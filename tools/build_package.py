@@ -30,6 +30,7 @@ import subprocess
 import sys
 import time
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 
 from rich.console import Console
@@ -179,23 +180,53 @@ def home_path_patterns() -> list[re.Pattern[bytes]]:
     return out
 
 
+def _contents(path: Path) -> Iterator[tuple[str, bytes]]:
+    """A file's bytes, and the members of the compressed archives a raw scan cannot see: zip
+    files (PyInstaller's base_library.zip) and the frozen backend's own archive (the Python
+    modules, marshalled, in its embedded PYZ)."""
+    data = path.read_bytes()
+    yield "", data
+    if data[:4] == b"PK\x03\x04":
+        with zipfile.ZipFile(path) as zf:
+            for name in zf.namelist():
+                yield name, zf.read(name)
+    elif path.name in ("spaceknife-backend", "spaceknife-backend.exe"):
+        from PyInstaller.archive.readers import CArchiveReader  # type: ignore[import-untyped]
+
+        pkg = CArchiveReader(str(path))
+        for name, entry in pkg.toc.items():
+            if entry[-1] == "z":  # PYZ: the pure-Python modules
+                pyz = pkg.open_embedded_archive(name)
+                for module in pyz.toc:
+                    raw = pyz.extract(module, raw=True)
+                    if raw:
+                        yield f"{name}/{module}", raw
+            else:
+                member = pkg.extract(name)
+                if member:
+                    yield name, member
+
+
 def check_no_build_paths(root: Path) -> None:
-    """No file of the packaged app may contain the build machine's home path (user name)."""
+    """No file of the packaged app may contain the build machine's home path (user name),
+    including inside zip files and the frozen backend's module archive."""
     t0 = step(f"no build-machine paths in {root.relative_to(ROOT)}")
     patterns = home_path_patterns()
     bad: list[str] = []
-    files = 0
+    files = members = 0
     for path in root.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
         files += 1
-        data = path.read_bytes()
-        hits = sum(len(p.findall(data)) for p in patterns)
-        if hits:
-            bad.append(f"{path.relative_to(root)}: {hits}")
+        for member, data in _contents(path):
+            members += bool(member)
+            hits = sum(len(p.findall(data)) for p in patterns)
+            if hits:
+                where = f"{path.relative_to(root)}{' › ' + member if member else ''}"
+                bad.append(f"{where}: {hits}")
     if bad:
         raise SystemExit("the build machine's home path is in the package:\n  " + "\n  ".join(bad))
-    done(t0, f"{files} files")
+    done(t0, f"{files} files, {members} archive members")
 
 
 def build_electron(targets: list[str]) -> None:
