@@ -154,7 +154,14 @@ class GovernorCore:
         self._dt = 1.0  # last sample window length
         # history (one point per second)
         self.history: deque[LoadPoint] = deque(maxlen=HISTORY)
-        self._bucket = [0.0, 0.0, 0.0, False, False]  # self·dt, total·dt, dt, yielding, paused
+        self._bucket = [
+            0.0,
+            0.0,
+            0.0,
+            False,
+            False,
+            0.0,
+        ]  # self·dt, total·dt, dt, yielding, paused, active·dt
 
     # ------------------------------------------------------------------ derived
 
@@ -577,17 +584,19 @@ class GovernorCore:
         b[2] += span
         b[3] = bool(b[3]) or self.yielding
         b[4] = bool(b[4]) or self.paused
+        b[5] += self.active * span
         if b[2] >= 0.95:
             self.history.append(
                 LoadPoint(
                     t=time.time() if wall is None else wall,
                     self_pct=round(100.0 * b[0] / b[2], 2),
                     total_pct=round(100.0 * b[1] / b[2], 2),
+                    active_pct=round(100.0 * b[5] / b[2], 2),
                     yielding=bool(b[3]),
                     paused=bool(b[4]),
                 )
             )
-            self._bucket = [0.0, 0.0, 0.0, False, False]
+            self._bucket = [0.0, 0.0, 0.0, False, False, 0.0]
 
     def status(self, history: bool = True) -> IoStatus:
         return IoStatus(

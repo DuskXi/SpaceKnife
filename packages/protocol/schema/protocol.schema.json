@@ -2726,6 +2726,12 @@
     "LoadPoint": {
       "description": "One second of the W2 load curve.",
       "properties": {
+        "active_pct": {
+          "default": 0.0,
+          "description": "Task Manager 'active time' of the whole disk, %",
+          "title": "Active Pct",
+          "type": "number"
+        },
         "paused": {
           "default": false,
           "title": "Paused",

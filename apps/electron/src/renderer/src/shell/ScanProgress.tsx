@@ -281,6 +281,10 @@ function Load({ scan, io }: { scan: ScanStatus; io: IoStatus }) {
             <>
               当前 <span className="strong mono">{Math.round(io.self_pct)}%</span>
               <span className="muted"> · 整盘 {Math.round(io.total_pct)}%</span>
+              <span className="muted" title={ACTIVE_TIP}>
+                {" "}
+                · 活动时间 {Math.round(io.active_pct)}%
+              </span>
             </>
           ) : (
             <span className="muted">无法测量此磁盘</span>
@@ -371,6 +375,7 @@ function LoadCurve({ io, startedAt, paused }: { io: IoStatus; startedAt: string 
   const pts = hist.filter((p) => now - p.t <= 60);
   const total = pts.length ? `M ${x(pts[0]!.t)} ${y(0)} ${pts.map((p) => `L ${x(p.t).toFixed(1)} ${y(p.total_pct).toFixed(1)}`).join(" ")} L ${x(pts[pts.length - 1]!.t)} ${y(0)} Z` : "";
   const own = pts.map((p, i) => `${i ? "L" : "M"} ${x(p.t).toFixed(1)} ${y(p.self_pct).toFixed(1)}`).join(" ");
+  const active = pts.map((p, i) => `${i ? "L" : "M"} ${x(p.t).toFixed(1)} ${y(p.active_pct).toFixed(1)}`).join(" ");
   const limited = io.level !== "max" && io.level !== "idle" && io.limit < 100;
   const start = startedAt ? Date.parse(startedAt) / 1000 : null;
   const showStart = start != null && now - start < 60 && now - start >= 0;
@@ -380,7 +385,8 @@ function LoadCurve({ io, startedAt, paused }: { io: IoStatus; startedAt: string 
       <figcaption className="row-between small">
         <span className="muted">磁盘读取占用 · 近 60 秒</span>
         <span className="sd-legend muted">
-          <span className="lg-line" /> 占用 <span className="lg-dash" /> 上限
+          <span className="lg-line" /> 占用 <span className="lg-dash" /> 上限{" "}
+          <span className="lg-dot" title={ACTIVE_TIP} /> <span title={ACTIVE_TIP}>活动时间</span>
         </span>
       </figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={curveSummary(io, start, paused)}>
@@ -388,6 +394,7 @@ function LoadCurve({ io, startedAt, paused }: { io: IoStatus; startedAt: string 
           <line key={g} className="grid" x1={0} x2={W} y1={y(g)} y2={y(g)} />
         ))}
         {total && <path className="total" d={total} />}
+        {active && <path className="active" d={active} />}
         {own && <path className="own" d={own} />}
         {limited && <line className="limit" x1={0} x2={W} y1={y(io.limit)} y2={y(io.limit)} />}
         {showStart && start != null && (
@@ -418,6 +425,9 @@ export function curveSummary(io: IoStatus, start: number | null, paused: boolean
   if (io.level !== "max" && io.level !== "idle") parts.push(self <= io.limit ? `，均低于上限 ${Math.round(io.limit)}%` : `，上限 ${Math.round(io.limit)}%`);
   return parts.join("");
 }
+
+/** Why 「活动时间」 is shown but not limited (the load is measured by queue depth, see TODO / native.md). */
+export const ACTIVE_TIP = "活动时间：任务管理器的口径，磁盘有请求在处理的时间占比。NVMe 固态盘上几个并发读就会到 100%，所以负载上限按请求队列折算的「占用」计算，活动时间只作参考";
 
 /** Status bar and others: the disk-load state of the scan in a tab, if any. */
 export function useScanIo(scanId: string | null | undefined): IoStatus | null {

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "fc7e52a1a25ea79e";
+export const SCHEMA_HASH = "f36be68e5e0bfbeb";
 
 export interface AgeCond {
   end: number;
@@ -612,6 +612,8 @@ export interface Limits {
 
 /** One second of the W2 load curve. */
 export interface LoadPoint {
+  /** Task Manager 'active time' of the whole disk, % */
+  active_pct: number;
   paused: boolean;
   /** SpaceKnife's own share of the disk load, % */
   self_pct: number;

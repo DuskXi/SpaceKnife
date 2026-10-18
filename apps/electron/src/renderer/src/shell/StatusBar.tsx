@@ -5,7 +5,7 @@ import type { ScanStatus } from "@/protocol/generated";
 import { continueScan, updateSettings } from "@/state/actions";
 import { activeTab, set, setting, startFormOf, toast, toggleLog, useApp } from "@/state/store";
 import { fmtDuration, fmtInt, fmtSize } from "@/lib/format";
-import { levelText, scanPercent } from "@/shell/ScanProgress";
+import { ACTIVE_TIP, levelText, scanPercent } from "@/shell/ScanProgress";
 import { Icon } from "@/ui/Icon";
 
 export function StatusBar() {
@@ -90,7 +90,11 @@ export function StatusBar() {
       <span className="status-sep" />
       <button
         className="status-item"
-        title={io ? `SpaceKnife 当前占用这块磁盘 ${Math.round(io.self_pct)}%，整盘 ${Math.round(io.total_pct)}%` : "扫描时按这个上限限制磁盘读取"}
+        title={
+          io
+            ? `SpaceKnife 当前占用这块磁盘 ${Math.round(io.self_pct)}%，整盘 ${Math.round(io.total_pct)}%，活动时间 ${Math.round(io.active_pct)}%\n${ACTIVE_TIP}`
+            : "扫描时按这个上限限制磁盘读取"
+        }
         onClick={() => io && set({ inspectorHidden: false })}
       >
         <Icon name="gauge" size={14} />
@@ -99,6 +103,7 @@ export function StatusBar() {
           <>
             <span className="strong">{levelText(io)}</span>
             <span>· 当前 {io.measured ? `${Math.round(io.self_pct)}%` : "—"}</span>
+            {io.measured && <span className="muted">· 活动时间 {Math.round(io.active_pct)}%</span>}
           </>
         ) : (
           <span className="strong">

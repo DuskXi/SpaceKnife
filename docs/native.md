@@ -108,7 +108,7 @@ def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOp
   - Windows：`IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS` 找物理磁盘，PDH / 原始磁盘计数器取忙碌度与队列深度，不需要管理员。
   - Linux：`/sys/dev/block/<maj>:<min>` 找到整盘，`/sys/block/<disk>/stat` 的 io_ticks 与 time_in_queue。
   - macOS：IOKit 块存储统计（拿不到时为开环）。
-- 负载 `rho = min(busy, 平均队列深度 / Q_eff)`，`Q_eff` 先验 HDD 1 / SATA SSD 8 / NVMe 32（介质来自 `scan.media`）。对 NVMe 来说，任务管理器的「活动时间」只要有一个请求在途就算忙，几个并发读就会显示 100%，而盘远未饱和；`rho` 按队列深度折算，更接近「还能让出多少给别的程序」。
+- 负载 `rho = min(busy, 平均队列深度 / Q_eff)`，`Q_eff` 先验 HDD 1 / SATA SSD 8 / NVMe 32（介质来自 `scan.media`）。对 NVMe 来说，任务管理器的「活动时间」只要有一个请求在途就算忙，几个并发读就会显示 100%，而盘远未饱和；`rho` 按队列深度折算，更接近「还能让出多少给别的程序」。限速只看 `rho`；原始忙碌度作为「活动时间」（`IoStatus.active_pct`、每秒曲线点 `LoadPoint.active_pct`）显示在状态栏、扫描详情和负载曲线上，只作参考（用户 2026-10-18 决定）。
 - 自身占用 = 扫描期间的 `rho` 减去基线（其他程序）；基线在扫描前测，扫描中定期短暂停发派（探测，间隔 8 s 起按需翻倍到 32 s）重测。
 
 ### 4.2 控制

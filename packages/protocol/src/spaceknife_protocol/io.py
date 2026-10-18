@@ -19,6 +19,7 @@ class LoadPoint(Payload):
     t: float = Field(description="Unix time of the end of this second")
     self_pct: float = Field(description="SpaceKnife's own share of the disk load, %")
     total_pct: float = Field(description="Whole-disk load, %")
+    active_pct: float = Field(default=0.0, description="Task Manager 'active time' of the whole disk, %")
     yielding: bool = False
     paused: bool = False
 
