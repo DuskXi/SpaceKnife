@@ -78,6 +78,7 @@ def volume_model(v: VolumeInfo | None) -> p.VolumeInfo | None:
         is_system=os.path.normcase(v.mount_point) == os.path.normcase(system_mount()),
         remote_path=v.remote_path,
         reason=v.reason,
+        note=v.note,
     )
 
 
@@ -583,6 +584,9 @@ class ScanManager:
         assert scanner is not None
         roots = [r.path for r in handle.roots]
         emit("scan", f"开始扫描 {', '.join(roots)}（硬扫描）", scan_id=handle.id, path=roots[0])
+        for r in handle.roots:
+            if r.volume is not None and r.volume.note:  # e.g. a Windows drive from WSL over 9P
+                emit("scan", f"{printable(r.path)}：{r.volume.note}", level="WARNING", scan_id=handle.id)
         reported = 0
 
         def warnings_on() -> bool:

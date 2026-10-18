@@ -11,7 +11,9 @@ snapshots, reserved blocks …).
 
 from __future__ import annotations
 
+import functools
 import os
+import re
 import sys
 from dataclasses import asdict, dataclass, replace
 
@@ -74,6 +76,7 @@ class VolumeInfo:
     dev: int = 0  # st_dev on POSIX
     remote_path: str = ""  # network volumes: the server path (UNC share, host:/export)
     reason: str = ""  # cannot be scanned now (no media, disconnected, locked)
+    note: str = ""  # can be scanned but is not recommended, and why (shown on the volume card)
 
     @property
     def used(self) -> int:
@@ -211,6 +214,29 @@ class _Mount:
     minor: int
 
 
+@functools.cache
+def in_wsl() -> bool:
+    """Running inside the Windows Subsystem for Linux."""
+    try:
+        with open("/proc/sys/kernel/osrelease", encoding="ascii", errors="replace") as fh:
+            return "microsoft" in fh.read().lower()
+    except OSError:
+        return False
+
+
+# WSL plumbing mounted into every distribution (GUI, drivers, Docker Desktop): never a scan target
+_WSL_HIDDEN = ("/mnt/wsl", "/mnt/wslg", "/usr/lib/wsl", "/usr/lib/modules", "/Docker/", "/init")
+_WSL_DRIVE = re.compile(r"[A-Za-z]:\\?")
+WSL_DRIVE_NOTE = "WSL 经 9P 协议访问的 Windows 盘，扫描会非常慢；建议用 Windows 版的 SpaceKnife 扫描"
+
+
+def _wsl_drive(m: _Mount) -> str:
+    """``C:`` for a Windows drive mounted into WSL over 9P (DrvFs), else ``""``."""
+    if m.fs_type in ("9p", "drvfs", "v9fs") and _WSL_DRIVE.fullmatch(m.source):
+        return m.source[:2].upper()
+    return ""
+
+
 def _linux_mounts() -> list[_Mount]:
     mounts = []
     try:
@@ -223,7 +249,8 @@ def _linux_mounts() -> list[_Mount]:
                     continue
                 major, _, minor = fields[2].partition(":")
                 point = fields[4].encode("latin-1", "replace").decode("unicode_escape")
-                mounts.append(_Mount(point, rfields[0], rfields[1], int(major), int(minor)))
+                source = rfields[1].encode("latin-1", "replace").decode("unicode_escape")  # "C:\134" → "C:\\"
+                mounts.append(_Mount(point, rfields[0], source, int(major), int(minor)))
     except OSError:
         pass
     return mounts
@@ -271,27 +298,38 @@ def _linux_volume(path: str) -> VolumeInfo:
     if best is None:
         point = _mount_point_by_dev(real)
         return _posix_from_statvfs(real, point, "", "", False)
-    return _posix_from_statvfs(real, best.mount_point, best.fs_type, best.source, best.fs_type in NETWORK_FS)
+    return _wsl_marked(
+        best,
+        _posix_from_statvfs(real, best.mount_point, best.fs_type, best.source, best.fs_type in NETWORK_FS),
+    )
+
+
+def _wsl_marked(m: _Mount, vol: VolumeInfo) -> VolumeInfo:
+    """A Windows drive seen from WSL: named after the drive and marked as not recommended."""
+    drive = _wsl_drive(m) if in_wsl() else ""
+    return replace(vol, label=f"{drive}（Windows 盘）", note=WSL_DRIVE_NOTE) if drive else vol
 
 
 def _linux_list() -> list[VolumeInfo]:
     out, seen = [], set()
+    wsl = in_wsl()
     for m in _linux_mounts():
         if m.fs_type in PSEUDO_FS or m.mount_point.startswith(
             ("/proc", "/sys", "/dev", "/run/user", "/snap/")
         ):
             continue
+        if wsl and (m.mount_point.startswith(_WSL_HIDDEN) or (m.fs_type == "9p" and not _wsl_drive(m))):
+            continue
         if (m.major, m.minor) in seen:
             continue
         seen.add((m.major, m.minor))
         try:
-            out.append(
-                _posix_from_statvfs(
-                    m.mount_point, m.mount_point, m.fs_type, m.source, m.fs_type in NETWORK_FS
-                )
+            vol = _posix_from_statvfs(
+                m.mount_point, m.mount_point, m.fs_type, m.source, m.fs_type in NETWORK_FS
             )
         except OSError:
             continue
+        out.append(_wsl_marked(m, vol))
     return out
 
 

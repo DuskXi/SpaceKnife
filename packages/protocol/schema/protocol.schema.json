@@ -5078,6 +5078,12 @@
           "title": "Mount Point",
           "type": "string"
         },
+        "note": {
+          "default": "",
+          "description": "Scannable but not recommended, and why (e.g. a Windows drive seen from WSL over 9P)",
+          "title": "Note",
+          "type": "string"
+        },
         "reason": {
           "default": "",
           "description": "Why the volume cannot be scanned now ('' = available)",

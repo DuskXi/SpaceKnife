@@ -58,6 +58,10 @@ class VolumeInfo(Payload):
         default="", description="Network volumes: the server path (\\\\server\\share, host:/export)"
     )
     reason: str = Field(default="", description="Why the volume cannot be scanned now ('' = available)")
+    note: str = Field(
+        default="",
+        description="Scannable but not recommended, and why (e.g. a Windows drive seen from WSL over 9P)",
+    )
 
 
 class VolumeListResult(Payload):

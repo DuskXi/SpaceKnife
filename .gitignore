@@ -35,3 +35,5 @@ Thumbs.db
 # Profiler output
 /prof*.out
 *.pdb
+*.so
+*.tsbuildinfo

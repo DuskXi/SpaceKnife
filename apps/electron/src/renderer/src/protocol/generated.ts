@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "94463d65088fefc1";
+export const SCHEMA_HASH = "ba5e4947ab981173";
 
 export interface AgeCond {
   end: number;
@@ -1040,6 +1040,8 @@ export interface VolumeInfo {
   /** Storage media (start page cards, IO tuning in M4) */
   media: "nvme_ssd" | "sata_ssd" | "ssd" | "hdd" | "usb_hdd" | "usb_ssd" | "usb_flash" | "sd_card" | "network" | "virtual" | "unknown";
   mount_point: string;
+  /** Scannable but not recommended, and why (e.g. a Windows drive seen from WSL over 9P) */
+  note: string;
   /** Why the volume cannot be scanned now ('' = available) */
   reason: string;
   /** Network volumes: the server path (\\server\share, host:/export) */

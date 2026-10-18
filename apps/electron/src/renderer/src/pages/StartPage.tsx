@@ -50,6 +50,7 @@ export function mftCapable(v: VolumeInfo | null | undefined): boolean {
 /** What this volume will actually be scanned with (UI-W1-18). */
 function methodBadge(v: VolumeInfo, method: ScanMethod, elevated: boolean): { icon: IconName; text: string } {
   if (v.reason) return { icon: "warning", text: v.reason };
+  if (v.note) return { icon: "warning", text: "不推荐 · 很慢" };
   if (method !== "hard" && mftCapable(v)) return { icon: "shield", text: elevated ? "MFT 快速扫描" : "MFT 快速扫描 · 需要管理员" };
   if (v.is_remote) return { icon: "clock", text: "网络扫描 · 较慢" };
   if (v.media === "usb_hdd") return { icon: "gauge", text: "并行硬扫描 · USB HDD 自动降速" };
@@ -252,6 +253,7 @@ export function StartPage({ tab }: { tab: Tab }) {
                   <span className="muted">选择一个卷，或输入要扫描的文件夹</span>
                 )}
               </div>
+              {selected?.note && <div className="warn-text small">{selected.note}</div>}
               {needsAdmin && (
                 <div className="muted small">
                   <Icon name="shield" size={13} /> 需要管理员权限：仅启动只读扫描助手，主程序不提权
@@ -339,7 +341,7 @@ function Volumes(props: { volumes: VolumeInfo[]; selected: string | null; method
               <span>{v.total ? `已用 ${fmtSizeAs(v.used, v.total)} · ${pct}%` : "已用 —"}</span>
               <span>{v.total ? `可用 ${fmtSizeAs(v.free, v.total)}` : "可用 —"}</span>
             </span>
-            <span className={`vol-badge${v.reason ? " warn" : ""}`}>
+            <span className={`vol-badge${v.reason || v.note ? " warn" : ""}`} title={v.note || undefined}>
               <Icon name={badge.icon} size={13} />
               {badge.text}
             </span>
