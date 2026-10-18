@@ -1,0 +1,64 @@
+{
+  "$description": "尺寸、圆角、布局骨架、阴影与动效。",
+  "radius": {
+    "$type": "dimension",
+    "xs": { "$value": { "value": 2, "unit": "px" } },
+    "sm": { "$value": { "value": 4, "unit": "px" } },
+    "md": { "$value": { "value": 6, "unit": "px" }, "$description": "控件" },
+    "lg": { "$value": { "value": 8, "unit": "px" }, "$description": "面板、菜单、标签页顶部" },
+    "pill": { "$value": { "value": 999, "unit": "px" } }
+  },
+  "space": {
+    "$type": "dimension",
+    "1": { "$value": { "value": 2, "unit": "px" } },
+    "2": { "$value": { "value": 4, "unit": "px" } },
+    "3": { "$value": { "value": 6, "unit": "px" } },
+    "4": { "$value": { "value": 8, "unit": "px" } },
+    "5": { "$value": { "value": 12, "unit": "px" } },
+    "6": { "$value": { "value": 16, "unit": "px" } },
+    "7": { "$value": { "value": 20, "unit": "px" } },
+    "8": { "$value": { "value": 24, "unit": "px" } },
+    "9": { "$value": { "value": 32, "unit": "px" } }
+  },
+  "control": {
+    "$type": "dimension",
+    "heightSm": { "$value": { "value": 24, "unit": "px" } },
+    "heightMd": { "$value": { "value": 28, "unit": "px" } },
+    "heightLg": { "$value": { "value": 32, "unit": "px" } },
+    "icon": { "$value": { "value": 16, "unit": "px" } },
+    "iconLg": { "$value": { "value": 20, "unit": "px" } },
+    "focusRing": { "$value": { "value": 2, "unit": "px" } }
+  },
+  "layout": {
+    "$type": "dimension",
+    "titlebar": { "$value": { "value": 40, "unit": "px" } },
+    "tabHeight": { "$value": { "value": 34, "unit": "px" } },
+    "toolbar": { "$value": { "value": 48, "unit": "px" } },
+    "statusbar": { "$value": { "value": 28, "unit": "px" } },
+    "inspector": { "$value": { "value": 320, "unit": "px" } },
+    "windowButton": { "$value": { "value": 46, "unit": "px" } },
+    "filterMaxWidth": { "$value": { "value": 420, "unit": "px" } }
+  },
+  "shadow": {
+    "$type": "shadow",
+    "popover": {
+      "$value": [
+        { "color": "#00000073", "offsetX": { "value": 0, "unit": "px" }, "offsetY": { "value": 12, "unit": "px" }, "blur": { "value": 32, "unit": "px" }, "spread": { "value": 0, "unit": "px" } },
+        { "color": "{color.line.strong}", "offsetX": { "value": 0, "unit": "px" }, "offsetY": { "value": 0, "unit": "px" }, "blur": { "value": 0, "unit": "px" }, "spread": { "value": 1, "unit": "px" } }
+      ]
+    }
+  },
+  "motion": {
+    "duration": {
+      "$type": "duration",
+      "fast": { "$value": { "value": 120, "unit": "ms" } },
+      "zoom": { "$value": { "value": 220, "unit": "ms" }, "$description": "双击放大 / 返回的缩放动画" },
+      "flash": { "$value": { "value": 900, "unit": "ms" }, "$description": "文件变化闪烁" }
+    },
+    "easing": {
+      "$type": "cubicBezier",
+      "standard": { "$value": [0.2, 0, 0, 1] },
+      "out": { "$value": [0, 0, 0.2, 1] }
+    }
+  }
+}

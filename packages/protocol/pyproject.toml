@@ -1,0 +1,13 @@
+[project]
+name = "spaceknife-protocol"
+version = "0.1.0"
+description = "SpaceKnife WebSocket protocol v1: pydantic message models and binary frame codec (shared by backend and all frontends)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "pydantic>=2.9",
+  "numpy>=2.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.8.4,<0.9"]
+build-backend = "uv_build"

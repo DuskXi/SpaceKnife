@@ -1,0 +1,1361 @@
+{
+ "spacesniffer": "2.0.5.18",
+ "recorded_at": "2026-10-18 03:49:46",
+ "fixture_version": 2,
+ "results": {
+  "": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "*.txt": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  "*.TXT": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  "?1.txt": [
+   "a1.txt"
+  ],
+  "a*": [
+   "a1.txt",
+   "app.log"
+  ],
+  "*o*": [
+   "app.log",
+   "notes.txt",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "zero.dat"
+  ],
+  "README": [
+   "README"
+  ],
+  "*.txt;*.jpg": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt"
+  ],
+  "*.txt; *.jpg": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt"
+  ],
+  "|*.txt": [
+   "Program Files/x/setup.exe",
+   "README",
+   "app.log",
+   "exact4000.bin",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "|*.txt;|*.jpg": [
+   "Program Files/x/setup.exe",
+   "README",
+   "app.log",
+   "exact4000.bin",
+   "music.mp3",
+   "sub/movie.mp4",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "*.txt;|a*": [
+   "UPPER.TXT",
+   "big.txt",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  ">1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "<1kb": [
+   "zero.dat"
+  ],
+  ">1mb;<10mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "temp/data.zip"
+  ],
+  ">10mb;<1mb": [],
+  ">1m": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1048576b": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  ">3999b": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  ">4000b": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  "s>4000b": [
+   "Program Files/x/setup.exe",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "d>4000b": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  "size>1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "disksize>1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "|>1mb": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "*.txt;>1mb": [
+   "big.txt"
+  ],
+  "*.txt;*.jpg;>1mb": [
+   "big.txt",
+   "photo.jpg"
+  ],
+  "<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  ">30d": [
+   "app.log",
+   "photo.jpg",
+   "temp/data.zip"
+  ],
+  "<1week": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  ">1month": [
+   "app.log",
+   "photo.jpg",
+   "temp/data.zip"
+  ],
+  ">1year": [
+   "app.log"
+  ],
+  "m<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  "c<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  "a<5d": [
+   "big.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt"
+  ],
+  "c>30d": [
+   "app.log",
+   "big.txt",
+   "photo.jpg"
+  ],
+  "m<5d;m>1.5d": null,
+  "c<5d;m>30d": [
+   "temp/data.zip"
+  ],
+  "m<5d;a<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  "|<5d": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "<5days;>1mb": [
+   "sub/movie.mp4"
+  ],
+  ":attr:h": [
+   "Program Files/x/setup.exe",
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  ":attr:r": [
+   "music.mp3",
+   "temp/data.zip"
+  ],
+  ":attr:s": [
+   "Program Files/x/setup.exe"
+  ],
+  ":attr:h+r": [
+   "music.mp3"
+  ],
+  ":attr:h,r": [
+   "music.mp3"
+  ],
+  ":attr:-h": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ":attr:h-r": [
+   "Program Files/x/setup.exe",
+   "temp/cache.txt"
+  ],
+  "|:attr:h": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ":attr:h;*.txt": [
+   "temp/cache.txt"
+  ],
+  ":class:Pictures/Images": [
+   "photo.jpg",
+   "sub/tiny.jpg"
+  ],
+  ":class:Video/Movies": [
+   "sub/movie.mp4"
+  ],
+  ":class:Pictures/Images;*.txt": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt"
+  ],
+  "|:class:Pictures/Images": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ":class:Pictures/Images;:class:Video/Movies": [
+   "photo.jpg",
+   "sub/movie.mp4",
+   "sub/tiny.jpg"
+  ],
+  "\\temp": [
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  "|\\temp": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "zero.dat"
+  ],
+  "\\sub": [
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg"
+  ],
+  "\\sub;*.txt": [
+   "sub/deeper/temp/x.txt"
+  ],
+  "\\sub;\\temp": [
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  "\\*program*": [
+   "Program Files/x/setup.exe"
+  ],
+  "|\\*program*": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "\\temp;|*.zip": [
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  "*.jpg;<5d": [],
+  "*.jpg;>1mb;\\sub": [],
+  "|*.txt;>1mb": [
+   "Program Files/x/setup.exe",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "m<5d;m>36h": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4"
+  ],
+  "m>36h": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "m>1.5d": null,
+  "<5d;>36h": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4"
+  ],
+  ">1mb;>2mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "s>3999b": [
+   "Program Files/x/setup.exe",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "s<4000b": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "zero.dat"
+  ],
+  "s>4001b": [
+   "Program Files/x/setup.exe",
+   "app.log",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "s<4001b": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "zero.dat"
+  ],
+  "d<1kb": [
+   "zero.dat"
+  ],
+  "d<4097b": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "zero.dat"
+  ],
+  ">1k": null,
+  ">1kb": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  ">=1mb": null,
+  "> 1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "<2w": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "zero.dat"
+  ],
+  "<2weeks": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "zero.dat"
+  ],
+  ">35h": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "<1y": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "<30s": [],
+  "create<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip"
+  ],
+  "modify<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  "access<5d": [
+   "big.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt"
+  ],
+  "modified<5d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  "filesize>1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "logicalsize>1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "clustersize>1mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  ":attr:a": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ":attr:-a": [],
+  ":attrs:h": [
+   "Program Files/x/setup.exe",
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  ":attr:hidden": [
+   "Program Files/x/setup.exe",
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  ":attr:readonly+hidden": [
+   "music.mp3"
+  ],
+  ":attr:h;:attr:r": [
+   "music.mp3"
+  ],
+  "*.txt;:class:Video/Movies": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  ":class:pictures/images": [
+   "photo.jpg",
+   "sub/tiny.jpg"
+  ],
+  ":class:Pictures": null,
+  ":red": [],
+  "|:red": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ":tag:red": [],
+  ":tag:all": [],
+  "\\notes*": [],
+  "*.txt;\\temp;>1kb": [
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  "|README;|*.txt;|*.jpg": [
+   "Program Files/x/setup.exe",
+   "app.log",
+   "exact4000.bin",
+   "music.mp3",
+   "sub/movie.mp4",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "*": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "*.*": [
+   "Program Files/x/setup.exe",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "\\fixture": [],
+  "\\ss-oracle*": [],
+  "d<16k": null,
+  ">500": null,
+  "<5": null,
+  ">0b": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1gb": [],
+  ">1tb": null,
+  ">1kib": null,
+  ">1MB": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "M<5D": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  "<5 d": [
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "temp/cache.txt"
+  ],
+  ">1 mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  ">1min": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1mon": null,
+  ">1minute": null,
+  ">1minutes": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1hour": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1hours": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1sec": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1second": null,
+  ">1seconds": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  ">1day": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "created<5d": [],
+  "accessed<5d": [
+   "big.txt",
+   "exact4000.bin",
+   "notes.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt"
+  ],
+  "| *.txt": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "\\ temp": [],
+  "\\temp\\x": [],
+  "\\sub*": [
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg"
+  ],
+  "\\*": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "\\sub;|\\deeper": [
+   "sub/movie.mp4",
+   "sub/tiny.jpg"
+  ],
+  "|\\sub;|\\temp": [
+   "Program Files/x/setup.exe",
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "zero.dat"
+  ],
+  "*.txt;*.jpg;|\\sub": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "photo.jpg",
+   "temp/cache.txt"
+  ],
+  ":tag:r+y": [],
+  ":tag:all-red": [],
+  ":yellow": [],
+  ":all": [],
+  ":foo": [],
+  ":tag:purple": null,
+  ":attr:z": null,
+  ":attr:compressed": [],
+  ":attr:ni": [],
+  ":attr:sp": [],
+  ":attr:ads": [],
+  ":attr:a+h-s": [
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  ":attr:a,h,-s": [
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  "|:attr:a": [],
+  ":ATTR:H": [
+   "Program Files/x/setup.exe",
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  ":attr: h": [
+   "Program Files/x/setup.exe",
+   "music.mp3",
+   "temp/cache.txt"
+  ],
+  ":CLASS:video/movies": [
+   "sub/movie.mp4"
+  ],
+  ":class: Video/Movies": [
+   "sub/movie.mp4"
+  ],
+  ":class:Audio/Music": [
+   "music.mp3"
+  ],
+  ":class:Executables/System files": [
+   "Program Files/x/setup.exe",
+   "app.log"
+  ],
+  ":class:Archives/Disk images": [
+   "temp/data.zip"
+  ],
+  ">1mb;|>10mb": [
+   "Program Files/x/setup.exe",
+   "big.txt",
+   "music.mp3",
+   "photo.jpg",
+   "sub/movie.mp4",
+   "temp/data.zip"
+  ],
+  "*.t?t": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  "a*;b*": [
+   "a1.txt",
+   "app.log",
+   "big.txt"
+  ],
+  ";;*.txt;": [
+   "UPPER.TXT",
+   "a1.txt",
+   "big.txt",
+   "notes.txt",
+   "sub/deeper/temp/x.txt",
+   "temp/cache.txt"
+  ],
+  "\"notes.txt\"": [],
+  "*\"*": [],
+  "s>4000b;s<4000b": [
+   "exact4000.bin"
+  ],
+  "|*.exe;|*.dll;\\*temp*;|\\*windows*": [
+   "README",
+   "UPPER.TXT",
+   "a1.txt",
+   "app.log",
+   "big.txt",
+   "exact4000.bin",
+   "music.mp3",
+   "notes.txt",
+   "photo.jpg",
+   "sub/deeper/temp/x.txt",
+   "sub/movie.mp4",
+   "sub/tiny.jpg",
+   "temp/cache.txt",
+   "temp/data.zip",
+   "zero.dat"
+  ],
+  "c>1month": [
+   "app.log",
+   "big.txt",
+   "photo.jpg"
+  ],
+  "m<1day": []
+ },
+ "dialogs": {
+  "m<5d;m>1.5d": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  "m>1.5d": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">1k": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">=1mb": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  "\\notes*": [
+   "<timeout without dialog>"
+  ],
+  ":class:Pictures": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad file class name\nPlease check and resubmit."
+  ],
+  "\\fixture": [
+   "<timeout without dialog>"
+  ],
+  "\\ss-oracle*": [
+   "<timeout without dialog>"
+  ],
+  "d<16k": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">500": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  "<5": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">1tb": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">1kib": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">1mon": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">1minute": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  ">1second": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad size or date specifier\nPlease check and resubmit."
+  ],
+  "\\ temp": [
+   "<timeout without dialog>"
+  ],
+  "\\temp\\x": [
+   "<timeout without dialog>"
+  ],
+  ":tag:purple": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad tag specifier (red, blue, yellow...)\nPlease check and resubmit."
+  ],
+  ":attr:z": [
+   "[Filter Consistency Check]",
+   "Filter contains errors:\n  Bad attribute specifier (archive, readonly, hidden...)\nPlease check and resubmit."
+  ],
+  "\"notes.txt\"": [
+   "<timeout without dialog>"
+  ],
+  "*\"*": [
+   "<timeout without dialog>"
+  ],
+  "units:>1mb": [
+   "<timeout without dialog>"
+  ],
+  "units:s>1mb": [
+   "<timeout without dialog>"
+  ]
+ },
+ "unit_results": {
+  ">1mb": [],
+  "s>1mb": [],
+  "s>1kb": [
+   "m1030k.bin"
+  ],
+  "s<1kb": [
+   "age30_5.bin",
+   "age31_5.bin",
+   "age365_5.bin",
+   "age366_5.bin",
+   "k1010.bin"
+  ],
+  "s>1000b": [
+   "k1010.bin",
+   "m1030k.bin"
+  ],
+  "s<1023b": [
+   "age30_5.bin",
+   "age31_5.bin",
+   "age365_5.bin",
+   "age366_5.bin",
+   "k1010.bin"
+  ],
+  ">1month": [
+   "age30_5.bin",
+   "age31_5.bin",
+   "age365_5.bin",
+   "age366_5.bin"
+  ],
+  ">1months": [
+   "age30_5.bin",
+   "age31_5.bin",
+   "age365_5.bin",
+   "age366_5.bin"
+  ],
+  ">1y": [
+   "age365_5.bin",
+   "age366_5.bin"
+  ],
+  ">1year": [
+   "age365_5.bin",
+   "age366_5.bin"
+  ],
+  ">1years": [
+   "age365_5.bin",
+   "age366_5.bin"
+  ],
+  ">30d": [
+   "age30_5.bin",
+   "age31_5.bin",
+   "age365_5.bin",
+   "age366_5.bin"
+  ],
+  ">31d": [
+   "age31_5.bin",
+   "age365_5.bin",
+   "age366_5.bin"
+  ]
+ }
+}

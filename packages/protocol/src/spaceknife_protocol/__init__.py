@@ -1,0 +1,36 @@
+"""SpaceKnife WebSocket protocol v1.
+
+Single source of truth for every message exchanged between the backend and the frontends
+(Electron, Qt, WinUI3). See ``docs/protocol.md`` for the wire-level description.
+"""
+
+from __future__ import annotations
+
+PROTOCOL_VERSION = "1.0"
+SUBPROTOCOL = "spaceknife.v1"
+WS_PATH = "/v1"
+
+# Capabilities a server may advertise; the handshake result carries the intersection.
+CAP_BINARY_FRAMES = "binary-frames.v1"
+CAP_SUBSCRIPTIONS = "subscriptions"
+CAP_CANCEL = "cancel"
+CAP_LOG_STREAM = "log-stream"
+ALL_CAPABILITIES = (CAP_BINARY_FRAMES, CAP_SUBSCRIPTIONS, CAP_CANCEL, CAP_LOG_STREAM)
+
+
+def protocol_major(version: str) -> int:
+    """Major component of a ``"<major>.<minor>"`` version string."""
+    return int(version.split(".", 1)[0])
+
+
+__all__ = [
+    "ALL_CAPABILITIES",
+    "CAP_BINARY_FRAMES",
+    "CAP_CANCEL",
+    "CAP_LOG_STREAM",
+    "CAP_SUBSCRIPTIONS",
+    "PROTOCOL_VERSION",
+    "SUBPROTOCOL",
+    "WS_PATH",
+    "protocol_major",
+]

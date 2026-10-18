@@ -1,0 +1,403 @@
+"""The command registry (UI-W4-12…25): names, aliases, default keys, availability and status texts.
+
+Every frontend runs a command by its ``id``. Names match the labels used on menus and buttons;
+aliases add English words, and the full pinyin and pinyin initials of the name are generated so
+that ``qhps`` finds 切换配色 (W4 待定 6). Keys use a neutral notation (``Ctrl+Shift+F5``) that
+frontends render per platform; the keymap becomes editable with W7 (M6).
+"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from functools import cache
+from typing import Any
+
+from pypinyin import lazy_pinyin
+
+from ..view.state import View
+from .fuzzy import score
+
+COLOR_ZH = {"class": "文件类别", "flat": "扁平", "time": "修改时间"}
+
+
+@dataclass(frozen=True, slots=True)
+class Context:
+    tab: str  # scan | start | settings
+    scanning: bool = False
+    paused: bool = False
+    method: str = "hard"  # hard | mft | snapshot: how the tree is being read
+    has_scan: bool = False
+    source: str = "scan"  # scan | snapshot
+    elapsed_s: float | None = None
+    view: View | None = None
+    snapshots: int = 0
+    basket: int = 0
+
+    @property
+    def selected_node(self) -> int | None:
+        v = self.view
+        if v is None or v.selected is None or not 0 < v.selected < len(v.store):
+            return None
+        return v.selected
+
+
+Need = Callable[[Context], str | None]  # None when satisfied, else the reason shown in place of the status
+
+
+def _scan(c: Context) -> str | None:
+    return None if c.has_scan else "需要先完成扫描"
+
+
+def _done(c: Context) -> str | None:
+    return _scan(c) or ("扫描进行中" if c.scanning else None)
+
+
+def _running(c: Context) -> str | None:
+    return None if c.scanning else "没有进行中的扫描"
+
+
+def _pausable(c: Context) -> str | None:
+    if not c.scanning:
+        return "没有进行中的扫描"
+    if c.method == "mft":
+        return "MFT 快速扫描几秒内完成，无需暂停"
+    return "已暂停" if c.paused else None
+
+
+def _paused(c: Context) -> str | None:
+    return _running(c) or (None if c.paused else "扫描没有暂停")
+
+
+def _view(c: Context) -> str | None:
+    return None if c.view is not None else "需要先完成扫描"
+
+
+def _selection(c: Context) -> str | None:
+    return _view(c) or (None if c.selected_node is not None else "没有选中项")
+
+
+def _back(c: Context) -> str | None:
+    return _view(c) or (None if c.view and c.view.back else "没有可后退的位置")
+
+
+def _forward(c: Context) -> str | None:
+    return _view(c) or (None if c.view and c.view.forward else "没有可前进的位置")
+
+
+def _up(c: Context) -> str | None:
+    return _view(c) or (None if c.view and c.view.can_go_up() else "已经在根")
+
+
+def _snapshots(c: Context) -> str | None:
+    return None if c.snapshots else "没有快照"
+
+
+def _tab(c: Context) -> str | None:
+    return None if c.tab == "scan" else "需要先完成扫描"
+
+
+@dataclass(frozen=True, slots=True)
+class Command:
+    id: str
+    name: str
+    icon: str
+    keys: tuple[str, ...] = ()
+    aliases: tuple[str, ...] = ()
+    pinned: int = 0  # 1–9: position in the empty-input list
+    needs: tuple[Need, ...] = ()
+    status: Callable[[Context], str] | None = None
+    milestone: str = ""  # not wired up yet: disabled until then
+    typed_only: bool = False  # only listed for a typed query (W4 待定 3: colour choices)
+    search: tuple[tuple[str, tuple[int, ...] | None], ...] = field(default=(), compare=False)
+
+    @property
+    def more(self) -> bool:
+        return self.name.endswith("…")
+
+
+def _rescan_status(c: Context) -> str:
+    method = "MFT 快速扫描" if c.method == "mft" else "硬扫描"
+    if c.source != "scan" or c.elapsed_s is None:
+        return method
+    return f"{method} · 约 {max(1, round(c.elapsed_s))} 秒"
+
+
+def _color(c: Context) -> str:
+    return f"当前：{COLOR_ZH[c.view.color_mode]}" if c.view else ""
+
+
+def _free(c: Context) -> str:
+    return ("当前：显示" if c.view.show_free else "当前：隐藏") if c.view else ""
+
+
+def _unknown(c: Context) -> str:
+    return ("当前：显示" if c.view.show_unknown else "当前：隐藏") if c.view else ""
+
+
+def _basket(c: Context) -> str:
+    return f"{c.basket:,} 项" if c.basket else "空"
+
+
+def _snapshot_count(c: Context) -> str:
+    return f"{c.snapshots} 个快照"
+
+
+def _color_pick(mode: str) -> Callable[[Context], str]:
+    return lambda c: "当前" if c.view is not None and c.view.color_mode == mode else ""
+
+
+def _reveal_name() -> str:
+    if sys.platform == "darwin":
+        return "在访达中显示"
+    return "在资源管理器中显示" if sys.platform == "win32" else "在文件管理器中显示"
+
+
+def _registry() -> tuple[Command, ...]:
+    C = Command
+    return (
+        # the empty-input list, in this order (UI-W4-12)
+        C(
+            "view.rescan",
+            "重新扫描当前视图",
+            "refresh",
+            ("F5",),
+            ("rescan", "refresh"),
+            1,
+            (_tab, _done),
+            milestone="M5",
+        ),
+        C(
+            "scan.rescan_all",
+            "全盘重新扫描",
+            "drive",
+            ("Shift+F5",),
+            ("rescan all", "full rescan"),
+            2,
+            (_tab, _done),
+            _rescan_status,
+        ),
+        C(
+            "view.cycle_color",
+            "切换配色",
+            "palette",
+            ("C",),
+            ("color", "colour", "theme"),
+            3,
+            (_view,),
+            _color,
+        ),
+        C("view.toggle_free", "显示/隐藏可用空间", "eye", ("F",), ("free space",), 4, (_view,), _free),
+        C(
+            "basket.open",
+            "打开删除篮",
+            "basket",
+            (),
+            ("basket", "trash", "delete"),
+            5,
+            (),
+            _basket,
+            milestone="M6",
+        ),
+        C("snapshot.save", "保存快照", "snapshot", ("Ctrl+S",), ("save snapshot",), 6, (_tab, _done)),
+        C(
+            "snapshot.compare",
+            "与快照对比…",
+            "diff",
+            (),
+            ("compare", "diff"),
+            7,
+            (_tab, _done, _snapshots),
+            _snapshot_count,
+            milestone="M6",
+        ),
+        C(
+            "report.export",
+            "导出报告…",
+            "upload",
+            (),
+            ("export", "report", "csv", "json", "html"),
+            8,
+            (_tab, _scan),
+            lambda c: "CSV · JSON · HTML",
+            milestone="M6",
+        ),
+        C("app.settings", "设置", "settings", ("Ctrl+,",), ("settings", "preferences", "options"), 9),
+        # everything else, found by typing (UI-W4-23)
+        C("nav.back", "后退", "back", ("Backspace", "Alt+Left"), ("back",), needs=(_back,)),
+        C("nav.forward", "前进", "forward", ("Alt+Right",), ("forward",), needs=(_forward,)),
+        C("nav.up", "上一级", "up", ("Alt+Up",), ("up", "parent"), needs=(_up,)),
+        C("nav.home", "根", "home", ("Ctrl+Home",), ("home", "root"), needs=(_up,)),
+        C("view.detail_up", "提高细节层级", "plus", ("Ctrl+=",), ("more detail", "deeper"), needs=(_view,)),
+        C("view.detail_down", "降低细节层级", "minus", ("Ctrl+-",), ("less detail",), needs=(_view,)),
+        C("filter.focus", "聚焦过滤", "filter", ("/", "Ctrl+F"), ("filter", "find"), needs=(_view,)),
+        C("path.edit", "编辑路径", "search", ("Ctrl+L",), ("path", "go to", "address"), needs=(_view,)),
+        C("view.zoom_in", "放大进入", "layers", ("Enter",), ("zoom", "enter"), needs=(_selection,)),
+        C(
+            "basket.add",
+            "加入删除篮",
+            "basket",
+            ("Delete",),
+            ("delete", "remove", "trash"),
+            needs=(_selection,),
+        ),
+        C(
+            "item.preview",
+            "预览",
+            "eye",
+            ("Space",),
+            ("preview", "quick look"),
+            needs=(_selection,),
+            milestone="M6",
+        ),
+        C("item.copy_path", "复制路径", "copy", ("Ctrl+C",), ("copy path",), needs=(_selection,)),
+        C(
+            "item.reveal",
+            _reveal_name(),
+            "reveal",
+            ("Ctrl+E",),
+            ("reveal", "explorer", "finder", "show in folder"),
+            needs=(_selection,),
+        ),
+        C(
+            "item.terminal",
+            "在此打开终端",
+            "terminal",
+            ("Ctrl+`",),
+            ("terminal", "shell", "console"),
+            needs=(_selection,),
+        ),
+        C("tab.new", "新建标签", "plus", ("Ctrl+T",), ("new tab",)),
+        C("tab.close", "关闭标签", "close", ("Ctrl+W",), ("close tab",)),
+        C("tag.red", "红色标签", "tag", ("1", "Ctrl+1"), ("red tag",), needs=(_selection,)),
+        C("tag.yellow", "黄色标签", "tag", ("2", "Ctrl+2"), ("yellow tag",), needs=(_selection,)),
+        C("tag.green", "绿色标签", "tag", ("3", "Ctrl+3"), ("green tag",), needs=(_selection,)),
+        C("tag.blue", "蓝色标签", "tag", ("4", "Ctrl+4"), ("blue tag",), needs=(_selection,)),
+        C("tag.clear", "清除标签", "tag", ("0", "Ctrl+0"), ("clear tag", "untag"), needs=(_selection,)),
+        C(
+            "view.toggle_unknown",
+            "显示/隐藏未知空间",
+            "eye",
+            ("U",),
+            ("unknown space",),
+            needs=(_view,),
+            status=_unknown,
+        ),
+        C("view.split", "分屏", "split", (), ("split", "side by side"), needs=(_view,)),
+        C("scan.pause", "暂停扫描", "pause", (), ("pause",), needs=(_pausable,)),
+        C("scan.resume", "继续扫描", "play", (), ("resume", "continue"), needs=(_paused,)),
+        C("scan.stop", "停止扫描", "stop", (), ("stop", "cancel"), needs=(_running,)),
+        C("scan.new", "新扫描", "drive", (), ("new scan", "scan")),
+        C("snapshot.open", "打开快照文件…", "snapshot", (), ("open snapshot", "load")),
+        C("app.log", "日志面板", "log", ("Ctrl+J",), ("log", "logs", "console")),
+        C(
+            "view.color.class",
+            "配色：文件类别",
+            "palette",
+            (),
+            ("color class",),
+            needs=(_view,),
+            status=_color_pick("class"),
+            typed_only=True,
+        ),
+        C(
+            "view.color.flat",
+            "配色：扁平",
+            "palette",
+            (),
+            ("color flat",),
+            needs=(_view,),
+            status=_color_pick("flat"),
+            typed_only=True,
+        ),
+        C(
+            "view.color.time",
+            "配色：修改时间",
+            "palette",
+            (),
+            ("color time", "age"),
+            needs=(_view,),
+            status=_color_pick("time"),
+            typed_only=True,
+        ),
+    )
+
+
+def _each_char(text: str) -> Any:
+    return list(text)  # one entry per non-hanzi character, so entries line up with the name
+
+
+def _search_keys(cmd: Command) -> tuple[tuple[str, tuple[int, ...] | None], ...]:
+    """(text, map from text index to name index or None) for the name, its pinyin and its aliases."""
+    name = cmd.name
+    syllables = lazy_pinyin(name, errors=_each_char)
+    full: list[str] = []
+    full_map: list[int] = []
+    initials: list[str] = []
+    init_map: list[int] = []
+    if len(syllables) == len(name):
+        for i, (ch, py) in enumerate(zip(name, syllables, strict=True)):
+            if py == ch:  # not a hanzi
+                if ch.isalnum():
+                    full.append(ch.lower())
+                    full_map.append(i)
+                    initials.append(ch.lower())
+                    init_map.append(i)
+                continue
+            full.extend(py)
+            full_map.extend([i] * len(py))
+            initials.append(py[0])
+            init_map.append(i)
+    keys: list[tuple[str, tuple[int, ...] | None]] = [(name, tuple(range(len(name))))]
+    if full:
+        keys.append(("".join(full), tuple(full_map)))
+        keys.append(("".join(initials), tuple(init_map)))
+    keys.extend((a, None) for a in cmd.aliases)
+    return tuple(keys)
+
+
+@cache
+def registry() -> tuple[Command, ...]:
+    from dataclasses import replace
+
+    return tuple(replace(c, search=_search_keys(c)) for c in _registry())
+
+
+def evaluate(cmd: Command, ctx: Context) -> tuple[bool, str]:
+    """(enabled, status text or the reason it is disabled)."""
+    status = cmd.status(ctx) if cmd.status is not None else ""
+    for need in cmd.needs:
+        reason = need(ctx)
+        if reason:
+            return False, reason
+    if cmd.milestone:
+        return False, f"{status} · {cmd.milestone} 接入" if status else f"{cmd.milestone} 接入"
+    return True, status
+
+
+def match(cmd: Command, query: str) -> tuple[int, list[tuple[int, int]]] | None:
+    """Best fuzzy score over the name, its pinyin and its aliases; hits are mapped onto the name."""
+    best: tuple[int, list[tuple[int, int]]] | None = None
+    for k, (text, mapping) in enumerate(cmd.search):
+        got = score(query, text)
+        if got is None:
+            continue
+        s, spans = got
+        s -= 4 * k if k else 0  # prefer the visible name, then pinyin, then aliases
+        if mapping is None:
+            spans = []
+        elif k:
+            idx = sorted({mapping[i] for a, b in spans for i in range(a, b)})
+            spans = []
+            for i in idx:
+                if spans and spans[-1][1] == i:
+                    spans[-1] = (spans[-1][0], i + 1)
+                else:
+                    spans.append((i, i + 1))
+        if best is None or s > best[0]:
+            best = (s, spans)
+    return best
+
+
+__all__ = ["COLOR_ZH", "Command", "Context", "evaluate", "match", "registry"]

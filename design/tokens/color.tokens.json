@@ -1,0 +1,46 @@
+{
+  "$description": "A2「石墨 + 沉浸的对比度」外框色板（暗色）。亮色主题待设计评审后补充。",
+  "color": {
+    "$type": "color",
+    "bg": {
+      "window": { "$value": "#08090B", "$description": "窗口底色、标题栏" },
+      "chrome": { "$value": "#0C0D10", "$description": "工具栏、状态栏、活动标签" },
+      "panel": { "$value": "#0E1013", "$description": "详情栏等侧栏" },
+      "overlay": { "$value": "#111318", "$description": "浮层底色（菜单、提示卡）" },
+      "raised": { "$value": "#14161B", "$description": "输入框、卡片、分段控件" },
+      "hover": { "$value": "#1A1D23" },
+      "active": { "$value": "#1E2128", "$description": "按下 / 选中段" },
+      "sunken": { "$value": "#060709", "$description": "树图区底色" }
+    },
+    "line": {
+      "subtle": { "$value": "#1D2027", "$description": "细分隔线" },
+      "strong": { "$value": "#2A2E37", "$description": "控件边框、强分隔线" }
+    },
+    "text": {
+      "primary": { "$value": "#F1F2F5" },
+      "secondary": { "$value": "#AEB3BE" },
+      "tertiary": { "$value": "#8F95A2", "$description": "说明文字，任何面板底色上 ≥ 5.6:1" },
+      "disabled": { "$value": "#4A4E58" },
+      "onAccent": { "$value": "#0B0C10" }
+    },
+    "accent": {
+      "default": { "$value": "#8B9CFF", "$description": "默认强调色（长春花蓝）" },
+      "lime": { "$value": "#D4FF3A", "$description": "可选：沉浸的电光青柠" },
+      "teal": { "$value": "#5EC8B8" },
+      "orange": { "$value": "#F2A65A" }
+    },
+    "status": {
+      "success": { "$value": "#3FCB80" },
+      "warning": { "$value": "#F5C542" },
+      "danger": { "$value": "#FF6B6B" },
+      "growth": { "$value": "#E8963A", "$description": "「较快照增长」胶囊文字" }
+    },
+    "tag": {
+      "red": { "$value": "#FF5D61", "$description": "红色标签，形状 ▲" },
+      "yellow": { "$value": "#FFD23F", "$description": "黄色标签，形状 ■" },
+      "green": { "$value": "#3FE08A", "$description": "绿色标签，形状 ●" },
+      "blue": { "$value": "#5A97FF", "$description": "蓝色标签，形状 ◆" },
+      "base": { "$value": "#000000B8", "$description": "标签小底座" }
+    }
+  }
+}

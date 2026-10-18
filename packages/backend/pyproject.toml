@@ -1,0 +1,30 @@
+[project]
+name = "spaceknife-backend"
+version = "0.1.0"
+description = "SpaceKnife backend: scanning, storage, layout, filtering and the WebSocket server"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "spaceknife-protocol",
+  "pydantic>=2.9",
+  "numpy>=2.1",
+  "websockets>=15.0",
+  "loguru>=0.7.2",
+  "rich>=13.9",
+  "typer>=0.12",
+  "platformdirs>=4.3",
+  "zstandard>=0.23",
+  "pypinyin>=0.53",
+]
+
+[project.scripts]
+spaceknife = "spaceknife.cli:main"
+
+[tool.uv.sources]
+spaceknife-protocol = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "spaceknife"
+
+[build-system]
+requires = ["uv_build>=0.8.4,<0.9"]
+build-backend = "uv_build"

@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+!design/build/
+
+# Node / Electron
+node_modules/
+out/
+.vite/
+
+# Rust
+target/
+target-*/
+.venv-*/
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local tooling
+.claude/settings.local.json
+
+# Third-party reference binary (kept locally for compatibility testing, not redistributed)
+/SpaceSniffer.exe
+
+# Profiler output
+/prof*.out
+*.pdb

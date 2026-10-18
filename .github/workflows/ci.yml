@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+.
+        os: [windows-latest, ubuntu-22.04, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12 and the workspace
+        run: |
+          uv python install 3.12
+          uv sync --locked
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Type check
+        run: uv run mypy packages/protocol/src packages/backend/src packages/client/src tools/gen_design.py
+
+      - name: Generated artefacts are up to date
+        run: |
+          uv run python tools/gen_design.py --check
+          uv run spaceknife schema --check packages/protocol/schema/protocol.schema.json
+          uv run python tools/gen_ts_protocol.py --check
+
+      - name: Tests
+        run: uv run pytest
+
+  electron:
+    name: Electron · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    defaults:
+      run:
+        working-directory: apps/electron
+    steps:
+      - uses: actions/checkout@v4
+
+      # No packageManager field in apps/electron/package.json; pnpm-lock.yaml is lockfileVersion 9.0 → pnpm 10.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/electron/pnpm-lock.yaml
+
+      # The renderer's @design alias resolves to the committed design/build artefacts (kept in sync by
+      # the python job's gen_design.py --check), so no Python toolchain is needed here. Tests and the
+      # build never launch Electron, so its binary download is skipped.
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Tests
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build

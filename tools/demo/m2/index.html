@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpaceKnife M2 体验台</title>
+<link rel="stylesheet" href="/design/build/tokens.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="brand">SpaceKnife <span>M2 体验台</span></div>
+  <div class="scan">
+    <input id="path" spellcheck="false" placeholder="要扫描的路径，例如 C:\Users">
+    <button id="scan" class="primary">开始扫描</button>
+    <select id="snapshots"><option value="">打开快照…</option></select>
+  </div>
+  <div id="status" class="status">连接中…</div>
+</header>
+<nav class="bar tools">
+  <div class="group">
+    <button id="back" title="后退（Backspace）">‹</button>
+    <button id="forward" title="前进（Shift+Backspace / Alt+→）">›</button>
+    <button id="up" title="上一级（Alt+↑）">↑</button>
+    <button id="home" title="根（Ctrl+Home）">⌂</button>
+  </div>
+  <div id="crumbs" class="crumbs"></div>
+  <div class="filter">
+    <div class="filter-box">
+      <pre id="filter-mirror" aria-hidden="true"></pre>
+      <input id="filter" spellcheck="false" autocomplete="off" placeholder="过滤  例如 *.mp4; >1gb; :class:视频" aria-label="过滤">
+      <kbd>/</kbd>
+    </div>
+    <div id="completion" class="completion" hidden></div>
+  </div>
+  <div class="group">
+    <span class="label">层级</span>
+    <button id="detail-minus" title="Ctrl+-">−</button><span id="detail" class="num">5</span><button id="detail-plus" title="Ctrl+=">+</button>
+  </div>
+  <div class="seg" id="color-mode" title="配色（C）">
+    <button data-v="class" class="on">类别</button><button data-v="flat">扁平</button><button data-v="time">时间</button>
+  </div>
+  <div class="group">
+    <button id="free" class="chip on" title="可用空间（F）">可用空间</button>
+    <button id="unknown" class="chip on" title="未知空间（U）">未知空间</button>
+  </div>
+</nav>
+<main>
+  <div id="stage"><canvas id="canvas"></canvas><div id="empty" class="empty">输入路径并开始扫描，或打开一个快照。</div>
+    <div id="floater" class="floater" hidden>
+      <span id="match-text"></span>
+      <div class="seg" id="filter-mode"><button data-v="dim" class="on">暗化不匹配</button><button data-v="hide">隐藏不匹配</button></div>
+    </div>
+    <div id="tip" class="tip" hidden></div>
+  </div>
+  <aside id="side">
+    <section>
+      <h3>选中项</h3>
+      <div id="detail-panel" class="muted">单击树图里的块</div>
+      <div class="tags">
+        <button data-tag="red" title="Ctrl+1">▲ 红</button><button data-tag="yellow" title="Ctrl+2">■ 黄</button>
+        <button data-tag="green" title="Ctrl+3">● 绿</button><button data-tag="blue" title="Ctrl+4">◆ 蓝</button>
+        <button data-tag="" title="Ctrl+0">清除</button>
+      </div>
+    </section>
+    <section>
+      <h3>过滤式</h3>
+      <div id="chips" class="muted">（空）</div>
+      <div id="canonical" class="mono muted"></div>
+      <div id="diag" class="diag"></div>
+    </section>
+    <section>
+      <h3>帧</h3>
+      <div id="frame-info" class="mono muted"></div>
+    </section>
+    <section class="keys">
+      <h3>快捷键</h3>
+      <p>双击 / Enter 放大 · Backspace 后退 · Alt+↑ 上一级 · Ctrl+Home 根 · Ctrl+= / Ctrl+- 层级 · F / U 可用 / 未知空间 · C 配色 · 1–4 标签 · 0 清除 · / 过滤 · Esc 取消</p>
+    </section>
+  </aside>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

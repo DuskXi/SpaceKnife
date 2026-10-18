@@ -1,0 +1,529 @@
+"""Scan coordinator: hands directories to workers, folds their results into the node store.
+
+The coordinator is the store's single writer and runs on the asyncio loop. A batch of directories
+is listed by a *slicer*: the Python worker in a spawn-context process pool (Python 3.12 threads
+would slow stat-heavy listing down: GIL convoy), or the native walker on plain threads (it releases
+the GIL). ``executor=None`` lists in one thread (small scans, tests).
+
+With an I/O governor (:mod:`spaceknife.io`) every batch waits for a permit: the governor bounds
+the batches in flight and paces them so the disk load stays under the limit. Pausing stops the
+dispatch; batches in flight finish (within their time budget), and the scan continues from its
+queue on resume.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import multiprocessing
+import os
+import sys
+import time
+from collections import deque
+from collections.abc import Callable
+from concurrent.futures import Executor, ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from loguru import logger
+
+from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
+from . import worker
+from .volume import VolumeInfo, is_volume_root, volume_for
+from .worker import RootOptions, SliceOptions, SliceResult, Task
+
+if TYPE_CHECKING:
+    from ..io import IoGovernor, Permit
+
+MAX_RECORDED_DENIED = 200
+
+
+class ScanError(Exception):
+    pass
+
+
+class ScanState(StrEnum):
+    QUEUED = "queued"
+    SCANNING = "scanning"
+    DONE = "done"
+    CANCELLED = "cancelled"
+    FAILED = "failed"
+
+
+@dataclass(slots=True)
+class RootInfo:
+    path: str
+    node: int
+    volume: VolumeInfo | None
+    whole_volume: bool
+
+
+RATE_WINDOW_S = 4.0  # sliding window of the item / byte rates
+ESTIMATE_AFTER_S = 3.0  # no remaining-time estimate before this much data
+
+
+@dataclass(slots=True)
+class ScanProgress:
+    state: ScanState
+    items: int
+    files: int
+    dirs: int
+    bytes_alloc: int
+    bytes_size: int
+    errors: int
+    pending_dirs: int
+    current_path: str
+    elapsed_s: float
+    rate: float
+    progress: float | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    denied: list[str] = field(default_factory=list)
+    message: str = ""
+    byte_rate: float = 0.0  # allocated bytes per second (same window as ``rate``)
+    remaining_s: float | None = None
+    expected_items: int | None = None
+    paused: bool = False
+
+
+def _report(on_progress: Callable[[ScanProgress], None], progress: ScanProgress) -> None:
+    """Progress reporting is best effort: a failing callback never fails or aborts the scan."""
+    try:
+        on_progress(progress)
+    except Exception:
+        logger.exception("scan progress callback failed")
+
+
+def default_workers() -> int:
+    return max(2, min(8, (os.cpu_count() or 4) - 1))
+
+
+def native_threads() -> int:
+    """Listing threads for the native walker: beyond 16 the file system's locks only add contention."""
+    return max(2, min(16, os.cpu_count() or 4))
+
+
+Slicer = Callable[[list[Task], SliceOptions], SliceResult]
+
+
+def native_slicer() -> Slicer | None:
+    """The native walker as a slicer (one listing thread per call), or None without the extension."""
+    from .. import native
+
+    mod = native.module()
+    if mod is None or not native.has("scan_slice"):
+        return None
+    scan_slice = mod.scan_slice
+
+    def run(tasks: list[Task], opts: SliceOptions) -> SliceResult:
+        roots = [
+            {
+                "dev": r.dev,
+                "cluster_size": r.cluster_size,
+                "resident_max": r.resident_max,
+                "cross_mounts": r.cross_mounts,
+            }
+            for r in opts.roots
+        ]
+        raw = scan_slice(
+            tasks, {"roots": roots, "budget_s": opts.budget_s, "max_entries": opts.max_entries, "threads": 1}
+        )
+        return SliceResult(**raw)
+
+    return run
+
+
+def make_pool(workers: int | None = None) -> ProcessPoolExecutor:
+    """Spawn-context pool (never fork: the backend is multi-threaded)."""
+    return ProcessPoolExecutor(
+        max_workers=workers or default_workers(),
+        mp_context=multiprocessing.get_context("spawn"),
+        initializer=worker.warm_up,
+    )
+
+
+def normalise_root(path: str) -> str:
+    path = os.path.abspath(os.path.expanduser(path))
+    if sys.platform == "win32" and len(path) == 2 and path[1] == ":":
+        path += "\\"
+    return path
+
+
+class Scanner:
+    def __init__(
+        self,
+        roots: list[str],
+        *,
+        executor: Executor | None = None,
+        concurrency: int | None = None,
+        cross_mounts: bool = False,
+        budget_s: float = 0.03,
+        slicer: Slicer | None = None,
+        batch_tasks: int = 32,
+        governor: IoGovernor | None = None,
+        count_links_each: bool = False,
+    ) -> None:
+        if not roots:
+            raise ScanError("no scan roots given")
+        self.store = NodeStore()
+        self.state = ScanState.QUEUED
+        self.roots: list[RootInfo] = []
+        self._executor = executor
+        self._own_thread_executor = executor is None
+        self.concurrency = concurrency or (
+            getattr(executor, "_max_workers", None) or 1 if executor is not None else 1
+        )
+        self.budget_s = budget_s
+        self.slicer: Slicer = slicer or worker.scan_slice
+        self.batch_tasks = max(1, batch_tasks)
+        self.governor = governor
+        self.count_links_each = count_links_each  # every hard link counts (the 「每个链接都计」 setting)
+        self._running = asyncio.Event()
+        self._running.set()
+        self._cancelled = False
+        self._seen_links: set[tuple[int, int]] = set()
+        self._queue: deque[Task] = deque()
+        self._errors = 0
+        self._denied: list[str] = []
+        self.denied_reasons: list[str] = []  # OS message per recorded denied path (log panel)
+        self._current = ""
+        self._started: float | None = None
+        self._finished: float | None = None
+        self.started_at: datetime | None = None
+        self.finished_at: datetime | None = None
+        self.message = ""
+        self.expected_items: int | None = None  # from the last snapshot of the same roots (UI-W2-15)
+        self._samples: deque[tuple[float, int, int]] = deque()  # (time, items, allocated bytes)
+
+        root_opts: list[RootOptions] = []
+        normalised: list[str] = []
+        for raw in roots:
+            path = normalise_root(raw)
+            if any(path == r or path.startswith(r.rstrip("\\/") + os.sep) for r in normalised):
+                continue  # nested inside another root: already covered
+            normalised.append(path)
+        for path in normalised:
+            try:
+                st = os.stat(path)
+            except OSError as exc:
+                raise ScanError(f"cannot access {path}: {exc.strerror or exc}") from exc
+            if not os.path.isdir(path):
+                raise ScanError(f"not a directory: {path}")
+            try:
+                volume: VolumeInfo | None = volume_for(path)
+            except OSError:
+                volume = None
+            node = self.store.add_root(path)
+            self.store.set_root_stats(
+                node,
+                mtime=int(max(0, st.st_mtime)),
+                ctime=int(max(0, getattr(st, "st_birthtime", 0.0))),
+                atime=int(max(0, st.st_atime)),
+            )
+            whole = volume is not None and is_volume_root(path, volume)
+            self.roots.append(RootInfo(path=path, node=node, volume=volume, whole_volume=whole))
+            ntfs = sys.platform == "win32" and volume is not None and volume.fs_type.upper() == "NTFS"
+            root_opts.append(
+                RootOptions(
+                    dev=st.st_dev,
+                    cluster_size=volume.cluster_size if volume else 4096,
+                    resident_max=512 if ntfs else 0,
+                    cross_mounts=cross_mounts,
+                )
+            )
+            self._queue.append(((0, node, 0), path, len(root_opts) - 1))
+        self._root_opts = tuple(root_opts)
+
+    # ------------------------------------------------------------------ control
+
+    def cancel(self) -> None:
+        self._cancelled = True
+        self._running.set()  # a paused scan stops too
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def uncancel(self) -> None:
+        """Forget a cancel that only stopped the hard scan to switch to another method."""
+        self._cancelled = False
+
+    @property
+    def paused(self) -> bool:
+        return not self._running.is_set()
+
+    # the tree comes from elsewhere (an MFT scan adopted into the store): timing and state only
+
+    def begin_external(self) -> None:
+        self.state = ScanState.SCANNING
+        self._started = time.perf_counter()
+        self.started_at = datetime.now(UTC)
+
+    def finish_external(self, state: ScanState) -> None:
+        self.state = state
+        self._finished = time.perf_counter()
+        self.finished_at = datetime.now(UTC)
+        self._queue.clear()
+        self._current = ""
+
+    def reset_external(self) -> None:
+        """The external read failed: :meth:`run` scans as usual."""
+        self.state = ScanState.QUEUED
+        self._started = None
+        self.started_at = None
+
+    def pause(self) -> None:
+        """Stop dispatching batches; those in flight finish within their time budget (W2)."""
+        if self._running.is_set() and self.state in (ScanState.QUEUED, ScanState.SCANNING):
+            self._running.clear()
+            if self.governor is not None:
+                self.governor.pause(owner=self)  # also a clean baseline window: nothing of ours in flight
+
+    def resume(self) -> None:
+        if not self._running.is_set():
+            self._running.set()
+            if self.governor is not None:
+                self.governor.resume(owner=self)
+
+    async def run(
+        self,
+        on_progress: Callable[[ScanProgress], None] | None = None,
+        progress_interval: float = 0.25,
+    ) -> ScanProgress:
+        loop = asyncio.get_running_loop()
+        self.state = ScanState.SCANNING
+        self._started = time.perf_counter()
+        self.started_at = datetime.now(UTC)
+        executor = self._executor
+        thread_pool = None
+        if executor is None:
+            from concurrent.futures import ThreadPoolExecutor
+
+            thread_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="spaceknife-scan")
+            executor = thread_pool
+        inflight: set[asyncio.Future[SliceResult]] = set()
+        permit_task: asyncio.Future[Permit] | None = None
+        resumed: asyncio.Task[bool] | None = None
+        gov = self.governor
+        last_report = 0.0
+
+        def dispatch(permit: Permit | None) -> None:
+            parallel = gov.concurrency if gov is not None else self.concurrency
+            share = max(1, min(self.batch_tasks, len(self._queue) // max(1, parallel)))
+            batch = [self._queue.popleft() for _ in range(min(share, len(self._queue)))]
+            budget = min(0.01, self.budget_s) if len(self._queue) < parallel else self.budget_s
+            opts = SliceOptions(roots=self._root_opts, budget_s=budget)
+            fut = loop.run_in_executor(executor, self.slicer, batch, opts)
+            if permit is not None:
+                permit.bind(fut)
+            inflight.add(fut)
+
+        try:
+            while (self._queue or inflight) and not self._cancelled:
+                running = self._running.is_set()
+                if gov is None:
+                    while running and self._queue and len(inflight) < self.concurrency:
+                        dispatch(None)
+                elif running and self._queue and permit_task is None and len(inflight) < self.concurrency:
+                    permit_task = asyncio.ensure_future(gov.permit())  # paced by the disk-load limit
+                elif not running and permit_task is not None:
+                    permit_task.cancel()  # paused: the governor takes a waiting request back
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await permit_task
+                    permit_task = None
+                waits: set[asyncio.Future[Any]] = set(inflight)
+                if permit_task is not None:
+                    waits.add(permit_task)
+                if not running:
+                    if resumed is None:
+                        resumed = asyncio.ensure_future(self._running.wait())
+                    waits.add(resumed)
+                if not waits:
+                    break
+                done, _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                for fut in done:
+                    if fut is permit_task:
+                        permit_task = None
+                        permit = fut.result()
+                        if self._queue and self._running.is_set() and not self._cancelled:
+                            dispatch(permit)
+                        else:
+                            permit.release()
+                    elif fut is resumed:
+                        resumed = None
+                    else:
+                        inflight.discard(fut)
+                        self._apply(fut.result())
+                now = time.perf_counter()
+                if on_progress is not None and now - last_report >= progress_interval:
+                    last_report = now
+                    _report(on_progress, self.progress())
+            if inflight:  # cancelled: let in-flight slices land so the partial tree stays consistent
+                for fut in asyncio.as_completed(inflight):
+                    with contextlib.suppress(Exception):
+                        self._apply(await fut)
+            self.state = ScanState.CANCELLED if self._cancelled else ScanState.DONE
+        except BrokenProcessPool as exc:
+            self.state = ScanState.FAILED
+            self.message = f"scan worker died: {exc}"
+            logger.error(self.message)
+        except Exception as exc:
+            self.state = ScanState.FAILED
+            self.message = f"{type(exc).__name__}: {exc}"
+            logger.exception("scan failed")
+        finally:
+            if permit_task is not None:
+                if not permit_task.done():
+                    permit_task.cancel()  # the governor takes the request back
+                elif not permit_task.cancelled() and permit_task.exception() is None:
+                    permit_task.result().release()  # granted but never used
+            if resumed is not None and not resumed.done():
+                resumed.cancel()
+            if self.paused and gov is not None:
+                gov.resume(owner=self)
+            self._running.set()
+            self._finished = time.perf_counter()
+            self.finished_at = datetime.now(UTC)
+            if thread_pool is not None:
+                thread_pool.shutdown(wait=False, cancel_futures=True)
+        result = self.progress()
+        if on_progress is not None:
+            _report(on_progress, result)
+        logger.info(
+            "scan {}: {:,} items, {:,} files, {:.1f} GiB in {:.2f}s ({:,.0f} items/s), {} errors",
+            self.state.value,
+            result.items,
+            result.files,
+            result.bytes_alloc / 2**30,
+            result.elapsed_s,
+            result.rate,
+            result.errors,
+        )
+        return result
+
+    # ------------------------------------------------------------------ folding results
+
+    def _apply(self, res: SliceResult) -> None:
+        store = self.store
+        cols = res.cols
+        n_entries = len(res.name_lens)
+        if n_entries and not self.count_links_each:
+            cand = np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]
+            if len(cand):
+                flags = cols["flags"]
+                for i in cand.tolist():
+                    key = (int(cols["dev"][i]), int(cols["ino"][i]))
+                    if key in self._seen_links:
+                        flags[i] |= np.uint32(Flag.HARDLINK_DUP)
+                    else:
+                        self._seen_links.add(key)
+        name_off = np.concatenate(([0], np.cumsum(res.name_lens, dtype=np.int64)))
+        remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
+        ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
+        starts: list[int] = []
+
+        def resolve(ref: tuple[int, int, int] | np.ndarray) -> int:
+            kind, a, b = (int(x) for x in ref)
+            return a if kind == 0 else starts[a] + b
+
+        for listing, path in enumerate(res.paths):
+            dir_id = resolve(res.refs[listing])
+            lo, hi = int(res.bounds[listing]), int(res.bounds[listing + 1])
+            entries = {key: cols[key][lo:hi] for key in ENTRY_COLUMNS}
+            start = store.ingest_listing(
+                dir_id,
+                res.name_blob[int(name_off[lo]) : int(name_off[hi])],
+                res.name_lens[lo:hi],
+                entries,
+                ext_global[lo:hi],
+            )
+            starts.append(start)
+            mounts = np.nonzero((cols["flags"][lo:hi] & np.uint32(Flag.MOUNT)) != 0)[0]
+            for j in mounts.tolist():
+                store.clear(start + j, Flag.PENDING)
+            self._current = path
+        for ref, path, msg in res.errors:
+            node = resolve(ref)
+            store.mark(node, Flag.ACCESS_DENIED)
+            store.clear(node, Flag.PENDING)
+            self._errors += 1
+            if len(self._denied) < MAX_RECORDED_DENIED:
+                self._denied.append(path)
+                self.denied_reasons.append(msg)
+        for ref, path, root_idx in res.frontier:
+            self._queue.append(((0, resolve(ref), 0), path, root_idx))
+
+    # ------------------------------------------------------------------ reporting
+
+    def progress(self) -> ScanProgress:
+        c = self.store.cols
+        elapsed = 0.0
+        if self._started is not None:
+            elapsed = (self._finished or time.perf_counter()) - self._started
+        items = len(self.store) - 1
+        scanned_alloc = int(c["tot_alloc"][0])
+        rate, byte_rate = self._rates(items, scanned_alloc, elapsed)
+        running = self.state == ScanState.SCANNING
+        fraction: float | None = None
+        remaining: float | None = None
+        used = 0
+        if self.roots and all(r.whole_volume and r.volume for r in self.roots):
+            used = sum(r.volume.used for r in self.roots if r.volume)
+            if used > 0:
+                fraction = 1.0 if self.state == ScanState.DONE else min(0.999, scanned_alloc / used)
+        if fraction is None and self.expected_items:
+            fraction = 1.0 if self.state == ScanState.DONE else min(0.99, items / self.expected_items)
+        if running and elapsed >= ESTIMATE_AFTER_S:
+            # by items when the total is known from the last scan, else by bytes against the volume
+            if self.expected_items and rate > 0 and items < self.expected_items:
+                remaining = (self.expected_items - items) / rate
+            elif used > scanned_alloc and byte_rate > 0:
+                remaining = (used - scanned_alloc) / byte_rate
+        return ScanProgress(
+            state=self.state,
+            items=items,
+            files=int(c["tot_files"][0]),
+            dirs=int(c["tot_dirs"][0]),
+            bytes_alloc=scanned_alloc,
+            bytes_size=int(c["tot_size"][0]),
+            errors=self._errors,
+            pending_dirs=len(self._queue),
+            current_path=self._current,
+            elapsed_s=elapsed,
+            rate=rate,
+            progress=fraction,
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+            denied=list(self._denied),
+            message=self.message,
+            byte_rate=byte_rate,
+            remaining_s=remaining,
+            expected_items=self.expected_items,
+            paused=self.paused,
+        )
+
+    def _rates(self, items: int, alloc: int, elapsed: float) -> tuple[float, float]:
+        """Items and bytes per second over the last few seconds (UI-W2-14), not since the start."""
+        if self.state != ScanState.SCANNING:
+            return (items / elapsed, alloc / elapsed) if elapsed > 0 else (0.0, 0.0)
+        now = time.perf_counter()
+        samples = self._samples
+        if not samples or now - samples[-1][0] >= 0.25:
+            samples.append((now, items, alloc))
+        while len(samples) > 2 and now - samples[1][0] >= RATE_WINDOW_S:
+            samples.popleft()
+        t0, i0, b0 = samples[0]
+        if now - t0 < 1.0:
+            return (items / elapsed, alloc / elapsed) if elapsed > 0 else (0.0, 0.0)
+        return (items - i0) / (now - t0), (alloc - b0) / (now - t0)
+
+    def space_summary(self, root: RootInfo) -> tuple[int, int] | None:
+        """(free, unknown) bytes for a whole-volume root, else None."""
+        if not root.whole_volume or root.volume is None:
+            return None
+        scanned = int(self.store.cols["tot_alloc"][root.node])
+        return root.volume.free, max(0, root.volume.used - scanned)

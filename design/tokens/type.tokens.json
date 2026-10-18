@@ -1,0 +1,32 @@
+{
+  "$description": "字体排印。三端打包同一套 OFL 字体：Geist、Geist Mono、Noto Sans SC。",
+  "font": {
+    "family": {
+      "$type": "fontFamily",
+      "ui": { "$value": ["Geist", "Geist Variable", "Noto Sans SC", "Noto Sans SC Variable", "system-ui", "sans-serif"] },
+      "mono": { "$value": ["Geist Mono", "Geist Mono Variable", "ui-monospace", "Cascadia Mono", "monospace"], "$description": "所有大小、数字（tabular）" },
+      "cjk": { "$value": ["Noto Sans SC", "Noto Sans SC Variable", "sans-serif"] }
+    },
+    "size": {
+      "$type": "dimension",
+      "caption": { "$value": { "value": 10, "unit": "px" } },
+      "small": { "$value": { "value": 11, "unit": "px" }, "$description": "树图标签、kbd" },
+      "label": { "$value": { "value": 12, "unit": "px" }, "$description": "状态栏、次要标签" },
+      "body": { "$value": { "value": 13, "unit": "px" }, "$description": "正文默认" },
+      "title": { "$value": { "value": 15, "unit": "px" } },
+      "heading": { "$value": { "value": 22, "unit": "px" } },
+      "display": { "$value": { "value": 28, "unit": "px" }, "$description": "详情栏大数字" }
+    },
+    "weight": {
+      "$type": "fontWeight",
+      "regular": { "$value": 400 },
+      "medium": { "$value": 500 },
+      "semibold": { "$value": 600 }
+    },
+    "lineHeight": {
+      "$type": "number",
+      "tight": { "$value": 1.2 },
+      "body": { "$value": 1.45 }
+    }
+  }
+}

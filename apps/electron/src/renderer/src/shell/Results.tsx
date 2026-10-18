@@ -1,0 +1,465 @@
+// W3 「匹配结果」 sidebar (UI-W3-27…34, UI-W3-38): summary, the expression as condition capsules,
+// the result list (rows grouped by visible block, served page by page by view.results), key hints.
+
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import type { FilterNormal, FilterParse, Range, ResultRow, ViewResults } from "@/protocol/generated";
+import { basketAdd, cancellable, viewCall } from "@/state/actions";
+import { patchView, set, useApp } from "@/state/store";
+import { fmtInt, fmtShare, fmtSize, sizeParts } from "@/lib/format";
+import { useThrottled } from "@/lib/throttle";
+import { isRunning } from "@/shell/ScanProgress";
+import { Icon, Kbd } from "@/ui/Icon";
+
+const ROW_H = 50;
+const PAGE = 100;
+const OVERSCAN = 6;
+
+type Sort = "size" | "name" | "count";
+const SORT_ZH: Record<Sort, string> = { size: "按大小", name: "按名称", count: "按项数" };
+const TAG_ZH: Record<string, string> = { red: "红色", yellow: "黄色", green: "绿色", blue: "蓝色" };
+
+export function Results({ viewId }: { viewId: string }) {
+  const filter = useApp((s) => s.views[viewId]?.filter ?? null);
+  const parse = useApp((s) => s.views[viewId]?.parse ?? null);
+  const scanned = useApp((s) => s.views[viewId]?.info?.scanned ?? 0);
+  const seq = useApp((s) => s.views[viewId]?.info?.seq ?? 0);
+  const rootLabel = useApp((s) => s.views[viewId]?.info?.breadcrumb[0]?.label ?? "");
+  const scanId = useApp((s) => s.views[viewId]?.state.scan_id ?? "");
+  const storedSort = useApp((s) => s.views[viewId]?.state.results_sort ?? "size");
+  const vocab = useApp((s) => s.vocab);
+  const [sort, setSort] = useState<Sort>(storedSort);
+  const [range, setRange] = useState({ first: 0, count: 20 });
+  const [shown, setShown] = useState<{ meta: ViewResults; pages: Map<number, ResultRow[]> } | null>(null);
+  const [active, setActive] = useState(-1);
+  const list = useRef<HTMLDivElement>(null);
+  const cache = useRef({ key: "", pages: new Map<number, ResultRow[]>(), inflight: new Map<number, () => void>() });
+  // a new frame invalidates every page; while the scan runs (four frames a second) refetch once a second
+  const running = useApp((s) => isRunning(s.scans[scanId]));
+  const tick = useThrottled(seq, running ? 1000 : 0);
+  const extClass = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of vocab?.classes ?? []) for (const e of c.extensions) if (!m.has(e)) m.set(e, c.id);
+    return m;
+  }, [vocab]);
+
+  useEffect(() => setSort(storedSort), [viewId, storedSort]);
+  // leaving (filter cleared, tab switched) must not leave a hover outline behind on the treemap
+  useEffect(() => () => patchView(viewId, { hoverKey: null }), [viewId]);
+  // pages still on their way when the panel goes are not needed any more
+  useEffect(() => () => cache.current.inflight.forEach((cancel) => cancel()), []);
+
+  // fetch the pages under the visible range; keep showing the previous rows until they arrive
+  useEffect(() => {
+    if (!filter?.active) return;
+    const key = `${viewId}:${tick}:${sort}`;
+    const c = cache.current;
+    if (c.key !== key) {
+      c.inflight.forEach((cancel) => cancel()); // pages of an older frame or order
+      c.key = key;
+      c.pages = new Map();
+      c.inflight = new Map();
+    }
+    const firstPage = Math.floor(Math.max(0, range.first - OVERSCAN) / PAGE);
+    const lastPage = Math.floor((range.first + range.count + OVERSCAN) / PAGE);
+    const need: number[] = [];
+    for (let p = firstPage; p <= lastPage; p++) need.push(p);
+    const publish = (meta: ViewResults) => {
+      if (need.every((q) => c.pages.has(q) || q * PAGE >= meta.total)) setShown({ meta, pages: new Map(c.pages) });
+    };
+    for (const p of need) {
+      if (c.pages.has(p) || c.inflight.has(p)) continue;
+      const job = cancellable("view.results", { view_id: viewId, sort, offset: p * PAGE, limit: PAGE });
+      c.inflight.set(p, job.cancel);
+      job.promise
+        .then((res) => {
+          if (cache.current.key !== key) return;
+          c.inflight.delete(p);
+          if (!res) return;
+          c.pages.set(p, res.rows);
+          publish(res);
+        })
+        .catch(() => c.inflight.delete(p));
+    }
+  }, [viewId, tick, sort, range.first, range.count, filter?.active]);
+
+  const onScroll = () => {
+    const el = list.current;
+    if (!el) return;
+    const first = Math.floor(el.scrollTop / ROW_H);
+    const count = Math.ceil(el.clientHeight / ROW_H) + 1;
+    if (first !== range.first || count !== range.count) setRange({ first, count });
+  };
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const meta = shown?.meta ?? null;
+  const total = meta?.total ?? 0;
+  const rowAt = (i: number): ResultRow | undefined => shown?.pages.get(Math.floor(i / PAGE))?.[i % PAGE];
+
+  const changeSort = (s: Sort) => {
+    setSort(s);
+    const v = useApp.getState().views[viewId];
+    if (v) patchView(viewId, { state: { ...v.state, results_sort: s } });
+    setActive(-1);
+    list.current?.scrollTo({ top: 0 });
+  };
+
+  const hover = (key: number | null) => patchView(viewId, { hoverKey: key });
+  const locate = (r: ResultRow) => r.kind !== "rest" && void viewCall(viewId, "view.reveal", { key: r.key });
+  const zoom = (r: ResultRow) => r.kind !== "rest" && void viewCall(viewId, "view.zoom", { key: r.key });
+  const toBasket = (r: ResultRow) => {
+    if (r.kind === "file" || r.kind === "folder") basketAdd(scanId, r.node);
+  };
+
+  const moveTo = (i: number) => {
+    const k = Math.max(0, Math.min(total - 1, i));
+    setActive(k);
+    const el = list.current;
+    if (el) {
+      if (k * ROW_H < el.scrollTop) el.scrollTop = k * ROW_H;
+      else if ((k + 1) * ROW_H > el.scrollTop + el.clientHeight) el.scrollTop = (k + 1) * ROW_H - el.clientHeight;
+    }
+    const r = rowAt(k);
+    if (r) hover(r.kind === "rest" ? null : r.key);
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return; // Alt+↑, Ctrl+Home… are view shortcuts
+    const r = active >= 0 ? rowAt(active) : undefined;
+    let handled = true;
+    if (e.key === "ArrowDown") moveTo(active + 1);
+    else if (e.key === "ArrowUp") moveTo(active - 1);
+    else if (e.key === "Home") moveTo(0);
+    else if (e.key === "End") moveTo(total - 1);
+    else if (e.key === "PageDown") moveTo(active + Math.max(1, range.count - 1));
+    else if (e.key === "PageUp") moveTo(active - Math.max(1, range.count - 1));
+    else if (e.key === "Enter" && r) zoom(r);
+    else if (e.key === "Delete" && r) toBasket(r);
+    else if (e.key === " " && r) locate(r);
+    else handled = false;
+    if (handled) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  };
+
+  const files = filter?.files ?? 0;
+  const alloc = filter?.alloc ?? 0;
+  const [num, unit] = sizeParts(alloc);
+  const first = Math.max(0, range.first - OVERSCAN);
+  const last = Math.min(total, range.first + range.count + OVERSCAN);
+  const rows: React.ReactNode[] = [];
+  for (let i = first; i < last; i++) {
+    const r = rowAt(i);
+    rows.push(
+      <ResultLine
+        key={i}
+        id={`${viewId}-res-${i}`}
+        index={i}
+        row={r}
+        max={meta?.max_alloc ?? 0}
+        active={i === active}
+        rootLabel={rootLabel}
+        extClass={extClass}
+        onHover={() => r && hover(r.kind === "rest" ? null : r.key)}
+        onClick={() => {
+          setActive(i);
+          list.current?.focus({ preventScroll: true });
+          if (r) locate(r);
+        }}
+        onDouble={() => r && zoom(r)}
+      />,
+    );
+  }
+
+  return (
+    <aside className="inspector results" aria-label="匹配结果">
+      <div className="res-head">
+        <h2>匹配结果</h2>
+        <span className="flex" />
+        <SortMenu sort={sort} onChange={changeSort} />
+        <button className="icon-btn small" aria-label="隐藏侧栏" title="隐藏侧栏" onClick={() => set({ inspectorHidden: true })}>
+          <Icon name="sidebar" />
+        </button>
+      </div>
+      <div className="res-top">
+        <div className="res-summary">
+          <div className="big-num">
+            <span className="num">{num}</span>
+            <span className="unit">{unit}</span>
+            <span className="res-count mono">{fmtInt(files)} 项</span>
+          </div>
+          <div className="bar" role="img" aria-label={`占已扫描的 ${fmtShare(alloc, scanned)}`}>
+            <div style={{ width: `${Math.min(100, scanned ? (alloc / scanned) * 100 : 0)}%` }} />
+          </div>
+          <div className="small muted">
+            占已扫描 <span className="mono strong">{fmtSize(scanned)}</span> 的 <span className="mono strong">{fmtShare(alloc, scanned)}</span>
+          </div>
+        </div>
+        <Conditions parse={parse} />
+      </div>
+      <div className="res-cols" aria-hidden="true">
+        <span>名称</span>
+        <span>大小</span>
+      </div>
+      <div
+        ref={list}
+        className="res-list"
+        role="listbox"
+        aria-label="匹配结果列表"
+        tabIndex={0}
+        aria-activedescendant={active >= 0 ? `${viewId}-res-${active}` : undefined}
+        onScroll={onScroll}
+        onKeyDown={onKey}
+        onMouseLeave={() => hover(null)}
+        onBlur={() => hover(null)}
+      >
+        <div style={{ height: total * ROW_H }} className="res-spacer">
+          {rows}
+        </div>
+        {meta && total === 0 && (
+          <div className="res-empty">
+            <Icon name="search" size={20} />
+            <div>当前位置下没有匹配项</div>
+            <div className="small muted">放宽条件，或回到上一级（Alt+↑）在更大的范围里找</div>
+          </div>
+        )}
+      </div>
+      <div className="res-hints small muted">
+        <span>单击定位</span>
+        <span>
+          <Kbd>Enter</Kbd> 放大进入
+        </span>
+        <span>
+          <Kbd>Delete</Kbd> 加入删除篮
+        </span>
+      </div>
+    </aside>
+  );
+}
+
+function ResultLine(props: {
+  id: string;
+  index: number;
+  row: ResultRow | undefined;
+  max: number;
+  active: boolean;
+  rootLabel: string;
+  extClass: Map<string, string>;
+  onHover: () => void;
+  onClick: () => void;
+  onDouble: () => void;
+}) {
+  const { row: r, index } = props;
+  const style = { top: index * ROW_H };
+  if (!r) return <div className="res-row loading" style={style} aria-hidden="true" />;
+  const ext = r.kind === "file" ? (r.name.includes(".") ? r.name.slice(r.name.lastIndexOf(".") + 1).toLowerCase() : "") : "";
+  const cls = r.kind === "file" ? (props.extClass.get(ext) ?? "other") : null;
+  const name =
+    r.kind === "group" ? (r.name ? r.name : `${fmtInt(r.count)} 个小项`) : r.kind === "rest" ? `其余 ${fmtInt(r.count)} 项` : r.name.replace(/[\\/]+$/, "") || props.rootLabel;
+  const path = r.path || props.rootLabel;
+  const tag = r.tag ? `${TAG_ZH[r.tag]}标签${r.tag_inherited ? "（继承自文件夹）" : ""}` : "";
+  return (
+    <div
+      id={props.id}
+      className={`res-row${props.active ? " on" : ""}${r.kind === "rest" ? " rest" : ""}`}
+      style={style}
+      role="option"
+      aria-selected={props.active}
+      aria-label={`${name}，${fmtSize(r.alloc)}${r.kind !== "file" ? `，${fmtInt(r.count)} 项` : ""}${tag ? `，${tag}` : ""}，位于 ${path}`}
+      onMouseEnter={props.onHover}
+      onClick={props.onClick}
+      onDoubleClick={props.onDouble}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        props.onClick();
+      }}
+    >
+      <span className={`res-icon ${r.kind}`} style={cls ? { background: `var(--sk-treemap-class-${cls})` } : undefined}>
+        <Icon name={r.kind === "file" ? "file" : r.kind === "folder" ? "folder" : "layers"} size={15} />
+      </span>
+      <span className="res-text">
+        <span className="res-name">
+          <span className="res-label" title={name}>
+            {name}
+          </span>
+          {r.tag && <span className={`tag-mini ${r.tag}${r.tag_inherited ? " inherited" : ""}`} role="img" aria-label={tag} title={tag} />}
+          {r.kind === "folder" && <span className="res-n mono">{fmtInt(r.count)} 项</span>}
+          {r.kind === "group" && r.name && r.count > 1 && <span className="res-n mono">{fmtInt(r.count)} 项</span>}
+        </span>
+        <span className="res-path mono" title={path}>
+          <span>{path}</span>
+        </span>
+      </span>
+      <span className="res-size">
+        <span className="mono">{fmtSize(r.alloc)}</span>
+        <span className="res-bar">
+          <span style={{ width: `${props.max ? Math.max(2, (r.alloc / props.max) * 100) : 0}%` }} />
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function SortMenu({ sort, onChange }: { sort: Sort; onChange: (s: Sort) => void }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+  return (
+    <div className="res-sort" ref={box}>
+      <button className="ghost small" aria-haspopup="menu" aria-expanded={open} aria-label={`排序：${SORT_ZH[sort]}`} onClick={() => setOpen(!open)}>
+        {SORT_ZH[sort]}
+        <Icon name="chevronDown" size={12} />
+      </button>
+      {open && (
+        <div
+          className="menu"
+          role="menu"
+          aria-label="排序方式"
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setOpen(false);
+            }
+          }}
+        >
+          {(Object.keys(SORT_ZH) as Sort[]).map((s) => (
+            <button
+              key={s}
+              role="menuitemradio"
+              aria-checked={s === sort}
+              className="menu-item"
+              autoFocus={s === sort}
+              onClick={() => {
+                setOpen(false);
+                if (s !== sort) onChange(s);
+              }}
+            >
+              <span className="menu-check">{s === sort && <Icon name="check" size={14} />}</span>
+              {SORT_ZH[s]}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ conditions (UI-W3-30)
+
+const PENDING_ZH: Record<string, string> = {
+  name: "名称",
+  class: "类别",
+  folder: "文件夹",
+  tag: "标签",
+  size: "大小",
+  age: "时间",
+  attr: "属性",
+};
+const ATTR_ZH: Record<string, string> = {
+  archive: "归档",
+  system: "系统",
+  readonly: "只读",
+  hidden: "隐藏",
+  compressed: "压缩",
+  encrypted: "加密",
+  offline: "脱机",
+  temporary: "临时",
+  notindexed: "不索引",
+  sparse: "稀疏",
+  ads: "备用数据流",
+};
+const TIME_ZH: Record<string, string> = { s: "秒", min: "分钟", h: "小时", d: "天", w: "周", month: "个月", y: "年" };
+const AGE_ZH: Record<string, string> = { modify: "修改", create: "创建", access: "访问" };
+
+interface Capsule {
+  label: string;
+  values: { text: string; cls: string }[];
+  joiner: string;
+}
+
+function Conditions({ parse }: { parse: FilterParse | null }) {
+  const lastValid = useRef<FilterNormal | null>(null);
+  if (parse?.normal) lastValid.current = parse.normal;
+  const vocab = useApp((s) => s.vocab);
+  const normal = parse?.normal ?? lastValid.current;
+  if (!normal) return null;
+  const className = (id: string) => vocab?.classes.find((c) => c.id === id)?.name ?? id;
+  const caps = capsules(normal, className);
+  const pending = parse?.pending?.category ?? null;
+  if (!caps.length && !pending) return null;
+  return (
+    <section className="res-conds" aria-label="条件">
+      <h3>条件</h3>
+      <div className="conds">
+        {caps.map((c, i) => (
+          <span key={i} className="cond">
+            <span className="cond-label">{c.label}</span>
+            {c.values.map((v, k) => (
+              <span key={k}>
+                {k > 0 && <span className="cond-join">{c.joiner}</span>}
+                <code className={v.cls}>{v.text}</code>
+              </span>
+            ))}
+          </span>
+        ))}
+        {pending && (
+          <span className="cond pending">
+            <span className="cond-label">{PENDING_ZH[pending] ?? pending}</span>
+            <span className="muted">选择中…</span>
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function capsules(n: FilterNormal, className: (id: string) => string): Capsule[] {
+  const out: Capsule[] = [];
+  const list = (label: string, items: string[], cls: string, joiner = "或") =>
+    items.length && out.push({ label, joiner, values: items.map((text) => ({ text, cls })) });
+  list("名称", n.masks, "t-mask");
+  list("排除名称", n.not_masks, "t-mask");
+  list("文件夹", n.folders.map((f) => `\\${f}`), "t-folder");
+  list("排除文件夹", n.not_folders.map((f) => `\\${f}`), "t-folder");
+  list("类别", n.classes.map(className), "t-value");
+  list("排除类别", n.not_classes.map(className), "t-value");
+  for (const r of n.sizes) out.push({ label: r.field === "logical" ? "逻辑大小" : "大小", joiner: "且", values: sizeRange(r) });
+  for (const r of n.ages) out.push({ label: `${AGE_ZH[r.field] ?? r.field}时间`, joiner: "且", values: ageRange(r) });
+  if (n.tags !== null) list("标签", n.tags.length === 4 ? ["任意"] : n.tags.map((t) => TAG_ZH[t]!), "t-keyword");
+  list("排除标签", n.not_tags.map((t) => TAG_ZH[t]!), "t-keyword");
+  if (n.attrs) {
+    const vals = [...n.attrs.required.map((a) => ATTR_ZH[a] ?? a), ...n.attrs.forbidden.map((a) => `非${ATTR_ZH[a] ?? a}`)];
+    list("属性", vals, "t-value", "且");
+  }
+  for (const a of n.not_attrs) {
+    const vals = [...a.required.map((x) => ATTR_ZH[x] ?? x), ...a.forbidden.map((x) => `非${ATTR_ZH[x] ?? x}`)];
+    list("排除属性", vals, "t-value", "且");
+  }
+  return out;
+}
+
+function sizeRange(r: Range) {
+  const side = (b: NonNullable<Range["lower"]>) => ({ text: `${b.op} ${b.number} ${b.unit === "b" ? "B" : b.unit.toUpperCase()}`, cls: "t-compare" });
+  return [r.lower && side(r.lower), r.upper && side(r.upper)].filter((x): x is { text: string; cls: string } => !!x);
+}
+
+function ageRange(r: Range) {
+  const span = (b: NonNullable<Range["lower"]>) => `${b.number} ${TIME_ZH[b.unit] ?? b.unit}`;
+  const out: { text: string; cls: string }[] = [];
+  if (r.upper) out.push({ text: `${span(r.upper)}以内${r.upper.op === "<=" ? "（含）" : ""}`, cls: "t-compare" });
+  if (r.lower) out.push({ text: `早于 ${span(r.lower)}前${r.lower.op === ">=" ? "（含）" : ""}`, cls: "t-compare" });
+  return out;
+}

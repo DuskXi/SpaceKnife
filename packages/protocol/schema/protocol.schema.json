@@ -1,0 +1,5490 @@
+{
+  "$defs": {
+    "AgeCond": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "field": {
+          "enum": [
+            "modify",
+            "create",
+            "access"
+          ],
+          "title": "Field",
+          "type": "string"
+        },
+        "hi": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive upper bound of the age in seconds",
+          "title": "Hi"
+        },
+        "kind": {
+          "const": "age",
+          "default": "age",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lo": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive lower bound of the age in seconds",
+          "title": "Lo"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "field",
+        "lo",
+        "hi"
+      ],
+      "title": "AgeCond",
+      "type": "object"
+    },
+    "AttrCond": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "forbidden": {
+          "items": {
+            "enum": [
+              "archive",
+              "system",
+              "readonly",
+              "hidden",
+              "compressed",
+              "encrypted",
+              "offline",
+              "temporary",
+              "notindexed",
+              "sparse",
+              "ads"
+            ],
+            "type": "string"
+          },
+          "title": "Forbidden",
+          "type": "array"
+        },
+        "kind": {
+          "const": "attr",
+          "default": "attr",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "required": {
+          "items": {
+            "enum": [
+              "archive",
+              "system",
+              "readonly",
+              "hidden",
+              "compressed",
+              "encrypted",
+              "offline",
+              "temporary",
+              "notindexed",
+              "sparse",
+              "ads"
+            ],
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "required",
+        "forbidden"
+      ],
+      "title": "AttrCond",
+      "type": "object"
+    },
+    "AttrSet": {
+      "properties": {
+        "forbidden": {
+          "items": {
+            "enum": [
+              "archive",
+              "system",
+              "readonly",
+              "hidden",
+              "compressed",
+              "encrypted",
+              "offline",
+              "temporary",
+              "notindexed",
+              "sparse",
+              "ads"
+            ],
+            "type": "string"
+          },
+          "title": "Forbidden",
+          "type": "array"
+        },
+        "required": {
+          "items": {
+            "enum": [
+              "archive",
+              "system",
+              "readonly",
+              "hidden",
+              "compressed",
+              "encrypted",
+              "offline",
+              "temporary",
+              "notindexed",
+              "sparse",
+              "ads"
+            ],
+            "type": "string"
+          },
+          "title": "Required",
+          "type": "array"
+        }
+      },
+      "required": [
+        "required",
+        "forbidden"
+      ],
+      "title": "AttrSet",
+      "type": "object"
+    },
+    "BinaryFrameHeader": {
+      "properties": {
+        "blobs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/BlobSpec"
+          },
+          "title": "Blobs",
+          "type": "object"
+        },
+        "columns": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ColumnSpec"
+          },
+          "title": "Columns",
+          "type": "object"
+        },
+        "count": {
+          "description": "Rows; every column has exactly this many elements",
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "final": {
+          "default": true,
+          "title": "Final",
+          "type": "boolean"
+        },
+        "layout": {
+          "description": "Versioned column layout, e.g. 'rect.v1'",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Layout",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "seq": {
+          "minimum": 0,
+          "title": "Seq",
+          "type": "integer"
+        },
+        "stream": {
+          "description": "Logical stream, e.g. 'drawlist'",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Stream",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stream",
+        "seq",
+        "layout",
+        "count",
+        "columns"
+      ],
+      "title": "BinaryFrameHeader",
+      "type": "object"
+    },
+    "BlobSpec": {
+      "properties": {
+        "length": {
+          "minimum": 0,
+          "title": "Length",
+          "type": "integer"
+        },
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset",
+        "length"
+      ],
+      "title": "BlobSpec",
+      "type": "object"
+    },
+    "Bound": {
+      "description": "One side of a range, in its canonical spelling (``>`` ``500`` ``mb``).",
+      "properties": {
+        "number": {
+          "title": "Number",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "<",
+            "<=",
+            ">",
+            ">="
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "unit": {
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "number",
+        "unit"
+      ],
+      "title": "Bound",
+      "type": "object"
+    },
+    "CancelParams": {
+      "additionalProperties": false,
+      "description": "``$/cancel`` notification: cancel the in-flight request with this id.",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            }
+          ],
+          "title": "Id"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "CancelParams",
+      "type": "object"
+    },
+    "ClassCond": {
+      "properties": {
+        "class_id": {
+          "title": "Class Id",
+          "type": "string"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "class",
+          "default": "class",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "class_id"
+      ],
+      "title": "ClassCond",
+      "type": "object"
+    },
+    "ClassStat": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "class_id": {
+          "title": "Class Id",
+          "type": "string"
+        },
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "class_id",
+        "bytes",
+        "files"
+      ],
+      "title": "ClassStat",
+      "type": "object"
+    },
+    "ClientInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "electron",
+            "qt",
+            "winui",
+            "cli",
+            "test",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "maxLength": 32,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "kind"
+      ],
+      "title": "ClientInfo",
+      "type": "object"
+    },
+    "ColumnSpec": {
+      "properties": {
+        "dtype": {
+          "title": "Dtype",
+          "type": "string"
+        },
+        "offset": {
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "offset",
+        "dtype"
+      ],
+      "title": "ColumnSpec",
+      "type": "object"
+    },
+    "Completion": {
+      "description": "What can be inserted at the cursor; ``start``/``end`` is the span a candidate replaces.",
+      "properties": {
+        "candidates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Candidates",
+          "type": "array"
+        },
+        "context": {
+          "enum": [
+            "keyword",
+            "class",
+            "tag",
+            "attr",
+            "unit",
+            "prefix"
+          ],
+          "title": "Context",
+          "type": "string"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "typed": {
+          "title": "Typed",
+          "type": "string"
+        }
+      },
+      "required": [
+        "context",
+        "start",
+        "end",
+        "typed",
+        "candidates"
+      ],
+      "title": "Completion",
+      "type": "object"
+    },
+    "Crumb": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "integer"
+        },
+        "label": {
+          "description": "Folder name; 'small:N' / 'more:N' for an aggregate block",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "title": "Crumb",
+      "type": "object"
+    },
+    "Empty": {
+      "additionalProperties": false,
+      "description": "Params for methods that take no arguments.",
+      "properties": {},
+      "title": "Empty",
+      "type": "object"
+    },
+    "EmptyResult": {
+      "description": "Result for methods that return nothing but an acknowledgement.",
+      "properties": {},
+      "title": "EmptyResult",
+      "type": "object"
+    },
+    "ErrorObject": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "integer"
+        },
+        "data": {
+          "anyOf": [
+            {},
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorObject",
+      "type": "object"
+    },
+    "FilterClassInfo": {
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "extensions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Extensions",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "aliases",
+        "extensions"
+      ],
+      "title": "FilterClassInfo",
+      "type": "object"
+    },
+    "FilterDiagnostic": {
+      "description": "An error (the expression is not applied) or, with ``severity=\"warning\"``, a hint.",
+      "properties": {
+        "code": {
+          "enum": [
+            "incomplete",
+            "unterminated_quote",
+            "text_after_quote",
+            "bad_escape",
+            "backslash_in_mask",
+            "unknown_keyword",
+            "bad_char",
+            "unknown_class",
+            "unknown_tag",
+            "unknown_attr",
+            "bad_list",
+            "unknown_prefix",
+            "bad_operator",
+            "bad_number",
+            "missing_unit",
+            "unknown_unit",
+            "unit_mismatch",
+            "out_of_range",
+            "unsupported"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "cond_end": {
+          "title": "Cond End",
+          "type": "integer"
+        },
+        "cond_start": {
+          "description": "UTF-16 span of the whole condition",
+          "title": "Cond Start",
+          "type": "integer"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "expected": {
+          "description": "Valid spellings at this position",
+          "items": {
+            "type": "string"
+          },
+          "title": "Expected",
+          "type": "array"
+        },
+        "severity": {
+          "default": "error",
+          "enum": [
+            "error",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "start": {
+          "description": "UTF-16 offset of the offending part",
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "The offending part as typed",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "start",
+        "end",
+        "cond_start",
+        "cond_end",
+        "text"
+      ],
+      "title": "FilterDiagnostic",
+      "type": "object"
+    },
+    "FilterInfo": {
+      "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "alloc": {
+          "default": 0,
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/FilterDiagnostic"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "dim",
+            "hide"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "size": {
+          "default": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "stale": {
+          "description": "The text has errors; the previous valid filter is still shown",
+          "title": "Stale",
+          "type": "boolean"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "active",
+        "stale",
+        "mode"
+      ],
+      "title": "FilterInfo",
+      "type": "object"
+    },
+    "FilterNormal": {
+      "description": "The normal form: what the expression means, independent of how it was written.\n\nTwo expressions with the same normal form select exactly the same files; ``canonical`` is the\nunique spelling of this normal form.",
+      "properties": {
+        "ages": {
+          "items": {
+            "$ref": "#/$defs/Range"
+          },
+          "title": "Ages",
+          "type": "array"
+        },
+        "attrs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AttrSet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "canonical": {
+          "default": "",
+          "title": "Canonical",
+          "type": "string"
+        },
+        "classes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "folders": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "masks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Masks",
+          "type": "array"
+        },
+        "not_attrs": {
+          "items": {
+            "$ref": "#/$defs/AttrSet"
+          },
+          "title": "Not Attrs",
+          "type": "array"
+        },
+        "not_classes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Classes",
+          "type": "array"
+        },
+        "not_folders": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Folders",
+          "type": "array"
+        },
+        "not_masks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Masks",
+          "type": "array"
+        },
+        "not_tags": {
+          "items": {
+            "enum": [
+              "red",
+              "yellow",
+              "green",
+              "blue"
+            ],
+            "type": "string"
+          },
+          "title": "Not Tags",
+          "type": "array"
+        },
+        "sizes": {
+          "items": {
+            "$ref": "#/$defs/Range"
+          },
+          "title": "Sizes",
+          "type": "array"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "red",
+                  "yellow",
+                  "green",
+                  "blue"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None = no tag condition",
+          "title": "Tags"
+        }
+      },
+      "title": "FilterNormal",
+      "type": "object"
+    },
+    "FilterParse": {
+      "properties": {
+        "completion": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Completion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "conditions": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "age": "#/$defs/AgeCond",
+                "attr": "#/$defs/AttrCond",
+                "class": "#/$defs/ClassCond",
+                "folder": "#/$defs/FolderCond",
+                "name": "#/$defs/MaskCond",
+                "size": "#/$defs/SizeCond",
+                "tag": "#/$defs/TagCond"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/MaskCond"
+              },
+              {
+                "$ref": "#/$defs/FolderCond"
+              },
+              {
+                "$ref": "#/$defs/ClassCond"
+              },
+              {
+                "$ref": "#/$defs/TagCond"
+              },
+              {
+                "$ref": "#/$defs/AttrCond"
+              },
+              {
+                "$ref": "#/$defs/SizeCond"
+              },
+              {
+                "$ref": "#/$defs/AgeCond"
+              }
+            ]
+          },
+          "title": "Conditions",
+          "type": "array"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/FilterDiagnostic"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        },
+        "normal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilterNormal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None while there are errors"
+        },
+        "pending": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PendingCond"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tokens": {
+          "items": {
+            "$ref": "#/$defs/FilterToken"
+          },
+          "title": "Tokens",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text",
+        "tokens",
+        "conditions"
+      ],
+      "title": "FilterParse",
+      "type": "object"
+    },
+    "FilterParseParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "UTF-16 offset of the caret",
+          "title": "Cursor"
+        },
+        "text": {
+          "maxLength": 8192,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "FilterParseParams",
+      "type": "object"
+    },
+    "FilterToken": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "negate",
+            "separator",
+            "mask",
+            "folder",
+            "compare",
+            "keyword",
+            "value"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind",
+        "start",
+        "end"
+      ],
+      "title": "FilterToken",
+      "type": "object"
+    },
+    "FilterVocab": {
+      "description": "Everything the parser needs besides the text; served by ``filter.vocab``.",
+      "properties": {
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/FilterClassInfo"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "unsupported_ages": {
+          "items": {
+            "enum": [
+              "modify",
+              "create",
+              "access"
+            ],
+            "type": "string"
+          },
+          "title": "Unsupported Ages",
+          "type": "array"
+        },
+        "unsupported_attrs": {
+          "items": {
+            "enum": [
+              "archive",
+              "system",
+              "readonly",
+              "hidden",
+              "compressed",
+              "encrypted",
+              "offline",
+              "temporary",
+              "notindexed",
+              "sparse",
+              "ads"
+            ],
+            "type": "string"
+          },
+          "title": "Unsupported Attrs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes"
+      ],
+      "title": "FilterVocab",
+      "type": "object"
+    },
+    "FolderCond": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "folder",
+          "default": "folder",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "pattern": {
+          "title": "Pattern",
+          "type": "string"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "pattern"
+      ],
+      "title": "FolderCond",
+      "type": "object"
+    },
+    "FrameInfo": {
+      "properties": {
+        "breadcrumb": {
+          "items": {
+            "$ref": "#/$defs/Crumb"
+          },
+          "title": "Breadcrumb",
+          "type": "array"
+        },
+        "dpr": {
+          "title": "Dpr",
+          "type": "number"
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilterInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "height": {
+          "title": "Height",
+          "type": "integer"
+        },
+        "layout_ms": {
+          "title": "Layout Ms",
+          "type": "number"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "rows": {
+          "title": "Rows",
+          "type": "integer"
+        },
+        "scanned": {
+          "description": "Allocated bytes below the zoom root",
+          "title": "Scanned",
+          "type": "integer"
+        },
+        "selected_row": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Row"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "view_id": {
+          "title": "View Id",
+          "type": "string"
+        },
+        "width": {
+          "description": "Canvas size in physical px",
+          "title": "Width",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "view_id",
+        "seq",
+        "width",
+        "height",
+        "dpr",
+        "rows",
+        "breadcrumb",
+        "scanned",
+        "layout_ms"
+      ],
+      "title": "FrameInfo",
+      "type": "object"
+    },
+    "HelloParams": {
+      "additionalProperties": false,
+      "description": "First request on every connection; anything else before it closes the socket.",
+      "properties": {
+        "capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "client": {
+          "$ref": "#/$defs/ClientInfo"
+        },
+        "protocol": {
+          "description": "Protocol version the client speaks, e.g. '1.0'",
+          "pattern": "^\\d+\\.\\d+$",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "token": {
+          "description": "Per-launch secret handed to the client out of band",
+          "maxLength": 256,
+          "minLength": 16,
+          "title": "Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "protocol",
+        "client"
+      ],
+      "title": "HelloParams",
+      "type": "object"
+    },
+    "HelloResult": {
+      "properties": {
+        "capabilities": {
+          "description": "Intersection of client and server capabilities",
+          "items": {
+            "type": "string"
+          },
+          "title": "Capabilities",
+          "type": "array"
+        },
+        "limits": {
+          "$ref": "#/$defs/Limits"
+        },
+        "protocol": {
+          "title": "Protocol",
+          "type": "string"
+        },
+        "schema_hash": {
+          "title": "Schema Hash",
+          "type": "string"
+        },
+        "server": {
+          "$ref": "#/$defs/ServerInfo"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "server",
+        "session_id",
+        "capabilities",
+        "schema_hash",
+        "limits"
+      ],
+      "title": "HelloResult",
+      "type": "object"
+    },
+    "IoStatus": {
+      "description": "Disk-load state of one physical disk (W2 curve, status bar UI-MAIN-50).",
+      "properties": {
+        "active_pct": {
+          "description": "Raw busy time (Task Manager 'active time'), %",
+          "title": "Active Pct",
+          "type": "number"
+        },
+        "auto": {
+          "title": "Auto",
+          "type": "boolean"
+        },
+        "concurrency": {
+          "description": "Allowed parallel batches",
+          "title": "Concurrency",
+          "type": "integer"
+        },
+        "disk": {
+          "title": "Disk",
+          "type": "string"
+        },
+        "duty": {
+          "description": "Share of the allowed parallelism in use, 0..1",
+          "title": "Duty",
+          "type": "number"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/LoadPoint"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "inflight": {
+          "description": "Batches in flight now",
+          "title": "Inflight",
+          "type": "integer"
+        },
+        "level": {
+          "enum": [
+            "max",
+            "balanced",
+            "quiet",
+            "idle",
+            "custom"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Limit on SpaceKnife's own load, % (100 = not limited)",
+          "title": "Limit",
+          "type": "number"
+        },
+        "low_io_priority": {
+          "description": "Workers should read at OS low I/O priority",
+          "title": "Low Io Priority",
+          "type": "boolean"
+        },
+        "measured": {
+          "description": "False: no load data for this disk (open loop)",
+          "title": "Measured",
+          "type": "boolean"
+        },
+        "media": {
+          "title": "Media",
+          "type": "string"
+        },
+        "others_pct": {
+          "title": "Others Pct",
+          "type": "number"
+        },
+        "paused": {
+          "title": "Paused",
+          "type": "boolean"
+        },
+        "q_eff": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Q Eff"
+        },
+        "self_pct": {
+          "title": "Self Pct",
+          "type": "number"
+        },
+        "total_pct": {
+          "title": "Total Pct",
+          "type": "number"
+        },
+        "yielding": {
+          "title": "Yielding",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "disk",
+        "media",
+        "level",
+        "limit",
+        "self_pct",
+        "total_pct",
+        "others_pct",
+        "active_pct",
+        "concurrency",
+        "inflight",
+        "duty",
+        "auto",
+        "yielding",
+        "paused",
+        "measured",
+        "low_io_priority"
+      ],
+      "title": "IoStatus",
+      "type": "object"
+    },
+    "IoStatusEvent": {
+      "description": "``io.load``: a disk's load state, twice a second while someone listens.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/IoStatus"
+        },
+        "sub": {
+          "title": "Sub",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub",
+        "status"
+      ],
+      "title": "IoStatusEvent",
+      "type": "object"
+    },
+    "IoStatusList": {
+      "properties": {
+        "disks": {
+          "items": {
+            "$ref": "#/$defs/IoStatus"
+          },
+          "title": "Disks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "disks"
+      ],
+      "title": "IoStatusList",
+      "type": "object"
+    },
+    "Limits": {
+      "properties": {
+        "hello_timeout_s": {
+          "title": "Hello Timeout S",
+          "type": "number"
+        },
+        "max_inbound_message_bytes": {
+          "title": "Max Inbound Message Bytes",
+          "type": "integer"
+        },
+        "max_outbound_chunk_bytes": {
+          "title": "Max Outbound Chunk Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max_inbound_message_bytes",
+        "max_outbound_chunk_bytes",
+        "hello_timeout_s"
+      ],
+      "title": "Limits",
+      "type": "object"
+    },
+    "LoadPoint": {
+      "description": "One second of the W2 load curve.",
+      "properties": {
+        "paused": {
+          "default": false,
+          "title": "Paused",
+          "type": "boolean"
+        },
+        "self_pct": {
+          "description": "SpaceKnife's own share of the disk load, %",
+          "title": "Self Pct",
+          "type": "number"
+        },
+        "t": {
+          "description": "Unix time of the end of this second",
+          "title": "T",
+          "type": "number"
+        },
+        "total_pct": {
+          "description": "Whole-disk load, %",
+          "title": "Total Pct",
+          "type": "number"
+        },
+        "yielding": {
+          "default": false,
+          "title": "Yielding",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "t",
+        "self_pct",
+        "total_pct"
+      ],
+      "title": "LoadPoint",
+      "type": "object"
+    },
+    "LogRecordEvent": {
+      "description": "``log.record``: one backend log record, pushed to ``log`` subscribers (W8 log panel).",
+      "properties": {
+        "extra": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Extra",
+          "type": "object"
+        },
+        "level": {
+          "enum": [
+            "TRACE",
+            "DEBUG",
+            "INFO",
+            "SUCCESS",
+            "WARNING",
+            "ERROR",
+            "CRITICAL"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "sub": {
+          "title": "Sub",
+          "type": "string"
+        },
+        "time": {
+          "format": "date-time",
+          "title": "Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub",
+        "seq",
+        "time",
+        "level",
+        "source",
+        "message"
+      ],
+      "title": "LogRecordEvent",
+      "type": "object"
+    },
+    "MaskCond": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "name",
+          "default": "name",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "pattern": {
+          "description": "Normalised glob: lower case, '*' '?' wildcards, '\\' escapes",
+          "title": "Pattern",
+          "type": "string"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "pattern"
+      ],
+      "title": "MaskCond",
+      "type": "object"
+    },
+    "NodeInfo": {
+      "properties": {
+        "alloc": {
+          "description": "Allocated bytes on disk (subtree total for directories)",
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "atime": {
+          "default": 0,
+          "title": "Atime",
+          "type": "integer"
+        },
+        "child_count": {
+          "default": 0,
+          "title": "Child Count",
+          "type": "integer"
+        },
+        "ctime": {
+          "default": 0,
+          "title": "Ctime",
+          "type": "integer"
+        },
+        "depth": {
+          "title": "Depth",
+          "type": "integer"
+        },
+        "dirs": {
+          "default": 0,
+          "title": "Dirs",
+          "type": "integer"
+        },
+        "ext": {
+          "default": "",
+          "title": "Ext",
+          "type": "string"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Flags",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "dir",
+            "link",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "mtime": {
+          "default": 0,
+          "title": "Mtime",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "parent": {
+          "title": "Parent",
+          "type": "integer"
+        },
+        "size": {
+          "description": "Logical bytes (subtree total for directories)",
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "parent",
+        "name",
+        "kind",
+        "depth",
+        "size",
+        "alloc"
+      ],
+      "title": "NodeInfo",
+      "type": "object"
+    },
+    "PaletteClearParams": {
+      "additionalProperties": false,
+      "properties": {
+        "scan_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Clear this scan target's recents",
+          "title": "Scan Id"
+        }
+      },
+      "title": "PaletteClearParams",
+      "type": "object"
+    },
+    "PaletteCommand": {
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "hits": {
+          "description": "Matched characters of the name",
+          "items": {
+            "$ref": "#/$defs/Span"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "icon": {
+          "description": "Icon name from the design icon set",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "description": "Run by the frontend; stable across versions",
+          "title": "Id",
+          "type": "string"
+        },
+        "keys": {
+          "description": "Bindings in neutral notation ('Ctrl+Shift+F5'); the first is shown, Ctrl = ⌘ on macOS",
+          "items": {
+            "type": "string"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "more": {
+          "default": false,
+          "description": "Ends with '…': running it asks for one more choice",
+          "title": "More",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "status": {
+          "default": "",
+          "description": "State info, or the reason when disabled",
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon"
+      ],
+      "title": "PaletteCommand",
+      "type": "object"
+    },
+    "PaletteCommandList": {
+      "description": "Every command with its default keys (W7 快捷键 page; the keymap becomes editable in M6).",
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/PaletteCommand"
+          },
+          "title": "Commands",
+          "type": "array"
+        }
+      },
+      "required": [
+        "commands"
+      ],
+      "title": "PaletteCommandList",
+      "type": "object"
+    },
+    "PaletteContext": {
+      "additionalProperties": false,
+      "description": "Where the palette was opened: the active tab (or the focused pane of a split).",
+      "properties": {
+        "basket": {
+          "default": 0,
+          "description": "Items in the delete basket (held by the frontend until M6)",
+          "minimum": 0,
+          "title": "Basket",
+          "type": "integer"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Id"
+        },
+        "tab": {
+          "enum": [
+            "scan",
+            "start",
+            "settings"
+          ],
+          "title": "Tab",
+          "type": "string"
+        },
+        "view_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "View Id"
+        }
+      },
+      "required": [
+        "tab"
+      ],
+      "title": "PaletteContext",
+      "type": "object"
+    },
+    "PaletteDirect": {
+      "description": "The input itself as a filter expression or a path (UI-W4-31…33).",
+      "properties": {
+        "alloc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alloc"
+        },
+        "complete": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tab: the path completed by one segment",
+          "title": "Complete"
+        },
+        "diagnostics": {
+          "items": {
+            "$ref": "#/$defs/FilterDiagnostic"
+          },
+          "title": "Diagnostics",
+          "type": "array"
+        },
+        "is_dir": {
+          "default": true,
+          "title": "Is Dir",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "filter",
+            "path"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "enum": [
+                "in_scan",
+                "outside",
+                "missing"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "State"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tokens": {
+          "items": {
+            "$ref": "#/$defs/FilterToken"
+          },
+          "title": "Tokens",
+          "type": "array"
+        },
+        "valid": {
+          "default": true,
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "PaletteDirect",
+      "type": "object"
+    },
+    "PalettePath": {
+      "properties": {
+        "alloc": {
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "complete": {
+          "description": "Tab: absolute path, folders with a trailing separator",
+          "title": "Complete",
+          "type": "string"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/Span"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "is_dir": {
+          "title": "Is Dir",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "parent": {
+          "description": "Absolute path of the containing folder",
+          "title": "Parent",
+          "type": "string"
+        },
+        "tier": {
+          "description": "0 exact name · 1 prefix · 2 inside the name · 3 scattered letters · 4 child listing",
+          "title": "Tier",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "name",
+        "parent",
+        "is_dir",
+        "alloc",
+        "hits",
+        "tier",
+        "complete"
+      ],
+      "title": "PalettePath",
+      "type": "object"
+    },
+    "PalettePaths": {
+      "properties": {
+        "folder": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Listing the children of this folder",
+          "title": "Folder"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/PalettePath"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "partial": {
+          "description": "The scan is still running: results may be incomplete",
+          "title": "Partial",
+          "type": "boolean"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "total": {
+          "description": "All hits, of which the best `limit` are listed",
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "text",
+        "items",
+        "total",
+        "partial"
+      ],
+      "title": "PalettePaths",
+      "type": "object"
+    },
+    "PalettePathsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "text": {
+          "default": "",
+          "maxLength": 4096,
+          "title": "Text",
+          "type": "string"
+        },
+        "view_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Empty text: seed with its selection",
+          "title": "View Id"
+        }
+      },
+      "required": [
+        "scan_id"
+      ],
+      "title": "PalettePathsParams",
+      "type": "object"
+    },
+    "PalettePreview": {
+      "properties": {
+        "alloc": {
+          "default": 0,
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "size": {
+          "default": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "valid": {
+          "title": "Valid",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "text",
+        "valid"
+      ],
+      "title": "PalettePreview",
+      "type": "object"
+    },
+    "PalettePreviewParams": {
+      "additionalProperties": false,
+      "properties": {
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 8192,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "text"
+      ],
+      "title": "PalettePreviewParams",
+      "type": "object"
+    },
+    "PaletteQueryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/PaletteContext"
+        },
+        "text": {
+          "default": "",
+          "maxLength": 4096,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "context"
+      ],
+      "title": "PaletteQueryParams",
+      "type": "object"
+    },
+    "PaletteRecent": {
+      "properties": {
+        "alloc": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "jump: current size; filter: see palette.preview",
+          "title": "Alloc"
+        },
+        "exists": {
+          "default": true,
+          "description": "jump: the path is still in this scan",
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "hits": {
+          "items": {
+            "$ref": "#/$defs/Span"
+          },
+          "title": "Hits",
+          "type": "array"
+        },
+        "is_dir": {
+          "default": true,
+          "title": "Is Dir",
+          "type": "boolean"
+        },
+        "kind": {
+          "enum": [
+            "jump",
+            "filter"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "text": {
+          "description": "Absolute path (jump) or filter expression (filter)",
+          "title": "Text",
+          "type": "string"
+        },
+        "tokens": {
+          "description": "Filter colouring (W3 rules)",
+          "items": {
+            "$ref": "#/$defs/FilterToken"
+          },
+          "title": "Tokens",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "PaletteRecent",
+      "type": "object"
+    },
+    "PaletteRememberParams": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "jump",
+            "filter"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "jump: the scan the path belongs to",
+          "title": "Scan Id"
+        },
+        "text": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "PaletteRememberParams",
+      "type": "object"
+    },
+    "PaletteResult": {
+      "properties": {
+        "commands": {
+          "items": {
+            "$ref": "#/$defs/PaletteCommand"
+          },
+          "title": "Commands",
+          "type": "array"
+        },
+        "direct": {
+          "items": {
+            "$ref": "#/$defs/PaletteDirect"
+          },
+          "title": "Direct",
+          "type": "array"
+        },
+        "paths": {
+          "description": "Ask palette.paths for the path group (scan tab only)",
+          "title": "Paths",
+          "type": "boolean"
+        },
+        "recent": {
+          "items": {
+            "$ref": "#/$defs/PaletteRecent"
+          },
+          "title": "Recent",
+          "type": "array"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Empty input: the selection's name searched for",
+          "title": "Seed"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "direct",
+        "recent",
+        "commands",
+        "paths"
+      ],
+      "title": "PaletteResult",
+      "type": "object"
+    },
+    "PathCheck": {
+      "properties": {
+        "merged_into": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Inside (or equal to) another path of the list",
+          "title": "Merged Into"
+        },
+        "message": {
+          "default": "",
+          "description": "What is wrong, ready to show",
+          "title": "Message",
+          "type": "string"
+        },
+        "normalized": {
+          "description": "Absolute, normalised",
+          "title": "Normalized",
+          "type": "string"
+        },
+        "path": {
+          "description": "As typed",
+          "title": "Path",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "missing",
+            "not_dir",
+            "denied",
+            "error"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "volume": {
+          "default": "",
+          "description": "Mount point of the volume holding the path",
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "normalized",
+        "state"
+      ],
+      "title": "PathCheck",
+      "type": "object"
+    },
+    "PathCheckParams": {
+      "additionalProperties": false,
+      "properties": {
+        "paths": {
+          "description": "Paths as typed; blank entries are ignored",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "title": "PathCheckParams",
+      "type": "object"
+    },
+    "PathCheckResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/PathCheck"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "roots": {
+          "description": "The valid paths to scan, nested ones merged into their ancestors",
+          "items": {
+            "type": "string"
+          },
+          "title": "Roots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "roots"
+      ],
+      "title": "PathCheckResult",
+      "type": "object"
+    },
+    "PendingCond": {
+      "description": "The unfinished condition under the cursor: not an error, not evaluated (dashed chip).",
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "enum": [
+                "name",
+                "class",
+                "folder",
+                "tag",
+                "size",
+                "age",
+                "attr"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Category"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "category",
+        "start",
+        "end"
+      ],
+      "title": "PendingCond",
+      "type": "object"
+    },
+    "PingParams": {
+      "additionalProperties": false,
+      "properties": {
+        "payload": {
+          "anyOf": [
+            {
+              "maxLength": 1024,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        }
+      },
+      "title": "PingParams",
+      "type": "object"
+    },
+    "PingResult": {
+      "properties": {
+        "payload": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Payload"
+        },
+        "server_time": {
+          "format": "date-time",
+          "title": "Server Time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "server_time"
+      ],
+      "title": "PingResult",
+      "type": "object"
+    },
+    "PlatformInfo": {
+      "properties": {
+        "machine": {
+          "title": "Machine",
+          "type": "string"
+        },
+        "release": {
+          "title": "Release",
+          "type": "string"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "system",
+        "release",
+        "machine"
+      ],
+      "title": "PlatformInfo",
+      "type": "object"
+    },
+    "ProgressEvent": {
+      "description": "``$/progress``: LSP-style progress for long-running requests.",
+      "properties": {
+        "token": {
+          "title": "Token",
+          "type": "string"
+        },
+        "value": {
+          "additionalProperties": true,
+          "title": "Value",
+          "type": "object"
+        }
+      },
+      "required": [
+        "token",
+        "value"
+      ],
+      "title": "ProgressEvent",
+      "type": "object"
+    },
+    "Range": {
+      "properties": {
+        "field": {
+          "title": "Field",
+          "type": "string"
+        },
+        "hi": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Hi"
+        },
+        "lo": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Lo"
+        },
+        "lower": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bound"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "upper": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Bound"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "field",
+        "lo",
+        "hi",
+        "lower",
+        "upper"
+      ],
+      "title": "Range",
+      "type": "object"
+    },
+    "ResultRow": {
+      "description": "One line of the W3 result list: a drawn matching file, or the matches inside one block.",
+      "properties": {
+        "alloc": {
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "count": {
+          "description": "Matching files in this row",
+          "title": "Count",
+          "type": "integer"
+        },
+        "key": {
+          "description": "Block to locate with view.reveal (the aggregate's key for 'group')",
+          "title": "Key",
+          "type": "integer"
+        },
+        "kind": {
+          "description": "file: drawn on its own · folder: matches inside a folder block · group: matches inside a small-items / +N block · rest: matches too small to draw",
+          "enum": [
+            "file",
+            "folder",
+            "group",
+            "rest"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "description": "'' for a group of several files and for 'rest'",
+          "title": "Name",
+          "type": "string"
+        },
+        "node": {
+          "description": "The file or folder; the containing folder for 'group' and 'rest'",
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "description": "Folder holding the block, relative to the scan root, platform separators",
+          "title": "Path",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "enum": [
+                "red",
+                "yellow",
+                "green",
+                "blue"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tag"
+        },
+        "tag_inherited": {
+          "default": false,
+          "description": "The tag comes from an enclosing folder",
+          "title": "Tag Inherited",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "key",
+        "node",
+        "kind",
+        "name",
+        "count",
+        "alloc",
+        "size",
+        "path"
+      ],
+      "title": "ResultRow",
+      "type": "object"
+    },
+    "ScanIdParams": {
+      "additionalProperties": false,
+      "properties": {
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id"
+      ],
+      "title": "ScanIdParams",
+      "type": "object"
+    },
+    "ScanListResult": {
+      "properties": {
+        "scans": {
+          "items": {
+            "$ref": "#/$defs/ScanStatus"
+          },
+          "title": "Scans",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scans"
+      ],
+      "title": "ScanListResult",
+      "type": "object"
+    },
+    "ScanProgressEvent": {
+      "description": "``scan.progress``: periodic status of a scan (≤ 4 Hz), plus a final one when it ends.",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/ScanStatus"
+        },
+        "sub": {
+          "title": "Sub",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub",
+        "status"
+      ],
+      "title": "ScanProgressEvent",
+      "type": "object"
+    },
+    "ScanRootInfo": {
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "volume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VolumeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "whole_volume": {
+          "title": "Whole Volume",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "node",
+        "whole_volume"
+      ],
+      "title": "ScanRootInfo",
+      "type": "object"
+    },
+    "ScanSetLoadParams": {
+      "additionalProperties": false,
+      "properties": {
+        "concurrency": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fixed parallelism; None = automatic (the governor's)",
+          "title": "Concurrency"
+        },
+        "custom": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Percent for level=custom",
+          "title": "Custom"
+        },
+        "level": {
+          "enum": [
+            "max",
+            "balanced",
+            "quiet",
+            "idle",
+            "custom"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "level"
+      ],
+      "title": "ScanSetLoadParams",
+      "type": "object"
+    },
+    "ScanStartParams": {
+      "additionalProperties": false,
+      "properties": {
+        "ads": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Count NTFS alternate data streams (MFT scans); None = the setting",
+          "title": "Ads"
+        },
+        "auto_snapshot": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Save a snapshot automatically when the scan completes; None = the setting",
+          "title": "Auto Snapshot"
+        },
+        "cross_mounts": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Descend into other filesystems mounted below a root; None = the setting",
+          "title": "Cross Mounts"
+        },
+        "load_custom": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 5,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Percent for load_level=custom",
+          "title": "Load Custom"
+        },
+        "load_level": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "balanced",
+                "quiet",
+                "idle",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Disk load limit; None = the setting",
+          "title": "Load Level"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "mft",
+                "hard"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "auto and mft: the MFT fast scan for a whole local NTFS volume (the read-only helper asks for administrator rights once, unless the scan.elevate setting is off), else a hard scan; None = the setting",
+          "title": "Method"
+        },
+        "roots": {
+          "description": "Absolute paths; drive roots allowed",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Roots",
+          "type": "array"
+        },
+        "workers": {
+          "anyOf": [
+            {
+              "maximum": 64,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "0 = scan in-process (no pool); None = the concurrency setting",
+          "title": "Workers"
+        }
+      },
+      "required": [
+        "roots"
+      ],
+      "title": "ScanStartParams",
+      "type": "object"
+    },
+    "ScanStatus": {
+      "properties": {
+        "byte_rate": {
+          "default": 0.0,
+          "description": "Allocated bytes per second, same window",
+          "title": "Byte Rate",
+          "type": "number"
+        },
+        "bytes_alloc": {
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "bytes_size": {
+          "title": "Bytes Size",
+          "type": "integer"
+        },
+        "current_path": {
+          "title": "Current Path",
+          "type": "string"
+        },
+        "denied": {
+          "description": "Directories that could not be listed (capped)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Denied",
+          "type": "array"
+        },
+        "dirs": {
+          "title": "Dirs",
+          "type": "integer"
+        },
+        "elapsed_s": {
+          "title": "Elapsed S",
+          "type": "number"
+        },
+        "errors": {
+          "title": "Errors",
+          "type": "integer"
+        },
+        "expected_items": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Items of the last scan of the same roots",
+          "title": "Expected Items"
+        },
+        "fallback": {
+          "default": "",
+          "description": "Why an MFT scan fell back to a hard scan (shown once)",
+          "title": "Fallback",
+          "type": "string"
+        },
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        },
+        "finished_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finished At"
+        },
+        "free": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free bytes (whole-volume scans only)",
+          "title": "Free"
+        },
+        "io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IoStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Load state of the disk being scanned (W2)"
+        },
+        "items": {
+          "title": "Items",
+          "type": "integer"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "method": {
+          "default": "hard",
+          "description": "How the tree was (or is being) read",
+          "enum": [
+            "hard",
+            "mft",
+            "snapshot"
+          ],
+          "title": "Method",
+          "type": "string"
+        },
+        "mft_available": {
+          "default": false,
+          "description": "The target is a whole local NTFS volume: scan.use_mft can switch to MFT",
+          "title": "Mft Available",
+          "type": "boolean"
+        },
+        "paused": {
+          "default": false,
+          "title": "Paused",
+          "type": "boolean"
+        },
+        "pending_dirs": {
+          "title": "Pending Dirs",
+          "type": "integer"
+        },
+        "phase": {
+          "default": "",
+          "description": "What a fast scan is doing: helper (starting the read-only helper, may wait for the administrator prompt), mft (reading and parsing the $MFT), receive, build; empty otherwise",
+          "title": "Phase",
+          "type": "string"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "0..1 against the volume's used space, or against the item count of the last scan of the same roots; None if unknown",
+          "title": "Progress"
+        },
+        "rate": {
+          "description": "Items per second, averaged over the last few seconds",
+          "title": "Rate",
+          "type": "number"
+        },
+        "remaining_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Estimated seconds left; None while estimating",
+          "title": "Remaining S"
+        },
+        "roots": {
+          "items": {
+            "$ref": "#/$defs/ScanRootInfo"
+          },
+          "title": "Roots",
+          "type": "array"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path of the snapshot this scan was saved to/loaded from",
+          "title": "Snapshot"
+        },
+        "source": {
+          "default": "scan",
+          "enum": [
+            "scan",
+            "snapshot"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "scanning",
+            "done",
+            "cancelled",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "unknown": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Used but not scanned bytes (whole-volume scans only)",
+          "title": "Unknown"
+        }
+      },
+      "required": [
+        "scan_id",
+        "state",
+        "roots",
+        "items",
+        "files",
+        "dirs",
+        "bytes_alloc",
+        "bytes_size",
+        "errors",
+        "pending_dirs",
+        "current_path",
+        "elapsed_s",
+        "rate",
+        "progress"
+      ],
+      "title": "ScanStatus",
+      "type": "object"
+    },
+    "ServerInfo": {
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "platform": {
+          "title": "Platform",
+          "type": "string"
+        },
+        "python": {
+          "title": "Python",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "python",
+        "platform"
+      ],
+      "title": "ServerInfo",
+      "type": "object"
+    },
+    "SettingMeta": {
+      "properties": {
+        "applies": {
+          "default": "now",
+          "enum": [
+            "now",
+            "next_scan",
+            "new_views"
+          ],
+          "title": "Applies",
+          "type": "string"
+        },
+        "category": {
+          "enum": [
+            "general",
+            "appearance",
+            "treemap",
+            "scan",
+            "classes",
+            "tags",
+            "keys",
+            "advanced"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "control": {
+          "enum": [
+            "switch",
+            "segmented",
+            "number",
+            "slider",
+            "color",
+            "text"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "depends": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'key' (a switch that must be on) or 'key=value' for this row to be editable",
+          "title": "Depends"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "group": {
+          "title": "Group",
+          "type": "string"
+        },
+        "group_note": {
+          "default": "",
+          "title": "Group Note",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/SettingOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "description": "Why the setting is disabled (platform, or the milestone that wires it)",
+          "title": "Reason",
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
+        "synonyms": {
+          "description": "Extra search words (English, abbreviations)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Synonyms",
+          "type": "array"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "category",
+        "group",
+        "name",
+        "description",
+        "control"
+      ],
+      "title": "SettingMeta",
+      "type": "object"
+    },
+    "SettingOption": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "description": "Why this option cannot be chosen here ('' = available)",
+          "title": "Reason",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "title": "SettingOption",
+      "type": "object"
+    },
+    "SettingsChangedEvent": {
+      "description": "``settings.changed``: pushed to every session after any change (also edits of the file).",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/SettingsState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "SettingsChangedEvent",
+      "type": "object"
+    },
+    "SettingsResetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "category": {
+          "anyOf": [
+            {
+              "enum": [
+                "general",
+                "appearance",
+                "treemap",
+                "scan",
+                "classes",
+                "tags",
+                "keys",
+                "advanced"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None resets every setting",
+          "title": "Category"
+        }
+      },
+      "title": "SettingsResetParams",
+      "type": "object"
+    },
+    "SettingsState": {
+      "properties": {
+        "defaults": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Defaults",
+          "type": "object"
+        },
+        "error": {
+          "default": "",
+          "description": "The settings file on disk is invalid; the last valid values are in use",
+          "title": "Error",
+          "type": "string"
+        },
+        "logs": {
+          "description": "The log folder (W7 高级)",
+          "title": "Logs",
+          "type": "string"
+        },
+        "meta": {
+          "items": {
+            "$ref": "#/$defs/SettingMeta"
+          },
+          "title": "Meta",
+          "type": "array"
+        },
+        "path": {
+          "description": "The settings file (UI-W7-25)",
+          "title": "Path",
+          "type": "string"
+        },
+        "snapshots": {
+          "description": "The auto-saved snapshots folder (W1 最近记录)",
+          "title": "Snapshots",
+          "type": "string"
+        },
+        "unit_base": {
+          "description": "Size unit base after resolving 'system'",
+          "enum": [
+            1000,
+            1024
+          ],
+          "title": "Unit Base",
+          "type": "integer"
+        },
+        "values": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "title": "Values",
+          "type": "object"
+        },
+        "version": {
+          "description": "Bumped by every change; send it back with settings.update",
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "values",
+        "defaults",
+        "meta",
+        "path",
+        "logs",
+        "snapshots",
+        "unit_base"
+      ],
+      "title": "SettingsState",
+      "type": "object"
+    },
+    "SettingsUpdateParams": {
+      "additionalProperties": false,
+      "properties": {
+        "values": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "Keys to change; others keep their value",
+          "title": "Values",
+          "type": "object"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reject the change if the document moved on since",
+          "title": "Version"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "title": "SettingsUpdateParams",
+      "type": "object"
+    },
+    "ShutdownResult": {
+      "properties": {
+        "accepted": {
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "accepted"
+      ],
+      "title": "ShutdownResult",
+      "type": "object"
+    },
+    "SizeCond": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "field": {
+          "enum": [
+            "disk",
+            "logical"
+          ],
+          "title": "Field",
+          "type": "string"
+        },
+        "hi": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive upper bound in bytes (after applying negation)",
+          "title": "Hi"
+        },
+        "kind": {
+          "const": "size",
+          "default": "size",
+          "title": "Kind",
+          "type": "string"
+        },
+        "lo": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Inclusive lower bound in bytes (after applying negation)",
+          "title": "Lo"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "field",
+        "lo",
+        "hi"
+      ],
+      "title": "SizeCond",
+      "type": "object"
+    },
+    "SnapshotInfo": {
+      "properties": {
+        "bytes_alloc": {
+          "default": 0,
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "file_bytes": {
+          "default": 0,
+          "description": "Size of the snapshot file itself",
+          "title": "File Bytes",
+          "type": "integer"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "enum": [
+                "hard",
+                "mft"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How the saved tree was read (None: saved before M4, a hard scan)",
+          "title": "Method"
+        },
+        "node_count": {
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "path",
+        "created_at",
+        "roots",
+        "node_count"
+      ],
+      "title": "SnapshotInfo",
+      "type": "object"
+    },
+    "SnapshotListResult": {
+      "properties": {
+        "snapshots": {
+          "items": {
+            "$ref": "#/$defs/SnapshotInfo"
+          },
+          "title": "Snapshots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "snapshots"
+      ],
+      "title": "SnapshotListResult",
+      "type": "object"
+    },
+    "SnapshotLoadParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SnapshotLoadParams",
+      "type": "object"
+    },
+    "SnapshotSaveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target file; default = the auto-save folder",
+          "title": "Path"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id"
+      ],
+      "title": "SnapshotSaveParams",
+      "type": "object"
+    },
+    "Span": {
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start",
+        "end"
+      ],
+      "title": "Span",
+      "type": "object"
+    },
+    "SubscribeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "params": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Params"
+        },
+        "rate_hz": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 120,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Upper bound on event rate",
+          "title": "Rate Hz"
+        },
+        "topic": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Topic",
+          "type": "string"
+        }
+      },
+      "required": [
+        "topic"
+      ],
+      "title": "SubscribeParams",
+      "type": "object"
+    },
+    "SubscribeResult": {
+      "properties": {
+        "sub": {
+          "title": "Sub",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub"
+      ],
+      "title": "SubscribeResult",
+      "type": "object"
+    },
+    "SystemInfo": {
+      "properties": {
+        "pid": {
+          "title": "Pid",
+          "type": "integer"
+        },
+        "platform": {
+          "$ref": "#/$defs/PlatformInfo"
+        },
+        "server": {
+          "$ref": "#/$defs/ServerInfo"
+        },
+        "sessions": {
+          "title": "Sessions",
+          "type": "integer"
+        },
+        "started_at": {
+          "format": "date-time",
+          "title": "Started At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "server",
+        "pid",
+        "started_at",
+        "platform",
+        "sessions"
+      ],
+      "title": "SystemInfo",
+      "type": "object"
+    },
+    "TagCond": {
+      "properties": {
+        "colors": {
+          "items": {
+            "enum": [
+              "red",
+              "yellow",
+              "green",
+              "blue"
+            ],
+            "type": "string"
+          },
+          "title": "Colors",
+          "type": "array"
+        },
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "tag",
+          "default": "tag",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "colors"
+      ],
+      "title": "TagCond",
+      "type": "object"
+    },
+    "TopFile": {
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeInfo"
+        },
+        "rel_parent": {
+          "description": "Folder of the file relative to the summarised node, ending in a separator",
+          "title": "Rel Parent",
+          "type": "string"
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "enum": [
+                "red",
+                "yellow",
+                "green",
+                "blue"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tag"
+        }
+      },
+      "required": [
+        "node",
+        "rel_parent"
+      ],
+      "title": "TopFile",
+      "type": "object"
+    },
+    "TreeChildrenParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 200,
+          "maximum": 5000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "node": {
+          "minimum": 0,
+          "title": "Node",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "sort": {
+          "default": "size",
+          "enum": [
+            "size",
+            "name"
+          ],
+          "title": "Sort",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "TreeChildrenParams",
+      "type": "object"
+    },
+    "TreeChildrenResult": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/NodeInfo"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "parent": {
+          "$ref": "#/$defs/NodeInfo"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "parent",
+        "total",
+        "items"
+      ],
+      "title": "TreeChildrenResult",
+      "type": "object"
+    },
+    "TreeFindParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "path"
+      ],
+      "title": "TreeFindParams",
+      "type": "object"
+    },
+    "TreeFindResult": {
+      "properties": {
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "TreeFindResult",
+      "type": "object"
+    },
+    "TreeNodeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "minimum": 0,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "TreeNodeParams",
+      "type": "object"
+    },
+    "TreeNodeResult": {
+      "properties": {
+        "node": {
+          "$ref": "#/$defs/NodeInfo"
+        },
+        "on_disk": {
+          "default": true,
+          "description": "False inside the MFT pseudo folders ($NTFS 元数据, $孤立文件): no such path exists",
+          "title": "On Disk",
+          "type": "boolean"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "path"
+      ],
+      "title": "TreeNodeResult",
+      "type": "object"
+    },
+    "TreeSummaryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "minimum": 0,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "top": {
+          "default": 5,
+          "description": "How many of the largest files to return",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Top",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "TreeSummaryParams",
+      "type": "object"
+    },
+    "TreeSummaryResult": {
+      "description": "Everything the details panel shows for one node (UI-MAIN-35…43, G11).",
+      "properties": {
+        "classes": {
+          "description": "Allocated bytes and files per file class, largest first",
+          "items": {
+            "$ref": "#/$defs/ClassStat"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "latest_mtime": {
+          "description": "Newest modification time in the subtree (0 = unknown)",
+          "title": "Latest Mtime",
+          "type": "integer"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeInfo"
+        },
+        "on_disk": {
+          "default": true,
+          "description": "False inside the MFT pseudo folders ($NTFS 元数据, $孤立文件): no such path exists",
+          "title": "On Disk",
+          "type": "boolean"
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "enum": [
+                "red",
+                "yellow",
+                "green",
+                "blue"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tag"
+        },
+        "top_files": {
+          "items": {
+            "$ref": "#/$defs/TopFile"
+          },
+          "title": "Top Files",
+          "type": "array"
+        },
+        "volume": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VolumeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The volume of the scan root that holds the node"
+        }
+      },
+      "required": [
+        "node",
+        "path",
+        "latest_mtime",
+        "top_files",
+        "classes"
+      ],
+      "title": "TreeSummaryResult",
+      "type": "object"
+    },
+    "UnsubscribeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "sub": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Sub",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub"
+      ],
+      "title": "UnsubscribeParams",
+      "type": "object"
+    },
+    "ViewFilterParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "text": {
+          "maxLength": 8192,
+          "title": "Text",
+          "type": "string"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "text"
+      ],
+      "title": "ViewFilterParams",
+      "type": "object"
+    },
+    "ViewFrameEvent": {
+      "description": "``view.frame``: a frame pushed without a request (scan progress, time-based filters).",
+      "properties": {
+        "frame": {
+          "$ref": "#/$defs/FrameInfo"
+        }
+      },
+      "required": [
+        "frame"
+      ],
+      "title": "ViewFrameEvent",
+      "type": "object"
+    },
+    "ViewIdParams": {
+      "additionalProperties": false,
+      "properties": {
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id"
+      ],
+      "title": "ViewIdParams",
+      "type": "object"
+    },
+    "ViewListParams": {
+      "additionalProperties": false,
+      "properties": {
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Id"
+        }
+      },
+      "title": "ViewListParams",
+      "type": "object"
+    },
+    "ViewListResult": {
+      "properties": {
+        "views": {
+          "items": {
+            "$ref": "#/$defs/ViewState"
+          },
+          "title": "Views",
+          "type": "array"
+        }
+      },
+      "required": [
+        "views"
+      ],
+      "title": "ViewListResult",
+      "type": "object"
+    },
+    "ViewOpenParams": {
+      "additionalProperties": false,
+      "properties": {
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ViewSettingsParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "viewport": {
+          "$ref": "#/$defs/Viewport"
+        }
+      },
+      "required": [
+        "scan_id",
+        "viewport"
+      ],
+      "title": "ViewOpenParams",
+      "type": "object"
+    },
+    "ViewResults": {
+      "properties": {
+        "active": {
+          "description": "A filter is in effect (otherwise there are no rows)",
+          "title": "Active",
+          "type": "boolean"
+        },
+        "alloc": {
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "files": {
+          "description": "Matching files below the zoom root (sum of the rows' counts)",
+          "title": "Files",
+          "type": "integer"
+        },
+        "max_alloc": {
+          "description": "Largest row, for the relative size bars",
+          "title": "Max Alloc",
+          "type": "integer"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/ResultRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "seq": {
+          "description": "Frame the rows were grouped by",
+          "title": "Seq",
+          "type": "integer"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "sort": {
+          "enum": [
+            "size",
+            "name",
+            "count"
+          ],
+          "title": "Sort",
+          "type": "string"
+        },
+        "total": {
+          "description": "Number of rows",
+          "title": "Total",
+          "type": "integer"
+        },
+        "view_id": {
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "seq",
+        "active",
+        "sort",
+        "total",
+        "files",
+        "alloc",
+        "size",
+        "max_alloc",
+        "offset",
+        "rows"
+      ],
+      "title": "ViewResults",
+      "type": "object"
+    },
+    "ViewResultsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "enum": [
+                "size",
+                "name",
+                "count"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New order (remembered per view); None keeps it",
+          "title": "Sort"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id"
+      ],
+      "title": "ViewResultsParams",
+      "type": "object"
+    },
+    "ViewRevealParams": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "A result row's key, or any node id",
+          "exclusiveMaximum": 4294967296,
+          "minimum": 0,
+          "title": "Key",
+          "type": "integer"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "key"
+      ],
+      "title": "ViewRevealParams",
+      "type": "object"
+    },
+    "ViewSelectParams": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 4294967296,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Key"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id"
+      ],
+      "title": "ViewSelectParams",
+      "type": "object"
+    },
+    "ViewSetParams": {
+      "additionalProperties": false,
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/ViewSettingsParams"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "settings"
+      ],
+      "title": "ViewSetParams",
+      "type": "object"
+    },
+    "ViewSettingsParams": {
+      "additionalProperties": false,
+      "description": "Fields left out keep their value.",
+      "properties": {
+        "color_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "class",
+                "flat",
+                "time"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color Mode"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "maximum": 15,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "filter_mode": {
+          "anyOf": [
+            {
+              "enum": [
+                "dim",
+                "hide"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Filter Mode"
+        },
+        "min_element": {
+          "anyOf": [
+            {
+              "maximum": 20,
+              "minimum": 3,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "CSS px",
+          "title": "Min Element"
+        },
+        "show_free": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Show Free"
+        },
+        "show_unknown": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Show Unknown"
+        },
+        "sort_by_size": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sort By Size"
+        },
+        "viewport": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Viewport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "ViewSettingsParams",
+      "type": "object"
+    },
+    "ViewState": {
+      "properties": {
+        "can_back": {
+          "title": "Can Back",
+          "type": "boolean"
+        },
+        "can_forward": {
+          "title": "Can Forward",
+          "type": "boolean"
+        },
+        "can_up": {
+          "title": "Can Up",
+          "type": "boolean"
+        },
+        "color_mode": {
+          "enum": [
+            "class",
+            "flat",
+            "time"
+          ],
+          "title": "Color Mode",
+          "type": "string"
+        },
+        "detail": {
+          "title": "Detail",
+          "type": "integer"
+        },
+        "filter_mode": {
+          "enum": [
+            "dim",
+            "hide"
+          ],
+          "title": "Filter Mode",
+          "type": "string"
+        },
+        "min_element": {
+          "title": "Min Element",
+          "type": "number"
+        },
+        "results_sort": {
+          "default": "size",
+          "enum": [
+            "size",
+            "name",
+            "count"
+          ],
+          "title": "Results Sort",
+          "type": "string"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "selected": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected"
+        },
+        "show_free": {
+          "title": "Show Free",
+          "type": "boolean"
+        },
+        "show_unknown": {
+          "title": "Show Unknown",
+          "type": "boolean"
+        },
+        "sort_by_size": {
+          "title": "Sort By Size",
+          "type": "boolean"
+        },
+        "view_id": {
+          "title": "View Id",
+          "type": "string"
+        },
+        "viewport": {
+          "$ref": "#/$defs/Viewport"
+        },
+        "zoom_key": {
+          "title": "Zoom Key",
+          "type": "integer"
+        },
+        "zoom_node": {
+          "title": "Zoom Node",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "view_id",
+        "scan_id",
+        "zoom_node",
+        "zoom_key",
+        "detail",
+        "min_element",
+        "sort_by_size",
+        "show_free",
+        "show_unknown",
+        "color_mode",
+        "filter_mode",
+        "viewport",
+        "can_back",
+        "can_forward",
+        "can_up"
+      ],
+      "title": "ViewState",
+      "type": "object"
+    },
+    "ViewTagParams": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "enum": [
+                "red",
+                "yellow",
+                "green",
+                "blue"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None clears the selection's tag and every tag below it (Ctrl+0)",
+          "title": "Color"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id"
+      ],
+      "title": "ViewTagParams",
+      "type": "object"
+    },
+    "ViewUpdate": {
+      "properties": {
+        "changed": {
+          "default": true,
+          "title": "Changed",
+          "type": "boolean"
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FilterInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Current filter state (also without a frame)"
+        },
+        "frame": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Present when a new frame was sent"
+        },
+        "state": {
+          "$ref": "#/$defs/ViewState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "ViewUpdate",
+      "type": "object"
+    },
+    "ViewZoomParams": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "description": "A block's key from the last frame, or a node id",
+          "exclusiveMaximum": 4294967296,
+          "minimum": 0,
+          "title": "Key",
+          "type": "integer"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "key"
+      ],
+      "title": "ViewZoomParams",
+      "type": "object"
+    },
+    "Viewport": {
+      "additionalProperties": false,
+      "properties": {
+        "dpr": {
+          "default": 1.0,
+          "maximum": 8,
+          "minimum": 0.5,
+          "title": "Dpr",
+          "type": "number"
+        },
+        "height": {
+          "description": "CSS px",
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Height",
+          "type": "number"
+        },
+        "width": {
+          "description": "CSS px",
+          "exclusiveMinimum": 0,
+          "maximum": 32768,
+          "title": "Width",
+          "type": "number"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "title": "Viewport",
+      "type": "object"
+    },
+    "VolumeInfo": {
+      "properties": {
+        "cluster_size": {
+          "title": "Cluster Size",
+          "type": "integer"
+        },
+        "device": {
+          "title": "Device",
+          "type": "string"
+        },
+        "free": {
+          "title": "Free",
+          "type": "integer"
+        },
+        "fs_type": {
+          "title": "Fs Type",
+          "type": "string"
+        },
+        "is_remote": {
+          "title": "Is Remote",
+          "type": "boolean"
+        },
+        "is_removable": {
+          "title": "Is Removable",
+          "type": "boolean"
+        },
+        "is_system": {
+          "default": false,
+          "description": "The system volume (selected by default on the start page)",
+          "title": "Is System",
+          "type": "boolean"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "media": {
+          "default": "unknown",
+          "description": "Storage media (start page cards, IO tuning in M4)",
+          "enum": [
+            "nvme_ssd",
+            "sata_ssd",
+            "ssd",
+            "hdd",
+            "usb_hdd",
+            "usb_ssd",
+            "usb_flash",
+            "sd_card",
+            "network",
+            "virtual",
+            "unknown"
+          ],
+          "title": "Media",
+          "type": "string"
+        },
+        "mount_point": {
+          "title": "Mount Point",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "description": "Why the volume cannot be scanned now ('' = available)",
+          "title": "Reason",
+          "type": "string"
+        },
+        "remote_path": {
+          "default": "",
+          "description": "Network volumes: the server path (\\\\server\\share, host:/export)",
+          "title": "Remote Path",
+          "type": "string"
+        },
+        "serial": {
+          "default": "",
+          "title": "Serial",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "used": {
+          "title": "Used",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "mount_point",
+        "device",
+        "fs_type",
+        "label",
+        "total",
+        "free",
+        "used",
+        "cluster_size",
+        "is_remote",
+        "is_removable"
+      ],
+      "title": "VolumeInfo",
+      "type": "object"
+    },
+    "VolumeListResult": {
+      "properties": {
+        "elevated": {
+          "default": false,
+          "description": "An MFT scan needs no administrator prompt now (the backend has administrator rights, or the read-only helper is running)",
+          "title": "Elevated",
+          "type": "boolean"
+        },
+        "volumes": {
+          "items": {
+            "$ref": "#/$defs/VolumeInfo"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "volumes"
+      ],
+      "title": "VolumeListResult",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "binaryFrameHeader": "#/$defs/BinaryFrameHeader",
+  "errorObject": "#/$defs/ErrorObject",
+  "events": {
+    "$/progress": {
+      "doc": "Progress of a long-running request.",
+      "payload": "#/$defs/ProgressEvent"
+    },
+    "io.load": {
+      "doc": "Load state of a disk for an 'io' subscription (2 Hz).",
+      "payload": "#/$defs/IoStatusEvent"
+    },
+    "log.record": {
+      "doc": "A backend log record for a 'log' subscription.",
+      "payload": "#/$defs/LogRecordEvent"
+    },
+    "scan.progress": {
+      "doc": "Status of a scan for a 'scan' subscription.",
+      "payload": "#/$defs/ScanProgressEvent"
+    },
+    "settings.changed": {
+      "doc": "Settings changed (any client, or the file was edited).",
+      "payload": "#/$defs/SettingsChangedEvent"
+    },
+    "view.frame": {
+      "doc": "A frame pushed without a request (scan progress, time).",
+      "payload": "#/$defs/ViewFrameEvent"
+    }
+  },
+  "methods": {
+    "$/subscribe": {
+      "doc": "Subscribe to an event topic.",
+      "params": "#/$defs/SubscribeParams",
+      "requiresSession": true,
+      "result": "#/$defs/SubscribeResult"
+    },
+    "$/unsubscribe": {
+      "doc": "Cancel a subscription.",
+      "params": "#/$defs/UnsubscribeParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "app.shutdown": {
+      "doc": "Ask the backend to shut down gracefully.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/ShutdownResult"
+    },
+    "filter.parse": {
+      "doc": "Parse a filter: tokens, diagnostics, pending condition, completion and normal form.",
+      "params": "#/$defs/FilterParseParams",
+      "requiresSession": true,
+      "result": "#/$defs/FilterParse"
+    },
+    "filter.vocab": {
+      "doc": "File classes and platform limits for the filter.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/FilterVocab"
+    },
+    "io.status": {
+      "doc": "Load state of every local disk, with history.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/IoStatusList"
+    },
+    "palette.clear": {
+      "doc": "Clear the recents of a scan target and the shared filters.",
+      "params": "#/$defs/PaletteClearParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "palette.commands": {
+      "doc": "All commands with names, icons and default keys.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/PaletteCommandList"
+    },
+    "palette.paths": {
+      "doc": "Path group: name search, folder listing or selection seed.",
+      "params": "#/$defs/PalettePathsParams",
+      "requiresSession": true,
+      "result": "#/$defs/PalettePaths"
+    },
+    "palette.preview": {
+      "doc": "Matches of a filter expression on a whole scan.",
+      "params": "#/$defs/PalettePreviewParams",
+      "requiresSession": true,
+      "result": "#/$defs/PalettePreview"
+    },
+    "palette.query": {
+      "doc": "Commands, recents and direct items for the palette input.",
+      "params": "#/$defs/PaletteQueryParams",
+      "requiresSession": true,
+      "result": "#/$defs/PaletteResult"
+    },
+    "palette.remember": {
+      "doc": "Record a path jump or filter run from the palette.",
+      "params": "#/$defs/PaletteRememberParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "scan.cancel": {
+      "doc": "Stop a running scan (partial tree stays).",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.check_paths": {
+      "doc": "Validate typed paths and merge nested ones (UI-W1-25).",
+      "params": "#/$defs/PathCheckParams",
+      "requiresSession": true,
+      "result": "#/$defs/PathCheckResult"
+    },
+    "scan.close": {
+      "doc": "Forget a scan and free its memory.",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "scan.list": {
+      "doc": "Scans held by the backend.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/ScanListResult"
+    },
+    "scan.pause": {
+      "doc": "Stop dispatching reads; batches in flight finish (W2).",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.resume": {
+      "doc": "Continue a paused scan where it stopped.",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.set_load": {
+      "doc": "Change the disk load limit of a running scan (W2).",
+      "params": "#/$defs/ScanSetLoadParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.start": {
+      "doc": "Start scanning one or more roots.",
+      "params": "#/$defs/ScanStartParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.status": {
+      "doc": "Current status of a scan.",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.use_mft": {
+      "doc": "Switch a running hard scan to the MFT fast scan (asks for administrator rights; the hard scan goes on until the helper is ready, and on if it cannot start).",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "session.hello": {
+      "doc": "Authenticate and negotiate protocol/capabilities.",
+      "params": "#/$defs/HelloParams",
+      "requiresSession": false,
+      "result": "#/$defs/HelloResult"
+    },
+    "settings.get": {
+      "doc": "All settings with their metadata (W7).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/SettingsState"
+    },
+    "settings.reset": {
+      "doc": "Restore the defaults of one page, or of everything.",
+      "params": "#/$defs/SettingsResetParams",
+      "requiresSession": true,
+      "result": "#/$defs/SettingsState"
+    },
+    "settings.update": {
+      "doc": "Change some settings (validated, saved atomically).",
+      "params": "#/$defs/SettingsUpdateParams",
+      "requiresSession": true,
+      "result": "#/$defs/SettingsState"
+    },
+    "snapshot.list": {
+      "doc": "Auto-saved snapshots, newest first (W1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/SnapshotListResult"
+    },
+    "snapshot.load": {
+      "doc": "Open a snapshot as a finished scan.",
+      "params": "#/$defs/SnapshotLoadParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "snapshot.save": {
+      "doc": "Save a scan as a snapshot file.",
+      "params": "#/$defs/SnapshotSaveParams",
+      "requiresSession": true,
+      "result": "#/$defs/SnapshotInfo"
+    },
+    "system.info": {
+      "doc": "Server, platform and session information.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/SystemInfo"
+    },
+    "system.ping": {
+      "doc": "Round-trip check; echoes the payload.",
+      "params": "#/$defs/PingParams",
+      "requiresSession": true,
+      "result": "#/$defs/PingResult"
+    },
+    "tree.children": {
+      "doc": "A page of a node's children.",
+      "params": "#/$defs/TreeChildrenParams",
+      "requiresSession": true,
+      "result": "#/$defs/TreeChildrenResult"
+    },
+    "tree.find": {
+      "doc": "Look up a node by absolute path.",
+      "params": "#/$defs/TreeFindParams",
+      "requiresSession": true,
+      "result": "#/$defs/TreeFindResult"
+    },
+    "tree.node": {
+      "doc": "One node with its full path.",
+      "params": "#/$defs/TreeNodeParams",
+      "requiresSession": true,
+      "result": "#/$defs/TreeNodeResult"
+    },
+    "tree.summary": {
+      "doc": "Details-panel data of a node: parent, largest files, per-class totals, newest change, tag, volume.",
+      "params": "#/$defs/TreeSummaryParams",
+      "requiresSession": true,
+      "result": "#/$defs/TreeSummaryResult"
+    },
+    "view.back": {
+      "doc": "Back to the previous zoom root.",
+      "params": "#/$defs/ViewIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.close": {
+      "doc": "Close a view.",
+      "params": "#/$defs/ViewIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "view.filter": {
+      "doc": "Set the view's filter expression.",
+      "params": "#/$defs/ViewFilterParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.forward": {
+      "doc": "Forward again.",
+      "params": "#/$defs/ViewIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.home": {
+      "doc": "Back to the whole scan / volume.",
+      "params": "#/$defs/ViewIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.list": {
+      "doc": "Views of this session (optionally of one scan).",
+      "params": "#/$defs/ViewListParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewListResult"
+    },
+    "view.open": {
+      "doc": "Open a view (tab / pane) on a scan; sends its first frame.",
+      "params": "#/$defs/ViewOpenParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.render": {
+      "doc": "Send a fresh frame of a view.",
+      "params": "#/$defs/ViewIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.results": {
+      "doc": "A page of the filter result list, grouped by visible block.",
+      "params": "#/$defs/ViewResultsParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewResults"
+    },
+    "view.reveal": {
+      "doc": "Select a block and navigate until it is drawn (W3 click).",
+      "params": "#/$defs/ViewRevealParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.select": {
+      "doc": "Select a block (or clear the selection).",
+      "params": "#/$defs/ViewSelectParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.set": {
+      "doc": "Change detail, viewport, switches, colour or filter mode.",
+      "params": "#/$defs/ViewSetParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.tag": {
+      "doc": "Tag the selection (Ctrl+1..4) or clear tags (Ctrl+0).",
+      "params": "#/$defs/ViewTagParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.up": {
+      "doc": "Zoom to the parent; the folder left is selected.",
+      "params": "#/$defs/ViewIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "view.zoom": {
+      "doc": "Zoom into a block (double-click / Enter).",
+      "params": "#/$defs/ViewZoomParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewUpdate"
+    },
+    "volume.list": {
+      "doc": "Volumes offered on the start page (W1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/VolumeListResult"
+    }
+  },
+  "notifications": {
+    "$/cancel": {
+      "doc": "Cancel an in-flight request (answered with -32800).",
+      "params": "#/$defs/CancelParams"
+    }
+  },
+  "protocol": "1.0",
+  "title": "SpaceKnife protocol"
+}

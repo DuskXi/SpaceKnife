@@ -1,0 +1,15 @@
+[project]
+name = "spaceknife-native"
+version = "0.1.0"
+description = "SpaceKnife native acceleration (Rust/PyO3): MFT parsing and parallel directory scans"
+requires-python = ">=3.12,<3.13"
+dependencies = ["numpy>=2.1"]
+
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[tool.maturin]
+python-source = "python"
+module-name = "spaceknife_native._native"
+features = ["pyo3/extension-module"]

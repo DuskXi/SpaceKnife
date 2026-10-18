@@ -1,0 +1,347 @@
+{
+  "$description": "树图 carbon 主题（A2 基线）。语义见 docs/UI-SPEC.md 的 T 节；所有文字对比度 ≥ 4.5:1。",
+  "treemap": {
+    "ground": {
+      "$type": "color",
+      "$value": "#060709"
+    },
+    "level": {
+      "$type": "color",
+      "$description": "文件夹框按嵌套深度取色，超过第 4 层沿用第 4 层",
+      "0": {
+        "bg": {
+          "$value": "#0C0E12"
+        },
+        "border": {
+          "$value": "#22262F"
+        },
+        "headerBg": {
+          "$value": "#13151B"
+        },
+        "headerText": {
+          "$value": "#F1F2F5"
+        },
+        "headerSub": {
+          "$value": "#9AA0AE"
+        }
+      },
+      "1": {
+        "bg": {
+          "$value": "#101217"
+        },
+        "border": {
+          "$value": "#272B35"
+        },
+        "headerBg": {
+          "$value": "#171A20"
+        },
+        "headerText": {
+          "$value": "#EEEFF3"
+        },
+        "headerSub": {
+          "$value": "#9AA0AE"
+        }
+      },
+      "2": {
+        "bg": {
+          "$value": "#13161B"
+        },
+        "border": {
+          "$value": "#2C303B"
+        },
+        "headerBg": {
+          "$value": "#1B1E25"
+        },
+        "headerText": {
+          "$value": "#ECEDF1"
+        },
+        "headerSub": {
+          "$value": "#9DA3B1"
+        }
+      },
+      "3": {
+        "bg": {
+          "$value": "#171A20"
+        },
+        "border": {
+          "$value": "#313642"
+        },
+        "headerBg": {
+          "$value": "#1F232A"
+        },
+        "headerText": {
+          "$value": "#E9EAEF"
+        },
+        "headerSub": {
+          "$value": "#A0A6B4"
+        }
+      }
+    },
+    "halo": {
+      "$type": "color",
+      "$description": "悬停/选中项的祖先标题栏光晕",
+      "bg": {
+        "$value": "#26304A"
+      },
+      "text": {
+        "$value": "#FFFFFF"
+      },
+      "sub": {
+        "$value": "#C9D0E2"
+      }
+    },
+    "collapsed": {
+      "$type": "color",
+      "$value": "#232731",
+      "$description": "超过细节层级而折叠的文件夹"
+    },
+    "class": {
+      "$type": "color",
+      "$description": "文件类别填充色；文字取白或 #0A0B0D 中对比度更高者",
+      "video": {
+        "$value": "#E07A1F"
+      },
+      "image": {
+        "$value": "#2F8FDB"
+      },
+      "audio": {
+        "$value": "#9B4586"
+      },
+      "archive": {
+        "$value": "#E5C547"
+      },
+      "exec": {
+        "$value": "#1FAE8A"
+      },
+      "doc": {
+        "$value": "#505DC6"
+      },
+      "other": {
+        "$value": "#2B2F38"
+      }
+    },
+    "label": {
+      "$type": "color",
+      "light": {
+        "$value": "#FFFFFF"
+      },
+      "lightSub": {
+        "$value": "#FFFFFFDB"
+      },
+      "dark": {
+        "$value": "#0A0B0D"
+      },
+      "darkSub": {
+        "$value": "#0A0B0DD6"
+      }
+    },
+    "free": {
+      "$type": "color",
+      "stripeA": {
+        "$value": "#06140D"
+      },
+      "stripeB": {
+        "$value": "#0A1D13"
+      },
+      "border": {
+        "$value": "#1C5A3B"
+      },
+      "text": {
+        "$value": "#5BE3A0"
+      },
+      "sub": {
+        "$value": "#41B47C"
+      }
+    },
+    "unknown": {
+      "$type": "color",
+      "stripeA": {
+        "$value": "#0C0D11"
+      },
+      "stripeB": {
+        "$value": "#121318"
+      },
+      "border": {
+        "$value": "#343844"
+      },
+      "text": {
+        "$value": "#A3A9B6"
+      },
+      "sub": {
+        "$value": "#7E8493"
+      }
+    },
+    "pending": {
+      "$type": "color",
+      "stripeA": {
+        "$value": "#0C0E12"
+      },
+      "stripeB": {
+        "$value": "#12151B"
+      },
+      "border": {
+        "$value": "#303542"
+      },
+      "text": {
+        "$value": "#9EA4B2"
+      },
+      "sub": {
+        "$value": "#808695"
+      }
+    },
+    "state": {
+      "$type": "color",
+      "selectRing": {
+        "$value": "#FFFFFF"
+      },
+      "selectOuter": {
+        "$value": "#000000B3"
+      },
+      "hoverInset": {
+        "$value": "#FFFFFFE6"
+      },
+      "flash": {
+        "$value": "#F5C542"
+      },
+      "newBadgeBg": {
+        "$value": "#F5C542"
+      },
+      "newBadgeText": {
+        "$value": "#0A0B0D"
+      }
+    },
+    "diff": {
+      "$type": "color",
+      "$description": "快照对比色阶：增长 <1 / 1–3 / 3–8 / ≥8 GB，减少 <1 / 1–3 / ≥3 GB",
+      "grow": {
+        "0": {
+          "$value": "#5E3410"
+        },
+        "1": {
+          "$value": "#7A4312"
+        },
+        "2": {
+          "$value": "#9A5313"
+        },
+        "3": {
+          "$value": "#F08A2A"
+        }
+      },
+      "shrink": {
+        "0": {
+          "$value": "#0F3050"
+        },
+        "1": {
+          "$value": "#18497A"
+        },
+        "2": {
+          "$value": "#236AA5"
+        }
+      }
+    },
+    "geometry": {
+      "$type": "dimension",
+      "headerHeight": {
+        "$value": {
+          "value": 18,
+          "unit": "px"
+        }
+      },
+      "folderPadding": {
+        "$value": {
+          "value": 2,
+          "unit": "px"
+        }
+      },
+      "gap": {
+        "$value": {
+          "value": 2,
+          "unit": "px"
+        }
+      },
+      "fileRadius": {
+        "$value": {
+          "value": 3,
+          "unit": "px"
+        }
+      },
+      "folderRadius": {
+        "$value": {
+          "value": 5,
+          "unit": "px"
+        }
+      },
+      "selectRingWidth": {
+        "$value": {
+          "value": 2,
+          "unit": "px"
+        }
+      },
+      "stripeWidth": {
+        "$value": {
+          "value": 7,
+          "unit": "px"
+        }
+      },
+      "labelMinWidth": {
+        "$value": {
+          "value": 30,
+          "unit": "px"
+        }
+      },
+      "labelMinHeight": {
+        "$value": {
+          "value": 15,
+          "unit": "px"
+        }
+      },
+      "sizeLineMinHeight": {
+        "$value": {
+          "value": 31,
+          "unit": "px"
+        }
+      },
+      "minElement": {
+        "$value": {
+          "value": 15,
+          "unit": "px"
+        },
+        "$description": "低于此边长的项合并进「N 个小项」"
+      }
+    },
+    "dimOpacity": {
+      "$type": "number",
+      "$value": 0.12,
+      "$description": "过滤「暗化不匹配」时的不透明度"
+    },
+    "time": {
+      "$type": "color",
+      "$description": "时间配色：修改距今 < 1 天、< 1 周、< 1 月、< 1 年、更早（UI-SPEC T 节待定 12 的提案值，待设计评审与色盲检查）",
+      "0": {
+        "$value": "#7FE0C9"
+      },
+      "1": {
+        "$value": "#3FB39A"
+      },
+      "2": {
+        "$value": "#258672"
+      },
+      "3": {
+        "$value": "#1C5F53"
+      },
+      "4": {
+        "$value": "#173F39"
+      }
+    },
+    "dot": {
+      "$type": "color",
+      "$description": "聚合块点阵：暗底用亮点、亮底用暗点",
+      "onDark": {
+        "$value": "#FFFFFF33"
+      },
+      "onLight": {
+        "$value": "#00000033"
+      }
+    }
+  }
+}

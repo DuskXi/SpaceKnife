@@ -1,0 +1,1011 @@
+"""Settings service (W7): the registry, validation, atomic persistence and change notification.
+
+The registry below is the single source of truth for every frontend: names, descriptions,
+options, ranges, defaults, which page and group a setting lives on, when it takes effect, and
+whether it can be changed on this platform / in this build (UI-W7-27). Values are validated with
+a pydantic model generated from the registry and stored as JSON in the config directory
+(W7 待定 24). External edits of the file are picked up by :meth:`SettingsStore.poll`.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import threading
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal
+
+from loguru import logger
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
+
+from spaceknife_protocol.settings import SettingMeta, SettingOption, SettingsState, SettingValue
+
+from . import paths
+
+FILE_VERSION = 1
+IS_WIN = sys.platform == "win32"
+IS_MAC = sys.platform == "darwin"
+
+
+@dataclass(frozen=True, slots=True)
+class Spec:
+    key: str
+    category: str
+    group: str
+    name: str
+    description: str
+    control: str
+    default: SettingValue
+    options: tuple[tuple[SettingValue, str] | tuple[SettingValue, str, str], ...] = ()
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    unit: str = ""
+    applies: str = "now"
+    synonyms: tuple[str, ...] = ()
+    reason: str = ""  # non-empty: shown disabled with this reason
+    depends: str | None = None
+    group_note: str = ""
+    kind: type = field(default=str)
+
+
+def _monitor_text() -> str:
+    if IS_WIN:
+        return "使用 USN 日志 + ReadDirectoryChangesEx，变化的文件会闪烁提示"
+    if IS_MAC:
+        return "使用 FSEvents，变化的文件会闪烁提示"
+    return "使用 fanotify / inotify，变化的文件会闪烁提示"
+
+
+LOAD_LEVELS: tuple[tuple[SettingValue, str], ...] = (
+    ("max", "极速"),
+    ("balanced", "均衡 70%"),
+    ("quiet", "安静 35%"),
+    ("idle", "空闲"),
+    ("custom", "自定义"),
+)
+ACCENTS = ("#8B9CFF", "#D4FF3A", "#5EC8B8", "#F2A65A")
+
+
+def _registry() -> tuple[Spec, ...]:
+    S = Spec
+    mft_reason = "" if IS_WIN else "只在 Windows 的 NTFS 卷上可用"
+    return (
+        # ------------------------------------------------------------ 常规
+        S(
+            "general.language",
+            "general",
+            "语言",
+            "界面语言",
+            "切换后全部文字、日期与数字格式立即更换",
+            "segmented",
+            "system",
+            (("system", "跟随系统"), ("zh-CN", "简体中文"), ("en", "English", "英文界面在 M7 接入")),
+            synonyms=("language", "locale", "中文", "english"),
+            kind=str,
+        ),
+        S(
+            "general.hover_keep_open",
+            "general",
+            "悬停提示",
+            "切换元素时保持打开",
+            "鼠标从一个块移到另一个块时，提示卡直接换成新内容",
+            "switch",
+            True,
+            synonyms=("tooltip", "hover"),
+            kind=bool,
+        ),
+        S(
+            "general.hover_dates",
+            "general",
+            "悬停提示",
+            "显示日期与时间",
+            "提示卡显示创建、修改、访问时间",
+            "switch",
+            True,
+            synonyms=("tooltip", "date", "time"),
+            kind=bool,
+        ),
+        S(
+            "general.hover_age",
+            "general",
+            "悬停提示",
+            "显示文件年龄",
+            "用「2 个月前」这样的相对时间显示",
+            "switch",
+            True,
+            synonyms=("tooltip", "age", "relative"),
+            kind=bool,
+        ),
+        S(
+            "general.flash_on_done",
+            "general",
+            "窗口",
+            "扫描结束时若窗口在后台则闪烁提醒",
+            "Windows 任务栏闪烁、macOS 程序坞图标弹跳、Linux 窗口紧急提示",
+            "switch",
+            True,
+            synonyms=("notify", "flash", "taskbar"),
+            kind=bool,
+        ),
+        S(
+            "general.log_auto_open",
+            "general",
+            "日志",
+            "有新事件时自动打开日志面板",
+            "收到警告或错误时自动展开日志面板；与日志面板里的开关是同一个设置",
+            "switch",
+            True,
+            synonyms=("log", "console", "popup"),
+            kind=bool,
+        ),
+        S(
+            "general.log_scan_warnings",
+            "general",
+            "日志",
+            "记录扫描警告",
+            "例如「无法访问 …：拒绝访问」",
+            "switch",
+            True,
+            synonyms=("log", "denied", "warning"),
+            kind=bool,
+        ),
+        # ------------------------------------------------------------ 外观
+        S(
+            "appearance.theme",
+            "appearance",
+            "主题",
+            "主题",
+            "深色为 A2「石墨 + 沉浸的对比度」",
+            "segmented",
+            "system",
+            (("system", "跟随系统"), ("light", "浅色", "浅色主题待设计（W7 待定 20）"), ("dark", "深色")),
+            synonyms=("theme", "dark", "light"),
+            kind=str,
+        ),
+        S(
+            "appearance.accent",
+            "appearance",
+            "主题",
+            "强调色",
+            "主要按钮、当前导航项、开关、滑块和焦点环",
+            "color",
+            ACCENTS[0],
+            tuple((c, c) for c in ACCENTS),
+            synonyms=("accent", "color", "colour"),
+            kind=str,
+        ),
+        S(
+            "appearance.reduce_motion",
+            "appearance",
+            "动画",
+            "减少动画",
+            "开启后缩放改为瞬时切换，扫描中的条纹不滚动",
+            "segmented",
+            "system",
+            (("system", "跟随系统"), ("on", "开"), ("off", "关")),
+            synonyms=("motion", "animation", "accessibility"),
+            kind=str,
+        ),
+        S(
+            "appearance.level_contrast",
+            "appearance",
+            "树图视觉",
+            "层级对比",
+            "相邻层级底色的差别（平 ↔ 深）",
+            "slider",
+            10,
+            min=0,
+            max=50,
+            step=1,
+            reason="M6 接入",
+            synonyms=("contrast", "depth"),
+            kind=int,
+        ),
+        S(
+            "appearance.border_contrast",
+            "appearance",
+            "树图视觉",
+            "边框对比",
+            "块边框的强弱（柔和 ↔ 锐利）",
+            "slider",
+            10,
+            min=0,
+            max=50,
+            step=1,
+            reason="M6 接入",
+            synonyms=("border",),
+            kind=int,
+        ),
+        S(
+            "appearance.halo_levels",
+            "appearance",
+            "树图视觉",
+            "高亮光晕层数",
+            "悬停或选中时点亮几层祖先标题栏（克制 ↔ 绚烂）",
+            "slider",
+            3,
+            min=0,
+            max=10,
+            step=1,
+            synonyms=("halo", "glow", "highlight"),
+            kind=int,
+        ),
+        S(
+            "appearance.hover_highlight",
+            "appearance",
+            "树图视觉",
+            "悬停高亮",
+            "鼠标下的元素加白色内描边",
+            "switch",
+            True,
+            synonyms=("hover", "highlight"),
+            kind=bool,
+        ),
+        S(
+            "appearance.mouse_trail",
+            "appearance",
+            "树图视觉",
+            "鼠标拖尾",
+            "鼠标划过的元素渐隐",
+            "switch",
+            False,
+            reason="M6 接入",
+            synonyms=("trail",),
+            kind=bool,
+        ),
+        S(
+            "appearance.selection_shadow",
+            "appearance",
+            "树图视觉",
+            "选中投影",
+            "选中元素带投影，更容易追踪",
+            "switch",
+            True,
+            synonyms=("shadow", "selection"),
+            kind=bool,
+        ),
+        S(
+            "appearance.default_color_mode",
+            "appearance",
+            "配色样式",
+            "新视图默认配色",
+            "与工具栏的「类别｜扁平｜时间」对应",
+            "segmented",
+            "class",
+            (("class", "文件类别"), ("flat", "扁平"), ("time", "修改时间")),
+            applies="new_views",
+            synonyms=("color", "flat", "classes"),
+            kind=str,
+        ),
+        # ------------------------------------------------------------ 树图
+        S(
+            "treemap.font_scale",
+            "treemap",
+            "几何",
+            "元素字号",
+            "标题栏高度和标签显示阈值随字号等比缩放",
+            "slider",
+            100,
+            min=80,
+            max=140,
+            step=5,
+            unit="%",
+            reason="M6 接入",
+            synonyms=("font", "size"),
+            kind=int,
+        ),
+        S(
+            "treemap.min_element",
+            "treemap",
+            "几何",
+            "最小元素尺寸",
+            "小于这个尺寸的元素并入「N 个小项」聚合块",
+            "slider",
+            10,
+            min=3,
+            max=20,
+            step=1,
+            unit="px",
+            synonyms=("minimum", "small items", "geometry"),
+            kind=int,
+        ),
+        S(
+            "treemap.aspect",
+            "treemap",
+            "几何",
+            "元素比例",
+            "偏高 ↔ 偏宽；0 表示尽量接近正方形",
+            "slider",
+            0,
+            min=-60,
+            max=60,
+            step=5,
+            reason="M6 接入",
+            synonyms=("aspect", "ratio"),
+            kind=int,
+        ),
+        S(
+            "treemap.initial_detail",
+            "treemap",
+            "几何",
+            "初始细节层级",
+            "新视图的细节层级，与工具栏「层级」一致",
+            "slider",
+            5,
+            min=1,
+            max=15,
+            step=1,
+            applies="new_views",
+            synonyms=("detail", "depth", "level"),
+            kind=int,
+        ),
+        S(
+            "treemap.show_free",
+            "treemap",
+            "几何",
+            "新视图显示可用空间",
+            "整卷视图里显示可用空间块",
+            "switch",
+            True,
+            applies="new_views",
+            synonyms=("free space",),
+            kind=bool,
+        ),
+        S(
+            "treemap.show_unknown",
+            "treemap",
+            "几何",
+            "新视图显示未知空间",
+            "整卷视图里显示未知空间块",
+            "switch",
+            True,
+            applies="new_views",
+            synonyms=("unknown space",),
+            kind=bool,
+        ),
+        S(
+            "treemap.sort_by_size",
+            "treemap",
+            "几何",
+            "按大小排序",
+            "同一文件夹内大块排在左上",
+            "switch",
+            True,
+            synonyms=("sort", "order"),
+            kind=bool,
+        ),
+        S(
+            "treemap.zoom_ms",
+            "treemap",
+            "动画",
+            "缩放动画时长",
+            "双击放大或返回时的过渡时长；0 表示无动画",
+            "slider",
+            250,
+            min=0,
+            max=600,
+            step=25,
+            unit="ms",
+            synonyms=("animation", "zoom", "duration"),
+            kind=int,
+        ),
+        S(
+            "treemap.fps",
+            "treemap",
+            "动画",
+            "动画帧率",
+            "对应 SpaceSniffer 的「流畅 ↔ 卡顿」",
+            "segmented",
+            "display",
+            (("display", "跟随显示器"), ("60", "60 fps"), ("30", "30 fps")),
+            reason="M6 接入",
+            synonyms=("fps", "frame rate"),
+            kind=str,
+        ),
+        S(
+            "treemap.dynazoom",
+            "treemap",
+            "动画",
+            "缩放时实时重排（DynaZoom）",
+            "缩放过程中元素实时重新排列",
+            "switch",
+            False,
+            reason="M6 接入",
+            synonyms=("dynazoom",),
+            kind=bool,
+        ),
+        S(
+            "treemap.dynasmooth",
+            "treemap",
+            "动画",
+            "按交互调节帧率（DynaSmooth）",
+            "只在操作时使用高帧率，更省电",
+            "switch",
+            True,
+            reason="M6 接入",
+            synonyms=("dynasmooth",),
+            kind=bool,
+        ),
+        S(
+            "treemap.flash_changes",
+            "treemap",
+            "变化提示",
+            "元素变化闪烁",
+            "扫描中或文件变化时元素闪烁提示",
+            "switch",
+            True,
+            reason="M5 接入",
+            synonyms=("flash", "blink", "changes"),
+            kind=bool,
+        ),
+        # ------------------------------------------------------------ 扫描与性能
+        S(
+            "scan.method",
+            "scan",
+            "扫描方式",
+            "默认扫描方式",
+            "自动与快速 MFT：整个 NTFS 卷用 MFT 快速扫描（需要时请求一次管理员授权，拒绝则改用硬扫描），"
+            "其他位置硬扫描",
+            "segmented",
+            "auto",
+            (("auto", "自动"), ("mft", "快速 MFT", mft_reason), ("hard", "硬扫描")),
+            applies="next_scan",
+            synonyms=("mft", "fast", "hard", "method"),
+            kind=str,
+        ),
+        S(
+            "scan.elevate",
+            "scan",
+            "扫描方式",
+            "需要时请求管理员权限",
+            "仅启动只读扫描助手，主程序不提权；关闭后没有管理员权限时直接改用硬扫描",
+            "switch",
+            True,
+            reason=mft_reason,
+            synonyms=("admin", "uac", "elevate", "helper"),
+            kind=bool,
+        ),
+        S(
+            "scan.load_manual",
+            "scan",
+            "磁盘负载上限与并发",
+            "手动扫描默认",
+            "从启动页开始的扫描与重新扫描",
+            "segmented",
+            "balanced",
+            LOAD_LEVELS,
+            applies="next_scan",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("load", "limit", "throttle", "io"),
+            kind=str,
+        ),
+        S(
+            "scan.load_incremental",
+            "scan",
+            "磁盘负载上限与并发",
+            "增量重扫默认",
+            "实时监控发现变化后的定点重扫",
+            "segmented",
+            "quiet",
+            LOAD_LEVELS,
+            reason="M5 接入（随实时监控的定点重扫）",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("load", "incremental"),
+            kind=str,
+        ),
+        S(
+            "scan.custom_limit",
+            "scan",
+            "磁盘负载上限与并发",
+            "自定义上限",
+            "选择「自定义」档位时使用",
+            "slider",
+            70,
+            min=5,
+            max=100,
+            step=5,
+            unit="%",
+            applies="next_scan",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("custom", "limit"),
+            kind=int,
+        ),
+        S(
+            "scan.idle_low_io",
+            "scan",
+            "磁盘负载上限与并发",
+            "空闲时使用系统低 I/O 优先级",
+            "后台重扫与「空闲」档位使用低 I/O 优先级，不与前台程序抢磁盘",
+            "switch",
+            True,
+            applies="next_scan",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("io priority", "idle", "background"),
+            kind=bool,
+        ),
+        S(
+            "scan.yield_when_busy",
+            "scan",
+            "磁盘负载上限与并发",
+            "整盘繁忙时让路",
+            "其他程序让整块磁盘超过上限时，扫描降到最低进度",
+            "switch",
+            True,
+            applies="next_scan",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("yield", "busy"),
+            kind=bool,
+        ),
+        S(
+            "scan.concurrency",
+            "scan",
+            "磁盘负载上限与并发",
+            "最大并发",
+            "自动：按处理器核数选择；手动：按下面的数值",
+            "segmented",
+            "auto",
+            (("auto", "自动"), ("manual", "手动")),
+            applies="next_scan",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("concurrency", "threads", "workers", "parallel"),
+            kind=str,
+        ),
+        S(
+            "scan.workers",
+            "scan",
+            "磁盘负载上限与并发",
+            "手动并发数",
+            "手动时同时扫描的工作进程数",
+            "number",
+            4,
+            min=1,
+            max=64,
+            step=1,
+            applies="next_scan",
+            depends="scan.concurrency=manual",
+            group_note="限制扫描造成的磁盘读取占用",
+            synonyms=("concurrency", "workers"),
+            kind=int,
+        ),
+        S(
+            "scan.ads",
+            "scan",
+            "扫描范围",
+            "扫描 NTFS 备用数据流",
+            "MFT 快速扫描时把附加在文件上的隐藏数据流计入大小（硬扫描不读取数据流）",
+            "switch",
+            False,
+            applies="next_scan",
+            reason="只在 Windows 上可用" if not IS_WIN else "",
+            synonyms=("ads", "alternate data stream", "stream"),
+            kind=bool,
+        ),
+        S(
+            "scan.cross_mounts",
+            "scan",
+            "扫描范围",
+            "跨越挂载点",
+            "进入挂载在文件夹下的其他卷；关闭时只统计当前卷",
+            "switch",
+            False,
+            applies="next_scan",
+            synonyms=("mount", "mount point", "volume"),
+            kind=bool,
+        ),
+        S(
+            "scan.hardlinks",
+            "scan",
+            "统计口径",
+            "硬链接计算",
+            "只计一次时，合计与磁盘实际占用一致",
+            "segmented",
+            "once",
+            (("once", "只计一次"), ("each", "每个链接都计")),
+            applies="next_scan",
+            synonyms=("hardlink", "hard link", "inode"),
+            kind=str,
+        ),
+        S(
+            "scan.unit_base",
+            "scan",
+            "统计口径",
+            "大小单位",
+            "按 1000 计时，778.6 GB 显示为 836.0 GB",
+            "segmented",
+            "system",
+            (("system", "跟随系统"), ("1024", "1024"), ("1000", "1000")),
+            synonyms=("unit", "1024", "1000", "kib", "gib", "base"),
+            kind=str,
+        ),
+        S(
+            "scan.monitor",
+            "scan",
+            "实时监控",
+            "实时监控",
+            _monitor_text(),
+            "switch",
+            True,
+            reason="M5 接入",
+            synonyms=("monitor", "watch", "usn", "inotify", "fsevents", "hooks"),
+            kind=bool,
+        ),
+        S(
+            "scan.coalesce_ms",
+            "scan",
+            "实时监控",
+            "事件合并间隔",
+            "此时间内的连续变化合并为一次刷新",
+            "number",
+            150,
+            min=50,
+            max=5000,
+            step=10,
+            unit="ms",
+            reason="M5 接入",
+            depends="scan.monitor",
+            synonyms=("debounce", "coalesce", "interval"),
+            kind=int,
+        ),
+        # ------------------------------------------------------------ 标签
+        S(
+            "tags.name_red",
+            "tags",
+            "显示名",
+            "红色标签 ▲",
+            "显示名出现在详情面板和悬停卡里；过滤语法仍写 :red",
+            "text",
+            "",
+            synonyms=("tag", "red", "label"),
+            kind=str,
+        ),
+        S(
+            "tags.name_yellow",
+            "tags",
+            "显示名",
+            "黄色标签 ■",
+            "过滤语法仍写 :yellow",
+            "text",
+            "",
+            synonyms=("tag", "yellow"),
+            kind=str,
+        ),
+        S(
+            "tags.name_green",
+            "tags",
+            "显示名",
+            "绿色标签 ●",
+            "过滤语法仍写 :green",
+            "text",
+            "",
+            synonyms=("tag", "green"),
+            kind=str,
+        ),
+        S(
+            "tags.name_blue",
+            "tags",
+            "显示名",
+            "蓝色标签 ◆",
+            "过滤语法仍写 :blue",
+            "text",
+            "",
+            synonyms=("tag", "blue"),
+            kind=str,
+        ),
+        S(
+            "tags.omit_ctrl",
+            "tags",
+            "快捷键",
+            "树图有焦点时可省略 Ctrl",
+            "直接按 1–4 打标签、按 0 清除",
+            "switch",
+            True,
+            synonyms=("shortcut", "ctrl", "tag key"),
+            kind=bool,
+        ),
+        S(
+            "tags.remember",
+            "tags",
+            "保存",
+            "记住标签",
+            "按扫描根路径保存标签，重新扫描或打开快照后恢复",
+            "switch",
+            True,
+            synonyms=("persist", "save tags"),
+            kind=bool,
+        ),
+        # ------------------------------------------------------------ 快捷键
+        S(
+            "keys.preset",
+            "keys",
+            "键位预设",
+            "键位预设",
+            "改了任意一个键后显示为「自定义」",
+            "segmented",
+            "modern",
+            (("modern", "现代"), ("classic", "SpaceSniffer 经典")),
+            reason="改键在 M6 接入；下表列出当前键位",
+            synonyms=("keymap", "shortcuts", "hotkeys", "classic"),
+            kind=str,
+        ),
+        # ------------------------------------------------------------ 高级
+        S(
+            "advanced.log_level",
+            "advanced",
+            "日志",
+            "日志文件级别",
+            "写入日志文件的最低级别",
+            "segmented",
+            "INFO",
+            (("INFO", "信息"), ("DEBUG", "调试")),
+            synonyms=("log", "debug", "verbose"),
+            kind=str,
+        ),
+        S(
+            "advanced.auto_snapshot",
+            "advanced",
+            "缓存与快照",
+            "扫描后自动保存快照",
+            "供启动页的最近记录和快照对比使用",
+            "switch",
+            True,
+            applies="next_scan",
+            synonyms=("snapshot", "cache", "autosave"),
+            kind=bool,
+        ),
+        S(
+            "advanced.snapshot_keep",
+            "advanced",
+            "缓存与快照",
+            "保留最近快照数",
+            "更早的快照每周只保留一份",
+            "number",
+            10,
+            min=1,
+            max=100,
+            step=1,
+            synonyms=("snapshot", "retention", "keep"),
+            kind=int,
+        ),
+        S(
+            "advanced.memory_budget",
+            "advanced",
+            "内存",
+            "扫描数据内存上限",
+            "扫描数据超过物理内存的这个比例后，新的节点表存进磁盘映射文件：不占私有提交，常用部分仍由系统留在内存里",
+            "number",
+            25,
+            min=5,
+            max=90,
+            step=5,
+            unit="%",
+            applies="next_scan",
+            synonyms=("memory", "ram", "mmap", "budget", "swap", "内存映射"),
+            kind=int,
+        ),
+    )
+
+
+REGISTRY: tuple[Spec, ...] = _registry()
+BY_KEY: dict[str, Spec] = {s.key: s for s in REGISTRY}
+DEFAULTS: dict[str, SettingValue] = {s.key: s.default for s in REGISTRY}
+
+
+def _field(spec: Spec) -> tuple[Any, Any]:
+    alias = spec.key
+    if spec.options and spec.control in ("segmented",):
+        values = tuple(o[0] for o in spec.options)
+        return Literal[values], Field(spec.default, alias=alias)
+    if spec.kind is bool:
+        return bool, Field(spec.default, alias=alias)
+    if spec.kind is int:
+        return int, Field(spec.default, alias=alias, ge=spec.min, le=spec.max)
+    if spec.control == "color":
+        return str, Field(spec.default, alias=alias, pattern=r"^#[0-9A-Fa-f]{6}$")
+    return str, Field(spec.default, alias=alias, max_length=64)
+
+
+Values: type[BaseModel] = create_model(  # type: ignore[call-overload]
+    "SettingsValues",
+    __config__=ConfigDict(extra="ignore", populate_by_name=False, strict=True),
+    **{s.key.replace(".", "__"): _field(s) for s in REGISTRY},
+)
+
+
+class SettingsFile(BaseModel):
+    version: int = FILE_VERSION
+    values: dict[str, SettingValue] = Field(default_factory=dict)
+
+
+class SettingsError(ValueError):
+    pass
+
+
+class ConflictError(SettingsError):
+    pass
+
+
+def validate(values: dict[str, Any]) -> dict[str, SettingValue]:
+    """Full, validated values (unknown keys dropped, missing keys defaulted)."""
+    try:
+        model = Values.model_validate(values)
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        key = str(err["loc"][0]) if err["loc"] else "?"
+        name = BY_KEY[key].name if key in BY_KEY else key
+        raise SettingsError(f"「{name}」的值不合法：{err['msg']}") from exc
+    return model.model_dump(by_alias=True)
+
+
+def meta() -> list[SettingMeta]:
+    out = []
+    for s in REGISTRY:
+        out.append(
+            SettingMeta(
+                key=s.key,
+                category=s.category,  # type: ignore[arg-type]
+                group=s.group,
+                group_note=s.group_note,
+                name=s.name,
+                description=s.description,
+                control=s.control,  # type: ignore[arg-type]
+                options=[
+                    SettingOption(value=o[0], label=o[1], reason=o[2] if len(o) > 2 else "")
+                    for o in s.options
+                ],
+                min=s.min,
+                max=s.max,
+                step=s.step,
+                unit=s.unit,
+                applies=s.applies,  # type: ignore[arg-type]
+                synonyms=list(s.synonyms),
+                enabled=not s.reason,
+                reason=s.reason,
+                depends=s.depends,
+            )
+        )
+    return out
+
+
+def system_unit_base() -> Literal[1000, 1024]:
+    """'跟随系统' (W7 待定 7): Windows 1024, macOS 1000, Linux GNOME 1000, other desktops 1024."""
+    if IS_MAC:
+        return 1000
+    if sys.platform.startswith("linux") and "gnome" in os.environ.get("XDG_CURRENT_DESKTOP", "").lower():
+        return 1000
+    return 1024
+
+
+class SettingsStore:
+    """The settings document: thread-safe reads, validated patches, atomic saves, change listeners."""
+
+    def __init__(self, file: Path | None = None) -> None:
+        self.file = file or paths.config_dir() / "settings.json"
+        self._lock = threading.Lock()
+        self.version = 0
+        self.values: dict[str, SettingValue] = dict(DEFAULTS)
+        self.error = ""
+        self._mtime: float | None = None
+        self.listeners: dict[str, Callable[[SettingsStore], None]] = {}
+        self._load()
+
+    # ------------------------------------------------------------ persistence
+
+    def _load(self) -> bool:
+        try:
+            stat = self.file.stat()
+        except FileNotFoundError:
+            self._mtime = None
+            return False
+        except OSError as exc:
+            self.error = f"无法读取设置文件：{exc.strerror or exc}"
+            return False
+        self._mtime = stat.st_mtime
+        try:
+            doc = SettingsFile.model_validate(json.loads(self.file.read_text(encoding="utf-8")))
+            values = validate({**DEFAULTS, **doc.values})
+        except (ValueError, ValidationError) as exc:
+            self.error = f"设置文件不合法，继续使用上一次的有效设置：{exc}"
+            logger.warning("settings file {} is invalid: {}", self.file, exc)
+            return False
+        changed = values != self.values
+        self.values, self.error = values, ""
+        return changed
+
+    def _save(self) -> None:
+        self.file.parent.mkdir(parents=True, exist_ok=True)
+        changed = {k: v for k, v in self.values.items() if v != DEFAULTS[k]}
+        doc = SettingsFile(values=dict(sorted(changed.items())))
+        tmp = self.file.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, self.file)
+        self._mtime = self.file.stat().st_mtime
+
+    def poll(self) -> bool:
+        """Reload after an external edit of the file (UI-W7-25). True if the values changed."""
+        try:
+            mtime: float | None = self.file.stat().st_mtime
+        except OSError:
+            mtime = None
+        if mtime == self._mtime:
+            return False
+        with self._lock:
+            changed = self._load()
+            if changed:
+                self.version += 1
+        if changed or self.error:
+            self._notify()
+        return changed
+
+    # ------------------------------------------------------------ access
+
+    def get(self, key: str) -> SettingValue:
+        return self.values[key]
+
+    def update(self, patch: dict[str, SettingValue], version: int | None = None) -> None:
+        unknown = [k for k in patch if k not in BY_KEY]
+        if unknown:
+            raise SettingsError(f"未知设置：{', '.join(unknown)}")
+        locked = [BY_KEY[k].name for k, v in patch.items() if BY_KEY[k].reason and v != self.values[k]]
+        if locked:
+            raise SettingsError(f"这些设置在当前版本不可修改：{'、'.join(locked)}")
+        with self._lock:
+            if version is not None and version != self.version:
+                raise ConflictError(f"设置已被其他窗口修改（版本 {self.version}）")
+            values = validate({**self.values, **patch})
+            if values == self.values:
+                return
+            self.values = values
+            self.version += 1
+            self._save()
+        self._notify()
+
+    def reset(self, category: str | None) -> None:
+        keys = [s.key for s in REGISTRY if category is None or s.category == category]
+        with self._lock:
+            values = {**self.values, **{k: DEFAULTS[k] for k in keys}}
+            if values == self.values:
+                return
+            self.values = values
+            self.version += 1
+            self._save()
+        self._notify()
+
+    def unit_base(self) -> Literal[1000, 1024]:
+        v = self.values["scan.unit_base"]
+        return 1000 if v == "1000" else 1024 if v == "1024" else system_unit_base()
+
+    def state(self) -> SettingsState:
+        return SettingsState(
+            version=self.version,
+            values=dict(self.values),
+            defaults=dict(DEFAULTS),
+            meta=meta(),
+            path=str(self.file),
+            logs=str(paths.logs_dir()),
+            snapshots=str(paths.snapshots_dir()),
+            error=self.error,
+            unit_base=self.unit_base(),
+        )
+
+    def _notify(self) -> None:
+        for listener in list(self.listeners.values()):
+            try:
+                listener(self)
+            except Exception:
+                logger.exception("settings listener failed")
+
+
+__all__ = [
+    "BY_KEY",
+    "DEFAULTS",
+    "REGISTRY",
+    "ConflictError",
+    "SettingsError",
+    "SettingsStore",
+    "Spec",
+    "validate",
+]
