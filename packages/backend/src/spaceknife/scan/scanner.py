@@ -421,31 +421,24 @@ class Scanner:
                         flags[i] |= np.uint32(Flag.HARDLINK_DUP)
                     else:
                         self._seen_links.add(key)
-        name_off = np.concatenate(([0], np.cumsum(res.name_lens, dtype=np.int64)))
         remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
         ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
-        starts: list[int] = []
+        # the whole slice in one go (mount points stay unentered: never PENDING)
+        starts = store.ingest_slice(
+            res.refs,
+            res.bounds,
+            res.name_blob,
+            res.name_lens,
+            {key: cols[key] for key in ENTRY_COLUMNS},
+            ext_global,
+        ).tolist()
+        if res.paths:
+            self._current = res.paths[-1]
 
         def resolve(ref: tuple[int, int, int] | np.ndarray) -> int:
             kind, a, b = (int(x) for x in ref)
             return a if kind == 0 else starts[a] + b
 
-        for listing, path in enumerate(res.paths):
-            dir_id = resolve(res.refs[listing])
-            lo, hi = int(res.bounds[listing]), int(res.bounds[listing + 1])
-            entries = {key: cols[key][lo:hi] for key in ENTRY_COLUMNS}
-            start = store.ingest_listing(
-                dir_id,
-                res.name_blob[int(name_off[lo]) : int(name_off[hi])],
-                res.name_lens[lo:hi],
-                entries,
-                ext_global[lo:hi],
-            )
-            starts.append(start)
-            mounts = np.nonzero((cols["flags"][lo:hi] & np.uint32(Flag.MOUNT)) != 0)[0]
-            for j in mounts.tolist():
-                store.clear(start + j, Flag.PENDING)
-            self._current = path
         for ref, path, msg in res.errors:
             node = resolve(ref)
             store.mark(node, Flag.ACCESS_DENIED)

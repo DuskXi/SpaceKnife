@@ -84,7 +84,7 @@ def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOp
 - 名字编码同 worker.py（Windows surrogatepass，POSIX 原始字节等价的 surrogateescape）；非 ASCII 扩展名用 Python 自己的 `str.lower` 小写，避免 Unicode 版本差异。
 - 有意差异（未截断的切片与 worker 完全一致）：(1) 被预算截断的切片是「已列目录的先序子树」而不是 worker 的 DFS 前缀，引用仍然有效；每个线程按目录检查预算，`max_entries` 最多超出每线程一个目录。(2) Windows 上名字以点或空格结尾的目录能正常列出（worker 打不开）；空的 FAT 根是空列表而不是错误。
 - 扫描器的接法（`scan/scanner.py`）：有扩展时 `native_slicer()` 每次调用只用 1 个列目录线程（`threads=1`），由后端的线程池并发多次调用，并发数由 IO 限速器控制（`native_threads()` = min(CPU, 16) 为上限）；每批 256 个目录任务、预算 0.05 s。没有扩展时退回 spawn 进程池。
-- 已知瓶颈：端到端吞吐目前受 Python 端的归并（`Scanner._apply`，每个列表约 30 µs）限制，约 25 万项/秒；单看遍历，原生在 Program Files 上是进程池的 3.4–3.9 倍、`/usr` 上 11.7 倍。向量化的 `NodeStore.ingest_slice` 留作后续优化。
+- 归并（`NodeStore.ingest_slice`）：一次把整个切片并进节点表——深度用指针跳跃求、合计用分段求和，切片内由深到浅累加，再沿已有祖先各上传一次；与逐列表的 `ingest_listing` 结果逐列一致（真实目录切片与随机切片的等价性测试）。每个列表的归并开销从 30–78 µs 降到 1–3 µs。一个 38 万项的测试目录（热缓存）端到端由 8–10 万项/秒提到 12–30 万项/秒（同一代码多次运行的波动主要来自系统），此时 16 个列目录线程都在忙、归并只占 16–22%：瓶颈已在系统的目录枚举。遍历本身：原生在 Program Files 上是进程池的 3.4–3.9 倍、`/usr` 上 11.7 倍。
 
 ## 3. 只读扫描助手（`spaceknife/helper/`）
 

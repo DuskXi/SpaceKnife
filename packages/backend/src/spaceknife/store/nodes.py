@@ -338,6 +338,138 @@ class NodeStore:
         self._propagate(dir_id, size, alloc, files, dirs)
         return start
 
+    def ingest_slice(
+        self,
+        refs: np.ndarray,
+        bounds: np.ndarray,
+        name_blob: bytes,
+        name_lens: np.ndarray,
+        entries: dict[str, np.ndarray],
+        ext_ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Append a whole slice of listings at once (a scan worker's ``SliceResult``); returns the
+        first new id of every listing. The result equals :meth:`ingest_listing` per listing.
+
+        Listing ``k`` lists the directory ``refs[k]`` names — ``(0, node, 0)``: a node already in
+        the store; ``(1, j, i)``: entry ``i`` of an earlier listing ``j`` of this slice — and its
+        entries are rows ``bounds[k]:bounds[k + 1]`` of ``entries`` / ``name_lens`` / ``ext_ids``.
+        Entries flagged ``MOUNT`` are not entered (never ``PENDING``).
+
+        A few dozen numpy calls per slice instead of per listing: depths by pointer jumping over
+        the listings, totals by segment sums, folded inside the slice deepest first and then up
+        the existing ancestors once per listed node of the store.
+        """
+        c = self.cols
+        refs = np.asarray(refs, dtype=np.int64).reshape(-1, 3)
+        bounds = np.asarray(bounds, dtype=np.int64)
+        listings = len(refs)
+        n0 = self._n
+        starts: np.ndarray = n0 + bounds[:-1]
+        if listings == 0:
+            return starts
+        counts = np.diff(bounds)
+        total = int(bounds[-1])
+        inner = refs[:, 0] != 0
+        at, entry = refs[:, 1], refs[:, 2]
+        if bool(inner.any()):
+            k = np.flatnonzero(inner)
+            j = at[k]
+            if bool(((j < 0) | (j >= k)).any()):
+                raise ValueError("a listing can only name an entry of an earlier listing")
+            if bool(((entry[k] < 0) | (entry[k] >= counts[j])).any()):
+                raise ValueError("a listing names an entry its listing does not have")
+        dirs = np.where(inner, starts[np.where(inner, at, 0)] + entry, at)
+        old = dirs[~inner]
+        if bool(((old < 0) | (old >= n0)).any()):
+            raise ValueError("a listing names a node that is not in the store")
+        kinds = np.empty(listings, dtype=np.uint8)
+        kinds[~inner] = c["kind"][old]
+        kinds[inner] = np.asarray(entries["kind"])[dirs[inner] - n0]
+        if bool((kinds != Kind.DIR).any()):
+            raise ValueError(f"node {int(dirs[np.argmax(kinds != Kind.DIR)])} is not a directory")
+        if bool(c["child_count"][old].any()) or len(np.unique(dirs)) != listings:
+            raise ValueError("a directory was already listed")
+
+        # depth below the slice's listings of store nodes: pointer jumping over "listed in listing j"
+        up = np.where(inner, at, np.arange(listings))
+        level = inner.astype(np.int64)
+        jump, dist = up, level
+        while True:
+            nxt = jump[jump]
+            if bool((nxt == jump).all()):
+                break
+            dist, jump = dist + dist[jump], nxt
+        dir_depth = c["depth"][dirs[jump]].astype(np.int64) + dist
+
+        if total:
+            self._grow(total)
+            c = self.cols
+            sl = slice(n0, n0 + total)
+            c["parent"][sl] = np.repeat(dirs, counts)
+            c["depth"][sl] = np.repeat(dir_depth + 1, counts)
+            for key in ENTRY_COLUMNS:
+                c[key][sl] = entries[key]
+            c["ext"][sl] = ext_ids if ext_ids is not None else 0
+            for key in ("tot_size", "tot_alloc", "tot_files", "tot_dirs", "child_start", "child_count"):
+                c[key][sl] = 0
+            lengths = np.asarray(name_lens, dtype=np.int64)
+            offsets = self._heap.append(name_blob, lengths)
+            self._fit_offsets(int(offsets[-1] + lengths[-1]))
+            c = self.cols
+            c["name_off"][sl] = offsets
+            c["name_len"][sl] = lengths
+            kind = c["kind"][sl]
+            flags = c["flags"][sl]
+            is_dir = kind == Kind.DIR
+            enter = is_dir & ((flags & np.uint32(Flag.MOUNT)) == 0)
+            c["flags"][sl] = np.where(enter, flags | np.uint32(Flag.PENDING), flags)
+        c["flags"][dirs] &= ~np.uint32(Flag.PENDING)
+        self.version += 1
+        # publish for readers in other threads: rows, the store's count, range starts, counts last
+        self._n = n0 + total
+        c["child_start"][dirs] = starts
+        c["child_count"][dirs] = counts
+
+        if not total:
+            return starts
+        # each listing's own entries (a directory's own allocation counts toward its parent) ...
+        counted = (c["flags"][sl] & np.uint32(Flag.HARDLINK_DUP)) == 0
+
+        def per_listing(values: np.ndarray) -> np.ndarray:
+            run = np.zeros(total + 1, dtype=np.int64)
+            np.cumsum(values, out=run[1:])
+            sums: np.ndarray = run[bounds[1:]] - run[bounds[:-1]]
+            return sums
+
+        acc = np.stack(
+            [
+                per_listing(np.where(counted, c["size"][sl], 0)),
+                per_listing(np.where(counted, c["alloc"][sl], 0)),
+                per_listing(kind == Kind.FILE),
+                per_listing(is_dir),
+            ],
+            axis=1,
+        )
+        # ... folded into the listings above them, deepest first: subtree totals inside the slice
+        for d in range(int(dist.max()), 0, -1):
+            k = np.flatnonzero(dist == d)
+            np.add.at(acc, up[k], acc[k])
+        tot = (c["tot_size"], c["tot_alloc"], c["tot_files"], c["tot_dirs"])
+        new = np.flatnonzero(inner)
+        for col, i in zip(tot, range(4), strict=True):
+            col[dirs[new]] = acc[new, i]  # new directories start from zero
+        # listed nodes of the store pass their subtree totals up their chain, root included
+        top = np.flatnonzero(~inner)
+        node, add = dirs[top], acc[top]
+        parent = c["parent"]
+        while len(node):
+            for col, i in zip(tot, range(4), strict=True):
+                np.add.at(col, node, add[:, i])
+            node = parent[node].astype(np.int64)
+            keep = node >= 0
+            node, add = node[keep], add[keep]
+        return starts
+
     def _propagate(self, node: int, size: int, alloc: int, files: int, dirs: int) -> None:
         c = self.cols
         parent = c["parent"]
