@@ -37,6 +37,19 @@ if LINUX:
     # glibc than RHEL 9's 2.34 (Ubuntu 22.04's libgcc_s, GCC 12: GLIBC_2.35). tools/build_package.py
     # checks the glibc floor of everything that stays.
     a.binaries = [b for b in a.binaries if not b[0].startswith(("libgcc_s.so", "libstdc++.so"))]
+    # Python's build configuration (_sysconfigdata_*) names where this interpreter is installed,
+    # under the build machine's home folder: compile a copy without it (the paths mean nothing in
+    # the frozen app; tools/build_package.py rejects any build-machine path in the bundle).
+    home = os.path.expanduser("~")
+    pure = []
+    for name, src, typecode in a.pure:
+        if name.startswith("_sysconfigdata") and src and src.endswith(".py"):
+            text = open(src, encoding="utf-8").read().replace(home, "/home/builder")
+            src = os.path.join(workpath, name + ".py")
+            with open(src, "w", encoding="utf-8") as f:
+                f.write(text)
+        pure.append((name, src, typecode))
+    a.pure = pure
 pyz = PYZ(a.pure)
 
 version = None  # Windows: the name Task Manager shows, the product version
