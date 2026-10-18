@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import TYPE_CHECKING
 
 from loguru import logger
@@ -43,6 +44,11 @@ def install(server: Server) -> None:
             applied["log_level"] = level
         mapped.POLICY.fraction = int(st.get("advanced.memory_budget")) / 100  # the next growth / load
         server.views.apply_settings_live(st)
+        monitor = bool(st.get("scan.monitor"))
+        if applied.get("monitor", monitor) != monitor:  # live monitoring switched on or off
+            with contextlib.suppress(RuntimeError):  # no loop yet: applied when scans start
+                asyncio.get_running_loop().create_task(server.monitors.apply_settings())
+        applied["monitor"] = monitor
 
     store.listeners["server"] = on_change
     apply_live(store)

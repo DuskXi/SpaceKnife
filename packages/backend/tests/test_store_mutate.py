@@ -124,7 +124,7 @@ def test_relist_follows_the_disk(tree: tuple[Path, NodeStore]) -> None:
     (up / "fresh").mkdir()
     (up / "fresh" / "deep").mkdir()
     (up / "fresh" / "deep" / "x.txt").write_bytes(b"x" * 1234)
-    other = next(p for p in root.iterdir() if p.is_dir())
+    other = next(p for p in root.iterdir() if p.is_dir() and p not in target.parents)
     other.rename(root / "renamed-folder")
     for folder in (target, up, root):
         relist_path(store, root, node_of(store, folder))

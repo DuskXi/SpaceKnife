@@ -9,6 +9,7 @@ breadcrumb — that the protocol layer turns into one binary frame.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Literal
@@ -29,6 +30,7 @@ FilterMode = Literal["dim", "hide"]
 ResultsSort = Literal["size", "name", "count"]
 DETAIL_MIN, DETAIL_MAX = 1, 15
 HISTORY = 200  # back steps kept per view
+MAX_FLASH = 200  # changes flashed per frame (the largest)
 
 # Per-block flags of a rendered frame.
 F_MATCH = 1  # filter active: this file matches / this block contains matches
@@ -101,6 +103,7 @@ class Frame:
     breadcrumb: list[tuple[int, str]]  # (key, label) from the home root to the zoom root
     filter_totals: tuple[int, int, int] | None  # (files, allocated, logical) below the zoom root
     scanned_total: int  # allocated bytes below the zoom root
+    flash: list[tuple[int, int]] = field(default_factory=list)  # (row, allocation change): file changes
 
 
 class View:
@@ -138,6 +141,8 @@ class View:
         self.filter = FilterState()
         self.results_sort: ResultsSort = "size"  # W3 result list order, remembered per view
         self.last: Frame | None = None
+        self._flashes: dict[int, int] = {}  # node -> allocation change, shown with the next frame (M5)
+        self._flash_lock = threading.Lock()  # added on the event loop, taken by renders on the pool
 
     # ------------------------------------------------------------- navigation
 
@@ -181,7 +186,38 @@ class View:
         for entries in (self.back, self.forward):
             for i, e in enumerate(entries):
                 entries[i] = Entry(zoom(e.zoom) or Zoom(fallback, fallback), one(e.selected))
+        with self._flash_lock:
+            if self._flashes:
+                moved = new_ids(np.array(list(self._flashes), dtype=np.int64))
+                self._flashes = {
+                    int(m): d for m, d in zip(moved.tolist(), self._flashes.values(), strict=True) if m >= 0
+                }
         self.last = None
+
+    def add_flash(self, changes: dict[int, int]) -> None:
+        """Blocks to flash in the next frame: node -> change of its allocation (UI-TM-43)."""
+        with self._flash_lock:
+            for node, delta in changes.items():
+                self._flashes[node] = self._flashes.get(node, 0) + delta
+
+    def _flash_rows(self, draw: DrawList) -> list[tuple[int, int]]:
+        """Rows for the pending flashes: the block itself, else its aggregate or nearest drawn
+        ancestor (several changes in one row add up). The largest ``MAX_FLASH`` changes only."""
+        with self._flash_lock:
+            pending, self._flashes = self._flashes, {}
+        if not pending:
+            return []
+        n = len(self.store)
+        rows: dict[int, int] = {}
+        for node, delta in sorted(pending.items(), key=lambda kv: -abs(kv[1]))[:MAX_FLASH]:
+            if not 0 <= node < n:
+                continue
+            row = draw.row(node)
+            if row is None:
+                row = self._hidden_row(draw, node)
+            if row is not None:
+                rows[row] = rows.get(row, 0) + delta
+        return sorted(rows.items())
 
     def zoom_into(self, key: int) -> bool:
         """Zoom into a block of the last frame (double-click / Enter). False if it cannot be zoomed."""
@@ -438,6 +474,7 @@ class View:
             sizes[: res.n] = res.alloc
         draw = self.layout.run(params, self._root_spec(), sizes)
         frame = self._annotate(draw, res)
+        frame.flash = self._flash_rows(draw)
         self.last = frame
         return frame
 

@@ -238,6 +238,11 @@ class Scanner:
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))
         self._root_opts = tuple(root_opts)
 
+    @property
+    def root_options(self) -> tuple[RootOptions, ...]:
+        """Listing options per scan root (file change monitoring lists folders the same way)."""
+        return self._root_opts
+
     # ------------------------------------------------------------------ control
 
     def cancel(self) -> None:

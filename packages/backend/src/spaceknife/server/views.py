@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import itertools
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -55,6 +56,7 @@ class ViewHost:
     push_task: asyncio.Task[None] | None = None
     push_final: bool = False  # the running push renders the scan's final frame
     final_pending: bool = False  # the scan ended while a progress push was rendering
+    change_pending: bool = False  # file changes arrived while a push was rendering (M5)
 
 
 @dataclass(slots=True)
@@ -221,6 +223,43 @@ class ViewManager:
             filter=filter_info(host.view, None),
         )
 
+    # ------------------------------------------------------------- file changes (M5)
+
+    def _hosts(self, scan_id: str) -> list[ViewHost]:
+        return [h for h in self.views.values() if h.scan_id == scan_id]
+
+    def chains(self, scan_id: str) -> dict[str, list[int]]:
+        """Each view's zoom node with its ancestors, taken before a change: a node that goes
+        loses its parent, so the nearest one still there is found from this list afterwards."""
+        out: dict[str, list[int]] = {}
+        for host in self._hosts(scan_id):
+            store, z = host.view.store, host.view.zoom.node
+            out[host.view.id] = [z, *store.ancestors(z)] if 0 <= z < len(store) else []
+        return out
+
+    def remap(
+        self, scan_id: str, chains: dict[str, list[int]], new_ids: Callable[[np.ndarray], np.ndarray]
+    ) -> None:
+        """Node ids changed: every view of the scan follows (zoom, selection, history, flashes)."""
+        for host in self._hosts(scan_id):
+            chain = chains.get(host.view.id, [])
+            moved = new_ids(np.array(chain, dtype=np.int64)) if chain else np.empty(0, dtype=np.int64)
+            fallback = next((int(m) for m in moved.tolist() if m >= 0), host.view.home)
+            host.view.remap(new_ids, fallback)
+
+    def flash(self, scan_id: str, changes: dict[int, int]) -> None:
+        """The tree changed: views flash what changed (setting 「元素变化闪烁」) and get a new frame."""
+        st = self.settings
+        flash_on = st is None or bool(st.get("treemap.flash_changes"))
+        for host in self._hosts(scan_id):
+            if flash_on and changes:
+                host.view.add_flash(changes)
+            if host.push_task is not None and not host.push_task.done():
+                host.change_pending = True  # the running push renders once more
+                continue
+            host.push_final = False
+            host.push_task = asyncio.get_running_loop().create_task(self._push(host, False, "change"))
+
     # ------------------------------------------------------------- scan-driven pushes
 
     def _on_scan(self, scan_id: str, state: str) -> None:
@@ -237,7 +276,7 @@ class ViewManager:
             host.push_final = final
             host.push_task = asyncio.get_running_loop().create_task(self._push(host, final))
 
-    async def _push(self, host: ViewHost, final: bool) -> None:
+    async def _push(self, host: ViewHost, final: bool, reason: str = "") -> None:
         while True:
             try:
                 async with host.lock:
@@ -246,15 +285,20 @@ class ViewManager:
                     if view.filter.active and (final or now - host.last_refilter >= REFILTER_INTERVAL):
                         await compute(view.refilter)
                         host.last_refilter = now
-                    info = await self.render(host, "scan-final" if final else "scan")
+                    info = await self.render(host, reason or ("scan-final" if final else "scan"))
                     host.last_push = time.monotonic()
                 host.session.emit(EVENT_VIEW_FRAME, pv.ViewFrameEvent(frame=info))
             except Exception:
                 logger.exception("pushing a frame of {} failed", host.view.id)
-            if not host.final_pending:
+            if host.final_pending:
+                host.final_pending = False
+                host.push_final = final = True
+                reason = ""
+            elif host.change_pending:
+                host.change_pending = False
+                reason = "change"
+            else:
                 return
-            host.final_pending = False
-            host.push_final = final = True
 
 
 def apply_settings(view: View, s: pv.ViewSettingsParams) -> None:
@@ -336,6 +380,7 @@ def frame_info(host: ViewHost, frame: Frame, reason: str) -> pv.FrameInfo:
         filter=filter_info(host.view, frame),
         layout_ms=round(d.elapsed_s * 1000, 2),
         reason=reason,
+        flash=[pv.FlashItem(row=row, delta=delta) for row, delta in frame.flash],
     )
 
 

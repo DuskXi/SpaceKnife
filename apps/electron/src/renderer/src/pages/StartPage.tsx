@@ -115,7 +115,8 @@ export function StartPage({ tab }: { tab: Tab }) {
 
   const start = () => {
     if (!ready) return;
-    void startScan({ roots, method: form.method, load_level: form.load, ads: form.ads }, tab.id);
+    const capable = mftCapable(selected);
+    void startScan({ roots, method: capable ? form.method : "hard", load_level: form.load, ads: capable && form.ads }, tab.id);
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -244,8 +245,8 @@ export function StartPage({ tab }: { tab: Tab }) {
               <div>
                 {targetName ? (
                   <>
-                    <strong>{targetName}</strong> · {METHOD_ZH[form.method][0]}
-                    {form.method === "auto" && (viaMft ? "（MFT 快速扫描）" : "（并行硬扫描）")} · 磁盘负载上限{" "}
+                    <strong>{targetName}</strong> · {mftCapable(selected) ? METHOD_ZH[form.method][0] : "并行硬扫描"}
+                    {mftCapable(selected) && form.method === "auto" && (viaMft ? "（MFT 快速扫描）" : "（并行硬扫描）")} · 磁盘负载上限{" "}
                     {LOAD_ZH[form.load][0].replace(/ (\d+%)/, " ≤$1")}
                     {form.ads && viaMft && " · 备用数据流"}
                   </>
@@ -360,33 +361,34 @@ function Options(props: {
   elevated: boolean;
   onChange: (p: { method?: ScanMethod; load?: LoadLevel; ads?: boolean }) => void;
 }) {
-  const ntfs = props.volume ? props.volume.fs_type.toUpperCase() === "NTFS" : true;
-  const mftReason = !IS_WIN() ? "只在 Windows 的 NTFS 卷上可用" : !ntfs ? "目标卷不是 NTFS，不支持 MFT 快速扫描" : "";
+  // the method and the NTFS streams only mean something for a whole local NTFS volume on Windows:
+  // anywhere else (Linux, macOS, ReFS / Btrfs / exFAT drives, folders) a hard scan is the only way
+  const capable = mftCapable(props.volume);
   return (
     <div className="start-options">
       <h2>扫描选项</h2>
       <div className="set-card">
-        <div className="set-row">
-          <div className="set-text">
-            <div className="set-name">扫描方式</div>
-            <div className="set-desc">{METHOD_ZH[props.method][1]}</div>
+        {capable && (
+          <div className="set-row">
+            <div className="set-text">
+              <div className="set-name">扫描方式</div>
+              <div className="set-desc">{METHOD_ZH[props.method][1]}</div>
+            </div>
+            <div className="segmented small" role="radiogroup" aria-label="扫描方式">
+              {(Object.keys(METHOD_ZH) as ScanMethod[]).map((m) => (
+                <button
+                  key={m}
+                  role="radio"
+                  aria-checked={props.method === m}
+                  className={props.method === m ? "on" : ""}
+                  onClick={() => props.onChange({ method: m })}
+                >
+                  {METHOD_ZH[m][0]}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="segmented small" role="radiogroup" aria-label="扫描方式">
-            {(Object.keys(METHOD_ZH) as ScanMethod[]).map((m) => (
-              <button
-                key={m}
-                role="radio"
-                aria-checked={props.method === m}
-                className={props.method === m ? "on" : ""}
-                disabled={m === "mft" && !!mftReason}
-                title={m === "mft" && mftReason ? mftReason : undefined}
-                onClick={() => props.onChange({ method: m })}
-              >
-                {METHOD_ZH[m][0]}
-              </button>
-            ))}
-          </div>
-        </div>
+        )}
         <div className="set-row">
           <div className="set-text">
             <div className="set-name">磁盘负载上限</div>
@@ -400,18 +402,17 @@ function Options(props: {
             ))}
           </div>
         </div>
-        {IS_WIN() && (
-          <div className={`set-row${ntfs ? "" : " disabled"}`}>
+        {capable && (
+          <div className="set-row">
             <div className="set-text">
               <div className="set-name">扫描 NTFS 备用数据流</div>
-              <div className="set-desc">{ntfs ? "统计附加在文件上的隐藏数据流（MFT 快速扫描时计入）" : "目标卷不是 NTFS，没有备用数据流"}</div>
+              <div className="set-desc">统计附加在文件上的隐藏数据流（MFT 快速扫描时计入）</div>
             </div>
             <button
               role="switch"
               aria-checked={props.ads}
               aria-label="扫描 NTFS 备用数据流"
               className={`switch${props.ads ? " on" : ""}`}
-              disabled={!ntfs}
               onClick={() => props.onChange({ ads: !props.ads })}
             >
               <span />

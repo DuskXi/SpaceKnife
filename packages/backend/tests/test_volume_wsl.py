@@ -42,7 +42,12 @@ def test_wsl_volume_list(monkeypatch: pytest.MonkeyPatch, wsl: bool) -> None:
     if wsl:
         assert set(listed) == {"/", "/mnt/c", "/mnt/d", "/srv/share"}
         c = listed["/mnt/c"]
-        assert c.label == "C:（Windows 盘）" and c.note == vol.WSL_DRIVE_NOTE and c.is_remote and not c.remote_path
+        assert (
+            c.label == "C:（Windows 盘）"
+            and c.note == vol.WSL_DRIVE_NOTE
+            and c.is_remote
+            and not c.remote_path
+        )
         assert listed["/"].note == "" and listed["/srv/share"].note == ""
     else:  # a plain Linux machine keeps every real mount and marks nothing
         assert "/Docker/host" in listed and "/mnt/wslg/distro" in listed

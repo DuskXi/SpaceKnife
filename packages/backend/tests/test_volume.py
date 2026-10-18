@@ -9,7 +9,7 @@ def test_volume_for_temp_dir(tmp_path: Path) -> None:
     vol = volume_for(str(tmp_path))
     assert vol.total > 0
     assert 0 <= vol.free <= vol.total
-    assert vol.used == vol.total - vol.free
+    assert vol.used == vol.total - vol.free - vol.reserved  # root-only blocks are neither
     assert vol.cluster_size > 0
     assert str(tmp_path).lower().startswith(vol.mount_point.lower().rstrip("\\/")) or vol.mount_point == "/"
     assert is_volume_root(vol.mount_point, vol)

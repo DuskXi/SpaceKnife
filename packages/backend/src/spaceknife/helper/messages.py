@@ -2,10 +2,10 @@
 
 A frame is ``u32 little-endian length`` + payload. The payload's first byte says what follows:
 ``J`` one JSON control message (the pydantic models below), ``B`` one bulk binary frame from
-:func:`spaceknife_protocol.binary.encode_frame` (MFT columns). The backend sends requests; the
-helper sends ``hello`` first, then for each request any number of ``progress`` messages and
-binary frames (scans announce them with ``begin``), closed by exactly one ``response`` or
-``error`` with the request's id.
+:func:`spaceknife_protocol.binary.encode_frame` (MFT columns, USN records). The backend sends
+requests; the helper sends ``hello`` first, then for each request any number of ``progress``
+messages and binary frames (scans and journal reads announce them with ``begin``), closed by
+exactly one ``response`` or ``error`` with the request's id.
 """
 
 from __future__ import annotations
@@ -27,10 +27,19 @@ MFT_STREAM = "mft"
 MFT_LAYOUT = "mft.v1"
 DEFAULT_BATCH_ROWS = 1_000_000
 MAX_BATCH_ROWS = 4_000_000
+# read_usn: columns frn u64, parent_frn u64, usn i64, reason u32, attrs u32, name_off u32,
+# name_len u16 and the UTF-8 blob "names" (helper/usn.py COLUMNS)
+USN_STREAM = "usn"
+USN_LAYOUT = "usn.v1"
+DEFAULT_USN_ROWS = 1_000_000
+MAX_USN_ROWS = 4_000_000
 
 Volume = Annotated[str, StringConstraints(pattern=r"^[A-Za-z]:$")]
 BatchRows = Annotated[int, Field(ge=1, le=MAX_BATCH_ROWS)]
-Duty = Annotated[float, Field(gt=0, le=1)]  # share of time the $MFT reader may be busy (I/O limit)
+Duty = Annotated[float, Field(gt=0, le=1)]  # share of time the reader may be busy (I/O limit)
+UsnRows = Annotated[int, Field(ge=1, le=MAX_USN_ROWS)]
+Usn = Annotated[int, Field(ge=0, le=2**63 - 1)]  # a byte offset in the change journal
+JournalId = Annotated[int, Field(ge=0, le=2**64 - 1)]
 Scalar = bool | int | float | str | None
 
 
@@ -75,11 +84,32 @@ class ScanMftImage(Message):
     duty: Duty = 1.0
 
 
+class QueryUsn(Message):
+    """The change journal's state: ``{journal_id, first_usn, next_usn, max_size …}``."""
+
+    op: Literal["query_usn"] = "query_usn"
+    volume: Volume
+
+
+class ReadUsn(Message):
+    """Journal records from ``start_usn`` (a checkpoint of journal ``journal_id``), as binary
+    frames; the response's extras carry ``{journal_id, next_usn, rows, truncated}``."""
+
+    op: Literal["read_usn"] = "read_usn"
+    volume: Volume
+    start_usn: Usn
+    journal_id: JournalId
+    max_rows: UsnRows = DEFAULT_USN_ROWS
+    duty: Duty = 1.0
+
+
 class Shutdown(Message):
     op: Literal["shutdown"] = "shutdown"
 
 
-Call = Annotated[Ping | VolumeInfo | ScanMft | ScanMftImage | Shutdown, Field(discriminator="op")]
+Call = Annotated[
+    Ping | VolumeInfo | ScanMft | ScanMftImage | QueryUsn | ReadUsn | Shutdown, Field(discriminator="op")
+]
 
 
 class Request(Message):
@@ -106,12 +136,13 @@ class Progress(Message):
     id: int = Field(ge=1, le=MAX_ID)
     phase: Literal["scan", "send"]
     elapsed: float = Field(ge=0)
-    done: int = Field(default=0, ge=0, description="Bytes of $MFT parsed so far (phase scan)")
-    total: int = Field(default=0, ge=0, description="Bytes of $MFT to parse; 0: not known yet")
+    done: int = Field(default=0, ge=0, description="Bytes of $MFT parsed / of journal read (phase scan)")
+    total: int = Field(default=0, ge=0, description="Bytes of $MFT / of journal to read; 0: not known yet")
 
 
 class Begin(Message):
-    """Sent before the bulk frames of a scan, so the client can allocate the table once."""
+    """Sent before the bulk frames of a scan or journal read, so the client can allocate the
+    table once."""
 
     type: Literal["begin"] = "begin"
     id: int = Field(ge=1, le=MAX_ID)
@@ -121,7 +152,8 @@ class Begin(Message):
 
 class Response(Message):
     """``result``: the operation's result (for scans: geometry, row/frame counts, timings);
-    ``extras``: scans only, the scalar entries of the parsed MftTable (``bad_records`` …)."""
+    ``extras``: scans and journal reads only, the scalar entries of the table (``bad_records`` …;
+    ``read_usn``: ``journal_id``, ``next_usn``, ``rows``, ``truncated``)."""
 
     type: Literal["response"] = "response"
     id: int = Field(ge=1, le=MAX_ID)
@@ -136,6 +168,8 @@ ErrorCode = Literal[
     "not_supported",  # not available on this platform / volume
     "not_ntfs",  # not a local NTFS volume
     "io_error",  # reading the volume or file failed
+    "usn_inactive",  # the volume's change journal is not active (or is being deleted)
+    "usn_gone",  # the checkpoint is no longer valid: journal recreated or its records overwritten
     "unavailable",  # the MFT module is missing or broken
     "bad_frame",  # framing error; the helper closes the connection after this
     "internal",

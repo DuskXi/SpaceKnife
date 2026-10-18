@@ -25,6 +25,7 @@ from spaceknife_protocol.session import ServerInfo
 from .. import __version__
 from ..logbus import LogHub
 from ..settings import SettingsStore
+from .monitors import MonitorManager
 from .rpc import Router
 from .scans import ScanManager
 from .session import Session
@@ -69,6 +70,8 @@ class Server:
         self.scans.settings = self.settings
         self.views = ViewManager(self.scans)
         self.views.settings = self.settings
+        self.monitors = MonitorManager(self.scans, self.views)  # file change hooks (M5)
+        self.scans.monitors = self.monitors
         self.on_start: list[Callable[[], None]] = []  # run once the loop is serving
         self.background: list[asyncio.Task[None]] = []
         self.capabilities = config.capabilities

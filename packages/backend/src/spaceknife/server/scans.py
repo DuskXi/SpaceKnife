@@ -33,6 +33,7 @@ from ..scan.scanner import (
     Scanner,
     ScanProgress,
     ScanState,
+    Slicer,
     default_workers,
     make_pool,
     native_slicer,
@@ -181,6 +182,7 @@ class ScanHandle:
     mft_read: float | None = None  # share of the $MFT read so far (helper heartbeats)
     mft_elapsed: float = 0.0  # seconds since the helper took the request, at the last heartbeat
     mft_at: float = 0.0  # time.monotonic() of that heartbeat
+    monitor: Any = None  # server.monitors.ScanMonitor while file changes are watched (M5)
     upgrade_task: asyncio.Task[None] | None = None
 
     @property
@@ -259,6 +261,7 @@ class ScanHandle:
             mft_available=self.mft_ok,
             paused=pr.paused,
             io=self.governor.status(history=True) if self.governor is not None and self.running else None,
+            monitor=self.monitor.status() if self.monitor is not None else None,
         )
 
     def publish(self) -> None:
@@ -285,6 +288,7 @@ class ScanManager:
         self._io_ready = asyncio.Event()  # set once sampling started (or failed to)
         self._io_starting = False
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults for new scans)
+        self.monitors: Any = None  # server.monitors.MonitorManager, set by the server (M5)
         # set by the ViewManager: scans with open views are never evicted; evicted scans are released
         self.in_use: Callable[[str], bool] | None = None
         self.on_evict: Callable[[str], None] | None = None
@@ -305,6 +309,13 @@ class ScanManager:
             self._pool = None
             pool.shutdown(wait=False, cancel_futures=True)
 
+    def slicer(self) -> Slicer | None:
+        """The native folder lister, or None (the Python worker then)."""
+        return self._slicer
+
+    def thread_executor(self) -> ThreadPoolExecutor:
+        return self._thread_executor()
+
     def _thread_executor(self) -> ThreadPoolExecutor:
         if self._threads is None:
             self._threads = ThreadPoolExecutor(
@@ -323,6 +334,8 @@ class ScanManager:
             self._io_ready.set()
 
     async def close(self) -> None:
+        if self.monitors is not None:
+            await self.monitors.close()
         for handle in self.scans.values():
             if handle.scanner is not None:
                 handle.scanner.cancel()
@@ -355,6 +368,8 @@ class ScanManager:
             if self.on_evict is not None:
                 self.on_evict(oldest.id)
             self.scans.pop(oldest.id, None)
+            if self.monitors is not None:
+                asyncio.get_running_loop().create_task(self.monitors.stop(oldest.id))
             logger.info("evicted scan {} to free memory", oldest.id)
 
     def get(self, scan_id: str) -> ScanHandle:
@@ -442,6 +457,8 @@ class ScanManager:
         handle.mft_ok = self._mft_eligible(handle)
         self.scans[handle.id] = handle
         handle.task = asyncio.create_task(self._run(handle), name=f"scan-{handle.id}")
+        if self.monitors is not None:  # changes are watched from the start (UI-W2-09)
+            await self.monitors.start(handle)
         logger.info("scan {} started: {}", handle.id, ", ".join(r.path for r in handle.roots))
         return handle
 
@@ -559,6 +576,8 @@ class ScanManager:
             del table
             handle.store.adopt(store)
             forget(handle.store)
+            if handle.monitor is not None:
+                handle.monitor.rebuilt()  # every id changed
             scanner.finish_external(ScanState.DONE)
         except asyncio.CancelledError:
             if not scanner.cancelled:  # the scan task itself was cancelled (backend shutting down)
@@ -669,6 +688,8 @@ class ScanManager:
         scanner = handle.scanner
         assert scanner is not None
         roots = [r.path for r in handle.roots]
+        if handle.monitor is not None:
+            handle.monitor.kick()  # the last folders of the scan get their watches now
         # nothing is added any more: give back the growth headroom (up to half of every column)
         freed = await compute(handle.store.compact)
         logger.debug("scan {}: compacted the node store, {:.0f} MB freed", handle.id, freed / 2**20)
@@ -767,6 +788,8 @@ class ScanManager:
 
     async def close_scan(self, scan_id: str) -> None:
         handle = self.get(scan_id)
+        if self.monitors is not None:
+            await self.monitors.stop(scan_id)
         if handle.scanner is not None:
             handle.scanner.cancel()
         if handle.mft_task is not None:

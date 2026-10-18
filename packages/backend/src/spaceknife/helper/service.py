@@ -15,7 +15,7 @@ import threading
 import time
 from collections.abc import Iterator, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from types import ModuleType
 from typing import Any, Literal
 
@@ -25,7 +25,9 @@ from pydantic import ValidationError
 
 from spaceknife_protocol.binary import ALIGN, ALLOWED_DTYPES, BinaryFrameHeader, BlobSpec, ColumnSpec
 
+from . import usn
 from .messages import (
+    DEFAULT_BATCH_ROWS,
     KIND_BINARY,
     KIND_JSON,
     MAX_CONTROL_BYTES,
@@ -33,6 +35,8 @@ from .messages import (
     MFT_LAYOUT,
     MFT_STREAM,
     PROTOCOL_VERSION,
+    USN_LAYOUT,
+    USN_STREAM,
     Begin,
     Error,
     ErrorCode,
@@ -40,6 +44,8 @@ from .messages import (
     Message,
     Ping,
     Progress,
+    QueryUsn,
+    ReadUsn,
     Request,
     Response,
     Scalar,
@@ -60,6 +66,9 @@ IO_TIMEOUT = 120.0
 HEARTBEAT_SECONDS = 1.0
 NAMES_BUDGET = 256 << 20  # name bytes per bulk frame, so frames stay far below the size limit
 _LOCAL_DRIVES = (2, 3, 6)  # removable, fixed, RAM disk
+MFT_COLUMNS = ("record", "name_off", "name_len")  # required in an MftTable (split_table)
+# what journal operations fail with (anything else is a bug: logged and reported as internal)
+_USN_FAILURES = (usn.UsnError, OSError, ValueError, NotImplementedError)
 
 
 class OpError(Exception):
@@ -149,6 +158,10 @@ class Service:
                 }
             elif isinstance(call, VolumeInfo):
                 result = self._volume_info(call.volume)
+            elif isinstance(call, QueryUsn):
+                result = self._query_usn(call)
+            elif isinstance(call, ReadUsn):
+                result, extras = self._read_usn(request.id, call)
             elif isinstance(call, ScanMft):
                 result, extras = self._scan_mft(request.id, call)
             else:
@@ -190,6 +203,54 @@ class Service:
             raise OpError("forbidden", "scan_mft_image 只在非提权助手中可用")
         return self._scan(req_id, "scan_volume_image", call.path, call.batch_rows, call.duty)
 
+    def _usn_volume(self, volume: str) -> str:
+        """``X:`` of a local NTFS volume whose journal the (elevated) helper may read."""
+        if not self._elevated:
+            raise OpError("needs_admin", "需要管理员权限")
+        _check_ntfs(volume)
+        return volume.upper()
+
+    def _query_usn(self, call: QueryUsn) -> dict[str, Scalar]:
+        volume = self._usn_volume(call.volume)
+        try:
+            with closing(usn.open_volume(volume)) as device:
+                journal = device.query()
+        except _USN_FAILURES as exc:
+            raise usn_failure(exc) from exc
+        return {"volume": volume, **journal.scalars()}
+
+    def _read_usn(self, req_id: int, call: ReadUsn) -> tuple[dict[str, Scalar], dict[str, Scalar]]:
+        """Read the journal from the checkpoint (at most ``max_rows`` records), then stream the
+        rows. Returns (statistics, extras: journal_id, next_usn, rows, truncated)."""
+        volume = self._usn_volume(call.volume)
+        with self._heartbeat(req_id, "scan") as beat:
+            t0 = time.perf_counter()
+            try:
+                with closing(usn.open_volume(volume)) as device:
+                    table, stats = usn.read_journal(
+                        device,
+                        call.start_usn,
+                        call.journal_id,
+                        max_rows=call.max_rows,
+                        duty=call.duty,
+                        progress=beat.reading,
+                    )
+            except _USN_FAILURES as exc:
+                raise usn_failure(exc) from exc
+            t1 = time.perf_counter()
+            beat.phase = "send"
+            sent, extras = self._send_table(
+                req_id,
+                table,
+                DEFAULT_BATCH_ROWS,
+                stream=USN_STREAM,
+                layout=USN_LAYOUT,
+                required=tuple(usn.COLUMNS),
+            )
+            del table
+            timing = {"read_seconds": t1 - t0, "send_seconds": time.perf_counter() - t1}
+        return {"volume": volume, **stats, **sent, **timing}, extras
+
     def _scan(
         self,
         req_id: int,
@@ -219,12 +280,20 @@ class Service:
         return {**geometry, **stats, **timing}, extras
 
     def _send_table(
-        self, req_id: int, table: Mapping[str, Any], batch_rows: int
+        self,
+        req_id: int,
+        table: Mapping[str, Any],
+        batch_rows: int,
+        *,
+        stream: str = MFT_STREAM,
+        layout: str = MFT_LAYOUT,
+        required: tuple[str, ...] = MFT_COLUMNS,
     ) -> tuple[dict[str, Scalar], dict[str, Scalar]]:
         """Bulk frames of ``batch_rows`` rows; frame k+1 is encoded while frame k is written."""
-        columns, names, extras = split_table(table)
+        columns, names, extras = split_table(table, required)
+        rows = len(columns["name_len"])
         bounds = batch_bounds(columns["name_len"], batch_rows, NAMES_BUDGET)
-        self.send(Begin(id=req_id, rows=len(columns["record"]), frames=len(bounds)))
+        self.send(Begin(id=req_id, rows=rows, frames=len(bounds)))
         wire = 0
         pending: Future[None] | None = None
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="sk-helper-send") as writer:
@@ -235,8 +304,8 @@ class Service:
                         names, columns["name_off"][a:b], columns["name_len"][a:b]
                     )
                     parts, size = frame_parts(
-                        stream=MFT_STREAM,
-                        layout=MFT_LAYOUT,
+                        stream=stream,
+                        layout=layout,
                         columns=batch,
                         seq=seq,
                         final=seq == len(bounds) - 1,
@@ -255,7 +324,7 @@ class Service:
                 if pending is not None and not pending.done():
                     pending.cancel()
         stats: dict[str, Scalar] = {
-            "rows": len(columns["record"]),
+            "rows": rows,
             "frames": len(bounds),
             "names_bytes": len(names),
             "wire_bytes": wire,
@@ -298,7 +367,7 @@ Phase = Literal["scan", "send"]
 class _Beat:
     def __init__(self, phase: Phase) -> None:
         self.phase: Phase = phase
-        self.done = 0  # bytes of $MFT parsed, of total (reported with every heartbeat)
+        self.done = 0  # bytes of $MFT parsed / of journal read, of total (sent with every heartbeat)
         self.total = 0
 
     def reading(self, done: int, total: int) -> None:
@@ -307,6 +376,23 @@ class _Beat:
 
 
 # --------------------------------------------------------------------------- helpers
+
+
+def usn_failure(exc: BaseException) -> OpError:
+    """The error a failed journal operation is reported with."""
+    if isinstance(exc, OpError):
+        return exc
+    if isinstance(exc, usn.UsnError):
+        return OpError(exc.code, exc.message)
+    if isinstance(exc, PermissionError):
+        return OpError("needs_admin", f"需要管理员权限：{exc}")
+    if isinstance(exc, NotImplementedError):
+        return OpError("not_supported", f"USN 日志不可用：{exc}")
+    if isinstance(exc, OSError):
+        return OpError("io_error", f"读取 USN 日志失败：{exc}")
+    if isinstance(exc, ValueError):
+        return OpError("io_error", f"USN 日志记录无法解析：{exc}")
+    return OpError("internal", f"{type(exc).__name__}: {exc}")
 
 
 def _mft_module() -> ModuleType:
@@ -372,11 +458,11 @@ def frame_parts(
         dtype = arr.dtype.newbyteorder("<") if arr.dtype.byteorder == ">" else arr.dtype
         code = np.dtype(dtype).str.replace("|", "<")
         if arr.ndim != 1 or code not in ALLOWED_DTYPES:
-            raise OpError("internal", f"MFT 列 {name!r} 无法编码（{arr.dtype}，{arr.ndim} 维）")
+            raise OpError("internal", f"数据列 {name!r} 无法编码（{arr.dtype}，{arr.ndim} 维）")
         if count is None:
             count = arr.shape[0]
         elif arr.shape[0] != count:
-            raise OpError("internal", f"MFT 列 {name!r} 的行数不一致")
+            raise OpError("internal", f"数据列 {name!r} 的行数不一致")
         view = memoryview(np.ascontiguousarray(arr, dtype=np.dtype(code))).cast("B")
         specs[name] = ColumnSpec(offset=offset, dtype=code)
         offset = _append_padded(parts, view, offset)
@@ -409,8 +495,11 @@ def _append_padded(parts: list[Buffer], view: memoryview, offset: int) -> int:
     return offset + len(view) + pad
 
 
-def split_table(table: Mapping[str, Any]) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str, Scalar]]:
-    """MftTable → (equal-length 1-D columns, names as uint8, scalar extras such as bad_records)."""
+def split_table(
+    table: Mapping[str, Any], required: tuple[str, ...] = MFT_COLUMNS
+) -> tuple[dict[str, np.ndarray], np.ndarray, dict[str, Scalar]]:
+    """MftTable (or USN rows) → (equal-length 1-D columns, names as uint8, scalar extras such as
+    bad_records). ``required``: the columns the table must have besides name_off / name_len."""
     columns: dict[str, np.ndarray] = {}
     extras: dict[str, Scalar] = {}
     names: np.ndarray | None = None
@@ -431,10 +520,10 @@ def split_table(table: Mapping[str, Any]) -> tuple[dict[str, np.ndarray], np.nda
             extras[key] = value
         else:
             raise OpError("internal", f"MFT 表的 {key!r}（{type(value).__name__}）无法传输")
-    missing = {"record", "name_off", "name_len"} - columns.keys()
+    missing = {"name_off", "name_len", *required} - columns.keys()
     if names is None or missing:
-        raise OpError("internal", f"MFT 表缺少 {sorted(missing) or ['names']}")
-    rows = len(columns["record"])
+        raise OpError("internal", f"表缺少 {sorted(missing) or ['names']}")
+    rows = len(columns["name_len"])
     uneven = [key for key, col in columns.items() if len(col) != rows]
     if uneven:
         raise OpError("internal", f"MFT 表的列长度不一致：{uneven}")
@@ -502,4 +591,5 @@ __all__ = [
     "frame_parts",
     "rebase_names",
     "split_table",
+    "usn_failure",
 ]

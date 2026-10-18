@@ -2,6 +2,8 @@
 
 >>> helper = await HelperClient.launch(elevate=True)    # UAC prompt unless already admin
 >>> table = await helper.scan_mft("C:")                  # same dict as parse_mft_table
+>>> journal = await helper.query_usn("C:")               # checkpoint: journal_id, next_usn
+>>> rows = await helper.read_usn("C:", journal["next_usn"], journal["journal_id"])  # later
 >>> await helper.close()
 
 One request is in flight at a time (an asyncio lock serialises callers). Use
@@ -29,11 +31,14 @@ from .errors import HelperDenied, HelperError, HelperUnavailable
 from .launch import HelperProcess, helper_command, start_elevated, start_subprocess
 from .messages import (
     DEFAULT_BATCH_ROWS,
+    DEFAULT_USN_ROWS,
     KIND_BINARY,
     MFT_LAYOUT,
     MFT_STREAM,
     PROTOCOL_VERSION,
     REPLY,
+    USN_LAYOUT,
+    USN_STREAM,
     Begin,
     Call,
     Error,
@@ -41,6 +46,8 @@ from .messages import (
     Hello,
     Ping,
     Progress,
+    QueryUsn,
+    ReadUsn,
     Request,
     Response,
     Scalar,
@@ -60,10 +67,13 @@ CLOSE_TIMEOUT = 5.0
 _ACCEPT_SLICE = 0.25
 _U32_MAX = 2**32 - 1
 
-# (phase "scan" | "send", seconds since the request, share of the $MFT read or None if not known)
+# (phase "scan" | "send", seconds since the request, share of the $MFT / journal read or None)
 ProgressCallback = Callable[[str, float, float | None], None]
 Batch = dict[str, Any]
 _Frame = tuple[BinaryFrameHeader, dict[str, np.ndarray]]
+_Stream = tuple[str, str]  # (stream, layout) of the bulk frames a request may answer with
+_MFT: _Stream = (MFT_STREAM, MFT_LAYOUT)
+_USN: _Stream = (USN_STREAM, USN_LAYOUT)
 
 
 class HelperClient:
@@ -83,6 +93,9 @@ class HelperClient:
         # Result of the last finished scan: geometry (record_size, cluster_size, mft_size …), rows,
         # frames, names_bytes, wire_bytes and read/parse/send_seconds.
         self.last_scan: dict[str, Scalar] = {}
+        # Result of the last finished read_usn: first/start/target_usn, reads, bytes_read,
+        # skipped, rows, frames, names_bytes, wire_bytes, read_seconds, send_seconds.
+        self.last_usn: dict[str, Scalar] = {}
 
     # ------------------------------------------------------------------ launch
 
@@ -213,7 +226,7 @@ class HelperClient:
         return HelperUnavailable(f"扫描助手协议错误：{what}", "protocol")
 
     async def _exchange(
-        self, call: Call, on_progress: ProgressCallback | None
+        self, call: Call, on_progress: ProgressCallback | None, stream: _Stream = _MFT
     ) -> AsyncGenerator[_Frame | Begin | Response]:
         """Send one request; yield ``begin``, its bulk frames, then its response (an error raises).
 
@@ -242,7 +255,7 @@ class HelperClient:
                     else:
                         kind, body = await self._read()
                     if kind == KIND_BINARY:
-                        frame = self._decode(body, req_id)
+                        frame = self._decode(body, req_id, stream)
                         ahead = asyncio.ensure_future(self._read())
                         yield frame
                         continue
@@ -291,12 +304,12 @@ class HelperClient:
             return HelperUnavailable(error.message, "protocol")
         return HelperError(error.message, error.code)
 
-    def _decode(self, body: bytearray, req_id: int) -> _Frame:
+    def _decode(self, body: bytearray, req_id: int, stream: _Stream) -> _Frame:
         try:
             header, columns = decode_frame(body)
         except ProtocolError as exc:
             raise self._protocol_error(f"无效的数据帧：{exc}") from None
-        if header.stream != MFT_STREAM or header.layout != MFT_LAYOUT or header.request_id != req_id:
+        if (header.stream, header.layout) != stream or header.request_id != req_id:
             raise self._protocol_error(f"意外的数据帧 {header.stream}/{header.layout}")
         return header, columns
 
@@ -386,6 +399,42 @@ class HelperClient:
             _build(ScanMftImage, path=path, batch_rows=batch_rows, duty=duty), on_progress
         )
 
+    async def query_usn(self, volume: str) -> dict[str, Scalar]:
+        """The change journal of a local NTFS ``X:`` (administrator rights): ``{volume,
+        journal_id, first_usn, next_usn, lowest_valid_usn, max_usn, max_size, allocation_delta}``.
+        ``(journal_id, next_usn)`` is the checkpoint to :meth:`read_usn` from later. HelperError
+        ``usn_inactive`` when the volume has no active journal."""
+        return await self._simple(_build(QueryUsn, volume=volume))
+
+    async def read_usn(
+        self,
+        volume: str,
+        start_usn: int,
+        journal_id: int,
+        *,
+        max_rows: int = DEFAULT_USN_ROWS,
+        duty: float = 1.0,
+        on_progress: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        """Journal records from the checkpoint ``(journal_id, start_usn)`` up to the journal's end.
+
+        Returns the columns ``frn``, ``parent_frn`` (uint64 NTFS file references: record number in
+        the low 48 bits), ``usn`` (int64), ``reason``, ``attrs`` (uint32), ``name_off`` (uint32)
+        / ``name_len`` (uint16) into ``names`` (UTF-8 bytes, surrogatepass), and the scalars
+        ``journal_id``, ``next_usn`` (the next checkpoint), ``rows`` and ``truncated`` (``max_rows``
+        was reached: read again from ``next_usn``). HelperError ``usn_gone`` when the checkpoint
+        is no longer valid (journal recreated, records overwritten), ``usn_inactive`` when the
+        journal is off. Statistics are in :attr:`last_usn` afterwards."""
+        call = _build(
+            ReadUsn,
+            volume=volume,
+            start_usn=start_usn,
+            journal_id=journal_id,
+            max_rows=max_rows,
+            duty=duty,
+        )
+        return await self._table(call, on_progress, _USN)
+
     async def _batches(self, call: Call, on_progress: ProgressCallback | None) -> AsyncGenerator[Batch]:
         async with contextlib.aclosing(self._exchange(call, on_progress)) as items:
             async for item in items:
@@ -394,16 +443,21 @@ class HelperClient:
                 elif not isinstance(item, Begin):
                     yield item[1]
 
-    async def _table(self, call: Call, on_progress: ProgressCallback | None) -> dict[str, Any]:
+    async def _table(
+        self, call: Call, on_progress: ProgressCallback | None, stream: _Stream = _MFT
+    ) -> dict[str, Any]:
         """Copy the batches straight into a table allocated from ``begin`` (no second copy)."""
         assembler: TableAssembler | None = None
         extras: dict[str, Scalar] = {}
-        async with contextlib.aclosing(self._exchange(call, on_progress)) as items:
+        async with contextlib.aclosing(self._exchange(call, on_progress, stream)) as items:
             async for item in items:
                 if isinstance(item, Begin):
                     assembler = TableAssembler(item.rows)
                 elif isinstance(item, Response):
-                    self.last_scan = dict(item.result)
+                    if stream == _USN:
+                        self.last_usn = dict(item.result)
+                    else:
+                        self.last_scan = dict(item.result)
                     extras = dict(item.extras)
                 elif assembler is None:
                     raise self._protocol_error("数据帧之前没有 begin")
@@ -570,8 +624,9 @@ def _discard(task: asyncio.Task[Any] | None) -> None:
 
 
 class TableAssembler:
-    """Builds one MftTable from batches: columns are allocated once (``rows`` from ``begin``)
-    and each batch is copied into place; ``name_off`` is rebased onto the joined name blob."""
+    """Builds one MftTable (or USN rows) from batches: columns are allocated once (``rows`` from
+    ``begin``) and each batch is copied into place; ``name_off`` is rebased onto the joined
+    name blob."""
 
     def __init__(self, rows: int) -> None:
         self.rows = rows
@@ -582,7 +637,7 @@ class TableAssembler:
 
     def add(self, batch: Batch) -> None:
         names = np.asarray(batch["names"], dtype=np.uint8)
-        n = len(batch["record"])
+        n = len(batch["name_len"])
         start, end = self._pos, self._pos + n
         keys = batch.keys() - {"names"}
         if end > self.rows:
@@ -618,7 +673,7 @@ class TableAssembler:
 
 def concat_batches(batches: Sequence[Batch]) -> dict[str, Any]:
     """Join MFT batches (as :meth:`HelperClient.stream_mft` yields them) into one table."""
-    assembler = TableAssembler(sum(len(batch["record"]) for batch in batches))
+    assembler = TableAssembler(sum(len(batch["name_len"]) for batch in batches))
     for batch in batches:
         assembler.add(batch)
     return assembler.finish()
