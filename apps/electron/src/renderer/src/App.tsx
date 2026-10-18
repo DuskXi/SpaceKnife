@@ -24,6 +24,7 @@ export function App() {
   const message = useApp((s) => s.connMessage);
   const toastText = useApp((s) => s.toast);
   const paletteOpen = useApp((s) => s.paletteOpen);
+  useApp((s) => s.lang); // 「界面语言」: a change re-renders the whole tree, every t() follows (M7.5)
 
   useEffect(() => {
     void boot();

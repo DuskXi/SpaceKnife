@@ -31,6 +31,7 @@ export function installShim(): void {
       openTerminal: (dir) => console.info("openTerminal", dir),
       copyText: (text) => void navigator.clipboard?.writeText(text).catch(noop),
     },
+    setLanguage: () => undefined,
     dialog: {
       openSnapshot: async () => window.prompt("快照文件路径（.sks）")?.trim() || null,
       openFile: async (o) => window.prompt(o.title)?.trim() || null,

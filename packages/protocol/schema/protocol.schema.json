@@ -5330,6 +5330,16 @@
           "title": "Error",
           "type": "string"
         },
+        "language": {
+          "default": "zh-CN",
+          "description": "Interface language after resolving 'system'",
+          "enum": [
+            "zh-CN",
+            "en"
+          ],
+          "title": "Language",
+          "type": "string"
+        },
         "logs": {
           "description": "The log folder (W7 高级)",
           "title": "Logs",

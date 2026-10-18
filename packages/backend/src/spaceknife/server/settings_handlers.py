@@ -13,7 +13,7 @@ from spaceknife_protocol.base import Empty
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EVENT_SETTINGS_CHANGED, SETTINGS_GET, SETTINGS_RESET, SETTINGS_UPDATE
 
-from .. import paths
+from .. import i18n, paths
 from ..log import set_file_logging
 from ..settings import ConflictError, SettingsError, SettingsStore
 from ..store import mapped
@@ -26,12 +26,18 @@ if TYPE_CHECKING:
 POLL_INTERVAL = 1.0  # s between checks for external edits of the settings file
 
 
+def set_language(st: SettingsStore) -> None:
+    """「界面语言」: everything the backend says from now on (M7.5)."""
+    i18n.set_language(i18n.resolve(str(st.get("general.language"))))
+
+
 def install(server: Server) -> None:
     router = server.router
     store: SettingsStore = server.settings
     applied: dict[str, object] = {}
 
     def on_change(st: SettingsStore) -> None:
+        set_language(st)  # first: the state below is built in the new language
         state = st.state()
         for session in list(server.sessions):
             session.emit(EVENT_SETTINGS_CHANGED, ps.SettingsChangedEvent(state=state))
@@ -51,6 +57,7 @@ def install(server: Server) -> None:
         applied["monitor"] = monitor
 
     store.listeners["server"] = on_change
+    set_language(store)
     apply_live(store)
 
     async def watch() -> None:

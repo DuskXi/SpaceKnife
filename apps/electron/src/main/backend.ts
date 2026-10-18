@@ -10,11 +10,14 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import type { BackendInfo } from "../shared/api";
+import { mt } from "./text";
 
 export interface BackendOptions {
   repoRoot: string;
   allowOrigins: string[];
   home?: string;
+  /** OS UI language (app.getPreferredSystemLanguages), for 「跟随系统」 */
+  locale?: string;
   onLog?: (line: string) => void;
 }
 
@@ -39,6 +42,8 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
   for (const origin of opts.allowOrigins) args.push("--allow-origin", origin);
   const env: NodeJS.ProcessEnv = { ...process.env, PYTHONIOENCODING: "utf-8" };
   if (opts.home) env.SPACEKNIFE_HOME = resolve(opts.home);
+  // 「界面语言 · 跟随系统」 (M7.5): the OS UI language as Electron sees it
+  if (opts.locale) env.SPACEKNIFE_SYSTEM_LOCALE = opts.locale;
   const proc = spawn(pythonFor(opts.repoRoot), args, {
     cwd: opts.repoRoot,
     env,
@@ -50,7 +55,7 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
     createInterface({ input: proc.stderr }).on("line", (line) => opts.onLog?.(line));
   }
   return new Promise((resolveReady, reject) => {
-    const timer = setTimeout(() => reject(new Error("后端 30 秒内没有就绪")), 30_000);
+    const timer = setTimeout(() => reject(new Error(mt("backendTimeout"))), 30_000);
     const lines = createInterface({ input: proc.stdout! });
     lines.once("line", (line) => {
       clearTimeout(timer);
@@ -62,12 +67,12 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
           stop: () => stop(proc),
         });
       } catch (err) {
-        reject(new Error(`后端就绪行无法解析：${line} (${String(err)})`));
+        reject(new Error(mt("backendBadLine", { line, error: String(err) })));
       }
     });
     proc.once("exit", (code) => {
       clearTimeout(timer);
-      reject(new Error(`后端启动失败（退出码 ${code}）`));
+      reject(new Error(mt("backendExited", { code: String(code) })));
     });
     proc.once("error", (err) => {
       clearTimeout(timer);

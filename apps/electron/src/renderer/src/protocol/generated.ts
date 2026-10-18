@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "f36be68e5e0bfbeb";
+export const SCHEMA_HASH = "5c1504c3582d6fbc";
 
 export interface AgeCond {
   end: number;
@@ -1154,6 +1154,8 @@ export interface SettingsState {
   defaults: Record<string, boolean | number | string>;
   /** The settings file on disk is invalid; the last valid values are in use */
   error: string;
+  /** Interface language after resolving 'system' */
+  language: "zh-CN" | "en";
   /** The log folder (W7 高级) */
   logs: string;
   meta: SettingMeta[];

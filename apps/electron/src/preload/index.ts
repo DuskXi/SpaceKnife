@@ -29,6 +29,7 @@ const api: SkApi = {
     openTerminal: (dir) => ipcRenderer.send("sk:openTerminal", dir),
     copyText: (text) => ipcRenderer.send("sk:copyText", text),
   },
+  setLanguage: (lang) => ipcRenderer.send("sk:setLanguage", lang),
   dialog: {
     openSnapshot: () => ipcRenderer.invoke("sk:openSnapshot") as Promise<string | null>,
     openFolders: () => ipcRenderer.invoke("sk:openFolders") as Promise<string[]>,

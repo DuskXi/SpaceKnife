@@ -23,7 +23,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from spaceknife_protocol.settings import SettingMeta, SettingOption, SettingsState, SettingValue
 
-from . import paths
+from . import i18n, paths
+from .i18n import _
 
 FILE_VERSION = 1
 IS_WIN = sys.platform == "win32"
@@ -83,7 +84,7 @@ def _registry() -> tuple[Spec, ...]:
             "切换后全部文字、日期与数字格式立即更换",
             "segmented",
             "system",
-            (("system", "跟随系统"), ("zh-CN", "简体中文"), ("en", "English", "英文界面在 M7 接入")),
+            (("system", "跟随系统"), ("zh-CN", "简体中文"), ("en", "English")),
             synonyms=("language", "locale", "中文", "english"),
             kind=str,
         ),
@@ -830,29 +831,35 @@ def validate(values: dict[str, Any]) -> dict[str, SettingValue]:
 
 
 def meta() -> list[SettingMeta]:
+    """The settings' metadata in the current language (M7.5); the Chinese name stays searchable."""
+    source = i18n.language() == i18n.SOURCE
     out = []
     for s in REGISTRY:
         out.append(
             SettingMeta(
                 key=s.key,
                 category=s.category,  # type: ignore[arg-type]
-                group=s.group,
-                group_note=s.group_note,
-                name=s.name,
-                description=s.description,
+                group=_(s.group),
+                group_note=_(s.group_note) if s.group_note else "",
+                name=_(s.name),
+                description=_(s.description) if s.description else "",
                 control=s.control,  # type: ignore[arg-type]
                 options=[
-                    SettingOption(value=o[0], label=o[1], reason=o[2] if len(o) > 2 else "")
+                    SettingOption(
+                        value=o[0],
+                        label=_(o[1]) if o[1] else o[1],
+                        reason=_(o[2]) if len(o) > 2 and o[2] else "",
+                    )
                     for o in s.options
                 ],
                 min=s.min,
                 max=s.max,
                 step=s.step,
-                unit=s.unit,
+                unit=_(s.unit) if s.unit else "",
                 applies=s.applies,  # type: ignore[arg-type]
-                synonyms=list(s.synonyms),
+                synonyms=list(s.synonyms) if source else [*s.synonyms, s.name],
                 enabled=not s.reason,
-                reason=s.reason,
+                reason=_(s.reason) if s.reason else "",
                 depends=s.depends,
             )
         )
@@ -978,6 +985,7 @@ class SettingsStore:
             snapshots=str(paths.snapshots_dir()),
             error=self.error,
             unit_base=self.unit_base(),
+            language=i18n.resolve(str(self.values["general.language"])),
         )
 
     def _notify(self) -> None:

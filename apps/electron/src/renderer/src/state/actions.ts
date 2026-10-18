@@ -24,6 +24,7 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { getLang, setLang } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
@@ -493,11 +494,26 @@ export function applySettings(state: SettingsState): void {
   }
   const motion = state.values["appearance.reduce_motion"];
   document.documentElement.dataset.motion = motion === "on" ? "reduce" : motion === "off" ? "full" : "";
+  // 「界面语言」 (M7.5): every t() follows at the next render; texts the backend made (volume notes,
+  // class names) are fetched again, painted labels redrawn
+  const langChanged = state.language !== getLang() || state.language !== get().lang;
+  if (langChanged) {
+    setLang(state.language);
+    document.documentElement.lang = state.language;
+    window.sk.setLanguage(state.language);
+  }
   set((s) => ({
     settings: state,
     logAuto: Boolean(state.values["general.log_auto_open"] ?? true),
-    unitEpoch: prev?.unit_base !== state.unit_base ? s.unitEpoch + 1 : s.unitEpoch,
+    unitEpoch: prev?.unit_base !== state.unit_base || langChanged ? s.unitEpoch + 1 : s.unitEpoch,
+    lang: state.language,
   }));
+  if (langChanged && prev) {
+    void refreshLists();
+    void call("filter.vocab", {})
+      .then((vocab) => set({ vocab }))
+      .catch(() => undefined);
+  }
 }
 
 /** Change settings; saved by the backend at once (UI-W7-22). Retries once after a version conflict. */

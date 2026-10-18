@@ -17,5 +17,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/renderer/src/**/*.test.ts"],
+    setupFiles: ["src/renderer/src/test-setup.ts"],
   },
 });

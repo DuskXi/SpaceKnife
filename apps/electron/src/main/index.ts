@@ -9,6 +9,7 @@ import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from 
 
 import type { BackendState } from "../shared/api";
 import { type Backend, startBackend } from "./backend";
+import { type Lang, mt, setLang } from "./text";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -52,6 +53,7 @@ async function launchBackend(): Promise<void> {
       repoRoot: repoRoot(),
       allowOrigins: origins,
       home: process.env.SPACEKNIFE_HOME,
+      locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
       onLog: (line) => console.log(`[backend] ${line}`),
     });
     backend.proc.once("exit", (code) => setBackend({ state: "exited", code }));
@@ -106,9 +108,10 @@ function registerIpc(): void {
   ipcMain.on("sk:showItemInFolder", (_e, path: string) => shell.showItemInFolder(path));
   ipcMain.handle("sk:openPath", (_e, path: string) => shell.openPath(path));
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
+  ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
   ipcMain.handle("sk:openFolders", async () => {
-    const opts = { title: "选择要扫描的文件夹", properties: ["openDirectory" as const, "multiSelections" as const] };
+    const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return res.canceled ? [] : res.filePaths;
   });
@@ -123,7 +126,7 @@ function registerIpc(): void {
     return res.canceled || !res.filePath ? null : res.filePath;
   });
   ipcMain.handle("sk:openSnapshot", async () => {
-    const opts = { title: "打开快照文件", properties: ["openFile" as const], filters: [{ name: "SpaceKnife 快照", extensions: ["sks"] }] };
+    const opts = { title: mt("openSnapshot"), properties: ["openFile" as const], filters: [{ name: mt("snapshotFilter"), extensions: ["sks"] }] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return res.canceled ? null : (res.filePaths[0] ?? null);
   });

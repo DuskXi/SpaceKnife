@@ -5,6 +5,8 @@ import os
 from collections.abc import AsyncIterator
 
 import pytest
+
+os.environ.setdefault("SPACEKNIFE_LANGUAGE", "zh-CN")  # M7.5: tests read the Chinese source text
 from loguru import logger
 from pydantic import Field
 

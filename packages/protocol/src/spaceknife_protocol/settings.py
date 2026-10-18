@@ -65,6 +65,9 @@ class SettingsState(Payload):
         default="", description="The settings file on disk is invalid; the last valid values are in use"
     )
     unit_base: Literal[1000, 1024] = Field(description="Size unit base after resolving 'system'")
+    language: Literal["zh-CN", "en"] = Field(
+        default="zh-CN", description="Interface language after resolving 'system'"
+    )
 
 
 class SettingsUpdateParams(Params):

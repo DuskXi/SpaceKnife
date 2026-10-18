@@ -21,6 +21,8 @@ export interface SkApi {
   platform: "win32" | "darwin" | "linux";
   version: string;
   backend(): Promise<BackendState>;
+  /** The interface language changed (M7.5): the main process's own texts follow. */
+  setLanguage(lang: "zh-CN" | "en"): void;
   onBackend(cb: (state: BackendState) => void): () => void;
   window: {
     minimize(): void;

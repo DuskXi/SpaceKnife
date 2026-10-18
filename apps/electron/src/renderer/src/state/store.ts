@@ -21,6 +21,7 @@ import type {
   VolumeInfo,
 } from "@/protocol/generated";
 import type { DrawFrame } from "@/treemap/frame";
+import { getLang, type Lang } from "@/lib/i18n";
 
 export type TabKind = "start" | "scan" | "settings";
 
@@ -148,6 +149,8 @@ export interface AppState {
   op: OpProgressEvent | null;
   /** 「导出报告…」 dialog */
   exportOpen: boolean;
+  /** interface language (M7.5): the root re-renders on change, every t() follows */
+  lang: Lang;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -202,6 +205,7 @@ export const useApp = create<AppState>(() => ({
   menu: null,
   op: null,
   exportOpen: false,
+  lang: getLang(),
 }));
 
 export const set = useApp.setState;
