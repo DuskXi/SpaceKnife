@@ -68,10 +68,16 @@
 
 ## M8 打包与发布（Windows 与 Linux）
 
-- [ ] 应用图标：现在只有标题栏里 16 px 的界面标识（`design/build/icons/logo.svg`），窗口、任务栏和安装包用的还是 Electron 默认图标。要做：1024 px 母版 SVG（先出几版给用户选）→ Windows `.ico`（16–256 多尺寸）、Linux PNG 全套（16–512，hicolor）与 `.desktop`、NSIS 安装 / 卸载图标；`BrowserWindow` 的 `icon`；标题栏标识与新图标统一
-- [ ] Electron 安装包：Windows NSIS；Linux deb / rpm / AppImage
+- [x] 应用图标：用户选定「D 斜切」（`design/app-icon/spaceknife.svg`）；`tools/render_app_icons.py --app` 生成 Windows `.ico`（16–256，10 个尺寸）、Linux hicolor PNG（16–512）、窗口图标；NSIS 安装 / 卸载图标、`.desktop`；标题栏标识改成同一个图形
+- [x] Electron 安装包：Windows NSIS；Linux deb / rpm / AppImage（`tools/build_package.py`，见 [docs/packaging.md](docs/packaging.md)）
+- [x] 冻结后端：PyInstaller onedir，扫描助手与工作进程走同一个可执行文件；Linux 包的 glibc 下限 2.34 有检查
+- [x] 冒烟测试：Windows 11 上 `win-unpacked`，WSL（Ubuntu 22.04）上 `linux-unpacked` 与 AppImage（`packaging/smoke_app.py`）
+- [ ] 干净机器安装测试：Windows 10、RHEL 9、Ubuntu 22.04（装 / 运行 / 扫描 / 卸载）；Windows 上安装包本身（安装到用户机器前先问用户）
 - [ ] Windows 代码签名：没有证书时先发未签名包（SmartScreen 会提示）
-- [ ] 干净机器冒烟测试：Windows 10+、RHEL 9、Ubuntu 22.04
+- [ ] 选定许可证（deb / rpm 里现在是 `unknown`），附第三方许可清单（Python 依赖、字体）
+- [ ] 确认项目主页（现在暂定 `https://github.com/DuskXi/SpaceKnife`，deb / rpm 必填）
+- [ ] 包体积：只 strip 没被 auditwheel 改过的库（libpython、zstandard、原生扩展），Linux 后端约省 40 MB 解压后体积
+- [ ] 自动更新（electron-updater，需要发布渠道）
 
 ## 其他
 

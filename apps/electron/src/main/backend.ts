@@ -2,11 +2,13 @@
 //
 // The token travels on stdin (never argv/env); the backend prints one JSON "ready" line on stdout
 // and exits gracefully when its stdin closes, so quitting the app (or crashing) stops it.
+// An installed app (M8) runs the frozen backend it ships (resources/backend, PyInstaller);
+// a checkout runs `python -m spaceknife` from the repo's uv environment.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import type { BackendInfo } from "../shared/api";
@@ -14,6 +16,8 @@ import { mt } from "./text";
 
 export interface BackendOptions {
   repoRoot: string;
+  /** the frozen backend of an installed app (bundledBackend); else the repo's Python */
+  bundled?: string | null;
   allowOrigins: string[];
   home?: string;
   /** OS UI language (app.getPreferredSystemLanguages), for 「跟随系统」 */
@@ -36,16 +40,24 @@ export function pythonFor(repoRoot: string): string {
   return process.platform === "win32" ? "python.exe" : "python3";
 }
 
+/** resources/backend/spaceknife-backend[.exe] of a packaged app (electron-builder.yml), if present. */
+export function bundledBackend(resourcesPath: string): string | null {
+  const exe = join(resourcesPath, "backend", process.platform === "win32" ? "spaceknife-backend.exe" : "spaceknife-backend");
+  return existsSync(exe) ? exe : null;
+}
+
 export function startBackend(opts: BackendOptions): Promise<Backend> {
   const token = randomBytes(24).toString("base64url");
-  const args = ["-X", "utf8", "-m", "spaceknife", "serve", "--token-stdin", "--log-format", "plain"];
+  // the frozen backend is built with -X utf8 (packaging/spaceknife-backend.spec)
+  const args = opts.bundled ? ["serve"] : ["-X", "utf8", "-m", "spaceknife", "serve"];
+  args.push("--token-stdin", "--log-format", "plain");
   for (const origin of opts.allowOrigins) args.push("--allow-origin", origin);
   const env: NodeJS.ProcessEnv = { ...process.env, PYTHONIOENCODING: "utf-8" };
   if (opts.home) env.SPACEKNIFE_HOME = resolve(opts.home);
   // 「界面语言 · 跟随系统」 (M7.5): the OS UI language as Electron sees it
   if (opts.locale) env.SPACEKNIFE_SYSTEM_LOCALE = opts.locale;
-  const proc = spawn(pythonFor(opts.repoRoot), args, {
-    cwd: opts.repoRoot,
+  const proc = spawn(opts.bundled ?? pythonFor(opts.repoRoot), args, {
+    cwd: opts.bundled ? dirname(opts.bundled) : opts.repoRoot,
     env,
     stdio: ["pipe", "pipe", "pipe"],
     windowsHide: true,

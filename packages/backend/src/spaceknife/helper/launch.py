@@ -58,7 +58,11 @@ class PopenProcess:
 def helper_command(elevated: bool) -> list[str]:
     """Interpreter + module. The elevated helper runs isolated (-I): no PYTHON* variables, no
     user site-packages, no current directory on sys.path, so nothing user-writable outside the
-    installed environment can inject code into the administrator process."""
+    installed environment can inject code into the administrator process. A frozen backend (the
+    installed app, M8) has no ``-m``: it runs its own executable in helper mode, and the frozen
+    interpreter only imports from its bundle."""
+    if getattr(sys, "frozen", False):
+        return [sys.executable, "--helper"]
     if elevated:
         return [sys.executable, "-I", "-m", "spaceknife.helper"]
     return [sys.executable, "-m", "spaceknife.helper"]

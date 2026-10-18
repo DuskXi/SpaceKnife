@@ -8,11 +8,12 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
-import { type Backend, startBackend } from "./backend";
+import { type Backend, bundledBackend, startBackend } from "./backend";
 import { type Lang, mt, setLang } from "./text";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
+const APP_ID = "io.github.duskxi.spaceknife"; // electron-builder.yml appId: taskbar grouping, shortcuts
 const RENDERER_DIR = join(here, "../renderer");
 const MIME: Record<string, string> = {
   ".html": "text/html",
@@ -25,8 +26,14 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
-// an isolated home (demos, tests) also gets its own Chromium profile: storage, caches, single-instance lock
-if (process.env.SPACEKNIFE_HOME) app.setPath("userData", join(resolve(process.env.SPACEKNIFE_HOME), "electron"));
+// The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own: an isolated
+// home (demos, tests) gets its own; otherwise <appData>/SpaceKnife/electron, apart from the backend's
+// files (on Linux the backend's config folder is ~/.config/SpaceKnife as well).
+app.setPath(
+  "userData",
+  process.env.SPACEKNIFE_HOME ? join(resolve(process.env.SPACEKNIFE_HOME), "electron") : join(app.getPath("appData"), "SpaceKnife", "electron"),
+);
+if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
@@ -51,6 +58,7 @@ async function launchBackend(): Promise<void> {
   try {
     backend = await startBackend({
       repoRoot: repoRoot(),
+      bundled: app.isPackaged ? bundledBackend(process.resourcesPath) : null,
       allowOrigins: origins,
       home: process.env.SPACEKNIFE_HOME,
       locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
@@ -61,6 +69,13 @@ async function launchBackend(): Promise<void> {
   } catch (err) {
     setBackend({ state: "failed", message: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/** The app icon for the window (Linux; a packaged Windows app shows its executable's icon). */
+function windowIcon(): string | undefined {
+  if (process.platform === "linux") return join(app.getAppPath(), "resources", "icon.png");
+  if (process.platform === "win32" && !app.isPackaged) return join(app.getAppPath(), "build", "icon.ico");
+  return undefined; // macOS: the bundle icon
 }
 
 function createWindow(): void {
@@ -75,6 +90,7 @@ function createWindow(): void {
     titleBarStyle: mac ? "hiddenInset" : "hidden",
     backgroundColor: "#08090B",
     title: "SpaceKnife",
+    icon: windowIcon(),
     webPreferences: {
       preload: join(here, "../preload/index.mjs"),
       contextIsolation: true,

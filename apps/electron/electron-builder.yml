@@ -1,0 +1,73 @@
+# Installers (M8): Windows NSIS; Linux AppImage / deb / rpm. Built by tools/build_package.py,
+# which first freezes the backend into ../../dist/backend/spaceknife-backend (PyInstaller) and
+# runs `electron-vite build`; see docs/packaging.md. No code signing yet (unsigned builds).
+appId: io.github.duskxi.spaceknife
+productName: SpaceKnife
+copyright: Copyright © 2026 DuskXi
+directories:
+  buildResources: build # icon.ico, icon.png, icons/<n>x<n>.png (tools/render_app_icons.py --app)
+  output: ../../dist/electron
+files:
+  - out/**
+  - resources/icon.png # the window icon (Linux)
+  - "!**/*.map"
+extraResources:
+  - from: ../../dist/backend/spaceknife-backend
+    to: backend # process.resourcesPath/backend/spaceknife-backend[.exe] (src/main/backend.ts)
+asar: true
+electronLanguages: [en-US, zh-CN] # the two UI languages (M7.5); drops the other Chromium locales
+npmRebuild: false # no native Node modules
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.ico
+  artifactName: ${productName}-${version}-Setup-x64.${ext}
+nsis:
+  oneClick: false # an assisted installer: current user or all users, install folder
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SpaceKnife
+  uninstallDisplayName: SpaceKnife
+  deleteAppDataOnUninstall: false # scans, snapshots and settings stay unless the user removes them
+  multiLanguageInstaller: true # the installer follows the system language
+  installerLanguages: [en_US, zh_CN]
+  displayLanguageSelector: false
+  runAfterFinish: true
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+  icon: build/icons
+  executableName: spaceknife
+  syncDesktopName: true # spaceknife.desktop = package.json desktopName = the window's app_id / WM_CLASS
+  category: Utility
+  synopsis: Disk space treemap — see what fills your drives
+  # also the .desktop Comment (electron-builder puts the description there)
+  description: See what fills your drives — a live treemap with filters, snapshot comparison and cleanup
+  maintainer: DuskXi <84715902+DuskXi@users.noreply.github.com>
+  vendor: DuskXi
+  desktop:
+    entry:
+      Name: SpaceKnife
+      GenericName: Disk Space Analyzer
+      GenericName[zh_CN]: 磁盘空间分析
+      Comment[zh_CN]: 看清是什么占满了磁盘：实时树图、过滤、快照对比与清理
+      Keywords: disk;space;usage;treemap;storage;cleanup;磁盘;空间;
+appImage:
+  artifactName: ${productName}-${version}-x86_64.${ext}
+deb:
+  packageName: spaceknife
+  artifactName: spaceknife_${version}_amd64.${ext}
+rpm:
+  packageName: spaceknife
+  artifactName: spaceknife-${version}.x86_64.${ext}

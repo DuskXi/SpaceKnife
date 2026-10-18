@@ -1,12 +1,19 @@
-"""Render the app-icon candidates to PNG previews and a side-by-side overview.
+"""Render the app-icon candidates to PNG previews, and the chosen icon for packaging.
 
-    uv run python tools/render_app_icons.py
+    uv run python tools/render_app_icons.py          # candidates: previews + overview
+    uv run python tools/render_app_icons.py --app    # design/app-icon/spaceknife.svg → apps/electron
 
 For every ``design/app-icon/candidates/<name>.svg`` (1024 px master) this writes
 ``<name>-16.png``, ``-32``, ``-48`` and ``-256`` next to it, rendered straight from the
 master (no hand-hinted small variants), and ``overview.png``: every candidate at
 256 / 48 / 32 / 16 px 1:1 plus 16 px blown up 4× (nearest neighbour), on a dark and a
 light background.
+
+``--app`` renders the chosen master ``design/app-icon/spaceknife.svg`` (M8) into the files the
+Electron packaging reads: ``apps/electron/build/icon.ico`` (16–256 px, every size rendered from the
+master, BMP entries so every Windows tool and NSIS read it), ``build/icons/<n>x<n>.png`` (the Linux
+hicolor set for deb / rpm / AppImage), ``build/icon.png`` (1024 px) and the window icon
+``apps/electron/resources/icon.png`` (256 px, packed into the app).
 
 Dev-only: needs ``resvg-py`` and ``pillow`` from the uv ``dev`` group.
 """
@@ -24,6 +31,10 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parent.parent
 CANDIDATES = ROOT / "design" / "app-icon" / "candidates"
 SIZES = (16, 32, 48, 256)
+APP_MASTER = ROOT / "design" / "app-icon" / "spaceknife.svg"
+ELECTRON = ROOT / "apps" / "electron"
+ICO_SIZES = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)  # 100–250 % scaling of 16 / 32 / 48
+LINUX_SIZES = (16, 24, 32, 48, 64, 128, 256, 512)
 
 # Overview layout (px)
 ZOOM = 4  # 16 px shown at 64 px, nearest neighbour
@@ -109,7 +120,35 @@ def overview(svgs: list[Path], icons: dict[Path, dict[int, Image.Image]]) -> Ima
     return page.convert("RGB")
 
 
+def app_icons() -> list[Path]:
+    """The packaging icons of the chosen master; returns the files written."""
+    sizes = sorted({*ICO_SIZES, *LINUX_SIZES, 1024})
+    img = {size: render(APP_MASTER, size) for size in sizes}
+    build = ELECTRON / "build"
+    (build / "icons").mkdir(parents=True, exist_ok=True)
+    (ELECTRON / "resources").mkdir(parents=True, exist_ok=True)
+    out = [build / "icon.ico", build / "icon.png", ELECTRON / "resources" / "icon.png"]
+    img[256].save(
+        out[0],
+        format="ICO",
+        sizes=[(s, s) for s in ICO_SIZES],
+        append_images=[img[s] for s in ICO_SIZES if s != 256],
+        bitmap_format="bmp",
+    )
+    img[1024].save(out[1], optimize=True)
+    img[256].save(out[2], optimize=True)
+    for size in LINUX_SIZES:
+        path = build / "icons" / f"{size}x{size}.png"
+        img[size].save(path, optimize=True)
+        out.append(path)
+    return out
+
+
 def main() -> int:
+    if sys.argv[1:] == ["--app"]:
+        for path in app_icons():
+            print(path.relative_to(ROOT))
+        return 0
     svgs = sorted(CANDIDATES.glob("*.svg"), key=title_of)
     if not svgs:
         print(f"no candidates in {CANDIDATES}", file=sys.stderr)

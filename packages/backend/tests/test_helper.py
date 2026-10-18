@@ -485,6 +485,13 @@ def test_shell_execute_params() -> None:
     assert helper_command(False)[1:] == ["-m", "spaceknife.helper"]
 
 
+def test_frozen_backend_runs_itself_as_helper(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The installed app (PyInstaller, packaging/backend_entry.py) has no ``-m``."""
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    assert helper_command(True) == [sys.executable, "--helper"]
+    assert helper_command(False) == [sys.executable, "--helper"]
+
+
 def test_token_file_is_private_and_read_once(tmp_path: Path) -> None:
     token = new_token()
     assert re.fullmatch(r"[0-9a-f]{64}", token)

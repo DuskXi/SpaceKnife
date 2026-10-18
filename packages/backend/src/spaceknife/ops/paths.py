@@ -343,6 +343,9 @@ def _app_dirs(home_override: str | None) -> tuple[str, ...]:
 @lru_cache(maxsize=1)
 def _program_dirs() -> tuple[str, ...]:
     dirs = {sys.prefix, sys.base_prefix, os.path.dirname(os.path.abspath(sys.executable))}
+    if getattr(sys, "frozen", False):
+        # the installed app: <install>/resources/backend/spaceknife-backend → <install>
+        dirs.add(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(sys.executable)))))
     return tuple(sorted(d for d in dirs if d))
 
 

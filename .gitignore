@@ -9,6 +9,7 @@ __pycache__/
 dist/
 build/
 !design/build/
+!apps/electron/build/
 
 # Node / Electron
 node_modules/

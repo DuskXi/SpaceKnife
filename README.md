@@ -7,6 +7,7 @@
 - 协议：[docs/protocol.md](docs/protocol.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
+- 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)
 
 ## 开发环境
 
@@ -64,4 +65,6 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy packages/prot
 | `packages/backend` | 后端：WebSocket 服务、扫描、列式存储与快照、过滤引擎、树图布局、视图、命令行（之后加入监控、导出、文件操作） |
 | `packages/client` | Python 前端共享的客户端核心（不依赖任何 GUI 库） |
 | `design/tokens`、`design/icons` | 设计 token 与图标源文件；`design/build` 是生成物 |
-| `tools` | 代码生成与开发工具 |
+| `apps/electron` | Electron 前端（UI v1）与安装包配置（`electron-builder.yml`） |
+| `packaging` | 冻结后端（PyInstaller spec 与入口）和安装包的冒烟测试 |
+| `tools` | 代码生成与开发工具（打包：`build_package.py`；图标：`render_app_icons.py`） |

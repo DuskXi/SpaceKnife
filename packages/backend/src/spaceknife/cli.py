@@ -89,11 +89,16 @@ def serve(
 
 @app.command()
 def version() -> None:
-    """Print the backend and protocol versions."""
+    """Print the backend, protocol and native-extension versions."""
     from spaceknife_protocol import PROTOCOL_VERSION
     from spaceknife_protocol.schema import schema_hash
 
-    Console().print(f"spaceknife {__version__} · protocol {PROTOCOL_VERSION} · schema {schema_hash()}")
+    from . import native
+
+    Console().print(
+        f"spaceknife {__version__} · protocol {PROTOCOL_VERSION} · schema {schema_hash()}"
+        f" · native {native.version() or 'none'}"
+    )
 
 
 @app.command()

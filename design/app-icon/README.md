@@ -1,6 +1,21 @@
-# 应用图标候选
+# 应用图标
 
-窗口、任务栏和安装包现在还用着 Electron 默认图标。这里放四版候选，**选定一版之后**再按 TODO.md M8 导出 Windows `.ico`、Linux hicolor PNG 全套与 `.desktop`、NSIS 图标，并让标题栏标识（`design/build/icons/logo.svg`）跟着统一。这一步不碰打包配置和界面代码。
+**定稿：D 斜切 Chamfer**（用户 2026-10-18 选定）。母版是 [`spaceknife.svg`](spaceknife.svg)（与 `candidates/chamfer.svg` 同一个图形），打包用的文件由它生成：
+
+```bash
+uv run python tools/render_app_icons.py --app
+```
+
+| 生成的文件 | 用途 |
+|---|---|
+| `apps/electron/build/icon.ico` | Windows：exe、NSIS 安装 / 卸载程序（16、20、24、32、40、48、64、96、128、256 px，每个尺寸都从母版渲染，BMP 条目带透明通道） |
+| `apps/electron/build/icons/<n>x<n>.png` | Linux hicolor 图标（16–512 px），deb / rpm / AppImage |
+| `apps/electron/build/icon.png` | 1024 px |
+| `apps/electron/resources/icon.png` | Linux 的窗口图标（256 px，打进应用） |
+
+标题栏里的 16 px 标识（`design/icons/icons.json` 的 `logo`，生成 `design/build/icons/logo.svg`）是同一个图形按 1/64 缩小、把裁切路径展开成普通路径的版本，只省掉了 0.25 px 的描边。
+
+下面是选定之前的四版候选，留作记录。
 
 ![四版候选在深色、浅色背景上各尺寸并排](candidates/overview.png)
 
@@ -64,4 +79,4 @@
 uv run python tools/render_app_icons.py
 ```
 
-读 `candidates/*.svg`，写出各尺寸 PNG 和 `overview.png`。依赖 `resvg-py`（resvg 的 Python 绑定，渲染 SVG；各平台都有预编译 wheel，不需要系统的 Cairo）和 `pillow`（拼对比图），都只加在 uv 的 `dev` 组里。对比图的标签字体按 微软雅黑 → Noto Sans CJK → 苹方 的顺序找，都没有时退回 Pillow 自带字体（中文会显示不出来，图标本身不受影响）。
+不带参数时读 `candidates/*.svg`，写出各尺寸 PNG 和 `overview.png`。依赖 `resvg-py`（resvg 的 Python 绑定，渲染 SVG；各平台都有预编译 wheel，不需要系统的 Cairo）和 `pillow`（拼对比图），都只加在 uv 的 `dev` 组里。对比图的标签字体按 微软雅黑 → Noto Sans CJK → 苹方 的顺序找，都没有时退回 Pillow 自带字体（中文会显示不出来，图标本身不受影响）。
