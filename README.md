@@ -1,6 +1,30 @@
 # SpaceKnife
 
-新一代跨平台磁盘空间分析器，SpaceSniffer 的继任者：嵌套树图、实时扫描、文件变化钩子、NTFS MFT 快速扫描、可限速的并发扫描。目标平台 Windows 10+、Linux（RHEL 9+ / Ubuntu 22.04+）、macOS 14+。
+现代化的跨平台硬盘占用分析工具：用嵌套树图实时展示磁盘被什么占满。支持 NTFS MFT 快速扫描、可限制磁盘负载的并发扫描、文件变化实时监控、过滤语言、快照对比和可撤销的删除篮，界面有简体中文和英文。目标平台 Windows 10+、Linux（RHEL 9+ / Ubuntu 22.04+），之后是 macOS 14+。
+
+> SpaceKnife 受 [SpaceSniffer](http://www.uderzo.it/main_products/space_sniffer/) 启发，是一个独立开发的新项目，与 SpaceSniffer 及其作者没有任何关联。
+>
+> SpaceKnife is an independent project inspired by SpaceSniffer. It is not affiliated with SpaceSniffer or its author.
+
+## 截图
+
+截图里是模拟数据：一个虚构的 2 TB 数据盘（[tools/demo/mock_snapshot.py](tools/demo/mock_snapshot.py) 生成），不是真实的磁盘。
+
+![树图：块的面积就是占用，悬停显示详情](docs/images/treemap.png)
+
+**树图**：块的面积就是占用，嵌套显示每一层文件夹；悬停显示大小、类型和时间，右侧是选中项的详情和最大的子项。
+
+![过滤：只亮出 1 GB 以上的视频](docs/images/filter.png)
+
+**过滤**：`:class:视频;>1gb` 只亮出 1 GB 以上的视频，其余变暗；右侧列出匹配结果，可按大小排序、定位。
+
+![快照对比：与五周前相比，橙色增长、蓝色减少](docs/images/compare.png)
+
+**快照对比**：和五周前的快照相比，橙色是增长、蓝色是减少，新增和已删除的项都有标记；右侧是净增长、增长最多的项和按当前速度估算的可用空间耗尽时间。
+
+![命令面板：按名称搜索整个扫描结果](docs/images/palette.png)
+
+**命令面板**（Ctrl+K）：按名称搜索整个扫描结果（支持拼音首字母），也可以直接执行命令。
 
 ## 下载
 
@@ -51,6 +75,12 @@ uv run spaceknife snapshot list
 ```
 
 环境变量 `SPACEKNIFE_HOME` 可以把快照等数据放到指定目录（测试和体验环境用它与真实数据隔离）。
+
+README 的截图用模拟数据离屏生成，不显示窗口、不读真实磁盘（先在 `apps/electron` 里 `pnpm build`；`--home` 用一个中性的空目录）：
+
+```bash
+uv run python tools/demo/screenshots.py --home <空目录> --out docs/images
+```
 
 M2 体验台（浏览器里的树图、导航、过滤和标签，直接走协议 v1）：
 

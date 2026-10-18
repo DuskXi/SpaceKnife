@@ -2,7 +2,7 @@
 
 > 状态：v1，2026-10-18。本文件与 [UI-SPEC.md](UI-SPEC.md) 是实施依据。
 
-SpaceKnife 是跨平台的新一代 SpaceSniffer：保留它的嵌套树图、实时扫描、文件变化钩子、过滤语法、标签、导出模板等精华，去掉只支持 Windows、没有 MFT 快扫、界面过时、扫描慢等问题。目标平台 Windows 10+ / Linux / macOS。
+SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘占用分析工具，与 SpaceSniffer 及其作者没有关联。它借鉴了嵌套树图、实时扫描、文件变化钩子、过滤语法、标签、导出模板这些好用的做法，并加上跨平台、MFT 快速扫描、可限速的并发扫描和现代化的界面。目标平台 Windows 10+ / Linux / macOS。
 
 ---
 
