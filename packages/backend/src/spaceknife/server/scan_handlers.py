@@ -19,8 +19,10 @@ from spaceknife_protocol.methods import (
     SCAN_CANCEL,
     SCAN_CHECK_PATHS,
     SCAN_CLOSE,
+    SCAN_CONTINUE,
     SCAN_LIST,
     SCAN_PAUSE,
+    SCAN_RESCAN,
     SCAN_RESUME,
     SCAN_SET_LOAD,
     SCAN_START,
@@ -90,6 +92,17 @@ def install(server: Server) -> None:
     @router.method(SCAN_USE_MFT)
     async def scan_use_mft(session: Session, params: p.ScanIdParams) -> p.ScanStatus:
         return scans.use_mft(params.scan_id).status()
+
+    @router.method(SCAN_CONTINUE)
+    async def scan_continue(session: Session, params: p.ScanIdParams) -> p.ScanStatus:
+        return (await scans.continue_scan(params.scan_id)).status()
+
+    @router.method(SCAN_RESCAN)
+    async def scan_rescan(session: Session, params: p.ScanRescanParams) -> p.ScanStatus:
+        handle = scans.get(params.scan_id)
+        scans.check_node(handle, params.node)
+        await server.monitors.rescan(handle, params.node)
+        return handle.status()
 
     @router.method(SCAN_SET_LOAD)
     async def scan_set_load(session: Session, params: p.ScanSetLoadParams) -> p.ScanStatus:

@@ -30,6 +30,7 @@ from .scan import (
     ScanIdParams,
     ScanListResult,
     ScanProgressEvent,
+    ScanRescanParams,
     ScanSetLoadParams,
     ScanStartParams,
     ScanStatus,
@@ -139,6 +140,18 @@ SCAN_USE_MFT = MethodSpec(
 )
 SCAN_SET_LOAD = MethodSpec(
     "scan.set_load", ScanSetLoadParams, ScanStatus, "Change the disk load limit of a running scan (W2)."
+)
+SCAN_CONTINUE = MethodSpec(
+    "scan.continue",
+    ScanIdParams,
+    ScanStatus,
+    "Go on with a stopped hard scan: the folders it had not read yet (W2 待定 16).",
+)
+SCAN_RESCAN = MethodSpec(
+    "scan.rescan",
+    ScanRescanParams,
+    ScanStatus,
+    "Read a folder of a finished scan again with everything below it, in place (F5, M5).",
 )
 IO_STATUS = MethodSpec("io.status", Empty, IoStatusList, "Load state of every local disk, with history.")
 TREE_NODE = MethodSpec("tree.node", TreeNodeParams, TreeNodeResult, "One node with its full path.")
@@ -276,6 +289,8 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         SCAN_RESUME,
         SCAN_USE_MFT,
         SCAN_SET_LOAD,
+        SCAN_CONTINUE,
+        SCAN_RESCAN,
         IO_STATUS,
         TREE_NODE,
         TREE_CHILDREN,

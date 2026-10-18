@@ -210,6 +210,11 @@ class ScanIdParams(Params):
     scan_id: str = Field(min_length=1, max_length=64)
 
 
+class ScanRescanParams(Params):
+    scan_id: str = Field(min_length=1, max_length=64)
+    node: int = Field(ge=1, description="Folder to read again, with everything below it")
+
+
 class ScanListResult(Payload):
     scans: list[ScanStatus]
 

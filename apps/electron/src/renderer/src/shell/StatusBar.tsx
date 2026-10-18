@@ -1,7 +1,9 @@
 // Status bar (UI-MAIN-48…53): scan result, live monitoring, disk load, free space.
 
 import { LOAD_ZH } from "@/pages/StartPage";
-import { activeTab, set, startFormOf, toggleLog, useApp } from "@/state/store";
+import type { ScanStatus } from "@/protocol/generated";
+import { continueScan, updateSettings } from "@/state/actions";
+import { activeTab, set, setting, startFormOf, toast, toggleLog, useApp } from "@/state/store";
 import { fmtDuration, fmtInt, fmtSize } from "@/lib/format";
 import { levelText, scanPercent } from "@/shell/ScanProgress";
 import { Icon } from "@/ui/Icon";
@@ -9,6 +11,8 @@ import { Icon } from "@/ui/Icon";
 export function StatusBar() {
   const tab = useApp((s) => activeTab(s));
   const scan = useApp((s) => (tab.scanId ? s.scans[tab.scanId] : undefined));
+  const monitorOn = useApp((s) => setting(s, "scan.monitor", true));
+  const live = monitorText(scan, monitorOn);
   const conn = useApp((s) => s.conn);
   const volumes = useApp((s) => s.volumes);
   const warnings = useApp((s) => s.logs.filter((l) => l.level === "WARNING" || l.level === "ERROR").length);
@@ -64,12 +68,24 @@ export function StatusBar() {
         {first}
         {warnings > 0 && <span className="warn-count">{warnings}</span>}
       </button>
+      {scan && scan.source === "scan" && scan.state === "cancelled" && scan.pending_dirs > 0 && (
+        <button className="status-item" title={`还有 ${fmtInt(scan.pending_dirs)} 个文件夹没有读取`} onClick={() => void continueScan(scan.scan_id)}>
+          <Icon name="play" size={14} />
+          <span>继续扫描</span>
+        </button>
+      )}
       <span className="status-sep" />
-      <button className="status-item" title="文件变化钩子将在 M5 接入">
-        <span className="muted">
+      <button
+        className="status-item"
+        title={live.title}
+        onClick={() => {
+          void updateSettings({ "scan.monitor": !monitorOn }).then((ok) => ok && toast(monitorOn ? "实时监控已关闭" : "实时监控已开启"));
+        }}
+      >
+        <span className={live.tone}>
           <Icon name="pulse" size={14} />
         </span>
-        <span>{scan ? "实时监控 · 将在 M5 接入" : "实时监控 · 扫描后自动开启"}</span>
+        <span>{live.text}</span>
       </button>
       <span className="status-sep" />
       <button
@@ -111,4 +127,18 @@ export function StatusBar() {
       )}
     </footer>
   );
+}
+
+/** 「实时监控」 (UI-MAIN-49, UI-W1-12): the change hooks of the active scan; a click switches them. */
+export function monitorText(scan: ScanStatus | undefined, on: boolean): { text: string; title: string; tone: string } {
+  const m = scan?.monitor;
+  const toggle = on ? "点击关闭实时监控" : "点击开启实时监控";
+  if (!scan) return on ? { text: "实时监控 · 扫描后自动开启", title: toggle, tone: "muted" } : { text: "实时监控已关闭", title: toggle, tone: "muted" };
+  if (scan.source === "snapshot") return { text: "快照 · 不监控变化", title: "快照是过去的状态，不随磁盘变化", tone: "muted" };
+  if (!on || !m) return { text: "实时监控已关闭", title: toggle, tone: "muted" };
+  const counts = `${fmtInt(m.changes)} 处变化已更新${m.pending ? `，${fmtInt(m.pending)} 项待处理` : ""}`;
+  if (m.state === "failed") return { text: "实时监控 · 失败", title: `${m.detail || "监视中断"}。${toggle}`, tone: "warn-text" };
+  if (m.state === "degraded") return { text: "实时监控 · 部分轮询", title: `${m.detail}。${counts}`, tone: "warn-text" };
+  if (m.state === "starting") return { text: "实时监控 · 启动中", title: toggle, tone: "muted" };
+  return { text: "实时监控中", title: `${counts}。${toggle}`, tone: "ok-text" };
 }

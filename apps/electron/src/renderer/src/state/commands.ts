@@ -12,7 +12,9 @@ import {
   newStartTab,
   openSettingsTab,
   openSnapshot,
+  continueScan,
   pauseScan,
+  rescanFolder,
   resumeScan,
   setViewSettings,
   startScan,
@@ -163,6 +165,14 @@ export async function runCommand(id: string): Promise<void> {
     case "scan.stop":
       if (tab.scanId) await call("scan.cancel", { scan_id: tab.scanId });
       return;
+    case "scan.continue":
+      if (tab.scanId) await continueScan(tab.scanId);
+      return;
+    case "view.rescan": {
+      const zoom = viewId ? get().views[viewId]?.state.zoom_node : undefined;
+      if (tab.scanId && zoom != null && zoom > 0) await rescanFolder(tab.scanId, zoom);
+      return;
+    }
     case "scan.new":
       return newStartTab();
     default:

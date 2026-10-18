@@ -239,6 +239,11 @@ class Scanner:
         self._root_opts = tuple(root_opts)
 
     @property
+    def has_queue(self) -> bool:
+        """Folders are left to read (a stopped scan can go on with them)."""
+        return bool(self._queue)
+
+    @property
     def root_options(self) -> tuple[RootOptions, ...]:
         """Listing options per scan root (file change monitoring lists folders the same way)."""
         return self._root_opts

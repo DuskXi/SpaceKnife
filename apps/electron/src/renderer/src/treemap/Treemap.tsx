@@ -34,6 +34,11 @@ interface Layer {
   tags: ReturnType<typeof paint>["tags"];
 }
 
+interface Flash {
+  start: number;
+  items: { x: number; y: number; w: number; h: number; delta: number }[];
+}
+
 interface Anim {
   start: number;
   duration: number;
@@ -44,6 +49,11 @@ interface Anim {
 
 const GROUND = rgba(tokens.treemap.ground);
 const ZOOM_MS = 250;
+// file changes (UI-TM-43/44): two pulses, then a fade; under reduced motion a static badge instead
+const FLASH_MS = tokens.motion.duration.flash;
+const FLASH_FADE_MS = 300;
+const BADGE_MS = 10_000;
+const FLASH = tokens.treemap.state.flash;
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
 export function Treemap({ viewId, onHover, onContextMenu }: Props) {
@@ -59,7 +69,8 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     raf: number;
     lastZoomKey: number | null;
     lastSeq: number;
-  }>({ gl: null, cur: null, old: null, anim: null, hovered: -1, raf: 0, lastZoomKey: null, lastSeq: -1 });
+    flash: Flash | null;
+  }>({ gl: null, cur: null, old: null, anim: null, hovered: -1, raf: 0, lastZoomKey: null, lastSeq: -1, flash: null });
 
   const view = useApp((s) => s.views[viewId]);
   const vocab = useApp((s) => s.vocab);
@@ -138,6 +149,12 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     st.gl.draw(st.cur.picture);
     drawTexts(ctx, st.cur.texts);
     drawTags(ctx, st.cur.tags, dpr);
+    if (st.flash && drawFlash(ctx, st.flash, performance.now(), reduced, dpr)) {
+      cancelAnimationFrame(st.raf);
+      st.raf = requestAnimationFrame(render);
+    } else {
+      st.flash = null;
+    }
   };
 
   const repaint = (frame: DrawFrame, colorMode: ColorMode, keepPicture?: Picture | null) => {
@@ -214,6 +231,10 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     if (!anim && st.cur) st.gl.dispose(st.cur.picture);
     st.cur = next;
     st.anim = anim;
+    const changed = frame.info.flash ?? [];
+    st.flash = changed.length
+      ? { start: performance.now(), items: changed.map((c) => ({ ...rectOf(frame, c.row), delta: c.delta })) }
+      : null;
     cancelAnimationFrame(st.raf);
     render();
     onHover?.(null);
@@ -330,6 +351,43 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
       {frame && frame.count === 0 && <div className="treemap-empty">这里没有任何占用空间的内容</div>}
     </div>
   );
+}
+
+/** Draw the changed blocks of a frame; false once there is nothing left to show. */
+function drawFlash(ctx: CanvasRenderingContext2D, flash: Flash, now: number, reduced: boolean, dpr: number): boolean {
+  const t = now - flash.start;
+  ctx.save();
+  if (reduced) {
+    // static badge in the block's bottom-right corner: the change of its size ("+212 MB")
+    if (t > BADGE_MS) return (ctx.restore(), false);
+    ctx.font = `${11 * dpr}px ${tokens.font.family.mono}`;
+    ctx.textBaseline = "middle";
+    for (const it of flash.items) {
+      const label = `${it.delta >= 0 ? "+" : "−"}${fmtSize(Math.abs(it.delta))}`;
+      const tw = ctx.measureText(label).width + 8 * dpr;
+      const th = 16 * dpr;
+      if (it.w < tw + 4 * dpr || it.h < th + 4 * dpr) continue;
+      const x = it.x + it.w - tw - 2 * dpr;
+      const y = it.y + it.h - th - 2 * dpr;
+      ctx.fillStyle = tokens.treemap.state.newBadgeBg;
+      ctx.fillRect(x, y, tw, th);
+      ctx.fillStyle = tokens.treemap.state.newBadgeText;
+      ctx.fillText(label, x + 4 * dpr, y + th / 2);
+    }
+    ctx.restore();
+    return true;
+  }
+  if (t > FLASH_MS + FLASH_FADE_MS) return (ctx.restore(), false);
+  // two pulses over FLASH_MS, then the outline fades out
+  const pulse = t < FLASH_MS ? 0.5 - 0.5 * Math.cos((4 * Math.PI * t) / FLASH_MS) : 1 - (t - FLASH_MS) / FLASH_FADE_MS;
+  ctx.globalAlpha = Math.max(0, Math.min(1, t < FLASH_MS ? 0.35 + 0.65 * pulse : pulse));
+  ctx.strokeStyle = FLASH;
+  ctx.lineWidth = 2 * dpr;
+  ctx.shadowColor = `${FLASH}8C`; // 55 %
+  ctx.shadowBlur = 18 * dpr;
+  for (const it of flash.items) ctx.strokeRect(it.x + dpr, it.y + dpr, Math.max(1, it.w - 2 * dpr), Math.max(1, it.h - 2 * dpr));
+  ctx.restore();
+  return true;
 }
 
 function rectOf(f: DrawFrame, row: number) {

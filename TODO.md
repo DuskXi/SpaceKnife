@@ -27,13 +27,17 @@
 
 ## M5 文件变化钩子
 
-- [ ] Windows：ReadDirectoryChangesW + USN 日志（助手加 `read_usn(volume, from)`）
-- [ ] Linux：fanotify / inotify；macOS：FSEvents
-- [ ] 增量流水线：定点重扫、合并进节点表
-- [ ] 树图元素闪烁（变化提示）
+- [x] Windows：ReadDirectoryChangesExW + USN 日志补偿（助手 `query_usn` / `read_usn`）
+- [x] Linux：inotify（额度 + 轮询对账）；macOS：FSEvents（未实机验证）
+- [ ] Linux fanotify（需要 Linux 提权助手）
+- [x] 增量流水线：定点重扫、合并进节点表（relist、压缩、视图 id 重映射）
+- [x] 树图元素闪烁（变化提示；减少动画时静态角标）
 - [ ] 「快照后变化」
-- [ ] 已停止扫描的「继续扫描」（从停下的位置补扫）
-- [ ] 验收：并发写入压测无事件丢失，或溢出可检测并补扫
+- [x] 已停止扫描的「继续扫描」（从停下的位置补扫）
+- [x] F5「重新扫描当前视图」
+- [x] 验收：并发写入压测无事件丢失，或溢出可检测并补扫（Windows 与 Linux）
+- [ ] 长时间运行（10 万次变化）后的压缩与内存：未在用户盘上做长时间压测
+- [ ] W2 的「正在扫描」闪烁（UI-W2-04 / UI-TM-42：扫描中正在填充的文件夹）
 
 ## M6 管理与分析
 

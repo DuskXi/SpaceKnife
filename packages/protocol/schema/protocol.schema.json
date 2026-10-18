@@ -2857,6 +2857,29 @@
       "title": "ScanProgressEvent",
       "type": "object"
     },
+    "ScanRescanParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "description": "Folder to read again, with everything below it",
+          "minimum": 1,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "ScanRescanParams",
+      "type": "object"
+    },
     "ScanRootInfo": {
       "properties": {
         "node": {
@@ -5384,6 +5407,12 @@
       "requiresSession": true,
       "result": "#/$defs/EmptyResult"
     },
+    "scan.continue": {
+      "doc": "Go on with a stopped hard scan: the folders it had not read yet (W2 待定 16).",
+      "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
     "scan.list": {
       "doc": "Scans held by the backend.",
       "params": "#/$defs/Empty",
@@ -5393,6 +5422,12 @@
     "scan.pause": {
       "doc": "Stop dispatching reads; batches in flight finish (W2).",
       "params": "#/$defs/ScanIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/ScanStatus"
+    },
+    "scan.rescan": {
+      "doc": "Read a folder of a finished scan again with everything below it, in place (F5, M5).",
+      "params": "#/$defs/ScanRescanParams",
       "requiresSession": true,
       "result": "#/$defs/ScanStatus"
     },

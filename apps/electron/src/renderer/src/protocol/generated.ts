@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "c2a6f6ac2875111f";
+export const SCHEMA_HASH = "0765e2063aa16d67";
 
 export interface AgeCond {
   end: number;
@@ -617,6 +617,12 @@ export interface ScanProgressEvent {
   sub: string;
 }
 
+export interface ScanRescanParams {
+  /** Folder to read again, with everything below it */
+  node: number;
+  scan_id: string;
+}
+
 export interface ScanRootInfo {
   node: number;
   path: string;
@@ -1120,10 +1126,14 @@ export interface Methods {
   "scan.check_paths": { params: PathCheckParams; result: PathCheckResult };
   /** Forget a scan and free its memory. */
   "scan.close": { params: ScanIdParams; result: EmptyResult };
+  /** Go on with a stopped hard scan: the folders it had not read yet (W2 待定 16). */
+  "scan.continue": { params: ScanIdParams; result: ScanStatus };
   /** Scans held by the backend. */
   "scan.list": { params: Empty; result: ScanListResult };
   /** Stop dispatching reads; batches in flight finish (W2). */
   "scan.pause": { params: ScanIdParams; result: ScanStatus };
+  /** Read a folder of a finished scan again with everything below it, in place (F5, M5). */
+  "scan.rescan": { params: ScanRescanParams; result: ScanStatus };
   /** Continue a paused scan where it stopped. */
   "scan.resume": { params: ScanIdParams; result: ScanStatus };
   /** Change the disk load limit of a running scan (W2). */

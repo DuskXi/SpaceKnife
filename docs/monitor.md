@@ -54,63 +54,75 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 - 监视器自己不合并、不去重；但同一批里同一路径重复的 `modified` 可以只留最后一条。
 - 任何时候丢了事件（缓冲区溢出、队列溢出、监视失效），都必须发一条 `overflow`（路径是受影响的最小已知目录），绝不静默丢失。
 
-### 2.1 Windows：`ReadDirectoryChangesExW`
+### 2.1 Windows：`ReadDirectoryChangesExW`（`monitor/win.py`）
 
-- 每个扫描根一个目录句柄（`FILE_LIST_DIRECTORY`，`FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED`，共享读写删），`bWatchSubtree=TRUE`，`ReadDirectoryNotifyExtendedInformation`（Windows 10 1709+；更老的系统用 `ReadDirectoryChangesW`，`modified` 不带大小）。
-- 关注：文件名、目录名、大小、最后写入时间、属性、创建。缓冲区 1 MiB（本地卷；网络卷 64 KiB）。读到 0 字节或 `ERROR_NOTIFY_ENUM_DIR` = 溢出。
-- 线程里用重叠 I/O + 事件等待；`stop` 用 `CancelIoEx` 打断。
-- 动作映射：`ADDED` → created；`REMOVED` → deleted；`MODIFIED` → modified（带 `FileSize`、`AllocatedLength`、`LastModificationTime`；目录的 MODIFIED 忽略）；`RENAMED_OLD_NAME` + `RENAMED_NEW_NAME` → renamed。
+- 每个扫描根一个目录句柄（`FILE_LIST_DIRECTORY`，`FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED`，共享读写删），`bWatchSubtree=TRUE`，`ReadDirectoryNotifyExtendedInformation`（Windows 10 1709+）。第一次读取被拒时依次退回：Ex 64 KiB → 旧接口 `ReadDirectoryChangesW`（`modified` 不带大小，状态说明「此卷不提供扩展变化信息」）。
+- 关注：文件名、目录名、大小、最后写入时间、属性、创建。缓冲区 1 MiB（本地卷；网络卷 64 KiB）。读到 0 字节或 `ERROR_NOTIFY_ENUM_DIR` = 溢出：发 `overflow(root)`，继续监视。
+- 线程里用重叠 I/O + 事件等待；每次读取完成先复制数据、立即挂下一次读取，再解码交给 sink。`stop` 用 `CancelIoEx` 打断，1 秒内返回。
+- 动作映射：`ADDED` → created；`REMOVED` → deleted；文件的 `MODIFIED` → modified（`FileSize`、`AllocatedLength`、`LastModificationTime`；压缩/稀疏文件 alloc 为 None，云占位为 0，常驻文件为 0）；目录的 `MODIFIED` 忽略；`RENAMED_OLD_NAME` + `RENAMED_NEW_NAME` → renamed（旧名等不到新名 50 ms 则当作 deleted）。
+- 根目录每秒检查一次（`DeletePending` 与最终路径）：被删除、移动或改名 → 先发 `overflow(root)` 再 `failed`。第一次读取都没挂上的失败（打不开、文件系统不支持通知）只报 `failed`，由流水线改用轮询。
+- 8.3 短名的通知不展开：路径找不到节点时按「重新列出父目录」处理。
 
-### 2.2 Linux：inotify（预算）+ 轮询对账
+### 2.2 Linux：inotify（额度）+ 轮询对账（`monitor/linux.py`）
 
-- 每个目录一个 watch（`IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF | IN_ONLYDIR | IN_DONT_FOLLOW`），新目录出现时补加 watch。
-- 预算：`/proc/sys/fs/inotify/max_user_watches` 减去已用（取不到时按 8192），最多用其中 80%；按广度优先（浅层先）分配。超出预算的子树，以及 `IN_Q_OVERFLOW` 之后，用轮询对账：按目录 mtime 发现增删（每 `poll_interval` 秒一轮，经 IO 限速器）。
-- fanotify（`FAN_MARK_FILESYSTEM`）需要 `CAP_SYS_ADMIN`，等 Linux 提权助手（见 TODO）。
+- 每个目录一个 watch，监视器线程看到新目录（`IN_CREATE`/`IN_MOVED_TO`）就立即加 watch 并列一遍，已有条目报 created（覆盖「mkdir 后立刻写入」和整棵树移入）。
+- 额度：进程内所有扫描共享 `max_user_watches` 的 80%（读不到按 8192）；只有父目录有 watch 的目录才分到 watch（浅层先），其余用内嵌的轮询对账，状态 degraded「inotify 监视额度不足，N 个文件夹改为轮询」。
+- `IN_Q_OVERFLOW`：发 `overflow(root)`，然后逐个校验 watch：过时的删掉、子树清理并重新遍历。根目录的 `IN_DELETE_SELF` / `IN_MOVE_SELF`：`overflow(root)` + `failed`。
+- 文件的 `IN_CLOSE_WRITE` / `IN_ATTRIB` → modified，大小与占用（`st_blocks × 512`）由监视器自己 stat。
+- fanotify（`FAN_MARK_FILESYSTEM`）需要 `CAP_SYS_ADMIN`，等 Linux 提权助手（见 TODO）。网络卷与 WSL 经 9P 挂的 Windows 盘：内核收不到对端的改动，流水线直接改用轮询。
 
-### 2.3 macOS：FSEvents
+### 2.3 macOS：FSEvents（`monitor/mac.py`）
 
-- `FSEventStreamCreate`（`kFSEventStreamCreateFlagFileEvents | kFSEventStreamCreateFlagNoDefer | kFSEventStreamCreateFlagWatchRoot`，latency 0.05 s），专用线程跑 CFRunLoop；`MustScanSubDirs` / `UserDropped` / `KernelDropped` 标志 = overflow。
-- 创建失败（ctypes 找不到框架等）时退回轮询。**未在 macOS 实机验证。**
+- `FSEventStreamCreate`（`FileEvents | NoDefer | WatchRoot`，latency 0.05 s），专用线程跑 CFRunLoop；`MustScanSubDirs` / `UserDropped` / `KernelDropped` = overflow。
+- 构造失败（找不到框架）或一启动就 `failed` 时退回轮询。**未在 macOS 实机验证。**
 
-### 2.4 轮询（`poll`）
+### 2.4 轮询（`monitor/poll.py`）
 
-- 通用兜底：记录每个已扫描目录的 mtime，每 `poll_interval` 秒比对一次（经 IO 限速器、分批），mtime 变了 → `dir`。只能发现目录内容的增删改名，发现不了文件内容大小变化（文件 mtime 不传到目录）。
+- 通用兜底：记录每个目录的 mtime，每 `poll_interval`（30 s）秒比对一轮，每秒最多 stat `poll_rate`（2000）个目录、分小批进行（不经 IO 限速器，靠这个速率保持轻量）。mtime 变了 → `dir`；目录消失 → `deleted`（只报最上层）。只能发现目录内容的增删改名，发现不了文件内容的大小变化。状态始终是 degraded（「未使用系统的文件变化通知……」）。
 
-## 3. 提权助手：USN 补偿（Windows）
+## 3. 提权助手：USN 补偿（Windows，`helper/usn.py`）
 
-- 新操作 `read_usn(volume, start_usn, journal_id)`：`FSCTL_QUERY_USN_JOURNAL` 取日志 id 和当前位置；从 `start_usn` 读 `FSCTL_READ_USN_JOURNAL`（V2/V3 记录），返回 `{journal_id, next_usn, rows: [(frn, parent_frn, reason, name)]}`（分帧，同 scan_mft 的二进制帧）。日志 id 变了或 `start_usn` 已被截断 → 错误码 `usn_gone`。
-- 后端在扫描开始时记下 `(journal_id, next_usn)` 作为检查点（随快照保存，M6 的「快照后变化」用）。溢出时读检查点之后的记录，取出所有 `parent_frn` → 对应目录重新列出；之后把检查点推进到 `next_usn`。
-- FRN 到节点：MFT 扫描的 `ino` 就是记录号；硬扫描在 Windows 上 `ino` 是 FileId（低 48 位 = 记录号）。后端按需建 `ino → 节点` 的排序索引。
-- 没有已提权的助手（不弹 UAC 去要权限）时：溢出 → 受影响子树标脏重扫。
+- `query_usn(volume)` → `{journal_id, first_usn, next_usn, lowest_valid_usn, max_usn, max_size, allocation_delta}`。
+- `read_usn(volume, start_usn, journal_id, max_rows, duty)`：从检查点读到读取开始时的日志末尾（V2/V3 记录），二进制帧（流 `usn`，布局 `usn.v1`）：列 `frn` u64、`parent_frn` u64、`usn` i64、`reason` u32、`attrs` u32、`name_off` u32 / `name_len` u16 与 `names` blob，标量 `{journal_id, next_usn, rows, truncated}`。检查点有效区间 `[max(first_usn, lowest_valid_usn), next_usn]`，区间外或日志 id 变了 → `usn_gone`；日志未开启 → `usn_inactive`。
+- 只用已经在运行的已提权助手（MFT 快扫会启动它），不为 USN 专门启动、更不弹 UAC；每 30 秒查一次检查点，助手因此不会空闲退出。检查点分「安全」与「较新」两个，安全的滞后一个周期：溢出时从安全检查点读，覆盖还在缓冲区里没送到的事件。
+- FRN 到节点：比较低 48 位（记录号）。MFT 扫描的 `ino` 就是记录号；硬扫描在 Windows 上 `ino` 是完整的 FileId（原生列目录才有）。
+- 没有可用的助手、树里没有文件 ID（纯 Python 列目录时）、或记录超过 100 万条：溢出 → 受影响子树标脏重扫。
+- 检查点随快照保存、回答「快照之后变了什么」：随 M6 的快照对比做。
 
 ## 4. 节点表的增量修改（`spaceknife/store/mutate.py`）
 
-不变量（名字索引、过滤结构缓存都依赖它）：
+不变量（名字索引、过滤的结构缓存都依赖它）：
 
 1. **行只追加，id 不复用，已有行的名字永不改写。**
-2. 每个目录的子项仍是一段连续 id（`child_start` / `child_count`），子项永远在目录之后。
-3. 已删除或被搬走的行打 `Flag.GONE`：`depth = 0`、`parent = -1`、`kind = OTHER`、大小与合计清零、`child_count = 0`；它们不在任何目录的子项区间里，树遍历到不了；对全表做向量化扫描的地方（过滤、名字搜索、结果列表、命令面板）必须屏蔽 `GONE`。
+2. 每个目录的子项仍是一段连续 id（`child_start` / `child_count`）。通常在目录之后；被 relist 搬到新 id 的目录保留原来的子项区间，可能在它之前，所以读方的防护是「区间不从 0 开始、不越过 `n`」。
+3. 已删除或被搬走的行打 `Flag.GONE`：`depth = 0`、`parent = -1`、`kind = OTHER`、大小与合计清零、`child_count = 0`；它们不在任何目录的子项区间里，树遍历到不了；过滤、命令面板搜索屏蔽 `GONE`。
 
 操作：
 
-- `update_stats(store, nodes, size, alloc, mtime, …) -> Delta`：原地改文件的大小、占用、时间；差值沿祖先链上推（同一批按层向量化）。id 不变。
-- `relist(store, dir, listing) -> Relist`：目录的新内容（和扫描 worker 一样的列）。按名字匹配旧子项：保留的子项复制到新行（目录连同自己的子项区间与合计一起搬，孙辈的 `parent` 改指新行），新出现的子项建新行（新目录标 `PENDING`，交给增量扫描），消失的子项连同整棵子树标 `GONE`。新区间追加在表尾，旧区间整体标 `GONE`。目录合计按新子项重算，差值沿祖先链上推。返回 `remap`（旧 id → 新 id）、`removed`、`added`、`pending`（要扫描的新目录）和每个变化项的占用差（闪烁角标用）。
-- `compact(store) -> remap`：`GONE` 行超过全表 25% 且多于 10 万行时，在计算池里按广度优先重排整张表（重建名字堆），之后名字索引重建、视图按 remap 换 id。
-- 发布顺序沿用 M4：先写行，再改 `_n`，再写 `child_start`，最后写 `child_count`；读方的保护（`child_range`、`subtree_ids`）不变。
+- `update_stats(store, nodes, size, alloc, mtime)`：原地改文件的大小、占用、时间，差值沿祖先链上推（向量化）。id 不变。
+- `relist(store, folder, names, entries, ext)`：按名字匹配旧子项。保留的复制到表尾新区间（目录连同子项区间与合计一起搬，孙辈的 `parent` 改指新行），新出现的建新行（新目录标 `PENDING`，交给增量扫描），消失的连同子树标 `GONE`，旧区间整体标 `GONE`；目录合计重算，差值上推。返回 `moved_from/moved_to`、`removed`（及其占用）、`added`、`pending`、`grown`（及占用差）。
+- `can_relist(store, folder)`：已列出、未 GONE、且没有 `PENDING` 子项（扫描的队列按 id 引用它们）。
+- `compact(store) -> (new_store, remap)`：`GONE` 行超过全表 25% 且多于 10 万行、扫描不在进行时，在计算池里按广度优先重排（重建名字堆），在结构锁下 `adopt`，名字索引重建，视图按 `remap` 换 id。
 
-视图（`view/state.py`）提供 `remap(fn)`：缩放根、选中项、前进/后退历史、小项聚合的成员数组都换成新 id；指向已删除节点的条目退回到最近的仍存在的祖先。
+结构锁（`store/lock.py`）：计算池里的读操作（渲染、汇总、过滤、搜索）在 `STRUCTURE.read()` 下运行；`relist` / `update_stats` / 压缩在事件循环线程上 `async with STRUCTURE.write()`（异步等读者退出，写的过程同步、不 await）。扫描的追加不需要锁。
 
-## 5. 变化流水线（`spaceknife/monitor/manager.py`）
+视图（`view/state.py`）提供 `remap(new_ids, fallback)`：缩放根、选中项、前进/后退历史、小项聚合成员、待闪烁项都换成新 id；指向已删除节点的缩放退回到变化前记下的祖先链里最近的仍存在者。
 
-1. **合并**：每个扫描一个队列，安静窗口 `scan.coalesce_ms`（默认 150 ms），持续有事件时最长 1 s 也要处理一次。
-2. **归类**：`modified` 且带数值、路径对应已扫描的文件 → `update_stats`；其余 → 所在目录（`renamed` 两边的目录、`dir` 本身）记为「要重新列出」。路径还没扫描到 → 忽略（扫描会读到最新状态）。
-3. **事件风暴**：一个窗口里要重新列出的目录超过 2000 个、或事件超过 20000 条 → 改为把它们的最近公共祖先标脏；溢出同理。标脏的子树在安静 2 秒后按 `scan.load_incremental` 档位经 IO 限速器重扫（重扫结果整体替换该子树，和 relist 一样走 remap）。
-4. **应用**：重新列出用扫描 worker 的同一套列目录代码（原生或纯 Python），只列这一层；结果交给 `relist`。新目录（`pending`）排进增量扫描（同一个扫描器，限速档位同上）。
-5. **推送**（不超过 10 Hz）：`scan.changes` 事件 = 变化的节点（新 id）、占用差、变化种类；视图据此生成闪烁列表（只含当前可见的块，或其最近的可见祖先），随下一帧绘制列表下发（UI-TM-43）；状态栏的可用空间与详情栏同步刷新（UI-MAIN-63）。
-6. **状态**：`monitor.status` / `monitor` 主题：每个扫描的 `WatchStatus`，加上待处理队列长度与最近一次应用耗时。状态栏「实时监控中」/「实时监控 · 降级」/「实时监控已关闭」（UI-MAIN-49、UI-W1-12）。
+## 5. 变化流水线（`spaceknife/server/monitors.py`）
+
+1. **启动**：每个扫描（不含快照）一个 `ScanMonitor`，扫描一开始就启动；监视器在线程里启动，原生监视器一启动就失败 → 轮询。扫描进行中每 0.25 s、扫描结束时立即把新目录交给逐目录监视器（跳过挂载点）。
+2. **合并**：安静窗口 `scan.coalesce_ms`（默认 150 ms），持续有事件时最长 1 s 也要处理一次。MFT 扫描读取期间事件全部留到整树就绪后再处理。
+3. **归类**：文件的 `modified` → `update_stats`（硬扫描的树在 Windows 上按硬扫描的占用规则从大小推算：云占位 0、常驻 ≤ 512 B 为 0、其余按簇；占用未知的压缩/稀疏文件 → 重新列出所在目录）；其余 → 所在目录（`renamed` 两边、`dir` 本身）「要重新列出」。路径还没扫描到 → 交给扫描；目录有 `PENDING` 子项 → 延后到扫描读完。
+4. **溢出**：有 USN 检查点 → 按日志补列被动过的目录；否则子树标脏。**事件风暴**（一个窗口里要列的目录 > 2000 或事件 > 20000）→ 公共祖先标脏。标脏的子树安静 2 秒后逐目录重新列出（新目录增量扫描）。
+5. **应用**：列目录用扫描的同一套代码（原生或纯 Python，只列一层），扫描进行中经它的 IO 限速器；深的目录先 `relist`（祖先的 relist 会把它的新区间一起带走）；之后新目录增量扫描。
+6. **推送**：变化项（新 id）与占用差交给视图（`ViewManager.flash`），视图把它们映射到当前帧的行（块本身、所在聚合块或最近的已绘祖先），随下一帧的 `FrameInfo.flash` 下发；前端闪两次后淡出，「减少动画」时画静态角标（UI-TM-43/44）。可用空间最多每秒重读一次（UI-MAIN-63）。
+7. **状态**：`ScanStatus.monitor`（`MonitorStatus`：state、detail、watcher、监视/轮询目录数、事件数、已应用变化数、溢出、待处理、最近一次耗时）。状态栏「实时监控中 / 部分轮询 / 失败 / 已关闭」，点击开关 `scan.monitor`（UI-MAIN-49/52、UI-W1-12）。
+8. **F5 与继续扫描**：`scan.rescan(node)` 把一个文件夹连同子树重新读一遍（实时监控关闭时由不带监视器的被动监控执行）；`scan.continue` 让已停止的硬扫描接着读它队列里剩下的文件夹。
 
 ## 6. 验收（来自 PLAN M5）
 
-- 并发写入压测：多线程在监视的目录里持续新建、追加、改名、删除文件（短时、低强度、只在临时目录），结束后节点表与重新硬扫描的结果逐项一致；溢出时有 `overflow` 记录并补偿到一致。
-- 事件到界面：单个文件变化在 `coalesce_ms + 100 ms` 内反映到树图并闪烁。
-- 长时间运行（模拟 10 万次变化）后，`GONE` 行压缩生效，内存回到扫描结束时的水平附近。
+| 项 | 结果 |
+|---|---|
+| 并发写入压测：不丢事件，或可检测的溢出并补偿 | 4 个写线程在监视中的临时目录里持续新建、追加、删除、改名、建目录，结束后节点表与重新扫描逐项一致（Windows：rdcw；Linux：inotify）；溢出 → USN 补列或子树重扫，均有测试 |
+| 事件到界面 | 合并窗口 150 ms 后应用（小目录一次 relist 约 1–5 ms），下一帧携带闪烁 |
+| 长时间运行后的压缩 | `compact` 的等价性有测试；10 万次变化的长时间压测未做（按约定不在用户盘上做长时间 IO） |

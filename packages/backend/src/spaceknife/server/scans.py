@@ -599,11 +599,12 @@ class ScanManager:
 
     # ------------------------------------------------------------------ hard scan
 
-    async def _run_hard(self, handle: ScanHandle) -> None:
+    async def _run_hard(self, handle: ScanHandle, again: bool = False) -> None:
         scanner = handle.scanner
         assert scanner is not None
         roots = [r.path for r in handle.roots]
-        emit("scan", f"开始扫描 {', '.join(roots)}（硬扫描）", scan_id=handle.id, path=roots[0])
+        verb = "继续扫描" if again else "开始扫描"
+        emit("scan", f"{verb} {', '.join(roots)}（硬扫描）", scan_id=handle.id, path=roots[0])
         for r in handle.roots:
             if r.volume is not None and r.volume.note:  # e.g. a Windows drive from WSL over 9P
                 emit("scan", f"{printable(r.path)}：{r.volume.note}", level="WARNING", scan_id=handle.id)
@@ -646,6 +647,19 @@ class ScanManager:
             handle.method = "hard"
             await scanner.run(on_progress=progressed)
         await self._finish(handle, reported if warnings_on() else None)
+
+    async def continue_scan(self, scan_id: str) -> ScanHandle:
+        """Go on with a stopped hard scan (W2 待定 16): its queue still holds the folders it had
+        not read; the tree grows on where it stopped, then it is saved like any finished scan."""
+        handle = self.get(scan_id)
+        scanner = handle.scanner
+        if handle.running:
+            return handle
+        if handle.source != "scan" or scanner is None or handle.method != "hard" or not scanner.has_queue:
+            raise RpcError(ErrorCode.INVALID_REQUEST, "这次扫描没有可以继续的部分")
+        scanner.uncancel()
+        handle.task = asyncio.create_task(self._run_hard(handle, again=True), name=f"scan-{handle.id}")
+        return handle
 
     def use_mft(self, scan_id: str) -> ScanHandle:
         """Switch a running hard scan to the MFT fast scan (W2-24): the hard scan goes on while the

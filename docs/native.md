@@ -95,8 +95,8 @@ def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOp
   - 鉴权：助手先校验后端 pid 再发令牌；后端校验令牌和对端 pid（Windows 允许是所启动进程的直接子进程——venv 启动器；句柄一直持有，pid 不会被复用）。
   - 一个后端只有一个助手（`SharedHelper`）：已提权的助手也服务不需要提权的请求；空闲 10 分钟退出，下次快扫再启动（非管理员后端会再弹一次 UAC）。
 - 协议：帧 = 4 字节小端长度 + 内容，内容首字节是类型：`J` JSON（pydantic 严格模型）/ `B` 二进制帧（复用 `spaceknife_protocol.binary`，流名 `mft`，布局 `mft.v1`，名字 blob `names`）。消息：`hello {token, pid, elevated}`、`progress {phase: scan|send, elapsed}`（扫描时每秒一次心跳）、`begin {rows, frames}`、`response {result, extras}`、`error {code, message}`。
-- 白名单操作：`ping`、`volume_info(volume)`、`scan_mft(volume, batch_rows, duty)`（读并解析 $MFT，分批发回各列）、`shutdown`；仅非提权助手开放的测试操作 `scan_mft_image(path, duty)`（读 NTFS 卷镜像）。参数严格校验：卷只能是 `X:` 形式的本地 NTFS 卷。M5 加 `read_usn(volume, from)`。
-- 错误码：`needs_admin`、`forbidden`、`invalid_request`、`not_supported`、`not_ntfs`、`io_error`、`unavailable`、`bad_frame`、`internal`（操作失败，助手仍可用）；连接层 `HelperUnavailable` 的 code：`exited`、`timeout`、`auth`、`protocol`、`closed`、`not_supported`、`denied`。
+- 白名单操作：`ping`、`volume_info(volume)`、`scan_mft(volume, batch_rows, duty)`（读并解析 $MFT，分批发回各列）、`shutdown`；仅非提权助手开放的测试操作 `scan_mft_image(path, duty)`（读 NTFS 卷镜像）。参数严格校验：卷只能是 `X:` 形式的本地 NTFS 卷。M5 加了 `query_usn(volume)` 与 `read_usn(volume, start_usn, journal_id, max_rows, duty)`（USN 日志，二进制帧流 `usn`、布局 `usn.v1`，见 [monitor.md](monitor.md) §3）。
+- 错误码：`needs_admin`、`forbidden`、`invalid_request`、`not_supported`、`not_ntfs`、`io_error`、`unavailable`、`bad_frame`、`internal`、`usn_inactive`（日志未开启）、`usn_gone`（检查点失效）（操作失败，助手仍可用）；连接层 `HelperUnavailable` 的 code：`exited`、`timeout`、`auth`、`protocol`、`closed`、`not_supported`、`denied`。
 - 测试：自动化测试**绝不**触发 UAC。助手用普通权限运行（这台开发机本身已提权，测试用 Safer NORMALUSER 令牌启动助手），`scan_mft` 在非提权时返回 `needs_admin`；UAC 路径只用替身测试参数构造和取消映射。Linux/macOS 上暂不实现提权（`elevate=True` 返回 `not_supported`），unix socket 通道已有测试。
 - 吞吐：900 万行（约 850 MB）经管道传输与拼装约 0.5 s（1.7 GB/s）；客户端直接拼进按 `begin` 预分配的表。
 

@@ -41,8 +41,8 @@ async def watched() -> Any:
         await mgr.close()
 
 
-async def scanned(mgr: ScanManager, root: Path) -> ScanHandle:
-    handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=0, auto_snapshot=False))
+async def scanned(mgr: ScanManager, root: Path, workers: int | None = 0) -> ScanHandle:
+    handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=workers, auto_snapshot=False))
     assert handle.task is not None
     await asyncio.wait_for(asyncio.shield(handle.task), 30)
     assert handle.monitor is not None
@@ -216,3 +216,83 @@ async def test_concurrent_writers_end_consistent(watched: Any, tmp_path: Path) -
     await asyncio.to_thread(join)
     await until(same_as_disk(handle, root), 20)
     check_structure(handle.store)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="the USN journal is NTFS on Windows")
+async def test_overflow_replays_the_usn_journal(watched: Any, tmp_path: Path) -> None:
+    """An overflow on a volume with a journal checkpoint lists just the folders the journal names."""
+    from spaceknife import native
+    from spaceknife.monitor import Change
+
+    if not native.has("scan_slice"):
+        pytest.skip("file ids come from the native lister")
+    mgr, _, _ = watched
+    root = build_tree(tmp_path / "root").root
+    handle = await scanned(mgr, root, workers=None)
+    mon = handle.monitor
+    assert mon is not None
+    target = max((d for d in root.rglob("*") if d.is_dir()), key=lambda d: len(d.parts))
+    node = handle.store.find(str(target))
+    assert node is not None
+    ino = int(handle.store.cols["ino"][node])
+    vol = os.path.splitdrive(str(root))[0].upper()
+    calls: list[tuple[str, int, int]] = []
+
+    class Journal:
+        async def read_usn(self, volume: str, start: int, jid: int, **_: Any) -> dict[str, Any]:
+            calls.append((volume, start, jid))
+            return {"parent_frn": np.array([ino | (7 << 48)], dtype=np.uint64), "truncated": False}
+
+    async def client() -> Any:
+        return Journal()
+
+    mon._usn_client = client  # type: ignore[method-assign]
+    mon.usn = {vol: (42, 1000, 2000)}
+    for w in [w for _, w in mon.watchers]:  # the watcher "loses" this change
+        await asyncio.to_thread(w.stop)
+    (target / "lost.bin").write_bytes(b"l" * 7000)
+    mon._sink([Change("overflow", str(root), is_dir=True)])
+    await until(same_as_disk(handle, root))
+    assert calls == [(vol, 1000, 42)]  # read from the safe checkpoint
+    assert not mon.trees  # no subtree rescan was needed
+
+
+async def test_a_stopped_scan_goes_on(watched: Any, tmp_path: Path) -> None:
+    mgr, _, monitors = watched
+    root = build_tree(tmp_path / "root").root
+    mgr.monitors = None  # start() then returns before the scan task ever ran ...
+    handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=0, auto_snapshot=False))
+    mgr.cancel(handle.id)  # ... so it stops with every folder still queued
+    mgr.monitors = monitors
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    stopped = handle.status()
+    assert stopped.state == "cancelled" and stopped.pending_dirs > 0
+    await mgr.continue_scan(handle.id)
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    assert handle.status().state == "done" and handle.status().pending_dirs == 0
+    await until(same_as_disk(handle, root))
+    with pytest.raises(Exception, match="没有可以继续"):
+        await mgr.continue_scan(handle.id)
+
+
+async def test_rescan_a_folder_without_monitoring(watched: Any, tmp_path: Path) -> None:
+    mgr, _, monitors = watched
+
+    class Off:
+        def get(self, key: str) -> Any:
+            return False if key == "scan.monitor" else {"scan.coalesce_ms": 150}.get(key)
+
+    mgr.settings = Off()  # type: ignore[assignment]
+    root = build_tree(tmp_path / "root").root
+    handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    assert handle.monitor is None
+    (root / "later.bin").write_bytes(b"l" * 12345)
+    deep = max((d for d in root.rglob("*") if d.is_dir()), key=lambda d: len(d.parts))
+    (deep / "also.bin").write_bytes(b"a" * 999)
+    await monitors.rescan(handle, 1)  # F5 on the root: the whole tree is read again
+    await until(same_as_disk(handle, root))
+    assert handle.status().monitor is None  # rescanning did not switch monitoring on

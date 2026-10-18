@@ -103,6 +103,7 @@ def install(server: Server) -> None:
             tab=c.tab,
             scanning=scanning,
             paused=status is not None and status.paused,
+            stopped=status is not None and status.state == "cancelled" and status.pending_dirs > 0,
             method=status.method if status is not None else "hard",
             has_scan=handle is not None,
             source=handle.source if handle is not None else "scan",

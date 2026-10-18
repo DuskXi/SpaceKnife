@@ -27,6 +27,7 @@ class Context:
     tab: str  # scan | start | settings
     scanning: bool = False
     paused: bool = False
+    stopped: bool = False  # a hard scan was stopped with folders left to read (scan.continue)
     method: str = "hard"  # hard | mft | snapshot: how the tree is being read
     has_scan: bool = False
     source: str = "scan"  # scan | snapshot
@@ -64,6 +65,10 @@ def _pausable(c: Context) -> str | None:
     if c.method == "mft":
         return "MFT 快速扫描几秒内完成，无需暂停"
     return "已暂停" if c.paused else None
+
+
+def _stopped(c: Context) -> str | None:
+    return None if c.stopped else "没有可以继续的扫描"
 
 
 def _paused(c: Context) -> str | None:
@@ -165,8 +170,7 @@ def _registry() -> tuple[Command, ...]:
             ("F5",),
             ("rescan", "refresh"),
             1,
-            (_tab, _done),
-            milestone="M5",
+            (_tab, _done, _view),
         ),
         C(
             "scan.rescan_all",
@@ -288,6 +292,7 @@ def _registry() -> tuple[Command, ...]:
         C("scan.pause", "暂停扫描", "pause", (), ("pause",), needs=(_pausable,)),
         C("scan.resume", "继续扫描", "play", (), ("resume", "continue"), needs=(_paused,)),
         C("scan.stop", "停止扫描", "stop", (), ("stop", "cancel"), needs=(_running,)),
+        C("scan.continue", "继续已停止的扫描", "play", (), ("continue", "go on"), needs=(_stopped,)),
         C("scan.new", "新扫描", "drive", (), ("new scan", "scan")),
         C("snapshot.open", "打开快照文件…", "snapshot", (), ("open snapshot", "load")),
         C("app.log", "日志面板", "log", ("Ctrl+J",), ("log", "logs", "console")),

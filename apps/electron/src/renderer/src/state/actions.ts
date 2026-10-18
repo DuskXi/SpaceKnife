@@ -290,18 +290,28 @@ export async function startScan(params: ScanStartParams, replaceTab?: string): P
 }
 
 /** W2 scan controls: pause / resume (UI-W2-19/20), load level and concurrency (UI-W2-28…45), MFT (UI-W2-24). */
-async function scanControl<M extends "scan.pause" | "scan.resume" | "scan.use_mft" | "scan.set_load">(method: M, params: Methods[M]["params"]): Promise<void> {
+type ScanControl = "scan.pause" | "scan.resume" | "scan.use_mft" | "scan.set_load" | "scan.continue" | "scan.rescan";
+
+async function scanControl<M extends ScanControl>(method: M, params: Methods[M]["params"]): Promise<boolean> {
   try {
     const status = (await call(method, params)) as ScanStatus;
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status } }));
+    return true;
   } catch (err) {
     toast(err instanceof RpcError ? err.message : String(err));
+    return false;
   }
 }
 
 export const pauseScan = (scanId: string) => scanControl("scan.pause", { scan_id: scanId });
 export const resumeScan = (scanId: string) => scanControl("scan.resume", { scan_id: scanId });
 export const useMft = (scanId: string) => scanControl("scan.use_mft", { scan_id: scanId });
+/** A stopped hard scan reads the folders it had left (W2 待定 16). */
+export const continueScan = (scanId: string) => scanControl("scan.continue", { scan_id: scanId });
+/** Read a folder of the tree again with everything below it (F5, M5). */
+export async function rescanFolder(scanId: string, node: number): Promise<void> {
+  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast("正在重新扫描这个文件夹…");
+}
 export const setScanLoad = (scanId: string, level: LoadLevel, custom?: number | null, concurrency?: number | null) =>
   scanControl("scan.set_load", { scan_id: scanId, level, custom: custom ?? null, concurrency: concurrency ?? null });
 

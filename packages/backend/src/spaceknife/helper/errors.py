@@ -1,8 +1,9 @@
 """Exceptions raised by :class:`spaceknife.helper.HelperClient`.
 
 ``HelperError`` — an operation failed; ``code`` is the helper's error code (``needs_admin``,
-``not_ntfs``, ``io_error``, ``invalid_request`` …). The helper is still usable unless it is
-also a :class:`HelperUnavailable`.
+``not_ntfs``, ``io_error``, ``invalid_request``, ``usn_inactive`` (no change journal on the
+volume), ``usn_gone`` (the checkpoint is no longer in the journal) …). The helper is still usable
+unless it is also a :class:`HelperUnavailable`.
 
 ``HelperUnavailable`` — there is no working helper; ``code`` says why: ``exited``, ``timeout``,
 ``auth``, ``protocol`` (it sent garbage and was disconnected), ``closed``, ``not_supported``.

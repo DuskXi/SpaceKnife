@@ -30,6 +30,7 @@ import numpy as np
 from loguru import logger
 
 from spaceknife_protocol import scan as p
+from spaceknife_protocol.errors import ErrorCode
 
 from ..events import emit, printable
 from ..filter.names import forget
@@ -42,6 +43,7 @@ from ..store.lock import STRUCTURE
 from ..store.lookup import PathIndex
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from .compute import compute
+from .rpc import RpcError
 
 if TYPE_CHECKING:
     from .scans import ScanHandle, ScanManager
@@ -53,6 +55,9 @@ STORM_EVENTS = 20_000
 QUIET_RESCAN_S = 2.0  # dirty subtrees wait for this long without events
 LIST_BATCH = 64  # folders listed per round of a subtree rescan
 FREE_REFRESH_S = 1.0
+USN_PERIOD_S = 30.0  # checkpoints of the USN journal move on this often
+USN_MAX_ROWS = 1_000_000  # more records to replay than this: list the subtree again instead
+REF_MASK = (1 << 48) - 1  # an NTFS file reference's record number
 SCAN_TICK_S = 0.25  # while a scan runs: hand new folders to the watchers this often
 
 
@@ -94,9 +99,10 @@ class _Remap:
 
 
 class ScanMonitor:
-    def __init__(self, owner: MonitorManager, handle: ScanHandle) -> None:
+    def __init__(self, owner: MonitorManager, handle: ScanHandle, *, watch: bool = True) -> None:
         self.owner = owner
         self.handle = handle
+        self.watch = watch  # False: no watchers, only rescans asked for (live monitoring is off)
         self.index = PathIndex(handle.store)
         self.watchers: list[tuple[str, Watcher]] = []  # (root path, watcher)
         self._lock = threading.Lock()
@@ -114,15 +120,21 @@ class ScanMonitor:
         self._fed = 0  # rows below this were handed to the watchers
         self._free_at = 0.0
         self.failed = ""
+        # Windows: per volume (journal id, safe checkpoint, newer checkpoint) of the USN journal, to
+        # replay what an overflow lost; the safe one lags one period behind (events still buffered)
+        self.usn: dict[str, tuple[int, int, int]] = {}
+        self._usn_at = 0.0
+        self._ino: tuple[int, np.ndarray, np.ndarray] | None = None  # (rows, sorted low-48 ino, node)
 
     # ------------------------------------------------------------- lifecycle
 
     async def start(self) -> None:
-        for root in self.handle.roots:
+        for root in self.handle.roots if self.watch else []:
             watcher = await self._start_watcher(root.path, self._watcher_for(root.path, root.volume))
             if watcher is not None:
                 self.watchers.append((root.path, watcher))
         self.task = self._loop.create_task(self._run(), name=f"monitor-{self.handle.id}")
+        self.kick()  # a small scan may be done already: its folders need their watches now
 
     async def _start_watcher(self, path: str, watcher: Watcher) -> Watcher | None:
         """Start ``watcher`` off the loop (FSEvents may take a second); a native watcher that fails
@@ -160,6 +172,12 @@ class ScanMonitor:
             # changes, so per-folder notifications would stay silent: poll instead
             return self._poller(path)
         return create_watcher(path, poll_interval=self.owner.poll_interval)
+
+    def rescan(self, path: str) -> None:
+        """List ``path`` and everything below it again, right away."""
+        self.trees.add(path)
+        self._last_event = 0.0  # no quiet period to wait for: asked for by the user
+        self.kick()
 
     def kick(self) -> None:
         """Look at the tree now (a scan just finished: its last folders still need watches)."""
@@ -253,7 +271,7 @@ class ScanMonitor:
     def _timeout(self) -> float | None:
         if self.trees:
             return max(0.05, QUIET_RESCAN_S - (time.monotonic() - self._last_event))
-        if self.handle.running or self.deferred:
+        if self.handle.running or self.deferred or not self.fed:
             return SCAN_TICK_S
         return None
 
@@ -292,12 +310,13 @@ class ScanMonitor:
             self.events += len(batch)
             self._last_event = now
         stats: dict[str, Change] = {}
+        lost: set[str] = set()
         folders: set[str] = set(self.deferred)
         self.deferred.clear()
         for ch in batch:
             if ch.kind == "overflow":
                 self.overflows += 1
-                self.trees.add(ch.path)
+                lost.add(ch.path)
             elif ch.kind == "modified" and not ch.is_dir:
                 stats[ch.path] = ch
             elif ch.kind == "dir":
@@ -306,6 +325,13 @@ class ScanMonitor:
                 folders.add(os.path.dirname(ch.path))
                 if ch.old_path:
                     folders.add(os.path.dirname(ch.old_path))
+        if lost:
+            replayed = await self._replay_usn(lost)
+            if replayed is None:
+                self.trees.update(lost)  # no journal to replay from: list the subtrees again
+            else:
+                folders |= replayed
+        await self._usn_tick(now)
         if len(folders) > STORM_FOLDERS or len(batch) > STORM_EVENTS:
             self.trees.update(_common_roots(folders | {os.path.dirname(q) for q in stats}))
             emit(
@@ -456,6 +482,119 @@ class ScanMonitor:
                 out.pending = [int(m) for m in remap(np.array(out.pending, dtype=np.int64)) if m >= 0]
                 self.owner.views.remap(self.handle.id, chains, remap)
         return out
+
+    # ------------------------------------------------------------- USN journal (Windows)
+
+    def _usn_volumes(self) -> list[str]:
+        """``X:`` of every local NTFS volume under the roots."""
+        out = []
+        for root in self.handle.roots:
+            v = root.volume
+            if (
+                v is not None
+                and not v.is_remote
+                and v.fs_type.upper() == "NTFS"
+                and v.mount_point[1:2] == ":"
+            ):
+                out.append(v.mount_point[:2].upper())
+        return sorted(set(out))
+
+    async def _usn_client(self) -> Any:
+        """The elevated helper if it is already running (an MFT scan started it); never started
+        just for this. The checkpoint queries every USN_PERIOD_S keep it from idling out."""
+        if os.name != "nt":
+            return None
+        current = self.owner.scans.helper.current
+        if current is None or not current.alive or not current.elevated:
+            return None
+        return current
+
+    async def start_usn(self) -> None:
+        """Take a checkpoint of each volume's change journal (when an overflow needs replaying)."""
+        client = await self._usn_client()
+        if client is None:
+            return
+        for vol in self._usn_volumes():
+            try:
+                j = await client.query_usn(vol)
+            except Exception as exc:
+                logger.info("no USN journal on {}: {}", vol, exc)
+                continue
+            jid, nxt = int(j["journal_id"]), int(j["next_usn"])
+            self.usn[vol] = (jid, nxt, nxt)
+        self._usn_at = time.monotonic()
+
+    async def _usn_tick(self, now: float) -> None:
+        """Move the checkpoints on (the safe one to the previous newer one), every USN_PERIOD_S."""
+        if not self.usn or now - self._usn_at < USN_PERIOD_S:
+            return
+        self._usn_at = now
+        client = await self._usn_client()
+        if client is None:
+            return
+        for vol, (jid, _safe, newer) in list(self.usn.items()):
+            try:
+                j = await client.query_usn(vol)
+            except Exception:
+                del self.usn[vol]
+                continue
+            if int(j["journal_id"]) != jid:
+                self.usn[vol] = (int(j["journal_id"]), int(j["next_usn"]), int(j["next_usn"]))
+            else:
+                self.usn[vol] = (jid, newer, int(j["next_usn"]))
+
+    async def _replay_usn(self, lost: set[str]) -> set[str] | None:
+        """Folders touched since the safe checkpoint of the volumes holding ``lost``, from the
+        journal; None when that is not possible (no journal, no rights, too many records)."""
+        vols = {os.path.splitdrive(q)[0].upper() for q in lost}
+        if not vols or not vols <= set(self.usn):
+            return None
+        client = await self._usn_client()
+        if client is None:
+            return None
+        parents: list[np.ndarray] = []
+        for vol in sorted(vols):
+            jid, safe, _ = self.usn[vol]
+            try:
+                got = await client.read_usn(vol, safe, jid, max_rows=USN_MAX_ROWS)
+            except Exception as exc:
+                logger.info("USN replay on {} failed: {}", vol, exc)
+                return None
+            if got.get("truncated"):
+                return None
+            parents.append(np.asarray(got["parent_frn"], dtype=np.uint64))
+        frn = np.unique(np.concatenate(parents)) if parents else np.empty(0, dtype=np.uint64)
+        nodes = self._nodes_of_frn(frn)
+        if nodes is None:
+            return None  # the tree has no file ids (scanned without the native lister)
+        store = self.handle.store
+        emit("monitor", f"变化通知溢出：按 USN 日志补齐 {len(nodes):,} 个文件夹", scan_id=self.handle.id)
+        return {store.path(int(n)) for n in nodes}
+
+    def _nodes_of_frn(self, frn: np.ndarray) -> np.ndarray | None:
+        """Live folders whose file id (record number: the low 48 bits) is in ``frn``; None when the
+        tree carries no file ids at all."""
+        store = self.handle.store
+        n = len(store)
+        if self._ino is None or self._ino[0] != n:
+            c = store.cols
+            live = (c["kind"][:n] == Kind.DIR) & ((c["flags"][:n] & np.uint32(Flag.GONE)) == 0)
+            ids = np.flatnonzero(live)
+            key = c["ino"][:n][ids].astype(np.uint64) & np.uint64(REF_MASK)
+            known = key != 0  # 0: no id (the Python lister on Windows does not read them)
+            ids, key = ids[known], key[known]
+            order = np.argsort(key, kind="stable")
+            self._ino = (n, key[order], ids[order])
+        _, keys, ids = self._ino
+        if not len(keys):
+            return None
+        want = frn.astype(np.uint64) & np.uint64(REF_MASK)
+        at = np.searchsorted(keys, want)
+        hit = (
+            (at < len(keys)) & (keys[np.minimum(at, max(len(keys) - 1, 0))] == want) if len(keys) else at < 0
+        )
+        found: np.ndarray = ids[at[hit]]
+        return found
 
     async def _list_one(self, node: int, path: str) -> SliceResult | None:
         root_idx = self._root_index(path)
@@ -611,6 +750,7 @@ class MonitorManager:
         self.scans = scans
         self.views = views
         self.monitors: dict[str, ScanMonitor] = {}
+        self.passive: dict[str, ScanMonitor] = {}  # rescans of scans that are not watched
         self.poll_interval = 30.0
 
     def enabled(self) -> bool:
@@ -627,18 +767,34 @@ class MonitorManager:
             return
         mon = ScanMonitor(self, handle)
         await mon.start()
+        await mon.start_usn()
         self.monitors[handle.id] = mon
         handle.monitor = mon
 
     async def stop(self, scan_id: str) -> None:
+        passive = self.passive.pop(scan_id, None)
+        if passive is not None:
+            await passive.stop()
         mon = self.monitors.pop(scan_id, None)
         if mon is not None:
             mon.handle.monitor = None
             await mon.stop()
 
     async def close(self) -> None:
-        for scan_id in list(self.monitors):
+        for scan_id in {*self.monitors, *self.passive}:
             await self.stop(scan_id)
+
+    async def rescan(self, handle: ScanHandle, node: int) -> None:
+        """Read a folder again with everything below it (F5 「重新扫描当前视图」); with live
+        monitoring off a monitor without watchers does it."""
+        if handle.running:
+            raise RpcError(ErrorCode.SCAN_BUSY, "扫描进行中，完成后再重新扫描")
+        mon = self.monitors.get(handle.id) or self.passive.get(handle.id)
+        if mon is None:
+            mon = ScanMonitor(self, handle, watch=False)
+            await mon.start()
+            self.passive[handle.id] = mon
+        mon.rescan(handle.store.path(node))
 
     async def apply_settings(self) -> None:
         """``scan.monitor`` switched: start or stop monitoring every open scan."""
