@@ -457,7 +457,7 @@ _names = st.text(
     alphabet=st.characters(blacklist_characters="/\\\0", blacklist_categories=("Cs",)),
     min_size=1,
     max_size=12,
-)
+).filter(lambda n: n not in (META_FOLDER, ORPHAN_FOLDER))  # reserved: the check finds them by name
 _tree: st.SearchStrategy[dict[str, Any]] = st.recursive(
     st.dictionaries(_names, st.integers(0, 1 << 24), max_size=4),
     lambda inner: st.dictionaries(_names, st.one_of(inner, st.integers(0, 1 << 24)), max_size=4),
