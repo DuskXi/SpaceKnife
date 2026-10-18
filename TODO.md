@@ -72,7 +72,8 @@
 - [x] Electron 安装包：Windows NSIS；Linux deb / rpm / AppImage（`tools/build_package.py`，见 [docs/packaging.md](docs/packaging.md)）
 - [x] 冻结后端：PyInstaller onedir，扫描助手与工作进程走同一个可执行文件；Linux 包的 glibc 下限 2.34 有检查
 - [x] 冒烟测试：Windows 11 上 `win-unpacked`，WSL（Ubuntu 22.04）上 `linux-unpacked` 与 AppImage（`packaging/smoke_app.py`）
-- [ ] 干净机器安装测试：Windows 10、RHEL 9、Ubuntu 22.04（装 / 运行 / 扫描 / 卸载）；Windows 上安装包本身（安装到用户机器前先问用户）
+- [x] Windows 安装包本身：静默「仅当前用户」安装、冒烟、卸载，卸载后与安装前一致（Windows 11）
+- [ ] 干净机器安装测试：Windows 10、RHEL 9、Ubuntu 22.04（装 / 运行 / 扫描 / 卸载；deb / rpm 还没实际安装过）
 - [ ] Windows 代码签名：没有证书时先发未签名包（SmartScreen 会提示）
 - [ ] 选定许可证（deb / rpm 里现在是 `unknown`），附第三方许可清单（Python 依赖、字体）
 - [ ] 确认项目主页（现在暂定 `https://github.com/DuskXi/SpaceKnife`，deb / rpm 必填）
