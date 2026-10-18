@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>SpaceKnife · A 刃面 Facet</title>
+  <!--
+    The 16 px title-bar mark (design/build/icons/logo.svg) scaled ×64 (one 16 px pixel is 64
+    units): the slash and the corner sit on the same pixels as in the title-bar mark; the plate
+    grows half a pixel on each side to fill the app-icon canvas. The plate is split into two
+    facets along the slash, the upper-left one a lighter tint of the accent: the bevel of a blade.
+  -->
+  <defs>
+    <clipPath id="bevel"><path d="M0 0H1024L0 1024Z"/></clipPath>
+  </defs>
+  <!-- accent.default -->
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="#8B9CFF"/>
+  <!-- lighter facet: accent.default mixed 30% toward white -->
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="#AEBAFF" clip-path="url(#bevel)"/>
+  <!-- text.onAccent -->
+  <g fill="none" stroke="#0B0C10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M288 736 736 288" stroke-width="112"/>
+    <path d="M544 736H736V544" stroke-width="88"/>
+  </g>
+</svg>

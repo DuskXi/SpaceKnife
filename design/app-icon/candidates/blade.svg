@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>SpaceKnife · C 刀片 Blade</title>
+  <!--
+    A snap-off utility-knife blade on a graphite tile. Its segments are a stacked bar of disk
+    usage: each segment's length is its share, coloured like the treemap classes, the largest
+    (the tip) in the accent colour. Drawn around the tile centre at 90 %: back of the blade at y = -176,
+    cutting edge at y = 176, ends and score lines slanted by 192, a 66-unit ground bevel.
+  -->
+  <!-- bg.hover plate, line.strong rim -->
+  <rect x="64" y="64" width="896" height="896" rx="224" fill="#1A1D23"/>
+  <rect x="72" y="72" width="880" height="880" rx="216" fill="none" stroke="#2A2E37" stroke-width="16"/>
+  <g transform="translate(512 512) scale(.9)">
+    <path d="M-208-176H-128L-320 176H-400Z" fill="#E5C547"/>  <!-- treemap.class.archive -->
+    <path d="M-104-176H16L-176 176H-296Z" fill="#1FAE8A"/>    <!-- treemap.class.exec -->
+    <path d="M40-176H184L-8 176H-152Z" fill="#2F8FDB"/>       <!-- treemap.class.image -->
+    <path d="M208-176H400L208 176H16Z" fill="#8B9CFF"/>       <!-- accent.default -->
+    <!-- ground bevel along the cutting edge -->
+    <g fill="#fff" fill-opacity=".32">
+      <path d="M-364 110H-284L-320 176H-400Z"/>
+      <path d="M-260 110H-140L-176 176H-296Z"/>
+      <path d="M-116 110H28L-8 176H-152Z"/>
+      <path d="M52 110H244L208 176H16Z"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>SpaceKnife · B 切片 Slice</title>
+  <!--
+    A graphite tile holding a five-block treemap (treemap.class colours, the largest block in the
+    accent colour), cut once along the diagonal. The two halves slide 28 units each way along the cut.
+  -->
+  <defs>
+    <g id="art">
+      <!-- bg.hover plate, line.strong rim -->
+      <rect x="64" y="64" width="896" height="896" rx="224" fill="#1A1D23"/>
+      <rect x="72" y="72" width="880" height="880" rx="216" fill="none" stroke="#2A2E37" stroke-width="16"/>
+      <rect x="160" y="160" width="368" height="704" rx="48" fill="#8B9CFF"/>  <!-- accent.default -->
+      <rect x="568" y="160" width="296" height="320" rx="48" fill="#2F8FDB"/>  <!-- treemap.class.image -->
+      <rect x="568" y="520" width="152" height="184" rx="40" fill="#1FAE8A"/>  <!-- treemap.class.exec -->
+      <rect x="760" y="520" width="104" height="184" rx="40" fill="#E5C547"/>  <!-- treemap.class.archive -->
+      <rect x="568" y="744" width="296" height="120" rx="40" fill="#E07A1F"/>  <!-- treemap.class.video -->
+    </g>
+    <!-- 56-unit cut along x + y = 1024 -->
+    <clipPath id="upper"><path d="M0 0H984L0 984Z"/></clipPath>
+    <clipPath id="lower"><path d="M1024 40V1024H40Z"/></clipPath>
+  </defs>
+  <use xlink:href="#art" clip-path="url(#upper)" transform="translate(28 -28)"/>
+  <use xlink:href="#art" clip-path="url(#lower)" transform="translate(-28 28)"/>
+</svg>
