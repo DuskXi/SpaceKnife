@@ -8,6 +8,7 @@ import { call, openSnapshot, refreshLists, refreshVolumes, startScan } from "@/s
 import { type LoadLevel, patchStartForm, type ScanMethod, setting, startFormOf, type Tab, toast, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtShare, fmtSize, fmtSizeAs } from "@/lib/format";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
+import { compareWithNow } from "@/state/compare";
 
 export const MEDIA_ZH: Record<string, string> = {
   nvme_ssd: "NVMe SSD",
@@ -515,7 +516,7 @@ function Recents({ tab }: { tab: Tab }) {
                   <button className="ghost tiny" onClick={() => void openSnapshot(r.snap.path, tab.id)}>
                     打开
                   </button>
-                  <button className="link small" disabled title="快照对比（W6）在 M6 接入">
+                  <button className="link small" title="与这个位置现在的状态对比（需要时先扫描）" onClick={() => void compareWithNow(r.snap, tab.id)}>
                     <Icon name="diff" size={13} /> 与现在对比
                   </button>
                 </div>

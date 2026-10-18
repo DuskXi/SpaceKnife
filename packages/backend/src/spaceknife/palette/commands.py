@@ -202,7 +202,6 @@ def _registry() -> tuple[Command, ...]:
             5,
             (),
             _basket,
-            milestone="M6",
         ),
         C("snapshot.save", "保存快照", "snapshot", ("Ctrl+S",), ("save snapshot",), 6, (_tab, _done)),
         C(
@@ -214,7 +213,6 @@ def _registry() -> tuple[Command, ...]:
             7,
             (_tab, _done, _snapshots),
             _snapshot_count,
-            milestone="M6",
         ),
         C(
             "report.export",
@@ -225,7 +223,6 @@ def _registry() -> tuple[Command, ...]:
             8,
             (_tab, _scan),
             lambda c: "CSV · JSON · HTML",
-            milestone="M6",
         ),
         C("app.settings", "设置", "settings", ("Ctrl+,",), ("settings", "preferences", "options"), 9),
         # everything else, found by typing (UI-W4-23)
@@ -253,7 +250,7 @@ def _registry() -> tuple[Command, ...]:
             ("Space",),
             ("preview", "quick look"),
             needs=(_selection,),
-            milestone="M6",
+            milestone="TODO",
         ),
         C("item.copy_path", "复制路径", "copy", ("Ctrl+C",), ("copy path",), needs=(_selection,)),
         C(
@@ -377,7 +374,8 @@ def evaluate(cmd: Command, ctx: Context) -> tuple[bool, str]:
         if reason:
             return False, reason
     if cmd.milestone:
-        return False, f"{status} · {cmd.milestone} 接入" if status else f"{cmd.milestone} 接入"
+        later = "还没有实现（见 TODO）" if cmd.milestone == "TODO" else f"{cmd.milestone} 接入"
+        return False, f"{status} · {later}" if status else later
     return True, status
 
 

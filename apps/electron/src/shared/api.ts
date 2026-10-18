@@ -12,6 +12,11 @@ export type BackendState =
   | { state: "failed"; message: string }
   | { state: "exited"; code: number | null };
 
+export interface FileDialogOptions {
+  title: string;
+  filters: { name: string; extensions: string[] }[];
+}
+
 export interface SkApi {
   platform: "win32" | "darwin" | "linux";
   version: string;
@@ -37,6 +42,10 @@ export interface SkApi {
     openSnapshot(): Promise<string | null>;
     /** Pick one or more folders (UI-W1-26 「浏览…」); [] when cancelled. */
     openFolders(): Promise<string[]>;
+    /** Pick one file to read (settings import, SpaceSniffer configuration); null when cancelled. */
+    openFile(options: FileDialogOptions): Promise<string | null>;
+    /** Choose where to write a file (export, settings export); null when cancelled. */
+    saveFile(options: FileDialogOptions & { defaultName: string }): Promise<string | null>;
   };
   files: {
     /** Absolute path of a file or folder dropped on the window ('' when unknown, e.g. browser mode). */

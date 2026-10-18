@@ -8,6 +8,7 @@ import { setting, useApp } from "@/state/store";
 import { Kind } from "@/treemap/frame";
 import type { HoverInfo } from "@/treemap/Treemap";
 import { fillOf, labelColors } from "@/treemap/paint";
+import { classColors } from "@/lib/classes";
 import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts } from "@/lib/format";
 import { Icon, Kbd } from "@/ui/Icon";
 
@@ -87,7 +88,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const f = shown.frame;
   const row = shown.row;
   const kind = f.kind[row]!;
-  const fill = fillOf(f, row, colorMode as "class", vocab?.classes.map((c) => c.id) ?? []);
+  const fill = fillOf(f, row, colorMode as "class", vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
   const [fg] = labelColors(fill);
   const bg = `rgb(${fill.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
   const [num, unit] = sizeParts(Number(f.size[row]));

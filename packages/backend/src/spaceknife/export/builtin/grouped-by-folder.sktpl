@@ -1,0 +1,14 @@
+@name=Grouped by folder
+# SpaceSniffer 2.0.5.18 的内置模板（语法见 docs/export-templates.md）
+@file=File report.txt
+@blocks=files
+@sort=size
+@order=desc
+@detail
+{script}
+{   if {<%isfile%>} == {true}
+  ? {  [{leftpad{<%disksize%>}{ }{8}}] <%file%>{&br}}
+  : {   if {<%containsfiles%>} == {true}
+      ? {{&br}<%pathfile%> [<%disksize%>]{&br}}
+    }
+}

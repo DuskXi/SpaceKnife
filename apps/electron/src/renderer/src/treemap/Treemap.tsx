@@ -6,7 +6,9 @@ import { tokens } from "@design/tokens";
 
 import { setViewSettings, viewCall } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
-import { fmtInt, fmtSize } from "@/lib/format";
+import { classColors } from "@/lib/classes";
+import { diffTiers, maxChange } from "@/lib/diff";
+import { fmtDelta, fmtInt, fmtSize } from "@/lib/format";
 
 import { type DrawFrame, hitTest } from "./frame";
 import { GlRenderer, type Picture } from "./gl";
@@ -54,6 +56,8 @@ const FLASH_MS = tokens.motion.duration.flash;
 const FLASH_FADE_MS = 300;
 const BADGE_MS = 10_000;
 const FLASH = tokens.treemap.state.flash;
+const TRAIL_MS = 500; // 「鼠标拖尾」: blocks the pointer left fade out over this long
+const FPS_GAP: Record<string, number> = { display: 0, "60": 1000 / 61, "30": 1000 / 31 }; // 「动画帧率」
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
 
 export function Treemap({ viewId, onHover, onContextMenu }: Props) {
@@ -70,11 +74,14 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     lastZoomKey: number | null;
     lastSeq: number;
     flash: Flash | null;
-  }>({ gl: null, cur: null, old: null, anim: null, hovered: -1, raf: 0, lastZoomKey: null, lastSeq: -1, flash: null });
+    trail: { x: number; y: number; w: number; h: number; t: number }[];
+    lastDraw: number;
+  }>({ gl: null, cur: null, old: null, anim: null, hovered: -1, raf: 0, lastZoomKey: null, lastSeq: -1, flash: null, trail: [], lastDraw: 0 });
 
   const view = useApp((s) => s.views[viewId]);
   const vocab = useApp((s) => s.vocab);
   const classIds = useMemo(() => vocab?.classes.map((c) => c.id) ?? [], [vocab]);
+  const colors = useMemo(() => classColors(vocab), [vocab]);
   const scanning = useApp((s) => {
     const v = s.views[viewId];
     const st = v ? s.scans[v.state.scan_id] : undefined;
@@ -87,6 +94,12 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
   const hoverHighlight = useApp((s) => setting(s, "appearance.hover_highlight", true));
   const selectionShadow = useApp((s) => setting(s, "appearance.selection_shadow", true));
   const unitEpoch = useApp((s) => s.unitEpoch);
+  const fontScale = useApp((s) => setting(s, "treemap.font_scale", 100)) / 100;
+  const levelContrast = useApp((s) => setting(s, "appearance.level_contrast", 10)) / 10;
+  const borderContrast = useApp((s) => setting(s, "appearance.border_contrast", 10)) / 10;
+  const trailOn = useApp((s) => setting(s, "appearance.mouse_trail", false));
+  const fpsGap = FPS_GAP[useApp((s) => setting<string>(s, "treemap.fps", "display"))] ?? 0;
+  const dynaSmooth = useApp((s) => setting(s, "treemap.dynasmooth", true));
   const reduced = motion === "on" || (motion === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
   // ---------------------------------------------------------------- render loop
@@ -96,6 +109,14 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     const canvas = glCanvas.current;
     const tc = textCanvas.current;
     if (!st.gl || !st.cur || !canvas || !tc) return;
+    const t0 = performance.now();
+    // 「DynaSmooth」: only what the user is doing (zoom, trail) gets the full rate; change flashes 30 fps
+    const gap = st.anim || st.trail.length || !dynaSmooth ? fpsGap : Math.max(fpsGap, FPS_GAP["30"]!);
+    if (gap && (st.anim || st.flash || st.trail.length) && t0 - st.lastDraw < gap) {
+      st.raf = requestAnimationFrame(render); // 「动画帧率」: skip this display frame
+      return;
+    }
+    st.lastDraw = t0;
     const W = st.cur.frame.info.width;
     const H = st.cur.frame.info.height;
     if (canvas.width !== W || canvas.height !== H) {
@@ -149,11 +170,13 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     st.gl.draw(st.cur.picture);
     drawTexts(ctx, st.cur.texts);
     drawTags(ctx, st.cur.tags, dpr);
-    if (st.flash && drawFlash(ctx, st.flash, performance.now(), reduced, dpr)) {
+    const now = performance.now();
+    const trailing = st.trail.length > 0 && drawTrail(ctx, st, now, dpr);
+    const flashing = !!st.flash && drawFlash(ctx, st.flash, now, reduced, dpr);
+    if (!flashing) st.flash = null;
+    if (flashing || trailing) {
       cancelAnimationFrame(st.raf);
       st.raf = requestAnimationFrame(render);
-    } else {
-      st.flash = null;
     }
   };
 
@@ -164,6 +187,7 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
       dpr: frame.info.dpr,
       colorMode,
       classIds,
+      classColors: colors,
       hovered: st.hovered,
       scanning,
       formatSize: (b) => fmtSize(b),
@@ -171,6 +195,10 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
       haloLevels,
       hoverHighlight,
       selectionShadow,
+      fontScale,
+      levelContrast,
+      borderContrast,
+      diff: frame.delta ? { tiers: diffTiers(maxChange(frame.delta, frame.kind)).tiers, formatDelta: fmtDelta } : undefined,
     });
     const picture = st.gl.upload(painted.instances, painted.count, keepPicture);
     const ctx = textCanvas.current.getContext("2d")!;
@@ -239,7 +267,7 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     render();
     onHover?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow]);
+  }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors]);
 
   // hover driven from outside (W3 result list): highlight that block like a pointer hover
   const hoverKey = view?.hoverKey ?? null;
@@ -295,6 +323,7 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     if (!p) return;
     const row = hitTest(p.f, p.px, p.py);
     if (row === st.hovered) return;
+    if (trailOn && !reduced && st.hovered >= 0) st.trail.push({ ...rectOf(p.f, st.hovered), t: performance.now() });
     st.hovered = row;
     if (st.cur) st.cur = repaint(st.cur.frame, colorMode, st.cur.picture) ?? st.cur;
     render();
@@ -345,12 +374,26 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
   };
 
   return (
-    <div ref={host} className="treemap" onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick} onDoubleClick={onDouble} onContextMenu={onMenu}>
+    <div ref={host} className="treemap" data-view-id={viewId} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick} onDoubleClick={onDouble} onContextMenu={onMenu}>
       <canvas ref={glCanvas} className="treemap-layer" />
       <canvas ref={textCanvas} className="treemap-layer" />
-      {frame && frame.count === 0 && <div className="treemap-empty">这里没有任何占用空间的内容</div>}
+      {frame && frame.count === 0 && <div className="treemap-empty">{view?.state.compare ? "两次之间没有变化" : "这里没有任何占用空间的内容"}</div>}
     </div>
   );
+}
+
+/** 「鼠标拖尾」: blocks the pointer passed fade out; false once the trail is gone. */
+function drawTrail(ctx: CanvasRenderingContext2D, st: { trail: { x: number; y: number; w: number; h: number; t: number }[] }, now: number, dpr: number): boolean {
+  st.trail = st.trail.filter((r) => now - r.t < TRAIL_MS);
+  ctx.save();
+  ctx.lineWidth = dpr;
+  for (const r of st.trail) {
+    ctx.globalAlpha = 0.6 * (1 - (now - r.t) / TRAIL_MS);
+    ctx.strokeStyle = tokens.treemap.state.hoverInset;
+    ctx.strokeRect(r.x + dpr / 2, r.y + dpr / 2, Math.max(1, r.w - dpr), Math.max(1, r.h - dpr));
+  }
+  ctx.restore();
+  return st.trail.length > 0;
 }
 
 /** Draw the changed blocks of a frame; false once there is nothing left to show. */

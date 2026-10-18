@@ -24,7 +24,7 @@ from enum import IntEnum, IntFlag
 
 import numpy as np
 
-from ..classes import DEFAULT_CLASSES, ClassTable
+from ..classes import ClassTable, active
 from ..store.nodes import Flag, Kind, NodeStore
 from .squarify import squarify
 
@@ -84,6 +84,8 @@ class LayoutParams:
     min_content: float = 4.0
     expand_min_w: float = 48.0
     expand_min_h: float = 40.0
+    font_scale: float = 1.0  # 「元素字号」: header height and label thresholds scale with it
+    aspect: float = 1.0  # 「元素比例」: the width / height cells aim for
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +139,9 @@ class _Geom:
         self.gap = max(1, round(p.gap * d))
         self.border = max(1, round(p.border * d))
         self.pad = round(p.padding * d)
-        self.header = round(p.header * d)
+        self.header = round(p.header * p.font_scale * d)
+        self.label_unit = d * p.font_scale  # px per CSS px of label thresholds
+        self.aspect = p.aspect
         self.min_draw = p.min_draw * d
         self.min_content = p.min_content * d
         self.expand_w = p.expand_min_w * d
@@ -145,7 +149,7 @@ class _Geom:
         self.threshold = (p.min_element * d) ** 2
 
     def label(self, w: int, h: int) -> Label:
-        cw, ch = w / self.dpr, h / self.dpr
+        cw, ch = w / self.label_unit, h / self.label_unit
         if cw < 30 or ch < 15:
             return Label.NONE
         if ch < 22:
@@ -161,22 +165,37 @@ class _Geom:
 class Layout:
     """Lays out one store; reusable across calls."""
 
-    def __init__(self, store: NodeStore, classes: ClassTable = DEFAULT_CLASSES) -> None:
+    def __init__(self, store: NodeStore, classes: ClassTable | None = None) -> None:
         self.store = store
-        self.classes = classes
-        self.class_ids = [c.id for c in classes.classes]
-        self.other = self.class_ids.index("other")
+        self._fixed = classes  # None: follow the active (user-edited) table
         self._ext_cls = np.zeros(0, dtype=np.uint8)
+        self._ext_key: tuple[int, int] = (-1, 0)
         self._sizes: tuple[int, int, np.ndarray] | None = None  # (store version, node count, sizes)
 
+    @property
+    def classes(self) -> ClassTable:
+        return self._fixed if self._fixed is not None else active()
+
+    @property
+    def class_ids(self) -> list[str]:
+        return self.classes.ids
+
+    @property
+    def other(self) -> int:
+        return self.classes.other_index
+
     def ext_classes(self) -> np.ndarray:
-        """Colour class index per extension-table id."""
+        """Colour class index per extension-table id (again when the class table changed)."""
         table = self.store.ext_table
-        if len(self._ext_cls) != len(table):
-            index = {cid: i for i, cid in enumerate(self.class_ids)}
+        classes = self.classes
+        key = (id(classes), len(table))
+        if key != self._ext_key:
+            index = {cid: i for i, cid in enumerate(classes.ids)}
+            other = classes.other_index
             self._ext_cls = np.fromiter(
-                (index[self.classes.color_class(e)] if e else self.other for e in table), np.uint8, len(table)
+                (index[classes.color_class(e)] if e else other for e in table), np.uint8, len(table)
             )
+            self._ext_key = key
         return self._ext_cls
 
     @staticmethod
@@ -415,12 +434,12 @@ class _Run:
         weights = [it.weight or float(it.size) for it in items]
         if page and len(items) > 1 and items[-1].kind == RectKind.MORE:
             # the leftover gets a strip of its own: no member shares a squarify row with a far larger block
-            body, rest = squarify([sum(weights[:-1]), weights[-1]], x0, y0, ex1, ey1)
-            cells = [*squarify(weights[:-1], *body), rest]
+            body, rest = squarify([sum(weights[:-1]), weights[-1]], x0, y0, ex1, ey1, g.aspect)
+            cells = [*squarify(weights[:-1], *body, g.aspect), rest]
         else:
-            cells = squarify(weights, x0, y0, ex1, ey1)
+            cells = squarify(weights, x0, y0, ex1, ey1, g.aspect)
         rows, names = self.rows, self.names
-        gap, min_draw, dpr = g.gap, g.min_draw, g.dpr
+        gap, min_draw, lu = g.gap, g.min_draw, g.label_unit
         expandable = level < self.p.detail
         depth = min(level, 255)
         kind, flags, child_count, store = self.kind, self.flags, self.child_count, self.store
@@ -441,7 +460,7 @@ class _Run:
             if rk == FOLDER:
                 lbl = L_NAME | L_SIZE
             else:  # UI-TM-14..16, in CSS px
-                cw, ch = bw / dpr, bh / dpr
+                cw, ch = bw / lu, bh / lu
                 if cw < 30 or ch < 15:
                     lbl = 0
                 elif ch < 22:

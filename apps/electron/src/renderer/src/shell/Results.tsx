@@ -10,6 +10,7 @@ import { fmtInt, fmtShare, fmtSize, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
+import { classHexNow } from "@/lib/classes";
 
 const ROW_H = 50;
 const PAGE = 100;
@@ -113,6 +114,12 @@ export function Results({ viewId }: { viewId: string }) {
 
   const hover = (key: number | null) => patchView(viewId, { hoverKey: key });
   const locate = (r: ResultRow) => r.kind !== "rest" && void viewCall(viewId, "view.reveal", { key: r.key });
+  // the unified context menu for a result: its block is located first, so the menu has it (UI-W5-01)
+  const menuFor = async (r: ResultRow, x: number, y: number) => {
+    if (r.kind === "rest") return;
+    await viewCall(viewId, "view.reveal", { key: r.key });
+    set({ menu: { viewId, scanId, key: r.key, node: r.kind === "group" ? null : r.node, x, y } });
+  };
   const zoom = (r: ResultRow) => r.kind !== "rest" && void viewCall(viewId, "view.zoom", { key: r.key });
   const toBasket = (r: ResultRow) => {
     if (r.kind === "file" || r.kind === "folder") basketAdd(scanId, r.node);
@@ -173,6 +180,10 @@ export function Results({ viewId }: { viewId: string }) {
           setActive(i);
           list.current?.focus({ preventScroll: true });
           if (r) locate(r);
+        }}
+        onMenu={(x, y) => {
+          setActive(i);
+          if (r) void menuFor(r, x, y);
         }}
         onDouble={() => r && zoom(r)}
       />,
@@ -256,6 +267,7 @@ function ResultLine(props: {
   onHover: () => void;
   onClick: () => void;
   onDouble: () => void;
+  onMenu: (x: number, y: number) => void;
 }) {
   const { row: r, index } = props;
   const style = { top: index * ROW_H };
@@ -279,10 +291,10 @@ function ResultLine(props: {
       onDoubleClick={props.onDouble}
       onContextMenu={(e) => {
         e.preventDefault();
-        props.onClick();
+        props.onMenu(e.clientX, e.clientY);
       }}
     >
-      <span className={`res-icon ${r.kind}`} style={cls ? { background: `var(--sk-treemap-class-${cls})` } : undefined}>
+      <span className={`res-icon ${r.kind}`} style={cls ? { background: classHexNow(cls) } : undefined}>
         <Icon name={r.kind === "file" ? "file" : r.kind === "folder" ? "folder" : "layers"} size={15} />
       </span>
       <span className="res-text">

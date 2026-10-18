@@ -33,6 +33,8 @@ export function installShim(): void {
     },
     dialog: {
       openSnapshot: async () => window.prompt("快照文件路径（.sks）")?.trim() || null,
+      openFile: async (o) => window.prompt(o.title)?.trim() || null,
+      saveFile: async (o) => window.prompt(o.title, o.defaultName)?.trim() || null,
       openFolders: async () => {
         const text = window.prompt("文件夹路径（多个用 ; 分隔）")?.trim();
         return text ? text.split(";").map((x) => x.trim()).filter(Boolean) : [];

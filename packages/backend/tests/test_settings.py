@@ -68,7 +68,7 @@ def test_update_validates_and_persists(tmp_path: Path) -> None:
     with pytest.raises(SettingsError):
         st.update({"nope": 1})
     with pytest.raises(SettingsError):
-        st.update({"appearance.mouse_trail": True})  # wired in a later milestone: read-only for now
+        st.update({"treemap.dynazoom": True})  # not implemented yet: read-only
     with pytest.raises(ConflictError):
         st.update({"treemap.min_element": 12}, version=0)
     st.update({"treemap.min_element": 12}, version=st.version)

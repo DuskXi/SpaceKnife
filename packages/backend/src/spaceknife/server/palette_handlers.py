@@ -73,7 +73,6 @@ def install(server: Server) -> None:
     router = server.router
     latest = Latest()
     recents = Recents()
-    vocab = platform_vocab()
     previews: OrderedDict[tuple[object, ...], pp.PalettePreview] = OrderedDict()
     previews_lock = threading.Lock()
 
@@ -131,7 +130,7 @@ def install(server: Server) -> None:
                 )
             )
         elif q and looks_like_filter(q):
-            parsed = parse(q, None, vocab)
+            parsed = parse(q, None, platform_vocab())
             errors = [d for d in parsed.diagnostics if d.severity == "error"]
             direct.append(
                 pp.PaletteDirect(
@@ -161,7 +160,7 @@ def install(server: Server) -> None:
                         "alloc": int(sizes[node]) if node < len(sizes) else None,
                     }
             else:
-                fields["tokens"] = parse(e.text, None, vocab).tokens
+                fields["tokens"] = parse(e.text, None, platform_vocab()).tokens
             recent.append((-got[0], pp.PaletteRecent.model_validate(fields)))
         recent.sort(key=lambda t: t[0])  # stable: newest first among equals
 
@@ -275,7 +274,7 @@ def install(server: Server) -> None:
     # ------------------------------------------------------------------ palette.preview
 
     def preview(handle: ScanHandle, text: str) -> pp.PalettePreview:
-        parsed = parse(text, None, vocab)
+        parsed = parse(text, None, platform_vocab())
         normal = parsed.normal
         if normal is None or normal.empty:
             return pp.PalettePreview(text=text, valid=False)

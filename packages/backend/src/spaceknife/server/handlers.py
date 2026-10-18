@@ -24,8 +24,13 @@ if TYPE_CHECKING:
 
 
 def install(server: Server) -> None:
+    from .classes_handlers import install as install_classes_handlers
+    from .compare_handlers import install as install_compare_handlers
     from .diag import install as install_diag
+    from .export_handlers import install as install_export_handlers
     from .filter_handlers import install as install_filter_handlers
+    from .maintenance_handlers import install as install_maintenance_handlers
+    from .ops_handlers import install as install_ops_handlers
     from .palette_handlers import install as install_palette_handlers
     from .scan_handlers import install as install_scan_handlers
     from .settings_handlers import install as install_settings_handlers
@@ -38,6 +43,11 @@ def install(server: Server) -> None:
     install_view_handlers(server)
     install_palette_handlers(server)
     install_settings_handlers(server)
+    install_compare_handlers(server)
+    install_classes_handlers(server)
+    install_ops_handlers(server)
+    install_export_handlers(server)
+    install_maintenance_handlers(server)
     install_diag(server)
 
     @router.method(SYSTEM_INFO)

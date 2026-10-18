@@ -3,10 +3,13 @@
 import { useLayoutEffect, useRef, useState } from "react";
 
 import { closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
-import { set, type Tab, useApp } from "@/state/store";
+import { get, set, type Tab, useApp } from "@/state/store";
+import type { DrawFrame } from "@/treemap/frame";
 import { type HoverInfo, Treemap } from "@/treemap/Treemap";
 import { fmtInt, fmtShare, fmtSize } from "@/lib/format";
 import { HoverCard } from "@/shell/HoverCard";
+import { BasketDrawer } from "@/shell/BasketDrawer";
+import { CompareHoverCard, CompareSidebar } from "@/shell/Compare";
 import { Inspector } from "@/shell/Inspector";
 import { Results } from "@/shell/Results";
 import { isRunning, ScanBand, ScanDetails } from "@/shell/ScanProgress";
@@ -14,7 +17,70 @@ import { FilterBox } from "@/shell/FilterBox";
 import { Icon } from "@/ui/Icon";
 
 export function ScanPage({ tab }: { tab: Tab }) {
+  if (tab.compare) return <ComparePage tab={tab} />;
+  return <NormalPage tab={tab} />;
+}
+
+/** Compare mode (W6): the change tree and the 「快照对比」 panel; while new ends compute, the old
+ * result stays, dimmed (UI-W6-41). */
+function ComparePage({ tab }: { tab: Tab }) {
+  const c = tab.compare!;
+  const basketOpen = useApp((s) => s.basketOpen);
   const hidden = useApp((s) => s.inspectorHidden);
+  const busy = c.phase !== "ready";
+  return (
+    <div className="content column">
+      <div className="content-row">
+        <div className={`panes${busy ? " cmp-busy" : ""}`}>
+          {c.viewId ? (
+            <ComparePane viewId={c.viewId} />
+          ) : (
+            <div className="cmp-loading" role="status">
+              <span className="spinner" aria-hidden="true" />
+              <span>{c.message || "正在对比…"}</span>
+              {c.progress != null && c.phase === "comparing" && <span className="mono muted">{Math.round(c.progress * 100)}%</span>}
+            </div>
+          )}
+        </div>
+        {basketOpen ? (
+          <BasketDrawer />
+        ) : hidden ? (
+          <button className="inspector-open icon-btn" aria-label="显示侧栏" title="显示侧栏" onClick={() => set({ inspectorHidden: false })}>
+            <Icon name="sidebar" />
+          </button>
+        ) : (
+          <CompareSidebar tab={tab} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ComparePane({ viewId }: { viewId: string }) {
+  const [hover, setHover] = useState<HoverInfo | null>(null);
+  const host = useRef<HTMLDivElement>(null);
+  const [bounds, setBounds] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = host.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBounds({ w: el.clientWidth, h: el.clientHeight }));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <section className="pane">
+      <div className="pane-map" ref={host}>
+        <Treemap viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
+        <FilterFloater viewId={viewId} />
+        <CompareHoverCard hover={hover} bounds={bounds} />
+      </div>
+    </section>
+  );
+}
+
+function NormalPage({ tab }: { tab: Tab }) {
+  const hidden = useApp((s) => s.inspectorHidden);
+  const basketOpen = useApp((s) => s.basketOpen);
   const focused = tab.viewIds[tab.focusedPane] ?? tab.viewIds[0];
   // the side panel follows the focused view: match results while it filters (UI-W3-27, UI-W3-36)
   const filtering = useApp((s) => (focused ? !!s.views[focused]?.filter?.active : false));
@@ -32,7 +98,9 @@ export function ScanPage({ tab }: { tab: Tab }) {
             <Pane key={v} tab={tab} index={i} viewId={v} split={split} focused={i === tab.focusedPane} onFocus={() => focusPane(tab.id, i)} />
           ))}
         </div>
-        {hidden ? (
+        {basketOpen ? (
+          <BasketDrawer />
+        ) : hidden ? (
           <button className="inspector-open icon-btn" aria-label="显示侧栏" title="显示侧栏" onClick={() => set({ inspectorHidden: false })}>
             <Icon name="sidebar" />
           </button>
@@ -64,7 +132,7 @@ function Pane(props: { tab: Tab; index: number; viewId: string; split: boolean; 
     <section className={`pane${focused && split ? " focused" : ""}`} onMouseDownCapture={onFocus}>
       {split && <PaneHead tab={tab} viewId={viewId} index={index} />}
       <div className="pane-map" ref={host}>
-        <Treemap viewId={viewId} onHover={setHover} />
+        <Treemap viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
         <FilterFloater viewId={viewId} />
         <HoverCard hover={hover} bounds={bounds} />
       </div>
@@ -154,4 +222,24 @@ function FilterFloater({ viewId }: { viewId: string }) {
       </div>
     </div>
   );
+}
+
+/** Right click on a block (UI-W5-01): the unified menu, beside the block. */
+function openMenu(viewId: string, row: number, frame: DrawFrame, ev: React.MouseEvent): void {
+  const scanId = get().views[viewId]?.state.scan_id;
+  if (!scanId) return;
+  const box = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+  const k = box.width / frame.info.width;
+  const node = frame.node[row]!;
+  set({
+    menu: {
+      viewId,
+      scanId,
+      key: frame.key[row]!,
+      node: node > 0 ? node : null,
+      x: ev.clientX,
+      y: ev.clientY,
+      avoid: { x: box.left + frame.x[row]! * k, y: box.top + frame.y[row]! * k, w: frame.w[row]! * k, h: frame.h[row]! * k },
+    },
+  });
 }

@@ -12,8 +12,17 @@ from collections.abc import Sequence
 Cell = tuple[float, float, float, float]  # x0, y0, x1, y1
 
 
-def squarify(areas: Sequence[float], x0: float, y0: float, x1: float, y1: float) -> list[Cell]:
-    """Cells for ``areas`` (best sorted descending; their sum should equal the rectangle's area)."""
+def squarify(
+    areas: Sequence[float], x0: float, y0: float, x1: float, y1: float, aspect: float = 1.0
+) -> list[Cell]:
+    """Cells for ``areas`` (best sorted descending; their sum should equal the rectangle's area).
+
+    ``aspect``: the width / height the cells aim for (1: squares; 「元素比例」, UI-W7-32). The
+    rectangle is laid out squarely with x divided by it, then stretched back: seams stay exact.
+    """
+    if aspect != 1.0 and aspect > 0:
+        cells = squarify(areas, x0 / aspect, y0, x1 / aspect, y1)
+        return [(a * aspect, b, c * aspect, d) for a, b, c, d in cells]
     n = len(areas)
     out: list[Cell] = [(x0, y0, x0, y0)] * n
     total = float(sum(areas))

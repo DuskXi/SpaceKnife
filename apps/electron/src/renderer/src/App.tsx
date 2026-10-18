@@ -1,6 +1,9 @@
 import { useEffect } from "react";
 
 import { basketAdd, boot, call, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
+import { ContextMenu } from "@/shell/ContextMenu";
+import { ExportDialog } from "@/shell/ExportDialog";
+import { OpToast } from "@/shell/OpToast";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog, useApp } from "@/state/store";
 import { NOT_ON_DISK, revealLabel } from "@/shell/Inspector";
 import { focusFilter } from "@/shell/FilterBox";
@@ -13,6 +16,7 @@ import { Toolbar } from "@/shell/Toolbar";
 import { ScanPage } from "@/pages/ScanPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
+import { cycleDirection, exitCompare } from "@/state/compare";
 
 export function App() {
   const tab = useApp((s) => activeTab(s));
@@ -48,6 +52,9 @@ export function App() {
         )}
       </div>
       <Palette />
+      <ContextMenu />
+      <OpToast />
+      <ExportDialog />
     </>
   );
 }
@@ -97,8 +104,25 @@ function onKey(e: KeyboardEvent): unknown {
   if (ctrl && key === "Home") return (done(), void viewCall(viewId, "view.home"));
   if (ctrl && (key === "=" || key === "+")) return (done(), void setViewSettings(viewId, { detail: Math.min(15, st.detail + 1) }));
   if (ctrl && key === "-") return (done(), void setViewSettings(viewId, { detail: Math.max(1, st.detail - 1) }));
+  // Shift+F10 / the menu key: the context menu of the selected block, beside it (UI-W5-02)
+  if ((key === "ContextMenu" || (e.shiftKey && key === "F10")) && !onControl) {
+    done();
+    const frame = view?.frame;
+    const row = frame?.info.selected_row;
+    const el = document.querySelector<HTMLElement>(`.treemap[data-view-id="${viewId}"]`);
+    if (row == null || !frame || !el) return;
+    const box = el.getBoundingClientRect();
+    const k = box.width / frame.info.width;
+    const r = { x: box.left + frame.x[row]! * k, y: box.top + frame.y[row]! * k, w: frame.w[row]! * k, h: frame.h[row]! * k };
+    const node = frame.node[row]!;
+    return set({ menu: { viewId, scanId: st.scan_id, key: frame.key[row]!, node: node > 0 ? node : null, x: r.x + r.w / 2, y: r.y + Math.min(r.h / 2, 24), avoid: r } });
+  }
   if (key === "Enter" && !onControl && st.selected != null) return (done(), void viewCall(viewId, "view.zoom", { key: st.selected }));
-  if (key === "Escape" && !onControl) return (done(), void viewCall(viewId, "view.select", { key: null }));
+  if (key === "Escape" && !onControl) {
+    // compare mode: Esc clears the selection, then leaves the comparison (W6 待定 16)
+    if (tab.compare && st.selected == null) return (done(), void exitCompare(tab.id));
+    return (done(), void viewCall(viewId, "view.select", { key: null }));
+  }
   if (key === "Delete" && !ctrl && !onControl) {
     const frame = view?.frame;
     const row = frame?.info.selected_row;
@@ -122,6 +146,8 @@ function onKey(e: KeyboardEvent): unknown {
   }
   if (bareTags && !ctrl && !e.altKey && key === "0") return (done(), void viewCall(viewId, "view.tag", { color: null }));
   const lower = key.toLowerCase();
+  if (st.compare && !ctrl && !e.altKey && (lower === "f" || lower === "u")) return; // no free / unknown blocks
+  if (st.compare && !ctrl && !e.altKey && lower === "c") return (done(), cycleDirection(viewId));
   if (!ctrl && !e.altKey && lower === "f") return (done(), void setViewSettings(viewId, { show_free: !st.show_free }));
   if (!ctrl && !e.altKey && lower === "u") return (done(), void setViewSettings(viewId, { show_unknown: !st.show_unknown }));
   if (!ctrl && !e.altKey && lower === "c") {

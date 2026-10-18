@@ -3,11 +3,16 @@
 import { create } from "zustand";
 
 import type {
+  BasketState,
+  CompareInfo,
+  CompareProgressEvent,
+  CompareSourcesResult,
   FilterInfo,
   FilterParse,
   FilterVocab,
   FrameInfo,
   LogRecordEvent,
+  OpProgressEvent,
   PathCheckResult,
   ScanStatus,
   SettingsState,
@@ -27,6 +32,25 @@ export interface Tab {
   viewIds: string[];
   focusedPane: number;
   title: string;
+  /** compare mode (W6): the tab shows a change tree instead of its scan */
+  compare?: TabCompare;
+}
+
+/** A tab's comparison: the one shown (viewId) and, while switching ends, the one being computed. */
+export interface TabCompare {
+  /** snapshot file or "now" */
+  base: string;
+  target: string;
+  /** the comparison being computed or shown */
+  compareId: string | null;
+  phase: CompareProgressEvent["phase"];
+  progress: number | null;
+  message: string;
+  /** the comparison on screen and its view (kept while a new one computes, UI-W6-41) */
+  shownId: string | null;
+  viewId: string | null;
+  info: CompareInfo | null;
+  sources: CompareSourcesResult | null;
 }
 
 export interface ViewData {
@@ -115,8 +139,28 @@ export interface AppState {
   unitEpoch: number;
   startForms: Record<string, StartForm>;
   toast: string | null;
-  /** delete basket entries ("scanId:node"); the real basket arrives with M6 */
-  basket: string[];
+  /** the delete basket, held by the backend (W5); null until it was read */
+  basket: BasketState | null;
+  basketOpen: boolean;
+  /** the unified context menu (W5-01…24) */
+  menu: MenuState | null;
+  /** the latest file operation (progress, results, undo window) */
+  op: OpProgressEvent | null;
+  /** 「导出报告…」 dialog */
+  exportOpen: boolean;
+}
+
+/** Where the context menu opens and for what (a treemap block or a result row). */
+export interface MenuState {
+  viewId: string;
+  scanId: string;
+  /** node id, or an aggregate block's key */
+  key: number;
+  node: number | null;
+  x: number;
+  y: number;
+  /** the target block in client px: the menu keeps clear of it */
+  avoid?: { x: number; y: number; w: number; h: number };
 }
 
 let nextTab = 1;
@@ -153,7 +197,11 @@ export const useApp = create<AppState>(() => ({
   unitEpoch: 0,
   startForms: {},
   toast: null,
-  basket: [],
+  basket: null,
+  basketOpen: false,
+  menu: null,
+  op: null,
+  exportOpen: false,
 }));
 
 export const set = useApp.setState;
@@ -166,7 +214,9 @@ export function activeTab(s: AppState = get()): Tab {
 /** The view the toolbar acts on: the focused pane of the active scan tab (G7). */
 export function focusedViewId(s: AppState = get()): string | null {
   const tab = activeTab(s);
-  return tab.kind === "scan" ? (tab.viewIds[tab.focusedPane] ?? tab.viewIds[0] ?? null) : null;
+  if (tab.kind !== "scan") return null;
+  if (tab.compare) return tab.compare.viewId; // compare mode: the change tree (W6)
+  return tab.viewIds[tab.focusedPane] ?? tab.viewIds[0] ?? null;
 }
 
 export function patchView(viewId: string, patch: Partial<ViewData>): void {
@@ -263,13 +313,8 @@ export function toast(message: string): void {
   toastTimer = setTimeout(() => set({ toast: null }), 1800);
 }
 
-/** Put a node into the delete basket (UI-W3-33 Delete). Returns false if it was already there. */
-export function addToBasket(scanId: string, node: number): boolean {
-  const id = `${scanId}:${node}`;
-  if (get().basket.includes(id)) return false;
-  set((s) => ({ basket: [...s.basket, id] }));
-  return true;
-}
+/** Items in the delete basket (toolbar badge, palette). */
+export const basketCount = (s: AppState) => s.basket?.items.length ?? 0;
 
 /** The start form of a tab, created from the settings' defaults and the system volume (UI-W1-03, UI-W1-19). */
 const defaultForms = new Map<string, { sig: string; form: StartForm }>();
@@ -296,4 +341,8 @@ export function startFormOf(s: AppState, tabId: string): StartForm {
 
 export function patchStartForm(tabId: string, patch: Partial<StartForm>): void {
   set((s) => ({ startForms: { ...s.startForms, [tabId]: { ...startFormOf(s, tabId), ...patch } } }));
+}
+
+export function patchCompare(tabId: string, patch: Partial<TabCompare>): void {
+  set((s) => ({ tabs: s.tabs.map((t) => (t.id === tabId && t.compare ? { ...t, compare: { ...t.compare, ...patch } } : t)) }));
 }

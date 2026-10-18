@@ -12,7 +12,7 @@ from __future__ import annotations
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -78,6 +78,8 @@ class ViewSettings:
     show_unknown: bool = True
     color_mode: ColorMode = "class"
     filter_mode: FilterMode = "dim"
+    font_scale: float = 1.0
+    aspect: float = 1.0
 
 
 @dataclass(slots=True)
@@ -104,6 +106,8 @@ class Frame:
     filter_totals: tuple[int, int, int] | None  # (files, allocated, logical) below the zoom root
     scanned_total: int  # allocated bytes below the zoom root
     flash: list[tuple[int, int]] = field(default_factory=list)  # (row, allocation change): file changes
+    delta: np.ndarray | None = None  # i8 compare views: signed net change per row (W6)
+    dstat: np.ndarray | None = None  # u1 compare views: 0 unchanged, 1 new, 2 deleted, 3 changed
 
 
 class View:
@@ -130,8 +134,10 @@ class View:
         self.show_free = s.show_free
         self.show_unknown = s.show_unknown
         self.color_mode: ColorMode = s.color_mode
+        self.font_scale = s.font_scale
+        self.aspect = s.aspect
         self.filter_mode: FilterMode = s.filter_mode
-        self.vocab = vocab or platform_vocab()
+        self._vocab = vocab  # None: the platform vocabulary with the current class table
         self.viewport = (1280.0, 800.0, 1.0)
         self.home = roots[0].node if len(roots) == 1 else 0
         self.zoom = Zoom(self.home, self.home)
@@ -141,6 +147,8 @@ class View:
         self.filter = FilterState()
         self.results_sort: ResultsSort = "size"  # W3 result list order, remembered per view
         self.last: Frame | None = None
+        self.compare: Any = None  # server.compares.ChangeTree: areas are changes (W6)
+        self.direction: str = "all"  # compare views: 「显示的变化」 all / grow / shrink
         self._flashes: dict[int, int] = {}  # node -> allocation change, shown with the next frame (M5)
         self._flash_lock = threading.Lock()  # added on the event loop, taken by renders on the pool
 
@@ -417,7 +425,7 @@ class View:
 
     def set_filter(self, text: str, cursor: int | None = None) -> FilterState:
         """Apply a filter text. With errors the previous valid filter stays in effect (UI-TM-48)."""
-        parsed = parse(text, cursor, self.vocab)
+        parsed = parse(text, cursor, self._vocab or platform_vocab())
         f = self.filter
         f.text = text
         f.diagnostics = parsed.diagnostics
@@ -466,10 +474,15 @@ class View:
             detail=self.detail,
             min_element=self.min_element,
             sort_by_size=self.sort_by_size,
+            font_scale=self.font_scale,
+            aspect=self.aspect,
         )
         res = self.filter.result if self.filter.active else None
         sizes = None
-        if res is not None and self.filter_mode == "hide":
+        hide = res is not None and self.filter_mode == "hide"
+        if self.compare is not None and self.direction != "all":
+            sizes = self.compare.amounts(self.direction, res.match if hide and res is not None else None)
+        elif hide and res is not None:
             sizes = np.zeros(len(self.store), dtype=np.int64)
             sizes[: res.n] = res.alloc
         draw = self.layout.run(params, self._root_spec(), sizes)
@@ -541,6 +554,9 @@ class View:
             scanned = int(Layout.effective_sizes_of(store, self.zoom.members).sum())
         else:
             scanned = int(Layout.effective_sizes_of(store, np.array([self.zoom.node]))[0])
+        delta = dstat = None
+        if self.compare is not None:
+            delta, dstat = self._changes(draw, real)
         return Frame(
             draw=draw,
             flags=flags,
@@ -550,7 +566,54 @@ class View:
             breadcrumb=self.breadcrumb(),
             filter_totals=totals,
             scanned_total=scanned,
+            delta=delta,
+            dstat=dstat,
         )
+
+    def _changes(self, draw: DrawList, real: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Compare views: each block's signed net change and status (aggregates: their members)."""
+        t = self.compare
+        n = len(draw)
+        node = draw.node.astype(np.int64)
+        delta = np.zeros(n, dtype=np.int64)
+        dstat = np.zeros(n, dtype=np.uint8)
+        ok = real & (node < len(t.delta))
+        delta[ok] = t.delta[node[ok]]
+        dstat[ok] = t.status[node[ok]]
+        kind = draw.kind
+        for row in np.nonzero((kind == RectKind.SMALL) | (kind == RectKind.MORE))[0]:
+            members = draw.members.get(int(draw.key[row]))
+            if members is None or not len(members):
+                continue
+            d = t.delta[members]
+            if self.direction == "grow":
+                d = d[d > 0]
+            elif self.direction == "shrink":
+                d = d[d < 0]
+            delta[row] = int(d.sum())
+            st = t.status[members]
+            dstat[row] = int(st[0]) if bool((st == st[0]).all()) and st[0] in (1, 2) else 3
+        return delta, dstat
+
+    def rebase(self, store: NodeStore, compare: Any, layout: Layout, roots: list[RootInfoLike]) -> None:
+        """A compare view moves to a recomputed change tree (live target): zoom root and selection
+        follow by path, the history starts anew."""
+        old = self.store
+
+        def path_of(node: int | None) -> str | None:
+            return old.path(node) if node is not None and 0 < node < len(old) else None
+
+        zoom_path = path_of(self.zoom.node)
+        sel_path = path_of(self.selected) if self.selected is not None and self.selected >= 0 else None
+        self.store, self.compare, self.layout, self.roots = store, compare, layout, roots
+        self.home = roots[0].node if len(roots) == 1 else 0
+        node = store.find(zoom_path) if zoom_path else None
+        self.zoom = Zoom(node, node) if node is not None else Zoom(self.home, self.home)
+        self.selected = store.find(sel_path) if sel_path else None
+        self.back.clear()
+        self.forward.clear()
+        self.last = None
+        self.refilter()
 
     def _selected_row(self, draw: DrawList) -> int | None:
         """Row of the selection: the selected block, or the aggregate / nearest ancestor holding it."""

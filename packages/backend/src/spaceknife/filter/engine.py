@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 import weakref
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import PurePath
 
 import numpy as np
@@ -22,7 +22,7 @@ import numpy as np
 from spaceknife_protocol.filter import AttrName, AttrSet, FilterNormal, TagColor
 from spaceknife_protocol.filter_syntax import glob_parts
 
-from ..classes import DEFAULT_CLASSES, ClassTable
+from ..classes import ClassTable, active
 from ..store.nodes import Flag, Kind, NodeStore
 from .names import glob_str_regex, name_index
 
@@ -46,7 +46,7 @@ AGE_COLUMNS = {"modify": "mtime", "create": "ctime", "access": "atime"}
 @dataclass(frozen=True, slots=True)
 class FilterContext:
     now: int
-    classes: ClassTable = DEFAULT_CLASSES
+    classes: ClassTable = field(default_factory=active)  # the user's table (W7 文件类别)
     tags: np.ndarray | None = None  # uint8 per node: own tag bits (TAG_BITS); inherited downwards
 
     @classmethod

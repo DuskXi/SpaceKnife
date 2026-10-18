@@ -1,0 +1,11 @@
+@name=Folder tree
+# SpaceKnife 新增的内置模板：按层级缩进的文件夹树（语法见 docs/export-templates.md）
+@file=Folder tree.txt
+@blocks=folders
+@sort=size
+@order=desc
+@detail
+{script}
+{   if {<%isfolder%>} == {true}
+  ? {{nest{    }}<%file%>  <%disksize%>{&br}}
+}

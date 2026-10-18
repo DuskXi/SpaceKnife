@@ -112,6 +112,16 @@ function registerIpc(): void {
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return res.canceled ? [] : res.filePaths;
   });
+  ipcMain.handle("sk:openFile", async (_e, o: { title: string; filters: { name: string; extensions: string[] }[] }) => {
+    const opts = { title: String(o.title), properties: ["openFile" as const], filters: o.filters };
+    const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+    return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
+  ipcMain.handle("sk:saveFile", async (_e, o: { title: string; filters: { name: string; extensions: string[] }[]; defaultName: string }) => {
+    const opts = { title: String(o.title), defaultPath: String(o.defaultName), filters: o.filters };
+    const res = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+    return res.canceled || !res.filePath ? null : res.filePath;
+  });
   ipcMain.handle("sk:openSnapshot", async () => {
     const opts = { title: "打开快照文件", properties: ["openFile" as const], filters: [{ name: "SpaceKnife 快照", extensions: ["sks"] }] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);

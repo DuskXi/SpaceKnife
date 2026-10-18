@@ -56,6 +56,13 @@ class TagStore:
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
         os.replace(tmp, self.file)
 
+    def forget(self) -> None:
+        """Drop every tag in memory (the saved file is removed by the caller)."""
+        self.tags.clear()
+        self.version += 1
+        self._resolved = None
+        self._arrays.clear()
+
     # ------------------------------------------------------------- addressing
 
     @staticmethod

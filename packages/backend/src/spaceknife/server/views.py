@@ -13,7 +13,7 @@ import itertools
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from loguru import logger
@@ -35,6 +35,9 @@ from .rpc import CURRENT_REQUEST, RpcError
 if TYPE_CHECKING:
     from spaceknife_protocol.scan import ScanStatus
 
+    from ..store.nodes import NodeStore
+    from .compares import ChangeTree, CompareHandle, CompareManager
+    from .ops_service import OpsService
     from .scans import ScanHandle, ScanManager
     from .session import Session
 
@@ -73,19 +76,29 @@ class ViewManager:
         self._shared: dict[str, _Shared] = {}
         self._ids = itertools.count(1)
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults and live changes)
+        self.compares: CompareManager | None = None  # set by CompareManager: compare views (W6)
+        self.ops: OpsService | None = None  # set by the server: the basket follows tree changes (W5)
         scans.in_use = self.has_views  # MAX_SCANS eviction must not pull a scan from under its tabs
         scans.on_evict = self._release
 
     # ------------------------------------------------------------- lifecycle
 
     def _scan(self, scan_id: str) -> ScanHandle:
-        handle = self.scans.scans.get(scan_id)
+        handle: Any = self.scans.scans.get(scan_id)
+        if handle is None and self.compares is not None:
+            handle = self.compares.lookup(scan_id)  # a ready comparison opens like a scan
         if handle is None:
             raise RpcError(ErrorCode.UNKNOWN_SCAN, f"unknown scan: {scan_id}")
-        return handle
+        return cast("ScanHandle", handle)
 
     def _shared_for(self, handle: ScanHandle) -> _Shared:
         shared = self._shared.get(handle.id)
+        cmp = _compare_of(handle)
+        if shared is None and cmp is not None:
+            # a comparison shows the tags of its scan (same roots: tags address root + path)
+            own = self.shared(cmp.scan_id)
+            shared = _Shared(own.tags if own else TagStore(None), Layout(handle.store), f"views-{handle.id}")
+            self._shared[handle.id] = shared
         if shared is None:
             remember = self.settings is None or bool(self.settings.get("tags.remember"))
             file = (
@@ -108,6 +121,19 @@ class ViewManager:
         """Tags and layout cache of a scan (also used by tree.summary)."""
         handle = self.scans.scans.get(scan_id)
         return self._shared_for(handle) if handle is not None else None
+
+    async def replace_store(self, compare_id: str, old: NodeStore, tree: ChangeTree) -> None:
+        """A live comparison was computed again: its views move to the new change tree."""
+        shared = self._shared.get(compare_id)
+        layout = Layout(tree.store)
+        if shared is not None:
+            shared.layout = layout
+        roots = [RootInfoLike(node=r, whole_volume=False) for r in tree.store.roots()]
+        for host in self._hosts(compare_id):
+            async with host.lock:
+                if host.view.store is old:
+                    host.view.rebase(tree.store, tree, layout, roots)
+            await self._repaint(host, "change")
 
     def open(self, session: Session, params: pv.ViewOpenParams) -> ViewHost:
         if len(self.views) >= MAX_VIEWS:
@@ -135,6 +161,9 @@ class ViewManager:
         view.set_viewport(params.viewport.width, params.viewport.height, params.viewport.dpr)
         if params.settings is not None:
             apply_settings(view, params.settings)
+        cmp = _compare_of(handle)
+        if cmp is not None:
+            view.compare = cmp.tree
         host = ViewHost(view, handle.id, session)
         self.views[view_id] = host
         return host
@@ -184,18 +213,41 @@ class ViewManager:
             show_free=bool(st.get("treemap.show_free")),
             show_unknown=bool(st.get("treemap.show_unknown")),
             color_mode=st.get("appearance.default_color_mode"),  # type: ignore[arg-type]
+            font_scale=int(st.get("treemap.font_scale")) / 100,
+            aspect=aspect_of(int(st.get("treemap.aspect"))),
         )
 
     def apply_settings_live(self, st: SettingsStore) -> None:
         """Geometry settings re-lay out every open view at once (UI-W7-32)."""
         min_element = float(st.get("treemap.min_element"))
         sort_by_size = bool(st.get("treemap.sort_by_size"))
+        font_scale = int(st.get("treemap.font_scale")) / 100
+        aspect = aspect_of(int(st.get("treemap.aspect")))
+        geometry = (min_element, sort_by_size, font_scale, aspect)
         for host in list(self.views.values()):
             v = host.view
-            if v.min_element == min_element and v.sort_by_size == sort_by_size:
+            if (v.min_element, v.sort_by_size, v.font_scale, v.aspect) == geometry:
                 continue
-            v.min_element, v.sort_by_size = min_element, sort_by_size
+            v.min_element, v.sort_by_size, v.font_scale, v.aspect = geometry
             asyncio.get_running_loop().create_task(self._repaint(host, "settings"))
+
+    async def forget_tags(self) -> None:
+        """「清除所有已保存的标签」: every scan's tags go; the views redraw without them."""
+        for shared in self._shared.values():
+            shared.tags.forget()
+        for host in list(self.views.values()):
+            async with host.lock:
+                if host.view.filter.active:
+                    await compute(host.view.refilter)
+            await self._repaint(host, "tags")
+
+    async def reclassify(self) -> None:
+        """The file class table changed: every view re-runs its filter (``:class:``) and recolours."""
+        for host in list(self.views.values()):
+            async with host.lock:
+                if host.view.filter.active:
+                    await compute(host.view.refilter)
+            await self._repaint(host, "classes")
 
     async def _repaint(self, host: ViewHost, reason: str) -> None:
         try:
@@ -249,6 +301,10 @@ class ViewManager:
 
     def flash(self, scan_id: str, changes: dict[int, int]) -> None:
         """The tree changed: views flash what changed (setting 「元素变化闪烁」) and get a new frame."""
+        if self.compares is not None:
+            self.compares.on_tree_changed(scan_id)  # live comparisons follow (UI-W6-38)
+        if self.ops is not None:
+            self.ops.on_tree_changed(scan_id)  # basket sizes and missing items (UI-W5-48)
         st = self.settings
         flash_on = st is None or bool(st.get("treemap.flash_changes"))
         for host in self._hosts(scan_id):
@@ -301,6 +357,18 @@ class ViewManager:
                 return
 
 
+def _compare_of(handle: object) -> CompareHandle | None:
+    """The comparison behind a scan-like handle (views open both)."""
+    from .compares import CompareHandle
+
+    return handle if isinstance(handle, CompareHandle) else None
+
+
+def aspect_of(setting: int) -> float:
+    """「元素比例」 −60…60 → the width / height cells aim for: 0.5 (taller) … 1 (square) … 2 (wider)."""
+    return float(2 ** (setting / 60))
+
+
 def apply_settings(view: View, s: pv.ViewSettingsParams) -> None:
     if s.detail is not None:
         view.set_detail(s.detail)
@@ -318,6 +386,8 @@ def apply_settings(view: View, s: pv.ViewSettingsParams) -> None:
         view.filter_mode = s.filter_mode
     if s.viewport is not None:
         view.set_viewport(s.viewport.width, s.viewport.height, s.viewport.dpr)
+    if s.direction is not None and view.compare is not None:
+        view.direction = s.direction
 
 
 def view_state(host: ViewHost) -> pv.ViewState:
@@ -338,6 +408,8 @@ def view_state(host: ViewHost) -> pv.ViewState:
         viewport=pv.Viewport(width=w, height=h, dpr=dpr),
         selected=v.selected,
         results_sort=v.results_sort,
+        compare=v.compare is not None,
+        direction=v.direction,  # type: ignore[arg-type]
         can_back=bool(v.back),
         can_forward=bool(v.forward),
         can_up=v.can_go_up(),
@@ -406,6 +478,9 @@ def encode_draw(frame: Frame, view_id: str, seq: int, request_id: int | str | No
         "tone": frame.tone,
         "name_len": np.fromiter((len(b) for b in encoded), dtype=np.uint32, count=len(encoded)),
     }
+    if frame.delta is not None and frame.dstat is not None:  # compare views (W6)
+        columns["delta"] = frame.delta
+        columns["dstat"] = frame.dstat
     return encode_frame(
         stream=pv.view_stream(view_id),
         layout=pv.DRAWLIST_LAYOUT,

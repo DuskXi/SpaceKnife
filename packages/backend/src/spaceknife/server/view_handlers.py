@@ -171,6 +171,7 @@ def view_state_tuple(v: View) -> tuple[object, ...]:
         v.color_mode,
         v.filter_mode,
         v.viewport,
+        v.direction,
     )
 
 

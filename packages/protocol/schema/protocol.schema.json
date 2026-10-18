@@ -198,6 +198,329 @@
       "title": "AttrSet",
       "type": "object"
     },
+    "BasketAddParams": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A block of the view's frame (an aggregate's members)",
+          "title": "Key"
+        },
+        "nodes": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 100000,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "view_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "With key: the view whose frame holds that block",
+          "title": "View Id"
+        }
+      },
+      "required": [
+        "scan_id"
+      ],
+      "title": "BasketAddParams",
+      "type": "object"
+    },
+    "BasketAddResult": {
+      "properties": {
+        "absorbed": {
+          "description": "Items replaced by a folder that holds them",
+          "title": "Absorbed",
+          "type": "integer"
+        },
+        "added": {
+          "title": "Added",
+          "type": "integer"
+        },
+        "merged": {
+          "description": "Already covered by an item (or one of its folders)",
+          "title": "Merged",
+          "type": "integer"
+        },
+        "refused": {
+          "items": {
+            "$ref": "#/$defs/Refusal"
+          },
+          "title": "Refused",
+          "type": "array"
+        },
+        "state": {
+          "$ref": "#/$defs/BasketState"
+        }
+      },
+      "required": [
+        "state",
+        "added",
+        "merged",
+        "absorbed"
+      ],
+      "title": "BasketAddResult",
+      "type": "object"
+    },
+    "BasketEvent": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/BasketState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "BasketEvent",
+      "type": "object"
+    },
+    "BasketExecuteParams": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None: every item",
+          "title": "Ids"
+        },
+        "mode": {
+          "enum": [
+            "trash",
+            "delete"
+          ],
+          "title": "Mode",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "title": "BasketExecuteParams",
+      "type": "object"
+    },
+    "BasketItem": {
+      "properties": {
+        "alloc": {
+          "description": "Bytes freed by deleting it (cloud placeholders, partial hard links: 0)",
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "dirs": {
+          "default": 0,
+          "title": "Dirs",
+          "type": "integer"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "dir",
+            "link",
+            "other",
+            "group"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "members": {
+          "default": 0,
+          "description": "Small items of an aggregate block (kind 'group')",
+          "title": "Members",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "description": "Why it cannot be deleted as is (locked by …, missing …)",
+          "title": "Note",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "status": {
+          "default": "ready",
+          "enum": [
+            "ready",
+            "locked",
+            "missing",
+            "protected"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tag"
+        },
+        "volume": {
+          "description": "Mount point of the volume holding it",
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "scan_id",
+        "path",
+        "name",
+        "kind",
+        "alloc",
+        "size",
+        "volume"
+      ],
+      "title": "BasketItem",
+      "type": "object"
+    },
+    "BasketRemoveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 100000,
+          "title": "Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids"
+      ],
+      "title": "BasketRemoveParams",
+      "type": "object"
+    },
+    "BasketState": {
+      "properties": {
+        "freeable": {
+          "description": "Bytes freed in all, every volume",
+          "title": "Freeable",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/BasketItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "$ref": "#/$defs/BasketVolume"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "volumes",
+        "freeable"
+      ],
+      "title": "BasketState",
+      "type": "object"
+    },
+    "BasketVolume": {
+      "properties": {
+        "free": {
+          "title": "Free",
+          "type": "integer"
+        },
+        "freeable": {
+          "description": "Bytes the basket frees on this volume",
+          "title": "Freeable",
+          "type": "integer"
+        },
+        "mount_point": {
+          "title": "Mount Point",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "trash": {
+          "description": "The volume has a recycle bin",
+          "title": "Trash",
+          "type": "boolean"
+        },
+        "trash_note": {
+          "default": "",
+          "description": "Where deleted items go (or why they cannot)",
+          "title": "Trash Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mount_point",
+        "total",
+        "free",
+        "freeable",
+        "trash"
+      ],
+      "title": "BasketVolume",
+      "type": "object"
+    },
     "BinaryFrameHeader": {
       "properties": {
         "blobs": {
@@ -350,6 +673,97 @@
       "title": "CancelParams",
       "type": "object"
     },
+    "ChangeItem": {
+      "description": "A changed item: a file, a folder, or an aggregate of small items ('group').",
+      "properties": {
+        "base": {
+          "description": "Allocated bytes in the base (0 when new)",
+          "title": "Base",
+          "type": "integer"
+        },
+        "delta": {
+          "description": "Net change of allocated bytes (target − base)",
+          "title": "Delta",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "file",
+            "dir",
+            "link",
+            "other",
+            "group"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "description": "A short, recognisable name: 「WeChat Files\\…\\Video」",
+          "title": "Label",
+          "type": "string"
+        },
+        "members": {
+          "default": 0,
+          "description": "Kind 'group': changed small items in it",
+          "title": "Members",
+          "type": "integer"
+        },
+        "new_files": {
+          "default": 0,
+          "description": "Files below it that are new",
+          "title": "New Files",
+          "type": "integer"
+        },
+        "node": {
+          "description": "Node of the change tree (kind 'group': the folder holding them)",
+          "title": "Node",
+          "type": "integer"
+        },
+        "on_disk": {
+          "default": true,
+          "description": "Still on disk (file operations allowed)",
+          "title": "On Disk",
+          "type": "boolean"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "description": "Known cause (insights rules), e.g. 「游戏更新」",
+          "title": "Reason",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "same",
+            "new",
+            "deleted",
+            "changed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "target": {
+          "description": "Allocated bytes in the target (0 when deleted)",
+          "title": "Target",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "path",
+        "label",
+        "kind",
+        "delta",
+        "base",
+        "target",
+        "status"
+      ],
+      "title": "ChangeItem",
+      "type": "object"
+    },
     "ClassCond": {
       "properties": {
         "class_id": {
@@ -390,6 +804,51 @@
       "title": "ClassCond",
       "type": "object"
     },
+    "ClassEdit": {
+      "additionalProperties": false,
+      "description": "One class as the editor sends it; order in the list is the display (and colour) order.",
+      "properties": {
+        "color": {
+          "default": "",
+          "pattern": "^(#[0-9A-Fa-f]{6})?$",
+          "title": "Color",
+          "type": "string"
+        },
+        "extensions": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "Extensions",
+          "type": "array"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None: a new class",
+          "title": "Id"
+        },
+        "name": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ClassEdit",
+      "type": "object"
+    },
     "ClassStat": {
       "properties": {
         "bytes": {
@@ -411,6 +870,67 @@
         "files"
       ],
       "title": "ClassStat",
+      "type": "object"
+    },
+    "ClassesEvent": {
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/ClassesState"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "ClassesEvent",
+      "type": "object"
+    },
+    "ClassesState": {
+      "properties": {
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/FilterClassInfo"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "custom": {
+          "description": "The table differs from the built-in one",
+          "title": "Custom",
+          "type": "boolean"
+        },
+        "defaults": {
+          "items": {
+            "$ref": "#/$defs/FilterClassInfo"
+          },
+          "title": "Defaults",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes",
+        "defaults",
+        "custom"
+      ],
+      "title": "ClassesState",
+      "type": "object"
+    },
+    "ClassesUpdateParams": {
+      "additionalProperties": false,
+      "properties": {
+        "classes": {
+          "items": {
+            "$ref": "#/$defs/ClassEdit"
+          },
+          "maxItems": 256,
+          "minItems": 1,
+          "title": "Classes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes"
+      ],
+      "title": "ClassesUpdateParams",
       "type": "object"
     },
     "ClientInfo": {
@@ -466,6 +986,482 @@
         "dtype"
       ],
       "title": "ColumnSpec",
+      "type": "object"
+    },
+    "CompareIdParams": {
+      "additionalProperties": false,
+      "properties": {
+        "compare_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Compare Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "compare_id"
+      ],
+      "title": "CompareIdParams",
+      "type": "object"
+    },
+    "CompareInfo": {
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/CompareSide"
+        },
+        "changed": {
+          "description": "Items that changed (files and folders)",
+          "title": "Changed",
+          "type": "integer"
+        },
+        "compare_id": {
+          "title": "Compare Id",
+          "type": "string"
+        },
+        "grow": {
+          "description": "Allocated bytes added, every file",
+          "title": "Grow",
+          "type": "integer"
+        },
+        "live": {
+          "default": false,
+          "description": "The target is 'now' and follows file changes",
+          "title": "Live",
+          "type": "boolean"
+        },
+        "nodes": {
+          "description": "Rows of the change tree",
+          "title": "Nodes",
+          "type": "integer"
+        },
+        "revision": {
+          "default": 0,
+          "description": "Bumped each time live changes recompute it",
+          "title": "Revision",
+          "type": "integer"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "shrink": {
+          "description": "Allocated bytes gone, every file (≥ 0)",
+          "title": "Shrink",
+          "type": "integer"
+        },
+        "target": {
+          "$ref": "#/$defs/CompareSide"
+        }
+      },
+      "required": [
+        "compare_id",
+        "scan_id",
+        "base",
+        "target",
+        "grow",
+        "shrink",
+        "changed",
+        "nodes"
+      ],
+      "title": "CompareInfo",
+      "type": "object"
+    },
+    "CompareNodeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "children": {
+          "default": 4,
+          "maximum": 50,
+          "minimum": 0,
+          "title": "Children",
+          "type": "integer"
+        },
+        "key": {
+          "description": "A block of the view's last frame",
+          "title": "Key",
+          "type": "integer"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "key"
+      ],
+      "title": "CompareNodeParams",
+      "type": "object"
+    },
+    "CompareNodeResult": {
+      "description": "The hover card of a compare view (UI-W6-20…22).",
+      "properties": {
+        "children": {
+          "description": "Its children that changed most",
+          "items": {
+            "$ref": "#/$defs/ChangeItem"
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "item": {
+          "$ref": "#/$defs/ChangeItem"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "title": "CompareNodeResult",
+      "type": "object"
+    },
+    "CompareOpenParams": {
+      "additionalProperties": false,
+      "properties": {
+        "base": {
+          "description": "A snapshot file, or 'now'",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "scan_id": {
+          "description": "The tab's scan (its roots, its live tree)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "target": {
+          "default": "now",
+          "description": "Same as base",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "base"
+      ],
+      "title": "CompareOpenParams",
+      "type": "object"
+    },
+    "CompareProgressEvent": {
+      "properties": {
+        "compare_id": {
+          "title": "Compare Id",
+          "type": "string"
+        },
+        "info": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompareInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Present once ready"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "loading",
+            "comparing",
+            "ready",
+            "failed",
+            "cancelled"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Progress"
+        }
+      },
+      "required": [
+        "compare_id",
+        "phase"
+      ],
+      "title": "CompareProgressEvent",
+      "type": "object"
+    },
+    "CompareSide": {
+      "description": "One end of a comparison: a snapshot file, or the tab's live tree (\"now\").",
+      "properties": {
+        "bytes_alloc": {
+          "default": 0,
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "created_at": {
+          "description": "When the snapshot was taken; for 'now' the moment compared",
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "snapshot",
+            "now"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "node_count": {
+          "default": 0,
+          "title": "Node Count",
+          "type": "integer"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The snapshot file (kind 'snapshot')",
+          "title": "Path"
+        }
+      },
+      "required": [
+        "kind",
+        "created_at"
+      ],
+      "title": "CompareSide",
+      "type": "object"
+    },
+    "CompareSourcesParams": {
+      "additionalProperties": false,
+      "properties": {
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id"
+      ],
+      "title": "CompareSourcesParams",
+      "type": "object"
+    },
+    "CompareSourcesResult": {
+      "properties": {
+        "now": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompareSide"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The live tree, when it can be compared"
+        },
+        "now_note": {
+          "default": "",
+          "description": "Why the live tree cannot be compared yet",
+          "title": "Now Note",
+          "type": "string"
+        },
+        "snapshots": {
+          "description": "Snapshots of the same scan roots, newest first",
+          "items": {
+            "$ref": "#/$defs/SnapshotInfo"
+          },
+          "title": "Snapshots",
+          "type": "array"
+        }
+      },
+      "required": [
+        "snapshots"
+      ],
+      "title": "CompareSourcesResult",
+      "type": "object"
+    },
+    "CompareSummary": {
+      "description": "The sidebar of a compare view, for its zoom root and filter (UI-W6-24…31).",
+      "properties": {
+        "base": {
+          "$ref": "#/$defs/CompareSide"
+        },
+        "compare_id": {
+          "title": "Compare Id",
+          "type": "string"
+        },
+        "daily": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Net bytes per day, when it grows",
+          "title": "Daily"
+        },
+        "days_to_full": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "free ÷ daily (an estimate)",
+          "title": "Days To Full"
+        },
+        "free": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Free bytes of the volume now (live target)",
+          "title": "Free"
+        },
+        "grow": {
+          "title": "Grow",
+          "type": "integer"
+        },
+        "grow_count": {
+          "description": "Change units that grew (the list shows the first ones)",
+          "title": "Grow Count",
+          "type": "integer"
+        },
+        "grow_items": {
+          "items": {
+            "$ref": "#/$defs/ChangeItem"
+          },
+          "title": "Grow Items",
+          "type": "array"
+        },
+        "net": {
+          "title": "Net",
+          "type": "integer"
+        },
+        "scope": {
+          "description": "Path of the zoom root the numbers cover",
+          "title": "Scope",
+          "type": "string"
+        },
+        "shrink": {
+          "title": "Shrink",
+          "type": "integer"
+        },
+        "shrink_count": {
+          "title": "Shrink Count",
+          "type": "integer"
+        },
+        "shrink_items": {
+          "items": {
+            "$ref": "#/$defs/ChangeItem"
+          },
+          "title": "Shrink Items",
+          "type": "array"
+        },
+        "span_s": {
+          "description": "target time − base time (negative after a swap)",
+          "title": "Span S",
+          "type": "number"
+        },
+        "target": {
+          "$ref": "#/$defs/CompareSide"
+        },
+        "view_id": {
+          "title": "View Id",
+          "type": "string"
+        },
+        "whole": {
+          "description": "The scope is the whole comparison",
+          "title": "Whole",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "view_id",
+        "compare_id",
+        "scope",
+        "whole",
+        "base",
+        "target",
+        "span_s",
+        "grow",
+        "shrink",
+        "net",
+        "grow_items",
+        "shrink_items",
+        "grow_count",
+        "shrink_count"
+      ],
+      "title": "CompareSummary",
+      "type": "object"
+    },
+    "CompareSummaryParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 12,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id"
+      ],
+      "title": "CompareSummaryParams",
+      "type": "object"
+    },
+    "CompareTask": {
+      "properties": {
+        "compare_id": {
+          "title": "Compare Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "compare_id"
+      ],
+      "title": "CompareTask",
       "type": "object"
     },
     "Completion": {
@@ -574,6 +1570,239 @@
       "title": "ErrorObject",
       "type": "object"
     },
+    "ExportCheckParams": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "maxLength": 1048576,
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "ExportCheckParams",
+      "type": "object"
+    },
+    "ExportCheckResult": {
+      "properties": {
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/ExportIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "issues"
+      ],
+      "title": "ExportCheckResult",
+      "type": "object"
+    },
+    "ExportIssue": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "column": {
+          "title": "Column",
+          "type": "integer"
+        },
+        "line": {
+          "title": "Line",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "section": {
+          "title": "Section",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "error",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "severity",
+        "code",
+        "message",
+        "section",
+        "line",
+        "column"
+      ],
+      "title": "ExportIssue",
+      "type": "object"
+    },
+    "ExportRunParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "The file to write (its folder must exist)",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "scope": {
+          "default": "zoom",
+          "description": "The view's zoom root, or every scan root",
+          "enum": [
+            "zoom",
+            "all"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "maxLength": 1048576,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A template's text instead",
+          "title": "Source"
+        },
+        "target": {
+          "default": "",
+          "description": "A target name; empty with source",
+          "maxLength": 256,
+          "title": "Target",
+          "type": "string"
+        },
+        "use_filter": {
+          "default": true,
+          "description": "Only what the view's filter matches",
+          "title": "Use Filter",
+          "type": "boolean"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "path"
+      ],
+      "title": "ExportRunParams",
+      "type": "object"
+    },
+    "ExportRunResult": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "issues": {
+          "description": "Warnings of the template",
+          "items": {
+            "$ref": "#/$defs/ExportIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "bytes"
+      ],
+      "title": "ExportRunResult",
+      "type": "object"
+    },
+    "ExportTarget": {
+      "description": "Something to export with: a built-in template or a format.",
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "extension": {
+          "description": "Suggested file extension, without the dot",
+          "title": "Extension",
+          "type": "string"
+        },
+        "file_name": {
+          "default": "",
+          "description": "The template's own suggested file name",
+          "title": "File Name",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "template",
+            "format"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "description": "What export.run takes: the template's SpaceSniffer name, or csv / json / html",
+          "title": "Name",
+          "type": "string"
+        },
+        "spacesniffer": {
+          "default": false,
+          "description": "Also built into SpaceSniffer",
+          "title": "Spacesniffer",
+          "type": "boolean"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "kind",
+        "extension"
+      ],
+      "title": "ExportTarget",
+      "type": "object"
+    },
+    "ExportTargets": {
+      "properties": {
+        "targets": {
+          "items": {
+            "$ref": "#/$defs/ExportTarget"
+          },
+          "title": "Targets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "targets"
+      ],
+      "title": "ExportTargets",
+      "type": "object"
+    },
     "FilterClassInfo": {
       "properties": {
         "aliases": {
@@ -582,6 +1811,12 @@
           },
           "title": "Aliases",
           "type": "array"
+        },
+        "color": {
+          "default": "",
+          "description": "#RRGGBB chosen by the user; empty: the theme's colour for the id",
+          "title": "Color",
+          "type": "string"
         },
         "extensions": {
           "items": {
@@ -1581,6 +2816,55 @@
       "title": "LogRecordEvent",
       "type": "object"
     },
+    "MaintenanceInfo": {
+      "properties": {
+        "cache_bytes": {
+          "title": "Cache Bytes",
+          "type": "integer"
+        },
+        "cache_dir": {
+          "title": "Cache Dir",
+          "type": "string"
+        },
+        "helper_elevated": {
+          "title": "Helper Elevated",
+          "type": "boolean"
+        },
+        "helper_running": {
+          "title": "Helper Running",
+          "type": "boolean"
+        },
+        "saved_tags": {
+          "description": "Scan roots with remembered tags",
+          "title": "Saved Tags",
+          "type": "integer"
+        },
+        "snapshot_count": {
+          "title": "Snapshot Count",
+          "type": "integer"
+        },
+        "snapshots_bytes": {
+          "title": "Snapshots Bytes",
+          "type": "integer"
+        },
+        "snapshots_dir": {
+          "title": "Snapshots Dir",
+          "type": "string"
+        }
+      },
+      "required": [
+        "helper_running",
+        "helper_elevated",
+        "cache_dir",
+        "cache_bytes",
+        "snapshots_dir",
+        "snapshots_bytes",
+        "snapshot_count",
+        "saved_tags"
+      ],
+      "title": "MaintenanceInfo",
+      "type": "object"
+    },
     "MaskCond": {
       "properties": {
         "end": {
@@ -1783,6 +3067,162 @@
         "alloc"
       ],
       "title": "NodeInfo",
+      "type": "object"
+    },
+    "OpItemResult": {
+      "properties": {
+        "code": {
+          "enum": [
+            "ok",
+            "missing",
+            "denied",
+            "locked",
+            "protected",
+            "no_trash",
+            "exists",
+            "cancelled",
+            "error"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "ok",
+        "code"
+      ],
+      "title": "OpItemResult",
+      "type": "object"
+    },
+    "OpProgressEvent": {
+      "properties": {
+        "can_undo": {
+          "default": false,
+          "title": "Can Undo",
+          "type": "boolean"
+        },
+        "current": {
+          "default": "",
+          "title": "Current",
+          "type": "string"
+        },
+        "done": {
+          "title": "Done",
+          "type": "integer"
+        },
+        "freed": {
+          "default": 0,
+          "description": "Bytes moved to the trash / deleted (items that succeeded)",
+          "title": "Freed",
+          "type": "integer"
+        },
+        "mode": {
+          "default": "trash",
+          "enum": [
+            "trash",
+            "delete"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "phase": {
+          "enum": [
+            "waiting",
+            "running",
+            "done",
+            "cancelled",
+            "undone"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "results": {
+          "description": "Filled once the task ends",
+          "items": {
+            "$ref": "#/$defs/OpItemResult"
+          },
+          "title": "Results",
+          "type": "array"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "done",
+        "total",
+        "phase"
+      ],
+      "title": "OpProgressEvent",
+      "type": "object"
+    },
+    "OpTask": {
+      "properties": {
+        "delay_s": {
+          "default": 0.0,
+          "description": "Permanent deletion waits this long (undo window)",
+          "title": "Delay S",
+          "type": "number"
+        },
+        "mode": {
+          "enum": [
+            "trash",
+            "delete"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "mode",
+        "total"
+      ],
+      "title": "OpTask",
+      "type": "object"
+    },
+    "OpTaskParams": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "title": "OpTaskParams",
       "type": "object"
     },
     "PaletteClearParams": {
@@ -2534,6 +3974,66 @@
       "title": "PathCheckResult",
       "type": "object"
     },
+    "PathForms": {
+      "description": "One path four ways, formatted by the backend so every front end copies the same text.",
+      "properties": {
+        "on_disk": {
+          "default": true,
+          "description": "False for MFT pseudo folders: nothing to open",
+          "title": "On Disk",
+          "type": "boolean"
+        },
+        "posix": {
+          "description": "Forward slashes",
+          "title": "Posix",
+          "type": "string"
+        },
+        "quoted": {
+          "description": "In double quotes (Windows) or shell-quoted (POSIX)",
+          "title": "Quoted",
+          "type": "string"
+        },
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "uri": {
+          "description": "file:// URI (RFC 8089), non-ASCII percent-encoded",
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "raw",
+        "quoted",
+        "posix",
+        "uri"
+      ],
+      "title": "PathForms",
+      "type": "object"
+    },
+    "PathFormsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "minimum": 1,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "PathFormsParams",
+      "type": "object"
+    },
     "PendingCond": {
       "description": "The unfinished condition under the cursor: not an error, not evaluated (dashed chip).",
       "properties": {
@@ -2720,6 +4220,24 @@
         "upper"
       ],
       "title": "Range",
+      "type": "object"
+    },
+    "Refusal": {
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "Refusal",
       "type": "object"
     },
     "ResultRow": {
@@ -3401,6 +4919,60 @@
       "title": "ServerInfo",
       "type": "object"
     },
+    "SettingChange": {
+      "properties": {
+        "after": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "After"
+        },
+        "before": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Before"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "name",
+        "before",
+        "after"
+      ],
+      "title": "SettingChange",
+      "type": "object"
+    },
     "SettingMeta": {
       "properties": {
         "applies": {
@@ -3600,6 +5172,98 @@
         "state"
       ],
       "title": "SettingsChangedEvent",
+      "type": "object"
+    },
+    "SettingsFileParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SettingsFileParams",
+      "type": "object"
+    },
+    "SettingsImportParams": {
+      "additionalProperties": false,
+      "properties": {
+        "apply": {
+          "default": false,
+          "description": "False: only tell what would change (the user confirms)",
+          "title": "Apply",
+          "type": "boolean"
+        },
+        "path": {
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SettingsImportParams",
+      "type": "object"
+    },
+    "SettingsImportResult": {
+      "properties": {
+        "applied": {
+          "default": false,
+          "title": "Applied",
+          "type": "boolean"
+        },
+        "changes": {
+          "items": {
+            "$ref": "#/$defs/SettingChange"
+          },
+          "title": "Changes",
+          "type": "array"
+        },
+        "classes": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/FilterClassInfo"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The new file class table, if it changes",
+          "title": "Classes"
+        },
+        "skipped": {
+          "description": "What could not be taken over, and why",
+          "items": {
+            "type": "string"
+          },
+          "title": "Skipped",
+          "type": "array"
+        },
+        "source": {
+          "enum": [
+            "spaceknife",
+            "spacesniffer"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "changes"
+      ],
+      "title": "SettingsImportResult",
       "type": "object"
     },
     "SettingsResetParams": {
@@ -4825,6 +6489,24 @@
           "default": null,
           "title": "Detail"
         },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "all",
+                "grow",
+                "shrink"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Compare views: changes shown",
+          "title": "Direction"
+        },
         "filter_mode": {
           "anyOf": [
             {
@@ -4930,9 +6612,25 @@
           "title": "Color Mode",
           "type": "string"
         },
+        "compare": {
+          "default": false,
+          "description": "A compare view: areas are changes (W6)",
+          "title": "Compare",
+          "type": "boolean"
+        },
         "detail": {
           "title": "Detail",
           "type": "integer"
+        },
+        "direction": {
+          "default": "all",
+          "enum": [
+            "all",
+            "grow",
+            "shrink"
+          ],
+          "title": "Direction",
+          "type": "string"
         },
         "filter_mode": {
           "enum": [
@@ -5295,6 +6993,18 @@
       "doc": "Progress of a long-running request.",
       "payload": "#/$defs/ProgressEvent"
     },
+    "basket.changed": {
+      "doc": "The delete basket changed (every session).",
+      "payload": "#/$defs/BasketEvent"
+    },
+    "classes.changed": {
+      "doc": "The file class table changed (every session).",
+      "payload": "#/$defs/ClassesEvent"
+    },
+    "compare.progress": {
+      "doc": "A comparison is computing, ready (with its totals) or failed.",
+      "payload": "#/$defs/CompareProgressEvent"
+    },
     "io.load": {
       "doc": "Load state of a disk for an 'io' subscription (2 Hz).",
       "payload": "#/$defs/IoStatusEvent"
@@ -5302,6 +7012,10 @@
     "log.record": {
       "doc": "A backend log record for a 'log' subscription.",
       "payload": "#/$defs/LogRecordEvent"
+    },
+    "ops.progress": {
+      "doc": "Progress and results of a file operation.",
+      "payload": "#/$defs/OpProgressEvent"
     },
     "scan.progress": {
       "doc": "Status of a scan for a 'scan' subscription.",
@@ -5335,6 +7049,108 @@
       "requiresSession": true,
       "result": "#/$defs/ShutdownResult"
     },
+    "basket.add": {
+      "doc": "Put nodes (or an aggregate block of a view) into the delete basket; folders absorb their items.",
+      "params": "#/$defs/BasketAddParams",
+      "requiresSession": true,
+      "result": "#/$defs/BasketAddResult"
+    },
+    "basket.clear": {
+      "doc": "Empty the basket (nothing is deleted).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/BasketState"
+    },
+    "basket.execute": {
+      "doc": "Move the items to the recycle bin, or delete them for good after an undo window; progress follows as 'ops.progress' events.",
+      "params": "#/$defs/BasketExecuteParams",
+      "requiresSession": true,
+      "result": "#/$defs/OpTask"
+    },
+    "basket.list": {
+      "doc": "The delete basket (held by the backend, W5).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/BasketState"
+    },
+    "basket.remove": {
+      "doc": "Take items out of the basket.",
+      "params": "#/$defs/BasketRemoveParams",
+      "requiresSession": true,
+      "result": "#/$defs/BasketState"
+    },
+    "classes.get": {
+      "doc": "The file class table (W7 文件类别).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/ClassesState"
+    },
+    "classes.reset": {
+      "doc": "Back to the built-in file classes.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/ClassesState"
+    },
+    "classes.update": {
+      "doc": "Replace the file class table (order = colour precedence); views recolour and filters re-run.",
+      "params": "#/$defs/ClassesUpdateParams",
+      "requiresSession": true,
+      "result": "#/$defs/ClassesState"
+    },
+    "compare.close": {
+      "doc": "Forget a comparison (or stop computing it).",
+      "params": "#/$defs/CompareIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "compare.info": {
+      "doc": "Totals and ends of a comparison.",
+      "params": "#/$defs/CompareIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/CompareInfo"
+    },
+    "compare.node": {
+      "doc": "One block of a compare view with both sizes and its children that changed most (hover card).",
+      "params": "#/$defs/CompareNodeParams",
+      "requiresSession": true,
+      "result": "#/$defs/CompareNodeResult"
+    },
+    "compare.open": {
+      "doc": "Start comparing two trees; 'compare.progress' events follow, then view.open {scan_id: compare_id}.",
+      "params": "#/$defs/CompareOpenParams",
+      "requiresSession": true,
+      "result": "#/$defs/CompareTask"
+    },
+    "compare.sources": {
+      "doc": "What a scan can be compared with: its roots' snapshots and the live tree (W6).",
+      "params": "#/$defs/CompareSourcesParams",
+      "requiresSession": true,
+      "result": "#/$defs/CompareSourcesResult"
+    },
+    "compare.summary": {
+      "doc": "Net change, growth and shrink lists and the fill-up estimate for a compare view's zoom root and filter.",
+      "params": "#/$defs/CompareSummaryParams",
+      "requiresSession": true,
+      "result": "#/$defs/CompareSummary"
+    },
+    "export.check": {
+      "doc": "Diagnostics of a template's text.",
+      "params": "#/$defs/ExportCheckParams",
+      "requiresSession": true,
+      "result": "#/$defs/ExportCheckResult"
+    },
+    "export.run": {
+      "doc": "Write a view's tree (zoom root or everything, filtered or not) to a file with a template or format.",
+      "params": "#/$defs/ExportRunParams",
+      "requiresSession": true,
+      "result": "#/$defs/ExportRunResult"
+    },
+    "export.targets": {
+      "doc": "Built-in export templates and formats (W4 「导出报告…」).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/ExportTargets"
+    },
     "filter.parse": {
       "doc": "Parse a filter: tokens, diagnostics, pending condition, completion and normal form.",
       "params": "#/$defs/FilterParseParams",
@@ -5352,6 +7168,18 @@
       "params": "#/$defs/Empty",
       "requiresSession": true,
       "result": "#/$defs/IoStatusList"
+    },
+    "ops.cancel": {
+      "doc": "Stop a running file operation.",
+      "params": "#/$defs/OpTaskParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "ops.undo": {
+      "doc": "Undo a file operation: put trashed items back, or call off a permanent deletion still waiting.",
+      "params": "#/$defs/OpTaskParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
     },
     "palette.clear": {
       "doc": "Clear the recents of a scan target and the shared filters.",
@@ -5388,6 +7216,12 @@
       "params": "#/$defs/PaletteRememberParams",
       "requiresSession": true,
       "result": "#/$defs/EmptyResult"
+    },
+    "path.forms": {
+      "doc": "A node's path four ways (copy path, W5-09…14).",
+      "params": "#/$defs/PathFormsParams",
+      "requiresSession": true,
+      "result": "#/$defs/PathForms"
     },
     "scan.cancel": {
       "doc": "Stop a running scan (partial tree stays).",
@@ -5467,11 +7301,23 @@
       "requiresSession": false,
       "result": "#/$defs/HelloResult"
     },
+    "settings.export": {
+      "doc": "Write the settings (and edited file classes) to a file.",
+      "params": "#/$defs/SettingsFileParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
     "settings.get": {
       "doc": "All settings with their metadata (W7).",
       "params": "#/$defs/Empty",
       "requiresSession": true,
       "result": "#/$defs/SettingsState"
+    },
+    "settings.import": {
+      "doc": "Read a SpaceKnife settings export or a SpaceSniffer configuration: what would change, then apply it.",
+      "params": "#/$defs/SettingsImportParams",
+      "requiresSession": true,
+      "result": "#/$defs/SettingsImportResult"
     },
     "settings.reset": {
       "doc": "Restore the defaults of one page, or of everything.",
@@ -5503,17 +7349,41 @@
       "requiresSession": true,
       "result": "#/$defs/SnapshotInfo"
     },
+    "system.cache_clear": {
+      "doc": "Delete the cache files nothing uses right now.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/MaintenanceInfo"
+    },
+    "system.helper_stop": {
+      "doc": "Stop the scan helper.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/MaintenanceInfo"
+    },
     "system.info": {
       "doc": "Server, platform and session information.",
       "params": "#/$defs/Empty",
       "requiresSession": true,
       "result": "#/$defs/SystemInfo"
     },
+    "system.maintenance": {
+      "doc": "Scan helper, cache, snapshots and saved tags (W7 高级).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/MaintenanceInfo"
+    },
     "system.ping": {
       "doc": "Round-trip check; echoes the payload.",
       "params": "#/$defs/PingParams",
       "requiresSession": true,
       "result": "#/$defs/PingResult"
+    },
+    "tags.clear_saved": {
+      "doc": "Forget every remembered tag (all scan roots).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/MaintenanceInfo"
     },
     "tree.children": {
       "doc": "A page of a node's children.",

@@ -32,6 +32,8 @@ const api: SkApi = {
   dialog: {
     openSnapshot: () => ipcRenderer.invoke("sk:openSnapshot") as Promise<string | null>,
     openFolders: () => ipcRenderer.invoke("sk:openFolders") as Promise<string[]>,
+    openFile: (options) => ipcRenderer.invoke("sk:openFile", options) as Promise<string | null>,
+    saveFile: (options) => ipcRenderer.invoke("sk:saveFile", options) as Promise<string | null>,
   },
   files: {
     pathOf: (file) => webUtils.getPathForFile(file),

@@ -5,9 +5,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { call, setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
-import { activeTab, focusedViewId, set, toast, useApp } from "@/state/store";
+import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
 import { Icon, Kbd } from "@/ui/Icon";
 
+import { ComparePicker, DirectionSegment, ExitCompare } from "./Compare";
 import { FilterBox } from "./FilterBox";
 
 export function Toolbar() {
@@ -15,14 +16,16 @@ export function Toolbar() {
   const viewId = useApp((s) => focusedViewId(s));
   const view = useApp((s) => (viewId ? s.views[viewId] : undefined));
   const paletteOpen = useApp((s) => s.paletteOpen);
-  const basket = useApp((s) => s.basket.length);
+  const basket = useApp(basketCount);
+  const basketOpen = useApp((s) => s.basketOpen);
   const st = view?.state;
   const scanTab = tab.kind === "scan";
   const settingsTab = tab.kind === "settings";
   const settingsPage = useApp((s) => s.settingsPage);
   const canBack = useApp((s) => (settingsTab ? s.settingsBack.length > 0 : !!st?.can_back));
   const canForward = useApp((s) => (settingsTab ? s.settingsForward.length > 0 : !!st?.can_forward));
-  const split = scanTab && tab.viewIds.length > 1;
+  const cmp = scanTab ? tab.compare : undefined;
+  const split = scanTab && !cmp && tab.viewIds.length > 1;
 
   return (
     <div className="toolbar" role="toolbar" aria-label="视图工具栏">
@@ -50,6 +53,8 @@ export function Toolbar() {
             </span>
           </span>
         </nav>
+      ) : cmp ? (
+        <ComparePicker tab={tab} />
       ) : scanTab && !split ? (
         <Breadcrumb viewId={viewId} />
       ) : !scanTab ? (
@@ -65,7 +70,30 @@ export function Toolbar() {
       {settingsTab && <SettingsSearch />}
       {!split && !settingsTab && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
       <div className="toolbar-right">
-        {scanTab && st && (
+        {cmp && (
+          <>
+            {st && viewId && (
+              <div className="stepper" role="group" aria-label="细节层级">
+                <button aria-label="降低细节层级（Ctrl+-）" title="降低细节层级（Ctrl+-）" disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
+                  <Icon name="minus" size={14} />
+                </button>
+                <div className="stepper-mid">
+                  <Icon name="layers" size={14} />
+                  <span className="muted">层级</span>
+                  <span className="num">{st.detail}</span>
+                </div>
+                <button aria-label="提高细节层级（Ctrl+=）" title="提高细节层级（Ctrl+=）" disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
+                  <Icon name="plus" size={14} />
+                </button>
+              </div>
+            )}
+            {viewId && <DirectionSegment viewId={viewId} />}
+            <ExitCompare tab={tab} />
+            <div className="vsep wide" />
+            <IconBtn icon="split" label="对比模式下不能分屏" disabled onClick={() => undefined} />
+          </>
+        )}
+        {scanTab && st && !cmp && (
           <>
             <div className="stepper" role="group" aria-label="细节层级">
               <button aria-label="降低细节层级（Ctrl+-）" title="降低细节层级（Ctrl+-）" disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
@@ -107,7 +135,13 @@ export function Toolbar() {
           <Kbd>Ctrl+K</Kbd>
         </button>
         {tab.kind !== "settings" && (
-          <button className="icon-btn basket" aria-label={`删除篮，${basket} 项`} title="删除篮（M6 接入）" onClick={() => toast("删除篮在 M6 接入")}>
+          <button
+            className={`icon-btn basket${basketOpen ? " on" : ""}`}
+            aria-label={`删除篮，${basket} 项`}
+            aria-pressed={basketOpen}
+            title="删除篮"
+            onClick={() => set({ basketOpen: !basketOpen })}
+          >
             <Icon name="basket" />
             {basket > 0 && <span className="badge-count">{basket > 99 ? "99+" : basket}</span>}
           </button>

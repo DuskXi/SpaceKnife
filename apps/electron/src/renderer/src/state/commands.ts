@@ -21,7 +21,8 @@ import {
   toggleSplit,
   viewCall,
 } from "./actions";
-import { activeTab, focusedViewId, get, toast, toggleLog } from "./store";
+import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
+import { activeTab, focusedViewId, get, set, toast, toggleLog } from "./store";
 
 const COLORS = ["class", "flat", "time"] as const;
 
@@ -53,6 +54,7 @@ export async function runCommand(id: string): Promise<void> {
       if (scan) await startScan({ roots: scan.roots.map((r) => r.path) }, tab.id);
       return;
     case "view.cycle_color":
+      if (st?.compare && viewId) return cycleDirection(viewId);
       if (st) await setViewSettings(viewId, { color_mode: COLORS[(COLORS.indexOf(st.color_mode) + 1) % 3] });
       return;
     case "view.color.class":
@@ -76,11 +78,20 @@ export async function runCommand(id: string): Promise<void> {
       if (tab.scanId) {
         try {
           const info = await call("snapshot.save", { scan_id: tab.scanId });
+          if (tab.compare) await refreshCompareSources(tab.id);
           toast(`快照已保存：${info.path.split(/[\\/]/).pop()}`);
         } catch (err) {
           toast(`保存快照失败：${String(err)}`);
         }
       }
+      return;
+    case "snapshot.compare":
+      return enterCompare();
+    case "report.export":
+      set({ exportOpen: true });
+      return;
+    case "basket.open":
+      set({ basketOpen: !s.basketOpen });
       return;
     case "snapshot.open": {
       const path = await window.sk.dialog.openSnapshot();

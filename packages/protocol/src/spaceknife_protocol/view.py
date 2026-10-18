@@ -39,6 +39,7 @@ from typing import Literal
 from pydantic import Field
 
 from .base import Params, Payload
+from .compare import CompareDirection
 from .filter import FilterDiagnostic, TagColor
 
 DRAWLIST_LAYOUT = "drawlist.v1"
@@ -74,6 +75,7 @@ class ViewSettingsParams(Params):
     color_mode: ColorModeName | None = None
     filter_mode: FilterModeName | None = None
     viewport: Viewport | None = None
+    direction: CompareDirection | None = Field(default=None, description="Compare views: changes shown")
 
 
 class ViewOpenParams(Params):
@@ -186,6 +188,8 @@ class ViewState(Payload):
     viewport: Viewport
     selected: int | None = None
     results_sort: ResultsSortName = "size"
+    compare: bool = Field(default=False, description="A compare view: areas are changes (W6)")
+    direction: CompareDirection = "all"
     can_back: bool
     can_forward: bool
     can_up: bool

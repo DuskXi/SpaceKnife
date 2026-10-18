@@ -118,7 +118,7 @@ def test_availability_and_status(tmp_path: Path) -> None:
     assert evaluate(by_id["scan.rescan_all"], mft_done) == (True, "MFT 快速扫描 · 约 9 秒")
     assert evaluate(by_id["view.cycle_color"], done) == (True, "当前：文件类别")
     assert evaluate(by_id["view.toggle_free"], done) == (True, "当前：显示")
-    assert evaluate(by_id["basket.open"], done) == (False, "2 项 · M6 接入")
+    assert evaluate(by_id["basket.open"], done) == (True, "2 项")
     assert evaluate(by_id["snapshot.compare"], done) == (False, "没有快照")
     assert evaluate(by_id["item.copy_path"], done) == (False, "没有选中项")
     assert evaluate(by_id["nav.back"], done) == (False, "没有可后退的位置")

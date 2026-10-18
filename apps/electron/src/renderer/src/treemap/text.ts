@@ -74,6 +74,10 @@ export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: nu
   for (const t of tags) {
     const s = dpr;
     ctx.globalAlpha = t.alpha * alpha;
+    if (t.badge) {
+      drawBadge(ctx, t, s);
+      continue;
+    }
     ctx.fillStyle = tokens.color.tag.base;
     ctx.beginPath();
     ctx.roundRect(t.x, t.y, 14 * s, 14 * s, 4 * s);
@@ -98,4 +102,29 @@ export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: nu
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+}
+
+/** 「新增」: a solid accent pill; 「已删除」: an outlined neutral one (UI-W6-16, W6 待定 7). */
+function drawBadge(ctx: CanvasRenderingContext2D, t: TagItem, s: number): void {
+  const text = t.badge === "new" ? "新增" : "已删除";
+  ctx.font = `600 ${10 * s}px "Geist", "Noto Sans SC", system-ui, sans-serif`;
+  const w = ctx.measureText(text).width + 10 * s;
+  const h = 15 * s;
+  ctx.beginPath();
+  ctx.roundRect(t.x, t.y, w, h, 4 * s);
+  if (t.badge === "new") {
+    ctx.fillStyle = tokens.color.accent.default;
+    ctx.fill();
+    ctx.fillStyle = tokens.color.text.onAccent;
+  } else {
+    ctx.fillStyle = "rgba(11, 12, 16, 0.72)";
+    ctx.fill();
+    ctx.lineWidth = s;
+    ctx.strokeStyle = tokens.color.text.secondary;
+    ctx.stroke();
+    ctx.fillStyle = tokens.color.text.primary;
+  }
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, t.x + 5 * s, t.y + h / 2 + 0.5 * s);
+  ctx.textBaseline = "alphabetic";
 }

@@ -5,6 +5,7 @@ import type { BinaryFrame } from "@/protocol/rpc";
 
 export const Kind = { FILE: 0, FOLDER: 1, COLLAPSED: 2, PENDING: 3, SMALL: 4, MORE: 5, FREE: 6, UNKNOWN: 7 } as const;
 export const Label = { NAME: 1, SIZE: 2, BIG: 4, SHORT: 8 } as const;
+export const DStat = { SAME: 0, NEW: 1, DELETED: 2, CHANGED: 3 } as const;
 export const Flag = { MATCH: 1, DIM: 2, FOLDER_HIT: 4, TAGGED: 8, SELECTED: 16, ON_PATH: 32 } as const;
 
 export interface DrawFrame {
@@ -26,6 +27,9 @@ export interface DrawFrame {
   flags: Uint16Array;
   tag: Uint8Array;
   tone: Uint8Array;
+  /** compare views (W6): signed net change and status per row (0 same, 1 new, 2 deleted, 3 changed) */
+  delta: BigInt64Array | null;
+  dstat: Uint8Array | null;
   names: string[];
   /** row of a key, built lazily */
   rowOf(key: number): number;
@@ -66,6 +70,8 @@ export function decodeDraw(frame: BinaryFrame, info: FrameInfo): DrawFrame {
     flags: c.flags as Uint16Array,
     tag: c.tag as Uint8Array,
     tone: c.tone as Uint8Array,
+    delta: (c.delta as BigInt64Array | undefined) ?? null,
+    dstat: (c.dstat as Uint8Array | undefined) ?? null,
     names,
     rowOf(k: number): number {
       if (!index) {

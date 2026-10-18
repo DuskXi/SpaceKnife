@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import Field
 
 from .base import Params, Payload
+from .filter import FilterClassInfo
 
 SettingCategory = Literal["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"]
 SettingControl = Literal["switch", "segmented", "number", "slider", "color", "text"]
@@ -79,3 +80,43 @@ class SettingsChangedEvent(Payload):
     """``settings.changed``: pushed to every session after any change (also edits of the file)."""
 
     state: SettingsState
+
+
+# --------------------------------------------------------------------------- 「高级」 (UI-W7-36)
+
+
+class SettingsFileParams(Params):
+    path: str = Field(min_length=1, max_length=32767)
+
+
+class SettingChange(Payload):
+    key: str
+    name: str
+    before: SettingValue
+    after: SettingValue
+
+
+class SettingsImportParams(Params):
+    path: str = Field(min_length=1, max_length=32767)
+    apply: bool = Field(default=False, description="False: only tell what would change (the user confirms)")
+
+
+class SettingsImportResult(Payload):
+    source: Literal["spaceknife", "spacesniffer"]
+    changes: list[SettingChange]
+    classes: list[FilterClassInfo] | None = Field(
+        default=None, description="The new file class table, if it changes"
+    )
+    skipped: list[str] = Field(default_factory=list, description="What could not be taken over, and why")
+    applied: bool = False
+
+
+class MaintenanceInfo(Payload):
+    helper_running: bool
+    helper_elevated: bool
+    cache_dir: str
+    cache_bytes: int
+    snapshots_dir: str
+    snapshots_bytes: int
+    snapshot_count: int
+    saved_tags: int = Field(description="Scan roots with remembered tags")

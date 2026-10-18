@@ -11,8 +11,36 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from .base import Empty, EmptyResult
+from .classes import ClassesEvent, ClassesState, ClassesUpdateParams
+from .compare import (
+    CompareIdParams,
+    CompareInfo,
+    CompareNodeParams,
+    CompareNodeResult,
+    CompareOpenParams,
+    CompareProgressEvent,
+    CompareSourcesParams,
+    CompareSourcesResult,
+    CompareSummary,
+    CompareSummaryParams,
+    CompareTask,
+)
+from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
+from .ops import (
+    BasketAddParams,
+    BasketAddResult,
+    BasketEvent,
+    BasketExecuteParams,
+    BasketRemoveParams,
+    BasketState,
+    OpProgressEvent,
+    OpTask,
+    OpTaskParams,
+    PathForms,
+    PathFormsParams,
+)
 from .palette import (
     PaletteClearParams,
     PaletteCommandList,
@@ -49,7 +77,16 @@ from .scan import (
     VolumeListResult,
 )
 from .session import HelloParams, HelloResult
-from .settings import SettingsChangedEvent, SettingsResetParams, SettingsState, SettingsUpdateParams
+from .settings import (
+    MaintenanceInfo,
+    SettingsChangedEvent,
+    SettingsFileParams,
+    SettingsImportParams,
+    SettingsImportResult,
+    SettingsResetParams,
+    SettingsState,
+    SettingsUpdateParams,
+)
 from .streams import (
     CancelParams,
     LogRecordEvent,
@@ -269,6 +306,103 @@ EVENT_SCAN_PROGRESS = EventSpec(
     "scan.progress", ScanProgressEvent, "Status of a scan for a 'scan' subscription."
 )
 
+PATH_FORMS = MethodSpec(
+    "path.forms", PathFormsParams, PathForms, "A node's path four ways (copy path, W5-09…14)."
+)
+BASKET_LIST = MethodSpec("basket.list", Empty, BasketState, "The delete basket (held by the backend, W5).")
+BASKET_ADD = MethodSpec(
+    "basket.add",
+    BasketAddParams,
+    BasketAddResult,
+    "Put nodes (or an aggregate block of a view) into the delete basket; folders absorb their items.",
+)
+BASKET_REMOVE = MethodSpec("basket.remove", BasketRemoveParams, BasketState, "Take items out of the basket.")
+BASKET_CLEAR = MethodSpec("basket.clear", Empty, BasketState, "Empty the basket (nothing is deleted).")
+BASKET_EXECUTE = MethodSpec(
+    "basket.execute",
+    BasketExecuteParams,
+    OpTask,
+    "Move the items to the recycle bin, or delete them for good after an undo window; progress follows "
+    "as 'ops.progress' events.",
+)
+OPS_CANCEL = MethodSpec("ops.cancel", OpTaskParams, EmptyResult, "Stop a running file operation.")
+OPS_UNDO = MethodSpec(
+    "ops.undo",
+    OpTaskParams,
+    EmptyResult,
+    "Undo a file operation: put trashed items back, or call off a permanent deletion still waiting.",
+)
+COMPARE_SOURCES = MethodSpec(
+    "compare.sources",
+    CompareSourcesParams,
+    CompareSourcesResult,
+    "What a scan can be compared with: its roots' snapshots and the live tree (W6).",
+)
+COMPARE_OPEN = MethodSpec(
+    "compare.open",
+    CompareOpenParams,
+    CompareTask,
+    "Start comparing two trees; 'compare.progress' events follow, then view.open {scan_id: compare_id}.",
+)
+COMPARE_INFO = MethodSpec("compare.info", CompareIdParams, CompareInfo, "Totals and ends of a comparison.")
+COMPARE_CLOSE = MethodSpec(
+    "compare.close", CompareIdParams, EmptyResult, "Forget a comparison (or stop computing it)."
+)
+COMPARE_SUMMARY = MethodSpec(
+    "compare.summary",
+    CompareSummaryParams,
+    CompareSummary,
+    "Net change, growth and shrink lists and the fill-up estimate for a compare view's zoom root and filter.",
+)
+COMPARE_NODE = MethodSpec(
+    "compare.node",
+    CompareNodeParams,
+    CompareNodeResult,
+    "One block of a compare view with both sizes and its children that changed most (hover card).",
+)
+CLASSES_GET = MethodSpec("classes.get", Empty, ClassesState, "The file class table (W7 文件类别).")
+CLASSES_UPDATE = MethodSpec(
+    "classes.update",
+    ClassesUpdateParams,
+    ClassesState,
+    "Replace the file class table (order = colour precedence); views recolour and filters re-run.",
+)
+CLASSES_RESET = MethodSpec("classes.reset", Empty, ClassesState, "Back to the built-in file classes.")
+EXPORT_TARGETS = MethodSpec(
+    "export.targets", Empty, ExportTargets, "Built-in export templates and formats (W4 「导出报告…」)."
+)
+EXPORT_CHECK = MethodSpec(
+    "export.check", ExportCheckParams, ExportCheckResult, "Diagnostics of a template's text."
+)
+EXPORT_RUN = MethodSpec(
+    "export.run",
+    ExportRunParams,
+    ExportRunResult,
+    "Write a view's tree (zoom root or everything, filtered or not) to a file with a template or format.",
+)
+SETTINGS_EXPORT = MethodSpec(
+    "settings.export",
+    SettingsFileParams,
+    EmptyResult,
+    "Write the settings (and edited file classes) to a file.",
+)
+SETTINGS_IMPORT = MethodSpec(
+    "settings.import",
+    SettingsImportParams,
+    SettingsImportResult,
+    "Read a SpaceKnife settings export or a SpaceSniffer configuration: what would change, then apply it.",
+)
+SYSTEM_MAINTENANCE = MethodSpec(
+    "system.maintenance", Empty, MaintenanceInfo, "Scan helper, cache, snapshots and saved tags (W7 高级)."
+)
+SYSTEM_HELPER_STOP = MethodSpec("system.helper_stop", Empty, MaintenanceInfo, "Stop the scan helper.")
+SYSTEM_CACHE_CLEAR = MethodSpec(
+    "system.cache_clear", Empty, MaintenanceInfo, "Delete the cache files nothing uses right now."
+)
+TAGS_CLEAR_SAVED = MethodSpec(
+    "tags.clear_saved", Empty, MaintenanceInfo, "Forget every remembered tag (all scan roots)."
+)
+
 METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
     spec.name: spec
     for spec in (
@@ -325,6 +459,32 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         PALETTE_PREVIEW,
         PALETTE_REMEMBER,
         PALETTE_CLEAR,
+        PATH_FORMS,
+        BASKET_LIST,
+        BASKET_ADD,
+        BASKET_REMOVE,
+        BASKET_CLEAR,
+        BASKET_EXECUTE,
+        OPS_CANCEL,
+        OPS_UNDO,
+        COMPARE_SOURCES,
+        COMPARE_OPEN,
+        COMPARE_INFO,
+        COMPARE_CLOSE,
+        COMPARE_SUMMARY,
+        COMPARE_NODE,
+        CLASSES_GET,
+        CLASSES_UPDATE,
+        CLASSES_RESET,
+        EXPORT_TARGETS,
+        EXPORT_CHECK,
+        EXPORT_RUN,
+        SETTINGS_EXPORT,
+        SETTINGS_IMPORT,
+        SYSTEM_MAINTENANCE,
+        SYSTEM_HELPER_STOP,
+        SYSTEM_CACHE_CLEAR,
+        TAGS_CLEAR_SAVED,
     )
 }
 NOTIFICATIONS: dict[str, NotificationSpec[BaseModel]] = {spec.name: spec for spec in (CANCEL,)}
@@ -338,6 +498,13 @@ EVENT_SETTINGS_CHANGED = EventSpec(
     "settings.changed", SettingsChangedEvent, "Settings changed (any client, or the file was edited)."
 )
 
+EVENT_BASKET = EventSpec("basket.changed", BasketEvent, "The delete basket changed (every session).")
+EVENT_OPS_PROGRESS = EventSpec("ops.progress", OpProgressEvent, "Progress and results of a file operation.")
+EVENT_CLASSES = EventSpec("classes.changed", ClassesEvent, "The file class table changed (every session).")
+EVENT_COMPARE_PROGRESS = EventSpec(
+    "compare.progress", CompareProgressEvent, "A comparison is computing, ready (with its totals) or failed."
+)
+
 EVENTS: dict[str, EventSpec[BaseModel]] = {
     spec.name: spec
     for spec in (
@@ -347,5 +514,9 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_VIEW_FRAME,
         EVENT_SETTINGS_CHANGED,
         EVENT_IO_LOAD,
+        EVENT_BASKET,
+        EVENT_OPS_PROGRESS,
+        EVENT_COMPARE_PROGRESS,
+        EVENT_CLASSES,
     )
 }

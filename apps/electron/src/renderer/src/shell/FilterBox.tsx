@@ -6,6 +6,7 @@ import type { FilterDiagnostic, FilterParse } from "@/protocol/generated";
 import { editFilter, focusPane } from "@/state/actions";
 import { useApp } from "@/state/store";
 import { Icon } from "@/ui/Icon";
+import { classHexNow } from "@/lib/classes";
 
 const CONTEXT: Record<string, [string, string]> = {
   keyword: ["关键字", ":"],
@@ -229,7 +230,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
                       onMouseEnter={() => setActive(k)}
                       onClick={() => accept(k)}
                     >
-                      {cls && <span className="swatch" style={{ background: `var(--sk-treemap-class-${cls.id})` }} />}
+                      {cls && <span className="swatch" style={{ background: classHexNow(cls.id) }} />}
                       <span className="cand">{c}</span>
                       <span className="detail">{detail}</span>
                       {k === active && completion.context === "class" && <code className="preview">:class:{c}</code>}

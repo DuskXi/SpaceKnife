@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "0765e2063aa16d67";
+export const SCHEMA_HASH = "fc7e52a1a25ea79e";
 
 export interface AgeCond {
   end: number;
@@ -34,6 +34,79 @@ export interface AttrCond {
 export interface AttrSet {
   forbidden: ("archive" | "system" | "readonly" | "hidden" | "compressed" | "encrypted" | "offline" | "temporary" | "notindexed" | "sparse" | "ads")[];
   required: ("archive" | "system" | "readonly" | "hidden" | "compressed" | "encrypted" | "offline" | "temporary" | "notindexed" | "sparse" | "ads")[];
+}
+
+export interface BasketAddParams {
+  /** A block of the view's frame (an aggregate's members) */
+  key?: number | null;
+  nodes?: number[];
+  scan_id: string;
+  /** With key: the view whose frame holds that block */
+  view_id?: string | null;
+}
+
+export interface BasketAddResult {
+  /** Items replaced by a folder that holds them */
+  absorbed: number;
+  added: number;
+  /** Already covered by an item (or one of its folders) */
+  merged: number;
+  refused: Refusal[];
+  state: BasketState;
+}
+
+export interface BasketEvent {
+  state: BasketState;
+}
+
+export interface BasketExecuteParams {
+  /** None: every item */
+  ids?: string[] | null;
+  mode: "trash" | "delete";
+}
+
+export interface BasketItem {
+  /** Bytes freed by deleting it (cloud placeholders, partial hard links: 0) */
+  alloc: number;
+  dirs: number;
+  files: number;
+  id: string;
+  kind: "file" | "dir" | "link" | "other" | "group";
+  /** Small items of an aggregate block (kind 'group') */
+  members: number;
+  name: string;
+  /** Why it cannot be deleted as is (locked by …, missing …) */
+  note: string;
+  path: string;
+  scan_id: string;
+  size: number;
+  status: "ready" | "locked" | "missing" | "protected";
+  tag: string | null;
+  /** Mount point of the volume holding it */
+  volume: string;
+}
+
+export interface BasketRemoveParams {
+  ids: string[];
+}
+
+export interface BasketState {
+  /** Bytes freed in all, every volume */
+  freeable: number;
+  items: BasketItem[];
+  volumes: BasketVolume[];
+}
+
+export interface BasketVolume {
+  free: number;
+  /** Bytes the basket frees on this volume */
+  freeable: number;
+  mount_point: string;
+  total: number;
+  /** The volume has a recycle bin */
+  trash: boolean;
+  /** Where deleted items go (or why they cannot) */
+  trash_note: string;
 }
 
 export interface BinaryFrameHeader {
@@ -67,6 +140,31 @@ export interface CancelParams {
   id: number | string;
 }
 
+/** A changed item: a file, a folder, or an aggregate of small items ('group'). */
+export interface ChangeItem {
+  /** Allocated bytes in the base (0 when new) */
+  base: number;
+  /** Net change of allocated bytes (target − base) */
+  delta: number;
+  kind: "file" | "dir" | "link" | "other" | "group";
+  /** A short, recognisable name: 「WeChat Files\…\Video」 */
+  label: string;
+  /** Kind 'group': changed small items in it */
+  members: number;
+  /** Files below it that are new */
+  new_files: number;
+  /** Node of the change tree (kind 'group': the folder holding them) */
+  node: number;
+  /** Still on disk (file operations allowed) */
+  on_disk: boolean;
+  path: string;
+  /** Known cause (insights rules), e.g. 「游戏更新」 */
+  reason: string;
+  status: "same" | "new" | "deleted" | "changed";
+  /** Allocated bytes in the target (0 when deleted) */
+  target: number;
+}
+
 export interface ClassCond {
   class_id: string;
   end: number;
@@ -77,10 +175,34 @@ export interface ClassCond {
   text: string;
 }
 
+/** One class as the editor sends it; order in the list is the display (and colour) order. */
+export interface ClassEdit {
+  color?: string;
+  extensions?: string[];
+  /** None: a new class */
+  id?: string | null;
+  name: string;
+}
+
 export interface ClassStat {
   bytes: number;
   class_id: string;
   files: number;
+}
+
+export interface ClassesEvent {
+  state: ClassesState;
+}
+
+export interface ClassesState {
+  classes: FilterClassInfo[];
+  /** The table differs from the built-in one */
+  custom: boolean;
+  defaults: FilterClassInfo[];
+}
+
+export interface ClassesUpdateParams {
+  classes: ClassEdit[];
 }
 
 export interface ClientInfo {
@@ -92,6 +214,122 @@ export interface ClientInfo {
 export interface ColumnSpec {
   dtype: string;
   offset: number;
+}
+
+export interface CompareIdParams {
+  compare_id: string;
+}
+
+export interface CompareInfo {
+  base: CompareSide;
+  /** Items that changed (files and folders) */
+  changed: number;
+  compare_id: string;
+  /** Allocated bytes added, every file */
+  grow: number;
+  /** The target is 'now' and follows file changes */
+  live: boolean;
+  /** Rows of the change tree */
+  nodes: number;
+  /** Bumped each time live changes recompute it */
+  revision: number;
+  scan_id: string;
+  /** Allocated bytes gone, every file (≥ 0) */
+  shrink: number;
+  target: CompareSide;
+}
+
+export interface CompareNodeParams {
+  children?: number;
+  /** A block of the view's last frame */
+  key: number;
+  view_id: string;
+}
+
+/** The hover card of a compare view (UI-W6-20…22). */
+export interface CompareNodeResult {
+  /** Its children that changed most */
+  children: ChangeItem[];
+  item: ChangeItem;
+}
+
+export interface CompareOpenParams {
+  /** A snapshot file, or 'now' */
+  base: string;
+  /** The tab's scan (its roots, its live tree) */
+  scan_id: string;
+  /** Same as base */
+  target?: string;
+}
+
+export interface CompareProgressEvent {
+  compare_id: string;
+  /** Present once ready */
+  info: CompareInfo | null;
+  message: string;
+  phase: "loading" | "comparing" | "ready" | "failed" | "cancelled";
+  progress: number | null;
+}
+
+/** One end of a comparison: a snapshot file, or the tab's live tree ("now"). */
+export interface CompareSide {
+  bytes_alloc: number;
+  /** When the snapshot was taken; for 'now' the moment compared */
+  created_at: string;
+  kind: "snapshot" | "now";
+  node_count: number;
+  /** The snapshot file (kind 'snapshot') */
+  path: string | null;
+}
+
+export interface CompareSourcesParams {
+  scan_id: string;
+}
+
+export interface CompareSourcesResult {
+  /** The live tree, when it can be compared */
+  now: CompareSide | null;
+  /** Why the live tree cannot be compared yet */
+  now_note: string;
+  /** Snapshots of the same scan roots, newest first */
+  snapshots: SnapshotInfo[];
+}
+
+/** The sidebar of a compare view, for its zoom root and filter (UI-W6-24…31). */
+export interface CompareSummary {
+  base: CompareSide;
+  compare_id: string;
+  /** Net bytes per day, when it grows */
+  daily: number | null;
+  /** free ÷ daily (an estimate) */
+  days_to_full: number | null;
+  /** Free bytes of the volume now (live target) */
+  free: number | null;
+  grow: number;
+  /** Change units that grew (the list shows the first ones) */
+  grow_count: number;
+  grow_items: ChangeItem[];
+  net: number;
+  /** Path of the zoom root the numbers cover */
+  scope: string;
+  shrink: number;
+  shrink_count: number;
+  shrink_items: ChangeItem[];
+  /** target time − base time (negative after a swap) */
+  span_s: number;
+  target: CompareSide;
+  view_id: string;
+  /** The scope is the whole comparison */
+  whole: boolean;
+}
+
+export interface CompareSummaryParams {
+  limit?: number;
+  view_id: string;
+}
+
+export interface CompareTask {
+  compare_id: string;
 }
 
 /** What can be inserted at the cursor; ``start``/``end`` is the span a candidate replaces. */
@@ -123,8 +361,68 @@ export interface ErrorObject {
   message: string;
 }
 
+export interface ExportCheckParams {
+  source: string;
+}
+
+export interface ExportCheckResult {
+  issues: ExportIssue[];
+  ok: boolean;
+}
+
+export interface ExportIssue {
+  code: string;
+  column: number;
+  line: number;
+  message: string;
+  section: string;
+  severity: "error" | "warning";
+}
+
+export interface ExportRunParams {
+  /** The file to write (its folder must exist) */
+  path: string;
+  /** The view's zoom root, or every scan root */
+  scope?: "zoom" | "all";
+  /** A template's text instead */
+  source?: string | null;
+  /** A target name; empty with source */
+  target?: string;
+  /** Only what the view's filter matches */
+  use_filter?: boolean;
+  view_id: string;
+}
+
+export interface ExportRunResult {
+  bytes: number;
+  /** Warnings of the template */
+  issues: ExportIssue[];
+  path: string;
+}
+
+/** Something to export with: a built-in template or a format. */
+export interface ExportTarget {
+  description: string;
+  /** Suggested file extension, without the dot */
+  extension: string;
+  /** The template's own suggested file name */
+  file_name: string;
+  kind: "template" | "format";
+  /** What export.run takes: the template's SpaceSniffer name, or csv / json / html */
+  name: string;
+  /** Also built into SpaceSniffer */
+  spacesniffer: boolean;
+  title: string;
+}
+
+export interface ExportTargets {
+  targets: ExportTarget[];
+}
+
 export interface FilterClassInfo {
   aliases: string[];
+  /** #RRGGBB chosen by the user; empty: the theme's colour for the id */
+  color: string;
   extensions: string[];
   id: string;
   name: string;
@@ -335,6 +633,18 @@ export interface LogRecordEvent {
   time: string;
 }
 
+export interface MaintenanceInfo {
+  cache_bytes: number;
+  cache_dir: string;
+  helper_elevated: boolean;
+  helper_running: boolean;
+  /** Scan roots with remembered tags */
+  saved_tags: number;
+  snapshot_count: number;
+  snapshots_bytes: number;
+  snapshots_dir: string;
+}
+
 export interface MaskCond {
   end: number;
   kind: "name";
@@ -383,6 +693,39 @@ export interface NodeInfo {
   parent: number;
   /** Logical bytes (subtree total for directories) */
   size: number;
+}
+
+export interface OpItemResult {
+  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "error";
+  message: string;
+  ok: boolean;
+  path: string;
+}
+
+export interface OpProgressEvent {
+  can_undo: boolean;
+  current: string;
+  done: number;
+  /** Bytes moved to the trash / deleted (items that succeeded) */
+  freed: number;
+  mode: "trash" | "delete";
+  phase: "waiting" | "running" | "done" | "cancelled" | "undone";
+  /** Filled once the task ends */
+  results: OpItemResult[];
+  task_id: string;
+  total: number;
+}
+
+export interface OpTask {
+  /** Permanent deletion waits this long (undo window) */
+  delay_s: number;
+  mode: "trash" | "delete";
+  task_id: string;
+  total: number;
+}
+
+export interface OpTaskParams {
+  task_id: string;
 }
 
 export interface PaletteClearParams {
@@ -546,6 +889,24 @@ export interface PathCheckResult {
   roots: string[];
 }
 
+/** One path four ways, formatted by the backend so every front end copies the same text. */
+export interface PathForms {
+  /** False for MFT pseudo folders: nothing to open */
+  on_disk: boolean;
+  /** Forward slashes */
+  posix: string;
+  /** In double quotes (Windows) or shell-quoted (POSIX) */
+  quoted: string;
+  raw: string;
+  /** file:// URI (RFC 8089), non-ASCII percent-encoded */
+  uri: string;
+}
+
+export interface PathFormsParams {
+  node: number;
+  scan_id: string;
+}
+
 /** The unfinished condition under the cursor: not an error, not evaluated (dashed chip). */
 export interface PendingCond {
   category: "name" | "class" | "folder" | "tag" | "size" | "age" | "attr" | null;
@@ -580,6 +941,11 @@ export interface Range {
   lo: number | null;
   lower: Bound | null;
   upper: Bound | null;
+}
+
+export interface Refusal {
+  path: string;
+  reason: string;
 }
 
 /** One line of the W3 result list: a drawn matching file, or the matches inside one block. */
@@ -715,6 +1081,13 @@ export interface ServerInfo {
   version: string;
 }
 
+export interface SettingChange {
+  after: boolean | number | string;
+  before: boolean | number | string;
+  key: string;
+  name: string;
+}
+
 export interface SettingMeta {
   applies: "now" | "next_scan" | "new_views";
   category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced";
@@ -748,6 +1121,26 @@ export interface SettingOption {
 /** ``settings.changed``: pushed to every session after any change (also edits of the file). */
 export interface SettingsChangedEvent {
   state: SettingsState;
+}
+
+export interface SettingsFileParams {
+  path: string;
+}
+
+export interface SettingsImportParams {
+  /** False: only tell what would change (the user confirms) */
+  apply?: boolean;
+  path: string;
+}
+
+export interface SettingsImportResult {
+  applied: boolean;
+  changes: SettingChange[];
+  /** The new file class table, if it changes */
+  classes: FilterClassInfo[] | null;
+  /** What could not be taken over, and why */
+  skipped: string[];
+  source: "spaceknife" | "spacesniffer";
 }
 
 export interface SettingsResetParams {
@@ -1005,6 +1398,8 @@ export interface ViewSetParams {
 export interface ViewSettingsParams {
   color_mode?: "class" | "flat" | "time" | null;
   detail?: number | null;
+  /** Compare views: changes shown */
+  direction?: "all" | "grow" | "shrink" | null;
   filter_mode?: "dim" | "hide" | null;
   /** CSS px */
   min_element?: number | null;
@@ -1019,7 +1414,10 @@ export interface ViewState {
   can_forward: boolean;
   can_up: boolean;
   color_mode: "class" | "flat" | "time";
+  /** A compare view: areas are changes (W6) */
+  compare: boolean;
   detail: number;
+  direction: "all" | "grow" | "shrink";
   filter_mode: "dim" | "hide";
   min_element: number;
   results_sort: "size" | "name" | "count";
@@ -1102,12 +1500,50 @@ export interface Methods {
   "$/unsubscribe": { params: UnsubscribeParams; result: EmptyResult };
   /** Ask the backend to shut down gracefully. */
   "app.shutdown": { params: Empty; result: ShutdownResult };
+  /** Put nodes (or an aggregate block of a view) into the delete basket; folders absorb their items. */
+  "basket.add": { params: BasketAddParams; result: BasketAddResult };
+  /** Empty the basket (nothing is deleted). */
+  "basket.clear": { params: Empty; result: BasketState };
+  /** Move the items to the recycle bin, or delete them for good after an undo window; progress follows as 'ops.progress' events. */
+  "basket.execute": { params: BasketExecuteParams; result: OpTask };
+  /** The delete basket (held by the backend, W5). */
+  "basket.list": { params: Empty; result: BasketState };
+  /** Take items out of the basket. */
+  "basket.remove": { params: BasketRemoveParams; result: BasketState };
+  /** The file class table (W7 文件类别). */
+  "classes.get": { params: Empty; result: ClassesState };
+  /** Back to the built-in file classes. */
+  "classes.reset": { params: Empty; result: ClassesState };
+  /** Replace the file class table (order = colour precedence); views recolour and filters re-run. */
+  "classes.update": { params: ClassesUpdateParams; result: ClassesState };
+  /** Forget a comparison (or stop computing it). */
+  "compare.close": { params: CompareIdParams; result: EmptyResult };
+  /** Totals and ends of a comparison. */
+  "compare.info": { params: CompareIdParams; result: CompareInfo };
+  /** One block of a compare view with both sizes and its children that changed most (hover card). */
+  "compare.node": { params: CompareNodeParams; result: CompareNodeResult };
+  /** Start comparing two trees; 'compare.progress' events follow, then view.open {scan_id: compare_id}. */
+  "compare.open": { params: CompareOpenParams; result: CompareTask };
+  /** What a scan can be compared with: its roots' snapshots and the live tree (W6). */
+  "compare.sources": { params: CompareSourcesParams; result: CompareSourcesResult };
+  /** Net change, growth and shrink lists and the fill-up estimate for a compare view's zoom root and filter. */
+  "compare.summary": { params: CompareSummaryParams; result: CompareSummary };
+  /** Diagnostics of a template's text. */
+  "export.check": { params: ExportCheckParams; result: ExportCheckResult };
+  /** Write a view's tree (zoom root or everything, filtered or not) to a file with a template or format. */
+  "export.run": { params: ExportRunParams; result: ExportRunResult };
+  /** Built-in export templates and formats (W4 「导出报告…」). */
+  "export.targets": { params: Empty; result: ExportTargets };
   /** Parse a filter: tokens, diagnostics, pending condition, completion and normal form. */
   "filter.parse": { params: FilterParseParams; result: FilterParse };
   /** File classes and platform limits for the filter. */
   "filter.vocab": { params: Empty; result: FilterVocab };
   /** Load state of every local disk, with history. */
   "io.status": { params: Empty; result: IoStatusList };
+  /** Stop a running file operation. */
+  "ops.cancel": { params: OpTaskParams; result: EmptyResult };
+  /** Undo a file operation: put trashed items back, or call off a permanent deletion still waiting. */
+  "ops.undo": { params: OpTaskParams; result: EmptyResult };
   /** Clear the recents of a scan target and the shared filters. */
   "palette.clear": { params: PaletteClearParams; result: EmptyResult };
   /** All commands with names, icons and default keys. */
@@ -1120,6 +1556,8 @@ export interface Methods {
   "palette.query": { params: PaletteQueryParams; result: PaletteResult };
   /** Record a path jump or filter run from the palette. */
   "palette.remember": { params: PaletteRememberParams; result: EmptyResult };
+  /** A node's path four ways (copy path, W5-09…14). */
+  "path.forms": { params: PathFormsParams; result: PathForms };
   /** Stop a running scan (partial tree stays). */
   "scan.cancel": { params: ScanIdParams; result: ScanStatus };
   /** Validate typed paths and merge nested ones (UI-W1-25). */
@@ -1146,8 +1584,12 @@ export interface Methods {
   "scan.use_mft": { params: ScanIdParams; result: ScanStatus };
   /** Authenticate and negotiate protocol/capabilities. */
   "session.hello": { params: HelloParams; result: HelloResult };
+  /** Write the settings (and edited file classes) to a file. */
+  "settings.export": { params: SettingsFileParams; result: EmptyResult };
   /** All settings with their metadata (W7). */
   "settings.get": { params: Empty; result: SettingsState };
+  /** Read a SpaceKnife settings export or a SpaceSniffer configuration: what would change, then apply it. */
+  "settings.import": { params: SettingsImportParams; result: SettingsImportResult };
   /** Restore the defaults of one page, or of everything. */
   "settings.reset": { params: SettingsResetParams; result: SettingsState };
   /** Change some settings (validated, saved atomically). */
@@ -1158,10 +1600,18 @@ export interface Methods {
   "snapshot.load": { params: SnapshotLoadParams; result: ScanStatus };
   /** Save a scan as a snapshot file. */
   "snapshot.save": { params: SnapshotSaveParams; result: SnapshotInfo };
+  /** Delete the cache files nothing uses right now. */
+  "system.cache_clear": { params: Empty; result: MaintenanceInfo };
+  /** Stop the scan helper. */
+  "system.helper_stop": { params: Empty; result: MaintenanceInfo };
   /** Server, platform and session information. */
   "system.info": { params: Empty; result: SystemInfo };
+  /** Scan helper, cache, snapshots and saved tags (W7 高级). */
+  "system.maintenance": { params: Empty; result: MaintenanceInfo };
   /** Round-trip check; echoes the payload. */
   "system.ping": { params: PingParams; result: PingResult };
+  /** Forget every remembered tag (all scan roots). */
+  "tags.clear_saved": { params: Empty; result: MaintenanceInfo };
   /** A page of a node's children. */
   "tree.children": { params: TreeChildrenParams; result: TreeChildrenResult };
   /** Look up a node by absolute path. */
@@ -1209,10 +1659,18 @@ export type MethodName = keyof Methods;
 export interface Events {
   /** Progress of a long-running request. */
   "$/progress": ProgressEvent;
+  /** The delete basket changed (every session). */
+  "basket.changed": BasketEvent;
+  /** The file class table changed (every session). */
+  "classes.changed": ClassesEvent;
+  /** A comparison is computing, ready (with its totals) or failed. */
+  "compare.progress": CompareProgressEvent;
   /** Load state of a disk for an 'io' subscription (2 Hz). */
   "io.load": IoStatusEvent;
   /** A backend log record for a 'log' subscription. */
   "log.record": LogRecordEvent;
+  /** Progress and results of a file operation. */
+  "ops.progress": OpProgressEvent;
   /** Status of a scan for a 'scan' subscription. */
   "scan.progress": ScanProgressEvent;
   /** Settings changed (any client, or the file was edited). */

@@ -10,6 +10,9 @@ import { type SettingsPageId, set, toast, useApp } from "@/state/store";
 import { fmtKeys } from "@/lib/format";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
+import { AdvancedTools, ClearTags } from "./AdvancedTools";
+import { ClassesEditor } from "./ClassesEditor";
+
 type Value = boolean | number | string;
 
 export const PAGES: { id: SettingsPageId; name: string; icon: IconName; note: string }[] = [
@@ -103,13 +106,15 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
         <h1>{p.name}</h1>
         <p className="muted">{p.note}</p>
       </header>
-      {p.id === "classes" && <ClassesPage />}
+      {p.id === "classes" && <ClassesEditor />}
       {p.id === "keys" && <KeysPage rows={rows} />}
       {p.id !== "keys" && (
         <div className="settings-columns">
           {groups.map(([group, items]) => (
             <Group key={group} title={group} note={items[0]?.group_note ?? ""} rows={items} />
           ))}
+          {p.id === "tags" && <ClearTags />}
+          {p.id === "advanced" && <AdvancedTools />}
           {p.id === "advanced" && <FilesGroup />}
         </div>
       )}
@@ -368,31 +373,6 @@ function Mark({ text, query }: { text: string; query?: string }) {
 }
 
 // ------------------------------------------------------------------ special pages
-
-function ClassesPage() {
-  const vocab = useApp((s) => s.vocab);
-  return (
-    <section className="set-group" aria-label="文件类别">
-      <div className="set-group-head">
-        <h2>类别</h2>
-        <span className="muted small">添加、改名、改颜色与拖动排序在 M6 接入</span>
-      </div>
-      <div className="set-card">
-        {(vocab?.classes ?? []).map((c) => (
-          <div key={c.id} className="set-row">
-            <span className="class-chip" style={{ background: `var(--sk-treemap-class-${c.id})` }} />
-            <div className="set-text">
-              <div className="set-name">
-                {c.name} <span className="muted small mono">:class:{c.name}</span>
-              </div>
-              <div className="set-desc mono">{c.extensions.length ? c.extensions.join(" ") : "未归类的扩展名"}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function KeysPage({ rows }: { rows: SettingMeta[] }) {
   const [commands, setCommands] = useState<PaletteCommand[] | null>(null);

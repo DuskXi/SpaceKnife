@@ -7,6 +7,8 @@ export function setUnitBase(base: 1000 | 1024): void {
   unitBase = base;
 }
 
+export const getUnitBase = (): 1000 | 1024 => unitBase;
+
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
 
 /** Split a size into number and unit: 63.6 / "GB". Whole numbers stay whole when `whole` (961 GB). */

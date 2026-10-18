@@ -10,6 +10,9 @@ every class matches it in filters. ``other`` holds every file in no class.
 
 from __future__ import annotations
 
+from pydantic import Field
+
+from .base import Params, Payload
 from .filter import FilterClassInfo
 
 OTHER = "other"
@@ -61,3 +64,29 @@ BUILTIN_CLASSES: tuple[FilterClassInfo, ...] = (
     ),
     _c(OTHER, "其他", "Other|Others|Unclassified", ""),
 )
+
+
+# --------------------------------------------------------------------------- editing (W7 文件类别)
+
+
+class ClassEdit(Params):
+    """One class as the editor sends it; order in the list is the display (and colour) order."""
+
+    id: str | None = Field(default=None, max_length=64, description="None: a new class")
+    name: str = Field(min_length=1, max_length=64)
+    extensions: list[str] = Field(default_factory=list, max_length=4096)
+    color: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$")
+
+
+class ClassesState(Payload):
+    classes: list[FilterClassInfo]
+    defaults: list[FilterClassInfo]
+    custom: bool = Field(description="The table differs from the built-in one")
+
+
+class ClassesUpdateParams(Params):
+    classes: list[ClassEdit] = Field(min_length=1, max_length=256)
+
+
+class ClassesEvent(Payload):
+    state: ClassesState

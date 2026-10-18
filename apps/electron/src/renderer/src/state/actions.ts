@@ -1,8 +1,8 @@
 // Everything that talks to the backend: connection, scans, views, filter, tags.
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
-import type { FrameInfo, MethodName, Methods, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewUpdate } from "@/protocol/generated";
-import { setUnitBase } from "@/lib/format";
+import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewUpdate } from "@/protocol/generated";
+import { fmtInt, setUnitBase } from "@/lib/format";
 import { type BinaryFrame, Rpc, RpcError } from "@/protocol/rpc";
 import { decodeDraw } from "@/treemap/frame";
 
@@ -10,7 +10,7 @@ import {
   activeTab,
   addLocalLog,
   addLog,
-  addToBasket,
+
   get,
   type LoadLevel,
   newTabId,
@@ -23,6 +23,7 @@ import {
   toast,
   writeText,
 } from "./store";
+import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
@@ -94,6 +95,11 @@ async function connect(): Promise<void> {
   r.on("view.frame", (ev) => void applyFrame(ev.frame));
   r.on("scan.progress", (ev) => onScanStatus(ev.status));
   r.on("settings.changed", (ev) => applySettings(ev.state));
+  r.on("basket.changed", (ev) => set({ basket: ev.state }));
+  r.on("ops.progress", (ev) => onOpProgress(ev));
+  r.on("compare.progress", (ev) => onCompareProgress(ev));
+  // the file class table changed (W7): the parser vocabulary and the colours follow
+  r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));
   r.on("log.record", (ev) => addLog(ev));
   r.onClose(() => {
     if (rpc !== r) return;
@@ -104,15 +110,17 @@ async function connect(): Promise<void> {
     setTimeout(() => void reconnect(), 800);
   });
   void r.call("$/subscribe", { topic: "log", params: { backlog: 500, min_level: "INFO" } }).catch(() => {});
-  const [vocab, volumes, snapshots, scans, settings] = await Promise.all([
+  const [vocab, volumes, snapshots, scans, settings, basket] = await Promise.all([
     r.call("filter.vocab", {}),
     r.call("volume.list", {}),
     r.call("snapshot.list", {}),
     r.call("scan.list", {}),
     r.call("settings.get", {}),
+    r.call("basket.list", {}).catch(() => null),
   ]);
   applySettings(settings);
   set({
+    basket,
     vocab,
     volumes: volumes.volumes,
     snapshots: snapshots.snapshots,
@@ -127,7 +135,8 @@ async function reconnect(): Promise<void> {
   if (!rpc) return;
   addLocalLog("INFO", "已重新连接");
   const tabs = get().tabs.filter((t) => t.kind === "scan" && t.scanId);
-  set({ views: {} });
+  // comparisons lived in the old backend: those tabs leave compare mode
+  set((s) => ({ views: {}, tabs: s.tabs.map((t) => (t.compare ? { ...t, compare: undefined } : t)) }));
   for (const t of tabs) {
     if (!get().scans[t.scanId!]) continue;
     const ids: string[] = [];
@@ -230,9 +239,74 @@ export async function viewCall<M extends ViewMethod>(
 export const setViewSettings = (viewId: string | null, settings: ViewSettingsParams) =>
   viewCall(viewId, "view.set", { settings });
 
-/** Delete key / "加入删除篮" (UI-W3-33, UI-MAIN-46); the basket itself arrives with M6. */
-export function basketAdd(scanId: string, node: number): void {
-  toast(addToBasket(scanId, node) ? "已加入删除篮" : "已经在删除篮里");
+// ------------------------------------------------------------------ delete basket (W5)
+
+/** Delete key / 「加入删除篮」 (UI-W3-33, UI-MAIN-46, UI-W5-18/28): the backend dedups by path. */
+export function basketAdd(scanId: string, node: number): Promise<void> {
+  return basketPut({ scan_id: scanId, nodes: [node] });
+}
+
+/** An aggregate block of a view goes in as one item with its members (UI-W5-29). */
+export function basketAddBlock(scanId: string, viewId: string, key: number): Promise<void> {
+  return basketPut({ scan_id: scanId, view_id: viewId, key });
+}
+
+async function basketPut(params: Methods["basket.add"]["params"]): Promise<void> {
+  try {
+    const r = await call("basket.add", params);
+    set({ basket: r.state });
+    if (r.refused.length) toast(`不能删除：${r.refused[0]!.reason}`);
+    else if (r.added === 0) toast("已经在删除篮里");
+    else if (r.absorbed > 0) toast(`已加入删除篮（并入了篮里的 ${fmtInt(r.absorbed)} 项）`);
+    else toast("已加入删除篮");
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+export async function basketRemove(ids: string[]): Promise<void> {
+  try {
+    set({ basket: await call("basket.remove", { ids }) });
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+export async function basketClear(): Promise<void> {
+  set({ basket: await call("basket.clear", {}) });
+}
+
+/** Run the basket: into the recycle bin, or deleted for good after the undo window (W5-41…47). */
+export async function basketExecute(mode: "trash" | "delete"): Promise<void> {
+  try {
+    const task = await call("basket.execute", { mode, ids: null });
+    // an ops.progress event may already be here: it wins
+    set((s) =>
+      s.op?.task_id === task.task_id
+        ? s
+        : { op: { task_id: task.task_id, mode, done: 0, total: task.total, current: "", phase: task.delay_s > 0 ? "waiting" : "running", results: [], freed: 0, can_undo: task.delay_s > 0 } },
+    );
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+export async function opUndo(taskId: string): Promise<void> {
+  try {
+    await call("ops.undo", { task_id: taskId });
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+export const opCancel = (taskId: string) => call("ops.cancel", { task_id: taskId }).catch(() => undefined);
+
+function onOpProgress(ev: OpProgressEvent): void {
+  set({ op: ev });
+  if (ev.phase === "done") {
+    const failed = ev.results.filter((r) => !r.ok);
+    if (failed.length) addLocalLog("WARNING", `${fmtInt(failed.length)} 项没有删除：${failed[0]!.message}`);
+  }
 }
 
 // filter: colouring comes back at once (filter.parse); evaluation is debounced and cancellable
@@ -277,15 +351,17 @@ export async function watchScan(scanId: string): Promise<void> {
   }
 }
 
-export async function startScan(params: ScanStartParams, replaceTab?: string): Promise<void> {
+export async function startScan(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
   try {
     const status = await call("scan.start", params);
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status }, logDismissed: false }));
     void watchScan(status.scan_id);
     await showScan(status.scan_id, scanTitle(params.roots), replaceTab);
+    return status.scan_id;
   } catch (err) {
     toast(err instanceof RpcError ? `无法开始扫描：${err.message}` : String(err));
+    return null;
   }
 }
 
@@ -338,6 +414,7 @@ async function showScan(scanId: string, title: string, replaceTab?: string): Pro
 
 /** Close a tab's views and, when no other tab shows it any more, stop and free its scan (UI-W2-51, W8). */
 function releaseTab(tab: Tab): void {
+  if (tab.compare) releaseCompare(tab.compare);
   for (const v of tab.viewIds) void call("view.close", { view_id: v }).catch(() => {});
   set((s) => {
     const views = { ...s.views };
@@ -458,6 +535,7 @@ function onScanStatus(status: ScanStatus): void {
   const before = get().scans[status.scan_id]?.state;
   set((s) => ({ scans: { ...s.scans, [status.scan_id]: status } }));
   const finished = status.state === "done" && (before === "scanning" || before === "queued");
+  if (finished) compareWhenDone(status.scan_id); // 「与现在对比」 from the start page (UI-W6-01)
   if (finished && !document.hasFocus() && setting(get(), "general.flash_on_done", true)) window.sk.window.flash();
 }
 

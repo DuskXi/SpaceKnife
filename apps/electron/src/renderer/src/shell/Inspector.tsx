@@ -10,6 +10,8 @@ import { fmtAgo, fmtInt, fmtPct, fmtShare, fmtSize, sizeParts } from "@/lib/form
 import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
+import { classHexNow } from "@/lib/classes";
+import { tagLabel } from "@/lib/tags";
 
 type Page = "details" | "classes" | "largest";
 const TAGS = [
@@ -62,7 +64,12 @@ export function Inspector({ viewId }: { viewId: string }) {
           ))}
         </div>
         <div className="inspector-tools">
-          <button className="icon-btn small" aria-label="更多" title="更多（M6 接入右键菜单）" onClick={() => toast("更多操作在 M6 接入")}>
+          <button
+            className="icon-btn small"
+            aria-label="更多操作"
+            title="更多操作（Shift+F10）"
+            onClick={() => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true }))}
+          >
             <Icon name="more" />
           </button>
           <button className="icon-btn small" aria-label="隐藏详情面板" title="隐藏详情面板" onClick={() => set({ inspectorHidden: true })}>
@@ -122,6 +129,7 @@ function ActionRow(props: { icon: Parameters<typeof Icon>[0]["name"]; label: str
 }
 
 function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: string; className: (id: string) => string }) {
+  const settings = useApp((st) => st.settings); // tag display names (W7 标签)
   const n = s.node;
   const dir = n.kind === "dir";
   const [num, unit] = sizeParts(n.alloc);
@@ -133,7 +141,7 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
   return (
     <>
       <div className="ins-title">
-        <div className="ins-icon" style={cls ? { background: `var(--sk-treemap-class-${cls})`, color: "#0A0B0D" } : undefined}>
+        <div className="ins-icon" style={cls ? { background: classHexNow(cls), color: "#0A0B0D" } : undefined}>
           <Icon name={dir ? "folder" : "file"} size={18} />
         </div>
         <div className="ins-name">
@@ -177,7 +185,8 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
           {TAGS.map((t) => (
             <button
               key={t.color}
-              aria-label={`${t.label}（Ctrl+${t.key}）`}
+              aria-label={`${tagLabel(settings, t.color)}（Ctrl+${t.key}）`}
+              title={`${tagLabel(settings, t.color)}（Ctrl+${t.key}）`}
               aria-pressed={s.tag === t.color}
               className={`tag-btn${s.tag === t.color ? " on" : ""}`}
               onClick={() => void viewCall(viewId, "view.tag", { color: s.tag === t.color ? null : t.color })}
@@ -214,7 +223,7 @@ function TopRow({ node, rel, tag, whole, viewId }: { node: NodeInfo; rel: string
   return (
     <button className="top-row" onClick={() => void reveal(viewId, node.id)}>
       <span className="top-line">
-        <span className="swatch" style={{ background: `var(--sk-treemap-class-${cls})` }} />
+        <span className="swatch" style={{ background: classHexNow(cls) }} />
         <span className="top-name">{node.name}</span>
         {tag && <span className={`tag-mini ${tag}`} role="img" aria-label={`${tag} 标签`} />}
         <span className="flex" />
@@ -225,7 +234,7 @@ function TopRow({ node, rel, tag, whole, viewId }: { node: NodeInfo; rel: string
         <span>{fmtPct(node.alloc, whole)}</span>
       </span>
       <span className="top-bar">
-        <span style={{ width: `${whole ? (node.alloc / whole) * 100 : 0}%`, background: `var(--sk-treemap-class-${cls})` }} />
+        <span style={{ width: `${whole ? (node.alloc / whole) * 100 : 0}%`, background: classHexNow(cls) }} />
       </span>
     </button>
   );
@@ -243,13 +252,13 @@ function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: st
       <h3>{s.node.name.split(/[\\/]/).filter(Boolean).pop()} · 按文件类别</h3>
       {s.classes.map((c) => (
         <div key={c.class_id} className="class-row">
-          <span className="swatch" style={{ background: `var(--sk-treemap-class-${c.class_id})` }} />
+          <span className="swatch" style={{ background: classHexNow(c.class_id) }} />
           <span className="flex">{className(c.class_id)}</span>
           <span className="mono muted">{fmtInt(c.files)} 个</span>
           <span className="mono">{fmtSize(c.bytes)}</span>
           <span className="mono muted share-pct">{fmtShare(c.bytes, total)}</span>
           <span className="class-bar">
-            <span style={{ width: `${total ? (c.bytes / total) * 100 : 0}%`, background: `var(--sk-treemap-class-${c.class_id})` }} />
+            <span style={{ width: `${total ? (c.bytes / total) * 100 : 0}%`, background: classHexNow(c.class_id) }} />
           </span>
         </div>
       ))}

@@ -1,0 +1,258 @@
+// The unified context menu (UI-W5-01…24): an object header, open / show / terminal, copy path ▸,
+// tags ▸, zoom, rescan, the delete basket and the system menu, the same in every front end.
+
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+
+import type { PathForms } from "@/protocol/generated";
+import { basketAdd, basketAddBlock, call, rescanFolder, viewCall } from "@/state/actions";
+import { set, toast, useApp } from "@/state/store";
+import { fmtInt, fmtSize } from "@/lib/format";
+import { Kind } from "@/treemap/frame";
+import { Icon, type IconName, Kbd } from "@/ui/Icon";
+import { revealLabel } from "@/shell/Inspector";
+import { tagLabel } from "@/lib/tags";
+
+const TAGS = [
+  { id: "red", name: "红", keys: "Ctrl+1" },
+  { id: "yellow", name: "黄", keys: "Ctrl+2" },
+  { id: "green", name: "绿", keys: "Ctrl+3" },
+  { id: "blue", name: "蓝", keys: "Ctrl+4" },
+] as const;
+const TAG_INDEX = [null, "red", "yellow", "green", "blue"] as const;
+const COPY_FORMS: { form: keyof Omit<PathForms, "on_disk">; label: string; keys?: string }[] = [
+  { form: "raw", label: "原样", keys: "Ctrl+C" },
+  { form: "quoted", label: "带引号" },
+  { form: "posix", label: "POSIX 路径" },
+  { form: "uri", label: "file:// URI" },
+];
+
+interface Item {
+  id: string;
+  icon: IconName;
+  label: string;
+  keys?: string;
+  sub?: "copy" | "tag";
+  danger?: boolean;
+  disabled?: string; // why it is unavailable (tooltip)
+  run?: () => void;
+}
+
+export const closeMenu = () => set({ menu: null });
+
+export function ContextMenu() {
+  const menu = useApp((s) => s.menu);
+  const view = useApp((s) => (s.menu ? s.views[s.menu.viewId] : undefined));
+  const vocab = useApp((s) => s.vocab);
+  const settings = useApp((s) => s.settings); // tag display names (W7 标签)
+  const box = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [forms, setForms] = useState<PathForms | null>(null);
+  const [active, setActive] = useState(0);
+  const [sub, setSub] = useState<"copy" | "tag" | null>(null);
+  const [subActive, setSubActive] = useState(0);
+
+  const frame = view?.frame ?? null;
+  const row = menu && frame ? frame.rowOf(menu.key) : -1;
+  const kind = row >= 0 && frame ? frame.kind[row]! : -1;
+  const group = kind === Kind.SMALL || kind === Kind.MORE;
+  const folder = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
+  const node = menu?.node ?? null;
+
+  // the path four ways (copy submenu) and whether it exists on disk at all (MFT pseudo folders)
+  useEffect(() => {
+    setForms(null);
+    setActive(0);
+    setSub(null);
+    if (!menu || node == null || node <= 0 || group) return;
+    let live = true;
+    void call("path.forms", { scan_id: menu.scanId, node })
+      .then((f) => live && setForms(f))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [menu, node, group]);
+
+  // place it: right of the block (8 px), downwards; flip when it does not fit (UI-W5-03)
+  useLayoutEffect(() => {
+    if (!menu || !box.current) return setPos(null);
+    const w = box.current.offsetWidth;
+    const h = box.current.offsetHeight;
+    const a = menu.avoid;
+    let left = a ? a.x + a.w + 8 : menu.x;
+    let top = menu.y;
+    if (left + w > window.innerWidth - 4) left = a ? Math.max(4, a.x - w - 8) : Math.max(4, menu.x - w);
+    if (top + h > window.innerHeight - 4) top = Math.max(4, window.innerHeight - h - 4);
+    setPos({ left, top });
+    box.current.focus({ preventScroll: true }); // arrows and Enter work at once (UI-W5-02/22)
+  }, [menu, forms, row]);
+
+  // any click elsewhere, a resize or the window losing focus closes it (UI-W5-23)
+  useEffect(() => {
+    if (!menu) return;
+    const down = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) closeMenu();
+    };
+    const close = () => closeMenu();
+    window.addEventListener("mousedown", down, true);
+    window.addEventListener("resize", close);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("mousedown", down, true);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("blur", close);
+    };
+  }, [menu]);
+
+  const items = useMemo<Item[]>(() => {
+    if (!menu || row < 0 || !frame) return [];
+    const gone = forms && !forms.on_disk ? "NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有对应的位置" : undefined;
+    const noPath = group ? "小项聚合块不是一个具体位置" : gone;
+    const path = forms?.raw ?? "";
+    const parentRow = frame.parent[row]!;
+    const folderNode = folder ? node : parentRow >= 0 ? frame.node[parentRow]! : null;
+    return [
+      { id: "open", icon: folder ? "folder" : "file", label: "打开", disabled: noPath, run: () => void window.sk.shell.openPath(path) },
+      { id: "reveal", icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: noPath, run: () => window.sk.shell.showItemInFolder(path) },
+      {
+        id: "terminal",
+        icon: "terminal",
+        label: "在此打开终端",
+        keys: "Ctrl+`",
+        disabled: noPath,
+        run: () => window.sk.shell.openTerminal(folder ? path : path.replace(/[\\/][^\\/]*$/, "")),
+      },
+      { id: "copy", icon: "copy", label: "复制路径", sub: "copy", disabled: noPath },
+      { id: "tag", icon: "tag", label: "加标签", sub: "tag", disabled: group ? "小项聚合块不能加标签" : undefined },
+      { id: "zoom", icon: "layers", label: "只看这里（放大）", keys: "Enter", run: () => void viewCall(menu.viewId, "view.zoom", { key: menu.key }) },
+      {
+        id: "rescan",
+        icon: "refresh",
+        label: "重新扫描此文件夹",
+        disabled: folderNode == null || folderNode <= 0 ? "没有可重新扫描的文件夹" : gone,
+        run: () => folderNode != null && void rescanFolder(menu.scanId, folderNode),
+      },
+      {
+        id: "basket",
+        icon: "basket",
+        label: "加入删除篮",
+        keys: "Delete",
+        danger: true,
+        disabled: gone,
+        run: () => void (group ? basketAddBlock(menu.scanId, menu.viewId, menu.key) : node != null && basketAdd(menu.scanId, node)),
+      },
+      { id: "system", icon: "more", label: "系统菜单…", disabled: "系统原生右键菜单还没有接入（见 TODO）" },
+    ];
+  }, [menu, row, frame, forms, group, folder, node]);
+
+  if (!menu || row < 0 || !frame) return null;
+  const size = Number(frame.size[row]!);
+  const parentRow = frame.parent[row]!;
+  const title = group ? `${fmtInt(frame.count_[row]!)} 个小项` : frame.names[row] ?? "";
+  const cls = vocab?.classes[frame.cls[row]!]?.name ?? (folder ? "文件夹" : "文件");
+  const where = parentRow >= 0 ? frame.names[parentRow] ?? "" : "";
+  const tag = TAG_INDEX[frame.tag[row]!] ?? null;
+
+  const activate = (it: Item) => {
+    if (it.disabled) return toast(it.disabled);
+    if (it.sub) {
+      setSub(it.sub);
+      setSubActive(0);
+      return;
+    }
+    closeMenu();
+    it.run?.();
+  };
+  const copy = (form: keyof Omit<PathForms, "on_disk">) => {
+    if (!forms) return;
+    window.sk.shell.copyText(forms[form]);
+    toast("已复制");
+    closeMenu();
+  };
+  const setTag = (color: string | null) => {
+    closeMenu();
+    void viewCall(menu.viewId, "view.select", { key: menu.key }).then(() => viewCall(menu.viewId, "view.tag", { color: color as "red" | null }));
+  };
+
+  const onKey = (e: React.KeyboardEvent) => {
+    const n = sub === "copy" ? COPY_FORMS.length : sub === "tag" ? TAGS.length + 1 : items.length;
+    if (e.key === "Escape") return sub ? setSub(null) : closeMenu();
+    if (e.key === "ArrowDown") return sub ? setSubActive((i) => (i + 1) % n) : setActive((i) => (i + 1) % n);
+    if (e.key === "ArrowUp") return sub ? setSubActive((i) => (i + n - 1) % n) : setActive((i) => (i + n - 1) % n);
+    if (e.key === "ArrowLeft" && sub) return setSub(null);
+    if ((e.key === "ArrowRight" && !sub && items[active]?.sub) || (e.key === "Enter" && !sub)) return activate(items[active]!);
+    if (e.key === "Enter" && sub === "copy") return copy(COPY_FORMS[subActive]!.form);
+    if (e.key === "Enter" && sub === "tag") return setTag(subActive < TAGS.length ? TAGS[subActive]!.id : null);
+  };
+
+  return (
+    <div
+      ref={box}
+      className="ctxmenu"
+      role="menu"
+      aria-label={`${title} 的操作`}
+      tabIndex={-1}
+      style={pos ?? { left: -9999, top: -9999 }}
+      onKeyDown={onKey}
+      onContextMenu={(e) => e.preventDefault()}
+    >
+      <div className="cm-head" title={title}>
+        <div className="cm-head-text">
+          <div className="cm-title">{title}</div>
+          <div className="cm-sub">
+            <span className="mono">{fmtSize(size)}</span> · {cls}
+            {where && ` · ${where}`}
+          </div>
+        </div>
+        {tag && <span className={`tag-shape ${tag}`} aria-label={`标签：${tag}`} />}
+      </div>
+      {items.map((it, i) => (
+        <div key={it.id}>
+          {(it.id === "basket" || it.id === "system") && <div className="cm-sep" role="separator" />}
+          <button
+            role="menuitem"
+            className={`cm-item${i === active && !sub ? " active" : ""}${it.danger ? " danger" : ""}`}
+            aria-disabled={!!it.disabled}
+            aria-haspopup={it.sub ? "menu" : undefined}
+            title={it.disabled}
+            onMouseEnter={() => {
+              setActive(i);
+              if (it.sub && !it.disabled) {
+                setSub(it.sub);
+                setSubActive(0);
+              } else setSub(null);
+            }}
+            onClick={() => activate(it)}
+          >
+            <span className="cm-icon">
+              <Icon name={it.icon} size={16} />
+            </span>
+            <span className="flex">{it.label}</span>
+            {it.sub ? <Icon name="chevronRight" size={14} /> : it.keys ? <Kbd>{it.keys}</Kbd> : null}
+          </button>
+          {sub && it.sub === sub && (
+            <div className={`cm-submenu${sub === "copy" ? " wide" : ""}`} role="menu" aria-label={it.label}>
+              {sub === "copy"
+                ? COPY_FORMS.map((f, j) => (
+                    <button key={f.form} role="menuitem" className={`cm-item two${j === subActive ? " active" : ""}`} onMouseEnter={() => setSubActive(j)} onClick={() => copy(f.form)}>
+                      <span className="flex">
+                        <span className="cm-line">{f.label}</span>
+                        <span className="cm-preview mono">{forms ? forms[f.form] : "…"}</span>
+                      </span>
+                      {f.keys && <Kbd>{f.keys}</Kbd>}
+                    </button>
+                  ))
+                : [...TAGS, { id: null, name: "清除标签", keys: "Ctrl+0" } as const].map((t, j) => (
+                    <button key={t.id ?? "none"} role="menuitem" className={`cm-item${j === subActive ? " active" : ""}`} onMouseEnter={() => setSubActive(j)} onClick={() => setTag(t.id)}>
+                      <span className="cm-icon">{t.id ? <span className={`tag-shape ${t.id}`} /> : <Icon name="close" size={14} />}</span>
+                      <span className="flex">{t.id ? tagLabel(settings, t.id) : t.name}</span>
+                      <Kbd>{t.keys}</Kbd>
+                    </button>
+                  ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}

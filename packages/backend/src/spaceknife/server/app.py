@@ -25,7 +25,10 @@ from spaceknife_protocol.session import ServerInfo
 from .. import __version__
 from ..logbus import LogHub
 from ..settings import SettingsStore
+from .classes_handlers import load_saved as load_saved_classes
+from .compares import CompareManager
 from .monitors import MonitorManager
+from .ops_service import OpsService
 from .rpc import Router
 from .scans import ScanManager
 from .session import Session
@@ -66,11 +69,15 @@ class Server:
         self.router = router or Router()
         self.topics = TopicRegistry()
         self.settings = SettingsStore()
+        load_saved_classes()  # the user's file classes (W7)
         self.scans = ScanManager()
         self.scans.settings = self.settings
         self.views = ViewManager(self.scans)
         self.views.settings = self.settings
         self.monitors = MonitorManager(self.scans, self.views)  # file change hooks (M5)
+        self.compares = CompareManager(self.scans, self.views)  # snapshot comparisons (W6)
+        self.ops = OpsService(self)  # the delete basket and file operations (W5)
+        self.views.ops = self.ops
         self.scans.monitors = self.monitors
         self.on_start: list[Callable[[], None]] = []  # run once the loop is serving
         self.background: list[asyncio.Task[None]] = []
@@ -130,6 +137,7 @@ class Server:
         finally:
             self.sessions.discard(session)
             self.views.close_session(session)
+            self.compares.close_session(session)
 
     def request_shutdown(self) -> None:
         if not self.shutdown_requested.is_set():

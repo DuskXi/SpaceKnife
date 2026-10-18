@@ -229,6 +229,9 @@ class FilterClassInfo(Payload):
     name: str
     aliases: list[str]
     extensions: list[str]
+    color: str = Field(
+        default="", description="#RRGGBB chosen by the user; empty: the theme's colour for the id"
+    )
 
 
 class FilterVocab(Payload):

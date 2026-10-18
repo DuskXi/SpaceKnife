@@ -16,7 +16,7 @@ import type {
 } from "@/protocol/generated";
 import { call, cancellable, editFilter, startScan, viewCall } from "@/state/actions";
 import { runCommand } from "@/state/commands";
-import { activeTab, focusedViewId, set, useApp } from "@/state/store";
+import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtSize, middlePath } from "@/lib/format";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
@@ -45,7 +45,7 @@ export function Palette() {
 function PaletteDialog() {
   const tab = useApp((s) => activeTab(s));
   const viewId = useApp((s) => focusedViewId(s));
-  const basket = useApp((s) => s.basket.length);
+  const basket = useApp(basketCount);
   // live values (UI-W4-24): a scan state change refreshes the lists; while a scan runs, every 2 s
   const scanState = useApp((s) => (tab.scanId ? (s.scans[tab.scanId]?.state ?? "") : ""));
   const [tick, setTick] = useState(0);

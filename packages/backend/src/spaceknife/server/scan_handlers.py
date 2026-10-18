@@ -119,11 +119,21 @@ def install(server: Server) -> None:
     @router.method(SCAN_CLOSE)
     async def scan_close(session: Session, params: p.ScanIdParams) -> EmptyResult:
         server.views.close_scan(params.scan_id)
+        server.compares.close_scan(params.scan_id)
         await scans.close_scan(params.scan_id)
         return EmptyResult()
 
     @router.method(TREE_NODE)
     async def tree_node(session: Session, params: p.TreeNodeParams) -> p.TreeNodeResult:
+        cmp = server.compares.lookup(params.scan_id)  # compare views ask about change tree rows (W6)
+        if cmp is not None and cmp.tree is not None:
+            if not 0 <= params.node < len(cmp.tree):
+                raise RpcError(ErrorCode.UNKNOWN_NODE, f"unknown node: {params.node}")
+            return p.TreeNodeResult(
+                node=node_info(cmp.store, params.node),
+                path=cmp.store.path(params.node),
+                on_disk=server.compares.on_disk(cmp, cmp.tree, params.node),
+            )
         handle = scans.get(params.scan_id)
         scans.check_node(handle, params.node)
         return p.TreeNodeResult(

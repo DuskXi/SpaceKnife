@@ -8,6 +8,8 @@ from functools import cache
 from spaceknife_protocol.filter import AgeField, AttrName, FilterVocab
 from spaceknife_protocol.filter_syntax import default_vocab
 
+from .. import classes as class_table
+
 # Attributes the scanner does not collect on POSIX (hidden = dot files is collected everywhere).
 _POSIX_MISSING_ATTRS: tuple[AttrName, ...] = (
     "archive",
@@ -23,8 +25,21 @@ _POSIX_MISSING_ATTRS: tuple[AttrName, ...] = (
 )
 
 
-@cache
+_current: tuple[int, FilterVocab] | None = None
+
+
 def platform_vocab() -> FilterVocab:
+    """The vocabulary with the active class table; the same object until the table changes (the
+    parser caches its class index per vocabulary object)."""
+    global _current
+    v = class_table.version()
+    if _current is None or _current[0] != v:
+        _current = (v, _platform().model_copy(update={"classes": list(class_table.active().classes)}))
+    return _current[1]
+
+
+@cache
+def _platform() -> FilterVocab:
     attrs: tuple[AttrName, ...]
     ages: tuple[AgeField, ...] = ()
     if sys.platform == "win32":
