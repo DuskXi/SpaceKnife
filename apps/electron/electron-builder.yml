@@ -14,6 +14,8 @@ files:
 extraResources:
   - from: ../../dist/backend/spaceknife-backend
     to: backend # process.resourcesPath/backend/spaceknife-backend[.exe] (src/main/backend.ts)
+  - from: ../../dist/licenses
+    to: licenses # SpaceKnife (MIT) and the third-party licenses (tools/third_party_licenses.py)
 asar: true
 electronLanguages: [en-US, zh-CN] # the two UI languages (M7.5); drops the other Chromium locales
 npmRebuild: false # no native Node modules

@@ -3,6 +3,7 @@
 # installers ship the folder as resources/backend/ (apps/electron/electron-builder.yml).
 # ruff: noqa
 import json
+import os
 import sys
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
@@ -21,6 +22,8 @@ datas = collect_data_files("spaceknife", excludes=["**/__pycache__/**"])
 
 a = Analysis(
     [SPECPATH + "/backend_entry.py"],
+    # tools/build_package.py: the release build of spaceknife_native (build paths remapped) first
+    pathex=[os.environ["SPACEKNIFE_NATIVE_RELEASE"]] if os.environ.get("SPACEKNIFE_NATIVE_RELEASE") else [],
     hiddenimports=hidden,
     datas=datas,
     # dev tools; pydantic.mypy (the mypy plugin) would pull in mypy itself

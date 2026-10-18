@@ -23,30 +23,37 @@
 @dataclass(frozen=True, slots=True)
 class Change:
     kind: Literal["modified", "created", "deleted", "renamed", "dir", "overflow"]
-    path: str              # 绝对路径（renamed：新路径；dir：内容变了的目录；overflow：丢失事件的根或子树）
-    old_path: str = ""     # renamed：旧路径（可能为空：只知道新名字）
+    path: str  # 绝对路径（renamed：新路径；dir：内容变了的目录；overflow：丢失事件的根或子树）
+    old_path: str = ""  # renamed：旧路径（可能为空：只知道新名字）
     is_dir: bool | None = None
-    size: int | None = None    # modified 且监视器拿得到时：新的逻辑大小 / 占用 / 修改时间（Unix 秒）
+    size: int | None = None  # modified 且监视器拿得到时：新的逻辑大小 / 占用 / 修改时间（Unix 秒）
     alloc: int | None = None
     mtime: int | None = None
 
+
 class Watcher(Protocol):
-    name: str                                   # "rdcw" | "inotify" | "fsevents" | "poll"
-    def start(self, sink: Callable[[list[Change]], None]) -> None: ...   # 在自己的线程里调用 sink
-    def add_dirs(self, dirs: Iterable[str]) -> None: ...  # 已进入树的目录（浅层先）；逐目录监视与轮询要用，递归监视忽略
-    def stop(self) -> None: ...                 # 1 秒内返回，之后不再调用 sink
+    name: str  # "rdcw" | "inotify" | "fsevents" | "poll"
+
+    def start(self, sink: Callable[[list[Change]], None]) -> None: ...  # 在自己的线程里调用 sink
+    def add_dirs(
+        self, dirs: Iterable[str]
+    ) -> None: ...  # 已进入树的目录（浅层先）；逐目录监视与轮询要用，递归监视忽略
+    def stop(self) -> None: ...  # 1 秒内返回，之后不再调用 sink
     def status(self) -> WatchStatus: ...
+
 
 @dataclass(frozen=True, slots=True)
 class WatchStatus:
     state: Literal["starting", "running", "degraded", "failed", "stopped"]
-    detail: str = ""        # 中文一句话，界面直接显示（如「inotify 监视额度不足，3 万个目录改为轮询」）
-    watched_dirs: int = 0   # 有效监视的目录数（Windows 递归监视记为整棵树：-1）
-    polled_dirs: int = 0    # 靠轮询对账的目录数
+    detail: str = ""  # 中文一句话，界面直接显示（如「inotify 监视额度不足，3 万个目录改为轮询」）
+    watched_dirs: int = 0  # 有效监视的目录数（Windows 递归监视记为整棵树：-1）
+    polled_dirs: int = 0  # 靠轮询对账的目录数
     overflows: int = 0
     events: int = 0
 
-def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000) -> Watcher: ...
+
+def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000) -> Watcher:
+    ...
     # 按平台选实现（spaceknife/monitor/base.py）；poll_rate：轮询时每秒最多 stat 的目录数
 ```
 

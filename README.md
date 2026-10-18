@@ -2,6 +2,19 @@
 
 新一代跨平台磁盘空间分析器，SpaceSniffer 的继任者：嵌套树图、实时扫描、文件变化钩子、NTFS MFT 快速扫描、可限速的并发扫描。目标平台 Windows 10+、Linux（RHEL 9+ / Ubuntu 22.04+）、macOS 14+。
 
+## 下载
+
+安装包在 [Releases](https://github.com/DuskXi/SpaceKnife/releases)（目前是预发布版）：
+
+| 系统 | 文件 |
+|---|---|
+| Windows 10+ x64 | `SpaceKnife-<版本>-Setup-x64.exe`（可选仅当前用户或所有用户；还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」，点「更多信息 › 仍要运行」） |
+| Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
+| RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
+| 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
+
+界面有简体中文和英文，默认跟随系统语言。macOS 版暂不提供。
+
 - 计划：[docs/PLAN.md](docs/PLAN.md)
 - UI 需求规格（484 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
 - 协议：[docs/protocol.md](docs/protocol.md)
@@ -56,6 +69,10 @@ uv run python tools/bench_m2.py --nodes 3000000
 ```bash
 uv run ruff check . && uv run ruff format --check . && uv run mypy packages/protocol/src packages/backend/src packages/client/src tools/gen_design.py && uv run python tools/gen_design.py --check && uv run pytest
 ```
+
+## 许可证
+
+[MIT](LICENSE)。安装包里附带的第三方许可证见 `resources/licenses/`（[docs/packaging.md](docs/packaging.md)）。
 
 ## 仓库结构
 

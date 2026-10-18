@@ -8,6 +8,7 @@
     "name": "DuskXi",
     "email": "84715902+DuskXi@users.noreply.github.com"
   },
+  "license": "MIT",
   "homepage": "https://github.com/DuskXi/SpaceKnife",
   "type": "module",
   "main": "out/main/index.js",
@@ -40,6 +41,7 @@
     "react": "19.3.1",
     "react-aria-components": "1.22.1",
     "react-dom": "19.3.1",
+    "rollup-plugin-license": "3.7.1",
     "typescript": "7.0.2",
     "vite": "8.3.4",
     "vitest": "5.0.5",

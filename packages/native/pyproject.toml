@@ -3,6 +3,7 @@ name = "spaceknife-native"
 version = "0.1.0"
 description = "SpaceKnife native acceleration (Rust/PyO3): MFT parsing and parallel directory scans"
 requires-python = ">=3.12,<3.13"
+license = "MIT"
 dependencies = ["numpy>=2.1"]
 
 [build-system]

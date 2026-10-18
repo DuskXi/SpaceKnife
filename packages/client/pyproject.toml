@@ -3,6 +3,7 @@ name = "spaceknife-client"
 version = "0.1.0"
 description = "SpaceKnife shared Python client core for the native frontends (no GUI dependencies)"
 requires-python = ">=3.12,<3.13"
+license = "MIT"
 dependencies = [
   "spaceknife-protocol",
   "pydantic>=2.9",

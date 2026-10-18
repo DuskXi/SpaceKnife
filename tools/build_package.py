@@ -9,22 +9,27 @@ Windows → dist/electron/SpaceKnife-<version>-Setup-x64.exe (NSIS, unsigned) an
 Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage, spaceknife_<version>_amd64.deb,
           spaceknife-<version>.x86_64.rpm (needs ``rpmbuild`` on PATH) and linux-unpacked/
 
-Steps: PyInstaller (packaging/spaceknife-backend.spec → dist/backend/spaceknife-backend), the
-frozen backend's smoke test (packaging/smoke_backend.py), on Linux the glibc floor of every ELF in
-the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34), ``electron-vite build``,
-``electron-builder`` (apps/electron/electron-builder.yml). The native extension is required:
-an installer without it would scan at a fraction of the speed. See docs/packaging.md.
+Steps: a release build of the native extension (maturin, with the build machine's paths remapped:
+no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
+dist/backend/spaceknife-backend), the frozen backend's smoke test (packaging/smoke_backend.py), on
+Linux the glibc floor of every ELF in the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34),
+``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
+``electron-builder`` (apps/electron/electron-builder.yml), and a check that no file of the
+packaged app contains the build machine's home path. The native extension is required: an
+installer without it would scan at a fraction of the speed. See docs/packaging.md.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import re
 import shutil
 import subprocess
 import sys
 import time
+import zipfile
 from pathlib import Path
 
 from rich.console import Console
@@ -33,6 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ELECTRON = ROOT / "apps" / "electron"
 DIST = ROOT / "dist"
 BACKEND_DIR = DIST / "backend" / "spaceknife-backend"
+NATIVE_RELEASE = ROOT / "build" / "native-release"  # spaceknife_native/ of the release wheel
 GLIBC_FLOOR = (2, 34)  # RHEL 9; Ubuntu 22.04 has 2.35
 LINUX_TARGETS = ("AppImage", "deb", "rpm")
 
@@ -48,24 +54,67 @@ def done(t0: float, note: str = "") -> None:
     console.print(f"  [green]ok[/green] {time.monotonic() - t0:.1f} s{f' · {note}' if note else ''}")
 
 
-def run(argv: list[str], cwd: Path = ROOT) -> None:
+def run(argv: list[str], cwd: Path = ROOT, env: dict[str, str] | None = None) -> None:
     exe = shutil.which(argv[0]) or argv[0]  # pnpm is pnpm.cmd on Windows
-    subprocess.run([exe, *argv[1:]], cwd=cwd, check=True)
+    subprocess.run([exe, *argv[1:]], cwd=cwd, check=True, env=env)
 
 
 def backend_exe() -> Path:
     return BACKEND_DIR / ("spaceknife-backend.exe" if sys.platform == "win32" else "spaceknife-backend")
 
 
-def freeze_backend() -> None:
-    t0 = step("frozen backend (PyInstaller)")
+def native_release() -> None:
+    """The native extension as shipped: a release wheel whose panic messages and debug-info paths
+    name /cargo, /rustup and /spaceknife instead of the build machine's folders (Cargo's
+    trim-paths is not stable yet), unpacked into NATIVE_RELEASE for PyInstaller."""
+    t0 = step("native extension (release build, build paths remapped)")
     hint = "run `uv sync --locked --group native --group package`"
-    if importlib.util.find_spec("PyInstaller") is None:
-        raise SystemExit(f"no PyInstaller: {hint}")
-    try:  # the compiled module itself, not just the package folder
-        importlib.import_module("spaceknife_native._native")
-    except ImportError as exc:
-        raise SystemExit(f"the native extension does not load ({exc}): {hint}") from exc
+    for module in ("PyInstaller", "maturin"):
+        if importlib.util.find_spec(module) is None:
+            raise SystemExit(f"no {module}: {hint}")
+    home = Path.home()
+    flags = [
+        f"--remap-path-prefix={os.environ.get('CARGO_HOME') or home / '.cargo'}=/cargo",
+        f"--remap-path-prefix={os.environ.get('RUSTUP_HOME') or home / '.rustup'}=/rustup",
+        f"--remap-path-prefix={ROOT}=/spaceknife",
+    ]
+    if sys.platform == "win32":
+        flags.append("-Clink-arg=/PDBALTPATH:%_PDB%")  # the PDB's file name only, not its full path
+    env = {**os.environ, "CARGO_ENCODED_RUSTFLAGS": "\x1f".join(flags)}
+    wheels = ROOT / "build" / "native-wheel"
+    shutil.rmtree(wheels, ignore_errors=True)
+    run(
+        [
+            sys.executable,
+            "-m",
+            "maturin",
+            "build",
+            "--release",
+            "--manifest-path",
+            str(ROOT / "packages" / "native" / "Cargo.toml"),
+            "--out",
+            str(wheels),
+            "--interpreter",
+            sys.executable,
+            "--target-dir",
+            str(ROOT / "build" / "native-target"),
+            "--auditwheel",
+            "skip",
+        ],
+        env=env,
+    )
+    (wheel,) = wheels.glob("*.whl")
+    shutil.rmtree(NATIVE_RELEASE, ignore_errors=True)
+    with zipfile.ZipFile(wheel) as zf:
+        zf.extractall(NATIVE_RELEASE, [n for n in zf.namelist() if n.startswith("spaceknife_native/")])
+    done(t0, wheel.name)
+
+
+def freeze_backend() -> None:
+    native_release()
+    t0 = step("frozen backend (PyInstaller)")
+    # the release build of the native extension comes first on the path (the spec reads it too)
+    env = {**os.environ, "PYTHONPATH": str(NATIVE_RELEASE), "SPACEKNIFE_NATIVE_RELEASE": str(NATIVE_RELEASE)}
     run(
         [
             sys.executable,
@@ -80,7 +129,8 @@ def freeze_backend() -> None:
             "--workpath",
             str(ROOT / "build" / "pyinstaller"),
             str(ROOT / "packaging" / "spaceknife-backend.spec"),
-        ]
+        ],
+        env=env,
     )
     size = sum(f.stat().st_size for f in BACKEND_DIR.rglob("*") if f.is_file())
     done(t0, f"{size / 2**20:.0f} MB")
@@ -116,9 +166,44 @@ def check_glibc() -> None:
     done(t0, f"highest GLIBC_{worst[0]}.{worst[1]}")
 
 
+def home_path_patterns() -> list[re.Pattern[bytes]]:
+    """The build machine's home folder as it may appear in a file: both slash styles, JS / JSON
+    escaped, UTF-8 and UTF-16 (Windows resources), any case (Windows paths)."""
+    home = str(Path.home()).rstrip("\\/")
+    variants = {home, home.replace("\\", "/"), home.replace("\\", "\\\\")}
+    out = []
+    for v in variants:
+        # not followed by another name character: /home/user must not match /home/username
+        out.append(re.compile(re.escape(v.encode()) + rb"(?![A-Za-z0-9_])", re.IGNORECASE))
+        out.append(re.compile(re.escape(v.encode("utf-16-le")) + rb"(?![A-Za-z0-9_]\x00)", re.IGNORECASE))
+    return out
+
+
+def check_no_build_paths(root: Path) -> None:
+    """No file of the packaged app may contain the build machine's home path (user name)."""
+    t0 = step(f"no build-machine paths in {root.relative_to(ROOT)}")
+    patterns = home_path_patterns()
+    bad: list[str] = []
+    files = 0
+    for path in root.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        files += 1
+        data = path.read_bytes()
+        hits = sum(len(p.findall(data)) for p in patterns)
+        if hits:
+            bad.append(f"{path.relative_to(root)}: {hits}")
+    if bad:
+        raise SystemExit("the build machine's home path is in the package:\n  " + "\n  ".join(bad))
+    done(t0, f"{files} files")
+
+
 def build_electron(targets: list[str]) -> None:
     t0 = step("Electron app (electron-vite build)")
     run(["pnpm", "-s", "build"], cwd=ELECTRON)
+    done(t0)
+    t0 = step("licenses (dist/licenses)")
+    run([sys.executable, str(ROOT / "tools" / "third_party_licenses.py")])
     done(t0)
     if not backend_exe().exists():
         raise SystemExit(f"no frozen backend at {BACKEND_DIR}: run without --skip-backend")
@@ -133,6 +218,9 @@ def build_electron(targets: list[str]) -> None:
     t0 = step(f"installers (electron-builder {' '.join(platform[1:])})")
     run(["pnpm", "exec", "electron-builder", *platform, "--x64", "--publish", "never"], cwd=ELECTRON)
     done(t0)
+    check_no_build_paths(
+        DIST / "electron" / ("win-unpacked" if sys.platform == "win32" else "linux-unpacked")
+    )
 
 
 def main() -> int:
@@ -145,6 +233,7 @@ def main() -> int:
     args = ap.parse_args()
     if not args.skip_backend:
         freeze_backend()
+        check_no_build_paths(BACKEND_DIR)
     if sys.platform.startswith("linux"):
         check_glibc()
     build_electron(args.targets)

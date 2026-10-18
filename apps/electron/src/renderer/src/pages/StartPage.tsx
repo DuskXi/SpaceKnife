@@ -230,7 +230,7 @@ export function StartPage({ tab }: { tab: Tab }) {
                 <input
                   ref={pathInput}
                   className="path-input"
-                  placeholder={t("例如 {paths}", { paths: IS_WIN() ? "C:\\Users\\lenny\\Videos; C:\\Users\\lenny\\Downloads" : "~/Videos; ~/Downloads" })}
+                  placeholder={t("例如 {paths}", { paths: IS_WIN() ? "C:\\Users\\Public\\Videos; D:\\Downloads" : "~/Videos; ~/Downloads" })}
                   spellCheck={false}
                   aria-label={t("扫描路径")}
                   aria-invalid={errors.length > 0}

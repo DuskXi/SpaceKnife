@@ -3,6 +3,7 @@ name = "spaceknife-backend"
 version = "0.1.0"
 description = "SpaceKnife backend: scanning, storage, layout, filtering and the WebSocket server"
 requires-python = ">=3.12,<3.13"
+license = "MIT"
 dependencies = [
   "spaceknife-protocol",
   "pydantic>=2.9",

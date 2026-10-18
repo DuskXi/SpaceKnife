@@ -26,15 +26,22 @@
 ### 2.1 MFT（`src/mft/`）
 
 ```python
-def mft_volume_info(volume: str) -> dict[str, int]: ...
+def mft_volume_info(volume: str) -> dict[str, int]:
+    ...
     # Windows：打开 \\.\X:（需要管理员），几何信息取自引导扇区（不用 FSCTL）：bytes_per_sector,
     # cluster_size, record_size, mft_lcn, mft_size, mft_valid_size, mft_fragments, volume_size。
-def scan_mft(volume: str, duty: float = 1.0) -> tuple[MftTable, dict[str, int]]: ...
+
+
+def scan_mft(volume: str, duty: float = 1.0) -> tuple[MftTable, dict[str, int]]:
+    ...
     # 主路径：按 $MFT 的 data runs 每次读 32 MiB 窗口，读线程与 rayon 解析重叠（有界通道，最多领先一个窗口）；
     # duty ∈ (0, 1]：读线程按这个占空比歇一歇（IO 档位换算见 4.3）。峰值内存约等于结果表本身
     # （C: 845 万项时助手峰值 1.6 GB；整块读入再解析要 10.6 GB）。
-def read_mft(volume: str) -> bytes: ...          # 整个 $MFT 读进内存（旧接口，测试与对比用）
-def parse_mft(data, record_size: int, cluster_size: int) -> MftTable: ...
+
+
+def read_mft(volume: str) -> bytes: ...  # 整个 $MFT 读进内存（旧接口，测试与对比用）
+def parse_mft(data, record_size: int, cluster_size: int) -> MftTable:
+    ...
     # 纯计算、跨平台；data 可以是任何 C 连续的 uint8 缓冲区。测试用合成 MFT 镜像驱动。
 ```
 
@@ -70,7 +77,9 @@ def parse_mft(data, record_size: int, cluster_size: int) -> MftTable: ...
 ### 2.2 并行硬扫描（`src/hardscan/`）
 
 ```python
-def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOpts | SliceOptions) -> dict: ...
+def scan_slice(
+    tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOpts | SliceOptions
+) -> dict: ...
 ```
 
 与 `spaceknife.scan.worker.scan_slice` **同一输入同一输出**（返回 dict 的键与 `SliceResult` 字段一一对应：`SliceResult(**scan_slice(...))`）。

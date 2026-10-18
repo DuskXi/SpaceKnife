@@ -25,7 +25,7 @@ dev = [
 # Rust/PyO3 acceleration: needs a Rust toolchain to build (`uv sync --group native`); optional
 native = ["spaceknife-native"]
 # M8 installers: the frozen backend (tools/build_package.py; `uv sync --group native --group package`)
-package = ["pyinstaller>=6.11"]
+package = ["pyinstaller>=6.11", "maturin>=1.9,<2"]
 
 [tool.uv]
 default-groups = ["dev"]
