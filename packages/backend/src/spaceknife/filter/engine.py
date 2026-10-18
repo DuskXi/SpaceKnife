@@ -220,7 +220,7 @@ class _Eval:
     # ------------------------------------------------------------- facets
 
     def run(self, nf: FilterNormal) -> tuple[np.ndarray, np.ndarray]:
-        ok = self.leaf.copy()
+        ok = self.leaf & ((self.flags & np.uint32(Flag.GONE)) == 0)  # GONE: deleted or moved (M5)
         if nf.masks or nf.classes:
             what = np.zeros(self.n, dtype=bool)
             for m in nf.masks:

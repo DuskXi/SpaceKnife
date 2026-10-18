@@ -39,7 +39,7 @@ const IS_WIN = () => window.sk.platform === "win32";
 /** 「C: 系统」, or the folder name of a mount point on Linux / macOS. */
 export function volumeName(v: VolumeInfo): string {
   const mp = v.mount_point.replace(/[\\/]+$/, "") || v.mount_point;
-  return v.label && v.label !== mp.split("/").pop() ? `${mp} ${v.label}` : mp;
+  return v.label && v.label !== mp && v.label !== mp.split("/").pop() ? `${mp} ${v.label}` : mp;
 }
 
 /** A whole local NTFS volume on Windows: the MFT fast scan can read it (UI-W1-18). */

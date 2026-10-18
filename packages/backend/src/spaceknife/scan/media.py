@@ -144,6 +144,16 @@ def _read(path: str) -> str:
         return ""
 
 
+# vendor / model of hypervisors' emulated disks (they often claim to rotate: WSL's ext4 VHDX does)
+_VIRTUAL_DISKS = ("msft virtual disk", "vmware", "qemu", "vbox", "virtual disk")
+
+
+def _virtual_disk(disk: str) -> bool:
+    who = f"{_read(os.path.join(disk, 'device', 'vendor'))} {_read(os.path.join(disk, 'device', 'model'))}"
+    who = " ".join(who.lower().split())
+    return any(v in who for v in _VIRTUAL_DISKS)
+
+
 def _linux_media(device: str) -> Media:
     if not device.startswith("/dev/"):
         return "unknown"
@@ -160,7 +170,7 @@ def _linux_media(device: str) -> Media:
         bus = "nvme"
     elif name.startswith("mmcblk"):
         bus = "sd"
-    elif name.startswith(("loop", "zram", "vd", "xvd")) or "/virtual/" in disk:
+    elif name.startswith(("loop", "zram", "vd", "xvd")) or "/virtual/" in disk or _virtual_disk(disk):
         bus = "virtual"
     elif name.startswith("sd") and os.path.isdir(os.path.join(disk, "device", "scsi_disk")):
         bus = "sata"

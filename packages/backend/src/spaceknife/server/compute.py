@@ -22,6 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from spaceknife_protocol.errors import ErrorCode
 
+from ..store.lock import STRUCTURE
 from .rpc import RpcError
 
 WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
@@ -39,10 +40,16 @@ def pool() -> ThreadPoolExecutor:
 
 
 async def compute[T](fn: Callable[..., T], /, *args: object, **kwargs: object) -> T:
-    """Run ``fn`` on the compute pool. Cancelling the awaiting task drops the call if it has not
+    """Run ``fn`` on the compute pool, reading scanned trees under :data:`STRUCTURE` (a file change
+    never rewrites a folder under it). Cancelling the awaiting task drops the call if it has not
     started yet (a running call finishes; its result is discarded)."""
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(pool(), functools.partial(fn, *args, **kwargs))
+    return await loop.run_in_executor(pool(), _reading, functools.partial(fn, *args, **kwargs))
+
+
+def _reading[T](fn: Callable[[], T]) -> T:
+    with STRUCTURE.read():
+        return fn()
 
 
 class Superseded(RpcError):

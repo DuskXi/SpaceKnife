@@ -135,6 +135,14 @@ class NameHeap:
 
     # ------------------------------------------------------------------ export
 
+    def image_positions(self, off: np.ndarray) -> np.ndarray:
+        """Where global offsets ``off`` lie in :meth:`image` (chunks' unused tails are left out)."""
+        bases = np.asarray(self._bases, dtype=np.int64)
+        before = np.concatenate(([0], np.cumsum(self._used, dtype=np.int64)[:-1]))
+        k = np.searchsorted(bases, off, side="right") - 1
+        result: np.ndarray = off - bases[k] + before[k]
+        return result
+
     def parts(self) -> Iterator[np.ndarray]:
         """The written part of every chunk, in order: the image is their concatenation."""
         for chunk, used in zip(self._chunks, self._used, strict=True):

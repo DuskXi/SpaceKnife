@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "ba5e4947ab981173";
+export const SCHEMA_HASH = "c2a6f6ac2875111f";
 
 export interface AgeCond {
   end: number;
@@ -211,6 +211,13 @@ export interface FilterVocab {
   unsupported_attrs: ("archive" | "system" | "readonly" | "hidden" | "compressed" | "encrypted" | "offline" | "temporary" | "notindexed" | "sparse" | "ads")[];
 }
 
+export interface FlashItem {
+  /** Change of allocated bytes (the static badge under reduced motion) */
+  delta: number;
+  /** Row of this frame's draw list: the changed block or its drawn ancestor */
+  row: number;
+}
+
 export interface FolderCond {
   end: number;
   kind: "folder";
@@ -225,6 +232,8 @@ export interface FrameInfo {
   breadcrumb: Crumb[];
   dpr: number;
   filter: FilterInfo | null;
+  /** Rows changed by a file change since the last frame (UI-TM-43) */
+  flash: FlashItem[];
   height: number;
   layout_ms: number;
   reason: string;
@@ -335,6 +344,25 @@ export interface MaskCond {
   start: number;
   /** Canonical spelling of this single condition */
   text: string;
+}
+
+/** Live change monitoring of a scan (M5): the status bar's 「实时监控」 item. */
+export interface MonitorStatus {
+  /** Changes applied to the tree so far */
+  changes: number;
+  /** Why it is degraded or failed (Chinese, shown as is) */
+  detail: string;
+  events: number;
+  last_apply_ms: number;
+  overflows: number;
+  /** Changes and folders waiting to be applied */
+  pending: number;
+  polled_dirs: number;
+  state: "starting" | "running" | "degraded" | "failed";
+  /** Folders under live watch; -1: the whole tree */
+  watched_dirs: number;
+  /** rdcw | inotify | fsevents | poll (one per kind in use) */
+  watcher: string;
 }
 
 export interface NodeInfo {
@@ -651,6 +679,8 @@ export interface ScanStatus {
   method: "hard" | "mft" | "snapshot";
   /** The target is a whole local NTFS volume: scan.use_mft can switch to MFT */
   mft_available: boolean;
+  /** Live change monitoring; None: not monitored (off, or a snapshot) */
+  monitor: MonitorStatus | null;
   paused: boolean;
   pending_dirs: number;
   /** What a fast scan is doing: helper (starting the read-only helper, may wait for the administrator prompt), mft (reading and parsing the $MFT), receive, build; empty otherwise */
@@ -1046,6 +1076,8 @@ export interface VolumeInfo {
   reason: string;
   /** Network volumes: the server path (\\server\share, host:/export) */
   remote_path: string;
+  /** Free only for the super-user (ext4's 5 %): counted neither as used nor free */
+  reserved: number;
   serial: string;
   total: number;
   used: number;

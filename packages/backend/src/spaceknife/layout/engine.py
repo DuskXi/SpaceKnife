@@ -264,11 +264,11 @@ class _Run:
         self.avoid = -1  # aggregate zoom: key of the block zoomed into
 
     def children(self, node: int) -> np.ndarray:
-        # a scan may list this folder while we read: count before start, a range must lie after its
-        # folder (else: not listed yet, see NodeStore.child_range), and never past the node count
+        # a scan may list this folder while we read: count before start, a range never starts at
+        # node 0 (else: not listed yet, see NodeStore.child_range), and never past the node count
         count = int(self.child_count[node])
         start = int(self.child_start[node]) if count > 0 else 0
-        if count <= 0 or start <= node:
+        if count <= 0 or start < 1:
             return np.empty(0, dtype=np.int64)
         stop = min(start + count, len(self.sizes))
         return np.arange(start, max(start, stop), dtype=np.int64)

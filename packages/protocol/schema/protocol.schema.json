@@ -1078,6 +1078,26 @@
       "title": "FilterVocab",
       "type": "object"
     },
+    "FlashItem": {
+      "properties": {
+        "delta": {
+          "description": "Change of allocated bytes (the static badge under reduced motion)",
+          "title": "Delta",
+          "type": "integer"
+        },
+        "row": {
+          "description": "Row of this frame's draw list: the changed block or its drawn ancestor",
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "delta"
+      ],
+      "title": "FlashItem",
+      "type": "object"
+    },
     "FolderCond": {
       "properties": {
         "end": {
@@ -1141,6 +1161,14 @@
             }
           ],
           "default": null
+        },
+        "flash": {
+          "description": "Rows changed by a file change since the last frame (UI-TM-43)",
+          "items": {
+            "$ref": "#/$defs/FlashItem"
+          },
+          "title": "Flash",
+          "type": "array"
         },
         "height": {
           "title": "Height",
@@ -1592,6 +1620,76 @@
         "pattern"
       ],
       "title": "MaskCond",
+      "type": "object"
+    },
+    "MonitorStatus": {
+      "description": "Live change monitoring of a scan (M5): the status bar's 「实时监控」 item.",
+      "properties": {
+        "changes": {
+          "default": 0,
+          "description": "Changes applied to the tree so far",
+          "title": "Changes",
+          "type": "integer"
+        },
+        "detail": {
+          "default": "",
+          "description": "Why it is degraded or failed (Chinese, shown as is)",
+          "title": "Detail",
+          "type": "string"
+        },
+        "events": {
+          "default": 0,
+          "title": "Events",
+          "type": "integer"
+        },
+        "last_apply_ms": {
+          "default": 0.0,
+          "title": "Last Apply Ms",
+          "type": "number"
+        },
+        "overflows": {
+          "default": 0,
+          "title": "Overflows",
+          "type": "integer"
+        },
+        "pending": {
+          "default": 0,
+          "description": "Changes and folders waiting to be applied",
+          "title": "Pending",
+          "type": "integer"
+        },
+        "polled_dirs": {
+          "default": 0,
+          "title": "Polled Dirs",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "starting",
+            "running",
+            "degraded",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "watched_dirs": {
+          "default": 0,
+          "description": "Folders under live watch; -1: the whole tree",
+          "title": "Watched Dirs",
+          "type": "integer"
+        },
+        "watcher": {
+          "default": "",
+          "description": "rdcw | inotify | fsevents | poll (one per kind in use)",
+          "title": "Watcher",
+          "type": "string"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "MonitorStatus",
       "type": "object"
     },
     "NodeInfo": {
@@ -3104,6 +3202,18 @@
           "description": "The target is a whole local NTFS volume: scan.use_mft can switch to MFT",
           "title": "Mft Available",
           "type": "boolean"
+        },
+        "monitor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MonitorStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Live change monitoring; None: not monitored (off, or a snapshot)"
         },
         "paused": {
           "default": false,
@@ -5095,6 +5205,12 @@
           "description": "Network volumes: the server path (\\\\server\\share, host:/export)",
           "title": "Remote Path",
           "type": "string"
+        },
+        "reserved": {
+          "default": 0,
+          "description": "Free only for the super-user (ext4's 5 %): counted neither as used nor free",
+          "title": "Reserved",
+          "type": "integer"
         },
         "serial": {
           "default": "",

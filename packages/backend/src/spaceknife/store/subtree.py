@@ -27,8 +27,8 @@ def subtree_ids(store: NodeStore, node: int) -> np.ndarray:
     """Ids of every node strictly below ``node`` (unordered).
 
     Safe while a scan adds listings in another thread (see :meth:`NodeStore.child_range`): counts
-    are read before starts and a range that does not lie after its folder reads as empty, so every
-    step moves to higher ids and no node is visited twice. The walk also stops at ``n`` nodes.
+    are read before starts, and a range that starts at node 0 or runs past ``n`` reads as empty.
+    The walk never visits more than ``n`` nodes (it raises instead of running away).
     """
     n = len(store)
     c = store.cols
@@ -40,7 +40,7 @@ def subtree_ids(store: NodeStore, node: int) -> np.ndarray:
     while frontier.size:
         count = count_col[frontier].astype(np.int64)  # counts first, then starts
         start = start_col[frontier].astype(np.int64)
-        ok = (count > 0) & (start > frontier) & (start + count <= n)
+        ok = (count > 0) & (start >= 1) & (start + count <= n)
         ids = ranges_to_ids(start[ok], count[ok])
         if not ids.size:
             break

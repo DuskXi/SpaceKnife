@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
 import pytest
 
 from spaceknife.scan import volume as vol
@@ -39,7 +42,7 @@ def test_wsl_volume_list(monkeypatch: pytest.MonkeyPatch, wsl: bool) -> None:
     if wsl:
         assert set(listed) == {"/", "/mnt/c", "/mnt/d", "/srv/share"}
         c = listed["/mnt/c"]
-        assert c.label == "C:（Windows 盘）" and c.note == vol.WSL_DRIVE_NOTE and c.is_remote
+        assert c.label == "C:（Windows 盘）" and c.note == vol.WSL_DRIVE_NOTE and c.is_remote and not c.remote_path
         assert listed["/"].note == "" and listed["/srv/share"].note == ""
     else:  # a plain Linux machine keeps every real mount and marks nothing
         assert "/Docker/host" in listed and "/mnt/wslg/distro" in listed
@@ -51,3 +54,31 @@ def test_wsl_drive_sources() -> None:
     assert vol._wsl_drive(mount("/mnt/e", "drvfs", "e:", 1)) == "E:"
     assert vol._wsl_drive(mount("/x", "9p", "drivers", 1)) == ""
     assert vol._wsl_drive(mount("/x", "ext4", "C:\\", 1)) == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="statvfs is POSIX")
+def test_root_reserved_blocks_are_neither_used_nor_free(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    class St:  # 1000 blocks of 4 KiB: 200 in use, 800 free of which 50 only for root
+        f_frsize = f_bsize = 4096
+        f_blocks, f_bfree, f_bavail = 1000, 800, 750
+
+    monkeypatch.setattr(vol.os, "statvfs", lambda path: St())
+    v = vol._posix_from_statvfs(str(tmp_path), "/", "ext4", "/dev/sda1", False)
+    assert (v.total, v.free, v.reserved, v.used) == (1000 * 4096, 750 * 4096, 50 * 4096, 200 * 4096)
+
+
+def test_hypervisor_disks_are_virtual(tmp_path: Path) -> None:
+    from spaceknife.scan import media
+
+    for vendor, model, virtual in [
+        ("Msft    ", "Virtual Disk    ", True),  # WSL 2 / Hyper-V (claims to rotate)
+        ("QEMU", "QEMU HARDDISK", True),
+        ("ATA", "WDC WD40EFRX-68N", False),
+    ]:
+        disk = tmp_path / model.strip().replace(" ", "_")
+        (disk / "device").mkdir(parents=True)
+        (disk / "device" / "vendor").write_text(vendor)
+        (disk / "device" / "model").write_text(model)
+        assert media._virtual_disk(str(disk)) is virtual

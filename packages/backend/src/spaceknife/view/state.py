@@ -9,6 +9,7 @@ breadcrumb — that the protocol layer turns into one binary frame.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Literal
 
@@ -148,6 +149,39 @@ class View:
 
     def _valid(self, zoom: Zoom) -> bool:
         return 0 <= zoom.node < len(self.store)
+
+    def remap(self, new_ids: Callable[[np.ndarray], np.ndarray], fallback: int) -> None:
+        """Node ids changed (a folder listed again after a file change, the store compacted):
+        ``new_ids`` maps old ids to new ones, -1 for a node that is gone. A zoom onto a gone node
+        falls back to ``fallback`` (the nearest folder that is still there); a gone selection is
+        dropped; history keeps its order."""
+
+        def one(key: int | None) -> int | None:
+            if key is None:
+                return None
+            tag, node = (key & ~(KEY_SMALL - 1), key & (KEY_SMALL - 1)) if key >= KEY_SMALL else (0, key)
+            new = int(new_ids(np.array([node], dtype=np.int64))[0])
+            return None if new < 0 else tag | new
+
+        def zoom(z: Zoom | None) -> Zoom | None:
+            if z is None:
+                return None
+            node = one(z.node)
+            if node is None:
+                return Zoom(fallback, fallback)
+            members = None
+            if z.members is not None:
+                moved = new_ids(z.members.astype(np.int64))
+                members = moved[moved >= 0]
+            return Zoom(node, one(z.key) or node, members, z.count, zoom(z.parent))
+
+        self.home = one(self.home) or fallback
+        self.zoom = zoom(self.zoom) or Zoom(self.home, self.home)
+        self.selected = one(self.selected)
+        for entries in (self.back, self.forward):
+            for i, e in enumerate(entries):
+                entries[i] = Entry(zoom(e.zoom) or Zoom(fallback, fallback), one(e.selected))
+        self.last = None
 
     def zoom_into(self, key: int) -> bool:
         """Zoom into a block of the last frame (double-click / Enter). False if it cannot be zoomed."""

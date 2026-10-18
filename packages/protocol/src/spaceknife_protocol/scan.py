@@ -62,6 +62,9 @@ class VolumeInfo(Payload):
         default="",
         description="Scannable but not recommended, and why (e.g. a Windows drive seen from WSL over 9P)",
     )
+    reserved: int = Field(
+        default=0, description="Free only for the super-user (ext4's 5 %): counted neither as used nor free"
+    )
 
 
 class VolumeListResult(Payload):
@@ -134,6 +137,21 @@ class ScanRootInfo(Payload):
     volume: VolumeInfo | None = None
 
 
+class MonitorStatus(Payload):
+    """Live change monitoring of a scan (M5): the status bar's 「实时监控」 item."""
+
+    state: Literal["starting", "running", "degraded", "failed"]
+    detail: str = Field(default="", description="Why it is degraded or failed (Chinese, shown as is)")
+    watcher: str = Field(default="", description="rdcw | inotify | fsevents | poll (one per kind in use)")
+    watched_dirs: int = Field(default=0, description="Folders under live watch; -1: the whole tree")
+    polled_dirs: int = 0
+    events: int = 0
+    changes: int = Field(default=0, description="Changes applied to the tree so far")
+    overflows: int = 0
+    pending: int = Field(default=0, description="Changes and folders waiting to be applied")
+    last_apply_ms: float = 0.0
+
+
 class ScanStatus(Payload):
     scan_id: str
     state: ScanStateName
@@ -183,6 +201,9 @@ class ScanStatus(Payload):
     )
     paused: bool = False
     io: IoStatus | None = Field(default=None, description="Load state of the disk being scanned (W2)")
+    monitor: MonitorStatus | None = Field(
+        default=None, description="Live change monitoring; None: not monitored (off, or a snapshot)"
+    )
 
 
 class ScanIdParams(Params):

@@ -77,10 +77,11 @@ class VolumeInfo:
     remote_path: str = ""  # network volumes: the server path (UNC share, host:/export)
     reason: str = ""  # cannot be scanned now (no media, disconnected, locked)
     note: str = ""  # can be scanned but is not recommended, and why (shown on the volume card)
+    reserved: int = 0  # free only for the super-user (ext4 keeps 5 % by default): neither used nor free
 
     @property
     def used(self) -> int:
-        return max(0, self.total - self.free)
+        return max(0, self.total - self.free - self.reserved)
 
     def to_dict(self) -> dict[str, object]:
         return {**asdict(self), "used": self.used}
@@ -267,6 +268,7 @@ def _posix_from_statvfs(path: str, mount_point: str, fs_type: str, source: str, 
         label=os.path.basename(mount_point.rstrip("/")) or mount_point,
         total=st.f_blocks * frsize,
         free=st.f_bavail * frsize,
+        reserved=max(0, st.f_bfree - st.f_bavail) * frsize,
         cluster_size=st.f_bsize or 4096,
         is_remote=remote,
         is_removable=mount_point.startswith(("/media/", "/run/media/", "/Volumes/")),
@@ -307,7 +309,7 @@ def _linux_volume(path: str) -> VolumeInfo:
 def _wsl_marked(m: _Mount, vol: VolumeInfo) -> VolumeInfo:
     """A Windows drive seen from WSL: named after the drive and marked as not recommended."""
     drive = _wsl_drive(m) if in_wsl() else ""
-    return replace(vol, label=f"{drive}（Windows 盘）", note=WSL_DRIVE_NOTE) if drive else vol
+    return replace(vol, label=f"{drive}（Windows 盘）", note=WSL_DRIVE_NOTE, remote_path="") if drive else vol
 
 
 def _linux_list() -> list[VolumeInfo]:

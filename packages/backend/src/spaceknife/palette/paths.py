@@ -21,7 +21,7 @@ import numpy as np
 from spaceknife_protocol.filter_syntax import normalize_glob
 
 from ..filter.names import char_regex, name_index
-from ..store.nodes import Kind, NodeStore
+from ..store.nodes import Flag, Kind, NodeStore
 from .fuzzy import score
 
 _DRIVE = re.compile(r"^[A-Za-z]:(?:[\\/]|$)")
@@ -163,8 +163,10 @@ def search(
     seen = np.zeros(0, dtype=np.int64)
     picked: list[tuple[int, int]] = []
     total = 0
+    gone = store.cols["flags"]
     for tier, ids in enumerate(tiers):
         ids = ids[ids > 0]
+        ids = ids[(gone[ids] & np.uint32(Flag.GONE)) == 0]  # deleted, or the old copy of a moved row
         if exclude is not None:
             ids = ids[ids != exclude]
         if not disjoint:

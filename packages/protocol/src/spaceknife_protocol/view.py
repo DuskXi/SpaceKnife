@@ -148,6 +148,11 @@ class FilterInfo(Payload):
     diagnostics: list[FilterDiagnostic] = Field(default_factory=list)
 
 
+class FlashItem(Payload):
+    row: int = Field(description="Row of this frame's draw list: the changed block or its drawn ancestor")
+    delta: int = Field(description="Change of allocated bytes (the static badge under reduced motion)")
+
+
 class FrameInfo(Payload):
     view_id: str
     seq: int
@@ -161,6 +166,9 @@ class FrameInfo(Payload):
     filter: FilterInfo | None = None
     layout_ms: float
     reason: str = ""
+    flash: list[FlashItem] = Field(
+        default_factory=list, description="Rows changed by a file change since the last frame (UI-TM-43)"
+    )
 
 
 class ViewState(Payload):

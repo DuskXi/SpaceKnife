@@ -61,6 +61,7 @@ class Flag(IntFlag):
     OFFLINE = 1 << 16
     VIRTUAL = 1 << 17  # node 0
     ADS = 1 << 18  # has alternate data streams (reserved: not collected yet)
+    GONE = 1 << 19  # deleted, or the old copy of a moved row (store.mutate): outside every child range
 
 
 # column name -> dtype. Times are unix seconds (uint32: 1970–2106, 0 = unknown).
@@ -542,17 +543,18 @@ class NodeStore:
         """``(start, stop)`` of a folder's children; safe while a scan adds listings in another thread.
 
         The count is read before the start (ingest publishes them the other way round), and a range
-        that does not lie after its folder and inside the store reads as empty (children always come
-        after their folder): a folder being listed at this very moment is simply not listed yet.
-        Reading the start first could pair a fresh count with the old start 0 — a range over the
-        top of the tree, which a subtree walk would then revisit again and again.
+        that starts at node 0 or runs past the store reads as empty: a folder being listed at this
+        very moment is simply not listed yet. Reading the start first could pair a fresh count with
+        the old start 0 — a range over the top of the tree, which a subtree walk would then revisit
+        again and again. (Children usually come after their folder, but a folder moved by a change,
+        see store.mutate, keeps its old children: ranges may also lie before it.)
         """
         c = self.cols
         count = int(c["child_count"][node])
         if count <= 0:
             return 0, 0
         start = int(c["child_start"][node])
-        if start <= node or start + count > self._n:
+        if start < 1 or start + count > self._n:
             return 0, 0
         return start, start + count
 

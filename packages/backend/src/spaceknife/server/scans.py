@@ -79,6 +79,7 @@ def volume_model(v: VolumeInfo | None) -> p.VolumeInfo | None:
         remote_path=v.remote_path,
         reason=v.reason,
         note=v.note,
+        reserved=v.reserved,
     )
 
 
