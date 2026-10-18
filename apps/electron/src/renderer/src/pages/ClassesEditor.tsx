@@ -9,6 +9,7 @@ import { RpcError } from "@/protocol/rpc";
 import { call } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
 import { classHex } from "@/lib/classes";
+import { byLang, t } from "@/lib/i18n";
 import { Icon } from "@/ui/Icon";
 
 interface Row {
@@ -31,6 +32,7 @@ const splitExts = (text: string) =>
 
 export function ClassesEditor() {
   const vocab = useApp((s) => s.vocab);
+  const lang = useApp((s) => s.lang); // the duplicate notes are in the interface language
   const [state, setState] = useState<ClassesState | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [confirm, setConfirm] = useState<string | null>(null); // row key, or "reset"
@@ -53,13 +55,14 @@ export function ClassesEditor() {
       const mine: string[] = [];
       for (const e of splitExts(r.exts)) {
         const owner = seen.get(e);
-        if (owner && owner !== r.name) mine.push(`${e}（${owner}）`);
+        if (owner && owner !== r.name) mine.push(t("{ext}（{owner}）", { ext: e, owner }));
         else seen.set(e, r.name);
       }
       if (mine.length) out.set(r.key, mine);
     }
     return out;
-  }, [rows]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, lang]);
 
   const commit = async (next: Row[]) => {
     setRows(next);
@@ -85,7 +88,7 @@ export function ClassesEditor() {
   };
   const add = () => {
     const n = rows.length;
-    const row: Row = { key: `new-${nextKey++}`, id: null, name: `新类别 ${n}`, exts: "", color: NEW_COLORS[n % NEW_COLORS.length]! };
+    const row: Row = { key: `new-${nextKey++}`, id: null, name: t("新类别 {n}", { n }), exts: "", color: NEW_COLORS[n % NEW_COLORS.length]! };
     const other = rows.findIndex((r) => r.id === "other");
     const next = [...rows];
     next.splice(other < 0 ? next.length : other, 0, row);
@@ -104,10 +107,10 @@ export function ClassesEditor() {
   };
 
   return (
-    <section className="set-group" aria-label="文件类别">
+    <section className="set-group" aria-label={t("文件类别")}>
       <div className="set-group-head">
-        <h2>类别</h2>
-        <span className="muted small">拖动排序：同一扩展名在多个类别里时，排在前面的决定颜色</span>
+        <h2>{t("类别")}</h2>
+        <span className="muted small">{t("拖动排序：同一扩展名在多个类别里时，排在前面的决定颜色")}</span>
       </div>
       <div className="set-card classes-card" role="list">
         {rows.map((r) => {
@@ -135,11 +138,11 @@ export function ClassesEditor() {
               <span className={`class-grip${other ? " off" : ""}`} aria-hidden="true">
                 ⋮⋮
               </span>
-              <label className="class-color" title="改颜色" style={{ background: hex }}>
+              <label className="class-color" title={t("改颜色")} style={{ background: hex }}>
                 <input
                   type="color"
                   value={hex.slice(0, 7)}
-                  aria-label={`${r.name} 的颜色`}
+                  aria-label={t("{name} 的颜色", { name: r.name })}
                   onChange={(e) => patch(r.key, { color: e.target.value.toUpperCase() })}
                   onBlur={() => changed(r.key)}
                 />
@@ -149,7 +152,7 @@ export function ClassesEditor() {
                   className="class-name"
                   value={r.name}
                   disabled={other}
-                  aria-label="类别名"
+                  aria-label={t("类别名")}
                   onChange={(e) => patch(r.key, { name: e.target.value })}
                   onBlur={() => changed(r.key)}
                   onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
@@ -157,28 +160,28 @@ export function ClassesEditor() {
                 <input
                   className="class-exts mono"
                   value={other ? "" : r.exts}
-                  placeholder={other ? "所有未归类的扩展名" : "扩展名，用 ; 分隔，例如 safetensors; gguf"}
+                  placeholder={other ? t("所有未归类的扩展名") : t("扩展名，用 ; 分隔，例如 safetensors; gguf")}
                   disabled={other}
-                  aria-label={`${r.name} 的扩展名`}
+                  aria-label={t("{name} 的扩展名", { name: r.name })}
                   onChange={(e) => patch(r.key, { exts: e.target.value })}
                   onBlur={() => changed(r.key)}
                   onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
                 />
-                {dups.get(r.key) && <div className="warn-text small">已在前面的类别里：{dups.get(r.key)!.join("、")}</div>}
+                {dups.get(r.key) && <div className="warn-text small">{t("已在前面的类别里：{list}", { list: dups.get(r.key)!.join(byLang("、", ", ")) })}</div>}
               </div>
               <span className="muted small mono class-filter">:class:{r.name.trim()}</span>
               {!other &&
                 (confirm === r.key ? (
                   <span className="class-confirm">
                     <button className="danger-btn small" onClick={() => (setConfirm(null), void commit(rows.filter((x) => x.key !== r.key)))}>
-                      删除
+                      {t("删除")}
                     </button>
                     <button className="ghost small" onClick={() => setConfirm(null)}>
-                      取消
+                      {t("取消")}
                     </button>
                   </span>
                 ) : (
-                  <button className="icon-btn small" aria-label={`删除类别 ${r.name}`} title="删除（其扩展名归入「其他」）" onClick={() => setConfirm(r.key)}>
+                  <button className="icon-btn small" aria-label={t("删除类别 {name}", { name: r.name })} title={t("删除（其扩展名归入「其他」）")} onClick={() => setConfirm(r.key)}>
                     <Icon name="close" size={14} />
                   </button>
                 ))}
@@ -188,12 +191,12 @@ export function ClassesEditor() {
       </div>
       <div className="class-actions">
         <button className="ghost small" onClick={add}>
-          <Icon name="plus" size={14} /> 添加类别
+          <Icon name="plus" size={14} /> {t("添加类别")}
         </button>
         {state?.custom &&
           (confirm === "reset" ? (
             <span className="class-confirm">
-              <span className="small">恢复为内置的 7 个类别？</span>
+              <span className="small">{t("恢复为内置的 7 个类别？")}</span>
               <button
                 className="danger-btn small"
                 onClick={async () => {
@@ -203,15 +206,15 @@ export function ClassesEditor() {
                   setRows(st.classes.map(toRow));
                 }}
               >
-                恢复
+                {t("恢复")}
               </button>
               <button className="ghost small" onClick={() => setConfirm(null)}>
-                取消
+                {t("取消")}
               </button>
             </span>
           ) : (
             <button className="ghost small" onClick={() => setConfirm("reset")}>
-              恢复默认类别
+              {t("恢复默认类别")}
             </button>
           ))}
       </div>

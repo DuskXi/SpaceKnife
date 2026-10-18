@@ -30,6 +30,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EVENT_BASKET, EVENT_OPS_PROGRESS
 
 from .. import fmt
+from ..i18n import Texts
 from ..ops.basket import AddResult, Basket, BasketItem, Refused
 from ..store.nodes import NodeStore
 from .compute import compute
@@ -48,15 +49,17 @@ KEEP_TASKS = 8  # finished operations remembered for undo
 REFRESH_QUIET_S = 1.0  # after file changes, the basket is checked again once this quiet
 
 # User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "not_on_disk": "只能操作「现在」还在磁盘上的项",
-    "no_block": "这个块已经不在视图里了，请再试一次",
-    "busy": "还有文件操作在进行，完成后再执行",
-    "unknown_task": "没有这个文件操作：{id}",
-    "nothing": "删除篮里没有可以执行的项",
-    "trash_same": "回收站在同一个卷上：清空回收站后才真正释放空间",
-    "trash_used": "，回收站现在有 {size}",
-}
+TEXT = Texts(
+    {
+        "not_on_disk": "只能操作「现在」还在磁盘上的项",
+        "no_block": "这个块已经不在视图里了，请再试一次",
+        "busy": "还有文件操作在进行，完成后再执行",
+        "unknown_task": "没有这个文件操作：{id}",
+        "nothing": "删除篮里没有可以执行的项",
+        "trash_same": "回收站在同一个卷上：清空回收站后才真正释放空间",
+        "trash_used": "{note}，回收站现在有 {size}",
+    }
+)
 
 
 @dataclass(eq=False)
@@ -141,7 +144,7 @@ class OpsService:
             if st.available:
                 note = TEXT["trash_same"] if st.same_volume else st.location
                 if st.used >= 0:
-                    note += TEXT["trash_used"].format(size=fmt.size(st.used))
+                    note = TEXT["trash_used"].format(note=note, size=fmt.size(st.used))
             else:
                 note = st.reason
             volumes.append(

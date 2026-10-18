@@ -30,6 +30,7 @@ from typing import Literal
 
 import numpy as np
 
+from ..i18n import Texts
 from ..store.lookup import PathIndex
 from ..store.nodes import Flag, Kind, NodeStore
 from ..store.subtree import subtree_ids
@@ -40,22 +41,24 @@ ItemKind = Literal["file", "dir", "link", "other", "group"]
 Status = Literal["ready", "locked", "missing", "protected"]
 
 # Every user-facing text of this module (M7.5 extracts them for translation).
-TEXT: dict[str, str] = {
-    "group_name": "{folder} 中 {count} 个小项",
-    "bad_node": "扫描结果中没有这一项",
-    "virtual": "MFT 伪文件夹中的项不在磁盘上",
-    "not_folder": "小项聚合块的所在位置不是文件夹",
-    "not_member": "不是所在文件夹的直接子项",
-    "missing": "已不存在",
-    "members_missing": "其中 {count} 项已不存在",
-    "locked": "正在被 {names} 使用，需先退出",
-    "links_file": "另有 {count} 个硬链接不在删除篮中，删除后不释放空间",
-    "links_dir": "其中 {count} 个文件在别处还有硬链接，删除后不释放这部分空间",
-    "failed": "{message}",
-    "members_failed": "{count} 项未完成：{message}",
-    "list_sep": "、",
-    "note_sep": "；",
-}
+TEXT = Texts(
+    {
+        "group_name": "{folder} 中 {count} 个小项",
+        "bad_node": "扫描结果中没有这一项",
+        "virtual": "MFT 伪文件夹中的项不在磁盘上",
+        "not_folder": "小项聚合块的所在位置不是文件夹",
+        "not_member": "不是所在文件夹的直接子项",
+        "missing": "已不存在",
+        "members_missing": "其中 {count} 项已不存在",
+        "locked": "正在被 {names} 使用，需先退出",
+        "links_file": "另有 {count} 个硬链接不在删除篮中，删除后不释放空间",
+        "links_dir": "其中 {count} 个文件在别处还有硬链接，删除后不释放这部分空间",
+        "failed": "{message}",
+        "members_failed": "{count} 项未完成：{message}",
+        "list_sep": "、",
+        "note_sep": "；",
+    }
+)
 
 _KIND_NAMES: dict[int, ItemKind] = {
     Kind.FILE: "file",

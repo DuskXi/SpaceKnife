@@ -44,6 +44,7 @@ from urllib.parse import quote, unquote_to_bytes
 from loguru import logger
 
 from .. import fmt
+from ..i18n import Texts
 from .locks import find_lockers
 from .paths import protected_reason
 
@@ -55,36 +56,39 @@ ProgressFn = Callable[[int, int, "OpResult"], None]  # (items done, items in tot
 CancelFn = Callable[[], bool]
 
 # Every user-facing text of this module (M7.5 extracts them for translation).
-TEXT: dict[str, str] = {
-    "trashed": "已移到回收站",
-    "restored": "已还原",
-    "deleted": "已永久删除",
-    "missing": "已不存在",
-    "denied": "没有权限",
-    "locked": "正在被 {names} 使用，需先退出",
-    "locked_unknown": "正被其他程序使用，需先关闭",
-    "cancelled": "已取消",
-    "cancelled_partly": "已取消，其中一部分已删除",
-    "error": "操作失败：{detail}",
-    "partly": "部分内容未能删除：{detail}",
-    "mount_inside": "其中有另一个卷的挂载点，未进入",
-    "no_bin_remote": "网络位置没有回收站，只能永久删除",
-    "no_bin_removable": "可移动磁盘没有回收站，只能永久删除",
-    "no_bin_volume": "这个卷没有回收站，只能永久删除",
-    "no_bin_nuke": "这个卷的回收站设置为「不移到回收站，直接删除」，只能永久删除",
-    "too_big": "超出回收站容量（{size}，回收站最多 {limit}），只能永久删除",
-    "too_long": "路径过长，回收站放不下，只能永久删除",
-    "refused": "系统准备直接删除而不是移到回收站，已阻止，未做任何改动",
-    "destroyed": "未在回收站中找到，可能已被系统直接删除",
-    "no_trash_dir": "这个卷上没有可用的回收站目录，只能永久删除",
-    "cross_mount": "回收站与它不在同一个挂载点，无法移入",
-    "no_name": "回收站中找不到可用的名字",
-    "not_moved": "未能移到回收站（系统没有说明原因），未做改动",
-    "unsupported": "这个系统不支持移到回收站",
-    "exists": "原位置已有同名项目，未覆盖",
-    "bad_ref": "不是可还原的回收站条目",
-    "gone_from_trash": "回收站中已没有这一项（可能已被清空）",
-}
+TEXT = Texts(
+    {
+        "trashed": "已移到回收站",
+        "restored": "已还原",
+        "deleted": "已永久删除",
+        "missing": "已不存在",
+        "denied": "没有权限",
+        "locked": "正在被 {names} 使用，需先退出",
+        "locked_unknown": "正被其他程序使用，需先关闭",
+        "cancelled": "已取消",
+        "cancelled_partly": "已取消，其中一部分已删除",
+        "error": "操作失败：{detail}",
+        "partly": "部分内容未能删除：{detail}",
+        "mount_inside": "其中有另一个卷的挂载点，未进入",
+        "no_bin_remote": "网络位置没有回收站，只能永久删除",
+        "no_bin_removable": "可移动磁盘没有回收站，只能永久删除",
+        "no_bin_volume": "这个卷没有回收站，只能永久删除",
+        "no_bin_nuke": "这个卷的回收站设置为「不移到回收站，直接删除」，只能永久删除",
+        "too_big": "超出回收站容量（{size}，回收站最多 {limit}），只能永久删除",
+        "too_long": "路径过长，回收站放不下，只能永久删除",
+        "refused": "系统准备直接删除而不是移到回收站，已阻止，未做任何改动",
+        "destroyed": "未在回收站中找到，可能已被系统直接删除",
+        "no_trash_dir": "这个卷上没有可用的回收站目录，只能永久删除",
+        "cross_mount": "回收站与它不在同一个挂载点，无法移入",
+        "no_name": "回收站中找不到可用的名字",
+        "not_moved": "未能移到回收站（系统没有说明原因），未做改动",
+        "unsupported": "这个系统不支持移到回收站",
+        "exists": "原位置已有同名项目，未覆盖",
+        "bad_ref": "不是可还原的回收站条目",
+        "gone_from_trash": "回收站中已没有这一项（可能已被清空）",
+        "list_sep": "、",
+    }
+)
 
 WIN_MAX_PATH = 259  # longest path the shell's recycle engine handles (MAX_PATH less the NUL)
 CAPACITY_SHARE = 0.9  # an item must stay below this share of the bin's capacity ...
@@ -99,7 +103,7 @@ class OpResult:
     path: str
     ok: bool
     code: OpCode
-    message: str  # Chinese, for the user
+    message: str  # for the user, in the current language
     trash_ref: str = ""  # move_to_trash: what restore() takes to put it back
 
 
@@ -108,7 +112,7 @@ class TrashStatus:
     """What moving something on a volume to the trash means there (UI-W5-39/40)."""
 
     available: bool
-    reason: str = ""  # why not (Chinese)
+    reason: str = ""  # why not (for the user)
     location: str = ""  # where trashed items of this volume go
     used: int = -1  # bytes in it now (-1: unknown)
     capacity: int = 0  # Windows: the bin's capacity on the volume (0: none or unknown)
@@ -152,7 +156,9 @@ def _precheck(paths: Sequence[str], check_locks: bool) -> dict[int, OpResult]:
         for i in alive:
             names = lockers.get(paths[i])
             if names:
-                skipped[i] = _result(paths[i], "locked", TEXT["locked"].format(names="、".join(names)))
+                skipped[i] = _result(
+                    paths[i], "locked", TEXT["locked"].format(names=TEXT["list_sep"].join(names))
+                )
     return skipped
 
 

@@ -24,6 +24,7 @@ from spaceknife_protocol.methods import (
 )
 
 from .. import classes, paths, settings_io
+from ..i18n import Texts, tr
 from ..settings import BY_KEY, SettingsError
 from ..store import snapshot
 from .rpc import RpcError
@@ -32,11 +33,13 @@ if TYPE_CHECKING:
     from .app import Server
     from .session import Session
 
-# User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "write": "写不了 {path}：{reason}",
-    "folder": "目标文件夹不存在：{folder}",
-}
+# User-facing text, translated when read (M7.5).
+TEXT = Texts(
+    {
+        "write": "写不了 {path}：{reason}",
+        "folder": "目标文件夹不存在：{folder}",
+    }
+)
 
 
 def _tree_bytes(root: Path) -> tuple[int, int]:
@@ -112,7 +115,7 @@ def install(server: Server) -> None:
         except ValueError as exc:
             raise RpcError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
         changes = [
-            ps.SettingChange(key=k, name=BY_KEY[k].name, before=store.values[k], after=v)
+            ps.SettingChange(key=k, name=tr(BY_KEY[k].name), before=store.values[k], after=v)
             for k, v in plan.values.items()
         ]
         if params.apply:
@@ -129,7 +132,7 @@ def install(server: Server) -> None:
         return ps.SettingsImportResult(
             source=plan.source,
             changes=changes,
-            classes=list(plan.classes) if plan.classes is not None else None,
+            classes=classes.shown(classes.ClassTable(plan.classes)) if plan.classes is not None else None,
             skipped=plan.skipped,
             applied=params.apply,
         )

@@ -18,5 +18,7 @@ export default defineConfig({
     environment: "node",
     include: ["src/renderer/src/**/*.test.ts"],
     setupFiles: ["src/renderer/src/test-setup.ts"],
+    // the module cache keeps lib/i18n.ts with its import.meta.glob result: catalogs added later went unseen
+    fsModuleCache: false,
   },
 });

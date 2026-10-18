@@ -36,13 +36,16 @@ import numpy as np
 from loguru import logger
 
 from .. import native
+from ..i18n import Texts
 from ..store.nodes import Flag, Kind, NodeStore, encode_name
 from ..store.subtree import ranges_to_ids
 
 MftTable = dict[str, Any]
 
-META_FOLDER = "$NTFS 元数据"
-ORPHAN_FOLDER = "$孤立文件"
+# Names of the pseudo folders, in the language of the scan (they become tree names when it is built).
+FOLDERS = Texts({"meta": "$NTFS 元数据", "orphan": "$孤立文件"})
+META_FOLDER = FOLDERS.raw("meta")  # the Chinese names (message ids)
+ORPHAN_FOLDER = FOLDERS.raw("orphan")
 ROOT_RECORD = 5
 BADCLUS_RECORD = 8  # $BadClus: its $Bad stream spans the whole volume (see table_to_store)
 FIRST_USER_RECORD = 16  # records 0–15 are metafiles / reserved
@@ -1212,8 +1215,8 @@ def table_to_store(
     # names: the table's blob, then the root and the pseudo folders
     extra = {
         root_row: encode_name(root_path),
-        meta_row: META_FOLDER.encode(),
-        orphan_row: ORPHAN_FOLDER.encode(),
+        meta_row: FOLDERS["meta"].encode(),
+        orphan_row: FOLDERS["orphan"].encode(),
     }
     name_off = node_col("name_off", np.int64)
     name_len = node_col("name_len", np.int64)

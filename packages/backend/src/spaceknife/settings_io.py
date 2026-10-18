@@ -23,37 +23,40 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
-from spaceknife_protocol.classes import BUILTIN_CLASSES, OTHER
+from spaceknife_protocol.classes import BUILTIN_CLASSES, OTHER, localized
 from spaceknife_protocol.filter import FilterClassInfo
 from spaceknife_protocol.settings import SettingValue
 
 from . import classes as class_table
+from .i18n import Texts, _, language
 from .settings import BY_KEY, DEFAULTS, SettingsStore, validate
 
 FORMAT = "spaceknife-settings"
 MAX_BYTES = 4 << 20
 
-# User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "too_big": "文件太大，不像是设置文件",
-    "unreadable": "读不了 {path}：{reason}",
-    "unknown_format": "不认识这个文件：既不是 SpaceKnife 导出的设置，"
-    "也不是 SpaceSniffer 的 SpaceSnifferConfig.xml",
-    "bad_json": "设置文件不是有效的 JSON：{reason}",
-    "bad_xml": "SpaceSniffer 配置不是有效的 XML：{reason}",
-    "newer": "这份设置来自更新版本的 SpaceKnife（格式 {version}），无法导入",
-    "unknown_key": "未知设置 {key}（来自其他版本），已跳过",
-    "invalid": "设置值不合法，已跳过：{key} = {value}",
-    "locked": "当前版本不可修改，已跳过：{name}",
-    "ss_colors": "SpaceSniffer 的配色（磁盘 / 文件夹 / 文件 / 可用 / 未知空间颜色）："
-    "SpaceKnife 的树图配色固定，不导入",
-    "ss_refresh": "刷新间隔 refreshDelayMs：SpaceKnife 自动调节刷新，不需要",
-    "ss_zoom": "缩放时长 zoomTimeMs：单位与 SpaceKnife 不同，不导入（可在「树图 › 缩放动画时长」里调）",
-    "ss_realzoom": "实时缩放 useRealZoom（DynaZoom）：还没有实现",
-    "ss_proportions": "元素比例 proportions：两边的刻度不同，不导入（可在「树图 › 元素比例」里调）",
-    "ss_template": "自定义导出模板「{name}」：SpaceKnife 还不能保存自定义模板",
-    "ss_kept_class": "保留 SpaceKnife 的「{name}」类别（SpaceSniffer 没有这一类）",
-}
+# User-facing text, translated when read (M7.5).
+TEXT = Texts(
+    {
+        "too_big": "文件太大，不像是设置文件",
+        "unreadable": "读不了 {path}：{reason}",
+        "unknown_format": "不认识这个文件：既不是 SpaceKnife 导出的设置，"
+        "也不是 SpaceSniffer 的 SpaceSnifferConfig.xml",
+        "bad_json": "设置文件不是有效的 JSON：{reason}",
+        "bad_xml": "SpaceSniffer 配置不是有效的 XML：{reason}",
+        "newer": "这份设置来自更新版本的 SpaceKnife（格式 {version}），无法导入",
+        "unknown_key": "未知设置 {key}（来自其他版本），已跳过",
+        "invalid": "设置值不合法，已跳过：{key} = {value}",
+        "locked": "当前版本不可修改，已跳过：{name}",
+        "ss_colors": "SpaceSniffer 的配色（磁盘 / 文件夹 / 文件 / 可用 / 未知空间颜色）："
+        "SpaceKnife 的树图配色固定，不导入",
+        "ss_refresh": "刷新间隔 refreshDelayMs：SpaceKnife 自动调节刷新，不需要",
+        "ss_zoom": "缩放时长 zoomTimeMs：单位与 SpaceKnife 不同，不导入（可在「树图 › 缩放动画时长」里调）",
+        "ss_realzoom": "实时缩放 useRealZoom（DynaZoom）：还没有实现",
+        "ss_proportions": "元素比例 proportions：两边的刻度不同，不导入（可在「树图 › 元素比例」里调）",
+        "ss_template": "自定义导出模板「{name}」：SpaceKnife 还不能保存自定义模板",
+        "ss_kept_class": "保留 SpaceKnife 的「{name}」类别（SpaceSniffer 没有这一类）",
+    }
+)
 
 # SpaceSniffer element -> (SpaceKnife key, converter)
 _BOOL: dict[str, str] = {
@@ -84,11 +87,11 @@ class ImportPlan:
     source: Literal["spaceknife", "spacesniffer"]
     values: dict[str, SettingValue] = field(default_factory=dict)  # only what changes
     classes: tuple[FilterClassInfo, ...] | None = None  # a new class table, if it changes
-    skipped: list[str] = field(default_factory=list)  # Chinese notes
+    skipped: list[str] = field(default_factory=list)  # notes, in the language of the moment
 
 
 class ImportError_(ValueError):
-    """A file that cannot be imported (the message is Chinese)."""
+    """A file that cannot be imported (the message is in the current language)."""
 
 
 # --------------------------------------------------------------------------- export
@@ -138,7 +141,7 @@ def _finish(plan: ImportPlan, wanted: dict[str, Any], current: dict[str, Setting
             continue
         if meta.reason:
             if value != current.get(key):
-                plan.skipped.append(TEXT["locked"].format(name=meta.name))
+                plan.skipped.append(TEXT["locked"].format(name=_(meta.name)))
             continue
         try:
             checked = validate({**current, key: value})[key]
@@ -296,7 +299,7 @@ def _classes_from(groups: ET.Element, plan: ImportPlan) -> class_table.ClassTabl
     for c in BUILTIN_CLASSES:  # SpaceKnife-only classes stay; 「其他」 last
         if c.id not in used and c.id != OTHER:
             edits.append(ClassEdit(id=c.id, name=c.name, extensions=c.extensions))
-            plan.skipped.append(TEXT["ss_kept_class"].format(name=c.name))
+            plan.skipped.append(TEXT["ss_kept_class"].format(name=localized(c, language()).name))
     other = next(c for c in BUILTIN_CLASSES if c.id == OTHER)
     edits.append(ClassEdit(id=OTHER, name=other.name))
     return class_table.build(edits)

@@ -2,6 +2,8 @@
 
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
+import { t } from "@/lib/i18n";
+
 interface State {
   error: Error | null;
 }
@@ -22,14 +24,14 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
     if (!error) return this.props.children;
     return (
       <div className="fatal" role="alert">
-        <h2>界面出错了</h2>
+        <h2>{t("界面出错了")}</h2>
         <p className="mono">{error.message}</p>
         <div className="fatal-actions">
           <button className="ghost" onClick={() => this.setState({ error: null })}>
-            重试
+            {t("重试")}
           </button>
           <button className="primary" onClick={() => location.reload()}>
-            重新加载界面
+            {t("重新加载界面")}
           </button>
         </div>
       </div>

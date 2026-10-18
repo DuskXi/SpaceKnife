@@ -2,6 +2,8 @@
 
 import { tokens } from "@design/tokens";
 
+import { t } from "@/lib/i18n";
+
 import type { TagItem, TextItem } from "./paint";
 
 export interface PreparedText extends TextItem {
@@ -71,27 +73,27 @@ export function drawTexts(ctx: CanvasRenderingContext2D, items: PreparedText[], 
 
 /** Tag markers (UI-TM-49): a 14 px dark base with a red ▲, yellow ■, green ● or blue ◆. */
 export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: number, alpha = 1): void {
-  for (const t of tags) {
+  for (const tag of tags) {
     const s = dpr;
-    ctx.globalAlpha = t.alpha * alpha;
-    if (t.badge) {
-      drawBadge(ctx, t, s);
+    ctx.globalAlpha = tag.alpha * alpha;
+    if (tag.badge) {
+      drawBadge(ctx, tag, s);
       continue;
     }
     ctx.fillStyle = tokens.color.tag.base;
     ctx.beginPath();
-    ctx.roundRect(t.x, t.y, 14 * s, 14 * s, 4 * s);
+    ctx.roundRect(tag.x, tag.y, 14 * s, 14 * s, 4 * s);
     ctx.fill();
-    ctx.fillStyle = TAG_COLORS[t.tag] ?? "#fff";
-    const cx = t.x + 7 * s;
-    const cy = t.y + 7 * s;
+    ctx.fillStyle = TAG_COLORS[tag.tag] ?? "#fff";
+    const cx = tag.x + 7 * s;
+    const cy = tag.y + 7 * s;
     ctx.beginPath();
-    if (t.tag === 1) {
+    if (tag.tag === 1) {
       ctx.moveTo(cx, cy - 4.5 * s);
       ctx.lineTo(cx + 4.5 * s, cy + 3.5 * s);
       ctx.lineTo(cx - 4.5 * s, cy + 3.5 * s);
-    } else if (t.tag === 2) ctx.roundRect(cx - 4 * s, cy - 4 * s, 8 * s, 8 * s, s);
-    else if (t.tag === 3) ctx.arc(cx, cy, 4 * s, 0, Math.PI * 2);
+    } else if (tag.tag === 2) ctx.roundRect(cx - 4 * s, cy - 4 * s, 8 * s, 8 * s, s);
+    else if (tag.tag === 3) ctx.arc(cx, cy, 4 * s, 0, Math.PI * 2);
     else {
       ctx.moveTo(cx, cy - 4.95 * s);
       ctx.lineTo(cx + 4.95 * s, cy);
@@ -105,14 +107,14 @@ export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: nu
 }
 
 /** 「新增」: a solid accent pill; 「已删除」: an outlined neutral one (UI-W6-16, W6 待定 7). */
-function drawBadge(ctx: CanvasRenderingContext2D, t: TagItem, s: number): void {
-  const text = t.badge === "new" ? "新增" : "已删除";
+function drawBadge(ctx: CanvasRenderingContext2D, tag: TagItem, s: number): void {
+  const text = tag.badge === "new" ? t("新增") : t("已删除");
   ctx.font = `600 ${10 * s}px "Geist", "Noto Sans SC", system-ui, sans-serif`;
   const w = ctx.measureText(text).width + 10 * s;
   const h = 15 * s;
   ctx.beginPath();
-  ctx.roundRect(t.x, t.y, w, h, 4 * s);
-  if (t.badge === "new") {
+  ctx.roundRect(tag.x, tag.y, w, h, 4 * s);
+  if (tag.badge === "new") {
     ctx.fillStyle = tokens.color.accent.default;
     ctx.fill();
     ctx.fillStyle = tokens.color.text.onAccent;
@@ -125,6 +127,6 @@ function drawBadge(ctx: CanvasRenderingContext2D, t: TagItem, s: number): void {
     ctx.fillStyle = tokens.color.text.primary;
   }
   ctx.textBaseline = "middle";
-  ctx.fillText(text, t.x + 5 * s, t.y + h / 2 + 0.5 * s);
+  ctx.fillText(text, tag.x + 5 * s, tag.y + h / 2 + 0.5 * s);
   ctx.textBaseline = "alphabetic";
 }

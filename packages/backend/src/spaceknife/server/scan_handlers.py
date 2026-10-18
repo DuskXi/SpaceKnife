@@ -38,6 +38,7 @@ from spaceknife_protocol.methods import (
     VOLUME_LIST,
 )
 
+from ..i18n import tr
 from ..scan.media import media_of
 from ..scan.scanner import normalise_root
 from ..scan.volume import VolumeInfo, list_volumes, volume_for
@@ -258,16 +259,16 @@ def check_paths(paths: list[str]) -> p.PathCheckResult:
         try:
             if not os.path.isdir(norm):
                 state, message = (
-                    ("not_dir", "不是文件夹") if os.path.exists(norm) else ("missing", "路径不存在")
+                    ("not_dir", tr("不是文件夹")) if os.path.exists(norm) else ("missing", tr("路径不存在"))
                 )
             else:
                 with os.scandir(norm) as it:
                     next(it, None)
                 volume = volume_for(norm).mount_point
         except PermissionError:
-            state, message = "denied", "无法访问：拒绝访问"
+            state, message = "denied", tr("无法访问：拒绝访问")
         except OSError as exc:
-            state, message = "error", f"无法访问：{exc.strerror or exc}"
+            state, message = "error", tr("无法访问：{reason}", reason=exc.strerror or exc)
         items.append(p.PathCheck(path=text, normalized=norm, state=state, message=message, volume=volume))  # type: ignore[arg-type]
     ok = sorted((i for i in items if i.state == "ok"), key=lambda i: len(i.normalized))
     kept: list[str] = []

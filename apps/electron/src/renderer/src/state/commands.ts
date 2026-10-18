@@ -3,6 +3,7 @@
 
 import { focusFilter } from "@/shell/FilterBox";
 import { revealLabel } from "@/shell/Inspector";
+import { t } from "@/lib/i18n";
 import { Kind } from "@/treemap/frame";
 
 import {
@@ -79,9 +80,9 @@ export async function runCommand(id: string): Promise<void> {
         try {
           const info = await call("snapshot.save", { scan_id: tab.scanId });
           if (tab.compare) await refreshCompareSources(tab.id);
-          toast(`快照已保存：${info.path.split(/[\\/]/).pop()}`);
+          toast(t("快照已保存：{name}", { name: info.path.split(/[\\/]/).pop() ?? info.path }));
         } catch (err) {
-          toast(`保存快照失败：${String(err)}`);
+          toast(t("保存快照失败：{error}", { error: String(err) }));
         }
       }
       return;
@@ -133,7 +134,7 @@ export async function runCommand(id: string): Promise<void> {
       const p = await selectionPath();
       if (p) {
         window.sk.shell.copyText(p.path);
-        toast("已复制");
+        toast(t("已复制"));
       }
       return;
     }
@@ -187,6 +188,6 @@ export async function runCommand(id: string): Promise<void> {
     case "scan.new":
       return newStartTab();
     default:
-      toast("这个命令还没有接入");
+      toast(t("这个命令还没有接入"));
   }
 }

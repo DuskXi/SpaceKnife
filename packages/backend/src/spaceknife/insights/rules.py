@@ -17,6 +17,10 @@ A path in Windows form (drive letter, UNC, ``\\\\?\\``) is matched against the W
 case-insensitively; any other path against the host's POSIX platform — Linux case-sensitively,
 macOS case-insensitively (APFS default) — so a snapshot from another platform still gets its own
 platform's rules. ``RuleSet`` is immutable once built and safe to share between threads.
+
+Texts come in the interface language unless a lookup asks for another one (M7.5): a rule's
+``i18n`` table translates its own texts; problems with rule files are reported in the interface
+language of the moment they are found.
 """
 
 from __future__ import annotations
@@ -34,6 +38,8 @@ from typing import Any, Literal, cast, get_args
 
 from loguru import logger
 
+from ..i18n import Texts, _
+from ..i18n import language as interface_language
 from ..paths import config_dir
 from ..store.nodes import Kind, NodeStore
 
@@ -47,46 +53,52 @@ PLATFORMS = ("windows", "linux", "macos")
 FORMAT_VERSION = 1
 BUILTIN_SOURCE = "builtin.toml"
 
-# --- user-facing text (log panel and the rule problems list), kept together for M7.5 i18n ----
-MSG = {
-    "file_unreadable": "无法读取洞察规则文件 {source}：{error}",
-    "file_syntax": "洞察规则文件 {source} 不是有效的 TOML：{error}",
-    "file_version": "洞察规则文件 {source} 的格式版本 {version} 不受支持（支持 {supported}），已跳过",
-    "file_keys": "洞察规则文件 {source} 有未知的顶层字段 {keys}，已忽略",
-    "file_rules": "洞察规则文件 {source} 的 rule 应为表数组（[[rule]]）",
-    "rule_skipped": "跳过洞察规则 {rule}（{source}）：{error}",
-    "rule_duplicate": "洞察规则 {rule} 在 {source} 中出现多次，以最后一条为准",
-    "rule_override": "用户规则 {rule}（{source}）覆盖了同名规则",
-    "rules_loaded": "已加载 {count} 条洞察规则（来自 {files} 个文件，跳过 {skipped} 处问题）",
-}
-ERR = {
-    "not_table": "规则应为表",
-    "missing": "缺少字段 {key}",
-    "type": "字段 {key} 应为{expected}",
-    "unknown": "未知字段 {keys}",
-    "bad_id": "id {value!r} 无效：只能用字母、数字和 . _ -，并以字母或数字开头",
-    "bad_choice": "字段 {key} 的值 {value!r} 无效，可选 {choices}",
-    "no_matcher": "至少要有一条 paths 或 names",
-    "name_sep": "名称 {value!r} 不能为空或包含路径分隔符（多层路径请写进 paths）",
-    "empty_choice": "字段 {key} 不能为空列表",
-    "bad_glob": "通配符 {value!r} 无效：{error}",
-    "empty_glob": "通配符不能为空",
-    "unclosed": "[ 没有配对的 ]",
-    "unclosed_brace": "{ 没有配对的 }",
-    "too_many": "花括号展开后的模式超过 {limit} 个",
-    "tilde": "不支持 ~，请改用相对模式（如 .cache/pip，可匹配任意层级）",
-    "bad_size": '无法识别的大小 {value!r}（例：1048576、"500 MB"、"2 GiB"）',
-    "bad_priority": "priority 应在 -1000 到 1000 之间",
-    "bad_lang": "i18n 的语言代码 {value!r} 无效（例：en、zh-tw）",
-    "bad_i18n": "i18n.{lang} 只能包含 title、reason、note、app",
-}
-TYPE_NAMES = {
-    "str": "字符串",
-    "strs": "字符串或字符串列表",
-    "int": "整数",
-    "bool": "true 或 false",
-    "table": "表",
-}
+# --- user-facing text (log panel and the rule problems list), translated when read (M7.5) -----
+MSG = Texts(
+    {
+        "file_unreadable": "无法读取洞察规则文件 {source}：{error}",
+        "file_syntax": "洞察规则文件 {source} 不是有效的 TOML：{error}",
+        "file_version": "洞察规则文件 {source} 的格式版本 {version} 不受支持（支持 {supported}），已跳过",
+        "file_keys": "洞察规则文件 {source} 有未知的顶层字段 {keys}，已忽略",
+        "file_rules": "洞察规则文件 {source} 的 rule 应为表数组（[[rule]]）",
+        "rule_skipped": "跳过洞察规则 {rule}（{source}）：{error}",
+        "rule_duplicate": "洞察规则 {rule} 在 {source} 中出现多次，以最后一条为准",
+        "rule_override": "用户规则 {rule}（{source}）覆盖了同名规则",
+        "rules_loaded": "已加载 {count} 条洞察规则（来自 {files} 个文件，跳过 {skipped} 处问题）",
+    }
+)
+ERR = Texts(
+    {
+        "not_table": "规则应为表",
+        "missing": "缺少字段 {key}",
+        "type": "字段 {key} 应为{expected}",
+        "unknown": "未知字段 {keys}",
+        "bad_id": "id {value!r} 无效：只能用字母、数字和 . _ -，并以字母或数字开头",
+        "bad_choice": "字段 {key} 的值 {value!r} 无效，可选 {choices}",
+        "no_matcher": "至少要有一条 paths 或 names",
+        "name_sep": "名称 {value!r} 不能为空或包含路径分隔符（多层路径请写进 paths）",
+        "empty_choice": "字段 {key} 不能为空列表",
+        "bad_glob": "通配符 {value!r} 无效：{error}",
+        "empty_glob": "通配符不能为空",
+        "unclosed": "[ 没有配对的 ]",
+        "unclosed_brace": "{ 没有配对的 }",
+        "too_many": "花括号展开后的模式超过 {limit} 个",
+        "tilde": "不支持 ~，请改用相对模式（如 .cache/pip，可匹配任意层级）",
+        "bad_size": '无法识别的大小 {value!r}（例：1048576、"500 MB"、"2 GiB"）',
+        "bad_priority": "priority 应在 -1000 到 1000 之间",
+        "bad_lang": "i18n 的语言代码 {value!r} 无效（例：en、zh-tw）",
+        "bad_i18n": "i18n.{lang} 只能包含 title、reason、note、app",
+    }
+)
+TYPE_NAMES = Texts(
+    {
+        "str": "字符串",
+        "strs": "字符串或字符串列表",
+        "int": "整数",
+        "bool": "true 或 false",
+        "table": "表",
+    }
+)
 
 _TEXT_FIELDS = ("title", "reason", "note", "app")
 _MATCH_FIELDS = ("paths", "names", "parents", "exclude", "platforms", "node", "min_size")
@@ -463,7 +475,7 @@ def _parse_rule(raw: object, source: str) -> tuple[str, Rule | None]:
         raise _type_error("enabled", "bool")
     unknown = sorted(set(raw) - _RULE_KEYS)
     if unknown:
-        raise _Invalid(ERR["unknown"].format(keys="、".join(unknown)))
+        raise _Invalid(ERR["unknown"].format(keys=_("、").join(unknown)))
     if not enabled:
         return rule_id, None
 
@@ -544,7 +556,7 @@ def _parse_file(text: str, source: str) -> tuple[list[tuple[str, Rule | None]], 
     extra = sorted(set(data) - {"version", "rule"})
     if extra:
         problems.append(
-            RuleProblem(source, "", MSG["file_keys"].format(source=source, keys="、".join(extra)))
+            RuleProblem(source, "", MSG["file_keys"].format(source=source, keys=_("、").join(extra)))
         )
     entries = data.get("rule", [])
     if not isinstance(entries, list):
@@ -688,6 +700,11 @@ class _Ancestors:
         self.outer: dict[_Compiled, _Cand | None] = {}  # rule -> its shallowest match (lazily)
 
 
+def _text_language(lang: str | None) -> str:
+    """The language of a lookup's texts: ``lang``, else the interface language ("" = the rules' own)."""
+    return interface_language() if lang is None else lang
+
+
 def host_platform() -> str:
     if sys.platform == "win32":
         return "windows"
@@ -745,10 +762,11 @@ class RuleSet:
     def match(
         self, path: str, kind: NodeKind, *, size: int | None = None, lang: str | None = None
     ) -> Insight | None:
-        """The insight for ``path`` (a ``kind`` node; ``size`` in bytes enables ``min_size``)."""
+        """The insight for ``path`` (a ``kind`` node; ``size`` in bytes enables ``min_size``), with
+        texts in ``lang`` (default: the interface language; "" for the rule's own texts)."""
         p = self._prepare(path)
         hit = self._find(p, _kind_bit(kind), size, None)
-        return None if hit is None else self._insight(p, hit, lang)
+        return None if hit is None else self._insight(p, hit, _text_language(lang))
 
     def match_many(
         self,
@@ -770,14 +788,15 @@ class RuleSet:
             raise ValueError("sizes and paths differ in length")
         cache: dict[tuple[int, str], _Ancestors] = {}
         out: list[Insight | None] = []
+        text_lang = _text_language(lang)
         for j, path in enumerate(paths):
             p = self._prepare(path)
             hit = self._find(p, bits[j], None if sizes is None else sizes[j], cache)
-            out.append(None if hit is None else self._insight(p, hit, lang))
+            out.append(None if hit is None else self._insight(p, hit, text_lang))
         return out
 
     def match_node(self, store: NodeStore, node: int, *, lang: str | None = None) -> Insight | None:
-        """``match`` for a store node (its path, kind and allocated size)."""
+        """``match`` for a store node (its path, kind and allocated size; ``lang`` as there)."""
         kind = Kind(int(store.cols["kind"][node]))
         column = "tot_alloc" if kind == Kind.DIR else "alloc"
         return self.match(store.path(node), kind, size=int(store.cols[column][node]), lang=lang)

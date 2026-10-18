@@ -11,15 +11,18 @@ import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
 import { classHexNow } from "@/lib/classes";
+import { t } from "@/lib/i18n";
 import { tagLabel } from "@/lib/tags";
 
 type Page = "details" | "classes" | "largest";
+// red ▲, yellow ■, green ●, blue ◆: the names come from tagLabel (W7 「标签」 · 显示名)
 const TAGS = [
-  { color: "red", label: "红色标签 ▲", key: 1 },
-  { color: "yellow", label: "黄色标签 ■", key: 2 },
-  { color: "green", label: "绿色标签 ●", key: 3 },
-  { color: "blue", label: "蓝色标签 ◆", key: 4 },
+  { color: "red", key: 1 },
+  { color: "yellow", key: 2 },
+  { color: "green", key: 3 },
+  { color: "blue", key: 4 },
 ] as const;
+const pageLabel = (p: Page) => ({ details: t("详情"), classes: t("类别统计"), largest: t("最大文件") })[p];
 
 export function Inspector({ viewId }: { viewId: string }) {
   const view = useApp((s) => s.views[viewId]);
@@ -54,25 +57,25 @@ export function Inspector({ viewId }: { viewId: string }) {
   const className = (id: string) => vocab?.classes.find((c) => c.id === id)?.name ?? id;
 
   return (
-    <aside className="inspector" aria-label="详情面板">
+    <aside className="inspector" aria-label={t("详情面板")}>
       <div className="inspector-head">
-        <div className="segtabs" role="tablist" aria-label="侧栏视图">
+        <div className="segtabs" role="tablist" aria-label={t("侧栏视图")}>
           {(["details", "classes", "largest"] as const).map((p) => (
             <button key={p} role="tab" aria-selected={page === p} className={page === p ? "on" : ""} onClick={() => setPage(p)}>
-              {{ details: "详情", classes: "类别统计", largest: "最大文件" }[p]}
+              {pageLabel(p)}
             </button>
           ))}
         </div>
         <div className="inspector-tools">
           <button
             className="icon-btn small"
-            aria-label="更多操作"
-            title="更多操作（Shift+F10）"
+            aria-label={t("更多操作")}
+            title={t("更多操作（Shift+F10）")}
             onClick={() => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "F10", shiftKey: true, bubbles: true }))}
           >
             <Icon name="more" />
           </button>
-          <button className="icon-btn small" aria-label="隐藏详情面板" title="隐藏详情面板" onClick={() => set({ inspectorHidden: true })}>
+          <button className="icon-btn small" aria-label={t("隐藏详情面板")} title={t("隐藏详情面板")} onClick={() => set({ inspectorHidden: true })}>
             <Icon name="sidebar" />
           </button>
         </div>
@@ -81,7 +84,7 @@ export function Inspector({ viewId }: { viewId: string }) {
         {synthetic != null && frame ? (
           <SyntheticDetails frameKind={frame.kind[synthetic]!} size={Number(frame.size[synthetic])} count={frame.count_[synthetic]!} />
         ) : !summary ? (
-          <div className="muted">正在读取…</div>
+          <div className="muted">{t("正在读取…")}</div>
         ) : page === "details" ? (
           <Details s={summary} viewId={viewId} className={className} />
         ) : page === "classes" ? (
@@ -95,15 +98,15 @@ export function Inspector({ viewId }: { viewId: string }) {
           <ActionRow icon="reveal" label={revealLabel()} keys="Ctrl+E" disabled={!summary.on_disk} onClick={() => window.sk.shell.showItemInFolder(summary.path)} />
           <ActionRow
             icon="copy"
-            label="复制路径"
+            label={t("复制路径")}
             keys="Ctrl+C"
             onClick={() => {
               window.sk.shell.copyText(summary.path);
-              toast("已复制");
+              toast(t("已复制"));
             }}
           />
-          <ActionRow icon="basket" danger label="加入删除篮" keys="Delete" disabled={!summary.on_disk} onClick={() => scanId && basketAdd(scanId, summary.node.id)} />
-          {!summary.on_disk && <div className="muted small inspector-note">{NOT_ON_DISK}</div>}
+          <ActionRow icon="basket" danger label={t("加入删除篮")} keys="Delete" disabled={!summary.on_disk} onClick={() => scanId && basketAdd(scanId, summary.node.id)} />
+          {!summary.on_disk && <div className="muted small inspector-note">{notOnDisk()}</div>}
         </div>
       )}
     </aside>
@@ -111,10 +114,10 @@ export function Inspector({ viewId }: { viewId: string }) {
 }
 
 export const revealLabel = () =>
-  window.sk.platform === "darwin" ? "在访达中显示" : window.sk.platform === "win32" ? "在资源管理器中显示" : "在文件管理器中显示";
+  window.sk.platform === "darwin" ? t("在访达中显示") : window.sk.platform === "win32" ? t("在资源管理器中显示") : t("在文件管理器中显示");
 
 /** Items under the MFT pseudo folders have no folder of their own to open or delete from. */
-export const NOT_ON_DISK = "NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有可以打开或删除的对应位置";
+export const notOnDisk = () => t("NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有可以打开或删除的对应位置");
 
 function ActionRow(props: { icon: Parameters<typeof Icon>[0]["name"]; label: string; keys: string; danger?: boolean; disabled?: boolean; onClick: () => void }) {
   return (
@@ -157,44 +160,49 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
           <span className="num">{num}</span>
           <span className="unit">{unit}</span>
         </div>
-        <div className="ins-stats" title={`精确 ${fmtInt(n.alloc)} 字节（逻辑 ${fmtInt(n.size)} 字节）`}>
-          {dir ? `${fmtInt(n.files)} 个文件 · ${fmtInt(n.dirs)} 个文件夹 · 修改于 ${fmtAgo(s.latest_mtime)}` : `${className(cls ?? "other")} · 修改于 ${fmtAgo(n.mtime)}`}
+        <div className="ins-stats" title={t("精确 {alloc} 字节（逻辑 {size} 字节）", { alloc: fmtInt(n.alloc), size: fmtInt(n.size) })}>
+          {dir
+            ? t("{files} 个文件 · {dirs} 个文件夹 · 修改于 {ago}", { files: fmtInt(n.files), dirs: fmtInt(n.dirs), ago: fmtAgo(s.latest_mtime) })
+            : t("{cls} · 修改于 {ago}", { cls: className(cls ?? "other"), ago: fmtAgo(n.mtime) })}
         </div>
       </div>
       <section className="ins-section">
-        <h3>占比</h3>
-        {s.parent && <ShareBar label={`占 ${s.parent.name.split(/[\\/]/).filter(Boolean).pop() ?? s.parent.name}`} part={n.alloc} whole={s.parent.alloc} />}
-        {vol && used > 0 && <ShareBar label={`占 ${vol.mount_point.replace(/[\\/]+$/, "")} 已用`} part={n.alloc} whole={used} />}
+        <h3>{t("占比")}</h3>
+        {s.parent && <ShareBar label={t("占 {name}", { name: s.parent.name.split(/[\\/]/).filter(Boolean).pop() ?? s.parent.name })} part={n.alloc} whole={s.parent.alloc} />}
+        {vol && used > 0 && <ShareBar label={t("占 {volume} 已用", { volume: vol.mount_point.replace(/[\\/]+$/, "") })} part={n.alloc} whole={used} />}
       </section>
       {dir && s.top_files.length > 0 && (
         <section className="ins-section">
-          <h3>最大的子项</h3>
+          <h3>{t("最大的子项")}</h3>
           <div className="top-list">
-            {s.top_files.slice(0, 5).map((t) => (
-              <TopRow key={t.node.id} node={t.node} rel={t.rel_parent} tag={t.tag ?? null} whole={n.alloc} viewId={viewId} />
+            {s.top_files.slice(0, 5).map((f) => (
+              <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} whole={n.alloc} viewId={viewId} />
             ))}
           </div>
         </section>
       )}
       <section className="ins-section">
         <div className="row-between">
-          <h3>标签</h3>
-          <span className="muted small">Ctrl+1–4 · Ctrl+0 清除</span>
+          <h3>{t("标签")}</h3>
+          <span className="muted small">{t("Ctrl+1–4 · Ctrl+0 清除")}</span>
         </div>
-        <div className="tag-grid" role="group" aria-label="颜色标签">
-          {TAGS.map((t) => (
-            <button
-              key={t.color}
-              aria-label={`${tagLabel(settings, t.color)}（Ctrl+${t.key}）`}
-              title={`${tagLabel(settings, t.color)}（Ctrl+${t.key}）`}
-              aria-pressed={s.tag === t.color}
-              className={`tag-btn${s.tag === t.color ? " on" : ""}`}
-              onClick={() => void viewCall(viewId, "view.tag", { color: s.tag === t.color ? null : t.color })}
-            >
-              <span className={`tag-shape ${t.color}`} />
-              <span className="mono muted">{t.key}</span>
-            </button>
-          ))}
+        <div className="tag-grid" role="group" aria-label={t("颜色标签")}>
+          {TAGS.map((tg) => {
+            const name = t("{tag}（Ctrl+{key}）", { tag: tagLabel(settings, tg.color), key: tg.key });
+            return (
+              <button
+                key={tg.color}
+                aria-label={name}
+                title={name}
+                aria-pressed={s.tag === tg.color}
+                className={`tag-btn${s.tag === tg.color ? " on" : ""}`}
+                onClick={() => void viewCall(viewId, "view.tag", { color: s.tag === tg.color ? null : tg.color })}
+              >
+                <span className={`tag-shape ${tg.color}`} />
+                <span className="mono muted">{tg.key}</span>
+              </button>
+            );
+          })}
         </div>
       </section>
     </>
@@ -225,7 +233,7 @@ function TopRow({ node, rel, tag, whole, viewId }: { node: NodeInfo; rel: string
       <span className="top-line">
         <span className="swatch" style={{ background: classHexNow(cls) }} />
         <span className="top-name">{node.name}</span>
-        {tag && <span className={`tag-mini ${tag}`} role="img" aria-label={`${tag} 标签`} />}
+        {tag && <span className={`tag-mini ${tag}`} role="img" aria-label={t("{tag} 标签", { tag })} />}
         <span className="flex" />
         <span className="mono">{fmtSize(node.alloc)}</span>
       </span>
@@ -249,12 +257,12 @@ function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: st
   const total = s.classes.reduce((a, c) => a + c.bytes, 0);
   return (
     <section className="ins-section">
-      <h3>{s.node.name.split(/[\\/]/).filter(Boolean).pop()} · 按文件类别</h3>
+      <h3>{t("{name} · 按文件类别", { name: s.node.name.split(/[\\/]/).filter(Boolean).pop() ?? "" })}</h3>
       {s.classes.map((c) => (
         <div key={c.class_id} className="class-row">
           <span className="swatch" style={{ background: classHexNow(c.class_id) }} />
           <span className="flex">{className(c.class_id)}</span>
-          <span className="mono muted">{fmtInt(c.files)} 个</span>
+          <span className="mono muted">{t("{n} 个", { n: fmtInt(c.files) })}</span>
           <span className="mono">{fmtSize(c.bytes)}</span>
           <span className="mono muted share-pct">{fmtShare(c.bytes, total)}</span>
           <span className="class-bar">
@@ -269,10 +277,10 @@ function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: st
 function TopList({ s, viewId }: { s: TreeSummaryResult; viewId: string; className: (id: string) => string }) {
   return (
     <section className="ins-section">
-      <h3>最大的 {s.top_files.length} 个文件</h3>
+      <h3>{t("最大的 {n} 个文件", { n: s.top_files.length })}</h3>
       <div className="top-list">
-        {s.top_files.map((t) => (
-          <TopRow key={t.node.id} node={t.node} rel={t.rel_parent} tag={t.tag ?? null} whole={s.node.alloc} viewId={viewId} />
+        {s.top_files.map((f) => (
+          <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} whole={s.node.alloc} viewId={viewId} />
         ))}
       </div>
     </section>
@@ -283,12 +291,12 @@ function SyntheticDetails({ frameKind, size, count }: { frameKind: number; size:
   const [num, unit] = sizeParts(size);
   const text =
     frameKind === Kind.SMALL
-      ? [`${fmtInt(count)} 个小项`, "同一文件夹里单独画不下的小文件合并成一块。双击可以把它们逐个铺开。"]
+      ? [t("{n} 个小项", { n: fmtInt(count) }), t("同一文件夹里单独画不下的小文件合并成一块。双击可以把它们逐个铺开。")]
       : frameKind === Kind.MORE
-        ? [`+${fmtInt(count)} 项`, "同级里画不下的条目合并成一块。双击可以把它们铺开。"]
+        ? [t("+{n} 项", { n: fmtInt(count) }), t("同级里画不下的条目合并成一块。双击可以把它们铺开。")]
         : frameKind === Kind.FREE
-          ? ["可用空间", "系统报告的卷可用空间。按 F 显示或隐藏。"]
-          : ["未知空间", "未知空间 = 系统报告的已用 − 已扫描合计，通常是无权限或系统保留的区域。以管理员身份扫描可以减少这部分（M4）。"];
+          ? [t("可用空间"), t("系统报告的卷可用空间。按 F 显示或隐藏。")]
+          : [t("未知空间"), t("未知空间 = 系统报告的已用 − 已扫描合计，通常是无权限或系统保留的区域。以管理员身份扫描可以减少这部分（M4）。")];
   return (
     <>
       <div className="ins-name">

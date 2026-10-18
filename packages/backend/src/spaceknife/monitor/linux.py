@@ -39,6 +39,7 @@ from typing import Any
 from loguru import logger
 
 from .. import fmt
+from ..i18n import Texts
 from .base import Change, Sink, WatchState, WatchStatus
 from .poll import DirPoller, stat_file
 
@@ -77,19 +78,44 @@ _MAX_DEPTH = 4096
 _BUDGET_SHARE = 0.8
 DEFAULT_MAX_USER_WATCHES = 8192
 
+# User-facing text (M7.5): watch states and the reasons inotify cannot be used.
+TEXT = Texts(
+    {
+        "emfile": "inotify 实例数已达上限（fs.inotify.max_user_instances）",
+        "enfile": "系统打开的文件过多",
+        "enosys": "内核不支持",
+        "denied": "没有权限",
+        "enomem": "内存不足",
+        "not_linux": "inotify 只在 Linux 上可用",
+        "no_libc": "libc 没有 inotify",
+        "no_poll": "需要 poll()",
+        "started": "监视器已经启动",
+        "fallback": "inotify 不可用（{reason}），全部文件夹改为轮询",
+        "root_fallback": "无法监视扫描根目录（{reason}），全部文件夹改为轮询",
+        "short": "inotify 监视额度不足，{count} 个文件夹改为轮询",
+        "polled": "{count} 个文件夹无法用 inotify 监视，改为轮询",
+        "root_lost": "扫描根目录已被删除或移走，实时监控已停止",
+        "root_gone": "扫描根目录已不存在，实时监控已停止",
+        "crashed": "实时监控出错，已停止",
+        "log_fallback": "inotify 不可用（{error}）：{path} 改为轮询",
+        "log_root": "inotify 无法监视 {path}：{error}",
+        "log_thread": "inotify 监视线程出错：{path}",
+        "log_sink": "监视器回调出错",
+    }
+)
 _ERRNO_TEXT = {
-    errno.EMFILE: "inotify 实例数已达上限（fs.inotify.max_user_instances）",
-    errno.ENFILE: "系统打开的文件过多",
-    errno.ENOSYS: "内核不支持",
-    errno.EACCES: "没有权限",
-    errno.EPERM: "没有权限",
-    errno.ENOMEM: "内存不足",
+    errno.EMFILE: "emfile",
+    errno.ENFILE: "enfile",
+    errno.ENOSYS: "enosys",
+    errno.EACCES: "denied",
+    errno.EPERM: "denied",
+    errno.ENOMEM: "enomem",
 }
 
 
 def _why(exc: OSError) -> str:
     if exc.errno in _ERRNO_TEXT:
-        return _ERRNO_TEXT[exc.errno]
+        return TEXT[_ERRNO_TEXT[exc.errno]]
     return exc.strerror or str(exc)
 
 
@@ -348,12 +374,12 @@ def _dangling_moves(events: Sequence[RawEvent]) -> bool:
 def _open_inotify() -> tuple[int, Any, Any]:
     """``inotify_init1(IN_NONBLOCK | IN_CLOEXEC)`` plus the watch calls (libc through ctypes)."""
     if not sys.platform.startswith("linux"):
-        raise OSError(errno.ENOSYS, "inotify 只在 Linux 上可用")
+        raise OSError(errno.ENOSYS, TEXT["not_linux"])
     libc = ctypes.CDLL(None, use_errno=True)
     try:
         init1, add, rm = libc.inotify_init1, libc.inotify_add_watch, libc.inotify_rm_watch
     except AttributeError as exc:
-        raise OSError(errno.ENOSYS, "libc 没有 inotify") from exc
+        raise OSError(errno.ENOSYS, TEXT["no_libc"]) from exc
     init1.argtypes = [ctypes.c_int]
     init1.restype = ctypes.c_int
     add.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
@@ -405,7 +431,7 @@ class _Inotify:
 
 def _wait_readable(fds: list[int], timeout: float) -> set[int]:
     if sys.platform == "win32":
-        raise OSError(errno.ENOSYS, "需要 poll()")
+        raise OSError(errno.ENOSYS, TEXT["no_poll"])
     poller = select.poll()
     for fd in fds:
         poller.register(fd, select.POLLIN)
@@ -495,7 +521,7 @@ class InotifyWatcher:
 
     def start(self, sink: Sink) -> None:
         if self._thread is not None:
-            raise RuntimeError("监视器已经启动")
+            raise RuntimeError(TEXT["started"])
         self._sink = sink
         self._wake_r, self._wake_w = os.pipe()
         os.set_blocking(self._wake_r, False)
@@ -503,8 +529,8 @@ class InotifyWatcher:
         try:
             self._ino = _Inotify()
         except OSError as exc:
-            self._fallback = f"inotify 不可用（{_why(exc)}），全部文件夹改为轮询"
-            logger.warning("inotify 不可用（{}）：{} 改为轮询", exc, self.root)
+            self._fallback = TEXT["fallback"].format(reason=_why(exc))
+            logger.warning(TEXT["log_fallback"].format(error=exc, path=self.root))
         if self._ino is not None:
             self._watch_root()
         if self._tree.root_wd not in self._tree:
@@ -536,9 +562,9 @@ class InotifyWatcher:
             if self._fallback:
                 state, detail = "degraded", self._fallback
             elif polled and self._short:
-                state, detail = "degraded", f"inotify 监视额度不足，{fmt.count(polled)} 个文件夹改为轮询"
+                state, detail = "degraded", TEXT["short"].format(count=fmt.count(polled))
             elif polled:
-                state, detail = "degraded", f"{fmt.count(polled)} 个文件夹无法用 inotify 监视，改为轮询"
+                state, detail = "degraded", TEXT["polled"].format(count=fmt.count(polled))
         return WatchStatus(
             state,
             detail,
@@ -580,8 +606,8 @@ class InotifyWatcher:
             if exc.errno == errno.ENOSPC:
                 self._kernel_full = self._short = True
             else:
-                self._fallback = f"无法监视扫描根目录（{_why(exc)}），全部文件夹改为轮询"
-            logger.warning("inotify 无法监视 {}：{}", self.root, exc)
+                self._fallback = TEXT["root_fallback"].format(reason=_why(exc))
+            logger.warning(TEXT["log_root"].format(path=self.root, error=exc))
             return
         self._tree.set_root(wd)
 
@@ -601,7 +627,7 @@ class InotifyWatcher:
             if exc.errno == errno.ENOSPC:
                 self._kernel_full = self._short = True
             else:
-                logger.debug("inotify_add_watch({}) 失败：{}", path, exc)
+                logger.debug("inotify_add_watch({}) failed: {}", path, exc)
             self._poller.add(path)
             return None
         if wd in self._tree:  # the same folder under another path (bind mount): one path per watch
@@ -684,7 +710,7 @@ class InotifyWatcher:
                 continue
             if root:
                 self._emit([Change("overflow", self.root, is_dir=True)])
-                self._state, self._detail = "failed", "扫描根目录已被删除或移走，实时监控已停止"
+                self._state, self._detail = "failed", TEXT["root_lost"]
                 return True
             stale = True
             self._tree.remove(wd)
@@ -707,8 +733,8 @@ class InotifyWatcher:
         try:
             self._loop()
         except Exception:
-            logger.exception("inotify 监视线程出错：{}", self.root)
-            self._state, self._detail = "failed", "实时监控出错，已停止"
+            logger.exception(TEXT["log_thread"].format(path=self.root))
+            self._state, self._detail = "failed", TEXT["crashed"]
             self._emit([Change("overflow", self.root, is_dir=True)])
         finally:
             self._close()
@@ -725,7 +751,7 @@ class InotifyWatcher:
             if changes:
                 self._emit(changes)
             if self._poller.root_lost:
-                self._state, self._detail = "failed", "扫描根目录已不存在，实时监控已停止"
+                self._state, self._detail = "failed", TEXT["root_gone"]
                 return
             if self._incoming or self._walk or self._recheck:
                 timeout = 0.0
@@ -765,7 +791,7 @@ class InotifyWatcher:
         if changes:
             self._emit(changes)
         if res.root_lost:
-            self._state, self._detail = "failed", "扫描根目录已被删除或移走，实时监控已停止"
+            self._state, self._detail = "failed", TEXT["root_lost"]
         return res.root_lost
 
     def _emit(self, changes: list[Change]) -> None:
@@ -777,7 +803,7 @@ class InotifyWatcher:
             try:
                 self._sink(changes)
             except Exception:
-                logger.exception("监视器回调出错")
+                logger.exception(TEXT["log_sink"])
 
     def _wake(self) -> None:
         with self._fd_lock:

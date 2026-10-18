@@ -24,6 +24,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EVENT_VIEW_FRAME
 
 from .. import paths
+from ..i18n import tr
 from ..layout.engine import Layout
 from ..settings import SettingsStore
 from ..store import snapshot
@@ -137,7 +138,7 @@ class ViewManager:
 
     def open(self, session: Session, params: pv.ViewOpenParams) -> ViewHost:
         if len(self.views) >= MAX_VIEWS:
-            raise RpcError(ErrorCode.INVALID_REQUEST, "too many open views")
+            raise RpcError(ErrorCode.INVALID_REQUEST, tr("打开的视图太多了，先关掉一些标签或窗格"))
         handle = self._scan(params.scan_id)
         shared = self._shared_for(handle)
         roots = [

@@ -4,6 +4,7 @@
 import { tokens } from "@design/tokens";
 
 import { diffColor, type Tiers } from "@/lib/diff";
+import { t } from "@/lib/i18n";
 
 import { DStat, Flag, Kind, Label, type DrawFrame } from "./frame";
 
@@ -278,10 +279,10 @@ export function paint(f: DrawFrame, o: PaintOptions): Painted {
       });
       text = P.text;
       sub = P.sub;
-      if (kind === Kind.FREE) line1 = "可用空间";
-      if (kind === Kind.UNKNOWN) line1 = o.scanning ? "未知空间 · 尚未扫描" : "未知空间";
+      if (kind === Kind.FREE) line1 = t("可用空间");
+      if (kind === Kind.UNKNOWN) line1 = o.scanning ? t("未知空间 · 尚未扫描") : t("未知空间");
       if (kind === Kind.PENDING) {
-        line2 = "等待扫描…";
+        line2 = t("等待扫描…");
         weight = 600;
       }
     } else {
@@ -297,7 +298,7 @@ export function paint(f: DrawFrame, o: PaintOptions): Painted {
       });
       [text, sub] = labelColors(fill);
       if (aggregate) {
-        line1 = kind === Kind.SMALL ? `${o.formatInt(f.count_[i]!)} 个小项` : `+${o.formatInt(f.count_[i]!)} 项`;
+        line1 = kind === Kind.SMALL ? t("{n} 个小项", { n: o.formatInt(f.count_[i]!) }) : t("+{n} 项", { n: o.formatInt(f.count_[i]!) });
         weight = 400;
       } else if (kind === Kind.COLLAPSED) {
         weight = flags & Flag.FOLDER_HIT ? 700 : 600;

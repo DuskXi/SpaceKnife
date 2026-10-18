@@ -10,6 +10,7 @@ from spaceknife_protocol.base import Empty
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EXPORT_CHECK, EXPORT_RUN, EXPORT_TARGETS
 
+from ..i18n import Texts, tr
 from .compute import compute
 from .rpc import RpcError
 
@@ -19,13 +20,15 @@ if TYPE_CHECKING:
     from .session import Session
 
 # User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "compare": "对比视图还不能导出：先退出对比，或用「复制汇总」",
-    "no_target": "没有选择导出模板或格式",
-    "template_errors": "模板有错误，没有导出：{first}",
-    "folder": "目标文件夹不存在：{folder}",
-    "write": "写不了 {path}：{reason}",
-}
+TEXT = Texts(
+    {
+        "compare": "对比视图还不能导出：先退出对比，或用「复制汇总」",
+        "no_target": "没有选择导出模板或格式",
+        "template_errors": "模板有错误，没有导出：{first}",
+        "folder": "目标文件夹不存在：{folder}",
+        "write": "写不了 {path}：{reason}",
+    }
+)
 
 
 def _issue(i: TemplateIssue) -> pe.ExportIssue:
@@ -47,8 +50,8 @@ def install(server: Server) -> None:
             out.append(
                 pe.ExportTarget(
                     name=name,
-                    title=info.title,
-                    description=info.description,
+                    title=tr(info.title),  # BuiltinInfo texts are message ids, translated here
+                    description=tr(info.description),
                     kind="template",
                     extension="txt",
                     file_name=tpl.file_name if tpl is not None else "",
@@ -56,7 +59,7 @@ def install(server: Server) -> None:
                 )
             )
         for key, f in FORMATS.items():
-            out.append(pe.ExportTarget(name=key, title=f.title, kind="format", extension=f.extension))
+            out.append(pe.ExportTarget(name=key, title=tr(f.title), kind="format", extension=f.extension))
         return pe.ExportTargets(targets=out)
 
     @router.method(EXPORT_CHECK)

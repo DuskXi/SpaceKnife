@@ -27,7 +27,20 @@ from collections.abc import Iterable
 
 from loguru import logger
 
+from ..i18n import Texts
 from .base import Change, Sink, WatchState, WatchStatus
+
+# User-facing text (M7.5): the watch state of the polling watcher.
+TEXT = Texts(
+    {
+        "started": "监视器已经启动",
+        "polling": "未使用系统的文件变化通知，改为每 {interval} 秒轮询一次文件夹；文件大小的变化发现不了",
+        "root_gone": "扫描根目录已不存在，实时监控已停止",
+        "crashed": "实时监控出错，已停止",
+        "log_thread": "轮询监视线程出错：{path}",
+        "log_sink": "监视器回调出错",
+    }
+)
 
 _PENDING = -1  # baseline not taken yet
 _UNKNOWN = -2  # the stat failed for another reason than "gone" (permissions, I/O error): retried
@@ -221,11 +234,9 @@ class PollWatcher:
 
     def start(self, sink: Sink) -> None:
         if self._thread is not None:
-            raise RuntimeError("监视器已经启动")
+            raise RuntimeError(TEXT["started"])
         self._sink = sink
-        interval = f"{self._poller.interval:g}"
-        self._state = "degraded"
-        self._detail = f"未使用系统的文件变化通知，改为每 {interval} 秒轮询一次文件夹；文件大小的变化发现不了"
+        self._state = "degraded"  # the detail (TEXT["polling"]) is written when the status is read
         self._thread = threading.Thread(target=self._run, name="sk-poll", daemon=True)
         self._thread.start()
 
@@ -246,9 +257,12 @@ class PollWatcher:
             self._state = "stopped"
 
     def status(self) -> WatchStatus:
+        detail = self._detail
+        if not detail and self._thread is not None:  # started: polling instead of notifications
+            detail = TEXT["polling"].format(interval=f"{self._poller.interval:g}")
         return WatchStatus(
             self._state,
-            self._detail,
+            detail,
             watched_dirs=0,
             polled_dirs=len(self._poller),
             overflows=self._overflows,
@@ -265,14 +279,14 @@ class PollWatcher:
                 if changes:
                     self._emit(changes)
                 if poller.root_lost:
-                    self._state, self._detail = "failed", "扫描根目录已不存在，实时监控已停止"
+                    self._state, self._detail = "failed", TEXT["root_gone"]
                     return
                 delay = 0.0 if self._incoming else poller.wake_time() - time.monotonic()
                 if delay > 0 and self._wake.wait(min(delay, 1.0)):
                     self._wake.clear()
         except Exception:
-            logger.exception("轮询监视线程出错：{}", self.root)
-            self._state, self._detail = "failed", "实时监控出错，已停止"
+            logger.exception(TEXT["log_thread"].format(path=self.root))
+            self._state, self._detail = "failed", TEXT["crashed"]
             self._emit([Change("overflow", self.root, is_dir=True)])
 
     def _emit(self, changes: list[Change]) -> None:
@@ -284,7 +298,7 @@ class PollWatcher:
             try:
                 self._sink(changes)
             except Exception:
-                logger.exception("监视器回调出错")
+                logger.exception(TEXT["log_sink"])
 
 
 __all__ = ["DirPoller", "PollWatcher", "stat_file"]

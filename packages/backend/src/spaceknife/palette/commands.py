@@ -4,6 +4,10 @@ Every frontend runs a command by its ``id``. Names match the labels used on menu
 aliases add English words, and the full pinyin and pinyin initials of the name are generated so
 that ``qhps`` finds 切换配色 (W4 待定 6). Keys use a neutral notation (``Ctrl+Shift+F5``) that
 frontends render per platform; the keymap becomes editable with W7 (M6).
+
+M7.5: names, statuses and reasons are Chinese message ids, translated when the palette answers
+(:func:`label`, :func:`evaluate`); in the English interface the English name is searched first and
+the hits light up on it, the Chinese name, its pinyin and the aliases still find the command.
 """
 
 from __future__ import annotations
@@ -16,10 +20,11 @@ from typing import Any
 
 from pypinyin import lazy_pinyin
 
+from ..i18n import SOURCE, Texts, _, language, plural, tr
 from ..view.state import View
 from .fuzzy import score
 
-COLOR_ZH = {"class": "文件类别", "flat": "扁平", "time": "修改时间"}
+COLOR_NAMES = Texts({"class": "文件类别", "flat": "扁平", "time": "修改时间"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,59 +53,59 @@ Need = Callable[[Context], str | None]  # None when satisfied, else the reason s
 
 
 def _scan(c: Context) -> str | None:
-    return None if c.has_scan else "需要先完成扫描"
+    return None if c.has_scan else _("需要先完成扫描")
 
 
 def _done(c: Context) -> str | None:
-    return _scan(c) or ("扫描进行中" if c.scanning else None)
+    return _scan(c) or (_("扫描进行中") if c.scanning else None)
 
 
 def _running(c: Context) -> str | None:
-    return None if c.scanning else "没有进行中的扫描"
+    return None if c.scanning else _("没有进行中的扫描")
 
 
 def _pausable(c: Context) -> str | None:
     if not c.scanning:
-        return "没有进行中的扫描"
+        return _("没有进行中的扫描")
     if c.method == "mft":
-        return "MFT 快速扫描几秒内完成，无需暂停"
-    return "已暂停" if c.paused else None
+        return _("MFT 快速扫描几秒内完成，无需暂停")
+    return _("已暂停") if c.paused else None
 
 
 def _stopped(c: Context) -> str | None:
-    return None if c.stopped else "没有可以继续的扫描"
+    return None if c.stopped else _("没有可以继续的扫描")
 
 
 def _paused(c: Context) -> str | None:
-    return _running(c) or (None if c.paused else "扫描没有暂停")
+    return _running(c) or (None if c.paused else _("扫描没有暂停"))
 
 
 def _view(c: Context) -> str | None:
-    return None if c.view is not None else "需要先完成扫描"
+    return None if c.view is not None else _("需要先完成扫描")
 
 
 def _selection(c: Context) -> str | None:
-    return _view(c) or (None if c.selected_node is not None else "没有选中项")
+    return _view(c) or (None if c.selected_node is not None else _("没有选中项"))
 
 
 def _back(c: Context) -> str | None:
-    return _view(c) or (None if c.view and c.view.back else "没有可后退的位置")
+    return _view(c) or (None if c.view and c.view.back else _("没有可后退的位置"))
 
 
 def _forward(c: Context) -> str | None:
-    return _view(c) or (None if c.view and c.view.forward else "没有可前进的位置")
+    return _view(c) or (None if c.view and c.view.forward else _("没有可前进的位置"))
 
 
 def _up(c: Context) -> str | None:
-    return _view(c) or (None if c.view and c.view.can_go_up() else "已经在根")
+    return _view(c) or (None if c.view and c.view.can_go_up() else _("已经在根"))
 
 
 def _snapshots(c: Context) -> str | None:
-    return None if c.snapshots else "没有快照"
+    return None if c.snapshots else _("没有快照")
 
 
 def _tab(c: Context) -> str | None:
-    return None if c.tab == "scan" else "需要先完成扫描"
+    return None if c.tab == "scan" else _("需要先完成扫描")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,40 +128,34 @@ class Command:
 
 
 def _rescan_status(c: Context) -> str:
-    method = "MFT 快速扫描" if c.method == "mft" else "硬扫描"
+    method = _("MFT 快速扫描") if c.method == "mft" else _("硬扫描")
     if c.source != "scan" or c.elapsed_s is None:
         return method
-    return f"{method} · 约 {max(1, round(c.elapsed_s))} 秒"
+    return tr("{method} · 约 {seconds} 秒", method=method, seconds=max(1, round(c.elapsed_s)))
 
 
 def _color(c: Context) -> str:
-    return f"当前：{COLOR_ZH[c.view.color_mode]}" if c.view else ""
+    return tr("当前：{mode}", mode=COLOR_NAMES[c.view.color_mode]) if c.view else ""
 
 
 def _free(c: Context) -> str:
-    return ("当前：显示" if c.view.show_free else "当前：隐藏") if c.view else ""
+    return (_("当前：显示") if c.view.show_free else _("当前：隐藏")) if c.view else ""
 
 
 def _unknown(c: Context) -> str:
-    return ("当前：显示" if c.view.show_unknown else "当前：隐藏") if c.view else ""
+    return (_("当前：显示") if c.view.show_unknown else _("当前：隐藏")) if c.view else ""
 
 
 def _basket(c: Context) -> str:
-    return f"{c.basket:,} 项" if c.basket else "空"
+    return plural(c.basket, "{count} 项", "1 item", count=f"{c.basket:,}") if c.basket else _("空")
 
 
 def _snapshot_count(c: Context) -> str:
-    return f"{c.snapshots} 个快照"
+    return plural(c.snapshots, "{count} 个快照", "1 snapshot", count=c.snapshots)
 
 
 def _color_pick(mode: str) -> Callable[[Context], str]:
-    return lambda c: "当前" if c.view is not None and c.view.color_mode == mode else ""
-
-
-def _reveal_name() -> str:
-    if sys.platform == "darwin":
-        return "在访达中显示"
-    return "在资源管理器中显示" if sys.platform == "win32" else "在文件管理器中显示"
+    return lambda c: _("当前") if c.view is not None and c.view.color_mode == mode else ""
 
 
 def _registry() -> tuple[Command, ...]:
@@ -255,7 +254,11 @@ def _registry() -> tuple[Command, ...]:
         C("item.copy_path", "复制路径", "copy", ("Ctrl+C",), ("copy path",), needs=(_selection,)),
         C(
             "item.reveal",
-            _reveal_name(),
+            "在访达中显示"
+            if sys.platform == "darwin"
+            else "在资源管理器中显示"
+            if sys.platform == "win32"
+            else "在文件管理器中显示",
             "reveal",
             ("Ctrl+E",),
             ("reveal", "explorer", "finder", "show in folder"),
@@ -366,23 +369,43 @@ def registry() -> tuple[Command, ...]:
     return tuple(replace(c, search=_search_keys(c)) for c in _registry())
 
 
+def label(cmd: Command) -> str:
+    """The command's name in the current language (what :func:`match` hits refer to)."""
+    return _(cmd.name)
+
+
 def evaluate(cmd: Command, ctx: Context) -> tuple[bool, str]:
-    """(enabled, status text or the reason it is disabled)."""
+    """(enabled, status text or the reason it is disabled), in the current language."""
     status = cmd.status(ctx) if cmd.status is not None else ""
     for need in cmd.needs:
         reason = need(ctx)
         if reason:
             return False, reason
     if cmd.milestone:
-        later = "还没有实现（见 TODO）" if cmd.milestone == "TODO" else f"{cmd.milestone} 接入"
+        if cmd.milestone == "TODO":
+            later = _("还没有实现（见 TODO）")
+        else:
+            later = tr("{milestone} 接入", milestone=cmd.milestone)
         return False, f"{status} · {later}" if status else later
     return True, status
 
 
+def _keys(cmd: Command) -> tuple[tuple[str, tuple[int, ...] | None], ...]:
+    """The search keys in the current language: in a translated interface the shown name comes
+    first (hits map onto it), then the Chinese name, its pinyin and the aliases (no hits)."""
+    if language() == SOURCE:
+        return cmd.search
+    shown = label(cmd)
+    if shown == cmd.name:
+        return cmd.search
+    return ((shown, tuple(range(len(shown)))), *((text, None) for text, _map in cmd.search))
+
+
 def match(cmd: Command, query: str) -> tuple[int, list[tuple[int, int]]] | None:
-    """Best fuzzy score over the name, its pinyin and its aliases; hits are mapped onto the name."""
+    """Best fuzzy score over the name, its pinyin and its aliases (and the shown name, see
+    :func:`_keys`); hits are mapped onto the shown name (:func:`label`)."""
     best: tuple[int, list[tuple[int, int]]] | None = None
-    for k, (text, mapping) in enumerate(cmd.search):
+    for k, (text, mapping) in enumerate(_keys(cmd)):
         got = score(query, text)
         if got is None:
             continue
@@ -403,4 +426,4 @@ def match(cmd: Command, query: str) -> tuple[int, list[tuple[int, int]]] | None:
     return best
 
 
-__all__ = ["COLOR_ZH", "Command", "Context", "evaluate", "match", "registry"]
+__all__ = ["COLOR_NAMES", "Command", "Context", "evaluate", "label", "match", "registry"]

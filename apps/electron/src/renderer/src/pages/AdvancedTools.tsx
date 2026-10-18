@@ -9,6 +9,7 @@ import { RpcError } from "@/protocol/rpc";
 import { call, resetSettings } from "@/state/actions";
 import { toast } from "@/state/store";
 import { fmtInt, fmtSize } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { Icon } from "@/ui/Icon";
 
 const fail = (err: unknown) => toast(err instanceof RpcError ? err.message : String(err));
@@ -49,10 +50,10 @@ function Confirm({ label, ask, onYes, disabled }: { label: string; ask: string; 
     <span className="class-confirm">
       <span className="small">{ask}</span>
       <button className="danger-btn small" onClick={() => (setAsking(false), onYes())}>
-        确定
+        {t("确定")}
       </button>
       <button className="ghost small" onClick={() => setAsking(false)}>
-        取消
+        {t("取消")}
       </button>
     </span>
   );
@@ -65,22 +66,22 @@ export function AdvancedTools() {
   const exportSettings = async () => {
     const d = new Date();
     const path = await window.sk.dialog.saveFile({
-      title: "导出设置",
-      defaultName: `SpaceKnife-设置-${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.json`,
-      filters: [{ name: "SpaceKnife 设置", extensions: ["json"] }],
+      title: t("导出设置"),
+      defaultName: t("SpaceKnife-设置-{date}.json", { date: `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` }),
+      filters: [{ name: t("SpaceKnife 设置"), extensions: ["json"] }],
     });
     if (!path) return;
     try {
       await call("settings.export", { path });
-      toast("设置已导出");
+      toast(t("设置已导出"));
     } catch (err) {
       fail(err);
     }
   };
   const importFrom = async (spacesniffer: boolean) => {
     const path = await window.sk.dialog.openFile({
-      title: spacesniffer ? "选择 SpaceSnifferConfig.xml" : "导入设置",
-      filters: spacesniffer ? [{ name: "SpaceSniffer 配置", extensions: ["xml"] }] : [{ name: "SpaceKnife 设置", extensions: ["json"] }],
+      title: spacesniffer ? t("选择 SpaceSnifferConfig.xml") : t("导入设置"),
+      filters: spacesniffer ? [{ name: t("SpaceSniffer 配置"), extensions: ["xml"] }] : [{ name: t("SpaceKnife 设置"), extensions: ["json"] }],
     });
     if (!path) return;
     try {
@@ -94,7 +95,8 @@ export function AdvancedTools() {
     try {
       const r = await call("settings.import", { path: preview.path, apply: true });
       setPreview(null);
-      toast(`已导入 ${fmtInt(r.changes.length)} 项设置${r.classes ? "和文件类别" : ""}`);
+      const n = fmtInt(r.changes.length);
+      toast(r.classes ? t("已导入 {n} 项设置和文件类别", { n }) : t("已导入 {n} 项设置", { n }));
     } catch (err) {
       fail(err);
     }
@@ -102,56 +104,67 @@ export function AdvancedTools() {
 
   return (
     <>
-      <section className="set-group" aria-label="设置文件">
+      <section className="set-group" aria-label={t("设置文件")}>
         <div className="set-group-head">
-          <h2>导入与导出</h2>
+          <h2>{t("导入与导出")}</h2>
         </div>
         <div className="set-card">
-          <Row name="导出设置" desc="所有改过的设置和自定义的文件类别，存成一个文件">
+          <Row name={t("导出设置")} desc={t("所有改过的设置和自定义的文件类别，存成一个文件")}>
             <button className="ghost small" onClick={() => void exportSettings()}>
-              <Icon name="upload" size={14} /> 导出…
+              <Icon name="upload" size={14} /> {t("导出…")}
             </button>
           </Row>
-          <Row name="导入设置" desc="先列出会改变的项，确认后才生效">
+          <Row name={t("导入设置")} desc={t("先列出会改变的项，确认后才生效")}>
             <button className="ghost small" onClick={() => void importFrom(false)}>
-              导入…
+              {t("导入…")}
             </button>
           </Row>
-          <Row name="从 SpaceSniffer 导入" desc="读取 SpaceSnifferConfig.xml：几何、动画、行为、外观和文件类别">
+          <Row name={t("从 SpaceSniffer 导入")} desc={t("读取 SpaceSnifferConfig.xml：几何、动画、行为、外观和文件类别")}>
             <button className="ghost small" onClick={() => void importFrom(true)}>
-              选择配置文件…
+              {t("选择配置文件…")}
             </button>
           </Row>
-          <Row name="全部恢复默认" desc="所有设置和文件类别回到初始值">
+          <Row name={t("全部恢复默认")} desc={t("所有设置和文件类别回到初始值")}>
             <Confirm
-              label="全部恢复默认…"
-              ask="所有设置都会恢复默认，确定？"
+              label={t("全部恢复默认…")}
+              ask={t("所有设置都会恢复默认，确定？")}
               onYes={() => {
                 void resetSettings(null);
                 void call("classes.reset", {}).catch(fail);
-                toast("已全部恢复默认");
+                toast(t("已全部恢复默认"));
               }}
             />
           </Row>
         </div>
       </section>
-      <section className="set-group" aria-label="扫描助手与缓存">
+      <section className="set-group" aria-label={t("扫描助手与缓存")}>
         <div className="set-group-head">
-          <h2>扫描助手与缓存</h2>
+          <h2>{t("扫描助手与缓存")}</h2>
         </div>
         <div className="set-card">
-          <Row name="扫描助手" desc={info ? (info.helper_running ? `运行中${info.helper_elevated ? "（管理员权限）" : ""}：MFT 快速扫描与 USN 日志由它读取` : "未运行") : "…"}>
+          <Row
+            name={t("扫描助手")}
+            desc={
+              info
+                ? info.helper_running
+                  ? info.helper_elevated
+                    ? t("运行中（管理员权限）：MFT 快速扫描与 USN 日志由它读取")
+                    : t("运行中：MFT 快速扫描与 USN 日志由它读取")
+                  : t("未运行")
+                : "…"
+            }
+          >
             <button className="ghost small" disabled={!info?.helper_running} onClick={() => refresh(call("system.helper_stop", {}))}>
-              停止扫描助手
+              {t("停止扫描助手")}
             </button>
           </Row>
-          <Row name="快照" desc={info ? `${fmtInt(info.snapshot_count)} 个快照，共 ${fmtSize(info.snapshots_bytes)} · ${info.snapshots_dir}` : "…"}>
+          <Row name={t("快照")} desc={info ? t("{n} 个快照，共 {size} · {dir}", { n: fmtInt(info.snapshot_count), size: fmtSize(info.snapshots_bytes), dir: info.snapshots_dir }) : "…"}>
             <button className="ghost small" disabled={!info} onClick={() => info && void window.sk.shell.openPath(info.snapshots_dir)}>
-              <Icon name="reveal" size={14} /> 打开
+              <Icon name="reveal" size={14} /> {t("打开")}
             </button>
           </Row>
-          <Row name="缓存" desc={info ? `${fmtSize(info.cache_bytes)} · ${info.cache_dir}` : "…"}>
-            <Confirm label="清除缓存…" ask="正在使用的缓存会保留，确定清除？" disabled={!info?.cache_bytes} onYes={() => refresh(call("system.cache_clear", {}))} />
+          <Row name={t("缓存")} desc={info ? `${fmtSize(info.cache_bytes)} · ${info.cache_dir}` : "…"}>
+            <Confirm label={t("清除缓存…")} ask={t("正在使用的缓存会保留，确定清除？")} disabled={!info?.cache_bytes} onYes={() => refresh(call("system.cache_clear", {}))} />
           </Row>
         </div>
       </section>
@@ -161,7 +174,7 @@ export function AdvancedTools() {
 }
 
 function show(v: unknown): string {
-  if (typeof v === "boolean") return v ? "开" : "关";
+  if (typeof v === "boolean") return v ? t("开") : t("关");
   return String(v);
 }
 
@@ -171,13 +184,13 @@ function ImportPreview({ preview, onApply, onCancel }: { preview: { path: string
   return (
     <div className="modal-back" role="presentation" onMouseDown={onCancel}>
       <div className="modal import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title" onMouseDown={(e) => e.stopPropagation()}>
-        <h3 id="import-title">{plan.source === "spacesniffer" ? "从 SpaceSniffer 导入" : "导入设置"}</h3>
+        <h3 id="import-title">{plan.source === "spacesniffer" ? t("从 SpaceSniffer 导入") : t("导入设置")}</h3>
         <p className="muted small mono">{preview.path}</p>
         <div className="import-body">
-          {nothing && <p>没有需要改变的设置。</p>}
+          {nothing && <p>{t("没有需要改变的设置。")}</p>}
           {plan.changes.length > 0 && (
             <>
-              <div className="muted small">将改变 {fmtInt(plan.changes.length)} 项设置</div>
+              <div className="muted small">{t("将改变 {n} 项设置", { n: fmtInt(plan.changes.length) })}</div>
               <table className="import-table">
                 <tbody>
                   {plan.changes.map((c) => (
@@ -194,11 +207,11 @@ function ImportPreview({ preview, onApply, onCancel }: { preview: { path: string
           )}
           {plan.classes && (
             <>
-              <div className="muted small">文件类别将变为</div>
+              <div className="muted small">{t("文件类别将变为")}</div>
               <ul className="import-classes">
                 {plan.classes.map((c) => (
                   <li key={c.id}>
-                    <strong>{c.name}</strong> <span className="muted small mono">{c.extensions.join(";") || "未归类的扩展名"}</span>
+                    <strong>{c.name}</strong> <span className="muted small mono">{c.extensions.join(";") || t("未归类的扩展名")}</span>
                   </li>
                 ))}
               </ul>
@@ -206,7 +219,7 @@ function ImportPreview({ preview, onApply, onCancel }: { preview: { path: string
           )}
           {plan.skipped.length > 0 && (
             <>
-              <div className="muted small">不导入</div>
+              <div className="muted small">{t("不导入")}</div>
               <ul className="import-skipped muted small">
                 {plan.skipped.map((s) => (
                   <li key={s}>{s}</li>
@@ -217,10 +230,10 @@ function ImportPreview({ preview, onApply, onCancel }: { preview: { path: string
         </div>
         <div className="modal-buttons">
           <button className="ghost" onClick={onCancel}>
-            取消
+            {t("取消")}
           </button>
           <button className="primary" disabled={nothing} onClick={onApply}>
-            导入
+            {t("导入")}
           </button>
         </div>
       </div>
@@ -232,13 +245,13 @@ function ImportPreview({ preview, onApply, onCancel }: { preview: { path: string
 export function ClearTags() {
   const [info, refresh] = useMaintenance();
   return (
-    <section className="set-group" aria-label="已保存的标签">
+    <section className="set-group" aria-label={t("已保存的标签")}>
       <div className="set-group-head">
-        <h2>已保存的标签</h2>
+        <h2>{t("已保存的标签")}</h2>
       </div>
       <div className="set-card">
-        <Row name="清除所有已保存的标签" desc={info ? `${fmtInt(info.saved_tags)} 个扫描位置有已保存的标签` : "…"}>
-          <Confirm label="清除…" ask="所有扫描位置的标签都会被清除，确定？" disabled={!info?.saved_tags} onYes={() => refresh(call("tags.clear_saved", {}))} />
+        <Row name={t("清除所有已保存的标签")} desc={info ? t("{n} 个扫描位置有已保存的标签", { n: fmtInt(info.saved_tags) }) : "…"}>
+          <Confirm label={t("清除…")} ask={t("所有扫描位置的标签都会被清除，确定？")} disabled={!info?.saved_tags} onYes={() => refresh(call("tags.clear_saved", {}))} />
         </Row>
       </div>
     </section>

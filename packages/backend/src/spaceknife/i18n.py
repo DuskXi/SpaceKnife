@@ -154,6 +154,14 @@ def tr(text: str, /, **fields: Any) -> str:
     return out.format(**fields) if fields else out
 
 
+def plural(count: int, text: str, one: str, /, **fields: Any) -> str:
+    """``tr(text, **fields)``, except one of something in English: ``one`` (an English literal),
+    e.g. ``plural(n, "{count} 个快照", "1 snapshot", count=n)``. Chinese has no plural forms."""
+    if count == 1 and _language == "en":
+        return one.format(**fields) if fields else one
+    return tr(text, **fields)
+
+
 class Texts(dict[str, str]):
     """A module's table of user-facing text: items are translated each time they are read."""
 

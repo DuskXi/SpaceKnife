@@ -25,6 +25,7 @@ from pydantic import ValidationError
 
 from spaceknife_protocol.binary import ALIGN, ALLOWED_DTYPES, BinaryFrameHeader, BlobSpec, ColumnSpec
 
+from ..i18n import _, tr
 from . import usn
 from .messages import (
     DEFAULT_BATCH_ROWS,
@@ -111,27 +112,27 @@ class Service:
         try:
             self._serve(idle_timeout)
         except ChannelClosed as exc:
-            logger.debug("连接已断开：{}", exc)
+            logger.debug("connection closed: {}", exc)
 
     def _serve(self, idle_timeout: float) -> None:
         while True:
             try:
                 kind, body = self._chan.read_frame(idle_timeout, self._io_timeout, MAX_CONTROL_BYTES)
             except TimeoutError:
-                logger.info("扫描助手空闲 {:.0f} 秒，退出", idle_timeout)
+                logger.info("idle for {:.0f} s, exiting", idle_timeout)
                 return
             except EOFError:
-                logger.debug("后端已断开")
+                logger.debug("the backend disconnected")
                 return
             except FrameError as exc:
-                logger.warning("收到无效帧：{}", exc)
+                logger.warning(tr("收到无效帧：{reason}", reason=exc))
                 self._error(None, "bad_frame", str(exc))
                 return
             except OSError as exc:
-                logger.debug("读取请求失败：{}", exc)
+                logger.debug("reading a request failed: {}", exc)
                 return
             if kind != KIND_JSON:
-                self._error(None, "invalid_request", "助手只接受 JSON 请求帧")
+                self._error(None, "invalid_request", _("助手只接受 JSON 请求帧"))
                 continue
             try:
                 request = Request.model_validate_json(body)
@@ -143,7 +144,7 @@ class Service:
 
     def _dispatch(self, request: Request) -> bool:
         call = request.call
-        logger.debug("请求 {} {}", request.id, call.op)
+        logger.debug("request {} {}", request.id, call.op)
         extras: dict[str, Scalar] = {}
         try:
             if isinstance(call, Shutdown):
@@ -172,7 +173,7 @@ class Service:
         except ChannelClosed:
             raise
         except Exception as exc:
-            logger.exception("处理 {} 失败", call.op)
+            logger.exception(tr("处理 {op} 失败", op=call.op))
             self._error(request.id, "internal", f"{type(exc).__name__}: {exc}")
             return True
         self.send(Response(id=request.id, result=result, extras=extras))
@@ -187,26 +188,26 @@ class Service:
             try:
                 result.update(_win32.ntfs_volume_data(volume))
             except OSError as exc:
-                raise OpError("io_error", f"读取 NTFS 卷参数失败：{exc}") from exc
+                raise OpError("io_error", tr("读取 NTFS 卷参数失败：{reason}", reason=exc)) from exc
         return result
 
     def _scan_mft(self, req_id: int, call: ScanMft) -> tuple[dict[str, Scalar], dict[str, Scalar]]:
         if not self._elevated:
-            raise OpError("needs_admin", "需要管理员权限")
+            raise OpError("needs_admin", _("需要管理员权限"))
         if sys.platform != "win32":
-            raise OpError("not_supported", "MFT 快速扫描只支持 Windows NTFS 卷")
+            raise OpError("not_supported", _("MFT 快速扫描只支持 Windows NTFS 卷"))
         _check_ntfs(call.volume)
         return self._scan(req_id, "scan_volume", call.volume.upper(), call.batch_rows, call.duty)
 
     def _scan_mft_image(self, req_id: int, call: ScanMftImage) -> tuple[dict[str, Scalar], dict[str, Scalar]]:
         if self._elevated:
-            raise OpError("forbidden", "scan_mft_image 只在非提权助手中可用")
+            raise OpError("forbidden", _("scan_mft_image 只在非提权助手中可用"))
         return self._scan(req_id, "scan_volume_image", call.path, call.batch_rows, call.duty)
 
     def _usn_volume(self, volume: str) -> str:
         """``X:`` of a local NTFS volume whose journal the (elevated) helper may read."""
         if not self._elevated:
-            raise OpError("needs_admin", "需要管理员权限")
+            raise OpError("needs_admin", _("需要管理员权限"))
         _check_ntfs(volume)
         return volume.upper()
 
@@ -267,11 +268,11 @@ class Service:
             try:
                 table, geometry = _unpack_scan(getattr(mft, scanner)(source, duty, beat.reading))
             except PermissionError as exc:
-                raise OpError("needs_admin", f"需要管理员权限：{exc}") from exc
+                raise OpError("needs_admin", tr("需要管理员权限：{reason}", reason=exc)) from exc
             except NotImplementedError as exc:
-                raise OpError("not_supported", f"MFT 读取不可用：{exc}") from exc
+                raise OpError("not_supported", tr("MFT 读取不可用：{reason}", reason=exc)) from exc
             except (OSError, ValueError) as exc:
-                raise OpError("io_error", f"读取 $MFT 失败：{exc}") from exc
+                raise OpError("io_error", tr("读取 $MFT 失败：{reason}", reason=exc)) from exc
             t1 = time.perf_counter()
             beat.phase = "send"
             stats, extras = self._send_table(req_id, table, batch_rows)
@@ -385,13 +386,13 @@ def usn_failure(exc: BaseException) -> OpError:
     if isinstance(exc, usn.UsnError):
         return OpError(exc.code, exc.message)
     if isinstance(exc, PermissionError):
-        return OpError("needs_admin", f"需要管理员权限：{exc}")
+        return OpError("needs_admin", tr("需要管理员权限：{reason}", reason=exc))
     if isinstance(exc, NotImplementedError):
-        return OpError("not_supported", f"USN 日志不可用：{exc}")
+        return OpError("not_supported", tr("USN 日志不可用：{reason}", reason=exc))
     if isinstance(exc, OSError):
-        return OpError("io_error", f"读取 USN 日志失败：{exc}")
+        return OpError("io_error", tr("读取 USN 日志失败：{reason}", reason=exc))
     if isinstance(exc, ValueError):
-        return OpError("io_error", f"USN 日志记录无法解析：{exc}")
+        return OpError("io_error", tr("USN 日志记录无法解析：{reason}", reason=exc))
     return OpError("internal", f"{type(exc).__name__}: {exc}")
 
 
@@ -399,23 +400,23 @@ def _mft_module() -> ModuleType:
     try:
         return importlib.import_module("spaceknife.scan.mft")
     except ImportError as exc:
-        raise OpError("unavailable", f"MFT 解析模块不可用：{exc}") from exc
+        raise OpError("unavailable", tr("MFT 解析模块不可用：{reason}", reason=exc)) from exc
 
 
 def _unpack_scan(raw: object) -> tuple[Mapping[str, Any], dict[str, int]]:
     """``scan_volume`` / ``scan_volume_image`` → (MftTable, geometry of ``mft_volume_info``)."""
     try:
         if not isinstance(raw, tuple) or len(raw) != 2:
-            raise TypeError(f"需要 (table, info)，得到 {type(raw).__name__}")
+            raise TypeError(tr("需要 (table, info)，得到 {type}", type=type(raw).__name__))
         data, info = raw
         if not isinstance(data, Mapping):
-            raise TypeError(f"表应为 dict，得到 {type(data).__name__}")
+            raise TypeError(tr("表应为 dict，得到 {type}", type=type(data).__name__))
         geometry = {str(key): int(value) for key, value in dict(info).items()}
         missing = {"record_size", "cluster_size"} - geometry.keys()
         if missing:
             raise KeyError(sorted(missing))
     except (TypeError, ValueError, KeyError) as exc:
-        raise OpError("internal", f"MFT 读取结果无法识别：{exc!r}") from exc
+        raise OpError("internal", tr("MFT 读取结果无法识别：{reason!r}", reason=exc)) from exc
     return data, geometry
 
 
@@ -424,13 +425,14 @@ def _check_ntfs(volume: str) -> dict[str, Scalar]:
     if sys.platform == "win32":
         details = _win32.volume_details(volume)
         if details["drive_type"] not in _LOCAL_DRIVES:
-            raise OpError("not_ntfs", f"{volume.upper()} 不是本地卷")
+            raise OpError("not_ntfs", tr("{volume} 不是本地卷", volume=volume.upper()))
         if str(details["device"]).startswith("\\??\\"):
-            raise OpError("not_ntfs", f"{volume.upper()} 是 SUBST 映射的文件夹，不是卷")
+            raise OpError("not_ntfs", tr("{volume} 是 SUBST 映射的文件夹，不是卷", volume=volume.upper()))
         if details["fs_type"] != "NTFS":
-            raise OpError("not_ntfs", f"{volume.upper()} 不是 NTFS 卷（{details['fs_type'] or '无法识别'}）")
+            fs = details["fs_type"] or _("无法识别")
+            raise OpError("not_ntfs", tr("{volume} 不是 NTFS 卷（{fs}）", volume=volume.upper(), fs=fs))
         return dict(details)
-    raise OpError("not_supported", "卷信息只支持 Windows")
+    raise OpError("not_supported", _("卷信息只支持 Windows"))
 
 
 def frame_parts(
@@ -458,11 +460,19 @@ def frame_parts(
         dtype = arr.dtype.newbyteorder("<") if arr.dtype.byteorder == ">" else arr.dtype
         code = np.dtype(dtype).str.replace("|", "<")
         if arr.ndim != 1 or code not in ALLOWED_DTYPES:
-            raise OpError("internal", f"数据列 {name!r} 无法编码（{arr.dtype}，{arr.ndim} 维）")
+            raise OpError(
+                "internal",
+                tr(
+                    "数据列 {name!r} 无法编码（{dtype}，{ndim} 维）",
+                    name=name,
+                    dtype=arr.dtype,
+                    ndim=arr.ndim,
+                ),
+            )
         if count is None:
             count = arr.shape[0]
         elif arr.shape[0] != count:
-            raise OpError("internal", f"数据列 {name!r} 的行数不一致")
+            raise OpError("internal", tr("数据列 {name!r} 的行数不一致", name=name))
         view = memoryview(np.ascontiguousarray(arr, dtype=np.dtype(code))).cast("B")
         specs[name] = ColumnSpec(offset=offset, dtype=code)
         offset = _append_padded(parts, view, offset)
@@ -512,21 +522,23 @@ def split_table(
             )
         elif isinstance(value, np.ndarray):
             if value.ndim != 1:
-                raise OpError("internal", f"MFT 表的列 {key!r} 不是一维数组")
+                raise OpError("internal", tr("MFT 表的列 {key!r} 不是一维数组", key=key))
             columns[key] = value
         elif isinstance(value, np.generic):
             extras[key] = value.item()
         elif value is None or isinstance(value, bool | int | float | str):
             extras[key] = value
         else:
-            raise OpError("internal", f"MFT 表的 {key!r}（{type(value).__name__}）无法传输")
+            raise OpError(
+                "internal", tr("MFT 表的 {key!r}（{type}）无法传输", key=key, type=type(value).__name__)
+            )
     missing = {"name_off", "name_len", *required} - columns.keys()
     if names is None or missing:
-        raise OpError("internal", f"表缺少 {sorted(missing) or ['names']}")
+        raise OpError("internal", tr("表缺少 {columns}", columns=sorted(missing) or ["names"]))
     rows = len(columns["name_len"])
     uneven = [key for key, col in columns.items() if len(col) != rows]
     if uneven:
-        raise OpError("internal", f"MFT 表的列长度不一致：{uneven}")
+        raise OpError("internal", tr("MFT 表的列长度不一致：{columns}", columns=uneven))
     return columns, names, extras
 
 
@@ -558,7 +570,7 @@ def rebase_names(names: np.ndarray, off: np.ndarray, length: np.ndarray) -> tupl
     end = start + length
     lo, hi = int(start.min()), int(end.max())
     if lo < 0 or hi > len(names):
-        raise OpError("internal", "MFT 表的名字偏移越界")
+        raise OpError("internal", _("MFT 表的名字偏移越界"))
     total = int(length.sum(dtype=np.int64))
     if hi - lo <= 2 * total + 4096:
         return names[lo:hi].tobytes(), (start - lo).astype(np.uint32)
@@ -577,8 +589,8 @@ def _guess_id(body: bytes | bytearray) -> int | None:
 
 
 def _summarize(exc: ValidationError) -> str:
-    parts = [f"{'.'.join(str(p) for p in err['loc']) or '请求'}: {err['msg']}" for err in exc.errors()[:5]]
-    return "无效请求：" + "；".join(parts)
+    parts = [f"{'.'.join(str(p) for p in err['loc']) or _('请求')}: {err['msg']}" for err in exc.errors()[:5]]
+    return tr("无效请求：{details}", details=_("；").join(parts))
 
 
 __all__ = [

@@ -9,17 +9,15 @@ import { exitCompare, NOW, setCompareEnds, swapCompare } from "@/state/compare";
 import { runCommand } from "@/state/commands";
 import { patchView, setting, type Tab, toast, useApp } from "@/state/store";
 import { diffColor, diffTiers, GROW_COLORS, maxChange, SHRINK_COLORS, type Tiers } from "@/lib/diff";
-import { fmtDelta, fmtInt, fmtSize, sizeParts } from "@/lib/format";
+import { fmtDelta, fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
+import { byLang, t } from "@/lib/i18n";
 import { Kind } from "@/treemap/frame";
 import type { HoverInfo } from "@/treemap/Treemap";
 import { Icon, type IconName } from "@/ui/Icon";
 
 const LIST_LIMIT = 12;
-const DIRECTIONS = [
-  ["all", "全部"],
-  ["grow", "增长"],
-  ["shrink", "减少"],
-] as const;
+const DIRECTIONS = ["all", "grow", "shrink"] as const;
+const directionLabel = (d: (typeof DIRECTIONS)[number]): string => ({ all: t("全部"), grow: t("增长"), shrink: t("减少") })[d];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 function stamp(iso: string): string {
@@ -37,19 +35,19 @@ export function fmtSpan(seconds: number): string {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (d) return h ? `${d} 天 ${h} 小时` : `${d} 天`;
-  if (h) return m ? `${h} 小时 ${m} 分钟` : `${h} 小时`;
-  return `${Math.max(1, m)} 分钟`;
+  if (d) return h ? t("{d} 天 {h} 小时", { d, h }) : t("{d} 天", { d });
+  if (h) return m ? t("{h} 小时 {m} 分钟", { h, m }) : t("{h} 小时", { h });
+  return t("{m} 分钟", { m: Math.max(1, m) });
 }
 
 /** The label of one end in the picker and the timeline. */
 function endLabel(spec: string, sources: CompareSourcesResult | null): string {
-  if (spec === NOW) return "现在";
+  if (spec === NOW) return t("现在");
   const snap = sources?.snapshots.find((s) => s.path === spec);
-  return snap ? `${stamp(snap.created_at)} 快照` : spec.split(/[\\/]/).pop() ?? spec;
+  return snap ? t("{time} 快照", { time: stamp(snap.created_at) }) : spec.split(/[\\/]/).pop() ?? spec;
 }
 
-const sideName = (side: CompareSide) => (side.kind === "now" ? "现在" : stamp(side.created_at));
+const sideName = (side: CompareSide) => (side.kind === "now" ? t("现在") : stamp(side.created_at));
 
 // ------------------------------------------------------------------ toolbar
 
@@ -57,10 +55,10 @@ const sideName = (side: CompareSide) => (side.kind === "now" ? "现在" : stamp(
 export function ComparePicker({ tab }: { tab: Tab }) {
   const c = tab.compare!;
   return (
-    <div className="cmp-picker" role="group" aria-label="快照对比">
+    <div className="cmp-picker" role="group" aria-label={t("快照对比")}>
       <span className="cmp-label">
         <Icon name="diff" size={14} />
-        对比
+        {t("对比")}
       </span>
       <EndMenu tab={tab} which="base" />
       <span className="cmp-arrow" aria-hidden="true">
@@ -68,7 +66,7 @@ export function ComparePicker({ tab }: { tab: Tab }) {
       </span>
       <EndMenu tab={tab} which="target" />
       <span className="cmp-vsep" />
-      <button className="icon-btn small cmp-swap" aria-label="交换基准与对比目标" title="交换基准与对比目标" onClick={() => void swapCompare(tab.id)} disabled={c.phase !== "ready" && !c.shownId}>
+      <button className="icon-btn small cmp-swap" aria-label={t("交换基准与对比目标")} title={t("交换基准与对比目标")} onClick={() => void swapCompare(tab.id)} disabled={c.phase !== "ready" && !c.shownId}>
         <Icon name="diff" size={14} />
       </button>
     </div>
@@ -89,8 +87,8 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
     return () => window.removeEventListener("mousedown", down, true);
   }, [open]);
   const options: { spec: string; label: string; sub: string }[] = [];
-  if (c.sources?.now) options.push({ spec: NOW, label: "现在", sub: fmtSize(c.sources.now.bytes_alloc) });
-  for (const s of c.sources?.snapshots ?? []) options.push({ spec: s.path, label: `${stamp(s.created_at)} 快照`, sub: fmtSize(s.bytes_alloc) });
+  if (c.sources?.now) options.push({ spec: NOW, label: t("现在"), sub: fmtSize(c.sources.now.bytes_alloc) });
+  for (const s of c.sources?.snapshots ?? []) options.push({ spec: s.path, label: t("{time} 快照", { time: stamp(s.created_at) }), sub: fmtSize(s.bytes_alloc) });
   const pick = (to: string) => {
     setOpen(false);
     if (to === spec) return;
@@ -103,7 +101,7 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
         className="cmp-end-btn"
         aria-haspopup="listbox"
         aria-expanded={open}
-        aria-label={which === "base" ? `基准：${label}` : `对比目标：${label}`}
+        aria-label={which === "base" ? t("基准：{label}", { label }) : t("对比目标：{label}", { label })}
         onClick={() => setOpen(!open)}
         onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
       >
@@ -111,7 +109,7 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
         <Icon name="chevronDown" size={12} />
       </button>
       {open && (
-        <div className="cmp-menu" role="listbox" aria-label={which === "base" ? "基准" : "对比目标"} onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
+        <div className="cmp-menu" role="listbox" aria-label={which === "base" ? t("基准") : t("对比目标")} onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
           {options.map((o) => (
             <button key={o.spec} role="option" aria-selected={o.spec === spec} className={`cmp-option${o.spec === spec ? " on" : ""}`} onClick={() => pick(o.spec)}>
               <span className="cmp-check">{o.spec === spec && <Icon name="check" size={14} />}</span>
@@ -129,7 +127,7 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
             }}
           >
             <span className="cmp-check" />
-            <span className="flex">打开快照文件…</span>
+            <span className="flex">{t("打开快照文件…")}</span>
           </button>
         </div>
       )}
@@ -141,10 +139,10 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
 export function DirectionSegment({ viewId }: { viewId: string }) {
   const dir = useApp((s) => s.views[viewId]?.state.direction ?? "all");
   return (
-    <div className="segmented" role="radiogroup" aria-label="显示的变化" title="显示的变化（C）">
-      {DIRECTIONS.map(([d, name]) => (
+    <div className="segmented" role="radiogroup" aria-label={t("显示的变化")} title={t("显示的变化（C）")}>
+      {DIRECTIONS.map((d) => (
         <button key={d} role="radio" aria-checked={dir === d} className={dir === d ? "on" : ""} onClick={() => void setViewSettings(viewId, { direction: d })}>
-          {name}
+          {directionLabel(d)}
         </button>
       ))}
     </div>
@@ -153,9 +151,9 @@ export function DirectionSegment({ viewId }: { viewId: string }) {
 
 export function ExitCompare({ tab }: { tab: Tab }) {
   return (
-    <button className="outline-btn" onClick={() => void exitCompare(tab.id)} title="退出对比（Esc）">
+    <button className="outline-btn" onClick={() => void exitCompare(tab.id)} title={t("退出对比（Esc）")}>
       <Icon name="close" size={14} />
-      退出对比
+      {t("退出对比")}
     </button>
   );
 }
@@ -188,12 +186,12 @@ export function CompareSidebar({ tab }: { tab: Tab }) {
   const maxAbs = Math.max(1, ...(sum?.grow_items ?? []).map((i) => Math.abs(i.delta)), ...(sum?.shrink_items ?? []).map((i) => Math.abs(i.delta)));
 
   return (
-    <aside className={`inspector cmp-side${busy ? " busy" : ""}`} aria-label="快照对比" aria-busy={busy}>
+    <aside className={`inspector cmp-side${busy ? " busy" : ""}`} aria-label={t("快照对比")} aria-busy={busy}>
       <div className="cmp-head">
-        <strong>快照对比</strong>
+        <strong>{t("快照对比")}</strong>
         {sum && !sum.whole && (
           <span className="cmp-scope muted small" title={sum.scope}>
-            范围：{sum.scope.split(/[\\/]/).filter(Boolean).pop()}
+            {t("范围：{name}", { name: sum.scope.split(/[\\/]/).filter(Boolean).pop() ?? "" })}
           </span>
         )}
         <span className="flex" />
@@ -202,7 +200,7 @@ export function CompareSidebar({ tab }: { tab: Tab }) {
       {busy && (
         <div className="cmp-progress" role="status">
           <span className="spinner" aria-hidden="true" />
-          <span>{c.message || "正在对比…"}</span>
+          <span>{c.message || t("正在对比…")}</span>
           {c.progress != null && c.phase === "comparing" && <span className="mono muted">{Math.round(c.progress * 100)}%</span>}
         </div>
       )}
@@ -210,13 +208,24 @@ export function CompareSidebar({ tab }: { tab: Tab }) {
         <div className="cmp-body">
           <Summary sum={sum} />
           <Legend heads={legend.heads} />
-          {dir !== "shrink" && <ChangeList title="增长最多" right={`前 ${Math.min(LIST_LIMIT, sum.grow_items.length)} 项`} items={sum.grow_items} empty="没有增长的项" maxAbs={maxAbs} tiers={legend.tiers} viewId={viewId!} selected={selected} />}
+          {dir !== "shrink" && (
+            <ChangeList
+              title={t("增长最多")}
+              right={t("前 {n} 项", { n: Math.min(LIST_LIMIT, sum.grow_items.length) })}
+              items={sum.grow_items}
+              empty={t("没有增长的项")}
+              maxAbs={maxAbs}
+              tiers={legend.tiers}
+              viewId={viewId!}
+              selected={selected}
+            />
+          )}
           {dir !== "grow" && (
-            <ChangeList title="减少" right={sum.shrink ? fmtDelta(-sum.shrink) : "0"} items={sum.shrink_items} empty="没有减少的项" maxAbs={maxAbs} tiers={legend.tiers} viewId={viewId!} selected={selected} />
+            <ChangeList title={t("减少")} right={sum.shrink ? fmtDelta(-sum.shrink) : "0"} items={sum.shrink_items} empty={t("没有减少的项")} maxAbs={maxAbs} tiers={legend.tiers} viewId={viewId!} selected={selected} />
           )}
         </div>
       ) : (
-        <div className="cmp-body muted cmp-wait">{c.phase === "failed" ? c.message : "正在准备对比数据…"}</div>
+        <div className="cmp-body muted cmp-wait">{c.phase === "failed" ? c.message : t("正在准备对比数据…")}</div>
       )}
       <Timeline tab={tab} />
     </aside>
@@ -236,19 +245,19 @@ function MoreMenu({ sum }: { sum: CompareSummary | null }) {
     setOpen(false);
     if (!sum) return;
     const lines = [
-      `快照对比：${sideName(sum.base)} → ${sideName(sum.target)}（相隔 ${fmtSpan(sum.span_s)}）`,
-      `净变化 ${fmtDelta(sum.net)}，增长 ${fmtSize(sum.grow)}，减少 ${fmtSize(sum.shrink)}`,
-      "增长最多：",
+      t("快照对比：{base} → {target}（相隔 {span}）", { base: sideName(sum.base), target: sideName(sum.target), span: fmtSpan(sum.span_s) }),
+      t("净变化 {net}，增长 {grow}，减少 {shrink}", { net: fmtDelta(sum.net), grow: fmtSize(sum.grow), shrink: fmtSize(sum.shrink) }),
+      t("增长最多："),
       ...sum.grow_items.map((i) => `  ${fmtDelta(i.delta)}  ${i.path}`),
-      "减少：",
+      t("减少："),
       ...sum.shrink_items.map((i) => `  ${fmtDelta(i.delta)}  ${i.path}`),
     ];
     window.sk.shell.copyText(lines.join("\n"));
-    toast("已复制对比汇总");
+    toast(t("已复制对比汇总"));
   };
   return (
     <div className="cmp-more" ref={box}>
-      <button className="icon-btn" aria-label="更多对比选项" title="更多对比选项" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <button className="icon-btn" aria-label={t("更多对比选项")} title={t("更多对比选项")} aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name="more" />
       </button>
       {open && (
@@ -257,13 +266,13 @@ function MoreMenu({ sum }: { sum: CompareSummary | null }) {
             <span className="cmp-check">
               <Icon name="copy" size={14} />
             </span>
-            复制汇总
+            {t("复制汇总")}
           </button>
-          <button role="menuitem" className="cmp-option" disabled title="导出对比报告还没有接入（见 TODO）">
+          <button role="menuitem" className="cmp-option" disabled title={t("导出对比报告还没有接入（见 TODO）")}>
             <span className="cmp-check">
               <Icon name="upload" size={14} />
             </span>
-            导出对比报告…
+            {t("导出对比报告…")}
           </button>
         </div>
       )}
@@ -272,7 +281,7 @@ function MoreMenu({ sum }: { sum: CompareSummary | null }) {
 }
 
 function Summary({ sum }: { sum: CompareSummary }) {
-  const label = sum.net > 0 ? "净增长" : sum.net < 0 ? "净减少" : "无净变化";
+  const label = sum.net > 0 ? t("净增长") : sum.net < 0 ? t("净减少") : t("无净变化");
   const [num, unit] = sum.net === 0 ? ["0", ""] : sizeParts(Math.abs(sum.net));
   const total = sum.grow + sum.shrink;
   const live = sum.target.kind === "now";
@@ -280,31 +289,36 @@ function Summary({ sum }: { sum: CompareSummary }) {
   // an estimate from a few minutes of change says nothing: at least a day between the ends (W6 待定 1)
   const showFill = live && sum.span_s >= 86400 && sum.daily != null && sum.daily > 0 && days != null && days <= 365;
   return (
-    <section className="cmp-sum" aria-label="变化汇总">
+    <section className="cmp-sum" aria-label={t("变化汇总")}>
       <div className="row-between small">
         <span className="muted">{label}</span>
-        <span className="muted">相隔 {fmtSpan(sum.span_s)}</span>
+        <span className="muted">{t("相隔 {span}", { span: fmtSpan(sum.span_s) })}</span>
       </div>
       <div className="cmp-big">
         <span className="mono">{sum.net === 0 ? "0" : `${sum.net > 0 ? "+" : "−"}${num}`}</span>
         {unit && <span className="cmp-unit">{unit}</span>}
       </div>
-      <div className="cmp-ratio" role="img" aria-label={`增长 ${fmtSize(sum.grow)}，减少 ${fmtSize(sum.shrink)}`}>
+      <div className="cmp-ratio" role="img" aria-label={t("增长 {grow}，减少 {shrink}", { grow: fmtSize(sum.grow), shrink: fmtSize(sum.shrink) })}>
         {total > 0 && <span style={{ flexGrow: sum.grow, background: GROW_COLORS[3] }} />}
         {total > 0 && sum.shrink > 0 && <span style={{ flexGrow: sum.shrink, background: SHRINK_COLORS[2] }} />}
       </div>
       <div className="row-between small">
         <span>
-          <span className="cmp-swatch" style={{ background: GROW_COLORS[3] }} /> 增长 <span className="mono">{fmtSize(sum.grow)}</span>
+          <span className="cmp-swatch" style={{ background: GROW_COLORS[3] }} /> {t("增长")} <span className="mono">{fmtSize(sum.grow)}</span>
         </span>
         <span>
-          <span className="cmp-swatch" style={{ background: SHRINK_COLORS[2] }} /> 减少 <span className="mono">{fmtSize(sum.shrink)}</span>
+          <span className="cmp-swatch" style={{ background: SHRINK_COLORS[2] }} /> {t("减少")} <span className="mono">{fmtSize(sum.shrink)}</span>
         </span>
       </div>
       {showFill && (
-        <div className={`cmp-fill${days! <= 30 ? " warn" : ""}`} title="按两端之间的日均变化推算">
+        <div className={`cmp-fill${days! <= 30 ? " warn" : ""}`} title={t("按两端之间的日均变化推算")}>
           <Icon name={days! <= 30 ? "warning" : "info"} size={14} />
-          日均 {fmtDelta(sum.daily!)} · 约 {fmtInt(Math.floor(days!))} 天后可用空间耗尽
+          {plural(
+            Math.floor(days!),
+            t("日均 {daily} · 约 {days} 天后可用空间耗尽", { daily: fmtDelta(sum.daily!), days: fmtInt(Math.floor(days!)) }),
+            "Daily average {daily} · free space runs out in about 1 day",
+            { daily: fmtDelta(sum.daily!) },
+          )}
         </div>
       )}
     </section>
@@ -313,7 +327,7 @@ function Summary({ sum }: { sum: CompareSummary }) {
 
 function Legend({ heads }: { heads: string[] }) {
   return (
-    <section className="cmp-legend" aria-label="图例">
+    <section className="cmp-legend" aria-label={t("图例")}>
       <div className="cmp-grid">
         <span />
         {heads.map((h) => (
@@ -321,20 +335,20 @@ function Legend({ heads }: { heads: string[] }) {
             {h}
           </span>
         ))}
-        <span className="small">增长</span>
+        <span className="small">{t("增长")}</span>
         {GROW_COLORS.map((c) => (
           <span key={c} className="cmp-chip" style={{ background: c }} />
         ))}
-        <span className="small">减少</span>
+        <span className="small">{t("减少")}</span>
         {SHRINK_COLORS.map((c, i) => (
           <span key={c} className="cmp-chip" style={{ background: c, gridColumn: i === 2 ? "span 2" : undefined }} />
         ))}
       </div>
       <div className="cmp-legend-notes small">
         <span>
-          <span className="cmp-badge new">新增</span> 新出现的项
+          <span className="cmp-badge new">{t("新增")}</span> {t("新出现的项")}
         </span>
-        <span className="muted">面积 = 变化量</span>
+        <span className="muted">{t("面积 = 变化量")}</span>
       </div>
     </section>
   );
@@ -375,8 +389,8 @@ function ChangeRow({ it, maxAbs, tiers, viewId, on }: { it: ChangeItem; maxAbs: 
       <span className="cmp-row-main">
         <span className="cmp-row-name">
           <span className="cmp-row-label">{it.label}</span>
-          {it.status === "new" && <span className="cmp-badge new">新增</span>}
-          {it.status === "deleted" && <span className="cmp-badge deleted">已删除</span>}
+          {it.status === "new" && <span className="cmp-badge new">{t("新增")}</span>}
+          {it.status === "deleted" && <span className="cmp-badge deleted">{t("已删除")}</span>}
           {it.reason && it.status !== "new" && it.status !== "deleted" && <span className="cmp-reason">{it.reason}</span>}
         </span>
         <span className="cmp-bar" style={{ width: `${(Math.abs(it.delta) / maxAbs) * 100}%`, background: diffColor(it.delta, tiers) }} />
@@ -410,11 +424,12 @@ function Timeline({ tab }: { tab: Tab }) {
     } else if (spec !== c.base) void (spec === c.target ? swapCompare(tab.id) : setCompareEnds(tab.id, spec, c.target));
   };
   return (
-    <section className="cmp-timeline" aria-label="快照时间轴">
+    <section className="cmp-timeline" aria-label={t("快照时间轴")}>
       <div className="row-between">
-        <strong className="small">快照</strong>
-        <button className="text-btn small" onClick={() => void runCommand("snapshot.save")} title="把当前扫描保存为快照（Ctrl+S）">
-          <Icon name="snapshot" size={14} /> 保存快照
+        {/* a list of them: plural in English, one form in Chinese */}
+        <strong className="small">{byLang("快照", "Snapshots")}</strong>
+        <button className="text-btn small" onClick={() => void runCommand("snapshot.save")} title={t("把当前扫描保存为快照（Ctrl+S）")}>
+          <Icon name="snapshot" size={14} /> {t("保存快照")}
         </button>
       </div>
       <div className="cmp-track">
@@ -423,7 +438,7 @@ function Timeline({ tab }: { tab: Tab }) {
         {points.map((p) => {
           const isBase = p.spec === c.base;
           const isTarget = p.spec === c.target;
-          const name = p.spec === NOW ? "现在" : isBase ? `基准快照 ${stamp(p.at)}` : `快照 ${stamp(p.at)}`;
+          const name = p.spec === NOW ? t("现在") : isBase ? t("基准快照 {time}", { time: stamp(p.at) }) : t("快照 {time}", { time: stamp(p.at) });
           return (
             <button
               key={p.spec}
@@ -431,13 +446,13 @@ function Timeline({ tab }: { tab: Tab }) {
               style={{ left: `${pos(p.at)}%` }}
               aria-label={name}
               aria-pressed={isBase || isTarget}
-              title={`${p.spec === NOW ? "现在" : stamp(p.at)}（单击设为基准，Shift+单击设为对比目标）`}
+              title={t("{name}（单击设为基准，Shift+单击设为对比目标）", { name: p.spec === NOW ? t("现在") : stamp(p.at) })}
               onClick={(e) => click(p.spec, e.shiftKey)}
             >
               {labelled.has(p.spec) && (
                 <span className={`cmp-dot-label${isBase ? " strong" : ""}${p.spec === NOW && isTarget ? " accent" : ""}`}>
-                  {p.spec === NOW ? "现在" : day(p.at)}
-                  {isBase && " 基准"}
+                  {p.spec === NOW ? t("现在") : day(p.at)}
+                  {isBase && ` ${t("基准")}`}
                 </span>
               )}
             </button>
@@ -469,8 +484,8 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
     if (!hover) return setShown(null);
     if (keepOpen && shown) return setShown(hover);
     setShown(null);
-    const t = setTimeout(() => setShown(hover), HOVER_DELAY);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setShown(hover), HOVER_DELAY);
+    return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
   useEffect(() => {
@@ -502,7 +517,7 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
 
   if (!shown || !info) return null;
   const it = info.item;
-  const tname = target ? sideName(target) : "目标";
+  const tname = target ? sideName(target) : t("目标");
   const pct = it.base > 0 ? (it.delta / it.base) * 100 : null;
   const sep = it.path.includes("\\") ? "\\" : "/";
   const parts = it.path.split(sep);
@@ -511,13 +526,13 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
     <div className="hovercard cmp-card" ref={card} style={{ left: pos.left, top: pos.top }} role="tooltip">
       <div className="cmp-card-title">
         <Icon name={KIND_ICON[it.kind]} size={15} />
-        <span className="flex cmp-card-name">{it.kind === "group" ? `${fmtInt(it.members)} 个小项` : it.label}</span>
+        <span className="flex cmp-card-name">{it.kind === "group" ? t("{n} 个小项", { n: fmtInt(it.members) }) : it.label}</span>
         <strong className="mono">{fmtDelta(it.delta)}</strong>
       </div>
       <div className="mono small muted cmp-card-path">{path}</div>
       <div className="row-between small">
         <span>
-          <span className="muted">基准</span> <span className="mono">{it.status === "new" ? "—" : fmtSize(it.base)}</span> <span className="muted">›</span>{" "}
+          <span className="muted">{t("基准")}</span> <span className="mono">{it.status === "new" ? "—" : fmtSize(it.base)}</span> <span className="muted">›</span>{" "}
           <span className="muted">{tname}</span> <span className="mono">{it.status === "deleted" ? "—" : fmtSize(it.target)}</span>
         </span>
         {pct != null && it.status !== "deleted" && <span className="mono">{`${pct >= 0 ? "+" : "−"}${Math.abs(pct).toFixed(1)}%`}</span>}
@@ -528,13 +543,13 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
             <div key={k.node} className="cmp-card-kid small">
               <Icon name={KIND_ICON[k.kind]} size={13} />
               <span className="flex cmp-card-name">{k.label}</span>
-              {k.new_files > 0 && <span className="muted">新增 {fmtInt(k.new_files)} 项</span>}
+              {k.new_files > 0 && <span className="muted">{t("新增 {n} 项", { n: fmtInt(k.new_files) })}</span>}
               <span className="mono">{fmtDelta(k.delta)}</span>
             </div>
           ))}
         </div>
       )}
-      <div className="muted small cmp-card-hint">双击放大 · 右键更多</div>
+      <div className="muted small cmp-card-hint">{t("双击放大 · 右键更多")}</div>
     </div>
   );
 }

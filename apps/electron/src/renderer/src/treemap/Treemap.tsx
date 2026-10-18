@@ -9,6 +9,7 @@ import { setting, useApp } from "@/state/store";
 import { classColors } from "@/lib/classes";
 import { diffTiers, maxChange } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize } from "@/lib/format";
+import { t } from "@/lib/i18n";
 
 import { type DrawFrame, hitTest } from "./frame";
 import { GlRenderer, type Picture } from "./gl";
@@ -377,7 +378,7 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     <div ref={host} className="treemap" data-view-id={viewId} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick} onDoubleClick={onDouble} onContextMenu={onMenu}>
       <canvas ref={glCanvas} className="treemap-layer" />
       <canvas ref={textCanvas} className="treemap-layer" />
-      {frame && frame.count === 0 && <div className="treemap-empty">{view?.state.compare ? "两次之间没有变化" : "这里没有任何占用空间的内容"}</div>}
+      {frame && frame.count === 0 && <div className="treemap-empty">{view?.state.compare ? t("两次之间没有变化") : t("这里没有任何占用空间的内容")}</div>}
     </div>
   );
 }

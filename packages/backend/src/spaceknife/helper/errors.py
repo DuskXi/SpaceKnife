@@ -14,6 +14,8 @@ Callers fall back to the hard scan.
 
 from __future__ import annotations
 
+from ..i18n import _
+
 
 class HelperError(Exception):
     def __init__(self, message: str, code: str = "error") -> None:
@@ -28,8 +30,8 @@ class HelperUnavailable(HelperError):
 
 
 class HelperDenied(HelperUnavailable):
-    def __init__(self, message: str = "用户拒绝了管理员授权") -> None:
-        super().__init__(message, "denied")
+    def __init__(self, message: str | None = None) -> None:
+        super().__init__(_("用户拒绝了管理员授权") if message is None else message, "denied")
 
 
 __all__ = ["HelperDenied", "HelperError", "HelperUnavailable"]

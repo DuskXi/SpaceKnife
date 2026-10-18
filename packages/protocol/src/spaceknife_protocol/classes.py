@@ -66,6 +66,32 @@ BUILTIN_CLASSES: tuple[FilterClassInfo, ...] = (
 )
 
 
+# The built-in classes' names in the English interface (M7.5). Each is already one of the class's
+# aliases, so filters read the same in both languages.
+ENGLISH_NAMES: dict[str, str] = {
+    "video": "Video",
+    "image": "Pictures",
+    "audio": "Audio",
+    "archive": "Archives",
+    "exec": "Programs",
+    "doc": "Documents",
+    OTHER: "Other",
+}
+
+
+def localized(c: FilterClassInfo, language: str) -> FilterClassInfo:
+    """A class as shown in ``language``: a built-in class the user has not renamed takes its
+    English name, and its Chinese name becomes an alias (``:class:视频`` keeps working)."""
+    if language != "en":
+        return c
+    builtin = next((b for b in BUILTIN_CLASSES if b.id == c.id), None)
+    english = ENGLISH_NAMES.get(c.id)
+    if builtin is None or english is None or c.name != builtin.name:
+        return c
+    aliases = [a for a in c.aliases if a.casefold() != english.casefold()]
+    return c.model_copy(update={"name": english, "aliases": [*aliases, builtin.name]})
+
+
 # --------------------------------------------------------------------------- editing (W7 文件类别)
 
 

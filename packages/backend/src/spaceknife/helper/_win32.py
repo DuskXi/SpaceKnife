@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ..i18n import _
+
 if TYPE_CHECKING:
     from .launch import ShellExecuteParams
 
@@ -374,7 +376,7 @@ class Pipe:
     def _enter(self) -> int:
         with self._lock:
             if self._closed:
-                raise ConnectionAbortedError("管道已关闭")
+                raise ConnectionAbortedError(_("管道已关闭"))
             self._users += 1
             return self._handle
 
@@ -407,8 +409,8 @@ class Pipe:
             err = ctypes.get_last_error()
             if err == ERROR_OPERATION_ABORTED:
                 if outcome == WAIT_TIMEOUT:
-                    raise TimeoutError("管道读写超时")
-                raise ConnectionAbortedError("管道已关闭")
+                    raise TimeoutError(_("管道读写超时"))
+                raise ConnectionAbortedError(_("管道已关闭"))
             raise _closed_or_error(err)
         finally:
             _k32.CloseHandle(ov.hEvent)
@@ -426,9 +428,9 @@ class Pipe:
         try:
             got = self._run(lambda h, ov: bool(_k32.ReadFile(h, addr, size, None, ctypes.byref(ov))), timeout)
         except BrokenPipeError:
-            raise EOFError("管道已断开") from None
+            raise EOFError(_("管道已断开")) from None
         if got == 0:
-            raise EOFError("管道已断开")
+            raise EOFError(_("管道已断开"))
         return got
 
     def write(self, view: memoryview, timeout: float | None) -> int:
@@ -456,7 +458,7 @@ class Pipe:
 
 def _closed_or_error(err: int) -> OSError:
     if err in _CLOSED_ERRORS:
-        return BrokenPipeError(err, "管道已断开")
+        return BrokenPipeError(err, _("管道已断开"))
     return _winerror(err)
 
 
@@ -550,10 +552,10 @@ def shell_execute(params: ShellExecuteParams) -> ProcessHandle:
         if not _shell32.ShellExecuteExW(ctypes.byref(info)):
             err = ctypes.get_last_error()
             if err == ERROR_CANCELLED:
-                raise PermissionError(ERROR_CANCELLED, "用户拒绝了管理员授权")
+                raise PermissionError(ERROR_CANCELLED, _("用户拒绝了管理员授权"))
             raise _winerror(err)
         if not _valid(info.hProcess):
-            raise OSError("ShellExecuteExW 没有返回进程句柄")
+            raise OSError(_("ShellExecuteExW 没有返回进程句柄"))
         return ProcessHandle(int(info.hProcess))
     finally:
         if com >= 0:  # S_OK / S_FALSE

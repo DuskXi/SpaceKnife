@@ -14,7 +14,11 @@ from typing import Literal
 
 from loguru import logger
 
+from .i18n import _
+
 Source = Literal["scan", "perm", "monitor", "delete", "snapshot", "export", "system"]
+_DENIED_ZH = "拒绝"  # in a Chinese system's "access denied" message  # i18n: ignore
+_STOPS = "。. "  # full stops stripped from an OS message  # i18n: ignore
 
 
 def emit(
@@ -54,9 +58,9 @@ def printable(text: str) -> str:
 def denied_reason(message: str) -> str:
     """OS error text -> the wording used in the log panel."""
     low = message.lower()
-    if "denied" in low or "拒绝" in message or "permission" in low or "eacces" in low or "eperm" in low:
-        return "拒绝访问"
-    return message.rstrip("。. ") or "无法读取"
+    if "denied" in low or _DENIED_ZH in message or "permission" in low or "eacces" in low or "eperm" in low:
+        return _("拒绝访问")
+    return message.rstrip(_STOPS) or _("无法读取")
 
 
 __all__ = ["Source", "denied_reason", "emit", "printable"]

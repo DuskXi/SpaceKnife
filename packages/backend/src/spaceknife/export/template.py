@@ -32,6 +32,7 @@ from typing import Any, Literal, cast
 import numpy as np
 
 from .. import fmt
+from ..i18n import Texts
 from ..store.nodes import Flag, Kind, NodeStore
 
 Blocks = Literal["files", "folders", "mixed"]
@@ -39,24 +40,26 @@ SortKey = Literal["size", "name", "none"]
 Severity = Literal["error", "warning"]
 Section = Literal["options", "header", "detail", "footer"]
 
-# User-facing text of this module (M7.5 extracts it for translation).
-MESSAGES: dict[str, str] = {
-    "unknown_tag": "未知的标签 <%{name}%>，输出 *BAD TAG*",
-    "unclosed_tag": "标签缺少结尾的 %>",
-    "unclosed_group": "缺少与之配对的 }}",
-    "stray_close": "多余的 }}，按原样输出（要输出 }} 请写 {{&curlycl}}）",
-    "unknown_entity": "未知的转义 {{{name}}}，按原样输出",
-    "bad_if": "if 的写法应为 {{if{{值1}}=={{值2}}?{{结果}}:{{否则}}}}：{detail}",
-    "bad_call": "{name} 的写法应为 {usage}",
-    "bad_option": "选项 @{key} 的值 {value!r} 无效，可选：{allowed}",
-    "unknown_option": "未知的选项 @{key}，已忽略",
-    "bad_line": "这一行既不是 @选项=值，也不是段标记（@header / @detail / @footer），已忽略",
-    "duplicate_section": "@{name} 段出现了不止一次，以最后一次为准",
-    "if_operand": "缺少值或值没有用 {{}} 括起来",
-    "if_operator": "缺少比较运算符（== != < <= > >=）",
-    "if_question": "缺少 ?",
-    "if_end": "结尾缺少 }}",
-}
+# User-facing text of this module, translated when read (M7.5).
+MESSAGES = Texts(
+    {
+        "unknown_tag": "未知的标签 <%{name}%>，输出 *BAD TAG*",
+        "unclosed_tag": "标签缺少结尾的 %>",
+        "unclosed_group": "缺少与之配对的 }}",
+        "stray_close": "多余的 }}，按原样输出（要输出 }} 请写 {{&curlycl}}）",
+        "unknown_entity": "未知的转义 {{{name}}}，按原样输出",
+        "bad_if": "if 的写法应为 {usage}：{detail}",
+        "bad_call": "{name} 的写法应为 {usage}",
+        "bad_option": "选项 @{key} 的值 {value!r} 无效，可选：{allowed}",
+        "unknown_option": "未知的选项 @{key}，已忽略",
+        "bad_line": "这一行既不是 @选项=值，也不是段标记（@header / @detail / @footer），已忽略",
+        "duplicate_section": "@{name} 段出现了不止一次，以最后一次为准",
+        "if_operand": "缺少值或值没有用 {{}} 括起来",
+        "if_operator": "缺少比较运算符（== != < <= > >=）",
+        "if_question": "缺少 ?",
+        "if_end": "结尾缺少 }}",
+    }
+)
 
 BAD_TAG = "*BAD TAG*"
 BAD_PAD = "*BAD PAD*"
@@ -72,13 +75,24 @@ ENTITIES = {
     "&angleop": "<",
     "&anglecl": ">",
 }
-USAGE = {
-    "leftpad": "{leftpad{文字}{填充}{长度}}",
-    "rightpad": "{rightpad{文字}{填充}{长度}}",
-    "nest": "{nest{文字}}",
-    "html": "{html{文字}}",
-    "csv": "{csv{文字}}",
-    "json": "{json{文字}}",
+ARGS = Texts(  # names of the arguments in the usage hints (:func:`usage`)
+    {
+        "text": "文字",
+        "pad": "填充",
+        "length": "长度",
+        "value1": "值1",
+        "value2": "值2",
+        "then": "结果",
+        "else": "否则",
+    }
+)
+USAGE: dict[str, tuple[str, ...]] = {  # function -> its arguments (keys of ARGS)
+    "leftpad": ("text", "pad", "length"),
+    "rightpad": ("text", "pad", "length"),
+    "nest": ("text",),
+    "html": ("text",),
+    "csv": ("text",),
+    "json": ("text",),
 }
 FUNCTIONS = frozenset({"if", *USAGE})
 COMPARISONS = ("==", "!=", "<=", ">=", "<", ">")  # longest first
@@ -101,11 +115,19 @@ _SEPARATORS_T = tuple(_SEPARATORS)  # str.endswith takes a tuple
 _DUP = int(Flag.HARDLINK_DUP)
 
 
+def usage(word: str) -> str:
+    """How a function is written, e.g. ``{leftpad{文字}{填充}{长度}}`` (in the interface language)."""
+    if word == "if":
+        a = ARGS
+        return "{if{" + a["value1"] + "}=={" + a["value2"] + "}?{" + a["then"] + "}:{" + a["else"] + "}}"
+    return "{" + word + "".join("{" + ARGS[arg] + "}" for arg in USAGE[word]) + "}"
+
+
 @dataclass(frozen=True, slots=True)
 class TemplateIssue:
     severity: Severity
     code: str
-    message: str  # Chinese, for the user
+    message: str  # for the user, in the interface language at parse time
     section: Section
     line: int  # 1-based, in the template source
     column: int  # 1-based
@@ -869,13 +891,13 @@ class _Parser:
             if word == "nest":
                 return _Nest(args[0]), k + 1
             return _Escape(_ESCAPES[word], args[0]), k + 1
-        self.issue(start, "bad_call", name=word, usage=USAGE[word])
+        self.issue(start, "bad_call", name=word, usage=usage(word))
         marker = BAD_PAD if word in ("leftpad", "rightpad") else BAD_CALL
         return _Text(marker), self.skip_group(start)
 
     def call_if(self, start: int, i: int) -> tuple[_Node, int]:
         def fail(code: str) -> tuple[_Node, int]:
-            self.issue(start, "bad_if", detail=MESSAGES[code].format())
+            self.issue(start, "bad_if", usage=usage("if"), detail=MESSAGES[code].format())
             return _Text(BAD_IF), self.skip_group(start)
 
         a, i = self.arg(i)

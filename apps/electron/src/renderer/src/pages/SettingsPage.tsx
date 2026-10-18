@@ -8,6 +8,7 @@ import type { PaletteCommand, SettingMeta } from "@/protocol/generated";
 import { call, closeSettings, resetSettings, settingsGo, updateSettings } from "@/state/actions";
 import { type SettingsPageId, set, toast, useApp } from "@/state/store";
 import { fmtKeys } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
 import { AdvancedTools, ClearTags } from "./AdvancedTools";
@@ -15,15 +16,88 @@ import { ClassesEditor } from "./ClassesEditor";
 
 type Value = boolean | number | string;
 
-export const PAGES: { id: SettingsPageId; name: string; icon: IconName; note: string }[] = [
-  { id: "general", name: "常规", icon: "settings", note: "语言、悬停提示、窗口提醒与日志" },
-  { id: "appearance", name: "外观", icon: "palette", note: "主题、强调色、动画与树图视觉；更改立即生效" },
-  { id: "treemap", name: "树图", icon: "layers", note: "几何与动画；修改后已打开的视图立即重排，「新视图…」类只影响之后新开的视图" },
-  { id: "scan", name: "扫描与性能", icon: "gauge", note: "扫描方式、扫描范围与硬链接计算从下一次扫描起生效，其余更改立即生效" },
-  { id: "classes", name: "文件类别", icon: "file", note: "按扩展名归类，用于树图着色、:class: 过滤和类别统计" },
-  { id: "tags", name: "标签", icon: "tag", note: "四个固定标签：红▲、黄■、绿●、蓝◆，颜色与形状不可修改" },
-  { id: "keys", name: "快捷键", icon: "command", note: "全部命令与当前快捷键，与命令面板同一份命令清单" },
-  { id: "advanced", name: "高级", icon: "terminal", note: "设置文件、日志、缓存与快照" },
+// name and note translate each time they are read (getters), so a language switch applies (M7.5)
+export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName; readonly note: string }[] = [
+  {
+    id: "general",
+    get name() {
+      return t("常规");
+    },
+    icon: "settings",
+    get note() {
+      return t("语言、悬停提示、窗口提醒与日志");
+    },
+  },
+  {
+    id: "appearance",
+    get name() {
+      return t("外观");
+    },
+    icon: "palette",
+    get note() {
+      return t("主题、强调色、动画与树图视觉；更改立即生效");
+    },
+  },
+  {
+    id: "treemap",
+    get name() {
+      return t("树图");
+    },
+    icon: "layers",
+    get note() {
+      return t("几何与动画；修改后已打开的视图立即重排，「新视图…」类只影响之后新开的视图");
+    },
+  },
+  {
+    id: "scan",
+    get name() {
+      return t("扫描与性能");
+    },
+    icon: "gauge",
+    get note() {
+      return t("扫描方式、扫描范围与硬链接计算从下一次扫描起生效，其余更改立即生效");
+    },
+  },
+  {
+    id: "classes",
+    get name() {
+      return t("文件类别");
+    },
+    icon: "file",
+    get note() {
+      return t("按扩展名归类，用于树图着色、:class: 过滤和类别统计");
+    },
+  },
+  {
+    id: "tags",
+    get name() {
+      return t("标签");
+    },
+    icon: "tag",
+    get note() {
+      return t("四个固定标签：红▲、黄■、绿●、蓝◆，颜色与形状不可修改");
+    },
+  },
+  {
+    id: "keys",
+    get name() {
+      return t("快捷键");
+    },
+    icon: "command",
+    get note() {
+      return t("全部命令与当前快捷键，与命令面板同一份命令清单");
+    },
+  },
+  {
+    id: "advanced",
+    get name() {
+      return t("高级");
+    },
+    icon: "terminal",
+    get note() {
+      return t("设置文件、日志、缓存与快照");
+    },
+  },
 ];
 const GROUPS: SettingsPageId[][] = [
   ["general", "appearance", "treemap"],
@@ -37,8 +111,10 @@ export function SettingsPage() {
   const page = useApp((s) => s.settingsPage);
   const query = useApp((s) => s.settingsQuery);
   const conn = useApp((s) => s.conn);
+  const lang = useApp((s) => s.lang); // the search also matches the page names, in the interface language
   const meta = state?.meta ?? EMPTY_META;
-  const hits = useMemo(() => (query.trim() ? search(meta, query.trim()) : null), [meta, query]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const hits = useMemo(() => (query.trim() ? search(meta, query.trim()) : null), [meta, query, lang]);
   const counts = useMemo(() => {
     const m = new Map<string, number>();
     for (const h of hits ?? []) m.set(h.category, (m.get(h.category) ?? 0) + 1);
@@ -47,7 +123,7 @@ export function SettingsPage() {
 
   return (
     <div className="settings">
-      <nav className="settings-nav" aria-label="设置分类">
+      <nav className="settings-nav" aria-label={t("设置分类")}>
         <div className="settings-nav-list">
           {GROUPS.map((group, gi) => (
             <div key={gi} className="settings-nav-group">
@@ -73,15 +149,15 @@ export function SettingsPage() {
         </div>
         <button className="settings-nav-file" disabled={!state} onClick={() => state && void window.sk.shell.openPath(state.path)}>
           <Icon name="reveal" size={14} />
-          打开设置文件
+          {t("打开设置文件")}
         </button>
       </nav>
       <div className="settings-main">
         <div className="settings-scroll">
-          {conn !== "ready" && <div className="settings-banner warn">与后端的连接已断开，设置暂不可修改</div>}
+          {conn !== "ready" && <div className="settings-banner warn">{t("与后端的连接已断开，设置暂不可修改")}</div>}
           {state?.error && <div className="settings-banner warn">{state.error}</div>}
           {!state ? (
-            <div className="muted">正在读取设置…</div>
+            <div className="muted">{t("正在读取设置…")}</div>
           ) : hits ? (
             <SearchResults hits={hits} query={query.trim()} />
           ) : (
@@ -168,8 +244,8 @@ function Row({ meta, query }: { meta: SettingMeta; query?: string }) {
         <div className="set-desc" id={`${id}-desc`}>
           {meta.description}
         </div>
-        {meta.applies === "next_scan" && scanning && meta.enabled && <div className="set-note">将在下一次扫描生效</div>}
-        {meta.applies === "new_views" && meta.enabled && <div className="set-note subtle">只影响之后新开的视图</div>}
+        {meta.applies === "next_scan" && scanning && meta.enabled && <div className="set-note">{t("将在下一次扫描生效")}</div>}
+        {meta.applies === "new_views" && meta.enabled && <div className="set-note subtle">{t("只影响之后新开的视图")}</div>}
       </div>
       <div className="set-control">
         <Control meta={meta} value={value} disabled={disabled} onSave={save} describedBy={`${id}-desc`} />
@@ -248,7 +324,7 @@ function Slider({ meta, value, disabled, onSave }: { meta: SettingMeta; value: n
     <div className="set-slider">
       <input
         type="range"
-        aria-label={`${meta.name}滑块`}
+        aria-label={t("{name}滑块", { name: meta.name })}
         min={meta.min ?? 0}
         max={meta.max ?? 100}
         step={meta.step ?? 1}
@@ -276,7 +352,7 @@ function NumberBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value
     const lo = meta.min ?? -Infinity;
     const hi = meta.max ?? Infinity;
     if (!Number.isInteger(n) || n < lo || n > hi) {
-      setError(`请输入 ${lo}–${hi} 的整数`);
+      setError(t("请输入 {lo}–{hi} 的整数", { lo, hi }));
       setText(String(value));
       return;
     }
@@ -314,7 +390,7 @@ function TextBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value: 
     <input
       className="set-text-input"
       aria-label={meta.name}
-      placeholder="未命名"
+      placeholder={t("未命名")}
       maxLength={64}
       value={text}
       disabled={disabled}
@@ -333,19 +409,23 @@ function TextBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value: 
 function search(meta: SettingMeta[], query: string): SettingMeta[] {
   const q = query.toLowerCase();
   return meta.filter((m) =>
-    [m.name, m.description, m.group, pageName(m.category), ...m.synonyms, ...m.options.map((o) => `${o.label} ${o.value}`)].some((t) => t.toLowerCase().includes(q)),
+    [m.name, m.description, m.group, pageName(m.category), ...m.synonyms, ...m.options.map((o) => `${o.label} ${o.value}`)].some((x) => x.toLowerCase().includes(q)),
   );
 }
 
 function SearchResults({ hits, query }: { hits: SettingMeta[]; query: string }) {
-  if (!hits.length) return <div className="settings-empty muted">没有找到与「{query}」相关的设置</div>;
+  if (!hits.length) return <div className="settings-empty muted">{t("没有找到与「{query}」相关的设置", { query })}</div>;
   const byPage = PAGES.map((p) => [p, hits.filter((h) => h.category === p.id)] as const).filter(([, h]) => h.length);
+  // the key cap sits inside the sentence: split the translated text around {key}
+  const [before, after] = t("{n} 项设置 · 按 {key} 清空", { n: hits.length }).split("{key}");
   return (
     <>
       <header className="settings-head">
-        <h1>搜索结果</h1>
+        <h1>{t("搜索结果")}</h1>
         <p className="muted">
-          {hits.length} 项设置 · 按 <Kbd>Esc</Kbd> 清空
+          {before}
+          <Kbd>Esc</Kbd>
+          {after}
         </p>
       </header>
       {byPage.map(([p, rows]) => (
@@ -386,18 +466,18 @@ function KeysPage({ rows }: { rows: SettingMeta[] }) {
       {groupBy(rows).map(([group, items]) => (
         <Group key={group} title={group} note="" rows={items} />
       ))}
-      <section className="set-group" aria-label="键位表">
+      <section className="set-group" aria-label={t("键位表")}>
         <div className="set-group-head">
-          <h2>键位表</h2>
-          <input className="set-text-input small" placeholder="搜索命令或按键" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
+          <h2>{t("键位表")}</h2>
+          <input className="set-text-input small" placeholder={t("搜索命令或按键")} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.stopPropagation()} />
         </div>
         <div className="set-card keys-table">
-          {!commands && <div className="set-row muted">正在读取…</div>}
+          {!commands && <div className="set-row muted">{t("正在读取…")}</div>}
           {shown.map((c) => (
             <div key={c.id} className="key-row">
               <Icon name={(c.icon as IconName) || "command"} size={14} />
               <span className="flex">{c.name}</span>
-              {c.keys.length ? c.keys.map((k) => <Kbd key={k}>{fmtKeys(k)}</Kbd>) : <span className="muted small">未绑定</span>}
+              {c.keys.length ? c.keys.map((k) => <Kbd key={k}>{fmtKeys(k)}</Kbd>) : <span className="muted small">{t("未绑定")}</span>}
             </div>
           ))}
         </div>
@@ -413,32 +493,32 @@ function FilesGroup() {
   const copyDiagnostics = async () => {
     const info = await call("system.info", {}).catch(() => null);
     const lines = [
-      `SpaceKnife 前端 ${window.sk.version} · 后端 ${version}`,
-      `平台 ${window.sk.platform} · ${navigator.userAgent}`,
-      info ? `后端 ${JSON.stringify(info)}` : "后端信息不可用",
-      `设置文件 ${state.path}`,
-      `日志目录 ${state.logs}`,
+      t("SpaceKnife 前端 {frontend} · 后端 {backend}", { frontend: window.sk.version, backend: version }),
+      t("平台 {platform} · {agent}", { platform: window.sk.platform, agent: navigator.userAgent }),
+      info ? t("后端 {info}", { info: JSON.stringify(info) }) : t("后端信息不可用"),
+      t("设置文件 {path}", { path: state.path }),
+      t("日志目录 {path}", { path: state.logs }),
     ];
     window.sk.shell.copyText(lines.join("\n"));
-    toast("诊断信息已复制");
+    toast(t("诊断信息已复制"));
   };
   return (
-    <section className="set-group" aria-label="文件与诊断">
+    <section className="set-group" aria-label={t("文件与诊断")}>
       <div className="set-group-head">
-        <h2>文件与诊断</h2>
+        <h2>{t("文件与诊断")}</h2>
       </div>
       <div className="set-card">
-        <FileRow name="设置文件" path={state.path} />
-        <FileRow name="日志文件夹" path={state.logs} />
+        <FileRow name={t("设置文件")} path={state.path} />
+        <FileRow name={t("日志文件夹")} path={state.logs} />
         <div className="set-row">
           <div className="set-text">
-            <div className="set-name">复制诊断信息</div>
-            <div className="set-desc">版本、平台与能力清单，用于反馈问题</div>
+            <div className="set-name">{t("复制诊断信息")}</div>
+            <div className="set-desc">{t("版本、平台与能力清单，用于反馈问题")}</div>
           </div>
           <div className="set-control">
             <button className="ghost small" onClick={() => void copyDiagnostics()}>
               <Icon name="copy" size={14} />
-              复制
+              {t("复制")}
             </button>
           </div>
         </div>
@@ -459,7 +539,7 @@ function FileRow({ name, path }: { name: string; path: string }) {
       <div className="set-control">
         <button className="ghost small" onClick={() => void window.sk.shell.openPath(path)}>
           <Icon name="reveal" size={14} />
-          打开
+          {t("打开")}
         </button>
       </div>
     </div>
@@ -490,21 +570,21 @@ function Footer({ page }: { page: SettingsPageId }) {
   return (
     <footer className="settings-foot">
       {save.state === "saving" ? (
-        <span className="muted">正在保存…</span>
+        <span className="muted">{t("正在保存…")}</span>
       ) : save.state === "error" ? (
         <span className="warn settings-save">
           <Icon name="warning" size={14} />
-          保存失败：{save.message}
+          {t("保存失败：{message}", { message: save.message })}
         </span>
       ) : (
         <span className="muted settings-save">
           <Icon name="check" size={14} />
-          更改已自动保存
+          {t("更改已自动保存")}
         </span>
       )}
       {undo && (
         <span className="settings-undo">
-          已恢复「{pageName(page)}」的默认值 ·{" "}
+          {t("已恢复「{page}」的默认值", { page: pageName(page) })} ·{" "}
           <button
             className="link"
             onClick={() => {
@@ -512,16 +592,16 @@ function Footer({ page }: { page: SettingsPageId }) {
               setUndo(null);
             }}
           >
-            撤销
+            {t("撤销")}
           </button>
         </span>
       )}
       <span className="flex" />
-      <button className="ghost" disabled={!!query.trim() || changed.length === 0} title={changed.length ? `把「${pageName(page)}」的 ${changed.length} 项恢复为默认值` : "当前页已经全部是默认值"} onClick={() => void restore()}>
-        恢复默认
+      <button className="ghost" disabled={!!query.trim() || changed.length === 0} title={changed.length ? t("把「{page}」的 {n} 项恢复为默认值", { page: pageName(page), n: changed.length }) : t("当前页已经全部是默认值")} onClick={() => void restore()}>
+        {t("恢复默认")}
       </button>
       <button className="primary small" onClick={() => void closeSettings()}>
-        完成
+        {t("完成")}
       </button>
     </footer>
   );
@@ -538,8 +618,8 @@ export function SettingsSearch() {
       <input
         id="sk-settings-search"
         className="filter-input plain"
-        placeholder="搜索设置"
-        aria-label="搜索设置"
+        placeholder={t("搜索设置")}
+        aria-label={t("搜索设置")}
         value={query}
         spellCheck={false}
         onChange={(e) => set({ settingsQuery: e.target.value })}

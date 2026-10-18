@@ -19,6 +19,7 @@ from loguru import logger
 
 from ..events import emit
 from ..filter.names import existing_index
+from ..i18n import tr
 from ..memory import process_memory
 from . import compute
 
@@ -87,8 +88,11 @@ async def watch(server: Server) -> None:
             logger.warning("memory above what the scans account for:\n{}", text)
             emit(
                 "system",
-                f"后端内存占用异常：{private / GiB:.1f} GB（扫描数据约 {accounted(server) / GiB:.1f} GB），"
-                "诊断信息已写入日志文件",
+                tr(
+                    "后端内存占用异常：{used} GB（扫描数据约 {scans} GB），诊断信息已写入日志文件",
+                    used=f"{private / GiB:.1f}",
+                    scans=f"{accounted(server) / GiB:.1f}",
+                ),
                 level="WARNING",
             )
         except Exception:  # diagnostics never take the backend down

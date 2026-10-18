@@ -4,12 +4,14 @@
 
 import type { BackendState, SkApi } from "../../shared/api";
 
+import { t } from "@/lib/i18n";
+
 export function installShim(): void {
   if (window.sk) return;
   const params = new URLSearchParams(location.hash.slice(1));
   const url = params.get("ws");
   const token = params.get("token");
-  const state: BackendState = url && token ? { state: "ready", info: { url, token, pid: 0 } } : { state: "failed", message: "浏览器模式：地址里缺少 #ws=…&token=…" };
+  const state: BackendState = url && token ? { state: "ready", info: { url, token, pid: 0 } } : { state: "failed", message: t("浏览器模式：地址里缺少 #ws=…&token=…") };
   const platform = (params.get("platform") as SkApi["platform"]) ?? (navigator.userAgent.includes("Windows") ? "win32" : navigator.userAgent.includes("Mac") ? "darwin" : "linux");
   const noop = () => {};
   window.sk = {
@@ -33,11 +35,11 @@ export function installShim(): void {
     },
     setLanguage: () => undefined,
     dialog: {
-      openSnapshot: async () => window.prompt("快照文件路径（.sks）")?.trim() || null,
+      openSnapshot: async () => window.prompt(t("快照文件路径（.sks）"))?.trim() || null,
       openFile: async (o) => window.prompt(o.title)?.trim() || null,
       saveFile: async (o) => window.prompt(o.title, o.defaultName)?.trim() || null,
       openFolders: async () => {
-        const text = window.prompt("文件夹路径（多个用 ; 分隔）")?.trim();
+        const text = window.prompt(t("文件夹路径（多个用 ; 分隔）"))?.trim();
         return text ? text.split(";").map((x) => x.trim()).filter(Boolean) : [];
       },
     },

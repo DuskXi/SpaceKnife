@@ -27,8 +27,28 @@ from typing import Any
 
 from loguru import logger
 
+from ..i18n import Texts
 from .base import Change, Sink, WatchState, WatchStatus
 from .poll import stat_file
+
+# User-facing text (M7.5): the watch state and why FSEvents could not be used.
+TEXT = Texts(
+    {
+        "missing": "找不到 {name}",
+        "constants": "找不到 CoreFoundation 常量",
+        "started": "监视器已经启动",
+        "start_failed": "FSEventStreamStart 失败",
+        "no_source": "CFRunLoop 没有可运行的源",
+        "no_string": "无法创建路径字符串",
+        "no_array": "无法创建路径数组",
+        "create_failed": "FSEventStreamCreate 失败",
+        "unavailable": "FSEvents 不可用（{error}），实时监控已停止",
+        "root_lost": "扫描根目录已被删除或移走，实时监控已停止",
+        "log_failed": "FSEvents 监视失败：{path}：{error}",
+        "log_callback": "FSEvents 回调出错",
+        "log_sink": "监视器回调出错",
+    }
+)
 
 _CORE_FOUNDATION = "/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation"
 _CORE_SERVICES = "/System/Library/Frameworks/CoreServices.framework/CoreServices"
@@ -135,7 +155,7 @@ class _Api:
             try:
                 f = getattr(lib, name)
             except AttributeError as exc:
-                raise OSError(f"找不到 {name}") from exc
+                raise OSError(TEXT["missing"].format(name=name)) from exc
             f.restype = restype
             f.argtypes = list(argtypes)
             return f
@@ -168,7 +188,7 @@ class _Api:
             self.default_mode = vp.in_dll(cf, "kCFRunLoopDefaultMode").value
             self.array_callbacks = ctypes.addressof(ctypes.c_char.in_dll(cf, "kCFTypeArrayCallBacks"))
         except ValueError as exc:
-            raise OSError("找不到 CoreFoundation 常量") from exc
+            raise OSError(TEXT["constants"]) from exc
 
 
 class FsEventsWatcher:
@@ -194,7 +214,7 @@ class FsEventsWatcher:
 
     def start(self, sink: Sink) -> None:
         if self._thread is not None:
-            raise RuntimeError("监视器已经启动")
+            raise RuntimeError(TEXT["started"])
         self._sink = sink
         self._thread = threading.Thread(target=self._run, name="sk-fsevents", daemon=True)
         self._thread.start()
@@ -235,7 +255,7 @@ class FsEventsWatcher:
             loop = api.current_loop()
             api.schedule(stream, loop, api.default_mode)
             if not api.start(stream):
-                raise OSError("FSEventStreamStart 失败")
+                raise OSError(TEXT["start_failed"])
             started = True
             with self._lock:
                 self._loop = loop
@@ -243,10 +263,10 @@ class FsEventsWatcher:
             self._started.set()
             while not self._stopping and self._state == "running":
                 if api.run_in_mode(api.default_mode, 0.25, 0) == _RUN_FINISHED:
-                    raise OSError("CFRunLoop 没有可运行的源")
+                    raise OSError(TEXT["no_source"])
         except Exception as exc:
-            logger.warning("FSEvents 监视失败：{}：{}", self.root, exc)
-            self._state, self._detail = "failed", f"FSEvents 不可用（{exc}），实时监控已停止"
+            logger.warning(TEXT["log_failed"].format(path=self.root, error=exc))
+            self._state, self._detail = "failed", TEXT["unavailable"].format(error=exc)
             if started:  # events may have been lost since; a stream that never ran lost nothing
                 self._emit([Change("overflow", self.root, is_dir=True)])
         finally:
@@ -263,12 +283,12 @@ class FsEventsWatcher:
         api = self._api
         path = api.string(None, os.fsencode(self.root))
         if not path:
-            raise OSError("无法创建路径字符串")
+            raise OSError(TEXT["no_string"])
         try:
             values = (ctypes.c_void_p * 1)(path)
             paths = api.array(None, values, 1, api.array_callbacks)
             if not paths:
-                raise OSError("无法创建路径数组")
+                raise OSError(TEXT["no_array"])
             try:
                 stream = api.create(None, self._callback, None, paths, _SINCE_NOW, _LATENCY, _CREATE_FLAGS)
             finally:
@@ -276,7 +296,7 @@ class FsEventsWatcher:
         finally:
             api.release(path)
         if not stream:
-            raise OSError("FSEventStreamCreate 失败")
+            raise OSError(TEXT["create_failed"])
         return int(stream)
 
     def _local(self, raw: bytes | None) -> str:
@@ -296,10 +316,10 @@ class FsEventsWatcher:
             if changes:
                 self._emit(changes)
             if root_lost:
-                self._state, self._detail = "failed", "扫描根目录已被删除或移走，实时监控已停止"
+                self._state, self._detail = "failed", TEXT["root_lost"]
                 self._api.stop_loop(self._api.current_loop())
         except Exception:
-            logger.exception("FSEvents 回调出错")
+            logger.exception(TEXT["log_callback"])
 
     def _emit(self, changes: list[Change]) -> None:
         with self._lock:
@@ -310,7 +330,7 @@ class FsEventsWatcher:
             try:
                 self._sink(changes)
             except Exception:
-                logger.exception("监视器回调出错")
+                logger.exception(TEXT["log_sink"])
 
 
 __all__ = ["FsEventsWatcher", "map_events"]

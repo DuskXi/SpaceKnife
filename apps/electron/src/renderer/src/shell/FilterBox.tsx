@@ -7,65 +7,80 @@ import { editFilter, focusPane } from "@/state/actions";
 import { useApp } from "@/state/store";
 import { Icon } from "@/ui/Icon";
 import { classHexNow } from "@/lib/classes";
+import { t } from "@/lib/i18n";
 
-const CONTEXT: Record<string, [string, string]> = {
-  keyword: ["关键字", ":"],
-  class: ["文件类别", ":class:"],
-  tag: ["标签", ":tag:"],
-  attr: ["属性", ":attr:"],
-  unit: ["单位", ""],
-  prefix: ["条件开头", ""],
-};
+// every text is looked up when shown: the interface language can change at any time
+const contextLabel = (context: string): string =>
+  (({ keyword: t("关键字"), class: t("文件类别"), tag: t("标签"), attr: t("属性"), unit: t("单位"), prefix: t("条件开头") }) as Record<string, string>)[context] ?? context;
+const BADGE: Record<string, string> = { keyword: ":", class: ":class:", tag: ":tag:", attr: ":attr:" };
 
-const ATTR_ZH: Record<string, string> = {
-  archive: "归档 · a",
-  system: "系统 · s",
-  readonly: "只读 · r",
-  hidden: "隐藏 · h",
-  compressed: "压缩 · c",
-  encrypted: "加密 · e",
-  offline: "脱机 · o",
-  temporary: "临时 · t",
-  notindexed: "不索引 · ni",
-  sparse: "稀疏 · sp",
-  ads: "备用数据流 · ads",
+/** File attribute names (also the condition capsules of 「匹配结果」). */
+export const attrLabel = (a: string): string =>
+  (({
+    archive: t("归档"),
+    system: t("系统"),
+    readonly: t("只读"),
+    hidden: t("隐藏"),
+    compressed: t("压缩"),
+    encrypted: t("加密"),
+    offline: t("脱机"),
+    temporary: t("临时"),
+    notindexed: t("不索引"),
+    sparse: t("稀疏"),
+    ads: t("备用数据流"),
+  }) as Record<string, string>)[a] ?? a;
+const ATTR_LETTER: Record<string, string> = {
+  archive: "a",
+  system: "s",
+  readonly: "r",
+  hidden: "h",
+  compressed: "c",
+  encrypted: "e",
+  offline: "o",
+  temporary: "t",
+  notindexed: "ni",
+  sparse: "sp",
+  ads: "ads",
 };
-const UNIT_ZH: Record<string, string> = {
-  b: "字节",
-  kb: "KB",
-  mb: "MB",
-  gb: "GB",
-  tb: "TB",
-  pb: "PB",
-  s: "秒",
-  min: "分钟",
-  h: "小时",
-  d: "天",
-  w: "周",
-  month: "月",
-  y: "年",
-};
-export const ERROR_ZH: Record<string, string> = {
-  incomplete: "条件还没写完",
-  unterminated_quote: "引号没有闭合",
-  text_after_quote: "闭合引号后面还有内容",
-  bad_escape: "引号内末尾的反斜杠",
-  backslash_in_mask: "掩码里不能有反斜杠，需要时用引号",
-  bad_char: "掩码里不能有 | < >，需要时用引号",
-  unknown_keyword: "未知关键字",
-  unknown_class: "未知类别",
-  unknown_tag: "未知标签颜色",
-  unknown_attr: "未知属性",
-  bad_list: "列表格式不对",
-  unknown_prefix: "未知前缀",
-  bad_operator: "无法识别的运算符，可用",
-  bad_number: "数字不合法",
-  missing_unit: "缺少单位，可用",
-  unknown_unit: "无法识别的单位，可用",
-  unit_mismatch: "前缀与单位不同类，可用",
-  out_of_range: "数值超出上限",
-  unsupported: "此平台不记录",
-};
+const unitLabel = (unit: string): string =>
+  (({
+    b: t("字节"),
+    kb: "KB",
+    mb: "MB",
+    gb: "GB",
+    tb: "TB",
+    pb: "PB",
+    s: t("秒"),
+    min: t("分钟"),
+    h: t("小时"),
+    d: t("天"),
+    w: t("周"),
+    month: t("月"),
+    y: t("年"),
+  }) as Record<string, string>)[unit] ?? "";
+/** The message of a filter diagnostic code (the backend sends codes, the wording is here). */
+export const errorText = (code: string): string =>
+  (({
+    incomplete: t("条件还没写完"),
+    unterminated_quote: t("引号没有闭合"),
+    text_after_quote: t("闭合引号后面还有内容"),
+    bad_escape: t("引号内末尾的反斜杠"),
+    backslash_in_mask: t("掩码里不能有反斜杠，需要时用引号"),
+    bad_char: t("掩码里不能有 | < >，需要时用引号"),
+    unknown_keyword: t("未知关键字"),
+    unknown_class: t("未知类别"),
+    unknown_tag: t("未知标签颜色"),
+    unknown_attr: t("未知属性"),
+    bad_list: t("列表格式不对"),
+    unknown_prefix: t("未知前缀"),
+    bad_operator: t("无法识别的运算符，可用"),
+    bad_number: t("数字不合法"),
+    missing_unit: t("缺少单位，可用"),
+    unknown_unit: t("无法识别的单位，可用"),
+    unit_mismatch: t("前缀与单位不同类，可用"),
+    out_of_range: t("数值超出上限"),
+    unsupported: t("此平台不记录"),
+  }) as Record<string, string>)[code] ?? code;
 
 /** One filter box per view (split panes each have their own, W8). */
 export const filterInputId = (viewId: string | null) => `sk-filter-${viewId ?? "none"}`;
@@ -96,7 +111,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
   const exact = candidates.length === 1 && candidates[0] === completion?.typed;
   const errors = (parse?.diagnostics ?? []).filter((d) => d.severity === "error");
   const panelOpen = focused && !closed && !!parse && (candidates.length > 0 ? !exact : errors.length > 0);
-  const badge = completion ? CONTEXT[completion.context]?.[1] : undefined;
+  const badge = completion ? BADGE[completion.context] : undefined;
 
   const onInput = (immediate = false) => {
     if (!viewId || !input.current) return;
@@ -148,7 +163,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
   return (
     <div className={`filter${disabled ? " disabled" : ""}${pane ? " pane-filter" : ""}`}>
       <label htmlFor={inputId} className="sr-only">
-        {pane ? `过滤${pane}` : "过滤"}
+        {pane ? t("过滤{pane}", { pane }) : t("过滤")}
       </label>
       <span className="filter-icon">
         <Icon name="filter" />
@@ -161,7 +176,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
         onFocus={() => {
           setFocused(true);
           const st = useApp.getState();
-          const tab = st.tabs.find((t) => viewId && t.viewIds.includes(viewId));
+          const tab = st.tabs.find((x) => viewId && x.viewIds.includes(viewId));
           if (tab && viewId && tab.viewIds.length > 1) focusPane(tab.id, tab.viewIds.indexOf(viewId));
         }}
         ref={input}
@@ -173,7 +188,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
         aria-expanded={panelOpen}
         aria-controls={`${inputId}-panel`}
         aria-invalid={errors.length > 0}
-        placeholder={disabled ? "开始扫描后可以过滤" : pane ? "过滤此窗格" : "按名称、类型、大小过滤，例如 *.mp4; >1gb; :class:视频"}
+        placeholder={disabled ? t("开始扫描后可以过滤") : pane ? t("过滤此窗格") : t("按名称、类型、大小过滤，例如 *.mp4; >1gb; :class:视频")}
         onChange={() => onInput()}
         onKeyDown={onKey}
         onKeyUp={(e) => ["ArrowLeft", "ArrowRight", "Home", "End"].includes(e.key) && onInput()}
@@ -184,8 +199,8 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
       {text ? (
         <button
           className="filter-clear"
-          aria-label={pane ? `清除${pane}过滤` : "清除过滤"}
-          title="清除过滤（Esc）"
+          aria-label={pane ? t("清除{pane}过滤", { pane }) : t("清除过滤")}
+          title={t("清除过滤（Esc）")}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             if (input.current) input.current.value = "";
@@ -202,12 +217,12 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
           {candidates.length > 0 && completion && (
             <>
               <div className="panel-head">
-                <span>{CONTEXT[completion.context]?.[0] ?? completion.context}</span>
+                <span>{contextLabel(completion.context)}</span>
                 {badge && <code className="badge">{badge}</code>}
                 <span className="flex" />
                 <span className="hint">
                   <kbd className="kbd">↑</kbd>
-                  <kbd className="kbd">↓</kbd> 选择 <kbd className="kbd">Tab</kbd> 补全
+                  <kbd className="kbd">↓</kbd> {t("选择")} <kbd className="kbd">Tab</kbd> {t("补全")}
                 </span>
               </div>
               <div className="panel-list">
@@ -217,9 +232,11 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
                     completion.context === "class"
                       ? (cls?.extensions.slice(0, 6).join(" ") ?? "")
                       : completion.context === "attr"
-                        ? (ATTR_ZH[c] ?? "")
+                        ? ATTR_LETTER[c]
+                          ? `${attrLabel(c)} · ${ATTR_LETTER[c]}`
+                          : ""
                         : completion.context === "unit"
-                          ? (UNIT_ZH[c] ?? "")
+                          ? unitLabel(c)
                           : "";
                   return (
                     <div
@@ -244,28 +261,25 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
             <div className="panel-error" role="alert">
               <Icon name="warning" size={14} />
               <code>{errors[0].text || "∅"}</code>
-              <span>
-                {diagnosticText(errors[0])}
-                {errors.length > 1 && `（还有 ${errors.length - 1} 处）`}
-              </span>
+              <span>{errors.length > 1 ? t("{error}（还有 {n} 处）", { error: diagnosticText(errors[0]), n: errors.length - 1 }) : diagnosticText(errors[0])}</span>
             </div>
           )}
           <div className="panel-cheats">
             <span>
-              大小 <code className="t-compare">&gt;1gb</code>
+              {t("大小")} <code className="t-compare">&gt;1gb</code>
             </span>
             <span>
-              时间 <code className="t-compare">m&lt;7d</code>
+              {t("时间")} <code className="t-compare">m&lt;7d</code>
             </span>
             <span>
-              标签 <code className="t-keyword">:red</code>
+              {t("标签")} <code className="t-keyword">:red</code>
             </span>
             <span>
-              属性 <code className="t-keyword">:attr:</code>
+              {t("属性")} <code className="t-keyword">:attr:</code>
               <code className="t-value">h</code>
             </span>
             <span>
-              取反 <code className="t-negate">|</code>
+              {t("取反")} <code className="t-negate">|</code>
             </span>
           </div>
         </div>
@@ -276,7 +290,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
 
 /** The W3 wording of a diagnostic: message plus the accepted spellings (UI-W3-18, UI-W4-32). */
 export function diagnosticText(d: FilterDiagnostic): string {
-  return (ERROR_ZH[d.code] ?? d.code) + (d.expected.length > 0 ? ` ${d.expected.slice(0, 8).join("/")}` : "");
+  return errorText(d.code) + (d.expected.length > 0 ? ` ${d.expected.slice(0, 8).join("/")}` : "");
 }
 
 type Colourable = Pick<FilterParse, "text" | "tokens" | "diagnostics"> & { pending?: FilterParse["pending"] };
@@ -285,7 +299,7 @@ type Colourable = Pick<FilterParse, "text" | "tokens" | "diagnostics"> & { pendi
 export function renderColoured(text: string, parse: Colourable | null): React.ReactNode {
   if (!parse || parse.text !== text) return text;
   const cls = new Array<string>(text.length).fill("");
-  for (const t of parse.tokens) for (let k = t.start; k < t.end && k < text.length; k++) cls[k] = `t-${t.kind}`;
+  for (const tok of parse.tokens) for (let k = tok.start; k < tok.end && k < text.length; k++) cls[k] = `t-${tok.kind}`;
   const err = new Array<boolean>(text.length).fill(false);
   for (const d of parse.diagnostics) {
     if (d.severity !== "error") continue;

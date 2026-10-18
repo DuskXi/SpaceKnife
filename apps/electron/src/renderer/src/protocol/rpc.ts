@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   SUBPROTOCOL,
 } from "./generated";
+import { t } from "@/lib/i18n";
 
 export class RpcError extends Error {
   constructor(
@@ -111,7 +112,7 @@ export class Rpc {
     };
     await new Promise<void>((resolve, reject) => {
       ws.onopen = () => resolve();
-      ws.onerror = () => reject(new Error("无法连接后端"));
+      ws.onerror = () => reject(new Error(t("无法连接后端")));
     });
     this.hello = (await this.callRaw("session.hello", {
       token,

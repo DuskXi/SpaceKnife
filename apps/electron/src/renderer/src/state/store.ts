@@ -21,7 +21,7 @@ import type {
   VolumeInfo,
 } from "@/protocol/generated";
 import type { DrawFrame } from "@/treemap/frame";
-import { getLang, type Lang } from "@/lib/i18n";
+import { getLang, type Lang, t } from "@/lib/i18n";
 
 export type TabKind = "start" | "scan" | "settings";
 
@@ -169,7 +169,8 @@ export interface MenuState {
 let nextTab = 1;
 export const newTabId = () => `tab-${nextTab++}`;
 
-const firstTab: Tab = { id: newTabId(), kind: "start", viewIds: [], focusedPane: 0, title: "新扫描" };
+// in the language guessed at start; applySettings retitles it when the backend's differs
+const firstTab: Tab = { id: newTabId(), kind: "start", viewIds: [], focusedPane: 0, title: t("新扫描") };
 
 export const useApp = create<AppState>(() => ({
   conn: "starting",

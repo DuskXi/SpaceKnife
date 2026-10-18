@@ -25,7 +25,7 @@ from .. import paths
 from ..filter.engine import FilterContext, evaluate
 from ..filter.vocab import platform_vocab
 from ..palette import paths as ppaths
-from ..palette.commands import Context, match, registry
+from ..palette.commands import Context, label, match, registry
 from ..palette.commands import evaluate as command_state
 from ..palette.fuzzy import score, utf16_spans
 from ..palette.recents import Recents
@@ -179,11 +179,12 @@ def install(server: Server) -> None:
             ]
         for cmd, hits in chosen:
             enabled, text = command_state(cmd, ctx)
+            name = label(cmd)  # M7.5: the current language; ``hits`` refer to it
             commands.append(
                 pp.PaletteCommand(
                     id=cmd.id,
-                    name=cmd.name,
-                    hits=spans(cmd.name, hits),
+                    name=name,
+                    hits=spans(name, hits),
                     status=text,
                     enabled=enabled,
                     keys=list(cmd.keys),
@@ -208,7 +209,7 @@ def install(server: Server) -> None:
     async def palette_commands(session: Session, _: Empty) -> pp.PaletteCommandList:
         return pp.PaletteCommandList(
             commands=[
-                pp.PaletteCommand(id=c.id, name=c.name, keys=list(c.keys), icon=c.icon, more=c.more)
+                pp.PaletteCommand(id=c.id, name=label(c), keys=list(c.keys), icon=c.icon, more=c.more)
                 for c in registry()
                 if not c.typed_only
             ]

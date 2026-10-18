@@ -38,7 +38,7 @@ import ntpath
 import os
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import Literal
@@ -46,6 +46,7 @@ from typing import Literal
 import numpy as np
 from loguru import logger
 
+from ..i18n import Texts
 from ..store.nodes import COLUMNS, NAME_ERRORS, OFF_NARROW_LIMIT, Flag, Kind, NodeStore, decode_name
 from ..store.subtree import ranges_to_ids
 
@@ -57,14 +58,16 @@ DOMINANT = 0.5  # changes(): a folder is broken down when significant children h
 MINOR = 0.05  # ... a child is significant from this share of its folder's change
 
 # User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "cancelled": "对比已取消",
-    "direction": "方向只能是 grow 或 shrink",
-    "status.unchanged": "不变",
-    "status.added": "新增",
-    "status.removed": "已删除",
-    "status.changed": "变化",
-}
+TEXT = Texts(
+    {
+        "cancelled": "对比已取消",
+        "direction": "方向只能是 grow 或 shrink",
+        "status.unchanged": "不变",
+        "status.added": "新增",
+        "status.removed": "已删除",
+        "status.changed": "变化",
+    }
+)
 
 
 class Status(IntEnum):
@@ -74,7 +77,20 @@ class Status(IntEnum):
     CHANGED = 3
 
 
-STATUS_LABELS = {s: TEXT[f"status.{s.name.lower()}"] for s in Status}
+class _StatusLabels(Mapping[Status, str]):
+    """The label of each :class:`Status`, in the current language (read when shown)."""
+
+    def __getitem__(self, status: Status) -> str:
+        return TEXT[f"status.{Status(status).name.lower()}"]
+
+    def __iter__(self) -> Iterator[Status]:
+        return iter(Status)
+
+    def __len__(self) -> int:
+        return len(Status)
+
+
+STATUS_LABELS: Mapping[Status, str] = _StatusLabels()
 
 
 class CompareCancelled(Exception):

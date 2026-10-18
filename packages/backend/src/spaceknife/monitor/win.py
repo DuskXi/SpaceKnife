@@ -30,6 +30,7 @@ from typing import Any
 
 from loguru import logger
 
+from ..i18n import Texts
 from .base import Change, Sink, WatchState, WatchStatus
 
 assert sys.platform == "win32"
@@ -85,10 +86,29 @@ CHECK_LOCAL_S = 1.0  # how often the root's identity is checked (calls on the ha
 CHECK_NETWORK_S = 5.0
 CANCEL_WAIT_MS = 2000
 
-ROOT_DELETED = "监视的文件夹已被删除"
-ROOT_MOVED = "监视的文件夹已被移动或改名"
-NO_EXTENDED = "此卷不提供扩展变化信息，文件大小变化需重新列出目录"
-NO_NOTIFY = "此文件系统不支持变化通知"
+# User-facing text (M7.5): watch states and why watching failed.
+TEXT = Texts(
+    {
+        "root_deleted": "监视的文件夹已被删除",
+        "root_moved": "监视的文件夹已被移动或改名",
+        "no_extended": "此卷不提供扩展变化信息，文件大小变化需重新列出目录",
+        "no_notify": "此文件系统不支持变化通知",
+        "error": "错误 {code}",
+        "cannot_watch": "无法监视此文件夹：{reason}",
+        "interrupted": "监视中断：{reason}",
+        "crashed": "监视意外中断：{reason}",
+        "log_join": "文件监视线程未能在 1 秒内结束：{path}",
+        "log_thread": "文件监视线程异常：{path}",
+        "log_sink": "文件变化回调失败：{path}",
+        "log_failed": "文件监视失败：{path}：{detail}",
+        "log_cancel": "文件监视的读取未能取消，保留其缓冲区：{path}",
+    }
+)
+# the Chinese texts (message ids) of the watch states; shown as TEXT[...] in the current language
+ROOT_DELETED = TEXT.raw("root_deleted")
+ROOT_MOVED = TEXT.raw("root_moved")
+NO_EXTENDED = TEXT.raw("no_extended")
+NO_NOTIFY = TEXT.raw("no_notify")
 
 _EPOCH_SECS = 11_644_473_600  # 1601-01-01 → 1970-01-01
 # FILE_NOTIFY_EXTENDED_INFORMATION up to FileName: NextEntryOffset, Action, LastModificationTime,
@@ -162,7 +182,8 @@ def _valid(handle: int | None) -> bool:
 
 
 def _message(err: int) -> str:
-    return ctypes.FormatError(err).strip().rstrip("。.") or f"错误 {err}"
+    text = ctypes.FormatError(err).strip().rstrip("。.")  # i18n: ignore
+    return text or TEXT["error"].format(code=err)
 
 
 def _unix(ft: int) -> int:
@@ -374,7 +395,7 @@ class RdcwWatcher:
         if thread is not None and thread is not threading.current_thread():
             thread.join(1.0)
             if thread.is_alive():
-                logger.warning("文件监视线程未能在 1 秒内结束：{}", self.root)
+                logger.warning(TEXT["log_join"].format(path=self.root))
         with self._lock:
             if self._state != "failed":
                 self._state, self._detail = "stopped", ""
@@ -396,8 +417,8 @@ class RdcwWatcher:
             if self._open() and self._arm():
                 self._loop()
         except Exception as exc:
-            logger.exception("文件监视线程异常：{}", self.root)
-            self._fail(f"监视意外中断：{exc}")
+            logger.exception(TEXT["log_thread"].format(path=self.root))
+            self._fail(TEXT["crashed"].format(reason=exc))
         finally:
             self._close()
 
@@ -412,7 +433,7 @@ class RdcwWatcher:
             None,
         )
         if not _valid(handle):
-            self._fail(f"无法监视此文件夹：{_message(_last_error())}")
+            self._fail(TEXT["cannot_watch"].format(reason=_message(_last_error())))
             return False
         with self._lock:
             self._handle = int(handle)
@@ -440,14 +461,18 @@ class RdcwWatcher:
                 break
         if err:
             if not self._stop.is_set():
-                self._fail(NO_NOTIFY if err in _UNSUPPORTED else f"无法监视此文件夹：{_message(err)}")
+                self._fail(
+                    TEXT["no_notify"]
+                    if err in _UNSUPPORTED
+                    else TEXT["cannot_watch"].format(reason=_message(err))
+                )
             return False
         with self._lock:
             self._armed = True
             if not self._stop.is_set():
-                self._state, self._detail = "running", "" if self.extended else NO_EXTENDED
+                self._state, self._detail = "running", "" if self.extended else TEXT["no_extended"]
         logger.debug(
-            "开始监视 {}（{}，缓冲区 {} KiB）",
+            "watching {} ({}, buffer {} KiB)",
             self.root,
             "ReadDirectoryChangesExW" if self.extended else "ReadDirectoryChangesW",
             self.buffer_size >> 10,
@@ -492,7 +517,7 @@ class RdcwWatcher:
             if r == WAIT_TIMEOUT:
                 self._deliver(self._decoder.flush())
             elif r != WAIT_OBJECT_0:
-                self._fail(f"监视意外中断：{_message(_last_error())}")
+                self._fail(TEXT["crashed"].format(reason=_message(_last_error())))
                 return
             elif not self._completion():
                 return
@@ -529,7 +554,7 @@ class RdcwWatcher:
         self._completed += 1
         reissue = self._issue()  # keep a read pending while this batch is decoded and delivered
         if overflow:
-            logger.debug("文件监视缓冲区溢出：{}", self.root)
+            logger.debug("change buffer overflow: {}", self.root)
             batch = [*self._decoder.flush(), self._overflow()]
         else:
             batch = self._decoder.decode(data)
@@ -552,7 +577,7 @@ class RdcwWatcher:
         try:
             sink(batch)
         except Exception:
-            logger.exception("文件变化回调失败：{}", self.root)
+            logger.exception(TEXT["log_sink"].format(path=self.root))
 
     def _fail(self, detail: str) -> None:
         if self._stop.is_set():
@@ -560,7 +585,7 @@ class RdcwWatcher:
         with self._lock:
             self._state, self._detail = "failed", detail
             armed = self._armed
-        logger.warning("文件监视失败：{}：{}", self.root, detail)
+        logger.warning(TEXT["log_failed"].format(path=self.root, detail=detail))
         if armed:
             self._deliver([*self._decoder.flush(), self._overflow()])
 
@@ -569,8 +594,8 @@ class RdcwWatcher:
         if problem:
             return problem
         if err in _UNSUPPORTED:
-            return NO_NOTIFY
-        return f"监视中断：{_message(err)}"
+            return TEXT["no_notify"]
+        return TEXT["interrupted"].format(reason=_message(err))
 
     def _root_problem(self, *, lookup: bool) -> str:
         """Whether the root is gone: deleted (delete pending, or POSIX-style) or moved. Without
@@ -585,13 +610,17 @@ class RdcwWatcher:
             )
             and info.DeletePending
         ):
-            return ROOT_DELETED
+            return TEXT["root_deleted"]
         final = _final_path(handle)
         if self._final and final and os.path.normcase(final) != os.path.normcase(self._final):
             # a POSIX-style delete moves the still-open folder to \$Extend\$Deleted
-            return ROOT_DELETED if "\\$extend\\$deleted\\" in os.path.normcase(final) else ROOT_MOVED
+            return (
+                TEXT["root_deleted"]
+                if "\\$extend\\$deleted\\" in os.path.normcase(final)
+                else TEXT["root_moved"]
+            )
         if lookup and not os.path.isdir(self.root):
-            return ROOT_DELETED
+            return TEXT["root_deleted"]
         return ""
 
     def _close(self) -> None:
@@ -602,7 +631,7 @@ class RdcwWatcher:
             _k32.CancelIoEx(handle, ctypes.byref(self._ov))
             # the buffer and OVERLAPPED must outlive the read: wait for the cancellation
             if int(_k32.WaitForSingleObject(self._io_event, CANCEL_WAIT_MS)) != WAIT_OBJECT_0:
-                logger.warning("文件监视的读取未能取消，保留其缓冲区：{}", self.root)
+                logger.warning(TEXT["log_cancel"].format(path=self.root))
                 _leaked.append((self._buf, self._ov))
         if handle is not None:
             _k32.CloseHandle(handle)

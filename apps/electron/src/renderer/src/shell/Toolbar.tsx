@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { call, setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
+import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
 import { ComparePicker, DirectionSegment, ExitCompare } from "./Compare";
@@ -28,20 +29,20 @@ export function Toolbar() {
   const split = scanTab && !cmp && tab.viewIds.length > 1;
 
   return (
-    <div className="toolbar" role="toolbar" aria-label="视图工具栏">
-      <nav className="nav" aria-label="导航">
-        <IconBtn icon="back" label="后退" keys="Backspace" disabled={!canBack} onClick={() => (settingsTab ? settingsHistory(-1) : void viewCall(viewId, "view.back"))} />
-        <IconBtn icon="forward" label="前进" keys="Alt+→" disabled={!canForward} onClick={() => (settingsTab ? settingsHistory(1) : void viewCall(viewId, "view.forward"))} />
-        <IconBtn icon="up" label="上一级" keys="Alt+↑" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.up")} />
-        <IconBtn icon="home" label="根" keys="Ctrl+Home" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.home")} />
+    <div className="toolbar" role="toolbar" aria-label={t("视图工具栏")}>
+      <nav className="nav" aria-label={t("导航")}>
+        <IconBtn icon="back" label={t("后退")} keys="Backspace" disabled={!canBack} onClick={() => (settingsTab ? settingsHistory(-1) : void viewCall(viewId, "view.back"))} />
+        <IconBtn icon="forward" label={t("前进")} keys="Alt+→" disabled={!canForward} onClick={() => (settingsTab ? settingsHistory(1) : void viewCall(viewId, "view.forward"))} />
+        <IconBtn icon="up" label={t("上一级")} keys="Alt+↑" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.up")} />
+        <IconBtn icon="home" label={t("根")} keys="Ctrl+Home" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.home")} />
       </nav>
       <div className="vsep" />
       {settingsTab ? (
-        <nav className="crumbs" aria-label="当前位置">
+        <nav className="crumbs" aria-label={t("当前位置")}>
           <span className="crumb-seg">
             <button className="crumb" onClick={() => settingsGo("general")}>
               <Icon name="settings" />
-              设置
+              {t("设置")}
             </button>
           </span>
           <span className="crumb-seg">
@@ -58,10 +59,10 @@ export function Toolbar() {
       ) : scanTab && !split ? (
         <Breadcrumb viewId={viewId} />
       ) : !scanTab ? (
-        <nav className="crumbs" aria-label="当前位置">
+        <nav className="crumbs" aria-label={t("当前位置")}>
           <span className="crumb-cur">
             <Icon name="drive" />
-            新扫描
+            {t("新扫描")}
           </span>
         </nav>
       ) : (
@@ -73,16 +74,16 @@ export function Toolbar() {
         {cmp && (
           <>
             {st && viewId && (
-              <div className="stepper" role="group" aria-label="细节层级">
-                <button aria-label="降低细节层级（Ctrl+-）" title="降低细节层级（Ctrl+-）" disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
+              <div className="stepper" role="group" aria-label={t("细节层级")}>
+                <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
                   <Icon name="minus" size={14} />
                 </button>
                 <div className="stepper-mid">
                   <Icon name="layers" size={14} />
-                  <span className="muted">层级</span>
+                  <span className="muted">{t("层级")}</span>
                   <span className="num">{st.detail}</span>
                 </div>
-                <button aria-label="提高细节层级（Ctrl+=）" title="提高细节层级（Ctrl+=）" disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
+                <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
                   <Icon name="plus" size={14} />
                 </button>
               </div>
@@ -90,56 +91,56 @@ export function Toolbar() {
             {viewId && <DirectionSegment viewId={viewId} />}
             <ExitCompare tab={tab} />
             <div className="vsep wide" />
-            <IconBtn icon="split" label="对比模式下不能分屏" disabled onClick={() => undefined} />
+            <IconBtn icon="split" label={t("对比模式下不能分屏")} disabled onClick={() => undefined} />
           </>
         )}
         {scanTab && st && !cmp && (
           <>
-            <div className="stepper" role="group" aria-label="细节层级">
-              <button aria-label="降低细节层级（Ctrl+-）" title="降低细节层级（Ctrl+-）" disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
+            <div className="stepper" role="group" aria-label={t("细节层级")}>
+              <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
                 <Icon name="minus" size={14} />
               </button>
               <div className="stepper-mid">
                 <Icon name="layers" size={14} />
-                <span className="muted">层级</span>
+                <span className="muted">{t("层级")}</span>
                 <span className="num">{st.detail}</span>
               </div>
-              <button aria-label="提高细节层级（Ctrl+=）" title="提高细节层级（Ctrl+=）" disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
+              <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
                 <Icon name="plus" size={14} />
               </button>
             </div>
-            <div className="segmented" role="radiogroup" aria-label="配色" title="配色（C）">
+            <div className="segmented" role="radiogroup" aria-label={t("配色")} title={t("配色（C）")}>
               <span className="seg-icon">
                 <Icon name="palette" size={14} />
               </span>
               {(["class", "flat", "time"] as const).map((m) => (
                 <button key={m} role="radio" aria-checked={st.color_mode === m} className={st.color_mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { color_mode: m })}>
-                  {{ class: "类别", flat: "扁平", time: "时间" }[m]}
+                  {{ class: t("类别"), flat: t("扁平"), time: t("时间") }[m]}
                 </button>
               ))}
             </div>
-            <button className={`chip${st.show_free ? " on" : ""}`} aria-pressed={st.show_free} title="可用空间（F）" onClick={() => void setViewSettings(viewId, { show_free: !st.show_free })}>
+            <button className={`chip${st.show_free ? " on" : ""}`} aria-pressed={st.show_free} title={t("可用空间（F）")} onClick={() => void setViewSettings(viewId, { show_free: !st.show_free })}>
               <span className="chip-swatch free" />
-              可用空间
+              {t("可用空间")}
             </button>
-            <button className={`chip${st.show_unknown ? " on" : ""}`} aria-pressed={st.show_unknown} title="未知空间（U）" onClick={() => void setViewSettings(viewId, { show_unknown: !st.show_unknown })}>
+            <button className={`chip${st.show_unknown ? " on" : ""}`} aria-pressed={st.show_unknown} title={t("未知空间（U）")} onClick={() => void setViewSettings(viewId, { show_unknown: !st.show_unknown })}>
               <span className="chip-swatch unknown" />
-              未知空间
+              {t("未知空间")}
             </button>
             <div className="vsep wide" />
-            <IconBtn icon="split" label="分屏" pressed={split} onClick={() => void toggleSplit()} />
+            <IconBtn icon="split" label={t("分屏")} pressed={split} onClick={() => void toggleSplit()} />
           </>
         )}
-        <button className={`palette-btn${paletteOpen ? " on" : ""}`} aria-label="命令面板（Ctrl+K）" title="命令面板（Ctrl+K）" aria-expanded={paletteOpen} onClick={() => set({ paletteOpen: !paletteOpen })}>
+        <button className={`palette-btn${paletteOpen ? " on" : ""}`} aria-label={t("命令面板（Ctrl+K）")} title={t("命令面板（Ctrl+K）")} aria-expanded={paletteOpen} onClick={() => set({ paletteOpen: !paletteOpen })}>
           <Icon name="command" />
           <Kbd>Ctrl+K</Kbd>
         </button>
         {tab.kind !== "settings" && (
           <button
             className={`icon-btn basket${basketOpen ? " on" : ""}`}
-            aria-label={`删除篮，${basket} 项`}
+            aria-label={t("删除篮，{n} 项", { n: basket })}
             aria-pressed={basketOpen}
-            title="删除篮"
+            title={t("删除篮")}
             onClick={() => set({ basketOpen: !basketOpen })}
           >
             <Icon name="basket" />
@@ -152,7 +153,7 @@ export function Toolbar() {
 }
 
 function IconBtn(props: { icon: Parameters<typeof Icon>[0]["name"]; label: string; keys?: string; disabled?: boolean; pressed?: boolean; onClick: () => void }) {
-  const title = props.keys ? `${props.label}（${props.keys}）` : props.label;
+  const title = props.keys ? t("{label}（{keys}）", { label: props.label, keys: props.keys }) : props.label;
   return (
     <button className={`icon-btn${props.pressed ? " on" : ""}`} aria-label={title} title={title} aria-pressed={props.pressed} disabled={props.disabled} onClick={props.onClick}>
       <Icon name={props.icon} />
@@ -191,7 +192,7 @@ function Breadcrumb({ viewId }: { viewId: string | null }) {
     try {
       const found = await call("tree.find", { scan_id: tab.scanId, path });
       if (!found.node) {
-        setError("路径不存在，或不在本次扫描范围内");
+        setError(t("路径不存在，或不在本次扫描范围内"));
         return;
       }
       await viewCall(viewId, "view.zoom", { key: found.node.id });
@@ -208,7 +209,7 @@ function Breadcrumb({ viewId }: { viewId: string | null }) {
         <input
           ref={input}
           spellCheck={false}
-          aria-label="路径"
+          aria-label={t("路径")}
           aria-invalid={!!error}
           onKeyDown={(e) => {
             e.stopPropagation();
@@ -225,13 +226,13 @@ function Breadcrumb({ viewId }: { viewId: string | null }) {
     );
   }
   const label = (c: { label: string }, i: number) => {
-    if (c.label.startsWith("small:")) return `${Number(c.label.slice(6)).toLocaleString("en-US")} 个小项`;
-    if (c.label.startsWith("more:")) return `+${Number(c.label.slice(5)).toLocaleString("en-US")} 项`;
+    if (c.label.startsWith("small:")) return t("{n} 个小项", { n: Number(c.label.slice(6)).toLocaleString("en-US") });
+    if (c.label.startsWith("more:")) return t("+{n} 项", { n: Number(c.label.slice(5)).toLocaleString("en-US") });
     if (i === 0 && whole) return tab.title;
     return c.label.split(/[\\/]/).filter(Boolean).pop() ?? c.label;
   };
   return (
-    <nav className="crumbs" aria-label="当前位置">
+    <nav className="crumbs" aria-label={t("当前位置")}>
       {crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
         return (
@@ -243,7 +244,7 @@ function Breadcrumb({ viewId }: { viewId: string | null }) {
             )}
             <button
               className={last ? "crumb-cur" : "crumb"}
-              aria-label={last ? `${label(c, i)}，编辑路径（Ctrl+L）` : label(c, i)}
+              aria-label={last ? t("{name}，编辑路径（Ctrl+L）", { name: label(c, i) }) : label(c, i)}
               onClick={() => {
                 if (last) setEditing(true);
                 else void jumpUp(viewId, crumbs.length - 1 - i);
@@ -255,7 +256,7 @@ function Breadcrumb({ viewId }: { viewId: string | null }) {
           </span>
         );
       })}
-      {atRoot && whole && <span className="crumb-note">整个卷</span>}
+      {atRoot && whole && <span className="crumb-note">{t("整个卷")}</span>}
     </nav>
   );
 }

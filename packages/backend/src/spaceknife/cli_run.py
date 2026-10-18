@@ -38,101 +38,86 @@ from rich.table import Table
 from rich.text import Text
 
 from . import fmt
+from .cli_scan import apply_language
 from .export import BUILTIN_INFO, FORMATS, ExportError, ExportFormat, export_chunks, resolve, write_export
 from .export.template import ExportTree, Ordering
+from .i18n import Texts, tr
 from .scan.scanner import ScanError, Scanner, ScanProgress, ScanState, native_slicer, native_threads
 from .store import snapshot
 from .store.nodes import NodeStore
 
-# User-facing text of this module (M7.5 extracts it for translation).
-TEXT: dict[str, str] = {
-    "unknown": "未知的命令「{word}」（可用：help scan load filter save export autoclose）",
-    "incomplete": "命令 {name} 不完整，写法：{usage}",
-    "no_view": "{name} 前面没有 scan 或 load：它要作用于前一个打开的视图",
-    "unclosed": "参数缺少结尾的分隔符 {delim}",
-    "bad_delim": "元命令 {word} 无效：@delim= 后面应是一个或两个字符",
-    "meta_after_os": "@parser=OS 之后不能再用元命令：{word}",
-    "errors": "命令行有误，没有执行任何命令：",
-    "help_hint": "运行 spaceknife run help 查看用法。",
-    "scanning": "扫描中",
-    "scan_failed": "无法扫描 {paths}：{reason}",
-    "scan_stopped": "扫描没有完成（{state}）：{paths}",
-    "scanned": "已扫描 {paths}：{items} 项，占用 {size}，用时 {time}",
-    "denied": "{count} 个文件夹无法访问，例如 {example}",
-    "load_failed": "无法打开快照 {path}：{reason}",
-    "load_sns": "{path} 看起来是 SpaceSniffer 快照（.sns）：这种格式没有公开，SpaceKnife 读不了",
-    "load_many": "一个 load 只能打开一个快照；要打开多个，请写多个 load",
-    "loaded": "已打开快照 {path}：{items} 项，占用 {size}",
-    "filter_failed": "过滤表达式有误：{expr}",
-    "filter_diag": "  第 {start} 个字符起「{text}」：{reason}",
-    "filtered": "过滤 {expr}：{count} 个文件，占用 {size}",
-    "saved": "已保存快照 {path}（{size}）",
-    "save_failed": "无法保存快照 {path}：{reason}",
-    "template_errors": "模板「{name}」有错误，没有导出：",
-    "template_issue": "  第 {line} 行第 {column} 列（{section}）：{message}",
-    "exported": "已导出（{what}）到 {path}（{size}）",
-    "export_failed": "无法写入 {path}：{reason}",
-    "interrupted": "已中断",
-    "view_title": "视图 {index}：{label}",
-    "col_name": "名称",
-    "col_disk": "占用",
-    "col_share": "占比",
-    "view_total": "共 {files} 个文件、{folders} 个文件夹，占用 {size}",
-    "view_filter": "过滤 {expr}",
-    "rest": "…其余 {count} 项",
-}
-FILTER_REASONS: dict[str, str] = {  # docs/filter-syntax.md, section 8 (the frontends localise by code)
-    "incomplete": "条件缺少必需的部分",
-    "unterminated_quote": "引号没有闭合",
-    "text_after_quote": "闭合引号后还有内容",
-    "bad_escape": "引号内末尾的 \\",
-    "backslash_in_mask": "不带引号的掩码里有 \\",
-    "bad_char": "不带引号的掩码里有 | < >",
-    "unknown_keyword": "未知关键字",
-    "unknown_class": "未知类别",
-    "unknown_tag": "未知标签",
-    "unknown_attr": "未知属性",
-    "bad_list": "列表格式不对",
-    "unknown_prefix": "未知前缀",
-    "bad_operator": "运算符应为 < > <= >=",
-    "bad_number": "数字不合法",
-    "missing_unit": "缺少单位",
-    "unknown_unit": "未知单位",
-    "unit_mismatch": "前缀与单位不同类",
-    "out_of_range": "数值超出上限",
-    "unsupported": "当前平台不记录这项属性或时间（警告）",
-}
-USAGE: dict[str, str] = {
-    "help": "help",
-    "scan": 'scan "<路径>"',
-    "load": 'load "<快照>"',
-    "filter": 'filter "<表达式>"',
-    "save": 'save "<文件>"',
-    "export": 'export "<模板>" "<文件>"',
-    "autoclose": "autoclose",
-}
-HELP = """spaceknife run <命令序列>
-
-按顺序执行与 SpaceSniffer 相同的命令，不打开窗口。整个序列先检查一遍，有错就一条也不执行。
-
-  help                       显示本帮助
-  scan "<路径>"              扫描文件夹或磁盘，打开一个视图；多个路径用 ; 分隔（同一个视图）
-  load "<快照>"              打开 SpaceKnife 快照（.sks），打开一个视图
-  filter "<表达式>"          对前一个视图应用过滤（语法见 docs/filter-syntax.md）
-  save "<文件>"              把前一个视图的完整结果保存为快照（不受过滤影响）
-  export "<模板>" "<文件>"   把前一个视图导出到文件（过滤后的内容）；<模板> 是内置模板名、
-                             csv / json / html，或模板文件的路径（语法见 docs/export-templates.md）
-  autoclose                  结束时不显示视图摘要
-
-元命令（必须是一个不带分隔符的词）：
-  @delim=X  @delim=XY        之后的参数改用 X 作分隔符（或 X 开头、Y 结尾），默认是 "
-  @parser=OS                 改用系统拆分的参数从头再解析一次，之后不再接受元命令
-
-内置模板：{builtins}
-导出格式：{formats}
-
-例：spaceknife run scan "D:\\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
-"""
+# User-facing text of this module, translated when read (M7.5).
+TEXT = Texts(
+    {
+        "unknown": "未知的命令「{word}」（可用：help scan load filter save export autoclose）",
+        "incomplete": "命令 {name} 不完整，写法：{usage}",
+        "no_view": "{name} 前面没有 scan 或 load：它要作用于前一个打开的视图",
+        "unclosed": "参数缺少结尾的分隔符 {delim}",
+        "bad_delim": "元命令 {word} 无效：@delim= 后面应是一个或两个字符",
+        "meta_after_os": "@parser=OS 之后不能再用元命令：{word}",
+        "errors": "命令行有误，没有执行任何命令：",
+        "help_hint": "运行 spaceknife run help 查看用法。",
+        "scanning": "扫描中",
+        "scan_failed": "无法扫描 {paths}：{reason}",
+        "scan_stopped": "扫描没有完成（{state}）：{paths}",
+        "scanned": "已扫描 {paths}：{items} 项，占用 {size}，用时 {time}",
+        "denied": "{count} 个文件夹无法访问，例如 {example}",
+        "load_failed": "无法打开快照 {path}：{reason}",
+        "load_sns": "{path} 看起来是 SpaceSniffer 快照（.sns）：这种格式没有公开，SpaceKnife 读不了",
+        "load_many": "一个 load 只能打开一个快照；要打开多个，请写多个 load",
+        "loaded": "已打开快照 {path}：{items} 项，占用 {size}",
+        "filter_failed": "过滤表达式有误：{expr}",
+        "filter_diag": "  第 {start} 个字符起「{text}」：{reason}",
+        "filtered": "过滤 {expr}：{count} 个文件，占用 {size}",
+        "saved": "已保存快照 {path}（{size}）",
+        "save_failed": "无法保存快照 {path}：{reason}",
+        "template_errors": "模板「{name}」有错误，没有导出：",
+        "template_issue": "  第 {line} 行第 {column} 列（{section}）：{message}",
+        "exported": "已导出（{what}）到 {path}（{size}）",
+        "export_failed": "无法写入 {path}：{reason}",
+        "interrupted": "已中断",
+        "view_title": "视图 {index}：{label}",
+        "col_name": "名称",
+        "col_disk": "占用",
+        "col_share": "占比",
+        "view_total": "共 {files} 个文件、{folders} 个文件夹，占用 {size}",
+        "view_filter": "过滤 {expr}",
+        "rest": "…其余 {count} 项",
+    }
+)
+# docs/filter-syntax.md, section 8 (the frontends localise by code)
+FILTER_REASONS = Texts(
+    {
+        "incomplete": "条件缺少必需的部分",
+        "unterminated_quote": "引号没有闭合",
+        "text_after_quote": "闭合引号后还有内容",
+        "bad_escape": "引号内末尾的 \\",
+        "backslash_in_mask": "不带引号的掩码里有 \\",
+        "bad_char": "不带引号的掩码里有 | < >",
+        "unknown_keyword": "未知关键字",
+        "unknown_class": "未知类别",
+        "unknown_tag": "未知标签",
+        "unknown_attr": "未知属性",
+        "bad_list": "列表格式不对",
+        "unknown_prefix": "未知前缀",
+        "bad_operator": "运算符应为 < > <= >=",
+        "bad_number": "数字不合法",
+        "missing_unit": "缺少单位",
+        "unknown_unit": "未知单位",
+        "unit_mismatch": "前缀与单位不同类",
+        "out_of_range": "数值超出上限",
+        "unsupported": "当前平台不记录这项属性或时间（警告）",
+    }
+)
+USAGE = Texts(  # how a command with parameters is written (the others: just the name)
+    {
+        "scan": 'scan "<路径>"',
+        "load": 'load "<快照>"',
+        "filter": 'filter "<表达式>"',
+        "save": 'save "<文件>"',
+        "export": 'export "<模板>" "<文件>"',
+    }
+)
 ARITY: dict[str, int] = {"help": 0, "scan": 1, "load": 1, "filter": 1, "save": 1, "export": 2, "autoclose": 0}
 VIEW_COMMANDS = ("scan", "load")
 CONTEXT_SETTINGS: dict[str, Any] = {"allow_extra_args": True, "ignore_unknown_options": True}
@@ -273,7 +258,7 @@ def group(words: Sequence[str]) -> tuple[list[Command], list[str]]:
             i += 1
             continue
         if len(words) - i - 1 < arity:
-            errors.append(TEXT["incomplete"].format(name=name, usage=USAGE[name]))
+            errors.append(TEXT["incomplete"].format(name=name, usage=USAGE.get(name, name)))
             break
         commands.append(Command(name, tuple(words[i + 1 : i + 1 + arity])))
         i += 1 + arity
@@ -362,7 +347,7 @@ class View:
 
 
 class CommandFailed(Exception):
-    """A command could not run; the message is for the user (Chinese)."""
+    """A command could not run; the message is for the user (in the interface language)."""
 
 
 def _split_paths(arg: str, *, folder: bool) -> list[str]:
@@ -614,7 +599,32 @@ class Runner:
 
 
 def help_text() -> str:
-    return HELP.format(builtins="、".join(BUILTIN_INFO), formats=" / ".join(FORMATS))
+    return tr(
+        """spaceknife run <命令序列>
+
+按顺序执行与 SpaceSniffer 相同的命令，不打开窗口。整个序列先检查一遍，有错就一条也不执行。
+
+  help                       显示本帮助
+  scan "<路径>"              扫描文件夹或磁盘，打开一个视图；多个路径用 ; 分隔（同一个视图）
+  load "<快照>"              打开 SpaceKnife 快照（.sks），打开一个视图
+  filter "<表达式>"          对前一个视图应用过滤（语法见 docs/filter-syntax.md）
+  save "<文件>"              把前一个视图的完整结果保存为快照（不受过滤影响）
+  export "<模板>" "<文件>"   把前一个视图导出到文件（过滤后的内容）；<模板> 是内置模板名、
+                             csv / json / html，或模板文件的路径（语法见 docs/export-templates.md）
+  autoclose                  结束时不显示视图摘要
+
+元命令（必须是一个不带分隔符的词）：
+  @delim=X  @delim=XY        之后的参数改用 X 作分隔符（或 X 开头、Y 结尾），默认是 "
+  @parser=OS                 改用系统拆分的参数从头再解析一次，之后不再接受元命令
+
+内置模板：{builtins}
+导出格式：{formats}
+
+例：spaceknife run scan "D:\\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
+""",
+        builtins=tr("、").join(BUILTIN_INFO),
+        formats=" / ".join(FORMATS),
+    )
 
 
 def main(
@@ -654,6 +664,7 @@ def run(ctx: typer.Context) -> None:
     from .log import LogFormat, setup_logging
 
     setup_logging("WARNING", LogFormat.RICH)
+    apply_language()
     from . import classes
 
     classes.load_user()  # the user's file classes (W7) also apply to :class: here

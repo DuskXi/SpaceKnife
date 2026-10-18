@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 from spaceknife_protocol.settings import SettingMeta, SettingOption, SettingsState, SettingValue
 
 from . import i18n, paths
-from .i18n import _
+from .i18n import Texts, _
 
 FILE_VERSION = 1
 IS_WIN = sys.platform == "win32"
@@ -53,27 +53,33 @@ class Spec:
     kind: type = field(default=str)
 
 
-def _monitor_text() -> str:
-    if IS_WIN:
-        return "使用 USN 日志 + ReadDirectoryChangesEx，变化的文件会闪烁提示"
-    if IS_MAC:
-        return "使用 FSEvents，变化的文件会闪烁提示"
-    return "使用 fanotify / inotify，变化的文件会闪烁提示"
-
-
-LOAD_LEVELS: tuple[tuple[SettingValue, str], ...] = (
-    ("max", "极速"),
-    ("balanced", "均衡 70%"),
-    ("quiet", "安静 35%"),
-    ("idle", "空闲"),
-    ("custom", "自定义"),
+# User-facing text, translated when shown (M7.5).
+TEXT = Texts(
+    {
+        "invalid_value": "「{name}」的值不合法：{msg}",
+        "unreadable": "无法读取设置文件：{reason}",
+        "invalid_file": "设置文件不合法，继续使用上一次的有效设置：{reason}",
+        "unknown": "未知设置：{keys}",
+        "locked": "这些设置在当前版本不可修改：{names}",
+        "conflict": "设置已被其他窗口修改（版本 {version}）",
+    }
 )
+# the load levels' labels (message ids: settings.meta() translates the options when shown)
+LOAD_LABELS = Texts(
+    {
+        "max": "极速",
+        "balanced": "均衡 70%",
+        "quiet": "安静 35%",
+        "idle": "空闲",
+        "custom": "自定义",
+    }
+)
+LOAD_LEVELS: tuple[tuple[SettingValue, str], ...] = tuple((k, LOAD_LABELS.raw(k)) for k in LOAD_LABELS)
 ACCENTS = ("#8B9CFF", "#D4FF3A", "#5EC8B8", "#F2A65A")
 
 
 def _registry() -> tuple[Spec, ...]:
     S = Spec
-    mft_reason = "" if IS_WIN else "只在 Windows 的 NTFS 卷上可用"
     return (
         # ------------------------------------------------------------ 常规
         S(
@@ -84,8 +90,12 @@ def _registry() -> tuple[Spec, ...]:
             "切换后全部文字、日期与数字格式立即更换",
             "segmented",
             "system",
-            (("system", "跟随系统"), ("zh-CN", "简体中文"), ("en", "English")),
-            synonyms=("language", "locale", "中文", "english"),
+            (
+                ("system", "跟随系统"),
+                ("zh-CN", "简体中文"),  # named in its own language  # i18n: ignore
+                ("en", "English"),
+            ),
+            synonyms=("language", "locale", "中文", "english"),  # i18n: ignore
             kind=str,
         ),
         S(
@@ -445,7 +455,11 @@ def _registry() -> tuple[Spec, ...]:
             "其他位置硬扫描",
             "segmented",
             "auto",
-            (("auto", "自动"), ("mft", "快速 MFT", mft_reason), ("hard", "硬扫描")),
+            (
+                ("auto", "自动"),
+                ("mft", "快速 MFT", "" if IS_WIN else "只在 Windows 的 NTFS 卷上可用"),
+                ("hard", "硬扫描"),
+            ),
             applies="next_scan",
             synonyms=("mft", "fast", "hard", "method"),
             kind=str,
@@ -458,7 +472,7 @@ def _registry() -> tuple[Spec, ...]:
             "仅启动只读扫描助手，主程序不提权；关闭后没有管理员权限时直接改用硬扫描",
             "switch",
             True,
-            reason=mft_reason,
+            reason="" if IS_WIN else "只在 Windows 的 NTFS 卷上可用",
             synonyms=("admin", "uac", "elevate", "helper"),
             kind=bool,
         ),
@@ -618,7 +632,13 @@ def _registry() -> tuple[Spec, ...]:
             "scan",
             "实时监控",
             "实时监控",
-            _monitor_text(),
+            (
+                "使用 USN 日志 + ReadDirectoryChangesEx，变化的文件会闪烁提示"
+                if IS_WIN
+                else "使用 FSEvents，变化的文件会闪烁提示"
+                if IS_MAC
+                else "使用 fanotify / inotify，变化的文件会闪烁提示"
+            ),
             "switch",
             True,
             synonyms=("monitor", "watch", "usn", "inotify", "fsevents", "hooks"),
@@ -773,7 +793,7 @@ def _registry() -> tuple[Spec, ...]:
             step=5,
             unit="%",
             applies="next_scan",
-            synonyms=("memory", "ram", "mmap", "budget", "swap", "内存映射"),
+            synonyms=("memory", "ram", "mmap", "budget", "swap", "内存映射"),  # i18n: ignore
             kind=int,
         ),
     )
@@ -825,8 +845,8 @@ def validate(values: dict[str, Any]) -> dict[str, SettingValue]:
     except ValidationError as exc:
         err = exc.errors()[0]
         key = str(err["loc"][0]) if err["loc"] else "?"
-        name = BY_KEY[key].name if key in BY_KEY else key
-        raise SettingsError(f"「{name}」的值不合法：{err['msg']}") from exc
+        name = _(BY_KEY[key].name) if key in BY_KEY else key
+        raise SettingsError(TEXT["invalid_value"].format(name=name, msg=err["msg"])) from exc
     return model.model_dump(by_alias=True)
 
 
@@ -883,7 +903,7 @@ class SettingsStore:
         self._lock = threading.Lock()
         self.version = 0
         self.values: dict[str, SettingValue] = dict(DEFAULTS)
-        self.error = ""
+        self._error: tuple[str, str] | None = None  # (TEXT key, reason): translated when shown
         self._mtime: float | None = None
         self.listeners: dict[str, Callable[[SettingsStore], None]] = {}
         self._load()
@@ -897,18 +917,18 @@ class SettingsStore:
             self._mtime = None
             return False
         except OSError as exc:
-            self.error = f"无法读取设置文件：{exc.strerror or exc}"
+            self._error = ("unreadable", str(exc.strerror or exc))
             return False
         self._mtime = stat.st_mtime
         try:
             doc = SettingsFile.model_validate(json.loads(self.file.read_text(encoding="utf-8")))
             values = validate({**DEFAULTS, **doc.values})
         except (ValueError, ValidationError) as exc:
-            self.error = f"设置文件不合法，继续使用上一次的有效设置：{exc}"
+            self._error = ("invalid_file", str(exc))
             logger.warning("settings file {} is invalid: {}", self.file, exc)
             return False
         changed = values != self.values
-        self.values, self.error = values, ""
+        self.values, self._error = values, None
         return changed
 
     def _save(self) -> None:
@@ -936,6 +956,14 @@ class SettingsStore:
             self._notify()
         return changed
 
+    @property
+    def error(self) -> str:
+        """What is wrong with the settings file, in the current language ("" when nothing is)."""
+        if self._error is None:
+            return ""
+        key, reason = self._error
+        return TEXT[key].format(reason=reason)
+
     # ------------------------------------------------------------ access
 
     def get(self, key: str) -> SettingValue:
@@ -944,13 +972,13 @@ class SettingsStore:
     def update(self, patch: dict[str, SettingValue], version: int | None = None) -> None:
         unknown = [k for k in patch if k not in BY_KEY]
         if unknown:
-            raise SettingsError(f"未知设置：{', '.join(unknown)}")
-        locked = [BY_KEY[k].name for k, v in patch.items() if BY_KEY[k].reason and v != self.values[k]]
+            raise SettingsError(TEXT["unknown"].format(keys=", ".join(unknown)))
+        locked = [_(BY_KEY[k].name) for k, v in patch.items() if BY_KEY[k].reason and v != self.values[k]]
         if locked:
-            raise SettingsError(f"这些设置在当前版本不可修改：{'、'.join(locked)}")
+            raise SettingsError(TEXT["locked"].format(names=_("、").join(locked)))
         with self._lock:
             if version is not None and version != self.version:
-                raise ConflictError(f"设置已被其他窗口修改（版本 {self.version}）")
+                raise ConflictError(TEXT["conflict"].format(version=self.version))
             values = validate({**self.values, **patch})
             if values == self.values:
                 return

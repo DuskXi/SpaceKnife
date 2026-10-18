@@ -17,6 +17,19 @@ import re
 import sys
 from dataclasses import asdict, dataclass, replace
 
+from ..i18n import Texts
+
+# User-facing text (M7.5): reasons a volume cannot be scanned, the WSL drive label and note.
+TEXT = Texts(
+    {
+        "offline": "网络卷未连接",
+        "no_media": "没有介质",
+        "unreadable": "无法读取卷：{reason}",
+        "wsl_label": "{drive}（Windows 盘）",
+        "wsl_note": "WSL 经 9P 协议访问的 Windows 盘，扫描会非常慢；建议用 Windows 版的 SpaceKnife 扫描",
+    }
+)
+
 NETWORK_FS = {
     "nfs",
     "nfs4",
@@ -175,17 +188,17 @@ def _win_list() -> list[VolumeInfo]:
         except OSError as exc:
             # still listed, but disabled with the reason (UI-W1-22)
             reason = (
-                "网络卷未连接"
+                TEXT["offline"]
                 if drive_type == 4
-                else "没有介质"
+                else TEXT["no_media"]
                 if getattr(exc, "winerror", 0) == 21  # ERROR_NOT_READY
-                else f"无法读取卷：{exc.strerror or exc}"
+                else TEXT["unreadable"].format(reason=exc.strerror or exc)
             )
             vol = VolumeInfo(
                 root, root.rstrip("\\"), "", "", 0, 0, 4096, drive_type == 4, drive_type == 2, reason=reason
             )
         if vol.total == 0 and not vol.reason:
-            vol = replace(vol, reason="没有介质")
+            vol = replace(vol, reason=TEXT["no_media"])
         out.append(replace(vol, remote_path=remote) if remote else vol)
     return out
 
@@ -228,7 +241,7 @@ def in_wsl() -> bool:
 # WSL plumbing mounted into every distribution (GUI, drivers, Docker Desktop): never a scan target
 _WSL_HIDDEN = ("/mnt/wsl", "/mnt/wslg", "/usr/lib/wsl", "/usr/lib/modules", "/Docker/", "/init")
 _WSL_DRIVE = re.compile(r"[A-Za-z]:\\?")
-WSL_DRIVE_NOTE = "WSL 经 9P 协议访问的 Windows 盘，扫描会非常慢；建议用 Windows 版的 SpaceKnife 扫描"
+WSL_DRIVE_NOTE = TEXT.raw("wsl_note")  # the Chinese text (message id); shown as TEXT["wsl_note"]
 
 
 def _wsl_drive(m: _Mount) -> str:
@@ -309,7 +322,9 @@ def _linux_volume(path: str) -> VolumeInfo:
 def _wsl_marked(m: _Mount, vol: VolumeInfo) -> VolumeInfo:
     """A Windows drive seen from WSL: named after the drive and marked as not recommended."""
     drive = _wsl_drive(m) if in_wsl() else ""
-    return replace(vol, label=f"{drive}（Windows 盘）", note=WSL_DRIVE_NOTE, remote_path="") if drive else vol
+    if not drive:
+        return vol
+    return replace(vol, label=TEXT["wsl_label"].format(drive=drive), note=TEXT["wsl_note"], remote_path="")
 
 
 def _linux_list() -> list[VolumeInfo]:

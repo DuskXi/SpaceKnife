@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
+from ..i18n import _, tr
 from .errors import HelperDenied, HelperUnavailable
 
 if sys.platform == "win32":
@@ -77,7 +78,7 @@ def start_subprocess(argv: Sequence[str]) -> HelperProcess:
             creationflags=flags,
         )
     except OSError as exc:
-        raise HelperUnavailable(f"无法启动扫描助手：{exc}", "exited") from exc
+        raise HelperUnavailable(tr("无法启动扫描助手：{reason}", reason=exc), "exited") from exc
     return PopenProcess(popen)
 
 
@@ -111,7 +112,7 @@ async def start_elevated(argv: Sequence[str]) -> HelperProcess:
     the helper then finds the pipe gone and exits by itself.
     """
     if sys.platform != "win32":
-        raise HelperUnavailable("当前平台暂不支持提权助手", "not_supported")
+        raise HelperUnavailable(_("当前平台暂不支持提权助手"), "not_supported")
     params = elevated_params(argv)
     loop = asyncio.get_running_loop()
     future: asyncio.Future[HelperProcess] = loop.create_future()
@@ -135,10 +136,10 @@ async def start_elevated(argv: Sequence[str]) -> HelperProcess:
             exc = (
                 HelperDenied()
                 if err.errno == ERROR_CANCELLED
-                else HelperUnavailable(f"无法启动扫描助手：{err}")
+                else HelperUnavailable(tr("无法启动扫描助手：{reason}", reason=err))
             )
         except OSError as err:
-            exc = HelperUnavailable(f"无法启动扫描助手：{err}", "exited")
+            exc = HelperUnavailable(tr("无法启动扫描助手：{reason}", reason=err), "exited")
         try:
             loop.call_soon_threadsafe(deliver, proc, exc)
         except RuntimeError:  # loop closed meanwhile
@@ -157,7 +158,7 @@ if sys.platform == "win32":
 else:
 
     def _shell_execute(params: ShellExecuteParams) -> HelperProcess:
-        raise OSError("ShellExecuteExW 只在 Windows 上可用")
+        raise OSError(_("ShellExecuteExW 只在 Windows 上可用"))
 
 
 __all__ = [

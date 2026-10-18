@@ -1,5 +1,14 @@
 // Number, size and time formatting shared by every screen (UI-MAIN-59, UI-MAIN-60, G13).
 
+import { byLang, t } from "./i18n";
+
+/** English takes the singular for 1 ("1 item"), Chinese has one form: `text` is the translated
+ * message, `one` its English singular with the same placeholders, filled from `fields`. */
+export function plural(n: number, text: string, one: string, fields: Record<string, string | number> = {}): string {
+  if (n !== 1) return text;
+  return byLang(text, one.replace(/\{(\w+)\}/g, (m, k: string) => (k in fields ? String(fields[k]) : m)));
+}
+
 /** Size unit base: Windows and Linux 1024, macOS 1000 (G13); settings may override. */
 let unitBase: 1000 | 1024 = typeof window !== "undefined" && window.sk?.platform === "darwin" ? 1000 : 1024;
 
@@ -70,10 +79,10 @@ export function fmtPct(part: number, whole: number): string {
 }
 
 export function fmtDuration(seconds: number): string {
-  if (Number(seconds.toFixed(1)) < 60) return `${seconds.toFixed(1)} 秒`;
+  if (Number(seconds.toFixed(1)) < 60) return t("{s} 秒", { s: seconds.toFixed(1) });
   const total = Math.round(seconds); // round first, then split: 119.6 s is 2 分 0 秒
   const m = Math.floor(total / 60);
-  return m < 60 ? `${m} 分 ${total % 60} 秒` : `${Math.floor(m / 60)} 小时 ${m % 60} 分`;
+  return m < 60 ? t("{m} 分 {s} 秒", { m, s: total % 60 }) : t("{h} 小时 {m} 分", { h: Math.floor(m / 60), m: m % 60 });
 }
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -87,14 +96,17 @@ export function fmtDateTime(unixSeconds: number): string {
 
 /** "2 小时前", "3 天前", "2 个月前"; "刚刚" under a minute; "未知" for 0. */
 export function fmtAgo(unixSeconds: number, now = Date.now() / 1000): string {
-  if (!unixSeconds) return "未知";
+  if (!unixSeconds) return t("未知");
   const s = Math.max(0, now - unixSeconds);
-  if (s < 60) return "刚刚";
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
-  if (s < 30 * 86400) return `${Math.floor(s / 86400)} 天前`;
-  if (s < 365 * 86400) return `${Math.floor(s / (30 * 86400))} 个月前`;
-  return `${Math.floor(s / (365 * 86400))} 年前`;
+  if (s < 60) return t("刚刚");
+  const [min, hour, day] = [Math.floor(s / 60), Math.floor(s / 3600), Math.floor(s / 86400)];
+  if (s < 3600) return plural(min, t("{n} 分钟前", { n: min }), "1 minute ago");
+  if (s < 86400) return plural(hour, t("{n} 小时前", { n: hour }), "1 hour ago");
+  if (s < 30 * 86400) return plural(day, t("{n} 天前", { n: day }), "1 day ago");
+  const month = Math.floor(s / (30 * 86400));
+  if (s < 365 * 86400) return plural(month, t("{n} 个月前", { n: month }), "1 month ago");
+  const year = Math.floor(s / (365 * 86400));
+  return plural(year, t("{n} 年前", { n: year }), "1 year ago");
 }
 
 // ------------------------------------------------------------------ keys and paths

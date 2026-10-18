@@ -15,6 +15,8 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
 
+from ..i18n import tr
+
 PROTOCOL_VERSION = 1
 KIND_JSON = 0x4A  # "J"
 KIND_BINARY = 0x42  # "B"
@@ -208,7 +210,7 @@ def check_header(head: bytes | bytearray, *, max_binary: int) -> tuple[int, int]
     elif kind == KIND_BINARY:
         limit = max_binary
     else:
-        raise FrameError(f"未知的帧类型 0x{kind:02x}")
+        raise FrameError(tr("未知的帧类型 0x{kind:02x}", kind=kind))
     if length < 1 or body_len > limit:
-        raise FrameError(f"帧长度 {length} 超出范围")
+        raise FrameError(tr("帧长度 {length} 超出范围", length=length))
     return kind, body_len

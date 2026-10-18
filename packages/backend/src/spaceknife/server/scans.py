@@ -25,6 +25,7 @@ from .. import paths
 from ..events import denied_reason, emit, printable
 from ..filter.names import forget, name_index
 from ..helper import HelperError, SharedHelper, is_elevated
+from ..i18n import tr
 from ..io import IoGovernor, IoRegistry, set_low_io_priority
 from ..scan import mft
 from ..scan.media import media_of, system_mount
@@ -537,7 +538,7 @@ class ScanManager:
         root = handle.roots[0]
         handle.method, handle.phase = "mft", "helper" if client is None else "mft"
         scanner.begin_external()
-        emit("scan", f"开始扫描 {root.path}（MFT 快速扫描）", scan_id=handle.id, path=root.path)
+        emit("scan", tr("开始扫描 {path}（MFT 快速扫描）", path=root.path), scan_id=handle.id, path=root.path)
         handle.publish()
         try:
             if client is None:
@@ -586,9 +587,14 @@ class ScanManager:
         except (HelperError, OSError, ValueError) as exc:
             reason = exc.message if isinstance(exc, HelperError) else str(exc)
             handle.method, handle.phase = "hard", ""
-            handle.fallback = f"{reason}，已改用硬扫描"
+            handle.fallback = tr("{reason}，已改用硬扫描", reason=reason)
             scanner.reset_external()
-            emit("scan", f"MFT 快速扫描不可用：{reason}；改用硬扫描", level="WARNING", scan_id=handle.id)
+            emit(
+                "scan",
+                tr("MFT 快速扫描不可用：{reason}；改用硬扫描", reason=reason),
+                level="WARNING",
+                scan_id=handle.id,
+            )
             return False
         finally:
             handle.mft_task = None
@@ -603,11 +609,21 @@ class ScanManager:
         scanner = handle.scanner
         assert scanner is not None
         roots = [r.path for r in handle.roots]
-        verb = "继续扫描" if again else "开始扫描"
-        emit("scan", f"{verb} {', '.join(roots)}（硬扫描）", scan_id=handle.id, path=roots[0])
+        listed = ", ".join(roots)
+        started = (
+            tr("继续扫描 {paths}（硬扫描）", paths=listed)
+            if again
+            else tr("开始扫描 {paths}（硬扫描）", paths=listed)
+        )
+        emit("scan", started, scan_id=handle.id, path=roots[0])
         for r in handle.roots:
             if r.volume is not None and r.volume.note:  # e.g. a Windows drive from WSL over 9P
-                emit("scan", f"{printable(r.path)}：{r.volume.note}", level="WARNING", scan_id=handle.id)
+                emit(
+                    "scan",
+                    tr("{path}：{note}", path=printable(r.path), note=r.volume.note),
+                    level="WARNING",
+                    scan_id=handle.id,
+                )
         reported = 0
 
         def warnings_on() -> bool:
@@ -622,11 +638,11 @@ class ScanManager:
                 reason = (
                     denied_reason(scanner.denied_reasons[i])
                     if i < len(scanner.denied_reasons)
-                    else "拒绝访问"
+                    else tr("拒绝访问")
                 )
                 emit(
                     "perm",
-                    f"无法访问 {denied[i]}：{reason}，已计入未知空间",
+                    tr("无法访问 {path}：{reason}，已计入未知空间", path=denied[i], reason=reason),
                     level="WARNING",
                     scan_id=handle.id,
                     path=denied[i],
@@ -656,7 +672,7 @@ class ScanManager:
         if handle.running:
             return handle
         if handle.source != "scan" or scanner is None or handle.method != "hard" or not scanner.has_queue:
-            raise RpcError(ErrorCode.INVALID_REQUEST, "这次扫描没有可以继续的部分")
+            raise RpcError(ErrorCode.INVALID_REQUEST, tr("这次扫描没有可以继续的部分"))
         scanner.uncancel()
         handle.task = asyncio.create_task(self._run_hard(handle, again=True), name=f"scan-{handle.id}")
         return handle
@@ -666,7 +682,7 @@ class ScanManager:
         helper starts (the administrator prompt), and is replaced once it is ready (W2-25)."""
         handle = self.get(scan_id)
         if not handle.mft_ok:
-            raise RpcError(ErrorCode.INVALID_REQUEST, "只有整个本地 NTFS 卷能用 MFT 快速扫描")
+            raise RpcError(ErrorCode.INVALID_REQUEST, tr("只有整个本地 NTFS 卷能用 MFT 快速扫描"))
         if not handle.running or handle.method == "mft" or handle.upgrade_task is not None:
             return handle
         handle.phase, handle.fallback = "helper", ""
@@ -680,10 +696,10 @@ class ScanManager:
         try:
             client = await self.helper.get(elevate=True)
         except HelperError as exc:
-            handle.fallback = f"{exc.message}，继续硬扫描"
+            handle.fallback = tr("{reason}，继续硬扫描", reason=exc.message)
             emit(
                 "scan",
-                f"未能启用 MFT 快速扫描：{exc.message}；继续硬扫描",
+                tr("未能启用 MFT 快速扫描：{reason}；继续硬扫描", reason=exc.message),
                 level="WARNING",
                 scan_id=handle.id,
             )
@@ -711,18 +727,22 @@ class ScanManager:
         if reported is not None and done.errors > reported:
             emit(
                 "perm",
-                f"另有 {done.errors - reported:,} 个文件夹无法访问，已计入未知空间",
+                tr("另有 {count} 个文件夹无法访问，已计入未知空间", count=f"{done.errors - reported:,}"),
                 level="WARNING",
                 scan_id=handle.id,
             )
-        took = f"{done.items:,} 项，{done.elapsed_s:.1f} 秒"
-        how = "MFT 快速扫描" if handle.method == "mft" else "硬扫描"
+        took = tr("{items} 项，{seconds} 秒", items=f"{done.items:,}", seconds=f"{done.elapsed_s:.1f}")
         if done.state == ScanState.DONE:
-            emit("scan", f"{how}完成：{took}", scan_id=handle.id, path=roots[0])
+            finished = (
+                tr("MFT 快速扫描完成：{took}", took=took)
+                if handle.method == "mft"
+                else tr("硬扫描完成：{took}", took=took)
+            )
+            emit("scan", finished, scan_id=handle.id, path=roots[0])
         elif done.state == ScanState.CANCELLED:
             emit(
                 "scan",
-                f"已停止扫描：{took}，已扫描的结果保留",
+                tr("已停止扫描：{took}，已扫描的结果保留", took=took),
                 level="WARNING",
                 scan_id=handle.id,
                 path=roots[0],
@@ -730,7 +750,7 @@ class ScanManager:
         else:
             emit(
                 "scan",
-                f"扫描失败：{done.message or '未知错误'}",
+                tr("扫描失败：{error}", error=done.message or tr("未知错误")),
                 level="ERROR",
                 scan_id=handle.id,
                 path=roots[0],
@@ -754,7 +774,12 @@ class ScanManager:
             else:
                 logger.exception("could not save snapshot for {}", handle.id)
                 reason = str(exc) or type(exc).__name__
-            emit("snapshot", f"自动保存快照失败：{reason}", level="WARNING", scan_id=handle.id)
+            emit(
+                "snapshot",
+                tr("自动保存快照失败：{reason}", reason=reason),
+                level="WARNING",
+                scan_id=handle.id,
+            )
             return
         handle.snapshot_path = str(path)
         keep = int(self.settings.get("advanced.snapshot_keep")) if self.settings else snapshot.KEEP_RECENT
@@ -794,7 +819,7 @@ class ScanManager:
         handle = self.get(params.scan_id)
         gov = handle.governor
         if gov is None:
-            raise RpcError(ErrorCode.INVALID_REQUEST, "this scan has no disk load control")
+            raise RpcError(ErrorCode.INVALID_REQUEST, tr("这次扫描没有磁盘负载控制"))
         gov.set_level(params.level, float(params.custom) if params.custom is not None else None)
         gov.set_manual_concurrency(params.concurrency)
         handle.publish()
@@ -843,14 +868,16 @@ class ScanManager:
     async def save_snapshot(self, scan_id: str, target: str | None) -> p.SnapshotInfo:
         handle = self.get(scan_id)
         if handle.running:
-            raise RpcError(ErrorCode.SCAN_BUSY, "wait for the scan to finish (or cancel it) before saving")
+            raise RpcError(ErrorCode.SCAN_BUSY, tr("扫描完成（或停止）后才能保存快照"))
         path = Path(target) if target else snapshot.auto_path([r.path for r in handle.roots])
         try:
             header = await asyncio.to_thread(self._save, handle, path)
         except OSError as exc:
-            raise RpcError(ErrorCode.SNAPSHOT_ERROR, f"cannot write {path}: {exc.strerror or exc}") from exc
+            raise RpcError(
+                ErrorCode.SNAPSHOT_ERROR, tr("写不了 {path}：{reason}", path=path, reason=exc.strerror or exc)
+            ) from exc
         handle.snapshot_path = str(path)
-        emit("snapshot", f"快照已保存：{path}", scan_id=handle.id)
+        emit("snapshot", tr("快照已保存：{path}", path=path), scan_id=handle.id)
         return snapshot_info(path, header)
 
     async def load_snapshot(self, target: str) -> ScanHandle:
@@ -859,7 +886,9 @@ class ScanManager:
         try:
             store, header = await asyncio.to_thread(snapshot.load, path)
         except (OSError, snapshot.SnapshotError) as exc:
-            raise RpcError(ErrorCode.SNAPSHOT_ERROR, f"cannot open {path}: {exc}") from exc
+            raise RpcError(
+                ErrorCode.SNAPSHOT_ERROR, tr("打不开快照 {path}：{error}", path=path, error=exc)
+            ) from exc
         stats = header.stats
         root_meta = {m.get("path"): m for m in stats.get("roots", [])}
         roots = []
@@ -911,7 +940,11 @@ class ScanManager:
         )
         self.scans[handle.id] = handle
         logger.info("opened snapshot {} as {}", path, handle.id)
-        emit("snapshot", f"已打开快照 {path}（{header.node_count - 1:,} 项）", scan_id=handle.id)
+        emit(
+            "snapshot",
+            tr("已打开快照 {path}（{count} 项）", path=path, count=f"{header.node_count - 1:,}"),
+            scan_id=handle.id,
+        )
         return handle
 
     # ------------------------------------------------------------------ tree

@@ -2,7 +2,8 @@
 
 The templates are the ``*.sktpl`` files next to this module (users can copy one as a starting
 point); this module only names them. A template's name is its SpaceSniffer name, which is what
-``spaceknife run … export "<name>" <file>`` accepts; title and description are what the UI shows.
+``spaceknife run … export "<name>" <file>`` accepts; title and description are what the UI shows,
+in the interface language (M7.5: read them when they are shown).
 """
 
 from __future__ import annotations
@@ -10,14 +11,26 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import resources
 
+from ...i18n import _
+
 
 @dataclass(frozen=True, slots=True)
 class BuiltinInfo:
-    name: str  # SpaceSniffer's name (command line, settings)
+    name: str  # SpaceSniffer's name (command line, settings); never translated
     file: str
-    title: str  # user-facing (M7.5 extracts it for translation)
-    description: str
+    title_id: str  # the Chinese source text (message id) of :attr:`title`
+    description_id: str  # … of :attr:`description`
     spacesniffer: bool  # also built into SpaceSniffer
+
+    @property
+    def title(self) -> str:
+        """The title in the current interface language."""
+        return _(self.title_id)
+
+    @property
+    def description(self) -> str:
+        """The description in the current interface language."""
+        return _(self.description_id)
 
 
 _BUILTINS: tuple[BuiltinInfo, ...] = (

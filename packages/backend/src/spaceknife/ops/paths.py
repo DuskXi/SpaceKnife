@@ -26,28 +26,31 @@ from typing import Literal
 from urllib.parse import quote
 
 from .. import paths as app_paths
+from ..i18n import Texts
 
 System = Literal["windows", "linux", "darwin"]
 IS_WINDOWS = sys.platform == "win32"
 
 # Every user-facing text of this module (M7.5 extracts them for translation).
-TEXT: dict[str, str] = {
-    "root": "卷的根目录不能删除",
-    "mount": "这里挂载着另一个卷，不能删除",
-    "system": "系统目录，删除会损坏操作系统",
-    "boot": "启动与恢复所需的文件，删除后系统可能无法启动",
-    "system_file": "系统的分页 / 休眠 / 交换文件，由系统管理",
-    "program_root": "程序安装位置的根目录，只能删除其中的单个程序",
-    "data_root": "系统级应用数据的根目录，只能删除其中的单项",
-    "shared_root": "系统共享目录本身，只能删除其中的内容",
-    "users_root": "存放所有用户主目录的文件夹",
-    "home": "用户主目录本身不能删除",
-    "profile": "用户的应用配置与数据目录本身，只能删除其中的单项",
-    "trash": "回收站目录，请用系统的「清空回收站」",
-    "package_db": "软件包数据库，删除会损坏包管理器",
-    "app": "SpaceKnife 自己的数据目录",
-    "program": "SpaceKnife 正在运行的程序所在目录",
-}
+TEXT = Texts(
+    {
+        "root": "卷的根目录不能删除",
+        "mount": "这里挂载着另一个卷，不能删除",
+        "system": "系统目录，删除会损坏操作系统",
+        "boot": "启动与恢复所需的文件，删除后系统可能无法启动",
+        "system_file": "系统的分页 / 休眠 / 交换文件，由系统管理",
+        "program_root": "程序安装位置的根目录，只能删除其中的单个程序",
+        "data_root": "系统级应用数据的根目录，只能删除其中的单项",
+        "shared_root": "系统共享目录本身，只能删除其中的内容",
+        "users_root": "存放所有用户主目录的文件夹",
+        "home": "用户主目录本身不能删除",
+        "profile": "用户的应用配置与数据目录本身，只能删除其中的单项",
+        "trash": "回收站目录，请用系统的「清空回收站」",
+        "package_db": "软件包数据库，删除会损坏包管理器",
+        "app": "SpaceKnife 自己的数据目录",
+        "program": "SpaceKnife 正在运行的程序所在目录",
+    }
+)
 
 
 # --------------------------------------------------------------------------- path forms
@@ -406,7 +409,7 @@ def _is_mount(path: str) -> bool:
 
 
 def protected_reason(path: str) -> str | None:
-    """Why ``path`` must not be deleted (Chinese, for the user), or None when it may be.
+    """Why ``path`` must not be deleted (for the user, in the current language), or None when it may be.
 
     Volume roots and mount points, system folders, program and data roots, user homes themselves,
     trash folders and SpaceKnife's own folders. Also checks the path with its parent folders

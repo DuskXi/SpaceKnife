@@ -70,8 +70,8 @@ def _call_name(node: ast.AST | None) -> str | None:
     return None
 
 
-def scan_python(paths: list[Path]) -> tuple[set[str], list[Problem]]:
-    msgids: set[str] = set()
+def scan_python(paths: list[Path]) -> tuple[dict[str, set[str]], list[Problem]]:
+    msgids: dict[str, set[str]] = {}
     problems: list[Problem] = []
     for path in paths:
         text = path.read_text(encoding="utf-8")
@@ -110,19 +110,22 @@ def scan_python(paths: list[Path]) -> tuple[set[str], list[Problem]]:
             if isinstance(parent, ast.JoinedStr):
                 continue  # reported with the f-string
             if (
-                _call_name(parent) in WRAPPERS
-                and isinstance(parent, ast.Call)
+                isinstance(parent, ast.Call)
                 and parent.args
-                and parent.args[0] is node
+                and (
+                    (_call_name(parent) in WRAPPERS and parent.args[0] is node)
+                    # plural(count, "中文", "one in English", ...)
+                    or (_call_name(parent) == "plural" and len(parent.args) > 1 and parent.args[1] is node)
+                )
             ):
-                msgids.add(node.value)
+                msgids.setdefault(node.value, set()).add(rel)
                 continue
             if (
                 isinstance(parent, ast.Dict)
                 and node in parent.values
                 and _call_name(parents.get(id(parent))) in TABLES
             ):
-                msgids.add(node.value)
+                msgids.setdefault(node.value, set()).add(rel)
                 continue
             if ignored(node):
                 continue
@@ -135,7 +138,7 @@ def scan_python(paths: list[Path]) -> tuple[set[str], list[Problem]]:
                     break
                 anc = parents.get(id(anc))
             if registered:
-                msgids.add(node.value)
+                msgids.setdefault(node.value, set()).add(rel)
                 continue
             problems.append(
                 Problem(rel, node.lineno, node.value[:80], "Chinese text not passed to _() / tr()")
@@ -143,7 +146,7 @@ def scan_python(paths: list[Path]) -> tuple[set[str], list[Problem]]:
     return msgids, problems
 
 
-def scan_electron() -> tuple[set[str], list[Problem]] | None:
+def scan_electron() -> tuple[dict[str, set[str]], list[Problem]] | None:
     node = shutil.which("node")
     if node is None or not (ELECTRON.parent / "node_modules").exists():
         return None
@@ -158,7 +161,8 @@ def scan_electron() -> tuple[set[str], list[Problem]] | None:
     problems = [
         Problem("apps/electron/src/" + p["file"], p["line"], p["text"], p["why"]) for p in doc["problems"]
     ]
-    return set(doc["msgids"]), problems
+    ids = {k: {"apps/electron/src/" + f for f in v} for k, v in doc["msgids"].items()}
+    return ids, problems
 
 
 def load_catalog(folder: Path) -> tuple[dict[str, str], list[str]]:
@@ -175,7 +179,7 @@ def load_catalog(folder: Path) -> tuple[dict[str, str], list[str]]:
 PLACEHOLDER = re.compile(r"\{(\w*)\}")
 
 
-def check_catalog(msgids: set[str], catalog: dict[str, str], side: str) -> list[str]:
+def check_catalog(msgids: dict[str, set[str]], catalog: dict[str, str], side: str) -> list[str]:
     out: list[str] = []
     for m in sorted(msgids):
         en = catalog.get(m)
@@ -207,6 +211,7 @@ def main() -> int:
 
     if args.area in ("backend", "all"):
         ids, problems = scan_python(backend_files())
+        ids = {k: v for k, v in ids.items() if not only or any((ROOT / f).resolve() in only for f in v)}
         catalog, conflicts = load_catalog(BACKEND_CATALOG)
         for p in filter(keep, problems):
             print(p)
@@ -224,6 +229,7 @@ def main() -> int:
             print("electron: skipped (needs node and apps/electron/node_modules)")
         else:
             ids, problems = found
+            ids = {k: v for k, v in ids.items() if not only or any((ROOT / f).resolve() in only for f in v)}
             catalog, conflicts = load_catalog(ELECTRON_CATALOG)
             for p in filter(keep, problems):
                 print(p)

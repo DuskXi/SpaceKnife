@@ -6,8 +6,8 @@ shows. CSV and JSON stream (``iter_csv`` / ``iter_json`` yield pieces); the HTML
 (a few levels, the largest children, the largest files and extensions), so it stays small and
 readable for any tree, and is self-contained: inline CSS, no scripts, no external assets.
 
-The data formats use English keys (a stable schema for tools); the report's text is Chinese and
-lives in :data:`TEXT`.
+The data formats use English keys (a stable schema for tools); the report's text is in the
+interface language (M7.5) and lives in :data:`TEXT`.
 """
 
 from __future__ import annotations
@@ -25,42 +25,45 @@ from json.encoder import encode_basestring
 
 import numpy as np
 
-from .. import __version__, fmt
+from .. import __version__, fmt, i18n
+from ..i18n import Texts, _
 from ..store.nodes import Flag, Kind, NodeStore
 from .template import Element, ExportTree, Ordering, export_roots, local_time
 
-# User-facing text of the HTML report (M7.5 extracts it for translation).
-TEXT: dict[str, str] = {
-    "title": "空间报告",
-    "roots": "{count} 个位置",
-    "generated": "生成于 {time}",
-    "filter": "过滤：{expr}",
-    "disk": "占用空间",
-    "logical": "逻辑大小",
-    "files": "文件",
-    "folders": "文件夹",
-    "matched": "匹配过滤的文件",
-    "structure": "文件夹结构",
-    "structure_note": "每层按占用从大到小，最多 {top} 项、{depth} 层",
-    "largest": "最大的文件",
-    "extensions": "按扩展名",
-    "col_name": "名称",
-    "col_share": "占比",
-    "col_disk": "占用",
-    "col_files": "文件数",
-    "col_modified": "修改于",
-    "col_path": "路径",
-    "col_ext": "扩展名",
-    "no_ext": "（无扩展名）",
-    "rest": "其余 {count} 项",
-    "empty": "没有内容",
-    "footer": "由 SpaceKnife {version} 生成 · 大小均为占用空间 · {base}",
-    "base_1024": "1 KB = 1024 字节",
-    "base_1000": "1 KB = 1000 字节",
-    "csv": "CSV 表格",
-    "json": "JSON 数据",
-    "html": "HTML 报告",
-}
+# User-facing text of the HTML report and the format titles, translated when read (M7.5).
+TEXT = Texts(
+    {
+        "title": "空间报告",
+        "roots": "{count} 个位置",
+        "generated": "生成于 {time}",
+        "filter": "过滤：{expr}",
+        "disk": "占用空间",
+        "logical": "逻辑大小",
+        "files": "文件",
+        "folders": "文件夹",
+        "matched": "匹配过滤的文件",
+        "structure": "文件夹结构",
+        "structure_note": "每层按占用从大到小，最多 {top} 项、{depth} 层",
+        "largest": "最大的文件",
+        "extensions": "按扩展名",
+        "col_name": "名称",
+        "col_share": "占比",
+        "col_disk": "占用",
+        "col_files": "文件数",
+        "col_modified": "修改于",
+        "col_path": "路径",
+        "col_ext": "扩展名",
+        "no_ext": "（无扩展名）",
+        "rest": "其余 {count} 项",
+        "empty": "没有内容",
+        "footer": "由 SpaceKnife {version} 生成 · 大小均为占用空间 · {base}",
+        "base_1024": "1 KB = 1024 字节",
+        "base_1000": "1 KB = 1000 字节",
+        "csv": "CSV 表格",
+        "json": "JSON 数据",
+        "html": "HTML 报告",
+    }
+)
 
 CSV_COLUMNS = (
     "path",
@@ -515,7 +518,7 @@ def export_html(
     stamp = local_time(int(time.time() if now is None else now), "%Y-%m-%d %H:%M")
     subject = store.path(roots[0]) if len(roots) == 1 else TEXT["roots"].format(count=len(roots))
     out = [
-        '<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8">'
+        f'<!doctype html>\n<html lang="{i18n.language()}"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         f'<meta name="generator" content="SpaceKnife {_e(__version__)}">'
         f"<title>{_e(TEXT['title'])} · {_e(subject)}</title><style>{_CSS}</style></head><body><main>"
@@ -571,11 +574,16 @@ def iter_html(
 @dataclass(frozen=True, slots=True)
 class ExportFormat:
     key: str  # "csv" | "json" | "html"
-    title: str  # user-facing
+    title_id: str  # the Chinese source text (message id) of :attr:`title`
     extension: str
     media_type: str
     bom: bool  # write a UTF-8 BOM: Excel reads a CSV without one in the ANSI code page
     chunks: Callable[..., Iterator[str]]  # (store, root, *, match=None, filter_text="")
+
+    @property
+    def title(self) -> str:
+        """User-facing, in the current interface language."""
+        return _(self.title_id)
 
 
 def _csv_chunks(
@@ -585,7 +593,7 @@ def _csv_chunks(
 
 
 FORMATS: dict[str, ExportFormat] = {
-    "csv": ExportFormat("csv", TEXT["csv"], ".csv", "text/csv", True, _csv_chunks),
-    "json": ExportFormat("json", TEXT["json"], ".json", "application/json", False, iter_json),
-    "html": ExportFormat("html", TEXT["html"], ".html", "text/html", False, iter_html),
+    "csv": ExportFormat("csv", TEXT.raw("csv"), ".csv", "text/csv", True, _csv_chunks),
+    "json": ExportFormat("json", TEXT.raw("json"), ".json", "application/json", False, iter_json),
+    "html": ExportFormat("html", TEXT.raw("html"), ".html", "text/html", False, iter_html),
 }

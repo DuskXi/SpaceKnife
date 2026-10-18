@@ -9,32 +9,60 @@ import { type LoadLevel, patchStartForm, type ScanMethod, setting, startFormOf, 
 import { fmtInt, fmtKeys, fmtShare, fmtSize, fmtSizeAs } from "@/lib/format";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { compareWithNow } from "@/state/compare";
+import { byLang, t } from "@/lib/i18n";
 
+// the labels translate each time they are read (getters), so a language switch applies (M7.5)
 export const MEDIA_ZH: Record<string, string> = {
   nvme_ssd: "NVMe SSD",
   sata_ssd: "SATA SSD",
   ssd: "SSD",
-  hdd: "机械硬盘",
+  get hdd() {
+    return t("机械硬盘");
+  },
   usb_hdd: "USB HDD",
   usb_ssd: "USB SSD",
-  usb_flash: "U 盘",
-  sd_card: "存储卡",
-  network: "网络",
-  virtual: "虚拟磁盘",
-  unknown: "未知介质",
+  get usb_flash() {
+    return t("U 盘");
+  },
+  get sd_card() {
+    return t("存储卡");
+  },
+  get network() {
+    return t("网络");
+  },
+  get virtual() {
+    return t("虚拟磁盘");
+  },
+  get unknown() {
+    return t("未知介质");
+  },
 };
 export const LOAD_ZH: Record<LoadLevel, [string, string]> = {
-  max: ["极速", "不限制磁盘读取"],
-  balanced: ["均衡 70%", "扫描最多占用 70% 的磁盘读取，给前台程序留出余量"],
-  quiet: ["安静 35%", "扫描最多占用 35% 的磁盘读取，几乎感觉不到"],
-  idle: ["空闲", "只在磁盘空闲时读取，并使用系统低 I/O 优先级"],
-  custom: ["自定义", "按设置里的「自定义上限」"],
+  get max(): [string, string] {
+    return [t("极速"), t("不限制磁盘读取")];
+  },
+  get balanced(): [string, string] {
+    return [t("均衡 70%"), t("扫描最多占用 70% 的磁盘读取，给前台程序留出余量")];
+  },
+  get quiet(): [string, string] {
+    return [t("安静 35%"), t("扫描最多占用 35% 的磁盘读取，几乎感觉不到")];
+  },
+  get idle(): [string, string] {
+    return [t("空闲"), t("只在磁盘空闲时读取，并使用系统低 I/O 优先级")];
+  },
+  get custom(): [string, string] {
+    return [t("自定义"), t("按设置里的「自定义上限」")];
+  },
 };
-const METHOD_ZH: Record<ScanMethod, [string, string]> = {
-  auto: ["自动", "整个 NTFS 卷用 MFT 快速扫描，其他位置逐目录硬扫描"],
-  mft: ["快速 MFT", "读取 NTFS 主文件表，整盘几秒完成（需要管理员）"],
-  hard: ["硬扫描", "逐目录遍历，耗时随文件数量增长"],
-};
+const METHODS: ScanMethod[] = ["auto", "mft", "hard"];
+function methodText(m: ScanMethod): [string, string] {
+  const table: Record<ScanMethod, [string, string]> = {
+    auto: [t("自动"), t("整个 NTFS 卷用 MFT 快速扫描，其他位置逐目录硬扫描")],
+    mft: [t("快速 MFT"), t("读取 NTFS 主文件表，整盘几秒完成（需要管理员）")],
+    hard: [t("硬扫描"), t("逐目录遍历，耗时随文件数量增长")],
+  };
+  return table[m];
+}
 const IS_WIN = () => window.sk.platform === "win32";
 
 /** 「C: 系统」, or the folder name of a mount point on Linux / macOS. */
@@ -51,11 +79,11 @@ export function mftCapable(v: VolumeInfo | null | undefined): boolean {
 /** What this volume will actually be scanned with (UI-W1-18). */
 function methodBadge(v: VolumeInfo, method: ScanMethod, elevated: boolean): { icon: IconName; text: string } {
   if (v.reason) return { icon: "warning", text: v.reason };
-  if (v.note) return { icon: "warning", text: "不推荐 · 很慢" };
-  if (method !== "hard" && mftCapable(v)) return { icon: "shield", text: elevated ? "MFT 快速扫描" : "MFT 快速扫描 · 需要管理员" };
-  if (v.is_remote) return { icon: "clock", text: "网络扫描 · 较慢" };
-  if (v.media === "usb_hdd") return { icon: "gauge", text: "并行硬扫描 · USB HDD 自动降速" };
-  return { icon: "gauge", text: "并行硬扫描" };
+  if (v.note) return { icon: "warning", text: t("不推荐 · 很慢") };
+  if (method !== "hard" && mftCapable(v)) return { icon: "shield", text: elevated ? t("MFT 快速扫描") : t("MFT 快速扫描 · 需要管理员") };
+  if (v.is_remote) return { icon: "clock", text: t("网络扫描 · 较慢") };
+  if (v.media === "usb_hdd") return { icon: "gauge", text: t("并行硬扫描 · USB HDD 自动降速") };
+  return { icon: "gauge", text: t("并行硬扫描") };
 }
 
 export function StartPage({ tab }: { tab: Tab }) {
@@ -71,8 +99,8 @@ export function StartPage({ tab }: { tab: Tab }) {
   useEffect(() => {
     if (conn !== "ready") return;
     void refreshLists();
-    const t = setInterval(() => void refreshVolumes(), 5000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => void refreshVolumes(), 5000);
+    return () => clearInterval(timer);
   }, [conn]);
 
   const paths = useMemo(
@@ -93,12 +121,12 @@ export function StartPage({ tab }: { tab: Tab }) {
       if (form.check) patch({ check: null });
       return;
     }
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void call("scan.check_paths", { paths })
         .then((check) => patch({ check }))
         .catch(() => {});
     }, 300);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.path, rootMatch?.mount_point]);
 
@@ -107,7 +135,7 @@ export function StartPage({ tab }: { tab: Tab }) {
   const merged = check?.items.filter((i) => i.merged_into) ?? [];
   const roots = selected ? [selected.mount_point] : paths.length ? (check && check.items.length === paths.length && !errors.length ? check.roots : []) : [];
   const ready = conn === "ready" && roots.length > 0;
-  const targetName = selected ? volumeName(selected) : roots.length > 1 ? `${roots.length} 个位置` : roots[0]?.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const targetName = selected ? volumeName(selected) : roots.length > 1 ? t("{n} 个位置", { n: roots.length }) : roots[0]?.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const elevated = useApp((s) => s.volumesElevated);
   const mayElevate = useApp((s) => setting(s, "scan.elevate", true));
   // the MFT fast scan reads a whole local NTFS volume; it may need the administrator prompt (UI-W1-34)
@@ -122,10 +150,10 @@ export function StartPage({ tab }: { tab: Tab }) {
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key !== "Enter") return;
-    const t = e.target as HTMLElement;
+    const el = e.target as HTMLElement;
     // Enter starts the scan unless another button has the focus (UI-W1-35)
-    if (t.tagName === "BUTTON" && !t.closest(".volumes, .start-options")) return;
-    if (t.tagName === "INPUT" && t !== pathInput.current) return;
+    if (el.tagName === "BUTTON" && !el.closest(".volumes, .start-options")) return;
+    if (el.tagName === "INPUT" && el !== pathInput.current) return;
     e.preventDefault();
     start();
   };
@@ -141,7 +169,7 @@ export function StartPage({ tab }: { tab: Tab }) {
       const file = files[i]!;
       const path = window.sk.files.pathOf(file);
       if (!path) {
-        toast("浏览器模式下无法读取拖入文件的路径");
+        toast(t("浏览器模式下无法读取拖入文件的路径"));
         return;
       }
       const isDir = items[i]?.webkitGetAsEntry()?.isDirectory ?? false;
@@ -150,7 +178,7 @@ export function StartPage({ tab }: { tab: Tab }) {
         void openSnapshot(path, tab.id);
         return;
       } else {
-        toast("只接受文件夹或 SpaceKnife 快照文件（.sks）");
+        toast(t("只接受文件夹或 SpaceKnife 快照文件（.sks）"));
         return;
       }
     }
@@ -171,10 +199,10 @@ export function StartPage({ tab }: { tab: Tab }) {
       onDrop={onDrop}
     >
       <div className="start-cols">
-        <section className="start-main" aria-label="选择要扫描的位置">
+        <section className="start-main" aria-label={t("选择要扫描的位置")}>
           <div className="start-scroll">
             <div className="start-title">
-              <h1>选择要扫描的位置</h1>
+              <h1>{t("选择要扫描的位置")}</h1>
               <button
                 className="ghost small"
                 disabled={refreshing}
@@ -184,15 +212,15 @@ export function StartPage({ tab }: { tab: Tab }) {
                 }}
               >
                 <Icon name="refresh" size={14} />
-                {refreshing ? "正在刷新…" : "刷新"}
+                {refreshing ? t("正在刷新…") : t("刷新")}
               </button>
             </div>
             <Volumes volumes={volumes} selected={selected?.mount_point ?? null} method={form.method} elevated={elevated} onPick={(mp) => patch({ picked: mp, path: "", check: null })} />
             <div className="path-area">
               <div className="path-label">
-                <span>或输入路径（多个路径用 ; 分隔）</span>
+                <span>{t("或输入路径（多个路径用 ; 分隔）")}</span>
                 <span className="muted small">
-                  <Icon name="upload" size={13} /> 也可以把文件夹直接拖进窗口
+                  <Icon name="upload" size={13} /> {t("也可以把文件夹直接拖进窗口")}
                 </span>
               </div>
               <div className="path-row">
@@ -202,9 +230,9 @@ export function StartPage({ tab }: { tab: Tab }) {
                 <input
                   ref={pathInput}
                   className="path-input"
-                  placeholder={IS_WIN() ? "例如 C:\\Users\\lenny\\Videos; C:\\Users\\lenny\\Downloads" : "例如 ~/Videos; ~/Downloads"}
+                  placeholder={t("例如 {paths}", { paths: IS_WIN() ? "C:\\Users\\lenny\\Videos; C:\\Users\\lenny\\Downloads" : "~/Videos; ~/Downloads" })}
                   spellCheck={false}
-                  aria-label="扫描路径"
+                  aria-label={t("扫描路径")}
                   aria-invalid={errors.length > 0}
                   value={form.path}
                   onChange={(e) => patch({ path: e.target.value })}
@@ -223,19 +251,23 @@ export function StartPage({ tab }: { tab: Tab }) {
                     if (picked.length) patch({ path: [...paths, ...picked].join("; "), picked: null });
                   }}
                 >
-                  浏览…
+                  {t("浏览…")}
                 </button>
               </div>
               {errors.map((e) => (
                 <div key={e.path} className="path-error" role="alert">
                   <Icon name="warning" size={13} />
-                  <span className="mono">{e.path}</span>：{e.message}
+                  <span className="mono">{e.path}</span>
+                  {byLang("：", ": ")}
+                  {e.message}
                 </div>
               ))}
               {merged.length > 0 && !errors.length && (
                 <div className="path-note">
                   <Icon name="info" size={13} />
-                  {merged.map((m) => `${m.path} 已包含在 ${m.merged_into} 中`).join("；")}，将合并扫描
+                  {t("{items}，将合并扫描", {
+                    items: merged.map((m) => t("{path} 已包含在 {parent} 中", { path: m.path, parent: m.merged_into ?? "" })).join(byLang("；", "; ")),
+                  })}
                 </div>
               )}
             </div>
@@ -246,25 +278,26 @@ export function StartPage({ tab }: { tab: Tab }) {
               <div>
                 {targetName ? (
                   <>
-                    <strong>{targetName}</strong> · {mftCapable(selected) ? METHOD_ZH[form.method][0] : "并行硬扫描"}
-                    {mftCapable(selected) && form.method === "auto" && (viaMft ? "（MFT 快速扫描）" : "（并行硬扫描）")} · 磁盘负载上限{" "}
-                    {LOAD_ZH[form.load][0].replace(/ (\d+%)/, " ≤$1")}
-                    {form.ads && viaMft && " · 备用数据流"}
+                    <strong>{targetName}</strong> · {mftCapable(selected) ? methodText(form.method)[0] : t("并行硬扫描")}
+                    {mftCapable(selected) && form.method === "auto" && (viaMft ? t("（MFT 快速扫描）") : t("（并行硬扫描）"))}
+                    {" · "}
+                    {t("磁盘负载上限 {level}", { level: LOAD_ZH[form.load][0].replace(/ (\d+%)/, " ≤$1") })}
+                    {form.ads && viaMft && ` · ${t("备用数据流")}`}
                   </>
                 ) : (
-                  <span className="muted">选择一个卷，或输入要扫描的文件夹</span>
+                  <span className="muted">{t("选择一个卷，或输入要扫描的文件夹")}</span>
                 )}
               </div>
               {selected?.note && <div className="warn-text small">{selected.note}</div>}
               {needsAdmin && (
                 <div className="muted small">
-                  <Icon name="shield" size={13} /> 需要管理员权限：仅启动只读扫描助手，主程序不提权
+                  <Icon name="shield" size={13} /> {t("需要管理员权限：仅启动只读扫描助手，主程序不提权")}
                 </div>
               )}
             </div>
             <button className="primary big" disabled={!ready} onClick={start}>
               <Icon name="play" />
-              开始扫描
+              {t("开始扫描")}
               <Kbd>Enter</Kbd>
             </button>
           </div>
@@ -274,7 +307,7 @@ export function StartPage({ tab }: { tab: Tab }) {
       {dragging && (
         <div className="drop-hint" aria-hidden="true">
           <Icon name="upload" size={28} />
-          松开以添加文件夹，或打开快照文件
+          {t("松开以添加文件夹，或打开快照文件")}
         </div>
       )}
     </div>
@@ -283,8 +316,8 @@ export function StartPage({ tab }: { tab: Tab }) {
 
 function sameRoot(a: string, b: string): boolean {
   const norm = (x: string) => {
-    const t = x.trim().replace(/[\\/]+$/, "");
-    return IS_WIN() ? t.toLowerCase() : t || "/";
+    const p = x.trim().replace(/[\\/]+$/, "");
+    return IS_WIN() ? p.toLowerCase() : p || "/";
   };
   return norm(a) === norm(b);
 }
@@ -302,9 +335,9 @@ function Volumes(props: { volumes: VolumeInfo[]; selected: string | null; method
     onPick(next.mount_point);
     group.current?.querySelector<HTMLElement>(`[data-mp="${CSS.escape(next.mount_point)}"]`)?.focus();
   };
-  if (!volumes.length) return <div className="volumes-empty muted">正在读取卷…</div>;
+  if (!volumes.length) return <div className="volumes-empty muted">{t("正在读取卷…")}</div>;
   return (
-    <div ref={group} className="volumes" role="radiogroup" aria-label="卷" onKeyDown={onKey}>
+    <div ref={group} className="volumes" role="radiogroup" aria-label={t("卷")} onKeyDown={onKey}>
       {volumes.map((v) => {
         const on = v.mount_point === selected;
         const badge = methodBadge(v, method, elevated);
@@ -340,8 +373,8 @@ function Volumes(props: { volumes: VolumeInfo[]; selected: string | null; method
               <span style={{ width: `${v.total ? (v.used / v.total) * 100 : 0}%` }} />
             </span>
             <span className="vol-figures mono">
-              <span>{v.total ? `已用 ${fmtSizeAs(v.used, v.total)} · ${pct}%` : "已用 —"}</span>
-              <span>{v.total ? `可用 ${fmtSizeAs(v.free, v.total)}` : "可用 —"}</span>
+              <span>{v.total ? t("已用 {size} · {pct}%", { size: fmtSizeAs(v.used, v.total), pct }) : t("已用 —")}</span>
+              <span>{v.total ? t("可用 {size}", { size: fmtSizeAs(v.free, v.total) }) : t("可用 —")}</span>
             </span>
             <span className={`vol-badge${v.reason || v.note ? " warn" : ""}`} title={v.note || undefined}>
               <Icon name={badge.icon} size={13} />
@@ -367,16 +400,16 @@ function Options(props: {
   const capable = mftCapable(props.volume);
   return (
     <div className="start-options">
-      <h2>扫描选项</h2>
+      <h2>{t("扫描选项")}</h2>
       <div className="set-card">
         {capable && (
           <div className="set-row">
             <div className="set-text">
-              <div className="set-name">扫描方式</div>
-              <div className="set-desc">{METHOD_ZH[props.method][1]}</div>
+              <div className="set-name">{t("扫描方式")}</div>
+              <div className="set-desc">{methodText(props.method)[1]}</div>
             </div>
-            <div className="segmented small" role="radiogroup" aria-label="扫描方式">
-              {(Object.keys(METHOD_ZH) as ScanMethod[]).map((m) => (
+            <div className="segmented small" role="radiogroup" aria-label={t("扫描方式")}>
+              {METHODS.map((m) => (
                 <button
                   key={m}
                   role="radio"
@@ -384,7 +417,7 @@ function Options(props: {
                   className={props.method === m ? "on" : ""}
                   onClick={() => props.onChange({ method: m })}
                 >
-                  {METHOD_ZH[m][0]}
+                  {methodText(m)[0]}
                 </button>
               ))}
             </div>
@@ -392,10 +425,10 @@ function Options(props: {
         )}
         <div className="set-row">
           <div className="set-text">
-            <div className="set-name">磁盘负载上限</div>
+            <div className="set-name">{t("磁盘负载上限")}</div>
             <div className="set-desc">{LOAD_ZH[props.load][1]}</div>
           </div>
-          <div className="segmented small" role="radiogroup" aria-label="磁盘负载上限">
+          <div className="segmented small" role="radiogroup" aria-label={t("磁盘负载上限")}>
             {(["max", "balanced", "quiet", "idle"] as LoadLevel[]).map((l) => (
               <button key={l} role="radio" aria-checked={props.load === l} className={props.load === l ? "on" : ""} onClick={() => props.onChange({ load: l })}>
                 {LOAD_ZH[l][0]}
@@ -406,13 +439,13 @@ function Options(props: {
         {capable && (
           <div className="set-row">
             <div className="set-text">
-              <div className="set-name">扫描 NTFS 备用数据流</div>
-              <div className="set-desc">统计附加在文件上的隐藏数据流（MFT 快速扫描时计入）</div>
+              <div className="set-name">{t("扫描 NTFS 备用数据流")}</div>
+              <div className="set-desc">{t("统计附加在文件上的隐藏数据流（MFT 快速扫描时计入）")}</div>
             </div>
             <button
               role="switch"
               aria-checked={props.ads}
-              aria-label="扫描 NTFS 备用数据流"
+              aria-label={t("扫描 NTFS 备用数据流")}
               className={`switch${props.ads ? " on" : ""}`}
               onClick={() => props.onChange({ ads: !props.ads })}
             >
@@ -440,8 +473,8 @@ function fmtWhen(iso: string): string {
   const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
   const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = Math.round((day(now) - day(d)) / 86400000);
-  if (diff === 0) return `今天 ${hm}`;
-  if (diff === 1) return `昨天 ${hm}`;
+  if (diff === 0) return t("今天 {time}", { time: hm });
+  if (diff === 1) return t("昨天 {time}", { time: hm });
   const pad = (n: number) => String(n).padStart(2, "0");
   if (d.getFullYear() === now.getFullYear()) return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -453,6 +486,7 @@ function Recents({ tab }: { tab: Tab }) {
   const snapDir = useApp((s) => s.settings?.snapshots ?? "");
   const [all, setAll] = useState(false);
   const [menu, setMenu] = useState(false);
+  const lang = useApp((s) => s.lang); // the names below are in the interface language
   const records = useMemo<Record_[]>(() => {
     const seen = new Set<string>();
     const out: Record_[] = [];
@@ -461,39 +495,40 @@ function Recents({ tab }: { tab: Tab }) {
       if (!all && seen.has(key)) continue; // newest per target unless showing everything
       seen.add(key);
       const vol = s.roots.length === 1 ? volumes.find((v) => sameRoot(v.mount_point, s.roots[0]!)) : undefined;
-      const name = vol ? volumeName(vol) : s.roots.length > 1 ? `${s.roots.length} 个位置` : (s.roots[0]?.split(/[\\/]/).filter(Boolean).pop() ?? s.roots[0] ?? "");
+      const name = vol ? volumeName(vol) : s.roots.length > 1 ? t("{n} 个位置", { n: s.roots.length }) : (s.roots[0]?.split(/[\\/]/).filter(Boolean).pop() ?? s.roots[0] ?? "");
       out.push({ key: s.path, snap: s, name, volume: !!vol });
     }
     return out;
-  }, [snapshots, volumes, all]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snapshots, volumes, all, lang]);
   const shown = all ? records : records.slice(0, 4);
 
   return (
-    <aside className="start-side" aria-label="最近">
+    <aside className="start-side" aria-label={t("最近")}>
       <div className="start-title">
         <h2>
-          最近 <span className="mono muted">{records.length}</span>
+          {t("最近")} <span className="mono muted">{records.length}</span>
         </h2>
         <div className="menu-anchor">
-          <button className="icon-btn" aria-label="最近记录选项" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+          <button className="icon-btn" aria-label={t("最近记录选项")} aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
             <Icon name="more" />
           </button>
           {menu && (
             <div className="menu" role="menu" onMouseLeave={() => setMenu(false)}>
               <button role="menuitem" className="menu-item" onClick={() => (setMenu(false), void refreshLists())}>
                 <span className="menu-check" />
-                刷新列表
+                {t("刷新列表")}
               </button>
               <button role="menuitem" className="menu-item" disabled={!snapDir} onClick={() => (setMenu(false), void window.sk.shell.openPath(snapDir))}>
                 <span className="menu-check" />
-                打开快照文件夹
+                {t("打开快照文件夹")}
               </button>
             </div>
           )}
         </div>
       </div>
       <div className="recent-card">
-        {records.length === 0 && <p className="muted recent-empty">还没有扫描记录。每次扫描完成后会自动保存快照，之后可以秒开。</p>}
+        {records.length === 0 && <p className="muted recent-empty">{t("还没有扫描记录。每次扫描完成后会自动保存快照，之后可以秒开。")}</p>}
         <div className={all ? "recent-list all" : "recent-list"}>
           {shown.map((r) => (
             <div key={r.key} className="recent">
@@ -506,18 +541,18 @@ function Recents({ tab }: { tab: Tab }) {
                   <span className="muted small mono">{fmtWhen(r.snap.created_at)}</span>
                 </div>
                 <div className="recent-line muted small">
-                  <span className="recent-sub">{r.volume ? `${fmtSize(r.snap.bytes_alloc)} · ${r.snap.method === "mft" ? "MFT 快扫" : "硬扫描"} · ${fmtInt(r.snap.files)} 个文件` : `${r.snap.roots.join("; ")} · ${fmtSize(r.snap.bytes_alloc)}`}</span>
+                  <span className="recent-sub">{r.volume ? t("{size} · {method} · {files} 个文件", { size: fmtSize(r.snap.bytes_alloc), method: r.snap.method === "mft" ? t("MFT 快扫") : t("硬扫描"), files: fmtInt(r.snap.files) }) : `${r.snap.roots.join("; ")} · ${fmtSize(r.snap.bytes_alloc)}`}</span>
                   <span className="recent-badge">
                     <Icon name="snapshot" size={12} />
-                    有快照
+                    {t("有快照")}
                   </span>
                 </div>
                 <div className="recent-actions">
                   <button className="ghost tiny" onClick={() => void openSnapshot(r.snap.path, tab.id)}>
-                    打开
+                    {t("打开")}
                   </button>
-                  <button className="link small" title="与这个位置现在的状态对比（需要时先扫描）" onClick={() => void compareWithNow(r.snap, tab.id)}>
-                    <Icon name="diff" size={13} /> 与现在对比
+                  <button className="link small" title={t("与这个位置现在的状态对比（需要时先扫描）")} onClick={() => void compareWithNow(r.snap, tab.id)}>
+                    <Icon name="diff" size={13} /> {t("与现在对比")}
                   </button>
                 </div>
               </div>
@@ -526,7 +561,7 @@ function Recents({ tab }: { tab: Tab }) {
         </div>
         {records.length > 4 || all ? (
           <button className="recent-all" onClick={() => setAll(!all)}>
-            {all ? "只看最近 4 条" : "查看全部扫描记录"} <Icon name="chevronRight" size={12} />
+            {all ? t("只看最近 4 条") : t("查看全部扫描记录")} <Icon name="chevronRight" size={12} />
           </button>
         ) : null}
       </div>
@@ -534,8 +569,8 @@ function Recents({ tab }: { tab: Tab }) {
         <span className="drop-icon">
           <Icon name="upload" size={18} />
         </span>
-        <div className="strong">把快照文件拖到这里</div>
-        <div className="muted small">打开后可直接浏览，或与现在的磁盘对比</div>
+        <div className="strong">{t("把快照文件拖到这里")}</div>
+        <div className="muted small">{t("打开后可直接浏览，或与现在的磁盘对比")}</div>
         <button
           className="ghost small"
           onClick={async () => {
@@ -544,7 +579,7 @@ function Recents({ tab }: { tab: Tab }) {
           }}
         >
           <Icon name="snapshot" size={14} />
-          打开快照文件…
+          {t("打开快照文件…")}
         </button>
       </div>
     </aside>

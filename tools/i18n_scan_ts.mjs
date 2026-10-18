@@ -43,7 +43,7 @@ function* files(dir) {
   }
 }
 
-const msgids = new Set();
+const msgids = new Map(); // msgid -> files
 const problems = [];
 
 const calleeName = (call) => (call && call.type === "CallExpression" && call.callee.type === "Identifier" ? call.callee.name : null);
@@ -55,6 +55,7 @@ for (const file of files(root)) {
   const lines = text.split("\n");
   const rel = relative(root, file).replaceAll("\\", "/");
   const ignored = (node) => /\/\/\s*i18n-ignore\s*$/.test(lines[node.loc.start.line - 1] ?? "") || /\/\/\s*i18n-ignore\s*$/.test(lines[node.loc.end.line - 1] ?? "");
+  const addId = (value) => msgids.set(value, [...(msgids.get(value) ?? []), rel]);
   const report = (node, value, why) => {
     if (!ignored(node)) problems.push({ file: rel, line: node.loc.start.line, text: value.slice(0, 80), why });
   };
@@ -65,7 +66,7 @@ for (const file of files(root)) {
       const value = node.value;
       if (CJK.test(value)) {
         const fn = calleeName(parent);
-        if (fn === "t" && parent.arguments[0] === node) msgids.add(value);
+        if (fn === "t" && parent.arguments[0] === node) addId(value);
         else if (fn === "byLang") {
           /* both languages given in place */
         } else if (parent && parent.type === "JSXAttribute") report(node, value, 'JSX attribute: use attr={t("…")}');
@@ -78,7 +79,7 @@ for (const file of files(root)) {
       if (CJK.test(value)) {
         const fn = calleeName(parent);
         if (node.expressions.length) report(node, value, 'template with ${}: use t("…{name}…", { name })');
-        else if (fn === "t" && parent.arguments[0] === node) msgids.add(value);
+        else if (fn === "t" && parent.arguments[0] === node) addId(value);
         else if (fn !== "byLang") report(node, value, 'template literal: use t("…")');
       }
     } else if (node.type === "JSXText") {
@@ -95,4 +96,4 @@ for (const file of files(root)) {
   visit(ast.program, null);
 }
 
-process.stdout.write(JSON.stringify({ msgids: [...msgids].sort(), problems }, null, 1));
+process.stdout.write(JSON.stringify({ msgids: Object.fromEntries([...msgids].sort()), problems }, null, 1));

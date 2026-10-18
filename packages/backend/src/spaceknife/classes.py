@@ -4,6 +4,10 @@ The built-in definitions are shared data in :mod:`spaceknife_protocol.classes`. 
 the table (W7 「文件类别」): it is kept in ``config_dir()/classes.json`` and becomes the *active*
 table every component reads through :func:`active` — the filter engine, the layout's colour
 classes, the parser vocabulary.
+
+M7.5: frontends see a built-in class the user has not renamed under its name in the interface
+language (``spaceknife_protocol.classes.localized``); :func:`build` takes that name back as the
+built-in one, so saving the editor in English is no rename.
 """
 
 from __future__ import annotations
@@ -16,18 +20,22 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from spaceknife_protocol.classes import BUILTIN_CLASSES, OTHER, ClassEdit
+from spaceknife_protocol.classes import BUILTIN_CLASSES, OTHER, ClassEdit, localized
 from spaceknife_protocol.filter import FilterClassInfo
 
-# User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "empty_name": "类别名不能为空",
-    "dup_name": "类别名「{name}」重复了（与「{other}」冲突）",
-    "bad_name": "类别名里不能有「{chars}」",
-    "other_missing": "「其他」类别不能删除",
-    "other_exts": "「其他」类别不能填扩展名：它收纳所有未归类的扩展名",
-    "bad_ext": "扩展名「{ext}」不合法",
-}
+from .i18n import SOURCE, Texts, _, language
+
+# User-facing text, translated when read (M7.5).
+TEXT = Texts(
+    {
+        "empty_name": "类别名不能为空",
+        "dup_name": "类别名「{name}」重复了（与「{other}」冲突）",
+        "bad_name": "类别名里不能有「{chars}」",
+        "other_missing": "「其他」类别不能删除",
+        "other_exts": "「其他」类别不能填扩展名：它收纳所有未归类的扩展名",
+        "bad_ext": "扩展名「{ext}」不合法",
+    }
+)
 _EXT_SPLIT = re.compile(r"[;,\s]+")
 _BAD_NAME = re.compile(r'[;:"\\]')  # would break `:class:<name>` in the filter syntax
 
@@ -107,8 +115,22 @@ def _norm_ext(raw: str) -> str:
     return raw.strip().lstrip(".").lower()
 
 
+def shown(table: ClassTable) -> list[FilterClassInfo]:
+    """The table's classes as the interface shows them (built-in names in its language, M7.5)."""
+    lang = language()
+    return [localized(c, lang) for c in table.classes]
+
+
+def _own_name(cid: str | None, name: str) -> str:
+    """A built-in class's name as shown in a translated interface -> its own name (not a rename)."""
+    lang = language()
+    base = next((c for c in BUILTIN_CLASSES if c.id == cid), None) if lang != SOURCE else None
+    return base.name if base is not None and name == localized(base, lang).name else name
+
+
 def build(edits: list[ClassEdit]) -> ClassTable:
-    """Validate the editor's list (UI-W7-33) into a table; raises ``ValueError`` with a Chinese message.
+    """Validate the editor's list (UI-W7-33) into a table; raises ``ValueError`` with a message in
+    the current language.
 
     Extensions: ``;`` separated like SpaceSniffer, spaces and commas accepted, leading dots and
     case dropped. Built-in classes keep their aliases (SpaceSniffer's names keep matching) unless
@@ -120,7 +142,7 @@ def build(edits: list[ClassEdit]) -> ClassTable:
     used_ids: set[str] = set()
     other: FilterClassInfo | None = None
     for e in edits:
-        name = e.name.strip()
+        name = _own_name(e.id, e.name.strip())
         if not name:
             raise ValueError(TEXT["empty_name"])
         bad = sorted(set(_BAD_NAME.findall(name)))
@@ -161,7 +183,8 @@ def build(edits: list[ClassEdit]) -> ClassTable:
 
 
 def _display(classes: list[FilterClassInfo], cid: str) -> str:
-    return next((c.name for c in classes if c.id == cid), cid)
+    lang = language()
+    return next((localized(c, lang).name for c in classes if c.id == cid), cid)
 
 
 def _new_id(name: str, used: set[str]) -> str:
@@ -186,7 +209,7 @@ def load(path: Path) -> ClassTable:
     except FileNotFoundError:
         return DEFAULT_CLASSES
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        logger.warning("类别表 {} 读不出来，改用内置类别：{}", path, exc)
+        logger.warning(_("类别表 {} 读不出来，改用内置类别：{}"), path, exc)
         return DEFAULT_CLASSES
 
 

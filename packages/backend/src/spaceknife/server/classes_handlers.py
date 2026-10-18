@@ -6,7 +6,7 @@ import asyncio
 from typing import TYPE_CHECKING
 
 from spaceknife_protocol.base import Empty
-from spaceknife_protocol.classes import BUILTIN_CLASSES, ClassesEvent, ClassesState, ClassesUpdateParams
+from spaceknife_protocol.classes import ClassesEvent, ClassesState, ClassesUpdateParams
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import CLASSES_GET, CLASSES_RESET, CLASSES_UPDATE, EVENT_CLASSES
 
@@ -19,8 +19,11 @@ if TYPE_CHECKING:
 
 
 def state() -> ClassesState:
+    """The table as the interface shows it: built-in names in the current language (M7.5)."""
     table = classes.active()
-    return ClassesState(classes=list(table.classes), defaults=list(BUILTIN_CLASSES), custom=table.custom)
+    return ClassesState(
+        classes=classes.shown(table), defaults=classes.shown(classes.DEFAULT_CLASSES), custom=table.custom
+    )
 
 
 def load_saved() -> None:

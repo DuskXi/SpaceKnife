@@ -4,6 +4,7 @@
 
 import type { CompareProgressEvent } from "@/protocol/generated";
 import { RpcError } from "@/protocol/rpc";
+import { t } from "@/lib/i18n";
 import { isSynthetic } from "@/treemap/frame";
 
 import { call, openView, setViewSettings, startScan, viewCall } from "./actions";
@@ -47,8 +48,8 @@ export async function enterCompare(base?: string): Promise<void> {
     toast(err instanceof RpcError ? err.message : String(err));
     return;
   }
-  if (!sources.now) return toast(sources.now_note || "现在还不能对比");
-  if (!sources.snapshots.length) return toast("还没有这个位置的快照：先保存一次快照（Ctrl+S）");
+  if (!sources.now) return toast(sources.now_note || t("现在还不能对比"));
+  if (!sources.snapshots.length) return toast(t("还没有这个位置的快照：先保存一次快照（Ctrl+S）"));
   // the newest snapshot that is not this very tree (a finished scan saves itself at once)
   const own = get().scans[tab.scanId]?.snapshot;
   const first = base ?? (sources.snapshots.find((s) => s.path !== own) ?? sources.snapshots[0]!).path;
@@ -72,7 +73,7 @@ export async function enterCompare(base?: string): Promise<void> {
 export async function setCompareEnds(tabId: string, base: string, target: string): Promise<void> {
   const tab = tabOf(tabId);
   if (!tab?.compare) return;
-  if (base === target) return toast("基准和对比目标不能是同一份数据");
+  if (base === target) return toast(t("基准和对比目标不能是同一份数据"));
   await startCompare(tabId, base, target);
 }
 
@@ -106,7 +107,7 @@ async function startCompare(tabId: string, base: string, target: string): Promis
 
 function failed(tabId: string, message: string): void {
   const c = tabOf(tabId)?.compare;
-  toast(message || "对比失败");
+  toast(message || t("对比失败"));
   if (!c) return;
   if (!c.shownId) {
     set((s) => ({ tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, compare: undefined } : t)) }));
@@ -228,7 +229,7 @@ export async function compareWithNow(snapshot: { path: string; roots: string[] }
   const scanId = await startScan({ roots: snapshot.roots }, tabId);
   if (scanId) {
     afterScan.set(scanId, snapshot.path);
-    toast("扫描完成后会自动与这个快照对比");
+    toast(t("扫描完成后会自动与这个快照对比"));
   }
 }
 

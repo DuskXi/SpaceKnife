@@ -6,25 +6,39 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { call, updateSettings, viewCall } from "@/state/actions";
 import { activeTab, type LogEntry, set, toast, useApp } from "@/state/store";
 import { fmtDateTime, fmtDuration, fmtInt, fmtSize } from "@/lib/format";
+import { byLang, getLang, t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
 const ROW_H = 20;
-const SOURCE_ZH: Record<string, string> = {
-  scan: "扫描",
-  perm: "权限",
-  monitor: "监控",
-  delete: "删除",
-  snapshot: "快照",
-  export: "导出",
-  system: "系统",
-};
-const LEVEL_ZH: Record<LogEntry["level"], string> = { INFO: "信息", WARNING: "警告", ERROR: "错误" };
+/** An event's source in the current language (read at render time, M7.5); unknown ones as they are. */
+function sourceText(source: string): string {
+  switch (source) {
+    case "scan":
+      return t("扫描");
+    case "perm":
+      return t("权限");
+    case "monitor":
+      return t("监控");
+    case "delete":
+      return t("删除");
+    case "snapshot":
+      return t("快照");
+    case "export":
+      return t("导出");
+    case "system":
+      return t("系统");
+    default:
+      return source;
+  }
+}
+
+const levelText = (level: LogEntry["level"]): string => ({ INFO: t("信息"), WARNING: t("警告"), ERROR: t("错误") })[level];
 
 export function LogPanel() {
   const open = useApp((s) => s.logOpen);
   if (!open) return <div className="logdock" />;
   return (
-    <section className="logdock open" aria-label="日志面板">
+    <section className="logdock open" aria-label={t("日志面板")}>
       <LogBody />
     </section>
   );
@@ -41,24 +55,24 @@ function LogBody() {
   return (
     <>
       <div className="log-head">
-        <div className="segtabs small" role="tablist" aria-label="停靠面板">
+        <div className="segtabs small" role="tablist" aria-label={t("停靠面板")}>
           <button role="tab" aria-selected={tab === "log"} className={tab === "log" ? "on" : ""} onClick={() => set({ logTab: "log" })}>
             <Icon name="log" size={14} />
-            日志
+            {t("日志")}
           </button>
           <button role="tab" aria-selected={tab === "stats"} className={tab === "stats" ? "on" : ""} onClick={() => set({ logTab: "stats" })}>
-            扫描统计
+            {t("扫描统计")}
           </button>
         </div>
         <span className="log-summary">
-          本次会话 · {fmtInt(logs.length)} 条 ·{" "}
-          <button className={`link${onlyWarnings ? " on" : ""}`} aria-pressed={onlyWarnings} title={onlyWarnings ? "显示全部事件" : "只看警告和错误"} onClick={() => setOnlyWarnings(!onlyWarnings)}>
-            {fmtInt(warnings)} 条警告
+          {t("本次会话 · {n} 条 ·", { n: fmtInt(logs.length) })}{" "}
+          <button className={`link${onlyWarnings ? " on" : ""}`} aria-pressed={onlyWarnings} title={onlyWarnings ? t("显示全部事件") : t("只看警告和错误")} onClick={() => setOnlyWarnings(!onlyWarnings)}>
+            {t("{n} 条警告", { n: fmtInt(warnings) })}
           </button>
         </span>
         <span className="flex" />
         <label className="switch-row">
-          <span>弹出事件时自动打开</span>
+          <span>{t("弹出事件时自动打开")}</span>
           <button
             role="switch"
             aria-checked={auto}
@@ -70,9 +84,9 @@ function LogBody() {
         </label>
         <span className="vsep" />
         <button className="ghost small" onClick={() => set({ logs: [] })}>
-          清空
+          {t("清空")}
         </button>
-        <button className="icon-btn small" aria-label="收起日志面板" title="收起日志面板（Ctrl+J）" onClick={() => set({ logOpen: false, logDismissed: true })}>
+        <button className="icon-btn small" aria-label={t("收起日志面板")} title={t("收起日志面板（Ctrl+J）")} onClick={() => set({ logOpen: false, logDismissed: true })}>
           <Icon name="chevronDown" />
         </button>
       </div>
@@ -155,7 +169,7 @@ function LogList({ logs }: { logs: LogEntry[] }) {
         ref={box}
         className="log-list"
         role="listbox"
-        aria-label="事件日志"
+        aria-label={t("事件日志")}
         aria-activedescendant={active >= 0 ? `log-row-${active}` : undefined}
         tabIndex={0}
         onScroll={onScroll}
@@ -166,11 +180,11 @@ function LogList({ logs }: { logs: LogEntry[] }) {
             <LogRow key={`${e.seq}-${first + i}`} id={`log-row-${first + i}`} entry={e} top={(first + i) * ROW_H} active={first + i === active} onPick={() => setActive(first + i)} />
           ))}
         </div>
-        {logs.length === 0 && <div className="log-empty">暂无事件</div>}
+        {logs.length === 0 && <div className="log-empty">{t("暂无事件")}</div>}
       </div>
       {/* new events only are announced, politely (UI-W8-36); the virtualised rows are not a live region */}
       <div className="sr-only" role="log" aria-live="polite">
-        {logs.length ? `${LEVEL_ZH[logs[logs.length - 1]!.level]}：${logs[logs.length - 1]!.message}` : ""}
+        {logs.length ? t("{level}：{message}", { level: levelText(logs[logs.length - 1]!.level), message: logs[logs.length - 1]!.message }) : ""}
       </div>
       {!follow && logs.length > 0 && (
         <button
@@ -182,7 +196,7 @@ function LogList({ logs }: { logs: LogEntry[] }) {
           }}
         >
           <Icon name="chevronDown" size={14} />
-          跳到最新
+          {t("跳到最新")}
         </button>
       )}
     </div>
@@ -191,21 +205,21 @@ function LogList({ logs }: { logs: LogEntry[] }) {
 
 function LogRow({ id, entry: e, top, active, onPick }: { id: string; entry: LogEntry; top: number; active: boolean; onPick: () => void }) {
   const time = new Date(e.time);
-  const hhmmss = Number.isNaN(time.getTime()) ? "" : time.toLocaleTimeString("zh-CN", { hour12: false });
+  const hhmmss = Number.isNaN(time.getTime()) ? "" : time.toLocaleTimeString(getLang(), { hour12: false });
   return (
     <div id={id} role="option" aria-selected={active} className={`log-row${active ? " on" : ""} ${e.level.toLowerCase()}`} style={{ top }} onMouseDown={onPick} title={e.message}>
       <span className="log-time mono">{hhmmss}</span>
-      <span className="log-level">{LEVEL_ZH[e.level]}</span>
-      <span className="log-source">{SOURCE_ZH[e.source] ?? e.source}</span>
+      <span className="log-level">{levelText(e.level)}</span>
+      <span className="log-source">{sourceText(e.source)}</span>
       <span className="log-msg">{renderMessage(e.message, e.path)}</span>
       {e.path && (
         <span className="log-actions">
           {e.scanId && (
             <button className="ghost tiny" onClick={() => void locate(e)}>
-              在树图中定位
+              {t("在树图中定位")}
             </button>
           )}
-          <button className="icon-btn tiny" aria-label="复制路径（Ctrl+C）" title="复制路径（Ctrl+C）" onClick={() => copyPath(e.path)}>
+          <button className="icon-btn tiny" aria-label={t("复制路径（Ctrl+C）")} title={t("复制路径（Ctrl+C）")} onClick={() => copyPath(e.path)}>
             <Icon name="copy" size={13} />
           </button>
         </span>
@@ -237,15 +251,15 @@ function shortPath(path: string): string {
 
 function copyPath(path: string): void {
   window.sk.shell.copyText(path);
-  toast("已复制");
+  toast(t("已复制"));
 }
 
 /** Locate an event's path in the focused pane of its scan's tab (UI-W8-27). */
 async function locate(e: LogEntry): Promise<void> {
   const s = useApp.getState();
-  const tab = s.tabs.find((t) => t.scanId === e.scanId);
+  const tab = s.tabs.find((x) => x.scanId === e.scanId);
   if (!tab) {
-    toast("这次扫描已经关闭");
+    toast(t("这次扫描已经关闭"));
     return;
   }
   if (s.active !== tab.id) set({ active: tab.id });
@@ -253,13 +267,13 @@ async function locate(e: LogEntry): Promise<void> {
   try {
     const found = await call("tree.find", { scan_id: e.scanId, path: e.path });
     if (!found.node) {
-      toast("该路径已不存在");
+      toast(t("该路径已不存在"));
       return;
     }
     await viewCall(viewId ?? null, "view.reveal", { key: found.node.id });
-    if (viewId && useApp.getState().views[viewId]?.filter?.active) toast("该项可能被当前过滤隐藏");
+    if (viewId && useApp.getState().views[viewId]?.filter?.active) toast(t("该项可能被当前过滤隐藏"));
   } catch {
-    toast("无法定位该路径");
+    toast(t("无法定位该路径"));
   }
 }
 
@@ -267,31 +281,33 @@ async function locate(e: LogEntry): Promise<void> {
 function ScanStats() {
   const tab = useApp((s) => activeTab(s));
   const scan = useApp((s) => (tab.scanId ? s.scans[tab.scanId] : undefined));
-  if (!scan) return <div className="log-empty">当前标签没有扫描</div>;
+  if (!scan) return <div className="log-empty">{t("当前标签没有扫描")}</div>;
   const running = scan.state === "scanning" || scan.state === "queued";
+  const state = { queued: t("排队中"), scanning: t("扫描中"), done: t("已完成"), cancelled: t("已停止（结果保留）"), failed: t("失败") }[scan.state];
   const rows: [string, React.ReactNode][] = [
-    ["扫描方式", scan.source === "snapshot" ? "快照" : scan.method === "mft" ? "MFT 快速扫描" : "硬扫描"],
-    ["状态", scan.paused && running ? "已暂停" : { queued: "排队中", scanning: "扫描中", done: "已完成", cancelled: "已停止（结果保留）", failed: "失败" }[scan.state]],
-    ["开始", scan.started_at ? fmtDateTime(Date.parse(scan.started_at) / 1000) : "—"],
-    ["结束", scan.finished_at ? fmtDateTime(Date.parse(scan.finished_at) / 1000) : running ? "进行中" : "—"],
-    ["耗时", fmtDuration(scan.elapsed_s)],
-    ["文件 / 文件夹", `${fmtInt(scan.files)} / ${fmtInt(scan.dirs)}`],
+    // 「快照」: the one snapshot this tab shows (as a log source and elsewhere: the snapshots, plural)
+    [t("扫描方式"), scan.source === "snapshot" ? byLang("快照", "Snapshot") : scan.method === "mft" ? t("MFT 快速扫描") : t("硬扫描")],
+    [t("状态"), scan.paused && running ? t("已暂停") : state],
+    [t("开始"), scan.started_at ? fmtDateTime(Date.parse(scan.started_at) / 1000) : "—"],
+    [t("结束"), scan.finished_at ? fmtDateTime(Date.parse(scan.finished_at) / 1000) : running ? t("进行中") : "—"],
+    [t("耗时"), fmtDuration(scan.elapsed_s)],
+    [t("文件 / 文件夹"), `${fmtInt(scan.files)} / ${fmtInt(scan.dirs)}`],
   ];
   const right: [string, React.ReactNode][] = [
-    ["已扫描合计", fmtSize(scan.bytes_alloc)],
-    ["未知空间", scan.unknown != null ? fmtSize(scan.unknown) : "—（不是整卷扫描）"],
+    [t("已扫描合计"), fmtSize(scan.bytes_alloc)],
+    [t("未知空间"), scan.unknown != null ? fmtSize(scan.unknown) : t("—（不是整卷扫描）")],
     [
-      "无法访问",
+      t("无法访问"),
       scan.errors > 0 ? (
         <button className="link" onClick={() => set({ logTab: "log" })}>
-          {fmtInt(scan.errors)} 个文件夹
+          {t("{n} 个文件夹", { n: fmtInt(scan.errors) })}
         </button>
       ) : (
         "0"
       ),
     ],
-    ["平均吞吐", scan.elapsed_s > 0 ? `${fmtInt(Math.round(scan.items / scan.elapsed_s))} 项/秒 · ${fmtSize(scan.bytes_alloc / scan.elapsed_s)}/秒` : "—"],
-    ["磁盘负载历史", <span className="muted">M4 接入</span>],
+    [t("平均吞吐"), scan.elapsed_s > 0 ? t("{rate} 项/秒 · {size}/秒", { rate: fmtInt(Math.round(scan.items / scan.elapsed_s)), size: fmtSize(scan.bytes_alloc / scan.elapsed_s) }) : "—"],
+    [t("磁盘负载历史"), <span className="muted">{t("M4 接入")}</span>],
   ];
   return (
     <div className="log-stats">
@@ -312,7 +328,7 @@ function ScanStats() {
         ))}
       </dl>
       <div className="log-stats-hint muted small">
-        <Kbd>Ctrl+J</Kbd> 显示 / 隐藏日志面板
+        <Kbd>Ctrl+J</Kbd> {t("显示 / 隐藏日志面板")}
       </div>
     </div>
   );

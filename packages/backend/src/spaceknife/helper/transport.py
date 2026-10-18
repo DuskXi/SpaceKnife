@@ -31,6 +31,7 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from ..i18n import tr
 from .messages import HEADER, KIND_JSON, MAX_BINARY_BYTES, FrameError, Message, check_header, json_frame
 
 PIPE_PREFIX = "\\\\.\\pipe\\spaceknife-helper-"
@@ -82,7 +83,7 @@ class AsyncChannel(ABC):
             try:
                 await self.recv_into(memoryview(body), inactivity)
             except EOFError:
-                raise ConnectionResetError("帧不完整：对端已关闭") from None
+                raise ConnectionResetError(tr("帧不完整：对端已关闭")) from None
         return kind, body
 
     async def send_message(self, message: Message, inactivity: float | None) -> None:
@@ -114,14 +115,14 @@ class SyncChannel(ABC):
         try:
             self.recv_into(view[1:], timeout)
         except EOFError:
-            raise ConnectionResetError("帧不完整：对端已关闭") from None
+            raise ConnectionResetError(tr("帧不完整：对端已关闭")) from None
         kind, body_len = check_header(head, max_binary=max_binary)
         body = bytearray(body_len)
         if body_len:
             try:
                 self.recv_into(memoryview(body), timeout)
             except EOFError:
-                raise ConnectionResetError("帧不完整：对端已关闭") from None
+                raise ConnectionResetError(tr("帧不完整：对端已关闭")) from None
         return kind, body
 
     def send_message(self, message: Message, timeout: float | None) -> None:
@@ -138,7 +139,7 @@ if sys.platform == "win32":
                 got += pipe.read_into(view[got:], timeout)
             except EOFError:
                 if got:
-                    raise ConnectionResetError("帧不完整：管道已断开") from None
+                    raise ConnectionResetError(tr("帧不完整：管道已断开")) from None
                 raise
 
     def _drain_pipe(pipe: _win32.Pipe, buffers: Sequence[Buffer], timeout: float | None) -> None:
@@ -166,11 +167,11 @@ if sys.platform == "win32":
 
         async def _on_io_thread(self, fn: Callable[..., None], *args: object) -> None:
             if self._pipe.closed:
-                raise ConnectionAbortedError("管道已关闭")
+                raise ConnectionAbortedError(tr("管道已关闭"))
             try:
                 await asyncio.get_running_loop().run_in_executor(self._io, fn, self._pipe, *args)
             except RuntimeError as exc:  # the executor was shut down by close() meanwhile
-                raise ConnectionAbortedError("管道已关闭") from exc
+                raise ConnectionAbortedError(tr("管道已关闭")) from exc
 
         def close(self) -> None:
             self._pipe.close()
@@ -200,7 +201,7 @@ if sys.platform == "win32":
         async def accept(self, wait: float) -> AsyncChannel:
             """Wait up to ``wait`` seconds for the helper to connect (TimeoutError otherwise; may retry)."""
             if self._pipe is None:
-                raise ConnectionAbortedError("监听已关闭")
+                raise ConnectionAbortedError(tr("监听已关闭"))
             await asyncio.get_running_loop().run_in_executor(None, self._pipe.accept, wait)
             pipe, self._pipe = self._pipe, None
             try:
@@ -245,20 +246,20 @@ else:
 
         async def recv_into(self, view: memoryview, inactivity: float | None) -> None:
             if self._closed:
-                raise ConnectionAbortedError("套接字已关闭")
+                raise ConnectionAbortedError(tr("套接字已关闭"))
             loop = asyncio.get_running_loop()
             got = 0
             while got < len(view):
                 n = await asyncio.wait_for(loop.sock_recv_into(self._sock, view[got:]), inactivity)
                 if n == 0:
                     if got:
-                        raise ConnectionResetError("帧不完整：对端已关闭")
-                    raise EOFError("对端已关闭")
+                        raise ConnectionResetError(tr("帧不完整：对端已关闭"))
+                    raise EOFError(tr("对端已关闭"))
                 got += n
 
         async def send(self, buffers: Sequence[Buffer], inactivity: float | None) -> None:
             if self._closed:
-                raise ConnectionAbortedError("套接字已关闭")
+                raise ConnectionAbortedError(tr("套接字已关闭"))
             loop = asyncio.get_running_loop()
             for buf in buffers:
                 await asyncio.wait_for(loop.sock_sendall(self._sock, buf), inactivity)
@@ -286,7 +287,7 @@ else:
                 if r or w:
                     return
                 if deadline is not None and time.monotonic() >= deadline:
-                    raise TimeoutError("套接字读写超时")
+                    raise TimeoutError(tr("套接字读写超时"))
 
         def recv_into(self, view: memoryview, timeout: float | None) -> None:
             got = 0
@@ -300,8 +301,8 @@ else:
                     n = 0
                 if n == 0:
                     if got:
-                        raise ConnectionResetError("帧不完整：对端已关闭")
-                    raise EOFError("对端已关闭")
+                        raise ConnectionResetError(tr("帧不完整：对端已关闭"))
+                    raise EOFError(tr("对端已关闭"))
                 got += n
 
         def send(self, buffers: Sequence[Buffer], timeout: float | None) -> None:
@@ -338,12 +339,12 @@ else:
         async def accept(self, wait: float) -> AsyncChannel:
             """Wait up to ``wait`` seconds for the helper to connect (TimeoutError otherwise; may retry)."""
             if self._sock is None:
-                raise ConnectionAbortedError("监听已关闭")
+                raise ConnectionAbortedError(tr("监听已关闭"))
             conn, _ = await asyncio.wait_for(asyncio.get_running_loop().sock_accept(self._sock), wait)
             try:
                 _pid, uid = _peer_cred(conn)
                 if uid is not None and uid not in (os.getuid(), 0):
-                    raise PermissionError(f"拒绝了用户 {uid} 的连接")
+                    raise PermissionError(tr("拒绝了用户 {uid} 的连接", uid=uid))
                 self.close()  # one connection only: nobody else may connect after the helper
                 return _SocketChannel(conn)
             except BaseException:
@@ -372,7 +373,7 @@ else:
 def connect(address: str, timeout: float) -> SyncChannel:
     """Helper side: connect to the backend's listener (only to an address it could have made)."""
     if not valid_address(address):
-        raise ValueError(f"无效的助手地址：{address!r}")
+        raise ValueError(tr("无效的助手地址：{address!r}", address=address))
     return _connect(address, timeout)
 
 

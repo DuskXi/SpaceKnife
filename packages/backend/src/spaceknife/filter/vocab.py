@@ -5,10 +5,12 @@ from __future__ import annotations
 import sys
 from functools import cache
 
+from spaceknife_protocol.classes import localized
 from spaceknife_protocol.filter import AgeField, AttrName, FilterVocab
 from spaceknife_protocol.filter_syntax import default_vocab
 
 from .. import classes as class_table
+from .. import i18n
 
 # Attributes the scanner does not collect on POSIX (hidden = dot files is collected everywhere).
 _POSIX_MISSING_ATTRS: tuple[AttrName, ...] = (
@@ -25,16 +27,17 @@ _POSIX_MISSING_ATTRS: tuple[AttrName, ...] = (
 )
 
 
-_current: tuple[int, FilterVocab] | None = None
+_current: tuple[tuple[int, str], FilterVocab] | None = None
 
 
 def platform_vocab() -> FilterVocab:
     """The vocabulary with the active class table; the same object until the table changes (the
     parser caches its class index per vocabulary object)."""
     global _current
-    v = class_table.version()
-    if _current is None or _current[0] != v:
-        _current = (v, _platform().model_copy(update={"classes": list(class_table.active().classes)}))
+    key = (class_table.version(), i18n.language())
+    if _current is None or _current[0] != key:
+        shown = [localized(c, key[1]) for c in class_table.active().classes]  # M7.5: English names
+        _current = (key, _platform().model_copy(update={"classes": shown}))
     return _current[1]
 
 

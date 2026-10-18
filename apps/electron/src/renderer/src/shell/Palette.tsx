@@ -18,6 +18,7 @@ import { call, cancellable, editFilter, startScan, viewCall } from "@/state/acti
 import { runCommand } from "@/state/commands";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtSize, middlePath } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
 import { diagnosticText, renderColoured } from "./FilterBox";
@@ -51,8 +52,8 @@ function PaletteDialog() {
   const [tick, setTick] = useState(0);
   useEffect(() => {
     if (scanState !== "scanning" && scanState !== "queued") return;
-    const t = setInterval(() => setTick((x) => x + 1), 2000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setTick((x) => x + 1), 2000);
+    return () => clearInterval(timer);
   }, [scanState]);
   const scanTab = tab.kind === "scan" && !!tab.scanId;
   const [returnTo] = useState(() => document.activeElement as HTMLElement | null);
@@ -246,37 +247,35 @@ function PaletteDialog() {
     { id: "direct", title: "" },
     {
       id: "recent",
-      title: "最近",
+      title: t("最近"),
       extra: (
         <button
           className="pal-clear"
-          aria-label="清除最近记录"
+          aria-label={t("清除最近记录")}
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
             void call("palette.clear", { scan_id: tab.scanId ?? null }).then(() => setReload((x) => x + 1));
             input.current?.focus();
           }}
         >
-          清除
+          {t("清除")}
         </button>
       ),
     },
-    { id: "command", title: "命令" },
+    { id: "command", title: t("命令") },
     {
       id: "path",
-      title: "路径",
+      title: t("路径"),
       extra: searching ? (
-        <span>搜索中…</span>
+        <span>{t("搜索中…")}</span>
       ) : paths?.partial ? (
-        <span className="warn">扫描未完成，结果可能不全</span>
+        <span className="warn">{t("扫描未完成，结果可能不全")}</span>
       ) : res?.seed ? (
-        <span>匹配选中项「{res.seed}」</span>
+        <span>{t("匹配选中项「{seed}」", { seed: res.seed })}</span>
       ) : paths?.folder ? (
-        <span>{fmtInt(paths.total)} 项</span>
+        <span>{t("{n} 项", { n: fmtInt(paths.total) })}</span>
       ) : paths && paths.total > paths.items.length ? (
-        <span>
-          显示 {paths.items.length} / {fmtInt(paths.total)}
-        </span>
+        <span>{t("显示 {shown} / {total}", { shown: paths.items.length, total: fmtInt(paths.total) })}</span>
       ) : null,
     },
   ];
@@ -292,7 +291,7 @@ function PaletteDialog() {
         className="palette"
         role="dialog"
         aria-modal="true"
-        aria-label="命令面板"
+        aria-label={t("命令面板")}
         onMouseDown={(e) => {
           // keep the caret in the input: headers, hints and padding must not take the focus (UI-W4-38)
           if (e.target !== input.current && !(e.target as HTMLElement).closest("button")) e.preventDefault();
@@ -303,10 +302,10 @@ function PaletteDialog() {
           <input
             ref={input}
             value={text}
-            placeholder="输入命令、路径或过滤条件…"
+            placeholder={t("输入命令、路径或过滤条件…")}
             spellCheck={false}
             role="combobox"
-            aria-label="命令面板输入"
+            aria-label={t("命令面板输入")}
             aria-expanded="true"
             aria-controls="sk-palette-list"
             aria-autocomplete="list"
@@ -317,19 +316,19 @@ function PaletteDialog() {
             onCompositionEnd={() => (composing.current = false)}
           />
           {scanTab && (
-            <span className="pal-scope" title="命令面板作用于这个扫描">
+            <span className="pal-scope" title={t("命令面板作用于这个扫描")}>
               <Icon name="drive" size={14} />
               {tab.title}
             </span>
           )}
         </div>
-        <div ref={list} id="sk-palette-list" className="pal-list" role="listbox" aria-label="命令、路径与最近">
+        <div ref={list} id="sk-palette-list" className="pal-list" role="listbox" aria-label={t("命令、路径与最近")}>
           {groups.map((g) => {
             const members = lines.filter((l) => l.group === g.id);
             const visible = g.id === "path" ? pathGroupVisible : members.length > 0;
             if (!visible) return null;
             return (
-              <div key={g.id} role="group" aria-label={g.title || "直达"} className="pal-group">
+              <div key={g.id} role="group" aria-label={g.title || t("直达")} className="pal-group">
                 {g.title && (
                   <div className="pal-head">
                     <span aria-hidden="true">{g.title}</span>
@@ -355,25 +354,25 @@ function PaletteDialog() {
               </div>
             );
           })}
-          {noResults && <div className="pal-empty">没有匹配的命令或路径</div>}
+          {noResults && <div className="pal-empty">{t("没有匹配的命令或路径")}</div>}
         </div>
         <div className="pal-hints">
           <span>
             <Kbd>↑</Kbd>
-            <Kbd>↓</Kbd> 选择
+            <Kbd>↓</Kbd> {t("选择")}
           </span>
           <span>
-            <Kbd>Enter</Kbd> 执行
+            <Kbd>Enter</Kbd> {t("执行")}
           </span>
           <span>
-            <Kbd>Tab</Kbd> 补全
+            <Kbd>Tab</Kbd> {t("补全")}
           </span>
           <span>
-            <Kbd>Esc</Kbd> 关闭
+            <Kbd>Esc</Kbd> {t("关闭")}
           </span>
         </div>
         <div className="sr-only" role="status" aria-live="polite">
-          {res ? `${lines.length} 个结果` : ""}
+          {res ? t("{n} 个结果", { n: lines.length }) : ""}
         </div>
       </div>
     </div>
@@ -391,7 +390,7 @@ function PaletteRow(props: { id: string; line: Line; on: boolean; previews: Reco
   let tone = "";
   const stats = (expr: string) => {
     const pv = props.previews[expr];
-    return pv ? (pv.valid ? `${fmtInt(pv.files)} 项 · ${fmtSize(pv.alloc)}` : "") : "搜索中…";
+    return pv ? (pv.valid ? t("{n} 项 · {size}", { n: fmtInt(pv.files), size: fmtSize(pv.alloc) }) : "") : t("搜索中…");
   };
   switch (row.kind) {
     case "filter": {
@@ -399,7 +398,7 @@ function PaletteRow(props: { id: string; line: Line; on: boolean; previews: Reco
       const errs = row.d.diagnostics;
       main = (
         <>
-          <span className="pal-verb">过滤</span>
+          <span className="pal-verb">{t("过滤")}</span>
           <code className="pal-expr">{renderColoured(row.d.text, { text: row.d.text, tokens: row.d.tokens, diagnostics: errs })}</code>
         </>
       );
@@ -407,23 +406,23 @@ function PaletteRow(props: { id: string; line: Line; on: boolean; previews: Reco
         tone = " error";
         secondary = <span className="danger">{diagnosticText(errs[0])}</span>;
       } else right = <span className="mono">{stats(row.d.text)}</span>;
-      label = `过滤 ${row.d.text}${errs[0] ? `，错误：${diagnosticText(errs[0])}` : ""}`;
+      label = errs[0] ? t("过滤 {text}，错误：{error}", { text: row.d.text, error: diagnosticText(errs[0]) }) : t("过滤 {text}", { text: row.d.text });
       break;
     }
     case "goto": {
       icon = row.d.is_dir ? "folder" : "file";
       main = (
         <>
-          <span className="pal-verb">跳转到</span>
+          <span className="pal-verb">{t("跳转到")}</span>
           <span className="mono pal-path">{row.d.text}</span>
         </>
       );
       if (row.d.state === "in_scan") right = <span className="mono">{fmtSize(row.d.alloc ?? 0)}</span>;
       else if (row.d.state === "outside") {
-        secondary = <span>不在当前扫描范围内</span>;
-        right = <span className="pal-action">扫描此位置</span>;
-      } else secondary = <span>路径不存在</span>;
-      label = `跳转到 ${row.d.text}`;
+        secondary = <span>{t("不在当前扫描范围内")}</span>;
+        right = <span className="pal-action">{t("扫描此位置")}</span>;
+      } else secondary = <span>{t("路径不存在")}</span>;
+      label = t("跳转到 {path}", { path: row.d.text });
       break;
     }
     case "recent": {
@@ -432,24 +431,24 @@ function PaletteRow(props: { id: string; line: Line; on: boolean; previews: Reco
       if (r.kind === "filter") {
         main = (
           <>
-            <span className="pal-verb">过滤</span>
+            <span className="pal-verb">{t("过滤")}</span>
             <code className="pal-expr">{renderColoured(r.text, { text: r.text, tokens: r.tokens, diagnostics: [] })}</code>
           </>
         );
         right = <span className="mono">{stats(r.text)}</span>;
-        label = `过滤 ${r.text}`;
+        label = t("过滤 {text}", { text: r.text });
       } else {
         main = (
           <>
-            <span className="pal-verb">跳转到</span>
+            <span className="pal-verb">{t("跳转到")}</span>
             <span className="mono pal-path">
               <Hl text={r.text} hits={r.hits} />
             </span>
           </>
         );
         if (r.exists) right = <span className="mono">{fmtSize(r.alloc ?? 0)}</span>;
-        else secondary = <span>已不存在</span>;
-        label = `跳转到 ${r.text}`;
+        else secondary = <span>{t("已不存在")}</span>;
+        label = t("跳转到 {path}", { path: r.text });
       }
       break;
     }
@@ -459,7 +458,7 @@ function PaletteRow(props: { id: string; line: Line; on: boolean; previews: Reco
       main = <Hl text={c.name} hits={c.hits} />;
       secondary = c.status ? <span>{c.status}</span> : null;
       right = c.keys[0] ? <Kbd>{fmtKeys(c.keys[0])}</Kbd> : null;
-      label = [c.name, c.status, c.keys[0] ? fmtKeys(c.keys[0]) : ""].filter(Boolean).join("，");
+      label = [c.name, c.status, c.keys[0] ? fmtKeys(c.keys[0]) : ""].filter(Boolean).join(t("，"));
       break;
     }
     case "path": {
@@ -472,7 +471,7 @@ function PaletteRow(props: { id: string; line: Line; on: boolean; previews: Reco
         </span>
       );
       right = <span className="mono">{fmtSize(p.alloc)}</span>;
-      label = `${p.name}，${p.parent}，${fmtSize(p.alloc)}`;
+      label = [p.name, p.parent, fmtSize(p.alloc)].join(t("，"));
       break;
     }
   }

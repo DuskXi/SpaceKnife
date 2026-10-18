@@ -20,6 +20,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from ..i18n import _
+
 if sys.platform == "win32":
     from . import _win32
 
@@ -52,10 +54,10 @@ def read_token_file(path: str) -> str:
     """Helper side: read the token and delete the file. Refuses anything but a token file."""
     p = Path(path)
     if not p.is_absolute() or TOKEN_FILE_RE.fullmatch(p.name) is None:
-        raise ValueError("令牌文件路径无效")
+        raise ValueError(_("令牌文件路径无效"))
     st = os.lstat(p)
     if not stat.S_ISREG(st.st_mode) or getattr(st, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT:
-        raise ValueError("令牌文件不是普通文件")
+        raise ValueError(_("令牌文件不是普通文件"))
     try:
         fd = os.open(p, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
         try:
@@ -67,7 +69,7 @@ def read_token_file(path: str) -> str:
             os.remove(p)
     token = data.decode("ascii", "replace").strip()
     if TOKEN_RE.fullmatch(token) is None:
-        raise ValueError("令牌格式无效")
+        raise ValueError(_("令牌格式无效"))
     return token
 
 

@@ -34,6 +34,7 @@ from spaceknife_protocol.errors import ErrorCode
 
 from ..events import emit, printable
 from ..filter.names import forget
+from ..i18n import tr
 from ..monitor import Change, Watcher, create_watcher
 from ..scan import worker
 from ..scan.volume import volume_for
@@ -144,7 +145,7 @@ class ScanMonitor:
         except Exception as exc:
             logger.warning("cannot watch {} with {}: {}", path, watcher.name, exc)
             if watcher.name == "poll":
-                self.failed = f"无法监视 {printable(path)}：{exc}"
+                self.failed = tr("无法监视 {path}：{error}", path=printable(path), error=exc)
                 return None
             return await self._start_watcher(path, self._poller(path))
         if watcher.name != "poll" and await self._fails_at_once(watcher):
@@ -336,7 +337,7 @@ class ScanMonitor:
             self.trees.update(_common_roots(folders | {os.path.dirname(q) for q in stats}))
             emit(
                 "monitor",
-                f"文件变化过多（{len(batch):,} 条），稍后重新扫描受影响的文件夹",
+                tr("文件变化过多（{count} 条），稍后重新扫描受影响的文件夹", count=f"{len(batch):,}"),
                 scan_id=self.handle.id,
             )
             folders.clear()
@@ -568,7 +569,11 @@ class ScanMonitor:
         if nodes is None:
             return None  # the tree has no file ids (scanned without the native lister)
         store = self.handle.store
-        emit("monitor", f"变化通知溢出：按 USN 日志补齐 {len(nodes):,} 个文件夹", scan_id=self.handle.id)
+        emit(
+            "monitor",
+            tr("变化通知溢出：按 USN 日志补齐 {count} 个文件夹", count=f"{len(nodes):,}"),
+            scan_id=self.handle.id,
+        )
         return {store.path(int(n)) for n in nodes}
 
     def _nodes_of_frn(self, frn: np.ndarray) -> np.ndarray | None:
@@ -788,7 +793,7 @@ class MonitorManager:
         """Read a folder again with everything below it (F5 「重新扫描当前视图」); with live
         monitoring off a monitor without watchers does it."""
         if handle.running:
-            raise RpcError(ErrorCode.SCAN_BUSY, "扫描进行中，完成后再重新扫描")
+            raise RpcError(ErrorCode.SCAN_BUSY, tr("扫描进行中，完成后再重新扫描"))
         mon = self.monitors.get(handle.id) or self.passive.get(handle.id)
         if mon is None:
             mon = ScanMonitor(self, handle, watch=False)

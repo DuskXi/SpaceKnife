@@ -5,8 +5,9 @@ import { ContextMenu } from "@/shell/ContextMenu";
 import { ExportDialog } from "@/shell/ExportDialog";
 import { OpToast } from "@/shell/OpToast";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog, useApp } from "@/state/store";
-import { NOT_ON_DISK, revealLabel } from "@/shell/Inspector";
+import { notOnDisk, revealLabel } from "@/shell/Inspector";
 import { focusFilter } from "@/shell/FilterBox";
+import { t } from "@/lib/i18n";
 import { LogPanel } from "@/shell/LogPanel";
 import { Palette } from "@/shell/Palette";
 import { Kind } from "@/treemap/frame";
@@ -42,7 +43,7 @@ export function App() {
         <StatusBar />
         {conn === "failed" && (
           <div className="fatal">
-            <h2>后端没有启动</h2>
+            <h2>{t("后端没有启动")}</h2>
             <p className="mono">{message}</p>
           </div>
         )}
@@ -80,7 +81,7 @@ function onKey(e: KeyboardEvent): unknown {
   if (ctrl && key.toLowerCase() === "w") return (done(), void closeTab(tab.id));
   if (ctrl && key === ",") return (done(), openSettingsTab());
   if (ctrl && (key === "Tab" || key === "PageDown" || key === "PageUp")) {
-    const idx = s.tabs.findIndex((t) => t.id === tab.id);
+    const idx = s.tabs.findIndex((x) => x.id === tab.id);
     const step = (e.shiftKey && key === "Tab") || key === "PageUp" ? -1 : 1;
     return (done(), set({ active: s.tabs[(idx + step + s.tabs.length) % s.tabs.length]!.id }));
   }
@@ -172,9 +173,9 @@ function onKey(e: KeyboardEvent): unknown {
       });
       if (lower === "c") {
         window.sk.shell.copyText(r.path);
-        toast("已复制");
+        toast(t("已复制"));
       } else if (!r.on_disk) {
-        toast(NOT_ON_DISK);
+        toast(notOnDisk());
       } else if (lower === "e") {
         window.sk.shell.showItemInFolder(r.path);
         toast(revealLabel());

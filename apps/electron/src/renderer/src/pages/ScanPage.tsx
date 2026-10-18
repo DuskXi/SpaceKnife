@@ -1,12 +1,13 @@
 // A scan tab: treemap (one or two panes, W8) + details panel + filter floater (W3) + hover card.
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 import { closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
 import { get, set, type Tab, useApp } from "@/state/store";
 import type { DrawFrame } from "@/treemap/frame";
 import { type HoverInfo, Treemap } from "@/treemap/Treemap";
 import { fmtInt, fmtShare, fmtSize } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { HoverCard } from "@/shell/HoverCard";
 import { BasketDrawer } from "@/shell/BasketDrawer";
 import { CompareHoverCard, CompareSidebar } from "@/shell/Compare";
@@ -37,7 +38,7 @@ function ComparePage({ tab }: { tab: Tab }) {
           ) : (
             <div className="cmp-loading" role="status">
               <span className="spinner" aria-hidden="true" />
-              <span>{c.message || "正在对比…"}</span>
+              <span>{c.message || t("正在对比…")}</span>
               {c.progress != null && c.phase === "comparing" && <span className="mono muted">{Math.round(c.progress * 100)}%</span>}
             </div>
           )}
@@ -45,7 +46,7 @@ function ComparePage({ tab }: { tab: Tab }) {
         {basketOpen ? (
           <BasketDrawer />
         ) : hidden ? (
-          <button className="inspector-open icon-btn" aria-label="显示侧栏" title="显示侧栏" onClick={() => set({ inspectorHidden: false })}>
+          <button className="inspector-open icon-btn" aria-label={t("显示侧栏")} title={t("显示侧栏")} onClick={() => set({ inspectorHidden: false })}>
             <Icon name="sidebar" />
           </button>
         ) : (
@@ -101,7 +102,7 @@ function NormalPage({ tab }: { tab: Tab }) {
         {basketOpen ? (
           <BasketDrawer />
         ) : hidden ? (
-          <button className="inspector-open icon-btn" aria-label="显示侧栏" title="显示侧栏" onClick={() => set({ inspectorHidden: false })}>
+          <button className="inspector-open icon-btn" aria-label={t("显示侧栏")} title={t("显示侧栏")} onClick={() => set({ inspectorHidden: false })}>
             <Icon name="sidebar" />
           </button>
         ) : focused && filtering ? (
@@ -142,6 +143,11 @@ function Pane(props: { tab: Tab; index: number; viewId: string; split: boolean; 
 
 const NO_CRUMBS: { key: number; label: string }[] = [];
 
+/** A translated text whose {placeholders} are React nodes: rich(t("匹配 {n} 项"), { n: <b>3</b> }). */
+function rich(text: string, parts: Record<string, ReactNode>): ReactNode {
+  return text.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? <Fragment key={i}>{parts[piece]}</Fragment> : piece));
+}
+
 /** W8 pane header: its own breadcrumb and filter (G7). */
 function PaneHead({ tab, viewId, index }: { tab: Tab; viewId: string; index: number }) {
   const crumbs = useApp((s) => s.views[viewId]?.info?.breadcrumb) ?? NO_CRUMBS;
@@ -149,18 +155,19 @@ function PaneHead({ tab, viewId, index }: { tab: Tab; viewId: string; index: num
   const filter = useApp((s) => s.views[viewId]?.filter ?? null);
   const scan = useApp((s) => (tab.scanId ? s.scans[tab.scanId] : undefined));
   const focused = tab.focusedPane === index;
-  const side = index === 0 ? "左窗格" : "右窗格";
+  const left = index === 0;
+  const side = left ? t("左窗格") : t("右窗格");
   const root = scan?.roots.length === 1 ? scan.roots[0] : undefined;
   const atRoot = crumbs.length <= 1;
   const label = (c: { label: string }, i: number) => {
-    if (c.label.startsWith("small:")) return `${fmtInt(Number(c.label.slice(6)))} 个小项`;
-    if (c.label.startsWith("more:")) return `+${fmtInt(Number(c.label.slice(5)))} 项`;
+    if (c.label.startsWith("small:")) return t("{n} 个小项", { n: fmtInt(Number(c.label.slice(6))) });
+    if (c.label.startsWith("more:")) return t("+{n} 项", { n: fmtInt(Number(c.label.slice(5))) });
     if (i === 0) return c.label.replace(/[\\/]+$/, "") || c.label;
     return c.label.split(/[\\/]/).filter(Boolean).pop() ?? c.label;
   };
   return (
-    <div className={`pane-head${focused ? " focused" : ""}`} role="region" aria-label={focused ? `${side}（焦点）` : side}>
-      <nav className="pane-crumbs" aria-label={`${side}路径`}>
+    <div className={`pane-head${focused ? " focused" : ""}`} role="region" aria-label={focused ? (left ? t("左窗格（焦点）") : t("右窗格（焦点）")) : side}>
+      <nav className="pane-crumbs" aria-label={left ? t("左窗格路径") : t("右窗格路径")}>
         {crumbs.map((c, i) => {
           const last = i === crumbs.length - 1;
           return (
@@ -181,15 +188,15 @@ function PaneHead({ tab, viewId, index }: { tab: Tab; viewId: string; index: num
           );
         })}
       </nav>
-      <span className="pane-size muted">{atRoot && root?.whole_volume && root.volume ? `整个卷 · ${fmtSize(root.volume.total, true)}` : fmtSize(scanned)}</span>
+      <span className="pane-size muted">{atRoot && root?.whole_volume && root.volume ? t("整个卷 · {size}", { size: fmtSize(root.volume.total, true) }) : fmtSize(scanned)}</span>
       <span className="flex" />
       {filter?.active && (
         <span className="pane-match" role="status">
-          匹配 <span className="mono">{fmtInt(filter.files)}</span> 项 · <span className="mono">{fmtSize(filter.alloc)}</span>
+          {rich(t("匹配 {n} 项 · {size}"), { n: <span className="mono">{fmtInt(filter.files)}</span>, size: <span className="mono">{fmtSize(filter.alloc)}</span> })}
         </span>
       )}
       <FilterBox viewId={viewId} pane={side} />
-      <button className="icon-btn tiny" aria-label={`关闭${side}`} title={`关闭${side}`} onClick={() => closePane(tab.id, viewId)}>
+      <button className="icon-btn tiny" aria-label={left ? t("关闭左窗格") : t("关闭右窗格")} title={left ? t("关闭左窗格") : t("关闭右窗格")} onClick={() => closePane(tab.id, viewId)}>
         <Icon name="close" size={14} />
       </button>
     </div>
@@ -207,16 +214,16 @@ function FilterFloater({ viewId }: { viewId: string }) {
   const scanned = useApp((s) => s.views[viewId]?.info?.scanned ?? 0);
   if (!filter?.active) return null;
   return (
-    <div className="floater" role="group" aria-label="过滤结果">
+    <div className="floater" role="group" aria-label={t("过滤结果")}>
       <span className="floater-stat" role="status" aria-live="polite">
-        匹配 <span className="mono strong">{fmtInt(filter.files)}</span> 项 · <span className="mono strong">{fmtSize(filter.alloc)}</span>
-        <span className="muted"> · 占 {fmtShare(filter.alloc, scanned)}</span>
-        {filter.stale && <span className="warn"> · 表达式有误，显示的是上一次的结果</span>}
+        {rich(t("匹配 {n} 项 · {size}"), { n: <span className="mono strong">{fmtInt(filter.files)}</span>, size: <span className="mono strong">{fmtSize(filter.alloc)}</span> })}
+        <span className="muted"> · {t("占 {share}", { share: fmtShare(filter.alloc, scanned) })}</span>
+        {filter.stale && <span className="warn"> · {t("表达式有误，显示的是上一次的结果")}</span>}
       </span>
-      <div className="segmented small" role="radiogroup" aria-label="不匹配项的显示方式">
+      <div className="segmented small" role="radiogroup" aria-label={t("不匹配项的显示方式")}>
         {(["dim", "hide"] as const).map((m) => (
           <button key={m} role="radio" aria-checked={mode === m} className={mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { filter_mode: m })}>
-            {m === "dim" ? "暗化不匹配" : "隐藏不匹配"}
+            {m === "dim" ? t("暗化不匹配") : t("隐藏不匹配")}
           </button>
         ))}
       </div>

@@ -2,7 +2,7 @@
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
 import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewUpdate } from "@/protocol/generated";
-import { fmtInt, setUnitBase } from "@/lib/format";
+import { fmtInt, plural, setUnitBase } from "@/lib/format";
 import { type BinaryFrame, Rpc, RpcError } from "@/protocol/rpc";
 import { decodeDraw } from "@/treemap/frame";
 
@@ -24,7 +24,7 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
-import { getLang, setLang } from "@/lib/i18n";
+import { getLang, setLang, t } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
@@ -32,7 +32,7 @@ const binaries = new Map<string, BinaryFrame>();
 const waiters = new Map<string, (f: BinaryFrame) => void>();
 
 export function client(): Rpc {
-  if (!rpc || !rpc.open) throw new RpcError(-32006, "后端未连接");
+  if (!rpc || !rpc.open) throw new RpcError(-32006, t("后端未连接"));
   return rpc;
 }
 
@@ -67,7 +67,7 @@ async function onBackend(st: BackendState): Promise<void> {
   backendGone = st.state === "exited" || st.state === "failed";
   if (st.state === "starting") set({ conn: "starting" });
   else if (st.state === "failed") set({ conn: "failed", connMessage: st.message });
-  else if (st.state === "exited") set({ conn: "failed", connMessage: `后端已退出（退出码 ${st.code}）` });
+  else if (st.state === "exited") set({ conn: "failed", connMessage: t("后端已退出（退出码 {code}）", { code: String(st.code) }) });
   else if (st.state === "ready" && (!backendInfo || backendInfo.url !== st.info.url)) {
     if (backendInfo) resetLogSeq(); // a new backend numbers its records from 1 again
     backendInfo = st.info;
@@ -107,7 +107,7 @@ async function connect(): Promise<void> {
     rpc = null;
     if (backendGone) return;
     set({ conn: "lost" });
-    addLocalLog("WARNING", "与后端的连接已断开，正在重连…");
+    addLocalLog("WARNING", t("与后端的连接已断开，正在重连…"));
     setTimeout(() => void reconnect(), 800);
   });
   void r.call("$/subscribe", { topic: "log", params: { backlog: 500, min_level: "INFO" } }).catch(() => {});
@@ -134,7 +134,7 @@ async function connect(): Promise<void> {
 async function reconnect(): Promise<void> {
   await connect();
   if (!rpc) return;
-  addLocalLog("INFO", "已重新连接");
+  addLocalLog("INFO", t("已重新连接"));
   const tabs = get().tabs.filter((t) => t.kind === "scan" && t.scanId);
   // comparisons lived in the old backend: those tabs leave compare mode
   set((s) => ({ views: {}, tabs: s.tabs.map((t) => (t.compare ? { ...t, compare: undefined } : t)) }));
@@ -256,10 +256,11 @@ async function basketPut(params: Methods["basket.add"]["params"]): Promise<void>
   try {
     const r = await call("basket.add", params);
     set({ basket: r.state });
-    if (r.refused.length) toast(`不能删除：${r.refused[0]!.reason}`);
-    else if (r.added === 0) toast("已经在删除篮里");
-    else if (r.absorbed > 0) toast(`已加入删除篮（并入了篮里的 ${fmtInt(r.absorbed)} 项）`);
-    else toast("已加入删除篮");
+    if (r.refused.length) toast(t("不能删除：{reason}", { reason: r.refused[0]!.reason }));
+    else if (r.added === 0) toast(t("已经在删除篮里"));
+    else if (r.absorbed > 0)
+      toast(plural(r.absorbed, t("已加入删除篮（并入了篮里的 {n} 项）", { n: fmtInt(r.absorbed) }), "Added to the delete basket (1 item already in it was merged)"));
+    else toast(t("已加入删除篮"));
   } catch (err) {
     toast(err instanceof RpcError ? err.message : String(err));
   }
@@ -306,7 +307,10 @@ function onOpProgress(ev: OpProgressEvent): void {
   set({ op: ev });
   if (ev.phase === "done") {
     const failed = ev.results.filter((r) => !r.ok);
-    if (failed.length) addLocalLog("WARNING", `${fmtInt(failed.length)} 项没有删除：${failed[0]!.message}`);
+    if (failed.length) {
+      const fields = { n: fmtInt(failed.length), reason: failed[0]!.message };
+      addLocalLog("WARNING", plural(failed.length, t("{n} 项没有删除：{reason}", fields), "1 item was not deleted: {reason}", fields));
+    }
   }
 }
 
@@ -361,7 +365,7 @@ export async function startScan(params: ScanStartParams, replaceTab?: string): P
     await showScan(status.scan_id, scanTitle(params.roots), replaceTab);
     return status.scan_id;
   } catch (err) {
-    toast(err instanceof RpcError ? `无法开始扫描：${err.message}` : String(err));
+    toast(err instanceof RpcError ? t("无法开始扫描：{error}", { error: err.message }) : String(err));
     return null;
   }
 }
@@ -387,7 +391,7 @@ export const useMft = (scanId: string) => scanControl("scan.use_mft", { scan_id:
 export const continueScan = (scanId: string) => scanControl("scan.continue", { scan_id: scanId });
 /** Read a folder of the tree again with everything below it (F5, M5). */
 export async function rescanFolder(scanId: string, node: number): Promise<void> {
-  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast("正在重新扫描这个文件夹…");
+  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast(t("正在重新扫描这个文件夹…"));
 }
 export const setScanLoad = (scanId: string, level: LoadLevel, custom?: number | null, concurrency?: number | null) =>
   scanControl("scan.set_load", { scan_id: scanId, level, custom: custom ?? null, concurrency: concurrency ?? null });
@@ -398,7 +402,7 @@ export async function openSnapshot(path: string, replaceTab?: string): Promise<v
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status } }));
     await showScan(status.scan_id, scanTitle(status.roots.map((r) => r.path)), replaceTab);
   } catch (err) {
-    toast(err instanceof RpcError ? `无法打开快照：${err.message}` : String(err));
+    toast(err instanceof RpcError ? t("无法打开快照：{error}", { error: err.message }) : String(err));
   }
 }
 
@@ -434,7 +438,7 @@ function releaseTab(tab: Tab): void {
 }
 
 export function newStartTab(): void {
-  const tab: Tab = { id: newTabId(), kind: "start", viewIds: [], focusedPane: 0, title: "新扫描" };
+  const tab: Tab = { id: newTabId(), kind: "start", viewIds: [], focusedPane: 0, title: t("新扫描") };
   set((s) => ({ tabs: [...s.tabs, tab], active: tab.id }));
 }
 
@@ -445,7 +449,7 @@ export function openSettingsTab(page?: SettingsPageId): void {
   const existing = s.tabs.find((t) => t.kind === "settings");
   if (existing) set({ active: existing.id, settingsReturnTo: from });
   else {
-    const tab: Tab = { id: newTabId(), kind: "settings", viewIds: [], focusedPane: 0, title: "设置" };
+    const tab: Tab = { id: newTabId(), kind: "settings", viewIds: [], focusedPane: 0, title: t("设置") };
     set((x) => ({ tabs: [...x.tabs, tab], active: tab.id, settingsReturnTo: from }));
   }
   if (typeof page === "string") settingsGo(page); // callers may be event handlers: ignore event objects
@@ -507,6 +511,8 @@ export function applySettings(state: SettingsState): void {
     logAuto: Boolean(state.values["general.log_auto_open"] ?? true),
     unitEpoch: prev?.unit_base !== state.unit_base || langChanged ? s.unitEpoch + 1 : s.unitEpoch,
     lang: state.language,
+    // the start and settings tabs carry a made-up title: it follows the language
+    tabs: langChanged ? s.tabs.map((tab) => (tab.kind === "start" ? { ...tab, title: t("新扫描") } : tab.kind === "settings" ? { ...tab, title: t("设置") } : tab)) : s.tabs,
   }));
   if (langChanged && prev) {
     void refreshLists();
@@ -561,7 +567,7 @@ export async function closeTab(id: string): Promise<void> {
   const tab = s.tabs[idx];
   if (!tab) return;
   let tabs = s.tabs.filter((t) => t.id !== id);
-  if (!tabs.length) tabs = [{ id: newTabId(), kind: "start", viewIds: [], focusedPane: 0, title: "新扫描" }];
+  if (!tabs.length) tabs = [{ id: newTabId(), kind: "start", viewIds: [], focusedPane: 0, title: t("新扫描") }];
   const active = s.active === id ? tabs[Math.min(idx, tabs.length - 1)]!.id : s.active;
   const startForms = { ...s.startForms };
   delete startForms[id];

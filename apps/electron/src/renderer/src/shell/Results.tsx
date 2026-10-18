@@ -1,24 +1,34 @@
 // W3 「匹配结果」 sidebar (UI-W3-27…34, UI-W3-38): summary, the expression as condition capsules,
 // the result list (rows grouped by visible block, served page by page by view.results), key hints.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import type { FilterNormal, FilterParse, Range, ResultRow, ViewResults } from "@/protocol/generated";
 import { basketAdd, cancellable, viewCall } from "@/state/actions";
 import { patchView, set, useApp } from "@/state/store";
 import { fmtInt, fmtShare, fmtSize, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
+import { attrLabel } from "@/shell/FilterBox";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
 import { classHexNow } from "@/lib/classes";
+import { t } from "@/lib/i18n";
 
 const ROW_H = 50;
 const PAGE = 100;
 const OVERSCAN = 6;
 
 type Sort = "size" | "name" | "count";
-const SORT_ZH: Record<Sort, string> = { size: "按大小", name: "按名称", count: "按项数" };
-const TAG_ZH: Record<string, string> = { red: "红色", yellow: "黄色", green: "绿色", blue: "蓝色" };
+const SORTS: Sort[] = ["size", "name", "count"];
+// labels are looked up when shown: the interface language can change at any time
+const sortLabel = (k: Sort) => ({ size: t("按大小"), name: t("按名称"), count: t("按项数") })[k];
+const tagColour = (c: string) => (({ red: t("红色"), yellow: t("黄色"), green: t("绿色"), blue: t("蓝色") }) as Record<string, string>)[c] ?? c;
+const tagText = (c: string) => (({ red: t("红色标签"), yellow: t("黄色标签"), green: t("绿色标签"), blue: t("蓝色标签") }) as Record<string, string>)[c] ?? c;
+
+/** A translated text with React nodes in its {placeholders}: the word order is the language's. */
+function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
+}
 
 export function Results({ viewId }: { viewId: string }) {
   const filter = useApp((s) => s.views[viewId]?.filter ?? null);
@@ -191,12 +201,12 @@ export function Results({ viewId }: { viewId: string }) {
   }
 
   return (
-    <aside className="inspector results" aria-label="匹配结果">
+    <aside className="inspector results" aria-label={t("匹配结果")}>
       <div className="res-head">
-        <h2>匹配结果</h2>
+        <h2>{t("匹配结果")}</h2>
         <span className="flex" />
         <SortMenu sort={sort} onChange={changeSort} />
-        <button className="icon-btn small" aria-label="隐藏侧栏" title="隐藏侧栏" onClick={() => set({ inspectorHidden: true })}>
+        <button className="icon-btn small" aria-label={t("隐藏侧栏")} title={t("隐藏侧栏")} onClick={() => set({ inspectorHidden: true })}>
           <Icon name="sidebar" />
         </button>
       </div>
@@ -205,26 +215,29 @@ export function Results({ viewId }: { viewId: string }) {
           <div className="big-num">
             <span className="num">{num}</span>
             <span className="unit">{unit}</span>
-            <span className="res-count mono">{fmtInt(files)} 项</span>
+            <span className="res-count mono">{t("{n} 项", { n: fmtInt(files) })}</span>
           </div>
-          <div className="bar" role="img" aria-label={`占已扫描的 ${fmtShare(alloc, scanned)}`}>
+          <div className="bar" role="img" aria-label={t("占已扫描的 {share}", { share: fmtShare(alloc, scanned) })}>
             <div style={{ width: `${Math.min(100, scanned ? (alloc / scanned) * 100 : 0)}%` }} />
           </div>
           <div className="small muted">
-            占已扫描 <span className="mono strong">{fmtSize(scanned)}</span> 的 <span className="mono strong">{fmtShare(alloc, scanned)}</span>
+            {withNodes(t("占已扫描 {size} 的 {share}"), {
+              size: <span className="mono strong">{fmtSize(scanned)}</span>,
+              share: <span className="mono strong">{fmtShare(alloc, scanned)}</span>,
+            })}
           </div>
         </div>
         <Conditions parse={parse} />
       </div>
       <div className="res-cols" aria-hidden="true">
-        <span>名称</span>
-        <span>大小</span>
+        <span>{t("名称")}</span>
+        <span>{t("大小")}</span>
       </div>
       <div
         ref={list}
         className="res-list"
         role="listbox"
-        aria-label="匹配结果列表"
+        aria-label={t("匹配结果列表")}
         tabIndex={0}
         aria-activedescendant={active >= 0 ? `${viewId}-res-${active}` : undefined}
         onScroll={onScroll}
@@ -238,18 +251,18 @@ export function Results({ viewId }: { viewId: string }) {
         {meta && total === 0 && (
           <div className="res-empty">
             <Icon name="search" size={20} />
-            <div>当前位置下没有匹配项</div>
-            <div className="small muted">放宽条件，或回到上一级（Alt+↑）在更大的范围里找</div>
+            <div>{t("当前位置下没有匹配项")}</div>
+            <div className="small muted">{t("放宽条件，或回到上一级（Alt+↑）在更大的范围里找")}</div>
           </div>
         )}
       </div>
       <div className="res-hints small muted">
-        <span>单击定位</span>
+        <span>{t("单击定位")}</span>
         <span>
-          <Kbd>Enter</Kbd> 放大进入
+          <Kbd>Enter</Kbd> {t("放大进入")}
         </span>
         <span>
-          <Kbd>Delete</Kbd> 加入删除篮
+          <Kbd>Delete</Kbd> {t("加入删除篮")}
         </span>
       </div>
     </aside>
@@ -275,9 +288,19 @@ function ResultLine(props: {
   const ext = r.kind === "file" ? (r.name.includes(".") ? r.name.slice(r.name.lastIndexOf(".") + 1).toLowerCase() : "") : "";
   const cls = r.kind === "file" ? (props.extClass.get(ext) ?? "other") : null;
   const name =
-    r.kind === "group" ? (r.name ? r.name : `${fmtInt(r.count)} 个小项`) : r.kind === "rest" ? `其余 ${fmtInt(r.count)} 项` : r.name.replace(/[\\/]+$/, "") || props.rootLabel;
+    r.kind === "group"
+      ? r.name
+        ? r.name
+        : t("{n} 个小项", { n: fmtInt(r.count) })
+      : r.kind === "rest"
+        ? t("其余 {n} 项", { n: fmtInt(r.count) })
+        : r.name.replace(/[\\/]+$/, "") || props.rootLabel;
   const path = r.path || props.rootLabel;
-  const tag = r.tag ? `${TAG_ZH[r.tag]}标签${r.tag_inherited ? "（继承自文件夹）" : ""}` : "";
+  const tag = r.tag ? (r.tag_inherited ? t("{tag}（继承自文件夹）", { tag: tagText(r.tag) }) : tagText(r.tag)) : "";
+  const spoken = [name, fmtSize(r.alloc)];
+  if (r.kind !== "file") spoken.push(t("{n} 项", { n: fmtInt(r.count) }));
+  if (tag) spoken.push(tag);
+  spoken.push(t("位于 {path}", { path }));
   return (
     <div
       id={props.id}
@@ -285,7 +308,7 @@ function ResultLine(props: {
       style={style}
       role="option"
       aria-selected={props.active}
-      aria-label={`${name}，${fmtSize(r.alloc)}${r.kind !== "file" ? `，${fmtInt(r.count)} 项` : ""}${tag ? `，${tag}` : ""}，位于 ${path}`}
+      aria-label={spoken.join(t("，"))}
       onMouseEnter={props.onHover}
       onClick={props.onClick}
       onDoubleClick={props.onDouble}
@@ -303,8 +326,8 @@ function ResultLine(props: {
             {name}
           </span>
           {r.tag && <span className={`tag-mini ${r.tag}${r.tag_inherited ? " inherited" : ""}`} role="img" aria-label={tag} title={tag} />}
-          {r.kind === "folder" && <span className="res-n mono">{fmtInt(r.count)} 项</span>}
-          {r.kind === "group" && r.name && r.count > 1 && <span className="res-n mono">{fmtInt(r.count)} 项</span>}
+          {r.kind === "folder" && <span className="res-n mono">{t("{n} 项", { n: fmtInt(r.count) })}</span>}
+          {r.kind === "group" && r.name && r.count > 1 && <span className="res-n mono">{t("{n} 项", { n: fmtInt(r.count) })}</span>}
         </span>
         <span className="res-path mono" title={path}>
           <span>{path}</span>
@@ -331,15 +354,15 @@ function SortMenu({ sort, onChange }: { sort: Sort; onChange: (s: Sort) => void 
   }, [open]);
   return (
     <div className="res-sort" ref={box}>
-      <button className="ghost small" aria-haspopup="menu" aria-expanded={open} aria-label={`排序：${SORT_ZH[sort]}`} onClick={() => setOpen(!open)}>
-        {SORT_ZH[sort]}
+      <button className="ghost small" aria-haspopup="menu" aria-expanded={open} aria-label={t("排序：{sort}", { sort: sortLabel(sort) })} onClick={() => setOpen(!open)}>
+        {sortLabel(sort)}
         <Icon name="chevronDown" size={12} />
       </button>
       {open && (
         <div
           className="menu"
           role="menu"
-          aria-label="排序方式"
+          aria-label={t("排序方式")}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
               e.stopPropagation();
@@ -347,7 +370,7 @@ function SortMenu({ sort, onChange }: { sort: Sort; onChange: (s: Sort) => void 
             }
           }}
         >
-          {(Object.keys(SORT_ZH) as Sort[]).map((s) => (
+          {SORTS.map((s) => (
             <button
               key={s}
               role="menuitemradio"
@@ -360,7 +383,7 @@ function SortMenu({ sort, onChange }: { sort: Sort; onChange: (s: Sort) => void 
               }}
             >
               <span className="menu-check">{s === sort && <Icon name="check" size={14} />}</span>
-              {SORT_ZH[s]}
+              {sortLabel(s)}
             </button>
           ))}
         </div>
@@ -371,30 +394,22 @@ function SortMenu({ sort, onChange }: { sort: Sort; onChange: (s: Sort) => void 
 
 // ------------------------------------------------------------------ conditions (UI-W3-30)
 
-const PENDING_ZH: Record<string, string> = {
-  name: "名称",
-  class: "类别",
-  folder: "文件夹",
-  tag: "标签",
-  size: "大小",
-  age: "时间",
-  attr: "属性",
-};
-const ATTR_ZH: Record<string, string> = {
-  archive: "归档",
-  system: "系统",
-  readonly: "只读",
-  hidden: "隐藏",
-  compressed: "压缩",
-  encrypted: "加密",
-  offline: "脱机",
-  temporary: "临时",
-  notindexed: "不索引",
-  sparse: "稀疏",
-  ads: "备用数据流",
-};
-const TIME_ZH: Record<string, string> = { s: "秒", min: "分钟", h: "小时", d: "天", w: "周", month: "个月", y: "年" };
-const AGE_ZH: Record<string, string> = { modify: "修改", create: "创建", access: "访问" };
+const pendingLabel = (category: string): string =>
+  (({ name: t("名称"), class: t("类别"), folder: t("文件夹"), tag: t("标签"), size: t("大小"), age: t("时间"), attr: t("属性") }) as Record<string, string>)[category] ?? category;
+/** 「7 天」: a number with its time unit. */
+function timeSpan(n: string, unit: string): string {
+  const fields = { n };
+  if (unit === "s") return t("{n} 秒", fields);
+  if (unit === "min") return t("{n} 分钟", fields);
+  if (unit === "h") return t("{n} 小时", fields);
+  if (unit === "d") return t("{n} 天", fields);
+  if (unit === "w") return t("{n} 周", fields);
+  if (unit === "month") return t("{n} 个月", fields);
+  if (unit === "y") return t("{n} 年", fields);
+  return `${n} ${unit}`;
+}
+const ageLabel = (field: string): string =>
+  (({ modify: t("修改时间"), create: t("创建时间"), access: t("访问时间") }) as Record<string, string>)[field] ?? t("{field}时间", { field });
 
 interface Capsule {
   label: string;
@@ -413,8 +428,8 @@ function Conditions({ parse }: { parse: FilterParse | null }) {
   const pending = parse?.pending?.category ?? null;
   if (!caps.length && !pending) return null;
   return (
-    <section className="res-conds" aria-label="条件">
-      <h3>条件</h3>
+    <section className="res-conds" aria-label={t("条件")}>
+      <h3>{t("条件")}</h3>
       <div className="conds">
         {caps.map((c, i) => (
           <span key={i} className="cond">
@@ -429,8 +444,8 @@ function Conditions({ parse }: { parse: FilterParse | null }) {
         ))}
         {pending && (
           <span className="cond pending">
-            <span className="cond-label">{PENDING_ZH[pending] ?? pending}</span>
-            <span className="muted">选择中…</span>
+            <span className="cond-label">{pendingLabel(pending)}</span>
+            <span className="muted">{t("选择中…")}</span>
           </span>
         )}
       </div>
@@ -440,26 +455,23 @@ function Conditions({ parse }: { parse: FilterParse | null }) {
 
 function capsules(n: FilterNormal, className: (id: string) => string): Capsule[] {
   const out: Capsule[] = [];
-  const list = (label: string, items: string[], cls: string, joiner = "或") =>
+  const or = t("或");
+  const and = t("且");
+  const list = (label: string, items: string[], cls: string, joiner = or) =>
     items.length && out.push({ label, joiner, values: items.map((text) => ({ text, cls })) });
-  list("名称", n.masks, "t-mask");
-  list("排除名称", n.not_masks, "t-mask");
-  list("文件夹", n.folders.map((f) => `\\${f}`), "t-folder");
-  list("排除文件夹", n.not_folders.map((f) => `\\${f}`), "t-folder");
-  list("类别", n.classes.map(className), "t-value");
-  list("排除类别", n.not_classes.map(className), "t-value");
-  for (const r of n.sizes) out.push({ label: r.field === "logical" ? "逻辑大小" : "大小", joiner: "且", values: sizeRange(r) });
-  for (const r of n.ages) out.push({ label: `${AGE_ZH[r.field] ?? r.field}时间`, joiner: "且", values: ageRange(r) });
-  if (n.tags !== null) list("标签", n.tags.length === 4 ? ["任意"] : n.tags.map((t) => TAG_ZH[t]!), "t-keyword");
-  list("排除标签", n.not_tags.map((t) => TAG_ZH[t]!), "t-keyword");
-  if (n.attrs) {
-    const vals = [...n.attrs.required.map((a) => ATTR_ZH[a] ?? a), ...n.attrs.forbidden.map((a) => `非${ATTR_ZH[a] ?? a}`)];
-    list("属性", vals, "t-value", "且");
-  }
-  for (const a of n.not_attrs) {
-    const vals = [...a.required.map((x) => ATTR_ZH[x] ?? x), ...a.forbidden.map((x) => `非${ATTR_ZH[x] ?? x}`)];
-    list("排除属性", vals, "t-value", "且");
-  }
+  const not = (a: string) => t("非{attr}", { attr: attrLabel(a) });
+  list(t("名称"), n.masks, "t-mask");
+  list(t("排除名称"), n.not_masks, "t-mask");
+  list(t("文件夹"), n.folders.map((f) => `\\${f}`), "t-folder");
+  list(t("排除文件夹"), n.not_folders.map((f) => `\\${f}`), "t-folder");
+  list(t("类别"), n.classes.map(className), "t-value");
+  list(t("排除类别"), n.not_classes.map(className), "t-value");
+  for (const r of n.sizes) out.push({ label: r.field === "logical" ? t("逻辑大小") : t("大小"), joiner: and, values: sizeRange(r) });
+  for (const r of n.ages) out.push({ label: ageLabel(r.field), joiner: and, values: ageRange(r) });
+  if (n.tags !== null) list(t("标签"), n.tags.length === 4 ? [t("任意")] : n.tags.map(tagColour), "t-keyword");
+  list(t("排除标签"), n.not_tags.map(tagColour), "t-keyword");
+  if (n.attrs) list(t("属性"), [...n.attrs.required.map(attrLabel), ...n.attrs.forbidden.map(not)], "t-value", and);
+  for (const a of n.not_attrs) list(t("排除属性"), [...a.required.map(attrLabel), ...a.forbidden.map(not)], "t-value", and);
   return out;
 }
 
@@ -469,9 +481,14 @@ function sizeRange(r: Range) {
 }
 
 function ageRange(r: Range) {
-  const span = (b: NonNullable<Range["lower"]>) => `${b.number} ${TIME_ZH[b.unit] ?? b.unit}`;
   const out: { text: string; cls: string }[] = [];
-  if (r.upper) out.push({ text: `${span(r.upper)}以内${r.upper.op === "<=" ? "（含）" : ""}`, cls: "t-compare" });
-  if (r.lower) out.push({ text: `早于 ${span(r.lower)}前${r.lower.op === ">=" ? "（含）" : ""}`, cls: "t-compare" });
+  if (r.upper) {
+    const fields = { span: timeSpan(r.upper.number, r.upper.unit) };
+    out.push({ text: r.upper.op === "<=" ? t("{span}以内（含）", fields) : t("{span}以内", fields), cls: "t-compare" });
+  }
+  if (r.lower) {
+    const fields = { span: timeSpan(r.lower.number, r.lower.unit) };
+    out.push({ text: r.lower.op === ">=" ? t("早于 {span}前（含）", fields) : t("早于 {span}前", fields), cls: "t-compare" });
+  }
   return out;
 }

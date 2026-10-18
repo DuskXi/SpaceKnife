@@ -35,6 +35,7 @@ from spaceknife_protocol.methods import EVENT_COMPARE_PROGRESS
 
 from ..diff import Change, CompareCancelled, DiffTree, Status
 from ..diff import compare as diff_trees
+from ..i18n import Texts
 from ..layout.engine import Layout
 from ..store import snapshot
 from ..store.nodes import COLUMNS, Flag, Kind, NodeStore
@@ -55,18 +56,21 @@ COUNT_UNITS = 2000  # change units counted for 「前 N 项」 (the lists show t
 PROGRESS_GAP_S = 0.2
 
 # User-facing text, kept in one place for the i18n extraction (M7.5).
-TEXT = {
-    "busy": "扫描还没有完成，完成后才能与「现在」对比",
-    "same": "基准和对比目标是同一份数据",
-    "roots": "快照的扫描位置和当前标签不同：{a} ≠ {b}",
-    "open": "打不开快照 {path}：{error}",
-    "unknown": "没有这个对比：{id}",
-    "not_ready": "对比还在计算",
-    "loading": "正在读取快照…",
-    "comparing": "正在对比…",
-    "failed": "对比失败：{error}",
-    "rest": "{label} 中其余 {n} 项",
-}
+TEXT = Texts(
+    {
+        "busy": "扫描还没有完成，完成后才能与「现在」对比",
+        "same": "基准和对比目标是同一份数据",
+        "roots": "快照的扫描位置和当前标签不同：{a} ≠ {b}",
+        "open": "打不开快照 {path}：{error}",
+        "unknown": "没有这个对比：{id}",
+        "not_ready": "对比还在计算",
+        "loading": "正在读取快照…",
+        "comparing": "正在对比…",
+        "failed": "对比失败：{error}",
+        "rest": "{label} 中其余 {n} 项",
+        "sep": "、",
+    }
+)
 
 _DIR = np.uint8(Kind.DIR)
 _STATUS_NAMES: tuple[pc.ChangeStatus, ...] = ("same", "new", "deleted", "changed")
@@ -456,8 +460,8 @@ class CompareManager:
             raise RpcError(ErrorCode.SNAPSHOT_ERROR, TEXT["open"].format(path=path, error=exc)) from exc
         mine = snapshot.root_key([r.path for r in scan.roots])
         if snapshot.root_key(header.roots) != mine:
-            a = "、".join(header.roots)
-            b = "、".join(r.path for r in scan.roots)
+            a = TEXT["sep"].join(header.roots)
+            b = TEXT["sep"].join(r.path for r in scan.roots)
             raise RpcError(ErrorCode.SNAPSHOT_ERROR, TEXT["roots"].format(a=a, b=b))
         info = snapshot_info(path, header)
         side = pc.CompareSide(

@@ -1,6 +1,6 @@
 // Hover card (UI-MAIN-29…31): beside the hovered block, never covering it; flips to stay inside.
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import type { TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
@@ -10,9 +10,15 @@ import type { HoverInfo } from "@/treemap/Treemap";
 import { fillOf, labelColors } from "@/treemap/paint";
 import { classColors } from "@/lib/classes";
 import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts } from "@/lib/format";
+import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
 const DELAY = 300;
+
+/** A translated text with React nodes in its {placeholders}: the word order is the language's. */
+function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
+}
 
 export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: { w: number; h: number } }) {
   const vocab = useApp((s) => s.vocab);
@@ -39,8 +45,8 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
       return;
     }
     setShown(null);
-    const t = setTimeout(() => setShown(hover), DELAY);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setShown(hover), DELAY);
+    return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
   useEffect(() => {
@@ -97,13 +103,13 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const dir = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
   const title =
     kind === Kind.SMALL
-      ? `${fmtInt(f.count_[row]!)} 个小项`
+      ? t("{n} 个小项", { n: fmtInt(f.count_[row]!) })
       : kind === Kind.MORE
-        ? `+${fmtInt(f.count_[row]!)} 项`
+        ? t("+{n} 项", { n: fmtInt(f.count_[row]!) })
         : kind === Kind.FREE
-          ? "可用空间"
+          ? t("可用空间")
           : kind === Kind.UNKNOWN
-            ? "未知空间"
+            ? t("未知空间")
             : (node?.name ?? f.names[row] ?? "");
   const folder = info ? info.path.slice(0, Math.max(0, info.path.length - info.node.name.length)).replace(/[\\/]+$/, "") : "";
   const parentName = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
@@ -126,22 +132,18 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
             <span className="unit">{unit}</span>
           </div>
           {parentAlloc > 0 && node && (
-            <span className="muted">
-              占 {parentName} <span className="mono strong">{fmtPct(node.alloc, parentAlloc)}</span>
-            </span>
+            <span className="muted">{withNodes(t("占 {name} {share}"), { name: parentName, share: <span className="mono strong">{fmtPct(node.alloc, parentAlloc)}</span> })}</span>
           )}
         </div>
         {node && (
           <div className="hc-class muted">
             {dir ? (
-              <span>
-                {fmtInt(node.files)} 个文件 · {fmtInt(node.dirs)} 个文件夹
-              </span>
+              <span>{t("{files} 个文件 · {dirs} 个文件夹", { files: fmtInt(node.files), dirs: fmtInt(node.dirs) })}</span>
             ) : (
               <>
                 <span className="swatch" style={{ background: bg }} />
                 <span>
-                  {cls?.name ?? "其他"}
+                  {cls?.name ?? t("其他")}
                   {node.ext ? ` · .${node.ext}` : ""}
                 </span>
               </>
@@ -153,26 +155,26 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
         <div className="hc-times">
           {(
             [
-              ["创建", node.ctime],
-              ["修改", node.mtime],
-              ["访问", node.atime],
+              ["ctime", t("创建"), node.ctime],
+              ["mtime", t("修改"), node.mtime],
+              ["atime", t("访问"), node.atime],
             ] as const
-          ).map(([label, t]) => (
-            <div key={label} className="hc-time">
+          ).map(([key, label, time]) => (
+            <div key={key} className="hc-time">
               <span className="muted">{label}</span>
-              {showAge && <span>{fmtAgo(t)}</span>}
-              <span className="mono muted">{fmtDateTime(t)}</span>
+              {showAge && <span>{fmtAgo(time)}</span>}
+              <span className="mono muted">{fmtDateTime(time)}</span>
             </div>
           ))}
         </div>
       )}
       <div className="hc-hint">
-        <span>双击放大</span>
+        <span>{t("双击放大")}</span>
         <span>·</span>
-        <span>右键更多</span>
+        <span>{t("右键更多")}</span>
         <span>·</span>
         <Kbd>Space</Kbd>
-        <span>预览</span>
+        <span>{t("预览")}</span>
       </div>
     </div>
   );

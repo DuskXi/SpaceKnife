@@ -26,6 +26,7 @@ from pydantic import ValidationError
 from spaceknife_protocol.binary import BinaryFrameHeader, decode_frame
 from spaceknife_protocol.errors import ProtocolError
 
+from ..i18n import _, tr
 from .auth import is_elevated, new_token, peer_is_launched, tokens_match, write_token_file
 from .errors import HelperDenied, HelperError, HelperUnavailable
 from .launch import HelperProcess, helper_command, start_elevated, start_subprocess
@@ -130,7 +131,7 @@ class HelperClient:
         try:
             listener = Listener()
         except OSError as exc:
-            raise HelperUnavailable(f"无法创建助手通道：{exc}") from exc
+            raise HelperUnavailable(tr("无法创建助手通道：{reason}", reason=exc)) from exc
         token_path: Path | None = None
         process: HelperProcess | None = None
         channel: AsyncChannel | None = None
@@ -151,7 +152,7 @@ class HelperClient:
                 try:
                     process = await asyncio.wait_for(start_elevated(argv), timeout)
                 except TimeoutError:
-                    raise HelperUnavailable("等待管理员授权超时", "timeout") from None
+                    raise HelperUnavailable(_("等待管理员授权超时"), "timeout") from None
             else:
                 process = start_subprocess(argv)
             channel = await _accept(listener, process, deadline)
@@ -162,13 +163,13 @@ class HelperClient:
             if process is not None:
                 await _reap(process, 0)
             if isinstance(exc, OSError):
-                raise HelperUnavailable(f"无法启动扫描助手：{exc}") from exc
+                raise HelperUnavailable(tr("无法启动扫描助手：{reason}", reason=exc)) from exc
             raise
         finally:
             listener.close()
             if token_path is not None:
                 token_path.unlink(missing_ok=True)
-        logger.info("扫描助手已就绪：pid {}，管理员权限 {}", hello.pid, hello.elevated)
+        logger.info("scan helper ready: pid {}, elevated {}", hello.pid, hello.elevated)
         return cls(channel, process, hello, request_timeout=request_timeout)
 
     # ------------------------------------------------------------------ state
@@ -194,14 +195,14 @@ class HelperClient:
     def _break(self, reason: str) -> None:
         if self._broken is None:
             self._broken = reason
-            logger.warning("扫描助手连接中断：{}", reason)
+            logger.warning(tr("扫描助手连接中断：{reason}", reason=reason))
         self._channel.close()
 
     def _check_usable(self) -> None:
         if self._closed:
-            raise HelperUnavailable("扫描助手已关闭", "closed")
+            raise HelperUnavailable(_("扫描助手已关闭"), "closed")
         if self._broken is not None:
-            raise HelperUnavailable(f"扫描助手不可用：{self._broken}", "exited")
+            raise HelperUnavailable(tr("扫描助手不可用：{reason}", reason=self._broken), "exited")
 
     # ------------------------------------------------------------------ exchange
 
@@ -209,21 +210,21 @@ class HelperClient:
         try:
             return await self._channel.read_frame(self._request_timeout)
         except TimeoutError:
-            self._break("响应超时")
-            raise HelperUnavailable("扫描助手无响应", "timeout") from None
+            self._break(_("响应超时"))
+            raise HelperUnavailable(_("扫描助手无响应"), "timeout") from None
         except FrameError as exc:
-            self._break(f"无效帧：{exc}")
-            raise HelperUnavailable(f"扫描助手发送了无效帧：{exc}", "protocol") from None
+            self._break(tr("无效帧：{reason}", reason=exc))
+            raise HelperUnavailable(tr("扫描助手发送了无效帧：{reason}", reason=exc), "protocol") from None
         except (EOFError, OSError) as exc:
-            self._break(f"连接断开：{exc}")
-            raise HelperUnavailable("扫描助手已退出", "exited") from None
+            self._break(tr("连接断开：{reason}", reason=exc))
+            raise HelperUnavailable(_("扫描助手已退出"), "exited") from None
         except BaseException:
-            self._break("读取被取消")  # a half-read frame leaves the stream unusable
+            self._break(_("读取被取消"))  # a half-read frame leaves the stream unusable
             raise
 
     def _protocol_error(self, what: str) -> HelperUnavailable:
         self._break(what)
-        return HelperUnavailable(f"扫描助手协议错误：{what}", "protocol")
+        return HelperUnavailable(tr("扫描助手协议错误：{reason}", reason=what), "protocol")
 
     async def _exchange(
         self, call: Call, on_progress: ProgressCallback | None, stream: _Stream = _MFT
@@ -240,10 +241,10 @@ class HelperClient:
             try:
                 await self._channel.send_message(Request(id=req_id, call=call), self._request_timeout)
             except (OSError, EOFError) as exc:
-                self._break(f"发送失败：{exc}")
-                raise HelperUnavailable("扫描助手已退出", "exited") from None
+                self._break(tr("发送失败：{reason}", reason=exc))
+                raise HelperUnavailable(_("扫描助手已退出"), "exited") from None
             except BaseException:
-                self._break("发送被取消")
+                self._break(_("发送被取消"))
                 raise
             done = False
             ahead: asyncio.Task[tuple[int, bytearray]] | None = None
@@ -272,7 +273,7 @@ class HelperClient:
                 task = asyncio.current_task()
                 if done or self._broken is not None or (task is not None and task.cancelling()):
                     if not done:
-                        self._break("请求被中止")
+                        self._break(_("请求被中止"))
                     _discard(ahead)
                 else:
                     await self._drain(
@@ -286,7 +287,9 @@ class HelperClient:
         try:
             message = REPLY.validate_json(body)
         except ValidationError as exc:
-            raise self._protocol_error(f"无法解析的消息（{exc.error_count()} 处错误）") from None
+            raise self._protocol_error(
+                tr("无法解析的消息（{count} 处错误）", count=exc.error_count())
+            ) from None
         if isinstance(message, Progress) and message.id == req_id:
             if on_progress is not None:
                 read = min(1.0, message.done / message.total) if message.total else None
@@ -296,7 +299,7 @@ class HelperClient:
             return message
         if isinstance(message, Error) and message.id in (req_id, None):
             return message
-        raise self._protocol_error(f"意外的 {message.type} 消息")
+        raise self._protocol_error(tr("意外的 {type} 消息", type=message.type))
 
     def _failure(self, error: Error) -> HelperError:
         if error.code == "bad_frame":  # the helper closes the connection after this
@@ -308,9 +311,11 @@ class HelperClient:
         try:
             header, columns = decode_frame(body)
         except ProtocolError as exc:
-            raise self._protocol_error(f"无效的数据帧：{exc}") from None
+            raise self._protocol_error(tr("无效的数据帧：{reason}", reason=exc)) from None
         if (header.stream, header.layout) != stream or header.request_id != req_id:
-            raise self._protocol_error(f"意外的数据帧 {header.stream}/{header.layout}")
+            raise self._protocol_error(
+                tr("意外的数据帧 {stream}/{layout}", stream=header.stream, layout=header.layout)
+            )
         return header, columns
 
     async def _drain(self, req_id: int, ahead: asyncio.Task[tuple[int, bytearray]] | None) -> None:
@@ -329,8 +334,8 @@ class HelperClient:
             async for item in items:
                 if isinstance(item, Response):
                     return dict(item.result)
-                raise self._protocol_error("意外的数据帧")
-        raise self._protocol_error("没有应答")
+                raise self._protocol_error(_("意外的数据帧"))
+        raise self._protocol_error(_("没有应答"))
 
     # ------------------------------------------------------------------ operations
 
@@ -460,18 +465,18 @@ class HelperClient:
                         self.last_scan = dict(item.result)
                     extras = dict(item.extras)
                 elif assembler is None:
-                    raise self._protocol_error("数据帧之前没有 begin")
+                    raise self._protocol_error(_("数据帧之前没有 begin"))
                 else:
                     try:
                         assembler.add(item[1])
                     except ValueError as exc:
                         raise self._protocol_error(str(exc)) from None
         if assembler is None:
-            raise HelperUnavailable("扫描助手没有返回数据", "protocol")
+            raise HelperUnavailable(_("扫描助手没有返回数据"), "protocol")
         try:
             table = assembler.finish()
         except ValueError as exc:
-            raise HelperUnavailable(f"扫描助手协议错误：{exc}", "protocol") from None
+            raise HelperUnavailable(tr("扫描助手协议错误：{reason}", reason=exc), "protocol") from None
         table.update(extras)
         return table
 
@@ -550,7 +555,9 @@ def _build(model: Any, **fields: Any) -> Any:
     try:
         return model(**fields)
     except ValidationError as exc:
-        raise HelperError(f"无效的参数：{exc.errors()[0]['msg']}", "invalid_request") from None
+        raise HelperError(
+            tr("无效的参数：{reason}", reason=exc.errors()[0]["msg"]), "invalid_request"
+        ) from None
 
 
 async def _accept(listener: Listener, process: HelperProcess, deadline: float) -> AsyncChannel:
@@ -559,18 +566,18 @@ async def _accept(listener: Listener, process: HelperProcess, deadline: float) -
     while True:
         remaining = deadline - loop.time()
         if remaining <= 0:
-            raise HelperUnavailable("扫描助手没有按时连接", "timeout")
+            raise HelperUnavailable(_("扫描助手没有按时连接"), "timeout")
         try:
             return await listener.accept(min(_ACCEPT_SLICE, remaining))
         except TimeoutError:
             pass
         except PermissionError as exc:
-            raise HelperUnavailable(f"扫描助手鉴权失败：{exc}", "auth") from None
+            raise HelperUnavailable(tr("扫描助手鉴权失败：{reason}", reason=exc), "auth") from None
         except OSError as exc:
-            raise HelperUnavailable(f"等待扫描助手连接失败：{exc}", "exited") from None
+            raise HelperUnavailable(tr("等待扫描助手连接失败：{reason}", reason=exc), "exited") from None
         code = process.poll()
         if code is not None:
-            raise HelperUnavailable(f"扫描助手启动后退出（退出码 {code}）", "exited")
+            raise HelperUnavailable(tr("扫描助手启动后退出（退出码 {code}）", code=code), "exited")
 
 
 async def _handshake(channel: AsyncChannel, process: HelperProcess, token: str, deadline: float) -> Hello:
@@ -579,31 +586,34 @@ async def _handshake(channel: AsyncChannel, process: HelperProcess, token: str, 
     try:
         kind, body = await channel.read_frame(timeout, max_binary=0)
     except TimeoutError:
-        raise HelperUnavailable("扫描助手没有发送 hello", "timeout") from None
+        raise HelperUnavailable(_("扫描助手没有发送 hello"), "timeout") from None
     except FrameError as exc:
-        raise _auth_failed(f"首帧无效（{exc}）") from None
+        raise _auth_failed(tr("首帧无效（{reason}）", reason=exc)) from None
     except (EOFError, OSError) as exc:
-        raise HelperUnavailable(f"扫描助手在握手时断开：{exc}", "exited") from None
+        raise HelperUnavailable(tr("扫描助手在握手时断开：{reason}", reason=exc), "exited") from None
     try:
         hello = REPLY.validate_json(body) if kind != KIND_BINARY else None
     except ValidationError:
         hello = None
     if not isinstance(hello, Hello):
-        raise _auth_failed("首帧不是 hello")
+        raise _auth_failed(_("首帧不是 hello"))
     if hello.version != PROTOCOL_VERSION:
-        raise _auth_failed(f"协议版本 {hello.version}，需要 {PROTOCOL_VERSION}")
+        raise _auth_failed(tr("协议版本 {got}，需要 {need}", got=hello.version, need=PROTOCOL_VERSION))
     if not tokens_match(hello.token, token):
-        raise _auth_failed("令牌不符")
+        raise _auth_failed(_("令牌不符"))
     if hello.pid != channel.peer_pid:
-        raise _auth_failed(f"声称的进程号 {hello.pid} 与实际连接方 {channel.peer_pid} 不符")
+        raise _auth_failed(
+            tr("声称的进程号 {claimed} 与实际连接方 {peer} 不符", claimed=hello.pid, peer=channel.peer_pid)
+        )
     if not peer_is_launched(channel.peer_pid, process.pid):
-        raise _auth_failed(f"连接方 {channel.peer_pid} 不是启动的进程 {process.pid}")
+        raise _auth_failed(tr("连接方 {peer} 不是启动的进程 {pid}", peer=channel.peer_pid, pid=process.pid))
     return hello
 
 
 def _auth_failed(why: str) -> HelperUnavailable:
-    logger.warning("扫描助手鉴权失败：{}", why)
-    return HelperUnavailable(f"扫描助手鉴权失败：{why}", "auth")
+    message = tr("扫描助手鉴权失败：{reason}", reason=why)
+    logger.warning(message)
+    return HelperUnavailable(message, "auth")
 
 
 async def _reap(process: HelperProcess, grace: float) -> None:
@@ -641,20 +651,20 @@ class TableAssembler:
         start, end = self._pos, self._pos + n
         keys = batch.keys() - {"names"}
         if end > self.rows:
-            raise ValueError(f"数据行数超过声明的 {self.rows}")
+            raise ValueError(tr("数据行数超过声明的 {rows}", rows=self.rows))
         if self._columns and keys != self._columns.keys():
-            raise ValueError("各批数据的列不一致")
+            raise ValueError(_("各批数据的列不一致"))
         if self._names_len + len(names) > _U32_MAX:
-            raise ValueError("名字总长超过 4 GiB")
+            raise ValueError(_("名字总长超过 4 GiB"))
         if n and int((batch["name_off"].astype(np.int64) + batch["name_len"]).max()) > len(names):
-            raise ValueError("名字偏移越界")
+            raise ValueError(_("名字偏移越界"))
         for key in keys:
             col = batch[key]
             out = self._columns.get(key)
             if out is None:
                 out = self._columns[key] = np.empty(self.rows, dtype=col.dtype)
             if len(col) != n or out.dtype != col.dtype:
-                raise ValueError(f"列 {key!r} 的长度或类型不一致")
+                raise ValueError(tr("列 {key!r} 的长度或类型不一致", key=key))
             if key == "name_off":
                 np.add(col, np.uint32(self._names_len), out=out[start:end])
             else:
@@ -665,7 +675,7 @@ class TableAssembler:
 
     def finish(self) -> dict[str, Any]:
         if self._pos != self.rows or not self._columns:
-            raise ValueError(f"声明 {self.rows} 行，收到 {self._pos} 行")
+            raise ValueError(tr("声明 {rows} 行，收到 {got} 行", rows=self.rows, got=self._pos))
         table: dict[str, Any] = dict(self._columns)
         table["names"] = b"".join(memoryview(part) for part in self._names)
         return table

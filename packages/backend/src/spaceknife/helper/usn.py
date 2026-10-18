@@ -26,6 +26,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
+from ..i18n import _, tr
 from .messages import ErrorCode
 
 # Win32 errors the journal FSCTLs report (winerror.h)
@@ -190,7 +191,7 @@ def parse_read_buffer(buf: bytes | bytearray | memoryview, limit: int | None = N
     """
     view = memoryview(buf).cast("B")
     if len(view) < _NEXT_USN.size:
-        raise ValueError(f"USN 读取结果只有 {len(view)} 字节")
+        raise ValueError(tr("USN 读取结果只有 {size} 字节", size=len(view)))
     (next_usn,) = _NEXT_USN.unpack_from(view, 0)
     offsets, majors, skipped, stop = _walk(view, _NEXT_USN.size, limit)
     u8 = np.frombuffer(view, dtype=np.uint8)
@@ -211,7 +212,7 @@ def parse_read_buffer(buf: bytes | bytearray | memoryview, limit: int | None = N
         bad = (start < layout.itemsize) | (start + size > length) | (size % 2 != 0)
         if bad.any():
             first = int(sel[np.argmax(bad)])
-            raise ValueError(f"第 {first + 1} 条 USN 记录的文件名越界或长度为奇数")
+            raise ValueError(tr("第 {index} 条 USN 记录的文件名越界或长度为奇数", index=first + 1))
         out["frn"][sel] = rec["frn"]
         out["parent_frn"][sel] = rec["parent"]
         out["usn"][sel] = rec["usn"]
@@ -221,7 +222,7 @@ def parse_read_buffer(buf: bytes | bytearray | memoryview, limit: int | None = N
         name_bytes[sel] = size
     names, lens = _utf8_names(u8, name_start, name_bytes // 2)
     if n and int(lens.max()) > 0xFFFF:
-        raise ValueError("USN 记录的文件名过长")
+        raise ValueError(_("USN 记录的文件名过长"))
     out["name_len"][:] = lens
     if n:
         np.cumsum(lens[:-1], out=out["name_off"][1:], dtype=np.uint32)
@@ -244,11 +245,18 @@ def _walk(
     unpack = _HEAD.unpack_from
     while pos < end:
         if end - pos < 8:
-            raise ValueError(f"USN 读取结果末尾有 {end - pos} 字节不完整的记录")
+            raise ValueError(tr("USN 读取结果末尾有 {size} 字节不完整的记录", size=end - pos))
         length, major = unpack(view, pos)
         layout = _LAYOUTS.get(major)
         if length < (layout.itemsize if layout is not None else 8) or length > end - pos:
-            raise ValueError(f"USN 记录长度 {length} 无效（偏移 {pos}，版本 {major}）")
+            raise ValueError(
+                tr(
+                    "USN 记录长度 {length} 无效（偏移 {offset}，版本 {version}）",
+                    length=length,
+                    offset=pos,
+                    version=major,
+                )
+            )
         if layout is None:
             skipped += 1
         elif limit is not None and len(offsets) >= limit:
@@ -295,7 +303,7 @@ def _utf8_names(u8: np.ndarray, start: np.ndarray, units: np.ndarray) -> tuple[b
     width[1:][pair[:-1]] = 0
     cs = np.concatenate(([0], np.cumsum(width)))
     if int(cs[-1]) != len(enc):
-        raise ValueError("USN 记录的文件名无法转换为 UTF-8")
+        raise ValueError(_("USN 记录的文件名无法转换为 UTF-8"))
     first = cs[dest]
     lens = cs[dest + units] - first
     return enc[_ranges(first, lens)].tobytes(), lens
@@ -308,7 +316,7 @@ def join_chunks(chunks: Sequence[UsnChunk]) -> tuple[dict[str, np.ndarray], byte
     if len(chunks) == 1:
         return dict(chunks[0].columns), chunks[0].names
     if sum(len(chunk.names) for chunk in chunks) > _U32_MAX:
-        raise ValueError("USN 记录的文件名总长超过 4 GiB")
+        raise ValueError(_("USN 记录的文件名总长超过 4 GiB"))
     columns = {key: np.concatenate([chunk.columns[key] for chunk in chunks]) for key in COLUMNS}
     base = np.repeat(
         np.cumsum([0] + [len(chunk.names) for chunk in chunks[:-1]]).astype(np.uint32),
@@ -335,14 +343,25 @@ def check_checkpoint(journal: Journal, start_usn: int, journal_id: int) -> None:
     if journal.journal_id != journal_id:
         raise UsnError(
             "usn_gone",
-            f"USN 日志已重建（当前编号 {journal.journal_id:#x}，检查点属于 {journal_id:#x}），检查点失效",
+            tr(
+                "USN 日志已重建（当前编号 {current:#x}，检查点属于 {checkpoint:#x}），检查点失效",
+                current=journal.journal_id,
+                checkpoint=journal_id,
+            ),
         )
     if start_usn < max(journal.first_usn, journal.lowest_valid_usn):
         raise UsnError(
-            "usn_gone", f"检查点 {start_usn} 之后的记录已被覆盖（日志现从 {journal.first_usn} 开始）"
+            "usn_gone",
+            tr(
+                "检查点 {start} 之后的记录已被覆盖（日志现从 {first} 开始）",
+                start=start_usn,
+                first=journal.first_usn,
+            ),
         )
     if start_usn > journal.next_usn:
-        raise UsnError("usn_gone", f"检查点 {start_usn} 超出日志末尾 {journal.next_usn}")
+        raise UsnError(
+            "usn_gone", tr("检查点 {start} 超出日志末尾 {end}", start=start_usn, end=journal.next_usn)
+        )
 
 
 def read_journal(
@@ -427,7 +446,7 @@ def _recheck(device: UsnDevice, journal_id: int, exc: UsnError) -> UsnError:
     except UsnError:
         return exc
     if current != journal_id:
-        return UsnError("usn_gone", f"读取期间 USN 日志被重建（{exc.message}）")
+        return UsnError("usn_gone", tr("读取期间 USN 日志被重建（{reason}）", reason=exc.message))
     return exc
 
 
@@ -435,7 +454,7 @@ def open_volume(volume: str) -> UsnDevice:
     """The change journal of the local volume ``X:`` (read-only; needs administrator rights)."""
     if sys.platform == "win32":  # (the class exists on Windows only: mypy checks this branch there)
         return _VolumeJournal(volume)
-    raise UsnError("not_supported", "USN 日志只支持 Windows NTFS 卷")
+    raise UsnError("not_supported", _("USN 日志只支持 Windows NTFS 卷"))
 
 
 # --------------------------------------------------------------------------- Win32
@@ -483,7 +502,10 @@ if sys.platform == "win32":
 
     def _fail(what: str) -> UsnError:
         err = ctypes.get_last_error()
-        return UsnError(error_code(err), f"{what}失败：[WinError {err}] {ctypes.FormatError(err).strip()}")
+        reason = ctypes.FormatError(err).strip()
+        return UsnError(
+            error_code(err), tr("{what}失败：[WinError {code}] {reason}", what=what, code=err, reason=reason)
+        )
 
     class _VolumeJournal:
         """``\\\\.\\X:`` opened for reading; the journal FSCTLs on it."""
@@ -494,14 +516,14 @@ if sys.platform == "win32":
                 "\\\\.\\" + self._volume, _GENERIC_READ, _SHARE_READ_WRITE, None, _OPEN_EXISTING, 0, None
             )
             if handle is None or handle == _INVALID_HANDLE:
-                raise _fail(f"打开卷 {self._volume}")
+                raise _fail(tr("打开卷 {volume}", volume=self._volume))
             self._handle: int | None = int(handle)
             self._max_major = 2
             self._out = ctypes.create_string_buffer(0)
 
         def _ioctl(self, code: int, data: bytes | None, out: ctypes.Array[ctypes.c_char], what: str) -> int:
             if self._handle is None:
-                raise UsnError("io_error", f"卷 {self._volume} 已关闭")
+                raise UsnError("io_error", tr("卷 {volume} 已关闭", volume=self._volume))
             got = wintypes.DWORD(0)
             ok = _k32.DeviceIoControl(
                 self._handle, code, data, len(data or b""), out, len(out), ctypes.byref(got), None
@@ -512,9 +534,10 @@ if sys.platform == "win32":
 
         def query(self) -> Journal:
             out = ctypes.create_string_buffer(_JOURNAL_BUFFER)
-            got = self._ioctl(FSCTL_QUERY_USN_JOURNAL, None, out, f"查询 {self._volume} 的 USN 日志")
+            what = tr("查询 {volume} 的 USN 日志", volume=self._volume)
+            got = self._ioctl(FSCTL_QUERY_USN_JOURNAL, None, out, what)
             if got < _JOURNAL_DATA.size:
-                raise UsnError("io_error", f"USN 日志信息只有 {got} 字节")
+                raise UsnError("io_error", tr("USN 日志信息只有 {size} 字节", size=got))
             jid, first, nxt, lowest, max_usn, max_size, delta = _JOURNAL_DATA.unpack_from(out, 0)
             if got >= _JOURNAL_DATA.size + _JOURNAL_VERSIONS.size:
                 _min_major, max_major = _JOURNAL_VERSIONS.unpack_from(out, _JOURNAL_DATA.size)
@@ -525,7 +548,8 @@ if sys.platform == "win32":
             if len(self._out) != size:
                 self._out = ctypes.create_string_buffer(size)
             data = _READ_DATA.pack(start_usn, ALL_REASONS, 0, 0, 0, journal_id, 2, self._max_major)
-            got = self._ioctl(FSCTL_READ_USN_JOURNAL, data, self._out, f"读取 {self._volume} 的 USN 日志")
+            what = tr("读取 {volume} 的 USN 日志", volume=self._volume)
+            got = self._ioctl(FSCTL_READ_USN_JOURNAL, data, self._out, what)
             return ctypes.string_at(self._out, got)
 
         def close(self) -> None:
