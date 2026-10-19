@@ -80,7 +80,9 @@ TEXT = Texts(
         "col_name": "名称",
         "col_disk": "占用",
         "col_share": "占比",
-        "view_total": "共 {files} 个文件、{folders} 个文件夹，占用 {size}",
+        "view_total": "共 {files}、{folders}，占用 {size}",  # the counts: view_files, view_folders
+        "view_files": "{files} 个文件",
+        "view_folders": "{folders} 个文件夹",
         "view_filter": "过滤 {expr}",
         "rest": "…其余 {count} 项",
     }
@@ -365,8 +367,10 @@ class Runner:
         self.views: list[View] = []
         self.autoclose = False
 
-    def say(self, key: str, style: str = "", **kw: object) -> None:
-        self.err.print(Text(TEXT[key].format(**kw), style=style))
+    def say(self, key: str, style: str = "", *, n: int | None = None, one: str = "", **kw: object) -> None:
+        """Print ``TEXT[key]`` filled in; with a count ``n``, English says ``one`` for a single thing."""
+        text = TEXT[key].format(**kw) if n is None else plural(n, TEXT.raw(key), one, **kw)
+        self.err.print(Text(text, style=style))
 
     def run(self, commands: Sequence[Command]) -> int:
         for cmd in commands:
@@ -402,25 +406,25 @@ class Runner:
         roots = [r.path for r in scanner.roots]
         if result.state != ScanState.DONE:
             raise CommandFailed(TEXT["scan_stopped"].format(state=result.state.value, paths="; ".join(roots)))
-        msg = plural(
-            result.items,
-            TEXT.raw("scanned"),
-            "Scanned {paths}: 1 item, {size} on disk, in {time}",
+        self.say(
+            "scanned",
+            MUTED,
+            n=result.items,
+            one="Scanned {paths}: 1 item, {size} on disk, in {time}",
             paths="; ".join(roots),
             items=fmt.count(result.items),
             size=fmt.size(result.bytes_alloc),
             time=fmt.duration(result.elapsed_s),
         )
-        self.err.print(Text(msg, style=MUTED))
         if result.errors:
-            msg = plural(
-                result.errors,
-                TEXT.raw("denied"),
-                "1 folder couldn't be accessed, e.g. {example}",
+            self.say(
+                "denied",
+                WARN,
+                n=result.errors,
+                one="1 folder couldn't be accessed, e.g. {example}",
                 count=result.errors,
                 example=result.denied[0] if result.denied else "",
             )
-            self.err.print(Text(msg, style=WARN))
         stats = {
             "items": result.items,
             "files": result.files,
@@ -491,15 +495,16 @@ class Runner:
             raise CommandFailed(TEXT["load_failed"].format(path=path, reason=exc)) from exc
         except OSError as exc:
             raise CommandFailed(TEXT["load_failed"].format(path=path, reason=exc.strerror or exc)) from exc
-        msg = plural(
-            header.node_count - 1,
-            TEXT.raw("loaded"),
-            "Opened snapshot {path}: 1 item, {size} on disk",
+        items = header.node_count - 1
+        self.say(
+            "loaded",
+            MUTED,
+            n=items,
+            one="Opened snapshot {path}: 1 item, {size} on disk",
             path=path,
-            items=fmt.count(header.node_count - 1),
+            items=fmt.count(items),
             size=fmt.size(int(store.cols["tot_alloc"][0])),
         )
-        self.err.print(Text(msg, style=MUTED))
         view = View(f"load {arg}", store, list(header.roots), list(header.volumes), dict(header.stats))
         view.checkpoints = dict(header.checkpoints)
         self.views.append(view)
@@ -523,15 +528,15 @@ class Runner:
         found = evaluate(view.store, result.normal, FilterContext.current())
         view.match, view.filter_text = found.match, expr
         count, alloc, _ = found.totals(0)
-        msg = plural(
-            count,
-            TEXT.raw("filtered"),
-            "Filter {expr}: 1 file, {size} on disk",
+        self.say(
+            "filtered",
+            MUTED,
+            n=count,
+            one="Filter {expr}: 1 file, {size} on disk",
             expr=expr,
             count=fmt.count(count),
             size=fmt.size(alloc),
         )
-        self.err.print(Text(msg, style=MUTED))
 
     def cmd_save(self, arg: str) -> None:
         view = self.view
@@ -611,7 +616,9 @@ class Runner:
                 table.add_row(Text(label, style=MUTED), fmt.size(rest), f"{share * 100:.1f}%")
             self.out.print(table)
             line = TEXT["view_total"].format(
-                files=fmt.count(files), folders=fmt.count(folders), size=fmt.size(total)
+                files=plural(files, TEXT.raw("view_files"), "1 file", files=fmt.count(files)),
+                folders=plural(folders, TEXT.raw("view_folders"), "1 folder", folders=fmt.count(folders)),
+                size=fmt.size(total),
             )
             self.out.print(Text(line, style=MUTED))
         self.out.print()
