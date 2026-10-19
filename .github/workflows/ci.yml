@@ -13,16 +13,17 @@ jobs:
   python:
     name: Python · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30  # the suite takes a few minutes; a hang must not hold a runner for hours
     strategy:
       fail-fast: false
       matrix:
         # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+.
         os: [windows-latest, ubuntu-22.04, macos-14]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
 
@@ -51,6 +52,7 @@ jobs:
   electron:
     name: Electron · ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -59,16 +61,16 @@ jobs:
       run:
         working-directory: apps/electron
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No packageManager field in apps/electron/package.json; pnpm-lock.yaml is lockfileVersion 9.0 → pnpm 10.
       - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
         with:
           version: 10
 
       - name: Set up Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm

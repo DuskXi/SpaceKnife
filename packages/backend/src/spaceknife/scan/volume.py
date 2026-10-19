@@ -398,17 +398,24 @@ def _darwin_statfs(path: str) -> tuple[str, str, str, bool] | None:
     )
 
 
+# The APFS Data volume: macOS presents it at "/" together with the sealed system volume (one
+# volume group, joined by firmlinks), so user files under /Users, /private/var… belong to "/".
+DARWIN_DATA = "/System/Volumes/Data"
+
+
 def _darwin_volume(path: str) -> VolumeInfo:
     info = _darwin_statfs(path)
     if info is None:
         return _posix_from_statvfs(path, _mount_point_by_dev(path), "", "", False)
     fs_type, point, source, local = info
+    if point == DARWIN_DATA:
+        point = "/"
     return _posix_from_statvfs(path, point, fs_type, source, not local)
 
 
 def _darwin_list() -> list[VolumeInfo]:
     paths = [
-        "/",
+        DARWIN_DATA if os.path.isdir(DARWIN_DATA) else "/",  # "/" with the size of the user's data
         *(os.path.join("/Volumes", n) for n in sorted(os.listdir("/Volumes")) if not n.startswith(".")),
     ]
     out, seen = [], set()

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import dataclasses
+import errno
 import os
 import stat
 import subprocess
@@ -388,7 +389,12 @@ def test_posix_non_utf8_names_fifo_and_hardlinks(tmp_path: Path) -> None:
     root.mkdir()
     broot = os.fsencode(root)
     for raw in [b"bad\xff.TXT", b"ext.\xc3\x89\xff", b"\xe4\xb8.\xe4\xb8\xad", b"latin1-\xe9.DAT"]:
-        fd = os.open(os.path.join(broot, raw), os.O_CREAT | os.O_WRONLY, 0o644)
+        try:
+            fd = os.open(os.path.join(broot, raw), os.O_CREAT | os.O_WRONLY, 0o644)
+        except OSError as exc:
+            if exc.errno == errno.EILSEQ:  # APFS (macOS) only stores valid UTF-8 names
+                pytest.skip("this file system rejects names that are not UTF-8")
+            raise
         os.write(fd, b"data")
         os.close(fd)
     os.mkdir(os.path.join(broot, b"dir\xfe"))

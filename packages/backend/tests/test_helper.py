@@ -339,13 +339,24 @@ if IS_WINDOWS:
 
 
 @pytest.fixture
-def unprivileged(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Helpers started by HelperClient.launch(elevate=False) run without administrator rights."""
+def unprivileged(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Helpers started by HelperClient.launch(elevate=False) run without administrator rights.
+
+    Files an elevated test process creates may be reachable only through BUILTIN\\Administrators
+    (the built-in Administrator account of CI runners: the profile's ACLs name the group, not the
+    user), which the restricted helper holds as deny-only: grant the user itself read access to
+    the test's folder, inherited by everything created in it.
+    """
     if not is_elevated():
         return
     if not IS_WINDOWS:
         pytest.skip("running as root: cannot start an unprivileged helper")
     monkeypatch.setattr(client_mod, "start_subprocess", spawn_unprivileged)
+    subprocess.run(
+        ["icacls", str(tmp_path), "/grant", f"*{_win32.current_user_sid()}:(OI)(CI)RX", "/Q"],
+        check=True,
+        capture_output=True,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -500,7 +511,9 @@ def test_token_file_is_private_and_read_once(tmp_path: Path) -> None:
         sddl = _file_sddl(str(path))
         assert sddl.startswith("D:P")  # protected: nothing inherited from the directory
         trustees = set(re.findall(r"\(A;[^;]*;[^;]*;;;([^)]*)\)", sddl))
-        assert trustees == {_win32.current_user_sid(), "BA"}, sddl
+        user = _win32.current_user_sid()
+        # SDDL writes the built-in Administrator account (RID 500, e.g. CI runners) as the alias LA
+        assert trustees in ({user, "BA"}, {"LA", "BA"} if user.endswith("-500") else set()), sddl
     else:
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
     with pytest.raises(FileExistsError):
