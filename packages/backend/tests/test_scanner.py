@@ -234,3 +234,23 @@ def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatc
     for bad in ("0", "-3", "many", ""):
         monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", bad)
         assert 2 <= native_threads() <= 16
+
+
+@pytest.mark.parametrize(
+    ("platform", "cpus", "threads"),
+    [
+        ("win32", 4, 4),
+        ("win32", 32, 16),
+        ("linux", 1, 2),
+        ("darwin", 1, 4),
+        ("darwin", 3, 6),
+        ("darwin", 12, 16),
+    ],
+)
+def test_default_listing_threads(
+    monkeypatch: pytest.MonkeyPatch, platform: str, cpus: int, threads: int
+) -> None:
+    monkeypatch.delenv("SPACEKNIFE_SCAN_THREADS", raising=False)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(os, "cpu_count", lambda: cpus)
+    assert native_threads() == threads
