@@ -1,11 +1,13 @@
-// A scan tab: treemap (one or two panes, W8) + details panel + filter floater (W3) + hover card.
+// A scan tab: the view (one or two panes, W8) + details panel + filter floater (W3) + hover card.
 
 import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
 import { closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
 import { get, set, type Tab, useApp } from "@/state/store";
-import type { DrawFrame } from "@/treemap/frame";
-import { type HoverInfo, Treemap } from "@/treemap/Treemap";
+import { pointerBox, VisualHost } from "@/visual/Host";
+import { hosts } from "@/visual/hosts";
+import { componentFor } from "@/visual/registry";
+import { HIT_ROOT, type Hit, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { fmtInt, fmtShare, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { HoverCard } from "@/shell/HoverCard";
@@ -71,7 +73,7 @@ function ComparePane({ viewId }: { viewId: string }) {
   return (
     <section className="pane">
       <div className="pane-map" ref={host}>
-        <Treemap viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
+        <VisualHost viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
         <FilterFloater viewId={viewId} />
         <CompareHoverCard hover={hover} bounds={bounds} />
       </div>
@@ -133,7 +135,7 @@ function Pane(props: { tab: Tab; index: number; viewId: string; split: boolean; 
     <section className={`pane${focused && split ? " focused" : ""}`} onMouseDownCapture={onFocus}>
       {split && <PaneHead tab={tab} viewId={viewId} index={index} />}
       <div className="pane-map" ref={host}>
-        <Treemap viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
+        <VisualHost viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
         <FilterFloater viewId={viewId} />
         <HoverCard hover={hover} bounds={bounds} />
       </div>
@@ -231,22 +233,15 @@ function FilterFloater({ viewId }: { viewId: string }) {
   );
 }
 
-/** Right click on a block (UI-W5-01): the unified menu, beside the block. */
-function openMenu(viewId: string, row: number, frame: DrawFrame, ev: React.MouseEvent): void {
+/** Right click on a block, a bar or a sector, or on the zoom root (UI-W5-01): the unified menu,
+ * beside the target; where the target can be the whole disc, beside the pointer. */
+function openMenu(viewId: string, row: Hit, frame: VisualFrame, ev: React.MouseEvent): void {
   const scanId = get().views[viewId]?.state.scan_id;
-  if (!scanId) return;
-  const box = (ev.currentTarget as HTMLElement).getBoundingClientRect();
-  const k = box.width / frame.info.width;
-  const node = frame.node[row]!;
-  set({
-    menu: {
-      viewId,
-      scanId,
-      key: frame.key[row]!,
-      node: node > 0 ? node : null,
-      x: ev.clientX,
-      y: ev.clientY,
-      avoid: { x: box.left + frame.x[row]! * k, y: box.top + frame.y[row]! * k, w: frame.w[row]! * k, h: frame.h[row]! * k },
-    },
-  });
+  const root = frame.info.root;
+  if (!scanId || (row < 0 && !(row === HIT_ROOT && root))) return;
+  const key = row >= 0 ? frame.key[row]! : root!.key;
+  const node = row >= 0 ? frame.node[row]! : root!.node;
+  const followsPointer = componentFor(frame.layout)?.hoverPlacement === "pointer";
+  const avoid = followsPointer ? pointerBox({ x: ev.clientX, y: ev.clientY }) : hosts.get(viewId)?.menuAnchor(row)?.avoid;
+  set({ menu: { viewId, scanId, key, node: node > 0 ? node : null, x: ev.clientX, y: ev.clientY, avoid } });
 }

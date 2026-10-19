@@ -53,7 +53,8 @@
       "$type": "duration",
       "fast": { "$value": { "value": 120, "unit": "ms" } },
       "zoom": { "$value": { "value": 220, "unit": "ms" }, "$description": "双击放大 / 返回的缩放动画" },
-      "flash": { "$value": { "value": 900, "unit": "ms" }, "$description": "文件变化闪烁" }
+      "flash": { "$value": { "value": 900, "unit": "ms" }, "$description": "文件变化闪烁" },
+      "swap": { "$value": { "value": 200, "unit": "ms" }, "$description": "切换可视化时新旧画面交叉淡入" }
     },
     "easing": {
       "$type": "cubicBezier",

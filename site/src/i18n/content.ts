@@ -110,7 +110,7 @@ export const content: Record<Lang, Content> = {
     featuresTitle: "Everything you need to reclaim space",
     featuresSub: "Built from first principles for today's huge drives: fast to scan, calm on your disk, safe to clean.",
     features: [
-      { icon: "layers", title: "Live nested treemap", body: "WebGL rendering that fills in while the scan runs, with zoom animation, hover details, detail levels and free and unknown space drawn as blocks." },
+      { icon: "layers", title: "Three live visualizations", body: "A nested treemap, a flame graph and a polar flame graph, rendered with WebGL and filled in while the scan runs; switch at any time. Zoom animation, hover details, detail levels, and free and unknown space drawn too." },
       { icon: "bolt", title: "Fast scans", body: "A native Rust extension walks folders in parallel; on Windows a quick scan reads the NTFS Master File Table directly." },
       { icon: "gauge", title: "Calm on your disk", body: "Cap the disk load the scan causes (max, balanced, quiet, idle or custom); it backs off when other programs need the disk." },
       { icon: "pulse", title: "Live monitoring", body: "After the scan, changes keep flowing in and changed blocks flash, so the picture never goes stale." },
@@ -176,6 +176,7 @@ export const content: Record<Lang, Content> = {
     appCategory: "UtilitiesApplication",
     featureList: [
       "Live nested treemap of disk usage",
+      "Flame graph and polar flame graph views, switchable at any time",
       "Parallel scanning with a native Rust extension",
       "NTFS Master File Table quick scan on Windows",
       "Configurable disk load limit while scanning",
@@ -218,7 +219,7 @@ export const content: Record<Lang, Content> = {
     featuresTitle: "腾出空间需要的，都在这里",
     featuresSub: "为今天的大容量磁盘重新设计：扫得快、不拖慢电脑、清理有保障。",
     features: [
-      { icon: "layers", title: "实时嵌套树图", body: "WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级，可用空间与未知空间也画成方块。" },
+      { icon: "layers", title: "三种实时可视化", body: "嵌套树图、火焰图、火焰-极坐标图，WebGL 渲染，边扫边画，扫描中也能随时切换；缩放动画、悬停详情、细节层级，可用空间与未知空间也画出来。" },
       { icon: "bolt", title: "扫描快", body: "Rust 原生扩展并行遍历目录；Windows 上可直接读取 NTFS 主文件表（MFT）快速扫描。" },
       { icon: "gauge", title: "不拖慢电脑", body: "可以限制扫描自身造成的磁盘负载（极速、均衡、安静、空闲或自定义），别的程序用磁盘时自动让路。" },
       { icon: "pulse", title: "实时监控", body: "扫描完成后继续跟踪文件变化，变化的方块会闪烁，画面不会过时。" },
@@ -284,6 +285,7 @@ export const content: Record<Lang, Content> = {
     appCategory: "UtilitiesApplication",
     featureList: [
       "实时嵌套树图显示磁盘占用",
+      "火焰图与火焰-极坐标图，随时切换",
       "Rust 原生扩展并行扫描",
       "Windows 上的 NTFS 主文件表快速扫描",
       "扫描时可限制磁盘负载",

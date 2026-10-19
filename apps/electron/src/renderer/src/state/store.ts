@@ -18,9 +18,10 @@ import type {
   SettingsState,
   SnapshotInfo,
   ViewState,
+  VisualInfo,
   VolumeInfo,
 } from "@/protocol/generated";
-import type { DrawFrame } from "@/treemap/frame";
+import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
 
 export type TabKind = "start" | "scan" | "settings";
@@ -57,12 +58,11 @@ export interface TabCompare {
 export interface ViewData {
   state: ViewState;
   info: FrameInfo | null;
-  frame: DrawFrame | null;
+  /** the latest frame, of whatever layout its visualization draws */
+  frame: VisualFrame | null;
   filter: FilterInfo | null;
   parse: FilterParse | null;
   filterText: string;
-  /** previous frame, kept for the zoom animation */
-  previous: DrawFrame | null;
   /** block highlighted from outside the treemap (W3 result list hover, UI-W3-33) */
   hoverKey: number | null;
 }
@@ -153,6 +153,8 @@ export interface AppState {
   fdaPrompt: boolean;
   /** interface language (M7.5): the root re-renders on change, every t() follows */
   lang: Lang;
+  /** visualizations the backend offers (visual.list), empty until connected */
+  visuals: VisualInfo[];
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -210,6 +212,7 @@ export const useApp = create<AppState>(() => ({
   exportOpen: false,
   fdaPrompt: false,
   lang: getLang(),
+  visuals: [],
 }));
 
 export const set = useApp.setState;

@@ -68,6 +68,9 @@ button:disabled { cursor: default; }
 }
 .segmented.small button { height: 22px; }
 .segmented button.on { background: var(--sk-color-bg-hover); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); color: var(--sk-color-text-primary); }
+.segmented button:disabled { color: var(--sk-color-text-disabled); }
+.segmented button.on:disabled { background: transparent; box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
+.segmented.icon-only > button { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; padding: 0 6px; }
 .swatch { flex: none; width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
 
 /* ---------------------------------------------------------------- title bar */

@@ -34,8 +34,8 @@ ELECTRON_CATALOG = ELECTRON / "renderer" / "src" / "locales" / "en"
 CJK = re.compile(r"[\u3400-\u9fff\uff01-\uff60\u3000-\u303f]")
 WRAPPERS = {"_", "tr"}
 TABLES = {"Texts"}
-# definitions whose texts are translated where they are shown (settings meta, palette, …)
-REGISTERED = {"S", "C", "_c", "BuiltinInfo", "_Option"}
+# definitions whose texts are translated where they are shown (settings meta, palette, visual.list, …)
+REGISTERED = {"S", "C", "_c", "BuiltinInfo", "_Option", "Visualization"}
 IGNORE = re.compile(r"#\s*i18n:\s*ignore\s*$")
 
 

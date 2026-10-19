@@ -49,6 +49,7 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 ## 功能
 
 - **实时树图**：WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级、小项聚合，可用空间与未知空间也画出来；可分屏开两个视图。
+- **三种可视化**：树图、火焰图、火焰-极坐标图，扫描中也能随时切换，每个视图各用各的。
 - **快**：Rust 原生扩展做并行目录遍历；Windows 上可读取 NTFS 主文件表（MFT）快速扫描（通过一个只读的提权助手，需要管理员确认）。
 - **不拖慢电脑**：扫描可以限制自己造成的磁盘负载（极速 / 均衡 / 安静 / 空闲 / 自定义），别的程序在用磁盘时自动让路。
 - **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询；macOS FSEvents），变化的块会闪烁。
@@ -96,8 +97,9 @@ macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需�
 ## 文档
 
 - 计划：[docs/PLAN.md](docs/PLAN.md)
-- UI 需求规格（484 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
+- UI 需求规格（512 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
 - 协议：[docs/protocol.md](docs/protocol.md)
+- 可视化（引擎、线上布局、前端组件）：[docs/visuals.md](docs/visuals.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
 - 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)

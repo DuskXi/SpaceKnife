@@ -2,8 +2,12 @@
 
 A view belongs to the session that opened it and dies with it. Rendering and filter evaluation run
 in worker threads (numpy releases the GIL for the heavy parts), one at a time per view. Views of a
-scan share its tags and layout caches; while the scan runs they are re-rendered at most 4 times a
-second and their filters re-evaluated at most once a second.
+scan share its tags, layout caches and engines; while the scan runs they are re-rendered at most 4
+times a second and their filters re-evaluated at most once a second.
+
+A session gets only the visualizations whose wire layout it negotiated (``showable``): new views and
+``view.open`` fall back to the treemap, ``view.set`` refuses with INVALID_PARAMS; the same goes for
+the ``branch`` colour mode without ``visuals.v1``.
 """
 
 from __future__ import annotations
@@ -11,13 +15,14 @@ from __future__ import annotations
 import asyncio
 import itertools
 import time
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Collection
+from dataclasses import asdict, dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 from loguru import logger
 
+from spaceknife_protocol import CAP_VISUALS
 from spaceknife_protocol import view as pv
 from spaceknife_protocol.binary import encode_frame
 from spaceknife_protocol.errors import ErrorCode
@@ -25,10 +30,13 @@ from spaceknife_protocol.methods import EVENT_VIEW_FRAME
 
 from .. import paths
 from ..i18n import tr
+from ..layout import registry
+from ..layout.api import Engine
 from ..layout.engine import Layout
+from ..layout.rows import COMMON_COLUMNS
 from ..settings import SettingsStore
 from ..store import snapshot
-from ..view.state import Frame, RootInfoLike, View, ViewSettings
+from ..view.state import BASELINE, ColorMode, Engines, Frame, RootInfoLike, View, ViewSettings, showable
 from ..view.tags import TagStore
 from .compute import compute
 from .rpc import CURRENT_REQUEST, RpcError
@@ -66,8 +74,26 @@ class ViewHost:
 @dataclass(slots=True)
 class _Shared:
     tags: TagStore
-    layout: Layout
+    basis: Layout  # sizes and colour classes of the scan's store
     listener: str
+    engines: Engines = field(init=False)  # one engine per visualization over ``basis``
+
+    def __post_init__(self) -> None:
+        self.engines = Engines(self.basis)
+
+    @property
+    def layout(self) -> Layout:
+        """The older name of :attr:`basis`."""
+        return self.basis
+
+    def engine_for(self, visual: str) -> Engine:
+        return self.engines.get(visual)
+
+    def rebuild(self, basis: Layout) -> Engines:
+        """The store was replaced: new caches and engines (a view keeps its own until it moves)."""
+        self.basis = basis
+        self.engines = Engines(basis)
+        return self.engines
 
 
 class ViewManager:
@@ -127,13 +153,12 @@ class ViewManager:
         """A live comparison was computed again: its views move to the new change tree."""
         shared = self._shared.get(compare_id)
         layout = Layout(tree.store)
-        if shared is not None:
-            shared.layout = layout
+        engines = shared.rebuild(layout) if shared is not None else Engines(layout)
         roots = [RootInfoLike(node=r, whole_volume=False) for r in tree.store.roots()]
         for host in self._hosts(compare_id):
-            async with host.lock:
+            async with host.lock:  # a render still running keeps the old store's engines
                 if host.view.store is old:
-                    host.view.rebase(tree.store, tree, layout, roots)
+                    host.view.rebase(tree.store, tree, layout, roots, engines.get)
             await self._repaint(host, "change")
 
     def open(self, session: Session, params: pv.ViewOpenParams) -> ViewHost:
@@ -151,21 +176,23 @@ class ViewManager:
             for r in handle.roots
         ]
         view_id = f"view-{next(self._ids)}"
+        caps = session.capabilities
+        cmp = _compare_of(handle)
         view = View(
             view_id,
             handle.store,
             roots,
             tags=shared.tags,
-            layout=shared.layout,
-            settings=self.new_view_settings(),
+            layout=shared.basis,
+            settings=self.new_view_settings(caps, compare=cmp is not None),
+            engines=shared.engines.get,
         )
         view.set_viewport(params.viewport.width, params.viewport.height, params.viewport.dpr)
         view.scanning = bool(getattr(handle, "running", False)) and self._marks_scanning()
-        if params.settings is not None:
-            apply_settings(view, params.settings)
-        cmp = _compare_of(handle)
         if cmp is not None:
-            view.compare = cmp.tree
+            view.compare = cmp.tree  # before the settings: the direction only applies to compare views
+        if params.settings is not None:
+            apply_settings(view, fall_back(params.settings, caps, compare=cmp is not None), caps)
         host = ViewHost(view, handle.id, session)
         self.views[view_id] = host
         return host
@@ -203,35 +230,58 @@ class ViewManager:
             self.close(view_id)
         self._release(scan_id)
 
-    def new_view_settings(self) -> ViewSettings:
-        """Defaults of a new view from the settings (W7 树图 · 外观)."""
+    def new_view_settings(self, caps: Collection[str], *, compare: bool = False) -> ViewSettings:
+        """Defaults of a new view from the settings (W7 树图 · 外观 · 可视化) for a session that
+        announced ``caps``: a visualization it can't show falls back to the treemap, the ``branch``
+        colour mode without ``visuals.v1`` to class colouring."""
         st = self.settings
         if st is None:
             return ViewSettings()
+        full = CAP_VISUALS in caps
+
+        def mode(key: str) -> ColorMode:
+            value = st.get(key)
+            return value if value != "branch" or full else "class"  # type: ignore[return-value]
+
+        # treemaps start with 「树图默认配色」, flame graphs with 「火焰图和火焰-极坐标图默认配色」,
+        # visualizations with a layout of their own with their default
+        starts = {pv.DRAWLIST_LAYOUT: mode("appearance.default_color_mode")}
+        starts |= dict.fromkeys((pv.FLAME_LAYOUT, pv.POLAR_LAYOUT), mode("appearance.partition_color_mode"))
+        colors = tuple((v.id, starts[v.layout]) for v in registry.all_visuals() if v.layout in starts)
+        vis = showable(str(st.get("appearance.default_visual")), caps)
+        visual = vis.id if vis is not None and (vis.compare or not compare) else BASELINE
         return ViewSettings(
             detail=int(st.get("treemap.initial_detail")),
             min_element=float(st.get("treemap.min_element")),
             sort_by_size=bool(st.get("treemap.sort_by_size")),
             show_free=bool(st.get("treemap.show_free")),
             show_unknown=bool(st.get("treemap.show_unknown")),
-            color_mode=st.get("appearance.default_color_mode"),  # type: ignore[arg-type]
+            visual=visual,
+            color_mode=dict(colors).get(visual, registry.get(visual).default_color),
+            colors=colors,
             font_scale=int(st.get("treemap.font_scale")) / 100,
             aspect=aspect_of(int(st.get("treemap.aspect"))),
+            flame_origin=str(st.get("treemap.flame_origin")),
         )
 
     def apply_settings_live(self, st: SettingsStore) -> None:
-        """Geometry settings re-lay out every open view at once (UI-W7-32)."""
+        """Geometry settings re-lay out every open view at once (UI-W7-32); the flame graph's
+        direction the views showing a flame graph."""
         min_element = float(st.get("treemap.min_element"))
         sort_by_size = bool(st.get("treemap.sort_by_size"))
         font_scale = int(st.get("treemap.font_scale")) / 100
         aspect = aspect_of(int(st.get("treemap.aspect")))
         geometry = (min_element, sort_by_size, font_scale, aspect)
+        flame = (("origin", str(st.get("treemap.flame_origin"))),)
         for host in list(self.views.values()):
             v = host.view
-            if (v.min_element, v.sort_by_size, v.font_scale, v.aspect) == geometry:
-                continue
+            changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect) != geometry
             v.min_element, v.sort_by_size, v.font_scale, v.aspect = geometry
-            asyncio.get_running_loop().create_task(self._repaint(host, "settings"))
+            if v.visual_options.get("flame") != flame:
+                v.visual_options["flame"] = flame
+                changed = changed or v.visual == "flame"
+            if changed:
+                asyncio.get_running_loop().create_task(self._repaint(host, "settings"))
 
     async def forget_tags(self) -> None:
         """「清除所有已保存的标签」: every scan's tags go; the views redraw without them."""
@@ -377,7 +427,33 @@ def aspect_of(setting: int) -> float:
     return float(2 ** (setting / 60))
 
 
-def apply_settings(view: View, s: pv.ViewSettingsParams) -> None:
+def fall_back(s: pv.ViewSettingsParams, caps: Collection[str], *, compare: bool) -> pv.ViewSettingsParams:
+    """``view.open``: a visualization the session can't show becomes the treemap; the ``branch``
+    colour mode without ``visuals.v1`` is left out (the view keeps its default)."""
+    update: dict[str, object] = {}
+    if s.visual is not None:
+        vis = showable(s.visual, caps)
+        if vis is None or (compare and not vis.compare):
+            update["visual"] = BASELINE
+    if s.color_mode == "branch" and CAP_VISUALS not in caps:
+        update["color_mode"] = None
+    if s.colors and CAP_VISUALS not in caps:
+        update["colors"] = {vis: mode for vis, mode in s.colors.items() if mode != "branch"}
+    return s.model_copy(update=update) if update else s
+
+
+def apply_settings(view: View, s: pv.ViewSettingsParams, caps: Collection[str]) -> None:
+    """Apply what ``s`` sets. A visualization or colour mode the session that announced ``caps``
+    can't show is INVALID_PARAMS, before anything changes. The visualization changes before the
+    colour mode, which belongs to it."""
+    if s.visual is not None:
+        vis = showable(s.visual, caps)
+        if vis is None or (view.compare is not None and not vis.compare):
+            raise RpcError(ErrorCode.INVALID_PARAMS, tr("这种可视化在当前界面不可用"))
+    if CAP_VISUALS not in caps and (
+        s.color_mode == "branch" or (s.colors is not None and "branch" in s.colors.values())
+    ):
+        raise RpcError(ErrorCode.INVALID_PARAMS, tr("这种配色在当前界面不可用"))
     if s.detail is not None:
         view.set_detail(s.detail)
     if s.min_element is not None:
@@ -388,6 +464,10 @@ def apply_settings(view: View, s: pv.ViewSettingsParams) -> None:
         view.show_free = s.show_free
     if s.show_unknown is not None:
         view.show_unknown = s.show_unknown
+    if s.colors is not None:
+        view.set_colors(s.colors)
+    if s.visual is not None:
+        view.set_visual(s.visual)
     if s.color_mode is not None:
         view.color_mode = s.color_mode
     if s.filter_mode is not None:
@@ -411,7 +491,9 @@ def view_state(host: ViewHost) -> pv.ViewState:
         sort_by_size=v.sort_by_size,
         show_free=v.show_free,
         show_unknown=v.show_unknown,
+        visual=v.visual,
         color_mode=v.color_mode,
+        colors=v.colors,
         filter_mode=v.filter_mode,
         viewport=pv.Viewport(width=w, height=h, dpr=dpr),
         selected=v.selected,
@@ -447,6 +529,7 @@ def filter_info(view: View, frame: Frame | None) -> pv.FilterInfo | None:
 
 def frame_info(host: ViewHost, frame: Frame, reason: str) -> pv.FrameInfo:
     d = frame.draw
+    drawn = d.layout != pv.DRAWLIST_LAYOUT  # the zoom root is drawn too: the root bar, the centre disc
     return pv.FrameInfo(
         view_id=host.view.id,
         seq=host.seq,
@@ -461,29 +544,25 @@ def frame_info(host: ViewHost, frame: Frame, reason: str) -> pv.FrameInfo:
         layout_ms=round(d.elapsed_s * 1000, 2),
         reason=reason,
         flash=[pv.FlashItem(row=row, delta=delta) for row, delta in frame.flash],
+        visual=d.visual,
+        layout=d.layout,
+        geometry=d.meta,
+        root=pv.FrameRoot(**asdict(frame.root)) if drawn else None,
     )
 
 
 def encode_draw(frame: Frame, view_id: str, seq: int, request_id: int | str | None) -> bytes:
+    """The binary frame: the common columns, the layout's geometry columns, the frame's own columns
+    and the names blob (docs/protocol.md §4)."""
     d = frame.draw
     encoded = [name.encode("utf-8", "replace") for name in d.names]
-    columns = {
-        "key": d.key,
-        "node": d.node,
-        "parent": d.parent,
-        "kind": d.kind,
-        "depth": d.depth,
-        "x": d.x,
-        "y": d.y,
-        "w": d.w,
-        "h": d.h,
-        "cls": d.cls,
-        "label": d.label,
-        "size": d.size,
-        "count": d.count,
+    columns: dict[str, np.ndarray] = {name: getattr(d, name) for name, _ in COMMON_COLUMNS}
+    columns |= d.geometry
+    columns |= {
         "flags": frame.flags,
         "tag": frame.tag,
         "tone": frame.tone,
+        "branch": frame.branch,
         "name_len": np.fromiter((len(b) for b in encoded), dtype=np.uint32, count=len(encoded)),
     }
     if frame.delta is not None and frame.dstat is not None:  # compare views (W6)
@@ -491,7 +570,7 @@ def encode_draw(frame: Frame, view_id: str, seq: int, request_id: int | str | No
         columns["dstat"] = frame.dstat
     return encode_frame(
         stream=pv.view_stream(view_id),
-        layout=pv.DRAWLIST_LAYOUT,
+        layout=d.layout,
         columns=columns,
         seq=seq,
         request_id=request_id,

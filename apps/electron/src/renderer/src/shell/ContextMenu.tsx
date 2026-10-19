@@ -8,7 +8,10 @@ import { basketAdd, basketAddBlock, call, rescanFolder, viewCall } from "@/state
 import { set, toast, useApp } from "@/state/store";
 import { fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
-import { Kind } from "@/treemap/frame";
+import { Kind } from "@/visual/frame";
+import { hitOfKey } from "@/visual/Host";
+import { rowTitle } from "@/visual/rowTitle";
+import { HIT_NONE, HIT_ROOT } from "@/visual/types";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { revealLabel } from "@/shell/Inspector";
 import { tagLabel } from "@/lib/tags";
@@ -44,6 +47,10 @@ export function ContextMenu() {
   const vocab = useApp((s) => s.vocab);
   const settings = useApp((s) => s.settings); // tag display names (W7 标签)
   const lang = useApp((s) => s.lang); // the item labels follow a language switch
+  const scanning = useApp((s) => {
+    const st = s.menu ? s.scans[s.menu.scanId] : undefined;
+    return st?.state === "scanning" || st?.state === "queued";
+  });
   const box = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [forms, setForms] = useState<PathForms | null>(null);
@@ -52,8 +59,10 @@ export function ContextMenu() {
   const [subActive, setSubActive] = useState(0);
 
   const frame = view?.frame ?? null;
-  const row = menu && frame ? frame.rowOf(menu.key) : -1;
-  const kind = row >= 0 && frame ? frame.kind[row]! : -1;
+  // a row, or the zoom root (the flame graphs' root bar and centre disc)
+  const row = menu && frame ? hitOfKey(frame, menu.key) : HIT_NONE;
+  const isRoot = row === HIT_ROOT;
+  const kind = !frame ? -1 : isRoot ? frame.info.root!.kind : row >= 0 ? frame.kind[row]! : -1;
   const group = kind === Kind.SMALL || kind === Kind.MORE;
   const folder = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
   const node = menu?.node ?? null;
@@ -105,13 +114,13 @@ export function ContextMenu() {
   }, [menu]);
 
   const items = useMemo<Item[]>(() => {
-    if (!menu || row < 0 || !frame) return [];
+    if (!menu || row === HIT_NONE || !frame) return [];
     const gone = forms && !forms.on_disk ? t("NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有对应的位置") : undefined;
     const noPath = group ? t("小项聚合块不是一个具体位置") : gone;
     const path = forms?.raw ?? "";
-    const parentRow = frame.parent[row]!;
+    const parentRow = row >= 0 ? frame.parent[row]! : -1;
     const folderNode = folder ? node : parentRow >= 0 ? frame.node[parentRow]! : null;
-    return [
+    const all: Item[] = [
       { id: "open", icon: folder ? "folder" : "file", label: t("打开"), disabled: noPath, run: () => void window.sk.shell.openPath(path) },
       { id: "reveal", icon: "reveal", label: revealLabel(), keys: "Ctrl+E", disabled: noPath, run: () => window.sk.shell.showItemInFolder(path) },
       {
@@ -143,16 +152,21 @@ export function ContextMenu() {
       },
       { id: "system", icon: "more", label: t("系统菜单…"), disabled: t("系统原生右键菜单还没有接入（见 TODO）") },
     ];
+    // the zoom root is what is zoomed into already
+    return isRoot ? all.filter((it) => it.id !== "zoom") : all;
     // lang: the labels are made by t(), so a language switch makes them again
-  }, [menu, row, frame, forms, group, folder, node, lang]);
+  }, [menu, row, isRoot, frame, forms, group, folder, node, lang]);
 
-  if (!menu || row < 0 || !frame) return null;
-  const size = Number(frame.size[row]!);
-  const parentRow = frame.parent[row]!;
-  const title = group ? t("{n} 个小项", { n: fmtInt(frame.count_[row]!) }) : frame.names[row] ?? "";
-  const cls = vocab?.classes[frame.cls[row]!]?.name ?? (folder ? t("文件夹") : t("文件"));
-  const where = parentRow >= 0 ? frame.names[parentRow] ?? "" : "";
-  const tag = TAG_INDEX[frame.tag[row]!] ?? null;
+  if (!menu || row === HIT_NONE || !frame) return null;
+  const root = isRoot ? frame.info.root! : null;
+  const size = root ? root.size : Number(frame.size[row]!);
+  const crumbs = frame.info.breadcrumb;
+  // a row too small for a label carries no name in the frame: its path's last part, once known
+  const title = rowTitle(frame, row, { scanning, formatInt: (n) => fmtInt(n) }).line1 || (forms?.raw.split(/[\\/]/).filter(Boolean).pop() ?? "");
+  const cls = (root ? undefined : vocab?.classes[frame.cls[row]!]?.name) ?? (folder ? t("文件夹") : t("文件"));
+  const parentRow = root ? -1 : frame.parent[row]!;
+  const where = root ? (crumbs[crumbs.length - 2]?.label.split(/[\\/]/).filter(Boolean).pop() ?? "") : parentRow >= 0 ? (frame.names[parentRow] ?? "") : "";
+  const tag = TAG_INDEX[root ? root.tag : frame.tag[row]!] ?? null;
 
   const activate = (it: Item) => {
     if (it.disabled) return toast(it.disabled);

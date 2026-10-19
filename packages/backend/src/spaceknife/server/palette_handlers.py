@@ -86,7 +86,7 @@ def install(server: Server) -> None:
     def sizes_of(handle: ScanHandle) -> np.ndarray:
         shared = server.views.shared(handle.id)
         assert shared is not None
-        return shared.layout.sizes()
+        return shared.basis.sizes()
 
     # ------------------------------------------------------------------ palette.query
 
@@ -110,6 +110,7 @@ def install(server: Server) -> None:
             view=view,
             snapshots=snapshot_count(target),
             basket=c.basket,
+            caps=session.capabilities,
         )
         q = params.text.strip()
         store = handle.store if handle is not None else None

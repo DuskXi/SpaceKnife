@@ -10,6 +10,7 @@ import {
   SUBPROTOCOL,
 } from "./generated";
 import { t } from "@/lib/i18n";
+import { visualCapabilities } from "@/visual/registry";
 
 export class RpcError extends Error {
   constructor(
@@ -118,7 +119,8 @@ export class Rpc {
       token,
       protocol: PROTOCOL_VERSION,
       client: { ...client, kind: "electron" },
-      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream"],
+      // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them first)
+      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", ...visualCapabilities()],
     })) as HelloResult;
     return this.hello;
   }

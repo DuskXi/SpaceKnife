@@ -1,13 +1,17 @@
-// Toolbar (UI-MAIN-10…26): navigation, breadcrumb / path edit, filter, detail, colour, switches,
-// split, command palette, delete basket. Acts on the focused view (G7).
+// Toolbar (UI-MAIN-10…26): navigation, breadcrumb / path edit, filter, visualization, detail,
+// colour, switches, split, command palette, delete basket. Acts on the focused view (G7).
 
 import { useEffect, useRef, useState } from "react";
 
+import type { ViewState } from "@/protocol/generated";
 import { call, setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
+import { pickVisual } from "@/state/commands";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
+import { COLOR_MODES, levelsThatFit, offered, visualIcon } from "@/state/visuals";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
+import { registeredLayouts } from "@/visual/registry";
 
 import { ComparePicker, DirectionSegment, ExitCompare } from "./Compare";
 import { FilterBox } from "./FilterBox";
@@ -74,19 +78,10 @@ export function Toolbar() {
         {cmp && (
           <>
             {st && viewId && (
-              <div className="stepper" role="group" aria-label={t("细节层级")}>
-                <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
-                  <Icon name="minus" size={14} />
-                </button>
-                <div className="stepper-mid">
-                  <Icon name="layers" size={14} />
-                  <span className="muted">{t("层级")}</span>
-                  <span className="num">{st.detail}</span>
-                </div>
-                <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
-                  <Icon name="plus" size={14} />
-                </button>
-              </div>
+              <>
+                <VisualSwitch viewId={viewId} st={st} />
+                <DetailStepper viewId={viewId} st={st} />
+              </>
             )}
             {viewId && <DirectionSegment viewId={viewId} />}
             <ExitCompare tab={tab} />
@@ -94,28 +89,17 @@ export function Toolbar() {
             <IconBtn icon="split" label={t("对比模式下不能分屏")} disabled onClick={() => undefined} />
           </>
         )}
-        {scanTab && st && !cmp && (
+        {scanTab && st && viewId && !cmp && (
           <>
-            <div className="stepper" role="group" aria-label={t("细节层级")}>
-              <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
-                <Icon name="minus" size={14} />
-              </button>
-              <div className="stepper-mid">
-                <Icon name="layers" size={14} />
-                <span className="muted">{t("层级")}</span>
-                <span className="num">{st.detail}</span>
-              </div>
-              <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
-                <Icon name="plus" size={14} />
-              </button>
-            </div>
+            <VisualSwitch viewId={viewId} st={st} />
+            <DetailStepper viewId={viewId} st={st} />
             <div className="segmented" role="radiogroup" aria-label={t("配色")} title={t("配色（C）")}>
               <span className="seg-icon">
                 <Icon name="palette" size={14} />
               </span>
-              {(["class", "flat", "time"] as const).map((m) => (
+              {COLOR_MODES.map((m) => (
                 <button key={m} role="radio" aria-checked={st.color_mode === m} className={st.color_mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { color_mode: m })}>
-                  {{ class: t("类别"), flat: t("扁平"), time: t("时间") }[m]}
+                  {{ class: t("类别"), flat: t("扁平"), time: t("时间"), branch: t("分支") }[m]}
                 </button>
               ))}
             </div>
@@ -148,6 +132,51 @@ export function Toolbar() {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Visualization switch (V / Shift+V): an icon segment for each visualization the backend offers.
+ * One this renderer or this view can't show stays in place, disabled, with the reason as its tooltip.
+ * Switching keeps the zoom, the selection, the filter and the history (they live in the backend's view). */
+function VisualSwitch({ viewId, st }: { viewId: string; st: ViewState }) {
+  const visuals = useApp((s) => s.visuals);
+  const items = offered(visuals, registeredLayouts(), st.compare);
+  if (!items.length) return null; // a backend without visual.list: the treemap only
+  return (
+    <div className="segmented icon-only" role="radiogroup" aria-label={t("可视化")} title={t("可视化（V）")}>
+      {items.map(({ info, enabled, reason }) => {
+        const on = st.visual === info.id;
+        return (
+          <button key={info.id} role="radio" aria-checked={on} aria-label={info.name} className={on ? "on" : ""} disabled={!enabled} title={reason ?? info.name} onClick={() => void pickVisual(viewId, info.id)}>
+            <Icon name={visualIcon(info.icon)} size={14} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Detail level stepper (Ctrl+- / Ctrl+=). The flame graph and the polar flame graph may have room for
+ * fewer levels than asked for: the stepper then says how many are drawn. */
+function DetailStepper({ viewId, st }: { viewId: string; st: ViewState }) {
+  const info = useApp((s) => s.views[viewId]?.info);
+  const fit = levelsThatFit(info, st.detail);
+  const fitText = fit == null ? null : t("画得下 {n} 层", { n: fit });
+  return (
+    <div className="stepper" role="group" aria-label={t("细节层级")}>
+      <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
+        <Icon name="minus" size={14} />
+      </button>
+      <div className="stepper-mid" title={fitText ?? undefined}>
+        <Icon name="layers" size={14} />
+        <span className="muted">{t("层级")}</span>
+        <span className="num">{st.detail}</span>
+        {fitText && <span className="muted">{fitText}</span>}
+      </div>
+      <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
+        <Icon name="plus" size={14} />
+      </button>
     </div>
   );
 }

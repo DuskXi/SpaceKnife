@@ -1,10 +1,13 @@
 // Everything that talks to the backend: connection, scans, views, filter, tags.
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
-import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewUpdate } from "@/protocol/generated";
+import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
-import { type BinaryFrame, Rpc, RpcError } from "@/protocol/rpc";
-import { decodeDraw } from "@/treemap/frame";
+import { Rpc, RpcError } from "@/protocol/rpc";
+// the built-in visualizations register before the first hello announces their layouts
+import "@/visual/builtins";
+import { decodeVisualFrame, isKnownLayout } from "@/visual/frame";
+import { componentFor } from "@/visual/registry";
 
 import {
   activeTab,
@@ -24,12 +27,15 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { FramePairer, frameKey } from "./frames";
 import { getLang, setLang, t } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
-const binaries = new Map<string, BinaryFrame>();
-const waiters = new Map<string, (f: BinaryFrame) => void>();
+
+/** Layouts this renderer decodes and has a component for. */
+const drawable = (layout: string) => isKnownLayout(layout) && componentFor(layout) !== null;
+const frames = new FramePairer(drawable);
 
 export function client(): Rpc {
   if (!rpc || !rpc.open) throw new RpcError(-32006, t("后端未连接"));
@@ -83,6 +89,7 @@ async function connect(): Promise<void> {
   try {
     const hello = await r.connect(backendInfo.url, backendInfo.token, { name: "spaceknife-electron", version: window.sk.version });
     rpc = r;
+    frames.clear();
     set({ conn: "ready", connMessage: "", serverVersion: hello.server.version });
   } catch (err) {
     if (backendGone) return; // keep the 「后端已退出」 message; a new 'ready' starts over
@@ -92,7 +99,7 @@ async function connect(): Promise<void> {
     return;
   }
   connectedOnce = true;
-  r.onBinary(onBinary);
+  r.onBinary((f) => frames.accept(f));
   r.on("view.frame", (ev) => void applyFrame(ev.frame));
   r.on("scan.progress", (ev) => onScanStatus(ev.status));
   r.on("settings.changed", (ev) => applySettings(ev.state));
@@ -111,18 +118,20 @@ async function connect(): Promise<void> {
     setTimeout(() => void reconnect(), 800);
   });
   void r.call("$/subscribe", { topic: "log", params: { backlog: 500, min_level: "INFO" } }).catch(() => {});
-  const [vocab, volumes, snapshots, scans, settings, basket] = await Promise.all([
+  const [vocab, volumes, snapshots, scans, settings, basket, visuals] = await Promise.all([
     r.call("filter.vocab", {}),
     r.call("volume.list", {}),
     r.call("snapshot.list", {}),
     r.call("scan.list", {}),
     r.call("settings.get", {}),
     r.call("basket.list", {}).catch(() => null),
+    r.call("visual.list", {}).catch(() => null), // a server before visuals.v1 has only the treemap
   ]);
   applySettings(settings);
   set({
     basket,
     vocab,
+    visuals: visuals?.visuals ?? [],
     volumes: volumes.volumes,
     snapshots: snapshots.snapshots,
     scans: Object.fromEntries(scans.scans.map((s) => [s.scan_id, s])),
@@ -130,8 +139,10 @@ async function connect(): Promise<void> {
   for (const s of scans.scans) if (s.state === "scanning" || s.state === "queued") void watchScan(s.scan_id);
 }
 
-/** After a reconnect the views of the old session are gone: reopen every scan tab. */
+/** After a reconnect the views of the old session are gone: reopen every scan tab, each view with
+ * the visualization and display settings it had. */
 async function reconnect(): Promise<void> {
+  const before = get().views;
   await connect();
   if (!rpc) return;
   addLocalLog("INFO", t("已重新连接"));
@@ -141,43 +152,41 @@ async function reconnect(): Promise<void> {
   for (const t of tabs) {
     if (!get().scans[t.scanId!]) continue;
     const ids: string[] = [];
-    for (let i = 0; i < Math.max(1, t.viewIds.length); i++) ids.push(await openView(t.scanId!));
+    for (let i = 0; i < Math.max(1, t.viewIds.length); i++) {
+      ids.push(await openLike(t.scanId!, t.viewIds[i] ? before[t.viewIds[i]!]?.state : undefined));
+    }
     set((s) => ({ tabs: s.tabs.map((x) => (x.id === t.id ? { ...x, viewIds: ids } : x)) }));
   }
 }
 
 // ------------------------------------------------------------------ frames
 
-function onBinary(f: BinaryFrame): void {
-  if (f.header.layout !== "drawlist.v1") return;
-  const key = `${f.header.stream}#${f.header.seq}`;
-  const w = waiters.get(key);
-  if (w) {
-    waiters.delete(key);
-    w(f);
-  } else {
-    binaries.set(key, f);
-    if (binaries.size > 32) binaries.delete(binaries.keys().next().value!);
-  }
-}
-
-function binaryFor(info: FrameInfo): Promise<BinaryFrame> {
-  const key = `view:${info.view_id}#${info.seq}`;
-  const got = binaries.get(key);
-  if (got) {
-    binaries.delete(key);
-    return Promise.resolve(got);
-  }
-  return new Promise((resolve) => waiters.set(key, resolve));
-}
+/** Views already told that their visualization cannot be drawn here. */
+const fellBack = new Set<string>();
 
 async function applyFrame(info: FrameInfo): Promise<void> {
   const cur = get().views[info.view_id];
   if (!cur || (cur.info && info.seq <= cur.info.seq)) return;
-  const bin = await binaryFor(info);
+  // a server before visuals.v1 sends no layout: its frames are all drawlist.v1
+  if (info.layout === undefined) info = { ...info, layout: "drawlist.v1", visual: "treemap" };
+  // a layout this renderer cannot draw: no waiting for its binary frame, the picture on screen
+  // stays, and the view goes back to the treemap
+  if (!drawable(info.layout)) return fallBack(info);
+  const bin = await frames.waitFor(frameKey(`view:${info.view_id}`, info.seq));
   const now = get().views[info.view_id];
-  if (!now || (now.info && info.seq <= now.info.seq)) return;
-  patchView(info.view_id, { info, frame: decodeDraw(bin, info), previous: now.frame, filter: info.filter ?? now.filter });
+  if (!bin || !now || (now.info && info.seq <= now.info.seq)) return;
+  const frame = decodeVisualFrame(bin, info);
+  if (!frame) return fallBack(info);
+  patchView(info.view_id, { info, frame, filter: info.filter ?? now.filter });
+}
+
+function fallBack(info: FrameInfo): void {
+  if (info.visual === "treemap") return; // nothing to go back to
+  if (!fellBack.has(info.view_id)) {
+    fellBack.add(info.view_id);
+    toast(t("这个界面画不了这种可视化，已换回树图"));
+  }
+  void setViewSettings(info.view_id, { visual: "treemap" });
 }
 
 async function applyUpdate(viewId: string, upd: ViewUpdate): Promise<void> {
@@ -196,13 +205,14 @@ export function defaultViewport(): { width: number; height: number; dpr: number 
   };
 }
 
-export async function openView(scanId: string): Promise<string> {
-  const upd = await call("view.open", { scan_id: scanId, viewport: defaultViewport() });
+/** A new view of a scan (or of a comparison); `settings` start it like another view (split, reconnect). */
+export async function openView(scanId: string, settings?: ViewSettingsParams): Promise<string> {
+  const upd = await call("view.open", { scan_id: scanId, viewport: defaultViewport(), ...(settings ? { settings } : {}) });
   const viewId = upd.state.view_id;
   set((s) => ({
     views: {
       ...s.views,
-      [viewId]: { state: upd.state, info: null, frame: null, filter: null, parse: null, filterText: "", previous: null, hoverKey: null },
+      [viewId]: { state: upd.state, info: null, frame: null, filter: null, parse: null, filterText: "", hoverKey: null },
     },
   }));
   if (upd.frame) await applyFrame(upd.frame);
@@ -239,6 +249,28 @@ export async function viewCall<M extends ViewMethod>(
 
 export const setViewSettings = (viewId: string | null, settings: ViewSettingsParams) =>
   viewCall(viewId, "view.set", { settings });
+
+/** What a view passes on to one opened like it: its visualization and what it shows. */
+export function carried(st: ViewState): ViewSettingsParams {
+  return {
+    visual: st.visual,
+    colors: st.colors,
+    color_mode: st.color_mode,
+    detail: st.detail,
+    show_free: st.show_free,
+    show_unknown: st.show_unknown,
+  };
+}
+
+/** A new view started like another one (split, reconnect); a plain one when the server refuses that. */
+async function openLike(scanId: string, like: ViewState | undefined): Promise<string> {
+  if (!like) return openView(scanId);
+  try {
+    return await openView(scanId, carried(like));
+  } catch {
+    return openView(scanId);
+  }
+}
 
 // ------------------------------------------------------------------ delete basket (W5)
 
@@ -561,6 +593,10 @@ export function applySettings(state: SettingsState): void {
     void call("filter.vocab", {})
       .then((vocab) => set({ vocab }))
       .catch(() => undefined);
+    // the visualizations' names are in the session's language
+    void call("visual.list", {})
+      .then((r) => set({ visuals: r.visuals }))
+      .catch(() => undefined);
   }
 }
 
@@ -630,7 +666,8 @@ export async function toggleSplit(): Promise<void> {
     closePane(tab.id, tab.viewIds[tab.focusedPane === 0 ? 1 : 0]!);
     return;
   }
-  const viewId = await openView(tab.scanId);
+  // the new pane starts like the focused one
+  const viewId = await openLike(tab.scanId, get().views[tab.viewIds[tab.focusedPane] ?? tab.viewIds[0]!]?.state);
   set((s) => ({ tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, viewIds: [...t.viewIds, viewId], focusedPane: 1 } : t)) }));
 }
 

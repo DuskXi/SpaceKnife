@@ -111,6 +111,7 @@ from .view import (
     ViewTagParams,
     ViewUpdate,
     ViewZoomParams,
+    VisualListResult,
 )
 
 
@@ -297,6 +298,12 @@ VIEW_RESULTS = MethodSpec(
     ViewResults,
     "A page of the filter result list, grouped by visible block.",
 )
+VISUAL_LIST = MethodSpec(
+    "visual.list",
+    Empty,
+    VisualListResult,
+    "Visualizations this server offers and whether this session can show each.",
+)
 
 CANCEL = NotificationSpec("$/cancel", CancelParams, "Cancel an in-flight request (answered with -32800).")
 
@@ -450,6 +457,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         VIEW_TAG,
         VIEW_REVEAL,
         VIEW_RESULTS,
+        VISUAL_LIST,
         SETTINGS_GET,
         SETTINGS_UPDATE,
         SETTINGS_RESET,

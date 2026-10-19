@@ -88,6 +88,7 @@
     <x:Double x:Key="SkLayoutWindowButton">46</x:Double>
     <x:Double x:Key="SkMotionDurationFastMs">120</x:Double>
     <x:Double x:Key="SkMotionDurationFlashMs">900</x:Double>
+    <x:Double x:Key="SkMotionDurationSwapMs">200</x:Double>
     <x:Double x:Key="SkMotionDurationZoomMs">220</x:Double>
     <x:String x:Key="SkMotionEasingOut">0,0,0.2,1</x:String>
     <x:String x:Key="SkMotionEasingStandard">0.2,0,0,1</x:String>
@@ -260,4 +261,96 @@
     <SolidColorBrush x:Key="SkTreemapUnknownSubBrush" Color="#FF7E8493"/>
     <Color x:Key="SkTreemapUnknownText">#FFA3A9B6</Color>
     <SolidColorBrush x:Key="SkTreemapUnknownTextBrush" Color="#FFA3A9B6"/>
+    <Color x:Key="SkVisualBranch11">#FF9EDBF9</Color>
+    <SolidColorBrush x:Key="SkVisualBranch11Brush" Color="#FF9EDBF9"/>
+    <Color x:Key="SkVisualBranch12">#FF0BB4EC</Color>
+    <SolidColorBrush x:Key="SkVisualBranch12Brush" Color="#FF0BB4EC"/>
+    <Color x:Key="SkVisualBranch13">#FF067398</Color>
+    <SolidColorBrush x:Key="SkVisualBranch13Brush" Color="#FF067398"/>
+    <Color x:Key="SkVisualBranch14">#FF024F6A</Color>
+    <SolidColorBrush x:Key="SkVisualBranch14Brush" Color="#FF024F6A"/>
+    <Color x:Key="SkVisualBranch21">#FFF8C5A2</Color>
+    <SolidColorBrush x:Key="SkVisualBranch21Brush" Color="#FFF8C5A2"/>
+    <Color x:Key="SkVisualBranch22">#FFEB883B</Color>
+    <SolidColorBrush x:Key="SkVisualBranch22Brush" Color="#FFEB883B"/>
+    <Color x:Key="SkVisualBranch23">#FF9C5313</Color>
+    <SolidColorBrush x:Key="SkVisualBranch23Brush" Color="#FF9C5313"/>
+    <Color x:Key="SkVisualBranch24">#FF6A3913</Color>
+    <SolidColorBrush x:Key="SkVisualBranch24Brush" Color="#FF6A3913"/>
+    <Color x:Key="SkVisualBranch31">#FFA6E1C0</Color>
+    <SolidColorBrush x:Key="SkVisualBranch31Brush" Color="#FFA6E1C0"/>
+    <Color x:Key="SkVisualBranch32">#FF2FC183</Color>
+    <SolidColorBrush x:Key="SkVisualBranch32Brush" Color="#FF2FC183"/>
+    <Color x:Key="SkVisualBranch33">#FF067D51</Color>
+    <SolidColorBrush x:Key="SkVisualBranch33Brush" Color="#FF067D51"/>
+    <Color x:Key="SkVisualBranch34">#FF0C5537</Color>
+    <SolidColorBrush x:Key="SkVisualBranch34Brush" Color="#FF0C5537"/>
+    <Color x:Key="SkVisualBranch41">#FFF6BEDC</Color>
+    <SolidColorBrush x:Key="SkVisualBranch41Brush" Color="#FFF6BEDC"/>
+    <Color x:Key="SkVisualBranch42">#FFE57BBA</Color>
+    <SolidColorBrush x:Key="SkVisualBranch42Brush" Color="#FFE57BBA"/>
+    <Color x:Key="SkVisualBranch43">#FF984979</Color>
+    <SolidColorBrush x:Key="SkVisualBranch43Brush" Color="#FF984979"/>
+    <Color x:Key="SkVisualBranch44">#FF673352</Color>
+    <SolidColorBrush x:Key="SkVisualBranch44Brush" Color="#FF673352"/>
+    <Color x:Key="SkVisualBranch51">#FF95E1E0</Color>
+    <SolidColorBrush x:Key="SkVisualBranch51Brush" Color="#FF95E1E0"/>
+    <Color x:Key="SkVisualBranch52">#FF08BCBC</Color>
+    <SolidColorBrush x:Key="SkVisualBranch52Brush" Color="#FF08BCBC"/>
+    <Color x:Key="SkVisualBranch53">#FF047879</Color>
+    <SolidColorBrush x:Key="SkVisualBranch53Brush" Color="#FF047879"/>
+    <Color x:Key="SkVisualBranch54">#FF045353</Color>
+    <SolidColorBrush x:Key="SkVisualBranch54Brush" Color="#FF045353"/>
+    <Color x:Key="SkVisualBranch61">#FFFFBFB8</Color>
+    <SolidColorBrush x:Key="SkVisualBranch61Brush" Color="#FFFFBFB8"/>
+    <Color x:Key="SkVisualBranch62">#FFF47B74</Color>
+    <SolidColorBrush x:Key="SkVisualBranch62Brush" Color="#FFF47B74"/>
+    <Color x:Key="SkVisualBranch63">#FFA34945</Color>
+    <SolidColorBrush x:Key="SkVisualBranch63Brush" Color="#FFA34945"/>
+    <Color x:Key="SkVisualBranch64">#FF6E3330</Color>
+    <SolidColorBrush x:Key="SkVisualBranch64Brush" Color="#FF6E3330"/>
+    <Color x:Key="SkVisualBranch71">#FFC6DAA4</Color>
+    <SolidColorBrush x:Key="SkVisualBranch71Brush" Color="#FFC6DAA4"/>
+    <Color x:Key="SkVisualBranch72">#FF8FB43F</Color>
+    <SolidColorBrush x:Key="SkVisualBranch72Brush" Color="#FF8FB43F"/>
+    <Color x:Key="SkVisualBranch73">#FF597417</Color>
+    <SolidColorBrush x:Key="SkVisualBranch73Brush" Color="#FF597417"/>
+    <Color x:Key="SkVisualBranch74">#FF3D4F15</Color>
+    <SolidColorBrush x:Key="SkVisualBranch74Brush" Color="#FF3D4F15"/>
+    <Color x:Key="SkVisualBranch81">#FFE0C4F6</Color>
+    <SolidColorBrush x:Key="SkVisualBranch81Brush" Color="#FFE0C4F6"/>
+    <Color x:Key="SkVisualBranch82">#FFC188EA</Color>
+    <SolidColorBrush x:Key="SkVisualBranch82Brush" Color="#FFC188EA"/>
+    <Color x:Key="SkVisualBranch83">#FF7E539C</Color>
+    <SolidColorBrush x:Key="SkVisualBranch83Brush" Color="#FF7E539C"/>
+    <Color x:Key="SkVisualBranch84">#FF56396A</Color>
+    <SolidColorBrush x:Key="SkVisualBranch84Brush" Color="#FF56396A"/>
+    <Color x:Key="SkVisualBranchNeutral">#FF494D54</Color>
+    <SolidColorBrush x:Key="SkVisualBranchNeutralBrush" Color="#FF494D54"/>
+    <Color x:Key="SkVisualCenterBg">#FF13151B</Color>
+    <SolidColorBrush x:Key="SkVisualCenterBgBrush" Color="#FF13151B"/>
+    <Color x:Key="SkVisualCenterSub">#FF9AA0AE</Color>
+    <SolidColorBrush x:Key="SkVisualCenterSubBrush" Color="#FF9AA0AE"/>
+    <Color x:Key="SkVisualCenterText">#FFF1F2F5</Color>
+    <SolidColorBrush x:Key="SkVisualCenterTextBrush" Color="#FFF1F2F5"/>
+    <x:Double x:Key="SkVisualFlameGap">2</x:Double>
+    <x:Double x:Key="SkVisualFlameRowMax">48</x:Double>
+    <x:Double x:Key="SkVisualFlameRowMin">20</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarGap">2</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarHoleMaxRatio">0.4</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarHoleMin">36</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarHoleRatio">0.24</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarMargin">8</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarRingMin">14</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarSegments">32</x:Double>
+    <Color x:Key="SkVisualHaloOverlay">#1AFFFFFF</Color>
+    <SolidColorBrush x:Key="SkVisualHaloOverlayBrush" Color="#1AFFFFFF"/>
+    <Color x:Key="SkVisualRing1">#FF5B6375</Color>
+    <SolidColorBrush x:Key="SkVisualRing1Brush" Color="#FF5B6375"/>
+    <Color x:Key="SkVisualRing2">#FF4D5566</Color>
+    <SolidColorBrush x:Key="SkVisualRing2Brush" Color="#FF4D5566"/>
+    <Color x:Key="SkVisualRing3">#FF424A5B</Color>
+    <SolidColorBrush x:Key="SkVisualRing3Brush" Color="#FF424A5B"/>
+    <Color x:Key="SkVisualRing4">#FF394151</Color>
+    <SolidColorBrush x:Key="SkVisualRing4Brush" Color="#FF394151"/>
 </ResourceDictionary>
