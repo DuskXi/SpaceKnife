@@ -145,3 +145,24 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # The one check branch protection requires: skipped jobs report under their unexpanded matrix
+  # name, so requiring each job would leave a pull request waiting forever.
+  result:
+    name: CI passed
+    needs: [changes, python, electron]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job that ran succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success | skipped) ;;
+              *) echo "::error::a job ended with $r"; exit 1 ;;
+            esac
+          done
