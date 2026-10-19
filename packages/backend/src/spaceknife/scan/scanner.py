@@ -111,9 +111,9 @@ NATIVE_BUDGET_S = 0.05  # seconds a native call lists before it returns what it 
 def native_threads() -> int:
     """Listing threads for the native walker: one per CPU, at most 16 (beyond that NTFS's locks only
     add contention). On macOS twice the CPUs: APFS listings wait in the kernel often enough that the
-    extra threads keep the CPUs busy (GitHub's macOS runners, 3 and 4 CPUs: fastest at 8 threads,
-    +27 % and +5 %; more starve the main thread that folds the results). SPACEKNIFE_SCAN_THREADS
-    sets it (1–64) for measurements."""
+    extra threads keep the CPUs busy (GitHub's macOS runners: 3-CPU arm64 +8 %, +27 % on 3 M items;
+    4-CPU Intel even; many more starve the main thread that folds the results; docs/packaging.md).
+    SPACEKNIFE_SCAN_THREADS sets it (1–64) for measurements."""
     forced = os.environ.get("SPACEKNIFE_SCAN_THREADS", "")
     if forced.isdigit() and int(forced) > 0:
         return min(64, int(forced))
