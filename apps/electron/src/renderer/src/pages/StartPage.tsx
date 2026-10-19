@@ -91,6 +91,7 @@ export function StartPage({ tab }: { tab: Tab }) {
   const conn = useApp((s) => s.conn);
   const form = useApp((s) => startFormOf(s, tab.id));
   const [refreshing, setRefreshing] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [dragging, setDragging] = useState(false);
   const pathInput = useRef<HTMLInputElement>(null);
   const patch = (p: Parameters<typeof patchStartForm>[1]) => patchStartForm(tab.id, p);
@@ -143,9 +144,12 @@ export function StartPage({ tab }: { tab: Tab }) {
   const needsAdmin = viaMft && !elevated;
 
   const start = () => {
-    if (!ready) return;
+    if (!ready || starting) return;
     const capable = mftCapable(selected);
-    void startScan({ roots, method: capable ? form.method : "hard", load_level: form.load, ads: capable && form.ads }, tab.id);
+    setStarting(true);
+    void startScan({ roots, method: capable ? form.method : "hard", load_level: form.load, ads: capable && form.ads }, tab.id).finally(() =>
+      setStarting(false),
+    );
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -295,9 +299,9 @@ export function StartPage({ tab }: { tab: Tab }) {
                 </div>
               )}
             </div>
-            <button className="primary big" disabled={!ready} onClick={start}>
+            <button className="primary big" disabled={!ready || starting} aria-busy={starting} onClick={start}>
               <Icon name="play" />
-              {t("开始扫描")}
+              {starting ? t("正在开始…") : t("开始扫描")}
               <Kbd>Enter</Kbd>
             </button>
           </div>

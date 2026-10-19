@@ -424,7 +424,23 @@ async function protectedPlaces(): Promise<boolean | null | undefined> {
   return choice === "cancel" ? null : choice === "skip";
 }
 
+/** Start tabs whose scan is being started: a second Enter or click while the first one opens its
+ * view (which can take a while on a busy backend) must not start the same scan again. */
+const startingTabs = new Set<string>();
+
 export async function startScan(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
+  if (replaceTab) {
+    if (startingTabs.has(replaceTab)) return null;
+    startingTabs.add(replaceTab);
+  }
+  try {
+    return await startScanNow(params, replaceTab);
+  } finally {
+    if (replaceTab) startingTabs.delete(replaceTab);
+  }
+}
+
+async function startScanNow(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
   if (params.skip_protected == null) {
     const skip = await protectedPlaces();
     if (skip === null) return null;

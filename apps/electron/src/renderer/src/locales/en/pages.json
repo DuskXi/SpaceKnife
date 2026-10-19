@@ -198,5 +198,6 @@
  "需要管理员权限：仅启动只读扫描助手，主程序不提权": "Needs administrator rights: only the read-only scan helper is elevated, never the app itself.",
  "高级": "Advanced",
  "（MFT 快速扫描）": " (MFT quick scan)",
- "（并行硬扫描）": " (parallel full scan)"
+ "（并行硬扫描）": " (parallel full scan)",
+ "正在开始…": "Starting…"
 }

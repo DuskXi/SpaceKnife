@@ -54,6 +54,8 @@ interface HostState {
   /** what cur was painted with (repainted after a lost context) */
   settings: PaintSettings | null;
   hovered: Hit;
+  /** where the pointer is over the picture (client px), null once it left */
+  pointer: { x: number; y: number } | null;
   lastZoomKey: number | null;
   flash: Flash | null;
   trail: TrailMark[];
@@ -103,6 +105,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     anim: null,
     settings: null,
     hovered: HIT_NONE,
+    pointer: null,
     lastZoomKey: null,
     flash: null,
     trail: [],
@@ -135,6 +138,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
 
   const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced });
   live.current = { pace: { fpsGap, dynaSmooth }, reduced };
+  const rehoverRef = useRef<() => void>(() => {});
 
   // ---------------------------------------------------------------- draw loops
 
@@ -176,6 +180,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
         st.anim = null;
         st.old.instance.dispose();
         st.old = null;
+        queueMicrotask(() => rehoverRef.current()); // the block under the pointer, in the new picture
         return drawMain(now);
       }
       const dprNow = cur.frame.info.dpr;
@@ -330,7 +335,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     loops.main.run();
     st.breath = breathingRows(g, frame, frame.info.dpr);
     loops.breath.run();
-    onHover?.(null);
+    rehoverRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced]);
 
@@ -414,19 +419,20 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
 
   // ---------------------------------------------------------------- pointer
 
-  const toCanvas = (ev: React.MouseEvent) => {
+  const toCanvasAt = (clientX: number, clientY: number) => {
     const cur = r.current.cur;
     const canvas = glCanvas.current;
     if (!cur || !canvas) return null;
     const rect = canvas.getBoundingClientRect();
     const f = cur.frame;
-    const px = (ev.clientX - rect.left) * (f.info.width / rect.width);
-    const py = (ev.clientY - rect.top) * (f.info.height / rect.height);
+    const px = (clientX - rect.left) * (f.info.width / rect.width);
+    const py = (clientY - rect.top) * (f.info.height / rect.height);
     return { cur, f, rect, hit: cur.component.geometry.hitTest(f, px, py) };
   };
+  const toCanvas = (ev: React.MouseEvent) => toCanvasAt(ev.clientX, ev.clientY);
 
-  const hoverInfo = (p: NonNullable<ReturnType<typeof toCanvas>>, ev: React.MouseEvent): HoverInfo => {
-    const pointer = { x: ev.clientX - p.rect.left, y: ev.clientY - p.rect.top };
+  const hoverInfo = (p: NonNullable<ReturnType<typeof toCanvas>>, clientX: number, clientY: number): HoverInfo => {
+    const pointer = { x: clientX - p.rect.left, y: clientY - p.rect.top };
     const b = p.cur.component.geometry.bounds(p.f, p.hit);
     return {
       viewId,
@@ -438,14 +444,35 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     };
   };
 
+  // a new picture under a pointer that has not moved: the block under it again, so its card stays
+  // up (with this frame's numbers) instead of vanishing until the next mouse move; none while a
+  // transition runs (the end of it calls this again)
+  const rehover = () => {
+    const st = r.current;
+    const at = st.pointer;
+    const p = at && !st.anim ? toCanvasAt(at.x, at.y) : null;
+    if (!p || !at) {
+      onHover?.(null);
+      return;
+    }
+    if (p.hit !== st.hovered) {
+      st.hovered = p.hit;
+      p.cur.instance.setHover(p.hit);
+      loops.main.run();
+    }
+    onHover?.(p.hit === HIT_NONE ? null : hoverInfo(p, at.x, at.y));
+  };
+  rehoverRef.current = rehover;
+
   const onMove = (ev: React.MouseEvent) => {
     const st = r.current;
+    st.pointer = { x: ev.clientX, y: ev.clientY };
     if (st.anim) return;
     const p = toCanvas(ev);
     if (!p) return;
     if (p.hit === st.hovered) {
       // a card that follows the pointer moves with it inside the row
-      if (p.hit !== HIT_NONE && p.cur.component.hoverPlacement === "pointer") onHover?.(hoverInfo(p, ev));
+      if (p.hit !== HIT_NONE && p.cur.component.hoverPlacement === "pointer") onHover?.(hoverInfo(p, ev.clientX, ev.clientY));
       return;
     }
     if (trailOn && !live.current.reduced && st.hovered !== HIT_NONE) {
@@ -455,11 +482,12 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     st.hovered = p.hit;
     p.cur.instance.setHover(p.hit);
     loops.main.run();
-    onHover?.(p.hit === HIT_NONE ? null : hoverInfo(p, ev));
+    onHover?.(p.hit === HIT_NONE ? null : hoverInfo(p, ev.clientX, ev.clientY));
   };
 
   const onLeave = () => {
     const st = r.current;
+    st.pointer = null;
     if (st.hovered !== HIT_NONE) {
       st.hovered = HIT_NONE;
       st.cur?.instance.setHover(HIT_NONE);
