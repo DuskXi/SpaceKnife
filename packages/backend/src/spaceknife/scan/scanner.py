@@ -444,13 +444,21 @@ class Scanner:
         ).tolist()
         if res.paths:
             self._current = res.paths[-1]
+        skipped = sum(1 for s in starts if s < 0)
+        if skipped:
+            logger.debug("scan: {} listing(s) of folders deleted while they were read, skipped", skipped)
 
-        def resolve(ref: tuple[int, int, int] | np.ndarray) -> int:
+        def resolve(ref: tuple[int, int, int] | np.ndarray) -> int | None:
+            """The node a result refers to; None when it left the tree while it was read."""
             kind, a, b = (int(x) for x in ref)
-            return a if kind == 0 else starts[a] + b
+            if kind == 0:
+                return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
+            return None if starts[a] < 0 else starts[a] + b
 
         for ref, path, msg in res.errors:
             node = resolve(ref)
+            if node is None:
+                continue
             store.mark(node, Flag.ACCESS_DENIED)
             store.clear(node, Flag.PENDING)
             self._errors += 1
@@ -458,7 +466,9 @@ class Scanner:
                 self._denied.append(path)
                 self.denied_reasons.append(msg)
         for ref, path, root_idx in res.frontier:
-            self._queue.append(((0, resolve(ref), 0), path, root_idx))
+            node = resolve(ref)
+            if node is not None:
+                self._queue.append(((0, node, 0), path, root_idx))
 
     # ------------------------------------------------------------------ reporting
 

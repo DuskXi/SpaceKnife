@@ -339,6 +339,23 @@ class NodeStore:
         self._propagate(dir_id, size, alloc, files, dirs)
         return start
 
+    def _gone_listings(self, refs: np.ndarray) -> np.ndarray:
+        """Per listing of a slice: does it list a folder that left the tree (``GONE``), or lie
+        inside one? (References out of range are left to ingest_slice's checks.)"""
+        inner = refs[:, 0] != 0
+        gone = np.zeros(len(refs), dtype=bool)
+        old = refs[~inner, 1]
+        known = (old >= 0) & (old < self._n)
+        hit = np.zeros(len(old), dtype=bool)
+        hit[known] = (self.cols["flags"][old[known]] & np.uint32(Flag.GONE)) != 0
+        gone[~inner] = hit
+        if bool(gone.any()):
+            for k in np.flatnonzero(inner).tolist():  # inner listings name earlier ones only
+                j = int(refs[k, 1])
+                if 0 <= j < k and gone[j]:
+                    gone[k] = True
+        return gone
+
     def ingest_slice(
         self,
         refs: np.ndarray,
@@ -359,6 +376,10 @@ class NodeStore:
         A few dozen numpy calls per slice instead of per listing: depths by pointer jumping over
         the listings, totals by segment sums, folded inside the slice deepest first and then up
         the existing ancestors once per listed node of the store.
+
+        A folder can leave the tree while a worker reads it: a monitor relists a folder above it
+        and marks what was removed ``GONE``. Its listing, and every listing inside it, is skipped;
+        their start is -1.
         """
         c = self.cols
         refs = np.asarray(refs, dtype=np.int64).reshape(-1, 3)
@@ -368,6 +389,13 @@ class NodeStore:
         starts: np.ndarray = n0 + bounds[:-1]
         if listings == 0:
             return starts
+        gone = self._gone_listings(refs)
+        if bool(gone.any()):
+            kept = ~gone
+            out = np.full(listings, -1, dtype=np.int64)
+            rest = _keep_listings(kept, refs, bounds, name_blob, name_lens, entries, ext_ids)
+            out[kept] = self.ingest_slice(*rest)
+            return out
         counts = np.diff(bounds)
         total = int(bounds[-1])
         inner = refs[:, 0] != 0
@@ -743,6 +771,34 @@ class NodeStore:
         store.ext_table = list(ext_table) or [""]
         store._ext_index = {e: i for i, e in enumerate(store.ext_table)}
         return store
+
+
+def _keep_listings(
+    keep: np.ndarray,
+    refs: np.ndarray,
+    bounds: np.ndarray,
+    name_blob: bytes,
+    name_lens: np.ndarray,
+    entries: dict[str, np.ndarray],
+    ext_ids: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, bytes, np.ndarray, dict[str, np.ndarray], np.ndarray | None]:
+    """A slice without the listings ``keep`` leaves out (with their entries and names); the
+    references between the listings that stay are renumbered."""
+    counts = np.diff(bounds)
+    rows = np.repeat(keep, counts)
+    lengths = np.asarray(name_lens, dtype=np.int64)
+    renumber = np.cumsum(keep) - 1
+    refs = refs[keep].copy()
+    inner = refs[:, 0] != 0
+    refs[inner, 1] = renumber[refs[inner, 1]]
+    return (
+        refs,
+        np.concatenate(([0], np.cumsum(counts[keep]))).astype(np.int64),
+        np.frombuffer(name_blob, dtype=np.uint8)[np.repeat(rows, lengths)].tobytes(),
+        lengths[rows],
+        {key: np.asarray(col)[rows] for key, col in entries.items()},
+        None if ext_ids is None else np.asarray(ext_ids)[rows],
+    )
 
 
 def _adoptable(col: np.ndarray | None, dtype: np.dtype[np.generic], length: int) -> bool:

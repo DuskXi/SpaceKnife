@@ -636,16 +636,20 @@ class ScanMonitor:
                 ext,
             ).tolist()
 
-            def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int:
+            def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int | None:
+                """None: the folder left the tree while it was read (store.ingest_slice)."""
                 kind, a, b = ref
-                return a if kind == 0 else starts[a] + b
+                if kind == 0:
+                    return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
+                return None if starts[a] < 0 else starts[a] + b
 
             for ref, _path, _msg in res.errors:
-                node = resolve(ref)
-                store.mark(node, Flag.ACCESS_DENIED)
-                store.clear(node, Flag.PENDING)
+                if (target := resolve(ref)) is not None:
+                    store.mark(target, Flag.ACCESS_DENIED)
+                    store.clear(target, Flag.PENDING)
             for ref, path, idx in res.frontier:
-                queue.append(((0, resolve(ref), 0), path, idx))
+                if (target := resolve(ref)) is not None:
+                    queue.append(((0, target, 0), path, idx))
 
     async def _slice(self, tasks: list[worker.Task], opts: SliceOptions) -> SliceResult:
         slicer = self.owner.scans.slicer()
