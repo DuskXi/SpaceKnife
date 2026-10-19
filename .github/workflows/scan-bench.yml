@@ -29,7 +29,7 @@ jobs:
       matrix:
         os: [macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 75
+    timeout-minutes: 100
     steps:
       - uses: actions/checkout@v7
       - name: Set up uv
@@ -41,7 +41,7 @@ jobs:
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
           sw_vers -productVersion
           diskutil info / | grep -E 'Device Node|Protocol|Solid State|Virtual|Personality' || true
-      - name: Scan /System /Library /usr
+      - name: Scan /System/Library /usr
         env:
           SPACEKNIFE_HOME: ${{ runner.temp }}/spaceknife-home
-        run: bash .github/scripts/scan-bench.sh /System /Library /usr
+        run: bash .github/scripts/scan-bench.sh /System/Library /usr

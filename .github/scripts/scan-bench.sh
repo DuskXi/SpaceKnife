@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Scan speed on a CI machine's own disk (never a user's): `spaceknife scan --profile` over the same
-# folders with different settings, each once with the disk cache purged (macOS: sudo purge) and once
-# warm. Prints every run's numbers and a summary table at the end.
-#   .github/scripts/scan-bench.sh ROOT...
+# folders with different settings. The settings take turns, round after round, so drift on a shared
+# runner spreads over all of them; one cold run (macOS: sudo purge) comes first for reference.
+# Prints every run's numbers and, per setting, the mean and range.
+#   .github/scripts/scan-bench.sh ROOT...        (BENCH_ROUNDS: rounds, default 2)
 set -o pipefail
 
 roots=("$@")
 py=.venv/bin/python
 export SPACEKNIFE_LANGUAGE=en COLUMNS=220
-rows=()
+data=$(mktemp)
 
 num() { grep -oE "$1" <<<"$2" | head -1 | grep -oE '[0-9][0-9,.]*' | head -1 | tr -d ,; }
 
@@ -31,13 +32,8 @@ one() { # label, cache (cold|warm), then VAR=value settings and extra arguments
   echo "::group::$label ($cache)"
   grep -E 'Status|Items|walker|busy|folding|batches|Held|Bulk' <<<"$out" | sed 's/[│┃]//g; s/  */ /g'
   echo "::endgroup::"
-  rows+=("$(printf '%-24s %-5s %9s items/s  busy %4s%%  folding %4s%%  held %4s%%' "$label" "$cache" \
-    "$(num 'Speed [0-9,]+ items/s' "$out")" "$(num 'busy [0-9]+%' "$out")" \
-    "$(num 'results [0-9]+%' "$out")" "$(num 'limit [0-9]+%' "$out")")")
-}
-
-both() {
-  one "$@" && one "$1" warm "${@:3}"
+  printf '%s|%s|%s|%s|%s|%s\n' "$label" "$cache" "$(num 'Speed [0-9,]+ items/s' "$out")" \
+    "$(num 'busy [0-9]+%' "$out")" "$(num 'results [0-9]+%' "$out")" "$(num 'limit [0-9]+%' "$out")" >>"$data"
 }
 
 "$py" - <<'EOF'
@@ -54,15 +50,40 @@ if vol is not None:
     print(f"/ : {vol.fs_type} on {vol.device}, media {media_of(vol.mount_point, vol.device, vol.is_remote)}")
 EOF
 
-one "warm-up" cold # first touch of everything: neither cold nor warm, left out of the comparison
-both "default" cold
-for t in 4 8 16 32 64; do
-  both "threads $t" cold SPACEKNIFE_SCAN_THREADS=$t
+one "default" cold # also the first touch of everything
+
+# what the system's own single-threaded walkers take over the same folders (warm)
+"$py" - "${roots[@]}" <<'EOF2'
+import subprocess
+import sys
+import time
+
+roots = sys.argv[1:]
+for cmd in (["find", *roots, "-xdev"], ["du", "-skx", *roots]):
+    t = time.perf_counter()
+    out = subprocess.run(cmd, capture_output=True, check=False)
+    dt = time.perf_counter() - t
+    paths = out.stdout.count(b"\n")
+    rate = f", {paths:,} paths, {paths / dt:,.0f}/s" if cmd[0] == "find" else ""
+    print(f"{cmd[0]}: {dt:.1f} s{rate}")
+EOF2
+
+cpus=$(getconf _NPROCESSORS_ONLN)
+for _ in $(seq "${BENCH_ROUNDS:-2}"); do
+  one "default" warm
+  one "threads = CPUs (before)" warm SPACEKNIFE_SCAN_THREADS="$cpus"
+  one "folders via fstatat" warm SPACEKNIFE_NO_BULK=dirs
+  one "threads 16" warm SPACEKNIFE_SCAN_THREADS=16
+  one "limit balanced" warm --disk-limit balanced
 done
-both "folders via fstatat" cold SPACEKNIFE_NO_BULK=dirs
-both "no getattrlistbulk" cold SPACEKNIFE_NO_BULK=1
-both "limit balanced" cold --disk-limit balanced
 
 echo
-echo "Summary (${roots[*]}):"
-printf '%s\n' "${rows[@]}"
+echo "Summary (${roots[*]}; items/s mean [min–max], listing threads busy, main thread folding, held by the limit):"
+awk -F'|' '
+  { k = $1 " (" $2 ")"; if (!(k in n)) order[++m] = k
+    n[k]++; s[k] += $3; b[k] += $4; f[k] += $5; h[k] += $6
+    if (!(k in lo) || $3 < lo[k]) lo[k] = $3
+    if (!(k in hi) || $3 > hi[k]) hi[k] = $3 }
+  END { for (i = 1; i <= m; i++) { k = order[i]
+    printf "%-30s %8.0f [%s–%s]  busy %3.0f%%  folding %3.0f%%  held %3.0f%%  (%d runs)\n",
+      k, s[k] / n[k], lo[k], hi[k], b[k] / n[k], f[k] / n[k], h[k] / n[k], n[k] } }' "$data"
