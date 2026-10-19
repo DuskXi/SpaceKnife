@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from spaceknife.scan.scanner import ScanError, Scanner, ScanState, make_pool
+from spaceknife.scan.scanner import ScanError, Scanner, ScanState, make_pool, native_threads
 from spaceknife.scan.volume import volume_for
 from spaceknife.store.nodes import Flag, Kind
 
@@ -199,3 +199,38 @@ def test_progress_by_items_else_bytes_and_unknown_past_the_ceiling(tmp_path: Pat
     assert now.progress == pytest.approx(now.items / 10)
     scanner.state = ScanState.DONE
     assert scanner.progress().progress == 1.0
+
+
+async def test_profile_accounts_for_the_scan(tree: TreeFacts) -> None:
+    scanner = Scanner([str(tree.root)], budget_s=0.0)
+    assert scanner.profile().slices == 0  # not started: nothing to show yet
+    result = await scanner.run()
+    p = scanner.profile()
+    assert p.items == result.items - 1  # all but the root, which the scan starts from
+    assert p.slices >= tree.dirs  # a zero budget lists one folder per slice
+    assert p.wall_s > 0 and p.busy_s > 0 and 0 < p.ingest_s < p.wall_s
+    assert p.busy > 0 and 0 < p.ingest < 1 and p.limited == 0  # no disk-load limit here
+    assert p.threads == scanner.concurrency
+    text = p.text()
+    assert f"{p.items:,} items" in text and "listing threads busy" in text
+
+
+async def test_profile_leaves_out_the_time_paused(tree: TreeFacts) -> None:
+    scanner = Scanner([str(tree.root)])
+    scanner.pause()
+    task = asyncio.create_task(scanner.run())
+    await asyncio.sleep(0.3)
+    scanner.resume()
+    await task
+    p = scanner.profile()
+    assert p.wall_s < 0.25 < scanner.progress().elapsed_s  # the elapsed time shown includes the pause
+
+
+def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "24")
+    assert native_threads() == 24
+    monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "500")
+    assert native_threads() == 64
+    for bad in ("0", "-3", "many", ""):
+        monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", bad)
+        assert 2 <= native_threads() <= 16

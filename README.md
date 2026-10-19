@@ -128,6 +128,8 @@ Scan from a terminal (parallel full scan, snapshot saved when done):
 uv run spaceknife scan "C:\Program Files"
 ```
 
+Add `--profile` to see where the time went: how busy the listing threads were (system calls) and how long the main thread spent folding results into the tree. `SPACEKNIFE_SCAN_THREADS` sets the number of listing threads, here and in the app, for comparisons.
+
 ```bash
 uv run spaceknife snapshot list
 ```

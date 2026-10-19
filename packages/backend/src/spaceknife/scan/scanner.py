@@ -104,9 +104,65 @@ def default_workers() -> int:
     return max(2, min(8, (os.cpu_count() or 4) - 1))
 
 
+NATIVE_BATCH = 256  # directories per native call (one listing thread each)
+NATIVE_BUDGET_S = 0.05  # seconds a native call lists before it returns what it has
+
+
 def native_threads() -> int:
-    """Listing threads for the native walker: beyond 16 the file system's locks only add contention."""
+    """Listing threads for the native walker: beyond 16 the file system's locks only add contention
+    (measured on NTFS). SPACEKNIFE_SCAN_THREADS sets it (1–64) to measure other file systems."""
+    forced = os.environ.get("SPACEKNIFE_SCAN_THREADS", "")
+    if forced.isdigit() and int(forced) > 0:
+        return min(64, int(forced))
     return max(2, min(16, os.cpu_count() or 4))
+
+
+@dataclass(slots=True)
+class ScanProfile:
+    """Where a scan's time went (logged when it ends; ``spaceknife scan --profile`` prints it)."""
+
+    wall_s: float  # scanning, start to end, without the time it was paused
+    threads: int  # listing slices allowed in parallel
+    busy_s: float  # summed time the slices took in their threads (listing: system calls)
+    ingest_s: float  # main thread: folding the slices into the tree
+    limited_s: float  # main thread: waiting for the disk-load limit to allow another slice
+    slices: int
+    items: int  # entries this run added to the tree
+
+    @property
+    def busy(self) -> float:
+        """Share of the listing threads' time spent listing (low: they wait for work or the limit)."""
+        return self.busy_s / (max(self.wall_s, 1e-9) * max(1, self.threads))
+
+    @property
+    def ingest(self) -> float:
+        """Share of the scan the main thread spent folding results (near 100 %: it is the bottleneck)."""
+        return self.ingest_s / max(self.wall_s, 1e-9)
+
+    @property
+    def limited(self) -> float:
+        return self.limited_s / max(self.wall_s, 1e-9)
+
+    def text(self) -> str:
+        bulk = bulk_listing()
+        return (
+            f"{self.items:,} items in {self.wall_s:.1f}s ({self.items / max(self.wall_s, 1e-9):,.0f}/s); "
+            f"listing threads busy {self.busy:.0%} of {self.threads}; "
+            f"main thread folding {self.ingest:.0%}; "
+            f"held by the disk-load limit {self.limited:.0%}; "
+            f"{self.slices:,} slices" + (f"; getattrlistbulk {bulk}" if bulk else "")
+        )
+
+
+def bulk_listing() -> str | None:
+    """macOS: whether the native walker lists with getattrlistbulk (\"on\", \"off: why\", \"untested\")."""
+    if sys.platform != "darwin":
+        return None
+    from .. import native
+
+    mod = native.module()
+    state = getattr(mod, "bulk_listing", None) if mod is not None else None
+    return str(state()) if state is not None else None
 
 
 Slicer = Callable[[list[Task], SliceOptions], SliceResult]
@@ -203,6 +259,10 @@ class Scanner:
         self.message = ""
         self.expected_items: int | None = None  # from the last snapshot of the same roots (UI-W2-15)
         self._samples: deque[tuple[float, int, int]] = deque()  # (time, items, allocated bytes)
+        self._busy_s = self._ingest_s = self._limited_s = self._paused_s = 0.0  # ScanProfile
+        self._paused_since: float | None = None
+        self._folded = 0  # entries added to the tree by this run
+        self._slices = 0
 
         root_opts: list[RootOptions] = []
         normalised: list[str] = []
@@ -261,6 +321,7 @@ class Scanner:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._unpaused()
         self._running.set()  # a paused scan stops too
 
     @property
@@ -299,11 +360,18 @@ class Scanner:
         """Stop dispatching batches; those in flight finish within their time budget (W2)."""
         if self._running.is_set() and self.state in (ScanState.QUEUED, ScanState.SCANNING):
             self._running.clear()
+            self._paused_since = time.perf_counter()
             if self.governor is not None:
                 self.governor.pause(owner=self)  # also a clean baseline window: nothing of ours in flight
 
+    def _unpaused(self) -> None:
+        if self._paused_since is not None:
+            self._paused_s += time.perf_counter() - self._paused_since
+            self._paused_since = None
+
     def resume(self) -> None:
         if not self._running.is_set():
+            self._unpaused()
             self._running.set()
             if self.governor is not None:
                 self.governor.resume(owner=self)
@@ -317,6 +385,10 @@ class Scanner:
         self.state = ScanState.SCANNING
         self._started = time.perf_counter()
         self.started_at = datetime.now(UTC)
+        self._busy_s = self._ingest_s = self._limited_s = self._paused_s = 0.0  # this run's profile
+        self._slices = self._folded = 0
+        if self._paused_since is not None:  # paused while queued
+            self._paused_since = self._started
         executor = self._executor
         thread_pool = None
         if executor is None:
@@ -329,6 +401,7 @@ class Scanner:
         resumed: asyncio.Task[bool] | None = None
         gov = self.governor
         last_report = 0.0
+        asked = 0.0
 
         def dispatch(permit: Permit | None) -> None:
             parallel = gov.concurrency if gov is not None else self.concurrency
@@ -349,6 +422,7 @@ class Scanner:
                         dispatch(None)
                 elif running and self._queue and permit_task is None and len(inflight) < self.concurrency:
                     permit_task = asyncio.ensure_future(gov.permit())  # paced by the disk-load limit
+                    asked = time.perf_counter()
                 elif not running and permit_task is not None:
                     permit_task.cancel()  # paused: the governor takes a waiting request back
                     with contextlib.suppress(asyncio.CancelledError):
@@ -367,6 +441,8 @@ class Scanner:
                 for fut in done:
                     if fut is permit_task:
                         permit_task = None
+                        if not inflight:  # nothing listing meanwhile: the limit held the scan
+                            self._limited_s += time.perf_counter() - asked
                         permit = fut.result()
                         if self._queue and self._running.is_set() and not self._cancelled:
                             dispatch(permit)
@@ -404,6 +480,7 @@ class Scanner:
                 resumed.cancel()
             if self.paused and gov is not None:
                 gov.resume(owner=self)
+            self._unpaused()
             self._running.set()
             self._finished = time.perf_counter()
             self.finished_at = datetime.now(UTC)
@@ -422,11 +499,36 @@ class Scanner:
             result.rate,
             result.errors,
         )
+        logger.info("scan profile: {}", self.profile().text())
         return result
 
     # ------------------------------------------------------------------ folding results
 
     def _apply(self, res: SliceResult) -> None:
+        t0 = time.perf_counter()
+        n0 = len(self.store)
+        try:
+            self._fold(res)
+        finally:
+            self._folded += len(self.store) - n0
+            self._ingest_s += time.perf_counter() - t0
+            self._busy_s += res.elapsed
+            self._slices += 1
+
+    def profile(self) -> ScanProfile:
+        end = self._finished or time.perf_counter()
+        paused = self._paused_s + (end - self._paused_since if self._paused_since is not None else 0.0)
+        return ScanProfile(
+            wall_s=end - self._started - paused if self._started is not None else 0.0,
+            threads=self.concurrency,
+            busy_s=self._busy_s,
+            ingest_s=self._ingest_s,
+            limited_s=self._limited_s,
+            slices=self._slices,
+            items=self._folded,
+        )
+
+    def _fold(self, res: SliceResult) -> None:
         store = self.store
         cols = res.cols
         n_entries = len(res.name_lens)

@@ -150,6 +150,9 @@ def test_cli_scan_and_snapshot_commands(tmp_path: Path) -> None:
     scan = run("scan", str(facts.root), "--workers", "0", "--top", "3")
     assert scan.returncode == 0, scan.stderr
     assert "扫描结果" in scan.stdout and "最大的文件" in scan.stdout and "movie.mp4" in scan.stdout
+    profiled = run("scan", str(facts.root), "--top", "3", "--profile", "--no-snapshot")  # as in the app
+    assert profiled.returncode == 0, profiled.stderr
+    assert "耗时分解" in profiled.stdout and "列目录线程平均忙碌" in profiled.stdout
     listing = run("snapshot", "list")
     assert listing.returncode == 0
     assert "共 1 个快照" in listing.stdout

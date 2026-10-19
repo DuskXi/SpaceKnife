@@ -31,6 +31,8 @@ from ..privacy import full_disk_access
 from ..scan import mft
 from ..scan.media import media_of, system_mount
 from ..scan.scanner import (
+    NATIVE_BATCH,
+    NATIVE_BUDGET_S,
     RootInfo,
     Scanner,
     ScanProgress,
@@ -53,7 +55,6 @@ IO_START_WAIT_S = 3.0  # a scan started with the backend waits this long for dis
 TICK_S = 0.5  # status pushes while a scan runs, also when nothing lands (MFT read, paused): W2 curve
 MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the rest is building
 MFT_BUILD_BYTES_PER_ROW = 450  # the received table (~100 B) plus building the tree from it (~330 B)
-NATIVE_BATCH = 256  # directories per native call (one listing thread each, 0.05 s budget)
 _KIND_NAMES: dict[int, Literal["file", "dir", "link", "other"]] = {
     Kind.FILE: "file",
     Kind.DIR: "dir",
@@ -406,7 +407,7 @@ class ScanManager:
         elif self._slicer is not None:
             executor = self._thread_executor()
             concurrency = min(workers or self._thread_count, self._thread_count)
-            options = {"slicer": self._slicer, "batch_tasks": NATIVE_BATCH, "budget_s": 0.05}
+            options = {"slicer": self._slicer, "batch_tasks": NATIVE_BATCH, "budget_s": NATIVE_BUDGET_S}
         else:
             executor = self._executor()
             concurrency = min(workers or self._pool_size, self._pool_size)

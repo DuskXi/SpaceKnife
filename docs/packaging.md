@@ -87,7 +87,7 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - 关闭了 Hardened Runtime：它会强制库校验，ad-hoc 签名的应用会拒绝加载 Electron 框架原有的签名。等有 Developer ID 再开（公证需要它）。
 - 「完全磁盘访问权限」：不给的话，扫描到「桌面」「文稿」「下载」、云盘、照片图库、其他应用的数据、外接盘和网络盘时会逐个弹出授权提示（提示文案是 `electron-builder.yml` 里的 `NS*UsageDescription`），邮件、信息等受保护目录读不到，计入未知空间。给了就都能扫到。应用在扫描前检查（`spaceknife.privacy`：读用户的 TCC 数据库，不弹窗），没有时弹出说明框：打开系统设置的对应页面 / 跳过这些位置（不弹窗，显示为无法访问）/ 照常逐个询问；设置「扫描范围 › 受保护的位置」记住选择。ad-hoc 签名的授权绑定在具体的构建上，更新后要在设置里关掉再打开一次。
 - 扫描 `/` 时不进入 `/System/Volumes/Data`：同一 APFS 卷组的数据卷与系统卷报告同一个设备号，它的文件已经通过 firmlink 在树里（`scan.volume.volume_group_twins`）。云盘里「仅在云端」的文件（`SF_DATALESS`）按占用 0 计，这样的文件夹不进入，进程也设为不物化 dataless 文件，扫描不会触发下载。
-- 磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源，`ioreg` 为后备）；目录条目的属性用 `getattrlistbulk` 批量取（每个进程第一批与 `fstatat` 对照，有差异就退回；`SPACEKNIFE_NO_BULK=1` 关掉，用来对比速度）。
+- 磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源，`ioreg` 为后备）；目录条目的属性用 `getattrlistbulk` 批量取（每个进程第一批与 `fstatat` 对照，有差异就退回；`SPACEKNIFE_NO_BULK=1` 关掉，用来对比速度；`spaceknife-backend scan --profile` 打印耗时分解和它的状态）。
 - 扫描是后端子进程做的，授权和提示都记在 SpaceKnife 这个应用名下（macOS 按负责的应用归属）。
 
 **数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：

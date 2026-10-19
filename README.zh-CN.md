@@ -126,6 +126,8 @@ uv run spaceknife serve
 uv run spaceknife scan "C:\Program Files"
 ```
 
+加 `--profile` 可以看耗时分解：列目录线程有多忙（系统调用），主线程把结果合并进树用了多久。环境变量 `SPACEKNIFE_SCAN_THREADS` 设定列目录线程数（命令行和应用都认），用来对比。
+
 ```bash
 uv run spaceknife snapshot list
 ```
