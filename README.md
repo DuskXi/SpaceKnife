@@ -18,6 +18,10 @@
   <img alt="Windows and Linux" src="https://img.shields.io/badge/platform-Windows%2010%2B%20%7C%20Linux-8B9CFF">
 </p>
 
+<p align="center">
+  <img src="docs/images/demo-en.gif" width="880" alt="SpaceKnife in action: hovering over a 2 TB drive, zooming into a folder, filtering for large videos, searching with the command palette and comparing two snapshots (mock data)">
+</p>
+
 SpaceKnife draws every folder and file as a block of a nested treemap, sized by the space it takes, so the space hogs stand out at a glance. It scans in parallel (or reads the NTFS Master File Table for a quick scan), can cap the disk load it causes, keeps watching for changes after the scan, and saves a snapshot after each scan so you can see what grew and what is new. Deleting goes to the recycle bin and can be undone. The interface is available in English and Simplified Chinese.
 
 > SpaceKnife is an independent project inspired by [SpaceSniffer](http://www.uderzo.it/main_products/space_sniffer/). It is not affiliated with SpaceSniffer or its author.
@@ -112,6 +116,12 @@ The README screenshots are rendered off-screen from mock data: no window, no rea
 
 ```bash
 uv run python tools/demo/screenshots.py --home <empty folder> --out docs/images --lang both
+```
+
+The demo animation (`docs/images/demo*.gif` / `.mp4`) is recorded the same way; it needs ffmpeg:
+
+```bash
+uv run python tools/demo/screenshots.py --home <empty folder> --out docs/images --lang both --video
 ```
 
 The website lives in `site/` (Astro; GitHub Actions publishes it to GitHub Pages on every push to `main`):

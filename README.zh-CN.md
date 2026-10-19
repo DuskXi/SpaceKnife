@@ -18,6 +18,10 @@
   <img alt="Windows 与 Linux" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux-8B9CFF">
 </p>
 
+<p align="center">
+  <img src="docs/images/demo.gif" width="880" alt="SpaceKnife 演示：在一块 2 TB 的磁盘上悬停查看、放大进入文件夹、过滤大视频、用命令面板搜索、对比两次快照（模拟数据）">
+</p>
+
 SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少空间：块越大，占用越多，一眼就能找到占地方的东西。它支持 NTFS MFT 快速扫描和可限制磁盘负载的并发扫描，扫描后自动保存快照，可以看出两次之间什么变大了、什么是新出现的；删除默认进回收站，可以撤销。界面有简体中文和英文。
 
 > SpaceKnife 受 [SpaceSniffer](http://www.uderzo.it/main_products/space_sniffer/) 启发，是一个独立开发的新项目，与 SpaceSniffer 及其作者没有任何关联。
@@ -110,6 +114,12 @@ README 的截图用模拟数据离屏生成，不显示窗口、不读真实磁�
 
 ```bash
 uv run python tools/demo/screenshots.py --home <空目录> --out docs/images --lang both
+```
+
+演示动画（`docs/images/demo*.gif` / `.mp4`）用同样的方式录制，需要 ffmpeg：
+
+```bash
+uv run python tools/demo/screenshots.py --home <空目录> --out docs/images --lang both --video
 ```
 
 官网在 `site/`（Astro，推送到 `main` 后由 GitHub Actions 发布到 GitHub Pages）：

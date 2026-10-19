@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions / 提问
+    url: https://github.com/DuskXi/SpaceKnife/discussions/categories/q-a
+    about: Ask how something works / 询问用法
+  - name: Security problem / 安全问题
+    url: https://github.com/DuskXi/SpaceKnife/security/advisories/new
+    about: Report privately, never in a public issue / 请私下报告，不要发公开 issue
+  - name: Website / 官网
+    url: https://spaceknife.kaltsit.dev/
+    about: Downloads and an overview / 下载与介绍

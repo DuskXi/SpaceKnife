@@ -1,0 +1,73 @@
+name: Bug report / 问题报告
+description: Something does not work as expected / 有功能没有按预期工作
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check the [existing issues](https://github.com/DuskXi/SpaceKnife/issues) first. Security problems go to [SECURITY.md](https://github.com/DuskXi/SpaceKnife/blob/main/SECURITY.md), not here.
+        感谢反馈！请先搜索[已有的 issue](https://github.com/DuskXi/SpaceKnife/issues)。安全问题请按 [SECURITY.md](https://github.com/DuskXi/SpaceKnife/blob/main/SECURITY.md) 私下报告，不要发在这里。
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      description: Settings › About, or the release you installed / 设置 › 关于，或你安装的版本
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system / 操作系统
+      options:
+        - Windows 11
+        - Windows 10
+        - Ubuntu
+        - Debian
+        - RHEL / Rocky / Alma
+        - Fedora
+        - Other Linux / 其他 Linux
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install it? / 安装方式
+      options:
+        - Windows installer (.exe)
+        - deb
+        - rpm
+        - AppImage
+        - From source / 从源码运行
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 发生了什么？
+      description: What you did, what you expected and what you saw instead. Screenshots help. / 你做了什么、预期是什么、实际看到了什么；截图很有帮助。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      placeholder: |
+        1. Scan D:\
+        2. Filter `>1gb`
+        3. …
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / 日志
+      description: |
+        The log panel (bottom of the window) can copy recent messages; the log files are in `%LOCALAPPDATA%\SpaceKnife\logs` (Windows) or `~/.local/share/SpaceKnife/logs` (Linux). Remove anything private (paths, names) before pasting.
+        窗口底部的日志面板可以复制最近的消息；日志文件在 `%LOCALAPPDATA%\SpaceKnife\logs`（Windows）或 `~/.local/share/SpaceKnife/logs`（Linux）。粘贴前请删掉不想公开的内容（路径、名字）。
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks / 确认
+      options:
+        - label: I searched the existing issues / 我搜索过已有的 issue
+          required: true

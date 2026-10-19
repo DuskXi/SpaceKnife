@@ -529,7 +529,8 @@ def build_store(tree: Tree) -> NodeStore:
             entries["nlink"][i] = 1
             if isinstance(value, dict):
                 entries["kind"][i] = Kind.DIR
-                entries["mtime"][i] = max((_mtime(v) for v in value.values()), default=ts(2024, 1))
+                newest = max((_mtime(v) for v in value.values()), default=ts(2024, 1))
+                entries["mtime"][i] = entries["ctime"][i] = entries["atime"][i] = newest
             else:
                 size, mtime = value
                 entries["kind"][i] = Kind.FILE

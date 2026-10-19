@@ -12,6 +12,8 @@ import paletteEn from "../../../docs/images/palette-en.png";
 import paletteZh from "../../../docs/images/palette.png";
 import treemapEn from "../../../docs/images/treemap-en.png";
 import treemapZh from "../../../docs/images/treemap.png";
+import demoEn from "../../../docs/images/demo-en.mp4?url";
+import demoZh from "../../../docs/images/demo.mp4?url";
 import { fmtSize, latestRelease, REPO_URL, type AssetKind } from "../data/release";
 import { structuredData } from "../data/seo";
 import type { Content } from "../i18n/content";
@@ -36,6 +38,9 @@ const SHOTS = {
 const shotUrls = await Promise.all(
   c.shots.map(async (s) => `${site}${(await getImage({ src: SHOTS[s.id], format: "webp", width: 1440 })).src}`),
 );
+// the hero plays the demo (tools/demo/demo.cjs); its poster is the treemap screenshot
+const demo = c.lang === "en" ? demoEn : demoZh;
+const poster = (await getImage({ src: SHOTS.treemap, format: "webp", width: 1440 })).src;
 const jsonLd = structuredData(c, release, pageUrl, shotUrls, `${site}${base}og-${c.lang}.png`);
 
 const icon = (name: string) => (icons as Record<string, string>)[name] ?? "";
@@ -138,7 +143,7 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
       </div>
       <div class="wrap shot-hero">
         <figure class="window tilt">
-          <Picture src={SHOTS.treemap} formats={["avif", "webp"]} fallbackFormat="webp" widths={[720, 1080, 1440]} sizes="(min-width: 1240px) 1200px, 96vw" alt={c.hero.shotAlt} loading="eager" fetchpriority="high" />
+          <video class="demo" src={demo} poster={poster} width="1280" height="776" muted loop playsinline preload="metadata" aria-label={c.hero.shotAlt}></video>
         </figure>
         <p class="note">{c.mockNote}</p>
       </div>
@@ -281,6 +286,12 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
   </footer>
 
   <script>
+    // the demo plays by itself, unless the visitor asked for reduced motion (then it has controls)
+    const demo = document.querySelector<HTMLVideoElement>("video.demo");
+    if (demo) {
+      if (matchMedia("(prefers-reduced-motion: reduce)").matches) demo.controls = true;
+      else void demo.play().catch(() => (demo.controls = true));
+    }
     for (const b of document.querySelectorAll<HTMLButtonElement>("button.copy")) {
       b.addEventListener("click", async () => {
         try {

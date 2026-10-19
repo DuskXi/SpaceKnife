@@ -437,8 +437,11 @@ html[data-os="mac"] .hero-mac {
     0 40px 140px -40px rgb(139 156 255 / 0.45);
 }
 
-.window img {
+.window img,
+.window video {
+  display: block;
   width: 100%;
+  height: auto;
 }
 
 .tilt {

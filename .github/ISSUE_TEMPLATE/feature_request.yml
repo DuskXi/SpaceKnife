@@ -1,0 +1,27 @@
+name: Feature request / 功能建议
+description: Suggest an idea or an improvement / 提出新想法或改进
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Open-ended ideas are welcome in [Discussions › Ideas](https://github.com/DuskXi/SpaceKnife/discussions/categories/ideas) too.
+        还没想清楚的点子也欢迎发到 [Discussions › Ideas](https://github.com/DuskXi/SpaceKnife/discussions/categories/ideas)。
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve? / 想解决什么问题？
+      description: The situation and why the current behaviour is not enough. / 场景，以及现在的做法为什么不够。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like? / 希望怎样做？
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / 其他方案
+      description: Workarounds or other tools you tried. / 试过的变通办法或其他工具。
