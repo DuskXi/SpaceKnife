@@ -84,6 +84,8 @@
 - [x] 项目主页 `https://github.com/DuskXi/SpaceKnife`；发布包里不带构建机路径（原生扩展单独做发布构建，构建时检查）
 - [ ] 包体积：只 strip 没被 auditwheel 改过的库（libpython、zstandard、原生扩展），Linux 后端约省 40 MB 解压后体积
 - [ ] 自动更新（electron-updater，需要发布渠道）
+- [x] 便携版（小众软件用户请求）：Windows x64 zip、Linux x64 tar.gz，程序旁的 `data` 文件夹存放全部数据（GitHub Actions「Portable build」，解压后以便携模式冒烟）
+- [ ] Windows / Linux ARM64（依赖都有对应 wheel，Electron 也有 arm64 版；缺测试设备）。32 位 Windows 做不了：Electron 44 已不再提供 ia32
 
 ## 其他
 

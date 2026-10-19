@@ -10,6 +10,8 @@ Electron 版（UI v1）的安装包：Windows NSIS；Linux AppImage / deb / rpm�
 | `spaceknife-<版本>.x86_64.rpm` | RHEL 9+ / Fedora 系 | 118 MB |
 | `SpaceKnife-<版本>-mac-arm64.dmg` | macOS 14+，Apple Silicon，ad-hoc 签名、未公证 | 141 MB |
 | `SpaceKnife-<版本>-mac-x64.dmg` | macOS 14+，Intel，ad-hoc 签名、未公证 | 148 MB |
+| `SpaceKnife-<版本>-win-x64-portable.zip` | Windows 10+ x64 便携版（`--portable`） | 174 MB |
+| `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | Linux x64 便携版（`--portable`） | 161 MB |
 | `win-unpacked/`、`linux-unpacked/`、`mac[-arm64]/SpaceKnife.app` | 免安装目录（冒烟测试、体验环境用） | 约 400 MB |
 
 ## 1. 构建
@@ -22,7 +24,7 @@ uv sync --locked --group native --group package
 uv run python tools/build_package.py
 ```
 
-在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种，macOS 按本机架构出 dmg：PyInstaller 冻结的是正在运行的解释器，交叉不了架构）。macOS 的两个 dmg 由 GitHub Actions 的「macOS build」工作流（[.github/workflows/macos.yml](../.github/workflows/macos.yml)，手动触发）分别在 `macos-15`（arm64）和 `macos-15-intel`（x64）上构建，dmg 与 SHA256 作为运行产物上传，再由维护者附到 Release 上。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
+在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种，macOS 按本机架构出 dmg：PyInstaller 冻结的是正在运行的解释器，交叉不了架构）。`--portable` 另外把免安装目录打成便携包（见第 4 节），`--no-installers` 只出免安装目录（和便携包）。便携包由「Portable build」工作流（[.github/workflows/portable.yml](../.github/workflows/portable.yml)）在 `windows-latest` 与 `ubuntu-22.04` 上构建，解压后用 `smoke_app.py --portable` 跑冒烟测试。两个打包工作流都可以手动触发，dev 分支上改动打包相关文件时也会自动构建。macOS 的两个 dmg 由 GitHub Actions 的「macOS build」工作流（[.github/workflows/macos.yml](../.github/workflows/macos.yml)，手动触发）分别在 `macos-15`（arm64）和 `macos-15-intel`（x64）上构建，dmg 与 SHA256 作为运行产物上传，再由维护者附到 Release 上。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
 
 需要：uv（Python 3.12）、Rust 工具链（原生扩展必须打进包，没有它扫描会慢很多：构建前检查它能加载，冻结后的冒烟测试再查一次）、Node 与 pnpm（`apps/electron` 里先 `pnpm install`）。Linux 的 rpm 需要 `rpmbuild`；electron-builder 第一次运行会下载 Electron、NSIS、AppImage 工具与 fpm 到它的缓存目录。
 
@@ -70,6 +72,13 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - deb / rpm：程序在 `/opt/SpaceKnife/`，`/usr/bin/spaceknife` 指向它；`spaceknife.desktop`（中英文名称与说明、关键字）和 hicolor 图标 16–512 px；依赖是 Electron 的常规依赖（GTK 3、NSS、libXss、libXtst、xdg-utils、at-spi2 等）。
 - AppImage：需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）；没有时用 `--appimage-extract-and-run` 运行。
 - 窗口的 app_id / WM_CLASS 与 desktop 文件名一致（`desktopName: spaceknife.desktop`），任务栏能把窗口和启动器图标对上。
+
+**便携版**（Windows zip、Linux tar.gz）：
+
+- 就是免安装目录，外加一个空的 `data` 文件夹（里面一份中英文说明）。打包后的 Windows / Linux 应用启动时，如果可执行文件旁边有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（[src/main/portable.ts](../apps/electron/src/main/portable.ts)）：快照、设置、日志、缓存和 Chromium 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
+- 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去）。
+- Linux 的 tar.gz 不需要 FUSE。和 AppImage 一样，`chrome-sandbox` 没有 setuid：在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则）可能启动不了，需要加 `--no-sandbox`；目标系统 Ubuntu 22.04 和 RHEL 9 不受影响。
+- 没有 32 位 Windows 版：Electron 44 已不再提供 win32-ia32。
 
 **macOS（dmg）**：
 

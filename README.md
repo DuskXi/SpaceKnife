@@ -68,6 +68,8 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 | Ubuntu 22.04+ / Debian family | `spaceknife_<version>_amd64.deb` |
 | RHEL 9+ / Fedora family | `spaceknife-<version>.x86_64.rpm` |
 | Other Linux x64 | `SpaceKnife-<version>-x86_64.AppImage` (needs FUSE 2, or run it with `--appimage-extract-and-run`) |
+| Windows 10+ x64, portable | `SpaceKnife-<version>-win-x64-portable.zip` (no installation: unzip anywhere and run `SpaceKnife.exe`; snapshots and settings stay in the `data` folder next to it) |
+| Linux x64, portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` (extract anywhere and run `./spaceknife`, no FUSE needed; data stays in the `data` folder next to it) |
 | macOS 14+, Apple Silicon | `SpaceKnife-<version>-mac-arm64.dmg` (preview: not notarized yet, see below) |
 | macOS 14+, Intel | `SpaceKnife-<version>-mac-x64.dmg` (preview: not notarized yet, see below) |
 
