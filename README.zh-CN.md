@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/DuskXi/SpaceKnife/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/DuskXi/SpaceKnife?include_prereleases&label=%E7%89%88%E6%9C%AC"></a>
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/DuskXi/SpaceKnife?label=%E8%AE%B8%E5%8F%AF%E8%AF%81"></a>
-  <img alt="Windows 与 Linux" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux-8B9CFF">
+  <img alt="Windows、Linux 与 macOS" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux%20%7C%20macOS%2014%2B-8B9CFF">
 </p>
 
 <p align="center">
@@ -51,7 +51,7 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 - **实时树图**：WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级、小项聚合，可用空间与未知空间也画出来；可分屏开两个视图。
 - **快**：Rust 原生扩展做并行目录遍历；Windows 上可读取 NTFS 主文件表（MFT）快速扫描（通过一个只读的提权助手，需要管理员确认）。
 - **不拖慢电脑**：扫描可以限制自己造成的磁盘负载（极速 / 均衡 / 安静 / 空闲 / 自定义），别的程序在用磁盘时自动让路。
-- **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询），变化的块会闪烁。
+- **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询；macOS FSEvents），变化的块会闪烁。
 - **过滤语言**：按名称、类型、大小、时间、属性、标签过滤，可以组合；与 SpaceSniffer 的过滤写法兼容并做了扩展（[语法](docs/filter-syntax.md)）。
 - **快照与对比**：扫描后自动保存快照；任意两次对比，或与「现在」对比，只看增长或减少。
 - **安全的清理**：右键菜单与删除篮，默认移到回收站，可以撤销；系统和程序目录受保护。
@@ -68,8 +68,22 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 | Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
 | RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
 | 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
+| macOS 14+，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg`（预览版：还没经过苹果公证，见下文） |
+| macOS 14+，Intel | `SpaceKnife-<版本>-mac-x64.dmg`（预览版：还没经过苹果公证，见下文） |
 
-每个版本都附带 `SHA256SUMS.txt`。macOS 版暂不提供。
+每个版本都附带 `SHA256SUMS.txt`。
+
+### macOS：第一次打开
+
+macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需要手动放行一次：
+
+1. 打开 dmg，把 SpaceKnife 拖进「应用程序」。
+2. 打开 SpaceKnife，系统提示无法验证它是否包含恶意软件，点「完成」。
+3. 打开「系统设置 › 隐私与安全性」，往下找到 SpaceKnife 已被阻止的提示，点「仍要打开」，再点一次「仍要打开」并输入密码。
+
+之后就能正常打开；安装新版本后需要再放行一次。macOS 14 上也可以在「应用程序」里右键 SpaceKnife 选「打开」。习惯用终端的话：`xattr -dr com.apple.quarantine /Applications/SpaceKnife.app`。
+
+想不被逐个文件夹的授权提示打断、扫到所有位置，给 SpaceKnife 开「完全磁盘访问权限」（系统设置 › 隐私与安全性 › 完全磁盘访问权限 › +），然后重新打开它。不开的话，邮件、信息等受保护的位置计入未知空间。更新版本后，在这个列表里把 SpaceKnife 关掉再打开一次。
 
 ## 觉得好用？点个 Star
 

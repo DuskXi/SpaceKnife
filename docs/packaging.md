@@ -1,6 +1,6 @@
 # 打包与发布（M8）
 
-Electron 版（UI v1）的安装包：Windows NSIS；Linux AppImage / deb / rpm。macOS 打包、签名与公证暂不做（见 [TODO.md](../TODO.md)）。
+Electron 版（UI v1）的安装包：Windows NSIS；Linux AppImage / deb / rpm；macOS dmg（Apple Silicon 与 Intel 各一个，ad-hoc 签名、未公证：Developer ID 签名与公证等 Apple 开发者账号下来再接上，见 [TODO.md](../TODO.md)）。
 
 | 产物（`dist/electron/`） | 平台 | 大小（0.3.0） |
 |---|---|---|
@@ -8,7 +8,9 @@ Electron 版（UI v1）的安装包：Windows NSIS；Linux AppImage / deb / rpm�
 | `SpaceKnife-<版本>-x86_64.AppImage` | Linux x64，免安装 | 164 MB |
 | `spaceknife_<版本>_amd64.deb` | Ubuntu 22.04+ / Debian 系 | 131 MB |
 | `spaceknife-<版本>.x86_64.rpm` | RHEL 9+ / Fedora 系 | 118 MB |
-| `win-unpacked/`、`linux-unpacked/` | 免安装目录（冒烟测试、体验环境用） | 约 400 MB |
+| `SpaceKnife-<版本>-mac-arm64.dmg` | macOS 14+，Apple Silicon，ad-hoc 签名、未公证 | 141 MB |
+| `SpaceKnife-<版本>-mac-x64.dmg` | macOS 14+，Intel，ad-hoc 签名、未公证 | 148 MB |
+| `win-unpacked/`、`linux-unpacked/`、`mac[-arm64]/SpaceKnife.app` | 免安装目录（冒烟测试、体验环境用） | 约 400 MB |
 
 ## 1. 构建
 
@@ -20,7 +22,7 @@ uv sync --locked --group native --group package
 uv run python tools/build_package.py
 ```
 
-在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种）。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
+在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种，macOS 按本机架构出 dmg：PyInstaller 冻结的是正在运行的解释器，交叉不了架构）。macOS 的两个 dmg 由 GitHub Actions 的「macOS build」工作流（[.github/workflows/macos.yml](../.github/workflows/macos.yml)，手动触发）分别在 `macos-15`（arm64）和 `macos-15-intel`（x64）上构建，dmg 与 SHA256 作为运行产物上传，再由维护者附到 Release 上。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
 
 需要：uv（Python 3.12）、Rust 工具链（原生扩展必须打进包，没有它扫描会慢很多：构建前检查它能加载，冻结后的冒烟测试再查一次）、Node 与 pnpm（`apps/electron` 里先 `pnpm install`）。Linux 的 rpm 需要 `rpmbuild`；electron-builder 第一次运行会下载 Electron、NSIS、AppImage 工具与 fpm 到它的缓存目录。
 
@@ -32,6 +34,7 @@ uv run python tools/build_package.py
 3. **glibc 下限**（只在 Linux）：包里每个 ELF 需要的 glibc 符号版本不超过 2.34（RHEL 9）。
 4. `electron-vite build`；**许可证**（[tools/third_party_licenses.py](../tools/third_party_licenses.py) → `dist/licenses`）；然后 `electron-builder`（[apps/electron/electron-builder.yml](../apps/electron/electron-builder.yml)）。
 5. **不带构建机路径**：冻结的后端和打包好的应用目录里，任何文件都不能出现构建机的家目录（两种斜杠、转义、UTF-8 / UTF-16、不分大小写），否则构建失败；zip 文件（`base_library.zip`）和后端可执行文件里压缩的 Python 模块（PYZ）也逐项解开检查。
+6. **ad-hoc 签名**（只在 macOS）：`codesign --verify --deep --strict` 整个 `SpaceKnife.app` 通过，且是 ad-hoc 签名。Apple Silicon 不运行没有签名的代码；签名坏了的话，Gatekeeper 会说应用「已损坏」，而不是给出「仍要打开」。
 
 **许可证**：SpaceKnife 是 MIT（仓库根目录 `LICENSE`）。安装后的 `resources/licenses/` 里有 `LICENSE.txt` 和三份第三方清单：`THIRD-PARTY-backend.txt`（Python 运行时与打进后端的包，含各包自带的许可证文件）、`THIRD-PARTY-native.txt`（原生扩展链接的 Rust crate）、`THIRD-PARTY-ui.txt`（打进界面的 JavaScript，由 `rollup-plugin-license` 生成，加上 Geist / Noto Sans SC 字体的 OFL）。Electron 自己的 `LICENSE.electron.txt` 与 `LICENSES.chromium.html` 在可执行文件旁边。
 
@@ -68,14 +71,22 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - AppImage：需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）；没有时用 `--appimage-extract-and-run` 运行。
 - 窗口的 app_id / WM_CLASS 与 desktop 文件名一致（`desktopName: spaceknife.desktop`），任务栏能把窗口和启动器图标对上。
 
+**macOS（dmg）**：
+
+- 打开 dmg，把 SpaceKnife 拖进「应用程序」。最低 macOS 14（`LSMinimumSystemVersion`；numpy 用的是需要 macOS 14 的 Accelerate 版本）。
+- ad-hoc 签名、未公证：第一次打开会被 Gatekeeper 拦下，用户要去「系统设置 › 隐私与安全性」点「仍要打开」并输入密码，之后正常打开；每次更新后再来一次。macOS 14 上也可以在「应用程序」里右键 › 打开。终端里 `xattr -dr com.apple.quarantine /Applications/SpaceKnife.app` 也行。README 里有给用户的步骤。
+- 关闭了 Hardened Runtime：它会强制库校验，ad-hoc 签名的应用会拒绝加载 Electron 框架原有的签名。等有 Developer ID 再开（公证需要它）。
+- 「完全磁盘访问权限」：不给的话，扫描到「桌面」「文稿」「下载」、外接盘和网络盘时会逐个弹出授权提示（提示文案是 `electron-builder.yml` 里的 `NS*UsageDescription`），邮件、信息、其他应用的数据等受保护目录读不到，计入未知空间。给了就都能扫到。ad-hoc 签名的授权绑定在具体的构建上，更新后要在设置里关掉再打开一次。
+- 扫描是后端子进程做的，授权和提示都记在 SpaceKnife 这个应用名下（macOS 按负责的应用归属）。
+
 **数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：
 
-| | Windows | Linux |
-|---|---|---|
-| 快照、标签、日志（数据） | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` |
-| 设置、文件类别、洞察规则 | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` |
-| 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` |
-| Chromium 配置 | `%APPDATA%\SpaceKnife\electron` | `~/.config/SpaceKnife/electron` |
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| 快照、标签、日志（数据） | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
+| 设置、文件类别、洞察规则 | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
+| 缓存 | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
+| Chromium 配置 | `%APPDATA%\SpaceKnife\electron` | `~/.config/SpaceKnife/electron` | `~/Library/Application Support/SpaceKnife/electron` |
 
 ## 5. 测试
 
@@ -89,7 +100,7 @@ uv run python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe
 
 ## 6. 已知限制
 
-- 未签名（Windows 代码签名证书待定）。
+- 未签名（Windows 代码签名证书待定）；macOS 只有 ad-hoc 签名、没有公证（等 Apple 开发者账号），也还没进 Homebrew（官方 cask 要求通过 Gatekeeper）。
 - 项目主页：`https://github.com/DuskXi/SpaceKnife`。
 - 没有 strip：PyInstaller 的 strip 会破坏 auditwheel 改过的库（numpy 自带的 openblas 报「not page-aligned」，冒烟测试会发现）。只 strip 没被改过的库（libpython、zstandard、原生扩展）大约能省 40 MB 解压后体积。
 - 「仅当前用户」安装在用户可写的目录里；需要管理员权限的 MFT 快扫会从这里启动提权助手。介意的话选「所有用户」安装（Program Files）。

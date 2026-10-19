@@ -10,10 +10,15 @@
   - 三端 golden 截图对比
   - 受影响的后续项：M8 里 Qt / WinUI3 的 PyInstaller 打包和 Windows App Runtime 安装一并挂起
   - 恢复条件：用户决定恢复
-- **macOS 打包、签名与公证**（M8 的一部分，暂不做）
-  - 原因：Apple 开发者证书需要付费
-  - macOS 的原生遍历代码（`readdir`、`st_birthtime`）也还没编译和运行过
-  - 恢复条件：有了开发者证书和 macOS 测试机
+
+## macOS（2026-10-19 恢复）
+
+- [x] dmg 打包：arm64 与 x64 各在对应架构的 Mac 上构建（GitHub Actions「macOS build」，手动触发），ad-hoc 签名、未公证；README 写明第一次打开的放行步骤
+- [ ] 实机验证（Intel Mac）：放行流程、扫描（原生遍历的 `readdir` / `st_birthtime` 第一次在 Mac 上跑）、FSEvents 监控、回收站（`NSFileManager`）、「完全磁盘访问权限」、标题栏与菜单
+- [ ] Developer ID 签名与公证（等 Apple 开发者账号审核）：Hardened Runtime、权限声明、notarytool、CI 里用 Secrets 自动签名
+- [ ] Homebrew cask（官方仓库要求通过 Gatekeeper，等公证）
+- [ ] Mac App Store（可选）：沙盒下用户授权整盘，访问权要用隐式安全范围书签传给后端子进程，先做概念验证
+- [ ] 应用内引导开启「完全磁盘访问权限」（直接打开系统设置的对应页面）
 
 ## M4 收尾
 

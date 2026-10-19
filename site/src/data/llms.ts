@@ -9,8 +9,8 @@ const SITE = "https://spaceknife.kaltsit.dev/";
 const BLOB = `${REPO_URL}/blob/main`;
 
 function downloads(r: Release): string[] {
-  const label = { windows: "Windows installer (x64, NSIS)", deb: "Ubuntu / Debian package (.deb)", rpm: "RHEL / Fedora package (.rpm)", appimage: "AppImage (any x64 Linux, glibc 2.34+)" } as const;
-  return (["windows", "deb", "rpm", "appimage"] as const).flatMap((k) => {
+  const label = { windows: "Windows installer (x64, NSIS)", macArm64: "macOS app for Apple Silicon (dmg; not notarized yet)", macX64: "macOS app for Intel Macs (dmg; not notarized yet)", deb: "Ubuntu / Debian package (.deb)", rpm: "RHEL / Fedora package (.rpm)", appimage: "AppImage (any x64 Linux, glibc 2.34+)" } as const;
+  return (["windows", "macArm64", "macX64", "deb", "rpm", "appimage"] as const).flatMap((k) => {
     const a = r.assets[k];
     return a ? [`- [${label[k]}](${a.url}): ${a.name}, ${fmtSize(a.size)}${a.sha256 ? `, SHA-256 ${a.sha256}` : ""}`] : [];
   });
@@ -20,7 +20,7 @@ function facts(r: Release): string[] {
   return [
     "- Name: SpaceKnife",
     "- Type: desktop application; disk usage / disk space analyzer with a treemap visualization",
-    "- Platforms: Windows 10 and 11 (x64); Linux x64 (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora; AppImage for other distributions with glibc 2.34+). No macOS build yet.",
+    "- Platforms: Windows 10 and 11 (x64); macOS 14+ (Apple Silicon and Intel; preview builds, not notarized yet); Linux x64 (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora; AppImage for other distributions with glibc 2.34+).",
     "- License: MIT. Free for personal and commercial use. No account, no telemetry, works offline.",
     "- Interface languages: English and Simplified Chinese (follows the system language).",
     `- Latest version: ${r.version}${r.prerelease ? " (pre-release)" : ""}, published ${r.date.slice(0, 10)}`,
