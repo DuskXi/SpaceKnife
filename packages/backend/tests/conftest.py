@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator
+import sys
+from collections.abc import AsyncIterator, Iterator
 
 import pytest
 
@@ -17,6 +18,29 @@ from spaceknife_client.connection import Connection
 from spaceknife_protocol.base import EmptyResult, Params
 from spaceknife_protocol.methods import MethodSpec
 from spaceknife_protocol.session import ClientInfo
+
+
+def pytest_report_header() -> str:
+    from spaceknife.io.priority import io_priority_is_low
+
+    low = io_priority_is_low()
+    return f"process I/O priority at start: {'unknown' if low is None else 'low' if low else 'normal'}"
+
+
+@pytest.fixture(autouse=True)
+def _io_priority_guard(request: pytest.FixtureRequest) -> Iterator[None]:
+    """A test that leaves this process at low I/O priority fails, by name (Windows: the priority
+    is per process and inherited by every later test and child)."""
+    if sys.platform != "win32":
+        yield
+        return
+    from spaceknife.io.priority import io_priority_is_low
+
+    before = io_priority_is_low()
+    yield
+    if before is False and io_priority_is_low() is True:
+        pytest.fail(f"{request.node.nodeid} left this process at low I/O priority", pytrace=False)
+
 
 TOKEN = "test-token-0123456789abcdef"
 CLIENT = ClientInfo(name="pytest", version="0.0.0", kind="test")
