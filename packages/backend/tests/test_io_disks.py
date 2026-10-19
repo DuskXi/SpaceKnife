@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,19 @@ def test_darwin_whole_disk_from_diskutil_info() -> None:
 # --------------------------------------------------------------------------- I/O priority
 
 needs_priority = pytest.mark.skipif(sys.platform == "darwin", reason="covered by the macOS policy API")
+
+
+@pytest.fixture(autouse=True)
+def normal_io_priority() -> Iterator[None]:
+    """The priority tests start from normal I/O priority. Some environments start every process at
+    low (GitHub's Windows runners: see the "process I/O priority at start" report header), which
+    children inherit: raise it for the test and put it back afterwards."""
+    started_low = io_priority_is_low() is True
+    if started_low:
+        assert set_low_io_priority(None, False)
+    yield
+    if started_low:
+        set_low_io_priority(None, True)
 
 
 @needs_priority
