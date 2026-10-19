@@ -71,6 +71,12 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 
 每个版本都附带 `SHA256SUMS.txt`。macOS 版暂不提供。
 
+## 觉得好用？点个 Star
+
+如果 SpaceKnife 帮你找回了磁盘空间，欢迎点一下页面顶部的 ⭐ Star。只要点一下，却是别人发现这个项目的主要途径：Star 数是 GitHub 排名和推荐仓库的重要依据。它也让我们知道这件事值得继续做下去。
+
+也可以这样参与：在 [Issues](https://github.com/DuskXi/SpaceKnife/issues) 里报告问题、提建议，在 [Discussions](https://github.com/DuskXi/SpaceKnife/discussions) 里提问和交流，认领一个[新手任务](https://github.com/DuskXi/SpaceKnife/labels/good%20first%20issue)（见 [CONTRIBUTING.md](CONTRIBUTING.md)），或者推荐给硬盘快满了的朋友。
+
 ## 文档
 
 - 计划：[docs/PLAN.md](docs/PLAN.md)

@@ -71,6 +71,12 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 
 Every release includes `SHA256SUMS.txt`. A macOS build is not available yet.
 
+## Like it? Give it a star
+
+If SpaceKnife helped you win back some disk space, please give it a ⭐ star at the top of this page. It takes one click, and it is how other people find the project: stars are a big part of how GitHub ranks and recommends repositories. It also tells us the work is worth continuing.
+
+Other ways to help: report a bug or suggest a feature in [Issues](https://github.com/DuskXi/SpaceKnife/issues), ask and share in [Discussions](https://github.com/DuskXi/SpaceKnife/discussions), pick a [good first issue](https://github.com/DuskXi/SpaceKnife/labels/good%20first%20issue) (see [CONTRIBUTING.md](CONTRIBUTING.md)), or tell a friend whose drive is full.
+
 ## Documentation
 
 The design documents are in Chinese:
