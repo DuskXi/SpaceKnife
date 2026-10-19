@@ -188,6 +188,24 @@ async def test_scan_progress_pushes_frames(tmp_path: Path, server: Server, clien
     assert len(frame) == pushed.rows
 
 
+async def test_views_follow_whether_their_scan_runs(
+    tmp_path: Path, server: Server, client: Connection
+) -> None:
+    scan_id = await scanned(tmp_path, client)
+    vc = ViewClient(client)
+    update, _ = await vc.call(
+        VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=800, height=600))
+    )
+    view = server.views.views[update.state.view_id].view
+    assert not view.scanning  # opened after the scan ended: no folder is marked as being scanned
+    server.views._on_scan(scan_id, "scanning")
+    assert view.scanning
+    assert (await vc.pushed.get()).reason == "scan"
+    server.views._on_scan(scan_id, "done")
+    assert not view.scanning
+    assert (await vc.pushed.get()).reason == "scan-final"
+
+
 async def test_views_belong_to_their_session_and_scan(
     tmp_path: Path, server: Server, client: Connection
 ) -> None:

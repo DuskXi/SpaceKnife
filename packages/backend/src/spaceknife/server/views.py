@@ -160,6 +160,7 @@ class ViewManager:
             settings=self.new_view_settings(),
         )
         view.set_viewport(params.viewport.width, params.viewport.height, params.viewport.dpr)
+        view.scanning = bool(getattr(handle, "running", False)) and self._marks_scanning()
         if params.settings is not None:
             apply_settings(view, params.settings)
         cmp = _compare_of(handle)
@@ -319,11 +320,17 @@ class ViewManager:
 
     # ------------------------------------------------------------- scan-driven pushes
 
+    def _marks_scanning(self) -> bool:
+        """Folders still being scanned breathe (UI-TM-42): the 「元素变化闪烁」 setting covers it."""
+        return self.settings is None or bool(self.settings.get("treemap.flash_changes"))
+
     def _on_scan(self, scan_id: str, state: str) -> None:
         final = state in ("done", "cancelled", "failed")
+        marks = state == "scanning" and self._marks_scanning()
         for host in self.views.values():
             if host.scan_id != scan_id:
                 continue
+            host.view.scanning = marks
             if host.push_task is not None and not host.push_task.done():
                 if final and not host.push_final:
                     host.final_pending = True  # the running push renders the final frame next

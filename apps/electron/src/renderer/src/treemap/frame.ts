@@ -6,7 +6,7 @@ import type { BinaryFrame } from "@/protocol/rpc";
 export const Kind = { FILE: 0, FOLDER: 1, COLLAPSED: 2, PENDING: 3, SMALL: 4, MORE: 5, FREE: 6, UNKNOWN: 7 } as const;
 export const Label = { NAME: 1, SIZE: 2, BIG: 4, SHORT: 8 } as const;
 export const DStat = { SAME: 0, NEW: 1, DELETED: 2, CHANGED: 3 } as const;
-export const Flag = { MATCH: 1, DIM: 2, FOLDER_HIT: 4, TAGGED: 8, SELECTED: 16, ON_PATH: 32 } as const;
+export const Flag = { MATCH: 1, DIM: 2, FOLDER_HIT: 4, TAGGED: 8, SELECTED: 16, ON_PATH: 32, SCANNING: 64 } as const;
 
 export interface DrawFrame {
   info: FrameInfo;

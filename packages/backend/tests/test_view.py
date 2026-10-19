@@ -9,8 +9,18 @@ import numpy as np
 import pytest
 
 from spaceknife.layout.engine import KEY_FREE, KEY_SMALL, KEY_UNKNOWN, RectKind
+from spaceknife.store.nodes import Flag
 from spaceknife.view import TagStore, View
-from spaceknife.view.state import F_DIM, F_FOLDER_HIT, F_MATCH, F_ON_PATH, F_SELECTED, F_TAGGED, RootInfoLike
+from spaceknife.view.state import (
+    F_DIM,
+    F_FOLDER_HIT,
+    F_MATCH,
+    F_ON_PATH,
+    F_SCANNING,
+    F_SELECTED,
+    F_TAGGED,
+    RootInfoLike,
+)
 
 from .store_builder import build, find
 
@@ -291,3 +301,26 @@ def test_double_clicking_a_file_zooms_to_its_folder_and_selects_it(view: View) -
     view.select(None)
     assert view.zoom_into(trip)
     assert view.selected == trip and len(view.back) == depth
+
+
+def test_folders_still_being_scanned_are_marked_on_the_top_three_levels(tmp_path: Path) -> None:
+    spec: dict[str, object] = {
+        "a": {"b": {"c": {"d": {"e": {"f.bin": 1}, "h.bin": 20 * MB}, "g.bin": 30 * MB}}},
+        "done": {"x.bin": 50 * MB},
+    }
+    store = build(spec, pending=("a/b/c/d/e",))
+    v = View("v1", store, [RootInfoLike(node=1, whole_volume=False)], tags=TagStore(tmp_path / "tags.json"))
+    v.set_viewport(1200, 800, 1.0)
+
+    def marked(frame_view: View) -> set[str]:
+        frame = frame_view.render()
+        rows = np.flatnonzero(frame.flags & F_SCANNING)
+        return {frame_view.store.name(int(frame.draw.node[r])) for r in rows}
+
+    assert marked(v) == set()  # the scan is not running: nothing breathes
+    v.scanning = True
+    assert marked(v) == {"a", "b", "c"}  # d is the fourth level; "done" holds nothing unlisted
+    assert v.zoom_into(find(store, "a"))
+    assert marked(v) == {"b", "c", "d"}  # levels count from the view root
+    store.clear(find(store, "a/b/c/d/e"), Flag.PENDING)
+    assert marked(v) == set()

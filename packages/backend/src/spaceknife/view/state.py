@@ -22,7 +22,7 @@ from spaceknife_protocol.filter_syntax import parse
 from ..filter.engine import FilterContext, FilterResult, evaluate
 from ..filter.vocab import platform_vocab
 from ..layout.engine import KEY_MORE, KEY_SMALL, DrawList, Layout, LayoutParams, RectKind, RootSpec
-from ..store.nodes import Kind, NodeStore
+from ..store.nodes import Flag, Kind, NodeStore
 from .tags import TagStore
 
 ColorMode = Literal["class", "flat", "time"]
@@ -31,6 +31,7 @@ ResultsSort = Literal["size", "name", "count"]
 DETAIL_MIN, DETAIL_MAX = 1, 15
 HISTORY = 200  # back steps kept per view
 MAX_FLASH = 200  # changes flashed per frame (the largest)
+SCANNING_LEVELS = 3  # levels below the view root that breathe while their folder is being scanned
 
 # Per-block flags of a rendered frame.
 F_MATCH = 1  # filter active: this file matches / this block contains matches
@@ -39,6 +40,7 @@ F_FOLDER_HIT = 4  # folder named by a positive folder mask (bold title)
 F_TAGGED = 8  # carries its own tag (see the tag column)
 F_SELECTED = 16  # the selection, or its nearest visible ancestor
 F_ON_PATH = 32  # an ancestor of the selection (halo header)
+F_SCANNING = 64  # scan running and this folder's subtree is not fully listed yet (top levels only)
 
 DAY = 86400
 TONE_LIMITS = (DAY, 7 * DAY, 30 * DAY, 365 * DAY)  # time colouring: < 1 d, < 1 w, < 1 mo, < 1 y, older
@@ -149,6 +151,7 @@ class View:
         self.last: Frame | None = None
         self.compare: Any = None  # server.compares.ChangeTree: areas are changes (W6)
         self.direction: str = "all"  # compare views: 「显示的变化」 all / grow / shrink
+        self.scanning = False  # its scan is running: frames mark the folders still being listed
         self._flashes: dict[int, int] = {}  # node -> allocation change, shown with the next frame (M5)
         self._flash_lock = threading.Lock()  # added on the event loop, taken by renders on the pool
 
@@ -226,6 +229,34 @@ class View:
             if row is not None:
                 rows[row] = rows.get(row, 0) + delta
         return sorted(rows.items())
+
+    def _scanning_rows(self, draw: DrawList) -> np.ndarray:
+        """Rows of the folders, down to ``SCANNING_LEVELS`` below the view root, whose subtree still
+        holds folders not listed yet (UI-TM-42). The not-listed folders climb to their ancestors one
+        level per step; a folder reached before stops the climb there (5 M nodes: about 20 ms)."""
+        kind, node = draw.kind, draw.node
+        folders = (kind == RectKind.FOLDER) | (kind == RectKind.COLLAPSED)
+        rows = np.flatnonzero(folders & (draw.depth <= SCANNING_LEVELS) & (node >= 0))
+        if not len(rows):
+            return rows
+        c = self.store.cols
+        n = len(self.store)
+        flags = c["flags"][:n]
+        wanted = np.uint32(Flag.PENDING | Flag.GONE)
+        cur = np.flatnonzero((flags & wanted) == np.uint32(Flag.PENDING))
+        if not len(cur):
+            return cur
+        depth, parent = c["depth"][:n], c["parent"][:n]
+        targets = node[rows].astype(np.int64)
+        low = int(depth[targets].min())  # nothing above this depth can be one of the rows
+        reached = np.zeros(n, dtype=bool)
+        cur = parent[cur]  # the folders themselves are drawn as PENDING blocks, not marked
+        while len(cur):
+            cur = cur[cur >= 0]
+            cur = cur[~reached[cur]]
+            reached[cur] = True
+            cur = parent[cur[depth[cur] > low]]
+        return rows[reached[targets]]
 
     def zoom_into(self, key: int) -> bool:
         """Zoom into a block of the last frame (double-click / Enter). False if it cannot be zoomed."""
@@ -487,6 +518,8 @@ class View:
             sizes[: res.n] = res.alloc
         draw = self.layout.run(params, self._root_spec(), sizes)
         frame = self._annotate(draw, res)
+        if self.scanning:
+            frame.flags[self._scanning_rows(draw)] |= F_SCANNING
         frame.flash = self._flash_rows(draw)
         self.last = frame
         return frame

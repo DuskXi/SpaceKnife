@@ -14,6 +14,7 @@ import { t } from "@/lib/i18n";
 import { type DrawFrame, hitTest } from "./frame";
 import { GlRenderer, type Picture } from "./gl";
 import { type ColorMode, paint, rgba } from "./paint";
+import { type Breath, breathingBlocks, drawBreath } from "./scanning";
 import { drawTags, drawTexts, type PreparedText, prepareTexts } from "./text";
 
 export interface HoverInfo {
@@ -65,6 +66,7 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
   const host = useRef<HTMLDivElement>(null);
   const glCanvas = useRef<HTMLCanvasElement>(null);
   const textCanvas = useRef<HTMLCanvasElement>(null);
+  const breathCanvas = useRef<HTMLCanvasElement>(null);
   const r = useRef<{
     gl: GlRenderer | null;
     cur: Layer | null;
@@ -77,7 +79,10 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     flash: Flash | null;
     trail: { x: number; y: number; w: number; h: number; t: number }[];
     lastDraw: number;
-  }>({ gl: null, cur: null, old: null, anim: null, hovered: -1, raf: 0, lastZoomKey: null, lastSeq: -1, flash: null, trail: [], lastDraw: 0 });
+    breath: Breath[];
+    breathRaf: number;
+    breathLast: number;
+  }>({ gl: null, cur: null, old: null, anim: null, hovered: -1, raf: 0, lastZoomKey: null, lastSeq: -1, flash: null, trail: [], lastDraw: 0, breath: [], breathRaf: 0, breathLast: 0 });
 
   const view = useApp((s) => s.views[viewId]);
   const vocab = useApp((s) => s.vocab);
@@ -181,6 +186,31 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     }
   };
 
+  // folders still being scanned breathe on their own canvas (UI-TM-42), at most 30 fps under DynaSmooth
+  const breathe = () => {
+    const st = r.current;
+    const bc = breathCanvas.current;
+    if (!bc || !st.cur) return;
+    const now = performance.now();
+    const gap = dynaSmooth ? Math.max(fpsGap, FPS_GAP["30"]!) : fpsGap;
+    if (gap && st.breath.length && !reduced && now - st.breathLast < gap) {
+      st.breathRaf = requestAnimationFrame(breathe);
+      return;
+    }
+    st.breathLast = now;
+    const W = st.cur.frame.info.width;
+    const H = st.cur.frame.info.height;
+    if (bc.width !== W || bc.height !== H) {
+      bc.width = W;
+      bc.height = H;
+    }
+    const ctx = bc.getContext("2d")!;
+    ctx.clearRect(0, 0, W, H);
+    if (!st.breath.length) return;
+    if (!st.anim) drawBreath(ctx, st.breath, now, reduced, st.cur.frame.info.dpr);
+    if (!reduced || st.anim) st.breathRaf = requestAnimationFrame(breathe); // after a zoom: draw again
+  };
+
   const repaint = (frame: DrawFrame, colorMode: ColorMode, keepPicture?: Picture | null) => {
     const st = r.current;
     if (!st.gl || !textCanvas.current) return null;
@@ -215,7 +245,10 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     } catch (err) {
       console.error(err);
     }
-    return () => cancelAnimationFrame(r.current.raf);
+    return () => {
+      cancelAnimationFrame(r.current.raf);
+      cancelAnimationFrame(r.current.breathRaf);
+    };
   }, []);
 
   // new frame, or a colour-mode / hover change
@@ -266,6 +299,9 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
       : null;
     cancelAnimationFrame(st.raf);
     render();
+    st.breath = breathingBlocks(frame, frame.info.dpr);
+    cancelAnimationFrame(st.breathRaf);
+    breathe();
     onHover?.(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors]);
@@ -378,6 +414,7 @@ export function Treemap({ viewId, onHover, onContextMenu }: Props) {
     <div ref={host} className="treemap" data-view-id={viewId} onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick} onDoubleClick={onDouble} onContextMenu={onMenu}>
       <canvas ref={glCanvas} className="treemap-layer" />
       <canvas ref={textCanvas} className="treemap-layer" />
+      <canvas ref={breathCanvas} className="treemap-layer" />
       {frame && frame.count === 0 && <div className="treemap-empty">{view?.state.compare ? t("两次之间没有变化") : t("这里没有任何占用空间的内容")}</div>}
     </div>
   );
