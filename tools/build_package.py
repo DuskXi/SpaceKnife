@@ -8,15 +8,18 @@
 Windows → dist/electron/SpaceKnife-<version>-Setup-x64.exe (NSIS, unsigned) and win-unpacked/
 Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage, spaceknife_<version>_amd64.deb,
           spaceknife-<version>.x86_64.rpm (needs ``rpmbuild`` on PATH) and linux-unpacked/
+macOS   → dist/electron/SpaceKnife-<version>-mac-<arch>.dmg for this Mac's architecture (arm64 or
+          x64; ad-hoc signed, not notarized) and mac[-arm64]/SpaceKnife.app
 
 Steps: a release build of the native extension (maturin, with the build machine's paths remapped:
 no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
 dist/backend/spaceknife-backend), the frozen backend's smoke test (packaging/smoke_backend.py), on
 Linux the glibc floor of every ELF in the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34),
 ``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
-``electron-builder`` (apps/electron/electron-builder.yml), and a check that no file of the
-packaged app contains the build machine's home path. The native extension is required: an
-installer without it would scan at a fraction of the speed. See docs/packaging.md.
+``electron-builder`` (apps/electron/electron-builder.yml), a check that no file of the
+packaged app contains the build machine's home path, and on macOS a check of the app's ad-hoc
+signature. The native extension is required: an installer without it would scan at a fraction of
+the speed. See docs/packaging.md.
 """
 
 from __future__ import annotations
@@ -229,6 +232,31 @@ def check_no_build_paths(root: Path) -> None:
     done(t0, f"{files} files, {members} archive members")
 
 
+def mac_arm64() -> bool:
+    return sys.platform == "darwin" and os.uname().machine == "arm64"
+
+
+def unpacked_app() -> Path:
+    """electron-builder's unpacked app: the folder the installer is made from."""
+    if sys.platform == "win32":
+        return DIST / "electron" / "win-unpacked"
+    if sys.platform == "darwin":
+        return DIST / "electron" / ("mac-arm64" if mac_arm64() else "mac") / "SpaceKnife.app"
+    return DIST / "electron" / "linux-unpacked"
+
+
+def check_mac_signature(app: Path) -> None:
+    """The whole bundle carries a valid ad-hoc signature (electron-builder.yml: identity "-"): an
+    Apple Silicon Mac runs no unsigned code, and a broken signature makes Gatekeeper call the app
+    "damaged" instead of offering "Open Anyway"."""
+    t0 = step("ad-hoc signature of the app")
+    run(["codesign", "--verify", "--deep", "--strict", str(app)])
+    info = subprocess.run(["codesign", "-dv", str(app)], capture_output=True, text=True, check=True).stderr
+    if "Signature=adhoc" not in info:
+        raise SystemExit(f"{app.name} is not ad-hoc signed:\n{info}")
+    done(t0, "valid, ad-hoc")
+
+
 def build_electron(targets: list[str]) -> None:
     t0 = step("Electron app (electron-vite build)")
     run(["pnpm", "-s", "build"], cwd=ELECTRON)
@@ -238,20 +266,25 @@ def build_electron(targets: list[str]) -> None:
     done(t0)
     if not backend_exe().exists():
         raise SystemExit(f"no frozen backend at {BACKEND_DIR}: run without --skip-backend")
+    arch = "--x64"
     if sys.platform == "win32":
         platform = ["--win", "nsis"]
     elif sys.platform.startswith("linux"):
         if "rpm" in targets and shutil.which("rpmbuild") is None:
             raise SystemExit("rpm needs rpmbuild on PATH (or leave it out: --targets AppImage deb)")
         platform = ["--linux", *targets]
+    elif sys.platform == "darwin":
+        # the frozen backend runs on this Mac's architecture only, so the app is built for it too
+        platform = ["--mac", "dmg"]
+        arch = "--arm64" if mac_arm64() else "--x64"
     else:
-        raise SystemExit("installers are built on Windows and Linux only (macOS packaging is deferred)")
-    t0 = step(f"installers (electron-builder {' '.join(platform[1:])})")
-    run(["pnpm", "exec", "electron-builder", *platform, "--x64", "--publish", "never"], cwd=ELECTRON)
+        raise SystemExit(f"no installers for {sys.platform}")
+    t0 = step(f"installers (electron-builder {' '.join(platform[1:])} {arch[2:]})")
+    run(["pnpm", "exec", "electron-builder", *platform, arch, "--publish", "never"], cwd=ELECTRON)
     done(t0)
-    check_no_build_paths(
-        DIST / "electron" / ("win-unpacked" if sys.platform == "win32" else "linux-unpacked")
-    )
+    check_no_build_paths(unpacked_app())
+    if sys.platform == "darwin":
+        check_mac_signature(unpacked_app())
 
 
 def main() -> int:
@@ -270,7 +303,7 @@ def main() -> int:
     build_electron(args.targets)
     out = DIST / "electron"
     for f in sorted(out.iterdir()):
-        if f.is_file() and f.suffix in {".exe", ".AppImage", ".deb", ".rpm"}:
+        if f.is_file() and f.suffix in {".exe", ".AppImage", ".deb", ".rpm", ".dmg"}:
             console.print(f"  {f.relative_to(ROOT)}  [dim]{f.stat().st_size / 2**20:.0f} MB[/dim]")
     return 0
 

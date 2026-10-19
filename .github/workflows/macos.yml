@@ -1,0 +1,76 @@
+name: macOS build
+
+# The macOS dmg for each architecture, built on a Mac of that architecture (PyInstaller freezes the
+# interpreter it runs on). Ad-hoc signed and not notarized until there is an Apple Developer ID; the
+# dmg and its checksum go to the run's artifacts, and a maintainer attaches them to a release
+# (docs/packaging.md). Started by hand: Actions › macOS build › Run workflow.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    name: macOS · ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+        with:
+          enable-cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/electron/pnpm-lock.yaml
+
+      - name: Update Rust
+        run: rustup update stable --no-self-update && rustup default stable
+
+      - name: Install Python 3.12 and the build tools
+        run: |
+          uv python install 3.12
+          uv sync --locked --group native --group package
+
+      - name: Install the Electron app's dependencies
+        working-directory: apps/electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the dmg
+        run: uv run python tools/build_package.py
+
+      - name: Checksum
+        working-directory: dist/electron
+        run: shasum -a 256 *.dmg | tee "SHA256SUMS-mac-${{ matrix.arch }}.txt"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SpaceKnife-mac-${{ matrix.arch }}
+          path: |
+            dist/electron/*.dmg
+            dist/electron/SHA256SUMS-mac-*.txt
+          if-no-files-found: error
+          retention-days: 14
