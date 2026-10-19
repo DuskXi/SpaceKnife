@@ -318,6 +318,7 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
             libc::close(dup);
             return Err(e);
         }
+        libc::rewinddir(dir); // from the first entry, whatever read the descriptor before
         let result = loop {
             *errno_location() = 0;
             let ent = libc::readdir(dir);
@@ -345,6 +346,7 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
 mod bulk {
     use std::cell::RefCell;
     use std::ffi::CStr;
+    use std::sync::Mutex;
     use std::sync::atomic::{AtomicU8, Ordering};
 
     use super::{Meta, errno, stat_entry};
@@ -417,6 +419,15 @@ mod bulk {
     const ON: u8 = 1;
     const OFF: u8 = 2;
     static STATE: AtomicU8 = AtomicU8::new(UNTESTED);
+    static REASON: Mutex<String> = Mutex::new(String::new()); // why it was turned off
+
+    fn turn_off(why: String) {
+        if STATE.swap(OFF, Ordering::Relaxed) != OFF {
+            if let Ok(mut r) = REASON.lock() {
+                *r = why;
+            }
+        }
+    }
     const BUF_BYTES: usize = 256 * 1024;
     const CHECKS: usize = 8; // entries compared with fstatat before the bulk path is trusted
 
@@ -440,11 +451,18 @@ mod bulk {
         (rd::<i64>(b, at), rd::<i64>(b, at + 8) as u64)
     }
 
-    pub fn state() -> &'static str {
+    pub fn state() -> String {
         match STATE.load(Ordering::Relaxed) {
-            ON => "on",
-            OFF => "off",
-            _ => "untested",
+            ON => "on".to_owned(),
+            OFF => {
+                let why = REASON.lock().map(|r| r.clone()).unwrap_or_default();
+                if why.is_empty() {
+                    "off".to_owned()
+                } else {
+                    format!("off: {why}")
+                }
+            }
+            _ => "untested".to_owned(),
         }
     }
 
@@ -454,7 +472,7 @@ mod bulk {
             OFF => false,
             _ => {
                 if std::env::var_os("SPACEKNIFE_NO_BULK").is_some_and(|v| v == "1") {
-                    STATE.store(OFF, Ordering::Relaxed);
+                    turn_off("SPACEKNIFE_NO_BULK=1".to_owned());
                     return false;
                 }
                 true
@@ -464,18 +482,26 @@ mod bulk {
 
     /// One parsed record: the name (with its NUL) and, when the record can be trusted for a
     /// non-folder, its attributes (None: fstatat it).
-    fn parse(rec: &[u8]) -> Option<(&CStr, Option<Meta>)> {
+    fn parse(rec: &[u8]) -> Result<(&CStr, Option<Meta>), String> {
         if rec.len() < RECORD {
-            return None;
+            return Err(format!(
+                "a record of {} bytes, {RECORD} expected",
+                rec.len()
+            ));
         }
         let name_off = rd::<i32>(rec, AT_NAME) as isize;
         let name_len = rd::<u32>(rec, AT_NAME + 4) as usize;
         let start = AT_NAME as isize + name_off;
         if start < RECORD as isize || name_len == 0 || start as usize + name_len > rec.len() {
-            return None;
+            return Err(format!(
+                "name at {start}, {name_len} bytes, in a record of {}",
+                rec.len()
+            ));
         }
         let start = start as usize;
-        let name = CStr::from_bytes_with_nul(&rec[start..start + name_len]).ok()?;
+        let raw = &rec[start..start + name_len];
+        let name =
+            CStr::from_bytes_until_nul(raw).map_err(|_| format!("name without NUL: {raw:?}"))?;
         let returned = rd::<u32>(rec, AT_RETURNED);
         let returned_file = rd::<u32>(rec, AT_RETURNED + 12);
         let objtype = rd::<u32>(rec, AT_OBJTYPE);
@@ -484,7 +510,7 @@ mod bulk {
             && returned_file & FILE == FILE
             && objtype != VDIR;
         if !usable {
-            return Some((name, None));
+            return Ok((name, None));
         }
         let mode = match objtype {
             VREG => libc::S_IFREG,
@@ -493,7 +519,7 @@ mod bulk {
             5 => libc::S_IFLNK,
             6 => libc::S_IFSOCK,
             7 => libc::S_IFIFO,
-            _ => return Some((name, None)),
+            _ => return Ok((name, None)),
         } as u32;
         let alloc = rd::<i64>(rec, AT_ALLOCSIZE).max(0);
         let meta = Meta {
@@ -508,7 +534,7 @@ mod bulk {
             nlink: rd::<u32>(rec, AT_LINKCOUNT) as u64,
             flags: rd::<u32>(rec, AT_FLAGS),
         };
-        Some((name, Some(meta)))
+        Ok((name, Some(meta)))
     }
 
     /// The fields fstatat and getattrlistbulk must agree on (access times may move meanwhile).
@@ -566,25 +592,33 @@ mod bulk {
                 let mut off = 0usize;
                 for _ in 0..n {
                     if off + 4 > BUF_BYTES {
-                        return bail(emitted);
+                        return bail(emitted, "records past the buffer".to_owned());
                     }
                     let len = rd::<u32>(bytes, off) as usize;
-                    if len < RECORD || off + len > BUF_BYTES {
-                        return bail(emitted);
+                    if len < 4 || off + len > BUF_BYTES {
+                        return bail(emitted, format!("a record length of {len}"));
                     }
                     match parse(&bytes[off..off + len]) {
-                        Some(item) => batch.push(item),
-                        None => return bail(emitted),
+                        Ok(item) => batch.push(item),
+                        Err(why) => return bail(emitted, why),
                     }
                     off += len;
                 }
-                if STATE.load(Ordering::Relaxed) == UNTESTED && !trusted(dirfd, &batch) {
-                    STATE.store(OFF, Ordering::Relaxed);
+                let verdict = if STATE.load(Ordering::Relaxed) == UNTESTED {
+                    trusted(dirfd, &batch)
+                } else {
+                    Ok(())
+                };
+                if let Err(why) = verdict {
+                    turn_off(why);
                     if !emitted {
                         return Ok(false);
                     }
+                }
+                if STATE.load(Ordering::Relaxed) == OFF {
+                    // turned off (here or by another thread's check): fstatat the rest of this folder
                     for (_, meta) in batch.iter_mut() {
-                        *meta = None; // fstatat the rest of this folder
+                        *meta = None;
                     }
                 }
                 for (name, meta) in batch.drain(..) {
@@ -597,14 +631,14 @@ mod bulk {
 
     /// A record that cannot be read: turn the bulk path off; before anything was emitted the
     /// folder is listed the other way, after it the listing fails (EIO).
-    fn bail(emitted: bool) -> Result<bool, i32> {
-        STATE.store(OFF, Ordering::Relaxed);
+    fn bail(emitted: bool, why: String) -> Result<bool, i32> {
+        turn_off(why);
         if emitted { Err(libc::EIO) } else { Ok(false) }
     }
 
     /// Compare up to CHECKS entries with fstatat; true when they all agree (or there is nothing to
     /// compare yet: the next batch is checked then).
-    fn trusted(dirfd: libc::c_int, batch: &[(&CStr, Option<Meta>)]) -> bool {
+    fn trusted(dirfd: libc::c_int, batch: &[(&CStr, Option<Meta>)]) -> Result<(), String> {
         let mut checked = 0;
         for (name, meta) in batch {
             let Some(bulk) = meta else { continue };
@@ -612,7 +646,7 @@ mod bulk {
                 continue;
             };
             if !same(bulk, &stat) {
-                return false;
+                return Err(format!("{name:?} differs: bulk {bulk:?}, fstatat {stat:?}"));
             }
             checked += 1;
             if checked == CHECKS {
@@ -620,9 +654,9 @@ mod bulk {
             }
         }
         if checked > 0 {
-            STATE.store(ON, Ordering::Relaxed);
+            let _ = STATE.compare_exchange(UNTESTED, ON, Ordering::Relaxed, Ordering::Relaxed);
         }
-        true
+        Ok(())
     }
 }
 
@@ -643,7 +677,7 @@ unsafe fn errno_location() -> *mut libc::c_int {
 }
 
 #[cfg(target_os = "macos")]
-pub fn bulk_state() -> &'static str {
+pub fn bulk_state() -> String {
     bulk::state()
 }
 
@@ -681,6 +715,9 @@ pub fn list_dir(
             if listed {
                 return Ok(());
             }
+            // getattrlistbulk moved the directory offset: read it again from the start
+            // SAFETY: plain call on our descriptor.
+            unsafe { libc::lseek(fd.0, 0, libc::SEEK_SET) };
         }
     }
     read_entries(&fd, |name| {

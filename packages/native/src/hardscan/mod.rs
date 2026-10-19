@@ -436,14 +436,14 @@ fn scan_slice<'py>(
 /// fstatat), "off" (turned off: a difference, or SPACEKNIFE_NO_BULK=1), "untested" (nothing listed
 /// yet); "unsupported" elsewhere (readdir / getdents64 + fstatat, NtQueryDirectoryFile on Windows).
 #[pyfunction]
-fn bulk_listing() -> &'static str {
+fn bulk_listing() -> String {
     #[cfg(target_os = "macos")]
     {
         posix::bulk_state()
     }
     #[cfg(not(target_os = "macos"))]
     {
-        "unsupported"
+        "unsupported".to_owned()
     }
 }
 

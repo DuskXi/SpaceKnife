@@ -14,11 +14,12 @@
 ## macOS（2026-10-19 恢复）
 
 - [x] dmg 打包：arm64 与 x64 各在对应架构的 Mac 上构建（GitHub Actions「macOS build」，手动触发），ad-hoc 签名、未公证；README 写明第一次打开的放行步骤
-- [ ] 实机验证（Intel Mac）：放行流程、扫描（原生遍历的 `readdir` / `st_birthtime` 第一次在 Mac 上跑）、FSEvents 监控、回收站（`NSFileManager`）、「完全磁盘访问权限」、标题栏与菜单
+- [x] 实机试用（Intel Mac，2026-10-19）：放行流程可用；发现并修好了数据卷重复计数（进度卡 99%）、扫描期间被删文件夹导致的扫描失败、磁盘负载测不到、云盘触发下载、逐个弹权限，并用 getattrlistbulk 提速
+- [ ] 再次实机验证（Intel Mac）：上面这些修复、FSEvents 监控（数据卷路径经 firmlink 映射）、回收站（`NSFileManager`）、标题栏与菜单
 - [ ] Developer ID 签名与公证（等 Apple 开发者账号审核）：Hardened Runtime、权限声明、notarytool、CI 里用 Secrets 自动签名
 - [ ] Homebrew cask（官方仓库要求通过 Gatekeeper，等公证）
 - [ ] Mac App Store（可选）：沙盒下用户授权整盘，访问权要用隐式安全范围书签传给后端子进程，先做概念验证
-- [ ] 应用内引导开启「完全磁盘访问权限」（直接打开系统设置的对应页面）
+- [x] 应用内引导开启「完全磁盘访问权限」（扫描前的说明框直接打开系统设置的对应页面；设置「扫描范围 › 受保护的位置」）
 
 ## M4 收尾
 
