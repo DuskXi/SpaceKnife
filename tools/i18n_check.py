@@ -227,6 +227,8 @@ def main() -> int:
         found = scan_electron()
         if found is None:
             print("electron: skipped (needs node and apps/electron/node_modules)")
+            if args.area == "electron":  # asked for by name (CI): not checking is a failure
+                bad += 1
         else:
             ids, problems = found
             ids = {k: v for k, v in ids.items() if not only or any((ROOT / f).resolve() in only for f in v)}
