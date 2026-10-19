@@ -26,7 +26,7 @@ while IFS= read -r path; do
     docs/* | site/* | design/app-icon/* | design/social/* | design/README.md \
       | README.md | README.zh-CN.md | CONTRIBUTING.md | CODE_OF_CONDUCT.md | SECURITY.md | TODO.md | LICENSE \
       | .github/ISSUE_TEMPLATE/* | .github/pull_request_template.md | .github/workflows/pages.yml \
-      | .github/workflows/macos.yml) ;;
+      | .github/workflows/macos.yml | .github/workflows/portable.yml) ;;
     *)
       python=true
       ;;

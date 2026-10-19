@@ -9,6 +9,7 @@ import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from 
 
 import type { BackendState } from "../shared/api";
 import { type Backend, bundledBackend, startBackend } from "./backend";
+import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,9 +27,13 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
+// A portable copy keeps its data next to the executable: the backend inherits SPACEKNIFE_HOME.
+const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env);
+if (portable) process.env.SPACEKNIFE_HOME = portable;
+
 // The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own: an isolated
-// home (demos, tests) gets its own; otherwise <appData>/SpaceKnife/electron, apart from the backend's
-// files (on Linux the backend's config folder is ~/.config/SpaceKnife as well).
+// home (demos, tests, portable copies) gets its own; otherwise <appData>/SpaceKnife/electron, apart from
+// the backend's files (on Linux the backend's config folder is ~/.config/SpaceKnife as well).
 app.setPath(
   "userData",
   process.env.SPACEKNIFE_HOME ? join(resolve(process.env.SPACEKNIFE_HOME), "electron") : join(app.getPath("appData"), "SpaceKnife", "electron"),

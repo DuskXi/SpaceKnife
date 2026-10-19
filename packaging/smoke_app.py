@@ -3,9 +3,11 @@
     python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe
     python packaging/smoke_app.py dist/electron/linux-unpacked/spaceknife
     python packaging/smoke_app.py SpaceKnife-<v>-x86_64.AppImage     # run with --appimage-extract-and-run
+    python packaging/smoke_app.py --portable <unpacked portable archive>/SpaceKnife.exe
 
 The app starts minimized (SPACEKNIFE_START_MINIMIZED) with an isolated home (temporary folder:
-its own settings, snapshots and Chromium profile) and the Chrome DevTools port on; through the
+its own settings, snapshots and Chromium profile; with --portable the data/ folder next to the
+executable, which the app has to find by itself) and the Chrome DevTools port on; through the
 port the test waits for the bundled backend to be ready and the start page to list the drives,
 then closes the window the way a user does and checks that the app and its backend both exit
 (the backend stops on stdin EOF). Exit status 1 on failure.
@@ -74,8 +76,12 @@ def until(what: str, check: Callable[[], Any]) -> Any:
         time.sleep(0.5)
 
 
-def smoke(app: Path, home: Path) -> None:
-    env = {**os.environ, "SPACEKNIFE_HOME": str(home), "SPACEKNIFE_START_MINIMIZED": "1"}
+def smoke(app: Path, home: Path, portable: bool = False) -> None:
+    env = {**os.environ, "SPACEKNIFE_START_MINIMIZED": "1"}
+    if portable:
+        env.pop("SPACEKNIFE_HOME", None)  # the app finds <its folder>/data by itself
+    else:
+        env["SPACEKNIFE_HOME"] = str(home)
     argv = [str(app), "--remote-debugging-port=0"]
     if app.suffix == ".AppImage":
         argv.insert(1, "--appimage-extract-and-run")  # no FUSE needed
@@ -130,9 +136,22 @@ def smoke(app: Path, home: Path) -> None:
 
 
 def main() -> int:
-    app = Path(sys.argv[1]).resolve()
-    with tempfile.TemporaryDirectory(prefix="sk-app-smoke-") as tmp:
-        smoke(app, Path(tmp))
+    args = sys.argv[1:]
+    portable = "--portable" in args
+    app = Path(next(a for a in args if a != "--portable")).resolve()
+    if portable:
+        # the DevTools port file appears in data/electron only if the app found its data folder
+        home = app.parent / "data"
+        if not home.is_dir():
+            raise SystemExit(f"FAIL no portable data folder at {home}")
+        smoke(app, home, portable=True)
+        stored = sorted(p.name for p in home.iterdir())
+        print(f"portable data folder holds: {', '.join(stored)}")
+        if "electron" not in stored:
+            raise SystemExit("FAIL the app did not keep its data in the portable folder")
+    else:
+        with tempfile.TemporaryDirectory(prefix="sk-app-smoke-") as tmp:
+            smoke(app, Path(tmp))
     print("packaged app: ok")
     return 0
 
