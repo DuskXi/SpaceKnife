@@ -487,16 +487,23 @@ class NodeStore:
         new = np.flatnonzero(inner)
         for col, i in zip(tot, range(4), strict=True):
             col[dirs[new]] = acc[new, i]  # new directories start from zero
-        # listed nodes of the store pass their subtree totals up their chain, root included
+        # listed nodes of the store pass their subtree totals up their chain, root included: the
+        # chains first, then one addition per total
         top = np.flatnonzero(~inner)
         node, add = dirs[top], acc[top]
         parent = c["parent"]
+        chain: list[np.ndarray] = []
+        adds: list[np.ndarray] = []
         while len(node):
-            for col, i in zip(tot, range(4), strict=True):
-                np.add.at(col, node, add[:, i])
+            chain.append(node)
+            adds.append(add)
             node = parent[node].astype(np.int64)
             keep = node >= 0
             node, add = node[keep], add[keep]
+        if chain:
+            nodes, amounts = np.concatenate(chain), np.concatenate(adds)
+            for col, i in zip(tot, range(4), strict=True):
+                np.add.at(col, nodes, amounts[:, i])
         return starts
 
     def _propagate(self, node: int, size: int, alloc: int, files: int, dirs: int) -> None:

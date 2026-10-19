@@ -116,7 +116,55 @@ class SliceResult:
     ext_ids: np.ndarray  # uint16 per entry, ids into ext_table
     frontier: list[Task]
     errors: list[tuple[Ref, str, str]]
-    elapsed: float = 0.0
+    elapsed: float = 0.0  # seconds spent listing (not waiting to start, nor handing the result over)
+
+
+def _shift(ref: Ref | np.ndarray, listings: int) -> Ref:
+    kind, j, i = (int(x) for x in ref)
+    return (kind, j, i) if kind == 0 else (kind, j + listings, i)
+
+
+def merge_slices(results: list[SliceResult]) -> SliceResult:
+    """Several slices as one, their listings one after another: the store folds them in one call
+    and pays its per-call costs once. Listings of different slices never name each other, so only
+    the references inside each slice (``(1, listing, entry)``) move. Extensions get one table."""
+    if len(results) == 1:
+        return results[0]
+    refs: list[np.ndarray] = []
+    bounds: list[np.ndarray] = [np.zeros(1, dtype=np.int64)]
+    ext_ids: list[np.ndarray] = []
+    frontier: list[Task] = []
+    errors: list[tuple[Ref, str, str]] = []
+    table: dict[str, int] = {}
+    listings = entries = 0
+    for r in results:
+        rr = np.array(r.refs, dtype=np.int64).reshape(-1, 3)
+        rr[rr[:, 0] != 0, 1] += listings
+        refs.append(rr)
+        bounds.append(np.asarray(r.bounds, dtype=np.int64)[1:] + entries)
+        remap = np.array([table.setdefault(e, len(table)) for e in r.ext_table], dtype=np.uint16)
+        ext_ids.append(remap[np.asarray(r.ext_ids, dtype=np.intp)])
+        if listings:
+            frontier += [(_shift(ref, listings), path, root) for ref, path, root in r.frontier]
+            errors += [(_shift(ref, listings), path, msg) for ref, path, msg in r.errors]
+        else:
+            frontier += r.frontier
+            errors += r.errors
+        listings += len(rr)
+        entries += len(r.name_lens)
+    return SliceResult(
+        refs=np.concatenate(refs),
+        paths=[p for r in results for p in r.paths],
+        bounds=np.concatenate(bounds),
+        name_blob=b"".join(r.name_blob for r in results),
+        name_lens=np.concatenate([r.name_lens for r in results]),
+        cols={key: np.concatenate([r.cols[key] for r in results]) for key in results[0].cols},
+        ext_table=list(table),
+        ext_ids=np.concatenate(ext_ids),
+        frontier=frontier,
+        errors=errors,
+        elapsed=sum(r.elapsed for r in results),
+    )
 
 
 @dataclass(slots=True)

@@ -35,7 +35,7 @@ from ..privacy import inside, protected_folders
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
 from .volume import VolumeInfo, is_volume_root, volume_for, volume_group_twins
-from .worker import RootOptions, SliceOptions, SliceResult, Task
+from .worker import RootOptions, SliceOptions, SliceResult, Task, merge_slices
 
 if TYPE_CHECKING:
     from ..io import IoGovernor, Permit
@@ -111,8 +111,8 @@ NATIVE_BUDGET_S = 0.05  # seconds a native call lists before it returns what it 
 def native_threads() -> int:
     """Listing threads for the native walker: one per CPU, at most 16 (beyond that NTFS's locks only
     add contention). On macOS twice the CPUs: APFS listings wait in the kernel often enough that the
-    extra threads keep the CPUs busy (GitHub's macOS runners: 3-CPU arm64 +8 %, +27 % on 3 M items;
-    4-CPU Intel even; many more starve the main thread that folds the results; docs/packaging.md).
+    extra threads keep the CPUs busy (GitHub's macOS runners, 3-CPU arm64 and 4-CPU Intel: +5 % to
+    +15 %; many more starve the main thread that folds the results; docs/packaging.md).
     SPACEKNIFE_SCAN_THREADS sets it (1–64) for measurements."""
     forced = os.environ.get("SPACEKNIFE_SCAN_THREADS", "")
     if forced.isdigit() and int(forced) > 0:
@@ -444,6 +444,7 @@ class Scanner:
                 if not waits:
                     break
                 done, _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                landed: list[SliceResult] = []
                 for fut in done:
                     if fut is permit_task:
                         permit_task = None
@@ -458,7 +459,9 @@ class Scanner:
                         resumed = None
                     else:
                         inflight.discard(fut)
-                        self._apply(fut.result())
+                        landed.append(fut.result())
+                if landed:
+                    self._apply(*landed)
                 now = time.perf_counter()
                 if on_progress is not None and now - last_report >= progress_interval:
                     last_report = now
@@ -510,16 +513,18 @@ class Scanner:
 
     # ------------------------------------------------------------------ folding results
 
-    def _apply(self, res: SliceResult) -> None:
+    def _apply(self, *results: SliceResult) -> None:
+        """Fold slice results into the tree: several that came in together as one (fewer, larger
+        calls into the store; the main thread folding is what limits a fast scan)."""
         t0 = time.perf_counter()
         n0 = len(self.store)
         try:
-            self._fold(res)
+            self._fold(merge_slices(list(results)))
         finally:
             self._folded += len(self.store) - n0
             self._ingest_s += time.perf_counter() - t0
-            self._busy_s += res.elapsed
-            self._slices += 1
+            self._busy_s += sum(r.elapsed for r in results)
+            self._slices += len(results)
 
     def profile(self) -> ScanProfile:
         end = self._finished or time.perf_counter()
@@ -558,23 +563,32 @@ class Scanner:
             res.name_lens,
             {key: cols[key] for key in ENTRY_COLUMNS},
             ext_global,
-        ).tolist()
+        )
         if res.paths:
             self._current = res.paths[-1]
-        skipped = sum(1 for s in starts if s < 0)
+        skipped = int(np.count_nonzero(starts < 0))
         if skipped:
             logger.debug("scan: {} listing(s) of folders deleted while they were read, skipped", skipped)
 
-        def resolve(ref: tuple[int, int, int] | np.ndarray) -> int | None:
-            """The node a result refers to; None when it left the tree while it was read."""
-            kind, a, b = (int(x) for x in ref)
-            if kind == 0:
-                return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
-            return None if starts[a] < 0 else starts[a] + b
+        def resolve(refs: list[tuple[int, int, int]]) -> list[int]:
+            """The nodes results refer to; -1 for one that left the tree while it was read."""
+            if not refs:
+                return []
+            r = np.array(refs, dtype=np.int64).reshape(-1, 3)
+            inner = r[:, 0] != 0
+            out = r[:, 1].copy()
+            if bool(inner.any()):
+                begin = starts[r[inner, 1]]
+                out[inner] = np.where(begin >= 0, begin + r[inner, 2], -1)
+            old = ~inner
+            if bool(old.any()):
+                gone = (store.cols["flags"][out[old]] & np.uint32(Flag.GONE)) != 0
+                out[old] = np.where(gone, -1, out[old])
+            nodes: list[int] = out.tolist()
+            return nodes
 
-        for ref, path, msg in res.errors:
-            node = resolve(ref)
-            if node is None:
+        for (_, path, msg), node in zip(res.errors, resolve([e[0] for e in res.errors]), strict=True):
+            if node < 0:
                 continue
             store.mark(node, Flag.ACCESS_DENIED)
             store.clear(node, Flag.PENDING)
@@ -582,10 +596,12 @@ class Scanner:
             if len(self._denied) < MAX_RECORDED_DENIED:
                 self._denied.append(path)
                 self.denied_reasons.append(msg)
-        for ref, path, root_idx in res.frontier:
-            node = resolve(ref)
-            if node is not None:
-                self._queue.append(((0, node, 0), path, root_idx))
+        nodes = resolve([f[0] for f in res.frontier])
+        self._queue.extend(
+            ((0, node, 0), path, root_idx)
+            for (_, path, root_idx), node in zip(res.frontier, nodes, strict=True)
+            if node >= 0
+        )
 
     # ------------------------------------------------------------------ reporting
 
