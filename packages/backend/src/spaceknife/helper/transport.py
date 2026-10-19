@@ -340,7 +340,25 @@ else:
             """Wait up to ``wait`` seconds for the helper to connect (TimeoutError otherwise; may retry)."""
             if self._sock is None:
                 raise ConnectionAbortedError(tr("监听已关闭"))
-            conn, _ = await asyncio.wait_for(asyncio.get_running_loop().sock_accept(self._sock), wait)
+            # Wait for readiness, then accept. wait_for(sock_accept()) drops a connection that arrives in
+            # the same loop iteration as the timeout; a readiness wait consumes nothing, so a retry finds it.
+            loop = asyncio.get_running_loop()
+            ready = loop.create_future()
+            fd = self._sock.fileno()
+
+            def on_ready() -> None:
+                if not ready.done():
+                    ready.set_result(None)
+
+            loop.add_reader(fd, on_ready)
+            try:
+                await asyncio.wait_for(ready, wait)
+            finally:
+                loop.remove_reader(fd)
+            try:
+                conn, _ = self._sock.accept()
+            except (BlockingIOError, InterruptedError):
+                raise TimeoutError from None  # a spurious wake-up: the caller retries
             try:
                 _pid, uid = _peer_cred(conn)
                 if uid is not None and uid not in (os.getuid(), 0):

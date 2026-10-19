@@ -582,6 +582,32 @@ def test_addresses_are_validated() -> None:
         assert not valid_address(bad), bad
 
 
+@pytest.mark.skipif(
+    IS_WINDOWS, reason="unix socket listener; the pipe listener times out inside the pipe wait"
+)
+async def test_listener_keeps_a_connection_that_races_the_timeout() -> None:
+    import socket
+
+    listener = Listener()
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    def connect_then_stall() -> None:
+        client.connect(listener.address)
+        time.sleep(0.2)  # the connection and the accept timeout become due in the same loop iteration
+
+    asyncio.get_running_loop().call_later(0.02, connect_then_stall)
+    try:
+        try:
+            channel = await listener.accept(0.1)
+        except TimeoutError:
+            channel = await listener.accept(2)  # still queued: _accept's next slice picks it up
+        assert channel.peer_pid == os.getpid()
+        channel.close()
+    finally:
+        client.close()
+        listener.close()
+
+
 def test_helper_refuses_bad_arguments(tmp_path: Path) -> None:
     token_path = write_token_file(new_token(), str(tmp_path))
     base = [*helper_command(False), "--server-pid", str(os.getpid())]
