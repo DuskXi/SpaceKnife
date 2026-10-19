@@ -210,10 +210,18 @@ def _contents(path: Path) -> Iterator[tuple[str, bytes]]:
                     yield name, member
 
 
+# GitHub-hosted runners: a home folder that names no person. Wheels from PyPI that were built on
+# such runners (pydantic-core, zstandard, …) contain it too, so it cannot be told apart from ours.
+RUNNER_HOMES = {"/Users/runner", "/home/runner"}
+
+
 def check_no_build_paths(root: Path) -> None:
     """No file of the packaged app may contain the build machine's home path (user name),
     including inside zip files and the frozen backend's module archive."""
     t0 = step(f"no build-machine paths in {root.relative_to(ROOT)}")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and str(Path.home()) in RUNNER_HOMES:
+        done(t0, f"skipped: {Path.home()} is the GitHub runner's home, not a user's")
+        return
     patterns = home_path_patterns()
     bad: list[str] = []
     files = members = 0
