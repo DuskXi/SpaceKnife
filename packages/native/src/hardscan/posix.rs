@@ -396,7 +396,8 @@ mod bulk {
     // u32 length, attribute_set_t returned (5 x u32), u32 error (right after the returned set),
     // then by bit: attrreference_t name, dev_t devid, fsobj_type_t objtype, timespec crtime,
     // modtime, acctime, u32 flags, u64 fileid; then the file attributes: u32 linkcount,
-    // off_t allocsize, off_t datalength. The name's bytes follow, where its reference points.
+    // off_t allocsize, off_t datalength (these only for what is not a folder). The name's
+    // bytes follow, where its reference points.
     const AT_RETURNED: usize = 4;
     const AT_ERROR: usize = 24;
     const AT_NAME: usize = 28;
@@ -407,10 +408,11 @@ mod bulk {
     const AT_ACCTIME: usize = 76;
     const AT_FLAGS: usize = 92;
     const AT_FILEID: usize = 96;
+    const COMMON_END: usize = 104; // every record: the common attributes
     const AT_LINKCOUNT: usize = 104;
     const AT_ALLOCSIZE: usize = 108;
     const AT_DATALENGTH: usize = 116;
-    const RECORD: usize = 124;
+    const RECORD: usize = 124; // with the file attributes (not packed for folders)
 
     const VREG: u32 = 1;
     const VDIR: u32 = 2;
@@ -483,16 +485,16 @@ mod bulk {
     /// One parsed record: the name (with its NUL) and, when the record can be trusted for a
     /// non-folder, its attributes (None: fstatat it).
     fn parse(rec: &[u8]) -> Result<(&CStr, Option<Meta>), String> {
-        if rec.len() < RECORD {
+        if rec.len() < COMMON_END {
             return Err(format!(
-                "a record of {} bytes, {RECORD} expected",
+                "a record of {} bytes, at least {COMMON_END} expected",
                 rec.len()
             ));
         }
         let name_off = rd::<i32>(rec, AT_NAME) as isize;
         let name_len = rd::<u32>(rec, AT_NAME + 4) as usize;
         let start = AT_NAME as isize + name_off;
-        if start < RECORD as isize || name_len == 0 || start as usize + name_len > rec.len() {
+        if start < COMMON_END as isize || name_len == 0 || start as usize + name_len > rec.len() {
             return Err(format!(
                 "name at {start}, {name_len} bytes, in a record of {}",
                 rec.len()
@@ -505,10 +507,13 @@ mod bulk {
         let returned = rd::<u32>(rec, AT_RETURNED);
         let returned_file = rd::<u32>(rec, AT_RETURNED + 12);
         let objtype = rd::<u32>(rec, AT_OBJTYPE);
+        // folders carry no file attributes (and go through fstatat anyway); a record without
+        // them, or one reported with an error, is fstatat'ed too
         let usable = rd::<u32>(rec, AT_ERROR) == 0
+            && objtype != VDIR
             && returned & NEEDED == NEEDED
             && returned_file & FILE == FILE
-            && objtype != VDIR;
+            && start >= RECORD;
         if !usable {
             return Ok((name, None));
         }
