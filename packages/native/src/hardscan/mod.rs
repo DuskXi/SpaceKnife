@@ -49,7 +49,13 @@ use common::{Arena, NativePath, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
 const OPT_KEYS: [&str; 4] = ["roots", "budget_s", "max_entries", "threads"];
-const ROOT_KEYS: [&str; 5] = ["dev", "cluster_size", "resident_max", "cross_mounts", "skip"];
+const ROOT_KEYS: [&str; 5] = [
+    "dev",
+    "cluster_size",
+    "resident_max",
+    "cross_mounts",
+    "skip",
+];
 
 struct Opts {
     roots: Vec<RootOpts>,

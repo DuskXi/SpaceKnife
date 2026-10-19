@@ -40,6 +40,8 @@ F_ENCRYPTED = 1 << 13
 F_TEMPORARY = 1 << 14
 F_NOT_INDEXED = 1 << 15
 F_OFFLINE = 1 << 16
+SF_DATALESS = 0x40000000  # macOS st_flags: contents in the cloud (iCloud Drive, File Provider)
+DARWIN = sys.platform == "darwin"
 
 IS_WINDOWS = sys.platform == "win32"
 NAME_ERRORS = "surrogatepass" if IS_WINDOWS else "surrogateescape"
@@ -280,6 +282,10 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                     continue
                 mode = st.st_mode
                 descend = False
+                if DARWIN and getattr(st, "st_flags", 0) & SF_DATALESS:
+                    flags |= (
+                        F_CLOUD  # takes no local space; a folder is not entered: listing would download it
+                    )
                 if stat.S_ISDIR(mode):
                     kind = KIND_DIR
                     if (st.st_dev != root.dev and not root.cross_mounts) or (
@@ -287,7 +293,7 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                     ):
                         flags |= F_MOUNT
                     else:
-                        descend = True
+                        descend = not flags & F_CLOUD
                 elif stat.S_ISLNK(mode):
                     kind = KIND_LINK
                 elif stat.S_ISREG(mode):
@@ -376,5 +382,9 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
 
 
 def warm_up() -> int:
-    """Pool initializer target: import everything once so the first real slice is fast."""
+    """Pool initializer target: import everything once so the first real slice is fast; on macOS
+    the worker process never downloads cloud files either (io.priority.no_cloud_downloads)."""
+    from ..io.priority import no_cloud_downloads
+
+    no_cloud_downloads()
     return os.getpid()

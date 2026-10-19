@@ -93,6 +93,22 @@ impl Drop for Fd {
     }
 }
 
+/// macOS st_flags: the contents are in the cloud (iCloud Drive, a File Provider), worker.SF_DATALESS.
+#[cfg(target_os = "macos")]
+const SF_DATALESS: u32 = 0x4000_0000;
+
+fn dataless(st: &libc::stat) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        st.st_flags & SF_DATALESS != 0
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = st;
+        false // the bit means something else elsewhere (FreeBSD)
+    }
+}
+
 fn st_birth(st: &libc::stat) -> (i64, u64) {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
     {
@@ -128,11 +144,15 @@ fn add_entry(
     let mut flags = 0u32;
     let mut descend = false;
     let dev = st.st_dev as u64;
+    let cloud = dataless(&st);
+    if cloud {
+        flags |= flag::CLOUD; // takes no local space; a folder is not entered: listing would download it
+    }
     let kind = if mode == libc::S_IFDIR as u32 {
         if (dev != root.dev && !root.cross_mounts) || is_skipped(&root.skip, dir, raw) {
             flags |= flag::MOUNT;
         } else {
-            descend = true;
+            descend = !cloud;
         }
         kind::DIR
     } else if mode == libc::S_IFLNK as u32 {
