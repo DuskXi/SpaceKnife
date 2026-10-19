@@ -75,7 +75,7 @@ cpus=$(getconf _NPROCESSORS_ONLN)
 configs=(
   "default|"
   "threads = CPUs (before)|SPACEKNIFE_SCAN_THREADS=$cpus"
-  "folders via fstatat (before)|SPACEKNIFE_NO_BULK=dirs"
+  "folders from getattrlistbulk|SPACEKNIFE_BULK_DIRS=1"
 )
 n=${#configs[@]}
 for r in $(seq 0 $((${BENCH_ROUNDS:-4} - 1))); do # each round starts one setting later (no order bias)

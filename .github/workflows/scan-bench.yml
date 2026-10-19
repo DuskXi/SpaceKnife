@@ -1,7 +1,7 @@
 name: Scan benchmark
 
-# Scan speed on GitHub's macOS runners (their own disks): the default against the settings before
-# (listing threads, folders through fstatat), warm and with the disk cache purged
+# Scan speed on GitHub's macOS runners (their own disks): the default against one listing thread
+# per CPU and against folders from getattrlistbulk too, warm and with the disk cache purged
 # (.github/scripts/scan-bench.sh).
 # The numbers are in the job log; nothing is uploaded.
 on:

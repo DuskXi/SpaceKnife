@@ -88,13 +88,18 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - 「完全磁盘访问权限」：不给的话，扫描到「桌面」「文稿」「下载」、云盘、照片图库、其他应用的数据、外接盘和网络盘时会逐个弹出授权提示（提示文案是 `electron-builder.yml` 里的 `NS*UsageDescription`），邮件、信息等受保护目录读不到，计入未知空间。给了就都能扫到。应用在扫描前检查（`spaceknife.privacy`：读用户的 TCC 数据库，不弹窗），没有时弹出说明框：打开系统设置的对应页面 / 跳过这些位置（不弹窗，显示为无法访问）/ 照常逐个询问；设置「扫描范围 › 受保护的位置」记住选择。ad-hoc 签名的授权绑定在具体的构建上，更新后要在设置里关掉再打开一次。
 - 扫描 `/` 时不进入 `/System/Volumes/Data`：同一 APFS 卷组的数据卷与系统卷报告同一个设备号，它的文件已经通过 firmlink 在树里（`scan.volume.volume_group_twins`）。云盘里「仅在云端」的文件（`SF_DATALESS`）按占用 0 计，这样的文件夹不进入，进程也设为不物化 dataless 文件，扫描不会触发下载。
 - 磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源，`ioreg` 为后备）。
-- 目录条目（文件和文件夹）的属性用 `getattrlistbulk` 批量取，挂载点和 firmlink 仍逐个 `fstatat`。每个进程读到的第一批文件、第一批文件夹各自与 `fstatat` 对照：文件有差异就整条退回 readdir + `fstatat`，文件夹有差异只让文件夹退回。`SPACEKNIFE_NO_BULK=1` 全关，`=dirs` 只关文件夹，用来对比速度；`spaceknife-backend scan --profile` 打印耗时分解和它的状态。
+- 文件条目的属性用 `getattrlistbulk` 批量取（文件夹、挂载点、firmlink 仍逐个 `fstatat`）。每个进程读到的第一批文件与 `fstatat` 对照，有差异就整条退回 readdir + `fstatat`；`SPACEKNIFE_NO_BULK=1` 关掉，用来对比速度。文件夹也能从它取（`SPACEKNIFE_BULK_DIRS=1`，同样单独对照），但并不更快：请求文件夹属性让每次调用都变慢，抵掉了省下的 `fstatat`。`spaceknife-backend scan --profile` 打印耗时分解和它的状态。
 - 列目录线程默认是 CPU 数的两倍（4–16），`SPACEKNIFE_SCAN_THREADS` 可以改。
-- 「Scan benchmark」workflow 在 GitHub 的 macOS 运行器上对比各设置（各设置轮流、每轮换一个开头，热缓存跑 6 轮）。2026-10-19 扫 /System/Library /usr（45 万到 70 万项）的结果：
-  - 3 核 arm64：两倍线程和文件夹批量取各快约 8%；在 300 万项上，8 线程比 3 线程快 27%。
-  - 4 核 Intel：与改动前持平。
-  - 两台运行器上，多线程只比单线程的 `find`、`du` 快约 20%；列目录线程 92–96% 的时间在系统调用里，瓶颈在内核侧。
-  - `sudo purge` 清不掉 APFS 元数据的缓存，测不出冷缓存。
+- 「Scan benchmark」workflow 在 GitHub 的 macOS 运行器上对比各设置：各设置轮流跑，每轮换一个开头；热缓存 6 轮，`sudo purge` 后 3 轮（purge 清不掉 APFS 元数据的缓存，两组差不多）。2026-10-20 扫 /System/Library /usr（3 核 arm64 45 万项，4 核 Intel 70 万项），单位是项/秒：
+
+  | | 3 核 arm64 | 4 核 Intel |
+  |---|---|---|
+  | 单线程切片各用自己的线程池（e07daf3） | 5.5 万 → 13.9 万 | 2.1 万 → 6.1 万 |
+  | 线程数两倍 | +8%（热）/ +15%（purge 后） | +12% / +5% |
+  | 文件夹也用 getattrlistbulk | −19% / −2% | 0% / −4% |
+
+  修好线程池之前，所有单线程切片排在同一个单线程池上，列目录实际只有一个线程；耗时分解里的「列目录线程忙碌」把排队也算了进去，看起来像内核侧的瓶颈。现在忙碌度只算列目录本身。
+- 修好之后，Intel 运行器上主线程把结果合并进树占 48–62%。同一次等待里落下的切片合并成一次写入（`worker.merge_slices`），祖先的合计一次加完。Windows 上用录下的 470 个切片（C:\Program Files，35.9 万项）重放合并：140 ms → 99 ms（逐片）→ 61–77 ms（合并后）；实际扫描中，主线程合并占比 45–58% → 39–43%，这时列目录线程成了瓶颈。
 - 扫描是后端子进程做的，授权和提示都记在 SpaceKnife 这个应用名下（macOS 按负责的应用归属）。
 
 **数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：
