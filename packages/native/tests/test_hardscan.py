@@ -566,3 +566,17 @@ def test_options_are_validated(tree: Path) -> None:
         native.scan_slice(tasks, {})
     with pytest.raises(TypeError):
         native.scan_slice([((0, 1, 0), b"bytes", 0)], {"roots": [{}]})
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="getattrlistbulk is macOS")
+def test_macos_lists_with_getattrlistbulk(tree: Path) -> None:
+    """The bulk path is used, not silently turned off: its first batch is checked against fstatat
+    and the whole tree must equal the Python walker's (scan_one compares them)."""
+    scan_one(tree)
+    assert native.bulk_listing() == "on"
+
+
+def test_bulk_listing_reports_a_state() -> None:
+    assert native.bulk_listing() in (
+        {"on", "off", "untested"} if sys.platform == "darwin" else {"unsupported"}
+    )

@@ -1,6 +1,7 @@
 //! POSIX lister: `open(O_DIRECTORY)` + `getdents64` (Linux) / `readdir` (elsewhere) +
 //! `fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW)` per entry: worker.py's `_list_posix`, syscall
-//! for syscall, without the Python objects in between.
+//! for syscall, without the Python objects in between. On macOS `getattrlistbulk` gives the
+//! attributes of whole batches of entries instead (`bulk`, checked against fstatat).
 
 #[cfg(target_os = "linux")]
 use std::cell::RefCell; // the getdents64 buffer
@@ -97,15 +98,27 @@ impl Drop for Fd {
 #[cfg(target_os = "macos")]
 const SF_DATALESS: u32 = 0x4000_0000;
 
-fn dataless(st: &libc::stat) -> bool {
+fn dataless(flags: u32) -> bool {
     #[cfg(target_os = "macos")]
     {
-        st.st_flags & SF_DATALESS != 0
+        flags & SF_DATALESS != 0
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = st;
+        let _ = flags;
         false // the bit means something else elsewhere (FreeBSD)
+    }
+}
+
+fn st_flags(st: &libc::stat) -> u32 {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+    {
+        st.st_flags as u32
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "freebsd")))]
+    {
+        let _ = st;
+        0
     }
 }
 
@@ -121,6 +134,48 @@ fn st_birth(st: &libc::stat) -> (i64, u64) {
     }
 }
 
+/// What a row needs of an entry: lstat's fields (fstatat, or getattrlistbulk on macOS).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Meta {
+    mode: u32, // S_IFMT bits
+    dev: u64,
+    size: i64,
+    alloc: i64, // st_blocks * 512
+    mtime: (i64, u64),
+    btime: (i64, u64),
+    atime: (i64, u64),
+    ino: u64,
+    nlink: u64,
+    flags: u32, // st_flags (BSDs)
+}
+
+impl Meta {
+    fn from_stat(st: &libc::stat) -> Self {
+        Self {
+            mode: st.st_mode as u32 & libc::S_IFMT as u32,
+            dev: st.st_dev as u64,
+            size: st.st_size as i64,
+            alloc: (st.st_blocks as i64).saturating_mul(512),
+            mtime: (st.st_mtime as i64, st.st_mtime_nsec as u64),
+            btime: st_birth(st),
+            atime: (st.st_atime as i64, st.st_atime_nsec as u64),
+            ino: st.st_ino as u64,
+            nlink: st.st_nlink as u64,
+            flags: st_flags(st),
+        }
+    }
+}
+
+/// fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW); None when it fails.
+fn stat_entry(dirfd: libc::c_int, name: &CStr) -> Option<Meta> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: name is NUL-terminated, st is writable.
+    if unsafe { libc::fstatat(dirfd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+        return None;
+    }
+    Some(Meta::from_stat(&st))
+}
+
 fn add_entry(
     dirfd: libc::c_int,
     name: &CStr,
@@ -130,26 +185,42 @@ fn add_entry(
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath)>,
 ) {
-    let raw = name.to_bytes();
+    push_entry(
+        stat_entry(dirfd, name),
+        name.to_bytes(),
+        dir,
+        root,
+        base,
+        arena,
+        subdirs,
+    );
+}
+
+/// One entry's row (ERROR_ROW without `meta`); a folder to descend goes to `subdirs`.
+fn push_entry(
+    meta: Option<Meta>,
+    raw: &[u8],
+    dir: &[u8],
+    root: &RootOpts,
+    base: usize,
+    arena: &mut Arena,
+    subdirs: &mut Vec<(u32, NativePath)>,
+) {
     let name_start = arena.names.len();
     arena.names.extend_from_slice(raw);
     let j = (arena.len() - base) as u32;
-    let mut st: libc::stat = unsafe { std::mem::zeroed() };
-    // SAFETY: name is NUL-terminated, st is writable.
-    if unsafe { libc::fstatat(dirfd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+    let Some(m) = meta else {
         arena.push_row(name_start, ERROR_ROW);
         return;
-    }
-    let mode = st.st_mode as u32 & libc::S_IFMT as u32;
+    };
     let mut flags = 0u32;
     let mut descend = false;
-    let dev = st.st_dev as u64;
-    let cloud = dataless(&st);
+    let cloud = dataless(m.flags);
     if cloud {
         flags |= flag::CLOUD; // takes no local space; a folder is not entered: listing would download it
     }
-    let kind = if mode == libc::S_IFDIR as u32 {
-        if (dev != root.dev && !root.cross_mounts) || is_skipped(&root.skip, dir, raw) {
+    let kind = if m.mode == libc::S_IFDIR as u32 {
+        if (m.dev != root.dev && !root.cross_mounts) || is_skipped(&root.skip, dir, raw) {
             flags |= flag::MOUNT;
         } else if is_skipped(&root.protect, dir, raw) {
             flags |= flag::ACCESS_DENIED;
@@ -157,9 +228,9 @@ fn add_entry(
             descend = !cloud;
         }
         kind::DIR
-    } else if mode == libc::S_IFLNK as u32 {
+    } else if m.mode == libc::S_IFLNK as u32 {
         kind::LINK
-    } else if mode == libc::S_IFREG as u32 {
+    } else if m.mode == libc::S_IFREG as u32 {
         kind::FILE
     } else {
         kind::OTHER
@@ -167,22 +238,17 @@ fn add_entry(
     if raw.first() == Some(&b'.') {
         flags |= flag::HIDDEN;
     }
-    let (bsec, bnsec) = st_birth(&st);
     let row = Row {
         kind,
         flags,
-        size: if kind == kind::DIR {
-            0
-        } else {
-            st.st_size as i64
-        },
-        alloc: (st.st_blocks as i64).saturating_mul(512),
-        mtime: secs(st.st_mtime as i64, st.st_mtime_nsec as u64),
-        ctime: secs(bsec, bnsec),
-        atime: secs(st.st_atime as i64, st.st_atime_nsec as u64),
-        ino: st.st_ino as u64,
-        nlink: (st.st_nlink as u64).min(65535) as u16,
-        dev,
+        size: if kind == kind::DIR { 0 } else { m.size },
+        alloc: m.alloc,
+        mtime: secs(m.mtime.0, m.mtime.1),
+        ctime: secs(m.btime.0, m.btime.1),
+        atime: secs(m.atime.0, m.atime.1),
+        ino: m.ino,
+        nlink: m.nlink.min(65535) as u16,
+        dev: m.dev,
         ext_len: if kind == kind::FILE {
             ext_len_with(raw, escaped_code_points)
         } else {
@@ -269,6 +335,297 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
     }
 }
 
+/// macOS: getattrlistbulk(2) returns the names and attributes of a batch of entries per call,
+/// where readdir + fstatat costs a system call per entry. Only entries that are not folders are
+/// taken from it: folders (mount points, firmlinks, the dataless check), entries reported with an
+/// error, and anything not as expected still go through fstatat. The first batch a process reads
+/// is checked against fstatat field by field; any difference turns the bulk path off for good
+/// (so does SPACEKNIFE_NO_BULK=1), and listings fall back to readdir + fstatat.
+#[cfg(target_os = "macos")]
+mod bulk {
+    use std::cell::RefCell;
+    use std::ffi::CStr;
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    use super::{Meta, errno, stat_entry};
+
+    #[repr(C)]
+    #[allow(dead_code)] // filled for the kernel, never read back
+    struct AttrList {
+        bitmapcount: u16,
+        reserved: u16,
+        commonattr: u32,
+        volattr: u32,
+        dirattr: u32,
+        fileattr: u32,
+        forkattr: u32,
+    }
+
+    const ATTR_BIT_MAP_COUNT: u16 = 5;
+    const ATTR_CMN_NAME: u32 = 0x0000_0001;
+    const ATTR_CMN_DEVID: u32 = 0x0000_0002;
+    const ATTR_CMN_OBJTYPE: u32 = 0x0000_0008;
+    const ATTR_CMN_CRTIME: u32 = 0x0000_0200;
+    const ATTR_CMN_MODTIME: u32 = 0x0000_0400;
+    const ATTR_CMN_ACCTIME: u32 = 0x0000_1000;
+    const ATTR_CMN_FLAGS: u32 = 0x0004_0000;
+    const ATTR_CMN_FILEID: u32 = 0x0200_0000;
+    const ATTR_CMN_ERROR: u32 = 0x2000_0000;
+    const ATTR_CMN_RETURNED_ATTRS: u32 = 0x8000_0000;
+    const ATTR_FILE_LINKCOUNT: u32 = 0x0000_0001;
+    const ATTR_FILE_ALLOCSIZE: u32 = 0x0000_0004;
+    const ATTR_FILE_DATALENGTH: u32 = 0x0000_0200;
+    const FSOPT_PACK_INVAL_ATTRS: u64 = 0x0000_0008;
+
+    const COMMON: u32 = ATTR_CMN_RETURNED_ATTRS
+        | ATTR_CMN_NAME
+        | ATTR_CMN_ERROR
+        | ATTR_CMN_DEVID
+        | ATTR_CMN_OBJTYPE
+        | ATTR_CMN_CRTIME
+        | ATTR_CMN_MODTIME
+        | ATTR_CMN_ACCTIME
+        | ATTR_CMN_FLAGS
+        | ATTR_CMN_FILEID;
+    const FILE: u32 = ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE | ATTR_FILE_DATALENGTH;
+    const NEEDED: u32 = COMMON & !(ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_ERROR);
+
+    // One record with FSOPT_PACK_INVAL_ATTRS (every requested attribute present, 4-byte aligned):
+    // u32 length, attribute_set_t returned (5 x u32), u32 error (right after the returned set),
+    // then by bit: attrreference_t name, dev_t devid, fsobj_type_t objtype, timespec crtime,
+    // modtime, acctime, u32 flags, u64 fileid; then the file attributes: u32 linkcount,
+    // off_t allocsize, off_t datalength. The name's bytes follow, where its reference points.
+    const AT_RETURNED: usize = 4;
+    const AT_ERROR: usize = 24;
+    const AT_NAME: usize = 28;
+    const AT_DEVID: usize = 36;
+    const AT_OBJTYPE: usize = 40;
+    const AT_CRTIME: usize = 44;
+    const AT_MODTIME: usize = 60;
+    const AT_ACCTIME: usize = 76;
+    const AT_FLAGS: usize = 92;
+    const AT_FILEID: usize = 96;
+    const AT_LINKCOUNT: usize = 104;
+    const AT_ALLOCSIZE: usize = 108;
+    const AT_DATALENGTH: usize = 116;
+    const RECORD: usize = 124;
+
+    const VREG: u32 = 1;
+    const VDIR: u32 = 2;
+
+    const UNTESTED: u8 = 0;
+    const ON: u8 = 1;
+    const OFF: u8 = 2;
+    static STATE: AtomicU8 = AtomicU8::new(UNTESTED);
+    const BUF_BYTES: usize = 256 * 1024;
+    const CHECKS: usize = 8; // entries compared with fstatat before the bulk path is trusted
+
+    unsafe extern "C" {
+        fn getattrlistbulk(
+            dirfd: libc::c_int,
+            alist: *mut libc::c_void,
+            buf: *mut libc::c_void,
+            size: libc::size_t,
+            options: u64,
+        ) -> libc::c_int;
+    }
+
+    fn rd<T: Copy>(b: &[u8], at: usize) -> T {
+        debug_assert!(at + std::mem::size_of::<T>() <= b.len());
+        // SAFETY: callers check that the record holds `at + size_of::<T>()` bytes.
+        unsafe { std::ptr::read_unaligned(b.as_ptr().add(at).cast::<T>()) }
+    }
+
+    fn time(b: &[u8], at: usize) -> (i64, u64) {
+        (rd::<i64>(b, at), rd::<i64>(b, at + 8) as u64)
+    }
+
+    pub fn state() -> &'static str {
+        match STATE.load(Ordering::Relaxed) {
+            ON => "on",
+            OFF => "off",
+            _ => "untested",
+        }
+    }
+
+    pub fn enabled() -> bool {
+        match STATE.load(Ordering::Relaxed) {
+            ON => true,
+            OFF => false,
+            _ => {
+                if std::env::var_os("SPACEKNIFE_NO_BULK").is_some_and(|v| v == "1") {
+                    STATE.store(OFF, Ordering::Relaxed);
+                    return false;
+                }
+                true
+            }
+        }
+    }
+
+    /// One parsed record: the name (with its NUL) and, when the record can be trusted for a
+    /// non-folder, its attributes (None: fstatat it).
+    fn parse(rec: &[u8]) -> Option<(&CStr, Option<Meta>)> {
+        if rec.len() < RECORD {
+            return None;
+        }
+        let name_off = rd::<i32>(rec, AT_NAME) as isize;
+        let name_len = rd::<u32>(rec, AT_NAME + 4) as usize;
+        let start = AT_NAME as isize + name_off;
+        if start < RECORD as isize || name_len == 0 || start as usize + name_len > rec.len() {
+            return None;
+        }
+        let start = start as usize;
+        let name = CStr::from_bytes_with_nul(&rec[start..start + name_len]).ok()?;
+        let returned = rd::<u32>(rec, AT_RETURNED);
+        let returned_file = rd::<u32>(rec, AT_RETURNED + 12);
+        let objtype = rd::<u32>(rec, AT_OBJTYPE);
+        let usable = rd::<u32>(rec, AT_ERROR) == 0
+            && returned & NEEDED == NEEDED
+            && returned_file & FILE == FILE
+            && objtype != VDIR;
+        if !usable {
+            return Some((name, None));
+        }
+        let mode = match objtype {
+            VREG => libc::S_IFREG,
+            3 => libc::S_IFBLK,
+            4 => libc::S_IFCHR,
+            5 => libc::S_IFLNK,
+            6 => libc::S_IFSOCK,
+            7 => libc::S_IFIFO,
+            _ => return Some((name, None)),
+        } as u32;
+        let alloc = rd::<i64>(rec, AT_ALLOCSIZE).max(0);
+        let meta = Meta {
+            mode,
+            dev: rd::<i32>(rec, AT_DEVID) as u64, // like st_dev (int32) as u64
+            size: rd::<i64>(rec, AT_DATALENGTH),
+            alloc: (alloc + 511) / 512 * 512, // st_blocks: the total allocation in 512-byte blocks
+            mtime: time(rec, AT_MODTIME),
+            btime: time(rec, AT_CRTIME),
+            atime: time(rec, AT_ACCTIME),
+            ino: rd::<u64>(rec, AT_FILEID),
+            nlink: rd::<u32>(rec, AT_LINKCOUNT) as u64,
+            flags: rd::<u32>(rec, AT_FLAGS),
+        };
+        Some((name, Some(meta)))
+    }
+
+    /// The fields fstatat and getattrlistbulk must agree on (access times may move meanwhile).
+    fn same(a: &Meta, b: &Meta) -> bool {
+        (
+            a.mode, a.dev, a.size, a.alloc, a.mtime, a.btime, a.ino, a.nlink, a.flags,
+        ) == (
+            b.mode, b.dev, b.size, b.alloc, b.mtime, b.btime, b.ino, b.nlink, b.flags,
+        )
+    }
+
+    /// Lists `dirfd` with getattrlistbulk: `each(name, meta)` per entry, meta None meaning "fstatat
+    /// it". Ok(false): nothing read, list it the other way (unsupported here, or turned off).
+    pub fn read(
+        dirfd: libc::c_int,
+        mut each: impl FnMut(&CStr, Option<Meta>),
+    ) -> Result<bool, i32> {
+        thread_local! {
+            static BUF: RefCell<Vec<u64>> = RefCell::new(vec![0u64; BUF_BYTES / 8]);
+        }
+        BUF.with_borrow_mut(|buf| {
+            let mut alist = AttrList {
+                bitmapcount: ATTR_BIT_MAP_COUNT,
+                reserved: 0,
+                commonattr: COMMON,
+                volattr: 0,
+                dirattr: 0,
+                fileattr: FILE,
+                forkattr: 0,
+            };
+            let mut emitted = false;
+            let mut batch: Vec<(&CStr, Option<Meta>)> = Vec::new();
+            loop {
+                // SAFETY: alist and buf are valid for the call; buf holds BUF_BYTES bytes.
+                let n = unsafe {
+                    getattrlistbulk(
+                        dirfd,
+                        (&mut alist as *mut AttrList).cast(),
+                        buf.as_mut_ptr().cast(),
+                        BUF_BYTES,
+                        FSOPT_PACK_INVAL_ATTRS,
+                    )
+                };
+                if n < 0 {
+                    let e = errno();
+                    return if emitted { Err(e) } else { Ok(false) };
+                }
+                if n == 0 {
+                    return Ok(true);
+                }
+                // SAFETY: the kernel filled at most BUF_BYTES bytes of buf.
+                let bytes: &[u8] =
+                    unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), BUF_BYTES) };
+                batch.clear();
+                let mut off = 0usize;
+                for _ in 0..n {
+                    if off + 4 > BUF_BYTES {
+                        return bail(emitted);
+                    }
+                    let len = rd::<u32>(bytes, off) as usize;
+                    if len < RECORD || off + len > BUF_BYTES {
+                        return bail(emitted);
+                    }
+                    match parse(&bytes[off..off + len]) {
+                        Some(item) => batch.push(item),
+                        None => return bail(emitted),
+                    }
+                    off += len;
+                }
+                if STATE.load(Ordering::Relaxed) == UNTESTED && !trusted(dirfd, &batch) {
+                    STATE.store(OFF, Ordering::Relaxed);
+                    if !emitted {
+                        return Ok(false);
+                    }
+                    for (_, meta) in batch.iter_mut() {
+                        *meta = None; // fstatat the rest of this folder
+                    }
+                }
+                for (name, meta) in batch.drain(..) {
+                    each(name, meta);
+                }
+                emitted = true;
+            }
+        })
+    }
+
+    /// A record that cannot be read: turn the bulk path off; before anything was emitted the
+    /// folder is listed the other way, after it the listing fails (EIO).
+    fn bail(emitted: bool) -> Result<bool, i32> {
+        STATE.store(OFF, Ordering::Relaxed);
+        if emitted { Err(libc::EIO) } else { Ok(false) }
+    }
+
+    /// Compare up to CHECKS entries with fstatat; true when they all agree (or there is nothing to
+    /// compare yet: the next batch is checked then).
+    fn trusted(dirfd: libc::c_int, batch: &[(&CStr, Option<Meta>)]) -> bool {
+        let mut checked = 0;
+        for (name, meta) in batch {
+            let Some(bulk) = meta else { continue };
+            let Some(stat) = stat_entry(dirfd, name) else {
+                continue;
+            };
+            if !same(bulk, &stat) {
+                return false;
+            }
+            checked += 1;
+            if checked == CHECKS {
+                break;
+            }
+        }
+        if checked > 0 {
+            STATE.store(ON, Ordering::Relaxed);
+        }
+        true
+    }
+}
+
 #[cfg(all(
     not(target_os = "linux"),
     any(target_os = "macos", target_os = "ios", target_os = "freebsd")
@@ -283,6 +640,11 @@ unsafe fn errno_location() -> *mut libc::c_int {
 ))]
 unsafe fn errno_location() -> *mut libc::c_int {
     unsafe { libc::__errno_location() }
+}
+
+#[cfg(target_os = "macos")]
+pub fn bulk_state() -> &'static str {
+    bulk::state()
 }
 
 /// Lists `path` into `arena` (worker._list_posix); subdirectories to descend go to `subdirs`.
@@ -308,6 +670,19 @@ pub fn list_dir(
     }
     let fd = Fd(fd);
     let base = arena.len();
+    #[cfg(target_os = "macos")]
+    {
+        if bulk::enabled() {
+            let listed = bulk::read(fd.0, |name, meta| match meta {
+                Some(m) => push_entry(Some(m), name.to_bytes(), path, root, base, arena, subdirs),
+                None => add_entry(fd.0, name, path, root, base, arena, subdirs),
+            })
+            .map_err(errno_message)?;
+            if listed {
+                return Ok(());
+            }
+        }
+    }
     read_entries(&fd, |name| {
         add_entry(fd.0, name, path, root, base, arena, subdirs)
     })

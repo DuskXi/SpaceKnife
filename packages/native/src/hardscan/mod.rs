@@ -432,7 +432,23 @@ fn scan_slice<'py>(
     Ok(out)
 }
 
+/// How POSIX listings get their attributes on macOS: "on" (getattrlistbulk, checked against
+/// fstatat), "off" (turned off: a difference, or SPACEKNIFE_NO_BULK=1), "untested" (nothing listed
+/// yet); "unsupported" elsewhere (readdir / getdents64 + fstatat, NtQueryDirectoryFile on Windows).
+#[pyfunction]
+fn bulk_listing() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        posix::bulk_state()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "unsupported"
+    }
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
+    m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;
     Ok(())
 }

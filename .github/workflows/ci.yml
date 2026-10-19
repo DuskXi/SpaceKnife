@@ -67,10 +67,12 @@ jobs:
         with:
           enable-cache: true
 
+      # the native extension too (Rust is on every runner image): its walkers are checked against
+      # the Python ones on each OS, macOS's getattrlistbulk path included
       - name: Install Python 3.12 and the workspace
         run: |
           uv python install 3.12
-          uv sync --locked
+          uv sync --locked --group native
 
       - name: Lint
         run: |
