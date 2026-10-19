@@ -337,11 +337,13 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
 }
 
 /// macOS: getattrlistbulk(2) returns the names and attributes of a batch of entries per call,
-/// where readdir + fstatat costs a system call per entry. Only entries that are not folders are
-/// taken from it: folders (mount points, firmlinks, the dataless check), entries reported with an
-/// error, and anything not as expected still go through fstatat. The first batch a process reads
-/// is checked against fstatat field by field; any difference turns the bulk path off for good
-/// (so does SPACEKNIFE_NO_BULK=1), and listings fall back to readdir + fstatat.
+/// where readdir + fstatat costs a system call per entry. Mount points and firmlinks (whose
+/// fstatat answer is the other side), entries reported with an error, and anything not as
+/// expected still go through fstatat. The first records of each kind a process reads (files,
+/// folders) are checked against fstatat field by field: a difference in a file turns the bulk
+/// path off for good, and listings fall back to readdir + fstatat; a difference in a folder only
+/// sends folders through fstatat from then on. SPACEKNIFE_NO_BULK=1 turns it all off, =dirs the
+/// folders only (to compare speeds).
 #[cfg(target_os = "macos")]
 mod bulk {
     use std::cell::RefCell;
@@ -374,10 +376,14 @@ mod bulk {
     const ATTR_CMN_FILEID: u32 = 0x0200_0000;
     const ATTR_CMN_ERROR: u32 = 0x2000_0000;
     const ATTR_CMN_RETURNED_ATTRS: u32 = 0x8000_0000;
+    const ATTR_DIR_LINKCOUNT: u32 = 0x0000_0001;
+    const ATTR_DIR_MOUNTSTATUS: u32 = 0x0000_0004;
+    const ATTR_DIR_ALLOCSIZE: u32 = 0x0000_0008;
     const ATTR_FILE_LINKCOUNT: u32 = 0x0000_0001;
     const ATTR_FILE_ALLOCSIZE: u32 = 0x0000_0004;
     const ATTR_FILE_DATALENGTH: u32 = 0x0000_0200;
     const FSOPT_PACK_INVAL_ATTRS: u64 = 0x0000_0008;
+    const SF_FIRMLINK: u32 = 0x0080_0000; // st_flags: a firmlink (/Applications on the system volume)
 
     const COMMON: u32 = ATTR_CMN_RETURNED_ATTRS
         | ATTR_CMN_NAME
@@ -389,15 +395,18 @@ mod bulk {
         | ATTR_CMN_ACCTIME
         | ATTR_CMN_FLAGS
         | ATTR_CMN_FILEID;
+    const DIR: u32 = ATTR_DIR_LINKCOUNT | ATTR_DIR_MOUNTSTATUS | ATTR_DIR_ALLOCSIZE;
     const FILE: u32 = ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE | ATTR_FILE_DATALENGTH;
     const NEEDED: u32 = COMMON & !(ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_ERROR);
 
-    // One record with FSOPT_PACK_INVAL_ATTRS (every requested attribute present, 4-byte aligned):
+    // One record with FSOPT_PACK_INVAL_ATTRS (requested attributes present, 4-byte aligned):
     // u32 length, attribute_set_t returned (5 x u32), u32 error (right after the returned set),
     // then by bit: attrreference_t name, dev_t devid, fsobj_type_t objtype, timespec crtime,
-    // modtime, acctime, u32 flags, u64 fileid; then the file attributes: u32 linkcount,
-    // off_t allocsize, off_t datalength (these only for what is not a folder). The name's
-    // bytes follow, where its reference points.
+    // modtime, acctime, u32 flags, u64 fileid; then, for a folder, the folder attributes: u32
+    // linkcount, u32 mountstatus, off_t allocsize; for anything else the file attributes: u32
+    // linkcount, off_t allocsize, off_t datalength. The name's bytes follow the fixed part, where
+    // its reference points: the folder attributes are read right after the common ones, the file
+    // attributes right before the name (whether or not the other section is packed too).
     const AT_RETURNED: usize = 4;
     const AT_ERROR: usize = 24;
     const AT_NAME: usize = 28;
@@ -409,10 +418,10 @@ mod bulk {
     const AT_FLAGS: usize = 92;
     const AT_FILEID: usize = 96;
     const COMMON_END: usize = 104; // every record: the common attributes
-    const AT_LINKCOUNT: usize = 104;
-    const AT_ALLOCSIZE: usize = 108;
-    const AT_DATALENGTH: usize = 116;
-    const RECORD: usize = 124; // with the file attributes (not packed for folders)
+    const DIR_LEN: usize = 16; // linkcount, mountstatus, allocsize
+    const FILE_LEN: usize = 20; // linkcount, allocsize, datalength
+    const DIR_MNTSTATUS_MNTPOINT: u32 = 0x0000_0001;
+    const DIR_MNTSTATUS_TRIGGER: u32 = 0x0000_0002;
 
     const VREG: u32 = 1;
     const VDIR: u32 = 2;
@@ -420,16 +429,57 @@ mod bulk {
     const UNTESTED: u8 = 0;
     const ON: u8 = 1;
     const OFF: u8 = 2;
-    static STATE: AtomicU8 = AtomicU8::new(UNTESTED);
-    static REASON: Mutex<String> = Mutex::new(String::new()); // why it was turned off
 
-    fn turn_off(why: String) {
-        if STATE.swap(OFF, Ordering::Relaxed) != OFF {
-            if let Ok(mut r) = REASON.lock() {
-                *r = why;
+    /// Trust in one kind of record (files, folders): untested, on, or off with the reason.
+    struct Switch {
+        state: AtomicU8,
+        reason: Mutex<String>,
+    }
+
+    impl Switch {
+        const fn new() -> Self {
+            Self {
+                state: AtomicU8::new(UNTESTED),
+                reason: Mutex::new(String::new()),
+            }
+        }
+
+        fn get(&self) -> u8 {
+            self.state.load(Ordering::Relaxed)
+        }
+
+        fn turn_off(&self, why: String) {
+            if self.state.swap(OFF, Ordering::Relaxed) != OFF {
+                if let Ok(mut r) = self.reason.lock() {
+                    *r = why;
+                }
+            }
+        }
+
+        fn trust(&self) {
+            let _ = self
+                .state
+                .compare_exchange(UNTESTED, ON, Ordering::Relaxed, Ordering::Relaxed);
+        }
+
+        fn describe(&self) -> String {
+            match self.get() {
+                ON => "on".to_owned(),
+                OFF => {
+                    let why = self.reason.lock().map(|r| r.clone()).unwrap_or_default();
+                    if why.is_empty() {
+                        "off".to_owned()
+                    } else {
+                        format!("off: {why}")
+                    }
+                }
+                _ => "untested".to_owned(),
             }
         }
     }
+
+    static FILES: Switch = Switch::new(); // off: the whole bulk path is off
+    static DIRS: Switch = Switch::new(); // off: folders go through fstatat
     const BUF_BYTES: usize = 256 * 1024;
     const CHECKS: usize = 8; // entries compared with fstatat before the bulk path is trusted
 
@@ -453,37 +503,35 @@ mod bulk {
         (rd::<i64>(b, at), rd::<i64>(b, at + 8) as u64)
     }
 
+    /// "on" (files and folders), "on (folders: …)", "untested", or "off: why".
     pub fn state() -> String {
-        match STATE.load(Ordering::Relaxed) {
-            ON => "on".to_owned(),
-            OFF => {
-                let why = REASON.lock().map(|r| r.clone()).unwrap_or_default();
-                if why.is_empty() {
-                    "off".to_owned()
-                } else {
-                    format!("off: {why}")
-                }
-            }
-            _ => "untested".to_owned(),
+        match (FILES.get(), DIRS.get()) {
+            (ON, ON) => "on".to_owned(),
+            (ON, _) => format!("on (folders: {})", DIRS.describe()),
+            _ => FILES.describe(),
         }
     }
 
     pub fn enabled() -> bool {
-        match STATE.load(Ordering::Relaxed) {
+        match FILES.get() {
             ON => true,
             OFF => false,
             _ => {
-                if std::env::var_os("SPACEKNIFE_NO_BULK").is_some_and(|v| v == "1") {
-                    turn_off("SPACEKNIFE_NO_BULK=1".to_owned());
+                let env = std::env::var_os("SPACEKNIFE_NO_BULK");
+                if env.as_ref().is_some_and(|v| v == "1") {
+                    FILES.turn_off("SPACEKNIFE_NO_BULK=1".to_owned());
                     return false;
+                }
+                if env.is_some_and(|v| v == "dirs") && DIRS.get() != OFF {
+                    DIRS.turn_off("SPACEKNIFE_NO_BULK=dirs".to_owned());
                 }
                 true
             }
         }
     }
 
-    /// One parsed record: the name (with its NUL) and, when the record can be trusted for a
-    /// non-folder, its attributes (None: fstatat it).
+    /// One parsed record: the name (with its NUL) and, when the record can be used, its
+    /// attributes (None: fstatat it).
     fn parse(rec: &[u8]) -> Result<(&CStr, Option<Meta>), String> {
         if rec.len() < COMMON_END {
             return Err(format!(
@@ -505,18 +553,51 @@ mod bulk {
         let name =
             CStr::from_bytes_until_nul(raw).map_err(|_| format!("name without NUL: {raw:?}"))?;
         let returned = rd::<u32>(rec, AT_RETURNED);
+        let returned_dir = rd::<u32>(rec, AT_RETURNED + 8);
         let returned_file = rd::<u32>(rec, AT_RETURNED + 12);
         let objtype = rd::<u32>(rec, AT_OBJTYPE);
-        // folders carry no file attributes (and go through fstatat anyway); a record without
-        // them, or one reported with an error, is fstatat'ed too
-        let usable = rd::<u32>(rec, AT_ERROR) == 0
-            && objtype != VDIR
-            && returned & NEEDED == NEEDED
-            && returned_file & FILE == FILE
-            && start >= RECORD;
-        if !usable {
+        let flags = rd::<u32>(rec, AT_FLAGS);
+        if rd::<u32>(rec, AT_ERROR) != 0 || returned & NEEDED != NEEDED {
             return Ok((name, None));
         }
+        let times = (
+            time(rec, AT_MODTIME),
+            time(rec, AT_CRTIME),
+            time(rec, AT_ACCTIME),
+        );
+        if objtype == VDIR {
+            // a mount point's or firmlink's fstatat describes what is on the other side
+            let usable = DIRS.get() != OFF
+                && returned_dir & DIR == DIR
+                && start >= COMMON_END + DIR_LEN
+                && rd::<u32>(rec, COMMON_END + 4)
+                    & (DIR_MNTSTATUS_MNTPOINT | DIR_MNTSTATUS_TRIGGER)
+                    == 0
+                && flags & SF_FIRMLINK == 0;
+            if !usable {
+                return Ok((name, None));
+            }
+            let alloc = rd::<i64>(rec, COMMON_END + 8).max(0);
+            return Ok((
+                name,
+                Some(Meta {
+                    mode: libc::S_IFDIR as u32,
+                    dev: rd::<i32>(rec, AT_DEVID) as u64,
+                    size: 0, // a folder's row has no size of its own (fstatat's st_size is not read)
+                    alloc: (alloc + 511) / 512 * 512,
+                    mtime: times.0,
+                    btime: times.1,
+                    atime: times.2,
+                    ino: rd::<u64>(rec, AT_FILEID),
+                    nlink: rd::<u32>(rec, COMMON_END) as u64,
+                    flags,
+                }),
+            ));
+        }
+        if returned_file & FILE != FILE || start < COMMON_END + FILE_LEN {
+            return Ok((name, None));
+        }
+        let at = start - FILE_LEN; // the file attributes end where the name starts
         let mode = match objtype {
             VREG => libc::S_IFREG,
             3 => libc::S_IFBLK,
@@ -526,29 +607,36 @@ mod bulk {
             7 => libc::S_IFIFO,
             _ => return Ok((name, None)),
         } as u32;
-        let alloc = rd::<i64>(rec, AT_ALLOCSIZE).max(0);
+        let alloc = rd::<i64>(rec, at + 4).max(0);
         let meta = Meta {
             mode,
             dev: rd::<i32>(rec, AT_DEVID) as u64, // like st_dev (int32) as u64
-            size: rd::<i64>(rec, AT_DATALENGTH),
+            size: rd::<i64>(rec, at + 12),
             alloc: (alloc + 511) / 512 * 512, // st_blocks: the total allocation in 512-byte blocks
-            mtime: time(rec, AT_MODTIME),
-            btime: time(rec, AT_CRTIME),
-            atime: time(rec, AT_ACCTIME),
+            mtime: times.0,
+            btime: times.1,
+            atime: times.2,
             ino: rd::<u64>(rec, AT_FILEID),
-            nlink: rd::<u32>(rec, AT_LINKCOUNT) as u64,
-            flags: rd::<u32>(rec, AT_FLAGS),
+            nlink: rd::<u32>(rec, at) as u64,
+            flags,
         };
         Ok((name, Some(meta)))
     }
 
-    /// The fields fstatat and getattrlistbulk must agree on (access times may move meanwhile).
+    fn is_dir(m: &Meta) -> bool {
+        m.mode == libc::S_IFDIR as u32
+    }
+
+    /// The fields fstatat and getattrlistbulk must agree on (access times may move meanwhile; a
+    /// folder's size is not used).
     fn same(a: &Meta, b: &Meta) -> bool {
-        (
-            a.mode, a.dev, a.size, a.alloc, a.mtime, a.btime, a.ino, a.nlink, a.flags,
-        ) == (
-            b.mode, b.dev, b.size, b.alloc, b.mtime, b.btime, b.ino, b.nlink, b.flags,
-        )
+        let key = |m: &Meta| {
+            let size = if is_dir(m) { 0 } else { m.size };
+            (
+                m.mode, m.dev, size, m.alloc, m.mtime, m.btime, m.ino, m.nlink, m.flags,
+            )
+        };
+        key(a) == key(b)
     }
 
     /// Lists `dirfd` with getattrlistbulk: `each(name, meta)` per entry, meta None meaning "fstatat
@@ -566,7 +654,7 @@ mod bulk {
                 reserved: 0,
                 commonattr: COMMON,
                 volattr: 0,
-                dirattr: 0,
+                dirattr: DIR,
                 fileattr: FILE,
                 forkattr: 0,
             };
@@ -609,21 +697,26 @@ mod bulk {
                     }
                     off += len;
                 }
-                let verdict = if STATE.load(Ordering::Relaxed) == UNTESTED {
-                    trusted(dirfd, &batch)
-                } else {
-                    Ok(())
-                };
-                if let Err(why) = verdict {
-                    turn_off(why);
-                    if !emitted {
-                        return Ok(false);
+                if FILES.get() == UNTESTED {
+                    if let Err(why) = check(dirfd, &batch, false, &FILES) {
+                        FILES.turn_off(why);
+                        if !emitted {
+                            return Ok(false);
+                        }
                     }
                 }
-                if STATE.load(Ordering::Relaxed) == OFF {
-                    // turned off (here or by another thread's check): fstatat the rest of this folder
+                if DIRS.get() == UNTESTED {
+                    if let Err(why) = check(dirfd, &batch, true, &DIRS) {
+                        DIRS.turn_off(why);
+                    }
+                }
+                let (files, dirs) = (FILES.get() != OFF, DIRS.get() != OFF);
+                if !files || !dirs {
+                    // turned off (here or by another thread's check): fstatat the rest
                     for (_, meta) in batch.iter_mut() {
-                        *meta = None;
+                        if meta.as_ref().is_some_and(|m| !files || is_dir(m)) {
+                            *meta = None;
+                        }
                     }
                 }
                 for (name, meta) in batch.drain(..) {
@@ -637,16 +730,25 @@ mod bulk {
     /// A record that cannot be read: turn the bulk path off; before anything was emitted the
     /// folder is listed the other way, after it the listing fails (EIO).
     fn bail(emitted: bool, why: String) -> Result<bool, i32> {
-        turn_off(why);
+        FILES.turn_off(why);
         if emitted { Err(libc::EIO) } else { Ok(false) }
     }
 
-    /// Compare up to CHECKS entries with fstatat; true when they all agree (or there is nothing to
-    /// compare yet: the next batch is checked then).
-    fn trusted(dirfd: libc::c_int, batch: &[(&CStr, Option<Meta>)]) -> Result<(), String> {
+    /// Compare up to CHECKS records of one kind (folders or the rest) with fstatat; once some
+    /// agree and none differs, `switch` trusts that kind (nothing to compare yet: the next batch
+    /// is checked).
+    fn check(
+        dirfd: libc::c_int,
+        batch: &[(&CStr, Option<Meta>)],
+        dirs: bool,
+        switch: &Switch,
+    ) -> Result<(), String> {
         let mut checked = 0;
         for (name, meta) in batch {
             let Some(bulk) = meta else { continue };
+            if is_dir(bulk) != dirs {
+                continue;
+            }
             let Some(stat) = stat_entry(dirfd, name) else {
                 continue;
             };
@@ -659,7 +761,7 @@ mod bulk {
             }
         }
         if checked > 0 {
-            let _ = STATE.compare_exchange(UNTESTED, ON, Ordering::Relaxed, Ordering::Relaxed);
+            switch.trust();
         }
         Ok(())
     }

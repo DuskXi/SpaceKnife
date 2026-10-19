@@ -574,12 +574,33 @@ def test_macos_lists_with_getattrlistbulk(tree: Path) -> None:
     and the whole tree must equal the Python walker's (scan_one compares them)."""
     scan_one(tree)
     state = native.bulk_listing()
-    assert state == "on", state
+    assert state == "on", state  # files and folders both
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="getattrlistbulk is macOS")
+def test_macos_folders_can_be_left_to_fstatat(tree: Path) -> None:
+    """SPACEKNIFE_NO_BULK=dirs: files still come from getattrlistbulk, folders from fstatat (the
+    state is per process: a fresh one)."""
+    code = "; ".join(
+        [
+            "import dataclasses, os, sys",
+            "import spaceknife_native as n",
+            "from spaceknife.scan.worker import RootOptions",
+            "root = sys.argv[1]",
+            "roots = [dataclasses.asdict(RootOptions(dev=os.stat(root).st_dev))]",
+            "n.scan_slice([((0, 1, 0), root, 0)], {'roots': roots, 'budget_s': 1e9, 'max_entries': 10**12})",
+            "print(n.bulk_listing())",
+        ]
+    )
+    env = {**os.environ, "SPACEKNIFE_NO_BULK": "dirs"}
+    out = subprocess.run([sys.executable, "-c", code, str(tree)], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "on (folders: off: SPACEKNIFE_NO_BULK=dirs)"
 
 
 def test_bulk_listing_reports_a_state() -> None:
     state = native.bulk_listing()
     if sys.platform == "darwin":
-        assert state in {"on", "untested"} or state.startswith("off"), state
+        assert state == "untested" or state.startswith(("on", "off")), state
     else:
         assert state == "unsupported"
