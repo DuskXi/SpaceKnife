@@ -1,0 +1,23 @@
+---
+import "../styles/global.css";
+const base = import.meta.env.BASE_URL;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Not found · SpaceKnife</title>
+    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="wrap" style="min-height:100vh;display:flex;flex-direction:column;justify-content:center;gap:20px;align-items:flex-start">
+      <img src={`${base}favicon.svg`} width="56" height="56" alt="" />
+      <h1 style="font-size:40px">404</h1>
+      <p style="color:var(--text-2)">This page does not exist. · 页面不存在。</p>
+      <a class="btn primary" href={base}>SpaceKnife</a>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+---
+// The document shell: SEO metadata (canonical, hreflang, Open Graph, Twitter), structured data
+// (JSON-LD) and the machine-readable alternates for AI assistants (llms.txt).
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "../styles/global.css";
+
+import type { Content } from "../i18n/content";
+
+interface Props {
+  c: Content;
+  jsonLd: Record<string, unknown>[];
+}
+
+const { c, jsonLd } = Astro.props;
+const base = import.meta.env.BASE_URL; // "/SpaceKnife/"
+const site = Astro.site!.href.replace(/\/$/, "");
+const abs = (path: string) => `${site}${base}${path}`;
+const canonical = abs(c.lang === "en" ? "" : "zh/");
+const ogImage = abs(`og-${c.lang}.png`);
+---
+
+<!doctype html>
+<html lang={c.htmlLang} data-os="other">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{c.title}</title>
+    <meta name="description" content={c.description} />
+    <link rel="canonical" href={canonical} />
+    <link rel="alternate" hreflang="en" href={abs("")} />
+    <link rel="alternate" hreflang="zh-CN" href={abs("zh/")} />
+    <link rel="alternate" hreflang="x-default" href={abs("")} />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="theme-color" content="#08090B" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="author" content="DuskXi" />
+    <meta name="keywords" content={c.lang === "en" ? "disk usage analyzer, disk space analyzer, treemap, free up disk space, open source, Windows, Linux, NTFS MFT, SpaceKnife" : "硬盘占用分析, 磁盘空间分析, 树图, 清理磁盘空间, 开源, Windows, Linux, NTFS MFT, SpaceKnife"} />
+
+    <link rel="icon" href={`${base}favicon.svg`} type="image/svg+xml" />
+    <link rel="icon" href={`${base}favicon-32.png`} sizes="32x32" type="image/png" />
+    <link rel="apple-touch-icon" href={`${base}apple-touch-icon.png`} />
+    <link rel="manifest" href={`${base}site.webmanifest`} />
+    <link rel="sitemap" href={`${base}sitemap-index.xml`} />
+    <!-- plain-text descriptions for AI assistants and crawlers (https://llmstxt.org) -->
+    <link rel="alternate" type="text/plain" title="SpaceKnife for AI assistants" href={`${base}llms.txt`} />
+    <link rel="alternate" type="text/plain" title="SpaceKnife full description for AI assistants" href={`${base}llms-full.txt`} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SpaceKnife" />
+    <meta property="og:title" content={c.title} />
+    <meta property="og:description" content={c.description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content={c.hero.shotAlt} />
+    <meta property="og:locale" content={c.ogLocale} />
+    <meta property="og:locale:alternate" content={c.lang === "en" ? "zh_CN" : "en_US"} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={c.title} />
+    <meta name="twitter:description" content={c.description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    {jsonLd.map((data) => <script type="application/ld+json" set:html={JSON.stringify(data)} />)}
+  </head>
+  <body>
+    <a class="skip" href="#main">{c.lang === "en" ? "Skip to content" : "跳到正文"}</a>
+    <slot />
+  </body>
+</html>

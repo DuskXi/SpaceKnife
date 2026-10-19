@@ -158,7 +158,7 @@ button:disabled { cursor: default; }
 }
 
 /* ---------------------------------------------------------------- filter box (W3) */
-.filter { position: relative; flex: 1 1 0; min-width: 220px; max-width: var(--sk-layout-filter-max-width); height: 32px; margin-left: 4px; }
+.filter { position: relative; flex: 1 1 0; min-width: 160px; max-width: var(--sk-layout-filter-max-width); height: 32px; margin-left: 4px; }
 .filter.disabled { opacity: 0.6; }
 .filter-icon { position: absolute; left: 10px; top: 8px; display: flex; color: var(--sk-color-text-tertiary); pointer-events: none; z-index: 2; }
 .filter-mirror, .filter-input {
@@ -470,7 +470,7 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .hc-title { font-size: 13px; font-weight: 600; line-height: 18px; word-break: break-all; }
 .hc-path { font-size: 11px; line-height: 15px; color: var(--sk-color-text-tertiary); word-break: break-all; }
 .hc-class { display: flex; align-items: center; gap: 7px; line-height: 16px; }
-.hc-times { display: grid; grid-template-columns: 28px 1fr auto; gap: 6px 8px; padding: 10px 12px; border-top: 1px solid var(--sk-color-line-strong); line-height: 16px; }
+.hc-times { display: grid; grid-template-columns: max-content 1fr auto; gap: 6px 8px; padding: 10px 12px; border-top: 1px solid var(--sk-color-line-strong); line-height: 16px; }
 .hc-time { display: contents; }
 .hc-time .mono { font-size: 11px; text-align: right; }
 .hc-hint { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--sk-color-line-strong); background: var(--sk-color-bg-overlay); font-size: 11px; color: var(--sk-color-text-tertiary); }
@@ -769,9 +769,10 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .cmp-fill { display: flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 8px; border-radius: var(--sk-radius-sm); background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); font-size: 12px; }
 .cmp-fill.warn { background: color-mix(in srgb, var(--sk-color-status-warning) 14%, transparent); color: var(--sk-color-status-warning); }
 .cmp-legend { display: flex; gap: 12px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--sk-color-line-subtle); }
-.cmp-grid { display: grid; grid-template-columns: 30px repeat(4, 1fr); gap: 3px 4px; align-items: center; flex: 1; font-size: 11px; }
+.cmp-grid { display: grid; grid-template-columns: max-content repeat(4, minmax(16px, 1fr)); gap: 3px 4px; align-items: center; flex: 1 1 auto; min-width: 150px; font-size: 11px; }
+.cmp-grid .mono { white-space: nowrap; }
 .cmp-chip { height: 10px; border-radius: 2px; }
-.cmp-legend-notes { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.cmp-legend-notes { display: flex; flex-direction: column; gap: 6px; flex: 0 1 auto; min-width: 0; }
 .cmp-badge { display: inline-flex; align-items: center; height: 15px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 600; flex: none; }
 .cmp-badge.new { background: var(--sk-color-accent-default); color: var(--sk-color-text-on-accent); }
 .cmp-badge.deleted { box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); color: var(--sk-color-text-secondary); }

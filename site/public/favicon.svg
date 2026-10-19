@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>SpaceKnife</title>
+  <!--
+    The app icon (chosen 2026-10-18: candidate D, candidates/chamfer.svg). A graphite tile with the
+    upper-right corner sliced off along x - y = 544; the cut-off piece (accent.lime) lifts away from
+    the cut. Inside, a treemap in graphite tones with one accent block; the block next to the cut
+    follows the cut (inset 96 units). Packaging icons: tools/render_app_icons.py (app mode).
+  -->
+  <defs>
+    <clipPath id="body"><path d="M0 0H544L1024 480V1024H0Z"/></clipPath>
+    <clipPath id="corner"><path d="M544 0H1024V480Z"/></clipPath>
+    <clipPath id="inset"><path d="M0 0H408L1024 616V1024H0Z"/></clipPath>
+  </defs>
+  <g clip-path="url(#body)">
+    <!-- bg.hover plate, line.strong rim -->
+    <rect x="64" y="64" width="896" height="896" rx="224" fill="#1A1D23"/>
+    <rect x="72" y="72" width="880" height="880" rx="216" fill="none" stroke="#2A2E37" stroke-width="16"/>
+  </g>
+  <g clip-path="url(#inset)">
+    <rect x="160" y="160" width="400" height="152" rx="40" fill="#313642"/>  <!-- treemap.level.3.border -->
+    <rect x="160" y="352" width="400" height="512" rx="48" fill="#8B9CFF"/>  <!-- accent.default -->
+    <rect x="600" y="160" width="264" height="400" rx="40" fill="#2C303B"/>  <!-- treemap.level.2.border -->
+    <rect x="600" y="600" width="264" height="264" rx="40" fill="#313642"/>  <!-- treemap.level.3.border -->
+  </g>
+  <g transform="translate(40 -40)">
+    <rect x="64" y="64" width="896" height="896" rx="224" fill="#D4FF3A" clip-path="url(#corner)"/>  <!-- accent.lime -->
+  </g>
+</svg>

@@ -1,0 +1,297 @@
+---
+// The landing page, in either language. Text: src/i18n/content.ts; downloads: the newest GitHub
+// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.py).
+import { getImage, Picture } from "astro:assets";
+
+import { icons } from "../../../design/build/icons";
+import compareEn from "../../../docs/images/compare-en.png";
+import compareZh from "../../../docs/images/compare.png";
+import filterEn from "../../../docs/images/filter-en.png";
+import filterZh from "../../../docs/images/filter.png";
+import paletteEn from "../../../docs/images/palette-en.png";
+import paletteZh from "../../../docs/images/palette.png";
+import treemapEn from "../../../docs/images/treemap-en.png";
+import treemapZh from "../../../docs/images/treemap.png";
+import { fmtSize, latestRelease, REPO_URL, type AssetKind } from "../data/release";
+import { structuredData } from "../data/seo";
+import type { Content } from "../i18n/content";
+import Base from "../layouts/Base.astro";
+
+interface Props {
+  c: Content;
+}
+
+const { c } = Astro.props;
+const release = await latestRelease();
+const base = import.meta.env.BASE_URL;
+const site = Astro.site!.href.replace(/\/$/, "");
+const pageUrl = `${site}${base}${c.lang === "en" ? "" : "zh/"}`;
+const other = c.lang === "en" ? `${base}zh/` : base;
+
+const SHOTS = {
+  en: { treemap: treemapEn, filter: filterEn, compare: compareEn, palette: paletteEn },
+  zh: { treemap: treemapZh, filter: filterZh, compare: compareZh, palette: paletteZh },
+}[c.lang];
+// stable, optimized copies for the structured data
+const shotUrls = await Promise.all(
+  c.shots.map(async (s) => `${site}${(await getImage({ src: SHOTS[s.id], format: "webp", width: 1440 })).src}`),
+);
+const jsonLd = structuredData(c, release, pageUrl, shotUrls, `${site}${base}og-${c.lang}.png`);
+
+const icon = (name: string) => (icons as Record<string, string>)[name] ?? "";
+const win = release.assets.windows;
+const kinds: Exclude<AssetKind, "sums">[] = ["windows", "deb", "rpm", "appimage"];
+const kindIcon: Record<string, string> = { windows: "drive", deb: "terminal", rpm: "terminal", appimage: "layers" };
+
+// a faint treemap behind the hero (squarified, fixed sizes: the same picture on every build)
+interface Rect { x: number; y: number; w: number; h: number; tone: number }
+function squarify(values: number[], x: number, y: number, w: number, h: number, out: Rect[]): void {
+  if (!values.length) return;
+  if (values.length === 1) { out.push({ x, y, w, h, tone: out.length % 5 }); return; }
+  const total = values.reduce((a, b) => a + b, 0);
+  let acc = 0;
+  let split = 0;
+  while (split < values.length - 1 && (acc + values[split]) / total < 0.5) acc += values[split++];
+  if (split === 0) { acc = values[0]; split = 1; }
+  const share = acc / total;
+  if (w >= h) {
+    squarify(values.slice(0, split), x, y, w * share, h, out);
+    squarify(values.slice(split), x + w * share, y, w * (1 - share), h, out);
+  } else {
+    squarify(values.slice(0, split), x, y, w, h * share, out);
+    squarify(values.slice(split), x, y + h * share, w, h * (1 - share), out);
+  }
+}
+const tiles: Rect[] = [];
+squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0, 0, 1600, 900, tiles);
+---
+
+<Base c={c} jsonLd={jsonLd}>
+  <script is:inline>
+    (() => {
+      const ua = navigator.userAgent;
+      const p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+      let os = "other";
+      if (/Android|iPhone|iPad|iPod/i.test(ua)) os = "mobile";
+      else if (/Win/i.test(p) || /Windows/i.test(ua)) os = "windows";
+      else if (/Mac/i.test(p)) os = "mac";
+      else if (/Linux|X11|CrOS/i.test(p + " " + ua)) os = "linux";
+      document.documentElement.dataset.os = os;
+    })();
+  </script>
+
+  <header class="nav">
+    <div class="wrap nav-row">
+      <a class="brand" href={c.lang === "en" ? base : `${base}zh/`} aria-label="SpaceKnife">
+        <img src={`${base}favicon.svg`} width="28" height="28" alt="" />
+        <span>SpaceKnife</span>
+      </a>
+      <nav class="links" aria-label={c.nav.features}>
+        <a href="#features">{c.nav.features}</a>
+        <a href="#screenshots">{c.nav.screenshots}</a>
+        <a href="#download">{c.nav.download}</a>
+        <a href="#faq">{c.nav.faq}</a>
+      </nav>
+      <div class="nav-actions">
+        <a class="lang" href={other} hreflang={c.lang === "en" ? "zh-CN" : "en"} lang={c.lang === "en" ? "zh-CN" : "en"}>{c.nav.switchTo}</a>
+        <a class="btn ghost small" href={REPO_URL} rel="noopener">
+          <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          {c.nav.github}
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <svg class="hero-tiles" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+        {tiles.map((t, i) => (
+          <rect x={t.x + 3} y={t.y + 3} width={Math.max(0, t.w - 6)} height={Math.max(0, t.h - 6)} rx="10" class={`tile tone-${t.tone}`} style={`animation-delay:${(i * 0.37) % 6}s`} />
+        ))}
+      </svg>
+      <div class="wrap hero-inner">
+        <a class="badge" href={release.url} rel="noopener">
+          <span class="dot" aria-hidden="true"></span>
+          <span class="mono">v{release.version}</span>
+          <span class="badge-sep" aria-hidden="true">·</span>
+          {c.hero.badge}
+        </a>
+        <h1>
+          <span>{c.hero.h1a}</span>
+          <span class="grad">{c.hero.h1b}</span>
+        </h1>
+        <p class="sub">{c.hero.sub}</p>
+        <div class="cta">
+          {win && (
+            <a class="btn primary cta-windows" href={win.url}>
+              <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" /></svg>
+              {c.hero.ctaWindows}
+              <span class="btn-meta mono">{fmtSize(win.size)}</span>
+            </a>
+          )}
+          <a class="btn primary cta-linux" href="#download">{c.hero.ctaLinux}</a>
+          <a class="btn primary cta-other" href="#download">{c.hero.ctaOther}</a>
+          <a class="btn ghost" href={REPO_URL} rel="noopener">{c.hero.ctaGithub}</a>
+        </div>
+        <p class="hero-meta">{c.hero.meta}</p>
+        <p class="hero-mac">{c.download.mac}</p>
+      </div>
+      <div class="wrap shot-hero">
+        <figure class="window tilt">
+          <Picture src={SHOTS.treemap} formats={["avif", "webp"]} fallbackFormat="webp" widths={[720, 1080, 1440]} sizes="(min-width: 1240px) 1200px, 96vw" alt={c.hero.shotAlt} loading="eager" fetchpriority="high" />
+        </figure>
+        <p class="note">{c.mockNote}</p>
+      </div>
+    </section>
+
+    <section class="wrap highlights-wrap" aria-label="Highlights">
+      <div class="highlights">
+        {c.highlights.map((h) => (
+          <div class="hl">
+            <span class="hl-value mono">{h.value}</span>
+            <span class="hl-label">{h.label}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <section id="features" class="wrap section">
+      <h2>{c.featuresTitle}</h2>
+      <p class="section-sub">{c.featuresSub}</p>
+      <ul class="features">
+        {c.features.map((f) => (
+          <li class="feature">
+            <span class="feature-icon" set:html={`<svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon(f.icon)}</svg>`} />
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+
+    <section id="screenshots" class="wrap section">
+      <h2>{c.shotsTitle}</h2>
+      <p class="section-sub">{c.shotsSub}</p>
+      <div class="shots">
+        {c.shots.slice(1).map((s, i) => (
+          <article class={`shot ${i % 2 ? "flip" : ""}`}>
+            <div class="shot-text">
+              <h3>{s.title}</h3>
+              <p set:html={s.body.replace(/`([^`]+)`/g, "<code>$1</code>")} />
+            </div>
+            <figure class="window">
+              <Picture src={SHOTS[s.id]} formats={["avif", "webp"]} fallbackFormat="webp" widths={[720, 1080, 1440]} sizes="(min-width: 1240px) 760px, 96vw" alt={s.alt} loading="lazy" />
+            </figure>
+          </article>
+        ))}
+      </div>
+    </section>
+
+    <section class="wrap section">
+      <div class="open">
+        <div>
+          <h2>{c.openTitle}</h2>
+          <p>{c.openBody}</p>
+          <ul class="ticks">
+            {c.openPoints.map((p) => <li>{p}</li>)}
+          </ul>
+          <a class="btn ghost" href={REPO_URL} rel="noopener">{c.openCta} →</a>
+        </div>
+        <pre class="code mono" aria-label="Command line"><span class="c-dim"># {c.lang === "en" ? "scan a folder or a whole drive" : "扫描一个文件夹或整个盘"}</span>
+<span class="c-acc">$</span> spaceknife-backend scan {"D:\\"}
+<span class="c-dim"># {c.lang === "en" ? "the snapshots saved after each scan" : "每次扫描后保存的快照"}</span>
+<span class="c-acc">$</span> spaceknife-backend snapshot list
+<span class="c-dim"># {c.lang === "en" ? "every option" : "全部选项"}</span>
+<span class="c-acc">$</span> spaceknife-backend --help</pre>
+      </div>
+    </section>
+
+    <section id="download" class="wrap section">
+      <h2>{c.downloadTitle}</h2>
+      <p class="section-sub">{c.downloadSub}</p>
+      <div class="downloads">
+        {kinds.map((k) => {
+          const a = release.assets[k];
+          if (!a) return null;
+          const text = c.download[k];
+          return (
+            <div class={`dl dl-${k}`}>
+              <div class="dl-head">
+                <span class="dl-icon" set:html={`<svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon(kindIcon[k])}</svg>`} />
+                <h3>{text.title}</h3>
+              </div>
+              <p class="dl-note">{text.note}</p>
+              <a class="btn primary block" href={a.url}>
+                {c.download.button}
+                <span class="btn-meta mono">{fmtSize(a.size)}</span>
+              </a>
+              <p class="dl-file mono">{a.name}</p>
+              {a.sha256 && (
+                <div class="sha">
+                  <span class="sha-label">{c.download.sha}</span>
+                  <code class="sha-value" title={a.sha256}>{a.sha256}</code>
+                  <button type="button" class="copy" data-copy={a.sha256} data-done={c.download.copied}>{c.download.copy}</button>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p class="dl-foot">
+        {c.download.prerelease}
+        {" "}
+        <a href={release.url} rel="noopener">{c.download.allReleases}</a>
+        {release.assets.sums && <> · <a href={release.assets.sums.url}>{c.download.checksums}</a></>}
+        {" · "}
+        {c.download.mac}
+      </p>
+    </section>
+
+    <section id="faq" class="wrap section">
+      <h2>{c.faqTitle}</h2>
+      <div class="faq">
+        {c.faqs.map((f, i) => (
+          <details open={i === 0}>
+            <summary>{f.q}</summary>
+            <p>{f.a}</p>
+          </details>
+        ))}
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap footer-row">
+      <div class="footer-brand">
+        <img src={`${base}favicon.svg`} width="24" height="24" alt="" />
+        <div>
+          <strong>SpaceKnife</strong>
+          <p>{c.footer.tagline}</p>
+        </div>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href={REPO_URL} rel="noopener">{c.footer.source}</a>
+        <a href={`${REPO_URL}/blob/main/LICENSE`} rel="noopener">{c.footer.license}</a>
+        <a href={release.url} rel="noopener">{c.download.allReleases}</a>
+        <a href={`${base}llms.txt`}>{c.footer.agents}</a>
+        <a href={other} hreflang={c.lang === "en" ? "zh-CN" : "en"}>{c.nav.switchTo}</a>
+      </nav>
+    </div>
+    <p class="wrap disclaimer">{c.footer.disclaimer}</p>
+  </footer>
+
+  <script>
+    for (const b of document.querySelectorAll<HTMLButtonElement>("button.copy")) {
+      b.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(b.dataset.copy ?? "");
+          const label = b.textContent;
+          b.textContent = b.dataset.done ?? "✓";
+          setTimeout(() => (b.textContent = label), 1500);
+        } catch {
+          /* clipboard unavailable: the hash stays selectable */
+        }
+      });
+    }
+  </script>
+</Base>

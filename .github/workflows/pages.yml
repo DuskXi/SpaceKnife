@@ -1,0 +1,61 @@
+# The website (site/, Astro) on GitHub Pages: https://duskxi.github.io/SpaceKnife/
+# Rebuilt when the site, its screenshots or icons change, and when a release is published or edited
+# (the download buttons point at the newest release, read from the GitHub API at build time).
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/images/**"
+      - "design/build/**"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published, edited, deleted]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      ASTRO_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: site/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: site
+      - run: pnpm build
+        working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

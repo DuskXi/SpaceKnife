@@ -82,6 +82,10 @@
 
 ## 其他
 
+- [x] 官网（`site/`，Astro → GitHub Pages）：中英双语、按系统给出下载按钮、SEO（canonical / hreflang / Open Graph / JSON-LD / sitemap）、给 AI 助手的 `llms.txt` 与 `llms-full.txt`
+- [ ] 自定义域名：爬虫只在域名根目录读 `robots.txt`、找 `llms.txt`；在 `duskxi.github.io/SpaceKnife/` 下它们只能靠页面里的链接被发现。也可以在 Google Search Console / Bing Webmaster Tools 提交 sitemap（需要账号所有者操作）
+- [x] 英文界面排版：悬停卡的时间标签、对比图例、对比模式工具栏在 1440 px 下不再截断
+
 - [ ] MFT 快扫：卷根目录下若真有名为「$NTFS 元数据」/「$孤立文件」的文件，会和伪文件夹同名并排显示（合计正确，只是名字重复）；给伪文件夹加后缀避让（Hypothesis 找到的边界情况）
 
 - [ ] 亮色主题（待设计评审）

@@ -1,0 +1,31 @@
+{
+  "name": "spaceknife-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The SpaceKnife website (GitHub Pages)",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/sitemap": "3.7.4",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/noto-sans-sc": "5.3.1",
+    "astro": "7.3.5",
+    "sharp": "0.35.5"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp"
+    ]
+  }
+}
