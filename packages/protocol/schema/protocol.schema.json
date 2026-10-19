@@ -2632,6 +2632,32 @@
           "default": null,
           "title": "Q Eff"
         },
+        "read_bps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes read per second on the whole disk, last sample",
+          "title": "Read Bps"
+        },
+        "read_latency_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mean time per read on the whole disk, ms",
+          "title": "Read Latency Ms"
+        },
         "self_pct": {
           "title": "Self Pct",
           "type": "number"

@@ -4,10 +4,12 @@
   ``Disk Reads/sec``, ``Avg. Disk sec/Read``, ``Disk Read Bytes/sec``), no elevation; falls back
   to the raw ``IOCTL_DISK_PERFORMANCE`` counters when the performance-counter subsystem is broken.
 * Linux: ``/sys/block/<disk>/stat`` deltas (io_ticks → busy, time_in_queue → queue depth).
-* macOS: IOKit block-storage statistics through ``ioreg -a`` (no idle time there: busy is
-  approximated by the queue depth); without it the governor runs open loop.
+* macOS: IOKit block-storage statistics (what ``iostat`` reads: every ``IOBlockStorageDriver``'s
+  ``Statistics``, named by the whole disk below it), read in process through ctypes; ``ioreg -a``
+  as the fallback. No idle time there: busy is approximated by the queue depth. Without either
+  the governor runs open loop.
 
-:meth:`DiskSampler.sample` blocks (system calls, a subprocess on macOS): call it from a worker
+:meth:`DiskSampler.sample` blocks (system calls, a subprocess for ``ioreg``): call it from a worker
 thread. The first call only primes the counters and returns nothing.
 """
 
@@ -466,29 +468,140 @@ def darwin_sample(prev: DarwinStat, cur: DarwinStat, dt: float, t: float) -> Dis
     )
 
 
-class IoregSampler(DiskSampler):
-    name = "ioreg"
+_KCF_UTF8 = 0x08000100  # kCFStringEncodingUTF8
+_KCF_SINT64 = 4  # kCFNumberSInt64Type
+_STAT_KEYS = (
+    "Statistics",
+    "BSD Name",
+    "Total Time (Read)",
+    "Total Time (Write)",
+    "Operations (Read)",
+    "Bytes (Read)",
+)
+
+
+class _IOKit:
+    """The IOKit and CoreFoundation calls :class:`IOKitSampler` needs (ctypes; macOS only)."""
+
+    # ctypes functions, set in __init__ (declared for type checkers on other platforms)
+    ctypes: Any
+    matching: Any
+    services: Any
+    next: Any
+    release_object: Any
+    property: Any
+    search: Any
+    release: Any
+    dict_get: Any
+    number_get: Any
+    string_get: Any
+    type_of: Any
+    number_type: int
+    string_type: int
+    keys: dict[str, Any]
+
+    def __init__(self) -> None:
+        import ctypes
+
+        if sys.platform != "darwin":
+            raise OSError("IOKit is macOS only")
+        try:
+            iokit = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
+            cf = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+        except OSError as exc:
+            raise OSError(f"IOKit not loadable: {exc}") from None
+        vp, u32, i32, ulong = ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int32, ctypes.c_ulong
+
+        def fn(lib: Any, name: str, restype: Any, *argtypes: Any) -> Any:
+            f = getattr(lib, name)
+            f.restype, f.argtypes = restype, list(argtypes)
+            return f
+
+        self.ctypes = ctypes
+        self.matching = fn(iokit, "IOServiceMatching", vp, ctypes.c_char_p)
+        self.services = fn(iokit, "IOServiceGetMatchingServices", i32, u32, vp, ctypes.POINTER(u32))
+        self.next = fn(iokit, "IOIteratorNext", u32, u32)
+        self.release_object = fn(iokit, "IOObjectRelease", i32, u32)
+        self.property = fn(iokit, "IORegistryEntryCreateCFProperty", vp, u32, vp, vp, u32)
+        self.search = fn(iokit, "IORegistryEntrySearchCFProperty", vp, u32, ctypes.c_char_p, vp, vp, u32)
+        self.release = fn(cf, "CFRelease", None, vp)
+        self.dict_get = fn(cf, "CFDictionaryGetValue", vp, vp, vp)
+        self.number_get = fn(cf, "CFNumberGetValue", ctypes.c_bool, vp, i32, vp)
+        self.string_get = fn(cf, "CFStringGetCString", ctypes.c_bool, vp, ctypes.c_char_p, ctypes.c_long, u32)
+        self.type_of = fn(cf, "CFGetTypeID", ulong, vp)
+        self.number_type = fn(cf, "CFNumberGetTypeID", ulong)()
+        self.string_type = fn(cf, "CFStringGetTypeID", ulong)()
+        cfstr = fn(cf, "CFStringCreateWithCString", vp, vp, ctypes.c_char_p, u32)
+        self.keys = {k: cfstr(None, k.encode(), _KCF_UTF8) for k in _STAT_KEYS}  # kept for the process
+
+    def read(self) -> dict[str, DarwinStat]:
+        """Cumulative statistics per whole disk (BSD name)."""
+        ct = self.ctypes
+        it = ct.c_uint32(0)
+        matching = self.matching(b"IOBlockStorageDriver")
+        if not matching or self.services(0, matching, ct.byref(it)) != 0:  # consumes ``matching``
+            return {}
+        out: dict[str, DarwinStat] = {}
+        try:
+            while entry := self.next(it.value):
+                try:
+                    name, stat = self._bsd_name(entry), self._stat(entry)
+                    if name is not None and stat is not None:
+                        out[name] = stat
+                finally:
+                    self.release_object(entry)
+        finally:
+            self.release_object(it.value)
+        return out
+
+    def _number(self, d: int, key: str) -> int:
+        value = self.dict_get(d, self.keys[key])
+        if not value or self.type_of(value) != self.number_type:
+            return 0
+        n = self.ctypes.c_int64(0)
+        self.number_get(value, _KCF_SINT64, self.ctypes.byref(n))
+        return int(n.value)
+
+    def _stat(self, entry: int) -> DarwinStat | None:
+        d = self.property(entry, self.keys["Statistics"], None, 0)
+        if not d:
+            return None
+        try:
+            read_ns = self._number(d, "Total Time (Read)")
+            total = read_ns + self._number(d, "Total Time (Write)")
+            reads = self._number(d, "Operations (Read)")
+            return DarwinStat(total, reads, read_ns, self._number(d, "Bytes (Read)"))
+        finally:
+            self.release(d)
+
+    def _bsd_name(self, entry: int) -> str | None:
+        """The whole disk below a block storage driver: the first "BSD Name" in its subtree."""
+        value = self.search(entry, b"IOService", self.keys["BSD Name"], None, 1)  # recursively
+        if not value:
+            return None
+        try:
+            if self.type_of(value) != self.string_type:
+                return None
+            buf = self.ctypes.create_string_buffer(64)
+            if not self.string_get(value, buf, 64, _KCF_UTF8):
+                return None
+            m = re.match(r"disk\d+", buf.value.decode(errors="replace"))
+            return m.group(0) if m else None
+        finally:
+            self.release(value)
+
+
+class _DarwinSampler(DiskSampler):
+    """Deltas of the cumulative IOKit statistics, per whole disk."""
+
     supported = True
-    min_interval = 1.0  # one ioreg process per sample
 
     def __init__(self) -> None:
         super().__init__()
         self._prev: dict[str, tuple[float, DarwinStat]] = {}
-        if not self._read():
-            raise OSError("ioreg returned no block storage statistics")
-        self.sample()
 
     def _read(self) -> dict[str, DarwinStat]:
-        try:
-            raw = subprocess.run(
-                ["ioreg", "-r", "-c", "IOBlockStorageDriver", "-a"],
-                capture_output=True,
-                timeout=3,
-                check=True,
-            ).stdout
-        except (OSError, subprocess.SubprocessError):
-            return {}
-        return parse_ioreg(raw)
+        raise NotImplementedError
 
     def sample(self) -> dict[DiskId, DiskSample]:
         cur = self._read()
@@ -505,6 +618,46 @@ class IoregSampler(DiskSampler):
         return out
 
 
+class IOKitSampler(_DarwinSampler):
+    name = "iokit"
+    min_interval = 0.0  # in process: microseconds per disk
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._api = _IOKit()
+        found = self._read()
+        if not found:
+            raise OSError("IOKit reports no block storage statistics")
+        logger.debug("disk load sampler iokit: {}", ", ".join(sorted(found)))
+        self.sample()
+
+    def _read(self) -> dict[str, DarwinStat]:
+        return self._api.read()
+
+
+class IoregSampler(_DarwinSampler):
+    name = "ioreg"
+    min_interval = 1.0  # one ioreg process per sample
+
+    def __init__(self) -> None:
+        super().__init__()
+        if not self._read():
+            raise OSError("ioreg returned no block storage statistics")
+        self.sample()
+
+    def _read(self) -> dict[str, DarwinStat]:
+        try:
+            raw = subprocess.run(
+                ["ioreg", "-r", "-c", "IOBlockStorageDriver", "-a"],
+                capture_output=True,
+                timeout=3,
+                check=True,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return {}
+        return parse_ioreg(raw)
+
+
 # --------------------------------------------------------------------------- selection
 
 
@@ -514,7 +667,7 @@ def default_sampler() -> DiskSampler:
     if sys.platform == "win32":
         candidates = [PdhSampler, WinPerfSampler]
     elif sys.platform == "darwin":
-        candidates = [IoregSampler]
+        candidates = [IOKitSampler, IoregSampler]
     else:
         candidates = [SysfsSampler]
     for cls in candidates:
@@ -533,6 +686,7 @@ __all__ = [
     "DiskPerf",
     "DiskSample",
     "DiskSampler",
+    "IOKitSampler",
     "IoregSampler",
     "LinuxStat",
     "NullSampler",

@@ -412,6 +412,7 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .sd-legend .lg-dash { border-top: 1px dashed var(--sk-color-text-secondary); }
 .sd-legend .lg-dot { display: inline-block; width: 14px; height: 0; margin-left: 6px; border-top: 1px dotted var(--sk-color-text-primary); }
 .sd-curve .active { fill: none; stroke: var(--sk-color-text-primary); stroke-width: 1; stroke-dasharray: 1 2; opacity: 0.7; vector-effect: non-scaling-stroke; }
+.sd-rates { margin-top: 6px; }
 .sd-concurrency { align-items: center; }
 .sd-auto { display: inline-flex; align-items: center; gap: 8px; }
 .sd-section .set-slider input[type="range"] { flex: 1 1 auto; width: auto; }

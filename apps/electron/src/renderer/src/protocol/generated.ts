@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "5c1504c3582d6fbc";
+export const SCHEMA_HASH = "b7cfedaa9f11a69f";
 
 export interface AgeCond {
   end: number;
@@ -589,6 +589,10 @@ export interface IoStatus {
   others_pct: number;
   paused: boolean;
   q_eff: number | null;
+  /** Bytes read per second on the whole disk, last sample */
+  read_bps: number | null;
+  /** Mean time per read on the whole disk, ms */
+  read_latency_ms: number | null;
   self_pct: number;
   total_pct: number;
   yielding: boolean;

@@ -374,3 +374,16 @@ def test_open_loop_without_samples() -> None:
     st = core.status()
     assert not st.measured and st.self_pct == 0.0
     assert core.u == pytest.approx(8 * 0.35)
+
+
+def test_status_reports_the_disks_read_rate_and_latency() -> None:
+    core = GovernorCore(DiskRef(DiskId("disk0"), media="nvme"))
+    sample = DiskSample(
+        t=1.0, dt=0.5, busy=0.2, queue=0.4, read_iops=2000, read_latency=0.00042, read_bps=1.5e8
+    )
+    core.observe(sample, 1.0)
+    st = core.status()
+    assert st.measured and st.read_bps == 150_000_000 and st.read_latency_ms == pytest.approx(0.42)
+    core.observe(None, 1.5)  # no data: nothing to show
+    st = core.status()
+    assert not st.measured and st.read_bps is None and st.read_latency_ms is None
