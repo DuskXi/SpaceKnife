@@ -2,7 +2,8 @@
 //! `fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW)` per entry: worker.py's `_list_posix`, syscall
 //! for syscall, without the Python objects in between.
 
-use std::cell::RefCell;
+#[cfg(target_os = "linux")]
+use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
 
 use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
