@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { basketAdd, boot, call, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
 import { ContextMenu } from "@/shell/ContextMenu";
 import { ExportDialog } from "@/shell/ExportDialog";
+import { FullDiskAccessDialog } from "@/shell/FullDiskAccessDialog";
 import { OpToast } from "@/shell/OpToast";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog, useApp } from "@/state/store";
 import { notOnDisk, revealLabel } from "@/shell/Inspector";
@@ -57,6 +58,7 @@ export function App() {
       <ContextMenu />
       <OpToast />
       <ExportDialog />
+      <FullDiskAccessDialog />
     </>
   );
 }

@@ -15,6 +15,7 @@ from spaceknife_protocol.methods import APP_SHUTDOWN, SUBSCRIBE, SYSTEM_INFO, SY
 from spaceknife_protocol.streams import TOPIC_LOG, SubscribeParams, SubscribeResult, UnsubscribeParams
 from spaceknife_protocol.system import PingParams, PingResult, PlatformInfo, ShutdownResult, SystemInfo
 
+from ..privacy import full_disk_access
 from .rpc import RpcError
 from .topics import log_topic
 
@@ -60,6 +61,7 @@ def install(server: Server) -> None:
                 system=platform.system(), release=platform.release(), machine=platform.machine()
             ),
             sessions=len(server.sessions),
+            full_disk_access=await asyncio.to_thread(full_disk_access),
         )
 
     @router.method(SYSTEM_PING)

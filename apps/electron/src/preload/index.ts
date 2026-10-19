@@ -28,6 +28,7 @@ const api: SkApi = {
     openPath: (path) => ipcRenderer.invoke("sk:openPath", path) as Promise<string>,
     openTerminal: (dir) => ipcRenderer.send("sk:openTerminal", dir),
     copyText: (text) => ipcRenderer.send("sk:copyText", text),
+    openFullDiskAccess: () => ipcRenderer.send("sk:openFullDiskAccess"),
   },
   setLanguage: (lang) => ipcRenderer.send("sk:setLanguage", lang),
   dialog: {

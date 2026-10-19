@@ -131,6 +131,10 @@ function registerIpc(): void {
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
+  // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
+  ipcMain.on("sk:openFullDiskAccess", () => {
+    if (process.platform === "darwin") void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles");
+  });
   ipcMain.handle("sk:openFolders", async () => {
     const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);

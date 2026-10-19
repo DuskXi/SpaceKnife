@@ -32,6 +32,7 @@ export function installShim(): void {
       openPath: async (path) => (console.info("openPath", path), ""),
       openTerminal: (dir) => console.info("openTerminal", dir),
       copyText: (text) => void navigator.clipboard?.writeText(text).catch(noop),
+      openFullDiskAccess: () => console.info("openFullDiskAccess"),
     },
     setLanguage: () => undefined,
     dialog: {

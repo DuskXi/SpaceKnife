@@ -38,6 +38,8 @@ export interface SkApi {
     openPath(path: string): Promise<string>;
     openTerminal(dir: string): void;
     copyText(text: string): void;
+    /** macOS: System Settings › Privacy & Security › Full Disk Access (nothing elsewhere). */
+    openFullDiskAccess(): void;
   };
   dialog: {
     /** Pick a snapshot file (UI-W1-45, W4 「打开快照文件…」); null when cancelled. */

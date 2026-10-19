@@ -151,6 +151,8 @@ fn add_entry(
     let kind = if mode == libc::S_IFDIR as u32 {
         if (dev != root.dev && !root.cross_mounts) || is_skipped(&root.skip, dir, raw) {
             flags |= flag::MOUNT;
+        } else if is_skipped(&root.protect, dir, raw) {
+            flags |= flag::ACCESS_DENIED;
         } else {
             descend = !cloud;
         }

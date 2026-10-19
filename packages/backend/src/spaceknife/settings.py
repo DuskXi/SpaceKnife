@@ -603,6 +603,25 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "scan.protected_places",
+            "scan",
+            "扫描范围",
+            "受保护的位置",
+            "没有「完全磁盘访问权限」时，macOS 会为桌面、文稿、下载、云盘、照片图库和"
+            "其他应用的数据逐个弹窗询问",
+            "segmented",
+            "ask",
+            options=(
+                ("ask", "扫描前询问"),
+                ("skip", "跳过，不弹窗"),
+                ("allow", "照常访问"),
+            ),
+            applies="next_scan",
+            reason="" if IS_MAC else "只在 macOS 上需要",
+            synonyms=("full disk access", "privacy", "tcc", "permission", "prompt", "完全磁盘访问"),
+            kind=str,
+        ),
+        S(
             "scan.hardlinks",
             "scan",
             "统计口径",

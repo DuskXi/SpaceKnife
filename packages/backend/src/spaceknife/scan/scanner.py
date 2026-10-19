@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger
 
+from ..privacy import inside, protected_folders
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
 from .volume import VolumeInfo, is_volume_root, volume_for, volume_group_twins
@@ -127,7 +128,8 @@ def native_slicer() -> Slicer | None:
                 "cluster_size": r.cluster_size,
                 "resident_max": r.resident_max,
                 "cross_mounts": r.cross_mounts,
-                **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the key
+                **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the keys
+                **({"protect": list(r.protect)} if r.protect else {}),
             }
             for r in opts.roots
         ]
@@ -168,6 +170,7 @@ class Scanner:
         batch_tasks: int = 32,
         governor: IoGovernor | None = None,
         count_links_each: bool = False,
+        skip_protected: bool = False,
     ) -> None:
         if not roots:
             raise ScanError("no scan roots given")
@@ -203,6 +206,8 @@ class Scanner:
 
         root_opts: list[RootOptions] = []
         normalised: list[str] = []
+        # macOS without Full Disk Access, when the user chose so: places that would each ask
+        protected = protected_folders() if skip_protected else ()
         for raw in roots:
             path = normalise_root(raw)
             if any(path == r or path.startswith(r.rstrip("\\/") + os.sep) for r in normalised):
@@ -236,6 +241,7 @@ class Scanner:
                     resident_max=512 if ntfs else 0,
                     cross_mounts=cross_mounts,
                     skip=() if cross_mounts else volume_group_twins(path),
+                    protect=tuple(p for p in protected if inside(p, path)),
                 )
             )
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))

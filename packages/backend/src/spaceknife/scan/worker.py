@@ -26,6 +26,7 @@ import numpy as np
 KIND_FILE, KIND_DIR, KIND_LINK, KIND_OTHER = 0, 1, 2, 3
 
 # Mirrors spaceknife.store.nodes.Flag (kept literal so workers don't import the store).
+F_ACCESS_DENIED = 1 << 0
 F_MOUNT = 1 << 1
 F_COMPRESSED = 1 << 3
 F_SPARSE = 1 << 4
@@ -91,6 +92,9 @@ class RootOptions:
     # folders not to enter, as mount points (macOS: the other half of the root's APFS volume
     # group, already in the tree through the firmlinks; scan.volume.volume_group_twins)
     skip: tuple[str, ...] = ()
+    # folders not to enter, as not accessible (macOS: places that would ask for consent one by
+    # one without Full Disk Access, when the user chose to leave them out; spaceknife.privacy)
+    protect: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +296,8 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                         root.skip and posixpath.join(path, name) in root.skip
                     ):
                         flags |= F_MOUNT
+                    elif root.protect and posixpath.join(path, name) in root.protect:
+                        flags |= F_ACCESS_DENIED
                     else:
                         descend = not flags & F_CLOUD
                 elif stat.S_ISLNK(mode):

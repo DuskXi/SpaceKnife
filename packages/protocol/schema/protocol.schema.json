@@ -4627,6 +4627,19 @@
           "title": "Roots",
           "type": "array"
         },
+        "skip_protected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "macOS without Full Disk Access: leave out the places that would each ask for consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown as not accessible; None = the scan.protected_places setting",
+          "title": "Skip Protected"
+        },
         "workers": {
           "anyOf": [
             {
@@ -5766,6 +5779,19 @@
     },
     "SystemInfo": {
       "properties": {
+        "full_disk_access": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected place); None elsewhere or when it cannot be told",
+          "title": "Full Disk Access"
+        },
         "pid": {
           "title": "Pid",
           "type": "integer"

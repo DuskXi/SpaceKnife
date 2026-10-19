@@ -462,6 +462,23 @@ def test_posix_skipped_folders_are_not_entered(tree: Path) -> None:
     assert not flags_by_name[os.fsencode(kept.name)] & Flag.MOUNT
 
 
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX walkers")
+def test_posix_protected_folders_are_not_entered(tree: Path) -> None:
+    """RootOptions.protect (macOS without Full Disk Access, by choice): the folder is listed as not
+    accessible and not entered, so it asks for nothing; both walkers alike."""
+    subs = sorted(p for p in tree.iterdir() if p.is_dir() and not p.is_symlink())
+    guarded = subs[0]
+    res = scan_one(tree, protect=(str(guarded),))
+    assert not any(p == str(guarded) or p.startswith(str(guarded) + "/") for p in res.paths)
+    lo, hi, off = int(res.bounds[0]), int(res.bounds[1]), 0
+    flags_by_name = {}
+    for i in range(lo, hi):
+        n = int(res.name_lens[i])
+        flags_by_name[res.name_blob[off : off + n]] = int(res.cols["flags"][i])
+        off += n
+    assert flags_by_name[os.fsencode(guarded.name)] & Flag.ACCESS_DENIED
+
+
 # ---------------------------------------------------------------------------- slicing
 
 

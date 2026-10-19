@@ -5,7 +5,7 @@
 //!
 //! | key | default | meaning |
 //! |---|---|---|
-//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False) |
+//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False), `skip` and `protect` (folders not entered: as mount points, as not accessible) |
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
@@ -49,12 +49,13 @@ use common::{Arena, NativePath, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
 const OPT_KEYS: [&str; 4] = ["roots", "budget_s", "max_entries", "threads"];
-const ROOT_KEYS: [&str; 5] = [
+const ROOT_KEYS: [&str; 6] = [
     "dev",
     "cluster_size",
     "resident_max",
     "cross_mounts",
     "skip",
+    "protect",
 ];
 
 struct Opts {
@@ -111,6 +112,10 @@ fn parse_root(obj: &Bound<'_, PyAny>) -> PyResult<RootOpts> {
     if let Some(v) = field(obj, "skip")? {
         let paths: Vec<String> = v.extract()?;
         r.skip = paths.into_iter().map(String::into_bytes).collect();
+    }
+    if let Some(v) = field(obj, "protect")? {
+        let paths: Vec<String> = v.extract()?;
+        r.protect = paths.into_iter().map(String::into_bytes).collect();
     }
     Ok(r)
 }

@@ -356,7 +356,48 @@ export async function watchScan(scanId: string): Promise<void> {
   }
 }
 
+export type ProtectedChoice = "settings" | "skip" | "allow" | "cancel";
+let protectedAnswer: ((choice: ProtectedChoice) => void) | null = null;
+
+/** Show the Full Disk Access dialog and wait for the answer (one at a time: a second ask cancels the first). */
+function askProtectedPlaces(): Promise<ProtectedChoice> {
+  return new Promise((resolve) => {
+    protectedAnswer?.("cancel");
+    protectedAnswer = resolve;
+    set({ fdaPrompt: true });
+  });
+}
+
+export function answerProtectedPlaces(choice: ProtectedChoice, remember: boolean): void {
+  set({ fdaPrompt: false });
+  if (remember && (choice === "skip" || choice === "allow")) void updateSettings({ "scan.protected_places": choice });
+  const answer = protectedAnswer;
+  protectedAnswer = null;
+  answer?.(choice);
+}
+
+/** macOS before a scan: the places that would each ask for consent. undefined: the backend applies
+ *  the scan.protected_places setting; true / false: skip them or not (the user chose now); null:
+ *  no scan (System Settings opened, or the dialog closed). */
+async function protectedPlaces(): Promise<boolean | null | undefined> {
+  if (window.sk.platform !== "darwin" || setting(get(), "scan.protected_places", "ask") !== "ask") return undefined;
+  const info = await call("system.info", {}).catch(() => null);
+  if (info?.full_disk_access !== false) return undefined;
+  const choice = await askProtectedPlaces();
+  if (choice === "settings") {
+    window.sk.shell.openFullDiskAccess();
+    toast(t("在列表里打开 SpaceKnife 的开关，再按提示重新打开 SpaceKnife"));
+    return null;
+  }
+  return choice === "cancel" ? null : choice === "skip";
+}
+
 export async function startScan(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
+  if (params.skip_protected == null) {
+    const skip = await protectedPlaces();
+    if (skip === null) return null;
+    if (skip !== undefined) params = { ...params, skip_protected: skip };
+  }
   try {
     const status = await call("scan.start", params);
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)

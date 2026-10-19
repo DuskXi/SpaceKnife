@@ -31,6 +31,11 @@ class SystemInfo(Payload):
     started_at: datetime
     platform: PlatformInfo
     sessions: int
+    full_disk_access: bool | None = Field(
+        default=None,
+        description="macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected "
+        "place); None elsewhere or when it cannot be told",
+    )
 
 
 class ShutdownResult(Payload):

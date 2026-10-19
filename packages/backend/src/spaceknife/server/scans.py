@@ -27,6 +27,7 @@ from ..filter.names import forget, name_index
 from ..helper import HelperError, SharedHelper, is_elevated
 from ..i18n import tr
 from ..io import IoGovernor, IoRegistry, set_low_io_priority
+from ..privacy import full_disk_access
 from ..scan import mft
 from ..scan.media import media_of, system_mount
 from ..scan.scanner import (
@@ -410,6 +411,9 @@ class ScanManager:
             executor = self._executor()
             concurrency = min(workers or self._pool_size, self._pool_size)
         links_each = st is not None and st.get("scan.hardlinks") == "each"
+        skip_protected = await asyncio.to_thread(
+            wants_skip_protected, params.skip_protected, str(st.get("scan.protected_places")) if st else "ask"
+        )
         try:
             scanner = await asyncio.to_thread(
                 Scanner,
@@ -418,6 +422,7 @@ class ScanManager:
                 concurrency=concurrency,
                 cross_mounts=cross,
                 count_links_each=links_each,
+                skip_protected=skip_protected,
                 **options,
             )
         except Exception as exc:
@@ -966,6 +971,15 @@ def saved_state(stats: dict[str, Any]) -> ScanState:
     except ValueError:
         return ScanState.DONE
     return ScanState.CANCELLED if state in (ScanState.QUEUED, ScanState.SCANNING) else state
+
+
+def wants_skip_protected(requested: bool | None, setting: str) -> bool:
+    """Leave out macOS's consent-guarded places (spaceknife.privacy)? A request decides (the app
+    asked the user); else the scan.protected_places setting, "skip" only while there is no Full
+    Disk Access ("ask" without an app to ask, as on the command line, accesses them)."""
+    if requested is not None:
+        return requested
+    return setting == "skip" and full_disk_access() is False
 
 
 def last_item_count(roots: list[str]) -> int | None:

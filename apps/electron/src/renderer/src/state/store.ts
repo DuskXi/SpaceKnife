@@ -149,6 +149,8 @@ export interface AppState {
   op: OpProgressEvent | null;
   /** 「导出报告…」 dialog */
   exportOpen: boolean;
+  /** macOS without Full Disk Access: the dialog before a scan (shell/FullDiskAccessDialog) */
+  fdaPrompt: boolean;
   /** interface language (M7.5): the root re-renders on change, every t() follows */
   lang: Lang;
 }
@@ -206,6 +208,7 @@ export const useApp = create<AppState>(() => ({
   menu: null,
   op: null,
   exportOpen: false,
+  fdaPrompt: false,
   lang: getLang(),
 }));
 

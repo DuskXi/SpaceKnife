@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.0";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "b7cfedaa9f11a69f";
+export const SCHEMA_HASH = "4227122d041a99b6";
 
 export interface AgeCond {
   end: number;
@@ -1026,6 +1026,8 @@ export interface ScanStartParams {
   method?: "auto" | "mft" | "hard" | null;
   /** Absolute paths; drive roots allowed */
   roots: string[];
+  /** macOS without Full Disk Access: leave out the places that would each ask for consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown as not accessible; None = the scan.protected_places setting */
+  skip_protected?: boolean | null;
   /** 0 = scan in-process (no pool); None = the concurrency setting */
   workers?: number | null;
 }
@@ -1243,6 +1245,8 @@ export interface SubscribeResult {
 }
 
 export interface SystemInfo {
+  /** macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected place); None elsewhere or when it cannot be told */
+  full_disk_access: boolean | null;
   pid: number;
   platform: PlatformInfo;
   server: ServerInfo;
