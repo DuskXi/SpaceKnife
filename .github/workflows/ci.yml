@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev] # work happens on dev; main changes by merging dev
   pull_request:
   workflow_dispatch: # a manual run tests everything
 
