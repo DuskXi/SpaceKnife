@@ -258,6 +258,8 @@ interface VisualInstance<F> {
 
 ## 13. 插件：现在做 / 以后做
 
+覆盖前后端的插件系统（统一通讯层、开放档次、权限与隔离、落地顺序）的经验与要求见 [plugins.md](plugins.md)；本节只说可视化这一类扩展。
+
 **现在做（本次已有）**
 - 后端 `ENGINE_API`、`Engine` 协议、`Visualization` 描述符、注册表、行契约检查；内置可视化和插件走同一条 `register()`。
 - 前端 `VISUAL_API`、`VisualComponent`（纯几何 + GL 实例）、注册表、一致性测试辅助。
