@@ -337,13 +337,15 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
 }
 
 /// macOS: getattrlistbulk(2) returns the names and attributes of a batch of entries per call,
-/// where readdir + fstatat costs a system call per entry. Mount points and firmlinks (whose
-/// fstatat answer is the other side), entries reported with an error, and anything not as
-/// expected still go through fstatat. The first records of each kind a process reads (files,
-/// folders) are checked against fstatat field by field: a difference in a file turns the bulk
-/// path off for good, and listings fall back to readdir + fstatat; a difference in a folder only
-/// sends folders through fstatat from then on. SPACEKNIFE_NO_BULK=1 turns it all off, =dirs the
-/// folders only (to compare speeds).
+/// where readdir + fstatat costs a system call per entry. Folders, entries reported with an error
+/// and anything not as expected still go through fstatat. The first files a process reads are
+/// checked against fstatat field by field; a difference turns the bulk path off for good, and
+/// listings fall back to readdir + fstatat (so does SPACEKNIFE_NO_BULK=1).
+///
+/// Folders can come from it too (SPACEKNIFE_BULK_DIRS=1, checked the same way on their own; mount
+/// points and firmlinks, whose fstatat answer is the other side, still fstatat'ed), but it is not
+/// faster: asking for the folder attributes slows every call down about as much as the fstatat
+/// calls it saves (GitHub's macOS runners, 2026-10-20; docs/packaging.md).
 #[cfg(target_os = "macos")]
 mod bulk {
     use std::cell::RefCell;
@@ -429,6 +431,7 @@ mod bulk {
     const UNTESTED: u8 = 0;
     const ON: u8 = 1;
     const OFF: u8 = 2;
+    const NOT_ASKED: u8 = 3; // folders: through fstatat, not asked of getattrlistbulk at all
 
     /// Trust in one kind of record (files, folders): untested, on, or off with the reason.
     struct Switch {
@@ -473,13 +476,19 @@ mod bulk {
                         format!("off: {why}")
                     }
                 }
+                NOT_ASKED => "not asked".to_owned(),
                 _ => "untested".to_owned(),
             }
         }
     }
 
+    /// Folders taken from getattrlistbulk (SPACEKNIFE_BULK_DIRS=1, not turned off by a check).
+    fn dirs_used() -> bool {
+        matches!(DIRS.get(), UNTESTED | ON)
+    }
+
     static FILES: Switch = Switch::new(); // off: the whole bulk path is off
-    static DIRS: Switch = Switch::new(); // off: folders go through fstatat
+    static DIRS: Switch = Switch::new(); // off or not asked: folders go through fstatat
     const BUF_BYTES: usize = 256 * 1024;
     const CHECKS: usize = 8; // entries compared with fstatat before the bulk path is trusted
 
@@ -504,9 +513,11 @@ mod bulk {
     }
 
     /// "on" (files and folders), "on (folders: …)", "untested", or "off: why".
+    /// "on" (files), "on (folders too)", "on (folders: …)", "untested", or "off: why".
     pub fn state() -> String {
         match (FILES.get(), DIRS.get()) {
-            (ON, ON) => "on".to_owned(),
+            (ON, NOT_ASKED) => "on".to_owned(),
+            (ON, ON) => "on (folders too)".to_owned(),
             (ON, _) => format!("on (folders: {})", DIRS.describe()),
             _ => FILES.describe(),
         }
@@ -517,13 +528,17 @@ mod bulk {
             ON => true,
             OFF => false,
             _ => {
-                let env = std::env::var_os("SPACEKNIFE_NO_BULK");
-                if env.as_ref().is_some_and(|v| v == "1") {
+                if std::env::var_os("SPACEKNIFE_NO_BULK").is_some_and(|v| v == "1") {
                     FILES.turn_off("SPACEKNIFE_NO_BULK=1".to_owned());
                     return false;
                 }
-                if env.is_some_and(|v| v == "dirs") && DIRS.get() != OFF {
-                    DIRS.turn_off("SPACEKNIFE_NO_BULK=dirs".to_owned());
+                if !std::env::var_os("SPACEKNIFE_BULK_DIRS").is_some_and(|v| v == "1") {
+                    let _ = DIRS.state.compare_exchange(
+                        UNTESTED,
+                        NOT_ASKED,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
                 }
                 true
             }
@@ -567,7 +582,7 @@ mod bulk {
         );
         if objtype == VDIR {
             // a mount point's or firmlink's fstatat describes what is on the other side
-            let usable = DIRS.get() != OFF
+            let usable = dirs_used()
                 && returned_dir & DIR == DIR
                 && start >= COMMON_END + DIR_LEN
                 && rd::<u32>(rec, COMMON_END + 4)
@@ -656,8 +671,7 @@ mod bulk {
                 reserved: 0,
                 commonattr: COMMON,
                 volattr: 0,
-                // folders through fstatat: not even asked for (what the folder attributes cost)
-                dirattr: if DIRS.get() == OFF { 0 } else { DIR },
+                dirattr: if dirs_used() { DIR } else { 0 },
                 fileattr: FILE,
                 forkattr: 0,
             };
@@ -713,7 +727,7 @@ mod bulk {
                         DIRS.turn_off(why);
                     }
                 }
-                let (files, dirs) = (FILES.get() != OFF, DIRS.get() != OFF);
+                let (files, dirs) = (FILES.get() != OFF, dirs_used());
                 if !files || !dirs {
                     // turned off (here or by another thread's check): fstatat the rest
                     for (_, meta) in batch.iter_mut() {

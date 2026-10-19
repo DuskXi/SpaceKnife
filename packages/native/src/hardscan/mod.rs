@@ -287,6 +287,7 @@ fn scan_slice<'py>(
         .map(|t| Node::new(t.path.clone(), t.root, false))
         .collect();
 
+    let listing = Instant::now();
     let arenas: Vec<Arena> = py.detach(|| {
         walk::walk(&pool, &nodes, &ctx);
         ctx.arenas
@@ -295,6 +296,7 @@ fn scan_slice<'py>(
             .collect()
     });
     let flat = py.detach(|| walk::flatten(&nodes, &input_refs, &arenas));
+    let listed_s = listing.elapsed().as_secs_f64(); // without parsing, nor building the result
 
     // extension table in first-appearance order of the lowercased extension (worker._Acc.ext_id)
     let ext_table = PyList::new(py, [""])?;
@@ -428,7 +430,7 @@ fn scan_slice<'py>(
     drop(names);
     // freeing a big walked tree takes milliseconds: let a pool thread do it after we return
     pool.spawn(move || drop((nodes, arenas)));
-    out.set_item("elapsed", started.elapsed().as_secs_f64())?;
+    out.set_item("elapsed", listed_s)?;
     Ok(out)
 }
 

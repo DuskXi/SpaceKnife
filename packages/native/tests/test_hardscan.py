@@ -574,28 +574,35 @@ def test_macos_lists_with_getattrlistbulk(tree: Path) -> None:
     and the whole tree must equal the Python walker's (scan_one compares them)."""
     scan_one(tree)
     state = native.bulk_listing()
-    assert state == "on", state  # files and folders both
+    assert state == "on", state  # files; folders through fstatat
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="getattrlistbulk is macOS")
-def test_macos_folders_can_be_left_to_fstatat(tree: Path) -> None:
-    """SPACEKNIFE_NO_BULK=dirs: files still come from getattrlistbulk, folders from fstatat (the
-    state is per process: a fresh one)."""
+def test_macos_folders_from_getattrlistbulk_on_request(tree: Path) -> None:
+    """SPACEKNIFE_BULK_DIRS=1: folders come from getattrlistbulk too, and the tree is still the
+    Python walker's (the state is per process: a fresh one)."""
     code = "; ".join(
         [
             "import dataclasses, os, sys",
+            "import numpy as np",
             "import spaceknife_native as n",
-            "from spaceknife.scan.worker import RootOptions",
+            "from spaceknife.scan import worker",
             "root = sys.argv[1]",
-            "roots = [dataclasses.asdict(RootOptions(dev=os.stat(root).st_dev))]",
-            "n.scan_slice([((0, 1, 0), root, 0)], {'roots': roots, 'budget_s': 1e9, 'max_entries': 10**12})",
-            "print(n.bulk_listing())",
+            "ro = worker.RootOptions(dev=os.stat(root).st_dev)",
+            "opts = worker.SliceOptions(roots=(ro,), budget_s=1e9, max_entries=10**12)",
+            "tasks = [((0, 1, 0), root, 0)]",
+            "worker.scan_slice(tasks, opts)",  # a first read can still bump access times
+            "w = worker.scan_slice(tasks, opts)",
+            "d = {'roots': [dataclasses.asdict(ro)], 'budget_s': 1e9, 'max_entries': 10**12}",
+            "r = n.scan_slice(tasks, d)",
+            "bad = [k for k in w.cols if not np.array_equal(w.cols[k], r['cols'][k])]",
+            "print(n.bulk_listing(), bad, r['name_blob'] == w.name_blob)",
         ]
     )
-    env = {**os.environ, "SPACEKNIFE_NO_BULK": "dirs"}
+    env = {**os.environ, "SPACEKNIFE_BULK_DIRS": "1"}
     out = subprocess.run([sys.executable, "-c", code, str(tree)], capture_output=True, text=True, env=env)
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "on (folders: off: SPACEKNIFE_NO_BULK=dirs)"
+    assert out.stdout.strip() == "on (folders too) [] True"
 
 
 def test_bulk_listing_reports_a_state() -> None:
