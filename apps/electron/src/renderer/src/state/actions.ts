@@ -501,9 +501,10 @@ export function applySettings(state: SettingsState): void {
   // 「界面语言」 (M7.5): every t() follows at the next render; texts the backend made (volume notes,
   // class names) are fetched again, painted labels redrawn
   const langChanged = state.language !== getLang() || state.language !== get().lang;
+  // always: index.html starts as zh-CN, and English at the first launch is no "change"
+  document.documentElement.lang = state.language;
   if (langChanged) {
     setLang(state.language);
-    document.documentElement.lang = state.language;
     window.sk.setLanguage(state.language);
   }
   set((s) => ({
