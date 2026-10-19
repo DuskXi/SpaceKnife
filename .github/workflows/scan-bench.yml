@@ -1,7 +1,8 @@
 name: Scan benchmark
 
-# Scan speed on GitHub's macOS runners (their own disks): listing threads, the getattrlistbulk path
-# and the disk-load limit, each with the disk cache purged and warm (.github/scripts/scan-bench.sh).
+# Scan speed on GitHub's macOS runners (their own disks): the default against the settings before
+# (listing threads, folders through fstatat), warm and with the disk cache purged
+# (.github/scripts/scan-bench.sh).
 # The numbers are in the job log; nothing is uploaded.
 on:
   workflow_dispatch:
@@ -41,7 +42,15 @@ jobs:
           sysctl -n machdep.cpu.brand_string hw.ncpu hw.memsize
           sw_vers -productVersion
           diskutil info / | grep -E 'Device Node|Protocol|Solid State|Virtual|Personality' || true
-      - name: Scan /System/Library /usr
+      - name: Scan /System/Library /usr, warm
         env:
           SPACEKNIFE_HOME: ${{ runner.temp }}/spaceknife-home
+          BENCH_CACHE: warm
+          BENCH_ROUNDS: 6
+        run: bash .github/scripts/scan-bench.sh /System/Library /usr
+      - name: Scan /System/Library /usr, disk cache purged
+        env:
+          SPACEKNIFE_HOME: ${{ runner.temp }}/spaceknife-home
+          BENCH_CACHE: cold
+          BENCH_ROUNDS: 3
         run: bash .github/scripts/scan-bench.sh /System/Library /usr

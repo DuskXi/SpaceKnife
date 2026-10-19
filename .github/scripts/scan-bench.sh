@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Scan speed on a CI machine's own disk (never a user's): `spaceknife scan --profile` over the same
-# folders with different settings. The settings take turns, round after round, so drift on a shared
-# runner spreads over all of them; one cold run (macOS: sudo purge) comes first for reference.
+# folders with different settings. The settings take turns and each round starts with a different
+# one, so drift on a shared runner and the order spread over all of them.
 # Prints every run's numbers and, per setting, the mean and range.
-#   .github/scripts/scan-bench.sh ROOT...        (BENCH_ROUNDS: rounds, default 2)
+#   BENCH_CACHE=warm|cold BENCH_ROUNDS=4 .github/scripts/scan-bench.sh ROOT...
 set -o pipefail
 
 roots=("$@")
@@ -50,10 +50,12 @@ if vol is not None:
     print(f"/ : {vol.fs_type} on {vol.device}, media {media_of(vol.mount_point, vol.device, vol.is_remote)}")
 EOF
 
-one "default" cold # also the first touch of everything
+cache=${BENCH_CACHE:-warm} # warm: the same folders again; cold: disk cache purged before each run
+one "warm-up" cold # first touch of everything, left out of the comparison
 
-# what the system's own single-threaded walkers take over the same folders (warm)
-"$py" - "${roots[@]}" <<'EOF2'
+if [ "$cache" = warm ]; then
+  # what the system's own single-threaded walkers take over the same folders
+  "$py" - "${roots[@]}" <<'EOF2'
 import subprocess
 import sys
 import time
@@ -67,14 +69,21 @@ for cmd in (["find", *roots, "-xdev"], ["du", "-skx", *roots]):
     rate = f", {paths:,} paths, {paths / dt:,.0f}/s" if cmd[0] == "find" else ""
     print(f"{cmd[0]}: {dt:.1f} s{rate}")
 EOF2
+fi
 
 cpus=$(getconf _NPROCESSORS_ONLN)
-for _ in $(seq "${BENCH_ROUNDS:-2}"); do
-  one "default" warm
-  one "threads = CPUs (before)" warm SPACEKNIFE_SCAN_THREADS="$cpus"
-  one "folders via fstatat" warm SPACEKNIFE_NO_BULK=dirs
-  one "threads 16" warm SPACEKNIFE_SCAN_THREADS=16
-  one "limit balanced" warm --disk-limit balanced
+configs=(
+  "default|"
+  "threads = CPUs (before)|SPACEKNIFE_SCAN_THREADS=$cpus"
+  "folders via fstatat (before)|SPACEKNIFE_NO_BULK=dirs"
+)
+n=${#configs[@]}
+for r in $(seq 0 $((${BENCH_ROUNDS:-4} - 1))); do # each round starts one setting later (no order bias)
+  for i in $(seq 0 $((n - 1))); do
+    c=${configs[$(((i + r) % n))]}
+    # shellcheck disable=SC2086 # the settings split on spaces
+    one "${c%%|*}" "$cache" ${c#*|}
+  done
 done
 
 echo

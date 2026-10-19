@@ -656,7 +656,8 @@ mod bulk {
                 reserved: 0,
                 commonattr: COMMON,
                 volattr: 0,
-                dirattr: DIR,
+                // folders through fstatat: not even asked for (what the folder attributes cost)
+                dirattr: if DIRS.get() == OFF { 0 } else { DIR },
                 fileattr: FILE,
                 forkattr: 0,
             };
