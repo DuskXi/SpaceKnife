@@ -16,7 +16,7 @@ from rich.table import Table
 from rich.text import Text
 
 from . import fmt, i18n
-from .i18n import tr
+from .i18n import plural, tr
 from .paths import snapshots_dir
 from .scan.scanner import Scanner, ScanProgress, ScanState, default_workers, make_pool
 from .store import snapshot
@@ -134,7 +134,12 @@ def summary_panel(scanner: Scanner, result: ScanProgress, snap: Path | None) -> 
             )
         lines.append(line)
     if result.errors:
-        denied = tr("{count} 个文件夹无法访问", count=result.errors)
+        denied = plural(
+            result.errors,
+            "{count} 个文件夹无法访问",
+            "1 folder couldn't be accessed",
+            count=result.errors,
+        )
         lines.append(
             tr(
                 "{denied}（已计入未知空间），例如 {example}",
@@ -302,7 +307,13 @@ def snapshot_list() -> None:
             path.name,
         )
     console.print(table)
-    total = tr("共 {count} 个快照，位于 {folder}", count=len(found), folder=snapshots_dir())
+    total = plural(
+        len(found),
+        "共 {count} 个快照，位于 {folder}",
+        "1 snapshot in {folder}",
+        count=len(found),
+        folder=snapshots_dir(),
+    )
     console.print(f"[#8F95A2]{total}[/#8F95A2]")
 
 
