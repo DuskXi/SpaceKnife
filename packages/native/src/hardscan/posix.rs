@@ -376,7 +376,7 @@ mod bulk {
     const ATTR_CMN_FILEID: u32 = 0x0200_0000;
     const ATTR_CMN_ERROR: u32 = 0x2000_0000;
     const ATTR_CMN_RETURNED_ATTRS: u32 = 0x8000_0000;
-    const ATTR_DIR_LINKCOUNT: u32 = 0x0000_0001;
+    const ATTR_DIR_ENTRYCOUNT: u32 = 0x0000_0002;
     const ATTR_DIR_MOUNTSTATUS: u32 = 0x0000_0004;
     const ATTR_DIR_ALLOCSIZE: u32 = 0x0000_0008;
     const ATTR_FILE_LINKCOUNT: u32 = 0x0000_0001;
@@ -395,7 +395,7 @@ mod bulk {
         | ATTR_CMN_ACCTIME
         | ATTR_CMN_FLAGS
         | ATTR_CMN_FILEID;
-    const DIR: u32 = ATTR_DIR_LINKCOUNT | ATTR_DIR_MOUNTSTATUS | ATTR_DIR_ALLOCSIZE;
+    const DIR: u32 = ATTR_DIR_ENTRYCOUNT | ATTR_DIR_MOUNTSTATUS | ATTR_DIR_ALLOCSIZE;
     const FILE: u32 = ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE | ATTR_FILE_DATALENGTH;
     const NEEDED: u32 = COMMON & !(ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_ERROR);
 
@@ -403,7 +403,7 @@ mod bulk {
     // u32 length, attribute_set_t returned (5 x u32), u32 error (right after the returned set),
     // then by bit: attrreference_t name, dev_t devid, fsobj_type_t objtype, timespec crtime,
     // modtime, acctime, u32 flags, u64 fileid; then, for a folder, the folder attributes: u32
-    // linkcount, u32 mountstatus, off_t allocsize; for anything else the file attributes: u32
+    // entrycount, u32 mountstatus, off_t allocsize; for anything else the file attributes: u32
     // linkcount, off_t allocsize, off_t datalength. The name's bytes follow the fixed part, where
     // its reference points: the folder attributes are read right after the common ones, the file
     // attributes right before the name (whether or not the other section is packed too).
@@ -418,7 +418,7 @@ mod bulk {
     const AT_FLAGS: usize = 92;
     const AT_FILEID: usize = 96;
     const COMMON_END: usize = 104; // every record: the common attributes
-    const DIR_LEN: usize = 16; // linkcount, mountstatus, allocsize
+    const DIR_LEN: usize = 16; // entrycount, mountstatus, allocsize
     const FILE_LEN: usize = 20; // linkcount, allocsize, datalength
     const DIR_MNTSTATUS_MNTPOINT: u32 = 0x0000_0001;
     const DIR_MNTSTATUS_TRIGGER: u32 = 0x0000_0002;
@@ -589,7 +589,9 @@ mod bulk {
                     btime: times.1,
                     atime: times.2,
                     ino: rd::<u64>(rec, AT_FILEID),
-                    nlink: rd::<u32>(rec, COMMON_END) as u64,
+                    // APFS gives a folder st_nlink = its entries + 2 (ATTR_DIR_LINKCOUNT counts only
+                    // hard links to it); a file system that counts otherwise fails the check
+                    nlink: rd::<u32>(rec, COMMON_END) as u64 + 2,
                     flags,
                 }),
             ));
