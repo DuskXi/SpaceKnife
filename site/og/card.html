@@ -1,6 +1,7 @@
 <!doctype html>
 <!-- The social card (1200×630) for link previews: rendered to site/public/og-<lang>.png by
-     site/og/capture.cjs. Open with ?lang=en or ?lang=zh. -->
+     site/og/capture.cjs. Open with ?lang=en or ?lang=zh; ?w=1280&h=640 lays it out at another
+     size (the GitHub social preview). -->
 <html>
   <head>
     <meta charset="utf-8" />
@@ -8,11 +9,15 @@
     <link rel="stylesheet" href="../node_modules/@fontsource-variable/geist-mono/index.css" />
     <link rel="stylesheet" href="../node_modules/@fontsource-variable/noto-sans-sc/index.css" />
     <style>
+      :root {
+        --w: 1200px;
+        --h: 630px;
+      }
       html,
       body {
         margin: 0;
-        width: 1200px;
-        height: 630px;
+        width: var(--w);
+        height: var(--h);
         overflow: hidden;
         background: #08090b;
         color: #f1f2f5;
@@ -20,8 +25,8 @@
       }
       .card {
         position: relative;
-        width: 1200px;
-        height: 630px;
+        width: var(--w);
+        height: var(--h);
         background:
           radial-gradient(42rem 26rem at 18% -6rem, rgb(139 156 255 / 0.28), transparent 70%),
           radial-gradient(30rem 22rem at 100% 100%, rgb(212 255 58 / 0.08), transparent 70%),
@@ -37,7 +42,7 @@
       .left {
         position: absolute;
         left: 72px;
-        top: 76px;
+        top: calc(76px + (var(--h) - 630px) / 2);
         width: 520px;
       }
       .brand {
@@ -88,8 +93,8 @@
       }
       .shot {
         position: absolute;
-        left: 640px;
-        top: 70px;
+        left: calc(var(--w) - 560px);
+        top: calc(70px + (var(--h) - 630px) / 2);
         width: 760px;
         border-radius: 16px;
         overflow: hidden;
@@ -117,7 +122,9 @@
       <div class="shot"><img id="shot" alt="" /></div>
     </div>
     <script>
-      const lang = new URLSearchParams(location.search).get("lang") === "zh" ? "zh" : "en";
+      const q = new URLSearchParams(location.search);
+      const lang = q.get("lang") === "zh" ? "zh" : "en";
+      for (const k of ["w", "h"]) if (q.get(k)) document.documentElement.style.setProperty(`--${k}`, `${Number(q.get(k))}px`);
       const t = {
         en: { a: "See what fills", b: "your drives.", pills: ["<b>Free</b> &amp; open source", "Windows · Linux", "MIT"], shot: "treemap-en.png" },
         zh: { a: "看清磁盘", b: "被什么占满。", pills: ["<b>免费</b>开源", "Windows · Linux", "MIT"], shot: "treemap.png" },
