@@ -33,7 +33,7 @@ from loguru import logger
 
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
-from .volume import VolumeInfo, is_volume_root, volume_for
+from .volume import VolumeInfo, is_volume_root, volume_for, volume_group_twins
 from .worker import RootOptions, SliceOptions, SliceResult, Task
 
 if TYPE_CHECKING:
@@ -64,6 +64,7 @@ class RootInfo:
 
 RATE_WINDOW_S = 4.0  # sliding window of the item / byte rates
 ESTIMATE_AFTER_S = 3.0  # no remaining-time estimate before this much data
+BYTES_CEILING = 0.95  # past this share of the used space a byte-based progress is a guess (progress())
 
 
 @dataclass(slots=True)
@@ -126,6 +127,7 @@ def native_slicer() -> Slicer | None:
                 "cluster_size": r.cluster_size,
                 "resident_max": r.resident_max,
                 "cross_mounts": r.cross_mounts,
+                **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the key
             }
             for r in opts.roots
         ]
@@ -233,6 +235,7 @@ class Scanner:
                     cluster_size=volume.cluster_size if volume else 4096,
                     resident_max=512 if ntfs else 0,
                     cross_mounts=cross_mounts,
+                    skip=() if cross_mounts else volume_group_twins(path),
                 )
             )
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))
@@ -486,15 +489,23 @@ class Scanner:
         used = 0
         if self.roots and all(r.whole_volume and r.volume for r in self.roots):
             used = sum(r.volume.used for r in self.roots if r.volume)
-            if used > 0:
-                fraction = 1.0 if self.state == ScanState.DONE else min(0.999, scanned_alloc / used)
-        if fraction is None and self.expected_items:
-            fraction = 1.0 if self.state == ScanState.DONE else min(0.99, items / self.expected_items)
+        # By items when the last scan of these roots says how many there are; else by bytes against
+        # the volume's used space, but only up to BYTES_CEILING: used space is no exact total (APFS
+        # clones and hard links can make the scan pass it, snapshots and other volumes keep it out
+        # of reach), so past that the progress is unknown rather than stuck at 99 %.
+        expected = self.expected_items or 0
+        by_items = items / expected if expected else None
+        by_bytes = scanned_alloc / used if used > 0 else None
+        if self.state == ScanState.DONE:
+            fraction = 1.0 if by_items is not None or by_bytes is not None else None
+        elif by_items is not None and by_items < 1:
+            fraction = min(0.99, by_items)
+        elif by_bytes is not None and by_bytes < BYTES_CEILING:
+            fraction = by_bytes
         if running and elapsed >= ESTIMATE_AFTER_S:
-            # by items when the total is known from the last scan, else by bytes against the volume
-            if self.expected_items and rate > 0 and items < self.expected_items:
-                remaining = (self.expected_items - items) / rate
-            elif used > scanned_alloc and byte_rate > 0:
+            if by_items is not None and by_items < 1 and rate > 0:
+                remaining = (expected - items) / rate
+            elif by_bytes is not None and by_bytes < BYTES_CEILING and byte_rate > 0:
                 remaining = (used - scanned_alloc) / byte_rate
         return ScanProgress(
             state=self.state,

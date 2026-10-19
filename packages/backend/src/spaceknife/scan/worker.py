@@ -14,6 +14,7 @@ Keep this module import-light: every pool process imports it at start-up.
 from __future__ import annotations
 
 import os
+import posixpath
 import stat
 import sys
 import time
@@ -85,6 +86,9 @@ class RootOptions:
     cluster_size: int = 4096  # Windows hard scan: allocation = size rounded up to clusters
     resident_max: int = 0  # NTFS: files this small live inside the MFT record (0 clusters)
     cross_mounts: bool = False
+    # folders not to enter, as mount points (macOS: the other half of the root's APFS volume
+    # group, already in the tree through the firmlinks; scan.volume.volume_group_twins)
+    skip: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,7 +282,9 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                 descend = False
                 if stat.S_ISDIR(mode):
                     kind = KIND_DIR
-                    if st.st_dev != root.dev and not root.cross_mounts:
+                    if (st.st_dev != root.dev and not root.cross_mounts) or (
+                        root.skip and posixpath.join(path, name) in root.skip
+                    ):
                         flags |= F_MOUNT
                     else:
                         descend = True

@@ -442,6 +442,26 @@ def test_posix_mount_boundaries(tree: Path) -> None:
     assert compare([((0, 1, 0), str(tree), 0)], (RootOptions(dev=real + 1, cross_mounts=True),)).paths[1:]
 
 
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX walkers")
+def test_posix_skipped_folders_are_not_entered(tree: Path) -> None:
+    """RootOptions.skip (macOS: the Data volume below "/", already there through the firmlinks):
+    the folder is listed as a mount point and not entered, by both walkers alike."""
+    subs = sorted(p for p in tree.iterdir() if p.is_dir() and not p.is_symlink())
+    skipped, kept = subs[0], subs[1]
+    res = scan_one(tree, skip=(str(skipped),))
+    assert str(skipped) not in res.paths and any(p.startswith(str(kept)) for p in res.paths)
+    assert not any(p.startswith(str(skipped) + "/") for p in res.paths)
+    lo, hi = int(res.bounds[0]), int(res.bounds[1])
+    off = 0
+    flags_by_name = {}
+    for i in range(lo, hi):
+        n = int(res.name_lens[i])
+        flags_by_name[res.name_blob[off : off + n]] = int(res.cols["flags"][i])
+        off += n
+    assert flags_by_name[os.fsencode(skipped.name)] & Flag.MOUNT
+    assert not flags_by_name[os.fsencode(kept.name)] & Flag.MOUNT
+
+
 # ---------------------------------------------------------------------------- slicing
 
 

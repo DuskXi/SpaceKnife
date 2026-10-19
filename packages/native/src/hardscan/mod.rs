@@ -49,7 +49,7 @@ use common::{Arena, NativePath, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
 const OPT_KEYS: [&str; 4] = ["roots", "budget_s", "max_entries", "threads"];
-const ROOT_KEYS: [&str; 4] = ["dev", "cluster_size", "resident_max", "cross_mounts"];
+const ROOT_KEYS: [&str; 5] = ["dev", "cluster_size", "resident_max", "cross_mounts", "skip"];
 
 struct Opts {
     roots: Vec<RootOpts>,
@@ -101,6 +101,10 @@ fn parse_root(obj: &Bound<'_, PyAny>) -> PyResult<RootOpts> {
     }
     if let Some(v) = field(obj, "cross_mounts")? {
         r.cross_mounts = v.is_truthy()?;
+    }
+    if let Some(v) = field(obj, "skip")? {
+        let paths: Vec<String> = v.extract()?;
+        r.skip = paths.into_iter().map(String::into_bytes).collect();
     }
     Ok(r)
 }

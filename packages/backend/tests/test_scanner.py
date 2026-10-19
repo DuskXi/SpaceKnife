@@ -175,3 +175,27 @@ async def test_scan_runs_inside_running_loop_without_blocking(tree: TreeFacts) -
 
     await asyncio.gather(scanner.run(), ticker())
     assert ticks > 0
+
+
+def test_progress_by_items_else_bytes_and_unknown_past_the_ceiling(tmp_path: Path) -> None:
+    """Used space is no exact total (APFS clones can pass it): past 95 % of it the progress is
+    unknown instead of stuck at 99 %; the last scan's item count wins when there is one."""
+    from dataclasses import replace
+
+    scanner = Scanner([str(tmp_path)])
+    root = scanner.roots[0]
+    root.volume = replace(volume_for(str(tmp_path)), total=4000, free=3000, reserved=0)  # 1000 used
+    root.whole_volume = True
+    scanner.state = ScanState.SCANNING
+    tot = scanner.store.cols["tot_alloc"]
+    tot[0] = 500
+    assert scanner.progress().progress == pytest.approx(0.5)
+    tot[0] = 960
+    assert scanner.progress().progress is None
+    tot[0] = 2000  # more than the volume says it uses
+    assert scanner.progress().progress is None
+    scanner.expected_items = 10  # the last scan of this root: by items, whatever the bytes say
+    now = scanner.progress()
+    assert now.progress == pytest.approx(now.items / 10)
+    scanner.state = ScanState.DONE
+    assert scanner.progress().progress == 1.0

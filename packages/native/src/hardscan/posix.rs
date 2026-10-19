@@ -42,6 +42,24 @@ fn join_posix(parent: &[u8], name: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Is `dir`/`name` one of the folders not to enter? (Compared without building the path.)
+fn is_skipped(skip: &[Vec<u8>], dir: &[u8], name: &[u8]) -> bool {
+    skip.iter().any(|s| {
+        let Some(rest) = s.strip_prefix(dir) else {
+            return false;
+        };
+        let rest = if dir.ends_with(b"/") || dir.is_empty() {
+            rest
+        } else {
+            match rest.strip_prefix(b"/") {
+                Some(r) => r,
+                None => return false,
+            }
+        };
+        rest == name
+    })
+}
+
 /// Nothing to learn per root on POSIX.
 pub struct RootState;
 
@@ -111,7 +129,7 @@ fn add_entry(
     let mut descend = false;
     let dev = st.st_dev as u64;
     let kind = if mode == libc::S_IFDIR as u32 {
-        if dev != root.dev && !root.cross_mounts {
+        if (dev != root.dev && !root.cross_mounts) || is_skipped(&root.skip, dir, raw) {
             flags |= flag::MOUNT;
         } else {
             descend = true;
@@ -290,6 +308,18 @@ mod tests {
         assert_eq!(escaped_code_points(b"\xff\xfe"), 2);
         assert_eq!(escaped_code_points(b"\xe4\xb8\xe4\xb8\xad"), 3);
         assert_eq!(escaped_code_points(b"\xed\xa0\x80"), 3);
+    }
+
+    #[test]
+    fn skips_exact_children_only() {
+        let skip = vec![b"/System/Volumes/Data".to_vec()];
+        assert!(is_skipped(&skip, b"/System/Volumes", b"Data"));
+        assert!(is_skipped(&skip, b"/System/Volumes/", b"Data"));
+        assert!(!is_skipped(&skip, b"/System/Volumes", b"Dat"));
+        assert!(!is_skipped(&skip, b"/System/Volumes", b"Data2"));
+        assert!(!is_skipped(&skip, b"/System", b"Volumes"));
+        assert!(!is_skipped(&[], b"/System/Volumes", b"Data"));
+        assert!(is_skipped(&[b"/x".to_vec()], b"/", b"x"));
     }
 
     #[test]
