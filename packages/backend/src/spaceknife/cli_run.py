@@ -41,7 +41,7 @@ from . import fmt
 from .cli_scan import apply_language
 from .export import BUILTIN_INFO, FORMATS, ExportError, ExportFormat, export_chunks, resolve, write_export
 from .export.template import ExportTree, Ordering
-from .i18n import Texts, tr
+from .i18n import Texts, plural, tr
 from .scan.scanner import ScanError, Scanner, ScanProgress, ScanState, native_slicer, native_threads
 from .store import snapshot
 from .store.nodes import NodeStore
@@ -402,16 +402,25 @@ class Runner:
         roots = [r.path for r in scanner.roots]
         if result.state != ScanState.DONE:
             raise CommandFailed(TEXT["scan_stopped"].format(state=result.state.value, paths="; ".join(roots)))
-        self.say(
-            "scanned",
-            MUTED,
+        msg = plural(
+            result.items,
+            TEXT.raw("scanned"),
+            "Scanned {paths}: 1 item, {size} on disk, in {time}",
             paths="; ".join(roots),
             items=fmt.count(result.items),
             size=fmt.size(result.bytes_alloc),
             time=fmt.duration(result.elapsed_s),
         )
+        self.err.print(Text(msg, style=MUTED))
         if result.errors:
-            self.say("denied", WARN, count=result.errors, example=result.denied[0] if result.denied else "")
+            msg = plural(
+                result.errors,
+                TEXT.raw("denied"),
+                "1 folder couldn't be accessed, e.g. {example}",
+                count=result.errors,
+                example=result.denied[0] if result.denied else "",
+            )
+            self.err.print(Text(msg, style=WARN))
         stats = {
             "items": result.items,
             "files": result.files,
@@ -482,13 +491,15 @@ class Runner:
             raise CommandFailed(TEXT["load_failed"].format(path=path, reason=exc)) from exc
         except OSError as exc:
             raise CommandFailed(TEXT["load_failed"].format(path=path, reason=exc.strerror or exc)) from exc
-        self.say(
-            "loaded",
-            MUTED,
+        msg = plural(
+            header.node_count - 1,
+            TEXT.raw("loaded"),
+            "Opened snapshot {path}: 1 item, {size} on disk",
             path=path,
             items=fmt.count(header.node_count - 1),
             size=fmt.size(int(store.cols["tot_alloc"][0])),
         )
+        self.err.print(Text(msg, style=MUTED))
         view = View(f"load {arg}", store, list(header.roots), list(header.volumes), dict(header.stats))
         view.checkpoints = dict(header.checkpoints)
         self.views.append(view)
@@ -512,7 +523,15 @@ class Runner:
         found = evaluate(view.store, result.normal, FilterContext.current())
         view.match, view.filter_text = found.match, expr
         count, alloc, _ = found.totals(0)
-        self.say("filtered", MUTED, expr=expr, count=fmt.count(count), size=fmt.size(alloc))
+        msg = plural(
+            count,
+            TEXT.raw("filtered"),
+            "Filter {expr}: 1 file, {size} on disk",
+            expr=expr,
+            count=fmt.count(count),
+            size=fmt.size(alloc),
+        )
+        self.err.print(Text(msg, style=MUTED))
 
     def cmd_save(self, arg: str) -> None:
         view = self.view
