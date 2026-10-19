@@ -5,7 +5,7 @@
 import { content } from "../i18n/content";
 import { fmtSize, REPO_URL, type Release } from "./release";
 
-const SITE = "https://duskxi.github.io/SpaceKnife/";
+const SITE = "https://spaceknife.kaltsit.dev/";
 const BLOB = `${REPO_URL}/blob/main`;
 
 function downloads(r: Release): string[] {

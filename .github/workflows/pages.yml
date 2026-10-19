@@ -1,4 +1,5 @@
-# The website (site/, Astro) on GitHub Pages: https://duskxi.github.io/SpaceKnife/
+# The website (site/, Astro) on GitHub Pages: https://spaceknife.kaltsit.dev/ (custom domain,
+# set in the repository's Pages settings; duskxi.github.io/SpaceKnife/ redirects there)
 # Rebuilt when the site, its screenshots or icons change, and when a release is published or edited
 # (the download buttons point at the newest release, read from the GitHub API at build time).
 name: Website

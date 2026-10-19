@@ -1,5 +1,5 @@
-// Everyone may crawl, AI crawlers included. Note: crawlers read robots.txt only at the root of a
-// host; on a project site (duskxi.github.io/SpaceKnife/) this copy takes effect with a custom domain.
+// Everyone may crawl, AI crawlers included (served at the root of spaceknife.kaltsit.dev, where
+// crawlers look for it).
 import type { APIRoute } from "astro";
 
 const AGENTS = ["GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot", "Claude-User", "Claude-SearchBot", "PerplexityBot", "Google-Extended", "Applebot-Extended", "CCBot", "Bingbot", "Googlebot"];

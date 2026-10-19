@@ -2,14 +2,14 @@
   "name": "SpaceKnife",
   "short_name": "SpaceKnife",
   "description": "A modern, cross-platform disk usage analyzer.",
-  "start_url": "/SpaceKnife/",
-  "scope": "/SpaceKnife/",
+  "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#08090B",
   "theme_color": "#08090B",
   "icons": [
-    { "src": "/SpaceKnife/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/SpaceKnife/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/SpaceKnife/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
   ]
 }

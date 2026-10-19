@@ -1,11 +1,10 @@
 // The SpaceKnife website: a static Astro site published to GitHub Pages
-// (https://duskxi.github.io/SpaceKnife/) by .github/workflows/pages.yml.
+// (https://spaceknife.kaltsit.dev/, a custom domain) by .github/workflows/pages.yml.
 import sitemap from "@astrojs/sitemap";
 import { defineConfig } from "astro/config";
 
 export default defineConfig({
-  site: "https://duskxi.github.io",
-  base: "/SpaceKnife",
+  site: "https://spaceknife.kaltsit.dev",
   trailingSlash: "always",
   build: { format: "directory" },
   integrations: [
