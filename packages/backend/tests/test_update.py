@@ -162,9 +162,49 @@ def test_version_order_is_semver() -> None:
     assert Version(0, 9, 0) < Version(0, 10, 0) and Version(1, 0, 0) > Version(1, 0, 0, ("rc", "1"))
 
 
+def test_every_part_is_a_number_of_any_length() -> None:
+    # each part grows by one at a time (0.3.9 -> 0.3.10 -> 0.3.100); a part to its left moves
+    # only for a real accumulated update: never compared as text or as a decimal number
+    ordered = [
+        "0.3.2",
+        "0.3.9",
+        "0.3.10",
+        "0.3.11",
+        "0.3.99",
+        "0.3.100",
+        "0.9.12",
+        "0.10.0",
+        "0.99.99",
+        "0.100.0",
+        "1.0.0",
+        "1.9.0",
+        "1.10.0",
+        "9.0.0",
+        "10.0.0",
+        "100.200.300",
+    ]
+    parsed = [Version.parse(v) for v in ordered]
+    assert all(p is not None for p in parsed)
+    assert [str(v) for v in sorted(reversed(parsed), key=lambda v: v.key if v else ())] == ordered
+    assert Version.parse("0.3.10-beta.10") > Version.parse("0.3.10-beta.9")  # type: ignore[operator]
+    newest = update.choose(update.parse_releases([gh("v0.3.9"), gh("v0.3.10"), gh("v0.3.2")]), "stable")
+    assert newest is not None and newest.version == "0.3.10"
+
+
 @pytest.mark.parametrize(
     ("current", "latest", "level"),
     [
+        ("0.3.9", "0.3.10", "patch"),
+        ("0.3.10", "0.3.100", "patch"),
+        ("0.3.99", "0.3.100", "patch"),
+        ("0.3.100", "0.4.0", "minor"),
+        ("0.9.12", "0.10.0", "minor"),
+        ("0.10.0", "0.10.15", "patch"),
+        ("0.99.99", "1.0.0", "major"),
+        ("9.9.9", "10.0.0", "major"),
+        ("0.3.10", "0.3.9", "none"),
+        ("0.10.0", "0.9.99", "none"),
+        ("0.3.10-beta.9", "0.3.10-beta.10", "patch"),
         ("0.3.0", "0.3.1", "patch"),
         ("0.3.0", "0.4.0", "minor"),
         ("0.3.9", "0.4.0", "minor"),

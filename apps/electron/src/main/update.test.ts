@@ -69,6 +69,16 @@ describe("installRefusal", () => {
       ["dmg", "darwin", "/Users/lenny/Downloads", "SpaceKnife-0.4.0-mac-x64.dmg"],
       ["deb", "linux", "/home/lenny/Downloads", "spaceknife_0.4.0_amd64.deb"],
       ["rpm", "linux", "/home/lenny/Downloads", "spaceknife-0.4.0.x86_64.rpm"],
+      // every part a number of any length
+      ["nsis", "win32", winDownloads, "SpaceKnife-0.3.10-Setup-x64.exe"],
+      ["nsis", "win32", winDownloads, "SpaceKnife-0.10.100-Setup-x64.exe"],
+      ["nsis", "win32", winDownloads, "SpaceKnife-12.34.567-Setup-x64.exe"],
+      ["dmg", "darwin", "/Users/lenny/Downloads", "SpaceKnife-0.3.10-mac-arm64.dmg"],
+      ["deb", "linux", "/home/lenny/Downloads", "spaceknife_0.3.10_amd64.deb"],
+      ["rpm", "linux", "/home/lenny/Downloads", "spaceknife-0.3.10.x86_64.rpm"],
+      // a pre-release as the Linux packages may spell it
+      ["deb", "linux", "/home/lenny/Downloads", "spaceknife_0.4.0~beta.1_amd64.deb"],
+      ["rpm", "linux", "/home/lenny/Downloads", "spaceknife-0.4.0_beta.1.x86_64.rpm"],
     ];
     for (const [kind, platform, folder, name] of cases) {
       const file = platform === "win32" ? `${folder}\\${name}` : `${folder}/${name}`;

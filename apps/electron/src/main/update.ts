@@ -22,7 +22,9 @@ const DPKG_LIST = "/var/lib/dpkg/info/spaceknife.list";
 
 // The release files main may start (electron-builder.yml artifactName); a portable archive or an
 // AppImage has no install step (the renderer shows it in its folder), nor has a development run.
-const VERSION = String.raw`\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?`;
+// every part is a number of any length (0.3.10, 0.10.0); deb and rpm may write a pre-release's "-"
+// as "~" or "_"
+const VERSION = String.raw`\d+\.\d+\.\d+(?:[-~_][0-9A-Za-z.~_-]+)?`;
 const INSTALLERS: Partial<Record<InstallKind, RegExp>> = {
   nsis: new RegExp(String.raw`^SpaceKnife-${VERSION}-Setup-x64\.exe$`),
   dmg: new RegExp(String.raw`^SpaceKnife-${VERSION}-mac-[0-9a-z_]+\.dmg$`),
