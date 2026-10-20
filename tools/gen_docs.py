@@ -43,7 +43,8 @@ DOCS = ROOT / "site" / "src" / "content" / "docs"
 RENDERER = ROOT / "apps" / "electron" / "src" / "renderer" / "src"
 FRONTEND_LOCALES = RENDERER / "locales" / "en"
 SETTINGS_PAGE = RENDERER / "pages" / "SettingsPage.tsx"
-APP_TSX = RENDERER / "App.tsx"
+# where the Electron window handles keys: App.tsx, and the keys it hands to palette commands
+KEY_HANDLERS = (RENDERER / "App.tsx", RENDERER / "state" / "commands.ts")
 
 Lang = Literal["en", "zh"]
 LANGS: tuple[Lang, ...] = ("en", "zh")
@@ -68,10 +69,10 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("advanced", "高级", "设置文件、日志、缓存与快照"),
 )
 
-# Keys the palette lists that the Electron window does not handle yet (App.tsx has no handler for
-# them): the table marks them. Each comes with what a handler in App.tsx would contain, so the
-# tests notice when one is wired up and this entry has to go.
-NOT_WIRED: dict[str, str] = {"F5": '"F5"', "Shift+F5": '"F5"', "Ctrl+S": '"s"'}
+# Keys the palette lists that the Electron window does not handle yet (no handler in KEY_HANDLERS):
+# the table marks them. Each comes with what its handler would contain, e.g. {"F5": '"F5"'}, so the
+# tests notice when one is wired up and this entry has to go. None at the moment.
+NOT_WIRED: dict[str, str] = {}
 
 # Text that stays as it is in every language (an option named in its own language).
 SAME_IN_EVERY_LANGUAGE = frozenset({"简体中文"})

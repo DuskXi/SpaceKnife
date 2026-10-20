@@ -6,6 +6,7 @@ import { revealLabel } from "@/shell/Inspector";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
 import { registeredLayouts } from "@/visual/registry";
+import type { PaletteContext } from "@/protocol/generated";
 
 import {
   basketAdd,
@@ -27,7 +28,7 @@ import {
 } from "./actions";
 import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
 import { openHelp } from "./help";
-import { activeTab, focusedViewId, get, set, toast, toggleLog } from "./store";
+import { type AppState, activeTab, basketCount, focusedViewId, get, set, toast, toggleLog } from "./store";
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
 
 /** The selected node of the focused view (not an aggregate block), or null. */
@@ -73,6 +74,31 @@ async function selectionPath(): Promise<{ path: string; dir: boolean } | null> {
   if (!sel) return null;
   const r = await call("tree.node", { scan_id: sel.scanId, node: sel.node });
   return { path: r.path, dir: r.node.kind === "dir" };
+}
+
+/** Where the user is, as the backend's commands see it (palette.query, palette.check). */
+export function paletteContext(s: AppState = get()): PaletteContext {
+  const tab = activeTab(s);
+  // the help tab is, to the backend's commands, a tab without a scan like the settings tab
+  return { tab: tab.kind === "help" ? "settings" : tab.kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s) };
+}
+
+/** The command a key runs through the palette's rules (runShortcut), or null: F5 / Shift+F5 / Ctrl+S,
+ * the keys palette/commands.py names for view.rescan, scan.rescan_all and snapshot.save. */
+export function shortcutCommand(e: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "shiftKey" | "altKey">): string | null {
+  const ctrl = e.ctrlKey || e.metaKey;
+  if (e.key === "F5" && !ctrl && !e.altKey) return e.shiftKey ? "scan.rescan_all" : "view.rescan";
+  if (ctrl && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "s") return "snapshot.save";
+  return null;
+}
+
+/** A command's keyboard shortcut (App.tsx): it runs where the palette would offer the command, and
+ * elsewhere says why not, as the palette's row does. Which commands are available is the backend's
+ * call (palette.check), so the key and the palette never disagree. */
+export async function runShortcut(id: string): Promise<void> {
+  const c = await call("palette.check", { id, context: paletteContext() });
+  if (!c.enabled) return toast(c.status ? t("{command}：{reason}", { command: c.name, reason: c.status }) : c.name);
+  await runCommand(id);
 }
 
 export async function runCommand(id: string): Promise<void> {
@@ -227,8 +253,9 @@ export async function runCommand(id: string): Promise<void> {
       if (tab.scanId) await continueScan(tab.scanId);
       return;
     case "view.rescan": {
+      // the zoom root; 0 is the top of a scan of several roots: all of them are read again
       const zoom = viewId ? get().views[viewId]?.state.zoom_node : undefined;
-      if (tab.scanId && zoom != null && zoom > 0) await rescanFolder(tab.scanId, zoom);
+      if (tab.scanId && zoom != null && zoom >= 0) await rescanFolder(tab.scanId, zoom);
       return;
     }
     case "scan.new":

@@ -14,7 +14,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 ## 按键什么时候生效
 
 - **单键不会在输入框里触发。** <kbd>/</kbd>、<kbd>F</kbd>、<kbd>U</kbd>、<kbd>C</kbd>、<kbd>V</kbd>、数字键、<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Backspace</kbd>、<kbd>Esc</kbd> 只在焦点不在文本框里时作用于视图。在过滤框里输入 `f` 不会关掉可用空间，<kbd>Ctrl</kbd>+<kbd>C</kbd> 在输入框里也是普通的复制。
-- **全局键在过滤框里也有效。** <kbd>Ctrl</kbd>+<kbd>K</kbd>、<kbd>Ctrl</kbd>+<kbd>J</kbd>、<kbd>Ctrl</kbd>+<kbd>T</kbd>、<kbd>Ctrl</kbd>+<kbd>W</kbd>、<kbd>Ctrl</kbd>+<kbd>,</kbd>、<kbd>Ctrl</kbd>+<kbd>Tab</kbd> 不用先离开过滤框。有些输入框把按键全部留给输入，全局键在里面不起作用：启动页的路径框、编辑路径的输入框（<kbd>Ctrl</kbd>+<kbd>L</kbd>），以及设置里的搜索框、数字框和标签名称框。
+- **全局键在过滤框里也有效。** <kbd>Ctrl</kbd>+<kbd>K</kbd>、<kbd>Ctrl</kbd>+<kbd>J</kbd>、<kbd>Ctrl</kbd>+<kbd>T</kbd>、<kbd>Ctrl</kbd>+<kbd>W</kbd>、<kbd>Ctrl</kbd>+<kbd>,</kbd>、<kbd>Ctrl</kbd>+<kbd>Tab</kbd>，以及 0.3.2 起的 <kbd>F5</kbd>、<kbd>Shift</kbd>+<kbd>F5</kbd>、<kbd>Ctrl</kbd>+<kbd>S</kbd> 不用先离开过滤框。有些输入框把按键全部留给输入，全局键在里面不起作用：启动页的路径框、编辑路径的输入框（<kbd>Ctrl</kbd>+<kbd>L</kbd>），以及设置里的搜索框、数字框和标签名称框。
 - **视图键作用于焦点窗格。** 分屏时，带强调边框的那一侧是焦点窗格；点一下另一侧就把焦点移过去。
 - **控件自己的键优先。** 焦点在按钮、单选、菜单项这类控件上时，<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Esc</kbd> 和 <kbd>Shift</kbd>+<kbd>F10</kbd> 交给控件（例如按钮上的 <kbd>Enter</kbd> 就是按下按钮）；焦点在下拉框上时，<kbd>C</kbd> 和 <kbd>V</kbd> 用来按首字母选项。
 - **对话框打开时，背后的界面不响应按键。** 命令面板打开时只有 <kbd>Ctrl</kbd>+<kbd>K</kbd>（关闭面板）和 0.3.2 起的 <kbd>F1</kbd>（打开命令面板的帮助页）还在窗口层面起作用；大版本更新的对话框打开时，所有快捷键都不生效。
@@ -155,6 +155,11 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | <kbd>Enter</kbd> | 开始扫描（焦点在其他按钮上时，按的是那个按钮）。在路径框里按 <kbd>Enter</kbd> 也一样 |
 | <kbd>←</kbd>、<kbd>→</kbd>、<kbd>↑</kbd>、<kbd>↓</kbd> | 在卷列表里换卷（左右换一个，上下换一行） |
 | <kbd>←</kbd>、<kbd>→</kbd>（或 <kbd>↑</kbd>、<kbd>↓</kbd>） | 焦点在扫描详情的「磁盘负载上限」上时，换到相邻的档位 |
+| <kbd>F5</kbd> | 0.3.2 起：重新扫描当前视图。放大进入的文件夹连同下面的一切重新读一遍，就地更新；在多个扫描位置的最顶层时，所有位置都重读一遍 |
+| <kbd>Shift</kbd>+<kbd>F5</kbd> | 0.3.2 起：全盘重新扫描，用同样的位置重新开始一次扫描 |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | 0.3.2 起：把当前扫描保存为快照 |
+
+这三个键和命令面板里的同名命令一样：命令在面板里是灰的（扫描还没完成、当前标签不是扫描结果、对比时重新扫描当前视图），按键就不执行，窗口底部提示原因。按住不放只执行一次。
 
 ## 设置标签页
 
@@ -203,13 +208,15 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 - **没有 Home、PageUp、PageDown 键时用 fn。** <kbd>fn</kbd>+<kbd>←</kbd> 是 Home，<kbd>fn</kbd>+<kbd>↑</kbd> / <kbd>fn</kbd>+<kbd>↓</kbd> 是 PageUp / PageDown，所以「回到根」是 <kbd>⌘</kbd>+<kbd>fn</kbd>+<kbd>←</kbd>。
 - **切换标签用 Control+Tab。** <kbd>⌘</kbd>+<kbd>Tab</kbd> 是系统的应用切换；也可以用 <kbd>⌘</kbd>+<kbd>fn</kbd>+<kbd>↑</kbd> / <kbd>↓</kbd>。
 - **打开终端可以用 Control+&#96;。** 系统默认把 <kbd>⌘</kbd>+<kbd>&#96;</kbd> 用于在同一应用的窗口之间切换。
-- **功能键**：功能键被设成媒体键时，<kbd>Shift</kbd>+<kbd>F10</kbd>（以及 0.3.2 起的 <kbd>F1</kbd>）要再加 <kbd>fn</kbd>。
+- **功能键**：功能键被设成媒体键时，<kbd>Shift</kbd>+<kbd>F10</kbd>（以及 0.3.2 起的 <kbd>F1</kbd>、<kbd>F5</kbd>、<kbd>Shift</kbd>+<kbd>F5</kbd>）要再加 <kbd>fn</kbd>。
 - **右键菜单**：Mac 键盘没有菜单键，用 <kbd>Shift</kbd>+<kbd>F10</kbd>，或者按住 Control 单击、双指轻点。
 
 ## 暂时不能用的键
 
 :::caution
-命令面板和「设置 › 快捷键」的键位表还列出了 <kbd>F5</kbd>（重新扫描当前视图）、<kbd>Shift</kbd>+<kbd>F5</kbd>（全盘重新扫描）和 <kbd>Ctrl</kbd>+<kbd>S</kbd>（保存快照），但这一版按这几个键还没有反应。请从命令面板运行这些命令；重新扫描某个文件夹也可以用右键菜单的「重新扫描此文件夹」。提示卡上的 <kbd>Space</kbd> 预览还没有实现。
+提示卡上写的 <kbd>Space</kbd> 预览还没有实现，按了没有反应。
+
+0.3.1 里 <kbd>F5</kbd>、<kbd>Shift</kbd>+<kbd>F5</kbd>、<kbd>Ctrl</kbd>+<kbd>S</kbd> 也还没有反应，请从命令面板运行这几个命令；重新扫描某个文件夹也可以用右键菜单的「重新扫描此文件夹」。
 :::
 
 键位目前不能修改：「设置 › 快捷键 › 键位预设」显示为灰色，下面的键位表列出当前的全部按键，可以按命令名或按键搜索。
@@ -226,12 +233,12 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 
 | 命令 | 按键 | 也能用这些词找到 | 备注 |
 | --- | --- | --- | --- |
-| 重新扫描当前视图 | <kbd>F5</kbd> | `rescan` · `refresh` | <kbd>F5</kbd> 暂未生效 |
-| 全盘重新扫描 | <kbd>Shift</kbd>+<kbd>F5</kbd> | `rescan all` · `full rescan` | <kbd>Shift</kbd>+<kbd>F5</kbd> 暂未生效 |
+| 重新扫描当前视图 | <kbd>F5</kbd> | `rescan` · `refresh` | — |
+| 全盘重新扫描 | <kbd>Shift</kbd>+<kbd>F5</kbd> | `rescan all` · `full rescan` | — |
 | 切换配色 | <kbd>C</kbd> | `color` · `colour` · `theme` | — |
 | 显示/隐藏可用空间 | <kbd>F</kbd> | `free space` | — |
 | 打开删除篮 | — | `basket` · `trash` · `delete` | — |
-| 保存快照 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | `save snapshot` | <kbd>Ctrl</kbd>+<kbd>S</kbd> 暂未生效 |
+| 保存快照 | <kbd>Ctrl</kbd>+<kbd>S</kbd> | `save snapshot` | — |
 | 与快照对比… | — | `compare` · `diff` | — |
 | 导出报告… | — | `export` · `report` · `csv` · `json` · `html` | — |
 | 设置 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | `settings` · `preferences` · `options` | — |

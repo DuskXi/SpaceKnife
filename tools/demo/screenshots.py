@@ -8,7 +8,7 @@ renderer with a backend for that home (tools/demo/m3_web.py), and runs tools/dem
 in the repo's Electron with an off-screen window: treemap with a hover card, a filter, the command
 palette and a snapshot comparison. ``--lang en`` captures the English interface as well
 (``*-en.png``). ``--video`` records the short demo instead (tools/demo/demo.cjs: hover, zoom into a
-folder, a typed filter, the palette, a comparison) and encodes it with ffmpeg into
+folder, the flame graph and the polar flame graph, a typed filter, the palette, a comparison) and encodes it with ffmpeg into
 ``demo[-en].mp4`` (H.264) and ``demo[-en].gif``. Needs ``pnpm build`` in apps/electron first.
 """
 

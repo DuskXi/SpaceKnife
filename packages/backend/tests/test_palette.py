@@ -128,6 +128,10 @@ def test_availability_and_status(tmp_path: Path) -> None:
     assert evaluate(by_id["nav.back"], done) == (False, "没有可后退的位置")
     view.select(find(store, "Users"))
     assert evaluate(by_id["item.copy_path"], done) == (True, "")
+    assert evaluate(by_id["view.rescan"], done) == (True, "")
+    view.compare = object()  # a comparison's view: its folders are changes, not the scan's
+    assert evaluate(by_id["view.rescan"], done) == (False, "对比时不可用，先退出对比")
+    assert evaluate(by_id["snapshot.save"], done) == (True, "")
 
 
 def test_visualization_commands(tmp_path: Path) -> None:

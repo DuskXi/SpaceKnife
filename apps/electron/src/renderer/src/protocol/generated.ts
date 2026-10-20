@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "eea34de360b94730";
+export const SCHEMA_HASH = "8fc504ecec088392";
 
 export interface AgeCond {
   end: number;
@@ -772,6 +772,13 @@ export interface OpTask {
 
 export interface OpTaskParams {
   task_id: string;
+}
+
+/** One command, where the user is: a keyboard shortcut runs it only when the palette would. */
+export interface PaletteCheckParams {
+  context: PaletteContext;
+  /** A command id (palette.commands) */
+  id: string;
 }
 
 export interface PaletteClearParams {
@@ -1729,6 +1736,8 @@ export interface Methods {
   "ops.cancel": { params: OpTaskParams; result: EmptyResult };
   /** Undo a file operation: put trashed items back, or call off a permanent deletion still waiting. */
   "ops.undo": { params: OpTaskParams; result: EmptyResult };
+  /** One command's state where the user is (a keyboard shortcut runs it only when it is enabled). */
+  "palette.check": { params: PaletteCheckParams; result: PaletteCommand };
   /** Clear the recents of a scan target and the shared filters. */
   "palette.clear": { params: PaletteClearParams; result: EmptyResult };
   /** All commands with names, icons and default keys. */

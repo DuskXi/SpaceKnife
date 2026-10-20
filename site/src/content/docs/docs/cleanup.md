@@ -186,6 +186,6 @@ On macOS, <kbd>⌘</kbd> works wherever <kbd>Ctrl</kbd> is listed. All keys are 
 
 **Only the clutter of one folder.** Zoom into the folder and right-click its small-items block. **Add to delete basket** takes exactly those files; the large files beside them stay.
 
-**Before and after.** Save a snapshot before a big cleanup (command palette › **Save snapshot**). Afterwards, [compare](../snapshots-compare/) it with **Now** and switch to **Decrease** to see what really went.
+**Before and after.** Save a snapshot before a big cleanup (command palette › **Save snapshot**, or <kbd>Ctrl</kbd>+<kbd>S</kbd> from 0.3.2). Afterwards, [compare](../snapshots-compare/) it with **Now** and switch to **Decrease** to see what really went.
 
 **Hand a path to a terminal.** Select the item and use **Copy path › Quoted** for a shell, **POSIX path** for WSL, or press <kbd>Ctrl</kbd>+<kbd>&#96;</kbd> to open a terminal right there.

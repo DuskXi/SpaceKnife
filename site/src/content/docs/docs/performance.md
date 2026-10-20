@@ -128,7 +128,7 @@ The **Idle** level always gives way, as soon as other programs use more than 10 
 
 - **Pause** stops sending new batches: SpaceKnife's reads drop to zero within a second. **Resume** carries on from the same place.
 - **Stop** keeps what was found (`Stopped (results kept)`). A stopped full scan can be continued later: **Continue scan** in the status bar (it tells you how many folders weren't read yet), or **Continue the stopped scan** in the command palette.
-- **Rescan current view** (command palette) rescans only the folder you zoomed into; **Rescan everything** scans all roots again. Their keys <kbd>F5</kbd> and <kbd>Shift</kbd>+<kbd>F5</kbd> are listed but don't work yet (see [Keyboard shortcuts](../shortcuts/#keys-that-dont-work-yet)). With live monitoring on, the tree stays current anyway, so a full rescan is rarely needed (see [Live monitoring](../monitoring/)).
+- **Rescan current view** (command palette) rescans only the folder you zoomed into; **Rescan everything** scans all roots again. From 0.3.2, press <kbd>F5</kbd> and <kbd>Shift</kbd>+<kbd>F5</kbd> (see [Keyboard shortcuts](../shortcuts/#start-page-and-scanning)). At the top of a scan of several locations, Rescan current view reads all of them again. With live monitoring on, the tree stays current anyway, so a full rescan is rarely needed (see [Live monitoring](../monitoring/)).
 
 ## Reading the numbers
 

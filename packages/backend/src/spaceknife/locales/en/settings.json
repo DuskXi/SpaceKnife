@@ -112,6 +112,7 @@
  "字符串或字符串列表": "a string or a list of strings",
  "安静 35%": "Quiet 35%",
  "完全磁盘访问": "full disk access",
+ "对比时不可用，先退出对比": "Not available in a comparison. Leave the comparison first.",
  "实时监控": "Live monitoring",
  "实时监控发现变化后的定点重扫": "Targeted rescans after live monitoring sees a change.",
  "还没有接入：实时监控的定点重扫不按这一档限速": "Not wired up yet: live monitoring's targeted rescans don't use this level.",

@@ -37,11 +37,11 @@ def test_pages_match_the_settings_tab() -> None:
 
 
 def test_keys_marked_not_wired_are_still_unhandled() -> None:
-    app = g.APP_TSX.read_text(encoding="utf-8")
+    app = "".join(f.read_text(encoding="utf-8") for f in g.KEY_HANDLERS)
     listed = {k for c in commands.registry() for k in c.keys}
     for key, handler in g.NOT_WIRED.items():
         assert key in listed, f"{key} is no longer a palette key: drop it from NOT_WIRED"
-        assert handler not in app, f"App.tsx handles {key} now: drop it from gen_docs.NOT_WIRED"
+        assert handler not in app, f"the window handles {key} now: drop it from gen_docs.NOT_WIRED"
 
 
 def test_english_blocks_have_no_chinese_text() -> None:

@@ -92,6 +92,13 @@ def _view(c: Context) -> str | None:
     return None if c.view is not None else _("需要先完成扫描")
 
 
+def _scan_view(c: Context) -> str | None:
+    """A view of the scan itself: a comparison's view shows changes, its folders are not the scan's."""
+    return _view(c) or (
+        _("对比时不可用，先退出对比") if c.view is not None and c.view.compare is not None else None
+    )
+
+
 def _selection(c: Context) -> str | None:
     return _view(c) or (None if c.selected_node is not None else _("没有选中项"))
 
@@ -231,7 +238,7 @@ def _registry() -> tuple[Command, ...]:
             ("F5",),
             ("rescan", "refresh"),
             1,
-            (_tab, _done, _view),
+            (_tab, _done, _scan_view),
         ),
         C(
             "scan.rescan_all",

@@ -39,7 +39,8 @@ export interface Content {
     ctaOther: string;
     ctaGithub: string;
     meta: string;
-    shotAlt: string;
+    shotAlt: string; // the treemap screenshot (video poster, og:image)
+    demoAlt: string; // the demo video
   };
   highlights: { value: string; label: string }[];
   featuresTitle: string;
@@ -102,6 +103,7 @@ export const content: Record<Lang, Content> = {
       ctaGithub: "Star on GitHub",
       meta: "Windows 10+ · macOS 14+ · Ubuntu, Debian, RHEL, Fedora · MIT license",
       shotAlt: "SpaceKnife showing a 2 TB drive as a nested treemap, with a hover card over a large video file",
+      demoAlt: "SpaceKnife demo on a 2 TB drive: the treemap, the flame graph and the polar flame graph, a filter for large videos, the command palette and a snapshot comparison (mock data)",
     },
     highlights: [
       { value: "MFT", label: "quick scan on NTFS" },
@@ -213,6 +215,7 @@ export const content: Record<Lang, Content> = {
       ctaGithub: "在 GitHub 上点星",
       meta: "Windows 10+ · macOS 14+ · Ubuntu、Debian、RHEL、Fedora · MIT 许可证",
       shotAlt: "SpaceKnife 用嵌套树图显示一块 2 TB 的磁盘，悬停在一个大视频文件上显示详情",
+      demoAlt: "SpaceKnife 在一块 2 TB 磁盘上的演示：树图、火焰图和火焰-极坐标图，过滤大视频，命令面板，快照对比（模拟数据）",
     },
     highlights: [
       { value: "MFT", label: "NTFS 快速扫描" },

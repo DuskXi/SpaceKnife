@@ -800,7 +800,8 @@ class MonitorManager:
 
     async def rescan(self, handle: ScanHandle, node: int) -> None:
         """Read a folder again with everything below it (F5 「重新扫描当前视图」); with live
-        monitoring off a monitor without watchers does it."""
+        monitoring off a monitor without watchers does it. Node 0, the top of a scan of several
+        roots, reads every root again."""
         if handle.running:
             raise RpcError(ErrorCode.SCAN_BUSY, tr("扫描进行中，完成后再重新扫描"))
         mon = self.monitors.get(handle.id) or self.passive.get(handle.id)
@@ -808,7 +809,8 @@ class MonitorManager:
             mon = ScanMonitor(self, handle, watch=False)
             await mon.start()
             self.passive[handle.id] = mon
-        mon.rescan(handle.store.path(node))
+        for n in [r.node for r in handle.roots] if node == 0 else [node]:
+            mon.rescan(handle.store.path(n))
 
     async def apply_settings(self) -> None:
         """``scan.monitor`` switched: start or stop monitoring every open scan."""
