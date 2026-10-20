@@ -3436,6 +3436,28 @@
       "title": "OpTaskParams",
       "type": "object"
     },
+    "PaletteCheckParams": {
+      "additionalProperties": false,
+      "description": "One command, where the user is: a keyboard shortcut runs it only when the palette would.",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/PaletteContext"
+        },
+        "id": {
+          "description": "A command id (palette.commands)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "context"
+      ],
+      "title": "PaletteCheckParams",
+      "type": "object"
+    },
     "PaletteClearParams": {
       "additionalProperties": false,
       "properties": {
@@ -8006,6 +8028,12 @@
       "params": "#/$defs/OpTaskParams",
       "requiresSession": true,
       "result": "#/$defs/EmptyResult"
+    },
+    "palette.check": {
+      "doc": "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+      "params": "#/$defs/PaletteCheckParams",
+      "requiresSession": true,
+      "result": "#/$defs/PaletteCommand"
     },
     "palette.clear": {
       "doc": "Clear the recents of a scan target and the shared filters.",

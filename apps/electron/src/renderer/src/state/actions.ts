@@ -482,9 +482,10 @@ export const resumeScan = (scanId: string) => scanControl("scan.resume", { scan_
 export const useMft = (scanId: string) => scanControl("scan.use_mft", { scan_id: scanId });
 /** A stopped hard scan reads the folders it had left (W2 待定 16). */
 export const continueScan = (scanId: string) => scanControl("scan.continue", { scan_id: scanId });
-/** Read a folder of the tree again with everything below it (F5, M5). */
+/** Read a folder of the tree again with everything below it (F5, M5); node 0, the top of a scan of
+ * several roots, reads every root again. */
 export async function rescanFolder(scanId: string, node: number): Promise<void> {
-  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast(t("正在重新扫描这个文件夹…"));
+  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast(node === 0 ? t("正在重新扫描所有位置…") : t("正在重新扫描这个文件夹…"));
 }
 export const setScanLoad = (scanId: string, level: LoadLevel, custom?: number | null, concurrency?: number | null) =>
   scanControl("scan.set_load", { scan_id: scanId, level, custom: custom ?? null, concurrency: concurrency ?? null });

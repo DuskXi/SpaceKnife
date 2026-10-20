@@ -11,8 +11,10 @@ import numpy as np
 
 from spaceknife_protocol import palette as pp
 from spaceknife_protocol.base import Empty, EmptyResult
+from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.filter_syntax import parse
 from spaceknife_protocol.methods import (
+    PALETTE_CHECK,
     PALETTE_CLEAR,
     PALETTE_COMMANDS,
     PALETTE_PATHS,
@@ -34,6 +36,7 @@ from ..store import snapshot
 from ..store.nodes import Kind
 from ..view.state import View
 from .compute import Latest
+from .rpc import RpcError
 
 if TYPE_CHECKING:
     from .app import Server
@@ -91,14 +94,16 @@ def install(server: Server) -> None:
 
     # ------------------------------------------------------------------ palette.query
 
-    def build(session: Session, params: pp.PaletteQueryParams, update: UpdateStatus) -> pp.PaletteResult:
-        c = params.context
+    def context_of(
+        session: Session, c: pp.PaletteContext, update: UpdateStatus
+    ) -> tuple[Context, ScanHandle | None, View | None]:
+        """What the commands' availability and status texts are computed from (palette.query and
+        palette.check alike)."""
         scan_tab = c.tab == "scan"
         handle = handle_of(c.scan_id) if scan_tab else None
         view = view_of(session, c.view_id) if scan_tab else None
         status = handle.status() if handle is not None else None
         scanning = status is not None and status.state in ("queued", "scanning")
-        target = target_of(handle)
         ctx = Context(
             tab=c.tab,
             scanning=scanning,
@@ -109,13 +114,18 @@ def install(server: Server) -> None:
             source=handle.source if handle is not None else "scan",
             elapsed_s=status.elapsed_s if status is not None and status.state == "done" else None,
             view=view,
-            snapshots=snapshot_count(target),
+            snapshots=snapshot_count(target_of(handle)),
             basket=c.basket,
             caps=session.capabilities,
             app_version=update.current,
             update_version=update.latest.version if update.latest is not None else "",
             update_checking=update.checking,
         )
+        return ctx, handle, view
+
+    def build(session: Session, params: pp.PaletteQueryParams, update: UpdateStatus) -> pp.PaletteResult:
+        ctx, handle, view = context_of(session, params.context, update)
+        target = target_of(handle)
         q = params.text.strip()
         store = handle.store if handle is not None else None
         sizes = sizes_of(handle) if handle is not None else None
@@ -224,6 +234,30 @@ def install(server: Server) -> None:
     async def palette_query(session: Session, params: pp.PaletteQueryParams) -> pp.PaletteResult:
         update = server.updates.status()  # on the loop: the update state is not shared with threads
         return await latest.run(("palette.query", session.id), build, session, params, update)
+
+    # ------------------------------------------------------------------ palette.check
+
+    def check(session: Session, params: pp.PaletteCheckParams, update: UpdateStatus) -> pp.PaletteCommand:
+        cmd = next((c for c in registry() if c.id == params.id), None)
+        if cmd is None:
+            raise RpcError(ErrorCode.INVALID_PARAMS, f"unknown command: {params.id}")
+        ctx, _, _ = context_of(session, params.context, update)
+        enabled, text = command_state(cmd, ctx)
+        return pp.PaletteCommand(
+            id=cmd.id,
+            name=label(cmd),
+            status=text,
+            enabled=enabled,
+            keys=list(cmd.keys),
+            icon=cmd.icon,
+            more=cmd.more,
+        )
+
+    @router.method(PALETTE_CHECK)
+    async def palette_check(session: Session, params: pp.PaletteCheckParams) -> pp.PaletteCommand:
+        update = server.updates.status()  # on the loop, as for palette.query
+        # off the loop: counting the target's snapshots lists a folder
+        return await asyncio.to_thread(check, session, params, update)
 
     # ------------------------------------------------------------------ palette.paths
 

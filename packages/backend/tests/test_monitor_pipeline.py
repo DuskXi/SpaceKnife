@@ -323,3 +323,28 @@ async def test_rescan_a_folder_without_monitoring(watched: Any, tmp_path: Path) 
     await monitors.rescan(handle, 1)  # F5 on the root: the whole tree is read again
     await until(same_as_disk(handle, root))
     assert handle.status().monitor is None  # rescanning did not switch monitoring on
+
+
+async def test_rescan_the_top_of_several_roots(watched: Any, tmp_path: Path) -> None:
+    # F5 at the top of a scan of several roots (node 0, the virtual top): every root is read again
+    mgr, _, monitors = watched
+
+    class Off:
+        def get(self, key: str) -> Any:
+            return False if key == "scan.monitor" else {"scan.coalesce_ms": 150}.get(key)
+
+    mgr.settings = Off()  # type: ignore[assignment]
+    roots = [build_tree(tmp_path / name).root for name in ("one", "two")]
+    handle = await mgr.start(p.ScanStartParams(roots=[str(r) for r in roots], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    for i, r in enumerate(roots):
+        (r / f"later{i}.bin").write_bytes(b"l" * (1000 + i))
+
+    async def both() -> bool:
+        fresh = Scanner([str(r) for r in roots])
+        await fresh.run()
+        return facts(handle.store) == facts(fresh.store)
+
+    await monitors.rescan(handle, 0)
+    await until(both)

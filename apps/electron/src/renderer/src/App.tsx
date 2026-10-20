@@ -23,7 +23,7 @@ import { ScanPage } from "@/pages/ScanPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
 import { cycleDirection, exitCompare } from "@/state/compare";
-import { cycleVisual } from "@/state/commands";
+import { cycleVisual, runShortcut, shortcutCommand } from "@/state/commands";
 import { helpHistory, openHelp, openHelpTab } from "@/state/help";
 import { visibleSurface } from "@/state/updates";
 import { nextColor } from "@/state/visuals";
@@ -96,6 +96,14 @@ function onKey(e: KeyboardEvent): unknown {
     return;
   }
   if (help) return (done(), openHelp());
+  // F5 / Shift+F5 / Ctrl+S: they run where the palette offers their command, anywhere else a toast
+  // says why not; held down, they run once
+  const shortcut = shortcutCommand(e);
+  if (shortcut) {
+    done();
+    if (!e.repeat) void runShortcut(shortcut);
+    return;
+  }
   if (ctrl && key.toLowerCase() === "j") return (done(), toggleLog()); // W8 待定 2
   if (ctrl && key.toLowerCase() === "t") return (done(), newStartTab());
   if (ctrl && key.toLowerCase() === "w") return (done(), void closeTab(tab.id));

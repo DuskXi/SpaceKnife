@@ -42,7 +42,9 @@ from .ops import (
     PathFormsParams,
 )
 from .palette import (
+    PaletteCheckParams,
     PaletteClearParams,
+    PaletteCommand,
     PaletteCommandList,
     PalettePaths,
     PalettePathsParams,
@@ -269,6 +271,12 @@ PALETTE_QUERY = MethodSpec(
     PaletteResult,
     "Commands, recents and direct items for the palette input.",
 )
+PALETTE_CHECK = MethodSpec(
+    "palette.check",
+    PaletteCheckParams,
+    PaletteCommand,
+    "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+)
 PALETTE_PATHS = MethodSpec(
     "palette.paths",
     PalettePathsParams,
@@ -491,6 +499,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         SETTINGS_RESET,
         PALETTE_COMMANDS,
         PALETTE_QUERY,
+        PALETTE_CHECK,
         PALETTE_PATHS,
         PALETTE_PREVIEW,
         PALETTE_REMEMBER,

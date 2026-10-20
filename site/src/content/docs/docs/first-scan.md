@@ -174,7 +174,7 @@ The tab title also says **Scanning**, **Paused**, **Incomplete** or **Scan faile
 | **Stop** | The progress band, or **Stop scan** | Ends the scan and keeps what was read ("Stopped (results kept)"). The tab shows **Incomplete**. |
 | **Continue scan** | The status bar, or **Continue the stopped scan** | Reads the folders a stopped full scan hadn't reached ("… folders not read yet"); the tree grows on from where it stopped. |
 
-A stopped scan is not saved as a snapshot by itself. To keep it as it is, run **Save snapshot** from the command palette. Once a continued scan reaches the end, it is saved like any finished scan.
+A stopped scan is not saved as a snapshot by itself. To keep it as it is, run **Save snapshot** from the command palette (from 0.3.2, or press <kbd>Ctrl</kbd>+<kbd>S</kbd>). Once a continued scan reaches the end, it is saved like any finished scan.
 
 Closing a tab stops its scan.
 

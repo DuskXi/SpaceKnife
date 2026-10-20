@@ -14,7 +14,7 @@ The keys below are for Windows and Linux. For macOS, see [Differences on macOS](
 ## When keys work
 
 - **Single keys never fire in a text field.** <kbd>/</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>C</kbd>, <kbd>V</kbd>, the digits, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Backspace</kbd> and <kbd>Esc</kbd> act on the view only when the focus is not in a text field. Typing `f` in the filter box doesn't hide free space, and <kbd>Ctrl</kbd>+<kbd>C</kbd> in a text field is the normal copy.
-- **Global keys also work in the filter box.** You don't have to leave it for <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Ctrl</kbd>+<kbd>T</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd>, <kbd>Ctrl</kbd>+<kbd>,</kbd> or <kbd>Ctrl</kbd>+<kbd>Tab</kbd>. Some text fields keep every key for typing, so global keys don't work in them: the start page's path field, the path editor (<kbd>Ctrl</kbd>+<kbd>L</kbd>), and the search, number and tag-name fields of Settings.
+- **Global keys also work in the filter box.** You don't have to leave it for <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Ctrl</kbd>+<kbd>T</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd>, <kbd>Ctrl</kbd>+<kbd>,</kbd>, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> or, from 0.3.2, <kbd>F5</kbd>, <kbd>Shift</kbd>+<kbd>F5</kbd> and <kbd>Ctrl</kbd>+<kbd>S</kbd>. Some text fields keep every key for typing, so global keys don't work in them: the start page's path field, the path editor (<kbd>Ctrl</kbd>+<kbd>L</kbd>), and the search, number and tag-name fields of Settings.
 - **View keys act on the focused pane.** In a split view, the pane with the accent border has the focus. Click the other pane to move the focus there.
 - **A focused control keeps its own keys.** On a button, radio button or menu item, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Esc</kbd> and <kbd>Shift</kbd>+<kbd>F10</kbd> belong to that control (<kbd>Enter</kbd> on a button presses it). On a drop-down list, <kbd>C</kbd> and <kbd>V</kbd> pick options by their first letter.
 - **Dialogs block the window behind them.** While the command palette is open, only <kbd>Ctrl</kbd>+<kbd>K</kbd> (close the palette) and, from 0.3.2, <kbd>F1</kbd> (open the palette's help page) still work at window level. While the dialog of a major update is open, no shortcut works.
@@ -155,6 +155,11 @@ While an input method is composing, <kbd>Enter</kbd>, the arrow keys and <kbd>Es
 | <kbd>Enter</kbd> | Start scan (unless another button has the focus: then it presses that button). <kbd>Enter</kbd> in the path field does the same |
 | <kbd>←</kbd>, <kbd>→</kbd>, <kbd>↑</kbd>, <kbd>↓</kbd> | Pick another volume in the volume list (left and right one at a time, up and down one row) |
 | <kbd>←</kbd>, <kbd>→</kbd> (or <kbd>↑</kbd>, <kbd>↓</kbd>) | With the focus on Disk load limit in the scan details, switch to the next level |
+| <kbd>F5</kbd> | From 0.3.2: rescan the current view. The folder you zoomed into is read again with everything below it, and updated in place. At the top of a scan of several locations, all of them are read again |
+| <kbd>Shift</kbd>+<kbd>F5</kbd> | From 0.3.2: rescan everything, a new scan of the same locations |
+| <kbd>Ctrl</kbd>+<kbd>S</kbd> | From 0.3.2: save the current scan as a snapshot |
+
+These three keys follow the command palette: when the palette shows their command grayed out (the scan hasn't finished, the tab isn't a scan, or Rescan current view in a comparison), the key does nothing and the bottom of the window says why. Held down, a key runs once.
 
 ## Settings tab
 
@@ -203,13 +208,15 @@ From 0.3.2 the help has one tab, like Settings. <kbd>F1</kbd> opens it.
 - **Use fn when there are no Home, PageUp and PageDown keys.** <kbd>fn</kbd>+<kbd>←</kbd> is Home, <kbd>fn</kbd>+<kbd>↑</kbd> and <kbd>fn</kbd>+<kbd>↓</kbd> are PageUp and PageDown, so Back to the root is <kbd>⌘</kbd>+<kbd>fn</kbd>+<kbd>←</kbd>.
 - **Switch tabs with Control+Tab.** <kbd>⌘</kbd>+<kbd>Tab</kbd> is the system's app switcher. <kbd>⌘</kbd>+<kbd>fn</kbd>+<kbd>↑</kbd> and <kbd>↓</kbd> work too.
 - **Open a terminal with Control+&#96;.** By default, the system uses <kbd>⌘</kbd>+<kbd>&#96;</kbd> to switch between windows of the same app.
-- **Function keys:** when the function keys act as media keys, add <kbd>fn</kbd> to <kbd>Shift</kbd>+<kbd>F10</kbd> (and, from 0.3.2, to <kbd>F1</kbd>).
+- **Function keys:** when the function keys act as media keys, add <kbd>fn</kbd> to <kbd>Shift</kbd>+<kbd>F10</kbd> (and, from 0.3.2, to <kbd>F1</kbd>, <kbd>F5</kbd> and <kbd>Shift</kbd>+<kbd>F5</kbd>).
 - **Context menu:** Mac keyboards have no Menu key. Press <kbd>Shift</kbd>+<kbd>F10</kbd>, Control-click, or tap with two fingers.
 
 ## Keys that don't work yet
 
 :::caution
-The command palette and the key map under Settings › Shortcuts also list <kbd>F5</kbd> (Rescan current view), <kbd>Shift</kbd>+<kbd>F5</kbd> (Rescan everything) and <kbd>Ctrl</kbd>+<kbd>S</kbd> (Save snapshot), but in this version these keys do nothing yet. Run those commands from the command palette. To rescan one folder, you can also use Rescan this folder in the context menu. <kbd>Space</kbd> for a preview, shown on the hover card, isn't implemented yet.
+<kbd>Space</kbd> for a preview, shown on the hover card, isn't implemented yet: the key does nothing.
+
+In 0.3.1, <kbd>F5</kbd>, <kbd>Shift</kbd>+<kbd>F5</kbd> and <kbd>Ctrl</kbd>+<kbd>S</kbd> don't work yet either. Run those commands from the command palette. To rescan one folder, you can also use Rescan this folder in the context menu.
 :::
 
 You can't change the keys yet: Settings › Shortcuts › Key preset is grayed out. The key map below it lists every current key, and you can search it by command name or key.
@@ -226,12 +233,12 @@ When you open the palette and type nothing, the Commands group lists these, in t
 
 | Command | Keys | Also found by | Notes |
 | --- | --- | --- | --- |
-| Rescan current view | <kbd>F5</kbd> | `rescan` · `refresh` | <kbd>F5</kbd> not active yet |
-| Rescan everything | <kbd>Shift</kbd>+<kbd>F5</kbd> | `rescan all` · `full rescan` | <kbd>Shift</kbd>+<kbd>F5</kbd> not active yet |
+| Rescan current view | <kbd>F5</kbd> | `rescan` · `refresh` | — |
+| Rescan everything | <kbd>Shift</kbd>+<kbd>F5</kbd> | `rescan all` · `full rescan` | — |
 | Cycle coloring | <kbd>C</kbd> | `color` · `colour` · `theme` | — |
 | Show/hide free space | <kbd>F</kbd> | `free space` | — |
 | Open delete basket | — | `basket` · `trash` · `delete` | — |
-| Save snapshot | <kbd>Ctrl</kbd>+<kbd>S</kbd> | `save snapshot` | <kbd>Ctrl</kbd>+<kbd>S</kbd> not active yet |
+| Save snapshot | <kbd>Ctrl</kbd>+<kbd>S</kbd> | `save snapshot` | — |
 | Compare with snapshot… | — | `compare` · `diff` | — |
 | Export report… | — | `export` · `report` · `csv` · `json` · `html` | — |
 | Settings | <kbd>Ctrl</kbd>+<kbd>,</kbd> | `settings` · `preferences` · `options` | — |

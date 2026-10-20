@@ -15,7 +15,7 @@ import type {
   Span,
 } from "@/protocol/generated";
 import { call, cancellable, editFilter, startScan, viewCall } from "@/state/actions";
-import { runCommand } from "@/state/commands";
+import { paletteContext, runCommand } from "@/state/commands";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtSize, middlePath } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -78,8 +78,7 @@ function PaletteDialog() {
 
   // palette.query, then palette.paths and filter previews; superseded requests are cancelled
   useEffect(() => {
-    // the help tab is, to the backend's commands, a tab without a scan like the settings tab
-    const context = { tab: tab.kind === "help" ? ("settings" as const) : tab.kind, scan_id: tab.scanId ?? null, view_id: viewId, basket };
+    const context = paletteContext();
     const refresh = shownText.current === text && paths !== null;
     const jobs: { cancel: () => void }[] = [];
     let alive = true;
