@@ -26,6 +26,7 @@ import {
   viewCall,
 } from "./actions";
 import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
+import { openHelp } from "./help";
 import { activeTab, focusedViewId, get, set, toast, toggleLog } from "./store";
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
 
@@ -140,6 +141,8 @@ export async function runCommand(id: string): Promise<void> {
     }
     case "app.settings":
       return openSettingsTab();
+    case "app.help":
+      return openHelp();
     case "app.log":
       toggleLog();
       return;

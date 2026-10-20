@@ -193,7 +193,7 @@ def _registry() -> tuple[Spec, ...]:
             "appearance",
             "主题",
             "主题",
-            "深色为 A2「石墨 + 沉浸的对比度」",
+            "深色为石墨色调，对比度较高",
             "segmented",
             "system",
             (("system", "跟随系统"), ("light", "浅色", "浅色主题待设计（W7 待定 20）"), ("dark", "深色")),
@@ -465,7 +465,7 @@ def _registry() -> tuple[Spec, ...]:
             "treemap",
             "动画",
             "动画帧率",
-            "对应 SpaceSniffer 的「流畅 ↔ 卡顿」",
+            "动画重绘的频率",
             "segmented",
             "display",
             (("display", "跟随显示器"), ("60", "60 fps"), ("30", "30 fps")),
@@ -561,6 +561,8 @@ def _registry() -> tuple[Spec, ...]:
             "quiet",
             LOAD_LEVELS,
             group_note="限制扫描造成的磁盘读取占用",
+            # nothing reads this yet: the monitor's rescans wait for the running scan's governor only
+            reason="还没有接入：实时监控的定点重扫不按这一档限速",
             synonyms=("load", "incremental"),
             kind=str,
         ),
@@ -586,7 +588,7 @@ def _registry() -> tuple[Spec, ...]:
             "scan",
             "磁盘负载上限与并发",
             "空闲时使用系统低 I/O 优先级",
-            "后台重扫与「空闲」档位使用低 I/O 优先级，不与前台程序抢磁盘",
+            "「空闲」档位使用系统低 I/O 优先级，不与前台程序抢磁盘",
             "switch",
             True,
             applies="next_scan",
@@ -717,7 +719,7 @@ def _registry() -> tuple[Spec, ...]:
                 if IS_WIN
                 else "使用 FSEvents，变化的文件会闪烁提示"
                 if IS_MAC
-                else "使用 fanotify / inotify，变化的文件会闪烁提示"
+                else "使用 inotify，变化的文件会闪烁提示"
             ),
             "switch",
             True,

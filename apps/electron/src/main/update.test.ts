@@ -148,16 +148,30 @@ describe("projectPage", () => {
     const page = "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0";
     expect(projectPage(page)).toBe(page);
     expect(projectPage("https://GitHub.com/DuskXi/SpaceKnife/releases")).toBe("https://github.com/DuskXi/SpaceKnife/releases");
+    // the repository itself, as the documentation links to it
+    expect(projectPage("https://github.com/DuskXi/SpaceKnife")).toBe("https://github.com/DuskXi/SpaceKnife");
+    expect(projectPage("https://github.com/DuskXi/SpaceKnife#readme")).toBe("https://github.com/DuskXi/SpaceKnife#readme");
+  });
+
+  it("opens the website's pages (the help page's links, 「在网站上查看」)", () => {
+    expect(projectPage("https://spaceknife.kaltsit.dev/zh/docs/filtering/#大小")).toBe("https://spaceknife.kaltsit.dev/zh/docs/filtering/#%E5%A4%A7%E5%B0%8F");
+    expect(projectPage("https://SpaceKnife.Kaltsit.dev")).toBe("https://spaceknife.kaltsit.dev/");
+    expect(projectPage("https://spaceknife.kaltsit.dev/docs/../")).toBe("https://spaceknife.kaltsit.dev/");
   });
 
   it("refuses everything else", () => {
     for (const url of [
-      "https://github.com/DuskXi/SpaceKnife",
+      "https://github.com/DuskXi/SpaceKnife?tab=evil",
       "https://github.com/DuskXi/SpaceKnife/../../evil/repo",
       "https://github.com/DuskXi/SpaceKnifeEvil/releases",
       "https://github.com.evil.example/DuskXi/SpaceKnife/",
       "https://user@github.com/DuskXi/SpaceKnife/releases",
       "http://github.com/DuskXi/SpaceKnife/releases",
+      "http://spaceknife.kaltsit.dev/docs/",
+      "https://spaceknife.kaltsit.dev.evil.example/docs/",
+      "https://evil.example/?https://spaceknife.kaltsit.dev/",
+      "https://user@spaceknife.kaltsit.dev/docs/",
+      "https://spaceknife.kaltsit.dev:8443/docs/",
       "file:///C:/Windows/System32/calc.exe",
       "not a url",
       42,

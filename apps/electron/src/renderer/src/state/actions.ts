@@ -579,6 +579,14 @@ export async function closeSettings(): Promise<void> {
 
 let accentApplied = "";
 
+/** The title of a tab named by a word of the interface, not by a place (start, settings, help). */
+function fixedTitle(tab: Tab): string | null {
+  if (tab.kind === "start") return t("新扫描");
+  if (tab.kind === "settings") return t("设置");
+  if (tab.kind === "help") return t("帮助");
+  return null;
+}
+
 /** Take a settings document from the backend and apply what the frontend itself renders. */
 export function applySettings(state: SettingsState): void {
   const prev = get().settings;
@@ -605,8 +613,8 @@ export function applySettings(state: SettingsState): void {
     logAuto: Boolean(state.values["general.log_auto_open"] ?? true),
     unitEpoch: prev?.unit_base !== state.unit_base || langChanged ? s.unitEpoch + 1 : s.unitEpoch,
     lang: state.language,
-    // the start and settings tabs carry a made-up title: it follows the language
-    tabs: langChanged ? s.tabs.map((tab) => (tab.kind === "start" ? { ...tab, title: t("新扫描") } : tab.kind === "settings" ? { ...tab, title: t("设置") } : tab)) : s.tabs,
+    // the start, settings and help tabs carry a made-up title: it follows the language
+    tabs: langChanged ? s.tabs.map((tab) => (fixedTitle(tab) == null ? tab : { ...tab, title: fixedTitle(tab)! })) : s.tabs,
   }));
   if (langChanged && prev) {
     void refreshLists();

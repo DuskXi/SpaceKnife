@@ -367,6 +367,8 @@ def _registry() -> tuple[Command, ...]:
         C("scan.new", "新扫描", "drive", (), ("new scan", "scan")),
         C("snapshot.open", "打开快照文件…", "snapshot", (), ("open snapshot", "load")),
         C("app.log", "日志面板", "log", ("Ctrl+J",), ("log", "logs", "console")),
+        # the documentation, bundled with the app (Electron: pages/HelpPage, opened by F1 as well)
+        C("app.help", "帮助", "info", ("F1",), ("help", "docs", "documentation", "manual", "guide")),
         C(
             "app.check_updates",
             "检查更新",

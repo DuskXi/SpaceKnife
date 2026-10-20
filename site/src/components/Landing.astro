@@ -45,8 +45,8 @@ const jsonLd = structuredData(c, release, pageUrl, shotUrls, `${site}${base}og-$
 
 const icon = (name: string) => (icons as Record<string, string>)[name] ?? "";
 const win = release.assets.windows;
-const kinds: Exclude<AssetKind, "sums">[] = ["windows", "macArm64", "macX64", "deb", "rpm", "appimage"];
-const kindIcon: Record<string, string> = { windows: "drive", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers" };
+const kinds: Exclude<AssetKind, "sums">[] = ["windows", "portableWin", "macArm64", "macX64", "deb", "rpm", "appimage", "portableLinux"];
+const kindIcon: Record<string, string> = { windows: "drive", portableWin: "folder", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers", portableLinux: "folder" };
 // macOS dmgs are attached to a release later than the other installers: until then a Mac visitor
 // gets the generic button and the "not yet" note
 const hasMac = Boolean(release.assets.macArm64 || release.assets.macX64);
@@ -99,6 +99,7 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
         <a href="#screenshots">{c.nav.screenshots}</a>
         <a href="#download">{c.nav.download}</a>
         <a href="#faq">{c.nav.faq}</a>
+        <a href={c.lang === "en" ? `${base}docs/` : `${base}zh/docs/`}>{c.nav.docs}</a>
       </nav>
       <div class="nav-actions">
         <a class="lang" href={other} hreflang={c.lang === "en" ? "zh-CN" : "en"} lang={c.lang === "en" ? "zh-CN" : "en"}>{c.nav.switchTo}</a>

@@ -8,8 +8,9 @@
     uv run python tools/build_package.py --portable --no-installers   # the portable archive only
 
 Windows → dist/electron/SpaceKnife-<version>-Setup-x64.exe (NSIS, unsigned) and win-unpacked/
-Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage, spaceknife_<version>_amd64.deb,
-          spaceknife-<version>.x86_64.rpm (needs ``rpmbuild`` on PATH) and linux-unpacked/
+Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage (+ .zsync, needs ``zsyncmake``),
+          spaceknife_<version>_amd64.deb, spaceknife-<version>.x86_64.rpm (needs ``rpmbuild`` on
+          PATH) and linux-unpacked/
 macOS   → dist/electron/SpaceKnife-<version>-mac-<arch>.dmg for this Mac's architecture (arm64 or
           x64; ad-hoc signed, not notarized) and mac[-arm64]/SpaceKnife.app
 Portable → dist/electron/SpaceKnife-<version>-win-x64-portable.zip or …-linux-x64-portable.tar.gz:
@@ -53,6 +54,10 @@ BACKEND_DIR = DIST / "backend" / "spaceknife-backend"
 NATIVE_RELEASE = ROOT / "build" / "native-release"  # spaceknife_native/ of the release wheel
 GLIBC_FLOOR = (2, 34)  # RHEL 9; Ubuntu 22.04 has 2.35
 LINUX_TARGETS = ("AppImage", "deb", "rpm")
+# AppImageUpdate and similar tools read this (AppImageSpec: ELF section .upd_info): the newest
+# release or pre-release of this repository (``latest`` would skip pre-releases), and the .zsync
+# published next to its AppImage
+APPIMAGE_UPDATE_INFO = "gh-releases-zsync|DuskXi|SpaceKnife|latest-all|SpaceKnife-*-x86_64.AppImage.zsync"
 
 console = Console()
 
@@ -298,9 +303,74 @@ def build_electron(targets: list[str], installers: bool) -> None:
     t0 = step(f"installers (electron-builder {' '.join(platform[1:])} {arch[2:]})")
     run(["pnpm", "exec", "electron-builder", *platform, arch, "--publish", "never"], cwd=ELECTRON)
     done(t0)
+    if installers and sys.platform.startswith("linux") and "AppImage" in targets:
+        version = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))["version"]
+        appimage = DIST / "electron" / f"SpaceKnife-{version}-x86_64.AppImage"
+        t0 = step(f"update information and .zsync ({appimage.name})")
+        embed_update_info(appimage)
+        zsync = make_zsync(appimage)
+        done(t0, zsync.name if zsync else "no zsyncmake: no .zsync")
     check_no_build_paths(unpacked_app())
     if sys.platform == "darwin":
         check_mac_signature(unpacked_app())
+
+
+def elf_section(path: Path, name: str) -> tuple[int, int] | None:
+    """(file offset, size) of a section of a little-endian ELF64 file, or None."""
+    with open(path, "rb") as f:
+        head = f.read(64)
+        if len(head) < 64 or head[:4] != b"ELF" or head[4] != 2 or head[5] != 1:
+            raise SystemExit(f"{path.name}: not a little-endian ELF64 file")
+        shoff = int.from_bytes(head[0x28:0x30], "little")
+        entsize, count, names_at = (int.from_bytes(head[i : i + 2], "little") for i in (0x3A, 0x3C, 0x3E))
+        f.seek(shoff)
+        table = f.read(entsize * count)
+
+        def header(i: int) -> tuple[int, int, int]:  # sh_name, sh_offset, sh_size
+            h = table[i * entsize : (i + 1) * entsize]
+            return tuple(int.from_bytes(h[a:b], "little") for a, b in ((0, 4), (24, 32), (32, 40)))  # type: ignore[return-value]
+
+        _, at, size = header(names_at)
+        f.seek(at)
+        names = f.read(size)
+    wanted = name.encode()
+    for i in range(count):
+        n, at, size = header(i)
+        if names[n : names.find(b"\x00", n)] == wanted:
+            return at, size
+    return None
+
+
+def embed_update_info(appimage: Path, info: str = APPIMAGE_UPDATE_INFO) -> None:
+    """Write the AppImage's update information into its runtime's .upd_info section (the runtime
+    electron-builder uses has one, empty), so that AppImageUpdate and similar tools can update it."""
+    found = elf_section(appimage, ".upd_info")
+    if found is None:
+        raise SystemExit(f"{appimage.name}: its runtime has no .upd_info section")
+    at, size = found
+    raw = info.encode()
+    if len(raw) >= size:
+        raise SystemExit(f"update information longer than .upd_info ({len(raw)} >= {size} bytes)")
+    with open(appimage, "r+b") as f:
+        f.seek(at)
+        f.write(raw.ljust(size, b"\x00"))
+        f.seek(at)
+        if f.read(size).rstrip(b"\x00") != raw:
+            raise SystemExit(f"{appimage.name}: update information did not stick")
+
+
+def make_zsync(appimage: Path) -> Path | None:
+    """The .zsync the update information points at, next to the AppImage. Its URL is the AppImage's
+    file name, which tools resolve next to the .zsync (the same release). None without zsyncmake
+    (the ``zsync`` package): a local build then has no .zsync; the release build installs it."""
+    tool = shutil.which("zsyncmake")
+    if tool is None:
+        console.print("  [yellow]zsyncmake not found (package zsync): no .zsync[/yellow]")
+        return None
+    out = appimage.with_name(appimage.name + ".zsync")
+    argv = [tool, "-u", appimage.name, "-o", out.name, appimage.name]
+    subprocess.run(argv, cwd=appimage.parent, check=True)
+    return out
 
 
 PORTABLE_NOTE = """SpaceKnife portable

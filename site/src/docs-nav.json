@@ -1,0 +1,25 @@
+{
+  "$comment": "The documentation's table of contents, shared by the website (astro.config.mjs → Starlight sidebar) and the app's help page. Each item is a page id: src/content/docs/docs/<id>.md (English) and src/content/docs/zh/docs/<id>.md (Chinese); \"index\" is the overview.",
+  "groups": [
+    {
+      "id": "start",
+      "label": { "en": "Getting started", "zh": "入门" },
+      "items": ["index", "install", "first-scan"]
+    },
+    {
+      "id": "use",
+      "label": { "en": "Using SpaceKnife", "zh": "使用" },
+      "items": ["visualizations", "navigation", "filtering", "tags-classes", "monitoring", "snapshots-compare", "cleanup", "export"]
+    },
+    {
+      "id": "advanced",
+      "label": { "en": "Advanced", "zh": "进阶" },
+      "items": ["shortcuts", "command-palette", "command-line", "performance", "settings", "data-locations"]
+    },
+    {
+      "id": "help",
+      "label": { "en": "Help", "zh": "帮助" },
+      "items": ["updates-privacy", "troubleshooting", "contributing"]
+    }
+  ]
+}

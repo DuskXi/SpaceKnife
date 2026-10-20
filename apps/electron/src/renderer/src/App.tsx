@@ -18,11 +18,13 @@ import { StatusBar } from "@/shell/StatusBar";
 import { TitleBar } from "@/shell/TitleBar";
 import { Toolbar } from "@/shell/Toolbar";
 import { UpdatePrompt } from "@/shell/UpdateCard";
+import { HelpPage } from "@/pages/HelpPage";
 import { ScanPage } from "@/pages/ScanPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
 import { cycleDirection, exitCompare } from "@/state/compare";
 import { cycleVisual } from "@/state/commands";
+import { helpHistory, openHelp, openHelpTab } from "@/state/help";
 import { visibleSurface } from "@/state/updates";
 import { nextColor } from "@/state/visuals";
 
@@ -46,7 +48,7 @@ export function App() {
       <div className="app" inert={paletteOpen || updateDialog}>
         <TitleBar />
         <Toolbar />
-        {tab.kind === "scan" ? <ScanPage tab={tab} /> : tab.kind === "settings" ? <SettingsPage /> : <StartPage tab={tab} />}
+        {tab.kind === "scan" ? <ScanPage tab={tab} /> : tab.kind === "settings" ? <SettingsPage /> : tab.kind === "help" ? <HelpPage /> : <StartPage tab={tab} />}
         <LogPanel />
         <StatusBar />
         {conn === "failed" && (
@@ -86,7 +88,14 @@ function onKey(e: KeyboardEvent): unknown {
 
   if (visibleSurface(s.update, s.updateOpen) === "dialog") return; // a major release's dialog is modal: no shortcuts behind it
   if (ctrl && key.toLowerCase() === "k") return (done(), set({ paletteOpen: !s.paletteOpen }));
-  if (s.paletteOpen) return; // the palette is modal: it handles its own keys (UI-W4-03)
+  // F1: the help, on the page for where the user is (the backend's app.help names the key too)
+  const help = key === "F1" && !ctrl && !e.altKey && !e.shiftKey;
+  if (s.paletteOpen) {
+    // the palette is modal: it handles its own keys (UI-W4-03); F1 leaves it for its help page
+    if (help) return (done(), set({ paletteOpen: false }), openHelpTab("command-palette"));
+    return;
+  }
+  if (help) return (done(), openHelp());
   if (ctrl && key.toLowerCase() === "j") return (done(), toggleLog()); // W8 待定 2
   if (ctrl && key.toLowerCase() === "t") return (done(), newStartTab());
   if (ctrl && key.toLowerCase() === "w") return (done(), void closeTab(tab.id));
@@ -95,6 +104,14 @@ function onKey(e: KeyboardEvent): unknown {
     const idx = s.tabs.findIndex((x) => x.id === tab.id);
     const step = (e.shiftKey && key === "Tab") || key === "PageUp" ? -1 : 1;
     return (done(), set({ active: s.tabs[(idx + step + s.tabs.length) % s.tabs.length]!.id }));
+  }
+  if (tab.kind === "help") {
+    // the help tab has its own search and page history, as the settings tab has
+    if (typing) return;
+    if ((key === "/" && !ctrl) || (ctrl && key.toLowerCase() === "f")) return (done(), document.getElementById("sk-help-search")?.focus());
+    if ((key === "Backspace" && !ctrl) || (e.altKey && key === "ArrowLeft")) return (done(), helpHistory(-1));
+    if (e.altKey && key === "ArrowRight") return (done(), helpHistory(1));
+    return;
   }
   if (tab.kind === "settings" && !typing) {
     // the settings tab has its own search and page history (UI-W7-03, UI-W7-05)

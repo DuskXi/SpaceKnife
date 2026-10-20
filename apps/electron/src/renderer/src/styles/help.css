@@ -1,0 +1,105 @@
+/* The help tab (pages/HelpPage.tsx): the documentation in the app's own type and colours. The table of
+   contents reuses the settings navigation (.settings-nav); the page's Markdown is help/markdown.ts. */
+
+.help { display: flex; min-height: 0; min-width: 0; }
+.help-nav { width: 232px; }
+.help-nav .settings-nav-group { gap: 1px; }
+.help-nav-label { padding: 6px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--sk-color-text-tertiary); }
+.help-nav-item { height: 30px; font-size: 13px; }
+.help-nav-item .flex { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.help-main { flex: 1 1 auto; min-width: 0; overflow-y: auto; scroll-padding-top: 16px; }
+.help-layout { display: flex; align-items: flex-start; gap: 48px; max-width: 1120px; padding: 36px 48px 56px; }
+.help-article { flex: 1 1 auto; min-width: 0; max-width: 780px; }
+.help-head { margin-bottom: 28px; padding-bottom: 20px; border-bottom: 1px solid var(--sk-color-line-subtle); }
+.help-kicker { min-height: 18px; margin-bottom: 8px; font-size: 12px; font-weight: 600; color: var(--sk-color-accent-default); }
+.help-head h1 { margin: 0; font-size: var(--sk-font-size-heading); font-weight: 600; line-height: 1.25; letter-spacing: -0.01em; color: var(--sk-color-text-primary); }
+.help-lede { display: flex; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 10px 0 0; font-size: 14px; line-height: 1.6; color: var(--sk-color-text-secondary); }
+
+/* ---------------------------------------------------------------- the page's Markdown */
+.help-body { font-size: 14px; line-height: 1.7; color: var(--sk-color-text-secondary); user-select: text; overflow-wrap: break-word; }
+.help-body > :first-child { margin-top: 0; }
+.help-body p, .help-body ul, .help-body ol, .help-body blockquote, .help-body .help-table, .help-body .help-code, .help-body .help-aside { margin: 0 0 14px; }
+.help-body h2, .help-body h3, .help-body h4, .help-body h5, .help-body h6 { color: var(--sk-color-text-primary); font-weight: 600; letter-spacing: -0.005em; scroll-margin-top: 16px; border-radius: var(--sk-radius-sm); }
+.help-body h2 { margin: 36px 0 12px; font-size: 18px; line-height: 1.35; }
+.help-body h3 { margin: 28px 0 10px; font-size: 15px; line-height: 1.4; }
+.help-body h4, .help-body h5, .help-body h6 { margin: 22px 0 8px; font-size: 13px; line-height: 1.45; color: var(--sk-color-text-primary); }
+.help-body strong { color: var(--sk-color-text-primary); font-weight: 600; }
+.help-body ul, .help-body ol { padding-left: 22px; }
+.help-body li { margin: 4px 0; }
+.help-body li > p { margin: 0 0 6px; }
+.help-body li::marker { color: var(--sk-color-text-tertiary); }
+.help-body hr { height: 1px; margin: 28px 0; border: 0; background: var(--sk-color-line-subtle); }
+.help-body blockquote { padding: 2px 0 2px 14px; border-left: 2px solid var(--sk-color-line-strong); color: var(--sk-color-text-tertiary); }
+.help-body a { color: var(--sk-color-accent-default); text-decoration: none; cursor: pointer; border-radius: var(--sk-radius-xs); }
+.help-body a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.help-body a[data-external]::after { content: "↗"; margin-left: 2px; font-size: 0.8em; color: var(--sk-color-text-tertiary); }
+.help-body a[data-invalid] { color: inherit; cursor: default; }
+.help-body code { padding: 1px 5px; border-radius: var(--sk-radius-sm); background: var(--sk-color-bg-raised); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); font: 12.5px/1.5 var(--sk-font-family-mono); color: var(--sk-color-text-primary); overflow-wrap: anywhere; }
+.help-body kbd.kbd { margin: 0 1px; vertical-align: 1px; color: var(--sk-color-text-primary); font-size: 11.5px; }
+.help-body .help-image { color: var(--sk-color-text-tertiary); font-style: italic; }
+.help-body .help-reached { animation: sk-help-reached 1.6s var(--sk-motion-easing-out); }
+@keyframes sk-help-reached { 0%, 30% { background: color-mix(in srgb, var(--sk-color-accent-default) 18%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--sk-color-accent-default) 18%, transparent); } }
+
+/* code blocks: a copy button in the corner */
+.help-code { position: relative; }
+.help-code pre { margin: 0; padding: 12px 44px 12px 14px; overflow-x: auto; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); scrollbar-width: thin; }
+.help-code pre code { padding: 0; background: none; box-shadow: none; font-size: 12.5px; line-height: 1.65; white-space: pre; overflow-wrap: normal; }
+.help-copy { position: absolute; top: 6px; right: 6px; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--sk-radius-md); background: transparent; color: var(--sk-color-text-tertiary); opacity: 0; }
+.help-code:hover .help-copy, .help-copy:focus-visible { opacity: 1; }
+.help-copy:hover { background: var(--sk-color-bg-hover); color: var(--sk-color-text-primary); }
+
+/* tables: their own horizontal scroll, never the page's */
+.help-table { overflow-x: auto; border-radius: var(--sk-radius-lg); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); scrollbar-width: thin; }
+.help-table table { width: 100%; border-collapse: collapse; font-size: 13px; line-height: 1.55; }
+.help-table th, .help-table td { padding: 8px 12px; text-align: left; vertical-align: top; }
+.help-table th { background: var(--sk-color-bg-panel); color: var(--sk-color-text-primary); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.help-table tr + tr td, .help-table thead + tbody tr td { border-top: 1px solid var(--sk-color-line-subtle); }
+.help-table td { color: var(--sk-color-text-secondary); }
+.help-table td:first-child { min-width: 112px; color: var(--sk-color-text-primary); }
+
+/* asides (:::note, :::tip, :::caution, :::danger) */
+.help-aside { --aside: var(--sk-color-accent-default); padding: 10px 14px 12px; border-radius: var(--sk-radius-lg); background: color-mix(in srgb, var(--aside) 8%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aside) 26%, transparent), inset 3px 0 0 var(--aside); }
+.help-aside.tip { --aside: var(--sk-color-status-success); }
+.help-aside.caution { --aside: var(--sk-color-status-warning); }
+.help-aside.danger { --aside: var(--sk-color-status-danger); }
+.help-aside-title { display: flex; align-items: center; gap: 6px; margin: 0 0 4px !important; font-size: 13px; font-weight: 600; color: var(--aside); }
+.help-aside-title svg { flex: none; }
+.help-aside-body { color: var(--sk-color-text-secondary); }
+.help-aside-body > :last-child { margin-bottom: 0; }
+
+/* ---------------------------------------------------------------- previous / next */
+.help-pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--sk-color-line-subtle); }
+.help-pager-link { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; padding: 12px 14px; border: 0; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); text-align: left; }
+.help-pager-link.next { align-items: flex-end; text-align: right; }
+.help-pager-link:hover { background: var(--sk-color-bg-hover); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); }
+.help-pager-title { display: flex; align-items: center; gap: 6px; max-width: 100%; font-size: 14px; font-weight: 600; color: var(--sk-color-text-primary); }
+.help-pager-title svg { flex: none; color: var(--sk-color-accent-default); }
+
+/* ---------------------------------------------------------------- 「本页内容」 */
+.help-toc { position: sticky; top: 32px; flex: none; width: 208px; max-height: calc(100vh - var(--sk-layout-titlebar) - var(--sk-layout-toolbar) - var(--sk-layout-statusbar) - 72px); overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-left: 12px; border-left: 1px solid var(--sk-color-line-subtle); scrollbar-width: thin; }
+.help-toc-title { margin-bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; color: var(--sk-color-text-tertiary); }
+.help-toc-item { display: block; width: 100%; padding: 4px 8px; border: 0; border-radius: var(--sk-radius-sm); background: transparent; color: var(--sk-color-text-secondary); font-size: 12px; line-height: 1.45; text-align: left; }
+.help-toc-item.d3 { padding-left: 20px; color: var(--sk-color-text-tertiary); }
+.help-toc-item:hover { background: var(--sk-color-bg-hover); color: var(--sk-color-text-primary); }
+.help-toc-item.on { color: var(--sk-color-accent-default); }
+@media (max-width: 1240px) { .help-toc { display: none; } .help-layout { padding: 32px 40px 48px; } }
+
+/* ---------------------------------------------------------------- search results */
+.help-results { display: flex; flex-direction: column; gap: 10px; }
+.help-result { display: flex; flex-direction: column; gap: 2px; padding: 10px 6px 12px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
+.help-result-page, .help-result-heading { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: var(--sk-radius-md); background: transparent; text-align: left; }
+.help-result-page { justify-content: space-between; min-height: 30px; padding: 0 8px; }
+.help-result-title { font-size: 14px; font-weight: 600; color: var(--sk-color-text-primary); }
+.help-result-desc { margin: 0 8px 4px; font-size: 13px; line-height: 1.5; color: var(--sk-color-text-secondary); }
+.help-result-heading { min-height: 26px; padding: 0 8px; color: var(--sk-color-text-secondary); font-size: 13px; }
+.help-result-heading svg { flex: none; color: var(--sk-color-text-tertiary); }
+.help-result-page:hover, .help-result-heading:hover { background: var(--sk-color-bg-hover); color: var(--sk-color-text-primary); }
+.help-result mark { background: color-mix(in srgb, var(--sk-color-accent-default) 30%, transparent); color: inherit; border-radius: 2px; }
+
+/* 「减少动画」: on, or the system's when it follows the system */
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .help-body .help-reached { animation: none; }
+  :root:not([data-motion="full"]) .help-main { scroll-behavior: auto; }
+}
+[data-motion="reduce"] .help-body .help-reached { animation: none; }

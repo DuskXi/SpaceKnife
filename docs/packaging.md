@@ -71,6 +71,7 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 - deb / rpm：程序在 `/opt/SpaceKnife/`，`/usr/bin/spaceknife` 指向它；`spaceknife.desktop`（中英文名称与说明、关键字）和 hicolor 图标 16–512 px；依赖是 Electron 的常规依赖（GTK 3、NSS、libXss、libXtst、xdg-utils、at-spi2 等）。
 - AppImage：需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）；没有时用 `--appimage-extract-and-run` 运行。
+- AppImage 的更新信息：electron-builder 用的运行时留了空的 `.upd_info` 段，构建时写进 `gh-releases-zsync|DuskXi|SpaceKnife|latest-all|SpaceKnife-*-x86_64.AppImage.zsync`（`latest-all`：最新的正式版或预发布版；`latest` 不算预发布），并用 `zsyncmake` 在旁边生成 `.zsync`（`tools/build_package.py` 的 `embed_update_info` / `make_zsync`；本机没装 `zsync` 包时只写更新信息、不生成 .zsync）。这样 AppImageUpdate、AppImageLauncher 之类的工具能增量更新。`./SpaceKnife-*.AppImage --appimage-updateinformation` 打印写进去的信息。
 - 窗口的 app_id / WM_CLASS 与 desktop 文件名一致（`desktopName: spaceknife.desktop`），任务栏能把窗口和启动器图标对上。
 
 **便携版**（Windows zip、Linux tar.gz）：
@@ -110,7 +111,8 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - 一键下载按安装方式挑发布文件，存进系统的「下载」文件夹，并用同一个发布里的 `SHA256SUMS*.txt` 校验，不符就删掉。之后「安装」：NSIS 安装包直接运行，SpaceKnife 退出，安装程序替换旧版本、保留数据（2026-10-20 在 Windows 11 上实测过从 0.3.0 升级）；dmg 打开（用户把新版拖进「应用程序」）、deb / rpm 交给系统的软件安装器，SpaceKnife 随即退出；便携版和 AppImage 只在文件夹中显示，由用户替换。主进程只启动下载文件夹里、按本次安装方式的发布文件命名的文件。
 - **发布时的约定**：更新检查靠文件名找文件。发布文件必须沿用下面的名字，并附上对应的校验和文件：
   - `SpaceKnife-<版本>-Setup-x64.exe`、`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-x86_64.AppImage`、`spaceknife_<版本>_amd64.deb`、`spaceknife-<版本>.x86_64.rpm`、`SpaceKnife-<版本>-mac-arm64.dmg`、`SpaceKnife-<版本>-mac-x64.dmg`；
-  - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`、`SHA256SUMS-mac-<架构>.txt`。
+  - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`、`SHA256SUMS-mac-<架构>.txt`；
+  - `SpaceKnife-<版本>-x86_64.AppImage.zsync`（AppImage 里的更新信息指向它）。
   - tag 是 `v<版本>`（语义化版本，可带预发布段）。改名之前先改 `spaceknife.update.pick_asset` 和主进程的 `installRefusal`。
 
 **数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：

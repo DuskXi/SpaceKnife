@@ -7,11 +7,12 @@ import { posix, win32 } from "node:path";
 
 import type { TextKey } from "./text";
 
+// The pages main opens in the browser for the renderer (release pages, the help's links to the
+// website); nothing else. The list is shared with the renderer, which checks it before it asks.
+export { PROJECT_PAGES, WEBSITE, projectPage } from "../shared/links";
+
 /** How this copy was installed (spaceknife_protocol.update.InstallKind; SPACEKNIFE_INSTALL_KIND). */
 export type InstallKind = "nsis" | "portable" | "appimage" | "deb" | "rpm" | "dmg" | "dev" | "unknown";
-
-/** The pages main opens in the browser for the renderer (release pages); nothing else. */
-export const PROJECT_PAGES = "https://github.com/DuskXi/SpaceKnife/";
 
 /** The uninstaller electron-builder's NSIS installer puts next to the executable. */
 const NSIS_UNINSTALLER = "Uninstall SpaceKnife.exe";
@@ -87,17 +88,6 @@ export function installRefusal(
   }
   if (!samePath(path.dirname(real), folder, platform)) return "updateNotInDownloads";
   return pattern.test(path.basename(real)) ? null : "updateNotAnUpdate";
-}
-
-/** The address to open when `url` is one of the project's pages on GitHub (normalised), else null. */
-export function projectPage(url: unknown): string | null {
-  if (typeof url !== "string") return null;
-  try {
-    const href = new URL(url).href; // resolves "..", lowercases the host
-    return href.startsWith(PROJECT_PAGES) ? href : null;
-  } catch {
-    return null;
-  }
 }
 
 function within(path: typeof posix, dir: string, file: string): boolean {

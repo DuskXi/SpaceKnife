@@ -124,6 +124,17 @@ function createWindow(): void {
   win.on("maximize", () => win?.webContents.send("sk:maximized", true));
   win.on("unmaximize", () => win?.webContents.send("sk:maximized", false));
   win.on("closed", () => (win = null));
+  // a link never opens a window nor leaves the app (the help page sends its links to sk:openExternal;
+  // this catches what slips past it, a dropped file included)
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    const page = projectPage(url);
+    if (page) void shell.openExternal(page);
+    return { action: "deny" };
+  });
+  const origin = process.env.ELECTRON_RENDERER_URL ? new URL(process.env.ELECTRON_RENDERER_URL).origin : APP_ORIGIN;
+  win.webContents.on("will-navigate", (event, url) => {
+    if (!url.startsWith(`${origin}/`)) event.preventDefault();
+  });
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadURL(`${APP_ORIGIN}/index.html`);
 }
@@ -154,7 +165,7 @@ function registerIpc(): void {
   ipcMain.on("sk:openExternal", (_e, url: unknown) => {
     const page = projectPage(url);
     if (page) void shell.openExternal(page);
-    else console.warn(`[shell] not opening ${String(url)}: not a page of the project on GitHub`);
+    else console.warn(`[shell] not opening ${String(url)}: not a page of the project (GitHub, the website)`);
   });
   ipcMain.handle("sk:installUpdate", (_e, path: unknown) => installUpdate(String(path)));
   ipcMain.handle("sk:openFolders", async () => {

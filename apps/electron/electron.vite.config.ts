@@ -19,6 +19,8 @@ export default defineConfig({
       alias: {
         "@": resolve(here, "src/renderer/src"),
         "@design": resolve(here, "../../design/build"),
+        // the documentation the website builds (site/src/content/docs): the help page bundles it
+        "@site": resolve(here, "../../site/src"),
       },
     },
     server: { port: 5173, strictPort: true, fs: { allow: [resolve(here, "../..")] } },
