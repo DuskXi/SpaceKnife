@@ -5,8 +5,15 @@ name: Portable build
 # smoke-tested in portable mode; the archives and their checksums go to the run's artifacts, and a
 # maintainer attaches them to a release. Started by hand (Actions › Portable build › Run workflow),
 # and on dev whenever the packaging changes, so it is checked before it reaches main.
+# With "installers" (by hand, for a release) the same run also builds the Windows installer and the
+# Linux deb / rpm / AppImage from the same commit, with their own checksums.
 on:
   workflow_dispatch:
+    inputs:
+      installers:
+        description: Also build the installers (for a release)
+        type: boolean
+        default: false
   push:
     branches: [dev]
     paths:
@@ -73,8 +80,17 @@ jobs:
         working-directory: apps/electron
         run: pnpm install --frozen-lockfile
 
+      - name: Install rpmbuild (the rpm package)
+        if: inputs.installers && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Build the portable archive
+        if: ${{ !inputs.installers }}
         run: uv run python tools/build_package.py --portable --no-installers
+
+      - name: Build the portable archive and the installers
+        if: inputs.installers
+        run: uv run python tools/build_package.py --portable
 
       - name: Unpack it again
         run: |
@@ -101,6 +117,26 @@ jobs:
       - name: Checksum
         working-directory: dist/electron
         run: sha256sum *-portable.* | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
+
+      - name: Checksum the installers
+        if: inputs.installers
+        working-directory: dist/electron
+        run: |
+          shopt -s nullglob
+          sha256sum *-Setup-x64.exe *.AppImage *.deb *.rpm | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
+
+      - uses: actions/upload-artifact@v7
+        if: inputs.installers
+        with:
+          name: SpaceKnife-installers-${{ matrix.target }}
+          path: |
+            dist/electron/*-Setup-x64.exe
+            dist/electron/*.AppImage
+            dist/electron/*.deb
+            dist/electron/*.rpm
+            dist/electron/SHA256SUMS-installers-*.txt
+          if-no-files-found: error
+          retention-days: 14
 
       - uses: actions/upload-artifact@v7
         with:
