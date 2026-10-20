@@ -120,7 +120,7 @@ export class Rpc {
       protocol: PROTOCOL_VERSION,
       client: { ...client, kind: "electron" },
       // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them first)
-      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", ...visualCapabilities()],
+      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", ...visualCapabilities()],
     })) as HelloResult;
     return this.hello;
   }

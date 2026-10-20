@@ -40,7 +40,7 @@ python -X utf8 -m spaceknife serve --token-stdin
  "params": {"token": "…", "protocol": "1.1",
             "client": {"name": "spaceknife-electron", "version": "0.1.0", "kind": "electron"},
             "capabilities": ["binary-frames.v1", "subscriptions", "cancel", "log-stream",
-                             "visuals.v1", "layout.flame.v1", "layout.polar.v1"]}}
+                             "visuals.v1", "layout.flame.v1", "layout.polar.v1", "updates.v1"]}}
 ```
 
 成功时返回协议版本、服务端信息、`session_id`、双方能力的交集、schema 指纹和各项限制。失败时先回一个错误响应，再按下表关闭连接：
@@ -64,6 +64,7 @@ python -X utf8 -m spaceknife serve --token-stdin
 | `visuals.v1` | 理解视图设置的 `visual` 字段、`visual.list`、`FrameInfo` 的 `visual` / `layout` / `geometry` / `root`、配色模式 `branch` 和 `branch` 列 |
 | `layout.flame.v1` | 能解码并画 `flame.v1` 帧（火焰图） |
 | `layout.polar.v1` | 能解码并画 `polar.v1` 帧（火焰-极坐标图） |
+| `updates.v1` | 接收 `update.changed`（更新检查结果与下载进度，见 §3「更新检查」） |
 
 `drawlist.v1`（树图）是基线，不需要能力。后端只给会话发它协商过的布局：没有对应能力的会话里，新视图和 `view.open` 的可视化退回树图，`view.set` 选不可用的可视化返回 INVALID_PARAMS；配色 `branch` 也只对带 `visuals.v1` 的会话开放。Electron 的能力列表由前端已注册的可视化组件生成。
 
@@ -119,6 +120,10 @@ python -X utf8 -m spaceknife serve --token-stdin
 | `palette.preview` | 一个过滤式在整个扫描上的匹配项数与大小（命令面板的过滤直达项与最近过滤项），按规范形与数据版本缓存 |
 | `palette.remember` / `palette.clear` | 记录在面板里执行过的路径跳转（按扫描目标）与过滤（全局）；清除某扫描目标的跳转和全部过滤 |
 | `view.render`、`view.list`、`view.close` | 重发一帧；列出本会话的视图；关闭视图（会话断开或扫描关闭时自动关闭） |
+| `update.status` | 更新检查的现状（`UpdateStatus`）：当前版本、安装方式、是否自动检查、通道、上次成功检查的时间与失败原因、落后程度 `level`、最新版本（标题、发布页、说明、本安装方式对应的文件）、卡片是否已关闭、下载状态 |
+| `update.check` | 立即检查 GitHub 发布列表（自动检查关闭时也查），检查进行中则等它结束；返回新的 `UpdateStatus` |
+| `update.dismiss` | `{version}` 的卡片 / 对话框已被关闭，此版本不再弹出（徽章保留） |
+| `update.download` / `update.cancel` | 把 `{version}` 对应本安装方式的文件下载到下载文件夹并校验 SHA-256（立即返回，进度见 `update.changed`）；不是当前可更新的版本返回 INVALID_PARAMS，没有对应文件返回 INVALID_REQUEST。停止下载并删除未完成的文件 |
 
 ### 当前事件与主题
 
@@ -129,6 +134,17 @@ python -X utf8 -m spaceknife serve --token-stdin
 | `scan.progress` | `scan` 主题（参数 `{scan_id}`）：订阅时立即推送一次当前状态，之后最多每秒 4 次，结束时再推送一次最终状态 |
 | `view.frame` | 不由请求触发的新帧（扫描进行中最多每秒 4 次，扫描结束时一次，设置改变几何参数时一次），随后到达对应的二进制帧 |
 | `settings.changed` | 任何一端修改设置、或设置文件被外部编辑后，推送给所有会话的完整设置文档 |
+| `update.changed` | `{status}`：检查开始与结束、下载进度（最多每秒 4 次）、卡片关闭、相关设置或界面语言改变时，推送给所有声明了 `updates.v1` 的会话 |
+
+### 更新检查（`updates.v1`）
+
+后端唯一的联网请求是 `GET https://api.github.com/repos/DuskXi/SpaceKnife/releases`（User-Agent `SpaceKnife/<版本>`，不带 token，不带其他数据，代理沿用系统设置），以及用户点击后从 github.com 下载文件。结果缓存在数据目录的 `update.json`（上次检查时间、ETag、精简后的发布列表、已关闭卡片的版本）；再次检查带 `If-None-Match`，列表没变时 GitHub 回 304，不占查询次数。
+
+- **频率**：设置「自动检查更新」开启时，启动约 60 秒后、且上次成功检查已超过 24 小时才查，之后每 24 小时一次；失败 6 小时后重试。打开该设置或切换通道时立即检查。
+- **通道**：`preview`（默认）包括 GitHub 上标为 Pre-release 或版本号带预发布段（`0.4.0-beta.1`）的版本，`stable` 只要正式版；草稿和不是语义化版本号的 tag 一律忽略，取版本号最大的一个。
+- **落后程度** `level` 按第一个不同的版本段：`patch`（0.3.0 → 0.3.1，只在右上角显示徽章）、`minor`（0.3.x → 0.4.0，另在左上角挂出带说明的卡片）、`major`（0.x → 1.0.0，另弹出窗口内对话框）；同一版本的预发布 → 正式版算 `patch`。徽章对所有级别都显示，`dismissed` 只影响卡片 / 对话框。
+- **文件**：按启动方传入的安装方式（`SPACEKNIFE_INSTALL_KIND`：`nsis` / `portable` / `appimage` / `deb` / `rpm` / `dmg`，不设为 `dev`）和平台、架构选发布里的文件（命名见 tools/build_package.py）；`dev`、`unknown` 或没有对应文件时 `latest.asset` 为空，只给发布页。SHA-256 取自发布里的 `SHA256SUMS*.txt`（下载时才取），不符时删除文件并报错；目标文件已存在且校验相符时直接复用。下载目录取 `SPACEKNIFE_DOWNLOAD_DIR`（Electron 传系统下载文件夹），否则 `~/Downloads`，都没有时用数据目录下的 `downloads`；AppImage 下载后设为可执行。
+- **当前版本**：`SPACEKNIFE_APP_VERSION`（Electron 传 `app.getVersion()`），否则取第一个声明 `updates.v1` 的会话在 `session.hello` 里报的客户端版本。测试与演示可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
 
 ## 4. 二进制帧（数据面）
 

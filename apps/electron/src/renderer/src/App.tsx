@@ -17,11 +17,13 @@ import { HIT_ROOT, type VisualFrame } from "@/visual/types";
 import { StatusBar } from "@/shell/StatusBar";
 import { TitleBar } from "@/shell/TitleBar";
 import { Toolbar } from "@/shell/Toolbar";
+import { UpdatePrompt } from "@/shell/UpdateCard";
 import { ScanPage } from "@/pages/ScanPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
 import { cycleDirection, exitCompare } from "@/state/compare";
 import { cycleVisual } from "@/state/commands";
+import { visibleSurface } from "@/state/updates";
 import { nextColor } from "@/state/visuals";
 
 export function App() {
@@ -30,6 +32,7 @@ export function App() {
   const message = useApp((s) => s.connMessage);
   const toastText = useApp((s) => s.toast);
   const paletteOpen = useApp((s) => s.paletteOpen);
+  const updateDialog = useApp((s) => visibleSurface(s.update, s.updateOpen) === "dialog");
   useApp((s) => s.lang); // 「界面语言」: a change re-renders the whole tree, every t() follows (M7.5)
 
   useEffect(() => {
@@ -40,7 +43,7 @@ export function App() {
 
   return (
     <>
-      <div className="app" inert={paletteOpen}>
+      <div className="app" inert={paletteOpen || updateDialog}>
         <TitleBar />
         <Toolbar />
         {tab.kind === "scan" ? <ScanPage tab={tab} /> : tab.kind === "settings" ? <SettingsPage /> : <StartPage tab={tab} />}
@@ -63,6 +66,7 @@ export function App() {
       <OpToast />
       <ExportDialog />
       <FullDiskAccessDialog />
+      <UpdatePrompt />
     </>
   );
 }
@@ -80,6 +84,7 @@ function onKey(e: KeyboardEvent): unknown {
   const st = view?.state;
   const done = () => e.preventDefault();
 
+  if (visibleSurface(s.update, s.updateOpen) === "dialog") return; // a major release's dialog is modal: no shortcuts behind it
   if (ctrl && key.toLowerCase() === "k") return (done(), set({ paletteOpen: !s.paletteOpen }));
   if (s.paletteOpen) return; // the palette is modal: it handles its own keys (UI-W4-03)
   if (ctrl && key.toLowerCase() === "j") return (done(), toggleLog()); // W8 待定 2

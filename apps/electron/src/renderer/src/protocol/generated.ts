@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "043084e023496d69";
+export const SCHEMA_HASH = "eea34de360b94730";
 
 export interface AgeCond {
   end: number;
@@ -1401,6 +1401,77 @@ export interface UnsubscribeParams {
   sub: string;
 }
 
+export interface UpdateAsset {
+  /** File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe */
+  name: string;
+  /** From the release's SHA256SUMS*.txt; None when it publishes none */
+  sha256: string | null;
+  /** Bytes */
+  size: number;
+  /** Its download URL on github.com */
+  url: string;
+}
+
+export interface UpdateChangedEvent {
+  status: UpdateStatus;
+}
+
+export interface UpdateDownload {
+  /** Why it failed, in the session's language */
+  error: string | null;
+  /** The downloaded file, once done */
+  path: string | null;
+  received: number;
+  state: "idle" | "downloading" | "verifying" | "done" | "failed" | "cancelled";
+  total: number;
+  /** SHA-256 matched (True), did not (never kept), no checksum published (None) */
+  verified: boolean | null;
+  version: string | null;
+}
+
+export interface UpdateInfo {
+  /** The file for this kind of install; None: only the release page */
+  asset: UpdateAsset | null;
+  /** The release title */
+  name: string;
+  /** Release notes (Markdown), at most 16 KiB */
+  notes: string;
+  /** Marked as a pre-release on GitHub */
+  prerelease: boolean;
+  published_at: string | null;
+  tag: string;
+  /** The release page */
+  url: string;
+  /** Without the leading v: 0.4.0, 0.4.0-beta.1 */
+  version: string;
+}
+
+export interface UpdateStatus {
+  channel: "stable" | "preview";
+  /** Last successful check */
+  checked_at: string | null;
+  checking: boolean;
+  /** Version of the running app */
+  current: string;
+  /** The card / dialog for this version was closed (the badge stays) */
+  dismissed: boolean;
+  download: UpdateDownload;
+  /** Automatic checks are on (setting general.update_check) */
+  enabled: boolean;
+  /** The last check failed: why (offline, rate limited) */
+  error: string | null;
+  install_kind: "nsis" | "portable" | "appimage" | "deb" | "rpm" | "dmg" | "dev" | "unknown";
+  /** The newest release, when it is newer */
+  latest: UpdateInfo | null;
+  /** How far behind the newest release this app is */
+  level: "none" | "patch" | "minor" | "major";
+}
+
+export interface UpdateVersionParams {
+  /** The version shown (latest.version) */
+  version: string;
+}
+
 export interface ViewFilterParams {
   cursor?: number | null;
   text: string;
@@ -1734,6 +1805,16 @@ export interface Methods {
   "tree.node": { params: TreeNodeParams; result: TreeNodeResult };
   /** Details-panel data of a node: parent, largest files, per-class totals, newest change, tag, volume. */
   "tree.summary": { params: TreeSummaryParams; result: TreeSummaryResult };
+  /** Stop a running download. */
+  "update.cancel": { params: Empty; result: UpdateStatus };
+  /** Check the GitHub releases now (also when automatic checks are off). */
+  "update.check": { params: Empty; result: UpdateStatus };
+  /** The card / dialog for this version was closed. */
+  "update.dismiss": { params: UpdateVersionParams; result: UpdateStatus };
+  /** Download this version's file for this install into the download folder (progress: update.changed). */
+  "update.download": { params: UpdateVersionParams; result: UpdateStatus };
+  /** What the last update check found (updates.v1). */
+  "update.status": { params: Empty; result: UpdateStatus };
   /** Back to the previous zoom root. */
   "view.back": { params: ViewIdParams; result: ViewUpdate };
   /** Close a view. */
@@ -1791,6 +1872,8 @@ export interface Events {
   "scan.progress": ScanProgressEvent;
   /** Settings changed (any client, or the file was edited). */
   "settings.changed": SettingsChangedEvent;
+  /** Update check result or download progress (sessions with updates.v1). */
+  "update.changed": UpdateChangedEvent;
   /** A frame pushed without a request (scan progress, time). */
   "view.frame": ViewFrameEvent;
 }

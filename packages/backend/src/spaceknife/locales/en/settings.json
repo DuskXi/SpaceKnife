@@ -328,5 +328,12 @@
  "鼠标下的元素加白色内描边": "The block under the mouse gets a white inner outline.",
  "鼠标从一个块移到另一个块时，提示卡直接换成新内容": "When the mouse moves from one block to another, the hover card switches to the new content.",
  "鼠标划过的元素渐隐": "Blocks the mouse passes over fade out.",
- "鼠标拖尾": "Mouse trail"
+ "鼠标拖尾": "Mouse trail",
+ "更新": "Updates",
+ "自动检查更新": "Check for updates automatically",
+ "每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示": "At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right",
+ "提示哪些版本": "Versions to offer",
+ "预览版是 GitHub 上标为预发布（Pre-release）的版本": "Previews are the releases marked as pre-release on GitHub",
+ "包括预览版": "Include previews",
+ "只要正式版": "Releases only"
 }

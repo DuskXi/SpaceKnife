@@ -1,7 +1,7 @@
-// Everything that talks to the backend: connection, scans, views, filter, tags.
+// Everything that talks to the backend: connection, scans, views, filter, tags, updates.
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
-import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
+import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
 import { Rpc, RpcError } from "@/protocol/rpc";
 // the built-in visualizations register before the first hello announces their layouts
@@ -28,6 +28,7 @@ import {
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
 import { FramePairer, frameKey } from "./frames";
+import { downloading, downloadOf, hasUpdate, visibleSurface } from "./updates";
 import { getLang, setLang, t } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
@@ -106,6 +107,7 @@ async function connect(): Promise<void> {
   r.on("basket.changed", (ev) => set({ basket: ev.state }));
   r.on("ops.progress", (ev) => onOpProgress(ev));
   r.on("compare.progress", (ev) => onCompareProgress(ev));
+  r.on("update.changed", (ev) => applyUpdateStatus(ev.status));
   // the file class table changed (W7): the parser vocabulary and the colours follow
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));
   r.on("log.record", (ev) => addLog(ev));
@@ -118,7 +120,7 @@ async function connect(): Promise<void> {
     setTimeout(() => void reconnect(), 800);
   });
   void r.call("$/subscribe", { topic: "log", params: { backlog: 500, min_level: "INFO" } }).catch(() => {});
-  const [vocab, volumes, snapshots, scans, settings, basket, visuals] = await Promise.all([
+  const [vocab, volumes, snapshots, scans, settings, basket, visuals, update] = await Promise.all([
     r.call("filter.vocab", {}),
     r.call("volume.list", {}),
     r.call("snapshot.list", {}),
@@ -126,6 +128,7 @@ async function connect(): Promise<void> {
     r.call("settings.get", {}),
     r.call("basket.list", {}).catch(() => null),
     r.call("visual.list", {}).catch(() => null), // a server before visuals.v1 has only the treemap
+    r.call("update.status", {}).catch(() => null), // a server before updates.v1 checks for none
   ]);
   applySettings(settings);
   set({
@@ -136,6 +139,7 @@ async function connect(): Promise<void> {
     snapshots: snapshots.snapshots,
     scans: Object.fromEntries(scans.scans.map((s) => [s.scan_id, s])),
   });
+  if (update) applyUpdateStatus(update);
   for (const s of scans.scans) if (s.state === "scanning" || s.state === "queued") void watchScan(s.scan_id);
 }
 
@@ -720,4 +724,79 @@ export async function refreshLists(): Promise<void> {
   } catch {
     /* offline */
   }
+}
+
+// ------------------------------------------------------------------ updates (updates.v1)
+
+/** Versions whose card was closed here: a status the backend sent before it heard of it stays closed. */
+const closedVersions = new Set<string>();
+
+/** A status from the backend (an answer, or update.changed). A download that ends while no update
+ * card is on screen says so in a toast; the badge shows the rest. */
+function applyUpdateStatus(next: UpdateStatus): void {
+  if (next.latest && !next.dismissed && closedVersions.has(next.latest.version)) next = { ...next, dismissed: true };
+  const before = downloadOf(get().update);
+  set((s) => ({ update: next, updateOpen: s.updateOpen && hasUpdate(next) }));
+  const after = downloadOf(next);
+  if (!downloading(before) || downloading(after) || visibleSurface(next, get().updateOpen) !== "none") return;
+  if (after.state === "done") toast(t("SpaceKnife {version} 已下载", { version: after.version ?? "" }));
+  else if (after.state === "failed") toast(t("更新下载失败：{error}", { error: after.error ?? "" }));
+}
+
+async function updateCall<M extends "update.dismiss" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
+  try {
+    applyUpdateStatus((await call(method, params)) as UpdateStatus);
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+/** 「检查更新」 (app.check_updates): now, also when automatic checks are off; a newer release opens
+ * its card under the badge. */
+export async function checkUpdates(): Promise<void> {
+  toast(t("正在检查更新…"));
+  try {
+    const st = await call("update.check", {});
+    applyUpdateStatus(st);
+    if (st.error) toast(t("检查更新失败：{error}", { error: st.error }));
+    else if (hasUpdate(st)) {
+      set({ updateOpen: true });
+      toast(t("发现新版本 {version}", { version: st.latest.version }));
+    } else toast(t("已是最新版本"));
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+/** The badge and 「查看更新」 (app.show_update): the card under the badge; nothing known yet: check. */
+export function showUpdate(): Promise<void> {
+  if (!hasUpdate(get().update)) return checkUpdates();
+  set({ updateOpen: true });
+  return Promise.resolve();
+}
+
+/** Close the update card or dialog (×, Esc, 「以后再说」): neither opens by itself again for this
+ * version; the badge stays. */
+export function closeUpdate(): void {
+  const st = get().update;
+  set({ updateOpen: false });
+  if (!hasUpdate(st) || st.dismissed) return;
+  closedVersions.add(st.latest.version);
+  set({ update: { ...st, dismissed: true } }); // closed at once, whatever the backend answers
+  void updateCall("update.dismiss", { version: st.latest.version });
+}
+
+export function toggleUpdateCard(): void {
+  if (get().updateOpen) closeUpdate();
+  else set({ updateOpen: true });
+}
+
+/** 「一键下载」 / 「重试」: the file for this kind of install, into the download folder. */
+export const downloadUpdate = (version: string) => updateCall("update.download", { version });
+export const cancelUpdate = () => updateCall("update.cancel", {});
+
+/** 「安装」: start the downloaded installer, disk image or package; the app quits when it started. */
+export async function installUpdate(path: string): Promise<void> {
+  const reason = await window.sk.update.install(path);
+  if (reason) toast(reason);
 }

@@ -10,6 +10,7 @@ import { registeredLayouts } from "@/visual/registry";
 import {
   basketAdd,
   call,
+  checkUpdates,
   closeTab,
   newStartTab,
   openSettingsTab,
@@ -19,6 +20,7 @@ import {
   rescanFolder,
   resumeScan,
   setViewSettings,
+  showUpdate,
   startScan,
   toggleSplit,
   viewCall,
@@ -141,6 +143,10 @@ export async function runCommand(id: string): Promise<void> {
     case "app.log":
       toggleLog();
       return;
+    case "app.check_updates":
+      return checkUpdates();
+    case "app.show_update":
+      return showUpdate();
     case "nav.back":
       await viewCall(viewId, "view.back");
       return;

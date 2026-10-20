@@ -20,6 +20,8 @@ CAP_LOG_STREAM = "log-stream"
 CAP_VISUALS = "visuals.v1"
 CAP_LAYOUT_FLAME = "layout.flame.v1"
 CAP_LAYOUT_POLAR = "layout.polar.v1"
+# Update checks against the GitHub releases: update.* and the update.changed event.
+CAP_UPDATES = "updates.v1"
 ALL_CAPABILITIES = (
     CAP_BINARY_FRAMES,
     CAP_SUBSCRIPTIONS,
@@ -28,6 +30,7 @@ ALL_CAPABILITIES = (
     CAP_VISUALS,
     CAP_LAYOUT_FLAME,
     CAP_LAYOUT_POLAR,
+    CAP_UPDATES,
 )
 
 
@@ -44,6 +47,7 @@ __all__ = [
     "CAP_LAYOUT_POLAR",
     "CAP_LOG_STREAM",
     "CAP_SUBSCRIPTIONS",
+    "CAP_UPDATES",
     "CAP_VISUALS",
     "PROTOCOL_VERSION",
     "SUBPROTOCOL",

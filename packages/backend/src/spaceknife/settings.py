@@ -164,6 +164,29 @@ def _registry() -> tuple[Spec, ...]:
             synonyms=("log", "denied", "warning"),
             kind=bool,
         ),
+        S(
+            "general.update_check",
+            "general",
+            "更新",
+            "自动检查更新",
+            "每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示",
+            "switch",
+            True,
+            synonyms=("update", "upgrade", "release", "version", "升级", "新版本"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
+            "general.update_channel",
+            "general",
+            "更新",
+            "提示哪些版本",
+            "预览版是 GitHub 上标为预发布（Pre-release）的版本",
+            "segmented",
+            "preview",
+            (("preview", "包括预览版"), ("stable", "只要正式版")),
+            synonyms=("update", "channel", "beta", "prerelease", "预发布"),  # i18n: ignore
+            kind=str,
+        ),
         # ------------------------------------------------------------ 外观
         S(
             "appearance.theme",

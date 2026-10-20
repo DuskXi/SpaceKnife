@@ -17,6 +17,7 @@ import type {
   ScanStatus,
   SettingsState,
   SnapshotInfo,
+  UpdateStatus,
   ViewState,
   VisualInfo,
   VolumeInfo,
@@ -155,6 +156,11 @@ export interface AppState {
   lang: Lang;
   /** visualizations the backend offers (visual.list), empty until connected */
   visuals: VisualInfo[];
+  /** update checks (updates.v1): what the last one found and the download; null until connected,
+   * and from a backend without them */
+  update: UpdateStatus | null;
+  /** the update card opened from the title bar's badge (shell/UpdateBadge) */
+  updateOpen: boolean;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -213,6 +219,8 @@ export const useApp = create<AppState>(() => ({
   fdaPrompt: false,
   lang: getLang(),
   visuals: [],
+  update: null,
+  updateOpen: false,
 }));
 
 export const set = useApp.setState;

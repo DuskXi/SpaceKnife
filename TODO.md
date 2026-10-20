@@ -85,7 +85,9 @@
 - [x] 许可证 MIT；安装包带第三方许可清单（Python、Rust、界面 JavaScript 与字体；`tools/third_party_licenses.py`）
 - [x] 项目主页 `https://github.com/DuskXi/SpaceKnife`；发布包里不带构建机路径（原生扩展单独做发布构建，构建时检查）
 - [ ] 包体积：只 strip 没被 auditwheel 改过的库（libpython、zstandard、原生扩展），Linux 后端约省 40 MB 解压后体积
-- [ ] 自动更新（electron-updater，需要发布渠道）
+- [x] 更新提示（2026-10-20）：每天最多一次检查 GitHub 发布；修订号只显示徽章，次版本号左上角挂卡片，主版本号弹对话框；一键下载对应安装方式的文件并按 SHA256SUMS 校验，Windows 安装包一键安装（docs/packaging.md「更新检查」）
+- [ ] 设计图标集里加一个「下载」图标（现在用旋转 180° 的向上箭头）
+- [ ] 静默的自动更新（下载后无需点击即替换）：要代码签名之后再考虑
 - [x] 便携版（小众软件用户请求）：Windows x64 zip、Linux x64 tar.gz，程序旁的 `data` 文件夹存放全部数据（GitHub Actions「Portable build」，解压后以便携模式冒烟）
 - [ ] Windows / Linux ARM64（依赖都有对应 wheel，Electron 也有 arm64 版；缺测试设备）。32 位 Windows 做不了：Electron 44 已不再提供 ia32
 

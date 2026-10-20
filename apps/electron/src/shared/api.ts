@@ -40,6 +40,13 @@ export interface SkApi {
     copyText(text: string): void;
     /** macOS: System Settings › Privacy & Security › Full Disk Access (nothing elsewhere). */
     openFullDiskAccess(): void;
+    /** Open a page of this project on GitHub (a release page) in the browser; other URLs are refused. */
+    openExternal(url: string): void;
+  };
+  update: {
+    /** Start a downloaded update (installer, disk image, package) and quit so it can replace the app.
+     * Only a file in the download folder named like a release asset; "" when started, else why not. */
+    install(path: string): Promise<string>;
   };
   dialog: {
     /** Pick a snapshot file (UI-W1-45, W4 「打开快照文件…」); null when cancelled. */

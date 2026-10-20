@@ -45,6 +45,9 @@ class Context:
     snapshots: int = 0
     basket: int = 0
     caps: frozenset[str] = frozenset()  # what the session announced: visualizations, branch colours
+    app_version: str = ""  # the running app's version (update.status)
+    update_version: str = ""  # a newer release, "" when there is none
+    update_checking: bool = False
 
     @property
     def selected_node(self) -> int | None:
@@ -137,6 +140,10 @@ def _tab(c: Context) -> str | None:
     return None if c.tab == "scan" else _("需要先完成扫描")
 
 
+def _update(c: Context) -> str | None:
+    return None if c.update_version else _("没有可用的更新")
+
+
 @dataclass(frozen=True, slots=True)
 class Command:
     id: str
@@ -195,6 +202,14 @@ def _basket(c: Context) -> str:
 
 def _snapshot_count(c: Context) -> str:
     return plural(c.snapshots, "{count} 个快照", "1 snapshot", count=c.snapshots)
+
+
+def _update_check(c: Context) -> str:
+    if c.update_checking:
+        return _("正在检查…")
+    if c.update_version:
+        return tr("有新版本 {version}", version=c.update_version)
+    return tr("当前版本 {version}", version=c.app_version) if c.app_version else ""
 
 
 def _color_pick(mode: str) -> Callable[[Context], str]:
@@ -352,6 +367,23 @@ def _registry() -> tuple[Command, ...]:
         C("scan.new", "新扫描", "drive", (), ("new scan", "scan")),
         C("snapshot.open", "打开快照文件…", "snapshot", (), ("open snapshot", "load")),
         C("app.log", "日志面板", "log", ("Ctrl+J",), ("log", "logs", "console")),
+        C(
+            "app.check_updates",
+            "检查更新",
+            "refresh",
+            (),
+            ("check for updates", "update", "upgrade", "new version"),
+            status=_update_check,
+        ),
+        C(
+            "app.show_update",
+            "查看更新",
+            "info",
+            (),
+            ("update", "release notes", "what's new", "download update"),
+            needs=(_update,),
+            status=lambda c: c.update_version,
+        ),
         C(
             "view.color.class",
             "配色：文件类别",

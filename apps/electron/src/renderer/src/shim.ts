@@ -33,6 +33,10 @@ export function installShim(): void {
       openTerminal: (dir) => console.info("openTerminal", dir),
       copyText: (text) => void navigator.clipboard?.writeText(text).catch(noop),
       openFullDiskAccess: () => console.info("openFullDiskAccess"),
+      openExternal: (url) => void window.open(url, "_blank", "noopener"),
+    },
+    update: {
+      install: async () => t("浏览器模式下无法安装更新"),
     },
     setLanguage: () => undefined,
     dialog: {

@@ -6464,6 +6464,334 @@
       "title": "UnsubscribeParams",
       "type": "object"
     },
+    "UpdateAsset": {
+      "properties": {
+        "name": {
+          "description": "File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "From the release's SHA256SUMS*.txt; None when it publishes none",
+          "title": "Sha256"
+        },
+        "size": {
+          "description": "Bytes",
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "url": {
+          "description": "Its download URL on github.com",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "url"
+      ],
+      "title": "UpdateAsset",
+      "type": "object"
+    },
+    "UpdateChangedEvent": {
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/UpdateStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "UpdateChangedEvent",
+      "type": "object"
+    },
+    "UpdateDownload": {
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it failed, in the session's language",
+          "title": "Error"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The downloaded file, once done",
+          "title": "Path"
+        },
+        "received": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Received",
+          "type": "integer"
+        },
+        "state": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "downloading",
+            "verifying",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "verified": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 matched (True), did not (never kept), no checksum published (None)",
+          "title": "Verified"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "title": "UpdateDownload",
+      "type": "object"
+    },
+    "UpdateInfo": {
+      "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateAsset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The file for this kind of install; None: only the release page"
+        },
+        "name": {
+          "description": "The release title",
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "description": "Release notes (Markdown), at most 16 KiB",
+          "title": "Notes",
+          "type": "string"
+        },
+        "prerelease": {
+          "description": "Marked as a pre-release on GitHub",
+          "title": "Prerelease",
+          "type": "boolean"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "url": {
+          "description": "The release page",
+          "title": "Url",
+          "type": "string"
+        },
+        "version": {
+          "description": "Without the leading v: 0.4.0, 0.4.0-beta.1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "tag",
+        "name",
+        "prerelease",
+        "url"
+      ],
+      "title": "UpdateInfo",
+      "type": "object"
+    },
+    "UpdateStatus": {
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "preview"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last successful check",
+          "title": "Checked At"
+        },
+        "checking": {
+          "default": false,
+          "title": "Checking",
+          "type": "boolean"
+        },
+        "current": {
+          "description": "Version of the running app",
+          "title": "Current",
+          "type": "string"
+        },
+        "dismissed": {
+          "default": false,
+          "description": "The card / dialog for this version was closed (the badge stays)",
+          "title": "Dismissed",
+          "type": "boolean"
+        },
+        "download": {
+          "$ref": "#/$defs/UpdateDownload"
+        },
+        "enabled": {
+          "description": "Automatic checks are on (setting general.update_check)",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The last check failed: why (offline, rate limited)",
+          "title": "Error"
+        },
+        "install_kind": {
+          "enum": [
+            "nsis",
+            "portable",
+            "appimage",
+            "deb",
+            "rpm",
+            "dmg",
+            "dev",
+            "unknown"
+          ],
+          "title": "Install Kind",
+          "type": "string"
+        },
+        "latest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The newest release, when it is newer"
+        },
+        "level": {
+          "default": "none",
+          "description": "How far behind the newest release this app is",
+          "enum": [
+            "none",
+            "patch",
+            "minor",
+            "major"
+          ],
+          "title": "Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current",
+        "install_kind",
+        "enabled",
+        "channel"
+      ],
+      "title": "UpdateStatus",
+      "type": "object"
+    },
+    "UpdateVersionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "description": "The version shown (latest.version)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "UpdateVersionParams",
+      "type": "object"
+    },
     "ViewFilterParams": {
       "additionalProperties": false,
       "properties": {
@@ -7519,6 +7847,10 @@
       "doc": "Settings changed (any client, or the file was edited).",
       "payload": "#/$defs/SettingsChangedEvent"
     },
+    "update.changed": {
+      "doc": "Update check result or download progress (sessions with updates.v1).",
+      "payload": "#/$defs/UpdateChangedEvent"
+    },
     "view.frame": {
       "doc": "A frame pushed without a request (scan progress, time).",
       "payload": "#/$defs/ViewFrameEvent"
@@ -7902,6 +8234,36 @@
       "params": "#/$defs/TreeSummaryParams",
       "requiresSession": true,
       "result": "#/$defs/TreeSummaryResult"
+    },
+    "update.cancel": {
+      "doc": "Stop a running download.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.check": {
+      "doc": "Check the GitHub releases now (also when automatic checks are off).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.dismiss": {
+      "doc": "The card / dialog for this version was closed.",
+      "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.download": {
+      "doc": "Download this version's file for this install into the download folder (progress: update.changed).",
+      "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.status": {
+      "doc": "What the last update check found (updates.v1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
     },
     "view.back": {
       "doc": "Back to the previous zoom root.",

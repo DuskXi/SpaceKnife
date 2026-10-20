@@ -96,6 +96,7 @@ from .streams import (
     UnsubscribeParams,
 )
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
+from .update import UpdateChangedEvent, UpdateStatus, UpdateVersionParams
 from .view import (
     ViewFilterParams,
     ViewFrameEvent,
@@ -410,11 +411,38 @@ TAGS_CLEAR_SAVED = MethodSpec(
     "tags.clear_saved", Empty, MaintenanceInfo, "Forget every remembered tag (all scan roots)."
 )
 
+UPDATE_STATUS = MethodSpec(
+    "update.status", Empty, UpdateStatus, "What the last update check found (updates.v1)."
+)
+UPDATE_CHECK = MethodSpec(
+    "update.check", Empty, UpdateStatus, "Check the GitHub releases now (also when automatic checks are off)."
+)
+UPDATE_DISMISS = MethodSpec(
+    "update.dismiss", UpdateVersionParams, UpdateStatus, "The card / dialog for this version was closed."
+)
+UPDATE_DOWNLOAD = MethodSpec(
+    "update.download",
+    UpdateVersionParams,
+    UpdateStatus,
+    "Download this version's file for this install into the download folder (progress: update.changed).",
+)
+UPDATE_CANCEL = MethodSpec("update.cancel", Empty, UpdateStatus, "Stop a running download.")
+EVENT_UPDATE = EventSpec(
+    "update.changed",
+    UpdateChangedEvent,
+    "Update check result or download progress (sessions with updates.v1).",
+)
+
 METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
     spec.name: spec
     for spec in (
         SESSION_HELLO,
         SYSTEM_INFO,
+        UPDATE_STATUS,
+        UPDATE_CHECK,
+        UPDATE_DISMISS,
+        UPDATE_DOWNLOAD,
+        UPDATE_CANCEL,
         SYSTEM_PING,
         APP_SHUTDOWN,
         SUBSCRIBE,
@@ -526,5 +554,6 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_OPS_PROGRESS,
         EVENT_COMPARE_PROGRESS,
         EVENT_CLASSES,
+        EVENT_UPDATE,
     )
 }
