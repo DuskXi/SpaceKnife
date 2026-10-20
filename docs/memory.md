@@ -79,3 +79,36 @@ C: 盘实测（845 万项，名字平均 24 B）：
 - **火焰图和火焰-极坐标图**的分区引擎按需计算：尺寸用 `sizes.of(ids)`、类别用 `basis.cls_of(ids)`、子项用 `basis.children(node)`，只访问画出的行和被合并的兄弟，每帧没有 O(N) 的分配。每帧最多 `MAX_ROWS` = 5 万行，每行 53 B（通用列 37 B 加 4 个几何列）另加名字，一帧的列不超过约 2.7 MB；4K、层级 15 下实测约 900 行。行缓冲每帧新建，不跨帧持有 store 的引用。
 - 隐藏模式每次渲染仍按全长数组构造尺寸（每项 8 B，渲染完即释放，已知的遗留项）；对比视图只看增长或减少时同样如此。
 - 引擎在计算池里运行（第 5 节），三种可视化共用同一个池和「只算最新」规则。契约见 [visuals.md](visuals.md)。
+
+## 8. 关掉扫描之后
+
+起因：用户在 Windows 上连扫三次 C:（每次约 870 万项：硬扫、MFT、再硬扫），全部关掉后，看门狗报「后端内存占用异常：1.9 GB（扫描数据约 0.0 GB）」，日志里是私有 1.87 GiB、常驻 1.16 GiB，此时没有视图，计算池也空着。
+
+**不是泄漏。** 在进程内起真实的服务端（2026-10-20，Windows 11），走完整条路径：开始扫描 → 打开视图 → 过滤（建名字索引）→ 切到火焰-极坐标图 → 关视图 → 关扫描。弱引用显示 `NodeStore` 和 `ScanHandle` 在 `scan.close` 之后立即释放，连 `gc.collect()` 都不需要。
+
+- 硬扫描（`C:\Program Files` 36 万项，`C:\Windows` 41 万项）和 MFT 路径（假的提权助手，合成的 400 万行表）都一样。
+- `test_memory.py` 的 `test_closing_a_scan_frees_its_store_and_name_index` 守着这一点。
+
+**留下的是 C 堆的空闲空间。**
+
+- **规模与规律**：`C:\Windows` 第一次扫完关掉，常驻比开始时多约 34 MB，约每项 60–80 B，按这个比例 870 万项约 0.5–0.7 GB。之后同样的扫描每次只再多几 MB，因为下一次扫描会复用这部分空间。
+- **用 tracemalloc 排查**：还活着的 Python 和 numpy 分配前后都是 73 MB，没有增加。
+- **用 `PYTHONMALLOC=malloc` 排查**：绕开 Python 的小对象分配器后，留存不变，所以不是 pymalloc 的 arena。
+- **把扫描线程降到 2 个**：留存只少了五六 MB，线程栈不是主因。
+- **结论**：是进程堆（Python 对象、numpy 的中等数组、原生扩展共用）的碎片。扫描期间大量中等大小的分配和少量长期存活的小块交错，空出来的页还不回去。
+- **Windows 的私有内存（提交量）**还包括已被系统移出工作集的部分，所以私有内存比常驻内存大。
+
+**现在的做法：**
+
+- **主动归还**：`scan.close` 之后约 1 秒，`memory.release()` 让堆归还能还的部分。
+  - Windows 用 `HeapSetInformation(HeapOptimizeResources)`，实测只多还回去几 MB；`HeapCompact` 和 `_heapmin` 没有效果。
+  - glibc 用 `malloc_trim(0)`；macOS 用 `malloc_zone_pressure_relief`。
+- **看门狗**（`server/diag.py`）：
+  - 限额在 `2 × 应占 + 1.5 GiB` 之上，再加「最近一小时关掉的最大那次扫描的大小」（`ScanManager.closed`，按关闭时的 `ram_bytes()` 记），这部分是堆留给下一次扫描复用的；
+  - 超限时先调一次 `release()` 再量，仍超才报警。
+  - 真正的泄漏（每关一次都留下整份数据）照样会在第二、三次时超限。
+
+**可选：Windows 段堆。** 给后端 exe 的清单加 `<heapType>SegmentHeap</heapType>`（Windows 10 2004+；PyInstaller 打包时嵌入，或构建后用 `mt.exe` 写入）。
+
+- 同样的实验，关掉 8 秒后，三轮累计留存从 +46 MB 降到 +30 MB，少了约三分之一，增长也更慢。
+- 还没做：要先比较两种堆的扫描速度，并在 Windows 10 上验证。

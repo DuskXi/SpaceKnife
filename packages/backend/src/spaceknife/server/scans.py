@@ -21,7 +21,7 @@ from loguru import logger
 from spaceknife_protocol import scan as p
 from spaceknife_protocol.errors import ErrorCode
 
-from .. import paths
+from .. import memory, paths
 from ..events import denied_reason, emit, printable
 from ..filter.names import forget, name_index
 from ..helper import HelperError, SharedHelper, is_elevated
@@ -53,6 +53,8 @@ from .rpc import RpcError
 MAX_SCANS = 8
 IO_START_WAIT_S = 3.0  # a scan started with the backend waits this long for disk sampling
 TICK_S = 0.5  # status pushes while a scan runs, also when nothing lands (MFT read, paused): W2 curve
+CLOSED_KEEP_S = 3600.0  # ScanManager.closed: how long a closed scan's size counts
+RELEASE_DELAY_S = 1.0  # after scan.close: give the heap back once the request is done with the scan
 MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the rest is building
 MFT_BUILD_BYTES_PER_ROW = 450  # the received table (~100 B) plus building the tree from it (~330 B)
 _KIND_NAMES: dict[int, Literal["file", "dir", "link", "other"]] = {
@@ -293,6 +295,10 @@ class ScanManager:
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults for new scans)
         self.monitors: Any = None  # server.monitors.MonitorManager, set by the server (M5)
         # set by the ViewManager: scans with open views are never evicted; evicted scans are released
+        # (when, bytes) of the scans closed lately: the C heap keeps about that much for the next
+        # scan to reuse, which the memory watchdog allows for (server/diag.py)
+        self.closed: list[tuple[float, int]] = []
+        self._releases: set[asyncio.Task[None]] = set()
         self.in_use: Callable[[str], bool] | None = None
         self.on_evict: Callable[[str], None] | None = None
 
@@ -346,6 +352,8 @@ class ScanManager:
                 handle.mft_task.cancel()
         tasks = [h.task for h in self.scans.values() if h.task is not None]
         await asyncio.gather(*tasks, return_exceptions=True)
+        for task in list(self._releases):
+            task.cancel()
         if self._pool is not None:
             self._pool.shutdown(wait=False, cancel_futures=True)
             self._pool = None
@@ -843,6 +851,17 @@ class ScanManager:
             with contextlib.suppress(Exception):
                 await handle.task
         self.scans.pop(scan_id, None)
+        now = time.monotonic()
+        recent = [c for c in self.closed if now - c[0] < CLOSED_KEEP_S]
+        self.closed = [*recent, (now, handle.store.ram_bytes())]
+        # once the request that closed it let go of the handle too, the heap can give back
+        task = asyncio.get_running_loop().create_task(self._release_later())
+        self._releases.add(task)
+        task.add_done_callback(self._releases.discard)
+
+    async def _release_later(self) -> None:
+        await asyncio.sleep(RELEASE_DELAY_S)
+        await asyncio.to_thread(memory.release)
 
     # ------------------------------------------------------------------ snapshots
 
