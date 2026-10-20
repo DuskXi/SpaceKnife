@@ -114,6 +114,9 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
   - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`、`SHA256SUMS-mac-<架构>.txt`；
   - `SpaceKnife-<版本>-x86_64.AppImage.zsync`（AppImage 里的更新信息指向它）。
   - tag 是 `v<版本>`（语义化版本，可带预发布段）。改名之前先改 `spaceknife.update.pick_asset` 和主进程的 `installRefusal`。
+- **累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。
+  - 发布时，它就是发布说明的正文：再补上下载表和已知限制。
+  - 发布之后，在 dev 上把它清空：只留标题、语言切换、开头那句说明（版本号改成下一版），以及每节下面的「（暂无）」/「(nothing yet)」。
 
 **数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：
 
