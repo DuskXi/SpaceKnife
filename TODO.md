@@ -102,6 +102,19 @@
 
 - [ ] 亮色主题（待设计评审）：包括可视化的分支色（`visual.branch.*`）和环形色（`visual.ring.*`）
 
+## 本机统计页面（2026-10-20 记下，先不做）
+
+一页看全这台机器上的所有盘：没扫描过的盘和扫描过的盘都列出来，并且分清每块盘的类型、接口和速率。
+
+- [ ] 盘的范围：没扫描过的盘列出系统能给的数据（容量、已用、可用、文件系统、卷标）；扫描过的盘再加上扫描得出的数据，比如最近一次扫描或快照的时间、文件数、类别分布、最大的文件夹
+- [ ] 介质类型：SSD / HDD / U 盘 / SD 卡 / 网络盘 / 虚拟盘
+- [ ] 接口和速率：SATA（1.5 / 3 / 6 Gb/s）、PCIe / NVMe（代数和通道数，例如 Gen4 x4）、USB（5 / 10 / 20 Gb/s 等）、SAS 等；尽量同时给出当前协商的速率和设备支持的最高速率
+- [ ] 物理盘与分区 / 卷的对应关系（一块盘上有几个卷，一个卷跨几块盘）
+- [ ] 现状：`VolumeInfo.media` 已经能分出 `nvme_ssd` / `sata_ssd` / `hdd` / `usb_*` 等（启动页卡片和限速在用），但还没有接口代数、速率，也没有物理盘与卷的对应
+- [ ] 三个平台的数据来源要先调研，不需要管理员权限的来源优先，需要权限的走扫描助手。可能的来源：Windows 用 `IOCTL_STORAGE_QUERY_PROPERTY`、`MSFT_PhysicalDisk`（BusType / MediaType）、PCI 设备属性（当前链路速度和宽度）；Linux 用 `/sys/block/*/queue/rotational`、`/sys/class/nvme`、`/sys/bus/pci/devices/*/current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`；macOS 用 IOKit 或 `system_profiler`
+- [ ] 协议：新增方法（pydantic 模型），前端只负责显示
+- [ ] 界面：一个新的标签页，入口和版式先出设计稿再做
+
 ## 可视化组件（2026-10-19）
 
 契约见 [docs/visuals.md](docs/visuals.md)，界面需求见 [docs/UI-SPEC.md](docs/UI-SPEC.md) 的 V 节。
@@ -119,7 +132,7 @@
 - [ ] 发布说明：旧版本后端读到 `branch`、`flame`、`flame_polar` 或新的设置键时，会判整份设置文件不合法，退回上一次的有效设置（`settings.py` 的校验）；按单项回落的改造另行排期
 - [ ] 性能遗留项：扫描推送时 `sizes()` 缓存每次都失效（树图的全量路径）；隐藏模式仍按全长数组构造尺寸；`_scanning_rows` 仍是 O(N)
 - [ ] `min_element` 有三个默认值：10（设置）、14（`ViewSettings` / `LayoutParams`）、15（令牌），各端阈值口径要统一
-- [ ] `settings.py` 里 `treemap.fps` 的说明文字提到了第三方产品名，改成不提名的写法
+- [x] `settings.py` 里 `treemap.fps` 的说明文字提到了第三方产品名，改成不提名的写法（2026-10-20：「动画重绘的频率」）
 - [ ] 极坐标里的角标（对比的「新增 / 已删除」、减少动画时的静态变化角标）以锚点为中心画成轴对齐的框，再收进扇区的外接框；在 3 点和 9 点方向附近，宽角标可能越过扇区内沿几个像素。改为沿角平分线摆放并按扇区形状判断放不放得下
 - [ ] P2：扫描帧之间按 key 补间；火焰图与火焰-极坐标图之间的变形动画；沿弧线弯曲的文字
 - [ ] 插件系统（以后做，前后端一体）：经验与设计要求见 [docs/plugins.md](docs/plugins.md)。要点：统一通讯层（插件声明方法 / 事件 / 状态，宿主负责传输、类型生成、能力与权限，开发者不碰 WebSocket 和 Electron IPC）；服务端按注册表推导能力（现在是固定的 `ALL_CAPABILITIES`）；加载第三方代码之前先做隔离（WASM 或子进程，只读的树视图，时间与内存上限）；一处声明命令、按键、设置与文案；布局格式由我们维护，不对插件开放
