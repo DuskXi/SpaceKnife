@@ -111,6 +111,7 @@ class ScanMonitor:
         self._loop = asyncio.get_running_loop()
         self._wake = asyncio.Event()
         self.task: asyncio.Task[None] | None = None
+        self.usn_task: asyncio.Task[None] | None = None  # the first change-journal checkpoint
         self.deferred: set[str] = set()  # folders whose children still wait in the scan's queue
         self.trees: set[str] = set()  # subtrees to list again once quiet
         self.events = 0
@@ -198,11 +199,12 @@ class ScanMonitor:
         for _, watcher in self.watchers:
             await asyncio.to_thread(watcher.stop)
         self.watchers.clear()
-        if self.task is not None:
-            self.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self.task
-            self.task = None
+        for task in (self.task, self.usn_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+        self.task = self.usn_task = None
 
     def _sink(self, batch: list[Change]) -> None:  # watcher threads
         with self._lock:
@@ -776,9 +778,12 @@ class MonitorManager:
             return
         mon = ScanMonitor(self, handle)
         await mon.start()
-        await mon.start_usn()
         self.monitors[handle.id] = mon
         handle.monitor = mon
+        # The checkpoint asks the elevated helper, which answers one request at a time and may be
+        # reading this very scan's MFT for half a minute: scan.start (and the window waiting for it)
+        # must not wait for that. Until it is taken an overflow rescans instead of replaying.
+        mon.usn_task = asyncio.get_running_loop().create_task(mon.start_usn(), name=f"usn-{handle.id}")
 
     async def stop(self, scan_id: str) -> None:
         passive = self.passive.pop(scan_id, None)

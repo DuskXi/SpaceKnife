@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from spaceknife.scan.scanner import Scanner
-from spaceknife.server.monitors import MonitorManager
+from spaceknife.server.monitors import MonitorManager, ScanMonitor
 from spaceknife.server.scans import ScanHandle, ScanManager
 from spaceknife.server.views import ViewManager
 from spaceknife.store import mutate
@@ -74,6 +74,33 @@ def same_as_disk(handle: ScanHandle, root: Path) -> Callable[[], Awaitable[bool]
         return facts(handle.store) == facts(fresh.store)
 
     return check
+
+
+async def test_a_busy_helper_does_not_hold_up_the_scan_start(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the change-journal checkpoint waits for the elevated helper, which may be reading this
+    # scan's MFT for half a minute: starting the scan (and the window waiting for it) goes on
+    mgr, _, monitors = watched
+    release = asyncio.Event()
+    asked: list[str] = []
+
+    async def busy_helper(self: Any) -> None:
+        asked.append(self.handle.id)
+        await release.wait()
+
+    monkeypatch.setattr(ScanMonitor, "start_usn", busy_helper)
+    build_tree(tmp_path)
+    handle = await asyncio.wait_for(
+        mgr.start(p.ScanStartParams(roots=[str(tmp_path)], workers=0, auto_snapshot=False)), 5
+    )
+    mon = handle.monitor
+    assert mon is not None and mon.usn_task is not None and not mon.usn_task.done()
+    await asyncio.sleep(0)
+    assert asked == [handle.id]
+    await monitors.stop(handle.id)  # closing the scan does not wait for the helper either
+    assert mon.usn_task is None
+    release.set()
 
 
 async def test_changes_reach_the_tree(watched: Any, tmp_path: Path) -> None:
