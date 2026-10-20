@@ -19,7 +19,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/images/demo-en.gif" width="880" alt="SpaceKnife in action: hovering over a 2 TB drive, zooming into a folder, filtering for large videos, searching with the command palette and comparing two snapshots (mock data)">
+  <img src="docs/images/demo-en.gif" width="880" alt="SpaceKnife in action: hovering over a 2 TB drive, zooming into a folder, switching to the flame graph and the polar flame graph, filtering for large videos, searching with the command palette and comparing two snapshots (mock data)">
 </p>
 
 SpaceKnife draws every folder and file as a block of a nested treemap, sized by the space it takes, so the space hogs stand out at a glance. It scans in parallel (or reads the NTFS Master File Table for a quick scan), can cap the disk load it causes, keeps watching for changes after the scan, and saves a snapshot after each scan so you can see what grew and what is new. Deleting goes to the recycle bin and can be undone. The interface is available in English and Simplified Chinese.
