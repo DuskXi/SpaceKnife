@@ -80,9 +80,9 @@ jobs:
         working-directory: apps/electron
         run: pnpm install --frozen-lockfile
 
-      - name: Install rpmbuild (the rpm package)
+      - name: Install rpmbuild and zsyncmake (the rpm and zsync packages)
         if: inputs.installers && runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y rpm
+        run: sudo apt-get update && sudo apt-get install -y rpm zsync
 
       - name: Build the portable archive
         if: ${{ !inputs.installers }}
@@ -124,6 +124,13 @@ jobs:
         run: |
           shopt -s nullglob
           sha256sum *-Setup-x64.exe *.AppImage *.deb *.rpm | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
+          if [ "$RUNNER_OS" = Linux ]; then
+            # AppImageUpdate reads the update information the build wrote, and the .zsync next to it
+            info=$(./*.AppImage --appimage-updateinformation)
+            echo "update information: $info"
+            [[ "$info" == gh-releases-zsync\|DuskXi\|SpaceKnife\|latest-all\|* ]]
+            ls -l *.AppImage.zsync
+          fi
 
       - uses: actions/upload-artifact@v7
         if: inputs.installers
@@ -132,6 +139,7 @@ jobs:
           path: |
             dist/electron/*-Setup-x64.exe
             dist/electron/*.AppImage
+            dist/electron/*.AppImage.zsync
             dist/electron/*.deb
             dist/electron/*.rpm
             dist/electron/SHA256SUMS-installers-*.txt
