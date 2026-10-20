@@ -99,6 +99,7 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
         <a href="#screenshots">{c.nav.screenshots}</a>
         <a href="#download">{c.nav.download}</a>
         <a href="#faq">{c.nav.faq}</a>
+        <a href={c.lang === "en" ? `${base}docs/` : `${base}zh/docs/`}>{c.nav.docs}</a>
       </nav>
       <div class="nav-actions">
         <a class="lang" href={other} hreflang={c.lang === "en" ? "zh-CN" : "en"} lang={c.lang === "en" ? "zh-CN" : "en"}>{c.nav.switchTo}</a>

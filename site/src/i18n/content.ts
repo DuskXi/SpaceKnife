@@ -27,7 +27,7 @@ export interface Content {
   ogLocale: string;
   title: string; // <title>
   description: string; // meta description
-  nav: { features: string; screenshots: string; download: string; faq: string; github: string; switchTo: string };
+  nav: { features: string; screenshots: string; download: string; faq: string; docs: string; github: string; switchTo: string };
   hero: {
     badge: string;
     h1a: string;
@@ -89,7 +89,7 @@ export const content: Record<Lang, Content> = {
     title: "SpaceKnife: free, open-source disk usage analyzer for Windows and Linux",
     description:
       "SpaceKnife shows what fills your drives as a live treemap. Fast parallel and NTFS MFT scans, snapshot comparison, filters and safe cleanup. Free and open source (MIT) for Windows 10+ and Linux.",
-    nav: { features: "Features", screenshots: "Screenshots", download: "Download", faq: "FAQ", github: "GitHub", switchTo: "中文" },
+    nav: { features: "Features", screenshots: "Screenshots", download: "Download", faq: "FAQ", docs: "Docs", github: "GitHub", switchTo: "中文" },
     hero: {
       badge: "pre-release · free & open source",
       h1a: "See what fills",
@@ -200,7 +200,7 @@ export const content: Record<Lang, Content> = {
     title: "SpaceKnife：免费开源的硬盘占用分析工具（Windows / Linux）",
     description:
       "SpaceKnife 用实时树图展示磁盘被什么占满：并行扫描与 NTFS MFT 快速扫描、快照对比、过滤语言和安全清理。免费开源（MIT），支持 Windows 10+ 与 Linux。",
-    nav: { features: "功能", screenshots: "截图", download: "下载", faq: "常见问题", github: "GitHub", switchTo: "English" },
+    nav: { features: "功能", screenshots: "截图", download: "下载", faq: "常见问题", docs: "文档", github: "GitHub", switchTo: "English" },
     hero: {
       badge: "预发布 · 免费开源",
       h1a: "看清磁盘",

@@ -283,6 +283,7 @@
  "规则应为表": "A rule must be a table",
  "记住标签": "Remember tags",
  "记录扫描警告": "Log scan warnings",
+ "帮助": "Help",
  "设置": "Settings",
  "设置值不合法，已跳过：{key} = {value}": "Skipped an invalid value: {key} = {value}",
  "设置已被其他窗口修改（版本 {version}）": "The settings were changed in another window (version {version}).",
