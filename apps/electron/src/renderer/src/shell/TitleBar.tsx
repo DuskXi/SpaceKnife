@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 
 import { activate, closeTab, newStartTab, openSettingsTab } from "@/state/actions";
+import { openHelp } from "@/state/help";
 import { useApp } from "@/state/store";
 import { fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -53,7 +54,7 @@ export function TitleBar() {
                 else activate(tab.id);
               }}
             >
-              <Icon name={tab.kind === "settings" ? "settings" : "drive"} size={14} />
+              <Icon name={tab.kind === "settings" ? "settings" : tab.kind === "help" ? "info" : "drive"} size={14} />
               <span className="tab-title">
                 {tab.title}
                 {suffix && <span className="tab-suffix">{suffix}</span>}
@@ -76,6 +77,9 @@ export function TitleBar() {
       </div>
       <div className="drag" />
       <UpdateBadge />
+      <button className="title-btn" aria-label={t("帮助（F1）")} title={t("帮助（F1）")} onClick={() => openHelp()}>
+        <Icon name="info" />
+      </button>
       <button className="title-btn" aria-label={t("设置（Ctrl+,）")} title={t("设置（Ctrl+,）")} onClick={() => openSettingsTab()}>
         <Icon name="settings" />
       </button>

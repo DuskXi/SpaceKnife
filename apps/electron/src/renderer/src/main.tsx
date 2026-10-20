@@ -3,6 +3,7 @@ import "@fontsource-variable/geist-mono";
 import "@fontsource-variable/noto-sans-sc";
 import "@design/tokens.css";
 import "./styles/app.css";
+import "./styles/help.css";
 
 import { installShim } from "./shim";
 

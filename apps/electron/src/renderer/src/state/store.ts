@@ -25,7 +25,7 @@ import type {
 import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
 
-export type TabKind = "start" | "scan" | "settings";
+export type TabKind = "start" | "scan" | "settings" | "help";
 
 export interface Tab {
   id: string;
@@ -77,6 +77,14 @@ export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 function lastSettingsPage(): SettingsPageId {
   const v = readText("sk.settingsPage");
   return (SETTINGS_PAGES as readonly string[]).includes(v ?? "") ? (v as SettingsPageId) : "general";
+}
+
+/** A place in the help (help/docs.ts): a page and, when a link named one, a heading on it. */
+export interface HelpLoc {
+  page: string;
+  anchor: string | null;
+  /** where the page was scrolled to when the user left it (history entries) */
+  scroll?: number;
 }
 
 /** One line of the log panel (W8): a backend event, or a local one (connection). */
@@ -137,6 +145,13 @@ export interface AppState {
   settingsSave: { state: "saved" | "saving" | "error"; message: string };
   /** the tab to go back to when the settings tab is closed with 「完成」 */
   settingsReturnTo: string | null;
+  /** the help tab (pages/HelpPage): the page shown, its history and the search */
+  help: HelpLoc;
+  helpBack: HelpLoc[];
+  helpForward: HelpLoc[];
+  helpQuery: string;
+  /** bumped on every move, so going to the heading already shown scrolls to it again */
+  helpNonce: number;
   /** bumped when the size unit base changes, so painted labels are redrawn */
   unitEpoch: number;
   startForms: Record<string, StartForm>;
@@ -208,6 +223,11 @@ export const useApp = create<AppState>(() => ({
   settingsQuery: "",
   settingsSave: { state: "saved", message: "" },
   settingsReturnTo: null,
+  help: { page: readText("sk.helpPage") || "index", anchor: null },
+  helpBack: [],
+  helpForward: [],
+  helpQuery: "",
+  helpNonce: 0,
   unitEpoch: 0,
   startForms: {},
   toast: null,

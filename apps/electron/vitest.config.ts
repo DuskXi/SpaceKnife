@@ -12,6 +12,7 @@ export default defineConfig({
     alias: {
       "@": resolve(here, "src/renderer/src"),
       "@design": resolve(here, "../../design/build"),
+      "@site": resolve(here, "../../site/src"),
     },
   },
   test: {

@@ -6,7 +6,10 @@ import { useEffect, useRef, useState } from "react";
 import type { ViewState } from "@/protocol/generated";
 import { call, setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
 import { pickVisual } from "@/state/commands";
+import { OVERVIEW } from "@/help/docs";
+import { HelpSearch, helpTitle } from "@/pages/HelpPage";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
+import { helpGo, helpHistory } from "@/state/help";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
 import { COLOR_MODES, levelsThatFit, offered, visualIcon } from "@/state/visuals";
 import { t } from "@/lib/i18n";
@@ -26,17 +29,21 @@ export function Toolbar() {
   const st = view?.state;
   const scanTab = tab.kind === "scan";
   const settingsTab = tab.kind === "settings";
+  const helpTab = tab.kind === "help";
   const settingsPage = useApp((s) => s.settingsPage);
-  const canBack = useApp((s) => (settingsTab ? s.settingsBack.length > 0 : !!st?.can_back));
-  const canForward = useApp((s) => (settingsTab ? s.settingsForward.length > 0 : !!st?.can_forward));
+  const helpPage = useApp((s) => (helpTab ? helpTitle(s.lang, s.help.page) : ""));
+  const canBack = useApp((s) => (settingsTab ? s.settingsBack.length > 0 : helpTab ? s.helpBack.length > 0 : !!st?.can_back));
+  const canForward = useApp((s) => (settingsTab ? s.settingsForward.length > 0 : helpTab ? s.helpForward.length > 0 : !!st?.can_forward));
+  const back = () => (settingsTab ? settingsHistory(-1) : helpTab ? helpHistory(-1) : void viewCall(viewId, "view.back"));
+  const forward = () => (settingsTab ? settingsHistory(1) : helpTab ? helpHistory(1) : void viewCall(viewId, "view.forward"));
   const cmp = scanTab ? tab.compare : undefined;
   const split = scanTab && !cmp && tab.viewIds.length > 1;
 
   return (
     <div className="toolbar" role="toolbar" aria-label={t("视图工具栏")}>
       <nav className="nav" aria-label={t("导航")}>
-        <IconBtn icon="back" label={t("后退")} keys="Backspace" disabled={!canBack} onClick={() => (settingsTab ? settingsHistory(-1) : void viewCall(viewId, "view.back"))} />
-        <IconBtn icon="forward" label={t("前进")} keys="Alt+→" disabled={!canForward} onClick={() => (settingsTab ? settingsHistory(1) : void viewCall(viewId, "view.forward"))} />
+        <IconBtn icon="back" label={t("后退")} keys="Backspace" disabled={!canBack} onClick={back} />
+        <IconBtn icon="forward" label={t("前进")} keys="Alt+→" disabled={!canForward} onClick={forward} />
         <IconBtn icon="up" label={t("上一级")} keys="Alt+↑" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.up")} />
         <IconBtn icon="home" label={t("根")} keys="Ctrl+Home" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.home")} />
       </nav>
@@ -58,6 +65,23 @@ export function Toolbar() {
             </span>
           </span>
         </nav>
+      ) : helpTab ? (
+        <nav className="crumbs" aria-label={t("当前位置")}>
+          <span className="crumb-seg">
+            <button className="crumb" onClick={() => helpGo(OVERVIEW)}>
+              <Icon name="info" />
+              {t("帮助")}
+            </button>
+          </span>
+          <span className="crumb-seg">
+            <span className="crumb-arrow">
+              <Icon name="chevronRight" size={12} />
+            </span>
+            <span className="crumb-cur" aria-current="page">
+              {helpPage}
+            </span>
+          </span>
+        </nav>
       ) : cmp ? (
         <ComparePicker tab={tab} />
       ) : scanTab && !split ? (
@@ -73,7 +97,8 @@ export function Toolbar() {
         <span className="flexless" />
       )}
       {settingsTab && <SettingsSearch />}
-      {!split && !settingsTab && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
+      {helpTab && <HelpSearch />}
+      {!split && !settingsTab && !helpTab && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
       <div className="toolbar-right">
         {cmp && (
           <>
@@ -119,7 +144,7 @@ export function Toolbar() {
           <Icon name="command" />
           <Kbd>Ctrl+K</Kbd>
         </button>
-        {tab.kind !== "settings" && (
+        {!settingsTab && !helpTab && (
           <button
             className={`icon-btn basket${basketOpen ? " on" : ""}`}
             aria-label={t("删除篮，{n} 项", { n: basket })}

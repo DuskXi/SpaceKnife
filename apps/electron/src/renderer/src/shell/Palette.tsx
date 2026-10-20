@@ -78,7 +78,8 @@ function PaletteDialog() {
 
   // palette.query, then palette.paths and filter previews; superseded requests are cancelled
   useEffect(() => {
-    const context = { tab: tab.kind, scan_id: tab.scanId ?? null, view_id: viewId, basket };
+    // the help tab is, to the backend's commands, a tab without a scan like the settings tab
+    const context = { tab: tab.kind === "help" ? ("settings" as const) : tab.kind, scan_id: tab.scanId ?? null, view_id: viewId, basket };
     const refresh = shownText.current === text && paths !== null;
     const jobs: { cancel: () => void }[] = [];
     let alive = true;
