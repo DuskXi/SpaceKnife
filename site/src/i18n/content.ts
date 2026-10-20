@@ -57,11 +57,13 @@ export interface Content {
   downloadSub: string;
   download: {
     windows: { title: string; note: string };
+    portableWin: { title: string; note: string };
     macArm64: { title: string; note: string };
     macX64: { title: string; note: string };
     deb: { title: string; note: string };
     rpm: { title: string; note: string };
     appimage: { title: string; note: string };
+    portableLinux: { title: string; note: string };
     button: string;
     sha: string;
     copy: string;
@@ -141,11 +143,13 @@ export const content: Record<Lang, Content> = {
     downloadSub: "Free for personal and commercial use. Each release lists SHA-256 checksums.",
     download: {
       windows: { title: "Windows", note: "Windows 10 and 11, x64. Install for yourself or for all users." },
+      portableWin: { title: "Windows · portable", note: "No installation: unzip anywhere and run. Everything stays in the data folder next to it." },
       macArm64: { title: "macOS · Apple Silicon", note: "macOS 14+ on Macs with M-series chips. Preview: not notarized yet." },
       macX64: { title: "macOS · Intel", note: "macOS 14+ on Macs with Intel chips. Preview: not notarized yet." },
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+, Debian 12+ and derivatives." },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+, Rocky, Alma, Fedora and derivatives." },
       appimage: { title: "AppImage", note: "Any x64 Linux with glibc 2.34+. Needs FUSE 2." },
+      portableLinux: { title: "Linux · portable", note: "x64, glibc 2.34+. Extract anywhere and run, no FUSE needed; data stays next to it." },
       button: "Download",
       sha: "SHA-256",
       copy: "Copy",
@@ -250,11 +254,13 @@ export const content: Record<Lang, Content> = {
     downloadSub: "个人和商业使用都免费。每个版本都附带 SHA-256 校验和。",
     download: {
       windows: { title: "Windows", note: "Windows 10 与 11，x64。可只为自己安装，也可为所有用户安装。" },
+      portableWin: { title: "Windows · 便携版", note: "免安装：解压到任意位置即可运行，数据都存在旁边的 data 文件夹里。" },
       macArm64: { title: "macOS · Apple Silicon", note: "macOS 14+，M 系列芯片的 Mac。预览版：还没经过苹果公证。" },
       macX64: { title: "macOS · Intel", note: "macOS 14+，Intel 芯片的 Mac。预览版：还没经过苹果公证。" },
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+、Debian 12+ 及衍生版。" },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+、Rocky、Alma、Fedora 及衍生版。" },
       appimage: { title: "AppImage", note: "任意 x64 Linux（glibc 2.34+），需要 FUSE 2。" },
+      portableLinux: { title: "Linux · 便携版", note: "x64，glibc 2.34+。解压后直接运行，不需要 FUSE；数据存在旁边。" },
       button: "下载",
       sha: "SHA-256",
       copy: "复制",

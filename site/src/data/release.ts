@@ -5,7 +5,7 @@
 export const REPO = "DuskXi/SpaceKnife";
 export const REPO_URL = `https://github.com/${REPO}`;
 
-export type AssetKind = "windows" | "macArm64" | "macX64" | "deb" | "rpm" | "appimage" | "sums";
+export type AssetKind = "windows" | "portableWin" | "macArm64" | "macX64" | "deb" | "rpm" | "appimage" | "portableLinux" | "sums";
 
 export interface Asset {
   kind: AssetKind;
@@ -43,12 +43,14 @@ const FALLBACK: Release = {
 
 function kindOf(name: string): AssetKind | null {
   if (/-Setup-x64\.exe$/i.test(name)) return "windows";
+  if (/-win-x64-portable\.zip$/i.test(name)) return "portableWin";
+  if (/-linux-x64-portable\.tar\.gz$/i.test(name)) return "portableLinux";
   if (/_amd64\.deb$/i.test(name)) return "deb";
   if (/\.x86_64\.rpm$/i.test(name)) return "rpm";
   if (/\.AppImage$/i.test(name)) return "appimage";
   if (/-mac-arm64\.dmg$/i.test(name)) return "macArm64";
   if (/-mac-x64\.dmg$/i.test(name)) return "macX64";
-  if (/^SHA256SUMS/i.test(name)) return "sums";
+  if (/^SHA256SUMS\.txt$/i.test(name)) return "sums"; // the installers' (portable and macOS files: their own digests)
   return null;
 }
 

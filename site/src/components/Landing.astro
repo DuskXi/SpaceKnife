@@ -45,8 +45,8 @@ const jsonLd = structuredData(c, release, pageUrl, shotUrls, `${site}${base}og-$
 
 const icon = (name: string) => (icons as Record<string, string>)[name] ?? "";
 const win = release.assets.windows;
-const kinds: Exclude<AssetKind, "sums">[] = ["windows", "macArm64", "macX64", "deb", "rpm", "appimage"];
-const kindIcon: Record<string, string> = { windows: "drive", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers" };
+const kinds: Exclude<AssetKind, "sums">[] = ["windows", "portableWin", "macArm64", "macX64", "deb", "rpm", "appimage", "portableLinux"];
+const kindIcon: Record<string, string> = { windows: "drive", portableWin: "folder", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers", portableLinux: "folder" };
 // macOS dmgs are attached to a release later than the other installers: until then a Mac visitor
 // gets the generic button and the "not yet" note
 const hasMac = Boolean(release.assets.macArm64 || release.assets.macX64);
