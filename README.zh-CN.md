@@ -14,8 +14,26 @@
 
 <p align="center">
   <a href="https://github.com/DuskXi/SpaceKnife/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/DuskXi/SpaceKnife?include_prereleases&label=%E7%89%88%E6%9C%AC"></a>
+  <a href="https://duskxi.github.io/spaceknife-stats/"><img alt="下载次数" src="https://img.shields.io/github/downloads/DuskXi/SpaceKnife/total?label=%E4%B8%8B%E8%BD%BD"></a>
+  <a href="https://github.com/DuskXi/SpaceKnife/stargazers"><img alt="GitHub Star" src="https://img.shields.io/github/stars/DuskXi/SpaceKnife?style=flat&label=Star"></a>
+  <a href="https://github.com/DuskXi/SpaceKnife/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/DuskXi/SpaceKnife/ci.yml?branch=main&label=CI"></a>
+  <a href="https://github.com/DuskXi/SpaceKnife/commits/dev"><img alt="最近提交" src="https://img.shields.io/github/last-commit/DuskXi/SpaceKnife/dev?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4"></a>
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/DuskXi/SpaceKnife?label=%E8%AE%B8%E5%8F%AF%E8%AF%81"></a>
+</p>
+<p align="center">
   <img alt="Windows、Linux 与 macOS" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux%20%7C%20macOS%2014%2B-8B9CFF">
+  <img alt="界面：英文与简体中文" src="https://img.shields.io/badge/%E7%95%8C%E9%9D%A2-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-8B9CFF">
+  <a href="https://spaceknife.kaltsit.dev/zh/docs/"><img alt="文档" src="https://img.shields.io/website?url=https%3A%2F%2Fspaceknife.kaltsit.dev%2Fdocs%2F&label=%E6%96%87%E6%A1%A3&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF"></a>
+  <img alt="没有遥测" src="https://img.shields.io/badge/%E9%81%A5%E6%B5%8B-%E6%97%A0-2ea44f">
+  <a href="https://github.com/DuskXi/SpaceKnife/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22"><img alt="新手任务" src="https://img.shields.io/github/issues/DuskXi/SpaceKnife/good%20first%20issue?color=7057ff&label=%E6%96%B0%E6%89%8B%E4%BB%BB%E5%8A%A1"></a>
+</p>
+<p align="center">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
+  <img alt="Rust 原生扩展" src="https://img.shields.io/badge/Rust-%E5%8E%9F%E7%94%9F%E6%89%A9%E5%B1%95-000000?logo=rust&logoColor=white">
+  <img alt="Electron" src="https://img.shields.io/github/package-json/dependency-version/DuskXi/SpaceKnife/dev/electron/main?filename=apps%2Felectron%2Fpackage.json&logo=electron&logoColor=white&color=47848F&label=Electron">
+  <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"></a>
+  <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
+  <img alt="用 mypy 检查类型" src="https://img.shields.io/badge/types-mypy-2a6db2">
 </p>
 
 <p align="center">
