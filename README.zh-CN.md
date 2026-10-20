@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <b>简体中文</b> · <a href="https://spaceknife.kaltsit.dev/zh/">官网</a> · <a href="https://github.com/DuskXi/SpaceKnife/releases">下载</a>
+  <a href="README.md">English</a> · <b>简体中文</b> · <a href="https://spaceknife.kaltsit.dev/zh/">官网</a> · <a href="https://github.com/DuskXi/SpaceKnife/releases">下载</a> · <a href="UNRELEASED.md#简体中文">即将发布</a>
 </p>
 
 <p align="center">
