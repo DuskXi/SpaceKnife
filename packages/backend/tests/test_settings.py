@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
+from spaceknife.layout import registry
 from spaceknife.server import Server
 from spaceknife.settings import (
     BY_KEY,
@@ -20,6 +22,7 @@ from spaceknife.settings import (
 )
 from spaceknife_client.connection import Connection, RemoteError
 from spaceknife_client.views import ViewClient
+from spaceknife_protocol import CAP_BINARY_FRAMES
 from spaceknife_protocol import settings as ps
 from spaceknife_protocol import view as pv
 from spaceknife_protocol.base import Empty
@@ -33,7 +36,9 @@ from spaceknife_protocol.methods import (
     VIEW_OPEN,
 )
 
+from .conftest import CLIENT, TOKEN
 from .test_view_server import scanned
+from .test_view_visuals import FAKES
 
 CATEGORIES = {"general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"}
 
@@ -47,6 +52,20 @@ def test_registry_is_consistent() -> None:
             assert s.default in [o[0] for o in s.options], s.key
         if s.min is not None:
             assert s.min <= s.default <= s.max, s.key  # type: ignore[operator]
+
+
+def test_visualization_settings_match_the_protocol() -> None:
+    assert [o[0] for o in BY_KEY["appearance.default_visual"].options] == list(pv.BUILTIN_VISUALS)
+    modes = list(get_args(pv.ColorModeName))
+    for key in ("appearance.default_color_mode", "appearance.partition_color_mode"):
+        assert [o[0] for o in BY_KEY[key].options] == modes, key
+    assert DEFAULTS["appearance.default_visual"] == "treemap"
+    assert DEFAULTS["appearance.partition_color_mode"] == "branch"
+    assert DEFAULTS["treemap.flame_origin"] == "bottom"  # classic flame graph: the root at the bottom
+    with pytest.raises(SettingsError):
+        validate({**DEFAULTS, "appearance.default_visual": "pie"})
+    with pytest.raises(SettingsError):
+        validate({**DEFAULTS, "treemap.flame_origin": "left"})
 
 
 def test_update_validates_and_persists(tmp_path: Path) -> None:
@@ -167,3 +186,51 @@ async def test_new_views_use_the_settings_and_geometry_is_live(
         await asyncio.sleep(0.02)
     assert any(p.frame.reason == "settings" for p in pushed)
     assert server.views.views[st.view_id].view.min_element == 18
+
+
+async def test_new_views_take_the_visualization_settings(
+    tmp_path: Path, server: Server, client: Connection
+) -> None:
+    await client.call(
+        SETTINGS_UPDATE,
+        ps.SettingsUpdateParams(
+            values={
+                "appearance.default_visual": "flame",
+                "appearance.default_color_mode": "branch",
+                "appearance.partition_color_mode": "flat",
+                "treemap.flame_origin": "top",
+            }
+        ),
+    )
+    scan_id = await scanned(tmp_path, client)
+    for v in FAKES:
+        registry.register(v)
+    try:
+        vc = ViewClient(client)
+        update, _ = await vc.call(
+            VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=800, height=600))
+        )
+        st = update.state
+        flame = "flame" in [v.id for v in registry.all_visuals()]  # registered by its own module
+        assert (st.visual, st.color_mode) == (("flame", "flat") if flame else ("treemap", "branch"))
+        view = server.views.views[st.view_id].view
+        assert view.visual_options["flame"] == (("origin", "top"),)
+        view.set_visual("test.rooted")  # a flame.v1 layout: 「火焰图和火焰-极坐标图默认配色」
+        assert view.color_mode == "flat"
+        view.set_visual("treemap")
+        assert view.color_mode == "branch"
+        # an older frontend: the treemap, and class colours instead of branch colours
+        old = await Connection.open(server.url, TOKEN, CLIENT, capabilities=[CAP_BINARY_FRAMES])
+        try:
+            update, _ = await ViewClient(old).call(
+                VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=800, height=600))
+            )
+            assert (update.state.visual, update.state.color_mode) == ("treemap", "class")
+        finally:
+            await old.close()
+        # the flame graph's direction applies to open views at once
+        await client.call(SETTINGS_UPDATE, ps.SettingsUpdateParams(values={"treemap.flame_origin": "bottom"}))
+        assert view.visual_options["flame"] == (("origin", "bottom"),)
+    finally:
+        for v in FAKES:
+            registry.unregister(v.id)

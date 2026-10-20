@@ -5,7 +5,7 @@
 //!
 //! | key | default | meaning |
 //! |---|---|---|
-//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False) |
+//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False), `skip` and `protect` (folders not entered: as mount points, as not accessible) |
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
@@ -49,7 +49,14 @@ use common::{Arena, NativePath, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
 const OPT_KEYS: [&str; 4] = ["roots", "budget_s", "max_entries", "threads"];
-const ROOT_KEYS: [&str; 4] = ["dev", "cluster_size", "resident_max", "cross_mounts"];
+const ROOT_KEYS: [&str; 6] = [
+    "dev",
+    "cluster_size",
+    "resident_max",
+    "cross_mounts",
+    "skip",
+    "protect",
+];
 
 struct Opts {
     roots: Vec<RootOpts>,
@@ -101,6 +108,14 @@ fn parse_root(obj: &Bound<'_, PyAny>) -> PyResult<RootOpts> {
     }
     if let Some(v) = field(obj, "cross_mounts")? {
         r.cross_mounts = v.is_truthy()?;
+    }
+    if let Some(v) = field(obj, "skip")? {
+        let paths: Vec<String> = v.extract()?;
+        r.skip = paths.into_iter().map(String::into_bytes).collect();
+    }
+    if let Some(v) = field(obj, "protect")? {
+        let paths: Vec<String> = v.extract()?;
+        r.protect = paths.into_iter().map(String::into_bytes).collect();
     }
     Ok(r)
 }
@@ -272,6 +287,7 @@ fn scan_slice<'py>(
         .map(|t| Node::new(t.path.clone(), t.root, false))
         .collect();
 
+    let listing = Instant::now();
     let arenas: Vec<Arena> = py.detach(|| {
         walk::walk(&pool, &nodes, &ctx);
         ctx.arenas
@@ -280,6 +296,7 @@ fn scan_slice<'py>(
             .collect()
     });
     let flat = py.detach(|| walk::flatten(&nodes, &input_refs, &arenas));
+    let listed_s = listing.elapsed().as_secs_f64(); // without parsing, nor building the result
 
     // extension table in first-appearance order of the lowercased extension (worker._Acc.ext_id)
     let ext_table = PyList::new(py, [""])?;
@@ -413,11 +430,27 @@ fn scan_slice<'py>(
     drop(names);
     // freeing a big walked tree takes milliseconds: let a pool thread do it after we return
     pool.spawn(move || drop((nodes, arenas)));
-    out.set_item("elapsed", started.elapsed().as_secs_f64())?;
+    out.set_item("elapsed", listed_s)?;
     Ok(out)
+}
+
+/// How POSIX listings get their attributes on macOS: "on" (getattrlistbulk, checked against
+/// fstatat), "off" (turned off: a difference, or SPACEKNIFE_NO_BULK=1), "untested" (nothing listed
+/// yet); "unsupported" elsewhere (readdir / getdents64 + fstatat, NtQueryDirectoryFile on Windows).
+#[pyfunction]
+fn bulk_listing() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        posix::bulk_state()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        "unsupported".to_owned()
+    }
 }
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
+    m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;
     Ok(())
 }

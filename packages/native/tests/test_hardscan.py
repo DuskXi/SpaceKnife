@@ -442,6 +442,43 @@ def test_posix_mount_boundaries(tree: Path) -> None:
     assert compare([((0, 1, 0), str(tree), 0)], (RootOptions(dev=real + 1, cross_mounts=True),)).paths[1:]
 
 
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX walkers")
+def test_posix_skipped_folders_are_not_entered(tree: Path) -> None:
+    """RootOptions.skip (macOS: the Data volume below "/", already there through the firmlinks):
+    the folder is listed as a mount point and not entered, by both walkers alike."""
+    subs = sorted(p for p in tree.iterdir() if p.is_dir() and not p.is_symlink())
+    skipped, kept = subs[0], subs[1]
+    res = scan_one(tree, skip=(str(skipped),))
+    assert str(skipped) not in res.paths and any(p.startswith(str(kept)) for p in res.paths)
+    assert not any(p.startswith(str(skipped) + "/") for p in res.paths)
+    lo, hi = int(res.bounds[0]), int(res.bounds[1])
+    off = 0
+    flags_by_name = {}
+    for i in range(lo, hi):
+        n = int(res.name_lens[i])
+        flags_by_name[res.name_blob[off : off + n]] = int(res.cols["flags"][i])
+        off += n
+    assert flags_by_name[os.fsencode(skipped.name)] & Flag.MOUNT
+    assert not flags_by_name[os.fsencode(kept.name)] & Flag.MOUNT
+
+
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX walkers")
+def test_posix_protected_folders_are_not_entered(tree: Path) -> None:
+    """RootOptions.protect (macOS without Full Disk Access, by choice): the folder is listed as not
+    accessible and not entered, so it asks for nothing; both walkers alike."""
+    subs = sorted(p for p in tree.iterdir() if p.is_dir() and not p.is_symlink())
+    guarded = subs[0]
+    res = scan_one(tree, protect=(str(guarded),))
+    assert not any(p == str(guarded) or p.startswith(str(guarded) + "/") for p in res.paths)
+    lo, hi, off = int(res.bounds[0]), int(res.bounds[1]), 0
+    flags_by_name = {}
+    for i in range(lo, hi):
+        n = int(res.name_lens[i])
+        flags_by_name[res.name_blob[off : off + n]] = int(res.cols["flags"][i])
+        off += n
+    assert flags_by_name[os.fsencode(guarded.name)] & Flag.ACCESS_DENIED
+
+
 # ---------------------------------------------------------------------------- slicing
 
 
@@ -529,3 +566,48 @@ def test_options_are_validated(tree: Path) -> None:
         native.scan_slice(tasks, {})
     with pytest.raises(TypeError):
         native.scan_slice([((0, 1, 0), b"bytes", 0)], {"roots": [{}]})
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="getattrlistbulk is macOS")
+def test_macos_lists_with_getattrlistbulk(tree: Path) -> None:
+    """The bulk path is used, not silently turned off: its first batch is checked against fstatat
+    and the whole tree must equal the Python walker's (scan_one compares them)."""
+    scan_one(tree)
+    state = native.bulk_listing()
+    assert state == "on", state  # files; folders through fstatat
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="getattrlistbulk is macOS")
+def test_macos_folders_from_getattrlistbulk_on_request(tree: Path) -> None:
+    """SPACEKNIFE_BULK_DIRS=1: folders come from getattrlistbulk too, and the tree is still the
+    Python walker's (the state is per process: a fresh one)."""
+    code = "; ".join(
+        [
+            "import dataclasses, os, sys",
+            "import numpy as np",
+            "import spaceknife_native as n",
+            "from spaceknife.scan import worker",
+            "root = sys.argv[1]",
+            "ro = worker.RootOptions(dev=os.stat(root).st_dev)",
+            "opts = worker.SliceOptions(roots=(ro,), budget_s=1e9, max_entries=10**12)",
+            "tasks = [((0, 1, 0), root, 0)]",
+            "worker.scan_slice(tasks, opts)",  # a first read can still bump access times
+            "w = worker.scan_slice(tasks, opts)",
+            "d = {'roots': [dataclasses.asdict(ro)], 'budget_s': 1e9, 'max_entries': 10**12}",
+            "r = n.scan_slice(tasks, d)",
+            "bad = [k for k in w.cols if not np.array_equal(w.cols[k], r['cols'][k])]",
+            "print(n.bulk_listing(), bad, r['name_blob'] == w.name_blob)",
+        ]
+    )
+    env = {**os.environ, "SPACEKNIFE_BULK_DIRS": "1"}
+    out = subprocess.run([sys.executable, "-c", code, str(tree)], capture_output=True, text=True, env=env)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "on (folders too) [] True"
+
+
+def test_bulk_listing_reports_a_state() -> None:
+    state = native.bulk_listing()
+    if sys.platform == "darwin":
+        assert state == "untested" or state.startswith(("on", "off")), state
+    else:
+        assert state == "unsupported"

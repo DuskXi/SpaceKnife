@@ -44,11 +44,13 @@ export function diffColor(delta: number, tiers: Tiers): string {
 export const GROW_COLORS = GROW;
 export const SHRINK_COLORS = SHRINK;
 
-/** Largest absolute change of the blocks that are coloured (files, aggregates, collapsed folders). */
-export function maxChange(delta: BigInt64Array, kind: Uint8Array): number {
+/** Largest absolute change of the blocks that are coloured: by default files, aggregates and
+ * collapsed folders (a treemap's open folders are not filled); a visualization says which rows it
+ * fills with `filled` (the flame graphs fill every row). */
+export function maxChange(delta: BigInt64Array, kind: Uint8Array, filled?: (row: number) => boolean): number {
   let m = 0;
   for (let i = 0; i < delta.length; i++) {
-    if (kind[i] === 1) continue; // open folders are not filled
+    if (filled ? !filled(i) : kind[i] === 1) continue;
     const a = Math.abs(Number(delta[i]));
     if (a > m) m = a;
   }

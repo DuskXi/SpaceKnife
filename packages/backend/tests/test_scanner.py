@@ -5,10 +5,13 @@ import os
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
-from spaceknife.scan.scanner import ScanError, Scanner, ScanState, make_pool
+from spaceknife.scan import worker
+from spaceknife.scan.scanner import ScanError, Scanner, ScanState, make_pool, native_threads
 from spaceknife.scan.volume import volume_for
+from spaceknife.scan.worker import SliceResult
 from spaceknife.store.nodes import Flag, Kind
 
 from .tree_fixture import TreeFacts, build_tree
@@ -175,3 +178,174 @@ async def test_scan_runs_inside_running_loop_without_blocking(tree: TreeFacts) -
 
     await asyncio.gather(scanner.run(), ticker())
     assert ticks > 0
+
+
+def test_progress_by_items_else_bytes_and_unknown_past_the_ceiling(tmp_path: Path) -> None:
+    """Used space is no exact total (APFS clones can pass it): past 95 % of it the progress is
+    unknown instead of stuck at 99 %; the last scan's item count wins when there is one."""
+    from dataclasses import replace
+
+    scanner = Scanner([str(tmp_path)])
+    root = scanner.roots[0]
+    root.volume = replace(volume_for(str(tmp_path)), total=4000, free=3000, reserved=0)  # 1000 used
+    root.whole_volume = True
+    scanner.state = ScanState.SCANNING
+    tot = scanner.store.cols["tot_alloc"]
+    tot[0] = 500
+    assert scanner.progress().progress == pytest.approx(0.5)
+    tot[0] = 960
+    assert scanner.progress().progress is None
+    tot[0] = 2000  # more than the volume says it uses
+    assert scanner.progress().progress is None
+    scanner.expected_items = 10  # the last scan of this root: by items, whatever the bytes say
+    now = scanner.progress()
+    assert now.progress == pytest.approx(now.items / 10)
+    scanner.state = ScanState.DONE
+    assert scanner.progress().progress == 1.0
+
+
+async def test_profile_accounts_for_the_scan(tree: TreeFacts) -> None:
+    scanner = Scanner([str(tree.root)], budget_s=0.0)
+    assert scanner.profile().slices == 0  # not started: nothing to show yet
+    result = await scanner.run()
+    p = scanner.profile()
+    assert p.items == result.items - 1  # all but the root, which the scan starts from
+    assert p.slices >= tree.dirs  # a zero budget lists one folder per slice
+    assert p.wall_s > 0 and p.busy_s > 0 and 0 < p.ingest_s < p.wall_s
+    assert p.busy > 0 and 0 < p.ingest < 1 and p.limited == 0  # no disk-load limit here
+    assert p.threads == scanner.concurrency
+    text = p.text()
+    assert f"{p.items:,} items" in text and "listing threads busy" in text
+
+
+async def test_profile_leaves_out_the_time_paused(tree: TreeFacts) -> None:
+    scanner = Scanner([str(tree.root)])
+    scanner.pause()
+    task = asyncio.create_task(scanner.run())
+    await asyncio.sleep(0.3)
+    scanner.resume()
+    await task
+    p = scanner.profile()
+    assert p.wall_s < 0.25 < scanner.progress().elapsed_s  # the elapsed time shown includes the pause
+
+
+def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "24")
+    assert native_threads() == 24
+    monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "500")
+    assert native_threads() == 64
+    for bad in ("0", "-3", "many", ""):
+        monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", bad)
+        assert 2 <= native_threads() <= 16
+
+
+@pytest.mark.parametrize(
+    ("platform", "cpus", "threads"),
+    [
+        ("win32", 4, 4),
+        ("win32", 32, 16),
+        ("linux", 1, 2),
+        ("darwin", 1, 4),
+        ("darwin", 3, 6),
+        ("darwin", 12, 16),
+    ],
+)
+def test_default_listing_threads(
+    monkeypatch: pytest.MonkeyPatch, platform: str, cpus: int, threads: int
+) -> None:
+    monkeypatch.delenv("SPACEKNIFE_SCAN_THREADS", raising=False)
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(os, "cpu_count", lambda: cpus)
+    assert native_threads() == threads
+
+
+def _store_rows(scanner: Scanner) -> list[tuple[object, ...]]:
+    store = scanner.store
+    return sorted(
+        (
+            store.path(i),
+            v.kind,
+            v.flags,
+            v.size,
+            v.alloc,
+            v.tot_size,
+            v.tot_alloc,
+            v.tot_files,
+            v.tot_dirs,
+            v.ext,
+        )
+        for i in range(1, len(store))
+        for v in [store.view(i)]
+    )
+
+
+async def test_slices_folded_together_build_the_same_tree(tree: TreeFacts) -> None:
+    """Slices that land together are folded as one (worker.merge_slices): the tree is the same as
+    folding them one by one, references between listings, frontiers and extensions included."""
+    recorded: list[SliceResult] = []
+    live = Scanner([str(tree.root)], budget_s=0.0)  # one folder per slice: many small slices
+    fold = live._fold
+    live._fold = lambda res: (recorded.append(res), fold(res))[1]  # type: ignore[method-assign]
+    await live.run()
+    assert len(recorded) > 5
+
+    def replay(group: int) -> Scanner:
+        sc = Scanner([str(tree.root)])
+        i = 0
+        while i < len(recorded):
+            n, j = len(sc.store), i + 1
+            while j < len(recorded) and j - i < group:  # only slices whose folders exist already
+                refs = np.asarray(recorded[j].refs).reshape(-1, 3)
+                if int(refs[refs[:, 0] == 0, 1].max(initial=0)) >= n:
+                    break
+                j += 1
+            sc._apply(*recorded[i:j])
+            i = j
+        return sc
+
+    one_by_one = _store_rows(replay(1))
+    assert one_by_one == _store_rows(live)
+    for group in (2, 3, 8):
+        assert _store_rows(replay(group)) == one_by_one
+
+
+def test_merging_renumbers_references_and_extensions() -> None:
+    a = worker.SliceResult(
+        refs=np.array([[0, 5, 0], [1, 0, 1]]),
+        paths=["/r/a", "/r/a/x"],
+        bounds=np.array([0, 2, 3]),
+        name_blob=b"p.txtxq.md",
+        name_lens=np.array([5, 1, 4], dtype=np.uint16),
+        cols={"kind": np.array([1, 0, 1], dtype=np.uint8)},
+        ext_table=["", "txt", "md"],
+        ext_ids=np.array([1, 0, 2], dtype=np.uint16),
+        frontier=[((1, 1, 0), "/r/a/x/q.md", 0)],
+        errors=[((1, 0, 0), "/r/a/p.txt", "denied")],
+        elapsed=0.5,
+    )
+    b = worker.SliceResult(
+        refs=np.array([[0, 7, 0], [1, 0, 0]]),
+        paths=["/r/b", "/r/b/y"],
+        bounds=np.array([0, 1, 2]),
+        name_blob=b"yz.md",
+        name_lens=np.array([1, 4], dtype=np.uint16),
+        cols={"kind": np.array([1, 0], dtype=np.uint8)},
+        ext_table=["", "md"],
+        ext_ids=np.array([0, 1], dtype=np.uint16),
+        frontier=[((1, 1, 0), "/r/b/y/z.md", 0), ((0, 9, 0), "/r/c", 0)],
+        errors=[],
+        elapsed=0.25,
+    )
+    m = worker.merge_slices([a, b])
+    assert m.refs.tolist() == [[0, 5, 0], [1, 0, 1], [0, 7, 0], [1, 2, 0]]
+    assert m.bounds.tolist() == [0, 2, 3, 4, 5]
+    assert m.name_blob == b"p.txtxq.mdyz.md" and m.name_lens.tolist() == [5, 1, 4, 1, 4]
+    assert [m.ext_table[i] for i in m.ext_ids.tolist()] == ["txt", "", "md", "", "md"]
+    assert m.frontier == [
+        ((1, 1, 0), "/r/a/x/q.md", 0),
+        ((1, 3, 0), "/r/b/y/z.md", 0),
+        ((0, 9, 0), "/r/c", 0),
+    ]
+    assert m.errors == [((1, 0, 0), "/r/a/p.txt", "denied")]
+    assert m.paths == ["/r/a", "/r/a/x", "/r/b", "/r/b/y"] and m.elapsed == 0.75
+    assert worker.merge_slices([a]) is a

@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/DuskXi/SpaceKnife/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/DuskXi/SpaceKnife?include_prereleases&label=%E7%89%88%E6%9C%AC"></a>
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/DuskXi/SpaceKnife?label=%E8%AE%B8%E5%8F%AF%E8%AF%81"></a>
-  <img alt="Windows 与 Linux" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux-8B9CFF">
+  <img alt="Windows、Linux 与 macOS" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux%20%7C%20macOS%2014%2B-8B9CFF">
 </p>
 
 <p align="center">
@@ -49,9 +49,10 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 ## 功能
 
 - **实时树图**：WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级、小项聚合，可用空间与未知空间也画出来；可分屏开两个视图。
+- **三种可视化**：树图、火焰图、火焰-极坐标图，扫描中也能随时切换，每个视图各用各的。
 - **快**：Rust 原生扩展做并行目录遍历；Windows 上可读取 NTFS 主文件表（MFT）快速扫描（通过一个只读的提权助手，需要管理员确认）。
 - **不拖慢电脑**：扫描可以限制自己造成的磁盘负载（极速 / 均衡 / 安静 / 空闲 / 自定义），别的程序在用磁盘时自动让路。
-- **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询），变化的块会闪烁。
+- **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询；macOS FSEvents），变化的块会闪烁。
 - **过滤语言**：按名称、类型、大小、时间、属性、标签过滤，可以组合；与 SpaceSniffer 的过滤写法兼容并做了扩展（[语法](docs/filter-syntax.md)）。
 - **快照与对比**：扫描后自动保存快照；任意两次对比，或与「现在」对比，只看增长或减少。
 - **安全的清理**：右键菜单与删除篮，默认移到回收站，可以撤销；系统和程序目录受保护。
@@ -68,8 +69,26 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 | Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
 | RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
 | 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
+| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
+| Linux x64 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里） |
+| macOS 14+，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg`（预览版：还没经过苹果公证，见下文） |
+| macOS 14+，Intel | `SpaceKnife-<版本>-mac-x64.dmg`（预览版：还没经过苹果公证，见下文） |
 
-每个版本都附带 `SHA256SUMS.txt`。macOS 版暂不提供。
+每个版本都附带 `SHA256SUMS.txt`。
+
+从 0.3.1 起，SpaceKnife 每天最多检查一次本仓库的发布（不发送任何关于你或你的文件的信息）。小版本只在右上角显示徽章；版本跨度更大时还会显示更新概要和「一键下载」，下载的文件按发布里的校验和核对。可以在「设置 › 常规 › 更新」里关掉。
+
+### macOS：第一次打开
+
+macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需要手动放行一次：
+
+1. 打开 dmg，把 SpaceKnife 拖进「应用程序」。
+2. 打开 SpaceKnife，系统提示无法验证它是否包含恶意软件，点「完成」。
+3. 打开「系统设置 › 隐私与安全性」，往下找到 SpaceKnife 已被阻止的提示，点「仍要打开」，再点一次「仍要打开」并输入密码。
+
+之后就能正常打开；安装新版本后需要再放行一次。macOS 14 上也可以在「应用程序」里右键 SpaceKnife 选「打开」。习惯用终端的话：`xattr -dr com.apple.quarantine /Applications/SpaceKnife.app`。
+
+想不被逐个文件夹的授权提示打断、扫到所有位置，给 SpaceKnife 开「完全磁盘访问权限」（系统设置 › 隐私与安全性 › 完全磁盘访问权限 › +），然后重新打开它。不开的话，邮件、信息等受保护的位置计入未知空间。更新版本后，在这个列表里把 SpaceKnife 关掉再打开一次。
 
 ## 觉得好用？点个 Star
 
@@ -80,8 +99,9 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 ## 文档
 
 - 计划：[docs/PLAN.md](docs/PLAN.md)
-- UI 需求规格（484 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
+- UI 需求规格（512 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
 - 协议：[docs/protocol.md](docs/protocol.md)
+- 可视化（引擎、线上布局、前端组件）：[docs/visuals.md](docs/visuals.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
 - 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)
@@ -109,6 +129,8 @@ uv run spaceknife serve
 ```bash
 uv run spaceknife scan "C:\Program Files"
 ```
+
+加 `--profile` 可以看耗时分解：列目录线程有多忙（系统调用），主线程把结果合并进树用了多久。环境变量 `SPACEKNIFE_SCAN_THREADS` 设定列目录线程数（命令行和应用都认），用来对比。
 
 ```bash
 uv run spaceknife snapshot list

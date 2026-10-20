@@ -20,6 +20,7 @@ from spaceknife_protocol.methods import (
     PALETTE_QUERY,
     PALETTE_REMEMBER,
 )
+from spaceknife_protocol.update import UpdateStatus
 
 from .. import paths
 from ..filter.engine import FilterContext, evaluate
@@ -86,11 +87,11 @@ def install(server: Server) -> None:
     def sizes_of(handle: ScanHandle) -> np.ndarray:
         shared = server.views.shared(handle.id)
         assert shared is not None
-        return shared.layout.sizes()
+        return shared.basis.sizes()
 
     # ------------------------------------------------------------------ palette.query
 
-    def build(session: Session, params: pp.PaletteQueryParams) -> pp.PaletteResult:
+    def build(session: Session, params: pp.PaletteQueryParams, update: UpdateStatus) -> pp.PaletteResult:
         c = params.context
         scan_tab = c.tab == "scan"
         handle = handle_of(c.scan_id) if scan_tab else None
@@ -110,6 +111,10 @@ def install(server: Server) -> None:
             view=view,
             snapshots=snapshot_count(target),
             basket=c.basket,
+            caps=session.capabilities,
+            app_version=update.current,
+            update_version=update.latest.version if update.latest is not None else "",
+            update_checking=update.checking,
         )
         q = params.text.strip()
         store = handle.store if handle is not None else None
@@ -217,7 +222,8 @@ def install(server: Server) -> None:
 
     @router.method(PALETTE_QUERY)
     async def palette_query(session: Session, params: pp.PaletteQueryParams) -> pp.PaletteResult:
-        return await latest.run(("palette.query", session.id), build, session, params)
+        update = server.updates.status()  # on the loop: the update state is not shared with threads
+        return await latest.run(("palette.query", session.id), build, session, params, update)
 
     # ------------------------------------------------------------------ palette.paths
 

@@ -35,6 +35,7 @@ export interface Content {
     sub: string;
     ctaWindows: string;
     ctaLinux: string;
+    ctaMac: string;
     ctaOther: string;
     ctaGithub: string;
     meta: string;
@@ -56,6 +57,8 @@ export interface Content {
   downloadSub: string;
   download: {
     windows: { title: string; note: string };
+    macArm64: { title: string; note: string };
+    macX64: { title: string; note: string };
     deb: { title: string; note: string };
     rpm: { title: string; note: string };
     appimage: { title: string; note: string };
@@ -66,7 +69,8 @@ export interface Content {
     allReleases: string;
     checksums: string;
     prerelease: string;
-    mac: string;
+    mac: string; // once a release has the dmgs
+    macNone: string;
   };
   faqTitle: string;
   faqs: Faq[];
@@ -91,9 +95,10 @@ export const content: Record<Lang, Content> = {
       sub: "SpaceKnife draws every folder and file as a block sized by the space it takes, live while it scans. Find the space hogs, see what grew since last month, and clean up safely.",
       ctaWindows: "Download for Windows",
       ctaLinux: "Download for Linux",
+      ctaMac: "Download for macOS",
       ctaOther: "Download",
       ctaGithub: "Star on GitHub",
-      meta: "Windows 10+ · Ubuntu, Debian, RHEL, Fedora · MIT license",
+      meta: "Windows 10+ · macOS 14+ · Ubuntu, Debian, RHEL, Fedora · MIT license",
       shotAlt: "SpaceKnife showing a 2 TB drive as a nested treemap, with a hover card over a large video file",
     },
     highlights: [
@@ -105,7 +110,7 @@ export const content: Record<Lang, Content> = {
     featuresTitle: "Everything you need to reclaim space",
     featuresSub: "Built from first principles for today's huge drives: fast to scan, calm on your disk, safe to clean.",
     features: [
-      { icon: "layers", title: "Live nested treemap", body: "WebGL rendering that fills in while the scan runs, with zoom animation, hover details, detail levels and free and unknown space drawn as blocks." },
+      { icon: "layers", title: "Three live visualizations", body: "A nested treemap, a flame graph and a polar flame graph, rendered with WebGL and filled in while the scan runs; switch at any time. Zoom animation, hover details, detail levels, and free and unknown space drawn too." },
       { icon: "bolt", title: "Fast scans", body: "A native Rust extension walks folders in parallel; on Windows a quick scan reads the NTFS Master File Table directly." },
       { icon: "gauge", title: "Calm on your disk", body: "Cap the disk load the scan causes (max, balanced, quiet, idle or custom); it backs off when other programs need the disk." },
       { icon: "pulse", title: "Live monitoring", body: "After the scan, changes keep flowing in and changed blocks flash, so the picture never goes stale." },
@@ -136,6 +141,8 @@ export const content: Record<Lang, Content> = {
     downloadSub: "Free for personal and commercial use. Each release lists SHA-256 checksums.",
     download: {
       windows: { title: "Windows", note: "Windows 10 and 11, x64. Install for yourself or for all users." },
+      macArm64: { title: "macOS · Apple Silicon", note: "macOS 14+ on Macs with M-series chips. Preview: not notarized yet." },
+      macX64: { title: "macOS · Intel", note: "macOS 14+ on Macs with Intel chips. Preview: not notarized yet." },
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+, Debian 12+ and derivatives." },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+, Rocky, Alma, Fedora and derivatives." },
       appimage: { title: "AppImage", note: "Any x64 Linux with glibc 2.34+. Needs FUSE 2." },
@@ -146,14 +153,16 @@ export const content: Record<Lang, Content> = {
       allReleases: "All releases",
       checksums: "SHA256SUMS.txt",
       prerelease: "This is a pre-release: the installers are not code-signed yet, so Windows SmartScreen asks once (More info › Run anyway).",
-      mac: "macOS is not supported yet.",
+      mac: "macOS: not notarized yet, so allow it once at the first launch (System Settings › Privacy & Security › Open Anyway).",
+      macNone: "macOS is not supported yet.",
     },
     faqTitle: "Questions",
     faqs: [
       { q: "Is SpaceKnife free?", a: "Yes. SpaceKnife is free and open source under the MIT license, for personal and commercial use." },
       { q: "Is it related to SpaceSniffer?", a: "No. SpaceKnife is an independent project inspired by SpaceSniffer; it is not affiliated with SpaceSniffer or its author." },
-      { q: "Which systems does it run on?", a: "Windows 10 and 11 (x64), and x64 Linux: Ubuntu 22.04+, Debian, RHEL 9+, Fedora, or any distribution through the AppImage. macOS is not available yet." },
-      { q: "Does it send my data anywhere?", a: "No. SpaceKnife has no account and no telemetry; scans, snapshots and settings stay on your computer." },
+      { q: "Which systems does it run on?", a: "Windows 10 and 11 (x64), macOS 14+ (Apple Silicon and Intel), and x64 Linux: Ubuntu 22.04+, Debian, RHEL 9+, Fedora, or any distribution through the AppImage." },
+      { q: "Why does macOS block it the first time?", a: "The macOS build is not notarized by Apple yet. Open SpaceKnife once, then go to System Settings › Privacy & Security and click Open Anyway; from then on it opens normally. A notarized build is on the way." },
+      { q: "Does it send my data anywhere?", a: "No. SpaceKnife has no account and no telemetry; scans, snapshots and settings stay on your computer. The only request it makes is an update check against this project's GitHub releases, at most once a day and sending nothing about you; you can turn it off in the settings." },
       { q: "Can it delete the wrong file?", a: "Deleting moves items to the recycle bin by default and can be undone; system and program folders are protected, and permanent deletion asks first." },
       { q: "Why does the quick scan ask for administrator rights?", a: "Reading the NTFS Master File Table needs administrator rights, so a small read-only helper asks once. The regular parallel scan needs no special rights." },
     ],
@@ -167,6 +176,7 @@ export const content: Record<Lang, Content> = {
     appCategory: "UtilitiesApplication",
     featureList: [
       "Live nested treemap of disk usage",
+      "Flame graph and polar flame graph views, switchable at any time",
       "Parallel scanning with a native Rust extension",
       "NTFS Master File Table quick scan on Windows",
       "Configurable disk load limit while scanning",
@@ -194,9 +204,10 @@ export const content: Record<Lang, Content> = {
       sub: "SpaceKnife 把每个文件夹、每个文件画成大小与占用成正比的方块，边扫描边显示。一眼找到最占地方的东西，看出这个月多了什么，再放心地清理。",
       ctaWindows: "下载 Windows 版",
       ctaLinux: "下载 Linux 版",
+      ctaMac: "下载 macOS 版",
       ctaOther: "下载",
       ctaGithub: "在 GitHub 上点星",
-      meta: "Windows 10+ · Ubuntu、Debian、RHEL、Fedora · MIT 许可证",
+      meta: "Windows 10+ · macOS 14+ · Ubuntu、Debian、RHEL、Fedora · MIT 许可证",
       shotAlt: "SpaceKnife 用嵌套树图显示一块 2 TB 的磁盘，悬停在一个大视频文件上显示详情",
     },
     highlights: [
@@ -208,7 +219,7 @@ export const content: Record<Lang, Content> = {
     featuresTitle: "腾出空间需要的，都在这里",
     featuresSub: "为今天的大容量磁盘重新设计：扫得快、不拖慢电脑、清理有保障。",
     features: [
-      { icon: "layers", title: "实时嵌套树图", body: "WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级，可用空间与未知空间也画成方块。" },
+      { icon: "layers", title: "三种实时可视化", body: "嵌套树图、火焰图、火焰-极坐标图，WebGL 渲染，边扫边画，扫描中也能随时切换；缩放动画、悬停详情、细节层级，可用空间与未知空间也画出来。" },
       { icon: "bolt", title: "扫描快", body: "Rust 原生扩展并行遍历目录；Windows 上可直接读取 NTFS 主文件表（MFT）快速扫描。" },
       { icon: "gauge", title: "不拖慢电脑", body: "可以限制扫描自身造成的磁盘负载（极速、均衡、安静、空闲或自定义），别的程序用磁盘时自动让路。" },
       { icon: "pulse", title: "实时监控", body: "扫描完成后继续跟踪文件变化，变化的方块会闪烁，画面不会过时。" },
@@ -239,6 +250,8 @@ export const content: Record<Lang, Content> = {
     downloadSub: "个人和商业使用都免费。每个版本都附带 SHA-256 校验和。",
     download: {
       windows: { title: "Windows", note: "Windows 10 与 11，x64。可只为自己安装，也可为所有用户安装。" },
+      macArm64: { title: "macOS · Apple Silicon", note: "macOS 14+，M 系列芯片的 Mac。预览版：还没经过苹果公证。" },
+      macX64: { title: "macOS · Intel", note: "macOS 14+，Intel 芯片的 Mac。预览版：还没经过苹果公证。" },
       deb: { title: "Ubuntu / Debian", note: "Ubuntu 22.04+、Debian 12+ 及衍生版。" },
       rpm: { title: "RHEL / Fedora", note: "RHEL 9+、Rocky、Alma、Fedora 及衍生版。" },
       appimage: { title: "AppImage", note: "任意 x64 Linux（glibc 2.34+），需要 FUSE 2。" },
@@ -249,14 +262,16 @@ export const content: Record<Lang, Content> = {
       allReleases: "全部版本",
       checksums: "SHA256SUMS.txt",
       prerelease: "这是预发布版：安装包还没有代码签名，Windows 第一次运行时 SmartScreen 会提示一次（更多信息 › 仍要运行）。",
-      mac: "暂不支持 macOS。",
+      mac: "macOS 版还没经过苹果公证：第一次打开时要在「系统设置 › 隐私与安全性」里点「仍要打开」。",
+      macNone: "暂不支持 macOS。",
     },
     faqTitle: "常见问题",
     faqs: [
       { q: "SpaceKnife 免费吗？", a: "免费。SpaceKnife 以 MIT 许可证开源，个人和商业使用都可以。" },
       { q: "它和 SpaceSniffer 有关系吗？", a: "没有。SpaceKnife 受 SpaceSniffer 启发，是独立开发的项目，与 SpaceSniffer 及其作者没有任何关联。" },
-      { q: "支持哪些系统？", a: "Windows 10 与 11（x64），以及 x64 Linux：Ubuntu 22.04+、Debian、RHEL 9+、Fedora，其他发行版可以用 AppImage。暂不支持 macOS。" },
-      { q: "会上传我的数据吗？", a: "不会。SpaceKnife 不需要账号，也没有遥测；扫描结果、快照和设置都留在你的电脑上。" },
+      { q: "支持哪些系统？", a: "Windows 10 与 11（x64）、macOS 14+（Apple Silicon 与 Intel），以及 x64 Linux：Ubuntu 22.04+、Debian、RHEL 9+、Fedora，其他发行版可以用 AppImage。" },
+      { q: "为什么 macOS 第一次会拦下它？", a: "macOS 版还没有经过苹果公证。先打开一次 SpaceKnife，再到「系统设置 › 隐私与安全性」点「仍要打开」，之后就能正常打开。经过公证的版本正在准备。" },
+      { q: "会上传我的数据吗？", a: "不会。SpaceKnife 不需要账号，也没有遥测；扫描结果、快照和设置都留在你的电脑上。它唯一发起的请求是检查本项目在 GitHub 上的新版本，每天最多一次，不发送任何关于你的信息，可以在设置里关掉。" },
       { q: "会不会误删文件？", a: "删除默认移到回收站，可以撤销；系统和程序目录受保护，永久删除前会再确认。" },
       { q: "为什么快速扫描要管理员权限？", a: "读取 NTFS 主文件表需要管理员权限，所以一个只读的小助手会请求一次。普通的并行扫描不需要特殊权限。" },
     ],
@@ -270,6 +285,7 @@ export const content: Record<Lang, Content> = {
     appCategory: "UtilitiesApplication",
     featureList: [
       "实时嵌套树图显示磁盘占用",
+      "火焰图与火焰-极坐标图，随时切换",
       "Rust 原生扩展并行扫描",
       "Windows 上的 NTFS 主文件表快速扫描",
       "扫描时可限制磁盘负载",

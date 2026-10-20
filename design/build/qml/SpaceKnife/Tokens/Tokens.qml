@@ -64,6 +64,7 @@ QtObject {
     readonly property real layoutWindowButton: 46
     readonly property int motionDurationFast: 120
     readonly property int motionDurationFlash: 900
+    readonly property int motionDurationSwap: 200
     readonly property int motionDurationZoom: 220
     readonly property var motionEasingOut: [0, 0, 0.2, 1]
     readonly property var motionEasingStandard: [0.2, 0, 0, 1]
@@ -165,4 +166,55 @@ QtObject {
     readonly property color treemapUnknownStripeB: "#FF121318"
     readonly property color treemapUnknownSub: "#FF7E8493"
     readonly property color treemapUnknownText: "#FFA3A9B6"
+    readonly property color visualBranch11: "#FF9EDBF9"
+    readonly property color visualBranch12: "#FF0BB4EC"
+    readonly property color visualBranch13: "#FF067398"
+    readonly property color visualBranch14: "#FF024F6A"
+    readonly property color visualBranch21: "#FFF8C5A2"
+    readonly property color visualBranch22: "#FFEB883B"
+    readonly property color visualBranch23: "#FF9C5313"
+    readonly property color visualBranch24: "#FF6A3913"
+    readonly property color visualBranch31: "#FFA6E1C0"
+    readonly property color visualBranch32: "#FF2FC183"
+    readonly property color visualBranch33: "#FF067D51"
+    readonly property color visualBranch34: "#FF0C5537"
+    readonly property color visualBranch41: "#FFF6BEDC"
+    readonly property color visualBranch42: "#FFE57BBA"
+    readonly property color visualBranch43: "#FF984979"
+    readonly property color visualBranch44: "#FF673352"
+    readonly property color visualBranch51: "#FF95E1E0"
+    readonly property color visualBranch52: "#FF08BCBC"
+    readonly property color visualBranch53: "#FF047879"
+    readonly property color visualBranch54: "#FF045353"
+    readonly property color visualBranch61: "#FFFFBFB8"
+    readonly property color visualBranch62: "#FFF47B74"
+    readonly property color visualBranch63: "#FFA34945"
+    readonly property color visualBranch64: "#FF6E3330"
+    readonly property color visualBranch71: "#FFC6DAA4"
+    readonly property color visualBranch72: "#FF8FB43F"
+    readonly property color visualBranch73: "#FF597417"
+    readonly property color visualBranch74: "#FF3D4F15"
+    readonly property color visualBranch81: "#FFE0C4F6"
+    readonly property color visualBranch82: "#FFC188EA"
+    readonly property color visualBranch83: "#FF7E539C"
+    readonly property color visualBranch84: "#FF56396A"
+    readonly property color visualBranchNeutral: "#FF494D54"
+    readonly property color visualCenterBg: "#FF13151B"
+    readonly property color visualCenterSub: "#FF9AA0AE"
+    readonly property color visualCenterText: "#FFF1F2F5"
+    readonly property real visualFlameGap: 2
+    readonly property real visualFlameRowMax: 48
+    readonly property real visualFlameRowMin: 20
+    readonly property real visualFlamePolarGap: 2
+    readonly property real visualFlamePolarHoleMaxRatio: 0.4
+    readonly property real visualFlamePolarHoleMin: 36
+    readonly property real visualFlamePolarHoleRatio: 0.24
+    readonly property real visualFlamePolarMargin: 8
+    readonly property real visualFlamePolarRingMin: 14
+    readonly property real visualFlamePolarSegments: 32
+    readonly property color visualHaloOverlay: "#1AFFFFFF"
+    readonly property color visualRing1: "#FF5B6375"
+    readonly property color visualRing2: "#FF4D5566"
+    readonly property color visualRing3: "#FF424A5B"
+    readonly property color visualRing4: "#FF394151"
 }

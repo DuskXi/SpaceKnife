@@ -20,11 +20,15 @@ from typing import Any
 
 from pypinyin import lazy_pinyin
 
+from spaceknife_protocol import CAP_VISUALS
+
 from ..i18n import SOURCE, Texts, _, language, plural, tr
-from ..view.state import View
+from ..layout import registry as visuals
+from ..view.state import View, showable
 from .fuzzy import score
 
-COLOR_NAMES = Texts({"class": "文件类别", "flat": "扁平", "time": "修改时间"})
+COLOR_NAMES = Texts({"class": "文件类别", "flat": "扁平", "time": "修改时间", "branch": "顶层分支"})
+VISUAL_NAMES = Texts({"treemap": "树图", "flame": "火焰图", "flame_polar": "火焰-极坐标图"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,6 +44,10 @@ class Context:
     view: View | None = None
     snapshots: int = 0
     basket: int = 0
+    caps: frozenset[str] = frozenset()  # what the session announced: visualizations, branch colours
+    app_version: str = ""  # the running app's version (update.status)
+    update_version: str = ""  # a newer release, "" when there is none
+    update_checking: bool = False
 
     @property
     def selected_node(self) -> int | None:
@@ -100,12 +108,40 @@ def _up(c: Context) -> str | None:
     return _view(c) or (None if c.view and c.view.can_go_up() else _("已经在根"))
 
 
+def _visuals(c: Context) -> str | None:
+    """Cycling needs a second visualization this window can show."""
+    return _view(c) or (None if len(_shown(c)) > 1 else _("这种可视化在当前界面不可用"))
+
+
+def _visual_ok(visual: str) -> Need:
+    return lambda c: _view(c) or (None if visual in _shown(c) else _("这种可视化在当前界面不可用"))
+
+
+def _branch_ok(c: Context) -> str | None:
+    return _view(c) or (None if CAP_VISUALS in c.caps else _("这种配色在当前界面不可用"))
+
+
+def _shown(c: Context) -> list[str]:
+    """The visualizations the view can switch to in this window."""
+    compare = c.view is not None and c.view.compare is not None
+    out = []
+    for v in visuals.all_visuals():
+        vis = showable(v.id, c.caps)
+        if vis is not None and (vis.compare or not compare):
+            out.append(v.id)
+    return out
+
+
 def _snapshots(c: Context) -> str | None:
     return None if c.snapshots else _("没有快照")
 
 
 def _tab(c: Context) -> str | None:
     return None if c.tab == "scan" else _("需要先完成扫描")
+
+
+def _update(c: Context) -> str | None:
+    return None if c.update_version else _("没有可用的更新")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +174,20 @@ def _color(c: Context) -> str:
     return tr("当前：{mode}", mode=COLOR_NAMES[c.view.color_mode]) if c.view else ""
 
 
+def _visual_name(visual: str) -> str:
+    name: str | None = VISUAL_NAMES.get(visual)
+    if name is None:
+        try:
+            name = visuals.get(visual).title
+        except KeyError:
+            name = visual
+    return name
+
+
+def _visual(c: Context) -> str:
+    return tr("当前：{name}", name=_visual_name(c.view.visual)) if c.view else ""
+
+
 def _free(c: Context) -> str:
     return (_("当前：显示") if c.view.show_free else _("当前：隐藏")) if c.view else ""
 
@@ -154,8 +204,20 @@ def _snapshot_count(c: Context) -> str:
     return plural(c.snapshots, "{count} 个快照", "1 snapshot", count=c.snapshots)
 
 
+def _update_check(c: Context) -> str:
+    if c.update_checking:
+        return _("正在检查…")
+    if c.update_version:
+        return tr("有新版本 {version}", version=c.update_version)
+    return tr("当前版本 {version}", version=c.app_version) if c.app_version else ""
+
+
 def _color_pick(mode: str) -> Callable[[Context], str]:
     return lambda c: _("当前") if c.view is not None and c.view.color_mode == mode else ""
+
+
+def _visual_pick(visual: str) -> Callable[[Context], str]:
+    return lambda c: _("当前") if c.view is not None and c.view.visual == visual else ""
 
 
 def _registry() -> tuple[Command, ...]:
@@ -231,6 +293,15 @@ def _registry() -> tuple[Command, ...]:
         C("nav.home", "根", "home", ("Ctrl+Home",), ("home", "root"), needs=(_up,)),
         C("view.detail_up", "提高细节层级", "plus", ("Ctrl+=",), ("more detail", "deeper"), needs=(_view,)),
         C("view.detail_down", "降低细节层级", "minus", ("Ctrl+-",), ("less detail",), needs=(_view,)),
+        C(
+            "view.cycle_visual",
+            "切换可视化",
+            "vizFlamePolar",
+            ("V",),
+            ("visualization", "chart", "treemap", "flame", "icicle", "flame_polar", "radial", "rings"),
+            needs=(_visuals,),
+            status=_visual,
+        ),
         C("filter.focus", "聚焦过滤", "filter", ("/", "Ctrl+F"), ("filter", "find"), needs=(_view,)),
         C("path.edit", "编辑路径", "search", ("Ctrl+L",), ("path", "go to", "address"), needs=(_view,)),
         C("view.zoom_in", "放大进入", "layers", ("Enter",), ("zoom", "enter"), needs=(_selection,)),
@@ -297,6 +368,23 @@ def _registry() -> tuple[Command, ...]:
         C("snapshot.open", "打开快照文件…", "snapshot", (), ("open snapshot", "load")),
         C("app.log", "日志面板", "log", ("Ctrl+J",), ("log", "logs", "console")),
         C(
+            "app.check_updates",
+            "检查更新",
+            "refresh",
+            (),
+            ("check for updates", "update", "upgrade", "new version"),
+            status=_update_check,
+        ),
+        C(
+            "app.show_update",
+            "查看更新",
+            "info",
+            (),
+            ("update", "release notes", "what's new", "download update"),
+            needs=(_update,),
+            status=lambda c: c.update_version,
+        ),
+        C(
             "view.color.class",
             "配色：文件类别",
             "palette",
@@ -324,6 +412,46 @@ def _registry() -> tuple[Command, ...]:
             ("color time", "age"),
             needs=(_view,),
             status=_color_pick("time"),
+            typed_only=True,
+        ),
+        C(
+            "view.color.branch",
+            "配色：顶层分支",
+            "palette",
+            (),
+            ("color branch", "top level"),
+            needs=(_branch_ok,),
+            status=_color_pick("branch"),
+            typed_only=True,
+        ),
+        C(
+            "view.visual.treemap",
+            "可视化：树图",
+            "vizTreemap",
+            (),
+            ("visualization treemap", "treemap"),
+            needs=(_visual_ok("treemap"),),
+            status=_visual_pick("treemap"),
+            typed_only=True,
+        ),
+        C(
+            "view.visual.flame",
+            "可视化：火焰图",
+            "vizFlame",
+            (),
+            ("visualization flame", "flame graph", "icicle"),
+            needs=(_visual_ok("flame"),),
+            status=_visual_pick("flame"),
+            typed_only=True,
+        ),
+        C(
+            "view.visual.flame_polar",
+            "可视化：火焰-极坐标图",
+            "vizFlamePolar",
+            (),
+            ("visualization polar", "polar flame graph", "radial", "rings"),
+            needs=(_visual_ok("flame_polar"),),
+            status=_visual_pick("flame_polar"),
             typed_only=True,
         ),
     )
@@ -426,4 +554,4 @@ def match(cmd: Command, query: str) -> tuple[int, list[tuple[int, int]]] | None:
     return best
 
 
-__all__ = ["COLOR_NAMES", "Command", "Context", "evaluate", "label", "match", "registry"]
+__all__ = ["COLOR_NAMES", "VISUAL_NAMES", "Command", "Context", "evaluate", "label", "match", "registry"]

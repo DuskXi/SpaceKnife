@@ -1,10 +1,13 @@
-// Everything that talks to the backend: connection, scans, views, filter, tags.
+// Everything that talks to the backend: connection, scans, views, filter, tags, updates.
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
-import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewUpdate } from "@/protocol/generated";
+import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
-import { type BinaryFrame, Rpc, RpcError } from "@/protocol/rpc";
-import { decodeDraw } from "@/treemap/frame";
+import { Rpc, RpcError } from "@/protocol/rpc";
+// the built-in visualizations register before the first hello announces their layouts
+import "@/visual/builtins";
+import { decodeVisualFrame, isKnownLayout } from "@/visual/frame";
+import { componentFor } from "@/visual/registry";
 
 import {
   activeTab,
@@ -24,12 +27,16 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { FramePairer, frameKey } from "./frames";
+import { downloading, downloadOf, hasUpdate, visibleSurface } from "./updates";
 import { getLang, setLang, t } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
-const binaries = new Map<string, BinaryFrame>();
-const waiters = new Map<string, (f: BinaryFrame) => void>();
+
+/** Layouts this renderer decodes and has a component for. */
+const drawable = (layout: string) => isKnownLayout(layout) && componentFor(layout) !== null;
+const frames = new FramePairer(drawable);
 
 export function client(): Rpc {
   if (!rpc || !rpc.open) throw new RpcError(-32006, t("后端未连接"));
@@ -83,6 +90,7 @@ async function connect(): Promise<void> {
   try {
     const hello = await r.connect(backendInfo.url, backendInfo.token, { name: "spaceknife-electron", version: window.sk.version });
     rpc = r;
+    frames.clear();
     set({ conn: "ready", connMessage: "", serverVersion: hello.server.version });
   } catch (err) {
     if (backendGone) return; // keep the 「后端已退出」 message; a new 'ready' starts over
@@ -92,13 +100,14 @@ async function connect(): Promise<void> {
     return;
   }
   connectedOnce = true;
-  r.onBinary(onBinary);
+  r.onBinary((f) => frames.accept(f));
   r.on("view.frame", (ev) => void applyFrame(ev.frame));
   r.on("scan.progress", (ev) => onScanStatus(ev.status));
   r.on("settings.changed", (ev) => applySettings(ev.state));
   r.on("basket.changed", (ev) => set({ basket: ev.state }));
   r.on("ops.progress", (ev) => onOpProgress(ev));
   r.on("compare.progress", (ev) => onCompareProgress(ev));
+  r.on("update.changed", (ev) => applyUpdateStatus(ev.status));
   // the file class table changed (W7): the parser vocabulary and the colours follow
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));
   r.on("log.record", (ev) => addLog(ev));
@@ -111,27 +120,33 @@ async function connect(): Promise<void> {
     setTimeout(() => void reconnect(), 800);
   });
   void r.call("$/subscribe", { topic: "log", params: { backlog: 500, min_level: "INFO" } }).catch(() => {});
-  const [vocab, volumes, snapshots, scans, settings, basket] = await Promise.all([
+  const [vocab, volumes, snapshots, scans, settings, basket, visuals, update] = await Promise.all([
     r.call("filter.vocab", {}),
     r.call("volume.list", {}),
     r.call("snapshot.list", {}),
     r.call("scan.list", {}),
     r.call("settings.get", {}),
     r.call("basket.list", {}).catch(() => null),
+    r.call("visual.list", {}).catch(() => null), // a server before visuals.v1 has only the treemap
+    r.call("update.status", {}).catch(() => null), // a server before updates.v1 checks for none
   ]);
   applySettings(settings);
   set({
     basket,
     vocab,
+    visuals: visuals?.visuals ?? [],
     volumes: volumes.volumes,
     snapshots: snapshots.snapshots,
     scans: Object.fromEntries(scans.scans.map((s) => [s.scan_id, s])),
   });
+  if (update) applyUpdateStatus(update);
   for (const s of scans.scans) if (s.state === "scanning" || s.state === "queued") void watchScan(s.scan_id);
 }
 
-/** After a reconnect the views of the old session are gone: reopen every scan tab. */
+/** After a reconnect the views of the old session are gone: reopen every scan tab, each view with
+ * the visualization and display settings it had. */
 async function reconnect(): Promise<void> {
+  const before = get().views;
   await connect();
   if (!rpc) return;
   addLocalLog("INFO", t("已重新连接"));
@@ -141,43 +156,41 @@ async function reconnect(): Promise<void> {
   for (const t of tabs) {
     if (!get().scans[t.scanId!]) continue;
     const ids: string[] = [];
-    for (let i = 0; i < Math.max(1, t.viewIds.length); i++) ids.push(await openView(t.scanId!));
+    for (let i = 0; i < Math.max(1, t.viewIds.length); i++) {
+      ids.push(await openLike(t.scanId!, t.viewIds[i] ? before[t.viewIds[i]!]?.state : undefined));
+    }
     set((s) => ({ tabs: s.tabs.map((x) => (x.id === t.id ? { ...x, viewIds: ids } : x)) }));
   }
 }
 
 // ------------------------------------------------------------------ frames
 
-function onBinary(f: BinaryFrame): void {
-  if (f.header.layout !== "drawlist.v1") return;
-  const key = `${f.header.stream}#${f.header.seq}`;
-  const w = waiters.get(key);
-  if (w) {
-    waiters.delete(key);
-    w(f);
-  } else {
-    binaries.set(key, f);
-    if (binaries.size > 32) binaries.delete(binaries.keys().next().value!);
-  }
-}
-
-function binaryFor(info: FrameInfo): Promise<BinaryFrame> {
-  const key = `view:${info.view_id}#${info.seq}`;
-  const got = binaries.get(key);
-  if (got) {
-    binaries.delete(key);
-    return Promise.resolve(got);
-  }
-  return new Promise((resolve) => waiters.set(key, resolve));
-}
+/** Views already told that their visualization cannot be drawn here. */
+const fellBack = new Set<string>();
 
 async function applyFrame(info: FrameInfo): Promise<void> {
   const cur = get().views[info.view_id];
   if (!cur || (cur.info && info.seq <= cur.info.seq)) return;
-  const bin = await binaryFor(info);
+  // a server before visuals.v1 sends no layout: its frames are all drawlist.v1
+  if (info.layout === undefined) info = { ...info, layout: "drawlist.v1", visual: "treemap" };
+  // a layout this renderer cannot draw: no waiting for its binary frame, the picture on screen
+  // stays, and the view goes back to the treemap
+  if (!drawable(info.layout)) return fallBack(info);
+  const bin = await frames.waitFor(frameKey(`view:${info.view_id}`, info.seq));
   const now = get().views[info.view_id];
-  if (!now || (now.info && info.seq <= now.info.seq)) return;
-  patchView(info.view_id, { info, frame: decodeDraw(bin, info), previous: now.frame, filter: info.filter ?? now.filter });
+  if (!bin || !now || (now.info && info.seq <= now.info.seq)) return;
+  const frame = decodeVisualFrame(bin, info);
+  if (!frame) return fallBack(info);
+  patchView(info.view_id, { info, frame, filter: info.filter ?? now.filter });
+}
+
+function fallBack(info: FrameInfo): void {
+  if (info.visual === "treemap") return; // nothing to go back to
+  if (!fellBack.has(info.view_id)) {
+    fellBack.add(info.view_id);
+    toast(t("这个界面画不了这种可视化，已换回树图"));
+  }
+  void setViewSettings(info.view_id, { visual: "treemap" });
 }
 
 async function applyUpdate(viewId: string, upd: ViewUpdate): Promise<void> {
@@ -196,13 +209,14 @@ export function defaultViewport(): { width: number; height: number; dpr: number 
   };
 }
 
-export async function openView(scanId: string): Promise<string> {
-  const upd = await call("view.open", { scan_id: scanId, viewport: defaultViewport() });
+/** A new view of a scan (or of a comparison); `settings` start it like another view (split, reconnect). */
+export async function openView(scanId: string, settings?: ViewSettingsParams): Promise<string> {
+  const upd = await call("view.open", { scan_id: scanId, viewport: defaultViewport(), ...(settings ? { settings } : {}) });
   const viewId = upd.state.view_id;
   set((s) => ({
     views: {
       ...s.views,
-      [viewId]: { state: upd.state, info: null, frame: null, filter: null, parse: null, filterText: "", previous: null, hoverKey: null },
+      [viewId]: { state: upd.state, info: null, frame: null, filter: null, parse: null, filterText: "", hoverKey: null },
     },
   }));
   if (upd.frame) await applyFrame(upd.frame);
@@ -239,6 +253,28 @@ export async function viewCall<M extends ViewMethod>(
 
 export const setViewSettings = (viewId: string | null, settings: ViewSettingsParams) =>
   viewCall(viewId, "view.set", { settings });
+
+/** What a view passes on to one opened like it: its visualization and what it shows. */
+export function carried(st: ViewState): ViewSettingsParams {
+  return {
+    visual: st.visual,
+    colors: st.colors,
+    color_mode: st.color_mode,
+    detail: st.detail,
+    show_free: st.show_free,
+    show_unknown: st.show_unknown,
+  };
+}
+
+/** A new view started like another one (split, reconnect); a plain one when the server refuses that. */
+async function openLike(scanId: string, like: ViewState | undefined): Promise<string> {
+  if (!like) return openView(scanId);
+  try {
+    return await openView(scanId, carried(like));
+  } catch {
+    return openView(scanId);
+  }
+}
 
 // ------------------------------------------------------------------ delete basket (W5)
 
@@ -356,7 +392,64 @@ export async function watchScan(scanId: string): Promise<void> {
   }
 }
 
+export type ProtectedChoice = "settings" | "skip" | "allow" | "cancel";
+let protectedAnswer: ((choice: ProtectedChoice) => void) | null = null;
+
+/** Show the Full Disk Access dialog and wait for the answer (one at a time: a second ask cancels the first). */
+function askProtectedPlaces(): Promise<ProtectedChoice> {
+  return new Promise((resolve) => {
+    protectedAnswer?.("cancel");
+    protectedAnswer = resolve;
+    set({ fdaPrompt: true });
+  });
+}
+
+export function answerProtectedPlaces(choice: ProtectedChoice, remember: boolean): void {
+  set({ fdaPrompt: false });
+  if (remember && (choice === "skip" || choice === "allow")) void updateSettings({ "scan.protected_places": choice });
+  const answer = protectedAnswer;
+  protectedAnswer = null;
+  answer?.(choice);
+}
+
+/** macOS before a scan: the places that would each ask for consent. undefined: the backend applies
+ *  the scan.protected_places setting; true / false: skip them or not (the user chose now); null:
+ *  no scan (System Settings opened, or the dialog closed). */
+async function protectedPlaces(): Promise<boolean | null | undefined> {
+  if (window.sk.platform !== "darwin" || setting(get(), "scan.protected_places", "ask") !== "ask") return undefined;
+  const info = await call("system.info", {}).catch(() => null);
+  if (info?.full_disk_access !== false) return undefined;
+  const choice = await askProtectedPlaces();
+  if (choice === "settings") {
+    window.sk.shell.openFullDiskAccess();
+    toast(t("在列表里打开 SpaceKnife 的开关，再按提示重新打开 SpaceKnife"));
+    return null;
+  }
+  return choice === "cancel" ? null : choice === "skip";
+}
+
+/** Start tabs whose scan is being started: a second Enter or click while the first one opens its
+ * view (which can take a while on a busy backend) must not start the same scan again. */
+const startingTabs = new Set<string>();
+
 export async function startScan(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
+  if (replaceTab) {
+    if (startingTabs.has(replaceTab)) return null;
+    startingTabs.add(replaceTab);
+  }
+  try {
+    return await startScanNow(params, replaceTab);
+  } finally {
+    if (replaceTab) startingTabs.delete(replaceTab);
+  }
+}
+
+async function startScanNow(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
+  if (params.skip_protected == null) {
+    const skip = await protectedPlaces();
+    if (skip === null) return null;
+    if (skip !== undefined) params = { ...params, skip_protected: skip };
+  }
   try {
     const status = await call("scan.start", params);
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
@@ -501,9 +594,10 @@ export function applySettings(state: SettingsState): void {
   // 「界面语言」 (M7.5): every t() follows at the next render; texts the backend made (volume notes,
   // class names) are fetched again, painted labels redrawn
   const langChanged = state.language !== getLang() || state.language !== get().lang;
+  // always: index.html starts as zh-CN, and English at the first launch is no "change"
+  document.documentElement.lang = state.language;
   if (langChanged) {
     setLang(state.language);
-    document.documentElement.lang = state.language;
     window.sk.setLanguage(state.language);
   }
   set((s) => ({
@@ -518,6 +612,10 @@ export function applySettings(state: SettingsState): void {
     void refreshLists();
     void call("filter.vocab", {})
       .then((vocab) => set({ vocab }))
+      .catch(() => undefined);
+    // the visualizations' names are in the session's language
+    void call("visual.list", {})
+      .then((r) => set({ visuals: r.visuals }))
       .catch(() => undefined);
   }
 }
@@ -588,7 +686,8 @@ export async function toggleSplit(): Promise<void> {
     closePane(tab.id, tab.viewIds[tab.focusedPane === 0 ? 1 : 0]!);
     return;
   }
-  const viewId = await openView(tab.scanId);
+  // the new pane starts like the focused one
+  const viewId = await openLike(tab.scanId, get().views[tab.viewIds[tab.focusedPane] ?? tab.viewIds[0]!]?.state);
   set((s) => ({ tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, viewIds: [...t.viewIds, viewId], focusedPane: 1 } : t)) }));
 }
 
@@ -625,4 +724,79 @@ export async function refreshLists(): Promise<void> {
   } catch {
     /* offline */
   }
+}
+
+// ------------------------------------------------------------------ updates (updates.v1)
+
+/** Versions whose card was closed here: a status the backend sent before it heard of it stays closed. */
+const closedVersions = new Set<string>();
+
+/** A status from the backend (an answer, or update.changed). A download that ends while no update
+ * card is on screen says so in a toast; the badge shows the rest. */
+function applyUpdateStatus(next: UpdateStatus): void {
+  if (next.latest && !next.dismissed && closedVersions.has(next.latest.version)) next = { ...next, dismissed: true };
+  const before = downloadOf(get().update);
+  set((s) => ({ update: next, updateOpen: s.updateOpen && hasUpdate(next) }));
+  const after = downloadOf(next);
+  if (!downloading(before) || downloading(after) || visibleSurface(next, get().updateOpen) !== "none") return;
+  if (after.state === "done") toast(t("SpaceKnife {version} 已下载", { version: after.version ?? "" }));
+  else if (after.state === "failed") toast(t("更新下载失败：{error}", { error: after.error ?? "" }));
+}
+
+async function updateCall<M extends "update.dismiss" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
+  try {
+    applyUpdateStatus((await call(method, params)) as UpdateStatus);
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+/** 「检查更新」 (app.check_updates): now, also when automatic checks are off; a newer release opens
+ * its card under the badge. */
+export async function checkUpdates(): Promise<void> {
+  toast(t("正在检查更新…"));
+  try {
+    const st = await call("update.check", {});
+    applyUpdateStatus(st);
+    if (st.error) toast(t("检查更新失败：{error}", { error: st.error }));
+    else if (hasUpdate(st)) {
+      set({ updateOpen: true });
+      toast(t("发现新版本 {version}", { version: st.latest.version }));
+    } else toast(t("已是最新版本"));
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+/** The badge and 「查看更新」 (app.show_update): the card under the badge; nothing known yet: check. */
+export function showUpdate(): Promise<void> {
+  if (!hasUpdate(get().update)) return checkUpdates();
+  set({ updateOpen: true });
+  return Promise.resolve();
+}
+
+/** Close the update card or dialog (×, Esc, 「以后再说」): neither opens by itself again for this
+ * version; the badge stays. */
+export function closeUpdate(): void {
+  const st = get().update;
+  set({ updateOpen: false });
+  if (!hasUpdate(st) || st.dismissed) return;
+  closedVersions.add(st.latest.version);
+  set({ update: { ...st, dismissed: true } }); // closed at once, whatever the backend answers
+  void updateCall("update.dismiss", { version: st.latest.version });
+}
+
+export function toggleUpdateCard(): void {
+  if (get().updateOpen) closeUpdate();
+  else set({ updateOpen: true });
+}
+
+/** 「一键下载」 / 「重试」: the file for this kind of install, into the download folder. */
+export const downloadUpdate = (version: string) => updateCall("update.download", { version });
+export const cancelUpdate = () => updateCall("update.cancel", {});
+
+/** 「安装」: start the downloaded installer, disk image or package; the app quits when it started. */
+export async function installUpdate(path: string): Promise<void> {
+  const reason = await window.sk.update.install(path);
+  if (reason) toast(reason);
 }

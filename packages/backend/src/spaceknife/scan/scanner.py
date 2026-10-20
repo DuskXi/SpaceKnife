@@ -31,10 +31,11 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger
 
+from ..privacy import inside, protected_folders
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
-from .volume import VolumeInfo, is_volume_root, volume_for
-from .worker import RootOptions, SliceOptions, SliceResult, Task
+from .volume import VolumeInfo, is_volume_root, volume_for, volume_group_twins
+from .worker import RootOptions, SliceOptions, SliceResult, Task, merge_slices
 
 if TYPE_CHECKING:
     from ..io import IoGovernor, Permit
@@ -64,6 +65,7 @@ class RootInfo:
 
 RATE_WINDOW_S = 4.0  # sliding window of the item / byte rates
 ESTIMATE_AFTER_S = 3.0  # no remaining-time estimate before this much data
+BYTES_CEILING = 0.95  # past this share of the used space a byte-based progress is a guess (progress())
 
 
 @dataclass(slots=True)
@@ -102,9 +104,71 @@ def default_workers() -> int:
     return max(2, min(8, (os.cpu_count() or 4) - 1))
 
 
+NATIVE_BATCH = 256  # directories per native call (one listing thread each)
+NATIVE_BUDGET_S = 0.05  # seconds a native call lists before it returns what it has
+
+
 def native_threads() -> int:
-    """Listing threads for the native walker: beyond 16 the file system's locks only add contention."""
-    return max(2, min(16, os.cpu_count() or 4))
+    """Listing threads for the native walker: one per CPU, at most 16 (beyond that NTFS's locks only
+    add contention). On macOS twice the CPUs: APFS listings wait in the kernel often enough that the
+    extra threads keep the CPUs busy (GitHub's macOS runners, 3-CPU arm64 and 4-CPU Intel: +5 % to
+    +15 %; many more starve the main thread that folds the results; docs/packaging.md).
+    SPACEKNIFE_SCAN_THREADS sets it (1–64) for measurements."""
+    forced = os.environ.get("SPACEKNIFE_SCAN_THREADS", "")
+    if forced.isdigit() and int(forced) > 0:
+        return min(64, int(forced))
+    cpus = os.cpu_count() or 4
+    if sys.platform == "darwin":
+        return max(4, min(16, 2 * cpus))
+    return max(2, min(16, cpus))
+
+
+@dataclass(slots=True)
+class ScanProfile:
+    """Where a scan's time went (logged when it ends; ``spaceknife scan --profile`` prints it)."""
+
+    wall_s: float  # scanning, start to end, without the time it was paused
+    threads: int  # listing slices allowed in parallel
+    busy_s: float  # summed time the slices took in their threads (listing: system calls)
+    ingest_s: float  # main thread: folding the slices into the tree
+    limited_s: float  # main thread: waiting for the disk-load limit to allow another slice
+    slices: int
+    items: int  # entries this run added to the tree
+
+    @property
+    def busy(self) -> float:
+        """Share of the listing threads' time spent listing (low: they wait for work or the limit)."""
+        return self.busy_s / (max(self.wall_s, 1e-9) * max(1, self.threads))
+
+    @property
+    def ingest(self) -> float:
+        """Share of the scan the main thread spent folding results (near 100 %: it is the bottleneck)."""
+        return self.ingest_s / max(self.wall_s, 1e-9)
+
+    @property
+    def limited(self) -> float:
+        return self.limited_s / max(self.wall_s, 1e-9)
+
+    def text(self) -> str:
+        bulk = bulk_listing()
+        return (
+            f"{self.items:,} items in {self.wall_s:.1f}s ({self.items / max(self.wall_s, 1e-9):,.0f}/s); "
+            f"listing threads busy {self.busy:.0%} of {self.threads}; "
+            f"main thread folding {self.ingest:.0%}; "
+            f"held by the disk-load limit {self.limited:.0%}; "
+            f"{self.slices:,} slices" + (f"; getattrlistbulk {bulk}" if bulk else "")
+        )
+
+
+def bulk_listing() -> str | None:
+    """macOS: whether the native walker lists with getattrlistbulk (\"on\", \"off: why\", \"untested\")."""
+    if sys.platform != "darwin":
+        return None
+    from .. import native
+
+    mod = native.module()
+    state = getattr(mod, "bulk_listing", None) if mod is not None else None
+    return str(state()) if state is not None else None
 
 
 Slicer = Callable[[list[Task], SliceOptions], SliceResult]
@@ -126,6 +190,8 @@ def native_slicer() -> Slicer | None:
                 "cluster_size": r.cluster_size,
                 "resident_max": r.resident_max,
                 "cross_mounts": r.cross_mounts,
+                **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the keys
+                **({"protect": list(r.protect)} if r.protect else {}),
             }
             for r in opts.roots
         ]
@@ -166,6 +232,7 @@ class Scanner:
         batch_tasks: int = 32,
         governor: IoGovernor | None = None,
         count_links_each: bool = False,
+        skip_protected: bool = False,
     ) -> None:
         if not roots:
             raise ScanError("no scan roots given")
@@ -198,9 +265,15 @@ class Scanner:
         self.message = ""
         self.expected_items: int | None = None  # from the last snapshot of the same roots (UI-W2-15)
         self._samples: deque[tuple[float, int, int]] = deque()  # (time, items, allocated bytes)
+        self._busy_s = self._ingest_s = self._limited_s = self._paused_s = 0.0  # ScanProfile
+        self._paused_since: float | None = None
+        self._folded = 0  # entries added to the tree by this run
+        self._slices = 0
 
         root_opts: list[RootOptions] = []
         normalised: list[str] = []
+        # macOS without Full Disk Access, when the user chose so: places that would each ask
+        protected = protected_folders() if skip_protected else ()
         for raw in roots:
             path = normalise_root(raw)
             if any(path == r or path.startswith(r.rstrip("\\/") + os.sep) for r in normalised):
@@ -233,6 +306,8 @@ class Scanner:
                     cluster_size=volume.cluster_size if volume else 4096,
                     resident_max=512 if ntfs else 0,
                     cross_mounts=cross_mounts,
+                    skip=() if cross_mounts else volume_group_twins(path),
+                    protect=tuple(p for p in protected if inside(p, path)),
                 )
             )
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))
@@ -252,6 +327,7 @@ class Scanner:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._unpaused()
         self._running.set()  # a paused scan stops too
 
     @property
@@ -290,11 +366,18 @@ class Scanner:
         """Stop dispatching batches; those in flight finish within their time budget (W2)."""
         if self._running.is_set() and self.state in (ScanState.QUEUED, ScanState.SCANNING):
             self._running.clear()
+            self._paused_since = time.perf_counter()
             if self.governor is not None:
                 self.governor.pause(owner=self)  # also a clean baseline window: nothing of ours in flight
 
+    def _unpaused(self) -> None:
+        if self._paused_since is not None:
+            self._paused_s += time.perf_counter() - self._paused_since
+            self._paused_since = None
+
     def resume(self) -> None:
         if not self._running.is_set():
+            self._unpaused()
             self._running.set()
             if self.governor is not None:
                 self.governor.resume(owner=self)
@@ -308,6 +391,10 @@ class Scanner:
         self.state = ScanState.SCANNING
         self._started = time.perf_counter()
         self.started_at = datetime.now(UTC)
+        self._busy_s = self._ingest_s = self._limited_s = self._paused_s = 0.0  # this run's profile
+        self._slices = self._folded = 0
+        if self._paused_since is not None:  # paused while queued
+            self._paused_since = self._started
         executor = self._executor
         thread_pool = None
         if executor is None:
@@ -320,6 +407,7 @@ class Scanner:
         resumed: asyncio.Task[bool] | None = None
         gov = self.governor
         last_report = 0.0
+        asked = 0.0
 
         def dispatch(permit: Permit | None) -> None:
             parallel = gov.concurrency if gov is not None else self.concurrency
@@ -340,6 +428,7 @@ class Scanner:
                         dispatch(None)
                 elif running and self._queue and permit_task is None and len(inflight) < self.concurrency:
                     permit_task = asyncio.ensure_future(gov.permit())  # paced by the disk-load limit
+                    asked = time.perf_counter()
                 elif not running and permit_task is not None:
                     permit_task.cancel()  # paused: the governor takes a waiting request back
                     with contextlib.suppress(asyncio.CancelledError):
@@ -355,9 +444,12 @@ class Scanner:
                 if not waits:
                     break
                 done, _ = await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
+                landed: list[SliceResult] = []
                 for fut in done:
                     if fut is permit_task:
                         permit_task = None
+                        if not inflight:  # nothing listing meanwhile: the limit held the scan
+                            self._limited_s += time.perf_counter() - asked
                         permit = fut.result()
                         if self._queue and self._running.is_set() and not self._cancelled:
                             dispatch(permit)
@@ -367,7 +459,9 @@ class Scanner:
                         resumed = None
                     else:
                         inflight.discard(fut)
-                        self._apply(fut.result())
+                        landed.append(fut.result())
+                if landed:
+                    self._apply(*landed)
                 now = time.perf_counter()
                 if on_progress is not None and now - last_report >= progress_interval:
                     last_report = now
@@ -395,6 +489,7 @@ class Scanner:
                 resumed.cancel()
             if self.paused and gov is not None:
                 gov.resume(owner=self)
+            self._unpaused()
             self._running.set()
             self._finished = time.perf_counter()
             self.finished_at = datetime.now(UTC)
@@ -413,11 +508,38 @@ class Scanner:
             result.rate,
             result.errors,
         )
+        logger.info("scan profile: {}", self.profile().text())
         return result
 
     # ------------------------------------------------------------------ folding results
 
-    def _apply(self, res: SliceResult) -> None:
+    def _apply(self, *results: SliceResult) -> None:
+        """Fold slice results into the tree: several that came in together as one (fewer, larger
+        calls into the store; the main thread folding is what limits a fast scan)."""
+        t0 = time.perf_counter()
+        n0 = len(self.store)
+        try:
+            self._fold(merge_slices(list(results)))
+        finally:
+            self._folded += len(self.store) - n0
+            self._ingest_s += time.perf_counter() - t0
+            self._busy_s += sum(r.elapsed for r in results)
+            self._slices += len(results)
+
+    def profile(self) -> ScanProfile:
+        end = self._finished or time.perf_counter()
+        paused = self._paused_s + (end - self._paused_since if self._paused_since is not None else 0.0)
+        return ScanProfile(
+            wall_s=end - self._started - paused if self._started is not None else 0.0,
+            threads=self.concurrency,
+            busy_s=self._busy_s,
+            ingest_s=self._ingest_s,
+            limited_s=self._limited_s,
+            slices=self._slices,
+            items=self._folded,
+        )
+
+    def _fold(self, res: SliceResult) -> None:
         store = self.store
         cols = res.cols
         n_entries = len(res.name_lens)
@@ -441,24 +563,45 @@ class Scanner:
             res.name_lens,
             {key: cols[key] for key in ENTRY_COLUMNS},
             ext_global,
-        ).tolist()
+        )
         if res.paths:
             self._current = res.paths[-1]
+        skipped = int(np.count_nonzero(starts < 0))
+        if skipped:
+            logger.debug("scan: {} listing(s) of folders deleted while they were read, skipped", skipped)
 
-        def resolve(ref: tuple[int, int, int] | np.ndarray) -> int:
-            kind, a, b = (int(x) for x in ref)
-            return a if kind == 0 else starts[a] + b
+        def resolve(refs: list[tuple[int, int, int]]) -> list[int]:
+            """The nodes results refer to; -1 for one that left the tree while it was read."""
+            if not refs:
+                return []
+            r = np.array(refs, dtype=np.int64).reshape(-1, 3)
+            inner = r[:, 0] != 0
+            out = r[:, 1].copy()
+            if bool(inner.any()):
+                begin = starts[r[inner, 1]]
+                out[inner] = np.where(begin >= 0, begin + r[inner, 2], -1)
+            old = ~inner
+            if bool(old.any()):
+                gone = (store.cols["flags"][out[old]] & np.uint32(Flag.GONE)) != 0
+                out[old] = np.where(gone, -1, out[old])
+            nodes: list[int] = out.tolist()
+            return nodes
 
-        for ref, path, msg in res.errors:
-            node = resolve(ref)
+        for (_, path, msg), node in zip(res.errors, resolve([e[0] for e in res.errors]), strict=True):
+            if node < 0:
+                continue
             store.mark(node, Flag.ACCESS_DENIED)
             store.clear(node, Flag.PENDING)
             self._errors += 1
             if len(self._denied) < MAX_RECORDED_DENIED:
                 self._denied.append(path)
                 self.denied_reasons.append(msg)
-        for ref, path, root_idx in res.frontier:
-            self._queue.append(((0, resolve(ref), 0), path, root_idx))
+        nodes = resolve([f[0] for f in res.frontier])
+        self._queue.extend(
+            ((0, node, 0), path, root_idx)
+            for (_, path, root_idx), node in zip(res.frontier, nodes, strict=True)
+            if node >= 0
+        )
 
     # ------------------------------------------------------------------ reporting
 
@@ -476,15 +619,23 @@ class Scanner:
         used = 0
         if self.roots and all(r.whole_volume and r.volume for r in self.roots):
             used = sum(r.volume.used for r in self.roots if r.volume)
-            if used > 0:
-                fraction = 1.0 if self.state == ScanState.DONE else min(0.999, scanned_alloc / used)
-        if fraction is None and self.expected_items:
-            fraction = 1.0 if self.state == ScanState.DONE else min(0.99, items / self.expected_items)
+        # By items when the last scan of these roots says how many there are; else by bytes against
+        # the volume's used space, but only up to BYTES_CEILING: used space is no exact total (APFS
+        # clones and hard links can make the scan pass it, snapshots and other volumes keep it out
+        # of reach), so past that the progress is unknown rather than stuck at 99 %.
+        expected = self.expected_items or 0
+        by_items = items / expected if expected else None
+        by_bytes = scanned_alloc / used if used > 0 else None
+        if self.state == ScanState.DONE:
+            fraction = 1.0 if by_items is not None or by_bytes is not None else None
+        elif by_items is not None and by_items < 1:
+            fraction = min(0.99, by_items)
+        elif by_bytes is not None and by_bytes < BYTES_CEILING:
+            fraction = by_bytes
         if running and elapsed >= ESTIMATE_AFTER_S:
-            # by items when the total is known from the last scan, else by bytes against the volume
-            if self.expected_items and rate > 0 and items < self.expected_items:
-                remaining = (self.expected_items - items) / rate
-            elif used > scanned_alloc and byte_rate > 0:
+            if by_items is not None and by_items < 1 and rate > 0:
+                remaining = (expected - items) / rate
+            elif by_bytes is not None and by_bytes < BYTES_CEILING and byte_rate > 0:
                 remaining = (used - scanned_alloc) / byte_rate
         return ScanProgress(
             state=self.state,

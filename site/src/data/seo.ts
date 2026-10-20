@@ -21,7 +21,7 @@ export function structuredData(c: Content, release: Release, pageUrl: string, sh
     inLanguage: c.htmlLang,
     applicationCategory: c.appCategory,
     applicationSubCategory: c.lang === "zh" ? "磁盘空间分析" : "Disk space analyzer",
-    operatingSystem: "Windows 10, Windows 11, Linux (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora)",
+    operatingSystem: "Windows 10, Windows 11, macOS 14+, Linux (Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora)",
     softwareVersion: release.version,
     datePublished: release.date.slice(0, 10),
     releaseNotes: release.url,

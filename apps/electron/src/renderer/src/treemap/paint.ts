@@ -5,10 +5,11 @@ import { tokens } from "@design/tokens";
 
 import { diffColor, type Tiers } from "@/lib/diff";
 import { t } from "@/lib/i18n";
+import { branchFill } from "@/visual/colors";
 
 import { DStat, Flag, Kind, Label, type DrawFrame } from "./frame";
 
-export type ColorMode = "class" | "flat" | "time";
+export type ColorMode = "class" | "flat" | "time" | "branch";
 
 /** Floats per instance; see the vertex shader in gl.ts for the meaning of each slot. */
 export const STRIDE = 24;
@@ -160,12 +161,23 @@ class Builder {
 
 const NONE: RGBA = [0, 0, 0, 0];
 
-export function fillOf(f: DrawFrame, i: number, mode: ColorMode, classIds: string[], tiers?: Tiers, classColors?: string[]): RGBA {
+/** Fill of a block that is not an open folder. 「顶层分支」 needs the frame's branch and depth columns
+ * (a frame without them is neutral). */
+export function fillOf(
+  f: Pick<DrawFrame, "kind" | "cls" | "tone" | "delta"> & Partial<Pick<DrawFrame, "branch" | "depth">>,
+  i: number,
+  mode: ColorMode,
+  classIds: string[],
+  tiers?: Tiers,
+  classColors?: string[],
+): RGBA {
   const kind = f.kind[i]!;
   if (tiers && f.delta) {
     const d = Number(f.delta[i]);
     return d === 0 ? rgba(T.collapsed) : rgba(diffColor(d, tiers));
   }
+  // files, collapsed folders and aggregates take their branch's hue at their depth's tier
+  if (mode === "branch") return branchFill(f.branch?.[i] ?? 0, f.depth?.[i] ?? 1);
   if (kind === Kind.COLLAPSED || kind === Kind.MORE) return rgba(T.collapsed);
   if (mode === "flat") return rgba(T.class.other);
   if (mode === "time" && (kind === Kind.FILE || kind === Kind.SMALL)) {

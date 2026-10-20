@@ -1,13 +1,16 @@
 // Hover card (UI-MAIN-29…31): beside the hovered block, never covering it; flips to stay inside.
+// Where a row's box can be most of the drawing (a large sector), the card follows the pointer.
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { TreeNodeResult } from "@/protocol/generated";
+import type { FilterVocab, TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
-import { Kind } from "@/treemap/frame";
-import type { HoverInfo } from "@/treemap/Treemap";
 import { fillOf, labelColors } from "@/treemap/paint";
+import { Kind } from "@/visual/frame";
+import { pointerBox } from "@/visual/Host";
+import { rowTitle } from "@/visual/rowTitle";
+import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
 import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -20,10 +23,32 @@ function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.
   return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
 }
 
+/** The same target: the card stays (and only moves when it follows the pointer). */
+export const sameTarget = (a: HoverInfo | null, b: HoverInfo | null) => !!a && !!b && a.viewId === b.viewId && a.frame === b.frame && a.target === b.target;
+
+/** What a card keeps clear of: the row's box, or a small box around the pointer. */
+export const cardAvoid = (h: HoverInfo): Box => (h.placement === "pointer" ? pointerBox(h.pointer) : h.avoid);
+
+/** What a hovered row (or the zoom root) is, for the cards: one row of the frame's columns. */
+export function hoverFacts(f: VisualFrame, target: number, vocab: FilterVocab | null, ext?: string) {
+  const root = target === HIT_ROOT ? f.info.root : null;
+  if (root) {
+    // the zoom root has no class column: a file root takes the class of its extension once known
+    const cls = ext === undefined ? -1 : (vocab?.classes.findIndex((c) => c.extensions.includes(ext)) ?? -1);
+    const one = { kind: Uint8Array.of(root.kind), cls: Uint8Array.of(cls < 0 ? 255 : cls), tone: Uint8Array.of(root.tone), branch: Uint8Array.of(root.branch), depth: Uint8Array.of(1), delta: null };
+    return { kind: root.kind, node: root.node, key: root.key, size: root.size, cls, columns: one, row: 0 };
+  }
+  return { kind: f.kind[target]!, node: f.node[target]!, key: f.key[target]!, size: Number(f.size[target]), cls: f.cls[target]!, columns: f, row: target };
+}
+
 export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: { w: number; h: number } }) {
   const vocab = useApp((s) => s.vocab);
   const scanId = useApp((s) => (hover ? s.views[hover.viewId]?.state.scan_id : undefined));
   const colorMode = useApp((s) => (hover ? s.views[hover.viewId]?.state.color_mode : "class")) ?? "class";
+  const scanning = useApp((s) => {
+    const st = scanId ? s.scans[scanId] : undefined;
+    return st?.state === "scanning" || st?.state === "queued";
+  });
   const [shown, setShown] = useState<HoverInfo | null>(null);
   // W7 常规 · 悬停提示
   const keepOpen = useApp((s) => setting(s, "general.hover_keep_open", true));
@@ -40,8 +65,8 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
       setShown(null);
       return;
     }
-    if (keepOpen && shown) {
-      setShown(hover); // moving between blocks: the open card switches in place
+    if ((keepOpen || sameTarget(shown, hover)) && shown) {
+      setShown(hover); // moving between blocks (or with the pointer): the open card switches in place
       return;
     }
     setShown(null);
@@ -49,13 +74,15 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
+  // the node's details, once per target (not per pointer move)
+  const frame = shown?.frame ?? null;
+  const target = shown?.target ?? null;
   useEffect(() => {
     setInfo(null);
-    if (!shown || !scanId) return;
-    const kind = shown.frame.kind[shown.row]!;
+    if (!frame || target === null || !scanId) return;
+    const { kind, node } = hoverFacts(frame, target, null);
     if (kind >= Kind.SMALL) return;
     let alive = true;
-    const node = shown.frame.node[shown.row]!;
     void call("tree.node", { scan_id: scanId, node })
       .then(async (r) => {
         if (!alive) return;
@@ -69,12 +96,12 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     return () => {
       alive = false;
     };
-  }, [shown, scanId]);
+  }, [frame, target, scanId]);
 
   // right of the block, top-aligned; else left; else below / above (UI-MAIN-29)
   useLayoutEffect(() => {
     if (!shown || !card.current) return;
-    const r = shown.rect;
+    const r = cardAvoid(shown);
     const cw = card.current.offsetWidth;
     const ch = card.current.offsetHeight;
     let left = r.x + r.w + 10;
@@ -92,25 +119,17 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
 
   if (!shown) return null;
   const f = shown.frame;
-  const row = shown.row;
-  const kind = f.kind[row]!;
-  const fill = fillOf(f, row, colorMode as "class", vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
+  const node = info?.node;
+  const facts = hoverFacts(f, shown.target, vocab, node?.ext);
+  const kind = facts.kind;
+  const fill = fillOf(facts.columns, facts.row, colorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
   const [fg] = labelColors(fill);
   const bg = `rgb(${fill.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
-  const [num, unit] = sizeParts(Number(f.size[row]));
-  const cls = vocab?.classes[f.cls[row]!];
-  const node = info?.node;
+  const [num, unit] = sizeParts(facts.size);
+  const cls = vocab?.classes[facts.cls];
   const dir = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
-  const title =
-    kind === Kind.SMALL
-      ? t("{n} 个小项", { n: fmtInt(f.count_[row]!) })
-      : kind === Kind.MORE
-        ? t("+{n} 项", { n: fmtInt(f.count_[row]!) })
-        : kind === Kind.FREE
-          ? t("可用空间")
-          : kind === Kind.UNKNOWN
-            ? t("未知空间")
-            : (node?.name ?? f.names[row] ?? "");
+  const named = rowTitle(f, shown.target, { scanning, formatInt: (n) => fmtInt(n) }).line1;
+  const title = (kind < Kind.SMALL ? node?.name : null) ?? named ?? "";
   const folder = info ? info.path.slice(0, Math.max(0, info.path.length - info.node.name.length)).replace(/[\\/]+$/, "") : "";
   const parentName = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
 

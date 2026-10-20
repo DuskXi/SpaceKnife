@@ -3,9 +3,17 @@ name: macOS build
 # The macOS dmg for each architecture, built on a Mac of that architecture (PyInstaller freezes the
 # interpreter it runs on). Ad-hoc signed and not notarized until there is an Apple Developer ID; the
 # dmg and its checksum go to the run's artifacts, and a maintainer attaches them to a release
-# (docs/packaging.md). Started by hand: Actions › macOS build › Run workflow.
+# (docs/packaging.md). Started by hand (Actions › macOS build › Run workflow), and on dev whenever
+# the packaging changes, so it is checked before it reaches main.
 on:
   workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/macos.yml
+      - tools/build_package.py
+      - packaging/**
+      - apps/electron/electron-builder.yml
 
 permissions:
   contents: read

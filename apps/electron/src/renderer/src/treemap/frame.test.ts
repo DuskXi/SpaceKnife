@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { FrameInfo } from "@/protocol/generated";
 import { type BinaryFrame, type Column, decodeFrame } from "@/protocol/rpc";
+import { frameInfo } from "@/visual/testing/fixtures";
 
 import { ancestorsOf, decodeDraw, Flag, hitTest, isSynthetic, Kind, Label } from "./frame";
 
@@ -137,21 +138,7 @@ function sceneColumns(rows: Row[]): { columns: Record<string, Column>; names: Ui
   return { columns, names };
 }
 
-const INFO: FrameInfo = {
-  breadcrumb: [{ key: 1, label: "root" }],
-  dpr: 1,
-  filter: null,
-  height: 100,
-  flash: [],
-      layout_ms: 0.4,
-  reason: "open",
-  rows: ROWS.length,
-  scanned: 1000,
-  selected_row: 1,
-  seq: 5,
-  view_id: "v1",
-  width: 260,
-};
+const INFO: FrameInfo = frameInfo({ rows: ROWS.length, selected_row: 1, seq: 5 });
 
 function scene() {
   const { columns, names } = sceneColumns(ROWS);

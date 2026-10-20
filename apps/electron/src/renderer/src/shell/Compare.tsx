@@ -11,8 +11,10 @@ import { patchView, setting, type Tab, toast, useApp } from "@/state/store";
 import { diffColor, diffTiers, GROW_COLORS, maxChange, SHRINK_COLORS, type Tiers } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
-import { Kind } from "@/treemap/frame";
-import type { HoverInfo } from "@/treemap/Treemap";
+import { cardAvoid, hoverFacts, sameTarget } from "@/shell/HoverCard";
+import { Kind } from "@/visual/frame";
+import { componentFor } from "@/visual/registry";
+import type { HoverInfo } from "@/visual/types";
 import { Icon, type IconName } from "@/ui/Icon";
 
 const LIST_LIMIT = 12;
@@ -182,7 +184,11 @@ export function CompareSidebar({ tab }: { tab: Tab }) {
     };
   }, [viewId, seq, c.info?.revision]);
 
-  const legend = useMemo(() => diffTiers(frame?.delta ? maxChange(frame.delta, frame.kind) : 0), [frame]);
+  // the same scale as the map: the rows its visualization fills
+  const legend = useMemo(() => {
+    const g = frame ? componentFor(frame.layout)?.geometry : undefined;
+    return diffTiers(frame?.delta ? maxChange(frame.delta, frame.kind, g ? (row) => g.filled(frame, row) : undefined) : 0);
+  }, [frame]);
   const maxAbs = Math.max(1, ...(sum?.grow_items ?? []).map((i) => Math.abs(i.delta)), ...(sum?.shrink_items ?? []).map((i) => Math.abs(i.delta)));
 
   return (
@@ -482,30 +488,33 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
   useEffect(() => {
     if (shown === hover) return;
     if (!hover) return setShown(null);
-    if (keepOpen && shown) return setShown(hover);
+    if ((keepOpen || sameTarget(shown, hover)) && shown) return setShown(hover);
     setShown(null);
     const timer = setTimeout(() => setShown(hover), HOVER_DELAY);
     return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
+  // the change's details, once per target (not per pointer move)
+  const viewId = shown?.viewId ?? null;
+  const frame = shown?.frame ?? null;
+  const targetHit = shown?.target ?? null;
   useEffect(() => {
     setInfo(null);
-    if (!shown) return;
-    const kind = shown.frame.kind[shown.row]!;
+    if (!viewId || !frame || targetHit === null) return;
+    const { kind, key } = hoverFacts(frame, targetHit, null);
     if (kind === Kind.FREE || kind === Kind.UNKNOWN) return;
     let alive = true;
-    const key = shown.frame.key[shown.row]!;
-    void call("compare.node", { view_id: shown.viewId, key, children: 4 })
+    void call("compare.node", { view_id: viewId, key, children: 4 })
       .then((r) => alive && setInfo(r))
       .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [shown]);
+  }, [viewId, frame, targetHit]);
 
   useLayoutEffect(() => {
     if (!shown || !card.current) return;
-    const r = shown.rect;
+    const r = cardAvoid(shown);
     const cw = card.current.offsetWidth;
     const ch = card.current.offsetHeight;
     let left = r.x + Math.min(r.w, 24) + 12;

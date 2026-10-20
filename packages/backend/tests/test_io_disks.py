@@ -18,7 +18,12 @@ from spaceknife.io.disks import (
     linux_whole_disk,
     local_disks,
 )
-from spaceknife.io.priority import io_priority_is_low, set_low_io_priority, set_thread_low_io_priority
+from spaceknife.io.priority import (
+    io_priority_is_low,
+    no_cloud_downloads,
+    set_low_io_priority,
+    set_thread_low_io_priority,
+)
 
 
 def test_this_checkout_maps_to_a_physical_disk() -> None:
@@ -145,3 +150,9 @@ def test_windows_background_mode() -> None:
     finally:
         assert set_low_io_priority(None, False, background_mode=True)
     assert io_priority_is_low() is False
+
+
+def test_no_cloud_downloads_is_a_macos_process_policy() -> None:
+    """macOS 10.15+: setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, …, OFF) succeeds (CI
+    checks the constants on a real macOS); elsewhere there is nothing to set."""
+    assert no_cloud_downloads() is (sys.platform == "darwin")

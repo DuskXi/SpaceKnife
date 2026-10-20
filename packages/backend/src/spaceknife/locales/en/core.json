@@ -161,6 +161,8 @@
  "这个系统不支持移到回收站": "This system doesn't support moving to trash",
  "这次扫描没有可以继续的部分": "This scan has nothing left to continue.",
  "这次扫描没有磁盘负载控制": "This scan has no disk load control.",
+ "这种可视化在当前界面不可用": "This window can't show this visualization",
+ "这种配色在当前界面不可用": "This window can't show this coloring",
  "这里挂载着另一个卷，不能删除": "Another volume is mounted here; it can't be deleted",
  "部分内容未能删除：{detail}": "Some contents couldn't be deleted: {detail}",
  "错误 {code}": "Error {code}",

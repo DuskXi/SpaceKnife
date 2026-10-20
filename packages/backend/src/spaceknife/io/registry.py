@@ -43,6 +43,8 @@ class IoRegistry:
         self.push_interval = push_interval
         self._clock = clock
         self._govs: dict[DiskId, IoGovernor] = {}
+        self._seen: set[DiskId] = set()  # disks the sampler has measured at least once
+        self._unmatched: set[DiskId] = set()  # disks already reported as never measured
         self._sampler: DiskSampler | None = None
         self._exec: ThreadPoolExecutor | None = None
         self._tasks: list[asyncio.Task[None]] = []
@@ -176,9 +178,23 @@ class IoRegistry:
         for disk, sample in samples.items():
             gov = self._govs.get(disk) or self._ensure(sampler.ref(disk) or DiskRef(disk))
             gov.observe(sample, wall)
+            self._seen.add(disk)
         for disk, gov in list(self._govs.items()):
-            if disk not in samples and not (sampler.supported and gov.disk.sampled):
-                gov.observe(None, wall)  # open loop: keep the governor ticking
+            if disk in samples:
+                continue
+            # a measured disk may miss one sample (counters primed again); one never measured while
+            # the sampler measures others is a mapping mismatch: run open loop, and say so once
+            if sampler.supported and gov.disk.sampled and disk in self._seen:
+                continue
+            if samples and sampler.supported and gov.disk.sampled and disk not in self._unmatched:
+                self._unmatched.add(disk)
+                logger.warning(
+                    "disk load: {} measures {}, never {}: its load is not limited by measurement",
+                    sampler.name,
+                    ", ".join(sorted(samples)),
+                    disk,
+                )
+            gov.observe(None, wall)  # open loop: keep the governor ticking
 
     async def _push_loop(self) -> None:
         while True:

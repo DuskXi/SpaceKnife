@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from spaceknife.layout import registry
 from spaceknife.server import Server
-from spaceknife.view.state import F_DIM, F_MATCH, F_SELECTED
+from spaceknife.view.state import F_DIM, F_MATCH, F_SCANNING, F_SELECTED
 from spaceknife_client.connection import Connection, RemoteError
 from spaceknife_client.views import ViewClient
+from spaceknife_protocol import CAP_BINARY_FRAMES, CAP_SUBSCRIPTIONS
 from spaceknife_protocol import scan as p
 from spaceknife_protocol import view as pv
 from spaceknife_protocol.errors import ErrorCode
@@ -34,6 +37,7 @@ from spaceknife_protocol.methods import (
 )
 
 from .test_scan_server import wait_done
+from .test_view_visuals import FAKES
 from .tree_fixture import build_tree
 
 
@@ -188,6 +192,24 @@ async def test_scan_progress_pushes_frames(tmp_path: Path, server: Server, clien
     assert len(frame) == pushed.rows
 
 
+async def test_views_follow_whether_their_scan_runs(
+    tmp_path: Path, server: Server, client: Connection
+) -> None:
+    scan_id = await scanned(tmp_path, client)
+    vc = ViewClient(client)
+    update, _ = await vc.call(
+        VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=800, height=600))
+    )
+    view = server.views.views[update.state.view_id].view
+    assert not view.scanning  # opened after the scan ended: no folder is marked as being scanned
+    server.views._on_scan(scan_id, "scanning")
+    assert view.scanning
+    assert (await vc.pushed.get()).reason == "scan"
+    server.views._on_scan(scan_id, "done")
+    assert not view.scanning
+    assert (await vc.pushed.get()).reason == "scan-final"
+
+
 async def test_views_belong_to_their_session_and_scan(
     tmp_path: Path, server: Server, client: Connection
 ) -> None:
@@ -221,3 +243,171 @@ async def test_views_belong_to_their_session_and_scan(
             VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=8, height=8))
         )
     assert err.value.code == ErrorCode.UNKNOWN_SCAN
+
+
+# ------------------------------------------------------------------ visualizations
+
+
+@pytest.fixture
+def fake_visuals() -> Iterator[None]:
+    """Test-only visualizations on the treemap engine; ``test.rooted`` hands its rows out as flame.v1."""
+    for v in FAKES:
+        registry.register(v)
+    try:
+        yield
+    finally:
+        for v in FAKES:
+            registry.unregister(v.id)
+
+
+async def test_switching_the_visualization(tmp_path: Path, fake_visuals: None, client: Connection) -> None:
+    scan_id = await scanned(tmp_path, client)
+    vc = ViewClient(client)
+    update, first = await vc.call(
+        VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=1000, height=700))
+    )
+    assert first is not None and update.frame is not None
+    assert (update.state.visual, update.frame.visual, update.frame.layout) == (
+        "treemap",
+        "treemap",
+        "drawlist.v1",
+    )
+    assert update.frame.geometry is None and update.frame.root is None
+    assert first.columns["branch"].dtype == np.uint8
+    view_id = update.state.view_id
+    key = int(first.columns["key"][row_named(first, "a")])
+    await vc.call(VIEW_ZOOM, pv.ViewZoomParams(view_id=view_id, key=key))
+    await vc.call(VIEW_SELECT, pv.ViewSelectParams(view_id=view_id, key=key + 1))
+    set_visual = pv.ViewSetParams(view_id=view_id, settings=pv.ViewSettingsParams(visual="test.rooted"))
+    update, frame = await vc.call(VIEW_SET, set_visual)
+    assert update.changed and frame is not None and update.frame is not None
+    info = update.frame
+    assert (info.reason, info.visual, info.layout) == ("visual", "test.rooted", "flame.v1")
+    assert isinstance(info.geometry, pv.FlameGeometry) and info.root is not None
+    assert (info.root.key, info.root.kind) == (key, 1)  # the zoom root: folder "a"
+    assert {"x", "y", "w", "h", "branch"} <= set(frame.columns)
+    st = update.state
+    assert (st.visual, st.zoom_node, st.selected, st.can_back, st.color_mode) == (
+        "test.rooted",
+        key,
+        key + 1,
+        True,
+        "branch",
+    )
+    update, frame = await vc.call(VIEW_SET, set_visual)  # the same again: nothing to draw
+    assert not update.changed and frame is None
+    update, frame = await vc.call(
+        VIEW_SET,
+        pv.ViewSetParams(
+            view_id=view_id, settings=pv.ViewSettingsParams(visual="treemap", color_mode="time")
+        ),
+    )
+    assert update.frame is not None and update.frame.reason == "visual" and update.state.color_mode == "time"
+    update, _ = await vc.call(
+        VIEW_SET, pv.ViewSetParams(view_id=view_id, settings=pv.ViewSettingsParams(detail=3))
+    )
+    assert update.frame is not None and update.frame.reason == "settings"
+    with pytest.raises(RemoteError) as err:
+        await vc.call(
+            VIEW_SET, pv.ViewSetParams(view_id=view_id, settings=pv.ViewSettingsParams(visual="pie"))
+        )
+    assert err.value.code == ErrorCode.INVALID_PARAMS
+    assert (await client.call(VIEW_LIST, pv.ViewListParams())).views[0].visual == "treemap"
+
+
+async def test_a_view_opened_like_another_keeps_every_colour_mode(
+    tmp_path: Path, fake_visuals: None, client: Connection
+) -> None:
+    scan_id = await scanned(tmp_path, client)
+    vc = ViewClient(client)
+    viewport = pv.Viewport(width=800, height=600)
+    update, _ = await vc.call(VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=viewport))
+    view_id = update.state.view_id
+    for settings in (
+        pv.ViewSettingsParams(color_mode="time"),
+        pv.ViewSettingsParams(visual="test.rooted", color_mode="flat"),
+    ):
+        update, _ = await vc.call(VIEW_SET, pv.ViewSetParams(view_id=view_id, settings=settings))
+    st = update.state
+    assert {"treemap": "time", "test.rooted": "flat"}.items() <= st.colors.items()
+    # a split pane / a reconnect opens with what the old view carried (actions.ts carried())
+    like = pv.ViewSettingsParams(visual=st.visual, colors=st.colors, color_mode=st.color_mode)
+    update, _ = await vc.call(VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=viewport, settings=like))
+    assert (update.state.visual, update.state.color_mode) == ("test.rooted", "flat")
+    update, _ = await vc.call(
+        VIEW_SET,
+        pv.ViewSetParams(view_id=update.state.view_id, settings=pv.ViewSettingsParams(visual="treemap")),
+    )
+    assert update.state.color_mode == "time"
+    # unknown visualizations in the map are left out
+    update, _ = await vc.call(
+        VIEW_OPEN,
+        pv.ViewOpenParams(
+            scan_id=scan_id, viewport=viewport, settings=pv.ViewSettingsParams(colors={"pie": "flat"})
+        ),
+    )
+    assert "pie" not in update.state.colors
+
+
+async def test_switching_while_frames_are_pushed(
+    tmp_path: Path, server: Server, fake_visuals: None, client: Connection
+) -> None:
+    scan_id = await scanned(tmp_path, client)
+    vc = ViewClient(client)
+    update, _ = await vc.call(
+        VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=800, height=600))
+    )
+    view_id = update.state.view_id
+    server.views._on_scan(scan_id, "scanning")
+    pushed = await vc.pushed.get()
+    assert (pushed.reason, pushed.layout) == ("scan", "drawlist.v1")
+    update, frame = await vc.call(
+        VIEW_SET, pv.ViewSetParams(view_id=view_id, settings=pv.ViewSettingsParams(visual="test.rooted"))
+    )
+    assert frame is not None and update.frame is not None and update.frame.reason == "visual"
+    assert update.frame.root is not None
+    server.views._on_scan(scan_id, "done")
+    pushed = await vc.pushed.get()
+    assert (pushed.reason, pushed.visual, pushed.layout) == ("scan-final", "test.rooted", "flame.v1")
+    assert pushed.root is not None and not pushed.root.flags & F_SCANNING
+    frame = await vc.frame(pushed.view_id, pushed.seq)  # the client decodes the other layout too
+    assert len(frame) == pushed.rows
+
+
+async def test_older_frontends_stay_on_the_treemap(
+    tmp_path: Path, server: Server, fake_visuals: None
+) -> None:
+    from .conftest import CLIENT, TOKEN
+
+    old = await Connection.open(
+        server.url, TOKEN, CLIENT, capabilities=[CAP_BINARY_FRAMES, CAP_SUBSCRIPTIONS]
+    )
+    try:
+        scan_id = await scanned(tmp_path, old)
+        vc = ViewClient(old)
+        update, frame = await vc.call(
+            VIEW_OPEN,
+            pv.ViewOpenParams(
+                scan_id=scan_id,
+                viewport=pv.Viewport(width=800, height=600),
+                settings=pv.ViewSettingsParams(visual="test.rooted", color_mode="branch"),
+            ),
+        )
+        assert frame is not None and update.frame is not None
+        assert (update.state.visual, update.state.color_mode, update.frame.layout) == (
+            "treemap",
+            "class",
+            "drawlist.v1",
+        )
+        view_id = update.state.view_id
+        for settings in (
+            pv.ViewSettingsParams(visual="test.fake"),
+            pv.ViewSettingsParams(color_mode="branch"),
+        ):
+            with pytest.raises(RemoteError) as err:
+                await vc.call(VIEW_SET, pv.ViewSetParams(view_id=view_id, settings=settings))
+            assert err.value.code == ErrorCode.INVALID_PARAMS
+        view = server.views.views[view_id].view
+        assert (view.visual, view.color_mode) == ("treemap", "class")  # nothing changed
+    finally:
+        await old.close()

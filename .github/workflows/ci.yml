@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev] # work happens on dev; main changes by merging dev
   pull_request:
   workflow_dispatch: # a manual run tests everything
 
@@ -67,10 +67,12 @@ jobs:
         with:
           enable-cache: true
 
+      # the native extension too (Rust is on every runner image): its walkers are checked against
+      # the Python ones on each OS, macOS's getattrlistbulk path included
       - name: Install Python 3.12 and the workspace
         run: |
           uv python install 3.12
-          uv sync --locked
+          uv sync --locked --group native
 
       - name: Lint
         run: |
@@ -145,3 +147,24 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # The one check branch protection requires: skipped jobs report under their unexpanded matrix
+  # name, so requiring each job would leave a pull request waiting forever.
+  result:
+    name: CI passed
+    needs: [changes, python, electron]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job that ran succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success | skipped) ;;
+              *) echo "::error::a job ended with $r"; exit 1 ;;
+            esac
+          done

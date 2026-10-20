@@ -1,4 +1,4 @@
-"""Handlers for view.*: open/close, navigation, selection, settings, filter and tags."""
+"""Handlers for view.*: open/close, navigation, selection, settings, filter and tags; visual.list."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from spaceknife_protocol import view as pv
-from spaceknife_protocol.base import EmptyResult
+from spaceknife_protocol.base import Empty, EmptyResult
 from spaceknife_protocol.methods import (
     VIEW_BACK,
     VIEW_CLOSE,
@@ -23,10 +23,13 @@ from spaceknife_protocol.methods import (
     VIEW_TAG,
     VIEW_UP,
     VIEW_ZOOM,
+    VISUAL_LIST,
 )
 
+from ..i18n import _
+from ..layout import registry
 from ..view.results import effective_tag, relative_path, sorted_rows
-from ..view.state import View
+from ..view.state import View, showable
 from .compute import Latest, compute
 from .views import ViewHost, ViewManager, apply_settings, view_state
 
@@ -108,12 +111,38 @@ def install(server: Server) -> None:
 
     @router.method(VIEW_SET)
     async def view_set(session: Session, params: pv.ViewSetParams) -> pv.ViewUpdate:
-        def change(v: View) -> bool:
-            before = view_state_tuple(v)
-            apply_settings(v, params.settings)
-            return view_state_tuple(v) != before
+        host = views.get(session, params.view_id)
+        async with host.lock:
+            v = host.view
+            before, visual = view_state_tuple(v), v.visual
+            apply_settings(v, params.settings, session.capabilities)
+            changed = view_state_tuple(v) != before
+            # another visualization: the frontend cross-fades instead of re-laying out in place
+            reason = "visual" if v.visual != visual else "settings"
+            frame = await views.render(host, reason) if changed else None
+        return views.update(host, frame, changed)
 
-        return await act(session, params.view_id, change, "settings")
+    @router.method(VISUAL_LIST)
+    async def visual_list(session: Session, _params: Empty) -> pv.VisualListResult:
+        caps = session.capabilities
+        out: list[pv.VisualInfo] = []
+        for v in registry.all_visuals():
+            available = showable(v.id, caps) is not None
+            out.append(
+                pv.VisualInfo(
+                    id=v.id,
+                    layout=v.layout,
+                    name=v.title,
+                    icon=v.icon,
+                    order=v.order,
+                    compare=v.compare,
+                    free_space=v.free_space,
+                    default_color=v.default_color,
+                    available=available,
+                    reason=None if available else _("这种可视化在当前界面不可用"),
+                )
+            )
+        return pv.VisualListResult(visuals=out)
 
     @router.method(VIEW_TAG)
     async def view_tag(session: Session, params: pv.ViewTagParams) -> pv.ViewUpdate:
@@ -162,12 +191,14 @@ def install(server: Server) -> None:
 
 
 def view_state_tuple(v: View) -> tuple[object, ...]:
+    """What ``view.set`` can change: a frame is sent when any of it did."""
     return (
         v.detail,
         v.min_element,
         v.sort_by_size,
         v.show_free,
         v.show_unknown,
+        v.visual,
         v.color_mode,
         v.filter_mode,
         v.viewport,

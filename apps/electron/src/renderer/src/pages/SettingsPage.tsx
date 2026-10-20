@@ -35,17 +35,18 @@ export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName;
     },
     icon: "palette",
     get note() {
-      return t("主题、强调色、动画与树图视觉；更改立即生效");
+      return t("主题、强调色、动画与可视化外观；更改立即生效");
     },
   },
   {
+    // the category id stays "treemap" (settings keys treemap.*); the page covers every visualization
     id: "treemap",
     get name() {
-      return t("树图");
+      return t("可视化");
     },
     icon: "layers",
     get note() {
-      return t("几何与动画；修改后已打开的视图立即重排，「新视图…」类只影响之后新开的视图");
+      return t("几何、火焰图方向与动画；修改后已打开的视图立即重排，「新视图…」类只影响之后新开的视图");
     },
   },
   {

@@ -271,7 +271,10 @@ function Method({ scan }: { scan: ScanStatus }) {
   );
 }
 
-/** UI-W2-27…45: the load limit, live load, the 60-second curve, concurrency. */
+/** A read latency: two decimals below 1 ms, one below 10 ms, whole milliseconds above. */
+const fmtMs = (ms: number): string => (ms < 1 ? ms.toFixed(2) : ms < 10 ? ms.toFixed(1) : String(Math.round(ms)));
+
+/** UI-W2-27…45: the load limit, live load, the 60-second curve, the disk's read rate, concurrency. */
 function Load({ scan, io }: { scan: ScanStatus; io: IoStatus }) {
   const customDefault = useApp((s) => setting(s, "scan.custom_limit", 70));
   const [custom, setCustom] = useState(io.level === "custom" ? Math.round(io.limit) : customDefault);
@@ -342,6 +345,12 @@ function Load({ scan, io }: { scan: ScanStatus; io: IoStatus }) {
         </div>
       )}
       <LoadCurve io={io} startedAt={scan.started_at} paused={scan.paused} />
+      {io.measured && io.read_bps != null && (
+        <div className="small sd-rates" title={t("整块磁盘在最近一次采样里的读取速度和平均每次读取的耗时（包括其他程序）")}>
+          {t("整盘读取")} <span className="strong mono">{fmtSize(io.read_bps)}/s</span>
+          {io.read_latency_ms != null && <span className="muted"> · {t("平均延迟 {ms} 毫秒", { ms: fmtMs(io.read_latency_ms) })}</span>}
+        </div>
+      )}
       {!mft && (
         <div className="row-between sd-concurrency">
           <span className="small">

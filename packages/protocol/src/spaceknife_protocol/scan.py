@@ -119,6 +119,12 @@ class ScanStartParams(Params):
     ads: bool | None = Field(
         default=None, description="Count NTFS alternate data streams (MFT scans); None = the setting"
     )
+    skip_protected: bool | None = Field(
+        default=None,
+        description="macOS without Full Disk Access: leave out the places that would each ask for "
+        "consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown "
+        "as not accessible; None = the scan.protected_places setting",
+    )
 
 
 class ScanSetLoadParams(Params):

@@ -146,4 +146,7 @@ def _force_utf8_pipes() -> None:
 
 def main() -> None:
     _force_utf8_pipes()
+    from .io.priority import no_cloud_downloads
+
+    no_cloud_downloads()  # macOS: never fetch iCloud / File Provider contents (every command)
     app()

@@ -17,10 +17,12 @@ import type {
   ScanStatus,
   SettingsState,
   SnapshotInfo,
+  UpdateStatus,
   ViewState,
+  VisualInfo,
   VolumeInfo,
 } from "@/protocol/generated";
-import type { DrawFrame } from "@/treemap/frame";
+import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
 
 export type TabKind = "start" | "scan" | "settings";
@@ -57,12 +59,11 @@ export interface TabCompare {
 export interface ViewData {
   state: ViewState;
   info: FrameInfo | null;
-  frame: DrawFrame | null;
+  /** the latest frame, of whatever layout its visualization draws */
+  frame: VisualFrame | null;
   filter: FilterInfo | null;
   parse: FilterParse | null;
   filterText: string;
-  /** previous frame, kept for the zoom animation */
-  previous: DrawFrame | null;
   /** block highlighted from outside the treemap (W3 result list hover, UI-W3-33) */
   hoverKey: number | null;
 }
@@ -149,8 +150,17 @@ export interface AppState {
   op: OpProgressEvent | null;
   /** 「导出报告…」 dialog */
   exportOpen: boolean;
+  /** macOS without Full Disk Access: the dialog before a scan (shell/FullDiskAccessDialog) */
+  fdaPrompt: boolean;
   /** interface language (M7.5): the root re-renders on change, every t() follows */
   lang: Lang;
+  /** visualizations the backend offers (visual.list), empty until connected */
+  visuals: VisualInfo[];
+  /** update checks (updates.v1): what the last one found and the download; null until connected,
+   * and from a backend without them */
+  update: UpdateStatus | null;
+  /** the update card opened from the title bar's badge (shell/UpdateBadge) */
+  updateOpen: boolean;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -206,7 +216,11 @@ export const useApp = create<AppState>(() => ({
   menu: null,
   op: null,
   exportOpen: false,
+  fdaPrompt: false,
   lang: getLang(),
+  visuals: [],
+  update: null,
+  updateOpen: false,
 }));
 
 export const set = useApp.setState;

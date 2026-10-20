@@ -1,9 +1,13 @@
-"""M2 benchmark: treemap layout, filter evaluation and view rendering on a large synthetic tree.
+"""M2 benchmark: layouts, filter evaluation and view rendering on a large synthetic tree.
 
     uv run python tools/bench_m2.py --nodes 3000000
+    uv run python tools/bench_m2.py --visual flame,flame_polar --nodes 1000000
 
 The tree mimics a real system disk: a few huge folders, deep nesting, many small files and
-common extensions. Prints rich tables; the M2 target is a 4K layout under 120 ms.
+common extensions. Everything runs in memory (nothing is read from or written to disk). Prints rich
+tables; the M2 target is a 4K layout under 120 ms. ``--visual`` picks the visualizations to lay
+out (the treemap adds the filter and view tables); ``--budget`` caps the run time in seconds:
+scenarios not started by then are skipped.
 """
 
 from __future__ import annotations
@@ -11,6 +15,7 @@ from __future__ import annotations
 import argparse
 import random
 import time
+from collections.abc import Callable
 
 import numpy as np
 from rich.console import Console
@@ -18,7 +23,17 @@ from rich.table import Table
 
 from spaceknife.filter import FilterContext, evaluate
 from spaceknife.filter.names import name_index
-from spaceknife.layout import Layout, LayoutParams, RootSpec
+from spaceknife.layout import (  # noqa: F401  (register on import)
+    Basis,
+    Layout,
+    LayoutParams,
+    RectKind,
+    RootSpec,
+    StoreSizes,
+    flame,
+    flame_polar,
+    registry,
+)
 from spaceknife.store.nodes import ENTRY_COLUMNS, Kind, NodeStore
 from spaceknife.view import View
 from spaceknife.view.state import RootInfoLike
@@ -115,16 +130,59 @@ def ms(fn, repeat: int = 3) -> tuple[float, object]:  # type: ignore[no-untyped-
     return best * 1000, out
 
 
+PARTITION_GRID = [(1920, 1080, 1.0, 5), (1920, 1080, 1.0, 15), (3840, 2160, 1.0, 5), (3840, 2160, 1.0, 15)]
+PARTITION_MIN_ELEMENT = 10.0  # the app's default minimum element (setting treemap.min_element)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--nodes", type=int, default=3_000_000)
+    ap.add_argument("--visual", default="treemap", help="comma-separated: treemap, flame, flame_polar")
+    ap.add_argument("--budget", type=float, default=120.0, help="seconds; later scenarios are skipped")
     args = ap.parse_args()
+    visuals = [v.strip() for v in args.visual.split(",") if v.strip()]
+    known = {"treemap"} | {v.id for v in registry.all_visuals()}
+    if unknown := [v for v in visuals if v not in known]:
+        ap.error(f"unknown visualization {', '.join(unknown)} (known: {', '.join(sorted(known))})")
     con = Console()
+    deadline: float = time.perf_counter() + args.budget
     t0 = time.perf_counter()
     store = synth(args.nodes)
     mib = store.memory_bytes() / 2**20
     con.print(f"合成树：{len(store):,} 个节点，{mib:.0f} MiB，用时 {time.perf_counter() - t0:.1f} 秒")
 
+    def late() -> bool:
+        return time.perf_counter() > deadline
+
+    if "treemap" in visuals:
+        treemap(con, store, late)
+    basis = Basis(store)
+    for vid in visuals:
+        if vid != "treemap":
+            partition(con, basis, vid, late)
+    if late():
+        con.print(f"[yellow]超出 {args.budget:.0f} 秒的时间上限，后面的场景已跳过[/]")
+
+
+def partition(con: Console, basis: Basis, vid: str, late: Callable[[], bool]) -> None:
+    vis = registry.get(vid)
+    engine = vis.engine(basis)
+    t = Table(title=f"{vis.title}布局（{vis.layout}，取 3 次最好成绩）", title_justify="left")
+    for col in ("视口", "层级", "画出层数", "行数", "展开", "毫秒"):
+        t.add_column(col, justify="right")
+    for w, h, dpr, detail in PARTITION_GRID:
+        if late():
+            t.add_row(f"{w}×{h} @{dpr}", str(detail), "", "", "", "跳过")
+            continue
+        p = LayoutParams(width=w, height=h, dpr=dpr, detail=detail, min_element=PARTITION_MIN_ELEMENT)
+        dl = engine.run(p, RootSpec(node=1), StoreSizes(basis))
+        took, _ = ms(lambda p=p: engine.run(p, RootSpec(node=1), StoreSizes(basis)))
+        folders = f"{int((dl.kind == RectKind.FOLDER).sum()):,}"
+        t.add_row(f"{w}×{h} @{dpr}", str(detail), str(dl.levels), f"{len(dl):,}", folders, f"{took:.1f}")
+    con.print(t)
+
+
+def treemap(con: Console, store: NodeStore, late: Callable[[], bool]) -> None:
     lay = Layout(store)
     t = Table(title="树图布局（取 3 次最好成绩）", title_justify="left")
     for col in ("视口", "层级", "矩形数", "毫秒"):
@@ -137,11 +195,16 @@ def main() -> None:
         (3840, 2160, 1.0, 15),
         (1920, 1080, 2.0, 15),
     ]:
+        if late():
+            t.add_row(f"{w}×{h} @{dpr}", str(detail), "", "跳过")
+            continue
         p = LayoutParams(width=w, height=h, dpr=dpr, detail=detail)
         lay.run(p, RootSpec(node=1))
         took, dl = ms(lambda p=p: lay.run(p, RootSpec(node=1)))
         t.add_row(f"{w}×{h} @{dpr}", str(detail), f"{len(dl):,}", f"{took:.1f}")  # type: ignore[arg-type]
     con.print(t)
+    if late():
+        return
 
     t0 = time.perf_counter()
     name_index(store).update(len(store))
@@ -160,6 +223,9 @@ def main() -> None:
         ":attr:h",
         "|*.js;s>1mb",
     ]:
+        if late():
+            t.add_row(text, "", "", "跳过")
+            continue
         nf = parse(text).normal
         assert nf is not None
         t0 = time.perf_counter()
@@ -168,6 +234,8 @@ def main() -> None:
         again, _ = ms(lambda nf=nf: evaluate(store, nf, ctx))
         t.add_row(text, f"{res.totals(0)[0]:,}", f"{first:.0f}", f"{again:.0f}")
     con.print(t)
+    if late():
+        return
 
     view = View(
         "bench",

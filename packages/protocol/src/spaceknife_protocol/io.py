@@ -44,6 +44,12 @@ class IoStatus(Payload):
     measured: bool = Field(description="False: no load data for this disk (open loop)")
     low_io_priority: bool = Field(description="Workers should read at OS low I/O priority")
     q_eff: float | None = None
+    read_bps: float | None = Field(
+        default=None, description="Bytes read per second on the whole disk, last sample"
+    )
+    read_latency_ms: float | None = Field(
+        default=None, description="Mean time per read on the whole disk, ms"
+    )
     history: list[LoadPoint] = Field(default_factory=list)
 
 

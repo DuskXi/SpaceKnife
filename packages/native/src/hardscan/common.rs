@@ -12,6 +12,7 @@ pub mod kind {
 /// spaceknife.store.nodes.Flag bits, the literals worker.py uses (each platform sets a subset).
 #[allow(dead_code)]
 pub mod flag {
+    pub const ACCESS_DENIED: u32 = 1 << 0;
     pub const MOUNT: u32 = 1 << 1;
     pub const COMPRESSED: u32 = 1 << 3;
     pub const SPARSE: u32 = 1 << 4;
@@ -35,6 +36,10 @@ pub struct RootOpts {
     pub cluster_size: i64,
     pub resident_max: i64,
     pub cross_mounts: bool,
+    /// Folders not to enter, as mount points (POSIX paths as bytes; worker.RootOptions.skip).
+    pub skip: Vec<Vec<u8>>,
+    /// Folders not to enter, as not accessible (worker.RootOptions.protect).
+    pub protect: Vec<Vec<u8>>,
 }
 
 impl Default for RootOpts {
@@ -44,6 +49,8 @@ impl Default for RootOpts {
             cluster_size: 4096,
             resident_max: 0,
             cross_mounts: false,
+            skip: Vec::new(),
+            protect: Vec::new(),
         }
     }
 }

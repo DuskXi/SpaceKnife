@@ -214,3 +214,75 @@ async def test_watchdog_reports_unexplained_memory(
     assert seen and "40.0 GB" in seen[0]
     text = diag.report(server)
     assert "accounted" in text and "compute" in text
+
+
+async def test_closing_a_scan_gives_the_heap_back(
+    tmp_path: Path, server: Server, client: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the C heap keeps freed space for the next scan (docs/memory.md §8): after a close it is asked
+    # to give it back, and the closed scan's size is remembered for the watchdog
+    from spaceknife.server import scans as scans_mod
+
+    released: list[int] = []
+    monkeypatch.setattr(scans_mod, "RELEASE_DELAY_S", 0.0)
+    monkeypatch.setattr(scans_mod.memory, "release", lambda: released.append(1))
+    facts = build_tree(tmp_path / "root")
+    started = await client.call(SCAN_START, p.ScanStartParams(roots=[str(facts.root)]))
+    await wait_done(client, started.scan_id)
+    await client.call(SCAN_CLOSE, p.ScanIdParams(scan_id=started.scan_id))
+    for _ in range(100):
+        if released:
+            break
+        await asyncio.sleep(0.01)
+    assert released
+    assert len(server.scans.closed) == 1 and server.scans.closed[0][1] > 0
+    assert diag.retained(server) == server.scans.closed[0][1]
+
+
+def test_release_runs_on_this_platform() -> None:
+    from spaceknife.memory import release
+
+    release()  # best effort: never raises
+
+
+async def _watch_briefly(server: Server) -> None:
+    task = asyncio.ensure_future(diag.watch(server))
+    try:
+        await asyncio.sleep(0.2)
+    finally:
+        task.cancel()
+
+
+async def test_watchdog_allows_for_what_closed_scans_leave_in_the_heap(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from spaceknife.memory import ProcessMemory
+
+    monkeypatch.setattr(diag, "PERIOD", 0.01)
+    monkeypatch.setattr(diag, "release", lambda: None)
+    monkeypatch.setattr(diag, "process_memory", lambda: ProcessMemory(3 << 30, 2 << 30))
+    seen: list[str] = []
+    monkeypatch.setattr(diag, "emit", lambda source, message, **kw: seen.append(message))
+    # a 2 GiB scan closed a minute ago: 3 GiB private is within 1.5 GiB slack + 2 GiB retained
+    server.scans.closed = [(time.monotonic() - 60, 2 << 30)]
+    await _watch_briefly(server)
+    assert not seen
+    # an hour later it no longer counts
+    server.scans.closed = [(time.monotonic() - 2 * 3600, 2 << 30)]
+    await _watch_briefly(server)
+    assert seen
+
+
+async def test_watchdog_gives_memory_back_before_warning(
+    server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from spaceknife.memory import ProcessMemory
+
+    monkeypatch.setattr(diag, "PERIOD", 0.01)
+    state = {"private": 3 << 30}
+    monkeypatch.setattr(diag, "release", lambda: state.update(private=1 << 30))
+    monkeypatch.setattr(diag, "process_memory", lambda: ProcessMemory(state["private"], 1 << 30))
+    seen: list[str] = []
+    monkeypatch.setattr(diag, "emit", lambda source, message, **kw: seen.append(message))
+    await _watch_briefly(server)
+    assert state["private"] == 1 << 30 and not seen

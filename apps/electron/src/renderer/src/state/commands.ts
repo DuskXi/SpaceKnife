@@ -4,11 +4,13 @@
 import { focusFilter } from "@/shell/FilterBox";
 import { revealLabel } from "@/shell/Inspector";
 import { t } from "@/lib/i18n";
-import { Kind } from "@/treemap/frame";
+import { Kind } from "@/visual/frame";
+import { registeredLayouts } from "@/visual/registry";
 
 import {
   basketAdd,
   call,
+  checkUpdates,
   closeTab,
   newStartTab,
   openSettingsTab,
@@ -18,14 +20,14 @@ import {
   rescanFolder,
   resumeScan,
   setViewSettings,
+  showUpdate,
   startScan,
   toggleSplit,
   viewCall,
 } from "./actions";
 import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
 import { activeTab, focusedViewId, get, set, toast, toggleLog } from "./store";
-
-const COLORS = ["class", "flat", "time"] as const;
+import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
 
 /** The selected node of the focused view (not an aggregate block), or null. */
 export function selectedNode(): { scanId: string; viewId: string; node: number } | null {
@@ -35,6 +37,34 @@ export function selectedNode(): { scanId: string; viewId: string; node: number }
   const row = frame?.info.selected_row;
   if (!viewId || !view || !frame || row == null || frame.kind[row]! >= Kind.SMALL || frame.node[row]! <= 0) return null;
   return { scanId: view.state.scan_id, viewId, node: frame.node[row]! };
+}
+
+/** V / Shift+V and 「切换可视化」: the view's next (dir 1) or previous visualization among those it
+ * can show here. The backend's command view.cycle_visual (palette/commands.py) names V as its key and
+ * App.tsx handles V itself: keep the two in step by hand. */
+export async function cycleVisual(viewId: string, dir: 1 | -1): Promise<void> {
+  const s = get();
+  const st = s.views[viewId]?.state;
+  if (!st) return;
+  const next = nextVisual(s.visuals, registeredLayouts(), st.visual, dir, st.compare);
+  if (next) await switchVisual(viewId, next);
+}
+
+/** The toolbar's visualization segments and 「可视化：…」: one this view can't show says why instead. */
+export async function pickVisual(viewId: string, id: string): Promise<void> {
+  const s = get();
+  const st = s.views[viewId]?.state;
+  if (!st || st.visual === id) return;
+  const item = offered(s.visuals, registeredLayouts(), st.compare).find((o) => o.info.id === id);
+  if (item?.reason) return toast(item.reason);
+  await switchVisual(viewId, id);
+}
+
+/** Zoom, selection, filter and history stay (they are the backend view's). The view's context menu
+ * closes: it points into the drawing being replaced. */
+async function switchVisual(viewId: string, id: string): Promise<void> {
+  if (get().menu?.viewId === viewId) set({ menu: null });
+  await setViewSettings(viewId, { visual: id });
 }
 
 async function selectionPath(): Promise<{ path: string; dir: boolean } | null> {
@@ -56,12 +86,21 @@ export async function runCommand(id: string): Promise<void> {
       return;
     case "view.cycle_color":
       if (st?.compare && viewId) return cycleDirection(viewId);
-      if (st) await setViewSettings(viewId, { color_mode: COLORS[(COLORS.indexOf(st.color_mode) + 1) % 3] });
+      if (st) await setViewSettings(viewId, { color_mode: nextColor(st.color_mode) });
       return;
     case "view.color.class":
     case "view.color.flat":
     case "view.color.time":
-      await setViewSettings(viewId, { color_mode: id.slice(11) as (typeof COLORS)[number] });
+    case "view.color.branch":
+      await setViewSettings(viewId, { color_mode: id.slice(11) as ColorModeName });
+      return;
+    case "view.cycle_visual":
+      if (viewId) await cycleVisual(viewId, 1);
+      return;
+    case "view.visual.treemap":
+    case "view.visual.flame":
+    case "view.visual.flame_polar":
+      if (viewId) await pickVisual(viewId, id.slice(12));
       return;
     case "view.toggle_free":
       if (st) await setViewSettings(viewId, { show_free: !st.show_free });
@@ -104,6 +143,10 @@ export async function runCommand(id: string): Promise<void> {
     case "app.log":
       toggleLog();
       return;
+    case "app.check_updates":
+      return checkUpdates();
+    case "app.show_update":
+      return showUpdate();
     case "nav.back":
       await viewCall(viewId, "view.back");
       return;

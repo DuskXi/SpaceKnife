@@ -14,6 +14,7 @@ Keep this module import-light: every pool process imports it at start-up.
 from __future__ import annotations
 
 import os
+import posixpath
 import stat
 import sys
 import time
@@ -25,6 +26,7 @@ import numpy as np
 KIND_FILE, KIND_DIR, KIND_LINK, KIND_OTHER = 0, 1, 2, 3
 
 # Mirrors spaceknife.store.nodes.Flag (kept literal so workers don't import the store).
+F_ACCESS_DENIED = 1 << 0
 F_MOUNT = 1 << 1
 F_COMPRESSED = 1 << 3
 F_SPARSE = 1 << 4
@@ -39,6 +41,8 @@ F_ENCRYPTED = 1 << 13
 F_TEMPORARY = 1 << 14
 F_NOT_INDEXED = 1 << 15
 F_OFFLINE = 1 << 16
+SF_DATALESS = 0x40000000  # macOS st_flags: contents in the cloud (iCloud Drive, File Provider)
+DARWIN = sys.platform == "darwin"
 
 IS_WINDOWS = sys.platform == "win32"
 NAME_ERRORS = "surrogatepass" if IS_WINDOWS else "surrogateescape"
@@ -85,6 +89,12 @@ class RootOptions:
     cluster_size: int = 4096  # Windows hard scan: allocation = size rounded up to clusters
     resident_max: int = 0  # NTFS: files this small live inside the MFT record (0 clusters)
     cross_mounts: bool = False
+    # folders not to enter, as mount points (macOS: the other half of the root's APFS volume
+    # group, already in the tree through the firmlinks; scan.volume.volume_group_twins)
+    skip: tuple[str, ...] = ()
+    # folders not to enter, as not accessible (macOS: places that would ask for consent one by
+    # one without Full Disk Access, when the user chose to leave them out; spaceknife.privacy)
+    protect: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +116,55 @@ class SliceResult:
     ext_ids: np.ndarray  # uint16 per entry, ids into ext_table
     frontier: list[Task]
     errors: list[tuple[Ref, str, str]]
-    elapsed: float = 0.0
+    elapsed: float = 0.0  # seconds spent listing (not waiting to start, nor handing the result over)
+
+
+def _shift(ref: Ref | np.ndarray, listings: int) -> Ref:
+    kind, j, i = (int(x) for x in ref)
+    return (kind, j, i) if kind == 0 else (kind, j + listings, i)
+
+
+def merge_slices(results: list[SliceResult]) -> SliceResult:
+    """Several slices as one, their listings one after another: the store folds them in one call
+    and pays its per-call costs once. Listings of different slices never name each other, so only
+    the references inside each slice (``(1, listing, entry)``) move. Extensions get one table."""
+    if len(results) == 1:
+        return results[0]
+    refs: list[np.ndarray] = []
+    bounds: list[np.ndarray] = [np.zeros(1, dtype=np.int64)]
+    ext_ids: list[np.ndarray] = []
+    frontier: list[Task] = []
+    errors: list[tuple[Ref, str, str]] = []
+    table: dict[str, int] = {}
+    listings = entries = 0
+    for r in results:
+        rr = np.array(r.refs, dtype=np.int64).reshape(-1, 3)
+        rr[rr[:, 0] != 0, 1] += listings
+        refs.append(rr)
+        bounds.append(np.asarray(r.bounds, dtype=np.int64)[1:] + entries)
+        remap = np.array([table.setdefault(e, len(table)) for e in r.ext_table], dtype=np.uint16)
+        ext_ids.append(remap[np.asarray(r.ext_ids, dtype=np.intp)])
+        if listings:
+            frontier += [(_shift(ref, listings), path, root) for ref, path, root in r.frontier]
+            errors += [(_shift(ref, listings), path, msg) for ref, path, msg in r.errors]
+        else:
+            frontier += r.frontier
+            errors += r.errors
+        listings += len(rr)
+        entries += len(r.name_lens)
+    return SliceResult(
+        refs=np.concatenate(refs),
+        paths=[p for r in results for p in r.paths],
+        bounds=np.concatenate(bounds),
+        name_blob=b"".join(r.name_blob for r in results),
+        name_lens=np.concatenate([r.name_lens for r in results]),
+        cols={key: np.concatenate([r.cols[key] for r in results]) for key in results[0].cols},
+        ext_table=list(table),
+        ext_ids=np.concatenate(ext_ids),
+        frontier=frontier,
+        errors=errors,
+        elapsed=sum(r.elapsed for r in results),
+    )
 
 
 @dataclass(slots=True)
@@ -276,12 +334,20 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                     continue
                 mode = st.st_mode
                 descend = False
+                if DARWIN and getattr(st, "st_flags", 0) & SF_DATALESS:
+                    flags |= (
+                        F_CLOUD  # takes no local space; a folder is not entered: listing would download it
+                    )
                 if stat.S_ISDIR(mode):
                     kind = KIND_DIR
-                    if st.st_dev != root.dev and not root.cross_mounts:
+                    if (st.st_dev != root.dev and not root.cross_mounts) or (
+                        root.skip and posixpath.join(path, name) in root.skip
+                    ):
                         flags |= F_MOUNT
+                    elif root.protect and posixpath.join(path, name) in root.protect:
+                        flags |= F_ACCESS_DENIED
                     else:
-                        descend = True
+                        descend = not flags & F_CLOUD
                 elif stat.S_ISLNK(mode):
                     kind = KIND_LINK
                 elif stat.S_ISREG(mode):
@@ -370,5 +436,9 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
 
 
 def warm_up() -> int:
-    """Pool initializer target: import everything once so the first real slice is fast."""
+    """Pool initializer target: import everything once so the first real slice is fast; on macOS
+    the worker process never downloads cloud files either (io.priority.no_cloud_downloads)."""
+    from ..io.priority import no_cloud_downloads
+
+    no_cloud_downloads()
     return os.getpid()

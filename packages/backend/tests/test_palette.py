@@ -9,7 +9,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from spaceknife.layout.engine import Layout
+from spaceknife import i18n
+from spaceknife.layout import registry as visuals
+from spaceknife.layout.api import ENGINE_API, Visualization
+from spaceknife.layout.engine import Layout, TreemapEngine
 from spaceknife.palette import paths as ppaths
 from spaceknife.palette.commands import Context, evaluate, match, registry
 from spaceknife.palette.fuzzy import score, utf16_spans
@@ -17,6 +20,7 @@ from spaceknife.palette.recents import Recents
 from spaceknife.store.nodes import ENTRY_COLUMNS, Kind, NodeStore
 from spaceknife.view import TagStore, View
 from spaceknife.view.state import RootInfoLike
+from spaceknife_protocol import ALL_CAPABILITIES
 
 from .store_builder import build, find
 
@@ -124,6 +128,59 @@ def test_availability_and_status(tmp_path: Path) -> None:
     assert evaluate(by_id["nav.back"], done) == (False, "没有可后退的位置")
     view.select(find(store, "Users"))
     assert evaluate(by_id["item.copy_path"], done) == (True, "")
+
+
+def test_visualization_commands(tmp_path: Path) -> None:
+    by_id = {c.id: c for c in registry()}
+    picks = ("view.visual.treemap", "view.visual.flame", "view.visual.flame_polar", "view.color.branch")
+    for cid in ("view.cycle_visual", *picks):
+        assert not by_id[cid].pinned, cid
+    assert all(by_id[cid].typed_only for cid in picks)
+    cycle = by_id["view.cycle_visual"]
+    assert cycle.keys == ("V",) and not cycle.typed_only and cycle.icon == "vizFlamePolar"
+    assert match(cycle, "qhksh") is not None and match(cycle, "flame") is not None
+    assert match(by_id["view.visual.flame_polar"], "polar") is not None
+    store = build(SPEC, root=ROOT)
+    view = View("v", store, [RootInfoLike(node=1, whole_volume=False)], tags=TagStore(tmp_path / "t.json"))
+    full = Context(tab="scan", has_scan=True, view=view, caps=frozenset(ALL_CAPABILITIES))
+    old = Context(tab="scan", has_scan=True, view=view)  # a frontend without visuals.v1
+    assert evaluate(by_id["view.visual.treemap"], full) == (True, "当前")
+    assert evaluate(by_id["view.visual.treemap"], old) == (True, "当前")
+    assert evaluate(by_id["view.color.branch"], full) == (True, "")
+    assert evaluate(by_id["view.color.branch"], old) == (False, "这种配色在当前界面不可用")
+    assert evaluate(by_id["view.visual.flame"], old) == (False, "这种可视化在当前界面不可用")
+    flame = "flame" in [v.id for v in visuals.all_visuals()]  # registered by its own module
+    assert evaluate(by_id["view.visual.flame"], full)[0] is flame
+    assert evaluate(by_id["view.cycle_visual"], old) == (False, "这种可视化在当前界面不可用")
+    assert evaluate(by_id["view.color.class"], Context(tab="start")) == (False, "需要先完成扫描")
+    fake = Visualization(
+        id="test.pie",
+        api=ENGINE_API,
+        layout="drawlist.v1",
+        capability="",
+        title_id="测试图",
+        icon="vizTreemap",
+        order=90,
+        engine=TreemapEngine,
+    )
+    visuals.register(fake)
+    try:
+        assert evaluate(by_id["view.cycle_visual"], full) == (True, "当前：树图")
+        view.set_visual("test.pie")
+        assert evaluate(by_id["view.cycle_visual"], full) == (True, "当前：测试图")
+        assert evaluate(by_id["view.visual.treemap"], full) == (True, "")
+        view.color_mode = "branch"
+        assert evaluate(by_id["view.color.branch"], full) == (True, "当前")
+        assert evaluate(by_id["view.cycle_color"], full) == (True, "当前：顶层分支")
+        view.set_visual("treemap")
+        try:
+            i18n.set_language("en")
+            assert evaluate(by_id["view.cycle_visual"], full) == (True, "Current: Treemap")
+        finally:
+            i18n.set_language("zh-CN")
+    finally:
+        view.set_visual("treemap")
+        visuals.unregister(fake.id)
 
 
 # ------------------------------------------------------------------ paths

@@ -9,6 +9,7 @@
 //! order worker.scan_slice lists in, so ``(1, L, j)`` references always point at earlier
 //! listings and an untruncated slice is identical to the worker's.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -102,7 +103,13 @@ const KEEP_POOLS: usize = 4;
 
 /// The thread pool of a given size, reused across calls. A forked child inherits the pool
 /// objects but not their threads, so pools from another pid are leaked and rebuilt.
+///
+/// A one-thread pool belongs to the calling thread: the scanner runs several one-thread slices at
+/// once, one per Python thread, and a shared one-thread pool would list them one after another.
 pub fn pool(threads: usize) -> Result<Arc<ThreadPool>, String> {
+    if threads == 1 {
+        return own_pool();
+    }
     type Pools = (u32, Vec<(usize, Arc<ThreadPool>)>); // (owning pid, pools)
     static POOLS: Mutex<Pools> = Mutex::new((0, Vec::new()));
     let mut guard = POOLS.lock().unwrap_or_else(|e| e.into_inner());
@@ -116,17 +123,41 @@ pub fn pool(threads: usize) -> Result<Arc<ThreadPool>, String> {
         pools.push(hit.clone());
         return Ok(hit.1);
     }
-    let p = ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("spaceknife-scan-{i}"))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let p = Arc::new(p);
+    let p = Arc::new(build(threads)?);
     pools.push((threads, p.clone()));
     if pools.len() > KEEP_POOLS {
         pools.remove(0);
     }
     Ok(p)
+}
+
+/// The calling thread's one-thread pool; it ends with that thread.
+fn own_pool() -> Result<Arc<ThreadPool>, String> {
+    thread_local! {
+        static OWN: RefCell<Option<(u32, Arc<ThreadPool>)>> = const { RefCell::new(None) };
+    }
+    OWN.with(|own| {
+        let mut own = own.borrow_mut();
+        match own.take() {
+            Some((pid, p)) if pid == std::process::id() => {
+                *own = Some((pid, p.clone()));
+                return Ok(p);
+            }
+            Some((_, p)) => std::mem::forget(p), // a forked child: the pool's thread is gone
+            None => {}
+        }
+        let p = Arc::new(build(1)?);
+        *own = Some((std::process::id(), p.clone()));
+        Ok(p)
+    })
+}
+
+fn build(threads: usize) -> Result<ThreadPool, String> {
+    ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("spaceknife-scan-{i}"))
+        .build()
+        .map_err(|e| e.to_string())
 }
 
 /// One per logical CPU, at most 16: directory opens contend on file-system locks, and on a
@@ -332,4 +363,44 @@ pub fn flatten<'a>(nodes: &'a [Node], input_refs: &[Ref], arenas: &'a [Arena]) -
         }
     }
     f
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_thread_pools_belong_to_their_caller() {
+        let mine = pool(1).unwrap();
+        assert!(Arc::ptr_eq(&mine, &pool(1).unwrap()));
+        let theirs = std::thread::spawn(|| pool(1).unwrap()).join().unwrap();
+        assert!(!Arc::ptr_eq(&mine, &theirs));
+        // concurrent one-thread slices run side by side, not one after another
+        let busy = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let workers: Vec<_> = (0..4)
+            .map(|_| {
+                let (busy, peak) = (busy.clone(), peak.clone());
+                std::thread::spawn(move || {
+                    pool(1).unwrap().install(|| {
+                        let now = busy.fetch_add(1, Ordering::SeqCst) + 1;
+                        peak.fetch_max(now, Ordering::SeqCst);
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        busy.fetch_sub(1, Ordering::SeqCst);
+                    })
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().unwrap();
+        }
+        assert!(peak.load(Ordering::SeqCst) > 1);
+    }
+
+    #[test]
+    fn bigger_pools_are_shared() {
+        let a = pool(3).unwrap();
+        let b = std::thread::spawn(|| pool(3).unwrap()).join().unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+    }
 }

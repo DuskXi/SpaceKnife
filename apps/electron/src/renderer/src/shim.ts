@@ -16,7 +16,7 @@ export function installShim(): void {
   const noop = () => {};
   window.sk = {
     platform,
-    version: "0.3.0-web",
+    version: "0.3.1-web",
     backend: async () => state,
     onBackend: () => noop,
     window: {
@@ -32,6 +32,11 @@ export function installShim(): void {
       openPath: async (path) => (console.info("openPath", path), ""),
       openTerminal: (dir) => console.info("openTerminal", dir),
       copyText: (text) => void navigator.clipboard?.writeText(text).catch(noop),
+      openFullDiskAccess: () => console.info("openFullDiskAccess"),
+      openExternal: (url) => void window.open(url, "_blank", "noopener"),
+    },
+    update: {
+      install: async () => t("浏览器模式下无法安装更新"),
     },
     setLanguage: () => undefined,
     dialog: {

@@ -9,7 +9,9 @@ import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from 
 
 import type { BackendState } from "../shared/api";
 import { type Backend, bundledBackend, startBackend } from "./backend";
+import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
+import { installKind, installRefusal, projectPage } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -26,9 +28,15 @@ const MIME: Record<string, string> = {
   ".json": "application/json",
 };
 
+// A portable copy keeps its data next to the executable: the backend inherits SPACEKNIFE_HOME.
+const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env);
+if (portable) process.env.SPACEKNIFE_HOME = portable;
+// what the backend's update check downloads, and what main may start once it is downloaded
+const INSTALL_KIND = installKind(process.execPath, process.platform, app.isPackaged, process.env, portable);
+
 // The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own: an isolated
-// home (demos, tests) gets its own; otherwise <appData>/SpaceKnife/electron, apart from the backend's
-// files (on Linux the backend's config folder is ~/.config/SpaceKnife as well).
+// home (demos, tests, portable copies) gets its own; otherwise <appData>/SpaceKnife/electron, apart from
+// the backend's files (on Linux the backend's config folder is ~/.config/SpaceKnife as well).
 app.setPath(
   "userData",
   process.env.SPACEKNIFE_HOME ? join(resolve(process.env.SPACEKNIFE_HOME), "electron") : join(app.getPath("appData"), "SpaceKnife", "electron"),
@@ -62,12 +70,24 @@ async function launchBackend(): Promise<void> {
       allowOrigins: origins,
       home: process.env.SPACEKNIFE_HOME,
       locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
+      appVersion: app.getVersion(),
+      installKind: INSTALL_KIND,
+      downloadDir: downloadsDir(),
       onLog: (line) => console.log(`[backend] ${line}`),
     });
     backend.proc.once("exit", (code) => setBackend({ state: "exited", code }));
     setBackend({ state: "ready", info: backend.info });
   } catch (err) {
     setBackend({ state: "failed", message: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** The user's download folder (the backend saves updates there); null when the OS names none. */
+function downloadsDir(): string | null {
+  try {
+    return app.getPath("downloads");
+  } catch {
+    return null;
   }
 }
 
@@ -96,6 +116,7 @@ function createWindow(): void {
       contextIsolation: true,
       sandbox: false,
       spellcheck: false,
+      additionalArguments: [`--sk-app-version=${app.getVersion()}`], // window.sk.version (preload)
     },
   });
   // SPACEKNIFE_START_MINIMIZED=1 (milestone demos): appear in the taskbar without taking the focus
@@ -126,6 +147,16 @@ function registerIpc(): void {
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
+  // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
+  ipcMain.on("sk:openFullDiskAccess", () => {
+    if (process.platform === "darwin") void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles");
+  });
+  ipcMain.on("sk:openExternal", (_e, url: unknown) => {
+    const page = projectPage(url);
+    if (page) void shell.openExternal(page);
+    else console.warn(`[shell] not opening ${String(url)}: not a page of the project on GitHub`);
+  });
+  ipcMain.handle("sk:installUpdate", (_e, path: unknown) => installUpdate(String(path)));
   ipcMain.handle("sk:openFolders", async () => {
     const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
@@ -145,6 +176,36 @@ function registerIpc(): void {
     const opts = { title: mt("openSnapshot"), properties: ["openFile" as const], filters: [{ name: mt("snapshotFilter"), extensions: ["sks"] }] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
     return res.canceled ? null : (res.filePaths[0] ?? null);
+  });
+}
+
+/** Start the update the backend downloaded (update.download): "" when started, else why not. */
+async function installUpdate(file: string): Promise<string> {
+  const downloads = downloadsDir();
+  const refusal = downloads ? installRefusal(file, INSTALL_KIND, downloads, process.platform) : "updateNotInDownloads";
+  if (refusal) {
+    console.warn(`[update] not starting ${file}: ${refusal}`);
+    return mt(refusal);
+  }
+  if (INSTALL_KIND === "nsis") return startInstaller(file);
+  // a disk image mounts (the user drags the new app over the old one), a package opens in the
+  // system's installer: either replaces files of this app, so it quits once the file is open
+  const error = await shell.openPath(file);
+  if (error) return mt("updateStartFailed", { error });
+  setTimeout(() => app.quit(), 500);
+  return "";
+}
+
+/** The Windows installer closes the app itself and replaces it; quitting stops the backend first. */
+function startInstaller(file: string): Promise<string> {
+  return new Promise((done) => {
+    const child = spawn(file, [], { detached: true, stdio: "ignore" });
+    child.once("error", (err) => done(mt("updateStartFailed", { error: err.message })));
+    child.once("spawn", () => {
+      child.unref();
+      done("");
+      app.quit();
+    });
   });
 }
 

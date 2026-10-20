@@ -4,10 +4,18 @@ import { describe, expect, it } from "vitest";
 import type { FrameInfo } from "@/protocol/generated";
 import type { Column } from "@/protocol/rpc";
 
+import { branchFill } from "@/visual/colors";
+import { frameInfo } from "@/visual/testing/fixtures";
+
 import { decodeDraw, type DrawFrame, Flag, Kind, Label } from "./frame";
 import { fillOf, labelColors, paint, type PaintOptions, Pattern, type RGBA, rgba, STRIDE } from "./paint";
 
 const T = tokens.treemap;
+/** Every tier of every 「顶层分支」 hue, and the neutral one. */
+const BRANCH_FILLS: string[] = [
+  ...Object.entries(tokens.visual.branch).flatMap(([k, v]) => (k === "neutral" ? [] : Object.values(v as Record<string, string>))),
+  tokens.visual.branch.neutral,
+];
 
 // ------------------------------------------------------------------ reference WCAG maths
 // Independent of paint.ts: relative luminance and contrast ratio as WCAG 2.x defines them.
@@ -38,24 +46,11 @@ interface Row {
   flags?: number;
   tag?: number;
   tone?: number;
+  branch?: number;
   name?: string;
 }
 
-const INFO: FrameInfo = {
-  breadcrumb: [],
-  dpr: 1,
-  filter: null,
-  height: 300,
-  flash: [],
-      layout_ms: 0,
-  reason: "open",
-  rows: 0,
-  scanned: 0,
-  selected_row: null,
-  seq: 1,
-  view_id: "v1",
-  width: 300,
-};
+const INFO: FrameInfo = frameInfo({ breadcrumb: [], height: 300, layout_ms: 0, scanned: 0, width: 300 });
 
 /** A DrawFrame straight from typed columns (the wire codec is covered by frame.test.ts). */
 function frameOf(rows: Row[]): DrawFrame {
@@ -83,6 +78,7 @@ function frameOf(rows: Row[]): DrawFrame {
     flags: Uint16Array.from(rows, (r) => r.flags ?? 0),
     tag: Uint8Array.from(rows, (r) => r.tag ?? 0),
     tone: Uint8Array.from(rows, (r) => r.tone ?? 0),
+    branch: Uint8Array.from(rows, (r) => r.branch ?? 0),
     name_len: Uint32Array.from(enc, (b) => b.length),
   };
   return decodeDraw(
@@ -136,6 +132,7 @@ describe("labelColors (UI-TM-19)", () => {
     const fills: RGBA[] = [
       ...Object.values(T.class).map((c) => rgba(c)),
       ...Object.values(T.time).map((c) => rgba(c)),
+      ...BRANCH_FILLS.map((c) => rgba(c)),
       ...Array.from({ length: 256 }, (_, v) => grey(v)),
       [1, 0, 0, 1],
       [0, 1, 0, 1],
@@ -149,6 +146,14 @@ describe("labelColors (UI-TM-19)", () => {
       expect([main, sub]).toEqual(best);
       // the better of white / near-black is never below ~4.4:1 against any opaque fill
       expect(Math.max(contrast(fill, L), contrast(fill, D))).toBeGreaterThan(4.4);
+    }
+  });
+
+  it("keeps the 「顶层分支」 labels at 4.5:1 or better on every tier", () => {
+    for (const hex of BRANCH_FILLS) {
+      const fill = rgba(hex);
+      const [main] = labelColors(fill);
+      expect(contrast(fill, rgba(main)), hex).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -215,6 +220,32 @@ describe("fillOf", () => {
     // newer is brighter: luminance strictly falls from tone 0 to tone 4
     const lum = [0, 7, 8, 9, 10].map((i) => luminance(fillOf(f, i, "time", classIds)));
     for (let k = 1; k < lum.length; k++) expect(lum[k]!).toBeLessThan(lum[k - 1]!);
+  });
+
+  it("colours files, collapsed folders and aggregates by top-level branch and depth in branch mode", () => {
+    const g = frameOf([
+      { kind: Kind.FILE, cls: 1, depth: 1, branch: 3 },
+      { kind: Kind.COLLAPSED, depth: 2, branch: 3 },
+      { kind: Kind.SMALL, depth: 3, branch: 5 },
+      { kind: Kind.MORE, depth: 6, branch: 8 },
+      { kind: Kind.FILE, depth: 2, branch: 0 }, // a row without a branch: neutral
+    ]);
+    expect(fillOf(g, 0, "branch", classIds)).toEqual(branchFill(3, 1));
+    expect(fillOf(g, 1, "branch", classIds)).toEqual(branchFill(3, 2));
+    expect(fillOf(g, 2, "branch", classIds)).toEqual(branchFill(5, 3));
+    expect(fillOf(g, 3, "branch", classIds)).toEqual(branchFill(8, 4));
+    expect(fillOf(g, 4, "branch", classIds)).toEqual(rgba(tokens.visual.branch.neutral));
+    // the hues differ between branches and the tiers between depths
+    expect(branchFill(3, 1)).not.toEqual(branchFill(3, 2));
+    expect(branchFill(3, 1)).not.toEqual(branchFill(4, 1));
+    // a frame without the branch column (a server before visuals.v1) is neutral
+    expect(fillOf({ kind: g.kind, cls: g.cls, tone: g.tone, delta: null }, 0, "branch", classIds)).toEqual(rgba(tokens.visual.branch.neutral));
+  });
+
+  it("lets the compare colour scale win over branch colouring", () => {
+    const g = frameOf([{ kind: Kind.FILE, branch: 2 }]);
+    const withDelta = { ...g, delta: BigInt64Array.of(5n << 30n) };
+    expect(fillOf(withDelta, 0, "branch", classIds, [1, 2, 3])).not.toEqual(branchFill(2, 1));
   });
 
   it("gives distinct classes distinct colours", () => {
@@ -374,6 +405,19 @@ describe("paint", () => {
     expect(p.tags).toEqual([{ x: 2 + 150 - 18, y: 24, tag: 1, alpha: 1 }]);
     const tiny = frameOf([{ kind: Kind.FILE, rect: [0, 0, 20, 20], tag: 3 }]);
     expect(paint(tiny, opts).tags).toEqual([]);
+  });
+
+  it("fills blocks by branch and keeps the level colours of folder boxes in branch mode", () => {
+    const f = frameOf(rows.map((r, i) => ({ ...r, branch: i === 3 || i === 4 ? 0 : 2 })));
+    const p = paint(f, { ...opts, colorMode: "branch" });
+    const box = slot(p, 0);
+    expectRGBA(box.subarray(4, 8), rgba(T.level[0].bg)); // the root folder's box
+    expectRGBA(slot(p, 2).subarray(4, 8), branchFill(2, 2)); // movie.mkv at depth 2
+    expectRGBA(slot(p, 3).subarray(4, 8), branchFill(2, 2)); // the small-items block
+    const [main] = labelColors(branchFill(2, 2));
+    expect(p.texts.find((t) => t.text === "movie.mkv")!.color).toBe(main);
+    // free and unknown space keep their stripes
+    expectRGBA(slot(p, 4).subarray(4, 8), rgba(T.free.stripeA));
   });
 
   it("scales geometry with the device pixel ratio", () => {
