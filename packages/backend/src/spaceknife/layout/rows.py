@@ -97,7 +97,7 @@ class DrawList:
     parent: np.ndarray  # i4 row of the enclosing FOLDER, -1 at the top
     kind: np.ndarray  # u1 RectKind
     depth: np.ndarray  # u1 nesting level, 1 = child of the zoom root
-    cls: np.ndarray  # u1 index into the class table (files, SMALL)
+    cls: np.ndarray  # u1 index into the class table; 255 (NO_CLASS): a folder or block in no one class
     label: np.ndarray  # u1 Label bits
     size: np.ndarray  # i8 bytes (area basis, except a shrunk "+N items" in an aggregate zoom)
     count: np.ndarray  # u4 files in SMALL, entries in MORE (SMALL counted by its files)

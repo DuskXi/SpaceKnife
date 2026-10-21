@@ -205,6 +205,16 @@
         "$value": "#0A0B0D"
       }
     },
+    "classFocus": {
+      "$type": "color",
+      "$description": "悬停「类别统计」里的一类：图上其余部分压暗的蒙层，这一类的块保持原色并描一圈细边，外发光取类别色（太暗的类别用强调色）",
+      "veil": {
+        "$value": "#060709D9"
+      },
+      "outline": {
+        "$value": "#FFFFFF8C"
+      }
+    },
     "pending": {
       "$type": "color",
       "stripeA": {

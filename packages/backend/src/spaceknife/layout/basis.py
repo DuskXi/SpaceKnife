@@ -8,6 +8,10 @@ from .. import pathclass
 from ..classes import ClassTable, active, looks_like_stream
 from ..store.nodes import Flag, Kind, NodeStore
 
+NO_CLASS = 255
+"""``cls`` of a row in no one class: a folder no folder class swallows, an aggregate of mixed
+classes, "+N items". It paints like the Other class but never counts as it (the class hover highlight)."""
+
 
 class Basis:
     """Per-store inputs of the layout engines; reusable across calls (and across engines)."""
@@ -56,11 +60,19 @@ class Basis:
 
     def cls_of(self, ids: np.ndarray) -> np.ndarray:
         """Colour class index (u1) of some nodes: by extension, under the folder classes
-        (a game install's files are 「游戏」 whatever their extension, see :mod:`..pathclass`)."""
+        (a game install's files are 「游戏」 whatever their extension, see :mod:`..pathclass`).
+
+        A folder has a class only when a folder class swallows it (everything in it is that
+        class); any other folder gets :data:`NO_CLASS`.
+        """
         out = self.ext_cls_of(ids)
         col = pathclass.column(self.store, self.classes)[ids]
         if col.any():
             out = pathclass.resolve(col, out, self.other)
+        dirs = self.store.cols["kind"][ids] == Kind.DIR
+        if dirs.any():
+            swallowed = (col > 0) & (col < pathclass.FALLBACK_BASE)
+            out = np.where(dirs & ~swallowed, NO_CLASS, out).astype(np.uint8, copy=False)
         return out
 
     def ext_cls_of(self, ids: np.ndarray) -> np.ndarray:

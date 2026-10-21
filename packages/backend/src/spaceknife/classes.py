@@ -40,6 +40,7 @@ TEXT = Texts(
         "other_missing": "「其他」类别不能删除",
         "other_exts": "「其他」类别不能填扩展名：它收纳所有未归类的扩展名",
         "bad_ext": "扩展名「{ext}」不合法",
+        "too_many": "类别最多 {n} 个",
     }
 )
 _EXT_SPLIT = re.compile(r"[;,\s]+")
@@ -71,10 +72,17 @@ class Split:
     rest: tuple[str, ...]  # the classes of any other file with this extension (none: 「其他」)
 
 
+MAX_CLASSES = 127
+"""Classes a table may hold: the folder class column stores a class index below 127, and the
+view rows' ``cls`` keeps 255 for "in no one class" (:data:`.layout.basis.NO_CLASS`)."""
+
+
 class ClassTable:
     """Classes in display order (``other`` last), with per-extension membership."""
 
     def __init__(self, classes: tuple[FilterClassInfo, ...] = BUILTIN_CLASSES) -> None:
+        if len(classes) > MAX_CLASSES:
+            raise ValueError(f"a class table holds at most {MAX_CLASSES} classes")
         self.classes = classes
         self.by_id = {c.id: c for c in classes}
         if OTHER not in self.by_id:
@@ -214,6 +222,8 @@ def build(edits: list[ClassEdit]) -> ClassTable:
     builtin = {c.id: c for c in BUILTIN_CLASSES}
     used_ids: set[str] = set()
     other: FilterClassInfo | None = None
+    if len(edits) > MAX_CLASSES:
+        raise ValueError(TEXT["too_many"].format(n=MAX_CLASSES))
     for e in edits:
         name = _own_name(e.id, e.name.strip())
         if not name:

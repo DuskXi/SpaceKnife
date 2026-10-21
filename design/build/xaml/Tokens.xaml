@@ -130,6 +130,10 @@
     <SolidColorBrush x:Key="SkTreemapClassOtherBrush" Color="#FF2B2F38"/>
     <Color x:Key="SkTreemapClassVideo">#FFE07A1F</Color>
     <SolidColorBrush x:Key="SkTreemapClassVideoBrush" Color="#FFE07A1F"/>
+    <Color x:Key="SkTreemapClassFocusOutline">#8CFFFFFF</Color>
+    <SolidColorBrush x:Key="SkTreemapClassFocusOutlineBrush" Color="#8CFFFFFF"/>
+    <Color x:Key="SkTreemapClassFocusVeil">#D9060709</Color>
+    <SolidColorBrush x:Key="SkTreemapClassFocusVeilBrush" Color="#D9060709"/>
     <Color x:Key="SkTreemapCollapsed">#FF232731</Color>
     <SolidColorBrush x:Key="SkTreemapCollapsedBrush" Color="#FF232731"/>
     <Color x:Key="SkTreemapDiffGrow0">#FF5E3410</Color>

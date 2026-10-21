@@ -68,6 +68,9 @@ export interface ViewData {
   filterText: string;
   /** block highlighted from outside the treemap (W3 result list hover, UI-W3-33) */
   hoverKey: number | null;
+  /** class lit in the picture from 「类别统计」 (UI-MAIN-65), within the node whose make-up the
+   * panel shows; the filter stays as it is */
+  hoverClass?: { id: string; node: number } | null;
 }
 
 export type ConnState = "starting" | "ready" | "lost" | "failed";

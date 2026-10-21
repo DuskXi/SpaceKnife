@@ -86,7 +86,7 @@ A file class is a named set of extensions. The classes are used in three places:
 
 - the **File classes** coloring of the picture,
 - `:class:` [filters](../filtering/#file-classes),
-- the **Classes** page of the details panel, which breaks the selected folder down by class: number of files, size, share and a bar for each class.
+- the **Classes** page of the details panel, which breaks the selected folder down by class: number of files, size, share and a bar for each class. Hover a class and the picture shows where it is.
 
 ### The built-in classes
 

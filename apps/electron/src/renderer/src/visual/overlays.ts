@@ -1,8 +1,9 @@
 // What the view host draws over any visualization: file-change flashes and, under reduced motion,
 // their static badges (UI-TM-43/44); the pointer trail (「鼠标拖尾」); and, on a canvas of its own so
 // their motion never repaints the shapes or their labels, the breathing outline of folders still
-// being scanned (UI-TM-42 / UI-W2-04) and what lies in a recycle bin (「回收站特效」). The rhythm is the host's; the outline of a row comes from the
-// component's geometry, so a block, a bar and a sector flash and breathe alike.
+// being scanned (UI-TM-42 / UI-W2-04), what lies in a recycle bin (「回收站特效」) and the class the
+// pointer is on in 「类别统计」 (UI-MAIN-65). The rhythm is the host's; the outline of a row comes from
+// the component's geometry, so a block, a bar and a sector flash, breathe and light up alike.
 
 import { icons } from "@design/icons";
 import { tokens } from "@design/tokens";
@@ -10,7 +11,7 @@ import { tokens } from "@design/tokens";
 import type { FlashItem } from "@/protocol/generated";
 import { fmtSize } from "@/lib/format";
 
-import { Flag } from "./frame";
+import { Flag, Kind } from "./frame";
 import { type Box, HIT_ROOT, type Hit, type Pt, type VisualFrame, type VisualGeometry } from "./types";
 
 /** Makes the outlines the overlays stroke: Path2D in the app, a recorder in tests. */
@@ -396,4 +397,107 @@ function drawBinBadge(ctx: CanvasRenderingContext2D, m: TrashMark, dpr: number, 
     ctx.stroke(newPath(BIN_ICON));
   }
   ctx.restore();
+}
+
+// ------------------------------------------------------------------ class highlight (UI-MAIN-65)
+
+/** One class lit in the picture: everything else under a veil, its rows cut out of it and outlined. */
+export interface ClassMark {
+  /** the class index (``filter.vocab`` order) */
+  cls: number;
+  /** what stays bright: the rows of the class */
+  cut: Path2D;
+  /** the outlines of the rows roomy enough for one */
+  outline: Path2D;
+  rows: number;
+  outlined: number;
+}
+
+const FOCUS = tokens.treemap.classFocus;
+/** rows a class can light: files, aggregates of one class, folders a folder class swallows (the
+ * backend sends 255 for every other folder, mixed aggregates, "+N items", free and unknown space) */
+const CLASS_KINDS: ReadonlySet<number> = new Set([Kind.FILE, Kind.SMALL, Kind.FOLDER, Kind.COLLAPSED, Kind.PENDING]);
+/** the veil comes and goes this fast (not under 「减少动画」) */
+export const CLASS_FADE_MS = 120;
+const GLOW_MAX = 2000; // past this many outlines the glow is left out
+
+/** The rows of class `cls` in `scope` (a row and what lies in it; -1: the whole picture). In the
+ * treemap a lit folder holds its blocks, so they are not drawn again. A scope drawn without its
+ * contents (a collapsed folder) lights itself when nothing in it can. */
+export function classMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, cls: number, scope: number, dpr: number, newPath: NewPath = path2d): ClassMark {
+  const nested = f.layout === "drawlist.v1";
+  // rows come before their children, so one pass carries both down the tree
+  const inside = scope >= 0 && scope < f.count ? new Uint8Array(f.count) : null;
+  const lit = nested ? new Uint8Array(f.count) : null;
+  const cut = newPath();
+  const outline = newPath();
+  const min = 4 * dpr;
+  let rows = 0;
+  let outlined = 0;
+  const light = (i: number) => {
+    if (!g.path(f, i, 0, cut)) return false;
+    rows++;
+    if (g.box(f, i).minor >= min && g.path(f, i, 0.75 * dpr, outline)) outlined++;
+    return true;
+  };
+  if (inside) inside[scope] = 1;
+  for (let i = 0; i < f.count; i++) {
+    const p = f.parent[i]!;
+    if (inside && i !== scope) {
+      if (p < 0 || !inside[p]) continue;
+      inside[i] = 1;
+    }
+    if (lit && p >= 0 && lit[p]) {
+      lit[i] = 1;
+      continue;
+    }
+    if (f.cls[i] !== cls || !CLASS_KINDS.has(f.kind[i]!)) continue;
+    if (light(i) && lit) lit[i] = 1;
+  }
+  if (!rows && inside && (f.kind[scope] === Kind.COLLAPSED || f.kind[scope] === Kind.PENDING)) light(scope);
+  return { cls, cut, outline, rows, outlined };
+}
+
+/** The glow around the lit rows: the class colour, the accent for a class too dark to glow. */
+export function glowOf(hex: string): string {
+  const v = /^#?([0-9a-f]{6})/i.exec(hex);
+  if (!v) return ACCENT;
+  const n = parseInt(v[1]!, 16);
+  const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lum = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return lum < 0.06 ? ACCENT : `#${v[1]}`;
+}
+
+/** Draw the mark at `level` (0–1, the fade): the veil over the whole canvas minus the class's rows,
+ * then their outlines with a soft glow. Drawn first on its canvas: the bins and the breathing go over it. */
+export function drawClassMark(ctx: CanvasRenderingContext2D, m: ClassMark, color: string, level: number, w: number, h: number, dpr: number): void {
+  if (level <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = level;
+  ctx.fillStyle = FOCUS.veil;
+  ctx.fillRect(0, 0, w, h);
+  if (m.rows) {
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fill(m.cut);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  if (m.outlined) {
+    ctx.globalAlpha = level;
+    ctx.strokeStyle = FOCUS.outline;
+    ctx.lineWidth = dpr;
+    if (m.outlined <= GLOW_MAX) {
+      ctx.shadowColor = glowOf(color);
+      ctx.shadowBlur = 8 * dpr;
+    }
+    ctx.stroke(m.outline);
+  }
+  ctx.restore();
+}
+
+/** The fade toward `on` after `dt` ms: there at once under 「减少动画」. */
+export function classFade(level: number, on: boolean, dt: number, reduced: boolean): number {
+  if (reduced) return on ? 1 : 0;
+  const step = Math.max(0, dt) / CLASS_FADE_MS;
+  return on ? Math.min(1, level + step) : Math.max(0, level - step);
 }

@@ -17,10 +17,29 @@ import { type ColorMode, rgba } from "@/treemap/paint";
 
 import { acquireGl, type GlContext } from "./glContext";
 import { type HostHandle, hosts } from "./hosts";
-import { type Breath, breathingRows, drawBreath, drawFlash, drawTrail, drawTrash, type Flash, flashOf, type TrailMark, trailMark, type TrashMark, trashMarks, type TrashMode, trashMoves } from "./overlays";
+import {
+  type Breath,
+  breathingRows,
+  classFade,
+  type ClassMark,
+  classMarks,
+  drawBreath,
+  drawClassMark,
+  drawFlash,
+  drawTrail,
+  drawTrash,
+  type Flash,
+  flashOf,
+  type TrailMark,
+  trailMark,
+  type TrashMark,
+  trashMarks,
+  type TrashMode,
+  trashMoves,
+} from "./overlays";
 import { componentFor } from "./registry";
 import { breathGap, FPS_GAP, FrameLoop, frameGap, type Pace, type TransitionKind, transitionFor, useDevicePixelRatio, useReducedMotion } from "./scheduler";
-import { type Box, HIT_NONE, HIT_ROOT, type Hit, type HoverInfo, type PaintSettings, type Pt, type VisualComponent, type VisualContext, type VisualFrame, type VisualInstance } from "./types";
+import { type Box, HIT_NONE, HIT_ROOT, type Hit, type HoverInfo, type PaintSettings, type Pt, type VisualComponent, type VisualContext, type VisualFrame, type VisualGeometry, type VisualInstance } from "./types";
 
 interface Props {
   viewId: string;
@@ -62,6 +81,14 @@ interface HostState {
   breath: Breath[];
   /** what lies in a recycle bin (「回收站特效」) */
   trash: TrashMark[];
+  /** the class lit from 「类别统计」 (UI-MAIN-65): its index (-1: none) and the node whose make-up
+   * the panel shows, its rows, how far the veil has come in (0–1, kept while it fades out) and when */
+  focusCls: number;
+  focusNode: number;
+  focus: ClassMark | null;
+  focusColor: string;
+  focusLevel: number;
+  focusAt: number;
 }
 
 /** What the draw loops read from the latest render. */
@@ -118,6 +145,12 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     trail: [],
     breath: [],
     trash: [],
+    focusCls: -1,
+    focusNode: -1,
+    focus: null,
+    focusColor: "",
+    focusLevel: 0,
+    focusAt: 0,
   });
 
   const view = useApp((s) => s.views[viewId]);
@@ -148,6 +181,14 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced, trashMode });
   live.current = { pace: { fpsGap, dynaSmooth }, reduced, trashMode };
   const rehoverRef = useRef<() => void>(() => {});
+
+  /** The lit class's rows in `frame` (UI-MAIN-65). Without a class the last rows stay while the
+   * veil fades out (`fading`), and go with a new frame. */
+  const relight = <F extends VisualFrame>(g: VisualGeometry<F>, frame: F, fading = false): void => {
+    const st = r.current;
+    if (st.focusCls >= 0) st.focus = classMarks(g, frame, st.focusCls, frame.rowOf(st.focusNode), frame.info.dpr);
+    else if (!fading) st.focus = null;
+  };
 
   // ---------------------------------------------------------------- draw loops
 
@@ -204,8 +245,10 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       }
       return more;
     };
-    // on a canvas of their own: what lies in a recycle bin, and the folders still being scanned
-    // breathing over it (UI-TM-42)
+    // the veil of the class lit from 「类别统计」 coming in or going
+    const focusFading = () => st.focus !== null && st.focusLevel !== (st.focusCls >= 0 ? 1 : 0);
+    // on a canvas of their own: the class lit from 「类别统计」, what lies in a recycle bin, and the
+    // folders still being scanned breathing over it (UI-TM-42)
     const drawBreathing = (now: number): boolean => {
       const bc = breathCanvas.current;
       const cur = st.cur;
@@ -215,19 +258,26 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       fit(bc, W, H);
       const ctx = bc.getContext("2d")!;
       ctx.clearRect(0, 0, W, H);
-      if (!st.breath.length && !st.trash.length) return false;
       const { reduced, trashMode } = live.current;
+      if (st.focus) {
+        st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0, now - st.focusAt, reduced);
+        st.focusAt = now;
+        if (st.focusLevel === 0 && st.focusCls < 0) st.focus = null;
+      }
+      if (!st.breath.length && !st.trash.length && !st.focus) return false;
       const moving = trashMoves(st.trash, trashMode, reduced);
       if (!st.anim) {
+        if (st.focus) drawClassMark(ctx, st.focus, st.focusColor, st.focusLevel, W, H, cur.frame.info.dpr);
         drawTrash(ctx, st.trash, now, moving, cur.frame.info.dpr, binLabel);
         drawBreath(ctx, st.breath, now, reduced, cur.frame.info.dpr);
       }
-      return (st.breath.length > 0 && !reduced) || moving || st.anim !== null; // after a transition: draw again
+      return (st.breath.length > 0 && !reduced) || moving || focusFading() || st.anim !== null; // after a transition: draw again
     };
     // the bin's light and dashes move at 30 frames a second at most
     const ambientGap = (): number => {
       const { pace, reduced, trashMode } = live.current;
       if (st.breath.length) return breathGap(pace, true, reduced);
+      if (focusFading()) return pace.fpsGap;
       return trashMoves(st.trash, trashMode, reduced) ? Math.max(pace.fpsGap, FPS_GAP["30"]!) : 0;
     };
     return {
@@ -326,6 +376,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       }
       if (!st.anim) loops.main.run();
       st.trash = trashMode === "off" ? [] : trashMarks(g, frame, frame.info.dpr);
+      relight(g, frame);
       loops.breath.run(); // 「减少动画」 or 「回收站特效」 may have changed: move again or hold still
       return;
     }
@@ -357,10 +408,29 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     loops.main.run();
     st.breath = breathingRows(g, frame, frame.info.dpr);
     st.trash = trashMode === "off" ? [] : trashMarks(g, frame, frame.info.dpr);
+    relight(g, frame);
     loops.breath.run();
     rehoverRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
+
+  // the class the pointer is on in 「类别统计」 (UI-MAIN-65): its rows lit in the picture, everything
+  // else under a veil; the filter stays as it is
+  const hoverClass = view?.hoverClass ?? null;
+  const focusCls = hoverClass == null ? -1 : classIds.indexOf(hoverClass.id);
+  const focusNode = hoverClass?.node ?? -1;
+  useEffect(() => {
+    const st = r.current;
+    st.focusCls = focusCls;
+    st.focusNode = focusNode;
+    st.focusColor = focusCls >= 0 ? (colors[focusCls] ?? "") : st.focusColor;
+    const cur = st.cur;
+    const component = cur ? componentFor(cur.frame.layout) : null;
+    if (cur && component) relight(component.geometry, cur.frame, true);
+    st.focusAt = performance.now();
+    loops.breath.run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusCls, focusNode, colors, loops]);
 
   // hover driven from outside (W3 result list): highlight that row like a pointer hover
   const hoverKey = view?.hoverKey ?? null;

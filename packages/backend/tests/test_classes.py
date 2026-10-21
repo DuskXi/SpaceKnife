@@ -5,11 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from spaceknife.classes import DEFAULT_CLASSES, STREAM_ALIGNED_MIN, STREAM_ANY_MIN, ClassTable
+from spaceknife.classes import DEFAULT_CLASSES, MAX_CLASSES, STREAM_ALIGNED_MIN, STREAM_ANY_MIN, ClassTable
+from spaceknife.classes import build as build_table
 from spaceknife.filter import FilterContext, evaluate
 from spaceknife.layout.basis import Basis
 from spaceknife.store.subtree import summarize
-from spaceknife_protocol.classes import BUILTIN_CLASSES, ENGLISH_NAMES, OTHER
+from spaceknife_protocol.classes import BUILTIN_CLASSES, ENGLISH_NAMES, OTHER, ClassEdit
 from spaceknife_protocol.filter_syntax import parse
 
 from .store_builder import build, find
@@ -141,3 +142,12 @@ def test_colours_summary_and_filter_agree() -> None:
         res = evaluate(store, nf, ctx)
         matched = {p for p, i in zip(WANT, ids.tolist(), strict=True) if res.match[i]}
         assert matched == {p for p, c in WANT.items() if c == cid}, cid
+
+
+def test_a_table_leaves_room_for_no_class() -> None:
+    """255 in a row's ``cls`` means "in no one class": a table never reaches it."""
+    many = [ClassEdit(id=None, name=f"c{i}", extensions=[f"e{i}"]) for i in range(MAX_CLASSES)]
+    build_table([*many[: MAX_CLASSES - 1], ClassEdit(id=OTHER, name="其他")])  # the most it holds
+    with pytest.raises(ValueError, match=str(MAX_CLASSES)):
+        build_table([*many, ClassEdit(id=OTHER, name="其他")])
+    assert MAX_CLASSES < 255

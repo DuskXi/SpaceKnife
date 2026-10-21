@@ -161,6 +161,10 @@ export const tokens = {
       "other": "#2B2F38",
       "video": "#E07A1F"
     },
+    "classFocus": {
+      "outline": "#FFFFFF8C",
+      "veil": "#060709D9"
+    },
     "collapsed": "#232731",
     "diff": {
       "grow": {
@@ -455,6 +459,8 @@ export const cssVar = {
   "treemap.class.image": "var(--sk-treemap-class-image)",
   "treemap.class.other": "var(--sk-treemap-class-other)",
   "treemap.class.video": "var(--sk-treemap-class-video)",
+  "treemap.classFocus.outline": "var(--sk-treemap-class-focus-outline)",
+  "treemap.classFocus.veil": "var(--sk-treemap-class-focus-veil)",
   "treemap.collapsed": "var(--sk-treemap-collapsed)",
   "treemap.diff.grow.0": "var(--sk-treemap-diff-grow-0)",
   "treemap.diff.grow.1": "var(--sk-treemap-diff-grow-1)",

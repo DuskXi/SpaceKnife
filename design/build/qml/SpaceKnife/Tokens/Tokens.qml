@@ -96,6 +96,8 @@ QtObject {
     readonly property color treemapClassImage: "#FF2F8FDB"
     readonly property color treemapClassOther: "#FF2B2F38"
     readonly property color treemapClassVideo: "#FFE07A1F"
+    readonly property color treemapClassFocusOutline: "#8CFFFFFF"
+    readonly property color treemapClassFocusVeil: "#D9060709"
     readonly property color treemapCollapsed: "#FF232731"
     readonly property color treemapDiffGrow0: "#FF5E3410"
     readonly property color treemapDiffGrow1: "#FF7A4312"

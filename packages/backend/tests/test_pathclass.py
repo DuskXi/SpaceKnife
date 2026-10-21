@@ -12,7 +12,7 @@ import pytest
 from spaceknife import pathclass
 from spaceknife.classes import DEFAULT_CLASSES, ClassTable
 from spaceknife.filter import FilterContext, evaluate
-from spaceknife.layout.basis import Basis
+from spaceknife.layout.basis import NO_CLASS, Basis
 from spaceknife.store import mutate
 from spaceknife.store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from spaceknife.store.subtree import summarize
@@ -139,6 +139,23 @@ HOME: dict[str, Any] = {
     "Program Files": {"App": {"app.exe": 10, "res.xyz": 20, "pic.png": 30}},
     "Data": {"lib": {"setup.py": 1, "m.py": 2}},
 }
+
+
+def test_a_folder_has_a_class_only_when_swallowed() -> None:
+    """The class hover highlight lights a folder only when everything in it is that class."""
+    store = build(GAMES, root=C)
+    basis = Basis(store, DEFAULT_CLASSES)
+    paths = [
+        "Program Files (x86)/Steam/steamapps/common/Foo",  # a game: all of it
+        "Games/Bar/Bar_Data",  # inside a game
+        "Program Files (x86)/Steam",  # software: only its unclassified files fall back
+        "Games/NotAGame",
+        "Games",
+    ]
+    ids = np.array([find(store, p) for p in paths], dtype=np.int64)
+    got = basis.cls_of(ids).tolist()
+    game = basis.class_ids.index("game")
+    assert got == [game, game, NO_CLASS, NO_CLASS, NO_CLASS]
 
 
 def test_projects_models_system_and_software() -> None:

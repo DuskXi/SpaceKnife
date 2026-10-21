@@ -90,6 +90,8 @@
   --sk-treemap-class-image: #2F8FDB;
   --sk-treemap-class-other: #2B2F38;
   --sk-treemap-class-video: #E07A1F;
+  --sk-treemap-class-focus-outline: #FFFFFF8C;
+  --sk-treemap-class-focus-veil: #060709D9;
   --sk-treemap-collapsed: #232731;
   --sk-treemap-diff-grow-0: #5E3410;
   --sk-treemap-diff-grow-1: #7A4312;

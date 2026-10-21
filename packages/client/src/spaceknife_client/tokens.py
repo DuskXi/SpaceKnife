@@ -102,6 +102,8 @@ TOKENS: Final[Mapping[str, TokenValue]] = {
     'treemap.class.image': '#2F8FDB',
     'treemap.class.other': '#2B2F38',
     'treemap.class.video': '#E07A1F',
+    'treemap.classFocus.outline': '#FFFFFF8C',
+    'treemap.classFocus.veil': '#060709D9',
     'treemap.collapsed': '#232731',
     'treemap.diff.grow.0': '#5E3410',
     'treemap.diff.grow.1': '#7A4312',

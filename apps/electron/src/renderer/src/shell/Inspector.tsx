@@ -4,7 +4,7 @@ import { type CSSProperties, useEffect, useState } from "react";
 
 import type { ClassStat, FolderClassInfo, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
-import { readFlag, set, toast, useApp, writeFlag } from "@/state/store";
+import { patchView, readFlag, set, toast, useApp, writeFlag } from "@/state/store";
 import { Kind } from "@/visual/frame";
 import { fmtAgo, fmtCount, fmtInt, fmtPct, fmtShare, fmtSize, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
@@ -281,7 +281,14 @@ const ALL_KEY = "sk.classStatsAll";
 /** 「类别统计」 (UI-MAIN-65): the scope's make-up as one stacked bar, then a row per class. */
 function ClassStats({ s, viewId, className }: { s: TreeSummaryResult; viewId: string; className: (id: string) => string }) {
   const [all, setAll] = useState(() => readFlag(ALL_KEY, false));
-  const [hot, setHot] = useState<string | null>(null);
+  const [hot, setHotRow] = useState<string | null>(null);
+  // the class under the pointer lights up in the picture (UI-MAIN-65), only within this folder
+  const node = s.node.id;
+  const setHot = (id: string | null) => {
+    setHotRow(id);
+    patchView(viewId, { hoverClass: id === null ? null : { id, node } });
+  };
+  useEffect(() => () => patchView(viewId, { hoverClass: null }), [viewId, node]);
   const total = s.classes.reduce((a, c) => a + c.bytes, 0);
   const files = s.classes.reduce((a, c) => a + c.files, 0);
   const minor = (c: ClassStat) => NICHE.has(c.class_id) && c.bytes < NICHE_SHARE * total && c.bytes < NICHE_BYTES;

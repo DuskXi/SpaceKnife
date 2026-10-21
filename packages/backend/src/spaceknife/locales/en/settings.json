@@ -29,6 +29,7 @@
  "、": ", ",
  "「{name}」的值不合法：{msg}": "Invalid value for \"{name}\": {msg}",
  "「其他」类别不能删除": "The \"Other\" class can't be deleted.",
+ "类别最多 {n} 个": "There can be at most {n} classes.",
  "「其他」类别不能填扩展名：它收纳所有未归类的扩展名": "The \"Other\" class can't have extensions: it holds every unclassified extension.",
  "上一级": "Up one level",
  "不支持 ~，请改用相对模式（如 .cache/pip，可匹配任意层级）": "~ isn't supported. Use a relative pattern instead (like .cache/pip, which matches at any depth)",

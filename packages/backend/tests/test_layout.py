@@ -9,7 +9,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from spaceknife.layout import DrawList, Label, Layout, LayoutParams, RectKind, RootSpec
+from spaceknife.layout import NO_CLASS, DrawList, Label, Layout, LayoutParams, RectKind, RootSpec
 from spaceknife.layout.engine import KEY_FREE, KEY_MORE, KEY_SMALL, KEY_UNKNOWN, PAGE_REST
 from spaceknife.layout.squarify import squarify
 
@@ -172,7 +172,7 @@ def test_small_files_merge_into_one_block_with_the_dominant_class() -> None:
     assert lay.class_ids[dl.cls[row]] == "image"  # 95 % of its bytes are pictures
     members = dl.members[KEY_SMALL | 1]
     assert len(members) == 400 and dl.size[row] == Layout.effective_sizes(store)[members].sum()
-    # mixed bytes without a majority: "other"
+    # mixed bytes without a majority: in no one class (painted like "other", never counted as it)
     mixed: dict[str, object] = {"movie.mp4": 900 * MB}
     mixed.update({f"p{i}.jpg": 30_000 for i in range(100)})
     mixed.update({f"z{i}.zip": 30_000 for i in range(100)})
@@ -180,7 +180,7 @@ def test_small_files_merge_into_one_block_with_the_dominant_class() -> None:
     m = Layout(build(mixed))
     dm = m.run(LayoutParams(width=800, height=600), RootSpec(node=1))
     r = dm.row(KEY_SMALL | 1)
-    assert r is not None and m.class_ids[dm.cls[r]] == "other"
+    assert r is not None and dm.cls[r] == NO_CLASS
 
 
 def test_tiny_siblings_merge_into_plus_n() -> None:
