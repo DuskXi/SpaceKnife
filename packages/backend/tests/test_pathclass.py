@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -21,7 +23,13 @@ from spaceknife_protocol.filter_syntax import parse
 
 from .store_builder import build, ext_of, find
 
-C = "C:\\"
+# the scanned volume: a drive on Windows, a folder elsewhere (both 3 characters with the separator)
+C = "C:\\" if sys.platform == "win32" else "/c"
+
+
+def at(*parts: str) -> str:
+    """A path on that volume, as this system writes it."""
+    return os.path.join(C, *parts)
 
 
 @pytest.fixture(autouse=True)
@@ -231,8 +239,8 @@ def test_a_rule_is_off_when_its_class_is_gone() -> None:
 def test_the_users_choices_win(tmp_path: Path) -> None:
     store = build(GAMES, root=C)
     foo = "Program Files (x86)/Steam/steamapps/common/Foo"
-    pathclass.set_folder("C:\\Games\\NotAGame", "game")
-    pathclass.set_folder("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Foo", "")  # by extension
+    pathclass.set_folder(at("Games", "NotAGame"), "game")
+    pathclass.set_folder(at("Program Files (x86)", "Steam", "steamapps", "common", "Foo"), "")  # by extension
     got = classes_of(store, ["Games/NotAGame/readme.txt", f"{foo}/intro.mp4", f"{foo}/data.pak"])
     assert got == {
         "Games/NotAGame/readme.txt": "game",
@@ -245,8 +253,8 @@ def test_the_users_choices_win(tmp_path: Path) -> None:
     # saved and read back; forgetting a choice brings the rule back
     path = tmp_path / "class_folders.json"
     pathclass.save(path)
-    pathclass.set_folder("C:\\Games\\NotAGame", None)
-    pathclass.set_folder("C:\\Program Files (x86)\\Steam\\steamapps\\common\\Foo", None)
+    pathclass.set_folder(at("Games", "NotAGame"), None)
+    pathclass.set_folder(at("Program Files (x86)", "Steam", "steamapps", "common", "Foo"), None)
     assert classes_of(store, [f"{foo}/intro.mp4"]) == {f"{foo}/intro.mp4": "game"}
     pathclass.replace_folders(pathclass.load(path))
     assert len(pathclass.folders()) == 2
@@ -263,13 +271,16 @@ def test_reasons() -> None:
         assert r is not None
         return r.class_id, store.path(r.folder).replace("\\", "/"), r.fallback
 
+    def folder(*parts: str) -> str:
+        return at(*parts).replace("\\", "/")
+
     assert why("Program Files (x86)/Steam/steamapps/common/Foo/intro.mp4") == (
         "game",
-        "C:/Program Files (x86)/Steam/steamapps",
+        folder("Program Files (x86)", "Steam", "steamapps"),
         False,
     )
-    assert why("Users/lenny/code/app/src/main.ts") == ("code", "C:/Users/lenny/code", False)
-    assert why("Program Files/App/res.xyz") == ("exec", "C:/Program Files", True)
+    assert why("Users/lenny/code/app/src/main.ts") == ("code", folder("Users", "lenny", "code"), False)
+    assert why("Program Files/App/res.xyz") == ("exec", folder("Program Files"), True)
     assert pathclass.explain(store, find(store, "Users/lenny/Documents/notes.txt"), DEFAULT_CLASSES) is None
 
 
