@@ -125,18 +125,21 @@
 
 - [ ] 亮色主题（待设计评审）：包括可视化的分支色（`visual.branch.*`）和环形色（`visual.ring.*`）
 
-## 本机统计页面（2026-10-20 记下，先不做）
+## 本机统计页面（2026-10-20 记下；2026-10-21 做成「本机磁盘」页，0.3.3）
 
-一页看全这台机器上的所有盘：没扫描过的盘和扫描过的盘都列出来，并且分清每块盘的类型、接口和速率。
+一页看全这台机器上的所有盘：没扫描过的盘和扫描过的盘都列出来，并且分清每块盘的类型、接口和速率。入口：开始页卷列表上方的「本机磁盘」按钮和命令面板「本机磁盘」；不自动弹出、不自动刷新。文档：`disks.md`。
 
-- [ ] 盘的范围：没扫描过的盘列出系统能给的数据（容量、已用、可用、文件系统、卷标）；扫描过的盘再加上扫描得出的数据，比如最近一次扫描或快照的时间、文件数、类别分布、最大的文件夹
-- [ ] 介质类型：SSD / HDD / U 盘 / SD 卡 / 网络盘 / 虚拟盘
-- [ ] 接口和速率：SATA（1.5 / 3 / 6 Gb/s）、PCIe / NVMe（代数和通道数，例如 Gen4 x4）、USB（5 / 10 / 20 Gb/s 等）、SAS 等；尽量同时给出当前协商的速率和设备支持的最高速率
-- [ ] 物理盘与分区 / 卷的对应关系（一块盘上有几个卷，一个卷跨几块盘）
-- [ ] 现状：`VolumeInfo.media` 已经能分出 `nvme_ssd` / `sata_ssd` / `hdd` / `usb_*` 等（启动页卡片和限速在用），但还没有接口代数、速率，也没有物理盘与卷的对应
-- [ ] 三个平台的数据来源要先调研，不需要管理员权限的来源优先，需要权限的走扫描助手。可能的来源：Windows 用 `IOCTL_STORAGE_QUERY_PROPERTY`、`MSFT_PhysicalDisk`（BusType / MediaType）、PCI 设备属性（当前链路速度和宽度）；Linux 用 `/sys/block/*/queue/rotational`、`/sys/class/nvme`、`/sys/bus/pci/devices/*/current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`；macOS 用 IOKit 或 `system_profiler`
-- [ ] 协议：新增方法（pydantic 模型），前端只负责显示
-- [ ] 界面：一个新的标签页，入口和版式先出设计稿再做
+- [x] 盘的范围：没扫描过的盘列出系统能给的数据（容量、已用、可用、文件系统、卷标）；扫描过的盘再加上扫描得出的数据，比如最近一次扫描或快照的时间、文件数、类别分布、最大的文件夹
+- [x] 介质类型：SSD / HDD / U 盘 / SD 卡 / 网络盘 / 虚拟盘
+- [x] 接口和速率：SATA（1.5 / 3 / 6 Gb/s）、PCIe / NVMe（代数和通道数，例如 Gen4 x4）、USB（5 / 10 / 20 Gb/s 等）、SAS 等；尽量同时给出当前协商的速率和设备支持的最高速率
+- [x] 物理盘与分区 / 卷的对应关系（一块盘上有几个卷，一个卷跨几块盘）
+- [x] 现状（做之前）：`VolumeInfo.media` 已经能分出 `nvme_ssd` / `sata_ssd` / `hdd` / `usb_*` 等（启动页卡片和限速在用），但还没有接口代数、速率，也没有物理盘与卷的对应
+- [x] 数据来源都不需要管理员权限（Windows 上 ATA IDENTIFY、NVMe Identify 也能用不带读权限的句柄经 `IOCTL_STORAGE_QUERY_PROPERTY` 取到；PCIe 链路来自 CfgMgr 的 `DEVPKEY_PciDevice_*Link*`；USB 速率来自集线器的连接查询）。调研时列的候选：可能的来源：Windows 用 `IOCTL_STORAGE_QUERY_PROPERTY`、`MSFT_PhysicalDisk`（BusType / MediaType）、PCI 设备属性（当前链路速度和宽度）；Linux 用 `/sys/block/*/queue/rotational`、`/sys/class/nvme`、`/sys/bus/pci/devices/*/current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`；macOS 用 IOKit 或 `system_profiler`
+- [x] 协议：`machine.disks`（`spaceknife_protocol.machine`），前端只负责显示
+- [x] 界面：单独的标签页（`pages/MachinePage.tsx`），每块盘一张卡片，盘上的卷按盘上顺序；链路比盘能跑的慢时用一行说明（不弹窗）
+- [ ] macOS 只用记录的数据形状测过（`system_profiler` 的键名随系统版本变化，比如 macOS 15 的 `SPUSBHostDataType`）：在真机上核对 NVMe / SATA / USB 链路
+- [ ] Linux 上 SATA 盘只有当前速率（设备支持的最高速率要 IDENTIFY，需要 root）：可以走扫描助手补上
+- [ ] Windows 把 USB 3.2 Gen 2×2 报告成 10 Gb/s：`IOCTL_USB_GET_NODE_CONNECTION_SUPERSPEEDPLUS_INFORMATION` 能分出 20 Gb/s
 
 ## 可视化组件（2026-10-19）
 

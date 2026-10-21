@@ -25,7 +25,7 @@ import type {
 import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
 
-export type TabKind = "start" | "scan" | "settings" | "help";
+export type TabKind = "start" | "scan" | "settings" | "help" | "machine";
 
 export interface Tab {
   id: string;

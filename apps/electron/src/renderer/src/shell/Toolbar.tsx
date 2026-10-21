@@ -90,7 +90,7 @@ export function Toolbar() {
         <nav className="crumbs" aria-label={t("当前位置")}>
           <span className="crumb-cur">
             <Icon name="drive" />
-            {t("新扫描")}
+            {tab.kind === "machine" ? t("本机磁盘") : t("新扫描")}
           </span>
         </nav>
       ) : (

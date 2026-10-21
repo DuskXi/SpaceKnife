@@ -96,6 +96,7 @@ python -X utf8 -m spaceknife serve --token-stdin
 | `app.shutdown` | 请求后端优雅退出（先回响应再关闭） |
 | `$/subscribe`、`$/unsubscribe` | 订阅管理 |
 | `volume.list` | 可扫描的卷：挂载点、文件系统、容量、已用、可用、簇大小、网络盘/可移动盘；介质（NVMe SSD / SATA SSD / 机械盘 / USB / 网络，免提权探测）、是否系统卷、网络路径、不可用原因（无介质、未连接、无法读取）（W1） |
+| `machine.disks` | 「本机磁盘」页（`MachineDisks`）：每块物理盘（型号、厂商、序列号、固件、容量、介质、接口、可移动、TRIM、系统盘）和它的链路 `DiskLink`（PCIe 代数与通道数、SATA / USB 速率，各有协商值和设备支持的最高值；SATA 盘另给控制器的 PCIe 链路）、盘上的卷（按盘上顺序，带在这块盘上占的字节数）；每个卷（`volume.list` 的同一份 `VolumeInfo`）所在的盘，以及打开着的整卷扫描（计数，扫完后还有最大的文件类别和顶层文件夹）或最新的整卷快照（只读头部的计数）。全部免提权读取（`spaceknife.disks`），系统没给的留空 |
 | `scan.check_paths` | 校验输入的扫描路径：是否存在、是否文件夹、能否访问、所在卷；互相包含的路径合并到上层，返回最终要扫描的根（UI-W1-25） |
 | `scan.start` | 开始扫描一个或多个根（`roots`；`cross_mounts`、`workers`、`auto_snapshot` 省略时取设置），立即返回扫描状态 |
 | `scan.status`、`scan.list` | 扫描状态：项数、文件/文件夹数、占用与逻辑大小、近几秒的项速率与字节速率、百分比（整卷按已用空间，文件夹按同一目标上次扫描的项数）、剩余时间估计、无法访问的目录、可用/未知空间、快照路径 |

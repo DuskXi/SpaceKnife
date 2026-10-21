@@ -14,6 +14,7 @@ import {
   checkUpdates,
   closeTab,
   newStartTab,
+  openMachineTab,
   openSettingsTab,
   openSnapshot,
   continueScan,
@@ -79,8 +80,8 @@ async function selectionPath(): Promise<{ path: string; dir: boolean } | null> {
 /** Where the user is, as the backend's commands see it (palette.query, palette.check). */
 export function paletteContext(s: AppState = get()): PaletteContext {
   const tab = activeTab(s);
-  // the help tab is, to the backend's commands, a tab without a scan like the settings tab
-  return { tab: tab.kind === "help" ? "settings" : tab.kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s) };
+  // the help and disk tabs are, to the backend's commands, tabs without a scan like the settings tab
+  return { tab: tab.kind === "help" || tab.kind === "machine" ? "settings" : tab.kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s) };
 }
 
 /** The command a key runs through the palette's rules (runShortcut), or null: F5 / Shift+F5 / Ctrl+S,
@@ -178,6 +179,8 @@ export async function runCommand(id: string): Promise<void> {
       return showUpdate();
     case "app.about":
       return openSettingsTab("about");
+    case "app.disks":
+      return openMachineTab();
     case "nav.back":
       await viewCall(viewId, "view.back");
       return;

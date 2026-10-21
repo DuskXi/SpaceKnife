@@ -9,6 +9,7 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 - **Restart and update.** A new version is downloaded and checked in the background (**Settings › About & updates › Download updates automatically**, on by default). Then one click on **Restart and update** puts it in place and opens SpaceKnife again: the Windows installer runs silently, a portable copy swaps its program files (its `data` folder stays, and the old files come back if something can't be replaced), an AppImage replaces its file. The window says "Updated to SpaceKnife …" once. Disk images and deb / rpm packages still open in the system's installer.
 - **Nothing left behind by updates.** Update files go into the `updates` folder in SpaceKnife's data folder instead of your Downloads folder, and each start removes those of the version you run or older.
 - **Clean uninstall on Windows.** The uninstaller removes the window's caches, the cache and downloaded updates. Its new **Your data** page asks about the snapshots, settings and logs: kept unless you tick **Also delete the snapshots, settings and logs**. A silent uninstall keeps them, or removes them with `--delete-app-data`.
+- **Disks**, a new page (the **Disks** button above the volumes on the start page, or the command palette): every disk in the computer, scanned or not, with its type, interface and link speed (PCIe generation and lanes, SATA or USB rate). It says when a link runs below what the disk supports (a PCIe 5.0 drive in a 4.0 slot, a USB 3 reader on a USB 2 port, a SATA disk on a narrow add-in controller), shows which volumes live on each disk, and what SpaceKnife knows of each volume from an open scan or its newest snapshot. No administrator rights are needed.
 - **About & updates**, a new settings page (also in the command palette, and linked from **Settings › General**): your version and how it was installed, the last and next update check, the update card when there is one, the versions of the components with **Copy version info**, and a timeline of the last 30 releases with their notes in the interface language.
 
 ### Fixes
@@ -26,6 +27,7 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 - **重启并更新**：新版本在后台下载并校验（「设置 › 关于与更新 › 自动下载更新」，默认打开），之后点一下「重启并更新」就换上新版本并重新打开 SpaceKnife：Windows 安装版静默安装；便携版替换程序文件（`data` 文件夹保留，有文件替换不了时放回旧文件）；AppImage 替换文件本身。窗口会提示一次「已更新到 SpaceKnife …」。磁盘映像和 deb / rpm 包仍然交给系统的安装器打开。
 - **更新不留残余**：更新文件放进 SpaceKnife 数据文件夹里的 `updates`，不再放进「下载」文件夹；每次启动都会删掉正在运行的版本及更旧版本的更新文件。
 - **Windows 上干净卸载**：卸载程序会删除界面缓存、缓存和下载的更新。新的「你的数据」一页询问快照、设置和日志：默认保留，勾上「同时删除快照、设置和日志」才删除。静默卸载默认保留，加 `--delete-app-data` 则删除。
+- **「本机磁盘」**页（开始页卷列表上方的「本机磁盘」按钮，或命令面板）：这台电脑上的每一块盘，扫描过的和没扫描过的，连同类型、接口和链路速率（PCIe 代数和通道数、SATA 或 USB 速率）。链路比盘能跑的慢时会写出来（PCIe 5.0 的盘插在 4.0 插槽上、USB 3 读卡器接在 USB 2 接口上、SATA 盘接在通道太窄的扩展卡上），还列出每块盘上有哪些卷，以及 SpaceKnife 从打开的扫描或最新快照里对每个卷知道些什么。不需要管理员权限。
 - **「关于与更新」**设置页（命令面板里也有，「设置 › 常规」里有入口）：你的版本和安装方式、上次与下次检查更新的时间、有新版本时的更新卡片、各组件的版本和「复制版本信息」，以及最近 30 个版本的发布时间线，发布说明按界面语言显示。
 
 ### 修复

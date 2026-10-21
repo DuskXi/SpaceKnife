@@ -393,6 +393,14 @@ def _registry() -> tuple[Command, ...]:
             needs=(_update,),
             status=lambda c: c.update_version,
         ),
+        # every physical disk with its interface and link, and the volumes on it
+        C(
+            "app.disks",
+            "本机磁盘",
+            "drive",
+            (),
+            ("disks", "drives", "hardware", "ssd", "nvme", "sata", "usb", "pcie"),
+        ),
         # the settings page with the version, the update settings and the release timeline
         C(
             "app.about",

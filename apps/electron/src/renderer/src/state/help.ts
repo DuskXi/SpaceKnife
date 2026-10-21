@@ -28,6 +28,7 @@ export function helpTopic(s: AppState = get(), focus: Element | null = null): st
   else if (tab.kind === "help") id = s.help.page;
   else if (tab.kind === "settings") id = SETTINGS_TOPICS[s.settingsPage] ?? "settings";
   else if (tab.kind === "start") id = "first-scan";
+  else if (tab.kind === "machine") id = "disks";
   else if (tab.compare) id = "snapshots-compare";
   else if (s.basketOpen) id = "cleanup";
   return isPage(id) ? id : OVERVIEW;

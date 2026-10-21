@@ -1528,6 +1528,130 @@
       "title": "Crumb",
       "type": "object"
     },
+    "DiskLink": {
+      "description": "A link: the negotiated rate and, when the system tells it, the most the device supports.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "pcie",
+            "sata",
+            "usb"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_pcie_gen": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the most the device supports",
+          "title": "Max Pcie Gen"
+        },
+        "max_pcie_width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the most lanes the device supports",
+          "title": "Max Pcie Width"
+        },
+        "max_rate_mbps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SATA / USB: the most the device (SATA: and its port) supports; None when not known",
+          "title": "Max Rate Mbps"
+        },
+        "pcie_gen": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the negotiated generation, 1-6",
+          "title": "Pcie Gen"
+        },
+        "pcie_width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the negotiated lanes",
+          "title": "Pcie Width"
+        },
+        "rate_mbps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SATA / USB: the negotiated line rate in Mb/s (SATA 1500, 3000, 6000; USB 12, 480, 5000, 10000, 20000)",
+          "title": "Rate Mbps"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "DiskLink",
+      "type": "object"
+    },
+    "DiskPart": {
+      "description": "A volume's share of a disk.",
+      "properties": {
+        "bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How much of the disk it takes; None when not known",
+          "title": "Bytes"
+        },
+        "mount_point": {
+          "title": "Mount Point",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mount_point"
+      ],
+      "title": "DiskPart",
+      "type": "object"
+    },
     "Empty": {
       "additionalProperties": false,
       "description": "Params for methods that take no arguments.",
@@ -2421,6 +2545,24 @@
       "title": "FolderCond",
       "type": "object"
     },
+    "FolderStat": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "bytes"
+      ],
+      "title": "FolderStat",
+      "type": "object"
+    },
     "FrameInfo": {
       "properties": {
         "breadcrumb": {
@@ -3025,6 +3167,36 @@
         "message"
       ],
       "title": "LogRecordEvent",
+      "type": "object"
+    },
+    "MachineDisks": {
+      "properties": {
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
+        },
+        "disks": {
+          "items": {
+            "$ref": "#/$defs/PhysicalDisk"
+          },
+          "title": "Disks",
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "$ref": "#/$defs/VolumeOverview"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "disks",
+        "volumes",
+        "collected_at"
+      ],
+      "title": "MachineDisks",
       "type": "object"
     },
     "MaintenanceInfo": {
@@ -4305,6 +4477,160 @@
         "end"
       ],
       "title": "PendingCond",
+      "type": "object"
+    },
+    "PhysicalDisk": {
+      "properties": {
+        "controller_link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The PCIe link of the controller a SATA disk hangs on, when the system tells it: an add-in card's lanes can be slower than the disk's SATA link"
+        },
+        "firmware": {
+          "default": "",
+          "title": "Firmware",
+          "type": "string"
+        },
+        "id": {
+          "description": "The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS)",
+          "title": "Id",
+          "type": "string"
+        },
+        "interface": {
+          "default": "unknown",
+          "enum": [
+            "nvme",
+            "sata",
+            "sas",
+            "scsi",
+            "ata",
+            "usb",
+            "sd",
+            "thunderbolt",
+            "virtual",
+            "raid",
+            "other",
+            "unknown"
+          ],
+          "title": "Interface",
+          "type": "string"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The disk's own link: PCIe (NVMe), SATA or USB"
+        },
+        "media": {
+          "default": "unknown",
+          "enum": [
+            "nvme_ssd",
+            "sata_ssd",
+            "ssd",
+            "hdd",
+            "usb_hdd",
+            "usb_ssd",
+            "usb_flash",
+            "sd_card",
+            "network",
+            "virtual",
+            "unknown"
+          ],
+          "title": "Media",
+          "type": "string"
+        },
+        "model": {
+          "description": "As the device reports it; '' when it doesn't",
+          "title": "Model",
+          "type": "string"
+        },
+        "number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Windows: the disk number of Disk Management",
+          "title": "Number"
+        },
+        "parts": {
+          "description": "The volumes on it, in disk order when known",
+          "items": {
+            "$ref": "#/$defs/DiskPart"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "removable": {
+          "default": false,
+          "title": "Removable",
+          "type": "boolean"
+        },
+        "serial": {
+          "default": "",
+          "title": "Serial",
+          "type": "string"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes; None while no medium is in (an empty card reader)",
+          "title": "Size"
+        },
+        "system": {
+          "default": false,
+          "description": "Holds the system volume",
+          "title": "System",
+          "type": "boolean"
+        },
+        "trim": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the disk takes TRIM / UNMAP; None when not known",
+          "title": "Trim"
+        },
+        "vendor": {
+          "default": "",
+          "title": "Vendor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "model"
+      ],
+      "title": "PhysicalDisk",
       "type": "object"
     },
     "PingParams": {
@@ -7860,6 +8186,155 @@
       ],
       "title": "VolumeListResult",
       "type": "object"
+    },
+    "VolumeOverview": {
+      "properties": {
+        "disks": {
+          "description": "Ids of the disks it lives on ([]: none known)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Disks",
+          "type": "array"
+        },
+        "scan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VolumeScan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "volume": {
+          "$ref": "#/$defs/VolumeInfo"
+        }
+      },
+      "required": [
+        "volume"
+      ],
+      "title": "VolumeOverview",
+      "type": "object"
+    },
+    "VolumeScan": {
+      "description": "What SpaceKnife knows of a volume from a scan of its root.",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the scan finished (or started, while it runs)",
+          "title": "At"
+        },
+        "bytes_alloc": {
+          "default": 0,
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "classes": {
+          "description": "Open scans: the largest file classes",
+          "items": {
+            "$ref": "#/$defs/ClassStat"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "dirs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dirs"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "folders": {
+          "description": "Open scans: the largest top-level folders",
+          "items": {
+            "$ref": "#/$defs/FolderStat"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "enum": [
+                "hard",
+                "mft"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Method"
+        },
+        "running": {
+          "default": false,
+          "title": "Running",
+          "type": "boolean"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The open scan (its tab can be shown)",
+          "title": "Scan Id"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The snapshot file",
+          "title": "Snapshot"
+        },
+        "source": {
+          "description": "A scan open in this backend, or the newest snapshot",
+          "enum": [
+            "scan",
+            "snapshot"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "VolumeScan",
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -8049,6 +8524,12 @@
       "params": "#/$defs/Empty",
       "requiresSession": true,
       "result": "#/$defs/IoStatusList"
+    },
+    "machine.disks": {
+      "doc": "This computer's disks with their links, the volumes on each and what scans tell of each volume.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/MachineDisks"
     },
     "ops.cancel": {
       "doc": "Stop a running file operation.",

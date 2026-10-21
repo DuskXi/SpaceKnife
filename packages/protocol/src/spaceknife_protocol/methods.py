@@ -28,6 +28,7 @@ from .compare import (
 from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
+from .machine import MachineDisks
 from .ops import (
     BasketAddParams,
     BasketAddResult,
@@ -441,6 +442,12 @@ UPDATE_RELEASES = MethodSpec(
     UpdateReleases,
     "The recent releases with their notes (the timeline of the About & updates page).",
 )
+MACHINE_DISKS = MethodSpec(
+    "machine.disks",
+    Empty,
+    MachineDisks,
+    "This computer's disks with their links, the volumes on each and what scans tell of each volume.",
+)
 EVENT_UPDATE = EventSpec(
     "update.changed",
     UpdateChangedEvent,
@@ -463,6 +470,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         SUBSCRIBE,
         UNSUBSCRIBE,
         VOLUME_LIST,
+        MACHINE_DISKS,
         SCAN_CHECK_PATHS,
         SCAN_START,
         SCAN_CANCEL,

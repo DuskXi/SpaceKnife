@@ -551,6 +551,14 @@ export function openSettingsTab(page?: SettingsPageId): void {
   if (typeof page === "string") settingsGo(page); // callers may be event handlers: ignore event objects
 }
 
+/** 「本机磁盘」: one tab at most (the start page's button, the palette). */
+export function openMachineTab(): void {
+  const existing = get().tabs.find((x) => x.kind === "machine");
+  if (existing) return set({ active: existing.id });
+  const tab: Tab = { id: newTabId(), kind: "machine", viewIds: [], focusedPane: 0, title: t("本机磁盘") };
+  set((x) => ({ tabs: [...x.tabs, tab], active: tab.id }));
+}
+
 /** Show a settings page; recorded in the tab's page history (UI-W7-02, UI-W7-03). */
 export function settingsGo(page: SettingsPageId): void {
   const s = get();
@@ -587,6 +595,7 @@ function fixedTitle(tab: Tab): string | null {
   if (tab.kind === "start") return t("新扫描");
   if (tab.kind === "settings") return t("设置");
   if (tab.kind === "help") return t("帮助");
+  if (tab.kind === "machine") return t("本机磁盘");
   return null;
 }
 

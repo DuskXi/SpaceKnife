@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "5d838590ae5e79bf";
+export const SCHEMA_HASH = "5204d10ceb9ba102";
 
 export interface AgeCond {
   end: number;
@@ -347,6 +347,30 @@ export interface Crumb {
   label: string;
 }
 
+/** A link: the negotiated rate and, when the system tells it, the most the device supports. */
+export interface DiskLink {
+  kind: "pcie" | "sata" | "usb";
+  /** PCIe: the most the device supports */
+  max_pcie_gen: number | null;
+  /** PCIe: the most lanes the device supports */
+  max_pcie_width: number | null;
+  /** SATA / USB: the most the device (SATA: and its port) supports; None when not known */
+  max_rate_mbps: number | null;
+  /** PCIe: the negotiated generation, 1-6 */
+  pcie_gen: number | null;
+  /** PCIe: the negotiated lanes */
+  pcie_width: number | null;
+  /** SATA / USB: the negotiated line rate in Mb/s (SATA 1500, 3000, 6000; USB 12, 480, 5000, 10000, 20000) */
+  rate_mbps: number | null;
+}
+
+/** A volume's share of a disk. */
+export interface DiskPart {
+  /** How much of the disk it takes; None when not known */
+  bytes: number | null;
+  mount_point: string;
+}
+
 /** Params for methods that take no arguments. */
 export interface Empty {
 }
@@ -541,6 +565,11 @@ export interface FolderCond {
   text: string;
 }
 
+export interface FolderStat {
+  bytes: number;
+  name: string;
+}
+
 export interface FrameInfo {
   breadcrumb: Crumb[];
   dpr: number;
@@ -677,6 +706,12 @@ export interface LogRecordEvent {
   source: string;
   sub: string;
   time: string;
+}
+
+export interface MachineDisks {
+  collected_at: string;
+  disks: PhysicalDisk[];
+  volumes: VolumeOverview[];
 }
 
 export interface MaintenanceInfo {
@@ -965,6 +1000,33 @@ export interface PendingCond {
   category: "name" | "class" | "folder" | "tag" | "size" | "age" | "attr" | null;
   end: number;
   start: number;
+}
+
+export interface PhysicalDisk {
+  /** The PCIe link of the controller a SATA disk hangs on, when the system tells it: an add-in card's lanes can be slower than the disk's SATA link */
+  controller_link: DiskLink | null;
+  firmware: string;
+  /** The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS) */
+  id: string;
+  interface: "nvme" | "sata" | "sas" | "scsi" | "ata" | "usb" | "sd" | "thunderbolt" | "virtual" | "raid" | "other" | "unknown";
+  /** The disk's own link: PCIe (NVMe), SATA or USB */
+  link: DiskLink | null;
+  media: "nvme_ssd" | "sata_ssd" | "ssd" | "hdd" | "usb_hdd" | "usb_ssd" | "usb_flash" | "sd_card" | "network" | "virtual" | "unknown";
+  /** As the device reports it; '' when it doesn't */
+  model: string;
+  /** Windows: the disk number of Disk Management */
+  number: number | null;
+  /** The volumes on it, in disk order when known */
+  parts: DiskPart[];
+  removable: boolean;
+  serial: string;
+  /** Bytes; None while no medium is in (an empty card reader) */
+  size: number | null;
+  /** Holds the system volume */
+  system: boolean;
+  /** Whether the disk takes TRIM / UNMAP; None when not known */
+  trim: boolean | null;
+  vendor: string;
 }
 
 export interface PingParams {
@@ -1692,6 +1754,34 @@ export interface VolumeListResult {
   volumes: VolumeInfo[];
 }
 
+export interface VolumeOverview {
+  /** Ids of the disks it lives on ([]: none known) */
+  disks: string[];
+  scan: VolumeScan | null;
+  volume: VolumeInfo;
+}
+
+/** What SpaceKnife knows of a volume from a scan of its root. */
+export interface VolumeScan {
+  /** When the scan finished (or started, while it runs) */
+  at: string | null;
+  bytes_alloc: number;
+  /** Open scans: the largest file classes */
+  classes: ClassStat[];
+  dirs: number | null;
+  files: number;
+  /** Open scans: the largest top-level folders */
+  folders: FolderStat[];
+  method: "hard" | "mft" | null;
+  running: boolean;
+  /** The open scan (its tab can be shown) */
+  scan_id: string | null;
+  /** The snapshot file */
+  snapshot: string | null;
+  /** A scan open in this backend, or the newest snapshot */
+  source: "scan" | "snapshot";
+}
+
 export interface Methods {
   /** Subscribe to an event topic. */
   "$/subscribe": { params: SubscribeParams; result: SubscribeResult };
@@ -1739,6 +1829,8 @@ export interface Methods {
   "filter.vocab": { params: Empty; result: FilterVocab };
   /** Load state of every local disk, with history. */
   "io.status": { params: Empty; result: IoStatusList };
+  /** This computer's disks with their links, the volumes on each and what scans tell of each volume. */
+  "machine.disks": { params: Empty; result: MachineDisks };
   /** Stop a running file operation. */
   "ops.cancel": { params: OpTaskParams; result: EmptyResult };
   /** Undo a file operation: put trashed items back, or call off a permanent deletion still waiting. */

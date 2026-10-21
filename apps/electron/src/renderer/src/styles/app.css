@@ -484,7 +484,7 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .start-cols { display: flex; gap: 40px; width: 1160px; max-width: 100%; min-height: 0; }
 .start-main { flex: 0 1 760px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .start-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; padding-right: 4px; }
-.start-title { display: flex; align-items: center; justify-content: space-between; height: 32px; }
+.start-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; height: 32px; }
 .start-title h1 { margin: 0; font-size: var(--sk-font-size-heading); font-weight: 600; }
 .start-title h2 { margin: 0; font-size: 15px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; }
 .volumes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: -8px; }
@@ -958,3 +958,54 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 }
 [data-motion="reduce"] .update-card { animation: none; }
 [data-motion="reduce"] .uc-bar.indeterminate span { animation: none; left: 0; width: 100%; opacity: 0.35; }
+
+/* 「本机磁盘」 (pages/MachinePage.tsx): a card per physical disk, its volumes in disk order */
+.machine { min-height: 0; overflow-y: auto; display: flex; justify-content: center; padding: 43px 24px 48px; }
+.mc-inner { width: 960px; max-width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.mc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+.mc-head h1 { margin: 0; font-size: var(--sk-font-size-heading); font-weight: 600; }
+.mc-head p { margin: 4px 0 0; font-size: 13px; }
+.mc-head-actions { flex: none; display: flex; align-items: center; gap: 12px; }
+.mc-disk { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 12px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
+.mc-disk.no-medium { opacity: 0.65; }
+.mc-disk-head { display: flex; align-items: center; gap: 12px; }
+.mc-icon { flex: none; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 9px; background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); }
+.mc-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mc-name { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mc-meta { font-size: 12px; color: var(--sk-color-text-secondary); }
+.mc-tags { flex: none; display: flex; gap: 6px; }
+.mc-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--sk-radius-sm); background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); font-size: 11px; }
+.mc-tag.accent { background: color-mix(in srgb, var(--sk-color-accent-default) 18%, transparent); color: var(--sk-color-accent-default); }
+.mc-link { display: flex; flex-wrap: wrap; gap: 6px; }
+.mc-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; background: var(--sk-color-bg-raised); font-size: 12px; color: var(--sk-color-text-primary); }
+.mc-chip svg, .mc-chip-sub { color: var(--sk-color-text-tertiary); }
+.mc-note { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.5; color: var(--sk-color-text-secondary); }
+.mc-note svg { flex: none; margin-top: 2px; color: var(--sk-color-text-tertiary); }
+.mc-note.warn, .mc-note.warn svg { color: var(--sk-color-status-warning); }
+.mc-map { display: flex; gap: 3px; height: 8px; border-radius: 4px; background: repeating-linear-gradient(135deg, transparent 0 3px, var(--sk-color-line-subtle) 3px 5px); overflow: hidden; }
+.mc-seg { flex: none; height: 100%; border-radius: 2px; background: var(--sk-color-bg-raised); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); }
+.mc-seg span { display: block; height: 100%; border-radius: 2px; background: var(--sk-color-text-tertiary); }
+.mc-seg:hover span { background: var(--sk-color-accent-default); }
+.mc-vols { display: flex; flex-direction: column; }
+.mc-vols.card { padding: 0 18px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
+.mc-vol { display: grid; grid-template-columns: minmax(140px, 1.1fr) minmax(150px, 1fr) minmax(240px, 2.2fr); align-items: start; gap: 8px 20px; padding: 12px 0; border-top: 1px solid var(--sk-color-line-subtle); }
+.mc-vols.card .mc-vol:first-child { border-top: 0; }
+.mc-vol-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 13px; font-weight: 600; }
+.mc-vol-label { font-weight: 400; color: var(--sk-color-text-secondary); }
+.mc-vol-use { display: flex; flex-direction: column; gap: 6px; padding-top: 5px; color: var(--sk-color-text-secondary); }
+.mc-vol-scan { display: flex; align-items: flex-start; gap: 12px; min-width: 0; font-size: 12px; }
+.mc-scan-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.mc-classes { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--sk-color-text-secondary); }
+.mc-class { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.mc-vol-act { flex: none; }
+.mc-details summary { width: max-content; cursor: pointer; font-size: 12px; color: var(--sk-color-text-tertiary); }
+.mc-details summary:hover { color: var(--sk-color-text-secondary); }
+.mc-details dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 4px; font-size: 12px; }
+.mc-details dt { color: var(--sk-color-text-secondary); }
+.mc-details dd { margin: 0; overflow-wrap: anywhere; }
+.mc-other h2 { margin: 16px 0 2px; font-size: 15px; font-weight: 600; }
+.mc-other p { margin: 0 0 10px; }
+.mc-empty { padding: 24px 0; }
+@media (max-width: 760px) {
+  .mc-vol { grid-template-columns: 1fr; }
+}

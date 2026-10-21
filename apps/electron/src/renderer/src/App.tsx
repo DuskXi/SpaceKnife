@@ -19,6 +19,7 @@ import { TitleBar } from "@/shell/TitleBar";
 import { Toolbar } from "@/shell/Toolbar";
 import { UpdatePrompt } from "@/shell/UpdateCard";
 import { HelpPage } from "@/pages/HelpPage";
+import { MachinePage } from "@/pages/MachinePage";
 import { ScanPage } from "@/pages/ScanPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
@@ -48,7 +49,17 @@ export function App() {
       <div className="app" inert={paletteOpen || updateDialog}>
         <TitleBar />
         <Toolbar />
-        {tab.kind === "scan" ? <ScanPage tab={tab} /> : tab.kind === "settings" ? <SettingsPage /> : tab.kind === "help" ? <HelpPage /> : <StartPage tab={tab} />}
+        {tab.kind === "scan" ? (
+          <ScanPage tab={tab} />
+        ) : tab.kind === "settings" ? (
+          <SettingsPage />
+        ) : tab.kind === "help" ? (
+          <HelpPage />
+        ) : tab.kind === "machine" ? (
+          <MachinePage />
+        ) : (
+          <StartPage tab={tab} />
+        )}
         <LogPanel />
         <StatusBar />
         {conn === "failed" && (
