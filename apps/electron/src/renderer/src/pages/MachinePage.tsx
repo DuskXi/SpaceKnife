@@ -78,17 +78,21 @@ export function MachinePage() {
               <FindingsPanel data={data} />
             </div>
             <h2 className="mc-h2">{t("磁盘")}</h2>
-            {orderedDisks(data).map((d) => (
-              <Disk key={d.id} disk={d} data={data} />
-            ))}
+            <div className="mc-grid">
+              {orderedDisks(data).map((d) => (
+                <Disk key={d.id} disk={d} data={data} />
+              ))}
+            </div>
             {!data.disks.length && <div className="mc-empty muted">{t("这个系统没有告诉 SpaceKnife 有哪些物理磁盘；下面是它的卷")}</div>}
             {other.length > 0 && (
               <section className="mc-other" aria-label={t("其他位置")}>
                 <h2 className="mc-h2">{t("其他位置")}</h2>
                 <p className="muted small">{t("网络位置、虚拟卷，以及找不到所在磁盘的卷")}</p>
-                <div className="mc-vols card">
+                <div className="mc-grid">
                   {other.map((v) => (
-                    <Volume key={v.volume.mount_point} v={v} />
+                    <div key={v.volume.mount_point} className="mc-disk mc-place">
+                      <Volume v={v} />
+                    </div>
                   ))}
                 </div>
               </section>
@@ -313,10 +317,15 @@ function Volume({ v }: { v: VolumeOverview }) {
   const share = vol.total ? Math.min(1, vol.used / vol.total) : 0;
   return (
     <div className="mc-vol">
-      <div className="mc-vol-name">
-        <span className="mono">{vol.mount_point}</span>
-        {vol.label && <span className="mc-vol-label">{vol.label}</span>}
-        <span className="muted small">{[vol.fs_type, vol.remote_path].filter(Boolean).join(" · ")}</span>
+      <div className="mc-vol-top">
+        <div className="mc-vol-name">
+          <span className="mono">{vol.mount_point}</span>
+          {vol.label && <span className="mc-vol-label">{vol.label}</span>}
+          <span className="muted small">{[vol.fs_type, vol.remote_path].filter(Boolean).join(" · ")}</span>
+        </div>
+        <div className="mc-vol-act">
+          <VolumeAction v={v} />
+        </div>
       </div>
       <div className="mc-vol-use">
         <Meter share={share} tone={share >= FULL ? "warn" : "muted"} title={vol.total ? t("已用 {pct}", { pct: fmtShare(vol.used, vol.total) }) : undefined} />
@@ -371,9 +380,6 @@ function ScanLine({ v }: { v: VolumeOverview }) {
             <span className="small muted">{t("比 {when} 的快照 {delta}", { when: fmtAgo(seconds(g.since)), delta: fmtDelta(g.delta) })}</span>
           </span>
         )}
-      </div>
-      <div className="mc-vol-act">
-        <VolumeAction v={v} />
       </div>
     </div>
   );

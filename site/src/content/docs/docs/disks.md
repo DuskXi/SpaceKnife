@@ -33,6 +33,8 @@ Nothing tells you to scan a volume: volumes you never scanned are simply shown a
 
 ## What a disk shows
 
+Under **Disks**, each disk is a card; the cards fill the window in as many columns as fit, two in a narrow window and three or four in a wide one.
+
 - **Name and size**: the model the disk reports (with its vendor when the model doesn't name it), the storage type (**NVMe SSD**, **SATA SSD**, **HDD**, **USB drive**, **Memory card**, …), the size, and how the system numbers it (**Disk 3** on Windows, as in Disk Management).
 - **System disk** marks the disk holding the system volume; **Removable** marks drives you can unplug or eject.
 - **How full**: the ring at its left shows how much of the disk its volumes use, with the share in the middle.
@@ -62,7 +64,7 @@ A volume spread over several disks (Storage Spaces, LVM, RAID) is listed under e
 
 ## What SpaceKnife knows of a volume
 
-The right side of each volume says what SpaceKnife knows of it from a scan of the whole volume:
+Under each volume, a line says what SpaceKnife knows of it from a scan of the whole volume, with a button on the volume's first line:
 
 | You see | From |
 |---|---|

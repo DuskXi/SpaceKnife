@@ -962,13 +962,15 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 [data-motion="reduce"] .uc-bar.indeterminate span { animation: none; left: 0; width: 100%; opacity: 0.35; }
 
 /* 「本机磁盘」 (pages/MachinePage.tsx): a card per physical disk, its volumes in disk order */
-.machine { min-height: 0; overflow-y: auto; display: flex; justify-content: center; padding: 43px 24px 48px; }
-.mc-inner { width: 960px; max-width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.machine { min-height: 0; overflow-y: auto; display: flex; justify-content: center; padding: 43px 32px 48px; }
+.mc-inner { width: 100%; max-width: 1680px; display: flex; flex-direction: column; gap: 16px; }
+/* the disks: compact cards, as many columns as fit (one on a narrow window, three or four on a wide one) */
+.mc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(360px, 100%), 1fr)); gap: 16px; }
 .mc-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
 .mc-head h1 { margin: 0; font-size: var(--sk-font-size-heading); font-weight: 600; }
 .mc-head p { margin: 4px 0 0; font-size: 13px; }
 .mc-head-actions { flex: none; display: flex; align-items: center; gap: 12px; }
-.mc-disk { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px 12px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
+.mc-disk { display: flex; flex-direction: column; gap: 12px; min-width: 0; padding: 16px 18px 12px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
 .mc-disk.no-medium { opacity: 0.65; }
 .mc-disk-head { display: flex; align-items: center; gap: 12px; }
 .mc-icon { flex: none; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; border-radius: 9px; background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); }
@@ -989,17 +991,21 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .mc-seg span { display: block; height: 100%; border-radius: 2px; background: var(--sk-color-text-tertiary); }
 .mc-seg:hover span { background: var(--sk-color-accent-default); }
 .mc-vols { display: flex; flex-direction: column; }
-.mc-vols.card { padding: 0 18px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-panel); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); }
-.mc-vol { display: grid; grid-template-columns: minmax(140px, 1.1fr) minmax(150px, 1fr) minmax(240px, 2.2fr); align-items: start; gap: 8px 20px; padding: 12px 0; border-top: 1px solid var(--sk-color-line-subtle); }
-.mc-vols.card .mc-vol:first-child { border-top: 0; }
-.mc-vol-name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 13px; font-weight: 600; }
+/* a volume inside its disk's card: name and action, how full, then what scans tell */
+.mc-vol { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 0; border-top: 1px solid var(--sk-color-line-subtle); }
+.mc-place .mc-vol { padding: 0; border-top: 0; }
+.mc-vol-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mc-vol-name { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; font-size: 13px; font-weight: 600; }
 .mc-vol-label { font-weight: 400; color: var(--sk-color-text-secondary); }
-.mc-vol-use { display: flex; flex-direction: column; gap: 6px; padding-top: 5px; color: var(--sk-color-text-secondary); }
-.mc-vol-scan { display: flex; align-items: flex-start; gap: 12px; min-width: 0; font-size: 12px; }
-.mc-scan-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; padding-top: 2px; }
+.mc-vol-use { display: flex; align-items: center; gap: 10px; color: var(--sk-color-text-secondary); }
+.mc-vol-use .meter { flex: 1 1 auto; }
+.mc-vol-use > .mono { flex: none; }
+.mc-vol-scan { display: flex; min-width: 0; font-size: 12px; }
+.mc-scan-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .mc-classes { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--sk-color-text-secondary); }
 .mc-class { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .mc-vol-act { flex: none; }
+.mc-details { margin-top: auto; }
 .mc-details summary { width: max-content; cursor: pointer; font-size: 12px; color: var(--sk-color-text-tertiary); }
 .mc-details summary:hover { color: var(--sk-color-text-secondary); }
 .mc-details dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 8px 0 4px; font-size: 12px; }
@@ -1007,9 +1013,6 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .mc-details dd { margin: 0; overflow-wrap: anywhere; }
 .mc-other p { margin: 0 0 10px; }
 .mc-empty { padding: 24px 0; }
-@media (max-width: 760px) {
-  .mc-vol { grid-template-columns: 1fr; }
-}
 
 /* small charts (ui/charts.tsx): thin marks on a track one step off the surface, 2px gaps */
 .ring { position: relative; flex: none; display: inline-flex; }
