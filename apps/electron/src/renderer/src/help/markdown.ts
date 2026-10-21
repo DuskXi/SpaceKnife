@@ -11,6 +11,7 @@ import GithubSlugger from "github-slugger";
 import MarkdownIt from "markdown-it";
 import type { Renderer, RendererRule, StateBlock, StateCore, StateInline, Token } from "markdown-it";
 
+import { picture } from "./pictures";
 import { type DocLang, type LinkTarget, resolveLink } from "./site";
 
 export interface Heading {
@@ -269,9 +270,15 @@ function renderRules(r: Renderer): void {
   r.rules.kbd_close = () => "</kbd>";
   r.rules.table_open = () => '<div class="help-table"><table>\n';
   r.rules.table_close = () => "</table></div>\n";
-  // the pictures (screenshots) are the website's: the help shows a picture's description in its place
-  // (docs/docs-writing.md)
-  r.rules.image = (tokens, idx) => `<span class="help-image">${esc(tokens[idx]!.content)}</span>`;
+  // a picture the pages name (site/src/assets, bundled with its size: no jump while it loads); anything
+  // else, such as a web address, shows its description (docs/docs-writing.md)
+  r.rules.image = (tokens, idx, _options, env) => {
+    const token = tokens[idx]!;
+    const alt = esc(token.content);
+    const pic = picture(String(token.attrGet("src") ?? ""), (env as unknown as Env).lang);
+    if (!pic) return `<span class="help-image">${alt}</span>`;
+    return `<img class="help-picture" src="${esc(pic.url)}" alt="${alt}" width="${pic.width}" height="${pic.height}" loading="lazy" decoding="async">`;
+  };
   r.rules.aside_open = (tokens, idx) => {
     const t = tokens[idx]!;
     const kind = t.info as Aside;

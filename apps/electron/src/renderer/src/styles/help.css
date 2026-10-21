@@ -38,6 +38,8 @@
 .help-body code { padding: 1px 5px; border-radius: var(--sk-radius-sm); background: var(--sk-color-bg-raised); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); font: 12.5px/1.5 var(--sk-font-family-mono); color: var(--sk-color-text-primary); overflow-wrap: anywhere; }
 .help-body kbd.kbd { margin: 0 1px; vertical-align: 1px; color: var(--sk-color-text-primary); font-size: 11.5px; }
 .help-body .help-image { color: var(--sk-color-text-tertiary); font-style: italic; }
+/* screenshots: width and height come with the <img>, so the page keeps its layout while they load */
+.help-body .help-picture { display: block; max-width: 100%; height: auto; border-radius: var(--sk-radius-lg); box-shadow: 0 0 0 1px var(--sk-color-line-subtle), 0 10px 28px -14px rgb(0 0 0 / 0.7); }
 .help-body .help-reached { animation: sk-help-reached 1.6s var(--sk-motion-easing-out); }
 @keyframes sk-help-reached { 0%, 30% { background: color-mix(in srgb, var(--sk-color-accent-default) 18%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--sk-color-accent-default) 18%, transparent); } }
 
