@@ -13,7 +13,7 @@ The keys below are for Windows and Linux. For macOS, see [Differences on macOS](
 
 ## When keys work
 
-- **Single keys never fire in a text field.** <kbd>/</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>C</kbd>, <kbd>V</kbd>, the digits, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Backspace</kbd> and <kbd>Esc</kbd> act on the view only when the focus is not in a text field. Typing `f` in the filter box doesn't hide free space, and <kbd>Ctrl</kbd>+<kbd>C</kbd> in a text field is the normal copy.
+- **Single keys never fire in a text field.** <kbd>/</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>R</kbd>, <kbd>C</kbd>, <kbd>V</kbd>, the digits, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Backspace</kbd> and <kbd>Esc</kbd> act on the view only when the focus is not in a text field. Typing `f` in the filter box doesn't hide free space, and <kbd>Ctrl</kbd>+<kbd>C</kbd> in a text field is the normal copy.
 - **Global keys also work in the filter box.** You don't have to leave it for <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Ctrl</kbd>+<kbd>T</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd>, <kbd>Ctrl</kbd>+<kbd>,</kbd>, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> or, from 0.3.2, <kbd>F5</kbd>, <kbd>Shift</kbd>+<kbd>F5</kbd> and <kbd>Ctrl</kbd>+<kbd>S</kbd>. Some text fields keep every key for typing, so global keys don't work in them: the start page's path field, the path editor (<kbd>Ctrl</kbd>+<kbd>L</kbd>), and the search, number and tag-name fields of Settings.
 - **View keys act on the focused pane.** In a split view, the pane with the accent border has the focus. Click the other pane to move the focus there.
 - **A focused control keeps its own keys.** On a button, radio button or menu item, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Esc</kbd> and <kbd>Shift</kbd>+<kbd>F10</kbd> belong to that control (<kbd>Enter</kbd> on a button presses it). On a drop-down list, <kbd>C</kbd> and <kbd>V</kbd> pick options by their first letter.
@@ -57,6 +57,7 @@ Back and forward remember where you zoomed and what was selected, like browser h
 | <kbd>Shift</kbd>+<kbd>V</kbd> | Previous visualization |
 | <kbd>F</kbd> | Show or hide the free space block (no effect in a snapshot comparison) |
 | <kbd>U</kbd> | Show or hide the unknown space block (no effect in a snapshot comparison) |
+| <kbd>R</kbd> | Show or hide the Recycle Bin (only when the scan holds one; not in a snapshot comparison) |
 | <kbd>Ctrl</kbd>+<kbd>=</kbd>, <kbd>Ctrl</kbd>+<kbd>+</kbd> | Raise the detail level, up to 15 |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> | Lower the detail level, down to 1 |
 
@@ -272,6 +273,7 @@ Every other command shows up when you type its name or one of the words below:
 | Blue tag | <kbd>4</kbd> · <kbd>Ctrl</kbd>+<kbd>4</kbd> | `blue tag` | — |
 | Clear tag | <kbd>0</kbd> · <kbd>Ctrl</kbd>+<kbd>0</kbd> | `clear tag` · `untag` | — |
 | Show/hide unknown space | <kbd>U</kbd> | `unknown space` | — |
+| Show/hide the Recycle Bin | <kbd>R</kbd> | `trash` · `recycle bin` | — |
 | Split view | — | `split` · `side by side` | — |
 | Pause scan | — | `pause` | — |
 | Resume scan | — | `resume` · `continue` | — |

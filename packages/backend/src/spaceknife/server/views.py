@@ -248,6 +248,7 @@ class ViewManager:
             sort_by_size=bool(st.get("treemap.sort_by_size")),
             show_free=bool(st.get("treemap.show_free")),
             show_unknown=bool(st.get("treemap.show_unknown")),
+            show_trash=bool(st.get("treemap.show_trash")),
             visual=visual,
             color_mode=dict(colors).get(visual, registry.get(visual).default_color),
             colors=colors,
@@ -492,6 +493,8 @@ def apply_settings(view: View, s: pv.ViewSettingsParams, caps: Collection[str]) 
         view.show_free = s.show_free
     if s.show_unknown is not None:
         view.show_unknown = s.show_unknown
+    if s.show_trash is not None:
+        view.show_trash = s.show_trash
     if s.colors is not None:
         view.set_colors(s.colors)
     if s.visual is not None:
@@ -519,6 +522,8 @@ def view_state(host: ViewHost) -> pv.ViewState:
         sort_by_size=v.sort_by_size,
         show_free=v.show_free,
         show_unknown=v.show_unknown,
+        show_trash=v.show_trash,
+        has_trash=v.has_trash,
         visual=v.visual,
         color_mode=v.color_mode,
         colors=v.colors,

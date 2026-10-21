@@ -97,6 +97,9 @@ class ViewSettingsParams(Params):
     sort_by_size: bool | None = None
     show_free: bool | None = None
     show_unknown: bool | None = None
+    show_trash: bool | None = Field(
+        default=None, description="The recycle bins: drawn, or taken out of the picture"
+    )
     visual: VisualId | None = Field(default=None, description="A visual.list id (needs visuals.v1)")
     color_mode: ColorModeName | None = Field(
         default=None, description="Of the view's current visualization; 'branch' needs visuals.v1"
@@ -274,6 +277,12 @@ class ViewState(Payload):
     sort_by_size: bool
     show_free: bool
     show_unknown: bool
+    show_trash: bool = Field(
+        default=True, description="The recycle bins are drawn (not taken out of the picture)"
+    )
+    has_trash: bool = Field(
+        default=False, description="The scan holds a recycle bin / trash folder (the toggle is offered)"
+    )
     visual: str = Field(default="treemap", description="A visual.list id")
     color_mode: ColorModeName = Field(description="Of the current visualization (each remembers its own)")
     colors: dict[str, ColorModeName] = Field(

@@ -173,6 +173,8 @@ While SpaceKnife monitors the scan, moving files to the bin moves their blocks i
 
 Choose **Moving**, **Still** or **Off** in **Settings › Appearance › Treemap visuals › Recycle Bin effect**.
 
+To leave the bin out of the picture, press <kbd>R</kbd> or click the **Recycle Bin** chip next to **Unknown space** (**Trash** on macOS). The chip is there only when the scan holds a bin, and not in comparisons. With it off, the bin takes no room and the rest grows to fill the view. Its bytes are not counted as unknown space, and a view zoomed into the bin keeps showing it. New views follow **Settings › Visualization › Geometry › Show the Recycle Bin in new views**.
+
 ## While a scan runs: the breathing outline
 
 The picture fills in while the scan runs, several times a second. You can select, hover, zoom, go back, change the level and switch the visualization the whole time.
@@ -220,6 +222,7 @@ The defaults, the initial detail level and the two "in new views" switches only 
 | Block proportions | Visualization › Geometry | Treemap only: taller or wider blocks |
 | Initial detail level | Visualization › Geometry | Level of new views |
 | Show free space / unknown space in new views | Visualization › Geometry | Start values of <kbd>F</kbd> and <kbd>U</kbd> |
+| Show the Recycle Bin in new views | Visualization › Geometry | Start value of <kbd>R</kbd> |
 | Sort by size | Visualization › Geometry | Largest first, or by name |
 | Flame graph direction | Visualization › Flame graph | Root at bottom or at top |
 | Zoom animation duration | Visualization › Animation | 0 to 600 ms, 250 by default; 0 turns it off |
@@ -234,6 +237,7 @@ The defaults, the initial detail level and the two "in new views" switches only 
 | <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> | Raise / lower the detail level |
 | <kbd>F</kbd> | Show or hide free space |
 | <kbd>U</kbd> | Show or hide unknown space |
+| <kbd>R</kbd> | Show or hide the Recycle Bin (when the scan holds one) |
 | Double-click, <kbd>Enter</kbd> | Zoom in, also into merged blocks |
 
 Single-letter keys don't work while you type in a text field, and a focused drop-down list keeps <kbd>C</kbd> and <kbd>V</kbd> for itself. On macOS you can press <kbd>⌘</kbd> wherever this page says <kbd>Ctrl</kbd>. All keys are listed in [Keyboard shortcuts](../shortcuts/); zooming and the rest of the navigation are in [Navigating the picture](../navigation/).

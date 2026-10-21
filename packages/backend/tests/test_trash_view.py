@@ -8,10 +8,11 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from spaceknife.layout.engine import KEY_UNKNOWN
 from spaceknife.store.nodes import NodeStore
-from spaceknife.view import TagStore, View
+from spaceknife.view import TagStore, View, trash
 from spaceknife.view.state import F_TRASH, F_TRASH_BIN, RootInfoLike
-from spaceknife.view.trash import in_trash, is_trash_path
+from spaceknife.view.trash import WithoutBins, find_bins, in_trash, is_trash_path, subtree
 
 from .store_builder import build, find
 
@@ -129,3 +130,105 @@ def test_frames_flag_the_bin_and_what_is_in_it(tmp_path: Path) -> None:
     # zoomed into the bin: the root bar / centre disc is in it as well
     assert view.zoom_to_node(find(store, "$Recycle.Bin"))
     assert view.render().root.flags & (F_TRASH | F_TRASH_BIN) == F_TRASH | F_TRASH_BIN
+
+
+# ------------------------------------------------------------------ the 「回收站」 chip
+
+
+def test_every_bin_of_a_store_is_found() -> None:
+    store = build(
+        {
+            "$Recycle.Bin": {"S-1-5-21": {"$R1.mp4": 700 * MB}},
+            "Users": {
+                "lenny": {
+                    "$Recycle.Bin": {"a": 1},  # not at the top of the drive
+                    ".local": {"share": {"Trash": {"files": {"y": 1}}}},
+                    "Videos": {"trip.mp4": 900 * MB},
+                }
+            },
+            "Trash": {"x": 1},  # the right name in the wrong place
+        },
+        root="C:\\",
+    )
+    found = find_bins(store).tolist()
+    assert sorted(store.path(i) for i in found) == sorted(
+        [store.path(find(store, "$Recycle.Bin")), store.path(find(store, "Users/lenny/.local/share/Trash"))]
+    )
+    assert find_bins(build({"Videos": {"a.mp4": 1}}, root="D:\\")).tolist() == []
+
+
+def test_the_bins_are_looked_up_again_by_path_between_full_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = build({"$Recycle.Bin": {"x": 1}, "data": {"y": 1}}, root="C:\\")
+    first = find_bins(store).tolist()
+    store.version += 1  # a change (monitoring): within FULL_SEARCH_S the known paths are resolved again
+    calls: list[int] = []
+    real = trash._search
+    monkeypatch.setattr(trash, "_search", lambda s: calls.append(1) or real(s))
+    assert find_bins(store).tolist() == first and calls == []
+    monkeypatch.setattr(trash, "FULL_SEARCH_S", 0.0)
+    store.version += 1
+    assert find_bins(store).tolist() == first and calls == [1]
+
+
+def test_without_bins_takes_their_bytes_out() -> None:
+    store = build(
+        {
+            "$Recycle.Bin": {"S-1": {"a.mp4": 700 * MB, "b": {"c.iso": 300 * MB}}},
+            "Users": {"v.mp4": 900 * MB},
+        },
+        root="C:\\",
+    )
+    from spaceknife.layout.api import StoreSizes
+    from spaceknife.layout.basis import Basis
+
+    base = StoreSizes(Basis(store))
+    sizes = WithoutBins(base, store, find_bins(store))
+    root, bin_, users = find(store, ""), find(store, "$Recycle.Bin"), find(store, "Users")
+    inside = [
+        find(store, p) for p in ("$Recycle.Bin/S-1", "$Recycle.Bin/S-1/a.mp4", "$Recycle.Bin/S-1/b/c.iso")
+    ]
+    ids = np.array([root, bin_, users, *inside], dtype=np.int64)
+    got = sizes.of(ids).tolist()
+    assert got[0] == int(base.of(np.array([root]))[0]) - 1000 * MB  # the root lost the bin
+    assert got[1:] == [0, 900 * MB, 0, 0, 0]
+    full = sizes.full()
+    assert full[ids].tolist() == got and subtree(store, np.array([bin_])).tolist() == sorted(
+        [bin_, *inside, find(store, "$Recycle.Bin/S-1/b")]
+    )
+
+
+def test_hiding_the_bin_takes_it_out_of_the_picture(tmp_path: Path) -> None:
+    store = build(
+        {"$Recycle.Bin": {"S-1-5-21": {"$RX1.mp4": 700 * MB}}, "Users": {"lenny": {"trip.mp4": 900 * MB}}},
+        root="C:\\",
+    )
+    roots = [RootInfoLike(node=1, whole_volume=True, free=500 * MB, used=1700 * MB)]
+    view = View("v1", store, roots, tags=TagStore(tmp_path / "tags.json"))
+    view.set_viewport(1200, 800, 1.0)
+    assert view.has_trash and view.show_trash
+    bin_ = find(store, "$Recycle.Bin")
+    assert (view.render().draw.node == bin_).any()
+    view.show_trash = False
+    frame = view.render()
+    assert not (frame.draw.node == bin_).any()
+    assert not (frame.flags & F_TRASH).any()
+    # unknown space stays what the scan didn't see: the hidden bin is not counted as unknown
+    unknown = frame.draw.size[frame.draw.key == KEY_UNKNOWN]
+    assert unknown.tolist() == [1700 * MB - int(store.cols["tot_alloc"][1])]
+    # zoomed into the bin, it stays drawn
+    assert view.zoom_to_node(bin_)
+    assert len(view.render().draw)
+    plain = View("v2", build({"Users": {"a": 1}}, root="D:\\"), roots, tags=TagStore(tmp_path / "t2.json"))
+    assert not plain.has_trash
+
+
+def test_the_palette_toggle_needs_a_bin(tmp_path: Path) -> None:
+    from spaceknife.palette.commands import Context, evaluate, registry
+
+    toggle = next(c for c in registry() if c.id == "view.toggle_trash")
+    with_bin = View(
+        "v", build({"$Recycle.Bin": {"x": 1}}, root="C:\\"), [], tags=TagStore(tmp_path / "a.json")
+    )
+    without = View("w", build({"data": {"x": 1}}, root="C:\\"), [], tags=TagStore(tmp_path / "b.json"))
+    assert evaluate(toggle, Context(tab="scan", view=with_bin))[0]
+    assert evaluate(toggle, Context(tab="scan", view=without)) == (False, "这次扫描里没有回收站")

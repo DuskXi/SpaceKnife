@@ -198,6 +198,7 @@ Geometry, flame graph direction and animation. Open views are laid out again at 
 | Initial detail level | 5 | 1 to 15 | The detail level new views start with, the same as the level control on the toolbar. Only affects views opened later. | `treemap.initial_detail` |
 | Show free space in new views | On | On `true` · Off `false` | Shows the free space block in whole-volume views. Only affects views opened later. | `treemap.show_free` |
 | Show unknown space in new views | On | On `true` · Off `false` | Shows the unknown space block in whole-volume views. Only affects views opened later. | `treemap.show_unknown` |
+| Show the Recycle Bin in new views | On | On `true` · Off `false` | Draws the Recycle Bin / Trash when the scan holds one. Off: the bin takes no room and the other blocks grow to fill the view. Only affects views opened later. | `treemap.show_trash` |
 | Sort by size | On | On `true` · Off `false` | Larger blocks go to the top left within a folder. | `treemap.sort_by_size` |
 
 #### Flame graph

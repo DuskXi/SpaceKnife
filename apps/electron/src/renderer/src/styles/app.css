@@ -151,6 +151,8 @@ button:disabled { cursor: default; }
 .chip-swatch { flex: none; width: 10px; height: 10px; border-radius: 3px; }
 .chip-swatch.free { border: 1px solid #3E9A6E; background: repeating-linear-gradient(135deg, #153A2A 0 2px, #2F7A57 2px 4px); }
 .chip-swatch.unknown { border: 1px dashed #6B707C; background: repeating-linear-gradient(45deg, #1E2128 0 1.5px, #3F434D 1.5px 3px); }
+/* 「回收站」: the bin's dashed coral outline over its cross-hatching (「回收站特效」) */
+.chip-swatch.trash { border: 1px dashed var(--sk-treemap-trash-outline); background: repeating-linear-gradient(45deg, transparent 0 2px, var(--sk-treemap-trash-hatch) 2px 3px), repeating-linear-gradient(-45deg, var(--sk-color-bg-raised) 0 2px, var(--sk-treemap-trash-hatch) 2px 3px); }
 .palette-btn { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 7px 0 9px; border: 0; border-radius: var(--sk-radius-md); background: transparent; box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); color: var(--sk-color-text-secondary); }
 .palette-btn:hover, .palette-btn.on { background: var(--sk-color-bg-hover); }
 .basket { position: relative; }

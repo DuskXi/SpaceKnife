@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "3de1c29fe8140330";
+export const SCHEMA_HASH = "5b1bc8aa65f6375d";
 
 export interface AgeCond {
   end: number;
@@ -1701,6 +1701,8 @@ export interface ViewSettingsParams {
   /** CSS px */
   min_element?: number | null;
   show_free?: boolean | null;
+  /** The recycle bins: drawn, or taken out of the picture */
+  show_trash?: boolean | null;
   show_unknown?: boolean | null;
   sort_by_size?: boolean | null;
   viewport?: Viewport | null;
@@ -1721,11 +1723,15 @@ export interface ViewState {
   detail: number;
   direction: "all" | "grow" | "shrink";
   filter_mode: "dim" | "hide";
+  /** The scan holds a recycle bin / trash folder (the toggle is offered) */
+  has_trash: boolean;
   min_element: number;
   results_sort: "size" | "name" | "count";
   scan_id: string;
   selected: number | null;
   show_free: boolean;
+  /** The recycle bins are drawn (not taken out of the picture) */
+  show_trash: boolean;
   show_unknown: boolean;
   sort_by_size: boolean;
   view_id: string;

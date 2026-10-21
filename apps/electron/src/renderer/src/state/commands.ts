@@ -136,6 +136,9 @@ export async function runCommand(id: string): Promise<void> {
     case "view.toggle_unknown":
       if (st) await setViewSettings(viewId, { show_unknown: !st.show_unknown });
       return;
+    case "view.toggle_trash":
+      if (st?.has_trash) await setViewSettings(viewId, { show_trash: !st.show_trash });
+      return;
     case "view.detail_up":
       if (st) await setViewSettings(viewId, { detail: Math.min(15, st.detail + 1) });
       return;

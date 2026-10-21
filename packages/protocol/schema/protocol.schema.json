@@ -7936,6 +7936,19 @@
           "default": null,
           "title": "Show Free"
         },
+        "show_trash": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The recycle bins: drawn, or taken out of the picture",
+          "title": "Show Trash"
+        },
         "show_unknown": {
           "anyOf": [
             {
@@ -8058,6 +8071,12 @@
           "title": "Filter Mode",
           "type": "string"
         },
+        "has_trash": {
+          "default": false,
+          "description": "The scan holds a recycle bin / trash folder (the toggle is offered)",
+          "title": "Has Trash",
+          "type": "boolean"
+        },
         "min_element": {
           "title": "Min Element",
           "type": "number"
@@ -8090,6 +8109,12 @@
         },
         "show_free": {
           "title": "Show Free",
+          "type": "boolean"
+        },
+        "show_trash": {
+          "default": true,
+          "description": "The recycle bins are drawn (not taken out of the picture)",
+          "title": "Show Trash",
           "type": "boolean"
         },
         "show_unknown": {

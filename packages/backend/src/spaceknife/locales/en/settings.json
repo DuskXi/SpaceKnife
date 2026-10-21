@@ -345,5 +345,9 @@
  "回收站 / 废纸篓里的东西蒙上一层暗纹、围上虚线，回收站本身标出清空后能释放多少；「动态」时虚线流动、偶尔扫过一道光（「减少动画」时不动）": "What lies in the Recycle Bin / Trash is shaded and hatched inside a dashed outline, and the bin itself says how much emptying it frees. \"Moving\": the dashes march and a band of light sweeps across now and then (still with \"Reduce motion\")",
  "动态": "Moving",
  "静态": "Still",
- "本机磁盘": "Disks"
+ "本机磁盘": "Disks",
+ "新视图显示回收站": "Show the Recycle Bin in new views",
+ "扫描里有回收站 / 废纸篓时显示它；关掉后回收站不占画面，其余的块放大填满": "Draws the Recycle Bin / Trash when the scan holds one. Off: the bin takes no room and the other blocks grow to fill the view",
+ "显示/隐藏回收站": "Show/hide the Recycle Bin",
+ "这次扫描里没有回收站": "This scan has no Recycle Bin"
 }

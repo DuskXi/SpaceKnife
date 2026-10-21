@@ -265,6 +265,7 @@ export function carried(st: ViewState): ViewSettingsParams {
     detail: st.detail,
     show_free: st.show_free,
     show_unknown: st.show_unknown,
+    show_trash: st.show_trash,
   };
 }
 

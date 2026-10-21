@@ -21,10 +21,12 @@ import os
 import re
 import sys
 import threading
+import time
 from weakref import WeakKeyDictionary
 
 import numpy as np
 
+from ..layout.api import SizeSource
 from ..store.nodes import Kind, NodeStore
 
 # byte lengths of the bins' folder names: Trash, .Trash, .Trashes / RECYCLER / RECYCLED,
@@ -158,4 +160,143 @@ def in_trash(store: NodeStore, nodes: np.ndarray) -> np.ndarray:
     return trash_marks(store, nodes)[0]
 
 
-__all__ = ["in_trash", "is_trash_path", "trash_marks"]
+# ------------------------------------------------------------------ every bin of a store (「回收站」 chip)
+
+BIN_DEPTH = 7  # the deepest a bin sits below its scan root (depth 1): /home/<user>/.local/share/Trash
+FULL_SEARCH_S = 5.0  # a store that keeps changing is searched whole at most this often
+_FIRST = np.array([ord(ch) for ch in "$.TtRr"], dtype=np.uint8)  # the bins' names start with these
+
+
+class _Found:
+    __slots__ = ("at", "ids", "paths", "version")
+
+    def __init__(self, version: int, at: float, ids: np.ndarray, paths: list[str]) -> None:
+        self.version, self.at, self.ids, self.paths = version, at, ids, paths
+
+
+_found: WeakKeyDictionary[NodeStore, _Found] = WeakKeyDictionary()
+
+
+def _first_bytes(store: NodeStore, n: int) -> np.ndarray:
+    """The first byte of every node's name (0 for an empty one), from the name heap's chunks."""
+    out = np.zeros(n, dtype=np.uint8)
+    lengths = store.cols["name_len"][:n]
+    a = 0
+    while a < n:
+        stop, run, sep = store.names_run(a, n)
+        if stop <= a:
+            break
+        first = run[np.minimum(sep.astype(np.int64) + 1, len(run) - 1)]
+        out[a:stop] = np.where(lengths[a:stop] > 0, first, 0)
+        a = stop
+    return out
+
+
+def _search(store: NodeStore) -> tuple[np.ndarray, list[str]]:
+    """Every bin in the store: folders near the top of a root whose name and path say so."""
+    n = len(store)
+    if n <= 1:
+        return np.zeros(0, dtype=np.int64), []
+    c = store.cols
+    kind, depth, parent = c["kind"][:n], c["depth"][:n], c["parent"][:n]
+    near = (kind == Kind.DIR) & (depth <= BIN_DEPTH) & (depth >= 1)
+    near &= np.isin(c["name_len"][:n].astype(np.int64), _LENGTHS)
+    near[0] = False
+    ids = np.flatnonzero(near)
+    if len(ids):
+        ids = ids[np.isin(_first_bytes(store, n)[ids], _FIRST)]
+    bins: list[int] = []
+    for node in ids.tolist():
+        if not _candidate(store.name(node)):
+            continue
+        up = int(parent[node])
+        if is_trash_path(store.path(node), top=up > 0 and int(parent[up]) == 0):
+            bins.append(node)
+    for root in store.roots():  # a scan of the bin itself
+        if is_trash_path(store.name(root)):
+            bins.append(int(root))
+    found = np.array(sorted(set(bins)), dtype=np.int64)
+    return found, [store.path(int(b)) for b in found]
+
+
+def find_bins(store: NodeStore) -> np.ndarray:
+    """The ids of every recycle bin / trash folder in the store, sorted. A store that changes all the
+    time (monitoring) is searched whole at most every FULL_SEARCH_S seconds; in between, the bins
+    found last are looked up again by path."""
+    now = time.monotonic()
+    with _lock:
+        hit = _found.get(store)
+    if hit is not None and hit.version == store.version:
+        return hit.ids
+    if hit is not None and now - hit.at < FULL_SEARCH_S:
+        again = [store.find(p) for p in hit.paths]
+        ids = np.array(sorted({i for i in again if i is not None}), dtype=np.int64)
+        fresh = _Found(store.version, hit.at, ids, [store.path(int(i)) for i in ids])
+    else:
+        ids, paths = _search(store)
+        fresh = _Found(store.version, now, ids, paths)
+    with _lock:
+        _found[store] = fresh
+    return fresh.ids
+
+
+def subtree(store: NodeStore, tops: np.ndarray) -> np.ndarray:
+    """``tops`` and everything below them, sorted (one level per step, ranges joined with numpy)."""
+    c = store.cols
+    n = len(store)
+    parts = [tops.astype(np.int64)]
+    frontier = parts[0]
+    while len(frontier):
+        frontier = frontier[c["kind"][frontier] == Kind.DIR]
+        start = c["child_start"][frontier].astype(np.int64)
+        count = c["child_count"][frontier].astype(np.int64)
+        ok = (count > 0) & (start >= 1) & (start + count <= n)
+        start, count = start[ok], count[ok]
+        if not len(count):
+            break
+        # each range start … start + count - 1, all at once
+        steps = np.ones(int(count.sum()), dtype=np.int64)
+        heads = np.concatenate(([0], np.cumsum(count)[:-1]))
+        steps[heads] = start - np.concatenate(([0], start[:-1] + count[:-1] - 1))
+        frontier = np.cumsum(steps)
+        parts.append(frontier)
+    return np.unique(np.concatenate(parts))
+
+
+class WithoutBins:
+    """A size source with the recycle bins taken out (the 「回收站」 chip off): a bin and everything
+    in it weigh nothing, and each of its ancestors loses the bin's bytes."""
+
+    __slots__ = ("_cut_ids", "_cut_val", "_inside", "base", "n")
+
+    def __init__(self, base: SizeSource, store: NodeStore, bins: np.ndarray) -> None:
+        self.base = base
+        self.n = base.n
+        bins = bins[bins < base.n]
+        self._inside = subtree(store, bins)
+        self._inside = self._inside[self._inside < base.n]
+        less: dict[int, int] = {}
+        for b, size in zip(bins.tolist(), base.of(bins).tolist(), strict=True):
+            for a in store.ancestors(int(b)):
+                less[a] = less.get(a, 0) + int(size)
+        self._cut_ids = np.array(sorted(less), dtype=np.int64)
+        self._cut_val = np.array([less[i] for i in self._cut_ids.tolist()], dtype=np.int64)
+
+    def of(self, ids: np.ndarray) -> np.ndarray:
+        out = np.array(self.base.of(ids), dtype=np.int64, copy=True)
+        if len(self._inside):
+            out[np.isin(ids, self._inside)] = 0
+        if len(self._cut_ids):
+            at = np.searchsorted(self._cut_ids, ids)
+            hit = (at < len(self._cut_ids)) & (self._cut_ids[np.minimum(at, len(self._cut_ids) - 1)] == ids)
+            out[hit] -= self._cut_val[at[hit]]
+        return np.maximum(out, 0)
+
+    def full(self) -> np.ndarray:
+        out = np.array(self.base.full(), dtype=np.int64, copy=True)
+        out[self._inside] = 0
+        out[self._cut_ids] -= self._cut_val
+        return np.maximum(out, 0)
+
+
+__all__ = ["WithoutBins", "find_bins", "in_trash", "is_trash_path", "subtree", "trash_marks"]

@@ -43,7 +43,7 @@ from ..layout.engine import (
 from ..store.nodes import Flag, Kind, NodeStore
 from .branch import BranchHues
 from .tags import TagStore
-from .trash import trash_marks
+from .trash import WithoutBins, find_bins, trash_marks
 
 ColorMode = Literal["class", "flat", "time", "branch"]
 FilterMode = Literal["dim", "hide"]
@@ -114,6 +114,7 @@ class ViewSettings:
     sort_by_size: bool = True
     show_free: bool = True
     show_unknown: bool = True
+    show_trash: bool = True  # the recycle bins (「回收站」 chip)
     visual: str = "treemap"  # a registered visualization
     color_mode: ColorMode = "class"  # of ``visual``, the one the view starts with
     colors: tuple[tuple[str, ColorMode], ...] = ()  # the colour mode each other visualization starts with
@@ -222,6 +223,7 @@ class View:
         self.sort_by_size = s.sort_by_size
         self.show_free = s.show_free
         self.show_unknown = s.show_unknown
+        self.show_trash = s.show_trash
         self.font_scale = s.font_scale
         self.aspect = s.aspect
         self.filter_mode: FilterMode = s.filter_mode
@@ -666,6 +668,10 @@ class View:
             sizes = ArraySizes(matched)
         else:
             sizes = StoreSizes(self.basis)
+        if not self.show_trash and self.compare is None:
+            bins = find_bins(self.store)
+            if len(bins) and not self._in_bin(bins):  # zoomed into a bin: it stays
+                sizes = WithoutBins(sizes, self.store, bins)
         draw = engine.run(self._params(), self._root_spec(vis), sizes)
         draw.visual = vis.id  # one engine may lay out several visualizations
         frame = self._annotate(draw, res, sizes)
@@ -677,6 +683,16 @@ class View:
         frame.flash = self._flash_rows(draw)
         self.last = frame
         return frame
+
+    @property
+    def has_trash(self) -> bool:
+        """The scan holds a recycle bin (the 「回收站」 chip is offered)."""
+        return self.compare is None and len(find_bins(self.store)) > 0
+
+    def _in_bin(self, bins: np.ndarray) -> bool:
+        node = self.zoom.node
+        chain = [node, *self.store.ancestors(node)] if 0 < node < len(self.store) else []
+        return bool(np.isin(np.array(chain, dtype=np.int64), bins).any())
 
     def _annotate(self, draw: DrawList, res: FilterResult | None, sizes: SizeSource) -> Frame:
         n = len(draw)

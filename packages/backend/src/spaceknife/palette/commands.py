@@ -92,6 +92,12 @@ def _view(c: Context) -> str | None:
     return None if c.view is not None else _("需要先完成扫描")
 
 
+def _trash_view(c: Context) -> str | None:
+    if c.view is None:
+        return _("需要先完成扫描")
+    return None if c.view.has_trash else _("这次扫描里没有回收站")
+
+
 def _scan_view(c: Context) -> str | None:
     """A view of the scan itself: a comparison's view shows changes, its folders are not the scan's."""
     return _view(c) or (
@@ -201,6 +207,10 @@ def _free(c: Context) -> str:
 
 def _unknown(c: Context) -> str:
     return (_("当前：显示") if c.view.show_unknown else _("当前：隐藏")) if c.view else ""
+
+
+def _trash(c: Context) -> str:
+    return (_("当前：显示") if c.view.show_trash else _("当前：隐藏")) if c.view else ""
 
 
 def _basket(c: Context) -> str:
@@ -365,6 +375,15 @@ def _registry() -> tuple[Command, ...]:
             ("unknown space",),
             needs=(_view,),
             status=_unknown,
+        ),
+        C(
+            "view.toggle_trash",
+            "显示/隐藏回收站",
+            "basket",
+            ("R",),
+            ("trash", "recycle bin"),
+            needs=(_trash_view,),
+            status=_trash,
         ),
         C("view.split", "分屏", "split", (), ("split", "side by side"), needs=(_view,)),
         C("scan.pause", "暂停扫描", "pause", (), ("pause",), needs=(_pausable,)),

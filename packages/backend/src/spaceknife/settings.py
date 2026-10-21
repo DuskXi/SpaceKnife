@@ -449,6 +449,18 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "treemap.show_trash",
+            "treemap",
+            "几何",
+            "新视图显示回收站",
+            "扫描里有回收站 / 废纸篓时显示它；关掉后回收站不占画面，其余的块放大填满",
+            "switch",
+            True,
+            applies="new_views",
+            synonyms=("trash", "recycle bin", "回收站", "废纸篓"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
             "treemap.sort_by_size",
             "treemap",
             "几何",
