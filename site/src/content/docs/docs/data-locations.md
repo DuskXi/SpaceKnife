@@ -29,7 +29,8 @@ You don't have to look them up: **Settings › Advanced** shows them.
 | `snapshots/` | data | One folder per scanned location, one `.sks` file per snapshot |
 | `tags/` | data | Saved tags, one file per scanned location |
 | `logs/spaceknife.log` | data | The log file |
-| `update.json` | data | The last update check, the newest release it found, and the versions whose update card you closed |
+| `update.json` | data | The last update check, the recent releases with their notes, and the versions whose update card you closed |
+| `updates/` | data | A downloaded new version until it runs, and while a portable copy is replaced, its new and old program files. Emptied at the next start ([Nothing left behind](../updates-privacy/#nothing-left-behind)) |
 | `palette_recent.json` | data | Recent jumps and filters of the command palette |
 | `settings.json` | configuration | Your settings |
 | `classes.json` | configuration | Your file classes |
@@ -108,7 +109,7 @@ The portable archives (`SpaceKnife-<version>-win-x64-portable.zip` and `SpaceKni
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.
 - Unpack the archive somewhere you can write: a folder under Program Files, for example, doesn't work.
-- The in-app update knows it is a portable copy: it downloads the portable archive and shows it in its folder. Replace the program files and keep `data` (see [Upgrading](../install/#upgrading)).
+- The in-app update knows it is a portable copy: it downloads the portable archive, and **Seamless update** replaces the program files and keeps `data`; **Replace it yourself** shows the archive so that you unpack it over the old files (see [Upgrading](../install/#upgrading)).
 - The macOS app and the AppImage have no portable mode. On macOS, use `SPACEKNIFE_HOME` instead.
 
 :::caution[The command line and portable mode]
@@ -126,4 +127,4 @@ To take your settings into a portable copy (or out of one), export them in one c
 
 ## Removing all data
 
-To start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are) (on Windows: `%LOCALAPPDATA%\SpaceKnife` and `%APPDATA%\SpaceKnife`), or the `SPACEKNIFE_HOME` folder or `data` folder you use. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.
+The Windows uninstaller does it for you: tick **Also delete the snapshots, settings and logs** on its second page ([Uninstalling](../install/#uninstalling)). Otherwise, to start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are) (on Windows: `%LOCALAPPDATA%\SpaceKnife` and `%APPDATA%\SpaceKnife`), or the `SPACEKNIFE_HOME` folder or `data` folder you use. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.

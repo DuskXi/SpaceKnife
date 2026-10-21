@@ -12,7 +12,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..store.nodes import Kind, NodeStore
-from .basis import Basis
+from .basis import NO_CLASS, Basis
 from .rows import KEY_FREE, KEY_MORE, KEY_NODE_MASK, KEY_SMALL, PAGE_REST, RectKind
 
 
@@ -73,7 +73,7 @@ def merge_items(
         by_cls = np.bincount(basis.cls_of(sm_ids), weights=sm_s, minlength=len(basis.class_ids))
         top = int(np.argmax(by_cls))
         sm_total = int(sm_s.sum())
-        cls = top if by_cls[top] * 2 >= sm_total else basis.other
+        cls = top if by_cls[top] * 2 >= sm_total else NO_CLASS
         agg = Item(KEY_SMALL | tag, container, RectKind.SMALL, sm_total, cls, n_small)
         ctx.members[KEY_SMALL | tag] = sm_ids
         rest = ~small
@@ -93,7 +93,7 @@ def merge_items(
             size, count = size + agg.size, count + agg.count
             agg = None
         ctx.members[KEY_MORE | tag] = np.concatenate(members)
-        more = Item(KEY_MORE | tag, container, RectKind.MORE, size, basis.other, count)
+        more = Item(KEY_MORE | tag, container, RectKind.MORE, size, NO_CLASS, count)
         rest &= ~tiny
     ids, s = ids[rest], s[rest]
     if ctx.sort_by_size:
@@ -104,7 +104,7 @@ def merge_items(
     classes = basis.cls_of(ids)
     out = [Item(int(ids[i]), int(ids[i]), RectKind.FILE, int(s[i]), int(classes[i]), 1) for i in order]
     for key, size in extra:
-        out.append(Item(key, -1, RectKind.FREE if key == KEY_FREE else RectKind.UNKNOWN, size, 0, 0))
+        out.append(Item(key, -1, RectKind.FREE if key == KEY_FREE else RectKind.UNKNOWN, size, NO_CLASS, 0))
     if agg is not None:
         out.append(agg)
     if ctx.sort_by_size and (extra or agg is not None):
@@ -156,5 +156,5 @@ def page_items(ctx: MergeCtx, container: int, ids: np.ndarray, s: np.ndarray, ne
             key = KEY_MORE | (int(rest[1]) & KEY_NODE_MASK)
         weight = float((total if k == k_prop else basis[k - 1]) - prefix[k - 1])
         ctx.members[key] = rest
-        out.append(Item(key, container, RectKind.MORE, int(s[k:].sum()), ctx.basis.other, len(rest), weight))
+        out.append(Item(key, container, RectKind.MORE, int(s[k:].sum()), NO_CLASS, len(rest), weight))
     return out

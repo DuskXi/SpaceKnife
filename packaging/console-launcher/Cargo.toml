@@ -1,0 +1,21 @@
+[package]
+name = "spaceknife-console"
+version = "0.1.0"
+edition = "2024"
+description = "SpaceKnife.com: the console entry of the Windows app, so a terminal waits for it (headless mode)"
+license = "MIT"
+publish = false
+
+# No dependencies: a few kernel32 calls. Built by tools/build_package.py on Windows and shipped next
+# to SpaceKnife.exe as SpaceKnife.com (docs/packaging.md).
+
+[[bin]]
+name = "spaceknife-console"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

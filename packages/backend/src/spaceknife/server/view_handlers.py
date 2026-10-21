@@ -198,6 +198,7 @@ def view_state_tuple(v: View) -> tuple[object, ...]:
         v.sort_by_size,
         v.show_free,
         v.show_unknown,
+        v.show_trash,
         v.visual,
         v.color_mode,
         v.filter_mode,

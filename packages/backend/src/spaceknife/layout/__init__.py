@@ -14,7 +14,7 @@ from .api import (
     StoreSizes,
     Visualization,
 )
-from .basis import Basis
+from .basis import NO_CLASS, Basis
 from .engine import Layout
 from .rows import (
     COMMON_COLUMNS,
@@ -41,6 +41,7 @@ __all__ = [
     "KEY_SMALL",
     "KEY_UNKNOWN",
     "MAX_ROWS",
+    "NO_CLASS",
     "ArraySizes",
     "Basis",
     "DrawList",

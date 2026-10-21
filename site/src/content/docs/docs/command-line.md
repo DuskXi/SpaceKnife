@@ -28,6 +28,8 @@ alias skb=/opt/SpaceKnife/resources/backend/spaceknife-backend
 
 :::note
 On a deb or rpm install, `spaceknife` (`/usr/bin/spaceknife`) starts the app, not the command line.
+
+The app's own executable takes options too: `--headless` and `--listen` run SpaceKnife without a window and serve its interface to a browser, on this computer or another one. See [Headless mode](../headless/).
 :::
 
 :::caution[Portable copies]

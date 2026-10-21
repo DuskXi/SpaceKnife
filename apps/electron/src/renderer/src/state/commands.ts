@@ -13,7 +13,9 @@ import {
   call,
   checkUpdates,
   closeTab,
+  moveActiveTab,
   newStartTab,
+  openMachineTab,
   openSettingsTab,
   openSnapshot,
   continueScan,
@@ -79,8 +81,8 @@ async function selectionPath(): Promise<{ path: string; dir: boolean } | null> {
 /** Where the user is, as the backend's commands see it (palette.query, palette.check). */
 export function paletteContext(s: AppState = get()): PaletteContext {
   const tab = activeTab(s);
-  // the help tab is, to the backend's commands, a tab without a scan like the settings tab
-  return { tab: tab.kind === "help" ? "settings" : tab.kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s) };
+  // the help and disk tabs are, to the backend's commands, tabs without a scan like the settings tab
+  return { tab: tab.kind === "help" || tab.kind === "machine" ? "settings" : tab.kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s) };
 }
 
 /** The command a key runs through the palette's rules (runShortcut), or null: F5 / Shift+F5 / Ctrl+S,
@@ -135,6 +137,9 @@ export async function runCommand(id: string): Promise<void> {
     case "view.toggle_unknown":
       if (st) await setViewSettings(viewId, { show_unknown: !st.show_unknown });
       return;
+    case "view.toggle_trash":
+      if (st?.has_trash) await setViewSettings(viewId, { show_trash: !st.show_trash });
+      return;
     case "view.detail_up":
       if (st) await setViewSettings(viewId, { detail: Math.min(15, st.detail + 1) });
       return;
@@ -176,6 +181,10 @@ export async function runCommand(id: string): Promise<void> {
       return checkUpdates();
     case "app.show_update":
       return showUpdate();
+    case "app.about":
+      return openSettingsTab("about");
+    case "app.disks":
+      return openMachineTab();
     case "nav.back":
       await viewCall(viewId, "view.back");
       return;
@@ -228,6 +237,10 @@ export async function runCommand(id: string): Promise<void> {
     case "tab.close":
       await closeTab(tab.id);
       return;
+    case "tab.move_left":
+      return moveActiveTab(-1);
+    case "tab.move_right":
+      return moveActiveTab(1);
     case "tag.red":
     case "tag.yellow":
     case "tag.green":

@@ -23,7 +23,7 @@ DAY = 86400
 ROOT = str(PurePath("/data/Scan Root")) if not PurePath("C:/").drive else "C:\\Data\\Scan Root"
 
 STEMS = ["a", "B", "notes", "Temp", "temp", "x", "Ä", "ä", "视频", "Program Files", "tmp", "abc", "Abc"]
-EXTS = ["", ".txt", ".TXT", ".jpg", ".mp4", ".log", ".tar.gz", ".", ".Mp3", ".zip"]
+EXTS = ["", ".txt", ".TXT", ".jpg", ".mp4", ".log", ".tar.gz", ".", ".Mp3", ".zip", ".ts", ".MTS"]
 ATTRS = [Flag.HIDDEN, Flag.READONLY, Flag.SYSTEM, Flag.ARCHIVE, Flag.COMPRESSED, Flag.SPARSE]
 
 
@@ -144,7 +144,7 @@ def reference(store: NodeStore, nf: FilterNormal, now: int, tags: np.ndarray) ->
         chain = list(store.ancestors(i))  # parent … root
         folder_names = [PurePath(store.name(a)).name if c["depth"][a] == 1 else store.name(a) for a in chain]
         ext = store.ext_table[int(c["ext"][i])]
-        classes = set(DEFAULT_CLASSES.classes_of(ext)) or {"other"}
+        classes = set(DEFAULT_CLASSES.file_classes(ext, int(c["size"][i]))) or {"other"}
         own_tags = 0
         for a in [i, *chain]:
             own_tags |= int(tags[a])

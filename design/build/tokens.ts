@@ -96,6 +96,9 @@ export const tokens = {
   "layout": {
     "filterMaxWidth": 420,
     "inspector": 320,
+    "inspectorMax": 640,
+    "inspectorMin": 280,
+    "mapMin": 360,
     "statusbar": 28,
     "tabHeight": 34,
     "titlebar": 40,
@@ -149,11 +152,18 @@ export const tokens = {
     "class": {
       "archive": "#E5C547",
       "audio": "#9B4586",
+      "code": "#B7CBF3",
+      "data": "#7BE8B9",
       "doc": "#505DC6",
       "exec": "#1FAE8A",
+      "game": "#BE1022",
       "image": "#2F8FDB",
       "other": "#2B2F38",
       "video": "#E07A1F"
+    },
+    "classFocus": {
+      "outline": "#FFFFFF8C",
+      "veil": "#060709D9"
     },
     "collapsed": "#232731",
     "diff": {
@@ -257,6 +267,14 @@ export const tokens = {
       "2": "#258672",
       "3": "#1C5F53",
       "4": "#173F39"
+    },
+    "trash": {
+      "badgeBg": "#FF8577",
+      "badgeText": "#0A0B0D",
+      "hatch": "#FF85772E",
+      "outline": "#FF8577",
+      "sweep": "#FFD9D32E",
+      "veil": "#06070973"
     },
     "unknown": {
       "border": "#343844",
@@ -402,6 +420,9 @@ export const cssVar = {
   "font.weight.semibold": "var(--sk-font-weight-semibold)",
   "layout.filterMaxWidth": "var(--sk-layout-filter-max-width)",
   "layout.inspector": "var(--sk-layout-inspector)",
+  "layout.inspectorMax": "var(--sk-layout-inspector-max)",
+  "layout.inspectorMin": "var(--sk-layout-inspector-min)",
+  "layout.mapMin": "var(--sk-layout-map-min)",
   "layout.statusbar": "var(--sk-layout-statusbar)",
   "layout.tabHeight": "var(--sk-layout-tab-height)",
   "layout.titlebar": "var(--sk-layout-titlebar)",
@@ -430,11 +451,16 @@ export const cssVar = {
   "space.9": "var(--sk-space-9)",
   "treemap.class.archive": "var(--sk-treemap-class-archive)",
   "treemap.class.audio": "var(--sk-treemap-class-audio)",
+  "treemap.class.code": "var(--sk-treemap-class-code)",
+  "treemap.class.data": "var(--sk-treemap-class-data)",
   "treemap.class.doc": "var(--sk-treemap-class-doc)",
   "treemap.class.exec": "var(--sk-treemap-class-exec)",
+  "treemap.class.game": "var(--sk-treemap-class-game)",
   "treemap.class.image": "var(--sk-treemap-class-image)",
   "treemap.class.other": "var(--sk-treemap-class-other)",
   "treemap.class.video": "var(--sk-treemap-class-video)",
+  "treemap.classFocus.outline": "var(--sk-treemap-class-focus-outline)",
+  "treemap.classFocus.veil": "var(--sk-treemap-class-focus-veil)",
   "treemap.collapsed": "var(--sk-treemap-collapsed)",
   "treemap.diff.grow.0": "var(--sk-treemap-diff-grow-0)",
   "treemap.diff.grow.1": "var(--sk-treemap-diff-grow-1)",
@@ -506,6 +532,12 @@ export const cssVar = {
   "treemap.time.2": "var(--sk-treemap-time-2)",
   "treemap.time.3": "var(--sk-treemap-time-3)",
   "treemap.time.4": "var(--sk-treemap-time-4)",
+  "treemap.trash.badgeBg": "var(--sk-treemap-trash-badge-bg)",
+  "treemap.trash.badgeText": "var(--sk-treemap-trash-badge-text)",
+  "treemap.trash.hatch": "var(--sk-treemap-trash-hatch)",
+  "treemap.trash.outline": "var(--sk-treemap-trash-outline)",
+  "treemap.trash.sweep": "var(--sk-treemap-trash-sweep)",
+  "treemap.trash.veil": "var(--sk-treemap-trash-veil)",
   "treemap.unknown.border": "var(--sk-treemap-unknown-border)",
   "treemap.unknown.stripeA": "var(--sk-treemap-unknown-stripe-a)",
   "treemap.unknown.stripeB": "var(--sk-treemap-unknown-stripe-b)",

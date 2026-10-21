@@ -37,6 +37,7 @@ DEFAULT_USN_ROWS = 1_000_000
 MAX_USN_ROWS = 4_000_000
 
 Volume = Annotated[str, StringConstraints(pattern=r"^[A-Za-z]:$")]
+LinuxDisk = Annotated[str, StringConstraints(pattern=r"^(nvme\d{1,3}n\d{1,3}|sd[a-z]{1,4})$")]
 BatchRows = Annotated[int, Field(ge=1, le=MAX_BATCH_ROWS)]
 Duty = Annotated[float, Field(gt=0, le=1)]  # share of time the reader may be busy (I/O limit)
 UsnRows = Annotated[int, Field(ge=1, le=MAX_USN_ROWS)]
@@ -105,12 +106,22 @@ class ReadUsn(Message):
     duty: Duty = 1.0
 
 
+class DiskHealth(Message):
+    """A disk's own health record (Linux, elevated): the raw pages as hex, ``{kind: nvme, log}``
+    (log page 02h) or ``{kind: ata, identify, general, temperature}`` (IDENTIFY DEVICE and the
+    Device Statistics pages 01h / 05h, through SAT). Only fixed read-only commands are sent."""
+
+    op: Literal["disk_health"] = "disk_health"
+    disk: LinuxDisk
+
+
 class Shutdown(Message):
     op: Literal["shutdown"] = "shutdown"
 
 
 Call = Annotated[
-    Ping | VolumeInfo | ScanMft | ScanMftImage | QueryUsn | ReadUsn | Shutdown, Field(discriminator="op")
+    Ping | VolumeInfo | ScanMft | ScanMftImage | QueryUsn | ReadUsn | DiskHealth | Shutdown,
+    Field(discriminator="op"),
 ]
 
 
@@ -167,7 +178,7 @@ ErrorCode = Literal[
     "needs_admin",  # the operation needs an elevated helper
     "forbidden",  # not allowed in this helper (scan_mft_image when elevated)
     "invalid_request",  # well-framed but not a valid request
-    "not_supported",  # not available on this platform / volume
+    "not_supported",  # not available on this platform / volume / device
     "not_ntfs",  # not a local NTFS volume
     "io_error",  # reading the volume or file failed
     "usn_inactive",  # the volume's change journal is not active (or is being deleted)

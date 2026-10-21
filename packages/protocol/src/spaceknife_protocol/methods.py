@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from .base import Empty, EmptyResult
-from .classes import ClassesEvent, ClassesState, ClassesUpdateParams
+from .classes import ClassesEvent, ClassesFolderParams, ClassesState, ClassesUpdateParams
 from .compare import (
     CompareIdParams,
     CompareInfo,
@@ -28,6 +28,7 @@ from .compare import (
 from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
+from .machine import MachineDisks, ReadHealthParams, ReadHealthResult
 from .ops import (
     BasketAddParams,
     BasketAddResult,
@@ -98,7 +99,7 @@ from .streams import (
     UnsubscribeParams,
 )
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
-from .update import UpdateChangedEvent, UpdateStatus, UpdateVersionParams
+from .update import UpdateChangedEvent, UpdateMuteParams, UpdateReleases, UpdateStatus, UpdateVersionParams
 from .view import (
     ViewFilterParams,
     ViewFrameEvent,
@@ -384,6 +385,12 @@ CLASSES_UPDATE = MethodSpec(
     "Replace the file class table (order = colour precedence); views recolour and filters re-run.",
 )
 CLASSES_RESET = MethodSpec("classes.reset", Empty, ClassesState, "Back to the built-in file classes.")
+CLASSES_FOLDER = MethodSpec(
+    "classes.folder",
+    ClassesFolderParams,
+    ClassesState,
+    "Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38).",
+)
 EXPORT_TARGETS = MethodSpec(
     "export.targets", Empty, ExportTargets, "Built-in export templates and formats (W4 「导出报告…」)."
 )
@@ -428,13 +435,39 @@ UPDATE_CHECK = MethodSpec(
 UPDATE_DISMISS = MethodSpec(
     "update.dismiss", UpdateVersionParams, UpdateStatus, "The card / dialog for this version was closed."
 )
+UPDATE_MUTE = MethodSpec(
+    "update.mute",
+    UpdateMuteParams,
+    UpdateStatus,
+    "Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic"
+    " download for its releases.",
+)
 UPDATE_DOWNLOAD = MethodSpec(
     "update.download",
     UpdateVersionParams,
     UpdateStatus,
-    "Download this version's file for this install into the download folder (progress: update.changed).",
+    "Download this version's file for this install into the updates folder (progress: update.changed).",
 )
 UPDATE_CANCEL = MethodSpec("update.cancel", Empty, UpdateStatus, "Stop a running download.")
+UPDATE_RELEASES = MethodSpec(
+    "update.releases",
+    Empty,
+    UpdateReleases,
+    "The recent releases with their notes (the timeline of the About & updates page).",
+)
+MACHINE_DISKS = MethodSpec(
+    "machine.disks",
+    Empty,
+    MachineDisks,
+    "This computer's disks with their links, the volumes on each and what scans tell of each volume.",
+)
+MACHINE_READ_HEALTH = MethodSpec(
+    "machine.read_health",
+    ReadHealthParams,
+    ReadHealthResult,
+    "Read the disks' own records that need administrator rights (Linux: the elevated helper, behind "
+    "polkit's password prompt). Only when the user asks; the answer is the whole page again.",
+)
 EVENT_UPDATE = EventSpec(
     "update.changed",
     UpdateChangedEvent,
@@ -449,13 +482,17 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         UPDATE_STATUS,
         UPDATE_CHECK,
         UPDATE_DISMISS,
+        UPDATE_MUTE,
         UPDATE_DOWNLOAD,
+        UPDATE_RELEASES,
         UPDATE_CANCEL,
         SYSTEM_PING,
         APP_SHUTDOWN,
         SUBSCRIBE,
         UNSUBSCRIBE,
         VOLUME_LIST,
+        MACHINE_DISKS,
+        MACHINE_READ_HEALTH,
         SCAN_CHECK_PATHS,
         SCAN_START,
         SCAN_CANCEL,
@@ -521,6 +558,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         CLASSES_GET,
         CLASSES_UPDATE,
         CLASSES_RESET,
+        CLASSES_FOLDER,
         EXPORT_TARGETS,
         EXPORT_CHECK,
         EXPORT_RUN,

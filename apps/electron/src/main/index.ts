@@ -1,38 +1,37 @@
 // Electron main process: one frameless window, the backend child process, a few native services.
 
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
-import { type Backend, bundledBackend, startBackend } from "./backend";
+import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
+import { fileIn, mimeOf } from "./files";
+import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
+import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
-import { installKind, installRefusal, projectPage } from "./update";
+import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
 const APP_ID = "io.github.duskxi.spaceknife"; // electron-builder.yml appId: taskbar grouping, shortcuts
 const RENDERER_DIR = join(here, "../renderer");
-const MIME: Record<string, string> = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".woff2": "font/woff2",
-  ".json": "application/json",
-};
+// --headless / --listen: no window, the interface in a browser (headless.ts); --help: the options
+const CLI = parseCommandLine(process.argv.slice(1));
 
 // A portable copy keeps its data next to the executable: the backend inherits SPACEKNIFE_HOME.
 const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env);
 if (portable) process.env.SPACEKNIFE_HOME = portable;
 // what the backend's update check downloads, and what main may start once it is downloaded
 const INSTALL_KIND = installKind(process.execPath, process.platform, app.isPackaged, process.env, portable);
+// started by 「无缝更新」 (the Windows installer passes it after a silent update): the renderer says so once
+const JUST_UPDATED = process.argv.includes("--updated");
 
 // The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own: an isolated
 // home (demos, tests, portable copies) gets its own; otherwise <appData>/SpaceKnife/electron, apart from
@@ -55,6 +54,20 @@ function repoRoot(): string {
   return process.env.SPACEKNIFE_REPO ? resolve(process.env.SPACEKNIFE_REPO) : resolve(app.getAppPath(), "../..");
 }
 
+/** How the backend starts, in the window and in headless mode alike. */
+function backendOptions(allowOrigins: string[], onLog: (line: string) => void): BackendOptions {
+  return {
+    repoRoot: repoRoot(),
+    bundled: app.isPackaged ? bundledBackend(process.resourcesPath) : null,
+    allowOrigins,
+    home: process.env.SPACEKNIFE_HOME,
+    locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
+    appVersion: app.getVersion(),
+    installKind: INSTALL_KIND,
+    onLog,
+  };
+}
+
 function setBackend(state: BackendState): void {
   backendState = state;
   win?.webContents.send("sk:backend", state);
@@ -64,30 +77,11 @@ async function launchBackend(): Promise<void> {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   const origins = devUrl ? [new URL(devUrl).origin] : [];
   try {
-    backend = await startBackend({
-      repoRoot: repoRoot(),
-      bundled: app.isPackaged ? bundledBackend(process.resourcesPath) : null,
-      allowOrigins: origins,
-      home: process.env.SPACEKNIFE_HOME,
-      locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
-      appVersion: app.getVersion(),
-      installKind: INSTALL_KIND,
-      downloadDir: downloadsDir(),
-      onLog: (line) => console.log(`[backend] ${line}`),
-    });
+    backend = await startBackend(backendOptions(origins, (line) => console.log(`[backend] ${line}`)));
     backend.proc.once("exit", (code) => setBackend({ state: "exited", code }));
     setBackend({ state: "ready", info: backend.info });
   } catch (err) {
     setBackend({ state: "failed", message: err instanceof Error ? err.message : String(err) });
-  }
-}
-
-/** The user's download folder (the backend saves updates there); null when the OS names none. */
-function downloadsDir(): string | null {
-  try {
-    return app.getPath("downloads");
-  } catch {
-    return null;
   }
 }
 
@@ -116,7 +110,8 @@ function createWindow(): void {
       contextIsolation: true,
       sandbox: false,
       spellcheck: false,
-      additionalArguments: [`--sk-app-version=${app.getVersion()}`], // window.sk.version (preload)
+      // window.sk.version and window.sk.justUpdated (preload)
+      additionalArguments: [`--sk-app-version=${app.getVersion()}`, ...(JUST_UPDATED ? ["--sk-updated"] : [])],
     },
   });
   // SPACEKNIFE_START_MINIMIZED=1 (milestone demos): appear in the taskbar without taking the focus
@@ -167,7 +162,7 @@ function registerIpc(): void {
     if (page) void shell.openExternal(page);
     else console.warn(`[shell] not opening ${String(url)}: not a page of the project (GitHub, the website)`);
   });
-  ipcMain.handle("sk:installUpdate", (_e, path: unknown) => installUpdate(String(path)));
+  ipcMain.handle("sk:installUpdate", (_e, path: unknown, how: unknown) => installUpdate(String(path), how === "classic" ? "classic" : "seamless"));
   ipcMain.handle("sk:openFolders", async () => {
     const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
@@ -190,34 +185,193 @@ function registerIpc(): void {
   });
 }
 
-/** Start the update the backend downloaded (update.download): "" when started, else why not. */
-async function installUpdate(file: string): Promise<string> {
-  const downloads = downloadsDir();
-  const refusal = downloads ? installRefusal(file, INSTALL_KIND, downloads, process.platform) : "updateNotInDownloads";
+/** One of the update card's two buttons with the file the backend downloaded (update.download):
+ *  「无缝更新」 or the classic way (shared/install.ts installStep). Only ever from a click in the card,
+ *  never by itself. "" when it is under way, else why not (and the app goes on as it was). */
+async function installUpdate(file: string, how: InstallHow): Promise<string> {
+  const updates = backend?.updatesDir ?? null;
+  const refusal = updates ? installRefusal(file, INSTALL_KIND, updates, process.platform) : "updateMissing";
   if (refusal) {
-    console.warn(`[update] not starting ${file}: ${refusal}`);
+    console.warn(`[update] not using ${file}: ${refusal}`);
     return mt(refusal);
   }
-  if (INSTALL_KIND === "nsis") return startInstaller(file);
-  // a disk image mounts (the user drags the new app over the old one), a package opens in the
-  // system's installer: either replaces files of this app, so it quits once the file is open
-  const error = await shell.openPath(file);
-  if (error) return mt("updateStartFailed", { error });
-  setTimeout(() => app.quit(), 500);
+  const step = installStep(INSTALL_KIND, how);
+  console.info(`[update] ${how} (${step ?? "nothing"}) with ${file}`);
+  try {
+    switch (step) {
+      case "silent":
+        // no wizard, the data stays, the installer starts the new version (update.ts nsisUpdateArgs)
+        return await restartInto(() => launch(file, nsisUpdateArgs(process.execPath, process.env)));
+      case "wizard":
+        // the installer with its pages: it upgrades in place (the old uninstaller runs with
+        // --updated, the data stays); SpaceKnife is gone before it gets that far
+        return await restartInto(() => launch(file, []));
+      case "swap":
+        return await replacePortable(file, updates!);
+      case "replace":
+        return await replaceAppImage(file);
+      case "open": {
+        // a disk image mounts (the user drags the new app over the old one), a package opens in the
+        // system's installer: either replaces files of this app, so it quits once the file is open
+        const error = await shell.openPath(file);
+        if (error) return mt("updateStartFailed", { error });
+        setTimeout(() => app.quit(), 500);
+        return "";
+      }
+      case "reveal":
+        shell.showItemInFolder(file); // unpacked or put in place by hand: SpaceKnife keeps running
+        return "";
+      default:
+        return mt("updateNoInstall");
+    }
+  } catch (err) {
+    console.warn(`[update] ${file}: ${String(err)}`);
+    return mt("updateStartFailed", { error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+/** Stop the backend (its files must be free before they are replaced), start what puts the new
+ *  version in place, and exit. When that can't start, the backend comes back and the app goes on. */
+async function restartInto(start: () => Promise<void>): Promise<string> {
+  const running = backend;
+  backend = null;
+  quitting = true; // before-quit: nothing left to stop
+  await running?.stop();
+  try {
+    await start();
+  } catch (err) {
+    console.warn(`[update] could not start the update: ${String(err)}`);
+    quitting = false;
+    void launchBackend();
+    return mt("updateStartFailed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  app.exit(0);
   return "";
 }
 
-/** The Windows installer closes the app itself and replaces it; quitting stops the backend first. */
-function startInstaller(file: string): Promise<string> {
-  return new Promise((done) => {
-    const child = spawn(file, [], { detached: true, stdio: "ignore" });
-    child.once("error", (err) => done(mt("updateStartFailed", { error: err.message })));
+/** Start a program on its own (it outlives the app); resolves once it runs. */
+function launch(file: string, args: string[]): Promise<void> {
+  return new Promise((done, fail) => {
+    const child = spawn(file, args, { detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", fail);
     child.once("spawn", () => {
       child.unref();
-      done("");
-      app.quit();
+      done();
     });
   });
+}
+
+/** An AppImage: the new file takes the old one's place (a rename: the running app keeps the old
+ *  file open), then the new one starts. Needs a folder the user can write to. */
+async function replaceAppImage(file: string): Promise<string> {
+  const target = process.env.APPIMAGE;
+  if (!target) return mt("updateNoInstall");
+  const next = `${target}.new`;
+  try {
+    await copyFile(file, next);
+    await chmod(next, 0o755);
+    await rename(next, target);
+  } catch (err) {
+    await rm(next, { force: true });
+    return mt("updateReplaceFailed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  return restartInto(() => launch(target, ["--updated"]));
+}
+
+/** A portable copy: unpack the new version next to the backend's downloads, then the new version's
+ *  backend swaps the files once the app has quit (spaceknife.update_swap) and starts it again. No
+ *  script: SpaceKnife's own program does it. The "data" folder stays. */
+async function replacePortable(file: string, updates: string): Promise<string> {
+  const version = /^SpaceKnife-(.+)-(?:win|linux)-x64-portable\.(?:zip|tar\.gz)$/.exec(basename(file))?.[1];
+  const platform = process.platform;
+  if (!version || (platform !== "win32" && platform !== "linux")) return mt("updateNoInstall");
+  const staging = join(updates, `staging-${version}`);
+  try {
+    await rm(staging, { recursive: true, force: true });
+    await mkdir(staging, { recursive: true });
+    await unpack(file, staging);
+  } catch (err) {
+    console.warn(`[update] could not unpack ${file}: ${String(err)}`);
+    return mt("updateUnpackFailed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  const top = (await readdir(staging, { withFileTypes: true })).filter((e) => e.isDirectory());
+  const staged = top.length === 1 ? join(staging, top[0]!.name) : null;
+  if (!staged || !(await readdir(staged)).includes(basename(process.execPath))) {
+    const found = top.map((e) => e.name).join(", ") || "nothing";
+    console.warn(`[update] ${basename(file)} is not one folder with ${basename(process.execPath)}: ${found}`);
+    return mt("updateUnpackFailed", { error: basename(file) });
+  }
+  const helper = swapHelper(staged, platform);
+  if (!existsSync(helper)) {
+    console.warn(`[update] ${basename(file)} has no ${helper}`);
+    return mt("updateUnpackFailed", { error: basename(file) });
+  }
+  const plan = {
+    pid: process.pid,
+    appDir: dirname(process.execPath),
+    staged,
+    previous: join(updates, `previous-${app.getVersion()}`),
+    exe: process.execPath,
+    log: join(updates, `update-${version}.log`),
+  };
+  await rm(plan.previous, { recursive: true, force: true }); // left by an attempt that was undone
+  const planFile = join(updates, `update-${version}.json`);
+  await writeFile(planFile, swapPlanJson(plan), "utf8");
+  console.info(`[update] ${version} unpacked: its backend swaps the files once the app has quit (${planFile})`);
+  return restartInto(() => startSwap(helper, planFile, updates));
+}
+
+/** Start the new version's backend in its --apply-update mode (spaceknife.update_swap): detached, so
+ *  it outlives the app. Resolves once it says the plan is usable; fails when it says otherwise, exits
+ *  or doesn't answer within 30 s (then the app goes on as it was). */
+function startSwap(helper: string, plan: string, cwd: string): Promise<void> {
+  return new Promise((done, fail) => {
+    const child = spawn(helper, ["--apply-update", plan], { cwd, detached: true, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    const lines = createInterface({ input: child.stdout! });
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      lines.close();
+      child.stdout?.destroy();
+      if (err) {
+        child.kill();
+        fail(err);
+      } else {
+        child.unref();
+        done();
+      }
+    };
+    const timer = setTimeout(() => finish(new Error(`${basename(helper)} did not answer`)), 30_000);
+    lines.once("line", (line) => {
+      let said: { ok?: unknown; error?: unknown } = {};
+      try {
+        said = JSON.parse(line) as typeof said;
+      } catch {
+        // not its answer: the error below
+      }
+      finish(said.ok === true ? undefined : new Error(typeof said.error === "string" ? said.error : line));
+    });
+    child.once("error", (err) => finish(err));
+    child.once("exit", (code) => finish(new Error(`${basename(helper)} exited with ${code}`)));
+  });
+}
+
+/** Unpack a portable archive (zip on Windows, tar.gz on Linux) with the system's tar: Windows 10 1803
+ *  and later have bsdtar, which reads zip and refuses entries leaving the folder; PowerShell's
+ *  Expand-Archive where it is missing. */
+function unpack(file: string, into: string): Promise<void> {
+  const run = (cmd: string, args: string[]) =>
+    new Promise<void>((done, fail) => {
+      const child = spawn(cmd, args, { stdio: "ignore", windowsHide: true });
+      child.once("error", fail);
+      child.once("exit", (code) => (code === 0 ? done() : fail(new Error(`${cmd} exited with ${code}`))));
+    });
+  if (process.platform !== "win32") return run("tar", ["-xzf", file, "-C", into]);
+  return run("tar.exe", ["-xf", file, "-C", into]).catch(() =>
+    run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Expand-Archive -LiteralPath '${file.replace(/'/g, "''")}' -DestinationPath '${into.replace(/'/g, "''")}' -Force`]),
+  );
 }
 
 function openTerminal(dir: string): void {
@@ -228,25 +382,38 @@ function openTerminal(dir: string): void {
 
 function serveRenderer(): void {
   protocol.handle("app", async (request) => {
-    const url = new URL(request.url);
-    const rel = normalize(decodeURIComponent(url.pathname)).replace(/^[/\\]+/, "") || "index.html";
-    const file = resolve(RENDERER_DIR, rel);
-    if (!file.startsWith(RENDERER_DIR)) return new Response("forbidden", { status: 403 });
+    const file = fileIn(RENDERER_DIR, new URL(request.url).pathname);
+    if (!file) return new Response("forbidden", { status: 403 });
     try {
       const body = await readFile(file);
-      return new Response(body, { headers: { "content-type": MIME[extname(file)] ?? "application/octet-stream" } });
+      return new Response(body, { headers: { "content-type": mimeOf(file) } });
     } catch {
       return new Response("not found", { status: 404 });
     }
   });
 }
 
-app.whenReady().then(() => {
-  serveRenderer();
-  registerIpc();
-  createWindow();
-  void launchBackend();
-});
+if (CLI.mode === "help" || CLI.mode === "error") {
+  const lang = systemLang();
+  if (CLI.mode === "help") process.stdout.write(`${ht(lang, "usage", { port: DEFAULT_PORT })}\n`);
+  else process.stderr.write(`${ht(lang, CLI.error, { value: CLI.value, port: DEFAULT_PORT })}\n${ht(lang, "seeHelp")}\n`);
+  exitFlushed(CLI.mode === "help" ? 0 : 2);
+} else if (CLI.mode === "headless") {
+  prepareHeadless();
+  void app.whenReady().then(() =>
+    runHeadless(CLI, {
+      rendererDir: RENDERER_DIR,
+      startBackend: (origins, onLog) => startBackend(backendOptions(origins, onLog)),
+    }),
+  );
+} else {
+  app.whenReady().then(() => {
+    serveRenderer();
+    registerIpc();
+    createWindow();
+    void launchBackend();
+  });
+}
 
 app.on("window-all-closed", () => app.quit());
 

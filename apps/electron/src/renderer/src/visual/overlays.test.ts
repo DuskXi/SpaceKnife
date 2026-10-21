@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Flag, Kind } from "./frame";
-import { badgeAt, breathAlpha, breathingRows, drawBreath, drawFlash, drawTrail, flashOf, trailMark } from "./overlays";
+import { badgeAt, breathAlpha, breathingRows, CLASS_FADE_MS, classFade, classMarks, drawBreath, drawClassMark, drawFlash, drawTrail, flashOf, glowOf, trailMark } from "./overlays";
 import { encodeFrame, PathRecorder, polarScene, rectScene } from "./testing/fixtures";
 import { treemapGeometry } from "./treemap/geometry";
 import { type Box, HIT_ROOT, type RectFrame, type VisualGeometry } from "./types";
@@ -195,5 +195,126 @@ describe("the pointer trail", () => {
     expect(c.calls[0]!.lineWidth).toBe(2);
     expect(drawTrail(canvas().ctx, [mark], 600, 2)).toEqual([]);
     expect(trailMark(treemapGeometry, f, HIT_ROOT, 0, recorder)).toBeNull();
+  });
+});
+
+describe("the class lit from 「类别统计」 (UI-MAIN-65)", () => {
+  const V = 0; // the class hovered
+  const NONE = 255; // the backend's "in no one class"
+  type R = { kind: number; parent: number; cls: number; geo: readonly [number, number, number, number] };
+  const frameOf = (layout: string, rows: R[]) =>
+    encodeFrame<RectFrame>(
+      layout,
+      rows.map((r, i) => ({ key: i + 1, node: i + 1, parent: r.parent, kind: r.kind, depth: 1, geo: r.geo, cls: r.cls, size: 1n })),
+      { width: 600, height: 200 },
+    ).frame;
+  //   0 a folder the class swallows (a game) ├ 1 its file
+  //   2 a folder in no class ├ 3 file · 4 aggregate of the class · 5 mixed aggregate · 6 "+N" · 8 tiny file
+  //   7 free space
+  const ROWS: R[] = [
+    { kind: Kind.FOLDER, parent: -1, cls: V, geo: [0, 0, 200, 100] },
+    { kind: Kind.FILE, parent: 0, cls: V, geo: [2, 20, 90, 70] },
+    { kind: Kind.FOLDER, parent: -1, cls: NONE, geo: [200, 0, 200, 100] },
+    { kind: Kind.FILE, parent: 2, cls: V, geo: [202, 20, 90, 70] },
+    { kind: Kind.SMALL, parent: 2, cls: V, geo: [300, 20, 90, 30] },
+    { kind: Kind.SMALL, parent: 2, cls: NONE, geo: [300, 60, 90, 30] },
+    { kind: Kind.MORE, parent: 2, cls: V, geo: [300, 92, 90, 6] },
+    { kind: Kind.FREE, parent: -1, cls: V, geo: [400, 0, 60, 100] },
+    { kind: Kind.FILE, parent: 2, cls: V, geo: [202, 92, 3, 3] },
+  ];
+  const rects = (p: Path2D) => opsOf(p).map((o) => o.args);
+
+  it("lights the class's files, aggregates and swallowed folders; a lit folder holds its blocks", () => {
+    const m = classMarks(treemapGeometry, frameOf("drawlist.v1", ROWS), V, -1, 1, recorder);
+    // row 1 lies inside the lit row 0; mixed aggregates, "+N" and free space never light
+    expect(rects(m.cut)).toEqual([
+      [0, 0, 200, 100],
+      [202, 20, 90, 70],
+      [300, 20, 90, 30],
+      [202, 92, 3, 3],
+    ]);
+    expect(m.rows).toBe(4);
+    expect(m.outlined).toBe(3); // the 3 px block is too small for an outline
+    expect(rects(m.outline)[0]).toEqual([0.75, 0.75, 198.5, 98.5]);
+    expect(classMarks(treemapGeometry, frameOf("drawlist.v1", ROWS), 3, -1, 1, recorder).rows).toBe(0);
+  });
+
+  it("stays within the folder whose make-up the panel shows", () => {
+    const m = classMarks(treemapGeometry, frameOf("drawlist.v1", ROWS), V, 2, 1, recorder);
+    expect(rects(m.cut)).toEqual([
+      [202, 20, 90, 70],
+      [300, 20, 90, 30],
+      [202, 92, 3, 3],
+    ]);
+    // a collapsed folder shows nothing of what is in it: it lights itself
+    const collapsed = frameOf("drawlist.v1", [{ kind: Kind.COLLAPSED, parent: -1, cls: NONE, geo: [0, 0, 50, 50] }, ROWS[2]!]);
+    expect(rects(classMarks(treemapGeometry, collapsed, V, 0, 1, recorder).cut)).toEqual([[0, 0, 50, 50]]);
+    expect(classMarks(treemapGeometry, collapsed, V, 1, 1, recorder).rows).toBe(0);
+  });
+
+  it("lights every row of the class in the flame graphs, through the geometry's path", () => {
+    const hits: number[] = [];
+    const geometry: VisualGeometry<RectFrame> = {
+      hitTest: () => -1,
+      bounds: () => null,
+      anchor: () => null,
+      box: () => ({ major: 100, minor: 20 }),
+      path: (_f, hit, inset, out) => (inset === 0 && hits.push(hit as number), out.arc(200, 200, 80, 0, 1), true),
+      filled: () => true,
+    };
+    const m = classMarks(geometry, frameOf("flame.v1", ROWS), V, -1, 1, recorder);
+    expect(hits).toEqual([0, 1, 3, 4, 8]); // the bars of a folder's contents lie beyond it
+    expect(m.outlined).toBe(5);
+  });
+
+  it("veils the picture, cuts the class out of it, and outlines it with the class's glow", () => {
+    const calls: { op: string; alpha: number; comp: string }[] = [];
+    const ctx = {
+      globalAlpha: 1,
+      globalCompositeOperation: "source-over",
+      lineWidth: 1,
+      strokeStyle: "",
+      fillStyle: "",
+      shadowColor: "",
+      shadowBlur: 0,
+      save() {},
+      restore() {},
+      fillRect() {
+        calls.push({ op: "veil", alpha: ctx.globalAlpha, comp: ctx.globalCompositeOperation });
+      },
+      fill() {
+        calls.push({ op: "cut", alpha: ctx.globalAlpha, comp: ctx.globalCompositeOperation });
+      },
+      stroke() {
+        calls.push({ op: "outline", alpha: ctx.globalAlpha, comp: ctx.globalCompositeOperation });
+      },
+    };
+    const m = classMarks(treemapGeometry, frameOf("drawlist.v1", ROWS), V, -1, 2, recorder);
+    drawClassMark(ctx as unknown as CanvasRenderingContext2D, m, "#E07A1F", 0.5, 600, 200, 2);
+    expect(calls).toEqual([
+      { op: "veil", alpha: 0.5, comp: "source-over" },
+      { op: "cut", alpha: 1, comp: "destination-out" },
+      { op: "outline", alpha: 0.5, comp: "source-over" },
+    ]);
+    expect(ctx.shadowColor).toBe("#E07A1F");
+    expect(ctx.lineWidth).toBe(2);
+    calls.length = 0;
+    drawClassMark(ctx as unknown as CanvasRenderingContext2D, m, "#E07A1F", 0, 600, 200, 2);
+    expect(calls).toEqual([]);
+  });
+
+  it("glows in the class colour, in the accent for a class too dark to glow", () => {
+    expect(glowOf("#E07A1F")).toBe("#E07A1F");
+    expect(glowOf("#2B2F38")).not.toBe("#2B2F38");
+    expect(glowOf("not a colour")).toBe(glowOf("#2B2F38"));
+  });
+
+  it("fades in and out in CLASS_FADE_MS, at once under reduced motion", () => {
+    expect(classFade(0, true, CLASS_FADE_MS / 2, false)).toBeCloseTo(0.5);
+    expect(classFade(0.5, true, CLASS_FADE_MS, false)).toBe(1);
+    expect(classFade(1, false, CLASS_FADE_MS / 4, false)).toBeCloseTo(0.75);
+    expect(classFade(0.2, false, CLASS_FADE_MS, false)).toBe(0);
+    expect(classFade(0, true, 0, true)).toBe(1);
+    expect(classFade(1, false, 0, true)).toBe(0);
   });
 });

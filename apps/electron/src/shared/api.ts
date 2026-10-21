@@ -1,5 +1,7 @@
 // The API the preload script exposes to the renderer as `window.sk` (main ↔ renderer contract).
 
+import type { InstallHow } from "./install";
+
 export interface BackendInfo {
   url: string;
   token: string;
@@ -17,9 +19,29 @@ export interface FileDialogOptions {
   filters: { name: string; extensions: string[] }[];
 }
 
+/** Browser mode: the computer the files are on (headless mode's /sk/info, main/headless-server.ts). */
+export interface RemoteInfo {
+  /** its name, shown in the title bar and next to deleting */
+  hostname: string;
+  /** the user's home folder there: where a typed path starts */
+  home: string;
+  /** reached over HTTPS */
+  secure: boolean;
+}
+
 export interface SkApi {
+  /** the platform of the computer the files are on (the server's in browser mode, not the browser's) */
   platform: "win32" | "darwin" | "linux";
   version: string;
+  /** "app": SpaceKnife's own window. "browser": a browser tab served by headless mode (--headless,
+   *  --listen): no window buttons, file dialogs, file manager, terminal or update install there. */
+  host: "app" | "browser";
+  /** browser mode: the computer the files are on; null in the app */
+  remote: RemoteInfo | null;
+  /** started by 「无缝更新」: the window says once that the update is done */
+  justUpdated: boolean;
+  /** the runtime's versions, for 「关于与更新」 */
+  versions: { electron: string; chrome: string; node: string };
   backend(): Promise<BackendState>;
   /** The interface language changed (M7.5): the main process's own texts follow. */
   setLanguage(lang: "zh-CN" | "en"): void;
@@ -44,9 +66,11 @@ export interface SkApi {
     openExternal(url: string): void;
   };
   update: {
-    /** Start a downloaded update (installer, disk image, package) and quit so it can replace the app.
-     * Only a file in the download folder named like a release asset; "" when started, else why not. */
-    install(path: string): Promise<string>;
+    /** One of the update card's two buttons (shared/install.ts installStep): 「无缝更新」 puts the
+     * version in place and starts it again; the classic way opens the installer, disk image or package
+     * and quits (or shows the file in its folder). Only a file in the backend's updates folder named
+     * like a release asset; "" when under way, else why not. Only ever after a click. */
+    install(path: string, how: InstallHow): Promise<string>;
   };
   dialog: {
     /** Pick a snapshot file (UI-W1-45, W4 「打开快照文件…」); null when cancelled. */

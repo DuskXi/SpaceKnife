@@ -27,6 +27,11 @@ win:
       arch: [x64]
   icon: build/icon.ico
   artifactName: ${productName}-${version}-Setup-x64.${ext}
+  # SpaceKnife.com next to SpaceKnife.exe: the console entry, so a terminal waits for headless mode
+  # (`SpaceKnife --headless`; packaging/console-launcher, built by tools/build_package.py)
+  extraFiles:
+    - from: ../../dist/console/SpaceKnife.com
+      to: SpaceKnife.com
 nsis:
   oneClick: false # an assisted installer: current user or all users, install folder
   perMachine: false

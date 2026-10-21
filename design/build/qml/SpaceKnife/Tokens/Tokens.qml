@@ -57,6 +57,9 @@ QtObject {
     readonly property int fontWeightSemibold: 600
     readonly property real layoutFilterMaxWidth: 420
     readonly property real layoutInspector: 320
+    readonly property real layoutInspectorMax: 640
+    readonly property real layoutInspectorMin: 280
+    readonly property real layoutMapMin: 360
     readonly property real layoutStatusbar: 28
     readonly property real layoutTabHeight: 34
     readonly property real layoutTitlebar: 40
@@ -85,11 +88,16 @@ QtObject {
     readonly property real space9: 32
     readonly property color treemapClassArchive: "#FFE5C547"
     readonly property color treemapClassAudio: "#FF9B4586"
+    readonly property color treemapClassCode: "#FFB7CBF3"
+    readonly property color treemapClassData: "#FF7BE8B9"
     readonly property color treemapClassDoc: "#FF505DC6"
     readonly property color treemapClassExec: "#FF1FAE8A"
+    readonly property color treemapClassGame: "#FFBE1022"
     readonly property color treemapClassImage: "#FF2F8FDB"
     readonly property color treemapClassOther: "#FF2B2F38"
     readonly property color treemapClassVideo: "#FFE07A1F"
+    readonly property color treemapClassFocusOutline: "#8CFFFFFF"
+    readonly property color treemapClassFocusVeil: "#D9060709"
     readonly property color treemapCollapsed: "#FF232731"
     readonly property color treemapDiffGrow0: "#FF5E3410"
     readonly property color treemapDiffGrow1: "#FF7A4312"
@@ -161,6 +169,12 @@ QtObject {
     readonly property color treemapTime2: "#FF258672"
     readonly property color treemapTime3: "#FF1C5F53"
     readonly property color treemapTime4: "#FF173F39"
+    readonly property color treemapTrashBadgeBg: "#FFFF8577"
+    readonly property color treemapTrashBadgeText: "#FF0A0B0D"
+    readonly property color treemapTrashHatch: "#2EFF8577"
+    readonly property color treemapTrashOutline: "#FFFF8577"
+    readonly property color treemapTrashSweep: "#2EFFD9D3"
+    readonly property color treemapTrashVeil: "#73060709"
     readonly property color treemapUnknownBorder: "#FF343844"
     readonly property color treemapUnknownStripeA: "#FF0C0D11"
     readonly property color treemapUnknownStripeB: "#FF121318"

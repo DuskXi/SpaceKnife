@@ -5,9 +5,13 @@
 // How loudly depends on how far behind the app is: a patch release (0.3.0 → 0.3.1) only gets the
 // badge in the title bar; a minor one (0.3.x → 0.4.0) also a card hanging at the top left; a
 // major one (0.x → 1.0.0) also a dialog. The badge stays for every level; clicking it opens the
-// card under it. Closing the card or the dialog (update.dismiss) keeps them closed for that version.
+// card under it. Closing the card or the dialog (update.dismiss) keeps them closed for that version;
+// 「跳过 0.4.x」 (update.mute) silences a whole series: no card, dialog or badge for any of its
+// releases, until it is turned back on in 「关于与更新」.
 
 import type { UpdateDownload, UpdateInfo, UpdateStatus } from "@/protocol/generated";
+import { t } from "@/lib/i18n";
+import { type InstallHow, type InstallStep, installStep } from "../../../shared/install";
 
 export type InstallKind = UpdateStatus["install_kind"];
 
@@ -15,21 +19,29 @@ export type InstallKind = UpdateStatus["install_kind"];
  * as a dialog by itself (major), or nowhere. */
 export type UpdateSurface = "none" | "anchored" | "corner" | "dialog";
 
-/** A newer release is known: the title bar shows the badge. */
+/** A newer release is known (the 「关于与更新」 page shows it). */
 export function hasUpdate(st: UpdateStatus | null | undefined): st is UpdateStatus & { latest: UpdateInfo } {
   return !!st && st.level !== "none" && !!st.latest;
 }
 
+/** A newer release the user wants to hear about: the title bar shows the badge (not for a muted series). */
+export function announced(st: UpdateStatus | null | undefined): st is UpdateStatus & { latest: UpdateInfo } {
+  return hasUpdate(st) && !st.muted;
+}
+
+/** A series as the buttons name it: "0.4" → "0.4.x", "1" → "1.x". */
+export const seriesName = (series: string): string => `${series}.x`;
+
 /** What opens by itself for a status: the top-left card for a minor release, the dialog for a major
- * one, nothing for a patch release or once this version's card was closed. */
+ * one, nothing for a patch release, once this version's card was closed or for a muted series. */
 export function autoSurface(st: UpdateStatus | null | undefined): Exclude<UpdateSurface, "anchored"> {
-  if (!hasUpdate(st) || st.dismissed) return "none";
+  if (!announced(st) || st.dismissed) return "none";
   return st.level === "major" ? "dialog" : st.level === "minor" ? "corner" : "none";
 }
 
 /** The surface on screen: the card opened from the badge replaces the one that opened by itself. */
 export function visibleSurface(st: UpdateStatus | null | undefined, open: boolean): UpdateSurface {
-  if (!hasUpdate(st)) return "none";
+  if (!announced(st)) return "none";
   return open ? "anchored" : autoSurface(st);
 }
 
@@ -52,10 +64,50 @@ export function downloadPct(d: UpdateDownload): number | null {
 /** The download runs (checking the file included): the badge fills up, the card shows the progress. */
 export const downloading = (d: UpdateDownload): boolean => d.state === "downloading" || d.state === "verifying";
 
-/** After the download: start it (an installer, a disk image, a package; the app quits) or show it in
- * its folder (a portable archive or an AppImage the user puts in place of the old one). */
-export function installAction(kind: InstallKind): "install" | "reveal" {
-  return kind === "nsis" || kind === "dmg" || kind === "deb" || kind === "rpm" ? "install" : "reveal";
+/** After the download: the card's two big buttons, the ones this kind of install has (shared/install.ts):
+ * 「无缝更新」 first, then the classic way. None (a run from source): only 「在文件夹中显示」. */
+export function installChoices(kind: InstallKind): { how: InstallHow; step: InstallStep }[] {
+  const out: { how: InstallHow; step: InstallStep }[] = [];
+  for (const how of ["seamless", "classic"] as const) {
+    const step = installStep(kind, how);
+    if (step) out.push({ how, step });
+  }
+  return out;
+}
+
+/** How this copy was installed, in words (「关于与更新」). */
+export function installKindName(kind: InstallKind): string {
+  switch (kind) {
+    case "nsis":
+      return t("Windows 安装版");
+    case "portable":
+      return t("便携版");
+    case "appimage":
+      return "AppImage";
+    case "deb":
+      return t("deb 安装包");
+    case "rpm":
+      return t("rpm 安装包");
+    case "dmg":
+      return "macOS";
+    case "dev":
+      return t("源码运行");
+    default:
+      return t("未知");
+  }
+}
+
+/** The part of a release's notes in the interface language: the notes are English first, then a
+ * "## 简体中文" section (docs/packaging.md). The language switch at the top goes, it links within
+ * the release page; notes without the Chinese section are shown whole. */
+export function notesFor(md: string, lang: "zh-CN" | "en"): string {
+  const lines = md.split(/\r\n?|\n/);
+  const zh = lines.findIndex((line) => /^##\s+简体中文\s*$/.test(line.trim())); // i18n-ignore: a heading of the notes
+  let part = lines;
+  if (zh >= 0) part = lang === "zh-CN" ? lines.slice(zh + 1) : lines.slice(0, zh);
+  const kept = part.filter((line) => !/^\*\*English\*\*\s·/.test(line.trim()));
+  while (kept.length && /^\s*(-{3,}|\*{3,})?\s*$/.test(kept[kept.length - 1]!)) kept.pop(); // the rule before 简体中文
+  return kept.join("\n").trim();
 }
 
 /** YYYY-MM-DD of a release in local time; "" when unknown. */

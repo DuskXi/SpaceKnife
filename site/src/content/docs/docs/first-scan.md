@@ -11,7 +11,7 @@ Every new tab opens on the start page. Pick what to scan, check the two or three
 
 ## The start page
 
-The left column is **Choose what to scan**: the volumes, a path box and the scan options, with **Start scan** at the bottom. The right column is **Recent**: your earlier scans and snapshot files.
+The left column is **Choose what to scan**: the volumes, a path box and the scan options, with **Start scan** at the bottom. The right column starts with the **[Disks](../disks/)** card (your disks at a glance; click it for the whole page), then **Recent**: your earlier scans and snapshot files.
 
 ### Volumes
 

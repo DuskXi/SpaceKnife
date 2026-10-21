@@ -13,7 +13,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 
 ## 按键什么时候生效
 
-- **单键不会在输入框里触发。** <kbd>/</kbd>、<kbd>F</kbd>、<kbd>U</kbd>、<kbd>C</kbd>、<kbd>V</kbd>、数字键、<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Backspace</kbd>、<kbd>Esc</kbd> 只在焦点不在文本框里时作用于视图。在过滤框里输入 `f` 不会关掉可用空间，<kbd>Ctrl</kbd>+<kbd>C</kbd> 在输入框里也是普通的复制。
+- **单键不会在输入框里触发。** <kbd>/</kbd>、<kbd>F</kbd>、<kbd>U</kbd>、<kbd>R</kbd>、<kbd>C</kbd>、<kbd>V</kbd>、数字键、<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Backspace</kbd>、<kbd>Esc</kbd> 只在焦点不在文本框里时作用于视图。在过滤框里输入 `f` 不会关掉可用空间，<kbd>Ctrl</kbd>+<kbd>C</kbd> 在输入框里也是普通的复制。
 - **全局键在过滤框里也有效。** <kbd>Ctrl</kbd>+<kbd>K</kbd>、<kbd>Ctrl</kbd>+<kbd>J</kbd>、<kbd>Ctrl</kbd>+<kbd>T</kbd>、<kbd>Ctrl</kbd>+<kbd>W</kbd>、<kbd>Ctrl</kbd>+<kbd>,</kbd>、<kbd>Ctrl</kbd>+<kbd>Tab</kbd>，以及 0.3.2 起的 <kbd>F5</kbd>、<kbd>Shift</kbd>+<kbd>F5</kbd>、<kbd>Ctrl</kbd>+<kbd>S</kbd> 不用先离开过滤框。有些输入框把按键全部留给输入，全局键在里面不起作用：启动页的路径框、编辑路径的输入框（<kbd>Ctrl</kbd>+<kbd>L</kbd>），以及设置里的搜索框、数字框和标签名称框。
 - **视图键作用于焦点窗格。** 分屏时，带强调边框的那一侧是焦点窗格；点一下另一侧就把焦点移过去。
 - **控件自己的键优先。** 焦点在按钮、单选、菜单项这类控件上时，<kbd>Enter</kbd>、<kbd>Delete</kbd>、<kbd>Esc</kbd> 和 <kbd>Shift</kbd>+<kbd>F10</kbd> 交给控件（例如按钮上的 <kbd>Enter</kbd> 就是按下按钮）；焦点在下拉框上时，<kbd>C</kbd> 和 <kbd>V</kbd> 用来按首字母选项。
@@ -31,6 +31,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | 关闭当前标签；关闭正在扫描的标签会停止这次扫描，关掉最后一个标签时会留下一个新的启动页 |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>、<kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | 下一个标签（到最后一个后回到第一个） |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>、<kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | 上一个标签 |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | 把当前标签左移 / 右移一位 |
 
 ## 导航
 
@@ -57,6 +58,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | <kbd>Shift</kbd>+<kbd>V</kbd> | 上一种可视化 |
 | <kbd>F</kbd> | 显示或隐藏可用空间块（快照对比里不起作用） |
 | <kbd>U</kbd> | 显示或隐藏未知空间块（快照对比里不起作用） |
+| <kbd>R</kbd> | 显示或隐藏回收站（扫描里有回收站时才有；快照对比里不起作用） |
 | <kbd>Ctrl</kbd>+<kbd>=</kbd>、<kbd>Ctrl</kbd>+<kbd>+</kbd> | 提高细节层级，最多 15 |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> | 降低细节层级，最少 1 |
 
@@ -66,7 +68,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 
 | 按键 | 作用 |
 | --- | --- |
-| <kbd>Esc</kbd> | 取消选中。在快照对比里，没有选中项时再按一次退出对比 |
+| <kbd>Esc</kbd> | 取消选中。没有选中项时再按一次：在快照对比里退出对比，过滤时清除过滤 |
 | <kbd>Delete</kbd> | 把选中的文件或文件夹加入删除篮（「N 个小项」聚合块请用右键菜单加入） |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> | 复制选中项的完整路径 |
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> | 在资源管理器中显示（macOS 是访达，Linux 是文件管理器） |
@@ -89,12 +91,12 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 按键 | 作用 |
 | --- | --- |
 | <kbd>↑</kbd>、<kbd>↓</kbd> | 上下移动 |
-| <kbd>Enter</kbd> | 执行当前项；在「复制路径」「加标签」上是打开子菜单 |
+| <kbd>Enter</kbd> | 执行当前项；在「复制路径」「加标签」「归类」上是打开子菜单 |
 | <kbd>→</kbd> | 打开子菜单 |
 | <kbd>←</kbd> | 从子菜单回到上一层 |
 | <kbd>Esc</kbd> | 关闭子菜单；不在子菜单里时关闭菜单 |
 
-菜单项依次是：打开、在资源管理器中显示、在此打开终端、复制路径 ▸、加标签 ▸、只看这里（放大）、重新扫描此文件夹、加入删除篮、系统菜单…（还没有接入）。「复制路径」子菜单有四种写法：原样（<kbd>Ctrl</kbd>+<kbd>C</kbd> 复制的就是这一种）、带引号、POSIX 路径、`file://` URI，每一种都先预览出来。在菜单外点一下、改变窗口大小或切到别的窗口，菜单就关闭。
+菜单项依次是：打开、在资源管理器中显示、在此打开终端、复制路径 ▸、加标签 ▸、只看这里（放大）、归类 ▸（仅文件夹）、重新扫描此文件夹、加入删除篮、系统菜单…（还没有接入）。「复制路径」子菜单有四种写法：原样（<kbd>Ctrl</kbd>+<kbd>C</kbd> 复制的就是这一种）、带引号、POSIX 路径、`file://` URI，每一种都先预览出来。在菜单外点一下、改变窗口大小或切到别的窗口，菜单就关闭。
 
 ## 匹配结果列表
 
@@ -266,12 +268,15 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 在此打开终端 | <kbd>Ctrl</kbd>+<kbd>&#96;</kbd> | `terminal` · `shell` · `console` | — |
 | 新建标签 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | `new tab` | — |
 | 关闭标签 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | `close tab` | — |
+| 标签左移 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> | `move tab left` · `reorder tabs` | — |
+| 标签右移 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd> | `move tab right` · `reorder tabs` | — |
 | 红色标签 | <kbd>1</kbd> · <kbd>Ctrl</kbd>+<kbd>1</kbd> | `red tag` | — |
 | 黄色标签 | <kbd>2</kbd> · <kbd>Ctrl</kbd>+<kbd>2</kbd> | `yellow tag` | — |
 | 绿色标签 | <kbd>3</kbd> · <kbd>Ctrl</kbd>+<kbd>3</kbd> | `green tag` | — |
 | 蓝色标签 | <kbd>4</kbd> · <kbd>Ctrl</kbd>+<kbd>4</kbd> | `blue tag` | — |
 | 清除标签 | <kbd>0</kbd> · <kbd>Ctrl</kbd>+<kbd>0</kbd> | `clear tag` · `untag` | — |
 | 显示/隐藏未知空间 | <kbd>U</kbd> | `unknown space` | — |
+| 显示/隐藏回收站 | <kbd>R</kbd> | `trash` · `recycle bin` | — |
 | 分屏 | — | `split` · `side by side` | — |
 | 暂停扫描 | — | `pause` | — |
 | 继续扫描 | — | `resume` · `continue` | — |
@@ -283,6 +288,8 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 帮助 | <kbd>F1</kbd> | `help` · `docs` · `documentation` · `manual` · `guide` | — |
 | 检查更新 | — | `check for updates` · `update` · `upgrade` · `new version` | — |
 | 查看更新 | — | `update` · `release notes` · `what's new` · `download update` | — |
+| 本机磁盘 | — | `disks` · `drives` · `hardware` · `ssd` · `nvme` · `sata` · `usb` · `pcie` | — |
+| 关于与更新 | — | `about` · `version` · `release notes` · `changelog` · `timeline` | — |
 
 ### 只按名称列出的命令
 

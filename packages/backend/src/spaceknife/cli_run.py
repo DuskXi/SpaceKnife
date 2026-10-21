@@ -691,8 +691,9 @@ def run(ctx: typer.Context) -> None:
 
     setup_logging("WARNING", LogFormat.RICH)
     apply_language()
-    from . import classes
+    from . import classes, pathclass
 
     classes.load_user()  # the user's file classes (W7) also apply to :class: here
+    pathclass.load_user()  # and their folder choices
     tokens = list(ctx.args)
     raise typer.Exit(main(tokens, raw=windows_command_tail(tokens)))

@@ -86,23 +86,48 @@ description: "用键盘给文件和文件夹打四种颜色标签、用过滤找
 
 - 图的「文件类别」配色；
 - `:class:` [过滤](../filtering/#文件类别)；
-- 详情面板的「类别统计」页：按类别拆分选中的文件夹，每个类别显示文件数、大小、占比和比例条。
+- 详情面板的「类别统计」页：按类别拆分选中的文件夹，每个类别显示文件数、大小、占比和比例条。悬停一个类别，图上就把它在哪亮出来。
 
 ### 内置类别
 
 | 类别 | 扩展名 |
 |---|---|
-| 视频 | mp4 mkv mov avi wmv webm m4v flv ts m2ts mts vob mpg mpeg mpe m1s qt rm rmvb 3gp f4v ogv |
-| 图片 | jpg jpeg png gif bmp tif tiff heic heif webp avif jxl svg ico psd raw nef rw2 cr2 cr3 arw dng orf raf |
-| 音频 | mp3 flac wav m4a aac ogg opus wma aif aiff alp au ac3 amr mp2 voc ape mid midi dsf 3gp |
-| 压缩包/镜像 | zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2 |
-| 程序/系统 | exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log |
-| 文档 | pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key |
+| 视频 | mp4 mkv mov avi wmv webm m4v flv ts m2ts mts vob mpg mpeg mpe m1s qt rm rmvb 3gp f4v ogv mxf dv divx y4m m2t m2v h264 h265 hevc ivf asf wtv mk3d ogm lrv insv braw r3d bik bk2 usm |
+| 图片 | jpg jpeg png gif bmp tif tiff heic heif webp avif jxl svg ico psd raw nef rw2 cr2 cr3 arw dng orf raf srw x3f pef rwl mrw dcr kdc erf mef mos nrw sr2 srf iiq 3fr jfif jpe jp2 j2k jxr hdp wdp apng qoi svgz exr hdr dds ktx ktx2 tga pcx pbm pgm ppm pnm icns cur ani psb xcf kra clip pdn sai afphoto afdesign ai eps emf wmf cdr sketch fig xd |
+| 音频 | mp3 flac wav m4a aac ogg opus wma aif aiff alp au ac3 amr mp2 voc ape mid midi dsf 3gp m4b m4r caf mka wv tta dts mpc spx weba oga gsm ra aifc w64 rf64 dff xm s3m it sf2 wem bnk |
+| 压缩包/镜像 | zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2 tbz tbz2 txz tzst lz4 lzo br sz zpaq zipx arj lha lzh cpio xar sit sitx vdi qcow avhdx hdd hds vmem vmsn ova xva sparseimage nrg |
+| 程序/系统 | exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log apk aab xapk ipa deb rpm snap appimage jar war ear vsix crx xpi pyd node wasm msp msu mui tlb winmd dmp mdmp etl evtx |
+| 文档 | pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key docm dotx dotm xlsm xlsb pptm odg wps et dps hwp ofd xps oxps djvu chm mobi azw azw3 fb2 tex rst org tsv vsd vsdx one eml msg pst ost mbox |
+| 游戏 | （没有扩展名：按文件夹识别，见下文） |
+| 代码/开发 | c h cc cpp cxx hh hpp hxx cs java kt kts scala groovy gradle go rs swift m mm py pyi pyw pyx ipynb js mjs cjs jsx ts tsx mts cts vue svelte css scss sass less php rb pl pm lua r jl dart ex exs erl hs elm clj cljs fs fsx vb cmake pyc pyo class o lib a pdb ilk idb pch ipch tlog whl egg gem nupkg |
+| 数据/模型 | safetensors gguf ggml ckpt pt pth onnx tflite mlmodel h5 hdf5 he5 nc npy npz pkl pickle joblib parquet arrow feather avro orc tfrecord jsonl ndjson json fits fts fit mat db sqlite sqlite3 db3 duckdb mdb accdb ldb vscdb realm ibd myd myi mdf ldf ndf dbf kdbx sql |
 | 其他 | 不属于其他任何类别的扩展名，以及没有扩展名的文件 |
 
 - 文件的扩展名是名字里最后一个点之后的部分，不区分大小写。开头的点不算：`.bashrc` 没有扩展名，归入「其他」。
 - 一个扩展名可以属于多个类别（`3gp` 同时在视频和音频里）：列表里排在前面的类别决定颜色，过滤时每个包含它的类别都能匹配。
-- 英文界面里这些类别显示为英文名（Video、Pictures、Audio、Archives、Programs、Documents、Other）。两套名字在任何界面语言下都能用于过滤。
+- `ts` 和 `mts` 例外：它们既可能是录像（MPEG 传输流、AVCHD），也可能是 TypeScript 源码。SpaceKnife 只看文件大小，不读内容：16 MB 以上，或 1 MB 以上且大小正好是整数个传输流包（`ts` 188 字节，`mts` 192 字节）的算视频，其余算代码。从视频类别里删掉 `ts`，就只按扩展名归类。
+- 英文界面里这些类别显示为英文名（Video、Pictures、Audio、Archives、Programs、Documents、Games、Code、Data、Other）。两套名字在任何界面语言下都能用于过滤。
+
+### 按文件夹归类
+
+扩展名说的是文件是什么；有些文件夹说得更多。认得出的文件夹决定里面**所有**文件的类别，不论扩展名：
+
+| 文件夹 | 算作 |
+|---|---|
+| 游戏：Steam 游戏库（`steamapps`）；Epic、GOG、Xbox、EA、Ubisoft、Riot、HoYoPlay / miHoYo、鹰角等启动器的游戏文件夹；Unity 游戏（`UnityPlayer.dll`，或 `名字.exe` 旁边有 `名字_Data`）、Unreal 游戏（`游戏/Content/Paks`）、Godot 游戏（`.pck` 旁边有 `.exe`）、暴雪游戏（`.build.info`）；家目录里的 `.minecraft`、`文档/My Games`、`文档/Paradox Interactive`、`Saved Games` | 游戏 |
+| 项目：含 `.git`、`package.json`、`Cargo.toml`、`pyproject.toml`、`go.mod`、`CMakeLists.txt`、`*.sln`、`*.csproj` 等标记的文件夹 | 代码/开发 |
+| 模型缓存：`.ollama`、`.cache/huggingface`、`.lmstudio` | 数据/模型 |
+| 系统区：`System Volume Information`、MFT 快速扫描的「$NTFS 元数据」 | 程序/系统 |
+
+另外，已安装的软件和应用数据里（卷顶层的 `Program Files`、`ProgramData`、`Windows`，`/usr`、`/opt`、`/Applications`，家目录的 `AppData`、`Library`、`.local`、`.config`），**没有类别的文件**算「程序/系统」；图片、视频这些认得出的文件仍按扩展名。
+
+- 外层的文件夹优先：游戏里的 `package.json` 仍算游戏，项目里构建出的游戏仍算项目。
+- 项目不会从已安装的软件、缓存和包仓库里（`AppData`、`node_modules`、`site-packages`、`.cargo` 等）开始，也不会是卷、家目录或家目录下的「下载」「文档」「桌面」等文件夹本身：下载文件夹里散落一个 `package.json` 不会让整个下载文件夹算项目，下载下来的仓库仍算。
+- 「类别统计」里，文件夹归类带进来的文件在悬停提示里写明按扩展名本是什么，例如「其中按扩展名本是：视频 3.0 GB」；「详情」页写明选中的文件夹算作什么、为什么，例如「整个文件夹算作「游戏」 · Steam 游戏库」。
+- 图的配色、`:class:` 过滤和「类别统计」都按这个结果：`:class:游戏` 找得到游戏里的视频，`:class:视频` 找不到它们（要找所有 mp4，用 `*.mp4`）。
+- 从类别表里删掉「游戏」，游戏文件夹的规则就不起作用了。
+
+**自己指定**：在图上右键一个文件夹，选「归类」：「自动识别」（默认）、「只按扩展名」（这个文件夹不用任何文件夹规则），或「算作「某类」」（里面的文件都算这一类）。你的选择优先于规则，嵌套时里层的选择管它自己的文件夹。所有选择列在「设置 › 文件类别 › 按文件夹归类」里，点 × 改回自动识别；「恢复默认类别」会一并清除，导出 / 导入设置时也一并带上。
 
 ### 类别怎样给图着色
 
@@ -114,11 +139,11 @@ description: "用键盘给文件和文件夹打四种颜色标签、用过滤找
 
 - **颜色**：点色块（「改颜色」）选新颜色。
 - **名称**：直接修改。行尾显示匹配这个类别的过滤写法，如 `:class:视频`。
-- **扩展名**：用 `;`、逗号或空格分隔，例如 `safetensors; gguf`。开头的点会去掉，不区分大小写。
+- **扩展名**：用 `;`、逗号或空格分隔，例如 `pak; ucas`。开头的点会去掉，不区分大小写。
 - **顺序**：按住左侧的把手拖动。同一扩展名在多个类别里时，排在前面的决定颜色；重复的扩展名会提示「已在前面的类别里：…」，并列出决定颜色的类别。
 - **添加类别**：在「其他」前面加一行「新类别 N」。
 - **删除**：点 × 并确认后删除，它的扩展名归入「其他」。
-- **恢复默认类别**：改动过之后出现，确认「恢复为内置的 7 个类别？」后恢复。
+- **恢复默认类别**：改动过之后出现，确认「恢复为内置的 9 个类别？」后恢复。
 
 编辑器会检查这些规则：
 
@@ -130,7 +155,7 @@ description: "用键盘给文件和文件夹打四种颜色标签、用过滤找
 给内置类别改名后，旧名字在过滤里照样有效：`:class:视频` 仍然找得到改了名的视频类别。SpaceSniffer 的类别名（`Audio/Music`、`Pictures/Images` 等）也一直有效。
 
 :::tip[加一个自己的类别]
-为自己磁盘上重要的文件建一个类别，比如「模型」，扩展名填 `safetensors; gguf; onnx; ckpt`。它在图上有自己的颜色，在「类别统计」里有自己的一行，`:class:模型;>1gb` 就能找出其中的大文件。
+为自己磁盘上重要的文件建一个类别，比如「游戏资源」，扩展名填 `pak; pck; ucas; utoc; assets`。它在图上有自己的颜色，在「类别统计」里有自己的一行，`:class:游戏资源;>1gb` 就能找出其中的大文件。
 :::
 
 ### 在不同电脑之间带走类别

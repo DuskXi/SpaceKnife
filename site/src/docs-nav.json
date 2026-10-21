@@ -9,12 +9,12 @@
     {
       "id": "use",
       "label": { "en": "Using SpaceKnife", "zh": "使用" },
-      "items": ["visualizations", "navigation", "filtering", "tags-classes", "monitoring", "snapshots-compare", "cleanup", "export"]
+      "items": ["visualizations", "navigation", "filtering", "tags-classes", "monitoring", "snapshots-compare", "cleanup", "export", "disks"]
     },
     {
       "id": "advanced",
       "label": { "en": "Advanced", "zh": "进阶" },
-      "items": ["shortcuts", "command-palette", "command-line", "performance", "settings", "data-locations"]
+      "items": ["shortcuts", "command-palette", "command-line", "headless", "performance", "settings", "data-locations"]
     },
     {
       "id": "help",

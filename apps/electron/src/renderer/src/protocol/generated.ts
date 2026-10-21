@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "8fc504ecec088392";
+export const SCHEMA_HASH = "fddfc4bed8e8889f";
 
 export interface AgeCond {
   end: number;
@@ -184,14 +184,35 @@ export interface ClassEdit {
   name: string;
 }
 
+/** The user's choice for one folder: its files take ``class_id`` whatever their extension. */
+export interface ClassFolder {
+  /** A class id, or "" for by extension only (no folder class) */
+  class_id: string;
+  path: string;
+}
+
+export interface ClassPart {
+  bytes: number;
+  /** The class the files would have by their extension */
+  class_id: string;
+}
+
 export interface ClassStat {
   bytes: number;
   class_id: string;
   files: number;
+  /** Files a folder class took over, by the class of their extension, largest first (「游戏 · 其中视频 3 GB」); empty when none */
+  parts: ClassPart[];
 }
 
 export interface ClassesEvent {
   state: ClassesState;
+}
+
+export interface ClassesFolderParams {
+  /** A class id; "" for by extension only; None forgets the choice (automatic again) */
+  class_id?: string | null;
+  path: string;
 }
 
 export interface ClassesState {
@@ -199,6 +220,8 @@ export interface ClassesState {
   /** The table differs from the built-in one */
   custom: boolean;
   defaults: FilterClassInfo[];
+  /** The user's folder choices, by path */
+  folders: ClassFolder[];
 }
 
 export interface ClassesUpdateParams {
@@ -345,6 +368,67 @@ export interface Crumb {
   key: number;
   /** Folder name; 'small:N' / 'more:N' for an aggregate block */
   label: string;
+}
+
+/**
+ * What the disk records about itself: the NVMe SMART / Health log (log page 02h) or the ATA
+ * Device Statistics log (04h). Fields the disk doesn't keep are None.
+ */
+export interface DiskHealth {
+  /** NVMe: spare blocks left, % */
+  available_spare: number | null;
+  /** NVMe: critical warning bits, 0 = none */
+  critical_warning: number | null;
+  /** NVMe: unrecovered data integrity errors */
+  media_errors: number | null;
+  /** NVMe: the share of its rated endurance used, the vendor's estimate (can pass 100) */
+  percentage_used: number | null;
+  power_cycles: number | null;
+  power_on_hours: number | null;
+  /** When the record was read with administrator rights (Linux: machine.read_health); None: read just now. The temperature is always the current one. */
+  read_at: string | null;
+  /** Read over the disk's life */
+  read_bytes: number | null;
+  source: "nvme" | "ata";
+  /** NVMe: the spare % below which it warns */
+  spare_threshold: number | null;
+  /** Now, in °C */
+  temperature_c: number | null;
+  unsafe_shutdowns: number | null;
+  /** Written over the disk's life */
+  written_bytes: number | null;
+}
+
+/** Read and written since the system started (the operating system's counters). */
+export interface DiskIo {
+  read_bytes: number;
+  /** When the counters started: the system's boot */
+  since: string | null;
+  written_bytes: number;
+}
+
+/** A link: the negotiated rate and, when the system tells it, the most the device supports. */
+export interface DiskLink {
+  kind: "pcie" | "sata" | "usb";
+  /** PCIe: the most the device supports */
+  max_pcie_gen: number | null;
+  /** PCIe: the most lanes the device supports */
+  max_pcie_width: number | null;
+  /** SATA / USB: the most the device (SATA: and its port) supports; None when not known */
+  max_rate_mbps: number | null;
+  /** PCIe: the negotiated generation, 1-6 */
+  pcie_gen: number | null;
+  /** PCIe: the negotiated lanes */
+  pcie_width: number | null;
+  /** SATA / USB: the negotiated line rate in Mb/s (SATA 1500, 3000, 6000; USB 12, 480, 5000, 10000, 20000) */
+  rate_mbps: number | null;
+}
+
+/** A volume's share of a disk. */
+export interface DiskPart {
+  /** How much of the disk it takes; None when not known */
+  bytes: number | null;
+  mount_point: string;
 }
 
 /** Params for methods that take no arguments. */
@@ -531,6 +615,19 @@ export interface FlashItem {
   row: number;
 }
 
+/** Why a folder's files take a folder class (spaceknife.pathclass). */
+export interface FolderClassInfo {
+  class_id: string;
+  /** Only files whose extension is in no class take it */
+  fallback: boolean;
+  /** The folder that decided (the node itself or an ancestor) */
+  folder: string;
+  /** What the folder was recognised as, in the interface language */
+  reason: string;
+  /** The user chose it (class_folders.json) */
+  user: boolean;
+}
+
 export interface FolderCond {
   end: number;
   kind: "folder";
@@ -539,6 +636,11 @@ export interface FolderCond {
   start: number;
   /** Canonical spelling of this single condition */
   text: string;
+}
+
+export interface FolderStat {
+  bytes: number;
+  name: string;
 }
 
 export interface FrameInfo {
@@ -677,6 +779,12 @@ export interface LogRecordEvent {
   source: string;
   sub: string;
   time: string;
+}
+
+export interface MachineDisks {
+  collected_at: string;
+  disks: PhysicalDisk[];
+  volumes: VolumeOverview[];
 }
 
 export interface MaintenanceInfo {
@@ -967,6 +1075,39 @@ export interface PendingCond {
   start: number;
 }
 
+export interface PhysicalDisk {
+  /** The PCIe link of the controller a SATA disk hangs on, when the system tells it: an add-in card's lanes can be slower than the disk's SATA link */
+  controller_link: DiskLink | null;
+  firmware: string;
+  /** What the disk records about itself */
+  health: DiskHealth | null;
+  /** Why `health` is missing or partial: behind a USB bridge that doesn't pass it on, the disk keeps no such log, the system needs administrator rights for it, or it has no way to it */
+  health_note: "" | "usb" | "unsupported" | "needs_admin" | "unavailable";
+  /** The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS) */
+  id: string;
+  interface: "nvme" | "sata" | "sas" | "scsi" | "ata" | "usb" | "sd" | "thunderbolt" | "virtual" | "raid" | "other" | "unknown";
+  /** Read and written since the system started */
+  io: DiskIo | null;
+  /** The disk's own link: PCIe (NVMe), SATA or USB */
+  link: DiskLink | null;
+  media: "nvme_ssd" | "sata_ssd" | "ssd" | "hdd" | "usb_hdd" | "usb_ssd" | "usb_flash" | "sd_card" | "network" | "virtual" | "unknown";
+  /** As the device reports it; '' when it doesn't */
+  model: string;
+  /** Windows: the disk number of Disk Management */
+  number: number | null;
+  /** The volumes on it, in disk order when known */
+  parts: DiskPart[];
+  removable: boolean;
+  serial: string;
+  /** Bytes; None while no medium is in (an empty card reader) */
+  size: number | null;
+  /** Holds the system volume */
+  system: boolean;
+  /** Whether the disk takes TRIM / UNMAP; None when not known */
+  trim: boolean | null;
+  vendor: string;
+}
+
 export interface PingParams {
   payload?: string | null;
 }
@@ -1021,6 +1162,22 @@ export interface Range {
   lo: number | null;
   lower: Bound | null;
   upper: Bound | null;
+}
+
+export interface ReadHealthParams {
+  /** Ids of the disks to read; []: every disk whose record needs administrator rights */
+  disks?: string[];
+}
+
+/**
+ * ``read``: the records were read (a disk that did not answer says why in its health_note);
+ * ``denied``: the user closed the password prompt; ``unavailable``: no way to ask for administrator
+ * rights here (``message`` says why); ``nothing``: no disk needed it.
+ */
+export interface ReadHealthResult {
+  machine: MachineDisks;
+  message: string;
+  outcome: "read" | "denied" | "unavailable" | "nothing";
 }
 
 export interface Refusal {
@@ -1172,7 +1329,7 @@ export interface SettingChange {
 
 export interface SettingMeta {
   applies: "now" | "next_scan" | "new_views";
-  category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced";
+  category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about";
   control: "switch" | "segmented" | "number" | "slider" | "color" | "text";
   /** 'key' (a switch that must be on) or 'key=value' for this row to be editable */
   depends: string | null;
@@ -1227,7 +1384,7 @@ export interface SettingsImportResult {
 
 export interface SettingsResetParams {
   /** None resets every setting */
-  category?: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | null;
+  category?: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about" | null;
 }
 
 export interface SettingsState {
@@ -1296,6 +1453,13 @@ export interface SnapshotLoadParams {
   path: string;
 }
 
+/** A complete snapshot of a whole volume: how much it held then. */
+export interface SnapshotPoint {
+  at: string;
+  bytes_alloc: number;
+  files: number;
+}
+
 export interface SnapshotSaveParams {
   /** Target file; default = the auto-save folder */
   path?: string | null;
@@ -1339,6 +1503,8 @@ export interface TagCond {
 }
 
 export interface TopFile {
+  /** The file's class (colour): by extension, and by size for ts / mts */
+  class_id: string;
   node: NodeInfo;
   /** Folder of the file relative to the summarised node, ending in a separator */
   rel_parent: string;
@@ -1391,6 +1557,8 @@ export interface TreeSummaryParams {
 export interface TreeSummaryResult {
   /** Allocated bytes and files per file class, largest first */
   classes: ClassStat[];
+  /** The folder class the node (or a file's folder) takes, if any */
+  folder_class: FolderClassInfo | null;
   /** Newest modification time in the subtree (0 = unknown) */
   latest_mtime: number;
   node: NodeInfo;
@@ -1453,6 +1621,18 @@ export interface UpdateInfo {
   version: string;
 }
 
+export interface UpdateMuteParams {
+  /** False turns its prompts back on */
+  muted?: boolean;
+  /** A series as UpdateStatus.series names it: "0.4" (every 0.4.x) or "1" (every 1.x) */
+  series: string;
+}
+
+export interface UpdateReleases {
+  /** The recent releases, newest first (at most 30, notes at most 16 KiB each, no asset) */
+  releases: UpdateInfo[];
+}
+
 export interface UpdateStatus {
   channel: "stable" | "preview";
   /** Last successful check */
@@ -1472,6 +1652,12 @@ export interface UpdateStatus {
   latest: UpdateInfo | null;
   /** How far behind the newest release this app is */
   level: "none" | "patch" | "minor" | "major";
+  /** The user turned off the prompts of that series: no card, dialog or badge, no automatic download (the 「关于与更新」 page still shows it) */
+  muted: boolean;
+  /** When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools) */
+  next_check_at: string | null;
+  /** The series of the newest release that update.mute takes: its major.minor for a minor update ("0.4"), its major for a major one ("1"); None for a patch release or no update */
+  series: string | null;
 }
 
 export interface UpdateVersionParams {
@@ -1564,6 +1750,8 @@ export interface ViewSettingsParams {
   /** CSS px */
   min_element?: number | null;
   show_free?: boolean | null;
+  /** The recycle bins: drawn, or taken out of the picture */
+  show_trash?: boolean | null;
   show_unknown?: boolean | null;
   sort_by_size?: boolean | null;
   viewport?: Viewport | null;
@@ -1584,11 +1772,15 @@ export interface ViewState {
   detail: number;
   direction: "all" | "grow" | "shrink";
   filter_mode: "dim" | "hide";
+  /** The scan holds a recycle bin / trash folder (the toggle is offered) */
+  has_trash: boolean;
   min_element: number;
   results_sort: "size" | "name" | "count";
   scan_id: string;
   selected: number | null;
   show_free: boolean;
+  /** The recycle bins are drawn (not taken out of the picture) */
+  show_trash: boolean;
   show_unknown: boolean;
   sort_by_size: boolean;
   view_id: string;
@@ -1685,6 +1877,36 @@ export interface VolumeListResult {
   volumes: VolumeInfo[];
 }
 
+export interface VolumeOverview {
+  /** Ids of the disks it lives on ([]: none known) */
+  disks: string[];
+  /** The complete snapshots of the whole volume, newest first (at most 12): how it grew */
+  history: SnapshotPoint[];
+  scan: VolumeScan | null;
+  volume: VolumeInfo;
+}
+
+/** What SpaceKnife knows of a volume from a scan of its root. */
+export interface VolumeScan {
+  /** When the scan finished (or started, while it runs) */
+  at: string | null;
+  bytes_alloc: number;
+  /** Open scans: the largest file classes */
+  classes: ClassStat[];
+  dirs: number | null;
+  files: number;
+  /** Open scans: the largest top-level folders */
+  folders: FolderStat[];
+  method: "hard" | "mft" | null;
+  running: boolean;
+  /** The open scan (its tab can be shown) */
+  scan_id: string | null;
+  /** The snapshot file */
+  snapshot: string | null;
+  /** A scan open in this backend, or the newest snapshot */
+  source: "scan" | "snapshot";
+}
+
 export interface Methods {
   /** Subscribe to an event topic. */
   "$/subscribe": { params: SubscribeParams; result: SubscribeResult };
@@ -1702,6 +1924,8 @@ export interface Methods {
   "basket.list": { params: Empty; result: BasketState };
   /** Take items out of the basket. */
   "basket.remove": { params: BasketRemoveParams; result: BasketState };
+  /** Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38). */
+  "classes.folder": { params: ClassesFolderParams; result: ClassesState };
   /** The file class table (W7 文件类别). */
   "classes.get": { params: Empty; result: ClassesState };
   /** Back to the built-in file classes. */
@@ -1732,6 +1956,10 @@ export interface Methods {
   "filter.vocab": { params: Empty; result: FilterVocab };
   /** Load state of every local disk, with history. */
   "io.status": { params: Empty; result: IoStatusList };
+  /** This computer's disks with their links, the volumes on each and what scans tell of each volume. */
+  "machine.disks": { params: Empty; result: MachineDisks };
+  /** Read the disks' own records that need administrator rights (Linux: the elevated helper, behind polkit's password prompt). Only when the user asks; the answer is the whole page again. */
+  "machine.read_health": { params: ReadHealthParams; result: ReadHealthResult };
   /** Stop a running file operation. */
   "ops.cancel": { params: OpTaskParams; result: EmptyResult };
   /** Undo a file operation: put trashed items back, or call off a permanent deletion still waiting. */
@@ -1820,8 +2048,12 @@ export interface Methods {
   "update.check": { params: Empty; result: UpdateStatus };
   /** The card / dialog for this version was closed. */
   "update.dismiss": { params: UpdateVersionParams; result: UpdateStatus };
-  /** Download this version's file for this install into the download folder (progress: update.changed). */
+  /** Download this version's file for this install into the updates folder (progress: update.changed). */
   "update.download": { params: UpdateVersionParams; result: UpdateStatus };
+  /** Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic download for its releases. */
+  "update.mute": { params: UpdateMuteParams; result: UpdateStatus };
+  /** The recent releases with their notes (the timeline of the About & updates page). */
+  "update.releases": { params: Empty; result: UpdateReleases };
   /** What the last update check found (updates.v1). */
   "update.status": { params: Empty; result: UpdateStatus };
   /** Back to the previous zoom root. */

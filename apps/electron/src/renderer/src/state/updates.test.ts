@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UpdateDownload, UpdateInfo, UpdateStatus } from "@/protocol/generated";
 
-import { autoSurface, downloadOf, downloadPct, hasUpdate, installAction, type InstallKind, plainInline, releaseDate, summarizeNotes, visibleSurface } from "./updates";
+import { announced, autoSurface, downloadOf, downloadPct, hasUpdate, type InstallKind, installChoices, notesFor, plainInline, releaseDate, seriesName, summarizeNotes, visibleSurface } from "./updates";
 
 const info = (patch: Partial<UpdateInfo> = {}): UpdateInfo => ({
   version: "0.4.0",
@@ -28,6 +28,7 @@ const dl = (patch: Partial<UpdateDownload> = {}): UpdateDownload => ({
 });
 
 const status = (patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
+  next_check_at: null,
   current: "0.3.0",
   install_kind: "nsis",
   enabled: true,
@@ -38,6 +39,8 @@ const status = (patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
   level: "minor",
   latest: info(),
   dismissed: false,
+  series: "0.4",
+  muted: false,
   download: dl(),
   ...patch,
 });
@@ -62,6 +65,16 @@ describe("surfaces", () => {
     expect(autoSurface(status({ level: "minor", dismissed: true }))).toBe("none");
     expect(autoSurface(status({ level: "major", dismissed: true }))).toBe("none");
     expect(visibleSurface(status({ level: "major", dismissed: true }), true)).toBe("anchored");
+  });
+
+  it("keeps a skipped series quiet: no card, dialog or badge; 「关于与更新」 still knows it", () => {
+    const muted = status({ level: "major", series: "1", muted: true });
+    expect(hasUpdate(muted)).toBe(true);
+    expect(announced(muted)).toBe(false);
+    expect(autoSurface(muted)).toBe("none");
+    expect(visibleSurface(muted, true)).toBe("none");
+    expect(announced(status())).toBe(true);
+    expect([seriesName("0.4"), seriesName("1")]).toEqual(["0.4.x", "1.x"]);
   });
 
   it("puts the card opened from the badge in place of the one that opened by itself", () => {
@@ -89,9 +102,13 @@ describe("download", () => {
     expect(downloadPct(dl({ state: "done", received: 1000, total: 1000 }))).toBeNull();
   });
 
-  it("starts installers, disk images and packages; shows portable copies in their folder", () => {
-    expect(["nsis", "dmg", "deb", "rpm"].map((k) => installAction(k as InstallKind))).toEqual(["install", "install", "install", "install"]);
-    expect(["portable", "appimage", "dev", "unknown"].map((k) => installAction(k as InstallKind))).toEqual(["reveal", "reveal", "reveal", "reveal"]);
+  it("offers 「无缝更新」 and the classic way where both exist, the classic one alone elsewhere", () => {
+    const steps = (k: InstallKind) => installChoices(k).map((c) => `${c.how}:${c.step}`);
+    expect(steps("nsis")).toEqual(["seamless:silent", "classic:wizard"]);
+    expect(steps("portable")).toEqual(["seamless:swap", "classic:reveal"]);
+    expect(steps("appimage")).toEqual(["seamless:replace", "classic:reveal"]);
+    expect((["dmg", "deb", "rpm"] as const).map(steps)).toEqual([["classic:open"], ["classic:open"], ["classic:open"]]);
+    expect(["dev", "unknown"].map((k) => installChoices(k as InstallKind))).toEqual([[], []]);
   });
 });
 
@@ -201,3 +218,32 @@ describe("summarizeNotes", () => {
     ]);
   });
 });
+
+describe("notesFor", () => {
+  const notes = [
+    "**English** · [简体中文](#简体中文) · [Website](https://spaceknife.kaltsit.dev/)",
+    "",
+    "## SpaceKnife 0.4.0 (pre-release)",
+    "",
+    "### What's new",
+    "",
+    "- Help inside the app",
+    "",
+    "---",
+    "",
+    "## 简体中文",
+    "",
+    "### 新功能",
+    "",
+    "- 软件内帮助",
+  ].join("\n");
+  it("keeps the part in the interface language, without the language switch", () => {
+    expect(notesFor(notes, "en")).toBe("## SpaceKnife 0.4.0 (pre-release)\n\n### What's new\n\n- Help inside the app");
+    expect(notesFor(notes, "zh-CN")).toBe("### 新功能\n\n- 软件内帮助");
+  });
+  it("shows notes of one language whole", () => {
+    expect(notesFor("- Fixed a crash\r\n- Faster", "zh-CN")).toBe("- Fixed a crash\n- Faster");
+    expect(notesFor("", "en")).toBe("");
+  });
+});
+

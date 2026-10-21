@@ -81,6 +81,9 @@
     <x:Int32 x:Key="SkFontWeightSemibold">600</x:Int32>
     <x:Double x:Key="SkLayoutFilterMaxWidth">420</x:Double>
     <x:Double x:Key="SkLayoutInspector">320</x:Double>
+    <x:Double x:Key="SkLayoutInspectorMax">640</x:Double>
+    <x:Double x:Key="SkLayoutInspectorMin">280</x:Double>
+    <x:Double x:Key="SkLayoutMapMin">360</x:Double>
     <x:Double x:Key="SkLayoutStatusbar">28</x:Double>
     <x:Double x:Key="SkLayoutTabHeight">34</x:Double>
     <x:Double x:Key="SkLayoutTitlebar">40</x:Double>
@@ -111,16 +114,26 @@
     <SolidColorBrush x:Key="SkTreemapClassArchiveBrush" Color="#FFE5C547"/>
     <Color x:Key="SkTreemapClassAudio">#FF9B4586</Color>
     <SolidColorBrush x:Key="SkTreemapClassAudioBrush" Color="#FF9B4586"/>
+    <Color x:Key="SkTreemapClassCode">#FFB7CBF3</Color>
+    <SolidColorBrush x:Key="SkTreemapClassCodeBrush" Color="#FFB7CBF3"/>
+    <Color x:Key="SkTreemapClassData">#FF7BE8B9</Color>
+    <SolidColorBrush x:Key="SkTreemapClassDataBrush" Color="#FF7BE8B9"/>
     <Color x:Key="SkTreemapClassDoc">#FF505DC6</Color>
     <SolidColorBrush x:Key="SkTreemapClassDocBrush" Color="#FF505DC6"/>
     <Color x:Key="SkTreemapClassExec">#FF1FAE8A</Color>
     <SolidColorBrush x:Key="SkTreemapClassExecBrush" Color="#FF1FAE8A"/>
+    <Color x:Key="SkTreemapClassGame">#FFBE1022</Color>
+    <SolidColorBrush x:Key="SkTreemapClassGameBrush" Color="#FFBE1022"/>
     <Color x:Key="SkTreemapClassImage">#FF2F8FDB</Color>
     <SolidColorBrush x:Key="SkTreemapClassImageBrush" Color="#FF2F8FDB"/>
     <Color x:Key="SkTreemapClassOther">#FF2B2F38</Color>
     <SolidColorBrush x:Key="SkTreemapClassOtherBrush" Color="#FF2B2F38"/>
     <Color x:Key="SkTreemapClassVideo">#FFE07A1F</Color>
     <SolidColorBrush x:Key="SkTreemapClassVideoBrush" Color="#FFE07A1F"/>
+    <Color x:Key="SkTreemapClassFocusOutline">#8CFFFFFF</Color>
+    <SolidColorBrush x:Key="SkTreemapClassFocusOutlineBrush" Color="#8CFFFFFF"/>
+    <Color x:Key="SkTreemapClassFocusVeil">#D9060709</Color>
+    <SolidColorBrush x:Key="SkTreemapClassFocusVeilBrush" Color="#D9060709"/>
     <Color x:Key="SkTreemapCollapsed">#FF232731</Color>
     <SolidColorBrush x:Key="SkTreemapCollapsedBrush" Color="#FF232731"/>
     <Color x:Key="SkTreemapDiffGrow0">#FF5E3410</Color>
@@ -251,6 +264,18 @@
     <SolidColorBrush x:Key="SkTreemapTime3Brush" Color="#FF1C5F53"/>
     <Color x:Key="SkTreemapTime4">#FF173F39</Color>
     <SolidColorBrush x:Key="SkTreemapTime4Brush" Color="#FF173F39"/>
+    <Color x:Key="SkTreemapTrashBadgeBg">#FFFF8577</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashBadgeBgBrush" Color="#FFFF8577"/>
+    <Color x:Key="SkTreemapTrashBadgeText">#FF0A0B0D</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashBadgeTextBrush" Color="#FF0A0B0D"/>
+    <Color x:Key="SkTreemapTrashHatch">#2EFF8577</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashHatchBrush" Color="#2EFF8577"/>
+    <Color x:Key="SkTreemapTrashOutline">#FFFF8577</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashOutlineBrush" Color="#FFFF8577"/>
+    <Color x:Key="SkTreemapTrashSweep">#2EFFD9D3</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashSweepBrush" Color="#2EFFD9D3"/>
+    <Color x:Key="SkTreemapTrashVeil">#73060709</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashVeilBrush" Color="#73060709"/>
     <Color x:Key="SkTreemapUnknownBorder">#FF343844</Color>
     <SolidColorBrush x:Key="SkTreemapUnknownBorderBrush" Color="#FF343844"/>
     <Color x:Key="SkTreemapUnknownStripeA">#FF0C0D11</Color>

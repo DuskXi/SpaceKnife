@@ -116,6 +116,18 @@
       "doc": {
         "$value": "#505DC6"
       },
+      "game": {
+        "$description": "游戏：深红。游戏安装目录里的文件不论扩展名都算它；亮度与彩度和其余类别拉开，色盲下仍可分",
+        "$value": "#BE1022"
+      },
+      "code": {
+        "$description": "代码/开发：浅石板蓝。大量小文件的区域保持安静；亮度与其余类别拉开，色盲下仍可分",
+        "$value": "#B7CBF3"
+      },
+      "data": {
+        "$description": "数据/模型：薄荷。亮度与其余类别拉开，色盲下仍可分",
+        "$value": "#7BE8B9"
+      },
       "other": {
         "$value": "#2B2F38"
       }
@@ -169,6 +181,38 @@
       },
       "sub": {
         "$value": "#7E8493"
+      }
+    },
+    "trash": {
+      "$type": "color",
+      "$description": "回收站 / 废纸篓里的块：压暗的蒙层、交叉细纹、虚线轮廓与流光，回收站本身的「清空可释放」标签",
+      "veil": {
+        "$value": "#06070973"
+      },
+      "hatch": {
+        "$value": "#FF85772E"
+      },
+      "outline": {
+        "$value": "#FF8577"
+      },
+      "sweep": {
+        "$value": "#FFD9D32E"
+      },
+      "badgeBg": {
+        "$value": "#FF8577"
+      },
+      "badgeText": {
+        "$value": "#0A0B0D"
+      }
+    },
+    "classFocus": {
+      "$type": "color",
+      "$description": "悬停「类别统计」里的一类：图上其余部分压暗的蒙层，这一类的块保持原色并描一圈细边，外发光取类别色（太暗的类别用强调色）",
+      "veil": {
+        "$value": "#060709D9"
+      },
+      "outline": {
+        "$value": "#FFFFFF8C"
       }
     },
     "pending": {

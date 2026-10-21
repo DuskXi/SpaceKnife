@@ -142,13 +142,6 @@ Language, hover tips, window alerts and logs.
 | Open the log panel on new events | On | On `true` · Off `false` | Opens the log panel on a warning or an error. The same setting as the switch in the log panel. | `general.log_auto_open` |
 | Log scan warnings | On | On `true` · Off `false` | For example "Can't access …: Access denied". | `general.log_scan_warnings` |
 
-#### Updates
-
-| Setting | Default | Values | Description | Key |
-| --- | --- | --- | --- | --- |
-| Check for updates automatically | On | On `true` · Off `false` | At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right. | `general.update_check` |
-| Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are the releases marked as pre-release on GitHub. | `general.update_channel` |
-
 ### Appearance
 
 Theme, accent color, animation and the look of the visualizations. Changes apply at once.
@@ -175,6 +168,7 @@ Theme, accent color, animation and the look of the visualizations. Changes apply
 | Highlight halo levels | 3 | 0 to 10 | How many ancestor title bars light up on hover or selection (subtle ↔ vivid). | `appearance.halo_levels` |
 | Hover highlight | On | On `true` · Off `false` | The block under the mouse gets a white inner outline. | `appearance.hover_highlight` |
 | Mouse trail | Off | On `true` · Off `false` | Blocks the mouse passes over fade out. | `appearance.mouse_trail` |
+| Recycle Bin effect | Moving | Moving `"animated"` · Still `"static"` · Off `"off"` | What lies in the Recycle Bin / Trash is shaded and hatched inside a dashed outline, and the bin itself says how much emptying it frees. "Moving": the dashes march and a band of light sweeps across now and then (still with "Reduce motion"). | `appearance.trash_effect` |
 | Selection shadow | On | On `true` · Off `false` | The selected block casts a shadow, so it is easier to follow. | `appearance.selection_shadow` |
 
 #### Coloring
@@ -204,6 +198,7 @@ Geometry, flame graph direction and animation. Open views are laid out again at 
 | Initial detail level | 5 | 1 to 15 | The detail level new views start with, the same as the level control on the toolbar. Only affects views opened later. | `treemap.initial_detail` |
 | Show free space in new views | On | On `true` · Off `false` | Shows the free space block in whole-volume views. Only affects views opened later. | `treemap.show_free` |
 | Show unknown space in new views | On | On `true` · Off `false` | Shows the unknown space block in whole-volume views. Only affects views opened later. | `treemap.show_unknown` |
+| Show the Recycle Bin in new views | On | On `true` · Off `false` | Draws the Recycle Bin / Trash when the scan holds one. Off: the bin takes no room and the other blocks grow to fill the view. Only affects views opened later. | `treemap.show_trash` |
 | Sort by size | On | On `true` · Off `false` | Larger blocks go to the top left within a folder. | `treemap.sort_by_size` |
 
 #### Flame graph
@@ -337,5 +332,17 @@ Settings file, logs, cache and snapshots.
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
 | Scan data memory limit | 25 % | 5 to 90 %, step 5 | Once scan data passes this share of physical memory, new node tables go to memory-mapped files on disk: they take no private commit, and the system keeps the parts in use in memory. Applies from the next scan. | `advanced.memory_budget` |
+
+### About & updates
+
+Version, updates and the release timeline.
+
+#### Updates
+
+| Setting | Default | Values | Description | Key |
+| --- | --- | --- | --- | --- |
+| Check for updates automatically | On | On `true` · Off `false` | At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right. | `general.update_check` |
+| Download updates automatically | On | On `true` · Off `false` | A new version is downloaded and checked in the background. It is installed only when you click Seamless update or the other way in the update card, never by itself. Can be changed when "Check for updates automatically" is on. | `general.update_download` |
+| Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are the releases marked as pre-release on GitHub. | `general.update_channel` |
 
 <!-- generated:settings:end -->

@@ -18,7 +18,8 @@ parent     <i4    row of the enclosing expanded folder, -1 at the top
 kind       <u1    0 file · 1 expanded folder (drawn as the layout says) · 2 collapsed folder
                   · 3 pending folder · 4 "N small items" · 5 "+N items" · 6 free space · 7 unknown space
 depth      <u1    nesting level, 1 = child of the zoom root (level colours: min(depth, 4))
-cls        <u1    file class index (``filter.vocab`` order) for files and small-item blocks
+cls        <u1    class index (``filter.vocab`` order) of files and small-item blocks, and of folders a
+                  folder class swallows; 255: in no one class (other folders, mixed blocks, "+N items")
 label      <u1    bits: 1 name · 2 size line · 4 large type · 8 short (name only, centred)
                   · 16 radial (``polar.v1`` only: the text runs along the radius)
 size       <i8    bytes shown (area basis; matched bytes in hide mode)
@@ -26,6 +27,8 @@ count      <u4    files in "N small items", entries in "+N items"
 flags      <u2    1 match · 2 dimmed · 4 folder-mask hit (bold) · 8 own tag · 16 selected
                   · 32 ancestor of the selection (halo) · 64 scan running and the folder's subtree is
                   not fully listed yet (folder blocks up to 3 levels below the zoom root)
+                  · 128 in a recycle bin / trash, or the bin itself (aggregates: by their container)
+                  · 256 the bin folder itself (it carries the badge of what emptying it frees)
 tag        <u1    own tag: 0 none, 1 red, 2 yellow, 3 green, 4 blue
 tone       <u1    modification-age band for time colouring: 0 < 1 d … 4 ≥ 1 y / unknown
 branch     <u1    top-level branch colour slot: 0 neutral, 1–8 (shade: min(depth, 4))
@@ -95,6 +98,9 @@ class ViewSettingsParams(Params):
     sort_by_size: bool | None = None
     show_free: bool | None = None
     show_unknown: bool | None = None
+    show_trash: bool | None = Field(
+        default=None, description="The recycle bins: drawn, or taken out of the picture"
+    )
     visual: VisualId | None = Field(default=None, description="A visual.list id (needs visuals.v1)")
     color_mode: ColorModeName | None = Field(
         default=None, description="Of the view's current visualization; 'branch' needs visuals.v1"
@@ -272,6 +278,12 @@ class ViewState(Payload):
     sort_by_size: bool
     show_free: bool
     show_unknown: bool
+    show_trash: bool = Field(
+        default=True, description="The recycle bins are drawn (not taken out of the picture)"
+    )
+    has_trash: bool = Field(
+        default=False, description="The scan holds a recycle bin / trash folder (the toggle is offered)"
+    )
     visual: str = Field(default="treemap", description="A visual.list id")
     color_mode: ColorModeName = Field(description="Of the current visualization (each remembers its own)")
     colors: dict[str, ColorModeName] = Field(

@@ -98,6 +98,13 @@ def test_command_matching_by_name_pinyin_and_alias() -> None:
     assert {"snapshot.save", "snapshot.compare", "snapshot.open"} <= set(found)
 
 
+def test_moving_tabs_is_always_available() -> None:
+    by_id = {c.id: c for c in registry()}
+    left, right = by_id["tab.move_left"], by_id["tab.move_right"]
+    assert (left.keys, right.keys) == (("Ctrl+Shift+PageUp",), ("Ctrl+Shift+PageDown",))
+    assert evaluate(left, Context(tab="start"))[0] and evaluate(right, Context(tab="scan"))[0]
+
+
 def test_availability_and_status(tmp_path: Path) -> None:
     by_id = {c.id: c for c in registry()}
     start = Context(tab="start")

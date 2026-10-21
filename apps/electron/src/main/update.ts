@@ -1,18 +1,20 @@
 // Updates (update.* of the backend, spaceknife_protocol.update): how this copy was installed, which
-// decides the release file the backend downloads, and what main checks before it starts a downloaded
-// file. Pure functions (the file system is injectable); index.ts does the Electron side.
+// decides the release file the backend downloads; what main checks before it uses a downloaded file;
+// and what the update card's two buttons need (shared/install.ts says what each does per kind of
+// install): the Windows installer's arguments, the plan for the backend that swaps a portable
+// copy's files. Pure functions (the file system is injectable); index.ts does the Electron side.
 
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { posix, win32 } from "node:path";
 
+import type { InstallKind } from "../shared/install";
 import type { TextKey } from "./text";
+
+export { type InstallHow, type InstallKind, type InstallStep, installStep, stepQuits } from "../shared/install";
 
 // The pages main opens in the browser for the renderer (release pages, the help's links to the
 // website); nothing else. The list is shared with the renderer, which checks it before it asks.
 export { PROJECT_PAGES, WEBSITE, projectPage } from "../shared/links";
-
-/** How this copy was installed (spaceknife_protocol.update.InstallKind; SPACEKNIFE_INSTALL_KIND). */
-export type InstallKind = "nsis" | "portable" | "appimage" | "deb" | "rpm" | "dmg" | "dev" | "unknown";
 
 /** The uninstaller electron-builder's NSIS installer puts next to the executable. */
 const NSIS_UNINSTALLER = "Uninstall SpaceKnife.exe";
@@ -21,17 +23,35 @@ const PACKAGE_DIR = "/opt/SpaceKnife";
 /** dpkg's file list of the installed deb (electron-builder.yml deb.packageName). */
 const DPKG_LIST = "/var/lib/dpkg/info/spaceknife.list";
 
-// The release files main may start (electron-builder.yml artifactName); a portable archive or an
-// AppImage has no install step (the renderer shows it in its folder), nor has a development run.
-// every part is a number of any length (0.3.10, 0.10.0); deb and rpm may write a pre-release's "-"
-// as "~" or "_"
+// The release files main may use (electron-builder.yml artifactName, tools/build_package.py); a
+// development run has none. Every part is a number of any length (0.3.10, 0.10.0); deb and rpm may
+// write a pre-release's "-" as "~" or "_".
 const VERSION = String.raw`\d+\.\d+\.\d+(?:[-~_][0-9A-Za-z.~_-]+)?`;
-const INSTALLERS: Partial<Record<InstallKind, RegExp>> = {
+const RELEASE_FILES: Partial<Record<InstallKind, RegExp>> = {
   nsis: new RegExp(String.raw`^SpaceKnife-${VERSION}-Setup-x64\.exe$`),
   dmg: new RegExp(String.raw`^SpaceKnife-${VERSION}-mac-[0-9a-z_]+\.dmg$`),
   deb: new RegExp(String.raw`^spaceknife_${VERSION}_amd64\.deb$`),
   rpm: new RegExp(String.raw`^spaceknife-${VERSION}\.x86_64\.rpm$`),
+  appimage: new RegExp(String.raw`^SpaceKnife-${VERSION}-x86_64\.AppImage$`),
 };
+const PORTABLE: Partial<Record<NodeJS.Platform, RegExp>> = {
+  win32: new RegExp(String.raw`^SpaceKnife-${VERSION}-win-x64-portable\.zip$`),
+  linux: new RegExp(String.raw`^SpaceKnife-${VERSION}-linux-x64-portable\.tar\.gz$`),
+};
+
+/** The Windows installer's arguments for a silent update in place, electron-builder's own flags:
+ *  --updated keeps the data and skips the pages, --force-run starts the new version afterwards. The
+ *  installer reads the folder and, with one installation, its scope from the registry; the scope is
+ *  passed only where the folder makes it plain (a per-user and a per-machine installation at once is
+ *  the case it would otherwise decide by itself, for the current user). */
+export function nsisUpdateArgs(execPath: string, env: NodeJS.ProcessEnv): string[] {
+  const args = ["--updated", "/S", "--force-run"];
+  const dir = win32.dirname(execPath);
+  const machine = [env.ProgramFiles, env["ProgramFiles(x86)"], env.ProgramW6432].some((root) => !!root && within(win32, root, dir));
+  if (machine) args.push("/allusers");
+  else if (env.LOCALAPPDATA && within(win32, env.LOCALAPPDATA, dir)) args.push("/currentuser");
+  return args;
+}
 
 /** The kind of install, from where the executable is and what lies around it. `portableHome` is
  *  portable.ts's answer (a portable copy with its data folder). */
@@ -65,28 +85,28 @@ const nodeFiles: FileProbe = {
   isFile: (path) => statSync(path).isFile(),
 };
 
-/** Why `file` can't be started as the downloaded update (a text of main's), or null when it can: a
- *  file directly in the download folder, links resolved, named like this install's release file. */
+/** Why `file` can't be used as the downloaded update (a text of main's), or null when it can: a file
+ *  directly in the backend's updates folder, links resolved, named like this install's release file. */
 export function installRefusal(
   file: string,
   kind: InstallKind,
-  downloads: string,
+  updates: string,
   platform: NodeJS.Platform,
   files: FileProbe = nodeFiles,
 ): TextKey | null {
-  const pattern = INSTALLERS[kind];
+  const pattern = kind === "portable" ? PORTABLE[platform] : RELEASE_FILES[kind];
   if (!pattern) return "updateNoInstall";
   const path = platform === "win32" ? win32 : posix;
   let real: string;
   let folder: string;
   try {
     real = files.realpath(file);
-    folder = files.realpath(downloads);
+    folder = files.realpath(updates);
     if (!files.isFile(real)) return "updateMissing";
   } catch {
     return "updateMissing";
   }
-  if (!samePath(path.dirname(real), folder, platform)) return "updateNotInDownloads";
+  if (!samePath(path.dirname(real), folder, platform)) return "updateNotInUpdates";
   return pattern.test(path.basename(real)) ? null : "updateNotAnUpdate";
 }
 
@@ -98,4 +118,34 @@ function within(path: typeof posix, dir: string, file: string): boolean {
 /** Windows and macOS file systems ignore case (macOS: by default). */
 function samePath(a: string, b: string, platform: NodeJS.Platform): boolean {
   return platform === "linux" ? a === b : a.toLowerCase() === b.toLowerCase();
+}
+
+// ------------------------------------------------------------------ a portable copy
+
+/** What the swap of a portable copy needs: the app's folder keeps its "data"; every other entry goes
+ *  to `previous`, the new version's entries come from `staged` (the archive's top folder, unpacked);
+ *  then `exe` starts again (the new version, or the old one when the swap failed and was undone). */
+export interface SwapPlan {
+  /** the app's main process: the swap starts once it is gone */
+  pid: number;
+  appDir: string;
+  staged: string;
+  previous: string;
+  exe: string;
+  log: string;
+}
+
+/** The plan file for the new version's backend (`--apply-update <plan>`, spaceknife.update_swap):
+ *  version 1, which every later backend keeps reading (an app hands it to the newer version). */
+export function swapPlanJson(p: SwapPlan): string {
+  const plan = { v: 1, pid: p.pid, app: p.appDir, new: p.staged, old: p.previous, exe: p.exe, log: p.log, keep: ["data"] };
+  return `${JSON.stringify(plan, null, 2)}
+`;
+}
+
+/** The new version's backend executable in its unpacked files: it does the swap (resources/backend,
+ *  electron-builder.yml extraResources). */
+export function swapHelper(staged: string, platform: "win32" | "linux"): string {
+  const path = platform === "win32" ? win32 : posix;
+  return path.join(staged, "resources", "backend", platform === "win32" ? "spaceknife-backend.exe" : "spaceknife-backend");
 }

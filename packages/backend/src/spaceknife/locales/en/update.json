@@ -21,5 +21,6 @@
  "没有可用的更新": "No update available",
  "这个版本没有适合这种安装方式的文件，请到发布页下载": "This release has no file for this kind of install; download it from the release page",
  "连不上 GitHub：{reason}": "Can't reach GitHub: {reason}",
- "连接 GitHub 超时": "The connection to GitHub timed out"
+ "连接 GitHub 超时": "The connection to GitHub timed out",
+ "关于与更新": "About & updates"
 }

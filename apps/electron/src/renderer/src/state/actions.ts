@@ -27,8 +27,10 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { moveTo, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
-import { downloading, downloadOf, hasUpdate, visibleSurface } from "./updates";
+import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
+import type { InstallHow } from "../../../shared/install";
 import { getLang, setLang, t } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
@@ -66,6 +68,8 @@ export function cancellable<M extends MethodName>(method: M, params: Methods[M][
 export async function boot(): Promise<void> {
   window.sk.onBackend((st) => void onBackend(st));
   await onBackend(await window.sk.backend());
+  // started again by 「无缝更新」: say once that it worked (the details are in 「关于与更新」)
+  if (window.sk.justUpdated) toast(t("已更新到 SpaceKnife {version}", { version: window.sk.version }), 5000);
 }
 
 let backendGone = false; // exited / failed: stop reconnecting until a new backend is ready
@@ -201,7 +205,7 @@ async function applyUpdate(viewId: string, upd: ViewUpdate): Promise<void> {
 // ------------------------------------------------------------------ views
 
 export function defaultViewport(): { width: number; height: number; dpr: number } {
-  const inspector = get().inspectorHidden ? 0 : 320;
+  const inspector = get().inspectorHidden ? 0 : get().inspectorWidth;
   return {
     width: Math.max(200, window.innerWidth - inspector),
     height: Math.max(200, window.innerHeight - 40 - 48 - 28),
@@ -263,6 +267,7 @@ export function carried(st: ViewState): ViewSettingsParams {
     detail: st.detail,
     show_free: st.show_free,
     show_unknown: st.show_unknown,
+    show_trash: st.show_trash,
   };
 }
 
@@ -353,6 +358,12 @@ function onOpProgress(ev: OpProgressEvent): void {
 // filter: colouring comes back at once (filter.parse); evaluation is debounced and cancellable
 const filterTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const filterCalls = new Map<string, () => void>();
+
+/** Leave filtering: the filter box empties, the side panel goes back to the details (the
+ * 「匹配结果」 header's 「清除过滤」, the floater's ×, Esc on the map with nothing selected). */
+export function clearFilter(viewId: string): void {
+  void editFilter(viewId, "", null, true);
+}
 
 export async function editFilter(viewId: string, text: string, cursor: number | null, immediate = false): Promise<void> {
   patchView(viewId, { filterText: text });
@@ -549,6 +560,14 @@ export function openSettingsTab(page?: SettingsPageId): void {
   if (typeof page === "string") settingsGo(page); // callers may be event handlers: ignore event objects
 }
 
+/** 「本机磁盘」: one tab at most (the start page's button, the palette). */
+export function openMachineTab(): void {
+  const existing = get().tabs.find((x) => x.kind === "machine");
+  if (existing) return set({ active: existing.id });
+  const tab: Tab = { id: newTabId(), kind: "machine", viewIds: [], focusedPane: 0, title: t("本机磁盘") };
+  set((x) => ({ tabs: [...x.tabs, tab], active: tab.id }));
+}
+
 /** Show a settings page; recorded in the tab's page history (UI-W7-02, UI-W7-03). */
 export function settingsGo(page: SettingsPageId): void {
   const s = get();
@@ -585,6 +604,7 @@ function fixedTitle(tab: Tab): string | null {
   if (tab.kind === "start") return t("新扫描");
   if (tab.kind === "settings") return t("设置");
   if (tab.kind === "help") return t("帮助");
+  if (tab.kind === "machine") return t("本机磁盘");
   return null;
 }
 
@@ -686,6 +706,23 @@ export function activate(id: string): void {
   set({ active: id });
 }
 
+/** UI-MAIN-04: put tab `id` after `index` other tabs (dragging it in the title bar). */
+export function moveTab(id: string, index: number): void {
+  set((s) => ({ tabs: moveTo(s.tabs, id, index) }));
+}
+
+/** The tabs back in a remembered order (Esc while dragging). */
+export function restoreTabOrder(ids: readonly string[]): void {
+  set((s) => ({ tabs: ids.flatMap((id) => s.tabs.filter((t) => t.id === id)).concat(s.tabs.filter((t) => !ids.includes(t.id))) }));
+}
+
+/** Ctrl+Shift+PgUp / PgDn, 「标签左移」 / 「标签右移」: the active tab one slot left or right. */
+export function moveActiveTab(step: -1 | 1): void {
+  const s = get();
+  const to = stepIndex(s.tabs, s.active, step);
+  if (to !== null) moveTab(s.active, to);
+}
+
 /** W8: split the active scan tab into two panes (a second view of the same scan). */
 export async function toggleSplit(): Promise<void> {
   const tab = activeTab();
@@ -726,6 +763,39 @@ export async function refreshVolumes(): Promise<void> {
   }
 }
 
+/** Read this computer's disks (machine.disks) for the start page's card and 「本机磁盘」: at most
+ * once a minute unless `force` (the page's 「刷新」); a failure keeps what was read before. */
+export async function refreshMachine(force = false): Promise<void> {
+  const s = get();
+  if (s.machineLoading || s.conn !== "ready" || (!force && s.machine && Date.now() - s.machineAt < 60_000)) return;
+  set({ machineLoading: true });
+  try {
+    set({ machine: await call("machine.disks", {}), machineAt: Date.now() });
+  } catch (err) {
+    if (force) toast(t("读取磁盘失败：{error}", { error: err instanceof Error ? err.message : String(err) }));
+  } finally {
+    set({ machineLoading: false });
+  }
+}
+
+/** Read the disks' own records that need administrator rights (machine.read_health; Linux:
+ * polkit's password prompt). Only from the button on a disk card, never by itself; one prompt
+ * reads every such disk. Why nothing was read shows on the disk whose button was clicked. */
+export async function readDiskRecords(disk: string): Promise<void> {
+  const s = get();
+  if (s.machineReading || s.conn !== "ready") return;
+  set({ machineReading: disk, machineReadNote: null });
+  try {
+    const r = await call("machine.read_health", { disks: [] });
+    const failed = r.outcome === "denied" || r.outcome === "unavailable";
+    set({ machine: r.machine, machineAt: Date.now(), machineReadNote: failed ? { disk, text: r.message } : null });
+  } catch (err) {
+    set({ machineReadNote: { disk, text: err instanceof Error ? err.message : String(err) } });
+  } finally {
+    set({ machineReading: null });
+  }
+}
+
 export async function refreshLists(): Promise<void> {
   try {
     const [volumes, snapshots] = await Promise.all([call("volume.list", {}), call("snapshot.list", {})]);
@@ -745,14 +815,14 @@ const closedVersions = new Set<string>();
 function applyUpdateStatus(next: UpdateStatus): void {
   if (next.latest && !next.dismissed && closedVersions.has(next.latest.version)) next = { ...next, dismissed: true };
   const before = downloadOf(get().update);
-  set((s) => ({ update: next, updateOpen: s.updateOpen && hasUpdate(next) }));
+  set((s) => ({ update: next, updateOpen: s.updateOpen && announced(next) }));
   const after = downloadOf(next);
   if (!downloading(before) || downloading(after) || visibleSurface(next, get().updateOpen) !== "none") return;
   if (after.state === "done") toast(t("SpaceKnife {version} 已下载", { version: after.version ?? "" }));
   else if (after.state === "failed") toast(t("更新下载失败：{error}", { error: after.error ?? "" }));
 }
 
-async function updateCall<M extends "update.dismiss" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
+async function updateCall<M extends "update.dismiss" | "update.mute" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
   try {
     applyUpdateStatus((await call(method, params)) as UpdateStatus);
   } catch (err) {
@@ -768,7 +838,10 @@ export async function checkUpdates(): Promise<void> {
     const st = await call("update.check", {});
     applyUpdateStatus(st);
     if (st.error) toast(t("检查更新失败：{error}", { error: st.error }));
-    else if (hasUpdate(st)) {
+    else if (st.muted && hasUpdate(st)) {
+      // a series the user skipped: no card; 「关于与更新」 shows it and turns its prompts back on
+      toast(t("发现新版本 {version}（已跳过 {series} 的提示，见「关于与更新」）", { version: st.latest.version, series: seriesName(st.series ?? "") }));
+    } else if (hasUpdate(st)) {
       set({ updateOpen: true });
       toast(t("发现新版本 {version}", { version: st.latest.version }));
     } else toast(t("已是最新版本"));
@@ -779,7 +852,12 @@ export async function checkUpdates(): Promise<void> {
 
 /** The badge and 「查看更新」 (app.show_update): the card under the badge; nothing known yet: check. */
 export function showUpdate(): Promise<void> {
-  if (!hasUpdate(get().update)) return checkUpdates();
+  const st = get().update;
+  if (!hasUpdate(st)) return checkUpdates();
+  if (st.muted) {
+    openSettingsTab("about"); // no badge to open it under: the page has it, and the way back on
+    return Promise.resolve();
+  }
   set({ updateOpen: true });
   return Promise.resolve();
 }
@@ -800,12 +878,23 @@ export function toggleUpdateCard(): void {
   else set({ updateOpen: true });
 }
 
-/** 「一键下载」 / 「重试」: the file for this kind of install, into the download folder. */
+/** 「跳过 0.4.x」 (muted) / 「恢复提示」: every release of the series stays quiet (no card, dialog,
+ * badge or automatic download) or speaks up again (update.mute). */
+export function muteUpdates(series: string, muted: boolean): void {
+  const st = get().update;
+  if (st?.series === series) set({ update: { ...st, muted }, updateOpen: muted ? false : get().updateOpen });
+  if (muted) toast(t("{series} 的版本不再提示；可以在「关于与更新」里恢复", { series: seriesName(series) }));
+  void updateCall("update.mute", { series, muted });
+}
+
+/** 「一键下载」 / 「重试」: the file for this kind of install, into the backend's updates folder. */
 export const downloadUpdate = (version: string) => updateCall("update.download", { version });
 export const cancelUpdate = () => updateCall("update.cancel", {});
 
-/** 「安装」: start the downloaded installer, disk image or package; the app quits when it started. */
-export async function installUpdate(path: string): Promise<void> {
-  const reason = await window.sk.update.install(path);
+/** One of the card's two big buttons: 「无缝更新」 or the classic way (shared/install.ts). Main does it
+ * (main/index.ts installUpdate); the app quits once that has started, else the reason is shown. Only
+ * ever from a click: nothing installs by itself. */
+export async function installUpdate(path: string, how: InstallHow): Promise<void> {
+  const reason = await window.sk.update.install(path, how);
   if (reason) toast(reason);
 }

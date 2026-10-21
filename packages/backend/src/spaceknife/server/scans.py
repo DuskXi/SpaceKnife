@@ -120,33 +120,63 @@ def on_disk(store: NodeStore, node: int) -> bool:
 
 
 def summary_of(server: Any, handle: ScanHandle, node: int, top: int) -> p.TreeSummaryResult:
-    """``tree.summary``: parent, largest files, class totals, newest change, tag and volume."""
+    """``tree.summary``: parent, largest files, class totals (with what folder classes took over),
+    newest change, tag, volume, and why the node takes a folder class."""
+    from .. import pathclass
     from ..layout.engine import Layout
     from ..store.subtree import summarize
 
     store = handle.store
     layout = Layout(store)
-    ext_class = layout.ext_classes()
     class_ids = layout.class_ids
-    s = summarize(store, node, ext_class, len(class_ids), top)
+    s = summarize(store, node, layout.cls_of, len(class_ids), top, layout.ext_cls_of)
     shared = server.views.shared(handle.id)
     tags = shared.tags if shared is not None else None
     base = store.path(node)
     tops = []
-    for f in s.top_files:
-        f = int(f)
+    top_cls = layout.cls_of(s.top_files).tolist() if len(s.top_files) else []
+    for f, ci in zip(s.top_files.tolist(), top_cls, strict=True):
         parent_path = store.path(int(store.cols["parent"][f]))
         rel = os.path.relpath(parent_path, base) if parent_path != base else ""
         rel = "" if rel in (".", "") else rel + os.sep
         tops.append(
-            p.TopFile(node=node_info(store, f), rel_parent=rel, tag=tags.of(store, f) if tags else None)
+            p.TopFile(
+                node=node_info(store, f),
+                rel_parent=rel,
+                tag=tags.of(store, f) if tags else None,
+                class_id=class_ids[ci],
+            )
         )
     order = np.argsort(-s.class_bytes, kind="stable")
+
+    def parts(i: int) -> list[p.ClassPart]:
+        if s.class_parts is None:
+            return []
+        row = s.class_parts[i]
+        return [p.ClassPart(class_id=class_ids[j], bytes=int(row[j])) for j in np.argsort(-row) if row[j] > 0]
+
     classes = [
-        p.ClassStat(class_id=class_ids[i], bytes=int(s.class_bytes[i]), files=int(s.class_files[i]))
+        p.ClassStat(
+            class_id=class_ids[i],
+            bytes=int(s.class_bytes[i]),
+            files=int(s.class_files[i]),
+            parts=parts(int(i)),
+        )
         for i in order
         if s.class_files[i]
     ]
+    why = pathclass.explain(store, node, layout.classes)
+    folder_class = (
+        p.FolderClassInfo(
+            class_id=why.class_id,
+            reason=why.reason,
+            folder=store.path(why.folder),
+            user=why.user,
+            fallback=why.fallback,
+        )
+        if why is not None
+        else None
+    )
     parent = int(store.cols["parent"][node])
     root = next((r for r in handle.roots if r.node == node or r.node in store.ancestors(node)), None)
     return p.TreeSummaryResult(
@@ -159,6 +189,7 @@ def summary_of(server: Any, handle: ScanHandle, node: int, top: int) -> p.TreeSu
         tag=tags.of(store, node) if tags else None,
         volume=volume_model(root.volume) if root is not None else None,
         on_disk=on_disk(store, node),
+        folder_class=folder_class,
     )
 
 

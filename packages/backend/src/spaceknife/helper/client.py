@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sys
 from collections.abc import AsyncGenerator, Callable, Sequence
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,7 @@ from .messages import (
     USN_STREAM,
     Begin,
     Call,
+    DiskHealth,
     Error,
     FrameError,
     Hello,
@@ -62,6 +64,7 @@ from .transport import AsyncChannel, Listener
 
 CONNECT_TIMEOUT = 20.0
 CONNECT_TIMEOUT_UAC = 60.0  # includes the time the UAC prompt is open
+CONNECT_TIMEOUT_POLKIT = 180.0  # includes typing the password in polkit's dialog
 REQUEST_TIMEOUT = 60.0  # inactivity; a busy helper sends a heartbeat every second
 HELLO_TIMEOUT = 10.0
 CLOSE_TIMEOUT = 5.0
@@ -112,20 +115,16 @@ class HelperClient:
     ) -> HelperClient:
         """Start a helper and wait until it has connected and authenticated.
 
-        ``elevate=True`` shows the UAC prompt (Windows; skipped when this process already has
-        administrator rights); ``elevate=False`` starts a plain subprocess. ``command`` replaces
+        ``elevate=True`` shows the UAC prompt (Windows) or polkit's password dialog (Linux; both
+        skipped when this process already has administrator rights); ``elevate=False`` starts a
+        plain subprocess. ``command`` replaces
         the interpreter + module prefix (tests). Raises HelperDenied when the user declines and
         HelperUnavailable for every other failure.
         """
         uac = elevate and not is_elevated()
         loop = asyncio.get_running_loop()
-        timeout = (
-            connect_timeout
-            if connect_timeout is not None
-            else CONNECT_TIMEOUT_UAC
-            if uac
-            else CONNECT_TIMEOUT
-        )
+        prompt = CONNECT_TIMEOUT_UAC if sys.platform == "win32" else CONNECT_TIMEOUT_POLKIT
+        timeout = connect_timeout if connect_timeout is not None else prompt if uac else CONNECT_TIMEOUT
         deadline = loop.time() + timeout
         token = new_token()
         try:
@@ -440,6 +439,12 @@ class HelperClient:
         )
         return await self._table(call, on_progress, _USN)
 
+    async def disk_health(self, disk: str) -> dict[str, Scalar]:
+        """The raw health pages of a Linux disk (kernel name, e.g. ``nvme0n1``, ``sda``), as hex:
+        ``{kind: "nvme", log}`` or ``{kind: "ata", identify, general, temperature}``. Elevated
+        helpers on Linux only; HelperError ``not_supported`` when the device does not answer."""
+        return await self._simple(_build(DiskHealth, disk=disk))
+
     async def _batches(self, call: Call, on_progress: ProgressCallback | None) -> AsyncGenerator[Batch]:
         async with contextlib.aclosing(self._exchange(call, on_progress)) as items:
             async for item in items:
@@ -577,6 +582,10 @@ async def _accept(listener: Listener, process: HelperProcess, deadline: float) -
             raise HelperUnavailable(tr("等待扫描助手连接失败：{reason}", reason=exc), "exited") from None
         code = process.poll()
         if code is not None:
+            explain = getattr(process, "exit_error", None)  # pkexec: refused or dismissed
+            error = await asyncio.to_thread(explain, code) if explain is not None else None
+            if error is not None:
+                raise error
             raise HelperUnavailable(tr("扫描助手启动后退出（退出码 {code}）", code=code), "exited")
 
 

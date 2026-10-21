@@ -89,7 +89,7 @@ The toolbar's **Coloring** group has four modes. <kbd>C</kbd> steps through them
 
 | Mode | Toolbar | Command palette | Color shows |
 |---|---|---|---|
-| File classes | **Classes** | **Coloring: file classes** | The file class, found by the extension: Video, Pictures, Audio, Archives, Programs, Documents, and Other for the rest. Edit the classes in **Settings › File classes**. |
+| File classes | **Classes** | **Coloring: file classes** | The file class, found by the extension: Video, Pictures, Audio, Archives, Programs, Documents, Games, Code, Data, and Other for the rest; the files in games, projects and other recognised folders take the folder's class. Edit the classes in **Settings › File classes**. |
 | Flat | **Flat** | **Coloring: flat** | Nothing: every file has the same neutral color, so only size and structure remain |
 | Date modified | **Time** | **Coloring: date modified** | How recently a file changed, in five bands: under a day, a week, a month, a year, and older |
 | Top-level branch | **Branch** | **Coloring: top-level branch** | Which top-level item a block belongs to |
@@ -158,6 +158,23 @@ When the zoom root is a whole volume you scanned (for example `C:\` or `/`), two
 
 A large unknown space is worth a look: scanning with more rights usually makes it smaller. See [Troubleshooting](../troubleshooting/).
 
+## The Recycle Bin
+
+What you deleted into the Recycle Bin (the Trash on macOS) still takes up space until the bin is emptied. SpaceKnife marks it so you don't mistake it for files you use:
+
+- Everything in the bin is shaded and cross-hatched inside a coral dashed outline.
+- The bin itself carries a badge: **Recycle Bin · emptying frees 12.3 GB** (**Trash · …** on macOS). It also shows as the root bar or center disc when you zoom into the bin in a flame graph.
+- The hover card says **In the Recycle Bin: the space comes back when the bin is emptied**.
+- With **Moving** (the default), the dashes march and a band of light sweeps across the bin now and then. **Reduce motion** holds them still.
+
+The bins it knows: `$Recycle.Bin` at the top of each Windows drive; `~/.Trash` and `.Trashes` at the top of a volume on macOS; `~/.local/share/Trash` and `.Trash-<user id>` at the top of a drive on Linux (the freedesktop.org Trash, used by GNOME, KDE and most file managers; `rm` deletes without one). A scan of the whole drive includes the bin; a scan of one folder does only when the bin is inside it.
+
+While SpaceKnife monitors the scan, moving files to the bin moves their blocks into it, and emptying the bin turns that space into free space.
+
+Choose **Moving**, **Still** or **Off** in **Settings › Appearance › Treemap visuals › Recycle Bin effect**.
+
+To leave the bin out of the picture, press <kbd>R</kbd> or click the **Recycle Bin** chip next to **Unknown space** (**Trash** on macOS). The chip is there only when the scan holds a bin, and not in comparisons. With it off, the bin takes no room and the rest grows to fill the view. Its bytes are not counted as unknown space, and a view zoomed into the bin keeps showing it. New views follow **Settings › Visualization › Geometry › Show the Recycle Bin in new views**.
+
 ## While a scan runs: the breathing outline
 
 The picture fills in while the scan runs, several times a second. You can select, hover, zoom, go back, change the level and switch the visualization the whole time.
@@ -205,6 +222,7 @@ The defaults, the initial detail level and the two "in new views" switches only 
 | Block proportions | Visualization › Geometry | Treemap only: taller or wider blocks |
 | Initial detail level | Visualization › Geometry | Level of new views |
 | Show free space / unknown space in new views | Visualization › Geometry | Start values of <kbd>F</kbd> and <kbd>U</kbd> |
+| Show the Recycle Bin in new views | Visualization › Geometry | Start value of <kbd>R</kbd> |
 | Sort by size | Visualization › Geometry | Largest first, or by name |
 | Flame graph direction | Visualization › Flame graph | Root at bottom or at top |
 | Zoom animation duration | Visualization › Animation | 0 to 600 ms, 250 by default; 0 turns it off |
@@ -219,6 +237,7 @@ The defaults, the initial detail level and the two "in new views" switches only 
 | <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> | Raise / lower the detail level |
 | <kbd>F</kbd> | Show or hide free space |
 | <kbd>U</kbd> | Show or hide unknown space |
+| <kbd>R</kbd> | Show or hide the Recycle Bin (when the scan holds one) |
 | Double-click, <kbd>Enter</kbd> | Zoom in, also into merged blocks |
 
 Single-letter keys don't work while you type in a text field, and a focused drop-down list keeps <kbd>C</kbd> and <kbd>V</kbd> for itself. On macOS you can press <kbd>⌘</kbd> wherever this page says <kbd>Ctrl</kbd>. All keys are listed in [Keyboard shortcuts](../shortcuts/); zooming and the rest of the navigation are in [Navigating the picture](../navigation/).

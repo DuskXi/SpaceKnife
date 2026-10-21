@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
-import { basketAdd, boot, call, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
+import { basketAdd, boot, call, clearFilter, closeTab, moveActiveTab, newStartTab, openSettingsTab, settingsHistory, setViewSettings, viewCall } from "@/state/actions";
+import { BrowserLayer } from "@/shell/BrowserLayer";
 import { ContextMenu } from "@/shell/ContextMenu";
 import { ExportDialog } from "@/shell/ExportDialog";
 import { FullDiskAccessDialog } from "@/shell/FullDiskAccessDialog";
@@ -8,6 +9,7 @@ import { OpToast } from "@/shell/OpToast";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog, useApp } from "@/state/store";
 import { notOnDisk, revealLabel } from "@/shell/Inspector";
 import { focusFilter } from "@/shell/FilterBox";
+import { inBrowser } from "@/lib/host";
 import { t } from "@/lib/i18n";
 import { LogPanel } from "@/shell/LogPanel";
 import { Palette } from "@/shell/Palette";
@@ -19,6 +21,7 @@ import { TitleBar } from "@/shell/TitleBar";
 import { Toolbar } from "@/shell/Toolbar";
 import { UpdatePrompt } from "@/shell/UpdateCard";
 import { HelpPage } from "@/pages/HelpPage";
+import { MachinePage } from "@/pages/MachinePage";
 import { ScanPage } from "@/pages/ScanPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
@@ -48,12 +51,22 @@ export function App() {
       <div className="app" inert={paletteOpen || updateDialog}>
         <TitleBar />
         <Toolbar />
-        {tab.kind === "scan" ? <ScanPage tab={tab} /> : tab.kind === "settings" ? <SettingsPage /> : tab.kind === "help" ? <HelpPage /> : <StartPage tab={tab} />}
+        {tab.kind === "scan" ? (
+          <ScanPage tab={tab} />
+        ) : tab.kind === "settings" ? (
+          <SettingsPage />
+        ) : tab.kind === "help" ? (
+          <HelpPage />
+        ) : tab.kind === "machine" ? (
+          <MachinePage />
+        ) : (
+          <StartPage tab={tab} />
+        )}
         <LogPanel />
         <StatusBar />
         {conn === "failed" && (
           <div className="fatal">
-            <h2>{t("后端没有启动")}</h2>
+            <h2>{inBrowser() ? t("连不上 SpaceKnife") : t("后端没有启动")}</h2>
             <p className="mono">{message}</p>
           </div>
         )}
@@ -69,6 +82,7 @@ export function App() {
       <ExportDialog />
       <FullDiskAccessDialog />
       <UpdatePrompt />
+      <BrowserLayer />
     </>
   );
 }
@@ -108,6 +122,8 @@ function onKey(e: KeyboardEvent): unknown {
   if (ctrl && key.toLowerCase() === "t") return (done(), newStartTab());
   if (ctrl && key.toLowerCase() === "w") return (done(), void closeTab(tab.id));
   if (ctrl && key === ",") return (done(), openSettingsTab());
+  // Ctrl+Shift+PgUp / PgDn: move the active tab (UI-MAIN-04); without Shift they switch tabs
+  if (ctrl && e.shiftKey && (key === "PageUp" || key === "PageDown")) return (done(), moveActiveTab(key === "PageUp" ? -1 : 1));
   if (ctrl && (key === "Tab" || key === "PageDown" || key === "PageUp")) {
     const idx = s.tabs.findIndex((x) => x.id === tab.id);
     const step = (e.shiftKey && key === "Tab") || key === "PageUp" ? -1 : 1;
@@ -154,6 +170,8 @@ function onKey(e: KeyboardEvent): unknown {
   if (key === "Escape" && !onControl) {
     // compare mode: Esc clears the selection, then leaves the comparison (W6 待定 16)
     if (tab.compare && st.selected == null) return (done(), void exitCompare(tab.id));
+    // then, with nothing selected: leave filtering (the 「匹配结果」 panel goes back to the details)
+    if (st.selected == null && view?.filter?.active) return (done(), clearFilter(viewId));
     return (done(), void viewCall(viewId, "view.select", { key: null }));
   }
   if (key === "Delete" && !ctrl && !onControl) {
@@ -183,6 +201,7 @@ function onKey(e: KeyboardEvent): unknown {
   if (st.compare && !ctrl && !e.altKey && !typeAhead && lower === "c") return (done(), cycleDirection(viewId));
   if (!ctrl && !e.altKey && lower === "f") return (done(), void setViewSettings(viewId, { show_free: !st.show_free }));
   if (!ctrl && !e.altKey && lower === "u") return (done(), void setViewSettings(viewId, { show_unknown: !st.show_unknown }));
+  if (!ctrl && !e.altKey && lower === "r" && st.has_trash) return (done(), void setViewSettings(viewId, { show_trash: !st.show_trash }));
   if (!ctrl && !e.altKey && !typeAhead && lower === "c") return (done(), void setViewSettings(viewId, { color_mode: nextColor(st.color_mode) }));
   // V / Shift+V: the next / previous visualization, comparisons included. The key is also listed by
   // the backend's view.cycle_visual (palette/commands.py): change both together.

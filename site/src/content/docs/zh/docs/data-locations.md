@@ -29,7 +29,8 @@ Linux 上设置了 `XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`XDG_CACHE_HOME` 时，
 | `snapshots/` | 数据 | 每个扫描位置一个文件夹，每份快照一个 `.sks` 文件 |
 | `tags/` | 数据 | 保存的标签，每个扫描位置一个文件 |
 | `logs/spaceknife.log` | 数据 | 日志文件 |
-| `update.json` | 数据 | 上一次更新检查、查到的最新版本，以及关掉过更新卡片的版本 |
+| `update.json` | 数据 | 上一次更新检查、最近的版本和它们的发布说明，以及关掉过更新卡片的版本 |
+| `updates/` | 数据 | 下载好的新版本（直到它运行起来）；便携版替换时，还有新旧两份程序文件。下次启动时清空（[不留残余](../updates-privacy/#不留残余)） |
 | `palette_recent.json` | 数据 | 命令面板最近的路径跳转和过滤 |
 | `settings.json` | 配置 | 你的设置 |
 | `classes.json` | 配置 | 你的文件类别 |
@@ -108,7 +109,7 @@ SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Conten
 - 手动设置的 `SPACEKNIFE_HOME` 优先于 `data` 文件夹。
 - 删掉或重命名 `data`，这份程序就改用正常的用户目录；放回去又是便携的。
 - 解压到自己能写入的位置：比如 Program Files 下面就不行。
-- 软件内的更新知道这是便携版：它下载便携包，并在文件夹中显示。替换程序文件，留下 `data`（见[升级](../install/#升级)）。
+- 软件内的更新知道这是便携版：它下载便携包，「无缝更新」替换程序文件、留下 `data`；「自己替换」把压缩包显示出来，由你解压覆盖（见[升级](../install/#升级)）。
 - macOS 应用和 AppImage 没有便携模式。macOS 上改用 `SPACEKNIFE_HOME`。
 
 :::caution[命令行不认便携模式]
@@ -126,4 +127,4 @@ $env:SPACEKNIFE_HOME = "C:\Users\lenny\Apps\SpaceKnife-portable\data"
 
 ## 删除全部数据
 
-想从头开始，或卸载后清理干净：退出 SpaceKnife，删除[第一张表](#存在哪里)里的文件夹（Windows 上是 `%LOCALAPPDATA%\SpaceKnife` 和 `%APPDATA%\SpaceKnife`），或者你用的 `SPACEKNIFE_HOME`、`data` 文件夹。「设置 › 高级 › 全部恢复默认」只重置设置和文件类别。
+Windows 的卸载程序可以代劳：在它的第二页勾上「同时删除快照、设置和日志」（见[卸载](../install/#卸载)）。否则，想从头开始，或卸载后清理干净：退出 SpaceKnife，删除[第一张表](#存在哪里)里的文件夹（Windows 上是 `%LOCALAPPDATA%\SpaceKnife` 和 `%APPDATA%\SpaceKnife`），或者你用的 `SPACEKNIFE_HOME`、`data` 文件夹。「设置 › 高级 › 全部恢复默认」只重置设置和文件类别。

@@ -1,0 +1,37 @@
+/* Browser mode (headless): the interface in a browser tab. BrowserLayer.tsx sets html.sk-browser. */
+
+/* the title bar: no window to drag, no window buttons (TitleBar.tsx leaves them out) */
+.sk-browser .titlebar { -webkit-app-region: no-drag; }
+
+/* which computer the files are on */
+.remote-chip {
+  flex: none; align-self: center; display: inline-flex; align-items: center; gap: 6px; height: 24px; max-width: 220px;
+  margin-right: 6px; padding: 0 10px 0 8px; border-radius: var(--sk-radius-pill);
+  background: color-mix(in srgb, var(--sk-color-accent-teal) 14%, transparent); color: var(--sk-color-accent-teal);
+  font-size: var(--sk-font-size-label); font-weight: var(--sk-font-weight-semibold); white-space: nowrap; cursor: default;
+}
+.remote-chip svg { flex: none; }
+.remote-name { overflow: hidden; text-overflow: ellipsis; }
+.remote-chip.plain { background: color-mix(in srgb, var(--sk-color-status-warning) 14%, transparent); color: var(--sk-color-status-warning); }
+.remote-plain {
+  flex: none; padding: 0 5px; border-radius: var(--sk-radius-xs); font: 600 10px/16px var(--sk-font-family-mono);
+  background: color-mix(in srgb, currentColor 18%, transparent);
+}
+
+/* a path typed instead of picked (shim.ts, BrowserLayer.tsx) */
+.path-dialog { width: min(560px, calc(100vw - 32px)); }
+.path-dialog p { margin: 0 0 12px; }
+.path-dialog-input {
+  width: 100%; height: var(--sk-control-height-lg); padding: 0 10px; border: 1px solid var(--sk-color-line-strong);
+  border-radius: var(--sk-radius-md); background: var(--sk-color-bg-sunken); color: var(--sk-color-text-primary); font-size: 13px;
+}
+.path-dialog-input:focus { outline: none; box-shadow: var(--sk-control-focus-ring); border-color: var(--sk-color-accent-default); }
+
+/* deleting and moving to the Recycle Bin act on the server: said in the basket */
+.bk-remote {
+  display: flex; gap: 8px; align-items: flex-start; margin: 0 12px 8px; padding: 8px 10px; border-radius: var(--sk-radius-md);
+  background: color-mix(in srgb, var(--sk-color-status-warning) 12%, transparent); color: var(--sk-color-text-primary);
+  font-size: var(--sk-font-size-small);
+}
+.bk-remote svg { flex: none; margin-top: 1px; color: var(--sk-color-status-warning); }
+.modal .remote-line { display: flex; gap: 6px; align-items: center; margin: 8px 0 0; color: var(--sk-color-status-warning); font-size: var(--sk-font-size-small); }

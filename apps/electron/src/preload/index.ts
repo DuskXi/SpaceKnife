@@ -8,7 +8,11 @@ const appVersion = process.argv.find((arg) => arg.startsWith(VERSION_ARG))?.slic
 
 const api: SkApi = {
   platform: process.platform as SkApi["platform"],
-  version: appVersion ?? process.env.npm_package_version ?? "0.3.2",
+  version: appVersion ?? process.env.npm_package_version ?? "0.3.3",
+  host: "app",
+  remote: null,
+  justUpdated: process.argv.includes("--sk-updated"),
+  versions: { electron: process.versions.electron ?? "", chrome: process.versions.chrome ?? "", node: process.versions.node ?? "" },
   backend: () => ipcRenderer.invoke("sk:backend") as Promise<BackendState>,
   onBackend(cb) {
     const listener = (_e: unknown, state: BackendState) => cb(state);
@@ -36,7 +40,7 @@ const api: SkApi = {
     openExternal: (url) => ipcRenderer.send("sk:openExternal", url),
   },
   update: {
-    install: (path) => ipcRenderer.invoke("sk:installUpdate", path) as Promise<string>,
+    install: (path, how) => ipcRenderer.invoke("sk:installUpdate", path, how) as Promise<string>,
   },
   setLanguage: (lang) => ipcRenderer.send("sk:setLanguage", lang),
   dialog: {

@@ -13,7 +13,7 @@ The keys below are for Windows and Linux. For macOS, see [Differences on macOS](
 
 ## When keys work
 
-- **Single keys never fire in a text field.** <kbd>/</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>C</kbd>, <kbd>V</kbd>, the digits, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Backspace</kbd> and <kbd>Esc</kbd> act on the view only when the focus is not in a text field. Typing `f` in the filter box doesn't hide free space, and <kbd>Ctrl</kbd>+<kbd>C</kbd> in a text field is the normal copy.
+- **Single keys never fire in a text field.** <kbd>/</kbd>, <kbd>F</kbd>, <kbd>U</kbd>, <kbd>R</kbd>, <kbd>C</kbd>, <kbd>V</kbd>, the digits, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Backspace</kbd> and <kbd>Esc</kbd> act on the view only when the focus is not in a text field. Typing `f` in the filter box doesn't hide free space, and <kbd>Ctrl</kbd>+<kbd>C</kbd> in a text field is the normal copy.
 - **Global keys also work in the filter box.** You don't have to leave it for <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>J</kbd>, <kbd>Ctrl</kbd>+<kbd>T</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd>, <kbd>Ctrl</kbd>+<kbd>,</kbd>, <kbd>Ctrl</kbd>+<kbd>Tab</kbd> or, from 0.3.2, <kbd>F5</kbd>, <kbd>Shift</kbd>+<kbd>F5</kbd> and <kbd>Ctrl</kbd>+<kbd>S</kbd>. Some text fields keep every key for typing, so global keys don't work in them: the start page's path field, the path editor (<kbd>Ctrl</kbd>+<kbd>L</kbd>), and the search, number and tag-name fields of Settings.
 - **View keys act on the focused pane.** In a split view, the pane with the accent border has the focus. Click the other pane to move the focus there.
 - **A focused control keeps its own keys.** On a button, radio button or menu item, <kbd>Enter</kbd>, <kbd>Delete</kbd>, <kbd>Esc</kbd> and <kbd>Shift</kbd>+<kbd>F10</kbd> belong to that control (<kbd>Enter</kbd> on a button presses it). On a drop-down list, <kbd>C</kbd> and <kbd>V</kbd> pick options by their first letter.
@@ -31,6 +31,7 @@ The keys below are for Windows and Linux. For macOS, see [Differences on macOS](
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current tab. Closing a tab that is scanning stops that scan; closing the last tab leaves a new start page |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | Next tab (after the last one, back to the first) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | Previous tab |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | Move the current tab one place left / right |
 
 ## Navigation
 
@@ -57,6 +58,7 @@ Back and forward remember where you zoomed and what was selected, like browser h
 | <kbd>Shift</kbd>+<kbd>V</kbd> | Previous visualization |
 | <kbd>F</kbd> | Show or hide the free space block (no effect in a snapshot comparison) |
 | <kbd>U</kbd> | Show or hide the unknown space block (no effect in a snapshot comparison) |
+| <kbd>R</kbd> | Show or hide the Recycle Bin (only when the scan holds one; not in a snapshot comparison) |
 | <kbd>Ctrl</kbd>+<kbd>=</kbd>, <kbd>Ctrl</kbd>+<kbd>+</kbd> | Raise the detail level, up to 15 |
 | <kbd>Ctrl</kbd>+<kbd>-</kbd> | Lower the detail level, down to 1 |
 
@@ -66,7 +68,7 @@ The plus and minus keys of the numeric keypad work too. Coloring, visualization 
 
 | Keys | Action |
 | --- | --- |
-| <kbd>Esc</kbd> | Clear the selection. In a snapshot comparison with nothing selected, leave the comparison |
+| <kbd>Esc</kbd> | Clear the selection. With nothing selected: leave the snapshot comparison, or clear the filter |
 | <kbd>Delete</kbd> | Add the selected file or folder to the delete basket (for an "N small items" block, use the context menu) |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> | Copy the full path of the selection |
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> | Show in Explorer (Finder on macOS, the file manager on Linux) |
@@ -89,12 +91,12 @@ Right-click a block, or press <kbd>Shift</kbd>+<kbd>F10</kbd>. The focus moves i
 | Keys | Action |
 | --- | --- |
 | <kbd>↑</kbd>, <kbd>↓</kbd> | Move up and down |
-| <kbd>Enter</kbd> | Run the item. On Copy path and Add tag, open the submenu |
+| <kbd>Enter</kbd> | Run the item. On Copy path, Add tag and Classify, open the submenu |
 | <kbd>→</kbd> | Open the submenu |
 | <kbd>←</kbd> | Back from the submenu |
 | <kbd>Esc</kbd> | Close the submenu, or the menu when no submenu is open |
 
-The items are: Open, Show in Explorer, Open terminal here, Copy path ▸, Add tag ▸, Show only this (zoom in), Rescan this folder, Add to delete basket, and System menu… (not wired up yet). The Copy path submenu has four forms, each previewed: As is (what <kbd>Ctrl</kbd>+<kbd>C</kbd> copies), Quoted, POSIX path and `file://` URI. A click outside the menu, resizing the window or switching to another window closes it.
+The items are: Open, Show in Explorer, Open terminal here, Copy path ▸, Add tag ▸, Show only this (zoom in), Classify ▸ (folders only), Rescan this folder, Add to delete basket, and System menu… (not wired up yet). The Copy path submenu has four forms, each previewed: As is (what <kbd>Ctrl</kbd>+<kbd>C</kbd> copies), Quoted, POSIX path and `file://` URI. A click outside the menu, resizing the window or switching to another window closes it.
 
 ## Matches list
 
@@ -266,12 +268,15 @@ Every other command shows up when you type its name or one of the words below:
 | Open terminal here | <kbd>Ctrl</kbd>+<kbd>&#96;</kbd> | `terminal` · `shell` · `console` | — |
 | New tab | <kbd>Ctrl</kbd>+<kbd>T</kbd> | `new tab` | — |
 | Close tab | <kbd>Ctrl</kbd>+<kbd>W</kbd> | `close tab` | — |
+| Move tab left | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> | `move tab left` · `reorder tabs` | — |
+| Move tab right | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd> | `move tab right` · `reorder tabs` | — |
 | Red tag | <kbd>1</kbd> · <kbd>Ctrl</kbd>+<kbd>1</kbd> | `red tag` | — |
 | Yellow tag | <kbd>2</kbd> · <kbd>Ctrl</kbd>+<kbd>2</kbd> | `yellow tag` | — |
 | Green tag | <kbd>3</kbd> · <kbd>Ctrl</kbd>+<kbd>3</kbd> | `green tag` | — |
 | Blue tag | <kbd>4</kbd> · <kbd>Ctrl</kbd>+<kbd>4</kbd> | `blue tag` | — |
 | Clear tag | <kbd>0</kbd> · <kbd>Ctrl</kbd>+<kbd>0</kbd> | `clear tag` · `untag` | — |
 | Show/hide unknown space | <kbd>U</kbd> | `unknown space` | — |
+| Show/hide the Recycle Bin | <kbd>R</kbd> | `trash` · `recycle bin` | — |
 | Split view | — | `split` · `side by side` | — |
 | Pause scan | — | `pause` | — |
 | Resume scan | — | `resume` · `continue` | — |
@@ -283,6 +288,8 @@ Every other command shows up when you type its name or one of the words below:
 | Help | <kbd>F1</kbd> | `help` · `docs` · `documentation` · `manual` · `guide` | — |
 | Check for updates | — | `check for updates` · `update` · `upgrade` · `new version` | — |
 | Show update | — | `update` · `release notes` · `what's new` · `download update` | — |
+| Disks | — | `disks` · `drives` · `hardware` · `ssd` · `nvme` · `sata` · `usb` · `pcie` | — |
+| About & updates | — | `about` · `version` · `release notes` · `changelog` · `timeline` | — |
 
 ### Listed only by name
 

@@ -92,6 +92,12 @@ def _view(c: Context) -> str | None:
     return None if c.view is not None else _("需要先完成扫描")
 
 
+def _trash_view(c: Context) -> str | None:
+    if c.view is None:
+        return _("需要先完成扫描")
+    return None if c.view.has_trash else _("这次扫描里没有回收站")
+
+
 def _scan_view(c: Context) -> str | None:
     """A view of the scan itself: a comparison's view shows changes, its folders are not the scan's."""
     return _view(c) or (
@@ -201,6 +207,10 @@ def _free(c: Context) -> str:
 
 def _unknown(c: Context) -> str:
     return (_("当前：显示") if c.view.show_unknown else _("当前：隐藏")) if c.view else ""
+
+
+def _trash(c: Context) -> str:
+    return (_("当前：显示") if c.view.show_trash else _("当前：隐藏")) if c.view else ""
 
 
 def _basket(c: Context) -> str:
@@ -352,6 +362,14 @@ def _registry() -> tuple[Command, ...]:
         ),
         C("tab.new", "新建标签", "plus", ("Ctrl+T",), ("new tab",)),
         C("tab.close", "关闭标签", "close", ("Ctrl+W",), ("close tab",)),
+        C("tab.move_left", "标签左移", "back", ("Ctrl+Shift+PageUp",), ("move tab left", "reorder tabs")),
+        C(
+            "tab.move_right",
+            "标签右移",
+            "forward",
+            ("Ctrl+Shift+PageDown",),
+            ("move tab right", "reorder tabs"),
+        ),
         C("tag.red", "红色标签", "tag", ("1", "Ctrl+1"), ("red tag",), needs=(_selection,)),
         C("tag.yellow", "黄色标签", "tag", ("2", "Ctrl+2"), ("yellow tag",), needs=(_selection,)),
         C("tag.green", "绿色标签", "tag", ("3", "Ctrl+3"), ("green tag",), needs=(_selection,)),
@@ -365,6 +383,15 @@ def _registry() -> tuple[Command, ...]:
             ("unknown space",),
             needs=(_view,),
             status=_unknown,
+        ),
+        C(
+            "view.toggle_trash",
+            "显示/隐藏回收站",
+            "basket",
+            ("R",),
+            ("trash", "recycle bin"),
+            needs=(_trash_view,),
+            status=_trash,
         ),
         C("view.split", "分屏", "split", (), ("split", "side by side"), needs=(_view,)),
         C("scan.pause", "暂停扫描", "pause", (), ("pause",), needs=(_pausable,)),
@@ -392,6 +419,23 @@ def _registry() -> tuple[Command, ...]:
             ("update", "release notes", "what's new", "download update"),
             needs=(_update,),
             status=lambda c: c.update_version,
+        ),
+        # every physical disk with its interface and link, and the volumes on it
+        C(
+            "app.disks",
+            "本机磁盘",
+            "diskGauge",
+            (),
+            ("disks", "drives", "hardware", "ssd", "nvme", "sata", "usb", "pcie"),
+        ),
+        # the settings page with the version, the update settings and the release timeline
+        C(
+            "app.about",
+            "关于与更新",
+            "info",
+            (),
+            ("about", "version", "release notes", "changelog", "timeline"),
+            status=lambda c: c.app_version,
         ),
         C(
             "view.color.class",

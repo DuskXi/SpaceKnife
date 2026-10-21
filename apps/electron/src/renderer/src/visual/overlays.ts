@@ -1,15 +1,17 @@
 // What the view host draws over any visualization: file-change flashes and, under reduced motion,
-// their static badges (UI-TM-43/44); the pointer trail (「鼠标拖尾」); and the breathing outline of
-// folders still being scanned (UI-TM-42 / UI-W2-04), on a canvas of its own so the pulse never
-// repaints the shapes or their labels. The rhythm is the host's; the outline of a row comes from the
-// component's geometry, so a block, a bar and a sector flash and breathe alike.
+// their static badges (UI-TM-43/44); the pointer trail (「鼠标拖尾」); and, on a canvas of its own so
+// their motion never repaints the shapes or their labels, the breathing outline of folders still
+// being scanned (UI-TM-42 / UI-W2-04), what lies in a recycle bin (「回收站特效」) and the class the
+// pointer is on in 「类别统计」 (UI-MAIN-65). The rhythm is the host's; the outline of a row comes from
+// the component's geometry, so a block, a bar and a sector flash, breathe and light up alike.
 
+import { icons } from "@design/icons";
 import { tokens } from "@design/tokens";
 
 import type { FlashItem } from "@/protocol/generated";
 import { fmtSize } from "@/lib/format";
 
-import { Flag } from "./frame";
+import { Flag, Kind } from "./frame";
 import { type Box, HIT_ROOT, type Hit, type Pt, type VisualFrame, type VisualGeometry } from "./types";
 
 /** Makes the outlines the overlays stroke: Path2D in the app, a recorder in tests. */
@@ -183,4 +185,319 @@ export function drawTrail(ctx: CanvasRenderingContext2D, trail: TrailMark[], now
   }
   ctx.restore();
   return left;
+}
+
+// ------------------------------------------------------------------ 「回收站特效」 (Flag.TRASH)
+
+/** 「回收站特效」: moving (the dashes march, a band of light sweeps across now and then), still, or none. */
+export type TrashMode = "animated" | "static" | "off";
+
+export interface TrashMark {
+  hit: Hit;
+  /** the outline of the outermost row (dashed) */
+  path: Path2D;
+  /** what is veiled: the row itself in the treemap (its blocks lie inside it), the row and every
+   * row of it in the flame graphs (their bars and rings lie beyond it) */
+  area: Path2D;
+  /** the bin folder itself: it carries the badge of what emptying it frees */
+  bin: boolean;
+  size: number;
+  /** where the badge goes */
+  badge: Pt | null;
+  /** the row's bounds (the badge stays inside) */
+  bounds: Box | null;
+  /** around the whole area: the band of light crosses it */
+  sweep: Box | null;
+}
+
+const TRASH = tokens.treemap.trash;
+const TRASH_MAX = 200;
+const TRASH_MEMBERS = 4000; // rows veiled with their bins in the flame graphs
+const SWEEP_MS = 7000; // a band of light crosses each bin once in this time…
+const SWEEP_SHARE = 0.4; // …during this share of it, then rests
+const DASH_MS = 1800; // the outline's dashes move one dash and gap in this time
+/** the bin icon of the design set (16 × 16, stroked), for the badge */
+export const BIN_ICON = (icons.basket.match(/d="([^"]+)"/g) ?? []).map((d) => d.slice(3, -1)).join(" ");
+
+/** The outermost rows in a recycle bin (the bin itself, or the top rows when the view is in it) and
+ * the zoom root when it is in one, each with what lies in it: the largest first past TRASH_MAX. The
+ * bin carries the badge, also as the zoom root of a flame graph or a polar flame graph. */
+export function trashMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, dpr: number, newPath: NewPath = path2d): TrashMark[] {
+  const root = f.info.root;
+  const rootIn = !!root && (root.flags & Flag.TRASH) !== 0;
+  const nested = f.layout === "drawlist.v1"; // the treemap draws a folder's blocks inside it
+  const inBin = (row: number) => row >= 0 && (f.flags[row]! & Flag.TRASH) !== 0;
+  // each row in a bin under its outermost row in the bin (the zoom root when the view is in one)
+  const groups = new Map<Hit, number[]>();
+  if (rootIn && !nested) groups.set(HIT_ROOT, []);
+  let members = 0;
+  for (let i = 0; i < f.count; i++) {
+    if (!inBin(i)) continue;
+    let top = i;
+    while (inBin(f.parent[top]!)) top = f.parent[top]!;
+    const hit = rootIn && !nested ? HIT_ROOT : top;
+    let rows = groups.get(hit);
+    if (!rows) groups.set(hit, (rows = []));
+    if (hit !== i && !nested && members < TRASH_MEMBERS) {
+      rows.push(i);
+      members++;
+    }
+  }
+  const picked: { hit: Hit; area: number }[] = [];
+  for (const hit of groups.keys()) {
+    const b = g.box(f, hit);
+    if (b.minor >= 3 * dpr || groups.get(hit)!.length) picked.push({ hit, area: b.major * b.minor });
+  }
+  if (picked.length > TRASH_MAX) picked.sort((a, b) => b.area - a.area).length = TRASH_MAX;
+  const out: TrashMark[] = [];
+  for (const { hit } of picked) {
+    const path = newPath();
+    const drawn = g.path(f, hit, 0.75 * dpr, path);
+    const rows = groups.get(hit)!;
+    let area = path;
+    let sweep = g.bounds(f, hit);
+    if (!nested) {
+      area = newPath();
+      let any = g.path(f, hit, 0, area);
+      for (const r of rows) {
+        if (!g.path(f, r, 0, area)) continue;
+        any = true;
+        sweep = union(sweep, g.bounds(f, r));
+      }
+      if (!any) continue;
+    } else if (!drawn) continue;
+    const flags = hit === HIT_ROOT ? root!.flags : f.flags[hit]!;
+    const size = hit === HIT_ROOT ? root!.size : Number(f.size[hit]);
+    out.push({ hit, path, area, bin: drawn && (flags & Flag.TRASH_BIN) !== 0, size, badge: g.anchor(f, hit, "badge"), bounds: g.bounds(f, hit), sweep });
+  }
+  return out;
+}
+
+function union(a: Box | null, b: Box | null): Box | null {
+  if (!a || !b) return a ?? b;
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return { x, y, w: Math.max(a.x + a.w, b.x + b.w) - x, h: Math.max(a.y + a.h, b.y + b.h) - y };
+}
+
+/** Whether the marks keep moving (the host's loop asks before each frame). */
+export const trashMoves = (marks: TrashMark[], mode: TrashMode, reduced: boolean) => marks.length > 0 && mode === "animated" && !reduced;
+
+/** 0–1 position of the band of light at `now`, null while it rests; each bin starts at its own time. */
+export function sweepAt(now: number, seed: number): number | null {
+  const t = ((((now + seed * 977) % SWEEP_MS) + SWEEP_MS) % SWEEP_MS) / SWEEP_MS;
+  return t < SWEEP_SHARE ? t / SWEEP_SHARE : null;
+}
+
+const hatches = new Map<number, CanvasPattern | null>();
+/** Fine cross-hatching in the bin's colour (one tile per pixel ratio). */
+function hatchOf(ctx: CanvasRenderingContext2D, dpr: number): CanvasPattern | null {
+  if (hatches.has(dpr)) return hatches.get(dpr)!;
+  let pattern: CanvasPattern | null = null;
+  if (typeof OffscreenCanvas !== "undefined" && typeof ctx.createPattern === "function") {
+    const n = Math.max(4, Math.round(7 * dpr));
+    const tile = new OffscreenCanvas(n, n);
+    const c = tile.getContext("2d");
+    if (c) {
+      c.strokeStyle = TRASH.hatch;
+      c.lineWidth = Math.max(1, 0.75 * dpr);
+      c.beginPath();
+      c.moveTo(0, n);
+      c.lineTo(n, 0);
+      c.moveTo(0, 0);
+      c.lineTo(n, n);
+      c.stroke();
+      pattern = ctx.createPattern(tile, "repeat");
+    }
+  }
+  hatches.set(dpr, pattern);
+  return pattern;
+}
+
+/** Draw the marks: the contents dimmed under a veil and fine cross-hatching, a dashed outline with a
+ * soft glow, and on the bin itself a badge with the bin icon and `label(size)`. `moving` also marches
+ * the dashes and sweeps a band of light across now and then. */
+export function drawTrash(
+  ctx: CanvasRenderingContext2D,
+  marks: TrashMark[],
+  now: number,
+  moving: boolean,
+  dpr: number,
+  label: (bytes: number) => string,
+  newPath: (d?: string) => Path2D = (d) => new Path2D(d),
+): void {
+  if (!marks.length) return;
+  const hatch = hatchOf(ctx, dpr);
+  ctx.save();
+  marks.forEach((m, k) => {
+    ctx.save();
+    ctx.clip(m.area);
+    ctx.fillStyle = TRASH.veil;
+    ctx.fill(m.area);
+    if (hatch) {
+      ctx.fillStyle = hatch;
+      ctx.fill(m.area);
+    }
+    const p = moving && m.sweep ? sweepAt(now, k) : null;
+    if (p !== null && m.sweep) {
+      const b = m.sweep;
+      const band = Math.max(28 * dpr, 0.2 * Math.min(b.w + b.h, 1600 * dpr));
+      const s = -band + p * (b.w + b.h + 2 * band); // along the diagonal, from the top-left corner
+      const grad = ctx.createLinearGradient(b.x + (s - band) / 2, b.y + (s - band) / 2, b.x + (s + band) / 2, b.y + (s + band) / 2);
+      const clear = `${TRASH.sweep.slice(0, 7)}00`;
+      grad.addColorStop(0, clear);
+      grad.addColorStop(0.5, TRASH.sweep);
+      grad.addColorStop(1, clear);
+      ctx.fillStyle = grad;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+    }
+    ctx.restore();
+    ctx.save();
+    const dash = 5 * dpr;
+    const gap = 4 * dpr;
+    ctx.setLineDash([dash, gap]);
+    ctx.lineDashOffset = moving ? -((now % DASH_MS) / DASH_MS) * (dash + gap) : 0;
+    ctx.strokeStyle = TRASH.outline;
+    ctx.lineWidth = 1.5 * dpr;
+    ctx.globalAlpha = 0.9;
+    ctx.shadowColor = TRASH.outline;
+    ctx.shadowBlur = 6 * dpr;
+    ctx.stroke(m.path);
+    ctx.restore();
+    if (m.bin && m.badge && m.bounds) drawBinBadge(ctx, m, dpr, label(m.size), newPath);
+  });
+  ctx.restore();
+}
+
+function drawBinBadge(ctx: CanvasRenderingContext2D, m: TrashMark, dpr: number, text: string, newPath: (d?: string) => Path2D): void {
+  ctx.save();
+  ctx.font = `600 ${11 * dpr}px ${tokens.font.family.ui}`;
+  ctx.textBaseline = "middle";
+  const icon = 12 * dpr;
+  const pad = 7 * dpr;
+  const w = pad + icon + 5 * dpr + ctx.measureText(text).width + pad;
+  const h = 20 * dpr;
+  const at = badgeAt(m.badge!, m.bounds!, w, h, 4 * dpr);
+  if (at) {
+    ctx.shadowColor = "#000000A0";
+    ctx.shadowBlur = 8 * dpr;
+    ctx.fillStyle = TRASH.badgeBg;
+    ctx.beginPath();
+    ctx.roundRect(at.x, at.y, w, h, h / 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = TRASH.badgeText;
+    ctx.fillText(text, at.x + pad + icon + 5 * dpr, at.y + h / 2 + 0.5 * dpr);
+    ctx.translate(at.x + pad, at.y + (h - icon) / 2);
+    ctx.scale(icon / 16, icon / 16);
+    ctx.strokeStyle = TRASH.badgeText;
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.stroke(newPath(BIN_ICON));
+  }
+  ctx.restore();
+}
+
+// ------------------------------------------------------------------ class highlight (UI-MAIN-65)
+
+/** One class lit in the picture: everything else under a veil, its rows cut out of it and outlined. */
+export interface ClassMark {
+  /** the class index (``filter.vocab`` order) */
+  cls: number;
+  /** what stays bright: the rows of the class */
+  cut: Path2D;
+  /** the outlines of the rows roomy enough for one */
+  outline: Path2D;
+  rows: number;
+  outlined: number;
+}
+
+const FOCUS = tokens.treemap.classFocus;
+/** rows a class can light: files, aggregates of one class, folders a folder class swallows (the
+ * backend sends 255 for every other folder, mixed aggregates, "+N items", free and unknown space) */
+const CLASS_KINDS: ReadonlySet<number> = new Set([Kind.FILE, Kind.SMALL, Kind.FOLDER, Kind.COLLAPSED, Kind.PENDING]);
+/** the veil comes and goes this fast (not under 「减少动画」) */
+export const CLASS_FADE_MS = 120;
+const GLOW_MAX = 2000; // past this many outlines the glow is left out
+
+/** The rows of class `cls` in `scope` (a row and what lies in it; -1: the whole picture). In the
+ * treemap a lit folder holds its blocks, so they are not drawn again. A scope drawn without its
+ * contents (a collapsed folder) lights itself when nothing in it can. */
+export function classMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, cls: number, scope: number, dpr: number, newPath: NewPath = path2d): ClassMark {
+  const nested = f.layout === "drawlist.v1";
+  // rows come before their children, so one pass carries both down the tree
+  const inside = scope >= 0 && scope < f.count ? new Uint8Array(f.count) : null;
+  const lit = nested ? new Uint8Array(f.count) : null;
+  const cut = newPath();
+  const outline = newPath();
+  const min = 4 * dpr;
+  let rows = 0;
+  let outlined = 0;
+  const light = (i: number) => {
+    if (!g.path(f, i, 0, cut)) return false;
+    rows++;
+    if (g.box(f, i).minor >= min && g.path(f, i, 0.75 * dpr, outline)) outlined++;
+    return true;
+  };
+  if (inside) inside[scope] = 1;
+  for (let i = 0; i < f.count; i++) {
+    const p = f.parent[i]!;
+    if (inside && i !== scope) {
+      if (p < 0 || !inside[p]) continue;
+      inside[i] = 1;
+    }
+    if (lit && p >= 0 && lit[p]) {
+      lit[i] = 1;
+      continue;
+    }
+    if (f.cls[i] !== cls || !CLASS_KINDS.has(f.kind[i]!)) continue;
+    if (light(i) && lit) lit[i] = 1;
+  }
+  if (!rows && inside && (f.kind[scope] === Kind.COLLAPSED || f.kind[scope] === Kind.PENDING)) light(scope);
+  return { cls, cut, outline, rows, outlined };
+}
+
+/** The glow around the lit rows: the class colour, the accent for a class too dark to glow. */
+export function glowOf(hex: string): string {
+  const v = /^#?([0-9a-f]{6})/i.exec(hex);
+  if (!v) return ACCENT;
+  const n = parseInt(v[1]!, 16);
+  const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  const lum = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+  return lum < 0.06 ? ACCENT : `#${v[1]}`;
+}
+
+/** Draw the mark at `level` (0–1, the fade): the veil over the whole canvas minus the class's rows,
+ * then their outlines with a soft glow. Drawn first on its canvas: the bins and the breathing go over it. */
+export function drawClassMark(ctx: CanvasRenderingContext2D, m: ClassMark, color: string, level: number, w: number, h: number, dpr: number): void {
+  if (level <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = level;
+  ctx.fillStyle = FOCUS.veil;
+  ctx.fillRect(0, 0, w, h);
+  if (m.rows) {
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fill(m.cut);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  if (m.outlined) {
+    ctx.globalAlpha = level;
+    ctx.strokeStyle = FOCUS.outline;
+    ctx.lineWidth = dpr;
+    if (m.outlined <= GLOW_MAX) {
+      ctx.shadowColor = glowOf(color);
+      ctx.shadowBlur = 8 * dpr;
+    }
+    ctx.stroke(m.outline);
+  }
+  ctx.restore();
+}
+
+/** The fade toward `on` after `dt` ms: there at once under 「减少动画」. */
+export function classFade(level: number, on: boolean, dt: number, reduced: boolean): number {
+  if (reduced) return on ? 1 : 0;
+  const step = Math.max(0, dt) / CLASS_FADE_MS;
+  return on ? Math.min(1, level + step) : Math.max(0, level - step);
 }

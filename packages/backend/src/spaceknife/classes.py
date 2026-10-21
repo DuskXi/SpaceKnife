@@ -8,6 +8,10 @@ classes, the parser vocabulary.
 M7.5: frontends see a built-in class the user has not renamed under its name in the interface
 language (``spaceknife_protocol.classes.localized``); :func:`build` takes that name back as the
 built-in one, so saving the editor in English is no rename.
+
+A file's class comes from its extension, except for the extensions in :data:`STREAM_SPLITS`, which
+two kinds of file share: there the file's size decides (:meth:`ClassTable.file_classes`; the
+vectorised forms are :meth:`ClassTable.splits` and :meth:`ClassTable.node_mask`).
 """
 
 from __future__ import annotations
@@ -15,6 +19,8 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -34,16 +40,49 @@ TEXT = Texts(
         "other_missing": "「其他」类别不能删除",
         "other_exts": "「其他」类别不能填扩展名：它收纳所有未归类的扩展名",
         "bad_ext": "扩展名「{ext}」不合法",
+        "too_many": "类别最多 {n} 个",
     }
 )
 _EXT_SPLIT = re.compile(r"[;,\s]+")
 _BAD_NAME = re.compile(r'[;:"\\]')  # would break `:class:<name>` in the filter syntax
+
+# Extensions a recording and a source file share, told apart by size alone (no content is read).
+# An MPEG transport stream is a run of fixed-size packets, 188 bytes (``.ts``) or 192 bytes
+# (AVCHD / Blu-ray ``.mts``), so a recording's size is a whole number of packets; TypeScript sources
+# (``.ts``, ``.mts``) are small text files. extension -> (class of a recording, packet size).
+STREAM_SPLITS: dict[str, tuple[str, int]] = {"ts": ("video", 188), "mts": ("video", 192)}
+STREAM_ALIGNED_MIN = 1 << 20  # a whole number of packets this large is a recording
+STREAM_ANY_MIN = 16 << 20  # anything this large is a recording: no source file is
+
+
+def looks_like_stream(size: np.ndarray | int, packet: int) -> np.ndarray:
+    """Bool per size: a file this large is a transport-stream recording, not source code."""
+    s = np.asarray(size, dtype=np.int64)
+    result: np.ndarray = (s >= STREAM_ANY_MIN) | ((s >= STREAM_ALIGNED_MIN) & (s % packet == 0))
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class Split:
+    """A :data:`STREAM_SPLITS` extension of one extension table, under one class table."""
+
+    ext_id: int  # index in the extension table
+    packet: int
+    stream: str  # the class of a recording
+    rest: tuple[str, ...]  # the classes of any other file with this extension (none: 「其他」)
+
+
+MAX_CLASSES = 127
+"""Classes a table may hold: the folder class column stores a class index below 127, and the
+view rows' ``cls`` keeps 255 for "in no one class" (:data:`.layout.basis.NO_CLASS`)."""
 
 
 class ClassTable:
     """Classes in display order (``other`` last), with per-extension membership."""
 
     def __init__(self, classes: tuple[FilterClassInfo, ...] = BUILTIN_CLASSES) -> None:
+        if len(classes) > MAX_CLASSES:
+            raise ValueError(f"a class table holds at most {MAX_CLASSES} classes")
         self.classes = classes
         self.by_id = {c.id: c for c in classes}
         if OTHER not in self.by_id:
@@ -79,6 +118,48 @@ class ClassTable:
         return np.fromiter(
             (class_id in self._ext_classes.get(e, ()) for e in ext_table), bool, len(ext_table)
         )
+
+    def _split_of(self, ext: str) -> tuple[str, int, tuple[str, ...]] | None:
+        """(class of a recording, packet size, other classes) when ``ext`` is split by size here.
+
+        Only while the recording's class still lists the extension: a user who took ``ts`` out of
+        「视频」 decides by extension again.
+        """
+        rule = STREAM_SPLITS.get(ext.lower())
+        owners = self._ext_classes.get(ext.lower(), [])
+        if rule is None or rule[0] not in owners:
+            return None
+        return rule[0], rule[1], tuple(o for o in owners if o != rule[0])
+
+    def file_classes(self, ext: str, size: int) -> list[str]:
+        """The classes one file belongs to (empty: 「其他」); the reference for the array forms."""
+        split = self._split_of(ext)
+        if split is None:
+            return self.classes_of(ext)
+        stream, packet, rest = split
+        return [stream] if bool(looks_like_stream(size, packet)) else list(rest)
+
+    def splits(self, ext_table: Sequence[str]) -> list[Split]:
+        """The extensions of ``ext_table`` whose files are split by size."""
+        out: list[Split] = []
+        for i, e in enumerate(ext_table):
+            split = self._split_of(e) if e else None
+            if split is not None:
+                out.append(Split(i, split[1], split[0], split[2]))
+        return out
+
+    def node_mask(
+        self, class_id: str, ext_table: Sequence[str], ext: np.ndarray, size: np.ndarray
+    ) -> np.ndarray:
+        """Bool per file (its extension id and logical size): it belongs to ``class_id``."""
+        out: np.ndarray = self.ext_mask(class_id, list(ext_table))[ext]
+        for sp in self.splits(ext_table):
+            rows = np.flatnonzero(ext == sp.ext_id)
+            if rows.size:
+                stream = looks_like_stream(size[rows], sp.packet)
+                plain = class_id in sp.rest or (class_id == OTHER and not sp.rest)
+                out[rows] = np.where(stream, class_id == sp.stream, plain)
+        return out
 
     @property
     def custom(self) -> bool:
@@ -141,6 +222,8 @@ def build(edits: list[ClassEdit]) -> ClassTable:
     builtin = {c.id: c for c in BUILTIN_CLASSES}
     used_ids: set[str] = set()
     other: FilterClassInfo | None = None
+    if len(edits) > MAX_CLASSES:
+        raise ValueError(TEXT["too_many"].format(n=MAX_CLASSES))
     for e in edits:
         name = _own_name(e.id, e.name.strip())
         if not name:

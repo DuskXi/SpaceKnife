@@ -28,6 +28,8 @@ alias skb=/opt/SpaceKnife/resources/backend/spaceknife-backend
 
 :::note
 deb / rpm 安装后，`spaceknife`（`/usr/bin/spaceknife`）启动的是应用，不是命令行。
+
+应用自己的可执行文件也有选项：`--headless` 和 `--listen` 让 SpaceKnife 不开窗口运行，把界面提供给浏览器，本机或别的设备都能用。见[无头模式](../headless/)。
 :::
 
 :::caution[便携版]

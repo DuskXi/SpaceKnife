@@ -223,6 +223,25 @@ def test_level(current: str, latest: str | None, level: str) -> None:
     assert update.level(current, latest) == level
 
 
+def test_series_that_can_be_muted() -> None:
+    # a minor update: its major.minor; a major one: its major; a patch release: none (badge only)
+    assert update.series("0.3.2", "0.4.1") == "0.4"
+    assert update.series("0.3.2", "0.4.0-beta.1") == "0.4"
+    assert update.series("0.3.2", "1.2.0") == "1"
+    assert update.series("0.9.9", "0.10.0") == "0.10"
+    assert update.series("0.3.2", "0.3.3") is None
+    assert update.series("0.4.0", "0.4.0") is None
+    assert update.series("dev", "0.4.0") is None
+    # reached: the running version is in it or past it, muting it says nothing any more
+    assert update.series_reached("0.4", "0.4.0")
+    assert update.series_reached("0.4", "0.5.1") and update.series_reached("0.4", "1.0.0")
+    assert not update.series_reached("0.4", "0.3.9")
+    assert not update.series_reached("0.10", "0.9.0")
+    assert update.series_reached("1", "1.0.0") and not update.series_reached("1", "0.9.0")
+    assert update.series_reached("junk", "0.3.0")
+    assert not update.series_reached("0.4", None)
+
+
 # ---------------------------------------------------------------- releases and channels
 
 
@@ -256,9 +275,16 @@ def test_choose_by_channel() -> None:
     assert stable is not None and stable.version == "0.3.1"
     assert update.choose([], "preview") is None
     assert update.choose([r for r in releases if r.preview], "stable") is None
-    assert [r.version for r in update.trim(releases)] == ["0.4.0-beta.10", "0.3.1"]
-    only_stable = update.parse_releases([gh("v0.3.1"), gh("v0.3.0")])
-    assert [r.version for r in update.trim(only_stable)] == ["0.3.1"]  # one entry for both channels
+    # the cache keeps the history (the timeline), newest first; both channels' newest are in it
+    assert [r.version for r in update.trim(releases)] == ["0.4.0-beta.10", "0.4.0-beta.2", "0.3.1", "0.3.0"]
+
+
+def test_trim_keeps_the_newest_releases() -> None:
+    many = update.parse_releases([gh(f"v0.{m}.{p}") for m in range(4) for p in range(12)] + [gh("nightly")])
+    kept = update.trim(many)
+    assert len(kept) == update.HISTORY_KEEP == 30
+    assert kept[0].version == "0.3.11" and kept[-1].version == "0.1.6"
+    assert all(r.parsed is not None for r in kept)  # a tag without a version is not a release here
 
 
 def test_only_github_urls_are_kept() -> None:
@@ -400,8 +426,64 @@ def test_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     assert update.feed_url() == "http://127.0.0.1:8123/releases"
     monkeypatch.setenv("SPACEKNIFE_UPDATE_FEED", "https://example.com/releases")  # never another host
     assert update.feed_url() == update.RELEASES_URL
-    monkeypatch.setenv("SPACEKNIFE_DOWNLOAD_DIR", str(tmp_path / "dl"))
-    assert update.download_dir() == tmp_path / "dl"
+    monkeypatch.setenv("SPACEKNIFE_HOME", str(tmp_path / "home"))
+    assert update.updates_dir() == tmp_path / "home" / "data" / "updates"  # never the download folder
+
+
+def test_update_file_versions() -> None:
+    v = update.update_file_version
+    assert str(v("SpaceKnife-0.3.2-Setup-x64.exe")) == "0.3.2"
+    assert str(v("SpaceKnife-0.4.0-beta.1-win-x64-portable.zip")) == "0.4.0-beta.1"
+    assert str(v("SpaceKnife-0.3.10-linux-x64-portable.tar.gz")) == "0.3.10"
+    assert str(v("SpaceKnife-0.3.2-x86_64.AppImage")) == "0.3.2"
+    assert str(v("spaceknife_0.4.0~beta.1_amd64.deb")) == "0.4.0-beta.1"
+    assert str(v("spaceknife-0.3.2.x86_64.rpm")) == "0.3.2"
+    assert str(v("SpaceKnife-0.3.2-mac-arm64.dmg")) == "0.3.2"
+    assert str(v("staging-0.3.3")) == "0.3.3" and str(v("previous-0.3.2")) == "0.3.2"
+    assert str(v("update-0.3.3.ps1")) == str(v("update-0.3.3.sh")) == str(v("update-0.3.3.log")) == "0.3.3"
+    for other in ("notes.txt", "SpaceKnife-Setup.exe", "staging-", "SpaceKnife-0.3.2-Setup-x64.exe.part"):
+        assert v(other) is None
+
+
+def test_clean_updates(tmp_path: Path) -> None:
+    folder = tmp_path / "updates"
+    folder.mkdir()
+    names = [
+        "SpaceKnife-0.3.1-Setup-x64.exe",  # older
+        "SpaceKnife-0.3.2-Setup-x64.exe",  # the running version: it was just installed
+        "SpaceKnife-0.3.3-Setup-x64.exe",  # newer, downloaded, not installed yet
+        "SpaceKnife-0.3.3-Setup-x64.exe.part",  # an interrupted download
+        "SpaceKnife-0.4.0-beta.1-x86_64.AppImage",  # a newer pre-release
+        "update-0.3.2.json",  # the plan that put the running version in place, and its log
+        "update-0.3.2.log",
+        "readme.txt",  # not ours: stays
+    ]
+    for name in names:
+        (folder / name).write_bytes(b"x")
+    for name in ("staging-0.3.2", "previous-0.3.1", "staging-0.3.3"):
+        (folder / name / "sub").mkdir(parents=True)
+        (folder / name / "sub" / "f").write_bytes(b"x")
+    removed = update.clean_updates(folder, "0.3.2")
+    assert sorted(removed) == [
+        "SpaceKnife-0.3.1-Setup-x64.exe",
+        "SpaceKnife-0.3.2-Setup-x64.exe",
+        "SpaceKnife-0.3.3-Setup-x64.exe.part",
+        "previous-0.3.1",
+        "staging-0.3.2",
+        "update-0.3.2.json",
+        "update-0.3.2.log",
+    ]
+    left = sorted(p.name for p in folder.iterdir())
+    assert left == [
+        "SpaceKnife-0.3.3-Setup-x64.exe",
+        "SpaceKnife-0.4.0-beta.1-x86_64.AppImage",
+        "readme.txt",
+        "staging-0.3.3",
+    ]
+    # a run from source (no version) only drops partial downloads; a missing folder is no error
+    (folder / "SpaceKnife-0.3.4-Setup-x64.exe.part").write_bytes(b"x")
+    assert update.clean_updates(folder, None) == ["SpaceKnife-0.3.4-Setup-x64.exe.part"]
+    assert update.clean_updates(tmp_path / "missing", "0.3.2") == []
 
 
 # ---------------------------------------------------------------- state
@@ -609,3 +691,5 @@ def test_palette_commands() -> None:
     assert evaluate(check, Context(tab="scan", update_version="0.4.0")) == (True, "有新版本 0.4.0")
     assert evaluate(show, Context(tab="start")) == (False, "没有可用的更新")
     assert evaluate(show, Context(tab="settings", update_version="0.4.0")) == (True, "0.4.0")
+    about = by_id["app.about"]
+    assert evaluate(about, Context(tab="scan", app_version="0.3.3")) == (True, "0.3.3")

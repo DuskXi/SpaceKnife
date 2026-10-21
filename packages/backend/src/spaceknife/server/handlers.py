@@ -30,6 +30,7 @@ def install(server: Server) -> None:
     from .diag import install as install_diag
     from .export_handlers import install as install_export_handlers
     from .filter_handlers import install as install_filter_handlers
+    from .machine_handlers import install as install_machine_handlers
     from .maintenance_handlers import install as install_maintenance_handlers
     from .ops_handlers import install as install_ops_handlers
     from .palette_handlers import install as install_palette_handlers
@@ -49,6 +50,7 @@ def install(server: Server) -> None:
     install_ops_handlers(server)
     install_export_handlers(server)
     install_maintenance_handlers(server)
+    install_machine_handlers(server)
     install_diag(server)
 
     @router.method(SYSTEM_INFO)

@@ -28,7 +28,7 @@
 - [ ] 限速精度实测：稳态 5 s 均值 ≤ 上限、单点超出 ≤ 5 个百分点、改档 3 s 内收敛
 - [x] 负载口径（用户 2026-10-18 决定）：限速继续按「忙碌度 / 队列深度」折算的占用计算；任务管理器式的「活动时间」显示在旁边作参考（状态栏、扫描详情、负载曲线的点线）
 - [x] 硬扫描结果归并向量化（`NodeStore.ingest_slice`）：每个列表 30–78 µs → 1–3 µs，瓶颈转到系统目录枚举
-- [ ] Linux / macOS 的提权助手（现在 `elevate=True` 返回 `not_supported`）
+- [x] Linux 的提权助手（0.3.3）：pkexec + polkit，目前只给「本机磁盘」读磁盘自己的记录（`disk_health`），点按钮才请求；macOS 不需要（NVMe 的记录不提权就能读），`elevate=True` 仍返回 `not_supported`
 - [ ] W2 扫描摘要卡（扫描中选中某块时，详情面板顶部的进度 + 档位 + 负载）
 - [ ] 日志面板「扫描统计」页复用负载曲线与并发
 
@@ -87,7 +87,30 @@
 - [ ] 包体积：只 strip 没被 auditwheel 改过的库（libpython、zstandard、原生扩展），Linux 后端约省 40 MB 解压后体积
 - [x] 更新提示（2026-10-20）：每天最多一次检查 GitHub 发布；修订号只显示徽章，次版本号左上角挂卡片，主版本号弹对话框；一键下载对应安装方式的文件并按 SHA256SUMS 校验，Windows 安装包一键安装（docs/packaging.md「更新检查」）
 - [ ] 设计图标集里加一个「下载」图标（现在用旋转 180° 的向上箭头）
-- [ ] 静默的自动更新（下载后无需点击即替换）：要代码签名之后再考虑
+- [x] **无缝更新与零残留卸载**（2026-10-21 用户决定，0.3.3 在 dev 上做完；端到端测试 `packaging/update_e2e.py` 在「Portable build」里跑）
+  - **更新方式**：后台下载并按 SHA-256 校验，下载好后更新卡片给出两个大按钮：「无缝更新」（静默安装或换文件后重新打开，不弹安装向导）和经典方式（安装向导、磁盘映像、安装包，便携版和 AppImage 是自己替换）。用户点了才安装，扫描进行中要再点一次确认；从不自己安装，也不做全自动安装的选项。次版本 / 主版本还能「跳过 0.4.x」/「跳过 1.x」，整个系列不再提示（「关于与更新」里恢复）。
+  - **下载位置**：更新文件放进数据目录下的 `updates`，不再放「下载」文件夹（现在每次更新都会在「下载」里留下一个 130 多 MB 的安装包）。装完即删，启动时清掉过期的。
+  - **Windows 安装版**：运行新安装包时带 `/S`，安装范围和当前一致（`/currentuser` 或 `/allusers`；所有用户安装的会弹一次管理员确认），装完重新打开。
+  - **便携版**：下好后解压到旁边，退出时替换程序文件，保留 `data`，再重新打开。
+  - **AppImage**：退出时直接替换文件。
+  - **deb / rpm**：不变，仍交给系统的软件安装器（以后可以做软件源）。
+  - [ ] **macOS**：等公证之后再做（现在仍是打开磁盘映像，由用户拖进「应用程序」）。
+  - **卸载**：
+    - 总是删除：`%APPDATA%\SpaceKnife\electron`（界面缓存）、旧版本留下的 `%APPDATA%\spaceknife-electron`、`updates` 文件夹。
+    - 快照、设置和日志：卸载向导里加一个「同时删除快照、设置和日志」勾选框，默认不勾。
+    - 更新时旧卸载程序也会运行（带 `--updated`），这时绝不能删数据。
+  - **风险**：没有代码签名时，「未签名程序静默运行下载来的安装包」可能被个别杀毒软件当成可疑行为。完整性靠发布里的 SHA-256 保证。
+  - **设置里的「关于与更新」页**（2026-10-21 用户要求）：没有新版本时也能打开，看版本信息和时间线。
+    - **版本卡片**：当前版本、安装方式（安装版 / 便携版 / AppImage…）、提示哪些版本、上次检查时间和下次检查时间。
+    - **状态**：已是最新 / 有新版本 / 已下载，重启即可更新。
+    - **按钮**：「检查更新」、更新卡片里的「无缝更新」和经典方式、「前往发布页」；被跳过的系列在这里「恢复提示」。
+    - **组件版本**：SpaceKnife、Electron、Chromium、Node、Python、协议版本和系统，附「复制版本信息」，方便报告问题。
+    - **时间线**：所有发布从新到旧排列。
+      - 每一条显示版本号、日期、是否预发布，并标出「当前」和「新」。
+      - 展开可以看发布说明：用帮助页的 Markdown 渲染，链接在浏览器里打开。
+      - 离线时显示缓存的内容。
+    - **后端**：更新记录现在只保存每个渠道最新的一版（`update.trim`），要改成保存最近约 30 个发布的历史，并限制每条发布说明的大小。
+    - 「自动检查更新」和「提示哪些版本」两项设置移到这一页，「常规」里留一个入口。
 - [x] 便携版（小众软件用户请求）：Windows x64 zip、Linux x64 tar.gz，程序旁的 `data` 文件夹存放全部数据（GitHub Actions「Portable build」，解压后以便携模式冒烟）
 - [ ] Windows / Linux ARM64（依赖都有对应 wheel，Electron 也有 arm64 版；缺测试设备）。32 位 Windows 做不了：Electron 44 已不再提供 ia32
 
@@ -102,18 +125,25 @@
 
 - [ ] 亮色主题（待设计评审）：包括可视化的分支色（`visual.branch.*`）和环形色（`visual.ring.*`）
 
-## 本机统计页面（2026-10-20 记下，先不做）
+## 本机统计页面（2026-10-20 记下；2026-10-21 做成「本机磁盘」页，0.3.3）
 
-一页看全这台机器上的所有盘：没扫描过的盘和扫描过的盘都列出来，并且分清每块盘的类型、接口和速率。
+一页看全这台机器上的所有盘：没扫描过的盘和扫描过的盘都列出来，并且分清每块盘的类型、接口和速率。入口：开始页右栏最上面的「本机磁盘」摘要卡片和命令面板「本机磁盘」；不自动弹出、不自动刷新。页面是仪表盘：汇总数字、容量构成、发现清单、每块盘的环形计量和链路计量、卷的快照增长折线（UI-SPEC W9）。文档：`disks.md`。
 
-- [ ] 盘的范围：没扫描过的盘列出系统能给的数据（容量、已用、可用、文件系统、卷标）；扫描过的盘再加上扫描得出的数据，比如最近一次扫描或快照的时间、文件数、类别分布、最大的文件夹
-- [ ] 介质类型：SSD / HDD / U 盘 / SD 卡 / 网络盘 / 虚拟盘
-- [ ] 接口和速率：SATA（1.5 / 3 / 6 Gb/s）、PCIe / NVMe（代数和通道数，例如 Gen4 x4）、USB（5 / 10 / 20 Gb/s 等）、SAS 等；尽量同时给出当前协商的速率和设备支持的最高速率
-- [ ] 物理盘与分区 / 卷的对应关系（一块盘上有几个卷，一个卷跨几块盘）
-- [ ] 现状：`VolumeInfo.media` 已经能分出 `nvme_ssd` / `sata_ssd` / `hdd` / `usb_*` 等（启动页卡片和限速在用），但还没有接口代数、速率，也没有物理盘与卷的对应
-- [ ] 三个平台的数据来源要先调研，不需要管理员权限的来源优先，需要权限的走扫描助手。可能的来源：Windows 用 `IOCTL_STORAGE_QUERY_PROPERTY`、`MSFT_PhysicalDisk`（BusType / MediaType）、PCI 设备属性（当前链路速度和宽度）；Linux 用 `/sys/block/*/queue/rotational`、`/sys/class/nvme`、`/sys/bus/pci/devices/*/current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`；macOS 用 IOKit 或 `system_profiler`
-- [ ] 协议：新增方法（pydantic 模型），前端只负责显示
-- [ ] 界面：一个新的标签页，入口和版式先出设计稿再做
+- [x] 盘的范围：没扫描过的盘列出系统能给的数据（容量、已用、可用、文件系统、卷标）；扫描过的盘再加上扫描得出的数据，比如最近一次扫描或快照的时间、文件数、类别分布、最大的文件夹
+- [x] 介质类型：SSD / HDD / U 盘 / SD 卡 / 网络盘 / 虚拟盘
+- [x] 接口和速率：SATA（1.5 / 3 / 6 Gb/s）、PCIe / NVMe（代数和通道数，例如 Gen4 x4）、USB（5 / 10 / 20 Gb/s 等）、SAS 等；尽量同时给出当前协商的速率和设备支持的最高速率
+- [x] 物理盘与分区 / 卷的对应关系（一块盘上有几个卷，一个卷跨几块盘）
+- [x] 现状（做之前）：`VolumeInfo.media` 已经能分出 `nvme_ssd` / `sata_ssd` / `hdd` / `usb_*` 等（启动页卡片和限速在用），但还没有接口代数、速率，也没有物理盘与卷的对应
+- [x] 数据来源都不需要管理员权限（Windows 上 ATA IDENTIFY、NVMe Identify 也能用不带读权限的句柄经 `IOCTL_STORAGE_QUERY_PROPERTY` 取到；PCIe 链路来自 CfgMgr 的 `DEVPKEY_PciDevice_*Link*`；USB 速率来自集线器的连接查询）。调研时列的候选：可能的来源：Windows 用 `IOCTL_STORAGE_QUERY_PROPERTY`、`MSFT_PhysicalDisk`（BusType / MediaType）、PCI 设备属性（当前链路速度和宽度）；Linux 用 `/sys/block/*/queue/rotational`、`/sys/class/nvme`、`/sys/bus/pci/devices/*/current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`；macOS 用 IOKit 或 `system_profiler`
+- [x] 协议：`machine.disks`（`spaceknife_protocol.machine`），前端只负责显示
+- [x] 界面：单独的标签页（`pages/MachinePage.tsx`），每块盘一张卡片，盘上的卷按盘上顺序；链路比盘能跑的慢时用一行说明（不弹窗）
+- [ ] macOS 只用记录的数据形状测过（`system_profiler` 的键名随系统版本变化，比如 macOS 15 的 `SPUSBHostDataType`）：在真机上核对 NVMe / SATA / USB 链路
+- [x] 磁盘自己的记录（0.3.3）：Windows 不提权读 NVMe 健康日志 / ATA 设备统计日志；macOS 经 IOKit 的 NVMe SMART 接口读 NVMe 盘（不提权）；Linux 点「用管理员权限读取…」后由提权助手读（NVMe 管理命令、SG_IO 的 ATA 直通）
+- [ ] macOS 的 NVMe SMART 在 Intel Mac 上实测（`disks/mac_smart.py` 还没在真机上跑过）：数值和 smartctl / DriveDx 对一下；另一个程序（Stats、DriveDx）占着接口时安静地读不到；连读约 20 次看有没有泄漏；正式签名（Developer ID、hardened runtime、不加 disable-library-validation）的包里也读得到。有机会在 Apple 芯片的 Mac 上跑一次
+- [ ] macOS 的 SATA 盘（iMac 2019 的机械盘 / Fusion Drive）：`ATASMARTLib` 的接口还没调研（要不要 root、读得到什么）
+- [ ] Linux 的 deb / rpm 在真机桌面上走一遍：polkit 密码框、冻结后端以 root 跑 `--helper`；可以随包附带一个 polkit 策略文件（`org.freedesktop.policykit.exec.path` 指向 `/opt/SpaceKnife/resources/backend/spaceknife-backend/spaceknife-backend`），让密码框写清楚要做什么（现在是 pkexec 的通用说明）
+- [ ] Linux 上 SATA 盘只有当前速率（设备支持的最高速率要 IDENTIFY，需要 root）：提权助手读健康记录时已经拿到 IDENTIFY，可以顺带补上
+- [ ] Windows 把 USB 3.2 Gen 2×2 报告成 10 Gb/s：`IOCTL_USB_GET_NODE_CONNECTION_SUPERSPEEDPLUS_INFORMATION` 能分出 20 Gb/s
 
 ## 可视化组件（2026-10-19）
 

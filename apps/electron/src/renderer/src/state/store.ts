@@ -12,6 +12,7 @@ import type {
   FilterVocab,
   FrameInfo,
   LogRecordEvent,
+  MachineDisks,
   OpProgressEvent,
   PathCheckResult,
   ScanStatus,
@@ -24,8 +25,9 @@ import type {
 } from "@/protocol/generated";
 import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
+import { storedInspectorWidth } from "@/lib/inspectorWidth";
 
-export type TabKind = "start" | "scan" | "settings" | "help";
+export type TabKind = "start" | "scan" | "settings" | "help" | "machine";
 
 export interface Tab {
   id: string;
@@ -66,11 +68,14 @@ export interface ViewData {
   filterText: string;
   /** block highlighted from outside the treemap (W3 result list hover, UI-W3-33) */
   hoverKey: number | null;
+  /** class lit in the picture from 「类别统计」 (UI-MAIN-65), within the node whose make-up the
+   * panel shows; the filter stays as it is */
+  hoverClass?: { id: string; node: number } | null;
 }
 
 export type ConnState = "starting" | "ready" | "lost" | "failed";
 
-export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"] as const;
+export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
 /** The page shown when settings open: the last one visited, else 「常规」 (UI-W7-01). */
@@ -129,6 +134,8 @@ export interface AppState {
   views: Record<string, ViewData>;
   paletteOpen: boolean;
   inspectorHidden: boolean;
+  /** preferred width of the details column, px (UI-MAIN-64) */
+  inspectorWidth: number;
   logOpen: boolean;
   logTab: "log" | "stats";
   /** open the panel by itself when a warning arrives (UI-W8-30) */
@@ -176,6 +183,16 @@ export interface AppState {
   update: UpdateStatus | null;
   /** the update card opened from the title bar's badge (shell/UpdateBadge) */
   updateOpen: boolean;
+  /** 「本机磁盘」 (machine.disks): the start page's card and the page; null until first read */
+  machine: MachineDisks | null;
+  /** Date.now() of that read, 0 before it */
+  machineAt: number;
+  /** a read of machine.disks is under way */
+  machineLoading: boolean;
+  /** machine.read_health is under way: the disk whose button started it */
+  machineReading: string | null;
+  /** why the last machine.read_health read nothing (prompt closed, no way to ask), on that disk */
+  machineReadNote: { disk: string; text: string } | null;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -211,6 +228,7 @@ export const useApp = create<AppState>(() => ({
   views: {},
   paletteOpen: false,
   inspectorHidden: false,
+  inspectorWidth: storedInspectorWidth(),
   logOpen: false,
   logTab: "log",
   logAuto: true,
@@ -241,6 +259,11 @@ export const useApp = create<AppState>(() => ({
   visuals: [],
   update: null,
   updateOpen: false,
+  machine: null,
+  machineAt: 0,
+  machineLoading: false,
+  machineReading: null,
+  machineReadNote: null,
 }));
 
 export const set = useApp.setState;
@@ -346,10 +369,10 @@ export function writeFlag(key: string, value: boolean): void {
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
-export function toast(message: string): void {
+export function toast(message: string, ms = 1800): void {
   set({ toast: message });
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => set({ toast: null }), 1800);
+  toastTimer = setTimeout(() => set({ toast: null }), ms);
 }
 
 /** Items in the delete basket (toolbar badge, palette). */

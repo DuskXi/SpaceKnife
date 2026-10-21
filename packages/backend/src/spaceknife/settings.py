@@ -164,9 +164,10 @@ def _registry() -> tuple[Spec, ...]:
             synonyms=("log", "denied", "warning"),
             kind=bool,
         ),
+        # ------------------------------------------------------------ 关于与更新 (the keys stay general.*)
         S(
             "general.update_check",
-            "general",
+            "about",
             "更新",
             "自动检查更新",
             "每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示",
@@ -176,8 +177,20 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "general.update_download",
+            "about",
+            "更新",
+            "自动下载更新",
+            "发现新版本后在后台下载并校验；只有你在更新卡片里点了「无缝更新」或安装方式才会安装，从不自己安装",
+            "switch",
+            True,
+            depends="general.update_check",
+            synonyms=("update", "download", "auto", "下载"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
             "general.update_channel",
-            "general",
+            "about",
             "更新",
             "提示哪些版本",
             "预览版是 GitHub 上标为预发布（Pre-release）的版本",
@@ -287,6 +300,19 @@ def _registry() -> tuple[Spec, ...]:
             False,
             synonyms=("trail",),
             kind=bool,
+        ),
+        S(
+            "appearance.trash_effect",
+            "appearance",
+            "树图视觉",
+            "回收站特效",
+            "回收站 / 废纸篓里的东西蒙上一层暗纹、围上虚线，回收站本身标出清空后能释放多少；"
+            "「动态」时虚线流动、偶尔扫过一道光（「减少动画」时不动）",
+            "segmented",
+            "animated",
+            (("animated", "动态"), ("static", "静态"), ("off", "关")),
+            synonyms=("trash", "recycle bin", "回收站", "废纸篓"),  # i18n: ignore
+            kind=str,
         ),
         S(
             "appearance.selection_shadow",
@@ -420,6 +446,18 @@ def _registry() -> tuple[Spec, ...]:
             True,
             applies="new_views",
             synonyms=("unknown space",),
+            kind=bool,
+        ),
+        S(
+            "treemap.show_trash",
+            "treemap",
+            "几何",
+            "新视图显示回收站",
+            "扫描里有回收站 / 废纸篓时显示它；关掉后回收站不占画面，其余的块放大填满",
+            "switch",
+            True,
+            applies="new_views",
+            synonyms=("trash", "recycle bin", "回收站", "废纸篓"),  # i18n: ignore
             kind=bool,
         ),
         S(

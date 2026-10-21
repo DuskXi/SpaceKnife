@@ -89,8 +89,8 @@ export function Toolbar() {
       ) : !scanTab ? (
         <nav className="crumbs" aria-label={t("当前位置")}>
           <span className="crumb-cur">
-            <Icon name="drive" />
-            {t("新扫描")}
+            <Icon name={tab.kind === "machine" ? "diskGauge" : "drive"} />
+            {tab.kind === "machine" ? t("本机磁盘") : t("新扫描")}
           </span>
         </nav>
       ) : (
@@ -136,6 +136,13 @@ export function Toolbar() {
               <span className="chip-swatch unknown" />
               {t("未知空间")}
             </button>
+            {st.has_trash && (
+              // only when the scan holds a recycle bin / trash folder (and not in a comparison)
+              <button className={`chip${st.show_trash ? " on" : ""}`} aria-pressed={st.show_trash} title={t("回收站（R）")} onClick={() => void setViewSettings(viewId, { show_trash: !st.show_trash })}>
+                <span className="chip-swatch trash" />
+                {binName()}
+              </button>
+            )}
             <div className="vsep wide" />
             <IconBtn icon="split" label={t("分屏")} pressed={split} onClick={() => void toggleSplit()} />
           </>
@@ -328,3 +335,6 @@ function fullPath(crumbs: { key: number; label: string }[], fallback: string): s
   const [first, ...rest] = parts;
   return [first!.replace(/[\\/]+$/, ""), ...rest].join(sep) + (rest.length ? "" : sep);
 }
+
+/** The recycle bin's name on this system: macOS calls it the Trash. */
+const binName = () => (window.sk.platform === "darwin" ? t("废纸篓") : t("回收站"));

@@ -35,7 +35,10 @@
     "tabHeight": { "$value": { "value": 34, "unit": "px" } },
     "toolbar": { "$value": { "value": 48, "unit": "px" } },
     "statusbar": { "$value": { "value": 28, "unit": "px" } },
-    "inspector": { "$value": { "value": 320, "unit": "px" } },
+    "inspector": { "$value": { "value": 320, "unit": "px" }, "$description": "详情栏默认宽度；可拖动左边缘调整（UI-MAIN-64）" },
+    "inspectorMin": { "$value": { "value": 280, "unit": "px" }, "$description": "详情栏拖动的最小宽度" },
+    "inspectorMax": { "$value": { "value": 640, "unit": "px" }, "$description": "详情栏拖动的最大宽度（窗口窄时另受树图最小宽度限制）" },
+    "mapMin": { "$value": { "value": 360, "unit": "px" }, "$description": "调整详情栏时树图区至少保留的宽度" },
     "windowButton": { "$value": { "value": 46, "unit": "px" } },
     "filterMaxWidth": { "$value": { "value": 420, "unit": "px" } }
   },

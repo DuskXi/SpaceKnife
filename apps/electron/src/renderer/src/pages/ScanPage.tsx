@@ -1,8 +1,8 @@
 // A scan tab: the view (one or two panes, W8) + details panel + filter floater (W3) + hover card.
 
-import { Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
-import { closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
+import { clearFilter, closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
 import { get, set, type Tab, useApp } from "@/state/store";
 import { pointerBox, VisualHost } from "@/visual/Host";
 import { hosts } from "@/visual/hosts";
@@ -12,12 +12,16 @@ import { fmtInt, fmtShare, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { HoverCard } from "@/shell/HoverCard";
 import { BasketDrawer } from "@/shell/BasketDrawer";
+import { ColumnResizer } from "@/shell/ColumnResizer";
 import { CompareHoverCard, CompareSidebar } from "@/shell/Compare";
 import { Inspector } from "@/shell/Inspector";
 import { Results } from "@/shell/Results";
 import { isRunning, ScanBand, ScanDetails } from "@/shell/ScanProgress";
 import { FilterBox } from "@/shell/FilterBox";
 import { Icon } from "@/ui/Icon";
+
+/** The details column's width for the CSS of `.inspector` (UI-MAIN-64). */
+const columnWidth = (w: number) => ({ "--inspector-w": `${w}px` }) as CSSProperties;
 
 export function ScanPage({ tab }: { tab: Tab }) {
   if (tab.compare) return <ComparePage tab={tab} />;
@@ -30,10 +34,11 @@ function ComparePage({ tab }: { tab: Tab }) {
   const c = tab.compare!;
   const basketOpen = useApp((s) => s.basketOpen);
   const hidden = useApp((s) => s.inspectorHidden);
+  const width = useApp((s) => s.inspectorWidth);
   const busy = c.phase !== "ready";
   return (
     <div className="content column">
-      <div className="content-row">
+      <div className="content-row" style={columnWidth(width)}>
         <div className={`panes${busy ? " cmp-busy" : ""}`}>
           {c.viewId ? (
             <ComparePane viewId={c.viewId} />
@@ -52,7 +57,10 @@ function ComparePage({ tab }: { tab: Tab }) {
             <Icon name="sidebar" />
           </button>
         ) : (
-          <CompareSidebar tab={tab} />
+          <>
+            <ColumnResizer />
+            <CompareSidebar tab={tab} />
+          </>
         )}
       </div>
     </div>
@@ -92,10 +100,11 @@ function NormalPage({ tab }: { tab: Tab }) {
   const scan = useApp((s) => (tab.scanId ? s.scans[tab.scanId] : undefined));
   const selected = useApp((s) => (focused ? s.views[focused]?.state.selected != null : false));
   const running = isRunning(scan);
+  const width = useApp((s) => s.inspectorWidth);
   return (
     <div className="content column">
       {running && scan && <ScanBand scan={scan} title={tab.title} />}
-      <div className="content-row">
+      <div className="content-row" style={columnWidth(width)}>
         <div className={`panes${split ? " split" : ""}`}>
           {tab.viewIds.map((v, i) => (
             <Pane key={v} tab={tab} index={i} viewId={v} split={split} focused={i === tab.focusedPane} onFocus={() => focusPane(tab.id, i)} />
@@ -107,12 +116,17 @@ function NormalPage({ tab }: { tab: Tab }) {
           <button className="inspector-open icon-btn" aria-label={t("显示侧栏")} title={t("显示侧栏")} onClick={() => set({ inspectorHidden: false })}>
             <Icon name="sidebar" />
           </button>
-        ) : focused && filtering ? (
-          <Results key={focused} viewId={focused} />
-        ) : running && scan && !selected ? (
-          <ScanDetails scan={scan} />
         ) : (
-          focused && <Inspector viewId={focused} />
+          <>
+            <ColumnResizer />
+            {focused && filtering ? (
+              <Results key={focused} viewId={focused} />
+            ) : running && scan && !selected ? (
+              <ScanDetails scan={scan} />
+            ) : (
+              focused && <Inspector viewId={focused} />
+            )}
+          </>
         )}
       </div>
     </div>
@@ -229,6 +243,9 @@ function FilterFloater({ viewId }: { viewId: string }) {
           </button>
         ))}
       </div>
+      <button className="icon-btn small" aria-label={t("清除过滤")} title={t("清除过滤（Esc）")} onClick={() => clearFilter(viewId)}>
+        <Icon name="close" size={14} />
+      </button>
     </div>
   );
 }

@@ -7,12 +7,12 @@ import type { FilterVocab, TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
 import { fillOf, labelColors } from "@/treemap/paint";
-import { Kind } from "@/visual/frame";
+import { Flag, Kind } from "@/visual/frame";
 import { pointerBox } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
-import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
@@ -132,6 +132,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const title = (kind < Kind.SMALL ? node?.name : null) ?? named ?? "";
   const folder = info ? info.path.slice(0, Math.max(0, info.path.length - info.node.name.length)).replace(/[\\/]+$/, "") : "";
   const parentName = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const flags = shown.target === HIT_ROOT ? (f.info.root?.flags ?? 0) : (f.flags[shown.target] ?? 0);
 
   return (
     <div ref={card} className="hovercard" role="tooltip" style={pos}>
@@ -154,6 +155,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
             <span className="muted">{withNodes(t("占 {name} {share}"), { name: parentName, share: <span className="mono strong">{fmtPct(node.alloc, parentAlloc)}</span> })}</span>
           )}
         </div>
+        {flags & Flag.TRASH ? <TrashLine bin={(flags & Flag.TRASH_BIN) !== 0} size={facts.size} /> : null}
         {node && (
           <div className="hc-class muted">
             {dir ? (
@@ -195,6 +197,24 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
         <Kbd>Space</Kbd>
         <span>{t("预览")}</span>
       </div>
+    </div>
+  );
+}
+
+/** In a recycle bin (「回收站特效」): its space comes back only when the bin is emptied. */
+function TrashLine({ bin, size }: { bin: boolean; size: number }) {
+  const mac = window.sk.platform === "darwin";
+  const text = bin
+    ? mac
+      ? t("废纸篓：清空后可释放 {size}", { size: fmtSize(size) })
+      : t("回收站：清空后可释放 {size}", { size: fmtSize(size) })
+    : mac
+      ? t("在废纸篓里：清空废纸篓后才释放空间")
+      : t("在回收站里：清空回收站后才释放空间");
+  return (
+    <div className="hc-trash">
+      <Icon name="basket" size={12} />
+      <span>{text}</span>
     </div>
   );
 }

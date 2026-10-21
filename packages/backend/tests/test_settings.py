@@ -40,7 +40,7 @@ from .conftest import CLIENT, TOKEN
 from .test_view_server import scanned
 from .test_view_visuals import FAKES
 
-CATEGORIES = {"general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"}
+CATEGORIES = {"general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"}
 
 
 def test_registry_is_consistent() -> None:

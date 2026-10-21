@@ -7,6 +7,9 @@ name: Portable build
 # and on dev whenever the packaging changes, so it is checked before it reaches main.
 # With "installers" (by hand, for a release) the same run also builds the Windows installer and the
 # Linux deb / rpm / AppImage from the same commit, with their own checksums.
+# Every run also tests 「无缝更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
+# files, and on Windows the installer upgrades from the newest published release, updates from inside
+# the app and uninstalls cleanly. The Windows job therefore always builds the installer.
 on:
   workflow_dispatch:
     inputs:
@@ -22,6 +25,8 @@ on:
       - packaging/**
       - apps/electron/electron-builder.yml
       - apps/electron/src/main/portable.ts
+      - apps/electron/src/main/update.ts
+      - apps/electron/build/installer.nsh
 
 permissions:
   contents: read
@@ -85,11 +90,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y rpm zsync
 
       - name: Build the portable archive
-        if: ${{ !inputs.installers }}
+        if: ${{ !inputs.installers && runner.os == 'Linux' }}
         run: uv run python tools/build_package.py --portable --no-installers
 
+      # on Windows always: the update test below installs it
       - name: Build the portable archive and the installers
-        if: inputs.installers
+        if: ${{ inputs.installers || runner.os == 'Windows' }}
         run: uv run python tools/build_package.py --portable
 
       - name: Unpack it again
@@ -113,6 +119,48 @@ jobs:
           else
             uv run python packaging/smoke_app.py --portable "$app"
           fi
+
+      # no window, the interface over HTTP (--headless); on Linux without a display (no xvfb-run),
+      # on Windows through SpaceKnife.com
+      - name: Headless mode smoke test
+        run: |
+          dir=$(dirname "$(ls -d dist/portable-test/*/"${{ matrix.exe }}")")
+          if [ "$RUNNER_OS" = Windows ]; then app="$dir/SpaceKnife.com"; else app="$dir/spaceknife"; fi
+          uv run python packaging/smoke_headless.py "$app"
+
+      # a release list on 127.0.0.1 offers the next version (this build again); the test clicks the
+      # update badge and 「无缝更新」 through the DevTools port, like a user
+      - name: Update end to end (portable)
+        timeout-minutes: 15
+        run: |
+          shopt -s nullglob
+          archive=(dist/electron/*-portable.zip dist/electron/*-portable.tar.gz)
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python packaging/update_e2e.py portable "${archive[0]}"
+          else
+            uv run python packaging/update_e2e.py portable "${archive[0]}"
+          fi
+
+      - name: Download the newest published installer (the upgrade starts from it)
+        if: runner.os == 'Windows'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo DuskXi/SpaceKnife --limit 10 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft | not)][0].tagName')
+          echo "newest release: $tag"
+          gh release download "$tag" --repo DuskXi/SpaceKnife --dir dist/previous \
+            --pattern '*-Setup-x64.exe' --pattern 'SHA256SUMS.txt'
+          ls -l dist/previous
+
+      - name: Update and uninstall end to end (Windows installer)
+        if: runner.os == 'Windows'
+        timeout-minutes: 25
+        run: |
+          shopt -s nullglob
+          setup=(dist/electron/SpaceKnife-*-Setup-x64.exe)
+          previous=(dist/previous/SpaceKnife-*-Setup-x64.exe)
+          uv run python packaging/update_e2e.py nsis "${setup[0]}" --previous "${previous[0]}"
 
       - name: Checksum
         working-directory: dist/electron

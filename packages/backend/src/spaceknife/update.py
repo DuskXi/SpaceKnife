@@ -30,6 +30,7 @@ import math
 import os
 import platform
 import re
+import shutil
 import ssl
 import sys
 import threading
@@ -62,6 +63,8 @@ SUMS_MAX = 1 << 20
 CHUNK = 256 * 1024
 PROGRESS_GAP_S = 0.25  # download progress at most 4 times a second
 KEEP_DISMISSED = 20
+KEEP_MUTED = 20
+HISTORY_KEEP = 30  # releases kept for the timeline of the 「关于与更新」 page
 STATE_VERSION = 1
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
 # trusted CA bundles of the distributions, for a Python whose OpenSSL looks elsewhere
@@ -169,6 +172,29 @@ def level(current: Version | str | None, latest: Version | str | None) -> Update
     if new.minor != cur.minor:
         return "minor"
     return "patch"
+
+
+def series(current: Version | str | None, latest: Version | str | None) -> str | None:
+    """The series of ``latest`` that the user can mute (update.mute): ``"0.4"`` (every 0.4.x) for a
+    minor update, ``"1"`` (every 1.x) for a major one; None for a patch release or no update."""
+    new = _version(latest)
+    match level(current, latest):
+        case "major" if new is not None:
+            return f"{new.major}"
+        case "minor" if new is not None:
+            return f"{new.major}.{new.minor}"
+        case _:
+            return None
+
+
+def series_reached(name: str, current: Version | str | None) -> bool:
+    """Whether ``current`` is in series ``name`` or past it: muting it says nothing any more."""
+    cur = _version(current)
+    try:
+        parts = tuple(int(p) for p in name.split("."))
+    except ValueError:
+        return True  # not a series: drop it
+    return cur is not None and (cur.major, cur.minor)[: len(parts)] >= parts
 
 
 # ---------------------------------------------------------------- releases
@@ -279,14 +305,11 @@ def choose(releases: Iterable[Release], channel: UpdateChannel) -> Release | Non
 
 
 def trim(releases: Iterable[Release]) -> list[Release]:
-    """What the cache keeps: the newest release of each channel (one when they are the same)."""
-    items = list(releases)
-    out: list[Release] = []
-    for channel in ("preview", "stable"):
-        r = choose(items, channel)
-        if r is not None and r not in out:
-            out.append(r)
-    return out
+    """What the cache keeps: the newest :data:`HISTORY_KEEP` releases that have a version, newest
+    first. They are the timeline of the 「关于与更新」 page; the newest of each channel is among them."""
+    known = [(v, r) for r in releases if (v := r.parsed) is not None]
+    known.sort(key=lambda vr: vr[0].key, reverse=True)
+    return [r for _, r in known[:HISTORY_KEEP]]
 
 
 def to_info(release: Release, asset: Asset | None, sha256: str | None = None) -> UpdateInfo:
@@ -419,14 +442,76 @@ def install_kind() -> InstallKind:
     return value if value in get_args(InstallKind) else "unknown"  # type: ignore[return-value]
 
 
-def download_dir() -> Path:
-    """Where downloads go: ``SPACEKNIFE_DOWNLOAD_DIR`` (Electron main passes the system download
-    folder), else ~/Downloads, else the data directory."""
-    value = os.environ.get("SPACEKNIFE_DOWNLOAD_DIR", "").strip()
-    if value:
-        return Path(value).expanduser()
-    home = Path.home() / "Downloads"
-    return home if home.is_dir() else paths.data_dir() / "downloads"
+def updates_dir() -> Path:
+    """Where update files go: ``updates`` in the data directory, not the user's download folder. Each
+    file is removed once the version it brings is running (:func:`clean_updates`), and the
+    uninstaller removes the folder: an update leaves nothing behind."""
+    return paths.data_dir() / "updates"
+
+
+# the names in the updates folder: the release files (asset_template), and what Electron main writes
+# while a portable copy is replaced: the new files unpacked, the old ones until the swap is done, the
+# plan for the backend that swaps them (update_swap) and its log; the scripts of earlier test builds
+_UPDATE_NAMES = tuple(
+    re.compile(re.escape(name).replace(re.escape("{v}"), f"(?P<v>{_V_SLOT})"))
+    for name in (
+        "SpaceKnife-{v}-Setup-x64.exe",
+        "SpaceKnife-{v}-win-x64-portable.zip",
+        "SpaceKnife-{v}-linux-x64-portable.tar.gz",
+        "SpaceKnife-{v}-x86_64.AppImage",
+        "spaceknife_{v}_amd64.deb",
+        "spaceknife-{v}.x86_64.rpm",
+        "SpaceKnife-{v}-mac-arm64.dmg",
+        "SpaceKnife-{v}-mac-x64.dmg",
+        "staging-{v}",
+        "previous-{v}",
+        "update-{v}.json",
+        "update-{v}.ps1",
+        "update-{v}.sh",
+        "update-{v}.log",
+    )
+)
+
+
+def update_file_version(name: str) -> Version | None:
+    """The version of a file or folder in the updates folder, from its name; None for any other name.
+    A deb or rpm package may spell a pre-release's ``-`` as ``~``."""
+    for pattern in _UPDATE_NAMES:
+        m = pattern.fullmatch(name)
+        if m is not None:
+            return Version.parse(m.group("v").replace("~", "-"))
+    return None
+
+
+def clean_updates(folder: Path, current: str | None) -> list[str]:
+    """Remove what the updates folder no longer needs (blocking): partial downloads, and everything
+    of the running version or an older one (the installer that brought it, a portable copy's unpacked
+    files and the old ones it replaced). The file of a newer release stays (downloaded, not installed
+    yet), and so does any name this module did not write. Returns the names removed."""
+    now = _version(current)
+    removed: list[str] = []
+    try:
+        entries = sorted(folder.iterdir())
+    except OSError:
+        return removed
+    for entry in entries:
+        name = entry.name
+        stale = name.endswith(".part")
+        if not stale and now is not None:
+            version = update_file_version(name)
+            stale = version is not None and version <= now
+        if not stale:
+            continue
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry)
+            else:
+                entry.unlink()
+        except OSError as exc:
+            logger.warning("could not remove {}: {}", entry, exc)
+            continue
+        removed.append(name)
+    return removed
 
 
 # ---------------------------------------------------------------- persistent state
@@ -441,7 +526,11 @@ class UpdateState(BaseModel):
     failed_at: AwareDatetime | None = None  # the last failed one, when it came after
     etag: str | None = None  # of ``releases``
     releases: list[Release] = Field(default_factory=list)  # trimmed (:func:`trim`)
+    # HISTORY_KEEP when ``releases`` was trimmed: a cache of a version that kept fewer (0.3.2 and
+    # older kept one per channel) is fetched again whole, without its ETag
+    kept: int = 0
     dismissed: list[str] = Field(default_factory=list)  # versions whose card / dialog was closed
+    muted: list[str] = Field(default_factory=list)  # series whose prompts are off (series())
 
 
 def state_file() -> Path:
@@ -450,7 +539,7 @@ def state_file() -> Path:
 
 def load_state(file: Path, feed: str = RELEASES_URL) -> UpdateState:
     """The saved state; a missing or broken file is a fresh start, a cache of another feed is
-    dropped (the closed cards are kept)."""
+    dropped (the closed cards and the muted series are kept)."""
     try:
         state = UpdateState.model_validate_json(file.read_bytes())
     except FileNotFoundError:
@@ -459,7 +548,7 @@ def load_state(file: Path, feed: str = RELEASES_URL) -> UpdateState:
         logger.warning("update state {} is unreadable, starting afresh: {}", file, exc)
         return UpdateState(feed=feed)
     if state.feed != feed:
-        return UpdateState(feed=feed, dismissed=state.dismissed)
+        return UpdateState(feed=feed, dismissed=state.dismissed, muted=state.muted)
     return state
 
 
@@ -689,7 +778,9 @@ def _stream(
 
 __all__ = [
     "CHECK_INTERVAL",
+    "HISTORY_KEEP",
     "KEEP_DISMISSED",
+    "KEEP_MUTED",
     "RELEASES_PAGE",
     "RELEASES_URL",
     "RETRY_INTERVAL",
@@ -706,8 +797,8 @@ __all__ = [
     "asset_template",
     "checksum_files",
     "choose",
+    "clean_updates",
     "download",
-    "download_dir",
     "feed_url",
     "fetch_checksums",
     "fetch_releases",
@@ -722,5 +813,7 @@ __all__ = [
     "state_file",
     "to_info",
     "trim",
+    "update_file_version",
+    "updates_dir",
     "write_atomic",
 ]

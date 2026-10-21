@@ -73,13 +73,15 @@ The panel on the right shows the selection, or the zoom root when nothing is sel
 
 | Tab | Shows |
 |---|---|
-| **Details** | Name and path; the size, with the number of files and folders and the latest change for a folder, or the file class and modification time for a file (hover that line for the exact number of bytes); **Share** of the parent folder and of the volume's used space; for a folder, **Largest items**: the five largest files anywhere below it; **Tags** |
-| **Classes** | The selection's bytes and file counts by file class |
+| **Details** | Name and path; the size, with the number of files and folders and the latest change for a folder, or the file class and modification time for a file (hover that line for the exact number of bytes); when the folder is [classed by folder](../tags-classes/#classes-by-folder), a line such as "Everything here counts as Games · Steam library"; **Share** of the parent folder and of the volume's used space; for a folder, **Largest items**: the five largest files anywhere below it; **Tags** |
+| **Classes** | The selection's make-up by file class: a bar split in the class colors, then a row per class with its files, size, share and a bar, largest first. Click a row to filter by that class. **Code** and **Data** fold away while they hold less than 2% and less than 8 GB; **Show all classes** brings them back. For files a folder class took over, the tooltip says what their extensions make them, such as "By their extensions these are: Video 3.0 GB". Hover a row or a segment of the bar and the picture lights that class up: the rest dims, while the class's files, the small-items blocks mostly of it and the folders that count as it whole (a game install, say) keep their colors with a glowing edge, within the selected folder only. Move away and it's back; the filter stays as it is |
 | **Largest files** | Up to 50 of the largest files below it |
 
 Click a file in **Largest items** or **Largest files** to **locate** it: it is selected, and if it isn't drawn (too deep or too small) the view zooms in, with history, until it is.
 
 At the bottom are the actions **Show in Explorer** (**Show in Finder** on macOS, **Show in file manager** on Linux), **Copy path** and **Add to delete basket**, each with its key. The **More actions** button opens the context menu, like <kbd>Shift</kbd>+<kbd>F10</kbd>. **Hide details panel** gives the picture the whole width; **Show sidebar** at the right edge brings it back.
+
+Drag the panel's left edge to resize it (280 to 640 pixels, always leaving the picture at least 360), and the picture is laid out again as you drag. Double-click the edge for the default 320 pixels. The width is remembered. With the edge focused, <kbd>←</kbd> and <kbd>→</kbd> resize it too (64 pixels at a time with <kbd>Shift</kbd>).
 
 The panel changes with what you do:
 
@@ -134,6 +136,7 @@ The menu starts with a header (name, size, type, parent folder) and then:
 | **Copy path** ▸ | | **As is** (<kbd>Ctrl</kbd>+<kbd>C</kbd>), **Quoted**, **POSIX path**, **file:// URI**; each shows a preview |
 | **Add tag** ▸ | | **Red tag**, **Yellow tag**, **Green tag**, **Blue tag** (<kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>4</kbd>), **Clear tag** (<kbd>Ctrl</kbd>+<kbd>0</kbd>) |
 | **Show only this (zoom in)** | <kbd>Enter</kbd> | Zooms in |
+| **Classify** ▸ (folders only) | | **Automatic**, **By extension only**, or **Count as** a class: every file in the folder counts as that class. See [Classes by folder](../tags-classes/#classes-by-folder) |
 | **Rescan this folder** | | Reads the folder again with everything below it (for a file: its folder) |
 | **Add to delete basket** | <kbd>Delete</kbd> | Puts it in the delete basket |
 | **System menu…** | | Listed, not available yet |
@@ -143,7 +146,7 @@ Inside the menu:
 | Keys | Action |
 |---|---|
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Move |
-| <kbd>→</kbd> or <kbd>Enter</kbd> on **Copy path** or **Add tag** | Open the submenu |
+| <kbd>→</kbd> or <kbd>Enter</kbd> on **Copy path**, **Add tag** or **Classify** | Open the submenu |
 | <kbd>←</kbd> | Close the submenu |
 | <kbd>Enter</kbd> | Run the highlighted item |
 | <kbd>Esc</kbd> | Close the submenu, then the menu |
@@ -172,9 +175,11 @@ Each scan opens in its own tab in the title bar. The tab shows the scan's state 
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the tab; middle-click a tab or its × does the same |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | Next tab |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | Previous tab |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | Move the current tab one place left / right |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
 
 - Tab switching wraps around.
+- Drag a tab sideways to change the order: it takes a neighbour's place once the pointer passes that tab's middle. <kbd>Esc</kbd> while dragging puts every tab back. Moving the tabs with the keys stops at the ends.
 - Closing a tab that is still scanning stops that scan. Closing the last tab leaves an empty **New scan** tab.
 - Settings opens as a tab of its own, and only once. In it, <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>F</kbd> jumps to the settings search, and <kbd>Backspace</kbd> / <kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>Alt</kbd>+<kbd>→</kbd> move back and forward through the settings pages you visited.
 
