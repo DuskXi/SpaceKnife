@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .. import pathclass
 from ..classes import ClassTable, active, looks_like_stream
 from ..store.nodes import Flag, Kind, NodeStore
 
@@ -54,7 +55,16 @@ class Basis:
         return self._ext_cls
 
     def cls_of(self, ids: np.ndarray) -> np.ndarray:
-        """Colour class index (u1) of some nodes."""
+        """Colour class index (u1) of some nodes: by extension, under the folder classes
+        (a game install's files are 「游戏」 whatever their extension, see :mod:`..pathclass`)."""
+        out = self.ext_cls_of(ids)
+        col = pathclass.column(self.store, self.classes)[ids]
+        if col.any():
+            out = pathclass.resolve(col, out, self.other)
+        return out
+
+    def ext_cls_of(self, ids: np.ndarray) -> np.ndarray:
+        """Class index (u1) of some nodes by their extension alone (and size, for ``ts``)."""
         ext = self.store.cols["ext"][ids]
         out: np.ndarray = self.ext_classes()[ext]
         for ext_id, packet, stream, plain in self._splits:

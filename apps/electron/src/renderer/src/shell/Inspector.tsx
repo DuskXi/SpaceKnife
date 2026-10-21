@@ -2,7 +2,7 @@
 
 import { type CSSProperties, useEffect, useState } from "react";
 
-import type { ClassStat, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
+import type { ClassStat, FolderClassInfo, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
 import { readFlag, set, toast, useApp, writeFlag } from "@/state/store";
 import { Kind } from "@/visual/frame";
@@ -11,7 +11,7 @@ import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
 import { classHexNow } from "@/lib/classes";
-import { t } from "@/lib/i18n";
+import { byLang, t } from "@/lib/i18n";
 import { tagLabel } from "@/lib/tags";
 import { inBrowser } from "@/lib/host";
 
@@ -168,6 +168,7 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
             ? t("{files} 个文件 · {dirs} 个文件夹 · 修改于 {ago}", { files: fmtInt(n.files), dirs: fmtInt(n.dirs), ago: fmtAgo(s.latest_mtime) })
             : t("{cls} · 修改于 {ago}", { cls: className(cls ?? "other"), ago: fmtAgo(n.mtime) })}
         </div>
+        {s.folder_class && <FolderClass info={s.folder_class} className={className} />}
       </div>
       <section className="ins-section">
         <h3>{t("占比")}</h3>
@@ -209,6 +210,20 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
         </div>
       </section>
     </>
+  );
+}
+
+/** The folder class the selection takes (UI-W7-38), and what decided it; changed from the menu. */
+function FolderClass({ info, className }: { info: FolderClassInfo; className: (id: string) => string }) {
+  const cls = className(info.class_id);
+  const text = info.fallback
+    ? t("其中没有类别的文件算作「{cls}」 · {reason}", { cls, reason: info.reason })
+    : t("整个文件夹算作「{cls}」 · {reason}", { cls, reason: info.reason });
+  return (
+    <div className="ins-fclass" title={t("由 {folder} 决定。右键菜单的「归类」可以更改", { folder: info.folder })}>
+      <span className="swatch" style={{ background: classHexNow(info.class_id) }} />
+      <span className="ins-fclass-text">{text}</span>
+    </div>
   );
 }
 
@@ -280,8 +295,13 @@ function ClassStats({ s, viewId, className }: { s: TreeSummaryResult; viewId: st
     "--cs-size": `${widest((c) => fmtSize(c.bytes))}ch`,
   } as CSSProperties;
   const name = s.node.name.split(/[\\/]/).filter(Boolean).pop() ?? s.node.name;
-  const describe = (c: ClassStat) =>
-    t("{name}：{files} 个文件，{size}，占 {share}", { name: className(c.class_id), files: fmtInt(c.files), size: fmtSize(c.bytes), share: fmtShare(c.bytes, total) });
+  const describe = (c: ClassStat) => {
+    const about = t("{name}：{files} 个文件，{size}，占 {share}", { name: className(c.class_id), files: fmtInt(c.files), size: fmtSize(c.bytes), share: fmtShare(c.bytes, total) });
+    if (!c.parts.length) return about;
+    // a folder class took files over (「游戏 · 其中视频 3 GB」)
+    const parts = c.parts.slice(0, 5).map((p) => t("{name} {size}", { name: className(p.class_id), size: fmtSize(p.bytes) }));
+    return t("{about}。其中按扩展名本是：{parts}", { about, parts: parts.join(byLang("、", ", ")) });
+  };
   const toggle = () => {
     writeFlag(ALL_KEY, !all);
     setAll(!all);

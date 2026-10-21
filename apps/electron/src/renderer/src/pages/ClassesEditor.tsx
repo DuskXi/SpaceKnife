@@ -1,6 +1,7 @@
 // 「设置 › 文件类别」 (UI-W7-33): add, rename, recolour, reorder and delete file classes. Every change
 // is sent at once (classes.update); the backend validates, saves, recolours the treemaps and re-runs
-// :class: filters, and the parser vocabulary follows (classes.changed).
+// :class: filters, and the parser vocabulary follows (classes.changed). Below, the folders the user
+// classed by hand (UI-W7-38, added from the map's menu 「归类」), each one removable.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -22,6 +23,18 @@ interface Row {
 
 const NEW_COLORS = ["#5EC8B8", "#D4FF3A", "#F2A65A", "#C77DFF", "#FF6B8A", "#4CC9F0"];
 let nextKey = 1;
+
+// what folders add to a built-in class (spaceknife.pathclass): shown under its extensions
+const folderNote = (id: string | null): string | null =>
+  id === "game"
+    ? t("另外，游戏安装目录里的文件都算这一类：Steam、Epic、GOG、Xbox、HoYoPlay 等启动器的游戏，Unity、Unreal、Godot 游戏，Minecraft，游戏存档")
+    : id === "code"
+      ? t("另外，项目文件夹里的文件都算这一类：含 .git、package.json、Cargo.toml、pyproject.toml、*.sln 等的文件夹")
+      : id === "data"
+        ? t("另外，模型缓存里的文件都算这一类：.ollama、.cache/huggingface、.lmstudio")
+        : id === "exec"
+          ? t("另外，系统卷信息和 NTFS 元数据算这一类；已安装的软件和应用数据（Program Files、AppData 等）里没有类别的文件也算")
+          : null;
 
 const toRow = (c: FilterClassInfo): Row => ({ key: c.id, id: c.id, name: c.name, exts: c.extensions.join("; "), color: c.color });
 const splitExts = (text: string) =>
@@ -160,7 +173,7 @@ export function ClassesEditor() {
                 <input
                   className="class-exts mono"
                   value={other ? "" : r.exts}
-                  placeholder={other ? t("所有未归类的扩展名") : t("扩展名，用 ; 分隔，例如 safetensors; gguf")}
+                  placeholder={other ? t("所有未归类的扩展名") : t("扩展名，用 ; 分隔，例如 pak; ucas")}
                   disabled={other}
                   aria-label={t("{name} 的扩展名", { name: r.name })}
                   onChange={(e) => patch(r.key, { exts: e.target.value })}
@@ -168,6 +181,7 @@ export function ClassesEditor() {
                   onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
                 />
                 {dups.get(r.key) && <div className="warn-text small">{t("已在前面的类别里：{list}", { list: dups.get(r.key)!.join(byLang("、", ", ")) })}</div>}
+                {folderNote(r.id) && <div className="muted small class-note">{folderNote(r.id)}</div>}
               </div>
               <span className="muted small mono class-filter">:class:{r.name.trim()}</span>
               {!other &&
@@ -193,10 +207,14 @@ export function ClassesEditor() {
         <button className="ghost small" onClick={add}>
           <Icon name="plus" size={14} /> {t("添加类别")}
         </button>
-        {state?.custom &&
+        {(state?.custom || !!state?.folders.length) &&
           (confirm === "reset" ? (
             <span className="class-confirm">
-              <span className="small">{t("恢复为内置的 {n} 个类别？", { n: state.defaults.length })}</span>
+              <span className="small">
+                {state.folders.length
+                  ? t("恢复为内置的 {n} 个类别，并清除 {m} 个文件夹归类？", { n: state.defaults.length, m: state.folders.length })
+                  : t("恢复为内置的 {n} 个类别？", { n: state.defaults.length })}
+              </span>
               <button
                 className="danger-btn small"
                 onClick={async () => {
@@ -217,6 +235,41 @@ export function ClassesEditor() {
               {t("恢复默认类别")}
             </button>
           ))}
+      </div>
+      <div className="set-group-head">
+        <h2>{t("按文件夹归类")}</h2>
+        <span className="muted small">{t("在图上右键文件夹，选「归类」添加；这些文件夹里的文件不论扩展名都算所选的类别")}</span>
+      </div>
+      <div className="set-card" role="list">
+        {state && state.folders.length === 0 && <div className="muted small class-folders-empty">{t("还没有。游戏、项目、模型缓存等文件夹会自动识别")}</div>}
+        {state?.folders.map((f) => {
+          const cls = f.class_id ? state.classes.find((c) => c.id === f.class_id) : null;
+          return (
+            <div key={f.path} role="listitem" className="class-folder">
+              <span className="mono class-folder-path" title={f.path}>
+                {f.path}
+              </span>
+              <span className="class-folder-class">
+                {cls && <span className="swatch" style={{ background: cls.color || classHex(vocab, cls.id) }} />}
+                {cls ? cls.name : t("只按扩展名")}
+              </span>
+              <button
+                className="icon-btn small"
+                aria-label={t("取消 {path} 的归类", { path: f.path })}
+                title={t("改回自动识别")}
+                onClick={async () => {
+                  try {
+                    setState(await call("classes.folder", { path: f.path, class_id: null }));
+                  } catch (err) {
+                    toast(err instanceof RpcError ? err.message : String(err));
+                  }
+                }}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            </div>
+          );
+        })}
       </div>
     </section>
   );

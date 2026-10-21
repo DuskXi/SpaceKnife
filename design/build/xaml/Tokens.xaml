@@ -122,6 +122,8 @@
     <SolidColorBrush x:Key="SkTreemapClassDocBrush" Color="#FF505DC6"/>
     <Color x:Key="SkTreemapClassExec">#FF1FAE8A</Color>
     <SolidColorBrush x:Key="SkTreemapClassExecBrush" Color="#FF1FAE8A"/>
+    <Color x:Key="SkTreemapClassGame">#FFBE1022</Color>
+    <SolidColorBrush x:Key="SkTreemapClassGameBrush" Color="#FFBE1022"/>
     <Color x:Key="SkTreemapClassImage">#FF2F8FDB</Color>
     <SolidColorBrush x:Key="SkTreemapClassImageBrush" Color="#FF2F8FDB"/>
     <Color x:Key="SkTreemapClassOther">#FF2B2F38</Color>

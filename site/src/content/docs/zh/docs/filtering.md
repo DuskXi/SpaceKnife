@@ -151,11 +151,12 @@ NTFS 上很小的文件直接存在文件表里，占用为 0 字节。不带前
 | 压缩包/镜像 | `archive`、`压缩包`、`镜像`、`Archive`、`Archives`、`Disk images`、`Archives/Disk images` |
 | 程序/系统 | `exec`、`程序`、`系统`、`Program`、`Programs`、`Executable`、`Executables`、`System files`、`Executables/System files` |
 | 文档 | `doc`、`Document`、`Documents`、`Docs` |
+| 游戏 | `game`、`Game`、`Games` |
 | 代码/开发 | `code`、`代码`、`开发`、`Code`、`Source code`、`Development`、`Dev` |
 | 数据/模型 | `data`、`数据`、`模型`、`Data`、`Datasets`、`Models`、`Databases` |
 | 其他 | `other`、`Other`、`Others`、`Unclassified` |
 
-- 类别按扩展名匹配：名字里最后一个点之后的部分。开头的点不算，所以 `.bashrc` 没有扩展名。`ts` 和 `mts` 还要看文件大小，分成视频和代码，见[内置类别](../tags-classes/#内置类别)。
+- 类别按扩展名匹配：名字里最后一个点之后的部分。开头的点不算，所以 `.bashrc` 没有扩展名。`ts` 和 `mts` 还要看文件大小，分成视频和代码，见[内置类别](../tags-classes/#内置类别)。游戏、项目等认得出的文件夹里，文件按文件夹的类别算：`:class:游戏` 找得到游戏里的视频，`:class:视频` 找不到，见[按文件夹归类](../tags-classes/#按文件夹归类)。
 - `:class:其他` 匹配扩展名不属于任何类别的文件，包括没有扩展名的文件。
 - 不存在的类别名会报错，补全列表里列出可用的类别。
 - 类别和扩展名可以自己改，见[标签与文件类别](../tags-classes/)。

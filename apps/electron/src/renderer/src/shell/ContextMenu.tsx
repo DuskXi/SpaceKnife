@@ -14,6 +14,7 @@ import { rowTitle } from "@/visual/rowTitle";
 import { HIT_NONE, HIT_ROOT } from "@/visual/types";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { revealLabel } from "@/shell/Inspector";
+import { classHexNow } from "@/lib/classes";
 import { tagLabel } from "@/lib/tags";
 import { inBrowser } from "@/lib/host";
 
@@ -37,11 +38,17 @@ interface Item {
   icon: IconName;
   label: string;
   keys?: string;
-  sub?: "copy" | "tag";
+  sub?: Sub;
   danger?: boolean;
   disabled?: string; // why it is unavailable (tooltip)
   run?: () => void;
 }
+
+type Sub = "copy" | "tag" | "classify";
+
+/** A path as the folder choices compare it (UI-W7-38): separators and case do not matter. */
+const samePath = (a: string, b: string) => norm(a) === norm(b);
+const norm = (p: string) => p.replace(/[\\/]+$/, "").replace(/\\/g, "/").toLowerCase();
 
 export const closeMenu = () => set({ menu: null });
 
@@ -59,7 +66,8 @@ export function ContextMenu() {
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [forms, setForms] = useState<PathForms | null>(null);
   const [active, setActive] = useState(0);
-  const [sub, setSub] = useState<"copy" | "tag" | null>(null);
+  const [sub, setSub] = useState<Sub | null>(null);
+  const [choice, setChoice] = useState<string | null | undefined>(undefined); // the folder's class choice, once read
   const [subActive, setSubActive] = useState(0);
 
   const frame = view?.frame ?? null;
@@ -138,6 +146,7 @@ export function ContextMenu() {
       { id: "copy", icon: "copy", label: t("复制路径"), sub: "copy", disabled: noPath },
       { id: "tag", icon: "tag", label: t("加标签"), sub: "tag", disabled: group ? t("小项聚合块不能加标签") : undefined },
       { id: "zoom", icon: "layers", label: t("只看这里（放大）"), keys: "Enter", run: () => void viewCall(menu.viewId, "view.zoom", { key: menu.key }) },
+      ...(folder ? [{ id: "classify", icon: "palette" as IconName, label: t("归类"), sub: "classify" as const, disabled: gone }] : []),
       {
         id: "rescan",
         icon: "refresh",
@@ -177,12 +186,35 @@ export function ContextMenu() {
   const activate = (it: Item) => {
     if (it.disabled) return toast(it.disabled);
     if (it.sub) {
-      setSub(it.sub);
-      setSubActive(0);
+      openSub(it.sub);
       return;
     }
     closeMenu();
     it.run?.();
+  };
+  // 「归类」 (UI-W7-38): automatic, by extension only, or one class for everything in the folder
+  const choices: { id: string | null; label: string }[] = [
+    { id: null, label: t("自动识别") },
+    { id: "", label: t("只按扩展名") },
+    ...(vocab?.classes ?? []).filter((c) => c.id !== "other").map((c) => ({ id: c.id, label: t("算作「{name}」", { name: c.name }) })),
+  ];
+  const classify = (id: string | null) => {
+    const path = forms?.raw;
+    closeMenu();
+    if (!path) return;
+    void call("classes.folder", { path, class_id: id })
+      .then(() => toast(id === null ? t("已改回自动识别") : id === "" ? t("这个文件夹只按扩展名归类") : t("这个文件夹的文件都算作「{name}」", { name: vocab?.classes.find((c) => c.id === id)?.name ?? id })))
+      .catch((e: unknown) => toast(e instanceof Error ? e.message : String(e)));
+  };
+  const openSub = (s: Sub) => {
+    setSub(s);
+    setSubActive(0);
+    if (s === "classify" && forms) {
+      setChoice(undefined);
+      void call("classes.get", {})
+        .then((st) => setChoice(st.folders.find((f) => samePath(f.path, forms.raw))?.class_id ?? null))
+        .catch(() => setChoice(null));
+    }
   };
   const copy = (form: CopyForm) => {
     if (!forms) return;
@@ -196,7 +228,7 @@ export function ContextMenu() {
   };
 
   const onKey = (e: React.KeyboardEvent) => {
-    const n = sub === "copy" ? COPY_FORMS.length : sub === "tag" ? TAGS.length + 1 : items.length;
+    const n = sub === "copy" ? COPY_FORMS.length : sub === "tag" ? TAGS.length + 1 : sub === "classify" ? choices.length : items.length;
     if (e.key === "Escape") return sub ? setSub(null) : closeMenu();
     if (e.key === "ArrowDown") return sub ? setSubActive((i) => (i + 1) % n) : setActive((i) => (i + 1) % n);
     if (e.key === "ArrowUp") return sub ? setSubActive((i) => (i + n - 1) % n) : setActive((i) => (i + n - 1) % n);
@@ -204,6 +236,7 @@ export function ContextMenu() {
     if ((e.key === "ArrowRight" && !sub && items[active]?.sub) || (e.key === "Enter" && !sub)) return activate(items[active]!);
     if (e.key === "Enter" && sub === "copy") return copy(COPY_FORMS[subActive]!.form);
     if (e.key === "Enter" && sub === "tag") return setTag(subActive < TAGS.length ? TAGS[subActive]!.id : null);
+    if (e.key === "Enter" && sub === "classify") return classify(choices[subActive]!.id);
   };
 
   return (
@@ -238,10 +271,8 @@ export function ContextMenu() {
             title={it.disabled}
             onMouseEnter={() => {
               setActive(i);
-              if (it.sub && !it.disabled) {
-                setSub(it.sub);
-                setSubActive(0);
-              } else setSub(null);
+              if (it.sub && !it.disabled) openSub(it.sub);
+              else setSub(null);
             }}
             onClick={() => activate(it)}
           >
@@ -253,7 +284,22 @@ export function ContextMenu() {
           </button>
           {sub && it.sub === sub && (
             <div className={`cm-submenu${sub === "copy" ? " wide" : ""}`} role="menu" aria-label={it.label}>
-              {sub === "copy"
+              {sub === "classify"
+                ? choices.map((c, j) => (
+                    <button
+                      key={c.id ?? "auto"}
+                      role="menuitemradio"
+                      aria-checked={choice !== undefined && choice === c.id}
+                      className={`cm-item${j === subActive ? " active" : ""}`}
+                      onMouseEnter={() => setSubActive(j)}
+                      onClick={() => classify(c.id)}
+                    >
+                      <span className="cm-icon">{choice !== undefined && choice === c.id ? <Icon name="check" size={14} /> : null}</span>
+                      {c.id ? <span className="swatch" style={{ background: classHexNow(c.id) }} /> : null}
+                      <span className="flex">{c.label}</span>
+                    </button>
+                  ))
+                : sub === "copy"
                 ? COPY_FORMS.map((f, j) => (
                     <button key={f.form} role="menuitem" className={`cm-item two${j === subActive ? " active" : ""}`} onMouseEnter={() => setSubActive(j)} onClick={() => copy(f.form)}>
                       <span className="flex">

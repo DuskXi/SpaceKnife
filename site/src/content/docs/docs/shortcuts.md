@@ -90,12 +90,12 @@ Right-click a block, or press <kbd>Shift</kbd>+<kbd>F10</kbd>. The focus moves i
 | Keys | Action |
 | --- | --- |
 | <kbd>↑</kbd>, <kbd>↓</kbd> | Move up and down |
-| <kbd>Enter</kbd> | Run the item. On Copy path and Add tag, open the submenu |
+| <kbd>Enter</kbd> | Run the item. On Copy path, Add tag and Classify, open the submenu |
 | <kbd>→</kbd> | Open the submenu |
 | <kbd>←</kbd> | Back from the submenu |
 | <kbd>Esc</kbd> | Close the submenu, or the menu when no submenu is open |
 
-The items are: Open, Show in Explorer, Open terminal here, Copy path ▸, Add tag ▸, Show only this (zoom in), Rescan this folder, Add to delete basket, and System menu… (not wired up yet). The Copy path submenu has four forms, each previewed: As is (what <kbd>Ctrl</kbd>+<kbd>C</kbd> copies), Quoted, POSIX path and `file://` URI. A click outside the menu, resizing the window or switching to another window closes it.
+The items are: Open, Show in Explorer, Open terminal here, Copy path ▸, Add tag ▸, Show only this (zoom in), Classify ▸ (folders only), Rescan this folder, Add to delete basket, and System menu… (not wired up yet). The Copy path submenu has four forms, each previewed: As is (what <kbd>Ctrl</kbd>+<kbd>C</kbd> copies), Quoted, POSIX path and `file://` URI. A click outside the menu, resizing the window or switching to another window closes it.
 
 ## Matches list
 

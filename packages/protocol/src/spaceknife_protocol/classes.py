@@ -5,7 +5,9 @@ Names are matched case-insensitively against the display name, the aliases and t
 SpaceSniffer 2.0.5.18's class names are aliases, so its filters keep working
 (``:class:Audio/Music``), and its extension lists are included, extended with current formats.
 ``code`` and ``data`` are SpaceKnife's own: source code and build output, and models, datasets
-and databases (on a developer's disk most of what used to be 「其他」).
+and databases (on a developer's disk most of what used to be 「其他」). ``game`` has no extensions:
+recognised folders fill it, and recognised project folders and model caches fill ``code`` and ``data``
+whatever the extensions inside (``spaceknife.pathclass``).
 An extension may belong to several classes (``3gp``): the first class in order gives the colour,
 every class matches it in filters. ``ts`` and ``mts`` are both video and code: the backend tells a
 file apart by its size (``spaceknife.classes.STREAM_SPLITS``). ``other`` holds every file in no
@@ -81,6 +83,8 @@ BUILTIN_CLASSES: tuple[FilterClassInfo, ...] = (
         " docm dotx dotm xlsm xlsb pptm odg wps et dps hwp ofd xps oxps djvu chm mobi azw azw3 fb2"
         " tex rst org tsv vsd vsdx one eml msg pst ost mbox",
     ),
+    # filled by folders (spaceknife.pathclass): everything in a recognised game install
+    _c("game", "游戏", "Game|Games", ""),
     _c(
         "code",
         "代码/开发",
@@ -114,6 +118,7 @@ ENGLISH_NAMES: dict[str, str] = {
     "archive": "Archives",
     "exec": "Programs",
     "doc": "Documents",
+    "game": "Games",
     "code": "Code",
     "data": "Data",
     OTHER: "Other",
@@ -145,10 +150,27 @@ class ClassEdit(Params):
     color: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$")
 
 
+class ClassFolder(Payload):
+    """The user's choice for one folder: its files take ``class_id`` whatever their extension."""
+
+    path: str
+    class_id: str = Field(description='A class id, or "" for by extension only (no folder class)')
+
+
 class ClassesState(Payload):
     classes: list[FilterClassInfo]
     defaults: list[FilterClassInfo]
     custom: bool = Field(description="The table differs from the built-in one")
+    folders: list[ClassFolder] = Field(default_factory=list, description="The user's folder choices, by path")
+
+
+class ClassesFolderParams(Params):
+    path: str = Field(min_length=1, max_length=4096)
+    class_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description='A class id; "" for by extension only; None forgets the choice (automatic again)',
+    )
 
 
 class ClassesUpdateParams(Params):

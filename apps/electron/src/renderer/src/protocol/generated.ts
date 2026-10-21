@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "5b1bc8aa65f6375d";
+export const SCHEMA_HASH = "a60d83f2f15b3b3e";
 
 export interface AgeCond {
   end: number;
@@ -184,14 +184,35 @@ export interface ClassEdit {
   name: string;
 }
 
+/** The user's choice for one folder: its files take ``class_id`` whatever their extension. */
+export interface ClassFolder {
+  /** A class id, or "" for by extension only (no folder class) */
+  class_id: string;
+  path: string;
+}
+
+export interface ClassPart {
+  bytes: number;
+  /** The class the files would have by their extension */
+  class_id: string;
+}
+
 export interface ClassStat {
   bytes: number;
   class_id: string;
   files: number;
+  /** Files a folder class took over, by the class of their extension, largest first (「游戏 · 其中视频 3 GB」); empty when none */
+  parts: ClassPart[];
 }
 
 export interface ClassesEvent {
   state: ClassesState;
+}
+
+export interface ClassesFolderParams {
+  /** A class id; "" for by extension only; None forgets the choice (automatic again) */
+  class_id?: string | null;
+  path: string;
 }
 
 export interface ClassesState {
@@ -199,6 +220,8 @@ export interface ClassesState {
   /** The table differs from the built-in one */
   custom: boolean;
   defaults: FilterClassInfo[];
+  /** The user's folder choices, by path */
+  folders: ClassFolder[];
 }
 
 export interface ClassesUpdateParams {
@@ -590,6 +613,19 @@ export interface FlashItem {
   delta: number;
   /** Row of this frame's draw list: the changed block or its drawn ancestor; -1 = the zoom root (flame.v1 / polar.v1 only) */
   row: number;
+}
+
+/** Why a folder's files take a folder class (spaceknife.pathclass). */
+export interface FolderClassInfo {
+  class_id: string;
+  /** Only files whose extension is in no class take it */
+  fallback: boolean;
+  /** The folder that decided (the node itself or an ancestor) */
+  folder: string;
+  /** What the folder was recognised as, in the interface language */
+  reason: string;
+  /** The user chose it (class_folders.json) */
+  user: boolean;
 }
 
 export interface FolderCond {
@@ -1521,6 +1557,8 @@ export interface TreeSummaryParams {
 export interface TreeSummaryResult {
   /** Allocated bytes and files per file class, largest first */
   classes: ClassStat[];
+  /** The folder class the node (or a file's folder) takes, if any */
+  folder_class: FolderClassInfo | null;
   /** Newest modification time in the subtree (0 = unknown) */
   latest_mtime: number;
   node: NodeInfo;
@@ -1875,6 +1913,8 @@ export interface Methods {
   "basket.list": { params: Empty; result: BasketState };
   /** Take items out of the basket. */
   "basket.remove": { params: BasketRemoveParams; result: BasketState };
+  /** Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38). */
+  "classes.folder": { params: ClassesFolderParams; result: ClassesState };
   /** The file class table (W7 文件类别). */
   "classes.get": { params: Empty; result: ClassesState };
   /** Back to the built-in file classes. */

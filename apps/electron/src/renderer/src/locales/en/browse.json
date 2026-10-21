@@ -242,5 +242,16 @@
  "回收站（R）": "Recycle Bin (R)",
  "回收站": "Recycle Bin",
  "废纸篓": "Trash",
- "清除过滤，回到详情（Esc）": "Clear the filter and go back to the details (Esc)"
+ "清除过滤，回到详情（Esc）": "Clear the filter and go back to the details (Esc)",
+ "{about}。其中按扩展名本是：{parts}": "{about}. By their extensions these are: {parts}",
+ "其中没有类别的文件算作「{cls}」 · {reason}": "Files in no class count as {cls} · {reason}",
+ "整个文件夹算作「{cls}」 · {reason}": "Everything here counts as {cls} · {reason}",
+ "由 {folder} 决定。右键菜单的「归类」可以更改": "Decided by {folder}. Change it with Classify in the context menu",
+ "归类": "Classify",
+ "自动识别": "Automatic",
+ "只按扩展名": "By extension only",
+ "算作「{name}」": "Count as {name}",
+ "已改回自动识别": "Back to automatic",
+ "这个文件夹只按扩展名归类": "This folder is classed by extension only",
+ "这个文件夹的文件都算作「{name}」": "Everything in this folder counts as {name}"
 }

@@ -19,9 +19,11 @@ from pathlib import PurePath
 
 import numpy as np
 
+from spaceknife_protocol.classes import OTHER
 from spaceknife_protocol.filter import AttrName, AttrSet, FilterNormal, TagColor
 from spaceknife_protocol.filter_syntax import glob_parts
 
+from .. import pathclass
 from ..classes import ClassTable, active
 from ..store.nodes import Flag, Kind, NodeStore
 from .names import glob_str_regex, name_index
@@ -197,8 +199,21 @@ class _Eval:
         return hit
 
     def classes(self, class_id: str) -> np.ndarray:
-        size = self.store.cols["size"][: self.n]  # decides for size-split extensions (ts)
-        by_file = self.ctx.classes.node_mask(class_id, self.store.ext_table, self.ext, size)
+        """Files whose class is ``class_id``: by extension (and size, for ``ts``), under the folder
+        classes (in a game install every file is 「游戏」, see :mod:`..pathclass`)."""
+        table = self.ctx.classes
+        size = self.store.cols["size"][: self.n]
+        by_file = table.node_mask(class_id, self.store.ext_table, self.ext, size)
+        col = pathclass.column(self.store, table)[: self.n]
+        if col.any() and class_id in table.by_id:
+            idx = table.ids.index(class_id)
+            wide = col.astype(np.int64)
+            swallow = (col > 0) & (col < pathclass.FALLBACK_BASE)
+            by_file = np.where(swallow, wide - 1 == idx, by_file)
+            fallback = col >= pathclass.FALLBACK_BASE
+            if fallback.any():
+                fallback &= table.node_mask(OTHER, self.store.ext_table, self.ext, size)
+                by_file = np.where(fallback, wide - pathclass.FALLBACK_BASE == idx, by_file)
         result: np.ndarray = self.leaf & by_file
         return result
 

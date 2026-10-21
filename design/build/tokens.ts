@@ -156,6 +156,7 @@ export const tokens = {
       "data": "#7BE8B9",
       "doc": "#505DC6",
       "exec": "#1FAE8A",
+      "game": "#BE1022",
       "image": "#2F8FDB",
       "other": "#2B2F38",
       "video": "#E07A1F"
@@ -450,6 +451,7 @@ export const cssVar = {
   "treemap.class.data": "var(--sk-treemap-class-data)",
   "treemap.class.doc": "var(--sk-treemap-class-doc)",
   "treemap.class.exec": "var(--sk-treemap-class-exec)",
+  "treemap.class.game": "var(--sk-treemap-class-game)",
   "treemap.class.image": "var(--sk-treemap-class-image)",
   "treemap.class.other": "var(--sk-treemap-class-other)",
   "treemap.class.video": "var(--sk-treemap-class-video)",

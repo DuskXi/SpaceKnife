@@ -849,6 +849,45 @@
       "title": "ClassEdit",
       "type": "object"
     },
+    "ClassFolder": {
+      "description": "The user's choice for one folder: its files take ``class_id`` whatever their extension.",
+      "properties": {
+        "class_id": {
+          "description": "A class id, or \"\" for by extension only (no folder class)",
+          "title": "Class Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "class_id"
+      ],
+      "title": "ClassFolder",
+      "type": "object"
+    },
+    "ClassPart": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "class_id": {
+          "description": "The class the files would have by their extension",
+          "title": "Class Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "class_id",
+        "bytes"
+      ],
+      "title": "ClassPart",
+      "type": "object"
+    },
     "ClassStat": {
       "properties": {
         "bytes": {
@@ -862,6 +901,14 @@
         "files": {
           "title": "Files",
           "type": "integer"
+        },
+        "parts": {
+          "description": "Files a folder class took over, by the class of their extension, largest first (「游戏 · 其中视频 3 GB」); empty when none",
+          "items": {
+            "$ref": "#/$defs/ClassPart"
+          },
+          "title": "Parts",
+          "type": "array"
         }
       },
       "required": [
@@ -884,6 +931,36 @@
       "title": "ClassesEvent",
       "type": "object"
     },
+    "ClassesFolderParams": {
+      "additionalProperties": false,
+      "properties": {
+        "class_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A class id; \"\" for by extension only; None forgets the choice (automatic again)",
+          "title": "Class Id"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ClassesFolderParams",
+      "type": "object"
+    },
     "ClassesState": {
       "properties": {
         "classes": {
@@ -903,6 +980,14 @@
             "$ref": "#/$defs/FilterClassInfo"
           },
           "title": "Defaults",
+          "type": "array"
+        },
+        "folders": {
+          "description": "The user's folder choices, by path",
+          "items": {
+            "$ref": "#/$defs/ClassFolder"
+          },
+          "title": "Folders",
           "type": "array"
         }
       },
@@ -2708,6 +2793,44 @@
         "delta"
       ],
       "title": "FlashItem",
+      "type": "object"
+    },
+    "FolderClassInfo": {
+      "description": "Why a folder's files take a folder class (spaceknife.pathclass).",
+      "properties": {
+        "class_id": {
+          "title": "Class Id",
+          "type": "string"
+        },
+        "fallback": {
+          "description": "Only files whose extension is in no class take it",
+          "title": "Fallback",
+          "type": "boolean"
+        },
+        "folder": {
+          "description": "The folder that decided (the node itself or an ancestor)",
+          "title": "Folder",
+          "type": "string"
+        },
+        "reason": {
+          "description": "What the folder was recognised as, in the interface language",
+          "title": "Reason",
+          "type": "string"
+        },
+        "user": {
+          "description": "The user chose it (class_folders.json)",
+          "title": "User",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "class_id",
+        "reason",
+        "folder",
+        "user",
+        "fallback"
+      ],
+      "title": "FolderClassInfo",
       "type": "object"
     },
     "FolderCond": {
@@ -7037,6 +7160,18 @@
           "title": "Classes",
           "type": "array"
         },
+        "folder_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FolderClassInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The folder class the node (or a file's folder) takes, if any"
+        },
         "latest_mtime": {
           "description": "Newest modification time in the subtree (0 = unknown)",
           "title": "Latest Mtime",
@@ -8783,6 +8918,12 @@
       "params": "#/$defs/BasketRemoveParams",
       "requiresSession": true,
       "result": "#/$defs/BasketState"
+    },
+    "classes.folder": {
+      "doc": "Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38).",
+      "params": "#/$defs/ClassesFolderParams",
+      "requiresSession": true,
+      "result": "#/$defs/ClassesState"
     },
     "classes.get": {
       "doc": "The file class table (W7 文件类别).",

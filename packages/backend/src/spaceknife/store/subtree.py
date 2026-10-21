@@ -59,15 +59,24 @@ class Summary:
     class_bytes: np.ndarray  # allocated bytes per colour class index
     class_files: np.ndarray
     latest_mtime: int
+    # bytes per (class, class by extension alone) where a folder class took files over (or None)
+    class_parts: np.ndarray | None = None
 
 
 def summarize(
-    store: NodeStore, node: int, cls_of: Callable[[np.ndarray], np.ndarray], n_classes: int, top: int
+    store: NodeStore,
+    node: int,
+    cls_of: Callable[[np.ndarray], np.ndarray],
+    n_classes: int,
+    top: int,
+    base_cls_of: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> Summary:
     """Largest files, per-class totals and newest modification time below ``node``.
 
     ``cls_of`` gives the colour class index of file nodes (``layout.Basis.cls_of``: by extension,
-    and by size for ``ts``). A file node summarises itself.
+    and by size for ``ts``, under the folder classes). With ``base_cls_of`` (the class by extension
+    alone), ``class_parts`` says what the folder classes took over: 「游戏 · 其中视频 3 GB」.
+    A file node summarises itself.
     """
     c = store.cols
     ids = subtree_ids(store, node) if c["kind"][node] == Kind.DIR else np.array([node], dtype=np.int64)
@@ -79,10 +88,19 @@ def summarize(
     cls = cls_of(files) if files.size else np.empty(0, dtype=np.int64)
     class_bytes = np.bincount(cls, weights=alloc, minlength=n_classes).astype(np.int64)
     class_files = np.bincount(cls, minlength=n_classes).astype(np.int64)
+    parts = None
+    if base_cls_of is not None and files.size:
+        base = base_cls_of(files).astype(np.int64)
+        moved = base != cls
+        if moved.any():
+            pair = cls[moved].astype(np.int64) * n_classes + base[moved]
+            flat = np.bincount(pair, weights=alloc[moved], minlength=n_classes * n_classes)
+            parts = flat.astype(np.int64).reshape(n_classes, n_classes)
     mt = c["mtime"][ids] if ids.size else np.zeros(1, dtype=np.uint32)
     return Summary(
         top_files=files[order],
         class_bytes=class_bytes,
         class_files=class_files,
         latest_mtime=int(mt.max()) if mt.size else 0,
+        class_parts=parts,
     )

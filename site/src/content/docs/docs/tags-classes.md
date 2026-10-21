@@ -98,6 +98,7 @@ A file class is a named set of extensions. The classes are used in three places:
 | Archives | zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2 tbz tbz2 txz tzst lz4 lzo br sz zpaq zipx arj lha lzh cpio xar sit sitx vdi qcow avhdx hdd hds vmem vmsn ova xva sparseimage nrg |
 | Programs | exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log apk aab xapk ipa deb rpm snap appimage jar war ear vsix crx xpi pyd node wasm msp msu mui tlb winmd dmp mdmp etl evtx |
 | Documents | pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key docm dotx dotm xlsm xlsb pptm odg wps et dps hwp ofd xps oxps djvu chm mobi azw azw3 fb2 tex rst org tsv vsd vsdx one eml msg pst ost mbox |
+| Games | (no extensions: recognised folders, see below) |
 | Code | c h cc cpp cxx hh hpp hxx cs java kt kts scala groovy gradle go rs swift m mm py pyi pyw pyx ipynb js mjs cjs jsx ts tsx mts cts vue svelte css scss sass less php rb pl pm lua r jl dart ex exs erl hs elm clj cljs fs fsx vb cmake pyc pyo class o lib a pdb ilk idb pch ipch tlog whl egg gem nupkg |
 | Data | safetensors gguf ggml ckpt pt pth onnx tflite mlmodel h5 hdf5 he5 nc npy npz pkl pickle joblib parquet arrow feather avro orc tfrecord jsonl ndjson json fits fts fit mat db sqlite sqlite3 db3 duckdb mdb accdb ldb vscdb realm ibd myd myi mdf ldf ndf dbf kdbx sql |
 | Other | every extension in no other class, and files without an extension |
@@ -105,7 +106,28 @@ A file class is a named set of extensions. The classes are used in three places:
 - A file's extension is the part of its name after the last dot, compared without case. A leading dot doesn't count: `.bashrc` has no extension, so it belongs to Other.
 - An extension can be in several classes (`3gp` is in Video and Audio). The first class in the list gives the color, and every class that lists it matches it in filters.
 - `ts` and `mts` are the exception: such a file can be a recording (an MPEG transport stream, AVCHD) or TypeScript source. SpaceKnife decides by the file's size and never reads its content: over 16 MB, or over 1 MB and exactly a whole number of transport-stream packets (188 bytes for `ts`, 192 for `mts`), it is Video; anything else is Code. Take `ts` out of Video and the extension alone decides again.
-- The Chinese interface shows the same classes under Chinese names (视频, 图片, 音频, 压缩包/镜像, 程序/系统, 文档, 代码/开发, 数据/模型, 其他). Both sets of names work in filters in either language.
+- The Chinese interface shows the same classes under Chinese names (视频, 图片, 音频, 压缩包/镜像, 程序/系统, 文档, 游戏, 代码/开发, 数据/模型, 其他). Both sets of names work in filters in either language.
+
+### Classes by folder
+
+The extension says what a file is; some folders say more. A folder SpaceKnife recognises decides the class of **every** file in it, whatever the extension:
+
+| Folder | Counts as |
+|---|---|
+| Games: Steam libraries (`steamapps`); the game folders of Epic, GOG, Xbox, EA, Ubisoft, Riot, HoYoPlay / miHoYo, Hypergryph and other launchers; Unity games (`UnityPlayer.dll`, or `name.exe` beside `name_Data`), Unreal games (`game/Content/Paks`), Godot games (a `.pck` beside an `.exe`), Blizzard games (`.build.info`); `.minecraft`, `Documents/My Games`, `Documents/Paradox Interactive` and `Saved Games` in a home | Games |
+| Projects: a folder holding `.git`, `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `CMakeLists.txt`, `*.sln`, `*.csproj` or a similar marker | Code |
+| Model caches: `.ollama`, `.cache/huggingface`, `.lmstudio` | Data |
+| System areas: `System Volume Information`, the MFT scan's NTFS metadata folder | Programs |
+
+Also, in installed software and app data (`Program Files`, `ProgramData` and `Windows` at the top of a volume, `/usr`, `/opt`, `/Applications`, and a home's `AppData`, `Library`, `.local`, `.config`), **files in no class** count as Programs; pictures, videos and other recognised files keep their extension's class.
+
+- The outer folder wins: a game's own `package.json` stays the game's, and a game built inside a project stays the project's.
+- A project never starts in installed software, a cache or a package store (`AppData`, `node_modules`, `site-packages`, `.cargo` …), and is never a volume, a home or a home's **Downloads**, **Documents**, **Desktop** and other standard folders themselves: a stray `package.json` in Downloads doesn't turn all of Downloads into a project, though a repository downloaded there still counts.
+- On the **Classes** page, the tooltip of a class says what its folders' files would be by extension, such as "By their extensions these are: Video 3.0 GB"; the **Details** page says what the selected folder counts as and why, such as "Everything here counts as Games · Steam library".
+- Colors, `:class:` filters and the **Classes** page all follow this: `:class:games` finds the videos inside games, `:class:video` doesn't (to find every mp4, use `*.mp4`).
+- Take **Games** out of the class table and the game folder rules are off.
+
+**Your own choice**: right-click a folder in the picture and pick **Classify**: **Automatic** (the default), **By extension only** (no folder rule for this folder), or **Count as** a class (every file in it counts as that class). Your choices win over the rules, and an inner choice decides its own folder. They are listed under **Settings › File classes › Classed by folder**, where × makes a folder automatic again; **Restore default classes** clears them too, and exporting or importing settings carries them along.
 
 ### How classes color the picture
 

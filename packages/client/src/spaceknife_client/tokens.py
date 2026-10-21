@@ -98,6 +98,7 @@ TOKENS: Final[Mapping[str, TokenValue]] = {
     'treemap.class.data': '#7BE8B9',
     'treemap.class.doc': '#505DC6',
     'treemap.class.exec': '#1FAE8A',
+    'treemap.class.game': '#BE1022',
     'treemap.class.image': '#2F8FDB',
     'treemap.class.other': '#2B2F38',
     'treemap.class.video': '#E07A1F',

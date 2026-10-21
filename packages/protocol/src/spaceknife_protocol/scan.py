@@ -302,10 +302,30 @@ class TopFile(Payload):
     )
 
 
+class ClassPart(Payload):
+    class_id: str = Field(description="The class the files would have by their extension")
+    bytes: int
+
+
 class ClassStat(Payload):
     class_id: str
     bytes: int
     files: int
+    parts: list[ClassPart] = Field(
+        default_factory=list,
+        description="Files a folder class took over, by the class of their extension, largest first "
+        "(「游戏 · 其中视频 3 GB」); empty when none",
+    )
+
+
+class FolderClassInfo(Payload):
+    """Why a folder's files take a folder class (spaceknife.pathclass)."""
+
+    class_id: str
+    reason: str = Field(description="What the folder was recognised as, in the interface language")
+    folder: str = Field(description="The folder that decided (the node itself or an ancestor)")
+    user: bool = Field(description="The user chose it (class_folders.json)")
+    fallback: bool = Field(description="Only files whose extension is in no class take it")
 
 
 class TreeSummaryResult(Payload):
@@ -324,6 +344,9 @@ class TreeSummaryResult(Payload):
     on_disk: bool = Field(
         default=True,
         description="False inside the MFT pseudo folders ($NTFS 元数据, $孤立文件): no such path exists",
+    )
+    folder_class: FolderClassInfo | None = Field(
+        default=None, description="The folder class the node (or a file's folder) takes, if any"
     )
 
 

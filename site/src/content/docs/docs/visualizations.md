@@ -89,7 +89,7 @@ The toolbar's **Coloring** group has four modes. <kbd>C</kbd> steps through them
 
 | Mode | Toolbar | Command palette | Color shows |
 |---|---|---|---|
-| File classes | **Classes** | **Coloring: file classes** | The file class, found by the extension: Video, Pictures, Audio, Archives, Programs, Documents, Code, Data, and Other for the rest. Edit the classes in **Settings › File classes**. |
+| File classes | **Classes** | **Coloring: file classes** | The file class, found by the extension: Video, Pictures, Audio, Archives, Programs, Documents, Games, Code, Data, and Other for the rest; the files in games, projects and other recognised folders take the folder's class. Edit the classes in **Settings › File classes**. |
 | Flat | **Flat** | **Coloring: flat** | Nothing: every file has the same neutral color, so only size and structure remain |
 | Date modified | **Time** | **Coloring: date modified** | How recently a file changed, in five bands: under a day, a week, a month, a year, and older |
 | Top-level branch | **Branch** | **Coloring: top-level branch** | Which top-level item a block belongs to |

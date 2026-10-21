@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from .base import Empty, EmptyResult
-from .classes import ClassesEvent, ClassesState, ClassesUpdateParams
+from .classes import ClassesEvent, ClassesFolderParams, ClassesState, ClassesUpdateParams
 from .compare import (
     CompareIdParams,
     CompareInfo,
@@ -385,6 +385,12 @@ CLASSES_UPDATE = MethodSpec(
     "Replace the file class table (order = colour precedence); views recolour and filters re-run.",
 )
 CLASSES_RESET = MethodSpec("classes.reset", Empty, ClassesState, "Back to the built-in file classes.")
+CLASSES_FOLDER = MethodSpec(
+    "classes.folder",
+    ClassesFolderParams,
+    ClassesState,
+    "Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38).",
+)
 EXPORT_TARGETS = MethodSpec(
     "export.targets", Empty, ExportTargets, "Built-in export templates and formats (W4 「导出报告…」)."
 )
@@ -544,6 +550,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         CLASSES_GET,
         CLASSES_UPDATE,
         CLASSES_RESET,
+        CLASSES_FOLDER,
         EXPORT_TARGETS,
         EXPORT_CHECK,
         EXPORT_RUN,

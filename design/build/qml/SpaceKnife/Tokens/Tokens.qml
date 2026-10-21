@@ -92,6 +92,7 @@ QtObject {
     readonly property color treemapClassData: "#FF7BE8B9"
     readonly property color treemapClassDoc: "#FF505DC6"
     readonly property color treemapClassExec: "#FF1FAE8A"
+    readonly property color treemapClassGame: "#FFBE1022"
     readonly property color treemapClassImage: "#FF2F8FDB"
     readonly property color treemapClassOther: "#FF2B2F38"
     readonly property color treemapClassVideo: "#FFE07A1F"

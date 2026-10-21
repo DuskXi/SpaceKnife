@@ -23,7 +23,7 @@ from spaceknife_protocol.methods import (
     TAGS_CLEAR_SAVED,
 )
 
-from .. import classes, paths, settings_io
+from .. import classes, pathclass, paths, settings_io
 from ..i18n import Texts, tr
 from ..settings import BY_KEY, SettingsError
 from ..store import snapshot
@@ -124,6 +124,11 @@ def install(server: Server) -> None:
                     store.update(plan.values)
             except SettingsError as exc:
                 raise RpcError(ErrorCode.INVALID_PARAMS, str(exc)) from exc
+            if plan.folders is not None:
+                from .classes_handlers import apply_folders
+
+                pathclass.replace_folders(plan.folders)
+                await apply_folders(server)
             if plan.classes is not None:
                 from .classes_handlers import apply_table
 

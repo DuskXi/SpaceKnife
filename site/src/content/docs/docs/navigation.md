@@ -73,8 +73,8 @@ The panel on the right shows the selection, or the zoom root when nothing is sel
 
 | Tab | Shows |
 |---|---|
-| **Details** | Name and path; the size, with the number of files and folders and the latest change for a folder, or the file class and modification time for a file (hover that line for the exact number of bytes); **Share** of the parent folder and of the volume's used space; for a folder, **Largest items**: the five largest files anywhere below it; **Tags** |
-| **Classes** | The selection's make-up by file class: a bar split in the class colors, then a row per class with its files, size, share and a bar, largest first. Click a row to filter by that class. **Code** and **Data** fold away while they hold less than 2% and less than 8 GB; **Show all classes** brings them back |
+| **Details** | Name and path; the size, with the number of files and folders and the latest change for a folder, or the file class and modification time for a file (hover that line for the exact number of bytes); when the folder is [classed by folder](../tags-classes/#classes-by-folder), a line such as "Everything here counts as Games · Steam library"; **Share** of the parent folder and of the volume's used space; for a folder, **Largest items**: the five largest files anywhere below it; **Tags** |
+| **Classes** | The selection's make-up by file class: a bar split in the class colors, then a row per class with its files, size, share and a bar, largest first. Click a row to filter by that class. **Code** and **Data** fold away while they hold less than 2% and less than 8 GB; **Show all classes** brings them back. For files a folder class took over, the tooltip says what their extensions make them, such as "By their extensions these are: Video 3.0 GB" |
 | **Largest files** | Up to 50 of the largest files below it |
 
 Click a file in **Largest items** or **Largest files** to **locate** it: it is selected, and if it isn't drawn (too deep or too small) the view zooms in, with history, until it is.
@@ -136,6 +136,7 @@ The menu starts with a header (name, size, type, parent folder) and then:
 | **Copy path** ▸ | | **As is** (<kbd>Ctrl</kbd>+<kbd>C</kbd>), **Quoted**, **POSIX path**, **file:// URI**; each shows a preview |
 | **Add tag** ▸ | | **Red tag**, **Yellow tag**, **Green tag**, **Blue tag** (<kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>4</kbd>), **Clear tag** (<kbd>Ctrl</kbd>+<kbd>0</kbd>) |
 | **Show only this (zoom in)** | <kbd>Enter</kbd> | Zooms in |
+| **Classify** ▸ (folders only) | | **Automatic**, **By extension only**, or **Count as** a class: every file in the folder counts as that class. See [Classes by folder](../tags-classes/#classes-by-folder) |
 | **Rescan this folder** | | Reads the folder again with everything below it (for a file: its folder) |
 | **Add to delete basket** | <kbd>Delete</kbd> | Puts it in the delete basket |
 | **System menu…** | | Listed, not available yet |
@@ -145,7 +146,7 @@ Inside the menu:
 | Keys | Action |
 |---|---|
 | <kbd>↑</kbd> / <kbd>↓</kbd> | Move |
-| <kbd>→</kbd> or <kbd>Enter</kbd> on **Copy path** or **Add tag** | Open the submenu |
+| <kbd>→</kbd> or <kbd>Enter</kbd> on **Copy path**, **Add tag** or **Classify** | Open the submenu |
 | <kbd>←</kbd> | Close the submenu |
 | <kbd>Enter</kbd> | Run the highlighted item |
 | <kbd>Esc</kbd> | Close the submenu, then the menu |

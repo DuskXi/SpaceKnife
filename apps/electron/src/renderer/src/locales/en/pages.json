@@ -103,7 +103,7 @@
  "打开快照文件…": "Open snapshot file…",
  "打开快照文件夹": "Open snapshot folder",
  "打开设置文件": "Open settings file",
- "扩展名，用 ; 分隔，例如 safetensors; gguf": "Extensions separated by ;, e.g. safetensors; gguf",
+ "扩展名，用 ; 分隔，例如 pak; ucas": "Extensions separated by ;, e.g. pak; ucas",
  "扫描 NTFS 备用数据流": "Scan NTFS alternate data streams",
  "扫描与性能": "Scan & performance",
  "扫描助手": "Scan helper",
@@ -203,5 +203,15 @@
  "关于与更新": "About & updates",
  "版本信息、更新与发布时间线": "Version, updates and the release timeline",
  "关于": "About",
- "版本信息、更新设置与发布时间线": "Version, update settings and the release timeline"
+ "版本信息、更新设置与发布时间线": "Version, update settings and the release timeline",
+ "另外，游戏安装目录里的文件都算这一类：Steam、Epic、GOG、Xbox、HoYoPlay 等启动器的游戏，Unity、Unreal、Godot 游戏，Minecraft，游戏存档": "Also every file in a game install: games of Steam, Epic, GOG, Xbox, HoYoPlay and other launchers, Unity, Unreal and Godot games, Minecraft, game saves",
+ "另外，项目文件夹里的文件都算这一类：含 .git、package.json、Cargo.toml、pyproject.toml、*.sln 等的文件夹": "Also every file in a project folder: a folder holding .git, package.json, Cargo.toml, pyproject.toml, *.sln and the like",
+ "另外，模型缓存里的文件都算这一类：.ollama、.cache/huggingface、.lmstudio": "Also every file in a model cache: .ollama, .cache/huggingface, .lmstudio",
+ "另外，系统卷信息和 NTFS 元数据算这一类；已安装的软件和应用数据（Program Files、AppData 等）里没有类别的文件也算": "Also System Volume Information and NTFS metadata, and the files in no class inside installed software and app data (Program Files, AppData and the like)",
+ "恢复为内置的 {n} 个类别，并清除 {m} 个文件夹归类？": "Restore the {n} built-in classes and clear {m} folder classes?",
+ "按文件夹归类": "Classed by folder",
+ "在图上右键文件夹，选「归类」添加；这些文件夹里的文件不论扩展名都算所选的类别": "Add one with Classify in a folder's context menu; every file in it then counts as that class, whatever its extension",
+ "还没有。游戏、项目、模型缓存等文件夹会自动识别": "None yet. Game, project and model cache folders are recognised by themselves",
+ "取消 {path} 的归类": "Remove the class of {path}",
+ "改回自动识别": "Back to automatic"
 }
