@@ -396,6 +396,35 @@ def install_folder(entry: dict[str, str]) -> Path:
     return Path(m.group(1)).parent if m else LOCAL / "Programs" / "SpaceKnife"
 
 
+def install_location() -> str | None:
+    """InstallLocation under HKCU\\Software\\<guid>: where the next installer looks for the program."""
+    import winreg
+
+    with contextlib.suppress(OSError), winreg.OpenKey(winreg.HKEY_CURRENT_USER, "Software") as key:
+        for i in range(winreg.QueryInfoKey(key)[0]):
+            with contextlib.suppress(OSError), winreg.OpenKey(key, winreg.EnumKey(key, i)) as sub:
+                if winreg.QueryValueEx(sub, "ShortcutName")[0] == "SpaceKnife":
+                    return str(winreg.QueryValueEx(sub, "InstallLocation")[0])
+    return None
+
+
+def expect_registered(exe: Path, version: str) -> None:
+    """After an update SpaceKnife is still in Windows' app list, as ``version`` in its folder, and
+    still a while later: an in-app upgrade from 0.3.1 to 0.3.2 once ended without both keys."""
+    for check in range(2):
+        if check:
+            time.sleep(10)
+        entry = uninstall_entry()
+        if entry is None:
+            fail("the uninstall entry is gone after the update")
+        if entry.get("DisplayVersion") != version or install_folder(entry) != exe.parent:
+            fail(f"the uninstall entry says {entry.get('DisplayVersion')!r} in {install_folder(entry)}")
+        location = install_location()
+        if location is None or Path(location) != exe.parent:
+            fail(f"InstallLocation under HKCU\\Software\\<guid> is {location!r}")
+    print(f"registered: {version} in {exe.parent}", flush=True)
+
+
 def installed() -> tuple[Path, str]:
     entry = wait("SpaceKnife's uninstall entry", uninstall_entry, 60)
     folder = install_folder(entry)
@@ -607,6 +636,7 @@ def nsis(setup: Path, previous: Path | None) -> None:
             if now != version:
                 fail(f"the upgrade left version {now!r}")
             run_restarted_app(exe, stale)
+            expect_registered(exe, version)
             # an update touches nothing of the user's; the new backend cleared the old update files
             expect(files, {"data", "cache", "profile"})
             quiet_uninstall()
@@ -627,6 +657,7 @@ def nsis(setup: Path, previous: Path | None) -> None:
         wait("the old app to quit", lambda: proc.poll() is not None, 60)
         stale = stale_update()  # the installer is still at work: only the new backend can clear it
         run_restarted_app(exe, stale)
+        expect_registered(exe, version)
         # the old app's backend cleared the seeded 0.0.1 installer when it started; the offered
         # (newer) file stays until a version at least as new runs
         expect(files, {"data", "cache", "profile"})
