@@ -12,7 +12,7 @@ import { pointerBox } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
-import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts ,plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
@@ -157,7 +157,11 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
         {node && (
           <div className="hc-class muted">
             {dir ? (
-              <span>{t("{files} 个文件 · {dirs} 个文件夹", { files: fmtInt(node.files), dirs: fmtInt(node.dirs) })}</span>
+              <span>
+                {plural(node.files, t("{files} 个文件", { files: fmtInt(node.files) }), "1 file")}
+                {" · "}
+                {plural(node.dirs, t("{dirs} 个文件夹", { dirs: fmtInt(node.dirs) }), "1 folder")}
+              </span>
             ) : (
               <>
                 <span className="swatch" style={{ background: bg }} />
