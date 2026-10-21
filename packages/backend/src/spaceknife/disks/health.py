@@ -141,7 +141,7 @@ def boot_time() -> datetime | None:
             cmd = ["sysctl", "-n", "kern.boottime"]
             out = subprocess.run(cmd, capture_output=True, text=True, timeout=5).stdout
             sec = int(out.split("sec =")[1].split(",")[0])
-            return datetime.fromtimestamp(sec, UTC)
+            up = time.time() - sec
         else:
             with open("/proc/uptime", encoding="ascii") as fh:
                 up = float(fh.read().split()[0])

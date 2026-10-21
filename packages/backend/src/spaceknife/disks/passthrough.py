@@ -250,7 +250,7 @@ if sys.platform != "win32":
     import fcntl
 
     def system_ioctl(fd: int, request: int, arg: Any) -> int:
-        return fcntl.ioctl(fd, request, arg)
+        return int(fcntl.ioctl(fd, request, arg))  # with a mutable buffer: the call's result code
 
 else:
 
