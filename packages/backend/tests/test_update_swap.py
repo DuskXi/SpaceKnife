@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -111,7 +112,7 @@ def test_the_new_version_takes_the_place_of_the_old_one(tmp_path: Path) -> None:
     assert not (plan.app / ".hidden").exists()
     # the data folder stays as it was: the archive's own data/README.txt doesn't come along
     assert sorted(p.name for p in (plan.app / "data").iterdir()) == ["data", "keep.txt"]
-    assert sorted(p.name for p in plan.old.iterdir()) == [".hidden", EXE, "resources"]
+    assert sorted(p.name for p in plan.old.iterdir()) == sorted([".hidden", EXE, "resources"])
     assert (plan.old / EXE).read_text(encoding="utf-8") == "0.3.3"
     assert log_lines(plan) == ["waiting for SpaceKnife (4242) to quit", "updated"]
 
@@ -172,7 +173,7 @@ def test_moving_out_tries_again_and_puts_back_what_moved(
         update_swap.move_out(plan.app, plan.old, plan.keep, Log(plan.log), timeout=0.6)
     monkeypatch.setattr(os, "replace", real)
     assert len(held) >= 2  # tried again
-    assert sorted(p.name for p in plan.app.iterdir()) == [".hidden", EXE, "data", "resources"]
+    assert sorted(p.name for p in plan.app.iterdir()) == sorted([".hidden", EXE, "data", "resources"])
     assert list(plan.old.iterdir()) == []
     assert log_lines(plan) == ["busy: resources: in use"]
 
@@ -205,10 +206,12 @@ def test_waiting_for_a_process(tmp_path: Path) -> None:
     while done.poll() is None:
         time.sleep(0.05)
     assert update_swap.wait_gone(done.pid, 1.0)
-    unreaped = subprocess.Popen([sys.executable, "-c", "pass"])
-    time.sleep(0.5)  # exited, its parent (this test) hasn't reaped it yet: a zombie on POSIX
-    assert update_swap.wait_gone(unreaped.pid, 2.0)
-    unreaped.wait()
+    # Linux tells an exited, unreaped process by /proc; macOS has no portable copy to swap
+    if sys.platform != "darwin":
+        unreaped = subprocess.Popen([sys.executable, "-c", "pass"])
+        time.sleep(0.5)  # exited, its parent (this test) hasn't reaped it yet: a zombie on POSIX
+        assert update_swap.wait_gone(unreaped.pid, 2.0)
+        unreaped.wait()
     running = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
         assert not update_swap.wait_gone(running.pid, 0.3)
@@ -263,6 +266,7 @@ def test_the_whole_swap_as_its_own_process(tmp_path: Path) -> None:
         (folder / name).write_text(script, encoding="utf-8")
         (folder / name).chmod(0o755)
     app = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(1.5)"])  # the quitting app
+    threading.Thread(target=app.wait, daemon=True).start()  # reaped when it exits, as by its real parent
     plan = Plan(pid=app.pid, app=plan.app, new=plan.new, old=plan.old, exe=plan.app / name, log=plan.log)
     file = write_plan(plan, tmp_path / "update-0.3.4.json")
     swap = subprocess.Popen(

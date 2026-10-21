@@ -722,6 +722,9 @@ def nsis(setup: Path, previous: Path | None) -> None:
 
 
 def main(argv: list[str]) -> int:
+    for stream in (sys.stdout, sys.stderr):  # the steps name buttons in Chinese; a runner's console is cp1252
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     if os.environ.get("GITHUB_ACTIONS") != "true":
         fail("this test installs, updates and uninstalls SpaceKnife in this user's profile: CI only")
     if len(argv) >= 2 and argv[0] == "portable":
