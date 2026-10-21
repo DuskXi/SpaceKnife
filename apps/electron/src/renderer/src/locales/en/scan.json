@@ -211,5 +211,6 @@
  "隐藏不匹配": "Hide non-matches",
  "（上次 {n} 项）": "(last scan: {n} items)",
  "，上限 {n}%": ", limit {n}%",
- "，均低于上限 {n}%": ", both under the {n}% limit"
+ "，均低于上限 {n}%": ", both under the {n}% limit",
+ "拖动可调整顺序": "Drag to reorder"
 }

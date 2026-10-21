@@ -27,6 +27,7 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { moveTo, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { downloading, downloadOf, hasUpdate, visibleSurface } from "./updates";
 import { getLang, setLang, t } from "@/lib/i18n";
@@ -702,6 +703,23 @@ export async function closeTab(id: string): Promise<void> {
 
 export function activate(id: string): void {
   set({ active: id });
+}
+
+/** UI-MAIN-04: put tab `id` after `index` other tabs (dragging it in the title bar). */
+export function moveTab(id: string, index: number): void {
+  set((s) => ({ tabs: moveTo(s.tabs, id, index) }));
+}
+
+/** The tabs back in a remembered order (Esc while dragging). */
+export function restoreTabOrder(ids: readonly string[]): void {
+  set((s) => ({ tabs: ids.flatMap((id) => s.tabs.filter((t) => t.id === id)).concat(s.tabs.filter((t) => !ids.includes(t.id))) }));
+}
+
+/** Ctrl+Shift+PgUp / PgDn, 「标签左移」 / 「标签右移」: the active tab one slot left or right. */
+export function moveActiveTab(step: -1 | 1): void {
+  const s = get();
+  const to = stepIndex(s.tabs, s.active, step);
+  if (to !== null) moveTab(s.active, to);
 }
 
 /** W8: split the active scan tab into two panes (a second view of the same scan). */

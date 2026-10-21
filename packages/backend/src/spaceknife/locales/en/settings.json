@@ -367,5 +367,7 @@
  "你的设置": "Your choice",
  "文件夹归类 {path} 读不出来，已忽略：{error}": "Could not read the folder classes in {path}, ignored: {error}",
  "文件夹归类的格式不对，已忽略": "The folder classes are not in the expected format, ignored",
- "没有 id 为「{cid}」的类别": "There is no class with the id \"{cid}\""
+ "没有 id 为「{cid}」的类别": "There is no class with the id \"{cid}\"",
+ "标签左移": "Move tab left",
+ "标签右移": "Move tab right"
 }

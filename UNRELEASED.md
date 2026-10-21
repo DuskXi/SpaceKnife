@@ -17,6 +17,7 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 - **Games, projects and other folders decide their files' class.** Everything in a recognised game install counts as the new **Games** class, whatever its extension: Steam libraries, the games of Epic, GOG, Xbox, EA, Ubisoft, Riot, HoYoPlay / miHoYo and Hypergryph, Unity, Unreal, Godot and Blizzard games, Minecraft and game saves. Everything in a project folder (one holding `.git`, `package.json`, `Cargo.toml`, `pyproject.toml`, `*.sln` and the like) counts as **Code**, model caches (`.ollama`, `.cache/huggingface`) as **Data**, System Volume Information and the NTFS metadata as **Programs**, and so do the files in no class inside installed software and app data. A stray `package.json` in Downloads doesn't make Downloads a project. On a developer's 2.7 TB disk, Other fell from 34% to 2% of the space. The **Classes** page says what a folder's files would be by extension ("By their extensions these are: Video 3.0 GB"), the **Details** page says why a folder counts as what it does, and **Classify** in a folder's context menu sets your own choice, listed under **Settings › File classes**.
 - **Hover a class to see where it is.** On the **Classes** page, hovering a class (a row, or a segment of the bar) lights it up in the picture: the rest dims, while the class's files, the small-items blocks mostly of it and the folders that count as it whole stay bright with a glowing edge, within the folder the page describes. Nothing is filtered: move away and the picture is as it was.
 - **Resizable details panel.** Drag its left edge to make it 280 to 640 pixels wide (the picture always keeps at least 360) and the picture is laid out again as you drag. Double-click the edge for the default width. The width is remembered.
+- **Reorder tabs.** Drag a tab sideways to move it (Esc while dragging puts the tabs back), or move the current tab with <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> (also **Move tab left / right** in the command palette).
 
 ### Fixes
 
@@ -44,6 +45,7 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 - **游戏、项目等文件夹决定里面文件的类别**：认得出的游戏安装目录里，所有文件不论扩展名都算新类别「游戏」：Steam 游戏库，Epic、GOG、Xbox、EA、Ubisoft、Riot、HoYoPlay / miHoYo、鹰角的游戏，Unity、Unreal、Godot、暴雪游戏，Minecraft 和游戏存档。项目文件夹（含 `.git`、`package.json`、`Cargo.toml`、`pyproject.toml`、`*.sln` 等）里的文件算「代码/开发」，模型缓存（`.ollama`、`.cache/huggingface`）算「数据/模型」，系统卷信息和 NTFS 元数据算「程序/系统」，已安装的软件和应用数据里没有类别的文件也算「程序/系统」。「下载」里散落一个 `package.json` 不会让整个「下载」算项目。在一台 2.7 TB 的开发用电脑上，「其他」从占用空间的 34% 降到 2%。「类别统计」写明文件夹带进来的文件按扩展名本是什么（「其中按扩展名本是：视频 3.0 GB」），「详情」页写明选中的文件夹为什么算作这一类，右键文件夹的「归类」可以自己指定，指定过的列在「设置 › 文件类别」里。
 - **悬停类别，图上就亮出它在哪**：「类别统计」里悬停一个类别（一行，或分段条的一段），左边的图就把这一类高亮出来：其余部分压暗，这一类的文件、以它为主的小项块和整个算作它的文件夹保持原色、亮起一圈，只看这一页统计的文件夹之内。不会过滤，移开就恢复原样。
 - **详情面板可以调宽**：拖动左边缘，宽度在 280–640 像素之间（画面始终至少留 360），画面随拖动重新排布；双击左边缘恢复默认宽度。宽度会被记住。
+- **标签可以调整顺序**：按住标签左右拖动即可（拖动中按 Esc 恢复原样），或用 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> 移动当前标签（命令面板里也有「标签左移」「标签右移」）。
 
 ### 修复
 

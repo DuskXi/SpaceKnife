@@ -95,6 +95,9 @@ button:disabled { cursor: default; }
 .tab-close { flex: none; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--sk-color-text-tertiary); visibility: hidden; }
 .tab.on .tab-close, .tab:hover .tab-close { visibility: visible; }
 .tab-close:hover { background: var(--sk-color-bg-active); color: var(--sk-color-text-primary); }
+/* UI-MAIN-04: the tab being dragged lifts a little and follows the pointer slot by slot */
+.tabs.reordering .tab { cursor: grabbing; }
+.tab.dragging { background: var(--sk-color-bg-active); color: var(--sk-color-text-primary); box-shadow: var(--sk-shadow-popover); z-index: 1; }
 .tab-new { flex: none; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin-bottom: 2px; border: 0; border-radius: var(--sk-radius-md); background: transparent; color: var(--sk-color-text-secondary); }
 .tab-new:hover { background: var(--sk-color-bg-hover); }
 .drag { flex: 1 1 auto; }

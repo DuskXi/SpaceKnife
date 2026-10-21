@@ -31,6 +31,7 @@ The keys below are for Windows and Linux. For macOS, see [Differences on macOS](
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the current tab. Closing a tab that is scanning stops that scan; closing the last tab leaves a new start page |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | Next tab (after the last one, back to the first) |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | Previous tab |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | Move the current tab one place left / right |
 
 ## Navigation
 
@@ -267,6 +268,8 @@ Every other command shows up when you type its name or one of the words below:
 | Open terminal here | <kbd>Ctrl</kbd>+<kbd>&#96;</kbd> | `terminal` · `shell` · `console` | — |
 | New tab | <kbd>Ctrl</kbd>+<kbd>T</kbd> | `new tab` | — |
 | Close tab | <kbd>Ctrl</kbd>+<kbd>W</kbd> | `close tab` | — |
+| Move tab left | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> | `move tab left` · `reorder tabs` | — |
+| Move tab right | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd> | `move tab right` · `reorder tabs` | — |
 | Red tag | <kbd>1</kbd> · <kbd>Ctrl</kbd>+<kbd>1</kbd> | `red tag` | — |
 | Yellow tag | <kbd>2</kbd> · <kbd>Ctrl</kbd>+<kbd>2</kbd> | `yellow tag` | — |
 | Green tag | <kbd>3</kbd> · <kbd>Ctrl</kbd>+<kbd>3</kbd> | `green tag` | — |

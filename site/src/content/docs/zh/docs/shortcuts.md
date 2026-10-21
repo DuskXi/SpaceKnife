@@ -31,6 +31,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | 关闭当前标签；关闭正在扫描的标签会停止这次扫描，关掉最后一个标签时会留下一个新的启动页 |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>、<kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | 下一个标签（到最后一个后回到第一个） |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>、<kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | 上一个标签 |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | 把当前标签左移 / 右移一位 |
 
 ## 导航
 
@@ -267,6 +268,8 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 在此打开终端 | <kbd>Ctrl</kbd>+<kbd>&#96;</kbd> | `terminal` · `shell` · `console` | — |
 | 新建标签 | <kbd>Ctrl</kbd>+<kbd>T</kbd> | `new tab` | — |
 | 关闭标签 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | `close tab` | — |
+| 标签左移 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> | `move tab left` · `reorder tabs` | — |
+| 标签右移 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd> | `move tab right` · `reorder tabs` | — |
 | 红色标签 | <kbd>1</kbd> · <kbd>Ctrl</kbd>+<kbd>1</kbd> | `red tag` | — |
 | 黄色标签 | <kbd>2</kbd> · <kbd>Ctrl</kbd>+<kbd>2</kbd> | `yellow tag` | — |
 | 绿色标签 | <kbd>3</kbd> · <kbd>Ctrl</kbd>+<kbd>3</kbd> | `green tag` | — |

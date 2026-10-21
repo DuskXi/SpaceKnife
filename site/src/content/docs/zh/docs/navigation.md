@@ -175,9 +175,11 @@ description: 放大与返回、导航历史、面包屑、详情面板、悬停�
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | 关闭标签；中键单击标签或点它的 × 也一样 |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>、<kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | 下一个标签 |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>、<kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | 上一个标签 |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | 把当前标签左移 / 右移一位 |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | 设置 |
 
 - 切换标签首尾循环。
+- 按住标签左右拖动可以调整顺序：指针越过相邻标签的中线，就和它换位。拖动中按 <kbd>Esc</kbd> 恢复原来的顺序。用按键移动标签到两端为止，不循环。
 - 关闭仍在扫描的标签会停止那次扫描。关掉最后一个标签后，会留下一个空的「新扫描」标签。
 - 设置也是一个标签，而且只有一个。在设置里，<kbd>/</kbd> 或 <kbd>Ctrl</kbd>+<kbd>F</kbd> 跳到设置搜索框，<kbd>Backspace</kbd> / <kbd>Alt</kbd>+<kbd>←</kbd> 和 <kbd>Alt</kbd>+<kbd>→</kbd> 在看过的设置页之间后退、前进。
 

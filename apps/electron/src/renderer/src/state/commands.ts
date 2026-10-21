@@ -13,6 +13,7 @@ import {
   call,
   checkUpdates,
   closeTab,
+  moveActiveTab,
   newStartTab,
   openMachineTab,
   openSettingsTab,
@@ -236,6 +237,10 @@ export async function runCommand(id: string): Promise<void> {
     case "tab.close":
       await closeTab(tab.id);
       return;
+    case "tab.move_left":
+      return moveActiveTab(-1);
+    case "tab.move_right":
+      return moveActiveTab(1);
     case "tag.red":
     case "tag.yellow":
     case "tag.green":

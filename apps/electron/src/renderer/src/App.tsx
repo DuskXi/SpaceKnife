@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { basketAdd, boot, call, clearFilter, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
+import { basketAdd, boot, call, clearFilter, closeTab, moveActiveTab, newStartTab, openSettingsTab, settingsHistory, setViewSettings, viewCall } from "@/state/actions";
 import { BrowserLayer } from "@/shell/BrowserLayer";
 import { ContextMenu } from "@/shell/ContextMenu";
 import { ExportDialog } from "@/shell/ExportDialog";
@@ -122,6 +122,8 @@ function onKey(e: KeyboardEvent): unknown {
   if (ctrl && key.toLowerCase() === "t") return (done(), newStartTab());
   if (ctrl && key.toLowerCase() === "w") return (done(), void closeTab(tab.id));
   if (ctrl && key === ",") return (done(), openSettingsTab());
+  // Ctrl+Shift+PgUp / PgDn: move the active tab (UI-MAIN-04); without Shift they switch tabs
+  if (ctrl && e.shiftKey && (key === "PageUp" || key === "PageDown")) return (done(), moveActiveTab(key === "PageUp" ? -1 : 1));
   if (ctrl && (key === "Tab" || key === "PageDown" || key === "PageUp")) {
     const idx = s.tabs.findIndex((x) => x.id === tab.id);
     const step = (e.shiftKey && key === "Tab") || key === "PageUp" ? -1 : 1;

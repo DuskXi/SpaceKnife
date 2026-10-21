@@ -175,9 +175,11 @@ Each scan opens in its own tab in the title bar. The tab shows the scan's state 
 | <kbd>Ctrl</kbd>+<kbd>W</kbd> | Close the tab; middle-click a tab or its × does the same |
 | <kbd>Ctrl</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageDown</kbd> | Next tab |
 | <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd>, <kbd>Ctrl</kbd>+<kbd>PageUp</kbd> | Previous tab |
+| <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd> / <kbd>PageDown</kbd> | Move the current tab one place left / right |
 | <kbd>Ctrl</kbd>+<kbd>,</kbd> | Settings |
 
 - Tab switching wraps around.
+- Drag a tab sideways to change the order: it takes a neighbour's place once the pointer passes that tab's middle. <kbd>Esc</kbd> while dragging puts every tab back. Moving the tabs with the keys stops at the ends.
 - Closing a tab that is still scanning stops that scan. Closing the last tab leaves an empty **New scan** tab.
 - Settings opens as a tab of its own, and only once. In it, <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>F</kbd> jumps to the settings search, and <kbd>Backspace</kbd> / <kbd>Alt</kbd>+<kbd>←</kbd> and <kbd>Alt</kbd>+<kbd>→</kbd> move back and forward through the settings pages you visited.
 
