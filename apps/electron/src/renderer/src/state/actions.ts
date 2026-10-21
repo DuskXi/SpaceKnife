@@ -737,6 +737,21 @@ export async function refreshVolumes(): Promise<void> {
   }
 }
 
+/** Read this computer's disks (machine.disks) for the start page's card and 「本机磁盘」: at most
+ * once a minute unless `force` (the page's 「刷新」); a failure keeps what was read before. */
+export async function refreshMachine(force = false): Promise<void> {
+  const s = get();
+  if (s.machineLoading || s.conn !== "ready" || (!force && s.machine && Date.now() - s.machineAt < 60_000)) return;
+  set({ machineLoading: true });
+  try {
+    set({ machine: await call("machine.disks", {}), machineAt: Date.now() });
+  } catch (err) {
+    if (force) toast(t("读取磁盘失败：{error}", { error: err instanceof Error ? err.message : String(err) }));
+  } finally {
+    set({ machineLoading: false });
+  }
+}
+
 export async function refreshLists(): Promise<void> {
   try {
     const [volumes, snapshots] = await Promise.all([call("volume.list", {}), call("snapshot.list", {})]);

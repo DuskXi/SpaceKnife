@@ -2,7 +2,8 @@
 // are tested. Rates are line rates as the interfaces are sold (SATA 6 Gb/s, USB 5 Gb/s); PCIe links
 // are named by generation and lanes, with what they carry after encoding (≈ GB/s).
 
-import type { DiskLink, MachineDisks, PhysicalDisk, VolumeOverview } from "@/protocol/generated";
+import type { DiskLink, MachineDisks, PhysicalDisk, SnapshotPoint, VolumeOverview } from "@/protocol/generated";
+import { fmtAgo, fmtSize } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 
 /** MB/s one lane carries after encoding, per PCIe generation (1-6). */
@@ -204,4 +205,191 @@ export function volumesOf(data: MachineDisks, disk: PhysicalDisk): VolumeOvervie
 export function elsewhere(data: MachineDisks): VolumeOverview[] {
   const placed = new Set(data.disks.flatMap((d) => d.parts.map((p) => p.mount_point)));
   return data.volumes.filter((v) => !placed.has(v.volume.mount_point));
+}
+
+// ------------------------------------------------------------------ the dashboard's analysis
+
+const seconds = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000) || 0;
+
+/** A volume that takes part in the totals: local, with a size, readable now. */
+const local = (v: VolumeOverview): boolean => !v.volume.is_remote && v.volume.total > 0 && !v.volume.reason;
+
+export interface Totals {
+  /** disks with a medium */
+  disks: number;
+  /** their bytes */
+  capacity: number;
+  volumes: number;
+  /** volumes SpaceKnife knows from a scan or a snapshot */
+  known: number;
+  /** used and free bytes of the local volumes on these disks */
+  used: number;
+  free: number;
+}
+
+export function totals(data: MachineDisks): Totals {
+  const present = data.disks.filter((d) => d.size != null);
+  const vols = data.volumes.filter(local);
+  const onDisks = vols.filter((v) => v.disks.length > 0);
+  return {
+    disks: present.length,
+    capacity: present.reduce((sum, d) => sum + (d.size ?? 0), 0),
+    volumes: vols.length,
+    known: vols.filter((v) => v.scan).length,
+    used: onDisks.reduce((sum, v) => sum + v.volume.used, 0),
+    free: onDisks.reduce((sum, v) => sum + v.volume.free, 0),
+  };
+}
+
+export type MediaTier = "nvme" | "sata" | "hdd" | "external" | "other";
+
+export interface MediaShare {
+  tier: MediaTier;
+  label: string;
+  bytes: number;
+  disks: number;
+  /** a step of one hue, brighter for faster media (design tokens visual.branch.1.*) */
+  color: string;
+}
+
+const TIER_OF: Record<PhysicalDisk["media"], MediaTier> = {
+  nvme_ssd: "nvme",
+  sata_ssd: "sata",
+  ssd: "sata",
+  hdd: "hdd",
+  usb_hdd: "external",
+  usb_ssd: "external",
+  usb_flash: "external",
+  sd_card: "external",
+  network: "other",
+  virtual: "other",
+  unknown: "other",
+};
+const TIERS: MediaTier[] = ["nvme", "sata", "hdd", "external", "other"];
+const TIER_COLOR: Record<MediaTier, string> = {
+  nvme: "var(--sk-visual-branch-1-1)",
+  sata: "var(--sk-visual-branch-1-2)",
+  hdd: "var(--sk-visual-branch-1-3)",
+  external: "var(--sk-visual-branch-1-4)",
+  other: "var(--sk-visual-branch-neutral)",
+};
+
+export function tierName(tier: MediaTier): string {
+  switch (tier) {
+    case "nvme":
+      return "NVMe SSD";
+    case "sata":
+      return t("SATA 及其他 SSD");
+    case "hdd":
+      return t("机械硬盘");
+    case "external":
+      return t("外接盘与存储卡");
+    default:
+      return t("其他");
+  }
+}
+
+/** The disks' capacity by media, fastest first (the part-to-whole bar); empty tiers left out. */
+export function byMedia(data: MachineDisks): MediaShare[] {
+  const sums = new Map<MediaTier, { bytes: number; disks: number }>();
+  for (const d of data.disks) {
+    if (d.size == null) continue;
+    const tier = TIER_OF[d.media] ?? "other";
+    const s = sums.get(tier) ?? { bytes: 0, disks: 0 };
+    sums.set(tier, { bytes: s.bytes + d.size, disks: s.disks + 1 });
+  }
+  return TIERS.filter((tier) => sums.has(tier)).map((tier) => ({ tier, label: tierName(tier), color: TIER_COLOR[tier], ...sums.get(tier)! }));
+}
+
+/** MB/s a link carries (PCIe after encoding, SATA after 8b/10b, USB about a tenth of its line rate);
+ * `top`: the most the disk supports. */
+export function linkMBps(link: DiskLink | null | undefined, top = false): number | null {
+  if (!link) return null;
+  if (link.kind === "pcie") return top ? pcieMBps(link.max_pcie_gen, link.max_pcie_width) : pcieMBps(link.pcie_gen, link.pcie_width);
+  const rate = top ? link.max_rate_mbps : link.rate_mbps;
+  if (!rate) return null;
+  return link.kind === "sata" ? (SATA_MBPS[rate] ?? Math.round(rate / 10)) : Math.round(rate / 10);
+}
+
+/** How much of what the disk supports its link carries now (0-1); null when the most isn't known. */
+export function linkShare(link: DiskLink | null | undefined): number | null {
+  const now = linkMBps(link);
+  const top = linkMBps(link, true);
+  return now && top ? Math.min(1, now / top) : null;
+}
+
+/** The disk with the fastest link. */
+export function fastest(data: MachineDisks): { disk: PhysicalDisk; mbps: number } | null {
+  let best: { disk: PhysicalDisk; mbps: number } | null = null;
+  for (const d of data.disks) {
+    const mbps = d.size != null ? linkMBps(d.link) : null;
+    if (mbps && (!best || mbps > best.mbps)) best = { disk: d, mbps };
+  }
+  return best;
+}
+
+/** The local volume with the least room left, by share used. */
+export function fullest(data: MachineDisks): { v: VolumeOverview; share: number } | null {
+  let best: { v: VolumeOverview; share: number } | null = null;
+  for (const v of data.volumes.filter(local)) {
+    const share = v.volume.used / v.volume.total;
+    if (!best || share > best.share) best = { v, share };
+  }
+  return best;
+}
+
+/** Bytes in use on a disk: its volumes' used space (a volume over several disks counts by its
+ * share here, when known); null when nothing on it is known. */
+export function diskUsed(disk: PhysicalDisk, data: MachineDisks): number | null {
+  const by = new Map(data.volumes.map((v) => [v.volume.mount_point, v]));
+  let used = 0;
+  let known = false;
+  for (const p of disk.parts) {
+    const v = by.get(p.mount_point);
+    if (!v || !v.volume.total) continue;
+    if (v.disks.length <= 1) used += v.volume.used;
+    else if (p.bytes != null) used += (v.volume.used * p.bytes) / v.volume.total;
+    else continue;
+    known = true;
+  }
+  return known ? used : null;
+}
+
+/** Growth between the two newest complete snapshots of a volume. */
+export function growth(history: SnapshotPoint[]): { delta: number; since: string } | null {
+  if (history.length < 2) return null;
+  return { delta: history[0]!.bytes_alloc - history[1]!.bytes_alloc, since: history[1]!.at };
+}
+
+export interface Finding {
+  level: "warn" | "info";
+  text: string;
+}
+
+const pct = (share: number): string => `${Math.round(share * 100)}%`;
+const SSD: PhysicalDisk["media"][] = ["nvme_ssd", "sata_ssd", "ssd", "usb_ssd"];
+
+/** What is worth knowing, the ones to act on first: nearly full volumes, links below what the disk
+ * supports, a narrow controller, an SSD without TRIM, a volume that grew a lot since its last
+ * snapshot. Nothing about volumes not scanned yet. */
+export function findings(data: MachineDisks, now = Date.now() / 1000): Finding[] {
+  const out: Finding[] = [];
+  const sep = byLang("：", ": ");
+  for (const v of data.volumes.filter(local)) {
+    const share = v.volume.used / v.volume.total;
+    const mount = v.volume.mount_point;
+    if (share >= 0.9) out.push({ level: "warn", text: t("{mount} 已用 {pct}，只剩 {free}", { mount, pct: pct(share), free: fmtSize(v.volume.free, true) }) });
+    else if (share >= 0.8) out.push({ level: "info", text: t("{mount} 已用 {pct}", { mount, pct: pct(share) }) });
+    const g = growth(v.history);
+    if (g && Math.abs(g.delta) >= Math.max(5 * 2 ** 30, v.volume.total * 0.02)) {
+      const args = { mount, size: fmtSize(Math.abs(g.delta), true), when: fmtAgo(seconds(g.since), now) };
+      out.push({ level: "info", text: g.delta > 0 ? t("{mount} 比 {when} 的快照多了 {size}", args) : t("{mount} 比 {when} 的快照少了 {size}", args) });
+    }
+  }
+  for (const d of data.disks) {
+    if (d.size == null) continue;
+    for (const n of linkNotes(d)) out.push({ level: n.warn ? "warn" : "info", text: `${diskName(d)}${sep}${n.text}` });
+    if (d.trim === false && SSD.includes(d.media)) out.push({ level: "info", text: t("{disk} 不支持 TRIM：长期写入后可能变慢", { disk: diskName(d) }) });
+  }
+  return [...out.filter((f) => f.level === "warn"), ...out.filter((f) => f.level === "info")];
 }

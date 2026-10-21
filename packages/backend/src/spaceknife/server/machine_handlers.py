@@ -3,7 +3,7 @@
 The disks and the volumes' place on them come from :mod:`spaceknife.disks`; what is known of each
 volume comes from a scan of its root open in this backend (counts, and once it is done the largest
 file classes and top-level folders) or else from the newest snapshot of it (counts only: a snapshot
-is not loaded for this).
+is not loaded for this). The headers of the volume's complete snapshots give its history.
 """
 
 from __future__ import annotations
@@ -23,12 +23,13 @@ from spaceknife_protocol.methods import MACHINE_DISKS
 from spaceknife_protocol.scan import ClassStat
 
 from .. import disks, paths
+from ..scan.scanner import ScanState
 from ..scan.volume import VolumeInfo, list_volumes
 from ..store import snapshot
 from ..store.nodes import Kind
 from .compute import Latest
 from .scan_handlers import warm_media
-from .scans import ScanHandle, saved_method, summary_of, volume_model
+from .scans import ScanHandle, saved_method, saved_state, summary_of, volume_model
 
 if TYPE_CHECKING:
     from .app import Server
@@ -36,6 +37,7 @@ if TYPE_CHECKING:
 
 TOP_CLASSES = 5
 TOP_FOLDERS = 3
+HISTORY = 12  # snapshots of a volume for its growth (the newest 10 are kept, then weekly)
 
 
 def _key(path: str) -> str:
@@ -92,36 +94,49 @@ def _live(server: Server, handle: ScanHandle) -> m.VolumeScan:
     )
 
 
-def newest_snapshot(mount_point: str, base: Path | None = None) -> m.VolumeScan | None:
-    """The newest snapshot of a whole volume (its header only)."""
+Saved = tuple[m.VolumeScan | None, list[m.SnapshotPoint]]
+
+
+def saved_scans(mount_point: str, base: Path | None = None) -> Saved:
+    """The newest complete snapshot of a whole volume and the history of its complete snapshots,
+    newest first (headers only; stopped scans saved by hand are left out: their counts are partial)."""
     folder = (base or paths.snapshots_dir()) / snapshot.root_key([mount_point])
     try:
         files = sorted(folder.glob(f"*{snapshot.SUFFIX}"), key=lambda f: f.name, reverse=True)
     except OSError:
-        return None
+        return None, []
+    newest: m.VolumeScan | None = None
+    history: list[m.SnapshotPoint] = []
     for file in files:
+        if len(history) >= HISTORY:
+            break
         try:
             header = snapshot.read_header(file)
         except (OSError, snapshot.SnapshotError, ValueError):
             continue
         stats = header.stats
-        return m.VolumeScan(
-            source="snapshot",
-            snapshot=str(file),
-            at=header.created_at,
-            files=int(stats.get("files", 0)),
-            dirs=int(stats["dirs"]) if isinstance(stats.get("dirs"), int) else None,
-            bytes_alloc=int(stats.get("bytes_alloc", 0)),
-            method=saved_method(stats),
-        )
-    return None
+        if saved_state(stats) != ScanState.DONE:
+            continue
+        files_n, alloc = int(stats.get("files", 0)), int(stats.get("bytes_alloc", 0))
+        if newest is None:
+            newest = m.VolumeScan(
+                source="snapshot",
+                snapshot=str(file),
+                at=header.created_at,
+                files=files_n,
+                dirs=int(stats["dirs"]) if isinstance(stats.get("dirs"), int) else None,
+                bytes_alloc=alloc,
+                method=saved_method(stats),
+            )
+        history.append(m.SnapshotPoint(at=header.created_at, bytes_alloc=alloc, files=files_n))
+    return newest, history
 
 
 def overview(
     server: Server,
     volumes: Sequence[VolumeInfo],
     found: disks.Probe,
-    saved: dict[str, m.VolumeScan],
+    saved: dict[str, Saved],
 ) -> m.MachineDisks:
     """The page's data (on the compute pool: summing an open scan's classes reads its columns)."""
     open_scans: dict[str, ScanHandle] = {}
@@ -138,9 +153,12 @@ def overview(
         if model is None:
             continue
         handle = open_scans.get(_key(v.mount_point))
-        scan = _live(server, handle) if handle is not None else saved.get(v.mount_point)
+        newest, history = saved.get(v.mount_point, (None, []))
+        scan = _live(server, handle) if handle is not None else newest
         ids = [disk for disk, _size in found.parts.get(v.mount_point, [])]
-        out_volumes.append(m.VolumeOverview(volume=model, disks=list(dict.fromkeys(ids)), scan=scan))
+        out_volumes.append(
+            m.VolumeOverview(volume=model, disks=list(dict.fromkeys(ids)), scan=scan, history=history)
+        )
     # each disk's volumes, in disk order (those with no known offset last)
     on_disk: dict[str, list[tuple[int, str, int | None]]] = {}
     for mount, parts in found.parts.items():
@@ -171,15 +189,11 @@ def install(server: Server) -> None:
         await asyncio.to_thread(warm_media, volumes)
         found = await asyncio.to_thread(disks.probe, volumes)
 
-        def snapshots() -> dict[str, m.VolumeScan]:
-            out = {}
-            for v in volumes:
-                if not v.reason and (s := newest_snapshot(v.mount_point)) is not None:
-                    out[v.mount_point] = s
-            return out
+        def snapshots() -> dict[str, Saved]:
+            return {v.mount_point: saved_scans(v.mount_point) for v in volumes if not v.reason}
 
         saved = await asyncio.to_thread(snapshots)
         return await latest.run(("machine.disks", session.id), overview, server, volumes, found, saved)
 
 
-__all__ = ["install", "newest_snapshot", "overview"]
+__all__ = ["install", "overview", "saved_scans"]

@@ -12,6 +12,7 @@ import type {
   FilterVocab,
   FrameInfo,
   LogRecordEvent,
+  MachineDisks,
   OpProgressEvent,
   PathCheckResult,
   ScanStatus,
@@ -176,6 +177,12 @@ export interface AppState {
   update: UpdateStatus | null;
   /** the update card opened from the title bar's badge (shell/UpdateBadge) */
   updateOpen: boolean;
+  /** 「本机磁盘」 (machine.disks): the start page's card and the page; null until first read */
+  machine: MachineDisks | null;
+  /** Date.now() of that read, 0 before it */
+  machineAt: number;
+  /** a read of machine.disks is under way */
+  machineLoading: boolean;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -241,6 +248,9 @@ export const useApp = create<AppState>(() => ({
   visuals: [],
   update: null,
   updateOpen: false,
+  machine: null,
+  machineAt: 0,
+  machineLoading: false,
 }));
 
 export const set = useApp.setState;

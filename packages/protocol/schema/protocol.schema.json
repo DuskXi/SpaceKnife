@@ -6292,6 +6292,31 @@
       "title": "SnapshotLoadParams",
       "type": "object"
     },
+    "SnapshotPoint": {
+      "description": "A complete snapshot of a whole volume: how much it held then.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "bytes_alloc": {
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "bytes_alloc",
+        "files"
+      ],
+      "title": "SnapshotPoint",
+      "type": "object"
+    },
     "SnapshotSaveParams": {
       "additionalProperties": false,
       "properties": {
@@ -8195,6 +8220,14 @@
             "type": "string"
           },
           "title": "Disks",
+          "type": "array"
+        },
+        "history": {
+          "description": "The complete snapshots of the whole volume, newest first (at most 12): how it grew",
+          "items": {
+            "$ref": "#/$defs/SnapshotPoint"
+          },
+          "title": "History",
           "type": "array"
         },
         "scan": {

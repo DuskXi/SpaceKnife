@@ -120,12 +120,24 @@ class VolumeScan(Payload):
     )
 
 
+class SnapshotPoint(Payload):
+    """A complete snapshot of a whole volume: how much it held then."""
+
+    at: datetime
+    bytes_alloc: int
+    files: int
+
+
 class VolumeOverview(Payload):
     volume: VolumeInfo
     disks: list[str] = Field(
         default_factory=list, description="Ids of the disks it lives on ([]: none known)"
     )
     scan: VolumeScan | None = None
+    history: list[SnapshotPoint] = Field(
+        default_factory=list,
+        description="The complete snapshots of the whole volume, newest first (at most 12): how it grew",
+    )
 
 
 class MachineDisks(Payload):
@@ -142,6 +154,7 @@ __all__ = [
     "LinkKind",
     "MachineDisks",
     "PhysicalDisk",
+    "SnapshotPoint",
     "VolumeOverview",
     "VolumeScan",
 ]

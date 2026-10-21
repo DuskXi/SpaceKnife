@@ -65,12 +65,24 @@ async def test_what_a_scan_and_a_snapshot_tell(
     assert all((facts.root / f.name).is_dir() for f in scan.folders)
     assert [f.bytes for f in scan.folders] == sorted((f.bytes for f in scan.folders), reverse=True)
 
-    # without the open scan: the newest snapshot (its header only)
-    saved = machine_handlers.newest_snapshot(root)
+    # without the open scan: the newest snapshot (its header only), and the history of the volume
+    saved, history = machine_handlers.saved_scans(root)
     assert saved is not None and saved.source == "snapshot" and saved.snapshot == status.snapshot
     assert (saved.files, saved.bytes_alloc, saved.method) == (status.files, status.bytes_alloc, "hard")
     assert saved.classes == [] and saved.folders == []
+    assert [(h.files, h.bytes_alloc) for h in history] == [(status.files, status.bytes_alloc)]
     monkeypatch.setattr(machine_handlers, "_whole_root", lambda h: None)
-    out = machine_handlers.overview(server, [volume], found, {root: saved})
-    assert out.volumes[0].scan == saved
-    assert machine_handlers.newest_snapshot(str(tmp_path / "never scanned")) is None
+    out = machine_handlers.overview(server, [volume], found, {root: (saved, history)})
+    assert out.volumes[0].scan == saved and out.volumes[0].history == history
+    assert machine_handlers.saved_scans(str(tmp_path / "never scanned")) == (None, [])
+
+    # a second complete scan: the history grows, newest first (the first file renamed to an older name:
+    # snapshot files are named by the second, and both scans finish within one)
+    first = Path(status.snapshot or "")
+    first.rename(first.with_name("20000101-000000.sks"))
+    (facts.root / "grown.bin").write_bytes(b"x" * 300_000)
+    again = await client.call(SCAN_START, p.ScanStartParams(roots=[root]))
+    second = await wait_done(client, again.scan_id)
+    _saved, history = machine_handlers.saved_scans(root)
+    assert [h.bytes_alloc for h in history] == [second.bytes_alloc, status.bytes_alloc]
+    assert history[0].at >= history[1].at and second.bytes_alloc > status.bytes_alloc

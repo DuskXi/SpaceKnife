@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DiskLink, MachineDisks, PhysicalDisk, VolumeInfo, VolumeOverview } from "@/protocol/generated";
 
-import { bandwidthText, diskMap, diskName, elsewhere, linkBandwidth, linkNotes, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, volumesOf } from "./machine";
+import { bandwidthText, byMedia, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
 
 const link = (patch: Partial<DiskLink>): DiskLink => ({
   kind: "pcie",
@@ -56,6 +56,7 @@ const volume = (mount: string, used = 50, total = 100): VolumeOverview => ({
   } as VolumeInfo,
   disks: [],
   scan: null,
+  history: [],
 });
 
 describe("links", () => {
@@ -155,5 +156,87 @@ describe("disks", () => {
     const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", disks: [d], volumes: [volume("C:\\"), volume("D:\\"), volume("Z:\\")] };
     expect(volumesOf(data, d).map((v) => v.volume.mount_point)).toEqual(["D:\\", "C:\\"]);
     expect(elsewhere(data).map((v) => v.volume.mount_point)).toEqual(["Z:\\"]);
+  });
+});
+
+describe("the dashboard", () => {
+  const nvme = disk({ id: "d3", number: 3, size: 4000, system: true, link: link({ pcie_gen: 4, pcie_width: 4, max_pcie_gen: 5, max_pcie_width: 4 }), parts: [{ mount_point: "C:\\", bytes: 4000 }] });
+  const sata = disk({
+    id: "d2",
+    number: 2,
+    size: 2000,
+    media: "sata_ssd",
+    interface: "sata",
+    link: link({ kind: "sata", rate_mbps: 6000, max_rate_mbps: 6000 }),
+    controller_link: link({ pcie_gen: 2, pcie_width: 1 }),
+    parts: [{ mount_point: "H:\\", bytes: 2000 }],
+  });
+  const reader = disk({ id: "d8", number: 8, size: 500, media: "usb_flash", interface: "usb", trim: null, link: link({ kind: "usb", rate_mbps: 480, max_rate_mbps: 5000 }), parts: [{ mount_point: "E:\\", bytes: 500 }] });
+  const slot = disk({ id: "d9", number: 9, size: null, media: "usb_flash", interface: "usb", parts: [] });
+  const on = (v: VolumeOverview, ids: string[]): VolumeOverview => ({ ...v, disks: ids });
+  const data: MachineDisks = {
+    collected_at: "2026-10-21T00:00:00Z",
+    disks: [nvme, sata, reader, slot],
+    volumes: [on(volume("C:\\", 2700, 4000), ["d3"]), on(volume("H:\\", 1900, 2000), ["d2"]), on(volume("E:\\", 400, 500), ["d8"]), volume("Z:\\", 10, 100)],
+  };
+
+  it("sums disks, capacity and room", () => {
+    expect(totals(data)).toEqual({ disks: 3, capacity: 6500, volumes: 4, known: 0, used: 5000, free: 1500 });
+  });
+
+  it("splits the capacity by media, fastest first, one hue brighter for faster", () => {
+    const m = byMedia(data);
+    expect(m.map((x) => [x.tier, x.bytes, x.disks])).toEqual([
+      ["nvme", 4000, 1],
+      ["sata", 2000, 1],
+      ["external", 500, 1],
+    ]);
+    expect(m[0]!.color).toBe("var(--sk-visual-branch-1-1)");
+  });
+
+  it("finds the fastest link and the fullest volume", () => {
+    expect(fastest(data)?.disk.id).toBe("d3");
+    expect(fastest(data)?.mbps).toBe(7876);
+    expect(fullest(data)?.v.volume.mount_point).toBe("H:\\");
+  });
+
+  it("measures links against what the disk supports", () => {
+    expect(linkShare(nvme.link)).toBeCloseTo(7876 / 15752);
+    expect(linkShare(sata.link)).toBe(1);
+    expect(linkShare(reader.link)).toBeCloseTo(48 / 500);
+    expect(linkShare(link({ pcie_gen: 4, pcie_width: 4 }))).toBeNull(); // the most is not known
+    expect(linkMBps(link({ kind: "usb", rate_mbps: 5000 }))).toBe(500);
+  });
+
+  it("sums what is used on a disk", () => {
+    expect(diskUsed(nvme, data)).toBe(2700);
+    expect(diskUsed(slot, data)).toBeNull();
+    const spread = disk({ parts: [{ mount_point: "S:\\", bytes: 500 }] });
+    const both: MachineDisks = { ...data, volumes: [on(volume("S:\\", 600, 1000), ["a", "b"])] };
+    expect(diskUsed(spread, both)).toBe(300); // half the volume is here
+  });
+
+  it("lists findings, the ones to act on first", () => {
+    const f = findings(data);
+    expect(f.map((x) => x.level)).toEqual(["warn", "info", "info", "info", "info"]);
+    expect(f[0]!.text).toContain("H:\\");
+    expect(f.some((x) => x.text.includes("PCIe 5.0 ×4"))).toBe(true);
+    expect(f.some((x) => x.text.includes("480 Mb/s"))).toBe(true);
+    expect(f.some((x) => x.text.includes("E:\\") && x.text.includes("80%"))).toBe(true);
+    expect(f.some((x) => x.text.includes("PCIe 2.0 ×1"))).toBe(true);
+  });
+
+  it("tells growth between the two newest snapshots, and only a large one is a finding", () => {
+    const history = [
+      { at: "2026-10-20T00:00:00Z", bytes_alloc: 900 * 2 ** 30, files: 10 },
+      { at: "2026-10-17T00:00:00Z", bytes_alloc: 880 * 2 ** 30, files: 9 },
+    ];
+    expect(growth(history)).toEqual({ delta: 20 * 2 ** 30, since: "2026-10-17T00:00:00Z" });
+    expect(growth(history.slice(0, 1))).toBeNull();
+    const big = { ...on(volume("D:\\", 500 * 2 ** 30, 1000 * 2 ** 30), ["d0"]), history };
+    const small = { ...big, history: [history[0]!, { ...history[1]!, bytes_alloc: 899 * 2 ** 30 }] };
+    const now = Date.parse("2026-10-21T00:00:00Z") / 1000;
+    expect(findings({ ...data, disks: [], volumes: [big] }, now).map((x) => x.text)).toEqual([expect.stringContaining("20 GB")]);
+    expect(findings({ ...data, disks: [], volumes: [small] }, now)).toEqual([]);
   });
 });

@@ -4,7 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SnapshotInfo, VolumeInfo } from "@/protocol/generated";
-import { call, openMachineTab, openSnapshot, refreshLists, refreshVolumes, startScan } from "@/state/actions";
+import { call, openSnapshot, refreshLists, refreshVolumes, startScan } from "@/state/actions";
+import { MachineCard } from "@/pages/MachineCard";
 import { type LoadLevel, patchStartForm, type ScanMethod, setting, startFormOf, type Tab, toast, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtShare, fmtSize, fmtSizeAs } from "@/lib/format";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
@@ -207,11 +208,6 @@ export function StartPage({ tab }: { tab: Tab }) {
           <div className="start-scroll">
             <div className="start-title">
               <h1>{t("选择要扫描的位置")}</h1>
-              <span className="flex" />
-              <button className="ghost small" title={t("每块盘的类型、接口与速率，以及盘上的卷")} onClick={openMachineTab}>
-                <Icon name="gauge" size={14} />
-                {t("本机磁盘")}
-              </button>
               <button
                 className="ghost small"
                 disabled={refreshing}
@@ -514,6 +510,7 @@ function Recents({ tab }: { tab: Tab }) {
 
   return (
     <aside className="start-side" aria-label={t("最近")}>
+      <MachineCard />
       <div className="start-title">
         <h2>
           {t("最近")} <span className="mono muted">{records.length}</span>

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "5204d10ceb9ba102";
+export const SCHEMA_HASH = "8daf3bc03a37415f";
 
 export interface AgeCond {
   end: number;
@@ -1358,6 +1358,13 @@ export interface SnapshotLoadParams {
   path: string;
 }
 
+/** A complete snapshot of a whole volume: how much it held then. */
+export interface SnapshotPoint {
+  at: string;
+  bytes_alloc: number;
+  files: number;
+}
+
 export interface SnapshotSaveParams {
   /** Target file; default = the auto-save folder */
   path?: string | null;
@@ -1757,6 +1764,8 @@ export interface VolumeListResult {
 export interface VolumeOverview {
   /** Ids of the disks it lives on ([]: none known) */
   disks: string[];
+  /** The complete snapshots of the whole volume, newest first (at most 12): how it grew */
+  history: SnapshotPoint[];
   scan: VolumeScan | null;
   volume: VolumeInfo;
 }
