@@ -160,13 +160,7 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
           <span className="num">{num}</span>
           <span className="unit">{unit}</span>
         </div>
-        <div
-          className="ins-stats"
-          title={t("精确 {alloc} 字节（逻辑 {size} 字节）", {
-            alloc: fmtInt(n.alloc),
-            size: fmtInt(n.size),
-          })}
-        >
+        <div className="ins-stats" title={t("精确 {alloc} 字节（逻辑 {size} 字节）", { alloc: fmtInt(n.alloc), size: fmtInt(n.size) })}>
           {dir
             ? (() => {
                 const fields = {
@@ -306,7 +300,7 @@ function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: st
 function TopList({ s, viewId }: { s: TreeSummaryResult; viewId: string; className: (id: string) => string }) {
   return (
     <section className="ins-section">
-      <h3>{plural(s.top_files.length, t("最大的 {n} 个文件", { n: s.top_files.length }), "Largest 1 file")}</h3>
+      <h3>{plural(s.top_files.length, t("最大的 {n} 个文件", { n: s.top_files.length }), "1 largest file")}</h3>
       <div className="top-list">
         {s.top_files.map((f) => (
           <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} whole={s.node.alloc} viewId={viewId} />
@@ -322,7 +316,7 @@ function SyntheticDetails({ frameKind, size, count }: { frameKind: number; size:
     frameKind === Kind.SMALL
       ? [plural(count, t("{n} 个小项", { n: fmtInt(count) }), "1 small item"), t("同一文件夹里单独画不下的小文件合并成一块。双击可以把它们逐个铺开。")]
       : frameKind === Kind.MORE
-        ? [plural(count, t("+{n} 项", { n: fmtInt(count) }), "+1 item"), t("同级里画不下的条目合并成一块。双击可以把它们铺开。")]
+        ? [t("+{n} 项", { n: fmtInt(count) }), t("同级里画不下的条目合并成一块。双击可以把它们铺开。")]
         : frameKind === Kind.FREE
           ? [t("可用空间"), t("系统报告的卷可用空间。按 F 显示或隐藏。")]
           : [t("未知空间"), t("未知空间 = 系统报告的已用 − 已扫描合计，通常是无权限或系统保留的区域。以管理员身份扫描可以减少这部分（M4）。")];
