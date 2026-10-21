@@ -8,7 +8,7 @@ const appVersion = process.argv.find((arg) => arg.startsWith(VERSION_ARG))?.slic
 
 const api: SkApi = {
   platform: process.platform as SkApi["platform"],
-  version: appVersion ?? process.env.npm_package_version ?? "0.3.1",
+  version: appVersion ?? process.env.npm_package_version ?? "0.3.2",
   backend: () => ipcRenderer.invoke("sk:backend") as Promise<BackendState>,
   onBackend(cb) {
     const listener = (_e: unknown, state: BackendState) => cb(state);

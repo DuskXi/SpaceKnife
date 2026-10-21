@@ -12,7 +12,7 @@ body:
     attributes:
       label: Version / 版本
       description: Settings › About, or the release you installed / 设置 › 关于，或你安装的版本
-      placeholder: "0.3.1"
+      placeholder: "0.3.2"
     validations:
       required: true
   - type: dropdown
