@@ -16,6 +16,15 @@ export interface Shot {
   alt: string;
 }
 
+/** One of the three visualizations (pictures: site/src/assets/visualizations). */
+export interface View {
+  id: "treemap" | "flame" | "polar";
+  name: string;
+  tag: string; // what size becomes
+  body: string;
+  alt: string;
+}
+
 export interface Faq {
   q: string;
   a: string;
@@ -46,6 +55,10 @@ export interface Content {
   featuresTitle: string;
   featuresSub: string;
   features: Feature[];
+  viewsTitle: string;
+  viewsSub: string;
+  views: View[];
+  viewsMore: string; // the link to the docs page about them
   shotsTitle: string;
   shotsSub: string;
   shots: Shot[];
@@ -124,6 +137,14 @@ export const content: Record<Lang, Content> = {
       { icon: "search", title: "Command palette", body: "Ctrl+K searches the whole scan by name and runs any command, without leaving the keyboard." },
       { icon: "terminal", title: "Export and command line", body: "Export reports as CSV, JSON, HTML and more, or scan, compare and export from a terminal." },
     ],
+    viewsTitle: "One scan, three ways to see it",
+    viewsSub: "The same folders and the same sizes, drawn three ways. Press V to switch at any time; the zoom, the selection and the filter stay.",
+    views: [
+      { id: "treemap", name: "Treemap", tag: "Size is area", body: "Boxes inside boxes. Each folder is a frame holding its contents, and every block's area is its share of the space, so the biggest files are the biggest blocks, however deep they sit.", alt: "Treemap of a made-up 2 TB drive: Videos, Games, Backups, Photos, VMs and Dev as frames of nested blocks, the free space as a green striped block" },
+      { id: "flame", name: "Flame graph", tag: "Size is length", body: "One band per folder level, growing up from the root bar. Every bar spans its share of its parent, so a path reads straight up the stack, and the height shows how deep the space sits.", alt: "Flame graph of the same drive: the drive as the root bar at the bottom, above it one band per folder level, each bar as long as its size" },
+      { id: "polar", name: "Polar flame graph", tag: "Size is angle", body: "A special pie chart, stacked in layers with no center area. Each ring is one folder level and each sector's angle is its share; the middle stays free for the folder you're in, with its name and size.", alt: "Polar flame graph of the same drive: the drive's name and size in the center disc, one ring per folder level around it, each sector's angle its share of the size" },
+    ],
+    viewsMore: "How the three visualizations work",
     shotsTitle: "A closer look",
     shotsSub: "Real screens of SpaceKnife 0.3, showing a made-up 2 TB drive.",
     shots: [
@@ -236,6 +257,14 @@ export const content: Record<Lang, Content> = {
       { icon: "search", title: "命令面板", body: "Ctrl+K 按名称搜索整个扫描结果，也能执行任何命令，不用离开键盘。" },
       { icon: "terminal", title: "导出与命令行", body: "导出 CSV、JSON、HTML 等报告，也可以在终端里扫描、对比和导出。" },
     ],
+    viewsTitle: "同一次扫描，三种看法",
+    viewsSub: "同样的文件夹、同样的大小，三种画法。随时按 V 切换，缩放、选中和过滤都保持不变。",
+    views: [
+      { id: "treemap", name: "树图", tag: "大小是面积", body: "盒子套盒子：每个文件夹是一个框，里面装着它的内容，每一块的面积就是它占的空间比例。最大的文件就是最大的块，不管它藏在第几层。", alt: "一块虚构的 2 TB 磁盘的树图：Videos、Games、Backups、Photos、VMs、Dev 是一层套一层的框，可用空间是绿色斜纹块" },
+      { id: "flame", name: "火焰图", tag: "大小是长度", body: "每一层文件夹是一条横带，从最下面的根条往上长。每一段按比例占父段的宽度，一条路径顺着往上读，叠得越高，空间藏得越深。", alt: "同一块磁盘的火焰图：磁盘本身是最下面的根条，往上每一带是一层文件夹，每一段的长度对应它的大小" },
+      { id: "polar", name: "火焰-极坐标图", tag: "大小是角度", body: "一种多层堆叠、没有中心区域的特殊饼图：每一环是一层文件夹，扇区的角度就是它占的比例；中间空出来，留给当前所在的文件夹，显示它的名称和大小。", alt: "同一块磁盘的火焰-极坐标图：中心圆写着磁盘的名称和大小，外面每一环是一层文件夹，扇区的角度对应它占的比例" },
+    ],
+    viewsMore: "三种可视化详解",
     shotsTitle: "细看一下",
     shotsSub: "SpaceKnife 0.3 的真实界面，显示的是一块虚构的 2 TB 磁盘。",
     shots: [

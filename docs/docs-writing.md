@@ -23,7 +23,8 @@
 - 提示块（Starlight 的写法）：`:::note`、`:::tip`、`:::caution`、`:::danger`，可带标题 `:::tip[标题]`，以 `:::` 结束。
 - 按键：`<kbd>Ctrl</kbd>+<kbd>K</kbd>`。这是唯一允许的 HTML。
 - 页内链接：相对路径，带结尾斜杠，同一语言：`[过滤](../filtering/)`、`[大小条件](../filtering/#大小)`。外部链接写完整网址。
-- 不用 MDX、组件、`import`、其他 HTML，也暂时不放图片。
+- 不用 MDX、组件、`import`、其他 HTML。
+- 图片只放界面截图：文件在 `site/src/assets/`，用相对路径引用（英文页 `../../../assets/…`，中文页多一层 `../`），英文页用英文界面的图（`*-en.webp`），中文页用中文界面的图。截图用模拟数据，不带个人路径和名字；三种可视化的图由 `uv run python tools/demo/screenshots.py --home <中性的空文件夹> --views --lang both` 生成。alt 写清图里是什么：软件的帮助页不显示图片，在原处显示这段文字。
 - 生成的段落夹在 `<!-- generated:<name>:start -->` 与 `<!-- generated:<name>:end -->` 之间，由 `tools/gen_docs.py` 写入，不要手改（改源头：命令与按键在 `packages/backend/src/spaceknife/palette/commands.py`，设置在 `packages/backend/src/spaceknife/settings.py`）；`uv run python tools/gen_docs.py --check` 检查是否最新。
 
 ## 3. 内容
@@ -38,4 +39,4 @@
 ## 4. 检查
 
 - 官网：`site/` 里 `pnpm build`（Node 22+），构建会检查链接到的页面是否存在。
-- 软件内：帮助页的测试会把每一页渲染一遍。
+- 软件内：帮助页的测试会把每一页渲染一遍，并检查每张图有 alt、文件存在。

@@ -9,6 +9,10 @@ import { render } from "./markdown";
 import { type DocLang, siteUrl } from "./site";
 
 const LANGS: DocLang[] = ["en", "zh"];
+/** The files in site/src/assets, as paths below it ("visualizations/treemap.webp"). */
+const ASSETS = new Set(
+  Object.keys(import.meta.glob("@site/assets/**/*")).map((k) => /(?:^|\/)site\/src\/assets\/(.+)$/.exec(k)?.[1] ?? k),
+);
 
 /** The elements the renderer makes; anything else would be HTML that came through. */
 const ELEMENTS = new Set([
@@ -51,7 +55,15 @@ describe.each(LANGS)("every %s page", (lang) => {
     expect(text.match(/&lt;[a-zA-Z!/][^\n]{0,40}/g) ?? [], "raw HTML").toEqual([]);
     // an aside that didn't open (a misspelt kind, a missing blank line) is left as ":::" text
     expect(text.match(/(^|>)\s*:::[^\n]{0,30}/gm) ?? [], "asides").toEqual([]);
-    expect(r.html.includes('class="help-image"'), "images").toBe(false);
+    // pictures: the help shows their description instead, so each has one; the file is in
+    // site/src/assets, found from the page's folder (site/src/content/docs/[zh/]docs) as the website finds it
+    const folder = `file:///site/src/content/docs/${lang === "zh" ? "zh/" : ""}docs/`;
+    for (const [, alt, src] of p.body.matchAll(/!\[([^\]]*)\]\(([^)\s]+)\)/g)) {
+      expect(alt!.trim(), `${src}: description`).not.toBe("");
+      const file = new URL(src!, folder).pathname;
+      expect(file.startsWith("/site/src/assets/"), `${src}: not in site/src/assets`).toBe(true);
+      expect(ASSETS.has(file.slice("/site/src/assets/".length)), `${src}: no such file`).toBe(true);
+    }
   });
 
   it.each(ORDER)("%s links only to pages and headings that exist", (id) => {

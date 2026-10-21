@@ -269,7 +269,8 @@ function renderRules(r: Renderer): void {
   r.rules.kbd_close = () => "</kbd>";
   r.rules.table_open = () => '<div class="help-table"><table>\n';
   r.rules.table_close = () => "</table></div>\n";
-  // no images in the pages yet (docs/docs-writing.md): one shows its description
+  // the pictures (screenshots) are the website's: the help shows a picture's description in its place
+  // (docs/docs-writing.md)
   r.rules.image = (tokens, idx) => `<span class="help-image">${esc(tokens[idx]!.content)}</span>`;
   r.rules.aside_open = (tokens, idx) => {
     const t = tokens[idx]!;
