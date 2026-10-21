@@ -103,8 +103,11 @@ def test_name_index_cache_is_bounded_by_bytes(monkeypatch: pytest.MonkeyPatch) -
 # ------------------------------------------------------------------ the node store
 
 
-def test_compact_gives_back_headroom_and_keeps_the_data() -> None:
-    store = _store(5000)  # grown from 16 by doubling: up to half of every column is headroom
+def test_compact_gives_back_headroom_and_keeps_the_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    from spaceknife.store import mapped
+
+    monkeypatch.setattr(mapped.POLICY, "force_bytes", None)  # plain memory (mapped columns keep their tail)
+    store = _store(5000)  # grown from 16 by half: up to a third of every column is headroom
     before = {k: a[: len(store)].copy() for k, a in store.cols.items()}
     cap = len(store.cols["kind"])
     assert cap > len(store)

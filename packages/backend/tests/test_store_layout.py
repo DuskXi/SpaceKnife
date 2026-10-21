@@ -248,7 +248,8 @@ def test_mapped_mode_keeps_columns_out_of_private_memory(
     assert store.ram_bytes() < 1 << 20  # only the first, tiny name chunk stayed in plain memory
     names = _all_names(store)
     plain_tot = int(store.cols["tot_alloc"][1])
-    assert store.compact() > 0 and all(mapped.is_mapped(a) for a in store.cols.values())
+    assert store.compact() == 0  # mapped columns keep their tail: never touched, never written
+    assert all(mapped.is_mapped(a) for a in store.cols.values())
     assert _all_names(store) == names and int(store.cols["tot_alloc"][1]) == plain_tot
     index = name_index(store)
     assert len(index.match("*cache*", len(store))) > 0
@@ -266,12 +267,109 @@ def test_mapped_mode_keeps_columns_out_of_private_memory(
         assert not list(files_dir.iterdir())
 
 
+def _bytes_written() -> int | None:
+    """Bytes this process has written through system calls so far (None: not known here)."""
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        class Counters(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in ("ro", "wo", "oo", "rb", "wb", "ob")]
+
+        k = ctypes.WinDLL("kernel32")
+        k.GetCurrentProcess.restype = wintypes.HANDLE
+        k.GetProcessIoCounters.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters)]
+        c = Counters()
+        k.GetProcessIoCounters(k.GetCurrentProcess(), ctypes.byref(c))
+        return int(c.wb)
+    try:
+        for line in Path("/proc/self/io").read_text().splitlines():
+            if line.startswith("wchar:"):
+                return int(line.split()[1])
+    except OSError:
+        pass
+    return None
+
+
+def test_mapped_files_are_not_filled_with_zeros() -> None:
+    """Making a mapped file longer writes nothing: on Windows ``os.ftruncate`` wrote every new
+    byte as a zero, so each mapped column went to disk once more for nothing."""
+    before = _bytes_written()
+    if before is None:
+        pytest.skip("no write counter on this platform")
+    arr = mapped.mapped_zeros(32 << 20, np.uint8, growable=True)
+    big = mapped.grow(arr, 96 << 20)
+    assert big is not None and not big[-4096:].any()
+    after = _bytes_written()
+    assert after is not None and after - before < 1 << 20
+
+
+def test_mapped_columns_grow_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    arr = mapped.mapped_zeros(1000, np.int64, growable=True)
+    arr[:] = np.arange(1000)
+    big = mapped.grow(arr, 50_000)
+    assert big is not None and len(big) == 50_000
+    assert big[:1000].tolist() == list(range(1000)) and not big[1000:].any()
+    big[3] = -7
+    assert arr[3] == -7  # the same pages: nothing was copied (or written again)
+    assert mapped.grow(np.zeros(10), 20) is None  # plain memory
+    assert mapped.grow(mapped.mapped_zeros(10, np.int64), 20) is None  # a name chunk: not growable
+    assert mapped.grow(big[5:], 60_000) is None  # a view that starts inside the file
+
+    monkeypatch.setattr(mapped.POLICY, "force_bytes", 0)
+    store = _build(3000)
+    files = {k: mapped._backings[mapped._mapping(a)] for k, a in store.cols.items()}  # type: ignore[index]
+    cap, names = store._cap, _all_names(store)
+    c, n = store.cols, len(store)
+    leaf = int(np.flatnonzero((c["kind"][:n] == Kind.DIR) & (c["child_count"][:n] == 0))[0])
+    first = store.ingest_names(  # one listing larger than the headroom: the columns grow
+        leaf,
+        [f"g{i}".encode() for i in range(cap)],
+        {k: np.zeros(cap, dtype=COLUMNS[k]) for k in ENTRY_COLUMNS},
+    )
+    assert store._cap > cap and _all_names(store)[:first] == names
+    assert all(mapped._backings[mapped._mapping(a)] is files[k] for k, a in store.cols.items())  # type: ignore[index]
+
+
 def test_policy_maps_beyond_the_budget(monkeypatch: pytest.MonkeyPatch) -> None:
     policy = mapped.Policy()
     policy.force_bytes = None
+    policy.large = None  # the budget alone (large stores: the next test)
     monkeypatch.setattr(mapped, "physical_memory", lambda: 1000)
     policy.fraction = 0.5
     assert not policy.should_map(None, 400)
     assert policy.should_map(None, 600)
     monkeypatch.setattr(mapped, "physical_memory", lambda: None)
     assert not policy.should_map(None, 10**12)  # unknown RAM: stay in plain memory
+
+
+def test_policy_maps_large_stores_by_themselves(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = mapped.Policy()
+    policy.force_bytes = None
+    monkeypatch.setattr(mapped, "physical_memory", lambda: 1 << 40)  # 1 TiB: the budget never decides
+    assert policy.large == mapped.LARGE_BYTES
+    assert not policy.should_map(None, mapped.LARGE_BYTES - 1)
+    assert policy.should_map(None, mapped.LARGE_BYTES)
+    monkeypatch.setattr(mapped, "physical_memory", lambda: None)
+    assert policy.should_map(None, mapped.LARGE_BYTES)  # also with the RAM unknown
+    policy.large = None  # 「大扫描存进映射文件」 off: only the budget
+    assert not policy.should_map(None, 4 * mapped.LARGE_BYTES)
+    policy.large = mapped.LARGE_BYTES
+    policy.force_bytes = 10**15  # SPACEKNIFE_MAP_ABOVE replaces both rules
+    assert not policy.should_map(None, 4 * mapped.LARGE_BYTES)
+
+
+def test_a_scan_maps_once_it_grows_large(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mapped, "physical_memory", lambda: 1 << 40)
+    monkeypatch.setattr(mapped.POLICY, "large", 1 << 20)  # 1 MiB: about 9000 rows with their names
+    small = _build(2000)
+    assert not small.mapped  # small scans stay in plain memory
+    store = _build(30_000)
+    assert store.mapped and all(mapped.is_mapped(a) for a in store.cols.values())
+    names = _all_names(store)
+    store.compact()  # the end of the scan: the shrunk columns stay mapped
+    assert all(mapped.is_mapped(a) for a in store.cols.values()) and _all_names(store) == names
+    loaded = NodeStore.from_columns(store.export_columns(), store.names_blob, store.ext_table, separated=True)
+    assert loaded.mapped and all(mapped.is_mapped(a) for a in loaded.cols.values())  # a snapshot or MFT tree
+    monkeypatch.setattr(mapped.POLICY, "large", None)
+    assert not _build(30_000).mapped

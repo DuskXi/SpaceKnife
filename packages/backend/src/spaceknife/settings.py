@@ -901,6 +901,18 @@ def _registry() -> tuple[Spec, ...]:
             kind=int,
         ),
         S(
+            "advanced.map_large_scans",
+            "advanced",
+            "内存",
+            "大扫描存进映射文件",
+            "节点表超过 256 MB（约 200 万项）时存进磁盘映射文件，不占私有内存；关掉后只按下面的比例切换",
+            "switch",
+            True,
+            applies="next_scan",
+            synonyms=("memory", "ram", "mmap", "large", "内存映射"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
             "advanced.memory_budget",
             "advanced",
             "内存",

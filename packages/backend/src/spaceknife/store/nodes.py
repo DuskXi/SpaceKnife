@@ -89,6 +89,11 @@ COLUMNS: dict[str, np.dtype[np.generic]] = {
 }
 
 ROW_BYTES = sum(dt.itemsize for dt in COLUMNS.values())
+# column growth (NodeStore._grow, docs/memory.md §3): by half while a scan adds rows; once the
+# store is complete (compacted or loaded), a file change adds 1/16 or 64 Ki rows, whichever is more
+GROWTH = 1.5
+SETTLED_SHARE = 16
+SETTLED_MIN_STEP = 1 << 16
 _OFF_WIDE = np.dtype("<i8")
 OFF_NARROW_LIMIT = 2**32  # name offsets fit uint32 below this many bytes of names
 
@@ -124,6 +129,7 @@ class NodeStore:
         self._n = 0
         self._cap = max(16, capacity)
         self.mapped = False  # columns and new name chunks in file-backed memory (see .mapped)
+        self._settled = False  # complete (compacted or loaded): grows a little at a time
         self._heap = NameHeap()
         self.cols: dict[str, np.ndarray] = {k: self._zeros(self._cap, dt) for k, dt in COLUMNS.items()}
         mapped.POLICY.register(self)
@@ -168,7 +174,7 @@ class NodeStore:
     def _zeros(self, count: int, dtype: np.dtype[np.generic]) -> np.ndarray:
         if self.mapped:
             try:
-                return mapped.mapped_zeros(count, dtype)
+                return mapped.mapped_zeros(count, dtype, growable=True)
             except OSError:  # no room for the file: plain memory still works
                 self._unmap()
         return np.zeros(count, dtype=dtype)
@@ -194,16 +200,22 @@ class NodeStore:
         return view
 
     def _grow(self, need: int) -> None:
-        if self._n + need <= self._cap:
+        want = self._n + need
+        if want <= self._cap:
             return
-        cap = self._cap
-        while self._n + need > cap:
-            cap *= 2
+        if self._settled:  # a file change of a complete tree: never double a whole volume's columns
+            cap = want + max(SETTLED_MIN_STEP, want // SETTLED_SHARE)
+        else:
+            cap = self._cap
+            while want > cap:
+                cap = int(cap * GROWTH) + 1
         if not self.mapped and mapped.POLICY.should_map(self, cap * ROW_BYTES + self._heap.reserved()):
             self._map()
         for key, arr in self.cols.items():
-            new = self._zeros(cap, arr.dtype)
-            new[: self._n] = arr[: self._n]
+            new = mapped.grow(arr, cap) if self.mapped else None  # in place: nothing copied or rewritten
+            if new is None:
+                new = self._zeros(cap, arr.dtype)
+                new[: self._n] = arr[: self._n]
             self.cols[key] = new
         self._cap = cap
 
@@ -211,11 +223,15 @@ class NodeStore:
         """Give back the growth headroom (up to half of every column) once nothing is added any more.
 
         Copies one column at a time, so the extra memory is one column at most. Readers holding an
-        old column keep a valid, equal copy. Returns the bytes freed.
+        old column keep a valid, equal copy. Returns the bytes freed. From now on the columns grow
+        a little at a time (:data:`SETTLED_SHARE`).
         """
+        self._settled = True
         n = max(16, self._n)
         if self._cap <= n:
             return 0
+        if all(mapped.is_mapped(a) for a in self.cols.values()):
+            return 0  # the unused tail of a mapped file was never touched: no memory, and no rewrite
         freed = 0
         for key, arr in self.cols.items():
             freed += (len(arr) - n) * arr.itemsize
@@ -706,6 +722,7 @@ class NodeStore:
         self._heap = other._heap
         self._n = other._n
         self._cap = other._cap
+        self._settled = other._settled
         self.mapped = other.mapped
         self.ext_table = other.ext_table
         self._ext_index = other._ext_index
@@ -746,6 +763,7 @@ class NodeStore:
         store._n = n
         store.version = 0
         store._cap = max(16, n)
+        store._settled = True  # complete: later changes grow it a little at a time
         store.mapped = False
         store._heap = NameHeap()
         image_len = len(names) if separated else int(np.asarray(columns["name_len"]).sum(dtype=np.int64)) + n

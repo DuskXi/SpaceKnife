@@ -151,6 +151,8 @@
  "扫描中或文件变化时元素闪烁提示": "Blocks flash while scanning or when their files change.",
  "扫描前询问": "Ask before scanning",
  "扫描后自动保存快照": "Save a snapshot after each scan",
+ "大扫描存进映射文件": "Keep large scans in mapped files",
+ "节点表超过 256 MB（约 200 万项）时存进磁盘映射文件，不占私有内存；关掉后只按下面的比例切换": "Node tables over 256 MB (about two million items) go to memory-mapped files on disk and take no private memory. When off, only the share below switches them.",
  "扫描数据内存上限": "Scan data memory limit",
  "扫描数据超过物理内存的这个比例后，新的节点表存进磁盘映射文件：不占私有提交，常用部分仍由系统留在内存里": "Once scan data passes this share of physical memory, new node tables go to memory-mapped files on disk: they take no private commit, and the system keeps the parts in use in memory.",
  "扫描方式": "Scan method",

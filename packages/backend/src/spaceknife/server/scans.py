@@ -7,13 +7,16 @@ import contextlib
 import os
 import secrets
 import sys
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+from weakref import WeakKeyDictionary
 
 import numpy as np
 from loguru import logger
@@ -50,6 +53,10 @@ from ..store.nodes import Flag, Kind, NodeStore
 from .compute import compute
 from .rpc import RpcError
 
+if TYPE_CHECKING:
+    from ..layout.basis import Basis
+    from ..store.subtree import Summary
+
 MAX_SCANS = 8
 IO_START_WAIT_S = 3.0  # a scan started with the backend waits this long for disk sampling
 TICK_S = 0.5  # status pushes while a scan runs, also when nothing lands (MFT read, paused): W2 curve
@@ -58,6 +65,8 @@ RELEASE_DELAY_S = 1.0  # after scan.close: give the heap back once the request i
 MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the rest is building
 # the received table (~160 B with the names) plus building the tree from it (~85 B, docs/memory.md §6)
 MFT_BUILD_BYTES_PER_ROW = 280
+SUMMARY_TOP = 50  # largest files in a cached summary: the details panel asks for 5 or 50
+SUMMARY_KEEP = 8  # cached summaries per scan (other nodes of the same store version)
 _KIND_NAMES: dict[int, Literal["file", "dir", "link", "other"]] = {
     Kind.FILE: "file",
     Kind.DIR: "dir",
@@ -120,17 +129,66 @@ def on_disk(store: NodeStore, node: int) -> bool:
     return not any(flags[n] & Flag.VIRTUAL for n in (node, *store.ancestors(node)) if n > 0)
 
 
+class _Summaries:
+    """One store's recent summaries, computed one at a time."""
+
+    __slots__ = ("items", "lock")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        # (node, store version, node count, class table, folder choices) -> (top asked, summary)
+        self.items: OrderedDict[tuple[int, ...], tuple[int, Summary]] = OrderedDict()
+
+
+_summaries: WeakKeyDictionary[NodeStore, _Summaries] = WeakKeyDictionary()
+_summaries_lock = threading.Lock()
+
+
+def cached_summary(store: NodeStore, basis: Basis, node: int, top: int, *, cache: bool = True) -> Summary:
+    """``store.subtree.summarize`` below ``node`` with ``basis``'s classes, at most once per store
+    version: the details panel, the Disks page and the end of a scan ask for the same summary
+    within moments, and each would walk the whole scan. Calls for one store run one at a time
+    (the later ones wait and take the result), so at most one walk's temporaries exist per scan.
+
+    ``cache=False`` while a scan still writes the store (it bumps the version before the rows are
+    in): computed under the same lock, but not kept.
+    """
+    from .. import pathclass
+    from ..store.subtree import summarize
+
+    with _summaries_lock:
+        entry = _summaries.get(store)
+        if entry is None:
+            entry = _summaries[store] = _Summaries()
+    key = (node, store.version, len(store), id(basis.classes), pathclass.folders_version())
+    with entry.lock:
+        hit = entry.items.get(key) if cache else None
+        if hit is None or hit[0] < top:
+            want = max(top, SUMMARY_TOP)
+            hit = (want, summarize(store, node, basis.cls_of, len(basis.class_ids), want, basis.ext_cls_of))
+            stale = [k for k in entry.items if k[1:] != key[1:]]  # nobody asks for an old version again
+            for k in stale:
+                del entry.items[k]
+            if cache:
+                entry.items[key] = hit
+                while len(entry.items) > SUMMARY_KEEP:
+                    entry.items.popitem(last=False)
+        else:
+            entry.items.move_to_end(key)
+    s = hit[1]
+    return s if len(s.top_files) <= top else replace(s, top_files=s.top_files[:top])
+
+
 def summary_of(server: Any, handle: ScanHandle, node: int, top: int) -> p.TreeSummaryResult:
     """``tree.summary``: parent, largest files, class totals (with what folder classes took over),
     newest change, tag, volume, and why the node takes a folder class."""
     from .. import pathclass
     from ..layout.engine import Layout
-    from ..store.subtree import summarize
 
     store = handle.store
     layout = Layout(store)
     class_ids = layout.class_ids
-    s = summarize(store, node, layout.cls_of, len(class_ids), top, layout.ext_cls_of)
+    s = cached_summary(store, layout, node, top, cache=not handle.running)
     shared = server.views.shared(handle.id)
     tags = shared.tags if shared is not None else None
     base = store.path(node)

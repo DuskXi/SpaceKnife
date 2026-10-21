@@ -7,7 +7,7 @@ import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
 import { patchView, readFlag, set, toast, useApp, writeFlag } from "@/state/store";
 import { Kind } from "@/visual/frame";
 import { fmtAgo, fmtCount, fmtInt, fmtPct, fmtShare, fmtSize, plural, sizeParts } from "@/lib/format";
-import { useThrottled } from "@/lib/throttle";
+import { summaryInterval, useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
 import { classHexNow } from "@/lib/classes";
@@ -39,9 +39,12 @@ export function Inspector({ viewId }: { viewId: string }) {
   const synthetic = selRow != null && frame && selKind! >= Kind.SMALL ? selRow : null;
   const seq = frame?.info.seq ?? 0;
   const running = useApp((s) => (scanId ? isRunning(s.scans[scanId]) : false));
-  // every frame may change the totals, but a summary walks the whole subtree: while the scan runs
-  // (four frames a second) refresh it once a second, and drop a request the next one replaces
-  const tick = useThrottled(seq, running ? 1000 : 0);
+  // every frame may change the totals, but a summary walks the whole subtree: refresh it at most
+  // once a second while the scan runs (four frames a second), and the less often the larger the
+  // subtree (live monitoring of a busy disk changes something every few seconds); a request the
+  // next one replaces is dropped
+  const items = summary && summary.node.id === node ? summary.node.files + summary.node.dirs : 0;
+  const tick = useThrottled(seq, summaryInterval(items, running));
 
   useEffect(() => {
     if (!scanId || node == null || node < 0) return;
