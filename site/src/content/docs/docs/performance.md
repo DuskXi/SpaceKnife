@@ -175,7 +175,7 @@ The scan data is kept compactly, in columns: about 134 bytes per item (a file or
 | 50 million | about 6.7 GB |
 | 100 million | about 13.4 GB |
 
-- **Keep large scans in mapped files** (**Settings › Advanced › Memory**, on by default): a scan whose node table passes 256 MB (about two million items) goes to memory-mapped files in the cache folder. They don't count as the process's private memory; the system keeps the parts in use in RAM and drops the others, reading them back from disk when needed (a pass over a whole scan can then take some tenths of a second longer). The cost: after the scan the data is written to these files once, about 200 bytes per item (about 1.8 GB for a drive of 8.6 million items). Scans are as fast as before.
+- **Keep large scans in mapped files** (**Settings › Advanced › Memory**, off by default): when on, a scan whose node table passes 256 MB (about two million items) goes to memory-mapped files in the cache folder. They don't count as the process's private memory; the system keeps the parts in use in RAM and drops the others, reading them back from disk when needed (a pass over a whole scan can then take some tenths of a second longer). The cost: after the scan the data is written to these files once, about 200 bytes per item (about 1.8 GB for a drive of 8.6 million items). Scans are as fast as before.
 - **Scan data memory limit** (same page, 25 % by default, from 5 to 90): once the open scans pass this share of physical memory, smaller scans go to mapped files too.
 - The mapped files are deleted automatically, even after a crash. If there is no room on the disk, SpaceKnife stays in memory.
 - **Up to 8 scans** stay in memory. Starting another one drops the oldest scan that has finished and has no open view.

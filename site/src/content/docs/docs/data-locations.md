@@ -61,7 +61,7 @@ For a bug report, **Settings › Advanced › Copy diagnostics** puts the versio
 
 ### Cache
 
-Scans of more than about two million items (**Settings › Advanced › Keep large scans in mapped files**, on by default), and scan data beyond **Settings › Advanced › Scan data memory limit** (25% of physical memory by default), go to memory-mapped files in the cache instead of private memory. These files remove themselves when they are no longer needed, and anything a crash leaves behind is removed at the next start. **Clear cache…** removes what isn't in use.
+Scans of more than about two million items when **Settings › Advanced › Keep large scans in mapped files** is on (it is off by default), and scan data beyond **Settings › Advanced › Scan data memory limit** (25% of physical memory by default), go to memory-mapped files in the cache instead of private memory. These files remove themselves when they are no longer needed, and anything a crash leaves behind is removed at the next start. **Clear cache…** removes what isn't in use.
 
 ## SPACEKNIFE_HOME
 

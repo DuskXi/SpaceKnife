@@ -347,7 +347,9 @@ def test_policy_maps_large_stores_by_themselves(monkeypatch: pytest.MonkeyPatch)
     policy = mapped.Policy()
     policy.force_bytes = None
     monkeypatch.setattr(mapped, "physical_memory", lambda: 1 << 40)  # 1 TiB: the budget never decides
-    assert policy.large == mapped.LARGE_BYTES
+    assert policy.large is None  # 「大扫描存进映射文件」 is off by default
+    assert not policy.should_map(None, 4 * mapped.LARGE_BYTES)
+    policy.large = mapped.LARGE_BYTES  # switched on
     assert not policy.should_map(None, mapped.LARGE_BYTES - 1)
     assert policy.should_map(None, mapped.LARGE_BYTES)
     monkeypatch.setattr(mapped, "physical_memory", lambda: None)

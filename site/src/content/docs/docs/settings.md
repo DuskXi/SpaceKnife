@@ -331,7 +331,7 @@ Settings file, logs, cache and snapshots.
 
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
-| Keep large scans in mapped files | On | On `true` · Off `false` | Node tables over 256 MB (about two million items) go to memory-mapped files on disk and take no private memory. When off, only the share below switches them. Applies from the next scan. | `advanced.map_large_scans` |
+| Keep large scans in mapped files | Off | On `true` · Off `false` | When on, scans whose node table passes 256 MB (about two million items) go to memory-mapped files on disk and take no private memory; after the scan this writes about 200 bytes per item to disk once. Applies from the next scan. | `advanced.map_large_scans` |
 | Scan data memory limit | 25 % | 5 to 90 %, step 5 | Once scan data passes this share of physical memory, new node tables go to memory-mapped files on disk: they take no private commit, and the system keeps the parts in use in memory. Applies from the next scan. | `advanced.memory_budget` |
 
 ### About & updates

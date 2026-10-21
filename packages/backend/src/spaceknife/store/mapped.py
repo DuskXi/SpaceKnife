@@ -4,8 +4,9 @@ Pages of a shared file mapping are backed by their file, not by the page file: t
 private commit (Windows) or anonymous memory (Linux, macOS). The OS keeps the pages in use in RAM —
 reading them then costs the same as plain memory — and drops cold ones without writing them to
 swap. A store switches to it when it grows past :data:`LARGE_BYTES` (about two million nodes;
-``advanced.map_large_scans``), or when its columns would push the open scans past the memory
-budget (``advanced.memory_budget``: a share of physical RAM); smaller scans stay in plain memory.
+only with ``advanced.map_large_scans``, off by default: see the writes below), or when its
+columns would push the open scans past the memory budget (``advanced.memory_budget``: a share
+of physical RAM); other scans stay in plain memory.
 
 The files clean up after themselves: opened delete-on-close on Windows (the mapping holds the last
 handle) and unlinked right after creation on POSIX, so nothing is left behind, even after a crash.
@@ -157,14 +158,14 @@ class Policy:
     """When a growing or loading store switches to file-backed columns.
 
     A store of ``large`` bytes or more (columns with their headroom, and names) maps by itself;
-    ``None`` turns that off. ``fraction`` of physical memory is the budget for the columns and
-    names of all open stores in plain memory. ``SPACEKNIFE_MAP_ABOVE`` (bytes) replaces both,
-    for tests and experiments.
+    ``None`` (the default, ``advanced.map_large_scans`` off) turns that off. ``fraction`` of
+    physical memory is the budget for the columns and names of all open stores in plain memory.
+    ``SPACEKNIFE_MAP_ABOVE`` (bytes) replaces both, for tests and experiments.
     """
 
     def __init__(self) -> None:
         self.fraction = 0.25
-        self.large: int | None = LARGE_BYTES
+        self.large: int | None = None  # LARGE_BYTES with advanced.map_large_scans
         env = os.environ.get("SPACEKNIFE_MAP_ABOVE")
         self.force_bytes: int | None = int(env) if env else None
         self._stores: weakref.WeakSet[NodeStore] = weakref.WeakSet()

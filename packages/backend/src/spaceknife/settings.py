@@ -905,9 +905,10 @@ def _registry() -> tuple[Spec, ...]:
             "advanced",
             "内存",
             "大扫描存进映射文件",
-            "节点表超过 256 MB（约 200 万项）时存进磁盘映射文件，不占私有内存；关掉后只按下面的比例切换",
+            "开启后，节点表超过 256 MB（约 200 万项）的扫描存进磁盘映射文件，不占私有内存；"
+            "代价是扫完后每项约写盘 200 字节",
             "switch",
-            True,
+            False,  # the writes: docs/memory.md §3
             applies="next_scan",
             synonyms=("memory", "ram", "mmap", "large", "内存映射"),  # i18n: ignore
             kind=bool,
