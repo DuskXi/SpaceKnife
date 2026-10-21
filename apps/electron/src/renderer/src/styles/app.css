@@ -252,13 +252,18 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 }
 
 /* ---------------------------------------------------------------- inspector */
-.inspector { flex: none; width: var(--sk-layout-inspector); display: flex; flex-direction: column; border-left: 1px solid var(--sk-color-line-subtle); background: var(--sk-color-bg-panel); min-height: 0; }
+.inspector {
+  flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--sk-color-line-subtle); background: var(--sk-color-bg-panel); min-height: 0;
+  /* dragged width (UI-MAIN-64), capped so the map keeps its minimum in a narrow window */
+  width: var(--inspector-w, var(--sk-layout-inspector));
+  max-width: max(var(--sk-layout-inspector-min), calc(100vw - var(--sk-layout-map-min)));
+}
 .inspector-head { flex: none; display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--sk-color-line-subtle); }
 .segtabs { display: flex; gap: 2px; }
 .segtabs button { height: 26px; padding: 0 10px; border: 0; border-radius: var(--sk-radius-md); background: transparent; color: var(--sk-color-text-secondary); font-size: 12px; font-weight: 500; }
 .segtabs button.on { background: var(--sk-color-bg-hover); color: var(--sk-color-text-primary); }
 .inspector-tools { display: flex; gap: 2px; }
-.inspector-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; user-select: text; }
+.inspector-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; user-select: text; container: inspector / inline-size; }
 .inspector-actions { flex: none; display: flex; flex-direction: column; gap: 2px; padding: 8px; border-top: 1px solid var(--sk-color-line-subtle); }
 .action-row { display: flex; align-items: center; gap: 10px; width: 100%; height: 32px; padding: 0 8px; border: 0; border-radius: var(--sk-radius-md); background: transparent; color: var(--sk-color-text-primary); text-align: left; }
 .action-row:hover:not(:disabled) { background: var(--sk-color-bg-hover); }
@@ -305,11 +310,50 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .tag-shape.green, .tag-mini.green { width: 9px; height: 9px; border-radius: 50%; background: var(--sk-color-tag-green); }
 .tag-shape.blue, .tag-mini.blue { width: 7px; height: 7px; border-radius: 1px; background: var(--sk-color-tag-blue); transform: rotate(45deg); }
 .tag-mini { flex: none; display: inline-block; }
-.class-row { display: grid; grid-template-columns: 10px 1fr auto auto 44px; align-items: center; gap: 4px 8px; font-size: 12px; }
-.class-row .swatch { width: 10px; height: 10px; }
-.class-row .share-pct { text-align: right; }
-.class-bar { grid-column: 2 / -1; height: 3px; border-radius: 2px; background: var(--sk-color-line-subtle); overflow: hidden; }
-.class-bar span { display: block; height: 100%; }
+/* 「类别统计」 (UI-MAIN-65): nothing wraps; columns as wide as their longest value (set inline) */
+.cstat { display: flex; flex-direction: column; gap: 10px; min-width: 0; --cs-pct: 4.5ch; }
+.cstat-head { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.cstat-title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 13px; font-weight: 600; line-height: 18px; color: var(--sk-color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cstat-total { flex: none; font-size: 13px; line-height: 18px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cstat-sub { margin-top: -6px; font-size: 11px; line-height: 15px; color: var(--sk-color-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cstat-stack { display: flex; gap: 1px; height: 10px; border-radius: var(--sk-radius-xs); overflow: hidden; background: var(--sk-color-line-subtle); }
+.cstat-stack > span { flex-basis: 0; min-width: 0; transition: opacity var(--sk-motion-duration-fast); }
+.cstat-stack > span.dim { opacity: 0.3; }
+/* the grid is set in the mono font so its ch columns fit the tabular numbers exactly */
+.cstat-cols, .cstat-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) var(--cs-files) var(--cs-size) var(--cs-pct); column-gap: 8px; align-items: center; font-family: var(--sk-font-family-mono); }
+.cstat-cols > span, .cstat-name { font-family: var(--sk-font-family-ui); }
+.cstat-cols { padding: 0 6px; font-size: 11px; line-height: 14px; color: var(--sk-color-text-tertiary); }
+.cstat-list { list-style: none; margin: 0 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.cstat-row { width: 100%; padding: 5px 6px 6px; row-gap: 5px; border: 0; border-radius: var(--sk-radius-sm); background: transparent; color: var(--sk-color-text-primary); font-size: 12px; line-height: 16px; text-align: left; }
+.cstat-row:hover, .cstat-row.hot { background: var(--sk-color-bg-hover); }
+.cstat-row .swatch { width: 10px; height: 10px; }
+.cstat-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cstat-files, .cstat-size, .cstat-pct { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.cstat-row .cstat-files, .cstat-row .cstat-pct { color: var(--sk-color-text-secondary); }
+.cstat-row.minor .cstat-name { color: var(--sk-color-text-secondary); }
+.cstat-files .short { display: none; }
+.cstat-bar { grid-column: 2 / -1; height: 3px; border-radius: 2px; background: var(--sk-color-line-subtle); overflow: hidden; }
+.cstat-bar > span { display: block; height: 100%; border-radius: 2px; }
+.cstat-more { align-self: flex-start; padding: 2px 6px; border: 0; border-radius: var(--sk-radius-sm); background: transparent; color: var(--sk-color-accent-default); font-size: 12px; line-height: 16px; text-align: left; }
+.cstat-more:hover { background: var(--sk-color-bg-hover); }
+/* a narrow column: counts shorten (25.1万), the full count stays in the row's tooltip */
+@container inspector (max-width: 279px) {
+  .cstat { --cs-files: var(--cs-files-short); }
+  .cstat-files .full { display: none; }
+  .cstat-files .short { display: inline; }
+}
+/* the narrowest column: the count leaves (still in the tooltip) so the names fit */
+@container inspector (max-width: 259px) {
+  .cstat-cols, .cstat-row { grid-template-columns: 10px minmax(0, 1fr) var(--cs-size) var(--cs-pct); }
+  .cstat-files { display: none; }
+}
+
+/* the details column's left edge (UI-MAIN-64): a 6px grip over the 1px border */
+.col-resizer { flex: none; position: relative; z-index: 7; width: 0; outline: none; }
+.col-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: -3px; width: 6px; cursor: col-resize; }
+.col-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: -1px; width: 2px; background: transparent; transition: background var(--sk-motion-duration-fast); pointer-events: none; }
+.col-resizer:hover::after, .col-resizer:focus-visible::after, body.col-resizing .col-resizer::after { background: var(--sk-color-accent-default); }
+body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none; }
 
 /* ---------------------------------------------------------------- match results (W3) */
 .results { overflow: hidden; }

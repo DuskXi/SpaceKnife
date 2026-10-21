@@ -89,7 +89,7 @@
  "快照": "Snapshots",
  "快速 MFT": "Quick MFT",
  "恢复": "Restore",
- "恢复为内置的 7 个类别？": "Restore the 7 built-in classes?",
+ "恢复为内置的 {n} 个类别？": "Restore the {n} built-in classes?",
  "恢复默认": "Restore defaults",
  "恢复默认类别": "Restore default classes",
  "或输入路径（多个路径用 ; 分隔）": "Or enter a path (separate several with ;)",

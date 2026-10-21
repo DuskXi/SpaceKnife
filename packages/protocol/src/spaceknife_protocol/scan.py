@@ -297,6 +297,9 @@ class TopFile(Payload):
         description="Folder of the file relative to the summarised node, ending in a separator"
     )
     tag: Literal["red", "yellow", "green", "blue"] | None = None
+    class_id: str = Field(
+        default="other", description="The file's class (colour): by extension, and by size for ts / mts"
+    )
 
 
 class ClassStat(Payload):

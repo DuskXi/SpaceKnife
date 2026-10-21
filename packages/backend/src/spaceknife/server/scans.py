@@ -126,20 +126,24 @@ def summary_of(server: Any, handle: ScanHandle, node: int, top: int) -> p.TreeSu
 
     store = handle.store
     layout = Layout(store)
-    ext_class = layout.ext_classes()
     class_ids = layout.class_ids
-    s = summarize(store, node, ext_class, len(class_ids), top)
+    s = summarize(store, node, layout.cls_of, len(class_ids), top)
     shared = server.views.shared(handle.id)
     tags = shared.tags if shared is not None else None
     base = store.path(node)
     tops = []
-    for f in s.top_files:
-        f = int(f)
+    top_cls = layout.cls_of(s.top_files).tolist() if len(s.top_files) else []
+    for f, ci in zip(s.top_files.tolist(), top_cls, strict=True):
         parent_path = store.path(int(store.cols["parent"][f]))
         rel = os.path.relpath(parent_path, base) if parent_path != base else ""
         rel = "" if rel in (".", "") else rel + os.sep
         tops.append(
-            p.TopFile(node=node_info(store, f), rel_parent=rel, tag=tags.of(store, f) if tags else None)
+            p.TopFile(
+                node=node_info(store, f),
+                rel_parent=rel,
+                tag=tags.of(store, f) if tags else None,
+                class_id=class_ids[ci],
+            )
         )
     order = np.argsort(-s.class_bytes, kind="stable")
     classes = [

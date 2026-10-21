@@ -105,6 +105,18 @@ def test_partition_fills_have_readable_labels() -> None:
     assert tokens["visual.center.bg"] == tokens["treemap.level.0.headerBg"]
 
 
+def test_every_builtin_class_has_its_own_readable_colour() -> None:
+    # A class without a token would be drawn in 「其他」's colour (lib/classes.ts).
+    from spaceknife_protocol.classes import BUILTIN_CLASSES
+
+    tokens = {t.dotted: t.value for t in g.load_tokens()}
+    fills = [tokens[f"treemap.class.{c.id}"] for c in BUILTIN_CLASSES]
+    assert len(set(fills)) == len(fills)
+    light, dark = tokens["treemap.label.light"], tokens["treemap.label.dark"]
+    for fill in fills:
+        assert max(_contrast(fill, light), _contrast(fill, dark)) >= 4.5, fill
+
+
 def test_visualization_icons() -> None:
     _, icons = g.load_icons()
     assert {"vizTreemap", "vizFlame", "vizFlamePolar"} <= set(icons)

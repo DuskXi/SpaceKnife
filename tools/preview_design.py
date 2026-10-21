@@ -58,7 +58,7 @@ def build(tokens: list[g.Token], icons: dict[str, str], meta: dict[str, object])
             )
         return "<div class='grid'>" + "".join(cards) + "</div>"
 
-    classes = ["video", "image", "audio", "archive", "exec", "doc", "other"]
+    classes = ["video", "image", "audio", "archive", "exec", "doc", "code", "data", "other"]
     names = {
         "video": "视频",
         "image": "图片",
@@ -66,6 +66,8 @@ def build(tokens: list[g.Token], icons: dict[str, str], meta: dict[str, object])
         "archive": "压缩包/镜像",
         "exec": "程序/系统",
         "doc": "文档",
+        "code": "代码/开发",
+        "data": "数据/模型",
         "other": "其他",
     }
     blocks = []

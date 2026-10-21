@@ -25,6 +25,7 @@ import type {
 } from "@/protocol/generated";
 import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
+import { storedInspectorWidth } from "@/lib/inspectorWidth";
 
 export type TabKind = "start" | "scan" | "settings" | "help" | "machine";
 
@@ -130,6 +131,8 @@ export interface AppState {
   views: Record<string, ViewData>;
   paletteOpen: boolean;
   inspectorHidden: boolean;
+  /** preferred width of the details column, px (UI-MAIN-64) */
+  inspectorWidth: number;
   logOpen: boolean;
   logTab: "log" | "stats";
   /** open the panel by itself when a warning arrives (UI-W8-30) */
@@ -222,6 +225,7 @@ export const useApp = create<AppState>(() => ({
   views: {},
   paletteOpen: false,
   inspectorHidden: false,
+  inspectorWidth: storedInspectorWidth(),
   logOpen: false,
   logTab: "log",
   logAuto: true,

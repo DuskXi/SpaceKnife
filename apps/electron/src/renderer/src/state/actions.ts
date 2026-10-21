@@ -203,7 +203,7 @@ async function applyUpdate(viewId: string, upd: ViewUpdate): Promise<void> {
 // ------------------------------------------------------------------ views
 
 export function defaultViewport(): { width: number; height: number; dpr: number } {
-  const inspector = get().inspectorHidden ? 0 : 320;
+  const inspector = get().inspectorHidden ? 0 : get().inspectorWidth;
   return {
     width: Math.max(200, window.innerWidth - inspector),
     height: Math.max(200, window.innerHeight - 40 - 48 - 28),

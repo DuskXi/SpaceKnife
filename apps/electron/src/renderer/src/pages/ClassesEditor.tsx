@@ -196,7 +196,7 @@ export function ClassesEditor() {
         {state?.custom &&
           (confirm === "reset" ? (
             <span className="class-confirm">
-              <span className="small">{t("恢复为内置的 7 个类别？")}</span>
+              <span className="small">{t("恢复为内置的 {n} 个类别？", { n: state.defaults.length })}</span>
               <button
                 className="danger-btn small"
                 onClick={async () => {

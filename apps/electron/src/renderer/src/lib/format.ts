@@ -66,6 +66,13 @@ export function fmtInt(n: number | bigint): string {
   return Number(n).toLocaleString("en-US");
 }
 
+/** A count for tight columns: below 10,000 in full, then short (250,752 → 25.1万 / 250.8K). */
+export function fmtCount(n: number): string {
+  if (Math.abs(n) < 10_000) return fmtInt(n);
+  const locale = byLang("zh-CN", "en-US");
+  return new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }).format(n);
+}
+
 /** Share: < 10 % with one decimal (8.2%), otherwise whole (54%). */
 export function fmtShare(part: number, whole: number): string {
   if (!whole) return "0%";

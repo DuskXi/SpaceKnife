@@ -57,6 +57,9 @@ QtObject {
     readonly property int fontWeightSemibold: 600
     readonly property real layoutFilterMaxWidth: 420
     readonly property real layoutInspector: 320
+    readonly property real layoutInspectorMax: 640
+    readonly property real layoutInspectorMin: 280
+    readonly property real layoutMapMin: 360
     readonly property real layoutStatusbar: 28
     readonly property real layoutTabHeight: 34
     readonly property real layoutTitlebar: 40
@@ -85,6 +88,8 @@ QtObject {
     readonly property real space9: 32
     readonly property color treemapClassArchive: "#FFE5C547"
     readonly property color treemapClassAudio: "#FF9B4586"
+    readonly property color treemapClassCode: "#FFB7CBF3"
+    readonly property color treemapClassData: "#FF7BE8B9"
     readonly property color treemapClassDoc: "#FF505DC6"
     readonly property color treemapClassExec: "#FF1FAE8A"
     readonly property color treemapClassImage: "#FF2F8FDB"

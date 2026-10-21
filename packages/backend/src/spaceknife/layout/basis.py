@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..classes import ClassTable, active
+from ..classes import ClassTable, active, looks_like_stream
 from ..store.nodes import Flag, Kind, NodeStore
 
 
@@ -16,6 +16,7 @@ class Basis:
         self._fixed = classes  # None: follow the active (user-edited) table
         self._ext_cls = np.zeros(0, dtype=np.uint8)
         self._ext_key: tuple[int, int] = (-1, 0)
+        self._splits: list[tuple[int, int, int, int]] = []  # (ext id, packet, recording, other)
         self._sizes: tuple[int, int, np.ndarray] | None = None  # (store version, node count, sizes)
 
     @property
@@ -31,7 +32,11 @@ class Basis:
         return self.classes.other_index
 
     def ext_classes(self) -> np.ndarray:
-        """Colour class index per extension-table id (again when the class table changed)."""
+        """Colour class index per extension-table id (again when the class table changed).
+
+        Files of a size-split extension (``ts``) get theirs from :meth:`cls_of`, which also looks
+        at the size.
+        """
         table = self.store.ext_table
         classes = self.classes
         key = (id(classes), len(table))
@@ -41,12 +46,22 @@ class Basis:
             self._ext_cls = np.fromiter(
                 (index[classes.color_class(e)] if e else other for e in table), np.uint8, len(table)
             )
+            self._splits = [
+                (s.ext_id, s.packet, index[s.stream], index[s.rest[0]] if s.rest else other)
+                for s in classes.splits(table)
+            ]
             self._ext_key = key
         return self._ext_cls
 
     def cls_of(self, ids: np.ndarray) -> np.ndarray:
         """Colour class index (u1) of some nodes."""
-        out: np.ndarray = self.ext_classes()[self.store.cols["ext"][ids]]
+        ext = self.store.cols["ext"][ids]
+        out: np.ndarray = self.ext_classes()[ext]
+        for ext_id, packet, stream, plain in self._splits:
+            rows = np.flatnonzero(ext == ext_id)
+            if rows.size:
+                size = self.store.cols["size"][ids[rows]]
+                out[rows] = np.where(looks_like_stream(size, packet), stream, plain)
         return out
 
     @staticmethod

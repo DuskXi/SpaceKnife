@@ -92,17 +92,20 @@ A file class is a named set of extensions. The classes are used in three places:
 
 | Class | Extensions |
 |---|---|
-| Video | mp4 mkv mov avi wmv webm m4v flv ts m2ts mts vob mpg mpeg mpe m1s qt rm rmvb 3gp f4v ogv |
-| Pictures | jpg jpeg png gif bmp tif tiff heic heif webp avif jxl svg ico psd raw nef rw2 cr2 cr3 arw dng orf raf |
-| Audio | mp3 flac wav m4a aac ogg opus wma aif aiff alp au ac3 amr mp2 voc ape mid midi dsf 3gp |
-| Archives | zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2 |
-| Programs | exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log |
-| Documents | pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key |
+| Video | mp4 mkv mov avi wmv webm m4v flv ts m2ts mts vob mpg mpeg mpe m1s qt rm rmvb 3gp f4v ogv mxf dv divx y4m m2t m2v h264 h265 hevc ivf asf wtv mk3d ogm lrv insv braw r3d bik bk2 usm |
+| Pictures | jpg jpeg png gif bmp tif tiff heic heif webp avif jxl svg ico psd raw nef rw2 cr2 cr3 arw dng orf raf srw x3f pef rwl mrw dcr kdc erf mef mos nrw sr2 srf iiq 3fr jfif jpe jp2 j2k jxr hdp wdp apng qoi svgz exr hdr dds ktx ktx2 tga pcx pbm pgm ppm pnm icns cur ani psb xcf kra clip pdn sai afphoto afdesign ai eps emf wmf cdr sketch fig xd |
+| Audio | mp3 flac wav m4a aac ogg opus wma aif aiff alp au ac3 amr mp2 voc ape mid midi dsf 3gp m4b m4r caf mka wv tta dts mpc spx weba oga gsm ra aifc w64 rf64 dff xm s3m it sf2 wem bnk |
+| Archives | zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2 tbz tbz2 txz tzst lz4 lzo br sz zpaq zipx arj lha lzh cpio xar sit sitx vdi qcow avhdx hdd hds vmem vmsn ova xva sparseimage nrg |
+| Programs | exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log apk aab xapk ipa deb rpm snap appimage jar war ear vsix crx xpi pyd node wasm msp msu mui tlb winmd dmp mdmp etl evtx |
+| Documents | pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key docm dotx dotm xlsm xlsb pptm odg wps et dps hwp ofd xps oxps djvu chm mobi azw azw3 fb2 tex rst org tsv vsd vsdx one eml msg pst ost mbox |
+| Code | c h cc cpp cxx hh hpp hxx cs java kt kts scala groovy gradle go rs swift m mm py pyi pyw pyx ipynb js mjs cjs jsx ts tsx mts cts vue svelte css scss sass less php rb pl pm lua r jl dart ex exs erl hs elm clj cljs fs fsx vb cmake pyc pyo class o lib a pdb ilk idb pch ipch tlog whl egg gem nupkg |
+| Data | safetensors gguf ggml ckpt pt pth onnx tflite mlmodel h5 hdf5 he5 nc npy npz pkl pickle joblib parquet arrow feather avro orc tfrecord jsonl ndjson json fits fts fit mat db sqlite sqlite3 db3 duckdb mdb accdb ldb vscdb realm ibd myd myi mdf ldf ndf dbf kdbx sql |
 | Other | every extension in no other class, and files without an extension |
 
 - A file's extension is the part of its name after the last dot, compared without case. A leading dot doesn't count: `.bashrc` has no extension, so it belongs to Other.
 - An extension can be in several classes (`3gp` is in Video and Audio). The first class in the list gives the color, and every class that lists it matches it in filters.
-- The Chinese interface shows the same classes under Chinese names (视频, 图片, 音频, 压缩包/镜像, 程序/系统, 文档, 其他). Both sets of names work in filters in either language.
+- `ts` and `mts` are the exception: such a file can be a recording (an MPEG transport stream, AVCHD) or TypeScript source. SpaceKnife decides by the file's size and never reads its content: over 16 MB, or over 1 MB and exactly a whole number of transport-stream packets (188 bytes for `ts`, 192 for `mts`), it is Video; anything else is Code. Take `ts` out of Video and the extension alone decides again.
+- The Chinese interface shows the same classes under Chinese names (视频, 图片, 音频, 压缩包/镜像, 程序/系统, 文档, 代码/开发, 数据/模型, 其他). Both sets of names work in filters in either language.
 
 ### How classes color the picture
 
@@ -114,11 +117,11 @@ Settings › File classes lists the classes in order. Every change is applied as
 
 - **Color.** Click the color swatch to pick a new color.
 - **Name.** Edit the name in place. The row shows the filter that matches the class, such as `:class:Video`.
-- **Extensions.** Type them separated by `;`, commas or spaces, as in `safetensors; gguf`. Leading dots are dropped and case doesn't matter.
+- **Extensions.** Type them separated by `;`, commas or spaces, as in `pak; ucas`. Leading dots are dropped and case doesn't matter.
 - **Order.** Drag a row by its handle. The order decides which color an extension gets when it is in several classes. A row warns with "Already in an earlier class: …" and lists those extensions with the class that colors them.
 - **Add class** adds a "New class" row just above Other.
 - **Delete.** The × button deletes a class after you confirm. Its extensions fall back to Other.
-- **Restore default classes** appears once you have changed something and brings back the 7 built-in classes.
+- **Restore default classes** appears once you have changed something and brings back the 9 built-in classes.
 
 Rules the editor enforces:
 
@@ -130,7 +133,7 @@ Rules the editor enforces:
 When you rename a built-in class, its old name keeps working in filters. A filter that says `:class:Video` still finds your renamed video class. The SpaceSniffer class names (`Audio/Music`, `Pictures/Images` and so on) stay valid as well.
 
 :::tip[Your own classes]
-Add a class for the files that matter on your disk, for example "Models" with `safetensors; gguf; onnx; ckpt`. It gets its own color in the picture, its own line in the Classes page, and `:class:Models;>1gb` finds the large ones.
+Add a class for the files that matter on your disk, for example "Game assets" with `pak; pck; ucas; utoc; assets`. It gets its own color in the picture, its own line in the Classes page, and `:class:Game assets;>1gb` finds the large ones.
 :::
 
 ### Moving classes between machines

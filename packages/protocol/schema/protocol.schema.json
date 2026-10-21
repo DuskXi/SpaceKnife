@@ -6802,6 +6802,12 @@
     },
     "TopFile": {
       "properties": {
+        "class_id": {
+          "default": "other",
+          "description": "The file's class (colour): by extension, and by size for ts / mts",
+          "title": "Class Id",
+          "type": "string"
+        },
         "node": {
           "$ref": "#/$defs/NodeInfo"
         },

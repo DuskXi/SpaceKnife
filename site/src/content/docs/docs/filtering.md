@@ -151,9 +151,11 @@ Write `[prefix] operator number unit`, for example `m<7d` or `c>1y`. A date cond
 | Archives | `archive`, `压缩包/镜像`, `压缩包`, `镜像`, `Archive`, `Disk images`, `Archives/Disk images` |
 | Programs | `exec`, `程序/系统`, `程序`, `系统`, `Program`, `Executable`, `Executables`, `System files`, `Executables/System files` |
 | Documents | `doc`, `文档`, `Document`, `Docs` |
+| Code | `code`, `代码/开发`, `代码`, `开发`, `Source code`, `Development`, `Dev` |
+| Data | `data`, `数据/模型`, `数据`, `模型`, `Datasets`, `Models`, `Databases` |
 | Other | `other`, `其他`, `Others`, `Unclassified` |
 
-- A class matches by extension: the part of the name after the last dot. A leading dot does not count, so `.bashrc` has no extension.
+- A class matches by extension: the part of the name after the last dot. A leading dot does not count, so `.bashrc` has no extension. For `ts` and `mts` the size also counts, splitting them into Video and Code: see [the built-in classes](../tags-classes/#the-built-in-classes).
 - `:class:other` matches every file whose extension is in no class, including files without an extension.
 - An unknown class name is an error, and the completion list offers the class names.
 - Classes and their extensions are yours to edit. See [Tags and file classes](../tags-classes/).

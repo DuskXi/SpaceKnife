@@ -188,9 +188,11 @@ bare       = 不含 ";" "\" "|" "<" ">" 的非空文本 ;
 | archive | 压缩包/镜像 | 压缩包、镜像、Archive、Archives、Disk images、Archives/Disk images |
 | exec | 程序/系统 | 程序、系统、Program(s)、Executable(s)、System files、Executables/System files |
 | doc | 文档 | Document、Documents、Docs |
+| code | 代码/开发 | 代码、开发、Code、Source code、Development、Dev（SpaceKnife 新增） |
+| data | 数据/模型 | 数据、模型、Data、Datasets、Models、Databases（SpaceKnife 新增） |
 | other | 其他 | Other、Others、Unclassified（不属于任何类别的文件） |
 
-类别的扩展名列表来自「文件类别」设置（默认表在 `packages/protocol/src/spaceknife_protocol/classes.py`，包含 SpaceSniffer 的全部默认扩展名）。不存在的类别名报 `unknown_class`，并列出候选。
+类别的扩展名列表来自「文件类别」设置（默认表在 `packages/protocol/src/spaceknife_protocol/classes.py`，包含 SpaceSniffer 的全部默认扩展名）。`ts`、`mts` 同时在视频和代码里，按文件大小归入其中一个（`spaceknife.classes.STREAM_SPLITS`：16 MiB 以上，或 1 MiB 以上且大小是整数个传输流包——`ts` 188 字节、`mts` 192 字节——算视频，其余算代码）；只看大小，不读内容。不存在的类别名报 `unknown_class`，并列出候选。
 
 ## 4. 取反
 

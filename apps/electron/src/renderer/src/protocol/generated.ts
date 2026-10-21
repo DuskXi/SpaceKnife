@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "674add5b9836c65d";
+export const SCHEMA_HASH = "3de1c29fe8140330";
 
 export interface AgeCond {
   end: number;
@@ -1467,6 +1467,8 @@ export interface TagCond {
 }
 
 export interface TopFile {
+  /** The file's class (colour): by extension, and by size for ts / mts */
+  class_id: string;
   node: NodeInfo;
   /** Folder of the file relative to the summarised node, ending in a separator */
   rel_parent: string;

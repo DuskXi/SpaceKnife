@@ -74,12 +74,14 @@ The panel on the right shows the selection, or the zoom root when nothing is sel
 | Tab | Shows |
 |---|---|
 | **Details** | Name and path; the size, with the number of files and folders and the latest change for a folder, or the file class and modification time for a file (hover that line for the exact number of bytes); **Share** of the parent folder and of the volume's used space; for a folder, **Largest items**: the five largest files anywhere below it; **Tags** |
-| **Classes** | The selection's bytes and file counts by file class |
+| **Classes** | The selection's make-up by file class: a bar split in the class colors, then a row per class with its files, size, share and a bar, largest first. Click a row to filter by that class. **Code** and **Data** fold away while they hold less than 2% and less than 8 GB; **Show all classes** brings them back |
 | **Largest files** | Up to 50 of the largest files below it |
 
 Click a file in **Largest items** or **Largest files** to **locate** it: it is selected, and if it isn't drawn (too deep or too small) the view zooms in, with history, until it is.
 
 At the bottom are the actions **Show in Explorer** (**Show in Finder** on macOS, **Show in file manager** on Linux), **Copy path** and **Add to delete basket**, each with its key. The **More actions** button opens the context menu, like <kbd>Shift</kbd>+<kbd>F10</kbd>. **Hide details panel** gives the picture the whole width; **Show sidebar** at the right edge brings it back.
+
+Drag the panel's left edge to resize it (280 to 640 pixels, always leaving the picture at least 360), and the picture is laid out again as you drag. Double-click the edge for the default 320 pixels. The width is remembered. With the edge focused, <kbd>←</kbd> and <kbd>→</kbd> resize it too (64 pixels at a time with <kbd>Shift</kbd>).
 
 The panel changes with what you do:
 

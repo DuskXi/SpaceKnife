@@ -6,6 +6,7 @@ turning (start, count) ranges into ids with numpy — no Python loop over nodes.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
@@ -60,10 +61,13 @@ class Summary:
     latest_mtime: int
 
 
-def summarize(store: NodeStore, node: int, ext_class: np.ndarray, n_classes: int, top: int) -> Summary:
+def summarize(
+    store: NodeStore, node: int, cls_of: Callable[[np.ndarray], np.ndarray], n_classes: int, top: int
+) -> Summary:
     """Largest files, per-class totals and newest modification time below ``node``.
 
-    ``ext_class`` maps extension ids to colour class indices. A file node summarises itself.
+    ``cls_of`` gives the colour class index of file nodes (``layout.Basis.cls_of``: by extension,
+    and by size for ``ts``). A file node summarises itself.
     """
     c = store.cols
     ids = subtree_ids(store, node) if c["kind"][node] == Kind.DIR else np.array([node], dtype=np.int64)
@@ -72,7 +76,7 @@ def summarize(store: NodeStore, node: int, ext_class: np.ndarray, n_classes: int
     alloc = c["alloc"][files].astype(np.int64)
     part = np.argpartition(-alloc, top)[:top] if files.size > top else np.arange(files.size)
     order = part[np.argsort(-alloc[part], kind="stable")]
-    cls = ext_class[c["ext"][files]] if files.size else np.empty(0, dtype=np.int64)
+    cls = cls_of(files) if files.size else np.empty(0, dtype=np.int64)
     class_bytes = np.bincount(cls, weights=alloc, minlength=n_classes).astype(np.int64)
     class_files = np.bincount(cls, minlength=n_classes).astype(np.int64)
     mt = c["mtime"][ids] if ids.size else np.zeros(1, dtype=np.uint32)

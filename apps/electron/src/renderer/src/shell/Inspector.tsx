@@ -1,12 +1,12 @@
 // Details panel (UI-MAIN-32…47, G11): details / class statistics / largest files of the selection.
 
-import { useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useState } from "react";
 
-import type { NodeInfo, TreeSummaryResult } from "@/protocol/generated";
-import { basketAdd, cancellable, viewCall } from "@/state/actions";
-import { set, toast, useApp } from "@/state/store";
+import type { ClassStat, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
+import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
+import { readFlag, set, toast, useApp, writeFlag } from "@/state/store";
 import { Kind } from "@/visual/frame";
-import { fmtAgo, fmtInt, fmtPct, fmtShare, fmtSize, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtCount, fmtInt, fmtPct, fmtShare, fmtSize, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
@@ -89,7 +89,7 @@ export function Inspector({ viewId }: { viewId: string }) {
         ) : page === "details" ? (
           <Details s={summary} viewId={viewId} className={className} />
         ) : page === "classes" ? (
-          <ClassStats s={summary} className={className} />
+          <ClassStats s={summary} viewId={viewId} className={className} />
         ) : (
           <TopList s={summary} viewId={viewId} className={className} />
         )}
@@ -179,7 +179,7 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
           <h3>{t("最大的子项")}</h3>
           <div className="top-list">
             {s.top_files.slice(0, 5).map((f) => (
-              <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} whole={n.alloc} viewId={viewId} />
+              <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} cls={f.class_id} whole={n.alloc} viewId={viewId} />
             ))}
           </div>
         </section>
@@ -228,9 +228,9 @@ function ShareBar({ label, part, whole }: { label: string; part: number; whole: 
   );
 }
 
-function TopRow({ node, rel, tag, whole, viewId }: { node: NodeInfo; rel: string; tag: string | null; whole: number; viewId: string }) {
-  const vocab = useApp((s) => s.vocab);
-  const cls = vocab?.classes.find((c) => c.extensions.includes(node.ext))?.id ?? "other";
+// `cls` comes from the backend: by extension, and by size for ts / mts
+function TopRow(props: { node: NodeInfo; rel: string; tag: string | null; cls: string; whole: number; viewId: string }) {
+  const { node, rel, tag, cls, whole, viewId } = props;
   return (
     <button className="top-row" onClick={() => void reveal(viewId, node.id)}>
       <span className="top-line">
@@ -256,23 +256,103 @@ export async function reveal(viewId: string, key: number): Promise<void> {
   await viewCall(viewId, "view.reveal", { key });
 }
 
-function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: string) => string }) {
+// SpaceKnife's own classes are niche: listed only when they hold a real share of the scope, the
+// rest behind 「显示全部类别」 (UI-MAIN-65; the composition panel's rule, without its folding).
+const NICHE = new Set(["code", "data"]);
+const NICHE_SHARE = 0.02;
+const NICHE_BYTES = 8 * 2 ** 30;
+const ALL_KEY = "sk.classStatsAll";
+
+/** 「类别统计」 (UI-MAIN-65): the scope's make-up as one stacked bar, then a row per class. */
+function ClassStats({ s, viewId, className }: { s: TreeSummaryResult; viewId: string; className: (id: string) => string }) {
+  const [all, setAll] = useState(() => readFlag(ALL_KEY, false));
+  const [hot, setHot] = useState<string | null>(null);
   const total = s.classes.reduce((a, c) => a + c.bytes, 0);
+  const files = s.classes.reduce((a, c) => a + c.files, 0);
+  const minor = (c: ClassStat) => NICHE.has(c.class_id) && c.bytes < NICHE_SHARE * total && c.bytes < NICHE_BYTES;
+  const folded = s.classes.filter(minor);
+  const rows = all ? s.classes : s.classes.filter((c) => !minor(c));
+  // columns as wide as their longest value (mono: 1ch a character), never narrower than the heading
+  const widest = (f: (c: ClassStat) => string) => Math.max(5, ...rows.map((c) => f(c).length));
+  const cols = {
+    "--cs-files": `${widest((c) => fmtInt(c.files))}ch`,
+    "--cs-files-short": `${widest((c) => fmtCount(c.files))}ch`,
+    "--cs-size": `${widest((c) => fmtSize(c.bytes))}ch`,
+  } as CSSProperties;
+  const name = s.node.name.split(/[\\/]/).filter(Boolean).pop() ?? s.node.name;
+  const describe = (c: ClassStat) =>
+    t("{name}：{files} 个文件，{size}，占 {share}", { name: className(c.class_id), files: fmtInt(c.files), size: fmtSize(c.bytes), share: fmtShare(c.bytes, total) });
+  const toggle = () => {
+    writeFlag(ALL_KEY, !all);
+    setAll(!all);
+  };
   return (
-    <section className="ins-section">
-      <h3>{t("{name} · 按文件类别", { name: s.node.name.split(/[\\/]/).filter(Boolean).pop() ?? "" })}</h3>
-      {s.classes.map((c) => (
-        <div key={c.class_id} className="class-row">
-          <span className="swatch" style={{ background: classHexNow(c.class_id) }} />
-          <span className="flex">{className(c.class_id)}</span>
-          <span className="mono muted">{t("{n} 个", { n: fmtInt(c.files) })}</span>
-          <span className="mono">{fmtSize(c.bytes)}</span>
-          <span className="mono muted share-pct">{fmtShare(c.bytes, total)}</span>
-          <span className="class-bar">
-            <span style={{ width: `${total ? (c.bytes / total) * 100 : 0}%`, background: classHexNow(c.class_id) }} />
-          </span>
-        </div>
-      ))}
+    <section className="cstat" style={cols}>
+      <header className="cstat-head">
+        <h3 className="cstat-title" title={s.path}>
+          {name}
+        </h3>
+        <span className="cstat-total mono">{fmtSize(total)}</span>
+      </header>
+      <div className="cstat-sub">{t("按文件类别 · {n} 个文件", { n: fmtInt(files) })}</div>
+      <div className="cstat-stack" role="img" aria-label={s.classes.map(describe).join(" · ")}>
+        {s.classes
+          .filter((c) => c.bytes > 0)
+          .map((c) => (
+            <span
+              key={c.class_id}
+              className={hot && hot !== c.class_id ? "dim" : undefined}
+              title={describe(c)}
+              style={{ flexGrow: c.bytes, background: classHexNow(c.class_id) }}
+              onMouseEnter={() => setHot(c.class_id)}
+              onMouseLeave={() => setHot(null)}
+            />
+          ))}
+      </div>
+      <div className="cstat-cols" aria-hidden="true">
+        <span />
+        <span>{t("类别")}</span>
+        <span className="cstat-files">{t("文件数")}</span>
+        <span className="cstat-size">{t("大小")}</span>
+        <span className="cstat-pct">{t("占比")}</span>
+      </div>
+      <ul className="cstat-list">
+        {rows.map((c) => {
+          const hex = classHexNow(c.class_id);
+          return (
+            <li key={c.class_id}>
+              <button
+                className={`cstat-row${hot === c.class_id ? " hot" : ""}${minor(c) ? " minor" : ""}`}
+                title={t("{about}。点击按这一类过滤", { about: describe(c) })}
+                onClick={() => void editFilter(viewId, `:class:${className(c.class_id)}`, null, true)}
+                onMouseEnter={() => setHot(c.class_id)}
+                onMouseLeave={() => setHot(null)}
+                onFocus={() => setHot(c.class_id)}
+                onBlur={() => setHot(null)}
+              >
+                <span className="swatch" style={{ background: hex }} />
+                <span className="cstat-name">{className(c.class_id)}</span>
+                <span className="cstat-files mono">
+                  <span className="full">{fmtInt(c.files)}</span>
+                  <span className="short">{fmtCount(c.files)}</span>
+                </span>
+                <span className="cstat-size mono">{fmtSize(c.bytes)}</span>
+                <span className="cstat-pct mono">{fmtShare(c.bytes, total)}</span>
+                <span className="cstat-bar">
+                  <span style={{ width: `${total ? (c.bytes / total) * 100 : 0}%`, background: hex }} />
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {folded.length > 0 && (
+        <button className="cstat-more" onClick={toggle} aria-pressed={all}>
+          {all
+            ? t("只显示主要类别")
+            : t("显示全部类别（另有 {n} 个小众类别，共 {size}）", { n: folded.length, size: fmtSize(folded.reduce((a, c) => a + c.bytes, 0)) })}
+        </button>
+      )}
     </section>
   );
 }
@@ -283,7 +363,7 @@ function TopList({ s, viewId }: { s: TreeSummaryResult; viewId: string; classNam
       <h3>{t("最大的 {n} 个文件", { n: s.top_files.length })}</h3>
       <div className="top-list">
         {s.top_files.map((f) => (
-          <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} whole={s.node.alloc} viewId={viewId} />
+          <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} cls={f.class_id} whole={s.node.alloc} viewId={viewId} />
         ))}
       </div>
     </section>

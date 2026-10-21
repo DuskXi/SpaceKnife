@@ -197,8 +197,9 @@ class _Eval:
         return hit
 
     def classes(self, class_id: str) -> np.ndarray:
-        by_ext = self.ctx.classes.ext_mask(class_id, self.store.ext_table)
-        result: np.ndarray = self.leaf & by_ext[self.ext]
+        size = self.store.cols["size"][: self.n]  # decides for size-split extensions (ts)
+        by_file = self.ctx.classes.node_mask(class_id, self.store.ext_table, self.ext, size)
+        result: np.ndarray = self.leaf & by_file
         return result
 
     def attrs(self, s: AttrSet) -> np.ndarray:
