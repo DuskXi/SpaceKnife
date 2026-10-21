@@ -226,6 +226,7 @@ async function restartInto(start: () => Promise<void>): Promise<string> {
   try {
     await start();
   } catch (err) {
+    console.warn(`[update] could not start the update: ${String(err)}`);
     quitting = false;
     void launchBackend();
     return mt("updateStartFailed", { error: err instanceof Error ? err.message : String(err) });
@@ -275,11 +276,14 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     await mkdir(staging, { recursive: true });
     await unpack(file, staging);
   } catch (err) {
+    console.warn(`[update] could not unpack ${file}: ${String(err)}`);
     return mt("updateUnpackFailed", { error: err instanceof Error ? err.message : String(err) });
   }
   const top = (await readdir(staging, { withFileTypes: true })).filter((e) => e.isDirectory());
   const staged = top.length === 1 ? join(staging, top[0]!.name) : null;
   if (!staged || !(await readdir(staged)).includes(basename(process.execPath))) {
+    const found = top.map((e) => e.name).join(", ") || "nothing";
+    console.warn(`[update] ${basename(file)} is not one folder with ${basename(process.execPath)}: ${found}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
   const script = join(updates, `update-${version}.${platform === "win32" ? "ps1" : "sh"}`);
@@ -293,6 +297,7 @@ async function replacePortable(file: string, updates: string): Promise<string> {
   };
   await writeFile(script, swapScriptFile(platform, swapScript(platform, plan)));
   const how = swapLauncher(platform, script);
+  console.info(`[update] ${version} unpacked: ${script} swaps the files once the app has quit`);
   return restartInto(() => (how.wait ? runToEnd(how.cmd, how.args) : launch(how.cmd, how.args)));
 }
 

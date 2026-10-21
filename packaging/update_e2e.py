@@ -45,6 +45,8 @@ from typing import Any, NoReturn
 from smoke_app import Page
 from websockets.sync.client import connect
 
+from spaceknife.update import parse_checksums
+
 WIN = sys.platform == "win32"
 
 
@@ -334,6 +336,9 @@ def portable(archive: Path) -> None:
                     member.name = top_new + member.name[len(top_old) :]
                     if member.islnk() and member.linkname.startswith(top_old):
                         member.linkname = top_new + member.linkname[len(top_old) :]
+                    # a long name is in the PAX header too, and that one wins when it is written
+                    pax = member.pax_headers
+                    member.pax_headers = {k: v for k, v in pax.items() if k not in ("path", "linkpath")}
                     dst.addfile(member, fileobj)
                 note = tarfile.TarInfo(f"{top_new}/{marker}")
                 body = f"{newer}\n".encode()
@@ -639,8 +644,8 @@ def nsis(setup: Path, previous: Path | None) -> None:
         else:
             step(f"upgrade from {old.group(1)}, the way the app starts the new installer")
             sums = previous.parent / "SHA256SUMS.txt"
-            listed = sums.read_text(encoding="utf-8") if sums.is_file() else ""
-            if f"{sha256(previous)}  {previous.name}" not in listed:
+            listed = parse_checksums(sums.read_text(encoding="utf-8")) if sums.is_file() else {}
+            if listed.get(previous.name) != sha256(previous):
                 fail(f"{previous.name} doesn't match {sums}")
             install(previous)
             files = seed()
