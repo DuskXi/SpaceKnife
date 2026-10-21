@@ -56,7 +56,8 @@ TICK_S = 0.5  # status pushes while a scan runs, also when nothing lands (MFT re
 CLOSED_KEEP_S = 3600.0  # ScanManager.closed: how long a closed scan's size counts
 RELEASE_DELAY_S = 1.0  # after scan.close: give the heap back once the request is done with the scan
 MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the rest is building
-MFT_BUILD_BYTES_PER_ROW = 450  # the received table (~100 B) plus building the tree from it (~330 B)
+# the received table (~160 B with the names) plus building the tree from it (~85 B, docs/memory.md §6)
+MFT_BUILD_BYTES_PER_ROW = 280
 _KIND_NAMES: dict[int, Literal["file", "dir", "link", "other"]] = {
     Kind.FILE: "file",
     Kind.DIR: "dir",

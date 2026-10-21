@@ -14,6 +14,7 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 
 - **Closing a tab while its snapshot loads no longer keeps the scan in memory.** A snapshot that finished loading, or a scan that started, after its tab was closed stayed in the backend with no tab until SpaceKnife quit (about 1.1 GB for a snapshot of 8.6 million items); a started scan even kept running. Now it is freed at once.
 - **The toolbar fits narrow windows.** In a window narrower than about 1,400 px the toolbar's right end was cut off: at the smallest window size the split, command palette and delete basket buttons were out of reach, and the path could disappear. Now the filter box shrinks first, then the chips show only their swatch, and the coloring, the chips and last the visualization switch move into a new **More** (…) menu, so every control stays reachable at any window size, in a comparison too.
+- **MFT fast scans need far less memory at their peak.** Building the tree of a large volume used to take about 325 bytes per item on top of the table read from the $MFT, for a moment: on a drive of 8.6 million items the backend reached about 3.6 GB (SpaceKnife as a whole 3.8 GB). It now takes about 85 bytes per item, so the same drive should peak at about 2.2 GB, with the same result and speed.
 
 ---
 
@@ -31,3 +32,4 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 
 - **快照加载途中关掉标签，扫描不再一直占着内存**：标签关掉以后才加载完的快照，或者才开始的扫描，会一直留在后端、没有标签显示，直到退出 SpaceKnife（一个 860 万项的快照约 1.1 GB）；已经开始的扫描甚至会继续跑。现在会立即释放。
 - **窄窗口下工具栏不再被截断**：窗口窄于约 1400 像素时，工具栏右端会被截掉，最小窗口下分屏、命令面板和删除篮按钮都点不到，路径也可能消失。现在先压缩过滤框，再把芯片缩成色块，然后依次把配色、芯片、最后是可视化切换收进新的「更多」（…）菜单，任何窗口大小下每个控件都点得到，快照对比时也一样。
+- **MFT 快速扫描的内存峰值大幅降低**：大盘建树的那一刻，以前要在读到的 $MFT 表之外再占每项约 325 字节：860 万项的盘后端会冲到约 3.6 GB（整个 SpaceKnife 约 3.8 GB）。现在每项约 85 字节，同一块盘的峰值应在约 2.2 GB，结果和速度都不变。
