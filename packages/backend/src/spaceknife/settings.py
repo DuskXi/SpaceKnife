@@ -302,6 +302,19 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "appearance.trash_effect",
+            "appearance",
+            "树图视觉",
+            "回收站特效",
+            "回收站 / 废纸篓里的东西蒙上一层暗纹、围上虚线，回收站本身标出清空后能释放多少；"
+            "「动态」时虚线流动、偶尔扫过一道光（「减少动画」时不动）",
+            "segmented",
+            "animated",
+            (("animated", "动态"), ("static", "静态"), ("off", "关")),
+            synonyms=("trash", "recycle bin", "回收站", "废纸篓"),  # i18n: ignore
+            kind=str,
+        ),
+        S(
             "appearance.selection_shadow",
             "appearance",
             "树图视觉",

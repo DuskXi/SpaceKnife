@@ -341,5 +341,9 @@
  "只要正式版": "Releases only",
  "自动下载更新": "Download updates automatically",
  "发现新版本后在后台下载并校验；下载好后点「重启并更新」才会安装，不会自己安装": "A new version is downloaded and checked in the background. It is installed only when you click \"Restart and update\".",
+ "回收站特效": "Recycle Bin effect",
+ "回收站 / 废纸篓里的东西蒙上一层暗纹、围上虚线，回收站本身标出清空后能释放多少；「动态」时虚线流动、偶尔扫过一道光（「减少动画」时不动）": "What lies in the Recycle Bin / Trash is shaded and hatched inside a dashed outline, and the bin itself says how much emptying it frees. \"Moving\": the dashes march and a band of light sweeps across now and then (still with \"Reduce motion\")",
+ "动态": "Moving",
+ "静态": "Still",
  "本机磁盘": "Disks"
 }

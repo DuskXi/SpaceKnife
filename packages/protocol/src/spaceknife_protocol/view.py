@@ -26,6 +26,8 @@ count      <u4    files in "N small items", entries in "+N items"
 flags      <u2    1 match · 2 dimmed · 4 folder-mask hit (bold) · 8 own tag · 16 selected
                   · 32 ancestor of the selection (halo) · 64 scan running and the folder's subtree is
                   not fully listed yet (folder blocks up to 3 levels below the zoom root)
+                  · 128 in a recycle bin / trash, or the bin itself (aggregates: by their container)
+                  · 256 the bin folder itself (it carries the badge of what emptying it frees)
 tag        <u1    own tag: 0 none, 1 red, 2 yellow, 3 green, 4 blue
 tone       <u1    modification-age band for time colouring: 0 < 1 d … 4 ≥ 1 y / unknown
 branch     <u1    top-level branch colour slot: 0 neutral, 1–8 (shade: min(depth, 4))

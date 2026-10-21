@@ -251,6 +251,18 @@
     <SolidColorBrush x:Key="SkTreemapTime3Brush" Color="#FF1C5F53"/>
     <Color x:Key="SkTreemapTime4">#FF173F39</Color>
     <SolidColorBrush x:Key="SkTreemapTime4Brush" Color="#FF173F39"/>
+    <Color x:Key="SkTreemapTrashBadgeBg">#FFFF8577</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashBadgeBgBrush" Color="#FFFF8577"/>
+    <Color x:Key="SkTreemapTrashBadgeText">#FF0A0B0D</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashBadgeTextBrush" Color="#FF0A0B0D"/>
+    <Color x:Key="SkTreemapTrashHatch">#2EFF8577</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashHatchBrush" Color="#2EFF8577"/>
+    <Color x:Key="SkTreemapTrashOutline">#FFFF8577</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashOutlineBrush" Color="#FFFF8577"/>
+    <Color x:Key="SkTreemapTrashSweep">#2EFFD9D3</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashSweepBrush" Color="#2EFFD9D3"/>
+    <Color x:Key="SkTreemapTrashVeil">#73060709</Color>
+    <SolidColorBrush x:Key="SkTreemapTrashVeilBrush" Color="#73060709"/>
     <Color x:Key="SkTreemapUnknownBorder">#FF343844</Color>
     <SolidColorBrush x:Key="SkTreemapUnknownBorderBrush" Color="#FF343844"/>
     <Color x:Key="SkTreemapUnknownStripeA">#FF0C0D11</Color>

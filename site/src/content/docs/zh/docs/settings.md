@@ -168,6 +168,7 @@ SpaceKnife 的设置都在一个「设置」标签页里。改动立即保存，
 | 高亮光晕层数 | 3 | 0 至 10 | 悬停或选中时点亮几层祖先标题栏（克制 ↔ 绚烂）。 | `appearance.halo_levels` |
 | 悬停高亮 | 开 | 开 `true` · 关 `false` | 鼠标下的元素加白色内描边。 | `appearance.hover_highlight` |
 | 鼠标拖尾 | 关 | 开 `true` · 关 `false` | 鼠标划过的元素渐隐。 | `appearance.mouse_trail` |
+| 回收站特效 | 动态 | 动态 `"animated"` · 静态 `"static"` · 关 `"off"` | 回收站 / 废纸篓里的东西蒙上一层暗纹、围上虚线，回收站本身标出清空后能释放多少；「动态」时虚线流动、偶尔扫过一道光（「减少动画」时不动）。 | `appearance.trash_effect` |
 | 选中投影 | 开 | 开 `true` · 关 `false` | 选中元素带投影，更容易追踪。 | `appearance.selection_shadow` |
 
 #### 配色样式

@@ -43,6 +43,7 @@ from ..layout.engine import (
 from ..store.nodes import Flag, Kind, NodeStore
 from .branch import BranchHues
 from .tags import TagStore
+from .trash import trash_marks
 
 ColorMode = Literal["class", "flat", "time", "branch"]
 FilterMode = Literal["dim", "hide"]
@@ -60,6 +61,8 @@ F_TAGGED = 8  # carries its own tag (see the tag column)
 F_SELECTED = 16  # the selection, or its nearest visible ancestor
 F_ON_PATH = 32  # an ancestor of the selection (halo header)
 F_SCANNING = 64  # scan running and this folder's subtree is not fully listed yet (top levels only)
+F_TRASH = 128  # in a recycle bin / trash, or the bin itself (view/trash.py)
+F_TRASH_BIN = 256  # the bin folder itself (its badge: what emptying it frees)
 
 DAY = 86400
 TONE_LIMITS = (DAY, 7 * DAY, 30 * DAY, 365 * DAY)  # time colouring: < 1 d, < 1 w, < 1 mo, < 1 y, older
@@ -147,7 +150,7 @@ class RootRow:
     kind: int  # RectKind: FOLDER, PENDING, FILE, or SMALL / MORE for an aggregate zoom
     size: int  # bytes on this frame's basis (matched bytes in hide mode, changes in a compare view)
     count: int = 0  # members of an aggregate zoom
-    flags: int = 0  # F_SCANNING, F_MATCH / F_DIM, F_FOLDER_HIT, F_TAGGED
+    flags: int = 0  # F_SCANNING, F_MATCH / F_DIM, F_FOLDER_HIT, F_TAGGED, F_TRASH
     tag: int = 0
     tone: int = 4
     branch: int = 0
@@ -690,6 +693,11 @@ class View:
         if real.any():
             tag[real] = tag_index[node[real]]
         flags[tag > 0] |= F_TAGGED
+        # in a recycle bin: real blocks by their node, aggregates by their container
+        holder = np.where(real | (kind == RectKind.SMALL) | (kind == RectKind.MORE), node, -1)
+        inside, is_bin = trash_marks(store, holder)
+        flags[inside] |= F_TRASH
+        flags[is_bin & real] |= F_TRASH_BIN
         # time bands (files: own mtime; aggregates: the band holding most of their bytes)
         now = FilterContext.current().now
         files = real & (kind == RectKind.FILE)
@@ -790,6 +798,11 @@ class View:
             flags |= F_MATCH if int(res.count[inside].sum()) > 0 else F_DIM
             if members is None and z.node < res.n and res.folder_hit[z.node]:
                 flags |= F_FOLDER_HIT
+        inside, is_bin = trash_marks(store, np.array([z.node], dtype=np.int64))  # aggregates: the container
+        if inside[0]:
+            flags |= F_TRASH
+        if is_bin[0] and members is None:
+            flags |= F_TRASH_BIN
         return RootRow(
             key=z.key,
             node=z.node,
@@ -933,6 +946,8 @@ __all__ = [
     "F_SCANNING",
     "F_SELECTED",
     "F_TAGGED",
+    "F_TRASH",
+    "F_TRASH_BIN",
     "Engines",
     "Frame",
     "RootRow",

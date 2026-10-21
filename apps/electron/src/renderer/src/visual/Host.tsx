@@ -17,7 +17,7 @@ import { type ColorMode, rgba } from "@/treemap/paint";
 
 import { acquireGl, type GlContext } from "./glContext";
 import { type HostHandle, hosts } from "./hosts";
-import { type Breath, breathingRows, drawBreath, drawFlash, drawTrail, type Flash, flashOf, type TrailMark, trailMark } from "./overlays";
+import { type Breath, breathingRows, drawBreath, drawFlash, drawTrail, drawTrash, type Flash, flashOf, type TrailMark, trailMark, type TrashMark, trashMarks, type TrashMode, trashMoves } from "./overlays";
 import { componentFor } from "./registry";
 import { breathGap, FPS_GAP, FrameLoop, frameGap, type Pace, type TransitionKind, transitionFor, useDevicePixelRatio, useReducedMotion } from "./scheduler";
 import { type Box, HIT_NONE, HIT_ROOT, type Hit, type HoverInfo, type PaintSettings, type Pt, type VisualComponent, type VisualContext, type VisualFrame, type VisualInstance } from "./types";
@@ -60,13 +60,20 @@ interface HostState {
   flash: Flash | null;
   trail: TrailMark[];
   breath: Breath[];
+  /** what lies in a recycle bin (「回收站特效」) */
+  trash: TrashMark[];
 }
 
 /** What the draw loops read from the latest render. */
 interface Live {
   pace: Pace;
   reduced: boolean;
+  trashMode: TrashMode;
 }
+
+/** The badge on a recycle bin: what emptying it frees (macOS calls it the Trash). */
+const binLabel = (bytes: number) =>
+  window.sk.platform === "darwin" ? t("废纸篓 · 清空可释放 {size}", { size: fmtSize(bytes) }) : t("回收站 · 清空可释放 {size}", { size: fmtSize(bytes) });
 
 const GROUND = rgba(tokens.treemap.ground);
 const GROUND_RGB = [GROUND[0], GROUND[1], GROUND[2]] as const;
@@ -110,6 +117,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     flash: null,
     trail: [],
     breath: [],
+    trash: [],
   });
 
   const view = useApp((s) => s.views[viewId]);
@@ -132,12 +140,13 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   const levelContrast = useApp((s) => setting(s, "appearance.level_contrast", 10)) / 10;
   const borderContrast = useApp((s) => setting(s, "appearance.border_contrast", 10)) / 10;
   const trailOn = useApp((s) => setting(s, "appearance.mouse_trail", false));
+  const trashMode = useApp((s) => setting<string>(s, "appearance.trash_effect", "animated")) as TrashMode;
   const fpsGap = FPS_GAP[useApp((s) => setting<string>(s, "treemap.fps", "display"))] ?? 0;
   const dynaSmooth = useApp((s) => setting(s, "treemap.dynasmooth", true));
   const dpr = useDevicePixelRatio();
 
-  const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced });
-  live.current = { pace: { fpsGap, dynaSmooth }, reduced };
+  const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced, trashMode });
+  live.current = { pace: { fpsGap, dynaSmooth }, reduced, trashMode };
   const rehoverRef = useRef<() => void>(() => {});
 
   // ---------------------------------------------------------------- draw loops
@@ -195,7 +204,8 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       }
       return more;
     };
-    // folders still being scanned breathe on their own canvas (UI-TM-42)
+    // on a canvas of their own: what lies in a recycle bin, and the folders still being scanned
+    // breathing over it (UI-TM-42)
     const drawBreathing = (now: number): boolean => {
       const bc = breathCanvas.current;
       const cur = st.cur;
@@ -205,13 +215,24 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       fit(bc, W, H);
       const ctx = bc.getContext("2d")!;
       ctx.clearRect(0, 0, W, H);
-      if (!st.breath.length) return false;
-      if (!st.anim) drawBreath(ctx, st.breath, now, live.current.reduced, cur.frame.info.dpr);
-      return !live.current.reduced || st.anim !== null; // after a transition: draw again
+      if (!st.breath.length && !st.trash.length) return false;
+      const { reduced, trashMode } = live.current;
+      const moving = trashMoves(st.trash, trashMode, reduced);
+      if (!st.anim) {
+        drawTrash(ctx, st.trash, now, moving, cur.frame.info.dpr, binLabel);
+        drawBreath(ctx, st.breath, now, reduced, cur.frame.info.dpr);
+      }
+      return (st.breath.length > 0 && !reduced) || moving || st.anim !== null; // after a transition: draw again
+    };
+    // the bin's light and dashes move at 30 frames a second at most
+    const ambientGap = (): number => {
+      const { pace, reduced, trashMode } = live.current;
+      if (st.breath.length) return breathGap(pace, true, reduced);
+      return trashMoves(st.trash, trashMode, reduced) ? Math.max(pace.fpsGap, FPS_GAP["30"]!) : 0;
     };
     return {
       main: new FrameLoop(drawMain, () => frameGap(live.current.pace, { user: st.anim !== null || st.trail.length > 0, ambient: st.flash !== null })),
-      breath: new FrameLoop(drawBreathing, () => breathGap(live.current.pace, st.breath.length > 0, live.current.reduced)),
+      breath: new FrameLoop(drawBreathing, ambientGap),
     };
   }, []);
 
@@ -304,7 +325,8 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
         st.cur.instance.setFrame(st.cur.frame, settings);
       }
       if (!st.anim) loops.main.run();
-      loops.breath.run(); // 「减少动画」 may have changed: breathe again or hold still
+      st.trash = trashMode === "off" ? [] : trashMarks(g, frame, frame.info.dpr);
+      loops.breath.run(); // 「减少动画」 or 「回收站特效」 may have changed: move again or hold still
       return;
     }
     st.hovered = HIT_NONE;
@@ -334,10 +356,11 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     st.flash = flashOf(g, frame, frame.info.flash ?? [], performance.now());
     loops.main.run();
     st.breath = breathingRows(g, frame, frame.info.dpr);
+    st.trash = trashMode === "off" ? [] : trashMarks(g, frame, frame.info.dpr);
     loops.breath.run();
     rehoverRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced]);
+  }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
 
   // hover driven from outside (W3 result list): highlight that row like a pointer hover
   const hoverKey = view?.hoverKey ?? null;

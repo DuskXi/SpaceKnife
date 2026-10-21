@@ -168,6 +168,7 @@ Theme, accent color, animation and the look of the visualizations. Changes apply
 | Highlight halo levels | 3 | 0 to 10 | How many ancestor title bars light up on hover or selection (subtle ↔ vivid). | `appearance.halo_levels` |
 | Hover highlight | On | On `true` · Off `false` | The block under the mouse gets a white inner outline. | `appearance.hover_highlight` |
 | Mouse trail | Off | On `true` · Off `false` | Blocks the mouse passes over fade out. | `appearance.mouse_trail` |
+| Recycle Bin effect | Moving | Moving `"animated"` · Still `"static"` · Off `"off"` | What lies in the Recycle Bin / Trash is shaded and hatched inside a dashed outline, and the bin itself says how much emptying it frees. "Moving": the dashes march and a band of light sweeps across now and then (still with "Reduce motion"). | `appearance.trash_effect` |
 | Selection shadow | On | On `true` · Off `false` | The selected block casts a shadow, so it is easier to follow. | `appearance.selection_shadow` |
 
 #### Coloring

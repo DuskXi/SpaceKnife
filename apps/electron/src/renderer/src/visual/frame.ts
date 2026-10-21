@@ -10,7 +10,7 @@ export const Kind = { FILE: 0, FOLDER: 1, COLLAPSED: 2, PENDING: 3, SMALL: 4, MO
 /** RADIAL only in polar.v1: the label runs along the radius */
 export const Label = { NAME: 1, SIZE: 2, BIG: 4, SHORT: 8, RADIAL: 16 } as const;
 export const DStat = { SAME: 0, NEW: 1, DELETED: 2, CHANGED: 3 } as const;
-export const Flag = { MATCH: 1, DIM: 2, FOLDER_HIT: 4, TAGGED: 8, SELECTED: 16, ON_PATH: 32, SCANNING: 64 } as const;
+export const Flag = { MATCH: 1, DIM: 2, FOLDER_HIT: 4, TAGGED: 8, SELECTED: 16, ON_PATH: 32, SCANNING: 64, TRASH: 128, TRASH_BIN: 256 } as const;
 
 /** Geometry columns of each layout this renderer decodes (all <i4). */
 export const GEOMETRY_COLUMNS: Readonly<Record<string, readonly string[]>> = {

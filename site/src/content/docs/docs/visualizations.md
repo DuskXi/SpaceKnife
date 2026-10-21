@@ -158,6 +158,21 @@ When the zoom root is a whole volume you scanned (for example `C:\` or `/`), two
 
 A large unknown space is worth a look: scanning with more rights usually makes it smaller. See [Troubleshooting](../troubleshooting/).
 
+## The Recycle Bin
+
+What you deleted into the Recycle Bin (the Trash on macOS) still takes up space until the bin is emptied. SpaceKnife marks it so you don't mistake it for files you use:
+
+- Everything in the bin is shaded and cross-hatched inside a coral dashed outline.
+- The bin itself carries a badge: **Recycle Bin · emptying frees 12.3 GB** (**Trash · …** on macOS). It also shows as the root bar or center disc when you zoom into the bin in a flame graph.
+- The hover card says **In the Recycle Bin: the space comes back when the bin is emptied**.
+- With **Moving** (the default), the dashes march and a band of light sweeps across the bin now and then. **Reduce motion** holds them still.
+
+The bins it knows: `$Recycle.Bin` at the top of each Windows drive; `~/.Trash` and `.Trashes` at the top of a volume on macOS; `~/.local/share/Trash` and `.Trash-<user id>` at the top of a drive on Linux (the freedesktop.org Trash, used by GNOME, KDE and most file managers; `rm` deletes without one). A scan of the whole drive includes the bin; a scan of one folder does only when the bin is inside it.
+
+While SpaceKnife monitors the scan, moving files to the bin moves their blocks into it, and emptying the bin turns that space into free space.
+
+Choose **Moving**, **Still** or **Off** in **Settings › Appearance › Treemap visuals › Recycle Bin effect**.
+
 ## While a scan runs: the breathing outline
 
 The picture fills in while the scan runs, several times a second. You can select, hover, zoom, go back, change the level and switch the visualization the whole time.

@@ -226,5 +226,11 @@
  "颜色标签": "Color tags",
  "黄色": "Yellow",
  "黄色标签": "Yellow tag",
- "，": ", "
+ "，": ", ",
+ "回收站 · 清空可释放 {size}": "Recycle Bin · emptying frees {size}",
+ "废纸篓 · 清空可释放 {size}": "Trash · emptying frees {size}",
+ "回收站：清空后可释放 {size}": "Recycle Bin: emptying it frees {size}",
+ "废纸篓：清空后可释放 {size}": "Trash: emptying it frees {size}",
+ "在回收站里：清空回收站后才释放空间": "In the Recycle Bin: the space comes back when the bin is emptied",
+ "在废纸篓里：清空废纸篓后才释放空间": "In the Trash: the space comes back when the Trash is emptied"
 }

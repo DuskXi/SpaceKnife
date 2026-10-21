@@ -171,6 +171,28 @@
         "$value": "#7E8493"
       }
     },
+    "trash": {
+      "$type": "color",
+      "$description": "回收站 / 废纸篓里的块：压暗的蒙层、交叉细纹、虚线轮廓与流光，回收站本身的「清空可释放」标签",
+      "veil": {
+        "$value": "#06070973"
+      },
+      "hatch": {
+        "$value": "#FF85772E"
+      },
+      "outline": {
+        "$value": "#FF8577"
+      },
+      "sweep": {
+        "$value": "#FFD9D32E"
+      },
+      "badgeBg": {
+        "$value": "#FF8577"
+      },
+      "badgeText": {
+        "$value": "#0A0B0D"
+      }
+    },
     "pending": {
       "$type": "color",
       "stripeA": {

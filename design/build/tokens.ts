@@ -258,6 +258,14 @@ export const tokens = {
       "3": "#1C5F53",
       "4": "#173F39"
     },
+    "trash": {
+      "badgeBg": "#FF8577",
+      "badgeText": "#0A0B0D",
+      "hatch": "#FF85772E",
+      "outline": "#FF8577",
+      "sweep": "#FFD9D32E",
+      "veil": "#06070973"
+    },
     "unknown": {
       "border": "#343844",
       "stripeA": "#0C0D11",
@@ -506,6 +514,12 @@ export const cssVar = {
   "treemap.time.2": "var(--sk-treemap-time-2)",
   "treemap.time.3": "var(--sk-treemap-time-3)",
   "treemap.time.4": "var(--sk-treemap-time-4)",
+  "treemap.trash.badgeBg": "var(--sk-treemap-trash-badge-bg)",
+  "treemap.trash.badgeText": "var(--sk-treemap-trash-badge-text)",
+  "treemap.trash.hatch": "var(--sk-treemap-trash-hatch)",
+  "treemap.trash.outline": "var(--sk-treemap-trash-outline)",
+  "treemap.trash.sweep": "var(--sk-treemap-trash-sweep)",
+  "treemap.trash.veil": "var(--sk-treemap-trash-veil)",
   "treemap.unknown.border": "var(--sk-treemap-unknown-border)",
   "treemap.unknown.stripeA": "var(--sk-treemap-unknown-stripe-a)",
   "treemap.unknown.stripeB": "var(--sk-treemap-unknown-stripe-b)",
