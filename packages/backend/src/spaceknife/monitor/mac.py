@@ -14,7 +14,10 @@ FSEvents merges the flags of one path within the latency window (``Created | Rem
 either order), so structural events are decided by whether the path exists now; the backend lists
 the folder again either way. A rename arrives as two events with consecutive ids (old path, then
 new path) and is paired when the first one is gone and the second one exists. Event paths are
-canonical (``/private/var/…``), so they are mapped back onto the root as the scan spelled it.
+canonical (``/private/var/…``), so they are mapped back onto the root as the scan spelled it. A
+path inside the boot volume group's Data volume (``/System/Volumes/Data/Users/…``: the scan does
+not enter that mount, its files are in the tree through the firmlinks) first goes back through the
+firmlinks (``/Users/…``); one no firmlink leads to is not in the tree and is dropped.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ from typing import Any
 from loguru import logger
 
 from ..i18n import Texts
+from ..scan.volume import through_firmlinks, volume_group_twins
 from .base import Change, Sink, WatchState, WatchStatus
 from .poll import stat_file
 
@@ -200,6 +204,10 @@ class FsEventsWatcher:
         self.root = os.path.abspath(root)
         self._real = os.path.realpath(self.root)
         self._api = _Api()
+        # the boot volume group's Data volume, unless the root lies inside it (then paths match)
+        self._twins = tuple(
+            t for t in volume_group_twins("/") if self._real != t and not self._real.startswith(t + "/")
+        )
         self._callback = _CALLBACK(self._on_events)  # kept alive as long as the stream
         self._lock = threading.RLock()  # sink calls and the run loop reference vs. stop()
         self._loop: int | None = None  # the thread's CFRunLoop while it runs
@@ -299,11 +307,19 @@ class FsEventsWatcher:
             raise OSError(TEXT["create_failed"])
         return int(stream)
 
-    def _local(self, raw: bytes | None) -> str:
-        """An event path as the scan spells it (FSEvents reports the canonical one)."""
+    def _local(self, raw: bytes | None) -> str | None:
+        """An event path as the scan spells it (FSEvents reports the canonical one); None when it
+        is not in the tree (a part of the Data volume no firmlink leads to)."""
         path = os.fsdecode(raw or b"")
         if len(path) > 1:
             path = path.rstrip("/")
+        for twin in self._twins:
+            if path == twin or path.startswith(twin + "/"):
+                mapped = through_firmlinks(path, twin)
+                if mapped is None:
+                    return None
+                path = mapped
+                break
         real = self._real
         if real != self.root and (path == real or path.startswith(real.rstrip("/") + "/")):
             path = self.root + path[len(real) :]
@@ -311,7 +327,11 @@ class FsEventsWatcher:
 
     def _on_events(self, _stream: Any, _info: Any, count: int, paths: Any, flags: Any, ids: Any) -> None:
         try:
-            events = [(self._local(paths[k]), int(flags[k]), int(ids[k])) for k in range(count)]
+            events = [
+                (path, int(flags[k]), int(ids[k]))
+                for k in range(count)
+                if (path := self._local(paths[k])) is not None
+            ]
             changes, root_lost = map_events(events, self.root)
             if changes:
                 self._emit(changes)

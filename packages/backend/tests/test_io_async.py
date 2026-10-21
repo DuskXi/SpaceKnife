@@ -185,3 +185,24 @@ async def test_registry_samples_controls_and_pushes(tmp_path: Path) -> None:
         await asyncio.sleep(0.15)
         assert not net.status().measured  # ticked open loop
     assert not registry.running
+
+
+async def test_a_disk_the_sampler_never_measures_runs_open_loop() -> None:
+    """The sampler measures other disks but never this one (a mapping mismatch, as macOS's ioreg
+    parsing once had): the governor ticks open loop and the mismatch is logged once, with names."""
+    from loguru import logger
+
+    fake = FakeSampler()
+    registry = IoRegistry(sampler_factory=lambda: fake, idle_interval=0.05, active_interval=0.05)
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
+    try:
+        async with registry:
+            stray = registry.governor(DiskRef(DiskId("disk9"), name="disk9"))
+            await asyncio.sleep(0.3)
+            assert not stray.status().measured
+            assert registry.governor(DISK.id).status().measured
+    finally:
+        logger.remove(sink)
+    hits = [m for m in messages if "never disk9" in m]
+    assert len(hits) == 1 and str(DISK.id) in hits[0]

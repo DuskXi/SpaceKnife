@@ -106,6 +106,7 @@ export const tokens = {
     "duration": {
       "fast": 120,
       "flash": 900,
+      "swap": 200,
       "zoom": 220
     },
     "easing": {
@@ -264,6 +265,85 @@ export const tokens = {
       "sub": "#7E8493",
       "text": "#A3A9B6"
     }
+  },
+  "visual": {
+    "branch": {
+      "1": {
+        "1": "#9EDBF9",
+        "2": "#0BB4EC",
+        "3": "#067398",
+        "4": "#024F6A"
+      },
+      "2": {
+        "1": "#F8C5A2",
+        "2": "#EB883B",
+        "3": "#9C5313",
+        "4": "#6A3913"
+      },
+      "3": {
+        "1": "#A6E1C0",
+        "2": "#2FC183",
+        "3": "#067D51",
+        "4": "#0C5537"
+      },
+      "4": {
+        "1": "#F6BEDC",
+        "2": "#E57BBA",
+        "3": "#984979",
+        "4": "#673352"
+      },
+      "5": {
+        "1": "#95E1E0",
+        "2": "#08BCBC",
+        "3": "#047879",
+        "4": "#045353"
+      },
+      "6": {
+        "1": "#FFBFB8",
+        "2": "#F47B74",
+        "3": "#A34945",
+        "4": "#6E3330"
+      },
+      "7": {
+        "1": "#C6DAA4",
+        "2": "#8FB43F",
+        "3": "#597417",
+        "4": "#3D4F15"
+      },
+      "8": {
+        "1": "#E0C4F6",
+        "2": "#C188EA",
+        "3": "#7E539C",
+        "4": "#56396A"
+      },
+      "neutral": "#494D54"
+    },
+    "center": {
+      "bg": "#13151B",
+      "sub": "#9AA0AE",
+      "text": "#F1F2F5"
+    },
+    "flame": {
+      "gap": 2,
+      "rowMax": 48,
+      "rowMin": 20
+    },
+    "flamePolar": {
+      "gap": 2,
+      "holeMaxRatio": 0.4,
+      "holeMin": 36,
+      "holeRatio": 0.24,
+      "margin": 8,
+      "ringMin": 14,
+      "segments": 32
+    },
+    "haloOverlay": "#FFFFFF1A",
+    "ring": {
+      "1": "#5B6375",
+      "2": "#4D5566",
+      "3": "#424A5B",
+      "4": "#394151"
+    }
   }
 } as const;
 
@@ -329,6 +409,7 @@ export const cssVar = {
   "layout.windowButton": "var(--sk-layout-window-button)",
   "motion.duration.fast": "var(--sk-motion-duration-fast)",
   "motion.duration.flash": "var(--sk-motion-duration-flash)",
+  "motion.duration.swap": "var(--sk-motion-duration-swap)",
   "motion.duration.zoom": "var(--sk-motion-duration-zoom)",
   "motion.easing.out": "var(--sk-motion-easing-out)",
   "motion.easing.standard": "var(--sk-motion-easing-standard)",
@@ -429,5 +510,56 @@ export const cssVar = {
   "treemap.unknown.stripeA": "var(--sk-treemap-unknown-stripe-a)",
   "treemap.unknown.stripeB": "var(--sk-treemap-unknown-stripe-b)",
   "treemap.unknown.sub": "var(--sk-treemap-unknown-sub)",
-  "treemap.unknown.text": "var(--sk-treemap-unknown-text)"
+  "treemap.unknown.text": "var(--sk-treemap-unknown-text)",
+  "visual.branch.1.1": "var(--sk-visual-branch-1-1)",
+  "visual.branch.1.2": "var(--sk-visual-branch-1-2)",
+  "visual.branch.1.3": "var(--sk-visual-branch-1-3)",
+  "visual.branch.1.4": "var(--sk-visual-branch-1-4)",
+  "visual.branch.2.1": "var(--sk-visual-branch-2-1)",
+  "visual.branch.2.2": "var(--sk-visual-branch-2-2)",
+  "visual.branch.2.3": "var(--sk-visual-branch-2-3)",
+  "visual.branch.2.4": "var(--sk-visual-branch-2-4)",
+  "visual.branch.3.1": "var(--sk-visual-branch-3-1)",
+  "visual.branch.3.2": "var(--sk-visual-branch-3-2)",
+  "visual.branch.3.3": "var(--sk-visual-branch-3-3)",
+  "visual.branch.3.4": "var(--sk-visual-branch-3-4)",
+  "visual.branch.4.1": "var(--sk-visual-branch-4-1)",
+  "visual.branch.4.2": "var(--sk-visual-branch-4-2)",
+  "visual.branch.4.3": "var(--sk-visual-branch-4-3)",
+  "visual.branch.4.4": "var(--sk-visual-branch-4-4)",
+  "visual.branch.5.1": "var(--sk-visual-branch-5-1)",
+  "visual.branch.5.2": "var(--sk-visual-branch-5-2)",
+  "visual.branch.5.3": "var(--sk-visual-branch-5-3)",
+  "visual.branch.5.4": "var(--sk-visual-branch-5-4)",
+  "visual.branch.6.1": "var(--sk-visual-branch-6-1)",
+  "visual.branch.6.2": "var(--sk-visual-branch-6-2)",
+  "visual.branch.6.3": "var(--sk-visual-branch-6-3)",
+  "visual.branch.6.4": "var(--sk-visual-branch-6-4)",
+  "visual.branch.7.1": "var(--sk-visual-branch-7-1)",
+  "visual.branch.7.2": "var(--sk-visual-branch-7-2)",
+  "visual.branch.7.3": "var(--sk-visual-branch-7-3)",
+  "visual.branch.7.4": "var(--sk-visual-branch-7-4)",
+  "visual.branch.8.1": "var(--sk-visual-branch-8-1)",
+  "visual.branch.8.2": "var(--sk-visual-branch-8-2)",
+  "visual.branch.8.3": "var(--sk-visual-branch-8-3)",
+  "visual.branch.8.4": "var(--sk-visual-branch-8-4)",
+  "visual.branch.neutral": "var(--sk-visual-branch-neutral)",
+  "visual.center.bg": "var(--sk-visual-center-bg)",
+  "visual.center.sub": "var(--sk-visual-center-sub)",
+  "visual.center.text": "var(--sk-visual-center-text)",
+  "visual.flame.gap": "var(--sk-visual-flame-gap)",
+  "visual.flame.rowMax": "var(--sk-visual-flame-row-max)",
+  "visual.flame.rowMin": "var(--sk-visual-flame-row-min)",
+  "visual.flamePolar.gap": "var(--sk-visual-flame-polar-gap)",
+  "visual.flamePolar.holeMaxRatio": "var(--sk-visual-flame-polar-hole-max-ratio)",
+  "visual.flamePolar.holeMin": "var(--sk-visual-flame-polar-hole-min)",
+  "visual.flamePolar.holeRatio": "var(--sk-visual-flame-polar-hole-ratio)",
+  "visual.flamePolar.margin": "var(--sk-visual-flame-polar-margin)",
+  "visual.flamePolar.ringMin": "var(--sk-visual-flame-polar-ring-min)",
+  "visual.flamePolar.segments": "var(--sk-visual-flame-polar-segments)",
+  "visual.haloOverlay": "var(--sk-visual-halo-overlay)",
+  "visual.ring.1": "var(--sk-visual-ring-1)",
+  "visual.ring.2": "var(--sk-visual-ring-2)",
+  "visual.ring.3": "var(--sk-visual-ring-3)",
+  "visual.ring.4": "var(--sk-visual-ring-4)"
 } as const;

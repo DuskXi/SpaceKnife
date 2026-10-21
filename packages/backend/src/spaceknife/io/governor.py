@@ -109,6 +109,8 @@ class GovernorCore:
         self.q_eff = self.profile.q_eff
         self.measured = False
         self._open_loop = False  # the registry has no samples for this disk
+        self.read_bps: float | None = None  # whole disk, last sample (shown, not controlled)
+        self.read_latency: float | None = None  # mean seconds per read, last sample
         # settings
         self.level: Level = "balanced"
         self.custom = DEFAULT_CUSTOM
@@ -418,11 +420,13 @@ class GovernorCore:
         if sample is None:
             self.measured, self._open_loop = False, True
             self.total = self.self_load = self.active = 0.0
+            self.read_bps = self.read_latency = None
             if self._limited() and demand and not self._pauses:
                 self.u = self._open_loop_u()
             self._record(span, wall)
             return
         self.measured, self._open_loop = True, False
+        self.read_bps, self.read_latency = sample.read_bps, sample.read_latency
         self._dt = sample.dt if sample.dt > 0 else self._dt
         rho = self._rho(sample)
         self.active, self.total = sample.busy, rho
@@ -617,6 +621,8 @@ class GovernorCore:
             measured=self.measured,
             low_io_priority=self.low_io_priority,
             q_eff=None if self.q_eff is None else round(self.q_eff, 2),
+            read_bps=None if self.read_bps is None else round(self.read_bps),
+            read_latency_ms=None if self.read_latency is None else round(1000.0 * self.read_latency, 3),
             history=list(self.history) if history else [],
         )
 

@@ -90,6 +90,15 @@ async def test_major_version_mismatch_closes_with_4426(server: Server) -> None:
         assert info.value.rcvd.code == CloseCode.VERSION_MISMATCH
 
 
+async def test_older_minor_version_is_accepted(server: Server) -> None:
+    # Minor versions only add capabilities, so a 1.0 client is answered normally.
+    async with connect(server.url, subprotocols=[SUBPROTOCOL]) as ws:  # type: ignore[list-item]
+        await ws.send(hello_frame(protocol="1.0"))
+        reply = json.loads(await ws.recv())
+        assert reply["result"]["protocol"] == PROTOCOL_VERSION
+        assert reply["result"]["capabilities"] == ["subscriptions"]
+
+
 async def test_missing_subprotocol_is_rejected(server: Server) -> None:
     # websockets refuses the upgrade itself (HTTP 400); the session-level check is defence in depth.
     with pytest.raises(InvalidStatus) as info:

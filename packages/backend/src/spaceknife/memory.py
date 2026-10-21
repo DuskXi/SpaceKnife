@@ -108,6 +108,36 @@ def _macos() -> ProcessMemory:
     return ProcessMemory(int(info.phys_footprint), int(info.resident_size))
 
 
+def release() -> None:
+    """Hand memory the allocator keeps but no longer uses back to the system (after a big scan was
+    closed). The C heap keeps freed space for reuse: after a scan of millions of items that is a few
+    hundred MB the next scan reuses, without this the process keeps it until then (docs/memory.md
+    §8). Best effort: Windows decommits free heap pages (HeapOptimizeResources, Windows 8.1+),
+    glibc trims its arenas, macOS relieves its malloc zones; elsewhere nothing happens."""
+    try:
+        if sys.platform == "win32":
+            from ctypes import wintypes
+
+            class Optimize(ctypes.Structure):  # HEAP_OPTIMIZE_RESOURCES_INFORMATION
+                _fields_ = [("Version", wintypes.DWORD), ("Flags", wintypes.DWORD)]
+
+            info = Optimize(1, 0)
+            heap_optimize_resources = 3
+            ctypes.WinDLL("kernel32").HeapSetInformation(
+                None, heap_optimize_resources, ctypes.byref(info), ctypes.sizeof(info)
+            )
+        elif sys.platform == "darwin":
+            libc = ctypes.CDLL("/usr/lib/libSystem.dylib")
+            libc.malloc_zone_pressure_relief.argtypes = (ctypes.c_void_p, ctypes.c_size_t)
+            libc.malloc_zone_pressure_relief(None, 0)
+        else:
+            trim = getattr(ctypes.CDLL(None), "malloc_trim", None)  # glibc only (not musl)
+            if trim is not None:
+                trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
 def physical_memory() -> int | None:
     """Installed physical memory in bytes, or None."""
     try:

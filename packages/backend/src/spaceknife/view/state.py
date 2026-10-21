@@ -1,36 +1,56 @@
 """View state machine: one tab or split pane looking at one scan (UI-TM-33…38, UI-TM-55, W3, W8).
 
 Each view owns its zoom root, back/forward history (every entry remembers its selection),
-detail level, viewport, free/unknown switches, colour mode, filter and selection. Views of the
-same scan share the node store, the tags and the layout caches; rendering returns a
-:class:`Frame` — the draw list plus per-block flags, tag, time tone, the selected row and the
-breadcrumb — that the protocol layer turns into one binary frame.
+detail level, viewport, free/unknown switches, visualization, colour mode (one per visualization),
+filter and selection. Views of the same scan share the node store, the tags and the layout caches;
+rendering returns a :class:`Frame` — the draw list plus per-block flags, tag, time tone, branch
+colour, the zoom root, the selected row and the breadcrumb — that the protocol layer turns into one
+binary frame.
+
+The visualization is a registry id (``layout.registry``); switching keeps the zoom root, history,
+selection, filter and detail level, only the engine that lays out the next frame changes.
 """
 
 from __future__ import annotations
 
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
 import numpy as np
 
+from spaceknife_protocol import CAP_VISUALS
 from spaceknife_protocol.filter import FilterDiagnostic, FilterNormal, FilterVocab
 from spaceknife_protocol.filter_syntax import parse
+from spaceknife_protocol.view import DRAWLIST_LAYOUT
 
 from ..filter.engine import FilterContext, FilterResult, evaluate
 from ..filter.vocab import platform_vocab
-from ..layout.engine import KEY_MORE, KEY_SMALL, DrawList, Layout, LayoutParams, RectKind, RootSpec
-from ..store.nodes import Kind, NodeStore
+from ..layout import registry
+from ..layout.api import ArraySizes, Engine, SizeSource, StoreSizes, Visualization
+from ..layout.basis import Basis
+from ..layout.engine import (
+    KEY_MORE,
+    KEY_NODE_MASK,
+    KEY_SMALL,
+    DrawList,
+    Layout,
+    LayoutParams,
+    RectKind,
+    RootSpec,
+)
+from ..store.nodes import Flag, Kind, NodeStore
+from .branch import BranchHues
 from .tags import TagStore
 
-ColorMode = Literal["class", "flat", "time"]
+ColorMode = Literal["class", "flat", "time", "branch"]
 FilterMode = Literal["dim", "hide"]
 ResultsSort = Literal["size", "name", "count"]
 DETAIL_MIN, DETAIL_MAX = 1, 15
 HISTORY = 200  # back steps kept per view
 MAX_FLASH = 200  # changes flashed per frame (the largest)
+SCANNING_LEVELS = 3  # levels below the view root that breathe while their folder is being scanned
 
 # Per-block flags of a rendered frame.
 F_MATCH = 1  # filter active: this file matches / this block contains matches
@@ -39,9 +59,24 @@ F_FOLDER_HIT = 4  # folder named by a positive folder mask (bold title)
 F_TAGGED = 8  # carries its own tag (see the tag column)
 F_SELECTED = 16  # the selection, or its nearest visible ancestor
 F_ON_PATH = 32  # an ancestor of the selection (halo header)
+F_SCANNING = 64  # scan running and this folder's subtree is not fully listed yet (top levels only)
 
 DAY = 86400
 TONE_LIMITS = (DAY, 7 * DAY, 30 * DAY, 365 * DAY)  # time colouring: < 1 d, < 1 w, < 1 mo, < 1 y, older
+_TAG_BITS = 3 << 30  # the tag part of a key (KEY_SMALL / KEY_MORE / FREE and UNKNOWN)
+BASELINE = "treemap"  # the visualization every session can show (drawlist.v1, no capability)
+
+
+def showable(visual: str, caps: Collection[str]) -> Visualization | None:
+    """The visualization ``visual`` if a session that announced ``caps`` can show it: registered, its
+    capability announced, and without ``visuals.v1`` only the baseline treemap."""
+    try:
+        vis = registry.get(visual)
+    except KeyError:
+        return None
+    if CAP_VISUALS not in caps:
+        return vis if vis.id == BASELINE else None
+    return vis if registry.is_available(vis, caps) else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,10 +111,48 @@ class ViewSettings:
     sort_by_size: bool = True
     show_free: bool = True
     show_unknown: bool = True
-    color_mode: ColorMode = "class"
+    visual: str = "treemap"  # a registered visualization
+    color_mode: ColorMode = "class"  # of ``visual``, the one the view starts with
+    colors: tuple[tuple[str, ColorMode], ...] = ()  # the colour mode each other visualization starts with
     filter_mode: FilterMode = "dim"
     font_scale: float = 1.0
     aspect: float = 1.0
+    flame_origin: str = "bottom"  # flame graph: the root bar at the "top" or the "bottom"
+
+
+class Engines:
+    """One engine per visualization over one basis, built when first asked for (views of a scan
+    share it; a view on its own builds its own)."""
+
+    __slots__ = ("_built", "basis")
+
+    def __init__(self, basis: Basis) -> None:
+        self.basis = basis
+        self._built: dict[str, Engine] = {}
+
+    def get(self, visual: str) -> Engine:
+        """The engine of ``visual`` (KeyError: no such visualization)."""
+        engine = self._built.get(visual)
+        if engine is None:  # two renders racing build one each: one of them is kept
+            engine = self._built.setdefault(visual, registry.get(visual).engine(self.basis))
+        return engine
+
+
+@dataclass(frozen=True, slots=True)
+class RootRow:
+    """The zoom root as the facts of a row (``FrameInfo.root``: the root bar, the centre disc)."""
+
+    key: int
+    node: int
+    kind: int  # RectKind: FOLDER, PENDING, FILE, or SMALL / MORE for an aggregate zoom
+    size: int  # bytes on this frame's basis (matched bytes in hide mode, changes in a compare view)
+    count: int = 0  # members of an aggregate zoom
+    flags: int = 0  # F_SCANNING, F_MATCH / F_DIM, F_FOLDER_HIT, F_TAGGED
+    tag: int = 0
+    tone: int = 4
+    branch: int = 0
+    delta: int | None = None  # compare views
+    dstat: int | None = None
 
 
 @dataclass(slots=True)
@@ -101,6 +174,8 @@ class Frame:
     flags: np.ndarray  # u2 F_* bits per row
     tag: np.ndarray  # u1 own tag per row: 0 none, 1–4 red, yellow, green, blue
     tone: np.ndarray  # u1 time-colouring band per row (0 newest … 4 oldest)
+    branch: np.ndarray  # u1 top-level branch colour slot per row (0 neutral, 1–8)
+    root: RootRow  # the zoom root itself
     selected_row: int | None
     breadcrumb: list[tuple[int, str]]  # (key, label) from the home root to the zoom root
     filter_totals: tuple[int, int, int] | None  # (files, allocated, logical) below the zoom root
@@ -121,19 +196,29 @@ class View:
         layout: Layout | None = None,
         settings: ViewSettings | None = None,
         vocab: FilterVocab | None = None,
+        engines: Callable[[str], Engine] | None = None,
     ) -> None:
         self.id = view_id
         self.store = store
         self.roots = roots
         self.tags = tags or TagStore()
         self.layout = layout or Layout(store)
+        self.basis: Basis = self.layout  # what the engines lay out (``layout``: older name)
+        self._engines = engines or Engines(self.basis).get  # visualization id -> its engine
         s = settings or ViewSettings()
+        registry.get(s.visual)  # KeyError: not a registered visualization
+        self.visual = s.visual
+        self._colors: dict[str, ColorMode] = dict(s.colors)  # visualization -> its colour mode
+        self._colors[s.visual] = s.color_mode
+        self.visual_options: dict[str, tuple[tuple[str, object], ...]] = {  # LayoutParams.options
+            "flame": (("origin", s.flame_origin),),
+        }
+        self.hues = BranchHues()
         self.detail = s.detail
         self.min_element = s.min_element
         self.sort_by_size = s.sort_by_size
         self.show_free = s.show_free
         self.show_unknown = s.show_unknown
-        self.color_mode: ColorMode = s.color_mode
         self.font_scale = s.font_scale
         self.aspect = s.aspect
         self.filter_mode: FilterMode = s.filter_mode
@@ -149,8 +234,57 @@ class View:
         self.last: Frame | None = None
         self.compare: Any = None  # server.compares.ChangeTree: areas are changes (W6)
         self.direction: str = "all"  # compare views: 「显示的变化」 all / grow / shrink
+        self.scanning = False  # its scan is running: frames mark the folders still being listed
         self._flashes: dict[int, int] = {}  # node -> allocation change, shown with the next frame (M5)
         self._flash_lock = threading.Lock()  # added on the event loop, taken by renders on the pool
+
+    # ------------------------------------------------------------- visualization
+
+    @property
+    def color_mode(self) -> ColorMode:
+        """Colour mode of the current visualization (each one remembers its own)."""
+        mode = self._colors.get(self.visual)
+        return mode if mode is not None else registry.get(self.visual).default_color
+
+    @color_mode.setter
+    def color_mode(self, mode: ColorMode) -> None:
+        self._colors[self.visual] = mode
+
+    @property
+    def colors(self) -> dict[str, ColorMode]:
+        """The colour modes set so far, per visualization (``view.state``; split and reconnect)."""
+        return dict(self._colors)
+
+    def set_colors(self, colors: Mapping[str, ColorMode]) -> None:
+        """Take over another view's colour modes; ids of unknown visualizations are left out."""
+        known = {v.id for v in registry.all_visuals()}
+        self._colors.update({vis: mode for vis, mode in colors.items() if vis in known})
+
+    def set_visual(self, visual: str) -> bool:
+        """Show another visualization (KeyError: not registered). Zoom root, history, selection and
+        filter stay; switching is no history step. Returns whether it changed."""
+        registry.get(visual)
+        if visual == self.visual:
+            return False
+        self.visual = visual
+        return True
+
+    def _engine(self) -> Engine:
+        return self._engines(self.visual)
+
+    def _params(self) -> LayoutParams:
+        w, h, dpr = self.viewport
+        return LayoutParams(
+            width=w,
+            height=h,
+            dpr=dpr,
+            detail=self.detail,
+            min_element=self.min_element,
+            sort_by_size=self.sort_by_size,
+            font_scale=self.font_scale,
+            aspect=self.aspect,
+            options=self.visual_options.get(self.visual, ()),
+        )
 
     # ------------------------------------------------------------- navigation
 
@@ -200,6 +334,7 @@ class View:
                 self._flashes = {
                     int(m): d for m, d in zip(moved.tolist(), self._flashes.values(), strict=True) if m >= 0
                 }
+        self.hues.remap(new_ids)
         self.last = None
 
     def add_flash(self, changes: dict[int, int]) -> None:
@@ -210,12 +345,14 @@ class View:
 
     def _flash_rows(self, draw: DrawList) -> list[tuple[int, int]]:
         """Rows for the pending flashes: the block itself, else its aggregate or nearest drawn
-        ancestor (several changes in one row add up). The largest ``MAX_FLASH`` changes only."""
+        ancestor (several changes in one row add up). The largest ``MAX_FLASH`` changes only.
+        Partition layouts draw the zoom root too: a change below it that lands on no row is row -1."""
         with self._flash_lock:
             pending, self._flashes = self._flashes, {}
         if not pending:
             return []
         n = len(self.store)
+        rooted = draw.layout != DRAWLIST_LAYOUT
         rows: dict[int, int] = {}
         for node, delta in sorted(pending.items(), key=lambda kv: -abs(kv[1]))[:MAX_FLASH]:
             if not 0 <= node < n:
@@ -223,9 +360,52 @@ class View:
             row = draw.row(node)
             if row is None:
                 row = self._hidden_row(draw, node)
+            if row is None and rooted and self._in_zoom(node):
+                row = -1
             if row is not None:
                 rows[row] = rows.get(row, 0) + delta
         return sorted(rows.items())
+
+    def _in_zoom(self, node: int) -> bool:
+        """Whether ``node`` is the zoom root or below it (an aggregate zoom: one of its members)."""
+        z = self.zoom
+        chain = [node, *self.store.ancestors(node)]
+        if z.members is not None:
+            return bool(np.isin(chain, z.members).any())
+        return z.node == 0 or z.node in chain
+
+    def _scanning_rows(self, draw: DrawList) -> tuple[np.ndarray, bool]:
+        """Rows of the folders, down to ``SCANNING_LEVELS`` below the view root, whose subtree still
+        holds folders not listed yet (UI-TM-42), and whether the zoom root (a folder) is one or is
+        not listed itself. The not-listed folders climb to their ancestors one level per step; a
+        folder reached before stops the climb there (5 M nodes: about 20 ms)."""
+        kind, node = draw.kind, draw.node
+        folders = (kind == RectKind.FOLDER) | (kind == RectKind.COLLAPSED)
+        rows = np.flatnonzero(folders & (draw.depth <= SCANNING_LEVELS) & (node >= 0))
+        c = self.store.cols
+        n = len(self.store)
+        z = self.zoom
+        root = z.node if z.members is None and 0 <= z.node < n and c["kind"][z.node] == Kind.DIR else -1
+        if not len(rows) and root < 0:
+            return rows, False
+        flags = c["flags"][:n]
+        wanted = np.uint32(Flag.PENDING | Flag.GONE)
+        listing = (flags & wanted) == np.uint32(Flag.PENDING)
+        cur = np.flatnonzero(listing)
+        if not len(cur):
+            return cur, False
+        depth, parent = c["depth"][:n], c["parent"][:n]
+        targets = node[rows].astype(np.int64)
+        # nothing above this depth can be one of the targets (the root is above all the rows)
+        low = int(depth[root]) if root >= 0 else int(depth[targets].min())
+        reached = np.zeros(n, dtype=bool)
+        cur = parent[cur]  # the folders themselves are drawn as PENDING blocks, not marked
+        while len(cur):
+            cur = cur[cur >= 0]
+            cur = cur[~reached[cur]]
+            reached[cur] = True
+            cur = parent[cur[depth[cur] > low]]
+        return rows[reached[targets]], root >= 0 and bool(reached[root] or listing[root])
 
     def zoom_into(self, key: int) -> bool:
         """Zoom into a block of the last frame (double-click / Enter). False if it cannot be zoomed."""
@@ -343,8 +523,9 @@ class View:
         aggregate blocks (under the zoom root, or a member of the aggregate zoomed into). A node
         that is not drawn — below the detail level, or outside the zoom root — makes the view
         zoom (with history) to the highest
-        ancestor under which it is within the detail level; if it is still not drawn there (too
-        small), to its parent folder, where it is drawn or sits in a small-items block.
+        ancestor under which it is within the detail level (or the levels the visualization fits in
+        the viewport, when fewer); if it is still not drawn there (too small), to its parent folder,
+        where it is drawn or sits in a small-items block.
         """
         frame = self.last
         if frame is not None and frame.draw.row(key) is not None:
@@ -373,7 +554,8 @@ class View:
                 self.selected = key  # drawn inside an aggregate block: select that block
                 return changed
         base = self.zoom.node if inside else chain[-1]
-        want = max(int(c["depth"][base]) if base else 0, int(c["depth"][key]) - self.detail)
+        levels = max(1, min(self.detail, self._engine().levels(self._params())))  # what this viewport shows
+        want = max(int(c["depth"][base]) if base else 0, int(c["depth"][key]) - levels)
         target = next((a for a in chain if (int(c["depth"][a]) if a else 0) == want), chain[0])
         if here and target == self.zoom.node:
             target = chain[0]
@@ -451,14 +633,14 @@ class View:
 
     # ------------------------------------------------------------- rendering
 
-    def _root_spec(self) -> RootSpec:
+    def _root_spec(self, vis: Visualization) -> RootSpec:
         z = self.zoom
         if z.members is not None:
             return RootSpec(node=z.node, members=z.members, key=z.key)
         free = unknown = None
         hide = self.filter.active and self.filter_mode == "hide"
         root = next((r for r in self.roots if r.node == z.node and r.whole_volume), None)
-        if root is not None and not hide:
+        if root is not None and not hide and vis.free_space:
             if self.show_free and root.free:
                 free = root.free
             if self.show_unknown and root.used is not None:
@@ -466,32 +648,34 @@ class View:
         return RootSpec(node=z.node, free=free, unknown=unknown)
 
     def render(self) -> Frame:
-        w, h, dpr = self.viewport
-        params = LayoutParams(
-            width=w,
-            height=h,
-            dpr=dpr,
-            detail=self.detail,
-            min_element=self.min_element,
-            sort_by_size=self.sort_by_size,
-            font_scale=self.font_scale,
-            aspect=self.aspect,
-        )
+        vis = registry.get(self.visual)
+        engine = self._engine()
         res = self.filter.result if self.filter.active else None
-        sizes = None
         hide = res is not None and self.filter_mode == "hide"
+        sizes: SizeSource
         if self.compare is not None and self.direction != "all":
-            sizes = self.compare.amounts(self.direction, res.match if hide and res is not None else None)
+            sizes = ArraySizes(
+                self.compare.amounts(self.direction, res.match if hide and res is not None else None)
+            )
         elif hide and res is not None:
-            sizes = np.zeros(len(self.store), dtype=np.int64)
-            sizes[: res.n] = res.alloc
-        draw = self.layout.run(params, self._root_spec(), sizes)
-        frame = self._annotate(draw, res)
+            matched = np.zeros(len(self.store), dtype=np.int64)
+            matched[: res.n] = res.alloc
+            sizes = ArraySizes(matched)
+        else:
+            sizes = StoreSizes(self.basis)
+        draw = engine.run(self._params(), self._root_spec(vis), sizes)
+        draw.visual = vis.id  # one engine may lay out several visualizations
+        frame = self._annotate(draw, res, sizes)
+        if self.scanning:
+            rows, root = self._scanning_rows(draw)
+            frame.flags[rows] |= F_SCANNING
+            if root:
+                frame.root = replace(frame.root, flags=frame.root.flags | F_SCANNING)
         frame.flash = self._flash_rows(draw)
         self.last = frame
         return frame
 
-    def _annotate(self, draw: DrawList, res: FilterResult | None) -> Frame:
+    def _annotate(self, draw: DrawList, res: FilterResult | None, sizes: SizeSource) -> Frame:
         n = len(draw)
         store = self.store
         c = store.cols
@@ -508,19 +692,13 @@ class View:
         flags[tag > 0] |= F_TAGGED
         # time bands (files: own mtime; aggregates: the band holding most of their bytes)
         now = FilterContext.current().now
-        mtime = c["mtime"][: len(store)].astype(np.int64)
         files = real & (kind == RectKind.FILE)
         if files.any():
-            tone[files] = _bands(now, mtime[node[files]])
+            tone[files] = _bands(now, c["mtime"][node[files]].astype(np.int64))
         for row in np.nonzero((kind == RectKind.SMALL) | (kind == RectKind.MORE))[0]:
             members = draw.members.get(int(draw.key[row]))
             if members is not None and len(members):
-                weights = np.bincount(
-                    _bands(now, mtime[members]),
-                    weights=Layout.effective_sizes_of(store, members),
-                    minlength=5,
-                )
-                tone[row] = int(np.argmax(weights))
+                tone[row] = _tone_of(store, now, members)
         # filter state
         totals = None
         if res is not None:
@@ -562,10 +740,65 @@ class View:
             flags=flags,
             tag=tag,
             tone=tone,
+            branch=self.hues.hues(self.zoom.key, draw),
+            root=self._root_row(res, sizes, tag_index, now),
             selected_row=selected_row,
             breadcrumb=self.breadcrumb(),
             filter_totals=totals,
             scanned_total=scanned,
+            delta=delta,
+            dstat=dstat,
+        )
+
+    def _root_row(
+        self, res: FilterResult | None, sizes: SizeSource, tag_index: np.ndarray, now: int
+    ) -> RootRow:
+        """The zoom root as a row: its kind, bytes on this frame's basis, filter and tag flags, time
+        band and change (compare views). :meth:`render` adds the scanning flag."""
+        z = self.zoom
+        store = self.store
+        c = store.cols
+        members = z.members
+        flags = tag = 0
+        tone = 4
+        delta = dstat = None
+        if members is not None:  # an aggregate zoom: the block's members
+            kind = RectKind.SMALL if z.key & _TAG_BITS == KEY_SMALL else RectKind.MORE
+            ids = members[members < sizes.n]
+            size = int(sizes.of(ids).sum())
+            if len(members):
+                tone = _tone_of(store, now, members)
+            if self.compare is not None:
+                delta, dstat = self._aggregate_change(members)
+        else:
+            node = z.node
+            ids = np.array([node], dtype=np.int64)
+            if c["kind"][node] != Kind.DIR:
+                kind = RectKind.FILE
+                tone = int(_bands(now, c["mtime"][ids].astype(np.int64))[0])
+            else:
+                kind = RectKind.PENDING if c["flags"][node] & Flag.PENDING else RectKind.FOLDER
+            size = int(sizes.of(ids)[0]) if node < sizes.n else 0
+            tag = int(tag_index[node]) if 0 < node < len(tag_index) else 0
+            if tag:
+                flags |= F_TAGGED
+            t = self.compare
+            if t is not None and node < len(t.delta):
+                delta, dstat = int(t.delta[node]), int(t.status[node])
+        if res is not None:
+            inside = ids[ids < res.n]
+            flags |= F_MATCH if int(res.count[inside].sum()) > 0 else F_DIM
+            if members is None and z.node < res.n and res.folder_hit[z.node]:
+                flags |= F_FOLDER_HIT
+        return RootRow(
+            key=z.key,
+            node=z.node,
+            kind=int(kind),
+            size=size,
+            count=z.count if members is not None else 0,
+            flags=flags,
+            tag=tag,
+            tone=tone,
             delta=delta,
             dstat=dstat,
         )
@@ -585,19 +818,30 @@ class View:
             members = draw.members.get(int(draw.key[row]))
             if members is None or not len(members):
                 continue
-            d = t.delta[members]
-            if self.direction == "grow":
-                d = d[d > 0]
-            elif self.direction == "shrink":
-                d = d[d < 0]
-            delta[row] = int(d.sum())
-            st = t.status[members]
-            dstat[row] = int(st[0]) if bool((st == st[0]).all()) and st[0] in (1, 2) else 3
+            delta[row], dstat[row] = self._aggregate_change(members)
         return delta, dstat
 
-    def rebase(self, store: NodeStore, compare: Any, layout: Layout, roots: list[RootInfoLike]) -> None:
+    def _aggregate_change(self, members: np.ndarray) -> tuple[int, int]:
+        """Compare views: an aggregate's net change (the shown direction's part) and status."""
+        t = self.compare
+        d = t.delta[members]
+        if self.direction == "grow":
+            d = d[d > 0]
+        elif self.direction == "shrink":
+            d = d[d < 0]
+        st = t.status[members]
+        return int(d.sum()), int(st[0]) if bool((st == st[0]).all()) and st[0] in (1, 2) else 3
+
+    def rebase(
+        self,
+        store: NodeStore,
+        compare: Any,
+        layout: Layout,
+        roots: list[RootInfoLike],
+        engines: Callable[[str], Engine] | None = None,
+    ) -> None:
         """A compare view moves to a recomputed change tree (live target): zoom root and selection
-        follow by path, the history starts anew."""
+        follow by path, the history starts anew. ``engines`` lay out ``layout`` (None: its own)."""
         old = self.store
 
         def path_of(node: int | None) -> str | None:
@@ -606,6 +850,9 @@ class View:
         zoom_path = path_of(self.zoom.node)
         sel_path = path_of(self.selected) if self.selected is not None and self.selected >= 0 else None
         self.store, self.compare, self.layout, self.roots = store, compare, layout, roots
+        self.basis = layout
+        self._engines = engines or Engines(layout).get
+        self.hues.clear()
         self.home = roots[0].node if len(roots) == 1 else 0
         node = store.find(zoom_path) if zoom_path else None
         self.zoom = Zoom(node, node) if node is not None else Zoom(self.home, self.home)
@@ -616,13 +863,25 @@ class View:
         self.refilter()
 
     def _selected_row(self, draw: DrawList) -> int | None:
-        """Row of the selection: the selected block, or the aggregate / nearest ancestor holding it."""
+        """Row of the selection: the selected block, or the aggregate / nearest ancestor holding it.
+        An aggregate block that is not drawn (another visualization merges differently) falls back
+        to its node: the container of "N small items", the largest member of an aggregate zoom's
+        "+N items"; free and unknown space and the zoom root itself have no fallback."""
         sel = self.selected
         if sel is None:
             return None
         row = draw.row(sel)
-        if row is not None or sel >= KEY_SMALL:
+        if row is not None:
             return row
+        if sel >= KEY_SMALL:
+            if sel & _TAG_BITS not in (KEY_SMALL, KEY_MORE):
+                return None
+            sel = sel & KEY_NODE_MASK
+            if sel == self.zoom.node or not 0 < sel < len(self.store):
+                return None
+            row = draw.row(sel)
+            if row is not None:
+                return row
         return self._hidden_row(draw, sel)
 
     def breadcrumb(self) -> list[tuple[int, str]]:
@@ -655,15 +914,30 @@ def _bands(now: int, mtime: np.ndarray) -> np.ndarray:
     return out
 
 
+def _tone_of(store: NodeStore, now: int, members: np.ndarray) -> int:
+    """Time band of an aggregate: the one holding most of its members' bytes."""
+    weights = np.bincount(
+        _bands(now, store.cols["mtime"][members].astype(np.int64)),
+        weights=Layout.effective_sizes_of(store, members),
+        minlength=5,
+    )
+    return int(np.argmax(weights))
+
+
 __all__ = [
+    "BASELINE",
     "F_DIM",
     "F_FOLDER_HIT",
     "F_MATCH",
     "F_ON_PATH",
+    "F_SCANNING",
     "F_SELECTED",
     "F_TAGGED",
+    "Engines",
     "Frame",
+    "RootRow",
     "View",
     "ViewSettings",
     "Zoom",
+    "showable",
 ]

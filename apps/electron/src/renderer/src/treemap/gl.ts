@@ -153,13 +153,21 @@ export class GlRenderer {
     return { vao, buffer, count };
   }
 
+  /** Clear to the ground colour (the clear ignores the viewport), set premultiplied blending, then use(). */
   begin(width: number, height: number, ground: [number, number, number]): void {
     const gl = this.gl;
-    gl.viewport(0, 0, width, height);
     gl.clearColor(ground[0], ground[1], ground[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    this.use(width, height);
+  }
+
+  /** Make this program current for a width × height canvas without clearing or touching the blend
+   * state: another program may already have drawn into this context in the same frame. */
+  use(width: number, height: number): void {
+    const gl = this.gl;
+    gl.viewport(0, 0, width, height);
     gl.useProgram(this.program);
     gl.uniform2f(this.uRes, width, height);
   }

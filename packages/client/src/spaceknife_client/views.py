@@ -1,4 +1,8 @@
-"""Client side of views: pairs each ``ViewUpdate`` with its binary draw-list frame."""
+"""Client side of views: pairs each ``ViewUpdate`` with its binary draw-list frame.
+
+Frames of every layout are decoded the same way, column by column (``FrameInfo.layout`` names the
+geometry columns: x y w h for drawlist.v1 and flame.v1, a0 a1 r0 r1 for polar.v1).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +17,8 @@ from spaceknife_protocol.binary import BinaryFrameHeader
 from spaceknife_protocol.methods import EVENT_VIEW_FRAME, MethodSpec
 
 from .connection import Connection
+
+LAYOUTS = frozenset({pv.DRAWLIST_LAYOUT, pv.FLAME_LAYOUT, pv.POLAR_LAYOUT})  # what this client decodes
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,7 +58,7 @@ class ViewClient:
         conn.on_event(EVENT_VIEW_FRAME, lambda ev: self.pushed.put_nowait(ev.frame))
 
     def _on_binary(self, header: BinaryFrameHeader, columns: dict[str, np.ndarray]) -> None:
-        if header.layout != pv.DRAWLIST_LAYOUT or not header.stream.startswith(pv.VIEW_STREAM_PREFIX):
+        if header.layout not in LAYOUTS or not header.stream.startswith(pv.VIEW_STREAM_PREFIX):
             return
         frame = decode_draw(header, columns)
         key = (frame.view_id, frame.seq)

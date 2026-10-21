@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 
 from spaceknife.scan.scanner import Scanner
-from spaceknife.server.monitors import MonitorManager
+from spaceknife.server.monitors import MonitorManager, ScanMonitor
 from spaceknife.server.scans import ScanHandle, ScanManager
 from spaceknife.server.views import ViewManager
 from spaceknife.store import mutate
@@ -74,6 +74,33 @@ def same_as_disk(handle: ScanHandle, root: Path) -> Callable[[], Awaitable[bool]
         return facts(handle.store) == facts(fresh.store)
 
     return check
+
+
+async def test_a_busy_helper_does_not_hold_up_the_scan_start(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # the change-journal checkpoint waits for the elevated helper, which may be reading this
+    # scan's MFT for half a minute: starting the scan (and the window waiting for it) goes on
+    mgr, _, monitors = watched
+    release = asyncio.Event()
+    asked: list[str] = []
+
+    async def busy_helper(self: Any) -> None:
+        asked.append(self.handle.id)
+        await release.wait()
+
+    monkeypatch.setattr(ScanMonitor, "start_usn", busy_helper)
+    build_tree(tmp_path)
+    handle = await asyncio.wait_for(
+        mgr.start(p.ScanStartParams(roots=[str(tmp_path)], workers=0, auto_snapshot=False)), 5
+    )
+    mon = handle.monitor
+    assert mon is not None and mon.usn_task is not None and not mon.usn_task.done()
+    await asyncio.sleep(0)
+    assert asked == [handle.id]
+    await monitors.stop(handle.id)  # closing the scan does not wait for the helper either
+    assert mon.usn_task is None
+    release.set()
 
 
 async def test_changes_reach_the_tree(watched: Any, tmp_path: Path) -> None:
@@ -296,3 +323,28 @@ async def test_rescan_a_folder_without_monitoring(watched: Any, tmp_path: Path) 
     await monitors.rescan(handle, 1)  # F5 on the root: the whole tree is read again
     await until(same_as_disk(handle, root))
     assert handle.status().monitor is None  # rescanning did not switch monitoring on
+
+
+async def test_rescan_the_top_of_several_roots(watched: Any, tmp_path: Path) -> None:
+    # F5 at the top of a scan of several roots (node 0, the virtual top): every root is read again
+    mgr, _, monitors = watched
+
+    class Off:
+        def get(self, key: str) -> Any:
+            return False if key == "scan.monitor" else {"scan.coalesce_ms": 150}.get(key)
+
+    mgr.settings = Off()  # type: ignore[assignment]
+    roots = [build_tree(tmp_path / name).root for name in ("one", "two")]
+    handle = await mgr.start(p.ScanStartParams(roots=[str(r) for r in roots], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    for i, r in enumerate(roots):
+        (r / f"later{i}.bin").write_bytes(b"l" * (1000 + i))
+
+    async def both() -> bool:
+        fresh = Scanner([str(r) for r in roots])
+        await fresh.run()
+        return facts(handle.store) == facts(fresh.store)
+
+    await monitors.rescan(handle, 0)
+    await until(both)

@@ -1,12 +1,13 @@
-"""Views (one per tab / split pane) and their draw-list frames.
+"""Views (one per tab / split pane) and their frames.
 
 Every method that changes a view answers with a :class:`ViewUpdate` (JSON) and, when the picture
-changed, sends one binary frame (stream ``"view:<view_id>"``, layout ``drawlist.v1``) whose ``seq``
+changed, sends one binary frame (stream ``"view:<view_id>"``, layout ``FrameInfo.layout``) whose ``seq``
 equals ``ViewUpdate.frame.seq`` and whose ``request_id`` is the request's id. Frames pushed while a scan
 is running carry no ``request_id`` and arrive with a ``view.frame`` event.
 
-``drawlist.v1`` columns (one row per rectangle; parents come before their children; coordinates
-are whole physical pixels in a ``width`` × ``height`` canvas):
+A view shows one visualization (``ViewState.visual``, listed by ``visual.list``); each visualization
+emits one wire layout. Every layout has the same common columns (one row per drawn block; parents come
+before their children) plus its own geometry columns:
 
 =========  =====  =====================================================================
 column     dtype  meaning
@@ -14,27 +15,44 @@ column     dtype  meaning
 key        <u4    stable id: node id, or SMALL/MORE/FREE/UNKNOWN tagged id (top 2 bits)
 node       <i4    node id (container for SMALL/MORE, -1 for FREE/UNKNOWN)
 parent     <i4    row of the enclosing expanded folder, -1 at the top
-kind       <u1    0 file · 1 folder (frame + header) · 2 collapsed folder · 3 pending folder
-                  · 4 "N small items" · 5 "+N items" · 6 free space · 7 unknown space
+kind       <u1    0 file · 1 expanded folder (drawn as the layout says) · 2 collapsed folder
+                  · 3 pending folder · 4 "N small items" · 5 "+N items" · 6 free space · 7 unknown space
 depth      <u1    nesting level, 1 = child of the zoom root (level colours: min(depth, 4))
-x y w h    <i4    rectangle
 cls        <u1    file class index (``filter.vocab`` order) for files and small-item blocks
 label      <u1    bits: 1 name · 2 size line · 4 large type · 8 short (name only, centred)
+                  · 16 radial (``polar.v1`` only: the text runs along the radius)
 size       <i8    bytes shown (area basis; matched bytes in hide mode)
 count      <u4    files in "N small items", entries in "+N items"
 flags      <u2    1 match · 2 dimmed · 4 folder-mask hit (bold) · 8 own tag · 16 selected
-                  · 32 ancestor of the selection (halo header)
+                  · 32 ancestor of the selection (halo) · 64 scan running and the folder's subtree is
+                  not fully listed yet (folder blocks up to 3 levels below the zoom root)
 tag        <u1    own tag: 0 none, 1 red, 2 yellow, 3 green, 4 blue
 tone       <u1    modification-age band for time colouring: 0 < 1 d … 4 ≥ 1 y / unknown
+branch     <u1    top-level branch colour slot: 0 neutral, 1–8 (shade: min(depth, 4))
 name_len   <u4    byte length of this row's name in the ``names`` blob (0: no label)
+delta      <i8    compare views only: net change of allocated bytes
+dstat      <u1    compare views only: 0 unchanged · 1 new · 2 deleted · 3 changed
 =========  =====  =====================================================================
 
 Blob ``names``: the rows' UTF-8 names, concatenated in row order.
+
+Geometry columns (``<i4``, whole physical pixels of a ``width`` × ``height`` canvas):
+
+* ``drawlist.v1`` (treemap): ``x y w h`` rectangles; kind 1 is a frame with a header, its children
+  inside. ``FrameInfo.geometry`` is None.
+* ``flame.v1``: ``x y w h`` bars, one band per level; kind 1 is an expanded solid bar, its children in
+  the next band. ``FrameInfo.geometry`` is a :class:`FlameGeometry`.
+* ``polar.v1``: ``a0 a1`` angles (:data:`ANGLE_UNIT` per turn, 0 = 12 o'clock, increasing clockwise on
+  screen) and ``r0 r1`` radii from the centre (the ring gap already taken off); kind 1 is an expanded
+  solid sector, its children in the next ring. ``FrameInfo.geometry`` is a :class:`PolarGeometry`.
+
+In ``flame.v1`` and ``polar.v1`` the zoom root itself is the root bar / centre disc described by
+``FrameInfo.root``; it is not a row.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
@@ -43,6 +61,10 @@ from .compare import CompareDirection
 from .filter import FilterDiagnostic, TagColor
 
 DRAWLIST_LAYOUT = "drawlist.v1"
+FLAME_LAYOUT = "flame.v1"
+POLAR_LAYOUT = "polar.v1"
+ANGLE_UNIT = 1 << 20  # polar.v1 angle units per turn: every value stays exact in an f32
+BUILTIN_VISUALS = ("treemap", "flame", "flame_polar")
 VIEW_STREAM_PREFIX = "view:"
 
 
@@ -50,7 +72,8 @@ def view_stream(view_id: str) -> str:
     return VIEW_STREAM_PREFIX + view_id
 
 
-ColorModeName = Literal["class", "flat", "time"]
+VisualId = Annotated[str, Field(min_length=1, max_length=48, pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")]
+ColorModeName = Literal["class", "flat", "time", "branch"]
 FilterModeName = Literal["dim", "hide"]
 ResultsSortName = Literal["size", "name", "count"]
 ResultKind = Literal["file", "folder", "group", "rest"]
@@ -72,7 +95,15 @@ class ViewSettingsParams(Params):
     sort_by_size: bool | None = None
     show_free: bool | None = None
     show_unknown: bool | None = None
-    color_mode: ColorModeName | None = None
+    visual: VisualId | None = Field(default=None, description="A visual.list id (needs visuals.v1)")
+    color_mode: ColorModeName | None = Field(
+        default=None, description="Of the view's current visualization; 'branch' needs visuals.v1"
+    )
+    colors: dict[str, ColorModeName] | None = Field(
+        default=None,
+        description="Colour mode per visualization (a split pane or a reopened view keeps them); "
+        "color_mode, when also given, wins for the current one",
+    )
     filter_mode: FilterModeName | None = None
     viewport: Viewport | None = None
     direction: CompareDirection | None = Field(default=None, description="Compare views: changes shown")
@@ -151,8 +182,62 @@ class FilterInfo(Payload):
 
 
 class FlashItem(Payload):
-    row: int = Field(description="Row of this frame's draw list: the changed block or its drawn ancestor")
+    row: int = Field(
+        description="Row of this frame's draw list: the changed block or its drawn ancestor; "
+        "-1 = the zoom root (flame.v1 / polar.v1 only)"
+    )
     delta: int = Field(description="Change of allocated bytes (the static badge under reduced motion)")
+
+
+class PixelRect(Payload):
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+class FlameGeometry(Payload):
+    """``flame.v1``: one band per level, the zoom root's bar in band 0."""
+
+    kind: Literal["flame"] = "flame"
+    origin: Literal["top", "bottom"] = Field(description="Side of the canvas holding the root bar")
+    row_h: int = Field(description="Band pitch in physical px (bar height + gap)")
+    rows: int = Field(description="Levels drawn beyond the root bar")
+    gap: int = Field(description="Gap between bands and between neighbouring bars, physical px")
+    root: PixelRect = Field(description="The zoom root's bar")
+
+
+class PolarGeometry(Payload):
+    """``polar.v1``: the zoom root is the centre disc, level k the k-th ring around it."""
+
+    kind: Literal["polar"] = "polar"
+    cx: int = Field(description="Centre, physical px")
+    cy: int
+    radius: int = Field(description="Outer edge of the last ring")
+    hole: int = Field(description="Radius of the centre disc")
+    ring_w: int = Field(description="Ring pitch: ring k spans [hole + (k-1)·ring_w, hole + k·ring_w)")
+    rings: int = Field(description="Levels drawn around the centre disc")
+    gap: int = Field(description="Gap between rings and between neighbouring sectors, physical px")
+    unit: int = Field(default=ANGLE_UNIT, description="Angle units per turn")
+
+
+FrameGeometry = Annotated[FlameGeometry | PolarGeometry, Field(discriminator="kind")]
+
+
+class FrameRoot(Payload):
+    """The zoom root of a flame.v1 / polar.v1 frame (root bar, centre disc): the same facts as a row."""
+
+    key: int
+    node: int
+    kind: int
+    size: int
+    count: int = 0
+    flags: int = 0
+    tag: int = 0
+    tone: int = 4
+    branch: int = 0
+    delta: int | None = Field(default=None, description="Compare views only")
+    dstat: int | None = Field(default=None, description="Compare views only")
 
 
 class FrameInfo(Payload):
@@ -171,6 +256,10 @@ class FrameInfo(Payload):
     flash: list[FlashItem] = Field(
         default_factory=list, description="Rows changed by a file change since the last frame (UI-TM-43)"
     )
+    visual: str = Field(default="treemap", description="Visualization that drew this frame")
+    layout: str = Field(default=DRAWLIST_LAYOUT, description="Layout of the binary frame that follows")
+    geometry: FrameGeometry | None = Field(default=None, description="None for drawlist.v1")
+    root: FrameRoot | None = Field(default=None, description="The zoom root (flame.v1 / polar.v1)")
 
 
 class ViewState(Payload):
@@ -183,7 +272,11 @@ class ViewState(Payload):
     sort_by_size: bool
     show_free: bool
     show_unknown: bool
-    color_mode: ColorModeName
+    visual: str = Field(default="treemap", description="A visual.list id")
+    color_mode: ColorModeName = Field(description="Of the current visualization (each remembers its own)")
+    colors: dict[str, ColorModeName] = Field(
+        default_factory=dict, description="Colour mode each visualization remembers"
+    )
     filter_mode: FilterModeName
     viewport: Viewport
     selected: int | None = None
@@ -236,6 +329,25 @@ class ViewResults(Payload):
     max_alloc: int = Field(description="Largest row, for the relative size bars")
     offset: int
     rows: list[ResultRow]
+
+
+class VisualInfo(Payload):
+    """One visualization this server offers (``visual.list``)."""
+
+    id: str
+    layout: str = Field(description="Layout of its frames")
+    name: str = Field(description="Display name in the session's language")
+    icon: str
+    order: int
+    compare: bool = Field(description="Can show compare views")
+    free_space: bool = Field(description="Shows free / unknown space at a volume root")
+    default_color: ColorModeName = Field(description="Colour mode a view starts with on this visualization")
+    available: bool = Field(description="This session negotiated what it needs")
+    reason: str | None = Field(default=None, description="Why it is not available (display text)")
+
+
+class VisualListResult(Payload):
+    visuals: list[VisualInfo]
 
 
 class ViewFrameEvent(Payload):

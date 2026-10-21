@@ -42,7 +42,9 @@ from .ops import (
     PathFormsParams,
 )
 from .palette import (
+    PaletteCheckParams,
     PaletteClearParams,
+    PaletteCommand,
     PaletteCommandList,
     PalettePaths,
     PalettePathsParams,
@@ -96,6 +98,7 @@ from .streams import (
     UnsubscribeParams,
 )
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
+from .update import UpdateChangedEvent, UpdateStatus, UpdateVersionParams
 from .view import (
     ViewFilterParams,
     ViewFrameEvent,
@@ -111,6 +114,7 @@ from .view import (
     ViewTagParams,
     ViewUpdate,
     ViewZoomParams,
+    VisualListResult,
 )
 
 
@@ -267,6 +271,12 @@ PALETTE_QUERY = MethodSpec(
     PaletteResult,
     "Commands, recents and direct items for the palette input.",
 )
+PALETTE_CHECK = MethodSpec(
+    "palette.check",
+    PaletteCheckParams,
+    PaletteCommand,
+    "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+)
 PALETTE_PATHS = MethodSpec(
     "palette.paths",
     PalettePathsParams,
@@ -296,6 +306,12 @@ VIEW_RESULTS = MethodSpec(
     ViewResultsParams,
     ViewResults,
     "A page of the filter result list, grouped by visible block.",
+)
+VISUAL_LIST = MethodSpec(
+    "visual.list",
+    Empty,
+    VisualListResult,
+    "Visualizations this server offers and whether this session can show each.",
 )
 
 CANCEL = NotificationSpec("$/cancel", CancelParams, "Cancel an in-flight request (answered with -32800).")
@@ -403,11 +419,38 @@ TAGS_CLEAR_SAVED = MethodSpec(
     "tags.clear_saved", Empty, MaintenanceInfo, "Forget every remembered tag (all scan roots)."
 )
 
+UPDATE_STATUS = MethodSpec(
+    "update.status", Empty, UpdateStatus, "What the last update check found (updates.v1)."
+)
+UPDATE_CHECK = MethodSpec(
+    "update.check", Empty, UpdateStatus, "Check the GitHub releases now (also when automatic checks are off)."
+)
+UPDATE_DISMISS = MethodSpec(
+    "update.dismiss", UpdateVersionParams, UpdateStatus, "The card / dialog for this version was closed."
+)
+UPDATE_DOWNLOAD = MethodSpec(
+    "update.download",
+    UpdateVersionParams,
+    UpdateStatus,
+    "Download this version's file for this install into the download folder (progress: update.changed).",
+)
+UPDATE_CANCEL = MethodSpec("update.cancel", Empty, UpdateStatus, "Stop a running download.")
+EVENT_UPDATE = EventSpec(
+    "update.changed",
+    UpdateChangedEvent,
+    "Update check result or download progress (sessions with updates.v1).",
+)
+
 METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
     spec.name: spec
     for spec in (
         SESSION_HELLO,
         SYSTEM_INFO,
+        UPDATE_STATUS,
+        UPDATE_CHECK,
+        UPDATE_DISMISS,
+        UPDATE_DOWNLOAD,
+        UPDATE_CANCEL,
         SYSTEM_PING,
         APP_SHUTDOWN,
         SUBSCRIBE,
@@ -450,11 +493,13 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         VIEW_TAG,
         VIEW_REVEAL,
         VIEW_RESULTS,
+        VISUAL_LIST,
         SETTINGS_GET,
         SETTINGS_UPDATE,
         SETTINGS_RESET,
         PALETTE_COMMANDS,
         PALETTE_QUERY,
+        PALETTE_CHECK,
         PALETTE_PATHS,
         PALETTE_PREVIEW,
         PALETTE_REMEMBER,
@@ -518,5 +563,6 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_OPS_PROGRESS,
         EVENT_COMPARE_PROGRESS,
         EVENT_CLASSES,
+        EVENT_UPDATE,
     )
 }

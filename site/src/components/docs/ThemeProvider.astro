@@ -1,0 +1,8 @@
+---
+// Starlight's theme provider, dark only like the rest of the site (src/styles/global.css).
+---
+
+<script is:inline>
+  document.documentElement.dataset.theme = "dark";
+  window.StarlightThemeProvider = { updatePickers() {} };
+</script>

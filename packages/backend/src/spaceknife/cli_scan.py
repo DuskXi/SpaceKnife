@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+from concurrent.futures import Executor, ThreadPoolExecutor
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import numpy as np
 import typer
@@ -17,8 +18,21 @@ from rich.text import Text
 
 from . import fmt, i18n
 from .i18n import tr
+from .io import IoRegistry, set_low_io_priority
 from .paths import snapshots_dir
-from .scan.scanner import Scanner, ScanProgress, ScanState, default_workers, make_pool
+from .scan import worker
+from .scan.scanner import (
+    NATIVE_BATCH,
+    NATIVE_BUDGET_S,
+    Scanner,
+    ScanProgress,
+    ScanState,
+    bulk_listing,
+    default_workers,
+    make_pool,
+    native_slicer,
+    native_threads,
+)
 from .store import snapshot
 from .store.nodes import Flag, Kind, NodeStore
 
@@ -154,10 +168,43 @@ def summary_panel(scanner: Scanner, result: ScanProgress, snap: Path | None) -> 
     return Panel("\n".join(lines), title=tr("扫描结果"), title_align="left", border_style="#2A2E37")
 
 
-async def _run_scan(paths: list[str], workers: int, cross_mounts: bool) -> tuple[Scanner, ScanProgress]:
-    pool = make_pool(workers) if workers > 0 else None
+def load_limit(text: str) -> tuple[str, float | None]:
+    """``--disk-limit``: a level of the app's 「磁盘负载上限」 or a percentage (custom)."""
+    value = text.strip().lower().removesuffix("%")
+    if value in ("max", "balanced", "quiet", "idle"):
+        return value, None
+    if value.isdigit() and 1 <= int(value) <= 100:
+        return "custom", float(value)
+    raise typer.BadParameter(tr("磁盘负载上限只能是 max、balanced、quiet、idle 或 1–100 的百分比"))
+
+
+async def _run_scan(
+    paths: list[str], workers: int | None, cross_mounts: bool, limit: tuple[str, float | None] | None = None
+) -> tuple[Scanner, ScanProgress]:
+    slicer = None if workers == 0 or os.environ.get("SPACEKNIFE_NO_NATIVE") else native_slicer()
+    pool: Executor | None
+    options: dict[str, Any] = {}
+    if slicer is not None:  # as in the app: the native walker on listing threads
+        threads = workers or native_threads()
+        pool = ThreadPoolExecutor(max_workers=threads, thread_name_prefix="spaceknife-list")
+        options = {"slicer": slicer, "batch_tasks": NATIVE_BATCH, "budget_s": NATIVE_BUDGET_S}
+    else:  # the Python walker in worker processes
+        threads = default_workers() if workers is None else workers
+        pool = make_pool(threads) if threads > 0 else None
+    registry: IoRegistry | None = None
+    low_io = False
     try:
-        scanner = Scanner(paths, executor=pool, concurrency=max(1, workers), cross_mounts=cross_mounts)
+        scanner = Scanner(
+            paths, executor=pool, concurrency=max(1, threads), cross_mounts=cross_mounts, **options
+        )
+        if limit is not None and pool is not None:  # paced like the app's scans
+            registry = IoRegistry(max_workers=max(1, threads))
+            await registry.start()
+            gov = await registry.governor_for_path(scanner.roots[0].path)
+            gov.set_max_workers(max(1, threads))
+            gov.set_level(limit[0], limit[1])  # type: ignore[arg-type]
+            scanner.governor = gov
+            low_io = gov.low_io_priority and set_low_io_priority(None, True)
         progress = Progress(
             SpinnerColumn(style="#8B9CFF"),
             TextColumn(f"[bold]{tr('扫描中')}[/bold]"),
@@ -192,6 +239,10 @@ async def _run_scan(paths: list[str], workers: int, cross_mounts: bool) -> tuple
                 raise
         return scanner, result
     finally:
+        if low_io:
+            set_low_io_priority(None, False)
+        if registry is not None:
+            await registry.stop()
         if pool is not None:
             pool.shutdown(wait=False, cancel_futures=True)
 
@@ -199,7 +250,11 @@ async def _run_scan(paths: list[str], workers: int, cross_mounts: bool) -> tuple
 def scan(
     paths: Annotated[list[str], typer.Argument(help="Folders or drives to scan, e.g. C:\\ or ~/Downloads.")],
     workers: Annotated[
-        int | None, typer.Option(help="Worker processes; 0 scans in-process. Default: CPU count − 1 (max 8).")
+        int | None,
+        typer.Option(
+            help="Listing threads (worker processes without the native extension); 0 scans in-process "
+            "with the Python walker. Default: as in the app (SPACEKNIFE_SCAN_THREADS sets it there too)."
+        ),
     ] = None,
     top: Annotated[int, typer.Option(help="Rows per level in the summary.")] = 15,
     depth: Annotated[int, typer.Option(help="Levels to expand in the summary.")] = 2,
@@ -208,15 +263,23 @@ def scan(
     ] = False,
     save: Annotated[Path | None, typer.Option(help="Also save the snapshot to this file.")] = None,
     no_snapshot: Annotated[bool, typer.Option("--no-snapshot", help="Do not auto-save a snapshot.")] = False,
+    profile: Annotated[bool, typer.Option("--profile", help="Also show where the scan's time went.")] = False,
+    disk_limit: Annotated[
+        str | None,
+        typer.Option(
+            help="Limit the disk load as the app does: balanced (70 %), quiet (35 %), idle, max, "
+            "or a percentage. Default: no limit."
+        ),
+    ] = None,
 ) -> None:
     """Scan folders or drives and show where the space goes."""
     from .log import LogFormat, setup_logging
 
     setup_logging("WARNING", LogFormat.RICH)
     apply_language()
-    n_workers = default_workers() if workers is None else workers
+    limit = load_limit(disk_limit) if disk_limit is not None else None
     try:
-        scanner, result = asyncio.run(_run_scan(paths, n_workers, cross_mounts))
+        scanner, result = asyncio.run(_run_scan(paths, workers, cross_mounts, limit))
     except KeyboardInterrupt:
         console.print(f"[yellow]{tr('已中断')}[/yellow]")
         raise typer.Exit(130) from None
@@ -231,11 +294,39 @@ def scan(
     if save is not None:
         _save(scanner, save)
     console.print(summary_panel(scanner, result, snap))
+    if profile:
+        console.print(profile_panel(scanner))
     store = scanner.store
     for root in scanner.roots:
         console.print(top_table(store, root.node, top, depth, tr("{path} 里最大的项目", path=root.path)))
         console.print()
     _largest_files(store, top)
+
+
+def profile_panel(scanner: Scanner) -> Panel:
+    """Where the scan's time went: listing (system calls) or folding results into the tree."""
+    p = scanner.profile()
+    walker = tr("Python 遍历器") if scanner.slicer is worker.scan_slice else tr("原生遍历器")
+    lines = [
+        tr("{walker} · 列目录并发 {threads}", walker=walker, threads=p.threads),
+        tr(
+            "列目录线程平均忙碌 {busy}（系统调用；接近 100% 说明瓶颈在磁盘或文件系统）",
+            busy=f"[bold]{p.busy:.0%}[/bold]",
+        ),
+        tr(
+            "主线程合并结果 {ingest}（接近 100% 说明瓶颈在合并，加线程无用）",
+            ingest=f"[bold]{p.ingest:.0%}[/bold]",
+        ),
+        tr("共 {slices} 批", slices=fmt.count(p.slices)),
+    ]
+    if scanner.governor is not None:
+        lines.append(
+            tr("等磁盘负载上限放行 {limited}（没有任何目录在列）", limited=f"[bold]{p.limited:.0%}[/bold]")
+        )
+    bulk = bulk_listing()
+    if bulk is not None:
+        lines.append(tr("批量列目录（getattrlistbulk）：{state}", state=bulk))
+    return Panel("\n".join(lines), title=tr("耗时分解"), title_align="left", border_style="#2A2E37")
 
 
 def _largest_files(store: NodeStore, limit: int) -> None:

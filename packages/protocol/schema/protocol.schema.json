@@ -2313,6 +2313,54 @@
       "title": "FilterVocab",
       "type": "object"
     },
+    "FlameGeometry": {
+      "description": "``flame.v1``: one band per level, the zoom root's bar in band 0.",
+      "properties": {
+        "gap": {
+          "description": "Gap between bands and between neighbouring bars, physical px",
+          "title": "Gap",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "flame",
+          "default": "flame",
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "description": "Side of the canvas holding the root bar",
+          "enum": [
+            "top",
+            "bottom"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "root": {
+          "$ref": "#/$defs/PixelRect",
+          "description": "The zoom root's bar"
+        },
+        "row_h": {
+          "description": "Band pitch in physical px (bar height + gap)",
+          "title": "Row H",
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Levels drawn beyond the root bar",
+          "title": "Rows",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "origin",
+        "row_h",
+        "rows",
+        "gap",
+        "root"
+      ],
+      "title": "FlameGeometry",
+      "type": "object"
+    },
     "FlashItem": {
       "properties": {
         "delta": {
@@ -2321,7 +2369,7 @@
           "type": "integer"
         },
         "row": {
-          "description": "Row of this frame's draw list: the changed block or its drawn ancestor",
+          "description": "Row of this frame's draw list: the changed block or its drawn ancestor; -1 = the zoom root (flame.v1 / polar.v1 only)",
           "title": "Row",
           "type": "integer"
         }
@@ -2405,9 +2453,42 @@
           "title": "Flash",
           "type": "array"
         },
+        "geometry": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "flame": "#/$defs/FlameGeometry",
+                  "polar": "#/$defs/PolarGeometry"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/FlameGeometry"
+                },
+                {
+                  "$ref": "#/$defs/PolarGeometry"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None for drawlist.v1",
+          "title": "Geometry"
+        },
         "height": {
           "title": "Height",
           "type": "integer"
+        },
+        "layout": {
+          "default": "drawlist.v1",
+          "description": "Layout of the binary frame that follows",
+          "title": "Layout",
+          "type": "string"
         },
         "layout_ms": {
           "title": "Layout Ms",
@@ -2417,6 +2498,18 @@
           "default": "",
           "title": "Reason",
           "type": "string"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameRoot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The zoom root (flame.v1 / polar.v1)"
         },
         "rows": {
           "title": "Rows",
@@ -2447,6 +2540,12 @@
           "title": "View Id",
           "type": "string"
         },
+        "visual": {
+          "default": "treemap",
+          "description": "Visualization that drew this frame",
+          "title": "Visual",
+          "type": "string"
+        },
         "width": {
           "description": "Canvas size in physical px",
           "title": "Width",
@@ -2465,6 +2564,86 @@
         "layout_ms"
       ],
       "title": "FrameInfo",
+      "type": "object"
+    },
+    "FrameRoot": {
+      "description": "The zoom root of a flame.v1 / polar.v1 frame (root bar, centre disc): the same facts as a row.",
+      "properties": {
+        "branch": {
+          "default": 0,
+          "title": "Branch",
+          "type": "integer"
+        },
+        "count": {
+          "default": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Compare views only",
+          "title": "Delta"
+        },
+        "dstat": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Compare views only",
+          "title": "Dstat"
+        },
+        "flags": {
+          "default": 0,
+          "title": "Flags",
+          "type": "integer"
+        },
+        "key": {
+          "title": "Key",
+          "type": "integer"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "tag": {
+          "default": 0,
+          "title": "Tag",
+          "type": "integer"
+        },
+        "tone": {
+          "default": 4,
+          "title": "Tone",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "node",
+        "kind",
+        "size"
+      ],
+      "title": "FrameRoot",
       "type": "object"
     },
     "HelloParams": {
@@ -2631,6 +2810,32 @@
           ],
           "default": null,
           "title": "Q Eff"
+        },
+        "read_bps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes read per second on the whole disk, last sample",
+          "title": "Read Bps"
+        },
+        "read_latency_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mean time per read on the whole disk, ms",
+          "title": "Read Latency Ms"
         },
         "self_pct": {
           "title": "Self Pct",
@@ -3229,6 +3434,28 @@
         "task_id"
       ],
       "title": "OpTaskParams",
+      "type": "object"
+    },
+    "PaletteCheckParams": {
+      "additionalProperties": false,
+      "description": "One command, where the user is: a keyboard shortcut runs it only when the palette would.",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/PaletteContext"
+        },
+        "id": {
+          "description": "A command id (palette.commands)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "context"
+      ],
+      "title": "PaletteCheckParams",
       "type": "object"
     },
     "PaletteClearParams": {
@@ -4126,6 +4353,34 @@
       "title": "PingResult",
       "type": "object"
     },
+    "PixelRect": {
+      "properties": {
+        "h": {
+          "title": "H",
+          "type": "integer"
+        },
+        "w": {
+          "title": "W",
+          "type": "integer"
+        },
+        "x": {
+          "title": "X",
+          "type": "integer"
+        },
+        "y": {
+          "title": "Y",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "title": "PixelRect",
+      "type": "object"
+    },
     "PlatformInfo": {
       "properties": {
         "machine": {
@@ -4147,6 +4402,68 @@
         "machine"
       ],
       "title": "PlatformInfo",
+      "type": "object"
+    },
+    "PolarGeometry": {
+      "description": "``polar.v1``: the zoom root is the centre disc, level k the k-th ring around it.",
+      "properties": {
+        "cx": {
+          "description": "Centre, physical px",
+          "title": "Cx",
+          "type": "integer"
+        },
+        "cy": {
+          "title": "Cy",
+          "type": "integer"
+        },
+        "gap": {
+          "description": "Gap between rings and between neighbouring sectors, physical px",
+          "title": "Gap",
+          "type": "integer"
+        },
+        "hole": {
+          "description": "Radius of the centre disc",
+          "title": "Hole",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "polar",
+          "default": "polar",
+          "title": "Kind",
+          "type": "string"
+        },
+        "radius": {
+          "description": "Outer edge of the last ring",
+          "title": "Radius",
+          "type": "integer"
+        },
+        "ring_w": {
+          "description": "Ring pitch: ring k spans [hole + (k-1)·ring_w, hole + k·ring_w)",
+          "title": "Ring W",
+          "type": "integer"
+        },
+        "rings": {
+          "description": "Levels drawn around the centre disc",
+          "title": "Rings",
+          "type": "integer"
+        },
+        "unit": {
+          "default": 1048576,
+          "description": "Angle units per turn",
+          "title": "Unit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cx",
+        "cy",
+        "radius",
+        "hole",
+        "ring_w",
+        "rings",
+        "gap"
+      ],
+      "title": "PolarGeometry",
       "type": "object"
     },
     "ProgressEvent": {
@@ -4600,6 +4917,19 @@
           "minItems": 1,
           "title": "Roots",
           "type": "array"
+        },
+        "skip_protected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "macOS without Full Disk Access: leave out the places that would each ask for consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown as not accessible; None = the scan.protected_places setting",
+          "title": "Skip Protected"
         },
         "workers": {
           "anyOf": [
@@ -5740,6 +6070,19 @@
     },
     "SystemInfo": {
       "properties": {
+        "full_disk_access": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected place); None elsewhere or when it cannot be told",
+          "title": "Full Disk Access"
+        },
         "pid": {
           "title": "Pid",
           "type": "integer"
@@ -6143,6 +6486,334 @@
       "title": "UnsubscribeParams",
       "type": "object"
     },
+    "UpdateAsset": {
+      "properties": {
+        "name": {
+          "description": "File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "From the release's SHA256SUMS*.txt; None when it publishes none",
+          "title": "Sha256"
+        },
+        "size": {
+          "description": "Bytes",
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "url": {
+          "description": "Its download URL on github.com",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "url"
+      ],
+      "title": "UpdateAsset",
+      "type": "object"
+    },
+    "UpdateChangedEvent": {
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/UpdateStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "UpdateChangedEvent",
+      "type": "object"
+    },
+    "UpdateDownload": {
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it failed, in the session's language",
+          "title": "Error"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The downloaded file, once done",
+          "title": "Path"
+        },
+        "received": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Received",
+          "type": "integer"
+        },
+        "state": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "downloading",
+            "verifying",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "verified": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 matched (True), did not (never kept), no checksum published (None)",
+          "title": "Verified"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "title": "UpdateDownload",
+      "type": "object"
+    },
+    "UpdateInfo": {
+      "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateAsset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The file for this kind of install; None: only the release page"
+        },
+        "name": {
+          "description": "The release title",
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "description": "Release notes (Markdown), at most 16 KiB",
+          "title": "Notes",
+          "type": "string"
+        },
+        "prerelease": {
+          "description": "Marked as a pre-release on GitHub",
+          "title": "Prerelease",
+          "type": "boolean"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "url": {
+          "description": "The release page",
+          "title": "Url",
+          "type": "string"
+        },
+        "version": {
+          "description": "Without the leading v: 0.4.0, 0.4.0-beta.1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "tag",
+        "name",
+        "prerelease",
+        "url"
+      ],
+      "title": "UpdateInfo",
+      "type": "object"
+    },
+    "UpdateStatus": {
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "preview"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last successful check",
+          "title": "Checked At"
+        },
+        "checking": {
+          "default": false,
+          "title": "Checking",
+          "type": "boolean"
+        },
+        "current": {
+          "description": "Version of the running app",
+          "title": "Current",
+          "type": "string"
+        },
+        "dismissed": {
+          "default": false,
+          "description": "The card / dialog for this version was closed (the badge stays)",
+          "title": "Dismissed",
+          "type": "boolean"
+        },
+        "download": {
+          "$ref": "#/$defs/UpdateDownload"
+        },
+        "enabled": {
+          "description": "Automatic checks are on (setting general.update_check)",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The last check failed: why (offline, rate limited)",
+          "title": "Error"
+        },
+        "install_kind": {
+          "enum": [
+            "nsis",
+            "portable",
+            "appimage",
+            "deb",
+            "rpm",
+            "dmg",
+            "dev",
+            "unknown"
+          ],
+          "title": "Install Kind",
+          "type": "string"
+        },
+        "latest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The newest release, when it is newer"
+        },
+        "level": {
+          "default": "none",
+          "description": "How far behind the newest release this app is",
+          "enum": [
+            "none",
+            "patch",
+            "minor",
+            "major"
+          ],
+          "title": "Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "current",
+        "install_kind",
+        "enabled",
+        "channel"
+      ],
+      "title": "UpdateStatus",
+      "type": "object"
+    },
+    "UpdateVersionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "description": "The version shown (latest.version)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "UpdateVersionParams",
+      "type": "object"
+    },
     "ViewFilterParams": {
       "additionalProperties": false,
       "properties": {
@@ -6480,7 +7151,8 @@
               "enum": [
                 "class",
                 "flat",
-                "time"
+                "time",
+                "branch"
               ],
               "type": "string"
             },
@@ -6489,7 +7161,30 @@
             }
           ],
           "default": null,
+          "description": "Of the view's current visualization; 'branch' needs visuals.v1",
           "title": "Color Mode"
+        },
+        "colors": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "enum": [
+                  "class",
+                  "flat",
+                  "time",
+                  "branch"
+                ],
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Colour mode per visualization (a split pane or a reopened view keeps them); color_mode, when also given, wins for the current one",
+          "title": "Colors"
         },
         "detail": {
           "anyOf": [
@@ -6600,6 +7295,22 @@
             }
           ],
           "default": null
+        },
+        "visual": {
+          "anyOf": [
+            {
+              "maxLength": 48,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A visual.list id (needs visuals.v1)",
+          "title": "Visual"
         }
       },
       "title": "ViewSettingsParams",
@@ -6620,13 +7331,29 @@
           "type": "boolean"
         },
         "color_mode": {
+          "description": "Of the current visualization (each remembers its own)",
           "enum": [
             "class",
             "flat",
-            "time"
+            "time",
+            "branch"
           ],
           "title": "Color Mode",
           "type": "string"
+        },
+        "colors": {
+          "additionalProperties": {
+            "enum": [
+              "class",
+              "flat",
+              "time",
+              "branch"
+            ],
+            "type": "string"
+          },
+          "description": "Colour mode each visualization remembers",
+          "title": "Colors",
+          "type": "object"
         },
         "compare": {
           "default": false,
@@ -6704,6 +7431,12 @@
         },
         "viewport": {
           "$ref": "#/$defs/Viewport"
+        },
+        "visual": {
+          "default": "treemap",
+          "description": "A visual.list id",
+          "title": "Visual",
+          "type": "string"
         },
         "zoom_key": {
           "title": "Zoom Key",
@@ -6864,6 +7597,101 @@
         "height"
       ],
       "title": "Viewport",
+      "type": "object"
+    },
+    "VisualInfo": {
+      "description": "One visualization this server offers (``visual.list``).",
+      "properties": {
+        "available": {
+          "description": "This session negotiated what it needs",
+          "title": "Available",
+          "type": "boolean"
+        },
+        "compare": {
+          "description": "Can show compare views",
+          "title": "Compare",
+          "type": "boolean"
+        },
+        "default_color": {
+          "description": "Colour mode a view starts with on this visualization",
+          "enum": [
+            "class",
+            "flat",
+            "time",
+            "branch"
+          ],
+          "title": "Default Color",
+          "type": "string"
+        },
+        "free_space": {
+          "description": "Shows free / unknown space at a volume root",
+          "title": "Free Space",
+          "type": "boolean"
+        },
+        "icon": {
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "layout": {
+          "description": "Layout of its frames",
+          "title": "Layout",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name in the session's language",
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "title": "Order",
+          "type": "integer"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it is not available (display text)",
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "id",
+        "layout",
+        "name",
+        "icon",
+        "order",
+        "compare",
+        "free_space",
+        "default_color",
+        "available"
+      ],
+      "title": "VisualInfo",
+      "type": "object"
+    },
+    "VisualListResult": {
+      "properties": {
+        "visuals": {
+          "items": {
+            "$ref": "#/$defs/VisualInfo"
+          },
+          "title": "Visuals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "visuals"
+      ],
+      "title": "VisualListResult",
       "type": "object"
     },
     "VolumeInfo": {
@@ -7041,6 +7869,10 @@
       "doc": "Settings changed (any client, or the file was edited).",
       "payload": "#/$defs/SettingsChangedEvent"
     },
+    "update.changed": {
+      "doc": "Update check result or download progress (sessions with updates.v1).",
+      "payload": "#/$defs/UpdateChangedEvent"
+    },
     "view.frame": {
       "doc": "A frame pushed without a request (scan progress, time).",
       "payload": "#/$defs/ViewFrameEvent"
@@ -7196,6 +8028,12 @@
       "params": "#/$defs/OpTaskParams",
       "requiresSession": true,
       "result": "#/$defs/EmptyResult"
+    },
+    "palette.check": {
+      "doc": "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+      "params": "#/$defs/PaletteCheckParams",
+      "requiresSession": true,
+      "result": "#/$defs/PaletteCommand"
     },
     "palette.clear": {
       "doc": "Clear the recents of a scan target and the shared filters.",
@@ -7425,6 +8263,36 @@
       "requiresSession": true,
       "result": "#/$defs/TreeSummaryResult"
     },
+    "update.cancel": {
+      "doc": "Stop a running download.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.check": {
+      "doc": "Check the GitHub releases now (also when automatic checks are off).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.dismiss": {
+      "doc": "The card / dialog for this version was closed.",
+      "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.download": {
+      "doc": "Download this version's file for this install into the download folder (progress: update.changed).",
+      "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.status": {
+      "doc": "What the last update check found (updates.v1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
     "view.back": {
       "doc": "Back to the previous zoom root.",
       "params": "#/$defs/ViewIdParams",
@@ -7515,6 +8383,12 @@
       "requiresSession": true,
       "result": "#/$defs/ViewUpdate"
     },
+    "visual.list": {
+      "doc": "Visualizations this server offers and whether this session can show each.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/VisualListResult"
+    },
     "volume.list": {
       "doc": "Volumes offered on the start page (W1).",
       "params": "#/$defs/Empty",
@@ -7528,6 +8402,6 @@
       "params": "#/$defs/CancelParams"
     }
   },
-  "protocol": "1.0",
+  "protocol": "1.1",
   "title": "SpaceKnife protocol"
 }

@@ -62,6 +62,8 @@ _IOPRIO_SYSCALLS = {  # machine → (ioprio_set, ioprio_get)
 _IOPOL_TYPE_DISK = 0
 _IOPOL_SCOPE_PROCESS, _IOPOL_SCOPE_THREAD = 0, 1
 _IOPOL_DEFAULT, _IOPOL_THROTTLE = 0, 3
+_IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES = 3  # macOS 10.15+
+_IOPOL_MATERIALIZE_DATALESS_FILES_OFF = 1
 
 
 # --------------------------------------------------------------------------- Windows
@@ -206,6 +208,30 @@ def _darwin_get(scope: int) -> int | None:
     return None if value < 0 else value
 
 
+def no_cloud_downloads() -> bool:
+    """macOS: this process never downloads ("materializes") a dataless file or folder, one of iCloud
+    Drive or a File Provider (OneDrive, Google Drive, Dropbox…) whose contents are in the cloud:
+    listing such a folder fails instead of fetching it over the network. The scan does not enter
+    them anyway (SF_DATALESS: shown as cloud items); this keeps any other access local too. True
+    when set; elsewhere False and nothing to do."""
+    if sys.platform != "darwin":
+        return False
+    fn = getattr(ctypes.CDLL(None, use_errno=True), "setiopolicy_np", None)
+    if fn is None:
+        return False
+    ok = (
+        fn(
+            _IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
+            _IOPOL_SCOPE_PROCESS,
+            _IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
+        )
+        == 0
+    )
+    if not ok:
+        logger.debug("no_cloud_downloads: setiopolicy_np failed (errno {})", ctypes.get_errno())
+    return bool(ok)
+
+
 # --------------------------------------------------------------------------- public
 
 
@@ -259,4 +285,4 @@ def io_priority_is_low(pid: int | None = None, *, thread: bool = False) -> bool 
         return None
 
 
-__all__ = ["io_priority_is_low", "set_low_io_priority", "set_thread_low_io_priority"]
+__all__ = ["io_priority_is_low", "no_cloud_downloads", "set_low_io_priority", "set_thread_low_io_priority"]

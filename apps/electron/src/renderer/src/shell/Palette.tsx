@@ -15,7 +15,7 @@ import type {
   Span,
 } from "@/protocol/generated";
 import { call, cancellable, editFilter, startScan, viewCall } from "@/state/actions";
-import { runCommand } from "@/state/commands";
+import { paletteContext, runCommand } from "@/state/commands";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtSize, middlePath } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -78,7 +78,7 @@ function PaletteDialog() {
 
   // palette.query, then palette.paths and filter previews; superseded requests are cancelled
   useEffect(() => {
-    const context = { tab: tab.kind, scan_id: tab.scanId ?? null, view_id: viewId, basket };
+    const context = paletteContext();
     const refresh = shownText.current === text && paths !== null;
     const jobs: { cancel: () => void }[] = [];
     let alive = true;

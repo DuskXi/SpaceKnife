@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import type { NodeInfo, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, viewCall } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
-import { Kind } from "@/treemap/frame";
+import { Kind } from "@/visual/frame";
 import { fmtAgo, fmtInt, fmtPct, fmtShare, fmtSize, plural, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";

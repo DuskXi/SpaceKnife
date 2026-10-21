@@ -1,6 +1,7 @@
-# Installers (M8): Windows NSIS; Linux AppImage / deb / rpm. Built by tools/build_package.py,
-# which first freezes the backend into ../../dist/backend/spaceknife-backend (PyInstaller) and
-# runs `electron-vite build`; see docs/packaging.md. No code signing yet (unsigned builds).
+# Installers (M8): Windows NSIS; Linux AppImage / deb / rpm; macOS dmg. Built by
+# tools/build_package.py, which first freezes the backend into ../../dist/backend/spaceknife-backend
+# (PyInstaller) and runs `electron-vite build`; see docs/packaging.md. No code signing certificate
+# yet: Windows and Linux builds are unsigned, macOS builds ad-hoc signed and not notarized.
 appId: io.github.duskxi.spaceknife
 productName: SpaceKnife
 copyright: Copyright © 2026 DuskXi
@@ -73,3 +74,25 @@ deb:
 rpm:
   packageName: spaceknife
   artifactName: spaceknife-${version}.x86_64.${ext}
+
+mac:
+  target:
+    - target: dmg # the architecture comes from tools/build_package.py: the build Mac's own
+  icon: build/icon.png # 1024×1024; electron-builder makes the .icns
+  category: public.app-category.utilities
+  minimumSystemVersion: "14.0" # docs/PLAN.md: macOS 14+
+  # Ad-hoc signed until there is an Apple Developer ID: Gatekeeper then asks the user to allow the
+  # app once (System Settings › Privacy & Security › Open Anyway; README). Hardened runtime would
+  # enforce library validation, which rejects the Electron framework's own signature next to ours.
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  extendInfo:
+    # shown in the Files and Folders prompts (Full Disk Access avoids them; README)
+    NSDesktopFolderUsageDescription: SpaceKnife measures the files on your Desktop to show what takes up space.
+    NSDocumentsFolderUsageDescription: SpaceKnife measures the files in Documents to show what takes up space.
+    NSDownloadsFolderUsageDescription: SpaceKnife measures the files in Downloads to show what takes up space.
+    NSRemovableVolumesUsageDescription: SpaceKnife measures the files on removable drives to show what takes up space.
+    NSNetworkVolumesUsageDescription: SpaceKnife measures the files on network drives to show what takes up space.
+dmg:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}

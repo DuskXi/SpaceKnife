@@ -33,6 +33,7 @@ from .rpc import Router
 from .scans import ScanManager
 from .session import Session
 from .topics import TopicRegistry
+from .update_handlers import UpdateService
 from .views import ViewManager
 
 DEFAULT_ORIGINS: tuple[str | None, ...] = ("app://spaceknife", None)
@@ -54,6 +55,7 @@ class ServerConfig:
     ping_interval: float | None = 20.0
     capabilities: tuple[str, ...] = field(default=ALL_CAPABILITIES)
     log_file: bool = False  # write the rotating log file (the real app; not tests)
+    update_checks: bool | None = None  # automatic update checks; None: as log_file (the real app)
 
 
 class Server:
@@ -78,6 +80,7 @@ class Server:
         self.compares = CompareManager(self.scans, self.views)  # snapshot comparisons (W6)
         self.ops = OpsService(self)  # the delete basket and file operations (W5)
         self.views.ops = self.ops
+        self.updates = UpdateService(self)  # update checks against the GitHub releases
         self.scans.monitors = self.monitors
         self.on_start: list[Callable[[], None]] = []  # run once the loop is serving
         self.background: list[asyncio.Task[None]] = []
@@ -96,8 +99,10 @@ class Server:
         self.port = 0
 
         from .handlers import install
+        from .update_handlers import install as install_update_handlers
 
         install(self)
+        install_update_handlers(self)  # after the settings handlers: their listener sets the language
 
     async def start(self) -> int:
         self._ws = await serve(
@@ -156,5 +161,6 @@ class Server:
         for task in self.background:
             task.cancel()
         self.background.clear()
+        await self.updates.close()
         await self.scans.close()
         logger.info("server stopped")

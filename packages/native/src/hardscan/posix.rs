@@ -1,8 +1,10 @@
 //! POSIX lister: `open(O_DIRECTORY)` + `getdents64` (Linux) / `readdir` (elsewhere) +
 //! `fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW)` per entry: worker.py's `_list_posix`, syscall
-//! for syscall, without the Python objects in between.
+//! for syscall, without the Python objects in between. On macOS `getattrlistbulk` gives the
+//! attributes of whole batches of entries instead (`bulk`, checked against fstatat).
 
-use std::cell::RefCell;
+#[cfg(target_os = "linux")]
+use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
 
 use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
@@ -41,6 +43,24 @@ fn join_posix(parent: &[u8], name: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Is `dir`/`name` one of the folders not to enter? (Compared without building the path.)
+fn is_skipped(skip: &[Vec<u8>], dir: &[u8], name: &[u8]) -> bool {
+    skip.iter().any(|s| {
+        let Some(rest) = s.strip_prefix(dir) else {
+            return false;
+        };
+        let rest = if dir.ends_with(b"/") || dir.is_empty() {
+            rest
+        } else {
+            match rest.strip_prefix(b"/") {
+                Some(r) => r,
+                None => return false,
+            }
+        };
+        rest == name
+    })
+}
+
 /// Nothing to learn per root on POSIX.
 pub struct RootState;
 
@@ -74,6 +94,34 @@ impl Drop for Fd {
     }
 }
 
+/// macOS st_flags: the contents are in the cloud (iCloud Drive, a File Provider), worker.SF_DATALESS.
+#[cfg(target_os = "macos")]
+const SF_DATALESS: u32 = 0x4000_0000;
+
+fn dataless(flags: u32) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        flags & SF_DATALESS != 0
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = flags;
+        false // the bit means something else elsewhere (FreeBSD)
+    }
+}
+
+fn st_flags(st: &libc::stat) -> u32 {
+    #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
+    {
+        st.st_flags as u32
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "freebsd")))]
+    {
+        let _ = st;
+        0
+    }
+}
+
 fn st_birth(st: &libc::stat) -> (i64, u64) {
     #[cfg(any(target_os = "macos", target_os = "ios", target_os = "freebsd"))]
     {
@@ -86,6 +134,48 @@ fn st_birth(st: &libc::stat) -> (i64, u64) {
     }
 }
 
+/// What a row needs of an entry: lstat's fields (fstatat, or getattrlistbulk on macOS).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Meta {
+    mode: u32, // S_IFMT bits
+    dev: u64,
+    size: i64,
+    alloc: i64, // st_blocks * 512
+    mtime: (i64, u64),
+    btime: (i64, u64),
+    atime: (i64, u64),
+    ino: u64,
+    nlink: u64,
+    flags: u32, // st_flags (BSDs)
+}
+
+impl Meta {
+    fn from_stat(st: &libc::stat) -> Self {
+        Self {
+            mode: st.st_mode as u32 & libc::S_IFMT as u32,
+            dev: st.st_dev as u64,
+            size: st.st_size as i64,
+            alloc: (st.st_blocks as i64).saturating_mul(512),
+            mtime: (st.st_mtime as i64, st.st_mtime_nsec as u64),
+            btime: st_birth(st),
+            atime: (st.st_atime as i64, st.st_atime_nsec as u64),
+            ino: st.st_ino as u64,
+            nlink: st.st_nlink as u64,
+            flags: st_flags(st),
+        }
+    }
+}
+
+/// fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW); None when it fails.
+fn stat_entry(dirfd: libc::c_int, name: &CStr) -> Option<Meta> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    // SAFETY: name is NUL-terminated, st is writable.
+    if unsafe { libc::fstatat(dirfd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+        return None;
+    }
+    Some(Meta::from_stat(&st))
+}
+
 fn add_entry(
     dirfd: libc::c_int,
     name: &CStr,
@@ -95,30 +185,52 @@ fn add_entry(
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath)>,
 ) {
-    let raw = name.to_bytes();
+    push_entry(
+        stat_entry(dirfd, name),
+        name.to_bytes(),
+        dir,
+        root,
+        base,
+        arena,
+        subdirs,
+    );
+}
+
+/// One entry's row (ERROR_ROW without `meta`); a folder to descend goes to `subdirs`.
+fn push_entry(
+    meta: Option<Meta>,
+    raw: &[u8],
+    dir: &[u8],
+    root: &RootOpts,
+    base: usize,
+    arena: &mut Arena,
+    subdirs: &mut Vec<(u32, NativePath)>,
+) {
     let name_start = arena.names.len();
     arena.names.extend_from_slice(raw);
     let j = (arena.len() - base) as u32;
-    let mut st: libc::stat = unsafe { std::mem::zeroed() };
-    // SAFETY: name is NUL-terminated, st is writable.
-    if unsafe { libc::fstatat(dirfd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
+    let Some(m) = meta else {
         arena.push_row(name_start, ERROR_ROW);
         return;
-    }
-    let mode = st.st_mode as u32 & libc::S_IFMT as u32;
+    };
     let mut flags = 0u32;
     let mut descend = false;
-    let dev = st.st_dev as u64;
-    let kind = if mode == libc::S_IFDIR as u32 {
-        if dev != root.dev && !root.cross_mounts {
+    let cloud = dataless(m.flags);
+    if cloud {
+        flags |= flag::CLOUD; // takes no local space; a folder is not entered: listing would download it
+    }
+    let kind = if m.mode == libc::S_IFDIR as u32 {
+        if (m.dev != root.dev && !root.cross_mounts) || is_skipped(&root.skip, dir, raw) {
             flags |= flag::MOUNT;
+        } else if is_skipped(&root.protect, dir, raw) {
+            flags |= flag::ACCESS_DENIED;
         } else {
-            descend = true;
+            descend = !cloud;
         }
         kind::DIR
-    } else if mode == libc::S_IFLNK as u32 {
+    } else if m.mode == libc::S_IFLNK as u32 {
         kind::LINK
-    } else if mode == libc::S_IFREG as u32 {
+    } else if m.mode == libc::S_IFREG as u32 {
         kind::FILE
     } else {
         kind::OTHER
@@ -126,22 +238,17 @@ fn add_entry(
     if raw.first() == Some(&b'.') {
         flags |= flag::HIDDEN;
     }
-    let (bsec, bnsec) = st_birth(&st);
     let row = Row {
         kind,
         flags,
-        size: if kind == kind::DIR {
-            0
-        } else {
-            st.st_size as i64
-        },
-        alloc: (st.st_blocks as i64).saturating_mul(512),
-        mtime: secs(st.st_mtime as i64, st.st_mtime_nsec as u64),
-        ctime: secs(bsec, bnsec),
-        atime: secs(st.st_atime as i64, st.st_atime_nsec as u64),
-        ino: st.st_ino as u64,
-        nlink: (st.st_nlink as u64).min(65535) as u16,
-        dev,
+        size: if kind == kind::DIR { 0 } else { m.size },
+        alloc: m.alloc,
+        mtime: secs(m.mtime.0, m.mtime.1),
+        ctime: secs(m.btime.0, m.btime.1),
+        atime: secs(m.atime.0, m.atime.1),
+        ino: m.ino,
+        nlink: m.nlink.min(65535) as u16,
+        dev: m.dev,
         ext_len: if kind == kind::FILE {
             ext_len_with(raw, escaped_code_points)
         } else {
@@ -211,6 +318,7 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
             libc::close(dup);
             return Err(e);
         }
+        libc::rewinddir(dir); // from the first entry, whatever read the descriptor before
         let result = loop {
             *errno_location() = 0;
             let ent = libc::readdir(dir);
@@ -228,6 +336,454 @@ fn read_entries(fd: &Fd, mut each: impl FnMut(&CStr)) -> Result<(), i32> {
     }
 }
 
+/// macOS: getattrlistbulk(2) returns the names and attributes of a batch of entries per call,
+/// where readdir + fstatat costs a system call per entry. Folders, entries reported with an error
+/// and anything not as expected still go through fstatat. The first files a process reads are
+/// checked against fstatat field by field; a difference turns the bulk path off for good, and
+/// listings fall back to readdir + fstatat (so does SPACEKNIFE_NO_BULK=1).
+///
+/// Folders can come from it too (SPACEKNIFE_BULK_DIRS=1, checked the same way on their own; mount
+/// points and firmlinks, whose fstatat answer is the other side, still fstatat'ed), but it is not
+/// faster: asking for the folder attributes slows every call down about as much as the fstatat
+/// calls it saves (GitHub's macOS runners, 2026-10-20; docs/packaging.md).
+#[cfg(target_os = "macos")]
+mod bulk {
+    use std::cell::RefCell;
+    use std::ffi::CStr;
+    use std::sync::Mutex;
+    use std::sync::atomic::{AtomicU8, Ordering};
+
+    use super::{Meta, errno, stat_entry};
+
+    #[repr(C)]
+    #[allow(dead_code)] // filled for the kernel, never read back
+    struct AttrList {
+        bitmapcount: u16,
+        reserved: u16,
+        commonattr: u32,
+        volattr: u32,
+        dirattr: u32,
+        fileattr: u32,
+        forkattr: u32,
+    }
+
+    const ATTR_BIT_MAP_COUNT: u16 = 5;
+    const ATTR_CMN_NAME: u32 = 0x0000_0001;
+    const ATTR_CMN_DEVID: u32 = 0x0000_0002;
+    const ATTR_CMN_OBJTYPE: u32 = 0x0000_0008;
+    const ATTR_CMN_CRTIME: u32 = 0x0000_0200;
+    const ATTR_CMN_MODTIME: u32 = 0x0000_0400;
+    const ATTR_CMN_ACCTIME: u32 = 0x0000_1000;
+    const ATTR_CMN_FLAGS: u32 = 0x0004_0000;
+    const ATTR_CMN_FILEID: u32 = 0x0200_0000;
+    const ATTR_CMN_ERROR: u32 = 0x2000_0000;
+    const ATTR_CMN_RETURNED_ATTRS: u32 = 0x8000_0000;
+    const ATTR_DIR_ENTRYCOUNT: u32 = 0x0000_0002;
+    const ATTR_DIR_MOUNTSTATUS: u32 = 0x0000_0004;
+    const ATTR_DIR_ALLOCSIZE: u32 = 0x0000_0008;
+    const ATTR_FILE_LINKCOUNT: u32 = 0x0000_0001;
+    const ATTR_FILE_ALLOCSIZE: u32 = 0x0000_0004;
+    const ATTR_FILE_DATALENGTH: u32 = 0x0000_0200;
+    const FSOPT_PACK_INVAL_ATTRS: u64 = 0x0000_0008;
+    const SF_FIRMLINK: u32 = 0x0080_0000; // st_flags: a firmlink (/Applications on the system volume)
+
+    const COMMON: u32 = ATTR_CMN_RETURNED_ATTRS
+        | ATTR_CMN_NAME
+        | ATTR_CMN_ERROR
+        | ATTR_CMN_DEVID
+        | ATTR_CMN_OBJTYPE
+        | ATTR_CMN_CRTIME
+        | ATTR_CMN_MODTIME
+        | ATTR_CMN_ACCTIME
+        | ATTR_CMN_FLAGS
+        | ATTR_CMN_FILEID;
+    const DIR: u32 = ATTR_DIR_ENTRYCOUNT | ATTR_DIR_MOUNTSTATUS | ATTR_DIR_ALLOCSIZE;
+    const FILE: u32 = ATTR_FILE_LINKCOUNT | ATTR_FILE_ALLOCSIZE | ATTR_FILE_DATALENGTH;
+    const NEEDED: u32 = COMMON & !(ATTR_CMN_RETURNED_ATTRS | ATTR_CMN_ERROR);
+
+    // One record with FSOPT_PACK_INVAL_ATTRS (requested attributes present, 4-byte aligned):
+    // u32 length, attribute_set_t returned (5 x u32), u32 error (right after the returned set),
+    // then by bit: attrreference_t name, dev_t devid, fsobj_type_t objtype, timespec crtime,
+    // modtime, acctime, u32 flags, u64 fileid; then, for a folder, the folder attributes: u32
+    // entrycount, u32 mountstatus, off_t allocsize; for anything else the file attributes: u32
+    // linkcount, off_t allocsize, off_t datalength. The name's bytes follow the fixed part, where
+    // its reference points: the folder attributes are read right after the common ones, the file
+    // attributes right before the name (whether or not the other section is packed too).
+    const AT_RETURNED: usize = 4;
+    const AT_ERROR: usize = 24;
+    const AT_NAME: usize = 28;
+    const AT_DEVID: usize = 36;
+    const AT_OBJTYPE: usize = 40;
+    const AT_CRTIME: usize = 44;
+    const AT_MODTIME: usize = 60;
+    const AT_ACCTIME: usize = 76;
+    const AT_FLAGS: usize = 92;
+    const AT_FILEID: usize = 96;
+    const COMMON_END: usize = 104; // every record: the common attributes
+    const DIR_LEN: usize = 16; // entrycount, mountstatus, allocsize
+    const FILE_LEN: usize = 20; // linkcount, allocsize, datalength
+    const DIR_MNTSTATUS_MNTPOINT: u32 = 0x0000_0001;
+    const DIR_MNTSTATUS_TRIGGER: u32 = 0x0000_0002;
+
+    const VREG: u32 = 1;
+    const VDIR: u32 = 2;
+
+    const UNTESTED: u8 = 0;
+    const ON: u8 = 1;
+    const OFF: u8 = 2;
+    const NOT_ASKED: u8 = 3; // folders: through fstatat, not asked of getattrlistbulk at all
+
+    /// Trust in one kind of record (files, folders): untested, on, or off with the reason.
+    struct Switch {
+        state: AtomicU8,
+        reason: Mutex<String>,
+    }
+
+    impl Switch {
+        const fn new() -> Self {
+            Self {
+                state: AtomicU8::new(UNTESTED),
+                reason: Mutex::new(String::new()),
+            }
+        }
+
+        fn get(&self) -> u8 {
+            self.state.load(Ordering::Relaxed)
+        }
+
+        fn turn_off(&self, why: String) {
+            if self.state.swap(OFF, Ordering::Relaxed) != OFF {
+                if let Ok(mut r) = self.reason.lock() {
+                    *r = why;
+                }
+            }
+        }
+
+        fn trust(&self) {
+            let _ = self
+                .state
+                .compare_exchange(UNTESTED, ON, Ordering::Relaxed, Ordering::Relaxed);
+        }
+
+        fn describe(&self) -> String {
+            match self.get() {
+                ON => "on".to_owned(),
+                OFF => {
+                    let why = self.reason.lock().map(|r| r.clone()).unwrap_or_default();
+                    if why.is_empty() {
+                        "off".to_owned()
+                    } else {
+                        format!("off: {why}")
+                    }
+                }
+                NOT_ASKED => "not asked".to_owned(),
+                _ => "untested".to_owned(),
+            }
+        }
+    }
+
+    /// Folders taken from getattrlistbulk (SPACEKNIFE_BULK_DIRS=1, not turned off by a check).
+    fn dirs_used() -> bool {
+        matches!(DIRS.get(), UNTESTED | ON)
+    }
+
+    static FILES: Switch = Switch::new(); // off: the whole bulk path is off
+    static DIRS: Switch = Switch::new(); // off or not asked: folders go through fstatat
+    const BUF_BYTES: usize = 256 * 1024;
+    const CHECKS: usize = 8; // entries compared with fstatat before the bulk path is trusted
+
+    unsafe extern "C" {
+        fn getattrlistbulk(
+            dirfd: libc::c_int,
+            alist: *mut libc::c_void,
+            buf: *mut libc::c_void,
+            size: libc::size_t,
+            options: u64,
+        ) -> libc::c_int;
+    }
+
+    fn rd<T: Copy>(b: &[u8], at: usize) -> T {
+        debug_assert!(at + std::mem::size_of::<T>() <= b.len());
+        // SAFETY: callers check that the record holds `at + size_of::<T>()` bytes.
+        unsafe { std::ptr::read_unaligned(b.as_ptr().add(at).cast::<T>()) }
+    }
+
+    fn time(b: &[u8], at: usize) -> (i64, u64) {
+        (rd::<i64>(b, at), rd::<i64>(b, at + 8) as u64)
+    }
+
+    /// "on" (files and folders), "on (folders: …)", "untested", or "off: why".
+    /// "on" (files), "on (folders too)", "on (folders: …)", "untested", or "off: why".
+    pub fn state() -> String {
+        match (FILES.get(), DIRS.get()) {
+            (ON, NOT_ASKED) => "on".to_owned(),
+            (ON, ON) => "on (folders too)".to_owned(),
+            (ON, _) => format!("on (folders: {})", DIRS.describe()),
+            _ => FILES.describe(),
+        }
+    }
+
+    pub fn enabled() -> bool {
+        match FILES.get() {
+            ON => true,
+            OFF => false,
+            _ => {
+                if std::env::var_os("SPACEKNIFE_NO_BULK").is_some_and(|v| v == "1") {
+                    FILES.turn_off("SPACEKNIFE_NO_BULK=1".to_owned());
+                    return false;
+                }
+                if !std::env::var_os("SPACEKNIFE_BULK_DIRS").is_some_and(|v| v == "1") {
+                    let _ = DIRS.state.compare_exchange(
+                        UNTESTED,
+                        NOT_ASKED,
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    );
+                }
+                true
+            }
+        }
+    }
+
+    /// One parsed record: the name (with its NUL) and, when the record can be used, its
+    /// attributes (None: fstatat it).
+    fn parse(rec: &[u8]) -> Result<(&CStr, Option<Meta>), String> {
+        if rec.len() < COMMON_END {
+            return Err(format!(
+                "a record of {} bytes, at least {COMMON_END} expected",
+                rec.len()
+            ));
+        }
+        let name_off = rd::<i32>(rec, AT_NAME) as isize;
+        let name_len = rd::<u32>(rec, AT_NAME + 4) as usize;
+        let start = AT_NAME as isize + name_off;
+        if start < COMMON_END as isize || name_len == 0 || start as usize + name_len > rec.len() {
+            return Err(format!(
+                "name at {start}, {name_len} bytes, in a record of {}",
+                rec.len()
+            ));
+        }
+        let start = start as usize;
+        let raw = &rec[start..start + name_len];
+        let name =
+            CStr::from_bytes_until_nul(raw).map_err(|_| format!("name without NUL: {raw:?}"))?;
+        let returned = rd::<u32>(rec, AT_RETURNED);
+        let returned_dir = rd::<u32>(rec, AT_RETURNED + 8);
+        let returned_file = rd::<u32>(rec, AT_RETURNED + 12);
+        let objtype = rd::<u32>(rec, AT_OBJTYPE);
+        let flags = rd::<u32>(rec, AT_FLAGS);
+        if rd::<u32>(rec, AT_ERROR) != 0 || returned & NEEDED != NEEDED {
+            return Ok((name, None));
+        }
+        let times = (
+            time(rec, AT_MODTIME),
+            time(rec, AT_CRTIME),
+            time(rec, AT_ACCTIME),
+        );
+        if objtype == VDIR {
+            // a mount point's or firmlink's fstatat describes what is on the other side
+            let usable = dirs_used()
+                && returned_dir & DIR == DIR
+                && start >= COMMON_END + DIR_LEN
+                && rd::<u32>(rec, COMMON_END + 4)
+                    & (DIR_MNTSTATUS_MNTPOINT | DIR_MNTSTATUS_TRIGGER)
+                    == 0
+                && flags & SF_FIRMLINK == 0;
+            if !usable {
+                return Ok((name, None));
+            }
+            let alloc = rd::<i64>(rec, COMMON_END + 8).max(0);
+            return Ok((
+                name,
+                Some(Meta {
+                    mode: libc::S_IFDIR as u32,
+                    dev: rd::<i32>(rec, AT_DEVID) as u64,
+                    size: 0, // a folder's row has no size of its own (fstatat's st_size is not read)
+                    alloc: (alloc + 511) / 512 * 512,
+                    mtime: times.0,
+                    btime: times.1,
+                    atime: times.2,
+                    ino: rd::<u64>(rec, AT_FILEID),
+                    // APFS gives a folder st_nlink = its entries + 2 (ATTR_DIR_LINKCOUNT counts only
+                    // hard links to it); a file system that counts otherwise fails the check
+                    nlink: rd::<u32>(rec, COMMON_END) as u64 + 2,
+                    flags,
+                }),
+            ));
+        }
+        if returned_file & FILE != FILE || start < COMMON_END + FILE_LEN {
+            return Ok((name, None));
+        }
+        let at = start - FILE_LEN; // the file attributes end where the name starts
+        let mode = match objtype {
+            VREG => libc::S_IFREG,
+            3 => libc::S_IFBLK,
+            4 => libc::S_IFCHR,
+            5 => libc::S_IFLNK,
+            6 => libc::S_IFSOCK,
+            7 => libc::S_IFIFO,
+            _ => return Ok((name, None)),
+        } as u32;
+        let alloc = rd::<i64>(rec, at + 4).max(0);
+        let meta = Meta {
+            mode,
+            dev: rd::<i32>(rec, AT_DEVID) as u64, // like st_dev (int32) as u64
+            size: rd::<i64>(rec, at + 12),
+            alloc: (alloc + 511) / 512 * 512, // st_blocks: the total allocation in 512-byte blocks
+            mtime: times.0,
+            btime: times.1,
+            atime: times.2,
+            ino: rd::<u64>(rec, AT_FILEID),
+            nlink: rd::<u32>(rec, at) as u64,
+            flags,
+        };
+        Ok((name, Some(meta)))
+    }
+
+    fn is_dir(m: &Meta) -> bool {
+        m.mode == libc::S_IFDIR as u32
+    }
+
+    /// The fields fstatat and getattrlistbulk must agree on (access times may move meanwhile; a
+    /// folder's size is not used).
+    fn same(a: &Meta, b: &Meta) -> bool {
+        let key = |m: &Meta| {
+            let size = if is_dir(m) { 0 } else { m.size };
+            (
+                m.mode, m.dev, size, m.alloc, m.mtime, m.btime, m.ino, m.nlink, m.flags,
+            )
+        };
+        key(a) == key(b)
+    }
+
+    /// Lists `dirfd` with getattrlistbulk: `each(name, meta)` per entry, meta None meaning "fstatat
+    /// it". Ok(false): nothing read, list it the other way (unsupported here, or turned off).
+    pub fn read(
+        dirfd: libc::c_int,
+        mut each: impl FnMut(&CStr, Option<Meta>),
+    ) -> Result<bool, i32> {
+        thread_local! {
+            static BUF: RefCell<Vec<u64>> = RefCell::new(vec![0u64; BUF_BYTES / 8]);
+        }
+        BUF.with_borrow_mut(|buf| {
+            let mut alist = AttrList {
+                bitmapcount: ATTR_BIT_MAP_COUNT,
+                reserved: 0,
+                commonattr: COMMON,
+                volattr: 0,
+                dirattr: if dirs_used() { DIR } else { 0 },
+                fileattr: FILE,
+                forkattr: 0,
+            };
+            let mut emitted = false;
+            let mut batch: Vec<(&CStr, Option<Meta>)> = Vec::new();
+            loop {
+                // SAFETY: alist and buf are valid for the call; buf holds BUF_BYTES bytes.
+                let n = unsafe {
+                    getattrlistbulk(
+                        dirfd,
+                        (&mut alist as *mut AttrList).cast(),
+                        buf.as_mut_ptr().cast(),
+                        BUF_BYTES,
+                        FSOPT_PACK_INVAL_ATTRS,
+                    )
+                };
+                if n < 0 {
+                    let e = errno();
+                    return if emitted { Err(e) } else { Ok(false) };
+                }
+                if n == 0 {
+                    return Ok(true);
+                }
+                // SAFETY: the kernel filled at most BUF_BYTES bytes of buf.
+                let bytes: &[u8] =
+                    unsafe { std::slice::from_raw_parts(buf.as_ptr().cast::<u8>(), BUF_BYTES) };
+                batch.clear();
+                let mut off = 0usize;
+                for _ in 0..n {
+                    if off + 4 > BUF_BYTES {
+                        return bail(emitted, "records past the buffer".to_owned());
+                    }
+                    let len = rd::<u32>(bytes, off) as usize;
+                    if len < 4 || off + len > BUF_BYTES {
+                        return bail(emitted, format!("a record length of {len}"));
+                    }
+                    match parse(&bytes[off..off + len]) {
+                        Ok(item) => batch.push(item),
+                        Err(why) => return bail(emitted, why),
+                    }
+                    off += len;
+                }
+                if FILES.get() == UNTESTED {
+                    if let Err(why) = check(dirfd, &batch, false, &FILES) {
+                        FILES.turn_off(why);
+                        if !emitted {
+                            return Ok(false);
+                        }
+                    }
+                }
+                if DIRS.get() == UNTESTED {
+                    if let Err(why) = check(dirfd, &batch, true, &DIRS) {
+                        DIRS.turn_off(why);
+                    }
+                }
+                let (files, dirs) = (FILES.get() != OFF, dirs_used());
+                if !files || !dirs {
+                    // turned off (here or by another thread's check): fstatat the rest
+                    for (_, meta) in batch.iter_mut() {
+                        if meta.as_ref().is_some_and(|m| !files || is_dir(m)) {
+                            *meta = None;
+                        }
+                    }
+                }
+                for (name, meta) in batch.drain(..) {
+                    each(name, meta);
+                }
+                emitted = true;
+            }
+        })
+    }
+
+    /// A record that cannot be read: turn the bulk path off; before anything was emitted the
+    /// folder is listed the other way, after it the listing fails (EIO).
+    fn bail(emitted: bool, why: String) -> Result<bool, i32> {
+        FILES.turn_off(why);
+        if emitted { Err(libc::EIO) } else { Ok(false) }
+    }
+
+    /// Compare up to CHECKS records of one kind (folders or the rest) with fstatat; once some
+    /// agree and none differs, `switch` trusts that kind (nothing to compare yet: the next batch
+    /// is checked).
+    fn check(
+        dirfd: libc::c_int,
+        batch: &[(&CStr, Option<Meta>)],
+        dirs: bool,
+        switch: &Switch,
+    ) -> Result<(), String> {
+        let mut checked = 0;
+        for (name, meta) in batch {
+            let Some(bulk) = meta else { continue };
+            if is_dir(bulk) != dirs {
+                continue;
+            }
+            let Some(stat) = stat_entry(dirfd, name) else {
+                continue;
+            };
+            if !same(bulk, &stat) {
+                return Err(format!("{name:?} differs: bulk {bulk:?}, fstatat {stat:?}"));
+            }
+            checked += 1;
+            if checked == CHECKS {
+                break;
+            }
+        }
+        if checked > 0 {
+            switch.trust();
+        }
+        Ok(())
+    }
+}
+
 #[cfg(all(
     not(target_os = "linux"),
     any(target_os = "macos", target_os = "ios", target_os = "freebsd")
@@ -242,6 +798,11 @@ unsafe fn errno_location() -> *mut libc::c_int {
 ))]
 unsafe fn errno_location() -> *mut libc::c_int {
     unsafe { libc::__errno_location() }
+}
+
+#[cfg(target_os = "macos")]
+pub fn bulk_state() -> String {
+    bulk::state()
 }
 
 /// Lists `path` into `arena` (worker._list_posix); subdirectories to descend go to `subdirs`.
@@ -267,6 +828,22 @@ pub fn list_dir(
     }
     let fd = Fd(fd);
     let base = arena.len();
+    #[cfg(target_os = "macos")]
+    {
+        if bulk::enabled() {
+            let listed = bulk::read(fd.0, |name, meta| match meta {
+                Some(m) => push_entry(Some(m), name.to_bytes(), path, root, base, arena, subdirs),
+                None => add_entry(fd.0, name, path, root, base, arena, subdirs),
+            })
+            .map_err(errno_message)?;
+            if listed {
+                return Ok(());
+            }
+            // getattrlistbulk moved the directory offset: read it again from the start
+            // SAFETY: plain call on our descriptor.
+            unsafe { libc::lseek(fd.0, 0, libc::SEEK_SET) };
+        }
+    }
     read_entries(&fd, |name| {
         add_entry(fd.0, name, path, root, base, arena, subdirs)
     })
@@ -289,6 +866,18 @@ mod tests {
         assert_eq!(escaped_code_points(b"\xff\xfe"), 2);
         assert_eq!(escaped_code_points(b"\xe4\xb8\xe4\xb8\xad"), 3);
         assert_eq!(escaped_code_points(b"\xed\xa0\x80"), 3);
+    }
+
+    #[test]
+    fn skips_exact_children_only() {
+        let skip = vec![b"/System/Volumes/Data".to_vec()];
+        assert!(is_skipped(&skip, b"/System/Volumes", b"Data"));
+        assert!(is_skipped(&skip, b"/System/Volumes/", b"Data"));
+        assert!(!is_skipped(&skip, b"/System/Volumes", b"Dat"));
+        assert!(!is_skipped(&skip, b"/System/Volumes", b"Data2"));
+        assert!(!is_skipped(&skip, b"/System", b"Volumes"));
+        assert!(!is_skipped(&[], b"/System/Volumes", b"Data"));
+        assert!(is_skipped(&[b"/x".to_vec()], b"/", b"x"));
     }
 
     #[test]

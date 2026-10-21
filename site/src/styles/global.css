@@ -392,14 +392,16 @@ p {
 /* the primary button matches the visitor's system (set before paint by the inline script) */
 .cta-windows,
 .cta-linux,
+.cta-mac,
 .cta-other {
   display: none;
 }
 
 html[data-os="windows"] .cta-windows,
 html[data-os="linux"] .cta-linux,
+html[data-os="mac"] .cta[data-mac="yes"] .cta-mac,
+html[data-os="mac"] .cta[data-mac="no"] .cta-other,
 html[data-os="other"] .cta-other,
-html[data-os="mac"] .cta-other,
 html[data-os="mobile"] .cta-other {
   display: inline-flex;
 }

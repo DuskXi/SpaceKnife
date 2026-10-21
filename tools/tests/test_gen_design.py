@@ -76,3 +76,36 @@ def test_generated_python_module_matches_tokens() -> None:
     assert TOKENS["treemap.class.video"] == "#E07A1F"
     assert TOKENS["layout.toolbar"] == 48
     assert TOKENS["font.family.ui"][0] == "Geist"
+    assert TOKENS["motion.duration.swap"] == 200
+    assert TOKENS["visual.flamePolar.holeRatio"] == 0.24
+
+
+def _luminance(color: str) -> float:
+    def channel(c: float) -> float:
+        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+
+    r, g_, b = (channel(int(color[i : i + 2], 16) / 255) for i in (1, 3, 5))
+    return 0.2126 * r + 0.7152 * g_ + 0.0722 * b
+
+
+def _contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_partition_fills_have_readable_labels() -> None:
+    tokens = {t.dotted: t.value for t in g.load_tokens()}
+    branch = [tokens[f"visual.branch.{slot}.{tier}"] for slot in range(1, 9) for tier in range(1, 5)]
+    assert len(set(branch)) == 32
+    rings = [tokens[f"visual.ring.{tier}"] for tier in range(1, 5)]
+    light, dark = tokens["treemap.label.light"], tokens["treemap.label.dark"]
+    # Labels take white or near-black, whichever contrasts more (UI-TM-19).
+    for fill in [*branch, tokens["visual.branch.neutral"], *rings]:
+        assert max(_contrast(fill, light), _contrast(fill, dark)) >= 4.5, fill
+    assert tokens["visual.center.bg"] == tokens["treemap.level.0.headerBg"]
+
+
+def test_visualization_icons() -> None:
+    _, icons = g.load_icons()
+    assert {"vizTreemap", "vizFlame", "vizFlamePolar"} <= set(icons)
+    assert (g.BUILD / "icons" / "viz-flame-polar.svg").exists()

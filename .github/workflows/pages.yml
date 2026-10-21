@@ -1,7 +1,8 @@
 # The website (site/, Astro) on GitHub Pages: https://spaceknife.kaltsit.dev/ (custom domain,
 # set in the repository's Pages settings; duskxi.github.io/SpaceKnife/ redirects there)
 # Rebuilt when the site, its screenshots or icons change, and when a release is published or edited
-# (the download buttons point at the newest release, read from the GitHub API at build time).
+# (the download buttons point at the newest release, read from the GitHub API at build time; a
+# release starts a rebuild on main, see from-main).
 name: Website
 
 on:
@@ -26,7 +27,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # A release runs this workflow on its tag, and the github-pages environment deploys from main
+  # only: rebuild from main instead (GITHUB_TOKEN may start a workflow_dispatch run).
+  from-main:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh workflow run pages.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   build:
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     env:
       ASTRO_TELEMETRY_DISABLED: "1"

@@ -1,10 +1,12 @@
 """Memory watchdog: when the backend holds far more than its scans account for, say what holds it.
 
 Every ``PERIOD`` seconds the private memory of the process is compared with what the scans need
-(node stores and name indexes). Beyond ``2 × accounted + 1.5 GiB`` a warning goes to the log
-panel and a breakdown to the log file: scans, views, compute pool, session outboxes and — with
-``SPACEKNIFE_MEMTRACE=1`` (tracemalloc, one frame) — the source lines holding the most memory.
-Reports repeat only after another 25 % of growth.
+(node stores and name indexes). Beyond ``2 × accounted + 1.5 GiB`` — plus the size of the largest
+scan closed in the last hour, which the C heap keeps for the next scan to reuse (docs/memory.md
+§8) — the heap is first asked to give back what it can; when that does not bring the process under
+the limit, a warning goes to the log panel and a breakdown to the log file: scans, views, compute
+pool, session outboxes and — with ``SPACEKNIFE_MEMTRACE=1`` (tracemalloc, one frame) — the source
+lines holding the most memory. Reports repeat only after another 25 % of growth.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+import time
 import tracemalloc
 from typing import TYPE_CHECKING
 
@@ -20,8 +23,9 @@ from loguru import logger
 from ..events import emit
 from ..filter.names import existing_index
 from ..i18n import tr
-from ..memory import process_memory
+from ..memory import process_memory, release
 from . import compute
+from .scans import CLOSED_KEEP_S
 
 if TYPE_CHECKING:
     from .app import Server
@@ -44,11 +48,19 @@ def accounted(server: Server) -> int:
     return total
 
 
+def retained(server: Server) -> int:
+    """What the C heap may still keep from scans closed in the last hour: about the largest of them
+    (the next scan reuses it; measured in docs/memory.md §8)."""
+    now = time.monotonic()
+    return max((size for when, size in server.scans.closed if now - when < CLOSED_KEEP_S), default=0)
+
+
 def report(server: Server) -> str:
     mem = process_memory()
     lines = [
         f"private {(mem.private or 0) / GiB:.2f} GiB, resident {(mem.resident or 0) / GiB:.2f} GiB, "
-        f"accounted {accounted(server) / GiB:.2f} GiB, threads {threading.active_count()}"
+        f"accounted {accounted(server) / GiB:.2f} GiB, retained after closed scans up to "
+        f"{retained(server) / GiB:.2f} GiB, threads {threading.active_count()}"
     ]
     for handle in list(server.scans.scans.values()):
         store = handle.store
@@ -80,8 +92,12 @@ async def watch(server: Server) -> None:
             private = process_memory().private
             if private is None:
                 continue
-            limit = 2 * accounted(server) + SLACK
+            limit = 2 * accounted(server) + SLACK + retained(server)
             if private <= limit or private <= last * 1.25:
+                continue
+            await asyncio.to_thread(release)  # freed but kept by the heap: give it back, then judge
+            private = process_memory().private
+            if private is None or private <= limit:
                 continue
             last = private
             text = await asyncio.to_thread(report, server) if tracemalloc.is_tracing() else report(server)
