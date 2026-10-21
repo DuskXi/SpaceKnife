@@ -4,9 +4,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
-import { type FileProbe, type InstallKind, installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapScript } from "./update";
+import { type FileProbe, type InstallKind, installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapLauncher, swapScript, swapScriptFile } from "./update";
 
 const none = () => false;
 const only = (...paths: string[]) => (path: string) => paths.includes(path);
@@ -304,5 +304,41 @@ describe("swapScript", () => {
     expect(readFileSync(join(app, "SpaceKnife.exe"), "utf8")).toBe("old");
     expect(readdirSync(join(app, "resources"))).toEqual(["old.txt"]);
     expect(readFileSync(p.log, "utf8")).toContain("kept the old version");
+  }, 60_000);
+});
+
+describe("starting the swap", () => {
+  it("writes a BOM on Windows only (PowerShell 5.1 reads UTF-8 without one as ANSI)", () => {
+    expect([...swapScriptFile("win32", "x").subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(swapScriptFile("linux", "x").toString("utf8")).toBe("x");
+  });
+
+  it("starts the Windows swap through a hidden PowerShell that it waits for", () => {
+    const how = swapLauncher("win32", "C:\\Users\\lenny\\Space Knife's\\update-0.4.0.ps1");
+    expect(how.cmd).toBe("powershell.exe");
+    expect(how.wait).toBe(true);
+    const command = how.args[how.args.indexOf("-Command") + 1]!;
+    expect(command).toContain("Start-Process -FilePath powershell.exe -WindowStyle Hidden");
+    expect(command).toContain(`-File "C:\\Users\\lenny\\Space Knife''s\\update-0.4.0.ps1"'`);
+    expect(swapLauncher("linux", "/tmp/x.sh")).toEqual({ cmd: "/bin/sh", args: ["/tmp/x.sh"], wait: false });
+  });
+
+  // for real: the script must still run once the starter (and the test's own process, here) is gone
+  it.runIf(process.platform === "win32")("runs the script after the starter is done, from a folder with Chinese in its name", async () => {
+    const root = mkdtempSync(join(tmpdir(), "sk-launch-"));
+    try {
+      const dir = join(root, "软件 it's");
+      mkdirSync(dir, { recursive: true });
+      const log = join(dir, "ran.log");
+      const script = join(dir, "update-0.4.0.ps1");
+      writeFileSync(script, swapScriptFile("win32", `Start-Sleep -Milliseconds 500\r\nAdd-Content -LiteralPath '${log.replace(/'/g, "''")}' -Value 'ran'\r\n`));
+      const how = swapLauncher("win32", script);
+      const code = await new Promise<number | null>((done) => spawn(how.cmd, how.args, { stdio: "ignore", windowsHide: true }).once("exit", done));
+      expect(code).toBe(0);
+      for (let i = 0; i < 100 && !existsSync(log); i++) await new Promise((r) => setTimeout(r, 200));
+      expect(readFileSync(log, "utf8")).toContain("ran");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }, 60_000);
 });

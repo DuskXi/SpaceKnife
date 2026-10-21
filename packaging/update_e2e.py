@@ -48,7 +48,13 @@ from websockets.sync.client import connect
 WIN = sys.platform == "win32"
 
 
+APP_LOG = Path(tempfile.gettempdir()) / f"sk-update-e2e-app-{os.getpid()}.log"
+
+
 def fail(message: str) -> NoReturn:
+    if APP_LOG.exists():  # what the app printed (main's "[update] …" lines, backend errors)
+        lines = APP_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        print("---- the app's output (last 80 lines)", *lines[-80:], "----", sep="\n", flush=True)
     raise SystemExit(f"FAIL {message}")
 
 
@@ -260,11 +266,16 @@ def restart_and_update(url: str, version: str) -> None:
         print(f"card: {card!r}", flush=True)
         with contextlib.suppress(Exception):  # the window goes away while it answers
             page.eval(f"{button}.click(), true")
+        with contextlib.suppress(Exception):  # still here after a while: the card says why
+            time.sleep(8)
+            card = page.eval("(document.querySelector('.update-card') || document.body).innerText")
+            print(f"after the click, still open: {card[:600]!r}", flush=True)
 
 
 def start_app(exe: Path, env: dict[str, str]) -> subprocess.Popen[bytes]:
     argv = [str(exe), "--remote-debugging-port=0"]
-    return subprocess.Popen(argv, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    out = APP_LOG.open("ab")
+    return subprocess.Popen(argv, env=env, stdout=out, stderr=subprocess.STDOUT)
 
 
 def app_env(feed: Feed, **extra: str) -> dict[str, str]:
@@ -321,6 +332,8 @@ def portable(archive: Path) -> None:
                 for member in src.getmembers():
                     fileobj = src.extractfile(member) if member.isfile() else None
                     member.name = top_new + member.name[len(top_old) :]
+                    if member.islnk() and member.linkname.startswith(top_old):
+                        member.linkname = top_new + member.linkname[len(top_old) :]
                     dst.addfile(member, fileobj)
                 note = tarfile.TarInfo(f"{top_new}/{marker}")
                 body = f"{newer}\n".encode()

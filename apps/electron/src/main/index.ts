@@ -14,7 +14,7 @@ import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
-import { installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapScript } from "./update";
+import { installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapLauncher, swapScript, swapScriptFile } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -291,12 +291,30 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     exe: process.execPath,
     log: join(updates, `update-${version}.log`),
   };
-  await writeFile(script, swapScript(platform, plan), "utf8");
-  return restartInto(() =>
-    platform === "win32"
-      ? launch("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", script])
-      : launch("/bin/sh", [script]),
-  );
+  await writeFile(script, swapScriptFile(platform, swapScript(platform, plan)));
+  const how = swapLauncher(platform, script);
+  return restartInto(() => (how.wait ? runToEnd(how.cmd, how.args) : launch(how.cmd, how.args)));
+}
+
+/** Run a hidden helper and wait until it is done (the starter of the Windows swap); fails on a
+ * non-zero exit or after 30 s. */
+function runToEnd(cmd: string, args: string[]): Promise<void> {
+  return new Promise((done, fail) => {
+    const child = spawn(cmd, args, { stdio: "ignore", windowsHide: true });
+    const timer = setTimeout(() => {
+      child.kill();
+      fail(new Error(`${cmd} did not finish`));
+    }, 30_000);
+    child.once("error", (err) => {
+      clearTimeout(timer);
+      fail(err);
+    });
+    child.once("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) done();
+      else fail(new Error(`${cmd} exited with ${code}`));
+    });
+  });
 }
 
 /** Unpack a portable archive (zip on Windows, tar.gz on Linux) with the system's tar: Windows 10 1803

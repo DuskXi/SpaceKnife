@@ -161,6 +161,27 @@ export interface SwapPlan {
  *  moves the new ones in, undoes both when a step fails, and starts the app with --updated (the new
  *  version) or without (the old one). The backend removes `previous`, `staged`, the script and its log
  *  once the new version runs (spaceknife.update.clean_updates). */
+/** The script file's bytes: Windows PowerShell 5.1 reads a .ps1 without a byte order mark in the
+ * ANSI code page, so the paths in it (a portable copy under 「D:\\软件」) need UTF-8 with a BOM. */
+export function swapScriptFile(platform: "win32" | "linux", text: string): Buffer {
+  return Buffer.from(platform === "win32" ? `\ufeff${text}` : text, "utf8");
+}
+
+/** How to start the swap so it outlives the app without a window. On Windows a detached
+ * powershell.exe (no console) never runs its script, and an attached one dies with the app (libuv's
+ * job object). So an attached, hidden PowerShell starts the real one with Start-Process: that one
+ * leaves the job (silent breakaway) and outlives the app. `wait`: the app quits only once the starter
+ * is done. On Linux the shell runs detached. */
+export function swapLauncher(platform: "win32" | "linux", script: string): { cmd: string; args: string[]; wait: boolean } {
+  if (platform !== "win32") return { cmd: "/bin/sh", args: [script], wait: false };
+  // Start-Process joins an argument array with spaces and no quotes, so the arguments go as one
+  // string, the script's path in double quotes (a path can't hold one); the whole string in single
+  // quotes for the starter's -Command
+  const inner = `-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${script}"`;
+  const start = `Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList '${inner.replace(/'/g, "''")}'`;
+  return { cmd: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", start], wait: true };
+}
+
 export function swapScript(platform: "win32" | "linux", plan: SwapPlan): string {
   return platform === "win32" ? powershellSwap(plan) : shSwap(plan);
 }
@@ -186,6 +207,12 @@ function powershellSwap(p: SwapPlan): string {
     "}",
     `Log 'waiting for SpaceKnife (${p.pid}) to quit'`,
     `try { Wait-Process -Id ${p.pid} -Timeout 60 -ErrorAction Stop } catch { }`,
+    "# the new version must be complete before anything is moved",
+    "if (-not (Test-Path -LiteralPath (Join-Path $New (Split-Path -Leaf $Exe)) -PathType Leaf)) {",
+    "  Log 'the new version is incomplete: kept the old version'",
+    "  Start-Process -FilePath $Exe",
+    "  exit 1",
+    "}",
     "$ok = $false",
     "for ($i = 0; $i -lt 60 -and -not $ok; $i++) {",
     "  try { Move-Entries $App $Old; $ok = $true } catch { Log ('busy: ' + $_.Exception.Message); Start-Sleep -Milliseconds 500 }",
@@ -220,6 +247,7 @@ function shSwap(p: SwapPlan): string {
     `LOG=${shQuote(p.log)}`,
     `log() { printf '%s %s\\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG"; }`,
     "move_entries() {",
+    '  [ -d "$1" ] || return 1',
     '  mkdir -p "$2" || return 1',
     '  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do',
     '    [ -e "$e" ] || [ -L "$e" ] || continue',
@@ -230,6 +258,12 @@ function shSwap(p: SwapPlan): string {
     `log 'waiting for SpaceKnife (${p.pid}) to quit'`,
     "n=0",
     `while kill -0 ${p.pid} 2>/dev/null && [ $n -lt 300 ]; do sleep 0.2; n=$((n + 1)); done`,
+    "# the new version must be complete before anything is moved",
+    'if [ ! -f "$NEW/$(basename "$EXE")" ]; then',
+    '  log "the new version is incomplete: kept the old version"',
+    '  nohup "$EXE" >/dev/null 2>&1 &',
+    "  exit 1",
+    "fi",
     "ok=0",
     'if move_entries "$APP" "$OLD"; then',
     '  if move_entries "$NEW" "$APP"; then ok=1; else log "could not move the new files in"; move_entries "$APP" "$NEW"; fi',
