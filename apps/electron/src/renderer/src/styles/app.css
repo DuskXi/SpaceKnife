@@ -1069,6 +1069,15 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .mc-linkmeter { display: inline-flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; border-radius: 13px; background: var(--sk-color-bg-raised); }
 .mc-linkmeter .meter { width: 72px; height: 4px; }
 .mc-growth { display: flex; align-items: center; gap: 8px; }
+/* a disk's own record and the system's counters: a small read / write table, then health chips */
+.mc-record { display: flex; flex-direction: column; gap: 8px; }
+.mc-io { width: 100%; border-collapse: collapse; font-size: 12px; }
+.mc-io th, .mc-io td { padding: 3px 0; text-align: right; white-space: nowrap; }
+.mc-io thead th { font-weight: 500; font-size: 11px; color: var(--sk-color-text-tertiary); }
+.mc-io tbody th { text-align: left; font-weight: 400; color: var(--sk-color-text-secondary); }
+.mc-io td { font-family: var(--sk-font-family-mono); font-size: 12px; color: var(--sk-color-text-primary); }
+.mc-io tr + tr th, .mc-io tr + tr td { border-top: 1px solid var(--sk-color-line-subtle); }
+.mc-chip.warn, .mc-chip.warn svg { color: var(--sk-color-status-warning); }
 .mc-full { color: var(--sk-color-status-warning); }
 @media (max-width: 1000px) {
   .mc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

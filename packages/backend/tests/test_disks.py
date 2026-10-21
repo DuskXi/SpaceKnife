@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import posixpath
 import sys
+from datetime import UTC, datetime
 
 import pytest
 
 from spaceknife.disks import darwin as mac
-from spaceknife.disks import links, probe
+from spaceknife.disks import health, links, probe
 from spaceknife.disks.linux import probe as linux_probe
 from spaceknife.scan.volume import VolumeInfo, list_volumes
 from spaceknife_protocol.machine import DiskLink
@@ -407,3 +408,119 @@ def test_probe_this_machine() -> None:
     if sys.platform == "win32":
         assert all(d.id == f"PhysicalDrive{d.number}" for d in found.disks)
         assert sum(d.system for d in found.disks) <= 1
+
+
+# ---------------------------------------------------------------- what disks record about themselves
+
+
+def nvme_log(**fields: int) -> bytes:
+    """A SMART / Health log page with the given fields at their offsets."""
+    b = bytearray(512)
+    b[0] = fields.get("crit", 0)
+    b[1:3] = fields.get("kelvin", 320).to_bytes(2, "little")
+    b[3], b[4], b[5] = fields.get("spare", 100), fields.get("threshold", 10), fields.get("used", 9)
+    for offset, key in (
+        (32, "units_read"),
+        (48, "units_written"),
+        (112, "cycles"),
+        (128, "hours"),
+        (144, "unsafe"),
+        (160, "media"),
+    ):
+        b[offset : offset + 16] = fields.get(key, 0).to_bytes(16, "little")
+    return bytes(b)
+
+
+def test_nvme_health_log() -> None:
+    h = health.nvme_health(
+        nvme_log(units_read=206_874_470, units_written=493_120_475, cycles=686, hours=8070, unsafe=106)
+    )
+    assert h is not None and h.source == "nvme"
+    assert (h.temperature_c, h.percentage_used, h.available_spare, h.spare_threshold) == (47, 9, 100, 10)
+    assert h.read_bytes == 206_874_470 * 512_000 and h.written_bytes == 493_120_475 * 512_000
+    assert (h.power_cycles, h.power_on_hours, h.unsafe_shutdowns, h.media_errors, h.critical_warning) == (
+        686,
+        8070,
+        106,
+        0,
+        0,
+    )
+    assert health.nvme_health(bytes(512)) is None  # an empty answer
+    assert health.nvme_health(b"\x01" * 100) is None  # a short one
+    assert health.nvme_health(nvme_log(kelvin=0)).temperature_c is None  # type: ignore[union-attr]
+
+
+def qword(value: int, valid: bool = True) -> bytes:
+    return (value | (1 << 63) | ((1 << 62) if valid else 0)).to_bytes(8, "little")
+
+
+def test_ata_device_statistics() -> None:
+    general = bytearray(512)
+    general[0x08:0x10] = qword(2859)
+    general[0x10:0x18] = qword(30322)
+    general[0x18:0x20] = qword(25_974_947_733)
+    general[0x28:0x30] = qword(78_116_006_871, valid=False)  # not valid: left out
+    temps = bytearray(512)
+    temps[0x08:0x10] = qword(24)
+    h = health.ata_statistics(bytes(general), bytes(temps))
+    assert h is not None and h.source == "ata"
+    assert (h.power_cycles, h.power_on_hours, h.temperature_c) == (2859, 30322, 24)
+    assert h.written_bytes == 25_974_947_733 * 512 and h.read_bytes is None
+    below = bytearray(temps)
+    below[0x08:0x10] = qword(0xF6)  # −10 °C, a signed byte
+    assert health.ata_statistics(bytes(general), bytes(below)).temperature_c == -10  # type: ignore[union-attr]
+    assert health.ata_statistics(bytes(512), None) is None  # nothing supported
+
+
+def test_ata_sector_size() -> None:
+    words = bytearray(512)
+    assert health.ata_sector_size(bytes(words)) == 512
+    words[212:214] = (0x4000 | (1 << 12)).to_bytes(2, "little")  # word 106: logical sector > 256 words
+    words[234:238] = (2048).to_bytes(4, "little")  # words 117-118: 2048 words
+    assert health.ata_sector_size(bytes(words)) == 4096
+    assert health.ata_sector_size(b"") == 512
+
+
+def test_linux_stat_and_boot_time() -> None:
+    line = (
+        "  305918    11872 20453866   180210   152731   149412 26389336  2209360        0   350784  2397856"
+    )
+    assert health.linux_stat(line) == (20453866 * 512, 26389336 * 512)
+    assert health.linux_stat("") is None and health.linux_stat("a b c d e f g") is None
+    boot = health.boot_time()
+    assert boot is None or boot < datetime.now(UTC)
+
+
+def test_linux_health_and_counters(machine: FakeFs) -> None:
+    nvme_ctrl = "/sys/devices/pci0000:00/0000:00:1d.0/0000:3d:00.0/nvme/nvme0"
+    machine.file(f"{nvme_ctrl}/hwmon3/temp1_input", "47850")
+    machine.file(machine.real("/sys/block/nvme0n1") + "/stat", "1 0 2000 0 1 0 4000 0 0 0 0")
+    sda_dev = machine.real("/sys/block/sda/device")
+    machine.file(f"{sda_dev}/hwmon/hwmon5/temp1_input", "31000")
+    found = linux_probe([], fs=machine)  # type: ignore[arg-type]
+    by_id = {d.id: d for d in found.disks}
+    nvme, sata, reader = by_id["nvme0n1"], by_id["sda"], by_id["sdc"]
+    assert nvme.health is not None and (nvme.health.source, nvme.health.temperature_c) == ("nvme", 48)
+    assert nvme.health.written_bytes is None and nvme.health_note == "needs_admin"  # lifetime: root only
+    assert nvme.io is not None and (nvme.io.read_bytes, nvme.io.written_bytes) == (2000 * 512, 4000 * 512)
+    assert sata.health is not None and sata.health.temperature_c == 31
+    assert by_id["sdb"].health is None and by_id["sdb"].health_note == "needs_admin"  # no drivetemp
+    assert reader.health is None and reader.health_note == "usb"
+
+
+def test_mac_io_counters() -> None:
+    tree = [
+        {
+            "IOObjectClass": "IOBlockStorageDriver",
+            "Statistics": {"Bytes (Read)": 4_000_000, "Bytes (Write)": 9_000_000, "Operations (Read)": 10},
+            "IORegistryEntryChildren": [
+                {
+                    "BSD Name": "disk0",
+                    "IORegistryEntryChildren": [{"BSD Name": "disk0s1"}, {"BSD Name": "disk0s2"}],
+                }
+            ],
+        },
+        {"IOObjectClass": "IOBlockStorageDriver", "Statistics": {"Bytes (Read)": "n/a"}},
+    ]
+    assert mac.io_counters(tree) == {"disk0": (4_000_000, 9_000_000)}
+    assert mac.io_counters(None) == {}

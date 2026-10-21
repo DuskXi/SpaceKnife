@@ -28,6 +28,8 @@ import {
   linkNotes,
   linkShare,
   linkText,
+  healthNoteText,
+  powerOnText,
   orderedDisks,
   showMap,
   summary,
@@ -271,6 +273,7 @@ function Disk({ disk, data }: { disk: PhysicalDisk; data: MachineDisks }) {
             {n.text}
           </div>
         ))}
+      {!empty && <DiskRecord disk={disk} />}
       {showMap(map) && (
         <div className="mc-map" aria-hidden="true">
           {map.map((s) => (
@@ -304,11 +307,118 @@ function Disk({ disk, data }: { disk: PhysicalDisk; data: MachineDisks }) {
           <dd className="mono">{disk.firmware || "—"}</dd>
           <dt>TRIM</dt>
           <dd>{disk.trim == null ? "—" : disk.trim ? t("支持") : t("不支持")}</dd>
+          {disk.health && (
+            <>
+              <dt>{t("健康记录")}</dt>
+              <dd>{disk.health.source === "nvme" ? t("NVMe SMART / 健康日志") : t("ATA 设备统计日志")}</dd>
+              {disk.health.power_on_hours != null && (
+                <>
+                  <dt>{t("通电时间")}</dt>
+                  <dd>{t("{n} 小时", { n: fmtInt(disk.health.power_on_hours) })}</dd>
+                </>
+              )}
+              {disk.health.power_cycles != null && (
+                <>
+                  <dt>{t("通电次数")}</dt>
+                  <dd>{fmtInt(disk.health.power_cycles)}</dd>
+                </>
+              )}
+              {disk.health.unsafe_shutdowns != null && (
+                <>
+                  <dt>{t("不安全关机")}</dt>
+                  <dd>{fmtInt(disk.health.unsafe_shutdowns)}</dd>
+                </>
+              )}
+              {disk.health.media_errors != null && (
+                <>
+                  <dt>{t("介质错误")}</dt>
+                  <dd>{fmtInt(disk.health.media_errors)}</dd>
+                </>
+              )}
+              {disk.health.available_spare != null && (
+                <>
+                  <dt>{t("备用块")}</dt>
+                  <dd>{t("{pct}（低于 {low} 时报警）", { pct: `${disk.health.available_spare}%`, low: `${disk.health.spare_threshold ?? 0}%` })}</dd>
+                </>
+              )}
+            </>
+          )}
           <dt>{t("系统名称")}</dt>
           <dd className="mono">{disk.id}</dd>
         </dl>
       </details>
     </section>
+  );
+}
+
+/** What the disk records about itself (lifetime reads and writes, temperature, power-on time,
+ * wear) and the system's counters since it started; why the disk's own record is missing, when it is. */
+function DiskRecord({ disk }: { disk: PhysicalDisk }) {
+  const h = disk.health;
+  const io = disk.io;
+  const lifetime = !!h && (h.read_bytes != null || h.written_bytes != null);
+  const note = healthNoteText(disk.health_note);
+  const chips = !!h && (h.temperature_c != null || h.power_on_hours != null || h.percentage_used != null);
+  if (!lifetime && !io && !chips && !note) return null;
+  const size = (b: number | null | undefined) => (b == null ? "—" : fmtSize(b, true));
+  return (
+    <div className="mc-record">
+      {(lifetime || io) && (
+        <table className="mc-io">
+          <thead>
+            <tr>
+              <th />
+              <th>{t("读取")}</th>
+              <th>{t("写入")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lifetime && h && (
+              <tr title={t("磁盘自己记录的整个寿命里的读写量")}>
+                <th>{t("累计")}</th>
+                <td>{size(h.read_bytes)}</td>
+                <td>{size(h.written_bytes)}</td>
+              </tr>
+            )}
+            {io && (
+              <tr title={io.since ? t("系统 {when} 启动以来的读写量", { when: fmtDateTime(seconds(io.since)) }) : t("系统启动以来的读写量")}>
+                <th>{t("开机以来")}</th>
+                <td>{size(io.read_bytes)}</td>
+                <td>{size(io.written_bytes)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
+      {chips && h && (
+        <div className="mc-link">
+          {h.temperature_c != null && (
+            <span className={`mc-chip${h.temperature_c >= 70 ? " warn" : ""}`} title={t("温度")}>
+              <Icon name="thermometer" size={12} />
+              {h.temperature_c} °C
+            </span>
+          )}
+          {h.power_on_hours != null && (
+            <span className="mc-chip" title={t("{n} 小时", { n: fmtInt(h.power_on_hours) })}>
+              <Icon name="clock" size={12} />
+              {t("通电 {time}", { time: powerOnText(h.power_on_hours) })}
+            </span>
+          )}
+          {h.percentage_used != null && (
+            <span className="mc-linkmeter" title={t("写入寿命已用掉的比例（厂商的估计，可以超过 100%）")}>
+              <Meter share={Math.min(1, h.percentage_used / 100)} tone={h.percentage_used >= 90 ? "warn" : "muted"} />
+              <span className="small muted">{t("寿命已用 {pct}", { pct: `${h.percentage_used}%` })}</span>
+            </span>
+          )}
+        </div>
+      )}
+      {note && (
+        <div className="mc-note">
+          <Icon name="info" size={13} />
+          {note}
+        </div>
+      )}
+    </div>
   );
 }
 

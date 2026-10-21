@@ -1528,6 +1528,197 @@
       "title": "Crumb",
       "type": "object"
     },
+    "DiskHealth": {
+      "description": "What the disk records about itself: the NVMe SMART / Health log (log page 02h) or the ATA\nDevice Statistics log (04h). Fields the disk doesn't keep are None.",
+      "properties": {
+        "available_spare": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: spare blocks left, %",
+          "title": "Available Spare"
+        },
+        "critical_warning": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: critical warning bits, 0 = none",
+          "title": "Critical Warning"
+        },
+        "media_errors": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: unrecovered data integrity errors",
+          "title": "Media Errors"
+        },
+        "percentage_used": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: the share of its rated endurance used, the vendor's estimate (can pass 100)",
+          "title": "Percentage Used"
+        },
+        "power_cycles": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Cycles"
+        },
+        "power_on_hours": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power On Hours"
+        },
+        "read_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Read over the disk's life",
+          "title": "Read Bytes"
+        },
+        "source": {
+          "enum": [
+            "nvme",
+            "ata"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "spare_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: the spare % below which it warns",
+          "title": "Spare Threshold"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Now, in °C",
+          "title": "Temperature C"
+        },
+        "unsafe_shutdowns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unsafe Shutdowns"
+        },
+        "written_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Written over the disk's life",
+          "title": "Written Bytes"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "DiskHealth",
+      "type": "object"
+    },
+    "DiskIo": {
+      "description": "Read and written since the system started (the operating system's counters).",
+      "properties": {
+        "read_bytes": {
+          "title": "Read Bytes",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the counters started: the system's boot",
+          "title": "Since"
+        },
+        "written_bytes": {
+          "title": "Written Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "read_bytes",
+        "written_bytes"
+      ],
+      "title": "DiskIo",
+      "type": "object"
+    },
     "DiskLink": {
       "description": "A link: the negotiated rate and, when the system tells it, the most the device supports.",
       "properties": {
@@ -4498,6 +4689,31 @@
           "title": "Firmware",
           "type": "string"
         },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskHealth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the disk records about itself"
+        },
+        "health_note": {
+          "default": "",
+          "description": "Why `health` is missing or partial: behind a USB bridge that doesn't pass it on, the disk keeps no such log, the system needs administrator rights for it, or it has no way to it",
+          "enum": [
+            "",
+            "usb",
+            "unsupported",
+            "needs_admin",
+            "unavailable"
+          ],
+          "title": "Health Note",
+          "type": "string"
+        },
         "id": {
           "description": "The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS)",
           "title": "Id",
@@ -4521,6 +4737,18 @@
           ],
           "title": "Interface",
           "type": "string"
+        },
+        "io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskIo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Read and written since the system started"
         },
         "link": {
           "anyOf": [

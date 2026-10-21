@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "8daf3bc03a37415f";
+export const SCHEMA_HASH = "a391c4aa859bb27c";
 
 export interface AgeCond {
   end: number;
@@ -345,6 +345,41 @@ export interface Crumb {
   key: number;
   /** Folder name; 'small:N' / 'more:N' for an aggregate block */
   label: string;
+}
+
+/**
+ * What the disk records about itself: the NVMe SMART / Health log (log page 02h) or the ATA
+ * Device Statistics log (04h). Fields the disk doesn't keep are None.
+ */
+export interface DiskHealth {
+  /** NVMe: spare blocks left, % */
+  available_spare: number | null;
+  /** NVMe: critical warning bits, 0 = none */
+  critical_warning: number | null;
+  /** NVMe: unrecovered data integrity errors */
+  media_errors: number | null;
+  /** NVMe: the share of its rated endurance used, the vendor's estimate (can pass 100) */
+  percentage_used: number | null;
+  power_cycles: number | null;
+  power_on_hours: number | null;
+  /** Read over the disk's life */
+  read_bytes: number | null;
+  source: "nvme" | "ata";
+  /** NVMe: the spare % below which it warns */
+  spare_threshold: number | null;
+  /** Now, in °C */
+  temperature_c: number | null;
+  unsafe_shutdowns: number | null;
+  /** Written over the disk's life */
+  written_bytes: number | null;
+}
+
+/** Read and written since the system started (the operating system's counters). */
+export interface DiskIo {
+  read_bytes: number;
+  /** When the counters started: the system's boot */
+  since: string | null;
+  written_bytes: number;
 }
 
 /** A link: the negotiated rate and, when the system tells it, the most the device supports. */
@@ -1006,9 +1041,15 @@ export interface PhysicalDisk {
   /** The PCIe link of the controller a SATA disk hangs on, when the system tells it: an add-in card's lanes can be slower than the disk's SATA link */
   controller_link: DiskLink | null;
   firmware: string;
+  /** What the disk records about itself */
+  health: DiskHealth | null;
+  /** Why `health` is missing or partial: behind a USB bridge that doesn't pass it on, the disk keeps no such log, the system needs administrator rights for it, or it has no way to it */
+  health_note: "" | "usb" | "unsupported" | "needs_admin" | "unavailable";
   /** The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS) */
   id: string;
   interface: "nvme" | "sata" | "sas" | "scsi" | "ata" | "usb" | "sd" | "thunderbolt" | "virtual" | "raid" | "other" | "unknown";
+  /** Read and written since the system started */
+  io: DiskIo | null;
   /** The disk's own link: PCIe (NVMe), SATA or USB */
   link: DiskLink | null;
   media: "nvme_ssd" | "sata_ssd" | "ssd" | "hdd" | "usb_hdd" | "usb_ssd" | "usb_flash" | "sd_card" | "network" | "virtual" | "unknown";

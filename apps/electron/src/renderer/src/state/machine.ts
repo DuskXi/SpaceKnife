@@ -389,7 +389,50 @@ export function findings(data: MachineDisks, now = Date.now() / 1000): Finding[]
   for (const d of data.disks) {
     if (d.size == null) continue;
     for (const n of linkNotes(d)) out.push({ level: n.warn ? "warn" : "info", text: `${diskName(d)}${sep}${n.text}` });
+    out.push(...healthFindings(d));
     if (d.trim === false && SSD.includes(d.media)) out.push({ level: "info", text: t("{disk} 不支持 TRIM：长期写入后可能变慢", { disk: diskName(d) }) });
   }
   return [...out.filter((f) => f.level === "warn"), ...out.filter((f) => f.level === "info")];
+}
+
+// ------------------------------------------------------------------ what disks record about themselves
+
+/** Why a disk shows no record of its own (or only part of it); "" when there's nothing to say. */
+export function healthNoteText(note: PhysicalDisk["health_note"]): string {
+  switch (note) {
+    case "usb":
+      return t("USB 桥接没有把磁盘自己的记录传过来");
+    case "unsupported":
+      return t("这块盘没有提供不需要管理员权限就能读的健康记录");
+    case "needs_admin":
+      return t("磁盘自己记录的累计读写要管理员权限才能读");
+    case "unavailable":
+      return t("这个系统读不到磁盘自己的健康记录");
+    default:
+      return "";
+  }
+}
+
+/** Power-on time in words: hours under two days, else days. */
+export function powerOnText(hours: number): string {
+  return hours < 48 ? t("{n} 小时", { n: hours }) : t("{n} 天", { n: Math.floor(hours / 24).toLocaleString("en-US") });
+}
+
+/** What a disk's own record says that is worth knowing: a critical warning, media errors, wear,
+ * spare blocks running out, heat. */
+export function healthFindings(d: PhysicalDisk): Finding[] {
+  const h = d.health;
+  if (!h) return [];
+  const out: Finding[] = [];
+  const disk = diskName(d);
+  if (h.critical_warning) out.push({ level: "warn", text: t("{disk} 报告了严重警告", { disk }) });
+  if (h.media_errors) out.push({ level: "warn", text: t("{disk} 记录了 {n} 个介质错误", { disk, n: h.media_errors }) });
+  if (h.percentage_used != null && h.percentage_used >= 70) {
+    out.push({ level: h.percentage_used >= 90 ? "warn" : "info", text: t("{disk} 已用掉 {pct} 的写入寿命", { disk, pct: `${h.percentage_used}%` }) });
+  }
+  if (h.available_spare != null && h.spare_threshold && h.available_spare <= h.spare_threshold) {
+    out.push({ level: "warn", text: t("{disk} 的备用块只剩 {pct}", { disk, pct: `${h.available_spare}%` }) });
+  }
+  if (h.temperature_c != null && h.temperature_c >= 70) out.push({ level: "info", text: t("{disk} 现在 {n} °C，偏热", { disk, n: h.temperature_c }) });
+  return out;
 }

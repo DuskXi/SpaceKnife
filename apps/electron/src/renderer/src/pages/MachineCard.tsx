@@ -24,7 +24,7 @@ export function MachineCard() {
       <button className="mcard" onClick={openMachineTab} aria-label={t("本机磁盘")}>
         <span className="mcard-head">
           <span className="mcard-icon">
-            <Icon name="gauge" size={16} />
+            <Icon name="diskGauge" size={16} />
           </span>
           <span className="mcard-title">{t("本机磁盘")}</span>
           <Icon name="chevronRight" size={14} />
@@ -43,7 +43,7 @@ export function MachineCard() {
     <button className="mcard" onClick={openMachineTab} title={t("每块盘的类型、接口与速率，以及盘上的卷")}>
       <span className="mcard-head">
         <span className="mcard-icon">
-          <Icon name="gauge" size={16} />
+          <Icon name="diskGauge" size={16} />
         </span>
         <span className="mcard-title">{t("本机磁盘")}</span>
         {found.length > 0 && (

@@ -397,7 +397,7 @@ def _registry() -> tuple[Command, ...]:
         C(
             "app.disks",
             "本机磁盘",
-            "drive",
+            "diskGauge",
             (),
             ("disks", "drives", "hardware", "ssd", "nvme", "sata", "usb", "pcie"),
         ),

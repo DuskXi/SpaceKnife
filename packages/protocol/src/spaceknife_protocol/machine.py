@@ -63,6 +63,38 @@ class DiskPart(Payload):
     bytes: int | None = Field(default=None, description="How much of the disk it takes; None when not known")
 
 
+class DiskHealth(Payload):
+    """What the disk records about itself: the NVMe SMART / Health log (log page 02h) or the ATA
+    Device Statistics log (04h). Fields the disk doesn't keep are None."""
+
+    source: Literal["nvme", "ata"]
+    temperature_c: int | None = Field(default=None, description="Now, in °C")
+    power_on_hours: int | None = None
+    power_cycles: int | None = None
+    read_bytes: int | None = Field(default=None, description="Read over the disk's life")
+    written_bytes: int | None = Field(default=None, description="Written over the disk's life")
+    percentage_used: int | None = Field(
+        default=None,
+        description="NVMe: the share of its rated endurance used, the vendor's estimate (can pass 100)",
+    )
+    available_spare: int | None = Field(default=None, description="NVMe: spare blocks left, %")
+    spare_threshold: int | None = Field(default=None, description="NVMe: the spare % below which it warns")
+    unsafe_shutdowns: int | None = None
+    media_errors: int | None = Field(default=None, description="NVMe: unrecovered data integrity errors")
+    critical_warning: int | None = Field(default=None, description="NVMe: critical warning bits, 0 = none")
+
+
+HealthNote = Literal["", "usb", "unsupported", "needs_admin", "unavailable"]
+
+
+class DiskIo(Payload):
+    """Read and written since the system started (the operating system's counters)."""
+
+    read_bytes: int
+    written_bytes: int
+    since: datetime | None = Field(default=None, description="When the counters started: the system's boot")
+
+
 class PhysicalDisk(Payload):
     id: str = Field(
         description="The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS)"
@@ -91,6 +123,13 @@ class PhysicalDisk(Payload):
     parts: list[DiskPart] = Field(
         default_factory=list, description="The volumes on it, in disk order when known"
     )
+    health: DiskHealth | None = Field(default=None, description="What the disk records about itself")
+    health_note: HealthNote = Field(
+        default="",
+        description="Why `health` is missing or partial: behind a USB bridge that doesn't pass it on, the "
+        "disk keeps no such log, the system needs administrator rights for it, or it has no way to it",
+    )
+    io: DiskIo | None = Field(default=None, description="Read and written since the system started")
 
 
 class FolderStat(Payload):
@@ -147,10 +186,13 @@ class MachineDisks(Payload):
 
 
 __all__ = [
+    "DiskHealth",
     "DiskInterface",
+    "DiskIo",
     "DiskLink",
     "DiskPart",
     "FolderStat",
+    "HealthNote",
     "LinkKind",
     "MachineDisks",
     "PhysicalDisk",

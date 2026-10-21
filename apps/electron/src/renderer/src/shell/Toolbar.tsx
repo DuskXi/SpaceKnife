@@ -89,7 +89,7 @@ export function Toolbar() {
       ) : !scanTab ? (
         <nav className="crumbs" aria-label={t("当前位置")}>
           <span className="crumb-cur">
-            <Icon name="drive" />
+            <Icon name={tab.kind === "machine" ? "diskGauge" : "drive"} />
             {tab.kind === "machine" ? t("本机磁盘") : t("新扫描")}
           </span>
         </nav>

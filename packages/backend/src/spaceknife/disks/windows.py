@@ -6,8 +6,10 @@ sector is read):
 - ``IOCTL_STORAGE_QUERY_PROPERTY``: the device descriptor (model, serial, bus, removable), seek
   penalty (rotational), TRIM, and the protocol-specific data: ATA IDENTIFY (SATA speeds, words 76
   and 77) or the NVMe Identify Controller (serial, model, firmware).
+- The protocol-specific data also carries what the disk records about itself: the NVMe SMART /
+  Health log (page 02h) and the ATA Device Statistics log (04h, pages 01h and 05h).
 - ``IOCTL_DISK_GET_DRIVE_GEOMETRY_EX``: the size; ``IOCTL_STORAGE_GET_DEVICE_NUMBER``: the disk
-  number of Disk Management.
+  number of Disk Management; ``IOCTL_DISK_PERFORMANCE``: bytes read and written since the boot.
 - The device tree (SetupAPI / CfgMgr) above the disk: the PCIe link of an NVMe drive's controller,
   or of the add-in controller a SATA disk hangs on (DEVPKEY_PciDevice_*Link*), and for a USB disk
   the hub's connection query (``IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX(_V2)``).
@@ -21,16 +23,18 @@ import os
 import uuid
 from collections.abc import Sequence
 from ctypes import wintypes
+from datetime import datetime
 from functools import cache
 from typing import Any
 
 from loguru import logger
 
-from spaceknife_protocol.machine import DiskInterface, DiskLink, PhysicalDisk
+from spaceknife_protocol.machine import DiskHealth, DiskInterface, DiskIo, DiskLink, HealthNote, PhysicalDisk
 
 from ..scan.media import classify, system_mount
 from ..scan.volume import VolumeInfo
 from . import Probe
+from .health import ata_sector_size, ata_statistics, boot_time, nvme_health
 from .links import pcie, pcie_gen_code, sata_identify, usb_windows
 
 # STORAGE_BUS_TYPE (winioctl.h) -> interface
@@ -62,6 +66,7 @@ _MEDIA_BUS = {
 IOCTL_STORAGE_QUERY_PROPERTY = 0x2D1400
 IOCTL_STORAGE_GET_DEVICE_NUMBER = 0x2D1080
 IOCTL_DISK_GET_DRIVE_GEOMETRY_EX = 0x700A0
+IOCTL_DISK_PERFORMANCE = 0x70020
 IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS = 0x560000
 IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX = 0x220448
 IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX_V2 = 0x22045C
@@ -230,11 +235,14 @@ def _text(b: bytes, at: int) -> str:
     return b[at : end if end >= 0 else len(b)].decode("ascii", "replace").strip()
 
 
-def _protocol_data(h: int, protocol: int, data_type: int, value: int, length: int) -> bytes | None:
+def _protocol_data(
+    h: int, protocol: int, data_type: int, value: int, length: int, sub: int = 0
+) -> bytes | None:
     """StorageDeviceProtocolSpecificProperty: STORAGE_PROTOCOL_SPECIFIC_DATA (40 bytes) follows the
     query's two DWORDs; the answer is a STORAGE_PROTOCOL_DATA_DESCRIPTOR (8 bytes) with the same
     40-byte block, then the data."""
-    spec = b"".join(x.to_bytes(4, "little") for x in (protocol, data_type, value, 0, 40, length, 0, 0, 0, 0))
+    fields = (protocol, data_type, value, sub, 40, length, 0, 0, 0, 0)
+    spec = b"".join(x.to_bytes(4, "little") for x in fields)
     raw = _query(h, 50, 8 + 40 + length, spec)
     return raw[48 : 48 + length] if raw and len(raw) >= 48 + length else None
 
@@ -387,7 +395,16 @@ def _links(inst: int, interface: DiskInterface) -> tuple[DiskLink | None, DiskLi
     return None, _pci_link(pci)  # a SATA / SAS controller: chipset ones report no link
 
 
-def _disk(number: int, path: str, inst: int) -> PhysicalDisk | None:
+def _io(h: int, since: datetime | None) -> DiskIo | None:
+    """DISK_PERFORMANCE: BytesRead and BytesWritten since the boot (LARGE_INTEGERs at 0 and 8)."""
+    perf = _ioctl(h, IOCTL_DISK_PERFORMANCE, b"", 88)
+    if not perf or len(perf) < 16:
+        return None
+    read, written = int.from_bytes(perf[0:8], "little"), int.from_bytes(perf[8:16], "little")
+    return DiskIo(read_bytes=read, written_bytes=written, since=since)
+
+
+def _disk(number: int, path: str, inst: int, since: datetime | None = None) -> PhysicalDisk | None:
     h = _open(path)
     if h is None:
         return None
@@ -405,18 +422,33 @@ def _disk(number: int, path: str, inst: int) -> PhysicalDisk | None:
         size = int.from_bytes(geometry[24:32], "little") if geometry and len(geometry) >= 32 else None
         interface = _BUS.get(bus, "other")
         link: DiskLink | None = None
+        health: DiskHealth | None = None
+        note: HealthNote = ""
         if interface == "sata":
             words = _protocol_data(h, 2, 1, 0, 512)  # ProtocolTypeAta, AtaDataTypeIdentify
             if words:
                 link = sata_identify(
                     int.from_bytes(words[152:154], "little"), int.from_bytes(words[154:156], "little")
                 )
+            general = _protocol_data(h, 2, 2, 0x04, 512, sub=1)  # AtaDataTypeLogPage: Device Statistics
+            if general:
+                temps = _protocol_data(h, 2, 2, 0x04, 512, sub=5)
+                health = ata_statistics(general, temps, ata_sector_size(words or b""))
+            note = "" if health else "unsupported"
         elif interface == "nvme":
             ident = _protocol_data(h, 3, 1, 1, 4096)  # ProtocolTypeNvme, Identify, CNS = controller
             if ident:
                 serial = _ascii(ident[4:24]) or serial
                 model = _ascii(ident[24:64]) or model
                 firmware = _ascii(ident[64:72]) or firmware
+            log = _protocol_data(h, 3, 2, 2, 512)  # NVMeDataTypeLogPage, SMART / Health (02h)
+            health = nvme_health(log) if log else None
+            note = "" if health else "unsupported"
+        elif interface == "usb":
+            note = "usb"
+        elif interface not in ("virtual", "raid"):
+            note = "unavailable"
+        io = _io(h, since)
     finally:
         _close(h)
     own, controller = _links(inst, interface)
@@ -437,6 +469,9 @@ def _disk(number: int, path: str, inst: int) -> PhysicalDisk | None:
         trim=trim,
         link=link,
         controller_link=controller,
+        health=health,
+        health_note=note if size else "",
+        io=io,
     )
 
 
@@ -475,9 +510,10 @@ def _extents(mount_point: str) -> list[tuple[int, int, int]]:
 
 def probe(volumes: Sequence[VolumeInfo]) -> Probe:
     result = Probe()
+    since = boot_time()
     for number, (path, inst) in sorted(_disk_nodes().items()):
         try:
-            disk = _disk(number, path, inst)
+            disk = _disk(number, path, inst, since)
         except Exception as exc:  # one odd device must not hide the others
             logger.opt(exception=exc).debug("disk {} probe failed", number)
             continue

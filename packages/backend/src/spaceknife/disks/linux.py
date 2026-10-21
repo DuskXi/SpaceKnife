@@ -8,6 +8,8 @@
   PCI link; USB: the USB device directory (``speed`` in Mb/s, ``version``); SD: ``mmcblk``.
 - ``/dev/disk/by-id``: the serial of a SATA disk (``ata-<model>_<serial>``).
 - Volumes: their device's partition (``start``, ``size``) or device-mapper / md ``slaves``.
+- Since the boot: ``/sys/block/<disk>/stat``; the temperature: the disk's hwmon (``nvme``, or
+  ``drivetemp`` for SATA). The disk's own lifetime counters need root (an NVMe or ATA command).
 
 All file access goes through :class:`Sysfs`, so the tests run on a fake tree on any system.
 """
@@ -17,14 +19,16 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Sequence
+from datetime import datetime
 
 from loguru import logger
 
-from spaceknife_protocol.machine import DiskInterface, DiskLink, PhysicalDisk
+from spaceknife_protocol.machine import DiskHealth, DiskInterface, DiskIo, DiskLink, HealthNote, PhysicalDisk
 
 from ..scan.media import classify
 from ..scan.volume import VolumeInfo
 from . import Probe
+from .health import boot_time, linux_stat
 from .links import gbps_text, pcie, pcie_gen_text, pcie_width_text, usb_linux
 
 SKIP = ("loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd", "zd")  # logical, optical, floppy
@@ -135,7 +139,18 @@ def _interface(fs: Sysfs, name: str, path: str) -> DiskInterface:
     return "other"
 
 
-def _disk(fs: Sysfs, name: str) -> PhysicalDisk | None:
+def _hwmon_temp(fs: Sysfs, dev: str) -> int | None:
+    """°C from the disk's hwmon: the NVMe controller's ``hwmonN`` or drivetemp's ``hwmon/hwmonN``."""
+    for folder in (dev, f"{dev}/hwmon"):
+        for entry in fs.listdir(folder):
+            if entry.startswith("hwmon") and entry != "hwmon":
+                milli = _int(fs.read(f"{folder}/{entry}/temp1_input"))
+                if milli is not None:
+                    return round(milli / 1000)
+    return None
+
+
+def _disk(fs: Sysfs, name: str, since: datetime | None = None) -> PhysicalDisk | None:
     path = fs.real(f"/sys/block/{name}")
     sectors = _int(fs.read(f"{path}/size"))
     removable = fs.read(f"{path}/removable") == "1"
@@ -171,6 +186,17 @@ def _disk(fs: Sysfs, name: str) -> PhysicalDisk | None:
             serial = serial or fs.read(f"{usb}/serial")
     elif interface == "sd" and serial.startswith("0x"):
         serial = serial[2:]
+    counters = linux_stat(fs.read(f"{path}/stat"))
+    io = DiskIo(read_bytes=counters[0], written_bytes=counters[1], since=since) if counters else None
+    health: DiskHealth | None = None
+    note: HealthNote = ""
+    if interface in ("nvme", "sata", "ata"):
+        temp = _hwmon_temp(fs, dev)
+        if temp is not None:
+            health = DiskHealth(source="nvme" if interface == "nvme" else "ata", temperature_c=temp)
+        note = "needs_admin"  # the lifetime counters: an NVMe or ATA command, root only
+    elif interface == "usb":
+        note = "usb"
     return PhysicalDisk(
         id=name,
         model=" ".join(model.split()),
@@ -184,6 +210,9 @@ def _disk(fs: Sysfs, name: str) -> PhysicalDisk | None:
         trim=None if discard is None else discard > 0,
         link=link,
         controller_link=controller,
+        health=health,
+        health_note=note if sectors else "",
+        io=io,
     )
 
 
@@ -212,11 +241,12 @@ def _leaves(fs: Sysfs, name: str, depth: int = 0) -> list[tuple[str, int | None,
 def probe(volumes: Sequence[VolumeInfo], fs: Sysfs | None = None) -> Probe:
     fs = fs or Sysfs()
     result = Probe()
+    since = boot_time()
     for name in fs.listdir("/sys/block"):
         if name.startswith(SKIP):
             continue
         try:
-            disk = _disk(fs, name)
+            disk = _disk(fs, name, since)
         except Exception as exc:  # one odd device must not hide the others
             logger.opt(exception=exc).debug("disk {} probe failed", name)
             continue

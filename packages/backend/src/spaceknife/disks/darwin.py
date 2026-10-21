@@ -7,7 +7,10 @@
 - ``system_profiler -json`` (NVMe, SATA, USB): serial, firmware, TRIM and the links (NVMe "8.0 GT/s"
   and "x4", the SATA controller's negotiated speed, a USB device's speed), by BSD name.
 
-The parsing is in pure functions over the decoded plist / JSON, tested with recorded samples.
+- ``ioreg -r -c IOBlockStorageDriver -a``: each disk's bytes read and written since the boot.
+
+The disks' own health records need tools macOS doesn't ship. The parsing is in pure functions
+over the decoded plist / JSON, tested with recorded samples.
 """
 
 from __future__ import annotations
@@ -17,15 +20,17 @@ import plistlib
 import re
 import subprocess
 from collections.abc import Iterator, Sequence
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
 
-from spaceknife_protocol.machine import DiskInterface, DiskLink, PhysicalDisk
+from spaceknife_protocol.machine import DiskInterface, DiskIo, DiskLink, PhysicalDisk
 
 from ..scan.media import classify
 from ..scan.volume import VolumeInfo
 from . import Probe
+from .health import boot_time
 from .links import gbps_text, pcie, pcie_gen_text, pcie_width_text, usb_mac
 
 _PROFILES = ("SPNVMeDataType", "SPSerialATADataType", "SPUSBDataType", "SPUSBHostDataType")
@@ -172,11 +177,42 @@ def volume_disks(info: dict[str, Any]) -> list[tuple[str, int | None]]:
     return [(parent, int(size) if isinstance(size, int) and size > 0 else None)]
 
 
+def _ioreg() -> Any:
+    try:
+        raw = subprocess.run(
+            ["ioreg", "-r", "-c", "IOBlockStorageDriver", "-a"], capture_output=True, timeout=10, check=True
+        ).stdout
+        return plistlib.loads(raw)
+    except (OSError, subprocess.SubprocessError, plistlib.InvalidFileException, ValueError):
+        return None
+
+
+def io_counters(tree: Any) -> dict[str, tuple[int, int]]:
+    """BSD name -> (bytes read, bytes written) from ``ioreg -r -c IOBlockStorageDriver -a``: each
+    driver's Statistics, for the whole-disk IOMedia right under it."""
+    out: dict[str, tuple[int, int]] = {}
+    for d, _parents in _walk(tree):
+        stats = d.get("Statistics")
+        if not isinstance(stats, dict):
+            continue
+        read, written = stats.get("Bytes (Read)"), stats.get("Bytes (Write)")
+        if not isinstance(read, int) or not isinstance(written, int):
+            continue
+        for child, _p in _walk(d.get("IORegistryEntryChildren", [])):
+            bsd = child.get("BSD Name")
+            if isinstance(bsd, str) and _WHOLE.fullmatch(bsd):
+                out.setdefault(bsd, (read, written))
+                break
+    return out
+
+
 def probe(volumes: Sequence[VolumeInfo]) -> Probe:
     result = Probe()
     listing = _plist("list", "-plist") or {}
     whole = [str(x) for x in listing.get("WholeDisks", []) if _WHOLE.fullmatch(str(x))]
     facts = profile_facts(_profile())
+    counters = io_counters(_ioreg())
+    since: datetime | None = boot_time()
     for ident in whole:
         info = _plist("info", "-plist", ident)
         disk = disk_from_info(info) if info else None
@@ -190,6 +226,10 @@ def probe(volumes: Sequence[VolumeInfo]) -> Probe:
                 "model": disk.model or f.get("model", ""),
                 "trim": f.get("trim"),
                 "link": f.get("link"),
+                "health_note": "usb" if disk.interface == "usb" else "unavailable",
+                "io": DiskIo(read_bytes=counters[ident][0], written_bytes=counters[ident][1], since=since)
+                if ident in counters
+                else None,
             }
         )
         result.disks.append(disk)
@@ -210,4 +250,4 @@ def probe(volumes: Sequence[VolumeInfo]) -> Probe:
     return result
 
 
-__all__ = ["disk_from_info", "interface_of", "probe", "profile_facts", "volume_disks"]
+__all__ = ["disk_from_info", "interface_of", "io_counters", "probe", "profile_facts", "volume_disks"]

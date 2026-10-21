@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { DiskLink, MachineDisks, PhysicalDisk, VolumeInfo, VolumeOverview } from "@/protocol/generated";
+import type { DiskHealth, DiskLink, MachineDisks, PhysicalDisk, VolumeInfo, VolumeOverview } from "@/protocol/generated";
 
-import { bandwidthText, byMedia, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
+import { bandwidthText, byMedia, healthFindings, healthNoteText, powerOnText, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
 
 const link = (patch: Partial<DiskLink>): DiskLink => ({
   kind: "pcie",
@@ -31,6 +31,9 @@ const disk = (patch: Partial<PhysicalDisk> = {}): PhysicalDisk => ({
   controller_link: null,
   system: false,
   parts: [],
+  health: null,
+  health_note: "",
+  io: null,
   ...patch,
 });
 
@@ -238,5 +241,48 @@ describe("the dashboard", () => {
     const now = Date.parse("2026-10-21T00:00:00Z") / 1000;
     expect(findings({ ...data, disks: [], volumes: [big] }, now).map((x) => x.text)).toEqual([expect.stringContaining("20 GB")]);
     expect(findings({ ...data, disks: [], volumes: [small] }, now)).toEqual([]);
+  });
+});
+
+describe("what a disk records about itself", () => {
+  const record = (patch: Partial<DiskHealth> = {}): DiskHealth => ({
+    source: "nvme",
+    temperature_c: 47,
+    power_on_hours: 8070,
+    power_cycles: 686,
+    read_bytes: 105_919_728_640_000,
+    written_bytes: 252_478_183_936_000,
+    percentage_used: 9,
+    available_spare: 100,
+    spare_threshold: 10,
+    unsafe_shutdowns: 106,
+    media_errors: 0,
+    critical_warning: 0,
+    ...patch,
+  });
+
+  it("finds nothing in a healthy record", () => {
+    expect(healthFindings(disk({ health: record() }))).toEqual([]);
+    expect(healthFindings(disk())).toEqual([]);
+  });
+
+  it("warns of a critical warning, media errors, worn-out endurance and spare running out", () => {
+    const f = healthFindings(disk({ model: "X", health: record({ critical_warning: 2, media_errors: 3, percentage_used: 95, available_spare: 8, temperature_c: 72 }) }));
+    expect(f.map((x) => x.level)).toEqual(["warn", "warn", "warn", "warn", "info"]);
+    expect(f[1]!.text).toContain("3");
+    expect(f[2]!.text).toContain("95%");
+    expect(healthFindings(disk({ health: record({ percentage_used: 75 }) }))[0]!.level).toBe("info");
+  });
+
+  it("goes into the page's findings", () => {
+    const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", volumes: [], disks: [disk({ health: record({ media_errors: 1 }) })] };
+    expect(findings(data).map((x) => x.level)).toEqual(["warn"]);
+  });
+
+  it("says why there is no record, and power-on time in hours or days", () => {
+    expect(healthNoteText("")).toBe("");
+    for (const note of ["usb", "unsupported", "needs_admin", "unavailable"] as const) expect(healthNoteText(note)).not.toBe("");
+    expect(powerOnText(30)).toBe("30 小时");
+    expect(powerOnText(8070)).toBe("336 天");
   });
 });
