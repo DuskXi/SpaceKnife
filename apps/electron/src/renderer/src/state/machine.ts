@@ -413,6 +413,12 @@ export function healthNoteText(note: PhysicalDisk["health_note"]): string {
   }
 }
 
+/** Why a part of the disk's own record shows "—": the reason it has none, or that the disk
+ * doesn't keep that part. */
+export function recordGap(d: PhysicalDisk): string {
+  return healthNoteText(d.health_note) || (d.health ? t("这块盘的记录里没有这一项") : t("这块盘没有提供自己的记录"));
+}
+
 /** Power-on time in words: hours under two days, else days. */
 export function powerOnText(hours: number): string {
   return hours < 48 ? t("{n} 小时", { n: hours }) : t("{n} 天", { n: Math.floor(hours / 24).toLocaleString("en-US") });

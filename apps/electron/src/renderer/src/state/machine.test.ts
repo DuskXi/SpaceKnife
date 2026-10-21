@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import type { DiskHealth, DiskLink, MachineDisks, PhysicalDisk, VolumeInfo, VolumeOverview } from "@/protocol/generated";
 
-import { bandwidthText, byMedia, healthFindings, healthNoteText, powerOnText, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
+import { bandwidthText, byMedia, healthFindings, healthNoteText,
+  recordGap, powerOnText, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
 
 const link = (patch: Partial<DiskLink>): DiskLink => ({
   kind: "pcie",
@@ -278,6 +279,12 @@ describe("what a disk records about itself", () => {
   it("goes into the page's findings", () => {
     const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", volumes: [], disks: [disk({ health: record({ media_errors: 1 }) })] };
     expect(findings(data).map((x) => x.level)).toEqual(["warn"]);
+  });
+
+  it("says why a part of the record shows a dash", () => {
+    expect(recordGap(disk({ health_note: "usb" }))).toBe(healthNoteText("usb"));
+    expect(recordGap(disk({ health: record() }))).not.toBe(recordGap(disk()));  // the record lacks it / there is none
+    expect(recordGap(disk())).not.toBe("");
   });
 
   it("says why there is no record, and power-on time in hours or days", () => {

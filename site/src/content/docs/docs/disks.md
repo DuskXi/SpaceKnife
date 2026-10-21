@@ -37,12 +37,12 @@ Nothing tells you to scan a volume: volumes you never scanned are simply shown a
 
 ## What a disk shows
 
-Under **Disks**, each disk is a card; the cards fill the window in as many columns as fit, two in a narrow window and three or four in a wide one.
+Under **Disks**, each disk is a card; the cards fill the window in as many columns as fit, two in a narrow window and three or four in a wide one. The cards of a row line up section by section, so the links, reads and writes, health and volumes start at the same height and read across; what isn't known is **—**, with the reason on hover.
 
 - **Name and size**: the model the disk reports (with its vendor when the model doesn't name it), the storage type (**NVMe SSD**, **SATA SSD**, **HDD**, **USB drive**, **Memory card**, …), the size, and how the system numbers it (**Disk 3** on Windows, as in Disk Management).
 - **System disk** marks the disk holding the system volume; **Removable** marks drives you can unplug or eject.
 - **How full**: the ring at its left shows how much of the disk its volumes use, with the share in the middle.
-- **Interface** and **current link**: **NVMe** with its PCIe link (for example **PCIe 4.0 ×4 ≈ 7.9 GB/s**), **SATA** with its rate (**SATA 6 Gb/s**), **USB** with the rate it is connected at (**USB 480 Mb/s**, **USB 5 Gb/s**). When the system also tells the most the disk supports, a meter shows the link against it: **Full speed**, or for example **50% of its top rate** for a PCIe 5.0 drive in a 4.0 slot.
+- **Interface** and **current link**: **NVMe** with its PCIe link (for example **PCIe 4.0 ×4 ≈ 7.9 GB/s**), **SATA** with its rate (**SATA 6 Gb/s**), **USB** with the rate it is connected at (**USB 480 Mb/s**, **USB 5 Gb/s**). When the system also tells the most the disk supports, a meter shows the link against it: **Full speed**, or for example **50%** (of its top rate) for a PCIe 5.0 drive in a 4.0 slot.
 - **Reads and writes**: a small table. The **Lifetime** row is how much was read and written over the disk's life, as the disk records it; the **Since startup** row is what the system read and wrote since it last started. Sizes pick their unit by size, as the **Size units** setting says.
 - **Health**: the temperature, the power-on time and, for an SSD, **N% of its endurance used**. See [Reads, writes and health](#reads-writes-and-health).
 - **Details**: the model, vendor, serial number, firmware, whether it takes TRIM, the health record (its source, power-on time, power cycles, unsafe shutdowns, media errors, spare blocks), and the system's own name for it (`PhysicalDrive3`, `nvme0n1`, `disk2`). The serial number stays on your computer and shows only here, folded away.

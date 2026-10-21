@@ -1080,6 +1080,29 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .mc-chip.warn, .mc-chip.warn svg { color: var(--sk-color-status-warning); }
 .mc-read { display: flex; }
 .mc-read button { display: inline-flex; align-items: center; gap: 6px; }
+/* disk cards line up section by section: the grid's rows are the cards' slots (subgrid), so a
+   section starts at the same height in every card of a row; an empty slot takes no room */
+.mc-disks { row-gap: 0; }
+.mc-disks > .mc-disk { display: grid; grid-row: span 8; grid-template-rows: subgrid; row-gap: 0; margin-bottom: 16px; }
+.mc-disks > .mc-disk > :not(:first-child):not(:empty) { margin-top: 12px; }
+@supports not (grid-template-rows: subgrid) {
+  .mc-disks { row-gap: 16px; }
+  .mc-disks > .mc-disk { display: flex; margin-bottom: 0; }
+}
+.mc-slot { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+/* one line of chips: the squeezable ones give way first, the meters shrink, nothing wraps */
+.mc-line { display: flex; flex-wrap: nowrap; gap: 6px; min-width: 0; overflow: hidden; }
+.mc-line > * { flex: none; }
+.mc-line > .squeeze { flex: 0 10 auto; min-width: 0; }
+.mc-line > .mc-linkmeter { flex: 0 1 auto; min-width: min-content; }
+.mc-line .mc-linkmeter .meter { width: auto; flex: 1 1 72px; min-width: 24px; max-width: 72px; }
+.mc-line .mc-linkmeter .small { flex: none; white-space: nowrap; }
+.mc-line .mc-chip { white-space: nowrap; }
+.mc-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-chip.none, .mc-linkmeter.none .small, .mc-io td.none { color: var(--sk-color-text-tertiary); }
+.mc-chip.none svg { opacity: 0.6; }
+/* at most two lines; the whole text is in the tooltip */
+.mc-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; min-width: 0; }
 .mc-full { color: var(--sk-color-status-warning); }
 @media (max-width: 1000px) {
   .mc-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }

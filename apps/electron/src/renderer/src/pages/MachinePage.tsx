@@ -30,6 +30,7 @@ import {
   linkText,
   healthNoteText,
   powerOnText,
+  recordGap,
   orderedDisks,
   showMap,
   summary,
@@ -80,7 +81,7 @@ export function MachinePage() {
               <FindingsPanel data={data} />
             </div>
             <h2 className="mc-h2">{t("磁盘")}</h2>
-            <div className="mc-grid">
+            <div className="mc-grid mc-disks">
               {orderedDisks(data).map((d) => (
                 <Disk key={d.id} disk={d} data={data} />
               ))}
@@ -213,9 +214,6 @@ function FindingsPanel({ data }: { data: MachineDisks }) {
 function Disk({ disk, data }: { disk: PhysicalDisk; data: MachineDisks }) {
   const vols = volumesOf(data, disk);
   const map = diskMap(disk, data.volumes);
-  const link = linkText(disk.link);
-  const bandwidth = linkBandwidth(disk.link);
-  const share = linkShare(disk.link);
   const name = diskName(disk);
   const empty = disk.size == null; // a card reader's empty slot: its name and its drive letter only
   const used = !empty ? diskUsed(disk, data) : null;
@@ -245,51 +243,41 @@ function Disk({ disk, data }: { disk: PhysicalDisk; data: MachineDisks }) {
           {disk.removable && <span className="mc-tag">{t("可移动")}</span>}
         </div>
       </div>
-      {!empty && (
-        <div className="mc-link">
-          <span className="mc-chip" title={t("接口")}>
-            <Icon name="bolt" size={12} />
-            {interfaceName(disk.interface)}
-          </span>
-          {link && (
-            <span className="mc-chip" title={t("当前链路速率")}>
-              <Icon name="gauge" size={12} />
-              {link}
-              {bandwidth && <span className="mc-chip-sub">{bandwidth}</span>}
-            </span>
-          )}
-          {share != null && (
-            <span className="mc-linkmeter" title={t("链路速率占这块盘支持的最高速率的比例")}>
-              <Meter share={share} tone={share < 1 ? "muted" : "accent"} title={t("链路速率占这块盘支持的最高速率的比例")} />
-              <span className="small muted">{share >= 0.999 ? t("满速") : t("最高速率的 {pct}", { pct: `${Math.round(share * 100)}%` })}</span>
-            </span>
-          )}
-        </div>
-      )}
-      {!empty &&
-        linkNotes(disk).map((n) => (
-          <div key={n.text} className={`mc-note${n.warn ? " warn" : ""}`}>
-            <Icon name={n.warn ? "warning" : "info"} size={13} />
-            {n.text}
+      {/* fixed slots, one row each in the grid (subgrid): every card in a row lines up section by
+          section; a slot with nothing in it takes no room */}
+      <div className="mc-slot">{!empty && <LinkLine disk={disk} />}</div>
+      <div className="mc-slot">
+        {!empty &&
+          linkNotes(disk).map((n) => (
+            <div key={n.text} className={`mc-note${n.warn ? " warn" : ""}`}>
+              <Icon name={n.warn ? "warning" : "info"} size={13} />
+              <span className="mc-clamp" title={n.text}>
+                {n.text}
+              </span>
+            </div>
+          ))}
+      </div>
+      <div className="mc-slot">{!empty && <IoTable disk={disk} />}</div>
+      <div className="mc-slot">{!empty && <HealthLine disk={disk} />}</div>
+      <div className="mc-slot">{!empty && <RecordNote disk={disk} />}</div>
+      <div className="mc-slot">
+        {showMap(map) && (
+          <div className="mc-map" aria-hidden="true">
+            {map.map((s) => (
+              <span key={s.mount} className="mc-seg" style={{ width: `${s.share * 100}%` }} title={s.mount}>
+                <span style={{ width: `${s.used * 100}%` }} />
+              </span>
+            ))}
           </div>
-        ))}
-      {!empty && <DiskRecord disk={disk} />}
-      {showMap(map) && (
-        <div className="mc-map" aria-hidden="true">
-          {map.map((s) => (
-            <span key={s.mount} className="mc-seg" style={{ width: `${s.share * 100}%` }} title={s.mount}>
-              <span style={{ width: `${s.used * 100}%` }} />
-            </span>
-          ))}
-        </div>
-      )}
-      {vols.length > 0 && (
-        <div className="mc-vols">
-          {vols.map((v) => (
-            <Volume key={v.volume.mount_point} v={v} />
-          ))}
-        </div>
-      )}
+        )}
+        {vols.length > 0 && (
+          <div className="mc-vols">
+            {vols.map((v) => (
+              <Volume key={v.volume.mount_point} v={v} />
+            ))}
+          </div>
+        )}
+      </div>
       <details className="mc-details">
         <summary>{t("详细信息")}</summary>
         <dl>
@@ -351,80 +339,127 @@ function Disk({ disk, data }: { disk: PhysicalDisk; data: MachineDisks }) {
   );
 }
 
-/** What the disk records about itself (lifetime reads and writes, temperature, power-on time,
- * wear) and the system's counters since it started; why the disk's own record is missing, when it is. */
-function DiskRecord({ disk }: { disk: PhysicalDisk }) {
+/** Interface, current link and how it compares with the most the disk supports: one line (the
+ * meter and the link's text give way first; their full text is in the tooltips). */
+function LinkLine({ disk }: { disk: PhysicalDisk }) {
+  const link = linkText(disk.link);
+  const bandwidth = linkBandwidth(disk.link);
+  const share = linkShare(disk.link);
+  const linkTitle = t("当前链路速率：{link}", { link: [link, bandwidth].filter(Boolean).join(" ") });
+  const pct = share == null ? "" : `${Math.round(share * 100)}%`;
+  const shareText = share == null ? "" : share >= 0.999 ? t("满速") : t("最高速率的 {pct}", { pct });
+  return (
+    <div className="mc-line">
+      <span className="mc-chip fixed" title={t("接口")}>
+        <Icon name="bolt" size={12} />
+        {interfaceName(disk.interface)}
+      </span>
+      {link && (
+        <span className="mc-chip squeeze" title={linkTitle}>
+          <Icon name="gauge" size={12} />
+          <span className="mc-chip-text">
+            {link}
+            {bandwidth && <span className="mc-chip-sub"> {bandwidth}</span>}
+          </span>
+        </span>
+      )}
+      {share != null && (
+        <span className="mc-linkmeter" title={t("链路速率占这块盘支持的最高速率的比例：{share}", { share: shareText })}>
+          <Meter share={share} tone={share < 1 ? "muted" : "accent"} />
+          <span className="small muted">{share >= 0.999 ? shareText : pct}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Read and written: over the disk's life (its own record) and since the system started. Always
+ * both rows: what isn't known is "—", with the reason on hover. */
+function IoTable({ disk }: { disk: PhysicalDisk }) {
+  const h = disk.health;
+  const io = disk.io;
+  const size = (b: number | null | undefined) => (b == null ? "—" : fmtSize(b, true));
+  const lifetime = h?.read_at
+    ? t("磁盘自己记录的整个寿命里的读写量，以管理员权限读取于 {when}", { when: fmtDateTime(seconds(h.read_at)) })
+    : t("磁盘自己记录的整个寿命里的读写量");
+  const lifetimeGap = recordGap(disk);
+  const since = io?.since ? t("系统 {when} 启动以来的读写量", { when: fmtDateTime(seconds(io.since)) }) : t("系统启动以来的读写量");
+  const sinceGap = t("系统没有给出这块盘开机以来的读写计数");
+  return (
+    <table className="mc-io">
+      <thead>
+        <tr>
+          <th />
+          <th>{t("读取")}</th>
+          <th>{t("写入")}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr title={h?.read_bytes != null || h?.written_bytes != null ? lifetime : lifetimeGap}>
+          <th>{t("累计")}</th>
+          <td className={h?.read_bytes == null ? "none" : undefined} title={h?.read_bytes == null ? lifetimeGap : undefined}>
+            {size(h?.read_bytes)}
+          </td>
+          <td className={h?.written_bytes == null ? "none" : undefined} title={h?.written_bytes == null ? lifetimeGap : undefined}>
+            {size(h?.written_bytes)}
+          </td>
+        </tr>
+        <tr title={io ? since : sinceGap}>
+          <th>{t("开机以来")}</th>
+          <td className={io ? undefined : "none"}>{size(io?.read_bytes)}</td>
+          <td className={io ? undefined : "none"}>{size(io?.written_bytes)}</td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
+/** Temperature, power-on time and (NVMe) the endurance used: always the three, "—" when the disk
+ * doesn't say, with the reason on hover. */
+function HealthLine({ disk }: { disk: PhysicalDisk }) {
+  const h = disk.health;
+  const gap = recordGap(disk);
+  const temp = h?.temperature_c ?? null;
+  const hours = h?.power_on_hours ?? null;
+  const used = h?.percentage_used ?? null;
+  return (
+    <div className="mc-line">
+      <span className={`mc-chip fixed${temp == null ? " none" : temp >= 70 ? " warn" : ""}`} title={temp == null ? gap : t("温度")}>
+        <Icon name="thermometer" size={12} />
+        {temp == null ? "— °C" : `${temp} °C`}
+      </span>
+      <span className={`mc-chip fixed${hours == null ? " none" : ""}`} title={hours == null ? gap : t("{n} 小时", { n: fmtInt(hours) })}>
+        <Icon name="clock" size={12} />
+        {t("通电 {time}", { time: hours == null ? "—" : powerOnText(hours) })}
+      </span>
+      <span
+        className={`mc-linkmeter${used == null ? " none" : ""}`}
+        title={used == null ? (disk.interface === "nvme" ? gap : t("只有 NVMe 固态硬盘报告写入寿命的估计")) : t("写入寿命已用掉的比例（厂商的估计，可以超过 100%）")}
+      >
+        <Meter share={used == null ? 0 : Math.min(1, used / 100)} tone={used != null && used >= 90 ? "warn" : "muted"} />
+        <span className="small muted">{t("寿命已用 {pct}", { pct: used == null ? "—" : `${used}%` })}</span>
+      </span>
+    </div>
+  );
+}
+
+/** Why the disk's own record is missing (two lines at most, the rest on hover), the button that
+ * reads it with administrator rights (Linux), and why that read didn't happen. */
+function RecordNote({ disk }: { disk: PhysicalDisk }) {
   const conn = useApp((s) => s.conn);
   const reading = useApp((s) => s.machineReading);
   const readNote = useApp((s) => s.machineReadNote);
-  const h = disk.health;
-  const io = disk.io;
-  const lifetime = !!h && (h.read_bytes != null || h.written_bytes != null);
   const note = healthNoteText(disk.health_note);
-  const chips = !!h && (h.temperature_c != null || h.power_on_hours != null || h.percentage_used != null);
-  if (!lifetime && !io && !chips && !note) return null;
-  const size = (b: number | null | undefined) => (b == null ? "—" : fmtSize(b, true));
+  const failed = readNote?.disk === disk.id ? readNote.text : "";
+  if (!note && disk.health_note !== "needs_admin" && !failed) return null;
   return (
-    <div className="mc-record">
-      {(lifetime || io) && (
-        <table className="mc-io">
-          <thead>
-            <tr>
-              <th />
-              <th>{t("读取")}</th>
-              <th>{t("写入")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {lifetime && h && (
-              <tr
-                title={
-                  h.read_at
-                    ? t("磁盘自己记录的整个寿命里的读写量，以管理员权限读取于 {when}", { when: fmtDateTime(seconds(h.read_at)) })
-                    : t("磁盘自己记录的整个寿命里的读写量")
-                }
-              >
-                <th>{t("累计")}</th>
-                <td>{size(h.read_bytes)}</td>
-                <td>{size(h.written_bytes)}</td>
-              </tr>
-            )}
-            {io && (
-              <tr title={io.since ? t("系统 {when} 启动以来的读写量", { when: fmtDateTime(seconds(io.since)) }) : t("系统启动以来的读写量")}>
-                <th>{t("开机以来")}</th>
-                <td>{size(io.read_bytes)}</td>
-                <td>{size(io.written_bytes)}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      )}
-      {chips && h && (
-        <div className="mc-link">
-          {h.temperature_c != null && (
-            <span className={`mc-chip${h.temperature_c >= 70 ? " warn" : ""}`} title={t("温度")}>
-              <Icon name="thermometer" size={12} />
-              {h.temperature_c} °C
-            </span>
-          )}
-          {h.power_on_hours != null && (
-            <span className="mc-chip" title={t("{n} 小时", { n: fmtInt(h.power_on_hours) })}>
-              <Icon name="clock" size={12} />
-              {t("通电 {time}", { time: powerOnText(h.power_on_hours) })}
-            </span>
-          )}
-          {h.percentage_used != null && (
-            <span className="mc-linkmeter" title={t("写入寿命已用掉的比例（厂商的估计，可以超过 100%）")}>
-              <Meter share={Math.min(1, h.percentage_used / 100)} tone={h.percentage_used >= 90 ? "warn" : "muted"} />
-              <span className="small muted">{t("寿命已用 {pct}", { pct: `${h.percentage_used}%` })}</span>
-            </span>
-          )}
-        </div>
-      )}
+    <>
       {note && (
         <div className="mc-note">
           <Icon name="info" size={13} />
-          {note}
+          <span className="mc-clamp" title={note}>
+            {note}
+          </span>
         </div>
       )}
       {disk.health_note === "needs_admin" && (
@@ -440,13 +475,15 @@ function DiskRecord({ disk }: { disk: PhysicalDisk }) {
           </button>
         </div>
       )}
-      {readNote?.disk === disk.id && (
+      {failed && (
         <div className="mc-note warn" role="status">
           <Icon name="warning" size={13} />
-          {readNote.text}
+          <span className="mc-clamp" title={failed}>
+            {failed}
+          </span>
         </div>
       )}
-    </div>
+    </>
   );
 }
 

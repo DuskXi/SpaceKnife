@@ -109,5 +109,11 @@
  "会弹出系统的管理员授权。只读取磁盘自己的记录，不改动任何东西；一次授权读出所有需要的盘": "Asks for administrator rights in the system's prompt. Only reads the disks' own records and changes nothing; one prompt reads every disk that needs it",
  "正在等待授权…": "Waiting for authorization…",
  "用管理员权限读取…": "Read with administrator rights…",
- "磁盘自己记录的整个寿命里的读写量，以管理员权限读取于 {when}": "Read and written over the disk's life, as the disk records it; read with administrator rights at {when}"
+ "磁盘自己记录的整个寿命里的读写量，以管理员权限读取于 {when}": "Read and written over the disk's life, as the disk records it; read with administrator rights at {when}",
+ "当前链路速率：{link}": "Current link: {link}",
+ "链路速率占这块盘支持的最高速率的比例：{share}": "The link's rate as a share of the most this disk supports: {share}",
+ "只有 NVMe 固态硬盘报告写入寿命的估计": "Only NVMe SSDs report an estimate of their write endurance",
+ "系统没有给出这块盘开机以来的读写计数": "The system gives no read and write counters for this disk since it started",
+ "这块盘没有提供自己的记录": "This disk gives no record of its own",
+ "这块盘的记录里没有这一项": "The disk's record doesn't include this"
 }
