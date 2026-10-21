@@ -29,7 +29,8 @@ import {
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
 import { moveTo, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
-import { downloading, downloadOf, hasUpdate, visibleSurface } from "./updates";
+import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
+import type { InstallHow } from "../../../shared/install";
 import { getLang, setLang, t } from "@/lib/i18n";
 
 let rpc: Rpc | null = null;
@@ -67,7 +68,7 @@ export function cancellable<M extends MethodName>(method: M, params: Methods[M][
 export async function boot(): Promise<void> {
   window.sk.onBackend((st) => void onBackend(st));
   await onBackend(await window.sk.backend());
-  // started again by 「重启并更新」: say once that it worked (the details are in 「关于与更新」)
+  // started again by 「无缝更新」: say once that it worked (the details are in 「关于与更新」)
   if (window.sk.justUpdated) toast(t("已更新到 SpaceKnife {version}", { version: window.sk.version }), 5000);
 }
 
@@ -814,14 +815,14 @@ const closedVersions = new Set<string>();
 function applyUpdateStatus(next: UpdateStatus): void {
   if (next.latest && !next.dismissed && closedVersions.has(next.latest.version)) next = { ...next, dismissed: true };
   const before = downloadOf(get().update);
-  set((s) => ({ update: next, updateOpen: s.updateOpen && hasUpdate(next) }));
+  set((s) => ({ update: next, updateOpen: s.updateOpen && announced(next) }));
   const after = downloadOf(next);
   if (!downloading(before) || downloading(after) || visibleSurface(next, get().updateOpen) !== "none") return;
   if (after.state === "done") toast(t("SpaceKnife {version} 已下载", { version: after.version ?? "" }));
   else if (after.state === "failed") toast(t("更新下载失败：{error}", { error: after.error ?? "" }));
 }
 
-async function updateCall<M extends "update.dismiss" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
+async function updateCall<M extends "update.dismiss" | "update.mute" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
   try {
     applyUpdateStatus((await call(method, params)) as UpdateStatus);
   } catch (err) {
@@ -837,7 +838,10 @@ export async function checkUpdates(): Promise<void> {
     const st = await call("update.check", {});
     applyUpdateStatus(st);
     if (st.error) toast(t("检查更新失败：{error}", { error: st.error }));
-    else if (hasUpdate(st)) {
+    else if (st.muted && hasUpdate(st)) {
+      // a series the user skipped: no card; 「关于与更新」 shows it and turns its prompts back on
+      toast(t("发现新版本 {version}（已跳过 {series} 的提示，见「关于与更新」）", { version: st.latest.version, series: seriesName(st.series ?? "") }));
+    } else if (hasUpdate(st)) {
       set({ updateOpen: true });
       toast(t("发现新版本 {version}", { version: st.latest.version }));
     } else toast(t("已是最新版本"));
@@ -848,7 +852,12 @@ export async function checkUpdates(): Promise<void> {
 
 /** The badge and 「查看更新」 (app.show_update): the card under the badge; nothing known yet: check. */
 export function showUpdate(): Promise<void> {
-  if (!hasUpdate(get().update)) return checkUpdates();
+  const st = get().update;
+  if (!hasUpdate(st)) return checkUpdates();
+  if (st.muted) {
+    openSettingsTab("about"); // no badge to open it under: the page has it, and the way back on
+    return Promise.resolve();
+  }
   set({ updateOpen: true });
   return Promise.resolve();
 }
@@ -869,13 +878,23 @@ export function toggleUpdateCard(): void {
   else set({ updateOpen: true });
 }
 
+/** 「跳过 0.4.x」 (muted) / 「恢复提示」: every release of the series stays quiet (no card, dialog,
+ * badge or automatic download) or speaks up again (update.mute). */
+export function muteUpdates(series: string, muted: boolean): void {
+  const st = get().update;
+  if (st?.series === series) set({ update: { ...st, muted }, updateOpen: muted ? false : get().updateOpen });
+  if (muted) toast(t("{series} 的版本不再提示；可以在「关于与更新」里恢复", { series: seriesName(series) }));
+  void updateCall("update.mute", { series, muted });
+}
+
 /** 「一键下载」 / 「重试」: the file for this kind of install, into the backend's updates folder. */
 export const downloadUpdate = (version: string) => updateCall("update.download", { version });
 export const cancelUpdate = () => updateCall("update.cancel", {});
 
-/** 「重启并更新」 / 「安装」: main puts the downloaded version in place (main/update.ts restartMode); the
- * app quits once that has started, else the reason is shown. */
-export async function installUpdate(path: string): Promise<void> {
-  const reason = await window.sk.update.install(path);
+/** One of the card's two big buttons: 「无缝更新」 or the classic way (shared/install.ts). Main does it
+ * (main/index.ts installUpdate); the app quits once that has started, else the reason is shown. Only
+ * ever from a click: nothing installs by itself. */
+export async function installUpdate(path: string, how: InstallHow): Promise<void> {
+  const reason = await window.sk.update.install(path, how);
   if (reason) toast(reason);
 }

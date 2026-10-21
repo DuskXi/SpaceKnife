@@ -7467,6 +7467,28 @@
       "title": "UpdateInfo",
       "type": "object"
     },
+    "UpdateMuteParams": {
+      "additionalProperties": false,
+      "properties": {
+        "muted": {
+          "default": true,
+          "description": "False turns its prompts back on",
+          "title": "Muted",
+          "type": "boolean"
+        },
+        "series": {
+          "description": "A series as UpdateStatus.series names it: \"0.4\" (every 0.4.x) or \"1\" (every 1.x)",
+          "pattern": "^\\d{1,6}(\\.\\d{1,6})?$",
+          "title": "Series",
+          "type": "string"
+        }
+      },
+      "required": [
+        "series"
+      ],
+      "title": "UpdateMuteParams",
+      "type": "object"
+    },
     "UpdateReleases": {
       "properties": {
         "releases": {
@@ -7583,6 +7605,12 @@
           "title": "Level",
           "type": "string"
         },
+        "muted": {
+          "default": false,
+          "description": "The user turned off the prompts of that series: no card, dialog or badge, no automatic download (the 「关于与更新」 page still shows it)",
+          "title": "Muted",
+          "type": "boolean"
+        },
         "next_check_at": {
           "anyOf": [
             {
@@ -7596,6 +7624,19 @@
           "default": null,
           "description": "When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools)",
           "title": "Next Check At"
+        },
+        "series": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The series of the newest release that update.mute takes: its major.minor for a minor update (\"0.4\"), its major for a major one (\"1\"); None for a patch release or no update",
+          "title": "Series"
         }
       },
       "required": [
@@ -9294,6 +9335,12 @@
     "update.download": {
       "doc": "Download this version's file for this install into the updates folder (progress: update.changed).",
       "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.mute": {
+      "doc": "Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic download for its releases.",
+      "params": "#/$defs/UpdateMuteParams",
       "requiresSession": true,
       "result": "#/$defs/UpdateStatus"
     },

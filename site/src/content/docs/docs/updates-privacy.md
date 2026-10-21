@@ -13,7 +13,7 @@ With **Settings › About & updates › Updates › Check for updates automatica
 - then once every 24 hours while it runs;
 - 6 hours after a check that failed (no connection, GitHub busy), instead of 24.
 
-Each check sends the tag (ETag) of the list it already has, so an unchanged list costs almost nothing. Turning the setting on, or changing which versions to offer, checks right away. What the checks remember (the last check, the recent releases with their notes, the versions whose card you closed) is kept in `update.json` in the [data folder](../data-locations/).
+Each check sends the tag (ETag) of the list it already has, so an unchanged list costs almost nothing. Turning the setting on, or changing which versions to offer, checks right away. What the checks remember (the last check, the recent releases with their notes, the versions whose card you closed, the series you skipped) is kept in `update.json` in the [data folder](../data-locations/).
 
 **Check for updates** in the [command palette](../command-palette/) or on the [About & updates page](#the-about--updates-page) checks at any time, also with the automatic check off. Its status shows your current version, or the newer one it found.
 
@@ -38,15 +38,33 @@ How loudly SpaceKnife tells you depends on how far behind you are. Versions are 
 | The middle part (a minor release) | 0.3.2 → 0.4.0 | The badge, and the update card at the top left |
 | The first part (a major release) | 0.4.0 → 1.0.0 | The badge, and the update card as a dialog in the window |
 
-- **The badge** sits at the right of the title bar and reads "Update 0.4.0". While the new version downloads, it fills up and shows the percentage; once the file is ready, it reads **Update ready**. Hover for "SpaceKnife 0.4.0 is available (you have 0.3.2)"; click it to open the update card under it. A click elsewhere or <kbd>Esc</kbd> closes the card.
-- **The update card** shows the version, its release date, the version you have, a **Preview** tag for previews, the start of the release notes with **Full release notes**, the file for your kind of install and its size, and **Later**, **Release page** and **Download** (or the download's progress, or **Restart and update** once the file is ready).
+- **The badge** sits at the right of the title bar and reads "Update 0.4.0". While the new version downloads, it fills up and shows the percentage; once the file is ready, it reads **Update ready**. Hover for "SpaceKnife 0.4.0 is available (you have 0.3.2)", or, once the file is ready, "SpaceKnife 0.4.0 is downloaded and checked. Open this to choose how to update."; click it to open the update card under it. A click elsewhere or <kbd>Esc</kbd> closes the card.
+- **The update card** shows the version, its release date, the version you have, a **Preview** tag for previews, the start of the release notes with **Full release notes**, the file for your kind of install and its size, and **Later**, **Release page** and **Download** (or the download's progress, or the two install buttons once the file is ready: see [Install](#install)). On the card of a minor or major release, **Skip 0.4.x** (**Skip 1.x** for a major one) sits next to **Later**: see [Skipping a series](#skipping-a-series).
 - **The dialog** of a major release holds the same card, marked **Major update**. While it is open, the keyboard shortcuts behind it don't work.
 
 Closing the card or the dialog (the close button, **Later** or <kbd>Esc</kbd>) means that version won't open by itself again, also after a restart; the badge stays. Click the badge, or run **Show update** in the command palette, to open the card again.
 
+### Skipping a series
+
+To stop hearing about a whole series, click **Skip 0.4.x** or **Skip 1.x** in the update card. The button is next to **Later** on the card at the top left, in the dialog of a major release and on the card under the badge. A patch release only ever shows the badge, so it has no such button.
+
+| The update is | Button | The series it skips |
+|---|---|---|
+| A minor release (0.3.2 → 0.4.0) | **Skip 0.4.x** | Every 0.4.x: 0.4.0, 0.4.1, 0.4.2… |
+| A major release (0.4.0 → 1.0.0) | **Skip 1.x** | Every 1.x: 1.0.0, 1.1.0, 1.2.3… |
+
+From then on, a release of that series opens no card and no dialog, shows **no badge**, and downloads nothing by itself. Hover the button for "No more cards, dialogs or badge for 0.4.x, and no automatic download. Turn them back on in About & updates."; once you click it, SpaceKnife says "No more prompts for 0.4.x. Turn them back on in About & updates."
+
+- A release of another series speaks up as usual: 0.5.0 after you skipped 0.4.x, 2.0.0 after you skipped 1.x.
+- The [About & updates page](#the-about--updates-page) still shows the release, and turns its prompts back on: its status reads "Version 0.4.2 is available (prompts for 0.4.x are off)", and the card there has a line "Prompts for 0.4.x are off: no card, no badge, no automatic download." with **Turn prompts back on**. After that the series is offered as usual, and with **Download updates automatically** on, the download starts.
+- When **Check for updates** finds a skipped release, it only says "Found version 0.4.2 (prompts for 0.4.x are off: see About & updates)" and opens no card. **Show update** in the command palette opens the About & updates page.
+- The skipped series are kept in `update.json`, also across restarts, up to 20 of them. Once SpaceKnife itself runs a version of that series or a newer one, the series is dropped the next time you skip or turn back on a series.
+
+Closing a card and skipping a series are different things: closing the card (the close button, **Later**, <kbd>Esc</kbd>) only keeps that one version's card closed, the badge stays and the next version speaks up as usual; skipping covers the whole series, badge included.
+
 ## Download and verify
 
-With **Settings › About & updates › Updates › Download updates automatically** on (the default), a check that finds a newer version downloads its file right away, in the background: the badge and the card show the progress, and nothing opens for it. With the setting off, click **Download** in the card. Only a version the check offers is downloaded (see [Which versions are offered](#which-versions-are-offered)), and only when the release has a file for your kind of install.
+With **Settings › About & updates › Updates › Download updates automatically** on (the default), a check that finds a newer version downloads its file right away, in the background: the badge and the card show the progress, and nothing opens for it. With the setting off, click **Download** in the card. Only a version the check offers is downloaded (see [Which versions are offered](#which-versions-are-offered)), and only when the release has a file for your kind of install. A [skipped series](#skipping-a-series) isn't downloaded by itself; to get one of its releases anyway, click **Download** in its card on the About & updates page.
 
 The file goes into the `updates` folder in the [data folder](../data-locations/), not into your Downloads folder:
 
@@ -72,32 +90,44 @@ An automatic download that failed (no connection, for example) is tried again af
 
 ### Nothing left behind
 
-- Each start removes from the `updates` folder what is no longer needed: partial downloads, and everything of the version you run or an older one (the file that installed it and, for a portable copy, the old program files it replaced). A newer version you haven't installed yet stays.
+- Each start removes from the `updates` folder what is no longer needed: partial downloads, and everything of the version you run or an older one (the file that installed it and, for a portable copy, the old program files it replaced and the plan and log of the swap). A newer version you haven't installed yet stays.
 - Uninstalling the Windows installer removes the `updates` folder; see [Uninstalling](../install/#uninstalling).
 
 ## Install
 
-After the download, the card says how the new version replaces yours:
+Once the file is downloaded and checked, the card says "Pick a way to install: nothing starts until you click, and your scans and settings stay." Under it are two big buttons:
 
-| Your copy | Button | What happens |
+- **Seamless update**: SpaceKnife puts the new version in place itself and opens again.
+- **The classic way**: the installer, the disk image or the package takes over and SpaceKnife quits; for a portable copy or an AppImage, the downloaded file is shown so that you replace it yourself.
+
+A line under each button says what it does. Where your kind of install has no seamless way, the classic one is the only button.
+
+| Your copy | Seamless update | The classic way |
 |---|---|---|
-| Windows installer | **Restart and update** | SpaceKnife closes, the installer replaces the old version in the background without showing its pages, and SpaceKnife opens again. For an installation for all users, Windows asks once for administrator permission. Scan data and settings are kept. |
-| Portable | **Restart and update** | SpaceKnife closes, its program files are replaced by the new ones, and it opens again. The `data` folder (scan data and settings) stays as it is. If a file can't be replaced, the old files are put back and the old version opens again. |
-| AppImage | **Restart and update** | SpaceKnife closes, the new AppImage (already made executable) takes the place of the old file, and it opens again. Scan data and settings are kept. |
-| macOS | **Install** | SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one, then [allow it once more](../install/#first-launch-allow-it-once). |
-| deb, rpm | **Install** | SpaceKnife quits and opens the package in the system's software installer. Scan data and settings are kept. |
+| Windows installer | SpaceKnife closes, the installer runs silently in the background without showing its pages and replaces the old version, and SpaceKnife opens again. For an installation for all users, Windows asks once for administrator permission. | **Run the installer**: SpaceKnife quits and opens the installer's wizard; go through its steps to install the new version. It upgrades the old version in place. |
+| Portable (Windows zip, Linux tar.gz) | SpaceKnife closes, puts the new program files in place itself (see below) and opens again. The `data` folder stays as it is. | **Replace it yourself**: shows the downloaded archive in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then unpack the archive over the old files, keeping the `data` folder. |
+| AppImage | SpaceKnife closes, the new AppImage (already made executable) takes the place of the old file, and it opens again. | **Replace it yourself**: shows the new AppImage in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then replace the old file with it. |
+| macOS | None | **Open the disk image**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one, then [allow it once more](../install/#first-launch-allow-it-once). |
+| deb, rpm | None | **Open the package**: SpaceKnife quits and opens the package in the system's software installer. |
 
-After a **Restart and update**, the window says "Updated to SpaceKnife 0.4.0" (the version it now runs) once.
+Whichever way you choose, scan data and settings are kept. After a **Seamless update**, the window says "Updated to SpaceKnife 0.4.0" (the version it now runs) once.
 
-If a scan is still running when you click the button, the card warns "A scan is still running. Updating stops it (what it has read so far isn't saved)"; click **Restart and update anyway** (or **Install anyway**) to go ahead.
+**A portable copy's seamless update**: SpaceKnife unpacks the archive in its `updates` folder and quits; the files are swapped by the new version's own backend program, not by a script. It waits for SpaceKnife to quit, moves everything in the program folder except `data` to `updates/previous-<old version>` (waiting up to 30 more seconds while files are still in use), moves the new files in and starts the new version. If a file can't be replaced, the old files are put back and the old version opens again. If the new version is incomplete, nothing is touched: SpaceKnife stays open and says why. Each step is written to `updates/update-<version>.log`.
 
-SpaceKnife never installs anything without your click. It only starts a file that is directly in its `updates` folder and named like the release file for your kind of install.
+If a scan is still running when you click a button that closes SpaceKnife, the first click only warns "A scan is still running. Updating stops it (what it has read so far isn't saved)." and the button says **Click again to go on**; the second click goes ahead. **Replace it yourself** doesn't close SpaceKnife, so it doesn't ask.
+
+### It never installs by itself
+
+SpaceKnife never installs an update by itself, neither a seamless update nor an installer: every install starts with your click in the update card, and no option to install automatically will ever be added. **Download updates automatically** only downloads and verifies.
+
+Once you click, it only starts a file that is directly in its `updates` folder and named like the release file for your kind of install.
 
 ## The About & updates page
 
 **Settings › About & updates** gathers everything about your version and its updates. **About & updates** in the command palette opens it, and so does the **About** row at the bottom of **Settings › General**, which also says when a newer version is known.
 
 - **At the top**: your version, how this copy was installed and which versions are offered; what the last check found, when it ran and when the next automatic check is due. **Check for updates** checks now; **All releases** opens the [Releases page](https://github.com/DuskXi/SpaceKnife/releases). When a newer version is known, its update card is shown here too, and stays.
+- **Skipped series**: a release of a [skipped](#skipping-a-series) series is shown here too. The status reads "Version 0.4.2 is available (prompts for 0.4.x are off)", and the card has a line "Prompts for 0.4.x are off: no card, no badge, no automatic download." with **Turn prompts back on**, which makes the series speak up again. You can still download and install the release from this card.
 - **Updates**: the three update settings (check, download, versions to offer).
 - **Components**: the versions of SpaceKnife, Electron, Chromium, Node.js, the backend's Python and the protocol, and your system. **Copy version info** copies them, for a bug report.
 - **Release timeline**: the last 30 releases, newest first, marked **Current**, **New** (newer than yours) and **Preview**. Click one to read its notes in the interface language; the newest is open. **View on GitHub** opens its release page. The timeline comes from the last check, so it is there offline too; before the first check it is empty.
@@ -105,6 +135,8 @@ SpaceKnife never installs anything without your click. It only starts a file tha
 ## Turning the check off
 
 Switch off **Settings › About & updates › Updates › Check for updates automatically**. Automatic downloads stop with it, and SpaceKnife then makes no network request unless you ask for one with **Check for updates** or **Download**. A release found by an earlier check can still show its badge. Releases stay on the [Releases page](https://github.com/DuskXi/SpaceKnife/releases), and the [install page](../install/#upgrading) explains each way to upgrade by hand.
+
+To stop hearing about one series only, you don't need to turn the check off: click **Skip 0.4.x** in its card (see [Skipping a series](#skipping-a-series)), and other releases are still offered.
 
 ## Privacy
 
@@ -119,7 +151,7 @@ All of them go to GitHub, and only for updates:
 | Request | When | What is sent |
 |---|---|---|
 | The release list, from `api.github.com/repos/DuskXi/SpaceKnife/releases` | The automatic check, or **Check for updates** | A plain request with `User-Agent: SpaceKnife/<version>` and the ETag of the cached list. No token, no cookies. |
-| The checksum files and the release file, from GitHub | After a check found a newer version, with **Download updates automatically** on; or when you click **Download** | The same `User-Agent` |
+| The checksum files and the release file, from GitHub | After a check found a newer version, with **Download updates automatically** on (except for a skipped series: nothing of it is downloaded by itself); or when you click **Download** | The same `User-Agent` |
 
 - **Release page**, **Full release notes**, **All releases** and **View on GitHub** open GitHub in your web browser; SpaceKnife itself fetches nothing for them. The release timeline shows the notes the last check already fetched.
 - The requests go through your proxy settings: the usual proxy environment variables, and on Windows and macOS the system's proxy settings.

@@ -94,7 +94,7 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 
 Every release includes `SHA256SUMS.txt`.
 
-From 0.3.1 on, SpaceKnife checks this repository's releases at most once a day (it sends nothing about you or your files). A small update shows a badge at the top right; a bigger one also shows a summary. The new version is downloaded in the background and checked against the release's checksums; from 0.3.3 on, **Restart and update** puts it in place. Turn it off in Settings › About & updates.
+From 0.3.1 on, SpaceKnife checks this repository's releases at most once a day (it sends nothing about you or your files). A small update shows a badge at the top right; a bigger one also shows a summary. The new version is downloaded in the background and checked against the release's checksums. From 0.3.3 on, the update card offers two ways to install it: **Seamless update** (Windows installer, portable copies, AppImage) puts it in place and opens SpaceKnife again, the classic way opens the installer, the disk image or the package (or shows the file, to replace it yourself); **Skip 0.4.x** silences a whole series. SpaceKnife never installs an update by itself: nothing starts until you click. Turn the check off in Settings › About & updates.
 
 ### macOS: the first launch
 

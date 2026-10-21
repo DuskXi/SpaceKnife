@@ -66,7 +66,7 @@ describe("browserApi", () => {
     expect(e.notices).toHaveLength(3);
     expect(e.notices[0]).toContain("nas");
     expect(e.notices[0]).toContain("路径已复制");
-    expect(await sk.update.install("/x")).toContain("nas");
+    expect(await sk.update.install("/x", "seamless")).toContain("nas");
     sk.shell.openExternal("https://github.com/DuskXi/SpaceKnife/releases");
     expect(e.opened).toEqual(["https://github.com/DuskXi/SpaceKnife/releases"]);
   });

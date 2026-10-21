@@ -12,7 +12,7 @@ import { render } from "@/help/markdown";
 import { call, checkUpdates, settingsGo } from "@/state/actions";
 import { openHelpTab } from "@/state/help";
 import { toast, useApp } from "@/state/store";
-import { hasUpdate, installKindName, notesFor, releaseDate } from "@/state/updates";
+import { hasUpdate, installKindName, notesFor, releaseDate, seriesName } from "@/state/updates";
 import { UpdateCard } from "@/shell/UpdateCard";
 import { fmtAgo, fmtDateTime } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -34,7 +34,9 @@ export function AboutHeader() {
       : st.error
         ? t("上次检查失败：{error}", { error: st.error })
         : hasUpdate(st)
-          ? t("有新版本 {version}", { version: st.latest.version })
+          ? st.muted
+            ? t("有新版本 {version}（已跳过 {series} 的提示）", { version: st.latest.version, series: seriesName(st.series ?? "") })
+            : t("有新版本 {version}", { version: st.latest.version })
           : checked
             ? t("已是最新版本")
             : t("还没有检查过更新");

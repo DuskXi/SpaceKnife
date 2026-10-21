@@ -147,17 +147,17 @@ AppImage 和 tar.gz 里 Chromium 的 `chrome-sandbox` 没有 setuid。在限制�
 
 ## 升级
 
-SpaceKnife 每天最多检查一次新版本，有新版本时在标题栏提示，并在后台下载、校验新版本；Windows 安装版、便携版和 AppImage 点一下「重启并更新」就换上新版本并重新打开。具体怎么提示、怎么关掉，见[更新与隐私](../updates-privacy/)。
+SpaceKnife 每天最多检查一次新版本，有新版本时在标题栏提示，并在后台下载、校验新版本。下载好以后，更新卡片里有两个按钮：「无缝更新」（Windows 安装版、便携版和 AppImage）由 SpaceKnife 自己换上新版本并重新打开；经典方式交给安装程序、磁盘映像或安装包，或者由你自己替换。只有你点了才会安装。具体怎么提示、怎么跳过一个系列或关掉检查，见[更新与隐私](../updates-privacy/)。
 
 不管用哪种方式升级，扫描、快照和设置都会保留：它们不在程序目录里（便携版则在 `data` 文件夹里）。
 
 | 安装方式 | 新版本怎么替换旧版本 |
 |---|---|
-| Windows 安装包 | 在更新卡片里点「重启并更新」：SpaceKnife 关闭，安装程序在后台替换旧版本，然后 SpaceKnife 自动重新打开。手动运行新的安装包也一样。 |
-| Windows / Linux 便携版 | 点「重启并更新」：程序文件换成新的，`data` 文件夹保留。手动升级：退出 SpaceKnife，解压新的压缩包，用新文件替换旧文件夹里的内容，但留下其中的 `data` 文件夹。 |
-| macOS dmg | 点「安装」：SpaceKnife 退出并打开磁盘映像，把 SpaceKnife 拖进「应用程序」替换旧版本。然后再放行一次，并把「完全磁盘访问权限」关掉再打开（见上文）。 |
-| deb / rpm | 点「安装」：SpaceKnife 退出，并用系统的软件安装器打开安装包。也可以照上面的方法用 `apt` 或 `dnf` 安装新包。 |
-| AppImage | 点「重启并更新」：新的 AppImage 替换旧文件。手动升级：退出 SpaceKnife，用新的 AppImage 文件替换旧文件。 |
+| Windows 安装包 | 在更新卡片里点「无缝更新」：SpaceKnife 关闭，安装程序在后台替换旧版本（不显示安装向导），然后 SpaceKnife 自动重新打开。点「运行安装程序」则是 SpaceKnife 退出、打开安装向导，和手动运行新的安装包一样。 |
+| Windows / Linux 便携版 | 点「无缝更新」：SpaceKnife 自己换上新的程序文件，`data` 文件夹保留。点「自己替换」或手动升级：退出 SpaceKnife，解压新的压缩包，用新文件替换旧文件夹里的内容，但留下其中的 `data` 文件夹。 |
+| macOS dmg | 点「打开磁盘映像」：SpaceKnife 退出并打开磁盘映像，把 SpaceKnife 拖进「应用程序」替换旧版本。然后再放行一次，并把「完全磁盘访问权限」关掉再打开（见上文）。 |
+| deb / rpm | 点「打开安装包」：SpaceKnife 退出，并用系统的软件安装器打开安装包。也可以照上面的方法用 `apt` 或 `dnf` 安装新包。 |
+| AppImage | 点「无缝更新」：新的 AppImage 替换旧文件。点「自己替换」或手动升级：退出 SpaceKnife，用新的 AppImage 文件替换旧文件。 |
 
 ## 卸载
 

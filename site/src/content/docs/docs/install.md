@@ -147,17 +147,17 @@ In the AppImage and the tar.gz, Chromium's `chrome-sandbox` is not setuid. On di
 
 ## Upgrading
 
-SpaceKnife checks for new releases at most once a day and shows them in the title bar. It downloads and verifies the new version in the background, and on Windows, in a portable copy and as an AppImage one click on **Restart and update** puts it in place and opens it. How that works, and how to turn it off: [Updates and privacy](../updates-privacy/).
+SpaceKnife checks for new releases at most once a day and shows them in the title bar. It downloads and verifies the new version in the background; then the update card has two buttons. **Seamless update** (Windows installer, portable copy, AppImage) has SpaceKnife put the new version in place itself and open again; the classic way hands over to the installer, the disk image or the package, or lets you replace the file yourself. Nothing is installed until you click. How that works, how to skip a series and how to turn the check off: [Updates and privacy](../updates-privacy/).
 
 Whichever way you upgrade, your scans, snapshots and settings stay: they live outside the program folder, or in the `data` folder of a portable copy.
 
 | Install | How the new version replaces the old one |
 |---|---|
-| Windows installer | Click **Restart and update** in the update card: SpaceKnife closes, the installer replaces the old version in the background, and SpaceKnife opens again. Running a newer installer by hand does the same. |
-| Windows or Linux portable | Click **Restart and update**: the program files are replaced and the `data` folder is kept. By hand: quit SpaceKnife, unpack the new archive and replace the contents of the old folder, but keep its `data` folder. |
-| macOS dmg | Click **Install**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one. Then allow it once more and switch Full Disk Access off and on (see above). |
-| deb or rpm | Click **Install**: SpaceKnife quits and opens the package in the system's software installer. Or install the new package with `apt` or `dnf` as above. |
-| AppImage | Click **Restart and update**: the new AppImage takes the place of the old file. By hand: quit SpaceKnife and replace the old file with the new one. |
+| Windows installer | Click **Seamless update** in the update card: SpaceKnife closes, the installer replaces the old version in the background without showing its pages, and SpaceKnife opens again. **Run the installer** instead quits SpaceKnife and opens the installer's wizard, the same as running a newer installer by hand. |
+| Windows or Linux portable | Click **Seamless update**: SpaceKnife puts the new program files in place itself and keeps the `data` folder. With **Replace it yourself**, or by hand: quit SpaceKnife, unpack the new archive and replace the contents of the old folder, but keep its `data` folder. |
+| macOS dmg | Click **Open the disk image**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one. Then allow it once more and switch Full Disk Access off and on (see above). |
+| deb or rpm | Click **Open the package**: SpaceKnife quits and opens the package in the system's software installer. Or install the new package with `apt` or `dnf` as above. |
+| AppImage | Click **Seamless update**: the new AppImage takes the place of the old file. With **Replace it yourself**, or by hand: quit SpaceKnife and replace the old file with the new one. |
 
 ## Uninstalling
 

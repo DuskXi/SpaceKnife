@@ -223,6 +223,25 @@ def test_level(current: str, latest: str | None, level: str) -> None:
     assert update.level(current, latest) == level
 
 
+def test_series_that_can_be_muted() -> None:
+    # a minor update: its major.minor; a major one: its major; a patch release: none (badge only)
+    assert update.series("0.3.2", "0.4.1") == "0.4"
+    assert update.series("0.3.2", "0.4.0-beta.1") == "0.4"
+    assert update.series("0.3.2", "1.2.0") == "1"
+    assert update.series("0.9.9", "0.10.0") == "0.10"
+    assert update.series("0.3.2", "0.3.3") is None
+    assert update.series("0.4.0", "0.4.0") is None
+    assert update.series("dev", "0.4.0") is None
+    # reached: the running version is in it or past it, muting it says nothing any more
+    assert update.series_reached("0.4", "0.4.0")
+    assert update.series_reached("0.4", "0.5.1") and update.series_reached("0.4", "1.0.0")
+    assert not update.series_reached("0.4", "0.3.9")
+    assert not update.series_reached("0.10", "0.9.0")
+    assert update.series_reached("1", "1.0.0") and not update.series_reached("1", "0.9.0")
+    assert update.series_reached("junk", "0.3.0")
+    assert not update.series_reached("0.4", None)
+
+
 # ---------------------------------------------------------------- releases and channels
 
 
@@ -435,6 +454,8 @@ def test_clean_updates(tmp_path: Path) -> None:
         "SpaceKnife-0.3.3-Setup-x64.exe",  # newer, downloaded, not installed yet
         "SpaceKnife-0.3.3-Setup-x64.exe.part",  # an interrupted download
         "SpaceKnife-0.4.0-beta.1-x86_64.AppImage",  # a newer pre-release
+        "update-0.3.2.json",  # the plan that put the running version in place, and its log
+        "update-0.3.2.log",
         "readme.txt",  # not ours: stays
     ]
     for name in names:
@@ -449,6 +470,8 @@ def test_clean_updates(tmp_path: Path) -> None:
         "SpaceKnife-0.3.3-Setup-x64.exe.part",
         "previous-0.3.1",
         "staging-0.3.2",
+        "update-0.3.2.json",
+        "update-0.3.2.log",
     ]
     left = sorted(p.name for p in folder.iterdir())
     assert left == [

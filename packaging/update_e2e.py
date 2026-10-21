@@ -1,4 +1,4 @@
-"""End-to-end test of 「重启并更新」 and of the uninstaller's cleanup, on a CI runner only.
+"""End-to-end test of 「无缝更新」 and of the uninstaller's cleanup, on a CI runner only.
 
     python packaging/update_e2e.py portable dist/electron/SpaceKnife-<v>-win-x64-portable.zip
     xvfb-run -a python packaging/update_e2e.py portable dist/electron/SpaceKnife-<v>-linux-x64-portable.tar.gz
@@ -7,10 +7,11 @@
 Both modes serve a release list on 127.0.0.1 (SPACEKNIFE_UPDATE_FEED) that offers the next patch
 version, whose file is this build again (renamed; the portable archive also gets a marker file). The
 app is started minimized with the DevTools port on; the test waits until the update badge says the
-file is downloaded and verified, then clicks the badge and 「重启并更新」 like a user.
+file is downloaded and verified, then clicks the badge and 「无缝更新」 like a user.
 
-- portable: the program files are swapped by the app's script, the data folder stays, the app comes
-  back with --updated and its backend clears the old files out of the updates folder.
+- portable: the program files are swapped by the new version's own backend (--apply-update, no
+  script), the data folder stays, the app comes back with --updated and its backend clears the old
+  files out of the updates folder.
 - nsis (Windows): with --previous, the published installer is installed and upgraded the way the
   app runs the new installer (--updated /S --force-run /currentuser). Then the in-app update, a silent
   uninstall (keeps the snapshots, settings and logs; removes the caches and downloaded updates), the
@@ -242,7 +243,7 @@ def devtools_page(port_file: Path, proc: subprocess.Popen[bytes] | None) -> str:
 
 
 def restart_and_update(url: str, version: str) -> None:
-    """Wait for the badge to say the update is ready, then click it and 「重启并更新」."""
+    """Wait for the badge to say the update is ready, then click it and 「无缝更新」."""
     with connect(url, max_size=None) as ws:
         page = Page(ws)
         state = wait(
@@ -262,7 +263,7 @@ def restart_and_update(url: str, version: str) -> None:
         badge = page.eval("document.querySelector('.update-badge').textContent")
         print(f"badge: {badge!r}", flush=True)
         page.eval("document.querySelector('.update-badge').click(), true")
-        button = "document.querySelector('.update-card .uc-actions button.primary')"
+        button = "document.querySelector('.update-card .uc-choice.seamless')"
         wait("the update card", lambda: page.eval(f"!!{button}"), 30)
         card = page.eval("document.querySelector('.update-card').innerText")
         print(f"card: {card!r}", flush=True)
@@ -355,11 +356,22 @@ def portable(archive: Path) -> None:
             wait("the old app to quit", lambda: proc.poll() is not None, 60)
             updates = data / "data" / "updates"
             log = updates / f"update-{newer}.log"
-            wait("the swap script's log", log.exists, 60)
+
+            def swapped() -> str | None:  # read before the new backend clears the updates folder
+                try:
+                    text = log.read_text(encoding="utf-8")
+                except OSError:  # not there yet
+                    return None
+                last = text.splitlines()[-1] if text.strip() else ""
+                ended = last.endswith(("updated", "kept the old version")) or "did not quit" in last
+                return text if ended else None
+
+            text = wait("the swap's log to say how it ended", swapped, 120)
+            print(f"the swap's log:\n{text}", flush=True)
+            if not text.splitlines()[-1].endswith(" updated"):
+                fail("the swap did not finish with 'updated'")
             pid = wait("the app to come back with --updated", lambda: updated_main(exe), 120)
-            print(f"back with --updated (pid {pid}); log:\n{log.read_text(encoding='utf-8')}", flush=True)
-            if "updated" not in log.read_text(encoding="utf-8").splitlines()[-1]:
-                fail("the swap script did not finish with 'updated'")
+            print(f"back with --updated (pid {pid})", flush=True)
             if not (app_dir / marker).is_file():
                 fail("the new program files are not in place")
             if not keep.is_file():
@@ -659,7 +671,7 @@ def nsis(setup: Path, previous: Path | None) -> None:
             expect(files, {"data", "cache", "profile"})
             quiet_uninstall()
 
-    step("in-app update: 「重启并更新」 runs the next version's installer")
+    step("in-app update: 「无缝更新」 runs the next version's installer silently")
     exe, _ = install(setup)
     files = seed()
     newer = next_patch(version)

@@ -1,20 +1,20 @@
 // Updates (update.* of the backend, spaceknife_protocol.update): how this copy was installed, which
 // decides the release file the backend downloads; what main checks before it uses a downloaded file;
-// and how 「重启并更新」 puts the new version in place for each kind of install (the Windows installer
-// run silently, a portable copy's files swapped by a script once the app is gone, an AppImage
-// replaced). Pure functions (the file system is injectable); index.ts does the Electron side.
+// and what the update card's two buttons need (shared/install.ts says what each does per kind of
+// install): the Windows installer's arguments, the plan for the backend that swaps a portable
+// copy's files. Pure functions (the file system is injectable); index.ts does the Electron side.
 
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { posix, win32 } from "node:path";
 
+import type { InstallKind } from "../shared/install";
 import type { TextKey } from "./text";
+
+export { type InstallHow, type InstallKind, type InstallStep, installStep, stepQuits } from "../shared/install";
 
 // The pages main opens in the browser for the renderer (release pages, the help's links to the
 // website); nothing else. The list is shared with the renderer, which checks it before it asks.
 export { PROJECT_PAGES, WEBSITE, projectPage } from "../shared/links";
-
-/** How this copy was installed (spaceknife_protocol.update.InstallKind; SPACEKNIFE_INSTALL_KIND). */
-export type InstallKind = "nsis" | "portable" | "appimage" | "deb" | "rpm" | "dmg" | "dev" | "unknown";
 
 /** The uninstaller electron-builder's NSIS installer puts next to the executable. */
 const NSIS_UNINSTALLER = "Uninstall SpaceKnife.exe";
@@ -38,27 +38,6 @@ const PORTABLE: Partial<Record<NodeJS.Platform, RegExp>> = {
   win32: new RegExp(String.raw`^SpaceKnife-${VERSION}-win-x64-portable\.zip$`),
   linux: new RegExp(String.raw`^SpaceKnife-${VERSION}-linux-x64-portable\.tar\.gz$`),
 };
-
-/** How 「重启并更新」 puts the downloaded version in place: the Windows installer runs silently and
- *  starts it; a portable copy's files or an AppImage are replaced and it starts; a disk image or a
- *  package opens in the system's installer (the app quits); anything else has no install step. */
-export type RestartMode = "installer" | "replace" | "open" | "none";
-
-export function restartMode(kind: InstallKind): RestartMode {
-  switch (kind) {
-    case "nsis":
-      return "installer";
-    case "portable":
-    case "appimage":
-      return "replace";
-    case "dmg":
-    case "deb":
-    case "rpm":
-      return "open";
-    default:
-      return "none";
-  }
-}
 
 /** The Windows installer's arguments for a silent update in place, electron-builder's own flags:
  *  --updated keeps the data and skips the pages, --force-run starts the new version afterwards. The
@@ -156,126 +135,17 @@ export interface SwapPlan {
   log: string;
 }
 
-/** The script that swaps a portable copy's files after the app has quit: PowerShell on Windows, sh
- *  on Linux. It waits for the app, moves the old files out (retrying while Windows still holds them),
- *  moves the new ones in, undoes both when a step fails, and starts the app with --updated (the new
- *  version) or without (the old one). The backend removes `previous`, `staged`, the script and its log
- *  once the new version runs (spaceknife.update.clean_updates). */
-/** The script file's bytes: Windows PowerShell 5.1 reads a .ps1 without a byte order mark in the
- * ANSI code page, so the paths in it (a portable copy under 「D:\\软件」) need UTF-8 with a BOM. */
-export function swapScriptFile(platform: "win32" | "linux", text: string): Buffer {
-  return Buffer.from(platform === "win32" ? `\ufeff${text}` : text, "utf8");
+/** The plan file for the new version's backend (`--apply-update <plan>`, spaceknife.update_swap):
+ *  version 1, which every later backend keeps reading (an app hands it to the newer version). */
+export function swapPlanJson(p: SwapPlan): string {
+  const plan = { v: 1, pid: p.pid, app: p.appDir, new: p.staged, old: p.previous, exe: p.exe, log: p.log, keep: ["data"] };
+  return `${JSON.stringify(plan, null, 2)}
+`;
 }
 
-/** How to start the swap so it outlives the app without a window. On Windows a detached
- * powershell.exe (no console) never runs its script, and an attached one dies with the app (libuv's
- * job object). So an attached, hidden PowerShell starts the real one with Start-Process: that one
- * leaves the job (silent breakaway) and outlives the app. `wait`: the app quits only once the starter
- * is done. On Linux the shell runs detached. */
-export function swapLauncher(platform: "win32" | "linux", script: string): { cmd: string; args: string[]; wait: boolean } {
-  if (platform !== "win32") return { cmd: "/bin/sh", args: [script], wait: false };
-  // Start-Process joins an argument array with spaces and no quotes, so the arguments go as one
-  // string, the script's path in double quotes (a path can't hold one); the whole string in single
-  // quotes for the starter's -Command
-  const inner = `-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${script}"`;
-  const start = `Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList '${inner.replace(/'/g, "''")}'`;
-  return { cmd: "powershell.exe", args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", start], wait: true };
-}
-
-export function swapScript(platform: "win32" | "linux", plan: SwapPlan): string {
-  return platform === "win32" ? powershellSwap(plan) : shSwap(plan);
-}
-
-const psQuote = (s: string) => `'${s.replace(/'/g, "''")}'`;
-const shQuote = (s: string) => `'${s.replace(/'/g, "'\\''")}'`;
-
-function powershellSwap(p: SwapPlan): string {
-  return [
-    "# SpaceKnife: a portable copy's update (written by the app; removed once the new version runs)",
-    "$ErrorActionPreference = 'Stop'",
-    `$App = ${psQuote(p.appDir)}`,
-    `$New = ${psQuote(p.staged)}`,
-    `$Old = ${psQuote(p.previous)}`,
-    `$Exe = ${psQuote(p.exe)}`,
-    `$Log = ${psQuote(p.log)}`,
-    "function Log([string]$m) { Add-Content -LiteralPath $Log -Value ((Get-Date).ToString('u') + ' ' + $m) }",
-    "function Move-Entries([string]$from, [string]$to) {",
-    "  New-Item -ItemType Directory -Force -Path $to | Out-Null",
-    "  foreach ($e in @(Get-ChildItem -LiteralPath $from -Force | Where-Object { $_.Name -ne 'data' })) {",
-    "    Move-Item -LiteralPath $e.FullName -Destination (Join-Path $to $e.Name) -Force",
-    "  }",
-    "}",
-    `Log 'waiting for SpaceKnife (${p.pid}) to quit'`,
-    `try { Wait-Process -Id ${p.pid} -Timeout 60 -ErrorAction Stop } catch { }`,
-    "# the new version must be complete before anything is moved",
-    "if (-not (Test-Path -LiteralPath (Join-Path $New (Split-Path -Leaf $Exe)) -PathType Leaf)) {",
-    "  Log 'the new version is incomplete: kept the old version'",
-    "  Start-Process -FilePath $Exe",
-    "  exit 1",
-    "}",
-    "$ok = $false",
-    "for ($i = 0; $i -lt 60 -and -not $ok; $i++) {",
-    "  try { Move-Entries $App $Old; $ok = $true } catch { Log ('busy: ' + $_.Exception.Message); Start-Sleep -Milliseconds 500 }",
-    "}",
-    "if ($ok) {",
-    "  try { Move-Entries $New $App } catch {",
-    "    Log ('could not move the new files in: ' + $_.Exception.Message)",
-    "    try { Move-Entries $App $New } catch { Log ('could not take them out again: ' + $_.Exception.Message) }",
-    "    $ok = $false",
-    "  }",
-    "}",
-    "if (-not $ok) {",
-    "  try { Move-Entries $Old $App } catch { Log ('could not restore the old files: ' + $_.Exception.Message) }",
-    "  Log 'kept the old version'",
-    "  Start-Process -FilePath $Exe",
-    "} else {",
-    "  Log 'updated'",
-    "  Start-Process -FilePath $Exe -ArgumentList '--updated'",
-    "}",
-    "",
-  ].join("\r\n");
-}
-
-function shSwap(p: SwapPlan): string {
-  return [
-    "#!/bin/sh",
-    "# SpaceKnife: a portable copy's update (written by the app; removed once the new version runs)",
-    `APP=${shQuote(p.appDir)}`,
-    `NEW=${shQuote(p.staged)}`,
-    `OLD=${shQuote(p.previous)}`,
-    `EXE=${shQuote(p.exe)}`,
-    `LOG=${shQuote(p.log)}`,
-    `log() { printf '%s %s\\n' "$(date -u '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG"; }`,
-    "move_entries() {",
-    '  [ -d "$1" ] || return 1',
-    '  mkdir -p "$2" || return 1',
-    '  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do',
-    '    [ -e "$e" ] || [ -L "$e" ] || continue',
-    '    [ "$(basename "$e")" = data ] && continue',
-    '    mv -f "$e" "$2"/ || return 1',
-    "  done",
-    "}",
-    `log 'waiting for SpaceKnife (${p.pid}) to quit'`,
-    "n=0",
-    `while kill -0 ${p.pid} 2>/dev/null && [ $n -lt 300 ]; do sleep 0.2; n=$((n + 1)); done`,
-    "# the new version must be complete before anything is moved",
-    'if [ ! -f "$NEW/$(basename "$EXE")" ]; then',
-    '  log "the new version is incomplete: kept the old version"',
-    '  nohup "$EXE" >/dev/null 2>&1 &',
-    "  exit 1",
-    "fi",
-    "ok=0",
-    'if move_entries "$APP" "$OLD"; then',
-    '  if move_entries "$NEW" "$APP"; then ok=1; else log "could not move the new files in"; move_entries "$APP" "$NEW"; fi',
-    "fi",
-    'if [ "$ok" = 1 ]; then',
-    "  log updated",
-    '  nohup "$EXE" --updated >/dev/null 2>&1 &',
-    "else",
-    '  move_entries "$OLD" "$APP" || log "could not restore the old files"',
-    '  log "kept the old version"',
-    '  nohup "$EXE" >/dev/null 2>&1 &',
-    "fi",
-    "",
-  ].join("\n");
+/** The new version's backend executable in its unpacked files: it does the swap (resources/backend,
+ *  electron-builder.yml extraResources). */
+export function swapHelper(staged: string, platform: "win32" | "linux"): string {
+  const path = platform === "win32" ? win32 : posix;
+  return path.join(staged, "resources", "backend", platform === "win32" ? "spaceknife-backend.exe" : "spaceknife-backend");
 }

@@ -964,8 +964,37 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .uc-actions { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 14px 14px; }
 .update-card.dialog .uc-actions { padding: 6px 20px 20px; }
 .uc-actions .ghost, .uc-actions .primary { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; white-space: nowrap; }
-.uc-later { height: 30px; margin-right: auto; padding: 0 8px; color: var(--sk-color-text-secondary); }
-.uc-later:hover { color: var(--sk-color-text-primary); }
+/* 「以后再说」 and 「跳过 0.4.x」 (a whole series stays quiet: update.mute), at the left */
+.uc-later { display: flex; align-items: center; gap: 2px; margin-right: auto; min-width: 0; }
+.uc-later .text-btn { height: 30px; padding: 0 8px; color: var(--sk-color-text-secondary); white-space: nowrap; }
+.uc-later .text-btn:hover { color: var(--sk-color-text-primary); }
+/* after the download, the two big buttons (shared/install.ts): 「无缝更新」 first and accented, then the
+   classic way; nothing installs without one of these clicks */
+.uc-choices { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 0 14px 4px; }
+.update-card.dialog .uc-choices { padding: 0 20px 6px; }
+.update-card.inline .uc-choices { flex-direction: row; flex-wrap: wrap; }
+.update-card.inline .uc-choice { flex: 1 1 240px; }
+.uc-choice {
+  display: flex; align-items: flex-start; gap: 12px; width: 100%; min-height: 58px; padding: 11px 14px; border: 0; border-radius: 8px;
+  background: var(--sk-color-bg-raised); box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); color: var(--sk-color-text-primary);
+  font: inherit; text-align: left; cursor: pointer;
+  transition: background var(--sk-motion-duration-fast) var(--sk-motion-easing-out), box-shadow var(--sk-motion-duration-fast) var(--sk-motion-easing-out);
+}
+.uc-choice:hover { background: var(--sk-color-bg-hover); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); }
+.uc-choice:focus-visible { outline: 2px solid var(--sk-color-accent-default); outline-offset: 2px; }
+.uc-choice > svg { flex: none; margin-top: 1px; color: var(--sk-color-text-secondary); }
+.uc-choice-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.uc-choice-text strong { font-size: 13px; font-weight: 600; line-height: 18px; }
+.uc-choice-text span { font-size: 12px; line-height: 17px; color: var(--sk-color-text-secondary); overflow-wrap: anywhere; }
+.uc-choice.seamless { background: color-mix(in srgb, var(--sk-color-accent-default) 14%, var(--sk-color-bg-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sk-color-accent-default) 45%, transparent); }
+.uc-choice.seamless:hover { background: color-mix(in srgb, var(--sk-color-accent-default) 22%, var(--sk-color-bg-raised)); }
+.uc-choice.seamless > svg { color: var(--sk-color-accent-default); }
+.uc-choice.confirm { box-shadow: inset 0 0 0 1px var(--sk-color-status-warning); }
+.uc-choice.confirm .uc-choice-text span { color: var(--sk-color-status-warning); }
+/* 「关于与更新」: a skipped series says so, and turns its prompts back on */
+.uc-muted { flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--sk-color-line-subtle); font-size: 12px; line-height: 18px; color: var(--sk-color-text-secondary); }
+.uc-muted svg { flex: none; color: var(--sk-color-text-tertiary); }
+.uc-muted .link { flex: none; margin-left: auto; white-space: nowrap; }
 .uc-download svg { transform: rotate(180deg); }
 @keyframes sk-update-in { from { opacity: 0; transform: translateY(-6px); } }
 /* downloaded and checked: the badge says the next step is a restart */

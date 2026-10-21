@@ -1,12 +1,10 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { spawn, spawnSync } from "node:child_process";
-
-import { type FileProbe, type InstallKind, installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapLauncher, swapScript, swapScriptFile } from "./update";
+import { type FileProbe, type InstallKind, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, stepQuits, swapHelper, swapPlanJson } from "./update";
 
 const none = () => false;
 const only = (...paths: string[]) => (path: string) => paths.includes(path);
@@ -197,12 +195,17 @@ describe("projectPage", () => {
   });
 });
 
-describe("restartMode", () => {
-  it("runs the installer, replaces in place, opens the package, or has nothing to do", () => {
-    expect(restartMode("nsis")).toBe("installer");
-    expect([restartMode("portable"), restartMode("appimage")]).toEqual(["replace", "replace"]);
-    expect([restartMode("dmg"), restartMode("deb"), restartMode("rpm")]).toEqual(["open", "open", "open"]);
-    expect([restartMode("dev"), restartMode("unknown")]).toEqual(["none", "none"]);
+describe("installStep", () => {
+  const kinds: InstallKind[] = ["nsis", "portable", "appimage", "dmg", "deb", "rpm", "dev", "unknown"];
+  it("offers 「无缝更新」 where SpaceKnife can put the new version in place itself", () => {
+    expect(kinds.map((k) => installStep(k, "seamless"))).toEqual(["silent", "swap", "replace", null, null, null, null, null]);
+  });
+  it("offers the classic way for every release file: the installer's pages, the package, the file itself", () => {
+    expect(kinds.map((k) => installStep(k, "classic"))).toEqual(["wizard", "reveal", "reveal", "open", "open", "open", null, null]);
+  });
+  it("closes SpaceKnife for everything but showing the file", () => {
+    expect((["silent", "swap", "replace", "wizard", "open"] as const).every(stepQuits)).toBe(true);
+    expect(stepQuits("reveal")).toBe(false);
   });
 });
 
@@ -228,7 +231,7 @@ describe("nsisUpdateArgs", () => {
   });
 });
 
-describe("swapScript", () => {
+describe("the swap of a portable copy", () => {
   const plan = {
     pid: 4321,
     appDir: "C:\\Users\\lenny\\Apps\\Space Knife's",
@@ -237,108 +240,22 @@ describe("swapScript", () => {
     exe: "C:\\Users\\lenny\\Apps\\Space Knife's\\SpaceKnife.exe",
     log: "C:\\x\\update-0.4.0.log",
   };
-  it("quotes every path for its shell and waits for the app", () => {
-    const ps = swapScript("win32", plan);
-    expect(ps).toContain("$App = 'C:\\Users\\lenny\\Apps\\Space Knife''s'");
-    expect(ps).toContain("Wait-Process -Id 4321");
-    expect(ps).toContain("Where-Object { $_.Name -ne 'data' }");
-    const sh = swapScript("linux", { ...plan, appDir: "/home/lenny/apps/it's", exe: "/home/lenny/apps/it's/spaceknife" });
-    expect(sh.startsWith("#!/bin/sh\n")).toBe(true);
-    expect(sh).toContain("APP='/home/lenny/apps/it'\\''s'");
-    expect(sh).toContain("kill -0 4321");
+  it("writes the plan of version 1 that the new version's backend reads (spaceknife.update_swap)", () => {
+    expect(JSON.parse(swapPlanJson(plan))).toEqual({
+      v: 1,
+      pid: 4321,
+      app: plan.appDir,
+      new: plan.staged,
+      old: plan.previous,
+      exe: plan.exe,
+      log: plan.log,
+      keep: ["data"],
+    });
   });
-
-  // run the script for real on folders of this machine (the app it starts again is a missing file:
-  // nothing is shown, and the swap is done before that last step)
-  const shell = process.platform === "win32" ? "win32" : process.platform === "linux" ? "linux" : null;
-  const dirs: string[] = [];
-  afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  it("is done by the new version's own backend, not a script", () => {
+    expect(swapHelper(plan.staged, "win32")).toBe(`${plan.staged}\\resources\\backend\\spaceknife-backend.exe`);
+    expect(swapHelper("/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable", "linux")).toBe(
+      "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/resources/backend/spaceknife-backend",
+    );
   });
-
-  function layout(withStaged: boolean) {
-    const root = mkdtempSync(join(tmpdir(), "sk-swap-"));
-    dirs.push(root);
-    const app = join(root, "app");
-    const updates = join(app, "data", "data", "updates");
-    mkdirSync(join(app, "resources"), { recursive: true });
-    mkdirSync(updates, { recursive: true });
-    writeFileSync(join(app, "SpaceKnife.exe"), "old");
-    writeFileSync(join(app, "resources", "old.txt"), "old");
-    writeFileSync(join(app, "data", "data", "snapshot.sks"), "mine");
-    const staged = join(updates, "staging-0.4.0", "SpaceKnife-0.4.0-portable");
-    if (withStaged) {
-      mkdirSync(join(staged, "resources"), { recursive: true });
-      mkdirSync(join(staged, "data"), { recursive: true });
-      writeFileSync(join(staged, "SpaceKnife.exe"), "new");
-      writeFileSync(join(staged, "resources", "new.txt"), "new");
-      writeFileSync(join(staged, "data", "README.txt"), "the archive's note");
-    }
-    const p = {
-      pid: 2147483000, // not running: the swap starts at once
-      appDir: app,
-      staged,
-      previous: join(updates, "previous-0.3.2"),
-      exe: join(root, "missing", "SpaceKnife.exe"),
-      log: join(updates, "update-0.4.0.log"),
-    };
-    const file = join(updates, shell === "win32" ? "update-0.4.0.ps1" : "update-0.4.0.sh");
-    writeFileSync(file, swapScript(shell!, p));
-    const args = shell === "win32" ? ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", file] : [file];
-    spawnSync(shell === "win32" ? "powershell.exe" : "/bin/sh", args, { windowsHide: true, timeout: 60_000 });
-    return { app, updates, p };
-  }
-
-  it.runIf(shell)("puts the new files in place and keeps data", () => {
-    const { app, p } = layout(true);
-    expect(readFileSync(join(app, "SpaceKnife.exe"), "utf8")).toBe("new");
-    expect(existsSync(join(app, "resources", "new.txt")) && !existsSync(join(app, "resources", "old.txt"))).toBe(true);
-    expect(readFileSync(join(app, "data", "data", "snapshot.sks"), "utf8")).toBe("mine");
-    expect(existsSync(join(app, "data", "README.txt"))).toBe(false); // the archive's data folder stays out
-    expect(readFileSync(join(p.previous, "SpaceKnife.exe"), "utf8")).toBe("old"); // until the backend cleans
-    expect(readFileSync(p.log, "utf8")).toContain("updated");
-  }, 60_000);
-
-  it.runIf(shell)("keeps the old version when the new files can't be moved in", () => {
-    const { app, p } = layout(false);
-    expect(readFileSync(join(app, "SpaceKnife.exe"), "utf8")).toBe("old");
-    expect(readdirSync(join(app, "resources"))).toEqual(["old.txt"]);
-    expect(readFileSync(p.log, "utf8")).toContain("kept the old version");
-  }, 60_000);
-});
-
-describe("starting the swap", () => {
-  it("writes a BOM on Windows only (PowerShell 5.1 reads UTF-8 without one as ANSI)", () => {
-    expect([...swapScriptFile("win32", "x").subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
-    expect(swapScriptFile("linux", "x").toString("utf8")).toBe("x");
-  });
-
-  it("starts the Windows swap through a hidden PowerShell that it waits for", () => {
-    const how = swapLauncher("win32", "C:\\Users\\lenny\\Space Knife's\\update-0.4.0.ps1");
-    expect(how.cmd).toBe("powershell.exe");
-    expect(how.wait).toBe(true);
-    const command = how.args[how.args.indexOf("-Command") + 1]!;
-    expect(command).toContain("Start-Process -FilePath powershell.exe -WindowStyle Hidden");
-    expect(command).toContain(`-File "C:\\Users\\lenny\\Space Knife''s\\update-0.4.0.ps1"'`);
-    expect(swapLauncher("linux", "/tmp/x.sh")).toEqual({ cmd: "/bin/sh", args: ["/tmp/x.sh"], wait: false });
-  });
-
-  // for real: the script must still run once the starter (and the test's own process, here) is gone
-  it.runIf(process.platform === "win32")("runs the script after the starter is done, from a folder with Chinese in its name", async () => {
-    const root = mkdtempSync(join(tmpdir(), "sk-launch-"));
-    try {
-      const dir = join(root, "软件 it's");
-      mkdirSync(dir, { recursive: true });
-      const log = join(dir, "ran.log");
-      const script = join(dir, "update-0.4.0.ps1");
-      writeFileSync(script, swapScriptFile("win32", `Start-Sleep -Milliseconds 500\r\nAdd-Content -LiteralPath '${log.replace(/'/g, "''")}' -Value 'ran'\r\n`));
-      const how = swapLauncher("win32", script);
-      const code = await new Promise<number | null>((done) => spawn(how.cmd, how.args, { stdio: "ignore", windowsHide: true }).once("exit", done));
-      expect(code).toBe(0);
-      for (let i = 0; i < 100 && !existsSync(log); i++) await new Promise((r) => setTimeout(r, 200));
-      expect(readFileSync(log, "utf8")).toContain("ran");
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  }, 60_000);
 });

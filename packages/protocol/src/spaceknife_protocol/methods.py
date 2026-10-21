@@ -99,7 +99,7 @@ from .streams import (
     UnsubscribeParams,
 )
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
-from .update import UpdateChangedEvent, UpdateReleases, UpdateStatus, UpdateVersionParams
+from .update import UpdateChangedEvent, UpdateMuteParams, UpdateReleases, UpdateStatus, UpdateVersionParams
 from .view import (
     ViewFilterParams,
     ViewFrameEvent,
@@ -435,6 +435,13 @@ UPDATE_CHECK = MethodSpec(
 UPDATE_DISMISS = MethodSpec(
     "update.dismiss", UpdateVersionParams, UpdateStatus, "The card / dialog for this version was closed."
 )
+UPDATE_MUTE = MethodSpec(
+    "update.mute",
+    UpdateMuteParams,
+    UpdateStatus,
+    "Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic"
+    " download for its releases.",
+)
 UPDATE_DOWNLOAD = MethodSpec(
     "update.download",
     UpdateVersionParams,
@@ -475,6 +482,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         UPDATE_STATUS,
         UPDATE_CHECK,
         UPDATE_DISMISS,
+        UPDATE_MUTE,
         UPDATE_DOWNLOAD,
         UPDATE_RELEASES,
         UPDATE_CANCEL,

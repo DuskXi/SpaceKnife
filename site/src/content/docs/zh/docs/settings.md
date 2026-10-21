@@ -342,7 +342,7 @@ SpaceKnife 的设置都在一个「设置」标签页里。改动立即保存，
 | 设置 | 默认值 | 可选值 | 说明 | 设置键 |
 | --- | --- | --- | --- | --- |
 | 自动检查更新 | 开 | 开 `true` · 关 `false` | 每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示。 | `general.update_check` |
-| 自动下载更新 | 开 | 开 `true` · 关 `false` | 发现新版本后在后台下载并校验；下载好后点「重启并更新」才会安装，不会自己安装。「自动检查更新」打开时才能修改。 | `general.update_download` |
+| 自动下载更新 | 开 | 开 `true` · 关 `false` | 发现新版本后在后台下载并校验；只有你在更新卡片里点了「无缝更新」或安装方式才会安装，从不自己安装。「自动检查更新」打开时才能修改。 | `general.update_download` |
 | 提示哪些版本 | 包括预览版 | 包括预览版 `"preview"` · 只要正式版 `"stable"` | 预览版是 GitHub 上标为预发布（Pre-release）的版本。 | `general.update_channel` |
 
 <!-- generated:settings:end -->

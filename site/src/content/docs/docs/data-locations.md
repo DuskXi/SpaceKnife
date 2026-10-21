@@ -109,7 +109,7 @@ The portable archives (`SpaceKnife-<version>-win-x64-portable.zip` and `SpaceKni
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.
 - Unpack the archive somewhere you can write: a folder under Program Files, for example, doesn't work.
-- The in-app update knows it is a portable copy: it downloads the portable archive, and **Restart and update** replaces the program files and keeps `data` (see [Upgrading](../install/#upgrading)).
+- The in-app update knows it is a portable copy: it downloads the portable archive, and **Seamless update** replaces the program files and keeps `data`; **Replace it yourself** shows the archive so that you unpack it over the old files (see [Upgrading](../install/#upgrading)).
 - The macOS app and the AppImage have no portable mode. On macOS, use `SPACEKNIFE_HOME` instead.
 
 :::caution[The command line and portable mode]

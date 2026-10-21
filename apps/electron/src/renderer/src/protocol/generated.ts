@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "a60d83f2f15b3b3e";
+export const SCHEMA_HASH = "fddfc4bed8e8889f";
 
 export interface AgeCond {
   end: number;
@@ -1621,6 +1621,13 @@ export interface UpdateInfo {
   version: string;
 }
 
+export interface UpdateMuteParams {
+  /** False turns its prompts back on */
+  muted?: boolean;
+  /** A series as UpdateStatus.series names it: "0.4" (every 0.4.x) or "1" (every 1.x) */
+  series: string;
+}
+
 export interface UpdateReleases {
   /** The recent releases, newest first (at most 30, notes at most 16 KiB each, no asset) */
   releases: UpdateInfo[];
@@ -1645,8 +1652,12 @@ export interface UpdateStatus {
   latest: UpdateInfo | null;
   /** How far behind the newest release this app is */
   level: "none" | "patch" | "minor" | "major";
+  /** The user turned off the prompts of that series: no card, dialog or badge, no automatic download (the 「关于与更新」 page still shows it) */
+  muted: boolean;
   /** When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools) */
   next_check_at: string | null;
+  /** The series of the newest release that update.mute takes: its major.minor for a minor update ("0.4"), its major for a major one ("1"); None for a patch release or no update */
+  series: string | null;
 }
 
 export interface UpdateVersionParams {
@@ -2039,6 +2050,8 @@ export interface Methods {
   "update.dismiss": { params: UpdateVersionParams; result: UpdateStatus };
   /** Download this version's file for this install into the updates folder (progress: update.changed). */
   "update.download": { params: UpdateVersionParams; result: UpdateStatus };
+  /** Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic download for its releases. */
+  "update.mute": { params: UpdateMuteParams; result: UpdateStatus };
   /** The recent releases with their notes (the timeline of the About & updates page). */
   "update.releases": { params: Empty; result: UpdateReleases };
   /** What the last update check found (updates.v1). */

@@ -109,7 +109,7 @@ SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Conten
 - 手动设置的 `SPACEKNIFE_HOME` 优先于 `data` 文件夹。
 - 删掉或重命名 `data`，这份程序就改用正常的用户目录；放回去又是便携的。
 - 解压到自己能写入的位置：比如 Program Files 下面就不行。
-- 软件内的更新知道这是便携版：它下载便携包，「重启并更新」替换程序文件、留下 `data`（见[升级](../install/#升级)）。
+- 软件内的更新知道这是便携版：它下载便携包，「无缝更新」替换程序文件、留下 `data`；「自己替换」把压缩包显示出来，由你解压覆盖（见[升级](../install/#升级)）。
 - macOS 应用和 AppImage 没有便携模式。macOS 上改用 `SPACEKNIFE_HOME`。
 
 :::caution[命令行不认便携模式]

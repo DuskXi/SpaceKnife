@@ -13,8 +13,8 @@ always checks, also with the setting off.
 
 In the real app (:meth:`UpdateService.start`) the service also cleans the ``updates`` folder once at
 start, and with 「自动下载更新」 on it downloads a newer release's file by itself (after a check, and at
-start when one is already known); the front end then offers 「重启并更新」. Tests and demos without
-the scheduler never download by themselves.
+start when one is already known); the front end then offers 「无缝更新」 and the classic way, each only
+on a click. Tests and demos without the scheduler never download by themselves.
 
 The network calls run in daemon threads (:func:`in_thread`): one stuck on a slow connection never
 holds up the backend's exit, and its partial download is deleted once it notices the cancel.
@@ -43,6 +43,7 @@ from spaceknife_protocol.methods import (
     UPDATE_CHECK,
     UPDATE_DISMISS,
     UPDATE_DOWNLOAD,
+    UPDATE_MUTE,
     UPDATE_RELEASES,
     UPDATE_STATUS,
 )
@@ -50,6 +51,7 @@ from spaceknife_protocol.update import (
     UpdateChangedEvent,
     UpdateChannel,
     UpdateDownload,
+    UpdateMuteParams,
     UpdateReleases,
     UpdateStatus,
     UpdateVersionParams,
@@ -184,6 +186,7 @@ class UpdateService:
             download = download.model_copy(update={"error": str(self._download_error)})
         current = self.current()
         due = self.due_in() if self.auto else None  # tests and demos check only when asked
+        series = update.series(current, latest.version) if latest is not None else None
         return UpdateStatus(
             current=current or "",
             install_kind=self.kind,
@@ -195,6 +198,8 @@ class UpdateService:
             level=update.level(current, latest.version) if latest is not None else "none",
             latest=latest,
             dismissed=latest is not None and latest.version in self.state.dismissed,
+            series=series,
+            muted=series is not None and series in self.state.muted,
             download=download,
             next_check_at=self.clock() + timedelta(seconds=due) if due is not None else None,
         )
@@ -274,6 +279,9 @@ class UpdateService:
         if found is None or found[1] is None:
             return
         version = found[0].version
+        series = update.series(self.current(), version)
+        if series is not None and series in self.state.muted:
+            return  # the user doesn't want this series: nothing by itself
         d = self._download
         if d.version == version and d.state in ("downloading", "verifying", "done", "failed"):
             return
@@ -290,6 +298,23 @@ class UpdateService:
             del closed[: -update.KEEP_DISMISSED]
             await self._save()
             self.broadcast()
+        return self.status()
+
+    async def mute(self, series: str, muted: bool) -> UpdateStatus:
+        """Turn the prompts of ``series`` off (``muted``) or back on. Series the running version has
+        reached are dropped on the way: muting them says nothing any more."""
+        current = self.current()
+        names = [s for s in self.state.muted if s != series and not update.series_reached(s, current)]
+        if muted:
+            names.append(series)
+        names = names[-update.KEEP_MUTED :]
+        if names != self.state.muted:
+            self.state.muted = names
+            logger.info("update prompts of {}.x {}", series, "off" if muted else "on again")
+            await self._save()
+            self.broadcast()
+            if not muted:
+                await self.auto_fetch()
         return self.status()
 
     # ------------------------------------------------------------- download
@@ -491,6 +516,10 @@ def install(server: Server) -> None:
     @router.method(UPDATE_DISMISS)
     async def update_dismiss(session: Session, params: UpdateVersionParams) -> UpdateStatus:
         return await service.dismiss(params.version)
+
+    @router.method(UPDATE_MUTE)
+    async def update_mute(session: Session, params: UpdateMuteParams) -> UpdateStatus:
+        return await service.mute(params.series, params.muted)
 
     @router.method(UPDATE_DOWNLOAD)
     async def update_download(session: Session, params: UpdateVersionParams) -> UpdateStatus:

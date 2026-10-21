@@ -342,7 +342,7 @@ Version, updates and the release timeline.
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
 | Check for updates automatically | On | On `true` · Off `false` | At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right. | `general.update_check` |
-| Download updates automatically | On | On `true` · Off `false` | A new version is downloaded and checked in the background. It is installed only when you click "Restart and update". Can be changed when "Check for updates automatically" is on. | `general.update_download` |
+| Download updates automatically | On | On `true` · Off `false` | A new version is downloaded and checked in the background. It is installed only when you click Seamless update or the other way in the update card, never by itself. Can be changed when "Check for updates automatically" is on. | `general.update_download` |
 | Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are the releases marked as pre-release on GitHub. | `general.update_channel` |
 
 <!-- generated:settings:end -->

@@ -63,6 +63,7 @@ SUMS_MAX = 1 << 20
 CHUNK = 256 * 1024
 PROGRESS_GAP_S = 0.25  # download progress at most 4 times a second
 KEEP_DISMISSED = 20
+KEEP_MUTED = 20
 HISTORY_KEEP = 30  # releases kept for the timeline of the 「关于与更新」 page
 STATE_VERSION = 1
 LOOPBACK = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -171,6 +172,29 @@ def level(current: Version | str | None, latest: Version | str | None) -> Update
     if new.minor != cur.minor:
         return "minor"
     return "patch"
+
+
+def series(current: Version | str | None, latest: Version | str | None) -> str | None:
+    """The series of ``latest`` that the user can mute (update.mute): ``"0.4"`` (every 0.4.x) for a
+    minor update, ``"1"`` (every 1.x) for a major one; None for a patch release or no update."""
+    new = _version(latest)
+    match level(current, latest):
+        case "major" if new is not None:
+            return f"{new.major}"
+        case "minor" if new is not None:
+            return f"{new.major}.{new.minor}"
+        case _:
+            return None
+
+
+def series_reached(name: str, current: Version | str | None) -> bool:
+    """Whether ``current`` is in series ``name`` or past it: muting it says nothing any more."""
+    cur = _version(current)
+    try:
+        parts = tuple(int(p) for p in name.split("."))
+    except ValueError:
+        return True  # not a series: drop it
+    return cur is not None and (cur.major, cur.minor)[: len(parts)] >= parts
 
 
 # ---------------------------------------------------------------- releases
@@ -427,7 +451,7 @@ def updates_dir() -> Path:
 
 # the names in the updates folder: the release files (asset_template), and what Electron main writes
 # while a portable copy is replaced: the new files unpacked, the old ones until the swap is done, the
-# script that swaps them and its log
+# plan for the backend that swaps them (update_swap) and its log; the scripts of earlier test builds
 _UPDATE_NAMES = tuple(
     re.compile(re.escape(name).replace(re.escape("{v}"), f"(?P<v>{_V_SLOT})"))
     for name in (
@@ -441,6 +465,7 @@ _UPDATE_NAMES = tuple(
         "SpaceKnife-{v}-mac-x64.dmg",
         "staging-{v}",
         "previous-{v}",
+        "update-{v}.json",
         "update-{v}.ps1",
         "update-{v}.sh",
         "update-{v}.log",
@@ -505,6 +530,7 @@ class UpdateState(BaseModel):
     # older kept one per channel) is fetched again whole, without its ETag
     kept: int = 0
     dismissed: list[str] = Field(default_factory=list)  # versions whose card / dialog was closed
+    muted: list[str] = Field(default_factory=list)  # series whose prompts are off (series())
 
 
 def state_file() -> Path:
@@ -513,7 +539,7 @@ def state_file() -> Path:
 
 def load_state(file: Path, feed: str = RELEASES_URL) -> UpdateState:
     """The saved state; a missing or broken file is a fresh start, a cache of another feed is
-    dropped (the closed cards are kept)."""
+    dropped (the closed cards and the muted series are kept)."""
     try:
         state = UpdateState.model_validate_json(file.read_bytes())
     except FileNotFoundError:
@@ -522,7 +548,7 @@ def load_state(file: Path, feed: str = RELEASES_URL) -> UpdateState:
         logger.warning("update state {} is unreadable, starting afresh: {}", file, exc)
         return UpdateState(feed=feed)
     if state.feed != feed:
-        return UpdateState(feed=feed, dismissed=state.dismissed)
+        return UpdateState(feed=feed, dismissed=state.dismissed, muted=state.muted)
     return state
 
 
@@ -754,6 +780,7 @@ __all__ = [
     "CHECK_INTERVAL",
     "HISTORY_KEEP",
     "KEEP_DISMISSED",
+    "KEEP_MUTED",
     "RELEASES_PAGE",
     "RELEASES_URL",
     "RETRY_INTERVAL",

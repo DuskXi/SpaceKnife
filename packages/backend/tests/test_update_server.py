@@ -30,11 +30,12 @@ from spaceknife_protocol.methods import (
     UPDATE_CHECK,
     UPDATE_DISMISS,
     UPDATE_DOWNLOAD,
+    UPDATE_MUTE,
     UPDATE_RELEASES,
     UPDATE_STATUS,
 )
 from spaceknife_protocol.session import ClientInfo
-from spaceknife_protocol.update import UpdateChangedEvent, UpdateStatus, UpdateVersionParams
+from spaceknife_protocol.update import UpdateChangedEvent, UpdateMuteParams, UpdateStatus, UpdateVersionParams
 
 from .conftest import CLIENT, TOKEN
 from .test_update import LocalFeed
@@ -407,6 +408,54 @@ async def test_a_shorter_cache_is_fetched_again_whole(server: Server) -> None:
         await ui.call(UPDATE_CHECK, Empty())
         assert gh.etags[-1] is None and server.updates.state.kept == update.HISTORY_KEEP
         assert [r.version for r in (await ui.call(UPDATE_RELEASES, Empty())).releases] == ["0.3.1", "0.3.0"]
+
+
+async def test_muting_a_series(server: Server, tmp_path: Path) -> None:
+    gh = fake(server)
+    gh.releases = [rel("0.4.0", installer("0.4.0"))]
+    events: list[UpdateChangedEvent] = []
+    async with await Connection.open(server.url, TOKEN, UI) as ui:
+        ui.on_event(EVENT_UPDATE, events.append)
+        st = await ui.call(UPDATE_CHECK, Empty())
+        assert (st.level, st.series, st.muted) == ("minor", "0.4", False)
+
+        st = await ui.call(UPDATE_MUTE, UpdateMuteParams(series="0.4"))
+        assert st.muted and st.series == "0.4"
+        assert json.loads(server.updates.file.read_text(encoding="utf-8"))["muted"] == ["0.4"]
+        await until(lambda: events[-1].status.muted)
+
+        # every later release of the series stays quiet, and nothing is downloaded by itself
+        server.updates.auto = True
+        gh.releases = [rel("0.4.2", installer("0.4.2"))]
+        st = await ui.call(UPDATE_CHECK, Empty())
+        assert st.latest is not None and st.latest.version == "0.4.2" and st.muted
+        assert server.updates.status().download.state == "idle"
+
+        # another series speaks up again; muting a major one takes all its minor releases
+        server.updates.auto = False
+        gh.releases = [rel("0.5.0", installer("0.5.0"))]
+        st = await ui.call(UPDATE_CHECK, Empty())
+        assert (st.series, st.muted) == ("0.5", False)
+        gh.releases = [rel("1.2.0", installer("1.2.0"))]
+        st = await ui.call(UPDATE_CHECK, Empty())
+        assert (st.level, st.series, st.muted) == ("major", "1", False)
+        st = await ui.call(UPDATE_MUTE, UpdateMuteParams(series="1"))
+        assert st.muted
+        gh.releases = [rel("1.3.1", installer("1.3.1"))]
+        assert (await ui.call(UPDATE_CHECK, Empty())).muted
+
+        # back on: the prompts return
+        st = await ui.call(UPDATE_MUTE, UpdateMuteParams(series="1", muted=False))
+        assert not st.muted
+        assert server.updates.state.muted == ["0.4"]
+
+        # a series the running version reached is dropped the next time the list changes
+        server.updates.app_version = "0.4.1"
+        await ui.call(UPDATE_MUTE, UpdateMuteParams(series="2"))
+        assert server.updates.state.muted == ["2"]
+
+        with pytest.raises(RemoteError):
+            await ui.call(UPDATE_MUTE, UpdateMuteParams.model_construct(series="0.x", muted=True))
 
 
 async def test_downloads_by_itself_in_the_real_app(server: Server, tmp_path: Path) -> None:

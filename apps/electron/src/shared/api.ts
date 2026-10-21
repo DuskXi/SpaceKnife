@@ -1,5 +1,7 @@
 // The API the preload script exposes to the renderer as `window.sk` (main ↔ renderer contract).
 
+import type { InstallHow } from "./install";
+
 export interface BackendInfo {
   url: string;
   token: string;
@@ -36,7 +38,7 @@ export interface SkApi {
   host: "app" | "browser";
   /** browser mode: the computer the files are on; null in the app */
   remote: RemoteInfo | null;
-  /** started by 「重启并更新」: the window says once that the update is done */
+  /** started by 「无缝更新」: the window says once that the update is done */
   justUpdated: boolean;
   /** the runtime's versions, for 「关于与更新」 */
   versions: { electron: string; chrome: string; node: string };
@@ -64,10 +66,11 @@ export interface SkApi {
     openExternal(url: string): void;
   };
   update: {
-    /** Put a downloaded update in place and quit: the installer runs silently, a portable copy or an
-     * AppImage is replaced (both then start again), a disk image or a package opens (main/update.ts).
-     * Only a file in the backend's updates folder named like a release asset; "" when started, else why not. */
-    install(path: string): Promise<string>;
+    /** One of the update card's two buttons (shared/install.ts installStep): 「无缝更新」 puts the
+     * version in place and starts it again; the classic way opens the installer, disk image or package
+     * and quits (or shows the file in its folder). Only a file in the backend's updates folder named
+     * like a release asset; "" when under way, else why not. Only ever after a click. */
+    install(path: string, how: InstallHow): Promise<string>;
   };
   dialog: {
     /** Pick a snapshot file (UI-W1-45, W4 「打开快照文件…」); null when cancelled. */

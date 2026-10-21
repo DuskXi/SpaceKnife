@@ -1,8 +1,10 @@
 // Electron main process: one frameless window, the backend child process, a few native services.
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
@@ -14,7 +16,7 @@ import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
-import { installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapLauncher, swapScript, swapScriptFile } from "./update";
+import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -28,7 +30,7 @@ const portable = portableHome(process.execPath, process.platform, app.isPackaged
 if (portable) process.env.SPACEKNIFE_HOME = portable;
 // what the backend's update check downloads, and what main may start once it is downloaded
 const INSTALL_KIND = installKind(process.execPath, process.platform, app.isPackaged, process.env, portable);
-// started by 「重启并更新」 (the Windows installer passes it after a silent update): the renderer says so once
+// started by 「无缝更新」 (the Windows installer passes it after a silent update): the renderer says so once
 const JUST_UPDATED = process.argv.includes("--updated");
 
 // The Chromium profile (storage, caches) lives in an "electron" folder of SpaceKnife's own: an isolated
@@ -160,7 +162,7 @@ function registerIpc(): void {
     if (page) void shell.openExternal(page);
     else console.warn(`[shell] not opening ${String(url)}: not a page of the project (GitHub, the website)`);
   });
-  ipcMain.handle("sk:installUpdate", (_e, path: unknown) => installUpdate(String(path)));
+  ipcMain.handle("sk:installUpdate", (_e, path: unknown, how: unknown) => installUpdate(String(path), how === "classic" ? "classic" : "seamless"));
   ipcMain.handle("sk:openFolders", async () => {
     const opts = { title: mt("pickFolders"), properties: ["openDirectory" as const, "multiSelections" as const] };
     const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
@@ -183,22 +185,31 @@ function registerIpc(): void {
   });
 }
 
-/** 「重启并更新」 with the file the backend downloaded (update.download): "" when the app is on its way
- *  out to the new version, else why not (and the app goes on as it was). */
-async function installUpdate(file: string): Promise<string> {
+/** One of the update card's two buttons with the file the backend downloaded (update.download):
+ *  「无缝更新」 or the classic way (shared/install.ts installStep). Only ever from a click in the card,
+ *  never by itself. "" when it is under way, else why not (and the app goes on as it was). */
+async function installUpdate(file: string, how: InstallHow): Promise<string> {
   const updates = backend?.updatesDir ?? null;
   const refusal = updates ? installRefusal(file, INSTALL_KIND, updates, process.platform) : "updateMissing";
   if (refusal) {
     console.warn(`[update] not using ${file}: ${refusal}`);
     return mt(refusal);
   }
+  const step = installStep(INSTALL_KIND, how);
+  console.info(`[update] ${how} (${step ?? "nothing"}) with ${file}`);
   try {
-    switch (restartMode(INSTALL_KIND)) {
-      case "installer":
-        // silent: no wizard, the data stays, the installer starts the new version (update.ts)
+    switch (step) {
+      case "silent":
+        // no wizard, the data stays, the installer starts the new version (update.ts nsisUpdateArgs)
         return await restartInto(() => launch(file, nsisUpdateArgs(process.execPath, process.env)));
+      case "wizard":
+        // the installer with its pages: it upgrades in place (the old uninstaller runs with
+        // --updated, the data stays); SpaceKnife is gone before it gets that far
+        return await restartInto(() => launch(file, []));
+      case "swap":
+        return await replacePortable(file, updates!);
       case "replace":
-        return INSTALL_KIND === "appimage" ? await replaceAppImage(file) : await replacePortable(file, updates!);
+        return await replaceAppImage(file);
       case "open": {
         // a disk image mounts (the user drags the new app over the old one), a package opens in the
         // system's installer: either replaces files of this app, so it quits once the file is open
@@ -207,6 +218,9 @@ async function installUpdate(file: string): Promise<string> {
         setTimeout(() => app.quit(), 500);
         return "";
       }
+      case "reveal":
+        shell.showItemInFolder(file); // unpacked or put in place by hand: SpaceKnife keeps running
+        return "";
       default:
         return mt("updateNoInstall");
     }
@@ -264,8 +278,9 @@ async function replaceAppImage(file: string): Promise<string> {
   return restartInto(() => launch(target, ["--updated"]));
 }
 
-/** A portable copy: unpack the new version next to the backend's downloads, then a script swaps the
- *  files once the app has quit (update.ts swapScript) and starts it again. The "data" folder stays. */
+/** A portable copy: unpack the new version next to the backend's downloads, then the new version's
+ *  backend swaps the files once the app has quit (spaceknife.update_swap) and starts it again. No
+ *  script: SpaceKnife's own program does it. The "data" folder stays. */
 async function replacePortable(file: string, updates: string): Promise<string> {
   const version = /^SpaceKnife-(.+)-(?:win|linux)-x64-portable\.(?:zip|tar\.gz)$/.exec(basename(file))?.[1];
   const platform = process.platform;
@@ -286,7 +301,11 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     console.warn(`[update] ${basename(file)} is not one folder with ${basename(process.execPath)}: ${found}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
-  const script = join(updates, `update-${version}.${platform === "win32" ? "ps1" : "sh"}`);
+  const helper = swapHelper(staged, platform);
+  if (!existsSync(helper)) {
+    console.warn(`[update] ${basename(file)} has no ${helper}`);
+    return mt("updateUnpackFailed", { error: basename(file) });
+  }
   const plan = {
     pid: process.pid,
     appDir: dirname(process.execPath),
@@ -295,30 +314,47 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     exe: process.execPath,
     log: join(updates, `update-${version}.log`),
   };
-  await writeFile(script, swapScriptFile(platform, swapScript(platform, plan)));
-  const how = swapLauncher(platform, script);
-  console.info(`[update] ${version} unpacked: ${script} swaps the files once the app has quit`);
-  return restartInto(() => (how.wait ? runToEnd(how.cmd, how.args) : launch(how.cmd, how.args)));
+  await rm(plan.previous, { recursive: true, force: true }); // left by an attempt that was undone
+  const planFile = join(updates, `update-${version}.json`);
+  await writeFile(planFile, swapPlanJson(plan), "utf8");
+  console.info(`[update] ${version} unpacked: its backend swaps the files once the app has quit (${planFile})`);
+  return restartInto(() => startSwap(helper, planFile, updates));
 }
 
-/** Run a hidden helper and wait until it is done (the starter of the Windows swap); fails on a
- * non-zero exit or after 30 s. */
-function runToEnd(cmd: string, args: string[]): Promise<void> {
+/** Start the new version's backend in its --apply-update mode (spaceknife.update_swap): detached, so
+ *  it outlives the app. Resolves once it says the plan is usable; fails when it says otherwise, exits
+ *  or doesn't answer within 30 s (then the app goes on as it was). */
+function startSwap(helper: string, plan: string, cwd: string): Promise<void> {
   return new Promise((done, fail) => {
-    const child = spawn(cmd, args, { stdio: "ignore", windowsHide: true });
-    const timer = setTimeout(() => {
-      child.kill();
-      fail(new Error(`${cmd} did not finish`));
-    }, 30_000);
-    child.once("error", (err) => {
+    const child = spawn(helper, ["--apply-update", plan], { cwd, detached: true, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    const lines = createInterface({ input: child.stdout! });
+    let settled = false;
+    const finish = (err?: Error) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
-      fail(err);
+      lines.close();
+      child.stdout?.destroy();
+      if (err) {
+        child.kill();
+        fail(err);
+      } else {
+        child.unref();
+        done();
+      }
+    };
+    const timer = setTimeout(() => finish(new Error(`${basename(helper)} did not answer`)), 30_000);
+    lines.once("line", (line) => {
+      let said: { ok?: unknown; error?: unknown } = {};
+      try {
+        said = JSON.parse(line) as typeof said;
+      } catch {
+        // not its answer: the error below
+      }
+      finish(said.ok === true ? undefined : new Error(typeof said.error === "string" ? said.error : line));
     });
-    child.once("exit", (code) => {
-      clearTimeout(timer);
-      if (code === 0) done();
-      else fail(new Error(`${cmd} exited with ${code}`));
-    });
+    child.once("error", (err) => finish(err));
+    child.once("exit", (code) => finish(new Error(`${basename(helper)} exited with ${code}`)));
   });
 }
 

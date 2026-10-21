@@ -7,7 +7,7 @@ name: Portable build
 # and on dev whenever the packaging changes, so it is checked before it reaches main.
 # With "installers" (by hand, for a release) the same run also builds the Windows installer and the
 # Linux deb / rpm / AppImage from the same commit, with their own checksums.
-# Every run also tests 「重启并更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
+# Every run also tests 「无缝更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
 # files, and on Windows the installer upgrades from the newest published release, updates from inside
 # the app and uninstalls cleanly. The Windows job therefore always builds the installer.
 on:
@@ -129,7 +129,7 @@ jobs:
           uv run python packaging/smoke_headless.py "$app"
 
       # a release list on 127.0.0.1 offers the next version (this build again); the test clicks the
-      # update badge and 「重启并更新」 through the DevTools port, like a user
+      # update badge and 「无缝更新」 through the DevTools port, like a user
       - name: Update end to end (portable)
         timeout-minutes: 15
         run: |

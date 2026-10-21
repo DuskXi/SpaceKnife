@@ -8,12 +8,20 @@ running app's version and tells every session that announced ``updates.v1`` thro
 - ``minor`` (0.3.x → 0.4.0): also a card hanging at the top left with the summary;
 - ``major`` (0.x → 1.0.0): also a dialog in the window.
 
+Closing the card or the dialog (``update.dismiss``) keeps them away for that version.
+``update.mute`` turns off every prompt of a series: a minor one (``"0.4"``: every 0.4.x) or a major
+one (``"1"``: every 1.x). For a release of a muted series the front end shows no card, dialog or
+badge, and nothing is downloaded by itself; the 「关于与更新」 page still shows it and turns the
+prompts back on.
+
 Downloading is one click, or happens by itself (setting ``general.update_download``): the backend
 fetches the file for this kind of install into the ``updates`` folder of its data directory and
-checks it against the release's ``SHA256SUMS*.txt``. The front end then restarts into the new
-version (the Windows installer, run silently; a portable copy or an AppImage, replaced in place) or
-opens it (a disk image, a deb or rpm package). The backend removes what the folder no longer needs
-when it starts.
+checks it against the release's ``SHA256SUMS*.txt``. Installing it is always the user's click, one
+of two ways: 「无缝更新」 (the Windows installer run silently; a portable copy's files swapped by the
+new version's backend, ``spaceknife.update_swap``; an AppImage replaced in place, then the new
+version starts) or the classic way (the installer with its pages, the disk image or package opened,
+or the file shown in its folder). Nothing is ever installed by itself. The backend removes what the
+folder no longer needs when it starts.
 
 ``update.releases`` lists the recent releases with their notes for the timeline of the
 「关于与更新」 settings page.
@@ -81,6 +89,16 @@ class UpdateStatus(Payload):
     dismissed: bool = Field(
         default=False, description="The card / dialog for this version was closed (the badge stays)"
     )
+    series: str | None = Field(
+        default=None,
+        description="The series of the newest release that update.mute takes: its major.minor for a"
+        ' minor update ("0.4"), its major for a major one ("1"); None for a patch release or no update',
+    )
+    muted: bool = Field(
+        default=False,
+        description="The user turned off the prompts of that series: no card, dialog or badge, no automatic"
+        " download (the 「关于与更新」 page still shows it)",
+    )
     download: UpdateDownload = Field(default_factory=UpdateDownload)
     next_check_at: datetime | None = Field(
         default=None,
@@ -99,6 +117,14 @@ class UpdateVersionParams(Params):
     version: str = Field(min_length=1, max_length=64, description="The version shown (latest.version)")
 
 
+class UpdateMuteParams(Params):
+    series: str = Field(
+        pattern=r"^\d{1,6}(\.\d{1,6})?$",
+        description='A series as UpdateStatus.series names it: "0.4" (every 0.4.x) or "1" (every 1.x)',
+    )
+    muted: bool = Field(default=True, description="False turns its prompts back on")
+
+
 class UpdateChangedEvent(Payload):
     status: UpdateStatus
 
@@ -112,6 +138,7 @@ __all__ = [
     "UpdateDownload",
     "UpdateInfo",
     "UpdateLevel",
+    "UpdateMuteParams",
     "UpdateReleases",
     "UpdateStatus",
     "UpdateVersionParams",

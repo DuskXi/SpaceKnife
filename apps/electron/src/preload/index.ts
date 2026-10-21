@@ -40,7 +40,7 @@ const api: SkApi = {
     openExternal: (url) => ipcRenderer.send("sk:openExternal", url),
   },
   update: {
-    install: (path) => ipcRenderer.invoke("sk:installUpdate", path) as Promise<string>,
+    install: (path, how) => ipcRenderer.invoke("sk:installUpdate", path, how) as Promise<string>,
   },
   setLanguage: (lang) => ipcRenderer.send("sk:setLanguage", lang),
   dialog: {
