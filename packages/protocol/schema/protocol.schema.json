@@ -1607,6 +1607,20 @@
           "default": null,
           "title": "Power On Hours"
         },
+        "read_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the record was read with administrator rights (Linux: machine.read_health); None: read just now. The temperature is always the current one.",
+          "title": "Read At"
+        },
         "read_bytes": {
           "anyOf": [
             {
@@ -5097,6 +5111,49 @@
         "upper"
       ],
       "title": "Range",
+      "type": "object"
+    },
+    "ReadHealthParams": {
+      "properties": {
+        "disks": {
+          "description": "Ids of the disks to read; []: every disk whose record needs administrator rights",
+          "items": {
+            "type": "string"
+          },
+          "title": "Disks",
+          "type": "array"
+        }
+      },
+      "title": "ReadHealthParams",
+      "type": "object"
+    },
+    "ReadHealthResult": {
+      "description": "``read``: the records were read (a disk that did not answer says why in its health_note);\n``denied``: the user closed the password prompt; ``unavailable``: no way to ask for administrator\nrights here (``message`` says why); ``nothing``: no disk needed it.",
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineDisks"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "read",
+            "denied",
+            "unavailable",
+            "nothing"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "machine"
+      ],
+      "title": "ReadHealthResult",
       "type": "object"
     },
     "Refusal": {
@@ -8791,6 +8848,12 @@
       "params": "#/$defs/Empty",
       "requiresSession": true,
       "result": "#/$defs/MachineDisks"
+    },
+    "machine.read_health": {
+      "doc": "Read the disks' own records that need administrator rights (Linux: the elevated helper, behind polkit's password prompt). Only when the user asks; the answer is the whole page again.",
+      "params": "#/$defs/ReadHealthParams",
+      "requiresSession": true,
+      "result": "#/$defs/ReadHealthResult"
     },
     "ops.cancel": {
       "doc": "Stop a running file operation.",

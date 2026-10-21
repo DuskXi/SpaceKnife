@@ -183,6 +183,10 @@ export interface AppState {
   machineAt: number;
   /** a read of machine.disks is under way */
   machineLoading: boolean;
+  /** machine.read_health is under way: the disk whose button started it */
+  machineReading: string | null;
+  /** why the last machine.read_health read nothing (prompt closed, no way to ask), on that disk */
+  machineReadNote: { disk: string; text: string } | null;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -251,6 +255,8 @@ export const useApp = create<AppState>(() => ({
   machine: null,
   machineAt: 0,
   machineLoading: false,
+  machineReading: null,
+  machineReadNote: null,
 }));
 
 export const set = useApp.setState;

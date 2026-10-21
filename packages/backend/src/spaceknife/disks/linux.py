@@ -188,6 +188,7 @@ def _disk(fs: Sysfs, name: str, since: datetime | None = None) -> PhysicalDisk |
         serial = serial[2:]
     counters = linux_stat(fs.read(f"{path}/stat"))
     io = DiskIo(read_bytes=counters[0], written_bytes=counters[1], since=since) if counters else None
+    media = classify(_MEDIA_BUS.get(interface, "other"), rotational, removable)
     health: DiskHealth | None = None
     note: HealthNote = ""
     if interface in ("nvme", "sata", "ata"):
@@ -196,7 +197,9 @@ def _disk(fs: Sysfs, name: str, since: datetime | None = None) -> PhysicalDisk |
             health = DiskHealth(source="nvme" if interface == "nvme" else "ata", temperature_c=temp)
         note = "needs_admin"  # the lifetime counters: an NVMe or ATA command, root only
     elif interface == "usb":
-        note = "usb"
+        # a drive in an enclosure may pass ATA commands through its bridge (root, on request);
+        # sticks and card readers don't
+        note = "needs_admin" if media in ("usb_hdd", "usb_ssd") and name.startswith("sd") else "usb"
     return PhysicalDisk(
         id=name,
         model=" ".join(model.split()),
@@ -204,7 +207,7 @@ def _disk(fs: Sysfs, name: str, since: datetime | None = None) -> PhysicalDisk |
         serial=serial.strip(),
         firmware=firmware.strip(),
         size=sectors * 512 if sectors else None,
-        media=classify(_MEDIA_BUS.get(interface, "other"), rotational, removable),
+        media=media,
         interface=interface,
         removable=removable,
         trim=None if discard is None else discard > 0,

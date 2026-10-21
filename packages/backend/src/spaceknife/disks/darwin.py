@@ -8,9 +8,10 @@
   and "x4", the SATA controller's negotiated speed, a USB device's speed), by BSD name.
 
 - ``ioreg -r -c IOBlockStorageDriver -a``: each disk's bytes read and written since the boot.
+- An NVMe disk's own record: its SMART / Health log through IOKit's NVMe SMART user client
+  (:mod:`.mac_smart`, no root). SATA disks and drives behind USB bridges keep none we can read.
 
-The disks' own health records need tools macOS doesn't ship. The parsing is in pure functions
-over the decoded plist / JSON, tested with recorded samples.
+The parsing is in pure functions over the decoded plist / JSON, tested with recorded samples.
 """
 
 from __future__ import annotations
@@ -25,13 +26,14 @@ from typing import Any
 
 from loguru import logger
 
-from spaceknife_protocol.machine import DiskInterface, DiskIo, DiskLink, PhysicalDisk
+from spaceknife_protocol.machine import DiskHealth, DiskInterface, DiskIo, DiskLink, PhysicalDisk
 
 from ..scan.media import classify
 from ..scan.volume import VolumeInfo
 from . import Probe
-from .health import boot_time
+from .health import boot_time, nvme_health
 from .links import gbps_text, pcie, pcie_gen_text, pcie_width_text, usb_mac
+from .mac_smart import nvme_smart_logs
 
 _PROFILES = ("SPNVMeDataType", "SPSerialATADataType", "SPUSBDataType", "SPUSBHostDataType")
 _MEDIA_BUS = {"nvme": "nvme", "usb": "usb", "sata": "sata", "sd": "sd", "virtual": "virtual"}
@@ -213,12 +215,14 @@ def probe(volumes: Sequence[VolumeInfo]) -> Probe:
     facts = profile_facts(_profile())
     counters = io_counters(_ioreg())
     since: datetime | None = boot_time()
+    logs = nvme_smart_logs()
     for ident in whole:
         info = _plist("info", "-plist", ident)
         disk = disk_from_info(info) if info else None
         if disk is None:
             continue
         f = facts.get(ident, {})
+        health: DiskHealth | None = nvme_health(logs[ident]) if ident in logs else None
         disk = disk.model_copy(
             update={
                 "serial": f.get("serial", ""),
@@ -226,7 +230,8 @@ def probe(volumes: Sequence[VolumeInfo]) -> Probe:
                 "model": disk.model or f.get("model", ""),
                 "trim": f.get("trim"),
                 "link": f.get("link"),
-                "health_note": "usb" if disk.interface == "usb" else "unavailable",
+                "health": health,
+                "health_note": "" if health else "usb" if disk.interface == "usb" else "unavailable",
                 "io": DiskIo(read_bytes=counters[ident][0], written_bytes=counters[ident][1], since=since)
                 if ident in counters
                 else None,

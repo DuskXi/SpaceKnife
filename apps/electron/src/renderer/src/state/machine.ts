@@ -403,7 +403,7 @@ export function healthNoteText(note: PhysicalDisk["health_note"]): string {
     case "usb":
       return t("USB 桥接没有把磁盘自己的记录传过来");
     case "unsupported":
-      return t("这块盘没有提供不需要管理员权限就能读的健康记录");
+      return t("这块盘没有回应健康记录的查询");
     case "needs_admin":
       return t("磁盘自己记录的累计读写要管理员权限才能读");
     case "unavailable":

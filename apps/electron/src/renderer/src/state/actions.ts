@@ -752,6 +752,24 @@ export async function refreshMachine(force = false): Promise<void> {
   }
 }
 
+/** Read the disks' own records that need administrator rights (machine.read_health; Linux:
+ * polkit's password prompt). Only from the button on a disk card, never by itself; one prompt
+ * reads every such disk. Why nothing was read shows on the disk whose button was clicked. */
+export async function readDiskRecords(disk: string): Promise<void> {
+  const s = get();
+  if (s.machineReading || s.conn !== "ready") return;
+  set({ machineReading: disk, machineReadNote: null });
+  try {
+    const r = await call("machine.read_health", { disks: [] });
+    const failed = r.outcome === "denied" || r.outcome === "unavailable";
+    set({ machine: r.machine, machineAt: Date.now(), machineReadNote: failed ? { disk, text: r.message } : null });
+  } catch (err) {
+    set({ machineReadNote: { disk, text: err instanceof Error ? err.message : String(err) } });
+  } finally {
+    set({ machineReading: null });
+  }
+}
+
 export async function refreshLists(): Promise<void> {
   try {
     const [volumes, snapshots] = await Promise.all([call("volume.list", {}), call("snapshot.list", {})]);

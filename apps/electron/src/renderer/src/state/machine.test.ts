@@ -258,6 +258,7 @@ describe("what a disk records about itself", () => {
     unsafe_shutdowns: 106,
     media_errors: 0,
     critical_warning: 0,
+    read_at: null,
     ...patch,
   });
 

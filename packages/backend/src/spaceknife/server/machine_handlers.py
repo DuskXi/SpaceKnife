@@ -1,28 +1,39 @@
-"""``machine.disks``: the 「本机磁盘」 page.
+"""``machine.disks``: the 「本机磁盘」 page; ``machine.read_health``: the disks' own records that need
+administrator rights.
 
 The disks and the volumes' place on them come from :mod:`spaceknife.disks`; what is known of each
 volume comes from a scan of its root open in this backend (counts, and once it is done the largest
 file classes and top-level folders) or else from the newest snapshot of it (counts only: a snapshot
 is not loaded for this). The headers of the volume's complete snapshots give its history.
+
+On Linux a disk's lifetime counters need root: ``machine.read_health`` (only on the user's click)
+starts the elevated helper behind polkit's password prompt and reads the raw pages of each such
+disk. The records are kept for the life of the backend, so the page keeps them on later reads;
+while the elevated helper still runs (10 idle minutes), those reads ask it again, without a prompt.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from loguru import logger
 
 from spaceknife_protocol import machine as m
 from spaceknife_protocol.base import Empty
-from spaceknife_protocol.methods import MACHINE_DISKS
+from spaceknife_protocol.methods import MACHINE_DISKS, MACHINE_READ_HEALTH
 from spaceknife_protocol.scan import ClassStat
 
 from .. import disks, paths
+from ..disks.health import from_pages
+from ..helper import HelperError, HelperUnavailable
+from ..helper.errors import HelperDenied
 from ..scan.scanner import ScanState
 from ..scan.volume import VolumeInfo, list_volumes
 from ..store import snapshot
@@ -179,21 +190,109 @@ def overview(
     return m.MachineDisks(disks=out_disks, volumes=out_volumes, collected_at=datetime.now(UTC))
 
 
+# --------------------------------------------------------------------------- records read as root
+
+# (the record or None when the disk didn't answer, the note then, when it was read)
+Elevated = tuple[m.DiskHealth | None, m.HealthNote, datetime]
+
+
+def _record_key(d: m.PhysicalDisk) -> str:
+    """A kernel name can move to another disk (hot-plug): the serial pins it."""
+    return f"{d.id}|{d.serial}"
+
+
+def with_record(d: m.PhysicalDisk, read: Elevated | None) -> m.PhysicalDisk:
+    """The disk with what an elevated read found: the record (keeping the live temperature), or the
+    reason it has none (the bridge or the disk didn't answer)."""
+    if read is None:
+        return d
+    record, note, at = read
+    if record is None:
+        return d.model_copy(update={"health_note": note})
+    live = d.health.temperature_c if d.health is not None else None
+    merged = record.model_copy(
+        update={"temperature_c": live if live is not None else record.temperature_c, "read_at": at}
+    )
+    return d.model_copy(update={"health": merged, "health_note": ""})
+
+
+def failed_note(d: m.PhysicalDisk) -> m.HealthNote:
+    return "usb" if d.interface == "usb" else "unsupported"
+
+
+async def read_records(client: Any, targets: Sequence[m.PhysicalDisk], cache: dict[str, Elevated]) -> None:
+    """Ask the elevated helper for each disk's pages; the cache gets the record or the reason.
+    HelperUnavailable (the helper is gone) propagates; a disk that doesn't answer doesn't stop the rest."""
+    for d in targets:
+        at = datetime.now(UTC)
+        try:
+            pages = await client.disk_health(d.id)
+        except HelperUnavailable:
+            raise
+        except HelperError as exc:
+            logger.info("disk {} has no record for the helper: {}", d.id, exc.message)
+            cache[_record_key(d)] = (None, failed_note(d), at)
+            continue
+        record = from_pages(pages)
+        cache[_record_key(d)] = (record, "" if record is not None else failed_note(d), at)
+
+
 def install(server: Server) -> None:
     router = server.router
     latest = Latest()
+    elevated: dict[str, Elevated] = {}  # disk -> what root read; for the life of the backend
 
-    @router.method(MACHINE_DISKS)
-    async def machine_disks(session: Session, _: Empty) -> m.MachineDisks:
+    async def probe() -> tuple[list[VolumeInfo], disks.Probe]:
         volumes = await asyncio.to_thread(list_volumes)
         await asyncio.to_thread(warm_media, volumes)
-        found = await asyncio.to_thread(disks.probe, volumes)
+        return volumes, await asyncio.to_thread(disks.probe, volumes)
+
+    async def page(
+        key: str, session: Session, volumes: list[VolumeInfo], found: disks.Probe
+    ) -> m.MachineDisks:
+        found.disks = [with_record(d, elevated.get(_record_key(d))) for d in found.disks]
 
         def snapshots() -> dict[str, Saved]:
             return {v.mount_point: saved_scans(v.mount_point) for v in volumes if not v.reason}
 
         saved = await asyncio.to_thread(snapshots)
-        return await latest.run(("machine.disks", session.id), overview, server, volumes, found, saved)
+        return await latest.run((key, session.id), overview, server, volumes, found, saved)
+
+    async def refresh(found: disks.Probe) -> None:
+        """Read the kept records again while the elevated helper still runs (no prompt)."""
+        client = server.scans.helper.current
+        if not elevated or client is None or not client.elevated:
+            return
+        again = [d for d in found.disks if _record_key(d) in elevated and elevated[_record_key(d)][0]]
+        with contextlib.suppress(HelperError):
+            await read_records(client, again, elevated)
+
+    @router.method(MACHINE_DISKS)
+    async def machine_disks(session: Session, _: Empty) -> m.MachineDisks:
+        volumes, found = await probe()
+        await refresh(found)
+        return await page("machine.disks", session, volumes, found)
+
+    @router.method(MACHINE_READ_HEALTH)
+    async def machine_read_health(session: Session, params: m.ReadHealthParams) -> m.ReadHealthResult:
+        volumes, found = await probe()
+        wanted = set(params.disks)
+        known = [with_record(d, elevated.get(_record_key(d))) for d in found.disks]  # read once is enough
+        targets = [d for d in known if d.health_note == "needs_admin" and (not wanted or d.id in wanted)]
+        outcome: Literal["read", "denied", "unavailable", "nothing"] = "nothing"
+        message = ""
+        if targets:
+            try:
+                client = await server.scans.helper.get(elevate=True)
+                await read_records(client, targets, elevated)
+                outcome = "read"
+            except HelperDenied as exc:
+                outcome, message = "denied", exc.message
+            except HelperError as exc:
+                outcome, message = "unavailable", exc.message
+                logger.info("disk records need administrator rights, not available: {}", exc.message)
+        machine = await page("machine.read_health", session, volumes, found)  # never dropped for a refresh
+        return m.ReadHealthResult(outcome=outcome, message=message, machine=machine)
 
 
-__all__ = ["install", "overview", "saved_scans"]
+__all__ = ["failed_note", "install", "overview", "read_records", "saved_scans", "with_record"]

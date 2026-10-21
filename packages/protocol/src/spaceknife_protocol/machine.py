@@ -82,6 +82,11 @@ class DiskHealth(Payload):
     unsafe_shutdowns: int | None = None
     media_errors: int | None = Field(default=None, description="NVMe: unrecovered data integrity errors")
     critical_warning: int | None = Field(default=None, description="NVMe: critical warning bits, 0 = none")
+    read_at: datetime | None = Field(
+        default=None,
+        description="When the record was read with administrator rights (Linux: machine.read_health); "
+        "None: read just now. The temperature is always the current one.",
+    )
 
 
 HealthNote = Literal["", "usb", "unsupported", "needs_admin", "unavailable"]
@@ -185,6 +190,23 @@ class MachineDisks(Payload):
     collected_at: datetime
 
 
+class ReadHealthParams(Payload):
+    disks: list[str] = Field(
+        default_factory=list,
+        description="Ids of the disks to read; []: every disk whose record needs administrator rights",
+    )
+
+
+class ReadHealthResult(Payload):
+    """``read``: the records were read (a disk that did not answer says why in its health_note);
+    ``denied``: the user closed the password prompt; ``unavailable``: no way to ask for administrator
+    rights here (``message`` says why); ``nothing``: no disk needed it."""
+
+    outcome: Literal["read", "denied", "unavailable", "nothing"]
+    message: str = ""
+    machine: MachineDisks
+
+
 __all__ = [
     "DiskHealth",
     "DiskInterface",
@@ -196,6 +218,8 @@ __all__ = [
     "LinkKind",
     "MachineDisks",
     "PhysicalDisk",
+    "ReadHealthParams",
+    "ReadHealthResult",
     "SnapshotPoint",
     "VolumeOverview",
     "VolumeScan",

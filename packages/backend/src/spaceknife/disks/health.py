@@ -9,12 +9,14 @@
   (current temperature). Each statistic is a QWORD: bit 63 supported, bit 62 valid, value in the low
   bits.
 - Linux ``/sys/block/<disk>/stat``: sectors read (field 3) and written (field 7), 512 bytes each.
+- The raw pages the elevated helper reads on Linux (:mod:`.passthrough`), as hex.
 """
 
 from __future__ import annotations
 
 import sys
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 from spaceknife_protocol.machine import DiskHealth
@@ -88,6 +90,31 @@ def ata_statistics(general: bytes, temperature: bytes | None, sector: int = 512)
     )
 
 
+def _hex(pages: Mapping[str, object], key: str) -> bytes | None:
+    value = pages.get(key)
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return bytes.fromhex(value)
+    except ValueError:
+        return None
+
+
+def from_pages(pages: Mapping[str, object]) -> DiskHealth | None:
+    """The record from the helper's ``disk_health`` answer: ``{kind: nvme, log}`` or ``{kind: ata,
+    identify, general, temperature}`` (hex). None when it holds nothing usable."""
+    if pages.get("kind") == "nvme":
+        log = _hex(pages, "log")
+        return nvme_health(log) if log else None
+    if pages.get("kind") == "ata":
+        general = _hex(pages, "general")
+        if not general:
+            return None
+        sector = ata_sector_size(_hex(pages, "identify") or b"")
+        return ata_statistics(general, _hex(pages, "temperature"), sector)
+    return None
+
+
 def linux_stat(text: str) -> tuple[int, int] | None:
     """(bytes read, bytes written) from ``/sys/block/<disk>/stat``."""
     fields = text.split()
@@ -123,4 +150,4 @@ def boot_time() -> datetime | None:
     return datetime.fromtimestamp(time.time() - up, UTC)
 
 
-__all__ = ["ata_sector_size", "ata_statistics", "boot_time", "linux_stat", "nvme_health"]
+__all__ = ["ata_sector_size", "ata_statistics", "boot_time", "from_pages", "linux_stat", "nvme_health"]

@@ -47,8 +47,8 @@
 | W6 | 快照对比 | 43 | M6 |
 | W7 | 设置 | 37 | M3（基础）/ M6（完整） |
 | W8 | 多视图与日志 | 36 | M3 |
-| W9 | 本机磁盘 | 11 | 0.3.3（Electron） |
-| | **合计** | **524** | 三端全部实现在 M7 完成 |
+| W9 | 本机磁盘 | 12 | 0.3.3（Electron） |
+| | **合计** | **525** | 三端全部实现在 M7 完成 |
 
 ---
 
@@ -2872,7 +2872,8 @@ Tweak（画布上的调节项）：
 | UI-W9-08 | 详细信息 | 每块盘可以展开「详细信息」：型号、厂商、序列号、固件、TRIM、系统名称（PhysicalDrive3 / nvme0n1 / disk2）。序列号只在这里出现。 | 无 | 默认折叠，展开后能看到序列号。 |
 | UI-W9-09 | 帮助 | 本页按 F1 打开帮助「本机磁盘」一页。 | 无 | 在本页按 F1，帮助停在 disks 页。 |
 | UI-W9-10 | 读写量 | 磁盘卡片里链路下面一张小表，两列「读取」「写入」：「累计」是磁盘自己记录的整个寿命里的读写量，「开机以来」是系统启动以来的计数。数值按大小自动换单位（与「大小单位」设置一致，KB 到 PB）。悬停「开机以来」一行显示系统启动的时间。没有某一行的数据时不显示那一行。 | `PhysicalDisk.health`、`io` | ZHITAI TiPro9000 的卡片显示「累计 读取 96.3 TB 写入 229.6 TB」和「开机以来」一行。 |
-| UI-W9-11 | 磁盘自己的记录 | 来源：NVMe 的 SMART / 健康日志（日志页 02h）或 ATA 设备统计日志（04h），都不需要管理员权限（Windows）；Linux 上只有温度（hwmon），累计读写要 root；macOS 读不到。表下一行小标：温度（温度计图标，≥ 70 °C 用警示色）、通电时间（48 小时以内写小时，否则写天，悬停是小时数）、NVMe 的「寿命已用 N%」计量（≥ 90% 警示色）。「详细信息」里加：健康记录的来源、通电时间、通电次数、不安全关机、介质错误、备用块与报警线。读不到时写出原因（USB 桥接没有转发、盘没有提供、要管理员权限、系统读不到），不留空白，也不为此弹出提权。 | `DiskHealth`、`health_note` | LITEON T9 的卡片写「这块盘没有提供不需要管理员权限就能读的健康记录」；读卡器写「USB 桥接没有把磁盘自己的记录传过来」。 |
+| UI-W9-11 | 磁盘自己的记录 | 来源：NVMe 的 SMART / 健康日志（日志页 02h）或 ATA 设备统计日志（04h）。Windows 不需要管理员权限；macOS 经 IOKit 的 NVMe SMART 接口读 NVMe 盘，不需要管理员权限，SATA 盘和 USB 桥接后的盘读不到；Linux 上不提权时只有温度（hwmon），累计读写等要 root，见 UI-W9-12。表下一行小标：温度（温度计图标，≥ 70 °C 用警示色）、通电时间（48 小时以内写小时，否则写天，悬停是小时数）、NVMe 的「寿命已用 N%」计量（≥ 90% 警示色）。「详细信息」里加：健康记录的来源、通电时间、通电次数、不安全关机、介质错误、备用块与报警线。读不到时写出原因（USB 桥接没有转发、盘没有回应、要管理员权限、系统读不到），不留空白，也从不自动请求提权（Linux 上的按钮见 UI-W9-12）。 | `DiskHealth`、`health_note` | LITEON T9 的卡片写「这块盘没有回应健康记录的查询」；读卡器写「USB 桥接没有把磁盘自己的记录传过来」。 |
+| UI-W9-12 | 用管理员权限读取（Linux） | 写着「磁盘自己记录的累计读写要管理员权限才能读」的盘（Linux 上的 NVMe、SATA 盘和 USB 硬盘盒里的盘；U 盘、读卡器不算），说明下面一个按钮「用管理员权限读取…」（盾牌图标；悬停：「会弹出系统的管理员授权。只读取磁盘自己的记录，不改动任何东西；一次授权读出所有需要的盘」）。只有点击才请求授权，打开页面、刷新都不会。点击后按钮写「正在等待授权…」，其他这类按钮不可点；后端经 pkexec 启动只读助手（polkit 的密码框），一次读出所有需要的盘。读到的记录在后端运行期间保留，「累计」一行悬停写「以管理员权限读取于 {时间}」，温度仍是当前的；助手还在运行（空闲 10 分钟内）时刷新会顺带重读，不再询问。没应答的盘写原因（USB 桥接没有转发 / 盘没有回应），按钮不再出现。取消授权或没法请求授权（没有 polkit 身份验证代理，如 SSH 或无桌面；AppImage；没有 pkexec）时，在点过的那张卡片上用警示色写出原因，按钮留着。 | `machine.read_health`（`ReadHealthParams.disks`：[] = 所有需要的盘；`ReadHealthResult.outcome`：read / denied / unavailable / nothing、`message`、`machine`）；`DiskHealth.read_at` | 在 SSH 里运行时点按钮，卡片写「没有可以询问管理员密码的身份验证代理（比如在 SSH 会话里，或没有图形桌面）」。 |
 
 ### 文案与快捷键
 
@@ -2883,7 +2884,7 @@ Tweak（画布上的调节项）：
 
 ### 数据字段
 
-`MachineDisks`：`disks[]`（`PhysicalDisk`：id、number、model、vendor、serial、firmware、size、media、interface、removable、trim、link、controller_link、system、parts[]、health、health_note、io）、`volumes[]`（`VolumeOverview`：volume、disks、scan、history[]）、`collected_at`。磁盘自己的记录 `DiskHealth`：source（nvme / ata）、temperature_c、power_on_hours、power_cycles、read_bytes、written_bytes、percentage_used、available_spare、spare_threshold、unsafe_shutdowns、media_errors、critical_warning；系统计数 `DiskIo`：read_bytes、written_bytes、since（系统启动的时间）。链路 `DiskLink`：kind、rate_mbps、max_rate_mbps、pcie_gen、pcie_width、max_pcie_gen、max_pcie_width。
+`MachineDisks`：`disks[]`（`PhysicalDisk`：id、number、model、vendor、serial、firmware、size、media、interface、removable、trim、link、controller_link、system、parts[]、health、health_note、io）、`volumes[]`（`VolumeOverview`：volume、disks、scan、history[]）、`collected_at`。磁盘自己的记录 `DiskHealth`：source（nvme / ata）、temperature_c、power_on_hours、power_cycles、read_bytes、written_bytes、percentage_used、available_spare、spare_threshold、unsafe_shutdowns、media_errors、critical_warning、read_at；系统计数 `DiskIo`：read_bytes、written_bytes、since（系统启动的时间）。链路 `DiskLink`：kind、rate_mbps、max_rate_mbps、pcie_gen、pcie_width、max_pcie_gen、max_pcie_width。
 
 ### 待定事项
 

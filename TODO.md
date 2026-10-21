@@ -28,7 +28,7 @@
 - [ ] 限速精度实测：稳态 5 s 均值 ≤ 上限、单点超出 ≤ 5 个百分点、改档 3 s 内收敛
 - [x] 负载口径（用户 2026-10-18 决定）：限速继续按「忙碌度 / 队列深度」折算的占用计算；任务管理器式的「活动时间」显示在旁边作参考（状态栏、扫描详情、负载曲线的点线）
 - [x] 硬扫描结果归并向量化（`NodeStore.ingest_slice`）：每个列表 30–78 µs → 1–3 µs，瓶颈转到系统目录枚举
-- [ ] Linux / macOS 的提权助手（现在 `elevate=True` 返回 `not_supported`）
+- [x] Linux 的提权助手（0.3.3）：pkexec + polkit，目前只给「本机磁盘」读磁盘自己的记录（`disk_health`），点按钮才请求；macOS 不需要（NVMe 的记录不提权就能读），`elevate=True` 仍返回 `not_supported`
 - [ ] W2 扫描摘要卡（扫描中选中某块时，详情面板顶部的进度 + 档位 + 负载）
 - [ ] 日志面板「扫描统计」页复用负载曲线与并发
 
@@ -138,7 +138,11 @@
 - [x] 协议：`machine.disks`（`spaceknife_protocol.machine`），前端只负责显示
 - [x] 界面：单独的标签页（`pages/MachinePage.tsx`），每块盘一张卡片，盘上的卷按盘上顺序；链路比盘能跑的慢时用一行说明（不弹窗）
 - [ ] macOS 只用记录的数据形状测过（`system_profiler` 的键名随系统版本变化，比如 macOS 15 的 `SPUSBHostDataType`）：在真机上核对 NVMe / SATA / USB 链路
-- [ ] Linux 上 SATA 盘只有当前速率（设备支持的最高速率要 IDENTIFY，需要 root）：可以走扫描助手补上
+- [x] 磁盘自己的记录（0.3.3）：Windows 不提权读 NVMe 健康日志 / ATA 设备统计日志；macOS 经 IOKit 的 NVMe SMART 接口读 NVMe 盘（不提权）；Linux 点「用管理员权限读取…」后由提权助手读（NVMe 管理命令、SG_IO 的 ATA 直通）
+- [ ] macOS 的 NVMe SMART 在 Intel Mac 上实测（`disks/mac_smart.py` 还没在真机上跑过）：数值和 smartctl / DriveDx 对一下；另一个程序（Stats、DriveDx）占着接口时安静地读不到；连读约 20 次看有没有泄漏；正式签名（Developer ID、hardened runtime、不加 disable-library-validation）的包里也读得到。有机会在 Apple 芯片的 Mac 上跑一次
+- [ ] macOS 的 SATA 盘（iMac 2019 的机械盘 / Fusion Drive）：`ATASMARTLib` 的接口还没调研（要不要 root、读得到什么）
+- [ ] Linux 的 deb / rpm 在真机桌面上走一遍：polkit 密码框、冻结后端以 root 跑 `--helper`；可以随包附带一个 polkit 策略文件（`org.freedesktop.policykit.exec.path` 指向 `/opt/SpaceKnife/resources/backend/spaceknife-backend/spaceknife-backend`），让密码框写清楚要做什么（现在是 pkexec 的通用说明）
+- [ ] Linux 上 SATA 盘只有当前速率（设备支持的最高速率要 IDENTIFY，需要 root）：提权助手读健康记录时已经拿到 IDENTIFY，可以顺带补上
 - [ ] Windows 把 USB 3.2 Gen 2×2 报告成 10 Gb/s：`IOCTL_USB_GET_NODE_CONNECTION_SUPERSPEEDPLUS_INFORMATION` 能分出 20 Gb/s
 
 ## 可视化组件（2026-10-19）

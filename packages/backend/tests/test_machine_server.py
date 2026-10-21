@@ -8,14 +8,16 @@ from pathlib import Path
 import pytest
 
 from spaceknife.disks import Probe
+from spaceknife.helper import HelperDenied, HelperError, HelperUnavailable
 from spaceknife.scan.volume import VolumeInfo
 from spaceknife.server import Server, machine_handlers
 from spaceknife_client.connection import Connection
 from spaceknife_protocol import scan as p
 from spaceknife_protocol.base import Empty
-from spaceknife_protocol.machine import DiskPart, PhysicalDisk
-from spaceknife_protocol.methods import MACHINE_DISKS, SCAN_START, VOLUME_LIST
+from spaceknife_protocol.machine import DiskHealth, DiskPart, PhysicalDisk, ReadHealthParams
+from spaceknife_protocol.methods import MACHINE_DISKS, MACHINE_READ_HEALTH, SCAN_START, VOLUME_LIST
 
+from .test_disks import nvme_log
 from .test_scan_server import wait_done
 from .tree_fixture import build_tree
 
@@ -86,3 +88,122 @@ async def test_what_a_scan_and_a_snapshot_tell(
     _saved, history = machine_handlers.saved_scans(root)
     assert [h.bytes_alloc for h in history] == [second.bytes_alloc, status.bytes_alloc]
     assert history[0].at >= history[1].at and second.bytes_alloc > status.bytes_alloc
+
+
+# ---------------------------------------------------------------- records that need administrator rights
+
+
+class FakeClient:
+    """An elevated helper: the NVMe drive answers, the SATA disk refuses."""
+
+    elevated = True
+    alive = True
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    async def disk_health(self, disk: str) -> dict[str, object]:
+        self.asked.append(disk)
+        if disk == "sda":
+            raise HelperError("磁盘没有设备统计日志", "not_supported")
+        log = nvme_log(units_written=1_000_000, hours=8070, kelvin=330)
+        return {"kind": "nvme", "log": log.hex()}
+
+
+class FakeShared:
+    def __init__(self, fail: Exception | None = None) -> None:
+        self.fail = fail
+        self.client = FakeClient()
+        self.prompts = 0
+        self.running = False
+
+    @property
+    def current(self) -> FakeClient | None:
+        return self.client if self.running else None
+
+    async def get(self, elevate: bool = True) -> FakeClient:
+        assert elevate
+        self.prompts += 1
+        if self.fail is not None:
+            raise self.fail
+        self.running = True
+        return self.client
+
+    async def close(self) -> None:
+        self.running = False
+
+
+def linux_disks() -> list[PhysicalDisk]:
+    return [
+        PhysicalDisk(
+            id="nvme0n1",
+            model="ZHITAI TiPro9000",
+            serial="S1",
+            size=4 * 10**12,
+            media="nvme_ssd",
+            interface="nvme",
+            health=DiskHealth(source="nvme", temperature_c=47),  # hwmon: the current one
+            health_note="needs_admin",
+        ),
+        PhysicalDisk(id="sda", model="CT2000MX500SSD1", serial="S2", size=2 * 10**12, interface="sata",
+                     health_note="needs_admin"),
+        PhysicalDisk(id="sdc", model="STORAGE DEVICE", size=10**9, interface="usb", health_note="usb"),
+    ]  # fmt: skip
+
+
+async def test_records_are_read_only_on_request(
+    client: Connection, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(machine_handlers.disks, "probe", lambda volumes: Probe(disks=linux_disks()))
+    shared = FakeShared()
+    monkeypatch.setattr(server.scans, "helper", shared)
+
+    page = await client.call(MACHINE_DISKS, Empty())
+    assert shared.prompts == 0  # opening the page never asks
+    assert [d.health_note for d in page.disks] == ["needs_admin", "needs_admin", "usb"]
+
+    read = await client.call(MACHINE_READ_HEALTH, ReadHealthParams())
+    assert read.outcome == "read" and read.message == "" and shared.prompts == 1
+    assert shared.client.asked == ["nvme0n1", "sda"]  # not the card reader
+    nvme, sata, reader = read.machine.disks
+    assert nvme.health is not None and nvme.health_note == ""
+    assert nvme.health.written_bytes == 1_000_000 * 512_000 and nvme.health.power_on_hours == 8070
+    assert nvme.health.temperature_c == 47 and nvme.health.read_at is not None  # the live temperature
+    assert (sata.health, sata.health_note) == (None, "unsupported")  # it didn't answer: why
+    assert reader.health_note == "usb"
+
+    # later reads keep the record; while the helper runs they ask it again, without a prompt
+    again = await client.call(MACHINE_DISKS, Empty())
+    assert again.disks[0].health == nvme.health.model_copy(update={"read_at": again.disks[0].health.read_at})  # type: ignore[union-attr]
+    assert shared.client.asked == ["nvme0n1", "sda", "nvme0n1"] and shared.prompts == 1
+    await shared.close()
+    kept = await client.call(MACHINE_DISKS, Empty())
+    assert (
+        kept.disks[0].health is not None and kept.disks[0].health.written_bytes == nvme.health.written_bytes
+    )
+    assert kept.disks[1].health_note == "unsupported" and len(shared.client.asked) == 3
+
+    # nothing left to read
+    nothing = await client.call(MACHINE_READ_HEALTH, ReadHealthParams())
+    assert nothing.outcome == "nothing" and shared.prompts == 1
+
+
+@pytest.mark.parametrize(
+    ("fail", "outcome"),
+    [
+        (HelperDenied(), "denied"),
+        (HelperUnavailable("没有可以询问管理员密码的身份验证代理", "no_agent"), "unavailable"),
+    ],
+)
+async def test_records_when_rights_are_not_given(
+    client: Connection, server: Server, monkeypatch: pytest.MonkeyPatch, fail: Exception, outcome: str
+) -> None:
+    monkeypatch.setattr(machine_handlers.disks, "probe", lambda volumes: Probe(disks=linux_disks()))
+    monkeypatch.setattr(server.scans, "helper", FakeShared(fail))
+    read = await client.call(MACHINE_READ_HEALTH, ReadHealthParams(disks=["nvme0n1"]))
+    assert read.outcome == outcome and read.message
+    assert [d.health_note for d in read.machine.disks] == [
+        "needs_admin",
+        "needs_admin",
+        "usb",
+    ]  # still offered

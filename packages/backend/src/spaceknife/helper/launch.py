@@ -1,17 +1,23 @@
-"""Starting the helper process: a plain subprocess, or elevated through the UAC prompt."""
+"""Starting the helper process: a plain subprocess, or elevated through the UAC prompt (Windows)
+or polkit's ``pkexec`` (Linux)."""
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
 import subprocess
 import sys
 import threading
+from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import IO, Protocol
+
+from loguru import logger
 
 from ..i18n import _, tr
-from .errors import HelperDenied, HelperUnavailable
+from .errors import HelperDenied, HelperError, HelperUnavailable
 
 if sys.platform == "win32":
     from . import _win32
@@ -22,6 +28,9 @@ SEE_MASK_NOASYNC = 0x00000100
 SEE_MASK_FLAG_NO_UI = 0x00000400
 SEE_MASK_NO_CONSOLE = 0x00008000
 SW_HIDE = 0
+PKEXEC_PATHS = ("/usr/bin/pkexec", "/bin/pkexec")
+PKEXEC_DISMISSED = 126  # the user closed the password dialog
+PKEXEC_REFUSED = 127  # not authorized, no authentication agent, or the program can't run
 
 
 class HelperProcess(Protocol):
@@ -53,6 +62,93 @@ class PopenProcess:
 
     def close(self) -> None:
         self._popen.poll()  # reap if it has exited
+
+
+class PkexecProcess(PopenProcess):
+    """``pkexec helper …``: pkexec asks polkit, then replaces itself with the helper (the same
+    pid, now root). Its stderr is read on a thread: the last lines say why pkexec gave up, and the
+    helper's log goes to the backend's log."""
+
+    def __init__(self, popen: subprocess.Popen[bytes]) -> None:
+        super().__init__(popen)
+        self.tail: deque[str] = deque(maxlen=20)
+        self._reader: threading.Thread | None = None
+        if popen.stderr is not None:
+            self._reader = threading.Thread(
+                target=self._read, args=(popen.stderr,), name="sk-helper-stderr", daemon=True
+            )
+            self._reader.start()
+
+    def _read(self, stream: IO[bytes]) -> None:
+        with contextlib.suppress(OSError, ValueError):
+            for raw in stream:
+                line = raw.decode("utf-8", "replace").rstrip()
+                if line:
+                    self.tail.append(line)
+                    logger.debug("helper: {}", line)
+
+    def terminate(self) -> None:
+        with contextlib.suppress(PermissionError, ProcessLookupError):  # root by now: not ours to kill
+            super().terminate()
+
+    def exit_error(self, code: int) -> HelperError | None:
+        """What pkexec's exit code means, or None (the helper itself exited)."""
+        if self._reader is not None:
+            self._reader.join(1.0)  # it has exited: its last words are on their way
+        return pkexec_error(code, list(self.tail))
+
+
+def pkexec_error(code: int, stderr: Sequence[str]) -> HelperError | None:
+    if code == PKEXEC_DISMISSED:
+        return HelperDenied()
+    if code != PKEXEC_REFUSED:
+        return None
+    text = " ".join(stderr).strip()
+    if "authentication agent" in text.lower():
+        return HelperUnavailable(
+            _("没有可以询问管理员密码的身份验证代理（比如在 SSH 会话里，或没有图形桌面）"), "no_agent"
+        )
+    return HelperUnavailable(tr("系统没有给予管理员授权：{reason}", reason=text or code), "not_authorized")
+
+
+def pkexec_path() -> str | None:
+    """pkexec at a fixed absolute path (never looked up in PATH)."""
+    for path in PKEXEC_PATHS:
+        if os.access(path, os.X_OK):
+            return path
+    return None
+
+
+def in_appimage(executable: str | None = None) -> bool:
+    """An AppImage runs from a FUSE mount only its user can read: root can't start the helper."""
+    return bool(os.environ.get("APPIMAGE")) or "/.mount_" in (executable or sys.executable)
+
+
+def start_pkexec(argv: Sequence[str]) -> HelperProcess:
+    """``pkexec argv…`` (Linux): the desktop's polkit agent shows the password dialog while the
+    helper is being started; the caller waits for it to connect. Its own session, so pkexec never
+    falls back to asking on the backend's terminal."""
+    pkexec = pkexec_path()
+    if pkexec is None:
+        raise HelperUnavailable(_("找不到 pkexec：请求管理员授权需要 polkit"), "not_supported")
+    if in_appimage(argv[0]):
+        raise HelperUnavailable(
+            _("AppImage 版本不能以管理员身份运行助手；请改用 deb 或 rpm 安装包"), "not_supported"
+        )
+    if not os.path.isabs(argv[0]):
+        raise HelperUnavailable(tr("助手的路径不是绝对路径：{path}", path=argv[0]), "not_supported")
+    try:
+        popen = subprocess.Popen(
+            [pkexec, *argv],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            close_fds=True,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        raise HelperUnavailable(tr("无法启动 pkexec：{reason}", reason=exc), "exited") from exc
+    return PkexecProcess(popen)
 
 
 def helper_command(elevated: bool) -> list[str]:
@@ -109,12 +205,15 @@ def elevated_params(argv: Sequence[str]) -> ShellExecuteParams:
 
 
 async def start_elevated(argv: Sequence[str]) -> HelperProcess:
-    """Show the UAC prompt and start ``argv`` elevated (Windows only).
+    """Start ``argv`` elevated: the UAC prompt (Windows) or pkexec (Linux).
 
     ShellExecuteExW blocks until the user answers, so it runs on its own COM-initialised daemon
     thread. If the caller gives up first (connect timeout), a late process handle is released;
-    the helper then finds the pipe gone and exits by itself.
+    the helper then finds the pipe gone and exits by itself. pkexec returns at once; its password
+    dialog stays open while the caller waits for the helper to connect.
     """
+    if sys.platform.startswith("linux"):
+        return start_pkexec(argv)
     if sys.platform != "win32":
         raise HelperUnavailable(_("当前平台暂不支持提权助手"), "not_supported")
     params = elevated_params(argv)
@@ -167,10 +266,15 @@ else:
 
 __all__ = [
     "HelperProcess",
+    "PkexecProcess",
     "PopenProcess",
     "ShellExecuteParams",
     "elevated_params",
     "helper_command",
+    "in_appimage",
+    "pkexec_error",
+    "pkexec_path",
     "start_elevated",
+    "start_pkexec",
     "start_subprocess",
 ]

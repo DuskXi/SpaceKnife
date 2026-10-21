@@ -102,8 +102,12 @@
  "系统 {when} 启动以来的读写量": "Read and written since the system started at {when}",
  "系统启动以来的读写量": "Read and written since the system started",
  "这个系统读不到磁盘自己的健康记录": "This system has no way to read the disk's own health record",
- "这块盘没有提供不需要管理员权限就能读的健康记录": "This disk offers no health record that can be read without administrator rights",
+ "这块盘没有回应健康记录的查询": "This disk didn't answer the query for its health record",
  "通电 {time}": "On for {time}",
  "通电时间": "Power-on time",
- "通电次数": "Power cycles"
+ "通电次数": "Power cycles",
+ "会弹出系统的管理员授权。只读取磁盘自己的记录，不改动任何东西；一次授权读出所有需要的盘": "Asks for administrator rights in the system's prompt. Only reads the disks' own records and changes nothing; one prompt reads every disk that needs it",
+ "正在等待授权…": "Waiting for authorization…",
+ "用管理员权限读取…": "Read with administrator rights…",
+ "磁盘自己记录的整个寿命里的读写量，以管理员权限读取于 {when}": "Read and written over the disk's life, as the disk records it; read with administrator rights at {when}"
 }

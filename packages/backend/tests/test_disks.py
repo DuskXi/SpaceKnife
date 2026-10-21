@@ -4,6 +4,7 @@ macOS parsing on recorded diskutil / system_profiler shapes, and a live probe of
 from __future__ import annotations
 
 import posixpath
+import re
 import sys
 from datetime import UTC, datetime
 
@@ -508,6 +509,16 @@ def test_linux_health_and_counters(machine: FakeFs) -> None:
     assert reader.health is None and reader.health_note == "usb"
 
 
+def test_linux_drive_in_an_enclosure_can_be_read_as_root(machine: FakeFs) -> None:
+    """A hard disk or SSD behind a USB bridge may pass ATA commands on (root, on request); a stick
+    or a card reader doesn't, so it isn't offered."""
+    sdc = machine.real("/sys/block/sdc")
+    machine.file(f"{sdc}/removable", "0")
+    machine.file(f"{sdc}/queue/rotational", "1")
+    drive = {d.id: d for d in linux_probe([], fs=machine).disks}["sdc"]  # type: ignore[arg-type]
+    assert (drive.media, drive.health_note) == ("usb_hdd", "needs_admin")
+
+
 def test_mac_io_counters() -> None:
     tree = [
         {
@@ -524,3 +535,25 @@ def test_mac_io_counters() -> None:
     ]
     assert mac.io_counters(tree) == {"disk0": (4_000_000, 9_000_000)}
     assert mac.io_counters(None) == {}
+
+
+def test_mac_nvme_smart_layouts() -> None:
+    """The COM layouts of IOCFPlugIn.h and NVMeSMARTLibExternal.h, and the live call (macOS)."""
+    import ctypes
+
+    from spaceknife.disks import mac_smart
+
+    if ctypes.sizeof(ctypes.c_void_p) == 8:
+        assert mac_smart.IOCFPlugInInterface.version.offset == 32
+        assert mac_smart.IOCFPlugInInterface.Stop.offset == 56
+        assert mac_smart.IONVMeSMARTInterface.SMARTReadData.offset == 40
+        assert mac_smart.IONVMeSMARTInterface.GetIdentifyData.offset == 48
+        assert mac_smart.IONVMeSMARTInterface.GetLogPage.offset == 72
+    iid = mac_smart.uuid_bytes(mac_smart.SMART_INTERFACE)
+    assert ctypes.sizeof(iid) == 16 and (iid.byte0, iid.byte1, iid.byte15) == (0xCC, 0xD1, 0xB6)
+    logs = mac_smart.nvme_smart_logs()
+    if sys.platform != "darwin":
+        assert logs == {}
+    for name, log in logs.items():  # a CI runner's virtual disk has none; a Mac's NVMe SSD has one
+        assert re.fullmatch(r"disk\d+", name) and len(log) == mac_smart.LOG_BYTES
+        assert health.nvme_health(log) is not None

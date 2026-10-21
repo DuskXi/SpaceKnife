@@ -28,7 +28,7 @@ from .compare import (
 from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
-from .machine import MachineDisks
+from .machine import MachineDisks, ReadHealthParams, ReadHealthResult
 from .ops import (
     BasketAddParams,
     BasketAddResult,
@@ -448,6 +448,13 @@ MACHINE_DISKS = MethodSpec(
     MachineDisks,
     "This computer's disks with their links, the volumes on each and what scans tell of each volume.",
 )
+MACHINE_READ_HEALTH = MethodSpec(
+    "machine.read_health",
+    ReadHealthParams,
+    ReadHealthResult,
+    "Read the disks' own records that need administrator rights (Linux: the elevated helper, behind "
+    "polkit's password prompt). Only when the user asks; the answer is the whole page again.",
+)
 EVENT_UPDATE = EventSpec(
     "update.changed",
     UpdateChangedEvent,
@@ -471,6 +478,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         UNSUBSCRIBE,
         VOLUME_LIST,
         MACHINE_DISKS,
+        MACHINE_READ_HEALTH,
         SCAN_CHECK_PATHS,
         SCAN_START,
         SCAN_CANCEL,

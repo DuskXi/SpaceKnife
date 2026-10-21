@@ -79,9 +79,27 @@ description: 这台电脑上的每一块盘，扫描过的和没扫描过的：�
 | 你看到 | 意思 |
 |---|---|
 | USB 桥接没有把磁盘自己的记录传过来 | 移动硬盘盒、U 盘和读卡器里的转接芯片通常不转发这些查询。 |
-| 这块盘没有提供不需要管理员权限就能读的健康记录 | 有些较老的 SATA 盘只用需要管理员权限的命令报告健康状况。SpaceKnife 不会为此请求提权。 |
-| 磁盘自己记录的累计读写要管理员权限才能读 | Linux 上只有 root 能读这份记录；温度和开机以来的读写照常显示。 |
-| 这个系统读不到磁盘自己的健康记录 | macOS 不向普通程序提供这份记录；开机以来的读写照常显示。 |
+| 这块盘没有回应健康记录的查询 | 较老的 SATA 盘常常没有设备统计日志（它们只用各厂商自定的 SMART 属性报告健康状况，SpaceKnife 不读这些属性）；有些 RAID 驱动也不转发这类查询。 |
+| 磁盘自己记录的累计读写要管理员权限才能读 | Linux 上只有 root 能读这份记录。卡片上的「用管理员权限读取…」可以读出来，见[在 Linux 上用管理员权限读取](#在-linux-上用管理员权限读取)；温度和开机以来的读写照常显示。 |
+| 这个系统读不到磁盘自己的健康记录 | macOS 上只有 NVMe 盘的记录读得到（不需要管理员权限）；SATA 盘读不到。另一个程序（比如磁盘监控工具）正占用着 NVMe 盘的这个接口时，这一次也读不到。开机以来的读写照常显示。 |
+
+### 在 Linux 上用管理员权限读取
+
+Linux 只让 root 向磁盘发送读取这份记录的命令，所以 NVMe 盘、SATA 盘和硬盘盒里的盘的卡片上有一个「用管理员权限读取…」按钮。只有你点它才会请求授权：打开页面、刷新都不会。
+
+- 点击后，系统的身份验证对话框（polkit，经 `pkexec`）请你输入管理员密码。通过后，SpaceKnife 以 root 启动它的只读助手；主程序和界面始终不提权。
+- 一次授权读出所有需要的盘。助手只打开只读的磁盘设备，只发固定的只读命令：NVMe 的读取日志页 02h，或 SATA 的 IDENTIFY DEVICE 和读取设备统计日志 04h（经 ATA 直通）。它不读、不写盘上的任何数据。
+- 读到的记录在 SpaceKnife 运行期间保留；「累计」一行悬停能看到是什么时候读的。助手空闲 10 分钟后退出，在那之前点「刷新」会顺带重读，不再询问。
+- 一块盘没有应答时，卡片写出原因，按钮不再出现。
+
+没法请求授权时，卡片上写出原因：
+
+| 你看到 | 意思 |
+|---|---|
+| 用户拒绝了管理员授权 | 你关掉了密码框。按钮还在，可以再点。 |
+| 没有可以询问管理员密码的身份验证代理（比如在 SSH 会话里，或没有图形桌面） | 桌面环境通常自带 polkit 身份验证代理；SSH 会话、没有桌面的系统里没有。 |
+| AppImage 版本不能以管理员身份运行助手；请改用 deb 或 rpm 安装包 | AppImage 从只有你自己能读的挂载点运行，root 读不到它。deb 和 rpm 安装包装在 `/opt/SpaceKnife`。 |
+| 找不到 pkexec：请求管理员授权需要 polkit | 系统没有装 polkit（`pkexec`）。 |
 
 ### 卷和容量条
 
@@ -106,13 +124,13 @@ description: 这台电脑上的每一块盘，扫描过的和没扫描过的：�
 
 ## 这些信息从哪里来
 
-SpaceKnife 只向系统询问（包括请系统把磁盘自己的健康记录转给它），不需要管理员权限，也不读取磁盘上的任何文件或数据。
+SpaceKnife 只向系统询问（包括请系统把磁盘自己的健康记录转给它），不读取磁盘上的任何文件或数据。这些都不需要管理员权限，只有 Linux 上磁盘自己的累计记录例外，而且只在你点了按钮之后（见上）。
 
 | 系统 | 来源 |
 |---|---|
 | Windows | 每块盘的存储查询（型号、序列号、总线、TRIM、磁盘识别信息里的 SATA 速率、NVMe 识别信息）、它上方的设备树（NVMe 或 SATA 控制器的 PCIe 链路、USB 集线器报告的连接速率）以及每个卷所在的磁盘区段；磁盘自己的记录来自同一条存储查询转发的 NVMe SMART / 健康日志（日志页 02h）和 ATA 设备统计日志（04h），开机以来的读写来自磁盘性能计数 |
-| Linux | sysfs：`/sys/block`、PCI 设备的 `current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`、USB 设备的 `speed` 和 `version`，以及 `/dev/disk/by-id`；开机以来的读写来自 `/sys/block/*/stat`，温度来自 hwmon（NVMe 驱动，SATA 盘要加载 `drivetemp`） |
-| macOS | `diskutil` 和 `system_profiler`（NVMe、SATA、USB）；开机以来的读写来自 I/O Registry 里每块盘的统计 |
+| Linux | sysfs：`/sys/block`、PCI 设备的 `current_link_speed` 和 `current_link_width`、`/sys/class/ata_link/*/sata_spd`、USB 设备的 `speed` 和 `version`，以及 `/dev/disk/by-id`；开机以来的读写来自 `/sys/block/*/stat`，温度来自 hwmon（NVMe 驱动，SATA 盘要加载 `drivetemp`）；磁盘自己的累计记录由提权助手读（NVMe 管理命令 `NVME_IOCTL_ADMIN_CMD`，SATA 经 `SG_IO` 的 ATA 直通） |
+| macOS | `diskutil` 和 `system_profiler`（NVMe、SATA、USB）；开机以来的读写来自 I/O Registry 里每块盘的统计；NVMe 盘自己的记录来自 IOKit 的 NVMe SMART 接口 |
 
 系统没报告的就留空，不去猜。具体来说：
 

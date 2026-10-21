@@ -8,7 +8,7 @@
 import { useEffect } from "react";
 
 import type { MachineDisks, PhysicalDisk, VolumeOverview, VolumeScan } from "@/protocol/generated";
-import { activate, newStartTab, openSnapshot, refreshMachine } from "@/state/actions";
+import { activate, newStartTab, openSnapshot, readDiskRecords, refreshMachine } from "@/state/actions";
 import { classHexNow } from "@/lib/classes";
 import { patchStartForm, get, useApp } from "@/state/store";
 import { MEDIA_ZH } from "@/pages/StartPage";
@@ -354,6 +354,9 @@ function Disk({ disk, data }: { disk: PhysicalDisk; data: MachineDisks }) {
 /** What the disk records about itself (lifetime reads and writes, temperature, power-on time,
  * wear) and the system's counters since it started; why the disk's own record is missing, when it is. */
 function DiskRecord({ disk }: { disk: PhysicalDisk }) {
+  const conn = useApp((s) => s.conn);
+  const reading = useApp((s) => s.machineReading);
+  const readNote = useApp((s) => s.machineReadNote);
   const h = disk.health;
   const io = disk.io;
   const lifetime = !!h && (h.read_bytes != null || h.written_bytes != null);
@@ -374,7 +377,13 @@ function DiskRecord({ disk }: { disk: PhysicalDisk }) {
           </thead>
           <tbody>
             {lifetime && h && (
-              <tr title={t("磁盘自己记录的整个寿命里的读写量")}>
+              <tr
+                title={
+                  h.read_at
+                    ? t("磁盘自己记录的整个寿命里的读写量，以管理员权限读取于 {when}", { when: fmtDateTime(seconds(h.read_at)) })
+                    : t("磁盘自己记录的整个寿命里的读写量")
+                }
+              >
                 <th>{t("累计")}</th>
                 <td>{size(h.read_bytes)}</td>
                 <td>{size(h.written_bytes)}</td>
@@ -416,6 +425,25 @@ function DiskRecord({ disk }: { disk: PhysicalDisk }) {
         <div className="mc-note">
           <Icon name="info" size={13} />
           {note}
+        </div>
+      )}
+      {disk.health_note === "needs_admin" && (
+        <div className="mc-read">
+          <button
+            className="ghost small"
+            disabled={reading !== null || conn !== "ready"}
+            title={t("会弹出系统的管理员授权。只读取磁盘自己的记录，不改动任何东西；一次授权读出所有需要的盘")}
+            onClick={() => void readDiskRecords(disk.id)}
+          >
+            <Icon name="shield" size={13} />
+            {reading === disk.id ? t("正在等待授权…") : t("用管理员权限读取…")}
+          </button>
+        </div>
+      )}
+      {readNote?.disk === disk.id && (
+        <div className="mc-note warn" role="status">
+          <Icon name="warning" size={13} />
+          {readNote.text}
         </div>
       )}
     </div>

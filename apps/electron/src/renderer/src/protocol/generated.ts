@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "a391c4aa859bb27c";
+export const SCHEMA_HASH = "674add5b9836c65d";
 
 export interface AgeCond {
   end: number;
@@ -362,6 +362,8 @@ export interface DiskHealth {
   percentage_used: number | null;
   power_cycles: number | null;
   power_on_hours: number | null;
+  /** When the record was read with administrator rights (Linux: machine.read_health); None: read just now. The temperature is always the current one. */
+  read_at: string | null;
   /** Read over the disk's life */
   read_bytes: number | null;
   source: "nvme" | "ata";
@@ -1126,6 +1128,22 @@ export interface Range {
   upper: Bound | null;
 }
 
+export interface ReadHealthParams {
+  /** Ids of the disks to read; []: every disk whose record needs administrator rights */
+  disks?: string[];
+}
+
+/**
+ * ``read``: the records were read (a disk that did not answer says why in its health_note);
+ * ``denied``: the user closed the password prompt; ``unavailable``: no way to ask for administrator
+ * rights here (``message`` says why); ``nothing``: no disk needed it.
+ */
+export interface ReadHealthResult {
+  machine: MachineDisks;
+  message: string;
+  outcome: "read" | "denied" | "unavailable" | "nothing";
+}
+
 export interface Refusal {
   path: string;
   reason: string;
@@ -1881,6 +1899,8 @@ export interface Methods {
   "io.status": { params: Empty; result: IoStatusList };
   /** This computer's disks with their links, the volumes on each and what scans tell of each volume. */
   "machine.disks": { params: Empty; result: MachineDisks };
+  /** Read the disks' own records that need administrator rights (Linux: the elevated helper, behind polkit's password prompt). Only when the user asks; the answer is the whole page again. */
+  "machine.read_health": { params: ReadHealthParams; result: ReadHealthResult };
   /** Stop a running file operation. */
   "ops.cancel": { params: OpTaskParams; result: EmptyResult };
   /** Undo a file operation: put trashed items back, or call off a permanent deletion still waiting. */
