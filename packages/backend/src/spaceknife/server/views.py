@@ -166,15 +166,7 @@ class ViewManager:
             raise RpcError(ErrorCode.INVALID_REQUEST, tr("打开的视图太多了，先关掉一些标签或窗格"))
         handle = self._scan(params.scan_id)
         shared = self._shared_for(handle)
-        roots = [
-            RootInfoLike(
-                node=r.node,
-                whole_volume=r.whole_volume,
-                free=r.volume.free if r.volume else None,
-                used=r.volume.used if r.volume else None,
-            )
-            for r in handle.roots
-        ]
+        roots = _volume_roots(handle)
         view_id = f"view-{next(self._ids)}"
         caps = session.capabilities
         cmp = _compare_of(handle)
@@ -359,14 +351,37 @@ class ViewManager:
             self.ops.on_tree_changed(scan_id)  # basket sizes and missing items (UI-W5-48)
         st = self.settings
         flash_on = st is None or bool(st.get("treemap.flash_changes"))
+        self._follow_volumes(scan_id)
         for host in self._hosts(scan_id):
             if flash_on and changes:
                 host.view.add_flash(changes)
-            if host.push_task is not None and not host.push_task.done():
-                host.change_pending = True  # the running push renders once more
-                continue
-            host.push_final = False
-            host.push_task = asyncio.get_running_loop().create_task(self._push(host, False, "change"))
+            self._push_change(host)
+
+    def volumes_changed(self, scan_id: str) -> None:
+        """The free space of the scan's volumes moved without a change to the tree (read again a
+        moment after the last change): free and unknown space are drawn again."""
+        self._follow_volumes(scan_id)
+        for host in self._hosts(scan_id):
+            self._push_change(host)
+
+    def _follow_volumes(self, scan_id: str) -> None:
+        """The views' free and used space of each root: the volume as the scan last read it
+        (``ScanMonitor._refresh_free``), not as it was when the view opened. Otherwise whatever
+        is deleted while monitoring leaves the tree but not the used space, and shows as unknown."""
+        handle = self.scans.scans.get(scan_id)
+        if handle is None:
+            return
+        roots = _volume_roots(handle)
+        for host in self._hosts(scan_id):
+            if host.view.store is handle.store:
+                host.view.roots = roots
+
+    def _push_change(self, host: ViewHost) -> None:
+        if host.push_task is not None and not host.push_task.done():
+            host.change_pending = True  # the running push renders once more
+            return
+        host.push_final = False
+        host.push_task = asyncio.get_running_loop().create_task(self._push(host, False, "change"))
 
     # ------------------------------------------------------------- scan-driven pushes
 
@@ -413,6 +428,19 @@ class ViewManager:
                 reason = "change"
             else:
                 return
+
+
+def _volume_roots(handle: ScanHandle) -> list[RootInfoLike]:
+    """What views need of the scan's roots, with the free and used space of their volumes."""
+    return [
+        RootInfoLike(
+            node=r.node,
+            whole_volume=r.whole_volume,
+            free=r.volume.free if r.volume else None,
+            used=r.volume.used if r.volume else None,
+        )
+        for r in handle.roots
+    ]
 
 
 def _compare_of(handle: object) -> CompareHandle | None:

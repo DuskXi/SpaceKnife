@@ -13,7 +13,7 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 
 ### Fixes
 
-(nothing yet)
+- **Deleted space no longer shows as unknown.** What was deleted while a scan was monitored (in Explorer, by emptying the Recycle Bin, by another program) stayed counted as used in the open view, so the freed space grew the unknown-space block while the free-space block kept its old size. The view now follows the volume's free space, read again right after each change.
 
 ---
 
@@ -30,4 +30,4 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 
 ### 修复
 
-（暂无）
+- **删除的空间不再显示成未知空间**：扫描在监控时被删掉的东西（在资源管理器里删、清空回收站、别的程序删除），在已打开的视图里仍按原来的已用空间计算，释放出来的空间就变成了「未知空间」，可用空间块却还是原来的大小。现在视图跟着卷的可用空间走，每次变化后都会重新读取。

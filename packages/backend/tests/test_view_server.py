@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -9,7 +11,9 @@ import numpy as np
 import pytest
 
 from spaceknife.layout import registry
-from spaceknife.server import Server
+from spaceknife.layout.rows import KEY_FREE, KEY_UNKNOWN
+from spaceknife.scan.volume import VolumeInfo
+from spaceknife.server import Server, monitors
 from spaceknife.view.state import F_DIM, F_MATCH, F_SCANNING, F_SELECTED
 from spaceknife_client.connection import Connection, RemoteError
 from spaceknife_client.views import ViewClient
@@ -190,6 +194,79 @@ async def test_scan_progress_pushes_frames(tmp_path: Path, server: Server, clien
     assert pushed.view_id == update.state.view_id and pushed.reason == "scan-final"
     frame = await vc.frame(pushed.view_id, pushed.seq)
     assert len(frame) == pushed.rows
+
+
+async def test_free_and_unknown_space_follow_the_volume(
+    tmp_path: Path, server: Server, client: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """What is deleted while the scan is monitored becomes free space in the open view, not unknown
+    space: views used to keep the volume's free and used space of the moment they opened, so 765 GB
+    deleted showed as unknown space. A change within a second of the last read of the free space is
+    read a moment later, with no further change needed."""
+    facts = build_tree(tmp_path / "root")
+    for name, size in (("big.bin", 300_000), ("second.bin", 120_000)):
+        (facts.root / name).write_bytes(b"x" * size)
+    started = await client.call(SCAN_START, p.ScanStartParams(roots=[str(facts.root)], workers=0))
+    await wait_done(client, started.scan_id)
+    handle = server.scans.scans[started.scan_id]
+    mon = handle.monitor
+    assert mon is not None
+    for _ in range(250):  # the watcher reads on its own thread
+        if mon.status().state in ("running", "degraded") and mon.fed:
+            break
+        await asyncio.sleep(0.02)
+    await asyncio.sleep(0.05)
+
+    # the scanned folder stands in for a whole volume, sized so that every block is drawn: its used
+    # space is what the tree holds plus a fixed part outside it (unknown space), read when asked
+    root, store = handle.roots[0], handle.store
+    seen = int(store.cols["tot_alloc"][root.node])
+    hidden = seen // 3
+    total = 2 * seen + hidden
+
+    def used() -> int:
+        return int(store.cols["tot_alloc"][root.node]) + hidden
+
+    def volume(_path: str) -> VolumeInfo:
+        return VolumeInfo(root.path, "", "test", "", total, total - used(), 4096, False, False)
+
+    monkeypatch.setattr(monitors, "volume_for", volume)
+    root.whole_volume, root.volume = True, volume(root.path)
+
+    vc = ViewClient(client)
+    _, first = await vc.call(
+        VIEW_OPEN, pv.ViewOpenParams(scan_id=handle.id, viewport=pv.Viewport(width=800, height=600))
+    )
+    assert first is not None
+
+    def space(frame: object) -> tuple[int, int]:
+        sizes = frame.columns["size"]  # type: ignore[attr-defined]
+        free, unknown = frame.row(KEY_FREE), frame.row(KEY_UNKNOWN)  # type: ignore[attr-defined]
+        return (
+            int(sizes[free]) if free is not None else 0,
+            int(sizes[unknown]) if unknown is not None else 0,
+        )
+
+    assert space(first) == (total - used(), hidden)
+
+    async def deleted(name: str) -> None:
+        """Delete ``name``: a pushed frame draws the freed space as free space, unknown stays."""
+        (facts.root / name).unlink()
+        end = time.monotonic() + 10
+        while True:
+            pushed = await asyncio.wait_for(vc.pushed.get(), max(0.1, end - time.monotonic()))
+            async with asyncio.timeout(10):
+                frame = await vc.frame(pushed.view_id, pushed.seq)
+            if store.find(str(facts.root / name)) is None and space(frame) == (total - used(), hidden):
+                break
+
+    await deleted("big.bin")
+    # a read of the free space just happened: the next change is read a moment later
+    monkeypatch.setattr(monitors, "FREE_REFRESH_S", 0.8)
+    mon._free_at = time.monotonic()
+    await deleted("second.bin")
+    status = server.scans.scans[handle.id].status()
+    assert (status.free, status.unknown) == (total - used(), hidden)  # the status bar agrees
 
 
 async def test_views_follow_whether_their_scan_runs(

@@ -121,6 +121,7 @@ class ScanMonitor:
         self._last_event = 0.0
         self._fed = 0  # rows below this were handed to the watchers
         self._free_at = 0.0
+        self._free_due = False  # a change came within FREE_REFRESH_S of the last read
         self.failed = ""
         # Windows: per volume (journal id, safe checkpoint, newer checkpoint) of the USN journal, to
         # replay what an overflow lost; the safe one lags one period behind (events still buffered)
@@ -266,6 +267,10 @@ class ScanMonitor:
                         self._queue[:0] = batch
                     continue
                 await self._process(batch)
+                now = time.monotonic()
+                if self._free_due and now - self._free_at >= FREE_REFRESH_S and await self._refresh_free(now):
+                    self.owner.views.volumes_changed(self.handle.id)
+                    self.handle.publish()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -273,10 +278,15 @@ class ScanMonitor:
 
     def _timeout(self) -> float | None:
         if self.trees:
-            return max(0.05, QUIET_RESCAN_S - (time.monotonic() - self._last_event))
-        if self.handle.running or self.deferred or not self.fed:
-            return SCAN_TICK_S
-        return None
+            wait: float | None = max(0.05, QUIET_RESCAN_S - (time.monotonic() - self._last_event))
+        elif self.handle.running or self.deferred or not self.fed:
+            wait = SCAN_TICK_S
+        else:
+            wait = None
+        if self._free_due:  # wake up to read the free space once the second is over
+            due = max(0.05, FREE_REFRESH_S - (time.monotonic() - self._free_at))
+            wait = due if wait is None else min(wait, due)
+        return wait
 
     async def _feed(self) -> None:
         """Hand folders that entered the tree to per-folder watchers (inotify, polling)."""
@@ -374,8 +384,8 @@ class ScanMonitor:
         if changes or flashes:
             self.changes += changes
             self.last_apply_ms = (time.perf_counter() - t0) * 1000
+            await self._refresh_free(now)  # first: the new frames draw free and unknown space from it
             self.owner.views.flash(self.handle.id, flashes)
-            await self._refresh_free(now)
             self.handle.publish()
             await self._maybe_compact()
 
@@ -698,15 +708,23 @@ class ScanMonitor:
         vol = self.handle.roots[0].volume
         return vol.cluster_size if vol is not None else 4096
 
-    async def _refresh_free(self, now: float) -> None:
-        """Free space moves with the changes (status bar, unknown space): read it again, rarely."""
+    async def _refresh_free(self, now: float) -> bool:
+        """Free space moves with the changes (status bar, free and unknown space of the views): read
+        it again at most once every FREE_REFRESH_S. A change within that time is read once it is up
+        (``_free_due``, the loop wakes for it), so the last change of a burst is not missed. True when
+        a volume's free or used space changed."""
         if now - self._free_at < FREE_REFRESH_S:
-            return
-        self._free_at = now
+            self._free_due = True
+            return False
+        self._free_at, self._free_due = now, False
+        changed = False
         for root in self.handle.roots:
             if root.volume is not None and root.whole_volume:
                 with contextlib.suppress(OSError):
-                    root.volume = await asyncio.to_thread(volume_for, root.path)
+                    fresh = await asyncio.to_thread(volume_for, root.path)
+                    changed |= (fresh.free, fresh.used) != (root.volume.free, root.volume.used)
+                    root.volume = fresh
+        return changed
 
     async def _maybe_compact(self) -> None:
         store = self.handle.store
