@@ -12,7 +12,7 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 
 ### Fixes
 
-(nothing yet)
+- **Closing a tab while its snapshot loads no longer keeps the scan in memory.** A snapshot that finished loading, or a scan that started, after its tab was closed stayed in the backend with no tab until SpaceKnife quit (about 1.1 GB for a snapshot of 8.6 million items); a started scan even kept running. Now it is freed at once.
 
 ---
 
@@ -28,4 +28,4 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 
 ### 修复
 
-（暂无）
+- **快照加载途中关掉标签，扫描不再一直占着内存**：标签关掉以后才加载完的快照，或者才开始的扫描，会一直留在后端、没有标签显示，直到退出 SpaceKnife（一个 860 万项的快照约 1.1 GB）；已经开始的扫描甚至会继续跑。现在会立即释放。

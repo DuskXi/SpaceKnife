@@ -27,7 +27,7 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
-import { moveTo, stepIndex } from "./tabOrder";
+import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
 import type { InstallHow } from "../../../shared/install";
@@ -466,8 +466,7 @@ async function startScanNow(params: ScanStartParams, replaceTab?: string): Promi
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status }, logDismissed: false }));
     void watchScan(status.scan_id);
-    await showScan(status.scan_id, scanTitle(params.roots), replaceTab);
-    return status.scan_id;
+    return (await showScan(status.scan_id, scanTitle(params.roots), replaceTab)) ? status.scan_id : null;
   } catch (err) {
     toast(err instanceof RpcError ? t("无法开始扫描：{error}", { error: err.message }) : String(err));
     return null;
@@ -511,15 +510,22 @@ export async function openSnapshot(path: string, replaceTab?: string): Promise<v
   }
 }
 
-async function showScan(scanId: string, title: string, replaceTab?: string): Promise<void> {
+/** Put a scan's new view in a tab: in place of the start tab it came from, or a new one. False when
+ * that start tab was closed meanwhile (the snapshot was still loading, the scan still starting):
+ * then the view and, unless another tab shows it, the scan are freed at once instead of staying in
+ * the backend with no tab. */
+async function showScan(scanId: string, title: string, replaceTab?: string): Promise<boolean> {
   const viewId = await openView(scanId);
   const tab: Tab = { id: newTabId(), kind: "scan", scanId, viewIds: [viewId], focusedPane: 0, title };
   const old = replaceTab ? get().tabs.find((t) => t.id === replaceTab) : undefined;
-  set((s) => {
-    const tabs = replaceTab ? s.tabs.map((t) => (t.id === replaceTab ? tab : t)) : [...s.tabs, tab];
-    return { tabs, active: tab.id };
-  });
+  const tabs = placeTab(get().tabs, tab, replaceTab);
+  if (!tabs) {
+    releaseTab(tab);
+    return false;
+  }
+  set({ tabs, active: tab.id });
   if (old) releaseTab(old);
+  return true;
 }
 
 /** Close a tab's views and, when no other tab shows it any more, stop and free its scan (UI-W2-51, W8). */

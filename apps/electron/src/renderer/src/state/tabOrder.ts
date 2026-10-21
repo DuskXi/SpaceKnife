@@ -1,5 +1,6 @@
-// The order of the title bar's tabs (UI-MAIN-04): dragging a tab, or Ctrl+Shift+PgUp / PgDn, moves it.
-// Pure functions over the store's tab list; the title bar measures the tabs, these decide the slot.
+// The order of the title bar's tabs (UI-MAIN-04): dragging a tab, or Ctrl+Shift+PgUp / PgDn, moves it;
+// a scan or snapshot opened from a start tab takes that tab's place. Pure functions over the store's
+// tab list; the title bar measures the tabs, these decide the slot.
 
 /** `list` with the item `id` moved so that `index` other items come before it (clamped). */
 export function moveTo<T extends { id: string }>(list: readonly T[], id: string, index: number): T[] {
@@ -29,4 +30,13 @@ export function stepIndex(list: readonly { id: string }[], id: string, step: -1 
   const from = list.findIndex((x) => x.id === id);
   const to = from + step;
   return from < 0 || to < 0 || to >= list.length ? null : to;
+}
+
+/** The list with a new tab in place of `replace` (the start tab it was opened from), or added at the
+ * end when there is none to replace. null when `replace` is gone: that tab was closed while the
+ * scan started or the snapshot loaded, and nobody is left to show the new one. */
+export function placeTab<T extends { id: string }>(list: readonly T[], tab: T, replace?: string): T[] | null {
+  if (!replace) return [...list, tab];
+  if (!list.some((x) => x.id === replace)) return null;
+  return list.map((x) => (x.id === replace ? tab : x));
 }
