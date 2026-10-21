@@ -361,6 +361,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .results { overflow: hidden; }
 .res-head { flex: none; display: flex; align-items: center; gap: 4px; height: 48px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--sk-color-line-subtle); }
 .res-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.res-exit { gap: 4px; white-space: nowrap; }
 .res-sort { position: relative; }
 .ghost.small { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 8px; font-size: 12px; }
 .menu { position: absolute; right: 0; top: 32px; z-index: 30; min-width: 132px; display: flex; flex-direction: column; padding: 4px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-overlay); box-shadow: var(--sk-shadow-popover); }

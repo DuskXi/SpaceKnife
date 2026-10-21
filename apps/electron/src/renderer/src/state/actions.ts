@@ -357,6 +357,12 @@ function onOpProgress(ev: OpProgressEvent): void {
 const filterTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const filterCalls = new Map<string, () => void>();
 
+/** Leave filtering: the filter box empties, the side panel goes back to the details (the
+ * 「匹配结果」 header's 「清除过滤」, the floater's ×, Esc on the map with nothing selected). */
+export function clearFilter(viewId: string): void {
+  void editFilter(viewId, "", null, true);
+}
+
 export async function editFilter(viewId: string, text: string, cursor: number | null, immediate = false): Promise<void> {
   patchView(viewId, { filterText: text });
   try {

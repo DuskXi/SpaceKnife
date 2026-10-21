@@ -288,7 +288,12 @@ Each view remembers its choice. The numbers count the matches below the current 
 
 ### The Matches panel
 
-While a filter is active, the side panel becomes **Matches**. Clearing the filter brings the details panel back.
+While a filter is active, the side panel becomes **Matches**. Clearing the filter brings the details panel back. You can clear it from wherever the filter came from, also when you didn't type it (a click on a class in the **Classes** tab filters too):
+
+- **Clear filter** in the **Matches** header;
+- the × at the end of the match bar over the picture;
+- <kbd>Esc</kbd> on the picture: the first press clears the selection, the next one the filter;
+- the × in the filter box, or <kbd>Esc</kbd> there.
 
 - The summary shows the total size and number of matching files, and a bar for their share of what was scanned.
 - **Conditions** shows the expression as capsules, one per kind: Name, Classes, Folder, Tags, Size, Logical size, Date modified, Date created, Date accessed, Attributes, and the Excluded kinds for negated conditions. Values within a capsule are joined with "or" or "and" as the rules above combine them.

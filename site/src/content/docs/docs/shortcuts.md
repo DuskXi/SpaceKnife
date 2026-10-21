@@ -67,7 +67,7 @@ The plus and minus keys of the numeric keypad work too. Coloring, visualization 
 
 | Keys | Action |
 | --- | --- |
-| <kbd>Esc</kbd> | Clear the selection. In a snapshot comparison with nothing selected, leave the comparison |
+| <kbd>Esc</kbd> | Clear the selection. With nothing selected: leave the snapshot comparison, or clear the filter |
 | <kbd>Delete</kbd> | Add the selected file or folder to the delete basket (for an "N small items" block, use the context menu) |
 | <kbd>Ctrl</kbd>+<kbd>C</kbd> | Copy the full path of the selection |
 | <kbd>Ctrl</kbd>+<kbd>E</kbd> | Show in Explorer (Finder on macOS, the file manager on Linux) |

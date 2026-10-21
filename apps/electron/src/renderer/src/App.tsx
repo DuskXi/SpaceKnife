@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-import { basketAdd, boot, call, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
+import { basketAdd, boot, call, clearFilter, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
 import { BrowserLayer } from "@/shell/BrowserLayer";
 import { ContextMenu } from "@/shell/ContextMenu";
 import { ExportDialog } from "@/shell/ExportDialog";
@@ -168,6 +168,8 @@ function onKey(e: KeyboardEvent): unknown {
   if (key === "Escape" && !onControl) {
     // compare mode: Esc clears the selection, then leaves the comparison (W6 待定 16)
     if (tab.compare && st.selected == null) return (done(), void exitCompare(tab.id));
+    // then, with nothing selected: leave filtering (the 「匹配结果」 panel goes back to the details)
+    if (st.selected == null && view?.filter?.active) return (done(), clearFilter(viewId));
     return (done(), void viewCall(viewId, "view.select", { key: null }));
   }
   if (key === "Delete" && !ctrl && !onControl) {

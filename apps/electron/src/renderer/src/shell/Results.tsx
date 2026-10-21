@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import type { FilterNormal, FilterParse, Range, ResultRow, ViewResults } from "@/protocol/generated";
-import { basketAdd, cancellable, viewCall } from "@/state/actions";
+import { basketAdd, cancellable, clearFilter, viewCall } from "@/state/actions";
 import { patchView, set, useApp } from "@/state/store";
 import { fmtInt, fmtShare, fmtSize, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
@@ -205,6 +205,10 @@ export function Results({ viewId }: { viewId: string }) {
       <div className="res-head">
         <h2>{t("匹配结果")}</h2>
         <span className="flex" />
+        <button className="ghost small res-exit" title={t("清除过滤，回到详情（Esc）")} onClick={() => clearFilter(viewId)}>
+          <Icon name="close" size={12} />
+          {t("清除过滤")}
+        </button>
         <SortMenu sort={sort} onChange={changeSort} />
         <button className="icon-btn small" aria-label={t("隐藏侧栏")} title={t("隐藏侧栏")} onClick={() => set({ inspectorHidden: true })}>
           <Icon name="sidebar" />

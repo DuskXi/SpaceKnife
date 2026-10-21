@@ -2,7 +2,7 @@
 
 import { type CSSProperties, Fragment, type ReactNode, useLayoutEffect, useRef, useState } from "react";
 
-import { closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
+import { clearFilter, closePane, focusPane, setViewSettings, viewCall } from "@/state/actions";
 import { get, set, type Tab, useApp } from "@/state/store";
 import { pointerBox, VisualHost } from "@/visual/Host";
 import { hosts } from "@/visual/hosts";
@@ -243,6 +243,9 @@ function FilterFloater({ viewId }: { viewId: string }) {
           </button>
         ))}
       </div>
+      <button className="icon-btn small" aria-label={t("清除过滤")} title={t("清除过滤（Esc）")} onClick={() => clearFilter(viewId)}>
+        <Icon name="close" size={14} />
+      </button>
     </div>
   );
 }
