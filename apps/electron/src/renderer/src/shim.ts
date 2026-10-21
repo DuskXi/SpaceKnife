@@ -16,7 +16,7 @@ export function installShim(): void {
   const noop = () => {};
   window.sk = {
     platform,
-    version: "0.3.1-web",
+    version: "0.3.2-web",
     backend: async () => state,
     onBackend: () => noop,
     window: {
