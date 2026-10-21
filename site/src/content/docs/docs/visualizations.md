@@ -103,6 +103,10 @@ The two pictures cross-fade for 200 ms; with **Reduce motion** on they swap at o
 
 A visualization this window can't show stays on the toolbar, disabled, and its tooltip says why. <kbd>V</kbd> skips it.
 
+:::note[Narrow windows]
+When the window is too narrow for the whole toolbar, the groups it has no room for move into the **More** menu (**…**) next to them. First the **Free space** and **Unknown space** chips shrink to their swatch, then the **Coloring** group and the chips move into the menu, and the **Visualization** group goes last. The keys work as always.
+:::
+
 Every tab and every split pane has its own visualization. New views start with **Settings › Appearance › Visualization › Default visualization for new views**.
 
 :::tip[Two views of one scan]

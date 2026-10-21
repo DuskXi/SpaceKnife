@@ -13,6 +13,7 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 ### Fixes
 
 - **Closing a tab while its snapshot loads no longer keeps the scan in memory.** A snapshot that finished loading, or a scan that started, after its tab was closed stayed in the backend with no tab until SpaceKnife quit (about 1.1 GB for a snapshot of 8.6 million items); a started scan even kept running. Now it is freed at once.
+- **The toolbar fits narrow windows.** In a window narrower than about 1,400 px the toolbar's right end was cut off: at the smallest window size the split, command palette and delete basket buttons were out of reach, and the path could disappear. Now the filter box shrinks first, then the chips show only their swatch, and the coloring, the chips and last the visualization switch move into a new **More** (…) menu, so every control stays reachable at any window size, in a comparison too.
 
 ---
 
@@ -29,3 +30,4 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 ### 修复
 
 - **快照加载途中关掉标签，扫描不再一直占着内存**：标签关掉以后才加载完的快照，或者才开始的扫描，会一直留在后端、没有标签显示，直到退出 SpaceKnife（一个 860 万项的快照约 1.1 GB）；已经开始的扫描甚至会继续跑。现在会立即释放。
+- **窄窗口下工具栏不再被截断**：窗口窄于约 1400 像素时，工具栏右端会被截掉，最小窗口下分屏、命令面板和删除篮按钮都点不到，路径也可能消失。现在先压缩过滤框，再把芯片缩成色块，然后依次把配色、芯片、最后是可视化切换收进新的「更多」（…）菜单，任何窗口大小下每个控件都点得到，快照对比时也一样。

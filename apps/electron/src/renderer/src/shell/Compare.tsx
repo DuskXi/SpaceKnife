@@ -18,8 +18,8 @@ import type { HoverInfo } from "@/visual/types";
 import { Icon, type IconName } from "@/ui/Icon";
 
 const LIST_LIMIT = 12;
-const DIRECTIONS = ["all", "grow", "shrink"] as const;
-const directionLabel = (d: (typeof DIRECTIONS)[number]): string => ({ all: t("全部"), grow: t("增长"), shrink: t("减少") })[d];
+export const DIRECTIONS = ["all", "grow", "shrink"] as const;
+export const directionLabel = (d: (typeof DIRECTIONS)[number]): string => ({ all: t("全部"), grow: t("增长"), shrink: t("减少") })[d];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 function stamp(iso: string): string {
@@ -54,13 +54,15 @@ const sideName = (side: CompareSide) => (side.kind === "now" ? t("现在") : sta
 // ------------------------------------------------------------------ toolbar
 
 /** 对比选择器 (UI-W6-03…06): 「对比」 · base ▾ › target ▾ · swap. */
-export function ComparePicker({ tab }: { tab: Tab }) {
+/** The two ends of a comparison, in the toolbar. In a narrow window it shrinks (the snapshot names
+ * get an ellipsis) down to 260 px; `compact` leaves out the word 「对比」. */
+export function ComparePicker({ tab, compact = false }: { tab: Tab; compact?: boolean }) {
   const c = tab.compare!;
   return (
-    <div className="cmp-picker" role="group" aria-label={t("快照对比")}>
-      <span className="cmp-label">
+    <div className="cmp-picker" role="group" aria-label={t("快照对比")} data-fit-min={260}>
+      <span className="cmp-label" title={compact ? t("对比") : undefined}>
         <Icon name="diff" size={14} />
-        {t("对比")}
+        {!compact && t("对比")}
       </span>
       <EndMenu tab={tab} which="base" />
       <span className="cmp-arrow" aria-hidden="true">
@@ -98,7 +100,7 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
     void (which === "base" ? setCompareEnds(tab.id, to, c.target) : setCompareEnds(tab.id, c.base, to));
   };
   return (
-    <div className="cmp-end" ref={box}>
+    <div className={`cmp-end${spec === NOW ? " now" : ""}`} ref={box}>
       <button
         className="cmp-end-btn"
         aria-haspopup="listbox"
@@ -151,11 +153,12 @@ export function DirectionSegment({ viewId }: { viewId: string }) {
   );
 }
 
-export function ExitCompare({ tab }: { tab: Tab }) {
+/** 「退出对比」; `compact` (a narrow window): the icon alone, the text stays its name and tooltip. */
+export function ExitCompare({ tab, compact = false }: { tab: Tab; compact?: boolean }) {
   return (
-    <button className="outline-btn" onClick={() => void exitCompare(tab.id)} title={t("退出对比（Esc）")}>
+    <button className={`outline-btn${compact ? " icon-only" : ""}`} onClick={() => void exitCompare(tab.id)} aria-label={t("退出对比")} title={t("退出对比（Esc）")}>
       <Icon name="close" size={14} />
-      {t("退出对比")}
+      {!compact && t("退出对比")}
     </button>
   );
 }

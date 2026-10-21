@@ -253,5 +253,7 @@
  "算作「{name}」": "Count as {name}",
  "已改回自动识别": "Back to automatic",
  "这个文件夹只按扩展名归类": "This folder is classed by extension only",
- "这个文件夹的文件都算作「{name}」": "Everything in this folder counts as {name}"
+ "这个文件夹的文件都算作「{name}」": "Everything in this folder counts as {name}",
+ "更多": "More",
+ "显示": "Show"
 }

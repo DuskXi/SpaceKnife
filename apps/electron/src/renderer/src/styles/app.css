@@ -158,6 +158,13 @@ button:disabled { cursor: default; }
 .chip-swatch.trash { border: 1px dashed var(--sk-treemap-trash-outline); background: repeating-linear-gradient(45deg, transparent 0 2px, var(--sk-treemap-trash-hatch) 2px 3px), repeating-linear-gradient(-45deg, var(--sk-color-bg-raised) 0 2px, var(--sk-treemap-trash-hatch) 2px 3px); }
 .palette-btn { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 7px 0 9px; border: 0; border-radius: var(--sk-radius-md); background: transparent; box-shadow: inset 0 0 0 1px var(--sk-color-line-subtle); color: var(--sk-color-text-secondary); }
 .palette-btn:hover, .palette-btn.on { background: var(--sk-color-bg-hover); }
+/* a narrow window (toolbarFit.ts): chips as their swatch, the palette button and 「退出对比」 as their icon */
+.chip.swatch-only { padding: 0 9px; }
+.palette-btn.compact { padding: 0 8px; }
+.outline-btn.icon-only { padding: 0 9px; }
+/* 「更多」: the groups a narrow window folds away */
+.menu.toolbar-more { min-width: 200px; }
+.toolbar-more .menu-item { white-space: nowrap; }
 .basket { position: relative; }
 .badge-count {
   position: absolute; top: 1px; right: 0; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
@@ -166,7 +173,7 @@ button:disabled { cursor: default; }
 }
 
 /* ---------------------------------------------------------------- filter box (W3) */
-.filter { position: relative; flex: 1 1 0; min-width: 160px; max-width: var(--sk-layout-filter-max-width); height: 32px; margin-left: 4px; }
+.filter { position: relative; flex: 1 1 0; min-width: 220px; max-width: var(--sk-layout-filter-max-width); height: 32px; margin-left: 4px; }
 .filter.disabled { opacity: 0.6; }
 .filter-icon { position: absolute; left: 10px; top: 8px; display: flex; color: var(--sk-color-text-tertiary); pointer-events: none; z-index: 2; }
 .filter-mirror, .filter-input {
@@ -375,6 +382,10 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .menu-item { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 6px; border: 0; border-radius: var(--sk-radius-sm); background: transparent; color: var(--sk-color-text-primary); font-size: 13px; text-align: left; }
 .menu-item:hover, .menu-item:focus-visible { background: var(--sk-color-bg-hover); outline: none; }
 .menu-check { flex: none; display: flex; width: 16px; color: var(--sk-color-accent-default); }
+.menu-item:disabled { color: var(--sk-color-text-disabled); background: transparent; }
+.menu-label { padding: 6px 8px 4px 28px; color: var(--sk-color-text-tertiary); font-size: var(--sk-font-size-small); font-weight: var(--sk-font-weight-medium); white-space: nowrap; }
+.menu-sep { height: 1px; margin: 4px 6px; background: var(--sk-color-line-subtle); }
+.menu-key { margin-left: auto; padding-left: 16px; color: var(--sk-color-text-tertiary); font: 11px var(--sk-font-family-mono); }
 .res-top { flex: none; display: flex; flex-direction: column; gap: 16px; padding: 16px; border-bottom: 1px solid var(--sk-color-line-subtle); }
 .res-summary { display: flex; flex-direction: column; gap: 8px; }
 .res-count { margin-left: 6px; font-size: 13px; color: var(--sk-color-text-secondary); }
@@ -786,14 +797,16 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .op-toast button.ghost { height: 30px; }
 .op-countdown { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--sk-color-accent); transition: width 100ms linear; }
 /* W6 snapshot compare */
-.cmp-picker { display: flex; align-items: center; height: 32px; flex: none; border-radius: var(--sk-radius-md); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); }
+.cmp-picker { display: flex; align-items: center; height: 32px; flex: 0 1 auto; min-width: 0; border-radius: var(--sk-radius-md); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); }
 .cmp-label { display: flex; align-items: center; gap: 6px; height: 100%; padding: 0 10px; border-right: 1px solid var(--sk-color-line-subtle); border-radius: var(--sk-radius-md) 0 0 var(--sk-radius-md); background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); font-size: 12px; white-space: nowrap; }
 .cmp-arrow { display: flex; color: var(--sk-color-text-tertiary); }
 .cmp-vsep { width: 1px; height: 18px; margin: 0 4px; background: var(--sk-color-line-subtle); }
 .cmp-swap { margin-right: 4px; }
+/* in a narrow window only the two snapshot names give way */
+.cmp-label, .cmp-arrow, .cmp-vsep, .cmp-swap, .cmp-end.now { flex: none; }
 .cmp-swap svg { transform: rotate(90deg); }
 .cmp-end { position: relative; min-width: 0; }
-.cmp-end-btn { display: flex; align-items: center; gap: 4px; height: 28px; max-width: 220px; padding: 0 8px; border: 0; border-radius: var(--sk-radius-sm); background: transparent; color: var(--sk-color-text-primary); font-size: 13px; }
+.cmp-end-btn { display: flex; align-items: center; gap: 4px; height: 28px; max-width: min(220px, 100%); padding: 0 8px; border: 0; border-radius: var(--sk-radius-sm); background: transparent; color: var(--sk-color-text-primary); font-size: 13px; }
 .cmp-end-btn:hover { background: var(--sk-color-bg-hover); }
 .cmp-end-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmp-menu { position: absolute; top: 34px; left: 0; z-index: 40; min-width: 260px; padding: 4px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-overlay); box-shadow: var(--sk-shadow-popover); }
