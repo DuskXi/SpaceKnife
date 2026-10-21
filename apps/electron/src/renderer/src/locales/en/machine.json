@@ -79,7 +79,6 @@
  "ATA 设备统计日志": "ATA Device Statistics log",
  "NVMe SMART / 健康日志": "NVMe SMART / Health log",
  "USB 桥接没有把磁盘自己的记录传过来": "The USB bridge doesn't pass on the disk's own record",
- "{disk} 已用掉 {pct} 的写入寿命": "{disk} has used {pct} of its write endurance",
  "{disk} 报告了严重警告": "{disk} reports a critical warning",
  "{disk} 现在 {n} °C，偏热": "{disk} is at {n} °C, on the hot side",
  "{disk} 的备用块只剩 {pct}": "{disk} has only {pct} of its spare blocks left",
@@ -90,9 +89,7 @@
  "健康记录": "Health record",
  "写入": "Written",
  "读取": "Read",
- "写入寿命已用掉的比例（厂商的估计，可以超过 100%）": "The share of its write endurance used (the vendor's estimate; it can pass 100%)",
  "备用块": "Spare blocks",
- "寿命已用 {pct}": "{pct} of its endurance used",
  "开机以来": "Since startup",
  "累计": "Lifetime",
  "本机磁盘：每块盘的容量、链路、读写量与健康": "Disks: each disk's capacity, link, reads and writes, and health",
@@ -115,5 +112,11 @@
  "只有 NVMe 固态硬盘报告写入寿命的估计": "Only NVMe SSDs report an estimate of their write endurance",
  "系统没有给出这块盘开机以来的读写计数": "The system gives no read and write counters for this disk since it started",
  "这块盘没有提供自己的记录": "This disk gives no record of its own",
- "这块盘的记录里没有这一项": "The disk's record doesn't include this"
+ "这块盘的记录里没有这一项": "The disk's record doesn't include this",
+ "剩余寿命 {pct}": "Life left {pct}",
+ "剩余的写入寿命：厂商估计已用 {used}，还剩 {left}": "Write endurance left: the vendor estimates {used} used, {left} left",
+ "已超过额定的写入寿命：厂商估计已用 {used}。盘通常还能继续用，只是写入量超过了厂商的保证": "Past its rated write endurance: the vendor estimates {used} used. The drive usually goes on working; it has just been written more than its vendor guarantees",
+ "{disk} 已超过额定的写入寿命（厂商估计已用 {used}）": "{disk} is past its rated write endurance (the vendor estimates {used} used)",
+ "{disk} 的写入寿命只剩 {pct}": "{disk} has only {pct} of its write endurance left",
+ "{disk} 的写入寿命还剩 {pct}": "{disk} has {pct} of its write endurance left"
 }

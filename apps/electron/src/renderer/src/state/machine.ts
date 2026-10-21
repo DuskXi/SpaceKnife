@@ -419,6 +419,15 @@ export function recordGap(d: PhysicalDisk): string {
   return healthNoteText(d.health_note) || (d.health ? t("这块盘的记录里没有这一项") : t("这块盘没有提供自己的记录"));
 }
 
+/** Write endurance left, %: 100 minus the vendor's estimate of what is used (NVMe "percentage
+ * used", which can pass 100), never below 0. */
+export function lifeLeft(used: number): number {
+  return Math.max(0, 100 - used);
+}
+
+/** At or below this much life left (%), it shows in the warning colour. */
+export const LIFE_LOW = 10;
+
 /** Power-on time in words: hours under two days, else days. */
 export function powerOnText(hours: number): string {
   return hours < 48 ? t("{n} 小时", { n: hours }) : t("{n} 天", { n: Math.floor(hours / 24).toLocaleString("en-US") });
@@ -433,8 +442,15 @@ export function healthFindings(d: PhysicalDisk): Finding[] {
   const disk = diskName(d);
   if (h.critical_warning) out.push({ level: "warn", text: t("{disk} 报告了严重警告", { disk }) });
   if (h.media_errors) out.push({ level: "warn", text: t("{disk} 记录了 {n} 个介质错误", { disk, n: h.media_errors }) });
-  if (h.percentage_used != null && h.percentage_used >= 70) {
-    out.push({ level: h.percentage_used >= 90 ? "warn" : "info", text: t("{disk} 已用掉 {pct} 的写入寿命", { disk, pct: `${h.percentage_used}%` }) });
+  if (h.percentage_used != null) {
+    const left = lifeLeft(h.percentage_used);
+    if (h.percentage_used > 100) {
+      out.push({ level: "warn", text: t("{disk} 已超过额定的写入寿命（厂商估计已用 {used}）", { disk, used: `${h.percentage_used}%` }) });
+    } else if (left <= LIFE_LOW) {
+      out.push({ level: "warn", text: t("{disk} 的写入寿命只剩 {pct}", { disk, pct: `${left}%` }) });
+    } else if (left <= 30) {
+      out.push({ level: "info", text: t("{disk} 的写入寿命还剩 {pct}", { disk, pct: `${left}%` }) });
+    }
   }
   if (h.available_spare != null && h.spare_threshold && h.available_spare <= h.spare_threshold) {
     out.push({ level: "warn", text: t("{disk} 的备用块只剩 {pct}", { disk, pct: `${h.available_spare}%` }) });

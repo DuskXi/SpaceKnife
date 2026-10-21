@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DiskHealth, DiskLink, MachineDisks, PhysicalDisk, VolumeInfo, VolumeOverview } from "@/protocol/generated";
 
 import { bandwidthText, byMedia, healthFindings, healthNoteText,
-  recordGap, powerOnText, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
+  recordGap, lifeLeft, powerOnText, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
 
 const link = (patch: Partial<DiskLink>): DiskLink => ({
   kind: "pcie",
@@ -268,12 +268,20 @@ describe("what a disk records about itself", () => {
     expect(healthFindings(disk())).toEqual([]);
   });
 
-  it("warns of a critical warning, media errors, worn-out endurance and spare running out", () => {
+  it("warns of a critical warning, media errors, little life left and spare running out", () => {
     const f = healthFindings(disk({ model: "X", health: record({ critical_warning: 2, media_errors: 3, percentage_used: 95, available_spare: 8, temperature_c: 72 }) }));
     expect(f.map((x) => x.level)).toEqual(["warn", "warn", "warn", "warn", "info"]);
     expect(f[1]!.text).toContain("3");
-    expect(f[2]!.text).toContain("95%");
-    expect(healthFindings(disk({ health: record({ percentage_used: 75 }) }))[0]!.level).toBe("info");
+    expect(f[2]!.text).toContain("5%"); // what is left, not what is used
+    expect(healthFindings(disk({ health: record({ percentage_used: 75 }) }))[0]).toMatchObject({ level: "info", text: expect.stringContaining("25%") });
+    expect(healthFindings(disk({ health: record({ percentage_used: 60 }) }))).toEqual([]); // plenty left: nothing to say
+    const past = healthFindings(disk({ health: record({ percentage_used: 112 }) }));
+    expect(past).toHaveLength(1);
+    expect(past[0]).toMatchObject({ level: "warn", text: expect.stringContaining("112%") });
+  });
+
+  it("counts life left down from 100%, never below 0", () => {
+    expect([lifeLeft(0), lifeLeft(9), lifeLeft(100), lifeLeft(112)]).toEqual([100, 91, 0, 0]);
   });
 
   it("goes into the page's findings", () => {

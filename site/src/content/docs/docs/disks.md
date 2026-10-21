@@ -29,7 +29,7 @@ The top of the page is a dashboard:
 | **… doesn't take TRIM** | An SSD that doesn't take TRIM: it may slow down after much writing. |
 | **D:\ holds 18 GB more than its snapshot of 3 days ago** | A volume grew (or shrank) by 5 GB or more, and by 2% of its size or more, between its two newest complete snapshots. |
 | **… reports a critical warning**, **… has recorded 3 media errors** (warning) | The disk's own health record holds a critical warning or media errors. See [Reads, writes and health](#reads-writes-and-health). |
-| **… has used 75% of its write endurance** | An SSD estimates that 70% or more of its write endurance is used; from 90% it is a warning. |
+| **… has only 8% of its write endurance left** (warning) | An SSD estimates that 10% or less of its write endurance is left, or it is past its rated endurance. With 30% or less left it is listed without the warning. |
 | **… has only 8% of its spare blocks left** (warning) | An SSD's spare blocks fell to its own warning level or below. |
 | **… is at 72 °C, on the hot side** | The disk reports 70 °C or more. |
 
@@ -44,7 +44,7 @@ Under **Disks**, each disk is a card; the cards fill the window in as many colum
 - **How full**: the ring at its left shows how much of the disk its volumes use, with the share in the middle.
 - **Interface** and **current link**: **NVMe** with its PCIe link (for example **PCIe 4.0 ×4 ≈ 7.9 GB/s**), **SATA** with its rate (**SATA 6 Gb/s**), **USB** with the rate it is connected at (**USB 480 Mb/s**, **USB 5 Gb/s**). When the system also tells the most the disk supports, a meter shows the link against it: **Full speed**, or for example **50%** (of its top rate) for a PCIe 5.0 drive in a 4.0 slot.
 - **Reads and writes**: a small table. The **Lifetime** row is how much was read and written over the disk's life, as the disk records it; the **Since startup** row is what the system read and wrote since it last started. Sizes pick their unit by size, as the **Size units** setting says.
-- **Health**: the temperature, the power-on time and, for an SSD, **N% of its endurance used**. See [Reads, writes and health](#reads-writes-and-health).
+- **Health**: the temperature, the power-on time and, for an SSD, **Life left N%**. See [Reads, writes and health](#reads-writes-and-health).
 - **Details**: the model, vendor, serial number, firmware, whether it takes TRIM, the health record (its source, power-on time, power cycles, unsafe shutdowns, media errors, spare blocks), and the system's own name for it (`PhysicalDrive3`, `nvme0n1`, `disk2`). The serial number stays on your computer and shows only here, folded away.
 
 A disk with no medium in it, such as an empty card reader slot, shows as one line with its drive letter.
@@ -72,7 +72,7 @@ SSDs and most hard disks keep their own record: how long they have been powered 
 | **Since startup** Read 1.2 TB · Written 310 GB | What the system read and wrote on this disk since it last started. Hover the row to see when that was. |
 | **47 °C** | The temperature the disk reports, in the warning color from 70 °C. |
 | **On for 336 days** | The power-on time, in hours under two days. Hover it for the exact hours. |
-| **9% of its endurance used** | An NVMe SSD's estimate of the write endurance it has used. It can pass 100%: the disk still works, it has just been written more than its vendor promised. |
+| **Life left 91%** | How much write endurance an NVMe SSD has left: 100% minus the vendor's estimate of what is used. A new drive's bar is full and shortens slowly as it is written; with 10% or less left it turns to the warning color. The vendor's estimate can pass 100%; then it says **Life left 0%**: the drive usually goes on working, it has just been written more than its vendor guarantees. Hover it for the vendor's estimate of what is used. |
 
 When the record can't be read, the card says why instead of leaving a gap:
 

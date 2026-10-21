@@ -29,6 +29,8 @@ import {
   linkShare,
   linkText,
   healthNoteText,
+  LIFE_LOW,
+  lifeLeft,
   powerOnText,
   recordGap,
   orderedDisks,
@@ -414,14 +416,25 @@ function IoTable({ disk }: { disk: PhysicalDisk }) {
   );
 }
 
-/** Temperature, power-on time and (NVMe) the endurance used: always the three, "—" when the disk
- * doesn't say, with the reason on hover. */
+/** Temperature, power-on time and (NVMe) the write endurance left: always the three, "—" when the
+ * disk doesn't say, with the reason on hover. The life bar is full on a new drive and shrinks with
+ * wear; only a little left (or past its rated endurance) is a warning. */
 function HealthLine({ disk }: { disk: PhysicalDisk }) {
   const h = disk.health;
   const gap = recordGap(disk);
   const temp = h?.temperature_c ?? null;
   const hours = h?.power_on_hours ?? null;
   const used = h?.percentage_used ?? null;
+  const left = used == null ? null : lifeLeft(used);
+  const low = left != null && (left <= LIFE_LOW || (used ?? 0) > 100);
+  const lifeTitle =
+    used == null
+      ? disk.interface === "nvme"
+        ? gap
+        : t("只有 NVMe 固态硬盘报告写入寿命的估计")
+      : used > 100
+        ? t("已超过额定的写入寿命：厂商估计已用 {used}。盘通常还能继续用，只是写入量超过了厂商的保证", { used: `${used}%` })
+        : t("剩余的写入寿命：厂商估计已用 {used}，还剩 {left}", { used: `${used}%`, left: `${left}%` });
   return (
     <div className="mc-line">
       <span className={`mc-chip fixed${temp == null ? " none" : temp >= 70 ? " warn" : ""}`} title={temp == null ? gap : t("温度")}>
@@ -432,12 +445,9 @@ function HealthLine({ disk }: { disk: PhysicalDisk }) {
         <Icon name="clock" size={12} />
         {t("通电 {time}", { time: hours == null ? "—" : powerOnText(hours) })}
       </span>
-      <span
-        className={`mc-linkmeter${used == null ? " none" : ""}`}
-        title={used == null ? (disk.interface === "nvme" ? gap : t("只有 NVMe 固态硬盘报告写入寿命的估计")) : t("写入寿命已用掉的比例（厂商的估计，可以超过 100%）")}
-      >
-        <Meter share={used == null ? 0 : Math.min(1, used / 100)} tone={used != null && used >= 90 ? "warn" : "muted"} />
-        <span className="small muted">{t("寿命已用 {pct}", { pct: used == null ? "—" : `${used}%` })}</span>
+      <span className={`mc-linkmeter${left == null ? " none" : low ? " warn" : ""}`} title={lifeTitle}>
+        <Meter share={left == null ? 0 : left / 100} tone={low ? "warn" : "muted"} />
+        <span className="small muted">{t("剩余寿命 {pct}", { pct: left == null ? "—" : `${left}%` })}</span>
       </span>
     </div>
   );
