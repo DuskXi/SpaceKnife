@@ -1,7 +1,7 @@
 {
   "name": "spaceknife-electron",
   "productName": "SpaceKnife",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "SpaceKnife — see what fills your drives",
   "author": {

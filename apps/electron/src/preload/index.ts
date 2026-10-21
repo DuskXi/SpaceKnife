@@ -8,7 +8,7 @@ const appVersion = process.argv.find((arg) => arg.startsWith(VERSION_ARG))?.slic
 
 const api: SkApi = {
   platform: process.platform as SkApi["platform"],
-  version: appVersion ?? process.env.npm_package_version ?? "0.3.2",
+  version: appVersion ?? process.env.npm_package_version ?? "0.3.3",
   host: "app",
   remote: null,
   justUpdated: process.argv.includes("--sk-updated"),

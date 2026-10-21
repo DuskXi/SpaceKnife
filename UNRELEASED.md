@@ -24,6 +24,7 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 - **The Classes page no longer wraps.** Names broke in the middle, counts before 「个」 and sizes before their unit. Now the page starts with a bar of the whole selection split in the class colors, then one line per class with aligned columns (files, size, share) and a bar; in a narrow panel the counts shorten. Click a class to filter by it. **Code** and **Data** fold away while they hold less than 2% and less than 8 GB of the selection (**Show all classes**).
 - **TypeScript is no longer video.** `.ts` and `.mts` are both TypeScript and MPEG transport-stream (and AVCHD) recordings. SpaceKnife now tells them apart by size, without reading the file: over 16 MB, or over 1 MB and a whole number of 188-byte packets (192 for `.mts`), is Video; anything else is Code. Before, every TypeScript file counted and was colored as video.
 - **A filter can always be left.** A filter started by a click in the **Classes** tab left no obvious way back to the details. **Matches** now has **Clear filter** in its header, the match bar over the picture has an ×, and <kbd>Esc</kbd> on the picture clears the filter once nothing is selected.
+- **Singular English labels in the details panel**, such as "1 file" and "1 largest file". Thanks to @nimalagnanaguru ([#16](https://github.com/DuskXi/SpaceKnife/pull/16)).
 - **Deleted space no longer shows as unknown.** What was deleted while a scan was monitored (in Explorer, by emptying the Recycle Bin, by another program) stayed counted as used in the open view, so the freed space grew the unknown-space block while the free-space block kept its old size. The view now follows the volume's free space, read again right after each change.
 
 ---
@@ -52,4 +53,5 @@ What is already done for the next version, **0.3.3**, and not in a release yet. 
 - **「类别统计」不再换行**：以前名称从中间断开，文件数在「个」前、大小在单位前折行。现在页面上方是一条按类别配色的分段条，下面每个类别一行，文件数、大小、占比各列对齐，配一条比例条；面板窄时文件数缩写。单击一行就按这一类过滤。「代码/开发」「数据/模型」占选中项不到 2% 且不到 8 GB 时收起来（「显示全部类别」展开）。
 - **TypeScript 不再算作视频**：`.ts`、`.mts` 既是 TypeScript 源码，也是 MPEG 传输流（以及 AVCHD）录像。现在按文件大小区分，不读文件内容：16 MB 以上，或 1 MB 以上且大小正好是整数个 188 字节的包（`.mts` 为 192 字节）的算视频，其余算代码。以前所有 TypeScript 文件都按视频计数和着色。
 - **过滤随时能退出**：在「类别统计」里点类别进入过滤后，找不到回到详情的出口。现在「匹配结果」标题右边有「清除过滤」，图上方的匹配统计条右端有 ×，在图上没有选中项时按 <kbd>Esc</kbd> 也会清除过滤。
+- **详情栏的英文单数**：例如「1 file」「1 largest file」。感谢 @nimalagnanaguru（[#16](https://github.com/DuskXi/SpaceKnife/pull/16)）。
 - **删除的空间不再显示成未知空间**：扫描在监控时被删掉的东西（在资源管理器里删、清空回收站、别的程序删除），在已打开的视图里仍按原来的已用空间计算，释放出来的空间就变成了「未知空间」，可用空间块却还是原来的大小。现在视图跟着卷的可用空间走，每次变化后都会重新读取。

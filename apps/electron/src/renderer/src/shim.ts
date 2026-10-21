@@ -201,7 +201,7 @@ export async function installShim(): Promise<void> {
       {
         state: token ? { state: "ready", info: { url: ws, token, pid: 0 } } : { state: "failed", message: t("浏览器模式：地址里缺少 #ws=…&token=…") },
         platform: (params.get("platform") as SkApi["platform"]) ?? guessPlatform(),
-        version: "0.3.2-web",
+        version: "0.3.3-web",
         host: asBrowser ? "browser" : "app",
         remote: asBrowser ? { hostname: location.hostname, home: "", secure: location.protocol === "https:" } : null,
         justUpdated: params.get("updated") === "1", // demos: show the 「已更新」 note
