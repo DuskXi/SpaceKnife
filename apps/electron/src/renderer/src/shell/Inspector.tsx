@@ -6,7 +6,7 @@ import type { NodeInfo, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, viewCall } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
 import { Kind } from "@/visual/frame";
-import { fmtAgo, fmtInt, fmtPct, fmtShare, fmtSize, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtInt, fmtPct, fmtShare, fmtSize, plural, sizeParts } from "@/lib/format";
 import { useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
@@ -162,8 +162,31 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
         </div>
         <div className="ins-stats" title={t("精确 {alloc} 字节（逻辑 {size} 字节）", { alloc: fmtInt(n.alloc), size: fmtInt(n.size) })}>
           {dir
-            ? t("{files} 个文件 · {dirs} 个文件夹 · 修改于 {ago}", { files: fmtInt(n.files), dirs: fmtInt(n.dirs), ago: fmtAgo(s.latest_mtime) })
-            : t("{cls} · 修改于 {ago}", { cls: className(cls ?? "other"), ago: fmtAgo(n.mtime) })}
+            ? (() => {
+                const fields = {
+                  files: fmtInt(n.files),
+                  dirs: fmtInt(n.dirs),
+                  ago: fmtAgo(s.latest_mtime),
+                };
+                const text = t(
+                  "{files} 个文件 · {dirs} 个文件夹 · 修改于 {ago}",
+                  fields,
+                );
+                const one =
+                  n.files === 1 && n.dirs === 1
+                    ? "{files} file · {dirs} folder · modified {ago}"
+                    : n.files === 1
+                      ? "{files} file · {dirs} folders · modified {ago}"
+                      : "{files} files · {dirs} folder · modified {ago}";
+
+                return n.files === 1 || n.dirs === 1
+                  ? plural(1, text, one, fields)
+                  : text;
+            })()
+          : t("{cls} · 修改于 {ago}", {
+              cls: className(cls ?? "other"),
+              ago: fmtAgo(n.mtime),
+            })}
         </div>
       </div>
       <section className="ins-section">
@@ -262,7 +285,7 @@ function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: st
         <div key={c.class_id} className="class-row">
           <span className="swatch" style={{ background: classHexNow(c.class_id) }} />
           <span className="flex">{className(c.class_id)}</span>
-          <span className="mono muted">{t("{n} 个", { n: fmtInt(c.files) })}</span>
+          <span className="mono muted">{plural(c.files, t("{n} 个", { n: fmtInt(c.files) }), "1 file")}</span>
           <span className="mono">{fmtSize(c.bytes)}</span>
           <span className="mono muted share-pct">{fmtShare(c.bytes, total)}</span>
           <span className="class-bar">
@@ -277,7 +300,7 @@ function ClassStats({ s, className }: { s: TreeSummaryResult; className: (id: st
 function TopList({ s, viewId }: { s: TreeSummaryResult; viewId: string; className: (id: string) => string }) {
   return (
     <section className="ins-section">
-      <h3>{t("最大的 {n} 个文件", { n: s.top_files.length })}</h3>
+      <h3>{plural(s.top_files.length, t("最大的 {n} 个文件", { n: s.top_files.length }), "1 largest file")}</h3>
       <div className="top-list">
         {s.top_files.map((f) => (
           <TopRow key={f.node.id} node={f.node} rel={f.rel_parent} tag={f.tag ?? null} whole={s.node.alloc} viewId={viewId} />
@@ -291,7 +314,7 @@ function SyntheticDetails({ frameKind, size, count }: { frameKind: number; size:
   const [num, unit] = sizeParts(size);
   const text =
     frameKind === Kind.SMALL
-      ? [t("{n} 个小项", { n: fmtInt(count) }), t("同一文件夹里单独画不下的小文件合并成一块。双击可以把它们逐个铺开。")]
+      ? [plural(count, t("{n} 个小项", { n: fmtInt(count) }), "1 small item"), t("同一文件夹里单独画不下的小文件合并成一块。双击可以把它们逐个铺开。")]
       : frameKind === Kind.MORE
         ? [t("+{n} 项", { n: fmtInt(count) }), t("同级里画不下的条目合并成一块。双击可以把它们铺开。")]
         : frameKind === Kind.FREE
