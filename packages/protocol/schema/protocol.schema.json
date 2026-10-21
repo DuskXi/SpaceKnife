@@ -919,6 +919,39 @@
       "title": "ClassStat",
       "type": "object"
     },
+    "ClassTotal": {
+      "description": "The file classes of every volume whose mix is known (an open complete scan, or what was kept\nof the last one), added up.",
+      "properties": {
+        "bytes": {
+          "description": "The scanned bytes of those volumes",
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "classes": {
+          "description": "Every class with bytes, largest first",
+          "items": {
+            "$ref": "#/$defs/ClassStat"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "volumes": {
+          "description": "Their mount points",
+          "items": {
+            "type": "string"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes",
+        "bytes",
+        "volumes"
+      ],
+      "title": "ClassTotal",
+      "type": "object"
+    },
     "ClassesEvent": {
       "properties": {
         "state": {
@@ -3499,6 +3532,18 @@
     },
     "MachineDisks": {
       "properties": {
+        "classes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClassTotal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None until a volume's mix is known"
+        },
         "collected_at": {
           "format": "date-time",
           "title": "Collected At",
@@ -8766,7 +8811,7 @@
           "type": "integer"
         },
         "classes": {
-          "description": "Open scans: the largest file classes",
+          "description": "Open and kept scans: the largest file classes",
           "items": {
             "$ref": "#/$defs/ClassStat"
           },
@@ -8791,7 +8836,7 @@
           "type": "integer"
         },
         "folders": {
-          "description": "Open scans: the largest top-level folders",
+          "description": "Open and kept scans: the largest top-level folders",
           "items": {
             "$ref": "#/$defs/FolderStat"
           },
@@ -8846,10 +8891,11 @@
           "title": "Snapshot"
         },
         "source": {
-          "description": "A scan open in this backend, or the newest snapshot",
+          "description": "A scan open in this backend; what was kept of the volume's last complete scan (its classes and folders too, across closed tabs and restarts); or the newest snapshot (counts only)",
           "enum": [
             "scan",
-            "snapshot"
+            "snapshot",
+            "kept"
           ],
           "title": "Source",
           "type": "string"

@@ -6,6 +6,11 @@ volume comes from a scan of its root open in this backend (counts, and once it i
 file classes and top-level folders) or else from the newest snapshot of it (counts only: a snapshot
 is not loaded for this). The headers of the volume's complete snapshots give its history.
 
+What a complete scan of a whole volume showed (counts, every file class, the largest folders) is kept
+per volume (:mod:`.volume_summaries`) when the scan finishes, before its tab closes and whenever the
+page reads it, so the page still shows it after the tab is closed and after a restart; the classes of
+every volume whose mix is known add up to the page's class total.
+
 On Linux a disk's lifetime counters need root: ``machine.read_health`` (only on the user's click)
 starts the elevated helper behind polkit's password prompt and reads the raw pages of each such
 disk. The records are kept for the life of the backend, so the page keeps them on later reads;
@@ -17,8 +22,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from collections.abc import Sequence
-from datetime import UTC, datetime
+from collections.abc import Callable, Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -38,9 +43,10 @@ from ..scan.scanner import ScanState
 from ..scan.volume import VolumeInfo, list_volumes
 from ..store import snapshot
 from ..store.nodes import Kind
-from .compute import Latest
+from .compute import Latest, compute
 from .scan_handlers import warm_media
 from .scans import ScanHandle, saved_method, saved_state, summary_of, volume_model
+from .volume_summaries import Kept, VolumeSummaries, identity
 
 if TYPE_CHECKING:
     from .app import Server
@@ -49,6 +55,8 @@ if TYPE_CHECKING:
 TOP_CLASSES = 5
 TOP_FOLDERS = 3
 HISTORY = 12  # snapshots of a volume for its growth (the newest 10 are kept, then weekly)
+# a snapshot saved this long after a kept scan finished is from a later scan (saving one takes a while)
+LATER = timedelta(minutes=10)
 
 
 def _key(path: str) -> str:
@@ -72,14 +80,19 @@ def _rank(handle: ScanHandle) -> tuple[bool, datetime]:
 
 
 def _live(server: Server, handle: ScanHandle) -> m.VolumeScan:
+    return _live_full(server, handle)[0]
+
+
+def _live_full(server: Server, handle: ScanHandle) -> tuple[m.VolumeScan, list[ClassStat]]:
+    """What an open scan shows, and every class with bytes (largest first; [] while it runs)."""
     st = handle.status()
     running = handle.running
-    classes: list[ClassStat] = []
+    every: list[ClassStat] = []
     folders: list[m.FolderStat] = []
     if not running:
         node = handle.roots[0].node
         summary = summary_of(server, handle, node, 0)
-        classes = [c for c in summary.classes if c.bytes > 0][:TOP_CLASSES]
+        every = [c for c in summary.classes if c.bytes > 0]
         store = handle.store
         kids = store.sorted_children(node, "size")
         dirs = kids[store.cols["kind"][kids] == Kind.DIR][:TOP_FOLDERS]
@@ -90,7 +103,7 @@ def _live(server: Server, handle: ScanHandle) -> m.VolumeScan:
     method: Literal["hard", "mft"] | None = None
     if st.method in ("hard", "mft"):
         method = "mft" if st.method == "mft" else "hard"
-    return m.VolumeScan(
+    scan = m.VolumeScan(
         source="snapshot" if handle.source == "snapshot" else "scan",
         scan_id=handle.id,
         snapshot=handle.snapshot_path,
@@ -100,9 +113,40 @@ def _live(server: Server, handle: ScanHandle) -> m.VolumeScan:
         dirs=st.dirs,
         bytes_alloc=st.bytes_alloc,
         method=method,
-        classes=classes,
+        classes=every[:TOP_CLASSES],
         folders=folders,
     )
+    return scan, every
+
+
+def _keep(handle: ScanHandle, scan: m.VolumeScan, every: list[ClassStat]) -> Kept | None:
+    """What to keep of a complete scan of a whole volume; None for anything else."""
+    volume = handle.roots[0].volume if handle.roots else None
+    if volume is None or _whole_root(handle) is None or scan.running or scan.at is None:
+        return None
+    if handle.status().state != "done":  # a stopped scan's counts are partial
+        return None
+    return Kept(
+        mount=volume.mount_point,
+        identity=identity(volume),
+        at=scan.at,
+        seen=datetime.now(UTC),
+        files=scan.files,
+        dirs=scan.dirs,
+        bytes_alloc=scan.bytes_alloc,
+        method=scan.method,
+        snapshot=scan.snapshot,
+        classes=[c.model_copy(update={"parts": []}) for c in every],
+        folders=scan.folders,
+    )
+
+
+def kept_of(server: Server, handle: ScanHandle) -> Kept | None:
+    """What to keep of an open scan (on the compute pool: it sums the scan's classes)."""
+    if _whole_root(handle) is None or handle.running:
+        return None
+    scan, every = _live_full(server, handle)
+    return _keep(handle, scan, every)
 
 
 Saved = tuple[m.VolumeScan | None, list[m.SnapshotPoint]]
@@ -148,8 +192,13 @@ def overview(
     volumes: Sequence[VolumeInfo],
     found: disks.Probe,
     saved: dict[str, Saved],
+    kept: Callable[[VolumeInfo], Kept | None] | None = None,
+    fresh: list[Kept] | None = None,
 ) -> m.MachineDisks:
-    """The page's data (on the compute pool: summing an open scan's classes reads its columns)."""
+    """The page's data (on the compute pool: summing an open scan's classes reads its columns).
+
+    ``kept`` gives what was kept of a volume's last complete scan; ``fresh`` collects what to keep
+    of the complete scans open now."""
     open_scans: dict[str, ScanHandle] = {}
     for candidate in list(server.scans.scans.values()):
         root = _whole_root(candidate)
@@ -159,13 +208,41 @@ def overview(
         if best is None or _rank(candidate) > _rank(best):
             open_scans[root] = candidate
     out_volumes: list[m.VolumeOverview] = []
+    totals: dict[str, list[int]] = {}  # class -> [bytes, files]
+    covered: list[str] = []
+    covered_bytes = 0
     for v in volumes:
         model = volume_model(v)
         if model is None:
             continue
         handle = open_scans.get(_key(v.mount_point))
         newest, history = saved.get(v.mount_point, (None, []))
-        scan = _live(server, handle) if handle is not None else newest
+        k = kept(v) if kept is not None else None
+        every: list[ClassStat] = []
+        mix_bytes = 0
+        scan: m.VolumeScan | None
+        if handle is not None:
+            scan, every = _live_full(server, handle)
+            mix_bytes = scan.bytes_alloc
+            entry = _keep(handle, scan, every) if fresh is not None else None
+            if entry is not None and fresh is not None:
+                fresh.append(entry)
+            if scan.running and k is not None:  # scanned again: its last mix counts meanwhile
+                every, mix_bytes = k.classes, k.bytes_alloc
+        elif k is not None and (
+            newest is None or newest.at is None or newest.snapshot == k.snapshot or newest.at <= k.at + LATER
+        ):
+            scan = k.volume_scan(TOP_CLASSES)
+            every, mix_bytes = k.classes, k.bytes_alloc
+        else:
+            scan = newest
+        if every:
+            for c in every:
+                t = totals.setdefault(c.class_id, [0, 0])
+                t[0] += c.bytes
+                t[1] += c.files
+            covered.append(v.mount_point)
+            covered_bytes += mix_bytes
         ids = [disk for disk, _size in found.parts.get(v.mount_point, [])]
         out_volumes.append(
             m.VolumeOverview(volume=model, disks=list(dict.fromkeys(ids)), scan=scan, history=history)
@@ -187,7 +264,20 @@ def overview(
         )
         for d in found.disks
     ]
-    return m.MachineDisks(disks=out_disks, volumes=out_volumes, collected_at=datetime.now(UTC))
+    total = (
+        m.ClassTotal(
+            classes=[
+                ClassStat(class_id=cid, bytes=b, files=f)
+                for cid, (b, f) in sorted(totals.items(), key=lambda kv: (-kv[1][0], kv[0]))
+                if b > 0
+            ],
+            bytes=covered_bytes,
+            volumes=covered,
+        )
+        if covered
+        else None
+    )
+    return m.MachineDisks(disks=out_disks, volumes=out_volumes, collected_at=datetime.now(UTC), classes=total)
 
 
 # --------------------------------------------------------------------------- records read as root
@@ -241,6 +331,15 @@ def install(server: Server) -> None:
     router = server.router
     latest = Latest()
     elevated: dict[str, Elevated] = {}  # disk -> what root read; for the life of the backend
+    summaries = VolumeSummaries()
+
+    async def keep(handle: ScanHandle) -> None:
+        """A scan finished or its tab is closing: keep what it showed (complete whole volumes)."""
+        entry = await compute(kept_of, server, handle)
+        if entry is not None:
+            await asyncio.to_thread(summaries.put, [entry])
+
+    server.scans.keepers.append(keep)
 
     async def probe() -> tuple[list[VolumeInfo], disks.Probe]:
         volumes = await asyncio.to_thread(list_volumes)
@@ -256,7 +355,13 @@ def install(server: Server) -> None:
             return {v.mount_point: saved_scans(v.mount_point) for v in volumes if not v.reason}
 
         saved = await asyncio.to_thread(snapshots)
-        return await latest.run((key, session.id), overview, server, volumes, found, saved)
+        fresh: list[Kept] = []
+        args = (server, volumes, found, saved, summaries.get, fresh)
+        out = await latest.run((key, session.id), overview, *args)
+        if fresh:
+            await asyncio.to_thread(summaries.put, fresh)
+        await asyncio.to_thread(summaries.seen, volumes)
+        return out
 
     async def refresh(found: disks.Probe) -> None:
         """Read the kept records again while the elevated helper still runs (no prompt)."""
@@ -295,4 +400,4 @@ def install(server: Server) -> None:
         return m.ReadHealthResult(outcome=outcome, message=message, machine=machine)
 
 
-__all__ = ["failed_note", "install", "overview", "read_records", "saved_scans", "with_record"]
+__all__ = ["failed_note", "install", "kept_of", "overview", "read_records", "saved_scans", "with_record"]

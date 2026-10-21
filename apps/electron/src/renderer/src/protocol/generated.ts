@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "fddfc4bed8e8889f";
+export const SCHEMA_HASH = "d5ec8a5e7bb5f361";
 
 export interface AgeCond {
   end: number;
@@ -203,6 +203,19 @@ export interface ClassStat {
   files: number;
   /** Files a folder class took over, by the class of their extension, largest first (「游戏 · 其中视频 3 GB」); empty when none */
   parts: ClassPart[];
+}
+
+/**
+ * The file classes of every volume whose mix is known (an open complete scan, or what was kept
+ * of the last one), added up.
+ */
+export interface ClassTotal {
+  /** The scanned bytes of those volumes */
+  bytes: number;
+  /** Every class with bytes, largest first */
+  classes: ClassStat[];
+  /** Their mount points */
+  volumes: string[];
 }
 
 export interface ClassesEvent {
@@ -782,6 +795,8 @@ export interface LogRecordEvent {
 }
 
 export interface MachineDisks {
+  /** None until a volume's mix is known */
+  classes: ClassTotal | null;
   collected_at: string;
   disks: PhysicalDisk[];
   volumes: VolumeOverview[];
@@ -1891,11 +1906,11 @@ export interface VolumeScan {
   /** When the scan finished (or started, while it runs) */
   at: string | null;
   bytes_alloc: number;
-  /** Open scans: the largest file classes */
+  /** Open and kept scans: the largest file classes */
   classes: ClassStat[];
   dirs: number | null;
   files: number;
-  /** Open scans: the largest top-level folders */
+  /** Open and kept scans: the largest top-level folders */
   folders: FolderStat[];
   method: "hard" | "mft" | null;
   running: boolean;
@@ -1903,8 +1918,8 @@ export interface VolumeScan {
   scan_id: string | null;
   /** The snapshot file */
   snapshot: string | null;
-  /** A scan open in this backend, or the newest snapshot */
-  source: "scan" | "snapshot";
+  /** A scan open in this backend; what was kept of the volume's last complete scan (its classes and folders too, across closed tabs and restarts); or the newest snapshot (counts only) */
+  source: "scan" | "snapshot" | "kept";
 }
 
 export interface Methods {

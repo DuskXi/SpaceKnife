@@ -14,6 +14,8 @@ import { patchStartForm, get, useApp } from "@/state/store";
 import { MEDIA_ZH } from "@/pages/StartPage";
 import {
   bandwidthText,
+  classGaps,
+  classRows,
   byMedia,
   diskLabel,
   diskMap,
@@ -78,6 +80,7 @@ export function MachinePage() {
         ) : (
           <>
             <Kpis data={data} />
+            <ClassesPanel data={data} />
             <div className="mc-panels">
               <MediaPanel data={data} />
               <FindingsPanel data={data} />
@@ -181,6 +184,49 @@ function MediaPanel({ data }: { data: MachineDisks }) {
       )}
     </section>
   );
+}
+
+/** What fills the volumes: the file classes of every volume whose complete scan is known (open,
+ * or kept from the last one), added up, in the class colors of the per-volume bars. */
+function ClassesPanel({ data }: { data: MachineDisks }) {
+  const total = data.classes;
+  const rows = classRows(total);
+  const gaps = classGaps(data);
+  const list = (xs: string[]) => xs.join(byLang("、", ", "));
+  return (
+    <section className="mc-panel mc-classes-total" aria-label={t("文件类别")}>
+      <h2>{t("文件类别")}</h2>
+      {total && rows.length ? (
+        <>
+          <p className="muted small">
+            {t("{n} 个卷，共 {size}：{list}", { n: total.volumes.length, size: fmtSize(total.bytes, true), list: list(total.volumes) })}
+            {gaps.length > 0 && ` · ${t("还没有完整扫描过：{list}", { list: list(gaps) })}`}
+          </p>
+          <StackBar
+            height={14}
+            title={t("文件类别")}
+            segments={rows.map((r) => ({ key: r.key, share: r.share, color: r.classId ? classHexNow(r.classId) : "var(--sk-visual-branch-neutral)", title: `${rowName(r)} · ${fmtSize(r.bytes, true)}` }))}
+          />
+          <ul className="mc-class-legend">
+            {rows.map((r) => (
+              <li key={r.key} title={`${rowName(r)} · ${fmtSize(r.bytes, true)} · ${fmtShare(r.bytes, total.classes.reduce((s, c) => s + c.bytes, 0))}`}>
+                <span className="chip-swatch" style={{ background: r.classId ? classHexNow(r.classId) : "var(--sk-visual-branch-neutral)" }} />
+                <span className="mc-class-name">{rowName(r)}</span>
+                <span className="mono">{fmtSize(r.bytes, true)}</span>
+                <span className="mono muted">{`${Math.round(r.share * 1000) / 10}%`}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : (
+        <p className="muted small">{t("扫描一个整卷之后，这里显示所有卷里都是哪些文件；结果会一直保留，直到下一次扫描")}</p>
+      )}
+    </section>
+  );
+}
+
+function rowName(r: { classId: string | null; count: number }): string {
+  return r.classId ? className(r.classId) : t("其余 {n} 类", { n: r.count });
 }
 
 function FindingsPanel({ data }: { data: MachineDisks }) {
@@ -575,7 +621,8 @@ function scanSummary(s: VolumeScan): string {
   if (s.running) return t("正在扫描 · {files}", { files });
   const when = s.at ? fmtAgo(seconds(s.at)) : "";
   const size = fmtSize(s.bytes_alloc, true);
-  return s.source === "scan" ? t("扫描于 {when} · {files} · {size}", { when, files, size }) : t("快照 {when} · {files} · {size}", { when, files, size });
+  // an open scan, or what was kept of the last complete one: its own time; else the newest snapshot
+  return s.source === "snapshot" ? t("快照 {when} · {files} · {size}", { when, files, size }) : t("扫描于 {when} · {files} · {size}", { when, files, size });
 }
 
 function className(id: string): string {

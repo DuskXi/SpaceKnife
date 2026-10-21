@@ -32,6 +32,7 @@ You don't have to look them up: **Settings › Advanced** shows them.
 | `update.json` | data | The last update check, the recent releases with their notes, and the versions whose update card you closed |
 | `updates/` | data | A downloaded new version until it runs, and while a portable copy is replaced, its new and old program files. Emptied at the next start ([Nothing left behind](../updates-privacy/#nothing-left-behind)) |
 | `palette_recent.json` | data | Recent jumps and filters of the command palette |
+| `volume_summaries.json` | data | What the Disks page kept of each volume's last complete scan (file classes, largest folders) |
 | `settings.json` | configuration | Your settings |
 | `classes.json` | configuration | Your file classes |
 | `columns/` | cache | Scan data moved out of memory for very large scans |

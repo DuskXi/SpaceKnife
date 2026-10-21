@@ -1146,6 +1146,11 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .mc-panel h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .mc-panel > p { margin: -6px 0 0; }
 .mc-legend { width: 100%; border-collapse: collapse; font-size: 12px; }
+/* the page's class total: a wide bar, then the classes in as many columns as fit */
+.mc-class-legend { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 24px; margin: 0; padding: 0; list-style: none; font-size: 12px; }
+.mc-class-legend li { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 3px 0; }
+.mc-class-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-class-legend .mono { flex: none; }
 .mc-legend td { padding: 3px 0; vertical-align: middle; }
 .mc-legend td:first-child { display: flex; align-items: center; gap: 7px; }
 .mc-legend td + td { padding-left: 12px; text-align: right; white-space: nowrap; }

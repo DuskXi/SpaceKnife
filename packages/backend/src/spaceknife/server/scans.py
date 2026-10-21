@@ -8,7 +8,7 @@ import os
 import secrets
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -325,6 +325,8 @@ class ScanManager:
         self._io_starting = False
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults for new scans)
         self.monitors: Any = None  # server.monitors.MonitorManager, set by the server (M5)
+        # called when a scan finishes and before its tab closes: keep what it showed (machine.disks)
+        self.keepers: list[Callable[[ScanHandle], Awaitable[None]]] = []
         # set by the ViewManager: scans with open views are never evicted; evicted scans are released
         # (when, bytes) of the scans closed lately: the C heap keeps about that much for the next
         # scan to reuse, which the memory watchdog allows for (server/diag.py)
@@ -802,6 +804,8 @@ class ScanManager:
             )
         if scanner.state == ScanState.DONE and handle.auto_snapshot:
             await self._auto_save(handle)
+        if scanner.state == ScanState.DONE:
+            await self._keep(handle)
         handle.publish()
         if scanner.state == ScanState.DONE:
             # build the name index now, so the first wildcard filter does not pay for it
@@ -881,6 +885,7 @@ class ScanManager:
         if handle.task is not None:
             with contextlib.suppress(Exception):
                 await handle.task
+        await self._keep(handle)  # what changed while it was watched
         self.scans.pop(scan_id, None)
         now = time.monotonic()
         recent = [c for c in self.closed if now - c[0] < CLOSED_KEEP_S]
@@ -889,6 +894,13 @@ class ScanManager:
         task = asyncio.get_running_loop().create_task(self._release_later())
         self._releases.add(task)
         task.add_done_callback(self._releases.discard)
+
+    async def _keep(self, handle: ScanHandle) -> None:
+        for keeper in list(self.keepers):
+            try:
+                await keeper(handle)
+            except Exception:
+                logger.opt(exception=True).warning("keeping what scan {} showed failed", handle.id)
 
     async def _release_later(self) -> None:
         await asyncio.sleep(RELEASE_DELAY_S)

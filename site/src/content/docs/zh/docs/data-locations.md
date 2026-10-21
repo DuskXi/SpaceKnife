@@ -32,6 +32,7 @@ Linux 上设置了 `XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`XDG_CACHE_HOME` 时，
 | `update.json` | 数据 | 上一次更新检查、最近的版本和它们的发布说明，以及关掉过更新卡片的版本 |
 | `updates/` | 数据 | 下载好的新版本（直到它运行起来）；便携版替换时，还有新旧两份程序文件。下次启动时清空（[不留残余](../updates-privacy/#不留残余)） |
 | `palette_recent.json` | 数据 | 命令面板最近的路径跳转和过滤 |
+| `volume_summaries.json` | 数据 | 「本机磁盘」保留的每个卷上一次完整扫描的结果（文件类别、最大的文件夹） |
 | `settings.json` | 配置 | 你的设置 |
 | `classes.json` | 配置 | 你的文件类别 |
 | `columns/` | 缓存 | 超大扫描时移出内存的扫描数据 |
