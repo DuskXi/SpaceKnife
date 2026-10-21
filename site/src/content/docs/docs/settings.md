@@ -142,13 +142,6 @@ Language, hover tips, window alerts and logs.
 | Open the log panel on new events | On | On `true` · Off `false` | Opens the log panel on a warning or an error. The same setting as the switch in the log panel. | `general.log_auto_open` |
 | Log scan warnings | On | On `true` · Off `false` | For example "Can't access …: Access denied". | `general.log_scan_warnings` |
 
-#### Updates
-
-| Setting | Default | Values | Description | Key |
-| --- | --- | --- | --- | --- |
-| Check for updates automatically | On | On `true` · Off `false` | At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right. | `general.update_check` |
-| Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are the releases marked as pre-release on GitHub. | `general.update_channel` |
-
 ### Appearance
 
 Theme, accent color, animation and the look of the visualizations. Changes apply at once.
@@ -337,5 +330,17 @@ Settings file, logs, cache and snapshots.
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
 | Scan data memory limit | 25 % | 5 to 90 %, step 5 | Once scan data passes this share of physical memory, new node tables go to memory-mapped files on disk: they take no private commit, and the system keeps the parts in use in memory. Applies from the next scan. | `advanced.memory_budget` |
+
+### About & updates
+
+Version, updates and the release timeline.
+
+#### Updates
+
+| Setting | Default | Values | Description | Key |
+| --- | --- | --- | --- | --- |
+| Check for updates automatically | On | On `true` · Off `false` | At most once a day, it only reads this project's release list on GitHub and sends no usage data; small updates only show a badge at the top right. | `general.update_check` |
+| Download updates automatically | On | On `true` · Off `false` | A new version is downloaded and checked in the background. It is installed only when you click "Restart and update". Can be changed when "Check for updates automatically" is on. | `general.update_download` |
+| Versions to offer | Include previews | Include previews `"preview"` · Releases only `"stable"` | Previews are the releases marked as pre-release on GitHub. | `general.update_channel` |
 
 <!-- generated:settings:end -->

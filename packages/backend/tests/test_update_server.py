@@ -30,6 +30,7 @@ from spaceknife_protocol.methods import (
     UPDATE_CHECK,
     UPDATE_DISMISS,
     UPDATE_DOWNLOAD,
+    UPDATE_RELEASES,
     UPDATE_STATUS,
 )
 from spaceknife_protocol.session import ClientInfo
@@ -46,11 +47,15 @@ PAGE = "https://github.com/DuskXi/SpaceKnife/releases"
 @pytest.fixture(autouse=True)
 def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SPACEKNIFE_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("SPACEKNIFE_DOWNLOAD_DIR", str(tmp_path / "downloads"))
     monkeypatch.setenv("no_proxy", "*")
     monkeypatch.setenv("NO_PROXY", "*")
     for var in ("SPACEKNIFE_APP_VERSION", "SPACEKNIFE_INSTALL_KIND", "SPACEKNIFE_UPDATE_FEED"):
         monkeypatch.delenv(var, raising=False)
+
+
+def updates_folder(tmp_path: Path) -> Path:
+    """Where the service downloads to: ``updates`` in the data directory of SPACEKNIFE_HOME."""
+    return tmp_path / "home" / "data" / "updates"
 
 
 class FakeGitHub:
@@ -200,8 +205,8 @@ async def test_download_over_the_server(server: Server, tmp_path: Path) -> None:
             await until(lambda: bool(events) and events[-1].status.download.state == "done")
             done = events[-1].status
             assert done.download.verified is True and done.download.received == len(payload)
-            assert done.download.path == str(tmp_path / "downloads" / exe)
-            assert (tmp_path / "downloads" / exe).read_bytes() == payload
+            assert done.download.path == str(updates_folder(tmp_path) / exe)
+            assert (updates_folder(tmp_path) / exe).read_bytes() == payload
             assert done.latest is not None and done.latest.asset is not None
             assert done.latest.asset.sha256 == digest
 
@@ -228,7 +233,7 @@ def published(feed: LocalFeed, version: str, payload: bytes, sums: str) -> Relea
 
 async def test_download_mismatch_and_cancel(server: Server, tmp_path: Path) -> None:
     payload = b"x" * (3 * update.CHUNK)
-    downloads = tmp_path / "downloads"
+    downloads = updates_folder(tmp_path)
     gh = fake(server)
     go_on = threading.Event()
     with LocalFeed() as feed:
@@ -364,3 +369,68 @@ async def test_state_survives_a_restart(server: Server) -> None:
     st: UpdateStatus = again.status()
     assert st.level == "minor" and st.dismissed and st.checked_at == server.updates.state.checked_at
     assert again.state.etag == '"1"' and again.due_in() == pytest.approx(24 * 3600, abs=60)
+
+
+async def test_timeline_and_next_check(server: Server) -> None:
+    gh = fake(server)
+    gh.releases = [
+        rel("0.3.0", notes="- first"),
+        rel("0.4.0-beta.1", prerelease=True),
+        rel("0.3.1", installer("0.3.1")),
+    ]
+    async with await Connection.open(server.url, TOKEN, UI) as ui:
+        assert (await ui.call(UPDATE_RELEASES, Empty())).releases == []  # nothing checked yet
+        st = await ui.call(UPDATE_CHECK, Empty())
+        assert st.checked_at is not None and st.next_check_at is None  # no automatic checks here
+        # the real app (without its download, which would go to GitHub): the next check is a day later
+        server.settings.update({"general.update_download": False})
+        server.updates.auto = True
+        st = await ui.call(UPDATE_STATUS, Empty())
+        assert st.checked_at is not None and st.next_check_at is not None
+        assert abs((st.next_check_at - st.checked_at).total_seconds() - 24 * 3600) < 5
+        got = (await ui.call(UPDATE_RELEASES, Empty())).releases
+        assert [r.version for r in got] == ["0.4.0-beta.1", "0.3.1", "0.3.0"]  # newest first, the older too
+        assert got[0].prerelease and got[2].notes == "- first" and all(r.asset is None for r in got)
+        server.settings.update({"general.update_check": False})
+        assert (await ui.call(UPDATE_STATUS, Empty())).next_check_at is None
+
+
+async def test_a_shorter_cache_is_fetched_again_whole(server: Server) -> None:
+    gh = fake(server)
+    gh.releases = [rel("0.3.1"), rel("0.3.0")]
+    async with await Connection.open(server.url, TOKEN, UI) as ui:
+        await ui.call(UPDATE_CHECK, Empty())
+        await ui.call(UPDATE_CHECK, Empty())
+        assert gh.etags == [None, '"1"']  # this version's cache: the ETag goes along
+        # what 0.3.2 and older left: one release per channel, no "kept"
+        server.updates.state.kept = 0
+        await ui.call(UPDATE_CHECK, Empty())
+        assert gh.etags[-1] is None and server.updates.state.kept == update.HISTORY_KEEP
+        assert [r.version for r in (await ui.call(UPDATE_RELEASES, Empty())).releases] == ["0.3.1", "0.3.0"]
+
+
+async def test_downloads_by_itself_in_the_real_app(server: Server, tmp_path: Path) -> None:
+    payload = b"new installer " * 1000
+    gh = fake(server)
+    with LocalFeed() as feed:
+        exe = "SpaceKnife-0.4.0-Setup-x64.exe"
+        gh.releases = [rel("0.4.0", Asset(name=exe, size=len(payload), url=feed.file(f"/{exe}", payload)))]
+        async with await Connection.open(server.url, TOKEN, UI) as ui:
+            # tests and demos (no scheduler): a check finds it, nothing is downloaded
+            st = await ui.call(UPDATE_CHECK, Empty())
+            assert st.latest is not None and st.download.state == "idle"
+            # the real app with 「自动下载更新」 on: the next check starts the download
+            server.updates.auto = True
+            await ui.call(UPDATE_CHECK, Empty())
+            await until(lambda: server.updates.status().download.state == "done")
+            done = server.updates.status().download
+            assert done.path == str(updates_folder(tmp_path) / exe) and done.verified is None
+            assert (updates_folder(tmp_path) / exe).read_bytes() == payload
+            # done for this version: another check does not fetch it again
+            await ui.call(UPDATE_CHECK, Empty())
+            assert server.updates.status().download.state == "done"
+            # switched off: a newer release is found but not downloaded
+            server.settings.update({"general.update_download": False})
+            gh.releases = [rel("0.5.0", installer("0.5.0"))]
+            st = await ui.call(UPDATE_CHECK, Empty())
+            assert st.latest is not None and st.latest.version == "0.5.0" and st.download.state == "idle"

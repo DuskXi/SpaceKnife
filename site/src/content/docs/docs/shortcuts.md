@@ -283,6 +283,7 @@ Every other command shows up when you type its name or one of the words below:
 | Help | <kbd>F1</kbd> | `help` · `docs` · `documentation` · `manual` · `guide` | — |
 | Check for updates | — | `check for updates` · `update` · `upgrade` · `new version` | — |
 | Show update | — | `update` · `release notes` · `what's new` · `download update` | — |
+| About & updates | — | `about` · `version` · `release notes` · `changelog` · `timeline` | — |
 
 ### Listed only by name
 

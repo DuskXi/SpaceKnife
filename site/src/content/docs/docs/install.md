@@ -58,7 +58,7 @@ For scripted deployment, the installer takes the usual switches:
 .\SpaceKnife-<version>-Setup-x64.exe /S /currentuser
 ```
 
-Use `/allusers` instead of `/currentuser` for a machine-wide install (run it as administrator). To uninstall silently, run the `QuietUninstallString` from SpaceKnife's uninstall entry in the registry, which is `"Uninstall SpaceKnife.exe" /currentuser /S` in the install folder. The uninstaller copies itself to a temporary folder and runs from there, so the command returns at once.
+Use `/allusers` instead of `/currentuser` for a machine-wide install (run it as administrator). To uninstall silently, run the `QuietUninstallString` from SpaceKnife's uninstall entry in the registry, which is `"Uninstall SpaceKnife.exe" /currentuser /S` in the install folder. The uninstaller copies itself to a temporary folder and runs from there, so the command returns at once. A silent uninstall keeps the snapshots, settings and logs; add `--delete-app-data` to remove them too.
 
 ### Portable zip
 
@@ -147,30 +147,30 @@ In the AppImage and the tar.gz, Chromium's `chrome-sandbox` is not setuid. On di
 
 ## Upgrading
 
-SpaceKnife checks for new releases at most once a day and shows them in the title bar. A bigger release also shows a summary, and you can download and verify the new version in one click. How that works, and how to turn it off: [Updates and privacy](../updates-privacy/).
+SpaceKnife checks for new releases at most once a day and shows them in the title bar. It downloads and verifies the new version in the background, and on Windows, in a portable copy and as an AppImage one click on **Restart and update** puts it in place and opens it. How that works, and how to turn it off: [Updates and privacy](../updates-privacy/).
 
 Whichever way you upgrade, your scans, snapshots and settings stay: they live outside the program folder, or in the `data` folder of a portable copy.
 
 | Install | How the new version replaces the old one |
 |---|---|
-| Windows installer | Click **Install** in the update card: SpaceKnife quits, the installer runs and replaces the old version. Running a newer installer by hand does the same. |
-| Windows or Linux portable | Quit SpaceKnife and unpack the new archive. Replace the contents of the old folder, but keep its `data` folder. |
+| Windows installer | Click **Restart and update** in the update card: SpaceKnife closes, the installer replaces the old version in the background, and SpaceKnife opens again. Running a newer installer by hand does the same. |
+| Windows or Linux portable | Click **Restart and update**: the program files are replaced and the `data` folder is kept. By hand: quit SpaceKnife, unpack the new archive and replace the contents of the old folder, but keep its `data` folder. |
 | macOS dmg | Click **Install**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one. Then allow it once more and switch Full Disk Access off and on (see above). |
 | deb or rpm | Click **Install**: SpaceKnife quits and opens the package in the system's software installer. Or install the new package with `apt` or `dnf` as above. |
-| AppImage | Quit SpaceKnife and replace the old AppImage file with the new one. |
+| AppImage | Click **Restart and update**: the new AppImage takes the place of the old file. By hand: quit SpaceKnife and replace the old file with the new one. |
 
 ## Uninstalling
 
 | Install | How to remove it |
 |---|---|
-| Windows installer | Uninstall SpaceKnife from the app list in Windows Settings. |
+| Windows installer | Uninstall SpaceKnife from the app list in Windows Settings. It removes the program, the window's caches, the cache and the downloaded updates. Its second page, **Your data**, asks about the rest: tick **Also delete the snapshots, settings and logs** (unticked by default) to remove `%LOCALAPPDATA%\SpaceKnife` too. |
 | Portable | Delete the folder. Its `data` folder goes with it. |
 | macOS | Quit SpaceKnife and move it from Applications to the Trash. |
 | deb | `sudo apt remove spaceknife` |
 | rpm | `sudo dnf remove spaceknife` |
 | AppImage | Delete the file. |
 
-Except for a portable copy, removing the program keeps your scans, snapshots and settings, so a later install picks them up again. To remove them too, delete the folders listed in [Data locations](../data-locations/).
+Unless you tick that box, or remove a portable copy, your scans, snapshots and settings stay, so a later install picks them up again. To remove them by hand, delete the folders listed in [Data locations](../data-locations/). A folder set with `SPACEKNIFE_HOME` is never touched by the uninstaller.
 
 ## The command line
 

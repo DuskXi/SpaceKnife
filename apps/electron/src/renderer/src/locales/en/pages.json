@@ -199,5 +199,9 @@
  "高级": "Advanced",
  "（MFT 快速扫描）": " (MFT quick scan)",
  "（并行硬扫描）": " (parallel full scan)",
- "正在开始…": "Starting…"
+ "正在开始…": "Starting…",
+ "关于与更新": "About & updates",
+ "版本信息、更新与发布时间线": "Version, updates and the release timeline",
+ "关于": "About",
+ "版本信息、更新设置与发布时间线": "Version, update settings and the release timeline"
 }

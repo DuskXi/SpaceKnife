@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "8fc504ecec088392";
+export const SCHEMA_HASH = "5d838590ae5e79bf";
 
 export interface AgeCond {
   end: number;
@@ -1172,7 +1172,7 @@ export interface SettingChange {
 
 export interface SettingMeta {
   applies: "now" | "next_scan" | "new_views";
-  category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced";
+  category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about";
   control: "switch" | "segmented" | "number" | "slider" | "color" | "text";
   /** 'key' (a switch that must be on) or 'key=value' for this row to be editable */
   depends: string | null;
@@ -1227,7 +1227,7 @@ export interface SettingsImportResult {
 
 export interface SettingsResetParams {
   /** None resets every setting */
-  category?: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | null;
+  category?: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about" | null;
 }
 
 export interface SettingsState {
@@ -1453,6 +1453,11 @@ export interface UpdateInfo {
   version: string;
 }
 
+export interface UpdateReleases {
+  /** The recent releases, newest first (at most 30, notes at most 16 KiB each, no asset) */
+  releases: UpdateInfo[];
+}
+
 export interface UpdateStatus {
   channel: "stable" | "preview";
   /** Last successful check */
@@ -1472,6 +1477,8 @@ export interface UpdateStatus {
   latest: UpdateInfo | null;
   /** How far behind the newest release this app is */
   level: "none" | "patch" | "minor" | "major";
+  /** When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools) */
+  next_check_at: string | null;
 }
 
 export interface UpdateVersionParams {
@@ -1820,8 +1827,10 @@ export interface Methods {
   "update.check": { params: Empty; result: UpdateStatus };
   /** The card / dialog for this version was closed. */
   "update.dismiss": { params: UpdateVersionParams; result: UpdateStatus };
-  /** Download this version's file for this install into the download folder (progress: update.changed). */
+  /** Download this version's file for this install into the updates folder (progress: update.changed). */
   "update.download": { params: UpdateVersionParams; result: UpdateStatus };
+  /** The recent releases with their notes (the timeline of the About & updates page). */
+  "update.releases": { params: Empty; result: UpdateReleases };
   /** What the last update check found (updates.v1). */
   "update.status": { params: Empty; result: UpdateStatus };
   /** Back to the previous zoom root. */

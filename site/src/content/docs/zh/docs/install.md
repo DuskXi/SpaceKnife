@@ -58,7 +58,7 @@ shasum -a 256 SpaceKnife-<版本>-mac-arm64.dmg
 .\SpaceKnife-<版本>-Setup-x64.exe /S /currentuser
 ```
 
-装给整台电脑就把 `/currentuser` 换成 `/allusers`（以管理员身份运行）。静默卸载用注册表里 SpaceKnife 卸载项的 `QuietUninstallString`，也就是安装目录里的 `"Uninstall SpaceKnife.exe" /currentuser /S`。卸载程序会先把自己复制到临时目录再运行，所以命令会立即返回。
+装给整台电脑就把 `/currentuser` 换成 `/allusers`（以管理员身份运行）。静默卸载用注册表里 SpaceKnife 卸载项的 `QuietUninstallString`，也就是安装目录里的 `"Uninstall SpaceKnife.exe" /currentuser /S`。卸载程序会先把自己复制到临时目录再运行，所以命令会立即返回。静默卸载会保留快照、设置和日志；加上 `--delete-app-data` 就连它们一起删除。
 
 ### 便携版 zip
 
@@ -147,30 +147,30 @@ AppImage 和 tar.gz 里 Chromium 的 `chrome-sandbox` 没有 setuid。在限制�
 
 ## 升级
 
-SpaceKnife 每天最多检查一次新版本，有新版本时在标题栏提示；版本跨度大时还会显示更新概要，一键就能下载并校验新版本。具体怎么提示、怎么关掉，见[更新与隐私](../updates-privacy/)。
+SpaceKnife 每天最多检查一次新版本，有新版本时在标题栏提示，并在后台下载、校验新版本；Windows 安装版、便携版和 AppImage 点一下「重启并更新」就换上新版本并重新打开。具体怎么提示、怎么关掉，见[更新与隐私](../updates-privacy/)。
 
 不管用哪种方式升级，扫描、快照和设置都会保留：它们不在程序目录里（便携版则在 `data` 文件夹里）。
 
 | 安装方式 | 新版本怎么替换旧版本 |
 |---|---|
-| Windows 安装包 | 在更新卡片里点「安装」：SpaceKnife 退出，安装程序运行并替换旧版本。手动运行新的安装包也一样。 |
-| Windows / Linux 便携版 | 退出 SpaceKnife，解压新的压缩包，用新文件替换旧文件夹里的内容，但留下其中的 `data` 文件夹。 |
+| Windows 安装包 | 在更新卡片里点「重启并更新」：SpaceKnife 关闭，安装程序在后台替换旧版本，然后 SpaceKnife 自动重新打开。手动运行新的安装包也一样。 |
+| Windows / Linux 便携版 | 点「重启并更新」：程序文件换成新的，`data` 文件夹保留。手动升级：退出 SpaceKnife，解压新的压缩包，用新文件替换旧文件夹里的内容，但留下其中的 `data` 文件夹。 |
 | macOS dmg | 点「安装」：SpaceKnife 退出并打开磁盘映像，把 SpaceKnife 拖进「应用程序」替换旧版本。然后再放行一次，并把「完全磁盘访问权限」关掉再打开（见上文）。 |
 | deb / rpm | 点「安装」：SpaceKnife 退出，并用系统的软件安装器打开安装包。也可以照上面的方法用 `apt` 或 `dnf` 安装新包。 |
-| AppImage | 退出 SpaceKnife，用新的 AppImage 文件替换旧文件。 |
+| AppImage | 点「重启并更新」：新的 AppImage 替换旧文件。手动升级：退出 SpaceKnife，用新的 AppImage 文件替换旧文件。 |
 
 ## 卸载
 
 | 安装方式 | 怎么卸载 |
 |---|---|
-| Windows 安装包 | 在 Windows 设置的应用列表里卸载 SpaceKnife。 |
+| Windows 安装包 | 在 Windows 设置的应用列表里卸载 SpaceKnife。程序、界面缓存、缓存和下载的更新都会删除。卸载程序的第二页「你的数据」问其余的：勾上「同时删除快照、设置和日志」（默认不勾）就连 `%LOCALAPPDATA%\SpaceKnife` 一起删掉。 |
 | 便携版 | 删除整个文件夹，`data` 文件夹也一起删掉。 |
 | macOS | 退出 SpaceKnife，把它从「应用程序」移到废纸篓。 |
 | deb | `sudo apt remove spaceknife` |
 | rpm | `sudo dnf remove spaceknife` |
 | AppImage | 删除这个文件。 |
 
-除了便携版，卸载程序不会删除扫描、快照和设置，以后重新安装还能接着用。要连这些一起删掉，删除[数据位置](../data-locations/)里列出的文件夹。
+除非勾上那一项，或者删的是便携版，扫描、快照和设置都会保留，以后重新安装还能接着用。要手动删掉它们，删除[数据位置](../data-locations/)里列出的文件夹。用 `SPACEKNIFE_HOME` 指定的文件夹，卸载程序从不碰。
 
 ## 命令行
 

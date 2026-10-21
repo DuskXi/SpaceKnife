@@ -81,6 +81,7 @@ The gray text after a command name is its current status, worked out when the pa
 | Compare with snapshot… | How many snapshots this scan target has, like "3 snapshots" |
 | Export report… | "CSV · JSON · HTML" |
 | Check for updates | "Checking…", "… available" or "Current version …" |
+| About & updates | The version you run |
 | Coloring: …, Visualization: … | "Current" on the one in use |
 
 A command that can't run now is grayed out, its reason replaces the status, and <kbd>Enter</kbd> does nothing. The usual reasons:

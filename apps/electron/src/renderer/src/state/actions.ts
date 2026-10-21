@@ -66,6 +66,8 @@ export function cancellable<M extends MethodName>(method: M, params: Methods[M][
 export async function boot(): Promise<void> {
   window.sk.onBackend((st) => void onBackend(st));
   await onBackend(await window.sk.backend());
+  // started again by 「重启并更新」: say once that it worked (the details are in 「关于与更新」)
+  if (window.sk.justUpdated) toast(t("已更新到 SpaceKnife {version}", { version: window.sk.version }), 5000);
 }
 
 let backendGone = false; // exited / failed: stop reconnecting until a new backend is ready
@@ -800,11 +802,12 @@ export function toggleUpdateCard(): void {
   else set({ updateOpen: true });
 }
 
-/** 「一键下载」 / 「重试」: the file for this kind of install, into the download folder. */
+/** 「一键下载」 / 「重试」: the file for this kind of install, into the backend's updates folder. */
 export const downloadUpdate = (version: string) => updateCall("update.download", { version });
 export const cancelUpdate = () => updateCall("update.cancel", {});
 
-/** 「安装」: start the downloaded installer, disk image or package; the app quits when it started. */
+/** 「重启并更新」 / 「安装」: main puts the downloaded version in place (main/update.ts restartMode); the
+ * app quits once that has started, else the reason is shown. */
 export async function installUpdate(path: string): Promise<void> {
   const reason = await window.sk.update.install(path);
   if (reason) toast(reason);

@@ -176,6 +176,8 @@ export async function runCommand(id: string): Promise<void> {
       return checkUpdates();
     case "app.show_update":
       return showUpdate();
+    case "app.about":
+      return openSettingsTab("about");
     case "nav.back":
       await viewCall(viewId, "view.back");
       return;

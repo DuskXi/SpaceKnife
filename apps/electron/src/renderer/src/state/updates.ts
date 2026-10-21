@@ -8,6 +8,7 @@
 // card under it. Closing the card or the dialog (update.dismiss) keeps them closed for that version.
 
 import type { UpdateDownload, UpdateInfo, UpdateStatus } from "@/protocol/generated";
+import { t } from "@/lib/i18n";
 
 export type InstallKind = UpdateStatus["install_kind"];
 
@@ -52,10 +53,49 @@ export function downloadPct(d: UpdateDownload): number | null {
 /** The download runs (checking the file included): the badge fills up, the card shows the progress. */
 export const downloading = (d: UpdateDownload): boolean => d.state === "downloading" || d.state === "verifying";
 
-/** After the download: start it (an installer, a disk image, a package; the app quits) or show it in
- * its folder (a portable archive or an AppImage the user puts in place of the old one). */
-export function installAction(kind: InstallKind): "install" | "reveal" {
-  return kind === "nsis" || kind === "dmg" || kind === "deb" || kind === "rpm" ? "install" : "reveal";
+/** After the download: 「重启并更新」 (the Windows installer runs silently, a portable copy or an AppImage
+ * is replaced, and SpaceKnife starts again: main/update.ts restartMode), 「安装」 (a disk image or a
+ * package opens in the system's installer and SpaceKnife quits), or only the release page (a run
+ * from source). */
+export function finishAction(kind: InstallKind): "restart" | "install" | "page" {
+  if (kind === "nsis" || kind === "portable" || kind === "appimage") return "restart";
+  if (kind === "dmg" || kind === "deb" || kind === "rpm") return "install";
+  return "page";
+}
+
+/** How this copy was installed, in words (「关于与更新」). */
+export function installKindName(kind: InstallKind): string {
+  switch (kind) {
+    case "nsis":
+      return t("Windows 安装版");
+    case "portable":
+      return t("便携版");
+    case "appimage":
+      return "AppImage";
+    case "deb":
+      return t("deb 安装包");
+    case "rpm":
+      return t("rpm 安装包");
+    case "dmg":
+      return "macOS";
+    case "dev":
+      return t("源码运行");
+    default:
+      return t("未知");
+  }
+}
+
+/** The part of a release's notes in the interface language: the notes are English first, then a
+ * "## 简体中文" section (docs/packaging.md). The language switch at the top goes, it links within
+ * the release page; notes without the Chinese section are shown whole. */
+export function notesFor(md: string, lang: "zh-CN" | "en"): string {
+  const lines = md.split(/\r\n?|\n/);
+  const zh = lines.findIndex((line) => /^##\s+简体中文\s*$/.test(line.trim())); // i18n-ignore: a heading of the notes
+  let part = lines;
+  if (zh >= 0) part = lang === "zh-CN" ? lines.slice(zh + 1) : lines.slice(0, zh);
+  const kept = part.filter((line) => !/^\*\*English\*\*\s·/.test(line.trim()));
+  while (kept.length && /^\s*(-{3,}|\*{3,})?\s*$/.test(kept[kept.length - 1]!)) kept.pop(); // the rule before 简体中文
+  return kept.join("\n").trim();
 }
 
 /** YYYY-MM-DD of a release in local time; "" when unknown. */

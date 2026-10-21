@@ -15,9 +15,11 @@ const TEXT = {
   backendExited: { "zh-CN": "后端启动失败（退出码 {code}）", en: "The backend failed to start (exit code {code})." },
   updateNoInstall: { "zh-CN": "这份 SpaceKnife 的安装方式没有安装步骤", en: "This copy of SpaceKnife has no install step for updates." },
   updateMissing: { "zh-CN": "找不到下载的更新文件", en: "The downloaded update file wasn't found." },
-  updateNotInDownloads: { "zh-CN": "更新文件不在下载文件夹里", en: "The update file isn't in the download folder." },
+  updateNotInUpdates: { "zh-CN": "更新文件不在 SpaceKnife 的更新文件夹里", en: "The update file isn't in SpaceKnife's updates folder." },
   updateNotAnUpdate: { "zh-CN": "这不是这种安装方式的 SpaceKnife 更新文件", en: "This isn't a SpaceKnife update for this kind of install." },
   updateStartFailed: { "zh-CN": "无法启动更新：{error}", en: "Can't start the update: {error}" },
+  updateUnpackFailed: { "zh-CN": "无法解压更新：{error}", en: "Can't unpack the update: {error}" },
+  updateReplaceFailed: { "zh-CN": "无法替换旧版本：{error}", en: "Can't replace the old version: {error}" },
 } as const;
 
 export type TextKey = keyof typeof TEXT;

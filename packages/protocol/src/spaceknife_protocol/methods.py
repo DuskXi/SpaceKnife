@@ -98,7 +98,7 @@ from .streams import (
     UnsubscribeParams,
 )
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
-from .update import UpdateChangedEvent, UpdateStatus, UpdateVersionParams
+from .update import UpdateChangedEvent, UpdateReleases, UpdateStatus, UpdateVersionParams
 from .view import (
     ViewFilterParams,
     ViewFrameEvent,
@@ -432,9 +432,15 @@ UPDATE_DOWNLOAD = MethodSpec(
     "update.download",
     UpdateVersionParams,
     UpdateStatus,
-    "Download this version's file for this install into the download folder (progress: update.changed).",
+    "Download this version's file for this install into the updates folder (progress: update.changed).",
 )
 UPDATE_CANCEL = MethodSpec("update.cancel", Empty, UpdateStatus, "Stop a running download.")
+UPDATE_RELEASES = MethodSpec(
+    "update.releases",
+    Empty,
+    UpdateReleases,
+    "The recent releases with their notes (the timeline of the About & updates page).",
+)
 EVENT_UPDATE = EventSpec(
     "update.changed",
     UpdateChangedEvent,
@@ -450,6 +456,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         UPDATE_CHECK,
         UPDATE_DISMISS,
         UPDATE_DOWNLOAD,
+        UPDATE_RELEASES,
         UPDATE_CANCEL,
         SYSTEM_PING,
         APP_SHUTDOWN,

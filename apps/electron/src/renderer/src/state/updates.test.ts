@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { UpdateDownload, UpdateInfo, UpdateStatus } from "@/protocol/generated";
 
-import { autoSurface, downloadOf, downloadPct, hasUpdate, installAction, type InstallKind, plainInline, releaseDate, summarizeNotes, visibleSurface } from "./updates";
+import { autoSurface, downloadOf, downloadPct, finishAction, hasUpdate, type InstallKind, notesFor, plainInline, releaseDate, summarizeNotes, visibleSurface } from "./updates";
 
 const info = (patch: Partial<UpdateInfo> = {}): UpdateInfo => ({
   version: "0.4.0",
@@ -28,6 +28,7 @@ const dl = (patch: Partial<UpdateDownload> = {}): UpdateDownload => ({
 });
 
 const status = (patch: Partial<UpdateStatus> = {}): UpdateStatus => ({
+  next_check_at: null,
   current: "0.3.0",
   install_kind: "nsis",
   enabled: true,
@@ -90,8 +91,9 @@ describe("download", () => {
   });
 
   it("starts installers, disk images and packages; shows portable copies in their folder", () => {
-    expect(["nsis", "dmg", "deb", "rpm"].map((k) => installAction(k as InstallKind))).toEqual(["install", "install", "install", "install"]);
-    expect(["portable", "appimage", "dev", "unknown"].map((k) => installAction(k as InstallKind))).toEqual(["reveal", "reveal", "reveal", "reveal"]);
+    expect(["nsis", "portable", "appimage"].map((k) => finishAction(k as InstallKind))).toEqual(["restart", "restart", "restart"]);
+    expect(["dmg", "deb", "rpm"].map((k) => finishAction(k as InstallKind))).toEqual(["install", "install", "install"]);
+    expect(["dev", "unknown"].map((k) => finishAction(k as InstallKind))).toEqual(["page", "page"]);
   });
 });
 
@@ -201,3 +203,32 @@ describe("summarizeNotes", () => {
     ]);
   });
 });
+
+describe("notesFor", () => {
+  const notes = [
+    "**English** · [简体中文](#简体中文) · [Website](https://spaceknife.kaltsit.dev/)",
+    "",
+    "## SpaceKnife 0.4.0 (pre-release)",
+    "",
+    "### What's new",
+    "",
+    "- Help inside the app",
+    "",
+    "---",
+    "",
+    "## 简体中文",
+    "",
+    "### 新功能",
+    "",
+    "- 软件内帮助",
+  ].join("\n");
+  it("keeps the part in the interface language, without the language switch", () => {
+    expect(notesFor(notes, "en")).toBe("## SpaceKnife 0.4.0 (pre-release)\n\n### What's new\n\n- Help inside the app");
+    expect(notesFor(notes, "zh-CN")).toBe("### 新功能\n\n- 软件内帮助");
+  });
+  it("shows notes of one language whole", () => {
+    expect(notesFor("- Fixed a crash\r\n- Faster", "zh-CN")).toBe("- Fixed a crash\n- Faster");
+    expect(notesFor("", "en")).toBe("");
+  });
+});
+

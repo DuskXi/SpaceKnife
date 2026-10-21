@@ -11,6 +11,7 @@ import { fmtKeys } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
+import { AboutEntry, AboutHeader, ComponentsGroup, ReleaseTimeline } from "./AboutPage";
 import { AdvancedTools, ClearTags } from "./AdvancedTools";
 import { ClassesEditor } from "./ClassesEditor";
 
@@ -99,11 +100,21 @@ export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName;
       return t("设置文件、日志、缓存与快照");
     },
   },
+  {
+    id: "about",
+    get name() {
+      return t("关于与更新");
+    },
+    icon: "info",
+    get note() {
+      return t("版本信息、更新与发布时间线");
+    },
+  },
 ];
 const GROUPS: SettingsPageId[][] = [
   ["general", "appearance", "treemap"],
   ["scan", "classes", "tags"],
-  ["keys", "advanced"],
+  ["keys", "advanced", "about"],
 ];
 const pageName = (id: string) => PAGES.find((p) => p.id === id)?.name ?? id;
 
@@ -183,6 +194,7 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
         <h1>{p.name}</h1>
         <p className="muted">{p.note}</p>
       </header>
+      {p.id === "about" && <AboutHeader />}
       {p.id === "classes" && <ClassesEditor />}
       {p.id === "keys" && <KeysPage rows={rows} />}
       {p.id !== "keys" && (
@@ -193,8 +205,11 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
           {p.id === "tags" && <ClearTags />}
           {p.id === "advanced" && <AdvancedTools />}
           {p.id === "advanced" && <FilesGroup />}
+          {p.id === "about" && <ComponentsGroup />}
+          {p.id === "general" && <AboutEntry />}
         </div>
       )}
+      {p.id === "about" && <ReleaseTimeline />}
     </>
   );
 }

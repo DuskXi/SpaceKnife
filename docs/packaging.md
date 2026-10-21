@@ -63,9 +63,16 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 ## 4. 安装包
 
-**Windows（NSIS）**：引导式安装（不是一键安装），可选「仅当前用户」（默认，不需要管理员）或「所有用户」，可改安装目录；开始菜单与桌面快捷方式；安装向导跟随系统语言（中文 / 英文）；卸载时保留扫描、快照与设置。没有代码签名证书：第一次运行时 SmartScreen 会提示「未知发布者」。
+**Windows（NSIS）**：引导式安装（不是一键安装），可选「仅当前用户」（默认，不需要管理员）或「所有用户」，可改安装目录；开始菜单与桌面快捷方式；安装向导跟随系统语言（中文 / 英文）；卸载时默认保留扫描、快照与设置（卸载程序第二页「你的数据」可以勾选一起删除）。没有代码签名证书：第一次运行时 SmartScreen 会提示「未知发布者」。
 
 静默安装与卸载（命令行部署、测试）：`SpaceKnife-<版本>-Setup-x64.exe /S /currentuser`（或 `/allusers`，需要管理员）；卸载用注册表卸载项里的 `QuietUninstallString`（`"Uninstall SpaceKnife.exe" /currentuser /S`），卸载程序会复制到临时目录再运行，命令本身立即返回。electron-builder 的安装程序总会把自己复制一份到 `%LOCALAPPDATA%\spaceknife-electron-updater`（给 electron-updater 用，135 MB），卸载时也不删；SpaceKnife 不用 electron-updater（它自己的更新检查见下文），[build/installer.nsh](../apps/electron/build/installer.nsh) 在安装完和卸载时把它删掉。
+
+卸载时的清理（installer.nsh 的 `customUnInstall`，按卸载的那个用户的目录，所有用户安装也一样）：
+
+- 总是删除：界面配置 `%APPDATA%\SpaceKnife\electron`（以及 0.3.0 以前的 `%APPDATA%\spaceknife-electron`）、后端缓存 `%LOCALAPPDATA%\SpaceKnife\Cache`、下载的更新 `%LOCALAPPDATA%\SpaceKnife\updates`；`%APPDATA%\SpaceKnife` 空了就一起删掉。
+- 快照、设置和日志（`%LOCALAPPDATA%\SpaceKnife` 的其余部分）只在勾选「同时删除快照、设置和日志」时删除，默认不勾；静默卸载加 `--delete-app-data` 也会删除。`SPACEKNIFE_HOME` 指定的目录从不碰。
+- 升级时（新安装程序带 `--updated` 运行旧版本的卸载程序）什么都不删，第二页也不显示。
+- installer.nsh 要带 UTF-8 BOM，否则 NSIS 读错其中的中文。它被包含在 MUI2.nsh 之前，所以卸载页面的函数定义写在 `customUnWelcomePage` 宏里。
 
 **Linux**：
 
@@ -105,10 +112,16 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 **更新检查**（`spaceknife.update`，协议 `update.*`，界面在 `shell/UpdateBadge.tsx` / `UpdateCard.tsx`）：
 
-- 后端每天最多一次读取 `https://api.github.com/repos/DuskXi/SpaceKnife/releases`（启动约 1 分钟后第一次；带 ETag，没变化时 GitHub 回 304；失败 6 小时后再试），不带令牌，只发 `User-Agent: SpaceKnife/<版本>`。设置「常规 › 更新」可以关掉，或改成「只要正式版」（默认包括 GitHub 上标为预发布的版本）。命令面板「检查更新」随时检查。
+- 后端每天最多一次读取 `https://api.github.com/repos/DuskXi/SpaceKnife/releases`（启动约 1 分钟后第一次；带 ETag，没变化时 GitHub 回 304；失败 6 小时后再试），不带令牌，只发 `User-Agent: SpaceKnife/<版本>`。设置「关于与更新 › 更新」可以关掉，或改成「只要正式版」（默认包括 GitHub 上标为预发布的版本）。命令面板「检查更新」随时检查；「关于与更新」页（`pages/AboutPage.tsx`）显示版本、组件版本和最近 30 个发布的时间线（`update.releases`）。
 - 和正在运行的版本比较：只差修订号时只在标题栏右侧显示徽章；次版本号不同时左上角挂一张卡片（发布说明的概要、前往发布页、一键下载）；主版本号不同时在窗口内弹对话框。关掉卡片或对话框后这个版本不再自动弹出，徽章保留。
-- Electron 主进程把运行版本、安装方式和下载文件夹告诉后端：`SPACEKNIFE_APP_VERSION`、`SPACEKNIFE_INSTALL_KIND`（nsis / portable / appimage / deb / rpm / dmg / dev）、`SPACEKNIFE_DOWNLOAD_DIR`。演示和测试可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
-- 一键下载按安装方式挑发布文件，存进系统的「下载」文件夹，并用同一个发布里的 `SHA256SUMS*.txt` 校验，不符就删掉。之后「安装」：NSIS 安装包直接运行，SpaceKnife 退出，安装程序替换旧版本、保留数据（2026-10-20 在 Windows 11 上实测过从 0.3.0 升级）；dmg 打开（用户把新版拖进「应用程序」）、deb / rpm 交给系统的软件安装器，SpaceKnife 随即退出；便携版和 AppImage 只在文件夹中显示，由用户替换。主进程只启动下载文件夹里、按本次安装方式的发布文件命名的文件。
+- Electron 主进程把运行版本和安装方式告诉后端：`SPACEKNIFE_APP_VERSION`、`SPACEKNIFE_INSTALL_KIND`（nsis / portable / appimage / deb / rpm / dmg / dev）。后端在就绪行里报回 `updates_dir`（数据目录的 `updates`），主进程只认这个文件夹里的更新文件。演示和测试可以用 `SPACEKNIFE_UPDATE_FEED` 指向本机（只接受回环地址）的一份发布列表。
+- 下载（「自动下载更新」开启时检查之后自动开始，否则点「一键下载」）按安装方式挑发布文件，存进 `updates` 文件夹，并用同一个发布里的 `SHA256SUMS*.txt` 校验，不符就删掉。之后按安装方式（`main/update.ts` 的 `restartMode`）：
+  - **NSIS**（「重启并更新」）：主进程先停掉后端，再以 `--updated /S --force-run` 加 `/allusers` 或 `/currentuser`（按安装目录在 Program Files 还是 `%LOCALAPPDATA%` 下）运行新安装程序，然后退出。安装程序从注册表读出原来的安装目录，所有用户安装时自己请求提权，杀掉残留的 SpaceKnife 进程，以 `/S /KEEP_APP_DATA --updated` 运行旧版本的卸载程序，装好后（`--force-run`）启动新版本。
+  - **便携版**（「重启并更新」）：主进程把压缩包解到 `updates/staging-<版本>`（Windows 用 tar.exe，没有时用 Expand-Archive；Linux 用 tar），确认里面唯一的顶层文件夹带着可执行文件，再写出 `update-<版本>.ps1`（PowerShell，隐藏窗口）或 `.sh`，启动它后退出。脚本等旧进程结束，把程序目录里除 `data` 以外的条目移到 `updates/previous-<旧版本>`（文件被占用时重试 60 次），再把新条目移进来；任何一步失败就把旧条目移回原处。最后带 `--updated` 启动程序，过程写进 `update-<版本>.log`。
+  - **AppImage**（「重启并更新」）：复制成 `$APPIMAGE.new`、设为 755，再改名覆盖 `$APPIMAGE`（同一文件系统内的原子替换），然后启动它。
+  - **dmg / deb / rpm**（「安装」）：交给系统打开（用户把新版拖进「应用程序」，或由软件安装器安装），SpaceKnife 随即退出。
+  - 新版本带 `--updated` 启动时，预加载脚本拿到 `justUpdated`，界面提示一次「已更新到 SpaceKnife <版本>」。下一次启动后端清理 `updates`，旧安装包、`staging`、`previous` 都会删掉。
+  - 主进程只启动 `updates` 文件夹里、按本次安装方式的发布文件命名的文件（`installRefusal`）。
 - **发布时的约定**：更新检查靠文件名找文件。发布文件必须沿用下面的名字，并附上对应的校验和文件：
   - `SpaceKnife-<版本>-Setup-x64.exe`、`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-x86_64.AppImage`、`spaceknife_<版本>_amd64.deb`、`spaceknife-<版本>.x86_64.rpm`、`SpaceKnife-<版本>-mac-arm64.dmg`、`SpaceKnife-<版本>-mac-x64.dmg`；
   - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`、`SHA256SUMS-mac-<架构>.txt`；
@@ -134,6 +147,11 @@ uv run python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe
 ```
 
 [packaging/smoke_app.py](../packaging/smoke_app.py) 用临时目录作为 `SPACEKNIFE_HOME`、最小化启动应用（不抢焦点），打开 DevTools 端口：等打包的后端就绪、启动页列出卷，再像用户一样关窗口，确认应用和后端都退出。参数也可以是 `linux-unpacked/spaceknife` 或 AppImage。
+
+[packaging/update_e2e.py](../packaging/update_e2e.py) 是「重启并更新」和卸载清理的端到端测试，只在 GitHub Actions 上跑（`Portable build` 工作流；它会在当前用户的目录里安装、更新、卸载，所以在别处拒绝运行）。它在 127.0.0.1 上提供一份发布列表（`SPACEKNIFE_UPDATE_FEED`），把这次构建当作下一个修订版，通过 DevTools 端口等徽章变成「可以更新」，再像用户一样点徽章和「重启并更新」：
+
+- 便携版（Windows、Linux）：程序文件换成新的（新包里多一个标记文件），`data` 原样保留，应用带 `--updated` 回来，新后端清掉 `previous-<旧版本>`。
+- Windows 安装版：先装最新发布的安装包，用应用的那组参数（`--updated /S --force-run /currentuser`）升级到这次构建；再从应用里「重启并更新」；然后检查静默卸载（保留快照、设置和日志，删掉界面配置、缓存、下载的更新和 electron-updater 的缓存）、勾选「同时删除快照、设置和日志」的卸载（通过 Win32 消息操作卸载程序的页面，确认默认不勾、页面写出数据位置），以及 `--delete-app-data`。
 
 已验证（2026-10-18）：Windows 11 上安装包本身（静默「仅当前用户」安装 → 安装后的应用与后端冒烟 → 静默卸载；卸载后注册表卸载项、`HKCU\Software` 下的键、开始菜单与桌面快捷方式、安装目录都和安装前一致，用户数据不变）和 `win-unpacked`；WSL（Ubuntu 22.04，WSLg）上 `linux-unpacked` 与 AppImage；deb / rpm 的元数据、依赖、desktop 文件与图标。还没做：在干净的 Windows 10、RHEL 9、Ubuntu 22.04 上安装测试（见 TODO）；deb / rpm 只检查了内容，没有实际安装。
 

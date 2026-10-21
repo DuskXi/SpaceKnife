@@ -283,6 +283,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 帮助 | <kbd>F1</kbd> | `help` · `docs` · `documentation` · `manual` · `guide` | — |
 | 检查更新 | — | `check for updates` · `update` · `upgrade` · `new version` | — |
 | 查看更新 | — | `update` · `release notes` · `what's new` · `download update` | — |
+| 关于与更新 | — | `about` · `version` · `release notes` · `changelog` · `timeline` | — |
 
 ### 只按名称列出的命令
 

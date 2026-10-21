@@ -17,6 +17,8 @@ export function installShim(): void {
   window.sk = {
     platform,
     version: "0.3.2-web",
+    justUpdated: params.get("updated") === "1", // demos: show the 「已更新」 note
+    versions: { electron: "", chrome: "", node: "" },
     backend: async () => state,
     onBackend: () => noop,
     window: {

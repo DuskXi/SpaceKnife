@@ -164,9 +164,10 @@ def _registry() -> tuple[Spec, ...]:
             synonyms=("log", "denied", "warning"),
             kind=bool,
         ),
+        # ------------------------------------------------------------ 关于与更新 (the keys stay general.*)
         S(
             "general.update_check",
-            "general",
+            "about",
             "更新",
             "自动检查更新",
             "每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示",
@@ -176,8 +177,20 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "general.update_download",
+            "about",
+            "更新",
+            "自动下载更新",
+            "发现新版本后在后台下载并校验；下载好后点「重启并更新」才会安装，不会自己安装",
+            "switch",
+            True,
+            depends="general.update_check",
+            synonyms=("update", "download", "auto", "下载"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
             "general.update_channel",
-            "general",
+            "about",
             "更新",
             "提示哪些版本",
             "预览版是 GitHub 上标为预发布（Pre-release）的版本",

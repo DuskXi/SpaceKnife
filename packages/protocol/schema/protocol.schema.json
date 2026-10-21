@@ -5330,7 +5330,8 @@
             "classes",
             "tags",
             "keys",
-            "advanced"
+            "advanced",
+            "about"
           ],
           "title": "Category",
           "type": "string"
@@ -5616,7 +5617,8 @@
                 "classes",
                 "tags",
                 "keys",
-                "advanced"
+                "advanced",
+                "about"
               ],
               "type": "string"
             },
@@ -6688,6 +6690,23 @@
       "title": "UpdateInfo",
       "type": "object"
     },
+    "UpdateReleases": {
+      "properties": {
+        "releases": {
+          "description": "The recent releases, newest first (at most 30, notes at most 16 KiB each, no asset)",
+          "items": {
+            "$ref": "#/$defs/UpdateInfo"
+          },
+          "title": "Releases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "releases"
+      ],
+      "title": "UpdateReleases",
+      "type": "object"
+    },
     "UpdateStatus": {
       "properties": {
         "channel": {
@@ -6786,6 +6805,20 @@
           ],
           "title": "Level",
           "type": "string"
+        },
+        "next_check_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools)",
+          "title": "Next Check At"
         }
       },
       "required": [
@@ -8282,10 +8315,16 @@
       "result": "#/$defs/UpdateStatus"
     },
     "update.download": {
-      "doc": "Download this version's file for this install into the download folder (progress: update.changed).",
+      "doc": "Download this version's file for this install into the updates folder (progress: update.changed).",
       "params": "#/$defs/UpdateVersionParams",
       "requiresSession": true,
       "result": "#/$defs/UpdateStatus"
+    },
+    "update.releases": {
+      "doc": "The recent releases with their notes (the timeline of the About & updates page).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateReleases"
     },
     "update.status": {
       "doc": "What the last update check found (updates.v1).",

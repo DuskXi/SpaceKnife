@@ -31,11 +31,12 @@ export function UpdateBadge() {
   const d = downloadOf(status);
   const busy = downloading(d);
   const pct = downloadPct(d);
-  const label = busy ? (pct === null ? t("下载中") : `${pct}%`) : t("更新 {version}", { version });
+  const ready = d.state === "done";
+  const label = busy ? (pct === null ? t("下载中") : `${pct}%`) : ready ? t("可以更新") : t("更新 {version}", { version });
   const tip = busy
     ? t("正在下载 SpaceKnife {version}", { version })
-    : d.state === "done"
-      ? t("SpaceKnife {version} 已下载", { version })
+    : ready
+      ? t("SpaceKnife {version} 已下载并校验，点开后可以重启并更新", { version })
       : d.state === "failed"
         ? t("更新下载失败：{error}", { error: d.error ?? "" })
         : t("SpaceKnife {version} 可用（你在用 {current}）", { version, current: status.current });
@@ -52,7 +53,7 @@ export function UpdateBadge() {
     >
       <button
         ref={badge}
-        className={`update-badge${open ? " on" : ""}${busy ? " busy" : ""}`}
+        className={`update-badge${open ? " on" : ""}${busy ? " busy" : ""}${ready ? " ready" : ""}`}
         aria-label={tip}
         title={tip}
         aria-haspopup="dialog"

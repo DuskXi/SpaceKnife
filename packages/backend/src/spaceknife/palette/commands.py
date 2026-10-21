@@ -393,6 +393,15 @@ def _registry() -> tuple[Command, ...]:
             needs=(_update,),
             status=lambda c: c.update_version,
         ),
+        # the settings page with the version, the update settings and the release timeline
+        C(
+            "app.about",
+            "关于与更新",
+            "info",
+            (),
+            ("about", "version", "release notes", "changelog", "timeline"),
+            status=lambda c: c.app_version,
+        ),
         C(
             "view.color.class",
             "配色：文件类别",

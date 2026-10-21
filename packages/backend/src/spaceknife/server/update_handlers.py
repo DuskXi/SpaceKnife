@@ -11,6 +11,11 @@ interval; a failed check is tried again after :data:`update.RETRY_INTERVAL`. Swi
 on or changing the channel checks right away (an unchanged list costs nothing: ETag). ``update.check``
 always checks, also with the setting off.
 
+In the real app (:meth:`UpdateService.start`) the service also cleans the ``updates`` folder once at
+start, and with 「自动下载更新」 on it downloads a newer release's file by itself (after a check, and at
+start when one is already known); the front end then offers 「重启并更新」. Tests and demos without
+the scheduler never download by themselves.
+
 The network calls run in daemon threads (:func:`in_thread`): one stuck on a slow connection never
 holds up the backend's exit, and its partial download is deleted once it notices the cancel.
 """
@@ -23,7 +28,7 @@ import functools
 import os
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -38,12 +43,14 @@ from spaceknife_protocol.methods import (
     UPDATE_CHECK,
     UPDATE_DISMISS,
     UPDATE_DOWNLOAD,
+    UPDATE_RELEASES,
     UPDATE_STATUS,
 )
 from spaceknife_protocol.update import (
     UpdateChangedEvent,
     UpdateChannel,
     UpdateDownload,
+    UpdateReleases,
     UpdateStatus,
     UpdateVersionParams,
 )
@@ -124,6 +131,8 @@ class UpdateService:
         self._cancel = threading.Event()
         self._run = 0  # the download whose progress counts (a cancelled one stops reporting)
         self._sums: dict[tuple[str, str], str | None] = {}  # (version, file) -> published SHA-256
+        self.auto = False  # downloads by itself (「自动下载更新」): the real app only (start)
+        self.updates_dir: Path = update.updates_dir()
 
     # ------------------------------------------------------------- state
 
@@ -132,11 +141,15 @@ class UpdateService:
         return bool(self.server.settings.get("general.update_check"))
 
     @property
+    def auto_download(self) -> bool:
+        return bool(self.server.settings.get("general.update_download"))
+
+    @property
     def channel(self) -> UpdateChannel:
         return "stable" if self.server.settings.get("general.update_channel") == "stable" else "preview"
 
-    def _settings_key(self) -> tuple[bool, str, str]:
-        return self.enabled, self.channel, i18n.language()
+    def _settings_key(self) -> tuple[bool, str, str, bool]:
+        return self.enabled, self.channel, i18n.language(), self.auto_download
 
     def current(self) -> str | None:
         """The running app's version: the launcher's, else what the first session that announced
@@ -170,6 +183,7 @@ class UpdateService:
         if self._download_error is not None:
             download = download.model_copy(update={"error": str(self._download_error)})
         current = self.current()
+        due = self.due_in() if self.auto else None  # tests and demos check only when asked
         return UpdateStatus(
             current=current or "",
             install_kind=self.kind,
@@ -182,7 +196,12 @@ class UpdateService:
             latest=latest,
             dismissed=latest is not None and latest.version in self.state.dismissed,
             download=download,
+            next_check_at=self.clock() + timedelta(seconds=due) if due is not None else None,
         )
+
+    def releases(self) -> UpdateReleases:
+        """The cached releases, newest first, for the timeline (no asset: nothing to download there)."""
+        return UpdateReleases(releases=[update.to_info(r, None) for r in self.state.releases])
 
     def broadcast(self) -> None:
         """``update.changed`` to every session that announced ``updates.v1``."""
@@ -211,12 +230,16 @@ class UpdateService:
         await asyncio.shield(self._check)
         return self.status()
 
+    def _cached_etag(self) -> str | None:
+        """The ETag to send: only for a cache trimmed as this version trims it, else the whole list
+        comes again (an unchanged list would answer 304 and keep a shorter timeline)."""
+        st = self.state
+        return st.etag if st.releases and st.kept == update.HISTORY_KEEP else None
+
     async def _run_check(self) -> None:
         st = self.state
         try:
-            fetch = functools.partial(
-                self.fetch, self.feed, st.etag if st.releases else None, self.user_agent()
-            )
+            fetch = functools.partial(self.fetch, self.feed, self._cached_etag(), self.user_agent())
             got = await in_thread(fetch, "update-check")
         except update.UpdateError as exc:
             self._error, st.failed_at = exc, self.clock()
@@ -227,6 +250,7 @@ class UpdateService:
         else:
             if got.releases is not None:
                 st.releases, st.etag = update.trim(got.releases), got.etag
+                st.kept = update.HISTORY_KEEP
             st.checked_at, st.failed_at, self._error = self.clock(), None, None
         finally:
             self._check = None
@@ -239,6 +263,24 @@ class UpdateService:
             self._download, self._download_error = UpdateDownload(), None  # another release now
         await self._save()
         self.broadcast()
+        await self.auto_fetch()
+
+    async def auto_fetch(self) -> None:
+        """「自动下载更新」: start downloading a newer release's file, unless it is running, done or
+        failed for that version already (a failed one waits for the next check or a click)."""
+        if not (self.auto and self.auto_download):
+            return
+        found = self.newer()
+        if found is None or found[1] is None:
+            return
+        version = found[0].version
+        d = self._download
+        if d.version == version and d.state in ("downloading", "verifying", "done", "failed"):
+            return
+        try:
+            await self.download(version)
+        except RpcError as exc:  # the list changed meanwhile
+            logger.info("no automatic download of {}: {}", version, exc)
 
     async def dismiss(self, version: str) -> UpdateStatus:
         """The card / dialog of ``version`` was closed: not shown again for it (the badge stays)."""
@@ -307,7 +349,7 @@ class UpdateService:
                 loop.call_soon_threadsafe(self._progress, run, state, received, total)
 
         version = release.version
-        dest = update.download_dir() / asset.name
+        dest = self.updates_dir / asset.name
         error: update.UpdateError | None = None
         try:
             key = (version, asset.name)
@@ -375,12 +417,24 @@ class UpdateService:
         self._wake.set()
 
     def start(self) -> None:
-        """Start the automatic checks (:class:`Server` once listening, the real app only)."""
+        """Start the automatic checks, the cleaning of the updates folder and the automatic downloads
+        (:class:`Server` once listening, the real app only)."""
+        self.auto = True
         if self._scheduler is None:
             self._scheduler = asyncio.get_running_loop().create_task(self._schedule(), name="update-schedule")
 
     async def _schedule(self) -> None:
+        current = self.current()
+        try:
+            clean = functools.partial(update.clean_updates, self.updates_dir, current)
+            removed = await in_thread(clean, "update-clean")
+        except Exception:
+            logger.exception("could not clean the updates folder")
+        else:
+            if removed:
+                logger.info("removed from {}: {}", self.updates_dir, ", ".join(removed))
         await asyncio.sleep(self.first_delay)
+        await self.auto_fetch()  # a newer release known from an earlier check: its file, if not there yet
         while True:
             force, self._force = self._force, False
             try:
@@ -405,6 +459,9 @@ class UpdateService:
         enabled, channel = key[0], key[1]
         self.wake(force=enabled and (not before[0] or channel != before[1]))
         self.broadcast()
+        if key[3] and not before[3] and self.auto:  # 「自动下载更新」 switched on
+            with contextlib.suppress(RuntimeError):  # no running loop (a listener called from a thread)
+                asyncio.get_running_loop().create_task(self.auto_fetch(), name="update-auto-fetch")
 
     async def close(self) -> None:
         self._cancel.set()
@@ -438,6 +495,10 @@ def install(server: Server) -> None:
     @router.method(UPDATE_DOWNLOAD)
     async def update_download(session: Session, params: UpdateVersionParams) -> UpdateStatus:
         return await service.download(params.version)
+
+    @router.method(UPDATE_RELEASES)
+    async def update_releases(session: Session, _: Empty) -> UpdateReleases:
+        return service.releases()
 
     @router.method(UPDATE_CANCEL)
     async def update_cancel(session: Session, _: Empty) -> UpdateStatus:

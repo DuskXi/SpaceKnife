@@ -24,7 +24,7 @@ Areas where a security problem matters most:
 - **File operations**: the delete basket, the recycle bin and the protected system and program folders; a request to move something to the recycle bin must never delete it permanently.
 - **Installers and updates**: the installers are not code-signed yet; verify downloads against the `SHA256SUMS.txt` attached to each release. The in-app update download checks the file against those sums itself and only starts files named like this project's release files.
 
-SpaceKnife sends no telemetry. Its only network requests of its own are the update check — at most once a day it reads this project's release list from `api.github.com`, sending nothing about you or your files — and, when you click to download an update, the release file from `github.com`. Switch the check off in Settings › General › Updates.
+SpaceKnife sends no telemetry. Its only network requests of its own are the update check — at most once a day it reads this project's release list from `api.github.com`, sending nothing about you or your files — and, when a newer version is found (or you click to download it), the release file and its checksums from `github.com`. Switch the check off in Settings › About & updates.
 
 ---
 
@@ -50,4 +50,4 @@ SpaceKnife 目前是预发布版。安全修复只进入最新版本，报告前
 - **文件操作**：删除篮、回收站，以及受保护的系统和程序目录；「移到回收站」的请求绝不能变成永久删除。
 - **安装包与更新**：目前还没有代码签名，请用每个版本附带的 `SHA256SUMS.txt` 校验下载的文件。应用内的更新下载会自己按这份校验和核对文件，并且只启动按本项目发布文件命名的文件。
 
-SpaceKnife 没有遥测。它自己发起的网络请求只有两种：检查更新（每天最多一次，从 `api.github.com` 读取本项目的发布列表，不发送任何关于你或你的文件的信息），以及你点击下载更新时从 `github.com` 下载发布文件。可以在「设置 › 常规 › 更新」里关掉检查。
+SpaceKnife 没有遥测。它自己发起的网络请求只有两种：检查更新（每天最多一次，从 `api.github.com` 读取本项目的发布列表，不发送任何关于你或你的文件的信息），以及发现新版本后（或你点击下载时）从 `github.com` 下载发布文件和它的校验值。可以在「设置 › 关于与更新」里关掉检查。

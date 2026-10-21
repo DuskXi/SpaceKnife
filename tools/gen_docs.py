@@ -67,6 +67,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("tags", "标签", "四个固定标签：红▲、黄■、绿●、蓝◆，颜色与形状不可修改"),
     ("keys", "快捷键", "全部命令与当前快捷键，与命令面板同一份命令清单"),
     ("advanced", "高级", "设置文件、日志、缓存与快照"),
+    ("about", "关于与更新", "版本信息、更新与发布时间线"),
 )
 
 # Keys the palette lists that the Electron window does not handle yet (no handler in KEY_HANDLERS):

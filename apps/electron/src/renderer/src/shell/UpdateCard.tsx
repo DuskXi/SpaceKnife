@@ -1,20 +1,23 @@
 // The update card (updates.v1, state/updates.ts): the newest release, the start of its notes, and
-// getting it: download in one click, then start the installer or show the file in its folder. The
-// same card opens under the title bar's badge, hangs at the top left by itself for a minor release
-// and fills the dialog of a major one. It never takes the focus, except as that dialog.
+// getting it: the download (by itself with 「自动下载更新」, else one click), then 「重启并更新」 (the
+// new version takes this one's place and starts) or 「安装」 (a disk image or a package opens in the
+// system's installer). The same card opens under the title bar's badge, hangs at the top left by
+// itself for a minor release and fills the dialog of a major one. It never takes the focus, except
+// as that dialog.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { UpdateDownload, UpdateInfo, UpdateStatus } from "@/protocol/generated";
 import { cancelUpdate, closeUpdate, downloadUpdate, installUpdate } from "@/state/actions";
 import { useApp } from "@/state/store";
-import { downloading, downloadOf, downloadPct, hasUpdate, installAction, type InstallKind, releaseDate, summarizeNotes, visibleSurface } from "@/state/updates";
+import { downloading, downloadOf, downloadPct, finishAction, hasUpdate, type InstallKind, notesFor, releaseDate, summarizeNotes, visibleSurface } from "@/state/updates";
 import { revealLabel } from "@/shell/Inspector";
 import { fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon } from "@/ui/Icon";
 
-export type UpdatePlacement = "anchored" | "corner" | "dialog";
+/** "inline": in the 「关于与更新」 page, where it stays (no closing, no 「以后再说」) */
+export type UpdatePlacement = "anchored" | "corner" | "dialog" | "inline";
 
 /** The card that opens by itself: at the top left for a minor release, as a dialog for a major one. */
 export function UpdatePrompt() {
@@ -32,7 +35,9 @@ export function UpdatePrompt() {
 
 export function UpdateCard({ status, placement }: { status: UpdateStatus & { latest: UpdateInfo }; placement: UpdatePlacement }) {
   const latest = status.latest;
-  const notes = useMemo(() => summarizeNotes(latest.notes), [latest.notes]);
+  const lang = useApp((s) => s.lang);
+  // the notes are English, then 简体中文: the start of the part in the interface language
+  const notes = useMemo(() => summarizeNotes(notesFor(latest.notes, lang)), [latest.notes, lang]);
   const date = releaseDate(latest.published_at);
   const dialog = placement === "dialog";
   const self = useRef<HTMLElement>(null);
@@ -69,9 +74,11 @@ export function UpdateCard({ status, placement }: { status: UpdateStatus & { lat
             {latest.prerelease && <span className="uc-tag">{t("预览版")}</span>}
           </div>
         </div>
-        <button className="icon-btn small" aria-label={t("关闭")} title={placement === "anchored" ? t("关闭") : t("关闭（这个版本不再自动提示）")} onClick={closeUpdate}>
-          <Icon name="close" size={14} />
-        </button>
+        {placement !== "inline" && (
+          <button className="icon-btn small" aria-label={t("关闭")} title={placement === "anchored" ? t("关闭") : t("关闭（这个版本不再自动提示）")} onClick={closeUpdate}>
+            <Icon name="close" size={14} />
+          </button>
+        )}
       </header>
       {notes.lines.length > 0 && (
         <div className="uc-notes">
@@ -86,20 +93,20 @@ export function UpdateCard({ status, placement }: { status: UpdateStatus & { lat
           </button>
         </div>
       )}
-      <Download status={status} d={downloadOf(status)} />
+      <Download status={status} d={downloadOf(status)} inline={placement === "inline"} />
     </section>
   );
 }
 
 /** What the backend's download is at, and the buttons for the next step. */
-function Download({ status, d }: { status: UpdateStatus & { latest: UpdateInfo }; d: UpdateDownload }) {
+function Download({ status, d, inline }: { status: UpdateStatus & { latest: UpdateInfo }; d: UpdateDownload; inline: boolean }) {
   const latest = status.latest;
   // installing quits SpaceKnife: a scan still running asks once more first
   const scanning = useApp((s) => Object.values(s.scans).some((x) => x.state === "scanning" || x.state === "queued"));
   const [confirming, setConfirming] = useState(false);
   const asset = latest.asset;
   const openPage = () => window.sk.shell.openExternal(latest.url);
-  const later = (
+  const later = inline ? null : (
     <button className="text-btn uc-later" onClick={closeUpdate}>
       {t("以后再说")}
     </button>
@@ -143,9 +150,10 @@ function Download({ status, d }: { status: UpdateStatus & { latest: UpdateInfo }
 
   if (d.state === "done" && d.path) {
     const path = d.path;
-    const install = installAction(status.install_kind) === "install";
+    const action = finishAction(status.install_kind);
     const hint = installHint(status.install_kind);
     const reveal = () => window.sk.shell.showItemInFolder(path);
+    const go = () => (scanning && !confirming ? setConfirming(true) : void installUpdate(path));
     return (
       <>
         <div className="uc-body">
@@ -175,18 +183,23 @@ function Download({ status, d }: { status: UpdateStatus & { latest: UpdateInfo }
           {confirming && (
             <div className="uc-line warn">
               <Icon name="warning" size={14} />
-              {t("还有扫描在进行，安装会中断它（已扫描的部分不会保存）")}
+              {t("还有扫描在进行，更新会中断它（已扫描的部分不会保存）")}
             </div>
           )}
         </div>
         <div className="uc-actions">
           {later}
-          {install ? (
+          {action === "restart" ? (
+            <button className="primary" onClick={go}>
+              <Icon name="refresh" size={14} />
+              {confirming ? t("仍然重启并更新") : t("重启并更新")}
+            </button>
+          ) : action === "install" ? (
             <>
               <button className="ghost" onClick={reveal}>
                 {revealLabel()}
               </button>
-              <button className="primary" onClick={() => (scanning && !confirming ? setConfirming(true) : void installUpdate(path))}>
+              <button className="primary" onClick={go}>
                 <Icon name="play" size={14} />
                 {confirming ? t("仍然安装") : t("安装")}
               </button>
@@ -246,16 +259,16 @@ function Download({ status, d }: { status: UpdateStatus & { latest: UpdateInfo }
 function installHint(kind: InstallKind): string {
   switch (kind) {
     case "nsis":
-      return t("安装程序会关闭 SpaceKnife 并替换旧版本，扫描数据和设置都会保留");
+      return t("SpaceKnife 会关闭，在后台安装新版本后自动重新打开；扫描数据和设置都会保留");
     case "dmg":
       return t("SpaceKnife 会退出并打开磁盘映像：把 SpaceKnife 拖进「应用程序」文件夹替换旧版本");
     case "deb":
     case "rpm":
       return t("SpaceKnife 会退出，并用系统的软件安装程序打开安装包；扫描数据和设置都会保留");
     case "portable":
-      return t("退出 SpaceKnife 后解压，用新文件替换旧文件夹里的内容，但留下其中的 data 文件夹（扫描数据和设置都在里面）");
+      return t("SpaceKnife 会关闭，替换程序文件后自动重新打开；data 文件夹（扫描数据和设置）原样保留");
     case "appimage":
-      return t("退出 SpaceKnife 后用新的 AppImage 替换旧文件；扫描数据和设置都会保留");
+      return t("SpaceKnife 会关闭，用新的 AppImage 替换旧文件后自动重新打开；扫描数据和设置都会保留");
     default:
       return "";
   }

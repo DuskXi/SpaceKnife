@@ -70,7 +70,7 @@ export interface ViewData {
 
 export type ConnState = "starting" | "ready" | "lost" | "failed";
 
-export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"] as const;
+export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
 /** The page shown when settings open: the last one visited, else 「常规」 (UI-W7-01). */
@@ -346,10 +346,10 @@ export function writeFlag(key: string, value: boolean): void {
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
-export function toast(message: string): void {
+export function toast(message: string, ms = 1800): void {
   set({ toast: message });
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => set({ toast: null }), 1800);
+  toastTimer = setTimeout(() => set({ toast: null }), ms);
 }
 
 /** Items in the delete basket (toolbar badge, palette). */

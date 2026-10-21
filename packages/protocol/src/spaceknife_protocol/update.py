@@ -8,9 +8,15 @@ running app's version and tells every session that announced ``updates.v1`` thro
 - ``minor`` (0.3.x → 0.4.0): also a card hanging at the top left with the summary;
 - ``major`` (0.x → 1.0.0): also a dialog in the window.
 
-Downloading is one click: the backend fetches the file for this kind of install into the user's
-download folder and checks it against the release's ``SHA256SUMS*.txt``; the front end then opens
-it (an installer, a disk image) or shows it in its folder (a portable archive).
+Downloading is one click, or happens by itself (setting ``general.update_download``): the backend
+fetches the file for this kind of install into the ``updates`` folder of its data directory and
+checks it against the release's ``SHA256SUMS*.txt``. The front end then restarts into the new
+version (the Windows installer, run silently; a portable copy or an AppImage, replaced in place) or
+opens it (a disk image, a deb or rpm package). The backend removes what the folder no longer needs
+when it starts.
+
+``update.releases`` lists the recent releases with their notes for the timeline of the
+「关于与更新」 settings page.
 """
 
 from __future__ import annotations
@@ -76,6 +82,17 @@ class UpdateStatus(Payload):
         default=False, description="The card / dialog for this version was closed (the badge stays)"
     )
     download: UpdateDownload = Field(default_factory=UpdateDownload)
+    next_check_at: datetime | None = Field(
+        default=None,
+        description="When the next automatic check is due; None while automatic checks are off, and where"
+        " the backend makes none (tests, demos, tools)",
+    )
+
+
+class UpdateReleases(Payload):
+    releases: list[UpdateInfo] = Field(
+        description="The recent releases, newest first (at most 30, notes at most 16 KiB each, no asset)"
+    )
 
 
 class UpdateVersionParams(Params):
@@ -95,6 +112,7 @@ __all__ = [
     "UpdateDownload",
     "UpdateInfo",
     "UpdateLevel",
+    "UpdateReleases",
     "UpdateStatus",
     "UpdateVersionParams",
 ]

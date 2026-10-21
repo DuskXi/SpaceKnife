@@ -20,6 +20,10 @@ export interface FileDialogOptions {
 export interface SkApi {
   platform: "win32" | "darwin" | "linux";
   version: string;
+  /** started by 「重启并更新」: the window says once that the update is done */
+  justUpdated: boolean;
+  /** the runtime's versions, for 「关于与更新」 */
+  versions: { electron: string; chrome: string; node: string };
   backend(): Promise<BackendState>;
   /** The interface language changed (M7.5): the main process's own texts follow. */
   setLanguage(lang: "zh-CN" | "en"): void;
@@ -44,8 +48,9 @@ export interface SkApi {
     openExternal(url: string): void;
   };
   update: {
-    /** Start a downloaded update (installer, disk image, package) and quit so it can replace the app.
-     * Only a file in the download folder named like a release asset; "" when started, else why not. */
+    /** Put a downloaded update in place and quit: the installer runs silently, a portable copy or an
+     * AppImage is replaced (both then start again), a disk image or a package opens (main/update.ts).
+     * Only a file in the backend's updates folder named like a release asset; "" when started, else why not. */
     install(path: string): Promise<string>;
   };
   dialog: {
