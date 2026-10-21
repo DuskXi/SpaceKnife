@@ -18,6 +18,13 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 - **MFT fast scans need far less memory at their peak.** Building the tree of a large volume used to take about 325 bytes per item on top of the table read from the $MFT, for a moment: on a drive of 8.6 million items the backend reached about 3.6 GB (SpaceKnife as a whole 3.8 GB). It now takes about 85 bytes per item, so the same drive should peak at about 2.2 GB, with the same result and speed.
 - **Memory no longer jumps every few seconds while files change after a scan.** With live monitoring on, every batch of changes made the details panel work out the whole drive's summary again, often several at once, each needing about 100 bytes per item for a moment (about 0.85 GB on a drive of 8.6 million items); and the first change after a scan doubled the memory of the scan data for good. Now the summary is worked out in small pieces, once for everyone who asks for the same one, and refreshes less often on large scans (at most every 10 seconds); a change adds only a little room. On a drive of 3.2 million items with files changing for a minute, the backend's peak went from about 1.3 GB to about 660 MB (about 300 MB with **Keep large scans in mapped files** on), and it settles at about 600 MB instead of 835 MB.
 - **Scans moved to memory-mapped files write half as much to disk.** Once the scan data passed **Scan data memory limit**, each mapped file was first filled with zeros on Windows, and copied to a new file every time it grew. Now the files grow in place and only the data itself is written: on a drive of 3.2 million items about 0.67 GB instead of about 1.3 GB.
+- **Live monitoring no longer makes memory jump by gigabytes after a while.** Once many files had changed, the backend renumbered the whole tree, and for a moment needed about 760 bytes per item on top of it: about 6.3 GB more on a drive of 8.7 million items. It now needs about 1 GB, the size of the renumbered copy itself, at the same speed.
+- **Opening a snapshot needs half the memory.** Each column was first unpacked into a temporary copy, so a snapshot of 8.7 million items briefly needed 1.8 GB for the 0.95 GB it keeps. Now it is unpacked straight into place and needs just the 0.95 GB.
+- **The backend keeps less memory all the time.**
+  - About 50 MB less: the command palette's pinyin search no longer loads a Chinese dictionary when SpaceKnife starts.
+  - 8 bytes less per item while a scan is open (about 66 MB on a drive of 8.6 million items): the treemap and the palette work out sizes only for what they show, instead of an array for every item that was worked out again after every file change. The treemap also redraws faster after a change.
+- **A hard scan of a drive scanned before sets its memory aside once,** from the number of items the last complete scan found, instead of growing it step by step and copying everything each time.
+- **The window gives memory back when it is hidden.** A minimized or covered window releases its drawing surfaces and draws again when it shows. Moving the pointer over the treemap now reuses the same buffers, so it no longer allocates new memory every time something lights up.
 
 ---
 
@@ -39,3 +46,10 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 - **MFT 快速扫描的内存峰值大幅降低**：大盘建树的那一刻，以前要在读到的 $MFT 表之外再占每项约 325 字节：860 万项的盘后端会冲到约 3.6 GB（整个 SpaceKnife 约 3.8 GB）。现在每项约 85 字节，同一块盘的峰值应在约 2.2 GB，结果和速度都不变。
 - **扫完后文件持续变化时，内存不再每隔几秒冒高**：开着实时监控时，每批文件变化都让详情面板把整盘汇总重算一遍，还经常几份同时算，每份临时要每项约 100 字节（860 万项的盘约 0.85 GB）；扫完后的第一次文件变化还会让扫描数据的内存一直翻倍。现在汇总分小块计算，同一份只算一次，大扫描时刷新得慢一些（最长每 10 秒一次）；文件变化只多留一点余量。320 万项的盘、文件连续变化一分钟：后端峰值从约 1.3 GB 降到约 660 MB（打开「大扫描存进映射文件」约 300 MB），之后稳定在约 600 MB，原来是 835 MB。
 - **存进内存映射文件的扫描，写盘量减半**：扫描数据超过「扫描数据内存上限」后，Windows 上每个映射文件都先整个写一遍零，每次变大还要复制到新文件。现在文件原地变大，只写数据本身：320 万项的盘约 0.67 GB，原来约 1.3 GB。
+- **实时监控开久了，内存不再一下子冒高好几 GB**：文件改动累计多了以后，后端会把整棵树重新编号一次，这一刻每项要多占约 760 字节，870 万项的盘多出约 6.3 GB。现在只多出重新编号后那份副本本身（约 1 GB），速度不变。
+- **打开快照只要一半的内存**：以前每一列都先解压成一份临时副本，870 万项的快照打开时要临时占 1.8 GB，最后只留 0.95 GB。现在直接解压到位，只要 0.95 GB。
+- **后端平时占的内存更少**：
+  - 少约 50 MB：命令面板的拼音搜索不再在启动时载入中文词典。
+  - 打开扫描时每项少 8 字节（860 万项的盘约 66 MB）：树图和命令面板只算要显示的那些项的大小，不再为每一项建一整列、每次文件变化后再整列重算。树图在文件变化后的重画也更快。
+- **硬扫描扫过的盘时，一次留好内存**：按上次完整扫描的项数一次分配，不再一边扫一边扩容、每次都把已有的数据整份复制一遍。
+- **窗口隐藏时归还内存**：最小化或被完全挡住的窗口会交还绘图画布，再显示时重新画出来。鼠标在树图上移动时复用同一块缓冲，不再每次高亮都重新分配。

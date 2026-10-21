@@ -7,8 +7,6 @@ import threading
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
-import numpy as np
-
 from spaceknife_protocol import palette as pp
 from spaceknife_protocol.base import Empty, EmptyResult
 from spaceknife_protocol.errors import ErrorCode
@@ -27,6 +25,7 @@ from spaceknife_protocol.update import UpdateStatus
 from .. import paths
 from ..filter.engine import FilterContext, evaluate
 from ..filter.vocab import platform_vocab
+from ..layout.basis import LazySizes
 from ..palette import paths as ppaths
 from ..palette.commands import Context, label, match, registry
 from ..palette.commands import evaluate as command_state
@@ -87,10 +86,10 @@ def install(server: Server) -> None:
     def handle_of(scan_id: str | None) -> ScanHandle | None:
         return server.scans.scans.get(scan_id) if scan_id else None
 
-    def sizes_of(handle: ScanHandle) -> np.ndarray:
+    def sizes_of(handle: ScanHandle) -> LazySizes:
         shared = server.views.shared(handle.id)
         assert shared is not None
-        return shared.basis.sizes()
+        return LazySizes(shared.basis)  # the nodes asked for only, not an array of every node
 
     # ------------------------------------------------------------------ palette.query
 

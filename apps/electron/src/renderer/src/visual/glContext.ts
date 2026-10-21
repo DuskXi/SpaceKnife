@@ -2,7 +2,9 @@
 // drawing into it (programs and renderers cached by key), and given back when the host goes away,
 // so split panes and tab switches do not pile up contexts until Chromium drops the oldest.
 
-const ATTRIBUTES: WebGLContextAttributes = { premultipliedAlpha: true, antialias: false, alpha: false };
+// no depth or stencil buffer: nothing tests depth or stencil (they cost 4–5 B a pixel, ~40 MB in a
+// maximized 4K window)
+export const ATTRIBUTES: WebGLContextAttributes = { premultipliedAlpha: true, antialias: false, alpha: false, depth: false, stencil: false };
 
 export class GlContext {
   readonly gl: WebGL2RenderingContext;

@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
+from .nodes import ENTRY_COLUMNS, OFF_NARROW_LIMIT, Flag, Kind, NodeStore
 from .subtree import ranges_to_ids
 
 TOTALS = ("tot_size", "tot_alloc", "tot_files", "tot_dirs")
@@ -27,6 +27,8 @@ TOTALS = ("tot_size", "tot_alloc", "tot_files", "tot_dirs")
 _KEEP = np.uint32(Flag.PENDING | Flag.ACCESS_DENIED | Flag.ERROR | Flag.HARDLINK_DUP)
 COMPACT_RATIO = 0.25  # compact once GONE rows are this share of the store ...
 COMPACT_MIN = 100_000  # ... and at least this many
+COMPACT_CHUNK = 1 << 18  # rows per piece when compact gathers the columns
+COMPACT_NAME_CHUNK = 1 << 12  # rows per piece when it gathers the names (indexes of 24 B per name byte)
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,43 +212,77 @@ def needs_compaction(store: NodeStore) -> bool:
 
 def compact(store: NodeStore) -> tuple[NodeStore, np.ndarray]:
     """A copy of the live tree renumbered breadth first (children right after each other, every
-    range after its folder again, no GONE rows) and ``remap``: new id per old id, -1 for GONE.
+    range after its folder again, no GONE rows) and ``remap``: new id per old id (int32), -1 for GONE.
 
     Pure read of ``store`` (runs on the compute pool); the caller adopts the copy under
     ``STRUCTURE.write()`` once nothing changed in between.
+
+    Memory (docs/memory.md §5): besides the copy itself (the columns and a fresh ``\\0name`` image,
+    which the new store owns as they are), only the new order and ``remap`` (4 B a row each) and
+    the temporaries of one piece of :data:`COMPACT_CHUNK` rows (names: :data:`COMPACT_NAME_CHUNK`)
+    exist at a time. Gathering the names through one index per name byte of the whole store took
+    ~760 B a row, +6.3 GB for a volume of 8.7 million.
     """
     c = store.cols
     n = len(store)
-    order_parts = [np.array([0], dtype=np.int64)]
+    kind = c["kind"]
+    count_col, start_col = c["child_count"], c["child_start"]
+    order_parts = [np.zeros(1, dtype=np.int32)]  # node 0 first
     level = order_parts[0]
-    is_dir = c["kind"][:n] == Kind.DIR
-    is_dir[0] = True
     while level.size:
-        dirs = level[is_dir[level]]
-        level = ranges_to_ids(
-            c["child_start"][dirs].astype(np.int64), c["child_count"][dirs].astype(np.int64)
-        )
+        dirs = level[(kind[level] == Kind.DIR) | (level == 0)]
+        level = ranges_to_ids(start_col[dirs].astype(np.int64), count_col[dirs].astype(np.int64))
+        level = level.astype(np.int32)
         if level.size:
             order_parts.append(level)
     order = np.concatenate(order_parts)
-    remap = np.full(n, -1, dtype=np.int64)
-    remap[order] = np.arange(len(order), dtype=np.int64)
-    cols = {key: col[:n][order] for key, col in c.items()}
-    parent = cols["parent"].astype(np.int64)
-    cols["parent"] = np.where(parent >= 0, remap[np.maximum(parent, 0)], -1).astype(c["parent"].dtype)
-    listed = cols["child_count"] > 0
-    start = cols["child_start"].astype(np.int64)
-    cols["child_start"] = np.where(listed, remap[np.where(listed, start, 0)], 0).astype(
-        c["child_start"].dtype
-    )
-    # names in the new order: one gather over the joined heap image
-    image = np.frombuffer(store.names_blob, dtype=np.uint8)
-    ln = cols["name_len"].astype(np.int64)
-    off = store._heap.image_positions(cols["name_off"].astype(np.int64))
-    names = image[ranges_to_ids(off, ln)].tobytes()
-    cols["name_off"] = (np.cumsum(ln) - ln).astype(np.int64)
-    out = NodeStore.from_columns(cols, names, store.ext_table)
-    return out, remap
+    del order_parts, level
+    m = len(order)
+    remap = np.full(n, -1, dtype=np.int32)
+    remap[order] = np.arange(m, dtype=np.int32)
+
+    cols: dict[str, np.ndarray] = {}
+    for key, col in c.items():
+        if key == "name_off":
+            continue
+        out = np.empty(m, dtype=col.dtype)
+        for lo in range(0, m, COMPACT_CHUNK):
+            out[lo : lo + COMPACT_CHUNK] = col[order[lo : lo + COMPACT_CHUNK]]
+        cols[key] = out
+    parent, first, many = cols["parent"], cols["child_start"], cols["child_count"]
+    for lo in range(0, m, COMPACT_CHUNK):
+        hi = lo + COMPACT_CHUNK
+        up = parent[lo:hi]
+        parent[lo:hi] = np.where(up >= 0, remap[np.maximum(up, 0)], -1)
+        listed = many[lo:hi] > 0
+        first[lo:hi] = np.where(listed, remap[np.where(listed, first[lo:hi], 0)], 0)
+
+    # names: a fresh image (``\\0name`` per node, in the new order), gathered from the heap's chunks
+    # piece by piece (a name never spans two chunks)
+    lengths = cols["name_len"]
+    total = int(lengths.sum(dtype=np.int64)) + m
+    image = np.zeros(total, dtype=np.uint8)  # the zeros are the separators
+    new_off = np.empty(m, dtype=np.uint32 if total < OFF_NARROW_LIMIT else np.int64)
+    heap = store._heap
+    parts = heap._chunks
+    bases = np.asarray(heap._bases, dtype=np.int64)
+    old_off = c["name_off"]
+    pos = 0
+    for lo in range(0, m, COMPACT_NAME_CHUNK):
+        rows = order[lo : lo + COMPACT_NAME_CHUNK]
+        ln = lengths[lo : lo + COMPACT_NAME_CHUNK].astype(np.int64)
+        dst = pos + np.cumsum(ln + 1) - ln  # each name right after its separator
+        pos = int(dst[-1] + ln[-1])
+        new_off[lo : lo + len(rows)] = dst
+        src = old_off[rows].astype(np.int64)
+        k = np.searchsorted(bases, src, side="right") - 1
+        for chunk in np.unique(k).tolist():
+            sel = np.flatnonzero(k == chunk) if len(parts) > 1 else slice(None)
+            names = parts[chunk][ranges_to_ids(src[sel] - bases[chunk], ln[sel])]
+            image[ranges_to_ids(dst[sel], ln[sel])] = names
+    cols["name_off"] = new_off
+    out_store = NodeStore.from_columns(cols, image, store.ext_table, separated=True)
+    return out_store, remap
 
 
 # --------------------------------------------------------------------------- helpers

@@ -295,6 +295,17 @@ describe("paint", () => {
   };
   const slot = (p: { instances: Float32Array }, k: number) => p.instances.subarray(k * STRIDE, (k + 1) * STRIDE);
 
+  it("refills the previous instance array when it is large enough", () => {
+    const f = frameOf(rows);
+    const first = paint(f, opts);
+    const again = paint(f, { ...opts, hovered: 1 }, first.instances); // a hover repaint
+    expect(again.instances).toBe(first.instances);
+    const fresh = paint(f, { ...opts, hovered: 1 });
+    expect(Array.from(again.instances.subarray(0, again.count * STRIDE))).toEqual(Array.from(fresh.instances.subarray(0, fresh.count * STRIDE)));
+    const small = new Float32Array(STRIDE);
+    expect(paint(f, opts, small).instances).not.toBe(small); // too small: a new one
+  });
+
   it("emits one instance per block, two per folder, three for the selection", () => {
     const p = paint(frameOf(rows), opts);
     expect(p.count).toBe(2 + 1 + 1 + 1 + 1 + 1 + 3);

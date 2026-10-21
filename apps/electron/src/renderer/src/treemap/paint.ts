@@ -113,8 +113,9 @@ export interface Painted {
 class Builder {
   data: Float32Array;
   n = 0;
-  constructor(capacity: number) {
-    this.data = new Float32Array(Math.max(64, capacity) * STRIDE);
+  constructor(capacity: number, reuse?: Float32Array) {
+    const want = Math.max(64, capacity) * STRIDE;
+    this.data = reuse && reuse.length >= want ? reuse : new Float32Array(want);
   }
   push(
     x: number,
@@ -189,9 +190,11 @@ export function fillOf(
   return rgba((T.class as Record<string, string>)[cls] ?? T.class.other);
 }
 
-export function paint(f: DrawFrame, o: PaintOptions): Painted {
+/** The instances and labels of a frame. `reuse`: the `instances` of the previous paint, filled again
+ * when it is large enough (its contents are uploaded at once, so nothing else holds on to them). */
+export function paint(f: DrawFrame, o: PaintOptions, reuse?: Float32Array): Painted {
   const dpr = o.dpr;
-  const b = new Builder(f.count * 2 + 8);
+  const b = new Builder(f.count * 2 + 8, reuse);
   const texts: TextItem[] = [];
   const tags: TagItem[] = [];
   const bw = Math.max(1, Math.round(dpr));

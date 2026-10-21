@@ -166,14 +166,14 @@ When busy and folding are both low, the listing threads were waiting for work: a
 
 ## Memory and very large disks
 
-The scan data is kept compactly, in columns: about 134 bytes per item (a file or folder) with an average name length.
+The scan data is kept compactly, in columns: about 126 bytes per item (a file or folder) with an average name length.
 
 | Items | Memory |
 |---|---|
 | 1 million | about 0.13 GB |
 | 10 million | about 1.3 GB |
-| 50 million | about 6.7 GB |
-| 100 million | about 13.4 GB |
+| 50 million | about 6.3 GB |
+| 100 million | about 12.6 GB |
 
 - **Keep large scans in mapped files** (**Settings › Advanced › Memory**, off by default): when on, a scan whose node table passes 256 MB (about two million items) goes to memory-mapped files in the cache folder. They don't count as the process's private memory; the system keeps the parts in use in RAM and drops the others, reading them back from disk when needed (a pass over a whole scan can then take some tenths of a second longer). The cost: after the scan the data is written to these files once, about 200 bytes per item (about 1.8 GB for a drive of 8.6 million items). Scans are as fast as before.
 - **Scan data memory limit** (same page, 25 % by default, from 5 to 90): once the open scans pass this share of physical memory, smaller scans go to mapped files too.

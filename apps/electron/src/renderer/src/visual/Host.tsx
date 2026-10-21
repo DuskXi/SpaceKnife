@@ -253,18 +253,21 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       const bc = breathCanvas.current;
       const cur = st.cur;
       if (!bc || !cur) return false;
-      const W = cur.frame.info.width;
-      const H = cur.frame.info.height;
-      fit(bc, W, H);
-      const ctx = bc.getContext("2d")!;
-      ctx.clearRect(0, 0, W, H);
       const { reduced, trashMode } = live.current;
       if (st.focus) {
         st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0, now - st.focusAt, reduced);
         st.focusAt = now;
         if (st.focusLevel === 0 && st.focusCls < 0) st.focus = null;
       }
-      if (!st.breath.length && !st.trash.length && !st.focus) return false;
+      if (!st.breath.length && !st.trash.length && !st.focus) {
+        fit(bc, 0, 0); // nothing over the view: no full-size layer kept (8–12 B a pixel)
+        return false;
+      }
+      const W = cur.frame.info.width;
+      const H = cur.frame.info.height;
+      fit(bc, W, H);
+      const ctx = bc.getContext("2d")!;
+      ctx.clearRect(0, 0, W, H);
       const moving = trashMoves(st.trash, trashMode, reduced);
       if (!st.anim) {
         if (st.focus) drawClassMark(ctx, st.focus, st.focusColor, st.focusLevel, W, H, cur.frame.info.dpr);
@@ -334,7 +337,36 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       st.ctx = null;
       st.glc = null;
       glc.release();
+      // the 2D layers' backings go now, not at the next major GC (a remount sizes them again)
+      for (const c of [textCanvas.current, breathCanvas.current]) if (c) fit(c, 0, 0);
     };
+  }, [loops]);
+
+  // a hidden window (minimized, or covered: Chromium reports both) keeps no canvas memory: the GL
+  // context is given up (Chromium never sleeps WebGL drawing buffers) and the 2D layers shrink to
+  // nothing; when it shows again, the context comes back and the last frame is painted again
+  useEffect(() => {
+    const st = r.current;
+    let lose: WEBGL_lose_context | null = null;
+    const onVisibility = () => {
+      const glc = st.glc;
+      if (document.hidden) {
+        if (!glc || glc.lost) return;
+        lose = glc.gl.getExtension("WEBGL_lose_context");
+        if (!lose) return;
+        loops.main.stop();
+        loops.breath.stop();
+        lose.loseContext(); // the host's lost handler keeps it restorable (preventDefault)
+        for (const c of [textCanvas.current, breathCanvas.current]) if (c) fit(c, 0, 0);
+      } else if (lose) {
+        const back = lose;
+        lose = null;
+        back.restoreContext(); // webglcontextrestored: the instances make their objects, the frame is painted
+        loops.breath.run();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [loops]);
 
   // ---------------------------------------------------------------- frames

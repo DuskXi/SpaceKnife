@@ -67,6 +67,9 @@ MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the res
 MFT_BUILD_BYTES_PER_ROW = 280
 SUMMARY_TOP = 50  # largest files in a cached summary: the details panel asks for 5 or 50
 SUMMARY_KEEP = 8  # cached summaries per scan (other nodes of the same store version)
+# a hard scan reserves room for the newest complete snapshot's items, plus this share and these rows
+RESERVE_SHARE = 1.05
+RESERVE_EXTRA = 4096
 _KIND_NAMES: dict[int, Literal["file", "dir", "link", "other"]] = {
     Kind.FILE: "file",
     Kind.DIR: "dir",
@@ -542,6 +545,8 @@ class ScanManager:
             governor.set_manual_concurrency(concurrency if manual else None)
             scanner.governor = governor
         scanner.expected_items = await asyncio.to_thread(last_item_count, [r.path for r in scanner.roots])
+        if scanner.expected_items:  # about as many as last time: the columns never grow by copying
+            scanner.store.reserve(int(scanner.expected_items * RESERVE_SHARE) + RESERVE_EXTRA)
         await asyncio.to_thread(  # media probes may block: warm their cache before status() needs them
             lambda: [
                 media_of(r.volume.mount_point, r.volume.device, r.volume.is_remote)

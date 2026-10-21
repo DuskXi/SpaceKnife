@@ -29,7 +29,7 @@ from spaceknife_protocol.view import DRAWLIST_LAYOUT
 
 from ..store.nodes import Flag, Kind
 from . import registry
-from .api import ENGINE_API, LayoutParams, RootSpec, SizeSource, Visualization
+from .api import ENGINE_API, LayoutParams, RootSpec, SizeSource, StoreSizes, Visualization
 from .basis import Basis
 from .merge import MergeCtx, merge_items, page_items
 from .rows import (
@@ -100,7 +100,7 @@ class Layout(Basis):
 
     def run(self, params: LayoutParams, root: RootSpec, sizes: np.ndarray | None = None) -> DrawList:
         """Lay out ``root`` in the viewport. ``sizes`` overrides the area basis (filter: hide mode)."""
-        return _treemap(self, params, root, self.sizes() if sizes is None else sizes)
+        return _treemap(self, params, root, StoreSizes(self) if sizes is None else sizes)
 
 
 class TreemapEngine:
@@ -112,13 +112,30 @@ class TreemapEngine:
         self.basis = basis
 
     def run(self, params: LayoutParams, root: RootSpec, sizes: SizeSource) -> DrawList:
-        return _treemap(self.basis, params, root, sizes.full())
+        return _treemap(self.basis, params, root, sizes)  # sizes of the laid-out nodes only
 
     def levels(self, params: LayoutParams) -> int:
         return params.detail
 
 
-def _treemap(basis: Basis, params: LayoutParams, root: RootSpec, sizes: np.ndarray) -> DrawList:
+class _ArraySizes:
+    """A plain size array as a :class:`.api.SizeSource` (``Layout.run`` with ``sizes``)."""
+
+    __slots__ = ("arr", "n")
+
+    def __init__(self, arr: np.ndarray) -> None:
+        self.arr = arr
+        self.n = len(arr)
+
+    def of(self, ids: np.ndarray) -> np.ndarray:
+        out: np.ndarray = self.arr[ids]
+        return out
+
+    def full(self) -> np.ndarray:
+        return self.arr
+
+
+def _treemap(basis: Basis, params: LayoutParams, root: RootSpec, sizes: SizeSource | np.ndarray) -> DrawList:
     t0 = time.perf_counter()
     run = _Run(basis, params, sizes)
     W, H = round(params.width * params.dpr), round(params.height * params.dpr)
@@ -140,13 +157,13 @@ def _treemap(basis: Basis, params: LayoutParams, root: RootSpec, sizes: np.ndarr
 
 
 class _Run:
-    def __init__(self, basis: Basis, params: LayoutParams, sizes: np.ndarray) -> None:
+    def __init__(self, basis: Basis, params: LayoutParams, sizes: SizeSource | np.ndarray) -> None:
         self.basis = basis
         self.store = basis.store
         self.p = params
         self.g = _Geom(params)
-        self.sizes = sizes
-        n = len(sizes)
+        self.sizes = _ArraySizes(sizes) if isinstance(sizes, np.ndarray) else sizes
+        n = self.sizes.n
         self.n = n
         c = self.store.cols
         self.kind = c["kind"][:n]
@@ -174,7 +191,7 @@ class _Run:
         # cells cover the content rectangle extended by one gap; each block keeps its gap right/bottom
         ex1, ey1 = x1 + g.gap, y1 + g.gap
         area = float((ex1 - x0) * (ey1 - y0))
-        s = self.sizes[ids]
+        s = self.sizes.of(ids)
         if page:
             need = g.threshold / area if area > 0 else float("inf")  # share of the view per member
             items = page_items(self.ctx, container, ids, s, need)

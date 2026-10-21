@@ -209,6 +209,16 @@ class NodeStore:
             cap = self._cap
             while want > cap:
                 cap = int(cap * GROWTH) + 1
+        self._resize(cap)
+
+    def reserve(self, rows: int) -> None:
+        """Room for ``rows`` nodes in one go: a scan that expects about as many as last time (the
+        newest snapshot of its roots) never copies its columns to grow, and ends with little headroom.
+        More rows than that still grow the columns as usual."""
+        if rows > self._cap:
+            self._resize(rows)
+
+    def _resize(self, cap: int) -> None:
         if not self.mapped and mapped.POLICY.should_map(self, cap * ROW_BYTES + self._heap.reserved()):
             self._map()
         for key, arr in self.cols.items():

@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import mmap
 import os
 import struct
 from datetime import UTC, datetime
@@ -165,34 +166,65 @@ def _read_header(prefix: bytes, fh: Any) -> SnapshotHeader:
 
 
 def load(path: Path) -> tuple[NodeStore, SnapshotHeader]:
+    """The store of a snapshot file. Each block is decompressed straight into the array the store
+    then owns (no bytes object and no second copy per column), from a read-only mapping of the
+    file: opening a snapshot needs about the store itself, not twice that (docs/memory.md §8)."""
     with open(path, "rb") as fh:
         header = _read_header(fh.read(len(MAGIC) + _LEN.size), fh)
-        data = fh.read()
+        base = fh.tell()
+        size = os.fstat(fh.fileno()).st_size
+        mm = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ) if size > base else None
+    try:
+        return _load_blocks(memoryview(mm)[base:] if mm is not None else memoryview(b""), header)
+    finally:
+        if mm is not None:
+            mm.close()
+
+
+def _load_blocks(data: memoryview, header: SnapshotHeader) -> tuple[NodeStore, SnapshotHeader]:
     decompressor = zstandard.ZstdDecompressor()
 
-    def block(info: BlockInfo) -> bytes:
+    def block_into(info: BlockInfo, out: np.ndarray) -> None:
         end = info.offset + info.length
         if end > len(data):
             raise SnapshotError("snapshot is truncated")
-        raw = decompressor.decompress(data[info.offset : end], max_output_size=info.raw_length)
-        if len(raw) != info.raw_length:
+        view = memoryview(out).cast("B")
+        if len(view) != info.raw_length:
             raise SnapshotError("snapshot block has the wrong length")
-        return raw
+        with decompressor.stream_reader(data[info.offset : end]) as reader:
+            filled = 0
+            while filled < len(view):
+                got = reader.readinto(view[filled:])
+                if not got:
+                    break
+                filled += got
+            if filled != info.raw_length or reader.read(1):
+                raise SnapshotError("snapshot block has the wrong length")
+        view.release()
 
-    columns: dict[str, np.ndarray] = {}
-    for key, info in header.columns.items():
-        if key not in COLUMNS:
-            continue
-        arr = np.frombuffer(block(info), dtype=np.dtype(info.dtype))
-        if len(arr) != header.node_count:
-            raise SnapshotError(f"column {key} has {len(arr)} rows, expected {header.node_count}")
-        columns[key] = arr
-    missing = [k for k in ("parent", "kind", "name_off", "name_len") if k not in columns]
-    if missing:
-        raise SnapshotError(f"snapshot lacks required columns: {missing}")
-    store = NodeStore.from_columns(
-        columns, block(header.names), header.ext_table, separated=header.format >= 2
-    )
+    try:
+        columns: dict[str, np.ndarray] = {}
+        for key, info in header.columns.items():
+            if key not in COLUMNS:
+                continue
+            dtype = np.dtype(info.dtype)
+            if info.raw_length % dtype.itemsize or info.raw_length // dtype.itemsize != header.node_count:
+                raise SnapshotError(
+                    f"column {key} has {info.raw_length // dtype.itemsize} rows, expected {header.node_count}"
+                )
+            arr = np.empty(header.node_count, dtype=dtype)
+            block_into(info, arr)
+            columns[key] = arr
+        missing = [k for k in ("parent", "kind", "name_off", "name_len") if k not in columns]
+        if missing:
+            raise SnapshotError(f"snapshot lacks required columns: {missing}")
+        names = np.empty(header.names.raw_length, dtype=np.uint8)
+        block_into(header.names, names)
+        store = NodeStore.from_columns(columns, names, header.ext_table, separated=header.format >= 2)
+    except zstandard.ZstdError as exc:
+        raise SnapshotError(f"snapshot block is damaged: {exc}") from exc
+    finally:
+        data.release()
     return store, header
 
 
