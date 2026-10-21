@@ -15,6 +15,7 @@ import { HIT_NONE, HIT_ROOT } from "@/visual/types";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { revealLabel } from "@/shell/Inspector";
 import { tagLabel } from "@/lib/tags";
+import { inBrowser } from "@/lib/host";
 
 const TAGS = [
   { id: "red", keys: "Ctrl+1" },
@@ -27,6 +28,9 @@ type CopyForm = keyof Omit<PathForms, "on_disk">;
 const COPY_FORMS: { form: CopyForm; keys?: string }[] = [{ form: "raw", keys: "Ctrl+C" }, { form: "quoted" }, { form: "posix" }, { form: "uri" }];
 /** The label of a copy form, in the current language. */
 const copyLabel = (form: CopyForm): string => ({ raw: t("原样"), quoted: t("带引号"), posix: t("POSIX 路径"), uri: "file:// URI" })[form];
+
+/** What needs the server's own desktop (its file manager, a terminal there): not in a browser tab. */
+const SERVER_DESKTOP = new Set(["open", "reveal", "terminal", "system"]);
 
 interface Item {
   id: string;
@@ -152,8 +156,10 @@ export function ContextMenu() {
       },
       { id: "system", icon: "more", label: t("系统菜单…"), disabled: t("系统原生右键菜单还没有接入（见 TODO）") },
     ];
+    // in a browser tab the files are on the server: nothing to open, show or run on this computer
+    const here = inBrowser() ? all.filter((it) => !SERVER_DESKTOP.has(it.id)) : all;
     // the zoom root is what is zoomed into already
-    return isRoot ? all.filter((it) => it.id !== "zoom") : all;
+    return isRoot ? here.filter((it) => it.id !== "zoom") : here;
     // lang: the labels are made by t(), so a language switch makes them again
   }, [menu, row, isRoot, frame, forms, group, folder, node, lang]);
 

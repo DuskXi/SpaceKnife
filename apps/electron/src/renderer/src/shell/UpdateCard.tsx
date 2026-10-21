@@ -14,6 +14,7 @@ import { downloading, downloadOf, downloadPct, finishAction, hasUpdate, type Ins
 import { revealLabel } from "@/shell/Inspector";
 import { fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { inBrowser, serverName } from "@/lib/host";
 import { Icon } from "@/ui/Icon";
 
 /** "inline": in the 「关于与更新」 page, where it stays (no closing, no 「以后再说」) */
@@ -117,6 +118,24 @@ function Download({ status, d, inline }: { status: UpdateStatus & { latest: Upda
       {t("前往下载页")}
     </button>
   );
+
+  if (inBrowser()) {
+    // the update is for the computer SpaceKnife runs on: nothing to download or install from a tab
+    return (
+      <>
+        <div className="uc-body">
+          <div className="uc-line">
+            <Icon name="info" size={14} />
+            {t("请在 {host} 上更新 SpaceKnife：浏览器里不能下载或安装更新", { host: serverName() })}
+          </div>
+        </div>
+        <div className="uc-actions">
+          {later}
+          {pageBtn}
+        </div>
+      </>
+    );
+  }
 
   if (downloading(d)) {
     const pct = downloadPct(d);

@@ -60,6 +60,7 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - 只保留界面的两种语言的 Chromium 语言包（`electronLanguages: en-US, zh-CN`）。
 - 不带 `node_modules`：渲染进程用到的库都由 Vite 打进 `out/`，`package.json` 里全是 devDependencies。
 - 窗口图标：Linux 用 `resources/icon.png`；Windows 打包后用 exe 自带的图标。
+- Windows 上 `SpaceKnife.exe` 旁边还有 `SpaceKnife.com`（[packaging/console-launcher](../packaging/console-launcher/src/main.rs)，无依赖的 Rust 小程序，`tools/build_package.py` 用和原生扩展相同的路径重映射编译到 `dist/console/`，electron-builder 的 `win.extraFiles` 复制过去）：控制台子系统的启动器，带同样的参数启动 `SpaceKnife.exe` 并等待它结束，让终端等得到无头模式（`SpaceKnife --headless`）的 Y/N 提问和 Ctrl+C。在终端里它不给子进程标准句柄（Electron 于是挂接到这个控制台，并设 `SPACEKNIFE_CONSOLE=1` 让主进程从 `CONIN$` 读回答）；输出被重定向时则原样传递句柄，Ctrl+C 由它结束子进程。
 
 ## 4. 安装包
 
@@ -147,6 +148,12 @@ uv run python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe
 ```
 
 [packaging/smoke_app.py](../packaging/smoke_app.py) 用临时目录作为 `SPACEKNIFE_HOME`、最小化启动应用（不抢焦点），打开 DevTools 端口：等打包的后端就绪、启动页列出卷，再像用户一样关窗口，确认应用和后端都退出。参数也可以是 `linux-unpacked/spaceknife` 或 AppImage。
+
+```bash
+uv run python packaging/smoke_headless.py dist/electron/win-unpacked/SpaceKnife.com
+```
+
+[packaging/smoke_headless.py](../packaging/smoke_headless.py) 测无头模式：`--headless --listen 127.0.0.1:0` 启动，读打印出的地址，检查页面、`/sk/info` 只认 token、WebSocket 拒绝别的 Origin、用页面自己的 Origin 能和后端握手，再像终端一样停止（SIGINT；Windows 上对 `SpaceKnife.com` 发 Ctrl+Break）。Linux 上不开 xvfb，验证没有显示器也能启动。`Portable build` 工作流在便携版冒烟测试之后跑它。
 
 [packaging/update_e2e.py](../packaging/update_e2e.py) 是「重启并更新」和卸载清理的端到端测试，只在 GitHub Actions 上跑（`Portable build` 工作流；它会在当前用户的目录里安装、更新、卸载，所以在别处拒绝运行）。它在 127.0.0.1 上提供一份发布列表（`SPACEKNIFE_UPDATE_FEED`），把这次构建当作下一个修订版，通过 DevTools 端口等徽章变成「可以更新」，再像用户一样点徽章和「重启并更新」：
 

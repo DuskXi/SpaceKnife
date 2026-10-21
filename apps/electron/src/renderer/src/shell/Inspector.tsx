@@ -13,6 +13,7 @@ import { Icon, Kbd } from "@/ui/Icon";
 import { classHexNow } from "@/lib/classes";
 import { t } from "@/lib/i18n";
 import { tagLabel } from "@/lib/tags";
+import { inBrowser } from "@/lib/host";
 
 type Page = "details" | "classes" | "largest";
 // red ▲, yellow ■, green ●, blue ◆: the names come from tagLabel (W7 「标签」 · 显示名)
@@ -95,7 +96,9 @@ export function Inspector({ viewId }: { viewId: string }) {
       </div>
       {summary && synthetic == null && (
         <div className="inspector-actions">
-          <ActionRow icon="reveal" label={revealLabel()} keys="Ctrl+E" disabled={!summary.on_disk} onClick={() => window.sk.shell.showItemInFolder(summary.path)} />
+          {!inBrowser() && (
+            <ActionRow icon="reveal" label={revealLabel()} keys="Ctrl+E" disabled={!summary.on_disk} onClick={() => window.sk.shell.showItemInFolder(summary.path)} />
+          )}
           <ActionRow
             icon="copy"
             label={t("复制路径")}

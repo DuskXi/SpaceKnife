@@ -31,6 +31,18 @@ python -X utf8 -m spaceknife serve --token-stdin
 | 压缩 | 关闭（permessage-deflate 会让二进制吞吐下降约 8 倍） |
 | 入站消息上限 | 1 MiB |
 
+### 无头模式（浏览器经 HTTP 连接）
+
+`SpaceKnife --headless` / `--listen <地址>`（[site 文档](../site/src/content/docs/zh/docs/headless.md)）不开窗口，Electron 主进程在指定地址上起一个 HTTP(S) 服务器（[headless-server.ts](../apps/electron/src/main/headless-server.ts)），后端照旧只监听 `127.0.0.1`，握手和协议不变：
+
+| 路径 | 内容 |
+|---|---|
+| `GET /`、`/assets/…` | 构建好的界面（`out/renderer`），公开；`index.html` 的 CSP `connect-src` 改为这个服务器自己的 `ws://` / `wss://` 地址，`no-store`，禁止被嵌入框架 |
+| `GET /sk/info` | 界面连接前需要的 `{platform, version, hostname, home, secure}`；必须带 `Authorization: Bearer <token>`，否则 401 |
+| `GET /v1`（Upgrade） | 原样转发到后端的 `/v1`。浏览器的 `Origin` 必须等于 `<scheme>://<Host>`（页面自己的源，防跨站 WebSocket 劫持），否则 403；转发时 `Origin` 换成 `http://headless.spaceknife.invalid`（启动后端时用 `--allow-origin` 放行），去掉 `Forwarded` / `X-Forwarded-*` |
+
+token 就是启动后端用的那个，放在打印出的链接的片段里（`#token=…`，浏览器不会发给服务器）；界面（[shim.ts](../apps/electron/src/renderer/src/shim.ts)）读出后从地址栏移除、存在标签页的 sessionStorage 里，`session.hello` 照常校验它。
+
 ## 2. 握手
 
 连接后的第一条消息必须是 `session.hello` 请求，并且要在 5 秒内发出：

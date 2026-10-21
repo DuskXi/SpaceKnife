@@ -1,5 +1,5 @@
 // Title bar (UI-MAIN-02…09): brand, tabs, new tab, update badge, settings, window buttons; the empty
-// space drags.
+// space drags. In a browser tab (headless mode) no window buttons: the computer's chip instead.
 
 import { useEffect, useState } from "react";
 
@@ -10,13 +10,15 @@ import { fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon } from "@/ui/Icon";
 
+import { RemoteChip } from "./BrowserLayer";
 import { UpdateBadge } from "./UpdateBadge";
 
 export function TitleBar() {
   const tabs = useApp((s) => s.tabs);
   const active = useApp((s) => s.active);
   const scans = useApp((s) => s.scans);
-  const mac = window.sk.platform === "darwin";
+  const native = window.sk.host === "app";
+  const mac = native && window.sk.platform === "darwin"; // the traffic lights' room
   const [maximized, setMaximized] = useState(false);
   useEffect(() => {
     void window.sk.window.isMaximized().then(setMaximized);
@@ -76,6 +78,7 @@ export function TitleBar() {
         </button>
       </div>
       <div className="drag" />
+      {!native && <RemoteChip />}
       <UpdateBadge />
       <button className="title-btn" aria-label={t("本机磁盘")} title={t("本机磁盘：每块盘的容量、链路、读写量与健康")} onClick={openMachineTab}>
         <Icon name="diskGauge" />
@@ -86,7 +89,7 @@ export function TitleBar() {
       <button className="title-btn" aria-label={t("设置（Ctrl+,）")} title={t("设置（Ctrl+,）")} onClick={() => openSettingsTab()}>
         <Icon name="settings" />
       </button>
-      {!mac && (
+      {native && !mac && (
         <div className="window-btns">
           <button aria-label={t("最小化")} title={t("最小化")} onClick={() => window.sk.window.minimize()}>
             <Icon name="windowMinimize" strokeWidth={1.25} />

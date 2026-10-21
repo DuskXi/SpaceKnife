@@ -14,7 +14,7 @@
     {
       "id": "advanced",
       "label": { "en": "Advanced", "zh": "进阶" },
-      "items": ["shortcuts", "command-palette", "command-line", "performance", "settings", "data-locations"]
+      "items": ["shortcuts", "command-palette", "command-line", "headless", "performance", "settings", "data-locations"]
     },
     {
       "id": "help",

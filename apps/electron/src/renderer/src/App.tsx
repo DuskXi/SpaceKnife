@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 
 import { basketAdd, boot, call, closeTab, newStartTab, openSettingsTab, setViewSettings, settingsHistory, viewCall } from "@/state/actions";
+import { BrowserLayer } from "@/shell/BrowserLayer";
 import { ContextMenu } from "@/shell/ContextMenu";
 import { ExportDialog } from "@/shell/ExportDialog";
 import { FullDiskAccessDialog } from "@/shell/FullDiskAccessDialog";
@@ -8,6 +9,7 @@ import { OpToast } from "@/shell/OpToast";
 import { activeTab, focusedViewId, get, set, setting, toast, toggleLog, useApp } from "@/state/store";
 import { notOnDisk, revealLabel } from "@/shell/Inspector";
 import { focusFilter } from "@/shell/FilterBox";
+import { inBrowser } from "@/lib/host";
 import { t } from "@/lib/i18n";
 import { LogPanel } from "@/shell/LogPanel";
 import { Palette } from "@/shell/Palette";
@@ -64,7 +66,7 @@ export function App() {
         <StatusBar />
         {conn === "failed" && (
           <div className="fatal">
-            <h2>{t("后端没有启动")}</h2>
+            <h2>{inBrowser() ? t("连不上 SpaceKnife") : t("后端没有启动")}</h2>
             <p className="mono">{message}</p>
           </div>
         )}
@@ -80,6 +82,7 @@ export function App() {
       <ExportDialog />
       <FullDiskAccessDialog />
       <UpdatePrompt />
+      <BrowserLayer />
     </>
   );
 }

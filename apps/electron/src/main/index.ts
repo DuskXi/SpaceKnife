@@ -2,13 +2,16 @@
 
 import { spawn } from "node:child_process";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, extname, join, normalize, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
-import { type Backend, bundledBackend, startBackend } from "./backend";
+import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
+import { fileIn, mimeOf } from "./files";
+import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
+import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
 import { installKind, installRefusal, nsisUpdateArgs, projectPage, restartMode, swapScript } from "./update";
@@ -17,16 +20,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
 const APP_ID = "io.github.duskxi.spaceknife"; // electron-builder.yml appId: taskbar grouping, shortcuts
 const RENDERER_DIR = join(here, "../renderer");
-const MIME: Record<string, string> = {
-  ".html": "text/html",
-  ".js": "text/javascript",
-  ".mjs": "text/javascript",
-  ".css": "text/css",
-  ".svg": "image/svg+xml",
-  ".png": "image/png",
-  ".woff2": "font/woff2",
-  ".json": "application/json",
-};
+// --headless / --listen: no window, the interface in a browser (headless.ts); --help: the options
+const CLI = parseCommandLine(process.argv.slice(1));
 
 // A portable copy keeps its data next to the executable: the backend inherits SPACEKNIFE_HOME.
 const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env);
@@ -57,6 +52,20 @@ function repoRoot(): string {
   return process.env.SPACEKNIFE_REPO ? resolve(process.env.SPACEKNIFE_REPO) : resolve(app.getAppPath(), "../..");
 }
 
+/** How the backend starts, in the window and in headless mode alike. */
+function backendOptions(allowOrigins: string[], onLog: (line: string) => void): BackendOptions {
+  return {
+    repoRoot: repoRoot(),
+    bundled: app.isPackaged ? bundledBackend(process.resourcesPath) : null,
+    allowOrigins,
+    home: process.env.SPACEKNIFE_HOME,
+    locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
+    appVersion: app.getVersion(),
+    installKind: INSTALL_KIND,
+    onLog,
+  };
+}
+
 function setBackend(state: BackendState): void {
   backendState = state;
   win?.webContents.send("sk:backend", state);
@@ -66,16 +75,7 @@ async function launchBackend(): Promise<void> {
   const devUrl = process.env.ELECTRON_RENDERER_URL;
   const origins = devUrl ? [new URL(devUrl).origin] : [];
   try {
-    backend = await startBackend({
-      repoRoot: repoRoot(),
-      bundled: app.isPackaged ? bundledBackend(process.resourcesPath) : null,
-      allowOrigins: origins,
-      home: process.env.SPACEKNIFE_HOME,
-      locale: app.getPreferredSystemLanguages()[0] ?? app.getLocale(),
-      appVersion: app.getVersion(),
-      installKind: INSTALL_KIND,
-      onLog: (line) => console.log(`[backend] ${line}`),
-    });
+    backend = await startBackend(backendOptions(origins, (line) => console.log(`[backend] ${line}`)));
     backend.proc.once("exit", (code) => setBackend({ state: "exited", code }));
     setBackend({ state: "ready", info: backend.info });
   } catch (err) {
@@ -323,25 +323,38 @@ function openTerminal(dir: string): void {
 
 function serveRenderer(): void {
   protocol.handle("app", async (request) => {
-    const url = new URL(request.url);
-    const rel = normalize(decodeURIComponent(url.pathname)).replace(/^[/\\]+/, "") || "index.html";
-    const file = resolve(RENDERER_DIR, rel);
-    if (!file.startsWith(RENDERER_DIR)) return new Response("forbidden", { status: 403 });
+    const file = fileIn(RENDERER_DIR, new URL(request.url).pathname);
+    if (!file) return new Response("forbidden", { status: 403 });
     try {
       const body = await readFile(file);
-      return new Response(body, { headers: { "content-type": MIME[extname(file)] ?? "application/octet-stream" } });
+      return new Response(body, { headers: { "content-type": mimeOf(file) } });
     } catch {
       return new Response("not found", { status: 404 });
     }
   });
 }
 
-app.whenReady().then(() => {
-  serveRenderer();
-  registerIpc();
-  createWindow();
-  void launchBackend();
-});
+if (CLI.mode === "help" || CLI.mode === "error") {
+  const lang = systemLang();
+  if (CLI.mode === "help") process.stdout.write(`${ht(lang, "usage", { port: DEFAULT_PORT })}\n`);
+  else process.stderr.write(`${ht(lang, CLI.error, { value: CLI.value, port: DEFAULT_PORT })}\n${ht(lang, "seeHelp")}\n`);
+  exitFlushed(CLI.mode === "help" ? 0 : 2);
+} else if (CLI.mode === "headless") {
+  prepareHeadless();
+  void app.whenReady().then(() =>
+    runHeadless(CLI, {
+      rendererDir: RENDERER_DIR,
+      startBackend: (origins, onLog) => startBackend(backendOptions(origins, onLog)),
+    }),
+  );
+} else {
+  app.whenReady().then(() => {
+    serveRenderer();
+    registerIpc();
+    createWindow();
+    void launchBackend();
+  });
+}
 
 app.on("window-all-closed", () => app.quit());
 

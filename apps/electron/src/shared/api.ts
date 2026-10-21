@@ -17,9 +17,25 @@ export interface FileDialogOptions {
   filters: { name: string; extensions: string[] }[];
 }
 
+/** Browser mode: the computer the files are on (headless mode's /sk/info, main/headless-server.ts). */
+export interface RemoteInfo {
+  /** its name, shown in the title bar and next to deleting */
+  hostname: string;
+  /** the user's home folder there: where a typed path starts */
+  home: string;
+  /** reached over HTTPS */
+  secure: boolean;
+}
+
 export interface SkApi {
+  /** the platform of the computer the files are on (the server's in browser mode, not the browser's) */
   platform: "win32" | "darwin" | "linux";
   version: string;
+  /** "app": SpaceKnife's own window. "browser": a browser tab served by headless mode (--headless,
+   *  --listen): no window buttons, file dialogs, file manager, terminal or update install there. */
+  host: "app" | "browser";
+  /** browser mode: the computer the files are on; null in the app */
+  remote: RemoteInfo | null;
   /** started by 「重启并更新」: the window says once that the update is done */
   justUpdated: boolean;
   /** the runtime's versions, for 「关于与更新」 */

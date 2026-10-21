@@ -21,7 +21,8 @@ Steps: a release build of the native extension (maturin, with the build machine'
 no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
 dist/backend/spaceknife-backend), the frozen backend's smoke test (packaging/smoke_backend.py), on
 Linux the glibc floor of every ELF in the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34),
-``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
+on Windows the console launcher SpaceKnife.com (packaging/console-launcher, paths remapped the
+same way), ``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
 ``electron-builder`` (apps/electron/electron-builder.yml), a check that no file of the
 packaged app contains the build machine's home path, and on macOS a check of the app's ad-hoc
 signature. The native extension is required: an installer without it would scan at a fraction of
@@ -51,6 +52,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ELECTRON = ROOT / "apps" / "electron"
 DIST = ROOT / "dist"
 BACKEND_DIR = DIST / "backend" / "spaceknife-backend"
+CONSOLE_LAUNCHER = DIST / "console" / "SpaceKnife.com"  # Windows: electron-builder.yml win.extraFiles
 NATIVE_RELEASE = ROOT / "build" / "native-release"  # spaceknife_native/ of the release wheel
 GLIBC_FLOOR = (2, 34)  # RHEL 9; Ubuntu 22.04 has 2.35
 LINUX_TARGETS = ("AppImage", "deb", "rpm")
@@ -80,15 +82,10 @@ def backend_exe() -> Path:
     return BACKEND_DIR / ("spaceknife-backend.exe" if sys.platform == "win32" else "spaceknife-backend")
 
 
-def native_release() -> None:
-    """The native extension as shipped: a release wheel whose panic messages and debug-info paths
-    name /cargo, /rustup and /spaceknife instead of the build machine's folders (Cargo's
-    trim-paths is not stable yet), unpacked into NATIVE_RELEASE for PyInstaller."""
-    t0 = step("native extension (release build, build paths remapped)")
-    hint = "run `uv sync --locked --group native --group package`"
-    for module in ("PyInstaller", "maturin"):
-        if importlib.util.find_spec(module) is None:
-            raise SystemExit(f"no {module}: {hint}")
+def remapped_rust_env() -> dict[str, str]:
+    """Cargo's environment for a shipped binary: panic messages and debug-info paths name /cargo,
+    /rustup and /spaceknife instead of the build machine's folders (Cargo's trim-paths is not
+    stable yet)."""
     home = Path.home()
     flags = [
         f"--remap-path-prefix={os.environ.get('CARGO_HOME') or home / '.cargo'}=/cargo",
@@ -97,7 +94,42 @@ def native_release() -> None:
     ]
     if sys.platform == "win32":
         flags.append("-Clink-arg=/PDBALTPATH:%_PDB%")  # the PDB's file name only, not its full path
-    env = {**os.environ, "CARGO_ENCODED_RUSTFLAGS": "\x1f".join(flags)}
+    return {**os.environ, "CARGO_ENCODED_RUSTFLAGS": "\x1f".join(flags)}
+
+
+def console_launcher() -> None:
+    """Windows: SpaceKnife.com, the console entry next to SpaceKnife.exe (packaging/console-launcher).
+    A terminal waits for it, so headless mode can ask its question there and Ctrl+C stops it;
+    electron-builder.yml copies it from CONSOLE_LAUNCHER."""
+    t0 = step("console launcher (SpaceKnife.com)")
+    target = ROOT / "build" / "console-target"
+    run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--manifest-path",
+            str(ROOT / "packaging" / "console-launcher" / "Cargo.toml"),
+            "--target-dir",
+            str(target),
+        ],
+        env=remapped_rust_env(),
+    )
+    CONSOLE_LAUNCHER.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target / "release" / "spaceknife-console.exe", CONSOLE_LAUNCHER)
+    done(t0, f"{CONSOLE_LAUNCHER.stat().st_size // 1024} KB")
+
+
+def native_release() -> None:
+    """The native extension as shipped: a release wheel with the build paths remapped
+    (remapped_rust_env), unpacked into NATIVE_RELEASE for PyInstaller."""
+    t0 = step("native extension (release build, build paths remapped)")
+    hint = "run `uv sync --locked --group native --group package`"
+    for module in ("PyInstaller", "maturin"):
+        if importlib.util.find_spec(module) is None:
+            raise SystemExit(f"no {module}: {hint}")
+    env = remapped_rust_env()
     wheels = ROOT / "build" / "native-wheel"
     shutil.rmtree(wheels, ignore_errors=True)
     run(
@@ -435,6 +467,8 @@ def main() -> int:
         check_no_build_paths(BACKEND_DIR)
     if sys.platform.startswith("linux"):
         check_glibc()
+    if sys.platform == "win32":
+        console_launcher()
     build_electron(args.targets, installers=not args.no_installers)
     if args.portable:
         make_portable()
