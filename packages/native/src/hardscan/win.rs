@@ -1308,12 +1308,12 @@ fn unsupported(status: NTSTATUS) -> bool {
 }
 
 /// How a subdirectory of this listing can be opened from it: with a file id to check the open
-/// against (none for 0 or all ones), by a name that is a single path component (a `\` or `/` in
-/// it, as WinBtrfs shows some Linux names, would make the name a path of its own: BADNAME, opened
-/// by its id only), and how a descended reparse point is opened. On Btrfs it also keeps the size
+/// against (none for 0 or all ones), by a name that is a single path component (a name no path
+/// can hold, `case::unnameable`, such as the `\` or `:` WinBtrfs shows in some Linux names, is
+/// BADNAME, opened by its id only), and how a descended reparse point is opened. On Btrfs it also keeps the size
 /// the listing gave the folder (`check_size`).
 fn hint_of(raw: &Raw<'_>, btrfs: bool) -> Hint {
-    let single = !raw.name.iter().any(|&u| u == BS || u == SLASH);
+    let single = !case::unnameable(raw.name);
     // A reparse point that is descended (a cloud folder, ProjFS, a DFS link...) is opened by full
     // path: its listed id is the reparse point's own, so a layer that redirected only opens by
     // path would leave a relative open on the reparse point with a matching id. Its subdirectories
@@ -2052,6 +2052,7 @@ mod tests {
         static PLAIN: [u16; 3] = [b'b' as u16, b'i' as u16, b'n' as u16];
         static BACKSLASH: [u16; 3] = [b'a' as u16, BS, b'b' as u16];
         static SLASHED: [u16; 3] = [b'a' as u16, SLASH, b'b' as u16];
+        static COLON: [u16; 3] = [b'a' as u16, b':' as u16, b'b' as u16];
         assert_eq!(named(&PLAIN, 7 << 64 | 5, 128), hint(7 << 64 | 5, 128, "bin", 0));
         assert_eq!(named(&PLAIN, 5, 64).bits, 64);
         // no id to check the open against: a plain folder by full path
@@ -2069,6 +2070,7 @@ mod tests {
         };
         assert_eq!(named(&BACKSLASH, 5, 128), bad);
         assert_eq!(named(&SLASHED, 5, 128), bad);
+        assert_eq!(named(&COLON, 5, 128), bad); // a stream name to a path
         // a descended reparse point: its listed id is its own
         let reparse = hint_of(
             &Raw {

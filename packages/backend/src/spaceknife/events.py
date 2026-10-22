@@ -62,7 +62,7 @@ def denied_reason(message: str) -> str:
     own = {
         worker.CASE_ERROR: _("同一文件夹里另有一项与它只差大小写，按名字打开的是那一项"),
         worker.DUP_ERROR: _("同一文件夹里另有一项在 Windows 上显示为同一个名字，按名字分不开"),
-        worker.BADNAME_ERROR: _("名字里有 \\ 或 /，按名字打不开"),
+        worker.BADNAME_ERROR: _("名字里有 Windows 的名字里不能有的字符，按名字打不开"),
         worker.CAP_ERROR: _("只能按文件 ID 打开的文件夹一次要读的项太多，这次没有读"),
         worker.INCOMPLETE_ERROR: _("按文件 ID 打开时没有列全"),
     }.get(message)

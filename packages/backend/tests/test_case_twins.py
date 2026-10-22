@@ -127,7 +127,7 @@ def test_both_walkers_word_these_errors_alike() -> None:
     wording = {
         "CASE": (worker.CASE_ERROR, "同一文件夹里另有一项与它只差大小写，按名字打开的是那一项"),
         "DUP": (worker.DUP_ERROR, "同一文件夹里另有一项在 Windows 上显示为同一个名字，按名字分不开"),
-        "BADNAME": (worker.BADNAME_ERROR, "名字里有 \\ 或 /，按名字打不开"),
+        "BADNAME": (worker.BADNAME_ERROR, "名字里有 Windows 的名字里不能有的字符，按名字打不开"),
         "CAP": (worker.CAP_ERROR, "只能按文件 ID 打开的文件夹一次要读的项太多，这次没有读"),
         "INCOMPLETE": (worker.INCOMPLETE_ERROR, "按文件 ID 打开时没有列全"),
     }
@@ -150,6 +150,8 @@ def test_case_marks_group_names_that_upper_case_alike() -> None:
         8: "strict",  # str.upper() groups more than Windows does: the stored name decides
     }
     assert worker.case_marks(["a", "A"], []) == {}
+    odd = ["x:y", "a*", "q?", 'd"', "l<", "g>", "p|", "c\x01", "ok", "a b"]
+    assert worker.case_marks(odd, list(range(len(odd)))) == {j: "bad" for j in range(8)}
     assert worker.case_marks(["A", "a"], [1]) == {1: "strict"}
 
 

@@ -18,7 +18,8 @@ pub mod mark {
     pub const TWIN: u8 = 1;
     /// Another entry has exactly the same name (WinBtrfs shows invalid UTF-8 as U+FFFD).
     pub const DUP: u8 = 2;
-    /// The name has a `\` or `/` (WinBtrfs shows Linux names as they are): not a single name.
+    /// The name has a character a Windows path cannot hold (`unnameable`; WinBtrfs shows Linux
+    /// names as they are): no path, relative or full, reaches it.
     pub const BADNAME: u8 = 4;
     /// A reparse point that is descended (cloud folders, ProjFS, DFS links).
     pub const REPARSE: u8 = 8;
@@ -33,7 +34,7 @@ pub mod msg {
         "cannot be opened by its name: another entry in this folder has the same name in a different case";
     pub const DUP: &str =
         "cannot be opened by its name: another entry in this folder has the same name as Windows shows it";
-    pub const BADNAME: &str = "cannot be opened by its name: it contains a backslash or slash";
+    pub const BADNAME: &str = "cannot be opened by its name: it contains a character Windows names cannot hold";
     pub const CAP: &str =
         "not read: too many entries in one pass in folders that can only be opened by file id";
     pub const INCOMPLETE: &str = "listed incompletely when opened by its file id";
@@ -144,6 +145,16 @@ pub fn mark_twins(keys: &mut [CaseKey], names: &[u8], marks: &mut Vec<(u32, u8)>
 
 fn is_sep(u: u16) -> bool {
     u == b'\\' as u16 || u == b'/' as u16
+}
+
+/// A name no Windows path can hold, so no open by name reaches it: a separator (`\`, `/`), a
+/// stream separator (`:`), a wildcard or DOS wildcard (`* ? " < >`), `|`, or a control character:
+/// what WinBtrfs's check_file_name_valid refuses in a name it is asked to open, and what Linux
+/// stores freely (abrt's `ccpp-2025-11-23-18:28:47`, systemd's `\x2d` escapes).
+pub fn unnameable(name: &[u16]) -> bool {
+    name.iter().any(|&u| {
+        is_sep(u) || (1..=31).contains(&u) || matches!(u, 0x3A | 0x2A | 0x3F | 0x22 | 0x3C | 0x3E | 0x7C)
+    })
 }
 
 /// The names of a Windows path, without the empty ones of doubled or trailing separators.
@@ -376,6 +387,17 @@ pub fn by_id_failed(marks: u8, name_error: Option<String>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_no_windows_path_can_hold() {
+        let w = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        for bad in ["a\\b", "a/b", "ccpp-2025-11-23-18:28:47", "OMZ::plugins", "a*", "a?", "a\"b", "a<b", "a>b", "a|b", "a\u{1}b", "\u{1f}"] {
+            assert!(unnameable(&w(bad)), "{bad:?}");
+        }
+        for good in ["bin", "a b", "x2d", "ü.txt", "a.b", "[x]", "{y}", "100%", "#1", "a\u{7f}b", "\u{ff1a}"] {
+            assert!(!unnameable(&w(good)), "{good:?}");
+        }
+    }
 
     /// The units RtlUpcaseUnicodeChar changes that the tests need (identity elsewhere): it maps ÿ
     /// and ⱥ (whose upper cases have UTF-8 forms of another length) and σ, and leaves ı, ß, ς, the

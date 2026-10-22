@@ -46,7 +46,7 @@ TEXT = Texts(
         "group_name": "{folder} 中 {count} 个小项",
         "bad_node": "扫描结果中没有这一项",
         "virtual": "MFT 伪文件夹中的项不在磁盘上",
-        "bad_name": "它或上级文件夹的名字里有 \\ 或 /，没有路径能找到它",
+        "bad_name": "它或上级文件夹的名字里有路径不能有的字符，没有路径能找到它",
         "dup_name": "它或上级文件夹与同一文件夹里的另一项名字完全相同，按路径找到的可能是另一项",
         "trailing_name": "它或上级文件夹的名字以点或空格结尾，Windows 按路径找到的不是它",
         "not_folder": "小项聚合块的所在位置不是文件夹",
@@ -150,6 +150,16 @@ class _Entry:
 
     def covered(self) -> list[str]:
         return self.member_keys if self.group else [self.key]
+
+
+def _unnameable(name: str) -> bool:
+    """No path can hold this name, so a delete by path would reach something else or nothing:
+    on Windows the characters worker.unnameable lists, elsewhere only the separator."""
+    if os.name == "nt":
+        from ..scan.worker import unnameable
+
+        return unnameable(name)
+    return os.sep in name
 
 
 def _key(path: str) -> str:
@@ -436,10 +446,9 @@ class Basket:
         if any(c["flags"][n] & np.uint32(Flag.VIRTUAL) for n in line):
             return TEXT["virtual"]
         below = [n for n in line if c["depth"][n] > 1]  # the scan root's own name is a path
-        # a name with a separator (WinBtrfs shows Linux names with a backslash as they are): its
-        # path names something else, or nothing
-        seps = tuple(s for s in (os.sep, os.altsep) if s)
-        if any(any(s in store.name(n) for s in seps) for n in below):
+        # a name no path can hold (WinBtrfs shows Linux names with a \ or : as they are): its path
+        # names something else, or nothing
+        if any(_unnameable(store.name(n)) for n in below):
             return TEXT["bad_name"]
         # the very same name twice in one folder (WinBtrfs shows invalid UTF-8 as U+FFFD): the scan
         # lists each with its own contents, the path opens one of them

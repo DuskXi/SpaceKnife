@@ -93,7 +93,7 @@ CASE_ERROR = (
     "cannot be opened by its name: another entry in this folder has the same name in a different case"
 )
 DUP_ERROR = "cannot be opened by its name: another entry in this folder has the same name as Windows shows it"
-BADNAME_ERROR = "cannot be opened by its name: it contains a backslash or slash"
+BADNAME_ERROR = "cannot be opened by its name: it contains a character Windows names cannot hold"
 CAP_ERROR = "not read: too many entries in one pass in folders that can only be opened by file id"
 INCOMPLETE_ERROR = "listed incompletely when opened by its file id"
 
@@ -329,8 +329,8 @@ def case_marks(names: list[str], dirs: list[int]) -> dict[int, str]:
     opened, on roots that ``verify_names``: ``strict`` when another entry has the same name under
     ``str.upper()`` (it groups every pair the Windows upcase does, and a few more: checked by
     test; the stored name decides), ``dup`` for a subfolder after the first entry of the very same
-    name (WinBtrfs shows invalid UTF-8 as U+FFFD), ``bad`` for a name with a ``\\`` or ``/``,
-    which a path cannot hold. Unmarked subfolders are not in the result."""
+    name (WinBtrfs shows invalid UTF-8 as U+FFFD), ``bad`` for a name no Windows path can hold
+    (:func:`unnameable`). Unmarked subfolders are not in the result."""
     groups: dict[str, list[int]] = {}
     for j, name in enumerate(names):
         groups.setdefault(name.upper(), []).append(j)
@@ -345,9 +345,19 @@ def case_marks(names: list[str], dirs: list[int]) -> dict[int, str]:
                 marks[j] = "dup" if names[j] in seen else "strict"
             seen.add(names[j])
     for j in dirs:
-        if "\\" in names[j] or "/" in names[j]:
+        if unnameable(names[j]):
             marks[j] = "bad"
     return marks
+
+
+_UNNAMEABLE = frozenset('\\/:*?"<>|') | frozenset(map(chr, range(1, 32)))
+
+
+def unnameable(name: str) -> bool:
+    """A name no Windows path can hold (hardscan/case.rs ``unnameable``): a separator, the stream
+    separator ``:``, a wildcard or DOS wildcard (``* ? " < >``), ``|`` or a control character.
+    WinBtrfs lists Linux names that have them as they are."""
+    return any(c in _UNNAMEABLE for c in name)
 
 
 _NO_NAME = {"dup": DUP_ERROR, "bad": BADNAME_ERROR}
