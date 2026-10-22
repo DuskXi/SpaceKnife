@@ -133,8 +133,9 @@ def run(
         desc = str(sort).startswith("-")
         key = str(sort).lstrip("-+")
         if key not in QUERY_COLUMNS or key in ("name", "path"):
-            if key == "name":
-                names = [store.name(int(i)).casefold() for i in ids]
+            if key in ("name", "path"):
+                text = store.name if key == "name" else store.path
+                names = [text(int(i)).casefold() for i in ids]
                 order = sorted(range(len(ids)), key=names.__getitem__, reverse=desc)
                 ids = ids[np.asarray(order, dtype=np.int64)] if order else ids
             else:

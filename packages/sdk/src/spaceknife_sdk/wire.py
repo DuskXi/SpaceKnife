@@ -118,6 +118,13 @@ class Log(Msg):
     message: str = Field(max_length=8192)
 
 
+class ImageDrop(Msg):
+    """The plugin let go of a tree image (it mapped a newer one)."""
+
+    type: Literal["image_drop"] = "image_drop"
+    key: str = Field(max_length=128)
+
+
 class Heartbeat(Msg):
     type: Literal["heartbeat"] = "heartbeat"
     busy: list[int] = Field(default_factory=list, max_length=64)
@@ -125,7 +132,19 @@ class Heartbeat(Msg):
 
 
 FromPlugin = Annotated[
-    Hello | Ready | Result | Error | Progress | Chunk | Event | State | Toast | Request | Log | Heartbeat,
+    Hello
+    | Ready
+    | Result
+    | Error
+    | Progress
+    | Chunk
+    | Event
+    | State
+    | Toast
+    | Request
+    | Log
+    | Heartbeat
+    | ImageDrop,
     Field(discriminator="type"),
 ]
 FROM_PLUGIN: TypeAdapter[Any] = TypeAdapter(FromPlugin)

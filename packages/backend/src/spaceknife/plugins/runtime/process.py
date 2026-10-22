@@ -36,6 +36,8 @@ from .base import Callbacks, Chunk, PluginRuntime, RuntimeCallError, StartInfo
 CONNECT_TIMEOUT = 10.0
 READY_TIMEOUT = 30.0  # importing the plugin's code (numpy, pydantic …) on a cold disk
 HUNG_AFTER = 30.0  # calls in flight and not a word for this long: it is stuck
+CANCEL_GRACE = 5.0  # a cancelled call still running after this long: the process is stopped
+WATCH_EVERY = 1.0
 STDERR_LINES = 200
 _ACCEPT_SLICE = 0.25
 
@@ -101,6 +103,7 @@ class ProcessRuntime(PluginRuntime):
         self._last_seen = time.monotonic()
         self._stopping = False
         self._ready: asyncio.Future[dict[str, Any]] | None = None
+        self._zombies: dict[int, float] = {}  # cancelled calls not answered yet -> when to give up
 
     # ------------------------------------------------------------- lifecycle
 
@@ -260,6 +263,7 @@ class ProcessRuntime(PluginRuntime):
                 fut.set_exception(RuntimeCallError(code, message))
         self._pending.clear()
         self._chunks.clear()
+        self._zombies.clear()
 
     # ------------------------------------------------------------- the channel
 
@@ -325,6 +329,8 @@ class ProcessRuntime(PluginRuntime):
 
     def _dispatch(self, msg: Any, frames: list[bytes]) -> None:
         t = msg.type
+        if t in ("result", "error"):
+            self._zombies.pop(msg.id, None)
         if t == "result":
             fut = self._pending.pop(msg.id, None)
             self._chunks.pop(msg.id, None)
@@ -375,9 +381,16 @@ class ProcessRuntime(PluginRuntime):
 
     async def _watchdog(self) -> None:
         while True:
-            await asyncio.sleep(wire.HEARTBEAT_S)
+            await asyncio.sleep(WATCH_EVERY)
             p = self.popen
             if p is None or self._stopping:
+                return
+            now = time.monotonic()
+            if any(now > until for until in self._zombies.values()):
+                logger.warning("plugin {} did not stop a cancelled call; stopping it", self.start_info.plugin)
+                self.kill()
+                self.state = "crashed"
+                self.callbacks.exited(None, "the plugin did not stop a cancelled call")
                 return
             if self._pending and time.monotonic() - self._last_seen > HUNG_AFTER:
                 logger.warning("plugin {} is not responding; stopping it", self.start_info.plugin)
@@ -417,6 +430,7 @@ class ProcessRuntime(PluginRuntime):
             self._last_seen = max(self._last_seen, time.monotonic())
             return await fut
         except asyncio.CancelledError:
+            self._zombies[call_id] = time.monotonic() + CANCEL_GRACE
             with contextlib.suppress(RuntimeCallError):
                 await self._send({"type": "cancel", "id": call_id})
             raise

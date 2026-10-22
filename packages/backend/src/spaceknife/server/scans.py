@@ -268,7 +268,7 @@ class ScanHandle:
     auto_snapshot: bool = True
     listeners: dict[str, Callable[[p.ScanStatus], None]] = field(default_factory=dict)
     wanted: Literal["auto", "mft", "hard"] = "hard"
-    method: Literal["hard", "mft", "snapshot"] = "hard"
+    method: Literal["hard", "mft", "snapshot", "source"] = "hard"
     phase: str = ""
     fallback: str = ""
     governor: IoGovernor | None = None
@@ -393,6 +393,8 @@ class ScanManager:
         self.keepers: list[Callable[[ScanHandle], Awaitable[None]]] = []
         # ("started" | "opened" | "done" | "closed", handle): the plugin host's hooks
         self.events: list[Callable[[str, ScanHandle], None]] = []
+        # scan.start {source, uri}: a plugin's scan source (set by the server)
+        self.source_start: Callable[[p.ScanStartParams], Awaitable[ScanHandle]] | None = None
         # set by the ViewManager: scans with open views are never evicted; evicted scans are released
         # (when, bytes) of the scans closed lately: the C heap keeps about that much for the next
         # scan to reuse, which the memory watchdog allows for (server/diag.py)
@@ -491,6 +493,10 @@ class ScanManager:
     # ------------------------------------------------------------------ scans
 
     async def start(self, params: p.ScanStartParams) -> ScanHandle:
+        if params.source is not None:
+            if self.source_start is None:
+                raise RpcError(ErrorCode.INVALID_PARAMS, "scan sources need plugins")
+            return await self.source_start(params)
         self._make_room()
         st = self.settings
         workers = params.workers

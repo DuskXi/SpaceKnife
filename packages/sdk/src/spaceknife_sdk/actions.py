@@ -51,6 +51,8 @@ def normalize_action(raw: Any) -> dict[str, Any]:
         out = dict(raw)
     else:
         keys = [k for k in raw if k in ACTION_KINDS]
+        if "setting" in keys:  # { setting = "x", toggle = true }: toggle is the setting's option here
+            keys = ["setting"]
         if len(keys) != 1:
             raise ActionError(f"an action names exactly one of {', '.join(ACTION_KINDS)}; got {sorted(raw)}")
         kind = keys[0]

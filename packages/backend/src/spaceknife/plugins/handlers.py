@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 from typing import TYPE_CHECKING, Any
 
 from spaceknife_protocol import CAP_COLORS, CAP_PANELS, CAP_PLUGINS
@@ -24,7 +23,6 @@ from spaceknife_protocol.methods import (
     PLUGIN_RESTART,
     PLUGIN_UNINSTALL,
 )
-from spaceknife_protocol.text import LANG
 
 from .. import i18n
 from ..extensions import EXTENSIONS
@@ -368,8 +366,6 @@ def install(server: Server) -> None:
     @router.method(INSIGHT_NODE)
     async def insight_node(session: Session, params: pp.InsightNodeParams) -> pp.InsightNodeResult:
         return await insight_cards(host, session if CAP_PLUGINS in session.capabilities else None, params)
-
-    _ = (LANG, time)
 
 
 __all__ = ["extensions_state", "insight_cards", "install", "node_fields"]

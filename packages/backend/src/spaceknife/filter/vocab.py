@@ -49,7 +49,8 @@ def _sets(lang: str) -> list[FilterSetInfo]:
     out = []
     for c in EXTENSIONS.of("node_set"):
         spec = c.spec
-        out.append(FilterSetInfo(id=c.id, name=spec.title.get(lang), aliases=[spec.title.zh, *spec.aliases]))
+        aliases = [c.local, spec.title.zh, *([spec.title.en] if spec.title.en else []), *spec.aliases]
+        out.append(FilterSetInfo(id=c.id, name=spec.title.get(lang), aliases=aliases))
     return out
 
 

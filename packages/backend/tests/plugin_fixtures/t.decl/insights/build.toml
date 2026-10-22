@@ -1,0 +1,12 @@
+version = 1
+
+[[rule]]
+id = "t-decl-gradle"
+kind = "cache"
+title = "Gradle 缓存"
+app = "Gradle"
+cleanup = "safe"
+reason = "Gradle 下载的依赖和构建缓存，删掉后下次构建会重新下载。"
+paths = ["**/.gradle/caches"]
+i18n.en.title = "Gradle cache"
+i18n.en.reason = "Dependencies and build cache Gradle downloaded; they come back with the next build."

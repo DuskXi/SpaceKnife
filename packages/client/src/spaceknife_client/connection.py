@@ -23,7 +23,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed
 from websockets.typing import Origin, Subprotocol
 
-from spaceknife_protocol import ALL_CAPABILITIES, PROTOCOL_VERSION, SUBPROTOCOL
+from spaceknife_protocol import KNOWN_CAPABILITIES, PROTOCOL_VERSION, SUBPROTOCOL
 from spaceknife_protocol.binary import BinaryFrameHeader, decode_frame
 from spaceknife_protocol.envelope import (
     ErrorObject,
@@ -74,7 +74,7 @@ class Connection:
         token: str,
         client: ClientInfo,
         *,
-        capabilities: Sequence[str] = ALL_CAPABILITIES,
+        capabilities: Sequence[str] = KNOWN_CAPABILITIES,
         protocol: str = PROTOCOL_VERSION,
         max_size: int = 64 << 20,
         origin: str | None = None,
@@ -135,6 +135,25 @@ class Connection:
         finally:
             self._pending.pop(req_id, None)
         return spec.result.model_validate(raw)
+
+    async def call_raw(self, method: str, params: dict[str, Any] | None = None) -> Any:
+        """A request by name with JSON params (a plugin's ``plugin.<id>.<name>``): the raw result."""
+        req_id = next(self._ids)
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        self._pending[req_id] = fut
+        await self.ws.send(dump_message(Request(id=req_id, method=method, params=params or {})))
+        try:
+            return await fut
+        except asyncio.CancelledError:
+            with contextlib.suppress(ConnectionClosed):
+                await self.notify_cancel(req_id)
+            raise
+        finally:
+            self._pending.pop(req_id, None)
+
+    def on_raw(self, name: str, handler: Callable[[dict[str, Any]], None]) -> None:
+        """Every notification named ``name`` (a plugin's events, topics) with its raw params."""
+        self._handlers[name].append(handler)
 
     async def notify_cancel(self, req_id: RequestId) -> None:
         params = CancelParams(id=req_id).model_dump(mode="json")

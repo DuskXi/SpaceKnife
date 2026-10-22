@@ -12,7 +12,6 @@ import concurrent.futures
 import contextlib
 import contextvars
 import importlib.util
-import inspect
 import itertools
 import os
 import queue
@@ -229,7 +228,15 @@ class Dispatcher:
             return await h.fn(*args)
         loop = asyncio.get_running_loop()
         cv = contextvars.copy_context()
-        return await loop.run_in_executor(self.executor, lambda: cv.run(h.fn, *args))
+        fut = loop.run_in_executor(self.executor, lambda: cv.run(h.fn, *args))
+        try:
+            return await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            # a thread cannot be stopped: the call counts as cancelled once the function has returned
+            # (if it never does, the host stops the whole process after its grace period)
+            with contextlib.suppress(BaseException):
+                await fut
+            raise
 
     async def _invoke(
         self, h: Handler, ctx: Context, params: Any, frames: list[bytes], emit: Emit
@@ -730,5 +737,3 @@ __all__ = [
     "state_from_init",
     "unload_plugin",
 ]
-
-_ = inspect  # kept for handler introspection helpers

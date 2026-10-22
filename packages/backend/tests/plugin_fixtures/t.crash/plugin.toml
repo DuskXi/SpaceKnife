@@ -1,0 +1,5 @@
+# Test plugin: errors and a process that dies.
+id = "t.crash"
+version = "0.1.0"
+name = { zh = "崩溃测试", en = "Crash test" }
+entry = "plugin.py"

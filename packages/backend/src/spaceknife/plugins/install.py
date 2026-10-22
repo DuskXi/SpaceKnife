@@ -74,8 +74,8 @@ def unpack_zip(source: Path, target: Path) -> None:
             len(n.parts) == 1 and not i.is_dir() for n, i in zip(names, zf.infolist(), strict=True)
         )
         for info in infos:
-            mode = (info.external_attr >> 16) & 0xFFFF
-            if stat.S_ISLNK(mode) or (mode and not stat.S_ISREG(mode) and not stat.S_ISDIR(mode)):
+            kind = stat.S_IFMT((info.external_attr >> 16) & 0xFFFF)  # 0: no Unix mode recorded
+            if kind and kind not in (stat.S_IFREG, stat.S_IFDIR):
                 raise InstallError(tr("压缩包里有链接或特殊文件：{name}", name=info.filename))
             total += info.file_size
             if total > MAX_BYTES:

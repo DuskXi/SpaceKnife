@@ -1,0 +1,5 @@
+# Test plugin: outputs past their limits.
+id = "t.big"
+version = "0.1.0"
+name = { zh = "超限测试", en = "Limits test" }
+entry = "plugin.py"

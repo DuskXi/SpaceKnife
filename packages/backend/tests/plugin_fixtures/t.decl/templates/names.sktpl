@@ -1,0 +1,7 @@
+@name=Names
+@file=names.txt
+@blocks=files
+@sort=size
+@order=desc
+@detail
+{ if {<%isfile%>} == {true} ? {<%file%>{&br}}}

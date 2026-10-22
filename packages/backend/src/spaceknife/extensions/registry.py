@@ -90,6 +90,8 @@ class Extensions:
         self._lock = threading.RLock()
         self._items: dict[str, dict[str, Contribution]] = {}
         self._points: dict[str, Point] = {}
+        self._seq: dict[tuple[str, str], int] = {}  # registration order: ties keep declaration order
+        self._next = 0
         self.version = 0
         self.listeners: dict[str, Listener] = {}
 
@@ -140,6 +142,8 @@ class Extensions:
                 for c in items:
                     self.point_of(c.kind).add(c)
                     self._items.setdefault(c.kind, {})[c.id] = c
+                    self._next += 1
+                    self._seq[(c.kind, c.id)] = self._next
                     done.append(c)
             except Exception as exc:
                 for c in reversed(done):
@@ -150,6 +154,7 @@ class Extensions:
 
     def _drop(self, c: Contribution) -> None:
         self._items.get(c.kind, {}).pop(c.id, None)
+        self._seq.pop((c.kind, c.id), None)
         try:
             self.point_of(c.kind).remove(c)
         except Exception:
@@ -187,10 +192,11 @@ class Extensions:
     # ------------------------------------------------------------- reading
 
     def of(self, kind: str) -> list[Contribution]:
-        """Contributions of ``kind``: by order, built-ins first, then by id."""
+        """Contributions of ``kind``: by order, built-ins first, then by plugin and as declared."""
         with self._lock:
             items = list(self._items.get(kind, {}).values())
-        return sorted(items, key=lambda c: (c.order, c.owner != BUILTIN, c.id))
+            seq = dict(self._seq)
+        return sorted(items, key=lambda c: (c.order, c.owner != BUILTIN, c.owner, seq.get((c.kind, c.id), 0)))
 
     def get(self, kind: str, id: str) -> Contribution | None:
         with self._lock:

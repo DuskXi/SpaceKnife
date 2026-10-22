@@ -39,6 +39,7 @@
  "插件的清单不合法：{reason}": "The plugin's manifest is not valid: {reason}",
  "无法移到回收站：{reason}": "Cannot move to the recycle bin: {reason}",
  "没有插件 {id}": "There is no plugin {id}",
+ "没有这个扫描来源：{id}": "There is no scan source {id}",
  "没有这种配色（插件可能已停用）": "There is no such colour mode (its plugin may be off)",
  "解压后超过 {mb} MiB": "Unpacked, it is larger than {mb} MiB",
  "设置文件里这些值不合法，已改用默认值：{reason}": "These values in the settings file were not valid and are back to their defaults: {reason}",

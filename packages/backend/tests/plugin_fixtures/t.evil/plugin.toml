@@ -1,0 +1,5 @@
+# Test plugin: tries everything it may not do (no permissions at all).
+id = "t.evil"
+version = "0.1.0"
+name = { zh = "越权测试", en = "Overreach test" }
+entry = "plugin.py"

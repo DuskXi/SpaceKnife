@@ -995,7 +995,7 @@ Values: type[BaseModel] = create_model(  # type: ignore[call-overload]
 
 class SettingsFile(BaseModel):
     version: int = FILE_VERSION
-    values: dict[str, SettingValue] = Field(default_factory=dict)
+    values: dict[str, Any] = Field(default_factory=dict)  # each checked on its own (SettingsStore._split)
 
 
 class SettingsError(ValueError):

@@ -129,6 +129,7 @@ class PluginHost:
         self._background: set[asyncio.Task[Any]] = set()
         self._closed = False
         self.dev_folders: list[Path] = []  # tests and ``plugin dev``: linked without the trust file
+        self.force_runtime: pp.PluginRuntimeKind | None = None  # MockHost: where linked plugins run
         ext_points.install()
 
     # ------------------------------------------------------------- lifecycle
@@ -233,7 +234,11 @@ class PluginHost:
         if not rec.has_code:
             return "declarative"
         assert rec.manifest is not None
-        if rec.builtin or (rec.manifest.runtime == "inprocess" and self.dev_mode):
+        if rec.builtin:
+            return "inprocess"
+        if self.force_runtime is not None and rec.dev:
+            return self.force_runtime
+        if rec.manifest.runtime == "inprocess" and self.dev_mode:
             return "inprocess"
         return "process"
 
@@ -276,6 +281,8 @@ class PluginHost:
             k for c in EXTENSIONS.owned(rec.id) if c.kind == "command" for k in getattr(c.impl, "keys", ())
         ]
         self.server.settings.plugins_changed()
+        if rec.runtime is not None:  # started to describe itself: its settings exist only now
+            await rec.runtime.update({"settings": self.server.settings.plugin_settings(rec.id)})
 
     async def _deactivate(self, rec: PluginRecord) -> None:
         await self._stop_runtime(rec)
@@ -817,7 +824,7 @@ class PluginHost:
             permissions=permission_infos(rec.requested, m.net_hosts if m else [], m.exec if m else []),
             net_hosts=list(m.net_hosts) if m else [],
             exec=list(m.exec) if m else [],
-            granted=sorted(rec.granted),  # type: ignore[arg-type]
+            granted=[p for p in pp.PERMISSIONS if p in rec.granted],
             contributions=dict(counts),
             keys=list(rec.keys),
             issues=[

@@ -1,0 +1,19 @@
+# Test plugin: one of each contribution that runs code.
+id = "t.full"
+version = "0.2.0"
+name = { zh = "完整测试", en = "Full test" }
+entry = "plugin.py"
+permissions = ["tree.read", "files.read", "basket.propose"]
+
+[[settings]]
+name = "min_size"
+title = { zh = "最小大小", en = "Minimum size" }
+default = 100
+unit = "B"
+
+[[commands]]
+name = "big"
+title = { zh = "大文件报告", en = "Big files report" }
+keys = ["Ctrl+Alt+B"]
+when = ["scan"]
+action = { open = "report:big" }

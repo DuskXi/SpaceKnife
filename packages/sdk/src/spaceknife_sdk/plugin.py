@@ -85,9 +85,17 @@ class Handler:
     is_gen: bool = False  # an async generator (streams, watchers)
 
 
-def _annotations(fn: Callable[..., Any]) -> dict[str, Any]:
+def _defining_locals() -> dict[str, Any]:
+    """The local names where a decorator was applied (models defined inside a function, tests)."""
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_filename == __file__:
+        frame = frame.f_back  # type: ignore[assignment]
+    return dict(frame.f_locals) if frame is not None else {}
+
+
+def _annotations(fn: Callable[..., Any], localns: dict[str, Any] | None = None) -> dict[str, Any]:
     try:
-        return typing.get_type_hints(fn)
+        return typing.get_type_hints(fn, localns=localns)
     except Exception:  # unresolved forward references: the check reports missing types
         return dict(getattr(fn, "__annotations__", {}))
 
@@ -139,7 +147,8 @@ class Plugin:
         self.states: dict[str, type[BaseModel]] = {}
         self.streams: dict[str, Handler] = {}
         self.issues: list[Issue] = []
-        _INSTANCES.append(self)
+        if _LOADING:  # the runtime is importing a plugin's entry: it looks for this instance
+            _INSTANCES.append(self)
 
     @property
     def id(self) -> str:
@@ -164,7 +173,7 @@ class Plugin:
     ) -> Handler:
         if (kind, name) in self.handlers:
             self.issues.append(Issue("duplicate", f"{kind} {name!r} is defined twice"))
-        hints = _annotations(fn)
+        hints = _annotations(fn, _defining_locals())
         arity = _arity(fn)
         if params is None and kind in ("method", "stream") and arity >= 2:
             names = list(inspect.signature(fn).parameters)
@@ -592,12 +601,14 @@ class _Loading:
 
     def __exit__(self, *exc: object) -> None:
         _LOADING.remove(self.entry)
+        self.made = _INSTANCES[self.start :]
+        del _INSTANCES[self.start :]
 
     def instance(self) -> Plugin | None:
-        made = _INSTANCES[self.start :]
+        made = getattr(self, "made", None)
+        if made is None:
+            made = _INSTANCES[self.start :]
         return made[-1] if made else None
 
 
 __all__ = ["Description", "Handler", "Plugin", "describe_declarative", "loaded"]
-
-_ = sys  # the module object is used by the runtime to drop plugin modules

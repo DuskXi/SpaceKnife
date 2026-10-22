@@ -10,13 +10,14 @@ the same nodes). The host unlinks every segment it made.
 from __future__ import annotations
 
 import contextlib
+import mmap
+import os
 import secrets
 import sys
 import threading
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from multiprocessing import shared_memory
 from typing import Any
 
 import numpy as np
@@ -33,6 +34,38 @@ def _pad(n: int) -> int:
     return (-n) % ALIGN
 
 
+class Segment:
+    """A named shared memory segment the host writes and plugin processes map read-only.
+
+    Made directly (not with ``multiprocessing.shared_memory``, whose resource tracker would count the
+    host's own unlinking as a leak): a POSIX ``shm_open`` object, or a named Windows section.
+    """
+
+    def __init__(self, name: str, size: int) -> None:
+        self.name = name
+        self.size = size
+        if sys.platform == "win32":
+            self.mm = mmap.mmap(-1, size, tagname=name)  # a new section backed by the paging file
+        else:
+            import _posixshmem  # type: ignore[import-not-found]  # CPython's, behind shared_memory
+
+            fd = _posixshmem.shm_open("/" + name, os.O_CREAT | os.O_EXCL | os.O_RDWR, mode=0o600)
+            try:
+                os.ftruncate(fd, size)
+                self.mm = mmap.mmap(fd, size)
+            finally:
+                os.close(fd)
+
+    def close(self) -> None:
+        with contextlib.suppress(BufferError, ValueError):
+            self.mm.close()
+        if sys.platform != "win32":
+            import _posixshmem
+
+            with contextlib.suppress(FileNotFoundError, OSError):
+                _posixshmem.shm_unlink("/" + self.name)
+
+
 @dataclass(slots=True)
 class Exported:
     key: str
@@ -41,7 +74,7 @@ class Exported:
     epoch: int
     n: int
     columns: frozenset[str]
-    shm: shared_memory.SharedMemory
+    shm: Segment
     desc: dict[str, Any]
     users: set[str] = field(default_factory=set)
     made: float = field(default_factory=time.monotonic)
@@ -51,10 +84,7 @@ class Exported:
         return int(self.desc["size"])
 
     def release(self) -> None:
-        with contextlib.suppress(Exception):
-            self.shm.close()
-        with contextlib.suppress(FileNotFoundError, OSError):
-            self.shm.unlink()
+        self.shm.close()
 
 
 def export(
@@ -81,17 +111,11 @@ def export(
         offset += arr.nbytes + _pad(arr.nbytes)
     size = max(offset, ALIGN)
     name = "sk" + secrets.token_hex(4)
-    shm = shared_memory.SharedMemory(name=name, create=True, size=size)
-    if sys.platform != "win32":  # the host unlinks it; the tracker would warn about a "leak"
-        with contextlib.suppress(Exception):
-            from multiprocessing import resource_tracker
-
-            resource_tracker.unregister(shm._name, "shared_memory")  # type: ignore[attr-defined]
-    buf = shm.buf
-    assert buf is not None
+    shm = Segment(name, size)
     for spec, arr in zip(layout, arrays.values(), strict=True):
-        dst = np.ndarray((n,), dtype=np.dtype(spec["dtype"]), buffer=buf, offset=spec["offset"])
+        dst = np.ndarray((n,), dtype=np.dtype(spec["dtype"]), buffer=shm.mm, offset=spec["offset"])
         dst[:] = arr
+        del dst  # no export of the mapping left behind: it can close
     version = int(store.version)
     epoch = int(getattr(store, "epoch", 0))
     key = f"{scan_id}:{version}:{name}"

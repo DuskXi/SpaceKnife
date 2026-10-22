@@ -17,7 +17,6 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from spaceknife_protocol.plugins import (
-    MAX_TABLE_ROWS,
     BarItem,
     BarsBlock,
     Block,
@@ -160,7 +159,7 @@ def table(
         records = [dict(r) for r in rows]
         refs = _refs([r.get("node") for r in records])
     out: list[TableRow] = []
-    for rec, ref in zip(records[:MAX_TABLE_ROWS], refs, strict=False):
+    for rec, ref in zip(records, refs, strict=False):  # the host cuts to MAX_TABLE_ROWS and says so
         cells = {k: _cell(rec.get(k)) for k in keys}
         acts = rec.get("actions") or []
         out.append(TableRow(cells=cells, node=ref, actions=list(acts)))

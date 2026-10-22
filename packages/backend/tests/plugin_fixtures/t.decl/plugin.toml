@@ -1,0 +1,97 @@
+# Test plugin: one of each declarative contribution, no code.
+id = "t.decl"
+version = "0.1.0"
+name = { zh = "声明式测试", en = "Declarative test" }
+description = { zh = "每种声明式贡献各一个。", en = "One of each declarative contribution." }
+icon = "icons/star.svg"
+
+[[commands]]
+name = "logs"
+title = { zh = "只看日志", en = "Only logs" }
+keys = ["Ctrl+Alt+H"]
+aliases = ["logs"]
+when = ["view"]
+menus = ["node", "inspector"]
+action = { filter = "*.log" }
+
+[[commands]]
+name = "about_open"
+title = "打开说明"
+action = { open = "report:about" }
+
+[[keys]]
+key = "Ctrl+Alt+J"
+command = "view.rescan"
+
+[[keys]]
+key = "Ctrl+Alt+K"
+command = "logs"
+
+[[settings]]
+name = "level"
+title = { zh = "级别", en = "Level" }
+default = 3
+min = 1
+max = 9
+
+[[settings]]
+name = "mode"
+title = { zh = "模式", en = "Mode" }
+default = "a"
+options = [["a", { zh = "甲", en = "A" }], ["b", { zh = "乙", en = "B" }]]
+
+[[settings]]
+name = "fast"
+title = { zh = "快速", en = "Fast" }
+default = false
+
+[[reports]]
+name = "about"
+title = { zh = "说明", en = "About" }
+slot = "dialog"
+blocks = [{ type = "md", text = { zh = "这是说明。", en = "This is the about text." } }]
+
+[[visualizations]]
+name = "files_flame"
+title = { zh = "文件数火焰图", en = "Flame graph by file count" }
+base = "flame"
+size = "files"
+
+[[color_modes]]
+name = "media"
+title = { zh = "媒体类型", en = "Media type" }
+palette = ["muted", "#3F7FBF", "#BF7F3F"]
+legend = [{ zh = "其他", en = "Other" }, { zh = "视频", en = "Video" }, { zh = "图片", en = "Images" }]
+by = "ext"
+map = { mp4 = 1, mkv = 1, jpg = 2, png = 2 }
+
+[[color_modes]]
+name = "age"
+title = { zh = "新旧", en = "Age" }
+palette = ["muted", "ok", "warn", "danger"]
+by = "age"
+bands = ["30d", "1y"]
+
+[[export_templates]]
+name = "names"
+file = "templates/names.sktpl"
+title = { zh = "文件名列表", en = "File names" }
+
+[[classes]]
+name = "cad"
+title = { zh = "CAD 图纸", en = "CAD drawings" }
+exts = ["dwg", "dxf"]
+color = "#3F7FBF"
+
+[[folder_rules]]
+glob = "**/.gradle/caches"
+class = "cad"
+
+[[filters]]
+name = "big"
+title = { zh = "大文件", en = "Big files" }
+expr = ">1mb"
+
+[[panels]]
+name = "board"
+title = { zh = "面板", en = "Board" }

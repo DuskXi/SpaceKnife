@@ -1,0 +1,7 @@
+# Test plugin: time limits, cancellation, latest-wins.
+id = "t.slow"
+version = "0.1.0"
+name = { zh = "慢测试", en = "Slow test" }
+entry = "plugin.py"
+[limits]
+timeout_s = 30

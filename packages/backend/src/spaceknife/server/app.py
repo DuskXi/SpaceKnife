@@ -113,6 +113,7 @@ class Server:
         install_update_handlers(self)  # after the settings handlers: their listener sets the language
         install_plugin_handlers(self)
         self.topics.fallback = self.plugins.open_topic
+        self.scans.source_start = self._start_source
         self.scans.events.append(self._scan_event)
         self.settings.listeners["plugins"] = self._settings_changed
         self._lang = self.settings.state().language
@@ -125,6 +126,11 @@ class Server:
         from ..extensions import capabilities
 
         return capabilities()
+
+    async def _start_source(self, params: Any) -> Any:
+        from ..plugins.sources import start_source
+
+        return await start_source(self.plugins, params)
 
     def _scan_event(self, what: str, handle: object) -> None:
         roots = [r.path for r in getattr(handle, "roots", [])]
