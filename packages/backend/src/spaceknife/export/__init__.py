@@ -58,6 +58,7 @@ __all__ = [
     "iter_html",
     "iter_json",
     "parse_template",
+    "plugin_targets",
     "render",
     "render_chunks",
     "resolve",
@@ -91,14 +92,30 @@ def builtin_template(name: str) -> ExportTemplate | None:
     return parse_template(source, name) if source is not None else None
 
 
+def plugin_targets() -> list[tuple[str, ExportTemplate | ExportFormat]]:
+    """The enabled plugins' templates, then their formats, by full id (export.targets, the CLI)."""
+    from ..extensions import EXTENSIONS
+
+    out: list[tuple[str, ExportTemplate | ExportFormat]] = []
+    for kind in ("export_template", "export_format"):
+        for c in EXTENSIONS.of(kind):
+            if c.impl is not None:
+                out.append((c.id, c.impl))
+    return out
+
+
 def resolve(name: str, *, cwd: Path | None = None) -> ExportTemplate | ExportFormat:
-    """A built-in template, then a format key, then a template file (relative to ``cwd``)."""
+    """A built-in template, then a format key, then a plugin's template or format (by full id), then
+    a template file (relative to ``cwd``)."""
     found = builtin_template(name)
     if found is not None:
         return found
     fmt = FORMATS.get(name.strip().lower())
     if fmt is not None:
         return fmt
+    for key, target in plugin_targets():
+        if key == name.strip():
+            return target
     path = Path(name).expanduser()
     if cwd is not None and not path.is_absolute():
         path = cwd / path
@@ -122,14 +139,14 @@ def export_chunks(
     *,
     match: np.ndarray | None = None,
     filter_text: str = "",
-) -> Iterator[str]:
+) -> Iterator[str | bytes]:
     """The output of ``target`` for the tree below ``root`` (0: every scan root), in pieces."""
     if isinstance(target, ExportTemplate):
         return render_chunks(store, root, target, match=match)
     return target.chunks(store, root, match=match, filter_text=filter_text)
 
 
-def write_export(path: Path, chunks: Iterable[str], *, bom: bool = False) -> int:
+def write_export(path: Path, chunks: Iterable[str | bytes], *, bom: bool = False) -> int:
     """Write ``chunks`` to ``path`` as UTF-8, atomically (a temporary file, then a rename).
 
     Names that are not valid Unicode (a lone surrogate from a Windows name, a POSIX name that is
@@ -144,7 +161,7 @@ def write_export(path: Path, chunks: Iterable[str], *, bom: bool = False) -> int
                 fh.write(b"\xef\xbb\xbf")
                 written += 3
             for chunk in chunks:
-                data = chunk.encode("utf-8", "backslashreplace")
+                data = chunk if isinstance(chunk, bytes) else chunk.encode("utf-8", "backslashreplace")
                 fh.write(data)
                 written += len(data)
         os.replace(tmp, path)

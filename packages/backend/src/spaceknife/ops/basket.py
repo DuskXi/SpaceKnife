@@ -83,6 +83,8 @@ class BasketItem:
     volume: str = ""  # mount point of the volume holding it
     status: Status = "ready"
     note: str = ""  # Chinese: who holds it open, hard links, what failed …
+    origin: str | None = None  # the plugin cleanup that proposed it (full id), None: the user
+    reason: str = ""  # why it was proposed
 
 
 @dataclass(frozen=True, slots=True)
@@ -259,10 +261,18 @@ class Basket:
     # ------------------------------------------------------------------ changes
 
     def add(
-        self, store: NodeStore, scan_id: str, nodes: list[int], members: list[int] | None = None
+        self,
+        store: NodeStore,
+        scan_id: str,
+        nodes: list[int],
+        members: list[int] | None = None,
+        *,
+        origin: str | None = None,
+        reasons: list[str] | None = None,
     ) -> AddResult:
         """Add nodes of one scan; with ``members``, ``nodes`` is one folder and the members (its
-        direct children) become one small-item group (UI-W5-29)."""
+        direct children) become one small-item group (UI-W5-29). ``origin`` and ``reasons`` (per
+        node): a plugin's cleanup proposed them, and why (shown in the basket)."""
         with self._lock:
             result = AddResult()
             if members is not None:
@@ -270,8 +280,9 @@ class Basket:
                     raise ValueError("a small-item group takes exactly one folder")
                 self._add_group(store, scan_id, nodes[0], members, result)
             else:
-                for node in nodes:
-                    self._add_node(store, scan_id, node, result)
+                for i, node in enumerate(nodes):
+                    why = reasons[i] if reasons is not None and i < len(reasons) else ""
+                    self._add_node(store, scan_id, node, result, origin=origin, why=why)
             # an item added and absorbed within this call is simply merged into its absorber
             gone = set(result.absorbed) & set(result.added)
             if gone:
@@ -417,7 +428,16 @@ class Basket:
             return TEXT["virtual"]
         return None
 
-    def _add_node(self, store: NodeStore, scan_id: str, node: int, result: AddResult) -> None:
+    def _add_node(
+        self,
+        store: NodeStore,
+        scan_id: str,
+        node: int,
+        result: AddResult,
+        *,
+        origin: str | None = None,
+        why: str = "",
+    ) -> None:
         bad = self._check_node(store, node)
         path = store.path(node) if 0 < node < len(store) else str(node)
         if bad is not None:
@@ -440,6 +460,8 @@ class Basket:
             kind=kind,
             scan_id=scan_id,
             volume=self._volume(store, node),
+            origin=origin,
+            reason=why[:200],
         )
         entry = _Entry(
             item=item, key=key, measure=_measure(store, [node]), fingerprint=_fingerprint(store, [node])

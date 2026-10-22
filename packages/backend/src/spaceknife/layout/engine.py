@@ -288,5 +288,6 @@ registry.register(
         order=0,
         engine=TreemapEngine,
         default_color="class",
+        aliases=("visualization treemap", "treemap"),
     )
 )

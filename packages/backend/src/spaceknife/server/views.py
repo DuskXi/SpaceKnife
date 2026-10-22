@@ -29,6 +29,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EVENT_VIEW_FRAME
 
 from .. import paths
+from ..extensions.colors import color_unavailable
 from ..i18n import tr
 from ..layout import registry
 from ..layout.api import Engine
@@ -44,6 +45,7 @@ from .rpc import CURRENT_REQUEST, RpcError
 if TYPE_CHECKING:
     from spaceknife_protocol.scan import ScanStatus
 
+    from ..plugins.host import PluginHost
     from ..store.nodes import NodeStore
     from .compares import ChangeTree, CompareHandle, CompareManager
     from .ops_service import OpsService
@@ -105,6 +107,7 @@ class ViewManager:
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults and live changes)
         self.compares: CompareManager | None = None  # set by CompareManager: compare views (W6)
         self.ops: OpsService | None = None  # set by the server: the basket follows tree changes (W5)
+        self.plugins: PluginHost | None = None  # set by the server: node sets of :set: filters
         scans.in_use = self.has_views  # MAX_SCANS eviction must not pull a scan from under its tabs
         scans.on_evict = self._release
 
@@ -181,6 +184,9 @@ class ViewManager:
         )
         view.set_viewport(params.viewport.width, params.viewport.height, params.viewport.dpr)
         view.scanning = bool(getattr(handle, "running", False)) and self._marks_scanning()
+        if self.plugins is not None:
+            plugins, scan_id, store = self.plugins, handle.id, handle.store
+            view.sets_for = lambda nf: plugins.set_masks(scan_id, store, [*nf.sets, *nf.not_sets])
         if cmp is not None:
             view.compare = cmp.tree  # before the settings: the direction only applies to compare views
         if params.settings is not None:
@@ -239,7 +245,11 @@ class ViewManager:
         # visualizations with a layout of their own with their default
         starts = {pv.DRAWLIST_LAYOUT: mode("appearance.default_color_mode")}
         starts |= dict.fromkeys((pv.FLAME_LAYOUT, pv.POLAR_LAYOUT), mode("appearance.partition_color_mode"))
-        colors = tuple((v.id, starts[v.layout]) for v in registry.all_visuals() if v.layout in starts)
+        colors = tuple(
+            (v.id, starts[v.layout])
+            for v in registry.all_visuals()
+            if v.layout in starts and v.plugin is None
+        )
         vis = showable(str(st.get("appearance.default_visual")), caps)
         visual = vis.id if vis is not None and (vis.compare or not compare) else BASELINE
         return ViewSettings(
@@ -254,7 +264,7 @@ class ViewManager:
             colors=colors,
             font_scale=int(st.get("treemap.font_scale")) / 100,
             aspect=aspect_of(int(st.get("treemap.aspect"))),
-            flame_origin=str(st.get("treemap.flame_origin")),
+            options=visual_options(st),
         )
 
     def apply_settings_live(self, st: SettingsStore) -> None:
@@ -265,14 +275,15 @@ class ViewManager:
         font_scale = int(st.get("treemap.font_scale")) / 100
         aspect = aspect_of(int(st.get("treemap.aspect")))
         geometry = (min_element, sort_by_size, font_scale, aspect)
-        flame = (("origin", str(st.get("treemap.flame_origin"))),)
+        options = dict(visual_options(st))
         for host in list(self.views.values()):
             v = host.view
             changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect) != geometry
             v.min_element, v.sort_by_size, v.font_scale, v.aspect = geometry
-            if v.visual_options.get("flame") != flame:
-                v.visual_options["flame"] = flame
-                changed = changed or v.visual == "flame"
+            for vis, opts in options.items():
+                if v.visual_options.get(vis) != opts:
+                    v.visual_options[vis] = opts
+                    changed = changed or v.visual == vis
             if changed:
                 asyncio.get_running_loop().create_task(self._repaint(host, "settings"))
 
@@ -456,6 +467,17 @@ def aspect_of(setting: int) -> float:
     return float(2 ** (setting / 60))
 
 
+def visual_options(st: SettingsStore | None) -> tuple[tuple[str, tuple[tuple[str, object], ...]], ...]:
+    """Each visualization's own options from the settings they map to (``Visualization.options``)."""
+    if st is None:
+        return ()
+    out = []
+    for v in registry.all_visuals():
+        if v.options:
+            out.append((v.id, tuple((name, st.get(key)) for name, key in v.options if st.has(key))))
+    return tuple(out)
+
+
 def fall_back(s: pv.ViewSettingsParams, caps: Collection[str], *, compare: bool) -> pv.ViewSettingsParams:
     """``view.open``: a visualization the session can't show becomes the treemap; the ``branch``
     colour mode without ``visuals.v1`` is left out (the view keeps its default)."""
@@ -466,8 +488,16 @@ def fall_back(s: pv.ViewSettingsParams, caps: Collection[str], *, compare: bool)
             update["visual"] = BASELINE
     if s.color_mode == "branch" and CAP_VISUALS not in caps:
         update["color_mode"] = None
-    if s.colors and CAP_VISUALS not in caps:
-        update["colors"] = {vis: mode for vis, mode in s.colors.items() if mode != "branch"}
+    if s.color_mode is not None and color_unavailable(s.color_mode, caps) is not None:
+        update["color_mode"] = None
+    if s.colors and (
+        CAP_VISUALS not in caps or any(color_unavailable(m, caps) is not None for m in s.colors.values())
+    ):
+        update["colors"] = {
+            vis: mode
+            for vis, mode in s.colors.items()
+            if (mode != "branch" or CAP_VISUALS in caps) and color_unavailable(mode, caps) is None
+        }
     return s.model_copy(update=update) if update else s
 
 
@@ -483,6 +513,10 @@ def apply_settings(view: View, s: pv.ViewSettingsParams, caps: Collection[str]) 
         s.color_mode == "branch" or (s.colors is not None and "branch" in s.colors.values())
     ):
         raise RpcError(ErrorCode.INVALID_PARAMS, tr("这种配色在当前界面不可用"))
+    for mode in [s.color_mode, *(s.colors or {}).values()]:
+        reason = color_unavailable(mode, caps) if mode is not None else None
+        if reason is not None:
+            raise RpcError(ErrorCode.INVALID_PARAMS, reason)
     if s.detail is not None:
         view.set_detail(s.detail)
     if s.min_element is not None:
@@ -581,6 +615,8 @@ def frame_info(host: ViewHost, frame: Frame, reason: str) -> pv.FrameInfo:
         layout=d.layout,
         geometry=d.meta,
         root=pv.FrameRoot(**asdict(frame.root)) if drawn else None,
+        palette=frame.palette if frame.pal is not None else None,
+        size_unit=frame.size_unit,  # type: ignore[arg-type]
     )
 
 
@@ -601,6 +637,8 @@ def encode_draw(frame: Frame, view_id: str, seq: int, request_id: int | str | No
     if frame.delta is not None and frame.dstat is not None:  # compare views (W6)
         columns["delta"] = frame.delta
         columns["dstat"] = frame.dstat
+    if frame.pal is not None:  # colors.v1: a plugin colour mode's palette index per row
+        columns["pal"] = frame.pal
     return encode_frame(
         stream=pv.view_stream(view_id),
         layout=d.layout,

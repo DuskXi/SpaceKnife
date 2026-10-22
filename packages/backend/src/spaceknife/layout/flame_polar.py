@@ -131,5 +131,6 @@ FLAME_POLAR = register(
         order=2,
         engine=flame_polar_engine,
         default_color="branch",
+        aliases=("visualization polar", "polar flame graph", "radial", "rings"),
     )
 )

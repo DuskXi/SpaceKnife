@@ -72,7 +72,7 @@ def test_the_treemap_is_built_in() -> None:
         (replace(FAKE, id="treemap"), "already registered"),
         (replace(FAKE, id="test.other", api=ENGINE_API + 1), "engine API"),
         (replace(FAKE, id="Test"), "lowercase"),
-        (replace(FAKE, id="a" * 49), "lowercase"),  # too long
+        (replace(FAKE, id="a" * 65), "lowercase"),  # too long
         (replace(FAKE, id="test.other", layout="drawlist"), "layout"),  # no version
     ],
 )

@@ -6,6 +6,7 @@ requires-python = ">=3.12,<3.13"
 license = "MIT"
 dependencies = [
   "spaceknife-protocol",
+  "spaceknife-sdk",
   "pydantic>=2.9",
   "numpy>=2.1",
   "websockets>=15.0",
@@ -22,6 +23,7 @@ spaceknife = "spaceknife.cli:main"
 
 [tool.uv.sources]
 spaceknife-protocol = { workspace = true }
+spaceknife-sdk = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "spaceknife"

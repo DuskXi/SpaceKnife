@@ -6,7 +6,7 @@ import sys
 from functools import cache
 
 from spaceknife_protocol.classes import localized
-from spaceknife_protocol.filter import AgeField, AttrName, FilterVocab
+from spaceknife_protocol.filter import AgeField, AttrName, FilterSetInfo, FilterVocab
 from spaceknife_protocol.filter_syntax import default_vocab
 
 from .. import classes as class_table
@@ -27,18 +27,30 @@ _POSIX_MISSING_ATTRS: tuple[AttrName, ...] = (
 )
 
 
-_current: tuple[tuple[int, str], FilterVocab] | None = None
+_current: tuple[tuple[int, str, int], FilterVocab] | None = None
 
 
 def platform_vocab() -> FilterVocab:
-    """The vocabulary with the active class table; the same object until the table changes (the
-    parser caches its class index per vocabulary object)."""
+    """The vocabulary with the active class table and the plugins' node sets; the same object until
+    either changes (the parser caches its class index per vocabulary object)."""
     global _current
-    key = (class_table.version(), i18n.language())
+    from ..extensions import EXTENSIONS
+
+    key = (class_table.version(), i18n.language(), EXTENSIONS.version)
     if _current is None or _current[0] != key:
         shown = [localized(c, key[1]) for c in class_table.active().classes]  # M7.5: English names
-        _current = (key, _platform().model_copy(update={"classes": shown}))
+        _current = (key, _platform().model_copy(update={"classes": shown, "sets": _sets(key[1])}))
     return _current[1]
+
+
+def _sets(lang: str) -> list[FilterSetInfo]:
+    from ..extensions import EXTENSIONS
+
+    out = []
+    for c in EXTENSIONS.of("node_set"):
+        spec = c.spec
+        out.append(FilterSetInfo(id=c.id, name=spec.title.get(lang), aliases=[spec.title.zh, *spec.aliases]))
+    return out
 
 
 @cache

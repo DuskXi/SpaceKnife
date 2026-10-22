@@ -15,7 +15,7 @@ from .base import Params, Payload
 from .filter import FilterClassInfo
 
 SettingCategory = Literal[
-    "general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"
+    "general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about", "plugins"
 ]
 SettingControl = Literal["switch", "segmented", "number", "slider", "color", "text"]
 SettingApplies = Literal["now", "next_scan", "new_views"]
@@ -53,6 +53,7 @@ class SettingMeta(Payload):
         default=None,
         description="'key' (a switch that must be on) or 'key=value' for this row to be editable",
     )
+    plugin: str | None = Field(default=None, description="The plugin it belongs to (category 'plugins')")
 
 
 class SettingsState(Payload):

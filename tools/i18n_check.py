@@ -36,6 +36,8 @@ WRAPPERS = {"_", "tr"}
 TABLES = {"Texts"}
 # definitions whose texts are translated where they are shown (settings meta, palette, visual.list, …)
 REGISTERED = {"S", "C", "_c", "BuiltinInfo", "_Option", "Visualization"}
+# texts written in both languages where they are declared: T("中文", "English"), Text(zh=…, en=…)
+BILINGUAL = {"T", "Text"}
 IGNORE = re.compile(r"#\s*i18n:\s*ignore\s*$")
 
 
@@ -68,6 +70,21 @@ def _call_name(node: ast.AST | None) -> str | None:
         if isinstance(f, ast.Attribute):
             return f.attr
     return None
+
+
+def _bilingual(node: ast.AST, parent: ast.AST | None, parents: dict[int, ast.AST]) -> bool:
+    """``T("中文", "English")`` / ``Text(zh="中文", en="English")``: the Chinese text with its English."""
+    if isinstance(parent, ast.Call) and _call_name(parent) in BILINGUAL:
+        args = parent.args
+        if len(args) >= 2 and args[0] is node and isinstance(args[1], ast.Constant) and args[1].value:
+            return True
+        if any(k.arg == "en" for k in parent.keywords) and args and args[0] is node:
+            return True
+    if isinstance(parent, ast.keyword) and parent.arg == "zh":
+        call = parents.get(id(parent))
+        if isinstance(call, ast.Call) and _call_name(call) in BILINGUAL:
+            return any(k.arg == "en" for k in call.keywords)
+    return False
 
 
 def scan_python(paths: list[Path]) -> tuple[dict[str, set[str]], list[Problem]]:
@@ -109,6 +126,8 @@ def scan_python(paths: list[Path]) -> tuple[dict[str, set[str]], list[Problem]]:
             parent = parents.get(id(node))
             if isinstance(parent, ast.JoinedStr):
                 continue  # reported with the f-string
+            if _bilingual(node, parent, parents):
+                continue  # its English is right beside it
             if (
                 isinstance(parent, ast.Call)
                 and parent.args

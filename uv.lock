@@ -8,6 +8,7 @@ members = [
     "spaceknife-client",
     "spaceknife-native",
     "spaceknife-protocol",
+    "spaceknife-sdk",
 ]
 
 [manifest.dependency-groups]
@@ -23,6 +24,7 @@ dev = [
     { name = "spaceknife-backend", editable = "packages/backend" },
     { name = "spaceknife-client", editable = "packages/client" },
     { name = "spaceknife-protocol", editable = "packages/protocol" },
+    { name = "spaceknife-sdk", editable = "packages/sdk" },
 ]
 native = [{ name = "spaceknife-native", editable = "packages/native" }]
 package = [
@@ -650,6 +652,7 @@ dependencies = [
     { name = "pypinyin" },
     { name = "rich" },
     { name = "spaceknife-protocol" },
+    { name = "spaceknife-sdk" },
     { name = "typer" },
     { name = "websockets" },
     { name = "zstandard" },
@@ -664,6 +667,7 @@ requires-dist = [
     { name = "pypinyin", specifier = ">=0.53" },
     { name = "rich", specifier = ">=13.9" },
     { name = "spaceknife-protocol", editable = "packages/protocol" },
+    { name = "spaceknife-sdk", editable = "packages/sdk" },
     { name = "typer", specifier = ">=0.12" },
     { name = "websockets", specifier = ">=15.0" },
     { name = "zstandard", specifier = ">=0.23" },
@@ -712,6 +716,23 @@ dependencies = [
 requires-dist = [
     { name = "numpy", specifier = ">=2.1" },
     { name = "pydantic", specifier = ">=2.9" },
+]
+
+[[package]]
+name = "spaceknife-sdk"
+version = "0.1.0"
+source = { editable = "packages/sdk" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pydantic" },
+    { name = "spaceknife-protocol" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "numpy", specifier = ">=2.1" },
+    { name = "pydantic", specifier = ">=2.9" },
+    { name = "spaceknife-protocol", editable = "packages/protocol" },
 ]
 
 [[package]]

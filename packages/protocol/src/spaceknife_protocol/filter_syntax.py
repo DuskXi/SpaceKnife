@@ -43,6 +43,7 @@ from .filter import (
     MaskCond,
     PendingCond,
     Range,
+    SetCond,
     SizeCond,
     SizeField,
     TagColor,
@@ -144,7 +145,7 @@ ATTR_LETTER: dict[AttrName, str] = {
     "sparse": "sp",
     "ads": "ads",
 }
-VALUE_KEYWORDS = ("class", "tag", "attr", "attrs")
+VALUE_KEYWORDS = ("class", "tag", "attr", "attrs", "set")
 TAG_KEYWORDS = ("red", "yellow", "green", "blue", "all")
 KEYWORD_CANDIDATES = (":red", ":yellow", ":green", ":blue", ":all", ":tag:", ":attr:", ":class:")
 OPERATORS = ("<", ">", "<=", ">=")
@@ -385,6 +386,13 @@ class _Parser:
         self.cursor = None if cursor is None else min(self.u16.from16(cursor), len(text))
         self.vocab = vocab
         self.classes = _class_index(vocab)
+        self.sets: dict[str, str] = {}  # spelling (casefolded) -> set id
+        self.set_names: list[str] = []
+        for s in vocab.sets:
+            self.set_names.append(s.name)
+            for spelling in (s.id, s.name, *s.aliases):
+                self.sets.setdefault(spelling.casefold(), s.id)
+        self.keywords = KEYWORD_CANDIDATES + ((":set:",) if vocab.sets else ())
         self.tokens: list[FilterToken] = []
         self.conds: list[FilterCond] = []
         self.diags: list[FilterDiagnostic] = []
@@ -577,21 +585,25 @@ class _Parser:
         if j < b and t[j] == ":":
             kw_end = j + 1
             if word not in VALUE_KEYWORDS:
-                raise self._fail("unknown_keyword", p, kw_end, expected=KEYWORD_CANDIDATES)
+                raise self._fail("unknown_keyword", p, kw_end, expected=self.keywords)
             self._tok("keyword", p, kw_end)
             vs = self._ws(kw_end, b)
-            category: Category = "class" if word == "class" else "tag" if word == "tag" else "attr"
+            category: Category = (
+                "class" if word == "class" else "tag" if word == "tag" else "set" if word == "set" else "attr"
+            )
             if vs >= b:
                 self._complete(category, kw_end, kw_end, self._value_candidates(category, ""))
                 raise self._fail("incomplete", p, b, pending_ok=True, category=category)
             self._tok("value", vs, b)
             if word == "class":
                 return self._class(vs, neg)
+            if word == "set":
+                return self._set(vs, neg)
             if word == "tag":
                 return self._tag_list(vs, neg)
             return self._attr_list(vs, neg)
         rest = self._ws(j, b)
-        self._complete("keyword", p, j, [k for k in KEYWORD_CANDIDATES if k.startswith(t[p:j].lower())])
+        self._complete("keyword", p, j, [k for k in self.keywords if k.startswith(t[p:j].lower())])
         if word in TAG_KEYWORDS and rest >= b:
             self._tok("keyword", p, j)
             colors = list(TAG_COLORS) if word == "all" else [TAG_WORDS[word]]
@@ -603,12 +615,12 @@ class _Parser:
                 negated=neg,
             )
         self._tok("keyword", p, b)
-        prefix_of_keyword = rest >= b and any(k.startswith(t[p:j].lower()) for k in KEYWORD_CANDIDATES)
+        prefix_of_keyword = rest >= b and any(k.startswith(t[p:j].lower()) for k in self.keywords)
         raise self._fail(
             "incomplete" if not word and rest >= b else "unknown_keyword",
             p,
             b,
-            expected=KEYWORD_CANDIDATES,
+            expected=self.keywords,
             pending_ok=prefix_of_keyword,
         )
 
@@ -622,6 +634,8 @@ class _Parser:
             return seen
         if category == "tag":
             return [w for w in (*TAG_COLORS, "all") if w.startswith(key)]
+        if category == "set":
+            return [n for n in self.set_names if n.casefold().startswith(key)]
         return [a for a in ATTR_NAMES if a.startswith(key) or ATTR_LETTER[a].startswith(key)]
 
     def _class(self, vs: int, neg: bool) -> ClassCond:
@@ -640,6 +654,19 @@ class _Parser:
             )
         return ClassCond(
             class_id=cid, text=("|" if neg else "") + f":class:{cid}", start=self.us, end=self.ue, negated=neg
+        )
+
+    def _set(self, vs: int, neg: bool) -> SetCond:
+        name = self.text[vs : self.b].strip()
+        self._complete("set", vs, self.b, self._value_candidates("set", name))
+        sid = self.sets.get(name.casefold())
+        if sid is None:
+            partial = any(sp.startswith(name.casefold()) for sp in self.sets)
+            raise self._fail(
+                "unknown_set", vs, self.b, expected=self.set_names, pending_ok=partial, category="set"
+            )
+        return SetCond(
+            set_id=sid, text=("|" if neg else "") + f":set:{sid}", start=self.us, end=self.ue, negated=neg
         )
 
     def _word(self, i: int, stop: str) -> int:
@@ -899,6 +926,8 @@ def normalize(conds: Iterable[FilterCond], vocab: FilterVocab | None = None) -> 
     not_folders: set[str] = set()
     not_tags: set[TagColor] = set()
     not_attrs: set[tuple[tuple[AttrName, ...], tuple[AttrName, ...]]] = set()
+    sets: set[str] = set()
+    not_sets: set[str] = set()
 
     def merge(ranges: dict[str, list[int | None]], key: str, lo: int | None, hi: int | None) -> None:
         cur = ranges.setdefault(key, [None, None])
@@ -914,6 +943,8 @@ def normalize(conds: Iterable[FilterCond], vocab: FilterVocab | None = None) -> 
             (not_folders if c.negated else folders).add(c.pattern)
         elif isinstance(c, ClassCond):
             (not_classes if c.negated else classes).add(c.class_id)
+        elif isinstance(c, SetCond):
+            (not_sets if c.negated else sets).add(c.set_id)
         elif isinstance(c, TagCond):
             if c.negated:
                 not_tags |= set(c.colors)
@@ -937,6 +968,7 @@ def normalize(conds: Iterable[FilterCond], vocab: FilterVocab | None = None) -> 
     out_folders = sorted(folders)
     pieces += [format_mask(m) for m in out_masks]
     pieces += [f":class:{k}" for k in out_classes]
+    pieces += [f":set:{k}" for k in sorted(sets)]
     pieces += ["\\" + format_mask(f) for f in out_folders]
     out_tags = None if tags is None else [c for c in TAG_COLORS if c in tags]
     if out_tags is not None:
@@ -975,6 +1007,7 @@ def normalize(conds: Iterable[FilterCond], vocab: FilterVocab | None = None) -> 
     if out_not_tags:
         pieces.append("|" + _tags_text(out_not_tags))
     pieces += ["|" + text for text, _, _ in neg_attr_texts]
+    pieces += [f"|:set:{k}" for k in sorted(not_sets)]
     return FilterNormal(
         masks=out_masks,
         classes=out_classes,
@@ -988,6 +1021,8 @@ def normalize(conds: Iterable[FilterCond], vocab: FilterVocab | None = None) -> 
         not_folders=sorted(not_folders),
         not_tags=out_not_tags,
         not_attrs=[AttrSet(required=list(r), forbidden=list(f)) for _, r, f in neg_attr_texts],
+        sets=sorted(sets),
+        not_sets=sorted(not_sets),
         canonical=";".join(pieces),
     )
 

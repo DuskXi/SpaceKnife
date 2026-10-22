@@ -13,6 +13,7 @@ from pydantic import Field
 
 from .base import Params, Payload
 from .filter import FilterDiagnostic, FilterToken
+from .plugins import Action
 
 PaletteTab = Literal["scan", "start", "settings"]
 RecentKind = Literal["jump", "filter"]
@@ -61,6 +62,13 @@ class PaletteCommand(Payload):
     )
     icon: str = Field(description="Icon name from the design icon set")
     more: bool = Field(default=False, description="Ends with '…': running it asks for one more choice")
+    action: Action | None = Field(
+        default=None, description="plugins.v1: what running it does (None: the frontend's own handler)"
+    )
+    menus: list[str] = Field(
+        default_factory=list, description="Where else it is offered: node, inspector, toolbar, start"
+    )
+    plugin: str | None = Field(default=None, description="The plugin that adds it (None: built in)")
 
 
 class PaletteRecent(Payload):

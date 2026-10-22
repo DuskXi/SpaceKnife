@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
+from spaceknife_protocol import CAP_PLUGINS
 from spaceknife_protocol import palette as pp
 from spaceknife_protocol.base import Empty, EmptyResult
 from spaceknife_protocol.errors import ErrorCode
@@ -27,7 +28,7 @@ from ..filter.engine import FilterContext, evaluate
 from ..filter.vocab import platform_vocab
 from ..layout.basis import LazySizes
 from ..palette import paths as ppaths
-from ..palette.commands import Context, label, match, registry
+from ..palette.commands import Command, Context, label, match, registry
 from ..palette.commands import evaluate as command_state
 from ..palette.fuzzy import score, utf16_spans
 from ..palette.recents import Recents
@@ -119,8 +120,31 @@ def install(server: Server) -> None:
             app_version=update.current,
             update_version=update.latest.version if update.latest is not None else "",
             update_checking=update.checking,
+            settings=server.settings,
+            plugins=server.plugins.enabled_ids(),
+            scan_source=(handle.plugin_source or "") if handle is not None else "",
         )
         return ctx, handle, view
+
+    def commands_for(session: Session) -> tuple[Command, ...]:
+        """The registry as this session can use it: plugins' commands need plugins.v1."""
+        if CAP_PLUGINS in session.capabilities:
+            return registry()
+        return tuple(c for c in registry() if c.owner == "builtin")
+
+    def wire(cmd: Command, session: Session, **fields: Any) -> pp.PaletteCommand:
+        plugins = CAP_PLUGINS in session.capabilities
+        return pp.PaletteCommand(
+            id=cmd.id,
+            name=fields.pop("name", None) or label(cmd),
+            keys=list(cmd.keys),
+            icon=cmd.icon,
+            more=cmd.more,
+            action=cmd.action if plugins else None,
+            menus=list(cmd.menus) if plugins else [],
+            plugin=None if cmd.owner == "builtin" else cmd.owner,
+            **fields,
+        )
 
     def build(session: Session, params: pp.PaletteQueryParams, update: UpdateStatus) -> pp.PaletteResult:
         ctx, handle, view = context_of(session, params.context, update)
@@ -181,7 +205,7 @@ def install(server: Server) -> None:
         commands: list[pp.PaletteCommand] = []
         if q:
             ranked = []
-            for order, cmd in enumerate(registry()):
+            for order, cmd in enumerate(commands_for(session)):
                 m = match(cmd, q)
                 if m is not None:
                     ranked.append((-m[0], order, cmd, m[1]))
@@ -189,22 +213,14 @@ def install(server: Server) -> None:
             chosen = [(cmd, hits) for _, _, cmd, hits in ranked[:COMMANDS_SHOWN]]
         else:
             chosen = [
-                (cmd, []) for cmd in sorted((c for c in registry() if c.pinned), key=lambda c: c.pinned)
+                (cmd, [])
+                for cmd in sorted((c for c in commands_for(session) if c.pinned), key=lambda c: c.pinned)
             ]
         for cmd, hits in chosen:
             enabled, text = command_state(cmd, ctx)
             name = label(cmd)  # M7.5: the current language; ``hits`` refer to it
             commands.append(
-                pp.PaletteCommand(
-                    id=cmd.id,
-                    name=name,
-                    hits=spans(name, hits),
-                    status=text,
-                    enabled=enabled,
-                    keys=list(cmd.keys),
-                    icon=cmd.icon,
-                    more=cmd.more,
-                )
+                wire(cmd, session, name=name, hits=spans(name, hits), status=text, enabled=enabled)
             )
 
         seed = None
@@ -222,11 +238,7 @@ def install(server: Server) -> None:
     @router.method(PALETTE_COMMANDS)
     async def palette_commands(session: Session, _: Empty) -> pp.PaletteCommandList:
         return pp.PaletteCommandList(
-            commands=[
-                pp.PaletteCommand(id=c.id, name=label(c), keys=list(c.keys), icon=c.icon, more=c.more)
-                for c in registry()
-                if not c.typed_only
-            ]
+            commands=[wire(c, session) for c in commands_for(session) if not c.typed_only]
         )
 
     @router.method(PALETTE_QUERY)
@@ -237,20 +249,12 @@ def install(server: Server) -> None:
     # ------------------------------------------------------------------ palette.check
 
     def check(session: Session, params: pp.PaletteCheckParams, update: UpdateStatus) -> pp.PaletteCommand:
-        cmd = next((c for c in registry() if c.id == params.id), None)
+        cmd = next((c for c in commands_for(session) if c.id == params.id), None)
         if cmd is None:
             raise RpcError(ErrorCode.INVALID_PARAMS, f"unknown command: {params.id}")
         ctx, _, _ = context_of(session, params.context, update)
         enabled, text = command_state(cmd, ctx)
-        return pp.PaletteCommand(
-            id=cmd.id,
-            name=label(cmd),
-            status=text,
-            enabled=enabled,
-            keys=list(cmd.keys),
-            icon=cmd.icon,
-            more=cmd.more,
-        )
+        return wire(cmd, session, status=text, enabled=enabled)
 
     @router.method(PALETTE_CHECK)
     async def palette_check(session: Session, params: pp.PaletteCheckParams) -> pp.PaletteCommand:

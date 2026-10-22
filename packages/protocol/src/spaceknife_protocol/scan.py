@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from .base import Params, Payload
 from .io import IoStatus, LoadLevel
@@ -13,7 +13,7 @@ from .io import IoStatus, LoadLevel
 ScanStateName = Literal["queued", "scanning", "done", "cancelled", "failed"]
 NodeKindName = Literal["file", "dir", "link", "other"]
 ScanMethod = Literal["auto", "mft", "hard"]
-ScanMethodUsed = Literal["hard", "mft", "snapshot"]
+ScanMethodUsed = Literal["hard", "mft", "snapshot", "source"]
 
 TOPIC_SCAN = "scan"
 
@@ -98,7 +98,13 @@ class PathCheckResult(Payload):
 
 
 class ScanStartParams(Params):
-    roots: list[str] = Field(min_length=1, max_length=16, description="Absolute paths; drive roots allowed")
+    roots: list[str] = Field(
+        default_factory=list, max_length=16, description="Absolute paths; drive roots allowed"
+    )
+    source: str | None = Field(
+        default=None, max_length=64, description="plugins.v1: a scan source's full id instead of roots"
+    )
+    uri: str | None = Field(default=None, max_length=32767, description="What the source lists")
     cross_mounts: bool | None = Field(
         default=None, description="Descend into other filesystems mounted below a root; None = the setting"
     )
@@ -125,6 +131,15 @@ class ScanStartParams(Params):
         "consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown "
         "as not accessible; None = the scan.protected_places setting",
     )
+
+    @model_validator(mode="after")
+    def _roots_or_source(self) -> ScanStartParams:
+        if self.source is None:
+            if not self.roots:
+                raise ValueError("roots: at least one path (or a source and its uri)")
+        elif self.roots or not self.uri:
+            raise ValueError("a source takes a uri and no roots")
+        return self
 
 
 class ScanSetLoadParams(Params):

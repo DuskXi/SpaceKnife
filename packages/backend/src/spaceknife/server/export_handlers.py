@@ -5,12 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from spaceknife_protocol import CAP_PLUGINS
 from spaceknife_protocol import export as pe
 from spaceknife_protocol.base import Empty
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EXPORT_CHECK, EXPORT_RUN, EXPORT_TARGETS
 
-from ..i18n import Texts, tr
+from ..i18n import Texts, language, tr
 from .compute import compute
 from .rpc import RpcError
 
@@ -60,6 +61,35 @@ def install(server: Server) -> None:
             )
         for key, f in FORMATS.items():
             out.append(pe.ExportTarget(name=key, title=tr(f.title), kind="format", extension=f.extension))
+        if CAP_PLUGINS in session.capabilities:
+            from ..extensions import EXTENSIONS
+
+            lang = language()
+            for c in EXTENSIONS.of("export_template"):
+                spec = c.spec
+                out.append(
+                    pe.ExportTarget(
+                        name=c.id,
+                        title=spec.title.get(lang),
+                        description=spec.description.get(lang) if spec.description else "",
+                        kind="template",
+                        extension="txt",
+                        file_name=c.impl.file_name,
+                        plugin=c.owner,
+                    )
+                )
+            for c in EXTENSIONS.of("export_format"):
+                spec = c.spec
+                out.append(
+                    pe.ExportTarget(
+                        name=c.id,
+                        title=spec.title.get(lang),
+                        description=spec.description.get(lang) if spec.description else "",
+                        kind="format",
+                        extension=spec.extension.lstrip("."),
+                        plugin=c.owner,
+                    )
+                )
         return pe.ExportTargets(targets=out)
 
     @router.method(EXPORT_CHECK)

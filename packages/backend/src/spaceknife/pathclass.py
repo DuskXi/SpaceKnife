@@ -770,7 +770,98 @@ def _entry(store: NodeStore, table: ClassTable) -> tuple[_Entry, np.ndarray]:
 def column(store: NodeStore, table: ClassTable) -> np.ndarray:
     """One ``uint8`` per node of ``store`` (see the module doc), up to date with the store: it covers
     every node the store had when the call began (a scan only adds), so ids from an earlier walk."""
-    return _entry(store, table)[1]
+    e, col = _entry(store, table)
+    if _plugin_rules:
+        return _with_plugin_rules(store, table, e, col)
+    return col
+
+
+# --------------------------------------------------------------------------- plugins' folder rules
+# Thin (docs/plugins.md, 「folder_rule」): a glob over folder paths with a class; applied over the
+# built-in rules' column (the user's choices still win), worked out again when the store changes.
+
+
+@dataclass(frozen=True, slots=True)
+class PluginRule:
+    glob: str  # over '/'-separated, lower-case paths; "**/" matches any depth
+    class_id: str
+    fallback: bool = False  # only files whose extension is in no class
+    regex: re.Pattern[str] = field(default=re.compile(""), compare=False)
+
+
+_plugin_rules: tuple[PluginRule, ...] = ()
+_plugin_version = 0
+_overlays: WeakKeyDictionary[NodeStore, tuple[tuple[int, int, int, int], np.ndarray]] = WeakKeyDictionary()
+
+
+def compile_glob(glob: str) -> re.Pattern[str]:
+    """``**/.gradle/caches`` -> a regex over normalised paths ('/', lower case)."""
+    g = glob.replace("\\", "/").strip().lower()
+    out = ""
+    i = 0
+    while i < len(g):
+        if g.startswith("**/", i):
+            out += "(?:.*/)?"
+            i += 3
+        elif g.startswith("**", i):
+            out += ".*"
+            i += 2
+        elif g[i] == "*":
+            out += "[^/]*"
+            i += 1
+        elif g[i] == "?":
+            out += "[^/]"
+            i += 1
+        else:
+            out += re.escape(g[i])
+            i += 1
+    return re.compile("(?:^|.*/)" + out + "$" if not g.startswith(("/", "**")) else out + "$")
+
+
+def set_plugin_rules(rules: Iterable[tuple[str, str, bool]]) -> None:
+    """The enabled plugins' folder rules: (glob, class id, fallback)."""
+    global _plugin_rules, _plugin_version
+    _plugin_rules = tuple(PluginRule(g, c, fb, compile_glob(g)) for g, c, fb in rules)
+    _plugin_version += 1
+    _overlays.clear()
+
+
+def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.ndarray) -> np.ndarray:
+    n = len(col)
+    key = (store.version, n, id(table), _plugin_version)
+    hit = _overlays.get(store)
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    out = col.copy()
+    c = store.cols
+    dirs = np.flatnonzero(c["kind"][:n] == Kind.DIR)
+    last = {r.glob.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower() for r in _plugin_rules}
+    wild = any("*" in s or "?" in s for s in last)
+    user = set(e.user)
+    for d in dirs.tolist():
+        if d == 0:
+            continue
+        name = store.name(d).lower()
+        if not wild and name not in last:
+            continue
+        path = store.path(d).replace("\\", "/").lower()
+        for r in _plugin_rules:
+            if not r.regex.match(path) or r.class_id not in table.by_id:
+                continue
+            if d in user or any(a in user for a in store.ancestors(d)):
+                break
+            idx = table.ids.index(r.class_id)
+            if idx >= SWALLOW_MAX:
+                break
+            ids = _below(store, d, n)
+            if r.fallback:
+                free = out[ids] == 0
+                out[ids[free]] = FALLBACK_BASE + idx
+            else:
+                out[ids] = idx + 1
+            break
+    _overlays[store] = (key, out)
+    return out
 
 
 def resolve(col: np.ndarray, base: np.ndarray, other: int) -> np.ndarray:

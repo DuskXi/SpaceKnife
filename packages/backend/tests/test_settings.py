@@ -56,7 +56,7 @@ def test_registry_is_consistent() -> None:
 
 def test_visualization_settings_match_the_protocol() -> None:
     assert [o[0] for o in BY_KEY["appearance.default_visual"].options] == list(pv.BUILTIN_VISUALS)
-    modes = list(get_args(pv.ColorModeName))
+    modes = list(get_args(pv.BuiltinColorMode))  # plugins add more when asked (options_from)
     for key in ("appearance.default_color_mode", "appearance.partition_color_mode"):
         assert [o[0] for o in BY_KEY[key].options] == modes, key
     assert DEFAULTS["appearance.default_visual"] == "treemap"
@@ -116,9 +116,14 @@ def test_external_edits_are_picked_up(tmp_path: Path) -> None:
     file.write_text("{ broken", encoding="utf-8")
     os.utime(file, (2, 2))
     assert not st.poll() and st.error and st.values["tags.omit_ctrl"] is False  # last valid values stay
-    file.write_text(json.dumps({"values": {"treemap.min_element": 1}}), encoding="utf-8")
+    file.write_text(
+        json.dumps({"values": {"treemap.min_element": 1, "tags.omit_ctrl": False}}), encoding="utf-8"
+    )
     os.utime(file, (3, 3))
-    assert not st.poll() and "最小元素尺寸" in st.error
+    # one bad value falls back to its default; the others stay (and the error names the bad one)
+    assert not st.poll() and "最小元素尺寸" in st.error  # the values in use are the same as before
+    assert st.values["treemap.min_element"] == DEFAULTS["treemap.min_element"]
+    assert st.values["tags.omit_ctrl"] is False
 
 
 def test_system_unit_base(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

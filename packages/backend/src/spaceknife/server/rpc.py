@@ -26,7 +26,16 @@ class RpcError(Exception):
         self.data = data
 
 
-Handler = Callable[["Session", Any], Awaitable[BaseModel]]
+class RawResult:
+    """A result that is already JSON (a plugin's): the session sends ``raw`` as it is."""
+
+    __slots__ = ("raw",)
+
+    def __init__(self, raw: Any) -> None:
+        self.raw = raw
+
+
+Handler = Callable[["Session", Any], Awaitable[Any]]
 
 # Id of the request a handler is answering (each request runs in its own task, so this is per request).
 CURRENT_REQUEST: ContextVar[int | str | None] = ContextVar("current_request", default=None)
@@ -60,6 +69,10 @@ class Router:
 
     def get(self, name: str) -> Route | None:
         return self._routes.get(name)
+
+    def remove(self, name: str) -> bool:
+        """Drop a route (plugins going away); False when there was none."""
+        return self._routes.pop(name, None) is not None
 
     def names(self) -> list[str]:
         return sorted(self._routes)

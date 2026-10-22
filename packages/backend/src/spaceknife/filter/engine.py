@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import time
 import weakref
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
@@ -50,6 +51,8 @@ class FilterContext:
     now: int
     classes: ClassTable = field(default_factory=active)  # the user's table (W7 文件类别)
     tags: np.ndarray | None = None  # uint8 per node: own tag bits (TAG_BITS); inherited downwards
+    # node sets of plugins (``:set:``), bool per node by set id; a set left out matches nothing
+    sets: Mapping[str, np.ndarray] | None = None
 
     @classmethod
     def current(cls, **kw: object) -> FilterContext:
@@ -233,6 +236,15 @@ class _Eval:
         bits[:m] = own[:m]
         return self.down(bits)
 
+    def node_set(self, set_id: str) -> np.ndarray:
+        """Members of a plugin's node set (files and folders alike; nothing when it is unavailable)."""
+        out = np.zeros(self.n, dtype=bool)
+        found = (self.ctx.sets or {}).get(set_id)
+        if found is not None:
+            m = min(self.n, len(found))
+            out[:m] = np.asarray(found[:m], dtype=bool)
+        return out
+
     # ------------------------------------------------------------- facets
 
     def run(self, nf: FilterNormal) -> tuple[np.ndarray, np.ndarray]:
@@ -248,6 +260,13 @@ class _Eval:
             ok &= ~self.name_mask(m)
         for k in nf.not_classes:
             ok &= ~self.classes(k)
+        if nf.sets:
+            inside = np.zeros(self.n, dtype=bool)
+            for sid in nf.sets:
+                inside |= self.node_set(sid)
+            ok &= self.down(inside)  # a folder in the set: everything below it
+        for sid in nf.not_sets:
+            ok &= ~self.down(self.node_set(sid))
         folder_hit = self.folders(nf.folders) if nf.folders else np.zeros(self.n, dtype=bool)
         if nf.folders:
             ok &= self.down(folder_hit)

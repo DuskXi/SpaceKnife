@@ -212,12 +212,14 @@ def json_frame(message: Message) -> list[bytes]:
     return [frame_header(KIND_JSON, len(body)), body]
 
 
-def check_header(head: bytes | bytearray, *, max_binary: int) -> tuple[int, int]:
+def check_header(
+    head: bytes | bytearray, *, max_binary: int, max_json: int = MAX_CONTROL_BYTES
+) -> tuple[int, int]:
     """Validate a frame header; returns (kind, body length)."""
     length, kind = HEADER.unpack(head)
     body_len = length - 1
     if kind == KIND_JSON:
-        limit = MAX_CONTROL_BYTES
+        limit = max_json
     elif kind == KIND_BINARY:
         limit = max_binary
     else:

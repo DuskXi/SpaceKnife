@@ -22,6 +22,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
 from spaceknife_protocol.settings import SettingMeta, SettingOption, SettingsState, SettingValue
+from spaceknife_protocol.text import Text
 
 from . import i18n, paths
 from .i18n import Texts, _
@@ -51,6 +52,17 @@ class Spec:
     depends: str | None = None
     group_note: str = ""
     kind: type = field(default=str)
+    # options worked out when asked for ("visualizations", "color_modes": plugins add some)
+    options_from: str | None = None
+    plugin: str | None = None  # a plugin's setting (key plugin.<id>.<name>, category plugins)
+    texts: tuple[tuple[str, Text], ...] = ()  # a plugin's texts by field (name, description, group …)
+
+    def text(self, name: str, source: str) -> str:
+        """A text field in the interface language: a plugin's own pair, else the message id."""
+        for key, value in self.texts:
+            if key == name:
+                return value.get(i18n.language())
+        return _(source) if source else source
 
 
 # User-facing text, translated when shown (M7.5).
@@ -60,6 +72,7 @@ TEXT = Texts(
         "unreadable": "无法读取设置文件：{reason}",
         "invalid_file": "设置文件不合法，继续使用上一次的有效设置：{reason}",
         "unknown": "未知设置：{keys}",
+        "invalid_items": "设置文件里这些值不合法，已改用默认值：{reason}",
         "locked": "这些设置在当前版本不可修改：{names}",
         "conflict": "设置已被其他窗口修改（版本 {version}）",
     }
@@ -337,6 +350,7 @@ def _registry() -> tuple[Spec, ...]:
             applies="new_views",
             synonyms=("color", "flat", "classes", "branch"),
             kind=str,
+            options_from="color_modes",
         ),
         S(
             "appearance.default_visual",
@@ -350,6 +364,7 @@ def _registry() -> tuple[Spec, ...]:
             applies="new_views",
             synonyms=("visualization", "treemap", "flame", "flame_polar", "polar"),
             kind=str,
+            options_from="visualizations",
         ),
         S(
             "appearance.partition_color_mode",
@@ -363,6 +378,7 @@ def _registry() -> tuple[Spec, ...]:
             applies="new_views",
             synonyms=("color", "flame", "polar", "branch"),
             kind=str,
+            options_from="color_modes",
         ),
         # ------------------------------------------------------------ 树图
         S(
@@ -914,6 +930,18 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "advanced.plugin_dev_mode",
+            "advanced",
+            "插件",
+            "开发者模式",
+            "插件代码可以在后端进程内运行（没有隔离），也可以链接开发中的插件文件夹；只在开发插件时打开",
+            "switch",
+            False,
+            applies="now",
+            synonyms=("plugin", "developer", "debug", "dev mode", "插件开发"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
             "advanced.memory_budget",
             "advanced",
             "内存",
@@ -937,8 +965,13 @@ BY_KEY: dict[str, Spec] = {s.key: s for s in REGISTRY}
 DEFAULTS: dict[str, SettingValue] = {s.key: s.default for s in REGISTRY}
 
 
-def _field(spec: Spec) -> tuple[Any, Any]:
-    alias = spec.key
+_DYNAMIC_ID = r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+
+
+def _field(spec: Spec, *, aliased: bool = True) -> tuple[Any, Any]:
+    alias = spec.key if aliased else None
+    if spec.options_from is not None:  # checked against the options of the moment (dynamic_ok)
+        return str, Field(spec.default, alias=alias, max_length=64, pattern=_DYNAMIC_ID)
     if spec.options and spec.control in ("segmented",):
         values = tuple(o[0] for o in spec.options)
         return Literal[values], Field(spec.default, alias=alias)
@@ -946,6 +979,8 @@ def _field(spec: Spec) -> tuple[Any, Any]:
         return bool, Field(spec.default, alias=alias)
     if spec.kind is int:
         return int, Field(spec.default, alias=alias, ge=spec.min, le=spec.max)
+    if spec.kind is float:  # plugins' fractional numbers (an int is a float too)
+        return float | int, Field(spec.default, alias=alias, ge=spec.min, le=spec.max)
     if spec.control == "color":
         return str, Field(spec.default, alias=alias, pattern=r"^#[0-9A-Fa-f]{6}$")
     return str, Field(spec.default, alias=alias, max_length=64)
@@ -971,6 +1006,28 @@ class ConflictError(SettingsError):
     pass
 
 
+def dynamic_options(spec: Spec) -> list[tuple[SettingValue, str]]:
+    """The options of an ``options_from`` setting now: the built-in ones, then the plugins'."""
+    from .extensions import EXTENSIONS
+    from .layout import registry as visuals
+
+    out: list[tuple[SettingValue, str]] = [(o[0], o[1]) for o in spec.options]
+    known = {o[0] for o in out}
+    if spec.options_from == "visualizations":
+        for v in visuals.all_visuals():
+            if v.id not in known:
+                out.append((v.id, v.title))
+    elif spec.options_from == "color_modes":
+        for c in EXTENSIONS.of("color_mode"):
+            if c.id not in known:
+                out.append((c.id, c.spec.title.get(i18n.language())))
+    return out
+
+
+def dynamic_ok(spec: Spec, value: SettingValue) -> bool:
+    return spec.options_from is None or value in [o[0] for o in dynamic_options(spec)]
+
+
 def validate(values: dict[str, Any]) -> dict[str, SettingValue]:
     """Full, validated values (unknown keys dropped, missing keys defaulted)."""
     try:
@@ -980,40 +1037,105 @@ def validate(values: dict[str, Any]) -> dict[str, SettingValue]:
         key = str(err["loc"][0]) if err["loc"] else "?"
         name = _(BY_KEY[key].name) if key in BY_KEY else key
         raise SettingsError(TEXT["invalid_value"].format(name=name, msg=err["msg"])) from exc
-    return model.model_dump(by_alias=True)
+    out: dict[str, SettingValue] = model.model_dump(by_alias=True)
+    for key, value in out.items():
+        spec = BY_KEY[key]
+        if spec.options_from is not None and not dynamic_ok(spec, value):
+            raise SettingsError(TEXT["invalid_value"].format(name=_(spec.name), msg=f"{value!r}"))
+    return out
+
+
+_ITEM_MODELS: dict[tuple[str, int], type[BaseModel]] = {}
+
+
+def validate_item(spec: Spec, value: Any) -> SettingValue:
+    """One value of ``spec``; SettingsError says what is wrong with it."""
+    key = (spec.key, id(spec))
+    model = _ITEM_MODELS.get(key)
+    if model is None:
+        typ, info = _field(spec, aliased=False)
+        model = create_model("SettingItem", __config__=ConfigDict(extra="forbid", strict=True), v=(typ, info))
+        _ITEM_MODELS[key] = model
+    try:
+        got = model.model_validate({"v": value}).v  # type: ignore[attr-defined]
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        raise SettingsError(
+            TEXT["invalid_value"].format(name=spec.text("name", spec.name), msg=err["msg"])
+        ) from exc
+    if (
+        spec.options
+        and spec.options_from is None
+        and spec.plugin is not None
+        and got not in [o[0] for o in spec.options]
+    ):
+        raise SettingsError(TEXT["invalid_value"].format(name=spec.text("name", spec.name), msg=f"{got!r}"))
+    return got  # type: ignore[no-any-return]
+
+
+def plugin_specs() -> list[Spec]:
+    """The settings of the enabled plugins (``setting`` contributions), in registry order."""
+    from .extensions import EXTENSIONS
+
+    return [c.impl for c in EXTENSIONS.of("setting") if isinstance(c.impl, Spec)]
+
+
+def plugin_spec(key: str) -> Spec | None:
+    from .extensions import EXTENSIONS
+
+    if not key.startswith("plugin."):
+        return None
+    c = EXTENSIONS.get("setting", key[len("plugin.") :])
+    return c.impl if c is not None and isinstance(c.impl, Spec) else None
+
+
+def _options(s: Spec) -> list[SettingOption]:
+    if s.options_from is not None:
+        dyn = dynamic_options(s)
+        builtin = {o[0] for o in s.options}
+        return [
+            SettingOption(value=v, label=_(label) if v in builtin and label else label) for v, label in dyn
+        ]
+    if s.plugin is not None:
+        return [
+            SettingOption(value=o[0], label=s.text(f"option:{i}", str(o[1]))) for i, o in enumerate(s.options)
+        ]
+    return [
+        SettingOption(
+            value=o[0],
+            label=_(o[1]) if o[1] else o[1],
+            reason=_(o[2]) if len(o) > 2 and o[2] else "",
+        )
+        for o in s.options
+    ]
 
 
 def meta() -> list[SettingMeta]:
-    """The settings' metadata in the current language (M7.5); the Chinese name stays searchable."""
+    """The settings' metadata in the current language (M7.5); the Chinese name stays searchable.
+    The plugins' settings follow the built-in ones (category ``plugins``, grouped by plugin)."""
     source = i18n.language() == i18n.SOURCE
     out = []
-    for s in REGISTRY:
+    for s in (*REGISTRY, *plugin_specs()):
         out.append(
             SettingMeta(
                 key=s.key,
                 category=s.category,  # type: ignore[arg-type]
-                group=_(s.group),
-                group_note=_(s.group_note) if s.group_note else "",
-                name=_(s.name),
-                description=_(s.description) if s.description else "",
+                group=s.text("group", s.group),
+                group_note=s.text("group_note", s.group_note) if s.group_note else "",
+                name=s.text("name", s.name),
+                description=s.text("description", s.description) if s.description else "",
                 control=s.control,  # type: ignore[arg-type]
-                options=[
-                    SettingOption(
-                        value=o[0],
-                        label=_(o[1]) if o[1] else o[1],
-                        reason=_(o[2]) if len(o) > 2 and o[2] else "",
-                    )
-                    for o in s.options
-                ],
+                options=_options(s),
                 min=s.min,
                 max=s.max,
                 step=s.step,
-                unit=_(s.unit) if s.unit else "",
+                unit=s.text("unit", s.unit) if s.unit else "",
                 applies=s.applies,  # type: ignore[arg-type]
                 synonyms=list(s.synonyms) if source else [*s.synonyms, s.name],
                 enabled=not s.reason,
                 reason=_(s.reason) if s.reason else "",
                 depends=s.depends,
+                plugin=s.plugin,
             )
         )
     return out
@@ -1036,6 +1158,11 @@ class SettingsStore:
         self._lock = threading.Lock()
         self.version = 0
         self.values: dict[str, SettingValue] = dict(DEFAULTS)
+        # plugin.<id>.<name> of the enabled plugins (missing ones: their defaults)
+        self.plugin_values: dict[str, SettingValue] = {}
+        # what the file holds that is not in use now — keys of plugins that are off, unknown keys,
+        # values of dynamic options a plugin offered (its visualization) — written back unchanged
+        self.foreign: dict[str, Any] = {}
         self._error: tuple[str, str] | None = None  # (TEXT key, reason): translated when shown
         self._mtime: float | None = None
         self.listeners: dict[str, Callable[[SettingsStore], None]] = {}
@@ -1055,18 +1182,67 @@ class SettingsStore:
         self._mtime = stat.st_mtime
         try:
             doc = SettingsFile.model_validate(json.loads(self.file.read_text(encoding="utf-8")))
-            values = validate({**DEFAULTS, **doc.values})
         except (ValueError, ValidationError) as exc:
             self._error = ("invalid_file", str(exc))
             logger.warning("settings file {} is invalid: {}", self.file, exc)
             return False
-        changed = values != self.values
-        self.values, self._error = values, None
+        values, plugin_values, foreign, bad = self._split(doc.values)
+        changed = values != self.values or plugin_values != self.plugin_values
+        self.values, self.plugin_values, self.foreign = values, plugin_values, foreign
+        self._error = ("invalid_items", _("、").join(bad)) if bad else None
+        if bad:
+            logger.warning("settings file {}: invalid values reset to their defaults: {}", self.file, bad)
         return changed
+
+    def _split(
+        self, raw: dict[str, Any]
+    ) -> tuple[dict[str, SettingValue], dict[str, SettingValue], dict[str, Any], list[str]]:
+        """Each value on its own: a bad one falls back to its default (the others stay); plugin keys
+        of plugins that are not here, and unknown keys, are kept aside as they are."""
+        values = dict(DEFAULTS)
+        plugin_values: dict[str, SettingValue] = {}
+        foreign: dict[str, Any] = {}
+        bad: list[str] = []
+        for key, value in raw.items():
+            spec = BY_KEY.get(key) or plugin_spec(key)
+            if spec is None:
+                foreign[key] = value
+                continue
+            try:
+                got = validate_item(spec, value)
+            except SettingsError:
+                bad.append(spec.text("name", spec.name))
+                continue
+            if not dynamic_ok(spec, got):
+                foreign[key] = value  # a plugin's visualization or colour mode: back when it is
+                continue
+            if spec.plugin is None:
+                values[key] = got
+            else:
+                plugin_values[key] = got
+        return values, plugin_values, foreign, bad
+
+    def plugins_changed(self) -> None:
+        """Plugins came or went: their stored values move between in use and kept aside."""
+        with self._lock:
+            raw = {**self.foreign, **self.plugin_values}
+            raw.update({k: v for k, v in self.values.items() if v != DEFAULTS[k]})
+            values, plugin_values, foreign, _bad = self._split(raw)
+            changed = values != self.values or plugin_values != self.plugin_values
+            self.values, self.plugin_values, self.foreign = values, plugin_values, foreign
+            if changed:
+                self.version += 1
+        if changed:
+            self._notify()
 
     def _save(self) -> None:
         self.file.parent.mkdir(parents=True, exist_ok=True)
-        changed = {k: v for k, v in self.values.items() if v != DEFAULTS[k]}
+        changed: dict[str, Any] = {k: v for k, v in self.values.items() if v != DEFAULTS[k]}
+        changed.update(self.foreign)
+        for key, value in self.plugin_values.items():
+            spec = plugin_spec(key)
+            if spec is None or value != spec.default:
+                changed[key] = value
         doc = SettingsFile(values=dict(sorted(changed.items())))
         tmp = self.file.with_suffix(".tmp")
         tmp.write_text(json.dumps(doc.model_dump(), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1100,22 +1276,51 @@ class SettingsStore:
     # ------------------------------------------------------------ access
 
     def get(self, key: str) -> SettingValue:
-        return self.values[key]
+        if key in self.values:
+            return self.values[key]
+        if key in self.plugin_values:
+            return self.plugin_values[key]
+        spec = plugin_spec(key)
+        if spec is None:
+            raise KeyError(key)
+        return spec.default
+
+    def has(self, key: str) -> bool:
+        return key in self.values or plugin_spec(key) is not None
+
+    def plugin_settings(self, plugin: str) -> dict[str, SettingValue]:
+        """A plugin's values by local name (defaults included): what its code sees as ctx.settings."""
+        prefix = f"plugin.{plugin}."
+        out: dict[str, SettingValue] = {}
+        for spec in plugin_specs():
+            if spec.key.startswith(prefix):
+                out[spec.key[len(prefix) :]] = self.plugin_values.get(spec.key, spec.default)
+        return out
 
     def update(self, patch: dict[str, SettingValue], version: int | None = None) -> None:
-        unknown = [k for k in patch if k not in BY_KEY]
+        specs = {k: BY_KEY.get(k) or plugin_spec(k) for k in patch}
+        unknown = [k for k, s in specs.items() if s is None]
         if unknown:
             raise SettingsError(TEXT["unknown"].format(keys=", ".join(unknown)))
-        locked = [_(BY_KEY[k].name) for k, v in patch.items() if BY_KEY[k].reason and v != self.values[k]]
+        locked = [
+            _(BY_KEY[k].name)
+            for k, v in patch.items()
+            if k in BY_KEY and BY_KEY[k].reason and v != self.values[k]
+        ]
         if locked:
             raise SettingsError(TEXT["locked"].format(names=_("、").join(locked)))
+        builtin = {k: v for k, v in patch.items() if k in BY_KEY}
+        plugin = {k: validate_item(specs[k], v) for k, v in patch.items() if k not in BY_KEY}  # type: ignore[arg-type]
         with self._lock:
             if version is not None and version != self.version:
                 raise ConflictError(TEXT["conflict"].format(version=self.version))
-            values = validate({**self.values, **patch})
-            if values == self.values:
+            values = validate({**self.values, **builtin})
+            plugin_values = {**self.plugin_values, **plugin}
+            if values == self.values and plugin_values == self.plugin_values:
                 return
-            self.values = values
+            for k in builtin:
+                self.foreign.pop(k, None)
+            self.values, self.plugin_values = values, plugin_values
             self.version += 1
             self._save()
         self._notify()
@@ -1124,9 +1329,10 @@ class SettingsStore:
         keys = [s.key for s in REGISTRY if category is None or s.category == category]
         with self._lock:
             values = {**self.values, **{k: DEFAULTS[k] for k in keys}}
-            if values == self.values:
+            plugin_values = {} if category in (None, "plugins") else self.plugin_values
+            if values == self.values and plugin_values == self.plugin_values:
                 return
-            self.values = values
+            self.values, self.plugin_values = values, plugin_values
             self.version += 1
             self._save()
         self._notify()
@@ -1136,10 +1342,11 @@ class SettingsStore:
         return 1000 if v == "1000" else 1024 if v == "1024" else system_unit_base()
 
     def state(self) -> SettingsState:
+        specs = plugin_specs()
         return SettingsState(
             version=self.version,
-            values=dict(self.values),
-            defaults=dict(DEFAULTS),
+            values={**self.values, **{s.key: self.plugin_values.get(s.key, s.default) for s in specs}},
+            defaults={**DEFAULTS, **{s.key: s.default for s in specs}},
             meta=meta(),
             path=str(self.file),
             logs=str(paths.logs_dir()),

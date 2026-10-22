@@ -14,6 +14,7 @@ from typing import Protocol
 
 import numpy as np
 
+from spaceknife_protocol.text import Text
 from spaceknife_protocol.view import ColorModeName
 
 from ..i18n import _
@@ -113,6 +114,49 @@ class ArraySizes:
         return self.sizes
 
 
+class ColumnSizes:
+    """Areas by another measure of the store (variant visualizations): ``files`` counts files (a
+    folder: the files below it), ``items`` files and folders, ``size`` logical bytes."""
+
+    __slots__ = ("basis", "metric", "n")
+
+    def __init__(self, basis: Basis, metric: str) -> None:
+        if metric not in ("size", "files", "items"):
+            raise ValueError(f"unknown size metric {metric!r}")
+        self.basis = basis
+        self.metric = metric
+        self.n = len(basis.store)
+
+    def of(self, ids: np.ndarray) -> np.ndarray:
+        c = self.basis.store.cols
+        is_dir = c["kind"][ids] == 1
+        if self.metric == "size":
+            dup = (c["flags"][ids] & np.uint32(4)) != 0  # Flag.HARDLINK_DUP
+            out: np.ndarray = np.where(is_dir, c["tot_size"][ids], np.where(dup, 0, c["size"][ids]))
+            return out.astype(np.int64)
+        files = c["tot_files"][ids].astype(np.int64)
+        if self.metric == "items":
+            files = files + c["tot_dirs"][ids].astype(np.int64)
+        out = np.where(is_dir, files, 1).astype(np.int64)
+        return out
+
+    def full(self) -> np.ndarray:
+        return self.of(np.arange(self.n, dtype=np.int64))
+
+
+def subtree_sums(store_cols: dict[str, np.ndarray], n: int, leaf: np.ndarray) -> np.ndarray:
+    """Folder totals from per-node weights (folders' own values ignored), one pass per depth level."""
+    kind = store_cols["kind"][:n]
+    depth = store_cols["depth"][:n]
+    parent = store_cols["parent"][:n]
+    out = np.where(kind == 1, 0, np.asarray(leaf[:n], dtype=np.int64)).astype(np.int64)
+    out = np.maximum(out, 0)
+    for d in range(int(depth.max()) if n else 0, 0, -1):
+        idx = np.nonzero(depth == d)[0]
+        np.add.at(out, parent[idx], out[idx])
+    return out
+
+
 class Engine(Protocol):
     """Lays out one store for one visualization; built once per store and reused across frames."""
 
@@ -144,7 +188,23 @@ class Visualization:
     default_color: ColorModeName = "class"  # colour mode a view starts with on it
     compare: bool = True  # can show compare views
     free_space: bool = True  # shows free and unknown space at a whole-volume root
+    # own options: (LayoutParams.options name, settings key) — the flame graph's origin, a plugin's
+    options: tuple[tuple[str, str], ...] = ()
+    aliases: tuple[str, ...] = ()  # extra search words of its 「可视化：…」 command
+    size_metric: str = "alloc"  # alloc (bytes on disk) | size | files | items | code (a plugin's weights)
+    size_unit: str = "bytes"  # what the areas count: bytes | count
+    sizes: Callable[[Basis], SizeSource] | None = None  # areas other than the store's own bytes
+    plugin: str | None = None  # the plugin that adds it (None: built in)
+    text: Text | None = None  # a plugin's name in both languages (title_id is the built-ins')
 
     @property
     def title(self) -> str:
+        if self.text is not None:
+            return self.text.get(_lang())
         return _(self.title_id)
+
+
+def _lang() -> str:
+    from ..i18n import language
+
+    return language()

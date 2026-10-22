@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from .api import ENGINE_API, Visualization
 
 _ID = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*")  # protocol VisualId
-_ID_MAX = 48
+_ID_MAX = 64
 _LAYOUT = re.compile(r"[a-z][a-z0-9]*\.v\d+")
 
 _lock = threading.Lock()

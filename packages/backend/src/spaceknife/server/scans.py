@@ -282,6 +282,8 @@ class ScanHandle:
     mft_at: float = 0.0  # time.monotonic() of that heartbeat
     monitor: Any = None  # server.monitors.ScanMonitor while file changes are watched (M5)
     upgrade_task: asyncio.Task[None] | None = None
+    plugin_source: str | None = None  # a plugin's scan source (its full id): the tree is not on disk
+    uri: str | None = None  # what that source listed
 
     @property
     def running(self) -> bool:
@@ -389,6 +391,8 @@ class ScanManager:
         self.monitors: Any = None  # server.monitors.MonitorManager, set by the server (M5)
         # called when a scan finishes and before its tab closes: keep what it showed (machine.disks)
         self.keepers: list[Callable[[ScanHandle], Awaitable[None]]] = []
+        # ("started" | "opened" | "done" | "closed", handle): the plugin host's hooks
+        self.events: list[Callable[[str, ScanHandle], None]] = []
         # set by the ViewManager: scans with open views are never evicted; evicted scans are released
         # (when, bytes) of the scans closed lately: the C heap keeps about that much for the next
         # scan to reuse, which the memory watchdog allows for (server/diag.py)
@@ -571,6 +575,7 @@ class ScanManager:
         handle.task = asyncio.create_task(self._run(handle), name=f"scan-{handle.id}")
         if self.monitors is not None:  # changes are watched from the start (UI-W2-09)
             await self.monitors.start(handle)
+        self._event("started", handle)
         logger.info("scan {} started: {}", handle.id, ", ".join(r.path for r in handle.roots))
         return handle
 
@@ -870,6 +875,7 @@ class ScanManager:
             await self._auto_save(handle)
         if scanner.state == ScanState.DONE:
             await self._keep(handle)
+            self._event("done", handle)
         handle.publish()
         if scanner.state == ScanState.DONE:
             # build the name index now, so the first wildcard filter does not pay for it
@@ -951,6 +957,7 @@ class ScanManager:
                 await handle.task
         await self._keep(handle)  # what changed while it was watched
         self.scans.pop(scan_id, None)
+        self._event("closed", handle)
         now = time.monotonic()
         recent = [c for c in self.closed if now - c[0] < CLOSED_KEEP_S]
         self.closed = [*recent, (now, handle.store.ram_bytes())]
@@ -958,6 +965,13 @@ class ScanManager:
         task = asyncio.get_running_loop().create_task(self._release_later())
         self._releases.add(task)
         task.add_done_callback(self._releases.discard)
+
+    def _event(self, what: str, handle: ScanHandle) -> None:
+        for listener in list(self.events):
+            try:
+                listener(what, handle)
+            except Exception:
+                logger.exception("scan {} listener failed", what)
 
     async def _keep(self, handle: ScanHandle) -> None:
         for keeper in list(self.keepers):
@@ -1071,6 +1085,7 @@ class ScanManager:
             method=saved_method(stats) or "hard",  # kept when the snapshot is saved again
         )
         self.scans[handle.id] = handle
+        self._event("opened", handle)
         logger.info("opened snapshot {} as {}", path, handle.id)
         emit(
             "snapshot",

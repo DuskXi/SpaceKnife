@@ -25,6 +25,8 @@ from json.encoder import encode_basestring
 
 import numpy as np
 
+from spaceknife_protocol.text import Text
+
 from .. import __version__, fmt, i18n
 from ..i18n import Texts, _
 from ..store.nodes import Flag, Kind, NodeStore
@@ -578,11 +580,18 @@ class ExportFormat:
     extension: str
     media_type: str
     bom: bool  # write a UTF-8 BOM: Excel reads a CSV without one in the ANSI code page
-    chunks: Callable[..., Iterator[str]]  # (store, root, *, match=None, filter_text="")
+    chunks: Callable[..., Iterator[str | bytes]]  # (store, root, *, match=None, filter_text="")
+    text: Text | None = None  # a plugin's title in both languages
+    description: Text | None = None
+    plugin: str | None = None  # the plugin that adds it (key is then its full id)
 
     @property
     def title(self) -> str:
         """User-facing, in the current interface language."""
+        if self.text is not None:
+            from ..i18n import language
+
+            return self.text.get(language())
         return _(self.title_id)
 
 

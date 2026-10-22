@@ -45,7 +45,11 @@ from .branch import BranchHues
 from .tags import TagStore
 from .trash import WithoutBins, find_bins, trash_marks
 
-ColorMode = Literal["class", "flat", "time", "branch"]
+# An open id: the built-in modes (the frontends colour from the frame's columns), or a plugin's colour
+# mode's full id (colors.v1: the host fills the frame's ``pal`` column, extensions/colors.py).
+ColorMode = str
+BuiltinColorMode = Literal["class", "flat", "time", "branch"]
+BUILTIN_COLOR_MODES = frozenset({"class", "flat", "time", "branch"})
 FilterMode = Literal["dim", "hide"]
 ResultsSort = Literal["size", "name", "count"]
 DETAIL_MIN, DETAIL_MAX = 1, 15
@@ -121,7 +125,9 @@ class ViewSettings:
     filter_mode: FilterMode = "dim"
     font_scale: float = 1.0
     aspect: float = 1.0
-    flame_origin: str = "bottom"  # flame graph: the root bar at the "top" or the "bottom"
+    # each visualization's own options (LayoutParams.options), from the settings it maps them to
+    # (``Visualization.options``: the flame graph's origin, a plugin visualization's settings)
+    options: tuple[tuple[str, tuple[tuple[str, object], ...]], ...] = ()
 
 
 class Engines:
@@ -187,6 +193,9 @@ class Frame:
     flash: list[tuple[int, int]] = field(default_factory=list)  # (row, allocation change): file changes
     delta: np.ndarray | None = None  # i8 compare views: signed net change per row (W6)
     dstat: np.ndarray | None = None  # u1 compare views: 0 unchanged, 1 new, 2 deleted, 3 changed
+    pal: np.ndarray | None = None  # u1 colors.v1: palette index per row of a plugin colour mode
+    palette: str | None = None  # that colour mode's id
+    size_unit: str = "bytes"  # what the rows' sizes count (variant visualizations: files)
 
 
 class View:
@@ -214,9 +223,11 @@ class View:
         self.visual = s.visual
         self._colors: dict[str, ColorMode] = dict(s.colors)  # visualization -> its colour mode
         self._colors[s.visual] = s.color_mode
-        self.visual_options: dict[str, tuple[tuple[str, object], ...]] = {  # LayoutParams.options
-            "flame": (("origin", s.flame_origin),),
-        }
+        self.visual_options: dict[str, tuple[tuple[str, object], ...]] = dict(
+            s.options
+        )  # LayoutParams.options
+        # node sets of the filter's :set: conditions (the plugin host computes them; None: no plugins)
+        self.sets_for: Callable[[FilterNormal], Mapping[str, np.ndarray]] | None = None
         self.hues = BranchHues()
         self.detail = s.detail
         self.min_element = s.min_element
@@ -632,6 +643,9 @@ class View:
         if self.filter.normal is None:
             return
         ctx = FilterContext.current(tags=self.tags.bits(self.store))
+        nf = self.filter.normal
+        if (nf.sets or nf.not_sets) and self.sets_for is not None:
+            ctx = replace(ctx, sets=self.sets_for(nf))
         if now is not None:
             ctx = replace(ctx, now=now)
         self.filter.result = evaluate(self.store, self.filter.normal, ctx)
@@ -658,10 +672,14 @@ class View:
         res = self.filter.result if self.filter.active else None
         hide = res is not None and self.filter_mode == "hide"
         sizes: SizeSource
+        if vis.sizes is not None and self.compare is None:
+            hide = False  # matched bytes are bytes: another measure dims instead (thin, docs/plugins.md)
         if self.compare is not None and self.direction != "all":
             sizes = ArraySizes(
                 self.compare.amounts(self.direction, res.match if hide and res is not None else None)
             )
+        elif vis.sizes is not None and self.compare is None:
+            sizes = vis.sizes(self.basis)
         elif hide and res is not None:
             matched = np.zeros(len(self.store), dtype=np.int64)
             matched[: res.n] = res.alloc
@@ -675,6 +693,11 @@ class View:
         draw = engine.run(self._params(), self._root_spec(vis), sizes)
         draw.visual = vis.id  # one engine may lay out several visualizations
         frame = self._annotate(draw, res, sizes)
+        frame.size_unit = vis.size_unit
+        if self.color_mode not in BUILTIN_COLOR_MODES:
+            from ..extensions.colors import paint
+
+            frame.pal, frame.palette = paint(self, draw)
         if self.scanning:
             rows, root = self._scanning_rows(draw)
             frame.flags[rows] |= F_SCANNING

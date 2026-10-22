@@ -92,7 +92,7 @@ jobs:
           uv run ruff format --check .
 
       - name: Type check
-        run: uv run mypy packages/protocol/src packages/backend/src packages/client/src tools/gen_design.py
+        run: uv run mypy packages/protocol/src packages/backend/src packages/client/src packages/sdk/src tools/gen_design.py
 
       - name: Generated artefacts are up to date
         run: |

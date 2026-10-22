@@ -7,12 +7,14 @@ spaceknife-protocol = { workspace = true }
 spaceknife-backend = { workspace = true }
 spaceknife-client = { workspace = true }
 spaceknife-native = { workspace = true }
+spaceknife-sdk = { workspace = true }
 
 [dependency-groups]
 dev = [
   "spaceknife-protocol",
   "spaceknife-backend",
   "spaceknife-client",
+  "spaceknife-sdk",
   "pytest>=8.3",
   "pytest-asyncio>=0.24",
   "ruff>=0.7",
@@ -42,13 +44,13 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC", "PT"]
 ignore = ["RUF001", "RUF002", "RUF003"]  # full-width CJK punctuation in Chinese strings/comments is intentional
 
 [tool.ruff.lint.isort]
-known-first-party = ["spaceknife", "spaceknife_protocol", "spaceknife_client", "spaceknife_native"]
+known-first-party = ["spaceknife", "spaceknife_protocol", "spaceknife_client", "spaceknife_native", "spaceknife_sdk"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-mypy_path = ["packages/protocol/src", "packages/backend/src", "packages/client/src", "packages/native/python"]
+mypy_path = ["packages/protocol/src", "packages/backend/src", "packages/client/src", "packages/native/python", "packages/sdk/src"]
 explicit_package_bases = true
 
 [tool.pydantic-mypy]
@@ -60,7 +62,7 @@ warn_required_dynamic_aliases = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["tools"]
-testpaths = ["packages/protocol/tests", "packages/backend/tests", "packages/client/tests", "packages/native/tests", "tools/tests"]
+testpaths = ["packages/protocol/tests", "packages/backend/tests", "packages/client/tests", "packages/native/tests", "packages/sdk/tests", "tools/tests"]
 addopts = "-ra --import-mode=importlib"
 # a hung test fails with a stack dump instead of blocking the run (CI jobs have their own limit too)
 timeout = 300

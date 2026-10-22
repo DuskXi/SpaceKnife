@@ -7,9 +7,10 @@ import platform
 import secrets
 import sys
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from http import HTTPStatus
+from typing import Any
 
 from loguru import logger
 from websockets.asyncio.server import Server as WsServer
@@ -17,13 +18,14 @@ from websockets.asyncio.server import ServerConnection, serve
 from websockets.http11 import Request, Response
 from websockets.typing import Origin, Subprotocol
 
-from spaceknife_protocol import ALL_CAPABILITIES, SUBPROTOCOL, WS_PATH
+from spaceknife_protocol import SUBPROTOCOL, WS_PATH
 from spaceknife_protocol.errors import CloseCode
 from spaceknife_protocol.schema import schema_hash
 from spaceknife_protocol.session import ServerInfo
 
 from .. import __version__
 from ..logbus import LogHub
+from ..plugins.host import PluginHost
 from ..settings import SettingsStore
 from .classes_handlers import load_saved as load_saved_classes
 from .compares import CompareManager
@@ -53,7 +55,8 @@ class ServerConfig:
     max_inbound_bytes: int = 1 << 20
     max_outbound_chunk_bytes: int = 4 << 20
     ping_interval: float | None = 20.0
-    capabilities: tuple[str, ...] = field(default=ALL_CAPABILITIES)
+    # None: worked out from the registry (the host's own and its visualizations' layouts)
+    capabilities: tuple[str, ...] | None = None
     log_file: bool = False  # write the rotating log file (the real app; not tests)
     update_checks: bool | None = None  # automatic update checks; None: as log_file (the real app)
 
@@ -82,9 +85,11 @@ class Server:
         self.views.ops = self.ops
         self.updates = UpdateService(self)  # update checks against the GitHub releases
         self.scans.monitors = self.monitors
+        self.plugins = PluginHost(self)  # plugins and the extension registry (docs/plugins.md)
+        self.views.plugins = self.plugins
         self.on_start: list[Callable[[], None]] = []  # run once the loop is serving
         self.background: list[asyncio.Task[None]] = []
-        self.capabilities = config.capabilities
+        self._tasks: set[asyncio.Task[None]] = set()  # short-lived: plugin updates
         self.sessions: set[Session] = set()
         self.started_at = datetime.now(UTC)
         self.schema_hash = schema_hash()
@@ -98,11 +103,60 @@ class Server:
         self._ws: WsServer | None = None
         self.port = 0
 
+        from ..insights.rules import load_rules, user_rules_dir
+        from ..plugins.handlers import install as install_plugin_handlers
         from .handlers import install
         from .update_handlers import install as install_update_handlers
 
+        load_rules(user_rules_dir())  # the user's insight rules (config_dir/insights/*.toml)
         install(self)
         install_update_handlers(self)  # after the settings handlers: their listener sets the language
+        install_plugin_handlers(self)
+        self.topics.fallback = self.plugins.open_topic
+        self.scans.events.append(self._scan_event)
+        self.settings.listeners["plugins"] = self._settings_changed
+        self._lang = self.settings.state().language
+
+    @property
+    def capabilities(self) -> tuple[str, ...]:
+        """What this server offers: the configured set, else derived from the registry."""
+        if self.config.capabilities is not None:
+            return self.config.capabilities
+        from ..extensions import capabilities
+
+        return capabilities()
+
+    def _scan_event(self, what: str, handle: object) -> None:
+        roots = [r.path for r in getattr(handle, "roots", [])]
+        scan: dict[str, Any] = {
+            "scan_id": getattr(handle, "id", ""),
+            "roots": roots,
+            "items": len(getattr(handle, "store", ())) - 1,
+        }
+        if what in ("done", "closed"):
+            self.plugins.fire("scan_done" if what == "done" else "scan_closed", scan=scan)
+        if what == "closed":
+            self.plugins.images.drop_scan(scan["scan_id"])
+        task = asyncio.get_running_loop().create_task(
+            self.plugins.push_update({"roots": self.plugins.api.scan_roots()})
+        )
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def _settings_changed(self, st: SettingsStore) -> None:
+        lang = st.state().language
+        fields: dict[str, object] = {"settings": True}
+        if lang != self._lang:
+            self._lang = lang
+            fields["lang"] = lang
+            self.plugins.fire("lang")
+        self.plugins.fire("settings", changed=[])
+        try:
+            task = asyncio.get_running_loop().create_task(self.plugins.push_update(fields))
+        except RuntimeError:  # no loop (tests changing settings directly)
+            return
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def start(self) -> int:
         self._ws = await serve(
@@ -119,10 +173,20 @@ class Server:
         )
         sock = next(iter(self._ws.sockets))
         self.port = int(sock.getsockname()[1])
+        await self.plugins.start()
+        self.background.append(asyncio.create_task(self._plugin_sweeps(), name="plugin-sweeps"))
         for hook in self.on_start:
             hook()
         logger.info("listening on ws://{}:{}{}", self.config.host, self.port, WS_PATH)
         return self.port
+
+    async def _plugin_sweeps(self) -> None:
+        while True:
+            await asyncio.sleep(60.0)
+            try:
+                await self.plugins.idle_sweep()
+            except Exception:
+                logger.exception("plugin idle sweep failed")
 
     @property
     def url(self) -> str:
@@ -143,6 +207,7 @@ class Server:
             self.sessions.discard(session)
             self.views.close_session(session)
             self.compares.close_session(session)
+            self.plugins.close_session(session)
 
     def request_shutdown(self) -> None:
         if not self.shutdown_requested.is_set():
@@ -161,6 +226,7 @@ class Server:
         for task in self.background:
             task.cancel()
         self.background.clear()
+        await self.plugins.close()
         await self.updates.close()
         await self.scans.close()
         logger.info("server stopped")

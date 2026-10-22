@@ -134,6 +134,9 @@ class NodeStore:
         self.cols: dict[str, np.ndarray] = {k: self._zeros(self._cap, dt) for k, dt in COLUMNS.items()}
         mapped.POLICY.register(self)
         self.version = 0  # bumped by every change made through this API (caches key on it)
+        # bumped when node ids stop meaning the same nodes (adopting a store built aside, rows moved
+        # by a file change): ids a plugin kept from before are stale (docs/plugins.md, 「epoch」)
+        self.epoch = 0
         self.ext_table: list[str] = [""]
         self._ext_index: dict[str, int] = {"": 0}
         self._append_one(parent=-1, depth=0, kind=Kind.DIR, flags=Flag.VIRTUAL, name=b"")
@@ -737,6 +740,7 @@ class NodeStore:
         self.ext_table = other.ext_table
         self._ext_index = other._ext_index
         self.version = max(self.version, other.version) + 1
+        self.epoch += 1
 
     def names_size(self) -> int:
         """Bytes of names in use (each name plus its NUL)."""
@@ -772,6 +776,7 @@ class NodeStore:
         store = cls.__new__(cls)
         store._n = n
         store.version = 0
+        store.epoch = 0
         store._cap = max(16, n)
         store._settled = True  # complete: later changes grow it a little at a time
         store.mapped = False

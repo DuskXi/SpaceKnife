@@ -32,23 +32,46 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from ..i18n import tr
-from .messages import HEADER, KIND_JSON, MAX_BINARY_BYTES, FrameError, Message, check_header, json_frame
+from .messages import (
+    HEADER,
+    KIND_JSON,
+    MAX_BINARY_BYTES,
+    MAX_CONTROL_BYTES,
+    FrameError,
+    Message,
+    check_header,
+    json_frame,
+)
 
-PIPE_PREFIX = "\\\\.\\pipe\\spaceknife-helper-"
+HELPER_PREFIX = "spaceknife-helper-"
+PLUGIN_PREFIX = "spaceknife-plugin-"  # plugin processes (spaceknife.plugins): the same channel
+PREFIXES = (HELPER_PREFIX, PLUGIN_PREFIX)
+PIPE_PREFIX = "\\\\.\\pipe\\" + HELPER_PREFIX
 SOCKET_NAME = "helper.sock"
-_PIPE_RE = re.compile(r"\\\\\.\\pipe\\spaceknife-helper-[0-9a-f]{32}")
-_SOCKET_DIR_RE = re.compile(r"spaceknife-helper-[0-9a-z_]+")
 _SEND_CHUNK = 8 << 20
 Buffer = bytes | bytearray | memoryview
 
 
-def valid_address(address: str) -> bool:
-    """Whether ``address`` is one this module could have created (the helper refuses others)."""
+def _pipe_re(prefix: str) -> re.Pattern[str]:
+    return re.compile(r"\\\\\.\\pipe\\" + re.escape(prefix) + r"[0-9a-f]{32}")
+
+
+def _socket_dir_re(prefix: str) -> re.Pattern[str]:
+    return re.compile(re.escape(prefix) + r"[0-9a-z_]+")
+
+
+def valid_address(address: str, prefix: str = HELPER_PREFIX) -> bool:
+    """Whether ``address`` is one this module could have created with ``prefix`` (the helper and
+    plugin processes refuse others)."""
+    if prefix not in PREFIXES:
+        return False
     if sys.platform == "win32":
-        return _PIPE_RE.fullmatch(address) is not None
+        return _pipe_re(prefix).fullmatch(address) is not None
     path = Path(address)
     return (
-        path.is_absolute() and path.name == SOCKET_NAME and bool(_SOCKET_DIR_RE.fullmatch(path.parent.name))
+        path.is_absolute()
+        and path.name == SOCKET_NAME
+        and bool(_socket_dir_re(prefix).fullmatch(path.parent.name))
     )
 
 
@@ -73,11 +96,11 @@ class AsyncChannel(ABC):
     def closed(self) -> bool: ...
 
     async def read_frame(
-        self, inactivity: float | None, max_binary: int = MAX_BINARY_BYTES
+        self, inactivity: float | None, max_binary: int = MAX_BINARY_BYTES, max_json: int = MAX_CONTROL_BYTES
     ) -> tuple[int, bytearray]:
         head = bytearray(HEADER.size)
         await self.recv_into(memoryview(head), inactivity)
-        kind, body_len = check_header(head, max_binary=max_binary)
+        kind, body_len = check_header(head, max_binary=max_binary, max_json=max_json)
         body = bytearray(body_len)
         if body_len:
             try:
@@ -106,7 +129,11 @@ class SyncChannel(ABC):
     def close(self) -> None: ...
 
     def read_frame(
-        self, first_timeout: float | None, timeout: float | None, max_binary: int
+        self,
+        first_timeout: float | None,
+        timeout: float | None,
+        max_binary: int,
+        max_json: int = MAX_CONTROL_BYTES,
     ) -> tuple[int, bytearray]:
         """One frame; ``first_timeout`` bounds the wait for its first byte (the idle timeout)."""
         head = bytearray(HEADER.size)
@@ -116,7 +143,7 @@ class SyncChannel(ABC):
             self.recv_into(view[1:], timeout)
         except EOFError:
             raise ConnectionResetError(tr("帧不完整：对端已关闭")) from None
-        kind, body_len = check_header(head, max_binary=max_binary)
+        kind, body_len = check_header(head, max_binary=max_binary, max_json=max_json)
         body = bytearray(body_len)
         if body_len:
             try:
@@ -194,8 +221,8 @@ if sys.platform == "win32":
     class Listener:
         """The backend's end, created before the helper is launched; accepts exactly one connection."""
 
-        def __init__(self) -> None:
-            self.address = PIPE_PREFIX + secrets.token_hex(16)
+        def __init__(self, prefix: str = HELPER_PREFIX) -> None:
+            self.address = "\\\\.\\pipe\\" + prefix + secrets.token_hex(16)
             self._pipe: _win32.Pipe | None = _win32.create_pipe_server(self.address)
 
         async def accept(self, wait: float) -> AsyncChannel:
@@ -322,8 +349,8 @@ else:
     class Listener:
         """The backend's end, created before the helper is launched; accepts exactly one connection."""
 
-        def __init__(self) -> None:
-            self._dir: str | None = tempfile.mkdtemp(prefix="spaceknife-helper-")  # 0700
+        def __init__(self, prefix: str = HELPER_PREFIX) -> None:
+            self._dir: str | None = tempfile.mkdtemp(prefix=prefix)  # 0700
             self.address = os.path.join(self._dir, SOCKET_NAME)
             sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
             try:
@@ -388,15 +415,17 @@ else:
             raise
 
 
-def connect(address: str, timeout: float) -> SyncChannel:
-    """Helper side: connect to the backend's listener (only to an address it could have made)."""
-    if not valid_address(address):
+def connect(address: str, timeout: float, prefix: str = HELPER_PREFIX) -> SyncChannel:
+    """Helper / plugin side: connect to the backend's listener (only to an address it could have made)."""
+    if not valid_address(address, prefix):
         raise ValueError(tr("无效的助手地址：{address!r}", address=address))
     return _connect(address, timeout)
 
 
 __all__ = [
+    "HELPER_PREFIX",
     "KIND_JSON",
+    "PLUGIN_PREFIX",
     "AsyncChannel",
     "FrameError",
     "Listener",

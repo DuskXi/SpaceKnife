@@ -957,13 +957,45 @@ def user_rules_dir() -> Path:
 
 _active: RuleSet | None = None
 _lock = threading.Lock()
+_plugin_sources: list[tuple[str, str]] = []  # (source name, TOML text) of the enabled plugins' rule files
+_user_dir: Path | None = None  # the folder the active set was loaded with (its files' times below)
+_user_sig: tuple[tuple[str, int, int], ...] = ()
+
+
+def _signature(folder: Path | None) -> tuple[tuple[str, int, int], ...]:
+    if folder is None:
+        return ()
+    try:
+        return tuple(
+            sorted(
+                (f.name, f.stat().st_mtime_ns, f.stat().st_size) for f in folder.glob("*.toml") if f.is_file()
+            )
+        )
+    except OSError:
+        return ()
+
+
+def set_plugin_sources(sources: list[tuple[str, str]]) -> RuleSet:
+    """The plugins' rule files changed: built-in, then the plugins' (by plugin id), then the user's."""
+    global _plugin_sources
+    _plugin_sources = list(sources)
+    return load_rules(_user_dir)
+
+
+def refresh_user_rules() -> None:
+    """Load the user's rule folder again when its files changed (before a lookup that uses it)."""
+    if _user_dir is not None and _signature(_user_dir) != _user_sig:
+        load_rules(_user_dir)
 
 
 def load_rules(extra_dir: Path | None = None, *, host: str | None = None) -> RuleSet:
-    """Built-in rules plus every ``*.toml`` in ``extra_dir`` (by file name; user rules override
-    built-ins by id), made the active set for the module-level ``match`` functions."""
-    global _active
-    sources = [(BUILTIN_SOURCE, builtin_text())]
+    """Built-in rules, the enabled plugins' rule files, then every ``*.toml`` in ``extra_dir`` (by
+    file name; later sources override earlier ones by id), made the active set for the module-level
+    ``match`` functions."""
+    global _active, _user_dir, _user_sig
+    _user_dir = extra_dir
+    _user_sig = _signature(extra_dir)
+    sources = [(BUILTIN_SOURCE, builtin_text()), *_plugin_sources]
     problems: list[RuleProblem] = []
     if extra_dir is not None:
         try:

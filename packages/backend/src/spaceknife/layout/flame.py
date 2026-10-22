@@ -104,5 +104,7 @@ FLAME = register(
         order=1,
         engine=flame_engine,
         default_color="branch",
+        options=(("origin", "treemap.flame_origin"),),
+        aliases=("visualization flame", "flame graph", "icicle"),
     )
 )

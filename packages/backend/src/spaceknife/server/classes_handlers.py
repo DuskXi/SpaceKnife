@@ -39,7 +39,7 @@ def state() -> ClassesState:
     return ClassesState(
         classes=classes.shown(table),
         defaults=classes.shown(classes.DEFAULT_CLASSES),
-        custom=table.custom,
+        custom=classes.base().custom,
         folders=[ClassFolder(path=path, class_id=cid) for path, cid in pathclass.folders()],
     )
 

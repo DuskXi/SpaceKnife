@@ -485,6 +485,7 @@ class ScanMonitor:
                 kept = rel.moved_to[store.cols["kind"][rel.moved_to] == Kind.DIR]
                 out.kept_folders.extend(kept.tolist())
             if remap:
+                store.epoch += 1  # moved rows: node ids plugins hold are stale now
                 moved = remap(np.array(list(out.flashes), dtype=np.int64))
                 out.flashes = {
                     int(m): d for m, d in zip(moved.tolist(), out.flashes.values(), strict=True) if m >= 0

@@ -50,6 +50,8 @@ class BasketItem(Payload):
     status: BasketItemStatus = "ready"
     note: str = Field(default="", description="Why it cannot be deleted as is (locked by …, missing …)")
     tag: str | None = None
+    origin: str | None = Field(default=None, description="The plugin cleanup that proposed it (full id)")
+    reason: str = Field(default="", description="Why it was proposed (plugin cleanups)")
 
 
 class BasketVolume(Payload):
@@ -72,6 +74,12 @@ class BasketAddParams(Params):
     nodes: list[int] = Field(default_factory=list, max_length=100_000)
     view_id: str | None = Field(default=None, description="With key: the view whose frame holds that block")
     key: int | None = Field(default=None, description="A block of the view's frame (an aggregate's members)")
+    origin: str | None = Field(
+        default=None, max_length=64, description="A plugin cleanup's full id (shown in the basket)"
+    )
+    reasons: list[str] | None = Field(
+        default=None, max_length=100_000, description="Per node, why it was proposed (same order as nodes)"
+    )
 
 
 class Refusal(Payload):

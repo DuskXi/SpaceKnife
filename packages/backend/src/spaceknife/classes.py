@@ -171,13 +171,20 @@ DEFAULT_CLASSES = ClassTable()
 # --------------------------------------------------------------------------- the active table
 
 _lock = threading.Lock()
-_active = DEFAULT_CLASSES
+_base = DEFAULT_CLASSES  # the user's table, else the built-in one
+_active = DEFAULT_CLASSES  # _base with the enabled plugins' classes
+_plugin: tuple[FilterClassInfo, ...] = ()  # the plugins' classes (file_class contributions), in order
 _version = 0
 
 
 def active() -> ClassTable:
-    """The table in use now (the user's, else the built-in one)."""
+    """The table in use now: the user's (else the built-in one), with the plugins' classes."""
     return _active
+
+
+def base() -> ClassTable:
+    """The user's table (else the built-in one), without the plugins' classes."""
+    return _base
 
 
 def version() -> int:
@@ -185,11 +192,56 @@ def version() -> int:
     return _version
 
 
+def merged(table: ClassTable, plugin: tuple[FilterClassInfo, ...]) -> tuple[ClassTable, list[str]]:
+    """``table`` with the plugin classes it does not have yet, before 「其他」; the ones that do not
+    fit (a name taken, past MAX_CLASSES) are left out and named in the second result."""
+    if not plugin:
+        return table, []
+    have = {c.id for c in table.classes}
+    out = [c for c in table.classes if c.id != OTHER]
+    other = table.by_id[OTHER]
+    skipped: list[str] = []
+    for c in plugin:
+        if c.id in have:
+            continue
+        if len(out) + 1 >= MAX_CLASSES:
+            skipped.append(c.id)
+            continue
+        try:
+            ClassTable((*out, c, other))
+        except ValueError:
+            skipped.append(c.id)
+            continue
+        out.append(c)
+    return ClassTable((*out, other)), skipped
+
+
 def set_active(table: ClassTable) -> None:
-    global _active, _version
+    """Make ``table`` the user's table (the plugins' classes are added to it)."""
+    global _active, _base, _version
     with _lock:
-        _active = table
+        _base = strip_plugin(table)
+        _active = merged(_base, _plugin)[0]
         _version += 1
+
+
+def set_plugin_classes(classes: tuple[FilterClassInfo, ...]) -> list[str]:
+    """The enabled plugins' classes changed; returns the ids that could not be added."""
+    global _active, _plugin, _version
+    with _lock:
+        _plugin = tuple(classes)
+        _active, skipped = merged(_base, _plugin)
+        _version += 1
+    return skipped
+
+
+def strip_plugin(table: ClassTable) -> ClassTable:
+    """``table`` without the plugin classes it took over unchanged (the user's edits of one stay)."""
+    plugin = {c.id: c for c in _plugin}
+    keep = tuple(c for c in table.classes if plugin.get(c.id) != c)
+    if len(keep) == len(table.classes):
+        return table
+    return ClassTable(keep)
 
 
 def _norm_ext(raw: str) -> str:
@@ -308,7 +360,9 @@ def load_user() -> None:
 
 
 def save(table: ClassTable, path: Path) -> None:
-    """Write atomically; the built-in table removes the file (nothing to remember)."""
+    """Write atomically; the built-in table removes the file (nothing to remember). The plugins'
+    classes are not the user's: they come back with their plugins."""
+    table = strip_plugin(table)
     if not table.custom:
         path.unlink(missing_ok=True)
         return

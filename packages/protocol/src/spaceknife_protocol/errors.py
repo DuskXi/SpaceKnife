@@ -27,6 +27,14 @@ class ErrorCode(IntEnum):
     SCAN_BUSY = -32011
     UNKNOWN_VIEW = -32012
     SETTINGS_CONFLICT = -32013
+    # plugins (docs/plugins.md)
+    PERMISSION_DENIED = -32014  # missing permission, or a method a plugin may not call (data.permission)
+    PLUGIN_TIMEOUT = -32015
+    PLUGIN_UNAVAILABLE = -32016  # its process could not start, crashed or hung
+    PLUGIN_DISABLED = -32017  # not enabled, changed since confirmed, or incompatible
+    STALE_TREE = -32018  # a node id from before the tree was reorganised (its epoch moved on)
+    PLUGIN_ERROR = -32019  # the plugin reported an error; message is for the user
+    PLUGIN_LIMIT = -32020  # too many calls in flight or queued, or an output past its limit
 
     # Same value LSP uses for a request cancelled by the client
     REQUEST_CANCELLED = -32800

@@ -40,6 +40,11 @@ TopicFactory = Callable[["Session", dict[str, Any] | None, float | None], Awaita
 class TopicRegistry:
     def __init__(self) -> None:
         self._factories: dict[str, TopicFactory] = {}
+        # topics nobody registered by name: plugins' states and streams (plugin.<id>.<name>)
+        self.fallback: (
+            Callable[[Session, str, dict[str, Any] | None, float | None], Awaitable[Subscription | None]]
+            | None
+        ) = None
 
     def register(self, name: str, factory: TopicFactory) -> None:
         self._factories[name] = factory
@@ -48,6 +53,10 @@ class TopicRegistry:
         self, session: Session, name: str, params: dict[str, Any] | None, rate_hz: float | None
     ) -> Subscription:
         factory = self._factories.get(name)
+        if factory is None and self.fallback is not None:
+            sub = await self.fallback(session, name, params, rate_hz)
+            if sub is not None:
+                return sub
         if factory is None:
             raise RpcError(
                 ErrorCode.UNKNOWN_TOPIC, f"unknown topic: {name}", {"topics": sorted(self._factories)}

@@ -33,7 +33,7 @@ from spaceknife_protocol.session import ClientInfo, HelloParams, HelloResult, Li
 from spaceknife_protocol.streams import CancelParams
 
 from ..events import printable
-from .rpc import CURRENT_REQUEST, Route, RpcError, not_found
+from .rpc import CURRENT_REQUEST, RawResult, Route, RpcError, not_found
 
 if TYPE_CHECKING:
     from .app import Server
@@ -249,6 +249,8 @@ class Session:
             )
             return
         route = self.server.router.get(msg.method)
+        if route is None and msg.method.startswith("plugin."):
+            route = self.server.plugins.route(msg.method)
         if route is None:
             err = not_found(msg.method)
             self._enqueue_error(msg.id, err.code, err.message)
@@ -281,7 +283,8 @@ class Session:
                 self._enqueue_error(msg.id, ErrorCode.INTERNAL_ERROR, "internal error")
                 return
             try:
-                frame = encode_message(SuccessResponse(id=msg.id, result=result.model_dump(mode="json")))
+                raw = result.raw if isinstance(result, RawResult) else result.model_dump(mode="json")
+                frame = encode_message(SuccessResponse(id=msg.id, result=raw))
             except Exception:
                 logger.exception("could not encode the result of {}", msg.method)
                 self._enqueue_error(msg.id, ErrorCode.INTERNAL_ERROR, "internal error: unencodable result")
@@ -315,6 +318,18 @@ class Session:
             frame = encode_message(Notification(method=spec.name, params=payload.model_dump(mode="json")))
         except Exception:
             logger.exception("could not encode a {} event", spec.name)
+            return
+        self._queued_events += 1
+        self._enqueue(Priority.EVENT, frame)
+
+    def emit_raw(self, name: str, payload: dict[str, Any]) -> None:
+        """A plugin's event or topic message (``plugin.<id>.<name>``; not in the core EVENTS)."""
+        if self._closing or self._queued_events >= MAX_QUEUED_EVENTS:
+            return
+        try:
+            frame = encode_message(Notification(method=name, params=payload))
+        except Exception:
+            logger.exception("could not encode a {} event", name)
             return
         self._queued_events += 1
         self._enqueue(Priority.EVENT, frame)

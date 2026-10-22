@@ -75,8 +75,14 @@ def view_stream(view_id: str) -> str:
     return VIEW_STREAM_PREFIX + view_id
 
 
-VisualId = Annotated[str, Field(min_length=1, max_length=48, pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")]
-ColorModeName = Literal["class", "flat", "time", "branch"]
+ID_PATTERN = r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"
+VisualId = Annotated[str, Field(min_length=1, max_length=64, pattern=ID_PATTERN)]
+BuiltinColorMode = Literal["class", "flat", "time", "branch"]
+BUILTIN_COLOR_MODES: tuple[BuiltinColorMode, ...] = ("class", "flat", "time", "branch")
+# An open id (colors.v1): the built-in modes, or a plugin's full id (``example.media.media``).
+ColorModeId = Annotated[str, Field(min_length=1, max_length=64, pattern=ID_PATTERN)]
+ColorModeName = ColorModeId  # the older name
+SizeUnit = Literal["bytes", "count"]
 FilterModeName = Literal["dim", "hide"]
 ResultsSortName = Literal["size", "name", "count"]
 ResultKind = Literal["file", "folder", "group", "rest"]
@@ -102,10 +108,11 @@ class ViewSettingsParams(Params):
         default=None, description="The recycle bins: drawn, or taken out of the picture"
     )
     visual: VisualId | None = Field(default=None, description="A visual.list id (needs visuals.v1)")
-    color_mode: ColorModeName | None = Field(
-        default=None, description="Of the view's current visualization; 'branch' needs visuals.v1"
+    color_mode: ColorModeId | None = Field(
+        default=None,
+        description="Of the view's current visualization; 'branch' needs visuals.v1, a plugin's colors.v1",
     )
-    colors: dict[str, ColorModeName] | None = Field(
+    colors: dict[str, ColorModeId] | None = Field(
         default=None,
         description="Colour mode per visualization (a split pane or a reopened view keeps them); "
         "color_mode, when also given, wins for the current one",
@@ -266,6 +273,11 @@ class FrameInfo(Payload):
     layout: str = Field(default=DRAWLIST_LAYOUT, description="Layout of the binary frame that follows")
     geometry: FrameGeometry | None = Field(default=None, description="None for drawlist.v1")
     root: FrameRoot | None = Field(default=None, description="The zoom root (flame.v1 / polar.v1)")
+    palette: str | None = Field(
+        default=None,
+        description="colors.v1: a plugin colour mode drew this frame; its u1 'pal' column follows",
+    )
+    size_unit: SizeUnit = Field(default="bytes", description="What 'size' counts: bytes, or files / items")
 
 
 class ViewState(Payload):
@@ -285,8 +297,8 @@ class ViewState(Payload):
         default=False, description="The scan holds a recycle bin / trash folder (the toggle is offered)"
     )
     visual: str = Field(default="treemap", description="A visual.list id")
-    color_mode: ColorModeName = Field(description="Of the current visualization (each remembers its own)")
-    colors: dict[str, ColorModeName] = Field(
+    color_mode: ColorModeId = Field(description="Of the current visualization (each remembers its own)")
+    colors: dict[str, ColorModeId] = Field(
         default_factory=dict, description="Colour mode each visualization remembers"
     )
     filter_mode: FilterModeName
@@ -353,9 +365,11 @@ class VisualInfo(Payload):
     order: int
     compare: bool = Field(description="Can show compare views")
     free_space: bool = Field(description="Shows free / unknown space at a volume root")
-    default_color: ColorModeName = Field(description="Colour mode a view starts with on this visualization")
+    default_color: ColorModeId = Field(description="Colour mode a view starts with on this visualization")
     available: bool = Field(description="This session negotiated what it needs")
     reason: str | None = Field(default=None, description="Why it is not available (display text)")
+    plugin: str | None = Field(default=None, description="The plugin that adds it (None: built in)")
+    size_unit: SizeUnit = Field(default="bytes", description="What its areas count")
 
 
 class VisualListResult(Payload):

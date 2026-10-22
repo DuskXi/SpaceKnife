@@ -22,7 +22,8 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from spaceknife_protocol import CAP_VISUALS
+from spaceknife_protocol import CAP_COLORS, CAP_VISUALS
+from spaceknife_protocol.text import Text
 
 from ..i18n import SOURCE, Texts, _, language, plural, tr
 from ..layout import registry as visuals
@@ -50,6 +51,9 @@ class Context:
     app_version: str = ""  # the running app's version (update.status)
     update_version: str = ""  # a newer release, "" when there is none
     update_checking: bool = False
+    settings: Any = None  # the SettingsStore (commands available while a setting is on)
+    plugins: frozenset[str] = frozenset()  # enabled plugins
+    scan_source: str = ""  # the scan source of the scan in front (a plugin's full id), "" for disks
 
     @property
     def selected_node(self) -> int | None:
@@ -172,6 +176,11 @@ class Command:
     milestone: str = ""  # not wired up yet: disabled until then
     typed_only: bool = False  # only listed for a typed query (W4 待定 3: colour choices)
     search: tuple[tuple[str, tuple[int, ...] | None], ...] = field(default=(), compare=False)
+    action: Any = None  # plugins.v1: what running it does (a protocol Action); None: the frontend's own
+    menus: tuple[str, ...] = ()  # where else it is offered: node, inspector, toolbar, start
+    owner: str = "builtin"  # or the plugin that adds it
+    text: Text | None = None  # a plugin's name in both languages (``name`` is its Chinese text)
+    pinyin: tuple[str, ...] | None = None  # a plugin's pinyin of the name (its generated/pinyin.json)
 
     @property
     def more(self) -> bool:
@@ -185,8 +194,19 @@ def _rescan_status(c: Context) -> str:
     return tr("{method} · 约 {seconds} 秒", method=method, seconds=max(1, round(c.elapsed_s)))
 
 
+def color_name(mode: str) -> str:
+    """A colour mode's name in the current language (a plugin's from its declaration)."""
+    name: str | None = COLOR_NAMES.get(mode)
+    if name is not None:
+        return name
+    from ..extensions import EXTENSIONS
+
+    found = EXTENSIONS.get("color_mode", mode)
+    return found.spec.title.get(language()) if found is not None else mode
+
+
 def _color(c: Context) -> str:
-    return tr("当前：{mode}", mode=COLOR_NAMES[c.view.color_mode]) if c.view else ""
+    return tr("当前：{mode}", mode=color_name(c.view.color_mode)) if c.view else ""
 
 
 def _visual_name(visual: str) -> str:
@@ -240,6 +260,15 @@ def _visual_pick(visual: str) -> Callable[[Context], str]:
 
 
 def _registry() -> tuple[Command, ...]:
+    """The built-in commands (tools/gen_docs.py and gen_pinyin.py read exactly these)."""
+    return (
+        *_static(),
+        *_color_commands(),
+        *_visual_commands([v for v in visuals.all_visuals() if v.plugin is None]),
+    )
+
+
+def _static() -> tuple[Command, ...]:
     C = Command
     return (
         # the empty-input list, in this order (UI-W4-12)
@@ -439,77 +468,81 @@ def _registry() -> tuple[Command, ...]:
             ("about", "version", "release notes", "changelog", "timeline"),
             status=lambda c: c.app_version,
         ),
-        C(
-            "view.color.class",
-            "配色：文件类别",
-            "palette",
-            (),
-            ("color class",),
-            needs=(_view,),
-            status=_color_pick("class"),
-            typed_only=True,
-        ),
-        C(
-            "view.color.flat",
-            "配色：扁平",
-            "palette",
-            (),
-            ("color flat",),
-            needs=(_view,),
-            status=_color_pick("flat"),
-            typed_only=True,
-        ),
-        C(
-            "view.color.time",
-            "配色：修改时间",
-            "palette",
-            (),
-            ("color time", "age"),
-            needs=(_view,),
-            status=_color_pick("time"),
-            typed_only=True,
-        ),
-        C(
-            "view.color.branch",
-            "配色：顶层分支",
-            "palette",
-            (),
-            ("color branch", "top level"),
-            needs=(_branch_ok,),
-            status=_color_pick("branch"),
-            typed_only=True,
-        ),
-        C(
-            "view.visual.treemap",
-            "可视化：树图",
-            "vizTreemap",
-            (),
-            ("visualization treemap", "treemap"),
-            needs=(_visual_ok("treemap"),),
-            status=_visual_pick("treemap"),
-            typed_only=True,
-        ),
-        C(
-            "view.visual.flame",
-            "可视化：火焰图",
-            "vizFlame",
-            (),
-            ("visualization flame", "flame graph", "icicle"),
-            needs=(_visual_ok("flame"),),
-            status=_visual_pick("flame"),
-            typed_only=True,
-        ),
-        C(
-            "view.visual.flame_polar",
-            "可视化：火焰-极坐标图",
-            "vizFlamePolar",
-            (),
-            ("visualization polar", "polar flame graph", "radial", "rings"),
-            needs=(_visual_ok("flame_polar"),),
-            status=_visual_pick("flame_polar"),
-            typed_only=True,
-        ),
     )
+
+
+# the built-in colour modes' commands: (mode, name, aliases); 「顶层分支」 needs visuals.v1
+# names of the generated commands: their message id is the filled-in Chinese text
+NAMED = Texts({"visual": "可视化：{name}", "color": "配色：{name}", "filter": "过滤：{name}"})
+COLOR_COMMAND_NAMES = Texts(
+    {"class": "配色：文件类别", "flat": "配色：扁平", "time": "配色：修改时间", "branch": "配色：顶层分支"}
+)
+BUILTIN_COLORS: tuple[tuple[str, str, tuple[str, ...]], ...] = tuple(
+    (mode, COLOR_COMMAND_NAMES.raw(mode), aliases)
+    for mode, aliases in (
+        ("class", ("color class",)),
+        ("flat", ("color flat",)),
+        ("time", ("color time", "age")),
+        ("branch", ("color branch", "top level")),
+    )
+)
+
+
+def _color_ok(mode: str) -> Need:
+    def need(c: Context) -> str | None:
+        reason = _view(c)
+        if reason:
+            return reason
+        if CAP_COLORS not in c.caps:
+            return _("这种配色在当前界面不可用")
+        return None
+
+    return need
+
+
+def _color_commands() -> tuple[Command, ...]:
+    out = []
+    for mode, name, aliases in BUILTIN_COLORS:
+        out.append(
+            Command(
+                f"view.color.{mode}",
+                name,
+                "palette",
+                (),
+                aliases,
+                needs=(_branch_ok if mode == "branch" else _view,),
+                status=_color_pick(mode),
+                typed_only=True,
+            )
+        )
+    return tuple(out)
+
+
+def _visual_commands(vis: list[Any]) -> tuple[Command, ...]:
+    """「可视化：…」 for each visualization of the registry (built-ins: their message ids)."""
+    out = []
+    for v in vis:
+        text = None
+        if v.text is not None:
+            text = Text(
+                zh=NAMED.raw("visual").format(name=v.text.zh),
+                en=f"Visualization: {v.text.en}" if v.text.en else "",
+            )  # i18n: ignore
+        out.append(
+            Command(
+                f"view.visual.{v.id}",
+                NAMED.raw("visual").format(name=v.title_id if v.text is None else v.text.zh),
+                v.icon,
+                (),
+                v.aliases,
+                needs=(_visual_ok(v.id),),
+                status=_visual_pick(v.id),
+                typed_only=True,
+                owner=v.plugin or "builtin",
+                text=text,
+            )
+        )
+    return tuple(out)
 
 
 def each_char(text: str) -> Any:
@@ -534,9 +567,14 @@ def _syllables(name: str) -> list[str]:
 
 
 def _search_keys(cmd: Command) -> tuple[tuple[str, tuple[int, ...] | None], ...]:
-    """(text, map from text index to name index or None) for the name, its pinyin and its aliases."""
+    """(text, map from text index to name index or None) for the name, its pinyin and its aliases.
+    A plugin's command uses the pinyin its plugin ships (``plugin build``), or none: the backend never
+    loads pypinyin for names it does not know beforehand."""
     name = cmd.name
-    syllables = _syllables(name)
+    if cmd.owner != "builtin":
+        syllables = list(cmd.pinyin) if cmd.pinyin is not None else list(name)
+    else:
+        syllables = _syllables(name)
     full: list[str] = []
     full_map: list[int] = []
     initials: list[str] = []
@@ -562,15 +600,66 @@ def _search_keys(cmd: Command) -> tuple[tuple[str, tuple[int, ...] | None], ...]
     return tuple(keys)
 
 
-@cache
+_cache: tuple[tuple[int, tuple[str, ...]], tuple[Command, ...]] | None = None
+
+
 def registry() -> tuple[Command, ...]:
+    """Every command: the built-in ones, then the plugins' (with the effective keys of the single key
+    table, :func:`.keymap.apply`). Built again when the extension registry changes."""
+    global _cache
     from dataclasses import replace
 
-    return tuple(replace(c, search=_search_keys(c)) for c in _registry())
+    from ..extensions import EXTENSIONS
+    from .keymap import apply
+
+    all_vis = visuals.all_visuals()
+    key = (EXTENSIONS.version, tuple(v.id for v in all_vis))
+    hit = _cache
+    if hit is not None and hit[0] == key:
+        return hit[1]
+    cmds = [*_static(), *_color_commands(), *_visual_commands([v for v in all_vis if v.plugin is None])]
+    cmds += plugin_commands([v for v in all_vis if v.plugin is not None])
+    built = tuple(replace(c, search=_search_keys(c)) for c in apply(cmds))
+    _cache = (key, built)
+    return built
+
+
+def plugin_commands(plugin_visuals: list[Any]) -> list[Command]:
+    """The plugins' commands, filter presets, and the generated visualization / colour commands."""
+    from ..extensions import EXTENSIONS
+
+    out: list[Command] = list(_visual_commands(plugin_visuals))
+    for c in EXTENSIONS.of("color_mode"):
+        if c.builtin:
+            continue
+        title: Text = c.spec.title
+        out.append(
+            Command(
+                f"view.color.{c.id}",
+                NAMED.raw("color").format(name=title.zh),
+                "palette",
+                (),
+                ("color", c.local),
+                needs=(_color_ok(c.id),),
+                status=_color_pick(c.id),
+                typed_only=True,
+                owner=c.owner,
+                text=Text(
+                    zh=NAMED.raw("color").format(name=title.zh),
+                    en=f"Colours: {title.en}" if title.en else "",
+                ),  # i18n: ignore
+            )
+        )
+    for c in EXTENSIONS.of("command"):
+        if isinstance(c.impl, Command):
+            out.append(c.impl)
+    return out
 
 
 def label(cmd: Command) -> str:
     """The command's name in the current language (what :func:`match` hits refer to)."""
+    if cmd.text is not None:
+        return cmd.text.get(language())
     return _(cmd.name)
 
 
@@ -626,4 +715,16 @@ def match(cmd: Command, query: str) -> tuple[int, list[tuple[int, int]]] | None:
     return best
 
 
-__all__ = ["COLOR_NAMES", "VISUAL_NAMES", "Command", "Context", "evaluate", "label", "match", "registry"]
+__all__ = [
+    "BUILTIN_COLORS",
+    "COLOR_NAMES",
+    "VISUAL_NAMES",
+    "Command",
+    "Context",
+    "Need",
+    "color_name",
+    "evaluate",
+    "label",
+    "match",
+    "registry",
+]

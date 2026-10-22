@@ -46,7 +46,7 @@ ATTR_NAMES: tuple[AttrName, ...] = (
 
 SizeField = Literal["disk", "logical"]
 AgeField = Literal["modify", "create", "access"]
-Category = Literal["name", "class", "folder", "tag", "size", "age", "attr"]
+Category = Literal["name", "class", "folder", "tag", "size", "age", "attr", "set"]
 
 TokenKind = Literal["negate", "separator", "mask", "folder", "compare", "keyword", "value"]
 
@@ -59,6 +59,7 @@ ErrorCode = Literal[
     "unknown_keyword",
     "bad_char",  # a character a bare mask cannot contain ('|', '<', '>'): quote the mask
     "unknown_class",
+    "unknown_set",  # a node set (":set:") no enabled plugin offers
     "unknown_tag",
     "unknown_attr",
     "bad_list",  # malformed ":tag:" / ":attr:" list ("h++r", trailing "+")
@@ -122,6 +123,13 @@ class ClassCond(_Cond):
     class_id: str
 
 
+class SetCond(_Cond):
+    """``:set:<name>``: in a node set a plugin computes (plugins.v1)."""
+
+    kind: Literal["set"] = "set"
+    set_id: str
+
+
 class TagCond(_Cond):
     kind: Literal["tag"] = "tag"
     colors: list[TagColor]
@@ -148,7 +156,7 @@ class AgeCond(_Cond):
 
 
 FilterCond = Annotated[
-    MaskCond | FolderCond | ClassCond | TagCond | AttrCond | SizeCond | AgeCond,
+    MaskCond | FolderCond | ClassCond | SetCond | TagCond | AttrCond | SizeCond | AgeCond,
     Field(discriminator="kind"),
 ]
 
@@ -193,6 +201,8 @@ class FilterNormal(Payload):
     not_folders: list[str] = Field(default_factory=list)
     not_tags: list[TagColor] = Field(default_factory=list)
     not_attrs: list[AttrSet] = Field(default_factory=list)
+    sets: list[str] = Field(default_factory=list, description="Node sets, any of them (full ids)")
+    not_sets: list[str] = Field(default_factory=list)
     canonical: str = ""
 
     @property
@@ -203,7 +213,7 @@ class FilterNormal(Payload):
 class Completion(Payload):
     """What can be inserted at the cursor; ``start``/``end`` is the span a candidate replaces."""
 
-    context: Literal["keyword", "class", "tag", "attr", "unit", "prefix"]
+    context: Literal["keyword", "class", "tag", "attr", "unit", "prefix", "set"]
     start: int
     end: int
     typed: str
@@ -234,10 +244,19 @@ class FilterClassInfo(Payload):
     )
 
 
+class FilterSetInfo(Payload):
+    """A node set of an enabled plugin (``:set:<name>``)."""
+
+    id: str = Field(description="Full id; also accepted after :set:")
+    name: str
+    aliases: list[str] = Field(default_factory=list)
+
+
 class FilterVocab(Payload):
     """Everything the parser needs besides the text; served by ``filter.vocab``."""
 
     classes: list[FilterClassInfo]
+    sets: list[FilterSetInfo] = Field(default_factory=list, description="plugins.v1: the node sets")
     unsupported_attrs: list[AttrName] = Field(default_factory=list)
     unsupported_ages: list[AgeField] = Field(default_factory=list)
 

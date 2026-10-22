@@ -55,6 +55,26 @@ from .palette import (
     PaletteRememberParams,
     PaletteResult,
 )
+from .plugins import (
+    ExtensionsChangedEvent,
+    ExtensionsState,
+    InsightNodeParams,
+    InsightNodeResult,
+    PluginChangedEvent,
+    PluginDescribeResult,
+    PluginEnableParams,
+    PluginFieldsParams,
+    PluginFieldsResult,
+    PluginIdParams,
+    PluginInfo,
+    PluginInstallParams,
+    PluginInstallResult,
+    PluginLinkParams,
+    PluginListResult,
+    PluginProgressEvent,
+    PluginToastEvent,
+    PluginUninstallParams,
+)
 from .scan import (
     PathCheckParams,
     PathCheckResult,
@@ -468,6 +488,73 @@ MACHINE_READ_HEALTH = MethodSpec(
     "Read the disks' own records that need administrator rights (Linux: the elevated helper, behind "
     "polkit's password prompt). Only when the user asks; the answer is the whole page again.",
 )
+PLUGIN_LIST = MethodSpec(
+    "plugin.list", Empty, PluginListResult, "Installed plugins with their state (plugins.v1)."
+)
+PLUGIN_DESCRIBE = MethodSpec(
+    "plugin.describe",
+    PluginIdParams,
+    PluginDescribeResult,
+    "What enabling a plugin means: its permissions, what it adds, key conflicts and its current hash.",
+)
+PLUGIN_ENABLE = MethodSpec(
+    "plugin.enable",
+    PluginEnableParams,
+    PluginInfo,
+    "Enable a plugin the user confirmed: the hash and permissions must be those plugin.describe showed.",
+)
+PLUGIN_DISABLE = MethodSpec(
+    "plugin.disable", PluginIdParams, PluginInfo, "Turn a plugin off (its settings and data stay)."
+)
+PLUGIN_RESTART = MethodSpec(
+    "plugin.restart", PluginIdParams, PluginInfo, "Restart a plugin's process (also after it crashed)."
+)
+PLUGIN_INSTALL = MethodSpec(
+    "plugin.install",
+    PluginInstallParams,
+    PluginInstallResult,
+    "Copy a plugin folder or unpack a .zip into the plugins folder (never enables it).",
+)
+PLUGIN_UNINSTALL = MethodSpec(
+    "plugin.uninstall",
+    PluginUninstallParams,
+    EmptyResult,
+    "Turn a plugin off and move its folder (and with remove_data its data) to the recycle bin.",
+)
+PLUGIN_LINK = MethodSpec(
+    "plugin.link",
+    PluginLinkParams,
+    PluginInfo,
+    "Developer mode: use a plugin folder in place (no hash pinning; reloaded when its files change).",
+)
+EXTENSIONS_GET = MethodSpec(
+    "extensions.get",
+    Empty,
+    ExtensionsState,
+    "What enabled plugins add: reports, panels, node fields, cleanups, colour modes, sources, presets.",
+)
+PLUGIN_FIELDS = MethodSpec(
+    "plugin.fields",
+    PluginFieldsParams,
+    PluginFieldsResult,
+    "The plugin fields of a node for the details panel or the hover card (each plugin time-boxed).",
+)
+INSIGHT_NODE = MethodSpec(
+    "insight.node",
+    InsightNodeParams,
+    InsightNodeResult,
+    "Insight cards of a node: matching rules first, then what plugins say.",
+)
+EVENT_EXTENSIONS = EventSpec(
+    "extensions.changed",
+    ExtensionsChangedEvent,
+    "Plugins came, went or changed what they add: fetch the listed kinds again (plugins.v1).",
+)
+EVENT_PLUGIN = EventSpec("plugin.changed", PluginChangedEvent, "A plugin's state changed (plugins.v1).")
+EVENT_PLUGIN_TOAST = EventSpec("plugin.toast", PluginToastEvent, "A plugin shows a short message.")
+EVENT_PLUGIN_PROGRESS = EventSpec(
+    "plugin.progress", PluginProgressEvent, "Progress of a plugin call (reports, cleanups)."
+)
 EVENT_UPDATE = EventSpec(
     "update.changed",
     UpdateChangedEvent,
@@ -568,6 +655,17 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         SYSTEM_HELPER_STOP,
         SYSTEM_CACHE_CLEAR,
         TAGS_CLEAR_SAVED,
+        PLUGIN_LIST,
+        PLUGIN_DESCRIBE,
+        PLUGIN_ENABLE,
+        PLUGIN_DISABLE,
+        PLUGIN_RESTART,
+        PLUGIN_INSTALL,
+        PLUGIN_UNINSTALL,
+        PLUGIN_LINK,
+        EXTENSIONS_GET,
+        PLUGIN_FIELDS,
+        INSIGHT_NODE,
     )
 }
 NOTIFICATIONS: dict[str, NotificationSpec[BaseModel]] = {spec.name: spec for spec in (CANCEL,)}
@@ -602,5 +700,9 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_COMPARE_PROGRESS,
         EVENT_CLASSES,
         EVENT_UPDATE,
+        EVENT_EXTENSIONS,
+        EVENT_PLUGIN,
+        EVENT_PLUGIN_TOAST,
+        EVENT_PLUGIN_PROGRESS,
     )
 }

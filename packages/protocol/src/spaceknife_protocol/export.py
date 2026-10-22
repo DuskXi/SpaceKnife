@@ -21,6 +21,7 @@ class ExportTarget(Payload):
     extension: str = Field(description="Suggested file extension, without the dot")
     file_name: str = Field(default="", description="The template's own suggested file name")
     spacesniffer: bool = Field(default=False, description="Also built into SpaceSniffer")
+    plugin: str | None = Field(default=None, description="The plugin that adds it (name is its full id)")
 
 
 class ExportTargets(Payload):

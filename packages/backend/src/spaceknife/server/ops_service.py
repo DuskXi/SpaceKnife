@@ -14,6 +14,7 @@ back as ``no_trash`` and stays where it is (``ops.trash`` guarantees it, this la
 from __future__ import annotations
 
 import asyncio
+import functools
 import itertools
 import os
 import shutil
@@ -240,7 +241,11 @@ class OpsService:
             raise RpcError(ErrorCode.UNKNOWN_SCAN, f"unknown scan: {target}")
         result = AddResult(refused=list(refused))
         if live and (members is None or members):
-            added = await compute(self.basket.add, live_store, target, live, members)
+            reasons = list(params.reasons) if params.reasons is not None and members is None else None
+            if reasons is not None and len(reasons) != len(live):
+                reasons = None  # a compare view's nodes did not all map: no reasons rather than wrong ones
+            add = functools.partial(self.basket.add, origin=params.origin, reasons=reasons)
+            added = await compute(add, live_store, target, live, members)
             result.added, result.merged = added.added, added.merged
             result.absorbed, result.refused = added.absorbed, result.refused + added.refused
         state = await self.broadcast()
@@ -487,4 +492,6 @@ def _item_model(it: BasketItem) -> po.BasketItem:
         volume=it.volume,
         status=it.status,
         note=it.note,
+        origin=it.origin,
+        reason=it.reason,
     )

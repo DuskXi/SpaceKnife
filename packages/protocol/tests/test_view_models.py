@@ -91,7 +91,7 @@ def test_visual_ids_accepted(visual: str) -> None:
     assert pv.ViewSettingsParams(visual=visual).visual == visual
 
 
-@pytest.mark.parametrize("visual", ["", "Flame", "1flame", "flame_", "flame__polar", "a" * 49, "x/y"])
+@pytest.mark.parametrize("visual", ["", "Flame", "1flame", "flame_", "flame__polar", "a" * 65, "x/y"])
 def test_visual_ids_rejected(visual: str) -> None:
     with pytest.raises(ValidationError):
         pv.ViewSettingsParams(visual=visual)

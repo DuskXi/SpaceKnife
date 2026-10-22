@@ -222,6 +222,37 @@
           "title": "Nodes",
           "type": "array"
         },
+        "origin": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A plugin cleanup's full id (shown in the basket)",
+          "title": "Origin"
+        },
+        "reasons": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100000,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Per node, why it was proposed (same order as nodes)",
+          "title": "Reasons"
+        },
         "scan_id": {
           "maxLength": 64,
           "minLength": 1,
@@ -378,8 +409,27 @@
           "title": "Note",
           "type": "string"
         },
+        "origin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plugin cleanup that proposed it (full id)",
+          "title": "Origin"
+        },
         "path": {
           "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "description": "Why it was proposed (plugin cleanups)",
+          "title": "Reason",
           "type": "string"
         },
         "scan_id": {
@@ -645,6 +695,51 @@
         "unit"
       ],
       "title": "Bound",
+      "type": "object"
+    },
+    "BuiltinAction": {
+      "properties": {
+        "kind": {
+          "const": "builtin",
+          "default": "builtin",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "description": "A built-in frontend handler (by command id)",
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "BuiltinAction",
+      "type": "object"
+    },
+    "CallAction": {
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "kind": {
+          "const": "call",
+          "default": "call",
+          "title": "Kind",
+          "type": "string"
+        },
+        "method": {
+          "description": "Wire name of a plugin method (plugin.<id>.<name>)",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "CallAction",
       "type": "object"
     },
     "CancelParams": {
@@ -1051,6 +1146,77 @@
       "title": "ClassesUpdateParams",
       "type": "object"
     },
+    "CleanupAction": {
+      "properties": {
+        "cleanup": {
+          "description": "Full id of a cleanup contribution",
+          "title": "Cleanup",
+          "type": "string"
+        },
+        "kind": {
+          "const": "cleanup",
+          "default": "cleanup",
+          "title": "Kind",
+          "type": "string"
+        },
+        "method": {
+          "description": "Its wire name",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "cleanup",
+        "method"
+      ],
+      "title": "CleanupAction",
+      "type": "object"
+    },
+    "CleanupInfo": {
+      "properties": {
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "when": {
+          "items": {
+            "type": "string"
+          },
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title",
+        "method"
+      ],
+      "title": "CleanupInfo",
+      "type": "object"
+    },
     "ClientInfo": {
       "additionalProperties": false,
       "properties": {
@@ -1087,6 +1253,75 @@
       "title": "ClientInfo",
       "type": "object"
     },
+    "ColorModeInfo": {
+      "properties": {
+        "folders": {
+          "default": "ring",
+          "enum": [
+            "ring",
+            "palette"
+          ],
+          "title": "Folders",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "layouts": {
+          "description": "Layouts it applies to (empty: all)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Layouts",
+          "type": "array"
+        },
+        "legend": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Legend",
+          "type": "array"
+        },
+        "palette": {
+          "description": "0: neutral; semantic name, token, class:<id>, #RRGGBB or themed",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ThemedColor"
+              }
+            ]
+          },
+          "title": "Palette",
+          "type": "array"
+        },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugin"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ],
+      "title": "ColorModeInfo",
+      "type": "object"
+    },
     "ColumnSpec": {
       "properties": {
         "dtype": {
@@ -1104,6 +1339,25 @@
         "dtype"
       ],
       "title": "ColumnSpec",
+      "type": "object"
+    },
+    "CommandAction": {
+      "properties": {
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "kind": {
+          "const": "command",
+          "default": "command",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "CommandAction",
       "type": "object"
     },
     "CompareIdParams": {
@@ -1599,7 +1853,8 @@
             "tag",
             "attr",
             "unit",
-            "prefix"
+            "prefix",
+            "set"
           ],
           "title": "Context",
           "type": "string"
@@ -1644,6 +1899,34 @@
         "label"
       ],
       "title": "Crumb",
+      "type": "object"
+    },
+    "CycleAction": {
+      "properties": {
+        "kind": {
+          "const": "cycle",
+          "default": "cycle",
+          "title": "Kind",
+          "type": "string"
+        },
+        "step": {
+          "default": 1,
+          "title": "Step",
+          "type": "integer"
+        },
+        "what": {
+          "enum": [
+            "visual",
+            "color"
+          ],
+          "title": "What",
+          "type": "string"
+        }
+      },
+      "required": [
+        "what"
+      ],
+      "title": "CycleAction",
       "type": "object"
     },
     "DiskHealth": {
@@ -2214,6 +2497,19 @@
           "title": "Name",
           "type": "string"
         },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plugin that adds it (name is its full id)",
+          "title": "Plugin"
+        },
         "spacesniffer": {
           "default": false,
           "description": "Also built into SpaceSniffer",
@@ -2248,6 +2544,165 @@
         "targets"
       ],
       "title": "ExportTargets",
+      "type": "object"
+    },
+    "ExtensionsChangedEvent": {
+      "properties": {
+        "kinds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Kinds",
+          "type": "array"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "kinds"
+      ],
+      "title": "ExtensionsChangedEvent",
+      "type": "object"
+    },
+    "ExtensionsState": {
+      "properties": {
+        "cleanups": {
+          "items": {
+            "$ref": "#/$defs/CleanupInfo"
+          },
+          "title": "Cleanups",
+          "type": "array"
+        },
+        "color_modes": {
+          "items": {
+            "$ref": "#/$defs/ColorModeInfo"
+          },
+          "title": "Color Modes",
+          "type": "array"
+        },
+        "filter_presets": {
+          "items": {
+            "$ref": "#/$defs/PresetInfo"
+          },
+          "title": "Filter Presets",
+          "type": "array"
+        },
+        "icons": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "<plugin>:<name> -> sanitized SVG",
+          "title": "Icons",
+          "type": "object"
+        },
+        "node_fields": {
+          "items": {
+            "$ref": "#/$defs/FieldInfo"
+          },
+          "title": "Node Fields",
+          "type": "array"
+        },
+        "panels": {
+          "items": {
+            "$ref": "#/$defs/PanelInfo"
+          },
+          "title": "Panels",
+          "type": "array"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/$defs/PluginBrief"
+          },
+          "title": "Plugins",
+          "type": "array"
+        },
+        "reports": {
+          "items": {
+            "$ref": "#/$defs/ReportInfo"
+          },
+          "title": "Reports",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/SourceInfo"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "version": {
+          "description": "Bumped by every change of the registry",
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "plugins"
+      ],
+      "title": "ExtensionsState",
+      "type": "object"
+    },
+    "FieldInfo": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "slots": {
+          "items": {
+            "enum": [
+              "inspector",
+              "hover"
+            ],
+            "type": "string"
+          },
+          "title": "Slots",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title",
+        "slots"
+      ],
+      "title": "FieldInfo",
+      "type": "object"
+    },
+    "FilterAction": {
+      "properties": {
+        "expr": {
+          "title": "Expr",
+          "type": "string"
+        },
+        "kind": {
+          "const": "filter",
+          "default": "filter",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "expr"
+      ],
+      "title": "FilterAction",
       "type": "object"
     },
     "FilterClassInfo": {
@@ -2303,6 +2758,7 @@
             "unknown_keyword",
             "bad_char",
             "unknown_class",
+            "unknown_set",
             "unknown_tag",
             "unknown_attr",
             "bad_list",
@@ -2500,6 +2956,13 @@
           "title": "Not Masks",
           "type": "array"
         },
+        "not_sets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Not Sets",
+          "type": "array"
+        },
         "not_tags": {
           "items": {
             "enum": [
@@ -2511,6 +2974,14 @@
             "type": "string"
           },
           "title": "Not Tags",
+          "type": "array"
+        },
+        "sets": {
+          "description": "Node sets, any of them (full ids)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sets",
           "type": "array"
         },
         "sizes": {
@@ -2568,6 +3039,7 @@
                 "class": "#/$defs/ClassCond",
                 "folder": "#/$defs/FolderCond",
                 "name": "#/$defs/MaskCond",
+                "set": "#/$defs/SetCond",
                 "size": "#/$defs/SizeCond",
                 "tag": "#/$defs/TagCond"
               },
@@ -2582,6 +3054,9 @@
               },
               {
                 "$ref": "#/$defs/ClassCond"
+              },
+              {
+                "$ref": "#/$defs/SetCond"
               },
               {
                 "$ref": "#/$defs/TagCond"
@@ -2679,6 +3154,33 @@
       "title": "FilterParseParams",
       "type": "object"
     },
+    "FilterSetInfo": {
+      "description": "A node set of an enabled plugin (``:set:<name>``).",
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "id": {
+          "description": "Full id; also accepted after :set:",
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "FilterSetInfo",
+      "type": "object"
+    },
     "FilterToken": {
       "properties": {
         "end": {
@@ -2719,6 +3221,14 @@
             "$ref": "#/$defs/FilterClassInfo"
           },
           "title": "Classes",
+          "type": "array"
+        },
+        "sets": {
+          "description": "plugins.v1: the node sets",
+          "items": {
+            "$ref": "#/$defs/FilterSetInfo"
+          },
+          "title": "Sets",
           "type": "array"
         },
         "unsupported_ages": {
@@ -2997,6 +3507,19 @@
           "title": "Layout Ms",
           "type": "number"
         },
+        "palette": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "colors.v1: a plugin colour mode drew this frame; its u1 'pal' column follows",
+          "title": "Palette"
+        },
         "reason": {
           "default": "",
           "title": "Reason",
@@ -3038,6 +3561,16 @@
         "seq": {
           "title": "Seq",
           "type": "integer"
+        },
+        "size_unit": {
+          "default": "bytes",
+          "description": "What 'size' counts: bytes, or files / items",
+          "enum": [
+            "bytes",
+            "count"
+          ],
+          "title": "Size Unit",
+          "type": "string"
         },
         "view_id": {
           "title": "View Id",
@@ -3226,6 +3759,120 @@
       "title": "HelloResult",
       "type": "object"
     },
+    "InsightCard": {
+      "properties": {
+        "app": {
+          "default": "",
+          "title": "App",
+          "type": "string"
+        },
+        "cleanup": {
+          "default": "review",
+          "title": "Cleanup",
+          "type": "string"
+        },
+        "command": {
+          "default": "",
+          "description": "Shown and copyable, never run",
+          "title": "Command",
+          "type": "string"
+        },
+        "kind": {
+          "description": "Built-in kinds keep their icons; plugins may name others",
+          "title": "Kind",
+          "type": "string"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "path": {
+          "default": "",
+          "title": "Path",
+          "type": "string"
+        },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugin"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "rule": {
+          "default": "",
+          "title": "Rule",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "rule",
+            "plugin"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "title",
+        "reason",
+        "kind"
+      ],
+      "title": "InsightCard",
+      "type": "object"
+    },
+    "InsightNodeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "minimum": 0,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "InsightNodeParams",
+      "type": "object"
+    },
+    "InsightNodeResult": {
+      "properties": {
+        "cards": {
+          "items": {
+            "$ref": "#/$defs/InsightCard"
+          },
+          "title": "Cards",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cards"
+      ],
+      "title": "InsightNodeResult",
+      "type": "object"
+    },
     "IoStatus": {
       "description": "Disk-load state of one physical disk (W2 curve, status bar UI-MAIN-50).",
       "properties": {
@@ -3406,6 +4053,83 @@
         "disks"
       ],
       "title": "IoStatusList",
+      "type": "object"
+    },
+    "LabeledAction": {
+      "properties": {
+        "action": {
+          "discriminator": {
+            "mapping": {
+              "builtin": "#/$defs/BuiltinAction",
+              "call": "#/$defs/CallAction",
+              "cleanup": "#/$defs/CleanupAction",
+              "command": "#/$defs/CommandAction",
+              "cycle": "#/$defs/CycleAction",
+              "filter": "#/$defs/FilterAction",
+              "node": "#/$defs/NodeAction",
+              "open": "#/$defs/OpenAction",
+              "setting": "#/$defs/SettingAction",
+              "toggle": "#/$defs/ToggleAction",
+              "url": "#/$defs/UrlAction",
+              "view": "#/$defs/ViewAction"
+            },
+            "propertyName": "kind"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CallAction"
+            },
+            {
+              "$ref": "#/$defs/OpenAction"
+            },
+            {
+              "$ref": "#/$defs/CommandAction"
+            },
+            {
+              "$ref": "#/$defs/ViewAction"
+            },
+            {
+              "$ref": "#/$defs/CycleAction"
+            },
+            {
+              "$ref": "#/$defs/ToggleAction"
+            },
+            {
+              "$ref": "#/$defs/FilterAction"
+            },
+            {
+              "$ref": "#/$defs/SettingAction"
+            },
+            {
+              "$ref": "#/$defs/CleanupAction"
+            },
+            {
+              "$ref": "#/$defs/NodeAction"
+            },
+            {
+              "$ref": "#/$defs/UrlAction"
+            },
+            {
+              "$ref": "#/$defs/BuiltinAction"
+            }
+          ],
+          "title": "Action"
+        },
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "action"
+      ],
+      "title": "LabeledAction",
       "type": "object"
     },
     "Limits": {
@@ -3732,6 +4456,34 @@
       "title": "MonitorStatus",
       "type": "object"
     },
+    "NodeAction": {
+      "properties": {
+        "kind": {
+          "const": "node",
+          "default": "node",
+          "title": "Kind",
+          "type": "string"
+        },
+        "op": {
+          "enum": [
+            "reveal",
+            "open",
+            "terminal",
+            "copy_path",
+            "select",
+            "zoom",
+            "basket"
+          ],
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "title": "NodeAction",
+      "type": "object"
+    },
     "NodeInfo": {
       "properties": {
         "alloc": {
@@ -3823,6 +4575,35 @@
         "alloc"
       ],
       "title": "NodeInfo",
+      "type": "object"
+    },
+    "NodeRef": {
+      "description": "A node of a scan as a plugin saw it; ``epoch`` tells whether the id still means the same node.",
+      "properties": {
+        "epoch": {
+          "default": 0,
+          "title": "Epoch",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "default": "",
+          "title": "Path",
+          "type": "string"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "NodeRef",
       "type": "object"
     },
     "OpItemResult": {
@@ -3981,6 +4762,26 @@
       "title": "OpTaskParams",
       "type": "object"
     },
+    "OpenAction": {
+      "properties": {
+        "kind": {
+          "const": "open",
+          "default": "open",
+          "title": "Kind",
+          "type": "string"
+        },
+        "target": {
+          "description": "report:<full id> | panel:<full id> | settings:<plugin id>",
+          "title": "Target",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "title": "OpenAction",
+      "type": "object"
+    },
     "PaletteCheckParams": {
       "additionalProperties": false,
       "description": "One command, where the user is: a keyboard shortcut runs it only when the palette would.",
@@ -4026,6 +4827,73 @@
     },
     "PaletteCommand": {
       "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "builtin": "#/$defs/BuiltinAction",
+                  "call": "#/$defs/CallAction",
+                  "cleanup": "#/$defs/CleanupAction",
+                  "command": "#/$defs/CommandAction",
+                  "cycle": "#/$defs/CycleAction",
+                  "filter": "#/$defs/FilterAction",
+                  "node": "#/$defs/NodeAction",
+                  "open": "#/$defs/OpenAction",
+                  "setting": "#/$defs/SettingAction",
+                  "toggle": "#/$defs/ToggleAction",
+                  "url": "#/$defs/UrlAction",
+                  "view": "#/$defs/ViewAction"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/CallAction"
+                },
+                {
+                  "$ref": "#/$defs/OpenAction"
+                },
+                {
+                  "$ref": "#/$defs/CommandAction"
+                },
+                {
+                  "$ref": "#/$defs/ViewAction"
+                },
+                {
+                  "$ref": "#/$defs/CycleAction"
+                },
+                {
+                  "$ref": "#/$defs/ToggleAction"
+                },
+                {
+                  "$ref": "#/$defs/FilterAction"
+                },
+                {
+                  "$ref": "#/$defs/SettingAction"
+                },
+                {
+                  "$ref": "#/$defs/CleanupAction"
+                },
+                {
+                  "$ref": "#/$defs/NodeAction"
+                },
+                {
+                  "$ref": "#/$defs/UrlAction"
+                },
+                {
+                  "$ref": "#/$defs/BuiltinAction"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "plugins.v1: what running it does (None: the frontend's own handler)",
+          "title": "Action"
+        },
         "enabled": {
           "default": true,
           "title": "Enabled",
@@ -4057,6 +4925,14 @@
           "title": "Keys",
           "type": "array"
         },
+        "menus": {
+          "description": "Where else it is offered: node, inspector, toolbar, start",
+          "items": {
+            "type": "string"
+          },
+          "title": "Menus",
+          "type": "array"
+        },
         "more": {
           "default": false,
           "description": "Ends with '…': running it asks for one more choice",
@@ -4066,6 +4942,19 @@
         "name": {
           "title": "Name",
           "type": "string"
+        },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plugin that adds it (None: built in)",
+          "title": "Plugin"
         },
         "status": {
           "default": "",
@@ -4651,6 +5540,79 @@
       "title": "PaletteResult",
       "type": "object"
     },
+    "PanelInfo": {
+      "properties": {
+        "entry": {
+          "default": "web/index.html",
+          "title": "Entry",
+          "type": "string"
+        },
+        "height": {
+          "default": 320,
+          "title": "Height",
+          "type": "integer"
+        },
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "permissions": {
+          "description": "What its bridge may do",
+          "items": {
+            "enum": [
+              "tree.read",
+              "files.read",
+              "snapshots.read",
+              "basket.propose",
+              "net",
+              "exec",
+              "host.open",
+              "clipboard"
+            ],
+            "type": "string"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "slot": {
+          "default": "tab",
+          "enum": [
+            "tab",
+            "inspector",
+            "dialog"
+          ],
+          "title": "Slot",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "when": {
+          "items": {
+            "type": "string"
+          },
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title"
+      ],
+      "title": "PanelInfo",
+      "type": "object"
+    },
     "PathCheck": {
       "properties": {
         "merged_into": {
@@ -4825,7 +5787,8 @@
                 "tag",
                 "size",
                 "age",
-                "attr"
+                "attr",
+                "set"
               ],
               "type": "string"
             },
@@ -4850,6 +5813,41 @@
         "end"
       ],
       "title": "PendingCond",
+      "type": "object"
+    },
+    "PermissionInfo": {
+      "properties": {
+        "id": {
+          "enum": [
+            "tree.read",
+            "files.read",
+            "snapshots.read",
+            "basket.propose",
+            "net",
+            "exec",
+            "host.open",
+            "clipboard"
+          ],
+          "title": "Id",
+          "type": "string"
+        },
+        "text": {
+          "description": "What it allows, in the interface language",
+          "title": "Text",
+          "type": "string"
+        },
+        "warn": {
+          "default": false,
+          "description": "Stands out: any host, any program",
+          "title": "Warn",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "title": "PermissionInfo",
       "type": "object"
     },
     "PhysicalDisk": {
@@ -5140,6 +6138,822 @@
       "title": "PlatformInfo",
       "type": "object"
     },
+    "PluginBrief": {
+      "properties": {
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "needs_confirm",
+            "changed",
+            "incompatible",
+            "error",
+            "crashed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "version"
+      ],
+      "title": "PluginBrief",
+      "type": "object"
+    },
+    "PluginChangedEvent": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "process": {
+          "anyOf": [
+            {
+              "enum": [
+                "stopped",
+                "starting",
+                "running",
+                "idle",
+                "crashed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Process"
+        },
+        "state": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "needs_confirm",
+            "changed",
+            "incompatible",
+            "error",
+            "crashed"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "state"
+      ],
+      "title": "PluginChangedEvent",
+      "type": "object"
+    },
+    "PluginDescribeResult": {
+      "description": "What the enable dialog shows before the user confirms.",
+      "properties": {
+        "added": {
+          "description": "Permissions the confirmed version did not ask for (an update)",
+          "items": {
+            "enum": [
+              "tree.read",
+              "files.read",
+              "snapshots.read",
+              "basket.propose",
+              "net",
+              "exec",
+              "host.open",
+              "clipboard"
+            ],
+            "type": "string"
+          },
+          "title": "Added",
+          "type": "array"
+        },
+        "conflicts": {
+          "description": "Key conflicts, as text",
+          "items": {
+            "type": "string"
+          },
+          "title": "Conflicts",
+          "type": "array"
+        },
+        "plugin": {
+          "$ref": "#/$defs/PluginInfo"
+        },
+        "summary": {
+          "description": "What it adds, as text lines",
+          "items": {
+            "type": "string"
+          },
+          "title": "Summary",
+          "type": "array"
+        },
+        "unsigned": {
+          "default": true,
+          "title": "Unsigned",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "plugin"
+      ],
+      "title": "PluginDescribeResult",
+      "type": "object"
+    },
+    "PluginEnableParams": {
+      "additionalProperties": false,
+      "properties": {
+        "grant": {
+          "description": "Every permission it asks for",
+          "items": {
+            "enum": [
+              "tree.read",
+              "files.read",
+              "snapshots.read",
+              "basket.propose",
+              "net",
+              "exec",
+              "host.open",
+              "clipboard"
+            ],
+            "type": "string"
+          },
+          "title": "Grant",
+          "type": "array"
+        },
+        "hash": {
+          "default": "",
+          "description": "The hash the user saw (plugin.describe)",
+          "maxLength": 80,
+          "title": "Hash",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 32,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "PluginEnableParams",
+      "type": "object"
+    },
+    "PluginField": {
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LabeledAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "description": "Full id of the field contribution",
+          "title": "Id",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        },
+        "unit": {
+          "default": "text",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title",
+        "value"
+      ],
+      "title": "PluginField",
+      "type": "object"
+    },
+    "PluginFieldsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "node": {
+          "minimum": 0,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "slot": {
+          "default": "inspector",
+          "enum": [
+            "inspector",
+            "hover"
+          ],
+          "title": "Slot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node"
+      ],
+      "title": "PluginFieldsParams",
+      "type": "object"
+    },
+    "PluginFieldsResult": {
+      "properties": {
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/PluginField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
+        "pending": {
+          "default": false,
+          "description": "Hover: some fields were not cached yet; ask again",
+          "title": "Pending",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "fields"
+      ],
+      "title": "PluginFieldsResult",
+      "type": "object"
+    },
+    "PluginIdParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 32,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$",
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "PluginIdParams",
+      "type": "object"
+    },
+    "PluginInfo": {
+      "description": "One installed plugin, for the plugins page.",
+      "properties": {
+        "author": {
+          "default": "",
+          "title": "Author",
+          "type": "string"
+        },
+        "builtin": {
+          "default": false,
+          "title": "Builtin",
+          "type": "boolean"
+        },
+        "contributions": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Count per contribution kind",
+          "title": "Contributions",
+          "type": "object"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "dev": {
+          "default": false,
+          "description": "A linked development folder: no hash pinning",
+          "title": "Dev",
+          "type": "boolean"
+        },
+        "exec": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exec",
+          "type": "array"
+        },
+        "folder": {
+          "title": "Folder",
+          "type": "string"
+        },
+        "granted": {
+          "items": {
+            "enum": [
+              "tree.read",
+              "files.read",
+              "snapshots.read",
+              "basket.propose",
+              "net",
+              "exec",
+              "host.open",
+              "clipboard"
+            ],
+            "type": "string"
+          },
+          "title": "Granted",
+          "type": "array"
+        },
+        "hash": {
+          "default": "",
+          "description": "sha256 of its files (what the user confirmed)",
+          "title": "Hash",
+          "type": "string"
+        },
+        "homepage": {
+          "default": "",
+          "title": "Homepage",
+          "type": "string"
+        },
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "issues": {
+          "items": {
+            "$ref": "#/$defs/PluginIssue"
+          },
+          "title": "Issues",
+          "type": "array"
+        },
+        "keys": {
+          "description": "Keys its commands bind",
+          "items": {
+            "type": "string"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
+        "license": {
+          "default": "",
+          "title": "License",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "net_hosts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Net Hosts",
+          "type": "array"
+        },
+        "permissions": {
+          "items": {
+            "$ref": "#/$defs/PermissionInfo"
+          },
+          "title": "Permissions",
+          "type": "array"
+        },
+        "process": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginProcess"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "runtime": {
+          "default": "declarative",
+          "enum": [
+            "declarative",
+            "process",
+            "inprocess"
+          ],
+          "title": "Runtime",
+          "type": "string"
+        },
+        "schema_hash": {
+          "default": "",
+          "title": "Schema Hash",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "enabled",
+            "disabled",
+            "needs_confirm",
+            "changed",
+            "incompatible",
+            "error",
+            "crashed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "name",
+        "state",
+        "folder"
+      ],
+      "title": "PluginInfo",
+      "type": "object"
+    },
+    "PluginInstallParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "A plugin folder or a .zip",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "replace": {
+          "default": false,
+          "title": "Replace",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PluginInstallParams",
+      "type": "object"
+    },
+    "PluginInstallResult": {
+      "properties": {
+        "conflict": {
+          "default": false,
+          "description": "A plugin with this id is installed: confirm, replace",
+          "title": "Conflict",
+          "type": "boolean"
+        },
+        "existing_version": {
+          "default": "",
+          "title": "Existing Version",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "installed": {
+          "title": "Installed",
+          "type": "boolean"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "installed"
+      ],
+      "title": "PluginInstallResult",
+      "type": "object"
+    },
+    "PluginIssue": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "file": {
+          "default": "",
+          "title": "File",
+          "type": "string"
+        },
+        "line": {
+          "default": 0,
+          "title": "Line",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "default": "error",
+          "enum": [
+            "error",
+            "warning"
+          ],
+          "title": "Severity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "PluginIssue",
+      "type": "object"
+    },
+    "PluginLinkParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "description": "A plugin folder under development",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "PluginLinkParams",
+      "type": "object"
+    },
+    "PluginListResult": {
+      "properties": {
+        "dev_mode": {
+          "description": "Developer mode: in-process plugins and development links allowed",
+          "title": "Dev Mode",
+          "type": "boolean"
+        },
+        "folder": {
+          "description": "The plugins folder (data_dir/plugins)",
+          "title": "Folder",
+          "type": "string"
+        },
+        "plugins": {
+          "items": {
+            "$ref": "#/$defs/PluginInfo"
+          },
+          "title": "Plugins",
+          "type": "array"
+        }
+      },
+      "required": [
+        "plugins",
+        "folder",
+        "dev_mode"
+      ],
+      "title": "PluginListResult",
+      "type": "object"
+    },
+    "PluginProcess": {
+      "properties": {
+        "last_exit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exit code of the last process that ended",
+          "title": "Last Exit"
+        },
+        "memory": {
+          "default": 0,
+          "description": "Resident bytes at the last check (0: unknown)",
+          "title": "Memory",
+          "type": "integer"
+        },
+        "pid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pid"
+        },
+        "restarts": {
+          "default": 0,
+          "title": "Restarts",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "stopped",
+            "starting",
+            "running",
+            "idle",
+            "crashed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "stderr": {
+          "description": "Last lines it wrote to stderr",
+          "items": {
+            "type": "string"
+          },
+          "title": "Stderr",
+          "type": "array"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "PluginProcess",
+      "type": "object"
+    },
+    "PluginProgressEvent": {
+      "description": "Progress of a running plugin call (reports, cleanups): ``request`` is the caller's request id.",
+      "properties": {
+        "done": {
+          "title": "Done",
+          "type": "number"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "request": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "number"
+        }
+      },
+      "required": [
+        "plugin",
+        "done",
+        "total"
+      ],
+      "title": "PluginProgressEvent",
+      "type": "object"
+    },
+    "PluginToastEvent": {
+      "properties": {
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tone": {
+          "default": "info",
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger"
+          ],
+          "title": "Tone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin",
+        "text"
+      ],
+      "title": "PluginToastEvent",
+      "type": "object"
+    },
+    "PluginUninstallParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 32,
+          "minLength": 3,
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$",
+          "title": "Id",
+          "type": "string"
+        },
+        "remove_data": {
+          "default": false,
+          "title": "Remove Data",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "PluginUninstallParams",
+      "type": "object"
+    },
     "PolarGeometry": {
       "description": "``polar.v1``: the zoom root is the centre disc, level k the k-th ring around it.",
       "properties": {
@@ -5200,6 +7014,34 @@
         "gap"
       ],
       "title": "PolarGeometry",
+      "type": "object"
+    },
+    "PresetInfo": {
+      "properties": {
+        "expr": {
+          "title": "Expr",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title",
+        "expr"
+      ],
+      "title": "PresetInfo",
       "type": "object"
     },
     "ProgressEvent": {
@@ -5340,6 +7182,79 @@
         "reason"
       ],
       "title": "Refusal",
+      "type": "object"
+    },
+    "ReportInfo": {
+      "properties": {
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "method": {
+          "description": "Wire name to call with a ReportContext",
+          "title": "Method",
+          "type": "string"
+        },
+        "order": {
+          "default": 0,
+          "title": "Order",
+          "type": "integer"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "refresh": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Refresh",
+          "type": "array"
+        },
+        "slot": {
+          "default": "tab",
+          "enum": [
+            "tab",
+            "inspector",
+            "dialog",
+            "start",
+            "compare",
+            "status",
+            "history"
+          ],
+          "title": "Slot",
+          "type": "string"
+        },
+        "static": {
+          "default": false,
+          "description": "Declared blocks only: the method just returns them",
+          "title": "Static",
+          "type": "boolean"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "when": {
+          "items": {
+            "type": "string"
+          },
+          "title": "When",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title",
+        "method"
+      ],
+      "title": "ReportInfo",
       "type": "object"
     },
     "ResultRow": {
@@ -5693,7 +7608,6 @@
             "type": "string"
           },
           "maxItems": 16,
-          "minItems": 1,
           "title": "Roots",
           "type": "array"
         },
@@ -5709,6 +7623,34 @@
           "default": null,
           "description": "macOS without Full Disk Access: leave out the places that would each ask for consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown as not accessible; None = the scan.protected_places setting",
           "title": "Skip Protected"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "plugins.v1: a scan source's full id instead of roots",
+          "title": "Source"
+        },
+        "uri": {
+          "anyOf": [
+            {
+              "maxLength": 32767,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the source lists",
+          "title": "Uri"
         },
         "workers": {
           "anyOf": [
@@ -5726,9 +7668,6 @@
           "title": "Workers"
         }
       },
-      "required": [
-        "roots"
-      ],
       "title": "ScanStartParams",
       "type": "object"
     },
@@ -5848,7 +7787,8 @@
           "enum": [
             "hard",
             "mft",
-            "snapshot"
+            "snapshot",
+            "source"
           ],
           "title": "Method",
           "type": "string"
@@ -6034,6 +7974,92 @@
       "title": "ServerInfo",
       "type": "object"
     },
+    "SetCond": {
+      "description": "``:set:<name>``: in a node set a plugin computes (plugins.v1).",
+      "properties": {
+        "end": {
+          "title": "End",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "set",
+          "default": "set",
+          "title": "Kind",
+          "type": "string"
+        },
+        "negated": {
+          "default": false,
+          "title": "Negated",
+          "type": "boolean"
+        },
+        "set_id": {
+          "title": "Set Id",
+          "type": "string"
+        },
+        "start": {
+          "title": "Start",
+          "type": "integer"
+        },
+        "text": {
+          "description": "Canonical spelling of this single condition",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "start",
+        "end",
+        "text",
+        "set_id"
+      ],
+      "title": "SetCond",
+      "type": "object"
+    },
+    "SettingAction": {
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "kind": {
+          "const": "setting",
+          "default": "setting",
+          "title": "Kind",
+          "type": "string"
+        },
+        "toggle": {
+          "default": false,
+          "title": "Toggle",
+          "type": "boolean"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "key"
+      ],
+      "title": "SettingAction",
+      "type": "object"
+    },
     "SettingChange": {
       "properties": {
         "after": {
@@ -6110,7 +8136,8 @@
             "tags",
             "keys",
             "advanced",
-            "about"
+            "about",
+            "plugins"
           ],
           "title": "Category",
           "type": "string"
@@ -6196,6 +8223,19 @@
           },
           "title": "Options",
           "type": "array"
+        },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plugin it belongs to (category 'plugins')",
+          "title": "Plugin"
         },
         "reason": {
           "default": "",
@@ -6397,7 +8437,8 @@
                 "tags",
                 "keys",
                 "advanced",
-                "about"
+                "about",
+                "plugins"
               ],
               "type": "string"
             },
@@ -6799,6 +8840,71 @@
       "title": "SnapshotSaveParams",
       "type": "object"
     },
+    "SourceInfo": {
+      "properties": {
+        "extensions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Extensions",
+          "type": "array"
+        },
+        "icon": {
+          "default": "",
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "on_disk": {
+          "default": false,
+          "title": "On Disk",
+          "type": "boolean"
+        },
+        "ops": {
+          "default": false,
+          "title": "Ops",
+          "type": "boolean"
+        },
+        "pick": {
+          "default": "text",
+          "enum": [
+            "folder",
+            "file",
+            "text"
+          ],
+          "title": "Pick",
+          "type": "string"
+        },
+        "placeholder": {
+          "default": "",
+          "title": "Placeholder",
+          "type": "string"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "watch": {
+          "default": false,
+          "title": "Watch",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "title"
+      ],
+      "title": "SourceInfo",
+      "type": "object"
+    },
     "Span": {
       "properties": {
         "end": {
@@ -6966,6 +9072,49 @@
         "colors"
       ],
       "title": "TagCond",
+      "type": "object"
+    },
+    "ThemedColor": {
+      "properties": {
+        "dark": {
+          "title": "Dark",
+          "type": "string"
+        },
+        "light": {
+          "title": "Light",
+          "type": "string"
+        }
+      },
+      "required": [
+        "light",
+        "dark"
+      ],
+      "title": "ThemedColor",
+      "type": "object"
+    },
+    "ToggleAction": {
+      "properties": {
+        "kind": {
+          "const": "toggle",
+          "default": "toggle",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "enum": [
+            "show_free",
+            "show_unknown",
+            "show_trash",
+            "sort_by_size"
+          ],
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ToggleAction",
       "type": "object"
     },
     "TopFile": {
@@ -7710,6 +9859,48 @@
       "title": "UpdateVersionParams",
       "type": "object"
     },
+    "UrlAction": {
+      "properties": {
+        "kind": {
+          "const": "url",
+          "default": "url",
+          "title": "Kind",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 2048,
+          "pattern": "^https://",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "UrlAction",
+      "type": "object"
+    },
+    "ViewAction": {
+      "properties": {
+        "kind": {
+          "const": "view",
+          "default": "view",
+          "title": "Kind",
+          "type": "string"
+        },
+        "settings": {
+          "additionalProperties": true,
+          "description": "ViewSettingsParams fields",
+          "title": "Settings",
+          "type": "object"
+        }
+      },
+      "required": [
+        "settings"
+      ],
+      "title": "ViewAction",
+      "type": "object"
+    },
     "ViewFilterParams": {
       "additionalProperties": false,
       "properties": {
@@ -8044,12 +10235,9 @@
         "color_mode": {
           "anyOf": [
             {
-              "enum": [
-                "class",
-                "flat",
-                "time",
-                "branch"
-              ],
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
               "type": "string"
             },
             {
@@ -8057,19 +10245,16 @@
             }
           ],
           "default": null,
-          "description": "Of the view's current visualization; 'branch' needs visuals.v1",
+          "description": "Of the view's current visualization; 'branch' needs visuals.v1, a plugin's colors.v1",
           "title": "Color Mode"
         },
         "colors": {
           "anyOf": [
             {
               "additionalProperties": {
-                "enum": [
-                  "class",
-                  "flat",
-                  "time",
-                  "branch"
-                ],
+                "maxLength": 64,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
                 "type": "string"
               },
               "type": "object"
@@ -8208,7 +10393,7 @@
         "visual": {
           "anyOf": [
             {
-              "maxLength": 48,
+              "maxLength": 64,
               "minLength": 1,
               "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
               "type": "string"
@@ -8241,23 +10426,17 @@
         },
         "color_mode": {
           "description": "Of the current visualization (each remembers its own)",
-          "enum": [
-            "class",
-            "flat",
-            "time",
-            "branch"
-          ],
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
           "title": "Color Mode",
           "type": "string"
         },
         "colors": {
           "additionalProperties": {
-            "enum": [
-              "class",
-              "flat",
-              "time",
-              "branch"
-            ],
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
             "type": "string"
           },
           "description": "Colour mode each visualization remembers",
@@ -8535,12 +10714,9 @@
         },
         "default_color": {
           "description": "Colour mode a view starts with on this visualization",
-          "enum": [
-            "class",
-            "flat",
-            "time",
-            "branch"
-          ],
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
           "title": "Default Color",
           "type": "string"
         },
@@ -8571,6 +10747,19 @@
           "title": "Order",
           "type": "integer"
         },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plugin that adds it (None: built in)",
+          "title": "Plugin"
+        },
         "reason": {
           "anyOf": [
             {
@@ -8583,6 +10772,16 @@
           "default": null,
           "description": "Why it is not available (display text)",
           "title": "Reason"
+        },
+        "size_unit": {
+          "default": "bytes",
+          "description": "What its areas count",
+          "enum": [
+            "bytes",
+            "count"
+          ],
+          "title": "Size Unit",
+          "type": "string"
         }
       },
       "required": [
@@ -8928,6 +11127,10 @@
       "doc": "A comparison is computing, ready (with its totals) or failed.",
       "payload": "#/$defs/CompareProgressEvent"
     },
+    "extensions.changed": {
+      "doc": "Plugins came, went or changed what they add: fetch the listed kinds again (plugins.v1).",
+      "payload": "#/$defs/ExtensionsChangedEvent"
+    },
     "io.load": {
       "doc": "Load state of a disk for an 'io' subscription (2 Hz).",
       "payload": "#/$defs/IoStatusEvent"
@@ -8939,6 +11142,18 @@
     "ops.progress": {
       "doc": "Progress and results of a file operation.",
       "payload": "#/$defs/OpProgressEvent"
+    },
+    "plugin.changed": {
+      "doc": "A plugin's state changed (plugins.v1).",
+      "payload": "#/$defs/PluginChangedEvent"
+    },
+    "plugin.progress": {
+      "doc": "Progress of a plugin call (reports, cleanups).",
+      "payload": "#/$defs/PluginProgressEvent"
+    },
+    "plugin.toast": {
+      "doc": "A plugin shows a short message.",
+      "payload": "#/$defs/PluginToastEvent"
     },
     "scan.progress": {
       "doc": "Status of a scan for a 'scan' subscription.",
@@ -9084,6 +11299,12 @@
       "requiresSession": true,
       "result": "#/$defs/ExportTargets"
     },
+    "extensions.get": {
+      "doc": "What enabled plugins add: reports, panels, node fields, cleanups, colour modes, sources, presets.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/ExtensionsState"
+    },
     "filter.parse": {
       "doc": "Parse a filter: tokens, diagnostics, pending condition, completion and normal form.",
       "params": "#/$defs/FilterParseParams",
@@ -9095,6 +11316,12 @@
       "params": "#/$defs/Empty",
       "requiresSession": true,
       "result": "#/$defs/FilterVocab"
+    },
+    "insight.node": {
+      "doc": "Insight cards of a node: matching rules first, then what plugins say.",
+      "params": "#/$defs/InsightNodeParams",
+      "requiresSession": true,
+      "result": "#/$defs/InsightNodeResult"
     },
     "io.status": {
       "doc": "Load state of every local disk, with history.",
@@ -9173,6 +11400,60 @@
       "params": "#/$defs/PathFormsParams",
       "requiresSession": true,
       "result": "#/$defs/PathForms"
+    },
+    "plugin.describe": {
+      "doc": "What enabling a plugin means: its permissions, what it adds, key conflicts and its current hash.",
+      "params": "#/$defs/PluginIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginDescribeResult"
+    },
+    "plugin.disable": {
+      "doc": "Turn a plugin off (its settings and data stay).",
+      "params": "#/$defs/PluginIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginInfo"
+    },
+    "plugin.enable": {
+      "doc": "Enable a plugin the user confirmed: the hash and permissions must be those plugin.describe showed.",
+      "params": "#/$defs/PluginEnableParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginInfo"
+    },
+    "plugin.fields": {
+      "doc": "The plugin fields of a node for the details panel or the hover card (each plugin time-boxed).",
+      "params": "#/$defs/PluginFieldsParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginFieldsResult"
+    },
+    "plugin.install": {
+      "doc": "Copy a plugin folder or unpack a .zip into the plugins folder (never enables it).",
+      "params": "#/$defs/PluginInstallParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginInstallResult"
+    },
+    "plugin.link": {
+      "doc": "Developer mode: use a plugin folder in place (no hash pinning; reloaded when its files change).",
+      "params": "#/$defs/PluginLinkParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginInfo"
+    },
+    "plugin.list": {
+      "doc": "Installed plugins with their state (plugins.v1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/PluginListResult"
+    },
+    "plugin.restart": {
+      "doc": "Restart a plugin's process (also after it crashed).",
+      "params": "#/$defs/PluginIdParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginInfo"
+    },
+    "plugin.uninstall": {
+      "doc": "Turn a plugin off and move its folder (and with remove_data its data) to the recycle bin.",
+      "params": "#/$defs/PluginUninstallParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
     },
     "scan.cancel": {
       "doc": "Stop a running scan (partial tree stays).",
@@ -9511,6 +11792,6 @@
       "params": "#/$defs/CancelParams"
     }
   },
-  "protocol": "1.1",
+  "protocol": "1.2",
   "title": "SpaceKnife protocol"
 }
