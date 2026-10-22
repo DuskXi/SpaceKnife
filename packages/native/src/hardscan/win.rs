@@ -31,12 +31,12 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use windows_sys::Wdk::Foundation::{NtClose, NtQueryObject, OBJECT_ATTRIBUTES, OBJECT_NAME_INFORMATION};
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
-    FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_ID_INFORMATION,
+    FILE_FS_ATTRIBUTE_INFORMATION, FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_ID_INFORMATION,
     FILE_INFORMATION_CLASS, FILE_INTERNAL_INFORMATION, FILE_OPEN_FOR_BACKUP_INTENT,
     FILE_SYNCHRONOUS_IO_NONALERT, FileBasicInformation, FileBothDirectoryInformation,
     FileIdBothDirectoryInformation, FileIdExtdDirectoryInformation, FileIdInformation,
-    FileInternalInformation, NtOpenFile, NtQueryDirectoryFile, NtQueryInformationFile,
-    NtSetInformationFile,
+    FileFsAttributeInformation, FileInternalInformation, NtOpenFile, NtQueryDirectoryFile,
+    NtQueryInformationFile, NtQueryVolumeInformationFile, NtSetInformationFile,
 };
 use windows_sys::Win32::Foundation::{
     ERROR_FILENAME_EXCED_RANGE, ERROR_PATH_NOT_FOUND, GetLastError, HANDLE, NTSTATUS,
@@ -449,13 +449,54 @@ fn open_dir(path: &[u16], state: &RootState) -> Result<Handle, String> {
         })?;
         count_keep(state, keep);
         if state.relative.load(Ordering::Relaxed) && state.expansion.load(Ordering::Relaxed) == UNKNOWN {
-            match kernel_name_len(&h) {
-                Some(k) => state.expansion.store(k.saturating_sub(nt.len()) as u32, Ordering::Relaxed),
-                None => state.relative.store(false, Ordering::Relaxed), // no way to keep to the limit
+            match (relative_opens_pay(&h), kernel_name_len(&h)) {
+                (true, Some(k)) => state.expansion.store(k.saturating_sub(nt.len()) as u32, Ordering::Relaxed),
+                // another file system, or no way to keep to the limit: by full path, as before
+                _ => state.relative.store(false, Ordering::Relaxed),
             }
         }
         Ok(h)
     })
+}
+
+/// Relative opens only where they were measured to list the same and to pay (docs/native.md 2.2):
+/// NTFS and ReFS. On WinBtrfs the gain was within the noise and its FileIdExtd ids do not belong to
+/// their entries; FAT, exFAT and network file systems keep the open by path they always had.
+fn relative_opens_pay(h: &Handle) -> bool {
+    let mut buf = [0u64; 64]; // FILE_FS_ATTRIBUTE_INFORMATION and a name of up to 240 units
+    let mut iosb = IO_STATUS_BLOCK::default();
+    // SAFETY: buf is writable for its whole length.
+    let status = unsafe {
+        NtQueryVolumeInformationFile(
+            h.0,
+            &mut iosb,
+            buf.as_mut_ptr().cast(),
+            size_of_val(&buf) as u32,
+            FileFsAttributeInformation,
+        )
+    };
+    if status < 0 {
+        return false;
+    }
+    // SAFETY: on success the buffer starts with a FILE_FS_ATTRIBUTE_INFORMATION whose name follows
+    let info = unsafe { &*buf.as_ptr().cast::<FILE_FS_ATTRIBUTE_INFORMATION>() };
+    let units = (info.FileSystemNameLength as usize / 2)
+        .min((size_of_val(&buf) - offset_of!(FILE_FS_ATTRIBUTE_INFORMATION, FileSystemName)) / 2);
+    // SAFETY: `units` UTF-16 units of the name lie inside buf
+    let name = unsafe {
+        std::slice::from_raw_parts(
+            buf.as_ptr()
+                .cast::<u8>()
+                .add(offset_of!(FILE_FS_ATTRIBUTE_INFORMATION, FileSystemName))
+                .cast::<u16>(),
+            units,
+        )
+    };
+    name == w_str("NTFS") || name == w_str("ReFS")
+}
+
+fn w_str(s: &str) -> Vec<u16> {
+    s.encode_utf16().collect()
 }
 
 /// Length in UTF-16 units of the kernel's name of what `h` refers to (`\Device\HarddiskVolume3\…`).

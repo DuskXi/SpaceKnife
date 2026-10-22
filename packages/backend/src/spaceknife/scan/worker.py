@@ -13,6 +13,7 @@ Keep this module import-light: every pool process imports it at start-up.
 
 from __future__ import annotations
 
+import errno
 import os
 import posixpath
 import stat
@@ -321,11 +322,51 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
     return subdirs
 
 
+_PIECE = 1000  # bytes of path per open in _open_dir: well under PATH_MAX everywhere (macOS: 1,024)
+
+
+def _open_dir(path: str, flags: int) -> int:
+    """``os.open(path, flags)``, also for a path of PATH_MAX bytes or more, which open() refuses
+    (ENAMETOOLONG) although the folder is there to list (posix.rs `open_long`): opened a piece of
+    whole names at a time, each relative to the folder the one before reached. Resolution is that
+    of one open of the whole path: symlinks in the middle are followed, ``flags`` apply to the last
+    name only, and the folders on the way need search permission only (O_PATH, Linux)."""
+    try:
+        return os.open(path, flags)
+    except OSError as exc:
+        if exc.errno != errno.ENAMETOOLONG:
+            raise
+    middle = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    rest = os.fsencode(path)
+    fd: int | None = None
+    try:
+        while True:
+            if len(rest) <= _PIECE:
+                piece, tail = rest, b""
+            else:
+                cut = rest.rfind(b"/", 1, _PIECE + 1)  # a leading "/" stays with the first piece
+                if cut < 0:
+                    raise OSError(errno.ENAMETOOLONG, os.strerror(errno.ENAMETOOLONG), path)
+                piece, tail = rest[:cut], rest[cut + 1 :]
+            tail = tail.lstrip(b"/")
+            opened = os.open(piece, flags if not tail else middle, dir_fd=fd)
+            if fd is not None:
+                os.close(fd)
+            fd = opened
+            if not tail:
+                return opened
+            rest = tail
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        raise
+
+
 def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]]:
     assert sys.platform != "win32"
     subdirs: list[tuple[int, str]] = []
     base = len(acc.kind)
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+    fd = _open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
     try:
         with os.scandir(fd) as it:
             for entry in it:

@@ -838,6 +838,51 @@ pub fn bulk_state() -> String {
     bulk::state()
 }
 
+/// Bytes of path given to one open by `open_long`: well under PATH_MAX everywhere (macOS: 1,024
+/// with the NUL; a name is at most 255).
+const PIECE: usize = 1000;
+
+/// `open(path, oflags)` for a path of PATH_MAX bytes or more, which open() refuses (ENAMETOOLONG)
+/// although the folder is there to list (worker._open_dir): opened a piece of whole names at a
+/// time, each piece relative to the folder the one before reached. Resolution is that of one open
+/// of the whole path: symlinks in the middle are followed, `oflags` (O_NOFOLLOW) apply to the last
+/// name only, and the folders on the way need search permission only (O_PATH; elsewhere read
+/// permission too, so a few such paths still fail, as they did before).
+fn open_long(path: &[u8], oflags: libc::c_int) -> Result<Fd, i32> {
+    #[cfg(target_os = "linux")]
+    let middle = libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC;
+    #[cfg(not(target_os = "linux"))]
+    let middle = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
+    let mut dir: Option<Fd> = None;
+    let mut rest = path;
+    loop {
+        let (piece, tail) = if rest.len() <= PIECE {
+            (rest, &rest[rest.len()..])
+        } else {
+            // a leading "/" stays with the first piece
+            match rest[1..=PIECE].iter().rposition(|&b| b == b'/') {
+                Some(j) => (&rest[..j + 1], &rest[j + 2..]),
+                None => return Err(libc::ENAMETOOLONG),
+            }
+        };
+        let tail = &tail[tail.iter().take_while(|&&b| b == b'/').count()..]; // "a//b": no "/b"
+        let last = tail.is_empty();
+        let c = CString::new(piece).map_err(|_| libc::EINVAL)?;
+        let at = dir.as_ref().map_or(libc::AT_FDCWD, |d| d.0);
+        // SAFETY: c is NUL-terminated; `at` is open (or AT_FDCWD) until `dir` is replaced below.
+        let fd = unsafe { libc::openat(at, c.as_ptr(), if last { oflags } else { middle }) };
+        if fd < 0 {
+            return Err(errno());
+        }
+        let fd = Fd(fd);
+        if last {
+            return Ok(fd);
+        }
+        dir = Some(fd);
+        rest = tail;
+    }
+}
+
 /// Lists `path` into `arena` (worker._list_posix); subdirectories to descend go to `subdirs`.
 /// Directories found by this call are opened with O_NOFOLLOW (a swap for a symlink is refused);
 /// given tasks are opened like the worker does, so a root may itself be a symlink.
@@ -867,11 +912,13 @@ fn list_path(
         oflags |= libc::O_NOFOLLOW;
     }
     // SAFETY: c is NUL-terminated.
-    let fd = unsafe { libc::open(c.as_ptr(), oflags) };
-    if fd < 0 {
-        return Err(errno_message(errno()));
-    }
-    let fd = Fd(fd);
+    let fd = match unsafe { libc::open(c.as_ptr(), oflags) } {
+        fd if fd >= 0 => Fd(fd),
+        _ => match errno() {
+            libc::ENAMETOOLONG => open_long(path, oflags).map_err(errno_message)?,
+            code => return Err(errno_message(code)),
+        },
+    };
     #[cfg(target_os = "linux")]
     if state.keep {
         keep_access_time(fd.0);
@@ -929,6 +976,64 @@ mod tests {
         assert!(!is_skipped(&skip, b"/System", b"Volumes"));
         assert!(!is_skipped(&[], b"/System/Volumes", b"Data"));
         assert!(is_skipped(&[b"/x".to_vec()], b"/", b"x"));
+    }
+
+    #[test]
+    fn paths_past_path_max_open_piece_by_piece() {
+        let base = std::env::temp_dir().join(format!("spaceknife-long-{}", std::process::id()));
+        std::fs::create_dir(&base).unwrap();
+        let mut path = base.as_os_str().as_encoded_bytes().to_vec();
+        let name = CString::new(vec![b'd'; 200]).unwrap();
+        // SAFETY: plain calls on NUL-terminated names and our own descriptors.
+        let mut dir = Fd(unsafe { libc::open(CString::new(path.clone()).unwrap().as_ptr(), libc::O_RDONLY) });
+        let mut depth = 0;
+        while path.len() <= 5000 {
+            unsafe {
+                assert_eq!(libc::mkdirat(dir.0, name.as_ptr(), 0o755), 0);
+                dir = Fd(libc::openat(dir.0, name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY));
+            }
+            assert!(dir.0 >= 0);
+            path.extend_from_slice(b"/");
+            path.extend_from_slice(name.as_bytes());
+            depth += 1;
+        }
+        let ino = |fd: libc::c_int| {
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { libc::fstat(fd, &mut st) }, 0);
+            st.st_ino
+        };
+        let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+        let c = CString::new(path.clone()).unwrap();
+        assert_eq!(unsafe { libc::open(c.as_ptr(), flags) }, -1);
+        assert_eq!(errno(), libc::ENAMETOOLONG);
+        assert_eq!(ino(open_long(&path, flags).unwrap().0), ino(dir.0));
+        // doubled slashes, and a symlink in the middle (followed, as one open would)
+        let doubled = String::from_utf8(path.clone()).unwrap().replacen("/d", "//d", 3);
+        assert_eq!(ino(open_long(doubled.as_bytes(), flags).unwrap().0), ino(dir.0));
+        let first = base.join("d".repeat(200));
+        std::os::unix::fs::symlink(&first, base.join("via")).unwrap();
+        let mut via = base.join("via").as_os_str().as_encoded_bytes().to_vec();
+        via.extend_from_slice(&path[first.as_os_str().len()..]);
+        assert_eq!(ino(open_long(&via, flags).unwrap().0), ino(dir.0));
+        // the last name keeps O_NOFOLLOW; failures give the errno one open would
+        let mut missing = path.clone();
+        missing.extend_from_slice(b"/missing");
+        assert_eq!(open_long(&missing, flags).err(), Some(libc::ENOENT));
+        let dangling = CString::new("dangling").unwrap();
+        unsafe { assert_eq!(libc::symlinkat(c"/nonexistent".as_ptr(), dir.0, dangling.as_ptr()), 0) };
+        std::os::unix::fs::symlink("/nonexistent", base.join("dangling")).unwrap();
+        let short = CString::new(base.join("dangling").as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::open(short.as_ptr(), flags) }, -1);
+        let mut link = path.clone();
+        link.extend_from_slice(b"/dangling");
+        assert_eq!(open_long(&link, flags).err(), Some(errno()));
+        let mut gap = path.clone();
+        gap.extend_from_slice(b"/");
+        gap.extend_from_slice(&[b'x'; PIECE + 1]);
+        assert_eq!(open_long(&gap, flags).err(), Some(libc::ENAMETOOLONG));
+        drop(dir);
+        assert!(depth > 4096 / 201);
+        std::fs::remove_dir_all(&base).unwrap();
     }
 
     #[test]

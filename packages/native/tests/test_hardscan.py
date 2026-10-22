@@ -509,6 +509,45 @@ def test_posix_non_utf8_names_fifo_and_hardlinks(tmp_path: Path) -> None:
     assert any("\udcfe" in p for p in res.paths)
 
 
+@pytest.mark.skipif(IS_WINDOWS, reason="POSIX PATH_MAX")
+def test_posix_folders_past_path_max_are_listed(tmp_path: Path) -> None:
+    """A folder whose path is PATH_MAX bytes or longer exists and can be listed, but open() of
+    its path fails (ENAMETOOLONG): both walkers used to report it as a listing error and leave out
+    everything below it. Now they open such a path a piece at a time. Checked for folders found
+    during a call and for a task with such a path (a folder handed back to Python and listed by a
+    later call)."""
+    root = tmp_path / "long"
+    root.mkdir()
+    name = b"d" * 200
+    path = os.fsencode(root)
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        while len(path) <= 5000:  # PATH_MAX: 4,096 on Linux, 1,024 on macOS
+            os.mkdir(name, dir_fd=fd)
+            below = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = below
+            path += b"/" + name
+            out = os.open(b"f.txt", os.O_CREAT | os.O_WRONLY, 0o644, dir_fd=fd)
+            os.write(out, b"x" * len(path))
+            os.close(out)
+    finally:
+        os.close(fd)
+    deepest = os.fsdecode(path)
+    with pytest.raises(OSError, match=os.strerror(errno.ENAMETOOLONG)):
+        os.scandir(deepest)
+    roots = (root_opts(root),)
+    res = scan_one(root)
+    assert not res.errors
+    assert res.paths[-1] == deepest
+    assert len(res.paths) == 1 + path.count(b"/" + name)
+    assert int(res.cols["size"].sum()) == sum(range(len(os.fsencode(root)) + 201, len(path) + 1, 201))
+    res = compare([((0, 1, 0), deepest, 0)], roots)
+    assert not res.errors
+    assert res.paths == [deepest]
+    assert _names(res) == ["f.txt"]
+
+
 @pytest.fixture
 def restore_modes() -> Iterator[list[Path]]:
     paths: list[Path] = []
