@@ -52,8 +52,25 @@ class SliceOpts(TypedDict, total=False):
     budget_s: float
     max_entries: int
     threads: int  # 0: min(logical CPUs, 16)
-    keep_access_time: bool  # Windows, default True: listing a folder keeps its last access time
+    keep_access_time: bool  # Windows and Linux, default True: listing a folder keeps its last access time
     relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
+
+class LinkSet:
+    """The (dev, ino) of hard-linked files already counted during a scan (Scanner._fold)."""
+
+    def __init__(self) -> None: ...
+    def mark(
+        self,
+        dev: np.ndarray[Any, np.dtype[np.uint64]],
+        ino: np.ndarray[Any, np.dtype[np.uint64]],
+        nlink: np.ndarray[Any, np.dtype[np.uint16]],
+        kind: np.ndarray[Any, np.dtype[np.uint8]],
+        flags: np.ndarray[Any, np.dtype[np.uint32]],
+    ) -> int:
+        """In order: a file with nlink > 1 whose (dev, ino) was counted before gets HARDLINK_DUP in
+        ``flags`` (in place); the first one is remembered. Returns how many were marked."""
+    def __len__(self) -> int: ...
+    def __contains__(self, key: tuple[int, int]) -> bool: ...
 
 def _open_stats(reset: bool = False) -> dict[str, int]:
     """How directories were opened (Windows; empty on POSIX), process-wide since the last reset."""

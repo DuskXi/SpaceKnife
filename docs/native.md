@@ -88,7 +88,7 @@ def scan_slice(
   - `roots`：每个根一项 `{dev, cluster_size, resident_max, cross_mounts}`，语义同 `worker.RootOptions`。
   - `budget_s`（默认 0.03；≤ 0 表示列一次就停）、`max_entries`（默认 100000）。
   - `threads`：调用内部的列目录线程数，0 表示 min(逻辑 CPU, 16)。
-  - `keep_access_time`（默认 True，只在 Windows 上起作用，POSIX 忽略）：列目录时不更新文件夹的最后访问时间，见下。
+  - `keep_access_time`（默认 True，Windows 和 Linux 上起作用，macOS 忽略）：列目录时不更新文件夹的最后访问时间，见下。
   - `relative_open`（默认 True，只在 Windows 上起作用）：调用内新发现的子目录按名字相对父目录的句柄打开，见下。
   - `_open_stats(reset=False)`（测试与测量用，不属于公开接口）：进程内累计的打开方式计数（相对打开、按路径打开、各种回退的原因、保留访问时间被拒），POSIX 上为空。
 - Windows：`NtQueryDirectoryFile` + `FileIdExtdDirectoryInformation`（一次系统调用拿到名字、大小、占用、时间、属性、文件 ID、重解析标记），NT 路径形式打开。
@@ -118,6 +118,9 @@ def scan_slice(
   - 也不更快：在结果正确（条目一样多）的对比里，按扫描器的方式调度，C:\Windows 从 2.0–2.3 s 变成 2.6–3.0 s，ReFS 的 W:\work 也更慢。之前测到的「快一倍」来自少扫了三分之一。
   - 教训：改打开或列目录的方式，要在真实的整盘上、按扫描器的调度方式，逐个文件夹比对内容（前后各扫一次旧方式，排除期间的文件变动）；只比项数、只比小目录都不够。`test_native_scan_of_a_real_tree_matches_the_python_walker`（设 `SPACEKNIFE_TEST_SCAN_ROOT` 后运行，几分钟）在真实目录上与 Python 遍历器这样比对；`test_scanner_driven_native_scans_build_the_same_tree` 在测试树上按扫描器的方式（多任务、几种预算）检查同样的性质。
 - POSIX：`openat` + `getdents64`（Linux）/ `readdir`（macOS）+ `fstatat`，按 fd 相对路径遍历；不跨设备（除非 `cross_mounts`）；不跟随符号链接，调用内新发现的子目录用 `O_NOFOLLOW` 打开。
+- Linux 保留最后访问时间（`keep_access_time`，0.3.4）：目录打开后用 `fcntl(F_SETFL, O_NOATIME)` 补上 `O_NOATIME`，通过它列目录就不更新访问时间。内核只允许目录的属主和有 `CAP_FOWNER` 的进程这样做，别人被拒（EPERM），那个目录照旧列、访问时间照旧更新；打开后再设，不用事先知道属主，也不会多打开一次。`relatime`（大多数发行版的默认）下，一天里第一次扫描会改写所有一天没访问过的目录的 inode，Btrfs 上还要写时复制元数据、拆开快照之间共享的元数据。WSL 的根分区上 4.7 万个目录里 3.3 万个属于当前用户（家目录、uv 缓存），扫描家目录时几乎全部受益；系统目录属于 root，标准用户没有办法。测试（`test_listing_keeps_folder_access_times`）把测试目录的访问时间设成 2001 年再扫：默认选项一个都不变，关掉时都被改写（文件系统根本不更新访问时间时跳过）。macOS 没有对应的开关。
+- 硬链接只计一次（`LinkSet`，0.3.4）：扫描器把计过的 `(dev, ino)` 记在原生的 `LinkSet` 里，`mark(dev, ino, nlink, kind, flags)` 按切片顺序给后来者标 `HARDLINK_DUP`，与原来 `Scanner._fold` 里 Python 集合加逐项循环的结果逐项相同（随机数据与真实扫描两种等价性测试）；没有原生扩展时仍用 Python 集合。原来的循环每个多链接文件约 0.5 µs：WSL 根分区（60 万项，其中 16 万个文件有多个链接，uv 的缓存与各个虚拟环境共享）热缓存扫描中位数 0.37 s → 0.29 s。计在哪个名字上仍取决于先合并进来的是哪个，原生与 Python 遍历器顺序不同，所以真实目录比对（`test_native_scan_of_a_real_tree_matches_the_python_walker`）不比较这一项和由它决定的合计。
+- Linux 上的瓶颈（2026-10-22，WSL2 的 ext4 根分区，60 万项，16 个 vCPU）：热缓存约 0.3–0.4 s，列目录线程只忙 8–17%，主线程归并占 73–95%；线程数 4 / 8 / 16 / 32 用时没有差别（0.32–0.41 s），所以更快的 `fstatat`（例如只要所需字段的 `statx`）在热缓存下改变不了总用时。冷缓存（`drop_caches` 加清宿主机缓存）3.4–5.9 s，读 327 MB，列目录线程忙 83–91%，是读盘。原生与 Python 遍历器冷热各两遍逐个文件夹一致。
 - 名字编码同 worker.py（Windows surrogatepass，POSIX 原始字节等价的 surrogateescape）；非 ASCII 扩展名用 Python 自己的 `str.lower` 小写，避免 Unicode 版本差异。
 - 有意差异（未截断的切片与 worker 完全一致）：(1) 被预算截断的切片是「已列目录的先序子树」而不是 worker 的 DFS 前缀，引用仍然有效；每个线程按目录检查预算，`max_entries` 最多超出每线程一个目录。(2) Windows 上名字以点或空格结尾的目录能正常列出（worker 打不开）；空的 FAT 根是空列表而不是错误。
 - 扫描器的接法（`scan/scanner.py`）：有扩展时 `native_slicer()` 每次调用只用 1 个列目录线程（`threads=1`），由后端的线程池并发多次调用，并发数由 IO 限速器控制（`native_threads()` = min(CPU, 16) 为上限）；每批 256 个目录任务、预算 0.05 s。没有扩展时退回 spawn 进程池。

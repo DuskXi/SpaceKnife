@@ -174,6 +174,19 @@ def bulk_listing() -> str | None:
 Slicer = Callable[[list[Task], SliceOptions], SliceResult]
 
 
+def link_set() -> Any:
+    """Where a scan keeps the (dev, ino) of hard-linked files it has counted: the native LinkSet
+    (``mark`` runs the loop of ``Scanner._fold`` over a whole slice) or, without the extension, a
+    set of tuples. The Python loop took about a fifth of a warm scan of a Linux system whose uv
+    cache and environments share 160,000 files by hard links (0.5 µs per linked file)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is not None and native.has("LinkSet"):
+        return mod.LinkSet()
+    return set()
+
+
 def native_slicer() -> Slicer | None:
     """The native walker as a slicer (one listing thread per call), or None without the extension."""
     from .. import native
@@ -252,7 +265,7 @@ class Scanner:
         self._running = asyncio.Event()
         self._running.set()
         self._cancelled = False
-        self._seen_links: set[tuple[int, int]] = set()
+        self._seen_links = link_set()  # (dev, ino) of hard-linked files already counted
         self._queue: deque[Task] = deque()
         self._errors = 0
         self._denied: list[str] = []
@@ -544,15 +557,17 @@ class Scanner:
         cols = res.cols
         n_entries = len(res.name_lens)
         if n_entries and not self.count_links_each:
-            cand = np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]
-            if len(cand):
+            seen = self._seen_links
+            if not isinstance(seen, set):  # native: the same loop, in one call
+                seen.mark(cols["dev"], cols["ino"], cols["nlink"], cols["kind"], cols["flags"])
+            elif len(cand := np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]):
                 flags = cols["flags"]
                 for i in cand.tolist():
                     key = (int(cols["dev"][i]), int(cols["ino"][i]))
-                    if key in self._seen_links:
+                    if key in seen:
                         flags[i] |= np.uint32(Flag.HARDLINK_DUP)
                     else:
-                        self._seen_links.add(key)
+                        seen.add(key)
         remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
         ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
         # the whole slice in one go (mount points stay unentered: never PENDING)

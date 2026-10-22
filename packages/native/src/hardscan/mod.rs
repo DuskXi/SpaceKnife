@@ -9,7 +9,7 @@
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
-//! | `keep_access_time` | True | Windows: listing a folder does not update its last access time |
+//! | `keep_access_time` | True | Windows and Linux: listing a folder does not update its last access time |
 //! | `relative_open` | True | Windows: a found subdirectory is opened by name relative to its parent's handle, checked against the listed file id |
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
@@ -25,6 +25,7 @@
 //!   follow a directory that was swapped for a symlink in between).
 
 mod common;
+mod links;
 #[cfg(unix)]
 mod posix;
 mod walk;
@@ -489,6 +490,7 @@ fn _open_stats(py: Python<'_>, reset: bool) -> PyResult<Bound<'_, PyDict>> {
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
     m.add_function(wrap_pyfunction!(_open_stats, m)?)?;
+    m.add_class::<links::LinkSet>()?;
     m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;
     Ok(())
 }

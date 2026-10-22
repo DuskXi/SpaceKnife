@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from spaceknife import native
+from spaceknife.scan import scanner as scanner_mod
 from spaceknife.scan import worker
 from spaceknife.scan.scanner import ScanError, Scanner, ScanState, make_pool, native_threads
 from spaceknife.scan.volume import volume_for
@@ -164,6 +166,43 @@ async def test_posix_links_hardlinks_and_denied(tmp_path: Path) -> None:
         node = store.find(str(locked))
         assert node is not None and store.view(node).flags & Flag.ACCESS_DENIED
         assert result.errors == 1
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="link counts (Windows hard scans report none yet)")
+@pytest.mark.parametrize("budget_s", [0.0, 1.0])
+async def test_hard_links_count_once_with_either_link_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, budget_s: float
+) -> None:
+    """Names of one file in other folders and in the same folder: one name per file is counted,
+    and the native LinkSet marks exactly the names the Python set marks (in many slices or one)."""
+    root = tmp_path / "links"
+    for d in ("a", "b/c"):
+        (root / d).mkdir(parents=True)
+    for i in range(30):
+        first = root / "a" / f"f{i}"
+        first.write_bytes(b"x" * (100 + i))
+        for other in (root / "b" / f"g{i}", root / "b" / "c" / f"h{i}", root / "a" / f"f{i}-again"):
+            os.link(first, other)
+    (root / "single").write_bytes(b"y" * 7)
+
+    async def scan() -> tuple[dict[str, bool], int, bool]:
+        scanner = Scanner([str(root)], budget_s=budget_s)
+        await scanner.run()
+        store, c = scanner.store, scanner.store.cols
+        dups = {
+            store.path(i): bool(c["flags"][i] & Flag.HARDLINK_DUP)
+            for i in range(1, len(store))
+            if c["kind"][i] == Kind.FILE
+        }
+        return dups, int(c["tot_size"][scanner.roots[0].node]), isinstance(scanner._seen_links, set)
+
+    native_dups, native_total, native_is_set = await scan()
+    monkeypatch.setattr(scanner_mod, "link_set", set)
+    python_dups, python_total, python_is_set = await scan()
+    assert python_is_set and native_is_set == (not native.has("LinkSet"))
+    assert native_dups == python_dups
+    assert native_total == python_total == sum(100 + i for i in range(30)) + 7
+    assert sum(not dup for dup in python_dups.values()) == 31  # one name of each file, and "single"
 
 
 async def test_scan_runs_inside_running_loop_without_blocking(tree: TreeFacts) -> None:

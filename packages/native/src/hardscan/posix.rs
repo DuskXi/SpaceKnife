@@ -62,15 +62,32 @@ fn is_skipped(skip: &[Vec<u8>], dir: &[u8], name: &[u8]) -> bool {
     })
 }
 
-/// Nothing to learn per root on POSIX.
-pub struct RootState;
+/// Per root and call: whether listings keep folders' access times (Linux).
+pub struct RootState {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    keep: bool,
+}
 
 impl RootState {
-    /// `keep_access_time` and `relative_open` are Windows options (docs/native.md 2.2: Linux would
-    /// need O_NOATIME; opening a subdirectory relative to its parent measured no faster there).
-    pub fn new(_keep_access_time: bool, _relative_open: bool) -> Self {
-        Self
+    /// `keep_access_time` works on Linux (O_NOATIME; macOS has nothing like it). `relative_open` is
+    /// a Windows option: opening a subdirectory relative to its parent measured no faster here.
+    pub fn new(keep_access_time: bool, _relative_open: bool) -> Self {
+        Self {
+            keep: keep_access_time,
+        }
     }
+}
+
+/// Listing through `fd` leaves the folder's access time as it was: O_NOATIME, set once it is open
+/// (fcntl F_SETFL), which the kernel allows to the folder's owner and to CAP_FOWNER; for anyone
+/// else it is refused and the folder is listed as before. Under relatime the first listing of a
+/// day otherwise rewrites the inode of every folder whose access time is a day old (on Btrfs a
+/// copy-on-write of metadata that snapshots shared). Best effort.
+#[cfg(target_os = "linux")]
+fn keep_access_time(fd: libc::c_int) {
+    // SAFETY: a plain call on our descriptor. F_SETFL replaces the status flags: O_RDONLY is 0,
+    // and O_DIRECTORY, O_NOFOLLOW and O_CLOEXEC are not status flags, so only O_NOATIME changes.
+    unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NOATIME) };
 }
 
 /// Windows hands a listed directory's handle to its subdirectories (win.rs); here nothing is.
@@ -829,17 +846,18 @@ pub fn list_dir(
     discovered: bool,
     _via: Option<Via>,
     root: &RootOpts,
-    _state: &RootState,
+    state: &RootState,
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) -> Result<Option<Arc<Parent>>, String> {
-    list_path(path, discovered, root, arena, subdirs).map(|()| None)
+    list_path(path, discovered, root, state, arena, subdirs).map(|()| None)
 }
 
 fn list_path(
     path: &[u8],
     discovered: bool,
     root: &RootOpts,
+    state: &RootState,
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) -> Result<(), String> {
@@ -854,6 +872,12 @@ fn list_path(
         return Err(errno_message(errno()));
     }
     let fd = Fd(fd);
+    #[cfg(target_os = "linux")]
+    if state.keep {
+        keep_access_time(fd.0);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = state;
     let base = arena.len();
     #[cfg(target_os = "macos")]
     {

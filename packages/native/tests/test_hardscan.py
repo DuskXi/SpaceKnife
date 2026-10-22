@@ -580,19 +580,22 @@ def test_zero_budget_still_lists_and_returns_a_valid_frontier(tree: Path) -> Non
     assert len(res["paths"]) == 1 and res["frontier"]
 
 
-def tree_snapshot(store: NodeStore) -> dict[str, tuple[object, ...]]:
-    """Path -> node facts; store ids and extension ids depend on slice order, so they are left out."""
+def tree_snapshot(store: NodeStore, *, listed_only: bool = False) -> dict[str, tuple[object, ...]]:
+    """Path -> node facts; store ids and extension ids depend on slice order, so they are left out.
+    `listed_only`: what each entry's listing said, without which name of a hard-linked file was
+    counted (the first one folded in, so it follows the walk's order) and the totals that follow."""
     c = store.cols
     paths: dict[int, str] = {}
     out: dict[str, tuple[object, ...]] = {}
+    keys = ("kind", "flags", "size", "alloc", "mtime") + (
+        () if listed_only else ("tot_size", "tot_files", "tot_dirs")
+    )
+    not_dup = ~np.uint32(Flag.HARDLINK_DUP) if listed_only else ~np.uint32(0)
     for i in range(1, len(store)):
         parent = int(c["parent"][i])
         path = (paths[parent] + "/" if parent in paths else "") + store.name(i)
         paths[i] = path
-        facts = tuple(
-            int(c[k][i])
-            for k in ("kind", "flags", "size", "alloc", "mtime", "tot_size", "tot_files", "tot_dirs")
-        )
+        facts = tuple(int(c[k][i] & not_dup) if k == "flags" else int(c[k][i]) for k in keys)
         out[path] = (*facts, store.ext_table[int(c["ext"][i])])
     return out
 
@@ -682,7 +685,9 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
     native walker as the app drives it finds what the Python walker finds. The Python walker scans
     before and after, and only a path both of its scans agree on counts: a difference there is the
     walker's, not a file that changed. This is how the partial listings of opens by file id showed
-    up (a temporary test tree has none of the filters that caused them)."""
+    up (a temporary test tree has none of the filters that caused them). Which name of a hard-linked
+    file is counted follows the order of the walk, which differs between the two walkers, so that
+    and the totals are left out (on Linux, uv's cache and environments share thousands of files)."""
     from spaceknife.scan.scanner import NATIVE_BUDGET_S, default_workers, make_pool, native_threads
 
     root = os.environ["SPACEKNIFE_TEST_SCAN_ROOT"]
@@ -694,7 +699,7 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
             asyncio.run(scanner.run())
         finally:
             pool.shutdown()
-        return tree_snapshot(scanner.store)
+        return tree_snapshot(scanner.store, listed_only=True)
 
     def native_scan() -> dict[str, tuple[object, ...]]:
         threads = native_threads()
@@ -711,7 +716,7 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
             asyncio.run(scanner.run())
         finally:
             pool.shutdown()
-        return tree_snapshot(scanner.store)
+        return tree_snapshot(scanner.store, listed_only=True)
 
     def win32_only(path: str) -> bool:  # names Win32 rewrites: the worker cannot open them (on purpose)
         return IS_WINDOWS and any(part.endswith((".", " ")) for part in path.replace("\\", "/").split("/"))
@@ -730,8 +735,8 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
     assert not bad, f"{len(bad)} paths differ from the Python walker, e.g. {bad[:8]}"
 
 
-@pytest.mark.skipif(not IS_WINDOWS, reason="kept access times are Windows")
-def test_windows_keeping_access_times_changes_nothing(tree: Path) -> None:
+@pytest.mark.skipif(not (IS_WINDOWS or sys.platform == "linux"), reason="no way to keep access times")
+def test_keeping_access_times_changes_nothing(tree: Path) -> None:
     """Opening folders so that they keep their access times lists the same tree."""
     tasks: list[Task] = [((0, 1, 0), str(tree), 0)]
     roots = (root_opts(tree),)
@@ -740,21 +745,33 @@ def test_windows_keeping_access_times_changes_nothing(tree: Path) -> None:
     compare(tasks, roots, threads=1)
 
 
-@pytest.mark.skipif(not IS_WINDOWS, reason="NTFS last access times")
-def test_windows_listing_keeps_folder_access_times(tree: Path) -> None:
-    """A scan does not update the last access time of the folders it lists (on NTFS with access
-    time updates on, it rewrote every folder's record: ~2 GB of writes for a system volume)."""
+@pytest.mark.skipif(not (IS_WINDOWS or sys.platform == "linux"), reason="no way to keep access times")
+def test_listing_keeps_folder_access_times(tree: Path) -> None:
+    """A scan does not update the last access time of the folders it lists. On NTFS with access
+    time updates on, it rewrote every folder's record (about 2 GB of writes for a system volume);
+    under Linux's relatime, the first scan of a day rewrites every folder's inode (O_NOATIME, for
+    the folders' owner: the test's own folders). With the option off they do change, unless the
+    file system keeps no access times at all."""
     old = 978_307_200  # 2001-01-01
     folders = [Path(d) for d, _dirs, _files in os.walk(tree)]
-    for d in reversed(folders):  # children first: setting a folder's times touches its parent
-        os.utime(d, (old, os.stat(d).st_mtime))
-    assert all(abs(os.stat(d).st_atime - old) <= 2 for d in folders)
-    res = native.scan_slice(
-        [((0, 1, 0), str(tree), 0)], nopts(SliceOptions(roots=(root_opts(tree),), **EVERYTHING))
-    )
-    assert len(res["paths"]) == len(folders)
-    changed = [d for d in folders if abs(os.stat(d).st_atime - old) > 2]
+
+    def age() -> None:
+        for d in reversed(folders):  # children first: setting a folder's times touches its parent
+            os.utime(d, (old, os.stat(d).st_mtime))
+        assert all(abs(os.stat(d).st_atime - old) <= 2 for d in folders)
+
+    def scan(**extra: Any) -> list[Path]:
+        opts = nopts(SliceOptions(roots=(root_opts(tree),), **EVERYTHING), **extra)
+        res = native.scan_slice([((0, 1, 0), str(tree), 0)], opts)
+        assert len(res["paths"]) == len(folders)
+        return [d for d in folders if abs(os.stat(d).st_atime - old) > 2]
+
+    age()
+    changed = scan()
     assert not changed, f"{len(changed)} folders got a new access time, e.g. {changed[0]}"
+    age()
+    if not scan(keep_access_time=False):
+        pytest.skip("listing does not update access times here (noatime or similar)")
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="ReadDirectoryChangesW")
@@ -851,3 +868,58 @@ def test_bulk_listing_reports_a_state() -> None:
         assert state == "untested" or state.startswith(("on", "off")), state
     else:
         assert state == "unsupported"
+
+
+# ---------------------------------------------------------------------------- LinkSet
+
+
+def _python_mark(seen: set[tuple[int, int]], cols: dict[str, np.ndarray]) -> None:
+    """Scanner._fold's loop without the extension (the reference)."""
+    flags = cols["flags"]
+    for i in np.nonzero((cols["nlink"] > 1) & (cols["kind"] == 0))[0].tolist():
+        key = (int(cols["dev"][i]), int(cols["ino"][i]))
+        if key in seen:
+            flags[i] |= np.uint32(Flag.HARDLINK_DUP)
+        else:
+            seen.add(key)
+
+
+def test_link_set_marks_what_the_python_loop_marks() -> None:
+    """Over several slices (repeats within one and across them, several devices, folders and
+    single-link files with the same inode): the same names get HARDLINK_DUP, in place."""
+    rng = np.random.default_rng(7)
+    native_set, python_set = native.LinkSet(), set()
+    for _ in range(5):
+        n = 2000
+        cols = {
+            "dev": rng.integers(1, 3, n, dtype=np.uint64),
+            "ino": rng.integers(1, 400, n, dtype=np.uint64),
+            "nlink": rng.integers(1, 4, n, dtype=np.uint16),
+            "kind": rng.choice(np.array([0, 0, 0, 1], dtype=np.uint8), n),
+            "flags": rng.integers(0, 2, n, dtype=np.uint32) << np.uint32(5),  # other bits stay
+        }
+        ref = {k: v.copy() for k, v in cols.items()}
+        marked = native_set.mark(cols["dev"], cols["ino"], cols["nlink"], cols["kind"], cols["flags"])
+        _python_mark(python_set, ref)
+        assert np.array_equal(cols["flags"], ref["flags"])
+        assert marked == int(np.count_nonzero(ref["flags"] & np.uint32(Flag.HARDLINK_DUP)))
+        assert len(native_set) == len(python_set)
+    assert all(key in native_set for key in python_set)
+
+
+def test_link_set_refuses_mismatched_columns() -> None:
+    ok = {
+        "dev": np.zeros(3, np.uint64),
+        "ino": np.arange(3, dtype=np.uint64),
+        "nlink": np.full(3, 2, np.uint16),
+        "kind": np.zeros(3, np.uint8),
+    }
+    links = native.LinkSet()
+    with pytest.raises(ValueError, match="length"):
+        links.mark(ok["dev"], ok["ino"], ok["nlink"], ok["kind"], np.zeros(2, np.uint32))
+    with pytest.raises(ValueError, match="ino"):
+        links.mark(
+            ok["dev"], np.arange(6, dtype=np.uint64)[::2], ok["nlink"], ok["kind"], np.zeros(3, np.uint32)
+        )
+    with pytest.raises(TypeError):
+        links.mark(ok["dev"], ok["ino"], ok["nlink"], ok["kind"], np.zeros(3, np.int64))
