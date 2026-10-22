@@ -88,7 +88,25 @@ def scan_slice(
   - `roots`：每个根一项 `{dev, cluster_size, resident_max, cross_mounts}`，语义同 `worker.RootOptions`。
   - `budget_s`（默认 0.03；≤ 0 表示列一次就停）、`max_entries`（默认 100000）。
   - `threads`：调用内部的列目录线程数，0 表示 min(逻辑 CPU, 16)。
+  - `open_by_id`、`keep_access_time`（默认都是 True，只在 Windows 上起作用，POSIX 忽略）：打开目录的两种省法，见下。
 - Windows：`NtQueryDirectoryFile` + `FileIdExtdDirectoryInformation`（一次系统调用拿到名字、大小、占用、时间、属性、文件 ID、重解析标记），NT 路径形式打开。
+- Windows 打开目录的两种省法（0.3.4）：默认都开，用不了的地方自动退回原来的按路径打开（`FILE_LIST_DIRECTORY | SYNCHRONIZE`），扫描结果逐项不变。
+  - 按文件 ID 打开（`open_by_id`）：调用内新发现的子目录不再按完整路径打开，而是用父目录列表里拿到的文件 ID（`FILE_OPEN_BY_FILE_ID`，名字是 8 字节的 NTFS ID 或 16 字节的 ReFS ID），`RootDirectory` 是同一卷上的一个「锚」目录句柄：每个根第一次按路径打开一个本地盘符路径时多开一个，整个调用里一直持有。文件系统不用再逐级解析整条路径，省下的 CPU 主要来自这里。卷不支持（`STATUS_NOT_IMPLEMENTED`、`STATUS_NOT_SUPPORTED`、`STATUS_INVALID_PARAMETER` 等）→ 这个根之后都按路径打开；单个目录按 ID 打不开 → 这个目录按路径再试一次。`cross_mounts` 时不用（挂载点后面是别的卷，ID 不通用）；UNC 等不是盘符的路径不建锚，照旧按路径。
+  - 保留最后访问时间（`keep_access_time`）：先带 `FILE_WRITE_ATTRIBUTES` 打开，再用 `NtSetInformationFile(FileBasicInformation)` 把 `LastAccessTime` 设成 -1（即 `SetFileTime` 的「这个句柄以后不更新访问时间」），列这个目录就不再改写它的最后访问时间。NTFS 开着访问时间更新时（`fsutil behavior query disablelastaccess` 为 0，或 2「系统管理，已启用」），以前每列一个文件夹都要写一次元数据（NTFS 只在上次更新超过一小时时才写，所以隔一阵再扫最明显）：下面这次 C: 扫描写了 2.6–3.6 GB。拿不到写属性权限（标准用户进系统文件夹、只读 ACL、只读卷）→ 这个文件夹照旧打开，它的访问时间照旧会更新；一个根上被拒超过 64 次且多于成功次数，就不再先试。
+  - 实测（C:，870 万项，32 逻辑 CPU，默认 16 个列目录线程，命令行扫描，2026-10-22）：
+
+    | | 旧方式 | 两项都开 |
+    |---|---|---|
+    | 热缓存用时 | 30.8–49.2 s | 10.7–13.2 s |
+    | 热缓存 CPU 时间 | 256–278 s | 113–128 s |
+    | 热缓存写盘 | 2.6–3.3 GB | 30–75 MB |
+    | 冷缓存用时（先清空系统文件缓存） | 54.3 s | 21.0 s |
+    | 冷缓存 CPU 时间 | 354 s | 189 s |
+    | 冷缓存读 / 写 | 5.8 GB / 3.6 GB | 3.9 GB / 0.7 GB |
+    | 进程峰值工作集 | 1.22 GB | 0.83 GB |
+
+    访问时间刚更新过（一小时内重扫）时旧方式几乎不写盘；那时另一轮不同线程数的热缓存对比里，旧方式 18.9–25.5 s、206–286 CPU 秒，新方式 8.8–12.9 s、66–132 CPU 秒，仍然快约一倍、CPU 约减半。
+  - 测试（`tests/test_hardscan.py`）：两项全关 / 全开 / 单线程 / `cross_mounts` 的结果完全一致；扫描前把每个文件夹的访问时间设成 2001 年，默认选项扫完一个都不变（手动对照：关掉 `keep_access_time` 时 41 个文件夹全被改写）；用监控的过滤条件（`monitor.win.NOTIFY_FILTER`）监视扫描的目录，扫描本身不产生任何变化通知（这个过滤条件不含访问时间，旧方式在小目录上也没有触发；测试防的是以后的打开方式引入属性或大小类的变化）。
 - POSIX：`openat` + `getdents64`（Linux）/ `readdir`（macOS）+ `fstatat`，按 fd 相对路径遍历；不跨设备（除非 `cross_mounts`）；不跟随符号链接，调用内新发现的子目录用 `O_NOFOLLOW` 打开。
 - 名字编码同 worker.py（Windows surrogatepass，POSIX 原始字节等价的 surrogateescape）；非 ASCII 扩展名用 Python 自己的 `str.lower` 小写，避免 Unicode 版本差异。
 - 有意差异（未截断的切片与 worker 完全一致）：(1) 被预算截断的切片是「已列目录的先序子树」而不是 worker 的 DFS 前缀，引用仍然有效；每个线程按目录检查预算，`max_entries` 最多超出每线程一个目录。(2) Windows 上名字以点或空格结尾的目录能正常列出（worker 打不开）；空的 FAT 根是空列表而不是错误。

@@ -55,6 +55,30 @@ impl Default for RootOpts {
     }
 }
 
+/// How directories are opened (Windows; POSIX ignores it). Both on by default, and both fall back
+/// to the plain open by path wherever they cannot be used.
+#[derive(Clone, Copy, Debug)]
+pub struct OpenOpts {
+    /// Subdirectories found during a call are opened by their file id, relative to a directory
+    /// of the same volume, instead of by full path: the file system skips resolving every path
+    /// component again (half the CPU time of a warm NTFS scan). Off when the root crosses mounts.
+    pub by_id: bool,
+    /// Directories are opened with FILE_WRITE_ATTRIBUTES and told not to update their last
+    /// access time (SetFileTime's -1): listing them then writes nothing (on NTFS with access
+    /// time updates on, 2–3 GB per scan of a big system volume) and raises no change
+    /// notification. Where that access is denied, the folder is opened as before.
+    pub keep_access_time: bool,
+}
+
+impl Default for OpenOpts {
+    fn default() -> Self {
+        Self {
+            by_id: true,
+            keep_access_time: true,
+        }
+    }
+}
+
 /// Directory path in the platform's native form: UTF-16 units on Windows, raw bytes on POSIX.
 #[cfg(windows)]
 pub type Unit = u16;

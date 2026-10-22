@@ -7,7 +7,7 @@
 use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
 
-use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
+use super::common::{Arena, NativePath, OpenOpts, RootOpts, Row, ext_len_with, flag, kind, secs};
 
 /// The row worker.py writes when an entry cannot be stat'ed.
 const ERROR_ROW: Row = Row {
@@ -65,7 +65,7 @@ fn is_skipped(skip: &[Vec<u8>], dir: &[u8], name: &[u8]) -> bool {
 pub struct RootState;
 
 impl RootState {
-    pub fn new() -> Self {
+    pub fn new(_root: &RootOpts, _open: OpenOpts) -> Self {
         Self
     }
 }
@@ -183,7 +183,7 @@ fn add_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, u128)>,
 ) {
     push_entry(
         stat_entry(dirfd, name),
@@ -204,7 +204,7 @@ fn push_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, u128)>,
 ) {
     let name_start = arena.names.len();
     arena.names.extend_from_slice(raw);
@@ -257,7 +257,7 @@ fn push_entry(
     };
     arena.push_row(name_start, row);
     if descend {
-        subdirs.push((j, join_posix(dir, raw).into_boxed_slice()));
+        subdirs.push((j, join_posix(dir, raw).into_boxed_slice(), 0));
     }
 }
 
@@ -810,11 +810,12 @@ pub fn bulk_state() -> String {
 /// given tasks are opened like the worker does, so a root may itself be a symlink.
 pub fn list_dir(
     path: &[u8],
+    _id: u128,
     discovered: bool,
     root: &RootOpts,
     _state: &RootState,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, u128)>,
 ) -> Result<(), String> {
     let c = CString::new(path).map_err(|_| "embedded null byte".to_owned())?;
     let mut oflags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;

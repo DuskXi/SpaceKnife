@@ -9,6 +9,8 @@
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
+//! | `open_by_id` | True | Windows: open the subdirectories found during the call by file id (not with `cross_mounts`) |
+//! | `keep_access_time` | True | Windows: listing a folder does not update its last access time |
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
 //! (`SliceResult(**scan_slice(tasks, opts))`). Differences from the worker, all deliberate:
@@ -45,10 +47,17 @@ use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyTypeError, PyValueErro
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 
-use common::{Arena, NativePath, RootOpts};
+use common::{Arena, NativePath, OpenOpts, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
-const OPT_KEYS: [&str; 4] = ["roots", "budget_s", "max_entries", "threads"];
+const OPT_KEYS: [&str; 6] = [
+    "roots",
+    "budget_s",
+    "max_entries",
+    "threads",
+    "open_by_id",
+    "keep_access_time",
+];
 const ROOT_KEYS: [&str; 6] = [
     "dev",
     "cluster_size",
@@ -63,6 +72,7 @@ struct Opts {
     budget_s: f64,
     max_entries: usize,
     threads: usize,
+    open: OpenOpts,
 }
 
 /// `obj[key]` for a dict (rejecting unknown keys), else `getattr(obj, key, None)`.
@@ -140,11 +150,19 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         Some(v) if !v.is_none() => v.extract::<i64>()?.clamp(0, 256) as usize,
         _ => 0,
     };
+    let mut open = OpenOpts::default();
+    if let Some(v) = field(opts, "open_by_id")?.filter(|v| !v.is_none()) {
+        open.by_id = v.is_truthy()?;
+    }
+    if let Some(v) = field(opts, "keep_access_time")?.filter(|v| !v.is_none()) {
+        open.keep_access_time = v.is_truthy()?;
+    }
     Ok(Opts {
         roots,
         budget_s,
         max_entries,
         threads,
+        open,
     })
 }
 
@@ -271,7 +289,11 @@ fn scan_slice<'py>(
             .and_then(|d| started.checked_add(d))
     };
     let ctx = Ctx {
-        root_state: opts.roots.iter().map(|_| sys::RootState::new()).collect(),
+        root_state: opts
+            .roots
+            .iter()
+            .map(|r| sys::RootState::new(r, opts.open))
+            .collect(),
         roots: opts.roots,
         deadline,
         max_entries: opts.max_entries,

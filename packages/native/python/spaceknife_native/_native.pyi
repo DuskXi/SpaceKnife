@@ -52,6 +52,8 @@ class SliceOpts(TypedDict, total=False):
     budget_s: float
     max_entries: int
     threads: int  # 0: min(logical CPUs, 16)
+    open_by_id: bool  # Windows, default True: open subdirectories found during the call by file id
+    keep_access_time: bool  # Windows, default True: listing a folder keeps its last access time
 
 def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOpts | Any) -> dict[str, Any]:
     """Same fields as spaceknife.scan.worker.SliceResult (numpy arrays, bytes, lists).

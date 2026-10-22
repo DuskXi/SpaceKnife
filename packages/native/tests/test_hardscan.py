@@ -566,6 +566,93 @@ def test_options_are_validated(tree: Path) -> None:
         native.scan_slice(tasks, {})
     with pytest.raises(TypeError):
         native.scan_slice([((0, 1, 0), b"bytes", 0)], {"roots": [{}]})
+    native.scan_slice(tasks, {"roots": [{}], "open_by_id": False, "keep_access_time": None})  # known keys
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="opens by file id and kept access times are Windows")
+def test_windows_open_options_change_nothing(tree: Path) -> None:
+    """Opening subdirectories by file id and keeping access times list the same tree."""
+    tasks: list[Task] = [((0, 1, 0), str(tree), 0)]
+    roots = (root_opts(tree),)
+    compare(tasks, roots, open_by_id=False, keep_access_time=False)
+    compare(tasks, roots, open_by_id=True, keep_access_time=True)
+    compare(tasks, roots, threads=1)  # one thread: every subdirectory found by the call is opened by id
+    opts = nopts(SliceOptions(roots=roots, **EVERYTHING))
+    plain = native.scan_slice(tasks, {**opts, "open_by_id": False, "keep_access_time": False})
+    fast = native.scan_slice(tasks, opts)
+    assert plain["paths"] == fast["paths"] and plain["name_blob"] == fast["name_blob"]
+    for key in plain["cols"]:
+        assert np.array_equal(plain["cols"][key], fast["cols"][key]), key
+    crossing = (root_opts(tree, cross_mounts=True),)  # opens by id are off: still the same
+    compare(tasks, crossing)
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="NTFS last access times")
+def test_windows_listing_keeps_folder_access_times(tree: Path) -> None:
+    """A scan does not update the last access time of the folders it lists (on NTFS with access
+    time updates on, it rewrote every folder's record: ~2 GB of writes for a system volume)."""
+    old = 978_307_200  # 2001-01-01
+    folders = [Path(d) for d, _dirs, _files in os.walk(tree)]
+    for d in reversed(folders):  # children first: setting a folder's times touches its parent
+        os.utime(d, (old, os.stat(d).st_mtime))
+    assert all(abs(os.stat(d).st_atime - old) <= 2 for d in folders)
+    res = native.scan_slice(
+        [((0, 1, 0), str(tree), 0)], nopts(SliceOptions(roots=(root_opts(tree),), **EVERYTHING))
+    )
+    assert len(res["paths"]) == len(folders)
+    changed = [d for d in folders if abs(os.stat(d).st_atime - old) > 2]
+    assert not changed, f"{len(changed)} folders got a new access time, e.g. {changed[0]}"
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="ReadDirectoryChangesW")
+def test_windows_listing_raises_no_change_notifications(tree: Path) -> None:
+    """Listing raises nothing the live monitor listens for (monitor.win.NOTIFY_FILTER): with access
+    time updates on, every listed folder used to come back as modified."""
+    from ctypes import wintypes
+
+    from spaceknife.monitor.win import NOTIFY_FILTER
+
+    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = wintypes.HANDLE
+    handle = k32.CreateFileW(
+        str(tree), 0x1, 0x7, None, 3, 0x02000000, None
+    )  # FILE_LIST_DIRECTORY, backup semantics
+    assert handle not in (None, wintypes.HANDLE(-1).value)
+    seen: list[str] = []
+
+    def watch() -> None:
+        buf = ctypes.create_string_buffer(65536)
+        got = wintypes.DWORD()
+        while k32.ReadDirectoryChangesW(
+            handle, buf, len(buf), True, NOTIFY_FILTER, ctypes.byref(got), None, None
+        ):
+            off = 0
+            while got.value:
+                nxt = int.from_bytes(buf.raw[off : off + 4], "little")
+                size = int.from_bytes(buf.raw[off + 8 : off + 12], "little")
+                seen.append(buf.raw[off + 12 : off + 12 + size].decode("utf-16-le"))
+                if not nxt:
+                    break
+                off += nxt
+            if "sentinel.txt" in seen:
+                return
+
+    import threading
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        native.scan_slice(
+            [((0, 1, 0), str(tree), 0)], nopts(SliceOptions(roots=(root_opts(tree),), **EVERYTHING))
+        )
+        (tree / "sentinel.txt").write_bytes(b"s")  # something the watcher must see: the end marker
+        watcher.join(10)
+    finally:
+        k32.CloseHandle(handle)
+    assert seen and seen[-1] == "sentinel.txt"
+    assert seen == ["sentinel.txt"] * len(seen), (
+        f"the scan raised {[s for s in seen if s != 'sentinel.txt'][:5]}"
+    )
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="getattrlistbulk is macOS")
