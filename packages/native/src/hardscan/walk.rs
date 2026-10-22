@@ -16,7 +16,8 @@
 //! Windows folders a name cannot reach (case-only siblings, case.rs) are not left to the frontier
 //! like the others once the budget is spent: as a task a path would open them by name. A folder
 //! opened by file id, and everything below it, is *pinned*: listed in this call, up to a cap, and
-//! past it an error, never a task.
+//! past it an error, never a task. Folders whose name another entry shares are listed in this call
+//! up to the same cap too; past it the ones a task can still check go to the frontier.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -64,19 +65,23 @@ enum Past {
 }
 
 /// `budget_positive`: the call has a time budget (at 0 the monitor lists one folder alone: what
-/// lies below it stays as it is). `cap_left`: pinned entries listed past the budget are still
-/// below the call's cap.
+/// lies below it stays as it is). `cap_left`: the entries listed past the budget (`Ctx::extra`)
+/// are still below the call's cap.
 fn past_budget(care: Care, budget_positive: bool, cap_left: bool) -> Past {
+    let listed = budget_positive && cap_left;
     match care {
         Care::Plain => Past::Defer,
-        // one listing each, no more than the entries already listed have
-        Care::Strict(_) if budget_positive => Past::List,
-        // a task could not tell these apart from the entry its name reaches
+        Care::Strict(_) | Care::Pinned if listed => Past::List,
+        // past the cap: a task could not tell these apart from the entry its name reaches
+        Care::Strict(marks) if marks & (mark::BADNAME | mark::DUP) != 0 && budget_positive => {
+            Past::Fail(msg::CAP)
+        }
+        // at budget 0 (the relisted folder alone): the same, in their own words
         Care::Strict(marks) if marks & mark::BADNAME != 0 => Past::Fail(msg::BADNAME),
         Care::Strict(marks) if marks & mark::DUP != 0 => Past::Fail(msg::DUP),
         // a task: on Btrfs its stored names are checked (win.rs check_task)
         Care::Strict(_) => Past::Defer,
-        Care::Pinned if budget_positive && cap_left => Past::List,
+        // no path leads there at all
         Care::Pinned => Past::Fail(msg::CAP),
     }
 }
@@ -152,10 +157,11 @@ pub struct Ctx {
     /// A time budget above 0 (at 0 a call lists its first folder only: the monitor's relists).
     pub budget_positive: bool,
     pub max_entries: usize,
-    /// Entries of pinned folders listed once the budget was spent, and how many may be: it bounds
-    /// the extra time and memory of a call (about two slices' worth) and the wait on cancel or pause.
-    pub pinned_cap: usize,
-    pub pinned_entries: AtomicUsize,
+    /// Entries listed once the budget was spent (of pinned folders and of folders whose name
+    /// another entry shares, the only ones listed then), and how many may be: it bounds the extra
+    /// time and memory of a call (about two slices' worth) and the wait on cancel or pause.
+    pub extra_cap: usize,
+    pub extra: AtomicUsize,
     pub listed: AtomicUsize,
     pub entries: AtomicUsize,
     pub arenas: Vec<Mutex<Arena>>,
@@ -245,7 +251,7 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
     let via = node.take_via(); // the parent's handle goes once its last subdirectory has started
     let stopped = ctx.should_stop();
     if stopped {
-        let cap_left = ctx.pinned_entries.load(Ordering::Relaxed) < ctx.pinned_cap;
+        let cap_left = ctx.extra.load(Ordering::Relaxed) < ctx.extra_cap;
         match past_budget(node.care, ctx.budget_positive, cap_left) {
             Past::List => {}
             Past::Defer => {
@@ -253,7 +259,7 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
                 return;
             }
             Past::Fail(why) => {
-                if node.care == Care::Pinned {
+                if why == msg::CAP {
                     sys::cap_hit();
                 }
                 let _ = node.state.set(State::Failed(why.to_owned()));
@@ -282,8 +288,8 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
             drop(arena);
             ctx.entries.fetch_add(count, Ordering::Relaxed);
             ctx.listed.fetch_add(1, Ordering::Relaxed);
-            if stopped && pinned {
-                ctx.pinned_entries.fetch_add(count, Ordering::Relaxed);
+            if stopped {
+                ctx.extra.fetch_add(count, Ordering::Relaxed); // strict or pinned: nothing else
             }
             let children: Box<[Child]> = subdirs
                 .into_iter()
@@ -507,20 +513,23 @@ mod tests {
     #[test]
     fn what_waits_once_the_budget_is_spent() {
         use mark::{BADNAME, DUP, TWIN};
-        // every cell of the table in docs/native.md 2.2 (budget above 0, then 0 as the monitor's)
-        for cap_left in [true, false] {
-            assert_eq!(past_budget(Care::Plain, true, cap_left), Past::Defer);
-            assert_eq!(past_budget(Care::Plain, false, cap_left), Past::Defer);
-            for marks in [TWIN, TWIN | DUP, BADNAME, TWIN | BADNAME] {
-                assert_eq!(past_budget(Care::Strict(marks), true, cap_left), Past::List);
+        // every cell of the table in docs/native.md 2.2: budget above 0 with entries left below
+        // the cap, above 0 past the cap, then 0 (the monitor's relist of one folder)
+        let cells: [(Care, [Past; 3]); 5] = [
+            (Care::Plain, [Past::Defer, Past::Defer, Past::Defer]),
+            (Care::Strict(TWIN), [Past::List, Past::Defer, Past::Defer]),
+            (Care::Strict(TWIN | DUP), [Past::List, Past::Fail(msg::CAP), Past::Fail(msg::DUP)]),
+            (Care::Strict(BADNAME), [Past::List, Past::Fail(msg::CAP), Past::Fail(msg::BADNAME)]),
+            (Care::Pinned, [Past::List, Past::Fail(msg::CAP), Past::Fail(msg::CAP)]),
+        ];
+        for (care, want) in cells {
+            assert_eq!(past_budget(care, true, true), want[0], "{care:?}");
+            assert_eq!(past_budget(care, true, false), want[1], "{care:?}");
+            for cap_left in [true, false] {
+                assert_eq!(past_budget(care, false, cap_left), want[2], "{care:?}");
             }
-            assert_eq!(past_budget(Care::Strict(TWIN), false, cap_left), Past::Defer);
-            assert_eq!(past_budget(Care::Strict(TWIN | DUP), false, cap_left), Past::Fail(msg::DUP));
-            assert_eq!(past_budget(Care::Strict(BADNAME), false, cap_left), Past::Fail(msg::BADNAME));
-            assert_eq!(past_budget(Care::Pinned, false, cap_left), Past::Fail(msg::CAP));
         }
-        assert_eq!(past_budget(Care::Pinned, true, true), Past::List);
-        assert_eq!(past_budget(Care::Pinned, true, false), Past::Fail(msg::CAP));
+        assert_eq!(past_budget(Care::Strict(TWIN | BADNAME), false, true), Past::Fail(msg::BADNAME));
     }
 
     #[test]

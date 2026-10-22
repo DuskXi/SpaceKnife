@@ -333,7 +333,8 @@ class OpsService:
             sizes={t.path: t.size for t in targets},
             alloc=alloc,
             scans=scans,
-            roots=self._scan_roots(scans),
+            # kept with each item, so it holds once its scan is closed too
+            roots={t.path: t.root for t in targets if t.root},
             phase="waiting" if params.mode == "delete" else "running",
         )
         self.runs[run.id] = run
@@ -347,22 +348,6 @@ class OpsService:
             total=run.total,
             delay_s=DELETE_DELAY_S if run.mode == "delete" else 0.0,
         )
-
-    def _scan_roots(self, scans: dict[str, str]) -> dict[str, str]:
-        """The scan root each path was found under: ops.trash refuses a path whose names below
-        it open an entry that differs only in case (a case-only sibling on WinBtrfs)."""
-        out: dict[str, str] = {}
-        for path, scan_id in scans.items():
-            handle = self.server.scans.scans.get(scan_id)
-            if handle is None:
-                continue
-            norm = os.path.normcase(path)
-            for r in handle.roots:
-                top = os.path.normcase(r.path)
-                if norm == top or norm.startswith(top if top.endswith(os.sep) else top + os.sep):
-                    out[path] = r.path
-                    break
-        return out
 
     def _emit(self, run: OpRun, force: bool = True) -> None:
         now = time.monotonic()

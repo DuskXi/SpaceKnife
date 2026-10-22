@@ -96,6 +96,7 @@ TEXT = Texts(
         "unsupported": "这个系统不支持移到回收站",
         "exists": "原位置已有同名项目，未覆盖",
         "ambiguous_name": "另一项与它只差大小写，按名字会打开另一项；没有改动任何东西",
+        "trailing_name": "它或上级文件夹的名字以点或空格结尾，Windows 按路径找到的不是它；没有改动任何东西",
         "bad_ref": "不是可还原的回收站条目",
         "gone_from_trash": "回收站中已没有这一项（可能已被清空）",
         "list_sep": "、",
@@ -157,33 +158,60 @@ def _final_name(path: str) -> str | None:
     return final_name(path)
 
 
-def reaches_another(path: str, root: str) -> bool:
-    """Whether ``path`` opens an entry other than the one its names say: a name below the scan
-    ``root`` that the file system stores in another case only (on WinBtrfs the name of ``a`` can
-    open its sibling ``A``; so can POSIX names on NTFS in a folder without the case-sensitive
-    flag). Other differences (a hard link's other name, a short name) do not count; nor does
-    anything when the stored name is unknown."""
-    from ..scan.worker import names_below
+def reaches_another(path: str, root: str, *, root_names: dict[str, str | None] | None = None) -> bool:
+    """Whether ``path`` may open an entry other than the one its names say. The file system's
+    stored name of what it opens is compared with the scan ``root``'s own followed by the path's
+    names below it (scan.worker.task_is); where they differ, a folder on the way that holds the
+    path's name and another name equal to it but for case decides: an open by name can take the
+    other one (on WinBtrfs the name of ``a`` opens its sibling ``A``, or follows ``A`` when that is
+    a symlink; POSIX names on NTFS in a folder without the case-sensitive flag do the same).
+    Without such a pair the path still names the item: renamed in case since the scan, another
+    name of a hard link, a redirect. A folder that cannot be listed to tell counts as holding a
+    pair; nothing counts when the stored name is unknown. ``root_names``: the roots' stored names,
+    kept across the calls of one run."""
+    from ..scan.worker import _long_path, names_below, task_is
 
     below = names_below(path, root)
     stored = _final_name(path) if below else None
     if not below or stored is None:
         return False
-    names = [n for n in stored.replace("/", "\\").split("\\") if n]
-    if len(names) < len(below):
+    cache = root_names if root_names is not None else {}
+    if root not in cache:
+        cache[root] = _final_name(root)
+    if task_is(stored, cache[root], below):
         return False
+    for i, name in enumerate(below):
+        try:
+            entries = os.listdir(_long_path(os.path.join(root, *below[:i])))
+        except OSError:
+            return True
+        if name in entries and any(e != name and e.upper() == name.upper() for e in entries):
+            return True
+    return False
+
+
+def win32_trims(path: str) -> bool:
+    """Whether Win32 rewrites a name of ``path`` (Windows): one ending in a dot or a space loses
+    it, so the path names another item (``odd.`` becomes ``odd``) or none. The scan lists such
+    items as they are; deleting them by such a path would touch the other one."""
+    if sys.platform != "win32":
+        return False
+    rest = os.path.splitdrive(path)[1]
     return any(
-        s != b and s.upper() == b.upper()
-        for s, b in zip(names[len(names) - len(below) :], below, strict=True)
+        n.endswith((".", " ")) for n in rest.replace("/", "\\").split("\\") if n not in ("", ".", "..")
     )
 
 
 def _precheck(paths: Sequence[str], check_locks: bool, roots: Mapping[str, str]) -> dict[int, OpResult]:
-    """Per index, the reason an item is skipped: gone, protected, reached by its path only as
-    another entry, held open (§2.5 re-check)."""
+    """Per index, the reason an item is skipped: reached by its path only as another entry, gone,
+    protected, held open (§2.5 re-check)."""
     skipped: dict[int, OpResult] = {}
     alive: list[int] = []
+    root_names: dict[str, str | None] = {}
     for i, p in enumerate(paths):
+        if win32_trims(p):  # before lexists: that would look at the other item
+            skipped[i] = _result(p, "ambiguous_name", TEXT["trailing_name"])
+            continue
         if not os.path.lexists(p):
             skipped[i] = _result(p, "missing")
             continue
@@ -192,7 +220,7 @@ def _precheck(paths: Sequence[str], check_locks: bool, roots: Mapping[str, str])
             skipped[i] = _result(p, "protected", reason)
             continue
         root = roots.get(p)
-        if root is not None and reaches_another(p, root):
+        if root is not None and reaches_another(p, root, root_names=root_names):
             skipped[i] = _result(p, "ambiguous_name")
             continue
         alive.append(i)
@@ -1150,8 +1178,10 @@ __all__ = [
     "move_to_trash",
     "parse_recycle_info",
     "parse_trashinfo",
+    "reaches_another",
     "rename_noreplace",
     "restore",
     "trash_available",
     "trash_status",
+    "win32_trims",
 ]

@@ -99,9 +99,10 @@ def relist(
 ) -> Relist:
     """Replace a listed folder's children by a fresh listing of it (same columns as a scan).
 
-    Entries are matched by name; a name that changed between file and folder counts as removed
-    and added. New folders are ``PENDING`` (to be scanned) unless they are mount points. New files
-    take ``HARDLINK_DUP`` from ``entries`` (the caller decides), kept ones keep theirs.
+    Entries are matched by name (a name held twice, in listing order); a name that changed between
+    file and folder counts as removed and added. New folders are ``PENDING`` (to be scanned) unless
+    they are mount points. New files take ``HARDLINK_DUP`` from ``entries`` (the caller decides),
+    kept ones keep theirs.
 
     Kept entries change ids. While a scan runs, its queue names ``PENDING`` folders by id: do not
     relist a folder with a ``PENDING`` child before the scan is done (see :func:`can_relist`).
@@ -116,12 +117,25 @@ def relist(
     ends = np.cumsum(lengths)
     names = [name_blob[int(e - n) : int(e)] for e, n in zip(ends.tolist(), lengths.tolist(), strict=True)]
     kind = np.asarray(entries["kind"]).astype(np.uint8)
-    by_name = {store.name_bytes(int(i)): int(i) for i in old_ids}
+    # each old entry matches one new entry: a name a folder holds twice (WinBtrfs shows invalid
+    # UTF-8 as U+FFFD) pairs in listing order, never two new rows with one old row's children
+    by_name: dict[bytes, int] = {}
+    again: dict[bytes, list[int]] = {}
+    for i in old_ids.tolist():
+        name = store.name_bytes(i)
+        if name in by_name:
+            again.setdefault(name, []).append(i)
+        else:
+            by_name[name] = i
     old_kind = c["kind"]
     kept_old = np.full(count, -1, dtype=np.int64)
     for k, name in enumerate(names):
-        o = by_name.get(name)
-        if o is not None and (old_kind[o] == Kind.DIR) == (kind[k] == Kind.DIR):
+        o = by_name.pop(name, None)
+        if o is None:
+            continue
+        if again.get(name):
+            by_name[name] = again[name].pop(0)
+        if (old_kind[o] == Kind.DIR) == (kind[k] == Kind.DIR):
             kept_old[k] = o
     kept = kept_old >= 0
     removed = np.setdiff1d(old_ids, kept_old[kept], assume_unique=True)

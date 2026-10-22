@@ -221,8 +221,8 @@ def native_slicer() -> Slicer | None:
 
 def verify_names(volume: VolumeInfo | None) -> bool:
     """Whether listings of this volume check folders by the names the file system stores
-    (``RootOptions.verify_names``): Windows on WinBtrfs, whose case-insensitive lookup of a name
-    takes the first entry that matches it in any case, and Linux trees have case-only siblings."""
+    (``RootOptions.verify_names``): Windows on WinBtrfs, where trees Linux made can hold names
+    that differ only in case, and an open by name takes the first entry that matches in any case."""
     return sys.platform == "win32" and volume is not None and volume.fs_type.lower() == "btrfs"
 
 

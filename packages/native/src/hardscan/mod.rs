@@ -13,9 +13,9 @@
 //! | `relative_open` | True | Windows: a found subdirectory is opened by name relative to its parent's handle, checked against the listed file id |
 //!
 //! Test seams, not part of the interface: `_fold_strict` and `_extd_self_ids` (Windows: behave as
-//! WinBtrfs does, win.rs RootState), `_pinned_cap` (entries below folders opened by file id listed
-//! past the budget; default max(2 × max_entries, 10,000)). `ROOT_KEYS` lists the root keys this
-//! build knows.
+//! WinBtrfs does, win.rs RootState), `_pinned_cap` (entries listed past the budget: below folders
+//! opened by file id, and of folders whose name another entry shares; default max(2 × max_entries,
+//! 10,000)). `ROOT_KEYS` lists the root keys this build knows.
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
 //! (`SliceResult(**scan_slice(tasks, opts))`). Differences from the worker, all deliberate:
@@ -350,10 +350,10 @@ fn scan_slice<'py>(
         deadline,
         budget_positive,
         max_entries: opts.max_entries,
-        pinned_cap: opts
+        extra_cap: opts
             .pinned_cap
             .unwrap_or_else(|| opts.max_entries.saturating_mul(2).max(10_000)),
-        pinned_entries: AtomicUsize::new(0),
+        extra: AtomicUsize::new(0),
         listed: AtomicUsize::new(0),
         entries: AtomicUsize::new(0),
         arenas: (0..pool.current_num_threads().max(1))

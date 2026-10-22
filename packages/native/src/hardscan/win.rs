@@ -40,10 +40,11 @@ use windows_sys::Wdk::Storage::FileSystem::{
     FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
     FILE_FS_ATTRIBUTE_INFORMATION, FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_ID_INFORMATION,
     FILE_INFORMATION_CLASS, FILE_INTERNAL_INFORMATION, FILE_NAME_INFORMATION, FILE_OPEN_BY_FILE_ID,
-    FILE_OPEN_FOR_BACKUP_INTENT, FILE_SYNCHRONOUS_IO_NONALERT, FileBasicInformation,
-    FileBothDirectoryInformation, FileFsDeviceInformation, FileIdBothDirectoryInformation,
-    FileIdExtdDirectoryInformation, FileIdInformation, FileFsAttributeInformation,
-    FileInternalInformation, FileNameInformation, NtOpenFile, NtQueryDirectoryFile,
+    FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
+    FileBasicInformation, FileBothDirectoryInformation, FileFsDeviceInformation,
+    FileIdBothDirectoryInformation, FileIdExtdDirectoryInformation, FileIdInformation,
+    FileFsAttributeInformation, FileInternalInformation, FileNameInformation,
+    FileNormalizedNameInformation, NtOpenFile, NtQueryDirectoryFile,
     NtQueryInformationFile, NtQueryVolumeInformationFile, NtSetInformationFile,
 };
 use windows_sys::Wdk::System::SystemServices::{
@@ -140,6 +141,8 @@ pub struct RootState {
     /// Tasks must be the folders their paths name, by the stored names below the root (Btrfs,
     /// where names fold onto case-sensitive storage, or the root's `verify_names`).
     verify_names: AtomicBool,
+    /// The scan root's own stored name, read once per call for `check_task` (None: unreadable).
+    root_name: OnceLock<Option<Box<[u16]>>>,
     /// Test seams (private options; docs/native.md 2.2): strict subfolders are opened by their
     /// upcased name (in a case-sensitive NTFS folder that reaches the upper twin, as WinBtrfs's
     /// lookup does), and FileIdExtd listings give every entry the listed folder's own id (as
@@ -164,6 +167,7 @@ impl RootState {
             expansion: AtomicU32::new(UNKNOWN),
             fs: AtomicU8::new(fs::UNKNOWN),
             verify_names: AtomicBool::new(o.verify_names),
+            root_name: OnceLock::new(),
             fold_strict: o.fold_strict,
             extd_self_ids: o.extd_self_ids,
         }
@@ -176,7 +180,9 @@ impl RootState {
 
 /// How directories were opened, process-wide (`_open_stats`: tests and measurements).
 pub struct OpenStats {
-    /// Opened by name relative to the parent, and the handle had the listed file id.
+    /// Opened by name relative to the parent, and the handle had the listed file id (subfolders no
+    /// other entry shares its name with, not below a folder opened by file id: the others count
+    /// under `strict` and `pinned`).
     pub relative: AtomicU64,
     /// Opened by full path (tasks, and everything a relative open did not settle).
     pub by_path: AtomicU64,
@@ -184,7 +190,8 @@ pub struct OpenStats {
     pub relative_failed: AtomicU64,
     /// A relative open reached a folder with another file id than the listing gave.
     pub id_mismatch: AtomicU64,
-    /// The handle's file id could not be read: the root went back to opens by path.
+    /// The handle of a relative open (as for `relative`) had no file id to read: the root went back
+    /// to opens by path.
     pub id_unknown: AtomicU64,
     /// FILE_WRITE_ATTRIBUTES was refused: that folder's access time was updated by its listing.
     pub keep_refused: AtomicU64,
@@ -201,10 +208,12 @@ pub struct OpenStats {
     pub strict_by_id: AtomicU64,
     pub strict_failed: AtomicU64,
     /// A plain relative open reached a folder with another file id and another stored name (a
-    /// twin the upcase did not catch: a volume with its own upcase table), opened by file id then.
+    /// twin the upcase did not catch, on a volume with its own upcase table; a name that is another
+    /// folder's 8.3 short name), opened by file id then.
     pub mismatch_renamed: AtomicU64,
-    /// Folders listed through a handle opened by file id or below one, and those of them left
-    /// unread because the call's cap on such entries was reached (`_pinned_cap`).
+    /// Folders listed through a handle opened by file id or below one; and folders left unread
+    /// because the call's cap on what is listed past the budget was reached (`_pinned_cap`: such
+    /// folders, and folders whose name another entry shares).
     pub pinned: AtomicU64,
     pub pinned_cap_hit: AtomicU64,
     /// Tasks whose folder is stored under other names than their path's (a listing error), and
@@ -276,7 +285,7 @@ pub fn open_stats(reset: bool) -> Vec<(&'static str, u64)> {
     ]
 }
 
-/// walk.rs: a folder below one opened by file id was left unread (the call's cap).
+/// walk.rs: a folder no task's path could stand for was left unread (the call's cap).
 pub fn cap_hit() {
     bump(&STATS.pinned_cap_hit);
 }
@@ -536,6 +545,11 @@ unsafe impl Sync for Handle {}
 /// Opens directory `path` by its full path (the caller counts the handle it lists through:
 /// `count_keep`, `STATS.by_path`). The first open of a root learns its file system (`detect`).
 fn open_dir(path: &[u16], state: &RootState) -> Result<(Handle, Keep), String> {
+    open_path(path, 0, state)
+}
+
+/// `open_dir` with more create options (FILE_OPEN_REPARSE_POINT).
+fn open_path(path: &[u16], options: u32, state: &RootState) -> Result<(Handle, Keep), String> {
     SCRATCH.with_borrow_mut(|nt| {
         if !nt_form(path, nt) {
             let full = full_path(path).ok_or_else(|| win_message(unsafe { GetLastError() }))?;
@@ -559,7 +573,7 @@ fn open_dir(path: &[u16], state: &RootState) -> Result<(Handle, Keep), String> {
             SecurityDescriptor: ptr::null(),
             SecurityQualityOfService: ptr::null(),
         };
-        let (h, keep) = open_with(&oa, 0, state).map_err(open_error)?;
+        let (h, keep) = open_with(&oa, options, state).map_err(open_error)?;
         if state.fs.load(Ordering::Acquire) == fs::UNKNOWN {
             detect(&h, nt.len(), state);
         }
@@ -686,7 +700,7 @@ enum Keep {
 /// FILE_WRITE_ATTRIBUTES, telling the handle to keep the access time; when that is refused
 /// (denied, read-only media, a sharing mode) the plain open follows. The caller counts the handle
 /// it uses (`count_keep`), so a handle opened and given up (a relative open that did not pass its
-/// check) does not count. `options`: FILE_OPEN_BY_FILE_ID, or 0.
+/// check) does not count. `options`: FILE_OPEN_BY_FILE_ID, FILE_OPEN_REPARSE_POINT, or 0.
 fn open_with(oa: &OBJECT_ATTRIBUTES, options: u32, state: &RootState) -> Result<(Handle, Keep), NTSTATUS> {
     let open = |access: u32| -> Result<Handle, NTSTATUS> {
         let mut h: HANDLE = ptr::null_mut();
@@ -748,7 +762,10 @@ struct Opened {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum By {
     Path,
+    /// By name relative to the parent, checked by the listed file id (`open_relative`).
     Relative,
+    /// By name relative to the parent under the rules of case.rs (`open_checked`).
+    Named,
     Id,
 }
 
@@ -769,12 +786,12 @@ fn count_open(state: &RootState, o: &Opened) {
     match o.by {
         By::Path => bump(&STATS.by_path),
         By::Relative => bump(&STATS.relative),
-        By::Id => {}
+        By::Named | By::Id => {} // `strict`, `pinned`
     }
 }
 
 /// Opens subdirectory `path`, found in the listing of the directory `via` holds open. A plain one
-/// relative to it when that can be checked (`open_relative`), else by full path like a task; one
+/// relative to it when that can be checked (`open_plain`), else by full path like a task; one
 /// whose name another entry shares, or that lies below a folder opened by file id, only through a
 /// handle proven to be the listed entry (`open_checked`, rules in case.rs).
 fn open_child(path: &[u16], via: &Via, state: &RootState) -> Result<Opened, String> {
@@ -794,89 +811,77 @@ fn open_child(path: &[u16], via: &Via, state: &RootState) -> Result<Opened, Stri
     res
 }
 
+/// A plain subfolder: relative to its parent when relative opens are on and its path is one the
+/// open by path would accept, then as `case::after_open` says for `Class::Plain`; otherwise, and
+/// for whatever that leaves, by full path (which also reports any error).
 fn open_plain(path: &[u16], via: &Via, state: &RootState) -> Result<Opened, String> {
-    if !state.relative.load(Ordering::Relaxed) {
-        let (h, keep) = open_dir(path, state)?;
-        return Ok(Opened::new(h, keep, By::Path));
-    }
-    match open_relative(path, via, state) {
-        Ok((h, keep)) => Ok(Opened {
-            relist: true,
-            ..Opened::new(h, keep, By::Relative)
-        }),
-        Err(Declined::Renamed) => {
-            bump(&STATS.mismatch_renamed);
-            open_by_id(via, state, None)
-        }
-        Err(why) => {
-            let (h, keep) = open_dir(path, state)?;
-            if why == Declined::Failed {
-                bump(&STATS.path_after_failed);
+    let mut failed = false;
+    if state.relative.load(Ordering::Relaxed) && within_limit(path, via, state) {
+        let (outcome, handle) = open_relative(path, via, state);
+        match (case::after_open(Class::Plain, outcome, via.hint.mark, via.hint.trusted()), handle) {
+            (Then::List, Some((h, keep))) => {
+                return Ok(Opened {
+                    relist: true,
+                    ..Opened::new(h, keep, By::Relative)
+                });
             }
-            Ok(Opened::new(h, keep, By::Path))
+            (Then::ById, _) => {
+                bump(&STATS.mismatch_renamed);
+                return open_by_id(via, state, None);
+            }
+            (then, _) => {
+                if matches!(outcome, Outcome::Other { .. }) && then == Then::ByPath {
+                    // now and then a folder replaced meanwhile; again and again: ids that do not belong
+                    let n = state.mismatched.fetch_add(1, Ordering::Relaxed) + 1;
+                    if n > 64 && n > state.matched.load(Ordering::Relaxed) {
+                        distrust_ids(state, if via.hint.bits == 128 { 0 } else { 1 });
+                    }
+                }
+                failed = outcome == Outcome::Failed;
+            }
         }
     }
-}
-
-/// Why `open_relative` left a folder to the open by path, or to the open by file id.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Declined {
-    /// Not a case for it (path forms and lengths the open by path decides on).
-    Ineligible,
-    Failed,
-    Mismatch,
-    /// Another file id under another stored name: the name reached another entry.
-    Renamed,
-    Unknown,
-}
-
-/// The open of a plain subdirectory by its name relative to its parent's handle, only when it is
-/// the folder the parent's listing named: the handle must carry the file id that listing gave the
-/// name. Otherwise the open by full path takes over (which also reports any error):
-/// - its NT path is one the open by path would not accept (too long, or a form Win32 must
-///   normalise first): a relative open must not reach further than the open by path does;
-/// - the open fails (gone, denied): counted; failures outnumbering matches end relative opens
-///   on this root;
-/// - the handle has another file id under the listed name (the folder was replaced meanwhile, or
-///   the listing's ids do not belong to its entries): counted; mismatches outnumbering matches
-///   make the root distrust that information class's ids (`distrust_ids`). Under another stored
-///   name the name reached another entry (a case twin the upcase did not catch, on a volume with
-///   its own upcase table): that folder is opened by its file id instead (`Renamed`);
-/// - the file id cannot be read: such opens cannot be checked, so this root stops making them.
-fn open_relative(path: &[u16], via: &Via, state: &RootState) -> Result<(Handle, Keep), Declined> {
-    if !within_limit(path, via, state) {
-        return Err(Declined::Ineligible);
+    let (h, keep) = open_dir(path, state)?;
+    if failed {
+        bump(&STATS.path_after_failed);
     }
-    let Ok((h, keep)) = open_named(path, via, false, state) else {
+    Ok(Opened::new(h, keep, By::Path))
+}
+
+/// The open of a plain subdirectory by its name relative to its parent's handle (the NT form of
+/// openat), and what it found; the handle only when it is the folder the parent's listing named,
+/// i.e. carries the file id that listing gave the name. Counted on the root:
+/// - the open fails (gone, denied): failures outnumbering matches end relative opens here;
+/// - the handle has another file id (`id_mismatch`): with it, whether its stored name is the
+///   listed one. Under the listed name the folder was replaced meanwhile, or the listing's ids do
+///   not belong to its entries (counted by `open_plain`, which may distrust that class's ids);
+///   under another name the name reached another entry (a case twin the upcase did not catch, on a
+///   volume with its own upcase table; an 8.3 short name), which goes by file id instead;
+/// - the file id cannot be read: such opens cannot be checked, so this root stops making them.
+fn open_relative(path: &[u16], via: &Via, state: &RootState) -> (Outcome, Option<(Handle, Keep)>) {
+    let Ok((h, keep)) = open_named(path, via, false, 0, state) else {
         bump(&STATS.relative_failed);
         // now and then a folder deleted meanwhile; again and again: relative opens do not work here
         let n = state.failed.fetch_add(1, Ordering::Relaxed) + 1;
         if n > 64 && n > state.matched.load(Ordering::Relaxed) {
             state.relative.store(false, Ordering::Relaxed);
         }
-        return Err(Declined::Failed);
+        return (Outcome::Failed, None);
     };
     match file_id(&h, via.hint.bits) {
         Some(id) if id == via.hint.id => {
             state.matched.fetch_add(1, Ordering::Relaxed);
-            Ok((h, keep))
+            (Outcome::Same, Some((h, keep)))
         }
         Some(_) => {
             bump(&STATS.id_mismatch);
-            if stored_name_is(&h, listed_name(path, via)) == Some(false) {
-                return Err(Declined::Renamed);
-            }
-            // now and then a folder replaced meanwhile; again and again: ids that do not belong
-            let n = state.mismatched.fetch_add(1, Ordering::Relaxed) + 1;
-            if n > 64 && n > state.matched.load(Ordering::Relaxed) {
-                distrust_ids(state, if via.hint.bits == 128 { 0 } else { 1 });
-            }
-            Err(Declined::Mismatch)
+            let named = stored_name_is(&h, listed_name(path, via));
+            (Outcome::Other { named }, None)
         }
         None => {
             bump(&STATS.id_unknown);
             state.relative.store(false, Ordering::Relaxed);
-            Err(Declined::Unknown)
+            (Outcome::Unreadable, None)
         }
     }
 }
@@ -884,13 +889,21 @@ fn open_relative(path: &[u16], via: &Via, state: &RootState) -> Result<(Handle, 
 /// The open of a strict subfolder (TWIN, DUP, BADNAME), or of one below a folder opened by file id
 /// (pinned), by the rules of case.rs. A strict one is opened by name as a plain one is (relative
 /// where relative opens are on, else by full path), a pinned one only relative to its parent: no
-/// path leads there. The handle is listed when it is proven to be the listed entry (its file id is
-/// the listed one; without an id to check, its stored name is the listed name); otherwise the
-/// folder is opened by its file id, or it is a listing error. None of this counts toward the
-/// root's matches and mismatches: twins are expected not to match.
+/// path leads there. Unless the listed entry is itself a reparse point that is descended, the name
+/// is opened as what it reaches, never followed: a twin that is a symlink or a junction is then
+/// another entry, not the folder it points to (which can have the listed name). The handle is
+/// listed when it is proven to be the listed entry (its file id is the listed one; without an id
+/// to check, its stored name is the listed name); otherwise the folder is opened by its file id,
+/// or it is a listing error. None of this counts toward the root's matches and mismatches: twins
+/// are expected not to match.
 fn open_checked(path: &[u16], via: &Via, class: Class, state: &RootState) -> Result<Opened, String> {
     let hint = &via.hint;
     let fold = state.fold_strict && class == Class::Strict;
+    let own = if hint.mark & mark::REPARSE != 0 {
+        0
+    } else {
+        FILE_OPEN_REPARSE_POINT
+    };
     let opened = match case::first_open(hint.mark, hint.trusted(), via.pinned) {
         First::Fail(why) => return Err(why.to_owned()),
         First::ById => return open_by_id(via, state, None),
@@ -898,24 +911,24 @@ fn open_checked(path: &[u16], via: &Via, class: Class, state: &RootState) -> Res
         First::Relative if !within_limit(path, via, state) => {
             return Err(win_message(ERROR_FILENAME_EXCED_RANGE));
         }
-        First::Relative => open_named(path, via, fold, state)
-            .map(|(h, keep)| Opened::new(h, keep, By::Relative))
+        First::Relative => open_named(path, via, fold, own, state)
+            .map(|(h, keep)| Opened::new(h, keep, By::Named))
             .map_err(open_error),
         First::Name if state.relative.load(Ordering::Relaxed) && within_limit(path, via, state) => {
-            open_named(path, via, fold, state)
-                .map(|(h, keep)| Opened::new(h, keep, By::Relative))
+            open_named(path, via, fold, own, state)
+                .map(|(h, keep)| Opened::new(h, keep, By::Named))
                 .map_err(open_error)
         }
         First::Name | First::Path => {
             let target = if fold { folded(path, via) } else { path.to_vec() };
-            open_dir(&target, state).map(|(h, keep)| Opened::new(h, keep, By::Path))
+            open_path(&target, own, state).map(|(h, keep)| Opened::new(h, keep, By::Path))
         }
     };
     let outcome = match &opened {
         Ok(o) => outcome_of(&o.h, path, via),
         Err(_) => Outcome::Failed,
     };
-    match case::after_open(class, outcome, hint.trusted()) {
+    match case::after_open(class, outcome, hint.mark, hint.trusted()) {
         Then::List | Then::Fail | Then::ByPath => opened,
         Then::StoredName => {
             let o = opened?;
@@ -936,14 +949,9 @@ fn outcome_of(h: &Handle, path: &[u16], via: &Via) -> Outcome {
     match file_id(h, hint.bits) {
         Some(id) if id == hint.id => Outcome::Same,
         Some(_) => Outcome::Other {
-            // an exact duplicate's name proves nothing, nor does a stored name that cannot be read
-            renamed: hint.mark & mark::DUP != 0
-                || stored_name_is(h, listed_name(path, via)) != Some(true),
+            named: stored_name_is(h, listed_name(path, via)),
         },
-        None => {
-            bump(&STATS.id_unknown);
-            Outcome::Unreadable
-        }
+        None => Outcome::Unreadable,
     }
 }
 
@@ -984,8 +992,14 @@ fn within_limit(path: &[u16], via: &Via, state: &RootState) -> bool {
 }
 
 /// NtOpenFile of a found subfolder by its one name relative to its parent's handle (the NT form of
-/// openat); with `fold`, by its upcased name (test seam).
-fn open_named(path: &[u16], via: &Via, fold: bool, state: &RootState) -> Result<(Handle, Keep), NTSTATUS> {
+/// openat); with `fold`, by its upcased name (test seam). `options` as for `open_with`.
+fn open_named(
+    path: &[u16],
+    via: &Via,
+    fold: bool,
+    options: u32,
+    state: &RootState,
+) -> Result<(Handle, Keep), NTSTATUS> {
     let listed = listed_name(path, via);
     let upcased: Vec<u16>;
     let name = if fold {
@@ -1008,7 +1022,7 @@ fn open_named(path: &[u16], via: &Via, fold: bool, state: &RootState) -> Result<
         SecurityDescriptor: ptr::null(),
         SecurityQualityOfService: ptr::null(),
     };
-    open_with(&oa, 0, state)
+    open_with(&oa, options, state)
 }
 
 /// Opens a found subfolder by the file id its parent's listing gave it, relative to the parent's
@@ -1049,27 +1063,29 @@ fn open_by_id(via: &Via, state: &RootState, name_error: Option<String>) -> Resul
     Ok(Opened::new(h, keep, By::Id))
 }
 
-/// Calls `f` with the stored name of what `h` refers to (FileNameInformation: its path below the
-/// volume's root as the file system stores it, e.g. `\usr\share\terminfo\a`), or None when it
-/// cannot be read.
+/// Calls `f` with the stored name of what `h` refers to (its path below the volume's root as the
+/// file system stores it, e.g. `\usr\share\terminfo\a`), or None when it cannot be read. It is the
+/// normalised name (FileNormalizedNameInformation: NTFS gives long names for 8.3 short names the
+/// open went through; GetFinalPathNameByHandleW's default) where the file system has it, else
+/// FileNameInformation.
 fn with_stored_name<R>(h: &Handle, f: impl FnOnce(Option<&[u16]>) -> R) -> R {
     NAME.with_borrow_mut(|buf| {
         if buf.is_empty() {
             // exactly 64 KiB, room for any name of an NT path: WinBtrfs refuses a buffer of a few
-            // bytes more (STATUS_BUFFER_OVERFLOW for 65,540 bytes, measured 2026-10-22)
+            // bytes more (STATUS_BUFFER_OVERFLOW for 65,540 bytes, both classes, measured 2026-10-22)
             buf.resize(NAME_BYTES / 8, 0);
         }
-        let mut iosb = IO_STATUS_BLOCK::default();
-        // SAFETY: buf is writable for its whole length.
-        let status = unsafe {
-            NtQueryInformationFile(
-                h.0,
-                &mut iosb,
-                buf.as_mut_ptr().cast(),
-                (buf.len() * 8) as u32,
-                FileNameInformation,
-            )
-        };
+        let mut status = STATUS_INVALID_INFO_CLASS;
+        for class in [FileNormalizedNameInformation, FileNameInformation] {
+            let mut iosb = IO_STATUS_BLOCK::default();
+            // SAFETY: buf is writable for its whole length.
+            status = unsafe {
+                NtQueryInformationFile(h.0, &mut iosb, buf.as_mut_ptr().cast(), (buf.len() * 8) as u32, class)
+            };
+            if !unsupported(status) {
+                break;
+            }
+        }
         if status < 0 {
             return f(None);
         }
@@ -1091,10 +1107,11 @@ fn stored_name_is(h: &Handle, name: &[u16]) -> Option<bool> {
 }
 
 /// A task (a path from Python: the frontier, monitor relists, rescans) on a root whose names fold
-/// onto case-sensitive storage must be the folder its path names: the stored names below the scan
-/// root must be the task's, exactly. A case twin that lost the open, or anything below one, is a
-/// listing error then, never the winner's listing under its name. The root part is not compared:
-/// roots typed in another case, SUBST drives and mount folders work.
+/// onto case-sensitive storage must be the folder its path names: its stored name must be the scan
+/// root's own followed by the task's names below the root, exactly (`case::task_is`). A case twin
+/// that lost the open, anything below one, or a folder a twin that is a symlink led to, is a
+/// listing error then, never another folder's listing under its name. Roots typed in another
+/// case, SUBST drives and mount folders work: the root part is the root's own stored name.
 fn check_task(h: &Handle, path: &[u16], root: &RootOpts, state: &RootState) -> Result<(), String> {
     if !state.btrfs() && !state.verify_names.load(Ordering::Relaxed) {
         return Ok(());
@@ -1102,9 +1119,13 @@ fn check_task(h: &Handle, path: &[u16], root: &RootOpts, state: &RootState) -> R
     let Some(below) = case::below_root(path, &root.path) else {
         return Ok(()); // the root itself, or no root path to compare below
     };
-    with_stored_name(h, |stored| match stored.and_then(|s| case::tail_is(s, &below)) {
-        Some(true) => Ok(()),
-        Some(false) => {
+    let root_name = state.root_name.get_or_init(|| {
+        let (top, _) = open_dir(&root.path, state).ok()?;
+        with_stored_name(&top, |s| s.map(Box::from))
+    });
+    with_stored_name(h, |stored| match stored {
+        Some(s) if case::task_is(s, root_name.as_deref(), &below) => Ok(()),
+        Some(_) => {
             bump(&STATS.task_name_mismatch);
             Err(msg::CASE.to_owned())
         }
@@ -1504,7 +1525,7 @@ fn list_into(
     // test seam: FileIdExtd ids as WinBtrfs gives them, the listed folder's own
     let own_id = if state.extd_self_ids { file_id(h, 128) } else { None };
     CASE.with_borrow_mut(Vec::clear);
-    BUF.with_borrow_mut(|buf| {
+    let listed = BUF.with_borrow_mut(|buf| {
         let mut first = true;
         loop {
             let mut iosb = IO_STATUS_BLOCK::default();
@@ -1569,10 +1590,11 @@ fn list_into(
             }
         }
         Ok(())
-    })?;
+    });
     let subs = &mut subdirs[first_sub..];
-    // about 9 ns a name, 0.05% of a warm scan of a system drive (docs/native.md 2.2)
-    if !subs.is_empty() && arena.len() - base >= 2 {
+    // every name is hashed as it is read; the sort and the marks only with a subfolder among two
+    // entries or more (docs/native.md 2.2)
+    if listed.is_ok() && !subs.is_empty() && arena.len() - base >= 2 {
         CASE.with_borrow_mut(|keys| {
             MARKS.with_borrow_mut(|marks| {
                 case::mark_twins(keys, &arena.names, marks);
@@ -1584,6 +1606,10 @@ fn list_into(
             })
         });
     }
+    // pool threads live on: a folder of a million entries must not leave them 32 MB each
+    CASE.with_borrow_mut(trim);
+    MARKS.with_borrow_mut(trim);
+    listed?;
     let marked = subs.iter().any(|s| s.2.mark & mark::STRICT != 0);
     if (state.relative.load(Ordering::Relaxed) || pinned || marked) && shares_ids(subs) {
         distrust_ids(state, level);
@@ -1595,6 +1621,17 @@ fn list_into(
     }
     Ok(())
 }
+
+/// Empties a per-thread buffer, and gives its memory back once it held a big listing's worth.
+fn trim<T>(v: &mut Vec<T>) {
+    v.clear();
+    if v.capacity() > TRIM_ABOVE {
+        *v = Vec::new();
+    }
+}
+
+/// Entries a per-thread buffer of `list_into` keeps room for between listings.
+const TRIM_ABOVE: usize = 1 << 16;
 
 /// Two subdirectories of one listing with the same file id: the information class reports ids
 /// that do not belong to the entries (directories have no hard links). WinBtrfs gives every entry
@@ -1790,13 +1827,12 @@ mod tests {
                 hint: hint(id, bits, "a", 0),
                 pinned: false,
             };
-            assert!(open_relative(&t.child("a"), &via(a), &state).is_ok());
+            let (outcome, h) = open_relative(&t.child("a"), &via(a), &state);
+            assert!(outcome == Outcome::Same && h.is_some());
             let before = STATS.id_mismatch.load(Ordering::Relaxed);
             // the name "a" leads to a, but the listing said b: not that folder, so not opened
-            assert_eq!(
-                open_relative(&t.child("a"), &via(b), &state).err(),
-                Some(Declined::Mismatch)
-            );
+            let (outcome, h) = open_relative(&t.child("a"), &via(b), &state);
+            assert!(outcome == Outcome::Other { named: Some(true) } && h.is_none());
             assert!(STATS.id_mismatch.load(Ordering::Relaxed) > before);
             assert!(state.relative.load(Ordering::Relaxed)); // one mismatch does not end them
             // under the listed name: a folder replaced meanwhile, as before by its full path
@@ -1892,7 +1928,7 @@ mod tests {
             hint: hint(0, 0, "MIXED CASE FOLDER LONG", 0),
             pinned: true,
         };
-        let (h, _) = open_named(&t.child("MIXED CASE FOLDER LONG"), &via, false, &state).unwrap();
+        let (h, _) = open_named(&t.child("MIXED CASE FOLDER LONG"), &via, false, 0, &state).unwrap();
         assert_eq!(stored_name_is(&h, &w("Mixed Case Folder Long")), Some(true));
         assert_eq!(stored_name_is(&h, &w("MIXED CASE FOLDER LONG")), Some(false));
         let (h, _) = open_dir(&t.child("mixed case folder long"), &state).unwrap();
@@ -1912,6 +1948,57 @@ mod tests {
         let exact = t.child("Mixed Case Folder Long");
         assert_eq!(check_task(&h, &exact, &root, &checked), Ok(()));
         assert_eq!(check_task(&h, &upper, &root, &state), Ok(())); // not checked there
+    }
+
+    /// The 8.3 short name of `path`, if the volume made one.
+    fn short_name(path: &std::path::Path) -> Option<String> {
+        use windows_sys::Win32::Storage::FileSystem::GetShortPathNameW;
+        let long: Vec<u16> = w(path.to_str().unwrap()).into_iter().chain([0]).collect();
+        let mut buf = vec![0u16; 1024];
+        // SAFETY: `long` is NUL-terminated, `buf` writable for its length.
+        let n = unsafe { GetShortPathNameW(long.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        let full = String::from_utf16(&buf[..n.min(buf.len())]).ok()?;
+        let short = full.rsplit('\\').next()?.to_owned();
+        (n > 0 && short != path.file_name()?.to_str()?).then_some(short)
+    }
+
+    #[test]
+    fn a_short_name_that_reaches_another_folder_is_opened_by_the_listed_id() {
+        // An entry named like another folder's 8.3 short name (ntfs-3g writes such names): the
+        // open of that name can reach the other folder through its short name, and its
+        // FileNameInformation is then the short name, i.e. the listed name. Its normalised name is
+        // the long one: another entry, so the listed folder goes by its file id.
+        let t = Temp::new("short", &["Mixed Case Folder Long", "y"], &[]);
+        let Some(short) = short_name(&t.0.join("Mixed Case Folder Long")) else {
+            eprintln!("no 8.3 names on this volume");
+            return;
+        };
+        let state = RootState::new(&opts(true));
+        let parent = Arc::new(open_dir(&t.path(), &state).unwrap().0);
+        let (h, _) = open_dir(&t.child(&short), &state).unwrap();
+        assert_eq!(stored_name_is(&h, &w("Mixed Case Folder Long")), Some(true));
+        for bits in [128u8, 64] {
+            let y = id_of_file(&t.0.join("y"), bits);
+            let via = Via {
+                parent: parent.clone(),
+                hint: hint(y, bits, &short, 0),
+                pinned: false,
+            };
+            let o = open_child(&t.child(&short), &via, &state).unwrap();
+            assert_eq!((o.by, file_id(&o.h, bits)), (By::Id, Some(y)), "{bits}");
+        }
+    }
+
+    #[test]
+    fn per_thread_buffers_give_big_listings_back() {
+        let mut v: Vec<u64> = Vec::with_capacity(TRIM_ABOVE + 1);
+        v.push(1);
+        trim(&mut v);
+        assert_eq!((v.len(), v.capacity()), (0, 0));
+        let mut v: Vec<u64> = Vec::with_capacity(100);
+        v.push(1);
+        trim(&mut v);
+        assert!(v.is_empty() && v.capacity() >= 100);
     }
 
     #[test]

@@ -19,7 +19,9 @@ import posixpath
 import stat
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -92,7 +94,7 @@ CASE_ERROR = (
 )
 DUP_ERROR = "cannot be opened by its name: another entry in this folder has the same name as Windows shows it"
 BADNAME_ERROR = "cannot be opened by its name: it contains a backslash or slash"
-CAP_ERROR = "not read: too many entries below folders that can only be opened by file id in one pass"
+CAP_ERROR = "not read: too many entries in one pass in folders that can only be opened by file id"
 INCOMPLETE_ERROR = "listed incompletely when opened by its file id"
 
 
@@ -240,10 +242,11 @@ _final_name_fns: Any = None
 
 
 def final_name(path: str) -> str | None:
-    """The stored name of what ``path`` opens (Windows: FileNameInfo, its path below the volume's
-    root as the file system stores it, e.g. ``\\usr\\share\\terminfo\\A``), or None when it cannot
-    be read, and on other systems. Opened with no access rights and without following a reparse
-    point, as the open by name the listing does would."""
+    """The stored name of what ``path`` opens (Windows: its path below the volume's root as the
+    file system stores it, e.g. ``\\usr\\share\\terminfo\\A``; normalised, FileNormalizedNameInfo,
+    where the file system has it: NTFS gives long names for 8.3 short names), or None when it
+    cannot be read, and on other systems. Opened with no access rights and without following a
+    reparse point at the end, as the open by name the listing does would."""
     if not IS_WINDOWS:
         return None
     global _final_name_fns
@@ -271,7 +274,8 @@ def final_name(path: str) -> str | None:
         _final_name_fns = (create, info, close, ctypes)
     create, info, close, ct = _final_name_fns
     share_all, open_existing = 7, 3
-    backup_semantics, open_reparse_point, file_name_info = 0x02000000, 0x00200000, 2
+    backup_semantics, open_reparse_point = 0x02000000, 0x00200000
+    file_normalized_name_info, file_name_info = 24, 2
     h = create(
         _long_path(path), 0, share_all, None, open_existing, backup_semantics | open_reparse_point, None
     )
@@ -281,7 +285,9 @@ def final_name(path: str) -> str | None:
         # exactly 64 KiB (room for any name of an NT path): WinBtrfs refuses a buffer of a few
         # bytes more with ERROR_MORE_DATA (measured 2026-10-22)
         buf = ct.create_string_buffer(65536)
-        if not info(h, file_name_info, buf, len(buf)):
+        if not info(h, file_normalized_name_info, buf, len(buf)) and not info(
+            h, file_name_info, buf, len(buf)
+        ):
             return None
         n = int.from_bytes(buf.raw[:4], "little")
         return str(buf.raw[4 : 4 + n].decode("utf-16-le", "surrogatepass"))
@@ -290,9 +296,10 @@ def final_name(path: str) -> str | None:
 
 
 def names_below(path: str, root: str) -> list[str] | None:
-    """The names of ``path`` below the scan root ``root`` as given (the root part is never
-    compared: a root typed in another case, a SUBST drive, a mount folder), or None for the root
-    itself, a path not below it, or no root (hardscan/case.rs ``below_root``)."""
+    """The names of ``path`` below the scan root ``root`` as given (the root part of a stored name
+    is the root's own stored name, ``task_is``: a root typed in another case, a SUBST drive, a
+    mount folder), or None for the root itself, a path not below it, or no root (hardscan/case.rs
+    ``below_root``)."""
     if not root or not path.startswith(root):
         return None
     rest = path[len(root) :]
@@ -302,12 +309,19 @@ def names_below(path: str, root: str) -> list[str] | None:
     return below or None
 
 
-def tail_is(stored: str, below: list[str]) -> bool | None:
-    """Whether the last names of a stored name are ``below``, exactly; None when it has fewer."""
-    names = [n for n in stored.replace("/", "\\").split("\\") if n]
-    if len(names) < len(below):
-        return None
-    return names[len(names) - len(below) :] == below
+def _names(path: str) -> list[str]:
+    return [n for n in path.replace("/", "\\").split("\\") if n]
+
+
+def task_is(stored: str, root: str | None, below: list[str]) -> bool:
+    """Whether a folder is stored under the names its path gives it below the scan root, exactly:
+    its stored name is the root's own (``root``) followed by ``below``. Without the root's, its last
+    names must be ``below``; a stored name with fewer names than that was reached some other way
+    (through a symlink that won the name). hardscan/case.rs ``task_is``."""
+    names = _names(stored)
+    if root is not None:
+        return names == _names(root) + below
+    return len(names) >= len(below) and names[len(names) - len(below) :] == below
 
 
 def case_marks(names: list[str], dirs: list[int]) -> dict[int, str]:
@@ -339,19 +353,21 @@ def case_marks(names: list[str], dirs: list[int]) -> dict[int, str]:
 _NO_NAME = {"dup": DUP_ERROR, "bad": BADNAME_ERROR}
 
 
-def _unreachable(path: str, root: RootOptions, mark: str) -> str | None:
+def _unreachable(path: str, root: RootOptions, mark: str, root_name: Callable[[], str | None]) -> str | None:
     """Why the folder ``path`` names cannot be listed by that path (roots that ``verify_names``):
     an exact duplicate's or a ``\\`` name's never can; a task, or a subfolder whose name another
     entry shares, only when the file system stores it under those names below the root (else the
-    open reached a case-only sibling, or something below one). Checked when the folder's turn
-    comes, not at its parent's listing: a relist of the parent alone (the monitor's) stays free of
-    such errors, and every task that comes back from the frontier is checked again. When the
-    stored name cannot be read, the folder is listed as before and the listing gives any error."""
+    open reached a case-only sibling, something below one, or what a sibling that is a symlink
+    points to). ``root_name``: the root's own stored name (read once per slice). Checked when the
+    folder's turn comes, not at its parent's listing: a relist of the parent alone (the monitor's)
+    stays free of such errors, and every task that comes back from the frontier is checked again.
+    When the stored name cannot be read, the folder is listed as before and the listing gives any
+    error."""
     if mark in _NO_NAME:
         return _NO_NAME[mark]
     if mark in ("strict", "task") and (below := names_below(path, root.path)) is not None:
         stored = final_name(path)
-        if stored is not None and tail_is(stored, below) is False:
+        if stored is not None and not task_is(stored, root_name(), below):
             return CASE_ERROR
     return None
 
@@ -598,12 +614,19 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
     stack: list[tuple[Ref, str, int, str]] = [
         (ref, path, root, "task") for ref, path, root in reversed(tasks)
     ]
+    root_names: dict[int, str | None] = {}  # each root's own stored name, once it is needed
+
+    def root_name(i: int) -> str | None:
+        if i not in root_names:
+            root_names[i] = final_name(opts.roots[i].path)
+        return root_names[i]
+
     while stack:
         if acc.refs and (time.perf_counter() >= deadline or len(acc.kind) >= opts.max_entries):
             break
         ref, path, root_idx, mark = stack.pop()
         root = opts.roots[root_idx]
-        why = _unreachable(path, root, mark) if root.verify_names else None
+        why = _unreachable(path, root, mark, partial(root_name, root_idx)) if root.verify_names else None
         if why is not None:
             errors.append((ref, path, why))
             continue

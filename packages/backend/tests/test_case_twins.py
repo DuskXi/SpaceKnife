@@ -10,8 +10,11 @@ Windows tests in packages/native/tests/test_hardscan.py check the real thing.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import os
+import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -22,15 +25,17 @@ from typing import Any
 import numpy as np
 import pytest
 
+from spaceknife.events import denied_reason
 from spaceknife.monitor import Change
-from spaceknife.ops import trash
+from spaceknife.ops import basket, trash
 from spaceknife.ops.basket import Basket
 from spaceknife.scan import worker
 from spaceknife.scan.worker import RootOptions, SliceOptions, SliceResult, Task
 from spaceknife.server.compares import CompareManager
 from spaceknife.server.monitors import ScanMonitor
+from spaceknife.store import mutate
 from spaceknife.store.lookup import PathIndex
-from spaceknife.store.nodes import ENTRY_COLUMNS, Kind, NodeStore
+from spaceknife.store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from spaceknife_protocol import compare as pc
 
 # --------------------------------------------------------------------------- the worker
@@ -61,7 +66,7 @@ TREE: dict[str, list[tuple[str, bool]]] = {
 # what the file system stores for the folder each path opens (WinBtrfs: the first whose name
 # matches in any case, so `a` opens `A`)
 STORED = {
-    R: "\\X",  # the root typed in another case: never compared
+    R: "\\x",  # the root's own stored name: what lies below it must follow it
     R + "\\a": "\\x\\A",
     R + "\\A": "\\x\\A",
     R + "\\A\\inner": "\\x\\A\\inner",
@@ -113,6 +118,24 @@ def run(tasks: list[Task], budget_s: float = 1e9, *, verify: bool = True) -> Sli
     return worker.scan_slice(tasks, opts)
 
 
+def test_both_walkers_word_these_errors_alike() -> None:
+    """The native walker's listing errors (hardscan/case.rs ``msg``) are the worker's, word for
+    word: the log panel finds its wording by the text (events.denied_reason)."""
+    src = Path(__file__).parents[2] / "native" / "src" / "hardscan" / "case.rs"
+    body = src.read_text(encoding="utf-8").split("pub mod msg {", 1)[1].split("\n}", 1)[0]
+    texts = dict(re.findall(r'pub const (\w+): &str =\s*"([^"]*)";', body))
+    wording = {
+        "CASE": (worker.CASE_ERROR, "同一文件夹里另有一项与它只差大小写，按名字打开的是那一项"),
+        "DUP": (worker.DUP_ERROR, "同一文件夹里另有一项在 Windows 上显示为同一个名字，按名字分不开"),
+        "BADNAME": (worker.BADNAME_ERROR, "名字里有 \\ 或 /，按名字打不开"),
+        "CAP": (worker.CAP_ERROR, "只能按文件 ID 打开的文件夹一次要读的项太多，这次没有读"),
+        "INCOMPLETE": (worker.INCOMPLETE_ERROR, "按文件 ID 打开时没有列全"),
+    }
+    assert texts == {name: text for name, (text, _words) in wording.items()}
+    for text, words in wording.values():
+        assert denied_reason(text) == words
+
+
 def test_case_marks_group_names_that_upper_case_alike() -> None:
     names = ["a", "A", "b", "B", "x\ufffd", "x\ufffd", "s\\l", "s/m", "ß", "SS", "only"]
     dirs = [0, 1, 2, 4, 5, 6, 7, 8, 10]
@@ -130,15 +153,21 @@ def test_case_marks_group_names_that_upper_case_alike() -> None:
     assert worker.case_marks(["A", "a"], [1]) == {1: "strict"}
 
 
-def test_names_below_the_root_and_stored_tails() -> None:
+def test_names_below_the_root_and_stored_names() -> None:
     assert worker.names_below(R + "\\a\\b", R) == ["a", "b"]
     assert worker.names_below("I:\\x\\\\a\\", "I:\\x\\") == ["a"]
     assert worker.names_below(R, R) is None  # the root itself
     assert worker.names_below("I:\\xy\\a", R) is None
     assert worker.names_below(R + "\\a", "") is None
-    assert worker.tail_is("\\x\\A", ["a"]) is False
-    assert worker.tail_is("\\mnt\\x\\a", ["x", "a"]) is True
-    assert worker.tail_is("\\a", ["x", "a"]) is None
+    # after the root's own stored name, whatever the root was typed as (hardscan/case.rs task_is)
+    assert not worker.task_is("\\x\\A", "\\x", ["a"])
+    assert worker.task_is("\\x\\a", "\\x", ["a"])
+    assert worker.task_is("\\a", "\\", ["a"])  # a root that is a mount folder of the volume's root
+    assert not worker.task_is("\\elsewhere\\x\\a", "\\x", ["a"])  # through a symlink that won the name
+    # without the root's: the last names, never fewer
+    assert worker.task_is("\\mnt\\x\\a", None, ["x", "a"])
+    assert not worker.task_is("\\x\\A", None, ["a"])
+    assert not worker.task_is("\\a", None, ["x", "a"])
 
 
 @pytest.mark.usefixtures("fake_volume")
@@ -159,9 +188,10 @@ def test_a_loser_is_a_listing_error_when_its_turn_comes() -> None:
 
 
 @pytest.mark.usefixtures("fake_volume")
-def test_a_relist_alone_keeps_its_children_out_of_the_errors() -> None:
+def test_a_relist_alone_leaves_twins_to_the_frontier_and_unnamable_children_as_errors() -> None:
     """At budget 0 (the monitor relists one folder) a twin goes to the frontier: as a task it is
-    checked when it comes back. Names no path can hold are errors, never tasks."""
+    checked when it comes back. Names no path can hold (a second entry of the very same name, a
+    backslash) are errors of those subfolders, never tasks."""
     res = run([((0, 1, 0), R, 0)], budget_s=0.0)
     assert res.paths == [R]
     assert {path for _ref, path, _idx in res.frontier} == {
@@ -184,6 +214,28 @@ def test_tasks_whose_stored_names_differ_are_errors() -> None:
     res = run([((0, 7, 0), R + "\\a", 0), ((0, 8, 0), R + "\\A\\inner", 0)])
     assert res.errors == [((0, 7, 0), R + "\\a", worker.CASE_ERROR)]
     assert res.paths == [R + "\\A\\inner"]
+
+
+def test_tasks_a_symlink_led_elsewhere_are_errors(fake_volume: None, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A twin that is a symlink wins the name and leads to a folder with the same last names, or
+    to one with fewer names than the path has below the root: not the folder the path names."""
+    stored = {**STORED, R + "\\b": "\\y\\x\\b", R + "\\A\\inner": "\\inner"}
+    monkeypatch.setattr(worker, "final_name", stored.get)
+    tasks: list[Task] = [
+        ((0, 1, 0), R + "\\b", 0),
+        ((0, 2, 0), R + "\\A\\inner", 0),
+        ((0, 3, 0), R + "\\A", 0),
+    ]
+    res = run(tasks)
+    assert [path for _ref, path, msg in res.errors if msg == worker.CASE_ERROR] == [
+        R + "\\b",
+        R + "\\A\\inner",
+    ]
+    assert res.paths == [R + "\\A", R + "\\A\\inner"]  # A itself, then the subfolder it holds
+    # without the root's own stored name only the last names tell, and never fewer of them
+    del stored[R]
+    res = run(tasks)
+    assert [path for _ref, path, _msg in res.errors] == [R + "\\A\\inner"]
 
 
 # --------------------------------------------------------------------------- the monitor's relists
@@ -214,6 +266,9 @@ def test_a_relist_stands_with_errors_of_its_subfolders_only(tmp_path: Path) -> N
     assert relist([((1, 0, 0), os.path.join(top, "sub"), worker.DUP_ERROR)]) is not None
     assert relist([((0, 5, 0), top, worker.CASE_ERROR)]) is None  # the folder itself: stays as scanned
     assert relist([], refs=np.zeros((0, 3), dtype=np.int64), paths=[]) is None  # gone
+    # more than this one folder: its listing is all the relist takes as its children
+    two = np.array([[0, 5, 0], [1, 0, 0]], dtype=np.int64)
+    assert relist([], refs=two, paths=[top, os.path.join(top, "sub")]) is None
 
 
 # --------------------------------------------------------------------------- lookups by path
@@ -314,22 +369,36 @@ def test_a_compare_view_finds_the_twin_it_shows() -> None:
 # --------------------------------------------------------------------------- deleting
 
 
+def case_sensitive(folder: Path) -> None:
+    """Makes ``folder`` hold names that differ only in case, or skips. On Windows it becomes a
+    case-sensitive NTFS folder (fsutil's exit code says nothing: 0 also when that failed, so the
+    folder is tried); elsewhere the file system decides (APFS folds case by default). As
+    packages/native/tests/test_hardscan.py ``_case_sensitive`` does."""
+    folder.mkdir(parents=True, exist_ok=True)
+    if sys.platform == "win32":
+        with contextlib.suppress(OSError):
+            subprocess.run(
+                ["fsutil", "file", "setCaseSensitiveInfo", str(folder), "enable"],
+                capture_output=True,
+                check=False,
+            )
+    (folder / "probe").mkdir()
+    try:
+        (folder / "PROBE").mkdir()
+    except FileExistsError:
+        pytest.skip(f"{folder} cannot hold names that differ only in case")
+    finally:
+        (folder / "probe").rmdir()
+    (folder / "PROBE").rmdir()
+
+
 @pytest.fixture
 def twins(tmp_path: Path) -> tuple[Path, Path, Path]:
     """A scan root with folders `a` and `A` side by side (a case-sensitive folder on Windows)."""
     root = tmp_path / "root"
-    root.mkdir()
-    if sys.platform == "win32":
-        done = subprocess.run(
-            ["fsutil", "file", "setCaseSensitiveInfo", str(root), "enable"], capture_output=True, check=False
-        )
-        if done.returncode != 0:
-            pytest.skip("cannot make a case-sensitive folder here (needs the WSL feature)")
+    case_sensitive(root)
     (root / "a").mkdir()
-    try:
-        (root / "A").mkdir()
-    except FileExistsError:
-        pytest.skip("this file system folds case (APFS by default)")
+    (root / "A").mkdir()
     (root / "a" / "f").write_bytes(b"a")
     (root / "A" / "g").write_bytes(b"A")
     return root, root / "a", root / "A"
@@ -356,11 +425,19 @@ def test_a_path_that_opens_another_entry_is_never_deleted(
 def test_other_stored_names_do_not_stop_a_deletion(
     twins: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """A stored name elsewhere (another name of a hard link, a redirect) with no name on the way
+    that another entry has but for case: the path names the item. With such a pair on the way it
+    may not: `A` can be a symlink that won the name of `a` and led elsewhere."""
     root, a, big_a = twins
-    # a hard link's other name, a short name: not a case-only difference
-    monkeypatch.setattr(trash, "_final_name", stored_as({str(a): "\\elsewhere\\other"}))
-    (res,) = trash.delete_permanently([str(a)], roots={str(a): str(root)}, check_locks=False)
-    assert res.ok and not a.exists() and (big_a / "g").exists()
+    plain = root / "plain"
+    plain.mkdir()
+    (plain / "f").write_bytes(b"p")
+    elsewhere = {str(plain): "\\elsewhere\\other", str(a / "f"): "\\elsewhere\\y\\f"}
+    monkeypatch.setattr(trash, "_final_name", stored_as(elsewhere))
+    (res,) = trash.delete_permanently([str(a / "f")], roots={str(a / "f"): str(root)}, check_locks=False)
+    assert res.code == "ambiguous_name" and (a / "f").exists()
+    (res,) = trash.delete_permanently([str(plain)], roots={str(plain): str(root)}, check_locks=False)
+    assert res.ok and not plain.exists() and (a / "f").exists() and (big_a / "g").exists()
 
 
 def test_case_twins_on_disk_each_delete_their_own(twins: tuple[Path, Path, Path]) -> None:
@@ -386,3 +463,183 @@ def test_names_with_a_separator_cannot_go_into_the_basket() -> None:
         bad.add(store.path(first + 2))  # WinBtrfs shows Linux names with a backslash as they are
     assert refused == bad
     assert len(res.added) == 4 - len(bad)
+
+
+def test_names_held_twice_cannot_go_into_the_basket() -> None:
+    """The scan lists each of two entries of the very same name (WinBtrfs shows invalid UTF-8 as
+    U+FFFD) with its own contents; a path opens one of them, so neither is taken, nor anything
+    below them."""
+    store = NodeStore()
+    root = store.add_root(ROOT)
+    names = ["n�", "n�", "ok"]
+    first = store.ingest_names(root, [n.encode() for n in names], entries([Kind.DIR] * 3))
+    inner = store.ingest_names(first + 1, [b"f"], entries([Kind.FILE], [1]))
+    b = Basket(volume_of=lambda root: "VOL")
+    res = b.add(store, "s1", [first, first + 1, inner, first + 2])
+    assert [(r.path, r.reason) for r in res.refused] == [
+        (store.path(first), basket.TEXT["dup_name"]),
+        (store.path(first + 1), basket.TEXT["dup_name"]),
+        (store.path(inner), basket.TEXT["dup_name"]),
+    ]
+    assert len(res.added) == 1
+
+
+def test_items_keep_the_scan_root_they_were_found_under() -> None:
+    """Deleting checks a path's names below its scan root (``reaches_another``): the basket keeps
+    the root with each item, so the check holds once the scan is closed too."""
+    store, ids = twin_store()
+    b = Basket(volume_of=lambda root: "VOL")
+    b.add(store, "s1", [ids["a/f"]])
+    b.add(store, "s1", [next(iter(store.roots()))], members=[ids["b"]])  # a group of small items
+    assert {(t.path, t.root) for t in b.targets()} == {(path("a", "f"), ROOT), (path("b"), ROOT)}
+
+
+def test_a_name_whose_case_changed_since_the_scan_still_reaches_the_item(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The scan saw `Photos`, the folder is `photos` now: no entry has the old name, so the path
+    still opens the item (Windows) and is not refused. A stored name somewhere else altogether
+    (another name of a hard link, a redirect) is no sibling either."""
+    root = tmp_path / "root"
+    (root / "photos").mkdir(parents=True)
+    (root / "d1").mkdir()
+    (root / "d2").mkdir()
+    (root / "d2" / "file.txt").write_bytes(b"f")
+    stale = str(root / "Photos")
+    linked = str(root / "d2" / "file.txt")
+    stored = {str(root): "\\x\\root", stale: "\\x\\root\\photos", linked: "\\x\\root\\d1\\File.txt"}
+    monkeypatch.setattr(trash, "_final_name", stored_as(stored))
+    assert not trash.reaches_another(stale, str(root))
+    assert not trash.reaches_another(linked, str(root))
+    # with both names in the folder, the stored one is another entry's, or a link that one is
+    # led elsewhere
+    (root / "x").mkdir()
+    case_sensitive(root / "x" / "cs")
+    (root / "x" / "cs" / "Photos").mkdir()
+    (root / "x" / "cs" / "photos").mkdir()
+    twin = str(root / "x" / "cs" / "Photos")
+    below = twin + os.sep + "f"
+    stored |= {twin: "\\x\\root\\x\\cs\\photos", below: "\\x\\root\\x\\f"}
+    assert trash.reaches_another(twin, str(root))
+    assert trash.reaches_another(below, str(root))
+    stored[twin] = "\\x\\root\\x\\cs\\Photos"  # what it is stored as: nothing to look at
+    assert not trash.reaches_another(twin, str(root))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows opens names case-insensitively")
+def test_windows_a_stale_case_is_deleted_by_its_path(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    (root / "photos").mkdir(parents=True)
+    (root / "photos" / "big.mov").write_bytes(b"m")
+    stale = str(root / "Photos" / "big.mov")
+    (res,) = trash.delete_permanently([stale], roots={stale: str(root)}, check_locks=False)
+    assert res.ok and not (root / "photos" / "big.mov").exists()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Win32 path rules")
+def test_windows_names_ending_in_a_dot_are_never_deleted_by_their_path(tmp_path: Path) -> None:
+    """Win32 trims a name's trailing dot or space: by its path the folder `odd.` is `odd`. The scan
+    lists both as they are; deleting or trashing `odd.` would touch `odd`, so it is refused, as is
+    adding such an item to the basket."""
+    root = tmp_path / "root"
+    root.mkdir()
+    long_root = "\\\\?\\" + str(root)
+    for name in ("odd", "odd."):
+        os.mkdir(long_root + "\\" + name)
+        with open(long_root + "\\" + name + "\\in.txt", "wb") as f:
+            f.write(name.encode())
+    try:
+        target = str(root / "odd.")
+        for op in (trash.delete_permanently, trash.move_to_trash):
+            (res,) = op([target], roots={target: str(root)}, check_locks=False)
+            assert (res.code, res.message) == ("ambiguous_name", trash.TEXT["trailing_name"]), op
+        assert sorted(os.listdir(long_root)) == ["odd", "odd."]
+        assert trash.win32_trims(str(root / "x." / "f")) and trash.win32_trims(str(root / "sp "))
+        assert not trash.win32_trims(str(root / "a.b" / "c"))
+        store = NodeStore()
+        top = store.add_root(str(root))
+        first = store.ingest_names(top, [b"odd.", b"odd"], entries([Kind.DIR] * 2))
+        res_add = Basket(volume_of=lambda root: "VOL").add(store, "s1", [first, first + 1])
+        assert [r.reason for r in res_add.refused] == [basket.TEXT["trailing_name"]]
+    finally:
+        for name in ("odd", "odd."):
+            shutil.rmtree(long_root + "\\" + name, ignore_errors=True)
+
+
+# --------------------------------------------------------------------------- relisting by path
+
+
+def test_paths_that_name_no_folder_alone() -> None:
+    """The monitor relists folders by path: not those whose path opens another one too."""
+    store, ids = twin_store()
+    root = next(iter(store.roots()))
+    index = PathIndex(store)
+    dup = ids["dup"]
+    inner = store.ingest_names(dup + 1, [b"x"], entries([Kind.DIR]))
+    slashed = store.ingest_names(ids["b"], [b"s/l", b"t"], entries([Kind.DIR] * 2))
+    assert index.unnamed(dup) and index.unnamed(dup + 1) and index.unnamed(inner)
+    assert index.unnamed(slashed) and not index.unnamed(slashed + 1)
+    assert not index.unnamed(ids["a"]) and not index.unnamed(ids["a/f"]) and not index.unnamed(root)
+
+
+def test_relisting_pairs_names_held_twice_in_order() -> None:
+    """A folder relisted with two entries of the very same name keeps each one's own subtree."""
+    store = NodeStore()
+    root = store.add_root(ROOT)
+    first = store.ingest_names(root, [b"n\xef\xbf\xbd", b"n\xef\xbf\xbd"], entries([Kind.DIR] * 2))
+    store.ingest_names(first, [b"one"], entries([Kind.FILE], [1]))
+    store.ingest_names(first + 1, [b"two"], entries([Kind.FILE], [2]))
+    blob = b"n\xef\xbf\xbd" * 2
+    rel = mutate.relist(store, root, blob, np.array([4, 4]), entries([Kind.DIR] * 2))
+    assert len(rel.moved_to) == 2 and not len(rel.removed)
+    kept = [int(rel.moved_to[i]) for i in np.argsort(rel.moved_from)]
+    assert [[store.name(c) for c in store.children(k)] for k in kept] == [["one"], ["two"]]
+
+
+async def test_a_relist_leaves_new_subfolders_no_path_reaches_unscanned(
+    fake_volume: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """New subfolders a relist finds that no path can open (the second of the very same name, a
+    backslash) are not scanned by their path: they are unreadable, not pending. On a relist of the
+    whole subtree (F5) folders of a name held twice are not listed again by path either."""
+    import spaceknife.server.monitors as monitors_mod
+
+    monkeypatch.setattr(monitors_mod, "verify_names", lambda volume: True)
+    store = NodeStore()
+    root = store.add_root(R)
+    plain = store.ingest_names(root, [b"plain"], entries([Kind.DIR]))
+    store.clear(plain, Flag.PENDING)  # listed already
+    mon: Any = ScanMonitor.__new__(ScanMonitor)
+    mon.handle = SimpleNamespace(
+        store=store, roots=[SimpleNamespace(path=R, volume=None)], scanner=None, id="s1"
+    )
+    mon.owner = SimpleNamespace(views=SimpleNamespace(chains=lambda _id: None, remap=lambda *_a: None))
+
+    async def fake_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
+        return worker.scan_slice(tasks, opts)
+
+    async def permit() -> None:
+        return None
+
+    mon._slice = fake_slice
+    mon._permit = permit
+    applied = await mon._relist({root: R})
+    c = store.cols
+    rows = [(store.name(i), int(c["flags"][i])) for i in store.children(root)]
+    denied, pending = np.uint32(Flag.ACCESS_DENIED), np.uint32(Flag.PENDING)
+    assert [(n, bool(f & denied), bool(f & pending)) for n, f in rows] == [
+        ("a", False, True),
+        ("A", False, True),
+        ("b", False, True),
+        ("B", False, False),  # a file
+        ("n\ufffd", False, True),  # the first of the same name: scanned by its path, checked
+        ("n\ufffd", True, False),
+        ("s\\l", True, False),
+        ("plain", False, False),  # listed already: kept
+    ]
+    assert sorted(store.name(i) for i in applied.pending) == sorted(["a", "A", "b", "n\ufffd"])
+    for i in store.children(root):
+        store.clear(i, Flag.PENDING)
+    again = await mon._relist({root: R})
+    names = sorted(store.name(i) for i in again.kept_folders)
+    assert names == sorted(["a", "A", "b", "plain"] + ([] if os.name == "nt" else ["s\\l"]))

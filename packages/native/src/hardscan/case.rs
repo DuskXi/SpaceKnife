@@ -35,7 +35,7 @@ pub mod msg {
         "cannot be opened by its name: another entry in this folder has the same name as Windows shows it";
     pub const BADNAME: &str = "cannot be opened by its name: it contains a backslash or slash";
     pub const CAP: &str =
-        "not read: too many entries below folders that can only be opened by file id in one pass";
+        "not read: too many entries in one pass in folders that can only be opened by file id";
     pub const INCOMPLETE: &str = "listed incompletely when opened by its file id";
 }
 
@@ -156,9 +156,9 @@ pub fn last_name(stored: &[u16]) -> &[u16] {
     names(stored).next_back().unwrap_or(&[])
 }
 
-/// The names of task `path` below the scan root `root` (as given: the root part is never compared,
-/// so roots typed in another case, SUBST drives and mount folders work). None for the root itself,
-/// a path that is not below it, or no root given.
+/// The names of task `path` below the scan root `root` as given (the root part of a stored name is
+/// the root's own stored name, `task_is`, so roots typed in another case, SUBST drives and mount
+/// folders work). None for the root itself, a path that is not below it, or no root given.
 pub fn below_root<'a>(path: &'a [u16], root: &[u16]) -> Option<Vec<&'a [u16]>> {
     if root.is_empty() || !path.starts_with(root) {
         return None;
@@ -172,14 +172,19 @@ pub fn below_root<'a>(path: &'a [u16], root: &[u16]) -> Option<Vec<&'a [u16]>> {
     (!below.is_empty()).then_some(below)
 }
 
-/// Whether the last names of a stored name are `below`, exactly (UTF-16 units); None when it has
-/// fewer names than that (nothing to tell from).
-pub fn tail_is(stored: &[u16], below: &[&[u16]]) -> Option<bool> {
+/// Whether a task's folder is stored under the names its path gives it below the scan root,
+/// exactly (UTF-16 units): its stored name is the root's own stored name (`root`, read once per
+/// call) followed by `below`. Without the root's, its last names must be `below`; a stored name
+/// with fewer names than that was reached some other way (through a symlink that won the name).
+pub fn task_is(stored: &[u16], root: Option<&[u16]>, below: &[&[u16]]) -> bool {
     let all: Vec<&[u16]> = names(stored).collect();
-    if all.len() < below.len() {
-        return None;
+    match root {
+        Some(root) => {
+            let top: Vec<&[u16]> = names(root).collect();
+            all.len() == top.len() + below.len() && all[..top.len()] == top[..] && all[top.len()..] == *below
+        }
+        None => all.len() >= below.len() && all[all.len() - below.len()..] == *below,
     }
-    Some(all[all.len() - below.len()..] == *below)
 }
 
 /// A file id that is no id: all bits set, judged in the width the listing gave it (a 64-bit -1 is
@@ -279,9 +284,9 @@ pub enum Outcome {
     Same,
     /// The listing gave no file id to check the handle against.
     NoId,
-    /// The handle has another file id. `renamed`: its stored name is not the listed name, or the
-    /// entry has an exact duplicate (a folder replaced meanwhile keeps the name, a twin does not).
-    Other { renamed: bool },
+    /// The handle has another file id. `named`: whether its stored last name is the listed name
+    /// (None: it cannot be read). A folder replaced meanwhile keeps the name, a twin does not.
+    Other { named: Option<bool> },
     /// The handle's file id cannot be read.
     Unreadable,
     /// The open failed (NOT_A_DIRECTORY when a file of the same name wins, denied, gone...).
@@ -303,26 +308,33 @@ pub enum Then {
     Fail,
 }
 
-/// The rest of the open of a found subfolder; `Plain` only for relative opens (a plain folder
-/// opened by full path is listed as before, unchecked).
-pub fn after_open(class: Class, outcome: Outcome, trusted: bool) -> Then {
+/// The rest of the open of a found subfolder (`marks`: its `mark` bits; `trusted` as for
+/// `first_open`). `Plain` is the relative open of a folder no other entry shares its name with,
+/// checked by the listed file id (one without an id is opened by full path, unchecked, as before):
+/// whatever that does not settle goes by full path, unless the name reached an entry stored under
+/// another name. The others are listed only through a handle proven to be the listed entry: an
+/// exact duplicate's name, or a stored name that cannot be read, proves nothing.
+pub fn after_open(class: Class, outcome: Outcome, marks: u8, trusted: bool) -> Then {
     use Outcome::*;
+    let named = |n: Option<bool>| n == Some(true) && marks & mark::DUP == 0;
     match class {
         Class::Plain => match outcome {
             Same | NoId => Then::List,
-            Other { renamed: true } => Then::ById,
-            Other { renamed: false } | Unreadable | Failed => Then::ByPath,
+            Other { named: Some(false) } => Then::ById,
+            Other { .. } | Unreadable | Failed => Then::ByPath,
         },
         Class::Strict => match outcome {
-            Same | Other { renamed: false } => Then::List,
-            Other { renamed: true } => Then::ById,
+            Same => Then::List,
+            Other { named: n } if named(n) => Then::List,
+            Other { .. } => Then::ById,
             NoId | Unreadable => Then::StoredName,
             Failed if trusted => Then::ById,
             Failed => Then::Fail,
         },
         Class::Pinned => match outcome {
-            Same | NoId | Other { renamed: false } => Then::List,
-            Other { renamed: true } => Then::ById,
+            Same | NoId => Then::List,
+            Other { named: n } if named(n) => Then::List,
+            Other { .. } => Then::ById,
             Unreadable => Then::StoredName,
             Failed => Then::Fail,
         },
@@ -482,12 +494,25 @@ mod tests {
         let task = w("I:\\var\\lib\\flatpak\\terminfo\\a");
         let below = below_root(&task, &root).unwrap();
         assert_eq!(below, [&w("flatpak")[..], &w("terminfo"), &w("a")]);
-        // the stored name of the winner `A`, and of the folder itself (the root part may differ:
-        // a SUBST drive or mount folder shows the volume's own path)
-        assert_eq!(tail_is(&w("\\var\\lib\\flatpak\\terminfo\\A"), &below), Some(false));
-        assert_eq!(tail_is(&w("\\VAR\\lib\\flatpak\\terminfo\\a"), &below), Some(true));
-        assert_eq!(tail_is(&w("\\mnt\\flatpak\\terminfo\\a"), &below), Some(true));
-        assert_eq!(tail_is(&w("\\terminfo\\a"), &below), None);
+        // against the root's stored name: the winner `A`, and the folder itself (the root part
+        // is the root's own stored name, whatever the root was typed as: a SUBST drive or mount
+        // folder shows the volume's own path)
+        let stored = w("\\var\\lib");
+        let root_name = Some(&stored[..]);
+        assert!(!task_is(&w("\\var\\lib\\flatpak\\terminfo\\A"), root_name, &below));
+        assert!(task_is(&w("\\var\\lib\\flatpak\\terminfo\\a"), root_name, &below));
+        let volume_root = w("\\"); // a root that is a mount folder or a SUBST drive of the volume's root
+        assert!(task_is(&w("\\flatpak\\terminfo\\a"), Some(&volume_root), &below));
+        // reached some other way: through a symlink that won the name, to a folder that happens
+        // to end in the same names, or to one with fewer names than the path has below the root
+        assert!(!task_is(&w("\\srv\\flatpak\\terminfo\\a"), root_name, &below));
+        assert!(!task_is(&w("\\var\\lib\\x\\flatpak\\terminfo\\a"), root_name, &below));
+        assert!(!task_is(&w("\\b"), root_name, &below));
+        // without the root's stored name: the last names, and never fewer
+        assert!(!task_is(&w("\\var\\lib\\flatpak\\terminfo\\A"), None, &below));
+        assert!(task_is(&w("\\VAR\\lib\\flatpak\\terminfo\\a"), None, &below));
+        assert!(task_is(&w("\\mnt\\flatpak\\terminfo\\a"), None, &below));
+        assert!(!task_is(&w("\\terminfo\\a"), None, &below));
         assert_eq!(last_name(&w("\\usr\\share\\terminfo\\a")), w("a"));
         assert_eq!(last_name(&w("\\")), w(""));
         // the root itself, beside it, or no root at all: nothing to check
@@ -574,30 +599,40 @@ mod tests {
     fn after_the_open_by_name() {
         use Class::*;
         use Outcome::*;
-        let renamed = Other { renamed: true };
-        let replaced = Other { renamed: false };
-        // every cell of the table in docs/native.md 2.2 (rows: outcome; columns: class)
-        let cells: [(Outcome, [Then; 3]); 6] = [
+        use mark::{DUP, TWIN};
+        let (named, renamed, unknown) = (
+            Other { named: Some(true) },
+            Other { named: Some(false) },
+            Other { named: None },
+        );
+        // every cell (rows: what the open found; columns: plain, strict, pinned). Plain: the
+        // relative open of a folder with a listed id (win.rs open_plain), as before case-only
+        // siblings were handled, except that a name stored as another one goes by id
+        let cells: [(Outcome, [Then; 3]); 7] = [
             (Same, [Then::List, Then::List, Then::List]),
             (NoId, [Then::List, Then::StoredName, Then::List]),
-            (replaced, [Then::ByPath, Then::List, Then::List]),
-            (renamed, [Then::ById, Then::ById, Then::ById]),
+            (named, [Then::ByPath, Then::List, Then::List]), // replaced meanwhile
+            (renamed, [Then::ById, Then::ById, Then::ById]), // the name reached another entry
+            (unknown, [Then::ByPath, Then::ById, Then::ById]),
             (Unreadable, [Then::ByPath, Then::StoredName, Then::StoredName]),
             (Failed, [Then::ByPath, Then::ById, Then::Fail]),
         ];
         for (outcome, want) in cells {
             for (class, then) in [Plain, Strict, Pinned].into_iter().zip(want) {
-                assert_eq!(after_open(class, outcome, true), then, "{class:?} {outcome:?}");
+                let marks = if class == Strict { TWIN } else { 0 };
+                assert_eq!(after_open(class, outcome, marks, true), then, "{class:?} {outcome:?}");
             }
         }
+        // an exact duplicate's stored name proves nothing
+        assert_eq!(after_open(Strict, named, TWIN | DUP, true), Then::ById);
         // a strict folder whose open failed goes by id only with an id to go by
-        assert_eq!(after_open(Strict, Failed, false), Then::Fail);
-        assert_eq!(after_open(Pinned, Failed, false), Then::Fail);
+        assert_eq!(after_open(Strict, Failed, TWIN, false), Then::Fail);
+        assert_eq!(after_open(Pinned, Failed, 0, false), Then::Fail);
         // a descended reparse point below a pinned folder: whatever the open finds
-        for outcome in [Same, NoId, replaced, renamed, Unreadable] {
-            assert_eq!(after_open(PinnedReparse, outcome, false), Then::List);
+        for outcome in [Same, NoId, named, renamed, unknown, Unreadable] {
+            assert_eq!(after_open(PinnedReparse, outcome, 0, false), Then::List);
         }
-        assert_eq!(after_open(PinnedReparse, Failed, true), Then::Fail);
+        assert_eq!(after_open(PinnedReparse, Failed, 0, true), Then::Fail);
     }
 
     #[test]

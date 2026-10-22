@@ -8,6 +8,7 @@ same tree as the Python worker.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ctypes
 import dataclasses
 import errno
@@ -19,6 +20,7 @@ import sys
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -493,13 +495,25 @@ def test_windows_folder_past_the_path_limit_is_a_listing_error(tmp_path: Path) -
 
 
 def _case_sensitive(folder: Path) -> None:
-    """Creates `folder` as a case-sensitive NTFS folder, or skips (fsutil needs the WSL feature)."""
+    """Creates `folder` as a case-sensitive NTFS folder, or skips (fsutil setCaseSensitiveInfo
+    needs the WSL feature and an NTFS volume). Its exit code says nothing (0 also when it failed),
+    so the folder is tried: `probe` and `PROBE` must both be made. As backend/tests/test_case_twins.py
+    ``case_sensitive`` does."""
     folder.mkdir(parents=True, exist_ok=True)
-    done = subprocess.run(
-        ["fsutil", "file", "setCaseSensitiveInfo", str(folder), "enable"], capture_output=True, check=False
-    )
-    if done.returncode != 0:
-        pytest.skip("cannot make a case-sensitive folder here (fsutil setCaseSensitiveInfo)")
+    with contextlib.suppress(OSError):
+        subprocess.run(
+            ["fsutil", "file", "setCaseSensitiveInfo", str(folder), "enable"],
+            capture_output=True,
+            check=False,
+        )
+    (folder / "probe").mkdir()
+    try:
+        (folder / "PROBE").mkdir()
+    except FileExistsError:
+        pytest.skip(f"cannot make a case-sensitive folder here ({folder})")
+    finally:
+        (folder / "probe").rmdir()
+    (folder / "PROBE").rmdir()
 
 
 def build_twins(root: Path) -> Path:
@@ -556,7 +570,8 @@ def test_windows_case_twins_are_listed_by_their_file_ids(tmp_path: Path) -> None
 def test_windows_case_twins_never_wait_in_the_frontier(tmp_path: Path) -> None:
     """Past the budget a folder opened by id, and everything below it, is listed in the same call:
     as a task its path would open the twin. At budget 0 (a relist of one folder) the twins wait
-    like any folder. Past the cap on such entries they are errors, never tasks."""
+    like any folder. Past the cap on what is listed after the budget, folders below one opened by
+    id are errors, never tasks."""
     cs = build_twins(tmp_path / "twins")
     tasks: list[Task] = [((0, 1, 0), str(cs), 0)]
     opts = {"roots": [{}], "max_entries": 1, "threads": 1, "_fold_strict": True}
@@ -573,23 +588,36 @@ def test_windows_case_twins_never_wait_in_the_frontier(tmp_path: Path) -> None:
     assert sorted(p for _ref, p, _root in res["frontier"]) == sorted(
         str(cs / n) for n in ("A", "a", "b", "plain")
     )
-    # a cap of one entry: below the folders opened by id nothing more, and nothing left as a task
+    # a cap of two entries: `a` (and maybe `A` before it) is listed, then the cap is reached. Below
+    # `a` (opened by id) nothing more, and nothing left as a task; the twins `A` and `b` can wait
+    # in the frontier: as tasks they are checked by stored name on Btrfs
     native._open_stats(True)
-    res = native.scan_slice(tasks, {**opts, "_pinned_cap": 1})
+    res = native.scan_slice(tasks, {**opts, "_pinned_cap": 2})
+    check_slice(res, tasks)
     assert native._open_stats(True)["pinned_cap_hit"] >= 3
     capped = {p for _ref, p, msg in res["errors"] if msg == worker.CAP_ERROR}
     assert capped == {str(cs / "a" / n) for n in ("sub", "x", "X")}
-    assert [p for _ref, p, _root in res["frontier"]] == [str(cs / "plain")]
+    waiting = {p for _ref, p, _root in res["frontier"]}
+    assert {str(cs / "b"), str(cs / "plain")} <= waiting <= {str(cs / n) for n in ("A", "b", "plain")}
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
 def test_windows_scanner_driven_scans_of_case_twins_build_the_true_tree(tmp_path: Path) -> None:
+    """As the scanner drives it, in slices: the same tree as the worker's by path, and no folder a
+    task's path could not stand for is ever a task (on WinBtrfs such a path opens the twin): not
+    `a`, `A` or `b`, nothing below `a` and `b` (opened by file id), and nothing past the cap."""
     root = tmp_path / "twins"
-    build_twins(root)
+    cs = build_twins(root)
     py_store = scan_store(root)  # the worker by path: right in a case-sensitive folder
+    never = [str(cs / n) for n in ("a", "A", "b")]
+    below = [str(cs / n) + "\\" for n in ("a", "b")]
 
     def slicer(tasks: list[Task], opts: SliceOptions) -> SliceResult:
-        return SliceResult(**native.scan_slice(tasks, nopts(opts, threads=1, _fold_strict=True)))
+        for _ref, path, _root in tasks:
+            assert path not in never and not path.startswith(tuple(below)), path
+        res = SliceResult(**native.scan_slice(tasks, nopts(opts, threads=1, _fold_strict=True)))
+        assert not any(msg == worker.CAP_ERROR for _ref, _path, msg in res.errors), res.errors
+        return res
 
     for budget_s in (0.0005, 0.05):
         pool = ThreadPoolExecutor(max_workers=4)
@@ -600,6 +628,89 @@ def test_windows_scanner_driven_scans_of_case_twins_build_the_true_tree(tmp_path
             pool.shutdown()
         assert result.state == ScanState.DONE and not scanner.progress().denied
         assert tree_snapshot(scanner.store) == tree_snapshot(py_store)
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
+def test_windows_case_twins_without_ids_are_decided_by_their_stored_names(tmp_path: Path) -> None:
+    """A listing whose ids are shared (WinBtrfs's FileIdExtd: every entry has the listed folder's
+    own) gives no id to check against: the twins keep their marks, and the stored name decides. The
+    open of `a` reaches `A`, stored as `A`: an error, never A's listing under a's name. `b` reaches
+    file `B`: the open's own error. `A` is listed, and so is the plain folder."""
+    cs = build_twins(tmp_path / "twins")
+    res = native.scan_slice(
+        [((0, 1, 0), str(cs), 0)], {"roots": [{}], "threads": 1, **WINBTRFS, **EVERYTHING}
+    )
+    errors = {path: msg for _ref, path, msg in res["errors"]}
+    assert errors.keys() == {str(cs / "a"), str(cs / "b")}
+    assert errors[str(cs / "a")] == worker.CASE_ERROR
+    assert errors[str(cs / "b")] not in (worker.CASE_ERROR, worker.DUP_ERROR)  # the directory name is invalid
+    assert {str(cs / "A"), str(cs / "plain")} <= set(res["paths"])
+    assert not any(p.startswith(str(cs / "a") + "\\") for p in res["paths"])
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
+def test_windows_worker_checks_twins_by_their_stored_names(tmp_path: Path) -> None:
+    """On a root that verifies names the worker groups a listing's names (str.upper()) and checks
+    each twin's stored name when its turn comes. In a case-sensitive folder every path reaches its
+    own entry: the true tree, as the native walker lists it opening twins by id."""
+    root = tmp_path / "twins"
+    build_twins(root)
+    compare([((0, 1, 0), str(root), 0)], (root_opts(root, path=str(root), verify_names=True),), **WINBTRFS)
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders, directory symlinks")
+def test_windows_a_twin_that_is_a_symlink_is_not_followed(tmp_path: Path) -> None:
+    """`x\\A` is a directory symlink to another folder named `a`, and wins the open of `a`'s name
+    (as on WinBtrfs, where Linux symlinks are reparse points). The open must reach the link itself,
+    which is another entry: `a` goes by its file id and lists its own file, never the target's."""
+    (tmp_path / "other" / "a").mkdir(parents=True)
+    (tmp_path / "other" / "a" / "OTHER_CONTENT.txt").write_bytes(b"o")
+    x = tmp_path / "x"
+    _case_sensitive(x)
+    (x / "a").mkdir()
+    (x / "a" / "real_content.txt").write_bytes(b"r")
+    try:
+        os.symlink(os.path.join("..", "other", "a"), x / "A", target_is_directory=True)
+    except OSError as exc:
+        pytest.skip(f"cannot make a directory symlink here: {exc}")
+    for extra in ({}, {"relative_open": False}):
+        res = SliceResult(
+            **native.scan_slice(
+                [((0, 1, 0), str(x), 0)], {"roots": [{}], "threads": 1, "_fold_strict": True, **extra}
+            )
+        )
+        names = _names(res)
+        bounds = res.bounds.tolist()
+        listed = {p: names[bounds[i] : bounds[i + 1]] for i, p in enumerate(res.paths)}
+        assert listed.get(str(x / "a")) == ["real_content.txt"], (extra, listed, res.errors)
+        assert str(x / "A") not in listed and not res.errors  # a link: listed as an entry, not entered
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
+def test_windows_a_chain_of_twins_stops_at_the_cap(tmp_path: Path) -> None:
+    """Twins at every level, each opened by name (the upper one, which the upcased name reaches):
+    past the budget each is listed in the call, but only while the entries listed then stay below
+    the cap. Past it the twins go to the frontier (on WinBtrfs their tasks are checked by stored
+    name); nothing is listed without bound."""
+    top = tmp_path / "t"
+    _case_sensitive(top)
+    level = top
+    for _ in range(8):
+        for name in ("q", "Q"):
+            _case_sensitive(level / name)
+            (level / name / "f.txt").write_bytes(b"x")
+        level = level / "Q"
+    tasks: list[Task] = [((0, 1, 0), str(top), 0)]
+    opts = {"roots": [{}], "threads": 1, "max_entries": 1, "_fold_strict": True}
+    res = native.scan_slice(tasks, {**opts, "_pinned_cap": 0})
+    check_slice(res, tasks)
+    assert res["paths"] == [str(top)] and not res["errors"]
+    assert sorted(p for _ref, p, _root in res["frontier"]) == [str(top / "Q"), str(top / "q")]
+    res = native.scan_slice(tasks, {**opts, "_pinned_cap": 5})
+    check_slice(res, tasks)
+    assert 1 < len(res["paths"]) < 6 and res["frontier"] and not res["errors"]
+    res = native.scan_slice(tasks, {**opts, "budget_s": 1e9, "max_entries": 10**9})
+    assert len(res["paths"]) == 17 and not res["frontier"]  # within the budget: all of it
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="Windows stored names")
@@ -660,6 +771,45 @@ def test_root_keys_name_what_the_build_accepts(tree: Path) -> None:
     assert not res["errors"] and len(res["paths"]) > 50
 
 
+def test_the_scanner_gives_the_native_walker_each_roots_name_check(
+    tree: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A scan of a WinBtrfs volume on Windows (scanner.verify_names) checks every task by its
+    stored names: the scanner keeps the root's path and that check with the root, and every slice
+    of the native walker gets both. Elsewhere, and on other file systems, nothing is checked."""
+    from spaceknife.scan import scanner as scanner_mod
+
+    real_volume_for = scanner_mod.volume_for
+    monkeypatch.setattr(scanner_mod, "sys", SimpleNamespace(**{**vars(sys), "platform": "win32"}))
+    monkeypatch.setattr(
+        scanner_mod, "volume_for", lambda p: dataclasses.replace(real_volume_for(p), fs_type="Btrfs")
+    )
+    seen: list[list[dict[str, Any]]] = []
+    real_scan_slice = native.scan_slice
+
+    def spy(tasks: list[Task], opts: dict[str, Any]) -> dict[str, Any]:
+        seen.append(opts["roots"])
+        return real_scan_slice(tasks, opts)
+
+    monkeypatch.setattr(native, "scan_slice", spy)
+    slicer = native_slicer()
+    assert slicer is not None
+    pool = ThreadPoolExecutor(max_workers=2)
+    try:
+        scanner = Scanner([str(tree)], executor=pool, concurrency=2, slicer=slicer, budget_s=0.0005)
+        assert asyncio.run(scanner.run()).state == ScanState.DONE
+    finally:
+        pool.shutdown()
+    (opts,) = scanner.root_options
+    assert (opts.path, opts.verify_names) == (scanner.roots[0].path, True)
+    assert len(seen) > 1 and all(len(roots) == 1 for roots in seen)  # sliced, one root each
+    assert {(r[0]["path"], r[0]["verify_names"]) for r in seen} == {(scanner.roots[0].path, True)}
+    volume = real_volume_for(str(tree))
+    assert not scanner_mod.verify_names(dataclasses.replace(volume, fs_type="NTFS"))
+    monkeypatch.setattr(scanner_mod, "sys", sys)
+    assert scanner_mod.verify_names(dataclasses.replace(volume, fs_type="Btrfs")) == IS_WINDOWS
+
+
 class _NtWalk:
     """A reference walker for SPACEKNIFE_TEST_CASE_ROOT, independent of the native one: ntdll through
     ctypes, every folder listed with FileIdBothDirectoryInformation and every subfolder opened by the
@@ -714,6 +864,12 @@ class _NtWalk:
     def close(self, h: Any) -> None:
         self.nt.NtClose(self.wt.HANDLE(h))
 
+    def file_id(self, h: Any) -> int | None:
+        """FileInternalInformation: the 64-bit id FileIdBothDirectoryInformation lists."""
+        io = self.IOSB()
+        status = self.nt.NtQueryInformationFile(self.wt.HANDLE(h), ctypes.byref(io), self.buf, 8, 6)
+        return None if status & 0x80000000 else int(struct.unpack_from("<Q", self.buf, 0)[0])
+
     def fs_name(self, h: Any) -> str:
         io = self.IOSB()
         self.nt.NtQueryVolumeInformationFile(self.wt.HANDLE(h), ctypes.byref(io), self.buf, len(self.buf), 5)
@@ -766,16 +922,22 @@ class _NtWalk:
 def test_case_twins_of_a_real_tree_match_a_reference_that_opens_by_id() -> None:
     """The native walker on a real tree with case-only siblings (WinBtrfs: I:\\usr\\lib\\perl5, a
     flatpak runtime's share\\terminfo) lists each folder as a reference that never opens a folder
-    by its name does: per folder the names, kinds and sizes. On Btrfs every folder the reference
-    lists also matches the size its parent's listing gave it (2 bytes per byte of each name), and a
-    folder no other entry shares its name with lists the same by id as by path (filters that would
-    list folders opened by id in part, as on C:, would show here). No counts are fixed."""
+    by its name does: per folder the names, kinds and sizes, and no folder the reference does not
+    have (apart from reparse points the reference does not enter). On Btrfs every folder the
+    reference lists also matches the size its parent's listing gave it (2 bytes per byte of each
+    name). A folder whose path reaches it (no name on the way shares its name with another entry)
+    lists the same by id as by path: filters that would list folders opened by id in part, as on
+    C:, would show here. A folder whose path reaches another entry, given as a task, is a listing
+    error on Btrfs (the walker finds out the file system itself), and the entry it reaches is
+    listed. No counts are fixed."""
     root = os.path.abspath(os.environ["SPACEKNIFE_TEST_CASE_ROOT"])
     nt = _NtWalk()
     top = nt.open_path(root)
     assert top is not None, root
     btrfs = nt.fs_name(top).lower() == "btrfs"
     ref: dict[str, list[list[tuple[str, int, int]]]] = {}
+    entered: list[str] = []  # reparse points the reference does not enter (the native walker may)
+    losers: list[tuple[str, str]] = []  # (a folder whose path reaches another entry, that entry)
     problems: list[str] = []
 
     def kind_of(attrs: int, tag: int) -> int:
@@ -783,7 +945,7 @@ def test_case_twins_of_a_real_tree_match_a_reference_that_opens_by_id() -> None:
             return worker.KIND_LINK
         return worker.KIND_DIR if attrs & 0x10 else worker.KIND_FILE
 
-    def walk(path: str, h: Any, listed_size: int | None) -> None:
+    def walk(path: str, h: Any, listed_size: int | None, by_path: bool) -> None:
         got = nt.listing(h)
         if got is None:
             problems.append(f"{path}: cannot be listed")
@@ -798,32 +960,45 @@ def test_case_twins_of_a_real_tree_match_a_reference_that_opens_by_id() -> None:
         folded: dict[str, int] = {}
         for n in names:
             folded[n.upper()] = folded.get(n.upper(), 0) + 1
-        for name, attrs, eof, fid, _tag in got:
+        ids = {n: fid for n, _a, _eof, fid, _t in got}
+        for name, attrs, eof, fid, tag in got:
+            child = os.path.join(path, name)
+            if attrs & 0x10 and attrs & 0x400 and not tag & 0x20000000:
+                entered.append(child)
             if not attrs & 0x10 or attrs & 0x400:
                 continue  # reparse points are not entered here
-            child = os.path.join(path, name)
             ch = nt.open_id(h, fid, btrfs)
             if ch is None:
                 problems.append(f"{child}: cannot be opened by its file id")
                 continue
+            # a path reaches this folder only through names no other entry shares
+            reached = by_path and folded[name.upper()] == 1 and "\\" not in name and "/" not in name
             try:
-                if folded[name.upper()] == 1 and "\\" not in name and "/" not in name:
-                    by_path = nt.open_path(child)
-                    if by_path is not None:
-                        a, b = nt.listing(by_path), nt.listing(ch)
-                        nt.close(by_path)
+                if reached:
+                    named = nt.open_path(child)
+                    if named is not None:
+                        a, b = nt.listing(named), nt.listing(ch)
+                        nt.close(named)
                         if (
                             a is not None
                             and b is not None
                             and sorted(e[0] for e in a) != sorted(e[0] for e in b)
                         ):
                             problems.append(f"{child}: lists other names by id than by path")
-                walk(child, ch, eof)
+                elif by_path and folded[name.upper()] > 1:
+                    named = nt.open_path(child)
+                    other = nt.file_id(named) if named is not None else None
+                    if named is not None:
+                        nt.close(named)
+                    winner = next((n for n, i in ids.items() if i == other and n != name), None)
+                    if winner is not None:
+                        losers.append((child, os.path.join(path, winner)))
+                walk(child, ch, eof, reached)
             finally:
                 nt.close(ch)
 
     try:
-        walk(root, top, None)
+        walk(root, top, None, True)
     finally:
         nt.close(top)
     assert not problems, problems[:10]
@@ -841,6 +1016,18 @@ def test_case_twins_of_a_real_tree_match_a_reference_that_opens_by_id() -> None:
     assert not res["errors"], res["errors"][:10]
     differ = [p for p, rows in ref.items() if sorted(nat.get(p, [])) != sorted(rows)]
     assert not differ, f"{len(differ)} of {len(ref)} folders differ from the reference, e.g. {differ[:8]}"
+    extra = [p for p in nat if p not in ref and not any(p == q or p.startswith(q + "\\") for q in entered)]
+    assert not extra, f"{len(extra)} folders only in the native listing, e.g. {extra[:8]}"
+
+    # as tasks (the frontier, a monitor's relist, a rescan): a loser is an error, its winner listed
+    if btrfs and losers:
+        tasks: list[Task] = []
+        for i, (loser, winner) in enumerate(losers[:20]):
+            tasks += [((0, 2 * i + 1, 0), loser, 0), ((0, 2 * i + 2, 0), winner, 0)]
+        res = native.scan_slice(tasks, {"roots": [{"path": root}], **EVERYTHING})
+        errors = {path: msg for _ref, path, msg in res["errors"] if _ref[0] == 0}
+        assert all(errors.get(loser) == worker.CASE_ERROR for loser, _w in losers[:20]), errors
+        assert not {w for _l, w in losers[:20]} & errors.keys(), errors
 
 
 # ---------------------------------------------------------------------------- POSIX specifics

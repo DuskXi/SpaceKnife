@@ -27,6 +27,7 @@ from spaceknife_protocol.methods import (
     EVENT_OPS_PROGRESS,
     OPS_UNDO,
     PATH_FORMS,
+    SCAN_CLOSE,
     SCAN_START,
     TREE_FIND,
 )
@@ -190,3 +191,36 @@ async def test_tree_follows_without_monitoring(tmp_path: Path, server: Server, c
     assert handle.store.find(str(gone)) is None
     assert handle.store.find(str(root / "stay.tmp")) is not None
     assert os.path.exists(root / "stay.tmp")
+
+
+async def test_paths_are_checked_below_their_scan_root_once_the_scan_is_closed(
+    tmp_path: Path, client: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Executing the basket checks every path's names below the root it was scanned under
+    (trash.reaches_another: a case-only sibling on WinBtrfs); the basket keeps that root, so the
+    check holds after the scan's tab is closed. Nothing is touched when it fails."""
+    from spaceknife.ops import trash
+
+    root = tmp_path / "root"
+    (root / "a").mkdir(parents=True)
+    (root / "a" / "f").write_bytes(b"f")
+    scan_id = await scanned(client, root)
+    ops = Ops(client)
+    await client.call(BASKET_CLEAR, Empty())
+    node = await node_of(client, scan_id, root / "a")
+    await client.call(BASKET_ADD, po.BasketAddParams(scan_id=scan_id, nodes=[node]))
+    await client.call(SCAN_CLOSE, p.ScanIdParams(scan_id=scan_id))
+    asked: list[tuple[str, str]] = []
+
+    def opens_another(path: str, scan_root: str, **_kw: object) -> bool:
+        asked.append((path, scan_root))
+        return True
+
+    monkeypatch.setattr(trash, "reaches_another", opens_another)
+    for mode in ("trash", "delete"):
+        task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode=mode))
+        done = await ops.phase(task.task_id, "done")
+        assert [r.code for r in done.results] == ["ambiguous_name"], mode
+    assert asked == [(str(root / "a"), str(root))] * 2
+    assert (root / "a" / "f").read_bytes() == b"f"
+    await client.call(BASKET_CLEAR, Empty())
