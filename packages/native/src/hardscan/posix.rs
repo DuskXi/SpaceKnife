@@ -855,7 +855,8 @@ const PIECE: usize = 1000;
 /// time, each piece relative to the folder the one before reached. Resolution is that of one open
 /// of the whole path: symlinks in the middle are followed, `oflags` (O_NOFOLLOW) apply to the last
 /// name only, and the folders on the way need search permission only (O_PATH; elsewhere read
-/// permission too, so a few such paths still fail, as they did before).
+/// permission too, so a few such paths still fail, as they did before). A piece that is too long
+/// only once its symlinks are followed (macOS) is opened again one name at a time.
 fn open_long(path: &[u8], oflags: libc::c_int) -> Result<Fd, i32> {
     #[cfg(target_os = "linux")]
     let middle = libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC;
@@ -863,8 +864,17 @@ fn open_long(path: &[u8], oflags: libc::c_int) -> Result<Fd, i32> {
     let middle = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
     let mut dir: Option<Fd> = None;
     let mut rest = path;
+    // macOS counts a followed symlink's target into the 1,024 bytes of the piece being resolved:
+    // once a piece is too long that way, go on one name at a time (a target alone always fits)
+    let mut one = false;
     loop {
-        let (piece, tail) = if rest.len() <= PIECE {
+        let (piece, tail) = if one {
+            // a leading "/" stays with the first name
+            match rest.get(1..).and_then(|r| r.iter().position(|&b| b == b'/')) {
+                Some(j) => (&rest[..j + 1], &rest[j + 2..]),
+                None => (rest, &rest[rest.len()..]),
+            }
+        } else if rest.len() <= PIECE {
             (rest, &rest[rest.len()..])
         } else {
             // a leading "/" stays with the first piece
@@ -880,7 +890,12 @@ fn open_long(path: &[u8], oflags: libc::c_int) -> Result<Fd, i32> {
         // SAFETY: c is NUL-terminated; `at` is open (or AT_FDCWD) until `dir` is replaced below.
         let fd = unsafe { libc::openat(at, c.as_ptr(), if last { oflags } else { middle }) };
         if fd < 0 {
-            return Err(errno());
+            let code = errno();
+            if code == libc::ENAMETOOLONG && !one && piece[1..].contains(&b'/') {
+                one = true;
+                continue;
+            }
+            return Err(code);
         }
         let fd = Fd(fd);
         if last {

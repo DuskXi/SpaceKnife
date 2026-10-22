@@ -506,18 +506,23 @@ def _open_dir(path: str, flags: int) -> int:
     (ENAMETOOLONG) although the folder is there to list (posix.rs `open_long`): opened a piece of
     whole names at a time, each relative to the folder the one before reached. Resolution is that
     of one open of the whole path: symlinks in the middle are followed, ``flags`` apply to the last
-    name only, and the folders on the way need search permission only (O_PATH, Linux)."""
+    name only, and the folders on the way need search permission only (O_PATH, Linux). A piece that
+    is too long only once its symlinks are followed (macOS) is opened again one name at a time."""
     try:
         return os.open(path, flags)
     except OSError as exc:
         if exc.errno != errno.ENAMETOOLONG:
             raise
-    middle = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    middle = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     rest = os.fsencode(path)
     fd: int | None = None
+    one = False  # macOS counts a followed symlink's target into the piece: then one name at a time
     try:
         while True:
-            if len(rest) <= _PIECE:
+            if one:
+                cut = rest.find(b"/", 1)  # a leading "/" stays with the first name
+                piece, tail = (rest, b"") if cut < 0 else (rest[:cut], rest[cut + 1 :])
+            elif len(rest) <= _PIECE:
                 piece, tail = rest, b""
             else:
                 cut = rest.rfind(b"/", 1, _PIECE + 1)  # a leading "/" stays with the first piece
@@ -525,7 +530,13 @@ def _open_dir(path: str, flags: int) -> int:
                     raise OSError(errno.ENAMETOOLONG, os.strerror(errno.ENAMETOOLONG), path)
                 piece, tail = rest[:cut], rest[cut + 1 :]
             tail = tail.lstrip(b"/")
-            opened = os.open(piece, flags if not tail else middle, dir_fd=fd)
+            try:
+                opened = os.open(piece, flags if not tail else middle, dir_fd=fd)
+            except OSError as exc:
+                if exc.errno == errno.ENAMETOOLONG and not one and b"/" in piece[1:]:
+                    one = True
+                    continue
+                raise
             if fd is not None:
                 os.close(fd)
             fd = opened

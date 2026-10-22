@@ -450,8 +450,18 @@ def test_windows_relative_opens_stop_where_opens_by_path_do(tmp_path: Path) -> N
         relative = native.scan_slice(tasks, nopts(opts))
         assert native._open_stats(True)["relative"] > 0
         assert_same(SliceResult(**by_path), relative)
-        # the first folder of chain a past the limit; nothing below it is reached
-        assert len(by_path["errors"]) == 1, by_path["errors"]
+        # chain a: its first folder past the limit is an error and nothing below it is reached.
+        # Chain b's deepest folder may be refused too, by the kernel next to the limit (what the
+        # drive letter resolves to: on a CI runner it was; here it is not).
+        moved = {
+            n: [str(root / (n * (1 + grow))) + p[len(top) :] for p in chain]
+            for n, (top, chain) in built.items()
+        }
+        errs = [e[1] for e in by_path["errors"]]
+        in_a = [p for p in errs if p in moved["a"]]
+        assert len(in_a) == 1, errs
+        assert set(errs) - set(in_a) <= {moved["b"][-1]}, errs
+        assert not set(moved["a"][moved["a"].index(in_a[0]) + 1 :]) & set(by_path["paths"])
     finally:
         for name, (top, chain) in built.items():
             os.rename("\\\\?\\" + str(root / (name * (1 + grow))), top)
