@@ -8,6 +8,10 @@
 //! Results hang off the tree and are serialised afterwards in preorder, which is exactly the
 //! order worker.scan_slice lists in, so ``(1, L, j)`` references always point at earlier
 //! listings and an untruncated slice is identical to the worker's.
+//!
+//! A listed directory may hand its subdirectories a way to open them from it (`sys::Via`; on
+//! Windows its open handle, docs/native.md 2.2). Each subdirectory takes it when its job starts,
+//! so a directory stays open only until its last subdirectory has started.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -27,6 +31,8 @@ pub struct Node {
     pub root: u32,
     /// Found by this call (open without following a symlink) rather than given as a task.
     pub discovered: bool,
+    /// How to open it from its listed parent (taken when its job starts).
+    pub via: Mutex<Option<sys::Via>>,
     pub state: OnceLock<State>,
 }
 
@@ -52,12 +58,21 @@ pub struct Child {
 
 impl Node {
     pub fn new(path: NativePath, root: u32, discovered: bool) -> Self {
+        Self::with_via(path, root, discovered, None)
+    }
+
+    pub fn with_via(path: NativePath, root: u32, discovered: bool, via: Option<sys::Via>) -> Self {
         Self {
             path,
             root,
             discovered,
+            via: Mutex::new(via),
             state: OnceLock::new(),
         }
+    }
+
+    fn take_via(&self) -> Option<sys::Via> {
+        self.via.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
     fn take_children(&mut self, into: &mut Vec<Node>) {
@@ -169,6 +184,7 @@ pub fn default_threads() -> usize {
 }
 
 fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
+    let via = node.take_via(); // the parent's handle goes once its last subdirectory has started
     if ctx.should_stop() {
         let _ = node.state.set(State::Deferred);
         return;
@@ -176,18 +192,19 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
     let slot = rayon::current_thread_index().unwrap_or(0) % ctx.arenas.len();
     let mut arena = ctx.arenas[slot].lock().unwrap_or_else(|e| e.into_inner());
     let mark = arena.mark();
-    let mut subdirs: Vec<(u32, NativePath)> = Vec::new();
+    let mut subdirs: Vec<(u32, NativePath, sys::Hint)> = Vec::new();
     let root = node.root as usize;
     let res = sys::list_dir(
         &node.path,
         node.discovered,
+        via,
         &ctx.roots[root],
         &ctx.root_state[root],
         &mut arena,
         &mut subdirs,
     );
     match res {
-        Ok(()) => {
+        Ok(parent) => {
             let count = arena.len() - mark.entries;
             let name_end = arena.names.len();
             drop(arena);
@@ -195,9 +212,12 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
             ctx.listed.fetch_add(1, Ordering::Relaxed);
             let children: Box<[Child]> = subdirs
                 .into_iter()
-                .map(|(j, path)| Child {
-                    j,
-                    node: Node::new(path, node.root, true),
+                .map(|(j, path, hint)| {
+                    let via = parent.as_ref().and_then(|p| sys::via(p, hint));
+                    Child {
+                        j,
+                        node: Node::with_via(path, node.root, true, via),
+                    }
                 })
                 .collect();
             let listed = Listed {

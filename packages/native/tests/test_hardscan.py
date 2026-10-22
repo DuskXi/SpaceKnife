@@ -381,6 +381,76 @@ def test_windows_trailing_dot_names_are_listed(tmp_path: Path) -> None:
     assert not res["errors"] and len(res["name_lens"]) == 2
 
 
+@pytest.mark.skipif(not IS_WINDOWS, reason="Windows relative opens")
+def test_windows_relative_opens_list_the_same_tree(tree: Path) -> None:
+    """Subdirectories opened by name relative to their parent's handle (and checked against the
+    file id the parent's listing gave) list exactly what opens by full path list: the worker's
+    tree either way, every folder opened once, and no relative open fell back."""
+    tasks: list[Task] = [((0, 1, 0), str(tree), 0)]
+    roots = (root_opts(tree),)
+    native._open_stats(True)
+    compare(tasks, roots, relative_open=False)
+    off = native._open_stats(True)
+    compare(tasks, roots)  # on by default
+    on = native._open_stats(True)
+    assert off["relative"] == 0 and off["by_path"] > 10
+    assert on["relative"] > 10 and on["by_path"] == 1  # only the task itself goes by path
+    assert on["relative"] + on["by_path"] == off["by_path"]
+    assert on["relative_failed"] == on["id_mismatch"] == on["id_unknown"] == 0
+
+
+def _chain_to(top: str, deepest: int) -> list[str]:
+    """Folders top, top\\d…, … down to one whose path is exactly `deepest` units long."""
+    chain = [top]
+    os.mkdir(top)
+    while len(chain[-1]) + 241 < deepest:
+        chain.append(chain[-1] + "\\" + "d" * 240)
+        os.mkdir(chain[-1])
+    chain.append(chain[-1] + "\\" + "d" * (deepest - len(chain[-1]) - 1))
+    os.mkdir(chain[-1])
+    return chain
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="NT path length limit")
+def test_windows_relative_opens_stop_where_opens_by_path_do(tmp_path: Path) -> None:
+    """A folder an open by path cannot reach because its path is too long can still be opened
+    relative to its parent. It must not be: the open by path reports it as an error, so relative
+    opens report the same error. Near the limit the kernel may refuse paths too, depending on what
+    the drive letter resolves to (a SUBST drive's target makes names longer); relative opens leave
+    those to the open by path, so both ways list the same. Renaming the top folder longer puts the
+    deepest folders past the limit, and next to it. (The worker cannot take part: os.scandir raises
+    ValueError for such a path.)"""
+    root = tmp_path / "deep"
+    root.mkdir()
+    grow = 199
+    chains = {  # top folder -> deepest NT path once the top is `grow` units longer
+        "a": 32_900,  # past the limit of an NT path (32,766 units)
+        "b": 32_758,  # just within it
+    }
+    built = {}
+    for name, final in chains.items():
+        top = "\\\\?\\" + str(root / name)
+        built[name] = (top, _chain_to(top, final - grow))
+        os.rename(top, "\\\\?\\" + str(root / (name * (1 + grow))))
+    try:
+        tasks: list[Task] = [((0, 1, 0), str(root), 0)]
+        opts = SliceOptions(roots=(root_opts(root),), **EVERYTHING)
+        # see settle(): a first read can still bump timestamps
+        native.scan_slice(tasks, nopts(opts, relative_open=False))
+        by_path = native.scan_slice(tasks, nopts(opts, relative_open=False))
+        native._open_stats(True)
+        relative = native.scan_slice(tasks, nopts(opts))
+        assert native._open_stats(True)["relative"] > 0
+        assert_same(SliceResult(**by_path), relative)
+        # the first folder of chain a past the limit; nothing below it is reached
+        assert len(by_path["errors"]) == 1, by_path["errors"]
+    finally:
+        for name, (top, chain) in built.items():
+            os.rename("\\\\?\\" + str(root / (name * (1 + grow))), top)
+            for d in reversed(chain):
+                os.rmdir(d)
+
+
 # ---------------------------------------------------------------------------- POSIX specifics
 
 
@@ -567,7 +637,7 @@ def test_options_are_validated(tree: Path) -> None:
         native.scan_slice(tasks, {})
     with pytest.raises(TypeError):
         native.scan_slice([((0, 1, 0), b"bytes", 0)], {"roots": [{}]})
-    native.scan_slice(tasks, {"roots": [{}], "keep_access_time": None})  # a known key
+    native.scan_slice(tasks, {"roots": [{}], "keep_access_time": None, "relative_open": None})  # known keys
     with pytest.raises(ValueError, match="unknown"):
         native.scan_slice(
             tasks, {"roots": [{}], "open_by_id": True}
@@ -579,8 +649,9 @@ def test_scanner_driven_native_scans_build_the_same_tree(tree: Path, budget_s: f
     """The native walker as the app drives it (many tasks per call, calls cut short by their budget,
     the rest handed back and listed by later calls on other threads) builds exactly the tree the
     Python walker builds, whatever the budget: how a scan is cut into calls must never change what
-    it finds. (Opening folders relative to another folder once listed some of them only in part, in
-    calls that went deep enough: a third of C: went missing without an error.)"""
+    it finds. (Opening folders by file id relative to a fixed anchor folder once listed some of
+    them only in part, in calls that went deep enough: a third of C: went missing without an
+    error.)"""
     py_store = scan_store(tree)
     slicer = native_slicer()
     assert slicer is not None

@@ -192,6 +192,11 @@
 
 起因：试过「按文件 ID 打开子目录」，结果在 C: 上悄悄漏扫了三分之一，在 WinBtrfs 上无限循环，后来去掉了（经过见 [docs/native.md](docs/native.md) 2.2「试过但去掉的」）。同时对照了小众软件论坛上各款空间分析软件在 WinSxS 上结果不一致的讨论。
 
+- [x] **非 ID、只保留访问时间的硬扫描：冷热缓存实测与整盘核对**（2026-10-22）：C:（NTFS 876 万项）、W:（ReFS 321 万项）、I:（WinBtrfs 149 万项）各冷 2 次、热 2 次，逐个文件夹与参照（C: 读 MFT，W:/I: Python 遍历器）比对，没有漏扫和扫错，差异都能归到期间的文件变动或已知的有意差异（docs/native.md 2.2）。
+- [x] **子目录相对父目录句柄、按名字打开**（`relative_open`，默认开；代替按 ID 打开）：每个目录打开后核对文件 ID；重解析点、没有 ID、名字带 `\`、接近长度上限的都按完整路径；WinBtrfs 的 FileIdExtd ID 不可信时改用 FileIdBoth。热缓存 W: 快约 25–30%、C: 约 4%，冷缓存看不出差别；三块盘逐个文件夹比对一致（docs/native.md 2.2）。
+- [ ] **保留访问时间在受保护的系统文件夹里不起作用**：`C:\Windows\WinSxS`、`DriverStore\FileRepository` 等只给 TrustedInstaller 写权限，管理员打开 `FILE_WRITE_ATTRIBUTES` 也被拒（系统盘上约 16% 的文件夹），硬扫描整个 C: 仍写 0.25–0.7 GB。实测在进程里启用 `SeRestorePrivilege` 后带备份语义打开就能拿到写属性权限。待决定：要不要在管理员权限下只在列目录的线程上模拟一个启用了它的令牌（它让带备份语义的打开绕过写权限检查，安全上要仔细评估）；标准用户没有办法。
+- [ ] Rust 单元测试（`cargo test --lib`，含 Windows 上相对打开的 ID 核对测试）CI 里没有跑：考虑在 Windows 和 Linux 的 CI 上加一步。
+- [ ] WinBtrfs 上的硬扫描用时在约 1 s 和约 5.8 s（每次读 1.2 GB）之间跳，和开不开相对打开无关，看起来是 WinBtrfs 自己的缓存；Python 遍历器（FindFirstFileEx）有时不读盘。查清楚是不是 `FileIdExtdDirectoryInformation` 让它多读了 inode。
 - [ ] **Windows 硬扫描的硬链接只计一次**（PLAN.md 的正确性要求，现在没做到）
   - 现状：每行都是 `ino=0, nlink=1`，每个名字都算一次。本机 WinSxS 的情况：
     - 每个名字都算：27.21 GiB；
@@ -199,6 +204,7 @@
     - 其中与 System32 等共享：8.00 GiB（33,920 个文件）。
   - 后果：整盘合计会多算 10 GiB 以上，可能超过卷的已用空间（违反 UI-W7-18 的验收）。删除篮在 Windows 硬扫描下也判断不了硬链接（docs/manage.md）。
   - [ ] 原生遍历器把 `FileIdExtdDirectoryInformation` 已经给出的文件 ID 填进 `ino`，不多花系统调用。
+    - 注意 WinBtrfs（2026-10-22 实测）：它的 `FileIdExtdDirectoryInformation` 给每个子项填的都是被列目录自己的 ID（`I:\usr` 下 bin、games、include 都是 `I:\usr` 的 `…0775`），`FileIdBothDirectoryInformation` 和句柄上查到的 ID 才是对的。照搬就会把整个文件夹当成同一个文件的硬链接。相对打开已经按「一次列表里两个子目录同一 ID」识别它并改用 FileIdBoth（`win.rs` `shares_ids`），硬链接要用同一份判断；文件之间的重复 ID 本来就可能是硬链接，只能从子目录判断。
   - [ ] 没有 nlink，要自己找重复：扫描结束时按 `ino` 排序（870 万项约 70 MB、1 秒量级），或者边扫边找；然后修正 `HARDLINK_DUP` 和各级合计。内存按 docs/memory.md 估算。
   - [ ] 三种扫描统一归属规则。现在：
     - MFT 快扫：算在 MFT 记录里第一个名字上；

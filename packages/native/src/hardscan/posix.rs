@@ -6,6 +6,7 @@
 #[cfg(target_os = "linux")]
 use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
+use std::sync::Arc;
 
 use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
 
@@ -65,10 +66,24 @@ fn is_skipped(skip: &[Vec<u8>], dir: &[u8], name: &[u8]) -> bool {
 pub struct RootState;
 
 impl RootState {
-    /// `keep_access_time` is a Windows option (docs/native.md 2.2: Linux would need O_NOATIME).
-    pub fn new(_keep_access_time: bool) -> Self {
+    /// `keep_access_time` and `relative_open` are Windows options (docs/native.md 2.2: Linux would
+    /// need O_NOATIME; opening a subdirectory relative to its parent measured no faster there).
+    pub fn new(_keep_access_time: bool, _relative_open: bool) -> Self {
         Self
     }
+}
+
+/// Windows hands a listed directory's handle to its subdirectories (win.rs); here nothing is.
+pub type Hint = ();
+pub type Parent = ();
+pub enum Via {}
+
+pub fn via(_parent: &Arc<Parent>, _hint: Hint) -> Option<Via> {
+    None
+}
+
+pub fn open_stats(_reset: bool) -> Vec<(&'static str, u64)> {
+    Vec::new()
 }
 
 /// Python's OSError.strerror for an errno (the C library's message).
@@ -184,7 +199,7 @@ fn add_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) {
     push_entry(
         stat_entry(dirfd, name),
@@ -205,7 +220,7 @@ fn push_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) {
     let name_start = arena.names.len();
     arena.names.extend_from_slice(raw);
@@ -258,7 +273,7 @@ fn push_entry(
     };
     arena.push_row(name_start, row);
     if descend {
-        subdirs.push((j, join_posix(dir, raw).into_boxed_slice()));
+        subdirs.push((j, join_posix(dir, raw).into_boxed_slice(), ()));
     }
 }
 
@@ -812,10 +827,21 @@ pub fn bulk_state() -> String {
 pub fn list_dir(
     path: &[u8],
     discovered: bool,
+    _via: Option<Via>,
     root: &RootOpts,
     _state: &RootState,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
+) -> Result<Option<Arc<Parent>>, String> {
+    list_path(path, discovered, root, arena, subdirs).map(|()| None)
+}
+
+fn list_path(
+    path: &[u8],
+    discovered: bool,
+    root: &RootOpts,
+    arena: &mut Arena,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) -> Result<(), String> {
     let c = CString::new(path).map_err(|_| "embedded null byte".to_owned())?;
     let mut oflags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;

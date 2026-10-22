@@ -10,6 +10,7 @@
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
 //! | `keep_access_time` | True | Windows: listing a folder does not update its last access time |
+//! | `relative_open` | True | Windows: a found subdirectory is opened by name relative to its parent's handle, checked against the listed file id |
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
 //! (`SliceResult(**scan_slice(tasks, opts))`). Differences from the worker, all deliberate:
@@ -49,12 +50,13 @@ use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 use common::{Arena, NativePath, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
-const OPT_KEYS: [&str; 5] = [
+const OPT_KEYS: [&str; 6] = [
     "roots",
     "budget_s",
     "max_entries",
     "threads",
     "keep_access_time",
+    "relative_open",
 ];
 const ROOT_KEYS: [&str; 6] = [
     "dev",
@@ -71,6 +73,7 @@ struct Opts {
     max_entries: usize,
     threads: usize,
     keep_access_time: bool,
+    relative_open: bool,
 }
 
 /// `obj[key]` for a dict (rejecting unknown keys), else `getattr(obj, key, None)`.
@@ -152,12 +155,17 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         Some(v) if !v.is_none() => v.is_truthy()?,
         _ => true,
     };
+    let relative_open = match field(opts, "relative_open")? {
+        Some(v) if !v.is_none() => v.is_truthy()?,
+        _ => true,
+    };
     Ok(Opts {
         roots,
         budget_s,
         max_entries,
         threads,
         keep_access_time,
+        relative_open,
     })
 }
 
@@ -287,7 +295,7 @@ fn scan_slice<'py>(
         root_state: opts
             .roots
             .iter()
-            .map(|_| sys::RootState::new(opts.keep_access_time))
+            .map(|_| sys::RootState::new(opts.keep_access_time, opts.relative_open))
             .collect(),
         roots: opts.roots,
         deadline,
@@ -466,8 +474,21 @@ fn bulk_listing() -> String {
     }
 }
 
+/// How directories were opened since the last reset, process-wide (tests and measurements; Windows:
+/// relative opens, opens by path, and why relative opens fell back). Empty on POSIX.
+#[pyfunction]
+#[pyo3(signature = (reset = false))]
+fn _open_stats(py: Python<'_>, reset: bool) -> PyResult<Bound<'_, PyDict>> {
+    let d = PyDict::new(py);
+    for (k, v) in sys::open_stats(reset) {
+        d.set_item(k, v)?;
+    }
+    Ok(d)
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
+    m.add_function(wrap_pyfunction!(_open_stats, m)?)?;
     m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;
     Ok(())
 }

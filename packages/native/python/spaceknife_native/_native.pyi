@@ -53,6 +53,10 @@ class SliceOpts(TypedDict, total=False):
     max_entries: int
     threads: int  # 0: min(logical CPUs, 16)
     keep_access_time: bool  # Windows, default True: listing a folder keeps its last access time
+    relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
+
+def _open_stats(reset: bool = False) -> dict[str, int]:
+    """How directories were opened (Windows; empty on POSIX), process-wide since the last reset."""
 
 def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOpts | Any) -> dict[str, Any]:
     """Same fields as spaceknife.scan.worker.SliceResult (numpy arrays, bytes, lists).
