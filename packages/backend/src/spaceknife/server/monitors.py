@@ -37,6 +37,7 @@ from ..filter.names import forget
 from ..i18n import tr
 from ..monitor import Change, Watcher, create_watcher
 from ..scan import worker
+from ..scan.scanner import verify_names
 from ..scan.volume import volume_for
 from ..scan.worker import SliceOptions, SliceResult
 from ..store import mutate
@@ -618,9 +619,13 @@ class ScanMonitor:
         if root_idx is None:
             return None
         opts = SliceOptions(roots=self._root_opts(), budget_s=0.0)  # this folder only
-        res = await self._slice([((0, node, 0), path, root_idx)], opts)
-        if len(res.refs) != 1 or res.errors:
+        task = (0, node, 0)
+        res = await self._slice([(task, path, root_idx)], opts)
+        if not len(res.refs) or tuple(int(x) for x in res.refs[0]) != task:
             return None  # vanished (its parent lists it as gone) or no longer readable
+        if any(tuple(ref) == task for ref, _path, _msg in res.errors):
+            return None  # a folder a path cannot reach (a case-only sibling): stays as scanned
+        # errors of its subfolders (names no path can open) are theirs: the listing stands
         return res
 
     async def _scan_new(self, folders: list[int]) -> None:
@@ -680,7 +685,11 @@ class ScanMonitor:
         scanner = self.handle.scanner
         if scanner is not None:
             return scanner.root_options
-        return tuple(worker.RootOptions() for _ in self.handle.roots)
+        # each root's path and name check still apply: a relist must not list a case-only
+        # sibling's contents under the other's name
+        return tuple(
+            worker.RootOptions(path=r.path, verify_names=verify_names(r.volume)) for r in self.handle.roots
+        )
 
     def _root_index(self, path: str) -> int | None:
         norm = os.path.normcase(path)

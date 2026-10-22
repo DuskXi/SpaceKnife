@@ -46,6 +46,7 @@ TEXT = Texts(
         "group_name": "{folder} 中 {count} 个小项",
         "bad_node": "扫描结果中没有这一项",
         "virtual": "MFT 伪文件夹中的项不在磁盘上",
+        "bad_name": "它或上级文件夹的名字里有 \\ 或 /，没有路径能找到它",
         "not_folder": "小项聚合块的所在位置不是文件夹",
         "not_member": "不是所在文件夹的直接子项",
         "missing": "已不存在",
@@ -413,8 +414,14 @@ class Basket:
         c = store.cols
         if node <= 0 or node >= len(store) or c["flags"][node] & np.uint32(Flag.GONE):
             return TEXT["bad_node"]
-        if any(c["flags"][n] & np.uint32(Flag.VIRTUAL) for n in (node, *store.ancestors(node))):
+        line = (node, *store.ancestors(node))
+        if any(c["flags"][n] & np.uint32(Flag.VIRTUAL) for n in line):
             return TEXT["virtual"]
+        # a name with a separator (WinBtrfs shows Linux names with a backslash as they are): its
+        # path names something else, or nothing (the scan root's own name is a path)
+        seps = tuple(s for s in (os.sep, os.altsep) if s)
+        if any(any(s in store.name(n) for s in seps) for n in line if c["depth"][n] > 1):
+            return TEXT["bad_name"]
         return None
 
     def _add_node(self, store: NodeStore, scan_id: str, node: int, result: AddResult) -> None:

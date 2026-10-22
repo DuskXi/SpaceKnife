@@ -3837,6 +3837,7 @@
             "no_trash",
             "exists",
             "cancelled",
+            "ambiguous_name",
             "error"
           ],
           "title": "Code",

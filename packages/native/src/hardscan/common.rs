@@ -40,6 +40,13 @@ pub struct RootOpts {
     pub skip: Vec<Vec<u8>>,
     /// Folders not to enter, as not accessible (worker.RootOptions.protect).
     pub protect: Vec<Vec<u8>>,
+    /// The scan root as given (worker.RootOptions.path; Windows: tasks are checked by their names
+    /// below it, case.rs `below_root`). Empty: not given, nothing checked.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub path: NativePath,
+    /// Windows: check every task by the stored names below the root, as on Btrfs (where names
+    /// fold onto case-sensitive storage, which the walker finds out itself).
+    pub verify_names: bool,
 }
 
 impl Default for RootOpts {
@@ -51,8 +58,22 @@ impl Default for RootOpts {
             cross_mounts: false,
             skip: Vec::new(),
             protect: Vec::new(),
+            path: NativePath::default(),
+            verify_names: false,
         }
     }
+}
+
+/// What a root's state for one call starts from (`sys::RootState::new`; the `scan_slice` options).
+#[derive(Clone, Copy, Debug, Default)]
+#[cfg_attr(not(windows), allow(dead_code))]
+pub struct StateOpts {
+    pub keep_access_time: bool,
+    pub relative_open: bool,
+    pub verify_names: bool,
+    /// Test seams, the private `_fold_strict` and `_extd_self_ids` options (win.rs RootState).
+    pub fold_strict: bool,
+    pub extd_self_ids: bool,
 }
 
 /// Directory path in the platform's native form: UTF-16 units on Windows, raw bytes on POSIX.

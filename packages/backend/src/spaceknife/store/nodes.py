@@ -702,22 +702,30 @@ class NodeStore:
         )
 
     def find(self, path: str) -> int | None:
-        """Node id for an absolute path inside one of the roots, or None."""
-        target = os.path.normcase(os.path.normpath(path))
+        """Node id for an absolute path inside one of the roots, or None. Each name is matched in
+        its exact case first, case-insensitively (``normcase``) only when a single entry has it
+        that way: a folder can hold names that differ only in case (WinBtrfs, a case-sensitive
+        NTFS folder), and ``A`` must never resolve to ``a``."""
         for root in self.roots():
-            root_path = os.path.normcase(os.path.normpath(self.name(root)))
-            if target == root_path:
-                return root
-            prefix = root_path if root_path.endswith(os.sep) else root_path + os.sep
-            if not target.startswith(prefix):
+            parts = split_below(path, self.name(root))
+            if parts is None:
                 continue
             node = root
-            for part in target[len(prefix) :].split(os.sep):
-                match = next(
-                    (ch for ch in self.children(node) if os.path.normcase(self.name(ch)) == part), None
-                )
+            for part in parts:
+                key = os.path.normcase(part)
+                match: int | None = None
+                folded: list[int] = []
+                for ch in self.children(node):
+                    own = self.name(ch)
+                    if own == part:
+                        match = ch
+                        break
+                    if os.path.normcase(own) == key:
+                        folded.append(ch)
                 if match is None:
-                    return None
+                    if len(folded) != 1:
+                        return None
+                    match = folded[0]
                 node = match
             return node
         return None
@@ -883,3 +891,21 @@ def encode_name(name: str) -> bytes:
 
 def decode_name(raw: bytes) -> str:
     return raw.decode("utf-8", NAME_ERRORS)
+
+
+def split_below(path: str, root: str) -> list[str] | None:
+    """The names of ``path`` below the scan root ``root``, in their own case, or None when it is
+    not inside it (``[]``: the root itself). Both are normalised; the root part is compared with
+    normcase, so a root typed in another case is the same root."""
+    target = os.path.normpath(path)
+    root_path = os.path.normpath(root)
+    if os.path.normcase(target[: len(root_path)]) != os.path.normcase(root_path):
+        return None
+    rest = target[len(root_path) :]
+    if not rest:
+        return []
+    if not root_path.endswith(os.sep):
+        if not rest.startswith(os.sep):
+            return None  # C:\data2 is not inside C:\data
+        rest = rest[1:]
+    return rest.split(os.sep)

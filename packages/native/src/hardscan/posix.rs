@@ -8,7 +8,7 @@ use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
 use std::sync::Arc;
 
-use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
+use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, secs};
 
 /// The row worker.py writes when an entry cannot be stat'ed.
 const ERROR_ROW: Row = Row {
@@ -69,11 +69,12 @@ pub struct RootState {
 }
 
 impl RootState {
-    /// `keep_access_time` works on Linux (O_NOATIME; macOS has nothing like it). `relative_open` is
-    /// a Windows option: opening a subdirectory relative to its parent measured no faster here.
-    pub fn new(keep_access_time: bool, _relative_open: bool) -> Self {
+    /// `keep_access_time` works on Linux (O_NOATIME; macOS has nothing like it). The rest are
+    /// Windows options: opening a subdirectory relative to its parent measured no faster here, and
+    /// names are bytes compared exactly.
+    pub fn new(o: &StateOpts) -> Self {
         Self {
-            keep: keep_access_time,
+            keep: o.keep_access_time,
         }
     }
 }
@@ -90,14 +91,21 @@ fn keep_access_time(fd: libc::c_int) {
     unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NOATIME) };
 }
 
-/// Windows hands a listed directory's handle to its subdirectories (win.rs); here nothing is.
+/// Windows hands a listed directory's handle to its subdirectories (win.rs); here nothing is, and
+/// no folder is opened by file id (none is pinned, none strict: names are compared as bytes).
 pub type Hint = ();
 pub type Parent = ();
 pub enum Via {}
 
-pub fn via(_parent: &Arc<Parent>, _hint: Hint) -> Option<Via> {
+pub fn via(_parent: &Arc<Parent>, _hint: Hint, _pinned: bool) -> Option<Via> {
     None
 }
+
+pub fn marks(_hint: &Hint) -> u8 {
+    0
+}
+
+pub fn cap_hit() {}
 
 pub fn open_stats(_reset: bool) -> Vec<(&'static str, u64)> {
     Vec::new()
@@ -894,8 +902,8 @@ pub fn list_dir(
     state: &RootState,
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
-) -> Result<Option<Arc<Parent>>, String> {
-    list_path(path, discovered, root, state, arena, subdirs).map(|()| None)
+) -> Result<(Option<Arc<Parent>>, bool), String> {
+    list_path(path, discovered, root, state, arena, subdirs).map(|()| (None, false))
 }
 
 fn list_path(

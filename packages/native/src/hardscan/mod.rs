@@ -5,12 +5,17 @@
 //!
 //! | key | default | meaning |
 //! |---|---|---|
-//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False), `skip` and `protect` (folders not entered: as mount points, as not accessible) |
+//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False), `skip` and `protect` (folders not entered: as mount points, as not accessible), `path` (the root as given) and `verify_names` (False; Windows: tasks must be stored under their names below `path`, as on Btrfs) |
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
 //! | `keep_access_time` | True | Windows and Linux: listing a folder does not update its last access time |
 //! | `relative_open` | True | Windows: a found subdirectory is opened by name relative to its parent's handle, checked against the listed file id |
+//!
+//! Test seams, not part of the interface: `_fold_strict` and `_extd_self_ids` (Windows: behave as
+//! WinBtrfs does, win.rs RootState), `_pinned_cap` (entries below folders opened by file id listed
+//! past the budget; default max(2 × max_entries, 10,000)). `ROOT_KEYS` lists the root keys this
+//! build knows.
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
 //! (`SliceResult(**scan_slice(tasks, opts))`). Differences from the worker, all deliberate:
@@ -19,11 +24,16 @@
 //!   it is some subtree of listed directories (still in preorder, references valid, frontier in
 //!   preorder too). Budgets are checked before each directory, by every thread, so a slice can
 //!   overshoot `max_entries` by up to one directory per thread. Untruncated slices are identical.
-//! - Windows paths are opened in NT form: names Win32 would rewrite (trailing dot or space) are
-//!   listed correctly, and an empty FAT root is an empty listing rather than an error.
+//! - Windows paths are opened in NT form: an empty FAT root is an empty listing rather than an
+//!   error (names Win32 would rewrite, with a trailing dot or space, the worker lists through
+//!   `\\?\` paths as well).
 //! - POSIX: subdirectories found during the call are opened with O_NOFOLLOW (the worker would
 //!   follow a directory that was swapped for a symlink in between).
+//! - Windows: a folder whose name another entry of its listing shares in another case, which an
+//!   open by name does not reach (WinBtrfs), is opened by its file id and listed; the worker, which
+//!   cannot open by id, reports it as a listing error (case.rs, docs/native.md 2.2).
 
+mod case;
 mod common;
 mod links;
 #[cfg(unix)]
@@ -48,24 +58,29 @@ use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyTypeError, PyValueErro
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 
-use common::{Arena, NativePath, RootOpts};
+use common::{Arena, NativePath, RootOpts, StateOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
-const OPT_KEYS: [&str; 6] = [
+const OPT_KEYS: [&str; 9] = [
     "roots",
     "budget_s",
     "max_entries",
     "threads",
     "keep_access_time",
     "relative_open",
+    "_fold_strict",
+    "_extd_self_ids",
+    "_pinned_cap",
 ];
-const ROOT_KEYS: [&str; 6] = [
+const ROOT_KEYS: [&str; 8] = [
     "dev",
     "cluster_size",
     "resident_max",
     "cross_mounts",
     "skip",
     "protect",
+    "path",
+    "verify_names",
 ];
 
 struct Opts {
@@ -75,6 +90,9 @@ struct Opts {
     threads: usize,
     keep_access_time: bool,
     relative_open: bool,
+    fold_strict: bool,
+    extd_self_ids: bool,
+    pinned_cap: Option<usize>,
 }
 
 /// `obj[key]` for a dict (rejecting unknown keys), else `getattr(obj, key, None)`.
@@ -129,6 +147,14 @@ fn parse_root(obj: &Bound<'_, PyAny>) -> PyResult<RootOpts> {
         let paths: Vec<String> = v.extract()?;
         r.protect = paths.into_iter().map(String::into_bytes).collect();
     }
+    if let Some(v) = field(obj, "path")? {
+        if !v.is_none() {
+            r.path = native_path(&v)?;
+        }
+    }
+    if let Some(v) = field(obj, "verify_names")? {
+        r.verify_names = v.is_truthy()?;
+    }
     Ok(r)
 }
 
@@ -160,6 +186,16 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         Some(v) if !v.is_none() => v.is_truthy()?,
         _ => true,
     };
+    let seam = |key: &str| -> PyResult<bool> {
+        match field(opts, key)? {
+            Some(v) => v.is_truthy(),
+            None => Ok(false),
+        }
+    };
+    let pinned_cap = match field(opts, "_pinned_cap")? {
+        Some(v) if !v.is_none() => Some(v.extract::<i64>()?.max(0) as usize),
+        _ => None,
+    };
     Ok(Opts {
         roots,
         budget_s,
@@ -167,6 +203,9 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         threads,
         keep_access_time,
         relative_open,
+        fold_strict: seam("_fold_strict")?,
+        extd_self_ids: seam("_extd_self_ids")?,
+        pinned_cap,
     })
 }
 
@@ -285,7 +324,8 @@ fn scan_slice<'py>(
         opts.threads
     };
     let pool = walk::pool(threads).map_err(PyRuntimeError::new_err)?;
-    let deadline = if opts.budget_s.is_nan() || opts.budget_s <= 0.0 {
+    let budget_positive = !(opts.budget_s.is_nan() || opts.budget_s <= 0.0);
+    let deadline = if !budget_positive {
         Some(started)
     } else {
         Duration::try_from_secs_f64(opts.budget_s)
@@ -296,11 +336,24 @@ fn scan_slice<'py>(
         root_state: opts
             .roots
             .iter()
-            .map(|_| sys::RootState::new(opts.keep_access_time, opts.relative_open))
+            .map(|r| {
+                sys::RootState::new(&StateOpts {
+                    keep_access_time: opts.keep_access_time,
+                    relative_open: opts.relative_open,
+                    verify_names: r.verify_names,
+                    fold_strict: opts.fold_strict,
+                    extd_self_ids: opts.extd_self_ids,
+                })
+            })
             .collect(),
         roots: opts.roots,
         deadline,
+        budget_positive,
         max_entries: opts.max_entries,
+        pinned_cap: opts
+            .pinned_cap
+            .unwrap_or_else(|| opts.max_entries.saturating_mul(2).max(10_000)),
+        pinned_entries: AtomicUsize::new(0),
         listed: AtomicUsize::new(0),
         entries: AtomicUsize::new(0),
         arenas: (0..pool.current_num_threads().max(1))
@@ -489,6 +542,8 @@ fn _open_stats(py: Python<'_>, reset: bool) -> PyResult<Bound<'_, PyDict>> {
 
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
+    // what the backend may pass per root (older builds reject keys they do not know)
+    m.add("ROOT_KEYS", PyTuple::new(m.py(), ROOT_KEYS)?)?;
     m.add_function(wrap_pyfunction!(_open_stats, m)?)?;
     m.add_class::<links::LinkSet>()?;
     m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;

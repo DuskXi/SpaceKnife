@@ -13,6 +13,7 @@ import dataclasses
 import errno
 import os
 import stat
+import struct
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -46,8 +47,8 @@ def nopts(opts: SliceOptions, **extra: Any) -> dict[str, Any]:
     }
 
 
-def root_opts(path: Path, **kw: Any) -> RootOptions:
-    kw.setdefault("dev", os.stat(path).st_dev)
+def root_opts(folder: Path, /, **kw: Any) -> RootOptions:
+    kw.setdefault("dev", os.stat(folder).st_dev)
     return RootOptions(**kw)
 
 
@@ -368,17 +369,22 @@ def test_windows_denied_directory(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="Win32 path normalisation")
 def test_windows_trailing_dot_names_are_listed(tmp_path: Path) -> None:
-    """Documented difference: the worker's Win32 paths drop a trailing dot; NT paths keep it."""
+    """Win32 trims a name's trailing dot or space: by its plain path the folder `odd.` would list
+    its sibling `odd`. Both walkers list each as it is (NT paths natively, `\\\\?\\` paths in the
+    worker), also as tasks."""
     root = tmp_path / "dots"
     root.mkdir()
-    os.mkdir("\\\\?\\" + str(root / "odd."))
-    with open("\\\\?\\" + str(root / "odd.") + "\\inside.txt", "wb") as f:
-        f.write(b"i")
-    res = native.scan_slice(
-        [((0, 1, 0), str(root), 0)], nopts(SliceOptions(roots=(RootOptions(),), **EVERYTHING))
+    for name in ("odd.", "odd", "space "):
+        os.mkdir("\\\\?\\" + str(root / name))
+        with open("\\\\?\\" + str(root / name) + f"\\in-{name.strip('. ')}.txt", "wb") as f:
+            f.write(name.encode())
+    res = scan_one(root)
+    assert sorted(res.paths) == sorted(
+        [str(root), str(root / "odd"), str(root / "odd."), str(root / "space ")]
     )
-    assert res["paths"] == [str(root), str(root / "odd.")]
-    assert not res["errors"] and len(res["name_lens"]) == 2
+    assert not res.errors and len(res.name_lens) == 6
+    res = compare([((0, 1, 0), str(root / "odd."), 0)], (root_opts(root),))
+    assert _names(res) == ["in-odd.txt"]
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="Windows relative opens")
@@ -481,6 +487,360 @@ def test_windows_folder_past_the_path_limit_is_a_listing_error(tmp_path: Path) -
             os.rmdir(d)
     assert [e[1] for e in res.errors] == [longer[4:] + chain[-1][len(top) :]]
     assert len(res.paths) == len(chain)  # the root and every folder above the last
+
+
+# ---------------------------------------------------------------------------- case-only siblings
+
+
+def _case_sensitive(folder: Path) -> None:
+    """Creates `folder` as a case-sensitive NTFS folder, or skips (fsutil needs the WSL feature)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    done = subprocess.run(
+        ["fsutil", "file", "setCaseSensitiveInfo", str(folder), "enable"], capture_output=True, check=False
+    )
+    if done.returncode != 0:
+        pytest.skip("cannot make a case-sensitive folder here (fsutil setCaseSensitiveInfo)")
+
+
+def build_twins(root: Path) -> Path:
+    """root/cs is case-sensitive: `a` and `A` with other contents (a subtree and nested twins
+    inside `a`), folder `b` next to file `B`, and a plain folder. root/other makes the first listing
+    hold two folders, so `_extd_self_ids` gives them one id and the root switches to FileIdBoth."""
+    (root / "other").mkdir(parents=True)
+    (root / "other" / "o.txt").write_bytes(b"o")
+    cs = root / "cs"
+    _case_sensitive(cs)
+    _case_sensitive(cs / "a")
+    (cs / "a" / "sub" / "deeper").mkdir(parents=True)
+    (cs / "a" / "sub" / "deeper" / "d.txt").write_bytes(b"d" * 10)
+    (cs / "a" / "x").mkdir()
+    (cs / "a" / "X").mkdir()
+    (cs / "a" / "x" / "lower.txt").write_bytes(b"x")
+    (cs / "a" / "X" / "upper.txt").write_bytes(b"XX")
+    (cs / "a" / "f.txt").write_bytes(b"f" * 3)
+    (cs / "A").mkdir()
+    (cs / "A" / "only.txt").write_bytes(b"A" * 5)
+    (cs / "b").mkdir()
+    (cs / "b" / "in.txt").write_bytes(b"b")
+    (cs / "B").write_bytes(b"B" * 7)
+    (cs / "plain").mkdir()
+    (cs / "plain" / "p.txt").write_bytes(b"p")
+    settle(root)
+    return cs
+
+
+# As WinBtrfs behaves: a strict subfolder is opened by its upcased name (in a case-sensitive NTFS
+# folder that reaches the upper twin, the entry WinBtrfs's lookup finds), and FileIdExtd ids are
+# the listed folder's own.
+WINBTRFS = {"_fold_strict": True, "_extd_self_ids": True}
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
+def test_windows_case_twins_are_listed_by_their_file_ids(tmp_path: Path) -> None:
+    """The open by name of `a`, `b` and `x` reaches another entry (the twin, or file `B`): the
+    handle's file id or stored name tells, and the folder is opened by the id its parent's listing
+    gave it. The result is the true tree, as the worker lists it by path in a case-sensitive folder."""
+    root = tmp_path / "twins"
+    build_twins(root)
+    tasks: list[Task] = [((0, 1, 0), str(root), 0)]
+    native._open_stats(True)
+    compare(tasks, (root_opts(root),), threads=1, **WINBTRFS)
+    stats = native._open_stats(True)
+    assert stats["strict_by_id"] >= 3 and stats["pinned"] >= 5, stats  # a, b, a\x; and below
+    assert stats["strict_failed"] == 0 and stats["ids_distrusted"] >= 1, stats
+    compare(tasks, (root_opts(root),), _fold_strict=True)  # FileIdExtd ids, 16 bytes by id
+    compare(tasks, (root_opts(root),), relative_open=False, _fold_strict=True)
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
+def test_windows_case_twins_never_wait_in_the_frontier(tmp_path: Path) -> None:
+    """Past the budget a folder opened by id, and everything below it, is listed in the same call:
+    as a task its path would open the twin. At budget 0 (a relist of one folder) the twins wait
+    like any folder. Past the cap on such entries they are errors, never tasks."""
+    cs = build_twins(tmp_path / "twins")
+    tasks: list[Task] = [((0, 1, 0), str(cs), 0)]
+    opts = {"roots": [{}], "max_entries": 1, "threads": 1, "_fold_strict": True}
+    res = native.scan_slice(tasks, opts)
+    check_slice(res, tasks)
+    assert [p for _ref, p, _root in res["frontier"]] == [str(cs / "plain")]
+    assert not res["errors"]
+    assert {str(cs / n) for n in ("a", "A", "b", "a\\sub", "a\\sub\\deeper", "a\\x", "a\\X")} <= set(
+        res["paths"]
+    )
+    # budget 0: one listing, the twins in the frontier with the plain folder, no errors
+    res = native.scan_slice(tasks, {**opts, "budget_s": 0.0, "max_entries": 10**9})
+    assert res["paths"] == [str(cs)] and not res["errors"]
+    assert sorted(p for _ref, p, _root in res["frontier"]) == sorted(
+        str(cs / n) for n in ("A", "a", "b", "plain")
+    )
+    # a cap of one entry: below the folders opened by id nothing more, and nothing left as a task
+    native._open_stats(True)
+    res = native.scan_slice(tasks, {**opts, "_pinned_cap": 1})
+    assert native._open_stats(True)["pinned_cap_hit"] >= 3
+    capped = {p for _ref, p, msg in res["errors"] if msg == worker.CAP_ERROR}
+    assert capped == {str(cs / "a" / n) for n in ("sub", "x", "X")}
+    assert [p for _ref, p, _root in res["frontier"]] == [str(cs / "plain")]
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
+def test_windows_scanner_driven_scans_of_case_twins_build_the_true_tree(tmp_path: Path) -> None:
+    root = tmp_path / "twins"
+    build_twins(root)
+    py_store = scan_store(root)  # the worker by path: right in a case-sensitive folder
+
+    def slicer(tasks: list[Task], opts: SliceOptions) -> SliceResult:
+        return SliceResult(**native.scan_slice(tasks, nopts(opts, threads=1, _fold_strict=True)))
+
+    for budget_s in (0.0005, 0.05):
+        pool = ThreadPoolExecutor(max_workers=4)
+        try:
+            scanner = Scanner([str(root)], executor=pool, concurrency=4, slicer=slicer, budget_s=budget_s)
+            result = asyncio.run(scanner.run())
+        finally:
+            pool.shutdown()
+        assert result.state == ScanState.DONE and not scanner.progress().denied
+        assert tree_snapshot(scanner.store) == tree_snapshot(py_store)
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="Windows stored names")
+def test_windows_tasks_are_checked_by_their_stored_names(tmp_path: Path) -> None:
+    """On roots that verify names (Btrfs, where the walker finds it out itself) a task must be the
+    folder its path names: in another case than the stored name it is a listing error, in both
+    walkers, as a loser that the open of its name does not reach is. The root's own part is never
+    compared."""
+    root = tmp_path / "names"
+    (root / "Mixed" / "inner").mkdir(parents=True)
+    (root / "Mixed" / "in.txt").write_bytes(b"i")
+    settle(root)
+    roots = (root_opts(root, path=str(root), verify_names=True),)
+    res = compare([((0, 1, 0), str(root / "MIXED"), 0), ((0, 2, 0), str(root / "Mixed" / "INNER"), 0)], roots)
+    assert res.errors == [
+        ((0, 1, 0), str(root / "MIXED"), worker.CASE_ERROR),
+        ((0, 2, 0), str(root / "Mixed" / "INNER"), worker.CASE_ERROR),
+    ]
+    res = compare([((0, 1, 0), str(root / "Mixed"), 0)], roots)
+    assert res.paths == [str(root / "Mixed"), str(root / "Mixed" / "inner")] and not res.errors
+    # the root typed in another case: what lies below it is still compared, the root part not
+    upper = str(root).upper()
+    roots = (root_opts(root, path=upper, verify_names=True),)
+    res = compare([((0, 1, 0), upper, 0), ((0, 2, 0), upper + "\\Mixed", 0)], roots)
+    assert not res.errors and len(res.paths) == 5  # the root's listing and the task's
+    # without the option NTFS tasks are not checked (no twins outside case-sensitive folders)
+    res = compare([((0, 1, 0), str(root / "MIXED"), 0)], (root_opts(root, path=str(root)),))
+    assert not res.errors
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="RtlUpcaseUnicodeChar")
+def test_windows_upper_groups_every_pair_windows_folds() -> None:
+    """The worker groups names by str.upper() and lets the stored name decide: that must find
+    every pair the Windows upcase (RtlUpcaseUnicodeChar per UTF-16 unit) takes for the same name.
+    It does when upper(c) == upper(Rtl(c)) for every unit; extra groups (ß and SS) cost one check."""
+    rtl = ctypes.WinDLL("ntdll").RtlUpcaseUnicodeChar  # type: ignore[attr-defined,unused-ignore]
+    rtl.argtypes = [ctypes.c_uint16]
+    rtl.restype = ctypes.c_uint16
+    folded = 0
+    for u in range(0x10000):
+        if 0xD800 <= u <= 0xDFFF:
+            continue  # surrogates: units of their own, left alone by both
+        c, up = chr(u), chr(rtl(u))
+        folded += up != c
+        assert c.upper() == up.upper(), hex(u)
+    assert folded > 900  # the table is there (973 units on Windows 10 and 11)
+
+
+def test_root_keys_name_what_the_build_accepts(tree: Path) -> None:
+    assert {"path", "verify_names"} <= set(native.ROOT_KEYS)
+    root = {
+        k: v for k, v in dataclasses.asdict(root_opts(tree, path=str(tree))).items() if k in native.ROOT_KEYS
+    }
+    res = native.scan_slice(
+        [((0, 1, 0), str(tree), 0)],
+        {"roots": [root], "_fold_strict": False, "_extd_self_ids": False, "_pinned_cap": None, **EVERYTHING},
+    )
+    assert not res["errors"] and len(res["paths"]) > 50
+
+
+class _NtWalk:
+    """A reference walker for SPACEKNIFE_TEST_CASE_ROOT, independent of the native one: ntdll through
+    ctypes, every folder listed with FileIdBothDirectoryInformation and every subfolder opened by the
+    file id its parent's listing gave it, relative to the parent (16 bytes {inode, subvolume} on
+    Btrfs), never by its name. Read-only (FILE_LIST_DIRECTORY | SYNCHRONIZE)."""
+
+    def __init__(self) -> None:
+        from ctypes import wintypes
+
+        class US(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.USHORT),
+                ("MaximumLength", wintypes.USHORT),
+                ("Buffer", ctypes.c_void_p),
+            ]
+
+        class OA(ctypes.Structure):
+            _fields_ = [
+                ("Length", wintypes.ULONG),
+                ("RootDirectory", wintypes.HANDLE),
+                ("ObjectName", ctypes.POINTER(US)),
+                ("Attributes", wintypes.ULONG),
+                ("SecurityDescriptor", ctypes.c_void_p),
+                ("SecurityQualityOfService", ctypes.c_void_p),
+            ]
+
+        class IOSB(ctypes.Structure):
+            _fields_ = [("Status", ctypes.c_void_p), ("Information", ctypes.c_size_t)]
+
+        self.US, self.OA, self.IOSB, self.wt = US, OA, IOSB, wintypes
+        self.nt = ctypes.WinDLL("ntdll")  # type: ignore[attr-defined,unused-ignore]
+        self.buf = ctypes.create_string_buffer(65536)
+
+    def open(self, root: Any, name: bytes, *, by_id: bool = False) -> Any:
+        raw = ctypes.create_string_buffer(name, len(name))
+        us = self.US(len(name), len(name), ctypes.cast(raw, ctypes.c_void_p))
+        case_insensitive = 0x40
+        oa = self.OA(ctypes.sizeof(self.OA), root, ctypes.pointer(us), case_insensitive, None, None)
+        h = self.wt.HANDLE()
+        io = self.IOSB()
+        options = 0x1 | 0x20 | 0x4000 | (0x2000 if by_id else 0)  # directory, sync, backup, by id
+        status = self.nt.NtOpenFile(ctypes.byref(h), 0x100001, ctypes.byref(oa), ctypes.byref(io), 7, options)
+        return h.value if (status & 0xFFFFFFFF) < 0x80000000 else None
+
+    def open_path(self, path: str) -> Any:
+        return self.open(None, ("\\??\\" + path).encode("utf-16-le", "surrogatepass"))
+
+    def open_id(self, parent: Any, fid: int, btrfs: bool) -> Any:
+        name = struct.pack("<QQ", fid & 0xFF_FFFF_FFFF, fid >> 40) if btrfs else struct.pack("<Q", fid)
+        return self.open(parent, name, by_id=True)
+
+    def close(self, h: Any) -> None:
+        self.nt.NtClose(self.wt.HANDLE(h))
+
+    def fs_name(self, h: Any) -> str:
+        io = self.IOSB()
+        self.nt.NtQueryVolumeInformationFile(self.wt.HANDLE(h), ctypes.byref(io), self.buf, len(self.buf), 5)
+        (n,) = struct.unpack_from("<I", self.buf, 8)
+        return self.buf.raw[12 : 12 + n].decode("utf-16-le")
+
+    def listing(self, h: Any) -> list[tuple[str, int, int, int, int]] | None:
+        """(name, attributes, end of file, file id, reparse tag) per entry, or None when it fails."""
+        out: list[tuple[str, int, int, int, int]] = []
+        first = True
+        while True:
+            io = self.IOSB()
+            status = self.nt.NtQueryDirectoryFile(
+                self.wt.HANDLE(h),
+                None,
+                None,
+                None,
+                ctypes.byref(io),
+                self.buf,
+                len(self.buf),
+                37,
+                False,
+                None,
+                first,
+            )
+            status &= 0xFFFFFFFF
+            if status in (0x80000006, 0xC000000F):  # no more files, no such file
+                return out
+            if status >= 0x80000000:
+                return None
+            first = False
+            off = 0
+            while True:
+                (nxt,) = struct.unpack_from("<I", self.buf, off)
+                (eof,) = struct.unpack_from("<q", self.buf, off + 40)
+                attrs, nlen, ea = struct.unpack_from("<III", self.buf, off + 56)
+                (fid,) = struct.unpack_from("<Q", self.buf, off + 96)
+                name = self.buf.raw[off + 104 : off + 104 + nlen].decode("utf-16-le", "surrogatepass")
+                if name not in (".", ".."):
+                    out.append((name, attrs, eof, fid, ea if attrs & 0x400 else 0))
+                if not nxt:
+                    break
+                off += nxt
+
+
+@pytest.mark.skipif(
+    not (IS_WINDOWS and os.environ.get("SPACEKNIFE_TEST_CASE_ROOT")),
+    reason="set SPACEKNIFE_TEST_CASE_ROOT to a real folder with case-only siblings (Windows, e.g. on WinBtrfs)",
+)
+def test_case_twins_of_a_real_tree_match_a_reference_that_opens_by_id() -> None:
+    """The native walker on a real tree with case-only siblings (WinBtrfs: I:\\usr\\lib\\perl5, a
+    flatpak runtime's share\\terminfo) lists each folder as a reference that never opens a folder
+    by its name does: per folder the names, kinds and sizes. On Btrfs every folder the reference
+    lists also matches the size its parent's listing gave it (2 bytes per byte of each name), and a
+    folder no other entry shares its name with lists the same by id as by path (filters that would
+    list folders opened by id in part, as on C:, would show here). No counts are fixed."""
+    root = os.path.abspath(os.environ["SPACEKNIFE_TEST_CASE_ROOT"])
+    nt = _NtWalk()
+    top = nt.open_path(root)
+    assert top is not None, root
+    btrfs = nt.fs_name(top).lower() == "btrfs"
+    ref: dict[str, list[list[tuple[str, int, int]]]] = {}
+    problems: list[str] = []
+
+    def kind_of(attrs: int, tag: int) -> int:
+        if attrs & 0x400 and tag & 0x20000000:
+            return worker.KIND_LINK
+        return worker.KIND_DIR if attrs & 0x10 else worker.KIND_FILE
+
+    def walk(path: str, h: Any, listed_size: int | None) -> None:
+        got = nt.listing(h)
+        if got is None:
+            problems.append(f"{path}: cannot be listed")
+            return
+        kinds = [kind_of(a, t) for _n, a, _eof, _fid, t in got]
+        rows = sorted((e[0], k, 0 if k == worker.KIND_DIR else e[2]) for e, k in zip(got, kinds, strict=True))
+        ref.setdefault(path, []).append(rows)
+        names = [n for n, *_ in got]
+        measurable = btrfs and listed_size is not None and not any("\ufffd" in n for n in names)
+        if measurable and 2 * sum(len(n.encode("utf-8", "surrogatepass")) for n in names) != listed_size:
+            problems.append(f"{path}: listed size {listed_size} is not that of its names")
+        folded: dict[str, int] = {}
+        for n in names:
+            folded[n.upper()] = folded.get(n.upper(), 0) + 1
+        for name, attrs, eof, fid, _tag in got:
+            if not attrs & 0x10 or attrs & 0x400:
+                continue  # reparse points are not entered here
+            child = os.path.join(path, name)
+            ch = nt.open_id(h, fid, btrfs)
+            if ch is None:
+                problems.append(f"{child}: cannot be opened by its file id")
+                continue
+            try:
+                if folded[name.upper()] == 1 and "\\" not in name and "/" not in name:
+                    by_path = nt.open_path(child)
+                    if by_path is not None:
+                        a, b = nt.listing(by_path), nt.listing(ch)
+                        nt.close(by_path)
+                        if (
+                            a is not None
+                            and b is not None
+                            and sorted(e[0] for e in a) != sorted(e[0] for e in b)
+                        ):
+                            problems.append(f"{child}: lists other names by id than by path")
+                walk(child, ch, eof)
+            finally:
+                nt.close(ch)
+
+    try:
+        walk(root, top, None)
+    finally:
+        nt.close(top)
+    assert not problems, problems[:10]
+
+    res = native.scan_slice([((0, 1, 0), root, 0)], {"roots": [{"path": root}], **EVERYTHING})
+    nat: dict[str, list[list[tuple[str, int, int]]]] = {}
+    names = _names(SliceResult(**res))
+    bounds = res["bounds"].tolist()
+    for i, p in enumerate(res["paths"]):
+        lo, hi = bounds[i], bounds[i + 1]
+        rows = sorted(
+            (names[k], int(res["cols"]["kind"][k]), int(res["cols"]["size"][k])) for k in range(lo, hi)
+        )
+        nat.setdefault(p, []).append(rows)
+    assert not res["errors"], res["errors"][:10]
+    differ = [p for p, rows in ref.items() if sorted(nat.get(p, [])) != sorted(rows)]
+    assert not differ, f"{len(differ)} of {len(ref)} folders differ from the reference, e.g. {differ[:8]}"
 
 
 # ---------------------------------------------------------------------------- POSIX specifics
@@ -751,17 +1111,31 @@ def test_scanner_driven_native_scans_build_the_same_tree(tree: Path, budget_s: f
     not os.environ.get("SPACEKNIFE_TEST_SCAN_ROOT"),
     reason="set SPACEKNIFE_TEST_SCAN_ROOT to a real folder or drive (minutes, a few GB of memory per million items)",
 )
-def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
+def test_native_scan_of_a_real_tree_matches_the_python_walker(monkeypatch: pytest.MonkeyPatch) -> None:
     """On a real folder or drive (file system filters, ACLs, odd names, files changing meanwhile), the
     native walker as the app drives it finds what the Python walker finds. The Python walker scans
     before and after, and only a path both of its scans agree on counts: a difference there is the
     walker's, not a file that changed. This is how the partial listings of opens by file id showed
     up (a temporary test tree has none of the filters that caused them). Which name of a hard-linked
     file is counted follows the order of the walk, which differs between the two walkers, so that
-    and the totals are left out (on Linux, uv's cache and environments share thousands of files)."""
+    and the totals are left out (on Linux, uv's cache and environments share thousands of files).
+    Folders the Python walker cannot reach by their name (case-only siblings on WinBtrfs: CASE, DUP,
+    BADNAME errors) are opened by file id natively, so they and everything below them are left out
+    here; SPACEKNIFE_TEST_CASE_ROOT checks those against a reference that opens by id."""
+    from spaceknife.scan import scanner as scanner_mod
     from spaceknife.scan.scanner import NATIVE_BUDGET_S, default_workers, make_pool, native_threads
 
     root = os.environ["SPACEKNIFE_TEST_SCAN_ROOT"]
+    monkeypatch.setattr(scanner_mod, "MAX_RECORDED_DENIED", 10**9)  # every error and its reason
+    unreachable: set[str] = set()  # tree_snapshot's keys of the Python walker's no-name folders
+    no_name = {worker.CASE_ERROR, worker.DUP_ERROR, worker.BADNAME_ERROR}
+
+    def snapshot_key(scanner: Scanner, path: str) -> str:
+        for r in scanner.roots:
+            top = r.path.rstrip("\\/")
+            if path.startswith(top + os.sep):
+                return r.path + "/" + path[len(top) + 1 :].replace(os.sep, "/")
+        return path
 
     def python_scan() -> dict[str, tuple[object, ...]]:
         pool = make_pool()
@@ -770,6 +1144,9 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
             asyncio.run(scanner.run())
         finally:
             pool.shutdown()
+        for path, why in zip(scanner.progress().denied, scanner.denied_reasons, strict=False):
+            if why in no_name:
+                unreachable.add(snapshot_key(scanner, path))
         return tree_snapshot(scanner.store, listed_only=True)
 
     def native_scan() -> dict[str, tuple[object, ...]]:
@@ -789,9 +1166,6 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
             pool.shutdown()
         return tree_snapshot(scanner.store, listed_only=True)
 
-    def win32_only(path: str) -> bool:  # names Win32 rewrites: the worker cannot open them (on purpose)
-        return IS_WINDOWS and any(part.endswith((".", " ")) for part in path.replace("\\", "/").split("/"))
-
     before = python_scan()
     nat = native_scan()
     after = python_scan()
@@ -799,7 +1173,7 @@ def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
     differ = {p for p in stable if nat.get(p) != before[p]}
     # in the native scan only: a file that came and went meanwhile, unless its folder held still
     extra = {p for p in nat.keys() - before.keys() - after.keys() if p.rpartition("/")[0] in stable}
-    excused = {p for p in differ | extra if win32_only(p)}
+    excused = {p for p in differ | extra if any(p == q or p.startswith(q + "/") for q in unreachable)}
     bad = sorted(
         p for p in differ | extra if p not in excused and not any(q.startswith(p + "/") for q in excused)
     )

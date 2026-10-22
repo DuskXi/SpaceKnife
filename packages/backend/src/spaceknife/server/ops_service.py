@@ -72,6 +72,7 @@ class OpRun:
     sizes: dict[str, int]
     alloc: dict[str, int]  # item path -> freeable bytes (what a success frees)
     scans: dict[str, str]  # path -> scan id (refresh the tree afterwards)
+    roots: dict[str, str] = field(default_factory=dict)  # path -> its scan root (ops.trash: case twins)
     done: int = 0
     current: str = ""
     phase: str = "waiting"
@@ -332,6 +333,7 @@ class OpsService:
             sizes={t.path: t.size for t in targets},
             alloc=alloc,
             scans=scans,
+            roots=self._scan_roots(scans),
             phase="waiting" if params.mode == "delete" else "running",
         )
         self.runs[run.id] = run
@@ -345,6 +347,22 @@ class OpsService:
             total=run.total,
             delay_s=DELETE_DELAY_S if run.mode == "delete" else 0.0,
         )
+
+    def _scan_roots(self, scans: dict[str, str]) -> dict[str, str]:
+        """The scan root each path was found under: ops.trash refuses a path whose names below
+        it open an entry that differs only in case (a case-only sibling on WinBtrfs)."""
+        out: dict[str, str] = {}
+        for path, scan_id in scans.items():
+            handle = self.server.scans.scans.get(scan_id)
+            if handle is None:
+                continue
+            norm = os.path.normcase(path)
+            for r in handle.roots:
+                top = os.path.normcase(r.path)
+                if norm == top or norm.startswith(top if top.endswith(os.sep) else top + os.sep):
+                    out[path] = r.path
+                    break
+        return out
 
     def _emit(self, run: OpRun, force: bool = True) -> None:
         now = time.monotonic()
@@ -378,11 +396,20 @@ class OpsService:
 
             if run.mode == "trash":
                 results = await asyncio.to_thread(
-                    move_to_trash, run.paths, progress=progress, cancel=run.cancel.is_set, sizes=run.sizes
+                    move_to_trash,
+                    run.paths,
+                    progress=progress,
+                    cancel=run.cancel.is_set,
+                    sizes=run.sizes,
+                    roots=run.roots,
                 )
             else:
                 results = await asyncio.to_thread(
-                    delete_permanently, run.paths, progress=progress, cancel=run.cancel.is_set
+                    delete_permanently,
+                    run.paths,
+                    progress=progress,
+                    cancel=run.cancel.is_set,
+                    roots=run.roots,
                 )
             run.results = results
             run.done = sum(1 for r in results if r.code != "cancelled")

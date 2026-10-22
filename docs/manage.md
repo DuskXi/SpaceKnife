@@ -62,14 +62,15 @@ AddResult(added: list[id], merged: list[Merged(path, into)], absorbed: list[id],
 ```python
 def find_lockers(paths) -> dict[path, list[程序名]]        # Windows Restart Manager；Linux /proc/*/fd；macOS lsof
 def trash_status(path) -> TrashStatus(available, reason, location, used, capacity, same_volume)
-def move_to_trash(paths, *, progress=None, cancel=None, sizes=None, check_locks=True) -> list[OpResult]
+def move_to_trash(paths, *, progress=None, cancel=None, sizes=None, check_locks=True, roots=None) -> list[OpResult]
 def restore(refs) -> list[OpResult]                      # 不覆盖已有项（exists）
-def delete_permanently(paths, *, progress=None, cancel=None, check_locks=True) -> list[OpResult]
-OpResult(path, ok, code: ok|missing|denied|locked|protected|no_trash|exists|cancelled|error, message, trash_ref)
+def delete_permanently(paths, *, progress=None, cancel=None, check_locks=True, roots=None) -> list[OpResult]
+OpResult(path, ok, code: ok|missing|denied|locked|protected|no_trash|exists|cancelled|ambiguous_name|error, message, trash_ref)
 ```
 
 - **移到回收站从不变成永久删除**：Windows 用 IFileOperation（FOFX_RECYCLEONDELETE），进度回调拒绝任何不进回收站的删除；卷没有回收站、超过回收站容量、路径太长时逐项返回 `no_trash`，原样不动。Linux 按 freedesktop Trash 规范（`renameat2(RENAME_NOREPLACE)`，跨设备返回 `no_trash`，从不复制）。
 - 执行前逐项复核：仍存在、仍不受保护、未被占用。
+- 只差大小写的同名项（0.3.4，docs/native.md 2.2）：`roots` 给出每个路径所在的扫描根（`ops_service` 从扫描的根填入）。Windows 上逐项按路径打开（不要任何权限、不跟随重解析点）读 `FileNameInfo`（文件系统存的名字），扫描根以下有一段名字与路径不完全相同、但 `upper()` 后相同，就说明按这个路径会打开另一项（WinBtrfs 上 `a` 的路径打开的是 `A`；NTFS 上不带区分大小写标志的文件夹里 ntfs-3g 写下的 POSIX 名字同理），返回 `ambiguous_name`（「另一项与它只差大小写，按名字会打开另一项；没有改动任何东西」），原样不动。别的差异（硬链接的另一个名字、短名）照常执行，不误拦。旧快照、对比视图、Python 遍历器扫出的树、只差大小写的文件都由这一条兜住。删除篮加入时拒绝名字（或扫描根以下某一级上级的名字）里有路径分隔符的项（Windows 上 `\` 和 `/`，WinBtrfs 照原样显示 Linux 的文件名；POSIX 上 `\` 是普通字符）：没有路径能找到它。
 
 ### 2.4 服务层（`server/ops_service.py`）
 

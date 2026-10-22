@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "d5ec8a5e7bb5f361";
+export const SCHEMA_HASH = "ef4e4a0ce39b2a18";
 
 export interface AgeCond {
   end: number;
@@ -865,7 +865,7 @@ export interface NodeInfo {
 }
 
 export interface OpItemResult {
-  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "error";
+  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "ambiguous_name" | "error";
   message: string;
   ok: boolean;
   path: string;

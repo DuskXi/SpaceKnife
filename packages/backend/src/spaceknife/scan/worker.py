@@ -83,6 +83,18 @@ _ATTR_FLAGS = (
 Ref = tuple[int, int, int]
 Task = tuple[Ref, str, int]  # (ref, absolute directory path, root index)
 
+# Listing errors of folders their name does not reach (Windows: a case-only sibling's name opens
+# the other entry, docs/native.md 2.2). The native walker has the same texts (hardscan/case.rs);
+# events.denied_reason gives them their wording in the log. The worker cannot open by file id, so
+# such folders are errors here (CAP and INCOMPLETE are the native walker's only).
+CASE_ERROR = (
+    "cannot be opened by its name: another entry in this folder has the same name in a different case"
+)
+DUP_ERROR = "cannot be opened by its name: another entry in this folder has the same name as Windows shows it"
+BADNAME_ERROR = "cannot be opened by its name: it contains a backslash or slash"
+CAP_ERROR = "not read: too many entries below folders that can only be opened by file id in one pass"
+INCOMPLETE_ERROR = "listed incompletely when opened by its file id"
+
 
 @dataclass(frozen=True, slots=True)
 class RootOptions:
@@ -96,6 +108,11 @@ class RootOptions:
     # folders not to enter, as not accessible (macOS: places that would ask for consent one by
     # one without Full Disk Access, when the user chose to leave them out; spaceknife.privacy)
     protect: tuple[str, ...] = ()
+    path: str = ""  # the scan root as given (tasks are checked by their names below it)
+    # Windows: names fold onto case-sensitive storage here (WinBtrfs), so an open by name can reach
+    # a case-only sibling: subfolders sharing a name and every task are checked by the names the
+    # file system stores (`_unreachable`)
+    verify_names: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,11 +225,135 @@ def _secs(t: float) -> int:
 
 
 def _long_path(path: str) -> str:
-    if not IS_WINDOWS or len(path) < 240 or path.startswith("\\\\?\\"):
+    """``path`` as Win32 calls must get it: with the ``\\\\?\\`` prefix when it is long, or when a
+    name in it ends in a dot or space (Win32 trims those: the folder ``odd.`` would list ``odd``)."""
+    if not IS_WINDOWS or path.startswith("\\\\?\\"):
+        return path
+    if len(path) < 240 and not (".\\" in path or " \\" in path or path.endswith((".", " "))):
         return path
     if path.startswith("\\\\"):
         return "\\\\?\\UNC\\" + path[2:]
     return "\\\\?\\" + path
+
+
+_final_name_fns: Any = None
+
+
+def final_name(path: str) -> str | None:
+    """The stored name of what ``path`` opens (Windows: FileNameInfo, its path below the volume's
+    root as the file system stores it, e.g. ``\\usr\\share\\terminfo\\A``), or None when it cannot
+    be read, and on other systems. Opened with no access rights and without following a reparse
+    point, as the open by name the listing does would."""
+    if not IS_WINDOWS:
+        return None
+    global _final_name_fns
+    if _final_name_fns is None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+        create = k32.CreateFileW
+        create.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        create.restype = wintypes.HANDLE
+        info = k32.GetFileInformationByHandleEx
+        info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        info.restype = wintypes.BOOL
+        close = k32.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        _final_name_fns = (create, info, close, ctypes)
+    create, info, close, ct = _final_name_fns
+    share_all, open_existing = 7, 3
+    backup_semantics, open_reparse_point, file_name_info = 0x02000000, 0x00200000, 2
+    h = create(
+        _long_path(path), 0, share_all, None, open_existing, backup_semantics | open_reparse_point, None
+    )
+    if h is None or h == ct.c_void_p(-1).value:
+        return None
+    try:
+        # exactly 64 KiB (room for any name of an NT path): WinBtrfs refuses a buffer of a few
+        # bytes more with ERROR_MORE_DATA (measured 2026-10-22)
+        buf = ct.create_string_buffer(65536)
+        if not info(h, file_name_info, buf, len(buf)):
+            return None
+        n = int.from_bytes(buf.raw[:4], "little")
+        return str(buf.raw[4 : 4 + n].decode("utf-16-le", "surrogatepass"))
+    finally:
+        close(h)
+
+
+def names_below(path: str, root: str) -> list[str] | None:
+    """The names of ``path`` below the scan root ``root`` as given (the root part is never
+    compared: a root typed in another case, a SUBST drive, a mount folder), or None for the root
+    itself, a path not below it, or no root (hardscan/case.rs ``below_root``)."""
+    if not root or not path.startswith(root):
+        return None
+    rest = path[len(root) :]
+    if not (root.endswith(("\\", "/")) or rest.startswith(("\\", "/"))):
+        return None  # C:\data2 is not below C:\data
+    below = [n for n in rest.replace("/", "\\").split("\\") if n]
+    return below or None
+
+
+def tail_is(stored: str, below: list[str]) -> bool | None:
+    """Whether the last names of a stored name are ``below``, exactly; None when it has fewer."""
+    names = [n for n in stored.replace("/", "\\").split("\\") if n]
+    if len(names) < len(below):
+        return None
+    return names[len(names) - len(below) :] == below
+
+
+def case_marks(names: list[str], dirs: list[int]) -> dict[int, str]:
+    """How the subfolders ``dirs`` (indexes into ``names``, one listing's entry names) must be
+    opened, on roots that ``verify_names``: ``strict`` when another entry has the same name under
+    ``str.upper()`` (it groups every pair the Windows upcase does, and a few more: checked by
+    test; the stored name decides), ``dup`` for a subfolder after the first entry of the very same
+    name (WinBtrfs shows invalid UTF-8 as U+FFFD), ``bad`` for a name with a ``\\`` or ``/``,
+    which a path cannot hold. Unmarked subfolders are not in the result."""
+    groups: dict[str, list[int]] = {}
+    for j, name in enumerate(names):
+        groups.setdefault(name.upper(), []).append(j)
+    is_dir = set(dirs)
+    marks: dict[int, str] = {}
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        seen: set[str] = set()
+        for j in group:
+            if j in is_dir:
+                marks[j] = "dup" if names[j] in seen else "strict"
+            seen.add(names[j])
+    for j in dirs:
+        if "\\" in names[j] or "/" in names[j]:
+            marks[j] = "bad"
+    return marks
+
+
+_NO_NAME = {"dup": DUP_ERROR, "bad": BADNAME_ERROR}
+
+
+def _unreachable(path: str, root: RootOptions, mark: str) -> str | None:
+    """Why the folder ``path`` names cannot be listed by that path (roots that ``verify_names``):
+    an exact duplicate's or a ``\\`` name's never can; a task, or a subfolder whose name another
+    entry shares, only when the file system stores it under those names below the root (else the
+    open reached a case-only sibling, or something below one). Checked when the folder's turn
+    comes, not at its parent's listing: a relist of the parent alone (the monitor's) stays free of
+    such errors, and every task that comes back from the frontier is checked again. When the
+    stored name cannot be read, the folder is listed as before and the listing gives any error."""
+    if mark in _NO_NAME:
+        return _NO_NAME[mark]
+    if mark in ("strict", "task") and (below := names_below(path, root.path)) is not None:
+        stored = final_name(path)
+        if stored is not None and tail_is(stored, below) is False:
+            return CASE_ERROR
+    return None
 
 
 _get_compressed_size: Any = None
@@ -253,8 +394,11 @@ def _too_long(path: str) -> OSError:
     return OSError(0, text, path, _ERROR_FILENAME_EXCED_RANGE)
 
 
-def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]]:
-    subdirs: list[tuple[int, str]] = []
+def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str, str]]:
+    """Lists ``path`` into ``acc``; returns the subfolders to descend as ``(j, path, mark)`` (marks:
+    ``case_marks``, only on roots that ``verify_names``)."""
+    subdirs: list[tuple[int, str, str]] = []
+    names: list[str] = []  # the listing's names, to find the ones that share a name
     cluster = max(1, root.cluster_size)
     base = len(acc.kind)
     try:
@@ -264,6 +408,8 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
     with listing as it:
         for entry in it:
             name = entry.name
+            if root.verify_names:
+                names.append(name)
             flags = 0
             try:
                 st: Any = entry.stat(follow_symlinks=False)
@@ -318,7 +464,11 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
             acc.dev.append(0)
             acc.ext.append(acc.ext_id(name) if kind == KIND_FILE else 0)
             if kind == KIND_DIR:
-                subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name)))
+                subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name), ""))
+    if root.verify_names and subdirs and len(names) >= 2:
+        marks = case_marks(names, [j for j, _, _ in subdirs])
+        if marks:
+            subdirs = [(j, p, marks.get(j, "")) for j, p, _ in subdirs]
     return subdirs
 
 
@@ -362,9 +512,9 @@ def _open_dir(path: str, flags: int) -> int:
         raise
 
 
-def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]]:
+def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str, str]]:
     assert sys.platform != "win32"
-    subdirs: list[tuple[int, str]] = []
+    subdirs: list[tuple[int, str, str]] = []
     base = len(acc.kind)
     fd = _open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
     try:
@@ -429,7 +579,7 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                 acc.dev.append(st.st_dev)
                 acc.ext.append(acc.ext_id(name) if kind == KIND_FILE else 0)
                 if descend:
-                    subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name)))
+                    subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name), ""))
     finally:
         os.close(fd)
     return subdirs
@@ -444,14 +594,22 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
     deadline = started + opts.budget_s
     acc = _Acc()
     errors: list[tuple[Ref, str, str]] = []
-    stack: list[Task] = list(reversed(tasks))
+    # (ref, path, root index, mark): tasks are "task", subfolders as case_marks marked them
+    stack: list[tuple[Ref, str, int, str]] = [
+        (ref, path, root, "task") for ref, path, root in reversed(tasks)
+    ]
     while stack:
         if acc.refs and (time.perf_counter() >= deadline or len(acc.kind) >= opts.max_entries):
             break
-        ref, path, root_idx = stack.pop()
+        ref, path, root_idx, mark = stack.pop()
+        root = opts.roots[root_idx]
+        why = _unreachable(path, root, mark) if root.verify_names else None
+        if why is not None:
+            errors.append((ref, path, why))
+            continue
         listing = len(acc.refs)
         try:
-            subdirs = _list_dir(path, opts.roots[root_idx], acc)
+            subdirs = _list_dir(path, root, acc)
         except OSError as exc:
             # Roll back entries appended before the failure (e.g. scandir died mid-way).
             del acc.names[acc.bounds[-1] :]
@@ -464,9 +622,14 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
         acc.refs.append(ref)
         acc.paths.append(path)
         acc.bounds.append(len(acc.kind))
-        for j, sub_path in reversed(subdirs):
-            stack.append(((1, listing, j), sub_path, root_idx))
-    frontier = list(reversed(stack))
+        for j, sub_path, sub_mark in reversed(subdirs):
+            stack.append(((1, listing, j), sub_path, root_idx, sub_mark))
+    frontier: list[Task] = []
+    for ref, path, root_idx, mark in reversed(stack):
+        if mark in _NO_NAME:  # no path reaches it: never a task
+            errors.append((ref, path, _NO_NAME[mark]))
+        else:
+            frontier.append((ref, path, root_idx))
     count = len(acc.kind)
     cols: dict[str, np.ndarray] = {
         "kind": np.array(acc.kind, dtype=np.uint8),

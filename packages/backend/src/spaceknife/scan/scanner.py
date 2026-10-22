@@ -195,6 +195,8 @@ def native_slicer() -> Slicer | None:
     if mod is None or not native.has("scan_slice"):
         return None
     scan_slice = mod.scan_slice
+    # builds before the check of case-only siblings reject these keys (docs/native.md 2.2)
+    names = "verify_names" in getattr(mod, "ROOT_KEYS", ())
 
     def run(tasks: list[Task], opts: SliceOptions) -> SliceResult:
         roots = [
@@ -205,6 +207,7 @@ def native_slicer() -> Slicer | None:
                 "cross_mounts": r.cross_mounts,
                 **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the keys
                 **({"protect": list(r.protect)} if r.protect else {}),
+                **({"path": r.path, "verify_names": r.verify_names} if names else {}),
             }
             for r in opts.roots
         ]
@@ -214,6 +217,13 @@ def native_slicer() -> Slicer | None:
         return SliceResult(**raw)
 
     return run
+
+
+def verify_names(volume: VolumeInfo | None) -> bool:
+    """Whether listings of this volume check folders by the names the file system stores
+    (``RootOptions.verify_names``): Windows on WinBtrfs, whose case-insensitive lookup of a name
+    takes the first entry that matches it in any case, and Linux trees have case-only siblings."""
+    return sys.platform == "win32" and volume is not None and volume.fs_type.lower() == "btrfs"
 
 
 def make_pool(workers: int | None = None) -> ProcessPoolExecutor:
@@ -321,6 +331,8 @@ class Scanner:
                     cross_mounts=cross_mounts,
                     skip=() if cross_mounts else volume_group_twins(path),
                     protect=tuple(p for p in protected if inside(p, path)),
+                    path=path,
+                    verify_names=verify_names(volume),
                 )
             )
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))

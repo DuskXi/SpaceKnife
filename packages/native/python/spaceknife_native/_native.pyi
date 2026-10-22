@@ -46,6 +46,12 @@ class RootOpts(TypedDict, total=False):
     cluster_size: int
     resident_max: int
     cross_mounts: bool
+    skip: Sequence[str]
+    protect: Sequence[str]
+    path: str  # the scan root as given: tasks are checked by their names below it
+    verify_names: bool  # Windows: check every task by its stored names (Btrfs roots always are)
+
+ROOT_KEYS: tuple[str, ...]  # the RootOpts keys this build accepts
 
 class SliceOpts(TypedDict, total=False):
     roots: Sequence[RootOpts]
@@ -54,6 +60,10 @@ class SliceOpts(TypedDict, total=False):
     threads: int  # 0: min(logical CPUs, 16)
     keep_access_time: bool  # Windows and Linux, default True: listing a folder keeps its last access time
     relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
+    # test seams (docs/native.md 2.2), not part of the interface
+    _fold_strict: bool
+    _extd_self_ids: bool
+    _pinned_cap: int | None
 
 class LinkSet:
     """The (dev, ino) of hard-linked files already counted during a scan (Scanner._fold)."""

@@ -12,6 +12,11 @@
 //! A listed directory may hand its subdirectories a way to open them from it (`sys::Via`; on
 //! Windows its open handle, docs/native.md 2.2). Each subdirectory takes it when its job starts,
 //! so a directory stays open only until its last subdirectory has started.
+//!
+//! Windows folders a name cannot reach (case-only siblings, case.rs) are not left to the frontier
+//! like the others once the budget is spent: as a task a path would open them by name. A folder
+//! opened by file id, and everything below it, is *pinned*: listed in this call, up to a cap, and
+//! past it an error, never a task.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -21,6 +26,7 @@ use std::time::Instant;
 
 use rayon::{Scope, ThreadPool, ThreadPoolBuilder};
 
+use super::case::{mark, msg};
 use super::common::{Arena, NativePath, RootOpts};
 use super::sys;
 
@@ -31,9 +37,48 @@ pub struct Node {
     pub root: u32,
     /// Found by this call (open without following a symlink) rather than given as a task.
     pub discovered: bool,
+    pub care: Care,
     /// How to open it from its listed parent (taken when its job starts).
     pub via: Mutex<Option<sys::Via>>,
     pub state: OnceLock<State>,
+}
+
+/// How a node may be put off once the budget is spent (`past_budget`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Care {
+    /// A task, or a subfolder no other entry shares its name with: to the frontier.
+    Plain,
+    /// A subfolder whose name another entry shares (`case::mark` bits): as a task its path could
+    /// open the other entry.
+    Strict(u8),
+    /// Below a folder opened by file id: no path leads there at all.
+    Pinned,
+}
+
+/// What `process` does with a node once the budget is spent (docs/native.md 2.2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Past {
+    Defer,
+    List,
+    Fail(&'static str),
+}
+
+/// `budget_positive`: the call has a time budget (at 0 the monitor lists one folder alone: what
+/// lies below it stays as it is). `cap_left`: pinned entries listed past the budget are still
+/// below the call's cap.
+fn past_budget(care: Care, budget_positive: bool, cap_left: bool) -> Past {
+    match care {
+        Care::Plain => Past::Defer,
+        // one listing each, no more than the entries already listed have
+        Care::Strict(_) if budget_positive => Past::List,
+        // a task could not tell these apart from the entry its name reaches
+        Care::Strict(marks) if marks & mark::BADNAME != 0 => Past::Fail(msg::BADNAME),
+        Care::Strict(marks) if marks & mark::DUP != 0 => Past::Fail(msg::DUP),
+        // a task: on Btrfs its stored names are checked (win.rs check_task)
+        Care::Strict(_) => Past::Defer,
+        Care::Pinned if budget_positive && cap_left => Past::List,
+        Care::Pinned => Past::Fail(msg::CAP),
+    }
 }
 
 pub enum State {
@@ -58,14 +103,21 @@ pub struct Child {
 
 impl Node {
     pub fn new(path: NativePath, root: u32, discovered: bool) -> Self {
-        Self::with_via(path, root, discovered, None)
+        Self::with_via(path, root, discovered, Care::Plain, None)
     }
 
-    pub fn with_via(path: NativePath, root: u32, discovered: bool, via: Option<sys::Via>) -> Self {
+    pub fn with_via(
+        path: NativePath,
+        root: u32,
+        discovered: bool,
+        care: Care,
+        via: Option<sys::Via>,
+    ) -> Self {
         Self {
             path,
             root,
             discovered,
+            care,
             via: Mutex::new(via),
             state: OnceLock::new(),
         }
@@ -97,7 +149,13 @@ pub struct Ctx {
     pub roots: Vec<RootOpts>,
     pub root_state: Vec<sys::RootState>,
     pub deadline: Option<Instant>,
+    /// A time budget above 0 (at 0 a call lists its first folder only: the monitor's relists).
+    pub budget_positive: bool,
     pub max_entries: usize,
+    /// Entries of pinned folders listed once the budget was spent, and how many may be: it bounds
+    /// the extra time and memory of a call (about two slices' worth) and the wait on cancel or pause.
+    pub pinned_cap: usize,
+    pub pinned_entries: AtomicUsize,
     pub listed: AtomicUsize,
     pub entries: AtomicUsize,
     pub arenas: Vec<Mutex<Arena>>,
@@ -185,9 +243,23 @@ pub fn default_threads() -> usize {
 
 fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
     let via = node.take_via(); // the parent's handle goes once its last subdirectory has started
-    if ctx.should_stop() {
-        let _ = node.state.set(State::Deferred);
-        return;
+    let stopped = ctx.should_stop();
+    if stopped {
+        let cap_left = ctx.pinned_entries.load(Ordering::Relaxed) < ctx.pinned_cap;
+        match past_budget(node.care, ctx.budget_positive, cap_left) {
+            Past::List => {}
+            Past::Defer => {
+                let _ = node.state.set(State::Deferred);
+                return;
+            }
+            Past::Fail(why) => {
+                if node.care == Care::Pinned {
+                    sys::cap_hit();
+                }
+                let _ = node.state.set(State::Failed(why.to_owned()));
+                return;
+            }
+        }
     }
     let slot = rayon::current_thread_index().unwrap_or(0) % ctx.arenas.len();
     let mut arena = ctx.arenas[slot].lock().unwrap_or_else(|e| e.into_inner());
@@ -204,19 +276,30 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
         &mut subdirs,
     );
     match res {
-        Ok(parent) => {
+        Ok((parent, pinned)) => {
             let count = arena.len() - mark.entries;
             let name_end = arena.names.len();
             drop(arena);
             ctx.entries.fetch_add(count, Ordering::Relaxed);
             ctx.listed.fetch_add(1, Ordering::Relaxed);
+            if stopped && pinned {
+                ctx.pinned_entries.fetch_add(count, Ordering::Relaxed);
+            }
             let children: Box<[Child]> = subdirs
                 .into_iter()
                 .map(|(j, path, hint)| {
-                    let via = parent.as_ref().and_then(|p| sys::via(p, hint));
+                    let marks = sys::marks(&hint) & mark::STRICT;
+                    let care = if pinned {
+                        Care::Pinned
+                    } else if marks != 0 {
+                        Care::Strict(marks)
+                    } else {
+                        Care::Plain
+                    };
+                    let via = parent.as_ref().and_then(|p| sys::via(p, hint, pinned));
                     Child {
                         j,
-                        node: Node::with_via(path, node.root, true, via),
+                        node: Node::with_via(path, node.root, true, care, via),
                     }
                 })
                 .collect();
@@ -370,12 +453,16 @@ pub fn flatten<'a>(nodes: &'a [Node], input_refs: &[Ref], arenas: &'a [Arena]) -
                     stack.push((&c.node, [1, listing, c.j as i64], None));
                 }
             }
-            Some(State::Failed(msg)) => {
+            Some(State::Failed(why)) => {
                 let er = match input {
                     Some(i) => ErrRef::Input(i),
                     None => ErrRef::Child(r),
                 };
-                f.errors.push((er, origin(), msg.as_str()));
+                f.errors.push((er, origin(), why.as_str()));
+            }
+            // a pinned folder's path leads elsewhere, or nowhere: never a task
+            Some(State::Deferred) | None if node.care == Care::Pinned => {
+                f.errors.push((ErrRef::Child(r), origin(), msg::CAP));
             }
             Some(State::Deferred) | None => {
                 f.frontier.push((input.is_none().then_some(r), origin()));
@@ -415,6 +502,25 @@ mod tests {
             w.join().unwrap();
         }
         assert!(peak.load(Ordering::SeqCst) > 1);
+    }
+
+    #[test]
+    fn what_waits_once_the_budget_is_spent() {
+        use mark::{BADNAME, DUP, TWIN};
+        // every cell of the table in docs/native.md 2.2 (budget above 0, then 0 as the monitor's)
+        for cap_left in [true, false] {
+            assert_eq!(past_budget(Care::Plain, true, cap_left), Past::Defer);
+            assert_eq!(past_budget(Care::Plain, false, cap_left), Past::Defer);
+            for marks in [TWIN, TWIN | DUP, BADNAME, TWIN | BADNAME] {
+                assert_eq!(past_budget(Care::Strict(marks), true, cap_left), Past::List);
+            }
+            assert_eq!(past_budget(Care::Strict(TWIN), false, cap_left), Past::Defer);
+            assert_eq!(past_budget(Care::Strict(TWIN | DUP), false, cap_left), Past::Fail(msg::DUP));
+            assert_eq!(past_budget(Care::Strict(BADNAME), false, cap_left), Past::Fail(msg::BADNAME));
+            assert_eq!(past_budget(Care::Pinned, false, cap_left), Past::Fail(msg::CAP));
+        }
+        assert_eq!(past_budget(Care::Pinned, true, true), Past::List);
+        assert_eq!(past_budget(Care::Pinned, true, false), Past::Fail(msg::CAP));
     }
 
     #[test]
