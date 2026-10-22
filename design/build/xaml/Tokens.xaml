@@ -16,6 +16,8 @@
             <SolidColorBrush x:Key="SkColorBgActiveBrush" Color="#FF1E2128"/>
             <Color x:Key="SkColorBgChrome">#FF0C0D10</Color>
             <SolidColorBrush x:Key="SkColorBgChromeBrush" Color="#FF0C0D10"/>
+            <Color x:Key="SkColorBgField">#FF08090B</Color>
+            <SolidColorBrush x:Key="SkColorBgFieldBrush" Color="#FF08090B"/>
             <Color x:Key="SkColorBgHover">#FF1A1D23</Color>
             <SolidColorBrush x:Key="SkColorBgHoverBrush" Color="#FF1A1D23"/>
             <Color x:Key="SkColorBgOverlay">#FF111318</Color>
@@ -36,6 +38,8 @@
             <SolidColorBrush x:Key="SkColorLineStrongBrush" Color="#FF2A2E37"/>
             <Color x:Key="SkColorLineSubtle">#FF1D2027</Color>
             <SolidColorBrush x:Key="SkColorLineSubtleBrush" Color="#FF1D2027"/>
+            <Color x:Key="SkColorLineSwatch">#00000000</Color>
+            <SolidColorBrush x:Key="SkColorLineSwatchBrush" Color="#00000000"/>
             <Color x:Key="SkColorMeterUsed">#FF5A5F6B</Color>
             <SolidColorBrush x:Key="SkColorMeterUsedBrush" Color="#FF5A5F6B"/>
             <Color x:Key="SkColorShadow">#B3000000</Color>
@@ -48,6 +52,8 @@
             <SolidColorBrush x:Key="SkColorStatusSuccessBrush" Color="#FF3FCB80"/>
             <Color x:Key="SkColorStatusWarning">#FFF5C542</Color>
             <SolidColorBrush x:Key="SkColorStatusWarningBrush" Color="#FFF5C542"/>
+            <Color x:Key="SkColorStatusWarningBase">#00000000</Color>
+            <SolidColorBrush x:Key="SkColorStatusWarningBaseBrush" Color="#00000000"/>
             <Color x:Key="SkColorTagBlue">#FF5A97FF</Color>
             <SolidColorBrush x:Key="SkColorTagBlueBrush" Color="#FF5A97FF"/>
             <Color x:Key="SkColorTagGreen">#FF3FE08A</Color>
@@ -277,6 +283,8 @@
             <SolidColorBrush x:Key="SkColorBgActiveBrush" Color="#FFD8DBE2"/>
             <Color x:Key="SkColorBgChrome">#FFEFF1F6</Color>
             <SolidColorBrush x:Key="SkColorBgChromeBrush" Color="#FFEFF1F6"/>
+            <Color x:Key="SkColorBgField">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkColorBgFieldBrush" Color="#FFFFFFFF"/>
             <Color x:Key="SkColorBgHover">#FFDFE1E5</Color>
             <SolidColorBrush x:Key="SkColorBgHoverBrush" Color="#FFDFE1E5"/>
             <Color x:Key="SkColorBgOverlay">#FFF9FBFE</Color>
@@ -297,6 +305,8 @@
             <SolidColorBrush x:Key="SkColorLineStrongBrush" Color="#FFCDD0D7"/>
             <Color x:Key="SkColorLineSubtle">#FFDEE0E4</Color>
             <SolidColorBrush x:Key="SkColorLineSubtleBrush" Color="#FFDEE0E4"/>
+            <Color x:Key="SkColorLineSwatch">#26161920</Color>
+            <SolidColorBrush x:Key="SkColorLineSwatchBrush" Color="#26161920"/>
             <Color x:Key="SkColorMeterUsed">#FF868A91</Color>
             <SolidColorBrush x:Key="SkColorMeterUsedBrush" Color="#FF868A91"/>
             <Color x:Key="SkColorShadow">#5712161F</Color>
@@ -309,6 +319,8 @@
             <SolidColorBrush x:Key="SkColorStatusSuccessBrush" Color="#FF006D3D"/>
             <Color x:Key="SkColorStatusWarning">#FF845D00</Color>
             <SolidColorBrush x:Key="SkColorStatusWarningBrush" Color="#FF845D00"/>
+            <Color x:Key="SkColorStatusWarningBase">#FFFFF8D6</Color>
+            <SolidColorBrush x:Key="SkColorStatusWarningBaseBrush" Color="#FFFFF8D6"/>
             <Color x:Key="SkColorTagBlue">#FF3D78DE</Color>
             <SolidColorBrush x:Key="SkColorTagBlueBrush" Color="#FF3D78DE"/>
             <Color x:Key="SkColorTagGreen">#FF008D4F</Color>

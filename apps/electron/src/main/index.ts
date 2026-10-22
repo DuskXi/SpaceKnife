@@ -10,13 +10,14 @@ import { fileURLToPath } from "node:url";
 import { BrowserWindow, app, clipboard, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
-import { isThemeSetting, parseThemeFile, themeFileText, type ThemeSetting, WINDOW_BG } from "../shared/theme";
+import { WINDOW_BG } from "../shared/theme";
 import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
 import { fileIn, mimeOf } from "./files";
 import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
+import { ThemeKeeper } from "./theme";
 import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -86,33 +87,37 @@ async function launchBackend(): Promise<void> {
   }
 }
 
-// The theme (W7 外观 · 主题): nativeTheme.themeSource decides the page's prefers-color-scheme (tokens.css
-// is light unless it says dark), Electron's own UI and, on macOS, the window's. 「跟随系统」 follows
-// Windows' default app mode, macOS's appearance, and on Linux the desktop's appearance setting
-// (xdg-desktop-portal) or the GTK theme, light when neither says. The last choice is kept in
-// <userData>/theme.json so a start is in the right theme from its first frame.
+// The theme (W7 外观 · 主题, theme.ts): the last choice is in <userData>/theme.json, restored before the
+// window is created.
 const themeFile = () => join(app.getPath("userData"), "theme.json");
+let themes: ThemeKeeper | null = null;
 
-function restoreTheme(): void {
+function restoreTheme(): ThemeKeeper {
   let text: string | null = null;
   try {
     text = readFileSync(themeFile(), "utf8");
   } catch {
     // never chosen: 「跟随系统」
   }
-  nativeTheme.themeSource = parseThemeFile(text);
+  return new ThemeKeeper(
+    {
+      native: nativeTheme,
+      setBackground: (color) => win?.setBackgroundColor(color),
+      write: async (text) => {
+        const file = themeFile();
+        await mkdir(dirname(file), { recursive: true });
+        // whole or not at all: a start never reads half a file
+        await writeFile(`${file}.tmp`, text);
+        await rename(`${file}.tmp`, file);
+      },
+      warn: (message) => console.warn(message),
+    },
+    text,
+  );
 }
 
-async function saveTheme(theme: ThemeSetting): Promise<void> {
-  try {
-    await mkdir(dirname(themeFile()), { recursive: true });
-    await writeFile(themeFile(), themeFileText(theme));
-  } catch (err) {
-    console.warn(`[theme] not saved: ${String(err)}`); // the next start waits for the settings
-  }
-}
-
-const windowBackground = () => (nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light);
+// (restored before any window: light, as where nothing tells, is only a fallback)
+const windowBackground = () => themes?.background() ?? WINDOW_BG.light;
 
 /** The app icon for the window (Linux; a packaged Windows app shows its executable's icon). */
 function windowIcon(): string | undefined {
@@ -182,15 +187,9 @@ function registerIpc(): void {
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
   // the renderer applies the setting to the page itself; here the window, Electron's UI and the file
-  ipcMain.on("sk:setTheme", (_e, theme: unknown) => {
-    if (!isThemeSetting(theme)) return;
-    const changed = nativeTheme.themeSource !== theme;
-    nativeTheme.themeSource = theme;
-    win?.setBackgroundColor(windowBackground());
-    if (changed) void saveTheme(theme);
-  });
+  ipcMain.on("sk:setTheme", (_e, theme: unknown) => themes?.set(theme));
   // the system's theme changed (or themeSource did): the window's own background follows
-  nativeTheme.on("updated", () => win?.setBackgroundColor(windowBackground()));
+  nativeTheme.on("updated", () => themes?.updated());
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
   // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
@@ -448,7 +447,7 @@ if (CLI.mode === "help" || CLI.mode === "error") {
 } else {
   app.whenReady().then(() => {
     serveRenderer();
-    restoreTheme();
+    themes = restoreTheme();
     registerIpc();
     createWindow();
     void launchBackend();

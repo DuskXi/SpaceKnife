@@ -22,6 +22,8 @@ export interface LabelLine {
   text: string;
   font: string;
   color: string;
+  /** the colour while the row is lit, when it differs (the size line takes the name's, UI-TM-29) */
+  lit?: string;
   /** baseline offset from the anchor along the label's own vertical */
   dy: number;
 }
@@ -35,6 +37,8 @@ export interface LabelSpec {
   maxWidth: number;
   lines: LabelLine[];
   alpha: number;
+  /** the row it names (the centre disc's text has none) */
+  row?: number;
 }
 
 export interface PreparedLabel extends LabelSpec {
@@ -108,9 +112,10 @@ export function rowLabel(f: PolarFrame, row: number, s: PaintSettings, color: st
     const half = 7 * fsc * dpr;
     name.dy -= half;
     const delta = f.delta ? Number(f.delta[row]) : null;
-    lines.push({ text: title.line2 ?? sizeText(s, Number(f.size[row]), delta), font: `400 ${fs2}px ${FONT_MONO}`, color: sub, dy: half + fs2 * 0.36 });
+    // lit, the halo takes the contrast the size line's lighter ink has to spare: the name's colour then
+    lines.push({ text: title.line2 ?? sizeText(s, Number(f.size[row]), delta), font: `400 ${fs2}px ${FONT_MONO}`, color: sub, lit: color, dy: half + fs2 * 0.36 });
   }
-  return { x: p.x, y: p.y, rot: tangentRotation(theta), align: "center", maxWidth: tangentMaxWidth(sweepOf(f, g, row), r0, r1, g.gap, dpr), lines, alpha };
+  return { x: p.x, y: p.y, rot: tangentRotation(theta), align: "center", maxWidth: tangentMaxWidth(sweepOf(f, g, row), r0, r1, g.gap, dpr), lines, alpha, row };
 }
 
 /** The centre disc's text: the zoom root's name and size, or while a row is hovered its name,
@@ -165,7 +170,8 @@ export function prepareLabels(ctx: CanvasRenderingContext2D, specs: LabelSpec[])
   return out;
 }
 
-export function drawLabels(ctx: CanvasRenderingContext2D, items: PreparedLabel[], alpha = 1): void {
+/** Draw fitted labels; the rows in `lit` (the halo's) take their lines' lit colours. */
+export function drawLabels(ctx: CanvasRenderingContext2D, items: PreparedLabel[], alpha = 1, lit?: ReadonlySet<number>): void {
   ctx.save();
   ctx.textBaseline = "alphabetic";
   for (const it of items) {
@@ -176,11 +182,12 @@ export function drawLabels(ctx: CanvasRenderingContext2D, items: PreparedLabel[]
     ctx.textAlign = it.align;
     ctx.translate(it.x, it.y);
     if (it.rot) ctx.rotate(it.rot);
+    const on = it.row !== undefined && !!lit?.has(it.row);
     it.lines.forEach((line, k) => {
       const text = it.shown[k];
       if (!text) return;
       ctx.font = line.font;
-      ctx.fillStyle = line.color;
+      ctx.fillStyle = on && line.lit ? line.lit : line.color;
       ctx.fillText(text, 0, line.dy);
     });
     ctx.restore();

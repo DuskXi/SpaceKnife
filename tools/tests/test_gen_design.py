@@ -261,6 +261,16 @@ def _tint(color: str, pct: int, under: str) -> str:
     return _over(f"{color[:7]}{round(pct * 2.55):02X}", under)
 
 
+def _mix(color: str, pct: int, base: str) -> str:
+    """CSS ``color-mix(in srgb, color pct%, base)`` of an opaque ``color`` (premultiplied, as #RRGGBBAA)."""
+    p = pct / 100
+    *c, _ = _rgba(color)
+    *b, ab = _rgba(base)
+    alpha = p + (1 - p) * ab
+    rgb = [(x * p + y * ab * (1 - p)) / alpha for x, y in zip(c, b, strict=True)]
+    return "#" + "".join(f"{round(v * 255):02X}" for v in (*rgb, alpha))
+
+
 THEME_NAMES = list(g.THEMES)
 
 
@@ -322,29 +332,41 @@ def _chrome_pairs(T: dict[str, str]) -> list[Pair]:
     for st in ("success", "warning", "danger", "growth"):
         for s in SURFACES[:6]:
             rows.append(_pair(f"status.{st} on bg.{s}", c[f"status.{st}"], c[f"bg.{s}"], 4.5))
-    # the warning's tints are of its fill (bright yellow in both themes), its text is status.warning:
-    # the plain-text chip, the compare warning, the update card's label, the log's warning level,
-    # the help page's caution box; primary text on the settings note and the remote-delete note
-    fill = c["status.warningFill"]
-    for pct, s in ((14, "window"), (14, "panel"), (16, "overlay"), (22, "panel"), (8, "window")):
+    # the warning's tints are of its fill (bright yellow in both themes) mixed into warningBase (none in
+    # the dark theme, an opaque light yellow in the light one), its text is status.warning: the
+    # plain-text chip (title bar), the compare warning, the update card's label, the log's warning level
+    # (on a hovered row too), the help page's caution box; primary text on the settings note and the
+    # remote-delete note
+    fill, base = c["status.warningFill"], c["status.warningBase"]
+
+    def warn_tint(pct: int, s: str) -> str:
+        return _over(_mix(fill, pct, base), c[f"bg.{s}"])
+
+    for pct, s in (
+        (14, "window"),
+        (14, "chrome"),
+        (14, "panel"),
+        (16, "overlay"),
+        (22, "panel"),
+        (22, "hover"),
+        (8, "window"),
+        (8, "panel"),
+    ):
         rows.append(
             _pair(
-                f"status.warning on warningFill {pct}% / bg.{s}",
-                c["status.warning"],
-                _tint(fill, pct, c[f"bg.{s}"]),
-                4.5,
+                f"status.warning on warningFill {pct}% / bg.{s}", c["status.warning"], warn_tint(pct, s), 4.5
             )
         )
+    # the plain-HTTP label on that chip: the fill's 18 % over it
+    for s in ("window", "chrome"):
+        label = _tint(fill, 18, warn_tint(14, s))
+        rows.append(_pair(f"status.warning on the HTTP label / bg.{s}", c["status.warning"], label, 4.5))
     for pct, s in ((14, "window"), (12, "overlay")):
         rows.append(
-            _pair(
-                f"text.primary on warningFill {pct}% / bg.{s}",
-                c["text.primary"],
-                _tint(fill, pct, c[f"bg.{s}"]),
-                4.5,
-            )
+            _pair(f"text.primary on warningFill {pct}% / bg.{s}", c["text.primary"], warn_tint(pct, s), 4.5)
         )
     rows.append(_pair("text.onWarning on status.warningFill", c["text.onWarning"], fill, 4.5))
+    # the log's error level is mixed into the panel, also on a hovered row (app.css)
     for key, pct, s in (
         ("danger", 10, "overlay"),
         ("danger", 14, "panel"),
@@ -476,15 +498,13 @@ LABELLED = [
     "visual.branch.neutral",
     *(f"visual.ring.{i}" for i in range(1, 5)),
 ]
-# dark shortfalls from before the light theme (TODO.md): the size line on these, time.2's name and
-# a lit branch.3.3's too
+# dark shortfalls from before the light theme (TODO.md): the size line on these, time.2's name, and
+# the name on a lit third tier of the odd branches (4.31–4.44)
 DARK_SHORT = {
     "treemap.time.2",
     "treemap.time.2 sub",
     *(f"visual.branch.{slot}.3 sub" for slot in (1, 3, 5, 7)),
-    "visual.ring.1 lit sub",
-    "visual.branch.3.3 lit",
-    "visual.branch.3.3 lit sub",
+    *(f"visual.branch.{slot}.3 lit" for slot in (1, 3, 5, 7)),
 }
 
 
@@ -505,16 +525,20 @@ def test_block_labels_are_readable(theme: str) -> None:
         fill = T[key]
         text, sub = ink(fill)
         checks += [(key, text, fill), (f"{key} sub", _over(sub, fill), fill)]
+    # a lit row is a folder (flame graph, polar flame graph): on its ring tone, on any branch tier, or
+    # on a compare tier (「其他」's grey for no change); it keeps its labels' colours, and its size line
+    # takes the name's (flame/paint.ts, flamePolar/labels.ts)
     lit_keys = [
         *(f"visual.ring.{i}" for i in range(1, 5)),
-        "visual.branch.1.1",
-        "visual.branch.1.2",
-        "visual.branch.3.3",
+        *(f"visual.branch.{slot}.{tier}" for slot in range(1, 9) for tier in range(1, 5)),
+        "visual.branch.neutral",
+        *(f"treemap.diff.grow.{i}" for i in range(4)),
+        *(f"treemap.diff.shrink.{i}" for i in range(3)),
+        "treemap.collapsed",
     ]
     for key in lit_keys:
-        text, sub = ink(T[key])
-        lit = _over(T["visual.haloOverlay"], T[key])
-        checks += [(f"{key} lit", text, lit), (f"{key} lit sub", _over(sub, lit), lit)]
+        text, _ = ink(T[key])
+        checks.append((f"{key} lit", text, _over(T["visual.haloOverlay"], T[key])))
     low = {what for what, fg, bg in checks if _contrast(fg, bg) < 4.5}
     assert low == (DARK_SHORT if theme == "dark" else set())
 

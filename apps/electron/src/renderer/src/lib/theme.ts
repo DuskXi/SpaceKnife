@@ -2,9 +2,11 @@
 //
 // The CSS follows by itself: tokens.css is light on :root and dark under prefers-color-scheme: dark
 // (in the app, main sets nativeTheme.themeSource, which drives it) unless data-theme="light", and
-// dark anywhere with data-theme="dark". So the first frame is right before any script runs. What
-// the canvases paint reads palette() here, which follows the same rule; the store mirrors the
-// theme's name (AppState.theme) so the views repaint when it changes.
+// dark anywhere with data-theme="dark". In the app the first frame is right before any script runs;
+// in a browser (headless mode) there is no nativeTheme, so the choice is also kept in localStorage
+// and public/theme-boot.js sets data-theme from it before the styles apply. What the canvases paint
+// reads palette() here, which follows the same rule; the store mirrors the theme's name
+// (AppState.theme) so the views repaint when it changes.
 
 import { type Theme, type ThemeName, themes } from "@design/tokens";
 
@@ -46,6 +48,18 @@ function follow(): boolean {
 
 let watching = false;
 
+/** Where the choice is kept for the next load's first frame: public/theme-boot.js reads the same key. */
+export const THEME_KEY = "sk.theme";
+
+function remember(setting: ThemeSetting): void {
+  try {
+    if (setting === "system") localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, setting);
+  } catch {
+    // no storage (unit tests, a locked-down browser): a load waits for the settings
+  }
+}
+
 /** Apply the setting appearance.theme: data-theme on the page for a choice, none for 「跟随系统」 (the
  * media query decides); the system's changes are followed from then on. True when the theme on
  * screen changed. */
@@ -55,6 +69,7 @@ export function applyTheme(setting: ThemeSetting): boolean {
     if (setting === "system") delete document.documentElement.dataset.theme;
     else document.documentElement.dataset.theme = setting;
   }
+  remember(setting);
   const mq = media();
   if (mq && !watching) {
     watching = true;

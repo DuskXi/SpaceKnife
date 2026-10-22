@@ -99,6 +99,11 @@ export interface Painted {
   count: number;
 }
 
+export interface PolarOverlay extends Painted {
+  /** the rows lit (the halo), whose labels take their lit colours */
+  lit: Set<number>;
+}
+
 export interface PolarPaint extends Painted {
   labels: LabelSpec[];
   tags: TagItem[];
@@ -190,13 +195,13 @@ export function paintFrame(f: PolarFrame, s: PaintSettings, reuse?: Float32Array
 /** The overlay: the halo over the ancestors of the hovered and the selected row (the centre disc
  * too); the selection's shadow with the row drawn again above it; the hover outline; the
  * selection's double ring on top. */
-export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, selected: number, reuse?: Float32Array | null): Painted {
+export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, selected: number, reuse?: Float32Array | null): PolarOverlay {
   const P = palette();
   const T = P.treemap;
   const HALO = haloOverlay();
   const g = polarOf(f);
   const b = new SectorBuilder(reuse, overlayLimit(s.haloLevels, g?.rings ?? 0));
-  if (!g) return { instances: b.data, count: 0 };
+  if (!g) return { instances: b.data, count: 0, lit: new Set() };
   const dpr = f.info.dpr;
   const gap = g.gap;
   const rd = discRadius(g);
@@ -254,6 +259,6 @@ export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, sele
     b.push(...row(selected), NONE, { border: rgba(T.state.selectOuter), borderWidth: r, gap, inset: -2 * r });
     b.push(...row(selected), NONE, { border: rgba(T.state.selectRing), borderWidth: r, gap, inset: -r });
   }
-  return { instances: b.data, count: b.n };
+  return { instances: b.data, count: b.n, lit };
 }
 

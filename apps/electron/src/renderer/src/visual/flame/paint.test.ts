@@ -276,6 +276,29 @@ describe("selection, halo and hover", () => {
   const sel = f.rowOf(2); // a.mp4, depth 1, selected
   const deep = f.rowOf(6); // x.pdf under sub / docs
 
+  it("writes a lit row's size line in its name's colour (the halo takes the lighter ink's spare contrast)", () => {
+    const sized = (c: SceneNode): SceneNode => ({ ...c, flags: (c.flags ?? 0) & ~Flag.SELECTED, label: Label.NAME | Label.SIZE, children: c.children?.map(sized) });
+    const scene = rectScene({ layout: "flame.v1", tree: treeOf(SCENE_TREE.children!.map(sized)), info: { selected_row: 4 } });
+    const g = scene.frame;
+    g.flags[4]! |= Flag.SELECTED; // x.pdf: sub and docs are lit
+    expect(g.key[4]).toBe(6);
+    const lines = (p: { texts: { text: string; color: string }[] }, name: string, size: string) => {
+      const k = p.texts.findIndex((t) => t.text === name);
+      expect(p.texts[k + 1]!.text).toBe(size);
+      return [p.texts[k]!.color, p.texts[k + 1]!.color];
+    };
+    const lit = paintFlame(g, settings());
+    const [name, sizeLine] = lines(lit, "docs", "100 B");
+    expect(sizeLine).toBe(name);
+    // unlit, the size line keeps its own colour
+    const [name0, sizeLine0] = lines(paintFlame(g, settings({ haloLevels: 0 })), "docs", "100 B");
+    expect(name0).toBe(name);
+    expect(sizeLine0).not.toBe(name0);
+    // a row the halo does not reach keeps it too
+    const [a, b] = lines(lit, "a.mp4", "400 B");
+    expect(b).not.toBe(a);
+  });
+
   it("finds the selection by FrameInfo.selected_row", () => {
     expect(selectedOf(f)).toBe(sel);
     expect(selectedOf(rectScene({ layout: "flame.v1", info: { selected_row: null } }).frame)).toBe(-1);

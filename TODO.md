@@ -247,13 +247,14 @@
 
 - [ ] MFT 快扫：卷根目录下若真有名为「$NTFS 元数据」/「$孤立文件」的文件，会和伪文件夹同名并排显示（合计正确，只是名字重复）；给伪文件夹加后缀避让（Hypothesis 找到的边界情况）
 
-- [x] 浅色主题（0.3.4，起因是 AppImage 目录审核 AppImage/appimage.github.io#10482）：A2 的浅色模式，默认跟随系统；外框、树图、火焰图、火焰-极坐标图、分支色（`visual.branch.*`）和环形色（`visual.ring.*`）都有浅色值（`design/tokens/themes/light.tokens.json`），类别颜色按主题保存
-  - [ ] 用户评审浅色色板：`uv run python tools/preview_design.py <out.html>` 的深浅对照和实机截图；要问清当初否决 B「纸本」的理由（暖色和印刷感，还是「浅底加白色表面」本身），以及青柠、橙色预设在浅色里变深（#4F6200、#954104）能不能接受
+- [ ] 浅色主题（0.3.4 暂定稿，起因是 AppImage 目录审核 AppImage/appimage.github.io#10482）：A2 的浅色模式，默认跟随系统；外框、树图、火焰图、火焰-极坐标图、分支色（`visual.branch.*`）和环形色（`visual.ring.*`）都有浅色值（`design/tokens/themes/light.tokens.json`），类别颜色按主题保存。实现已完成，色值经用户评审之前不算完成，也不合进发布
+  - [ ] 用户评审浅色色板：`uv run python tools/preview_design.py <out.html>` 的深浅对照和实机截图。要问清：当初否决 B「纸本」的理由（暖色和印刷感，还是「浅底加白色表面」本身；若是后者，这一稿同样踩中）；青柠、橙色预设在浅色里变深（#4F6200 军绿、#954104 锈褐）能不能接受；黄色标签在外框里是暗金 #957700、画布上是深色底座上的亮黄 #FFD23F，同一屏两种黄，要不要改成外框也用深色底座加亮色；命令面板的 22% 石墨遮罩把黄、橙块压成芥末黄、焦褐，要不要换成不压暗的遮罩；警告的浅底现在垫在淡黄 `status.warningBase` 上（帮助页「注意」框 #FEF4CA），标题和边线仍是暗金 #845D00
   - [ ] Linux 实测「跟随系统」：GNOME 默认（应为浅色）、GNOME 深色、没有 xdg-desktop-portal 的桌面（如 Xfce）各跑一次 AppImage；实测之前 UNRELEASED 不写 Linux 的具体行为
   - [ ] macOS 实测「跟随系统」：系统设置 › 外观的浅色、深色、自动；红绿灯按钮和系统菜单跟随应用的选择
   - [ ] 帮助页的三张配图按主题出两套（`vite-plugins/help-pictures.ts` 按 `themeName()` 选图源）；在此之前浅色里仍是深色截图。`tools/demo/screenshots.cjs` 用 `SHOT_THEME=light` 截浅色
   - [ ] 分支色板在绿色盲下有几对槽位接近（如 4 / 5、8 / 1），两套主题相同（V 待定 1）
-- [ ] 深色主题原有的对比度不足（`tools/tests/test_gen_design.py` 的 `DARK_SHORT`）：`treemap.time.2` 的名称 4.43、大小行 3.71；分支第 3 档 1、3、5、7 槽的大小行 4.26–4.41；火焰图点亮后 `visual.ring.1` 的大小行 3.98、`visual.branch.3.3` 的名称 4.30 和大小行 3.59。另有点阵阈值：代码用亮度 0.18，规格写 0.2
+- [ ] 深色主题原有的对比度不足（`tools/tests/test_gen_design.py` 的 `DARK_SHORT`）：`treemap.time.2` 的名称 4.43、大小行 3.71；分支第 3 档 1、3、5、7 槽的大小行 4.26–4.41；火焰图和火焰-极坐标图点亮的文件夹条（大小行已改用名称的颜色），分支第 3 档 1、3、5、7 槽点亮后的名称 4.31–4.44。另有点阵阈值：代码用亮度 0.18，规格写 0.2。非文字：深色里「其他」和「游戏」的类别色在面板上不到 3:1；本机磁盘「外接盘」的深蓝段在深色卡片上约 2:1
+- [ ] 0.3.3 里明确选过「深色」的用户升级后第一次启动：还没有 `theme.json`，窗口先按系统出一次，设置到了才翻成深色（只此一次，之后 `theme.json` 记着）。要消掉得让 main 照 platformdirs 找到后端的 `settings.json` 读 `appearance.theme`（SPACEKNIFE_HOME、Windows 的 LocalAppData、macOS / Linux 的 XDG_CONFIG_HOME 各一套），先不做
 - [ ] 扁平配色按主题保存（等 UI-W7-31 ⑤ 的改色实现）：每个元素、每个主题一个设置项 `appearance.flat_<元素>_<主题>`，空为 `treemap.flat.*` 的默认色
 - [ ] 导出报告的浅色色板（`export/formats.py`）对齐浅色令牌：它的三级灰在底色上只有 4.62:1
 

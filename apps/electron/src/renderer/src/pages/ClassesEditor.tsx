@@ -181,14 +181,6 @@ export function ClassesEditor() {
                   onBlur={() => changed(r.key)}
                 />
               </label>
-              {/* a slot of its own width in every row, so a row with the button does not shift */}
-              <span className="class-reset">
-                {resettable && (
-                  <button className="icon-btn tiny" title={t("恢复默认颜色")} aria-label={t("恢复 {name} 的默认颜色", { name: r.name })} onClick={() => void commit(rows.map((x) => (x.key === r.key ? { ...x, ...recolor("") } : x)))}>
-                    <Icon name="refresh" size={12} />
-                  </button>
-                )}
-              </span>
               <div className="class-fields">
                 <input
                   className="class-name"
@@ -213,6 +205,15 @@ export function ClassesEditor() {
                 {folderNote(r.id) && <div className="muted small class-note">{folderNote(r.id)}</div>}
               </div>
               <span className="muted small mono class-filter">:class:{r.name.trim()}</span>
+              {/* with the row's other action, in a slot every row has: the names stay where they were, and a row
+                  with the button does not shift */}
+              <span className="class-reset">
+                {resettable && (
+                  <button className="icon-btn tiny" title={t("恢复默认颜色")} aria-label={t("恢复 {name} 的默认颜色", { name: r.name })} onClick={() => void commit(rows.map((x) => (x.key === r.key ? { ...x, ...recolor("") } : x)))}>
+                    <Icon name="refresh" size={12} />
+                  </button>
+                )}
+              </span>
               {!other &&
                 (confirm === r.key ? (
                   <span className="class-confirm">

@@ -12,6 +12,7 @@ export const tokens = {
     "bg": {
       "active": "#1E2128",
       "chrome": "#0C0D10",
+      "field": "#08090B",
       "hover": "#1A1D23",
       "overlay": "#111318",
       "panel": "#0E1013",
@@ -23,7 +24,8 @@ export const tokens = {
     },
     "line": {
       "strong": "#2A2E37",
-      "subtle": "#1D2027"
+      "subtle": "#1D2027",
+      "swatch": "#00000000"
     },
     "meter": {
       "used": "#5A5F6B"
@@ -34,6 +36,7 @@ export const tokens = {
       "growth": "#E8963A",
       "success": "#3FCB80",
       "warning": "#F5C542",
+      "warningBase": "#00000000",
       "warningFill": "#F5C542"
     },
     "tag": {
@@ -412,6 +415,7 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
       "bg": {
         "active": "#D8DBE2",
         "chrome": "#EFF1F6",
+        "field": "#FFFFFF",
         "hover": "#DFE1E5",
         "overlay": "#F9FBFE",
         "panel": "#F4F6FA",
@@ -423,7 +427,8 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
       },
       "line": {
         "strong": "#CDD0D7",
-        "subtle": "#DEE0E4"
+        "subtle": "#DEE0E4",
+        "swatch": "#16192026"
       },
       "meter": {
         "used": "#868A91"
@@ -434,6 +439,7 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
         "growth": "#A34700",
         "success": "#006D3D",
         "warning": "#845D00",
+        "warningBase": "#FFF8D6",
         "warningFill": "#F5C542"
       },
       "tag": {
@@ -792,6 +798,7 @@ export const cssVar = {
   "color.accent.teal": "var(--sk-color-accent-teal)",
   "color.bg.active": "var(--sk-color-bg-active)",
   "color.bg.chrome": "var(--sk-color-bg-chrome)",
+  "color.bg.field": "var(--sk-color-bg-field)",
   "color.bg.hover": "var(--sk-color-bg-hover)",
   "color.bg.overlay": "var(--sk-color-bg-overlay)",
   "color.bg.panel": "var(--sk-color-bg-panel)",
@@ -802,12 +809,14 @@ export const cssVar = {
   "color.bg.window": "var(--sk-color-bg-window)",
   "color.line.strong": "var(--sk-color-line-strong)",
   "color.line.subtle": "var(--sk-color-line-subtle)",
+  "color.line.swatch": "var(--sk-color-line-swatch)",
   "color.meter.used": "var(--sk-color-meter-used)",
   "color.shadow": "var(--sk-color-shadow)",
   "color.status.danger": "var(--sk-color-status-danger)",
   "color.status.growth": "var(--sk-color-status-growth)",
   "color.status.success": "var(--sk-color-status-success)",
   "color.status.warning": "var(--sk-color-status-warning)",
+  "color.status.warningBase": "var(--sk-color-status-warning-base)",
   "color.status.warningFill": "var(--sk-color-status-warning-fill)",
   "color.tag.base": "var(--sk-color-tag-base)",
   "color.tag.blue": "var(--sk-color-tag-blue)",

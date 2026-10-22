@@ -1,15 +1,29 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { themes, tokens } from "@design/tokens";
 
+import boot from "../../public/theme-boot.js?raw";
+import indexHtml from "../../index.html?raw";
 import { isThemeSetting, parseThemeFile, themeFileText, WINDOW_BG } from "../../../shared/theme";
-import { accentHex, accentOf, accentOfSetting, accentSlot, applyAccent, applyTheme, inkOnAccent, onAccentHex, onThemeChange, palette, resolveTheme, themeName } from "./theme";
+import { accentHex, accentOf, accentOfSetting, accentSlot, applyAccent, applyTheme, inkOnAccent, onAccentHex, onThemeChange, palette, resolveTheme, THEME_KEY, themeName } from "./theme";
 
 // test-setup.ts starts every file in the dark theme
 afterEach(() => {
+  vi.unstubAllGlobals();
   applyTheme("dark");
   applyAccent(tokens.color.accent.default);
 });
+
+/** A localStorage stand-in. */
+function fakeStorage(init: Record<string, string> = {}) {
+  const m = new Map(Object.entries(init));
+  return {
+    getItem: (k: string) => m.get(k) ?? null,
+    setItem: (k: string, v: string) => void m.set(k, String(v)),
+    removeItem: (k: string) => void m.delete(k),
+    map: m,
+  };
+}
 
 describe("theme", () => {
   it("follows the choice, else the system, light where nothing tells", () => {
@@ -80,6 +94,69 @@ describe("theme", () => {
     // only colours change: geometry, type and motion are the same
     expect(themes.light.treemap.geometry).toEqual(themes.dark.treemap.geometry);
     expect(themes.light.layout).toEqual(themes.dark.layout);
+  });
+});
+
+describe("the first frame in a browser", () => {
+  // headless mode: no nativeTheme, and the settings come with the backend; the choice is kept in
+  // localStorage and public/theme-boot.js puts it on the page before the styles apply
+  const runBoot = (storage: unknown) => {
+    const html = { dataset: {} as Record<string, string> };
+    new Function("localStorage", "document", boot)(storage, { documentElement: html });
+    return html.dataset.theme;
+  };
+
+  it("keeps a choice, forgets 「跟随系统」", () => {
+    const ls = fakeStorage();
+    vi.stubGlobal("localStorage", ls);
+    applyTheme("light");
+    expect(ls.map.get(THEME_KEY)).toBe("light");
+    applyTheme("dark");
+    expect(ls.map.get(THEME_KEY)).toBe("dark");
+    applyTheme("system");
+    expect(ls.map.has(THEME_KEY)).toBe(false);
+    // no storage: nothing kept, nothing thrown
+    vi.stubGlobal("localStorage", {
+      setItem: () => {
+        throw new Error("denied");
+      },
+    });
+    expect(() => applyTheme("light")).not.toThrow();
+  });
+
+  it("sets data-theme from what lib/theme.ts kept, before anything else", () => {
+    expect(runBoot(fakeStorage({ [THEME_KEY]: "dark" }))).toBe("dark");
+    expect(runBoot(fakeStorage({ [THEME_KEY]: "light" }))).toBe("light");
+    expect(runBoot(fakeStorage())).toBeUndefined();
+    expect(runBoot(fakeStorage({ [THEME_KEY]: "sepia" }))).toBeUndefined();
+    expect(runBoot(undefined)).toBeUndefined(); // no storage at all: no error either
+    // a classic script in <head>, ahead of the bundle (and of the styles it brings)
+    const head = indexHtml.slice(0, indexHtml.indexOf("</head>"));
+    expect(head).toMatch(/<script src="\/theme-boot\.js"><\/script>/);
+    expect(indexHtml.indexOf("theme-boot.js")).toBeLessThan(indexHtml.indexOf('type="module"'));
+  });
+
+  it("follows the system's theme while 「跟随系统」", () => {
+    const listeners: (() => void)[] = [];
+    const mq = { matches: false, addEventListener: (_: string, cb: () => void) => listeners.push(cb) };
+    vi.stubGlobal("window", { matchMedia: () => mq });
+    applyTheme("system");
+    expect(themeName()).toBe("light");
+    const seen: string[] = [];
+    const off = onThemeChange(() => seen.push(themeName()));
+    mq.matches = true;
+    for (const cb of listeners) cb();
+    expect(themeName()).toBe("dark");
+    // a choice does not follow the system
+    applyTheme("light");
+    mq.matches = false;
+    for (const cb of listeners) cb();
+    mq.matches = true;
+    for (const cb of listeners) cb();
+    expect(themeName()).toBe("light");
+    off();
+    expect(seen).toEqual(["dark", "light"]);
+    expect(listeners).toHaveLength(1); // watched once
   });
 });
 

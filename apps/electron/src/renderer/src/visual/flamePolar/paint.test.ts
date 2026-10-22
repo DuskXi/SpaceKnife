@@ -222,6 +222,9 @@ describe("paintOverlay", () => {
     const sel = paintOverlay(f, { ...S, hoverHighlight: false }, HIT_NONE, selected);
     expect(inst(sel, 0).fill).toEqual(f32(haloOverlay()));
     expect(inst(sel, 0).sector[1]).toBe(1);
+    // the rows lit, for the labels' lit colours
+    expect([...o.lit].sort()).toEqual([f.rowOf(3), f.rowOf(5)].sort());
+    expect(sel.lit.size).toBe(0);
   });
 
   it("lifts the selection above its shadow and rings it, grown outward", () => {

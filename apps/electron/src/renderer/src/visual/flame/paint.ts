@@ -246,13 +246,15 @@ export function paintFlame(f: RectFrame, s: PaintSettings, out: Instances = new 
         maxWidth: w - 6 * dpr - (f.tag[i] ? 22 : 5) * dpr,
         alpha,
       });
+      // a lit row's size line takes the name's colour: the halo takes the contrast the size line's
+      // lighter ink has to spare (UI-TM-29)
       if (!short && lbl & Label.SIZE)
         texts.push({
           x: x + 6 * dpr,
           y: y1 + (big ? 16 : 14) * fsc * dpr,
           text: title.line2 ?? sizeText(s, Number(f.size[i]), f.delta ? Number(f.delta[i]) : null),
           font: `400 ${(big ? 11.5 : 10.5) * fsc * dpr}px ${FONT_MONO}`,
-          color: r.sub,
+          color: litRows.has(i) ? r.text : r.sub,
           maxWidth: w - 11 * dpr,
           alpha,
         });

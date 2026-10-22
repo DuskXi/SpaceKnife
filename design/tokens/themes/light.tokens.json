@@ -12,11 +12,13 @@
       "active": { "$value": "#D8DBE2", "$description": "按下、选中的标签按钮、拖动中的标签：比 hover 再暗一档" },
       "sunken": { "$value": "#E5E7EB", "$description": "比 window 暗一档的凹槽（浏览器模式的路径输入框）；暗色里它和树图底同值，浅色里树图底是白色，两者分开" },
       "scrim": { "$value": "#161B2438", "$description": "命令面板的遮罩：22% 石墨，浅色里背后不去色（去色会把橙、黄块压成卡其色）；对话框背景用它的 75%" },
-      "selected": { "$value": "{color.bg.raised}", "$description": "分段控件、段标签、开着的图标按钮的选中片：白色凸起片（线框稿），比底槽亮一档，同暗色" }
+      "selected": { "$value": "{color.bg.raised}", "$description": "分段控件、段标签、开着的图标按钮的选中片：白色凸起片（线框稿），比底槽亮一档，同暗色" },
+      "field": { "$value": "{color.bg.raised}", "$description": "文本框和数字框的底：白色，配 line.strong 的边。浅色里灰底的框放在白色或近白的卡片上像禁用或只读，所以不跟暗色走凹槽" }
     },
     "line": {
       "subtle": { "$value": "#DEE0E4", "$description": "细分隔线：在 window 上 ≈1.2:1、在白色上 ≈1.3:1，和暗色 1.1–1.2:1 同一量级" },
-      "strong": { "$value": "#CDD0D7", "$description": "控件边框、强分隔线、浮层 1px 外圈" }
+      "strong": { "$value": "#CDD0D7", "$description": "控件边框、强分隔线、浮层 1px 外圈" },
+      "swatch": { "$value": "#16192026", "$description": "小色块和容量构成条各段的 1px 内描边：主文字 15%（同「文件类别」的取色块）。浅色里压缩包、数据、其他、代码这些浅色块和浅蓝的 NVMe 段在浅色表面上不到 2:1，靠这圈分出边界" }
     },
     "text": {
       "primary": { "$value": "#161920", "$description": "主文字（白色上 ≈15:1，暗色 ≈17:1）" },
@@ -37,7 +39,8 @@
       "warning": { "$value": "#845D00", "$description": "#F5C542 的浅色版（L=0.507）。色相 88°→80°：同样 4.5:1 的亮度下 80° 是琥珀金，88° 是橄榄褐。只当文字用；浅底（日志警告级、提示条、芯片）和计数徽章改用新令牌 status.warningFill（浅色是亮黄，暗色是本令牌的别名，所以暗色不变）" },
       "danger": { "$value": "#A9212C", "$description": "#FF6B6B 的浅色版（L=0.480）。在自己 22% 的浅底（日志错误级）上也 ≥ 4.55" },
       "growth": { "$value": "#A34700", "$description": "#E8963A 的浅色版（L=0.510）。色相 65°→48°（同橙色强调色）：65° 在这个亮度下是褐色；暗色里增长色和橙色强调色本来就几乎同色" },
-      "warningFill": { "$value": "#F5C542", "$description": "警告的填充色：亮黄（同 treemap.state.newBadgeBg），配深字 text.onWarning；警告的浅底（日志级别、提示条）按它调淡，文字仍用 status.warning" }
+      "warningFill": { "$value": "#F5C542", "$description": "警告的填充色：亮黄（同 treemap.state.newBadgeBg），配深字 text.onWarning；警告的浅底（日志级别、提示条）按它调淡，文字仍用 status.warning" },
+      "warningBase": { "$value": "#FFF8D6", "$description": "警告浅底下面垫的淡黄：亮黄按 8–22% 调进它，帮助页的「注意」框、提示条、芯片是 #FEF4CA–#FDEDB5 的浅黄。直接叠在冷灰表面上会成米色、卡其色（最像已否决的「纸本」），所以浅色里浅底不透明" }
     },
     "tag": {
       "red": { "$value": "#DC434A", "$description": "▲ 外框表面上的标签形状（详情栏、标签按钮、结果列表）：在所有表面含 bg.active（选中的标签按钮）上 ≥ 3:1。画布上的标签不用它：底座两套主题都是深色，画布固定取暗色的标签色" },
