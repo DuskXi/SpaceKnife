@@ -4,6 +4,7 @@ limits, latest-wins, cancellation, crashes and restarts)."""
 from __future__ import annotations
 
 import asyncio
+import sys
 import time
 from pathlib import Path
 
@@ -155,3 +156,5 @@ async def test_process_stderr_and_info() -> None:
         info = host.server.plugins.info(host.server.plugins.records["t.full"])
         assert info.process is not None and info.process.state == "running" and info.process.pid
         assert info.runtime == "process" and info.granted == ["tree.read", "files.read", "basket.propose"]
+        if sys.platform != "darwin":  # macOS: from the heartbeat, which may not have come yet
+            assert info.process.memory > 1 << 20

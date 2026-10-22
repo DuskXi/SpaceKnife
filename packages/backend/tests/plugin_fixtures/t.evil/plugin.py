@@ -52,7 +52,7 @@ def _spawn(p: Try) -> object:
 def _ctypes(p: Try) -> object:
     import ctypes
 
-    return ctypes.CDLL(None)
+    return ctypes.CDLL("kernel32" if os.name == "nt" else None)
 
 
 def _read(p: Try) -> object:

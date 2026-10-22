@@ -180,29 +180,33 @@ if sys.platform == "win32":
         def __init__(self, pipe: _win32.Pipe) -> None:
             self._pipe = pipe
             self.peer_pid = pipe.client_pid()
-            self._io = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sk-helper-io")
+            # one thread reads and one writes: a read waiting for the peer never holds up a send
+            # (plugin processes talk both ways at once; overlapped I/O allows both on one handle)
+            self._rd = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sk-helper-io")
+            self._wr = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sk-helper-io-w")
 
         @property
         def closed(self) -> bool:
             return self._pipe.closed
 
         async def recv_into(self, view: memoryview, inactivity: float | None) -> None:
-            await self._on_io_thread(_fill_pipe, view, inactivity)
+            await self._on_io_thread(self._rd, _fill_pipe, view, inactivity)
 
         async def send(self, buffers: Sequence[Buffer], inactivity: float | None) -> None:
-            await self._on_io_thread(_drain_pipe, buffers, inactivity)
+            await self._on_io_thread(self._wr, _drain_pipe, buffers, inactivity)
 
-        async def _on_io_thread(self, fn: Callable[..., None], *args: object) -> None:
+        async def _on_io_thread(self, io: ThreadPoolExecutor, fn: Callable[..., None], *args: object) -> None:
             if self._pipe.closed:
                 raise ConnectionAbortedError(tr("管道已关闭"))
             try:
-                await asyncio.get_running_loop().run_in_executor(self._io, fn, self._pipe, *args)
+                await asyncio.get_running_loop().run_in_executor(io, fn, self._pipe, *args)
             except RuntimeError as exc:  # the executor was shut down by close() meanwhile
                 raise ConnectionAbortedError(tr("管道已关闭")) from exc
 
         def close(self) -> None:
             self._pipe.close()
-            self._io.shutdown(wait=False)
+            self._rd.shutdown(wait=False)
+            self._wr.shutdown(wait=False)
 
     class _SyncPipe(SyncChannel):
         def __init__(self, pipe: _win32.Pipe) -> None:

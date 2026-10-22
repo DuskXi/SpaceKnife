@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import zipfile
 from collections.abc import AsyncIterator, Iterator
+from pathlib import PurePath
 
 import numpy as np
 
@@ -215,7 +216,7 @@ async def zip_source(ctx: Context, uri: str, out: Listing) -> None:
                 out.dir(info.filename)
             else:
                 out.file(info.filename, size=info.file_size, alloc=info.compress_size)
-    out.root_name(uri.rsplit("/", 1)[-1])
+    out.root_name(PurePath(uri).name)
 
 
 @plugin.watcher("zip")

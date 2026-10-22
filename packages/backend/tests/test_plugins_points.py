@@ -142,7 +142,7 @@ async def test_code_contributions() -> None:
         assert cards[-1].source == "plugin" and cards[-1].title == "日志"
         # cleanup -> proposals resolved to nodes with reasons
         props = await host.cleanup("logs")
-        assert sorted(p.path.rsplit("/", 1)[-1] for p in props) == ["a.log", "c.log"]
+        assert sorted(Path(p.path).name for p in props) == ["a.log", "c.log"]
         assert all(p.reason == "日志文件" and p.checked for p in props)
         # node set -> the filter's :set:
         mask = await host.node_set("logs")

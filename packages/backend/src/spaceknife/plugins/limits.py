@@ -145,6 +145,41 @@ if sys.platform == "win32":
     _k32.TerminateJobObject.restype = wintypes.BOOL
     _k32.TerminateJobObject.argtypes = [wintypes.HANDLE, wintypes.UINT]
 
+    class PROCESS_MEMORY_COUNTERS(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD),
+            ("PageFaultCount", wintypes.DWORD),
+            *(
+                (n, ctypes.c_size_t)
+                for n in (
+                    "PeakWorkingSetSize",
+                    "WorkingSetSize",
+                    "QuotaPeakPagedPoolUsage",
+                    "QuotaPagedPoolUsage",
+                    "QuotaPeakNonPagedPoolUsage",
+                    "QuotaNonPagedPoolUsage",
+                    "PagefileUsage",
+                    "PeakPagefileUsage",
+                )
+            ),
+        ]
+
+    _k32.K32GetProcessMemoryInfo.restype = wintypes.BOOL
+    _k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.c_void_p, wintypes.DWORD]
+
+    def _rss_windows(pid: int) -> int:
+        proc = _k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not proc:
+            return 0
+        try:
+            c = PROCESS_MEMORY_COUNTERS()
+            c.cb = ctypes.sizeof(c)
+            if not _k32.K32GetProcessMemoryInfo(proc, ctypes.byref(c), c.cb):
+                return 0
+            return int(c.WorkingSetSize)
+        finally:
+            _k32.CloseHandle(proc)
+
 
 if sys.platform == "win32":
 
@@ -223,8 +258,10 @@ else:
 
 
 def rss_of(pid: int) -> int:
-    """Resident bytes of a process (0 when unknown)."""
+    """Resident bytes of a process (0 when unknown; macOS relies on the plugin's heartbeat)."""
     try:
+        if sys.platform == "win32":
+            return _rss_windows(pid)
         if sys.platform.startswith("linux"):
             with open(f"/proc/{pid}/statm") as fh:
                 return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")

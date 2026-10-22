@@ -16,6 +16,7 @@ APP_VERSION = json.loads(open(ROOT + "/apps/electron/package.json", encoding="ut
 hidden = [
     *collect_submodules("spaceknife"),
     *collect_submodules("spaceknife_protocol"),
+    *collect_submodules("spaceknife_sdk"),
     *collect_submodules("spaceknife_native"),
 ]
 # locales/*.json, insights/builtin.toml, export/builtin/*.sktpl
