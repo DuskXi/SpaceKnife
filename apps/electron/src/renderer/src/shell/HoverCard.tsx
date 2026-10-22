@@ -6,7 +6,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { FilterVocab, TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
-import { fillOf, labelColors } from "@/treemap/paint";
+import { type ColorMode, fillOf, labelColors } from "@/treemap/paint";
 import { Flag, Kind } from "@/visual/frame";
 import { pointerBox } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
@@ -122,7 +122,8 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const node = info?.node;
   const facts = hoverFacts(f, shown.target, vocab, node?.ext);
   const kind = facts.kind;
-  const fill = fillOf(facts.columns, facts.row, colorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
+  // a plugin's colour mode (colors.v1, phase 2) paints like the class colours until the renderer draws its palette
+  const fill = fillOf(facts.columns, facts.row, colorMode as ColorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
   const [fg] = labelColors(fill);
   const bg = `rgb(${fill.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
   const [num, unit] = sizeParts(facts.size);

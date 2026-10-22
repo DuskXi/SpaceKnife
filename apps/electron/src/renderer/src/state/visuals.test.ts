@@ -16,6 +16,8 @@ const visual = (id: string, order: number, patch: Partial<VisualInfo> = {}): Vis
   default_color: "class",
   available: true,
   reason: null,
+  plugin: null,
+  size_unit: "bytes",
   ...patch,
 });
 

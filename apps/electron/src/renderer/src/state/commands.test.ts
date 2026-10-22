@@ -38,7 +38,7 @@ describe("shortcutCommand", () => {
 
 describe("runShortcut", () => {
   const mocked = vi.mocked(call);
-  const state = (enabled: boolean, status = ""): PaletteCommand => ({ id: "x", name: "保存快照", enabled, status, hits: [], icon: "snapshot", keys: ["Ctrl+S"], more: false });
+  const state = (enabled: boolean, status = ""): PaletteCommand => ({ id: "x", name: "保存快照", enabled, status, hits: [], icon: "snapshot", keys: ["Ctrl+S"], more: false, action: null, menus: [], plugin: null });
 
   beforeEach(() => {
     set({

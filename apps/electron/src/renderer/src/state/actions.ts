@@ -466,7 +466,7 @@ async function startScanNow(params: ScanStartParams, replaceTab?: string): Promi
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status }, logDismissed: false }));
     void watchScan(status.scan_id);
-    return (await showScan(status.scan_id, scanTitle(params.roots), replaceTab)) ? status.scan_id : null;
+    return (await showScan(status.scan_id, scanTitle(params.roots ?? []), replaceTab)) ? status.scan_id : null;
   } catch (err) {
     toast(err instanceof RpcError ? t("无法开始扫描：{error}", { error: err.message }) : String(err));
     return null;

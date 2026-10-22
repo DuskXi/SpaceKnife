@@ -142,6 +142,8 @@ export function frameInfo(patch: Partial<FrameInfo> = {}): FrameInfo {
     view_id: "v1",
     visual: "treemap",
     width: 260,
+    palette: null,
+    size_unit: "bytes",
     ...patch,
   };
 }

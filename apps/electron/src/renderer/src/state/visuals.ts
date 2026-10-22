@@ -8,10 +8,12 @@ import type { FrameInfo, ViewState, VisualInfo } from "@/protocol/generated";
 import { t } from "@/lib/i18n";
 import type { IconName } from "@/ui/Icon";
 
+/** A view's colour mode: the four built-in ones, or (colors.v1) a plugin's id. */
 export type ColorModeName = ViewState["color_mode"];
+export type BuiltinColorMode = "class" | "flat" | "time" | "branch";
 
 /** The C key's order: class → flat → time → branch → class. */
-export const COLOR_MODES = ["class", "flat", "time", "branch"] as const satisfies readonly ColorModeName[];
+export const COLOR_MODES = ["class", "flat", "time", "branch"] as const satisfies readonly BuiltinColorMode[];
 
 export interface Offered {
   info: VisualInfo;
@@ -55,7 +57,7 @@ export function nextVisual(list: readonly VisualInfo[], layouts: readonly string
 
 /** The C key: the next of the four colour modes. */
 export function nextColor(current: ColorModeName): ColorModeName {
-  return COLOR_MODES[(COLOR_MODES.indexOf(current) + 1) % COLOR_MODES.length]!;
+  return COLOR_MODES[(COLOR_MODES.indexOf(current as BuiltinColorMode) + 1) % COLOR_MODES.length]!;
 }
 
 /** Levels the frame's geometry has room for when that is fewer than `detail` (flame.v1 bands,
