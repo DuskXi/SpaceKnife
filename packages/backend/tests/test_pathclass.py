@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -312,18 +313,29 @@ def test_filters_and_totals_follow_the_folder_classes() -> None:
 # --------------------------------------------------------------------------- following changes
 
 
-def relist(store: NodeStore, folder: int, children: dict[str, int | None]) -> None:
-    """Relist ``folder`` with these children (None: a folder), as a change on disk would."""
+def listing(
+    store: NodeStore, children: dict[str, int | None]
+) -> tuple[list[bytes], dict[str, np.ndarray], np.ndarray]:
+    """Names, entry columns and extension ids of these children (None: a folder)."""
     names = [n.encode() for n in children]
-    k = len(names)
-    entries = {col: np.zeros(k, dtype=np.int64) for col in ENTRY_COLUMNS}
+    entries = {col: np.zeros(len(names), dtype=np.int64) for col in ENTRY_COLUMNS}
     for i, (_name, size) in enumerate(children.items()):
         entries["kind"][i] = Kind.DIR if size is None else Kind.FILE
         entries["size"][i] = entries["alloc"][i] = size or 0
-    ext = np.array([store.ext_id(ext_of(n)) for n in children], dtype=np.uint16)
+    return names, entries, np.array([store.ext_id(ext_of(n)) for n in children], dtype=np.uint16)
+
+
+def relist(store: NodeStore, folder: int, children: dict[str, int | None]) -> None:
+    """Relist ``folder`` with these children, as a change on disk would."""
+    names, entries, ext = listing(store, children)
     mutate.relist(
         store, folder, b"".join(names), np.array([len(n) for n in names], dtype=np.uint16), entries, ext
     )
+
+
+def fold(store: NodeStore, folder: int, children: dict[str, int | None]) -> int:
+    """List ``folder`` (a scan reaching it); the first new node."""
+    return store.ingest_names(folder, *listing(store, children))
 
 
 def test_changes_update_only_what_they_touch() -> None:
@@ -373,3 +385,56 @@ def test_a_scan_in_progress() -> None:
     store.ingest_names(src, names, entries, exts)
     assert same_as_fresh(store)
     assert classes_of(store, ["Users/lenny/p/src/big.bin"])["Users/lenny/p/src/big.bin"] == "code"
+
+
+@pytest.mark.parametrize("chosen", [False, True])
+def test_a_listing_folded_while_the_column_is_worked_out(
+    monkeypatch: pytest.MonkeyPatch, chosen: bool
+) -> None:
+    """A summary during a hard scan: the scan folds a listing (event loop thread) while a summary
+    works the column out (compute thread). The next summary walks the grown tree; the column covers
+    the new rows. It used to record the store's version after the listing landed but only the rows
+    before it, so every look until the next listing skipped them (``IndexError: index 21807 is out
+    of bounds for axis 0 with size 20879``); a user's choice above the listing failed at once."""
+    spec = {"Users": {"lenny": {"p": {"Cargo.toml": 1, "src": {"lib.rs": 3}}, "q": {"v.mp4": 9}}}}
+    store = build(spec, root=C, pending=("Users/lenny/p/src",))
+    if chosen:
+        pathclass.set_folder(at(store, "Users/lenny"), "game")
+    src = find(store, "Users/lenny/p/src")
+    detect = pathclass._detect
+    landed: list[int] = []
+
+    def fold_meanwhile(s: NodeStore, a: int, b: int) -> pathclass._Found:
+        if not landed:  # the scan's thread gets the GIL while this one works the column out
+            landed.append(fold(store, src, {"lib.rs": 3, "big.bin": 7}))
+        return detect(s, a, b)
+
+    monkeypatch.setattr(pathclass, "_detect", fold_meanwhile)
+    basis = Basis(store, DEFAULT_CLASSES)
+    root = next(iter(store.roots()))
+    # the first walk began before the listing (Cargo.toml, v.mp4); the second one takes it in
+    before = summarize(store, root, basis.cls_of, len(basis.class_ids), 5)
+    assert landed and int(before.class_files.sum()) == 2
+    after = summarize(store, root, basis.cls_of, len(basis.class_ids), 5)
+    code, game, video = (basis.class_ids.index(c) for c in ("code", "game", "video"))
+    if chosen:
+        assert int(after.class_files[game]) == 4
+    else:
+        assert (int(after.class_files[code]), int(after.class_files[video])) == (3, 1)
+    assert same_as_fresh(store)
+
+
+def test_a_choice_for_a_folder_the_scan_reaches_later() -> None:
+    """The user's choice applies to a folder the scan lists after the column was first looked at
+    (the update looked for choices again only when one had been found before)."""
+    store = build({"Users": {"lenny": {}}, "a.mp3": 3}, root=C, pending=("Users/lenny",))
+    lenny = find(store, "Users/lenny")
+    pathclass.set_folder(os.path.join(store.path(lenny), "x"), "game")
+    pathclass.column(store, DEFAULT_CLASSES)  # looked at before the scan is done
+    x = fold(store, lenny, {"x": None, "b.txt": 1})
+    fold(store, x, {"c.txt": 1})
+    assert classes_of(store, ["Users/lenny/x/c.txt", "Users/lenny/b.txt"]) == {
+        "Users/lenny/x/c.txt": "game",
+        "Users/lenny/b.txt": "doc",
+    }
+    assert same_as_fresh(store)

@@ -30,6 +30,8 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
   - 8 bytes less per item while a scan is open (about 66 MB on a drive of 8.6 million items): the treemap and the palette work out sizes only for what they show, instead of an array for every item that was worked out again after every file change. The treemap also redraws faster after a change.
 - **A hard scan of a drive scanned before sets its memory aside once,** from the number of items the last complete scan found, instead of growing it step by step and copying everything each time.
 - **The window gives memory back when it is hidden.** A minimized or covered window releases its drawing surfaces and draws again when it shows. Moving the pointer over the treemap now reuses the same buffers, so it no longer allocates new memory every time something lights up.
+- **The details panel and the picture no longer fail now and then during a hard scan.** A summary in the details panel or an update of the picture could fail while the scan added items, and some files could show the wrong color (by their extension instead of the class of the folder they are in, such as a game or a project) until the scan listed more folders, or even after it ended. Which class each item takes from its folder is worked out while the scan goes on, and the newest items could be counted as done without being worked out; now they never are.
+- **Folders you classify take their class in a scan from the moment it lists them.** If none of the folders you gave a class (**Classify** on a folder) was listed yet when a scan was first drawn, those choices did nothing in that scan until you classified a folder again or opened the scan from its snapshot.
 
 ---
 
@@ -63,3 +65,5 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
   - 打开扫描时每项少 8 字节（860 万项的盘约 66 MB）：树图和命令面板只算要显示的那些项的大小，不再为每一项建一整列、每次文件变化后再整列重算。树图在文件变化后的重画也更快。
 - **硬扫描扫过的盘时，一次留好内存**：按上次完整扫描的项数一次分配，不再一边扫一边扩容、每次都把已有的数据整份复制一遍。
 - **窗口隐藏时归还内存**：最小化或被完全挡住的窗口会交还绘图画布，再显示时重新画出来。鼠标在树图上移动时复用同一块缓冲，不再每次高亮都重新分配。
+- **硬扫描进行中，详情面板和画面不再偶尔出错**：扫描一边添加项目，详情面板的汇总或画面的一次更新就可能失败；有些文件还会显示成错的颜色（按扩展名，而不是它所在文件夹的类别，比如游戏、项目），直到扫描又列了更多文件夹，扫完后也可能一直错着。每一项从所在文件夹得到什么类别，是在扫描进行中算的，最新加进来的项目可能没算就被当成算过了；现在不会了。
+- **自己归类的文件夹，扫描一列到就按所选类别算**：扫描第一次画出来时，如果你归类过（在文件夹上右键「归类」）的文件夹一个都还没列到，这些归类在这次扫描里都不起作用，直到你再归类一个文件夹，或者从快照重新打开。

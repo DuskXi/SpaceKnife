@@ -623,8 +623,8 @@ class _Entry:
             p = int(parent[p])
         return False
 
-    def build(self, store: NodeStore, table: ClassTable) -> None:
-        n = len(store)
+    def build(self, store: NodeStore, table: ClassTable, n: int, version: int) -> None:
+        """The column of rows ``[0, n)`` from scratch, as of the store's ``version`` (read before ``n``)."""
         self.col = np.zeros(n, dtype=np.uint8)
         self.own = np.zeros(n, dtype=np.uint8)
         self.blocked = np.zeros(n, dtype=bool)
@@ -644,13 +644,12 @@ class _Entry:
         self._propagate(store, dirs)
         for lo in range(1, n, CHUNK):
             self._fill(store, np.arange(lo, min(n, lo + CHUNK), dtype=np.int64))
-        self._apply_user(store, table)
-        self.n, self.version = n, store.version
+        self._apply_user(store, table, n)
+        self.n, self.version = n, version
 
-    def update(self, store: NodeStore, table: ClassTable) -> None:
-        """Rows added since the last look (a scan, a change relisting a folder), and rule folders
-        that lost what made them so: only their subtrees are worked out again."""
-        n = len(store)
+    def update(self, store: NodeStore, table: ClassTable, n: int, version: int) -> None:
+        """Rows added since the last look up to ``n`` (a scan, a change relisting a folder), and rule
+        folders that lost what made them so: only their subtrees are worked out again."""
         c = store.cols
         flags, parent = c["flags"], c["parent"]
         gone = np.uint32(Flag.GONE)
@@ -691,15 +690,15 @@ class _Entry:
         for folder in _outermost(store, dirty):
             if flags[folder] & gone:
                 continue
-            below = subtree_ids(store, folder)
+            below = _below(store, folder, n)
             dirs = np.concatenate([np.array([folder], dtype=np.int64), below[c["kind"][below] == Kind.DIR]])
             self._propagate(store, dirs)
             self._fill(store, below)
-        if self.user:
-            self._apply_user(store, table)
-        self.n, self.version = n, store.version
+        if self.user or (n > self.n and _folders):  # a chosen folder may be among the new rows
+            self._apply_user(store, table, n)
+        self.n, self.version = n, version
 
-    def _apply_user(self, store: NodeStore, table: ClassTable) -> None:
+    def _apply_user(self, store: NodeStore, table: ClassTable, n: int) -> None:
         self.user = {}
         chosen = folders()
         if not chosen:
@@ -708,15 +707,22 @@ class _Entry:
         located = []
         for path, cid in chosen:
             node, _deepest = index.locate(path)
-            if node is not None and store.cols["kind"][node] == Kind.DIR:
+            if node is not None and node < n and store.cols["kind"][node] == Kind.DIR:
                 located.append((int(store.cols["depth"][node]), int(node), cid))
         for _depth, node, cid in sorted(located):
             value = _value_of(table, cid)
             self.col[node] = value
-            below = subtree_ids(store, node)
+            below = _below(store, node, n)
             if len(below):
                 self.col[below] = value
             self.user[node] = cid
+
+
+def _below(store: NodeStore, folder: int, n: int) -> np.ndarray:
+    """:func:`subtree_ids` of the rows ``[0, n)`` the column is being worked out for: a scan thread
+    may have folded more listings since (the next look takes those)."""
+    ids = subtree_ids(store, folder)
+    return ids[ids < n]
 
 
 def _outermost(store: NodeStore, folders_: set[int]) -> list[int]:
@@ -736,25 +742,35 @@ _entries: WeakKeyDictionary[NodeStore, _Entry] = WeakKeyDictionary()
 _entries_lock = threading.Lock()
 
 
-def _entry(store: NodeStore, table: ClassTable) -> _Entry:
+def _entry(store: NodeStore, table: ClassTable) -> tuple[_Entry, np.ndarray]:
+    """The store's entry, up to date, and its column (taken under the entry's lock).
+
+    A scan folds listings on the event loop thread while compute threads read the store (without a
+    lock: it only appends). So the version is read before the node count, and both are recorded as
+    read: a listing that lands while the column is worked out leaves the entry behind the store, and
+    the next look takes its rows. (Recording the version at the end marked them done without
+    working them out: a column shorter than the nodes of a later walk, IndexError in a summary.)
+    """
     with _entries_lock:
         e = _entries.get(store)
         if e is None:
             e = _entries[store] = _Entry()
     key = (id(table), folders_version())
     with e.lock:
-        if e.key != key or len(store) < e.n:
-            e.build(store, table)
+        version = store.version
+        n = len(store)
+        if e.key != key or n < e.n:
+            e.build(store, table, n, version)
             e.key = key
-        elif e.version != store.version:
-            e.update(store, table)
-    return e
+        elif e.version != version or n > e.n:
+            e.update(store, table, n, version)
+        return e, e.col[:n]
 
 
 def column(store: NodeStore, table: ClassTable) -> np.ndarray:
-    """One ``uint8`` per node of ``store`` (see the module doc), up to date with the store."""
-    e = _entry(store, table)
-    return e.col[: len(store)]
+    """One ``uint8`` per node of ``store`` (see the module doc), up to date with the store: it covers
+    every node the store had when the call began (a scan only adds), so ids from an earlier walk."""
+    return _entry(store, table)[1]
 
 
 def resolve(col: np.ndarray, base: np.ndarray, other: int) -> np.ndarray:
@@ -777,7 +793,7 @@ class Reason:
 
 def explain(store: NodeStore, node: int, table: ClassTable) -> Reason | None:
     """Why ``node`` (a folder, or a file's folder) takes a folder class, if it does."""
-    e = _entry(store, table)
+    e, _col = _entry(store, table)
     parent = store.cols["parent"]
     if store.cols["kind"][node] != Kind.DIR:
         node = int(parent[node])
