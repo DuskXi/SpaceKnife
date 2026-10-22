@@ -142,8 +142,8 @@ def load_rules(extra_dir=None, *, host=None) -> RuleSet       # 内置 110 条 +
 
 ## 6. 文件类别与设置导入导出（W7）
 
-- `classes.py`：用户可编辑的类别表存在 `config/classes.json`，启动时成为「当前类别表」（`classes.active()`）；过滤引擎、布局着色、解析词汇都读它。`classes.build(edits)` 校验：类别名唯一且不含 `; : " \`；扩展名用 `;`、空格或逗号分隔，去掉开头的点、不分大小写；「其他」不能删、不能填扩展名、始终最后；内置类别改名后旧名字留作别名（`:class:视频` 仍可用）。类别可带颜色（`#RRGGBB`，空为主题色）。
-- `settings_io.py`：导出 `{"format": "spaceknife-settings", "version": 1, "values": 非默认值, "classes": 自定义类别表或 null}`；导入先给出计划（将改变的项、新类别表、不导入的项及原因），用户确认后才应用。也读 SpaceSniffer 的 `SpaceSnifferConfig.xml`（每个设置一个元素；颜色 `0x00BBGGRR`；模板为 Base64 的 UTF-16LE）：能对应的设置照搬或换算（字号按 7pt=100%，边框对比按 30=10），配色、刷新间隔、缩放时长、DynaZoom、元素比例不导入；文件组按 SpaceSniffer 的名字和扩展名成为类别，内置类别保留 id，SpaceSniffer 默认的三原色改用主题色，用户自选的颜色保留；SpaceSniffer 没有的「文档」类别保留。
+- `classes.py`：用户可编辑的类别表存在 `config/classes.json`，启动时成为「当前类别表」（`classes.active()`）；过滤引擎、布局着色、解析词汇都读它。`classes.build(edits)` 校验：类别名唯一且不含 `; : " \`；扩展名用 `;`、空格或逗号分隔，去掉开头的点、不分大小写；「其他」不能删、不能填扩展名、始终最后；内置类别改名后旧名字留作别名（`:class:视频` 仍可用）。类别可带颜色（`#RRGGBB`，空为主题色），深色、浅色主题各一个：`color` 和 `color_light`；为空时内置类别用当前主题的颜色，自建类别用另一主题的颜色。`classes.json` 是第 2 版；读到第 1 版（或没有版本号）时，`color` 同时当作 `color_light`：那时只有深色主题，用户选的颜色两套主题都用。
+- `settings_io.py`：导出 `{"format": "spaceknife-settings", "version": 1, "values": 非默认值, "classes": 自定义类别表或 null}`；导入先给出计划（将改变的项、新类别表、不导入的项及原因），用户确认后才应用。也读 SpaceSniffer 的 `SpaceSnifferConfig.xml`（每个设置一个元素；颜色 `0x00BBGGRR`；模板为 Base64 的 UTF-16LE）：能对应的设置照搬或换算（字号按 7pt=100%，边框对比按 30=10），配色、刷新间隔、缩放时长、DynaZoom、元素比例不导入；文件组按 SpaceSniffer 的名字和扩展名成为类别，内置类别保留 id，SpaceSniffer 默认的三原色改用主题色，用户自选的颜色保留（两个主题都用它）；SpaceSniffer 没有的「文档」类别保留。
 
 ## 7. 协议
 

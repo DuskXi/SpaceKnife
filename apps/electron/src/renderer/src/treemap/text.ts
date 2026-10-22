@@ -1,8 +1,9 @@
 // Canvas2D label layer: names, sizes, header text and tag markers drawn over the WebGL shapes.
 
-import { tokens } from "@design/tokens";
+import { themes } from "@design/tokens";
 
 import { t } from "@/lib/i18n";
+import { accentHex, onAccentHex, palette } from "@/lib/theme";
 
 import type { TagItem, TextItem } from "./paint";
 
@@ -50,7 +51,7 @@ export function fit(ctx: CanvasRenderingContext2D, text: string, max: number): s
   return lo ? text.slice(0, lo) + "…" : "";
 }
 
-const TAG_COLORS = [null, tokens.color.tag.red, tokens.color.tag.yellow, tokens.color.tag.green, tokens.color.tag.blue];
+const TAG_NAMES = [null, "red", "yellow", "green", "blue"] as const;
 
 export function drawTexts(ctx: CanvasRenderingContext2D, items: PreparedText[], alpha = 1): void {
   ctx.textBaseline = "alphabetic";
@@ -71,8 +72,12 @@ export function drawTexts(ctx: CanvasRenderingContext2D, items: PreparedText[], 
   ctx.globalAlpha = 1;
 }
 
-/** Tag markers (UI-TM-49): a 14 px dark base with a red ▲, yellow ■, green ● or blue ◆. */
+/** Tag markers (UI-TM-49): a 14 px dark base with a red ▲, yellow ■, green ● or blue ◆. The base is
+ * dark in both themes, so the shapes on it keep the dark theme's tag colours (the light theme's are
+ * darkened for light surfaces: the details panel, menus). */
 export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: number, alpha = 1): void {
+  const C = palette().color;
+  const shapes = themes.dark.color.tag;
   for (const tag of tags) {
     const s = dpr;
     ctx.globalAlpha = tag.alpha * alpha;
@@ -80,11 +85,12 @@ export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: nu
       drawBadge(ctx, tag, s);
       continue;
     }
-    ctx.fillStyle = tokens.color.tag.base;
+    ctx.fillStyle = C.tag.base;
     ctx.beginPath();
     ctx.roundRect(tag.x, tag.y, 14 * s, 14 * s, 4 * s);
     ctx.fill();
-    ctx.fillStyle = TAG_COLORS[tag.tag] ?? "#fff";
+    const name = TAG_NAMES[tag.tag];
+    ctx.fillStyle = name ? shapes[name] : "#fff";
     const cx = tag.x + 7 * s;
     const cy = tag.y + 7 * s;
     ctx.beginPath();
@@ -108,6 +114,7 @@ export function drawTags(ctx: CanvasRenderingContext2D, tags: TagItem[], dpr: nu
 
 /** 「新增」: a solid accent pill; 「已删除」: an outlined neutral one (UI-W6-16, W6 待定 7). */
 function drawBadge(ctx: CanvasRenderingContext2D, tag: TagItem, s: number): void {
+  const C = palette().color;
   const text = tag.badge === "new" ? t("新增") : t("已删除");
   ctx.font = `600 ${10 * s}px "Geist", "Noto Sans SC", system-ui, sans-serif`;
   const w = ctx.measureText(text).width + 10 * s;
@@ -115,16 +122,16 @@ function drawBadge(ctx: CanvasRenderingContext2D, tag: TagItem, s: number): void
   ctx.beginPath();
   ctx.roundRect(tag.x, tag.y, w, h, 4 * s);
   if (tag.badge === "new") {
-    ctx.fillStyle = tokens.color.accent.default;
+    ctx.fillStyle = accentHex();
     ctx.fill();
-    ctx.fillStyle = tokens.color.text.onAccent;
+    ctx.fillStyle = onAccentHex();
   } else {
-    ctx.fillStyle = "rgba(11, 12, 16, 0.72)";
+    ctx.fillStyle = palette().treemap.state.deletedBadgeBg;
     ctx.fill();
     ctx.lineWidth = s;
-    ctx.strokeStyle = tokens.color.text.secondary;
+    ctx.strokeStyle = C.text.secondary;
     ctx.stroke();
-    ctx.fillStyle = tokens.color.text.primary;
+    ctx.fillStyle = C.text.primary;
   }
   ctx.textBaseline = "middle";
   ctx.fillText(text, tag.x + 5 * s, tag.y + h / 2 + 0.5 * s);

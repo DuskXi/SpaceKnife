@@ -1,15 +1,16 @@
 // Electron main process: one frameless window, the backend child process, a few native services.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
+import { BrowserWindow, app, clipboard, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
+import { isThemeSetting, parseThemeFile, themeFileText, type ThemeSetting, WINDOW_BG } from "../shared/theme";
 import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
 import { fileIn, mimeOf } from "./files";
 import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
@@ -85,6 +86,34 @@ async function launchBackend(): Promise<void> {
   }
 }
 
+// The theme (W7 外观 · 主题): nativeTheme.themeSource decides the page's prefers-color-scheme (tokens.css
+// is light unless it says dark), Electron's own UI and, on macOS, the window's. 「跟随系统」 follows
+// Windows' default app mode, macOS's appearance, and on Linux the desktop's appearance setting
+// (xdg-desktop-portal) or the GTK theme, light when neither says. The last choice is kept in
+// <userData>/theme.json so a start is in the right theme from its first frame.
+const themeFile = () => join(app.getPath("userData"), "theme.json");
+
+function restoreTheme(): void {
+  let text: string | null = null;
+  try {
+    text = readFileSync(themeFile(), "utf8");
+  } catch {
+    // never chosen: 「跟随系统」
+  }
+  nativeTheme.themeSource = parseThemeFile(text);
+}
+
+async function saveTheme(theme: ThemeSetting): Promise<void> {
+  try {
+    await mkdir(dirname(themeFile()), { recursive: true });
+    await writeFile(themeFile(), themeFileText(theme));
+  } catch (err) {
+    console.warn(`[theme] not saved: ${String(err)}`); // the next start waits for the settings
+  }
+}
+
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? WINDOW_BG.dark : WINDOW_BG.light);
+
 /** The app icon for the window (Linux; a packaged Windows app shows its executable's icon). */
 function windowIcon(): string | undefined {
   if (process.platform === "linux") return join(app.getAppPath(), "resources", "icon.png");
@@ -102,7 +131,7 @@ function createWindow(): void {
     show: false,
     frame: mac,
     titleBarStyle: mac ? "hiddenInset" : "hidden",
-    backgroundColor: "#08090B",
+    backgroundColor: windowBackground(),
     title: "SpaceKnife",
     icon: windowIcon(),
     webPreferences: {
@@ -152,6 +181,16 @@ function registerIpc(): void {
   ipcMain.handle("sk:openPath", (_e, path: string) => shell.openPath(path));
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
+  // the renderer applies the setting to the page itself; here the window, Electron's UI and the file
+  ipcMain.on("sk:setTheme", (_e, theme: unknown) => {
+    if (!isThemeSetting(theme)) return;
+    const changed = nativeTheme.themeSource !== theme;
+    nativeTheme.themeSource = theme;
+    win?.setBackgroundColor(windowBackground());
+    if (changed) void saveTheme(theme);
+  });
+  // the system's theme changed (or themeSource did): the window's own background follows
+  nativeTheme.on("updated", () => win?.setBackgroundColor(windowBackground()));
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
   // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
@@ -409,6 +448,7 @@ if (CLI.mode === "help" || CLI.mode === "error") {
 } else {
   app.whenReady().then(() => {
     serveRenderer();
+    restoreTheme();
     registerIpc();
     createWindow();
     void launchBackend();

@@ -1,6 +1,7 @@
 // The API the preload script exposes to the renderer as `window.sk` (main ↔ renderer contract).
 
 import type { InstallHow } from "./install";
+import type { ThemeSetting } from "./theme";
 
 export interface BackendInfo {
   url: string;
@@ -45,6 +46,9 @@ export interface SkApi {
   backend(): Promise<BackendState>;
   /** The interface language changed (M7.5): the main process's own texts follow. */
   setLanguage(lang: "zh-CN" | "en"): void;
+  /** The theme setting (W7 外观 · 主题): the window's background, Electron's own UI and the page's
+   *  prefers-color-scheme follow, and the next start opens in it. Nothing in browser mode. */
+  setTheme(theme: ThemeSetting): void;
   onBackend(cb: (state: BackendState) => void): () => void;
   window: {
     minimize(): void;

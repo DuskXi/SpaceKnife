@@ -8,7 +8,7 @@ import { fmtShare } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { fit } from "@/treemap/text";
 
-import { CENTER } from "../colors";
+import { center } from "../colors";
 import { Flag, Kind, Label } from "../frame";
 import { rowTitle } from "../rowTitle";
 import { HIT_ROOT, type Hit, type PaintSettings, type PolarFrame } from "../types";
@@ -127,6 +127,7 @@ export function centreLabel(f: PolarFrame, s: PaintSettings, hovered: Hit): Labe
   const sizeFont = `400 ${11.5 * fsc * dpr}px ${FONT_MONO}`;
   const shareFont = `400 ${10.5 * fsc * dpr}px ${FONT_UI}`;
   const rows: { text: string; font: string; color: string; px: number }[] = [];
+  const CENTER = center();
   if (hovered >= 0 && hovered < f.count) {
     const title = rowTitle(f, hovered, s);
     const size = Number(f.size[hovered]);

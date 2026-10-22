@@ -8,7 +8,7 @@ import { call, setViewSettings, viewCall } from "@/state/actions";
 import { exitCompare, NOW, setCompareEnds, swapCompare } from "@/state/compare";
 import { runCommand } from "@/state/commands";
 import { patchView, setting, type Tab, toast, useApp } from "@/state/store";
-import { diffColor, diffTiers, GROW_COLORS, maxChange, SHRINK_COLORS, type Tiers } from "@/lib/diff";
+import { diffColor, diffTiers, growColors, maxChange, shrinkColors, type Tiers } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 import { cardAvoid, hoverFacts, sameTarget } from "@/shell/HoverCard";
@@ -308,15 +308,15 @@ function Summary({ sum }: { sum: CompareSummary }) {
         {unit && <span className="cmp-unit">{unit}</span>}
       </div>
       <div className="cmp-ratio" role="img" aria-label={t("增长 {grow}，减少 {shrink}", { grow: fmtSize(sum.grow), shrink: fmtSize(sum.shrink) })}>
-        {total > 0 && <span style={{ flexGrow: sum.grow, background: GROW_COLORS[3] }} />}
-        {total > 0 && sum.shrink > 0 && <span style={{ flexGrow: sum.shrink, background: SHRINK_COLORS[2] }} />}
+        {total > 0 && <span style={{ flexGrow: sum.grow, background: growColors()[3] }} />}
+        {total > 0 && sum.shrink > 0 && <span style={{ flexGrow: sum.shrink, background: shrinkColors()[2] }} />}
       </div>
       <div className="row-between small">
         <span>
-          <span className="cmp-swatch" style={{ background: GROW_COLORS[3] }} /> {t("增长")} <span className="mono">{fmtSize(sum.grow)}</span>
+          <span className="cmp-swatch" style={{ background: growColors()[3] }} /> {t("增长")} <span className="mono">{fmtSize(sum.grow)}</span>
         </span>
         <span>
-          <span className="cmp-swatch" style={{ background: SHRINK_COLORS[2] }} /> {t("减少")} <span className="mono">{fmtSize(sum.shrink)}</span>
+          <span className="cmp-swatch" style={{ background: shrinkColors()[2] }} /> {t("减少")} <span className="mono">{fmtSize(sum.shrink)}</span>
         </span>
       </div>
       {showFill && (
@@ -345,11 +345,11 @@ function Legend({ heads }: { heads: string[] }) {
           </span>
         ))}
         <span className="small">{t("增长")}</span>
-        {GROW_COLORS.map((c) => (
+        {growColors().map((c) => (
           <span key={c} className="cmp-chip" style={{ background: c }} />
         ))}
         <span className="small">{t("减少")}</span>
-        {SHRINK_COLORS.map((c, i) => (
+        {shrinkColors().map((c, i) => (
           <span key={c} className="cmp-chip" style={{ background: c, gridColumn: i === 2 ? "span 2" : undefined }} />
         ))}
       </div>

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "ef4e4a0ce39b2a18";
+export const SCHEMA_HASH = "d684c62632d423dd";
 
 export interface AgeCond {
   end: number;
@@ -177,7 +177,10 @@ export interface ClassCond {
 
 /** One class as the editor sends it; order in the list is the display (and colour) order. */
 export interface ClassEdit {
+  /** for the dark theme */
   color?: string;
+  /** for the light theme */
+  color_light?: string;
   extensions?: string[];
   /** None: a new class */
   id?: string | null;
@@ -518,8 +521,10 @@ export interface ExportTargets {
 
 export interface FilterClassInfo {
   aliases: string[];
-  /** #RRGGBB chosen by the user; empty: the theme's colour for the id */
+  /** #RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a built-in id, the light choice for a class of the user's */
   color: string;
+  /** #RRGGBB chosen by the user for the light theme; empty: the light theme's colour for a built-in id, the dark choice for a class of the user's */
+  color_light: string;
   extensions: string[];
   id: string;
   name: string;

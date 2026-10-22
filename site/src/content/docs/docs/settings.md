@@ -150,7 +150,7 @@ Theme, accent color, animation and the look of the visualizations. Changes apply
 
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
-| Theme | Match system | Match system `"system"` · Light `"light"` (not available yet) · Dark `"dark"` | Dark is a graphite theme with strong contrast. | `appearance.theme` |
+| Theme | Match system | Match system `"system"` · Light `"light"` · Dark `"dark"` | With Match system, the theme follows your system's light or dark setting. | `appearance.theme` |
 | Accent color | `"#8B9CFF"` | `"#8B9CFF"` · `"#D4FF3A"` · `"#5EC8B8"` · `"#F2A65A"` | Used by primary buttons, the current navigation item, switches, sliders and focus rings. | `appearance.accent` |
 
 #### Animation
@@ -166,7 +166,7 @@ Theme, accent color, animation and the look of the visualizations. Changes apply
 | Level contrast | 10 | 0 to 50 | How much the shade differs between neighboring levels (flat ↔ deep). | `appearance.level_contrast` |
 | Border contrast | 10 | 0 to 50 | How strong block borders are (soft ↔ sharp). | `appearance.border_contrast` |
 | Highlight halo levels | 3 | 0 to 10 | How many ancestor title bars light up on hover or selection (subtle ↔ vivid). | `appearance.halo_levels` |
-| Hover highlight | On | On `true` · Off `false` | The block under the mouse gets a white inner outline. | `appearance.hover_highlight` |
+| Hover highlight | On | On `true` · Off `false` | The block under the mouse gets an inner outline (white in the dark theme, near-black in the light one). | `appearance.hover_highlight` |
 | Mouse trail | Off | On `true` · Off `false` | Blocks the mouse passes over fade out. | `appearance.mouse_trail` |
 | Recycle Bin effect | Moving | Moving `"animated"` · Still `"static"` · Off `"off"` | What lies in the Recycle Bin / Trash is shaded and hatched inside a dashed outline, and the bin itself says how much emptying it frees. "Moving": the dashes march and a band of light sweeps across now and then (still with "Reduce motion"). | `appearance.trash_effect` |
 | Selection shadow | On | On `true` · Off `false` | The selected block casts a shadow, so it is easier to follow. | `appearance.selection_shadow` |

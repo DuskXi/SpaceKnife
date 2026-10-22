@@ -31,7 +31,9 @@ import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
 import type { InstallHow } from "../../../shared/install";
+import { isThemeSetting, type ThemeSetting } from "../../../shared/theme";
 import { getLang, setLang, t } from "@/lib/i18n";
+import { applyAccent, applyTheme } from "@/lib/theme";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
@@ -603,7 +605,7 @@ export async function closeSettings(): Promise<void> {
 
 // ------------------------------------------------------------------ settings (W7)
 
-let accentApplied = "";
+let themeApplied: ThemeSetting | null = null;
 
 /** The title of a tab named by a word of the interface, not by a place (start, settings, help). */
 function fixedTitle(tab: Tab): string | null {
@@ -619,11 +621,17 @@ export function applySettings(state: SettingsState): void {
   const prev = get().settings;
   const base = state.unit_base === 1000 ? 1000 : 1024;
   setUnitBase(base);
-  const accent = String(state.values["appearance.accent"] ?? "");
-  if (accent && accent !== accentApplied) {
-    document.documentElement.style.setProperty("--sk-color-accent-default", accent);
-    accentApplied = accent;
+  // 「主题」 (UI-W7-31 ①): the page at once (CSS variables), the canvases on their next frame (the
+  // store's theme), main for the window and the next start; the accent keeps its slot in either
+  const theme = state.values["appearance.theme"];
+  const choice = isThemeSetting(theme) ? theme : "system";
+  if (choice !== themeApplied) {
+    applyTheme(choice);
+    window.sk.setTheme(choice);
+    themeApplied = choice;
   }
+  // a preset follows the theme through its slot, a colour of the user's stays as it is (lib/theme.ts)
+  applyAccent(String(state.values["appearance.accent"] ?? ""));
   const motion = state.values["appearance.reduce_motion"];
   document.documentElement.dataset.motion = motion === "on" ? "reduce" : motion === "off" ? "full" : "";
   // 「界面语言」 (M7.5): every t() follows at the next render; texts the backend made (volume notes,

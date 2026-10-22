@@ -3,13 +3,15 @@
 // their motion never repaints the shapes or their labels, the breathing outline of folders still
 // being scanned (UI-TM-42 / UI-W2-04), what lies in a recycle bin (「回收站特效」) and the class the
 // pointer is on in 「类别统计」 (UI-MAIN-65). The rhythm is the host's; the outline of a row comes from
-// the component's geometry, so a block, a bar and a sector flash, breathe and light up alike.
+// the component's geometry, so a block, a bar and a sector flash, breathe and light up alike. The
+// colours are the theme on screen's (lib/theme.ts), read as they are drawn.
 
 import { icons } from "@design/icons";
 import { tokens } from "@design/tokens";
 
 import type { FlashItem } from "@/protocol/generated";
 import { fmtSize } from "@/lib/format";
+import { accentHex, palette, themeName } from "@/lib/theme";
 
 import { Flag, Kind } from "./frame";
 import { type Box, HIT_ROOT, type Hit, type Pt, type VisualFrame, type VisualGeometry } from "./types";
@@ -31,7 +33,6 @@ const PERIOD_MS = 2400; // one breath
 const RIPPLE_MS = 220; // each level breathes this much later than the one around it: a wave inward
 const LEVEL_ALPHA = [1, 0.7, 0.45]; // outer levels brighter
 const MAX_BLOCKS = 300;
-const ACCENT = tokens.color.accent.default;
 
 /** The marked rows (and the zoom root, when its own flags say so) roomy enough to carry an outline:
  * the largest first when there are more than MAX_BLOCKS. */
@@ -65,8 +66,9 @@ export function breathAlpha(depth: number, now: number, reduced: boolean): numbe
 
 export function drawBreath(ctx: CanvasRenderingContext2D, rows: Breath[], now: number, reduced: boolean, dpr: number): void {
   ctx.save();
-  ctx.strokeStyle = ACCENT;
-  ctx.shadowColor = ACCENT;
+  const accent = accentHex(); // the user's (W7 外观 · 强调色)
+  ctx.strokeStyle = accent;
+  ctx.shadowColor = accent;
   for (const b of rows) {
     const a = breathAlpha(b.depth, now, reduced);
     ctx.globalAlpha = a;
@@ -95,7 +97,6 @@ export interface Flash {
 const FLASH_MS = tokens.motion.duration.flash;
 const FLASH_FADE_MS = 300;
 const BADGE_MS = 10_000;
-const FLASH = tokens.treemap.state.flash;
 
 /** The rows a frame says changed (row -1: the zoom root); null when none of them is drawn. */
 export function flashOf<F extends VisualFrame>(g: VisualGeometry<F>, f: F, items: readonly FlashItem[], now: number, newPath: NewPath = path2d): Flash | null {
@@ -124,6 +125,7 @@ export function badgeAt(anchor: Pt, bounds: Box, w: number, h: number, margin: n
  * static badge ("+212 MB") where it fits. False once there is nothing left to show. */
 export function drawFlash(ctx: CanvasRenderingContext2D, flash: Flash, now: number, reduced: boolean, dpr: number): boolean {
   const t = now - flash.start;
+  const S = palette().treemap.state;
   if (reduced) {
     if (t > BADGE_MS) return false;
     ctx.save();
@@ -136,9 +138,9 @@ export function drawFlash(ctx: CanvasRenderingContext2D, flash: Flash, now: numb
       const th = 16 * dpr;
       const at = badgeAt(m.badge, m.bounds, tw, th, 2 * dpr);
       if (!at) continue;
-      ctx.fillStyle = tokens.treemap.state.newBadgeBg;
+      ctx.fillStyle = S.newBadgeBg;
       ctx.fillRect(at.x, at.y, tw, th);
-      ctx.fillStyle = tokens.treemap.state.newBadgeText;
+      ctx.fillStyle = S.newBadgeText;
       ctx.fillText(label, at.x + 4 * dpr, at.y + th / 2);
     }
     ctx.restore();
@@ -149,9 +151,9 @@ export function drawFlash(ctx: CanvasRenderingContext2D, flash: Flash, now: numb
   const pulse = t < FLASH_MS ? 0.5 - 0.5 * Math.cos((4 * Math.PI * t) / FLASH_MS) : 1 - (t - FLASH_MS) / FLASH_FADE_MS;
   ctx.save();
   ctx.globalAlpha = Math.max(0, Math.min(1, t < FLASH_MS ? 0.35 + 0.65 * pulse : pulse));
-  ctx.strokeStyle = FLASH;
+  ctx.strokeStyle = S.flash;
   ctx.lineWidth = 2 * dpr;
-  ctx.shadowColor = `${FLASH}8C`; // 55 %
+  ctx.shadowColor = `${S.flash}8C`; // 55 %
   ctx.shadowBlur = 18 * dpr;
   for (const m of flash.marks) ctx.stroke(m.path);
   ctx.restore();
@@ -178,7 +180,7 @@ export function drawTrail(ctx: CanvasRenderingContext2D, trail: TrailMark[], now
   const left = trail.filter((m) => now - m.t < TRAIL_MS);
   ctx.save();
   ctx.lineWidth = dpr;
-  ctx.strokeStyle = tokens.treemap.state.hoverInset;
+  ctx.strokeStyle = palette().treemap.state.hoverInset;
   for (const m of left) {
     ctx.globalAlpha = 0.6 * (1 - (now - m.t) / TRAIL_MS);
     ctx.stroke(m.path);
@@ -210,7 +212,6 @@ export interface TrashMark {
   sweep: Box | null;
 }
 
-const TRASH = tokens.treemap.trash;
 const TRASH_MAX = 200;
 const TRASH_MEMBERS = 4000; // rows veiled with their bins in the flame graphs
 const SWEEP_MS = 7000; // a band of light crosses each bin once in this time…
@@ -289,17 +290,18 @@ export function sweepAt(now: number, seed: number): number | null {
   return t < SWEEP_SHARE ? t / SWEEP_SHARE : null;
 }
 
-const hatches = new Map<number, CanvasPattern | null>();
-/** Fine cross-hatching in the bin's colour (one tile per pixel ratio). */
+const hatches = new Map<string, CanvasPattern | null>();
+/** Fine cross-hatching in the bin's colour (one tile per theme and pixel ratio). */
 function hatchOf(ctx: CanvasRenderingContext2D, dpr: number): CanvasPattern | null {
-  if (hatches.has(dpr)) return hatches.get(dpr)!;
+  const key = `${themeName()} ${dpr}`;
+  if (hatches.has(key)) return hatches.get(key)!;
   let pattern: CanvasPattern | null = null;
   if (typeof OffscreenCanvas !== "undefined" && typeof ctx.createPattern === "function") {
     const n = Math.max(4, Math.round(7 * dpr));
     const tile = new OffscreenCanvas(n, n);
     const c = tile.getContext("2d");
     if (c) {
-      c.strokeStyle = TRASH.hatch;
+      c.strokeStyle = palette().treemap.trash.hatch;
       c.lineWidth = Math.max(1, 0.75 * dpr);
       c.beginPath();
       c.moveTo(0, n);
@@ -310,7 +312,7 @@ function hatchOf(ctx: CanvasRenderingContext2D, dpr: number): CanvasPattern | nu
       pattern = ctx.createPattern(tile, "repeat");
     }
   }
-  hatches.set(dpr, pattern);
+  hatches.set(key, pattern);
   return pattern;
 }
 
@@ -327,6 +329,7 @@ export function drawTrash(
   newPath: (d?: string) => Path2D = (d) => new Path2D(d),
 ): void {
   if (!marks.length) return;
+  const TRASH = palette().treemap.trash;
   const hatch = hatchOf(ctx, dpr);
   ctx.save();
   marks.forEach((m, k) => {
@@ -364,12 +367,12 @@ export function drawTrash(
     ctx.shadowBlur = 6 * dpr;
     ctx.stroke(m.path);
     ctx.restore();
-    if (m.bin && m.badge && m.bounds) drawBinBadge(ctx, m, dpr, label(m.size), newPath);
+    if (m.bin && m.badge && m.bounds) drawBinBadge(ctx, m, dpr, label(m.size), newPath, TRASH);
   });
   ctx.restore();
 }
 
-function drawBinBadge(ctx: CanvasRenderingContext2D, m: TrashMark, dpr: number, text: string, newPath: (d?: string) => Path2D): void {
+function drawBinBadge(ctx: CanvasRenderingContext2D, m: TrashMark, dpr: number, text: string, newPath: (d?: string) => Path2D, TRASH: { badgeBg: string; badgeText: string }): void {
   ctx.save();
   ctx.font = `600 ${11 * dpr}px ${tokens.font.family.ui}`;
   ctx.textBaseline = "middle";
@@ -379,7 +382,7 @@ function drawBinBadge(ctx: CanvasRenderingContext2D, m: TrashMark, dpr: number, 
   const h = 20 * dpr;
   const at = badgeAt(m.badge!, m.bounds!, w, h, 4 * dpr);
   if (at) {
-    ctx.shadowColor = "#000000A0";
+    ctx.shadowColor = palette().treemap.state.selectShadow;
     ctx.shadowBlur = 8 * dpr;
     ctx.fillStyle = TRASH.badgeBg;
     ctx.beginPath();
@@ -413,7 +416,6 @@ export interface ClassMark {
   outlined: number;
 }
 
-const FOCUS = tokens.treemap.classFocus;
 /** rows a class can light: files, aggregates of one class, folders a folder class swallows (the
  * backend sends 255 for every other folder, mixed aggregates, "+N items", free and unknown space) */
 const CLASS_KINDS: ReadonlySet<number> = new Set([Kind.FILE, Kind.SMALL, Kind.FOLDER, Kind.COLLAPSED, Kind.PENDING]);
@@ -461,17 +463,18 @@ export function classMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, cl
 /** The glow around the lit rows: the class colour, the accent for a class too dark to glow. */
 export function glowOf(hex: string): string {
   const v = /^#?([0-9a-f]{6})/i.exec(hex);
-  if (!v) return ACCENT;
+  if (!v) return accentHex();
   const n = parseInt(v[1]!, 16);
   const lin = (c: number) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
   const lum = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
-  return lum < 0.06 ? ACCENT : `#${v[1]}`;
+  return lum < 0.06 ? accentHex() : `#${v[1]}`;
 }
 
 /** Draw the mark at `level` (0–1, the fade): the veil over the whole canvas minus the class's rows,
  * then their outlines with a soft glow. Drawn first on its canvas: the bins and the breathing go over it. */
 export function drawClassMark(ctx: CanvasRenderingContext2D, m: ClassMark, color: string, level: number, w: number, h: number, dpr: number): void {
   if (level <= 0) return;
+  const FOCUS = palette().treemap.classFocus;
   ctx.save();
   ctx.globalAlpha = level;
   ctx.fillStyle = FOCUS.veil;

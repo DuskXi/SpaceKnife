@@ -66,7 +66,27 @@ def test_spacesniffer_custom_colour(tmp_path: Path) -> None:
     (tmp_path / "c.xml").write_text(text, encoding="utf-8")
     plan = read_plan(tmp_path / "c.xml", dict(DEFAULTS))
     assert plan.classes is not None
-    assert next(c for c in plan.classes if c.name == "Video/Movies").color == "#996633"  # BGR -> RGB
+    video = next(c for c in plan.classes if c.name == "Video/Movies")
+    assert (video.color, video.color_light) == ("#996633", "#996633")  # BGR -> RGB, in both themes
+
+
+def test_export_from_before_themes_keeps_colours_in_both(tmp_path: Path) -> None:
+    # an export written when there was only the dark theme has no color_light: the user's colours
+    # count for both themes; one written since says so itself ("" is the theme's colour)
+    rows = [c.model_dump(mode="json") for c in DEFAULT_CLASSES.classes]
+    rows[1]["color"] = "#123456"
+    old = [{k: v for k, v in r.items() if k != "color_light"} for r in rows]
+    for name, items in (("old.json", old), ("new.json", rows)):
+        doc = {"format": "spaceknife-settings", "version": 1, "values": {}, "classes": items}
+        (tmp_path / name).write_text(json.dumps(doc), encoding="utf-8")
+    plan = read_plan(tmp_path / "old.json", dict(DEFAULTS))
+    assert plan.classes is not None
+    image = next(c for c in plan.classes if c.id == "image")
+    assert (image.color, image.color_light) == ("#123456", "#123456")
+    plan = read_plan(tmp_path / "new.json", dict(DEFAULTS))
+    assert plan.classes is not None
+    image = next(c for c in plan.classes if c.id == "image")
+    assert (image.color, image.color_light) == ("#123456", "")
 
 
 def test_bad_files(tmp_path: Path) -> None:

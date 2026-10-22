@@ -173,8 +173,17 @@ def _plan_spaceknife(raw: bytes, current: dict[str, SettingValue]) -> ImportPlan
     wanted.update({k: v for k, v in values.items() if k not in DEFAULTS})
     _finish(plan, wanted, current)
     raw_classes = doc.get("classes")
+    # an export from before the light theme has no color_light (every export since writes it, ""
+    # for the theme's colour): its colours are the user's for both themes, as in classes.json v1
     table = (
-        class_table.ClassTable(tuple(FilterClassInfo.model_validate(c) for c in raw_classes))
+        class_table.ClassTable(
+            tuple(
+                FilterClassInfo.model_validate(
+                    c if isinstance(c, dict) and "color_light" in c else class_table.colors_for_both(c)
+                )
+                for c in raw_classes
+            )
+        )
         if raw_classes
         else class_table.DEFAULT_CLASSES
     )
@@ -300,14 +309,10 @@ def _classes_from(groups: ET.Element, plan: ImportPlan) -> class_table.ClassTabl
         cid = known.id if known is not None and known.id not in used and known.id != OTHER else None
         if cid:
             used.add(cid)
-        edits.append(
-            ClassEdit(
-                id=cid,
-                name=name,
-                extensions=[_text(g, "extensions") or ""],
-                color=_ss_color(_text(g, "color")),
-            )
-        )
+        color = _ss_color(_text(g, "color"))
+        # SpaceSniffer has one set of colours: they go to both themes
+        exts = [_text(g, "extensions") or ""]
+        edits.append(ClassEdit(id=cid, name=name, extensions=exts, color=color, color_light=color))
     for c in BUILTIN_CLASSES:  # SpaceKnife-only classes stay; 「其他」 last
         if c.id not in used and c.id != OTHER:
             edits.append(ClassEdit(id=c.id, name=c.name, extensions=c.extensions))

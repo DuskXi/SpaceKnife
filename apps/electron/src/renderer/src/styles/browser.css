@@ -12,7 +12,7 @@
 }
 .remote-chip svg { flex: none; }
 .remote-name { overflow: hidden; text-overflow: ellipsis; }
-.remote-chip.plain { background: color-mix(in srgb, var(--sk-color-status-warning) 14%, transparent); color: var(--sk-color-status-warning); }
+.remote-chip.plain { background: color-mix(in srgb, var(--sk-color-status-warning-fill) 14%, transparent); color: var(--sk-color-status-warning); }
 .remote-plain {
   flex: none; padding: 0 5px; border-radius: var(--sk-radius-xs); font: 600 10px/16px var(--sk-font-family-mono);
   background: color-mix(in srgb, currentColor 18%, transparent);
@@ -30,7 +30,7 @@
 /* deleting and moving to the Recycle Bin act on the server: said in the basket */
 .bk-remote {
   display: flex; gap: 8px; align-items: flex-start; margin: 0 12px 8px; padding: 8px 10px; border-radius: var(--sk-radius-md);
-  background: color-mix(in srgb, var(--sk-color-status-warning) 12%, transparent); color: var(--sk-color-text-primary);
+  background: color-mix(in srgb, var(--sk-color-status-warning-fill) 12%, transparent); color: var(--sk-color-text-primary);
   font-size: var(--sk-font-size-small);
 }
 .bk-remote svg { flex: none; margin-top: 1px; color: var(--sk-color-status-warning); }

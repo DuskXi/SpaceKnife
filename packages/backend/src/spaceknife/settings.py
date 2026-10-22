@@ -75,6 +75,8 @@ LOAD_LABELS = Texts(
     }
 )
 LOAD_LEVELS: tuple[tuple[SettingValue, str], ...] = tuple((k, LOAD_LABELS.raw(k)) for k in LOAD_LABELS)
+# the dark theme's presets, which also name the slot: the light theme has its own colour for each
+# (design/tokens color.accent.*), so the stored value stays the same when the theme changes
 ACCENTS = ("#8B9CFF", "#D4FF3A", "#5EC8B8", "#F2A65A")
 
 
@@ -206,10 +208,10 @@ def _registry() -> tuple[Spec, ...]:
             "appearance",
             "主题",
             "主题",
-            "深色为石墨色调，对比度较高",
+            "跟随系统时按系统的浅色 / 深色设置切换",
             "segmented",
             "system",
-            (("system", "跟随系统"), ("light", "浅色", "浅色主题待设计（W7 待定 20）"), ("dark", "深色")),
+            (("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")),
             synonyms=("theme", "dark", "light"),
             kind=str,
         ),
@@ -284,7 +286,7 @@ def _registry() -> tuple[Spec, ...]:
             "appearance",
             "树图视觉",
             "悬停高亮",
-            "鼠标下的元素加白色内描边",
+            "鼠标下的元素加一圈内描边（深色主题白色，浅色主题近黑色）",
             "switch",
             True,
             synonyms=("hover", "highlight"),
