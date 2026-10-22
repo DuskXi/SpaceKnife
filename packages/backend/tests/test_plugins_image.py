@@ -14,6 +14,7 @@ from spaceknife.server.rpc import RpcError
 from spaceknife_protocol.binary import decode_frame
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_sdk.image import map_image
+from spaceknife_sdk.testing import MockHost, make_tree
 
 from .plugin_helpers import mock
 from .store_builder import build, find
@@ -56,6 +57,64 @@ def test_image_cache_counts_users() -> None:
     images.release_user("p.one")
     assert images.bytes() == 0
     images.close()
+
+
+def test_a_wider_image_of_the_same_version_is_kept() -> None:
+    """A plugin reading one column after another gets a new image each time (same tree version,
+    more columns): the one just added stays, the older ones of that plugin go."""
+    store = _store()
+    images = Images()
+    made = []
+    for cols in (["kind"], ["alloc", "kind"], ["alloc", "kind", "size"], ["alloc", "kind", "mtime", "size"]):
+        e = export("scan-1", store, cols)  # type: ignore[arg-type]
+        images.add(e, "p.one")
+        made.append(e)
+        # what the plugin maps next is still there, with the values
+        image = map_image(e.desc)
+        assert image.columns["kind"].tolist() == store.cols["kind"][: len(store)].tolist()  # type: ignore[attr-defined]
+        image.close()
+    kept = images.find("scan-1", store.version, {"size", "mtime"}, running=False)  # type: ignore[attr-defined]
+    assert kept is made[-1]
+    assert images.bytes() <= made[-1].size + made[-2].size
+    # another plugin's image is not dropped for this one's
+    other = export("scan-1", store, ["size"])  # type: ignore[arg-type]
+    images.add(other, "p.two")
+    images.add(export("scan-1", store, ["parent"]), "p.one")  # type: ignore[arg-type]
+    assert images.find("scan-1", store.version, {"size"}, running=False) is not None  # type: ignore[attr-defined]
+    images.close()
+
+
+async def test_a_plugin_reads_columns_one_after_another(tmp_path: Path) -> None:
+    """Through a real plugin process: each new column comes back with the tree's values."""
+    folder = tmp_path / "t.cols"
+    folder.mkdir()
+    (folder / "plugin.toml").write_text(
+        'id = "t.cols"\nversion = "0.1.0"\nname = "cols"\nentry = "plugin.py"\npermissions = ["tree.read"]\n',
+        encoding="utf-8",
+    )
+    (folder / "plugin.py").write_text(
+        "from spaceknife_sdk import Context, Payload, Plugin\n"
+        "plugin = Plugin()\n"
+        "class Out(Payload):\n"
+        "    files: int\n"
+        "    alloc: int\n"
+        "    size: int\n"
+        "@plugin.method\n"
+        "async def cols(ctx: Context) -> Out:\n"
+        "    t = ctx.tree\n"
+        "    files = t.col('kind') == 0\n"
+        "    alloc = int(t.col('alloc')[files].sum())\n"
+        "    size = int(t.col('size')[files].sum())\n"
+        "    return Out(files=int(files.sum()), alloc=alloc, size=size)\n",
+        encoding="utf-8",
+    )
+    host = MockHost.load(folder, process=True, grant="requested")
+    host.scan(make_tree({"a.bin": 5000, "sub": {"b.bin": 3000}}))
+    async with host:
+        out = await host.call("cols")
+    assert out["files"] == 2
+    assert out["size"] == 8000
+    assert out["alloc"] >= 8000
 
 
 def test_queries() -> None:

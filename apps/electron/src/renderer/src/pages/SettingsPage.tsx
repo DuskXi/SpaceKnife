@@ -10,10 +10,13 @@ import { type SettingsPageId, set, toast, useApp } from "@/state/store";
 import { fmtKeys } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
+import { PluginIcon } from "@/plugins/icons";
+import { pluginName } from "@/plugins/store";
 
 import { AboutEntry, AboutHeader, ComponentsGroup, ReleaseTimeline } from "./AboutPage";
 import { AdvancedTools, ClearTags } from "./AdvancedTools";
 import { ClassesEditor } from "./ClassesEditor";
+import { PluginsPage } from "./PluginsPage";
 
 type Value = boolean | number | string;
 
@@ -81,6 +84,16 @@ export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName;
     },
   },
   {
+    id: "plugins",
+    get name() {
+      return t("插件");
+    },
+    icon: "bolt",
+    get note() {
+      return t("安装、启用与停用插件；插件自己的设置也在这里");
+    },
+  },
+  {
     id: "keys",
     get name() {
       return t("快捷键");
@@ -113,7 +126,7 @@ export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName;
 ];
 const GROUPS: SettingsPageId[][] = [
   ["general", "appearance", "treemap"],
-  ["scan", "classes", "tags"],
+  ["scan", "classes", "tags", "plugins"],
   ["keys", "advanced", "about"],
 ];
 const pageName = (id: string) => PAGES.find((p) => p.id === id)?.name ?? id;
@@ -196,6 +209,7 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
       </header>
       {p.id === "about" && <AboutHeader />}
       {p.id === "classes" && <ClassesEditor />}
+      {p.id === "plugins" && <PluginsPage />}
       {p.id === "keys" && <KeysPage rows={rows} />}
       {p.id !== "keys" && (
         <div className="settings-columns">
@@ -491,8 +505,11 @@ function KeysPage({ rows }: { rows: SettingMeta[] }) {
           {!commands && <div className="set-row muted">{t("正在读取…")}</div>}
           {shown.map((c) => (
             <div key={c.id} className="key-row">
-              <Icon name={(c.icon as IconName) || "command"} size={14} />
-              <span className="flex">{c.name}</span>
+              <PluginIcon plugin={c.plugin} name={c.icon || "command"} size={14} />
+              <span className="flex">
+                {c.name}
+                {c.plugin && <span className="muted small"> · {pluginName(c.plugin)}</span>}
+              </span>
               {c.keys.length ? c.keys.map((k) => <Kbd key={k}>{fmtKeys(k)}</Kbd>) : <span className="muted small">{t("未绑定")}</span>}
             </div>
           ))}

@@ -16,6 +16,9 @@ import { COLOR_MODES, levelsThatFit, offered, visualIcon } from "@/state/visuals
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 import { registeredLayouts } from "@/visual/registry";
+import { runShortcut } from "@/state/commands";
+import { PluginColorItems, PluginColorSegment } from "@/plugins/ColorMenu";
+import { PluginIcon } from "@/plugins/icons";
 
 import { ComparePicker, DIRECTIONS, DirectionSegment, directionLabel, ExitCompare } from "./Compare";
 import { FilterBox } from "./FilterBox";
@@ -108,8 +111,8 @@ export function Toolbar() {
       ) : !scanTab ? (
         <nav className="crumbs" aria-label={t("当前位置")} data-fit-min={CRUMBS_MIN}>
           <span className="crumb-cur">
-            <Icon name={tab.kind === "machine" ? "diskGauge" : "drive"} />
-            {tab.kind === "machine" ? t("本机磁盘") : t("新扫描")}
+            <Icon name={tab.kind === "machine" ? "diskGauge" : tab.kind === "plugin" ? "layers" : "drive"} />
+            {tab.kind === "machine" ? t("本机磁盘") : tab.kind === "plugin" ? tab.title : t("新扫描")}
           </span>
         </nav>
       ) : (
@@ -148,6 +151,7 @@ export function Toolbar() {
                     {colorLabel(m)}
                   </button>
                 ))}
+                <PluginColorSegment viewId={viewId} st={st} />
               </div>
             )}
             {!fold.chipsInMenu &&
@@ -204,6 +208,7 @@ const SPACE_SWITCHES = [
  * something is folded. Picking an item applies it and closes the menu, as the group would have. */
 function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState; fold: Collapse; compare: boolean }) {
   const visuals = useApp((s) => s.visuals);
+  const commands = useApp((s) => s.commands);
   const dir = useApp((s) => s.views[viewId]?.state.direction ?? "all");
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -218,7 +223,9 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
   }, [open]);
   const visualItems = fold.visualInMenu ? offered(visuals, registeredLayouts(), st.compare) : [];
   const chips = fold.chipsInMenu && !compare ? SPACE_SWITCHES.filter((s) => s.id !== "trash" || st.has_trash) : [];
-  if (!visualItems.length && !fold.coloringInMenu && !chips.length) return null;
+  // plugins' commands for the toolbar (menus "toolbar", thin): always in this menu
+  const extra = commands.filter((c) => c.menus.includes("toolbar"));
+  if (!visualItems.length && !fold.coloringInMenu && !chips.length && !extra.length) return null;
   const pick = (act: () => unknown) => () => {
     setOpen(false);
     button.current?.focus();
@@ -275,6 +282,7 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
             {colorLabel(m)}
           </button>
         ))}
+        <PluginColorItems viewId={viewId} st={st} onPick={pick} />
       </div>,
     );
   if (chips.length)
@@ -287,6 +295,20 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
             <span className={`chip-swatch ${s.id}`} />
             {s.label()}
             <span className="menu-key">{s.key}</span>
+          </button>
+        ))}
+      </div>,
+    );
+  if (extra.length)
+    groups.push(
+      <div key="plugins" role="group" aria-label={t("插件")}>
+        <div className="menu-label" aria-hidden="true">{t("插件")}</div>
+        {extra.map((c) => (
+          <button key={c.id} role="menuitem" className="menu-item" title={c.status || undefined} onClick={pick(() => runShortcut(c.id))}>
+            <span className="menu-check" />
+            <PluginIcon plugin={c.plugin} name={c.icon} size={14} />
+            {c.name}
+            {c.keys[0] && <span className="menu-key">{c.keys[0]}</span>}
           </button>
         ))}
       </div>,

@@ -10,7 +10,7 @@ import { HEADLESS_ORIGIN } from "./headless";
 import { type HeadlessServer, bearerOk, createHeadlessServer, sameOrigin, servedIndex } from "./headless-server";
 
 const TOKEN = "t".repeat(32);
-const INDEX = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws://127.0.0.1:*; style-src 'self'" /><div id="root"></div>`;
+const INDEX = `<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws://127.0.0.1:*; style-src 'self'; frame-src skplugin:" /><div id="root"></div>`;
 
 /** A stand-in for the backend: records the upgrade request it gets, answers 101, then echoes. */
 function fakeBackend(): Promise<{ server: Server; port: number; requests: string[] }> {
@@ -69,6 +69,13 @@ describe("headless server", () => {
     writeFileSync(join(dir, "renderer", "index.html"), INDEX);
     writeFileSync(join(dir, "renderer", "assets", "index-abc.js"), "console.log(1)");
     writeFileSync(join(dir, "secret.txt"), "outside");
+    // a plugin with a web panel, and the panel SDK
+    mkdirSync(join(dir, "plugins", "example.panel", "web"), { recursive: true });
+    writeFileSync(join(dir, "plugins", "example.panel", "plugin.toml"), 'id = "example.panel"');
+    writeFileSync(join(dir, "plugins", "example.panel", "web", "index.html"), "<html><head></head><body>panel</body></html>");
+    mkdirSync(join(dir, "sdk"));
+    writeFileSync(join(dir, "sdk", "bridge.js"), "export default {};");
+    writeFileSync(join(dir, "sdk", "guard.js"), "/* guard */");
     backend = await fakeBackend();
     headless = createHeadlessServer({
       rendererDir: join(dir, "renderer"),
@@ -77,6 +84,7 @@ describe("headless server", () => {
       info: { platform: "linux", version: "9.9.9", hostname: "nas", home: "/home/lenny", secure: false },
       tls: null,
       onSocket: (event, remote) => opened.push(`${event} ${remote}`),
+      plugins: { dirs: { installed: join(dir, "plugins"), builtin: null, trust: null }, sdkDir: join(dir, "sdk") },
     });
     port = await headless.listen({ host: "127.0.0.1", port: 0 });
     base = `http://127.0.0.1:${port}`;
@@ -97,6 +105,31 @@ describe("headless server", () => {
     const html = await res.text();
     expect(html).toContain(`connect-src 'self' ws://127.0.0.1:${port} wss://127.0.0.1:${port};`);
     expect(html).not.toContain("ws://127.0.0.1:*");
+  });
+
+  it("frames only its own pages (plugins' panels)", async () => {
+    const html = await (await fetch(`${base}/`)).text();
+    expect(html).toContain("frame-src 'self'");
+    expect(html).not.toContain("skplugin:");
+  });
+
+  it("serves a plugin's panel sandboxed, without network, framed only by this server's page", async () => {
+    const res = await fetch(`${base}/plugins/example.panel/web/index.html`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-frame-options")).toBeNull();
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toContain(`script-src http://127.0.0.1:${port}/plugins/example.panel/web/;`);
+    expect(csp).toContain(`frame-ancestors http://127.0.0.1:${port};`);
+    expect(csp).toContain("sandbox allow-scripts");
+    expect(csp).toContain("connect-src 'none'");
+    expect(await res.text()).toBe('<html><head><script src="/plugins/example.panel/web/_sk/guard.js"></script></head><body>panel</body></html>');
+    const sdk = await fetch(`${base}/plugins/example.panel/web/_sk/bridge.js`);
+    expect(sdk.status).toBe(200);
+    expect(sdk.headers.get("access-control-allow-origin")).toBe("*");
+    expect((await fetch(`${base}/plugins/example.panel/web/../plugin.toml`)).status).toBe(404);
+    expect((await fetch(`${base}/plugins/example.panel/web/%2e%2e/plugin.toml`)).status).toBe(404);
+    expect((await fetch(`${base}/plugins/no.such/web/index.html`)).status).toBe(404);
+    expect((await fetch(`${base}/plugins/..%2f..%2fsecret/web/x`)).status).toBe(404);
   });
 
   it("serves the bundles, cached for good, and nothing outside the folder", async () => {
@@ -176,6 +209,7 @@ describe("checks", () => {
 
   it("puts the Host into the page's connect-src", () => {
     expect(servedIndex(INDEX, "nas:8375")).toContain("connect-src 'self' ws://nas:8375 wss://nas:8375; style-src");
+    expect(servedIndex(INDEX, "nas:8375")).toContain("frame-src 'self'");
   });
 
   it("keeps paths inside the folder", () => {

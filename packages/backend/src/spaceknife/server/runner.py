@@ -33,6 +33,7 @@ from loguru import logger
 from spaceknife_protocol import PROTOCOL_VERSION, SUBPROTOCOL
 
 from ..logbus import LogHub
+from ..plugins import paths as plugin_paths
 from .app import Server, ServerConfig
 
 
@@ -171,6 +172,11 @@ async def run_server(
         "subprotocol": SUBPROTOCOL,
         # where update files are downloaded: Electron main starts only files from there
         "updates_dir": str(server.updates.updates_dir),
+        # where plugins' web panels are (Electron main and headless mode serve them, docs/plugins.md):
+        # installed plugins, the shipped ones, and the trust file that lists development links
+        "plugins_dir": str(plugin_paths.plugins_dir()),
+        "builtin_plugins_dir": str(plugin_paths.builtin_dir()),
+        "plugins_trust": str(plugin_paths.trust_file()),
     }
     if token_generated:
         ready["token"] = config.token

@@ -14,6 +14,7 @@ from .base import Params
 from .binary import BinaryFrameHeader
 from .envelope import ErrorObject
 from .methods import EVENTS, METHODS, NOTIFICATIONS
+from .plugins import DOCUMENTS
 
 
 def _mode(model: type[BaseModel]) -> JsonSchemaMode:
@@ -30,6 +31,7 @@ def export_schema() -> dict[str, Any]:
         models.append(note.params)
     for event in EVENTS.values():
         models.append(event.payload)
+    models += [model for model, _direction in DOCUMENTS.values()]
     unique = list(dict.fromkeys(models))
     refs, top = models_json_schema([(m, _mode(m)) for m in unique], ref_template="#/$defs/{model}")
 
@@ -55,6 +57,11 @@ def export_schema() -> dict[str, Any]:
         },
         "events": {
             name: {"payload": ref(spec.payload), "doc": spec.doc} for name, spec in sorted(EVENTS.items())
+        },
+        # plugins.v1: what plugin methods return and take (reports, toasts, cleanups, contexts)
+        "documents": {
+            name: {"model": ref(model), "direction": direction}
+            for name, (model, direction) in sorted(DOCUMENTS.items())
         },
         "binaryFrameHeader": ref(BinaryFrameHeader),
         "errorObject": ref(ErrorObject),

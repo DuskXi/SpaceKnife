@@ -11,6 +11,7 @@ directories:
 files:
   - out/**
   - resources/icon.png # the window icon (Linux)
+  - resources/plugin-sdk/** # plugins' web panels load it (src/main/plugin-files.ts)
   - "!**/*.map"
 extraResources:
   - from: ../../dist/backend/spaceknife-backend

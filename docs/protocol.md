@@ -17,7 +17,7 @@ python -X utf8 -m spaceknife serve --token-stdin
    {"event": "ready", "url": "ws://127.0.0.1:53817/v1", "host": "127.0.0.1", "port": 53817, "pid": 1234, "protocol": "1.1", "subprotocol": "spaceknife.v1"}
    ```
 
-   不带 `--token-stdin` 时，后端自己生成 token，并放在 ready 行的 `token` 字段里（开发调试用）。
+   不带 `--token-stdin` 时，后端自己生成 token，并放在 ready 行的 `token` 字段里（开发调试用）。ready 行还有 `updates_dir`（下载更新的位置），以及插件的位置 `plugins_dir`、`builtin_plugins_dir`、`plugins_trust`：Electron 主进程和无头模式据此提供插件的 Web 面板文件（[plugins.md](plugins.md)）。
 3. 后端在以下情况优雅退出：stdin 读到 EOF（父进程关闭管道或已退出）、收到 `app.shutdown`、收到 SIGTERM/SIGINT；在 Linux 上父进程死亡时内核会发 SIGTERM（PR_SET_PDEATHSIG），在 macOS 上会轮询 `getppid()`。
 
 连接要求：

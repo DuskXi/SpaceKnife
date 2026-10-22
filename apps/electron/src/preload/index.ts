@@ -38,6 +38,7 @@ const api: SkApi = {
     copyText: (text) => ipcRenderer.send("sk:copyText", text),
     openFullDiskAccess: () => ipcRenderer.send("sk:openFullDiskAccess"),
     openExternal: (url) => ipcRenderer.send("sk:openExternal", url),
+    openUrl: (url) => ipcRenderer.send("sk:openUrl", url),
   },
   update: {
     install: (path, how) => ipcRenderer.invoke("sk:installUpdate", path, how) as Promise<string>,

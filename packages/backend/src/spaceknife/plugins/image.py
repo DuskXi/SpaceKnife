@@ -151,13 +151,19 @@ class Images:
             return best
 
     def add(self, e: Exported, user: str) -> None:
+        """Keep ``e`` and, of the other images of its scan, the newest ``KEEP_VERSIONS - 1`` (newest
+        version first, then the latest made: a plugin that asks for one more column of the same
+        version gets a new image, which replaces its older one). Never the one just added: the
+        plugin maps it next, and a segment gone before that maps as nothing (or, on Windows, as a
+        fresh zero-filled one)."""
         with self._lock:
             e.users.add(user)
             self._items[e.key] = e
-            same = sorted(
-                (x for x in self._items.values() if x.scan_id == e.scan_id), key=lambda x: -x.version
+            others = sorted(
+                (x for x in self._items.values() if x.scan_id == e.scan_id and x is not e),
+                key=lambda x: (-x.version, -x.made),
             )
-            for old in same[KEEP_VERSIONS:]:
+            for old in others[KEEP_VERSIONS - 1 :]:
                 if not old.users - {user}:
                     self._items.pop(old.key, None)
                     old.release()

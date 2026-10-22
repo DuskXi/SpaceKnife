@@ -7,11 +7,12 @@ import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
+import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, session, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
 import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
 import { fileIn, mimeOf } from "./files";
+import { isPluginId, servePanelFile } from "./plugin-files";
 import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
@@ -44,7 +45,11 @@ if (process.platform === "win32") app.setAppUserModelId(APP_ID);
 
 protocol.registerSchemesAsPrivileged([
   { scheme: "app", privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
+  // plugins' web panels (plugin-files.ts): their own origin per plugin, no fetch, no CSP bypass
+  { scheme: "skplugin", privileges: { standard: true, secure: true, corsEnabled: true } },
 ]);
+/** The app's panel SDK (bridge.js, base.css, sk.d.ts, guard.js), shipped with the app. */
+const PLUGIN_SDK = join(app.getAppPath(), "resources", "plugin-sdk");
 
 let backend: Backend | null = null;
 let backendState: BackendState = { state: "starting" };
@@ -130,6 +135,24 @@ function createWindow(): void {
   win.webContents.on("will-navigate", (event, url) => {
     if (!url.startsWith(`${origin}/`)) event.preventDefault();
   });
+  // frames: only plugins' web panels, each staying within its own plugin's files (a panel can't
+  // take itself, or another plugin's panel, elsewhere); nothing inside a panel frames anything
+  win.webContents.on("will-frame-navigate", (details) => {
+    if (details.isMainFrame) return;
+    const target = panelHost(details.url);
+    const frame = details.frame;
+    const parentIsApp = !!frame && frame.parent !== null && frame.parent.parent === null;
+    // a new frame (about:blank) may load a panel; one that shows something already (a panel, an
+    // error page after a blocked attempt) only more of the same plugin's files
+    const fresh = !frame || frame.url === "" || frame.url === "about:blank";
+    const current = frame ? panelHost(frame.url) : null;
+    if (!target || !parentIsApp || (!fresh && current !== target)) {
+      console.warn(`[panels] blocked a frame navigation to ${details.url}`);
+      details.preventDefault();
+    }
+  });
+  // WebRTC is outside a panel's content security policy: no direct UDP from the app at all
+  win.webContents.setWebRTCIPHandlingPolicy("disable_non_proxied_udp");
   if (process.env.ELECTRON_RENDERER_URL) void win.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void win.loadURL(`${APP_ORIGIN}/index.html`);
 }
@@ -156,6 +179,11 @@ function registerIpc(): void {
   // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
     if (process.platform === "darwin") void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles");
+  });
+  // a plugin's `url` action or panel, after the user said yes in the window: https pages only
+  ipcMain.on("sk:openUrl", (_e, url: unknown) => {
+    if (typeof url === "string" && /^https:\/\/[^\s]+$/i.test(url) && url.length <= 2048) void shell.openExternal(url);
+    else console.warn(`[shell] not opening ${String(url)}: only https:// pages`);
   });
   ipcMain.on("sk:openExternal", (_e, url: unknown) => {
     const page = projectPage(url);
@@ -380,6 +408,33 @@ function openTerminal(dir: string): void {
   else spawn("x-terminal-emulator", [], { cwd: dir, detached: true });
 }
 
+/** The plugin id of a panel address (skplugin://<id>/…), or null. */
+function panelHost(url: string): string | null {
+  try {
+    const u = new URL(url);
+    return u.protocol === "skplugin:" && isPluginId(u.hostname) ? u.hostname : null;
+  } catch {
+    return null;
+  }
+}
+
+/** skplugin://<id>/<path>: plugin <id>'s web/ files, /_sk/ the SDK (plugin-files.ts). */
+function servePanels(): void {
+  const dev = process.env.ELECTRON_RENDERER_URL ? new URL(process.env.ELECTRON_RENDERER_URL).origin : null;
+  const ancestors = [APP_ORIGIN, ...(dev ? [dev] : [])];
+  const exists = async (p: string) => existsSync(p);
+  protocol.handle("skplugin", async (request) => {
+    const url = new URL(request.url);
+    const id = url.hostname;
+    if (!isPluginId(id) || !backend) return new Response("not found", { status: 404 });
+    const r = await servePanelFile({ dirs: backend.pluginDirs, sdkDir: PLUGIN_SDK, id, rest: url.pathname, self: `skplugin://${id}`, ancestors, guardSrc: "/_sk/guard.js", exists });
+    return new Response(r.body, { status: r.status, headers: r.headers });
+  });
+  // a panel asks for nothing (camera, microphone, notifications…); the window itself as before
+  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback, details) => callback(!String(details.requestingUrl ?? "").startsWith("skplugin:")));
+  session.defaultSession.setPermissionCheckHandler((_wc, _permission, origin) => !String(origin ?? "").startsWith("skplugin:"));
+}
+
 function serveRenderer(): void {
   protocol.handle("app", async (request) => {
     const file = fileIn(RENDERER_DIR, new URL(request.url).pathname);
@@ -403,12 +458,14 @@ if (CLI.mode === "help" || CLI.mode === "error") {
   void app.whenReady().then(() =>
     runHeadless(CLI, {
       rendererDir: RENDERER_DIR,
+      pluginSdkDir: PLUGIN_SDK,
       startBackend: (origins, onLog) => startBackend(backendOptions(origins, onLog)),
     }),
   );
 } else {
   app.whenReady().then(() => {
     serveRenderer();
+    servePanels();
     registerIpc();
     createWindow();
     void launchBackend();

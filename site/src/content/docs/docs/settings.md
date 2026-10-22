@@ -300,6 +300,12 @@ Four fixed tags: red ▲, yellow ■, green ●, blue ◆. Their colors and shap
 | --- | --- | --- | --- | --- |
 | Remember tags | On | On `true` · Off `false` | Tags are saved per scan root and come back after a rescan or when a snapshot is opened. | `tags.remember` |
 
+### Plugins
+
+Install, enable and disable plugins; their own settings are here too.
+
+This page lists the installed plugins: the permissions a plugin asks for are shown before it is first enabled, and its settings stay when it is turned off. A plugin's own settings appear on this page once it is enabled.
+
 ### Shortcuts
 
 Every command and its current shortcut, the same list as the command palette.

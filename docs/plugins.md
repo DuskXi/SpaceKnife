@@ -1,6 +1,6 @@
 # 插件系统 —— 经验与设计要求
 
-状态：**后端第一阶段已实现**（见下面「实现状态」）；前端渲染和面板是第二阶段。本文是为一套覆盖前后端的插件系统准备的。内容分两部分：
+状态：**后端（第一阶段）和 Electron 前端（第二阶段）已实现**（见下面两节「实现状态」）；命令行、按插件生成类型的构建步骤和参考插件是第三阶段。本文是为一套覆盖前后端的插件系统准备的。内容分两部分：
 
 - 把可视化做成可替换组件（`ea94b53`，接口约定见 [visuals.md](visuals.md)）时积累下的经验；
 - 由此推出来的要求。
@@ -40,7 +40,38 @@
 - 扫描来源列完才显示（不是边扫边画），重跑也是整个重跑；监控器只用于插件自己的来源，还没有按文件系统给普通扫描提供监控器的插件接口。
 - 文件夹规则的叠加、代码洞察都只有最基本的部分；悬停字段只读缓存（没有的发一次请求，下次悬停才显示）。
 - macOS 的内存上限只靠心跳检查。
-- 第二阶段：前端的渲染、插槽、插件页和 Web 面板。第三阶段：每个插件的协议模式与 TypeScript 类型生成、命令行 `spaceknife plugin …`、把内置导出和洞察迁成插件。
+- 第三阶段：每个插件的协议模式导出和 `plugin build`、命令行 `spaceknife plugin …`、把内置导出和洞察迁成插件。
+
+## 实现状态（第二阶段：Electron 前端）
+
+浏览器模式（无头模式、演示服务器）用的是同一份渲染进程代码，下面说的两边都有，除非另外注明。文件在 `apps/electron/src/renderer/src/plugins/`（下称 `plugins/`）。
+
+已有：
+
+- **连接**：`Rpc` 公开 `callRaw`、`callFrames`（带二进制列帧的结果）和 `onRaw`；插件的帧（`plugin.<id>.<名>`）不进视图帧的配对器。hello 声明 `plugins.v1 colors.v1 panels.v1`。`plugins/client.ts` 是 `callPlugin`、`onPluginEvent`、`subscribePlugin` 和类型化的 `pluginClient<Api>(id)`；`plugins/store.ts` 在连接时、收到 `extensions.changed`（按 kinds 只取需要的）、语言变了时重新取 `extensions.get`、`palette.commands`、`plugin.list`。
+- **动作与单一键位表**：`plugins/actions.ts` 执行 12 种动作，插件的动作只能调自己的方法、改自己的设置（加几项显示设置），`url` 和打开定位要 `host.open`、复制要 `clipboard`，删除只到删除篮。内置命令里通用的（配色、可视化、轮换、开关）由后端带上动作，其余是 `builtin`，`state/commands.ts` 按命令 id 处理。`plugins/keymap.ts` 用 `palette.commands` 的键建表，`App.tsx` 里手写的全局按键没有了：窗口自己的键只剩命令面板、切换标签页、帮助和设置页的搜索与历史、视图里的 Esc / Enter / 菜单键。旧行为由 `keymap.test.ts` 锁住。
+- **放置位置**（`plugins/slots.tsx`）：标签页（`TabKind` 加 `plugin`）、详情面板的插件页（图标页签）、对话框、开始页卡片（以及不需要扫描的面板和历史报告的入口）、对比侧栏的一节、状态栏项。每处按 `when` 显示不可用的原因（`plugins/when.ts`）。
+- **报告**（`plugins/report/`）：13 种块都用应用自己的部件画（Markdown 关闭原始 HTML、不显示图片、链接只显示地址；表格可排序、每页最多 50 行、可勾选、`more` 续读；圆环、堆叠条、仪表、折线）。按 `refresh` 重新取（选中项、扫描完成、帧每秒最多一次、对比、`interval:<秒>`、`state:<名>`、手动），只算最新，显示 `plugin.progress` 的进度。节点链接按路径重新解析后在视图里选中。
+- **字段、洞察、清理**：详情页顶部是洞察卡片（`insight.node`；命令只显示、可复制），内置信息之后是「插件」字段；悬停卡只显示缓存里的字段。清理先进复核对话框（勾选、合计、原因），用户点了才 `basket.add {origin, reasons}`；删除篮每项显示「来自〈插件〉：〈原因〉」。
+- **配色**：帧里的 `pal` 列解码进 `VisualFrame.pal`，三种可视化的画法按色板取色（中性色兜底），`folders = "palette"` 时火焰图和极坐标火焰图的文件夹条也上色；工具栏配色分段后多一个「插件」下拉（带图例），C 键轮换包括插件配色，不适用于当前布局的列出但不可选。按文件数的可视化变体（`size_unit = "count"`）标签和悬停卡显示项数。
+- **插件页**（设置 › 插件，`pages/PluginsPage.tsx`）：列表、状态标签、开关；第一次启用（或文件改动后）先弹确认，列出权限（`net`/`exec` 的主机和程序、新增的权限醒目）、贡献摘要、键冲突、未签名提示和「这不是操作系统级沙箱」；从文件夹或 zip 安装（同 id 时确认替换），重启、卸载、错误和 stderr 尾部、内存；开发者模式下可以链接开发文件夹。插件自己的设置作为这一页的分组，用现有的设置控件。快捷键页显示命令来自哪个插件。
+- **开始页的扫描来源**：按 `pick` 打开文件或文件夹对话框，或者输入；`scan.start {source, uri}`；「重新扫描全部」对来源的扫描是把来源重跑一遍。
+- **Web 面板**：
+  - Electron：`skplugin://<id>/` 协议（`main/plugin-files.ts`），文件来自开发链接、已安装或内置插件的 `web/`，`/_sk/` 是程序自带的 `resources/plugin-sdk/`（`bridge.js`、`base.css`、`sk.d.ts`、`guard.js`）。每个响应带面板的内容安全策略（没有网络、子框架、表单、worker，`sandbox allow-scripts`，`frame-ancestors` 只有应用自己），HTML 最前面插入 `guard.js`。`will-frame-navigate` 只放行面板留在自己插件的文件里，WebRTC 的 IP 处理策略为 `disable_non_proxied_udp`，面板不能申请任何权限（摄像头、通知……）。后端 ready 行加了 `plugins_dir`、`builtin_plugins_dir`、`plugins_trust`。
+  - 浏览器模式：无头模式和演示服务器（`tools/demo/m3_web.py`）提供 `/plugins/<id>/web/…`，策略相同，`script-src` 限在这个插件的路径下；主页面的 `frame-src` 改为只允许本服务器。
+  - 父页面一侧（`plugins/panel/`）：`sandbox="allow-scripts"` 的 iframe，只认这个 iframe 窗口的 hello，用 MessageChannel 交出一个端口；面板说出自己的地址，不在本插件文件里的就断开。桥只放行本插件的方法、白名单里的内置方法（各按权限；`basket.add` 强制带上面板的来源）、本插件的事件 / 状态 / 流，以及按权限的宿主操作；单条 1 MiB、同时 8 个调用、每秒 50 条；列结果以转移方式交出。`bridge.js` 有 mock 模式（`?mock=fixtures.json`）。
+- **生成的类型**：`tools/gen_ts_protocol.py` 的 `generate_plugin(schema)` 按插件输出 `web/sk-plugin.d.ts`（`Methods`/`Events`/`States` 与 `Sk<…>`）；插件的模式导出和 `plugin build` 在第三阶段接上。
+- **文案**：新的界面文字都在 `locales/en/plugins.json`；`tools/i18n_check.py --area electron` 通过。
+- **测试**（vitest）：`plugins/keymap.test.ts`、`actions.test.ts`、`colors.test.ts`（含 `when`）、`report/report.test.ts`、`panel/bridge.test.ts`（用 `plugins/testing/mockBridge.ts`）、`protocol/rpc.test.ts` 的插件部分、`main/plugin-files.test.ts`、`main/plugin-sdk.test.ts`、`main/headless-server.test.ts` 的面板路由。
+
+还很薄或未做：
+
+- 对比侧栏和状态栏的插件报告只做了基本的；工具栏「更多」里的插件命令、开始页的快捷操作同样很薄。
+- 详情面板的插件页没有按 `summaryInterval` 节流（跟随选中项、帧最多每秒一次）。
+- Web 面板的 `bridge.js` mock 模式要在 SpaceKnife 之外的静态服务器上打开，并把 SDK 放在 `web/_sk/`（SpaceKnife 自己的路由不给面板网络）；第三阶段的 `plugin build` / `plugin dev` 再把这一步做顺。
+- WebRTC：Electron 和浏览器模式都靠 `guard.js` 删掉构造函数、拦下子框架，加上 CSP 的 `webrtc 'block'`（浏览器认识时生效）；浏览器模式没有 IP 处理策略这一层，启用对话框里写明了这项残余风险。
+- 实测（Electron 44，Windows，用 DevTools 协议驱动打包前的界面，测试插件的面板放在详情面板里）：面板的源是 `null`；`RTCPeerConnection`、`webkitRTCPeerConnection`、`WebSocket` 都不存在；用 `DOMParser` 加 `adoptNode` 绕过 `createElement` 造出的子框架是另一个不透明源，读它的 `RTCPeerConnection` 报跨源错误，随后被移除；`fetch`、`localStorage`、`cookie`、父页面都拿不到；桥拒绝 `basket.execute`、`settings.update`、没授权的 `snapshot.list` 和 `reveal`、别的插件的方法（都是 -32014）。面板直接跳到别的插件的面板被 `will-frame-navigate` 拦下；跳到外部网址被父页面的 `frame-src` 拦下（停在错误页），再从错误页跳到别的插件同样被拦。浏览器模式的面板路由由 `headless-server.test.ts` 覆盖；手动走查用的浏览器自己拦掉了所有子框架，没能在那里看到面板的画面（其余功能在浏览器模式里都走过一遍）。
+- Qt / WinUI3 前端没有做（它们不声明 `plugins.v1`，后端照旧工作）。
 
 ## 1. 目标
 

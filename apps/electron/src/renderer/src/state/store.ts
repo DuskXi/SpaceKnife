@@ -4,17 +4,24 @@ import { create } from "zustand";
 
 import type {
   BasketState,
+  CleanupResult,
   CompareInfo,
   CompareProgressEvent,
   CompareSourcesResult,
   FilterInfo,
   FilterParse,
   FilterVocab,
+  ExtensionsState,
   FrameInfo,
   LogRecordEvent,
   MachineDisks,
   OpProgressEvent,
+  PaletteCommand,
   PathCheckResult,
+  PluginListResult,
+  PluginProgressEvent,
+  Report,
+  ReportContext,
   ScanStatus,
   SettingsState,
   SnapshotInfo,
@@ -27,7 +34,15 @@ import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
 import { storedInspectorWidth } from "@/lib/inspectorWidth";
 
-export type TabKind = "start" | "scan" | "settings" | "help" | "machine";
+export type TabKind = "start" | "scan" | "settings" | "help" | "machine" | "plugin";
+
+/** A plugin tab (plugins/slots.tsx): a report or a web panel, about the scan of the tab it was
+ * opened from (Tab.scanId; null when opened without one). */
+export interface TabPlugin {
+  kind: "report" | "panel";
+  /** the contribution's full id */
+  id: string;
+}
 
 export interface Tab {
   id: string;
@@ -39,6 +54,8 @@ export interface Tab {
   title: string;
   /** compare mode (W6): the tab shows a change tree instead of its scan */
   compare?: TabCompare;
+  /** kind "plugin": which report or panel */
+  plugin?: TabPlugin;
 }
 
 /** A tab's comparison: the one shown (viewId) and, while switching ends, the one being computed. */
@@ -75,7 +92,7 @@ export interface ViewData {
 
 export type ConnState = "starting" | "ready" | "lost" | "failed";
 
-export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"] as const;
+export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "plugins", "keys", "advanced", "about"] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
 /** The page shown when settings open: the last one visited, else 「常规」 (UI-W7-01). */
@@ -136,6 +153,8 @@ export interface AppState {
   inspectorHidden: boolean;
   /** preferred width of the details column, px (UI-MAIN-64) */
   inspectorWidth: number;
+  /** the details column's page: details, classes, largest, or plugin:<report or panel id> */
+  inspectorPage: string;
   logOpen: boolean;
   logTab: "log" | "stats";
   /** open the panel by itself when a warning arrives (UI-W8-30) */
@@ -187,12 +206,64 @@ export interface AppState {
   machine: MachineDisks | null;
   /** Date.now() of that read, 0 before it */
   machineAt: number;
+  /** what the session agreed on in session.hello (plugins.v1, colors.v1, panels.v1, layouts…) */
+  capabilities: readonly string[];
+  /** plugins.v1: what enabled plugins add (extensions.get); null without plugins.v1 or until read */
+  extensions: ExtensionsState | null;
+  /** every command with its keys and action (palette.commands): the key table, menus, toolbar */
+  commands: PaletteCommand[];
+  /** the installed plugins (plugin.list): the plugins page, permission checks of actions */
+  plugins: PluginListResult | null;
+  /** plugin.progress of running plugin calls, by request id */
+  pluginProgress: Record<string, PluginProgressEvent>;
+  pluginDialog: PluginDialog | null;
+  cleanup: CleanupReview | null;
+  confirm: ConfirmAsk | null;
+  /** the plugin whose details the plugins page shows open */
+  pluginOpen: string | null;
+  /** bumped when export formats or templates change: the export dialog reads them again */
+  exportsEpoch: number;
   /** a read of machine.disks is under way */
   machineLoading: boolean;
   /** machine.read_health is under way: the disk whose button started it */
   machineReading: string | null;
   /** why the last machine.read_health read nothing (prompt closed, no way to ask), on that disk */
   machineReadNote: { disk: string; text: string } | null;
+}
+
+/** A report or a web panel in a dialog (slot "dialog", or a call action that answered with a
+ * report): what it shows and what it is about. */
+export interface PluginDialog {
+  /** the plugin it comes from */
+  plugin: string;
+  title: string;
+  /** a report contribution (fetched with ctx) or a panel; else the report itself */
+  report?: { id: string } | null;
+  panel?: { id: string } | null;
+  document?: Report | null;
+  ctx: ReportContext;
+}
+
+/** The cleanup review (plugins/cleanup.tsx): a cleanup's candidates, until the user adds the
+ * checked ones to the delete basket or closes it. */
+export interface CleanupReview {
+  plugin: string;
+  scanId: string;
+  result: CleanupResult | null;
+  /** the call is running (its progress arrives as plugin.progress, for this request id) */
+  loading: boolean;
+  request: number | null;
+  error: string;
+  abort: (() => void) | null;
+}
+
+/** A question with two answers (plugins/confirm.tsx). */
+export interface ConfirmAsk {
+  title: string;
+  body: string[];
+  ok: string;
+  danger?: boolean;
+  answer: (yes: boolean) => void;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -229,6 +300,7 @@ export const useApp = create<AppState>(() => ({
   paletteOpen: false,
   inspectorHidden: false,
   inspectorWidth: storedInspectorWidth(),
+  inspectorPage: "details",
   logOpen: false,
   logTab: "log",
   logAuto: true,
@@ -264,6 +336,16 @@ export const useApp = create<AppState>(() => ({
   machineLoading: false,
   machineReading: null,
   machineReadNote: null,
+  capabilities: [],
+  extensions: null,
+  commands: [],
+  plugins: null,
+  pluginProgress: {},
+  pluginDialog: null,
+  cleanup: null,
+  confirm: null,
+  pluginOpen: null,
+  exportsEpoch: 0,
 }));
 
 export const set = useApp.setState;

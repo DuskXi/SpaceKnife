@@ -11,10 +11,12 @@ import { Flag, Kind } from "@/visual/frame";
 import { pointerBox } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
-import { classColors } from "@/lib/classes";
+import { classColors, classHex } from "@/lib/classes";
 import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
+import { palettePaint } from "@/plugins/colors";
+import { HoverFields } from "@/plugins/fields";
 
 const DELAY = 300;
 
@@ -45,6 +47,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const vocab = useApp((s) => s.vocab);
   const scanId = useApp((s) => (hover ? s.views[hover.viewId]?.state.scan_id : undefined));
   const colorMode = useApp((s) => (hover ? s.views[hover.viewId]?.state.color_mode : "class")) ?? "class";
+  const ext = useApp((s) => s.extensions);
   const scanning = useApp((s) => {
     const st = scanId ? s.scans[scanId] : undefined;
     return st?.state === "scanning" || st?.state === "queued";
@@ -122,11 +125,14 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const node = info?.node;
   const facts = hoverFacts(f, shown.target, vocab, node?.ext);
   const kind = facts.kind;
-  // a plugin's colour mode (colors.v1, phase 2) paints like the class colours until the renderer draws its palette
-  const fill = fillOf(facts.columns, facts.row, colorMode as ColorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
+  // a plugin's colour mode (colors.v1): the swatch takes the row's palette colour, as the picture does
+  const classes = classColors(vocab);
+  const palette = palettePaint(colorMode, ext, (id) => classHex(vocab, id));
+  const fill = fillOf(facts.columns, facts.row, colorMode as ColorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classes, palette);
   const [fg] = labelColors(fill);
   const bg = `rgb(${fill.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
-  const [num, unit] = sizeParts(facts.size);
+  // a visualization sized by file count (size_unit "count"): the number of items, not bytes
+  const [num, unit] = f.info.size_unit === "count" ? [fmtInt(facts.size), t("项")] : sizeParts(facts.size);
   const cls = vocab?.classes[facts.cls];
   const dir = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
   const named = rowTitle(f, shown.target, { scanning, formatInt: (n) => fmtInt(n) }).line1;
@@ -173,6 +179,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
           </div>
         )}
       </div>
+      {node && shown.target !== HIT_ROOT && <HoverFields scanId={scanId} node={node.id} />}
       {node && showDates && (
         <div className="hc-times">
           {(

@@ -8,6 +8,7 @@
 
 import type { FrameInfo } from "@/protocol/generated";
 import type { Tiers } from "@/lib/diff";
+import type { PalettePaint } from "@/plugins/colors";
 import type { ColorMode } from "@/treemap/paint";
 
 /** Version of this interface; a component built for another one is refused (visual/registry.ts). */
@@ -55,6 +56,8 @@ export interface VisualFrame {
   /** compare views (W6): signed net change and status per row (0 same, 1 new, 2 deleted, 3 changed) */
   delta: BigInt64Array | null;
   dstat: Uint8Array | null;
+  /** colors.v1: palette index per row of a plugin's colour mode (FrameInfo.palette); null otherwise */
+  pal: Uint8Array | null;
   names: string[];
   /** the layout's geometry columns by name (also set on the frame itself, see RectFrame / PolarFrame) */
   geometry: Record<string, Int32Array>;
@@ -111,6 +114,8 @@ export interface VisualGeometry<F extends VisualFrame = VisualFrame> {
 /** What paint needs besides the frame; the host reads it from the settings once. */
 export interface PaintSettings {
   colorMode: ColorMode;
+  /** a plugin's colour mode: its palette (the frame's pal column indexes it); null for the built-in ones */
+  palette: PalettePaint | null;
   classIds: string[];
   /** hex colour per class index (W7 文件类别: user colours); the theme's by id when missing */
   classColors: string[];

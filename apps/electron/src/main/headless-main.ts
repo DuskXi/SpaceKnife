@@ -28,6 +28,8 @@ type Headless = Extract<CommandLine, { mode: "headless" }>;
 
 export interface HeadlessDeps {
   rendererDir: string;
+  /** the app's web panel SDK (resources/plugin-sdk): plugins' panels load it */
+  pluginSdkDir?: string;
   /** start the backend, allowing these WebSocket origins */
   startBackend(allowOrigins: string[], onLog: (line: string) => void): Promise<Backend>;
 }
@@ -149,6 +151,7 @@ export async function runHeadless(cli: Headless, deps: HeadlessDeps): Promise<vo
     token: backend.info.token,
     info,
     tls,
+    plugins: deps.pluginSdkDir ? { dirs: backend.pluginDirs, sdkDir: deps.pluginSdkDir } : null,
     onSocket: (event, remote) => out(`${paint(process.stdout, "2", stamp())} ${ht(lang, event === "open" ? "connected" : "disconnected", { remote })}`),
   });
   let port: number;

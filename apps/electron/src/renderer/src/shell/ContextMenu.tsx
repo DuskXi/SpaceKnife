@@ -17,6 +17,8 @@ import { revealLabel } from "@/shell/Inspector";
 import { classHexNow } from "@/lib/classes";
 import { tagLabel } from "@/lib/tags";
 import { inBrowser } from "@/lib/host";
+import { runShortcut } from "@/state/commands";
+import { PluginIcon } from "@/plugins/icons";
 
 const TAGS = [
   { id: "red", keys: "Ctrl+1" },
@@ -36,6 +38,8 @@ const SERVER_DESKTOP = new Set(["open", "reveal", "terminal", "system"]);
 interface Item {
   id: string;
   icon: IconName;
+  /** a plugin's command (menus "node"): its own icon */
+  plugin?: { id: string; icon: string };
   label: string;
   keys?: string;
   sub?: Sub;
@@ -58,6 +62,7 @@ export function ContextMenu() {
   const vocab = useApp((s) => s.vocab);
   const settings = useApp((s) => s.settings); // tag display names (W7 标签)
   const lang = useApp((s) => s.lang); // the item labels follow a language switch
+  const commands = useApp((s) => s.commands);
   const scanning = useApp((s) => {
     const st = s.menu ? s.scans[s.menu.scanId] : undefined;
     return st?.state === "scanning" || st?.state === "queued";
@@ -163,6 +168,17 @@ export function ContextMenu() {
         disabled: gone,
         run: () => void (group ? basketAddBlock(menu.scanId, menu.viewId, menu.key) : node != null && basketAdd(menu.scanId, node)),
       },
+      // plugins' commands for this block (menus "node"); they run where the palette would, on it
+      ...commands
+        .filter((c) => c.menus.includes("node") && !group)
+        .map<Item>((c) => ({
+          id: `plugin:${c.id}`,
+          icon: "layers",
+          plugin: { id: c.plugin ?? "", icon: c.icon },
+          label: c.name,
+          keys: c.keys[0],
+          run: () => void runShortcut(c.id, { node, viewId: menu.viewId, scanId: menu.scanId }),
+        })),
       { id: "system", icon: "more", label: t("系统菜单…"), disabled: t("系统原生右键菜单还没有接入（见 TODO）") },
     ];
     // in a browser tab the files are on the server: nothing to open, show or run on this computer
@@ -170,7 +186,7 @@ export function ContextMenu() {
     // the zoom root is what is zoomed into already
     return isRoot ? here.filter((it) => it.id !== "zoom") : here;
     // lang: the labels are made by t(), so a language switch makes them again
-  }, [menu, row, isRoot, frame, forms, group, folder, node, lang]);
+  }, [menu, row, isRoot, frame, forms, group, folder, node, lang, commands]);
 
   if (!menu || row === HIT_NONE || !frame) return null;
   const root = isRoot ? frame.info.root! : null;
@@ -262,7 +278,7 @@ export function ContextMenu() {
       </div>
       {items.map((it, i) => (
         <div key={it.id}>
-          {(it.id === "basket" || it.id === "system") && <div className="cm-sep" role="separator" />}
+          {(it.id === "basket" || it.id === "system" || (it.plugin && !items[i - 1]?.plugin)) && <div className="cm-sep" role="separator" />}
           <button
             role="menuitem"
             className={`cm-item${i === active && !sub ? " active" : ""}${it.danger ? " danger" : ""}`}
@@ -276,9 +292,7 @@ export function ContextMenu() {
             }}
             onClick={() => activate(it)}
           >
-            <span className="cm-icon">
-              <Icon name={it.icon} size={16} />
-            </span>
+            <span className="cm-icon">{it.plugin ? <PluginIcon plugin={it.plugin.id} name={it.plugin.icon} size={16} /> : <Icon name={it.icon} size={16} />}</span>
             <span className="flex">{it.label}</span>
             {it.sub ? <Icon name="chevronRight" size={14} /> : it.keys ? <Kbd>{it.keys}</Kbd> : null}
           </button>

@@ -5,11 +5,14 @@ import { tokens } from "@design/tokens";
 
 import { diffColor, type Tiers } from "@/lib/diff";
 import { t } from "@/lib/i18n";
+import type { PalettePaint } from "@/plugins/colors";
 import { branchFill } from "@/visual/colors";
 
 import { DStat, Flag, Kind, Label, type DrawFrame } from "./frame";
 
-export type ColorMode = "class" | "flat" | "time" | "branch";
+/** The built-in colour modes; a plugin's (colors.v1) is its full id and paints from its palette. */
+export type BuiltinColorMode = "class" | "flat" | "time" | "branch";
+export type ColorMode = BuiltinColorMode | (string & {});
 
 /** Floats per instance; see the vertex shader in gl.ts for the meaning of each slot. */
 export const STRIDE = 24;
@@ -74,6 +77,8 @@ export interface TagItem {
 export interface PaintOptions {
   dpr: number;
   colorMode: ColorMode;
+  /** a plugin's colour mode: its palette, indexed by the frame's pal column */
+  palette?: PalettePaint | null;
   classIds: string[];
   /** hex colour per class index (W7 文件类别: user colours); the theme's by id when missing */
   classColors?: string[];
@@ -165,18 +170,21 @@ const NONE: RGBA = [0, 0, 0, 0];
 /** Fill of a block that is not an open folder. 「顶层分支」 needs the frame's branch and depth columns
  * (a frame without them is neutral). */
 export function fillOf(
-  f: Pick<DrawFrame, "kind" | "cls" | "tone" | "delta"> & Partial<Pick<DrawFrame, "branch" | "depth">>,
+  f: Pick<DrawFrame, "kind" | "cls" | "tone" | "delta"> & Partial<Pick<DrawFrame, "branch" | "depth" | "pal">>,
   i: number,
   mode: ColorMode,
   classIds: string[],
   tiers?: Tiers,
   classColors?: string[],
+  palette?: PalettePaint | null,
 ): RGBA {
   const kind = f.kind[i]!;
   if (tiers && f.delta) {
     const d = Number(f.delta[i]);
     return d === 0 ? rgba(T.collapsed) : rgba(diffColor(d, tiers));
   }
+  // a plugin's colour mode: the row's palette entry (0, the neutral one, while the frame has no pal)
+  if (palette) return paletteFill(f, i, palette);
   // files, collapsed folders and aggregates take their branch's hue at their depth's tier
   if (mode === "branch") return branchFill(f.branch?.[i] ?? 0, f.depth?.[i] ?? 1);
   if (kind === Kind.COLLAPSED || kind === Kind.MORE) return rgba(T.collapsed);
@@ -188,6 +196,12 @@ export function fillOf(
   if (custom) return rgba(custom);
   const cls = classIds[f.cls[i]!] ?? "other";
   return rgba((T.class as Record<string, string>)[cls] ?? T.class.other);
+}
+
+/** The palette colour of a row: its pal index, the neutral entry 0 when out of range or missing. */
+export function paletteFill(f: Partial<Pick<DrawFrame, "pal">>, i: number, palette: PalettePaint): RGBA {
+  const at = f.pal?.[i] ?? 0;
+  return rgba(palette.colors[at] ?? palette.colors[0] ?? T.class.other);
 }
 
 /** The instances and labels of a frame. `reuse`: the `instances` of the previous paint, filled again
@@ -301,7 +315,7 @@ export function paint(f: DrawFrame, o: PaintOptions, reuse?: Float32Array): Pain
         weight = 600;
       }
     } else {
-      fill = fillOf(f, i, o.colorMode, o.classIds, o.diff?.tiers, o.classColors);
+      fill = fillOf(f, i, o.colorMode, o.classIds, o.diff?.tiers, o.classColors, o.palette);
       const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
       const radius = (kind === Kind.COLLAPSED ? T.geometry.folderRadius : T.geometry.fileRadius) * dpr;
       b.push(x, y, w, h, fill, {

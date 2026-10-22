@@ -1,0 +1,56 @@
+/* SpaceKnife web panel base style (docs/plugin-dev.md 「Web 面板」): link it with
+   <link rel="stylesheet" href="./_sk/base.css"> and the panel looks like the app. The variables are
+   the app's design tokens; the app sends their current values when the panel connects (these are
+   the same values, for the first paint and the bridge's mock mode). */
+:root {
+  --sk-bg: #0E1013;
+  --sk-bg-raised: #14161B;
+  --sk-bg-hover: #1A1D23;
+  --sk-text: #F1F2F5;
+  --sk-muted: #AEB3BE;
+  --sk-subtle: #8F95A2;
+  --sk-disabled: #4A4E58;
+  --sk-accent: #8B9CFF;
+  --sk-on-accent: #0B0C10;
+  --sk-border: #1D2027;
+  --sk-border-strong: #2A2E37;
+  --sk-ok: #3FCB80;
+  --sk-warn: #F5C542;
+  --sk-danger: #FF6B6B;
+  --sk-font: Geist, "Geist Variable", "Noto Sans SC", "Noto Sans SC Variable", system-ui, sans-serif;
+  --sk-mono: "Geist Mono", "Geist Mono Variable", ui-monospace, "Cascadia Mono", monospace;
+  --sk-radius: 6px;
+  color-scheme: dark;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; background: var(--sk-bg); color: var(--sk-text); font: 13px/1.45 var(--sk-font); font-variant-numeric: tabular-nums; }
+body { padding: 12px; }
+h1, h2, h3 { margin: 0 0 8px; font-weight: 600; }
+h1 { font-size: 18px; } h2 { font-size: 15px; } h3 { font-size: 13px; }
+p { margin: 0 0 8px; }
+a { color: var(--sk-accent); }
+.muted { color: var(--sk-muted); }
+.subtle { color: var(--sk-subtle); }
+.mono, code, pre { font-family: var(--sk-mono); }
+.ok { color: var(--sk-ok); } .warn { color: var(--sk-warn); } .danger { color: var(--sk-danger); }
+button {
+  height: 28px; padding: 0 10px; border: 0; border-radius: var(--sk-radius);
+  background: transparent; color: var(--sk-text); font: inherit; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--sk-border-strong);
+}
+button:hover:not(:disabled) { background: var(--sk-bg-hover); }
+button:disabled { color: var(--sk-disabled); cursor: default; }
+button.primary { background: var(--sk-accent); color: var(--sk-on-accent); box-shadow: none; font-weight: 600; }
+input, select, textarea {
+  height: 28px; padding: 0 8px; border: 1px solid var(--sk-border-strong); border-radius: var(--sk-radius);
+  background: var(--sk-bg-raised); color: var(--sk-text); font: inherit;
+}
+textarea { height: auto; padding: 6px 8px; }
+:focus-visible { outline: 2px solid var(--sk-accent); outline-offset: 1px; }
+table { width: 100%; border-collapse: collapse; }
+th { text-align: left; font-weight: 500; font-size: 11px; color: var(--sk-subtle); border-bottom: 1px solid var(--sk-border); padding: 4px 6px; }
+td { padding: 4px 6px; border-bottom: 1px solid var(--sk-border); }
+td.num, th.num { text-align: right; font-family: var(--sk-mono); }
+.card { padding: 12px; border-radius: 8px; background: var(--sk-bg-raised); box-shadow: inset 0 0 0 1px var(--sk-border); }
+.bar { height: 6px; border-radius: 3px; background: var(--sk-border); overflow: hidden; }
+.bar > span { display: block; height: 100%; background: var(--sk-accent); }

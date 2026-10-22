@@ -4,7 +4,17 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "963ac97ff0635860";
+export const SCHEMA_HASH = "85ccce18a6d093af";
+
+/** Where the user is when an action runs (sent as the params of a ``call`` action). */
+export interface ActionContext {
+  args?: Record<string, unknown>;
+  compare_id?: string | null;
+  node?: number | null;
+  scan_id?: string | null;
+  selection?: number[];
+  view_id?: string | null;
+}
 
 export interface AgeCond {
   end: number;
@@ -34,6 +44,20 @@ export interface AttrCond {
 export interface AttrSet {
   forbidden: ("archive" | "system" | "readonly" | "hidden" | "compressed" | "encrypted" | "offline" | "temporary" | "notindexed" | "sparse" | "ads")[];
   required: ("archive" | "system" | "readonly" | "hidden" | "compressed" | "encrypted" | "offline" | "temporary" | "notindexed" | "sparse" | "ads")[];
+}
+
+export interface BarItem {
+  label: string;
+  node: NodeRef | null;
+  tone: string | null;
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+  value: number;
+}
+
+export interface BarsBlock {
+  items: BarItem[];
+  max: number | null;
+  type: "bars";
 }
 
 export interface BasketAddParams {
@@ -154,6 +178,12 @@ export interface CallAction {
   kind: "call";
   /** Wire name of a plugin method (plugin.<id>.<name>) */
   method: string;
+}
+
+export interface CalloutBlock {
+  text: string;
+  tone: "info" | "ok" | "warn" | "danger";
+  type: "callout";
 }
 
 /** ``$/cancel`` notification: cancel the in-flight request with this id. */
@@ -278,6 +308,28 @@ export interface CleanupInfo {
   plugin: string;
   title: string;
   when: string[];
+}
+
+export interface CleanupItem {
+  alloc: number;
+  checked: boolean;
+  name: string;
+  node: NodeRef;
+  path: string;
+  reason: string;
+  size: number;
+}
+
+/** Candidates of a cleanup: the review dialog adds the checked ones to the basket with origin. */
+export interface CleanupResult {
+  /** Candidates left out: unknown, gone or not on disk */
+  dropped: number;
+  freeable: number;
+  items: CleanupItem[];
+  /** Full id of the cleanup (BasketAddParams.origin) */
+  origin: string;
+  title: string;
+  type: "cleanup";
 }
 
 export interface ClientInfo {
@@ -902,6 +954,18 @@ export interface IoStatusList {
   disks: IoStatus[];
 }
 
+export interface KvBlock {
+  items: KvItem[];
+  type: "kv";
+}
+
+export interface KvItem {
+  label: string;
+  node: NodeRef | null;
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+  value: string | number | boolean | null;
+}
+
 export interface LabeledAction {
   action: CallAction | OpenAction | CommandAction | ViewAction | CycleAction | ToggleAction | FilterAction | SettingAction | CleanupAction | NodeAction | UrlAction | BuiltinAction;
   icon: string;
@@ -970,6 +1034,20 @@ export interface MaskCond {
   text: string;
 }
 
+export interface MdBlock {
+  text: string;
+  type: "md";
+}
+
+export interface MeterBlock {
+  label: string;
+  max: number;
+  tone: string | null;
+  type: "meter";
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+  value: number;
+}
+
 /** Live change monitoring of a scan (M5): the status bar's 「实时监控」 item. */
 export interface MonitorStatus {
   /** Changes applied to the tree so far */
@@ -1014,12 +1092,25 @@ export interface NodeInfo {
   size: number;
 }
 
+export interface NodeItem {
+  label: string;
+  node: NodeRef;
+  reason: string;
+  size: number | null;
+}
+
 /** A node of a scan as a plugin saw it; ``epoch`` tells whether the id still means the same node. */
 export interface NodeRef {
   epoch: number;
   node: number;
   path: string;
   scan_id: string;
+}
+
+export interface NodesBlock {
+  actions: LabeledAction[];
+  items: NodeItem[];
+  type: "nodes";
 }
 
 export interface OpItemResult {
@@ -1221,6 +1312,12 @@ export interface PanelInfo {
   slot: "tab" | "inspector" | "dialog";
   title: string;
   when: string[];
+}
+
+export interface PartItem {
+  label: string;
+  tone: string | null;
+  value: number;
 }
 
 export interface PathCheck {
@@ -1524,6 +1621,13 @@ export interface PresetInfo {
   title: string;
 }
 
+export interface ProgressBlock {
+  done: number;
+  text: string;
+  total: number;
+  type: "progress";
+}
+
 /** ``$/progress``: LSP-style progress for long-running requests. */
 export interface ProgressEvent {
   token: string;
@@ -1557,6 +1661,30 @@ export interface ReadHealthResult {
 export interface Refusal {
   path: string;
   reason: string;
+}
+
+/** A report document: blocks the frontends draw with their own components. */
+export interface Report {
+  actions: LabeledAction[];
+  blocks: (MdBlock | StatsBlock | KvBlock | TableBlock | BarsBlock | StackBlock | RingBlock | MeterBlock | SparkBlock | NodesBlock | CalloutBlock | ProgressBlock | SectionBlock)[];
+  /** Shown instead of the blocks when there are none */
+  empty: string;
+  footnote: string;
+  subtitle: string;
+  title: string;
+  type: "report";
+}
+
+/** The params of a report, a cleanup and a code insight: what it is about. */
+export interface ReportContext {
+  args?: Record<string, unknown>;
+  compare_id?: string | null;
+  /** A table's next page (Table.more) */
+  cursor?: string | null;
+  node?: number | null;
+  scan_id?: string | null;
+  selection?: number[];
+  view_id?: string | null;
 }
 
 export interface ReportInfo {
@@ -1593,6 +1721,13 @@ export interface ResultRow {
   tag: "red" | "yellow" | "green" | "blue" | null;
   /** The tag comes from an enclosing folder */
   tag_inherited: boolean;
+}
+
+export interface RingBlock {
+  center: string;
+  parts: PartItem[];
+  type: "ring";
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
 }
 
 export interface ScanIdParams {
@@ -1704,6 +1839,13 @@ export interface ScanStatus {
   state: "queued" | "scanning" | "done" | "cancelled" | "failed";
   /** Used but not scanned bytes (whole-volume scans only) */
   unknown: number | null;
+}
+
+export interface SectionBlock {
+  blocks: (MdBlock | StatsBlock | KvBlock | TableBlock | BarsBlock | StackBlock | RingBlock | MeterBlock | SparkBlock | NodesBlock | CalloutBlock | ProgressBlock | SectionBlock)[];
+  collapsed: boolean;
+  title: string;
+  type: "section";
 }
 
 export interface ServerInfo {
@@ -1897,6 +2039,33 @@ export interface Span {
   start: number;
 }
 
+export interface SparkBlock {
+  labels: string[];
+  type: "spark";
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+  values: number[];
+}
+
+export interface StackBlock {
+  parts: PartItem[];
+  type: "stack";
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+}
+
+export interface StatItem {
+  delta: number | null;
+  hint: string;
+  label: string;
+  tone: string | null;
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+  value: string | number | boolean | null;
+}
+
+export interface StatsBlock {
+  items: StatItem[];
+  type: "stats";
+}
+
 export interface SubscribeParams {
   params?: Record<string, unknown> | null;
   /** Upper bound on event rate */
@@ -1918,6 +2087,37 @@ export interface SystemInfo {
   started_at: string;
 }
 
+export interface TableBlock {
+  columns: TableColumn[];
+  more: TableMore | null;
+  page_size: number;
+  rows: TableRow[];
+  select: boolean;
+  /** Column key, '-key' for descending */
+  sort: string | null;
+  type: "table";
+}
+
+export interface TableColumn {
+  align: "start" | "end" | "center" | null;
+  grow: number | null;
+  key: string;
+  label: string;
+  unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
+}
+
+export interface TableMore {
+  cursor: string;
+  /** Wire name of the report to call with cursor for the next page */
+  method: string;
+}
+
+export interface TableRow {
+  actions: LabeledAction[];
+  cells: Record<string, string | number | boolean | null>;
+  node: NodeRef | null;
+}
+
 export interface TagCond {
   colors: ("red" | "yellow" | "green" | "blue")[];
   end: number;
@@ -1931,6 +2131,12 @@ export interface TagCond {
 export interface ThemedColor {
   dark: string;
   light: string;
+}
+
+export interface Toast {
+  text: string;
+  tone: "info" | "ok" | "warn" | "danger";
+  type: "toast";
 }
 
 export interface ToggleAction {

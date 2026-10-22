@@ -808,3 +808,17 @@ class PluginProgressEvent(Payload):
     done: float
     total: float
     text: str = ""
+
+
+# --------------------------------------------------------------------------- documents
+
+# What the frontends read from, or send to, a plugin's own methods (``plugin.<id>.<name>``): no core
+# method carries these, so the schema lists them by themselves (``documents``) and the TypeScript
+# types are generated like every other model. "input": the frontends send it (fields may be left out).
+DOCUMENTS: dict[str, tuple[type[Payload], Literal["input", "output"]]] = {
+    "report": (Report, "output"),
+    "toast": (Toast, "output"),
+    "cleanup": (CleanupResult, "output"),
+    "action_context": (ActionContext, "input"),
+    "report_context": (ReportContext, "input"),
+}

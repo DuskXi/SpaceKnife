@@ -11,6 +11,7 @@ import { sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 import { inBrowser, serverName } from "@/lib/host";
 import { Icon } from "@/ui/Icon";
+import { pluginName } from "@/plugins/store";
 
 type Sort = "size" | "name" | "path";
 const SORTS: Sort[] = ["size", "name", "path"];
@@ -169,6 +170,12 @@ function Row({ it, share }: { it: BasketItem; share: number }) {
           <Icon name="close" size={14} />
         </button>
       </div>
+      {it.origin && (
+        // proposed by a plugin's cleanup: which one and why (docs/plugins.md 「cleanup」)
+        <div className="bk-origin small" title={it.origin}>
+          {it.reason ? t("来自「{plugin}」：{reason}", { plugin: originName(it.origin), reason: it.reason }) : t("来自「{plugin}」", { plugin: originName(it.origin) })}
+        </div>
+      )}
       {it.status !== "ready" && (
         <div className="bk-warn">
           <Icon name="warning" size={13} /> {it.note || statusText(it.status)}
@@ -176,6 +183,14 @@ function Row({ it, share }: { it: BasketItem; share: number }) {
       )}
     </div>
   );
+}
+
+/** The plugin of a cleanup's full id ("example.dupes.extra_copies" → its plugin's name). */
+function originName(origin: string): string {
+  const cut = origin.lastIndexOf(".");
+  const plugin = cut > 0 ? origin.slice(0, cut) : origin;
+  const name = pluginName(plugin);
+  return name === plugin ? pluginName(origin) : name;
 }
 
 /** Why an item cannot be deleted now, when the backend gave no note. */

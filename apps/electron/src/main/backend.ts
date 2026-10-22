@@ -12,6 +12,7 @@ import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 import type { BackendInfo } from "../shared/api";
+import type { PluginDirs } from "./plugin-files";
 import { mt } from "./text";
 import type { InstallKind } from "./update";
 
@@ -33,6 +34,8 @@ export interface Backend {
   info: BackendInfo;
   /** where the backend downloads updates (its ready line): main uses update files from there only */
   updatesDir: string | null;
+  /** where plugins are (its ready line): their web panels are served from there */
+  pluginDirs: PluginDirs;
   proc: ChildProcess;
   stop(): Promise<void>;
 }
@@ -80,10 +83,11 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
     lines.once("line", (line) => {
       clearTimeout(timer);
       try {
-        const ready = JSON.parse(line) as { url: string; pid: number; updates_dir?: string };
+        const ready = JSON.parse(line) as { url: string; pid: number; updates_dir?: string; plugins_dir?: string; builtin_plugins_dir?: string; plugins_trust?: string };
         resolveReady({
           info: { url: ready.url, token, pid: ready.pid },
           updatesDir: ready.updates_dir ?? null,
+          pluginDirs: { installed: ready.plugins_dir ?? null, builtin: ready.builtin_plugins_dir ?? null, trust: ready.plugins_trust ?? null },
           proc,
           stop: () => stop(proc),
         });

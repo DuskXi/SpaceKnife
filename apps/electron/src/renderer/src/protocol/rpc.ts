@@ -10,6 +10,7 @@ import {
   SUBPROTOCOL,
 } from "./generated";
 import { t } from "@/lib/i18n";
+import { isPluginName, PLUGIN_CAPABILITIES } from "@/plugins/caps";
 import { visualCapabilities } from "@/visual/registry";
 
 export class RpcError extends Error {
@@ -84,7 +85,22 @@ export function decodeFrame(buf: ArrayBuffer): BinaryFrame {
   return { header, columns, blobs };
 }
 
-type Pending = { resolve: (v: unknown) => void; reject: (e: unknown) => void; method: string };
+type Pending = {
+  resolve: (v: unknown) => void;
+  reject: (e: unknown) => void;
+  method: string;
+  /** plugin calls: the binary frames stamped with this request's id (they come before the result) */
+  frames?: BinaryFrame[];
+};
+
+/** A result with the binary frames that came with it (a plugin method returning columns). */
+export interface WithFrames {
+  value: unknown;
+  frames: BinaryFrame[];
+}
+
+/** -32800: the request was cancelled ($/cancel). */
+export const CANCELLED = -32800;
 
 export interface ClientInfo {
   name: string;
@@ -119,8 +135,9 @@ export class Rpc {
       token,
       protocol: PROTOCOL_VERSION,
       client: { ...client, kind: "electron" },
-      // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them first)
-      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", ...visualCapabilities()],
+      // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them
+      // first); plugins.v1, colors.v1 and panels.v1 (plugins/caps.ts)
+      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", ...visualCapabilities(), ...PLUGIN_CAPABILITIES],
     })) as HelloResult;
     return this.hello;
   }
@@ -144,23 +161,45 @@ export class Rpc {
   ): { promise: Promise<Methods[M]["result"] | null>; cancel: () => void } {
     const id = this.nextId++;
     const promise = this.send(id, method, params).catch((err: unknown) => {
-      if (err instanceof RpcError && err.code === -32800) return null;
+      if (err instanceof RpcError && err.code === CANCELLED) return null;
       throw err;
     }) as Promise<Methods[M]["result"] | null>;
     return { promise, cancel: () => this.notify("$/cancel", { id }) };
   }
 
-  private callRaw(method: string, params: unknown): Promise<unknown> {
-    return this.send(this.nextId++, method, params);
+  /** Any method by name (a plugin's plugin.<id>.<name>, whose types the core schema does not know).
+   * An aborted signal sends $/cancel and rejects with an RpcError of code CANCELLED. */
+  callRaw(method: string, params: unknown, opts: { signal?: AbortSignal } = {}): Promise<unknown> {
+    return this.callFrames(method, params, opts).then((r) => r.value);
   }
 
-  private send(id: number, method: string, params: unknown): Promise<unknown> {
+  /** callRaw, with the binary frames the backend sent for this request (stamped with its id). */
+  callFrames(method: string, params: unknown, opts: { signal?: AbortSignal; onId?: (id: number) => void } = {}): Promise<WithFrames> {
+    const id = this.nextId++;
+    opts.onId?.(id); // plugin.progress names the request it belongs to
+    const frames: BinaryFrame[] = [];
+    const signal = opts.signal;
+    if (signal?.aborted) return Promise.reject(new RpcError(CANCELLED, "cancelled"));
+    const onAbort = () => {
+      this.notify("$/cancel", { id });
+      const p = this.pending.get(id);
+      if (!p) return;
+      this.pending.delete(id);
+      p.reject(new RpcError(CANCELLED, "cancelled"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    return this.send(id, method, params, frames)
+      .then((value) => ({ value, frames }))
+      .finally(() => signal?.removeEventListener("abort", onAbort));
+  }
+
+  private send(id: number, method: string, params: unknown, frames?: BinaryFrame[]): Promise<unknown> {
     return new Promise((resolve, reject) => {
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
         reject(new RpcError(-32006, "not connected"));
         return;
       }
-      this.pending.set(id, { resolve, reject, method });
+      this.pending.set(id, { resolve, reject, method, frames });
       this.ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
     });
   }
@@ -170,10 +209,15 @@ export class Rpc {
   }
 
   on<E extends EventName>(event: E, handler: (params: Events[E]) => void): () => void {
-    let set = this.handlers.get(event);
-    if (!set) this.handlers.set(event, (set = new Set()));
-    set.add(handler as (p: unknown) => void);
-    return () => set!.delete(handler as (p: unknown) => void);
+    return this.onRaw(event, handler as (p: unknown) => void);
+  }
+
+  /** Any notification by name: a plugin's events, states and streams (plugin.<id>.<name>). */
+  onRaw(method: string, handler: (params: unknown) => void): () => void {
+    let set = this.handlers.get(method);
+    if (!set) this.handlers.set(method, (set = new Set()));
+    set.add(handler);
+    return () => set!.delete(handler);
   }
 
   onBinary(handler: (frame: BinaryFrame) => void): () => void {
@@ -189,6 +233,13 @@ export class Rpc {
   private onMessage(ev: MessageEvent): void {
     if (typeof ev.data !== "string") {
       const frame = decodeFrame(ev.data as ArrayBuffer);
+      // a plugin method's columns come before its result, stamped with the request's id
+      const req = frame.header.request_id;
+      const waiting = isPluginName(frame.header.stream) && typeof req === "number" ? this.pending.get(req)?.frames : undefined;
+      if (waiting) {
+        waiting.push(frame);
+        return;
+      }
       for (const h of this.binaryHandlers) h(frame);
       return;
     }

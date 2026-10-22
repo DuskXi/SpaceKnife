@@ -64,6 +64,8 @@ export interface SkApi {
     openFullDiskAccess(): void;
     /** Open a page of this project on GitHub (a release page) in the browser; other URLs are refused. */
     openExternal(url: string): void;
+    /** A plugin's https page in the browser (its `url` action or panel), after the user said yes. */
+    openUrl(url: string): void;
   };
   update: {
     /** One of the update card's two buttons (shared/install.ts installStep): 「无缝更新」 puts the

@@ -14,8 +14,15 @@ import { classHexNow } from "@/lib/classes";
 import { byLang, t } from "@/lib/i18n";
 import { tagLabel } from "@/lib/tags";
 import { inBrowser } from "@/lib/host";
+import { runShortcut } from "@/state/commands";
+import { InspectorFields } from "@/plugins/fields";
+import { PluginIcon } from "@/plugins/icons";
+import { InsightCards } from "@/plugins/insight";
+import { InspectorPluginPage, inspectorPages } from "@/plugins/slots";
 
+/** The built-in pages; a plugin's is "plugin:<its full id>" (slot "inspector"). */
 type Page = "details" | "classes" | "largest";
+const BUILTIN_PAGES: readonly string[] = ["details", "classes", "largest"];
 // red ▲, yellow ■, green ●, blue ◆: the names come from tagLabel (W7 「标签」 · 显示名)
 const TAGS = [
   { color: "red", key: 1 },
@@ -28,7 +35,14 @@ const pageLabel = (p: Page) => ({ details: t("详情"), classes: t("类别统计
 export function Inspector({ viewId }: { viewId: string }) {
   const view = useApp((s) => s.views[viewId]);
   const vocab = useApp((s) => s.vocab);
-  const [page, setPage] = useState<Page>("details");
+  const plugins = useApp(inspectorPages);
+  const stored = useApp((s) => s.inspectorPage);
+  // a plugin page whose plugin went away: back to the details
+  const page = BUILTIN_PAGES.includes(stored) || plugins.some((p) => `plugin:${p.id}` === stored) ? stored : "details";
+  const pluginPage = page.startsWith("plugin:") ? page.slice(7) : null;
+  const setPage = (p: string) => set({ inspectorPage: p });
+  const commands = useApp((s) => s.commands);
+  const extra = commands.filter((c) => c.menus.includes("inspector"));
   const [summary, setSummary] = useState<TreeSummaryResult | null>(null);
   const frame = view?.frame;
   const scanId = view?.state.scan_id;
@@ -69,6 +83,14 @@ export function Inspector({ viewId }: { viewId: string }) {
               {pageLabel(p)}
             </button>
           ))}
+          {plugins.map((p) => {
+            const id = `plugin:${p.id}`;
+            return (
+              <button key={id} role="tab" aria-selected={page === id} aria-label={p.title} title={p.title} className={`plugin-tab${page === id ? " on" : ""}`} onClick={() => setPage(id)}>
+                <PluginIcon plugin={p.plugin} name={p.icon} size={14} />
+              </button>
+            );
+          })}
         </div>
         <div className="inspector-tools">
           <button
@@ -85,19 +107,25 @@ export function Inspector({ viewId }: { viewId: string }) {
         </div>
       </div>
       <div className="inspector-body">
-        {synthetic != null && frame ? (
+        {pluginPage ? (
+          <InspectorPluginPage id={pluginPage} viewId={viewId} />
+        ) : synthetic != null && frame ? (
           <SyntheticDetails frameKind={frame.kind[synthetic]!} size={Number(frame.size[synthetic])} count={frame.count_[synthetic]!} />
         ) : !summary ? (
           <div className="muted">{t("正在读取…")}</div>
         ) : page === "details" ? (
-          <Details s={summary} viewId={viewId} className={className} />
+          <>
+            {scanId && <InsightCards scanId={scanId} node={summary.node.id} tick={tick} />}
+            <Details s={summary} viewId={viewId} className={className} />
+            {scanId && <InspectorFields scanId={scanId} viewId={viewId} node={summary.node.id} tick={tick} />}
+          </>
         ) : page === "classes" ? (
           <ClassStats s={summary} viewId={viewId} className={className} />
         ) : (
           <TopList s={summary} viewId={viewId} className={className} />
         )}
       </div>
-      {summary && synthetic == null && (
+      {summary && synthetic == null && !pluginPage && (
         <div className="inspector-actions">
           {!inBrowser() && (
             <ActionRow icon="reveal" label={revealLabel()} keys="Ctrl+E" disabled={!summary.on_disk} onClick={() => window.sk.shell.showItemInFolder(summary.path)} />
@@ -112,6 +140,16 @@ export function Inspector({ viewId }: { viewId: string }) {
             }}
           />
           <ActionRow icon="basket" danger label={t("加入删除篮")} keys="Delete" disabled={!summary.on_disk} onClick={() => scanId && basketAdd(scanId, summary.node.id)} />
+          {extra.map((c) => (
+            // plugins' commands for the selection (menus "inspector"): they run where the palette would
+            <button key={c.id} className="action-row" onClick={() => void runShortcut(c.id)} title={c.status || undefined}>
+              <span className="muted">
+                <PluginIcon plugin={c.plugin} name={c.icon} />
+              </span>
+              <span className="flex">{c.name}</span>
+              {c.keys[0] && <Kbd>{c.keys[0]}</Kbd>}
+            </button>
+          ))}
           {!summary.on_disk && <div className="muted small inspector-note">{notOnDisk()}</div>}
         </div>
       )}

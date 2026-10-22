@@ -7,6 +7,7 @@ import { fmtDuration, fmtInt, fmtSize } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 import { activeTip, levelName, levelText, scanPercent } from "@/shell/ScanProgress";
 import { Icon } from "@/ui/Icon";
+import { StatusPluginItems } from "@/plugins/slots";
 
 /** The limit of a load level before a scan reports its own (the start page's choice, UI-W1-13). */
 const LEVEL_CAP: Record<LoadLevel, number> = { max: 100, balanced: 70, quiet: 35, idle: 0, custom: 70 };
@@ -58,7 +59,7 @@ export function StatusBar() {
           <Icon name="bolt" size={14} />
         </span>
         {/* 「快照」 here is the one snapshot the tab shows (elsewhere the same word names the snapshots, plural) */}
-        <span className="strong">{scan.source === "snapshot" ? byLang("快照", "Snapshot") : scan.method === "mft" ? t("MFT 快速扫描") : t("硬扫描")}</span>
+        <span className="strong">{scan.source === "snapshot" ? byLang("快照", "Snapshot") : scan.method === "mft" ? t("MFT 快速扫描") : scan.method === "source" ? t("插件来源") : t("硬扫描")}</span>
         <span>·</span>
         <span>{t("{n} 项", { n: fmtInt(scan.items) })}</span>
         <span>·</span>
@@ -127,6 +128,8 @@ export function StatusBar() {
         )}
       </button>
       <span className="flex" />
+      {/* plugins.v1: reports placed in the status bar (slot "status") */}
+      <StatusPluginItems scanId={tab.scanId ?? null} />
       {vol && (
         <button className="status-item" title={t("{fs} · {size}\n已用 {used} / {total}", { fs: vol.fs_type, size: fmtSize(vol.total, true), used: fmtSize(used), total: fmtSize(vol.total, true) })}>
           <span className="capacity">

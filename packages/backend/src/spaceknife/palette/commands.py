@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from spaceknife_protocol import CAP_COLORS, CAP_VISUALS
+from spaceknife_protocol.plugins import CycleAction, ToggleAction, ViewAction
 from spaceknife_protocol.text import Text
 
 from ..i18n import SOURCE, Texts, _, language, plural, tr
@@ -300,8 +301,19 @@ def _static() -> tuple[Command, ...]:
             3,
             (_view,),
             _color,
+            action=CycleAction(what="color"),
         ),
-        C("view.toggle_free", "显示/隐藏可用空间", "eye", ("F",), ("free space",), 4, (_view,), _free),
+        C(
+            "view.toggle_free",
+            "显示/隐藏可用空间",
+            "eye",
+            ("F",),
+            ("free space",),
+            4,
+            (_view,),
+            _free,
+            action=ToggleAction(name="show_free"),
+        ),
         C(
             "basket.open",
             "打开删除篮",
@@ -349,6 +361,7 @@ def _static() -> tuple[Command, ...]:
             ("visualization", "chart", "treemap", "flame", "icicle", "flame_polar", "radial", "rings"),
             needs=(_visuals,),
             status=_visual,
+            action=CycleAction(what="visual"),
         ),
         C("filter.focus", "聚焦过滤", "filter", ("/", "Ctrl+F"), ("filter", "find"), needs=(_view,)),
         C("path.edit", "编辑路径", "search", ("Ctrl+L",), ("path", "go to", "address"), needs=(_view,)),
@@ -414,6 +427,7 @@ def _static() -> tuple[Command, ...]:
             ("unknown space",),
             needs=(_view,),
             status=_unknown,
+            action=ToggleAction(name="show_unknown"),
         ),
         C(
             "view.toggle_trash",
@@ -423,6 +437,7 @@ def _static() -> tuple[Command, ...]:
             ("trash", "recycle bin"),
             needs=(_trash_view,),
             status=_trash,
+            action=ToggleAction(name="show_trash"),
         ),
         C("view.split", "分屏", "split", (), ("split", "side by side"), needs=(_view,)),
         C("scan.pause", "暂停扫描", "pause", (), ("pause",), needs=(_pausable,)),
@@ -513,6 +528,7 @@ def _color_commands() -> tuple[Command, ...]:
                 needs=(_branch_ok if mode == "branch" else _view,),
                 status=_color_pick(mode),
                 typed_only=True,
+                action=ViewAction(settings={"color_mode": mode}),
             )
         )
     return tuple(out)
@@ -538,6 +554,7 @@ def _visual_commands(vis: list[Any]) -> tuple[Command, ...]:
                 needs=(_visual_ok(v.id),),
                 status=_visual_pick(v.id),
                 typed_only=True,
+                action=ViewAction(settings={"visual": v.id}),
                 owner=v.plugin or "builtin",
                 text=text,
             )
@@ -643,6 +660,7 @@ def plugin_commands(plugin_visuals: list[Any]) -> list[Command]:
                 needs=(_color_ok(c.id),),
                 status=_color_pick(c.id),
                 typed_only=True,
+                action=ViewAction(settings={"color_mode": c.id}),
                 owner=c.owner,
                 text=Text(
                     zh=NAMED.raw("color").format(name=title.zh),

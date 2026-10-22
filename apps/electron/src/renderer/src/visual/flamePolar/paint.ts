@@ -6,7 +6,7 @@
 import { tokens } from "@design/tokens";
 
 import type { PolarGeometry } from "@/protocol/generated";
-import { fillOf, labelColors, Pattern, rgba, type RGBA, type TagItem } from "@/treemap/paint";
+import { fillOf, labelColors, paletteFill, Pattern, rgba, type RGBA, type TagItem } from "@/treemap/paint";
 
 import { branchFill, CENTER, HALO_OVERLAY, ringFill } from "../colors";
 import { DStat, Flag, Kind } from "../frame";
@@ -93,8 +93,9 @@ export function sectorFill(f: PolarFrame, i: number, s: PaintSettings): RGBA {
   const kind = f.kind[i]!;
   if (s.diffTiers && f.delta) return fillOf(f, i, s.colorMode, s.classIds, s.diffTiers, s.classColors);
   if (s.colorMode === "branch") return branchFill(f.branch ? f.branch[i]! : 0, f.depth[i]!);
-  if (kind === Kind.FOLDER || kind === Kind.COLLAPSED) return ringFill(f.depth[i]!);
-  return fillOf(f, i, s.colorMode, s.classIds, undefined, s.classColors);
+  // a plugin's colour mode colours folder bars too when its palette says so (folders = "palette")
+  if (kind === Kind.FOLDER || kind === Kind.COLLAPSED) return s.palette?.folders ? paletteFill(f, i, s.palette) : ringFill(f.depth[i]!);
+  return fillOf(f, i, s.colorMode, s.classIds, undefined, s.classColors, s.palette);
 }
 
 export interface Painted {

@@ -12,6 +12,8 @@ import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { compareWithNow } from "@/state/compare";
 import { byLang, t } from "@/lib/i18n";
 import { inBrowser, serverName } from "@/lib/host";
+import { StartPluginCards } from "@/plugins/slots";
+import { SourcesPanel } from "@/plugins/SourcesPanel";
 
 // the labels translate each time they are read (getters), so a language switch applies (M7.5)
 export const MEDIA_ZH: Record<string, string> = {
@@ -287,6 +289,9 @@ export function StartPage({ tab }: { tab: Tab }) {
               )}
             </div>
             <Options method={form.method} load={form.load} ads={form.ads} volume={selected ?? null} elevated={elevated} onChange={patch} />
+            {/* plugins.v1: what plugins can list as a tree, their cards and pages */}
+            <SourcesPanel tab={tab} />
+            <StartPluginCards />
           </div>
           <div className="start-bar">
             <div className="start-summary">

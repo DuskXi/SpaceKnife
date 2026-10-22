@@ -1,5 +1,73 @@
 {
   "$defs": {
+    "ActionContext": {
+      "description": "Where the user is when an action runs (sent as the params of a ``call`` action).",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "compare_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compare Id"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Id"
+        },
+        "selection": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 1000,
+          "title": "Selection",
+          "type": "array"
+        },
+        "view_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "View Id"
+        }
+      },
+      "title": "ActionContext",
+      "type": "object"
+    },
     "AgeCond": {
       "properties": {
         "end": {
@@ -196,6 +264,97 @@
         "forbidden"
       ],
       "title": "AttrSet",
+      "type": "object"
+    },
+    "BarItem": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        },
+        "unit": {
+          "default": "size",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "BarItem",
+      "type": "object"
+    },
+    "BarsBlock": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/BarItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "type": {
+          "const": "bars",
+          "default": "bars",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "BarsBlock",
       "type": "object"
     },
     "BasketAddParams": {
@@ -742,6 +901,36 @@
       "title": "CallAction",
       "type": "object"
     },
+    "CalloutBlock": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tone": {
+          "default": "info",
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "type": {
+          "const": "callout",
+          "default": "callout",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "CalloutBlock",
+      "type": "object"
+    },
     "CancelParams": {
       "additionalProperties": false,
       "description": "``$/cancel`` notification: cancel the in-flight request with this id.",
@@ -1215,6 +1404,93 @@
         "method"
       ],
       "title": "CleanupInfo",
+      "type": "object"
+    },
+    "CleanupItem": {
+      "properties": {
+        "alloc": {
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "checked": {
+          "default": true,
+          "title": "Checked",
+          "type": "boolean"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "name",
+        "path",
+        "alloc",
+        "size"
+      ],
+      "title": "CleanupItem",
+      "type": "object"
+    },
+    "CleanupResult": {
+      "description": "Candidates of a cleanup: the review dialog adds the checked ones to the basket with origin.",
+      "properties": {
+        "dropped": {
+          "default": 0,
+          "description": "Candidates left out: unknown, gone or not on disk",
+          "title": "Dropped",
+          "type": "integer"
+        },
+        "freeable": {
+          "default": 0,
+          "title": "Freeable",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "origin": {
+          "description": "Full id of the cleanup (BasketAddParams.origin)",
+          "title": "Origin",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "cleanup",
+          "default": "cleanup",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "origin",
+        "items"
+      ],
+      "title": "CleanupResult",
       "type": "object"
     },
     "ClientInfo": {
@@ -4055,6 +4331,89 @@
       "title": "IoStatusList",
       "type": "object"
     },
+    "KvBlock": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/KvItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "type": {
+          "const": "kv",
+          "default": "kv",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "KvBlock",
+      "type": "object"
+    },
+    "KvItem": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "unit": {
+          "default": "text",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "KvItem",
+      "type": "object"
+    },
     "LabeledAction": {
       "properties": {
         "action": {
@@ -4386,6 +4745,82 @@
       "title": "MaskCond",
       "type": "object"
     },
+    "MdBlock": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "md",
+          "default": "md",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "MdBlock",
+      "type": "object"
+    },
+    "MeterBlock": {
+      "properties": {
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "max": {
+          "title": "Max",
+          "type": "number"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        },
+        "type": {
+          "const": "meter",
+          "default": "meter",
+          "title": "Type",
+          "type": "string"
+        },
+        "unit": {
+          "default": "size",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "value",
+        "max"
+      ],
+      "title": "MeterBlock",
+      "type": "object"
+    },
     "MonitorStatus": {
       "description": "Live change monitoring of a scan (M5): the status bar's 「实时监控」 item.",
       "properties": {
@@ -4577,6 +5012,40 @@
       "title": "NodeInfo",
       "type": "object"
     },
+    "NodeItem": {
+      "properties": {
+        "label": {
+          "default": "",
+          "title": "Label",
+          "type": "string"
+        },
+        "node": {
+          "$ref": "#/$defs/NodeRef"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size"
+        }
+      },
+      "required": [
+        "node"
+      ],
+      "title": "NodeItem",
+      "type": "object"
+    },
     "NodeRef": {
       "description": "A node of a scan as a plugin saw it; ``epoch`` tells whether the id still means the same node.",
       "properties": {
@@ -4604,6 +5073,35 @@
         "node"
       ],
       "title": "NodeRef",
+      "type": "object"
+    },
+    "NodesBlock": {
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/LabeledAction"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/NodeItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "type": {
+          "const": "nodes",
+          "default": "nodes",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "NodesBlock",
       "type": "object"
     },
     "OpItemResult": {
@@ -5611,6 +6109,36 @@
         "title"
       ],
       "title": "PanelInfo",
+      "type": "object"
+    },
+    "PartItem": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "PartItem",
       "type": "object"
     },
     "PathCheck": {
@@ -7044,6 +7572,35 @@
       "title": "PresetInfo",
       "type": "object"
     },
+    "ProgressBlock": {
+      "properties": {
+        "done": {
+          "title": "Done",
+          "type": "number"
+        },
+        "text": {
+          "default": "",
+          "title": "Text",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "number"
+        },
+        "type": {
+          "const": "progress",
+          "default": "progress",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "done",
+        "total"
+      ],
+      "title": "ProgressBlock",
+      "type": "object"
+    },
     "ProgressEvent": {
       "description": "``$/progress``: LSP-style progress for long-running requests.",
       "properties": {
@@ -7182,6 +7739,193 @@
         "reason"
       ],
       "title": "Refusal",
+      "type": "object"
+    },
+    "Report": {
+      "description": "A report document: blocks the frontends draw with their own components.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/LabeledAction"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "blocks": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "bars": "#/$defs/BarsBlock",
+                "callout": "#/$defs/CalloutBlock",
+                "kv": "#/$defs/KvBlock",
+                "md": "#/$defs/MdBlock",
+                "meter": "#/$defs/MeterBlock",
+                "nodes": "#/$defs/NodesBlock",
+                "progress": "#/$defs/ProgressBlock",
+                "ring": "#/$defs/RingBlock",
+                "section": "#/$defs/SectionBlock",
+                "spark": "#/$defs/SparkBlock",
+                "stack": "#/$defs/StackBlock",
+                "stats": "#/$defs/StatsBlock",
+                "table": "#/$defs/TableBlock"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/MdBlock"
+              },
+              {
+                "$ref": "#/$defs/StatsBlock"
+              },
+              {
+                "$ref": "#/$defs/KvBlock"
+              },
+              {
+                "$ref": "#/$defs/TableBlock"
+              },
+              {
+                "$ref": "#/$defs/BarsBlock"
+              },
+              {
+                "$ref": "#/$defs/StackBlock"
+              },
+              {
+                "$ref": "#/$defs/RingBlock"
+              },
+              {
+                "$ref": "#/$defs/MeterBlock"
+              },
+              {
+                "$ref": "#/$defs/SparkBlock"
+              },
+              {
+                "$ref": "#/$defs/NodesBlock"
+              },
+              {
+                "$ref": "#/$defs/CalloutBlock"
+              },
+              {
+                "$ref": "#/$defs/ProgressBlock"
+              },
+              {
+                "$ref": "#/$defs/SectionBlock"
+              }
+            ]
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "empty": {
+          "default": "",
+          "description": "Shown instead of the blocks when there are none",
+          "title": "Empty",
+          "type": "string"
+        },
+        "footnote": {
+          "default": "",
+          "title": "Footnote",
+          "type": "string"
+        },
+        "subtitle": {
+          "default": "",
+          "title": "Subtitle",
+          "type": "string"
+        },
+        "title": {
+          "default": "",
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "report",
+          "default": "report",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "title": "Report",
+      "type": "object"
+    },
+    "ReportContext": {
+      "description": "The params of a report, a cleanup and a code insight: what it is about.",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "compare_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compare Id"
+        },
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A table's next page (Table.more)",
+          "title": "Cursor"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Id"
+        },
+        "selection": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 1000,
+          "title": "Selection",
+          "type": "array"
+        },
+        "view_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "View Id"
+        }
+      },
+      "title": "ReportContext",
       "type": "object"
     },
     "ReportInfo": {
@@ -7340,6 +8084,49 @@
         "path"
       ],
       "title": "ResultRow",
+      "type": "object"
+    },
+    "RingBlock": {
+      "properties": {
+        "center": {
+          "default": "",
+          "title": "Center",
+          "type": "string"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/PartItem"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "type": {
+          "const": "ring",
+          "default": "ring",
+          "title": "Type",
+          "type": "string"
+        },
+        "unit": {
+          "default": "size",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parts"
+      ],
+      "title": "RingBlock",
       "type": "object"
     },
     "ScanIdParams": {
@@ -7944,6 +8731,96 @@
         "progress"
       ],
       "title": "ScanStatus",
+      "type": "object"
+    },
+    "SectionBlock": {
+      "properties": {
+        "blocks": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "bars": "#/$defs/BarsBlock",
+                "callout": "#/$defs/CalloutBlock",
+                "kv": "#/$defs/KvBlock",
+                "md": "#/$defs/MdBlock",
+                "meter": "#/$defs/MeterBlock",
+                "nodes": "#/$defs/NodesBlock",
+                "progress": "#/$defs/ProgressBlock",
+                "ring": "#/$defs/RingBlock",
+                "section": "#/$defs/SectionBlock",
+                "spark": "#/$defs/SparkBlock",
+                "stack": "#/$defs/StackBlock",
+                "stats": "#/$defs/StatsBlock",
+                "table": "#/$defs/TableBlock"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/MdBlock"
+              },
+              {
+                "$ref": "#/$defs/StatsBlock"
+              },
+              {
+                "$ref": "#/$defs/KvBlock"
+              },
+              {
+                "$ref": "#/$defs/TableBlock"
+              },
+              {
+                "$ref": "#/$defs/BarsBlock"
+              },
+              {
+                "$ref": "#/$defs/StackBlock"
+              },
+              {
+                "$ref": "#/$defs/RingBlock"
+              },
+              {
+                "$ref": "#/$defs/MeterBlock"
+              },
+              {
+                "$ref": "#/$defs/SparkBlock"
+              },
+              {
+                "$ref": "#/$defs/NodesBlock"
+              },
+              {
+                "$ref": "#/$defs/CalloutBlock"
+              },
+              {
+                "$ref": "#/$defs/ProgressBlock"
+              },
+              {
+                "$ref": "#/$defs/SectionBlock"
+              }
+            ]
+          },
+          "title": "Blocks",
+          "type": "array"
+        },
+        "collapsed": {
+          "default": false,
+          "title": "Collapsed",
+          "type": "boolean"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "type": {
+          "const": "section",
+          "default": "section",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "blocks"
+      ],
+      "title": "SectionBlock",
       "type": "object"
     },
     "ServerInfo": {
@@ -8923,6 +9800,190 @@
       "title": "Span",
       "type": "object"
     },
+    "SparkBlock": {
+      "properties": {
+        "labels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Labels",
+          "type": "array"
+        },
+        "type": {
+          "const": "spark",
+          "default": "spark",
+          "title": "Type",
+          "type": "string"
+        },
+        "unit": {
+          "default": "size",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Values",
+          "type": "array"
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "title": "SparkBlock",
+      "type": "object"
+    },
+    "StackBlock": {
+      "properties": {
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/PartItem"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "type": {
+          "const": "stack",
+          "default": "stack",
+          "title": "Type",
+          "type": "string"
+        },
+        "unit": {
+          "default": "size",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "parts"
+      ],
+      "title": "StackBlock",
+      "type": "object"
+    },
+    "StatItem": {
+      "properties": {
+        "delta": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Delta"
+        },
+        "hint": {
+          "default": "",
+          "title": "Hint",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "tone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tone"
+        },
+        "unit": {
+          "default": "count",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "StatItem",
+      "type": "object"
+    },
+    "StatsBlock": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/StatItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "type": {
+          "const": "stats",
+          "default": "stats",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "title": "StatsBlock",
+      "type": "object"
+    },
     "SubscribeParams": {
       "additionalProperties": false,
       "properties": {
@@ -9025,6 +10086,204 @@
       "title": "SystemInfo",
       "type": "object"
     },
+    "TableBlock": {
+      "properties": {
+        "columns": {
+          "items": {
+            "$ref": "#/$defs/TableColumn"
+          },
+          "title": "Columns",
+          "type": "array"
+        },
+        "more": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TableMore"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "page_size": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/TableRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "select": {
+          "default": false,
+          "title": "Select",
+          "type": "boolean"
+        },
+        "sort": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Column key, '-key' for descending",
+          "title": "Sort"
+        },
+        "type": {
+          "const": "table",
+          "default": "table",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "title": "TableBlock",
+      "type": "object"
+    },
+    "TableColumn": {
+      "properties": {
+        "align": {
+          "anyOf": [
+            {
+              "enum": [
+                "start",
+                "end",
+                "center"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Align"
+        },
+        "grow": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Grow"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "unit": {
+          "default": "text",
+          "enum": [
+            "size",
+            "count",
+            "pct",
+            "date",
+            "ago",
+            "duration",
+            "bytes_per_s",
+            "text",
+            "path"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "label"
+      ],
+      "title": "TableColumn",
+      "type": "object"
+    },
+    "TableMore": {
+      "properties": {
+        "cursor": {
+          "title": "Cursor",
+          "type": "string"
+        },
+        "method": {
+          "description": "Wire name of the report to call with cursor for the next page",
+          "title": "Method",
+          "type": "string"
+        }
+      },
+      "required": [
+        "method",
+        "cursor"
+      ],
+      "title": "TableMore",
+      "type": "object"
+    },
+    "TableRow": {
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/LabeledAction"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "cells": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Cells",
+          "type": "object"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "cells"
+      ],
+      "title": "TableRow",
+      "type": "object"
+    },
     "TagCond": {
       "properties": {
         "colors": {
@@ -9090,6 +10349,36 @@
         "dark"
       ],
       "title": "ThemedColor",
+      "type": "object"
+    },
+    "Toast": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tone": {
+          "default": "info",
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "type": {
+          "const": "toast",
+          "default": "toast",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Toast",
       "type": "object"
     },
     "ToggleAction": {
@@ -11109,6 +12398,28 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "binaryFrameHeader": "#/$defs/BinaryFrameHeader",
+  "documents": {
+    "action_context": {
+      "direction": "input",
+      "model": "#/$defs/ActionContext"
+    },
+    "cleanup": {
+      "direction": "output",
+      "model": "#/$defs/CleanupResult"
+    },
+    "report": {
+      "direction": "output",
+      "model": "#/$defs/Report"
+    },
+    "report_context": {
+      "direction": "input",
+      "model": "#/$defs/ReportContext"
+    },
+    "toast": {
+      "direction": "output",
+      "model": "#/$defs/Toast"
+    }
+  },
   "errorObject": "#/$defs/ErrorObject",
   "events": {
     "$/progress": {

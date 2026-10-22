@@ -66,6 +66,7 @@ export function decodeVisualFrame(frame: BinaryFrame, info: FrameInfo): VisualFr
     branch: (c.branch as Uint8Array | undefined) ?? null,
     delta: (c.delta as BigInt64Array | undefined) ?? null,
     dstat: (c.dstat as Uint8Array | undefined) ?? null,
+    pal: c.pal instanceof Uint8Array ? c.pal : null,
     names,
     geometry,
     rowOf(k: number): number {

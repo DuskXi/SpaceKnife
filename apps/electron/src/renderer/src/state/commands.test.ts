@@ -1,40 +1,16 @@
-// Keyboard shortcuts of palette commands: which key names which command, and that a key runs its
-// command only where the backend's palette.check says the palette would offer it.
+// Running palette commands: a key (plugins/keymap.ts) or another command runs its command only where
+// the backend's palette.check says the palette would offer it, then its action or the app's own
+// handler (BUILTIN_ACTIONS). Which key names which command is keymap.test.ts.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PaletteCommand } from "@/protocol/generated";
 
 import { call, rescanFolder, startScan } from "./actions";
-import { runShortcut, shortcutCommand } from "./commands";
+import { runShortcut } from "./commands";
 import { get, set } from "./store";
 
 vi.mock(import("./actions"), async (original) => ({ ...(await original()), call: vi.fn(), rescanFolder: vi.fn(), startScan: vi.fn() }));
-
-const key = (k: string, mods: { ctrl?: boolean; meta?: boolean; shift?: boolean; alt?: boolean } = {}) => ({
-  key: k,
-  ctrlKey: !!mods.ctrl,
-  metaKey: !!mods.meta,
-  shiftKey: !!mods.shift,
-  altKey: !!mods.alt,
-});
-
-describe("shortcutCommand", () => {
-  it("names the command of F5, Shift+F5 and Ctrl+S (⌘S on macOS)", () => {
-    expect(shortcutCommand(key("F5"))).toBe("view.rescan");
-    expect(shortcutCommand(key("F5", { shift: true }))).toBe("scan.rescan_all");
-    expect(shortcutCommand(key("s", { ctrl: true }))).toBe("snapshot.save");
-    expect(shortcutCommand(key("S", { ctrl: true }))).toBe("snapshot.save"); // Caps Lock
-    expect(shortcutCommand(key("s", { meta: true }))).toBe("snapshot.save");
-  });
-
-  it("leaves every other key alone", () => {
-    for (const k of [key("s"), key("S", { shift: true }), key("s", { ctrl: true, shift: true }), key("s", { ctrl: true, alt: true })]) {
-      expect(shortcutCommand(k)).toBeNull();
-    }
-    for (const k of [key("F5", { ctrl: true }), key("F5", { alt: true }), key("F6"), key("5")]) expect(shortcutCommand(k)).toBeNull();
-  });
-});
 
 describe("runShortcut", () => {
   const mocked = vi.mocked(call);

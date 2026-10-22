@@ -16,6 +16,7 @@ import { Kind } from "@/visual/frame";
 import { componentFor } from "@/visual/registry";
 import type { HoverInfo } from "@/visual/types";
 import { Icon, type IconName } from "@/ui/Icon";
+import { CompareSections } from "@/plugins/slots";
 
 const LIST_LIMIT = 12;
 export const DIRECTIONS = ["all", "grow", "shrink"] as const;
@@ -232,6 +233,8 @@ export function CompareSidebar({ tab }: { tab: Tab }) {
           {dir !== "grow" && (
             <ChangeList title={t("减少")} right={sum.shrink ? fmtDelta(-sum.shrink) : "0"} items={sum.shrink_items} empty={t("没有减少的项")} maxAbs={maxAbs} tiers={legend.tiers} viewId={viewId!} selected={selected} />
           )}
+          {/* plugins.v1: reports placed in this panel (slot "compare") */}
+          <CompareSections tab={tab} />
         </div>
       ) : (
         <div className="cmp-body muted cmp-wait">{c.phase === "failed" ? c.message : t("正在准备对比数据…")}</div>

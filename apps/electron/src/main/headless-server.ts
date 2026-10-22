@@ -8,6 +8,9 @@
 //   GET /v1 (Upgrade)  the backend's WebSocket. The browser's Origin must be this server's own origin
 //                      (the Host it asked for), the backend sees HEADLESS_ORIGIN, and session.hello
 //                      still needs the token (docs/protocol.md §1).
+//   GET /plugins/<id>/web/…  a plugin's web panel files (plugin-files.ts): each with a policy that
+//                      sandboxes it (an opaque origin, never this page's, even opened by itself), no
+//                      network, framed only by this server's page; …/_sk/… the panel SDK.
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -16,8 +19,11 @@ import { createServer as createHttpsServer } from "node:https";
 import { type Socket, connect } from "node:net";
 import type { Duplex } from "node:stream";
 
+import { existsSync } from "node:fs";
+
 import { fileIn, mimeOf } from "./files";
 import { HEADLESS_ORIGIN, type Listen } from "./headless";
+import { isPluginId, type PluginDirs, servePanelFile } from "./plugin-files";
 
 const WS_PATH = "/v1"; // spaceknife_protocol.WS_PATH
 const MAX_SOCKETS = 64;
@@ -42,6 +48,8 @@ export interface HeadlessServerOptions {
   tls: { cert: Buffer; key: Buffer } | null;
   /** a browser connected to the backend, or went away */
   onSocket?: (event: "open" | "close", remote: string) => void;
+  /** where plugins are (the backend's ready line) and the app's panel SDK: their web panels */
+  plugins?: { dirs: PluginDirs; sdkDir: string } | null;
 }
 
 export interface HeadlessServer {
@@ -71,10 +79,13 @@ export function sameOrigin(origin: string | undefined, host: string | undefined,
 }
 
 /** index.html with its Content-Security-Policy letting the page reach this server's WebSocket by the
- *  name it used (CSP3 browsers match ws: to 'self' already; older ones need it spelled out). */
+ *  name it used (CSP3 browsers match ws: to 'self' already; older ones need it spelled out), and
+ *  frame only this server's own pages (plugins' panels): a panel can't take its frame elsewhere. */
 export function servedIndex(html: string, host: string): string {
-  return html.replace(/connect-src [^;"]*/, `connect-src 'self' ws://${host} wss://${host}`);
+  return html.replace(/connect-src [^;"]*/, `connect-src 'self' ws://${host} wss://${host}`).replace(/frame-src [^;"]*/, "frame-src 'self'");
 }
+
+const PANEL_PATH = /^\/plugins\/([^/]+)\/web(\/.*)?$/;
 
 const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
@@ -174,6 +185,29 @@ async function respond(o: HeadlessServerOptions, req: IncomingMessage, res: Serv
     return send(200, JSON.stringify(o.info), { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" });
   }
   if (pathname === WS_PATH) return send(426, "Upgrade Required\n", { upgrade: "websocket" });
+
+  const panel = PANEL_PATH.exec(pathname);
+  if (panel) {
+    const id = panel[1]!;
+    if (!o.plugins || !isPluginId(id)) return send(404, "Not Found\n");
+    const origin = `${secure ? "https" : "http"}://${host}`;
+    const prefix = `${origin}/plugins/${id}/web/`;
+    const r = await servePanelFile({
+      dirs: o.plugins.dirs,
+      sdkDir: o.plugins.sdkDir,
+      id,
+      rest: panel[2] ?? "/",
+      self: prefix,
+      ancestors: [origin],
+      guardSrc: `/plugins/${id}/web/_sk/guard.js`,
+      exists: async (p) => existsSync(p),
+    });
+    // not the app's own headers: a panel is framed by the app (no X-Frame-Options: DENY) and loads
+    // its files from an opaque origin (no same-origin resource policy)
+    res.writeHead(r.status, r.headers);
+    res.end(req.method === "HEAD" ? undefined : r.body);
+    return;
+  }
 
   const file = fileIn(o.rendererDir, pathname);
   if (!file) return send(404, "Not Found\n");

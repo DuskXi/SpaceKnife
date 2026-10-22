@@ -9,7 +9,8 @@ import { tokens } from "@design/tokens";
 
 import { setViewSettings, viewCall } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
-import { classColors } from "@/lib/classes";
+import { classColors, classHex } from "@/lib/classes";
+import { palettePaint } from "@/plugins/colors";
 import { diffTiers, maxChange } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
@@ -157,6 +158,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   const vocab = useApp((s) => s.vocab);
   const classIds = useMemo(() => vocab?.classes.map((c) => c.id) ?? [], [vocab]);
   const colors = useMemo(() => classColors(vocab), [vocab]);
+  const extensions = useApp((s) => s.extensions);
   const scanning = useApp((s) => {
     const v = s.views[viewId];
     const st = v ? s.scans[v.state.scan_id] : undefined;
@@ -374,6 +376,8 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   // new frame, or a colour-mode / paint-setting change
   const frame = view?.frame ?? null;
   const colorMode = (view?.state.color_mode ?? "class") as ColorMode;
+  // a plugin's colour mode (colors.v1): its palette, resolved against the theme and the class colours
+  const palette = useMemo(() => palettePaint(colorMode, extensions, (id) => classHex(vocab, id)), [colorMode, extensions, vocab]);
   const stateVisual = view?.state.visual;
   useEffect(() => {
     const st = r.current;
@@ -381,12 +385,15 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     const component = componentFor(frame.layout);
     if (!component) return;
     const g = component.geometry;
+    // a visualization sized by file count (a plugin's variant, size_unit "count") labels counts
+    const counts = frame.info.size_unit === "count";
     const settings: PaintSettings = {
       colorMode,
+      palette,
       classIds,
       classColors: colors,
       scanning,
-      formatSize: (b) => fmtSize(b),
+      formatSize: counts ? (n) => fmtInt(n) : (b) => fmtSize(b),
       formatInt: (n) => fmtInt(n),
       formatDelta: (b) => fmtDelta(b),
       haloLevels,
@@ -444,7 +451,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     loops.breath.run();
     rehoverRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
+  }, [frame, colorMode, palette, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
 
   // the class the pointer is on in 「类别统计」 (UI-MAIN-65): its rows lit in the picture, everything
   // else under a veil; the filter stays as it is

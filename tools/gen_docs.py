@@ -44,7 +44,7 @@ RENDERER = ROOT / "apps" / "electron" / "src" / "renderer" / "src"
 FRONTEND_LOCALES = RENDERER / "locales" / "en"
 SETTINGS_PAGE = RENDERER / "pages" / "SettingsPage.tsx"
 # where the Electron window handles keys: App.tsx, and the keys it hands to palette commands
-KEY_HANDLERS = (RENDERER / "App.tsx", RENDERER / "state" / "commands.ts")
+KEY_HANDLERS = (RENDERER / "App.tsx", RENDERER / "state" / "commands.ts", RENDERER / "plugins" / "keymap.ts")
 
 Lang = Literal["en", "zh"]
 LANGS: tuple[Lang, ...] = ("en", "zh")
@@ -65,6 +65,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("scan", "扫描与性能", "扫描方式、扫描范围与硬链接计算从下一次扫描起生效，其余更改立即生效"),
     ("classes", "文件类别", "按扩展名归类，用于树图着色、:class: 过滤和类别统计"),
     ("tags", "标签", "四个固定标签：红▲、黄■、绿●、蓝◆，颜色与形状不可修改"),
+    ("plugins", "插件", "安装、启用与停用插件；插件自己的设置也在这里"),
     ("keys", "快捷键", "全部命令与当前快捷键，与命令面板同一份命令清单"),
     ("advanced", "高级", "设置文件、日志、缓存与快照"),
     ("about", "关于与更新", "版本信息、更新与发布时间线"),
@@ -106,6 +107,8 @@ WORDS: dict[Lang, dict[str, str]] = {
         "platform_text": "{platforms}：{text}",
         "and": "、",
         "no_settings": "这一页没有开关类设置，是文件类别的编辑器，见[标签与文件类别](../tags-classes/)。",
+        "no_settings_plugins": "这一页列出装好的插件：第一次启用前先列出它要的权限，停用后它的设置保留。"
+        "插件自己的设置在它启用后出现在这一页。",
         "command": "命令",
         "keys": "按键",
         "search": "也能用这些词找到",
@@ -146,6 +149,9 @@ WORDS: dict[Lang, dict[str, str]] = {
         "and": ", ",
         "no_settings": "This page has no switches or choices: it is the file class editor. "
         "See [Tags and file classes](../tags-classes/).",
+        "no_settings_plugins": "This page lists the installed plugins: the permissions a plugin asks for "
+        "are shown before it is first enabled, and its settings stay when it is turned off. A plugin's own "
+        "settings appear on this page once it is enabled.",
         "command": "Command",
         "keys": "Keys",
         "search": "Also found by",
@@ -418,7 +424,8 @@ def settings_block(w: Words) -> str:
         lines += ["", f"### {w.tr(name, ui=True)}", "", w.sentence(w.tr(note, ui=True))]
         page = [v for v in variants if v[0].category == category]
         if not page:
-            lines += ["", w["no_settings"]]
+            # the plugins page lists plugins; their settings come with them (plugin.<id>.*)
+            lines += ["", w["no_settings_plugins" if category == "plugins" else "no_settings"]]
             continue
         groups: dict[str, list[tuple[Spec, ...]]] = {}
         for v in page:

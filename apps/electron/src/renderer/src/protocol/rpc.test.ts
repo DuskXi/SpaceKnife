@@ -422,4 +422,72 @@ describe("Rpc", () => {
     rpc.close();
     expect(ws.closedWith).toBe(1000);
   });
+
+  // ---------------------------------------------------------------- plugins.v1
+
+  it("announces plugins.v1, colors.v1 and panels.v1 in the hello", async () => {
+    const rpc = new Rpc();
+    void rpc.connect("ws://127.0.0.1:9/rpc", "secret", { name: "test", version: "1" });
+    const ws = FakeSocket.last!;
+    ws.accept();
+    await tick();
+    const caps = (ws.message(0).params as { capabilities: string[] }).capabilities;
+    for (const c of ["plugins.v1", "colors.v1", "panels.v1", "visuals.v1"]) expect(caps).toContain(c);
+  });
+
+  it("calls any method by name (a plugin's), and cancels it with an AbortSignal", async () => {
+    const { rpc, ws } = await connected();
+    const ok = rpc.callRaw("plugin.example.dupes.find", { min_size: 1 });
+    expect(ws.message(1)).toMatchObject({ method: "plugin.example.dupes.find", params: { min_size: 1 } });
+    ws.receive({ jsonrpc: "2.0", id: ws.message(1).id, result: { groups: [[1, 2]] } });
+    await expect(ok).resolves.toEqual({ groups: [[1, 2]] });
+
+    const ac = new AbortController();
+    const slow = rpc.callRaw("plugin.example.dupes.find", {}, { signal: ac.signal });
+    const id = ws.message(2).id;
+    ac.abort();
+    expect(ws.message(3)).toEqual({ jsonrpc: "2.0", method: "$/cancel", params: { id } });
+    await expect(slow).rejects.toMatchObject({ code: -32800 });
+    // the late answer finds nobody waiting
+    expect(() => ws.receive({ jsonrpc: "2.0", id, result: {} })).not.toThrow();
+    // an already aborted signal sends nothing
+    await expect(rpc.callRaw("plugin.x.y.z", {}, { signal: ac.signal })).rejects.toMatchObject({ code: -32800 });
+    expect(ws.sent).toHaveLength(4);
+  });
+
+  it("keeps a plugin call's binary frames for its answer, apart from the view frames", async () => {
+    const { rpc, ws } = await connected();
+    const views: BinaryFrame[] = [];
+    rpc.onBinary((f) => views.push(f));
+    let requestId = -1;
+    const p = rpc.callFrames("plugin.t.full.columns", {}, { onId: (n) => (requestId = n) });
+    expect(requestId).toBe(ws.message(1).id);
+    ws.receive(encodeFrame({ stream: "plugin.t.full.columns", request_id: requestId, layout: "columns" }, { ids: Int32Array.of(0, 1, 2) }));
+    ws.receive(encodeFrame({ stream: "view:v1", layout: "drawlist.v1", seq: 1 }, { key: Uint32Array.of(1) }));
+    ws.receive({ jsonrpc: "2.0", id: requestId, result: { columns: true } });
+    const r = await p;
+    expect(r.value).toEqual({ columns: true });
+    expect(r.frames).toHaveLength(1);
+    expect(r.frames[0]!.columns.ids).toEqual(Int32Array.of(0, 1, 2));
+    // the view's frame went to the view handlers, the plugin's did not
+    expect(views.map((f) => f.header.stream)).toEqual(["view:v1"]);
+  });
+
+  it("passes a plugin's frames without a waiting request to the binary handlers (streams)", async () => {
+    const { rpc, ws } = await connected();
+    const seen: string[] = [];
+    rpc.onBinary((f) => seen.push(f.header.stream));
+    ws.receive(encodeFrame({ stream: "plugin.t.full.ticks", layout: "columns" }, { n: Int32Array.of(1) }));
+    expect(seen).toEqual(["plugin.t.full.ticks"]);
+  });
+
+  it("dispatches any notification by name to raw handlers (plugin events)", async () => {
+    const { rpc, ws } = await connected();
+    const seen: unknown[] = [];
+    const off = rpc.onRaw("plugin.t.full.progress", (p) => seen.push(p));
+    ws.receive({ jsonrpc: "2.0", method: "plugin.t.full.progress", params: { done: 1, total: 2 } });
+    off();
+    ws.receive({ jsonrpc: "2.0", method: "plugin.t.full.progress", params: { done: 2, total: 2 } });
+    expect(seen).toEqual([{ done: 1, total: 2 }]);
+  });
 });

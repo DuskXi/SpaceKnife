@@ -57,6 +57,7 @@ class TreemapInstance implements VisualInstance<RectFrame> {
     const painted = paint(f, {
       dpr: f.info.dpr,
       colorMode: s.colorMode,
+      palette: s.palette,
       classIds: s.classIds,
       classColors: s.classColors,
       hovered: this.hovered >= 0 ? this.hovered : -1,

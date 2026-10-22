@@ -5,6 +5,7 @@ import "@design/tokens.css";
 import "./styles/app.css";
 import "./styles/help.css";
 import "./styles/browser.css";
+import "./styles/plugins.css";
 
 import { installShim } from "./shim";
 

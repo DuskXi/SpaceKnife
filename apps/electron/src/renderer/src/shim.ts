@@ -102,6 +102,7 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
       copyText: (text) => env.copy(text),
       openFullDiskAccess: () => elsewhere(t("请在 {host} 上打开「系统设置 › 隐私与安全性 › 完全磁盘访问权限」。", { host: server })),
       openExternal: (url) => env.open(url),
+      openUrl: (url) => (/^https:\/\//i.test(url) ? env.open(url) : undefined),
     },
     update: {
       install: async () => t("浏览器里不能安装更新：请在 {host} 上更新 SpaceKnife", { host: server }),

@@ -8,6 +8,9 @@ import { Rpc, RpcError } from "@/protocol/rpc";
 import "@/visual/builtins";
 import { decodeVisualFrame, isKnownLayout } from "@/visual/frame";
 import { componentFor } from "@/visual/registry";
+import { isPluginName } from "@/plugins/caps";
+import { detachPlugins } from "@/plugins/client";
+import { installPlugins, relocalize } from "@/plugins/store";
 
 import {
   activeTab,
@@ -104,7 +107,8 @@ async function connect(): Promise<void> {
     return;
   }
   connectedOnce = true;
-  r.onBinary((f) => frames.accept(f));
+  // a plugin's frames (plugin.<id>.<name>) are the plugin client's (plugins/client.ts)
+  r.onBinary((f) => !isPluginName(f.header.stream) && frames.accept(f));
   r.on("view.frame", (ev) => void applyFrame(ev.frame));
   r.on("scan.progress", (ev) => onScanStatus(ev.status));
   r.on("settings.changed", (ev) => applySettings(ev.state));
@@ -116,6 +120,7 @@ async function connect(): Promise<void> {
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));
   r.on("log.record", (ev) => addLog(ev));
   r.onClose(() => {
+    detachPlugins(r);
     if (rpc !== r) return;
     rpc = null;
     if (backendGone) return;
@@ -144,6 +149,8 @@ async function connect(): Promise<void> {
     scans: Object.fromEntries(scans.scans.map((s) => [s.scan_id, s])),
   });
   if (update) applyUpdateStatus(update);
+  // plugins.v1: what plugins add, the key table and the plugin list (plugins/store.ts)
+  await installPlugins(r);
   for (const s of scans.scans) if (s.state === "scanning" || s.state === "queued") void watchScan(s.scan_id);
 }
 
@@ -284,8 +291,14 @@ async function openLike(scanId: string, like: ViewState | undefined): Promise<st
 // ------------------------------------------------------------------ delete basket (W5)
 
 /** Delete key / 「加入删除篮」 (UI-W3-33, UI-MAIN-46, UI-W5-18/28): the backend dedups by path. */
-export function basketAdd(scanId: string, node: number): Promise<void> {
-  return basketPut({ scan_id: scanId, nodes: [node] });
+export function basketAdd(scanId: string, node: number, origin?: string | null): Promise<void> {
+  return basketPut({ scan_id: scanId, nodes: [node], ...(origin ? { origin } : {}) });
+}
+
+/** A cleanup's checked candidates (plugins/cleanup.tsx): each with why it was proposed and the
+ * cleanup it came from, shown in the basket. */
+export function basketAddMany(scanId: string, nodes: number[], origin: string, reasons: string[]): Promise<void> {
+  return basketPut({ scan_id: scanId, nodes, origin, reasons });
 }
 
 /** An aggregate block of a view goes in as one item with its members (UI-W5-29). */
@@ -466,7 +479,9 @@ async function startScanNow(params: ScanStartParams, replaceTab?: string): Promi
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status }, logDismissed: false }));
     void watchScan(status.scan_id);
-    return (await showScan(status.scan_id, scanTitle(params.roots ?? []), replaceTab)) ? status.scan_id : null;
+    // a plugin's scan source (plugins.v1) lists what its URI names: the tab is named after that
+    const title = params.source ? (status.roots[0]?.path.split(/[\\/]/).filter(Boolean).pop() ?? params.uri ?? "") : scanTitle(params.roots ?? []);
+    return (await showScan(status.scan_id, title, replaceTab)) ? status.scan_id : null;
   } catch (err) {
     toast(err instanceof RpcError ? t("无法开始扫描：{error}", { error: err.message }) : String(err));
     return null;
@@ -652,6 +667,8 @@ export function applySettings(state: SettingsState): void {
     void call("visual.list", {})
       .then((r) => set({ visuals: r.visuals }))
       .catch(() => undefined);
+    // command names, plugin titles and legends too
+    relocalize();
   }
 }
 
