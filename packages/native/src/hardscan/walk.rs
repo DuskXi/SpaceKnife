@@ -24,8 +24,6 @@ pub type Ref = [i64; 3];
 
 pub struct Node {
     pub path: NativePath,
-    /// File id from the parent's listing (0: unknown): Windows opens it by id when it can.
-    pub id: u128,
     pub root: u32,
     /// Found by this call (open without following a symlink) rather than given as a task.
     pub discovered: bool,
@@ -54,13 +52,8 @@ pub struct Child {
 
 impl Node {
     pub fn new(path: NativePath, root: u32, discovered: bool) -> Self {
-        Self::with_id(path, root, discovered, 0)
-    }
-
-    pub fn with_id(path: NativePath, root: u32, discovered: bool, id: u128) -> Self {
         Self {
             path,
-            id,
             root,
             discovered,
             state: OnceLock::new(),
@@ -183,11 +176,10 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
     let slot = rayon::current_thread_index().unwrap_or(0) % ctx.arenas.len();
     let mut arena = ctx.arenas[slot].lock().unwrap_or_else(|e| e.into_inner());
     let mark = arena.mark();
-    let mut subdirs: Vec<(u32, NativePath, u128)> = Vec::new();
+    let mut subdirs: Vec<(u32, NativePath)> = Vec::new();
     let root = node.root as usize;
     let res = sys::list_dir(
         &node.path,
-        node.id,
         node.discovered,
         &ctx.roots[root],
         &ctx.root_state[root],
@@ -203,9 +195,9 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
             ctx.listed.fetch_add(1, Ordering::Relaxed);
             let children: Box<[Child]> = subdirs
                 .into_iter()
-                .map(|(j, path, id)| Child {
+                .map(|(j, path)| Child {
                     j,
-                    node: Node::with_id(path, node.root, true, id),
+                    node: Node::new(path, node.root, true),
                 })
                 .collect();
             let listed = Listed {

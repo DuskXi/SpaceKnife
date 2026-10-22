@@ -5,28 +5,24 @@
 //! FindFirstFileW/FindNextFileW). Paths are opened in NT form (`\??\C:\...`), so long paths need
 //! no prefix and names Win32 would rewrite (trailing dots or spaces) are listed as they are.
 //!
-//! Two ways to spend less (`OpenOpts`, both on by default, docs/native.md 2.2):
-//! - a subdirectory found during the call is opened by its file id, relative to a directory of the
-//!   same volume (`RootState::anchor`), so the file system does not resolve its whole path again:
-//!   a warm NTFS scan of a system volume takes half the CPU time and half the time;
-//! - directories are opened with FILE_WRITE_ATTRIBUTES and told to keep their last access time
-//!   (the -1 of SetFileTime): listing then writes nothing and raises no change notification.
-//!
-//! Each falls back to the plain open by path wherever it cannot be used.
+//! With `keep_access_time` (on by default, docs/native.md 2.2) directories are opened with
+//! FILE_WRITE_ATTRIBUTES and told to keep their last access time (the -1 of SetFileTime): on NTFS
+//! with access time updates on, listing then no longer rewrites every folder's record (1.5-3.3 GB
+//! of writes for a scan of a big system volume). It falls back to the plain open wherever that
+//! access is refused.
 
 use std::cell::RefCell;
 use std::mem::offset_of;
 use std::ptr;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 use windows_sys::Wdk::Foundation::{NtClose, OBJECT_ATTRIBUTES};
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
     FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_INFORMATION_CLASS,
-    FILE_OPEN_BY_FILE_ID, FILE_OPEN_FOR_BACKUP_INTENT, FILE_SYNCHRONOUS_IO_NONALERT,
-    FileBasicInformation, FileBothDirectoryInformation, FileIdBothDirectoryInformation,
-    FileIdExtdDirectoryInformation, NtOpenFile, NtQueryDirectoryFile, NtSetInformationFile,
+    FILE_OPEN_FOR_BACKUP_INTENT, FILE_SYNCHRONOUS_IO_NONALERT, FileBasicInformation,
+    FileBothDirectoryInformation, FileIdBothDirectoryInformation, FileIdExtdDirectoryInformation,
+    NtOpenFile, NtQueryDirectoryFile, NtSetInformationFile,
 };
 use windows_sys::Win32::Foundation::{
     ERROR_FILENAME_EXCED_RANGE, ERROR_PATH_NOT_FOUND, GetLastError, HANDLE, NTSTATUS,
@@ -44,7 +40,7 @@ use windows_sys::Win32::System::Diagnostics::Debug::{
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
-use super::common::{Arena, NativePath, OpenOpts, RootOpts, Row, ext_len_with, flag, kind, secs};
+use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
 
 const FA_READONLY: u32 = 0x1;
 const FA_HIDDEN: u32 = 0x2;
@@ -88,29 +84,22 @@ const CLASSES: [FILE_INFORMATION_CLASS; 3] = [
 ];
 
 /// Per root and call: the information class its file system accepts (learnt on the first
-/// refusal), and how its directories are opened.
+/// refusal), and whether directories are opened to keep their access times.
 pub struct RootState {
     level: AtomicU8,
-    /// Open subdirectories by file id (off with `cross_mounts`: a subdirectory could then be on
-    /// another volume; cleared when the file system refuses opens by id).
-    by_id: AtomicBool,
     /// Ask for FILE_WRITE_ATTRIBUTES to keep access times (cleared when that mostly fails).
     keep: AtomicBool,
     kept: AtomicU32,
     refused: AtomicU32,
-    /// A directory of the root's volume, open for the whole call: opens by id are relative to it.
-    anchor: OnceLock<Option<Handle>>,
 }
 
 impl RootState {
-    pub fn new(root: &RootOpts, open: OpenOpts) -> Self {
+    pub fn new(keep_access_time: bool) -> Self {
         Self {
             level: AtomicU8::new(0),
-            by_id: AtomicBool::new(open.by_id && !root.cross_mounts),
-            keep: AtomicBool::new(open.keep_access_time),
+            keep: AtomicBool::new(keep_access_time),
             kept: AtomicU32::new(0),
             refused: AtomicU32::new(0),
-            anchor: OnceLock::new(),
         }
     }
 }
@@ -293,10 +282,6 @@ fn status_message(status: NTSTATUS) -> String {
 
 struct Handle(HANDLE);
 
-// SAFETY: a kernel handle: any thread may use it; the anchor is only read (as RootDirectory).
-unsafe impl Send for Handle {}
-unsafe impl Sync for Handle {}
-
 impl Drop for Handle {
     fn drop(&mut self) {
         // SAFETY: we own the handle.
@@ -304,67 +289,7 @@ impl Drop for Handle {
     }
 }
 
-/// Opens directory `path` (file id `id` when the parent's listing gave one, else 0).
-fn open_dir(path: &[u16], id: u128, state: &RootState) -> Result<Handle, String> {
-    if id != 0
-        && state.by_id.load(Ordering::Relaxed)
-        && let Some(Some(anchor)) = state.anchor.get()
-    {
-        match open_by_id(anchor.0, id, state) {
-            Ok(h) => return Ok(h),
-            Err(status) if unsupported(status) => state.by_id.store(false, Ordering::Relaxed),
-            Err(_) => {} // gone, denied, ...: the open by path says why, as before
-        }
-    }
-    let h = open_path(path, state)?;
-    if state.by_id.load(Ordering::Relaxed) && state.anchor.get().is_none() {
-        // the first directory opened by path anchors this call's opens by id (no mount is
-        // crossed while by_id is on, so every directory of the root is on its volume); network
-        // paths have no opens by id
-        let _ = state.anchor.get_or_init(|| {
-            if local(path) {
-                open_path(path, state).ok()
-            } else {
-                None
-            }
-        });
-    }
-    Ok(h)
-}
-
-/// A drive-letter path (`X:\...` or `\\?\X:\...`), not a share.
-fn local(path: &[u16]) -> bool {
-    let p = if starts(path, "\\\\?\\") || starts(path, "\\??\\") {
-        &path[4..]
-    } else {
-        path
-    };
-    p.len() >= 2 && p[1] == b':' as u16
-}
-
-fn open_by_id(anchor: HANDLE, id: u128, state: &RootState) -> Result<Handle, NTSTATUS> {
-    let mut units = [0u16; 8];
-    for (i, u) in units.iter_mut().enumerate() {
-        *u = (id >> (16 * i)) as u16;
-    }
-    let len: u16 = if id >> 64 == 0 { 8 } else { 16 }; // NTFS: 64-bit ids; ReFS: 128-bit
-    let name = UNICODE_STRING {
-        Length: len,
-        MaximumLength: len,
-        Buffer: units.as_mut_ptr(),
-    };
-    let oa = OBJECT_ATTRIBUTES {
-        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
-        RootDirectory: anchor,
-        ObjectName: &name,
-        Attributes: 0,
-        SecurityDescriptor: ptr::null(),
-        SecurityQualityOfService: ptr::null(),
-    };
-    open_with(&oa, FILE_OPEN_BY_FILE_ID, state)
-}
-
-fn open_path(path: &[u16], state: &RootState) -> Result<Handle, String> {
+fn open_dir(path: &[u16], state: &RootState) -> Result<Handle, String> {
     SCRATCH.with_borrow_mut(|nt| {
         if !nt_form(path, nt) {
             let full = full_path(path).ok_or_else(|| win_message(unsafe { GetLastError() }))?;
@@ -388,7 +313,7 @@ fn open_path(path: &[u16], state: &RootState) -> Result<Handle, String> {
             SecurityDescriptor: ptr::null(),
             SecurityQualityOfService: ptr::null(),
         };
-        open_with(&oa, 0, state).map_err(|status| {
+        open_with(&oa, state).map_err(|status| {
             // FindFirstFileW reports a missing directory as "path not found"
             if status == STATUS_OBJECT_NAME_NOT_FOUND {
                 win_message(ERROR_PATH_NOT_FOUND)
@@ -399,17 +324,15 @@ fn open_path(path: &[u16], state: &RootState) -> Result<Handle, String> {
     })
 }
 
-/// NtOpenFile of a directory with FindFirstFileW's flags plus `options`. With `keep` on, first
-/// with FILE_WRITE_ATTRIBUTES, telling the handle to keep the access time; when that is refused
+/// NtOpenFile of a directory with FindFirstFileW's flags. With `keep` on, first with
+/// FILE_WRITE_ATTRIBUTES, telling the handle to keep the access time; when that is refused
 /// (denied, read-only media, a sharing mode) the plain open follows, and once refusals outnumber
 /// the kept opens (a standard user in system folders) this call stops asking.
-fn open_with(oa: &OBJECT_ATTRIBUTES, options: u32, state: &RootState) -> Result<Handle, NTSTATUS> {
-    let options =
-        FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT | options;
+fn open_with(oa: &OBJECT_ATTRIBUTES, state: &RootState) -> Result<Handle, NTSTATUS> {
     let open = |access: u32| -> Result<Handle, NTSTATUS> {
         let mut h: HANDLE = ptr::null_mut();
         let mut iosb = IO_STATUS_BLOCK::default();
-        // SAFETY: all pointers are valid for the call.
+        // SAFETY: all pointers are valid for the call; FindFirstFileW opens with the same flags.
         let status = unsafe {
             NtOpenFile(
                 &mut h,
@@ -417,7 +340,7 @@ fn open_with(oa: &OBJECT_ATTRIBUTES, options: u32, state: &RootState) -> Result<
                 oa,
                 &mut iosb,
                 FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                options,
+                FILE_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT,
             )
         };
         if status < 0 {
@@ -445,7 +368,8 @@ fn open_with(oa: &OBJECT_ATTRIBUTES, options: u32, state: &RootState) -> Result<
 }
 
 /// What is done through `h` no longer updates the directory's last access time (SetFileTime's
-/// -1; FILE_BASIC_INFORMATION's zero fields change nothing). Best effort.
+/// -1; FILE_BASIC_INFORMATION's zero fields change nothing). It writes no USN record and leaves
+/// ChangeTime as it was. Best effort.
 fn keep_access_time(h: HANDLE) {
     let info = FILE_BASIC_INFORMATION {
         CreationTime: 0,
@@ -491,8 +415,6 @@ fn ft_secs(ft: i64) -> u32 {
 }
 
 struct Raw<'a> {
-    /// File id (FileIdExtd: 128 bits; FileIdBoth: 64; FileBoth: none, 0).
-    id: u128,
     attrs: u32,
     tag: u32,
     creation: i64,
@@ -535,15 +457,7 @@ unsafe fn read_entry<'a>(p: *const u8, avail: usize, level: u8) -> Option<(u32, 
             return None;
         }
         let name = std::slice::from_raw_parts(p.add(name_off) as *const u16, name_len);
-        let id = match level {
-            0 => u128::from_le_bytes(ptr::read_unaligned(
-                p.add(offset_of!(E, FileId)) as *const [u8; 16]
-            )),
-            1 => field!(i64, FILE_ID_BOTH_DIR_INFORMATION, FileId) as u64 as u128,
-            _ => 0,
-        };
         let raw = Raw {
-            id,
             attrs,
             tag: if attrs & FA_REPARSE != 0 { tag } else { 0 },
             creation: field!(i64, E, CreationTime),
@@ -574,7 +488,7 @@ fn add_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath, u128)>,
+    subdirs: &mut Vec<(u32, NativePath)>,
 ) {
     let attrs = raw.attrs;
     let mut flags = 0u32;
@@ -627,21 +541,20 @@ fn add_entry(
     let j = (arena.len() - base) as u32;
     arena.push_row(name_start, row);
     if kind == kind::DIR {
-        subdirs.push((j, join_windows(dir, raw.name).into_boxed_slice(), raw.id));
+        subdirs.push((j, join_windows(dir, raw.name).into_boxed_slice()));
     }
 }
 
 /// Lists `path` into `arena` (worker._list_windows); subdirectories to descend go to `subdirs`.
 pub fn list_dir(
     path: &[u16],
-    id: u128,
     _discovered: bool,
     root: &RootOpts,
     state: &RootState,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath, u128)>,
+    subdirs: &mut Vec<(u32, NativePath)>,
 ) -> Result<(), String> {
-    let h = open_dir(path, id, state)?;
+    let h = open_dir(path, state)?;
     let base = arena.len();
     BUF.with_borrow_mut(|buf| {
         let mut first = true;
@@ -776,7 +689,6 @@ mod tests {
             b'T' as u16,
         ];
         Raw {
-            id: 0,
             attrs,
             tag,
             creation: 0,
@@ -873,8 +785,8 @@ mod tests {
 
     #[test]
     fn missing_dir_is_path_not_found() {
-        let state = RootState::new(&RootOpts::default(), OpenOpts::default());
-        let err = open_dir(&w("C:\\definitely-not-here-spaceknife"), 0, &state)
+        let state = RootState::new(true);
+        let err = open_dir(&w("C:\\definitely-not-here-spaceknife"), &state)
             .err()
             .unwrap();
         assert_eq!(err, win_message(ERROR_PATH_NOT_FOUND));

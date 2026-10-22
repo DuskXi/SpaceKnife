@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +24,7 @@ import numpy as np
 import pytest
 
 from spaceknife.scan import worker
-from spaceknife.scan.scanner import Scanner, ScanState
+from spaceknife.scan.scanner import NATIVE_BATCH, Scanner, ScanState, native_slicer
 from spaceknife.scan.worker import RootOptions, SliceOptions, SliceResult, Task
 from spaceknife.store.nodes import Flag, NodeStore
 
@@ -566,25 +567,106 @@ def test_options_are_validated(tree: Path) -> None:
         native.scan_slice(tasks, {})
     with pytest.raises(TypeError):
         native.scan_slice([((0, 1, 0), b"bytes", 0)], {"roots": [{}]})
-    native.scan_slice(tasks, {"roots": [{}], "open_by_id": False, "keep_access_time": None})  # known keys
+    native.scan_slice(tasks, {"roots": [{}], "keep_access_time": None})  # a known key
+    with pytest.raises(ValueError, match="unknown"):
+        native.scan_slice(
+            tasks, {"roots": [{}], "open_by_id": True}
+        )  # tried and dropped (docs/native.md 2.2)
 
 
-@pytest.mark.skipif(not IS_WINDOWS, reason="opens by file id and kept access times are Windows")
-def test_windows_open_options_change_nothing(tree: Path) -> None:
-    """Opening subdirectories by file id and keeping access times list the same tree."""
+@pytest.mark.parametrize("budget_s", [0.0005, 0.005, 1.0])
+def test_scanner_driven_native_scans_build_the_same_tree(tree: Path, budget_s: float) -> None:
+    """The native walker as the app drives it (many tasks per call, calls cut short by their budget,
+    the rest handed back and listed by later calls on other threads) builds exactly the tree the
+    Python walker builds, whatever the budget: how a scan is cut into calls must never change what
+    it finds. (Opening folders relative to another folder once listed some of them only in part, in
+    calls that went deep enough: a third of C: went missing without an error.)"""
+    py_store = scan_store(tree)
+    slicer = native_slicer()
+    assert slicer is not None
+    pool = ThreadPoolExecutor(max_workers=4)
+    try:
+        scanner = Scanner(
+            [str(tree)],
+            executor=pool,
+            concurrency=4,
+            slicer=slicer,
+            batch_tasks=NATIVE_BATCH,
+            budget_s=budget_s,
+        )
+        result = asyncio.run(scanner.run())
+    finally:
+        pool.shutdown()
+    assert result.state == ScanState.DONE
+    assert len(scanner.store) == len(py_store)
+    assert tree_snapshot(scanner.store) == tree_snapshot(py_store)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("SPACEKNIFE_TEST_SCAN_ROOT"),
+    reason="set SPACEKNIFE_TEST_SCAN_ROOT to a real folder or drive (minutes, a few GB of memory per million items)",
+)
+def test_native_scan_of_a_real_tree_matches_the_python_walker() -> None:
+    """On a real folder or drive (file system filters, ACLs, odd names, files changing meanwhile), the
+    native walker as the app drives it finds what the Python walker finds. The Python walker scans
+    before and after, and only a path both of its scans agree on counts: a difference there is the
+    walker's, not a file that changed. This is how the partial listings of opens by file id showed
+    up (a temporary test tree has none of the filters that caused them)."""
+    from spaceknife.scan.scanner import NATIVE_BUDGET_S, default_workers, make_pool, native_threads
+
+    root = os.environ["SPACEKNIFE_TEST_SCAN_ROOT"]
+
+    def python_scan() -> dict[str, tuple[object, ...]]:
+        pool = make_pool()
+        try:
+            scanner = Scanner([root], executor=pool, concurrency=default_workers())
+            asyncio.run(scanner.run())
+        finally:
+            pool.shutdown()
+        return tree_snapshot(scanner.store)
+
+    def native_scan() -> dict[str, tuple[object, ...]]:
+        threads = native_threads()
+        pool = ThreadPoolExecutor(max_workers=threads)
+        try:
+            scanner = Scanner(
+                [root],
+                executor=pool,
+                concurrency=threads,
+                slicer=native_slicer(),
+                batch_tasks=NATIVE_BATCH,
+                budget_s=NATIVE_BUDGET_S,
+            )
+            asyncio.run(scanner.run())
+        finally:
+            pool.shutdown()
+        return tree_snapshot(scanner.store)
+
+    def win32_only(path: str) -> bool:  # names Win32 rewrites: the worker cannot open them (on purpose)
+        return IS_WINDOWS and any(part.endswith((".", " ")) for part in path.replace("\\", "/").split("/"))
+
+    before = python_scan()
+    nat = native_scan()
+    after = python_scan()
+    stable = {p for p in before.keys() & after.keys() if before[p] == after[p]}
+    differ = {p for p in stable if nat.get(p) != before[p]}
+    # in the native scan only: a file that came and went meanwhile, unless its folder held still
+    extra = {p for p in nat.keys() - before.keys() - after.keys() if p.rpartition("/")[0] in stable}
+    excused = {p for p in differ | extra if win32_only(p)}
+    bad = sorted(
+        p for p in differ | extra if p not in excused and not any(q.startswith(p + "/") for q in excused)
+    )
+    assert not bad, f"{len(bad)} paths differ from the Python walker, e.g. {bad[:8]}"
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="kept access times are Windows")
+def test_windows_keeping_access_times_changes_nothing(tree: Path) -> None:
+    """Opening folders so that they keep their access times lists the same tree."""
     tasks: list[Task] = [((0, 1, 0), str(tree), 0)]
     roots = (root_opts(tree),)
-    compare(tasks, roots, open_by_id=False, keep_access_time=False)
-    compare(tasks, roots, open_by_id=True, keep_access_time=True)
-    compare(tasks, roots, threads=1)  # one thread: every subdirectory found by the call is opened by id
-    opts = nopts(SliceOptions(roots=roots, **EVERYTHING))
-    plain = native.scan_slice(tasks, {**opts, "open_by_id": False, "keep_access_time": False})
-    fast = native.scan_slice(tasks, opts)
-    assert plain["paths"] == fast["paths"] and plain["name_blob"] == fast["name_blob"]
-    for key in plain["cols"]:
-        assert np.array_equal(plain["cols"][key], fast["cols"][key]), key
-    crossing = (root_opts(tree, cross_mounts=True),)  # opens by id are off: still the same
-    compare(tasks, crossing)
+    compare(tasks, roots, keep_access_time=False)
+    compare(tasks, roots, keep_access_time=True)
+    compare(tasks, roots, threads=1)
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="NTFS last access times")
@@ -606,8 +688,8 @@ def test_windows_listing_keeps_folder_access_times(tree: Path) -> None:
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="ReadDirectoryChangesW")
 def test_windows_listing_raises_no_change_notifications(tree: Path) -> None:
-    """Listing raises nothing the live monitor listens for (monitor.win.NOTIFY_FILTER): with access
-    time updates on, every listed folder used to come back as modified."""
+    """Listing raises nothing the live monitor listens for (monitor.win.NOTIFY_FILTER, which has no
+    access times): opening folders for FILE_WRITE_ATTRIBUTES must not look like a change."""
     from ctypes import wintypes
 
     from spaceknife.monitor.win import NOTIFY_FILTER

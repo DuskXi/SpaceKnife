@@ -9,7 +9,6 @@
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
-//! | `open_by_id` | True | Windows: open the subdirectories found during the call by file id (not with `cross_mounts`) |
 //! | `keep_access_time` | True | Windows: listing a folder does not update its last access time |
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
@@ -47,15 +46,14 @@ use pyo3::exceptions::{PyOverflowError, PyRuntimeError, PyTypeError, PyValueErro
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 
-use common::{Arena, NativePath, OpenOpts, RootOpts};
+use common::{Arena, NativePath, RootOpts};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
-const OPT_KEYS: [&str; 6] = [
+const OPT_KEYS: [&str; 5] = [
     "roots",
     "budget_s",
     "max_entries",
     "threads",
-    "open_by_id",
     "keep_access_time",
 ];
 const ROOT_KEYS: [&str; 6] = [
@@ -72,7 +70,7 @@ struct Opts {
     budget_s: f64,
     max_entries: usize,
     threads: usize,
-    open: OpenOpts,
+    keep_access_time: bool,
 }
 
 /// `obj[key]` for a dict (rejecting unknown keys), else `getattr(obj, key, None)`.
@@ -150,19 +148,16 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         Some(v) if !v.is_none() => v.extract::<i64>()?.clamp(0, 256) as usize,
         _ => 0,
     };
-    let mut open = OpenOpts::default();
-    if let Some(v) = field(opts, "open_by_id")?.filter(|v| !v.is_none()) {
-        open.by_id = v.is_truthy()?;
-    }
-    if let Some(v) = field(opts, "keep_access_time")?.filter(|v| !v.is_none()) {
-        open.keep_access_time = v.is_truthy()?;
-    }
+    let keep_access_time = match field(opts, "keep_access_time")? {
+        Some(v) if !v.is_none() => v.is_truthy()?,
+        _ => true,
+    };
     Ok(Opts {
         roots,
         budget_s,
         max_entries,
         threads,
-        open,
+        keep_access_time,
     })
 }
 
@@ -292,7 +287,7 @@ fn scan_slice<'py>(
         root_state: opts
             .roots
             .iter()
-            .map(|r| sys::RootState::new(r, opts.open))
+            .map(|_| sys::RootState::new(opts.keep_access_time))
             .collect(),
         roots: opts.roots,
         deadline,
