@@ -237,11 +237,30 @@ def _compressed_size(path: str) -> int | None:
     return int((high.value << 32) | low)
 
 
+_ERROR_FILENAME_EXCED_RANGE = 206
+
+
+def _too_long(path: str) -> OSError:
+    """The error a Win32 call gives a path past 32,767 units (os.scandir raises ValueError before
+    calling one); its strerror is CPython's for that code, as the native walker's win_message."""
+    assert sys.platform == "win32"
+    import ctypes
+
+    text = ctypes.FormatError(_ERROR_FILENAME_EXCED_RANGE)  # type: ignore[attr-defined,unused-ignore]
+    while text and (text[-1] <= " " or text[-1] == "."):  # trimmed like OSError.strerror
+        text = text[:-1]
+    return OSError(0, text, path, _ERROR_FILENAME_EXCED_RANGE)
+
+
 def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]]:
     subdirs: list[tuple[int, str]] = []
     cluster = max(1, root.cluster_size)
     base = len(acc.kind)
-    with os.scandir(_long_path(path)) as it:
+    try:
+        listing = os.scandir(_long_path(path))
+    except ValueError:  # too long for Windows (a folder renamed longer above a deep tree)
+        raise _too_long(path) from None
+    with listing as it:
         for entry in it:
             name = entry.name
             flags = 0

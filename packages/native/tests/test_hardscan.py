@@ -418,8 +418,8 @@ def test_windows_relative_opens_stop_where_opens_by_path_do(tmp_path: Path) -> N
     opens report the same error. Near the limit the kernel may refuse paths too, depending on what
     the drive letter resolves to (a SUBST drive's target makes names longer); relative opens leave
     those to the open by path, so both ways list the same. Renaming the top folder longer puts the
-    deepest folders past the limit, and next to it. (The worker cannot take part: os.scandir raises
-    ValueError for such a path.)"""
+    deepest folders past the limit, and next to it. (The worker is left out: next to the limit its
+    os.scandir appends `\\*.*` to the path, so it stops a few units sooner.)"""
     root = tmp_path / "deep"
     root.mkdir()
     grow = 199
@@ -449,6 +449,38 @@ def test_windows_relative_opens_stop_where_opens_by_path_do(tmp_path: Path) -> N
             os.rename("\\\\?\\" + str(root / (name * (1 + grow))), top)
             for d in reversed(chain):
                 os.rmdir(d)
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="Win32 path length limit")
+def test_windows_folder_past_the_path_limit_is_a_listing_error(tmp_path: Path) -> None:
+    """A folder whose path is longer than Win32 allows (32,767 units) is a listing error in the
+    worker as in the native walker, with the same message, although os.scandir raises ValueError
+    for it instead of OSError. Renaming the top folder longer puts the last folder past the limit,
+    its parent well within it."""
+    root = tmp_path / "toolong"
+    root.mkdir()
+    grow = 199
+    top = "\\\\?\\" + str(root / "a")
+    chain = _chain_to(top, 32_600 - grow)
+    chain.append(chain[-1] + "\\" + "d" * 200)  # 32,801 units once the top is longer
+    os.mkdir(chain[-1])
+    unreached = chain[-1] + "\\unreached.txt"
+    with open(unreached, "wb") as f:
+        f.write(b"u")
+    longer = "\\\\?\\" + str(root / ("a" * (1 + grow)))
+    os.rename(top, longer)
+    try:
+        tasks: list[Task] = [((0, 1, 0), str(root), 0)]
+        roots = (root_opts(root),)
+        compare(tasks, roots, relative_open=False)
+        res = compare(tasks, roots)
+    finally:
+        os.rename(longer, top)
+        os.remove(unreached)
+        for d in reversed(chain):
+            os.rmdir(d)
+    assert [e[1] for e in res.errors] == [longer[4:] + chain[-1][len(top) :]]
+    assert len(res.paths) == len(chain)  # the root and every folder above the last
 
 
 # ---------------------------------------------------------------------------- POSIX specifics
