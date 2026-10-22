@@ -425,6 +425,30 @@ class MockHost:
         host = await self._ready()
         await host._hook(host.enabled(self.plugin_id), event, **args)
 
+    async def annotate(self, items: Sequence[Mapping[str, Any]], name: str | None = None) -> list[str | None]:
+        """A change annotator's reasons for comparison items (``path``, ``kind``, ``status``,
+        ``delta``, ``base``, ``target``; missing ones take ChangeUnit's defaults)."""
+        host = await self._ready()
+        if name is None:
+            rec = host.records[self.plugin_id]
+            name = next(
+                h[1] for h in (rec.description.handlers if rec.description else []) if h[0] == "annotate"
+            )
+        value, _ = await host.call(self.plugin_id, "annotate", name, {"items": [dict(i) for i in items]})
+        return [None if v is None else str(v) for v in value]
+
+    def snapshot(self, *, when: Any = None) -> str:
+        """Save the scan in front as a snapshot (where the app keeps them); returns its path. For
+        plugins that read history (``ctx.snapshots``); ``when`` is a datetime for the file name."""
+        from spaceknife.store import snapshot as snap
+
+        store = self.store
+        roots = [store.name(r) for r in store.roots()]
+        path = snap.auto_path(roots, when)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        snap.save(store, path, roots=roots)
+        return str(path)
+
     # ------------------------------------------------------------- side effects
 
     @property

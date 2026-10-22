@@ -504,6 +504,12 @@ class ChildLink:
         self._images[scan_id] = image
         return image
 
+    def forget_image(self, scan_id: str) -> None:
+        """A snapshot was closed: unmap its image (the host drops its side)."""
+        hit = self._images.pop(scan_id, None)
+        if hit is not None:
+            hit.close()
+
     def store_of(self, scan_id: str) -> Any:
         return None
 

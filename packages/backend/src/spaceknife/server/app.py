@@ -114,6 +114,10 @@ class Server:
         install_plugin_handlers(self)
         self.topics.fallback = self.plugins.open_topic
         self.scans.source_start = self._start_source
+        from ..plugins.sources import make_monitor
+
+        self.monitors.source_monitor = make_monitor(self.plugins)
+        self.compares.annotate = self.plugins.annotate_changes
         self.scans.events.append(self._scan_event)
         self.settings.listeners["plugins"] = self._settings_changed
         self._lang = self.settings.state().language

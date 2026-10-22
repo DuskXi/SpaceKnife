@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import zipfile
 from collections.abc import AsyncIterator, Iterator
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 import numpy as np
 
@@ -208,7 +209,7 @@ async def clean_logs(ctx: Context, c: ReportContext) -> list[Proposal]:
     return [Proposal(node=int(i), reason=T("日志文件", "A log file")) for i in rows.ids]
 
 
-@plugin.scan_source("zip", T("压缩包", "Archive"), pick="file", extensions=[".zip"])
+@plugin.scan_source("zip", T("压缩包", "Archive"), pick="file", extensions=[".zip"], watch=True)
 async def zip_source(ctx: Context, uri: str, out: Listing) -> None:
     with zipfile.ZipFile(ctx.files.open_path(uri)) as z:
         for info in z.infolist():
@@ -221,7 +222,15 @@ async def zip_source(ctx: Context, uri: str, out: Listing) -> None:
 
 @plugin.watcher("zip")
 async def watch_zip(ctx: Context, uri: str) -> AsyncIterator[list[Change]]:
-    yield [Change(path="a.txt", kind="modified")]
+    """The archive changed (its modification time moved): everything in it may have."""
+    archive = Path(ctx.files.open_path(uri))
+    seen = archive.stat().st_mtime_ns
+    while True:
+        await asyncio.sleep(0.05)
+        now = archive.stat().st_mtime_ns
+        if now != seen:
+            seen = now
+            yield [Change(path="", kind="modified")]
 
 
 @plugin.change_annotator

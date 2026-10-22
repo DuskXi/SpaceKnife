@@ -52,10 +52,15 @@ class WatchStatus:
     events: int = 0
 
 
-def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000) -> Watcher:
+def create_watcher(
+    root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000, filesystem: str = ""
+) -> Watcher:
     ...
-    # 按平台选实现（spaceknife/monitor/base.py）；poll_rate：轮询时每秒最多 stat 的目录数
+    # 按注册表选实现（spaceknife/monitor/base.py）；poll_rate：轮询时每秒最多 stat 的目录数
 ```
+
+- **监视器注册表**：`register_watcher(WatcherKind(name, factory, platforms, filesystems, priority))`。`create_watcher` 取适用于这个平台和这个文件系统（扫描根所在卷的 `fs_type`）的、优先级最高的一种；工厂抛 `OSError`（这台机器上用不了，比如 CoreServices 不可用）时换下一种，最后是轮询。内置四种照常注册：`rdcw`（Windows）、`inotify`（Linux）、`fsevents`（macOS）优先级 10，`poll` 到处可用、优先级最低，行为与改成注册表之前相同。以后可以按文件系统加监视器（插件提供的也走这里）。
+- **插件扫描来源的扫描**没有平台监视器：它的 `handle.monitor` 是 `plugins/sources.py` 的 `SourceMonitor`。重新扫描（F5）就是把来源整个重跑一遍、换上新树，视图按路径保留缩放、选中和历史；来源声明了 `watch = true` 且插件有对应的 `watcher` 时，监控器的变化在安静 1 秒后同样重跑一遍（10 万项以内；更大的树只在状态栏提示「需要重新扫描」）。
 
 - `sink` 收到的批次至少每 50 ms 一批（有事件时），路径是 `str`（Windows 按 Win32 路径；POSIX 按 `os.fsdecode`，不可解码的字节用 surrogateescape，和扫描一致）。
 - 监视器自己不合并、不去重；但同一批里同一路径重复的 `modified` 可以只留最后一条。

@@ -72,9 +72,13 @@ SET_RUNNING_EVERY_S = 5.0
 COLOR_TIMEOUT = 0.02
 VISUAL_TIMEOUT = 0.12
 ANNOTATE_TIMEOUT = 0.2
+ANNOTATE_BATCH = 500
+MAX_REASONS = 20_000  # remembered change reasons (all comparisons); forgotten all at once beyond
 HOOK_TIMEOUT = 30.0
 CHECK_TIMEOUT = 0.05
 ROUTED_KINDS = ("method", "report", "cleanup")
+LONG_KINDS = ("stream", "watch")  # no time limit unless the caller gives one
+LONG_CALL_S = 10.0 * 365 * 86400  # what the plugin is told for those (its ctx.check() never trips)
 
 
 class RawParams(Params):
@@ -115,12 +119,14 @@ class PluginHost:
             int, tuple[str, Session | None, Any]
         ] = {}  # call id -> (plugin, session, request id)
         self._start_locks: dict[str, asyncio.Lock] = {}
+        self._starting: dict[str, asyncio.Task[PluginRuntime]] = {}
         self._event_rates: dict[str, _Rate] = {}
         self._state_rates: dict[str, _Rate] = {}
         self._state_subs: dict[tuple[str, str], dict[str, tuple[Session, Subscription]]] = defaultdict(dict)
         self._stream_tasks: dict[str, asyncio.Task[None]] = {}
         self._set_cache: dict[tuple[str, str], tuple[int, float, np.ndarray]] = {}
         self._field_cache: dict[tuple[str, str, int, int], pp.PluginField | None] = {}
+        self._reasons: dict[tuple[str, str, str, str, int], str] = {}  # change annotators' answers
         self._weights: dict[tuple[str, str, int, int], np.ndarray] = {}
         self._visual_failures: dict[tuple[str, str], int] = defaultdict(int)
         self._changed: set[str] = set()
@@ -288,6 +294,7 @@ class PluginHost:
         await self._stop_runtime(rec)
         EXTENSIONS.unregister_owner(rec.id)
         self.images.release_user(rec.id)
+        self.api.release_plugin(rec.id)
         for key in [k for k in self._state_subs if k[0] == rec.id]:
             for session, sub in list(self._state_subs.pop(key).values()):
                 session.remove_subscription(sub.id)
@@ -350,9 +357,25 @@ class PluginHost:
         if rt is not None and rt.state == "running":
             rec.last_used = time.monotonic()
             return rt
+        # One start per plugin, shielded: a caller that gives up (a frame's colours wait 20 ms)
+        # does not cancel the start the next caller will use.
+        task = self._starting.get(rec.id)
+        if task is None or task.done():
+            task = asyncio.ensure_future(self._start(rec))
+            self._starting[rec.id] = task
+            self._background.add(task)
+            task.add_done_callback(self._started)
+        return await asyncio.shield(task)
+
+    def _started(self, task: asyncio.Task[PluginRuntime]) -> None:
+        self._background.discard(task)
+        if not task.cancelled():
+            task.exception()  # retrieved here too: every caller may have stopped waiting
+
+    async def _start(self, rec: PluginRecord) -> PluginRuntime:
         lock = self._start_locks.setdefault(rec.id, asyncio.Lock())
         async with lock:
-            rt = rec.runtime
+            rt: PluginRuntime | None = rec.runtime
             if rt is not None and rt.state == "running":
                 return rt
             if rec.state == "crashed":
@@ -430,6 +453,7 @@ class PluginHost:
             logger.exception("stopping plugin {} failed", rec.id)
             rt.kill()
         self.images.release_user(rec.id)
+        self.api.release_plugin(rec.id)
 
     def _note_crash(self, rec: PluginRecord) -> None:
         now = time.monotonic()
@@ -488,21 +512,26 @@ class PluginHost:
         latest: bool = False,
     ) -> tuple[Any, list[bytes]]:
         """Call a plugin's handler; RpcError with a plugin error code when it fails."""
+        if self._closed:  # shutting down: nothing starts a plugin process again
+            raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "plugins are not running", {"plugin": plugin})
         rec = self.enabled(plugin)
         if not rec.has_code:
             raise RpcError(ErrorCode.METHOD_NOT_FOUND, f"{plugin} has no code")
-        limit = timeout
-        if limit is None:
-            decl = next(
-                (m for m in (rec.description.methods if rec.description else []) if m.name == name), None
-            )
-            limit = decl.timeout if decl is not None else 30.0
         assert rec.manifest is not None
-        limit = min(
-            float(limit),
-            float(rec.manifest.limits.timeout_s) if kind in ("method", "report") else 600.0,
-            600.0,
-        )
+        limit: float | None = timeout
+        if kind in LONG_KINDS and timeout is None:
+            limit = None  # streams and watchers run until they are cancelled
+        else:
+            if limit is None:
+                decl = next(
+                    (m for m in (rec.description.methods if rec.description else []) if m.name == name), None
+                )
+                limit = decl.timeout if decl is not None else 30.0
+            limit = min(
+                float(limit),
+                float(rec.manifest.limits.timeout_s) if kind in ("method", "report") else 600.0,
+                600.0,
+            )
         if self._queued[plugin] >= MAX_QUEUED:
             raise RpcError(ErrorCode.PLUGIN_LIMIT, tr("插件 {id} 的请求太多", id=plugin), {"plugin": plugin})
         key = (plugin, name, session.id if session is not None else "")
@@ -525,7 +554,7 @@ class PluginHost:
                 info = {
                     "lang": i18n.language(),
                     "session": session.id if session is not None else None,
-                    "timeout": limit,
+                    "timeout": limit if limit is not None else LONG_CALL_S,
                 }
                 info.update(ctx or {})
                 self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
@@ -543,6 +572,7 @@ class PluginHost:
                     raise RpcError(exc.code, exc.message, data) from None
                 finally:
                     self._sites.pop(call_id, None)
+                    self.api.call_ended(call_id)
                 rec.last_used = time.monotonic()
                 return value, out
         finally:
@@ -558,6 +588,12 @@ class PluginHost:
         loop = self._loop
         if loop is None or self._closed:
             raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "plugins are not running")
+        try:
+            here: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            here = None
+        if here is loop:  # waiting here would hold up the very loop that runs the call
+            raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "call_sync on the event loop", {"plugin": plugin})
         fut = asyncio.run_coroutine_threadsafe(
             self.call(plugin, kind, name, params, timeout=timeout, **kw), loop
         )
@@ -741,9 +777,7 @@ class PluginHost:
 
             async def run() -> None:
                 try:
-                    await self.call(
-                        plugin, "stream", local, params or {}, session=session, on_chunk=chunk, timeout=600.0
-                    )
+                    await self.call(plugin, "stream", local, params or {}, session=session, on_chunk=chunk)
                 except (RpcError, asyncio.CancelledError):
                     pass
                 finally:
@@ -1090,6 +1124,59 @@ class PluginHost:
         except RpcError:
             return None
         return str(value) if isinstance(value, str) and value else None
+
+    def annotate_changes(self, compare_id: str, items: list[Any]) -> list[Any]:
+        """Reasons from the change annotators for items the insight rules left blank (compute
+        threads): at most ``ANNOTATE_BATCH`` items per call, 200 ms each, remembered per comparison."""
+        annotators = [c for c in EXTENSIONS.of("change_annotator") if c.owner in self.enabled_ids()]
+        if not annotators:
+            return items
+        out = list(items)
+        for c in annotators:
+            todo: list[int] = []
+            for i, it in enumerate(out):
+                if it.reason or it.kind == "group":
+                    continue
+                key = (c.id, compare_id, it.path, it.status, int(it.delta))
+                if key in self._reasons:
+                    hit = self._reasons[key]
+                    if hit:
+                        out[i] = it.model_copy(update={"reason": hit})
+                else:
+                    todo.append(i)
+            for at in range(0, len(todo), ANNOTATE_BATCH):
+                chunk = todo[at : at + ANNOTATE_BATCH]
+                payload = {
+                    "items": [
+                        {
+                            "path": out[i].path,
+                            "kind": out[i].kind,
+                            "status": out[i].status,
+                            "delta": int(out[i].delta),
+                            "base": int(out[i].base),
+                            "target": int(out[i].target),
+                        }
+                        for i in chunk
+                    ]
+                }
+                try:
+                    value, _ = self.call_sync(c.owner, "annotate", c.local, payload, timeout=ANNOTATE_TIMEOUT)
+                except RpcError as exc:
+                    logger.bind(source=f"plugin:{c.owner}").debug(
+                        "change annotator {}: {}", c.id, exc.message
+                    )
+                    break  # this annotator is slow or failing now: no reasons from it this time
+                reasons = value if isinstance(value, list) else []
+                if len(self._reasons) > MAX_REASONS:
+                    self._reasons.clear()
+                for j, i in enumerate(chunk):
+                    r = reasons[j] if j < len(reasons) else None
+                    text = str(r)[:80] if isinstance(r, str) and r else ""
+                    it = out[i]
+                    self._reasons[(c.id, compare_id, it.path, it.status, int(it.delta))] = text
+                    if text:
+                        out[i] = it.model_copy(update={"reason": text})
+        return out
 
     def set_masks(self, scan_id: str, store: Any, set_ids: Sequence[str]) -> dict[str, np.ndarray]:
         """Node sets of a scan (called from compute threads), cached by store version; 5 s each."""

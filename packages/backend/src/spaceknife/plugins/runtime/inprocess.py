@@ -243,6 +243,12 @@ class InProcessRuntime(PluginRuntime):
             loop.call_soon_threadsafe(loop.stop)
         if self.thread is not None:
             self.thread.join(2.0)
+        # calls still waiting (a stream, a watcher) end here, not when their futures are collected
+        # later (by then the host's loop may be closed too)
+        for fut in list(self._calls.values()):
+            if not fut.done():
+                with contextlib.suppress(concurrent.futures.InvalidStateError):
+                    fut.set_exception(RuntimeCallError(ErrorCode.PLUGIN_UNAVAILABLE, "the plugin stopped"))
         unload_plugin(self.manifest)
         self.dispatcher = None
 

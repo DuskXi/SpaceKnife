@@ -280,6 +280,24 @@ class TreeView:
     def __repr__(self) -> str:
         return f"TreeView({self.scan_id}, n={self.n}, epoch={self.epoch})"
 
+    def close(self) -> None:
+        """Let go of a snapshot opened with ``ctx.snapshots.open`` before the call ends (at most two
+        may be open at once). Nothing happens for a scan's own tree."""
+        if not self.scan_id.startswith("snap-"):
+            return
+        self._image = None
+        self._image_cols = set()
+        forget = getattr(self._link, "forget_image", None)
+        if forget is not None:
+            forget(self.scan_id)
+        self._link.request("host.snapshot_close", {"scan_id": self.scan_id})
+
+    def __enter__(self) -> TreeView:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
     # ------------------------------------------------------------- nodes
 
     def _params(self, **kw: Any) -> dict[str, Any]:

@@ -23,6 +23,7 @@ import contextlib
 import os
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -174,7 +175,8 @@ class ScanMonitor:
             # NFS, SMB, WSL's 9P drives: the kernel never hears of other machines' (or Windows')
             # changes, so per-folder notifications would stay silent: poll instead
             return self._poller(path)
-        return create_watcher(path, poll_interval=self.owner.poll_interval)
+        fs = str(getattr(volume, "fs_type", "") or "") if volume is not None else ""
+        return create_watcher(path, poll_interval=self.owner.poll_interval, filesystem=fs)
 
     def rescan(self, path: str) -> None:
         """List ``path`` and everything below it again, right away."""
@@ -782,6 +784,8 @@ class MonitorManager:
         self.monitors: dict[str, ScanMonitor] = {}
         self.passive: dict[str, ScanMonitor] = {}  # rescans of scans that are not watched
         self.poll_interval = 30.0
+        # scans from a plugin's scan source: their monitor (plugins/sources.py), (handle, watch) -> it
+        self.source_monitor: Callable[[ScanHandle, bool], Any] | None = None
 
     def enabled(self) -> bool:
         st = self.scans.settings
@@ -794,6 +798,17 @@ class MonitorManager:
 
     async def start(self, handle: ScanHandle) -> None:
         if handle.source != "scan" or handle.id in self.monitors or not self.enabled():
+            return
+        if handle.plugin_source:  # not on disk (or not ours to watch): the plugin's watcher, if any
+            if self.source_monitor is None:
+                return
+            src = self.source_monitor(handle, True)
+            if src.watcher is None:
+                return
+            await src.start()
+            self.monitors[handle.id] = src
+            handle.monitor = src
+            handle.publish()
             return
         mon = ScanMonitor(self, handle)
         await mon.start()
@@ -824,7 +839,13 @@ class MonitorManager:
         if handle.running:
             raise RpcError(ErrorCode.SCAN_BUSY, tr("扫描进行中，完成后再重新扫描"))
         mon = self.monitors.get(handle.id) or self.passive.get(handle.id)
-        if mon is None:
+        if mon is None and handle.plugin_source:  # a source lists everything again
+            if self.source_monitor is None:
+                raise RpcError(ErrorCode.INVALID_PARAMS, "scan sources need plugins")
+            mon = self.source_monitor(handle, False)
+            await mon.start()
+            self.passive[handle.id] = mon
+        elif mon is None:
             mon = ScanMonitor(self, handle, watch=False)
             await mon.start()
             self.passive[handle.id] = mon

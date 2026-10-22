@@ -6,7 +6,8 @@ scan closed in the last hour, which the C heap keeps for the next scan to reuse 
 §8) — the heap is first asked to give back what it can; when that does not bring the process under
 the limit, a warning goes to the log panel and a breakdown to the log file: scans, views, compute
 pool, session outboxes and — with ``SPACEKNIFE_MEMTRACE=1`` (tracemalloc, one frame) — the source
-lines holding the most memory. Reports repeat only after another 25 % of growth.
+lines holding the most memory. Reports repeat only after another 25 % of growth. What plugins hold
+in the backend (snapshots they opened, tree images in shared memory) counts as accounted.
 """
 
 from __future__ import annotations
@@ -37,7 +38,8 @@ GiB = float(1 << 30)
 
 def accounted(server: Server) -> int:
     """Private bytes the open scans need: node stores in plain memory (with growth headroom; mapped
-    columns are file-backed, not private) and name indexes."""
+    columns are file-backed, not private) and name indexes; plus what plugins hold in the backend —
+    the snapshots they opened and the tree images exported for them (docs/plugins.md)."""
     total = 0
     for handle in list(server.scans.scans.values()):
         store = handle.store
@@ -45,7 +47,15 @@ def accounted(server: Server) -> int:
         index = existing_index(store)
         if index is not None:
             total += index.memory_bytes()
-    return total
+    return total + plugin_bytes(server)
+
+
+def plugin_bytes(server: Server) -> int:
+    """Snapshots opened by plugins (whole trees in memory) and the shared-memory tree images."""
+    plugins = getattr(server, "plugins", None)
+    if plugins is None:
+        return 0
+    return int(plugins.api.opened_bytes()) + int(plugins.images.bytes())
 
 
 def retained(server: Server) -> int:
@@ -73,6 +83,14 @@ def report(server: Server) -> str:
             f"name index {(index.memory_bytes() if index else 0) / 2**20:.0f} MB"
         )
     lines.append(f"  views {len(server.views.views)}, compute {compute.stats()}")
+    plugins = getattr(server, "plugins", None)
+    if plugins is not None:
+        lines.append(
+            f"  plugins: tree images {plugins.images.bytes() / 2**20:.0f} MB (shared memory), "
+            f"snapshots opened {plugins.api.opened_bytes() / 2**20:.0f} MB"
+        )
+        for sid, owner, nodes in plugins.api.opened():
+            lines.append(f"    {owner}: {sid}, {nodes:,} nodes")
     for session in list(server.sessions):
         count, size = session.outbox_stats()
         lines.append(f"  session {session.id}: outbox {count} messages, {size / 2**20:.1f} MB")
@@ -126,4 +144,4 @@ def install(server: Server) -> None:
     server.on_start.append(start)
 
 
-__all__ = ["accounted", "install", "report", "watch"]
+__all__ = ["accounted", "install", "plugin_bytes", "report", "watch"]

@@ -138,7 +138,7 @@ def _os_error(path: str, exc: OSError) -> OpResult:
 # --------------------------------------------------------------------------- checks
 
 
-def _precheck(paths: Sequence[str], check_locks: bool) -> dict[int, OpResult]:
+def _precheck(paths: Sequence[str], check_locks: bool, own_files: bool = False) -> dict[int, OpResult]:
     """Per index, the reason an item is skipped: gone, protected, held open (§2.5 re-check)."""
     skipped: dict[int, OpResult] = {}
     alive: list[int] = []
@@ -146,7 +146,7 @@ def _precheck(paths: Sequence[str], check_locks: bool) -> dict[int, OpResult]:
         if not os.path.lexists(p):
             skipped[i] = _result(p, "missing")
             continue
-        reason = protected_reason(p)
+        reason = None if own_files else protected_reason(p)
         if reason is not None:
             skipped[i] = _result(p, "protected", reason)
             continue
@@ -221,15 +221,18 @@ def move_to_trash(
     cancel: CancelFn | None = None,
     sizes: Mapping[str, int] | None = None,
     check_locks: bool = True,
+    own_files: bool = False,
 ) -> list[OpResult]:
     """Move each path to the trash; one result per path, in order. Never deletes anything.
 
     ``sizes``: bytes per path (keyed by the same strings) as last scanned, e.g. the basket's
     targets; folders well below the recycle bin's capacity are then not measured again.
-    ``check_locks``: skip items held open.
+    ``check_locks``: skip items held open. ``own_files``: the app's own files it put there itself
+    (an installed plugin's folder, inside the app's data directory, which the protection lists
+    keep from the user's file operations); the caller checks the paths.
     """
     run = _Run(paths, progress, cancel)
-    for i, res in _precheck(run.paths, check_locks).items():
+    for i, res in _precheck(run.paths, check_locks, own_files).items():
         run.set(i, res)
     todo = [i for i, r in enumerate(run.results) if r is None]
     if sys.platform == "win32":

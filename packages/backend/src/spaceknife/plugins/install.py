@@ -171,10 +171,18 @@ def cleanup_old() -> None:
 
 
 def _trash(paths: Sequence[str]) -> list[str]:
-    """Move paths to the recycle bin; returns the error messages (tests replace this)."""
+    """Move paths to the recycle bin; returns the error messages (tests replace this). Only the
+    app's own plugin folders: they are inside its data directory, which file operations refuse."""
     from ..ops.trash import move_to_trash
 
-    return [r.message or r.code for r in move_to_trash(list(paths), check_locks=False) if not r.ok]
+    roots = [ppaths.plugins_dir().resolve(), (ppaths.data_dir("x").parent).resolve()]
+    for p in paths:
+        real = Path(p).resolve()
+        if not any(real != r and real.is_relative_to(r) for r in roots):
+            return [f"{p}: not a plugin folder"]
+    return [
+        r.message or r.code for r in move_to_trash(list(paths), check_locks=False, own_files=True) if not r.ok
+    ]
 
 
 TRASH: Callable[[Sequence[str]], list[str]] = _trash

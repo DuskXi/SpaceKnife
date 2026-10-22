@@ -140,9 +140,37 @@ def from_spec(spec: Mapping[str, Any], root: str, now: int) -> tuple[NodeStore, 
     return build(root, top, virtual=False), contents
 
 
+def path_remap(old: NodeStore, new: NodeStore) -> np.ndarray:
+    """For each node of ``old``, the node of ``new`` at the same path (-1: not there any more).
+
+    Roots pair up in order; below them names are matched folder by folder, shallow first (a
+    source's tree listed again: views keep their place, history and selection).
+    """
+    n = len(old)
+    out = np.full(n, -1, dtype=np.int64)
+    if n == 0:
+        return out
+    out[0] = 0
+    for a, b in zip(old.roots(), new.roots(), strict=False):
+        out[a] = b
+    parent = old.cols["parent"]
+    index: dict[int, dict[str, int]] = {}
+    for node in np.argsort(old.cols["depth"][:n], kind="stable").tolist():
+        if out[node] >= 0 or node == 0:
+            continue
+        target = int(out[int(parent[node])])
+        if target < 0:
+            continue
+        names = index.get(target)
+        if names is None:
+            names = index[target] = {new.name(c): c for c in new.children(target)}
+        out[node] = names.get(old.name(node), -1)
+    return out
+
+
 def iter_paths(store: NodeStore) -> Iterable[str]:
     for i in range(1, len(store)):
         yield store.path(i).replace(os.sep, "/")
 
 
-__all__ = ["Collector", "build", "from_spec"]
+__all__ = ["Collector", "build", "from_spec", "path_remap"]

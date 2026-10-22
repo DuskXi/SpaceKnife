@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from .store import PluginRecord
 
 MAX_NODES = 100_000
+MAX_OPEN_SNAPSHOTS = 2  # snapshots one plugin may have open at once (each is a whole tree in memory)
 
 
 class PluginCaller:
@@ -79,6 +80,33 @@ class HostApi:
         self.server = host.server
         self._bases: WeakKeyDictionary[NodeStore, Basis] = WeakKeyDictionary()
         self._opened: dict[str, tuple[str, NodeStore]] = {}  # opened by plugins: id -> (plugin, store)
+        self._opened_in: dict[str, int] = {}  # snapshot id -> the call that opened it (released after it)
+        self._opened_count = 0
+
+    # ------------------------------------------------------------- snapshots plugins opened
+
+    def call_ended(self, call_id: int) -> None:
+        """A call is over: the snapshots it opened go (``ctx.snapshots.open`` lasts one call)."""
+        for sid in [s for s, c in self._opened_in.items() if c == call_id]:
+            self._close_snapshot(sid)
+
+    def release_plugin(self, plugin: str) -> None:
+        """The plugin stopped: everything it held goes."""
+        for sid in [s for s, (owner, _st) in self._opened.items() if owner == plugin]:
+            self._close_snapshot(sid)
+
+    def _close_snapshot(self, sid: str) -> None:
+        self._opened.pop(sid, None)
+        self._opened_in.pop(sid, None)
+        self.host.images.drop_scan(sid)
+
+    def opened_bytes(self) -> int:
+        """Memory of the snapshots plugins have open (the memory watchdog counts it)."""
+        return sum(store.ram_bytes() for _owner, store in list(self._opened.values()))
+
+    def opened(self) -> list[tuple[str, str, int]]:
+        """(snapshot id, plugin, nodes) of each open one, for diagnostics."""
+        return [(sid, owner, len(store)) for sid, (owner, store) in list(self._opened.items())]
 
     # ------------------------------------------------------------- scans
 
@@ -142,7 +170,8 @@ class HostApi:
         if scan_id is None:
             raise RuntimeCallError(ErrorCode.UNKNOWN_SCAN, "no scan")
         store = self.store_of(str(scan_id))
-        if store is None:
+        snap = self._opened.get(str(scan_id))
+        if store is None or (snap is not None and snap[0] != rec.id):  # another plugin's snapshot
             raise RuntimeCallError(ErrorCode.UNKNOWN_SCAN, f"unknown scan: {scan_id}")
         if epoch and p.get("epoch") is not None and int(p["epoch"]) != int(getattr(store, "epoch", 0)):
             raise RuntimeCallError(
@@ -404,15 +433,32 @@ class HostApi:
         from ..store import snapshot
 
         mine = [k for k, (owner, _s) in self._opened.items() if owner == rec.id]
-        if len(mine) >= 2:
-            self._opened.pop(mine[0], None)
+        if len(mine) >= MAX_OPEN_SNAPSHOTS:
+            raise RuntimeCallError(
+                ErrorCode.PLUGIN_LIMIT,
+                f"at most {MAX_OPEN_SNAPSHOTS} snapshots open at once: close() one first",
+                {"limit": MAX_OPEN_SNAPSHOTS},
+            )
         try:
             store, _header = await asyncio.to_thread(snapshot.load, Path(str(p["path"])))
         except (OSError, snapshot.SnapshotError) as exc:
             raise RuntimeCallError(ErrorCode.SNAPSHOT_ERROR, str(exc)) from None
-        sid = f"snap-{rec.id}-{len(self._opened)}-{id(store) & 0xFFFF:x}"
+        self._opened_count += 1
+        sid = f"snap-{rec.id}-{self._opened_count}"
         self._opened[sid] = (rec.id, store)
+        call = p.get("call")
+        if isinstance(call, int) and call > 0:
+            self._opened_in[sid] = call
         return self.tree_info(sid, store), []
+
+    async def _snapshot_close(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        sid = str(p.get("scan_id", ""))
+        opened = self._opened.get(sid)
+        if opened is not None and opened[0] == rec.id:
+            self._close_snapshot(sid)
+        return {"ok": True}, []
 
     async def _storage_usage(
         self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]

@@ -1,0 +1,6 @@
+# Test plugin: saved snapshots (ctx.snapshots) and a history report.
+id = "t.hist"
+version = "0.1.0"
+name = { zh = "历史测试", en = "History test" }
+entry = "plugin.py"
+permissions = ["tree.read", "snapshots.read"]

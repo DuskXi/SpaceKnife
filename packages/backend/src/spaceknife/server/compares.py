@@ -346,6 +346,18 @@ class CompareManager:
         self.compares: dict[str, CompareHandle] = {}
         self._ids = itertools.count(1)
         views.compares = self
+        # plugins' change annotators (docs/plugins.md): reasons for the items the rules left blank;
+        # called on the compute pool with (compare id, items), returns the items
+        self.annotate: Callable[[str, list[pc.ChangeItem]], list[pc.ChangeItem]] | None = None
+
+    def _annotated(self, compare_id: str, items: list[pc.ChangeItem]) -> list[pc.ChangeItem]:
+        if self.annotate is None or not items:
+            return items
+        try:
+            return self.annotate(compare_id, items)
+        except Exception:  # an annotator never breaks the sidebar
+            logger.opt(exception=True).debug("change annotators failed")
+            return items
 
     # ------------------------------------------------------------- sources
 
@@ -639,6 +651,8 @@ class CompareManager:
         whole = z.members is None and z.node == view.home
         grow_items, grow_count = self._units(handle, tree, "grow", grow, scope_nodes, z.node, limit)
         shrink_items, shrink_count = self._units(handle, tree, "shrink", shrink, scope_nodes, z.node, limit)
+        both = self._annotated(handle.id, grow_items + shrink_items)
+        grow_items, shrink_items = both[: len(grow_items)], both[len(grow_items) :]
         assert handle.base is not None
         assert handle.target is not None
         span = (handle.target.created_at - handle.base.created_at).total_seconds()
@@ -751,7 +765,8 @@ class CompareManager:
                 top = [self.item(handle, tree, int(k), scope) for k in kids[order].tolist()]
             else:
                 top = []
-            return pc.CompareNodeResult(item=item, children=top)
+            both = self._annotated(handle.id, [item, *top])
+            return pc.CompareNodeResult(item=both[0], children=both[1:])
 
         return await compute(work)
 

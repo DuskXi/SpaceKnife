@@ -58,30 +58,110 @@ class Watcher(Protocol):
     def status(self) -> WatchStatus: ...
 
 
-def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000) -> Watcher:
+@dataclass(frozen=True, slots=True)
+class WatcherKind:
+    """One way to watch a scan root (docs/monitor.md §2): the platform watchers register here.
+
+    ``create_watcher`` takes the kind of highest ``priority`` whose ``platforms`` (``sys.platform``
+    prefixes; empty: any) and ``filesystems`` (lower-case names as the volume reports them; empty:
+    any) fit the root; a factory that raises ``OSError`` (a facility this machine lacks) passes the
+    root on to the next kind. Polling, at the lowest priority, fits everywhere.
+    """
+
+    name: str
+    factory: Callable[[str, float, int], Watcher]  # (root, poll_interval, poll_rate)
+    platforms: tuple[str, ...] = ()
+    filesystems: tuple[str, ...] = ()
+    priority: int = 0
+    owner: str = "builtin"
+
+    def fits(self, platform: str, filesystem: str) -> bool:
+        if self.platforms and not any(platform.startswith(p) for p in self.platforms):
+            return False
+        return not self.filesystems or filesystem.lower() in self.filesystems
+
+
+_KINDS: dict[str, WatcherKind] = {}
+
+
+def register_watcher(kind: WatcherKind) -> None:
+    """Add (or replace) a way to watch; the built-in four are registered at import."""
+    _KINDS[kind.name] = kind
+
+
+def unregister_watcher(name: str) -> WatcherKind | None:
+    return _KINDS.pop(name, None)
+
+
+def watcher_kinds(platform: str | None = None, filesystem: str = "") -> list[WatcherKind]:
+    """The kinds that fit, best first (all of them without ``platform``)."""
+    kinds = list(_KINDS.values())
+    if platform is not None:
+        kinds = [k for k in kinds if k.fits(platform, filesystem)]
+    return sorted(kinds, key=lambda k: (-k.priority, k.name))
+
+
+def create_watcher(
+    root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000, filesystem: str = ""
+) -> Watcher:
     """The best watcher this platform offers for ``root`` (a scan root folder).
 
     ``poll_interval``: seconds between polling rounds; ``poll_rate``: folders stat'ed per second at
-    most while polling (polling stays a light background load).
+    most while polling (polling stays a light background load). ``filesystem``: the root volume's
+    file system, for kinds that only work on some.
     """
-    if sys.platform == "win32":
-        from .win import RdcwWatcher
-
-        return RdcwWatcher(root)
-    if sys.platform.startswith("linux"):
-        from .linux import InotifyWatcher
-
-        return InotifyWatcher(root, poll_interval=poll_interval, poll_rate=poll_rate)
-    if sys.platform == "darwin":
+    for kind in watcher_kinds(sys.platform, filesystem):
         try:
-            from .mac import FsEventsWatcher
-
-            return FsEventsWatcher(root)
+            return kind.factory(root, poll_interval, poll_rate)
         except OSError:
-            pass  # CoreServices not usable: poll
+            continue  # e.g. CoreServices not usable: the next kind (in the end, polling)
     from .poll import PollWatcher
 
     return PollWatcher(root, poll_interval=poll_interval, poll_rate=poll_rate)
 
 
-__all__ = ["Change", "ChangeKind", "Sink", "WatchState", "WatchStatus", "Watcher", "create_watcher"]
+def _rdcw(root: str, poll_interval: float, poll_rate: int) -> Watcher:
+    if sys.platform == "win32":
+        from .win import RdcwWatcher
+
+        return RdcwWatcher(root)
+    raise OSError("ReadDirectoryChangesW is Windows only")
+
+
+def _inotify(root: str, poll_interval: float, poll_rate: int) -> Watcher:
+    from .linux import InotifyWatcher
+
+    return InotifyWatcher(root, poll_interval=poll_interval, poll_rate=poll_rate)
+
+
+def _fsevents(root: str, poll_interval: float, poll_rate: int) -> Watcher:
+    from .mac import FsEventsWatcher
+
+    return FsEventsWatcher(root)
+
+
+def _poll(root: str, poll_interval: float, poll_rate: int) -> Watcher:
+    from .poll import PollWatcher
+
+    return PollWatcher(root, poll_interval=poll_interval, poll_rate=poll_rate)
+
+
+register_watcher(WatcherKind("rdcw", _rdcw, platforms=("win32",), priority=10))
+register_watcher(WatcherKind("inotify", _inotify, platforms=("linux",), priority=10))
+register_watcher(WatcherKind("fsevents", _fsevents, platforms=("darwin",), priority=10))
+register_watcher(WatcherKind("poll", _poll, priority=-100))
+
+
+__all__ = [
+    "Change",
+    "ChangeKind",
+    "Sink",
+    "WatchState",
+    "WatchStatus",
+    "Watcher",
+    "WatcherKind",
+    "create_watcher",
+    "register_watcher",
+    "unregister_watcher",
+    "watcher_kinds",
+]
