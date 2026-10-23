@@ -19,6 +19,7 @@ relocates it); a running app sees the change after its plugins page is refreshed
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
@@ -36,6 +37,9 @@ plugin_app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+for _stream in (sys.stdout, sys.stderr):  # line by line, also into a file (plugin dev > log.txt)
+    with contextlib.suppress(AttributeError, ValueError):
+        _stream.reconfigure(line_buffering=True)  # type: ignore[union-attr]
 out = Console(highlight=False, soft_wrap=True)
 err = Console(stderr=True, highlight=False, soft_wrap=True)
 
@@ -182,8 +186,28 @@ def _plugin_logs(plugin: str) -> Iterator[list[str]]:
         logger.remove(handle)
 
 
+def _settings(items: list[str] | None) -> dict[str, Any]:
+    """``--setting name=value`` (repeatable): JSON values (``true``, ``3``, ``"x"``) or plain text."""
+    out: dict[str, Any] = {}
+    for item in items or []:
+        name, sep, raw = item.partition("=")
+        if not sep or not name.strip():
+            raise _fail(f"--setting {item!r}: write name=value", 2)
+        try:
+            value: Any = json.loads(raw)
+        except ValueError:
+            value = raw
+        out[name.strip()] = value
+    return out
+
+
 async def _mock(
-    folder: Path, scan: Path | None, snapshot: Path | None, inprocess: bool, lang: str | None
+    folder: Path,
+    scan: Path | None,
+    snapshot: Path | None,
+    inprocess: bool,
+    lang: str | None,
+    settings: dict[str, Any] | None = None,
 ) -> Any:
     from spaceknife_sdk.testing import MockHost
 
@@ -199,6 +223,12 @@ async def _mock(
         err.print(f"[red]{exc}[/red]")
         err.print("[dim]spaceknife plugin check shows where[/dim]")
         raise typer.Exit(1) from None
+    for name, value in (settings or {}).items():
+        try:
+            await host.set_setting(name, value)
+        except Exception as exc:
+            await host.close()
+            raise _fail(f"--setting {name}: {exc}", 2) from None
     if scan is not None:
         await host.scan_dir(await asyncio.to_thread(lambda: scan.expanduser().resolve()))
     elif snapshot is not None:
@@ -233,6 +263,10 @@ def call(
     snapshot: Annotated[Path | None, typer.Option(help="Use this snapshot as the scan.")] = None,
     inprocess: Annotated[bool, typer.Option(help="Run the plugin in this process.")] = False,
     lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
+    setting: Annotated[
+        list[str] | None,
+        typer.Option("--setting", help="name=value: one of the plugin's settings (repeatable)."),
+    ] = None,
 ) -> None:
     """Call a method: prints its JSON result; events, toasts and the plugin's log to stderr."""
     folder = _folder(target)
@@ -247,7 +281,7 @@ def call(
     async def run() -> int:
         from .server.rpc import RpcError
 
-        host = await _mock(folder, scan, snapshot, inprocess, lang)
+        host = await _mock(folder, scan, snapshot, inprocess, lang, _settings(setting))
         try:
             with _plugin_logs(host.plugin_id) as logs:
                 try:
@@ -277,7 +311,7 @@ def render(
         str,
         typer.Argument(
             help="report:NAME, field[:NAME], insight, cleanup:NAME, export:NAME, set:NAME, "
-            "visual:NAME, color:NAME."
+            "visual:NAME, color:NAME, source:NAME (with --uri)."
         ),
     ],
     scan: Annotated[Path | None, typer.Option(help="Scan this folder first.")] = None,
@@ -286,30 +320,47 @@ def render(
     format: Annotated[str, typer.Option(help="text, json or md.")] = "text",
     inprocess: Annotated[bool, typer.Option(help="Run the plugin in this process.")] = False,
     lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
+    setting: Annotated[
+        list[str] | None,
+        typer.Option("--setting", help="name=value: one of the plugin's settings (repeatable)."),
+    ] = None,
+    uri: Annotated[str | None, typer.Option(help="source:NAME — what to list (a file, a URL …).")] = None,
+    output: Annotated[
+        Path | None, typer.Option("--output", "-o", help="export:NAME — write the file (with its BOM).")
+    ] = None,
 ) -> None:
     """Show what a contribution produces, without the app: a report as text, fields, the cleanup's
-    candidates, an export's output, a node set, a visualization's or colour mode's frame."""
+    candidates, an export's output, a node set, a visualization's or colour mode's frame, what a
+    scan source lists."""
     folder = _folder(target)
     _quiet()
     kind, _, name = what.partition(":")
-    if kind not in ("report", "field", "insight", "cleanup", "export", "set", "visual", "color"):
-        raise _fail(f"unknown {kind!r}: report, field, insight, cleanup, export, set, visual or color", 2)
-    if kind in ("report", "cleanup", "export", "set", "visual", "color") and not name:
+    kinds = ("report", "field", "insight", "cleanup", "export", "set", "visual", "color", "source")
+    if kind not in kinds:
+        raise _fail(f"unknown {kind!r}: {', '.join(kinds)}", 2)
+    if kind in ("report", "cleanup", "export", "set", "visual", "color", "source") and not name:
         raise _fail(f"{kind}:NAME — which one?", 2)
+    if kind == "source" and not uri:
+        raise _fail("source:NAME needs --uri (what to list)", 2)
 
     async def run() -> int:
         from .server.rpc import RpcError
 
-        host = await _mock(folder, scan, snapshot, inprocess, lang)
+        host = await _mock(folder, scan, snapshot, inprocess, lang, _settings(setting))
         try:
             with _plugin_logs(host.plugin_id) as logs:
                 try:
                     node_id = host.find(node) if node else None
-                    text = await _render(host, kind, name, node_id, format)
-                except (RpcError, StopIteration, AssertionError) as exc:
+                    if kind == "source":
+                        text = await _render_source(host, name, str(uri))
+                    elif kind == "export" and output is not None:
+                        text = await _write_export(host, name, output)
+                    else:
+                        text = await _render(host, kind, name, node_id, format)
+                except (RpcError, KeyError, AssertionError, RuntimeError) as exc:
                     _print_side_effects(host, logs)
                     message = getattr(exc, "message", None) or str(exc) or type(exc).__name__
-                    if isinstance(exc, StopIteration):
+                    if isinstance(exc, KeyError):
                         message = f"no {node!r} in the scan"
                     err.print(f"[red]{message}[/red]")
                     return 1
@@ -320,6 +371,56 @@ def render(
             await host.close()
 
     raise typer.Exit(asyncio.run(run()))
+
+
+async def _render_source(host: Any, name: str, uri: str) -> str:
+    """What a scan source lists for ``uri``: its tree, the largest first (as the app would show it)."""
+    from . import fmt as sizes
+
+    await host.source(name, uri)
+    store = host.store
+    lines = []
+    c = store.cols
+    for i in range(1, min(len(store), 401)):
+        kind = "dir " if int(c["kind"][i]) == 1 else "file"
+        alloc = int(c["tot_alloc"][i]) if kind == "dir " else int(c["alloc"][i])
+        lines.append(f"{kind} {sizes.size(alloc):>10}  {store.path(i)}")
+    more = len(store) - 1 - len(lines)
+    lines.append(f"{len(store) - 1} item(s)" + (f" ({more} not shown)" if more > 0 else ""))
+    return "\n".join(lines)
+
+
+async def _write_export(host: Any, name: str, path: Path) -> str:
+    """An export format's output written as the app writes it (its BOM, UTF-8)."""
+    from .export import ExportFormat, resolve, write_export
+
+    data = await host.export(name)
+    target = resolve(f"{host.plugin_id}.{name}")
+    bom = isinstance(target, ExportFormat) and target.bom
+    written = write_export(path, [data], bom=bom)
+    return f"wrote {path} ({written} bytes{', with a BOM' if bom else ''})"
+
+
+def _field_text(value: Any, unit: str) -> str:
+    """A field's value as the details panel shows it (sizes, counts, dates)."""
+    from . import fmt as f
+
+    if value is None:
+        return "—"
+    try:
+        if unit == "size" and isinstance(value, int | float):
+            return f.size(int(value))
+        if unit == "count" and isinstance(value, int | float):
+            return f.count(int(value))
+        if unit == "pct" and isinstance(value, int | float):
+            return f"{float(value) * 100:.1f}%"
+        if unit in ("date", "ago") and isinstance(value, int | float) and value:
+            import datetime as dt
+
+            return dt.datetime.fromtimestamp(float(value), dt.UTC).strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return str(value)
 
 
 async def _render(host: Any, kind: str, name: str, node: int | None, fmt: str) -> str:
@@ -341,13 +442,13 @@ async def _render(host: Any, kind: str, name: str, node: int | None, fmt: str) -
             rows = [r for r in rows if str(r.get("id", "")).endswith("." + name)]
         if fmt == "json":
             return dump(rows)
-        return (
-            "\n".join(
-                f"{r.get('title')}: {r.get('value', r.get('reason', ''))} {r.get('unit', '')}".rstrip()
-                for r in rows
+        if kind == "field":
+            text = "\n".join(
+                f"{r.get('title')}: {_field_text(r.get('value'), str(r.get('unit', '')))}" for r in rows
             )
-            or "(nothing for this node)"
-        )
+        else:
+            text = "\n".join(f"{r.get('title')}: {r.get('reason', '')}" for r in rows)
+        return text or "(nothing for this node)"
     if kind == "cleanup":
         items = await host.cleanup(name)
         if fmt == "json":

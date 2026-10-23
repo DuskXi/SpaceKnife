@@ -507,7 +507,7 @@ action = { open = "report:largest" }""")
     files["tests/test_plugin.py"] = "\n".join(tests) + "\n"
     for p in items:
         files.update(p.files)
-    files[".gitignore"] = "__pycache__/\ndist/\n"
+    files[".gitignore"] = "__pycache__/\n.pytest_cache/\n.mypy_cache/\ndist/\n"
     # for `pytest tests` in this folder (inside the SpaceKnife repository its own settings apply)
     files["pytest.ini"] = "[pytest]\nasyncio_mode = auto\nasyncio_default_fixture_loop_scope = function\n"
     return files

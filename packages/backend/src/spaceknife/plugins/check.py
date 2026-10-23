@@ -921,12 +921,19 @@ def generated_files(folder: Path, description: Description, manifest: Manifest) 
 
 
 def _pinyin_table(description: Description) -> str | None:
-    """Pinyin of its command titles (the palette finds them by pinyin; computed here once)."""
+    """Pinyin of its command titles and filter presets' commands (the palette finds them by pinyin;
+    computed here once)."""
+    from ..palette import commands as pal
+
+    def title(c: Mapping[str, Any]) -> str:
+        return str((c.get("spec") or {}).get("title", {}).get("zh", ""))
+
     names = sorted(
-        {
-            str((c.get("spec") or {}).get("title", {}).get("zh", ""))
+        {title(c) for c in description.contributions if c.get("kind") == "command"}
+        | {
+            pal.NAMED.raw("filter").format(name=title(c))
             for c in description.contributions
-            if c.get("kind") == "command"
+            if c.get("kind") == "filter_preset" and title(c)
         }
         - {""}
     )
@@ -936,7 +943,6 @@ def _pinyin_table(description: Description) -> str | None:
         from pypinyin import lazy_pinyin
     except ImportError:
         return None
-    from ..palette import commands as pal
 
     rows = [
         f" {json.dumps(n, ensure_ascii=False)}: "

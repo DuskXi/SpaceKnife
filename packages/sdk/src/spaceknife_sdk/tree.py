@@ -336,6 +336,57 @@ class TreeView:
         value, _ = self._link.request("host.paths", self._params(nodes=[int(i) for i in ids], what="path"))
         return [str(x) for x in value["texts"]]
 
+    def rel_path(self, id: int, under: int | None = None) -> str:
+        """The path of ``id`` relative to ``under`` (default: its root), always with ``/`` — the
+        same on every system (``path`` is the system's own: ``\\`` on Windows). "" for ``under``
+        itself."""
+        return self.rel_paths([id], under)[0]
+
+    def rel_paths(self, ids: Sequence[int] | np.ndarray, under: int | None = None) -> list[str]:
+        """:meth:`rel_path` of several nodes (one request)."""
+        want = [int(i) for i in ids]
+        base: list[str]
+        if under is not None:
+            top = self.path(int(under)).replace("\\", "/").rstrip("/")
+            base = [top] * len(want)
+        else:
+            roots = {
+                r: p.replace("\\", "/").rstrip("/") for r, p in zip(self.roots, self.root_paths, strict=False)
+            }
+            base = [roots.get(self.root_of(i), "") for i in want]
+        out = []
+        for full, top in zip((p.replace("\\", "/") for p in self.paths(want)), base, strict=True):
+            if top and (full == top or full.startswith(top + "/")):
+                out.append(full[len(top) :].lstrip("/"))
+            else:
+                out.append(full.lstrip("/"))
+        return out
+
+    def root_of(self, id: int) -> int:
+        """The root (a scanned folder) that ``id`` is under (0 for the top node)."""
+        node = int(id)
+        roots = set(self.roots)
+        guard = 0
+        while node > 0 and node not in roots and guard < 4096:
+            node = self.parent(node)
+            guard += 1
+        return node
+
+    def file_ids(self, ids: Sequence[int] | np.ndarray) -> list[tuple[int, int, int] | None]:
+        """(device, file id, link count) of files, as the system reports them now — for hard links
+        where the scan did not record them (``Flag.HARDLINK_DUP`` marks the extra links it saw).
+        Needs ``files.read``; None where a file cannot be read."""
+        import os
+
+        out: list[tuple[int, int, int] | None] = []
+        for path in self.paths(ids):
+            try:
+                st = os.stat(path, follow_symlinks=False)
+                out.append((int(st.st_dev), int(st.st_ino), int(st.st_nlink)))
+            except OSError:
+                out.append(None)
+        return out
+
     def find(self, path: str) -> int | None:
         """The node at an absolute path (or a path relative to the first root), or None."""
         value, _ = self._link.request("host.find", self._params(path=path))

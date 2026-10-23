@@ -583,6 +583,7 @@ def _one(
             zh=pal.NAMED.raw("filter").format(name=spec.title.zh),
             en=f"Filter: {spec.title.en}" if spec.title.en else "",
         )  # i18n: ignore
+        syl = pinyin.get(title.zh)
         cmd = pal.Command(
             id=cid,
             name=title.zh,
@@ -592,6 +593,7 @@ def _one(
             action=resolve_action({"kind": "filter", "expr": spec.expr}, pid),
             owner=pid,
             text=title,
+            pinyin=tuple(syl) if syl is not None and len(syl) == len(title.zh) else None,
         )
         return [
             Contribution("filter_preset", cid, pid, spec, None),

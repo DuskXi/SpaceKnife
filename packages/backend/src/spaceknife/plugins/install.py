@@ -188,12 +188,28 @@ def _trash(paths: Sequence[str]) -> list[str]:
 TRASH: Callable[[Sequence[str]], list[str]] = _trash
 
 
+def _in_temp(path: Path) -> bool:
+    """A data folder under the temporary folder (tests, ``plugin dev``, a trial run)."""
+    import tempfile
+
+    try:
+        return path.resolve().is_relative_to(Path(tempfile.gettempdir()).resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def uninstall(folder: Path, plugin: str, *, remove_data: bool) -> None:
-    """Move the plugin's folder (and its data) to the recycle bin."""
+    """Move the plugin's folder (and its data) to the recycle bin; with a data folder in the
+    temporary folder (tests, trial runs) they are removed outright (nothing to restore there)."""
     targets = [str(folder)]
     data = ppaths.data_dir(plugin)
     if remove_data and data.exists():
         targets.append(str(data))
+    if _in_temp(ppaths.plugins_dir()):
+        for t in targets:
+            shutil.rmtree(t, ignore_errors=True)
+        shutil.rmtree(ppaths.cache_dir(plugin), ignore_errors=True)
+        return
     errors = TRASH(targets)
     if errors:
         raise InstallError(tr("无法移到回收站：{reason}", reason="; ".join(errors)))
