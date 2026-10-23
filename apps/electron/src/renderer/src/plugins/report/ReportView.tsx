@@ -35,7 +35,7 @@ import { Icon } from "@/ui/Icon";
 
 import { type RunContext, runAction } from "../actions";
 import { callPlugin } from "../client";
-import { toneColor } from "../colors";
+import { type PaletteEntry, toneColor } from "../colors";
 import { PluginIcon } from "../icons";
 import { baseName, showNode } from "../nodes";
 import { type Cell, formatCell, nextSort, numericUnit, pageOf, share, sortRows } from "./format";
@@ -46,7 +46,7 @@ export type Block = Report["blocks"][number];
 /** Sections nest at most this deep; deeper blocks are left out. */
 const MAX_DEPTH = 4;
 
-const tone = (x: string | null | undefined) => toneColor(x, classHexNow);
+const tone = (x: PaletteEntry | string | null | undefined) => toneColor(x, classHexNow);
 
 interface Env {
   /** the plugin it comes from (actions run with its permissions) */
@@ -86,6 +86,8 @@ export function ReportView(p: ReportViewProps) {
           {r.subtitle && <div className="muted small">{r.subtitle}</div>}
         </header>
       )}
+      {/* the place shows the title (a tab, a dialog); what the report says under it stays */}
+      {r && p.hideTitle && r.subtitle && <div className="report-subtitle muted small">{r.subtitle}</div>}
       {(p.manual || (p.error && p.onReload)) && (
         <div className="report-tools">
           {p.loading && <span className="muted small">{t("正在更新…")}</span>}
@@ -378,7 +380,7 @@ function Bars({ b }: { b: BarsBlock }) {
 
 /** Colours of parts without a tone: the accent, then the class colours in turn. */
 const PART_COLORS = ["accent", "class:video", "class:image", "class:audio", "class:archive", "class:code", "class:document", "muted"];
-const partColor = (toneName: string | null | undefined, i: number) => tone(toneName) ?? tone(PART_COLORS[i % PART_COLORS.length]!)!;
+const partColor = (toneName: PaletteEntry | string | null | undefined, i: number) => tone(toneName) ?? tone(PART_COLORS[i % PART_COLORS.length]!)!;
 
 function Stack({ b }: { b: StackBlock }) {
   const parts = b.parts ?? [];

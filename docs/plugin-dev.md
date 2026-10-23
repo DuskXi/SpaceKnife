@@ -252,6 +252,7 @@ async def ticks(ctx: Context) -> AsyncIterator[Progress]:
 | `cleanup` | `{ cleanup = "extra" }` | 运行一个清理（先复核） |
 | `node` | `{ node = "reveal" }` | 对选中项：`reveal open terminal copy_path select zoom basket` |
 | `url` | `{ url = "https://…" }` | 打开网页（用户先确认；要 `host.open`） |
+| `scan_source` | `{ scan_source = "zip", uri = "$node" }` | 用本插件的扫描来源开一个扫描（`$node`：选中项的路径） |
 | `builtin` | `{ builtin = "app.palette" }` | 前端的内置处理 |
 
 ```toml ex
@@ -695,6 +696,7 @@ async def logs(ctx: Context, c: ReportContext) -> list[Proposal]:
 | `on_disk` | 列出的路径是真实的磁盘路径（False）；否则打开、显示位置等依赖真实路径的功能关闭 |
 | `ops` | 允许删除（要 `on_disk`；False） |
 | `watch` | 有对应的监控器（False） |
+| `size` | 树上一个文件算多大：`alloc`（默认，`out.file` 给的占用）或 `size`（例如压缩包解压后的大小） |
 
 签名：`(ctx, uri: str, out: Listing) -> None`。`out.file(path, size=…, alloc=…, mtime=…)`、`out.dir(path)`、`out.root_name(text)`，路径相对来源的根，用 `/`，父文件夹自动补上。用户选的 URI 本身在有 `files.read` 时可读（`ctx.files.open_path(uri)`）。
 
@@ -719,7 +721,7 @@ async def watch_zip(ctx: Context, uri: str) -> AsyncIterator[list[Change]]:
             yield [Change(path="", kind="modified")]
 ```
 
-监控器 `@plugin.watcher(source, name=None)`（`source` 是来源的名字，`name` 默认是函数名）是一个异步生成器，产出一批批 `Change(path, kind)`（`created modified deleted overflow`）。变化安静 1 秒后宿主把来源重跑一遍（10 万项以内；更大的只提示需要重新扫描）。F5 也是整个重跑。`fixtures/<来源名>.*` 放一个样例，`check` 会用它跑一次。
+监控器 `@plugin.watcher(source, name=None)`（`source` 是来源的名字，`name` 默认是函数名）是一个异步生成器，产出一批批 `Change(path, kind)`（`created modified deleted overflow`）。变化安静 1 秒后宿主把来源重跑一遍（10 万项以内；更大的只提示需要重新扫描）。F5 也是整个重跑。`on_disk = false` 的来源扫描里，条目的路径是 `<root_name>/a/b`，详情面板不提供定位、复制路径以外的磁盘操作，删除篮拒绝它们。命令或报告里的 `{ scan_source = "zip" }` 动作（`uri` 默认 `$node`：选中项的磁盘路径）从普通扫描里直接打开一个来源扫描。`fixtures/<来源名>.*` 放一个样例，`check` 会用它跑一次。
 
 <a id="kind-change_annotator"></a>
 #### 对比原因与快照

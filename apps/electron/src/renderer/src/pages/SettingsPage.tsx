@@ -7,7 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PaletteCommand, SettingMeta } from "@/protocol/generated";
 import { call, closeSettings, resetSettings, settingsGo, updateSettings } from "@/state/actions";
 import { type SettingsPageId, set, toast, useApp } from "@/state/store";
-import { fmtKeys } from "@/lib/format";
+import { fmtInt, fmtKeys, fmtSize, parseSizeText } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { PluginIcon } from "@/plugins/icons";
@@ -340,6 +340,8 @@ function Control(props: { meta: SettingMeta; value: Value | undefined; disabled:
     case "slider":
       return <Slider meta={meta} value={Number(value ?? 0)} disabled={disabled} onSave={onSave} />;
     case "number":
+      // a size in bytes (a plugin's unit "B"): shown and typed as a size, 1 MB rather than 1048576
+      if (meta.unit === "B") return <SizeBox meta={meta} value={Number(value ?? 0)} disabled={disabled} onSave={onSave} />;
       return <NumberBox meta={meta} value={Number(value ?? 0)} disabled={disabled} onSave={onSave} />;
     default:
       return <TextBox meta={meta} value={String(value ?? "")} disabled={disabled} onSave={onSave} />;
@@ -412,6 +414,44 @@ function NumberBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value
   );
 }
 
+function SizeBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value: number; disabled: boolean; onSave: (v: Value) => void }) {
+  const [text, setText] = useState(fmtSize(value));
+  const [error, setError] = useState("");
+  useEffect(() => setText(fmtSize(value)), [value]);
+  const commit = () => {
+    const n = parseSizeText(text);
+    const lo = meta.min ?? 0;
+    const hi = meta.max ?? Number.MAX_SAFE_INTEGER;
+    if (n == null || n < lo || n > hi) {
+      setError(t("请输入一个大小，例如 1 MB（{lo}–{hi}）", { lo: fmtSize(lo), hi: meta.max != null ? fmtSize(hi) : "∞" }));
+      setText(fmtSize(value));
+      return;
+    }
+    setError("");
+    if (n !== value) onSave(n);
+  };
+  return (
+    <div className="set-number-wrap">
+      <span className={`set-number set-size${error ? " invalid" : ""}`}>
+        <input
+          aria-label={meta.name}
+          aria-invalid={!!error}
+          value={text}
+          disabled={disabled}
+          title={t("{n} 字节", { n: fmtInt(value) })}
+          onChange={(e) => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") commit();
+          }}
+        />
+      </span>
+      {error && <span className="set-error">{error}</span>}
+    </div>
+  );
+}
+
 function TextBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value: string; disabled: boolean; onSave: (v: Value) => void }) {
   const [text, setText] = useState(value);
   useEffect(() => setText(value), [value]);
@@ -420,7 +460,7 @@ function TextBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value: 
     <input
       className="set-text-input"
       aria-label={meta.name}
-      placeholder={t("未命名")}
+      placeholder={meta.plugin ? meta.placeholder : t("未命名")}
       maxLength={64}
       value={text}
       disabled={disabled}

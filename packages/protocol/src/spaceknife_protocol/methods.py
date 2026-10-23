@@ -63,6 +63,7 @@ from .plugins import (
     InsightNodesParams,
     InsightNodesResult,
     PluginChangedEvent,
+    PluginClipboardEvent,
     PluginDescribeResult,
     PluginEnableParams,
     PluginFieldsParams,
@@ -560,6 +561,9 @@ EVENT_EXTENSIONS = EventSpec(
 )
 EVENT_PLUGIN = EventSpec("plugin.changed", PluginChangedEvent, "A plugin's state changed (plugins.v1).")
 EVENT_PLUGIN_TOAST = EventSpec("plugin.toast", PluginToastEvent, "A plugin shows a short message.")
+EVENT_PLUGIN_CLIPBOARD = EventSpec(
+    "plugin.clipboard", PluginClipboardEvent, "A plugin puts text on the clipboard (it has clipboard)."
+)
 EVENT_PLUGIN_PROGRESS = EventSpec(
     "plugin.progress", PluginProgressEvent, "Progress of a plugin call (reports, cleanups)."
 )
@@ -712,6 +716,7 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_EXTENSIONS,
         EVENT_PLUGIN,
         EVENT_PLUGIN_TOAST,
+        EVENT_PLUGIN_CLIPBOARD,
         EVENT_PLUGIN_PROGRESS,
     )
 }

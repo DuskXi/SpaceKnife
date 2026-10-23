@@ -3,13 +3,16 @@
 // (palette.commands, the key table), and the installed plugins (plugin.list). Read on connect,
 // again for the kinds extensions.changed names and after a language switch (texts come localized).
 
-import type { ExtensionsChangedEvent, PluginInfo, PluginProgressEvent, PluginToastEvent, ReportInfo, PanelInfo } from "@/protocol/generated";
+import type { ExtensionsChangedEvent, PluginClipboardEvent, PluginInfo, PluginProgressEvent, PluginToastEvent, ReportInfo, PanelInfo } from "@/protocol/generated";
 import type { Rpc } from "@/protocol/rpc";
 import { call } from "@/state/actions";
 import { type AppState, get, set, toast } from "@/state/store";
 import { t } from "@/lib/i18n";
 
 import { attachPlugins } from "./client";
+import { bindExtensions } from "./colors";
+
+bindExtensions(() => get().extensions); // palette:<mode>#<i> tones
 
 /** The session negotiated plugins.v1 (a backend before it: no plugins, the core app as before). */
 export const pluginsOn = (s: AppState = get()): boolean => s.extensions !== null;
@@ -75,6 +78,15 @@ function onToast(ev: PluginToastEvent): void {
   toast(name ? t("{plugin}：{text}", { plugin: name, text: ev.text }) : ev.text, ev.tone === "danger" || ev.tone === "warn" ? 5000 : 2500);
 }
 
+/** ctx.clipboard.write_text (the backend sends it only to the session whose call it was, and only
+ * for a plugin with the clipboard permission): copy it and say who did. */
+export function onClipboard(ev: PluginClipboardEvent): void {
+  if (!granted(ev.plugin).includes("clipboard") && !ev.plugin.startsWith("builtin.")) return;
+  window.sk.shell.copyText(ev.text);
+  const name = pluginName(ev.plugin);
+  toast(name ? t("{plugin} 复制了文字", { plugin: name }) : t("已复制"));
+}
+
 function onProgress(ev: PluginProgressEvent): void {
   const key = String(ev.request ?? "");
   if (!key) return;
@@ -95,6 +107,7 @@ export async function installPlugins(r: Rpc): Promise<void> {
   r.on("extensions.changed", (ev: ExtensionsChangedEvent) => void refreshFor(ev.kinds));
   r.on("plugin.changed", () => void refreshPlugins());
   r.on("plugin.toast", onToast);
+  r.on("plugin.clipboard", onClipboard);
   r.on("plugin.progress", onProgress);
   await Promise.allSettled([commands, refreshExtensions(), refreshPlugins()]);
 }

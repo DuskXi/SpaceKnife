@@ -73,7 +73,8 @@ def panel_policy(prefix: str, origin: str) -> str:
             "base-uri 'none'",
             f"frame-ancestors {origin}",
             "sandbox allow-scripts",
-            "webrtc 'block'",
+            # no "webrtc 'block'": browsers that do not know it log an error for every panel; WebRTC
+            # is taken away by the panel's guard (guard.js) and refused by plugin check instead
         ]
     )
 

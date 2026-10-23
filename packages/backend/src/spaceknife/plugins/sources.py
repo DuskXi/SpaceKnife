@@ -44,6 +44,7 @@ if TYPE_CHECKING:
 RERUN_MAX_ITEMS = 100_000  # a watcher's changes list the source again up to this many items
 QUIET_S = 1.0  # changes wait this long without new ones before the source runs again
 RETRY_S = (5.0, 30.0, 120.0)  # a watcher that stopped is started again after these pauses
+WAIT_BACK_S = 1.0  # a watcher whose plugin went off (or reloads) looks this often whether it is back
 LIST_TIMEOUT_S = 600.0
 
 
@@ -98,6 +99,8 @@ async def _list(
         c.owner, "source", c.local, {"uri": uri}, on_chunk=chunk, timeout=LIST_TIMEOUT_S, on_wait=on_wait
     )
     name = str((value or {}).get("root") or uri)
+    if getattr(c.spec, "size", "alloc") == "size":
+        collector.use_size()  # what the tree counts: the files' (unpacked) sizes
     built = await asyncio.to_thread(build, name, collector.root, virtual=not c.spec.on_disk)
     return name, built
 
@@ -302,6 +305,19 @@ class SourceMonitor:
         self._due = True
         self._wake.set()
 
+    async def _back(self, owner: str) -> Any:
+        """Wait until the watcher's plugin is enabled and declares it again (``plugin dev`` reloaded
+        it, the user turned it back on); its contribution then, or None once this monitor stops."""
+        while not self._stopped:
+            await asyncio.sleep(WAIT_BACK_S)
+            rec = self.host.records.get(owner)
+            if rec is None or rec.state != "enabled":
+                continue
+            w = watcher_of(self.handle.plugin_source or "")
+            if w is not None:
+                return w
+        return None
+
     async def _watch(self) -> None:
         assert self.watcher is not None
         w = self.watcher
@@ -323,12 +339,25 @@ class SourceMonitor:
                         tr("监控器 {id} 已停止：{why}", id=w.id, why=exc.message),
                     )
                     self.handle.publish()
-                    return
+                    # the plugin is off or reloading: watch again once it is back
+                    back = await self._back(w.owner)
+                    if back is None:
+                        return
+                    self.watcher = w = back
+                    self.state, self.detail = "running", ""
+                    self.handle.publish()
+                    self.rescan("")  # what changed while nobody watched
+                    failures = 0
+                    continue
                 self.state, self.detail = (
                     "degraded",
                     tr("监控器 {id} 已停止：{why}", id=w.id, why=exc.message),
                 )
                 self.handle.publish()
+                if exc.code == ErrorCode.PLUGIN_UNAVAILABLE and failures == 1:
+                    # its process went (a restart, plugin dev reloading it): try again soon
+                    await asyncio.sleep(WAIT_BACK_S)
+                    continue
             await asyncio.sleep(RETRY_S[min(failures, len(RETRY_S) - 1)] if failures else RETRY_S[0])
 
     # ------------------------------------------------------------- listing again

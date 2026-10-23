@@ -245,6 +245,8 @@ def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
     texts.append(("group", group))
     for i, (_v, label) in enumerate(spec.options):
         texts.append((f"option:{i}", label))
+    if spec.placeholder is not None:
+        texts.append(("placeholder", spec.placeholder))
     depends = spec.depends
     if depends and "." not in depends.split("=", 1)[0]:
         depends = f"plugin.{rec.id}.{depends}"

@@ -38,11 +38,25 @@ function nodeArg(args: Record<string, unknown>, ctx: ReportContext): { scan_id: 
   return { scan_id: scan, node, path: typeof ref.path === "string" ? ref.path : "" };
 }
 
-export function PanelFrame({ info, ctx, height }: { info: PanelInfo; ctx: ReportContext; height?: number }) {
+export type PanelPlace = "tab" | "inspector" | "dialog";
+
+/** What the page gets as its context: where the user is, where the page is, its params. */
+export function panelContext(ctx: ReportContext, info: Pick<PanelInfo, "params" | "slot">, place: PanelPlace | undefined): Record<string, unknown> {
+  return { ...ctx, slot: place ?? info.slot, params: { ...(info.params ?? {}) } };
+}
+
+export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx: ReportContext; height?: number; place?: PanelPlace }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const bridge = useRef<PanelBridge | null>(null);
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
+  const placeRef = useRef(place);
+  placeRef.current = place;
+  // the tree of the context's scan changed (a rescan, a change on disk, the scan went on): told as "tree"
+  const treeMark = useApp((s) => {
+    const st = ctx.scan_id ? s.scans[ctx.scan_id] : undefined;
+    return st ? `${st.state}:${st.items}:${st.bytes_alloc}` : "";
+  });
   const lang = useApp((s) => s.lang);
   const [h, setH] = useState(height ?? info.height);
   const [refused, setRefused] = useState("");
@@ -62,7 +76,15 @@ export function PanelFrame({ info, ctx, height }: { info: PanelInfo; ctx: Report
         }
         case "select": {
           const n = nodeArg(args, c);
-          if (n) await showNode(n);
+          if (!n) return null;
+          if (args.stay === true) {
+            // select it in its view, the user stays where the panel is
+            const where = viewFor(n.scan_id);
+            const id = where ? await resolveNode(n) : null;
+            if (where && id != null) await viewCall(where.viewId, "view.reveal", { key: id });
+            return null;
+          }
+          await showNode(n);
           return null;
         }
         case "zoom": {
@@ -139,7 +161,7 @@ export function PanelFrame({ info, ctx, height }: { info: PanelInfo; ctx: Report
             setRefused("");
             b.push("lang", { lang: get().lang });
             b.push("theme", { mode: "dark", vars: themeVars() });
-            b.push("context", { ...ctxRef.current });
+            b.push("context", panelContext(ctxRef.current, info, placeRef.current));
           },
         },
       );
@@ -152,10 +174,14 @@ export function PanelFrame({ info, ctx, height }: { info: PanelInfo; ctx: Report
       bridge.current?.close();
       bridge.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a new bridge for another plugin or page only
   }, [info.id, info.plugin, info.permissions, base]);
 
-  useEffect(() => bridge.current?.push("context", { ...ctx }), [ctx]);
+  useEffect(() => bridge.current?.push("context", panelContext(ctx, info, place)), [ctx, info, place]);
   useEffect(() => bridge.current?.push("lang", { lang }), [lang]);
+  useEffect(() => {
+    if (treeMark) bridge.current?.push("tree", { scan_id: ctx.scan_id });
+  }, [treeMark, ctx.scan_id]);
 
   if (refused) {
     return (

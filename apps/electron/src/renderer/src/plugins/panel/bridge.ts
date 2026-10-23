@@ -46,6 +46,7 @@ export const CORE_METHODS: Readonly<Record<string, string | null>> = {
   "basket.list": null,
   "basket.add": "basket.propose",
   "insight.node": "tree.read",
+  "insight.nodes": "tree.read",
 };
 
 /** Host operations and the permission each needs. */
@@ -135,7 +136,7 @@ export class PanelBridge {
   }
 
   /** Something for the panel (context, theme, language): only once it said it is ready. */
-  push(type: "context" | "theme" | "lang", payload: Record<string, unknown>): void {
+  push(type: "context" | "theme" | "lang" | "tree", payload: Record<string, unknown>): void {
     if (this.ready && !this.closed) this.post({ type, ...payload });
   }
 

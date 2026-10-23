@@ -85,12 +85,15 @@ def extensions_state(host: PluginHost, caps: frozenset[str]) -> pp.ExtensionsSta
                     id=c.id,
                     plugin=c.owner,
                     title=s.title.get(lang),
+                    short_title=s.short_title.get(lang) if s.short_title else "",
                     icon=s.icon,
                     slot=s.slot,
                     entry=s.entry,
                     height=s.height,
                     when=list(s.when),
                     permissions=sorted(rec.granted) if rec is not None else [],  # type: ignore[arg-type]
+                    params=dict(s.params),
+                    keep=s.keep,
                 )
             )
     fields = [
@@ -144,6 +147,7 @@ def extensions_state(host: PluginHost, caps: frozenset[str]) -> pp.ExtensionsSta
             on_disk=c.spec.on_disk,
             ops=c.spec.ops,
             watch=c.spec.watch,
+            size=c.spec.size,
         )
         for c in EXTENSIONS.of("scan_source")
     ]

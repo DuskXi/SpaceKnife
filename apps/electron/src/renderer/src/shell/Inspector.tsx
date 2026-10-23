@@ -19,6 +19,7 @@ import { InspectorFields } from "@/plugins/fields";
 import { PluginIcon } from "@/plugins/icons";
 import { InsightCards } from "@/plugins/insight";
 import { InspectorPluginPage, inspectorPages } from "@/plugins/slots";
+import { scanSourceOf } from "@/plugins/sources";
 
 /** The built-in pages; a plugin's is "plugin:<its full id>" (slot "inspector"). */
 type Page = "details" | "classes" | "largest";
@@ -42,10 +43,13 @@ export function Inspector({ viewId }: { viewId: string }) {
   const pluginPage = page.startsWith("plugin:") ? page.slice(7) : null;
   const setPage = (p: string) => set({ inspectorPage: p });
   const commands = useApp((s) => s.commands);
-  const extra = commands.filter((c) => c.menus.includes("inspector"));
   const [summary, setSummary] = useState<TreeSummaryResult | null>(null);
   const frame = view?.frame;
   const scanId = view?.state.scan_id;
+  // a scan of a plugin's source that is not on this disk: no revealing, deleting or disk commands
+  const sourceId = scanId ? scanSourceOf(scanId) : null;
+  const offDisk = useApp((s) => !!sourceId && s.extensions?.sources.find((x) => x.id === sourceId)?.on_disk === false);
+  const extra = commands.filter((c) => c.menus.includes("inspector") && !(offDisk && c.action?.kind === "node"));
   const selRow = frame?.info.selected_row ?? null;
   const selKind = selRow != null && frame ? frame.kind[selRow]! : null;
   // the selection, or the zoom root when nothing is selected (00 待定 6)
@@ -127,7 +131,7 @@ export function Inspector({ viewId }: { viewId: string }) {
       </div>
       {summary && synthetic == null && !pluginPage && (
         <div className="inspector-actions">
-          {!inBrowser() && (
+          {!inBrowser() && !offDisk && (
             <ActionRow icon="reveal" label={revealLabel()} keys="Ctrl+E" disabled={!summary.on_disk} onClick={() => window.sk.shell.showItemInFolder(summary.path)} />
           )}
           <ActionRow
@@ -139,7 +143,9 @@ export function Inspector({ viewId }: { viewId: string }) {
               toast(t("已复制"));
             }}
           />
-          <ActionRow icon="basket" danger label={t("加入删除篮")} keys="Delete" disabled={!summary.on_disk} onClick={() => scanId && basketAdd(scanId, summary.node.id)} />
+          {!offDisk && (
+            <ActionRow icon="basket" danger label={t("加入删除篮")} keys="Delete" disabled={!summary.on_disk} onClick={() => scanId && basketAdd(scanId, summary.node.id)} />
+          )}
           {extra.map((c) => (
             // plugins' commands for the selection (menus "inspector"): they run where the palette would
             <button key={c.id} className="action-row" onClick={() => void runShortcut(c.id)} title={c.status || undefined}>
@@ -150,7 +156,11 @@ export function Inspector({ viewId }: { viewId: string }) {
               {c.keys[0] && <Kbd>{c.keys[0]}</Kbd>}
             </button>
           ))}
-          {!summary.on_disk && <div className="muted small inspector-note">{notOnDisk()}</div>}
+          {offDisk ? (
+            <div className="muted small inspector-note">{t("这个来源的条目不在磁盘上：不能打开、定位或删除")}</div>
+          ) : (
+            !summary.on_disk && <div className="muted small inspector-note">{notOnDisk()}</div>
+          )}
         </div>
       )}
     </aside>

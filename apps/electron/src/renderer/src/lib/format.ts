@@ -139,3 +139,14 @@ export function middlePath(path: string, max = 52): string {
   if (rest.length <= 3) return path;
   return [parts.slice(0, rootLen).join(sep), "…", ...rest.slice(-2)].join(sep);
 }
+
+/** "2.5 MB", "1mb", "300 KiB", "1048576" → bytes (KB, MB … in the app's unit base; KiB … 1024); null when it is not a size. */
+export function parseSizeText(text: string, base: 1000 | 1024 = getUnitBase()): number | null {
+  const m = /^\s*(\d+(?:[.,]\d+)?)\s*([kmgtp]?)(i?)(b?)\s*$/i.exec(text);
+  if (!m) return null;
+  const n = Number(m[1]!.replace(",", "."));
+  const power = " kmgtp".indexOf((m[2] || " ").toLowerCase());
+  const unit = (m[3] ? 1024 : base) ** Math.max(0, power);
+  const v = Math.round(n * unit);
+  return Number.isFinite(v) ? v : null;
+}

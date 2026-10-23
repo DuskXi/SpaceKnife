@@ -54,6 +54,7 @@ class SettingMeta(Payload):
         description="'key' (a switch that must be on) or 'key=value' for this row to be editable",
     )
     plugin: str | None = Field(default=None, description="The plugin it belongs to (category 'plugins')")
+    placeholder: str = Field(default="", description="Shown in an empty text field")
 
 
 class SettingsState(Payload):

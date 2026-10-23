@@ -221,7 +221,22 @@
 .plugin-folder .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .plugin-stderr summary { cursor: pointer; color: var(--sk-color-text-secondary); }
 .plugin-stderr pre { max-height: 200px; overflow: auto; margin: 6px 0 0; padding: 8px 10px; border-radius: var(--sk-radius-md); background: var(--sk-color-bg-sunken); white-space: pre-wrap; }
-.plugin-actions { display: flex; gap: 6px; }
+.plugin-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.plugin-row-main { flex-wrap: wrap; }
+.plugin-details { min-width: 0; }
+@media (max-width: 900px) {
+  .plugin-details { padding-left: 16px; }
+  .plugin-details .report-kv-row { grid-template-columns: minmax(80px, 30%) 1fr; }
+}
+.plugin-groups { display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 0; list-style: none; }
+.plugin-groups details > summary { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: baseline; }
+.plugin-groups details > summary::-webkit-details-marker { display: none; }
+.plugin-groups details > summary::before { content: "›"; color: var(--sk-color-text-tertiary); width: 10px; }
+.plugin-groups details[open] > summary::before { content: "⌄"; }
+.plugin-groups ul { margin: 2px 0 4px 16px; padding: 0; list-style: none; color: var(--sk-color-text-secondary); overflow-wrap: anywhere; }
+.plugin-keys { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.plugin-keys li { display: flex; align-items: center; gap: 8px; }
+.plugin-keys li.warn { color: var(--sk-color-status-warning); }
 .ghost.danger-text { color: var(--sk-color-status-danger); }
 
 .plugin-enable { width: 520px; max-height: calc(100vh - 80px); overflow: auto; display: flex; flex-direction: column; gap: 10px; }
@@ -235,3 +250,12 @@
 
 .confirm-modal .confirm-detail { overflow-wrap: anywhere; font-size: 12px; color: var(--sk-color-text-secondary); }
 .confirm-modal p { margin: 0 0 6px; line-height: 1.5; }
+
+/* a plugin tab whose web page stays alive behind other tabs (panel keep = true) */
+.kept-panel-tab { display: flex; flex-direction: column; min-height: 0; }
+.kept-panel-tab[hidden] { display: none; }
+.report-subtitle { margin: 0 0 10px; }
+.cleanup-description { margin: 0 16px 8px; }
+.export-options { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.export-field { display: flex; align-items: center; gap: 10px; }
+.export-field input, .export-field select { width: 160px; }

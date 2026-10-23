@@ -13,9 +13,11 @@ import { Icon } from "@/ui/Icon";
 
 import { RemoteChip } from "./BrowserLayer";
 import { UpdateBadge } from "./UpdateBadge";
+import { pluginTabTitle } from "@/plugins/slots";
 
 export function TitleBar() {
   const tabs = useApp((s) => s.tabs);
+  const extensions = useApp((s) => s.extensions); // plugin tabs' titles (they follow the language)
   const active = useApp((s) => s.active);
   const scans = useApp((s) => s.scans);
   const native = window.sk.host === "app";
@@ -63,7 +65,9 @@ export function TitleBar() {
         <span>SpaceKnife</span>
       </div>
       <div ref={row} className={`tabs${dragging ? " reordering" : ""}`} role="tablist" aria-label={t("扫描视图")}>
-        {tabs.map((tab) => {
+        {tabs.map((tab0) => {
+          // a plugin tab is named as its report or panel is now (a language switch renames it)
+          const tab = tab0.kind === "plugin" && extensions ? { ...tab0, title: pluginTabTitle(tab0, { extensions }) } : tab0;
           const status = tab.scanId ? scans[tab.scanId] : undefined;
           const scanning = status?.state === "scanning" || status?.state === "queued";
           // a stopped or failed scan keeps its partial results (W2 待定 16)

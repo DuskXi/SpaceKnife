@@ -362,6 +362,12 @@ class UrlAction(_Action):
     url: str = Field(pattern=r"^https://", max_length=2048)
 
 
+class ScanSourceAction(_Action):
+    kind: Literal["scan_source"] = "scan_source"
+    source: str = Field(description="Full id of a scan source")
+    uri: str = Field(default="$node", max_length=4096, description='What to list; "$node": the selected node')
+
+
 class BuiltinAction(_Action):
     kind: Literal["builtin"] = "builtin"
     name: str = Field(description="A built-in frontend handler (by command id)")
@@ -379,6 +385,7 @@ Action = Annotated[
     | CleanupAction
     | NodeAction
     | UrlAction
+    | ScanSourceAction
     | BuiltinAction,
     Field(discriminator="kind"),
 ]
@@ -394,6 +401,7 @@ ACTION_KINDS = (
     "cleanup",
     "node",
     "url",
+    "scan_source",
     "builtin",
 )
 
@@ -745,12 +753,17 @@ class PanelInfo(Payload):
     id: str
     plugin: str
     title: str
+    short_title: str = Field(default="", description="For tabs and narrow places ('' = the title)")
     icon: str = ""
     slot: PanelSlot = "tab"
     entry: str = "web/index.html"
     height: int = 320
     when: list[str] = Field(default_factory=list)
     permissions: list[Permission] = Field(default_factory=list, description="What its bridge may do")
+    params: dict[str, str | int | float | bool] = Field(
+        default_factory=dict, description="Given to the page in its context (sk.context().params)"
+    )
+    keep: bool = Field(default=True, description="A tab in the background keeps its page")
 
 
 class FieldInfo(Payload):
@@ -800,6 +813,7 @@ class SourceInfo(Payload):
     on_disk: bool = False
     ops: bool = False
     watch: bool = False
+    size: Literal["alloc", "size"] = Field(default="alloc", description="What its tree's sizes are")
 
 
 class PresetInfo(Payload):
@@ -837,6 +851,14 @@ class PluginToastEvent(Payload):
     plugin: str
     text: str
     tone: Literal["info", "ok", "warn", "danger"] = "info"
+
+
+class PluginClipboardEvent(Payload):
+    """A plugin's ``ctx.clipboard.write_text`` (it has ``clipboard``): the frontend puts the text on
+    the clipboard and says so. Only the session the call came from gets it."""
+
+    plugin: str
+    text: str = Field(max_length=1 << 20)
 
 
 class PluginProgressEvent(Payload):

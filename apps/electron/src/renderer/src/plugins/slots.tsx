@@ -12,7 +12,7 @@ import { Icon } from "@/ui/Icon";
 
 import { openPluginTab, openTarget } from "./open";
 import { PluginIcon } from "./icons";
-import { PanelFrame } from "./panel/PanelFrame";
+import { PanelFrame, type PanelPlace } from "./panel/PanelFrame";
 import { ReportView } from "./report/ReportView";
 import { formatCell } from "./report/format";
 import { useReport } from "./report/useReport";
@@ -78,25 +78,72 @@ function Unavailable({ text }: { text: string }) {
 }
 
 /** A panel where it is placed, or why it can't be. */
-export function PanelSlot({ info, ctx, height }: { info: PanelInfo; ctx: ReportContext; height?: number }) {
+export function PanelSlot({ info, ctx, height, place }: { info: PanelInfo; ctx: ReportContext; height?: number; place?: PanelPlace }) {
   const why = useWhen(info.when, info.plugin, ctx);
   const panels = useApp((s) => s.capabilities.includes("panels.v1"));
   if (!panels) return <Unavailable text={t("这个界面不支持 Web 面板")} />;
   if (why) return <Unavailable text={why} />;
   // a frame of its own per panel: the main process lets a frame show one plugin's files only
-  return <PanelFrame key={info.id} info={info} ctx={ctx} height={height} />;
+  return <PanelFrame key={info.id} info={info} ctx={ctx} height={height} place={place} />;
 }
 
 /** A report or panel by its full id, or a note that its plugin is off. */
-export function Contribution({ kind, id, ctx, compact, height, hideTitle }: { kind: "report" | "panel"; id: string; ctx: ReportContext; compact?: boolean; height?: number; hideTitle?: boolean }) {
+export function Contribution({
+  kind,
+  id,
+  ctx,
+  compact,
+  height,
+  hideTitle,
+  place,
+}: {
+  kind: "report" | "panel";
+  id: string;
+  ctx: ReportContext;
+  compact?: boolean;
+  height?: number;
+  hideTitle?: boolean;
+  place?: PanelPlace;
+}) {
   const report = useApp((s) => (kind === "report" ? s.extensions?.reports.find((r) => r.id === id) : undefined));
   const panel = useApp((s) => (kind === "panel" ? s.extensions?.panels.find((p) => p.id === id) : undefined));
   if (report) return <ReportSlot info={report} ctx={ctx} compact={compact} hideTitle={hideTitle} />;
-  if (panel) return <PanelSlot info={panel} ctx={ctx} height={height} />;
+  if (panel) return <PanelSlot info={panel} ctx={ctx} height={height} place={place} />;
   return <Unavailable text={t("「{name}」不可用：它的插件已经停用或卸载", { name: id })} />;
 }
 
 // ------------------------------------------------------------------ a tab of its own
+
+/** A plugin tab's title now (the registry's, in the interface language; its short title for a panel). */
+export function pluginTabTitle(tab: Tab, s: Pick<AppState, "extensions">): string {
+  const p = tab.plugin;
+  if (!p || !s.extensions) return tab.title;
+  if (p.kind === "report") return s.extensions.reports.find((r) => r.id === p.id)?.title ?? tab.title;
+  const panel = s.extensions.panels.find((x) => x.id === p.id);
+  return panel ? panel.short_title || panel.title : tab.title;
+}
+
+/** Plugin tabs whose web page stays alive while another tab is in front (``keep``, the default):
+ * rendered where the page goes, hidden unless in front (a hidden frame keeps its document). */
+export function KeptPanelTabs({ active }: { active: string }) {
+  const tabs = useApp((s) => s.tabs);
+  const panels = useApp((s) => s.extensions?.panels);
+  const kept = tabs.filter((x) => x.kind === "plugin" && x.plugin?.kind === "panel" && panels?.find((p) => p.id === x.plugin!.id)?.keep !== false);
+  return (
+    <>
+      {kept.map((x) => (
+        <div key={x.id} className="kept-panel-tab" hidden={x.id !== active}>
+          <PluginTabPage tab={x} />
+        </div>
+      ))}
+    </>
+  );
+}
+
+/** Whether a tab's page is one of the kept panels (App leaves its place to KeptPanelTabs). */
+export function isKeptPanelTab(tab: Tab, s: AppState): boolean {
+  return tab.kind === "plugin" && tab.plugin?.kind === "panel" && s.extensions?.panels.find((p) => p.id === tab.plugin!.id)?.keep !== false;
+}
 
 export function PluginTabPage({ tab }: { tab: Tab }) {
   const p = tab.plugin!;
@@ -109,7 +156,7 @@ export function PluginTabPage({ tab }: { tab: Tab }) {
       <header className="plugin-page-head">
         <PluginIcon plugin={plugin} name={info?.icon} size={18} />
         <div className="plugin-page-title">
-          <h1>{info?.title ?? tab.title}</h1>
+          <h1>{info?.title ?? pluginTabTitle(tab, useApp.getState())}</h1>
           <div className="muted small">
             {pluginName(plugin)}
             {scanTitle ? ` · ${scanTitle}` : ""}
@@ -117,7 +164,7 @@ export function PluginTabPage({ tab }: { tab: Tab }) {
         </div>
       </header>
       <div className={`plugin-page-body${p.kind === "panel" ? " panel" : ""}`}>
-        <Contribution kind={p.kind} id={p.id} ctx={ctx} hideTitle />
+        <Contribution kind={p.kind} id={p.id} ctx={ctx} hideTitle place="tab" />
       </div>
     </div>
   );
@@ -159,7 +206,7 @@ export function PluginDialogHost() {
           ) : d.report ? (
             <Contribution kind="report" id={d.report.id} ctx={d.ctx} hideTitle />
           ) : d.panel ? (
-            <Contribution kind="panel" id={d.panel.id} ctx={d.ctx} />
+            <Contribution kind="panel" id={d.panel.id} ctx={d.ctx} place="dialog" />
           ) : null}
         </div>
       </div>
@@ -189,7 +236,7 @@ export function InspectorPluginPage({ id, viewId }: { id: string; viewId: string
   const scanId = useApp((s) => s.views[viewId]?.state.scan_id ?? null);
   const ctx = useScanCtx(scanId, viewId);
   const panel = useApp((s) => !!s.extensions?.panels.find((p) => p.id === id && p.slot === "inspector"));
-  return <Contribution kind={panel ? "panel" : "report"} id={id} ctx={ctx} compact hideTitle />;
+  return <Contribution kind={panel ? "panel" : "report"} id={id} ctx={ctx} compact hideTitle place="inspector" />;
 }
 
 // ------------------------------------------------------------------ the start page

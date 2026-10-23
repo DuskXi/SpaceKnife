@@ -81,10 +81,23 @@ export function resolveColor(entry: PaletteEntry | string | null | undefined, cl
   return token(entry) ?? SEMANTIC.muted!;
 }
 
-/** A tone of a report block or field (accent ok warn danger muted, or a colour like a palette's). */
-export function toneColor(tone: string | null | undefined, classHex: (id: string) => string): string | null {
+/** A tone of a report block or field: accent ok warn danger muted, a token, class:<id>, #RRGGBB,
+ * {light, dark}, or palette:<colour mode id>#<index> (that entry of a plugin's colour mode). */
+export function toneColor(tone: PaletteEntry | string | null | undefined, classHex: (id: string) => string, ext?: ExtensionsState | null): string | null {
   if (!tone) return null;
+  if (typeof tone === "string" && tone.startsWith("palette:")) {
+    const m = /^palette:(.+)#(\d+)$/.exec(tone);
+    const info = m ? (ext ?? extensionsNow())?.color_modes.find((x) => x.id === m[1]) : undefined;
+    if (!m || !info) return SEMANTIC.muted!;
+    return paletteHex(info, classHex)[Number(m[2])] ?? SEMANTIC.muted!;
+  }
   return resolveColor(tone, classHex);
+}
+
+/** The registry's view as the store has it now (set by the plugin store; null before). */
+let extensionsNow: () => ExtensionsState | null = () => null;
+export function bindExtensions(read: () => ExtensionsState | null): void {
+  extensionsNow = read;
 }
 
 /** A plugin mode's palette as hex colours, index 0 the neutral one; at most 16 entries. */
@@ -108,8 +121,10 @@ export function palettePaint(id: string, ext: ExtensionsState | null | undefined
   return { colors: paletteHex(info, classHex), folders: info.folders === "palette" };
 }
 
-/** A mode's legend: (colour, text) per palette entry that has a text. */
+/** A mode's legend: (colour, text) per palette entry that has a text; a plugin's legend may give
+ * its own colour for an entry (legend_colors). */
 export function legendOf(info: ColorModeInfo, classHex: (id: string) => string): { color: string; text: string }[] {
   const colors = paletteHex(info, classHex);
-  return info.legend.map((text, i) => ({ color: colors[i] ?? colors[0]!, text })).filter((x) => x.text);
+  const own = info.legend_colors ?? [];
+  return info.legend.map((text, i) => ({ color: own[i] ? resolveColor(own[i], classHex) : (colors[i] ?? colors[0]!), text })).filter((x) => x.text);
 }

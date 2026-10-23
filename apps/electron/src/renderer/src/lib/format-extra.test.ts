@@ -49,3 +49,15 @@ describe("W2 band figures", () => {
     expect(fmtRate(999.6)).toBe("1,000");
   });
 });
+
+describe("parseSizeText", () => {
+  it("reads sizes the way they are written", async () => {
+    const { parseSizeText } = await import("./format");
+    expect(parseSizeText("1048576", 1024)).toBe(1048576);
+    expect(parseSizeText("2.5 MB", 1024)).toBe(2621440);
+    expect(parseSizeText("1mb", 1000)).toBe(1_000_000);
+    expect(parseSizeText("300 KiB", 1000)).toBe(307200);
+    expect(parseSizeText("1,5 GB", 1024)).toBe(1610612736);
+    expect(parseSizeText("big", 1024)).toBeNull();
+  });
+});

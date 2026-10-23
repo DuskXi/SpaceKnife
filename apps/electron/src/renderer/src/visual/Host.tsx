@@ -385,15 +385,18 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     const component = componentFor(frame.layout);
     if (!component) return;
     const g = component.geometry;
-    // a visualization sized by file count (a plugin's variant, size_unit "count") labels counts
+    // a visualization sized by file count (a plugin's variant, size_unit "count") labels counts; one
+    // sized by a plugin's own weights ("weight") labels each row's share of the root, not bytes
     const counts = frame.info.size_unit === "count";
+    const weights = frame.info.size_unit === "weight";
+    const total = weights ? weightTotal(frame) : 0;
     const settings: PaintSettings = {
       colorMode,
       palette,
       classIds,
       classColors: colors,
       scanning,
-      formatSize: counts ? (n) => fmtInt(n) : (b) => fmtSize(b),
+      formatSize: counts ? (n) => fmtInt(n) : weights ? (w) => shareText(w, total) : (b) => fmtSize(b),
       formatInt: (n) => fmtInt(n),
       formatDelta: (b) => fmtDelta(b),
       haloLevels,
@@ -660,4 +663,20 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       {empty && <div className="treemap-empty">{view?.state.compare ? t("两次之间没有变化") : t("这里没有任何占用空间的内容")}</div>}
     </div>
   );
+}
+
+/** The weight of a frame's root (a plugin's weights: the root bar, else the largest row). */
+export function weightTotal(frame: { info: { root: { size: number } | null }; size: ArrayLike<number | bigint> }): number {
+  if (frame.info.root?.size) return frame.info.root.size;
+  let max = 0;
+  for (let i = 0; i < frame.size.length; i++) max = Math.max(max, Number(frame.size[i]));
+  return max;
+}
+
+/** A weight as its share of the root: "12%", "0.4%", "<0.1%". */
+export function shareText(w: number, total: number): string {
+  if (!(total > 0)) return "—";
+  const p = (100 * w) / total;
+  if (p > 0 && p < 0.1) return "<0.1%";
+  return `${p < 10 ? p.toFixed(1) : p.toFixed(0)}%`;
 }

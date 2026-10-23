@@ -116,6 +116,7 @@ API_PERMISSIONS = {
     "exec": "exec",
     "basket": "basket.propose",
     "snapshots": "snapshots.read",
+    "clipboard": "clipboard",
 }
 # kinds whose handlers get a tree (so their code needs tree.read without naming ctx.tree)
 TREE_KINDS = frozenset({"node_field", "insight", "node_set", "export_format", "cleanup"})

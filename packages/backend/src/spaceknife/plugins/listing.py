@@ -72,6 +72,17 @@ class Collector:
                 parent.files[name] = (int(size[i]), int(alloc[i]), int(mt[i]), int(ct[i]), int(at[i]))
         return self.count
 
+    def use_size(self) -> None:
+        """Files count with their size (a source with ``size = "size"``: an archive's unpacked
+        sizes) where the tree shows the allocation."""
+
+        todo = [self.root]
+        while todo:
+            d = todo.pop()
+            for name, (size, _alloc, mt, ct, at) in list(d.files.items()):
+                d.files[name] = (size, size, mt, ct, at)
+            todo.extend(d.dirs.values())
+
 
 def build(root_name: str, top: _Dir, *, virtual: bool) -> NodeStore:
     """The store of one root: breadth first, folders then files of each folder by name."""

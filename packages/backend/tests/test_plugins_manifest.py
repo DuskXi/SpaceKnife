@@ -200,11 +200,24 @@ def test_links_in_a_folder_are_refused(tmp_path: Path) -> None:
 def test_uninstall_moves_to_the_bin(monkeypatch: pytest.MonkeyPatch) -> None:
     trashed: list[str] = []
     monkeypatch.setattr(inst, "TRASH", lambda paths: trashed.extend(paths) or [])
+    monkeypatch.setattr(inst, "REMOVE_OUTRIGHT", lambda _folder: False)  # as for a real data folder
     res = inst.install(fixture("t.decl"))
     assert res.folder is not None
     ppaths.data_dir("t.decl").mkdir(parents=True)
     inst.uninstall(res.folder, "t.decl", remove_data=True)
     assert trashed == [str(res.folder), str(ppaths.data_dir("t.decl"))]
+
+
+def test_uninstall_in_a_temporary_data_folder_removes_outright(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A trial run's data folder (SPACEKNIFE_HOME under the temporary folder, as in tests): nothing
+    goes to the user's recycle bin."""
+    trashed: list[str] = []
+    monkeypatch.setattr(inst, "TRASH", lambda paths: trashed.extend(paths) or [])
+    res = inst.install(fixture("t.decl"))
+    assert res.folder is not None and inst.REMOVE_OUTRIGHT(ppaths.plugins_dir())
+    ppaths.data_dir("t.decl").mkdir(parents=True)
+    inst.uninstall(res.folder, "t.decl", remove_data=True)
+    assert trashed == [] and not res.folder.exists() and not ppaths.data_dir("t.decl").exists()
 
 
 def test_icons_are_cleaned() -> None:

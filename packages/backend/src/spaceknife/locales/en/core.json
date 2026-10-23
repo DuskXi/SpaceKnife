@@ -167,5 +167,6 @@
  "部分内容未能删除：{detail}": "Some contents couldn't be deleted: {detail}",
  "错误 {code}": "Error {code}",
  "需要 poll()": "poll() is required",
- "；": "; "
+ "；": "; ",
+ "这个来源的条目不在磁盘上，不能删除": "Items of this source are not files on this disk: they cannot be deleted"
 }

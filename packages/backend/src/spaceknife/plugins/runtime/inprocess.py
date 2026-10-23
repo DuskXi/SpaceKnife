@@ -155,6 +155,17 @@ class InProcessRuntime(PluginRuntime):
                 )
                 return
             loop.run_forever()
+            # stopped: calls still running (a watcher, a stream) end as cancelled here, so none is
+            # destroyed pending when the loop closes
+            pending = asyncio.all_tasks(loop)
+            for task in pending:
+                task.cancel()
+            with contextlib.suppress(BaseException):
+                loop.run_until_complete(
+                    asyncio.wait_for(asyncio.gather(*pending, return_exceptions=True), 2.0)
+                )
+            with contextlib.suppress(BaseException):
+                loop.run_until_complete(loop.shutdown_asyncgens())
             loop.close()
 
         self.thread = threading.Thread(target=run, name=f"sk-plugin-{self.manifest.id}", daemon=True)
@@ -198,8 +209,13 @@ class InProcessRuntime(PluginRuntime):
         except CallError as err:
             raise RuntimeCallError(err.code, err.message, err.data) from None
         except asyncio.CancelledError:
+            me = asyncio.current_task()
+            if fut.cancelled() and (me is None or me.cancelling() == 0):
+                # not our caller giving up: the plugin's loop ended (stop, restart) with it running
+                raise RuntimeCallError(ErrorCode.PLUGIN_UNAVAILABLE, "the plugin stopped") from None
             waiter.add_done_callback(_retrieved)
-            loop.call_soon_threadsafe(d.cancel, call_id)
+            with contextlib.suppress(RuntimeError):  # its loop may be closed already
+                loop.call_soon_threadsafe(d.cancel, call_id)
             raise
         finally:
             self._calls.pop(call_id, None)
@@ -223,6 +239,7 @@ class InProcessRuntime(PluginRuntime):
     async def stop(self, grace: float = 2.0) -> None:
         d, loop = self.dispatcher, self.loop
         if d is not None and loop is not None and self.state == "running":
+            self.state = "stopping"  # no new calls while the stop hook runs and the loop ends
             hooks = [h for (kind, _name), h in d.plugin.handlers.items() if kind == "hook"]
             for h in hooks:
                 spec = next(

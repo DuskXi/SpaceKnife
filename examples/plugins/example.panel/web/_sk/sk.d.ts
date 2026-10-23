@@ -16,6 +16,10 @@ export interface PanelContext {
   view_id: string | null;
   node: number | null;
   selection: number[];
+  /** where the page is: "tab", "inspector" (the details column) or "dialog" */
+  slot?: "tab" | "inspector" | "dialog";
+  /** the panel's params from its declaration (one page placed twice, each with its own) */
+  params?: Record<string, string | number | boolean>;
   compare_id: string | null;
 }
 
@@ -63,8 +67,11 @@ export interface Sk<
   subscribe(stream: string, params: Record<string, unknown> | null, cb: (item: unknown | Columns) => void): () => void;
   onContext(cb: (ctx: PanelContext) => void): () => void;
   onLang(cb: (lang: "zh-CN" | "en") => void): () => void;
+  /** The tree of the context's scan changed (a rescan, files changed, the scan went on). */
+  onTree(cb: (e: { scan_id: string | null }) => void): () => void;
   host: {
-    select(node: number | NodeRef): Promise<null>;
+    /** Select it in its scan's view; { stay: true }: the user stays where the panel is. */
+    select(node: number | NodeRef, opts?: { stay?: boolean }): Promise<null>;
     zoom(node: number | NodeRef): Promise<null>;
     filter(expr: string): Promise<null>;
     /** one of this plugin's commands, by its full id */

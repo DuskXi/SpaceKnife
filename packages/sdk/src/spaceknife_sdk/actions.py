@@ -109,6 +109,9 @@ def _short(kind: str, value: Any, rest: dict[str, Any]) -> dict[str, Any]:
     if kind == "url":
         extra()
         return {"kind": "url", "url": value}
+    if kind == "scan_source":
+        extra("uri")
+        return {"kind": "scan_source", "source": value, "uri": str(rest.get("uri", "$node"))}
     extra()
     return {"kind": "builtin", "name": value}
 
@@ -137,6 +140,8 @@ def _check(a: dict[str, Any]) -> None:
         raise ActionError("url: only https:// addresses")
     if kind == "setting" and a.get("value") is None and not a.get("toggle"):
         raise ActionError("setting: a value, or toggle = true")
+    if kind == "scan_source" and not (isinstance(a.get("source"), str) and a["source"]):
+        raise ActionError("scan_source: the source's name")
 
 
 def _local_ref(ref: str, plugin: str) -> str:
@@ -166,6 +171,8 @@ def resolve_action(norm: dict[str, Any], plugin: str) -> Action:
         a["method"] = wire_name(owner, local)
     elif kind == "command":
         a["command"] = _local_ref(a["command"], plugin)
+    elif kind == "scan_source":
+        a["source"] = _local_ref(str(a.get("source", "")), plugin)
     elif kind == "setting":
         key = a["key"]
         a["key"] = f"plugin.{plugin}.{key}" if valid_local_name(key) else key

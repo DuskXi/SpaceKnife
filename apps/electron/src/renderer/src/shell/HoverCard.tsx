@@ -8,7 +8,7 @@ import { call } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
 import { type ColorMode, fillOf, labelColors } from "@/treemap/paint";
 import { Flag, Kind } from "@/visual/frame";
-import { pointerBox } from "@/visual/Host";
+import { pointerBox, shareText, weightTotal } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors, classHex } from "@/lib/classes";
@@ -131,8 +131,11 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const fill = fillOf(facts.columns, facts.row, colorMode as ColorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classes, palette);
   const [fg] = labelColors(fill);
   const bg = `rgb(${fill.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
-  // a visualization sized by file count (size_unit "count"): the number of items, not bytes
-  const [num, unit] = f.info.size_unit === "count" ? [fmtInt(facts.size), t("项")] : sizeParts(facts.size);
+  // a visualization sized by file count (size_unit "count"): the number of items, not bytes; by a
+  // plugin's weights ("weight"): its share of the root, and the real size on disk below
+  const weighted = f.info.size_unit === "weight";
+  const [num, unit] =
+    f.info.size_unit === "count" ? [fmtInt(facts.size), t("项")] : weighted ? [shareText(facts.size, weightTotal(f)), t("的权重")] : sizeParts(facts.size);
   const cls = vocab?.classes[facts.cls];
   const dir = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
   const named = rowTitle(f, shown.target, { scanning, formatInt: (n) => fmtInt(n) }).line1;
@@ -162,7 +165,9 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
             <span className="muted">{withNodes(t("占 {name} {share}"), { name: parentName, share: <span className="mono strong">{fmtPct(node.alloc, parentAlloc)}</span> })}</span>
           )}
         </div>
-        {flags & Flag.TRASH ? <TrashLine bin={(flags & Flag.TRASH_BIN) !== 0} size={facts.size} /> : null}
+        {/* a plugin's weights drew the area: what it takes on disk is still the real size */}
+        {weighted && node && <div className="muted small">{t("磁盘上占 {size}", { size: fmtSize(node.alloc) })}</div>}
+        {flags & Flag.TRASH && !weighted ? <TrashLine bin={(flags & Flag.TRASH_BIN) !== 0} size={facts.size} /> : null}
         {node && (
           <div className="hc-class muted">
             {dir ? (

@@ -19,6 +19,7 @@ import type {
   OpenAction,
   Report,
   ReportContext,
+  ScanSourceAction,
   SettingAction,
   Toast,
   ToggleAction,
@@ -170,6 +171,7 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
     const { visual, ...rest } = a.settings as ViewSettingsParams & { visual?: string };
     if (visual) await COMMANDS.pickVisual(viewId, visual);
     if (Object.keys(rest).length) await setViewSettings(viewId, rest);
+    showViewTab(viewId);
   },
 
   async cycle(a: CycleAction, rc) {
@@ -198,6 +200,22 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
     const viewId = rc.viewId ?? focusedViewId();
     if (!viewId) return toast(t("需要先完成扫描"));
     await editFilter(viewId, a.expr, null, true);
+    showViewTab(viewId); // from a report's tab: the user sees what the filter did
+  },
+
+  async scan_source(a: ScanSourceAction, rc) {
+    const { startSourceScan } = await import("./sources");
+    let uri = a.uri;
+    if (uri === "$node") {
+      const ctx = actionContext(rc);
+      if (!ctx.scan_id || ctx.node == null || ctx.node <= 0) return toast(t("没有选中项"));
+      const r = await call("tree.node", { scan_id: ctx.scan_id, node: ctx.node });
+      if (!r.on_disk) return toast(t("这个位置不在磁盘上"));
+      uri = r.path;
+    }
+    const known = get().extensions?.sources.find((x) => x.id === a.source);
+    if (!known) return toast(t("没有这个扫描来源：{id}", { id: a.source }));
+    await startSourceScan(known, uri);
   },
 
   async setting(a: SettingAction, rc) {
@@ -263,6 +281,13 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
     if (yes) window.sk.shell.openUrl(a.url);
   },
 };
+
+/** Bring the scan tab of `viewId` forward when the user is on another tab (a report's, a panel's). */
+function showViewTab(viewId: string): void {
+  const s = get();
+  const tab = s.tabs.find((x) => x.kind === "scan" && x.viewIds.includes(viewId));
+  if (tab && s.active !== tab.id) set({ active: tab.id });
+}
 
 /** Run an action; never throws (what went wrong is shown in a toast). */
 export async function runAction(action: Action | null | undefined, rc: RunContext): Promise<void> {

@@ -25,6 +25,8 @@ const stateValues = new Map();
 const subs = new Map();
 const contextHandlers = new Set();
 const langHandlers = new Set();
+const treeHandlers = new Set();
+let gotContext = false;
 const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {} };
 let mock = null;
 
@@ -74,8 +76,12 @@ function onPortMessage(ev) {
     case "context":
       info.context = Object.assign({}, m);
       delete info.context.type;
+      gotContext = true;
       for (const cb of contextHandlers) cb(info.context);
       maybeReady();
+      return;
+    case "tree":
+      for (const cb of treeHandlers) cb({ scan_id: m.scan_id });
       return;
     case "theme":
       applyTheme({ mode: m.mode, vars: m.vars });
@@ -88,7 +94,8 @@ function onPortMessage(ev) {
 }
 
 function maybeReady() {
-  if (isReady || !info.theme) return;
+  // ready once the theme and the first context are here (sk.context is never {} after sk.ready)
+  if (isReady || !info.theme || !gotContext) return;
   isReady = true;
   markReady(info);
 }
@@ -167,6 +174,7 @@ if (mockFile) {
       mock = data || {};
       applyLang(mock.lang || info.lang);
       info.context = mock.context || {};
+      gotContext = true;
       for (const [name, value] of Object.entries(mock.states || {})) stateValues.set(name, value);
       applyTheme({ mode: "dark", vars: {} });
       maybeReady();
@@ -246,8 +254,14 @@ const sk = {
     langHandlers.add(cb);
     return () => langHandlers.delete(cb);
   },
+  /** The tree of the context's scan changed (a rescan, files changed, the scan went on). */
+  onTree(cb) {
+    treeHandlers.add(cb);
+    return () => treeHandlers.delete(cb);
+  },
   host: {
-    select: (ref) => host("select")(refArgs(ref)),
+    /** Select a node in its scan's view; { stay: true }: without bringing that tab forward. */
+    select: (ref, opts) => host("select")(Object.assign(refArgs(ref), opts && opts.stay ? { stay: true } : {})),
     zoom: (ref) => host("zoom")(refArgs(ref)),
     filter: (expr) => host("filter")({ expr }),
     command: (command) => host("command")({ command }),

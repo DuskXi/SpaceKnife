@@ -430,6 +430,11 @@ class ScanSourceSpec(Spec):
     on_disk: bool = False
     ops: bool = False
     watch: bool = False
+    size: Literal["alloc", "size"] = Field(
+        default="alloc",
+        description="What the tree shows as a file's size: alloc (as listed) or size (an archive's "
+        "unpacked size, for one)",
+    )
 
     @model_validator(mode="after")
     def _ops(self) -> ScanSourceSpec:

@@ -262,7 +262,7 @@ interface VisualInstance<F> {
 
 **现在有**
 - 后端 `ENGINE_API`、`Engine` 协议、`Visualization` 描述符、注册表、行契约检查；内置可视化和插件走同一条 `register()`（扩展注册表的 `visualization` 点）。服务端的能力从注册表推导，不再是固定的列表。
-- 插件的可视化是**变体**：选一个内置引擎（`base = treemap | flame | flame_polar`），换一种面积口径（`size = alloc | size | files | items`），或者由插件的函数给每个文件一个权重（`size = "code"`，在插件进程里算，宿主加到文件夹上，按扫描版本缓存，每帧 120 ms 的预算，失败三次后这次会话不再用）。布局格式仍然只有我们维护的三种，`size_unit` 决定标签写字节还是项数。
+- 插件的可视化是**变体**：选一个内置引擎（`base = treemap | flame | flame_polar`），换一种面积口径（`size = alloc | size | files | items`），或者由插件的函数给每个文件一个权重（`size = "code"`，在插件进程里算，宿主加到文件夹上，按扫描版本缓存，每帧 120 ms 的预算，失败三次后这次会话不再用）。布局格式仍然只有我们维护的三种，`size_unit` 决定标签怎么写：`bytes` 写大小，`count` 写项数，`weight`（`size = "code"` 的默认，也可以用 `unit` 指定）写这一行占缩放根权重的比例（例如「12%」），悬停卡片另写这一项在磁盘上的真实大小。权重不是字节，所以不会按字节格式化。
 - 配色模式也可以来自插件：声明式的规则由宿主算，代码的由插件给每个画出的行一个色板下标，帧里多一列 `pal`（`colors.v1`）。
 - `plugin check` 和 `MockHost.visual()` 用 `check_draw(full=True)` 检查插件可视化的每一帧；`test_layout_contract.py` 照旧覆盖内置引擎。
 - 前端 `VISUAL_API`、`VisualComponent`、注册表、一致性测试辅助不变（前端组件不对插件开放）。

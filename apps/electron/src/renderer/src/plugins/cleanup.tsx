@@ -85,6 +85,8 @@ export function CleanupDialog() {
     return () => window.removeEventListener("keydown", key, true);
   }, [c]);
   const totals = useMemo(() => checkedTotals(items, checked), [items, checked]);
+  // what the cleanup says it does (its declaration), under the title
+  const description = useApp((s) => (c?.result ? (s.extensions?.cleanups.find((x) => x.id === c.result!.origin)?.description ?? "") : ""));
   if (!c) return null;
   const r = c.result;
   const shown = pageOf(items, page, PAGE);
@@ -119,6 +121,7 @@ export function CleanupDialog() {
             <Icon name="close" />
           </button>
         </div>
+        {description && <p className="cleanup-description muted small">{description}</p>}
         {c.loading ? (
           <div className="cleanup-busy">
             {progress ? <ProgressLine done={progress.done} total={progress.total} text={progress.text} /> : <span className="muted">{t("正在找出可以清理的项…")}</span>}

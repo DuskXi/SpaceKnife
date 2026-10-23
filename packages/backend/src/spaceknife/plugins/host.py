@@ -28,6 +28,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import (
     EVENT_EXTENSIONS,
     EVENT_PLUGIN,
+    EVENT_PLUGIN_CLIPBOARD,
     EVENT_PLUGIN_PROGRESS,
     EVENT_PLUGIN_TOAST,
     MethodSpec,
@@ -712,6 +713,18 @@ class PluginHost:
             target = self._session(payload.get("session"))
             for s in [target] if target is not None else self._sessions():
                 s.emit(EVENT_PLUGIN_TOAST, ev)
+        elif type == "clipboard":
+            # ctx.clipboard.write_text: only with the permission, only for the session that asked
+            # (a background call with no session writes nobody's clipboard)
+            target = self._session(payload.get("session"))
+            if "clipboard" not in rec.granted or target is None:
+                logger.bind(source=f"plugin:{rec.id}").warning(
+                    "clipboard text dropped: {}",
+                    "no clipboard permission" if "clipboard" not in rec.granted else "no session asked",
+                )
+                return
+            text = str(payload.get("text", ""))[: 1 << 20]
+            target.emit(EVENT_PLUGIN_CLIPBOARD, pp.PluginClipboardEvent(plugin=rec.id, text=text))
         elif type == "progress":
             site = self._sites.get(int(payload.get("id", 0)))
             if site is None or site[1] is None:

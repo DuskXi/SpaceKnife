@@ -86,8 +86,8 @@ export function panelPolicy(self: string, ancestors: readonly string[]): string 
     "base-uri 'none'",
     `frame-ancestors ${ancestors.join(" ") || "'none'"}`,
     "sandbox allow-scripts",
-    // WebRTC is outside connect-src; where the browser knows this directive it blocks it too
-    "webrtc 'block'",
+    // WebRTC is outside connect-src: guard.js takes it away and plugin check refuses it ("webrtc
+    // 'block'" is left out: Chromium does not know it and logs an error for every panel)
   ].join("; ");
 }
 

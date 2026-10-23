@@ -19,6 +19,7 @@ const mode = (over: Partial<ColorModeInfo> = {}): ColorModeInfo => ({
   title: "媒体类型",
   palette: ["muted", "#3F7FBF", "class:video", { light: "#111111", dark: "#EEEEEE" }],
   legend: ["其他", "视频", "图片", ""],
+  legend_colors: [],
   folders: "ring",
   layouts: [],
   ...over,
@@ -64,6 +65,21 @@ describe("palette entries", () => {
     expect(resolveColor("url(javascript:x)", classHex)).toBe(neutral);
     expect(resolveColor(null, classHex)).toBe(neutral);
     expect(toneColor(null, classHex)).toBeNull();
+  });
+
+  it("reads tones in every form: themed, and an entry of a plugin's colour mode", () => {
+    expect(toneColor({ light: "#111111", dark: "#EEEEEE" }, classHex)).toBe("#EEEEEE");
+    expect(toneColor("palette:t.decl.media#1", classHex, ext([mode()]))).toBe("#3F7FBF");
+    expect(toneColor("palette:t.decl.media#2", classHex, ext([mode()]))).toBe("#AA0000");
+    expect(toneColor("palette:no.such#1", classHex, ext([mode()]))).toBe(resolveColor("muted", classHex));
+  });
+
+  it("takes a legend's own colours when the plugin gives them", () => {
+    const m = mode({ legend: ["a", "b", "", ""], legend_colors: [null, "#123456", null, null] });
+    expect(legendOf(m, classHex)).toEqual([
+      { color: resolveColor("muted", classHex), text: "a" },
+      { color: "#123456", text: "b" },
+    ]);
   });
 
   it("builds the painters' palette and the legend; built-in modes have none", () => {

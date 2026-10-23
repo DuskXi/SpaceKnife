@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "17e8d46831932bbf";
+export const SCHEMA_HASH = "d643130b57a38805";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -49,7 +49,7 @@ export interface AttrSet {
 export interface BarItem {
   label: string;
   node: NodeRef | null;
-  tone: string | null;
+  tone: string | ThemedColor | null;
   unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
   value: number;
 }
@@ -344,6 +344,8 @@ export interface ColorModeInfo {
   /** Layouts it applies to (empty: all) */
   layouts: string[];
   legend: string[];
+  /** A colour per legend entry from the plugin (None: the palette's) */
+  legend_colors: (string | ThemedColor | null)[];
   /** 0: neutral; semantic name, token, class:<id>, #RRGGBB or themed */
   palette: (string | ThemedColor)[];
   plugin: string | null;
@@ -485,6 +487,16 @@ export interface Completion {
   typed: string;
 }
 
+/** What a plugin adds of one kind, for the enable dialog (``plugin enable`` prints the same). */
+export interface ContributionGroup {
+  count: number;
+  /** Each one's title (at most 50) */
+  items: string[];
+  kind: string;
+  /** The kind, in the interface language */
+  title: string;
+}
+
 export interface Crumb {
   key: number;
   /** Folder name; 'small:N' / 'more:N' for an aggregate block */
@@ -590,11 +602,36 @@ export interface ExportIssue {
   severity: "error" | "warning";
 }
 
+/**
+ * A field of the export dialog that a plugin's format declares (``options`` of
+ * ``export_format``); its value goes to export.run ``options`` under ``name``.
+ */
+export interface ExportOption {
+  control: "switch" | "segmented" | "number" | "slider" | "color" | "text";
+  default: boolean | number | string;
+  description: string;
+  max: number | null;
+  min: number | null;
+  name: string;
+  options: SettingOption[];
+  placeholder: string;
+  step: number | null;
+  title: string;
+  /** B: a size in bytes (shown and typed as a size) */
+  unit: string;
+}
+
 export interface ExportRunParams {
+  /** scope node: the node */
+  node?: number | null;
+  /** Values of the format's options (by name) */
+  options?: Record<string, boolean | number | string>;
   /** The file to write (its folder must exist) */
   path: string;
-  /** The view's zoom root, or every scan root */
-  scope?: "zoom" | "all";
+  /** The view's zoom root, every scan root, the selected nodes (selection, else the view's), or one node (node) */
+  scope?: "zoom" | "all" | "selection" | "node";
+  /** scope selection */
+  selection?: number[];
   /** A template's text instead */
   source?: string | null;
   /** A target name; empty with source */
@@ -621,6 +658,8 @@ export interface ExportTarget {
   kind: "template" | "format";
   /** What export.run takes: the template's SpaceSniffer name, or csv / json / html */
   name: string;
+  /** Fields of a plugin's format */
+  options: ExportOption[];
   /** The plugin that adds it (name is its full id) */
   plugin: string | null;
   /** Also built into SpaceSniffer */
@@ -669,9 +708,13 @@ export interface FilterClassInfo {
   aliases: string[];
   /** #RRGGBB chosen by the user; empty: the theme's colour for the id */
   color: string;
+  /** A plugin's class: its colour for a light theme */
+  color_light: string;
   extensions: string[];
   id: string;
   name: string;
+  /** A plugin's class: its English name (shown in English) */
+  name_en: string;
 }
 
 /** An error (the expression is not applied) or, with ``severity="warning"``, a hint. */
@@ -841,7 +884,7 @@ export interface FrameInfo {
   selected_row: number | null;
   seq: number;
   /** What 'size' counts: bytes, or files / items */
-  size_unit: "bytes" | "count";
+  size_unit: "bytes" | "count" | "weight";
   view_id: string;
   /** Visualization that drew this frame */
   visual: string;
@@ -911,6 +954,16 @@ export interface InsightNodeResult {
   cards: InsightCard[];
 }
 
+export interface InsightNodesParams {
+  nodes: number[];
+  scan_id: string;
+}
+
+export interface InsightNodesResult {
+  /** The rules' card of each node (None: no rule) */
+  cards: (InsightCard | null)[];
+}
+
 /** Disk-load state of one physical disk (W2 curve, status bar UI-MAIN-50). */
 export interface IoStatus {
   /** Raw busy time (Task Manager 'active time'), % */
@@ -954,6 +1007,16 @@ export interface IoStatusList {
   disks: IoStatus[];
 }
 
+export interface KeyInfo {
+  /** The command's full id */
+  command: string;
+  /** The command that already has the key ('' = none) */
+  conflict: string;
+  key: string;
+  /** The command's title */
+  title: string;
+}
+
 export interface KvBlock {
   items: KvItem[];
   type: "kv";
@@ -967,7 +1030,7 @@ export interface KvItem {
 }
 
 export interface LabeledAction {
-  action: CallAction | OpenAction | CommandAction | ViewAction | CycleAction | ToggleAction | FilterAction | SettingAction | CleanupAction | NodeAction | UrlAction | BuiltinAction;
+  action: CallAction | OpenAction | CommandAction | ViewAction | CycleAction | ToggleAction | FilterAction | SettingAction | CleanupAction | NodeAction | UrlAction | ScanSourceAction | BuiltinAction;
   icon: string;
   label: string;
 }
@@ -1042,7 +1105,7 @@ export interface MdBlock {
 export interface MeterBlock {
   label: string;
   max: number;
-  tone: string | null;
+  tone: string | ThemedColor | null;
   type: "meter";
   unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
   value: number;
@@ -1166,7 +1229,7 @@ export interface PaletteClearParams {
 
 export interface PaletteCommand {
   /** plugins.v1: what running it does (None: the frontend's own handler) */
-  action: CallAction | OpenAction | CommandAction | ViewAction | CycleAction | ToggleAction | FilterAction | SettingAction | CleanupAction | NodeAction | UrlAction | BuiltinAction | null;
+  action: CallAction | OpenAction | CommandAction | ViewAction | CycleAction | ToggleAction | FilterAction | SettingAction | CleanupAction | NodeAction | UrlAction | ScanSourceAction | BuiltinAction | null;
   enabled: boolean;
   /** Matched characters of the name */
   hits: Span[];
@@ -1306,9 +1369,15 @@ export interface PanelInfo {
   height: number;
   icon: string;
   id: string;
+  /** A tab in the background keeps its page */
+  keep: boolean;
+  /** Given to the page in its context (sk.context().params) */
+  params: Record<string, string | number | boolean>;
   /** What its bridge may do */
   permissions: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard")[];
   plugin: string;
+  /** For tabs and narrow places ('' = the title) */
+  short_title: string;
   slot: "tab" | "inspector" | "dialog";
   title: string;
   when: string[];
@@ -1316,7 +1385,7 @@ export interface PanelInfo {
 
 export interface PartItem {
   label: string;
-  tone: string | null;
+  tone: string | ThemedColor | null;
   value: number;
 }
 
@@ -1447,12 +1516,25 @@ export interface PluginChangedEvent {
   state: "enabled" | "disabled" | "needs_confirm" | "changed" | "incompatible" | "error" | "crashed";
 }
 
+/**
+ * A plugin's ``ctx.clipboard.write_text`` (it has ``clipboard``): the frontend puts the text on
+ * the clipboard and says so. Only the session the call came from gets it.
+ */
+export interface PluginClipboardEvent {
+  plugin: string;
+  text: string;
+}
+
 /** What the enable dialog shows before the user confirms. */
 export interface PluginDescribeResult {
   /** Permissions the confirmed version did not ask for (an update) */
   added: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard")[];
   /** Key conflicts, as text */
   conflicts: string[];
+  /** What it adds, by kind (its code's contributions too) */
+  groups: ContributionGroup[];
+  /** The keys it binds */
+  keys: KeyInfo[];
   plugin: PluginInfo;
   /** What it adds, as text lines */
   summary: string[];
@@ -1474,7 +1556,7 @@ export interface PluginField {
   node: NodeRef | null;
   plugin: string;
   title: string;
-  tone: string | null;
+  tone: string | ThemedColor | null;
   unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
   value: string | number | boolean | null;
 }
@@ -1766,6 +1848,14 @@ export interface ScanSetLoadParams {
   scan_id: string;
 }
 
+export interface ScanSourceAction {
+  kind: "scan_source";
+  /** Full id of a scan source */
+  source: string;
+  /** What to list; "$node": the selected node */
+  uri: string;
+}
+
 export interface ScanStartParams {
   /** Count NTFS alternate data streams (MFT scans); None = the setting */
   ads?: boolean | null;
@@ -1895,6 +1985,8 @@ export interface SettingMeta {
   min: number | null;
   name: string;
   options: SettingOption[];
+  /** Shown in an empty text field */
+  placeholder: string;
   /** The plugin it belongs to (category 'plugins') */
   plugin: string | null;
   /** Why the setting is disabled (platform, or the milestone that wires it) */
@@ -2030,6 +2122,8 @@ export interface SourceInfo {
   pick: "folder" | "file" | "text";
   placeholder: string;
   plugin: string;
+  /** What its tree's sizes are */
+  size: "alloc" | "size";
   title: string;
   watch: boolean;
 }
@@ -2056,7 +2150,7 @@ export interface StatItem {
   delta: number | null;
   hint: string;
   label: string;
-  tone: string | null;
+  tone: string | ThemedColor | null;
   unit: "size" | "count" | "pct" | "date" | "ago" | "duration" | "bytes_per_s" | "text" | "path";
   value: string | number | boolean | null;
 }
@@ -2128,6 +2222,7 @@ export interface TagCond {
   text: string;
 }
 
+/** A colour per theme (``{light = "#…", dark = "#…"}``); the app draws the one of its theme. */
 export interface ThemedColor {
   dark: string;
   light: string;
@@ -2495,7 +2590,7 @@ export interface VisualInfo {
   /** Why it is not available (display text) */
   reason: string | null;
   /** What its areas count */
-  size_unit: "bytes" | "count";
+  size_unit: "bytes" | "count" | "weight";
 }
 
 export interface VisualListResult {
@@ -2615,6 +2710,8 @@ export interface Methods {
   "filter.vocab": { params: Empty; result: FilterVocab };
   /** Insight cards of a node: matching rules first, then what plugins say. */
   "insight.node": { params: InsightNodeParams; result: InsightNodeResult };
+  /** The insight rules' card of each of many nodes (no plugin code runs; for filters and plugins). */
+  "insight.nodes": { params: InsightNodesParams; result: InsightNodesResult };
   /** Load state of every local disk, with history. */
   "io.status": { params: Empty; result: IoStatusList };
   /** This computer's disks with their links, the volumes on each and what scans tell of each volume. */
@@ -2792,6 +2889,8 @@ export interface Events {
   "ops.progress": OpProgressEvent;
   /** A plugin's state changed (plugins.v1). */
   "plugin.changed": PluginChangedEvent;
+  /** A plugin puts text on the clipboard (it has clipboard). */
+  "plugin.clipboard": PluginClipboardEvent;
   /** Progress of a plugin call (reports, cleanups). */
   "plugin.progress": PluginProgressEvent;
   /** A plugin shows a short message. */

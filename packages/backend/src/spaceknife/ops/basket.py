@@ -46,6 +46,7 @@ TEXT = Texts(
         "group_name": "{folder} 中 {count} 个小项",
         "bad_node": "扫描结果中没有这一项",
         "virtual": "MFT 伪文件夹中的项不在磁盘上",
+        "source": "这个来源的条目不在磁盘上，不能删除",
         "not_folder": "小项聚合块的所在位置不是文件夹",
         "not_member": "不是所在文件夹的直接子项",
         "missing": "已不存在",
@@ -424,8 +425,10 @@ class Basket:
         c = store.cols
         if node <= 0 or node >= len(store) or c["flags"][node] & np.uint32(Flag.GONE):
             return TEXT["bad_node"]
-        if any(c["flags"][n] & np.uint32(Flag.VIRTUAL) for n in (node, *store.ancestors(node))):
-            return TEXT["virtual"]
+        marked = [n for n in (node, *store.ancestors(node)) if c["flags"][n] & np.uint32(Flag.VIRTUAL)]
+        if marked:
+            # a scan source's tree (its root is marked) is not on this disk; MFT pseudo folders are
+            return TEXT["source"] if int(c["parent"][marked[-1]]) == 0 else TEXT["virtual"]
         return None
 
     def _add_node(

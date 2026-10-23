@@ -336,7 +336,7 @@ def _open_dir(path: str, flags: int) -> int:
     except OSError as exc:
         if exc.errno != errno.ENAMETOOLONG:
             raise
-    middle = getattr(os, "O_PATH", os.O_RDONLY) | os.O_DIRECTORY | os.O_CLOEXEC
+    middle = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
     rest = os.fsencode(path)
     fd: int | None = None
     try:

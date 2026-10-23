@@ -4737,6 +4737,7 @@
               "filter": "#/$defs/FilterAction",
               "node": "#/$defs/NodeAction",
               "open": "#/$defs/OpenAction",
+              "scan_source": "#/$defs/ScanSourceAction",
               "setting": "#/$defs/SettingAction",
               "toggle": "#/$defs/ToggleAction",
               "url": "#/$defs/UrlAction",
@@ -4777,6 +4778,9 @@
             },
             {
               "$ref": "#/$defs/UrlAction"
+            },
+            {
+              "$ref": "#/$defs/ScanSourceAction"
             },
             {
               "$ref": "#/$defs/BuiltinAction"
@@ -5651,6 +5655,7 @@
                   "filter": "#/$defs/FilterAction",
                   "node": "#/$defs/NodeAction",
                   "open": "#/$defs/OpenAction",
+                  "scan_source": "#/$defs/ScanSourceAction",
                   "setting": "#/$defs/SettingAction",
                   "toggle": "#/$defs/ToggleAction",
                   "url": "#/$defs/UrlAction",
@@ -5691,6 +5696,9 @@
                 },
                 {
                   "$ref": "#/$defs/UrlAction"
+                },
+                {
+                  "$ref": "#/$defs/ScanSourceAction"
                 },
                 {
                   "$ref": "#/$defs/BuiltinAction"
@@ -6372,6 +6380,33 @@
           "title": "Id",
           "type": "string"
         },
+        "keep": {
+          "default": true,
+          "description": "A tab in the background keeps its page",
+          "title": "Keep",
+          "type": "boolean"
+        },
+        "params": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "description": "Given to the page in its context (sk.context().params)",
+          "title": "Params",
+          "type": "object"
+        },
         "permissions": {
           "description": "What its bridge may do",
           "items": {
@@ -6392,6 +6427,12 @@
         },
         "plugin": {
           "title": "Plugin",
+          "type": "string"
+        },
+        "short_title": {
+          "default": "",
+          "description": "For tabs and narrow places ('' = the title)",
+          "title": "Short Title",
           "type": "string"
         },
         "slot": {
@@ -7068,6 +7109,26 @@
         "state"
       ],
       "title": "PluginChangedEvent",
+      "type": "object"
+    },
+    "PluginClipboardEvent": {
+      "description": "A plugin's ``ctx.clipboard.write_text`` (it has ``clipboard``): the frontend puts the text on\nthe clipboard and says so. Only the session the call came from gets it.",
+      "properties": {
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 1048576,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin",
+        "text"
+      ],
+      "title": "PluginClipboardEvent",
       "type": "object"
     },
     "PluginDescribeResult": {
@@ -8629,6 +8690,33 @@
       "title": "ScanSetLoadParams",
       "type": "object"
     },
+    "ScanSourceAction": {
+      "properties": {
+        "kind": {
+          "const": "scan_source",
+          "default": "scan_source",
+          "title": "Kind",
+          "type": "string"
+        },
+        "source": {
+          "description": "Full id of a scan source",
+          "title": "Source",
+          "type": "string"
+        },
+        "uri": {
+          "default": "$node",
+          "description": "What to list; \"$node\": the selected node",
+          "maxLength": 4096,
+          "title": "Uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "ScanSourceAction",
+      "type": "object"
+    },
     "ScanStartParams": {
       "additionalProperties": false,
       "properties": {
@@ -9436,6 +9524,12 @@
           "title": "Options",
           "type": "array"
         },
+        "placeholder": {
+          "default": "",
+          "description": "Shown in an empty text field",
+          "title": "Placeholder",
+          "type": "string"
+        },
         "plugin": {
           "anyOf": [
             {
@@ -10097,6 +10191,16 @@
         },
         "plugin": {
           "title": "Plugin",
+          "type": "string"
+        },
+        "size": {
+          "default": "alloc",
+          "description": "What its tree's sizes are",
+          "enum": [
+            "alloc",
+            "size"
+          ],
+          "title": "Size",
           "type": "string"
         },
         "title": {
@@ -12797,6 +12901,10 @@
     "plugin.changed": {
       "doc": "A plugin's state changed (plugins.v1).",
       "payload": "#/$defs/PluginChangedEvent"
+    },
+    "plugin.clipboard": {
+      "doc": "A plugin puts text on the clipboard (it has clipboard).",
+      "payload": "#/$defs/PluginClipboardEvent"
     },
     "plugin.progress": {
       "doc": "Progress of a plugin call (reports, cleanups).",

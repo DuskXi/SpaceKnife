@@ -602,6 +602,11 @@ class MockHost:
     def toasts(self) -> list[str]:
         return [p["text"] for n, p in self.session.sent if n == "plugin.toast"]
 
+    @property
+    def clipboard(self) -> list[str]:
+        """What ``ctx.clipboard.write_text`` copied, oldest first (calls of this test's session)."""
+        return [p["text"] for n, p in self.session.sent if n == "plugin.clipboard"]
+
     def state(self, name: str) -> dict[str, Any]:
         rec = self.server.plugins.records[self.plugin_id]
         return dict(rec.states.get(name, {}))

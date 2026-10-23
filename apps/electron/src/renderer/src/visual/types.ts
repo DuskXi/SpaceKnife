@@ -115,7 +115,7 @@ export interface VisualGeometry<F extends VisualFrame = VisualFrame> {
 export interface PaintSettings {
   colorMode: ColorMode;
   /** a plugin's colour mode: its palette (the frame's pal column indexes it); null for the built-in ones */
-  palette: PalettePaint | null;
+  palette?: PalettePaint | null;
   classIds: string[];
   /** hex colour per class index (W7 文件类别: user colours); the theme's by id when missing */
   classColors: string[];

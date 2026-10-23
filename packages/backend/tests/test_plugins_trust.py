@@ -130,6 +130,7 @@ async def test_uninstall_forgets_the_confirmation(monkeypatch: pytest.MonkeyPatc
         return []
 
     monkeypatch.setattr(inst, "TRASH", to_bin)
+    monkeypatch.setattr(inst, "REMOVE_OUTRIGHT", lambda _folder: False)  # as for a real data folder
     copy_plugin("t.decl", ppaths.plugins_dir())
     srv = await _server()
     try:

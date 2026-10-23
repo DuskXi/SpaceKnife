@@ -198,6 +198,10 @@ def _in_temp(path: Path) -> bool:
         return False
 
 
+# whether uninstalling removes outright instead of using the recycle bin (tests replace it)
+REMOVE_OUTRIGHT: Callable[[Path], bool] = _in_temp
+
+
 def uninstall(folder: Path, plugin: str, *, remove_data: bool) -> None:
     """Move the plugin's folder (and its data) to the recycle bin; with a data folder in the
     temporary folder (tests, trial runs) they are removed outright (nothing to restore there)."""
@@ -205,7 +209,7 @@ def uninstall(folder: Path, plugin: str, *, remove_data: bool) -> None:
     data = ppaths.data_dir(plugin)
     if remove_data and data.exists():
         targets.append(str(data))
-    if _in_temp(ppaths.plugins_dir()):
+    if REMOVE_OUTRIGHT(ppaths.plugins_dir()):
         for t in targets:
             shutil.rmtree(t, ignore_errors=True)
         shutil.rmtree(ppaths.cache_dir(plugin), ignore_errors=True)

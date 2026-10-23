@@ -1136,6 +1136,7 @@ def meta() -> list[SettingMeta]:
                 reason=_(s.reason) if s.reason else "",
                 depends=s.depends,
                 plugin=s.plugin,
+                placeholder=s.text("placeholder", "") if s.plugin else "",
             )
         )
     return out

@@ -120,7 +120,8 @@ export function Toolbar() {
       )}
       {settingsTab && <SettingsSearch />}
       {helpTab && <HelpSearch />}
-      {!split && !settingsTab && !helpTab && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
+      {/* a plugin's tab has no view of its own: no filter box there (its filter buttons filter the scan's tab) */}
+      {!split && !settingsTab && !helpTab && tab.kind !== "plugin" && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
       <div className="toolbar-right">
         {cmp && (
           <>

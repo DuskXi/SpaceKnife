@@ -794,6 +794,8 @@ def _rss() -> int:
         if sys.platform.startswith("linux"):
             with open("/proc/self/statm") as fh:
                 return int(fh.read().split()[1]) * os.sysconf("SC_PAGE_SIZE")
+        if sys.platform == "win32":  # no resource module there (the host reads it from outside)
+            return 0
         import resource
 
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss

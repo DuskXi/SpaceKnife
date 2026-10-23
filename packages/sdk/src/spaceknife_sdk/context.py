@@ -189,6 +189,22 @@ class Basket:
         return int(value.get("added", 0))
 
 
+class Clipboard:
+    """``ctx.clipboard``: put text on the user's clipboard. Needs ``clipboard``."""
+
+    def __init__(self, ctx: Context) -> None:
+        self._ctx = ctx
+
+    def write_text(self, text: Text | str) -> None:
+        """Copy ``text`` (≤ 1 MiB): the app of the user who started the call puts it on the
+        clipboard and says so. From a call no user started (a hook, a watcher) nothing is copied."""
+        require(self._ctx._state, "clipboard")
+        value = localize(text) if not isinstance(text, str) else text
+        self._ctx._link.notify(
+            "clipboard", {"text": str(value)[: 1 << 20], "session": self._ctx.call_info.session}
+        )
+
+
 class Files:
     """``ctx.files``: read files inside the scanned folders. Needs ``files.read``."""
 
@@ -375,6 +391,7 @@ class Context:
         self._last_toast = 0.0
         self.settings = Settings(self)
         self.basket = Basket(self)
+        self.clipboard = Clipboard(self)
         self.files = Files(self)
         self.net = Net(self)
         self.snapshots = Snapshots(self)

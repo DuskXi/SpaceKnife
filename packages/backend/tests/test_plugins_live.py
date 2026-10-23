@@ -365,6 +365,36 @@ def test_ids_outside_a_remap_are_gone() -> None:
     assert sources._apply(remap, np.array([1, 2, 7, -3])).tolist() == [5, -1, -1, -1]
 
 
+async def test_a_watcher_comes_back_after_its_plugin_restarts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plugin dev reloads a plugin on save (restart), the user turns it off and on: the source
+    scan's watcher stops meanwhile and watches again once the plugin is back."""
+    monkeypatch.setattr(sources, "QUIET_S", 0.05)
+    monkeypatch.setattr(sources, "WAIT_BACK_S", 0.05)
+    archive = tmp_path / "data.zip"
+    _zip(archive, {"a.txt": b"a"})
+    async with mock("t.full") as host:
+        await host.scan_dir(tmp_path)
+        scan_id = await host.source("zip", str(archive))
+        handle = host.server.scans.scans[scan_id]
+        await _until(lambda: handle.monitor is not None)
+        mon = handle.monitor
+        assert isinstance(mon, sources.SourceMonitor)
+        hp = host.server.plugins
+        await hp.restart("t.full")  # the process goes, the watcher's call with it
+        rec = hp.records["t.full"]
+        await hp.disable("t.full")
+        await _until(
+            lambda: handle.status().monitor is not None and handle.status().monitor.state == "failed"
+        )
+        await hp.enable("t.full", rec.hash, sorted(rec.granted))
+        await _until(lambda: handle.status().monitor.state == "running")
+        reruns = mon.reruns
+        _zip(archive, {"a.txt": b"a", "b.txt": b"bb"})
+        await _until(lambda: mon.reruns > reruns and any(x.endswith("b.txt") for x in _paths(handle.store)))
+
+
 async def test_watchers_do_not_take_the_call_slots(tmp_path: Path) -> None:
     """Every open source scan has a watcher running for as long as it is open; they run beside the
     plugin's calls: with more of them than call slots, new source scans still list and fields

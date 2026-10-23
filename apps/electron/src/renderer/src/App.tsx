@@ -24,7 +24,7 @@ import { visibleSurface } from "@/state/updates";
 import { onKey } from "@/plugins/keymap";
 import { CleanupDialog } from "@/plugins/cleanup";
 import { ConfirmDialog } from "@/plugins/confirm";
-import { PluginDialogHost, PluginTabPage } from "@/plugins/slots";
+import { isKeptPanelTab, KeptPanelTabs, PluginDialogHost, PluginTabPage } from "@/plugins/slots";
 
 export function App() {
   const tab = useApp((s) => activeTab(s));
@@ -34,6 +34,7 @@ export function App() {
   const paletteOpen = useApp((s) => s.paletteOpen);
   const updateDialog = useApp((s) => visibleSurface(s.update, s.updateOpen) === "dialog");
   useApp((s) => s.lang); // 「界面语言」: a change re-renders the whole tree, every t() follows (M7.5)
+  const kept = useApp((s) => isKeptPanelTab(tab, s)); // its page stays alive behind other tabs
 
   useEffect(() => {
     void boot();
@@ -55,10 +56,11 @@ export function App() {
         ) : tab.kind === "machine" ? (
           <MachinePage />
         ) : tab.kind === "plugin" ? (
-          <PluginTabPage tab={tab} />
+          kept ? null : <PluginTabPage tab={tab} />
         ) : (
           <StartPage tab={tab} />
         )}
+        <KeptPanelTabs active={tab.id} />
         <LogPanel />
         <StatusBar />
         {conn === "failed" && (
@@ -76,8 +78,9 @@ export function App() {
       <Palette />
       <ContextMenu />
       <OpToast />
-      <ExportDialog />
       <PluginDialogHost />
+      {/* after the plugin dialog: a report there opens these on top of it */}
+      <ExportDialog />
       <CleanupDialog />
       <ConfirmDialog />
       <FullDiskAccessDialog />

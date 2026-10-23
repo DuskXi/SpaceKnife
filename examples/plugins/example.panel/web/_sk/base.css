@@ -23,6 +23,7 @@
   color-scheme: dark;
 }
 *, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; background: var(--sk-bg); color: var(--sk-text); font: 13px/1.45 var(--sk-font); font-variant-numeric: tabular-nums; }
 body { padding: 12px; }
 h1, h2, h3 { margin: 0 0 8px; font-weight: 600; }

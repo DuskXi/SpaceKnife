@@ -24,17 +24,31 @@ export function useFields(scanId: string | null | undefined, node: number | null
   const has = useHasFields(slot);
   const version = useApp((s) => s.extensions?.version ?? 0);
   const [res, setRes] = useState<PluginFieldsResult | null>(null);
+  const [again, setAgain] = useState(0);
   useEffect(() => {
     setRes(null);
+    setAgain(0);
+  }, [has, scanId, node, slot, tick, version]);
+  useEffect(() => {
     if (!has || !scanId || node == null || node < 0) return;
     let alive = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const job = cancellable("plugin.fields", { scan_id: scanId, node, slot });
-    job.promise.then((r) => alive && setRes(r)).catch(() => alive && setRes(null));
+    job.promise
+      .then((r) => {
+        if (!alive) return;
+        setRes(r);
+        // the details panel: a busy plugin answers later, ask again a few times (the hover card
+        // asks again on the next hover)
+        if (r?.pending && slot === "inspector" && again < 5) timer = setTimeout(() => alive && setAgain((n) => n + 1), 1500);
+      })
+      .catch(() => alive && setRes(null));
     return () => {
       alive = false;
+      if (timer) clearTimeout(timer);
       job.cancel();
     };
-  }, [has, scanId, node, slot, tick, version]);
+  }, [has, scanId, node, slot, tick, version, again]);
   return res;
 }
 

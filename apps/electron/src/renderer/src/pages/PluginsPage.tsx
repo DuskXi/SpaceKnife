@@ -14,7 +14,7 @@ import { set, toast, useApp } from "@/state/store";
 import { fmtInt, fmtSize, plural } from "@/lib/format";
 import { inBrowser } from "@/lib/host";
 import { byLang, t } from "@/lib/i18n";
-import { Icon } from "@/ui/Icon";
+import { Icon, Kbd } from "@/ui/Icon";
 import { ask } from "@/plugins/confirm";
 import { PluginIcon } from "@/plugins/icons";
 import { putPlugin, refreshPlugins } from "@/plugins/store";
@@ -419,17 +419,55 @@ function EnableDialog({ d, onYes, onNo }: { d: PluginDescribeResult; onYes: () =
         {p.description && <p className="small">{p.description}</p>}
         <h4>{t("它可以")}</h4>
         {p.permissions.length ? <Permissions p={p} added={d.added} /> : <p className="muted small">{t("不需要额外权限：只读它自己的设置和数据")}</p>}
-        {d.summary.length > 0 && (
+        {(d.groups?.length ?? 0) > 0 ? (
           <>
             <h4>{t("它会添加")}</h4>
-            <ul className="plugin-summary small">
-              {d.summary.map((line, i) => (
-                <li key={i}>{line}</li>
+            <ul className="plugin-groups small">
+              {d.groups.map((g) => (
+                <li key={g.kind}>
+                  <details>
+                    <summary>
+                      <span>{g.title}</span>
+                      <span className="muted mono">{fmtInt(g.count)}</span>
+                    </summary>
+                    <ul>
+                      {g.items.map((x, i) => (
+                        <li key={i}>{x}</li>
+                      ))}
+                      {g.count > g.items.length && <li className="muted">{t("……还有 {n} 项", { n: fmtInt(g.count - g.items.length) })}</li>}
+                    </ul>
+                  </details>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          d.summary.length > 0 && (
+            <>
+              <h4>{t("它会添加")}</h4>
+              <ul className="plugin-summary small">
+                {d.summary.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </>
+          )
+        )}
+        {(d.keys?.length ?? 0) > 0 && (
+          <>
+            <h4>{t("按键")}</h4>
+            <ul className="plugin-keys small">
+              {d.keys.map((k) => (
+                <li key={`${k.key}:${k.command}`} className={k.conflict ? "warn" : undefined}>
+                  <Kbd>{k.key}</Kbd>
+                  <span>{k.title}</span>
+                  {k.conflict && <span>{t("（已用于 {command}）", { command: k.conflict })}</span>}
+                </li>
               ))}
             </ul>
           </>
         )}
-        {d.conflicts.length > 0 && (
+        {d.conflicts.length > 0 && !(d.keys?.length ?? 0) && (
           <div className="report-callout warn">
             <Icon name="warning" size={14} />
             <span>{d.conflicts.join(byLang("；", "; "))}</span>
