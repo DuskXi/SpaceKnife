@@ -876,6 +876,10 @@ async def test_frame_columns(tmp_path: Path, ops: Ops) -> None:
     write(root, "x/a1.bin", a)
     write(root, "x/a2.bin", a)
     write(root, "y/other.bin", blob(MIB // 2, 91))
+    write(root, "y/lone.bin", blob(3 * MIB, 92))  # compared: its size has no partner
+    b = blob(MIB + 7, 93)
+    write(root, "y/b1.bin", b)
+    write(root, "y/b2.bin", b[:-1] + bytes([b[-1] ^ 1]))  # same size, read, different
     scans = await scan(root)
     _, res = await run(scans, ops, tmp_path / "c")
     sc = scans[0]
@@ -885,7 +889,10 @@ async def test_frame_columns(tmp_path: Path, ops: Ops) -> None:
     names = {frame.draw.names[i]: (int(dup[i]), int(dupg[i])) for i in range(len(dup)) if frame.draw.names[i]}
     assert {names["a1.bin"][0], names["a2.bin"][0]} == {C.DUP_KEEP, C.DUP_EXTRA}
     assert names["a1.bin"][1] == names["a2.bin"][1] == 1
-    assert names["other.bin"] == (0, 0)
+    assert names["other.bin"] == (0, 0)  # below the minimum: not compared
+    # compared and found to have no twin (the context menu may say so; drawn like 0)
+    assert names["lone.bin"] == (C.DUP_UNIQUE, 0)
+    assert names["b1.bin"] == names["b2.bin"] == (C.DUP_UNIQUE, 0)
     assert names["x"][0] == 3  # half its bytes are an extra copy: the ≥40 % tier
 
 

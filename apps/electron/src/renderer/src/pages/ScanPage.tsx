@@ -278,7 +278,7 @@ function DupesKeyFloat({ viewId }: { viewId: string }) {
   if (!on || drawer) return null;
   return (
     <div className="dp-key-float">
-      <DupesLegend compact />
+      <DupesLegend />
     </div>
   );
 }

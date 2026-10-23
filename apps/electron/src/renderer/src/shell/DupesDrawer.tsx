@@ -738,7 +738,7 @@ export function GroupRow({ g, jobId, scanId, viewId, lit, onHover }: { g: DupeGr
   const verdict = confirmed ? t("内容相同（已读完全文核对）") : t("同一份数据（硬链接或块克隆）：删了不腾空间");
   const shown = distinctPaths(
     g.members.map((m) => m.path),
-    46,
+    40,
   );
   return (
     <div className={`bk-row dp-group${lit ? " lit" : ""}`} role="listitem" onMouseEnter={onHover} onFocus={onHover}>
@@ -806,10 +806,14 @@ function FolderList({ s, scanId, viewId }: { s: DupesStatus; scanId: string; vie
               <Icon name="folder" />
             </span>
             <div className="bk-text">
-              <span className="bk-name mono">{fitPath(f.path, 44)}</span>
+              <span className="bk-name mono" title={f.path}>
+                {(f.twin ? distinctPaths([f.path, f.twin], 30) : [fitPath(f.path, 30)])[0]}
+              </span>
               {f.twin && (
                 <span className="bk-path dp-twin" title={f.twin}>
-                  {t("{pct} 在 {twin} 也有", { pct: `${Math.round((100 * f.twin_bytes) / Math.max(1, f.alloc))}%`, twin: fitPath(f.twin, 34) })}
+                  {f.twin === f.path
+                    ? t("{pct} 在这个文件夹里另有一份", { pct: `${Math.round((100 * f.twin_bytes) / Math.max(1, f.alloc))}%` })
+                    : t("{pct} 在 {twin} 也有", { pct: `${Math.round((100 * f.twin_bytes) / Math.max(1, f.alloc))}%`, twin: distinctPaths([f.path, f.twin], 30)[1]! })}
                 </span>
               )}
               <div className="dp-share" aria-hidden="true">

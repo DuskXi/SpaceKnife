@@ -203,7 +203,6 @@
  "没有符合筛选的组": "No group matches the filter",
  "没有重复，或没比较": "No duplicate, or not compared",
  "没能估计要读多少：{error}": "Could not estimate what to read: {error}",
- "留 {path}": "keeps {path}",
  "系统和程序文件夹里的 {n} 个": "{n} in system and program folders",
  "缓存认出（不读盘）": "Known from the cache (no reads)",
  "网络盘上的 {n} 个": "{n} on network drives",
@@ -222,5 +221,7 @@
  "速度估计中": "estimating the speed",
  "SD 卡": "SD card",
  "网络盘": "network drive",
- "虚拟盘": "virtual disk"
+ "虚拟盘": "virtual disk",
+ "留": "Stays",
+ "{pct} 在这个文件夹里另有一份": "{pct} has another copy in this same folder"
 }

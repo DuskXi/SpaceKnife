@@ -978,13 +978,42 @@ def _folder_rows(res: Results, si: int) -> tuple[list[_FolderRow], int]:
     out: list[_FolderRow] = []
     for i in listed:
         node = int(folders[i])
-        row = _FolderRow(node, store.path(node), int(idx.folder_bytes[i]), int(tot[i]))
+        here = store.path(node)
+        row = _FolderRow(node, here, int(idx.folder_bytes[i]), int(tot[i]))
         best = twin_of.get(node)
         if best:
-            (tsi, tpath), tb = max(best.items(), key=lambda kv: (kv[1], kv[0][1]))
+            tsi, tpath, tb = _twin(best, si, here)
             row.twin, row.twin_scan, row.twin_bytes = tpath, tsi, tb
             with contextlib.suppress(Exception):
                 found = res.scans[tsi].store.find(tpath)
                 row.twin_node = int(found) if found is not None else 0
         out.append(row)
     return out, version
+
+
+def _twin(keepers: dict[tuple[int, str], int], si: int, here: str) -> tuple[int, str, int]:
+    """The folder a folder repeats: the deepest folder holding at least half of the keepers of its
+    extra copies (a backup of six month folders repeats ``Photos\\2021``, not one month), never the
+    folder itself or one above it; else the folder with the most of them."""
+    total = sum(keepers.values())
+    norm = os.path.normcase(here)
+    by: dict[tuple[int, str], int] = {}
+    for (ksi, path), nbytes in keepers.items():
+        cur = path
+        for _ in range(4096):
+            by[(ksi, cur)] = by.get((ksi, cur), 0) + nbytes
+            up = os.path.dirname(cur)
+            if up == cur:
+                break
+            cur = up
+
+    def mine(ksi: int, path: str) -> bool:
+        p = os.path.normcase(path)
+        return ksi == si and (p == norm or norm.startswith(p.rstrip("\\/") + os.sep))
+
+    fit = [(k, b) for k, b in by.items() if 2 * b >= total and not mine(*k)]
+    if fit:
+        (ksi, path), nbytes = max(fit, key=lambda kv: (kv[0][1].count(os.sep), kv[1], kv[0][1]))
+        return ksi, path, nbytes
+    (ksi, path), nbytes = max(keepers.items(), key=lambda kv: (kv[1], kv[0][1]))
+    return ksi, path, nbytes

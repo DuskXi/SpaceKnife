@@ -648,3 +648,21 @@ async def test_a_stopped_search_says_so(tmp_path: Path, client: Connection) -> N
     )
     ev = await asyncio.wait_for(done, 30)
     assert ev.stop_reason == "budget" and ev.undecided > 0 and ev.error == ""
+
+
+async def test_a_backup_of_several_folders_repeats_their_parent(tmp_path: Path, client: Connection) -> None:
+    root = tmp_path / "t"
+    for i, month in enumerate(("01", "02", "03")):
+        a = blob(MIB + i, 160 + i)
+        (root / "photos" / "2021" / month).mkdir(parents=True, exist_ok=True)
+        (root / "backup" / month).mkdir(parents=True, exist_ok=True)
+        (root / "photos" / "2021" / month / f"{i}.jpg").write_bytes(a)
+        (root / "backup" / month / f"{i}.jpg").write_bytes(a)
+    sid = await scanned(client, root)
+    st = await searched(client, sid)
+    page = await client.call(DUPES_FOLDERS, pd.DupesFoldersParams(job_id=st.job_id, scan_id=sid))
+    rows = {Path(r.path).name: r for r in page.items}
+    side = "backup" if "backup" in rows else "2021"
+    other = root / "photos" / "2021" if side == "backup" else root / "backup"
+    assert rows[side].twin == str(other)  # the parent of the three month folders, not one of them
+    assert rows[side].twin_bytes == rows[side].redundant

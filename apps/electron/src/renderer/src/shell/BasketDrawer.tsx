@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { BasketItem, BasketVolume, DupesBasketMembers } from "@/protocol/generated";
 import { basketClear, basketExecute, basketRemove, call } from "@/state/actions";
 import { set, useApp } from "@/state/store";
-import { fitPath, fmtInt, fmtSize, plural } from "@/lib/format";
+import { distinctPaths, fitPath, fmtInt, fmtSize, plural } from "@/lib/format";
 import { sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 import { inBrowser, serverName } from "@/lib/host";
@@ -204,20 +204,28 @@ function DupesMembers({ id }: { id: string }) {
   if (!page) return <div className="muted small dp-bk-list">{t("正在读取…")}</div>;
   return (
     <div className="dp-bk-list small">
-      {page.folders.length > 0 && <div className="muted">{t("在：{list}", { list: page.folders.map((f) => fitPath(f, 40)).join(" · ") })}</div>}
-      {page.items.map((m) => (
-        <div key={m.path} className="dp-bk-member">
-          <span className="dp-role extra">{t("删")}</span>
-          <span className="mono dp-path" title={m.path}>
-            {fitPath(m.path, 44)}
-          </span>
-          {m.keepers[0] && (
-            <span className="mono dp-path muted" title={m.keepers.join("\n")}>
-              {t("留 {path}", { path: fitPath(m.keepers[0], 36) })}
-            </span>
-          )}
-        </div>
-      ))}
+      {page.folders.length > 0 && <div className="muted dp-bk-where">{t("在：{list}", { list: page.folders.slice(0, 3).map((f) => fitPath(f, 28)).join(" · ") })}</div>}
+      {page.items.map((m) => {
+        const [gone, kept] = m.keepers[0] ? distinctPaths([m.path, m.keepers[0]], 40) : [fitPath(m.path, 40), ""];
+        return (
+          <div key={m.path} className="dp-bk-member">
+            <div className="dp-bk-line">
+              <span className="dp-role extra">{t("删")}</span>
+              <span className="mono dp-path" title={m.path}>
+                {gone}
+              </span>
+            </div>
+            {kept && (
+              <div className="dp-bk-line muted">
+                <span className="dp-role keep">{t("留")}</span>
+                <span className="mono dp-path" title={m.keepers.join("\n")}>
+                  {kept}
+                </span>
+              </div>
+            )}
+          </div>
+        );
+      })}
       {page.total > page.items.length && (
         <button className="ghost small" onClick={() => setLimit(Math.min(2000, limit + 200))}>
           {t("再显示一些（共 {n} 份）", { n: fmtInt(page.total) })}
