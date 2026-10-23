@@ -189,11 +189,35 @@ mod mac {
         fn setiopolicy_np(iotype: libc::c_int, scope: libc::c_int, policy: libc::c_int) -> libc::c_int;
     }
     const IOPOL_TYPE_VFS_ATIME_UPDATES: libc::c_int = 2;
+    const IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES: libc::c_int = 3;
     const IOPOL_SCOPE_THREAD: libc::c_int = 1;
     const IOPOL_ATIME_UPDATES_OFF: libc::c_int = 1;
+    const IOPOL_MATERIALIZE_DATALESS_FILES_OFF: libc::c_int = 1;
 
     thread_local! {
         static ATIME_OFF: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+        static DATALESS_OFF: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+    }
+
+    /// Whether reads on this thread never materialize dataless files (iCloud Drive, File
+    /// Provider): with the policy off, reading one fails instead of downloading it. Set once per
+    /// thread; macOS 10.15+ (not verified on a real Mac here).
+    pub fn dataless_off() -> bool {
+        DATALESS_OFF.with(|c| {
+            if let Some(v) = c.get() {
+                return v;
+            }
+            // SAFETY: plain libc call with constant arguments.
+            let ok = unsafe {
+                setiopolicy_np(
+                    IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
+                    IOPOL_SCOPE_THREAD,
+                    IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
+                )
+            } == 0;
+            c.set(Some(ok));
+            ok
+        })
     }
 
     /// Whether reads on this thread leave access times alone (asked once per thread).
@@ -290,6 +314,12 @@ pub fn open_data(
             }
             true
         };
+        // no download: a file that turns dataless between S1's check and the read fails to read
+        // instead of being fetched. Where the policy cannot be set, nothing is read (like CLOUD).
+        #[cfg(target_os = "macos")]
+        if !mac::dataless_off() {
+            return Err(codes::CLOUD);
+        }
         let f = std::fs::OpenOptions::new()
             .read(true)
             .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
@@ -343,7 +373,10 @@ mod win {
     use std::os::windows::fs::OpenOptionsExt;
     use std::os::windows::io::AsRawHandle;
 
-    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW, WIN32_FIND_DATAW,
+    };
     use windows_sys::Win32::Storage::FileSystem::{
         FILE_ATTRIBUTE_TAG_INFO, FILE_BASIC_INFO, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_NO_BUFFERING,
         FILE_FLAG_OPEN_NO_RECALL, FILE_FLAG_OPEN_REPARSE_POINT, FILE_ID_INFO, FILE_NAME_NORMALIZED,
@@ -451,12 +484,14 @@ mod win {
         }
     }
 
-    /// Whether the handle reached the name we asked for: the same ignoring case but not the same
-    /// in case means the open may have reached a twin that differs only in case.
+    /// Whether the handle reached the name we asked for. A path that differs from the handle's
+    /// own only in case is fine unless a folder on the way holds another entry of that name in
+    /// another case (WinBtrfs trees Linux made, case-sensitive NTFS folders): only then may the open
+    /// have reached a twin. The scan root as the user typed it (`c:\users\x`) is not a twin.
     fn case_ok(h: HANDLE, path: &str) -> bool {
         let p = path.replace('/', "\\");
-        let below: &str = if p.len() >= 2 && p.as_bytes()[1] == b':' {
-            &p[2..]
+        let (drive, below): (&str, &str) = if p.len() >= 2 && p.as_bytes()[1] == b':' {
+            (&p[..2], &p[2..])
         } else {
             return true; // UNC and other forms: not checked
         };
@@ -467,9 +502,87 @@ mod win {
         if fin == want {
             return true;
         }
-        let a = std::ffi::OsString::from_wide(&fin).to_string_lossy().to_lowercase();
-        let b = below.to_lowercase();
-        a != b
+        let fin_s = std::ffi::OsString::from_wide(&fin).to_string_lossy().into_owned();
+        if fin_s.to_lowercase() != below.to_lowercase() {
+            return true; // another name altogether (8.3, a junction on the way): not a case twin
+        }
+        let got: Vec<&str> = fin_s.split('\\').collect();
+        let asked: Vec<&str> = below.split('\\').collect();
+        if got.len() != asked.len() {
+            return true;
+        }
+        let mut parent = String::from(drive);
+        for (g, a) in got.iter().zip(asked.iter()) {
+            if g.is_empty() {
+                continue;
+            }
+            if g != a && has_case_twin(&parent, a) {
+                return false;
+            }
+            parent.push('\\');
+            parent.push_str(g);
+        }
+        true
+    }
+
+    thread_local! {
+        static TWINS: std::cell::RefCell<(std::time::Instant, std::collections::HashMap<String, bool>)> =
+            std::cell::RefCell::new((std::time::Instant::now(), std::collections::HashMap::new()));
+    }
+
+    /// Whether `parent`, whose entry the open reached under another case than `asked`, holds
+    /// another entry for that name: two or more entries match `asked` as a pattern (matching
+    /// ignores case), or one is exactly `asked` (a file system matching case-sensitively). Asked
+    /// of the file system once per folder and name, remembered for 2 s per thread.
+    fn has_case_twin(parent: &str, asked: &str) -> bool {
+        let key = format!("{}\\{}", parent, asked);
+        let hit = TWINS.with(|t| {
+            let mut t = t.borrow_mut();
+            if t.0.elapsed().as_secs_f64() > 2.0 || t.1.len() > 4096 {
+                t.0 = std::time::Instant::now();
+                t.1.clear();
+            }
+            t.1.get(&key).copied()
+        });
+        if let Some(v) = hit {
+            return v;
+        }
+        let pattern = verbatim(&format!("{}\\{}", parent, asked));
+        let exact: Vec<u16> = std::ffi::OsStr::new(asked).encode_wide().collect();
+        let wide: Vec<u16> = pattern.encode_wide().chain(std::iter::once(0)).collect();
+        // SAFETY: zeroed is a valid WIN32_FIND_DATAW; the pattern is NUL-terminated.
+        let mut data: WIN32_FIND_DATAW = unsafe { std::mem::zeroed() };
+        // SAFETY: valid pointers for the call.
+        let find = unsafe {
+            FindFirstFileExW(
+                wide.as_ptr(),
+                FindExInfoBasic,
+                &mut data as *mut _ as *mut std::ffi::c_void,
+                FindExSearchNameMatch,
+                std::ptr::null(),
+                0,
+            )
+        };
+        let twin = if find == INVALID_HANDLE_VALUE {
+            false // nothing matches the name as asked: the entry reached is the only one
+        } else {
+            let name_of = |d: &WIN32_FIND_DATAW| -> Vec<u16> {
+                let end = d.cFileName.iter().position(|&u| u == 0).unwrap_or(d.cFileName.len());
+                d.cFileName[..end].to_vec()
+            };
+            let mut n = 1;
+            let mut same = name_of(&data) == exact;
+            // SAFETY: `find` is a valid search handle until FindClose.
+            while n < 2 && !same && unsafe { FindNextFileW(find, &mut data) } != 0 {
+                n += 1;
+                same |= name_of(&data) == exact;
+            }
+            // SAFETY: as above.
+            unsafe { FindClose(find) };
+            n >= 2 || same
+        };
+        TWINS.with(|t| t.borrow_mut().1.insert(key, twin));
+        twin
     }
 
     impl Meta {

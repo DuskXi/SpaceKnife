@@ -19,7 +19,6 @@ import os
 import shutil
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +30,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EVENT_BASKET, EVENT_OPS_PROGRESS
 
 from .. import fmt
+from ..dupes.guard import Elsewhere
 from ..i18n import Texts
 from ..ops.basket import AddResult, Basket, BasketItem, Refused
 from ..store.nodes import NodeStore
@@ -352,12 +352,17 @@ class OpsService:
             delay_s=DELETE_DELAY_S if run.mode == "delete" else 0.0,
         )
 
-    def _doomed(self, run: OpRun) -> Callable[[str], bool] | None:
-        """Duplicate-file guards: a keeper is lost too when anything in the basket covers it."""
+    def _doomed(self, run: OpRun) -> Elsewhere | None:
+        """Duplicate-file guards: a keeper is lost too when anything in the basket covers it, is
+        it under another path (an extra copy of another search), or is a folder above it."""
         if not run.guards:
             return None
         basket = self.basket
-        return lambda path: basket.contains(path) is not None
+        return Elsewhere(
+            covers=lambda path: basket.contains(path) is not None,
+            members=basket.dupes_ids,
+            plain=basket.plain_paths,
+        )
 
     def _emit(self, run: OpRun, force: bool = True) -> None:
         now = time.monotonic()

@@ -75,7 +75,7 @@ def install(server: Server) -> None:
 
     @router.method(DUPES_GROUPS)
     async def dupes_groups(session: Session, params: pd.DupesGroupsParams) -> pd.DupesGroupsPage:
-        return dupes.groups(params)
+        return await dupes.groups(params)
 
     @router.method(DUPES_GROUP)
     async def dupes_group(session: Session, params: pd.DupesGroupParams) -> pd.DupeGroup:
@@ -95,7 +95,7 @@ def install(server: Server) -> None:
 
     @router.method(DUPES_KEEP)
     async def dupes_keep(session: Session, params: pd.DupesKeepParams) -> pd.DupesStatus:
-        return dupes.keep(params)
+        return await dupes.keep(params)
 
     @router.method(DUPES_TO_BASKET)
     async def dupes_to_basket(session: Session, params: pd.DupesBasketParams) -> pd.DupesBasketResult:

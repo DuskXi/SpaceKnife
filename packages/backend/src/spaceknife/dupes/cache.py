@@ -121,8 +121,10 @@ class VolumeCache:
         self.strong = strong
         self.table = np.zeros(0, ENTRY_DTYPE)
         self._keys = np.zeros(0, "S16")
-        self._new: dict[tuple[int, int], np.ndarray] = {}
-        self._seen: set[int] = set()
+        self._new = np.zeros(0, ENTRY_DTYPE)  # entries learnt since the last save (grows by doubling)
+        self._n_new = 0
+        self._seen: set[int] = set()  # rows whose last_seen moves to today
+        self._disk: tuple[int, int] | None = None  # (mtime_ns, size) of the file as last read or written
         self._lock = threading.Lock()
         self.loaded_bytes = 0
         self.written = 0.0
@@ -147,6 +149,8 @@ class VolumeCache:
                     return np.zeros(0, ENTRY_DTYPE)
                 data = np.fromfile(f, dtype=ENTRY_DTYPE, count=count)
                 self.loaded_bytes = HEADER + data.nbytes
+                st = os.fstat(f.fileno())
+                self._disk = (st.st_mtime_ns, st.st_size)
         except (OSError, ValueError, struct.error):
             return np.zeros(0, ENTRY_DTYPE)
         if len(data) != count:
@@ -172,8 +176,16 @@ class VolumeCache:
         return e
 
     def touch(self, rows: Iterable[int]) -> None:
-        with self._lock:
-            self._seen.update(int(r) for r in rows if r >= 0)
+        """Entries seen again: their last day moves to today (only those not seen today already,
+        so a second run on the same day writes nothing for them)."""
+        day = today()
+        want = [int(r) for r in rows if r >= 0]
+        if not want:
+            return
+        fresh = [r for r, d in zip(want, self.table["last_seen"][want].tolist(), strict=True) if d != day]
+        if fresh:
+            with self._lock:
+                self._seen.update(fresh)
 
     def put(
         self,
@@ -208,27 +220,39 @@ class VolumeCache:
             flags |= E_RACY
         e["flags"] = flags
         with self._lock:
-            self._new[(fid_hi, fid_lo)] = e
+            if self._n_new >= len(self._new):
+                grown = np.zeros(max(64, 2 * len(self._new)), ENTRY_DTYPE)
+                grown[: self._n_new] = self._new[: self._n_new]
+                self._new = grown
+            self._new[self._n_new] = e  # a later one of the same file wins at save (hashed_at)
+            self._n_new += 1
 
     @property
     def dirty(self) -> bool:
-        return bool(self._new) or bool(self._seen)
+        return bool(self._n_new) or bool(self._seen)
 
     def save(self) -> int:
         """Merge with the file on disk, evict, write atomically. Returns the bytes written."""
         with self._lock:
-            new = list(self._new.values())
+            new = self._new[: self._n_new].copy()
             seen = sorted(self._seen)
-            self._new.clear()
+            self._new = np.zeros(0, ENTRY_DTYPE)
+            self._n_new = 0
             self._seen.clear()
-        base = self.table.copy()
+        base = self.table
         if seen:
-            base["last_seen"][np.asarray(seen, dtype=np.int64)] = today()
-        on_disk = self._read()
-        parts = [on_disk, base]
-        if new:
-            parts.append(np.array(new, dtype=ENTRY_DTYPE))
-        allrows = np.concatenate(parts, dtype=ENTRY_DTYPE) if len(parts) > 1 else parts[0]
+            base["last_seen"][np.asarray(seen, dtype=np.int64)] = today()  # ours: in place
+        # the file is read again only when another job wrote it since (else ``base`` is it)
+        parts = [base]
+        try:
+            st = os.stat(self.path)
+            if self._disk != (st.st_mtime_ns, st.st_size):
+                parts.insert(0, self._read())
+        except OSError:
+            pass
+        if len(new):
+            parts.append(new)
+        allrows = np.concatenate(parts, dtype=ENTRY_DTYPE) if len(parts) > 1 else parts[0].copy()
         if len(allrows):
             # the newest hash of each file wins
             order = np.lexsort((-allrows["hashed_at"], allrows["fid_lo"], allrows["fid_hi"]))
@@ -254,6 +278,9 @@ class VolumeCache:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp, self.path)
+        with contextlib.suppress(OSError):
+            st = os.stat(self.path)
+            self._disk = (st.st_mtime_ns, st.st_size)
         self.written = time.monotonic()
         return HEADER + allrows.nbytes
 

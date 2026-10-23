@@ -472,6 +472,9 @@ class Basket:
             result = AddResult()
             by_volume: dict[str, list[tuple[int, str, str, Any]]] = {}
             seen: set[str] = set()
+            # identities of the extra copies already in the basket, and of those this call adds:
+            # the same file reached by another path (two searches over one folder) is caught too
+            gone = self._dupes_ids()
             for node, path, guard in members:
                 bad = self._check_node(store, node)
                 if bad is not None:
@@ -488,10 +491,12 @@ class Basket:
                 if (
                     guard is not None
                     and guard.keepers
-                    and all(self._covering(_key(k.path)) is not None for k in guard.keepers)
+                    and all(self._keeper_lost(k, gone) for k in guard.keepers)
                 ):
                     result.refused.append(Refused(path, TEXT["keeper_in_basket"]))
                     continue
+                if guard is not None:
+                    gone.add(guard.member.ident)
                 by_volume.setdefault(self._volume(store, node), []).append((node, path, key, guard))
             for volume, rows in by_volume.items():
                 vkey = "\0dupes\0" + scan_id + "\0" + volume
@@ -575,20 +580,48 @@ class Basket:
         entry.item.name = self._name_of(entry, len(entry.item.members))
         self.version += 1
 
+    def _dupes_ids(self) -> set[tuple[int, int, int]]:
+        """Identities (volume, file id) of the extra copies in ``dupes`` items."""
+        out: set[tuple[int, int, int]] = set()
+        for entry in self._entries.values():
+            if entry.dupes:
+                for k in entry.member_keys:
+                    g = entry.guards.get(k)
+                    if g is not None:
+                        out.add(g.member.ident)
+        return out
+
+    def dupes_ids(self) -> set[tuple[int, int, int]]:
+        with self._lock:
+            return self._dupes_ids()
+
+    def plain_paths(self) -> list[str]:
+        """Paths of the items that are not extra copies of duplicate files."""
+        with self._lock:
+            out: list[str] = []
+            for e in self._entries.values():
+                if e.dupes:
+                    continue
+                out.extend(e.item.members if e.group else [e.item.path])
+            return out
+
+    def _keeper_lost(self, keeper: Any, gone: set[tuple[int, int, int]]) -> bool:
+        """A keeper is lost when the basket covers its path, or it is (by identity) an extra copy
+        in the basket under another path."""
+        return self._covering(_key(keeper.path)) is not None or keeper.ident in gone
+
     def _block_dupes(self) -> None:
-        """Members of ``dupes`` items whose every keeper is now in the basket too are blocked
-        (skipped at execution, ``last_copy``) until one of them leaves."""
+        """Members of ``dupes`` items whose every keeper is now in the basket too (by path, or by
+        identity as another item's extra copy) are blocked (skipped at execution, ``last_copy``)
+        until one of them leaves."""
+        gone = self._dupes_ids()
         for entry in self._entries.values():
             if not entry.dupes:
                 continue
             n = 0
             for k in entry.member_keys:
                 g = entry.guards.get(k)
-                if (
-                    g is not None
-                    and g.keepers
-                    and all(self._covering(_key(kp.path)) is not None for kp in g.keepers)
-                ):
+                if g is not None and g.keepers and all(self._keeper_lost(kp, gone) for kp in g.keepers):
                     n += 1
             if n != entry.blocked:
                 entry.blocked = n

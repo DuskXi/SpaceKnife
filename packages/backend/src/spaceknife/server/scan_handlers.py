@@ -122,6 +122,7 @@ def install(server: Server) -> None:
     async def scan_close(session: Session, params: p.ScanIdParams) -> EmptyResult:
         server.views.close_scan(params.scan_id)
         server.compares.close_scan(params.scan_id)
+        await server.dupes.on_scan_closed(params.scan_id)  # its search stops, results go
         await scans.close_scan(params.scan_id)
         return EmptyResult()
 

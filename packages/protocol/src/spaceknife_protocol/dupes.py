@@ -21,11 +21,14 @@ DupesState = Literal[
     "planning", "identifying", "probing", "verifying", "waiting_scan", "paused", "done", "cancelled", "failed"
 ]
 DupesLoad = Literal["idle", "quiet", "balanced", "max", "custom"]
-DupeRole = Literal["keep", "extra", "alias", "clone", "needed", "other_volume", "pinned"]
+DupeRole = Literal["keep", "extra", "alias", "clone", "needed", "pinned"]
 DupeKeepWhy = Literal["rule", "preferred", "folder", "volume", "needed", "manual", "pinned"]
 DupeKeepRule = Literal["oldest", "newest", "shortest"]
 DupesSort = Literal["reclaim", "size", "copies", "path"]
-DupeNodeState = Literal["none", "pending", "keep", "extra", "shared", "skipped"]
+# none: not compared (smaller than the minimum, excluded, not in the search); unique: compared and
+# no other file has its contents (its size is unique, or it was read and found different)
+DupeNodeState = Literal["none", "pending", "keep", "extra", "shared", "skipped", "unique"]
+DupesStop = Literal["", "cancelled", "budget", "time", "failed"]
 
 # frame column `dup` (files: state; folders, blocks: tier of the share of extra copies)
 DUP_NONE, DUP_PENDING, DUP_KEEP, DUP_EXTRA, DUP_SHARED, DUP_SKIPPED = 0, 1, 2, 3, 4, 5
@@ -51,11 +54,18 @@ class DupesPlanDisk(Payload):
     scans: list[str] = Field(default_factory=list)
 
 
+class DupesPlanScan(Payload):
+    scan_id: str
+    roots: list[str]
+    candidates: int = Field(default=0, description="Candidates of this scan")
+
+
 class DupesLast(Payload):
     at: str
     groups: int
     files: int
     reclaim: int
+    rate: float = Field(default=0, description="Bytes read per second by that search (0: unknown)")
 
 
 class DupesPlan(Payload):
@@ -70,6 +80,10 @@ class DupesPlan(Payload):
         default=None, description="Cross-volume: files and bytes it adds"
     )
     last: DupesLast | None = None
+    min_size: int = Field(default=1 << 20, description="Smaller files are not compared")
+    load: DupesLoad = Field(default="quiet", description="The disk-load level a search would start at")
+    scans: list[DupesPlanScan] = Field(default_factory=list, description="The scans compared")
+    disks: list[DupesPlanDisk] = Field(default_factory=list)
     current: DupesStatus | None = Field(
         default=None,
         description="The search covering scan_ids[0], running or finished (for a client that reconnects)",
@@ -158,7 +172,9 @@ class DupesStatus(Payload):
     extra: int = 0
     reclaim: int = 0
     version: int = 0
-    error: str = ""
+    error: str = Field(default="", description="Failed: what to tell the user (the details are in the log)")
+    stop_reason: DupesStop = Field(default="", description="Why it ended early")
+    undecided: int = Field(default=0, description="Candidates it stopped before deciding")
     elapsed_s: float = 0
 
 
@@ -172,6 +188,7 @@ class DupeMember(Payload):
     alloc: int = 0
     role: DupeRole
     why: DupeKeepWhy | None = None
+    view: bool = Field(default=False, description="Another path of the same file (overlapping scans)")
 
 
 class DupeGroup(Payload):
@@ -258,6 +275,10 @@ class DupesFolderRow(Payload):
     path: str
     redundant: int
     alloc: int
+    twin: str = Field(default="", description="Where most of its extra copies are kept")
+    twin_scan_id: str = ""
+    twin_node: int = 0
+    twin_bytes: int = Field(default=0, description="Bytes of its extra copies kept in twin")
 
 
 class DupesFoldersPage(Payload):
@@ -297,7 +318,12 @@ class DupesKeepParams(Params):
     prefer: list[str] = Field(default_factory=list, max_length=64)
     folder_consistent: bool = True
     per_volume: bool = True
-    overrides: list[DupesOverride] = Field(default_factory=list, max_length=10000)
+    overrides: list[DupesOverride] = Field(
+        default_factory=list,
+        max_length=10000,
+        description="Manual choices added to the search's (they pile up; same group and path: replaced)",
+    )
+    reset_overrides: bool = Field(default=False, description="Forget the manual choices first")
 
 
 class DupesBasketParams(Params):

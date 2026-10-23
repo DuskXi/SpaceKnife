@@ -23,7 +23,7 @@ import contextlib
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -69,6 +69,7 @@ class _Applied:
     pending: list[int]  # new folders to scan
     kept_folders: list[int]  # folders whose rows moved (subtree rescans continue below them)
     changes: int
+    touched: list[int] = field(default_factory=list)  # files whose size or mtime changed (new ids)
 
 
 class _Remap:
@@ -360,9 +361,11 @@ class ScanMonitor:
         changes = 0
         flashes: dict[int, int] = {}
         if stats:
-            got = await self._apply_stats(stats, folders)
+            got, touched = await self._apply_stats(stats, folders)
             flashes.update(got)
             changes += len(got)
+            # every file reported modified, a same-size rewrite too: duplicate-file results drop it
+            self.owner.views.files_changed(self.handle.id, touched)
         targets = self._targets(folders)
         quiet = now - self._last_event >= QUIET_RESCAN_S or (not batch and bool(self.trees))
         if self.trees and quiet and not self.handle.running:
@@ -378,6 +381,7 @@ class ScanMonitor:
             applied = await self._relist(targets)
             flashes.update(applied.flashes)
             changes += applied.changes
+            self.owner.views.files_changed(self.handle.id, applied.touched)
             await self._scan_new(applied.pending)
             # a subtree rescan goes on below every folder that stayed
             targets = {k: store.path(k) for k in applied.kept_folders} if rescan else {}
@@ -410,8 +414,12 @@ class ScanMonitor:
             out[folder] = store.path(folder)
         return out
 
-    async def _apply_stats(self, stats: dict[str, Change], folders: set[str]) -> dict[int, int]:
-        """Size and time changes of known files, in place; unknown paths make their folder dirty."""
+    async def _apply_stats(
+        self, stats: dict[str, Change], folders: set[str]
+    ) -> tuple[dict[int, int], list[int]]:
+        """Size and time changes of known files, in place; unknown paths make their folder dirty.
+        Returns the change of allocation of each file it moved, and every file it updated (a
+        same-size rewrite included)."""
         store = self.handle.store
         c = store.cols
         nodes: list[int] = []
@@ -422,7 +430,7 @@ class ScanMonitor:
             else:
                 nodes.append(node)
         if not nodes:
-            return {}
+            return {}, []
         known = [stats[store.path(n)] for n in nodes]
         if os.name == "nt":
             # no allocation in the event (compressed or sparse file): its folder's listing has it
@@ -447,7 +455,8 @@ class ScanMonitor:
             live = (c["kind"][ids] == Kind.FILE) & ((c["flags"][ids] & np.uint32(Flag.GONE)) == 0)
             ids, size, alloc, mtime = ids[live], size[live], alloc[live], mtime[live]
             delta = mutate.update_stats(store, ids, size, alloc, mtime)
-        return {int(i): int(d) for i, d in zip(ids.tolist(), delta.tolist(), strict=True) if d}
+        touched = sorted(set(nodes))  # every file reported modified, whatever its size did
+        return {int(i): int(d) for i, d in zip(ids.tolist(), delta.tolist(), strict=True) if d}, touched
 
     async def _relist(self, targets: dict[int, str]) -> _Applied:
         """List ``targets`` again (in threads), then fold every listing in, deepest folder first."""
@@ -491,6 +500,7 @@ class ScanMonitor:
                     out.flashes[i] = int(c["alloc"][i])
                 for i, d in zip(rel.grown.tolist(), rel.grown_by.tolist(), strict=True):
                     out.flashes[i] = d
+                out.touched.extend(rel.rewritten.tolist())
                 if len(rel.removed):
                     out.flashes[node] = out.flashes.get(node, 0) - int(rel.removed_alloc.sum())
                 out.pending.extend(i for i in rel.pending.tolist() if i not in unreadable)
@@ -509,6 +519,7 @@ class ScanMonitor:
                     int(m) for m in remap(np.array(out.kept_folders, dtype=np.int64)) if m >= 0
                 ]
                 out.pending = [int(m) for m in remap(np.array(out.pending, dtype=np.int64)) if m >= 0]
+                out.touched = [int(m) for m in remap(np.array(out.touched, dtype=np.int64)) if m >= 0]
                 self.owner.views.remap(self.handle.id, chains, remap)
         return out
 

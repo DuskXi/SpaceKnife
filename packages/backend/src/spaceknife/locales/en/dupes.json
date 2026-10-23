@@ -99,5 +99,8 @@
   "重复": "Duplicates",
   "可腾出 {size}": "{size} to free",
   "正在核对 {pct}%": "Checking {pct}%",
-  "这个扫描还没有查找重复文件": "No duplicate search for this scan yet"
+  "这个扫描还没有查找重复文件": "No duplicate search for this scan yet",
+  "在网络盘或 FUSE 挂载上（默认不比较：ID 不可靠，读云盘会触发下载）": "On a network drive or FUSE mount (not compared by default: file ids are unreliable there, and reading a cloud drive downloads it)",
+  "查找中途出错，可以再查一次（详情见日志）": "The search stopped on an error. You can search again (details in the log)",
+  "查找中途出错，已核对的 {groups} 组保留，可以再查一次（详情见日志）": "The search stopped on an error. The {groups} groups already verified are kept; you can search again (details in the log)"
 }

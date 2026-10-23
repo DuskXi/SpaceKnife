@@ -2113,7 +2113,6 @@
             "alias",
             "clone",
             "needed",
-            "other_volume",
             "pinned"
           ],
           "title": "Role",
@@ -2122,6 +2121,12 @@
         "scan_id": {
           "title": "Scan Id",
           "type": "string"
+        },
+        "view": {
+          "default": false,
+          "description": "Another path of the same file (overlapping scans)",
+          "title": "View",
+          "type": "boolean"
         },
         "volume": {
           "default": "",
@@ -2219,7 +2224,6 @@
                 "alias",
                 "clone",
                 "needed",
-                "other_volume",
                 "pinned"
               ],
               "type": "string"
@@ -2238,7 +2242,8 @@
             "keep",
             "extra",
             "shared",
-            "skipped"
+            "skipped",
+            "unique"
           ],
           "title": "State",
           "type": "string"
@@ -2535,6 +2540,28 @@
         "redundant": {
           "title": "Redundant",
           "type": "integer"
+        },
+        "twin": {
+          "default": "",
+          "description": "Where most of its extra copies are kept",
+          "title": "Twin",
+          "type": "string"
+        },
+        "twin_bytes": {
+          "default": 0,
+          "description": "Bytes of its extra copies kept in twin",
+          "title": "Twin Bytes",
+          "type": "integer"
+        },
+        "twin_node": {
+          "default": 0,
+          "title": "Twin Node",
+          "type": "integer"
+        },
+        "twin_scan_id": {
+          "default": "",
+          "title": "Twin Scan Id",
+          "type": "string"
         }
       },
       "required": [
@@ -2842,6 +2869,7 @@
           "type": "string"
         },
         "overrides": {
+          "description": "Manual choices added to the search's (they pile up; same group and path: replaced)",
           "items": {
             "$ref": "#/$defs/DupesOverride"
           },
@@ -2861,6 +2889,12 @@
           "maxItems": 64,
           "title": "Prefer",
           "type": "array"
+        },
+        "reset_overrides": {
+          "default": false,
+          "description": "Forget the manual choices first",
+          "title": "Reset Overrides",
+          "type": "boolean"
         },
         "rule": {
           "default": "oldest",
@@ -2892,6 +2926,12 @@
         "groups": {
           "title": "Groups",
           "type": "integer"
+        },
+        "rate": {
+          "default": 0,
+          "description": "Bytes read per second by that search (0: unknown)",
+          "title": "Rate",
+          "type": "number"
         },
         "reclaim": {
           "title": "Reclaim",
@@ -3067,7 +3107,6 @@
             "alias",
             "clone",
             "needed",
-            "other_volume",
             "pinned"
           ],
           "title": "Role",
@@ -3176,6 +3215,13 @@
           "default": null,
           "description": "The search covering scan_ids[0], running or finished (for a client that reconnects)"
         },
+        "disks": {
+          "items": {
+            "$ref": "#/$defs/DupesPlanDisk"
+          },
+          "title": "Disks",
+          "type": "array"
+        },
         "excluded": {
           "additionalProperties": {
             "type": "integer"
@@ -3203,6 +3249,25 @@
           ],
           "default": null
         },
+        "load": {
+          "default": "quiet",
+          "description": "The disk-load level a search would start at",
+          "enum": [
+            "idle",
+            "quiet",
+            "balanced",
+            "max",
+            "custom"
+          ],
+          "title": "Load",
+          "type": "string"
+        },
+        "min_size": {
+          "default": 1048576,
+          "description": "Smaller files are not compared",
+          "title": "Min Size",
+          "type": "integer"
+        },
         "probe_bytes": {
           "description": "What reading heads and tails costs",
           "title": "Probe Bytes",
@@ -3212,6 +3277,14 @@
           "description": "The most that could be freed, if every candidate had a twin",
           "title": "Reclaim Max",
           "type": "integer"
+        },
+        "scans": {
+          "description": "The scans compared",
+          "items": {
+            "$ref": "#/$defs/DupesPlanScan"
+          },
+          "title": "Scans",
+          "type": "array"
         }
       },
       "required": [
@@ -3224,6 +3297,58 @@
         "excluded"
       ],
       "title": "DupesPlan",
+      "type": "object"
+    },
+    "DupesPlanDisk": {
+      "properties": {
+        "disk": {
+          "title": "Disk",
+          "type": "string"
+        },
+        "media": {
+          "default": "unknown",
+          "title": "Media",
+          "type": "string"
+        },
+        "scans": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scans",
+          "type": "array"
+        }
+      },
+      "required": [
+        "disk"
+      ],
+      "title": "DupesPlanDisk",
+      "type": "object"
+    },
+    "DupesPlanScan": {
+      "properties": {
+        "candidates": {
+          "default": 0,
+          "description": "Candidates of this scan",
+          "title": "Candidates",
+          "type": "integer"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roots",
+          "type": "array"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "roots"
+      ],
+      "title": "DupesPlanScan",
       "type": "object"
     },
     "DupesRefused": {
@@ -3416,6 +3541,7 @@
         },
         "error": {
           "default": "",
+          "description": "Failed: what to tell the user (the details are in the log)",
           "title": "Error",
           "type": "string"
         },
@@ -3557,6 +3683,25 @@
           ],
           "title": "State",
           "type": "string"
+        },
+        "stop_reason": {
+          "default": "",
+          "description": "Why it ended early",
+          "enum": [
+            "",
+            "cancelled",
+            "budget",
+            "time",
+            "failed"
+          ],
+          "title": "Stop Reason",
+          "type": "string"
+        },
+        "undecided": {
+          "default": 0,
+          "description": "Candidates it stopped before deciding",
+          "title": "Undecided",
+          "type": "integer"
         },
         "version": {
           "default": 0,

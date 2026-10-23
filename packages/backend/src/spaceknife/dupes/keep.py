@@ -12,7 +12,9 @@ Order of precedence, earlier first:
    (P, Q), when the pair holds two or more such groups, keep the copy on the same side;
 5. across volumes, one copy per volume (on by default);
 6. ties: the shorter path, then the smaller path;
-7. manual choices (group digest + path), which override 2–5 but never 1.
+7. manual choices (group digest + path, any path of the file), which override 2–5 but never 1.
+   They pile up over the search (each 「保留这一份」 adds one) and carry over to the next search of
+   the same scans; the digest keeps them to the same content.
 
 Invariants enforced here, not by the interface: every group keeps at least one copy; with
 ``per_volume`` every volume of the group keeps one; needed and pinned copies are always kept.
@@ -50,6 +52,7 @@ class UnitView:
     mtime: int
     forced: bool  # may only be kept
     forced_why: int = C.WHY_NEEDED
+    alt: list[str] = field(default_factory=list)  # other paths of the same single-named file
 
 
 def _norm(p: str) -> str:
@@ -90,8 +93,18 @@ def choose(
         if u.forced:
             out[i] = (C.ROLE_KEEP, u.forced_why)
             kept[i] = True
-    manual_keep = {i for i, u in enumerate(units) if opts.overrides.get((digest or b"", u.path)) == "keep"}
-    manual_extra = {i for i, u in enumerate(units) if opts.overrides.get((digest or b"", u.path)) == "extra"}
+    d = digest or b""
+
+    def manual(u: UnitView) -> str | None:
+        for p in (u.path, *u.alt):
+            got = opts.overrides.get((d, p))
+            if got is not None:
+                return got
+        return None
+
+    wish = [manual(u) for u in units]
+    manual_keep = {i for i, w in enumerate(wish) if w == "keep"}
+    manual_extra = {i for i, w in enumerate(wish) if w == "extra"}
     for i in manual_keep:
         if not kept[i]:
             out[i] = (C.ROLE_KEEP, C.WHY_MANUAL)

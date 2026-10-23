@@ -1,8 +1,8 @@
 """What a job found, and what it means for the views (docs/dupes.md §8, §10).
 
 :class:`Results` is the engine's sink. It keeps, per verified group, its members as rows of
-:data:`codes.MEMBER_DTYPE` (64 bytes) plus their paths, applies the keep rules (``keep.py``) to
-give each member a role, and derives:
+:data:`codes.MEMBER_DTYPE` (64 bytes) plus their paths and birth times, applies the keep rules
+(``keep.py``) to give each member a role, and derives:
 
 - the ledger: what deleting the extra copies frees, per volume;
 - per scan, a sorted index of member nodes (hover cards, frame annotation, ``locate``);
@@ -12,10 +12,15 @@ give each member a role, and derives:
 
 Node ids move when the tree changes (monitor relists): :meth:`remap` maps them, :meth:`invalidate`
 takes changed members out (their group goes back to 「待核对」 when fewer than two remain).
+
+Everything the event loop asks often (status four times a second, frames, hover cards) is numpy
+over the member table or kept per group as it changes; the keep rules over every group (end of a
+job, a rule changed) run in a thread on a snapshot and are committed if nothing changed meanwhile.
 """
 
 from __future__ import annotations
 
+import asyncio
 import os
 import threading
 import time
@@ -76,19 +81,40 @@ class _ScanIndex:
     skipped: np.ndarray  # sorted candidate nodes skipped
 
 
+class _Live:
+    """Per scan: candidate nodes still undecided and skipped (changes as groups finish)."""
+
+    __slots__ = ("key", "pending", "skipped", "t")
+
+    def __init__(self, key: tuple[int, bool], pending: np.ndarray, skipped: np.ndarray) -> None:
+        self.key = key
+        self.pending = pending
+        self.skipped = skipped
+        self.t = time.monotonic()
+
+
+LIVE_EVERY_S = 0.5  # while a job runs, the pending / skipped nodes are rebuilt at most this often
+
+
 class Results:
     def __init__(self, scans: Sequence[ScanInput], keep: KeepOptions | None = None) -> None:
         self.scans = list(scans)
         self.keep = keep or KeepOptions()
         self.m = np.zeros(1024, C.MEMBER_DTYPE)
+        self.bt = np.zeros(1024, np.int64)  # birth time of each member (ns, 0 unknown)
         self.n = 0
         self.paths: list[str] = []
-        self.btime: list[int] = []
         self.groups: list[Group] = []
+        # per group, kept in step with the Group objects (vectorised status, ledger, frames)
+        self._gvalid = np.zeros(256, bool)
+        self._gshared = np.zeros(256, bool)
+        self._greclaim = np.zeros(256, np.int64)
         self._by_cand_group: dict[int, list[int]] = {}
         self.version = 0
         self.lock = threading.RLock()
         self._index: dict[int, _ScanIndex] = {}
+        self._live: dict[int, _Live] = {}
+        self._sorted: dict[tuple[Any, ...], tuple[int, list[Group]]] = {}
         self.job: Job | None = None
         self.vol_names: list[str] = []
         self.vol_notes: dict[int, list[str]] = {}
@@ -99,12 +125,38 @@ class Results:
     def start(self, job: Job) -> None:
         self.job = job
 
-    def finish(self, job: Job) -> None:
+    def _finish_info(self, job: Job) -> None:
         with self.lock:
             self.vol_names = [v.name for v in job.vols]
             self.vol_notes = {v.index: list(v.notes) for v in job.vols if v.notes}
             self.finished_at = time.time()
-            self.apply_keep()  # rules across groups (folder-consistent) need them all
+
+    def finish(self, job: Job) -> None:
+        self._finish_info(job)
+        self.apply_keep()  # rules across groups (folder-consistent) need them all
+
+    async def finish_async(self, job: Job) -> None:
+        """:meth:`finish` with the keep rules in a thread (the engine calls this one)."""
+        self._finish_info(job)
+        await self.set_keep_async(self.keep)
+
+    def _bump(self) -> None:
+        self.version += 1
+        self._index.clear()
+        self._sorted.clear()
+
+    def _sync_group(self, g: Group) -> None:
+        i = g.id
+        if i >= len(self._gvalid):
+            cap = max(len(self._gvalid) * 2, i + 1)
+            for name in ("_gvalid", "_gshared", "_greclaim"):
+                old = getattr(self, name)
+                new = np.zeros(cap, old.dtype)
+                new[: len(old)] = old
+                setattr(self, name, new)
+        self._gvalid[i] = g.valid
+        self._gshared[i] = g.shared
+        self._greclaim[i] = g.reclaim
 
     def add_group(
         self,
@@ -120,9 +172,13 @@ class Results:
             self.vol_names = [v.name for v in job.vols]
             k = len(members)
             if self.n + k > len(self.m):
-                grown = np.zeros(max(len(self.m) * 2, self.n + k), C.MEMBER_DTYPE)
+                cap = max(len(self.m) * 2, self.n + k)
+                grown = np.zeros(cap, C.MEMBER_DTYPE)
                 grown[: self.n] = self.m[: self.n]
                 self.m = grown
+                bt = np.zeros(cap, np.int64)
+                bt[: self.n] = self.bt[: self.n]
+                self.bt = bt
             start = self.n
             reps: dict[int, int] = {}
             for j, mem in enumerate(members):
@@ -150,7 +206,7 @@ class Results:
                     else (C.ROLE_CLONE if mem["kind"] == "clone" else 0)
                 )
                 self.paths.append(mem["path"])
-                self.btime.append(int(mem.get("btime", 0)))
+                self.bt[row] = int(mem.get("btime", 0))
             self.n += k
             vols = tuple(sorted({int(m["vol"]) for m in members}))
             names = len({os.path.basename(m["path"]).lower() for m in members})
@@ -168,17 +224,18 @@ class Results:
             self.groups.append(grp)
             self._by_cand_group.setdefault(g, []).append(grp.id)
             self._apply_one(grp)
-            self.version += 1
-            self._index.clear()
+            self._bump()
 
     def invalidate_rows(self, job: Job, cand_rows: Sequence[int]) -> None:
         sel = job.sel
-        if sel is None:
+        if sel is None or not len(cand_rows):
             return
-        keys = {(int(sel.cand["scan"][r]), int(sel.cand["node"][r])) for r in cand_rows}
+        cr = np.asarray(cand_rows, dtype=np.int64)
+        want = (sel.cand["scan"][cr].astype(np.int64) << 32) | sel.cand["node"][cr].astype(np.int64)
         with self.lock:
-            rows = [i for i in range(self.n) if (int(self.m["scan"][i]), int(self.m["node"][i])) in keys]
-            self.invalidate(rows)
+            m = self.m[: self.n]
+            have = (m["scan"].astype(np.int64) << 32) | m["node"].astype(np.int64)
+            self.invalidate(np.flatnonzero(np.isin(have, want)).tolist())
 
     # ------------------------------------------------------------------ keep rules
     def set_keep(self, keep: KeepOptions) -> None:
@@ -188,15 +245,44 @@ class Results:
 
     def apply_keep(self) -> None:
         with self.lock:
-            side = self._folder_sides()
+            side = self._folder_sides(self.keep, self.groups, self.m)
             for g in self.groups:
                 self._apply_one(g, side)
-            self.version += 1
-            self._index.clear()
+            self._bump()
 
-    def _units(self, g: Group) -> list[UnitView]:
-        m = self.m
+    async def set_keep_async(self, keep: KeepOptions) -> None:
+        """The keep rules over every group in a thread, on a snapshot of the roles; committed when
+        no group came or changed meanwhile (else computed again)."""
+        for _ in range(3):
+            with self.lock:
+                v0, n, m = self.version, self.n, self.m
+                groups = list(self.groups)
+                roles = m["role"][:n].copy()
+            if len(groups) < 64:  # not worth a thread
+                break
+            done = await asyncio.to_thread(self._keep_pass, keep, groups, m, roles)
+            with self.lock:
+                if self.version != v0 or self.n != n or self.m is not m:
+                    continue
+                self.m["role"][:n] = roles
+                for g, (reclaim, shared, keep_row, keep_why) in zip(groups, done, strict=True):
+                    g.reclaim, g.shared_bytes, g.keep_row, g.keep_why = reclaim, shared, keep_row, keep_why
+                    self._sync_group(g)
+                self.keep = keep
+                self._bump()
+                return
+        self.set_keep(keep)
+
+    def _keep_pass(
+        self, keep: KeepOptions, groups: list[Group], m: np.ndarray, roles: np.ndarray
+    ) -> list[tuple[int, int, int, int]]:
+        side = self._folder_sides(keep, groups, m)
+        return [self._roles_of(g, keep, side, m, roles) for g in groups]
+
+    def _units(self, g: Group, m: np.ndarray | None = None) -> list[UnitView]:
+        m = self.m if m is None else m
         units: dict[int, UnitView] = {}
+        named: dict[int, int] = {}  # rows of the unit that are names of their own (not views)
         for row in range(g.start, g.start + g.count):
             rep = int(m["unit"][row])
             u = units.get(rep)
@@ -206,66 +292,92 @@ class Results:
                     rows=[],
                     path=self.paths[rep],
                     vol=int(m["vol"][rep]),
-                    btime=self.btime[rep],
+                    btime=int(self.bt[rep]),
                     mtime=int(m["mtime"][rep]),
                     forced=False,
                 )
             u.rows.append(row)
+            if fl & C.F_VIEW:
+                u.alt.append(self.paths[row])
+            else:
+                named[rep] = named.get(rep, 0) + 1
             if fl & C.F_NEEDED:
                 u.forced, u.forced_why = True, C.WHY_NEEDED
             elif fl & C.F_PINNED and not u.forced:
                 u.forced, u.forced_why = True, C.WHY_PINNED
             elif fl & C.F_NETWORK and not u.forced:
                 u.forced, u.forced_why = True, C.WHY_NEEDED
-        for u in units.values():
-            if len(u.rows) > 1 and not u.forced:
-                u.forced, u.forced_why = True, C.WHY_PINNED  # several names: only ever kept (phase 1)
+        for rep, u in units.items():
+            if named.get(rep, 0) > 1 and not u.forced:
+                # several names (hard links, clones): only ever kept (phase 1)
+                u.forced, u.forced_why = True, C.WHY_PINNED
         return list(units.values())
 
     def _apply_one(self, g: Group, side: dict[str, int] | None = None) -> None:
-        m = self.m
-        units = self._units(g)
+        g.reclaim, g.shared_bytes, g.keep_row, g.keep_why = self._roles_of(
+            g, self.keep, side, self.m, self.m["role"]
+        )
+        self._sync_group(g)
+
+    def _roles_of(
+        self,
+        g: Group,
+        keep: KeepOptions,
+        side: dict[str, int] | None,
+        m: np.ndarray,
+        roles: np.ndarray,
+    ) -> tuple[int, int, int, int]:
+        """Writes the role of every row of ``g`` into ``roles``; (reclaim, shared bytes, keeper
+        row, why) of the group."""
+        units = self._units(g, m)
         if g.shared or not g.valid:
+            shared = 0
             for u in units:
-                for row in u.rows:
-                    base = int(m["role"][row]) & 0x0F
+                for k, row in enumerate(u.rows):
+                    base = int(roles[row]) & 0x0F
+                    if int(m["flags"][row]) & C.F_VIEW:
+                        roles[row] = C.ROLE_KEEP if not g.shared else base or C.ROLE_ALIAS
+                        continue
                     if base not in (C.ROLE_ALIAS, C.ROLE_CLONE):
                         base = C.ROLE_CLONE if g.shared and row != u.rows[0] else C.ROLE_KEEP
-                    m["role"][row] = base
-            g.reclaim = 0
-            g.shared_bytes = sum(int(m["alloc"][r]) for u in units for r in u.rows[1:])
-            return
-        roles = choose(units, self.keep, digest=g.digest, side=side)
+                    roles[row] = base
+                    if k > 0:
+                        shared += int(m["alloc"][row])
+            return 0, shared, -1, 0
+        chosen = choose(units, keep, digest=g.digest, side=side)
         reclaim = 0
         shared = 0
-        g.keep_row = -1
-        for u, (role, why) in zip(units, roles, strict=True):
+        keep_row, keep_why = -1, 0
+        for u, (role, why) in zip(units, chosen, strict=True):
             for k, row in enumerate(u.rows):
-                base = int(m["role"][row]) & 0x0F
+                fl = int(m["flags"][row])
+                if k > 0 and fl & C.F_VIEW:
+                    roles[row] = (role & 0x0F) | ((why & 0x0F) << 4)  # the same file: its role
+                    continue
+                base = int(roles[row]) & 0x0F
                 if k > 0 and base in (C.ROLE_ALIAS, C.ROLE_CLONE, 0):
-                    m["role"][row] = base or C.ROLE_ALIAS
+                    roles[row] = base or C.ROLE_ALIAS
                     shared += int(m["alloc"][row])
                     continue
                 r = role
-                if u.forced and int(m["flags"][row]) & C.F_NEEDED:
+                if u.forced and fl & C.F_NEEDED:
                     r = C.ROLE_NEEDED if role == C.ROLE_KEEP and why == C.WHY_NEEDED else role
-                m["role"][row] = (r & 0x0F) | ((why & 0x0F) << 4)
+                roles[row] = (r & 0x0F) | ((why & 0x0F) << 4)
                 if role == C.ROLE_EXTRA:
                     reclaim += int(m["alloc"][row])
-                elif g.keep_row < 0:
-                    g.keep_row, g.keep_why = row, why
-        g.reclaim = reclaim
-        g.shared_bytes = shared
+                elif keep_row < 0:
+                    keep_row, keep_why = row, why
+        return reclaim, shared, keep_row, keep_why
 
-    def _folder_sides(self) -> dict[str, int] | None:
-        if not self.keep.folder_consistent:
+    def _folder_sides(self, keep: KeepOptions, groups: list[Group], m: np.ndarray) -> dict[str, int] | None:
+        if not keep.folder_consistent:
             return None
         pairs: dict[tuple[str, str], int] = {}
         info: dict[str, tuple[int, int]] = {}
-        for g in self.groups:
+        for g in groups:
             if g.shared or not g.valid or g.units != 2:
                 continue
-            units = self._units(g)
+            units = self._units(g, m)
             if any(u.forced for u in units):
                 continue
             a, b = os.path.dirname(units[0].path), os.path.dirname(units[1].path)
@@ -278,7 +390,7 @@ class Results:
                 bt = u.btime if u.btime > 0 else u.mtime
                 old = info.get(d)
                 info[d] = (min(old[0], bt), max(old[1], u.mtime)) if old else (bt, u.mtime)
-        winners = folder_sides(pairs, info, self.keep)
+        winners = folder_sides(pairs, info, keep)
         if not winners:
             return None
         side: dict[str, int] = {}
@@ -295,77 +407,103 @@ class Results:
     def why(self, row: int) -> int:
         return (int(self.m["role"][row]) >> 4) & 0x0F
 
+    def is_view(self, row: int) -> bool:
+        return bool(int(self.m["flags"][row]) & C.F_VIEW)
+
     def valid_groups(self) -> list[Group]:
         return [g for g in self.groups if g.valid]
+
+    def _valid_rows(self) -> np.ndarray:
+        """Bool per member row: its group is still valid."""
+        m = self.m[: self.n]
+        return self._gvalid[: len(self.groups)][m["group"]] if self.n else np.zeros(0, bool)
 
     def ledger(self) -> dict[int, Ledger]:
         out: dict[int, Ledger] = {}
         with self.lock:
-            m = self.m
-            for g in self.groups:
-                if not g.valid:
-                    continue
-                for row in range(g.start, g.start + g.count):
-                    v = int(m["vol"][row])
-                    led = out.setdefault(v, Ledger())
-                    r = self.role(row)
-                    if r == C.ROLE_EXTRA:
-                        led.extra += 1
-                        led.reclaim += int(m["alloc"][row])
-                    elif r in (C.ROLE_ALIAS, C.ROLE_CLONE):
-                        led.shared += int(m["alloc"][row])
-                for v in set(g.volumes):
-                    out.setdefault(v, Ledger()).groups += 1
+            if not self.n:
+                return out
+            m = self.m[: self.n]
+            valid = self._valid_rows()
+            role = m["role"] & 0x0F
+            vol = m["vol"].astype(np.int64)
+            own = (m["flags"] & C.F_VIEW) == 0
+            nv = int(vol.max()) + 1
+            extra = valid & own & (role == C.ROLE_EXTRA)
+            shared = valid & own & ((role == C.ROLE_ALIAS) | (role == C.ROLE_CLONE))
+            alloc = m["alloc"].astype(np.float64)
+            ex_n = np.bincount(vol[extra], minlength=nv)
+            ex_b = np.rint(np.bincount(vol[extra], weights=alloc[extra], minlength=nv)).astype(np.int64)
+            sh_b = np.rint(np.bincount(vol[shared], weights=alloc[shared], minlength=nv)).astype(np.int64)
+            pairs = np.unique(m["group"][valid].astype(np.int64) * 256 + vol[valid])
+            g_n = np.bincount(pairs % 256, minlength=nv)
+            for v in np.unique(vol[valid]).tolist():
+                out[v] = Ledger(
+                    extra=int(ex_n[v]), reclaim=int(ex_b[v]), shared=int(sh_b[v]), groups=int(g_n[v])
+                )
         return out
 
     def totals(self) -> tuple[int, int, int]:
         """(groups with something to free, extra files, bytes freed)."""
         with self.lock:
-            gs = [g for g in self.groups if g.valid and not g.shared and g.reclaim > 0]
-            extra = int(
-                sum(
-                    1
-                    for i in range(self.n)
-                    if self.role(i) == C.ROLE_EXTRA and self.groups[int(self.m["group"][i])].valid
+            ng = len(self.groups)
+            mask = self._gvalid[:ng] & ~self._gshared[:ng] & (self._greclaim[:ng] > 0)
+            extra = 0
+            if self.n:
+                m = self.m[: self.n]
+                extra = int(
+                    np.count_nonzero(
+                        self._valid_rows()
+                        & ((m["role"] & 0x0F) == C.ROLE_EXTRA)
+                        & ((m["flags"] & C.F_VIEW) == 0)
+                    )
                 )
-            )
-            return len(gs), extra, int(sum(g.reclaim for g in gs))
+            return int(mask.sum()), extra, int(self._greclaim[:ng][mask].sum())
 
     def stale(self) -> int:
         """Verified groups a change took apart (back to 「待核对」 until the next search)."""
         with self.lock:
-            return sum(1 for g in self.groups if not g.valid)
+            return int(np.count_nonzero(~self._gvalid[: len(self.groups)]))
 
     # ------------------------------------------------------------------ per scan index
     def scan_index(self, si: int) -> _ScanIndex:
         with self.lock:
+            live = self._live_of(si)
             hit = self._index.get(si)
-            job_ver = self.job.done_groups if self.job is not None else 0
-            if hit is not None and hit.version == self.version * 1_000_003 + job_ver:
+            if hit is not None and hit.version == self.version:
+                hit.pending, hit.skipped = live.pending, live.skipped
                 return hit
             m = self.m[: self.n]
-            valid = (
-                np.array([self.groups[int(g)].valid for g in m["group"]], dtype=bool)
-                if self.n
-                else np.zeros(0, bool)
-            )
+            valid = self._valid_rows()
             mine = np.flatnonzero((m["scan"] == si) & valid)
             order = np.argsort(m["node"][mine], kind="stable")
             rows = mine[order]
             nodes = m["node"][rows].astype(np.int64)
             folders, fbytes = self._rollup(si, m, valid)
-            pending, skipped = self._pending(si)
             idx = _ScanIndex(
-                self.version * 1_000_003 + job_ver,
+                self.version,
                 nodes,
                 rows.astype(np.int64),
                 folders,
                 fbytes,
-                pending,
-                skipped,
+                live.pending,
+                live.skipped,
             )
             self._index[si] = idx
             return idx
+
+    def _live_of(self, si: int) -> _Live:
+        job = self.job
+        final = job is None or job.state in ("done", "cancelled", "failed")
+        key = (job.done_groups if job is not None else 0, final)
+        hit = self._live.get(si)
+        if hit is not None and (
+            hit.key == key or (not final and not hit.key[1] and time.monotonic() - hit.t < LIVE_EVERY_S)
+        ):
+            return hit
+        pending, skipped = self._pending(si)
+        live = self._live[si] = _Live(key, pending, skipped)
+        return live
 
     def _rollup(self, si: int, m: np.ndarray, valid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         roles = m["role"] & 0x0F
@@ -429,6 +567,11 @@ class Results:
         p = int(np.searchsorted(idx.pending, node))
         return p < len(idx.pending) and int(idx.pending[p]) == node
 
+    def is_skipped(self, si: int, node: int) -> bool:
+        idx = self.scan_index(si)
+        p = int(np.searchsorted(idx.skipped, node))
+        return p < len(idx.skipped) and int(idx.skipped[p]) == node
+
     # ------------------------------------------------------------------ frames
     def annotate(self, si: int, store: NodeStore, draw: Any) -> tuple[np.ndarray, np.ndarray]:
         """``dup`` (u1) and ``dupg`` (u4) for every row of a frame of scan ``si``."""
@@ -439,6 +582,7 @@ class Results:
             return dup, dupg
         with self.lock:
             idx = self.scan_index(si)
+            gshared = self._gshared[: len(self.groups)]
             node = draw.node.astype(np.int64)
             kind = draw.kind
             files = (kind == _RECT_FILE) & (node >= 0)
@@ -453,7 +597,9 @@ class Results:
                 state[roles == C.ROLE_EXTRA] = C.DUP_EXTRA
                 state[(roles == C.ROLE_ALIAS) | (roles == C.ROLE_CLONE)] = C.DUP_SHARED
                 gid = np.where(hit, self.m["group"][np.maximum(rows, 0)].astype(np.int64) + 1, 0)
-                shared_g = np.array([self.groups[int(x) - 1].shared if x else False for x in gid], dtype=bool)
+                shared_g = (
+                    np.where(hit, gshared[np.maximum(gid - 1, 0)], False) if len(gshared) else hit & False
+                )
                 state[shared_g & hit] = C.DUP_SHARED
                 rest = ~hit
                 if rest.any():
@@ -568,8 +714,7 @@ class Results:
             col[sel] = np.maximum(new, 0).astype(np.int32)
             gone = np.flatnonzero(sel)[new < 0]
             self.invalidate(gone.tolist())
-            self._index.clear()
-            self.version += 1
+            self._bump()
 
     def changed_nodes(self, si: int, nodes: Iterable[int]) -> list[int]:
         """Member rows of scan ``si`` among ``nodes`` (files that changed)."""
@@ -593,79 +738,97 @@ class Results:
             for r in rows:
                 self.m["role"][r] = 0
                 self.m["flags"][r] = int(self.m["flags"][r]) | 0x80  # changed: out of the group
+            fresh = 0
             for gid in touched:
                 g = self.groups[gid]
-                g.valid = False  # back to 「待核对」: the next run (or the monitor's recheck) decides
+                fresh += g.valid
+                g.valid = False  # back to 「待核对」: the next run decides
                 self._apply_one(g)
-            self._index.clear()
-            self.version += 1
-            return len(touched)
+            self._bump()
+            return fresh
 
     # ------------------------------------------------------------------ coverage
     def coverage(self, si: int, folder: int, *, limit: int = 50) -> Coverage:
-        """What of ``folder``'s files (at least the job's minimum size) exists elsewhere."""
+        """What of ``folder``'s files (at least the job's minimum size) exists elsewhere. Runs in a
+        thread: the tables are copied under the lock, the work is done outside it."""
         from .select import _below
 
         out = Coverage()
-        job = self.job
         store = self.scans[si].store
         cols = store.cols
         tops = np.array([folder], dtype=np.int64)
-        only: list[int] = []
-        counted = 0
         with self.lock:
-            if job is not None and job.sel is not None:
-                sel = job.sel
-                uniq = sel.unique_nodes.get(si)
-                if uniq is not None and len(uniq):
-                    inside = uniq[_below(store, uniq, tops)]
-                    counted += len(inside)
-                    only.extend(inside.tolist())
-                cand = sel.cand
-                mine = np.flatnonzero(cand["scan"] == si)
-                nodes = cand["node"][mine].astype(np.int64)
-                hit = _below(store, nodes, tops)
-                rows = mine[hit]
-                counted += len(rows)
-                for r in rows.tolist():
-                    node = int(cand["node"][r])
-                    st = int(cand["state"][r])
-                    b = int(cols["alloc"][node])
-                    mrow = self.member_of(si, node)
-                    g = self.groups[int(self.m["group"][mrow])] if mrow >= 0 else None
-                    if g is not None and g.valid:
-                        unit = int(self.m["unit"][mrow])
-                        other = same = False
-                        for o in range(g.start, g.start + g.count):
-                            osi = int(self.m["scan"][o])
-                            onode = int(self.m["node"][o])
-                            if osi == si and bool(_below(store, np.array([onode], np.int64), tops)[0]):
-                                continue
-                            if int(self.m["unit"][o]) == unit or g.shared:
-                                same = True
-                            else:
-                                other = True
-                        if other:
-                            out.elsewhere += 1
-                            out.elsewhere_bytes += b
-                        elif same:
-                            out.same_data += 1
-                            out.same_data_bytes += b
-                        else:
-                            only.append(node)
-                    elif st == C.ST_UNIQUE:
-                        only.append(node)
-                    else:
-                        out.unchecked += 1
-                        out.unchecked_bytes += b
-            for node in only:
-                out.only_here += 1
-                out.only_here_bytes += int(cols["alloc"][node])
-            biggest = sorted(only, key=lambda nd: -int(cols["alloc"][nd]))[:limit]
-            out.only_here_list = [(nd, store.path(nd), int(cols["alloc"][nd])) for nd in biggest]
-            out.small = max(0, int(cols["tot_files"][folder]) - counted)
-            seen = out.only_here_bytes + out.elsewhere_bytes + out.same_data_bytes + out.unchecked_bytes
-            out.small_bytes = max(0, int(cols["tot_alloc"][folder]) - seen)
+            job = self.job
+            n = self.n
+            m = self.m[:n].copy()
+            ng = len(self.groups)
+            gvalid = self._gvalid[:ng].copy()
+            gshared = self._gshared[:ng].copy()
+            sel = job.sel if job is not None else None
+            cand = sel.cand[["scan", "node", "state"]].copy() if sel is not None else None
+            uniq = sel.unique_nodes.get(si) if sel is not None else None
+        only: list[np.ndarray] = []
+        counted = 0
+        if uniq is not None and len(uniq):
+            inside_u = uniq[_below(store, uniq, tops)]
+            counted += len(inside_u)
+            only.append(inside_u.astype(np.int64))
+        if cand is not None and len(cand):
+            mine = np.flatnonzero(cand["scan"] == si)
+            nodes = cand["node"][mine].astype(np.int64)
+            hit = _below(store, nodes, tops)
+            cn = nodes[hit]
+            cst = cand["state"][mine[hit]]
+            counted += len(cn)
+            valid_row = gvalid[m["group"]] if n else np.zeros(0, bool)
+            mrows = np.flatnonzero((m["scan"] == si) & valid_row) if n else np.zeros(0, np.int64)
+            order = np.argsort(m["node"][mrows], kind="stable")
+            mrows = mrows[order]
+            mnodes = m["node"][mrows].astype(np.int64)
+            rows_in = np.full(len(cn), -1, np.int64)
+            if len(mnodes) and len(cn):
+                p = np.minimum(np.searchsorted(mnodes, cn), len(mnodes) - 1)
+                rows_in = np.where(mnodes[p] == cn, mrows[p], -1)
+            mem = rows_in >= 0
+            if mem.any():
+                inside_all = np.zeros(n, bool)
+                rs = np.flatnonzero(m["scan"] == si)
+                inside_all[rs] = _below(store, m["node"][rs].astype(np.int64), tops)
+                outside = valid_row & ~inside_all
+                og = m["group"][outside].astype(np.int64)
+                ou = m["unit"][outside].astype(np.int64)
+                per_group = np.bincount(og, minlength=ng)
+                upair, ucount = np.unique(og * (n + 1) + ou, return_counts=True)
+                r = rows_in[mem]
+                g = m["group"][r].astype(np.int64)
+                key = g * (n + 1) + m["unit"][r].astype(np.int64)
+                same_u = np.zeros(len(r), np.int64)
+                if len(upair):
+                    q = np.minimum(np.searchsorted(upair, key), len(upair) - 1)
+                    same_u = np.where(upair[q] == key, ucount[q], 0)
+                tot = per_group[g]
+                sh = gshared[g]
+                other = ~sh & (tot - same_u > 0)
+                same = ~other & ((same_u > 0) | (sh & (tot > 0)))
+                b = cols["alloc"][cn[mem]].astype(np.int64)
+                out.elsewhere, out.elsewhere_bytes = int(other.sum()), int(b[other].sum())
+                out.same_data, out.same_data_bytes = int(same.sum()), int(b[same].sum())
+                only.append(cn[mem][~other & ~same])
+            rest = ~mem
+            uniq_st = cst[rest] == C.ST_UNIQUE
+            only.append(cn[rest][uniq_st])
+            unchecked = cn[rest][~uniq_st]
+            out.unchecked = len(unchecked)
+            out.unchecked_bytes = int(cols["alloc"][unchecked].astype(np.int64).sum())
+        only_nodes = np.concatenate(only) if only else np.zeros(0, np.int64)
+        only_alloc = cols["alloc"][only_nodes].astype(np.int64)
+        out.only_here = len(only_nodes)
+        out.only_here_bytes = int(only_alloc.sum())
+        biggest = only_nodes[np.argsort(-only_alloc, kind="stable")[:limit]]
+        out.only_here_list = [(int(nd), store.path(int(nd)), int(cols["alloc"][nd])) for nd in biggest]
+        out.small = max(0, int(cols["tot_files"][folder]) - counted)
+        seen = out.only_here_bytes + out.elsewhere_bytes + out.same_data_bytes + out.unchecked_bytes
+        out.small_bytes = max(0, int(cols["tot_alloc"][folder]) - seen)
         return out
 
     # ------------------------------------------------------------------ pages
@@ -678,31 +841,29 @@ class Results:
         scan: int | None = None,
         under: tuple[int, int] | None = None,
     ) -> list[Group]:
+        from .select import _below
+
+        key_c = (sort, cross_only, include_shared, scan, under)
         with self.lock:
+            hit = self._sorted.get(key_c)
+            if hit is not None and hit[0] == self.version:
+                return hit[1]
+            version = self.version
             gs = [g for g in self.groups if g.valid and (include_shared or not g.shared)]
+            m = self.m[: self.n]
             if cross_only:
                 gs = [g for g in gs if len(g.volumes) > 1]
             if scan is not None:
-                gs = [
-                    g
-                    for g in gs
-                    if any(int(self.m["scan"][r]) == scan for r in range(g.start, g.start + g.count))
-                ]
+                ids = set(np.unique(m["group"][m["scan"] == scan]).tolist())
+                gs = [g for g in gs if g.id in ids]
             if under is not None:
                 si, node = under
-                parent = self.scans[si].store.cols["parent"]
-
-                def inside(r: int) -> bool:
-                    if int(self.m["scan"][r]) != si:
-                        return False
-                    cur = int(self.m["node"][r])
-                    while cur > 0:
-                        if cur == node:
-                            return True
-                        cur = int(parent[cur])
-                    return False
-
-                gs = [g for g in gs if any(inside(r) for r in range(g.start, g.start + g.count))]
+                mine = np.flatnonzero(m["scan"] == si)
+                inside = mine[
+                    _below(self.scans[si].store, m["node"][mine].astype(np.int64), np.array([node]))
+                ]
+                ids = set(np.unique(m["group"][inside]).tolist())
+                gs = [g for g in gs if g.id in ids]
             key = {
                 "reclaim": lambda g: (-g.reclaim, -g.size, g.id),
                 "size": lambda g: (-g.size, g.id),
@@ -711,7 +872,11 @@ class Results:
             }.get(sort)
             if key is None:
                 key = lambda g: (-g.reclaim, g.id)  # noqa: E731
-            return sorted(gs, key=key)
+            out = sorted(gs, key=key)
+            if len(self._sorted) >= 16:
+                self._sorted.clear()
+            self._sorted[key_c] = (version, out)
+            return out
 
     def member_dict(self, row: int, scan_ids: Sequence[str]) -> dict[str, Any]:
         m = self.m[row]
@@ -723,10 +888,11 @@ class Results:
             "path": self.paths[row],
             "volume": self.vol_names[v] if v < len(self.vol_names) else "",
             "mtime": int(m["mtime"]) // 1_000_000_000,
-            "ctime": self.btime[row] // 1_000_000_000,
+            "ctime": int(self.bt[row]) // 1_000_000_000,
             "alloc": int(m["alloc"]),
             "role": C.ROLE_NAMES.get(role, "keep"),
             "why": C.WHY_NAMES.get(self.why(row)) if role in (C.ROLE_KEEP, C.ROLE_NEEDED) else None,
+            "view": self.is_view(row),
         }
 
 

@@ -1,9 +1,12 @@
 """Duplicate-file searches on the server (docs/dupes.md §9.6, §10, §11).
 
 One search runs at a time per backend. Its results stay until ``dupes.clear``, a new search over
-the same scans, or until the scans close. Events go to every session that announced ``dupes.v1``:
-``dupes.progress`` at most four times a second, ``dupes.changed`` at most once a second; views in
-the ``dupes`` colouring are repainted at most once a second while groups come in.
+the same scans, or until one of its scans closes (or leaves memory): then a running search stops
+and the results go (the extra copies already in the delete basket stay there, each with its guard,
+which checks everything again before anything is deleted). Events go to every session that
+announced ``dupes.v1``: ``dupes.progress`` at most four times a second, ``dupes.changed`` at most
+once a second; views in the ``dupes`` colouring are repainted at most once a second while groups
+come in.
 
 A search only covers finished live scans (snapshots and comparisons show the past: their files
 cannot be read). File changes the monitor reports take changed copies out of their groups (they go
@@ -15,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import itertools
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -59,6 +63,8 @@ TEXT = Texts(
         "basket_note": "每组保留一份（{rule}）· 在重复文件面板里查看",
         "may_share": "这个卷能共享数据块，没能查到哪些副本共享：实际腾出的可能更少",
         "network": "网络盘上的文件可能是同一个文件，只保留不删除",
+        "failed": "查找中途出错，已核对的 {groups} 组保留，可以再查一次（详情见日志）",
+        "failed_none": "查找中途出错，可以再查一次（详情见日志）",
     }
 )
 
@@ -96,6 +102,7 @@ class DupesManager:
         # what this backend wrote to last.json lately: a plan right after a search sees it even
         # before the write in the background is done
         self._last: dict[str, dict[str, Any]] = {}
+        self._closing: set[asyncio.Task[None]] = set()
 
     # ------------------------------------------------------------------ scans and scopes
     def _live(self, scan_ids: list[str]) -> list[ScanHandle]:
@@ -175,7 +182,36 @@ class DupesManager:
         roots = ";".join(r.path for s in scope.scans for r in s.roots)
         hit: dict[str, Any] = last.get(roots) or {}
         covering = self.for_scan(sc.scan_ids[0])
+        st = self.server.settings
+        per_scan = np.bincount(sel.cand["scan"], minlength=len(scope.scans)) if len(sel.cand) else None
+        by_disk: dict[str, tuple[str, list[str]]] = {}  # device -> (mount, scans)
+        for s in scope.scans:
+            for r in s.roots:
+                vol = r.volume
+                key = vol.device if vol is not None and vol.device else r.path
+                mount, ids = by_disk.setdefault(key, (vol.mount_point if vol else r.path, []))
+                if s.scan_id not in ids:
+                    ids.append(s.scan_id)
+        reg = self.server.scans.io
+        disks: list[pd.DupesPlanDisk] = []
+        for mount, ids in by_disk.values():
+            media = "unknown"
+            with contextlib.suppress(Exception):
+                if reg.running:
+                    media = str((await reg.governor_for_path(mount)).disk.media)
+            disks.append(pd.DupesPlanDisk(disk=mount, media=media, scans=ids))
         return pd.DupesPlan(
+            min_size=scope.min_size,
+            load=(str(st.get("dupes.load")) if st else "quiet"),  # type: ignore[arg-type]
+            scans=[
+                pd.DupesPlanScan(
+                    scan_id=s.scan_id,
+                    roots=[r.path for r in s.roots],
+                    candidates=int(per_scan[i]) if per_scan is not None else 0,
+                )
+                for i, s in enumerate(scope.scans)
+            ],
+            disks=disks,
             current=self.status_of(covering[0]) if covering else None,
             candidates=int(num["candidates"]),
             groups=int(num["groups"]),
@@ -190,6 +226,7 @@ class DupesManager:
                 groups=int(hit.get("groups", 0)),
                 files=int(hit.get("files", 0)),
                 reclaim=int(hit.get("reclaim", 0)),
+                rate=float(hit.get("rate", 0) or 0),
             )
             if hit
             else None,
@@ -219,8 +256,10 @@ class DupesManager:
             await cur.job.cancel()
         scope = self._scope(sc)
         ids = [s.scan_id for s in scope.scans]
-        # results of these scans are replaced
+        # results of these scans are replaced; their manual choices (digest + path) carry over
+        carried: dict[tuple[bytes, str], Any] = {}
         for old in [h for h in self.jobs.values() if set(h.scan_ids) & set(ids)]:
+            carried.update(old.results.keep.overrides)
             self.jobs.pop(old.id, None)
         st = self.server.settings
         load = params.load or (str(st.get("dupes.load")) if st else "quiet")
@@ -232,7 +271,9 @@ class DupesManager:
             budget_bytes=params.budget_bytes,
             max_seconds=params.max_seconds,
         )
-        results = Results(scope.scans, self._keep_options())
+        keep = self._keep_options()
+        keep.overrides = carried
+        results = Results(scope.scans, keep)
         job_id = f"dupes-{next(self._ids)}"
         handle = JobHandle(job_id, params, ids, None, results)  # type: ignore[arg-type]
         job = Job(
@@ -274,8 +315,17 @@ class DupesManager:
             return
         groups, files, reclaim = h.results.totals()
         roots = ";".join(r.path for s in h.job.scope.scans for r in s.roots)
+        c = h.job.counters
+        read = c.bytes_probe + c.bytes_full
+        rate = read / h.job.elapsed if h.job.elapsed > 0 and read >= 64 << 20 else 0.0
         entry = {
-            roots: {"at": datetime.now(UTC).isoformat(), "groups": groups, "files": files, "reclaim": reclaim}
+            roots: {
+                "at": datetime.now(UTC).isoformat(),
+                "groups": groups,
+                "files": files,
+                "reclaim": reclaim,
+                "rate": round(rate, 1),
+            }
         }
         self._last.update(entry)
         loop = asyncio.get_running_loop()
@@ -362,6 +412,12 @@ class DupesManager:
             )
         groups, extra, reclaim = h.results.totals()
         level = j.opts.load
+        error = ""
+        if j.state == "failed":
+            error = TEXT["failed"].format(groups=groups) if groups else TEXT["failed_none"]
+        stop = (
+            "failed" if j.state == "failed" else (j._stop_reason if j.state in ("done", "cancelled") else "")
+        )
         return pd.DupesStatus(
             job_id=h.id,
             state=j.state,
@@ -406,7 +462,9 @@ class DupesManager:
             extra=extra,
             reclaim=reclaim,
             version=h.results.version,
-            error=j.error,
+            error=error,
+            stop_reason=stop,  # type: ignore[arg-type]
+            undecided=int(j.skipped_by_reason.get("stopped", 0)),
             elapsed_s=round(j.elapsed or (time.monotonic() - j._t0 if j._t0 else 0.0), 2),
         )
 
@@ -453,15 +511,19 @@ class DupesManager:
                 self.server.views.push_change(host)
 
     # ------------------------------------------------------------------ results
-    def groups(self, p: pd.DupesGroupsParams) -> pd.DupesGroupsPage:
+    async def groups(self, p: pd.DupesGroupsParams) -> pd.DupesGroupsPage:
         h = self.get(p.job_id)
         si = h.scan_ids.index(p.scan_id) if p.scan_id in h.scan_ids else None
         under = (si, p.under) if si is not None and p.under else None
-        gs = h.results.sorted_groups(
-            p.sort, cross_only=p.cross_only, include_shared=p.include_shared, scan=si, under=under
-        )
-        items = [self._group_model(h, g, limit=8) for g in gs[p.offset : p.offset + p.limit]]
-        return pd.DupesGroupsPage(version=h.results.version, total=len(gs), items=items)
+
+        def page() -> pd.DupesGroupsPage:
+            gs = h.results.sorted_groups(
+                p.sort, cross_only=p.cross_only, include_shared=p.include_shared, scan=si, under=under
+            )
+            items = [self._group_model(h, g, limit=8) for g in gs[p.offset : p.offset + p.limit]]
+            return pd.DupesGroupsPage(version=h.results.version, total=len(gs), items=items)
+
+        return await compute(page)
 
     def group(self, p: pd.DupesGroupParams) -> pd.DupeGroup:
         h = self.get(p.job_id)
@@ -498,7 +560,7 @@ class DupesManager:
             raise RpcError(ErrorCode.INVALID_PARAMS, TEXT["no_scan"].format(id=p.scan_id))
         si = h.scan_ids.index(p.scan_id)
         cov = await compute(h.results.coverage, si, p.node)
-        groups = len(h.results.sorted_groups(scan=si, under=(si, p.node)))
+        groups = len(await compute(h.results.sorted_groups, scan=si, under=(si, p.node)))
         return pd.DupesFolderInfo(
             node=p.node,
             redundant=h.results.redundant(si, p.node),
@@ -521,31 +583,23 @@ class DupesManager:
         if p.scan_id not in h.scan_ids:
             raise RpcError(ErrorCode.INVALID_PARAMS, TEXT["no_scan"].format(id=p.scan_id))
         si = h.scan_ids.index(p.scan_id)
-        store = h.results.scans[si].store
-
-        def page() -> pd.DupesFoldersPage:
-            idx = h.results.scan_index(si)
-            if not len(idx.folders):
-                return pd.DupesFoldersPage(version=h.results.version, total=0, items=[])
-            # a folder whose extra bytes all come from one child folder adds nothing: list the
-            # deepest folder of each chain first by sorting on bytes, then depth
-            depth = store.cols["depth"][idx.folders].astype(np.int64)
-            order = np.lexsort((-depth, -idx.folder_bytes))
-            keep = depth[order] > 1
-            order = order[keep]
-            sl = order[p.offset : p.offset + p.limit]
-            items = [
+        rows, version = await compute(_folder_rows, h.results, si)
+        items = []
+        for r in rows[p.offset : p.offset + p.limit]:
+            twin_sid = h.scan_ids[r.twin_scan] if r.twin_scan >= 0 else ""
+            items.append(
                 pd.DupesFolderRow(
-                    node=int(idx.folders[i]),
-                    path=store.path(int(idx.folders[i])),
-                    redundant=int(idx.folder_bytes[i]),
-                    alloc=int(store.cols["tot_alloc"][int(idx.folders[i])]),
+                    node=r.node,
+                    path=r.path,
+                    redundant=r.redundant,
+                    alloc=r.alloc,
+                    twin=r.twin,
+                    twin_scan_id=twin_sid,
+                    twin_node=r.twin_node,
+                    twin_bytes=r.twin_bytes,
                 )
-                for i in sl
-            ]
-            return pd.DupesFoldersPage(version=h.results.version, total=len(order), items=items)
-
-        return await compute(page)
+            )
+        return pd.DupesFoldersPage(version=version, total=len(rows), items=items)
 
     async def locate(self, session: Any, p: pd.DupesLocateParams) -> pd.DupesLocateResult:
         h = self.get(p.job_id)
@@ -566,14 +620,21 @@ class DupesManager:
             truncated=truncated,
         )
 
-    def keep(self, p: pd.DupesKeepParams) -> pd.DupesStatus:
+    async def keep(self, p: pd.DupesKeepParams) -> pd.DupesStatus:
+        """Rules as given; manual choices added to the search's (a later 「保留这一份」 in the same
+        group replaces that group's earlier one; other groups keep theirs), all of them forgotten
+        first with ``reset_overrides``."""
         h = self.get(p.job_id)
         res = h.results
-        over: dict[tuple[bytes, str], Any] = {}
+        over: dict[tuple[bytes, str], Any] = {} if p.reset_overrides else dict(res.keep.overrides)
         for o in p.overrides:
             if 0 <= o.group < len(res.groups) and res.groups[o.group].digest is not None:
-                over[(res.groups[o.group].digest or b"", o.path)] = o.role
-        res.set_keep(
+                digest = res.groups[o.group].digest or b""
+                if o.role == "keep":  # 「保留这一份」 in a group replaces that group's earlier one
+                    for k in [k for k, v in over.items() if k[0] == digest and v == "keep"]:
+                        del over[k]
+                over[(digest, o.path)] = o.role
+        await res.set_keep_async(
             KeepOptions(
                 rule=p.rule,
                 prefer=list(p.prefer),
@@ -593,7 +654,8 @@ class DupesManager:
         ops = self.server.ops
         st = self.server.settings
         recheck = bool(st and st.get("dupes.recheck_content"))
-        rule = KeepOptions().rule if h.keep_params is None else h.keep_params.rule
+        rule = res.keep.rule
+        per_volume = res.keep.per_volume
         note = TEXT["basket_note"].format(rule=tr(C.TEXT.raw(f"rule_{rule}")))
         wanted = set(p.groups) if p.groups is not None else None
         ops_kind = h.job.ops.name
@@ -607,15 +669,30 @@ class DupesManager:
                     continue
                 rows = list(range(g.start, g.start + g.count))
                 keepers = [r for r in rows if res.role(r) in (C.ROLE_KEEP, C.ROLE_NEEDED)]
-                extras = [r for r in rows if res.role(r) == C.ROLE_EXTRA]
+                # another path of an extra copy is the same file: deleted once, by its own path
+                extras = [r for r in rows if res.role(r) == C.ROLE_EXTRA and not res.is_view(r)]
                 if not extras:
                     continue
                 if not keepers:
                     refused.append(pd.DupesRefused(group=g.id, reason="no_keeper"))
                     continue
                 kst = tuple(_stamped(res, r) for r in keepers)
+                by_vol: dict[int, tuple[Stamped, ...]] = {}
+                if per_volume and len(g.volumes) > 1:
+                    # one copy stays on every volume: the guard checks the keeper of the member's own
+                    for v in g.volumes:
+                        mine = tuple(_stamped(res, r) for r in keepers if int(res.m["vol"][r]) == v)
+                        if mine:
+                            by_vol[v] = mine
                 for r in extras:
-                    guard = Guard(member=_stamped(res, r), keepers=kst, ops=ops_kind, recheck_content=recheck)
+                    keep_these = by_vol.get(int(res.m["vol"][r]), kst)
+                    guard = Guard(
+                        member=_stamped(res, r),
+                        keepers=keep_these,
+                        ops=ops_kind,
+                        recheck_content=recheck,
+                        keep_atime=h.job.opts.keep_atime,
+                    )
                     si = int(res.m["scan"][r])
                     by_scan.setdefault(si, []).append((int(res.m["node"][r]), res.paths[r], guard))
                     owner[(si, res.paths[r])] = (g.id, int(res.m["alloc"][r]))
@@ -681,9 +758,19 @@ class DupesManager:
             sel = h.job.sel
             if sel is not None:
                 hit_c = np.flatnonzero((sel.cand["scan"] == si) & (sel.cand["node"] == node))
-                if len(hit_c) and int(sel.cand["state"][hit_c[0]]) == C.ST_SKIPPED:
-                    reason = C.REASON_NAMES.get(int(sel.cand["reason"][hit_c[0]]), "read_error")
-                    return pd.DupeNodeInfo(state="skipped", reason=C.TEXT[reason])
+                if len(hit_c):
+                    st = int(sel.cand["state"][hit_c[0]])
+                    if st == C.ST_SKIPPED:
+                        reason = C.REASON_NAMES.get(int(sel.cand["reason"][hit_c[0]]), "read_error")
+                        return pd.DupeNodeInfo(state="skipped", reason=C.TEXT[reason])
+                    if st == C.ST_UNIQUE:
+                        return pd.DupeNodeInfo(state="unique")  # read and found different
+                    return None  # undecided (a member of a group a change took apart, ...)
+                uniq = sel.unique_nodes.get(si)
+                if uniq is not None and len(uniq):
+                    p = int(np.searchsorted(uniq, node))
+                    if p < len(uniq) and int(uniq[p]) == node:
+                        return pd.DupeNodeInfo(state="unique")  # no other file has its size
             return None
         g = res.groups[int(res.m["group"][row])]
         role = res.role(row)
@@ -746,11 +833,33 @@ class DupesManager:
             for pc in h.job._paths:
                 pc.clear()
 
-    def on_scan_closed(self, scan_id: str) -> None:
+    async def on_scan_closed(self, scan_id: str) -> None:
+        """A scan of a search closed (or left memory): a running search stops, its results go
+        (with the tree they point into). The basket keeps the extra copies already in it."""
         for h in [h for h in self.jobs.values() if scan_id in h.scan_ids]:
-            if h.running:
-                asyncio.get_running_loop().create_task(h.job.cancel())
             self.jobs.pop(h.id, None)
+            if h.running:
+                await h.job.cancel()
+                if h.task is not None:
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await asyncio.wait_for(asyncio.shield(h.task), 5)
+            if h.changed_timer is not None:
+                h.changed_timer.cancel()
+                h.changed_timer = None
+            self._changed(h, "cleared", force=True)
+            logger.info("dupes {} dropped: scan {} closed", h.id, scan_id)
+            for host in list(self.server.views.views.values()):
+                if host.scan_id in h.scan_ids and host.scan_id != scan_id:
+                    if host.view.color_mode == "dupes":
+                        host.view.color_mode = "class"
+                    self.server.views.push_change(host)
+
+    def scan_closed_soon(self, scan_id: str) -> None:
+        """:meth:`on_scan_closed` from a place that cannot wait (eviction)."""
+        if any(scan_id in h.scan_ids for h in self.jobs.values()):
+            task = asyncio.get_running_loop().create_task(self.on_scan_closed(scan_id))
+            self._closing.add(task)
+            task.add_done_callback(self._closing.discard)
 
 
 def _stamped(res: Results, row: int) -> Stamped:
@@ -770,3 +879,90 @@ def _stamped(res: Results, row: int) -> Stamped:
         change=int(m["change"]),
         usn=int(m["usn"]),
     )
+
+
+@dataclass(slots=True)
+class _FolderRow:
+    node: int
+    path: str
+    redundant: int
+    alloc: int
+    twin: str = ""
+    twin_scan: int = -1
+    twin_node: int = 0
+    twin_bytes: int = 0
+
+
+def _folder_rows(res: Results, si: int) -> tuple[list[_FolderRow], int]:
+    """The 「文件夹」 page (docs/dupes.md §8.4): folders holding extra copies themselves, and the
+    folders where two or more such branches meet when their share is at least 10 %; a chain of
+    folders each holding only the one below is listed once, at its deepest. Each row names its
+    twin: the folder where most of its extra copies are kept."""
+    from ..store.nodes import Kind
+
+    with res.lock:
+        version = res.version
+        idx = res.scan_index(si)
+        n = res.n
+        m = res.m[:n].copy()
+        valid = res._valid_rows().copy()
+        keep_rows = np.array([g.keep_row for g in res.groups], dtype=np.int64)
+        paths = res.paths
+    store = res.scans[si].store
+    cols = store.cols
+    if not len(idx.folders):
+        return [], version
+    extra = np.flatnonzero(
+        (m["scan"] == si) & valid & ((m["role"] & 0x0F) == C.ROLE_EXTRA) & ((m["flags"] & C.F_VIEW) == 0)
+    )
+    parent = cols["parent"][m["node"][extra].astype(np.int64)].astype(np.int64)
+    direct = set(np.unique(parent).tolist())
+    # branch points: folders with two or more child folders that hold extra bytes
+    folders = idx.folders
+    up = cols["parent"][folders].astype(np.int64)
+    kids = np.zeros(len(folders), np.int64)
+    pos = np.searchsorted(folders, up)
+    pos = np.minimum(pos, len(folders) - 1)
+    hit = folders[pos] == up
+    np.add.at(kids, pos[hit], 1)
+    tot = cols["tot_alloc"][folders].astype(np.int64)
+    branch = (kids >= 2) & (idx.folder_bytes >= 0.10 * np.maximum(tot, 1))
+    listed = [
+        i
+        for i in range(len(folders))
+        if (int(folders[i]) in direct or bool(branch[i]))
+        and int(cols["depth"][folders[i]]) > 1
+        and int(cols["kind"][folders[i]]) == Kind.DIR
+    ]
+    listed.sort(key=lambda i: (-int(idx.folder_bytes[i]), int(folders[i])))
+    # twins of the folders listed: where each extra copy's keeper sits, by bytes
+    twin_of: dict[int, dict[tuple[int, str], int]] = {}
+    want = {int(folders[i]) for i in listed}
+    for r, par in zip(extra.tolist(), parent.tolist(), strict=True):
+        g = int(m["group"][r])
+        k = int(keep_rows[g]) if g < len(keep_rows) else -1
+        if k < 0:
+            continue
+        key = (int(m["scan"][k]), os.path.dirname(paths[k]))
+        alloc = int(m["alloc"][r])
+        cur = par
+        for _ in range(4096):  # the folder itself and its listed ancestors
+            if cur in want:
+                d = twin_of.setdefault(cur, {})
+                d[key] = d.get(key, 0) + alloc
+            if cur <= 0:
+                break
+            cur = int(cols["parent"][cur])
+    out: list[_FolderRow] = []
+    for i in listed:
+        node = int(folders[i])
+        row = _FolderRow(node, store.path(node), int(idx.folder_bytes[i]), int(tot[i]))
+        best = twin_of.get(node)
+        if best:
+            (tsi, tpath), tb = max(best.items(), key=lambda kv: (kv[1], kv[0][1]))
+            row.twin, row.twin_scan, row.twin_bytes = tpath, tsi, tb
+            with contextlib.suppress(Exception):
+                found = res.scans[tsi].store.find(tpath)
+                row.twin_node = int(found) if found is not None else 0
+        out.append(row)
+    return out, version

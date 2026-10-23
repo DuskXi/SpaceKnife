@@ -29,6 +29,7 @@ UNSUPPORTED: Final = 13
 UNNAMEABLE: Final = 20  # the name cannot be passed to the OS as listed
 STOPPED: Final = 21  # the job stopped (cancel, byte or time budget) before this one was decided
 EXTERNAL: Final = 22  # more hard links than names in the scans: deleting this name frees nothing
+NETWORK: Final = 23  # on a network or FUSE file system mounted below the root (not compared by default)
 
 REASON_NAMES: Final[dict[int, str]] = {
     GONE: "gone",
@@ -46,6 +47,7 @@ REASON_NAMES: Final[dict[int, str]] = {
     UNNAMEABLE: "unnameable",
     STOPPED: "stopped",
     EXTERNAL: "external_links",
+    NETWORK: "network_mount",
 }
 
 # ------------------------------------------------------------------ candidate states (u1)
@@ -64,6 +66,8 @@ F_CACHE_HIT: Final = 2
 F_NETWORK: Final = 4
 F_PINNED: Final = 8  # a name Windows trims (trailing dot or space): may only be kept
 F_NEEDED: Final = 16  # protected or needed by a program: always kept
+F_VIEW: Final = 32  # members: the same single-named file seen by another path (overlapping scans, a
+# symlinked folder, a bind mount): it carries its representative's role and is counted once
 
 # ------------------------------------------------------------------ roles of verified members (u1)
 ROLE_KEEP: Final = 1
@@ -71,7 +75,6 @@ ROLE_EXTRA: Final = 2
 ROLE_ALIAS: Final = 3
 ROLE_CLONE: Final = 4
 ROLE_NEEDED: Final = 5
-ROLE_OTHER_VOLUME: Final = 6
 ROLE_PINNED: Final = 7
 ROLE_NAMES: Final[dict[int, str]] = {
     ROLE_KEEP: "keep",
@@ -79,7 +82,6 @@ ROLE_NAMES: Final[dict[int, str]] = {
     ROLE_ALIAS: "alias",
     ROLE_CLONE: "clone",
     ROLE_NEEDED: "needed",
-    ROLE_OTHER_VOLUME: "other_volume",
     ROLE_PINNED: "pinned",
 }
 
@@ -148,7 +150,9 @@ CAND_DTYPE: Final = np.dtype(
     }
 )
 
-# verified members: 64 bytes each (§6.2)
+# verified members: 64 bytes each (§6.2). ``role`` holds the role (low nibble) and why a keeper was
+# kept (high nibble); ``unit`` is the member row of the physical file's representative (i4: rows of
+# every group, not of one)
 MEMBER_DTYPE: Final = np.dtype(
     {
         "names": [
@@ -164,26 +168,10 @@ MEMBER_DTYPE: Final = np.dtype(
             "vol",
             "role",
             "flags",
-            "why",
             "unit",
         ],
-        "formats": [
-            "<u8",
-            "<u8",
-            "<i8",
-            "<i8",
-            "<i8",
-            "<i8",
-            "<i4",
-            "<i4",
-            "u1",
-            "u1",
-            "u1",
-            "u1",
-            "u1",
-            "u1",
-        ],
-        "offsets": [0, 8, 16, 24, 32, 40, 48, 52, 56, 57, 58, 59, 60, 61],
+        "formats": ["<u8", "<u8", "<i8", "<i8", "<i8", "<i8", "<i4", "<i4", "u1", "u1", "u1", "u1", "<i4"],
+        "offsets": [0, 8, 16, 24, 32, 40, 48, 52, 56, 57, 58, 59, 60],
         "itemsize": 64,
     }
 )
@@ -236,6 +224,7 @@ TEXT = Texts(
         "small": "小于下限",
         "system": "受保护或程序的文件夹",
         "network": "网络盘",
+        "network_mount": "在网络盘或 FUSE 挂载上（默认不比较：ID 不可靠，读云盘会触发下载）",
         "bins": "回收站",
         "group_title_one": "{name}",
         "group_title_many": "{name} 等 {n} 个名字",

@@ -15,11 +15,14 @@ size are taken in waves, largest possible reclaim first: one S1 batch identifies
 6. what is identical (whole content read, or joined from trusted cache entries) goes to the
    results sink (``results.Results``), which applies the keep rules.
 
-Pause stops asking for permits, waits for the batches in flight and closes every handle (hashers
-and offsets stay); resume reopens with the identity and stamps checked. Cancel waits for the
-batches in flight, keeps what was learnt in the cache and leaves the rest undecided. A scan
-starting on one of the job's disks makes that queue wait until it ends (the job never pauses the
-governor). The governor level is set per disk while the job runs and put back afterwards.
+Pause stops asking for permits (a batch granted one while pausing gives it back unused), waits for
+the batches in flight and closes every handle (hashers and offsets stay); resume reopens with the
+identity and stamps checked. Cancel does the same, keeps what was learnt in the cache and leaves the
+rest undecided; a batch counts as in flight until its thread is done with it, so no handle outlives
+the job. A scan starting on one of the job's disks makes that queue wait until it ends (the job
+never pauses the governor). The governor level is set per disk while the job runs and put back
+afterwards; below 「最大」, S3's large sequential reads also keep to the level's share of the
+disk's time (:class:`DutyCycle`), which the governor's queue-depth model does not see.
 """
 
 from __future__ import annotations
@@ -40,6 +43,7 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 from loguru import logger
 
+from ..io.governor import level_limit
 from ..io.priority import set_thread_low_io_priority
 from ..ops.paths import current_rules, match_rules
 from ..ops.trash import win32_trims
@@ -47,7 +51,7 @@ from ..scan.volume import VolumeInfo, volume_for
 from ..store.lock import STRUCTURE
 from . import codes as C
 from .cache import Stamp, VolumeCache, join_ok, split_ok
-from .identity import Volume, clonable, is_network, trust_of, volume_key
+from .identity import Volume, clonable, fs_group, is_network, trust_of, volume_key
 from .reads import Ops, Reader, default_ops
 from .select import G_ACTIVE, G_DONE, PathCache, Scope, Selection, name_usable, select
 
@@ -149,6 +153,55 @@ class Funnel:
         return {k: getattr(self, k) for k in self.__slots__}
 
 
+class DutyCycle:
+    """S3's share of one disk's time (docs/dupes.md §9.3).
+
+    Large sequential reads fill a disk's bandwidth at a queue depth the governor counts as light
+    (a SATA SSD reading 1 MiB blocks is saturated at a queue of 2–3), so below 「最大」 S3 batches
+    also keep to the level's share of wall time: the time with at least one S3 batch running is
+    debt that drains at ``share`` seconds per second; a new batch waits while the debt is above
+    :data:`DUTY_SLACK_S`. It needs no knowledge of the disk: while S3 runs the disk is busy with
+    it, so the rest of the time is left to other programs.
+    """
+
+    def __init__(self) -> None:
+        self.debt = 0.0
+        self.active = 0
+        self._last = time.monotonic()
+        self.waited_s = 0.0
+
+    def _settle(self, now: float, share: float) -> None:
+        dt = max(0.0, now - self._last)
+        self._last = now
+        if self.active:
+            self.debt += dt * (1.0 - share)  # busy: accrues; the share of it is free
+        else:
+            self.debt = max(0.0, self.debt - dt * share)
+
+    async def wait(self, share: Callable[[], float], stopped: Callable[[], bool]) -> None:
+        while True:
+            s = share()
+            if s >= 1.0:
+                return
+            self._settle(time.monotonic(), s)
+            if self.debt <= DUTY_SLACK_S or stopped():
+                return
+            nap = min(0.25, (self.debt - DUTY_SLACK_S) / max(s, 0.01) + 0.005)
+            self.waited_s += nap
+            await asyncio.sleep(nap)
+
+    def begin(self, share: float) -> None:
+        self._settle(time.monotonic(), min(share, 1.0))
+        self.active += 1
+
+    def end(self, share: float) -> None:
+        self._settle(time.monotonic(), min(share, 1.0))
+        self.active = max(0, self.active - 1)
+
+
+DUTY_SLACK_S = 0.2
+
+
 class DiskQueue:
     """The IO of one physical disk: its governor, threads and reader."""
 
@@ -178,6 +231,7 @@ class DiskQueue:
         self.set_level: str | None = None
         self.waiting = False
         self.stopped = False  # content reads stopped (access times moved by others)
+        self.duty = DutyCycle()
 
     def close(self) -> None:
         self.pool.shutdown(wait=False, cancel_futures=True)
@@ -242,7 +296,8 @@ class Job:
         self._running.set()
         self._cancelled = False
         self._stop_reason = ""
-        self._inflight: set[asyncio.Future[Any]] = set()
+        self._inflight: set[asyncio.Future[Any]] = set()  # batches until their thread is done
+        self._asking: set[asyncio.Future[Any]] = set()  # permits asked for, not yet granted
         self._t0 = 0.0
         self._wall0 = 0
         self._cpu0 = 0.0
@@ -273,6 +328,7 @@ class Job:
         if self.state in ("done", "cancelled", "failed"):
             return
         self._running.clear()
+        self._withdraw()
         await self._drain()
         for q in self.queues.values():
             await asyncio.get_running_loop().run_in_executor(q.pool, q.reader.suspend, None)
@@ -290,11 +346,18 @@ class Job:
         self._cancelled = True
         self._stop_reason = self._stop_reason or "cancelled"
         self._running.set()
+        self._withdraw()
         await self._drain()
 
+    def _withdraw(self) -> None:
+        """Permits still asked for are withdrawn (a throttled disk may take long to grant one)."""
+        for ask in list(self._asking):
+            ask.cancel()
+
     async def _drain(self) -> None:
-        while self._inflight:
-            await asyncio.wait(list(self._inflight))
+        """Until no batch runs on a thread and no permit is being asked for."""
+        while self._inflight or self._asking:
+            await asyncio.wait(list(self._inflight | self._asking))
 
     def open_handles(self) -> int:
         return sum(q.reader.open_handles() for q in self.queues.values())
@@ -342,25 +405,69 @@ class Job:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(poll.wait(), 0.25)
 
-    async def _run[T](self, q: DiskQueue, fn: Callable[..., T], *args: Any) -> T:
-        """One batch on ``q``: through the gate, under a governor permit, on the queue's threads."""
-        await self._gate(q)
+    def _held(self) -> bool:
+        """Paused or stopped: no new batch may start (one granted meanwhile is given back)."""
+        if self._cancelled or not self._running.is_set():
+            return True
+        try:
+            self._check()
+        except Stopped:
+            return True
+        return False
+
+    def _share(self) -> float:
+        return (
+            1.0 if self.opts.load in ("max", "idle") else level_limit(self.opts.load, self.opts.load_custom)
+        )
+
+    async def _run[T](self, q: DiskQueue, fn: Callable[..., T], *args: Any, bulk: bool = False) -> T:
+        """One batch on ``q``: through the gate, under a governor permit, on the queue's threads.
+        ``bulk``: large sequential reads (S3), which also keep to the level's share of the disk."""
         loop = asyncio.get_running_loop()
+        while True:
+            await self._gate(q)
+            if bulk:
+                await q.duty.wait(self._share, self._held)
+                if self._held():
+                    continue  # the gate waits (pause) or raises (stop)
+            permit = None
+            if q.governor is not None:
+                ask = asyncio.ensure_future(q.governor.permit())
+                self._asking.add(ask)
+                try:
+                    permit = await asyncio.shield(ask)
+                except asyncio.CancelledError:
+                    me = asyncio.current_task()
+                    if ask.cancelled() and not (me is not None and me.cancelling()):
+                        continue  # withdrawn by pause or cancel: back to the gate
+                    ask.cancel()
+                    raise
+                finally:
+                    self._asking.discard(ask)
+                if self._held():
+                    permit.release()  # paused or stopped while waiting: nothing is dispatched
+                    continue
+            break
         idle = q.governor is not None and q.governor.level == "idle"
-        if q.governor is not None:
-            permit = await q.governor.permit()
-            self.counters.permits += 1
-            fut = loop.run_in_executor(q.pool, _with_priority, idle, fn, *args)
+        self.counters.permits += 1
+        share = self._share() if bulk else 1.0
+        if bulk:
+            q.duty.begin(share)
+        fut = loop.run_in_executor(q.pool, _with_priority, idle, fn, *args)
+        if permit is not None:
             permit.bind(fut)
-        else:
-            self.counters.permits += 1
-            fut = loop.run_in_executor(q.pool, _with_priority, False, fn, *args)
         self.counters.io_calls += 1
         self._inflight.add(fut)
+
+        def done(f: asyncio.Future[Any]) -> None:
+            self._inflight.discard(f)
+            if bulk:
+                q.duty.end(share)
+
+        fut.add_done_callback(done)  # in flight until the thread is done, whoever awaits it
         try:
             return await asyncio.shield(fut)
         finally:
-            self._inflight.discard(fut)
             self.counters.max_open = max(self.counters.max_open, self.open_handles())
 
     # ------------------------------------------------------------------ queues and volumes
@@ -440,11 +547,18 @@ class Job:
         if ix is not None:
             return ix
         info = root_vol
-        if info is None or (info.dev and sys.platform != "win32" and info.dev != dev):
+        other = info is None or (info.dev != 0 and info.dev != dev)
+        if sys.platform == "win32" and info is not None and not info.dev:
+            # S1's 64-bit serial (FILE_ID_INFO) ends in the 32-bit one GetVolumeInformationW gives
+            other = bool(info.serial) and (dev & 0xFFFFFFFF) != _serial32(info.serial)
+        if other:
+            # another volume below the root (a mount point, a folder-mounted volume on Windows):
+            # its own file system decides trust, sharing and whether it is a network one; unknown
+            # is weak (the cache never joins files there)
             try:
                 info = volume_for(path)
-            except OSError:
-                info = root_vol
+            except (OSError, ValueError, RuntimeError):
+                info = None
         mount = info.mount_point if info is not None else os.path.dirname(path)
         native = self.ops.alg == C.ALG_BLAKE3
         v = Volume(
@@ -459,6 +573,7 @@ class Job:
             label=info.label if info is not None else "",
             sample_path=path,
             removable=bool(info and info.is_removable),
+            fs_group=fs_group(info, mount, dev),
         )
         if len(self.vols) >= 255:
             raise RuntimeError("too many volumes in one job")
@@ -493,10 +608,11 @@ class Job:
         except Stopped:
             self.state = "cancelled" if self._stop_reason == "cancelled" else "done"
         except Exception as exc:
-            logger.exception("dupes job failed")
+            logger.opt(exception=exc).error("dupes job failed: {}", exc)
             self.state = "failed"
-            self.error = str(exc)
+            self.error = f"{type(exc).__name__}: {exc}"
         finally:
+            # every batch's thread is done before the handles go: none comes back afterwards
             await self._drain()
             for q in self.queues.values():
                 with contextlib.suppress(Exception):
@@ -512,7 +628,11 @@ class Job:
             self.cpu_s = time.process_time() - self._cpu0
             self.peak_rss = max(self.peak_rss, _rss())
             if self.sink is not None:
-                self.sink.finish(self)
+                fin = getattr(self.sink, "finish_async", None)
+                if fin is not None:
+                    await fin(self)
+                else:
+                    self.sink.finish(self)
             self._emit(force=True)
 
     async def _select(self) -> Selection:
@@ -541,6 +661,13 @@ class Job:
         n_disks = max(1, len({self._root_disk_hint(s, r) for s, r in self._roots_in_use(sel)}))
         self._group_sem = asyncio.Semaphore(GROUPS_PER_DISK * n_disks)
         tasks: set[asyncio.Task[None]] = set()
+        failures: list[BaseException] = []
+
+        def settled(t: asyncio.Task[None]) -> None:
+            tasks.discard(t)
+            if not t.cancelled() and t.exception() is not None:
+                failures.append(t.exception())  # type: ignore[arg-type]
+
         self.state = "identifying"
         try:
             while heap or self.urgent:
@@ -569,19 +696,22 @@ class Job:
                     assert self._group_sem is not None
                     await self._group_sem.acquire()
                     self._check()
+                    if failures:
+                        raise failures[0]
                     t = asyncio.create_task(self._group_task(g, ident.pop(g)), name=f"dupes-group-{g}")
                     tasks.add(t)
-                    t.add_done_callback(tasks.discard)
-                # surface failures early
-                for t in [t for t in tasks if t.done()]:
-                    t.result()
+                    t.add_done_callback(settled)
+                if failures:  # one group failed: the job ends cleanly with it
+                    raise failures[0]
                 self.state = "verifying"
                 self._emit()
                 self._maybe_save()
             while tasks:
-                done, _ = await asyncio.wait(list(tasks), return_when=asyncio.FIRST_EXCEPTION)
-                for t in done:
-                    t.result()
+                await asyncio.wait(list(tasks), return_when=asyncio.FIRST_EXCEPTION)
+                if failures:
+                    raise failures[0]
+            if failures:
+                raise failures[0]
         except BaseException:
             for t in tasks:
                 t.cancel()
@@ -661,15 +791,18 @@ class Job:
 
     # ------------------------------------------------------------------ one group
     async def _group_task(self, g: int, data: dict[str, Any]) -> None:
+        completed = False
         try:
             await self._group(g, data)
+            completed = True
         except Stopped:
-            pass
+            pass  # stopped, failed or cancelled halfway: its undecided members are counted at the end
         finally:
             sel = self.sel
             assert sel is not None
-            sel.groups["state"][g] = G_DONE
-            self.done_groups += 1
+            if completed:
+                sel.groups["state"][g] = G_DONE
+                self.done_groups += 1
             assert self._group_sem is not None
             self._group_sem.release()
             self._emit()
@@ -707,6 +840,11 @@ class Job:
             cand["vol"][r] = row["vol"]
             fl = 0
             if self.vols[int(row["vol"])].network:
+                if not self.scope.include_network:
+                    # a network or FUSE file system mounted below a local root: not read (ids are
+                    # unreliable there and reading a cloud FUSE downloads), docs/dupes.md §5.3
+                    self._skip(r, C.NETWORK)
+                    continue
                 fl |= C.F_NETWORK
             if win32_trims(path):
                 fl |= C.F_PINNED
@@ -783,13 +921,16 @@ class Job:
         sel = self.sel
         assert sel is not None
         cand = sel.cand
-        by_vol: dict[int, list[Unit]] = {}
+        # by file system, not by st_dev: btrfs subvolumes and snapshots of one file system share
+        # extents, and FIEMAP's addresses are the file system's
+        by_fs: dict[bytes, list[Unit]] = {}
         for u in ulist:
             v = int(cand["vol"][rows[u.rep]])
             if self.vols[v].clonable:
-                by_vol.setdefault(v, []).append(u)
+                by_fs.setdefault(self.vols[v].fs_group, []).append(u)
         out = list(ulist)
-        for v, us in by_vol.items():
+        for us in by_fs.values():
+            v = int(cand["vol"][rows[us[0].rep]])
             if len(us) < 2:
                 continue
             q = await self._queue_for(int(cand["scan"][rows[us[0].rep]]), int(sel.root_of[rows[us[0].rep]]))
@@ -935,16 +1076,21 @@ class Job:
         """Drop the units the cache's prefix digests tell apart from every other unit."""
         if not any(u.prefix for u in part):
             return part
+        # a unit is apart when every other unit has a prefix digest at the same offset and none
+        # has its digest: counted per offset and per (offset, digest), O(n)
+        at: dict[int, int] = {}
+        same: dict[tuple[int, bytes], int] = {}
+        for v in part:
+            if v.prefix is not None:
+                at[v.prefix[0]] = at.get(v.prefix[0], 0) + 1
+                same[v.prefix] = same.get(v.prefix, 0) + 1
+        n = len(part)
         keep: list[Unit] = []
         for u in part:
             if u.known is not None or u.prefix is None:
                 keep.append(u)
                 continue
-            apart = all(
-                v.prefix is not None and v.prefix[0] == u.prefix[0] and v.prefix[1] != u.prefix[1]
-                for v in part
-                if v is not u
-            )
+            apart = at[u.prefix[0]] == n and same[u.prefix] == 1
             if apart:
                 self.counters.cache_separated += 1
                 self._unique(rows, info, u, size)
@@ -982,8 +1128,15 @@ class Job:
             if len(by) > 1:  # remembered: a later run tells these apart without reading
                 for u in active:
                     u.split = u.interim
+            # known digests that could still match a bucket: those without a cached prefix at this
+            # checkpoint, or whose prefix is this bucket's digest (counted once, not per bucket)
+            open_known = sum(1 for k in known if not (k.prefix and k.prefix[0] == cp))
+            known_at: dict[bytes, int] = {}
+            for k in known:
+                if k.prefix and k.prefix[0] == cp:
+                    known_at[k.prefix[1]] = known_at.get(k.prefix[1], 0) + 1
             for dig, us in by.items():
-                partners = [k for k in known if not (k.prefix and k.prefix[0] == cp and k.prefix[1] != dig)]
+                partners = open_known + known_at.get(dig, 0)
                 if len(us) == 1 and not partners:
                     self._drop_reader(rows, us[0])
                     self._unique(rows, info, us[0], size)
@@ -1018,7 +1171,7 @@ class Job:
                     keys = np.array([rows[u.rep] for u in pending], dtype=np.uint64)
                     until = np.full(len(pending), target, dtype=np.uint64)
                     max_bytes = min(32 << 20, q.step_bytes * len(pending))
-                    res = await self._run(q, q.reader.step, keys, until, max_bytes, q.batch_s)
+                    res = await self._run(q, q.reader.step, keys, until, max_bytes, q.batch_s, bulk=True)
                     if self.opts.between is not None:
                         self.opts.between(self, g)
                     nxt: list[Unit] = []
@@ -1144,10 +1297,14 @@ class Job:
         cand = sel.cand
         members: list[dict[str, Any]] = []
         for ui, u in enumerate(units):
+            # one name on disk (nlink 1) seen by several paths (overlapping scans, a symlinked or
+            # bind-mounted folder): the other paths are views of that name, not hard links
+            single = not u.clones and int(info[u.rep][1].get("nlink", 1)) <= 1
             for k, i in enumerate(u.names):
                 r = rows[i]
                 row = info[i][1]
                 kind = "rep" if k == 0 else ("clone" if i in u.clones else "alias")
+                view = C.F_VIEW if kind == "alias" and single else 0
                 members.append(
                     {
                         "unit": ui,
@@ -1161,7 +1318,7 @@ class Job:
                         "change": int(row["change"]),
                         "usn": int(row.get("usn", 0)),
                         "btime": int(row.get("btime", 0)),
-                        "flags": int(cand["flags"][r]) | (u.flags if k == 0 else 0),
+                        "flags": int(cand["flags"][r]) | (u.flags if k == 0 else 0) | view,
                         "path": info[i][0],
                         "external": u.external,
                     }
@@ -1207,14 +1364,20 @@ class Job:
 
     # ------------------------------------------------------------------ the end
     def _mark_stopped(self) -> None:
+        """Stopped (cancel, budget, time) or failed: every candidate not decided yet, of groups
+        not started, identified or halfway, is skipped as 「没来得及核对」."""
         sel = self.sel
-        if sel is None:
+        if sel is None or not len(sel.cand) or not (self._stop_reason or self.state == "failed"):
             return
         undecided = np.isin(sel.cand["state"], (C.ST_SELECTED, C.ST_PROBED, C.ST_VERIFYING))
         undecided &= sel.groups["state"][np.maximum(sel.cand["group"], 0)] != G_DONE
-        if self._stop_reason and undecided.any():
-            n = int(undecided.sum())
-            self.skipped_by_reason["stopped"] = self.skipped_by_reason.get("stopped", 0) + n
+        rows = np.flatnonzero(undecided)
+        if not len(rows):
+            return
+        sel.cand["state"][rows] = C.ST_SKIPPED
+        sel.cand["reason"][rows] = C.STOPPED
+        self.skipped_by_reason["stopped"] = self.skipped_by_reason.get("stopped", 0) + len(rows)
+        self.funnel.skipped += len(rows)
 
     async def _recheck_racy(self) -> None:
         """Files modified shortly before they were read: their stamps once more at the end."""
@@ -1285,6 +1448,13 @@ def _with_priority[T](idle: bool, fn: Callable[..., T], *args: Any) -> T:
         set_thread_low_io_priority(False)
 
 
+def _serial32(serial: str) -> int:
+    try:
+        return int(serial.replace("-", ""), 16) & 0xFFFFFFFF
+    except ValueError:
+        return -1
+
+
 def _partition(units: Sequence[Unit], key: Callable[[Unit], Any]) -> list[list[Unit]]:
     by: dict[Any, list[Unit]] = {}
     for u in units:
@@ -1313,13 +1483,16 @@ def _rss() -> int:
                     ("PeakPagefileUsage", ctypes.c_size_t),
                 )
 
+            k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+            k32.GetCurrentProcess.restype = wintypes.HANDLE
+            k32.GetCurrentProcess.argtypes = []
+            # K32GetProcessMemoryInfo lives in kernel32 since Windows 7 (psapi forwards to it)
+            k32.K32GetProcessMemoryInfo.restype = wintypes.BOOL
+            k32.K32GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(PMC), wintypes.DWORD]
             pmc = PMC()
             pmc.cb = ctypes.sizeof(PMC)
-            ctypes.windll.psapi.GetProcessMemoryInfo(  # type: ignore[attr-defined,unused-ignore]
-                ctypes.windll.kernel32.GetCurrentProcess(),  # type: ignore[attr-defined,unused-ignore]
-                ctypes.byref(pmc),
-                pmc.cb,
-            )
+            if not k32.K32GetProcessMemoryInfo(k32.GetCurrentProcess(), ctypes.byref(pmc), pmc.cb):
+                return 0
             return int(pmc.PeakWorkingSetSize)
         import resource
 

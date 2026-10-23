@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "82753f5f5627ac73";
+export const SCHEMA_HASH = "30292c0f30591179";
 
 export interface AgeCond {
   end: number;
@@ -471,8 +471,10 @@ export interface DupeMember {
   mtime: number;
   node: number;
   path: string;
-  role: "keep" | "extra" | "alias" | "clone" | "needed" | "other_volume" | "pinned";
+  role: "keep" | "extra" | "alias" | "clone" | "needed" | "pinned";
   scan_id: string;
+  /** Another path of the same file (overlapping scans) */
+  view: boolean;
   volume: string;
   why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
 }
@@ -488,8 +490,8 @@ export interface DupeNodeInfo {
   reclaim: number;
   /** Folders: bytes of extra copies below it */
   redundant: number;
-  role: "keep" | "extra" | "alias" | "clone" | "needed" | "other_volume" | "pinned" | null;
-  state: "none" | "pending" | "keep" | "extra" | "shared" | "skipped";
+  role: "keep" | "extra" | "alias" | "clone" | "needed" | "pinned" | null;
+  state: "none" | "pending" | "keep" | "extra" | "shared" | "skipped" | "unique";
   why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
 }
 
@@ -553,6 +555,12 @@ export interface DupesFolderRow {
   node: number;
   path: string;
   redundant: number;
+  /** Where most of its extra copies are kept */
+  twin: string;
+  /** Bytes of its extra copies kept in twin */
+  twin_bytes: number;
+  twin_node: number;
+  twin_scan_id: string;
 }
 
 export interface DupesFoldersPage {
@@ -615,9 +623,12 @@ export interface DupesJobParams {
 export interface DupesKeepParams {
   folder_consistent?: boolean;
   job_id: string;
+  /** Manual choices added to the search's (they pile up; same group and path: replaced) */
   overrides?: DupesOverride[];
   per_volume?: boolean;
   prefer?: string[];
+  /** Forget the manual choices first */
+  reset_overrides?: boolean;
   rule?: "oldest" | "newest" | "shortest";
 }
 
@@ -625,6 +636,8 @@ export interface DupesLast {
   at: string;
   files: number;
   groups: number;
+  /** Bytes read per second by that search (0: unknown) */
+  rate: number;
   reclaim: number;
 }
 
@@ -663,7 +676,7 @@ export interface DupesLocateResult {
 export interface DupesLocateRow {
   /** False: the copy is inside this folder or block */
   exact: boolean;
-  role: "keep" | "extra" | "alias" | "clone" | "needed" | "other_volume" | "pinned";
+  role: "keep" | "extra" | "alias" | "clone" | "needed" | "pinned";
   row: number;
 }
 
@@ -687,15 +700,35 @@ export interface DupesPlan {
   cross_extra: Record<string, number> | null;
   /** The search covering scan_ids[0], running or finished (for a client that reconnects) */
   current: DupesStatus | null;
+  disks: DupesPlanDisk[];
   /** small, cloud, system, network, bins, unique */
   excluded: Record<string, number>;
   full_bytes_max: number;
   groups: number;
   last: DupesLast | null;
+  /** The disk-load level a search would start at */
+  load: "idle" | "quiet" | "balanced" | "max" | "custom";
+  /** Smaller files are not compared */
+  min_size: number;
   /** What reading heads and tails costs */
   probe_bytes: number;
   /** The most that could be freed, if every candidate had a twin */
   reclaim_max: number;
+  /** The scans compared */
+  scans: DupesPlanScan[];
+}
+
+export interface DupesPlanDisk {
+  disk: string;
+  media: string;
+  scans: string[];
+}
+
+export interface DupesPlanScan {
+  /** Candidates of this scan */
+  candidates: number;
+  roots: string[];
+  scan_id: string;
 }
 
 export interface DupesRefused {
@@ -732,6 +765,7 @@ export interface DupesStatus {
   bytes: DupesBytes;
   cross_volume: boolean;
   elapsed_s: number;
+  /** Failed: what to tell the user (the details are in the log) */
   error: string;
   /** At most this long still (reading every candidate) */
   eta_max_s: number | null;
@@ -757,6 +791,10 @@ export interface DupesStatus {
   /** Verified groups a change took apart since: a new search checks them again */
   stale_groups: number;
   state: "planning" | "identifying" | "probing" | "verifying" | "waiting_scan" | "paused" | "done" | "cancelled" | "failed";
+  /** Why it ended early */
+  stop_reason: "" | "cancelled" | "budget" | "time" | "failed";
+  /** Candidates it stopped before deciding */
+  undecided: number;
   version: number;
   /** A scan of this disk runs: the job waits */
   waiting_for: string;

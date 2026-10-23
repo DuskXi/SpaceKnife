@@ -7,6 +7,7 @@ a shortened undo window (only files the test created are touched).
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,7 @@ from spaceknife_protocol.methods import (
     EVENT_DUPES_PROGRESS,
     EVENT_OPS_PROGRESS,
     OPS_UNDO,
+    SCAN_CLOSE,
     SCAN_START,
     TREE_FIND,
     TREE_NODE,
@@ -403,3 +405,241 @@ async def test_undo_brings_the_item_back_with_its_guards(
     done = await waiter.done(task.task_id)
     assert [r.code for r in done.results] == ["changed"]
     assert files["copy"].exists() and files["keep"].exists()
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+@pytest.mark.skipif(os.name == "nt", reason="a symlinked folder stands for SUBST / bind mounts")
+async def test_two_searches_over_two_paths_of_one_folder_keep_a_copy(
+    tmp_path: Path, client: Connection
+) -> None:
+    """The same folder scanned by two paths, searched twice with different keepers: the guard and
+    the basket compare identities, so the content is never deleted twice."""
+    data = tmp_path / "data"
+    files = tree(data)
+    alias = tmp_path / "alias"
+    alias.symlink_to(data, target_is_directory=True)
+    s1 = await scanned(client, data)
+    s2 = await scanned(client, alias)
+    await client.call(BASKET_CLEAR, Empty())
+    st1 = await searched(client, s1)
+    r1 = await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st1.job_id))
+    assert r1.members == 1
+    st2 = await searched(client, s2)
+    page = await client.call(DUPES_GROUPS, pd.DupesGroupsParams(job_id=st2.job_id))
+    other = next(m.path for m in page.items[0].members if m.role == "extra")
+    await client.call(
+        DUPES_KEEP,
+        pd.DupesKeepParams(job_id=st2.job_id, overrides=[pd.DupesOverride(group=0, path=other, role="keep")]),
+    )
+    r2 = await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st2.job_id))
+    assert r2.members == 0 and r2.refused  # its keeper is, by identity, the extra copy already in
+    waiter = OpsWaiter(client)
+    task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode="delete"))
+    await waiter.done(task.task_id)
+    assert files["keep"].exists() or files["copy"].exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+def test_the_guard_compares_identities_not_only_paths(tmp_path: Path) -> None:
+    from spaceknife.dupes.guard import Elsewhere, Guard, Stamped, check
+    from spaceknife.dupes.reads import default_ops
+
+    def stamped(path: Path) -> Stamped:
+        r = default_ops().identity([str(path)], True)
+        return Stamped(
+            path=str(path),
+            dev=int(r["dev"][0]),
+            fid_lo=int(r["fid_lo"][0]),
+            fid_hi=int(r["fid_hi"][0]),
+            size=int(r["size"][0]),
+            mtime=int(r["mtime"][0]),
+            change=int(r["change"][0]),
+            usn=int(r["usn"][0]),
+        )
+
+    data = tmp_path / "data"
+    (data / "sub").mkdir(parents=True)
+    (data / "a.bin").write_bytes(b"x" * 4096)
+    (data / "b.bin").write_bytes(b"x" * 4096)
+    (data / "sub" / "c.bin").write_bytes(b"x" * 4096)
+    alias = tmp_path / "alias"
+    alias.symlink_to(data, target_is_directory=True)
+    ops = default_ops().name
+    # search 1 keeps a and deletes b; search 2 (by the other path) keeps b and deletes a
+    g1 = Guard(member=stamped(data / "b.bin"), keepers=(stamped(data / "a.bin"),), ops=ops)
+    g2 = Guard(member=stamped(alias / "a.bin"), keepers=(stamped(alias / "b.bin"),), ops=ops)
+    doomed = [str(data / "b.bin"), str(alias / "a.bin")]
+    failed = check(doomed, {doomed[0]: g1, doomed[1]: g2})
+    assert {code for code, _ in failed.values()} == {"last_copy"}
+    # a keeper below a folder the rest of the basket deletes by another path
+    g3 = Guard(member=stamped(data / "a.bin"), keepers=(stamped(alias / "sub" / "c.bin"),), ops=ops)
+    rest = Elsewhere(covers=lambda p: False, members=set, plain=lambda: [str(data / "sub")])
+    failed = check([str(data / "a.bin")], {str(data / "a.bin"): g3}, also_doomed=rest)
+    assert failed[0][0] == "last_copy"
+    # the extra copies of another dupes item, by identity
+    rest = Elsewhere(covers=lambda p: False, members=lambda: {g3.keepers[0].ident}, plain=list)
+    assert check([str(data / "a.bin")], {str(data / "a.bin"): g3}, also_doomed=rest)[0][0] == "last_copy"
+    # nothing else goes: it passes, the content read again (same reads as the job) still matches
+    g4 = Guard(
+        member=stamped(data / "a.bin"), keepers=(stamped(data / "b.bin"),), ops=ops, recheck_content=True
+    )
+    atime = [os.stat(data / n).st_atime_ns for n in ("a.bin", "b.bin")]
+    assert check([str(data / "a.bin")], {str(data / "a.bin"): g4}) == {}
+    if os.name != "nt":
+        assert [os.stat(data / n).st_atime_ns for n in ("a.bin", "b.bin")] == atime
+
+
+async def test_closing_the_scan_drops_its_search(tmp_path: Path, server: Server, client: Connection) -> None:
+    tree(tmp_path / "t")
+    sid = await scanned(client, tmp_path / "t")
+    st = await searched(client, sid)
+    changed: list[pd.DupesChangedEvent] = []
+    client.on_event(EVENT_DUPES_CHANGED, changed.append)
+    await client.call(SCAN_CLOSE, p.ScanIdParams(scan_id=sid))
+    assert st.job_id not in server.dupes.jobs  # its store is no longer held
+    for _ in range(20):
+        if changed:
+            break
+        await asyncio.sleep(0.05)
+    assert changed and changed[-1].reason == "cleared"
+
+
+async def test_an_evicted_scan_takes_its_running_search_along(
+    tmp_path: Path, server: Server, client: Connection
+) -> None:
+    root = tmp_path / "t"
+    for i in range(4):
+        a = blob(16 * MIB, 90 + i)
+        (root / f"x{i}").mkdir(parents=True)
+        (root / f"x{i}" / "a.bin").write_bytes(a)
+        (root / f"x{i}" / "b.bin").write_bytes(a)
+    sid = await scanned(client, root)
+    st = await client.call(DUPES_START, pd.DupesStartParams(scope=pd.DupesScope(scan_ids=[sid]), load="max"))
+    h = server.dupes.jobs[st.job_id]
+    server.views._evicted(sid)  # what MAX_SCANS eviction calls
+    for _ in range(100):
+        if st.job_id not in server.dupes.jobs and not h.running:
+            break
+        await asyncio.sleep(0.05)
+    assert st.job_id not in server.dupes.jobs and not h.running
+    assert h.job.open_handles() == 0
+
+
+async def test_manual_keeps_pile_up_and_outlive_rule_changes_and_reruns(
+    tmp_path: Path, client: Connection
+) -> None:
+    root = tmp_path / "t"
+    files = tree(root)
+    data = bytes(reversed(files["keep"].read_bytes()))
+    (root / "photos" / "b.jpg").write_bytes(data)
+    (root / "backups" / "b.jpg").write_bytes(data)
+    sid = await scanned(client, root)
+    st = await searched(client, sid)
+    page = await client.call(DUPES_GROUPS, pd.DupesGroupsParams(job_id=st.job_id))
+    assert page.total == 2
+    picks = [(g.id, next(m.path for m in g.members if m.role == "extra")) for g in page.items]
+
+    async def roles(job_id: str) -> dict[str, str]:
+        pg = await client.call(DUPES_GROUPS, pd.DupesGroupsParams(job_id=job_id))
+        return {m.path: m.role for it in pg.items for m in it.members}
+
+    for gid, path in picks:  # what the drawer sends for 「保留这一份」, once per group
+        await client.call(
+            DUPES_KEEP,
+            pd.DupesKeepParams(
+                job_id=st.job_id, overrides=[pd.DupesOverride(group=gid, path=path, role="keep")]
+            ),
+        )
+    got = await roles(st.job_id)
+    assert all(got[path] == "keep" for _, path in picks)
+    # another rule (the drawer sends no overrides): the manual choices stay
+    await client.call(DUPES_KEEP, pd.DupesKeepParams(job_id=st.job_id, rule="newest"))
+    got = await roles(st.job_id)
+    assert all(got[path] == "keep" for _, path in picks)
+    # 「再查一次」: the new search of the same scan starts with them
+    st2 = await searched(client, sid)
+    got = await roles(st2.job_id)
+    assert all(got[path] == "keep" for _, path in picks)
+    # forgotten on request
+    await client.call(DUPES_KEEP, pd.DupesKeepParams(job_id=st2.job_id, reset_overrides=True))
+    got = await roles(st2.job_id)
+    assert any(got[path] == "extra" for _, path in picks)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlinks")
+async def test_one_cross_search_over_two_paths_of_one_folder(tmp_path: Path, client: Connection) -> None:
+    """Overlapping scans: each file is seen twice but is one single-named file; the real copy can
+    still go (once), the content stays."""
+    data = tmp_path / "data"
+    files = tree(data)
+    alias = tmp_path / "alias"
+    alias.symlink_to(data, target_is_directory=True)
+    s1 = await scanned(client, data)
+    s2 = await scanned(client, alias)
+    await client.call(BASKET_CLEAR, Empty())
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[pd.DupesStatus] = loop.create_future()
+    client.on_event(
+        EVENT_DUPES_PROGRESS, lambda ev: ev.state == "done" and not done.done() and done.set_result(ev)
+    )
+    st = await client.call(
+        DUPES_START, pd.DupesStartParams(scope=pd.DupesScope(scan_ids=[s1, s2], cross_volume=True))
+    )
+    if st.state != "done":
+        await asyncio.wait_for(done, 30)
+    st = await client.call(DUPES_STATUS, pd.DupesJobParams(job_id=st.job_id))
+    assert st.extra == 1 and st.groups == 1
+    page = await client.call(DUPES_GROUPS, pd.DupesGroupsParams(job_id=st.job_id))
+    views = [m for m in page.items[0].members if m.view]
+    assert len(views) == 2  # each file's second path
+    r = await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st.job_id))
+    assert r.members == 1
+    waiter = OpsWaiter(client)
+    task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode="delete"))
+    await waiter.done(task.task_id)
+    assert files["keep"].exists() != files["copy"].exists()  # one went, one stayed
+
+
+async def test_the_folders_page_lists_deepest_folders_with_their_twin(
+    tmp_path: Path, client: Connection
+) -> None:
+    root = tmp_path / "t"
+    for i in range(3):
+        a = blob(MIB + i, 120 + i)
+        (root / "photos" / "2021").mkdir(parents=True, exist_ok=True)
+        (root / "backup" / "phone" / "dcim").mkdir(parents=True, exist_ok=True)
+        (root / "photos" / "2021" / f"{i}.jpg").write_bytes(a)
+        (root / "backup" / "phone" / "dcim" / f"{i}.jpg").write_bytes(a)
+    sid = await scanned(client, root)
+    st = await searched(client, sid)
+    page = await client.call(DUPES_FOLDERS, pd.DupesFoldersParams(job_id=st.job_id, scan_id=sid))
+    assert page.total == 1  # not backup and backup/phone above it
+    row = page.items[0]
+    extra_side = "dcim" if row.path.endswith("dcim") else "2021"
+    twin_side = "2021" if extra_side == "dcim" else "dcim"
+    assert row.twin.endswith(twin_side) and row.twin_bytes == row.redundant and row.twin_node > 0
+
+
+async def test_a_stopped_search_says_so(tmp_path: Path, client: Connection) -> None:
+    root = tmp_path / "t"
+    for i in range(4):
+        a = blob(16 * MIB, 140 + i)
+        (root / f"x{i}").mkdir(parents=True)
+        (root / f"x{i}" / "a.bin").write_bytes(a)
+        (root / f"x{i}" / "b.bin").write_bytes(a)
+    sid = await scanned(client, root)
+    plan = await client.call(DUPES_PLAN, pd.DupesScope(scan_ids=[sid]))
+    assert plan.min_size == MIB and [s.scan_id for s in plan.scans] == [sid] and plan.disks
+    loop = asyncio.get_running_loop()
+    done: asyncio.Future[pd.DupesStatus] = loop.create_future()
+    client.on_event(
+        EVENT_DUPES_PROGRESS,
+        lambda ev: ev.state in ("done", "cancelled") and not done.done() and done.set_result(ev),
+    )
+    await client.call(
+        DUPES_START, pd.DupesStartParams(scope=pd.DupesScope(scan_ids=[sid]), budget_bytes=4 * MIB)
+    )
+    ev = await asyncio.wait_for(done, 30)
+    assert ev.stop_reason == "budget" and ev.undecided > 0 and ev.error == ""

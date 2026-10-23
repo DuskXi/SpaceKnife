@@ -49,7 +49,7 @@ from .locks import find_lockers
 from .paths import protected_reason
 
 if TYPE_CHECKING:
-    from ..dupes.guard import Guard
+    from ..dupes.guard import Elsewhere, Guard
     from . import _win
 
 OpCode = Literal[
@@ -212,7 +212,7 @@ def _precheck(
     check_locks: bool,
     roots: Mapping[str, str],
     guards: Mapping[str, Guard] | None = None,
-    also_doomed: Callable[[str], bool] | None = None,
+    also_doomed: Callable[[str], bool] | Elsewhere | None = None,
 ) -> dict[int, OpResult]:
     """Per index, the reason an item is skipped: reached by its path only as another entry, gone,
     protected, held open (§2.5 re-check); extra copies of duplicate files also when their guard
@@ -321,7 +321,7 @@ def move_to_trash(
     check_locks: bool = True,
     roots: Mapping[str, str] | None = None,
     guards: Mapping[str, Guard] | None = None,
-    also_doomed: Callable[[str], bool] | None = None,
+    also_doomed: Callable[[str], bool] | Elsewhere | None = None,
 ) -> list[OpResult]:
     """Move each path to the trash; one result per path, in order. Never deletes anything.
 
@@ -373,7 +373,7 @@ def delete_permanently(
     check_locks: bool = True,
     roots: Mapping[str, str] | None = None,
     guards: Mapping[str, Guard] | None = None,
-    also_doomed: Callable[[str], bool] | None = None,
+    also_doomed: Callable[[str], bool] | Elsewhere | None = None,
 ) -> list[OpResult]:
     """Delete each path for good (folders with everything inside); links are removed, never
     followed, and other file systems mounted inside a folder are not entered. ``roots`` as for

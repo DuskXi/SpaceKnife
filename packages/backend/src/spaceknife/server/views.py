@@ -108,7 +108,7 @@ class ViewManager:
         self.ops: OpsService | None = None  # set by the server: the basket follows tree changes (W5)
         self.dupes: Any = None  # server.dupes.DupesManager: the dupes colouring, changed copies
         scans.in_use = self.has_views  # MAX_SCANS eviction must not pull a scan from under its tabs
-        scans.on_evict = self._release
+        scans.on_evict = self._evicted
 
     # ------------------------------------------------------------- lifecycle
 
@@ -214,6 +214,12 @@ class ViewManager:
         handle = self.scans.scans.get(scan_id)
         if shared is not None and handle is not None:
             handle.listeners.pop(shared.listener, None)
+
+    def _evicted(self, scan_id: str) -> None:
+        """The scan left memory (MAX_SCANS): its duplicate-file search goes with it."""
+        self._release(scan_id)
+        if self.dupes is not None:
+            self.dupes.scan_closed_soon(scan_id)
 
     def close_session(self, session: Session) -> None:
         for view_id in [v for v, h in self.views.items() if h.session is session]:
@@ -360,6 +366,12 @@ class ViewManager:
             host.view.remap(new_ids, fallback)
         if self.dupes is not None:
             self.dupes.remap(scan_id, new_ids)
+
+    def files_changed(self, scan_id: str, nodes: list[int]) -> None:
+        """Files the monitor saw modified (any size change or none): duplicate-file results take
+        them out of their groups (docs/dupes.md §7.5)."""
+        if self.dupes is not None and nodes:
+            self.dupes.on_tree_changed(scan_id, dict.fromkeys(nodes, 0))
 
     def flash(self, scan_id: str, changes: dict[int, int]) -> None:
         """The tree changed: views flash what changed (setting 「元素变化闪烁」) and get a new frame."""

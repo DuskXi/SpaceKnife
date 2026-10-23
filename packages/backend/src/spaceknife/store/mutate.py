@@ -15,7 +15,7 @@ Every function here must run on the event loop thread inside ``STRUCTURE.write()
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -45,6 +45,8 @@ class Relist:
     grown: np.ndarray  # new ids of kept files whose allocation changed ...
     grown_by: np.ndarray  # ... and by how much (bytes, signed)
     gone: int  # rows marked GONE by this change
+    rewritten: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int64))  # new ids of kept
+    # files whose size or modification time changed (a same-size rewrite included)
 
 
 def is_gone(flags: np.ndarray) -> np.ndarray:
@@ -169,6 +171,11 @@ def relist(
     grown_mask = (kind[kept] != Kind.DIR) & (c["alloc"][to_new] != c["alloc"][from_old])
     grown, grown_by = to_new[grown_mask], (c["alloc"][to_new] - c["alloc"][from_old])[grown_mask]
     grown_by = np.where(_counted(c, from_old[grown_mask]), grown_by, 0)
+    files_kept = kind[kept] != Kind.DIR
+    rewritten = to_new[
+        files_kept
+        & ((c["size"][to_new] != c["size"][from_old]) | (c["mtime"][to_new] != c["mtime"][from_old]))
+    ]
     c["flags"][to_new] |= c["flags"][from_old] & _KEEP
     folders = to_new[kind[kept] == Kind.DIR]
     folders_old = from_old[kind[kept] == Kind.DIR]
@@ -206,6 +213,7 @@ def relist(
         grown=grown,
         grown_by=grown_by.astype(np.int64),
         gone=len(gone),
+        rewritten=rewritten.astype(np.int64),
     )
 
 

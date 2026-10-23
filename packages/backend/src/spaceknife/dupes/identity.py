@@ -66,6 +66,7 @@ class Volume:
     sample_path: str = ""  # a path on it (governor lookup, block maps)
     removable: bool = False
     notes: list[str] = field(default_factory=list)
+    fs_group: bytes = b""  # volumes of one file system (btrfs subvolumes): S1b compares across them
 
     @property
     def name(self) -> str:
@@ -100,6 +101,19 @@ def clonable(info: VolumeInfo | None) -> bool:
     if info.fs_flags & FILE_SUPPORTS_BLOCK_REFCOUNTING:
         return True
     return fs_name(info) in CLONABLE_FS
+
+
+def fs_group(info: VolumeInfo | None, mount: str, dev: int) -> bytes:
+    """What volumes of one file system share (block maps compare across them): the file system
+    UUID where Linux gives it (FS_IOC_GETFSUUID, 6.5+), else the mounted device for btrfs (each
+    subvolume has its own ``st_dev`` but the same source), else the device id itself."""
+    if info is not None and fs_name(info) == "btrfs":
+        uuid = _linux_uuid(mount)
+        if uuid:
+            return b"uuid:" + uuid
+        if info.device:
+            return b"src:" + info.device.encode("utf-8", "surrogateescape")
+    return b"dev:" + dev.to_bytes(8, "little", signed=False)
 
 
 def _win_guid(path: str) -> str:  # pragma: no cover - Windows

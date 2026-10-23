@@ -302,12 +302,17 @@ async def test_overlapping_scans_see_one_file(tmp_path: Path, ops: Ops) -> None:
     assert len(gs) == 1
     g = gs[0]
     assert g.units == 2  # a.bin (two names, one file) and b.bin
-    assert (
-        g.reclaim
-        == res.m["alloc"][[r for r in range(g.start, g.start + g.count) if res.role(r) == C.ROLE_EXTRA]].sum()
-    )
-    extra = [res.paths[r] for r in range(g.start, g.start + g.count) if res.role(r) == C.ROLE_EXTRA]
-    assert extra == [str(root / "b.bin")]  # the file with two names may only be kept
+    own = [r for r in range(g.start, g.start + g.count) if res.role(r) == C.ROLE_EXTRA and not res.is_view(r)]
+    assert g.reclaim == res.m["alloc"][own].sum()
+    # a.bin seen by two paths is one single-named file: it may go like any other copy, its second
+    # path carries the same role and is counted once
+    rows = range(g.start, g.start + g.count)
+    views = [r for r in rows if res.is_view(r)]
+    assert [res.paths[r] for r in views] == [str(root / "sub" / "a.bin")]
+    assert res.role(views[0]) == res.role(int(res.m["unit"][views[0]]))
+    extra = [res.paths[r] for r in rows if res.role(r) == C.ROLE_EXTRA and not res.is_view(r)]
+    assert len(extra) == 1
+    assert res.totals()[1] == 1  # one extra copy, not two
 
 
 # --------------------------------------------------------------------------- what is not read
@@ -961,3 +966,277 @@ async def test_reading_contents_leaves_access_times_alone(tmp_path: Path, ops: O
     assert job.counters.bytes_full > 0  # the contents were read
     assert [p.stat().st_atime_ns for p in paths] == before
     assert job.counters.atime_unkept == 0
+
+
+# --------------------------------------------------------------------------- review fixes
+
+
+async def test_more_than_256_verified_members(tmp_path: Path, ops: Ops) -> None:
+    """The member table's ``unit`` column holds any row (it was one byte: the 257th member broke
+    the search)."""
+    root = tmp_path / "t"
+    for i in range(140):
+        a = blob(8192 + i, 300 + i)
+        write(root, f"a/{i}.bin", a)
+        write(root, f"b/{i}.bin", a)
+    job, res = await run(await scan(root), ops, tmp_path / "c", min_size=4096)
+    assert job.state == "done", job.error
+    assert res.n == 280 and len(groups(res)) == 140
+    assert res.totals()[:2] == (140, 140)
+
+
+async def test_one_group_of_more_than_255_copies(tmp_path: Path, ops: Ops) -> None:
+    root = tmp_path / "t"
+    a = blob(9000, 7)
+    for i in range(300):
+        write(root, f"c/{i:03}.bin", a)
+    job, res = await run(await scan(root), ops, tmp_path / "c", min_size=4096)
+    assert job.state == "done", job.error
+    (g,) = res.valid_groups()
+    assert g.count == 300 and g.units == 300
+    assert sum(1 for r in range(g.start, g.start + g.count) if res.role(r) == C.ROLE_EXTRA) == 299
+
+
+def _no_handles(job: Job) -> None:
+    assert job.open_handles() == 0
+    assert all(q.reader.members() == 0 for q in job.queues.values())
+
+
+async def test_no_handle_outlives_a_budget_stop_or_a_failure(tmp_path: Path, ops: Ops) -> None:
+    root = tmp_path / "t"
+    for i in range(6):
+        a = blob(12 * MIB, 400 + i)
+        write(root, f"a{i}.bin", a)
+        write(root, f"b{i}.bin", a)
+    scans = await scan(root)
+    job, _ = await run(scans, ops, tmp_path / "c", budget_bytes=6 * MIB)
+    _no_handles(job)
+    assert job.skipped_by_reason.get("stopped", 0) > 0
+    # a failure halfway (here: in the test seam between two S3 batches)
+    res = Results(scans)
+    job = Job(Scope(scans), options=JobOptions(cache_root=tmp_path / "c2", racy_s=0), ops=ops, sink=res)
+
+    def boom(j: Job, g: int) -> None:
+        if g >= 0 and j.counters.bytes_full > 2 * MIB:
+            raise RuntimeError("boom")
+
+    job.opts.between = boom
+    await job.run()
+    assert job.state == "failed" and "boom" in job.error
+    _no_handles(job)
+    assert job.skipped_by_reason.get("stopped", 0) > 0  # what it did not decide is counted
+
+
+class SlowGovernor(FakeGovernor):
+    """Grants permits late, like a governor throttling a busy disk."""
+
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self.delay = delay
+
+    async def permit(self) -> Any:
+        await asyncio.sleep(self.delay)
+        return await super().permit()
+
+
+async def test_a_pause_while_permits_are_slow_stops_every_read(tmp_path: Path, ops: Ops) -> None:
+    root = tmp_path / "t"
+    for i in range(3):
+        a = blob(24 * MIB, 500 + i)
+        write(root, f"a{i}.bin", a)
+        write(root, f"b{i}.bin", a)
+    scans = await scan(root)
+    gov = SlowGovernor(0.05)
+    res = Results(scans)
+    job = Job(Scope(scans), options=JobOptions(cache_root=tmp_path / "c", racy_s=0), ops=ops, sink=res)
+    real_queue_for = job._queue_for
+
+    async def with_gov(si: int, ri: int) -> Any:
+        q = await real_queue_for(si, ri)
+        q.governor = gov  # type: ignore[assignment]
+        return q
+
+    job._queue_for = with_gov  # type: ignore[method-assign]
+    seen: dict[str, int] = {}
+
+    def between(j: Job, g: int) -> None:
+        if g >= 0 and not seen:
+            seen["at"] = 1
+
+            async def pause_then_watch() -> None:
+                await j.pause()
+                seen["calls"] = j.counters.io_calls
+                seen["read"] = read_bytes(j)
+                seen["open"] = j.open_handles()
+                await asyncio.sleep(0.4)  # several permits would have been granted meanwhile
+                seen["calls_later"] = j.counters.io_calls
+                seen["read_later"] = read_bytes(j)
+                seen["open_later"] = j.open_handles()
+                j.resume()
+
+            asyncio.get_running_loop().create_task(pause_then_watch())
+
+    job.opts.between = between
+    await job.run()
+    assert job.state == "done"
+    assert seen["open"] == 0 and seen["open_later"] == 0
+    assert seen["calls_later"] == seen["calls"] and seen["read_later"] == seen["read"]
+    assert groups(res) == [{"a0.bin", "b0.bin"}, {"a1.bin", "b1.bin"}, {"a2.bin", "b2.bin"}]
+
+
+async def test_quiet_keeps_s3_to_its_share_of_the_disk_time() -> None:
+    """The duty cycle: S3 busy time drains at the level's share; a batch waits while in debt."""
+    from spaceknife.dupes.engine import DUTY_SLACK_S, DutyCycle
+
+    d = DutyCycle()
+    share = 0.25
+    t0 = asyncio.get_running_loop().time()
+    busy = 0.0
+    while asyncio.get_running_loop().time() - t0 < 0.8:
+        await d.wait(lambda: share, lambda: False)
+        d.begin(share)
+        await asyncio.sleep(0.02)  # a batch that keeps the disk busy
+        d.end(share)
+        busy += 0.02
+    wall = asyncio.get_running_loop().time() - t0
+    assert busy <= share * wall + DUTY_SLACK_S + 0.05
+    assert d.waited_s > 0
+    # at 「最大」 nothing waits
+    m = DutyCycle()
+    m.begin(1.0)
+    m.end(1.0)
+    await asyncio.wait_for(m.wait(lambda: 1.0, lambda: False), 0.05)
+
+
+def test_prefix_separation_is_linear() -> None:
+    """3,000+ copies of one size told apart by cached prefixes: counted, not compared pairwise."""
+    import time as _t
+
+    from spaceknife.dupes.engine import Unit
+
+    n = 6000
+    job = Job(Scope([]), options=JobOptions())
+    dropped: list[int] = []
+    job._unique = lambda rows, info, u, size: dropped.append(u.rep)  # type: ignore[method-assign]
+    part = [Unit(rep=i, names=[i], prefix=(512 << 10, i.to_bytes(16, "little"))) for i in range(n)]
+    part.append(Unit(rep=n, names=[n], prefix=(512 << 10, (5).to_bytes(16, "little"))))  # a twin of 5
+    part.append(Unit(rep=n + 1, names=[n + 1]))  # no prefix: nothing can be said of the others
+    t = _t.perf_counter()
+    kept = job._separate_by_prefix([], [], part, 1 << 30)
+    assert _t.perf_counter() - t < 2.0
+    assert not dropped  # the unit without a prefix keeps every other one in
+    kept = job._separate_by_prefix([], [], part[:-1], 1 << 30)
+    assert sorted(u.rep for u in kept) == [5, n]
+    assert len(dropped) == n - 1
+
+
+async def test_a_network_mount_below_a_local_root_is_not_read(
+    tmp_path: Path, ops: Ops, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import spaceknife.dupes.engine as E
+    from spaceknife.scan.volume import VolumeInfo
+
+    local, net = tmp_path / "t", tmp_path / "t" / "mnt"
+    a = blob(2 * MIB, 600)
+    write(local, "a.bin", a)
+    write(net, "a-copy.bin", a)
+    write(net, "a-copy2.bin", a)
+    scans = await scan(local)
+    vops = two_volumes(ops, net)
+    real = E.volume_for
+
+    def fake_volume_for(path: str) -> VolumeInfo:
+        if path.startswith(str(net)):
+            return VolumeInfo(str(net), "server:/export", "nfs4", "", 0, 0, 4096, True, False)
+        return real(path)
+
+    monkeypatch.setattr(E, "volume_for", fake_volume_for)
+    job, res = await run(scans, vops, tmp_path / "c")
+    assert groups(res) == []
+    assert job.skipped_by_reason.get("network_mount") == 2
+    assert read_bytes(job) == 0  # the lone local file has no partner left: nothing is read
+
+
+def test_another_serial_on_windows_asks_for_its_own_volume(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A FAT or exFAT volume mounted in a folder of an NTFS root is weak, not the root's trust."""
+    import types
+
+    import spaceknife.dupes.engine as E
+    from spaceknife.scan.volume import VolumeInfo
+
+    root = VolumeInfo("C:\\", "\\\\?\\Volume{1}", "NTFS", "", 0, 0, 4096, False, False, serial="1234ABCD")
+    stick = VolumeInfo("C:\\mnt\\stick\\", "\\\\?\\Volume{2}", "exFAT", "", 0, 0, 4096, False, True)
+    monkeypatch.setattr(E, "sys", types.SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(E, "volume_for", lambda path: stick)
+    monkeypatch.setattr(E, "volume_key", lambda mount, dev: mount.encode() + dev.to_bytes(8, "little"))
+    job = Job(Scope([]), options=JobOptions(use_cache=False), ops=FallbackOps())
+    same = job._volume(0x55AA_0000_1234ABCD, "C:\\x\\a.bin", root)
+    other = job._volume(0x77, "C:\\mnt\\stick\\a.bin", root)
+    assert job.vols[same].trust == "strong" and job.vols[same].fs_type == "NTFS"
+    assert job.vols[other].fs_type == "exFAT" and job.vols[other].trust == "weak"
+
+
+def test_btrfs_subvolumes_are_one_file_system_for_block_maps(monkeypatch: pytest.MonkeyPatch) -> None:
+    import spaceknife.dupes.identity as I
+    from spaceknife.scan.volume import VolumeInfo
+
+    monkeypatch.setattr(I, "_linux_uuid", lambda mount: b"")
+    a = VolumeInfo("/", "/dev/sda2", "btrfs", "", 0, 0, 4096, False, False, dev=30)
+    b = VolumeInfo("/home", "/dev/sda2", "btrfs", "", 0, 0, 4096, False, False, dev=31)
+    c = VolumeInfo("/data", "/dev/sdb1", "btrfs", "", 0, 0, 4096, False, False, dev=40)
+    assert I.fs_group(a, "/", 30) == I.fs_group(b, "/home", 31) != I.fs_group(c, "/data", 40)
+    x = VolumeInfo("/x", "/dev/sdc1", "xfs", "", 0, 0, 4096, False, False, dev=50)
+    assert I.fs_group(x, "/x", 50) != I.fs_group(x, "/x", 51)
+
+
+async def test_a_stopped_search_says_what_it_did_not_decide(tmp_path: Path, ops: Ops) -> None:
+    root = tmp_path / "t"
+    for i in range(5):
+        a = blob(16 * MIB, 700 + i)
+        write(root, f"a{i}.bin", a)
+        write(root, f"b{i}.bin", a)
+    job, _ = await run(await scan(root), ops, tmp_path / "c", budget_bytes=4 * MIB)
+    assert job.sel is not None
+    undecided = int(job.skipped_by_reason.get("stopped", 0))
+    decided = int(np.isin(job.sel.cand["state"], (C.ST_CONFIRMED, C.ST_UNIQUE)).sum())
+    assert undecided > 0 and undecided + decided == len(job.sel.cand)
+    stopped = job.sel.cand["reason"][job.sel.cand["state"] == C.ST_SKIPPED]
+    assert (stopped == C.STOPPED).sum() == undecided
+
+
+async def test_manual_keeps_pile_up_and_survive_a_rule_change(tmp_path: Path, ops: Ops) -> None:
+    root = tmp_path / "t"
+    for i in range(3):
+        a = blob(MIB + i, 800 + i)
+        write(root, f"x/{i}.bin", a)
+        write(root, f"y{i}/{i}.bin", a)
+    _, res = await run(await scan(root), ops, tmp_path / "c")
+    extras = {}
+    for g in res.valid_groups():
+        rows = range(g.start, g.start + g.count)
+        extras[g.id] = next(res.paths[r] for r in rows if res.role(r) == C.ROLE_EXTRA)
+    over = {}
+    for g in res.valid_groups():
+        over[(g.digest or b"", extras[g.id])] = "keep"
+        await res.set_keep_async(KeepOptions(overrides=dict(over)))
+    for rule in ("newest", "shortest"):
+        await res.set_keep_async(KeepOptions(rule=rule, overrides=dict(over)))  # type: ignore[arg-type]
+        kept = {
+            res.paths[r]
+            for g in res.valid_groups()
+            for r in range(g.start, g.start + g.count)
+            if res.role(r) == C.ROLE_KEEP
+        }
+        assert kept == set(extras.values())
+
+
+def test_touching_entries_seen_today_does_not_dirty_the_cache(tmp_path: Path) -> None:
+    from spaceknife.dupes.cache import Stamp, VolumeCache
+
+    vc = VolumeCache.load(b"vol", C.ALG_BLAKE2B, C.PROBE_PARAMS, True, tmp_path)
+    vc.put(1, 2, Stamp(10, 1, 1), quick=5)
+    vc.save()
+    vc = VolumeCache.load(b"vol", C.ALG_BLAKE2B, C.PROBE_PARAMS, True, tmp_path)
+    hits = vc.lookup(np.array([1], np.uint64), np.array([2], np.uint64))
+    vc.touch(hits.tolist())
+    assert not vc.dirty  # seen today already: nothing to write
