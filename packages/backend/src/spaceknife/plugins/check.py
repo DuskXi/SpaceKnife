@@ -32,6 +32,7 @@ from spaceknife_sdk.manifest import (
     CODE_KINDS,
     MANIFEST,
     ColorModeSpec,
+    CommandSpec,
     ExportTemplateSpec,
     FileClassSpec,
     FilterPresetSpec,
@@ -43,6 +44,7 @@ from spaceknife_sdk.manifest import (
     Spec,
     VisualizationSpec,
     load_manifest,
+    spec_key,
 )
 from spaceknife_sdk.plugin import Description, describe_declarative
 
@@ -70,6 +72,9 @@ ANCHORS: dict[str, str] = {
     "missing_en": "texts",
     "placeholders": "texts",
     "icon": "icons",
+    "icon_name": "icons",
+    "bad_reference": "kind-command",
+    "private_import": "imports",
     "bad_color": "colors",
     "low_contrast": "colors",
     "same_color": "colors",
@@ -327,6 +332,100 @@ def check_icons(folder: Path, specs: Sequence[tuple[str, Spec]]) -> list[Issue]:
             out.append(
                 _issue("icon", str(exc), file=rel, fix='24×24 viewBox, paths only, stroke="currentColor"')
             )
+    return out
+
+
+def app_icons() -> list[str]:
+    """The names of the app's own icons (design/icons/icons.json, as the frontends have them)."""
+    from .icons import APP_ICONS
+
+    return sorted(APP_ICONS)
+
+
+def _icon_ok(name: str, own: set[str]) -> bool:
+    if not name:
+        return True
+    camel = re.sub(r"-([a-z0-9])", lambda m: m.group(1).upper(), name)
+    stem = name.rsplit("/", 1)[-1].removesuffix(".svg")
+    slug = re.sub(r"[^a-z0-9]+", "_", stem.lower()).strip("_")[:24].rstrip("_")
+    return camel in set(app_icons()) or stem in own or slug in own
+
+
+def check_references(
+    folder: Path, manifest: Manifest, desc: Description, specs: Sequence[tuple[str, Spec]]
+) -> list[Issue]:
+    """Names that point at something: icons (the app's or the plugin's own), and what commands do
+    (methods, reports, panels, commands, cleanups, settings, visualizations, colour modes)."""
+    import difflib
+
+    from spaceknife_sdk.actions import BUILTIN_COLORS, BUILTIN_VISUALS
+
+    own_icons = {
+        re.sub(r"[^a-z0-9]+", "_", p.stem.lower()).strip("_")
+        for p in ((folder / "icons").glob("*.svg") if (folder / "icons").is_dir() else [])
+    } | {s.name for _k, s in specs if isinstance(s, IconSpec)}
+    out: list[Issue] = []
+    places: list[tuple[str, str]] = [("plugin.toml icon", manifest.icon)]
+    for kind, spec in specs:
+        icon = getattr(spec, "icon", None)
+        if isinstance(icon, str) and icon:
+            places.append((f"{kind} {spec_key(kind, spec)!r}", icon))
+    for where, icon in places:
+        if not _icon_ok(icon, own_icons):
+            near = difflib.get_close_matches(icon, app_icons(), n=3, cutoff=0.4)
+            out.append(
+                _issue(
+                    "icon_name",
+                    f"{where}: {icon!r} is not an icon of the app or of the plugin",
+                    severity="warning",
+                    fix=("closest: " + ", ".join(near) + "; " if near else "")
+                    + "the list: spaceknife plugin docs --section icon-names; own ones: icons/<name>.svg",
+                )
+            )
+    names: dict[str, set[str]] = {}
+    for kind, spec in specs:
+        names.setdefault(kind, set()).add(spec_key(kind, spec))
+    methods = {m.name for m in desc.methods}
+    pid = manifest.id
+
+    def own(kind: str, ref: str, what: str, where: str) -> None:
+        if "." in ref:
+            return  # another plugin's, by full id: it may not be installed here
+        if ref not in names.get(kind, set()):
+            near = difflib.get_close_matches(ref, sorted(names.get(kind, set())), n=1)
+            out.append(
+                _issue(
+                    "bad_reference",
+                    f"{where}: there is no {what} {ref!r} in this plugin",
+                    fix=f"did you mean {near[0]!r}?" if near else f"declare the {what}, or use its full id",
+                )
+            )
+
+    for _kind, spec in specs:
+        if not isinstance(spec, CommandSpec) or spec.action is None:
+            continue
+        a, where = spec.action, f"command {spec.name!r}"
+        k = a.get("kind")
+        if k == "call" and "." not in str(a.get("method", "")) and a.get("method") not in methods:
+            out.append(_issue("bad_reference", f"{where}: there is no method {a.get('method')!r}"))
+        elif k == "open":
+            what, _, ref = str(a.get("target", "")).partition(":")
+            if what in ("report", "panel"):
+                own(what, ref, what, where)
+        elif k == "command":
+            own("command", str(a.get("command", "")), "command", where)
+        elif k == "cleanup":
+            own("cleanup", str(a.get("cleanup", "")), "cleanup", where)
+        elif k == "setting" and "." not in str(a.get("key", "")):
+            own("setting", str(a.get("key", "")), "setting", where)
+        elif k == "view":
+            st = a.get("settings") or {}
+            vis = st.get("visual")
+            if isinstance(vis, str) and vis not in BUILTIN_VISUALS:
+                own("visualization", vis.removeprefix(pid + "."), "visualization", where)
+            mode = st.get("color_mode")
+            if isinstance(mode, str) and mode not in BUILTIN_COLORS:
+                own("color_mode", mode.removeprefix(pid + "."), "colour mode", where)
     return out
 
 
@@ -984,6 +1083,7 @@ def static_issues(folder: Path, manifest: Manifest, desc: Description) -> list[I
     specs, out = specs_of(desc)
     out += check_texts(specs, manifest, desc.catalog)
     out += check_icons(folder, specs)
+    out += check_references(folder, manifest, desc, specs)
     out += check_colors(specs)
     out += check_permissions(folder, manifest, specs)
     out += check_rules(folder)

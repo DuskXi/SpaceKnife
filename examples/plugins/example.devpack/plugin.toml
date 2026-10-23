@@ -6,7 +6,7 @@ version = "1.0.0"
 name = { zh = "开发者清理包", en = "Developer cleanup pack" }
 description = { zh = "认识常见的构建缓存和构建产物，按它们着色和过滤。", en = "Knows common build caches and build output; colours and filters by them." }
 author = "SpaceKnife examples"
-icon = "code"
+icon = "terminal"
 
 # insights/*.toml is loaded by convention (rules: docs/insights.md)
 

@@ -62,7 +62,7 @@ async def test_hello(host: MockHost) -> None:
 """,
         imports=("Context", "Report", "ReportContext", "T", "r"),
         code='''
-@plugin.report(T("最大的文件", "Largest files"), icon="chart", refresh=["scan"])
+@plugin.report(T("最大的文件", "Largest files"), icon="gauge", refresh=["scan"])
 async def largest(ctx: Context, c: ReportContext) -> Report:
     """The largest files of the scan, as a table (opens as a tab)."""
     min_size = %MIN_SIZE%
@@ -141,7 +141,7 @@ async def test_logs(host: MockHost) -> None:
 [[panels]]                    # a web page in a sandboxed frame; it talks to the app through sk
 name = "main"
 title = { zh = "面板", en = "Panel" }
-icon = "chart"
+icon = "gauge"
 entry = "web/index.html"
 slot = "tab"
 """,
@@ -422,7 +422,7 @@ def render(plugin_id: str, parts: Sequence[str], *, title: str | None = None) ->
 [[commands]]                  # in the palette (Ctrl+K); keys = ["Ctrl+Alt+L"] would bind a key
 name = "open_largest"
 title = { zh = "最大的文件", en = "Largest files" }
-icon = "chart"
+icon = "gauge"
 when = ["done"]               # only once a scan has finished
 action = { open = "report:largest" }""")
     for p in items:

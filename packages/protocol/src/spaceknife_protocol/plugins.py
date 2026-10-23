@@ -223,6 +223,22 @@ class PluginIdParams(Params):
     id: PluginId
 
 
+class ContributionGroup(Payload):
+    """What a plugin adds of one kind, for the enable dialog (``plugin enable`` prints the same)."""
+
+    kind: str
+    title: str = Field(description="The kind, in the interface language")
+    count: int
+    items: list[str] = Field(default_factory=list, description="Each one's title (at most 50)")
+
+
+class KeyInfo(Payload):
+    key: str
+    command: str = Field(description="The command's full id")
+    title: str = Field(description="The command's title")
+    conflict: str = Field(default="", description="The command that already has the key ('' = none)")
+
+
 class PluginDescribeResult(Payload):
     """What the enable dialog shows before the user confirms."""
 
@@ -232,6 +248,10 @@ class PluginDescribeResult(Payload):
     )
     conflicts: list[str] = Field(default_factory=list, description="Key conflicts, as text")
     summary: list[str] = Field(default_factory=list, description="What it adds, as text lines")
+    groups: list[ContributionGroup] = Field(
+        default_factory=list, description="What it adds, by kind (its code's contributions too)"
+    )
+    keys: list[KeyInfo] = Field(default_factory=list, description="The keys it binds")
     unsigned: bool = True
 
 

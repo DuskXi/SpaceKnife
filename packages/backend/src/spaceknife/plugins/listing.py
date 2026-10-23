@@ -107,10 +107,11 @@ def build(root_name: str, top: _Dir, *, virtual: bool) -> NodeStore:
 
 
 def from_spec(spec: Mapping[str, Any], root: str, now: int) -> tuple[NodeStore, list[tuple[str, bytes]]]:
-    """A store from a nested dict (MockHost / tests): ``name: size | (size, mtime) | bytes | dict``.
+    """A store from a nested dict (MockHost / tests): ``name: size | (size, mtime) | bytes |
+    (bytes, mtime) | dict``.
 
     ``mtime`` is unix seconds or ``"YYYY-MM-DD"``; ``bytes`` are file contents (returned, relative
-    path -> content, for the caller to write under ``root``)."""
+    path -> content, for the caller to write under ``root``, with that modification time)."""
     import datetime as dt
 
     top = _Dir()
@@ -129,6 +130,11 @@ def from_spec(spec: Mapping[str, Any], root: str, now: int) -> tuple[NodeStore, 
             elif isinstance(value, bytes | bytearray):
                 d.files[name] = (len(value), len(value), now, now, now)
                 contents.append((prefix + name, bytes(value)))
+            elif isinstance(value, tuple) and value and isinstance(value[0], bytes | bytearray):
+                data = bytes(value[0])  # (contents, mtime)
+                mtime = when(value[1]) if len(value) > 1 else now
+                d.files[name] = (len(data), len(data), mtime, mtime, mtime)
+                contents.append((prefix + name, data))
             elif isinstance(value, tuple):
                 size = int(value[0])
                 mtime = when(value[1]) if len(value) > 1 else now

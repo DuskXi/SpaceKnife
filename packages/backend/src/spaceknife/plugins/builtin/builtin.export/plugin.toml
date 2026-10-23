@@ -8,7 +8,7 @@ version = "1.0.0"
 name = { zh = "导出", en = "Export" }
 description = { zh = "内置的导出模板（SpaceSniffer 的四个和文件夹树）与 CSV、JSON、HTML 三种格式。", en = "The built-in export templates (SpaceSniffer's four and the folder tree) and the CSV, JSON and HTML formats." }
 author = "SpaceKnife"
-icon = "export"
+icon = "upload"
 entry = "plugin.py"
 permissions = ["tree.read"]
 

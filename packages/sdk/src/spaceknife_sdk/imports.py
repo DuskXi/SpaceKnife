@@ -118,6 +118,18 @@ def check_imports(folder: Path, files: Iterable[Path] | None = None) -> list[Iss
                 names = [node.module]
             for name in names:
                 top = name.split(".")[0]
+                if top == "spaceknife_sdk" and any(part.startswith("_") for part in name.split(".")[1:]):
+                    issues.append(
+                        Issue(
+                            "private_import",
+                            f"{name} is the SDK's own inside: it may change in any version",
+                            file=rel,
+                            line=getattr(node, "lineno", 0),
+                            severity="warning",
+                            fix="what you need comes with the call: ctx, or c.ctx, x.ctx, v.ctx",
+                        )
+                    )
+                    continue
                 if top in FORBIDDEN:
                     issues.append(
                         Issue(

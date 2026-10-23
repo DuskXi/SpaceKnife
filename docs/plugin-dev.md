@@ -32,7 +32,7 @@ action = { open = "report:largest" }
 ```
 
 ```python
-@plugin.report(T("最大的文件", "Largest files"), icon="chart", refresh=["scan"])
+@plugin.report(T("最大的文件", "Largest files"), icon="gauge", refresh=["scan"])
 async def largest(ctx: Context, c: ReportContext) -> Report:
     rows = ctx.tree.query(kind="file", min_size=1, columns=("bytes", "path"), sort="-bytes", limit=50)
     cols = [r.col("bytes", T("占用", "Size"), "size"), r.col("path", T("位置", "Location"), "path")]
@@ -120,7 +120,7 @@ default = 1048576
 <a id="icons"></a>
 ### 1.4 图标
 
-`icon = "chart"` 用程序自带的图标名；自己的图标放 `icons/<名字>.svg`，写 `icon = "icons/<名字>.svg"`。SVG 会被清洗：`viewBox="0 0 24 24"`，只允许形状元素和几何属性，颜色只能是 `currentColor` 或 `none`，≤ 16 KiB，不能有文字、脚本、外部引用。
+`icon = "gauge"` 用程序自带的图标名；自己的图标放 `icons/<名字>.svg`，写 `icon = "icons/<名字>.svg"`。SVG 会被清洗：`viewBox="0 0 24 24"`，只允许形状元素和几何属性，颜色只能是 `currentColor` 或 `none`，≤ 16 KiB，不能有文字、脚本、外部引用。
 
 <a id="colors"></a>
 ### 1.5 颜色
@@ -258,7 +258,7 @@ async def ticks(ctx: Context) -> AsyncIterator[Progress]:
 [[commands]]
 name = "open_largest"
 title = { zh = "最大的文件", en = "Largest files" }
-icon = "chart"
+icon = "gauge"
 when = ["done"]
 menus = ["toolbar"]
 action = { open = "report:largest" }
@@ -337,7 +337,7 @@ unit = "B"
 签名：`async def f(ctx: Context, c: ReportContext) -> Report`。`c` 有 `scan_id view_id node selection compare_id cursor args`（`cursor` 是表格 `more` 续读的位置）。只算最新：用户切换选中时，还没算完的旧报告被取消。
 
 ```python ex
-@plugin.report(T("最大的文件", "Largest files"), name="largest", icon="chart", refresh=["scan"])
+@plugin.report(T("最大的文件", "Largest files"), name="largest", icon="gauge", refresh=["scan"])
 async def largest(ctx: Context, c: ReportContext) -> Report:
     rows = ctx.tree.query(kind="file", under=c.node, columns=("bytes", "path"), sort="-bytes", limit=50)
     total = int(rows["bytes"].sum())

@@ -126,7 +126,7 @@ def test_check_says_what_is_wrong_and_where(tmp_path: Path) -> None:
     folder = tmp_path / "example.bad"
     scaffold.write(folder, "example.bad", ["report"])
     toml = (folder / "plugin.toml").read_text(encoding="utf-8")
-    (folder / "plugin.toml").write_text(toml.replace('icon = "chart"', 'icno = "chart"'), encoding="utf-8")
+    (folder / "plugin.toml").write_text(toml.replace('icon = "gauge"', 'icno = "gauge"'), encoding="utf-8")
     result = check_plugin(folder, contracts=False)
     [typo] = [i for i in result.issues if i.code == "unknown_field"]
     assert typo.file == "plugin.toml" and typo.line > 0 and "icon" in typo.fix

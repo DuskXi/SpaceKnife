@@ -29,6 +29,7 @@ from typing import Annotated, Any
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 
 plugin_app = typer.Typer(
     help="Write, check, try and manage plugins (docs/plugin-dev.md).",
@@ -489,10 +490,15 @@ def enable(
             mark = " (new)" if perm.id in added else ""
             warn = " [!]" if perm.warn else ""
             out.print(f"  {perm.id}{mark}{warn}: {perm.text}")
-        for line in desc.summary:
-            out.print(f"  {line}")
-        for c in desc.conflicts:
-            out.print(f"  [yellow]{c}[/yellow]")
+        if desc.groups:
+            out.print("adds:")
+            for line in desc.summary:  # the same groups as the enable dialog
+                out.print(f"  {escape(line)}")
+        if desc.keys:
+            out.print("keys:")
+            for k in desc.keys:
+                taken = f"  [yellow](already {escape(k.conflict)})[/yellow]" if k.conflict else ""
+                out.print(f"  {escape(k.key)} → {escape(k.title)}{taken}")
         if desc.unsigned:
             out.print("not signed; the audit hook is not an operating-system sandbox")
         if not yes and not typer.confirm("enable it?"):

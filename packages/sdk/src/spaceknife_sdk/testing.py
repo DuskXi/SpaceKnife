@@ -13,6 +13,7 @@ temporary. Needs the SpaceKnife backend installed (``spaceknife-backend``).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import shutil
 import tempfile
@@ -20,7 +21,7 @@ import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from spaceknife_protocol.plugins import Report
 
@@ -37,9 +38,40 @@ class Tree:
 
 
 def make_tree(spec: Mapping[str, Any], *, root: str | None = None) -> Tree:
-    """``{name: size | (size, mtime) | bytes | {…}}``: a file (size, modified time as unix seconds or
-    ``"YYYY-MM-DD"``, or real contents) or a folder."""
+    """``{name: size | (size, mtime) | bytes | (bytes, mtime) | {…}}``: a file (size, modified time
+    as unix seconds or ``"YYYY-MM-DD"``, real contents, or both) or a folder.
+
+    ``root``: the folder the tree stands for (its files are written there when they have contents).
+    By default a new folder under ``~/.spaceknife-mock/`` (removed by ``close()``): not under the
+    temporary folder, so the app's own rules for temporary folders do not cover what a test
+    looks at."""
     return Tree(spec, root)
+
+
+def _mock_trees() -> Path:
+    """Where synthetic trees with contents go: ``$SPACEKNIFE_MOCK_TREES``, else
+    ``~/.spaceknife-mock`` (else the temporary folder when the home folder is not writable)."""
+    base = os.environ.get("SPACEKNIFE_MOCK_TREES")
+    if base:
+        Path(base).mkdir(parents=True, exist_ok=True)
+        return Path(base)
+    home = Path.home() / ".spaceknife-mock"
+    try:
+        home.mkdir(parents=True, exist_ok=True)
+        return home
+    except OSError:
+        return Path(tempfile.gettempdir())
+
+
+class _Settled:
+    """What ``set_setting`` / ``set_lang`` return: ``await`` it to wait for the plugin's hooks (the
+    next call waits for them anyway)."""
+
+    def __init__(self, host: MockHost) -> None:
+        self._host = host
+
+    def __await__(self) -> Any:
+        return self._host._settle().__await__()
 
 
 @dataclass(slots=True)
@@ -105,6 +137,8 @@ class MockHost:
     _started: bool = False
     _settings_pending: bool = False
     _stores: list[tuple[str, Any]] = field(default_factory=list)
+    _trees: list[Path] = field(default_factory=list)
+    _snapshots: int = 0
 
     # ------------------------------------------------------------- setting up
 
@@ -157,13 +191,25 @@ class MockHost:
     async def close(self) -> None:
         if self.server is not None:
             self.server.sessions.discard(self.session)
+            for handle in list(self.server.scans.scans.values()):  # sources' watchers, as the app
+                monitor = getattr(handle, "monitor", None)
+                if monitor is not None:
+                    with contextlib.suppress(Exception):
+                        await monitor.stop()
+                    handle.monitor = None
             await self.server.plugins.close()
             await self.server.scans.close()
+        for tree in self._trees:
+            shutil.rmtree(tree, ignore_errors=True)
         for key, value in self._env.items():
             if value is None:
                 os.environ.pop(key, None)
             else:
                 os.environ[key] = value
+        with contextlib.suppress(Exception):
+            from spaceknife import i18n
+
+            i18n.system_language.cache_clear()
         shutil.rmtree(self.home, ignore_errors=True)
 
     async def __aenter__(self) -> MockHost:
@@ -182,10 +228,12 @@ class MockHost:
             self._set_env()
         now = int(time.time())
         if isinstance(tree, Tree):
-            self.files_root = Path(
-                tempfile.mkdtemp(prefix="sk-mocktree-", dir=self.home if self.home.exists() else None)
-            )
-            root = tree.root or str(self.files_root)
+            if tree.root is None:
+                self.files_root = Path(tempfile.mkdtemp(prefix="tree-", dir=_mock_trees()))
+                self._trees.append(self.files_root)
+            else:
+                self.files_root = Path(tree.root)
+            root = str(self.files_root)
             store, contents = from_spec(tree.spec, root, now)
             for rel, data in contents:
                 target = Path(root) / rel
@@ -231,10 +279,17 @@ class MockHost:
                     ),
                 )
                 await self.server.plugins.push_update({"roots": self.server.plugins.api.scan_roots()})
+        await self._settle()
+        return self.server.plugins
+
+    async def _settle(self) -> None:
+        """The plugin has the new settings and language, and its hooks for them have run."""
         if self._settings_pending:  # set_setting: the plugin sees the value before the next call
             self._settings_pending = False
             await self.server.plugins.push_update({"settings": True})
-        return self.server.plugins
+        busy = [t for t in list(self.server.plugins._background) if not t.done()]
+        if busy:
+            await asyncio.wait(busy, timeout=35.0)
 
     async def scan_dir(self, path: str | os.PathLike[str]) -> str:
         """Scan a real folder (a hard scan in this process), wait for it, use it."""
@@ -259,11 +314,14 @@ class MockHost:
         return self.server.scans.scans[self.scan_id].store
 
     def find(self, rel: str) -> int:
-        """The node of a path relative to the root (``"a/x.bin"``)."""
+        """The node of a path relative to the root (``"a/x.bin"``); KeyError when there is none."""
         store = self.store
         node = next(iter(store.roots()))
         for part in [p for p in rel.replace("\\", "/").split("/") if p]:
-            node = next(ch for ch in store.children(node) if store.name(ch) == part)
+            found = next((ch for ch in store.children(node) if store.name(ch) == part), None)
+            if found is None:
+                raise KeyError(rel)
+            node = found
         return int(node)
 
     # ------------------------------------------------------------- calling the plugin
@@ -398,16 +456,54 @@ class MockHost:
             raise AssertionError("the frame breaks the row contract: " + "; ".join(problems[:5]))
         return frame
 
-    async def export(self, name: str, *, root: int = 0) -> str | bytes:
-        """The output of the plugin's export format (or template) for the tree below ``root``."""
-        from spaceknife.export import export_chunks, resolve
+    async def export(
+        self,
+        name: str,
+        *,
+        root: int = 0,
+        filter: str | None = None,
+        options: Mapping[str, Any] | None = None,
+        selection: Sequence[int] | None = None,
+    ) -> str | bytes:
+        """The output of the plugin's export format (or template) for the tree below ``root``, as
+        the export dialog makes it: ``filter`` (an expression: only what it matches), ``options``
+        (the format's options; the rest take their defaults), ``selection`` (only these nodes)."""
+        from spaceknife.export import common_root, export_chunks, resolve, subtree_mask
+        from spaceknife.filter.engine import FilterContext, evaluate
+        from spaceknife.filter.vocab import platform_vocab
         from spaceknife.server.compute import compute
+        from spaceknife_protocol.filter_syntax import parse
 
-        await self._ready()
+        host = await self._ready()
         target = resolve(f"{self.plugin_id}.{name}")
+        store = self.store
+        match = None
+        if filter:
+            parsed = parse(filter, None, platform_vocab())
+            if parsed.normal is None:
+                raise ValueError([d.code for d in parsed.diagnostics])
+            ids = [*parsed.normal.sets, *parsed.normal.not_sets]
+            sets = await asyncio.to_thread(host.set_masks, self.scan_id, store, ids) if ids else None
+            match = evaluate(store, parsed.normal, FilterContext.current(sets=sets)).match
+        picked = [int(x) for x in selection or []]
+        if picked:
+            root = common_root(store, picked)
+            if len(picked) > 1:
+                inside = subtree_mask(store, picked)
+                match = inside if match is None else (match & inside)
 
         def run() -> list[str | bytes]:
-            return list(export_chunks(target, self.store, root))
+            return list(
+                export_chunks(
+                    target,
+                    store,
+                    root,
+                    match=match,
+                    filter_text=filter or "",
+                    options=dict(options or {}),
+                    selection=picked,
+                )
+            )
 
         parts = await compute(run)
         if parts and isinstance(parts[0], bytes):
@@ -415,7 +511,9 @@ class MockHost:
         return "".join(p for p in parts if isinstance(p, str))
 
     async def source(self, name: str, uri: str) -> str:
-        """Scan ``uri`` with the plugin's scan source; returns the scan id (now in front)."""
+        """Scan ``uri`` with the plugin's scan source; returns the scan id (now in front). Raises
+        RuntimeError with the plugin's message when the listing failed (as the app's status bar
+        shows it); :meth:`status` tells how a scan stands."""
         from spaceknife_protocol.scan import ScanStartParams
 
         await self._ready()
@@ -423,7 +521,40 @@ class MockHost:
         if handle.task is not None:
             await handle.task
         self.scan_id = handle.id
+        st = handle.status()
+        if st.state == "failed":
+            raise RuntimeError(f"scan source {name!r} failed on {uri}: {st.message}")
         return str(handle.id)
+
+    def status(self, scan_id: str | None = None) -> Any:
+        """A scan's status (``scan.status``: state, items, message, monitor …)."""
+        sid = scan_id or self.scan_id
+        assert sid is not None, "scan something first"
+        return self.server.scans.scans[sid].status()
+
+    # ------------------------------------------------------------- what the plugin registered
+
+    def _owned(self, kind: str) -> list[Any]:
+        from spaceknife.extensions import EXTENSIONS
+
+        return [c for c in EXTENSIONS.of(kind) if c.owner == self.plugin_id]
+
+    def commands(self) -> dict[str, Any]:
+        """The plugin's commands as the palette has them: full id -> the command (``.name``,
+        ``.keys``, ``.action``, ``.available(ctx)`` …); filter presets are among them."""
+        return {c.id: c.impl for c in self._owned("command")}
+
+    def keys(self) -> dict[str, str]:
+        """Key -> command id, for every key the plugin binds (its commands' keys and keybindings)."""
+        out = {k: cid for cid, cmd in self.commands().items() for k in getattr(cmd, "keys", ())}
+        for c in self._owned("keybinding"):
+            cmd = c.spec.command
+            out[c.spec.key] = cmd if "." in cmd else f"{self.plugin_id}.{cmd}"
+        return out
+
+    def presets(self) -> dict[str, str]:
+        """Filter presets: name -> expression."""
+        return {c.local: c.spec.expr for c in self._owned("filter_preset")}
 
     async def hook(self, event: str, **args: Any) -> None:
         host = await self._ready()
@@ -449,6 +580,9 @@ class MockHost:
         store = self.store
         roots = [store.name(r) for r in store.roots()]
         path = snap.auto_path(roots, when)
+        while path.exists():  # two in the same second: the next free name
+            self._snapshots += 1
+            path = path.with_name(f"{path.stem}-{self._snapshots}{path.suffix}")
         path.parent.mkdir(parents=True, exist_ok=True)
         snap.save(store, path, roots=roots)
         return str(path)
@@ -476,15 +610,29 @@ class MockHost:
     def basket(self) -> list[Any]:
         return list(self.server.ops.basket.items())
 
-    def set_setting(self, name: str, value: Any) -> None:
-        """Change one of the plugin's settings (as the settings page would)."""
+    def set_setting(self, name: str, value: Any) -> _Settled:
+        """Change one of the plugin's settings (as the settings page would): the host drops what it
+        cached of the plugin's answers and runs its ``settings`` hook (``await`` the result to wait
+        for the hook; the next call waits for it anyway)."""
+        if self.server is None:
+            raise RuntimeError("start the host first (async with MockHost.load(...) as host)")
         self.server.settings.update({f"plugin.{self.plugin_id}.{name}": value})
         self._settings_pending = True
+        return _Settled(self)
 
-    def set_lang(self, lang: str) -> None:
+    def set_lang(self, lang: str) -> _Settled:
+        """Switch the interface language (``"en"`` or ``"zh-CN"``), as the settings page does: the
+        plugin's ``lang`` hook runs; texts come in that language from the next call on."""
         from spaceknife import i18n
 
-        i18n.set_language("en" if lang.startswith("en") else "zh-CN")
+        code: Literal["en", "zh-CN"] = "en" if lang.startswith("en") else "zh-CN"
+        self._env.setdefault("SPACEKNIFE_LANGUAGE", os.environ.get("SPACEKNIFE_LANGUAGE"))
+        os.environ["SPACEKNIFE_LANGUAGE"] = code  # what the host's language follows in tests
+        i18n.system_language.cache_clear()
+        i18n.set_language(code)
+        if self.server is not None:
+            self.server.settings.update({"general.language": code})  # stays when settings change
+        return _Settled(self)
 
     # ------------------------------------------------------------- checks
 
@@ -492,13 +640,18 @@ class MockHost:
         """What ``plugin check`` checks, on this plugin as it runs here: the files and the
         description, then every code contribution once on synthetic trees. Raises AssertionError
         listing every problem (warnings too with ``strict``)."""
-        from spaceknife.plugins.check import run_contracts, static_issues
+        from spaceknife.plugins.check import check_generated, run_contracts, static_issues
+        from spaceknife_sdk.imports import check_imports
         from spaceknife_sdk.manifest import load_manifest
 
         host = await self._ready()
         rec = host.records[self.plugin_id]
         assert rec.description is not None
-        issues = static_issues(self.folder, load_manifest(self.folder), rec.description)
+        manifest = load_manifest(self.folder)
+        issues = static_issues(self.folder, manifest, rec.description)  # as plugin check does
+        issues += check_imports(self.folder)
+        if not manifest.builtin:
+            issues += check_generated(self.folder, rec.description, manifest)
         scan_id = self.scan_id
         try:
             issues += await run_contracts(self, rec.description)

@@ -19,6 +19,8 @@ from spaceknife_protocol.plugins import (
     wire_name,
 )
 
+BUILTIN_VISUALS = ("treemap", "flame", "flame_polar")
+BUILTIN_COLORS = ("class", "flat", "time", "branch")
 NODE_OPS = ("reveal", "open", "terminal", "copy_path", "select", "zoom", "basket")
 TOGGLES = ("show_free", "show_unknown", "show_trash", "sort_by_size")
 VIEW_KEYS = (
@@ -167,6 +169,16 @@ def resolve_action(norm: dict[str, Any], plugin: str) -> Action:
     elif kind == "setting":
         key = a["key"]
         a["key"] = f"plugin.{plugin}.{key}" if valid_local_name(key) else key
+    elif kind == "view":
+        st = dict(a.get("settings") or {})
+        # the plugin's own visualizations and colour modes by local name, the built-in ones as they are
+        vis = st.get("visual")
+        if isinstance(vis, str) and vis not in BUILTIN_VISUALS and valid_local_name(vis):
+            st["visual"] = full_id(plugin, vis)
+        mode = st.get("color_mode")
+        if isinstance(mode, str) and mode not in BUILTIN_COLORS and valid_local_name(mode):
+            st["color_mode"] = full_id(plugin, mode)
+        a["settings"] = st
     try:
         return _ACTION.validate_python(a)
     except ValidationError as exc:

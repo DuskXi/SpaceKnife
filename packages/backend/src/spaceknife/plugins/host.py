@@ -974,48 +974,95 @@ class PluginHost:
         self.records[fresh.id] = fresh
         return fresh
 
+    async def _preview(self, rec: PluginRecord) -> Description | None:
+        """What a plugin adds, before it is enabled: a declarative one's manifest; a code plugin's
+        description from the cache (by its files' hash) or by importing it once in a plugin
+        process without permissions (``plugin check`` does the same)."""
+        if rec.description is not None:
+            return rec.description
+        if rec.manifest is None:
+            return None
+        if not rec.has_code:
+            try:
+                return await asyncio.to_thread(describe_declarative, rec.folder, rec.manifest)
+            except Exception:
+                return None
+        cache = ppaths.cache_dir(rec.id) / f"describe-{rec.hash.removeprefix('sha256:')[:32]}.json"
+        if rec.hash and cache.is_file():
+            with contextlib.suppress(OSError, ValueError):
+                return Description.model_validate_json(cache.read_text(encoding="utf-8"))
+        from .check import describe_in_subprocess
+
+        desc, _issues = await asyncio.to_thread(describe_in_subprocess, rec.folder)
+        if desc is not None and rec.hash and not rec.dev:
+            with contextlib.suppress(OSError):
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                cache.write_text(desc.model_dump_json(), encoding="utf-8")
+        return desc
+
+    def key_infos(self, rec: PluginRecord, desc: Description | None) -> list[pp.KeyInfo]:
+        """The keys a plugin binds (its commands' keys and its keybindings), and what has them now."""
+        from ..palette.commands import registry
+        from ..palette.keymap import normalize
+
+        lang = i18n.language()
+        taken: dict[str, tuple[str, str]] = {}
+        for c in registry():
+            if c.owner == rec.id:
+                continue
+            for k in c.keys:
+                taken.setdefault(normalize(k), (c.id, c.name))
+        for kb in EXTENSIONS.of("keybinding"):
+            if kb.owner != rec.id and kb.spec is not None:
+                taken.setdefault(normalize(kb.spec.key), (kb.spec.command, kb.spec.command))
+        out: list[pp.KeyInfo] = []
+        items = desc.contributions if desc is not None else []
+        titles: dict[str, str] = {}
+        for item in items:
+            if item.get("kind") == "command":
+                spec = item.get("spec") or {}
+                t = spec.get("title") or {}
+                title = str((t.get("en") if lang == "en" else None) or t.get("zh", ""))
+                full = f"{rec.id}.{spec.get('name', '')}"
+                titles[full] = title
+                for k in spec.get("keys") or []:
+                    hit = taken.get(normalize(k))
+                    out.append(pp.KeyInfo(key=k, command=full, title=title, conflict=hit[0] if hit else ""))
+        for item in items:
+            if item.get("kind") == "keybinding":
+                spec = item.get("spec") or {}
+                cmd = str(spec.get("command", ""))
+                full = cmd if "." in cmd else f"{rec.id}.{cmd}"
+                hit = taken.get(normalize(str(spec.get("key", ""))))
+                conflict = hit[0] if hit and not spec.get("override") else ""
+                out.append(
+                    pp.KeyInfo(
+                        key=str(spec.get("key", "")),
+                        command=full,
+                        title=titles.get(full, full),
+                        conflict=conflict,
+                    )
+                )
+        return out
+
     async def describe(self, plugin: str) -> pp.PluginDescribeResult:
+        from .texts import contribution_groups, summary_lines
+
         rec = await self.refresh(plugin)
         entry = self.trust.get(rec.id)
         added = [p for p in rec.requested if entry is not None and p not in entry.granted]
-        summary: list[str] = []
-        conflicts: list[str] = []
-        m = rec.manifest
-        if m is not None:
-            for kind, spec in m.declared():
-                title = getattr(spec, "title", None)
-                shown = title.get(i18n.language()) if title is not None else getattr(spec, "name", "")
-                summary.append(f"{kind}: {shown}")
-            if rec.description is not None:
-                for item in rec.description.contributions:
-                    if item.get("kind") in (
-                        "node_field",
-                        "cleanup",
-                        "scan_source",
-                        "node_set",
-                        "export_format",
-                        "insight",
-                    ):
-                        summary.append(f"{item['kind']}: {item.get('spec', {}).get('name', '')}")
-            from ..palette.keymap import normalize
-
-            builtin_keys = {
-                normalize(k): c.id
-                for c in __import__("spaceknife.palette.commands", fromlist=["registry"]).registry()
-                if c.owner == "builtin"
-                for k in c.keys
-            }
-            for c in m.commands:
-                for k in c.keys:
-                    if normalize(k) in builtin_keys:
-                        conflicts.append(
-                            tr("{key} 已用于 {command}", key=k, command=builtin_keys[normalize(k)])
-                        )
+        desc = await self._preview(rec)
+        lang = i18n.language()
+        groups = contribution_groups(desc, lang, rec.folder) if desc is not None else []
+        keys = self.key_infos(rec, desc)
+        conflicts = [tr("{key} 已用于 {command}", key=k.key, command=k.conflict) for k in keys if k.conflict]
         return pp.PluginDescribeResult(
             plugin=self.info(rec),
             added=added,  # type: ignore[arg-type]  # the manifest's permissions are Permission values
             conflicts=conflicts,
-            summary=summary,
+            summary=summary_lines(groups),
+            groups=groups,
+            keys=keys,
             unsigned=not rec.builtin,
         )
 
