@@ -35,7 +35,7 @@ from ..privacy import inside, protected_folders
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
 from .volume import VolumeInfo, is_volume_root, volume_for, volume_group_twins
-from .worker import RootOptions, SliceOptions, SliceResult, Task, merge_slices
+from .worker import RootOptions, SliceOptions, SliceResult, Task
 
 if TYPE_CHECKING:
     from ..io import IoGovernor, Permit
@@ -544,7 +544,7 @@ class Scanner:
         t0 = time.perf_counter()
         n0 = len(self.store)
         try:
-            self._fold(merge_slices(list(results)))
+            self._fold(list(results))
         finally:
             self._folded += len(self.store) - n0
             self._ingest_s += time.perf_counter() - t0
@@ -564,40 +564,51 @@ class Scanner:
             items=self._folded,
         )
 
-    def _fold(self, res: SliceResult) -> None:
+    def _fold(self, results: list[SliceResult]) -> None:
+        """Slices that came in together, folded as one (what worker.merge_slices and one fold of
+        the merged slice did, without the merged copy): hard links and extensions slice by slice
+        in order, one NodeStore.ingest_slices (natively without the GIL where the extension is),
+        then errors and the frontier."""
         store = self.store
-        cols = res.cols
-        n_entries = len(res.name_lens)
-        if n_entries and not self.count_links_each:
-            seen = self._seen_links
-            if not isinstance(seen, set):  # native: the same loop, in one call
-                seen.mark(cols["dev"], cols["ino"], cols["nlink"], cols["kind"], cols["flags"])
-            elif len(cand := np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]):
-                flags = cols["flags"]
-                for i in cand.tolist():
-                    key = (int(cols["dev"][i]), int(cols["ino"][i]))
-                    if key in seen:
-                        flags[i] |= np.uint32(Flag.HARDLINK_DUP)
-                    else:
-                        seen.add(key)
-        remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
-        ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
-        # the whole slice in one go (mount points stay unentered: never PENDING)
-        starts = store.ingest_slice(
-            res.refs,
-            res.bounds,
-            res.name_blob,
-            res.name_lens,
-            {key: cols[key] for key in ENTRY_COLUMNS},
-            ext_global,
-        )
-        if res.paths:
-            self._current = res.paths[-1]
-        skipped = int(np.count_nonzero(starts < 0))
+        parts = []
+        for res in results:
+            cols = res.cols
+            n_entries = len(res.name_lens)
+            if n_entries and not self.count_links_each:
+                seen = self._seen_links
+                if not isinstance(seen, set):  # native: the same loop, in one call
+                    seen.mark(cols["dev"], cols["ino"], cols["nlink"], cols["kind"], cols["flags"])
+                elif len(cand := np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]):
+                    flags = cols["flags"]
+                    for i in cand.tolist():
+                        key = (int(cols["dev"][i]), int(cols["ino"][i]))
+                        if key in seen:
+                            flags[i] |= np.uint32(Flag.HARDLINK_DUP)
+                        else:
+                            seen.add(key)
+            remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
+            ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
+            parts.append(
+                (
+                    res.refs,
+                    res.bounds,
+                    res.name_blob,
+                    res.name_lens,
+                    {key: cols[key] for key in ENTRY_COLUMNS},
+                    ext_global,
+                )
+            )
+        # the whole slices in one go (mount points stay unentered: never PENDING)
+        all_starts = store.ingest_slices(parts)
+        skipped = 0
+        for res, starts in zip(results, all_starts, strict=True):
+            if res.paths:
+                self._current = res.paths[-1]
+            skipped += int(np.count_nonzero(starts < 0))
         if skipped:
             logger.debug("scan: {} listing(s) of folders deleted while they were read, skipped", skipped)
 
-        def resolve(refs: list[tuple[int, int, int]]) -> list[int]:
+        def resolve(refs: list[tuple[int, int, int]], starts: np.ndarray) -> list[int]:
             """The nodes results refer to; -1 for one that left the tree while it was read."""
             if not refs:
                 return []
@@ -614,21 +625,25 @@ class Scanner:
             nodes: list[int] = out.tolist()
             return nodes
 
-        for (_, path, msg), node in zip(res.errors, resolve([e[0] for e in res.errors]), strict=True):
-            if node < 0:
-                continue
-            store.mark(node, Flag.ACCESS_DENIED)
-            store.clear(node, Flag.PENDING)
-            self._errors += 1
-            if len(self._denied) < MAX_RECORDED_DENIED:
-                self._denied.append(path)
-                self.denied_reasons.append(msg)
-        nodes = resolve([f[0] for f in res.frontier])
-        self._queue.extend(
-            ((0, node, 0), path, root_idx)
-            for (_, path, root_idx), node in zip(res.frontier, nodes, strict=True)
-            if node >= 0
-        )
+        for res, starts in zip(results, all_starts, strict=True):
+            for (_, path, msg), node in zip(
+                res.errors, resolve([e[0] for e in res.errors], starts), strict=True
+            ):
+                if node < 0:
+                    continue
+                store.mark(node, Flag.ACCESS_DENIED)
+                store.clear(node, Flag.PENDING)
+                self._errors += 1
+                if len(self._denied) < MAX_RECORDED_DENIED:
+                    self._denied.append(path)
+                    self.denied_reasons.append(msg)
+        for res, starts in zip(results, all_starts, strict=True):
+            nodes = resolve([f[0] for f in res.frontier], starts)
+            self._queue.extend(
+                ((0, node, 0), path, root_idx)
+                for (_, path, root_idx), node in zip(res.frontier, nodes, strict=True)
+                if node >= 0
+            )
 
     # ------------------------------------------------------------------ reporting
 

@@ -55,6 +55,9 @@ class NameHeap:
     def used(self) -> int:
         return sum(self._used)
 
+    def chunks(self) -> int:
+        return len(self._chunks)
+
     def reserved(self) -> int:
         return sum(len(c) for c in self._chunks)
 
@@ -83,7 +86,7 @@ class NameHeap:
         self._used.append(0)
         return chunk, base, 0
 
-    def append(self, blob: bytes | memoryview, lens: np.ndarray) -> np.ndarray:
+    def append(self, blob: bytes | memoryview | np.ndarray, lens: np.ndarray) -> np.ndarray:
         """Append names given as one concatenated blob and their lengths; their offsets (int64)."""
         lens = np.asarray(lens, dtype=np.int64)
         count = len(lens)
@@ -100,6 +103,16 @@ class NameHeap:
         self._used[-1] = pos + need
         starts: np.ndarray = rel + (base + pos)
         return starts
+
+    def run(self, need: int) -> tuple[np.ndarray, int, int]:
+        """Room for a run of ``need`` bytes of ``\\0name`` that the caller writes itself (the native
+        fold of NodeStore.ingest_slices): ``(chunk, base, pos)``, the run going to
+        ``chunk[pos:pos + need]`` at global offset ``base + pos``; :meth:`commit` once written."""
+        return self._room(need)
+
+    def commit(self, end: int) -> None:
+        """The last chunk is written up to ``end`` (after :meth:`run`)."""
+        self._used[-1] = end
 
     def append_one(self, name: bytes) -> int:
         chunk, base, pos = self._room(len(name) + 1)

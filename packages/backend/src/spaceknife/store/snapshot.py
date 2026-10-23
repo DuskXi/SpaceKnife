@@ -11,7 +11,10 @@ The names block is one ``\\0name`` run per node in id order (format 2, the store
 loaded without copying); format 1 stored the names back to back and is still read.
 
 Files are written to a temporary name and atomically renamed, so a crash (or Electron killing
-the backend's process tree on Windows) never leaves a half-written snapshot behind.
+the backend's process tree on Windows) never leaves a half-written snapshot behind. Every block
+goes from the store through the compressor straight into the file, a piece at a time (nothing
+compressed is kept in memory); the header is written last into room reserved after the magic, as
+JSON padded with spaces (``json.loads`` takes trailing whitespace: the same format 2).
 
 Every finished scan is saved automatically under ``snapshots_dir()/<root key>/``; retention keeps
 the newest :data:`KEEP_RECENT` plus the newest one of each older ISO week.
@@ -24,6 +27,7 @@ import json
 import mmap
 import os
 import struct
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -41,6 +45,10 @@ FORMAT_VERSION = 2  # 2: NUL-separated names in id order
 SUFFIX = ".sks"
 KEEP_RECENT = 10
 _LEN = struct.Struct("<I")
+SAVE_ROWS = 1 << 20  # rows of a column the writer hands the compressor at a time
+SAVE_THREADS = 4  # zstd worker threads (each keeps buffers of several MiB while it lives)
+WRITE_SIZE = 1 << 20  # bytes of compressed output per write to the file
+_PLACEHOLDER = 10**15  # more digits than any offset or length the header will hold
 
 
 class BlockInfo(BaseModel):
@@ -92,49 +100,71 @@ def save(
     checkpoints: dict[str, Any] | None = None,
     level: int = 3,
 ) -> SnapshotHeader:
-    compressor = zstandard.ZstdCompressor(level=level, threads=-1)
-    blocks: list[bytes] = []
-    offset = 0
-    col_info: dict[str, BlockInfo] = {}
-    for key, arr in store.export_columns().items():
-        raw = np.ascontiguousarray(arr)  # compressed straight from the column, no copy
-        packed = compressor.compress(memoryview(raw).cast("B"))
-        col_info[key] = BlockInfo(
-            offset=offset, length=len(packed), raw_length=raw.nbytes, dtype=arr.dtype.str
+    """Write ``store`` to ``path`` (atomically). Each column, then the names, is one zstd frame
+    compressed as it is written: :data:`SAVE_ROWS` rows at a time (``name_off`` rebased to the
+    names image piece by piece), at most :data:`SAVE_THREADS` compressor threads, so the save holds
+    little beyond the compressor's buffers (docs/memory.md §6). The blocks decompress to exactly
+    what ``store.export_columns()`` and ``store.names_blob`` are."""
+    n = len(store)
+    dtypes = store.export_dtypes()
+    created = datetime.now(UTC)
+
+    def header(col_info: dict[str, BlockInfo], names_info: BlockInfo) -> SnapshotHeader:
+        return SnapshotHeader(
+            created_at=created,
+            roots=roots,
+            node_count=n,
+            volumes=volumes or [],
+            stats=stats or {},
+            ext_table=store.ext_table,
+            columns=col_info,
+            names=names_info,
+            checkpoints=checkpoints or {},
         )
-        blocks.append(packed)
-        offset += len(packed)
-    # compressed piece by piece: no joined copy of all names
-    stream = compressor.compressobj(size=store.names_size())
-    pieces = [stream.compress(memoryview(part).cast("B")) for part in store.names_parts()]
-    pieces.append(stream.flush())
-    names_packed = b"".join(pieces)
-    names_info = BlockInfo(offset=offset, length=len(names_packed), raw_length=store.names_size())
-    blocks.append(names_packed)
-    header = SnapshotHeader(
-        created_at=datetime.now(UTC),
-        roots=roots,
-        node_count=len(store),
-        volumes=volumes or [],
-        stats=stats or {},
-        ext_table=store.ext_table,
-        columns=col_info,
-        names=names_info,
-        checkpoints=checkpoints or {},
+
+    big = _PLACEHOLDER
+    reserve = len(
+        _dump_header(
+            header(
+                {
+                    k: BlockInfo(offset=big, length=big, raw_length=big, dtype=dt.str)
+                    for k, dt in dtypes.items()
+                },
+                BlockInfo(offset=big, length=big, raw_length=big),
+            )
+        )
     )
-    head = _dump_header(header)
+    compressor = zstandard.ZstdCompressor(level=level, threads=min(SAVE_THREADS, os.cpu_count() or 1))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     with open(tmp, "wb") as fh:
         fh.write(MAGIC)
-        fh.write(_LEN.pack(len(head)))
-        fh.write(head)
-        for block in blocks:
-            fh.write(block)
+        fh.write(_LEN.pack(reserve))
+        fh.write(b" " * reserve)
+        base = fh.tell()
+
+        def block(raw_length: int, pieces: Iterator[np.ndarray], dtype: str = "") -> BlockInfo:
+            start = fh.tell()
+            writer = compressor.stream_writer(fh, size=raw_length, closefd=False, write_size=WRITE_SIZE)
+            for piece in pieces:
+                writer.write(memoryview(np.ascontiguousarray(piece)).cast("B"))
+            writer.flush(zstandard.FLUSH_FRAME)
+            end = fh.tell()
+            return BlockInfo(offset=start - base, length=end - start, raw_length=raw_length, dtype=dtype)
+
+        col_info: dict[str, BlockInfo] = {}
+        for key, dt in dtypes.items():
+            col_info[key] = block(n * dt.itemsize, store.export_pieces(key, SAVE_ROWS), dt.str)
+        names_info = block(store.names_size(), iter(store.names_parts()))
+        head = _dump_header(header(col_info, names_info))
+        if len(head) > reserve:  # cannot happen: every number is below the placeholder
+            raise SnapshotError("snapshot header outgrew its room")
+        fh.seek(len(MAGIC) + _LEN.size)
+        fh.write(head + b" " * (reserve - len(head)))
         fh.flush()
         os.fsync(fh.fileno())
     os.replace(tmp, path)
-    return header
+    return header(col_info, names_info)
 
 
 def _dump_header(header: SnapshotHeader) -> bytes:

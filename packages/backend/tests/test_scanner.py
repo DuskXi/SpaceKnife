@@ -319,12 +319,13 @@ def _store_rows(scanner: Scanner) -> list[tuple[object, ...]]:
 
 
 async def test_slices_folded_together_build_the_same_tree(tree: TreeFacts) -> None:
-    """Slices that land together are folded as one (worker.merge_slices): the tree is the same as
-    folding them one by one, references between listings, frontiers and extensions included."""
+    """Slices that land together are folded as one (NodeStore.ingest_slices, as worker.merge_slices
+    did): the tree is the same as folding them one by one, references between listings, frontiers
+    and extensions included."""
     recorded: list[SliceResult] = []
     live = Scanner([str(tree.root)], budget_s=0.0)  # one folder per slice: many small slices
     fold = live._fold
-    live._fold = lambda res: (recorded.append(res), fold(res))[1]  # type: ignore[method-assign]
+    live._fold = lambda results: (recorded.extend(results), fold(results))[1]  # type: ignore[method-assign]
     await live.run()
     assert len(recorded) > 5
 
