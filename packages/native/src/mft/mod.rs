@@ -7,8 +7,9 @@
 //! in, and the parts are joined in record order, so memory stays at the output table plus a few
 //! windows (`read_mft` holds the whole $MFT: about 9 GB on a large system volume).
 //! `_mft_image_info` / `_read_mft_image` / `_scan_mft_image` run the same code on an image file
-//! (tests).
+//! (tests). `mft_build` (`build.rs`) turns a table into the node store's columns (the backend).
 
+mod build;
 mod io;
 mod parse;
 mod record;
@@ -587,6 +588,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_mft, m)?)?;
     m.add_function(wrap_pyfunction!(_scan_mft_image, m)?)?;
     m.add_function(wrap_pyfunction!(_parse_mft_stream, m)?)?;
+    build::register(m)?;
     Ok(())
 }
 

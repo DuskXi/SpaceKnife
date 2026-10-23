@@ -35,6 +35,21 @@ def scan_mft(
     its errors are ignored. ``stats``: filled with the scan's timings and counts (benchmarks).
     """
 
+def mft_build(
+    table: dict[str, Any],
+    root_name: bytes,
+    meta_name: bytes,
+    orphan_name: bytes,
+    ext_ids: Callable[[list[bytes]], list[int]],
+    include_ads: bool = False,
+    count_links_each: bool = False,
+    consume: bool = False,
+) -> dict[str, Any]:
+    """The node store's columns of a ``parse_mft`` table (``scan.mft.table_to_store``):
+    ``{"columns": {name: array}, "names": uint8 \\0name image, "count", "cycles", "orphans"}``.
+    ``ext_ids`` numbers the distinct raw extensions (``scan.mft.ext_numbers``); ``consume``
+    deletes each table column once the build no longer needs it."""
+
 def _mft_image_info(path: str | os.PathLike[str]) -> dict[str, int]: ...
 def _read_mft_image(path: str | os.PathLike[str]) -> bytes: ...
 def _scan_mft_image(
