@@ -145,6 +145,9 @@ def _force_utf8_pipes() -> None:
 
 
 def main() -> None:
+    from .memory import tune_allocator
+
+    tune_allocator()  # glibc: before the scans start their listing threads (docs/memory.md §8)
     _force_utf8_pipes()
     from .io.priority import no_cloud_downloads
 

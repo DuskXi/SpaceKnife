@@ -874,6 +874,10 @@ class ScanManager:
         if scanner.state == ScanState.DONE:
             # build the name index now, so the first wildcard filter does not pay for it
             await compute(name_index(handle.store).update, len(handle.store))
+        # glibc: the scan's freed temporaries go back to the system (docs/memory.md §8), aside
+        trim = asyncio.get_running_loop().create_task(asyncio.to_thread(memory.trim))
+        self._releases.add(trim)
+        trim.add_done_callback(self._releases.discard)
 
     async def _auto_save(self, handle: ScanHandle) -> None:
         """Save a finished scan to the auto-snapshot folder; a failure only costs a log warning."""
