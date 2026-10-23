@@ -3164,6 +3164,18 @@
           "description": "Cross-volume: files and bytes it adds",
           "title": "Cross Extra"
         },
+        "current": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DupesStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The search covering scan_ids[0], running or finished (for a client that reconnects)"
+        },
         "excluded": {
           "additionalProperties": {
             "type": "integer"
@@ -3457,6 +3469,12 @@
           "title": "Load",
           "type": "string"
         },
+        "min_size": {
+          "default": 1048576,
+          "description": "Smaller files were not compared",
+          "title": "Min Size",
+          "type": "integer"
+        },
         "mode": {
           "default": "all",
           "enum": [
@@ -3467,6 +3485,19 @@
           ],
           "title": "Mode",
           "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "inside / against / file: the node of scan_ids[0]",
+          "title": "Node"
         },
         "progress": {
           "anyOf": [
@@ -3505,6 +3536,12 @@
           },
           "title": "Skipped By Reason",
           "type": "object"
+        },
+        "stale_groups": {
+          "default": 0,
+          "description": "Verified groups a change took apart since: a new search checks them again",
+          "title": "Stale Groups",
+          "type": "integer"
         },
         "state": {
           "enum": [

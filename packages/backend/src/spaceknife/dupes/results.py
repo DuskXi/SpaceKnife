@@ -331,6 +331,11 @@ class Results:
             )
             return len(gs), extra, int(sum(g.reclaim for g in gs))
 
+    def stale(self) -> int:
+        """Verified groups a change took apart (back to 「待核对」 until the next search)."""
+        with self.lock:
+            return sum(1 for g in self.groups if not g.valid)
+
     # ------------------------------------------------------------------ per scan index
     def scan_index(self, si: int) -> _ScanIndex:
         with self.lock:

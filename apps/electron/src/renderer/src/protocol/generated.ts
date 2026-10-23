@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "b1a864b82be74fd2";
+export const SCHEMA_HASH = "82753f5f5627ac73";
 
 export interface AgeCond {
   end: number;
@@ -685,6 +685,8 @@ export interface DupesPlan {
   candidates: number;
   /** Cross-volume: files and bytes it adds */
   cross_extra: Record<string, number> | null;
+  /** The search covering scan_ids[0], running or finished (for a client that reconnects) */
+  current: DupesStatus | null;
   /** small, cloud, system, network, bins, unique */
   excluded: Record<string, number>;
   full_bytes_max: number;
@@ -740,7 +742,11 @@ export interface DupesStatus {
   job_id: string;
   ledger: DupesLedgerVolume[];
   load: "idle" | "quiet" | "balanced" | "max" | "custom";
+  /** Smaller files were not compared */
+  min_size: number;
   mode: "all" | "inside" | "against" | "file";
+  /** inside / against / file: the node of scan_ids[0] */
+  node: number | null;
   /** Share of the groups decided, 0–1 */
   progress: number | null;
   /** Bytes read per second, lately */
@@ -748,6 +754,8 @@ export interface DupesStatus {
   reclaim: number;
   scan_ids: string[];
   skipped_by_reason: Record<string, number>;
+  /** Verified groups a change took apart since: a new search checks them again */
+  stale_groups: number;
   state: "planning" | "identifying" | "probing" | "verifying" | "waiting_scan" | "paused" | "done" | "cancelled" | "failed";
   version: number;
   /** A scan of this disk runs: the job waits */

@@ -70,6 +70,10 @@ class DupesPlan(Payload):
         default=None, description="Cross-volume: files and bytes it adds"
     )
     last: DupesLast | None = None
+    current: DupesStatus | None = Field(
+        default=None,
+        description="The search covering scan_ids[0], running or finished (for a client that reconnects)",
+    )
 
 
 class DupesStartParams(Params):
@@ -131,6 +135,8 @@ class DupesStatus(Payload):
     state: DupesState
     scan_ids: list[str]
     mode: DupesMode = "all"
+    node: int | None = Field(default=None, description="inside / against / file: the node of scan_ids[0]")
+    min_size: int = Field(default=1 << 20, description="Smaller files were not compared")
     cross_volume: bool = False
     progress: float | None = Field(default=None, description="Share of the groups decided, 0–1")
     funnel: DupesFunnel = Field(default_factory=DupesFunnel)
@@ -146,6 +152,9 @@ class DupesStatus(Payload):
     atime_unkept: int = 0
     atime_moved_by_others: int = 0
     groups: int = Field(default=0, description="Verified groups with something to free")
+    stale_groups: int = Field(
+        default=0, description="Verified groups a change took apart since: a new search checks them again"
+    )
     extra: int = 0
     reclaim: int = 0
     version: int = 0

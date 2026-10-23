@@ -170,7 +170,9 @@ class DupesManager:
         last = await asyncio.to_thread(dcache.read_last)
         roots = ";".join(r.path for s in scope.scans for r in s.roots)
         hit: dict[str, Any] = last.get(roots) or {}
+        covering = self.for_scan(sc.scan_ids[0])
         return pd.DupesPlan(
+            current=self.status_of(covering[0]) if covering else None,
             candidates=int(num["candidates"]),
             groups=int(num["groups"]),
             bytes=int(num["bytes"]),
@@ -360,6 +362,8 @@ class DupesManager:
             state=j.state,
             scan_ids=h.scan_ids,
             mode=j.scope.mode,
+            node=j.scope.node or None,
+            min_size=j.scope.min_size,
             cross_volume=len(h.scan_ids) > 1,
             progress=j.progress(),
             funnel=pd.DupesFunnel(
@@ -393,6 +397,7 @@ class DupesManager:
             atime_unkept=c.atime_unkept,
             atime_moved_by_others=c.atime_moved,
             groups=groups,
+            stale_groups=h.results.stale(),
             extra=extra,
             reclaim=reclaim,
             version=h.results.version,
@@ -588,9 +593,9 @@ class DupesManager:
         wanted = set(p.groups) if p.groups is not None else None
         ops_kind = h.job.ops.name
         by_scan: dict[int, list[tuple[int, str, Guard]]] = {}
+        # (scan, path) -> (group, bytes freed): what the basket refuses or already holds is not counted
+        owner: dict[tuple[int, str], tuple[int, int]] = {}
         refused: list[pd.DupesRefused] = []
-        n_groups = 0
-        freed = 0
         with res.lock:
             for g in res.groups:
                 if not g.valid or g.shared or (wanted is not None and g.id not in wanted):
@@ -604,25 +609,41 @@ class DupesManager:
                     refused.append(pd.DupesRefused(group=g.id, reason="no_keeper"))
                     continue
                 kst = tuple(_stamped(res, r) for r in keepers)
-                n_groups += 1
                 for r in extras:
                     guard = Guard(member=_stamped(res, r), keepers=kst, ops=ops_kind, recheck_content=recheck)
-                    by_scan.setdefault(int(res.m["scan"][r]), []).append(
-                        (int(res.m["node"][r]), res.paths[r], guard)
-                    )
-                    freed += int(res.m["alloc"][r])
+                    si = int(res.m["scan"][r])
+                    by_scan.setdefault(si, []).append((int(res.m["node"][r]), res.paths[r], guard))
+                    owner[(si, res.paths[r])] = (g.id, int(res.m["alloc"][r]))
         items: list[str] = []
         members = 0
+        freed = 0
+        groups: set[int] = set()
+        said: set[tuple[int, str]] = set()
         for si, mem in by_scan.items():
             sid = h.scan_ids[si]
             store = res.scans[si].store
             out = await compute(ops.basket.add_dupes, store, sid, mem, note=note)
             items.extend(out.added)
-            members += len(mem) - len(out.refused) - len(out.merged)
-            refused.extend(pd.DupesRefused(group=-1, reason=r.reason) for r in out.refused)
+            left_out = {x.path for x in out.refused} | {m.path for m in out.merged}
+            for ref in out.refused:
+                gid = owner.get((si, ref.path), (-1, 0))[0]
+                if (gid, ref.reason) not in said:
+                    said.add((gid, ref.reason))
+                    refused.append(pd.DupesRefused(group=gid, reason=ref.reason))
+            for _node, path, _guard in mem:
+                if path in left_out:
+                    continue
+                gid, alloc = owner[(si, path)]
+                groups.add(gid)
+                members += 1
+                freed += alloc
         await ops.broadcast()
         return pd.DupesBasketResult(
-            items=list(dict.fromkeys(items)), groups=n_groups, members=members, freed=freed, refused=refused
+            items=list(dict.fromkeys(items)),
+            groups=len(groups),
+            members=members,
+            freed=freed,
+            refused=refused,
         )
 
     # ------------------------------------------------------------------ views and hover cards

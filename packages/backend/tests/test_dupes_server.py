@@ -35,8 +35,10 @@ from spaceknife_protocol.methods import (
     DUPES_START,
     DUPES_STATUS,
     DUPES_TO_BASKET,
+    EVENT_DUPES_CHANGED,
     EVENT_DUPES_PROGRESS,
     EVENT_OPS_PROGRESS,
+    OPS_UNDO,
     SCAN_START,
     TREE_FIND,
     TREE_NODE,
@@ -288,3 +290,116 @@ async def test_only_finished_live_scans_and_one_search_at_a_time(tmp_path: Path,
         await client.call(DUPES_PLAN, pd.DupesScope(scan_ids=["scan-nope"]))
     st = await searched(client, scan_id)
     assert st.state == "done"
+
+
+async def test_the_plan_picks_up_a_search_and_the_status_names_its_scope(
+    tmp_path: Path, client: Connection
+) -> None:
+    files = tree(tmp_path / "t")
+    scan_id = await scanned(client, tmp_path / "t")
+    plan = await client.call(DUPES_PLAN, pd.DupesScope(scan_ids=[scan_id]))
+    assert plan.current is None
+    st = await searched(client, scan_id, min_size=MIB)
+    assert st.mode == "all" and st.node is None and st.min_size == MIB
+    # an interface that reconnects finds the search through the plan
+    plan = await client.call(DUPES_PLAN, pd.DupesScope(scan_ids=[scan_id]))
+    assert plan.current is not None and plan.current.job_id == st.job_id and plan.current.state == "done"
+    assert plan.last is not None and plan.last.groups == 1
+    folder = await node_of(client, scan_id, files["copy"].parent)
+    st2 = await searched(client, scan_id, mode="against", node=folder)
+    assert st2.mode == "against" and st2.node == folder and st2.job_id != st.job_id
+    cov = await client.call(
+        DUPES_FOLDER, pd.DupesFolderParams(job_id=st2.job_id, scan_id=scan_id, node=folder)
+    )
+    assert cov.elsewhere == 1
+
+
+async def test_a_copy_the_monitor_saw_change_leaves_its_group(
+    tmp_path: Path, server: Server, client: Connection
+) -> None:
+    files = tree(tmp_path / "t")
+    scan_id = await scanned(client, tmp_path / "t")
+    st = await searched(client, scan_id)
+    changed: list[pd.DupesChangedEvent] = []
+    client.on_event(EVENT_DUPES_CHANGED, changed.append)
+    n = await node_of(client, scan_id, files["copy"])
+    files["copy"].write_bytes(blob(2 * MIB, 5))
+    server.views.flash(scan_id, {n: 1})  # what the live monitor reports for a changed file
+    for _ in range(50):
+        if changed:
+            break
+        await asyncio.sleep(0.05)
+    assert changed and changed[-1].reason == "invalidated"
+    page = await client.call(DUPES_GROUPS, pd.DupesGroupsParams(job_id=st.job_id))
+    assert page.total == 0  # back to 「待核对」: never offered for deleting
+    now = await client.call(DUPES_STATUS, pd.DupesJobParams(job_id=st.job_id))
+    assert now.extra == 0 and now.reclaim == 0 and now.version > st.version and now.stale_groups == 1
+    info = await client.call(TREE_NODE, p.TreeNodeParams(scan_id=scan_id, node=n))
+    assert info.dupe is None or info.dupe.state not in ("extra", "keep")
+    await client.call(BASKET_CLEAR, Empty())
+    res = await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st.job_id))
+    assert res.members == 0
+
+
+async def test_two_searches_that_keep_each_others_copies_delete_nothing(
+    tmp_path: Path, client: Connection
+) -> None:
+    files = tree(tmp_path / "t")
+    scan_id = await scanned(client, tmp_path / "t")
+    st = await searched(client, scan_id)
+    await client.call(BASKET_CLEAR, Empty())
+    await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st.job_id))
+    # the same group with the other copy kept goes in as well: each item keeps what the other deletes
+    keep = str(files["copy"])
+    await client.call(
+        DUPES_KEEP,
+        pd.DupesKeepParams(job_id=st.job_id, overrides=[pd.DupesOverride(group=0, path=keep, role="keep")]),
+    )
+    res = await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st.job_id))
+    # refused: the copy this choice keeps is what the basket already deletes; nothing counted
+    assert res.members == 0 and res.groups == 0 and res.freed == 0 and [r.group for r in res.refused] == [0]
+    basket = await client.call(BASKET_LIST, Empty())
+    assert len([i for i in basket.items if i.kind == "dupes"]) == 1 and basket.items[0].members == 1
+    # and the first item, executed now, still checks its keeper (which the user wants kept anyway)
+    waiter = OpsWaiter(client)
+    task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode="delete"))
+    done = await waiter.done(task.task_id)
+    assert [r.ok for r in done.results] == [True]
+    assert files["keep"].exists() and not files["copy"].exists()
+
+
+async def test_undo_brings_the_item_back_with_its_guards(
+    tmp_path: Path, server: Server, client: Connection
+) -> None:
+    files = tree(tmp_path / "t")
+    scan_id = await scanned(client, tmp_path / "t")
+    st = await searched(client, scan_id)
+    await client.call(BASKET_CLEAR, Empty())
+    await client.call(DUPES_TO_BASKET, pd.DupesBasketParams(job_id=st.job_id))
+    waiter = OpsWaiter(client)
+    task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode="trash"))
+    try:
+        done = await waiter.done(task.task_id)
+        if not all(r.ok for r in done.results):
+            pytest.skip(f"no usable recycle bin here: {[r.message for r in done.results]}")
+        assert not files["copy"].exists()
+        await client.call(OPS_UNDO, po.OpTaskParams(task_id=task.task_id))
+        for _ in range(100):
+            if files["copy"].exists() and (await client.call(BASKET_LIST, Empty())).items:
+                break
+            await asyncio.sleep(0.05)
+        assert files["copy"].exists()
+        back = await client.call(BASKET_LIST, Empty())
+        assert [i.kind for i in back.items] == ["dupes"] and back.items[0].members == 1
+    finally:
+        run = server.ops.runs.get(task.task_id)
+        if run is not None and run.refs and not files["copy"].exists():
+            from spaceknife.ops.trash import restore
+
+            await asyncio.to_thread(restore, run.refs)
+    # the guard came back with it: moving the copy back changed its change time, so it is not
+    # deleted again without a new search (a guard-less item would delete it)
+    task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode="delete"))
+    done = await waiter.done(task.task_id)
+    assert [r.code for r in done.results] == ["changed"]
+    assert files["copy"].exists() and files["keep"].exists()

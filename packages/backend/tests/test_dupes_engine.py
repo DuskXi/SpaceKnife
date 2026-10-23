@@ -927,3 +927,27 @@ def test_select_allocates_nothing_as_long_as_the_store(tmp_path: Path) -> None:
     tracemalloc.stop()
     assert len(sel) == 10 and len(sel.groups) == 1
     assert peak < total * 8  # below one i8 column of the store: slices, not whole-store temporaries
+
+
+# --------------------------------------------------------------------------- access times
+
+
+@pytest.mark.skipif(
+    sys.platform == "darwin", reason="macOS: the reader asks for no access-time updates per thread"
+)
+async def test_reading_contents_leaves_access_times_alone(tmp_path: Path, ops: Ops) -> None:
+    """A month-old access time stays after the whole file was read (O_NOATIME as the owner on
+    Linux; the handle's -1 last-access time on Windows), where the mount would otherwise move it."""
+    root = tmp_path / "t"
+    a = blob(2 * MIB + 3, 21)
+    paths = [write(root, f"{d}/a.bin", a) for d in ("x", "y")]
+    month = 30 * 86400 * 10**9
+    for p in paths:
+        st = p.stat()
+        os.utime(p, ns=(st.st_mtime_ns - month, st.st_mtime_ns))
+    before = [p.stat().st_atime_ns for p in paths]
+    job, res = await run(await scan(root), ops, tmp_path / "c")
+    assert groups(res) == [{"a.bin"}]
+    assert job.counters.bytes_full > 0  # the contents were read
+    assert [p.stat().st_atime_ns for p in paths] == before
+    assert job.counters.atime_unkept == 0
