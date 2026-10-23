@@ -25,6 +25,7 @@ from spaceknife_sdk.testing import MockHost, make_tree
 from spaceknife_sdk.tsgen import generate_plugin
 
 ROOT = Path(__file__).resolve().parents[3]
+RUN = [sys.executable, "-X", "utf8", "-m", "spaceknife", "run"]
 
 pytestmark = pytest.mark.timeout(240)
 
@@ -324,3 +325,43 @@ def test_schema_prefixes_and_nested_models() -> None:
         "$ref": "#/$defs/AcmeToolsItem"
     }
     assert list(schema["methods"]) == ["find"]  # reports are the host's to call
+
+
+def test_run_exports_with_an_enabled_plugins_format(tmp_path: Path) -> None:
+    """``spaceknife run … export <plugin>.<format>``: the enabled plugins of the data folder are
+    started without a window; ``run help`` lists their formats."""
+    home = tmp_path / "home"
+    home.mkdir()
+    folder = tmp_path / "src" / "example.fmt"
+    scaffold.write(folder, "example.fmt", ["export"])
+    assert sk(home, "install", str(folder)).returncode == 0
+    enabled = sk(home, "enable", "example.fmt", "--yes")
+    assert enabled.returncode == 0, enabled.stdout + enabled.stderr
+    data = tmp_path / "data"
+    (data / "sub").mkdir(parents=True)
+    (data / "a.txt").write_bytes(b"a" * 10)
+    (data / "sub" / "b.txt").write_bytes(b"b" * 20)
+    out = tmp_path / "out.md"
+    run = subprocess.run(
+        [*RUN, "scan", str(data), "export", "example.fmt.md", str(out), "autoclose"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=_env(home),
+        cwd=home,
+        timeout=180,
+        check=False,
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    assert "b.txt" in out.read_text(encoding="utf-8")
+    shown = subprocess.run(
+        [*RUN, "help"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=_env(home),
+        cwd=home,
+        timeout=180,
+        check=False,
+    )
+    assert "example.fmt.md" in shown.stdout, shown.stdout + shown.stderr

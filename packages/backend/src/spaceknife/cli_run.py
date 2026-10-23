@@ -366,6 +366,20 @@ class Runner:
         self.err = err
         self.views: list[View] = []
         self.autoclose = False
+        self._plugins: Any = None  # the enabled plugins (plugins/headless.py), once a format needs them
+
+    def plugins(self) -> Any:
+        """The enabled plugins of the data folder, started on first use (a plugin's export format)."""
+        if self._plugins is None:
+            from .plugins.headless import Headless
+
+            self._plugins = Headless().start()
+        return self._plugins
+
+    def close(self) -> None:
+        if self._plugins is not None:
+            self._plugins.close()
+            self._plugins = None
 
     def say(self, key: str, style: str = "", *, n: int | None = None, one: str = "", **kw: object) -> None:
         """Print ``TEXT[key]`` filled in; with a count ``n``, English says ``one`` for a single thing."""
@@ -393,6 +407,7 @@ class Runner:
 
     def cmd_help(self) -> None:
         self.out.print(help_text(), markup=False, highlight=False)
+        self.out.print(plugin_help(self), markup=False, highlight=False)
 
     def cmd_autoclose(self) -> None:
         self.autoclose = True
@@ -560,7 +575,14 @@ class Runner:
         try:
             target = resolve(name)
         except ExportError as exc:
-            raise CommandFailed(str(exc)) from exc
+            if "." not in name.strip() or Path(name).suffix.lower() in (".sktpl", ".txt"):
+                raise CommandFailed(str(exc)) from exc
+            # a full id (<plugin id>.<name>): the enabled plugins' formats and templates
+            try:
+                self.plugins().add_store(view.store)
+                target = resolve(name)
+            except ExportError as again:
+                raise CommandFailed(str(again)) from again
         if isinstance(target, ExportFormat):
             what, bom = target.title, target.bom
         else:
@@ -580,6 +602,8 @@ class Runner:
                 )
                 self.err.print(Text(line, style=WARN))
         path = Path(os.path.expanduser(arg))
+        if isinstance(target, ExportFormat) and target.plugin is not None and not target.shipped:
+            self.plugins().add_store(view.store)  # the plugin reads the tree as a scan
         chunks = export_chunks(target, view.store, 0, match=view.match, filter_text=view.filter_text)
         try:
             written = write_export(path, chunks, bom=bom)
@@ -636,7 +660,8 @@ def help_text() -> str:
   filter "<表达式>"          对前一个视图应用过滤（语法见 docs/filter-syntax.md）
   save "<文件>"              把前一个视图的完整结果保存为快照（不受过滤影响）
   export "<模板>" "<文件>"   把前一个视图导出到文件（过滤后的内容）；<模板> 是内置模板名、
-                             csv / json / html，或模板文件的路径（语法见 docs/export-templates.md）
+                             csv / json / html，或模板文件的路径（语法见 docs/export-templates.md），
+                             或已启用插件的模板、格式的全名（<插件 id>.<名字>）
   autoclose                  结束时不显示视图摘要
 
 元命令（必须是一个不带分隔符的词）：
@@ -651,6 +676,30 @@ def help_text() -> str:
         builtins=tr("、").join(builtin_targets()[0]),
         formats=" / ".join(builtin_targets()[2]),
     )
+
+
+def plugin_help(runner: Runner | None = None) -> str:
+    """The enabled plugins' templates and formats (their full ids), for ``run help``."""
+    from .plugins.headless import has_enabled_plugins
+
+    if not has_enabled_plugins():
+        return ""
+    own = runner is None
+    r = runner or Runner(Console(), Console(stderr=True))
+    try:
+        r.plugins()
+        from .export import plugin_targets
+
+        names = [key for key, target in plugin_targets() if not key.startswith("builtin.")]
+    except Exception as exc:  # the help still shows the rest
+        logger.debug("plugin targets for help: {}", exc)
+        names = []
+    finally:
+        if own:
+            r.close()
+    if not names:
+        return ""
+    return tr("插件的模板和格式：{names}", names=tr("、").join(names)) + "\n"
 
 
 def main(
@@ -669,6 +718,7 @@ def main(
     err = err or Console(stderr=True)
     if not tokens and not (raw or "").strip():
         out.print(help_text(), markup=False, highlight=False)
+        out.print(plugin_help(), markup=False, highlight=False)
         return EXIT_OK
     parsed = parse_command_line(tokens, raw)
     if parsed.errors:
@@ -683,6 +733,8 @@ def main(
     except KeyboardInterrupt:
         err.print(Text(TEXT["interrupted"], style="yellow"))
         return EXIT_INTERRUPTED
+    finally:
+        runner.close()
 
 
 def run(ctx: typer.Context) -> None:

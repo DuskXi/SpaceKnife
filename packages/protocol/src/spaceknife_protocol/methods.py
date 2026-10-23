@@ -60,6 +60,8 @@ from .plugins import (
     ExtensionsState,
     InsightNodeParams,
     InsightNodeResult,
+    InsightNodesParams,
+    InsightNodesResult,
     PluginChangedEvent,
     PluginDescribeResult,
     PluginEnableParams,
@@ -545,6 +547,12 @@ INSIGHT_NODE = MethodSpec(
     InsightNodeResult,
     "Insight cards of a node: matching rules first, then what plugins say.",
 )
+INSIGHT_NODES = MethodSpec(
+    "insight.nodes",
+    InsightNodesParams,
+    InsightNodesResult,
+    "The insight rules' card of each of many nodes (no plugin code runs; for filters and plugins).",
+)
 EVENT_EXTENSIONS = EventSpec(
     "extensions.changed",
     ExtensionsChangedEvent,
@@ -666,6 +674,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         EXTENSIONS_GET,
         PLUGIN_FIELDS,
         INSIGHT_NODE,
+        INSIGHT_NODES,
     )
 }
 NOTIFICATIONS: dict[str, NotificationSpec[BaseModel]] = {spec.name: spec for spec in (CANCEL,)}

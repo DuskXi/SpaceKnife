@@ -289,6 +289,9 @@
               "type": "string"
             },
             {
+              "$ref": "#/$defs/ThemedColor"
+            },
+            {
               "type": "null"
             }
           ],
@@ -1559,6 +1562,24 @@
           "title": "Legend",
           "type": "array"
         },
+        "legend_colors": {
+          "description": "A colour per legend entry from the plugin (None: the palette's)",
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ThemedColor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Legend Colors",
+          "type": "array"
+        },
         "palette": {
           "description": "0: neutral; semantic name, token, class:<id>, #RRGGBB or themed",
           "items": {
@@ -2158,6 +2179,39 @@
       "title": "Completion",
       "type": "object"
     },
+    "ContributionGroup": {
+      "description": "What a plugin adds of one kind, for the enable dialog (``plugin enable`` prints the same).",
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "items": {
+          "description": "Each one's title (at most 50)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "description": "The kind, in the interface language",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "count"
+      ],
+      "title": "ContributionGroup",
+      "type": "object"
+    },
     "Crumb": {
       "properties": {
         "key": {
@@ -2654,9 +2708,153 @@
       "title": "ExportIssue",
       "type": "object"
     },
+    "ExportOption": {
+      "description": "A field of the export dialog that a plugin's format declares (``options`` of\n``export_format``); its value goes to export.run ``options`` under ``name``.",
+      "properties": {
+        "control": {
+          "enum": [
+            "switch",
+            "segmented",
+            "number",
+            "slider",
+            "color",
+            "text"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Default"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/SettingOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "placeholder": {
+          "default": "",
+          "title": "Placeholder",
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "description": "B: a size in bytes (shown and typed as a size)",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "control",
+        "default"
+      ],
+      "title": "ExportOption",
+      "type": "object"
+    },
     "ExportRunParams": {
       "additionalProperties": false,
       "properties": {
+        "node": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "scope node: the node",
+          "title": "Node"
+        },
+        "options": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "Values of the format's options (by name)",
+          "title": "Options",
+          "type": "object"
+        },
         "path": {
           "description": "The file to write (its folder must exist)",
           "maxLength": 32767,
@@ -2666,13 +2864,24 @@
         },
         "scope": {
           "default": "zoom",
-          "description": "The view's zoom root, or every scan root",
+          "description": "The view's zoom root, every scan root, the selected nodes (selection, else the view's), or one node (node)",
           "enum": [
             "zoom",
-            "all"
+            "all",
+            "selection",
+            "node"
           ],
           "title": "Scope",
           "type": "string"
+        },
+        "selection": {
+          "description": "scope selection",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 100000,
+          "title": "Selection",
+          "type": "array"
         },
         "source": {
           "anyOf": [
@@ -2772,6 +2981,14 @@
           "description": "What export.run takes: the template's SpaceSniffer name, or csv / json / html",
           "title": "Name",
           "type": "string"
+        },
+        "options": {
+          "description": "Fields of a plugin's format",
+          "items": {
+            "$ref": "#/$defs/ExportOption"
+          },
+          "title": "Options",
+          "type": "array"
         },
         "plugin": {
           "anyOf": [
@@ -2996,6 +3213,12 @@
           "title": "Color",
           "type": "string"
         },
+        "color_light": {
+          "default": "",
+          "description": "A plugin's class: its colour for a light theme",
+          "title": "Color Light",
+          "type": "string"
+        },
         "extensions": {
           "items": {
             "type": "string"
@@ -3009,6 +3232,12 @@
         },
         "name": {
           "title": "Name",
+          "type": "string"
+        },
+        "name_en": {
+          "default": "",
+          "description": "A plugin's class: its English name (shown in English)",
+          "title": "Name En",
           "type": "string"
         }
       },
@@ -3843,7 +4072,8 @@
           "description": "What 'size' counts: bytes, or files / items",
           "enum": [
             "bytes",
-            "count"
+            "count",
+            "weight"
           ],
           "title": "Size Unit",
           "type": "string"
@@ -4149,6 +4379,55 @@
       "title": "InsightNodeResult",
       "type": "object"
     },
+    "InsightNodesParams": {
+      "additionalProperties": false,
+      "properties": {
+        "nodes": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20000,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "nodes"
+      ],
+      "title": "InsightNodesParams",
+      "type": "object"
+    },
+    "InsightNodesResult": {
+      "properties": {
+        "cards": {
+          "description": "The rules' card of each node (None: no rule)",
+          "items": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/InsightCard"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Cards",
+          "type": "array"
+        }
+      },
+      "required": [
+        "cards"
+      ],
+      "title": "InsightNodesResult",
+      "type": "object"
+    },
     "IoStatus": {
       "description": "Disk-load state of one physical disk (W2 curve, status bar UI-MAIN-50).",
       "properties": {
@@ -4329,6 +4608,37 @@
         "disks"
       ],
       "title": "IoStatusList",
+      "type": "object"
+    },
+    "KeyInfo": {
+      "properties": {
+        "command": {
+          "description": "The command's full id",
+          "title": "Command",
+          "type": "string"
+        },
+        "conflict": {
+          "default": "",
+          "description": "The command that already has the key ('' = none)",
+          "title": "Conflict",
+          "type": "string"
+        },
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "title": {
+          "description": "The command's title",
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "command",
+        "title"
+      ],
+      "title": "KeyInfo",
       "type": "object"
     },
     "KvBlock": {
@@ -4779,6 +5089,9 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "$ref": "#/$defs/ThemedColor"
             },
             {
               "type": "null"
@@ -6123,6 +6436,9 @@
               "type": "string"
             },
             {
+              "$ref": "#/$defs/ThemedColor"
+            },
+            {
               "type": "null"
             }
           ],
@@ -6783,6 +7099,22 @@
           "title": "Conflicts",
           "type": "array"
         },
+        "groups": {
+          "description": "What it adds, by kind (its code's contributions too)",
+          "items": {
+            "$ref": "#/$defs/ContributionGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "keys": {
+          "description": "The keys it binds",
+          "items": {
+            "$ref": "#/$defs/KeyInfo"
+          },
+          "title": "Keys",
+          "type": "array"
+        },
         "plugin": {
           "$ref": "#/$defs/PluginInfo"
         },
@@ -6889,6 +7221,9 @@
           "anyOf": [
             {
               "type": "string"
+            },
+            {
+              "$ref": "#/$defs/ThemedColor"
             },
             {
               "type": "null"
@@ -9912,6 +10247,9 @@
               "type": "string"
             },
             {
+              "$ref": "#/$defs/ThemedColor"
+            },
+            {
               "type": "null"
             }
           ],
@@ -10334,6 +10672,7 @@
       "type": "object"
     },
     "ThemedColor": {
+      "description": "A colour per theme (``{light = \"#…\", dark = \"#…\"}``); the app draws the one of its theme.",
       "properties": {
         "dark": {
           "title": "Dark",
@@ -12067,7 +12406,8 @@
           "description": "What its areas count",
           "enum": [
             "bytes",
-            "count"
+            "count",
+            "weight"
           ],
           "title": "Size Unit",
           "type": "string"
@@ -12633,6 +12973,12 @@
       "params": "#/$defs/InsightNodeParams",
       "requiresSession": true,
       "result": "#/$defs/InsightNodeResult"
+    },
+    "insight.nodes": {
+      "doc": "The insight rules' card of each of many nodes (no plugin code runs; for filters and plugins).",
+      "params": "#/$defs/InsightNodesParams",
+      "requiresSession": true,
+      "result": "#/$defs/InsightNodesResult"
     },
     "io.status": {
       "doc": "Load state of every local disk, with history.",

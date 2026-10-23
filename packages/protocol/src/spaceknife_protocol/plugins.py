@@ -692,6 +692,15 @@ class InsightNodeResult(Payload):
     cards: list[InsightCard]
 
 
+class InsightNodesParams(Params):
+    scan_id: str = Field(min_length=1, max_length=64)
+    nodes: list[int] = Field(max_length=20_000)
+
+
+class InsightNodesResult(Payload):
+    cards: list[InsightCard | None] = Field(description="The rules' card of each node (None: no rule)")
+
+
 class CleanupItem(Payload):
     node: NodeRef
     name: str

@@ -13,6 +13,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import (
     EXTENSIONS_GET,
     INSIGHT_NODE,
+    INSIGHT_NODES,
     PLUGIN_DESCRIBE,
     PLUGIN_DISABLE,
     PLUGIN_ENABLE,
@@ -280,20 +281,7 @@ async def insight_cards(
     cards: list[pp.InsightCard] = []
     found = await compute(match_node, store, p.node, lang=lang)
     if found is not None:
-        cards.append(
-            pp.InsightCard(
-                source="rule",
-                rule=found.rule,
-                title=found.title,
-                reason=found.reason,
-                kind=str(found.kind),
-                cleanup=str(found.cleanup),
-                app=found.app,
-                note=found.note,
-                command=found.command,
-                path=found.path,
-            )
-        )
+        cards.append(_card(found))
 
     async def one(c: Any) -> pp.InsightCard | None:
         try:
@@ -325,9 +313,72 @@ async def insight_cards(
             )
         return None
 
-    got = await asyncio.gather(*(one(c) for c in EXTENSIONS.of("insight")))
+    path = store.path(p.node).replace("\\", "/").lower()
+    asked = [c for c in EXTENSIONS.of("insight") if _wanted(c, path)]
+    got = await asyncio.gather(*(one(c) for c in asked))
     cards += [g for g in got if g is not None]
     return pp.InsightNodeResult(cards=cards)
+
+
+def _wanted(c: Any, path: str) -> bool:
+    """A code insight with ``globs`` is asked only about the nodes that match one of them."""
+    globs = getattr(c.spec, "globs", None)
+    if not globs:
+        return True
+    from ..pathclass import compile_glob
+
+    pats = _GLOBS.get(c.id)
+    if pats is None or pats[0] != tuple(globs):
+        pats = (tuple(globs), [compile_glob(g) for g in globs])
+        _GLOBS[c.id] = pats
+    return any(r.match(path) for r in pats[1])
+
+
+_GLOBS: dict[str, tuple[tuple[str, ...], list[Any]]] = {}
+
+
+def _card(found: Any) -> pp.InsightCard:
+    return pp.InsightCard(
+        source="rule",
+        rule=found.rule,
+        title=found.title,
+        reason=found.reason,
+        kind=str(found.kind),
+        cleanup=str(found.cleanup),
+        app=found.app,
+        note=found.note,
+        command=found.command,
+        path=found.path,
+    )
+
+
+async def insight_many(host: PluginHost, p: pp.InsightNodesParams) -> pp.InsightNodesResult:
+    """The rules' cards of many nodes at once (the built-in rules and the plugins' rule files)."""
+    from ..insights import match_many
+    from ..insights.rules import refresh_user_rules
+    from ..store.nodes import Kind
+
+    store = host.api.store_of(p.scan_id)
+    if store is None:
+        raise RpcError(ErrorCode.UNKNOWN_SCAN, f"unknown scan: {p.scan_id}")
+    n = len(store)
+    bad = [x for x in p.nodes if not 0 < x < n]
+    if bad:
+        raise RpcError(ErrorCode.UNKNOWN_NODE, f"node {bad[0]} does not exist")
+    refresh_user_rules()
+    lang = i18n.language()
+
+    def work() -> list[pp.InsightCard | None]:
+        c = store.cols
+        paths = [store.path(x) for x in p.nodes]
+        kinds = ["dir" if int(c["kind"][x]) == Kind.DIR else "file" for x in p.nodes]
+        sizes: list[int | None] = [
+            int(c["tot_alloc"][x]) if kinds[i] == "dir" else int(c["alloc"][x]) for i, x in enumerate(p.nodes)
+        ]
+        found = match_many(paths, kinds, sizes=sizes, lang=lang)
+        return [None if f is None else _card(f) for f in found]
+
+    return pp.InsightNodesResult(cards=await compute(work))
 
 
 def install(server: Server) -> None:
@@ -389,5 +440,9 @@ def install(server: Server) -> None:
     async def insight_node(session: Session, params: pp.InsightNodeParams) -> pp.InsightNodeResult:
         return await insight_cards(host, session if CAP_PLUGINS in session.capabilities else None, params)
 
+    @router.method(INSIGHT_NODES)
+    async def insight_nodes(session: Session, params: pp.InsightNodesParams) -> pp.InsightNodesResult:
+        return await insight_many(host, params)
 
-__all__ = ["extensions_state", "insight_cards", "install", "node_fields"]
+
+__all__ = ["extensions_state", "insight_cards", "insight_many", "install", "node_fields"]

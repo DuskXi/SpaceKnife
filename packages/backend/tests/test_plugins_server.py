@@ -59,9 +59,11 @@ async def test_confirm_enable_change_and_disable() -> None:
             assert listed["t.full"].state == "needs_confirm" and listed["t.full"].hash.startswith("sha256:")
             desc = await conn.call(PLUGIN_DESCRIBE, pp.PluginIdParams(id="t.full"))
             assert [p.id for p in desc.plugin.permissions] == ["tree.read", "files.read", "basket.propose"]
-            assert (
-                desc.unsigned and "command: 大文件报告" in desc.summary
-            )  # declared in plugin.toml (the code has not run)
+            assert desc.unsigned and "命令 (2): 大文件报告、问好" in desc.summary
+            # what the code declares too: it was described in a plugin process without permissions
+            groups = {g.kind: g for g in desc.groups}
+            assert groups["node_field"].items == ["名字长度", "扩展名"] and "cleanup" in groups
+            assert [(k.key, k.command) for k in desc.keys][:1] == [("Ctrl+Alt+B", "t.full.big")]
             with pytest.raises(RemoteError) as err:
                 await conn.call(
                     PLUGIN_ENABLE,

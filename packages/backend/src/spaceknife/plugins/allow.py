@@ -31,6 +31,7 @@ ALLOWED: dict[str, Permission | None] = {
     "basket.list": None,
     "basket.add": "basket.propose",
     "insight.node": "tree.read",
+    "insight.nodes": "tree.read",
     "extensions.get": None,
 }
 

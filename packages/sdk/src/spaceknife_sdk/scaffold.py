@@ -244,17 +244,29 @@ async def test_age_colours(host: MockHost) -> None:
         doc="kind-color_mode",
     ),
     "export": Part(
-        imports=("ExportInfo", "T", "TreeView"),
+        imports=("ExportInput", "T"),
         code='''
-@plugin.export_format("md", T("Markdown 表格", "Markdown table"), extension=".md", media_type="text/markdown")
-def md(tree: TreeView, root: int, match: np.ndarray | None, info: ExportInfo) -> Iterator[str]:
-    """Every file below ``root`` (0: everything), the largest first; ``match``: the filtered ones."""
-    under = root or None
-    rows = tree.query(kind="file", under=under, columns=("bytes", "path"), sort="-bytes", limit=100_000)
+@plugin.export_format(
+    "md",
+    T("Markdown 表格", "Markdown table"),
+    extension="md",
+    media_type="text/markdown",
+    options=[{"name": "limit", "title": T("最多几行", "At most"), "default": 1000, "min": 1}],
+)
+def md(x: ExportInput) -> Iterator[str]:
+    """Every file below ``x.root`` (0: everything), the largest first; ``x.match``: the filtered
+    ones; ``x.options``: what the export dialog's fields say."""
+    under = x.root or None
+    limit = int(x.options.get("limit", 1000))
+    rows = x.tree.query(kind="file", under=under, columns=("bytes", "path"), sort="-bytes", limit=100_000)
     yield "| Size | Path |\\n|---:|---|\\n"
+    shown = 0
     for node, size, path in zip(rows.ids.tolist(), rows["bytes"].tolist(), rows.paths, strict=True):
-        if match is None or match[node]:
+        if x.match is None or x.match[node]:
             yield f"| {size} | {path} |\\n"
+            shown += 1
+            if shown >= limit:
+                break
 ''',
         test="""
 async def test_md_export(host: MockHost) -> None:
