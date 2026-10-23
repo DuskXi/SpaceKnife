@@ -363,3 +363,104 @@ def test_the_watcher_registry(tmp_path: Path) -> None:
 def test_ids_outside_a_remap_are_gone() -> None:
     remap = np.array([0, 5, -1], dtype=np.int64)
     assert sources._apply(remap, np.array([1, 2, 7, -3])).tolist() == [5, -1, -1, -1]
+
+
+async def test_watchers_do_not_take_the_call_slots(tmp_path: Path) -> None:
+    """Every open source scan has a watcher running for as long as it is open; they run beside the
+    plugin's calls: with more of them than call slots, new source scans still list and fields
+    still answer within their budget."""
+    from spaceknife.plugins import host as host_mod
+    from spaceknife.plugins.handlers import node_fields
+    from spaceknife_protocol.plugins import PluginFieldsParams
+
+    archives = []
+    for i in range(host_mod.MAX_CONCURRENT + 2):
+        archive = tmp_path / f"data{i}.zip"
+        _zip(archive, {f"f{i}.txt": b"x" * (i + 1), "docs/readme.md": b"y"})
+        archives.append(archive)
+    async with mock("t.full") as host:
+        await host.scan_dir(tmp_path)
+        handles = []
+        for archive in archives:
+            scan_id = await host.source("zip", str(archive))
+            handle = host.server.scans.scans[scan_id]
+            await _until(lambda handle=handle: handle.monitor is not None)
+            handles.append(handle)
+        assert all(h.status().state == "done" for h in handles)
+        last = handles[-1]
+        hp = host.server.plugins
+        t0 = time.monotonic()
+        res = await node_fields(
+            hp, None, PluginFieldsParams(scan_id=last.id, node=len(last.store) - 1, slot="inspector")
+        )
+        assert time.monotonic() - t0 < 1.5
+        assert "t.full.name_len" in [f.id for f in res.fields]
+
+
+async def test_a_busy_plugin_does_not_hold_a_field_past_its_budget(tmp_path: Path) -> None:
+    """Waiting for a call slot counts against the budget: the details panel gets 'pending' instead
+    of waiting for the plugin's long calls."""
+    from spaceknife.plugins import host as host_mod
+    from spaceknife.plugins.handlers import node_fields
+    from spaceknife_protocol.plugins import PluginFieldsParams
+
+    (tmp_path / "a.txt").write_bytes(b"a")
+    async with mock("t.full") as host:
+        scan_id = await host.scan_dir(tmp_path)
+        hp = host.server.plugins
+        sem = hp._slots.setdefault("t.full", asyncio.Semaphore(host_mod.MAX_CONCURRENT))
+        for _ in range(host_mod.MAX_CONCURRENT):
+            await sem.acquire()  # every slot busy
+        try:
+            t0 = time.monotonic()
+            res = await node_fields(hp, None, PluginFieldsParams(scan_id=scan_id, node=2, slot="inspector"))
+            assert time.monotonic() - t0 < 1.6 and res.pending and res.fields == []
+        finally:
+            for _ in range(host_mod.MAX_CONCURRENT):
+                sem.release()
+        await _until(lambda: any(k[0] == "t.full.name_len" for k in hp._field_cache))  # answered later
+        res = await node_fields(hp, None, PluginFieldsParams(scan_id=scan_id, node=2, slot="inspector"))
+        assert "t.full.name_len" in [f.id for f in res.fields]
+
+
+async def test_a_change_of_settings_drops_the_cached_answers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from spaceknife.plugins.handlers import node_fields
+    from spaceknife_protocol.plugins import PluginFieldsParams
+
+    (tmp_path / "a.log").write_bytes(b"a")
+    async with mock("t.full") as host:
+        scan_id = await host.scan_dir(tmp_path)
+        hp = host.server.plugins
+        await node_fields(hp, None, PluginFieldsParams(scan_id=scan_id, node=2, slot="inspector"))
+        await asyncio.to_thread(hp.set_masks, scan_id, host.store, ["t.full.logs"])
+        assert hp._field_cache and hp._set_cache
+        hooks: list[tuple[str, dict[str, object]]] = []
+
+        async def hook(rec: object, event: str, **args: object) -> None:
+            hooks.append((event, args))
+
+        monkeypatch.setattr(hp, "_hook", hook)
+        # a hook only for plugins that have one: give t.full one for the test
+        monkeypatch.setattr(
+            sources.EXTENSIONS,
+            "owned",
+            lambda owner, real=sources.EXTENSIONS.owned: [
+                *real(owner),
+                type("C", (), {"kind": "hook", "spec": type("S", (), {"event": "settings"})()})(),
+            ],
+        )
+        version = sources.EXTENSIONS.version
+        epoch = hp.epochs["t.full"]
+        host.server.settings.update({"plugin.t.full.min_size": 5})
+        await _until(lambda: hooks)
+        assert hooks == [("settings", {"changed": ["min_size"]})]
+        assert hp.epochs["t.full"] == epoch + 1
+        assert not [k for k in hp._field_cache if k[0].startswith("t.full.")] and not hp._set_cache
+        assert sources.EXTENSIONS.version > version  # frontends ask for fields again
+        # a change of another setting is not this plugin's
+        hooks.clear()
+        host.server.settings.update({"treemap.flash_changes": False})
+        await asyncio.sleep(0.1)
+        assert hooks == [] and hp.epochs["t.full"] == epoch + 1

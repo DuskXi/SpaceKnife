@@ -379,6 +379,14 @@ class ProcessRuntime(PluginRuntime):
                     )
                 )
 
+    def give_up(self, why: str) -> None:
+        """Stop the process now (it cannot answer any more); the host starts it again when needed."""
+        if self.popen is None or self._stopping:
+            return
+        self.kill()
+        self.state = "crashed"
+        self.callbacks.exited(None, why)
+
     async def _watchdog(self) -> None:
         while True:
             await asyncio.sleep(WATCH_EVERY)

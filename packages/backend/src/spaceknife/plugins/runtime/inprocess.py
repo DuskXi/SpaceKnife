@@ -189,11 +189,16 @@ class InProcessRuntime(PluginRuntime):
 
         fut = asyncio.run_coroutine_threadsafe(d.run(call_id, kind, name, params, ctx, frames, emit), loop)
         self._calls[call_id] = fut
+        # shielded: cancelling the wrapper would cancel the concurrent future from this thread while
+        # the plugin's loop finishes the call ("Future in unexpected state"); the dispatcher is told
+        # instead, and the call's late answer is dropped
+        waiter = asyncio.wrap_future(fut)
         try:
-            return await asyncio.wrap_future(fut)
+            return await asyncio.shield(waiter)
         except CallError as err:
             raise RuntimeCallError(err.code, err.message, err.data) from None
         except asyncio.CancelledError:
+            waiter.add_done_callback(_retrieved)
             loop.call_soon_threadsafe(d.cancel, call_id)
             raise
         finally:
@@ -258,3 +263,8 @@ class InProcessRuntime(PluginRuntime):
 
 
 __all__ = ["InProcessLink", "InProcessRuntime"]
+
+
+def _retrieved(fut: asyncio.Future[Any]) -> None:
+    if not fut.cancelled():
+        fut.exception()

@@ -82,7 +82,7 @@ BUILTIN_COLOR_MODES: tuple[BuiltinColorMode, ...] = ("class", "flat", "time", "b
 # An open id (colors.v1): the built-in modes, or a plugin's full id (``example.media.media``).
 ColorModeId = Annotated[str, Field(min_length=1, max_length=64, pattern=ID_PATTERN)]
 ColorModeName = ColorModeId  # the older name
-SizeUnit = Literal["bytes", "count"]
+SizeUnit = Literal["bytes", "count", "weight"]  # weight: a plugin's own measure (labels show shares)
 FilterModeName = Literal["dim", "hide"]
 ResultsSortName = Literal["size", "name", "count"]
 ResultKind = Literal["file", "folder", "group", "rest"]

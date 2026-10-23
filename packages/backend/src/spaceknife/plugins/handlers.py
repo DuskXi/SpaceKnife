@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
 FIELD_LIMIT = {"inspector": 16, "hover": 4}
 FIELD_CACHE = 2048
+FIELD_TIMEOUT_S = 1.0  # the details panel waits this long (queueing for the plugin included)
+LATE_FIELD_S = 10.0  # a late field is still fetched in the background, for the next ask
 
 
 def _need(session: Session) -> None:
@@ -116,13 +118,15 @@ def extensions_state(host: PluginHost, caps: frozenset[str]) -> pp.ExtensionsSta
     if CAP_COLORS in caps:
         for c in EXTENSIONS.of("color_mode"):
             s = c.spec
+            legend = host.legend_of(c, lang)
             colors.append(
                 pp.ColorModeInfo(
                     id=c.id,
                     plugin=c.owner,
                     title=s.title.get(lang),
                     palette=list(s.palette),
-                    legend=[t.get(lang) for t in s.legend],
+                    legend=[x[0] for x in legend],
+                    legend_colors=[x[1] for x in legend] if any(x[1] for x in legend) else [],
                     folders=s.folders,
                     layouts=list(s.layouts),
                 )
@@ -178,7 +182,7 @@ async def node_fields(
     pending = False
     todo = []
     for c in wanted:
-        key = (c.id, p.scan_id, p.node, version)
+        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner])
         if key in host._field_cache:
             hit = host._field_cache[key]
             if hit is not None:
@@ -186,15 +190,15 @@ async def node_fields(
             continue
         todo.append(c)
 
-    async def one(c: Any) -> pp.PluginField | None:
+    async def one(c: Any, timeout: float) -> pp.PluginField | None:  # noqa: ASYNC109
         value, _frames = await host.call(
             c.owner,
             "field",
             c.local,
-            {"node": p.node, "scan_id": p.scan_id},
+            {"node": p.node, "scan_id": p.scan_id, "slot": p.slot},
             session=session,
-            ctx={"scan_id": p.scan_id, "node": p.node},
-            timeout=1.0,
+            ctx={"scan_id": p.scan_id, "node": p.node, "slot": p.slot},
+            timeout=timeout,
         )
         if value is None:
             return None
@@ -216,12 +220,26 @@ async def node_fields(
             action=fv.action,
         )
 
-    async def fetch(c: Any) -> None:
-        key = (c.id, p.scan_id, p.node, version)
-        try:
-            host._field_cache[key] = await one(c)
-        except (RpcError, asyncio.CancelledError):
+    late: list[Any] = []
+
+    async def fetch(c: Any, timeout: float = FIELD_TIMEOUT_S) -> None:  # noqa: ASYNC109
+        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner])
+        if key in host._field_inflight:
             return
+        host._field_inflight.add(key)
+        try:
+            value = await one(c, timeout)
+        except RpcError as exc:
+            if exc.code == ErrorCode.PLUGIN_TIMEOUT:
+                late.append(c)  # busy or slow: answered later (the frontend asks again)
+            return
+        except asyncio.CancelledError:
+            return
+        finally:
+            host._field_inflight.discard(key)
+        if key[4] != host.epochs[c.owner]:
+            return  # its settings changed meanwhile: this answer is stale
+        host._field_cache[key] = value
         if len(host._field_cache) > FIELD_CACHE:
             for k in list(host._field_cache)[: FIELD_CACHE // 4]:
                 host._field_cache.pop(k, None)
@@ -230,13 +248,17 @@ async def node_fields(
         if todo:
             pending = True
             for c in todo:
-                host._spawn(fetch(c))
+                host._spawn(fetch(c, LATE_FIELD_S))
     else:
         await asyncio.gather(*(fetch(c) for c in todo), return_exceptions=True)
         for c in todo:
-            hit = host._field_cache.get((c.id, p.scan_id, p.node, version))
+            hit = host._field_cache.get((c.id, p.scan_id, p.node, version, host.epochs[c.owner]))
             if hit is not None:
                 out.append(hit)
+        if late:
+            pending = True
+            for c in late:
+                host._spawn(fetch(c, LATE_FIELD_S))
     order = {c.id: i for i, c in enumerate(wanted)}
     out.sort(key=lambda f: order.get(f.id, 0))
     return pp.PluginFieldsResult(fields=out, pending=pending)

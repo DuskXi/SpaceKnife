@@ -21,6 +21,18 @@ from .base import Params, Payload
 from .settings import SettingValue
 from .text import LocalStr
 
+
+class ThemedColor(Payload):
+    """A colour per theme (``{light = "#…", dark = "#…"}``); the app draws the one of its theme."""
+
+    light: str
+    dark: str
+
+
+Tone = str | ThemedColor
+"""A tone of a report block or field: accent, ok, warn, danger, muted, a design token, class:<id>,
+palette:<colour mode id>#<index>, #RRGGBB, or a :class:`ThemedColor`."""
+
 PLUGIN_ID_PATTERN = r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$"
 LOCAL_NAME_PATTERN = r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$"
 PLUGIN_ID_MAX = 32
@@ -410,7 +422,7 @@ class StatItem(Payload):
     value: Cell
     unit: Unit = "count"
     hint: LocalStr = ""
-    tone: str | None = None
+    tone: Tone | None = None
     delta: float | None = None
 
 
@@ -445,13 +457,13 @@ class BarItem(Payload):
     value: float
     unit: Unit = "size"
     node: NodeRef | None = None
-    tone: str | None = None
+    tone: Tone | None = None
 
 
 class PartItem(Payload):
     label: LocalStr
     value: float
-    tone: str | None = None
+    tone: Tone | None = None
 
 
 class NodeItem(Payload):
@@ -511,7 +523,7 @@ class MeterBlock(Payload):
     max: float
     label: LocalStr = ""
     unit: Unit = "size"
-    tone: str | None = None
+    tone: Tone | None = None
 
 
 class SparkBlock(Payload):
@@ -610,7 +622,7 @@ class FieldValue(Payload):
     type: Literal["field"] = "field"
     value: Cell
     unit: Unit = "text"
-    tone: str | None = None
+    tone: Tone | None = None
     node: NodeRef | None = None
     action: LabeledAction | None = None
 
@@ -627,7 +639,7 @@ class PluginField(Payload):
     title: str
     value: Cell
     unit: Unit = "text"
-    tone: str | None = None
+    tone: Tone | None = None
     node: NodeRef | None = None
     action: LabeledAction | None = None
 
@@ -730,11 +742,6 @@ class CleanupInfo(Payload):
     method: str
 
 
-class ThemedColor(Payload):
-    light: str
-    dark: str
-
-
 PaletteEntry = str | ThemedColor
 
 
@@ -746,6 +753,9 @@ class ColorModeInfo(Payload):
         default_factory=list, description="0: neutral; semantic name, token, class:<id>, #RRGGBB or themed"
     )
     legend: list[str] = Field(default_factory=list)
+    legend_colors: list[PaletteEntry | None] = Field(
+        default_factory=list, description="A colour per legend entry from the plugin (None: the palette's)"
+    )
     folders: Literal["ring", "palette"] = "ring"
     layouts: list[str] = Field(default_factory=list, description="Layouts it applies to (empty: all)")
 

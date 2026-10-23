@@ -16,6 +16,8 @@ from .compute import compute
 from .rpc import RpcError
 
 if TYPE_CHECKING:
+    from spaceknife_sdk.manifest import SettingSpec
+
     from ..export import TemplateIssue
     from .app import Server
     from .session import Session
@@ -28,6 +30,7 @@ TEXT = Texts(
         "template_errors": "模板有错误，没有导出：{first}",
         "folder": "目标文件夹不存在：{folder}",
         "write": "写不了 {path}：{reason}",
+        "no_selection": "没有选中要导出的项",
     }
 )
 
@@ -35,6 +38,24 @@ TEXT = Texts(
 def _issue(i: TemplateIssue) -> pe.ExportIssue:
     return pe.ExportIssue(
         severity=i.severity, code=i.code, message=i.message, section=i.section, line=i.line, column=i.column
+    )
+
+
+def _option(o: SettingSpec, lang: str) -> pe.ExportOption:
+    from spaceknife_protocol.settings import SettingOption
+
+    return pe.ExportOption(
+        name=o.name,
+        title=o.title.get(lang),
+        description=o.description.get(lang) if o.description else "",
+        control=o.control or "text",
+        default=o.default,
+        options=[SettingOption(value=v, label=label.get(lang)) for v, label in o.options],
+        min=o.min,
+        max=o.max,
+        step=o.step,
+        unit=o.unit,
+        placeholder=o.placeholder.get(lang) if o.placeholder else "",
     )
 
 
@@ -62,10 +83,18 @@ def install(server: Server) -> None:
                     spacesniffer=item.spacesniffer,
                 )
             )
+        lang = language()
         for key, f in formats.items():
-            out.append(pe.ExportTarget(name=key, title=f.title, kind="format", extension=f.extension))
+            out.append(
+                pe.ExportTarget(
+                    name=key,
+                    title=f.title,
+                    description=f.description.get(lang) if f.description else "",
+                    kind="format",
+                    extension=f.extension.lstrip("."),
+                )
+            )
         if CAP_PLUGINS in session.capabilities:
-            lang = language()
             for c in EXTENSIONS.of("export_template"):
                 if c.shipped:
                     continue
@@ -93,6 +122,7 @@ def install(server: Server) -> None:
                         kind="format",
                         extension=spec.extension.lstrip("."),
                         plugin=c.owner,
+                        options=[_option(o, lang) for o in spec.options],
                     )
                 )
         return pe.ExportTargets(targets=out)
@@ -110,9 +140,11 @@ def install(server: Server) -> None:
             ExportError,
             ExportFormat,
             ExportTemplate,
+            common_root,
             export_chunks,
             parse_template,
             resolve,
+            subtree_mask,
             write_export,
         )
 
@@ -138,13 +170,40 @@ def install(server: Server) -> None:
         if not path.parent.is_dir():
             raise RpcError(ErrorCode.INVALID_PARAMS, TEXT["folder"].format(folder=path.parent))
         res = view.filter.result if params.use_filter and view.filter.active else None
-        root = view.zoom.node if params.scope == "zoom" else 0
+        store = view.store
+        match = res.match if res else None
+        selection: list[int] = []
+        if params.scope == "zoom":
+            root = view.zoom.node
+        elif params.scope == "node":
+            if params.node is None or not 0 <= params.node < len(store):
+                raise RpcError(ErrorCode.UNKNOWN_NODE, f"node {params.node} does not exist")
+            root = params.node
+            selection = [params.node]
+        elif params.scope == "selection":
+            picked = params.selection or ([view.selected] if isinstance(view.selected, int) else [])
+            selection = [int(x) for x in picked if 0 < int(x) < len(store)]
+            if not selection:
+                raise RpcError(ErrorCode.INVALID_PARAMS, TEXT["no_selection"])
+            root = common_root(store, selection)
+        else:
+            root = 0
         bom = isinstance(target, ExportFormat) and target.bom
         text = view.filter.text if res is not None else ""
 
         def work() -> int:
+            keep = match
+            if params.scope == "selection" and len(selection) > 1:
+                inside = subtree_mask(store, selection)
+                keep = inside if keep is None else (keep[: len(inside)] & inside[: len(keep)])
             chunks = export_chunks(
-                target, view.store, root, match=res.match if res else None, filter_text=text
+                target,
+                store,
+                root,
+                match=keep,
+                filter_text=text,
+                options=dict(params.options),
+                selection=selection,
             )
             return write_export(path, chunks, bom=bom)
 

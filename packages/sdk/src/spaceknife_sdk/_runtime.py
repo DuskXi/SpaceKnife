@@ -37,7 +37,16 @@ from ._link import Image
 from .context import CallInfo, Context, PluginSelf, RuntimeState
 from .errors import Cancelled, HostError, ManifestError, PluginError
 from .manifest import Manifest
-from .models import ChangeUnit, ExportInfo, Listing, Proposal, ScanInfo, VisualInput
+from .models import (
+    ChangeUnit,
+    ColorInput,
+    ExportInfo,
+    ExportInput,
+    Listing,
+    Proposal,
+    ScanInfo,
+    VisualInput,
+)
 from .plugin import Handler, Plugin, loaded
 from .tree import Columns
 
@@ -141,9 +150,11 @@ class Dispatcher:
         self.state = state
         self.link = link
         self.log = log or (lambda text: link.notify("log", {"level": "ERROR", "message": text[-8000:]}))
+        self.threads = threads
         self.executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=threads, thread_name_prefix="sk-plugin"
         )
+        self.abandoned: set[asyncio.Future[Any]] = set()  # cancelled functions still running
         self.cancels: dict[int, threading.Event] = {}
         self.tasks: dict[int, asyncio.Task[Any]] = {}
         state.state_models.update(plugin.states)
@@ -250,10 +261,15 @@ class Dispatcher:
         try:
             return await asyncio.shield(fut)
         except asyncio.CancelledError:
-            # a thread cannot be stopped: the call counts as cancelled once the function has returned
-            # (if it never does, the host stops the whole process after its grace period)
-            with contextlib.suppress(BaseException):
-                await fut
+            # A thread cannot be stopped: the call is answered as cancelled right away and the
+            # function's result, when it comes, is dropped (``ctx.check()`` inside it raises now).
+            # The process is not stopped for it; a function that never returns keeps a worker
+            # thread until the plugin is restarted.
+            fut.add_done_callback(_drop_result)
+            self.abandoned.add(fut)
+            fut.add_done_callback(self.abandoned.discard)
+            if len(self.abandoned) >= self.threads:  # nothing else can run: the host restarts us
+                self.link.notify("stuck", {"threads": len(self.abandoned)})
             raise
 
     async def _invoke(
@@ -289,23 +305,44 @@ class Dispatcher:
                 return {"mask": True, "n": int(arr.shape[0])}, [_frame({"v": arr.astype(np.uint8)})]
             return {"mask": False, "n": int(arr.shape[0])}, [_frame({"v": arr.astype(np.int64)})]
         if kind == "visual":
-            v = VisualInput(tree=ctx.tree, options=dict(p.get("options") or {}))
+            v = VisualInput(tree=ctx.tree, options=dict(p.get("options") or {}), ctx=ctx)
             result = await self._call(h, v)
             arr = np.asarray(result)
             return {"n": int(arr.shape[0])}, [_frame({"v": arr.astype(np.float64)})]
         if kind == "color":
             ids = decode_frame(frames[0])[1]["ids"] if frames else np.zeros(0, dtype=np.int64)
-            result = await self._call(h, ctx.tree, np.asarray(ids, dtype=np.int64))
+            ids = np.asarray(ids, dtype=np.int64)
+            if h.arity == 1:
+                ci = ColorInput(tree=ctx.tree, ids=ids, palette=int(p.get("palette") or 1), ctx=ctx)
+                result = await self._call(h, ci)
+            else:
+                result = await self._call(h, ctx.tree, ids)
             arr = np.asarray(result)
             return {"n": int(arr.shape[0])}, [_frame({"pal": arr.astype(np.uint8)})]
+        if kind == "legend":
+            result = await self._call(h, ctx)
+            return [_legend_item(i) for i in (result or [])][:16], []
         if kind == "export":
             match = None
             if frames:
                 match = decode_frame(frames[0])[1]["match"].astype(bool)
             root = int(p.get("root", 0))
             tree = ctx.tree
-            if h.arity >= 4:
-                gen = h.fn(tree, root, match, ExportInfo(filter=str(p.get("filter") or "")))
+            filt = str(p.get("filter") or "")
+            options = dict(p.get("options") or {})
+            if h.arity == 1:
+                x = ExportInput(
+                    tree=tree,
+                    root=root,
+                    match=match,
+                    filter=filt,
+                    options=options,
+                    selection=[int(n) for n in p.get("selection") or []],
+                    ctx=ctx,
+                )
+                gen = h.fn(x)
+            elif h.arity >= 4:
+                gen = h.fn(tree, root, match, ExportInfo(filter=filt, options=options))
             else:
                 gen = h.fn(tree, root, match)
             count = await asyncio.get_running_loop().run_in_executor(
@@ -373,6 +410,22 @@ class Dispatcher:
         if isinstance(result, np.ndarray):
             return {"columns": True, "layout": "columns.v1"}, [_frame({"v": result})]
         return _dump(result), []
+
+
+def _drop_result(fut: asyncio.Future[Any]) -> None:
+    """A cancelled thread's result: retrieved (so nothing is logged) and dropped."""
+    if not fut.cancelled():
+        fut.exception()
+
+
+def _legend_item(item: Any) -> Any:
+    """A legend entry from code: a text, or ``(text, colour)``."""
+    from spaceknife_protocol.text import localize
+
+    if isinstance(item, tuple | list) and len(item) == 2:
+        label, color = item
+        return {"label": str(localize(label) or ""), "color": _dump(color)}
+    return {"label": str(localize(item) or ""), "color": None}
 
 
 def _listing_cols(batch: dict[str, Any]) -> dict[str, Any]:

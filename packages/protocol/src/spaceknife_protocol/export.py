@@ -7,6 +7,24 @@ from typing import Literal
 from pydantic import Field
 
 from .base import Params, Payload
+from .settings import SettingControl, SettingOption, SettingValue
+
+
+class ExportOption(Payload):
+    """A field of the export dialog that a plugin's format declares (``options`` of
+    ``export_format``); its value goes to export.run ``options`` under ``name``."""
+
+    name: str
+    title: str
+    description: str = ""
+    control: SettingControl
+    default: SettingValue
+    options: list[SettingOption] = Field(default_factory=list)
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    unit: str = Field(default="", description="B: a size in bytes (shown and typed as a size)")
+    placeholder: str = ""
 
 
 class ExportTarget(Payload):
@@ -22,6 +40,7 @@ class ExportTarget(Payload):
     file_name: str = Field(default="", description="The template's own suggested file name")
     spacesniffer: bool = Field(default=False, description="Also built into SpaceSniffer")
     plugin: str | None = Field(default=None, description="The plugin that adds it (name is its full id)")
+    options: list[ExportOption] = Field(default_factory=list, description="Fields of a plugin's format")
 
 
 class ExportTargets(Payload):
@@ -51,10 +70,17 @@ class ExportRunParams(Params):
     target: str = Field(default="", max_length=256, description="A target name; empty with source")
     source: str | None = Field(default=None, max_length=1 << 20, description="A template's text instead")
     path: str = Field(min_length=1, max_length=32767, description="The file to write (its folder must exist)")
-    scope: Literal["zoom", "all"] = Field(
-        default="zoom", description="The view's zoom root, or every scan root"
+    scope: Literal["zoom", "all", "selection", "node"] = Field(
+        default="zoom",
+        description="The view's zoom root, every scan root, the selected nodes (selection, else the "
+        "view's), or one node (node)",
     )
     use_filter: bool = Field(default=True, description="Only what the view's filter matches")
+    node: int | None = Field(default=None, ge=0, description="scope node: the node")
+    selection: list[int] = Field(default_factory=list, max_length=100_000, description="scope selection")
+    options: dict[str, SettingValue] = Field(
+        default_factory=dict, description="Values of the format's options (by name)"
+    )
 
 
 class ExportRunResult(Payload):

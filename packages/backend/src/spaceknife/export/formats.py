@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from json.encoder import encode_basestring
+from typing import Any
 
 import numpy as np
 
@@ -584,6 +585,8 @@ class ExportFormat:
     text: Text | None = None  # a plugin's title in both languages
     description: Text | None = None
     plugin: str | None = None  # the plugin that adds it (key is then its full id)
+    shipped: bool = False  # a plugin that comes with the app (builtin.export): the old call
+    options: tuple[Any, ...] = ()  # its options (SettingSpec), the export dialog's fields
 
     @property
     def title(self) -> str:

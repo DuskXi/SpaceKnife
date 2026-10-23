@@ -90,11 +90,11 @@ def action(label: TextIn, icon: str = "", **short: Any) -> LabeledAction:
     norm = normalize_action(short)
     ctx = current_context()
     plugin = ctx.plugin.id if ctx is not None else "local.plugin"
-    return LabeledAction(label=label, icon=icon, action=resolve_action(norm, plugin))  # type: ignore[arg-type]
+    return LabeledAction(label=label, icon=icon, action=resolve_action(norm, plugin))
 
 
 def md(text: TextIn) -> MdBlock:
-    return MdBlock(text=text)  # type: ignore[arg-type]
+    return MdBlock(text=text)
 
 
 def _stat(item: Any) -> StatItem:
@@ -177,11 +177,19 @@ def _cell(v: Any) -> Any:
 
 
 def bars(items: Iterable[Any], *, max: float | None = None) -> BarsBlock:
-    """Horizontal bars: ``(label, value[, unit[, node]])``."""
+    """Horizontal bars: ``(label, value[, unit[, node[, tone]]])`` tuples, dicts with those keys, or
+    :class:`BarItem`."""
     out = []
     for item in items:
         if isinstance(item, BarItem):
             out.append(item)
+            continue
+        if isinstance(item, Mapping):
+            d = dict(item)
+            if "node" in d:
+                d["node"] = _ref(d["node"])
+            d.setdefault("unit", "size")
+            out.append(BarItem.model_validate(d))
             continue
         label, value, *rest = item
         out.append(
@@ -190,6 +198,7 @@ def bars(items: Iterable[Any], *, max: float | None = None) -> BarsBlock:
                 value=float(value),
                 unit=rest[0] if rest else "size",
                 node=_ref(rest[1]) if len(rest) > 1 else None,
+                tone=rest[2] if len(rest) > 2 else None,
             )
         )
     return BarsBlock(items=out, max=max)
@@ -211,17 +220,17 @@ def stack(parts: Iterable[Any], unit: Unit = "size") -> StackBlock:
 
 
 def ring(parts: Iterable[Any], unit: Unit = "size", center: TextIn = "") -> RingBlock:
-    return RingBlock(parts=_parts(parts), unit=unit, center=center)  # type: ignore[arg-type]
+    return RingBlock(parts=_parts(parts), unit=unit, center=center)
 
 
 def meter(
     value: float, max: float, label: TextIn = "", unit: Unit = "size", tone: str | None = None
 ) -> MeterBlock:
-    return MeterBlock(value=value, max=max, label=label, unit=unit, tone=tone)  # type: ignore[arg-type]
+    return MeterBlock(value=value, max=max, label=label, unit=unit, tone=tone)
 
 
 def spark(values: Iterable[float], labels: Iterable[TextIn] = (), unit: Unit = "size") -> SparkBlock:
-    return SparkBlock(values=[float(v) for v in values], labels=list(labels), unit=unit)  # type: ignore[arg-type]
+    return SparkBlock(values=[float(v) for v in values], labels=list(labels), unit=unit)
 
 
 def nodes(items: Iterable[Any], actions: Iterable[LabeledAction] = ()) -> NodesBlock:
@@ -247,11 +256,11 @@ def callout(text: TextIn, tone: str = "info") -> CalloutBlock:
 
 
 def progress(done: float, total: float, text: TextIn = "") -> ProgressBlock:
-    return ProgressBlock(done=done, total=total, text=text)  # type: ignore[arg-type]
+    return ProgressBlock(done=done, total=total, text=text)
 
 
 def section(title: TextIn, blocks: Iterable[Block], *, collapsed: bool = False) -> SectionBlock:
-    return SectionBlock(title=title, blocks=list(blocks), collapsed=collapsed)  # type: ignore[arg-type]
+    return SectionBlock(title=title, blocks=list(blocks), collapsed=collapsed)
 
 
 # --------------------------------------------------------------------------- plain text
@@ -334,15 +343,15 @@ def render_text(report: Report | Mapping[str, Any]) -> str:
     if rep.title:
         out.append(f"# {rep.title}")
     if rep.subtitle:
-        out.append(rep.subtitle)
+        out.append(str(rep.subtitle))
     if not rep.blocks and rep.empty:
-        out.append(rep.empty)
+        out.append(str(rep.empty))
     for b in rep.blocks:
         out += _lines(b, 0)
     for a in rep.actions:
         out.append(f"[{a.label}]")
     if rep.footnote:
-        out.append(rep.footnote)
+        out.append(str(rep.footnote))
     return "\n".join(out)
 
 

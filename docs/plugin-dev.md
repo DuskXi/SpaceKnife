@@ -300,11 +300,12 @@ command = "open_largest"
 | `control` | `switch segmented number slider color text`，默认按 `default` 和 `options` 推断 |
 | `description` | 说明 |
 | `options` | `[[值, 标题], …]`：分段选择 |
-| `min` `max` `step` `unit` | 数字的范围、步长和单位（`B` 显示成大小） |
+| `min` `max` `step` `unit` | 数字的范围、步长和单位（`B`：按大小显示和输入，如 1 MB） |
 | `applies` | `now`（默认）`next_scan` `new_views` |
 | `synonyms` | 设置搜索的同义词 |
 | `depends` | 另一个开关设置的名字：它关着时这一项变灰 |
 | `group` | 分组标题 |
+| `placeholder` | 空的文字框里的提示 |
 
 ```toml ex
 [[settings]]
@@ -316,7 +317,7 @@ min = 1
 unit = "B"
 ```
 
-读：`ctx.settings["min_size"]`（`ctx.settings.get(name, default)`）；写：`ctx.settings.set(name, value)`。设置键是 `plugin.<id>.<名字>`，出现在设置 › 插件，逐项校验，坏掉一项只回落那一项；插件停用后值留在设置文件里。改动后插件收到 `settings` 钩子。
+读：`ctx.settings["min_size"]`（`ctx.settings.get(name, default)`）；写：`ctx.settings.set(name, value)`。设置键是 `plugin.<id>.<名字>`，出现在设置 › 插件，逐项校验，坏掉一项只回落那一项；插件停用后值留在设置文件里。改动后插件收到 `settings` 钩子（参数是变了的名字），宿主缓存的这个插件的回答（字段、节点集合、权重、图例）同时作废，见[缓存](plugin-api.md#cache)。
 
 <a id="kind-report"></a>
 #### 报告
@@ -384,7 +385,7 @@ def name_length(ctx: Context, node: Node) -> FieldValue | None:
 <a id="kind-insight"></a>
 #### 洞察（代码）
 
-详情面板顶部的洞察卡片：这是什么、能不能删、怎么清理。规则能写的用[洞察规则](#kind-insight_rules)，规则写不出来的才用代码。选项只有 `name`（默认是函数名）。
+详情面板顶部的洞察卡片：这是什么、能不能删、怎么清理。规则能写的用[洞察规则](#kind-insight_rules)，规则写不出来的才用代码。选项：`name`（默认是函数名）；`globs`（只问路径匹配其中一个的节点，如 `["**/node_modules", "**/*.bak"]`；不写时每个节点都问，详情面板会慢）。
 
 ```python ex
 @plugin.insight
@@ -406,10 +407,13 @@ async def backups(ctx: Context, node: Node) -> Insight | None:
 | 字段 | 说明 |
 |---|---|
 | `name` `title` | 必需 |
+| `short_title` | 标签页上的短标题（默认 `title`） |
 | `icon` | 图标 |
 | `entry` | `web/index.html`（默认），必须在 `web/` 里 |
+| `params` | 给网页的参数（`sk.context().params`）：同一个网页放两处，各带一组 |
 | `slot` | `tab`（默认）`inspector` `dialog` |
 | `height` | 详情面板和对话框里的高度（320，40–800） |
+| `keep` | 标签页转到后台时保留网页和它的状态（True） |
 | `when` | 同命令 |
 
 ```toml ex
@@ -431,7 +435,7 @@ title = { zh = "面板", en = "Board" }
 | `icon` `order` | 工具栏里的图标和位置（50） |
 | `base` | `treemap` `flame`（默认）`flame_polar` |
 | `size` | 面积按什么：`alloc`（占用，默认）`size`（逻辑大小）`files`（文件数）`items`（项数）`code`（函数给权重） |
-| `unit` | 面积的单位：`bytes` 或 `count`（默认按 `size` 推断），决定标签和悬停卡的写法 |
+| `unit` | 面积的单位：`bytes` `count` 或 `weight`（默认按 `size` 推断：`code` 是 `weight`），决定标签的写法：`weight` 的标签写占上一层的比例，悬停卡另写真实占用 |
 | `options` | 本插件的设置名：传给函数的 `v.options` |
 | `compare` | 对比时也可用（False） |
 
@@ -443,7 +447,7 @@ base = "flame"
 size = "files"
 ```
 
-代码版：函数给每个节点一个权重（长度 `tree.n` 的数组），宿主只取文件的权重、把它们加到文件夹上。权重是 ≥ 0 的整数，NaN 和负数当 0。`spaceknife_sdk.layout` 有几个帮手：`files_only` `by_column` `count` `check`。
+代码版：函数给每个节点一个权重（长度 `tree.n` 的数组），宿主只取文件的权重、把它们加到文件夹上。权重是 ≥ 0 的整数，NaN 和负数当 0。`VisualInput` 有 `tree` `options`（声明的选项，按视图里的值）`settings`（本插件全部设置）`ctx` 和 `cancelled`/`check()`。权重按树版本、选项和设置缓存。`spaceknife_sdk.layout` 有几个帮手：`files_only` `by_column` `count` `check`。
 
 ```python ex
 @plugin.visualization("by_lines", T("按估计行数", "By estimated lines"), base="treemap")
@@ -470,6 +474,7 @@ def by_lines(v: VisualInput) -> np.ndarray:
 | `set` | `by = "set"` 的节点集合全名 |
 | `folders` | 展开的文件夹怎么画：`ring`（默认，层级色）或 `palette` |
 | `layouts` | 只用于哪些布局：`drawlist.v1`（树图）`flame.v1` `polar.v1`；空表示全部 |
+| `bands_setting` | 本插件一个文字设置的名字（如 `"7d, 30d, 1y"`）：`bands` 跟着它变；没写 `legend` 时图例按分界生成（`< 7d`、`7d – 30d`…） |
 
 ```toml ex
 [[color_modes]]
@@ -481,12 +486,17 @@ legend = [{ zh = "其他", en = "Other" }, { zh = "视频", en = "Video" }, { zh
 map = { mp4 = 1, mkv = 1, jpg = 2, png = 2 }
 ```
 
-代码版：`(tree: TreeView, ids: np.ndarray) -> np.ndarray[uint8]`，`ids` 是这一帧画出的节点，返回同样长的下标。每帧 20 ms，超时这一帧全是中性色。
+代码版：`(c: ColorInput) -> np.ndarray[uint8]`，`c.ids` 是这一帧画出的节点，返回同样长的下标；`c` 还有 `tree` `palette`（色板长度）`settings` `ctx` `cancelled`。每帧 20 ms，超时这一帧全是中性色。旧写法 `(tree, ids)` 也能用。图例要跟着设置变时，用 `@plugin.color_legend("<配色名>")` 给出：`(ctx) -> list[文字 | (文字, 颜色)]`，每个下标一条，设置变了宿主重新要。
 
 ```python ex
 @plugin.color_mode("parity", T("奇偶", "Odd and even"), palette=["muted", "ok", "warn"])
-def parity(tree: TreeView, ids: np.ndarray) -> np.ndarray:
-    return (1 + ids % 2).astype(np.uint8)
+def parity(c: ColorInput) -> np.ndarray:
+    return (1 + c.ids % 2).astype(np.uint8)
+
+
+@plugin.color_legend("parity")
+def parity_legend(ctx: Context) -> list[Text | str]:
+    return [T("其他", "Other"), T("奇数", "Odd"), T("偶数", "Even")]
 ```
 
 ### 3.4 数据
@@ -496,21 +506,30 @@ def parity(tree: TreeView, ids: np.ndarray) -> np.ndarray:
 
 | 字段 | 说明 |
 |---|---|
-| `name` `title` `extension` | 必需；`extension` 如 `.md` |
+| `name` `title` `extension` | 必需；`extension` 如 `md`（写不写点都行，宿主存成不带点的） |
 | `description` | 导出对话框里的说明 |
 | `media_type` | `text/plain`（默认） |
 | `binary` | 产出 `bytes` 而不是 `str`（False） |
 | `bom` | 文件开头写 UTF-8 BOM（False；Excel 打开 CSV 需要） |
+| `options` | 导出对话框里的字段，写法同[设置](#kind-setting)（≤ 12 个）；值在 `x.options` |
 
-签名：`def f(tree: TreeView, root: int, match: np.ndarray | None[, info: ExportInfo]) -> Iterator[str]`。`root` 是要导出的子树（0 表示全部），`match` 是过滤后的掩码（按节点下标，没过滤时是 None），`info.filter` 是过滤式。宿主流式写文件、显示进度、出错时删掉临时文件；30 秒没有新的块就中止。用户在导出对话框和 `spaceknife run … export <全名> <文件>` 里都能选它。
+签名：`def f(x: ExportInput) -> Iterator[str]`。`x.root` 是要导出的子树（视图所在的位置、选中的项或 0 表示全部），`x.match` 是过滤后的掩码（按节点下标，没过滤时是 None；只导出选中项时它也只留选中的子树），`x.filter` 是过滤式，`x.options` 是对话框里选的值（没给的取默认），`x.selection` 是选中的节点，`x.settings` 和 `x.ctx` 同别处。宿主流式写文件、显示进度、出错时删掉临时文件；30 秒没有新的块就中止。用户在导出对话框和 `spaceknife run … export <全名> <文件>` 里都能选它（`run` 用选项的默认值）。旧写法 `(tree, root, match[, info])` 也能用。
 
 ```python ex
-@plugin.export_format("md", T("Markdown 表格", "Markdown table"), extension=".md", media_type="text/markdown")
-def md(tree: TreeView, root: int, match: np.ndarray | None, info: ExportInfo) -> Iterator[str]:
-    rows = tree.query(kind="file", under=root or None, columns=("bytes", "path"), sort="-bytes")
+@plugin.export_format(
+    "md",
+    T("Markdown 表格", "Markdown table"),
+    extension="md",
+    media_type="text/markdown",
+    options=[{"name": "limit", "title": T("最多几行", "At most"), "default": 100, "min": 1}],
+)
+def md(x: ExportInput) -> Iterator[str]:
+    rows = x.tree.query(kind="file", under=x.root or None, columns=("bytes", "path"), sort="-bytes")
     yield "| Size | Path |\n|---:|---|\n"
-    for node, size, path in zip(rows.ids.tolist(), rows["bytes"].tolist(), rows.paths, strict=True):
-        if match is None or match[node]:
+    for node, size, path in list(zip(rows.ids.tolist(), rows["bytes"].tolist(), rows.paths, strict=True))[
+        : int(x.options["limit"])
+    ]:
+        if x.match is None or x.match[node]:
             yield f"| {size} | {path} |\n"
 ```
 
@@ -582,9 +601,14 @@ i18n.en.reason = "Turborepo's local task cache; the next build makes it again."
 
 | `[[folder_rules]]` 字段 | 说明 |
 |---|---|
-| `glob` | 文件夹路径的 glob，`**/target/debug` |
+| `glob` | 文件夹路径的 glob，`**/target/debug`；`{a,b}` 二选一：`**/{.venv,venv}` |
 | `class` | 类别：本插件的名字、全名或内置类别 |
 | `mode` | `swallow`（默认：里面的所有文件都算这个类别）或 `fallback`（只给没有类别的文件） |
+| `name` | 规则名（默认由 glob 的字母数字生成：`**/.venv` 是 `rule_venv`，重名时加 `_2`） |
+| `priority` | 先试优先级高的（0，−100–100），同级按声明顺序；第一条匹配的决定 |
+| `exclude` | 不适用的路径 glob：`["**/steamapps/**"]` |
+
+`title` 两种语言都写：界面是英文时类别显示英文名，中文名留作过滤别名。`color` 写 `{ light, dark }` 时程序按自己的主题取。类别与文件夹的关系：落在文件夹规则（插件的、内置的项目文件夹，或用户选的）里的文件按文件夹的类别算，扩展名不再起作用；`fallback` 只给扩展名不属于任何类别的文件。
 
 ```toml ex
 [[classes]]

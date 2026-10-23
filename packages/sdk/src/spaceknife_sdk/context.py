@@ -30,6 +30,7 @@ from .tree import Node, TreeView
 
 if TYPE_CHECKING:
     from ._link import Link
+    from .models import ScanInfo, SnapshotInfo
 
 M = TypeVar("M", bound=BaseModel)
 R = TypeVar("R")
@@ -81,6 +82,7 @@ class CallInfo:
     node: int | None = None
     timeout: float = 30.0
     request: int | str | None = None  # the frontend's request id (progress events)
+    slot: str | None = None  # a node field: "inspector" or "hover"
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> CallInfo:
@@ -94,6 +96,7 @@ class CallInfo:
             node=d.get("node"),
             timeout=float(d.get("timeout", 30.0)),
             request=d.get("request"),
+            slot=d.get("slot"),
         )
 
 
@@ -310,14 +313,18 @@ class Snapshots:
     def __init__(self, ctx: Context) -> None:
         self._ctx = ctx
 
-    def list(self, root: str | None = None) -> list[dict[str, Any]]:
-        """Cheap: what the snapshot files' headers say (time, totals, roots)."""
+    def list(self, root: str | None = None) -> list[SnapshotInfo]:
+        """Cheap: what the snapshot files' headers say (time, totals, roots), newest first; only
+        those of ``root`` (a scanned folder's path) when given."""
+        from .models import SnapshotInfo
+
         require(self._ctx._state, "snapshots.read")
         value, _ = self._ctx._link.request("host.snapshots", {"root": root})
-        return list(value["snapshots"])
+        return [SnapshotInfo.model_validate(d) for d in value["snapshots"]]
 
     def open(self, path: str) -> TreeView:
-        """Expensive: load a snapshot as a tree (released when the call ends)."""
+        """Expensive: load a snapshot as a tree (released when the call ends). Only a path from
+        :meth:`list` or a snapshot the user opened (PermissionError otherwise)."""
         require(self._ctx._state, "snapshots.read")
         value, _ = self._ctx._link.request(
             "host.snapshot_open", {"path": path, "call": self._ctx.call_info.id}
@@ -420,11 +427,26 @@ class Context:
     def scan(self, scan_id: str) -> TreeView:
         return TreeView(self._link, self._tree_info(scan_id))
 
-    def scans(self) -> list[dict[str, Any]]:
-        """The open scans: id, roots, state."""
+    def scans(self) -> list[ScanInfo]:
+        """The open scans, newest first (``front`` marks the one in front). Needs ``tree.read``."""
+        from .models import ScanInfo
+
         require(self._state, "tree.read")
         value, _ = self._link.request("host.scans", {})
-        return list(value["scans"])
+        return [ScanInfo.model_validate(d) for d in value["scans"]]
+
+    def invalidate(self, *kinds: str) -> None:
+        """Forget what the host cached of this plugin's answers — fields, node sets, a code
+        visualization's weights, change reasons (``"node_field"``, ``"node_set"``,
+        ``"visualization"``, ``"change_annotator"``; none: all of them). The host does this by
+        itself when the plugin's settings change; call it when something else changed the answers
+        (a file the plugin reads, a cache it built)."""
+        self._link.request("host.invalidate", {"kinds": list(kinds)})
+
+    @property
+    def slot(self) -> str | None:
+        """Where a node field is shown: ``"inspector"`` (1 s) or ``"hover"`` (30 ms); else None."""
+        return self.call_info.slot
 
     @property
     def node(self) -> Node | None:

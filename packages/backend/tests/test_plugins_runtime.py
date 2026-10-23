@@ -123,11 +123,16 @@ async def test_a_stuck_call_is_given_up(monkeypatch: pytest.MonkeyPatch) -> None
         with pytest.raises(RpcError) as err:
             await host.call("stuck", seconds=30)
         assert err.value.code == ErrorCode.PLUGIN_TIMEOUT and time.monotonic() - t0 < 2
-        # the plugin's other calls run beside it (a worker thread holds the stuck one) ...
+        # the plugin's other calls run beside it (a worker thread holds the stuck one), and the
+        # process stays: a function that does not look at cancellation only costs its thread
         assert await host.call("quick") == {"tag": "quick", "cancelled": False}
         rec = host.server.plugins.records["t.slow"]
         pid = rec.runtime.pid
-        # ... until the grace for the cancelled call is over: then the process goes, and comes back
+        await asyncio.sleep(2.0)  # past the grace for cancelled calls
+        assert rec.restarts == 0 and rec.runtime.pid == pid
+        # ... until every worker thread is stuck: then the process goes, and comes back
+        with pytest.raises(RpcError):
+            await host.call("stuck", seconds=30)
         for _ in range(50):
             await asyncio.sleep(0.1)
             if rec.restarts:

@@ -14,10 +14,16 @@ from __future__ import annotations
 from spaceknife_protocol.base import Params, Payload
 from spaceknife_protocol.plugins import (
     ActionContext,
+    BarItem,
     FieldValue,
     NodeRef,
+    PartItem,
     Report,
     ReportContext,
+    StatItem,
+    TableColumn,
+    TableMore,
+    ThemedColor,
     Toast,
 )
 from spaceknife_protocol.text import T, Text
@@ -26,7 +32,19 @@ from . import layout
 from . import report as r
 from .context import Context
 from .errors import Cancelled, PluginError
-from .models import Change, ChangeUnit, ExportInfo, Insight, Listing, Proposal, ScanInfo, VisualInput
+from .models import (
+    Change,
+    ChangeUnit,
+    ColorInput,
+    ExportInfo,
+    ExportInput,
+    Insight,
+    Listing,
+    Proposal,
+    ScanInfo,
+    SnapshotInfo,
+    VisualInput,
+)
 from .plugin import Plugin
 from .tree import Columns, Flag, Kind, Node, Rows, TreeView
 
@@ -34,12 +52,15 @@ __version__ = "0.1.0"
 
 __all__ = [
     "ActionContext",
+    "BarItem",
     "Cancelled",
     "Change",
     "ChangeUnit",
+    "ColorInput",
     "Columns",
     "Context",
     "ExportInfo",
+    "ExportInput",
     "FieldValue",
     "Flag",
     "Insight",
@@ -48,6 +69,7 @@ __all__ = [
     "Node",
     "NodeRef",
     "Params",
+    "PartItem",
     "Payload",
     "Plugin",
     "PluginError",
@@ -56,8 +78,13 @@ __all__ = [
     "ReportContext",
     "Rows",
     "ScanInfo",
+    "SnapshotInfo",
+    "StatItem",
     "T",
+    "TableColumn",
+    "TableMore",
     "Text",
+    "ThemedColor",
     "Toast",
     "TreeView",
     "VisualInput",

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextvars import ContextVar
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
@@ -78,7 +78,12 @@ def as_text(value: Any) -> Any:
     return value
 
 
-LocalStr = Annotated[str, BeforeValidator(localize)]
+if TYPE_CHECKING:
+    # what type checkers see: a field takes a Text too (``Report(title=T("…", "…"))``); the value
+    # read back is a str at run time
+    LocalStr = str | Text
+else:
+    LocalStr = Annotated[str, BeforeValidator(localize)]
 """A text field of a model sent to the frontends: ``Text`` in, the request's language out."""
 
 TextLike = Annotated[Text, BeforeValidator(as_text)]

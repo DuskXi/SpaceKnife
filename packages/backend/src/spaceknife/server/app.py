@@ -160,7 +160,7 @@ class Server:
             self._lang = lang
             fields["lang"] = lang
             self.plugins.fire("lang")
-        self.plugins.fire("settings", changed=[])
+        self.plugins.settings_changed()  # the settings hooks, with what changed for each plugin
         try:
             task = asyncio.get_running_loop().create_task(self.plugins.push_update(fields))
         except RuntimeError:  # no loop (tests changing settings directly)

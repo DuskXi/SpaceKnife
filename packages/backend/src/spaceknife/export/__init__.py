@@ -223,11 +223,68 @@ def export_chunks(
     *,
     match: np.ndarray | None = None,
     filter_text: str = "",
+    options: dict[str, Any] | None = None,
+    selection: list[int] | None = None,
 ) -> Iterator[str | bytes]:
-    """The output of ``target`` for the tree below ``root`` (0: every scan root), in pieces."""
+    """The output of ``target`` for the tree below ``root`` (0: every scan root), in pieces.
+
+    ``options``: values of a plugin format's own options (the export dialog's fields); ``selection``:
+    the nodes the export was asked for (``match`` already keeps to them)."""
     if isinstance(target, ExportTemplate):
         return render_chunks(store, root, target, match=match)
+    if target.plugin is not None and not target.shipped:
+        return target.chunks(
+            store,
+            root,
+            match=match,
+            filter_text=filter_text,
+            options=options or {},
+            selection=selection or [],
+        )
     return target.chunks(store, root, match=match, filter_text=filter_text)
+
+
+def subtree_mask(store: NodeStore, nodes: Iterable[int]) -> np.ndarray:
+    """True for ``nodes`` and everything below them."""
+    n = len(store)
+    c = store.cols
+    mask = np.zeros(n, dtype=bool)
+    front = np.unique(np.asarray([x for x in nodes if 0 < int(x) < n], dtype=np.int64))
+    while len(front):
+        front = front[~mask[front]]
+        if not len(front):
+            break
+        mask[front] = True
+        cnt = c["child_count"][front].astype(np.int64)
+        st = c["child_start"][front].astype(np.int64)
+        ok = (cnt > 0) & (st >= 1) & (st + cnt <= n)
+        cnt, st = cnt[ok], st[ok]
+        if not len(cnt):
+            break
+        total = int(cnt.sum())
+        starts = np.repeat(st, cnt)
+        offs = np.arange(total, dtype=np.int64) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+        front = starts + offs
+    return mask
+
+
+def common_root(store: NodeStore, nodes: list[int]) -> int:
+    """The nearest folder that holds all of ``nodes`` (0: they are under different roots)."""
+    if not nodes:
+        return 0
+    if len(nodes) == 1:
+        return int(nodes[0])
+    chains = []
+    for x in nodes:
+        chain = [int(x), *store.ancestors(int(x))]
+        chains.append(chain[::-1])
+    out = 0
+    for level in zip(*chains, strict=False):
+        if all(v == level[0] for v in level):
+            out = level[0]
+        else:
+            break
+    return out
 
 
 def write_export(path: Path, chunks: Iterable[str | bytes], *, bom: bool = False) -> int:

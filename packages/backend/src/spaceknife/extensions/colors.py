@@ -8,6 +8,7 @@ a code mode asks its plugin for the same indices (20 ms, else this frame is all 
 from __future__ import annotations
 
 import fnmatch
+import itertools
 import re
 import time
 from collections.abc import Collection
@@ -45,14 +46,47 @@ def color_unavailable(mode: str, caps: Collection[str]) -> str | None:
 class RulePainter:
     """A declarative colour mode (``by = ext | class | age | size | depth | name | set | insight``)."""
 
-    def __init__(self, spec: ColorModeSpec, set_of: Any = None) -> None:
+    def __init__(self, spec: ColorModeSpec, set_of: Any = None, bands_of: Any = None) -> None:
         self.spec = spec
         self.n = len(spec.palette)
         self.map = {str(k).lower().lstrip("."): int(v) for k, v in spec.map.items()}
-        kind: Literal["time", "size"] = "time" if spec.by == "age" else "size"
-        self.bands = np.array([band_value(b, kind) or 0 for b in spec.bands], dtype=np.int64)
+        self.kind: Literal["time", "size"] = "time" if spec.by == "age" else "size"
+        self._bands = np.array([band_value(b, self.kind) or 0 for b in spec.bands], dtype=np.int64)
         self.rules = [(re.compile(fnmatch.translate(r.glob.lower())), r.index) for r in spec.rules]
         self.set_of = set_of  # (view, set id) -> bool mask per node (node sets live in plugins)
+        self.bands_of = bands_of  # () -> the text of the plugin's bands setting ('7d, 30d, 1y')
+
+    def band_texts(self) -> list[str]:
+        """The bands now: the plugin's setting when it names one and reads well, else the spec's."""
+        if self.bands_of is not None:
+            raw = self.bands_of()
+            if isinstance(raw, str):
+                parts = [x.strip() for x in raw.replace(";", ",").split(",") if x.strip()]
+                vals = [band_value(x, self.kind) for x in parts]
+                if parts and all(v is not None for v in vals) and len(parts) + 2 <= self.n:
+                    return parts
+        return list(self.spec.bands)
+
+    @property
+    def bands(self) -> np.ndarray:
+        if self.bands_of is None:
+            return self._bands
+        return np.array(sorted(band_value(b, self.kind) or 0 for b in self.band_texts()), dtype=np.int64)
+
+    def legend(self, lang: str) -> list[str]:
+        """The legend: the spec's texts, or for age and size bands made from the bands now
+        ('< 7d', '7d – 30d', …, '> 1y'; index 0, no time, is 'unknown')."""
+        if self.spec.legend:
+            return [t.get(lang) for t in self.spec.legend]
+        if self.spec.by not in ("age", "size"):
+            return []
+        bands = self.band_texts()
+        out = ["—"]
+        if bands:
+            out.append(f"< {bands[0]}")
+            out += [f"{a} – {b}" for a, b in itertools.pairwise(bands)]
+            out.append(f"> {bands[-1]}")
+        return (out + [""] * self.n)[: self.n]
 
     def __call__(self, view: View, draw: DrawList) -> np.ndarray:
         rows = len(draw)

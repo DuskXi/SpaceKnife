@@ -66,6 +66,17 @@ class PluginCaller:
         return None
 
 
+def _on_disk(h: Any) -> bool:
+    """Whether a scan's nodes are files on this computer (a scan source says so in its spec)."""
+    src = getattr(h, "plugin_source", None)
+    if not src:
+        return True
+    from ..extensions import EXTENSIONS
+
+    c = EXTENSIONS.get("scan_source", src)
+    return bool(c is not None and c.spec.on_disk)
+
+
 def _deny(permission: str) -> RuntimeCallError:
     return RuntimeCallError(
         ErrorCode.PERMISSION_DENIED,
@@ -230,7 +241,8 @@ class HostApi:
     ) -> tuple[Any, list[bytes]]:
         if "tree.read" not in rec.granted:
             raise _deny("tree.read")
-        out = []
+        out: list[dict[str, Any]] = []
+        front = self.active_scan()
         for sid, h in list(self.handles().items()):
             st = h.status()
             out.append(
@@ -240,8 +252,14 @@ class HostApi:
                     "state": st.state,
                     "items": st.items,
                     "source": getattr(h, "plugin_source", None) or h.source,
+                    "started_at": st.started_at.timestamp() if st.started_at else None,
+                    "finished_at": st.finished_at.timestamp() if st.finished_at else None,
+                    "snapshot": getattr(h, "snapshot_path", None),
+                    "front": sid == front,
+                    "on_disk": _on_disk(h),
                 }
             )
+        out.sort(key=lambda d: -float(d["finished_at"] or d["started_at"] or 0))  # newest first
         return {"scans": out}, []
 
     async def _node(
@@ -404,6 +422,29 @@ class HostApi:
             raise RuntimeCallError(ErrorCode.INVALID_PARAMS, str(exc)) from None
         return {"ok": True}, []
 
+    async def _invalidate(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        """``ctx.invalidate(kinds)``: what the host cached of this plugin's answers goes."""
+        kinds = [str(k) for k in p.get("kinds") or []]
+        self.host.invalidate(rec.id, kinds)
+        return {"epoch": self.host.epochs[rec.id]}, []
+
+    def _snapshot_allowed(self, path: str) -> bool:
+        """``ctx.snapshots.open``: the app's snapshot folder, or a snapshot open as a scan (the user
+        chose it) — not any file the plugin names."""
+        from .. import paths as app_paths
+
+        real = os.path.normcase(os.path.realpath(path))
+        base = os.path.normcase(os.path.realpath(app_paths.snapshots_dir()))
+        if real.startswith(base.rstrip("\\/") + os.sep):
+            return True
+        for h in self.handles().values():
+            sp = getattr(h, "snapshot_path", None)
+            if sp and os.path.normcase(os.path.realpath(sp)) == real:
+                return True
+        return False
+
     async def _snapshots(
         self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
     ) -> tuple[Any, list[bytes]]:
@@ -438,6 +479,11 @@ class HostApi:
                 ErrorCode.PLUGIN_LIMIT,
                 f"at most {MAX_OPEN_SNAPSHOTS} snapshots open at once: close() one first",
                 {"limit": MAX_OPEN_SNAPSHOTS},
+            )
+        if not await asyncio.to_thread(self._snapshot_allowed, str(p["path"])):
+            raise RuntimeCallError(
+                ErrorCode.PERMISSION_DENIED,
+                f"{p['path']}: not a saved snapshot (snapshots.list() gives their paths)",
             )
         try:
             store, _header = await asyncio.to_thread(snapshot.load, Path(str(p["path"])))

@@ -159,7 +159,7 @@ async def test_code_contributions() -> None:
         real = rows >= 0
         assert (frame.pal[real] == (1 + rows[real] % 2)).all()
         frame = await host.visual("by_name")
-        assert frame.size_unit == "count" and len(frame.draw)
+        assert frame.size_unit == "weight" and len(frame.draw)  # labels: shares, not bytes
         # command from a decorator: an action calling the function
         cmd = {c.id: c for c in commands()}["t.full.hello"]
         assert cmd.action.kind == "call" and cmd.action.method == "plugin.t.full.hello"

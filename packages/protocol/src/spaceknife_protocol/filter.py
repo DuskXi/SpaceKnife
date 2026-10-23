@@ -242,6 +242,8 @@ class FilterClassInfo(Payload):
     color: str = Field(
         default="", description="#RRGGBB chosen by the user; empty: the theme's colour for the id"
     )
+    name_en: str = Field(default="", description="A plugin's class: its English name (shown in English)")
+    color_light: str = Field(default="", description="A plugin's class: its colour for a light theme")
 
 
 class FilterSetInfo(Payload):

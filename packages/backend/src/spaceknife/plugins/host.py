@@ -56,7 +56,8 @@ if TYPE_CHECKING:
     from ..server.session import Session
     from ..server.topics import Subscription
 
-MAX_CONCURRENT = 4  # calls in flight per plugin
+MAX_CONCURRENT = 4  # calls in flight per plugin (watchers and streams do not count)
+MAX_LONG = 64  # watchers and streams running per plugin (they wait for changes, not compute)
 MAX_QUEUED = 32  # calls waiting per plugin
 MAX_PROCESSES = 8  # plugin processes at once (the idlest goes first)
 IDLE_STOP_S = 600.0
@@ -78,6 +79,7 @@ MAX_REASONS = 20_000  # remembered change reasons (all comparisons); forgotten a
 HOOK_TIMEOUT = 30.0
 CHECK_TIMEOUT = 0.05
 ROUTED_KINDS = ("method", "report", "cleanup")
+CACHED_KINDS = frozenset({"node_field", "node_set", "visualization", "color_mode", "change_annotator"})
 LONG_KINDS = ("stream", "watch")  # no time limit unless the caller gives one
 LONG_CALL_S = 10.0 * 365 * 86400  # what the plugin is told for those (its ctx.check() never trips)
 
@@ -114,6 +116,9 @@ class PluginHost:
         self.api = HostApi(self)
         self._ids = itertools.count(1)
         self._slots: dict[str, asyncio.Semaphore] = {}
+        self._long_slots: dict[str, asyncio.Semaphore] = {}
+        self.epochs: dict[str, int] = defaultdict(int)  # per plugin: cached answers older than this go
+        self._seen_settings: dict[str, dict[str, Any]] = {}
         self._queued: dict[str, int] = defaultdict(int)
         self._latest: dict[tuple[str, str, str], asyncio.Task[Any]] = {}
         self._sites: dict[
@@ -125,10 +130,13 @@ class PluginHost:
         self._state_rates: dict[str, _Rate] = {}
         self._state_subs: dict[tuple[str, str], dict[str, tuple[Session, Subscription]]] = defaultdict(dict)
         self._stream_tasks: dict[str, asyncio.Task[None]] = {}
-        self._set_cache: dict[tuple[str, str], tuple[int, float, np.ndarray]] = {}
-        self._field_cache: dict[tuple[str, str, int, int], pp.PluginField | None] = {}
+        self._set_cache: dict[tuple[str, str], tuple[tuple[int, int], float, np.ndarray]] = {}
+        self._field_cache: dict[tuple[str, str, int, int, int], pp.PluginField | None] = {}
+        self._field_inflight: set[tuple[str, str, int, int, int]] = set()
         self._reasons: dict[tuple[str, str, str, str, int], str] = {}  # change annotators' answers
-        self._weights: dict[tuple[str, str, int, int], np.ndarray] = {}
+        self._legends: dict[tuple[str, str, str], tuple[int, list[tuple[str, Any]]]] = {}
+        self._legend_asked: set[tuple[str, str, str]] = set()
+        self._weights: dict[tuple[str, str, int, int, int, str], np.ndarray] = {}
         self._visual_failures: dict[tuple[str, str], int] = defaultdict(int)
         self._changed: set[str] = set()
         self._flush: asyncio.TimerHandle | None = None
@@ -293,6 +301,7 @@ class PluginHost:
             k for c in EXTENSIONS.owned(rec.id) if c.kind == "command" for k in getattr(c.impl, "keys", ())
         ]
         self.server.settings.plugins_changed()
+        self._seen_settings[rec.id] = dict(self.server.settings.plugin_settings(rec.id))
         if rec.runtime is not None:  # started to describe itself: its settings exist only now
             await rec.runtime.update({"settings": self.server.settings.plugin_settings(rec.id)})
 
@@ -306,9 +315,7 @@ class PluginHost:
         for key in [k for k in self._state_subs if k[0] == rec.id]:
             for session, sub in list(self._state_subs.pop(key).values()):
                 session.remove_subscription(sub.id)
-        for key in [k for k in self._set_cache if k[0].startswith(rec.id + ".")]:
-            self._set_cache.pop(key, None)
-        self._field_cache.clear()
+        self._forget(rec.id)
         self.server.settings.plugins_changed()
 
     def enabled_ids(self) -> frozenset[str]:
@@ -518,8 +525,14 @@ class PluginHost:
         on_chunk: Callable[[Any, list[bytes]], None] | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 — the plugin's limit, enforced inside
         latest: bool = False,
+        on_wait: Callable[[], None] | None = None,
     ) -> tuple[Any, list[bytes]]:
-        """Call a plugin's handler; RpcError with a plugin error code when it fails."""
+        """Call a plugin's handler; RpcError with a plugin error code when it fails.
+
+        The time limit counts from here: waiting for one of the plugin's ``MAX_CONCURRENT`` call
+        slots is part of it (a field with a 1 s budget never waits longer than that), starting the
+        plugin's process is not. Watchers and streams run beside the calls, on slots of their own.
+        ``on_wait`` is called once when the call has to wait for a slot (a scan says so)."""
         if self._closed:  # shutting down: nothing starts a plugin process again
             raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "plugins are not running", {"plugin": plugin})
         rec = self.enabled(plugin)
@@ -527,7 +540,8 @@ class PluginHost:
             raise RpcError(ErrorCode.METHOD_NOT_FOUND, f"{plugin} has no code")
         assert rec.manifest is not None
         limit: float | None = timeout
-        if kind in LONG_KINDS and timeout is None:
+        long = kind in LONG_KINDS
+        if long and timeout is None:
             limit = None  # streams and watchers run until they are cancelled
         else:
             if limit is None:
@@ -540,7 +554,7 @@ class PluginHost:
                 float(rec.manifest.limits.timeout_s) if kind in ("method", "report") else 600.0,
                 600.0,
             )
-        if self._queued[plugin] >= MAX_QUEUED:
+        if not long and self._queued[plugin] >= MAX_QUEUED:
             raise RpcError(ErrorCode.PLUGIN_LIMIT, tr("插件 {id} 的请求太多", id=plugin), {"plugin": plugin})
         key = (plugin, name, session.id if session is not None else "")
         if latest:
@@ -550,44 +564,83 @@ class PluginHost:
             task = asyncio.current_task()
             if task is not None:
                 self._latest[key] = task
-        sem = self._slots.setdefault(plugin, asyncio.Semaphore(MAX_CONCURRENT))
-        self._queued[plugin] += 1
-        entered = False
+        loop = asyncio.get_running_loop()
+        deadline = None if limit is None else loop.time() + limit
+        if long:
+            sem = self._long_slots.setdefault(plugin, asyncio.Semaphore(MAX_LONG))
+        else:
+            sem = self._slots.setdefault(plugin, asyncio.Semaphore(MAX_CONCURRENT))
+            self._queued[plugin] += 1
+        queued = not long
         try:
-            async with sem:
+            if sem.locked() and on_wait is not None:
+                on_wait()
+            try:
+                async with asyncio.timeout_at(deadline):
+                    await sem.acquire()
+            except TimeoutError:
+                raise RpcError(
+                    ErrorCode.PLUGIN_TIMEOUT,
+                    tr("插件 {id} 正忙，没有及时回答", id=plugin),
+                    {"plugin": plugin, "queued": True},
+                ) from None
+            if queued:
                 self._queued[plugin] -= 1
-                entered = True
-                rt = await self._ensure_started(rec)
-                call_id = next(self._ids)
-                info = {
-                    "lang": i18n.language(),
-                    "session": session.id if session is not None else None,
-                    "timeout": limit if limit is not None else LONG_CALL_S,
-                }
-                info.update(ctx or {})
-                self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
-                try:
-                    async with asyncio.timeout(limit):
-                        value, out = await rt.call(call_id, kind, name, params, info, frames, on_chunk)
-                except TimeoutError:
-                    raise RpcError(
-                        ErrorCode.PLUGIN_TIMEOUT, tr("插件 {id} 没有及时回答", id=plugin), {"plugin": plugin}
-                    ) from None
-                except RuntimeCallError as exc:
-                    data: dict[str, Any] = {"plugin": plugin}
-                    if exc.data is not None:
-                        data["detail"] = exc.data
-                    raise RpcError(exc.code, exc.message, data) from None
-                finally:
-                    self._sites.pop(call_id, None)
-                    self.api.call_ended(call_id)
-                rec.last_used = time.monotonic()
-                return value, out
+                queued = False
+            try:
+                return await self._run_call(rec, kind, name, params, session, ctx, frames, on_chunk, deadline)
+            finally:
+                sem.release()
         finally:
-            if not entered:
+            if queued:
                 self._queued[plugin] -= 1
             if latest and self._latest.get(key) is asyncio.current_task():
                 self._latest.pop(key, None)
+
+    async def _run_call(
+        self,
+        rec: PluginRecord,
+        kind: str,
+        name: str,
+        params: Any,
+        session: Session | None,
+        ctx: Mapping[str, Any] | None,
+        frames: Sequence[bytes],
+        on_chunk: Callable[[Any, list[bytes]], None] | None,
+        deadline: float | None,
+    ) -> tuple[Any, list[bytes]]:
+        plugin = rec.id
+        loop = asyncio.get_running_loop()
+        t0 = loop.time()
+        cold = rec.runtime is None or rec.runtime.state != "running"
+        rt = await self._ensure_started(rec)
+        if deadline is not None and cold:
+            deadline += loop.time() - t0  # starting the process is not the call's time
+        call_id = next(self._ids)
+        info = {
+            "lang": i18n.language(),
+            "session": session.id if session is not None else None,
+            "timeout": max(0.0, deadline - loop.time()) if deadline is not None else LONG_CALL_S,
+        }
+        info.update(ctx or {})
+        self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
+        try:
+            async with asyncio.timeout_at(deadline):
+                value, out = await rt.call(call_id, kind, name, params, info, frames, on_chunk)
+        except TimeoutError:
+            raise RpcError(
+                ErrorCode.PLUGIN_TIMEOUT, tr("插件 {id} 没有及时回答", id=plugin), {"plugin": plugin}
+            ) from None
+        except RuntimeCallError as exc:
+            data: dict[str, Any] = {"plugin": plugin}
+            if exc.data is not None:
+                data["detail"] = exc.data
+            raise RpcError(exc.code, exc.message, data) from None
+        finally:
+            self._sites.pop(call_id, None)
+            self.api.call_ended(call_id)
+        rec.last_used = time.monotonic()
+        return value, out
 
     def call_sync(
         self, plugin: str, kind: str, name: str, params: Any = None, *, timeout: float, **kw: Any
@@ -675,6 +728,13 @@ class PluginHost:
             )
         elif type == "image_drop":
             self.images.drop(str(payload.get("key", "")), rec.id)
+        elif type == "stuck":  # every worker thread is in a cancelled call that does not return
+            rt = rec.runtime
+            if rt is not None and rt.kind == "process":
+                logger.bind(source=f"plugin:{rec.id}").warning(
+                    "plugin {}: every worker thread is busy with a cancelled call; restarting it", rec.id
+                )
+                rt.give_up("every worker thread is busy with a cancelled call")
 
     def _push_state(self, rec: PluginRecord, name: str) -> None:
         value = rec.states.get(name, {})
@@ -1108,6 +1168,97 @@ class PluginHost:
                         "hook {} of {} failed: {}", event, rec.id, getattr(exc, "message", exc)
                     )
 
+    # ------------------------------------------------------------- cached answers
+
+    def _forget(self, plugin: str) -> None:
+        prefix = plugin + "."
+        for key in [k for k in self._set_cache if k[0].startswith(prefix)]:
+            self._set_cache.pop(key, None)
+        for fkey in [k for k in self._field_cache if k[0].startswith(prefix)]:
+            self._field_cache.pop(fkey, None)
+        for wkey in [k for k in self._weights if k[0] == plugin]:
+            self._weights.pop(wkey, None)
+        for akey in [k for k in self._reasons if k[0].startswith(prefix)]:
+            self._reasons.pop(akey, None)
+
+    def invalidate(self, plugin: str, kinds: Sequence[str] = ()) -> None:
+        """Drop what the host keeps of a plugin's answers (fields, node sets, a code visualization's
+        weights, change reasons): its settings changed, or it called ``ctx.invalidate()``. The
+        frontends ask for fields again; views that use its node sets filter again, views that
+        show its visualization or colours draw again."""
+        self.epochs[plugin] += 1
+        self._forget(plugin)
+        owned = {c.kind for c in EXTENSIONS.owned(plugin)}
+        touched = (set(kinds) & owned) if kinds else owned & CACHED_KINDS
+        if touched:
+            EXTENSIONS.touch(frozenset(touched))
+        views = getattr(self.server, "views", None)
+        if views is not None and self._loop is not None:
+            with contextlib.suppress(RuntimeError):
+                self._spawn(views.plugin_changed(plugin))
+
+    def settings_changed(self) -> None:
+        """The settings changed: each plugin whose own values changed gets its ``settings`` hook with
+        their names, and its cached answers go (they may depend on them)."""
+        st = self.server.settings
+        for rec in list(self.records.values()):
+            if rec.state != "enabled":
+                continue
+            now = st.plugin_settings(rec.id)
+            before = self._seen_settings.get(rec.id)
+            self._seen_settings[rec.id] = dict(now)
+            if before is None:
+                continue
+            changed = sorted(k for k in set(now) | set(before) if now.get(k) != before.get(k))
+            if not changed:
+                continue
+            self.invalidate(rec.id)
+            if any(c.kind == "hook" and c.spec.event == "settings" for c in EXTENSIONS.owned(rec.id)):
+                self._spawn(self._hook(rec, "settings", changed=changed))
+
+    def legend_of(self, c: Any, lang: str) -> list[tuple[str, Any]]:
+        """A colour mode's legend now, (text, colour or None) per palette entry: from the plugin's
+        ``@plugin.color_legend`` (asked in the background, cached until its settings change), from
+        the bands it follows, or as declared."""
+        rec = self.records.get(c.owner)
+        dynamic = (
+            rec is not None
+            and rec.description is not None
+            and ["legend", c.local] in [list(h) for h in rec.description.handlers]
+        )
+        if dynamic and rec is not None and rec.state == "enabled":
+            key = (c.owner, c.local, lang)
+            hit = self._legends.get(key)
+            if hit is not None and hit[0] == self.epochs[c.owner]:
+                return hit[1]
+            if key not in self._legend_asked:
+                self._legend_asked.add(key)
+                self._spawn(self._ask_legend(c, lang, key))
+        impl = c.impl
+        if hasattr(impl, "legend"):
+            return [(t, None) for t in impl.legend(lang)]
+        return [(t.get(lang), None) for t in c.spec.legend]
+
+    async def _ask_legend(self, c: Any, lang: str, key: tuple[str, str, str]) -> None:
+        from spaceknife_protocol.text import LANG
+
+        epoch = self.epochs[c.owner]
+        try:
+            token = LANG.set(lang)
+            try:
+                value, _ = await self.call(c.owner, "legend", c.local, {}, ctx={"lang": lang}, timeout=5.0)
+            finally:
+                LANG.reset(token)
+            items = [
+                (str(d.get("label", ""))[:80], d.get("color")) for d in (value or []) if isinstance(d, dict)
+            ]
+            self._legends[key] = (epoch, items)
+            EXTENSIONS.touch(frozenset({"color_mode"}))
+        except RpcError as exc:
+            logger.bind(source=f"plugin:{c.owner}").warning("legend of {} failed: {}", c.id, exc.message)
+        finally:
+            self._legend_asked.discard(key)
+
     def fire(self, event: str, **args: Any) -> None:
         """Run every enabled plugin's ``event`` hooks (not waited for)."""
         owners = {c.owner for c in EXTENSIONS.of("hook") if c.spec.event == event and c.owner != BUILTIN}
@@ -1198,8 +1349,10 @@ class PluginHost:
                 continue
             key = (sid, scan_id)
             hit = self._set_cache.get(key)
+            epoch = self.epochs[c.owner]
             if hit is not None and (
-                hit[0] == store.version or (running and time.monotonic() - hit[1] < SET_RUNNING_EVERY_S)
+                hit[0] == (store.version, epoch)
+                or (running and hit[0][1] == epoch and time.monotonic() - hit[1] < SET_RUNNING_EVERY_S)
             ):
                 out[sid] = hit[2]
                 continue
@@ -1226,7 +1379,7 @@ class PluginHost:
             else:
                 ids = arr.astype(np.int64)
                 mask[ids[(ids >= 0) & (ids < n)]] = True
-            self._set_cache[key] = (store.version, time.monotonic(), mask)
+            self._set_cache[key] = ((store.version, epoch), time.monotonic(), mask)
             out[sid] = mask
         return out
 
@@ -1257,7 +1410,7 @@ class PluginHost:
                     plugin,
                     "color",
                     name,
-                    {"scan_id": scan_id},
+                    {"scan_id": scan_id, "palette": palette},
                     ctx={"scan_id": scan_id},
                     frames=[frame],
                     timeout=COLOR_TIMEOUT,
@@ -1279,15 +1432,23 @@ class PluginHost:
         from ..layout.api import ArraySizes, subtree_sums
 
         def sizes(basis: Any) -> Any:
+            import json
+
             store = basis.store
             scan_id = self.api.scan_of_store(store)
-            key = (plugin, name, id(store), int(store.version))
+            opts: dict[str, Any] = {}
+            for opt, skey in options:
+                with contextlib.suppress(KeyError):
+                    opts[opt] = self.server.settings.get(skey)
+            # the options are part of the key: two views with other options, or a change of them
+            # (also through the view's own options), are other weights
+            for opt, val in (getattr(basis, "options", None) or {}).items():
+                if opt in opts:
+                    opts[opt] = val
+            okey = json.dumps(opts, sort_keys=True, default=str)
+            key = (plugin, name, id(store), int(store.version), self.epochs[plugin], okey)
             hit = self._weights.get(key)
             if hit is None and scan_id is not None:
-                opts = {}
-                for opt, skey in options:
-                    with contextlib.suppress(KeyError):
-                        opts[opt] = self.server.settings.get(skey)
                 try:
                     _value, frames = self.call_sync(
                         plugin,
@@ -1310,8 +1471,11 @@ class PluginHost:
                     )
                     hit = None
                 if hit is not None:
-                    for k in [k for k in self._weights if k[:3] == key[:3]]:
+                    stale = [k for k in self._weights if k[:3] == key[:3] and k[3:5] != key[3:5]]
+                    for k in stale:
                         self._weights.pop(k, None)
+                    if len(self._weights) > 32:
+                        self._weights.pop(next(iter(self._weights)))
                     self._weights[key] = hit
             if hit is None:
                 from ..layout.api import StoreSizes
@@ -1330,8 +1494,18 @@ class PluginHost:
         plugin, name = rec.id, spec.name
         host = self
 
-        def chunks(store: Any, root: int, *, match: np.ndarray | None = None, filter_text: str = "") -> Any:
+        def chunks(
+            store: Any,
+            root: int,
+            *,
+            match: np.ndarray | None = None,
+            filter_text: str = "",
+            options: dict[str, Any] | None = None,
+            selection: list[int] | None = None,
+        ) -> Any:
             scan_id = host.api.scan_of_store(store)
+            opts = {o.name: o.default for o in spec.options}
+            opts.update({k: v for k, v in (options or {}).items() if k in opts})
             q: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=64)
 
             def on_chunk(value: Any, frames: list[bytes]) -> None:
@@ -1356,7 +1530,13 @@ class PluginHost:
                     plugin,
                     "export",
                     name,
-                    {"root": int(root), "scan_id": scan_id, "filter": filter_text},
+                    {
+                        "root": int(root),
+                        "scan_id": scan_id,
+                        "filter": filter_text,
+                        "options": opts,
+                        "selection": [int(n) for n in (selection or [])][:100_000],
+                    },
                     ctx={"scan_id": scan_id},
                     frames=frames,
                     on_chunk=on_chunk,
@@ -1382,13 +1562,14 @@ class PluginHost:
         return ExportFormat(
             key=f"{plugin}.{name}",
             title_id=spec.title.zh,
-            extension=spec.extension if spec.extension.startswith(".") else "." + spec.extension,
+            extension="." + spec.extension.lstrip("."),
             media_type=spec.media_type,
             bom=spec.bom,
             chunks=chunks,
             text=spec.title,
             description=spec.description,
             plugin=plugin,
+            options=tuple(spec.options),
         )
 
 

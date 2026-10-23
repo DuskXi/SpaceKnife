@@ -118,6 +118,10 @@ class PluginRuntime(ABC):
         """Calls in flight."""
         return 0
 
+    def give_up(self, why: str) -> None:
+        """The code cannot answer any more (every worker thread is stuck): stop it if possible."""
+        return None
+
     def info(self) -> PluginProcess:
         return PluginProcess(state=self.state)
 

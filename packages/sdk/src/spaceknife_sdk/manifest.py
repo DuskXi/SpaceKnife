@@ -134,6 +134,7 @@ class SettingSpec(Spec):
     synonyms: list[str] = Field(default_factory=list)
     depends: str | None = None
     group: TextLike | None = None
+    placeholder: TextLike | None = Field(default=None, description="Shown in an empty text field")
 
     @model_validator(mode="after")
     def _control(self) -> SettingSpec:
@@ -200,16 +201,24 @@ class FieldSpec(Spec):
 
 class InsightSpec(Spec):
     name: LocalName
+    globs: list[str] = Field(
+        default_factory=list, max_length=64, description="Only nodes whose path matches one are asked"
+    )
 
 
 class PanelSpec(Spec):
     name: LocalName
     title: TextLike
+    short_title: TextLike | None = Field(default=None, description="For tabs and narrow places")
     icon: str = ""
     entry: str = "web/index.html"
     slot: PanelSlot = "tab"
     height: int = Field(default=320, ge=40, le=800)
     when: When = Field(default_factory=list)
+    params: dict[str, str | int | float | bool] = Field(
+        default_factory=dict, description="Given to the page in sk.context().params (one page, two places)"
+    )
+    keep: bool = Field(default=True, description="A tab in the background keeps its page (state and all)")
 
     @field_validator("entry")
     @classmethod
@@ -236,13 +245,16 @@ class VisualizationSpec(Spec):
     size: Literal["alloc", "size", "files", "items", "code"] = "alloc"
     options: list[LocalName] = Field(default_factory=list, description="Own settings passed to the code")
     compare: bool = False
-    unit: Literal["bytes", "count"] | None = Field(
-        default=None, description="What the areas count (default: bytes for alloc/size, else count)"
+    unit: Literal["bytes", "count", "weight"] | None = Field(
+        default=None,
+        description="What the areas count (default: bytes for alloc/size, weight for code, else count)",
     )
 
-    def size_unit(self) -> Literal["bytes", "count"]:
+    def size_unit(self) -> Literal["bytes", "count", "weight"]:
         if self.unit is not None:
             return self.unit
+        if self.size == "code":
+            return "weight"
         return "bytes" if self.size in ("alloc", "size") else "count"
 
 
@@ -280,6 +292,10 @@ class ColorModeSpec(Spec):
     set: str | None = None
     folders: Literal["ring", "palette"] = "ring"
     layouts: list[Literal["drawlist.v1", "flame.v1", "polar.v1"]] = Field(default_factory=list)
+    bands_setting: LocalName | None = Field(
+        default=None,
+        description="A text setting of the plugin with the bands ('7d, 30d, 1y'): they follow it",
+    )
 
     @model_validator(mode="after")
     def _indices(self) -> ColorModeSpec:
@@ -320,6 +336,14 @@ class ExportFormatSpec(Spec):
     media_type: str = "text/plain"
     binary: bool = False
     bom: bool = False
+    options: list[SettingSpec] = Field(
+        default_factory=list, max_length=12, description="Fields of the export dialog (as settings)"
+    )
+
+    @field_validator("extension")
+    @classmethod
+    def _ext(cls, v: str) -> str:
+        return v.lstrip(".")  # one form everywhere: without the dot
 
 
 class ExportTemplateSpec(Spec):
@@ -365,9 +389,12 @@ class FileClassSpec(Spec):
 
 
 class FolderRuleSpec(Spec):
-    glob: str = Field(min_length=1, max_length=512)
+    glob: str = Field(min_length=1, max_length=512, description="'**/' any depth; {a,b} either")
     cls: str = Field(alias="class", min_length=1, max_length=64)
     mode: Literal["swallow", "fallback"] = "swallow"
+    name: LocalName | None = Field(default=None, description="Default: made from the glob")
+    priority: int = Field(default=0, ge=-100, le=100, description="Higher first; then declaration order")
+    exclude: list[str] = Field(default_factory=list, max_length=32, description="Globs it does not apply to")
 
 
 class NodeSetSpec(Spec):
@@ -506,7 +533,7 @@ def spec_key(kind: str, spec: Spec) -> str:
     if isinstance(spec, KeySpec):
         return spec.key
     if isinstance(spec, FolderRuleSpec):
-        return spec.glob
+        return spec.name or spec.glob
     if isinstance(spec, InsightRulesSpec):
         return spec.file
     return str(getattr(spec, "name", ""))

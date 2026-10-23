@@ -192,6 +192,15 @@ class Extensions:
         self._notify(frozenset({kind}))
         return c
 
+    def touch(self, kinds: frozenset[str]) -> None:
+        """Contributions of ``kinds`` answer differently now (a plugin's settings changed): a new
+        version, so frontends ask again for what they cached by it."""
+        if not kinds:
+            return
+        with self._lock:
+            self.version += 1
+        self._notify(kinds)
+
     def _notify(self, kinds: frozenset[str]) -> None:
         for listener in list(self.listeners.values()):
             try:

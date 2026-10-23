@@ -79,7 +79,11 @@ def _source(source_id: str | None) -> Contribution:
 
 
 async def _list(
-    host: PluginHost, c: Contribution, uri: str, on_count: Callable[[int], None] | None = None
+    host: PluginHost,
+    c: Contribution,
+    uri: str,
+    on_count: Callable[[int], None] | None = None,
+    on_wait: Callable[[], None] | None = None,
 ) -> tuple[str, NodeStore]:
     """Run the source once: (the root's display name, the tree built from what it listed)."""
     collector = Collector()
@@ -91,7 +95,7 @@ async def _list(
             on_count(collector.count)
 
     value, _ = await host.call(
-        c.owner, "source", c.local, {"uri": uri}, on_chunk=chunk, timeout=LIST_TIMEOUT_S
+        c.owner, "source", c.local, {"uri": uri}, on_chunk=chunk, timeout=LIST_TIMEOUT_S, on_wait=on_wait
     )
     name = str((value or {}).get("root") or uri)
     built = await asyncio.to_thread(build, name, collector.root, virtual=not c.spec.on_disk)
@@ -130,9 +134,15 @@ async def start_source(host: PluginHost, params: p.ScanStartParams) -> ScanHandl
             handle.saved_progress = _progress(ScanState.SCANNING, started, count)
             handle.publish()
 
+    def waiting() -> None:  # every call slot of the plugin is busy: the status bar says so
+        handle.saved_progress = _progress(
+            ScanState.SCANNING, started, seen[0], message=tr("在等插件 {id}：它正忙", id=c.owner)
+        )
+        handle.publish()
+
     async def run() -> None:
         try:
-            name, built = await _list(host, c, uri, counted)
+            name, built = await _list(host, c, uri, counted, waiting)
             async with STRUCTURE.write():
                 handle.store.adopt(built)
                 forget(handle.store)

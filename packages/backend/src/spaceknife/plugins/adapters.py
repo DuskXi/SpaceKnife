@@ -329,12 +329,18 @@ def _export_template(rec: PluginRecord, spec: ExportTemplateSpec) -> Any:
     return tpl
 
 
+def _hex(v: str) -> str:
+    return v.upper() if re.fullmatch(r"#[0-9A-Fa-f]{6}", v) else ""
+
+
 def _class(rec: PluginRecord, spec: FileClassSpec) -> FilterClassInfo:
-    color = ""
-    if isinstance(spec.color, str) and re.fullmatch(r"#[0-9A-Fa-f]{6}", spec.color):
-        color = spec.color.upper()
-    elif spec.color is not None and not isinstance(spec.color, str):
-        color = spec.color.light.upper()
+    """A plugin's class: its name in both languages (``name`` is the Chinese one, the English one is
+    shown in English), its colour for the app's theme (dark; ``color_light`` for a light one)."""
+    color = light = ""
+    if isinstance(spec.color, str):
+        color = light = _hex(spec.color)
+    elif spec.color is not None:
+        color, light = _hex(spec.color.dark), _hex(spec.color.light)
     aliases = list(spec.aliases)
     if spec.title.en and spec.title.en not in aliases:
         aliases.append(spec.title.en)
@@ -344,6 +350,8 @@ def _class(rec: PluginRecord, spec: FileClassSpec) -> FilterClassInfo:
         aliases=aliases,
         extensions=list(spec.exts),
         color=color,
+        name_en=spec.title.en,
+        color_light=light,
     )
 
 
@@ -361,14 +369,16 @@ def build(
     seen: set[tuple[str, str]] = set()
     names = {spec_key(k, s) for k, s in specs if k == "command"}
     own_classes = [_class(rec, s) for _k, s in specs if isinstance(s, FileClassSpec)]
+    rule_ids = rule_names(specs)
     for kind, spec in specs:
         key = spec_key(kind, spec)
         if (kind, key) in seen:
             issues.append(Issue("duplicate", f"{kind} {key!r} is declared twice"))
             continue
         seen.add((kind, key))
+        auto = [rule_ids[id(spec)]] if isinstance(spec, FolderRuleSpec) and not spec.name else None
         try:
-            out += _one(host, rec, kind, spec, pinyin, names, local, own_classes)
+            out += _one(host, rec, kind, spec, pinyin, names, local, own_classes, auto)
         except AdapterError as exc:
             issues += exc.issues
         except (ActionError, ValueError, KeyError) as exc:
@@ -404,6 +414,24 @@ def build(
     return out
 
 
+def rule_names(specs: list[tuple[str, Spec]]) -> dict[int, str]:
+    """The names of folder rules declared without one: ``rule_`` and the glob's letters and digits
+    (``**/.venv`` -> ``rule_venv``), with ``_2``, ``_3`` … when two globs give the same name."""
+    taken = {s.name for _k, s in specs if isinstance(s, FolderRuleSpec) and s.name}
+    out: dict[int, str] = {}
+    for _k, s in specs:
+        if not isinstance(s, FolderRuleSpec) or s.name:
+            continue
+        base = f"rule_{_slug(s.glob)}"[:21].rstrip("_")
+        name, n = base, 1
+        while name in taken:
+            n += 1
+            name = f"{base}_{n}"
+        taken.add(name)
+        out[id(s)] = name
+    return out
+
+
 def _source(rec: PluginRecord, rel: str) -> str:
     """A rule file's source name (in rule problems and logs): ``<plugin id>:<path>``; the shipped
     plugins' files by their names, as before they were plugins (``builtin.toml``)."""
@@ -430,13 +458,15 @@ def _local_format(rec: PluginRecord, spec: ExportFormatSpec, plugin: Plugin) -> 
     return ExportFormat(
         key=spec.name,
         title_id=spec.title.zh,
-        extension=spec.extension if spec.extension.startswith(".") else "." + spec.extension,
+        extension="." + spec.extension.lstrip("."),
         media_type=spec.media_type,
         bom=spec.bom,
         chunks=chunks,
         text=spec.title,
         description=spec.description,
         plugin=rec.id,
+        shipped=True,
+        options=tuple(spec.options),
     )
 
 
@@ -454,8 +484,10 @@ def _one(
     commands: set[str],
     local: Plugin | None = None,
     own_classes: list[FilterClassInfo] | None = None,
+    auto_rule_names: list[str] | None = None,
 ) -> list[Contribution]:
     pid = rec.id
+    auto_names = list(auto_rule_names or [])
     hostless = kind in (
         "export_template",
         "insight_rules",
@@ -489,7 +521,17 @@ def _one(
         assert isinstance(spec, ColorModeSpec)
         assert host is not None
         if spec.by is not None:
-            painter: Any = RulePainter(spec, set_of=host.set_mask_for_view)
+            bands_of = None
+            if spec.bands_setting is not None:
+                key = f"plugin.{pid}.{spec.bands_setting}"
+
+                def bands_of(key: str = key) -> Any:
+                    try:
+                        return host.server.settings.get(key)
+                    except KeyError:
+                        return None
+
+            painter: Any = RulePainter(spec, set_of=host.set_mask_for_view, bands_of=bands_of)
         else:
             painter = host.remote_painter(pid, spec.name, len(spec.palette))
         return [Contribution("color_mode", cid, pid, spec, painter)]
@@ -520,13 +562,14 @@ def _one(
     if kind == "folder_rule":
         assert isinstance(spec, FolderRuleSpec)
         cls = spec.cls if "." in spec.cls or spec.cls in _builtin_classes() else f"{pid}.{spec.cls}"
+        rid = f"{pid}.{spec.name}" if spec.name else f"{pid}.{auto_names.pop(0) if auto_names else 'rule'}"
         return [
             Contribution(
                 "folder_rule",
-                f"{pid}.rule_{_slug(spec.glob)}",
+                rid,
                 pid,
                 spec,
-                (spec.glob, cls, spec.mode == "fallback"),
+                (spec.glob, cls, spec.mode == "fallback", spec.priority, tuple(spec.exclude)),
             )
         ]
     if kind == "filter_preset":

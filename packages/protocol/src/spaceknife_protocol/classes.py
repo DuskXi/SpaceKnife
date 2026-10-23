@@ -130,6 +130,9 @@ def localized(c: FilterClassInfo, language: str) -> FilterClassInfo:
     English name, and its Chinese name becomes an alias (``:class:视频`` keeps working)."""
     if language != "en":
         return c
+    if c.name_en and c.name_en != c.name:  # a plugin's class, declared in both languages
+        aliases = [a for a in c.aliases if a.casefold() != c.name_en.casefold()]
+        return c.model_copy(update={"name": c.name_en, "aliases": [*aliases, c.name]})
     builtin = next((b for b in BUILTIN_CLASSES if b.id == c.id), None)
     english = ENGLISH_NAMES.get(c.id)
     if builtin is None or english is None or c.name != builtin.name:

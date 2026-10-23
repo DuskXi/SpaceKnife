@@ -92,7 +92,11 @@ jobs:
           uv run ruff format --check .
 
       - name: Type check
-        run: uv run mypy packages/protocol/src packages/backend/src packages/client/src packages/sdk/src tools/gen_design.py
+        shell: bash
+        run: |
+          uv run mypy packages/protocol/src packages/backend/src packages/client/src packages/sdk/src tools/gen_design.py
+          # what plugin authors run (docs/plugin-dev.md 「测试」): the reference plugins pass --strict
+          for f in examples/plugins/*/plugin.py; do uv run mypy --strict "$f" || exit 1; done
 
       - name: Generated artefacts are up to date
         run: |

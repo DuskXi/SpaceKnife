@@ -305,6 +305,22 @@ class ViewManager:
                     await compute(host.view.refilter)
             await self._repaint(host, "classes")
 
+    async def plugin_changed(self, plugin: str) -> None:
+        """A plugin's cached answers went (its settings changed, ``ctx.invalidate``): views that
+        filter by its node sets filter again; those showing its visualization or colours draw again."""
+        prefix = plugin + "."
+        for host in list(self.views.values()):
+            v = host.view
+            nf = v.filter.normal
+            uses_set = nf is not None and any(s.startswith(prefix) for s in (*nf.sets, *nf.not_sets))
+            shows = v.visual.startswith(prefix) or str(v.color_mode).startswith(prefix)
+            if not (uses_set or shows):
+                continue
+            if uses_set:
+                async with host.lock:
+                    await compute(v.refilter)
+            await self._repaint(host, "plugin")
+
     async def _repaint(self, host: ViewHost, reason: str) -> None:
         try:
             async with host.lock:

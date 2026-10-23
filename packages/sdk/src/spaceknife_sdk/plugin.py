@@ -16,7 +16,7 @@ import typing
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar, overload
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -222,15 +222,29 @@ class Plugin:
 
     # ------------------------------------------------------------- communication
 
+    @overload
+    def method(self, fn: F, /) -> F: ...
+    @overload
     def method(
         self,
-        fn: F | None = None,
+        fn: None = None,
+        /,
         *,
         name: str | None = None,
         timeout: float = 30.0,
         latest: bool = False,
         public: bool = True,
-    ) -> Any:
+    ) -> Callable[[F], F]: ...
+    def method(
+        self,
+        fn: F | None = None,
+        /,
+        *,
+        name: str | None = None,
+        timeout: float = 30.0,
+        latest: bool = False,
+        public: bool = True,
+    ) -> F | Callable[[F], F]:
         """A request/response method: ``plugin.<id>.<name>`` for frontends and panels."""
 
         def wrap(f: F) -> F:
@@ -241,7 +255,11 @@ class Plugin:
 
         return wrap(fn) if fn is not None else wrap
 
-    def event(self, cls: C | None = None, *, name: str | None = None) -> Any:
+    @overload
+    def event(self, cls: C, /) -> C: ...
+    @overload
+    def event(self, cls: None = None, /, *, name: str | None = None) -> Callable[[C], C]: ...
+    def event(self, cls: C | None = None, /, *, name: str | None = None) -> C | Callable[[C], C]:
         """An event model; ``ctx.emit(Model(...))`` sends it."""
 
         def wrap(c: C) -> C:
@@ -250,7 +268,11 @@ class Plugin:
 
         return wrap(cls) if cls is not None else wrap
 
-    def state(self, cls: C | None = None, *, name: str | None = None) -> Any:
+    @overload
+    def state(self, cls: C, /) -> C: ...
+    @overload
+    def state(self, cls: None = None, /, *, name: str | None = None) -> Callable[[C], C]: ...
+    def state(self, cls: C | None = None, /, *, name: str | None = None) -> C | Callable[[C], C]:
         """A shared state model (the host keeps the latest value and pushes changes)."""
 
         def wrap(c: C) -> C:
@@ -259,7 +281,11 @@ class Plugin:
 
         return wrap(cls) if cls is not None else wrap
 
-    def stream(self, fn: F | None = None, *, name: str | None = None) -> Any:
+    @overload
+    def stream(self, fn: F, /) -> F: ...
+    @overload
+    def stream(self, fn: None = None, /, *, name: str | None = None) -> Callable[[F], F]: ...
+    def stream(self, fn: F | None = None, /, *, name: str | None = None) -> F | Callable[[F], F]:
         """A subscription stream: an async generator of models or :class:`Columns`."""
 
         def wrap(f: F) -> F:
@@ -331,12 +357,21 @@ class Plugin:
 
         return wrap
 
-    def insight(self, fn: F | None = None, *, name: str | None = None) -> Any:
-        """A code insight: ``(ctx, node) -> Insight | None``."""
+    @overload
+    def insight(self, fn: F, /) -> F: ...
+    @overload
+    def insight(
+        self, fn: None = None, /, *, name: str | None = None, globs: list[str] | None = None
+    ) -> Callable[[F], F]: ...
+    def insight(
+        self, fn: F | None = None, /, *, name: str | None = None, globs: list[str] | None = None
+    ) -> F | Callable[[F], F]:
+        """A code insight: ``(ctx, node) -> Insight | None``. ``globs``: only nodes whose path
+        matches one of them are asked (``"**/node_modules"``) — the details panel stays fast."""
 
         def wrap(f: F) -> F:
             n = name or f.__name__.rstrip("_")
-            self._declare("insight", InsightSpec(name=n))
+            self._declare("insight", InsightSpec(name=n, globs=list(globs or [])))
             self._handler("insight", n, f)
             return f
 
@@ -348,11 +383,25 @@ class Plugin:
 
     # ------------------------------------------------------------- visualizations and colours
 
-    def visualization(self, name: str, title: Text | str, **kw: Any) -> Any:
+    @overload
+    def visualization(
+        self, name: str, title: Text | str, *, size: Literal["code"] | None = None, **kw: Any
+    ) -> Callable[[F], F]: ...
+    @overload
+    def visualization(
+        self, name: str, title: Text | str, *, size: Literal["alloc", "size", "files", "items"], **kw: Any
+    ) -> VisualizationSpec: ...
+    def visualization(
+        self, name: str, title: Text | str, *, size: str | None = None, **kw: Any
+    ) -> VisualizationSpec | Callable[[F], F]:
         """A built-in engine with another size measure (``size="files"``); used as a decorator, the
         function gives each file a weight: ``(v: VisualInput) -> np.ndarray`` (length ``tree.n``)."""
-        if kw.get("size") not in (None, "code"):
-            return self._declare("visualization", VisualizationSpec(name=name, title=as_text(title), **kw))
+        if size not in (None, "code"):
+            spec = VisualizationSpec.model_validate(
+                {"name": name, "title": as_text(title), "size": size, **kw}
+            )
+            self._declare("visualization", spec)
+            return spec
 
         def wrap(f: F) -> F:
             self._declare(
@@ -363,11 +412,27 @@ class Plugin:
 
         return wrap
 
-    def color_mode(self, name: str, title: Text | str, **kw: Any) -> Any:
+    @overload
+    def color_mode(
+        self,
+        name: str,
+        title: Text | str,
+        *,
+        by: Literal["ext", "class", "age", "size", "depth", "name", "set", "insight"],
+        **kw: Any,
+    ) -> ColorModeSpec: ...
+    @overload
+    def color_mode(self, name: str, title: Text | str, *, by: None = None, **kw: Any) -> Callable[[F], F]: ...
+    def color_mode(
+        self, name: str, title: Text | str, *, by: str | None = None, **kw: Any
+    ) -> ColorModeSpec | Callable[[F], F]:
         """Declarative with ``by=…`` (ext, class, age, size, depth, name, set, insight); used as a
-        decorator: ``(tree, ids) -> np.ndarray[uint8]`` palette indices of the drawn rows."""
-        if kw.get("by") is not None:
-            return self._declare("color_mode", ColorModeSpec(name=name, title=as_text(title), **kw))
+        decorator: ``(c: ColorInput) -> np.ndarray[uint8]`` palette indices of the drawn rows (the
+        older ``(tree, ids)`` form works too)."""
+        if by is not None:
+            spec = ColorModeSpec.model_validate({"name": name, "title": as_text(title), "by": by, **kw})
+            self._declare("color_mode", spec)
+            return spec
 
         def wrap(f: F) -> F:
             self._declare("color_mode", ColorModeSpec(name=name, title=as_text(title), **kw))
@@ -376,11 +441,24 @@ class Plugin:
 
         return wrap
 
+    def color_legend(self, mode: str) -> Callable[[F], F]:
+        """The legend of a colour mode, worked out when it is shown: ``(ctx) -> list[text | (text,
+        colour)]``, one entry per palette index (index 0 first). It follows the plugin's settings
+        (asked again whenever they change, or after ``ctx.invalidate("color_mode")``)."""
+
+        def wrap(f: F) -> F:
+            self._handler("legend", mode, f)
+            return f
+
+        return wrap
+
     # ------------------------------------------------------------- data
 
     def export_format(self, name: str, title: Text | str, **kw: Any) -> Callable[[F], F]:
-        """An export format: ``(tree, root, match[, info]) -> Iterator[str]`` (``bytes`` with
-        binary=True); ``info`` is an :class:`~spaceknife_sdk.ExportInfo` (the filter expression)."""
+        """An export format: ``(x: ExportInput) -> Iterator[str]`` (``bytes`` with binary=True).
+        ``options=[{"name": …, "title": …, "default": …}, …]`` (setting fields) are drawn in the
+        export dialog; their values arrive in ``x.options``. The older ``(tree, root, match[, info])``
+        form works too."""
 
         def wrap(f: F) -> F:
             self._declare("export_format", ExportFormatSpec(name=name, title=as_text(title), **kw))
@@ -397,10 +475,28 @@ class Plugin:
     def file_class(self, name: str, title: Text | str, **kw: Any) -> FileClassSpec:
         return self._declare("file_class", FileClassSpec(name=name, title=as_text(title), **kw))  # type: ignore[return-value]
 
-    def folder_rule(self, glob: str, cls: str, *, mode: str = "swallow") -> FolderRuleSpec:
-        return self._declare(
-            "folder_rule", FolderRuleSpec.model_validate({"glob": glob, "class": cls, "mode": mode})
-        )  # type: ignore[return-value]
+    def folder_rule(
+        self,
+        glob: str,
+        cls: str,
+        *,
+        mode: str = "swallow",
+        name: str | None = None,
+        priority: int = 0,
+        exclude: list[str] | None = None,
+    ) -> FolderRuleSpec:
+        spec = FolderRuleSpec.model_validate(
+            {
+                "glob": glob,
+                "class": cls,
+                "mode": mode,
+                "name": name,
+                "priority": priority,
+                "exclude": list(exclude or []),
+            }
+        )
+        self._declare("folder_rule", spec)
+        return spec
 
     def node_set(self, name: str, title: Text | str, **kw: Any) -> Callable[[F], F]:
         """A node set for the filter (``:set:<name>``): ``(ctx, tree) -> bool mask | node ids``."""
@@ -453,7 +549,11 @@ class Plugin:
 
         return wrap
 
-    def change_annotator(self, fn: F | None = None, *, name: str | None = None) -> Any:
+    @overload
+    def change_annotator(self, fn: F, /) -> F: ...
+    @overload
+    def change_annotator(self, fn: None = None, /, *, name: str | None = None) -> Callable[[F], F]: ...
+    def change_annotator(self, fn: F | None = None, /, *, name: str | None = None) -> F | Callable[[F], F]:
         """Reasons for changes in a comparison: ``(ctx, items: list[ChangeUnit]) -> list[str | None]``."""
 
         def wrap(f: F) -> F:

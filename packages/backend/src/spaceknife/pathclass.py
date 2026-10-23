@@ -42,6 +42,7 @@ import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePath
+from typing import Any
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -783,10 +784,12 @@ def column(store: NodeStore, table: ClassTable) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class PluginRule:
-    glob: str  # over '/'-separated, lower-case paths; "**/" matches any depth
+    glob: str  # over '/'-separated, lower-case paths; "**/" matches any depth, {a,b} either
     class_id: str
     fallback: bool = False  # only files whose extension is in no class
     regex: re.Pattern[str] = field(default=re.compile(""), compare=False)
+    priority: int = 0  # higher first, then the order they were declared in
+    exclude: tuple[re.Pattern[str], ...] = field(default=(), compare=False)
 
 
 _plugin_rules: tuple[PluginRule, ...] = ()
@@ -794,8 +797,24 @@ _plugin_version = 0
 _overlays: WeakKeyDictionary[NodeStore, tuple[tuple[int, int, int, int], np.ndarray]] = WeakKeyDictionary()
 
 
+def expand_braces(glob: str) -> list[str]:
+    """``**/{.venv,venv}`` -> ``["**/.venv", "**/venv"]`` (nested braces too; at most 64)."""
+    m = re.search(r"\{([^{}]*)\}", glob)
+    if m is None:
+        return [glob]
+    out: list[str] = []
+    for alt in m.group(1).split(","):
+        out += expand_braces(glob[: m.start()] + alt + glob[m.end() :])
+        if len(out) >= 64:
+            break
+    return out[:64]
+
+
 def compile_glob(glob: str) -> re.Pattern[str]:
-    """``**/.gradle/caches`` -> a regex over normalised paths ('/', lower case)."""
+    """``**/.gradle/caches`` -> a regex over normalised paths ('/', lower case); ``{a,b}`` either."""
+    alts = expand_braces(glob)
+    if len(alts) > 1:
+        return re.compile("|".join(f"(?:{compile_glob(a).pattern})" for a in alts))
     g = glob.replace("\\", "/").strip().lower()
     out = ""
     i = 0
@@ -818,10 +837,18 @@ def compile_glob(glob: str) -> re.Pattern[str]:
     return re.compile("(?:^|.*/)" + out + "$" if not g.startswith(("/", "**")) else out + "$")
 
 
-def set_plugin_rules(rules: Iterable[tuple[str, str, bool]]) -> None:
-    """The enabled plugins' folder rules: (glob, class id, fallback)."""
+def set_plugin_rules(rules: Iterable[tuple[Any, ...]]) -> None:
+    """The enabled plugins' folder rules: (glob, class id, fallback[, priority[, exclude globs]]),
+    tried by priority (higher first), then in the order given; the first that matches decides."""
     global _plugin_rules, _plugin_version
-    _plugin_rules = tuple(PluginRule(g, c, fb, compile_glob(g)) for g, c, fb in rules)
+    made = []
+    for r in rules:
+        g, c, fb = r[0], r[1], r[2]
+        prio = int(r[3]) if len(r) > 3 else 0
+        excl = tuple(compile_glob(x) for x in (r[4] if len(r) > 4 else ()))
+        made.append(PluginRule(g, c, fb, compile_glob(g), prio, excl))
+    order = sorted(range(len(made)), key=lambda i: (-made[i].priority, i))
+    _plugin_rules = tuple(made[i] for i in order)
     _plugin_version += 1
     _overlays.clear()
 
@@ -835,7 +862,11 @@ def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.n
     out = col.copy()
     c = store.cols
     dirs = np.flatnonzero(c["kind"][:n] == Kind.DIR)
-    last = {r.glob.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower() for r in _plugin_rules}
+    last = {
+        g.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1].lower()
+        for r in _plugin_rules
+        for g in expand_braces(r.glob)
+    }
     wild = any("*" in s or "?" in s for s in last)
     user = set(e.user)
     for d in dirs.tolist():
@@ -847,6 +878,8 @@ def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.n
         path = store.path(d).replace("\\", "/").lower()
         for r in _plugin_rules:
             if not r.regex.match(path) or r.class_id not in table.by_id:
+                continue
+            if any(x.match(path) for x in r.exclude):
                 continue
             if d in user or any(a in user for a in store.ancestors(d)):
                 break

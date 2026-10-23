@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field
@@ -14,6 +15,9 @@ from spaceknife_protocol.plugins import NodeRef
 from spaceknife_protocol.text import LocalStr
 
 from .tree import TreeView
+
+if TYPE_CHECKING:
+    from .context import Context
 
 
 class Proposal(BaseModel):
@@ -40,15 +44,47 @@ class Insight(BaseModel):
     command: str = Field(default="", description="Shown, never run")
 
 
-class ScanInfo(BaseModel):
-    """Argument of the ``scan_done`` / ``scan_closed`` hooks."""
+class _Record(BaseModel):
+    """A model that also reads like the dict it used to be (``info["scan_id"]``, ``info.get(…)``)."""
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
+    def __getitem__(self, key: str) -> Any:
+        if key not in type(self).model_fields:
+            raise KeyError(key)
+        return getattr(self, key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        return getattr(self, key) if key in type(self).model_fields else default
+
+
+class ScanInfo(_Record):
+    """An open scan: what ``ctx.scans()`` lists (newest first) and the ``scan_done`` /
+    ``scan_closed`` hooks get. Times are unix seconds."""
+
     scan_id: str
+    roots: list[str] = Field(default_factory=list, description="The roots' paths (a source: its name)")
+    items: int = Field(default=0, description="Folders and files, the roots not counted")
+    source: str = Field(default="scan", description='"scan", "snapshot" or a scan source\'s full id')
+    state: Literal["scanning", "done", "cancelled", "failed"] | str = "done"
+    started_at: float | None = None
+    finished_at: float | None = None
+    snapshot: str | None = Field(default=None, description="The snapshot file it was opened from")
+    front: bool = Field(default=False, description="The scan in front (the one ctx.tree reads by default)")
+    on_disk: bool = Field(default=True, description="Its nodes are files here (False: a scan source's)")
+
+
+class SnapshotInfo(_Record):
+    """A saved snapshot: what ``ctx.snapshots.list()`` gives (newest first); ``path`` opens it."""
+
+    path: str
+    created_at: datetime
     roots: list[str] = Field(default_factory=list)
-    items: int = 0
-    source: str = "scan"
+    node_count: int = 0
+    bytes_alloc: int = 0
+    files: int = 0
+    file_bytes: int = Field(default=0, description="The size of the snapshot file itself")
+    method: str | None = Field(default=None, description='How it was read: "hard", "mft" or None')
 
 
 class Change(BaseModel):
@@ -75,20 +111,75 @@ class ChangeUnit(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class ExportInfo:
-    """The optional fourth argument of an export format: ``(tree, root, match, info)``.
-
-    ``filter`` is the filter expression the export is limited to ("" when it is not filtered;
-    ``match`` then is None), for a header line such as "Filter: …"."""
+    """The optional fourth argument of an export format: ``(tree, root, match, info)`` (the older
+    form; :class:`ExportInput` has everything). ``filter`` is the filter expression the export is
+    limited to ("" when it is not filtered; ``match`` then is None)."""
 
     filter: str = ""
+    options: dict[str, Any] = field(default_factory=dict)
+
+
+class _Inputs:
+    """What the inputs of code visualizations, colour modes and export formats share."""
+
+    __slots__ = ()
+    ctx: Context | None
+
+    @property
+    def settings(self) -> Mapping[str, Any]:
+        """The plugin's own settings by local name (as ``ctx.settings``)."""
+        if self.ctx is None:
+            return {}
+        return dict(self.ctx.settings.items())
+
+    @property
+    def cancelled(self) -> bool:
+        """The host gave up on this call (a newer frame, the user went on): stop and return anything."""
+        return self.ctx is not None and self.ctx.cancelled
+
+    def check(self) -> None:
+        """Raise :class:`~spaceknife_sdk.Cancelled` when :attr:`cancelled`."""
+        if self.ctx is not None:
+            self.ctx.check()
 
 
 @dataclass(slots=True)
-class VisualInput:
-    """What a code visualization gets: the tree and its options (own settings by name)."""
+class VisualInput(_Inputs):
+    """What a code visualization gets: ``(v: VisualInput) -> np.ndarray`` (a weight per node).
+
+    ``options``: its declared options (own settings by name, as the view has them); ``settings``:
+    all of the plugin's settings; ``ctx``: the call's context (``ctx.check()`` for cancellation)."""
 
     tree: TreeView
     options: dict[str, Any] = field(default_factory=dict)
+    ctx: Context | None = None
+
+
+@dataclass(slots=True)
+class ColorInput(_Inputs):
+    """What a code colour mode gets: ``(c: ColorInput) -> np.ndarray[uint8]``, a palette index for
+    each of ``ids`` (the drawn rows' nodes; 0 is the neutral colour). Runs within 20 ms per frame."""
+
+    tree: TreeView
+    ids: np.ndarray
+    palette: int = 1
+    ctx: Context | None = None
+
+
+@dataclass(slots=True)
+class ExportInput(_Inputs):
+    """What an export format gets: ``(x: ExportInput) -> Iterator[str]`` (``bytes`` with
+    ``binary = true``). ``root``: the node whose contents are exported (the view's place, the
+    selection's node, or a root); ``match``: the filter's matches (None: not filtered);
+    ``options``: the values of the format's ``options`` the user picked in the export dialog."""
+
+    tree: TreeView
+    root: int
+    match: np.ndarray | None = None
+    filter: str = ""
+    options: dict[str, Any] = field(default_factory=dict)
+    selection: list[int] = field(default_factory=list)
+    ctx: Context | None = None
 
 
 BATCH = 50_000
@@ -173,4 +264,16 @@ class Listing:
             self._flush(self.batch())
 
 
-__all__ = ["Change", "ChangeUnit", "Insight", "Listing", "Proposal", "ScanInfo", "VisualInput"]
+__all__ = [
+    "Change",
+    "ChangeUnit",
+    "ColorInput",
+    "ExportInfo",
+    "ExportInput",
+    "Insight",
+    "Listing",
+    "Proposal",
+    "ScanInfo",
+    "SnapshotInfo",
+    "VisualInput",
+]
