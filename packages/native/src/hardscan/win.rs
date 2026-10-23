@@ -145,9 +145,14 @@ pub struct RootState {
     /// The scan root's own stored name, read once per call for `check_task` (None: unreadable).
     root_name: OnceLock<Option<Box<[u16]>>>,
     /// Leave out the last query of a listing whose buffer had room for another entry, on local
-    /// NTFS, ReFS and Btrfs (`final_done`); with `verify_final` send it anyway and count it.
+    /// NTFS, ReFS and Btrfs (`skips_final`); with `verify_final` send it anyway and count it.
     skip_final: bool,
     verify_final: bool,
+    /// `skip_final` checks itself: the first FINAL_CHECKED listings of the root in this call that
+    /// could leave the query out, then one in FINAL_CHECKED, send it anyway; one that returns
+    /// entries turns it off for the root (`final_ok`).
+    final_ok: AtomicBool,
+    final_seen: AtomicU32,
     /// Check a relative open by the file id of the "." entry its listing starts with, before
     /// querying the handle for it (`list_dir`).
     dot_check: bool,
@@ -181,6 +186,8 @@ impl RootState {
             root_name: OnceLock::new(),
             skip_final: o.skip_final,
             verify_final: o.verify_final,
+            final_ok: AtomicBool::new(true),
+            final_seen: AtomicU32::new(0),
             dot_check: o.dot_check,
             keep_where_updated: o.keep_where_updated,
             fold_strict: o.fold_strict,
@@ -1711,10 +1718,22 @@ fn room_for_another(filled: usize, level: u8) -> bool {
 
 /// Whether listings of this root may leave out their last query (`skip_final`): only on local
 /// NTFS, ReFS and Btrfs, where the rule of `room_for_another` was checked on whole volumes
-/// (docs/native.md 2.2). Elsewhere (FAT, exFAT, network redirectors, which may return a short
-/// buffer early) every listing goes on until STATUS_NO_MORE_FILES.
+/// (docs/native.md 2.2), and until a checked listing broke it. Elsewhere (FAT, exFAT, network
+/// redirectors, which may return a short buffer early) every listing goes on until
+/// STATUS_NO_MORE_FILES; so do listings of reparse points (`list_into`).
 fn skips_final(state: &RootState) -> bool {
-    state.skip_final && matches!(state.fs.load(Ordering::Acquire), fs::NTFS | fs::REFS | fs::BTRFS)
+    state.skip_final
+        && state.final_ok.load(Ordering::Relaxed)
+        && matches!(state.fs.load(Ordering::Acquire), fs::NTFS | fs::REFS | fs::BTRFS)
+}
+
+/// Listings of a root `skip_final` checks before it trusts the rule, and one in how many after.
+const FINAL_CHECKED: u32 = 64;
+
+/// Whether this listing, which could leave its last query out, sends it to check the rule.
+fn checks_final(state: &RootState) -> bool {
+    let k = state.final_seen.fetch_add(1, Ordering::Relaxed);
+    state.verify_final || k < FINAL_CHECKED || k % FINAL_CHECKED == 0
 }
 
 /// The file id of a listing's "." entry and its width in bits (`Raw::id`), if it had one.
@@ -1742,7 +1761,8 @@ fn list_into(
     };
     // test seam: FileIdExtd ids as WinBtrfs gives them, the listed folder's own
     let own_id = if state.extd_self_ids { file_id(h, 128) } else { None };
-    let skip = skips_final(state);
+    let mut skip = skips_final(state);
+    let mut checked: Option<bool> = None; // checks_final, asked once per listing
     *dot = None;
     CASE.with_borrow_mut(Vec::clear);
     let listed = BUF.with_borrow_mut(|buf| {
@@ -1775,7 +1795,10 @@ fn list_into(
                 break;
             }
             if skippable {
-                bump(&STATS.final_wrong); // listed all the same: this mode sends the query
+                bump(&STATS.final_wrong); // listed all the same: the query was sent
+                if !state.verify_final {
+                    state.final_ok.store(false, Ordering::Relaxed); // the rule does not hold here
+                }
                 skippable = false;
             }
             if status < 0 {
@@ -1813,6 +1836,11 @@ fn list_into(
                     if dot.is_none() && raw.id_bits != 0 {
                         *dot = Some((raw.id, raw.id_bits));
                     }
+                    // a reparse point's listing may come from a filter (cloud files, ProjFS)
+                    // that fills its buffers by other rules
+                    if raw.attrs & FA_REPARSE != 0 {
+                        skip = false;
+                    }
                 } else if n != [b'.' as u16, b'.' as u16] {
                     add_entry(&raw, path, root, how, base, arena, subdirs);
                 }
@@ -1822,7 +1850,7 @@ fn list_into(
                 off += next as usize;
             }
             if skip && room_for_another(filled, level) {
-                if !state.verify_final {
+                if !*checked.get_or_insert_with(|| checks_final(state)) {
                     bump(&STATS.final_skipped);
                     break;
                 }
@@ -2122,6 +2150,31 @@ mod tests {
             pinned: false,
         };
         assert_eq!(open_child(&t.child("X"), &via, &state, false).err().as_deref(), Some(msg::CASE));
+    }
+
+    #[test]
+    fn a_listing_through_a_name_that_reached_another_entry_is_dropped_for_the_listed_one() {
+        // with dot_check the relative open is listed before it is checked: what x holds goes, and
+        // y is listed by its id; without it the open is checked first, with the same result
+        let t = Temp::new("dotid", &["x\\in-x", "y\\in-y"], &[]);
+        let root = RootOpts::default();
+        for dot_check in [true, false] {
+            let state = RootState::new(&StateOpts { dot_check, ..opts(true) });
+            let parent = Arc::new(open_dir(&t.path(), &state).unwrap().0);
+            let y = file_id(&open_dir(&t.child("y"), &state).unwrap().0, 128).unwrap();
+            for marks in [mark::TWIN, 0] {
+                let via = Via {
+                    parent: parent.clone(),
+                    hint: hint(y, 128, "X", marks),
+                    pinned: false,
+                };
+                let (mut arena, mut subs) = (Arena::default(), Vec::new());
+                let (_, pinned) =
+                    list_dir(&t.child("X"), true, Some(via), &root, &state, &mut arena, &mut subs).unwrap();
+                assert_eq!(names(&arena), ["in-y"], "{dot_check} {marks}");
+                assert!(pinned && subs.len() == 1, "{dot_check} {marks}");
+            }
+        }
     }
 
     #[test]
@@ -2466,14 +2519,23 @@ mod tests {
         let off = RootState::new(&opts(true));
         off.fs.store(fs::NTFS, Ordering::Release);
         assert!(!skips_final(&off));
+        // a checked listing that found more turned it off for the root
+        state.fs.store(fs::NTFS, Ordering::Release);
+        state.final_ok.store(false, Ordering::Relaxed);
+        assert!(!skips_final(&state));
     }
 
     /// Lists `path` as a task the way a scan does, with these options.
     fn list_task(path: &[u16], o: &StateOpts) -> (Arena, Vec<(u32, NativePath, Hint)>, RootState) {
         let state = RootState::new(o);
-        let (mut arena, mut subs) = (Arena::default(), Vec::new());
-        list_dir(path, false, None, &RootOpts::default(), &state, &mut arena, &mut subs).unwrap();
+        let (arena, subs) = list_with(path, &state);
         (arena, subs, state)
+    }
+
+    fn list_with(path: &[u16], state: &RootState) -> (Arena, Vec<(u32, NativePath, Hint)>) {
+        let (mut arena, mut subs) = (Arena::default(), Vec::new());
+        list_dir(path, false, None, &RootOpts::default(), state, &mut arena, &mut subs).unwrap();
+        (arena, subs)
     }
 
     fn names(arena: &Arena) -> Vec<String> {
@@ -2502,10 +2564,21 @@ mod tests {
                 keep_access_time: true,
                 ..opts(true)
             };
-            let skipped = STATS.final_skipped.load(Ordering::Relaxed);
-            let (arena, _, _) = list_task(&t.path(), &StateOpts { skip_final: true, ..base });
+            // a root's first listings send the query to check the rule, later ones leave it out
+            let state = RootState::new(&StateOpts { skip_final: true, ..base });
+            let (skipped, verified) = (
+                STATS.final_skipped.load(Ordering::Relaxed),
+                STATS.final_verified.load(Ordering::Relaxed),
+            );
+            let (arena, _) = list_with(&t.path(), &state);
+            assert_eq!(names(&arena), want, "{tag}");
+            assert_eq!(STATS.final_skipped.load(Ordering::Relaxed), skipped, "{tag}");
+            assert!(STATS.final_verified.load(Ordering::Relaxed) > verified, "{tag}");
+            state.final_seen.store(FINAL_CHECKED + 1, Ordering::Relaxed);
+            let (arena, _) = list_with(&t.path(), &state);
             assert_eq!(names(&arena), want, "{tag}");
             assert!(STATS.final_skipped.load(Ordering::Relaxed) > skipped, "{tag}");
+            assert!(state.final_ok.load(Ordering::Relaxed), "{tag}");
             let (arena, _, _) = list_task(&t.path(), &base);
             assert_eq!(names(&arena), want, "{tag}");
             // the verification mode sends the query and finds nothing more

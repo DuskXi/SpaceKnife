@@ -11,15 +11,15 @@
 //! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
 //! | `keep_access_time` | True | Windows and Linux: listing a folder does not update its last access time |
 //! | `relative_open` | True | Windows: a found subdirectory is opened by name relative to its parent's handle, checked against the listed file id |
-//! | `skip_final` | True | Windows (local NTFS, ReFS, Btrfs): no last directory query when the buffer before it had room for one more entry of any name |
-//! | `dot_check` | True | Windows: a relative open is checked by the file id of its listing's "." entry (else by querying the handle) |
+//! | `skip_final` | False | Windows (local NTFS, ReFS, Btrfs): no last directory query when the buffer before it had room for one more entry of any name (not in listings of reparse points; in each call the first 64 listings of a root that could leave it out, then one in 64, send it anyway, and one that returns entries turns it off for the root) |
+//! | `dot_check` | False | Windows: a relative open is checked by the file id of its listing's "." entry (else by querying the handle) |
 //! | `keep_where_updated` | True | Windows: `keep_access_time` only on volumes whose file system updates access times (the system's NtfsDisableLastAccessUpdate / RefsDisableLastAccessUpdate) |
 //!
 //! Test seams, not part of the interface: `_fold_strict` and `_extd_self_ids` (Windows: behave as
 //! WinBtrfs does, win.rs RootState), `_verify_final` (Windows: send the last query `skip_final`
 //! leaves out anyway and count what it returns, `_open_stats`), `_pinned_cap` (entries listed past the budget: below folders
 //! opened by file id, and of folders whose name another entry shares; default max(2 × max_entries,
-//! 10,000)). `ROOT_KEYS` lists the root keys this build knows.
+//! 10,000)). `ROOT_KEYS` and `OPT_KEYS` list the root and option keys this build knows.
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
 //! (`SliceResult(**scan_slice(tasks, opts))`). Differences from the worker, all deliberate:
@@ -190,10 +190,10 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         Some(v) if !v.is_none() => v.extract::<i64>()?.clamp(0, 256) as usize,
         _ => 0,
     };
-    let switch = |key: &str| -> PyResult<bool> {
+    let switch = |key: &str, default: bool| -> PyResult<bool> {
         match field(opts, key)? {
             Some(v) if !v.is_none() => v.is_truthy(),
-            _ => Ok(true),
+            _ => Ok(default),
         }
     };
     let seam = |key: &str| -> PyResult<bool> {
@@ -211,11 +211,11 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         budget_s,
         max_entries,
         threads,
-        keep_access_time: switch("keep_access_time")?,
-        relative_open: switch("relative_open")?,
-        skip_final: switch("skip_final")?,
-        dot_check: switch("dot_check")?,
-        keep_where_updated: switch("keep_where_updated")?,
+        keep_access_time: switch("keep_access_time", true)?,
+        relative_open: switch("relative_open", true)?,
+        skip_final: switch("skip_final", false)?,
+        dot_check: switch("dot_check", false)?,
+        keep_where_updated: switch("keep_where_updated", true)?,
         verify_final: seam("_verify_final")?,
         fold_strict: seam("_fold_strict")?,
         extd_self_ids: seam("_extd_self_ids")?,
@@ -562,6 +562,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
     // what the backend may pass per root (older builds reject keys they do not know)
     m.add("ROOT_KEYS", PyTuple::new(m.py(), ROOT_KEYS)?)?;
+    m.add("OPT_KEYS", PyTuple::new(m.py(), OPT_KEYS)?)?;
     m.add_function(wrap_pyfunction!(_open_stats, m)?)?;
     m.add_class::<links::LinkSet>()?;
     m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;

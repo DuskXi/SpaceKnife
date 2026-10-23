@@ -52,6 +52,7 @@ class RootOpts(TypedDict, total=False):
     verify_names: bool  # Windows: check every task by its stored names (Btrfs roots always are)
 
 ROOT_KEYS: tuple[str, ...]  # the RootOpts keys this build accepts
+OPT_KEYS: tuple[str, ...]  # the option keys of scan_slice this build accepts
 
 class SliceOpts(TypedDict, total=False):
     roots: Sequence[RootOpts]
@@ -60,8 +61,8 @@ class SliceOpts(TypedDict, total=False):
     threads: int  # 0: min(logical CPUs, 16)
     keep_access_time: bool  # Windows and Linux, default True: listing a folder keeps its last access time
     relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
-    skip_final: bool  # Windows, default True: no last query if the buffer had room (local NTFS, ReFS, Btrfs)
-    dot_check: bool  # Windows, default True: relative opens checked by their listing's "." entry
+    skip_final: bool  # Windows, default False: no last query if the buffer had room (local NTFS, ReFS, Btrfs)
+    dot_check: bool  # Windows, default False: relative opens checked by their listing's "." entry
     keep_where_updated: bool  # Windows, default True: keep_access_time only where access times are updated
     # test seams (docs/native.md 2.2), not part of the interface
     _verify_final: bool

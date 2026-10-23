@@ -197,6 +197,8 @@ def native_slicer() -> Slicer | None:
     scan_slice = mod.scan_slice
     # builds before the check of case-only siblings reject these keys (docs/native.md 2.2)
     names = "verify_names" in getattr(mod, "ROOT_KEYS", ())
+    known = getattr(mod, "OPT_KEYS", ())
+    switches = [k for k in ("skip_final", "dot_check", "keep_where_updated") if k in known]
 
     def run(tasks: list[Task], opts: SliceOptions) -> SliceResult:
         roots = [
@@ -212,7 +214,14 @@ def native_slicer() -> Slicer | None:
             for r in opts.roots
         ]
         raw = scan_slice(
-            tasks, {"roots": roots, "budget_s": opts.budget_s, "max_entries": opts.max_entries, "threads": 1}
+            tasks,
+            {
+                "roots": roots,
+                "budget_s": opts.budget_s,
+                "max_entries": opts.max_entries,
+                "threads": 1,
+                **{k: getattr(opts, k) for k in switches},  # SliceOptions: from the environment
+            },
         )
         return SliceResult(**raw)
 
