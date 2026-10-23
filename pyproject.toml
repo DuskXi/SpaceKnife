@@ -70,4 +70,7 @@ timeout = 300
 "tools/preview_design.py" = ["E501"]
 "tools/demo/*" = ["E501"]
 "packages/backend/src/spaceknife/cli_scan.py" = ["E501"]  # Chinese UI strings
+# the cleanup plan's text tables: whole sentences of the user's words, one per line
+"packages/backend/src/spaceknife/dupes/cleanup/codes.py" = ["E501"]
+"packages/backend/src/spaceknife/dupes/cleanup/risks.py" = ["E501"]
 "packages/*/tests/*" = ["E501", "PT018", "ASYNC240"]

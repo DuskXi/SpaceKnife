@@ -286,6 +286,20 @@ Only files that share their size with another are read; files count as duplicate
 | Files whose access time cannot be kept | Skip | Skip `"skip"` · Read anyway `"read"` | SpaceKnife reads files without changing their access time; when the system does not allow that, skip them or read them anyway. | `dupes.keep_access_time` |
 | Read the contents again before deleting | Off | On `true` · Off `false` | Before deleting, read both the copy to delete and the copy kept again in full (by default only checks that the files did not change). | `dupes.recheck_content` |
 
+#### Duplicate-file cleanup
+
+| Setting | Default | Values | Description | Key |
+| --- | --- | --- | --- | --- |
+| Keep criteria | oldest\_created,plain\_name,shortest\_path | Text, up to 64 characters | Compared in order when choosing a copy to keep; the next one counts only on a tie (the first follows “Default keep”). | `dupes.keep_criteria` |
+| Preset of a new plan | Recommended | Look only `"watch"` · Conservative `"conservative"` · Recommended `"recommended"` · Links first `"links"` | The rules a new cleanup plan starts with (they can be changed in the plan). | `dupes.cleanup.preset` |
+| When an item fails | Go on with the next | Go on with the next `"continue"` · Stop the run `"stop"` | An item that fails always goes back as it was; a full disk, read or write errors and anything that needs you always stop the run. | `dupes.cleanup.on_failure` |
+| Check contents before running | Auto | Auto `"auto"` · Read everything again `"content"` · File details only `"metadata"` | Automatic: read both copies again when timestamps cannot prove they did not change (no USN, changed within 24 hours, found from the cache). | `dupes.cleanup.verify` |
+| Symbolic link paths | Auto | Auto `"auto"` · Relative path `"relative"` · Absolute path `"absolute"` | Automatic: relative on the same volume when the paths go through no link, else absolute. | `dupes.cleanup.symlink_style` |
+| Volumes without a recycle bin | Recovery area | Recovery area `"recovery"` · Leave as is `"leave"` | Put them in SpaceKnife's recovery area (space comes back once it is emptied), or leave them. | `dupes.cleanup.no_trash` |
+| Allow a recovery area at the volume root | On | On `true` · Off `false` | Replaced originals must stay on their own volume; when the data folder is elsewhere, a hidden .SpaceKnife-recovery folder is made at the volume root. | `dupes.cleanup.recovery_at_root` |
+| Recovery area reminder | 7 days | 0 to 365 days | After originals have waited this many days in the recovery area, the cleanup history reminds you once (0: never; it is never emptied automatically). | `dupes.cleanup.purge_reminder_days` |
+| Allow links on macOS | Off | On `true` · Off `false` | Hard and symbolic links on macOS have not been tested on a Mac yet; off by default. | `dupes.cleanup.macos_links` |
+
 ### File classes
 
 Groups files by extension for treemap colors, :class: filters and class statistics.

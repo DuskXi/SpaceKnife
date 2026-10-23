@@ -28,6 +28,7 @@ def install(server: Server) -> None:
     from .classes_handlers import install as install_classes_handlers
     from .compare_handlers import install as install_compare_handlers
     from .diag import install as install_diag
+    from .dupes_cleanup_handlers import install as install_cleanup_handlers
     from .dupes_handlers import install as install_dupes_handlers
     from .export_handlers import install as install_export_handlers
     from .filter_handlers import install as install_filter_handlers
@@ -48,6 +49,7 @@ def install(server: Server) -> None:
     install_settings_handlers(server)
     install_compare_handlers(server)
     install_dupes_handlers(server)
+    install_cleanup_handlers(server)
     install_classes_handlers(server)
     install_ops_handlers(server)
     install_export_handlers(server)

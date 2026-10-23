@@ -291,8 +291,10 @@ class Results:
         named: dict[int, int] = {}  # rows of the unit that are names of their own (not views)
         for row in range(g.start, g.start + g.count):
             rep = int(m["unit"][row])
-            u = units.get(rep)
             fl = int(m["flags"][row])
+            if fl & C.F_CLEANED:
+                continue  # a cleanup took this name away
+            u = units.get(rep)
             if u is None:
                 u = units[rep] = UnitView(
                     rows=[],
@@ -480,7 +482,7 @@ class Results:
                 return hit
             m = self.m[: self.n]
             valid = self._valid_rows()
-            mine = np.flatnonzero((m["scan"] == si) & valid)
+            mine = np.flatnonzero((m["scan"] == si) & valid & ((m["flags"] & C.F_CLEANED) == 0))
             order = np.argsort(m["node"][mine], kind="stable")
             rows = mine[order]
             nodes = m["node"][rows].astype(np.int64)
@@ -758,6 +760,9 @@ class Results:
         if not len(rows):
             return 0
         with self.lock:
+            rows = [r for r in rows if not int(self.m["flags"][r]) & C.F_CLEANED]
+            if not rows:
+                return 0
             touched = {int(self.m["group"][r]) for r in rows}
             for r in rows:
                 self.m["role"][r] = 0
@@ -772,6 +777,63 @@ class Results:
                 self._apply_one(g)
             self._bump()
             return fresh
+
+    def apply_cleanup(self, items: Sequence[tuple[int, str, dict[str, Any]]]) -> set[int]:
+        """What a cleanup run did, applied at once (docs/dupes.md §16.11.1): ``(member row, action,
+        outcome)`` of the steps done. Recycle bin and symbolic links: the name leaves the group; hard
+        links: the name becomes another name of its keeper (「同一个文件」); block clones: the copy is
+        「同一份数据」, the whole group once every copy shares. Keepers take the stamps the run saw, so
+        later checks do not take our own changes for someone else's. The hash cache is not touched.
+        Returns the groups touched."""
+        touched: set[int] = set()
+        with self.lock:
+            m = self.m
+            for row, action, out in items:
+                if not 0 <= row < self.n:
+                    continue
+                gid = int(m["group"][row])
+                touched.add(gid)
+                if action in ("trash", "symlink"):
+                    m["flags"][row] = int(m["flags"][row]) | C.F_CLEANED
+                    m["role"][row] = 0
+                elif action == "hardlink":
+                    k = int(out.get("keeper_row", -1))
+                    ka = out.get("keeper_after") or {}
+                    if 0 <= k < self.n:
+                        m["fid_lo"][row], m["fid_hi"][row] = m["fid_lo"][k], m["fid_hi"][k]
+                        m["unit"][row] = m["unit"][k]
+                        m["role"][row] = C.ROLE_ALIAS
+                        if ka:
+                            for r2 in (row, k):
+                                m["mtime"][r2] = int(ka.get("mtime", m["mtime"][r2]))
+                                m["change"][r2] = int(ka.get("change", m["change"][r2]))
+                                m["usn"][r2] = int(ka.get("usn", m["usn"][r2]))
+                elif action == "clone":
+                    m["role"][row] = C.ROLE_CLONE
+                    ca = out.get("copy_after") or {}
+                    if ca:
+                        m["change"][row] = int(ca.get("change", m["change"][row]))
+                        m["usn"][row] = int(ca.get("usn", m["usn"][row]))
+                        m["mtime"][row] = int(ca.get("mtime", m["mtime"][row]))
+                k = int(out.get("keeper_row", -1))
+                ka = out.get("keeper_after") or {}
+                if 0 <= k < self.n and ka and action != "hardlink":
+                    m["change"][k] = int(ka.get("change", m["change"][k]))
+                    m["usn"][k] = int(ka.get("usn", m["usn"][k]))
+            for gid in touched:
+                g = self.groups[gid]
+                units = self._units(g)
+                g.units = len(units)
+                cloned = [
+                    r
+                    for r in range(g.start, g.start + g.count)
+                    if (int(m["role"][r]) & 0x0F) == C.ROLE_CLONE and not int(m["flags"][r]) & C.F_CLEANED
+                ]
+                if g.units <= 1 or (cloned and len(cloned) >= g.units - 1):
+                    g.shared = True
+                self._apply_one(g)
+            self._bump()
+        return touched
 
     # ------------------------------------------------------------------ coverage
     def coverage(self, si: int, folder: int, *, limit: int = 50) -> Coverage:

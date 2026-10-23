@@ -103,6 +103,9 @@ class DupesManager:
         # before the write in the background is done
         self._last: dict[str, dict[str, Any]] = {}
         self._closing: set[asyncio.Task[None]] = set()
+        # changes a cleanup run makes itself: (job, normcased path) -> until when (monotonic). The
+        # monitor reports them like anyone's; these do not send their group back to 「待核对」
+        self._expected: dict[tuple[str, str], float] = {}
 
     # ------------------------------------------------------------------ scans and scopes
     def _live(self, scan_ids: list[str]) -> list[ScanHandle]:
@@ -261,6 +264,7 @@ class DupesManager:
         for old in [h for h in self.jobs.values() if set(h.scan_ids) & set(ids)]:
             carried.update(old.results.keep.overrides)
             self.jobs.pop(old.id, None)
+            self._drop_plan(old.id)
         st = self.server.settings
         load = params.load or (str(st.get("dupes.load")) if st else "quiet")
         keep_atime = str(st.get("dupes.keep_access_time")) if st else "skip"
@@ -360,11 +364,17 @@ class DupesManager:
         h.job.set_load(params.level, params.custom)
         return self.status_of(h)
 
+    def _drop_plan(self, job_id: str) -> None:
+        cleanup = getattr(self.server, "cleanup", None)
+        if cleanup is not None:
+            cleanup.drop_job(job_id)
+
     async def clear(self, job_id: str) -> None:
         h = self.get(job_id)
         if h.running:
             await h.job.cancel()
         self.jobs.pop(job_id, None)
+        self._drop_plan(job_id)
         self._changed(h, "cleared", force=True)
         # views in the dupes colouring go back to class colours
         for host in list(self.server.views.views.values()):
@@ -733,15 +743,34 @@ class DupesManager:
         )
 
     # ------------------------------------------------------------------ tree changes
+    def expect(self, job_id: str, paths: list[str], ttl: float = 30.0) -> None:
+        """A cleanup run is about to change these paths itself (docs/dupes.md §16.11.1)."""
+        until = time.monotonic() + ttl
+        for p in paths:
+            self._expected[(job_id, os.path.normcase(p))] = until
+        now = time.monotonic()
+        for k in [k for k, v in self._expected.items() if v < now]:
+            del self._expected[k]
+
+    def _ours(self, h: JobHandle, rows: list[int]) -> list[int]:
+        if not self._expected:
+            return rows
+        now = time.monotonic()
+        res = h.results
+        return [r for r in rows if self._expected.get((h.id, os.path.normcase(res.paths[r])), 0.0) < now]
+
     def on_tree_changed(self, scan_id: str, changes: dict[int, int]) -> None:
         hit = self.for_scan(scan_id)
         if hit is None or not changes:
             return
         h, si = hit
-        rows = h.results.changed_nodes(si, changes.keys())
+        rows = self._ours(h, h.results.changed_nodes(si, changes.keys()))
         if rows and h.results.invalidate(rows):
             self._changed(h, "invalidated")
             self._repaint(h)
+            cleanup = getattr(self.server, "cleanup", None)
+            if cleanup is not None:
+                cleanup.on_results(h.id)
 
     def remap(self, scan_id: str, new_ids: Callable[[np.ndarray], np.ndarray]) -> None:
         hit = self.for_scan(scan_id)
@@ -767,6 +796,7 @@ class DupesManager:
         (with the tree they point into). The basket keeps the extra copies already in it."""
         for h in [h for h in self.jobs.values() if scan_id in h.scan_ids]:
             self.jobs.pop(h.id, None)
+            self._drop_plan(h.id)
             if h.running:
                 await h.job.cancel()
                 if h.task is not None:

@@ -25,6 +25,8 @@ CAP_UPDATES = "updates.v1"
 # Duplicate files: dupes.*, the dupes.* events, the ``dupes`` colour mode with the ``dup`` / ``dupg``
 # frame columns, TreeNodeResult.dupe and the basket's ``dupes`` items.
 CAP_DUPES = "dupes.v1"
+# Duplicate-file cleanup plans (needs dupes.v1): dupes.cleanup_*, their events, the ``dupa`` frame column
+CAP_DUPES_CLEANUP = "dupes.cleanup.v1"
 ALL_CAPABILITIES = (
     CAP_BINARY_FRAMES,
     CAP_SUBSCRIPTIONS,
@@ -35,6 +37,7 @@ ALL_CAPABILITIES = (
     CAP_LAYOUT_POLAR,
     CAP_UPDATES,
     CAP_DUPES,
+    CAP_DUPES_CLEANUP,
 )
 
 

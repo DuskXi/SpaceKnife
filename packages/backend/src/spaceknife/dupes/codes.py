@@ -68,6 +68,8 @@ F_PINNED: Final = 8  # a name Windows trims (trailing dot or space): may only be
 F_NEEDED: Final = 16  # protected or needed by a program: always kept
 F_VIEW: Final = 32  # members: the same single-named file seen by another path (overlapping scans, a
 # symlinked folder, a bind mount): it carries its representative's role and is counted once
+F_CLEANED: Final = 64  # members: a cleanup run took this name away (recycle bin, symbolic link): it no
+# longer counts (docs/dupes.md §16.11.1)
 
 # ------------------------------------------------------------------ roles of verified members (u1)
 ROLE_KEEP: Final = 1

@@ -331,7 +331,7 @@ def _registry() -> tuple[Command, ...]:
             "重复文件清理方案…",
             "dupes",
             (),
-            ("cleanup", "dedupe plan", "hard link", "清理重复", "去重"),  # i18n: ignore
+            ("cleanup", "dedupe plan", "hard link"),
             needs=(_tab, _has_dupes),
             status=_dupes_status,
         ),

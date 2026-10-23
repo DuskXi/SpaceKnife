@@ -286,6 +286,20 @@ SpaceKnife 的设置都在一个「设置」标签页里。改动立即保存，
 | 保留不了访问时间的文件 | 跳过 | 跳过 `"skip"` · 照读 `"read"` | SpaceKnife 读文件时不改访问时间；系统不允许时跳过还是照读。 | `dupes.keep_access_time` |
 | 删除前重读内容 | 关 | 开 `true` · 关 `false` | 执行删除前把要删的和保留的再完整读一遍（默认只核对文件没有变过）。 | `dupes.recheck_content` |
 
+#### 重复文件清理
+
+| 设置 | 默认值 | 可选值 | 说明 | 设置键 |
+| --- | --- | --- | --- | --- |
+| 保留的判据 | oldest\_created,plain\_name,shortest\_path | 文字，最多 64 个字符 | 补位时依次比较，前一项一样才看下一项（第一项跟着「默认保留」）。 | `dupes.keep_criteria` |
+| 新方案的预设 | 推荐 | 只看 `"watch"` · 保守 `"conservative"` · 推荐 `"recommended"` · 链接优先 `"links"` | 打开清理方案时先用哪一套规则（之后可以在方案里换）。 | `dupes.cleanup.preset` |
+| 某一项出错时 | 继续下一项 | 继续下一项 `"continue"` · 整次停下 `"stop"` | 出错的那一项总会回到原样；磁盘满、读写出错、要你看一下的情况总会停下。 | `dupes.cleanup.on_failure` |
+| 执行前核对内容 | 自动 | 自动 `"auto"` · 全部重读 `"content"` · 只核对文件信息 `"metadata"` | 自动：时间戳证明不了没变过时（没有 USN、24 小时内改过、来自缓存）把两份重读一遍。 | `dupes.cleanup.verify` |
+| 符号链接的写法 | 自动 | 自动 `"auto"` · 相对路径 `"relative"` · 绝对路径 `"absolute"` | 自动：同一个卷、路径不经过链接时写相对路径，否则写绝对路径。 | `dupes.cleanup.symlink_style` |
+| 没有回收站的卷 | 放进恢复区 | 放进恢复区 `"recovery"` · 不动 `"leave"` | 放进 SpaceKnife 的恢复区（清除恢复区才腾出空间），或者不动。 | `dupes.cleanup.no_trash` |
+| 允许在卷根建恢复区 | 开 | 开 `true` · 关 `false` | 被替换的原件要和它在同一个卷上；数据文件夹不在那个卷时，在卷根建隐藏的 .SpaceKnife-recovery。 | `dupes.cleanup.recovery_at_root` |
+| 恢复区提醒 | 7 天 | 0 至 365 天 | 恢复区里的原件放了这么多天后，清理记录提醒一次（0 不提醒；从不自动清除）。 | `dupes.cleanup.purge_reminder_days` |
+| macOS 上也能换成链接 | 关 | 开 `true` · 关 `false` | 在 macOS 上换成硬链接、符号链接还没有在真机验证过，默认关。 | `dupes.cleanup.macos_links` |
+
 ### 文件类别
 
 按扩展名归类，用于树图着色、:class: 过滤和类别统计。

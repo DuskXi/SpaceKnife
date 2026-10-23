@@ -84,6 +84,9 @@ class Server:
 
         self.dupes = DupesManager(self)  # duplicate files (docs/dupes.md)
         self.views.dupes = self.dupes
+        from .dupes_cleanup import CleanupManager
+
+        self.cleanup = CleanupManager(self)  # their cleanup plans and runs (docs/dupes.md §16)
         self.updates = UpdateService(self)  # update checks against the GitHub releases
         self.scans.monitors = self.monitors
         self.on_start: list[Callable[[], None]] = []  # run once the loop is serving
@@ -109,6 +112,11 @@ class Server:
         install_update_handlers(self)  # after the settings handlers: their listener sets the language
 
     async def start(self) -> int:
+        # interrupted cleanup runs are finished from their journals before any session (I10)
+        try:
+            await self.cleanup.recover_all()
+        except Exception:
+            logger.exception("finishing interrupted cleanup runs failed")
         self._ws = await serve(
             self._handle,
             self.config.host,

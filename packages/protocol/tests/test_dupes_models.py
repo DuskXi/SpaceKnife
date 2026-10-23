@@ -67,12 +67,13 @@ def test_older_peers_see_nothing_new() -> None:
     assert "has_dupes" in st["properties"] and "has_dupes" not in st.get("required", [])
     node = ps.TreeNodeResult.model_json_schema()
     assert "dupe" in node["properties"] and "dupe" not in node.get("required", [])
-    # the new colour mode, item kind, status and skip reasons
+    # the new colour mode, status and skip reasons; no basket item of duplicate files (no one-click
+    # deletion: cleaning up goes through the cleanup plan)
     assert "dupes" in pv.ColorModeName.__args__  # type: ignore[attr-defined]
     item_kind = po.BasketItem.model_json_schema()["properties"]["kind"]
-    assert "dupes" in str(item_kind)
+    assert "dupes" not in str(item_kind)
     status = po.BasketItem.model_json_schema()["properties"]["status"]
-    assert "blocked" in str(status)
+    assert "link_target" in str(status) and "blocked" not in str(status)
     code = po.OpItemResult.model_json_schema()["properties"]["code"]
     for c in ("changed", "keeper_changed", "last_copy", "keeper_busy"):
         assert c in str(code)

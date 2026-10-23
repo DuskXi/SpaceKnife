@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "e20dfdb63b5ef3e8";
+export const SCHEMA_HASH = "6705d3c0a7c1ac25";
 
 export interface AgeCond {
   end: number;
@@ -242,6 +242,689 @@ export interface ClassesState {
 
 export interface ClassesUpdateParams {
   classes: ClassEdit[];
+}
+
+export interface CleanupActionTotal {
+  action: "leave" | "trash" | "hardlink" | "symlink" | "clone";
+  copies: number;
+  freed_later: number;
+  freed_now: number;
+  groups: number;
+}
+
+export interface CleanupApprovalInfo {
+  acks: Record<string, number>;
+  at: string;
+  by_action: Record<string, number>;
+  steps: number;
+  token: string;
+  version: number;
+}
+
+export interface CleanupApproveParams {
+  plan_id: string;
+  version: number;
+}
+
+export interface CleanupBucket {
+  acked: boolean;
+  bytes: number;
+  code: string;
+  copies: number;
+  example: string;
+  groups: number;
+  id: string;
+  severity: "none" | "info" | "low" | "medium" | "high" | "blocked";
+  title: string;
+  /** High kinds: copies not covered by the acknowledgement */
+  unacked: number;
+}
+
+export interface CleanupChangedEvent {
+  plan_id: string;
+  reason: "edit" | "facts" | "results" | "approved" | "basket" | "closed" | "run";
+  version: number;
+}
+
+export interface CleanupCopy {
+  /** None for a keeper */
+  action: "leave" | "trash" | "hardlink" | "symlink" | "clone" | null;
+  alloc: number;
+  /** Per action: '' when it can be done, else why not */
+  available: Record<string, string>;
+  btime: number;
+  freed_later: number;
+  freed_now: number;
+  fs: string;
+  keep: "keep" | "locked" | "none";
+  manual: boolean;
+  mtime: number;
+  node: number;
+  path: string;
+  risks: CleanupRisk[];
+  row: number;
+  scan_id: string;
+  severity: "none" | "info" | "low" | "medium" | "high" | "blocked";
+  /** Why it is kept, or why it gets its action (the user's words) */
+  source: string;
+  source_code: string;
+  symlink_text: string;
+  tags: string[];
+  /** The keeper a link or clone points at */
+  target: string;
+  /** Another path of the same single-named file: it follows that one */
+  view_of: string;
+  volume: string;
+}
+
+export interface CleanupCopyDetail {
+  action_chain: CleanupReason[];
+  facts: CleanupFactRow[];
+  item: CleanupCopy;
+  keep_chain: CleanupReason[];
+  keeper: string;
+}
+
+export interface CleanupCopyRef {
+  group: number;
+  path: string;
+}
+
+export interface CleanupDiff {
+  after: Record<string, number>;
+  before: Record<string, number>;
+  changed: number;
+  examples: CleanupDiffRow[];
+  freed_after: number;
+  freed_before: number;
+  /** Copies chosen by hand that the edit leaves alone */
+  protected: number;
+  refused: string;
+  risks_added: Record<string, number>;
+  risks_removed: Record<string, number>;
+  /** Copies left as they were, by reason */
+  unavailable: Record<string, number>;
+  version: number;
+}
+
+export interface CleanupDiffRow {
+  after: string;
+  before: string;
+  path: string;
+}
+
+export interface CleanupEdit {
+  action?: "leave" | "trash" | "hardlink" | "symlink" | "clone" | null;
+  backup_volume?: string;
+  /** Bulk edits also change copies chosen by hand */
+  include_overridden?: boolean;
+  index?: number;
+  op: "keep_add" | "keep_remove" | "keep_only" | "keep_set" | "keep_clear" | "action_set" | "target_set" | "exclude" | "include" | "override_clear" | "rule_add" | "rule_update" | "rule_remove" | "rule_move" | "pair_set" | "pair_remove" | "preset" | "options" | "review" | "ack" | "unack";
+  options?: CleanupOptions | null;
+  pair?: CleanupPairRule | null;
+  paths?: string[];
+  preset?: "watch" | "conservative" | "recommended" | "links" | "backup" | "custom" | null;
+  risk?: string;
+  rule?: CleanupRule | null;
+  rule_id?: number;
+  scope?: CleanupScope;
+  target?: string;
+  value?: boolean;
+}
+
+export interface CleanupEditParams {
+  base_version: number;
+  edit: CleanupEdit;
+  plan_id: string;
+}
+
+export interface CleanupExecuteParams {
+  on_failure?: "continue" | "stop" | null;
+  plan_id: string;
+  /** Run the rest after the preflight skipped some steps */
+  proceed_after_drops?: boolean;
+  token: string;
+  verify?: "auto" | "content" | "metadata" | null;
+}
+
+export interface CleanupExportParams {
+  format?: "json" | "csv";
+  /** Where the user chose to save it */
+  path: string;
+  plan_id?: string;
+  run_id?: string;
+}
+
+export interface CleanupExportResult {
+  bytes: number;
+  path: string;
+}
+
+export interface CleanupFacets {
+  action: Record<string, number>;
+  fs: Record<string, number>;
+  risk: Record<string, number>;
+  severity: Record<string, number>;
+  source: Record<string, number>;
+  state: Record<string, number>;
+  tag: Record<string, number>;
+  total: number;
+  version: number;
+  volume: Record<string, number>;
+}
+
+export interface CleanupFactRow {
+  differs: boolean;
+  keeper: string;
+  label: string;
+  /** The copy's value */
+  this: string;
+}
+
+export interface CleanupFilterParams {
+  filter?: string;
+  plan_id: string;
+}
+
+export interface CleanupGroup {
+  actions: Record<string, number>;
+  changed_since_review: boolean;
+  conflict: boolean;
+  copies: number;
+  cross: boolean;
+  digest16: string;
+  freed_later: number;
+  freed_now: number;
+  id: number;
+  keep_line: string;
+  keepers: number;
+  members: CleanupCopy[];
+  name: string;
+  names: number;
+  only_avoided: boolean;
+  reviewed: boolean;
+  risk_count: number;
+  safety_net: boolean;
+  severity: "none" | "info" | "low" | "medium" | "high" | "blocked";
+  size: number;
+  /** rule / manual / pair / safety / mixed */
+  source: string;
+  state: "in" | "stale" | "shared" | "excluded" | "no_extra" | "cleaned";
+  total_members: number;
+  volumes: string[];
+}
+
+export interface CleanupGroupDetail {
+  copies: CleanupCopyDetail[];
+  group: CleanupGroup;
+  out_reason: string;
+  version: number;
+}
+
+export interface CleanupGroupParams {
+  group: number;
+  plan_id: string;
+}
+
+export interface CleanupGroupsPage {
+  items: CleanupGroup[];
+  offset: number;
+  total: number;
+  version: number;
+}
+
+export interface CleanupGroupsParams {
+  filter?: string;
+  /** Also list the groups that are not in the plan */
+  include_out?: boolean;
+  limit?: number;
+  offset?: number;
+  plan_id: string;
+  sort?: "freed" | "risk" | "size" | "copies" | "path" | "action";
+}
+
+export interface CleanupImportParams {
+  path: string;
+  plan_id: string;
+}
+
+export interface CleanupImportResult {
+  applied: number;
+  state: CleanupState;
+  unmatched: string[];
+}
+
+export interface CleanupInterrupted {
+  at_seq: number;
+  attention: number;
+  done: number;
+  message: string;
+  restored: number;
+  run_id: string;
+}
+
+export interface CleanupNotDone {
+  count: number;
+  reason: string;
+  text: string;
+  unit: "groups" | "copies";
+}
+
+export interface CleanupOpenParams {
+  backup_volume?: string;
+  job_id: string;
+  preset?: "watch" | "conservative" | "recommended" | "links" | "backup" | "custom" | null;
+}
+
+export interface CleanupOptions {
+  criteria?: ("oldest_created" | "oldest_modified" | "newest_modified" | "shortest_path" | "longest_path" | "shallowest" | "deepest" | "plain_name")[] | null;
+  default_action?: "leave" | "trash" | "hardlink" | "symlink" | "clone" | null;
+  folder_consistent?: boolean | null;
+  on_failure?: "continue" | "stop" | null;
+  per_volume?: boolean | null;
+  symlink_style?: "auto" | "relative" | "absolute" | null;
+  verify?: "auto" | "content" | "metadata" | null;
+}
+
+export interface CleanupPairRow {
+  a: string;
+  /** Share of a's compared files that have a copy in b */
+  a_in_b: number;
+  b: string;
+  b_in_a: number;
+  bytes: number;
+  groups: number;
+  /** a / b / both / mixed / none: where the keepers of these groups are */
+  keep: string;
+  /** Folder pairs below it taken into this one */
+  merged: number;
+  rule: CleanupPairView | null;
+}
+
+export interface CleanupPairRule {
+  a: string;
+  auto?: boolean;
+  b: string;
+  keep?: "a" | "b" | "both";
+  other_action?: "" | "leave" | "trash" | "hardlink" | "symlink" | "clone";
+}
+
+export interface CleanupPairView {
+  a: string;
+  auto: boolean;
+  b: string;
+  keep: "a" | "b" | "both";
+  other_action: string;
+}
+
+export interface CleanupPairsPage {
+  items: CleanupPairRow[];
+  total: number;
+  version: number;
+}
+
+export interface CleanupPairsParams {
+  limit?: number;
+  merge?: boolean;
+  offset?: number;
+  plan_id: string;
+}
+
+export interface CleanupPlanItem {
+  bytes: number;
+  can: boolean;
+  path: string;
+  seq: number;
+  why: string;
+}
+
+export interface CleanupPlanParams {
+  plan_id: string;
+}
+
+export interface CleanupProgressEvent {
+  bytes: number;
+  counts: Record<string, number>;
+  current: string;
+  done: number;
+  freed_later: number;
+  freed_now: number;
+  kind: "facts" | "preflight" | "execute" | "undo" | "purge" | "recover";
+  message: string;
+  /** Preflight skipped steps: run the rest only when asked again */
+  needs_confirm: boolean;
+  phase: string;
+  plan_id: string;
+  run_id: string;
+  /** Final event: what was not done, by reason */
+  skipped: CleanupSkipped[];
+  state: "waiting" | "preflight" | "running" | "paused" | "done" | "partial" | "stopped" | "failed" | "undone" | "recovered";
+  task_id: string;
+  total: number;
+}
+
+export interface CleanupPurgeParams {
+  /** Also originals with extra data never compared */
+  ack_streams?: boolean;
+  run_id: string;
+  seqs?: number[] | null;
+  verify?: "auto" | "content";
+}
+
+export interface CleanupPurgePlan {
+  bytes: number;
+  can: number;
+  cannot: number;
+  /** Copies in the recycle bin: emptying it is up to the user */
+  in_trash: number;
+  items: CleanupPlanItem[];
+  run_id: string;
+  /** Originals with extra streams or attributes (need ack_streams) */
+  streams: number;
+}
+
+export interface CleanupReason {
+  decided: boolean;
+  layer: string;
+  text: string;
+}
+
+export interface CleanupRecoverReport {
+  report: CleanupInterrupted | null;
+}
+
+export interface CleanupResolveParams {
+  choice: "put_back" | "keep_as_is";
+  run_id: string;
+  seq: number;
+}
+
+export interface CleanupResumeOffer {
+  manual: number;
+  rules: number;
+  saved_at: string;
+}
+
+export interface CleanupResumeParams {
+  accept: boolean;
+  plan_id: string;
+}
+
+export interface CleanupRisk {
+  acked: boolean;
+  code: string;
+  id: string;
+  severity: "none" | "info" | "low" | "medium" | "high" | "blocked";
+  text: string;
+  title: string;
+}
+
+export interface CleanupRiskCopies {
+  items: CleanupCopy[];
+  risk: CleanupBucket;
+  total: number;
+  version: number;
+}
+
+export interface CleanupRiskCopiesParams {
+  limit?: number;
+  offset?: number;
+  plan_id: string;
+  risk: string;
+}
+
+export interface CleanupRule {
+  criteria?: ("oldest_created" | "oldest_modified" | "newest_modified" | "shortest_path" | "longest_path" | "shallowest" | "deepest" | "plain_name")[];
+  /** keep: a CleanupKeepEffect; action: a CleanupAction */
+  effect: string;
+  enabled?: boolean;
+  fallback?: ("leave" | "trash" | "hardlink" | "symlink" | "clone")[];
+  folders?: string[];
+  /** 0 when adding */
+  id?: number;
+  kind: "keep" | "action";
+  label?: string;
+  label_key?: string;
+  n?: number;
+  symlink_style?: "" | "relative" | "absolute";
+  target_under?: string;
+  when?: CleanupSelector;
+}
+
+export interface CleanupRuleView {
+  bytes: number;
+  criteria: string[];
+  effect: string;
+  enabled: boolean;
+  fallback: string[];
+  folders: string[];
+  /** Copies it decides */
+  hits: number;
+  id: number;
+  kind: "keep" | "action";
+  label: string;
+  n: number;
+  preset: boolean;
+  risky: boolean;
+  target_under: string;
+  when: Record<string, unknown>;
+}
+
+export interface CleanupRunDetail {
+  items: CleanupRunItem[];
+  run: CleanupRunSummary;
+  total: number;
+}
+
+export interface CleanupRunItem {
+  action: "leave" | "trash" | "hardlink" | "symlink" | "clone";
+  code: string;
+  freed: number;
+  path: string;
+  recovery: string;
+  seq: number;
+  state: "pending" | "done" | "skipped" | "failed" | "attention" | "undone" | "purged" | "cancelled";
+  target: string;
+  text: string;
+}
+
+export interface CleanupRunParams {
+  /** A result code, or '' for every item */
+  filter?: string;
+  limit?: number;
+  offset?: number;
+  run_id: string;
+}
+
+export interface CleanupRunSeqsParams {
+  /** Undo: an original that cannot go back goes beside it instead */
+  beside?: boolean;
+  run_id: string;
+  seqs?: number[] | null;
+}
+
+export interface CleanupRunSummary {
+  attention: number;
+  by_action: Record<string, number>;
+  can_purge: number;
+  can_undo: number;
+  counts: Record<string, number>;
+  finished: string;
+  freed_now: number;
+  /** Bytes of originals still in the recovery area */
+  held: number;
+  held_by_volume: Record<string, number>;
+  in_trash: number;
+  purge_reminder: boolean;
+  roots: string[];
+  run_id: string;
+  started: string;
+  state: "waiting" | "preflight" | "running" | "paused" | "done" | "partial" | "stopped" | "failed" | "undone" | "recovered";
+}
+
+export interface CleanupRunsPage {
+  items: CleanupRunSummary[];
+  total: number;
+}
+
+export interface CleanupRunsParams {
+  limit?: number;
+  offset?: number;
+}
+
+export interface CleanupSample {
+  groups: number[];
+}
+
+export interface CleanupSampleParams {
+  per_bucket?: number;
+  plan_id: string;
+}
+
+export interface CleanupScope {
+  copies?: CleanupCopyRef[] | null;
+  /** The filter syntax of docs/dupes.md §16.7.3 */
+  filter?: string | null;
+  groups?: number[] | null;
+}
+
+export interface CleanupSelector {
+  can?: ("leave" | "trash" | "hardlink" | "symlink" | "clone")[];
+  classes?: string[];
+  copies_min?: number | null;
+  cross?: boolean | null;
+  ext?: string[];
+  fs?: string[];
+  mtime_after?: number | null;
+  mtime_before?: number | null;
+  name_glob?: string;
+  not_tags?: string[];
+  not_under?: string[];
+  path_glob?: string;
+  risk_any?: string[];
+  /** Risk-condition rules only */
+  risk_at_least?: "none" | "info" | "low" | "medium" | "high" | "blocked" | null;
+  same_folder?: boolean | null;
+  same_volume?: boolean | null;
+  size_max?: number | null;
+  size_min?: number | null;
+  tags?: string[];
+  under?: string[];
+  volumes?: string[];
+}
+
+export interface CleanupSkipped {
+  code: string;
+  count: number;
+  examples: string[];
+  text: string;
+}
+
+export interface CleanupState {
+  action_rules: CleanupRuleView[];
+  approval: CleanupApprovalInfo | null;
+  auto_pairs: number;
+  can_redo: boolean;
+  can_undo: boolean;
+  criteria: string[];
+  default_action: string;
+  facts_done: number;
+  facts_total: number;
+  folder_consistent: boolean;
+  job_id: string;
+  keep_rules: CleanupRuleView[];
+  macos_links: boolean;
+  manual: number;
+  options: Record<string, string>;
+  pairs: CleanupPairView[];
+  per_volume: boolean;
+  plan_id: string;
+  platform: string;
+  preset: string;
+  resume_offer: CleanupResumeOffer | null;
+  /** The task id of a cleanup task in progress */
+  running: string;
+  scan_ids: string[];
+  summary: CleanupSummary;
+  symlink_right: boolean;
+  version: number;
+}
+
+export interface CleanupSummary {
+  buckets: CleanupBucket[];
+  by_action: CleanupActionTotal[];
+  by_severity: Record<string, number>;
+  by_volume: CleanupVolumeTotal[];
+  /** Bytes read before running (verify, block clones) */
+  compare_bytes: number;
+  copies: number;
+  freed_later: number;
+  freed_now: number;
+  gates: string[];
+  groups: number;
+  in_plan: number;
+  not_done: CleanupNotDone[];
+  reviewed: number;
+  version: number;
+}
+
+export interface CleanupTask {
+  delay_s: number;
+  kind: "facts" | "preflight" | "execute" | "undo" | "purge" | "recover";
+  run_id: string;
+  task_id: string;
+  total: number;
+}
+
+export interface CleanupTaskParams {
+  task_id: string;
+}
+
+export interface CleanupTokenParams {
+  plan_id: string;
+  token: string;
+}
+
+export interface CleanupUndoPlan {
+  can: number;
+  cannot: number;
+  items: CleanupPlanItem[];
+  run_id: string;
+}
+
+export interface CleanupVersionParams {
+  base_version: number;
+  plan_id: string;
+}
+
+export interface CleanupVolumeCell {
+  a: string;
+  b: string;
+  bytes: number;
+  groups: number;
+}
+
+export interface CleanupVolumeMatrix {
+  cells: CleanupVolumeCell[];
+  version: number;
+  volumes: string[];
+}
+
+export interface CleanupVolumeTotal {
+  copies: number;
+  freed_later: number;
+  freed_now: number;
+  fs: string;
+  /** Where the originals of replaced copies stay */
+  recovery: string;
+  snapshots_note: string;
+  /** The volume's recycle bin, or why it has none */
+  trash: string;
+  volume: string;
+}
+
+export interface CleanupWhoUses {
+  users: Record<string, string[]>;
 }
 
 export interface ClientInfo {
@@ -2320,6 +3003,72 @@ export interface Methods {
   "compare.summary": { params: CompareSummaryParams; result: CompareSummary };
   /** Stop the search; what was verified stays, the rest stays unchecked. */
   "dupes.cancel": { params: DupesJobParams; result: DupesStatus };
+  /** Freeze the plan into steps and a token (refused while risks are checked or unacknowledged). */
+  "dupes.cleanup_approve": { params: CleanupApproveParams; result: CleanupApprovalInfo };
+  /** Stop once the step in progress is done. */
+  "dupes.cleanup_cancel": { params: CleanupTaskParams; result: CleanupTask };
+  /** Leave the plan; its edits are saved. */
+  "dupes.cleanup_close": { params: CleanupPlanParams; result: EmptyResult };
+  /** Apply an edit (refused with a reason, or when base_version is not the plan's); clears an approval. */
+  "dupes.cleanup_edit": { params: CleanupEditParams; result: CleanupState };
+  /** Run the approved steps (the token must be the plan's): preflight first, then step by step. */
+  "dupes.cleanup_execute": { params: CleanupExecuteParams; result: CleanupTask };
+  /** Write the plan or a run's report (JSON, CSV). */
+  "dupes.cleanup_export": { params: CleanupExportParams; result: CleanupExportResult };
+  /** Counts per facet of a filter. */
+  "dupes.cleanup_facets": { params: CleanupFilterParams; result: CleanupFacets };
+  /** Every copy of a group: facts side by side, what can be done and why not, risks, reason chains. */
+  "dupes.cleanup_group": { params: CleanupGroupParams; result: CleanupGroupDetail };
+  /** A page of the plan's groups (filtered, sorted). */
+  "dupes.cleanup_groups": { params: CleanupGroupsParams; result: CleanupGroupsPage };
+  /** Take a saved plan's rules and decisions (edits only). */
+  "dupes.cleanup_import": { params: CleanupImportParams; result: CleanupImportResult };
+  /** Open (or join) the cleanup plan of a finished search; the risk check starts in the background. */
+  "dupes.cleanup_open": { params: CleanupOpenParams; result: CleanupState };
+  /** Folder pairs, coverage both ways. */
+  "dupes.cleanup_pairs": { params: CleanupPairsParams; result: CleanupPairsPage };
+  /** Pause between two steps. */
+  "dupes.cleanup_pause": { params: CleanupTaskParams; result: CleanupTask };
+  /** Check every step again without changing anything. */
+  "dupes.cleanup_preflight": { params: CleanupTokenParams; result: CleanupTask };
+  /** What an edit would change, without keeping it. */
+  "dupes.cleanup_preview": { params: CleanupEditParams; result: CleanupDiff };
+  /** Empty the recovery area of a run for good, after a 5 s delay (cancellable) and checking each original. */
+  "dupes.cleanup_purge": { params: CleanupPurgeParams; result: CleanupTask };
+  /** Which originals can be purged, and why not. */
+  "dupes.cleanup_purge_plan": { params: CleanupPurgeParams; result: CleanupPurgePlan };
+  /** What finishing an interrupted run found at start. */
+  "dupes.cleanup_recover_report": { params: Empty; result: CleanupRecoverReport };
+  /** Redo an undone edit. */
+  "dupes.cleanup_redo_edit": { params: CleanupVersionParams; result: CleanupState };
+  /** Settle an item that needs the user. */
+  "dupes.cleanup_resolve": { params: CleanupResolveParams; result: CleanupRunDetail };
+  /** Take or drop the saved edits of an earlier plan. */
+  "dupes.cleanup_resume": { params: CleanupResumeParams; result: CleanupState };
+  /** Go on after a pause. */
+  "dupes.cleanup_resume_run": { params: CleanupTaskParams; result: CleanupTask };
+  /** The copies of one risk kind (paged). */
+  "dupes.cleanup_risk_copies": { params: CleanupRiskCopiesParams; result: CleanupRiskCopies };
+  /** One run, step by step. */
+  "dupes.cleanup_run": { params: CleanupRunParams; result: CleanupRunDetail };
+  /** The cleanup history, newest first. */
+  "dupes.cleanup_runs": { params: CleanupRunsParams; result: CleanupRunsPage };
+  /** Groups to spot-check. */
+  "dupes.cleanup_sample": { params: CleanupSampleParams; result: CleanupSample };
+  /** Version, rules, summary, gates. */
+  "dupes.cleanup_state": { params: CleanupPlanParams; result: CleanupState };
+  /** Per action, per volume, risk buckets, gates. */
+  "dupes.cleanup_summary": { params: CleanupPlanParams; result: CleanupSummary };
+  /** Undo a run (or some of it). */
+  "dupes.cleanup_undo": { params: CleanupRunSeqsParams; result: CleanupTask };
+  /** Undo the last edit. */
+  "dupes.cleanup_undo_edit": { params: CleanupVersionParams; result: CleanupState };
+  /** What undoing a run would do, item by item. */
+  "dupes.cleanup_undo_plan": { params: CleanupRunSeqsParams; result: CleanupUndoPlan };
+  /** Volume by volume. */
+  "dupes.cleanup_volumes": { params: CleanupPlanParams; result: CleanupVolumeMatrix };
+  /** Programs holding the filtered copies open. */
+  "dupes.cleanup_who_uses": { params: CleanupFilterParams; result: CleanupWhoUses };
   /** Forget a search and its results. */
   "dupes.clear": { params: DupesJobParams; result: EmptyResult };
   /** A folder's extra copies and what of it exists elsewhere (information only, never a delete). */
@@ -2507,6 +3256,12 @@ export interface Events {
   "compare.progress": CompareProgressEvent;
   /** Duplicate-file results changed (new groups, keep rules, files changed). */
   "dupes.changed": DupesChangedEvent;
+  /** A cleanup plan changed (an edit, the risk check, results, a run). */
+  "dupes.cleanup_changed": CleanupChangedEvent;
+  /** An interrupted cleanup run was finished at start (first session). */
+  "dupes.cleanup_interrupted": CleanupInterrupted;
+  /** A cleanup task's progress (at most four times a second, and at the end). */
+  "dupes.cleanup_progress": CleanupProgressEvent;
   /** A duplicate-file search's state (at most four times a second, every session). */
   "dupes.progress": DupesStatus;
   /** Load state of a disk for an 'io' subscription (2 Hz). */

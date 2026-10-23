@@ -13,6 +13,7 @@ slices of a million rows, so no temporary is as long as the store.
 
 from __future__ import annotations
 
+import contextlib
 import ntpath
 import os
 import posixpath
@@ -134,11 +135,43 @@ def _below(store: NodeStore, nodes: np.ndarray, tops: np.ndarray) -> np.ndarray:
     return out
 
 
+def _recovery_areas(store: NodeStore, roots: Sequence[RootInfo]) -> np.ndarray:
+    """Nodes of the cleanup's recovery folders in this tree: ``.SpaceKnife-recovery*`` at the top of
+    a root or a volume, and SpaceKnife's own ``data/dupes/cleanup/recovery``."""
+    from ..dupes.cleanup.recovery import AREA
+    from ..paths import data_dir
+
+    found: list[int] = []
+    for r in roots:
+        tops = {r.path}
+        if r.volume is not None:
+            tops.add(r.volume.mount_point)
+        for top in tops:
+            node = None
+            with contextlib.suppress(Exception):
+                node = store.find(top)
+            if node is None:
+                continue
+            for child in store.children(node):
+                with contextlib.suppress(Exception):
+                    if store.name(int(child)).startswith(AREA):
+                        found.append(int(child))
+    with contextlib.suppress(Exception):
+        hit = store.find(str(data_dir() / "dupes" / "cleanup" / "recovery"))
+        if hit is not None:
+            found.append(int(hit))
+    return np.array(sorted(set(found)), dtype=np.int64)
+
+
 def excluded_trees(
     store: NodeStore, roots: Sequence[RootInfo], include_system: bool
 ) -> tuple[np.ndarray, np.ndarray]:
-    """(protected and program trees, recycle bins) of one store as sorted node ids."""
+    """(protected and program trees, recycle bins and cleanup recovery areas) of one store as sorted
+    node ids. Recovery areas hold originals a cleanup replaced: never candidates (docs/dupes.md §16.9.6)."""
     bins = np.asarray(find_bins(store), dtype=np.int64)
+    areas = _recovery_areas(store, roots)
+    if len(areas):
+        bins = np.unique(np.concatenate([bins, areas]))
     if include_system:
         return np.zeros(0, dtype=np.int64), bins
     rules = current_rules()

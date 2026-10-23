@@ -210,6 +210,9 @@ class Session:
             hello.client.version,
             ",".join(sorted(self.capabilities)) or "-",
         )
+        cleanup = getattr(self.server, "cleanup", None)
+        if cleanup is not None:
+            cleanup.hello(self)  # an interrupted cleanup finished at start: told once
 
     async def _reject(self, code: CloseCode, reason: str) -> NoReturn:
         await self.ws.close(int(code), reason)

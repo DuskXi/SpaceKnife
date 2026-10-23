@@ -45,6 +45,53 @@ from .dupes import (
     DupesStartParams,
     DupesStatus,
 )
+from .dupes_cleanup import (
+    CleanupApprovalInfo,
+    CleanupApproveParams,
+    CleanupChangedEvent,
+    CleanupDiff,
+    CleanupEditParams,
+    CleanupExecuteParams,
+    CleanupExportParams,
+    CleanupExportResult,
+    CleanupFacets,
+    CleanupFilterParams,
+    CleanupGroupDetail,
+    CleanupGroupParams,
+    CleanupGroupsPage,
+    CleanupGroupsParams,
+    CleanupImportParams,
+    CleanupImportResult,
+    CleanupInterrupted,
+    CleanupOpenParams,
+    CleanupPairsPage,
+    CleanupPairsParams,
+    CleanupPlanParams,
+    CleanupProgressEvent,
+    CleanupPurgeParams,
+    CleanupPurgePlan,
+    CleanupRecoverReport,
+    CleanupResolveParams,
+    CleanupResumeParams,
+    CleanupRiskCopies,
+    CleanupRiskCopiesParams,
+    CleanupRunDetail,
+    CleanupRunParams,
+    CleanupRunSeqsParams,
+    CleanupRunsPage,
+    CleanupRunsParams,
+    CleanupSample,
+    CleanupSampleParams,
+    CleanupState,
+    CleanupSummary,
+    CleanupTask,
+    CleanupTaskParams,
+    CleanupTokenParams,
+    CleanupUndoPlan,
+    CleanupVersionParams,
+    CleanupVolumeMatrix,
+    CleanupWhoUses,
+)
 from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
@@ -456,6 +503,155 @@ DUPES_KEEP = MethodSpec(
     DupesStatus,
     "Set the keep rules and manual choices; roles and the ledger follow.",
 )
+# ---------------------------------------------------------------- duplicate-file cleanup (dupes.cleanup.v1)
+DUPES_CLEANUP_OPEN = MethodSpec(
+    "dupes.cleanup_open",
+    CleanupOpenParams,
+    CleanupState,
+    "Open (or join) the cleanup plan of a finished search; the risk check starts in the background.",
+)
+DUPES_CLEANUP_RESUME = MethodSpec(
+    "dupes.cleanup_resume",
+    CleanupResumeParams,
+    CleanupState,
+    "Take or drop the saved edits of an earlier plan.",
+)
+DUPES_CLEANUP_STATE = MethodSpec(
+    "dupes.cleanup_state", CleanupPlanParams, CleanupState, "Version, rules, summary, gates."
+)
+DUPES_CLEANUP_PREVIEW = MethodSpec(
+    "dupes.cleanup_preview", CleanupEditParams, CleanupDiff, "What an edit would change, without keeping it."
+)
+DUPES_CLEANUP_EDIT = MethodSpec(
+    "dupes.cleanup_edit",
+    CleanupEditParams,
+    CleanupState,
+    "Apply an edit (refused with a reason, or when base_version is not the plan's); clears an approval.",
+)
+DUPES_CLEANUP_UNDO_EDIT = MethodSpec(
+    "dupes.cleanup_undo_edit", CleanupVersionParams, CleanupState, "Undo the last edit."
+)
+DUPES_CLEANUP_REDO_EDIT = MethodSpec(
+    "dupes.cleanup_redo_edit", CleanupVersionParams, CleanupState, "Redo an undone edit."
+)
+DUPES_CLEANUP_GROUPS = MethodSpec(
+    "dupes.cleanup_groups",
+    CleanupGroupsParams,
+    CleanupGroupsPage,
+    "A page of the plan's groups (filtered, sorted).",
+)
+DUPES_CLEANUP_GROUP = MethodSpec(
+    "dupes.cleanup_group",
+    CleanupGroupParams,
+    CleanupGroupDetail,
+    "Every copy of a group: facts side by side, what can be done and why not, risks, reason chains.",
+)
+DUPES_CLEANUP_FACETS = MethodSpec(
+    "dupes.cleanup_facets", CleanupFilterParams, CleanupFacets, "Counts per facet of a filter."
+)
+DUPES_CLEANUP_PAIRS = MethodSpec(
+    "dupes.cleanup_pairs", CleanupPairsParams, CleanupPairsPage, "Folder pairs, coverage both ways."
+)
+DUPES_CLEANUP_VOLUMES = MethodSpec(
+    "dupes.cleanup_volumes", CleanupPlanParams, CleanupVolumeMatrix, "Volume by volume."
+)
+DUPES_CLEANUP_SUMMARY = MethodSpec(
+    "dupes.cleanup_summary", CleanupPlanParams, CleanupSummary, "Per action, per volume, risk buckets, gates."
+)
+DUPES_CLEANUP_RISK_COPIES = MethodSpec(
+    "dupes.cleanup_risk_copies",
+    CleanupRiskCopiesParams,
+    CleanupRiskCopies,
+    "The copies of one risk kind (paged).",
+)
+DUPES_CLEANUP_SAMPLE = MethodSpec(
+    "dupes.cleanup_sample", CleanupSampleParams, CleanupSample, "Groups to spot-check."
+)
+DUPES_CLEANUP_WHO_USES = MethodSpec(
+    "dupes.cleanup_who_uses",
+    CleanupFilterParams,
+    CleanupWhoUses,
+    "Programs holding the filtered copies open.",
+)
+DUPES_CLEANUP_EXPORT = MethodSpec(
+    "dupes.cleanup_export",
+    CleanupExportParams,
+    CleanupExportResult,
+    "Write the plan or a run's report (JSON, CSV).",
+)
+DUPES_CLEANUP_IMPORT = MethodSpec(
+    "dupes.cleanup_import",
+    CleanupImportParams,
+    CleanupImportResult,
+    "Take a saved plan's rules and decisions (edits only).",
+)
+DUPES_CLEANUP_APPROVE = MethodSpec(
+    "dupes.cleanup_approve",
+    CleanupApproveParams,
+    CleanupApprovalInfo,
+    "Freeze the plan into steps and a token (refused while risks are checked or unacknowledged).",
+)
+DUPES_CLEANUP_PREFLIGHT = MethodSpec(
+    "dupes.cleanup_preflight",
+    CleanupTokenParams,
+    CleanupTask,
+    "Check every step again without changing anything.",
+)
+DUPES_CLEANUP_EXECUTE = MethodSpec(
+    "dupes.cleanup_execute",
+    CleanupExecuteParams,
+    CleanupTask,
+    "Run the approved steps (the token must be the plan's): preflight first, then step by step.",
+)
+DUPES_CLEANUP_PAUSE = MethodSpec(
+    "dupes.cleanup_pause", CleanupTaskParams, CleanupTask, "Pause between two steps."
+)
+DUPES_CLEANUP_RESUME_RUN = MethodSpec(
+    "dupes.cleanup_resume_run", CleanupTaskParams, CleanupTask, "Go on after a pause."
+)
+DUPES_CLEANUP_CANCEL = MethodSpec(
+    "dupes.cleanup_cancel", CleanupTaskParams, CleanupTask, "Stop once the step in progress is done."
+)
+DUPES_CLEANUP_RUNS = MethodSpec(
+    "dupes.cleanup_runs", CleanupRunsParams, CleanupRunsPage, "The cleanup history, newest first."
+)
+DUPES_CLEANUP_RUN = MethodSpec(
+    "dupes.cleanup_run", CleanupRunParams, CleanupRunDetail, "One run, step by step."
+)
+DUPES_CLEANUP_UNDO_PLAN = MethodSpec(
+    "dupes.cleanup_undo_plan",
+    CleanupRunSeqsParams,
+    CleanupUndoPlan,
+    "What undoing a run would do, item by item.",
+)
+DUPES_CLEANUP_UNDO = MethodSpec(
+    "dupes.cleanup_undo", CleanupRunSeqsParams, CleanupTask, "Undo a run (or some of it)."
+)
+DUPES_CLEANUP_PURGE_PLAN = MethodSpec(
+    "dupes.cleanup_purge_plan",
+    CleanupPurgeParams,
+    CleanupPurgePlan,
+    "Which originals can be purged, and why not.",
+)
+DUPES_CLEANUP_PURGE = MethodSpec(
+    "dupes.cleanup_purge",
+    CleanupPurgeParams,
+    CleanupTask,
+    "Empty the recovery area of a run for good, after a 5 s delay (cancellable) and checking each original.",
+)
+DUPES_CLEANUP_RESOLVE = MethodSpec(
+    "dupes.cleanup_resolve", CleanupResolveParams, CleanupRunDetail, "Settle an item that needs the user."
+)
+DUPES_CLEANUP_RECOVER_REPORT = MethodSpec(
+    "dupes.cleanup_recover_report",
+    Empty,
+    CleanupRecoverReport,
+    "What finishing an interrupted run found at start.",
+)
+DUPES_CLEANUP_CLOSE = MethodSpec(
+    "dupes.cleanup_close", CleanupPlanParams, EmptyResult, "Leave the plan; its edits are saved."
+)
+
 DUPES_CLEAR = MethodSpec("dupes.clear", DupesJobParams, EmptyResult, "Forget a search and its results.")
 CLASSES_GET = MethodSpec("classes.get", Empty, ClassesState, "The file class table (W7 文件类别).")
 CLASSES_UPDATE = MethodSpec(
@@ -649,6 +845,39 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         DUPES_LOCATE,
         DUPES_KEEP,
         DUPES_CLEAR,
+        DUPES_CLEANUP_OPEN,
+        DUPES_CLEANUP_RESUME,
+        DUPES_CLEANUP_STATE,
+        DUPES_CLEANUP_PREVIEW,
+        DUPES_CLEANUP_EDIT,
+        DUPES_CLEANUP_UNDO_EDIT,
+        DUPES_CLEANUP_REDO_EDIT,
+        DUPES_CLEANUP_GROUPS,
+        DUPES_CLEANUP_GROUP,
+        DUPES_CLEANUP_FACETS,
+        DUPES_CLEANUP_PAIRS,
+        DUPES_CLEANUP_VOLUMES,
+        DUPES_CLEANUP_SUMMARY,
+        DUPES_CLEANUP_RISK_COPIES,
+        DUPES_CLEANUP_SAMPLE,
+        DUPES_CLEANUP_WHO_USES,
+        DUPES_CLEANUP_EXPORT,
+        DUPES_CLEANUP_IMPORT,
+        DUPES_CLEANUP_APPROVE,
+        DUPES_CLEANUP_PREFLIGHT,
+        DUPES_CLEANUP_EXECUTE,
+        DUPES_CLEANUP_PAUSE,
+        DUPES_CLEANUP_RESUME_RUN,
+        DUPES_CLEANUP_CANCEL,
+        DUPES_CLEANUP_RUNS,
+        DUPES_CLEANUP_RUN,
+        DUPES_CLEANUP_UNDO_PLAN,
+        DUPES_CLEANUP_UNDO,
+        DUPES_CLEANUP_PURGE_PLAN,
+        DUPES_CLEANUP_PURGE,
+        DUPES_CLEANUP_RESOLVE,
+        DUPES_CLEANUP_RECOVER_REPORT,
+        DUPES_CLEANUP_CLOSE,
         CLASSES_GET,
         CLASSES_UPDATE,
         CLASSES_RESET,
@@ -693,6 +922,22 @@ EVENT_DUPES_CHANGED = EventSpec(
     "Duplicate-file results changed (new groups, keep rules, files changed).",
 )
 
+EVENT_DUPES_CLEANUP_CHANGED = EventSpec(
+    "dupes.cleanup_changed",
+    CleanupChangedEvent,
+    "A cleanup plan changed (an edit, the risk check, results, a run).",
+)
+EVENT_DUPES_CLEANUP_PROGRESS = EventSpec(
+    "dupes.cleanup_progress",
+    CleanupProgressEvent,
+    "A cleanup task's progress (at most four times a second, and at the end).",
+)
+EVENT_DUPES_CLEANUP_INTERRUPTED = EventSpec(
+    "dupes.cleanup_interrupted",
+    CleanupInterrupted,
+    "An interrupted cleanup run was finished at start (first session).",
+)
+
 EVENTS: dict[str, EventSpec[BaseModel]] = {
     spec.name: spec
     for spec in (
@@ -709,5 +954,8 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_UPDATE,
         EVENT_DUPES_PROGRESS,
         EVENT_DUPES_CHANGED,
+        EVENT_DUPES_CLEANUP_CHANGED,
+        EVENT_DUPES_CLEANUP_PROGRESS,
+        EVENT_DUPES_CLEANUP_INTERRUPTED,
     )
 }

@@ -49,6 +49,7 @@ TEXT = Texts(
         "package_db": "软件包数据库，删除会损坏包管理器",
         "app": "SpaceKnife 自己的数据目录",
         "program": "SpaceKnife 正在运行的程序所在目录",
+        "recovery": "SpaceKnife 的恢复区：在「重复文件清理记录」里还原或清除",
     }
 )
 
@@ -418,6 +419,10 @@ def protected_reason(path: str) -> str | None:
     trash folders and SpaceKnife's own folders. Also checks the path with its parent folders
     resolved, so a link into ``/usr`` or ``C:\\Windows`` does not open a way around the list.
     """
+    from ..dupes.cleanup.recovery import is_recovery_path
+
+    if is_recovery_path(path):
+        return TEXT["recovery"]  # originals of a duplicate-file cleanup (docs/dupes.md §16.9.6)
     rules = current_rules()
     reason = match_rules(path, rules)
     if reason is None:

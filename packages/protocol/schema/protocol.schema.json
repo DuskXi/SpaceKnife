@@ -1060,6 +1060,3627 @@
       "title": "ClassesUpdateParams",
       "type": "object"
     },
+    "CleanupActionTotal": {
+      "properties": {
+        "action": {
+          "enum": [
+            "leave",
+            "trash",
+            "hardlink",
+            "symlink",
+            "clone"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "copies": {
+          "title": "Copies",
+          "type": "integer"
+        },
+        "freed_later": {
+          "title": "Freed Later",
+          "type": "integer"
+        },
+        "freed_now": {
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "copies",
+        "groups",
+        "freed_now",
+        "freed_later"
+      ],
+      "title": "CleanupActionTotal",
+      "type": "object"
+    },
+    "CleanupApprovalInfo": {
+      "properties": {
+        "acks": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Acks",
+          "type": "object"
+        },
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "by_action": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "By Action",
+          "type": "object"
+        },
+        "steps": {
+          "title": "Steps",
+          "type": "integer"
+        },
+        "token": {
+          "title": "Token",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "token",
+        "version",
+        "steps",
+        "by_action",
+        "acks",
+        "at"
+      ],
+      "title": "CleanupApprovalInfo",
+      "type": "object"
+    },
+    "CleanupApproveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "version": {
+          "minimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "plan_id",
+        "version"
+      ],
+      "title": "CleanupApproveParams",
+      "type": "object"
+    },
+    "CleanupBucket": {
+      "properties": {
+        "acked": {
+          "default": false,
+          "title": "Acked",
+          "type": "boolean"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "copies": {
+          "title": "Copies",
+          "type": "integer"
+        },
+        "example": {
+          "default": "",
+          "title": "Example",
+          "type": "string"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "none",
+            "info",
+            "low",
+            "medium",
+            "high",
+            "blocked"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unacked": {
+          "default": 0,
+          "description": "High kinds: copies not covered by the acknowledgement",
+          "title": "Unacked",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "severity",
+        "title",
+        "copies",
+        "groups",
+        "bytes"
+      ],
+      "title": "CleanupBucket",
+      "type": "object"
+    },
+    "CleanupChangedEvent": {
+      "properties": {
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "edit",
+            "facts",
+            "results",
+            "approved",
+            "basket",
+            "closed",
+            "run"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "plan_id",
+        "version",
+        "reason"
+      ],
+      "title": "CleanupChangedEvent",
+      "type": "object"
+    },
+    "CleanupCopy": {
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "enum": [
+                "leave",
+                "trash",
+                "hardlink",
+                "symlink",
+                "clone"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None for a keeper",
+          "title": "Action"
+        },
+        "alloc": {
+          "default": 0,
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "available": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Per action: '' when it can be done, else why not",
+          "title": "Available",
+          "type": "object"
+        },
+        "btime": {
+          "default": 0,
+          "title": "Btime",
+          "type": "integer"
+        },
+        "freed_later": {
+          "default": 0,
+          "title": "Freed Later",
+          "type": "integer"
+        },
+        "freed_now": {
+          "default": 0,
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "fs": {
+          "title": "Fs",
+          "type": "string"
+        },
+        "keep": {
+          "enum": [
+            "keep",
+            "locked",
+            "none"
+          ],
+          "title": "Keep",
+          "type": "string"
+        },
+        "manual": {
+          "default": false,
+          "title": "Manual",
+          "type": "boolean"
+        },
+        "mtime": {
+          "default": 0,
+          "title": "Mtime",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/CleanupRisk"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "severity": {
+          "default": "none",
+          "enum": [
+            "none",
+            "info",
+            "low",
+            "medium",
+            "high",
+            "blocked"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "source": {
+          "default": "",
+          "description": "Why it is kept, or why it gets its action (the user's words)",
+          "title": "Source",
+          "type": "string"
+        },
+        "source_code": {
+          "default": "",
+          "title": "Source Code",
+          "type": "string"
+        },
+        "symlink_text": {
+          "default": "",
+          "title": "Symlink Text",
+          "type": "string"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "target": {
+          "default": "",
+          "description": "The keeper a link or clone points at",
+          "title": "Target",
+          "type": "string"
+        },
+        "view_of": {
+          "default": "",
+          "description": "Another path of the same single-named file: it follows that one",
+          "title": "View Of",
+          "type": "string"
+        },
+        "volume": {
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "row",
+        "scan_id",
+        "node",
+        "path",
+        "volume",
+        "fs",
+        "keep"
+      ],
+      "title": "CleanupCopy",
+      "type": "object"
+    },
+    "CleanupCopyDetail": {
+      "properties": {
+        "action_chain": {
+          "items": {
+            "$ref": "#/$defs/CleanupReason"
+          },
+          "title": "Action Chain",
+          "type": "array"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/CleanupFactRow"
+          },
+          "title": "Facts",
+          "type": "array"
+        },
+        "item": {
+          "$ref": "#/$defs/CleanupCopy"
+        },
+        "keep_chain": {
+          "items": {
+            "$ref": "#/$defs/CleanupReason"
+          },
+          "title": "Keep Chain",
+          "type": "array"
+        },
+        "keeper": {
+          "default": "",
+          "title": "Keeper",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item"
+      ],
+      "title": "CleanupCopyDetail",
+      "type": "object"
+    },
+    "CleanupCopyRef": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group",
+        "path"
+      ],
+      "title": "CleanupCopyRef",
+      "type": "object"
+    },
+    "CleanupDiff": {
+      "properties": {
+        "after": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "After",
+          "type": "object"
+        },
+        "before": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Before",
+          "type": "object"
+        },
+        "changed": {
+          "default": 0,
+          "title": "Changed",
+          "type": "integer"
+        },
+        "examples": {
+          "items": {
+            "$ref": "#/$defs/CleanupDiffRow"
+          },
+          "title": "Examples",
+          "type": "array"
+        },
+        "freed_after": {
+          "title": "Freed After",
+          "type": "integer"
+        },
+        "freed_before": {
+          "title": "Freed Before",
+          "type": "integer"
+        },
+        "protected": {
+          "default": 0,
+          "description": "Copies chosen by hand that the edit leaves alone",
+          "title": "Protected",
+          "type": "integer"
+        },
+        "refused": {
+          "default": "",
+          "title": "Refused",
+          "type": "string"
+        },
+        "risks_added": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Risks Added",
+          "type": "object"
+        },
+        "risks_removed": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Risks Removed",
+          "type": "object"
+        },
+        "unavailable": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "Copies left as they were, by reason",
+          "title": "Unavailable",
+          "type": "object"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "before",
+        "after",
+        "freed_before",
+        "freed_after"
+      ],
+      "title": "CleanupDiff",
+      "type": "object"
+    },
+    "CleanupDiffRow": {
+      "properties": {
+        "after": {
+          "title": "After",
+          "type": "string"
+        },
+        "before": {
+          "title": "Before",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "before",
+        "after"
+      ],
+      "title": "CleanupDiffRow",
+      "type": "object"
+    },
+    "CleanupEdit": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "enum": [
+                "leave",
+                "trash",
+                "hardlink",
+                "symlink",
+                "clone"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "backup_volume": {
+          "default": "",
+          "title": "Backup Volume",
+          "type": "string"
+        },
+        "include_overridden": {
+          "default": false,
+          "description": "Bulk edits also change copies chosen by hand",
+          "title": "Include Overridden",
+          "type": "boolean"
+        },
+        "index": {
+          "default": 0,
+          "title": "Index",
+          "type": "integer"
+        },
+        "op": {
+          "enum": [
+            "keep_add",
+            "keep_remove",
+            "keep_only",
+            "keep_set",
+            "keep_clear",
+            "action_set",
+            "target_set",
+            "exclude",
+            "include",
+            "override_clear",
+            "rule_add",
+            "rule_update",
+            "rule_remove",
+            "rule_move",
+            "pair_set",
+            "pair_remove",
+            "preset",
+            "options",
+            "review",
+            "ack",
+            "unack"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "options": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupOptions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pair": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupPairRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "Paths",
+          "type": "array"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "enum": [
+                "watch",
+                "conservative",
+                "recommended",
+                "links",
+                "backup",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preset"
+        },
+        "risk": {
+          "default": "",
+          "title": "Risk",
+          "type": "string"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "rule_id": {
+          "default": 0,
+          "title": "Rule Id",
+          "type": "integer"
+        },
+        "scope": {
+          "$ref": "#/$defs/CleanupScope"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "value": {
+          "default": true,
+          "title": "Value",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "title": "CleanupEdit",
+      "type": "object"
+    },
+    "CleanupEditParams": {
+      "additionalProperties": false,
+      "properties": {
+        "base_version": {
+          "minimum": 0,
+          "title": "Base Version",
+          "type": "integer"
+        },
+        "edit": {
+          "$ref": "#/$defs/CleanupEdit"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "base_version",
+        "edit"
+      ],
+      "title": "CleanupEditParams",
+      "type": "object"
+    },
+    "CleanupExecuteParams": {
+      "additionalProperties": false,
+      "properties": {
+        "on_failure": {
+          "anyOf": [
+            {
+              "enum": [
+                "continue",
+                "stop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Failure"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "proceed_after_drops": {
+          "default": false,
+          "description": "Run the rest after the preflight skipped some steps",
+          "title": "Proceed After Drops",
+          "type": "boolean"
+        },
+        "token": {
+          "maxLength": 64,
+          "minLength": 8,
+          "title": "Token",
+          "type": "string"
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "content",
+                "metadata"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verify"
+        }
+      },
+      "required": [
+        "plan_id",
+        "token"
+      ],
+      "title": "CleanupExecuteParams",
+      "type": "object"
+    },
+    "CleanupExportParams": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "default": "json",
+          "enum": [
+            "json",
+            "csv"
+          ],
+          "title": "Format",
+          "type": "string"
+        },
+        "path": {
+          "description": "Where the user chose to save it",
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "plan_id": {
+          "default": "",
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "run_id": {
+          "default": "",
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "CleanupExportParams",
+      "type": "object"
+    },
+    "CleanupExportResult": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "bytes"
+      ],
+      "title": "CleanupExportResult",
+      "type": "object"
+    },
+    "CleanupFacets": {
+      "properties": {
+        "action": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Action",
+          "type": "object"
+        },
+        "fs": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Fs",
+          "type": "object"
+        },
+        "risk": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Risk",
+          "type": "object"
+        },
+        "severity": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Severity",
+          "type": "object"
+        },
+        "source": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Source",
+          "type": "object"
+        },
+        "state": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "State",
+          "type": "object"
+        },
+        "tag": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Tag",
+          "type": "object"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        },
+        "volume": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Volume",
+          "type": "object"
+        }
+      },
+      "required": [
+        "version",
+        "total",
+        "action",
+        "severity",
+        "risk",
+        "volume",
+        "fs",
+        "source",
+        "state",
+        "tag"
+      ],
+      "title": "CleanupFacets",
+      "type": "object"
+    },
+    "CleanupFactRow": {
+      "properties": {
+        "differs": {
+          "default": false,
+          "title": "Differs",
+          "type": "boolean"
+        },
+        "keeper": {
+          "title": "Keeper",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "this": {
+          "description": "The copy's value",
+          "title": "This",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "this",
+        "keeper"
+      ],
+      "title": "CleanupFactRow",
+      "type": "object"
+    },
+    "CleanupFilterParams": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Filter",
+          "type": "string"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "title": "CleanupFilterParams",
+      "type": "object"
+    },
+    "CleanupGroup": {
+      "properties": {
+        "actions": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Actions",
+          "type": "object"
+        },
+        "changed_since_review": {
+          "default": false,
+          "title": "Changed Since Review",
+          "type": "boolean"
+        },
+        "conflict": {
+          "default": false,
+          "title": "Conflict",
+          "type": "boolean"
+        },
+        "copies": {
+          "title": "Copies",
+          "type": "integer"
+        },
+        "cross": {
+          "title": "Cross",
+          "type": "boolean"
+        },
+        "digest16": {
+          "title": "Digest16",
+          "type": "string"
+        },
+        "freed_later": {
+          "title": "Freed Later",
+          "type": "integer"
+        },
+        "freed_now": {
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "keep_line": {
+          "title": "Keep Line",
+          "type": "string"
+        },
+        "keepers": {
+          "title": "Keepers",
+          "type": "integer"
+        },
+        "members": {
+          "items": {
+            "$ref": "#/$defs/CleanupCopy"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "names": {
+          "title": "Names",
+          "type": "integer"
+        },
+        "only_avoided": {
+          "default": false,
+          "title": "Only Avoided",
+          "type": "boolean"
+        },
+        "reviewed": {
+          "default": false,
+          "title": "Reviewed",
+          "type": "boolean"
+        },
+        "risk_count": {
+          "title": "Risk Count",
+          "type": "integer"
+        },
+        "safety_net": {
+          "default": false,
+          "title": "Safety Net",
+          "type": "boolean"
+        },
+        "severity": {
+          "enum": [
+            "none",
+            "info",
+            "low",
+            "medium",
+            "high",
+            "blocked"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "source": {
+          "description": "rule / manual / pair / safety / mixed",
+          "title": "Source",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "in",
+            "stale",
+            "shared",
+            "excluded",
+            "no_extra",
+            "cleaned"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "total_members": {
+          "default": 0,
+          "title": "Total Members",
+          "type": "integer"
+        },
+        "volumes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "digest16",
+        "name",
+        "names",
+        "size",
+        "copies",
+        "keepers",
+        "actions",
+        "freed_now",
+        "freed_later",
+        "severity",
+        "risk_count",
+        "source",
+        "state",
+        "keep_line",
+        "cross",
+        "volumes"
+      ],
+      "title": "CleanupGroup",
+      "type": "object"
+    },
+    "CleanupGroupDetail": {
+      "properties": {
+        "copies": {
+          "items": {
+            "$ref": "#/$defs/CleanupCopyDetail"
+          },
+          "title": "Copies",
+          "type": "array"
+        },
+        "group": {
+          "$ref": "#/$defs/CleanupGroup"
+        },
+        "out_reason": {
+          "default": "",
+          "title": "Out Reason",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "group",
+        "copies"
+      ],
+      "title": "CleanupGroupDetail",
+      "type": "object"
+    },
+    "CleanupGroupParams": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "group"
+      ],
+      "title": "CleanupGroupParams",
+      "type": "object"
+    },
+    "CleanupGroupsPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupGroup"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "offset": {
+          "title": "Offset",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "total",
+        "offset",
+        "items"
+      ],
+      "title": "CleanupGroupsPage",
+      "type": "object"
+    },
+    "CleanupGroupsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "default": "",
+          "maxLength": 2000,
+          "title": "Filter",
+          "type": "string"
+        },
+        "include_out": {
+          "default": false,
+          "description": "Also list the groups that are not in the plan",
+          "title": "Include Out",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "sort": {
+          "default": "freed",
+          "enum": [
+            "freed",
+            "risk",
+            "size",
+            "copies",
+            "path",
+            "action"
+          ],
+          "title": "Sort",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "title": "CleanupGroupsParams",
+      "type": "object"
+    },
+    "CleanupImportParams": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "path"
+      ],
+      "title": "CleanupImportParams",
+      "type": "object"
+    },
+    "CleanupImportResult": {
+      "properties": {
+        "applied": {
+          "title": "Applied",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/CleanupState"
+        },
+        "unmatched": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unmatched",
+          "type": "array"
+        }
+      },
+      "required": [
+        "applied",
+        "unmatched",
+        "state"
+      ],
+      "title": "CleanupImportResult",
+      "type": "object"
+    },
+    "CleanupInterrupted": {
+      "properties": {
+        "at_seq": {
+          "title": "At Seq",
+          "type": "integer"
+        },
+        "attention": {
+          "title": "Attention",
+          "type": "integer"
+        },
+        "done": {
+          "title": "Done",
+          "type": "integer"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "restored": {
+          "title": "Restored",
+          "type": "integer"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "at_seq",
+        "restored",
+        "done",
+        "attention",
+        "message"
+      ],
+      "title": "CleanupInterrupted",
+      "type": "object"
+    },
+    "CleanupNotDone": {
+      "properties": {
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "unit": {
+          "default": "copies",
+          "enum": [
+            "groups",
+            "copies"
+          ],
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reason",
+        "text",
+        "count"
+      ],
+      "title": "CleanupNotDone",
+      "type": "object"
+    },
+    "CleanupOpenParams": {
+      "additionalProperties": false,
+      "properties": {
+        "backup_volume": {
+          "default": "",
+          "title": "Backup Volume",
+          "type": "string"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "preset": {
+          "anyOf": [
+            {
+              "enum": [
+                "watch",
+                "conservative",
+                "recommended",
+                "links",
+                "backup",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Preset"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "CleanupOpenParams",
+      "type": "object"
+    },
+    "CleanupOptions": {
+      "additionalProperties": false,
+      "properties": {
+        "criteria": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "oldest_created",
+                  "oldest_modified",
+                  "newest_modified",
+                  "shortest_path",
+                  "longest_path",
+                  "shallowest",
+                  "deepest",
+                  "plain_name"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Criteria"
+        },
+        "default_action": {
+          "anyOf": [
+            {
+              "enum": [
+                "leave",
+                "trash",
+                "hardlink",
+                "symlink",
+                "clone"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Default Action"
+        },
+        "folder_consistent": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Folder Consistent"
+        },
+        "on_failure": {
+          "anyOf": [
+            {
+              "enum": [
+                "continue",
+                "stop"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "On Failure"
+        },
+        "per_volume": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Per Volume"
+        },
+        "symlink_style": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "relative",
+                "absolute"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symlink Style"
+        },
+        "verify": {
+          "anyOf": [
+            {
+              "enum": [
+                "auto",
+                "content",
+                "metadata"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verify"
+        }
+      },
+      "title": "CleanupOptions",
+      "type": "object"
+    },
+    "CleanupPairRow": {
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "a_in_b": {
+          "description": "Share of a's compared files that have a copy in b",
+          "title": "A In B",
+          "type": "number"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "b_in_a": {
+          "title": "B In A",
+          "type": "number"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "keep": {
+          "description": "a / b / both / mixed / none: where the keepers of these groups are",
+          "title": "Keep",
+          "type": "string"
+        },
+        "merged": {
+          "default": 0,
+          "description": "Folder pairs below it taken into this one",
+          "title": "Merged",
+          "type": "integer"
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupPairView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "groups",
+        "bytes",
+        "a_in_b",
+        "b_in_a",
+        "keep"
+      ],
+      "title": "CleanupPairRow",
+      "type": "object"
+    },
+    "CleanupPairRule": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "auto": {
+          "default": false,
+          "title": "Auto",
+          "type": "boolean"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "keep": {
+          "default": "a",
+          "enum": [
+            "a",
+            "b",
+            "both"
+          ],
+          "title": "Keep",
+          "type": "string"
+        },
+        "other_action": {
+          "default": "",
+          "enum": [
+            "",
+            "leave",
+            "trash",
+            "hardlink",
+            "symlink",
+            "clone"
+          ],
+          "title": "Other Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "a",
+        "b"
+      ],
+      "title": "CleanupPairRule",
+      "type": "object"
+    },
+    "CleanupPairView": {
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "auto": {
+          "title": "Auto",
+          "type": "boolean"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "keep": {
+          "enum": [
+            "a",
+            "b",
+            "both"
+          ],
+          "title": "Keep",
+          "type": "string"
+        },
+        "other_action": {
+          "title": "Other Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "keep",
+        "other_action",
+        "auto"
+      ],
+      "title": "CleanupPairView",
+      "type": "object"
+    },
+    "CleanupPairsPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupPairRow"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "total",
+        "items"
+      ],
+      "title": "CleanupPairsPage",
+      "type": "object"
+    },
+    "CleanupPairsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "merge": {
+          "default": true,
+          "title": "Merge",
+          "type": "boolean"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "title": "CleanupPairsParams",
+      "type": "object"
+    },
+    "CleanupPlanItem": {
+      "properties": {
+        "bytes": {
+          "default": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "can": {
+          "title": "Can",
+          "type": "boolean"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "why": {
+          "default": "",
+          "title": "Why",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "path",
+        "can"
+      ],
+      "title": "CleanupPlanItem",
+      "type": "object"
+    },
+    "CleanupPlanParams": {
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "title": "CleanupPlanParams",
+      "type": "object"
+    },
+    "CleanupProgressEvent": {
+      "properties": {
+        "bytes": {
+          "default": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Counts",
+          "type": "object"
+        },
+        "current": {
+          "default": "",
+          "title": "Current",
+          "type": "string"
+        },
+        "done": {
+          "title": "Done",
+          "type": "integer"
+        },
+        "freed_later": {
+          "default": 0,
+          "title": "Freed Later",
+          "type": "integer"
+        },
+        "freed_now": {
+          "default": 0,
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "facts",
+            "preflight",
+            "execute",
+            "undo",
+            "purge",
+            "recover"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "needs_confirm": {
+          "default": false,
+          "description": "Preflight skipped steps: run the rest only when asked again",
+          "title": "Needs Confirm",
+          "type": "boolean"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "plan_id": {
+          "default": "",
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "run_id": {
+          "default": "",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "skipped": {
+          "description": "Final event: what was not done, by reason",
+          "items": {
+            "$ref": "#/$defs/CleanupSkipped"
+          },
+          "title": "Skipped",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "waiting",
+            "preflight",
+            "running",
+            "paused",
+            "done",
+            "partial",
+            "stopped",
+            "failed",
+            "undone",
+            "recovered"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "kind",
+        "phase",
+        "state",
+        "done",
+        "total"
+      ],
+      "title": "CleanupProgressEvent",
+      "type": "object"
+    },
+    "CleanupPurgeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "ack_streams": {
+          "default": false,
+          "description": "Also originals with extra data never compared",
+          "title": "Ack Streams",
+          "type": "boolean"
+        },
+        "run_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seqs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seqs"
+        },
+        "verify": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "content"
+          ],
+          "title": "Verify",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "CleanupPurgeParams",
+      "type": "object"
+    },
+    "CleanupPurgePlan": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "can": {
+          "title": "Can",
+          "type": "integer"
+        },
+        "cannot": {
+          "title": "Cannot",
+          "type": "integer"
+        },
+        "in_trash": {
+          "default": 0,
+          "description": "Copies in the recycle bin: emptying it is up to the user",
+          "title": "In Trash",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupPlanItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "streams": {
+          "default": 0,
+          "description": "Originals with extra streams or attributes (need ack_streams)",
+          "title": "Streams",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "items",
+        "can",
+        "cannot",
+        "bytes"
+      ],
+      "title": "CleanupPurgePlan",
+      "type": "object"
+    },
+    "CleanupReason": {
+      "properties": {
+        "decided": {
+          "default": false,
+          "title": "Decided",
+          "type": "boolean"
+        },
+        "layer": {
+          "title": "Layer",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "layer",
+        "text"
+      ],
+      "title": "CleanupReason",
+      "type": "object"
+    },
+    "CleanupRecoverReport": {
+      "properties": {
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupInterrupted"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "CleanupRecoverReport",
+      "type": "object"
+    },
+    "CleanupResolveParams": {
+      "additionalProperties": false,
+      "properties": {
+        "choice": {
+          "enum": [
+            "put_back",
+            "keep_as_is"
+          ],
+          "title": "Choice",
+          "type": "string"
+        },
+        "run_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seq": {
+          "minimum": 1,
+          "title": "Seq",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run_id",
+        "seq",
+        "choice"
+      ],
+      "title": "CleanupResolveParams",
+      "type": "object"
+    },
+    "CleanupResumeOffer": {
+      "properties": {
+        "manual": {
+          "title": "Manual",
+          "type": "integer"
+        },
+        "rules": {
+          "title": "Rules",
+          "type": "integer"
+        },
+        "saved_at": {
+          "title": "Saved At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "saved_at",
+        "manual",
+        "rules"
+      ],
+      "title": "CleanupResumeOffer",
+      "type": "object"
+    },
+    "CleanupResumeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "accept": {
+          "title": "Accept",
+          "type": "boolean"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "accept"
+      ],
+      "title": "CleanupResumeParams",
+      "type": "object"
+    },
+    "CleanupRisk": {
+      "properties": {
+        "acked": {
+          "default": false,
+          "title": "Acked",
+          "type": "boolean"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "none",
+            "info",
+            "low",
+            "medium",
+            "high",
+            "blocked"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "severity",
+        "title",
+        "text"
+      ],
+      "title": "CleanupRisk",
+      "type": "object"
+    },
+    "CleanupRiskCopies": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupCopy"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "risk": {
+          "$ref": "#/$defs/CleanupBucket"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "risk",
+        "total",
+        "items"
+      ],
+      "title": "CleanupRiskCopies",
+      "type": "object"
+    },
+    "CleanupRiskCopiesParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "risk": {
+          "title": "Risk",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "risk"
+      ],
+      "title": "CleanupRiskCopiesParams",
+      "type": "object"
+    },
+    "CleanupRule": {
+      "additionalProperties": false,
+      "properties": {
+        "criteria": {
+          "items": {
+            "enum": [
+              "oldest_created",
+              "oldest_modified",
+              "newest_modified",
+              "shortest_path",
+              "longest_path",
+              "shallowest",
+              "deepest",
+              "plain_name"
+            ],
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "effect": {
+          "description": "keep: a CleanupKeepEffect; action: a CleanupAction",
+          "title": "Effect",
+          "type": "string"
+        },
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "fallback": {
+          "items": {
+            "enum": [
+              "leave",
+              "trash",
+              "hardlink",
+              "symlink",
+              "clone"
+            ],
+            "type": "string"
+          },
+          "title": "Fallback",
+          "type": "array"
+        },
+        "folders": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Folders",
+          "type": "array"
+        },
+        "id": {
+          "default": 0,
+          "description": "0 when adding",
+          "minimum": 0,
+          "title": "Id",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "keep",
+            "action"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Label",
+          "type": "string"
+        },
+        "label_key": {
+          "default": "",
+          "maxLength": 64,
+          "title": "Label Key",
+          "type": "string"
+        },
+        "n": {
+          "default": 1,
+          "maximum": 64,
+          "minimum": 1,
+          "title": "N",
+          "type": "integer"
+        },
+        "symlink_style": {
+          "default": "",
+          "enum": [
+            "",
+            "relative",
+            "absolute"
+          ],
+          "title": "Symlink Style",
+          "type": "string"
+        },
+        "target_under": {
+          "default": "",
+          "title": "Target Under",
+          "type": "string"
+        },
+        "when": {
+          "$ref": "#/$defs/CleanupSelector"
+        }
+      },
+      "required": [
+        "kind",
+        "effect"
+      ],
+      "title": "CleanupRule",
+      "type": "object"
+    },
+    "CleanupRuleView": {
+      "properties": {
+        "bytes": {
+          "default": 0,
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "effect": {
+          "title": "Effect",
+          "type": "string"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "fallback": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Fallback",
+          "type": "array"
+        },
+        "folders": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "hits": {
+          "default": 0,
+          "description": "Copies it decides",
+          "title": "Hits",
+          "type": "integer"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "keep",
+            "action"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "n": {
+          "title": "N",
+          "type": "integer"
+        },
+        "preset": {
+          "default": false,
+          "title": "Preset",
+          "type": "boolean"
+        },
+        "risky": {
+          "title": "Risky",
+          "type": "boolean"
+        },
+        "target_under": {
+          "title": "Target Under",
+          "type": "string"
+        },
+        "when": {
+          "additionalProperties": true,
+          "title": "When",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "effect",
+        "enabled",
+        "label",
+        "when",
+        "folders",
+        "n",
+        "criteria",
+        "fallback",
+        "target_under",
+        "risky"
+      ],
+      "title": "CleanupRuleView",
+      "type": "object"
+    },
+    "CleanupRunDetail": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupRunItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "run": {
+          "$ref": "#/$defs/CleanupRunSummary"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "run",
+        "total",
+        "items"
+      ],
+      "title": "CleanupRunDetail",
+      "type": "object"
+    },
+    "CleanupRunItem": {
+      "properties": {
+        "action": {
+          "enum": [
+            "leave",
+            "trash",
+            "hardlink",
+            "symlink",
+            "clone"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "freed": {
+          "default": 0,
+          "title": "Freed",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "recovery": {
+          "default": "",
+          "title": "Recovery",
+          "type": "string"
+        },
+        "seq": {
+          "title": "Seq",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "done",
+            "skipped",
+            "failed",
+            "attention",
+            "undone",
+            "purged",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "target": {
+          "default": "",
+          "title": "Target",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seq",
+        "action",
+        "path",
+        "code",
+        "text",
+        "state"
+      ],
+      "title": "CleanupRunItem",
+      "type": "object"
+    },
+    "CleanupRunParams": {
+      "additionalProperties": false,
+      "properties": {
+        "filter": {
+          "default": "",
+          "description": "A result code, or '' for every item",
+          "maxLength": 64,
+          "title": "Filter",
+          "type": "string"
+        },
+        "limit": {
+          "default": 200,
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "run_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "CleanupRunParams",
+      "type": "object"
+    },
+    "CleanupRunSeqsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "beside": {
+          "default": false,
+          "description": "Undo: an original that cannot go back goes beside it instead",
+          "title": "Beside",
+          "type": "boolean"
+        },
+        "run_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        },
+        "seqs": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 200000,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seqs"
+        }
+      },
+      "required": [
+        "run_id"
+      ],
+      "title": "CleanupRunSeqsParams",
+      "type": "object"
+    },
+    "CleanupRunSummary": {
+      "properties": {
+        "attention": {
+          "default": 0,
+          "title": "Attention",
+          "type": "integer"
+        },
+        "by_action": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "By Action",
+          "type": "object"
+        },
+        "can_purge": {
+          "default": 0,
+          "title": "Can Purge",
+          "type": "integer"
+        },
+        "can_undo": {
+          "default": 0,
+          "title": "Can Undo",
+          "type": "integer"
+        },
+        "counts": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Counts",
+          "type": "object"
+        },
+        "finished": {
+          "default": "",
+          "title": "Finished",
+          "type": "string"
+        },
+        "freed_now": {
+          "default": 0,
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "held": {
+          "default": 0,
+          "description": "Bytes of originals still in the recovery area",
+          "title": "Held",
+          "type": "integer"
+        },
+        "held_by_volume": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Held By Volume",
+          "type": "object"
+        },
+        "in_trash": {
+          "default": 0,
+          "title": "In Trash",
+          "type": "integer"
+        },
+        "purge_reminder": {
+          "default": false,
+          "title": "Purge Reminder",
+          "type": "boolean"
+        },
+        "roots": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Roots",
+          "type": "array"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        },
+        "started": {
+          "title": "Started",
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "waiting",
+            "preflight",
+            "running",
+            "paused",
+            "done",
+            "partial",
+            "stopped",
+            "failed",
+            "undone",
+            "recovered"
+          ],
+          "title": "State",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "started",
+        "state",
+        "roots",
+        "by_action",
+        "counts"
+      ],
+      "title": "CleanupRunSummary",
+      "type": "object"
+    },
+    "CleanupRunsPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupRunSummary"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "items"
+      ],
+      "title": "CleanupRunsPage",
+      "type": "object"
+    },
+    "CleanupRunsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "title": "CleanupRunsParams",
+      "type": "object"
+    },
+    "CleanupSample": {
+      "properties": {
+        "groups": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Groups",
+          "type": "array"
+        }
+      },
+      "required": [
+        "groups"
+      ],
+      "title": "CleanupSample",
+      "type": "object"
+    },
+    "CleanupSampleParams": {
+      "additionalProperties": false,
+      "properties": {
+        "per_bucket": {
+          "default": 10,
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Per Bucket",
+          "type": "integer"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id"
+      ],
+      "title": "CleanupSampleParams",
+      "type": "object"
+    },
+    "CleanupScope": {
+      "additionalProperties": false,
+      "properties": {
+        "copies": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/CleanupCopyRef"
+              },
+              "maxItems": 200000,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Copies"
+        },
+        "filter": {
+          "anyOf": [
+            {
+              "maxLength": 2000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The filter syntax of docs/dupes.md §16.7.3",
+          "title": "Filter"
+        },
+        "groups": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "maxItems": 200000,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Groups"
+        }
+      },
+      "title": "CleanupScope",
+      "type": "object"
+    },
+    "CleanupSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "can": {
+          "items": {
+            "enum": [
+              "leave",
+              "trash",
+              "hardlink",
+              "symlink",
+              "clone"
+            ],
+            "type": "string"
+          },
+          "title": "Can",
+          "type": "array"
+        },
+        "classes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Classes",
+          "type": "array"
+        },
+        "copies_min": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Copies Min"
+        },
+        "cross": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cross"
+        },
+        "ext": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 256,
+          "title": "Ext",
+          "type": "array"
+        },
+        "fs": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "Fs",
+          "type": "array"
+        },
+        "mtime_after": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mtime After"
+        },
+        "mtime_before": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mtime Before"
+        },
+        "name_glob": {
+          "default": "",
+          "title": "Name Glob",
+          "type": "string"
+        },
+        "not_tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Not Tags",
+          "type": "array"
+        },
+        "not_under": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Not Under",
+          "type": "array"
+        },
+        "path_glob": {
+          "default": "",
+          "title": "Path Glob",
+          "type": "string"
+        },
+        "risk_any": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 128,
+          "title": "Risk Any",
+          "type": "array"
+        },
+        "risk_at_least": {
+          "anyOf": [
+            {
+              "enum": [
+                "none",
+                "info",
+                "low",
+                "medium",
+                "high",
+                "blocked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Risk-condition rules only",
+          "title": "Risk At Least"
+        },
+        "same_folder": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Same Folder"
+        },
+        "same_volume": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Same Volume"
+        },
+        "size_max": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Max"
+        },
+        "size_min": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Size Min"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Tags",
+          "type": "array"
+        },
+        "under": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Under",
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "title": "CleanupSelector",
+      "type": "object"
+    },
+    "CleanupSkipped": {
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "count": {
+          "title": "Count",
+          "type": "integer"
+        },
+        "examples": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Examples",
+          "type": "array"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text",
+        "count"
+      ],
+      "title": "CleanupSkipped",
+      "type": "object"
+    },
+    "CleanupState": {
+      "properties": {
+        "action_rules": {
+          "items": {
+            "$ref": "#/$defs/CleanupRuleView"
+          },
+          "title": "Action Rules",
+          "type": "array"
+        },
+        "approval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupApprovalInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "auto_pairs": {
+          "default": 0,
+          "title": "Auto Pairs",
+          "type": "integer"
+        },
+        "can_redo": {
+          "default": false,
+          "title": "Can Redo",
+          "type": "boolean"
+        },
+        "can_undo": {
+          "default": false,
+          "title": "Can Undo",
+          "type": "boolean"
+        },
+        "criteria": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Criteria",
+          "type": "array"
+        },
+        "default_action": {
+          "title": "Default Action",
+          "type": "string"
+        },
+        "facts_done": {
+          "default": 0,
+          "title": "Facts Done",
+          "type": "integer"
+        },
+        "facts_total": {
+          "default": 0,
+          "title": "Facts Total",
+          "type": "integer"
+        },
+        "folder_consistent": {
+          "title": "Folder Consistent",
+          "type": "boolean"
+        },
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        },
+        "keep_rules": {
+          "items": {
+            "$ref": "#/$defs/CleanupRuleView"
+          },
+          "title": "Keep Rules",
+          "type": "array"
+        },
+        "macos_links": {
+          "default": false,
+          "title": "Macos Links",
+          "type": "boolean"
+        },
+        "manual": {
+          "default": 0,
+          "title": "Manual",
+          "type": "integer"
+        },
+        "options": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Options",
+          "type": "object"
+        },
+        "pairs": {
+          "items": {
+            "$ref": "#/$defs/CleanupPairView"
+          },
+          "title": "Pairs",
+          "type": "array"
+        },
+        "per_volume": {
+          "title": "Per Volume",
+          "type": "boolean"
+        },
+        "plan_id": {
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "platform": {
+          "default": "",
+          "title": "Platform",
+          "type": "string"
+        },
+        "preset": {
+          "title": "Preset",
+          "type": "string"
+        },
+        "resume_offer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CleanupResumeOffer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "running": {
+          "default": "",
+          "description": "The task id of a cleanup task in progress",
+          "title": "Running",
+          "type": "string"
+        },
+        "scan_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scan Ids",
+          "type": "array"
+        },
+        "summary": {
+          "$ref": "#/$defs/CleanupSummary"
+        },
+        "symlink_right": {
+          "default": true,
+          "title": "Symlink Right",
+          "type": "boolean"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "plan_id",
+        "job_id",
+        "scan_ids",
+        "version",
+        "preset",
+        "criteria",
+        "per_volume",
+        "folder_consistent",
+        "default_action",
+        "options",
+        "keep_rules",
+        "action_rules",
+        "pairs",
+        "summary"
+      ],
+      "title": "CleanupState",
+      "type": "object"
+    },
+    "CleanupSummary": {
+      "properties": {
+        "buckets": {
+          "items": {
+            "$ref": "#/$defs/CleanupBucket"
+          },
+          "title": "Buckets",
+          "type": "array"
+        },
+        "by_action": {
+          "items": {
+            "$ref": "#/$defs/CleanupActionTotal"
+          },
+          "title": "By Action",
+          "type": "array"
+        },
+        "by_severity": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "By Severity",
+          "type": "object"
+        },
+        "by_volume": {
+          "items": {
+            "$ref": "#/$defs/CleanupVolumeTotal"
+          },
+          "title": "By Volume",
+          "type": "array"
+        },
+        "compare_bytes": {
+          "default": 0,
+          "description": "Bytes read before running (verify, block clones)",
+          "title": "Compare Bytes",
+          "type": "integer"
+        },
+        "copies": {
+          "title": "Copies",
+          "type": "integer"
+        },
+        "freed_later": {
+          "title": "Freed Later",
+          "type": "integer"
+        },
+        "freed_now": {
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "gates": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Gates",
+          "type": "array"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "in_plan": {
+          "title": "In Plan",
+          "type": "integer"
+        },
+        "not_done": {
+          "items": {
+            "$ref": "#/$defs/CleanupNotDone"
+          },
+          "title": "Not Done",
+          "type": "array"
+        },
+        "reviewed": {
+          "title": "Reviewed",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "groups",
+        "copies",
+        "freed_now",
+        "freed_later",
+        "by_action",
+        "by_volume",
+        "by_severity",
+        "buckets",
+        "not_done",
+        "gates",
+        "reviewed",
+        "in_plan"
+      ],
+      "title": "CleanupSummary",
+      "type": "object"
+    },
+    "CleanupTask": {
+      "properties": {
+        "delay_s": {
+          "default": 0.0,
+          "title": "Delay S",
+          "type": "number"
+        },
+        "kind": {
+          "enum": [
+            "facts",
+            "preflight",
+            "execute",
+            "undo",
+            "purge",
+            "recover"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "run_id": {
+          "default": "",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "task_id": {
+          "title": "Task Id",
+          "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "task_id",
+        "kind"
+      ],
+      "title": "CleanupTask",
+      "type": "object"
+    },
+    "CleanupTaskParams": {
+      "additionalProperties": false,
+      "properties": {
+        "task_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Task Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "task_id"
+      ],
+      "title": "CleanupTaskParams",
+      "type": "object"
+    },
+    "CleanupTokenParams": {
+      "additionalProperties": false,
+      "properties": {
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        },
+        "token": {
+          "maxLength": 64,
+          "minLength": 8,
+          "title": "Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "token"
+      ],
+      "title": "CleanupTokenParams",
+      "type": "object"
+    },
+    "CleanupUndoPlan": {
+      "properties": {
+        "can": {
+          "title": "Can",
+          "type": "integer"
+        },
+        "cannot": {
+          "title": "Cannot",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/CleanupPlanItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "run_id": {
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "run_id",
+        "items",
+        "can",
+        "cannot"
+      ],
+      "title": "CleanupUndoPlan",
+      "type": "object"
+    },
+    "CleanupVersionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "base_version": {
+          "minimum": 0,
+          "title": "Base Version",
+          "type": "integer"
+        },
+        "plan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plan_id",
+        "base_version"
+      ],
+      "title": "CleanupVersionParams",
+      "type": "object"
+    },
+    "CleanupVolumeCell": {
+      "properties": {
+        "a": {
+          "title": "A",
+          "type": "string"
+        },
+        "b": {
+          "title": "B",
+          "type": "string"
+        },
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "a",
+        "b",
+        "groups",
+        "bytes"
+      ],
+      "title": "CleanupVolumeCell",
+      "type": "object"
+    },
+    "CleanupVolumeMatrix": {
+      "properties": {
+        "cells": {
+          "items": {
+            "$ref": "#/$defs/CleanupVolumeCell"
+          },
+          "title": "Cells",
+          "type": "array"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        },
+        "volumes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "version",
+        "volumes",
+        "cells"
+      ],
+      "title": "CleanupVolumeMatrix",
+      "type": "object"
+    },
+    "CleanupVolumeTotal": {
+      "properties": {
+        "copies": {
+          "title": "Copies",
+          "type": "integer"
+        },
+        "freed_later": {
+          "title": "Freed Later",
+          "type": "integer"
+        },
+        "freed_now": {
+          "title": "Freed Now",
+          "type": "integer"
+        },
+        "fs": {
+          "title": "Fs",
+          "type": "string"
+        },
+        "recovery": {
+          "default": "",
+          "description": "Where the originals of replaced copies stay",
+          "title": "Recovery",
+          "type": "string"
+        },
+        "snapshots_note": {
+          "default": "",
+          "title": "Snapshots Note",
+          "type": "string"
+        },
+        "trash": {
+          "default": "",
+          "description": "The volume's recycle bin, or why it has none",
+          "title": "Trash",
+          "type": "string"
+        },
+        "volume": {
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "volume",
+        "fs",
+        "freed_now",
+        "freed_later",
+        "copies"
+      ],
+      "title": "CleanupVolumeTotal",
+      "type": "object"
+    },
+    "CleanupWhoUses": {
+      "properties": {
+        "users": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Users",
+          "type": "object"
+        }
+      },
+      "required": [
+        "users"
+      ],
+      "title": "CleanupWhoUses",
+      "type": "object"
+    },
     "ClientInfo": {
       "additionalProperties": false,
       "properties": {
@@ -10695,6 +14316,18 @@
       "doc": "Duplicate-file results changed (new groups, keep rules, files changed).",
       "payload": "#/$defs/DupesChangedEvent"
     },
+    "dupes.cleanup_changed": {
+      "doc": "A cleanup plan changed (an edit, the risk check, results, a run).",
+      "payload": "#/$defs/CleanupChangedEvent"
+    },
+    "dupes.cleanup_interrupted": {
+      "doc": "An interrupted cleanup run was finished at start (first session).",
+      "payload": "#/$defs/CleanupInterrupted"
+    },
+    "dupes.cleanup_progress": {
+      "doc": "A cleanup task's progress (at most four times a second, and at the end).",
+      "payload": "#/$defs/CleanupProgressEvent"
+    },
     "dupes.progress": {
       "doc": "A duplicate-file search's state (at most four times a second, every session).",
       "payload": "#/$defs/DupesStatus"
@@ -10842,6 +14475,204 @@
       "params": "#/$defs/DupesJobParams",
       "requiresSession": true,
       "result": "#/$defs/DupesStatus"
+    },
+    "dupes.cleanup_approve": {
+      "doc": "Freeze the plan into steps and a token (refused while risks are checked or unacknowledged).",
+      "params": "#/$defs/CleanupApproveParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupApprovalInfo"
+    },
+    "dupes.cleanup_cancel": {
+      "doc": "Stop once the step in progress is done.",
+      "params": "#/$defs/CleanupTaskParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_close": {
+      "doc": "Leave the plan; its edits are saved.",
+      "params": "#/$defs/CleanupPlanParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "dupes.cleanup_edit": {
+      "doc": "Apply an edit (refused with a reason, or when base_version is not the plan's); clears an approval.",
+      "params": "#/$defs/CleanupEditParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupState"
+    },
+    "dupes.cleanup_execute": {
+      "doc": "Run the approved steps (the token must be the plan's): preflight first, then step by step.",
+      "params": "#/$defs/CleanupExecuteParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_export": {
+      "doc": "Write the plan or a run's report (JSON, CSV).",
+      "params": "#/$defs/CleanupExportParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupExportResult"
+    },
+    "dupes.cleanup_facets": {
+      "doc": "Counts per facet of a filter.",
+      "params": "#/$defs/CleanupFilterParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupFacets"
+    },
+    "dupes.cleanup_group": {
+      "doc": "Every copy of a group: facts side by side, what can be done and why not, risks, reason chains.",
+      "params": "#/$defs/CleanupGroupParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupGroupDetail"
+    },
+    "dupes.cleanup_groups": {
+      "doc": "A page of the plan's groups (filtered, sorted).",
+      "params": "#/$defs/CleanupGroupsParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupGroupsPage"
+    },
+    "dupes.cleanup_import": {
+      "doc": "Take a saved plan's rules and decisions (edits only).",
+      "params": "#/$defs/CleanupImportParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupImportResult"
+    },
+    "dupes.cleanup_open": {
+      "doc": "Open (or join) the cleanup plan of a finished search; the risk check starts in the background.",
+      "params": "#/$defs/CleanupOpenParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupState"
+    },
+    "dupes.cleanup_pairs": {
+      "doc": "Folder pairs, coverage both ways.",
+      "params": "#/$defs/CleanupPairsParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupPairsPage"
+    },
+    "dupes.cleanup_pause": {
+      "doc": "Pause between two steps.",
+      "params": "#/$defs/CleanupTaskParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_preflight": {
+      "doc": "Check every step again without changing anything.",
+      "params": "#/$defs/CleanupTokenParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_preview": {
+      "doc": "What an edit would change, without keeping it.",
+      "params": "#/$defs/CleanupEditParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupDiff"
+    },
+    "dupes.cleanup_purge": {
+      "doc": "Empty the recovery area of a run for good, after a 5 s delay (cancellable) and checking each original.",
+      "params": "#/$defs/CleanupPurgeParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_purge_plan": {
+      "doc": "Which originals can be purged, and why not.",
+      "params": "#/$defs/CleanupPurgeParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupPurgePlan"
+    },
+    "dupes.cleanup_recover_report": {
+      "doc": "What finishing an interrupted run found at start.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupRecoverReport"
+    },
+    "dupes.cleanup_redo_edit": {
+      "doc": "Redo an undone edit.",
+      "params": "#/$defs/CleanupVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupState"
+    },
+    "dupes.cleanup_resolve": {
+      "doc": "Settle an item that needs the user.",
+      "params": "#/$defs/CleanupResolveParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupRunDetail"
+    },
+    "dupes.cleanup_resume": {
+      "doc": "Take or drop the saved edits of an earlier plan.",
+      "params": "#/$defs/CleanupResumeParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupState"
+    },
+    "dupes.cleanup_resume_run": {
+      "doc": "Go on after a pause.",
+      "params": "#/$defs/CleanupTaskParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_risk_copies": {
+      "doc": "The copies of one risk kind (paged).",
+      "params": "#/$defs/CleanupRiskCopiesParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupRiskCopies"
+    },
+    "dupes.cleanup_run": {
+      "doc": "One run, step by step.",
+      "params": "#/$defs/CleanupRunParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupRunDetail"
+    },
+    "dupes.cleanup_runs": {
+      "doc": "The cleanup history, newest first.",
+      "params": "#/$defs/CleanupRunsParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupRunsPage"
+    },
+    "dupes.cleanup_sample": {
+      "doc": "Groups to spot-check.",
+      "params": "#/$defs/CleanupSampleParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupSample"
+    },
+    "dupes.cleanup_state": {
+      "doc": "Version, rules, summary, gates.",
+      "params": "#/$defs/CleanupPlanParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupState"
+    },
+    "dupes.cleanup_summary": {
+      "doc": "Per action, per volume, risk buckets, gates.",
+      "params": "#/$defs/CleanupPlanParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupSummary"
+    },
+    "dupes.cleanup_undo": {
+      "doc": "Undo a run (or some of it).",
+      "params": "#/$defs/CleanupRunSeqsParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupTask"
+    },
+    "dupes.cleanup_undo_edit": {
+      "doc": "Undo the last edit.",
+      "params": "#/$defs/CleanupVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupState"
+    },
+    "dupes.cleanup_undo_plan": {
+      "doc": "What undoing a run would do, item by item.",
+      "params": "#/$defs/CleanupRunSeqsParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupUndoPlan"
+    },
+    "dupes.cleanup_volumes": {
+      "doc": "Volume by volume.",
+      "params": "#/$defs/CleanupPlanParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupVolumeMatrix"
+    },
+    "dupes.cleanup_who_uses": {
+      "doc": "Programs holding the filtered copies open.",
+      "params": "#/$defs/CleanupFilterParams",
+      "requiresSession": true,
+      "result": "#/$defs/CleanupWhoUses"
     },
     "dupes.clear": {
       "doc": "Forget a search and its results.",
