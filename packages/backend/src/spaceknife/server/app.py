@@ -80,6 +80,10 @@ class Server:
         self.compares = CompareManager(self.scans, self.views)  # snapshot comparisons (W6)
         self.ops = OpsService(self)  # the delete basket and file operations (W5)
         self.views.ops = self.ops
+        from .dupes import DupesManager
+
+        self.dupes = DupesManager(self)  # duplicate files (docs/dupes.md)
+        self.views.dupes = self.dupes
         self.updates = UpdateService(self)  # update checks against the GitHub releases
         self.scans.monitors = self.monitors
         self.on_start: list[Callable[[], None]] = []  # run once the loop is serving

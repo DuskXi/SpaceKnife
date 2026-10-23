@@ -22,14 +22,16 @@ from functools import cache
 from pathlib import Path
 from typing import Any
 
-from spaceknife_protocol import CAP_VISUALS
+from spaceknife_protocol import CAP_DUPES, CAP_VISUALS
 
 from ..i18n import SOURCE, Texts, _, language, plural, tr
 from ..layout import registry as visuals
 from ..view.state import View, showable
 from .fuzzy import score
 
-COLOR_NAMES = Texts({"class": "文件类别", "flat": "扁平", "time": "修改时间", "branch": "顶层分支"})
+COLOR_NAMES = Texts(
+    {"class": "文件类别", "flat": "扁平", "time": "修改时间", "branch": "顶层分支", "dupes": "重复"}
+)
 VISUAL_NAMES = Texts({"treemap": "树图", "flame": "火焰图", "flame_polar": "火焰-极坐标图"})
 
 
@@ -50,6 +52,8 @@ class Context:
     app_version: str = ""  # the running app's version (update.status)
     update_version: str = ""  # a newer release, "" when there is none
     update_checking: bool = False
+    dupes: str = ""  # the tab's duplicate-file search: a status text ("" when there is none)
+    has_dupes: bool = False  # results or a running search cover the tab's scan
 
     @property
     def selected_node(self) -> int | None:
@@ -153,6 +157,22 @@ def _snapshots(c: Context) -> str | None:
 
 def _tab(c: Context) -> str | None:
     return None if c.tab == "scan" else _("需要先完成扫描")
+
+
+def _dupes_ok(c: Context) -> str | None:
+    if CAP_DUPES not in c.caps:
+        return _("这个界面不支持查找重复文件")
+    if c.source != "scan":
+        return _("快照是过去的状态，不能核对内容")
+    return None
+
+
+def _has_dupes(c: Context) -> str | None:
+    return None if c.has_dupes else _("这个扫描还没有查找重复文件")
+
+
+def _dupes_status(c: Context) -> str:
+    return c.dupes
 
 
 def _update(c: Context) -> str | None:
@@ -282,6 +302,32 @@ def _registry() -> tuple[Command, ...]:
             5,
             (),
             _basket,
+        ),
+        C(
+            "dupes.find",
+            "查找重复文件…",
+            "dupes",
+            (),
+            ("duplicates", "dupes", "dedupe", "same files"),
+            needs=(_tab, _done, _dupes_ok),
+            status=_dupes_status,
+        ),
+        C(
+            "dupes.panel",
+            "重复文件面板",
+            "dupes",
+            (),
+            ("duplicates panel", "dupes panel"),
+            needs=(_tab, _has_dupes),
+            status=_dupes_status,
+        ),
+        C(
+            "dupes.to_basket",
+            "把多余的副本加入删除篮",
+            "basket",
+            (),
+            ("duplicates basket", "delete duplicates"),
+            needs=(_tab, _has_dupes),
         ),
         C("snapshot.save", "保存快照", "snapshot", ("Ctrl+S",), ("save snapshot",), 6, (_tab, _done)),
         C(
@@ -477,6 +523,16 @@ def _registry() -> tuple[Command, ...]:
             ("color branch", "top level"),
             needs=(_branch_ok,),
             status=_color_pick("branch"),
+            typed_only=True,
+        ),
+        C(
+            "view.color.dupes",
+            "配色：重复",
+            "palette",
+            (),
+            ("color duplicates", "dupes"),
+            needs=(_view, _has_dupes),
+            status=_color_pick("dupes"),
             typed_only=True,
         ),
         C(

@@ -35,6 +35,11 @@ branch     <u1    top-level branch colour slot: 0 neutral, 1–8 (shade: min(dep
 name_len   <u4    byte length of this row's name in the ``names`` blob (0: no label)
 delta      <i8    compare views only: net change of allocated bytes
 dstat      <u1    compare views only: 0 unchanged · 1 new · 2 deleted · 3 changed
+dup        <u1    ``dupes`` colouring only (dupes.v1): files 0 not compared · 1 being checked · 2 kept
+                  · 3 extra copy · 4 the same data (hard link, clone) · 5 skipped; folders and blocks
+                  the share of their bytes that are extra copies: 0 none · 1 some · 2 ≥10 % · 3 ≥40 %
+                  · 4 ≥80 %
+dupg       <u4    ``dupes`` colouring only: the file's group id + 1 (0: none)
 =========  =====  =====================================================================
 
 Blob ``names``: the rows' UTF-8 names, concatenated in row order.
@@ -76,7 +81,7 @@ def view_stream(view_id: str) -> str:
 
 
 VisualId = Annotated[str, Field(min_length=1, max_length=48, pattern=r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")]
-ColorModeName = Literal["class", "flat", "time", "branch"]
+ColorModeName = Literal["class", "flat", "time", "branch", "dupes"]
 FilterModeName = Literal["dim", "hide"]
 ResultsSortName = Literal["size", "name", "count"]
 ResultKind = Literal["file", "folder", "group", "rest"]
@@ -244,6 +249,8 @@ class FrameRoot(Payload):
     branch: int = 0
     delta: int | None = Field(default=None, description="Compare views only")
     dstat: int | None = Field(default=None, description="Compare views only")
+    dup: int | None = Field(default=None, description="dupes colouring only")
+    dupg: int | None = Field(default=None, description="dupes colouring only")
 
 
 class FrameInfo(Payload):
@@ -283,6 +290,10 @@ class ViewState(Payload):
     )
     has_trash: bool = Field(
         default=False, description="The scan holds a recycle bin / trash folder (the toggle is offered)"
+    )
+    has_dupes: bool = Field(
+        default=False,
+        description="Duplicate-file results or a job cover this scan (the dupes colouring is offered)",
     )
     visual: str = Field(default="treemap", description="A visual.list id")
     color_mode: ColorModeName = Field(description="Of the current visualization (each remembers its own)")

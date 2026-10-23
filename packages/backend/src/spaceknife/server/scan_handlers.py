@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import ValidationError
 
+from spaceknife_protocol import CAP_DUPES
 from spaceknife_protocol import io as pio
 from spaceknife_protocol import scan as p
 from spaceknife_protocol.base import Empty, EmptyResult
@@ -137,10 +138,14 @@ def install(server: Server) -> None:
             )
         handle = scans.get(params.scan_id)
         scans.check_node(handle, params.node)
+        dupe = None
+        if CAP_DUPES in session.capabilities:
+            dupe = server.dupes.node_info(params.scan_id, params.node)
         return p.TreeNodeResult(
             node=node_info(handle.store, params.node),
             path=handle.store.path(params.node),
             on_disk=on_disk(handle.store, params.node),
+            dupe=dupe,
         )
 
     @router.method(TREE_CHILDREN)

@@ -269,6 +269,23 @@ SpaceKnife 的设置都在一个「设置」标签页里。改动立即保存，
 | 实时监控 | 开 | 开 `true` · 关 `false` | Windows：使用 USN 日志 + ReadDirectoryChangesEx，变化的文件会闪烁提示。macOS：使用 FSEvents，变化的文件会闪烁提示。Linux：使用 inotify，变化的文件会闪烁提示。 | `scan.monitor` |
 | 事件合并间隔 | 150 ms | 50 至 5000 ms，步长 10 | 此时间内的连续变化合并为一次刷新。「实时监控」打开时才能修改。 | `scan.coalesce_ms` |
 
+#### 重复文件
+
+只读和别的文件大小相同的文件；读完全文、内容一致才算重复。
+
+| 设置 | 默认值 | 可选值 | 说明 | 设置键 |
+| --- | --- | --- | --- | --- |
+| 最小文件 | 1 MB | 1 至 4096 MB | 比它小的文件不比较（越小要打开的文件越多）。 | `dupes.min_size` |
+| 读盘负载 | 安静 35% | 极速 `"max"` · 均衡 70% `"balanced"` · 安静 35% `"quiet"` · 空闲 `"idle"` | 查找重复文件时的磁盘负载上限；同一块盘上有扫描时先等扫描结束。 | `dupes.load` |
+| 默认保留 | 最早创建 | 最早创建 `"oldest"` · 最新修改 `"newest"` · 路径最短 `"shortest"` | 每组留下哪一份（可以在面板里逐组改）。 | `dupes.keep_rule` |
+| 同一对文件夹留在同一边 | 开 | 开 `true` · 关 `false` | 两个文件夹里有多组相同的文件时，保留的都在同一个文件夹里，删完另一个可以整个清空。 | `dupes.folder_consistent` |
+| 跨盘比较 | 关 | 开 `true` · 关 `false` | 把所有打开的扫描放在一起比较（默认只比较当前扫描）。 | `dupes.cross_volume` |
+| 跨盘时每个卷至少留一份 | 开 | 开 `true` · 关 `false` | 跨盘的副本常常是有意的备份：别的卷上的那份默认不选。「跨盘比较」打开时才能修改。 | `dupes.cross_keep_per_volume` |
+| 包括系统和程序文件夹 | 关 | 开 `true` · 关 `false` | Windows、Program Files、ProgramData 等；其中的文件只会保留，不会预选删除。 | `dupes.include_system` |
+| 包括网络盘 | 关 | 开 `true` · 关 `false` | 网络盘上认不出同一个文件，这些文件只会保留。 | `dupes.include_network` |
+| 保留不了访问时间的文件 | 跳过 | 跳过 `"skip"` · 照读 `"read"` | SpaceKnife 读文件时不改访问时间；系统不允许时跳过还是照读。 | `dupes.keep_access_time` |
+| 删除前重读内容 | 关 | 开 `true` · 关 `false` | 执行删除前把要删的和保留的再完整读一遍（默认只核对文件没有变过）。 | `dupes.recheck_content` |
+
 ### 文件类别
 
 按扩展名归类，用于树图着色、:class: 过滤和类别统计。

@@ -119,6 +119,8 @@ def install(server: Server) -> None:
             app_version=update.current,
             update_version=update.latest.version if update.latest is not None else "",
             update_checking=update.checking,
+            dupes=server.dupes.palette_status(c.scan_id) if scan_tab and c.scan_id else "",
+            has_dupes=scan_tab and bool(c.scan_id) and server.dupes.has_dupes(c.scan_id or ""),
         )
         return ctx, handle, view
 

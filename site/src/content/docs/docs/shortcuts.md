@@ -251,6 +251,9 @@ Every other command shows up when you type its name or one of the words below:
 
 | Command | Keys | Also found by | Notes |
 | --- | --- | --- | --- |
+| Find duplicate files… | — | `duplicates` · `dupes` · `dedupe` · `same files` | — |
+| Duplicate files panel | — | `duplicates panel` · `dupes panel` | — |
+| Put the extra copies in the delete basket | — | `duplicates basket` · `delete duplicates` | — |
 | Back | <kbd>Backspace</kbd> · <kbd>Alt</kbd>+<kbd>←</kbd> | `back` | — |
 | Forward | <kbd>Alt</kbd>+<kbd>→</kbd> | `forward` | — |
 | Up one level | <kbd>Alt</kbd>+<kbd>↑</kbd> | `up` · `parent` | — |
@@ -301,6 +304,7 @@ These pick one coloring or visualization directly. They show up only for a typed
 | Coloring: flat | — | `color flat` | — |
 | Coloring: date modified | — | `color time` · `age` | — |
 | Coloring: top-level branch | — | `color branch` · `top level` | — |
+| Colours: duplicates | — | `color duplicates` · `dupes` | — |
 | Visualization: treemap | — | `visualization treemap` · `treemap` | — |
 | Visualization: flame graph | — | `visualization flame` · `flame graph` · `icicle` | — |
 | Visualization: polar flame graph | — | `visualization polar` · `polar flame graph` · `radial` · `rings` | — |

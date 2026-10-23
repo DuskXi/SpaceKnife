@@ -26,7 +26,7 @@ import os
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 
@@ -37,8 +37,9 @@ from ..store.subtree import subtree_ids
 from .paths import protected_reason
 from .trash import OpResult, win32_trims
 
-ItemKind = Literal["file", "dir", "link", "other", "group"]
-Status = Literal["ready", "locked", "missing", "protected"]
+ItemKind = Literal["file", "dir", "link", "other", "group", "dupes"]
+Status = Literal["ready", "locked", "missing", "protected", "blocked"]
+LIVE = ("ready", "locked", "blocked")  # items that are executed (and free space)
 
 # Every user-facing text of this module (M7.5 extracts them for translation).
 TEXT = Texts(
@@ -60,6 +61,9 @@ TEXT = Texts(
         "members_failed": "{count} 项未完成：{message}",
         "list_sep": "、",
         "note_sep": "；",
+        "dupes_name": "重复文件的 {count} 份多余副本",
+        "dupes_blocked": "有 {count} 组保留的那份也在删除篮里，执行时这些组跳过",
+        "keeper_in_basket": "本组保留的那份已在删除篮里",
     }
 )
 
@@ -144,9 +148,18 @@ class _Entry:
     error_note: str = ""
     link_note: str = ""
 
+    guards: dict[str, Any] = field(default_factory=dict)  # dupes: member key -> dupes.guard.Guard
+    blocked: int = 0  # dupes: members whose every keeper is in the basket too
+    dupes_note: str = ""
+
     @property
     def group(self) -> bool:
-        return self.item.kind == "group"
+        """Members listed one by one: a small-item group, or the extra copies of duplicate files."""
+        return self.item.kind in ("group", "dupes")
+
+    @property
+    def dupes(self) -> bool:
+        return self.item.kind == "dupes"
 
     def covered(self) -> list[str]:
         return self.member_keys if self.group else [self.key]
@@ -211,6 +224,9 @@ class Basket:
         self._volumes: dict[str, str] = {}  # scan root path -> mount point
         self._absorbed_paths: dict[str, str] = {}  # during one add(): absorbed id -> its path
         self._shared: dict[int, frozenset[bytes]] = {}  # during one add(): folder -> names it holds twice
+        self._guards: dict[
+            str, Any
+        ] = {}  # member key -> Guard of every dupes member seen (undo puts them back)
         self.version = 0  # bumped by every change (pushes compare it)
 
     # ------------------------------------------------------------------ queries
@@ -238,7 +254,7 @@ class Basket:
         with self._lock:
             out: dict[str, int] = {}
             for e in self._entries.values():
-                if e.item.status in ("ready", "locked"):
+                if e.item.status in LIVE:
                     out[e.item.volume] = out.get(e.item.volume, 0) + e.item.alloc
             return out
 
@@ -353,7 +369,7 @@ class Basket:
                     continue
                 entry.missing_members = len(paths) - len(found) if entry.group else 0
                 if entry.group:
-                    entry.item.name = self._group_name(entry.item.path, len(found))
+                    entry.item.name = self._name_of(entry, len(found))
                 mark = _fingerprint(store, found)
                 if mark != entry.fingerprint:
                     entry.measure = _measure(store, found, members=entry.group)
@@ -376,7 +392,7 @@ class Basket:
                         if n not in names:
                             names.append(n)
                 entry.lock_note = TEXT["locked"].format(names=TEXT["list_sep"].join(names)) if names else ""
-                if entry.item.status in ("ready", "locked"):
+                if entry.item.status in LIVE:
                     entry.item.status = self._status(entry)
             self._settle()
 
@@ -414,6 +430,9 @@ class Basket:
             result = AddResult()
             for item in items:
                 known = _Measure(base=item.alloc, size=item.size, files=item.files, dirs=item.dirs)
+                if item.kind == "dupes":
+                    self._reinstate_dupes(item, result)
+                    continue
                 if item.kind == "group":
                     keys = [_key(m) for m in item.members]
                     known.member_sizes = [0] * len(keys)
@@ -435,6 +454,169 @@ class Basket:
                 self._insert(entry, result)
             self._settle()
             return result
+
+    # ------------------------------------------------------------------ duplicate files
+
+    def add_dupes(
+        self,
+        store: NodeStore,
+        scan_id: str,
+        members: Sequence[tuple[int, str, Any]],
+        *,
+        note: str = "",
+    ) -> AddResult:
+        """Add extra copies of duplicate files (``(node, path, guard)``, one scan) as ``dupes``
+        items, one per volume. A copy already in the basket is merged; a copy whose every keeper is
+        in the basket is refused (deleting it could lose the last copy)."""
+        with self._lock:
+            result = AddResult()
+            by_volume: dict[str, list[tuple[int, str, str, Any]]] = {}
+            seen: set[str] = set()
+            for node, path, guard in members:
+                bad = self._check_node(store, node)
+                if bad is not None:
+                    result.refused.append(Refused(path, bad))
+                    continue
+                key = _key(path)
+                if key in seen:
+                    continue
+                seen.add(key)
+                into = self._covering(key)
+                if into is not None:
+                    result.merged.append(Merged(path, into))
+                    continue
+                if (
+                    guard is not None
+                    and guard.keepers
+                    and all(self._covering(_key(k.path)) is not None for k in guard.keepers)
+                ):
+                    result.refused.append(Refused(path, TEXT["keeper_in_basket"]))
+                    continue
+                by_volume.setdefault(self._volume(store, node), []).append((node, path, key, guard))
+            for volume, rows in by_volume.items():
+                vkey = "\0dupes\0" + scan_id + "\0" + volume
+                existing = self._groups.get(vkey)
+                entry = self._entries.get(existing) if existing else None
+                if entry is None:
+                    item = BasketItem(
+                        id=_item_id(vkey, True),
+                        path=volume,
+                        name="",
+                        kind="dupes",
+                        scan_id=scan_id,
+                        volume=volume,
+                        root=self._root_path(store, rows[0][0]),
+                    )
+                    entry = _Entry(item=item, key=vkey)
+                    self._entries[item.id] = entry
+                    self._groups[vkey] = item.id
+                nodes = [r[0] for r in rows]
+                entry.item.members.extend(r[1] for r in rows)
+                entry.member_keys.extend(r[2] for r in rows)
+                for _, _, key, guard in rows:
+                    if guard is not None:
+                        entry.guards[key] = guard
+                        self._guards[key] = guard
+                entry.dupes_note = note
+                found = entry.member_keys
+                measure = _measure(store, nodes, members=True)
+                entry.measure = _combine(entry.measure, measure) if existing is not None else measure
+                if len(entry.member_sizes) != len(found) - len(rows):
+                    entry.member_sizes = [0] * (len(found) - len(rows))
+                entry.member_sizes.extend(
+                    measure.member_sizes if len(measure.member_sizes) == len(rows) else [0] * len(rows)
+                )
+                entry.fingerprint = b""
+                entry.item.name = self._name_of(entry, len(entry.item.members))
+                self._index_add(entry.item.id, [r[2] for r in rows])
+                entry.item.status = self._status(entry)
+                result.added.append(entry.item.id)
+                self.version += 1
+            self._settle()
+            return result
+
+    def guards_for(self, paths: Iterable[str]) -> dict[str, Any]:
+        """The guard of each path that is an extra copy in a ``dupes`` item."""
+        with self._lock:
+            out: dict[str, Any] = {}
+            for p in paths:
+                item_id = self._cover.get(_key(p))
+                entry = self._entries.get(item_id) if item_id else None
+                if entry is not None and entry.dupes:
+                    g = entry.guards.get(_key(p))
+                    if g is not None:
+                        out[p] = g
+            return out
+
+    def _trim_dupes(self, entry: _Entry, under: str) -> None:
+        """A new item covers some extra copies of a ``dupes`` item: they leave it (the new item
+        deletes them anyway)."""
+        prefix = _prefix(under)
+        drop = [i for i, k in enumerate(entry.member_keys) if k == under or k.startswith(prefix)]
+        if not drop:
+            return
+        gone = {entry.member_keys[i] for i in drop}
+        keep = [i for i in range(len(entry.member_keys)) if i not in set(drop)]
+        sizes = (
+            entry.member_sizes
+            if len(entry.member_sizes) == len(entry.member_keys)
+            else [0] * len(entry.member_keys)
+        )
+        entry.item.members = [entry.item.members[i] for i in keep]
+        entry.member_keys = [entry.member_keys[i] for i in keep]
+        entry.member_sizes = [sizes[i] for i in keep]
+        for k in gone:
+            entry.guards.pop(k, None)
+        self._index_remove(list(gone))
+        entry.fingerprint = b""
+        if not entry.item.members:
+            self._drop(entry)
+            return
+        entry.item.name = self._name_of(entry, len(entry.item.members))
+        self.version += 1
+
+    def _block_dupes(self) -> None:
+        """Members of ``dupes`` items whose every keeper is now in the basket too are blocked
+        (skipped at execution, ``last_copy``) until one of them leaves."""
+        for entry in self._entries.values():
+            if not entry.dupes:
+                continue
+            n = 0
+            for k in entry.member_keys:
+                g = entry.guards.get(k)
+                if (
+                    g is not None
+                    and g.keepers
+                    and all(self._covering(_key(kp.path)) is not None for kp in g.keepers)
+                ):
+                    n += 1
+            if n != entry.blocked:
+                entry.blocked = n
+                if entry.item.status in LIVE:
+                    entry.item.status = self._status(entry)
+
+    def _reinstate_dupes(self, item: BasketItem, result: AddResult) -> None:
+        vkey = "\0dupes\0" + item.scan_id + "\0" + item.volume
+        existing = self._groups.get(vkey)
+        entry = self._entries.get(existing) if existing else None
+        if entry is None:
+            entry = _Entry(item=replace(item, members=[], status="ready", note=""), key=vkey)
+            self._entries[entry.item.id] = entry
+            self._groups[vkey] = entry.item.id
+        fresh = [(m, _key(m)) for m in item.members if self._covering(_key(m)) is None]
+        entry.item.members.extend(m for m, _ in fresh)
+        entry.member_keys.extend(k for _, k in fresh)
+        entry.member_sizes = [0] * len(entry.member_keys)
+        for _, k in fresh:
+            g = self._guards.get(k)
+            if g is not None:
+                entry.guards[k] = g
+        entry.measure = _Measure(base=item.alloc, size=item.size, files=item.files)
+        entry.fingerprint = b""
+        entry.item.name = self._name_of(entry, len(entry.item.members))
+        self._index_add(entry.item.id, [k for _, k in fresh])
+        result.added.append(entry.item.id)
+        self.version += 1
 
     # ------------------------------------------------------------------ adding
 
@@ -588,6 +770,9 @@ class Basket:
             return
         for _, k, _ in fresh:  # whatever lies below a new member is now inside the group
             for below in self._below(k):
+                if below in self._entries and self._entries[below].dupes:
+                    self._trim_dupes(self._entries[below], k)
+                    continue
                 if below in self._entries and self._entries[below].key != folder_key:
                     result.absorbed.append(below)
                     self._absorbed_paths[below] = self._entries[below].item.path
@@ -631,6 +816,9 @@ class Basket:
             return
         for below in self._below(entry.key):
             if below in self._entries:
+                if self._entries[below].dupes:
+                    self._trim_dupes(self._entries[below], entry.key)
+                    continue
                 result.absorbed.append(below)
                 self._absorbed_paths[below] = self._entries[below].item.path
                 self._drop(self._entries[below])
@@ -653,9 +841,7 @@ class Basket:
                 failed.append(res)
         if done:
             moved = [entry.item.members[i] for i in done]
-            left.append(
-                replace(entry.item, members=moved, name=self._group_name(entry.item.path, len(moved)))
-            )
+            left.append(replace(entry.item, members=moved, name=self._name_of(entry, len(moved))))
             keep = sorted(set(range(len(entry.member_keys))) - set(done))
             gone_keys = [entry.member_keys[i] for i in done]
             sizes = (
@@ -674,7 +860,7 @@ class Basket:
             entry.measure.base = max(0, entry.measure.base - freed)
             entry.measure.size = max(0, entry.measure.size - freed)
             entry.fingerprint = b""
-            entry.item.name = self._group_name(entry.item.path, len(entry.item.members))
+            entry.item.name = self._name_of(entry, len(entry.item.members))
             self.version += 1
         if failed:
             entry.error_note = TEXT["members_failed"].format(count=len(failed), message=failed[0].message)
@@ -737,6 +923,11 @@ class Basket:
             hit = self._volumes[root_path] = self._volume_of(root_path)
         return hit
 
+    def _name_of(self, entry: _Entry, count: int) -> str:
+        if entry.dupes:
+            return TEXT["dupes_name"].format(count=count)
+        return self._group_name(entry.item.path, count)
+
     @staticmethod
     def _group_name(folder_path: str, count: int) -> str:
         folder = os.path.basename(os.path.normpath(folder_path)) or folder_path
@@ -749,17 +940,20 @@ class Basket:
             return "protected"
         if not check and entry.item.status == "protected":
             return "protected"
+        if entry.dupes and entry.blocked:
+            return "blocked"
         return "locked" if entry.lock_note else "ready"
 
     def _settle(self) -> None:
         """Hard links across the basket, freeable bytes and notes of every item."""
+        self._block_dupes()
         entries = list(self._entries.values())
         gain = np.zeros(len(entries), dtype=np.int64)
         short = np.zeros(len(entries), dtype=np.int64)  # names of incomplete link groups per item
         lacking = np.zeros(len(entries), dtype=np.int64)  # file items: other names not in the basket
         by_volume: dict[str, list[int]] = {}
         for i, e in enumerate(entries):
-            if e.item.status in ("ready", "locked") and len(e.measure.ino):
+            if e.item.status in LIVE and len(e.measure.ino):
                 by_volume.setdefault(e.item.volume, []).append(i)
         for idx in by_volume.values():
             ino = np.concatenate([entries[i].measure.ino for i in idx])
@@ -782,12 +976,12 @@ class Basket:
             np.maximum.at(lacking, owner[incomplete], (grp_nlink - counts)[group_of][incomplete])
         for i, e in enumerate(entries):
             item = e.item
-            if item.status in ("ready", "locked"):
+            if item.status in LIVE:
                 item.alloc = int(e.measure.base + gain[i])
             else:
                 item.alloc = 0
             item.size, item.files, item.dirs = e.measure.size, e.measure.files, e.measure.dirs
-            if short[i] and item.status in ("ready", "locked"):
+            if short[i] and item.status in LIVE:
                 e.link_note = (
                     TEXT["links_file"].format(count=int(lacking[i]))
                     if item.kind == "file"
@@ -800,6 +994,8 @@ class Basket:
                 TEXT["members_missing"].format(count=e.missing_members)
                 if e.missing_members and item.status != "missing"
                 else "",
+                e.dupes_note,
+                TEXT["dupes_blocked"].format(count=e.blocked) if e.blocked else "",
                 e.lock_note,
                 e.error_note,
                 e.link_note,

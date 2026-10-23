@@ -49,6 +49,7 @@ from .locks import find_lockers
 from .paths import protected_reason
 
 if TYPE_CHECKING:
+    from ..dupes.guard import Guard
     from . import _win
 
 OpCode = Literal[
@@ -61,6 +62,10 @@ OpCode = Literal[
     "exists",
     "cancelled",
     "ambiguous_name",
+    "changed",
+    "keeper_changed",
+    "last_copy",
+    "keeper_busy",
     "error",
 ]
 ProgressFn = Callable[[int, int, "OpResult"], None]  # (items done, items in total, the one just done)
@@ -202,9 +207,16 @@ def win32_trims(path: str) -> bool:
     )
 
 
-def _precheck(paths: Sequence[str], check_locks: bool, roots: Mapping[str, str]) -> dict[int, OpResult]:
+def _precheck(
+    paths: Sequence[str],
+    check_locks: bool,
+    roots: Mapping[str, str],
+    guards: Mapping[str, Guard] | None = None,
+    also_doomed: Callable[[str], bool] | None = None,
+) -> dict[int, OpResult]:
     """Per index, the reason an item is skipped: reached by its path only as another entry, gone,
-    protected, held open (§2.5 re-check)."""
+    protected, held open (§2.5 re-check); extra copies of duplicate files also when their guard
+    fails (dupes.guard: changed, keeper_changed, last_copy, keeper_busy)."""
     skipped: dict[int, OpResult] = {}
     alive: list[int] = []
     root_names: dict[str, str | None] = {}
@@ -232,6 +244,19 @@ def _precheck(paths: Sequence[str], check_locks: bool, roots: Mapping[str, str])
                 skipped[i] = _result(
                     paths[i], "locked", TEXT["locked"].format(names=TEXT["list_sep"].join(names))
                 )
+    if guards:
+        from ..dupes.guard import check
+
+        live = [i for i in alive if i not in skipped]
+        failed = check(
+            [paths[i] for i in live],
+            guards,
+            also_doomed=also_doomed,
+            lockers=find_lockers if check_locks else None,
+        )
+        for j, (code, message) in failed.items():
+            i = live[j]
+            skipped[i] = _result(paths[i], code, message)  # type: ignore[arg-type]
     return skipped
 
 
@@ -295,6 +320,8 @@ def move_to_trash(
     sizes: Mapping[str, int] | None = None,
     check_locks: bool = True,
     roots: Mapping[str, str] | None = None,
+    guards: Mapping[str, Guard] | None = None,
+    also_doomed: Callable[[str], bool] | None = None,
 ) -> list[OpResult]:
     """Move each path to the trash; one result per path, in order. Never deletes anything.
 
@@ -302,10 +329,11 @@ def move_to_trash(
     targets; folders well below the recycle bin's capacity are then not measured again.
     ``check_locks``: skip items held open. ``roots``: the scan root of each path (same keys); a
     path whose names below it open an entry differing only in case is left alone
-    (``ambiguous_name``, ``reaches_another``).
+    (``ambiguous_name``, ``reaches_another``). ``guards``: extra copies of duplicate files and what
+    must still hold for them (dupes.guard); ``also_doomed``: paths deleted by something else.
     """
     run = _Run(paths, progress, cancel)
-    for i, res in _precheck(run.paths, check_locks, roots or {}).items():
+    for i, res in _precheck(run.paths, check_locks, roots or {}, guards, also_doomed).items():
         run.set(i, res)
     todo = [i for i, r in enumerate(run.results) if r is None]
     if sys.platform == "win32":
@@ -344,12 +372,14 @@ def delete_permanently(
     cancel: CancelFn | None = None,
     check_locks: bool = True,
     roots: Mapping[str, str] | None = None,
+    guards: Mapping[str, Guard] | None = None,
+    also_doomed: Callable[[str], bool] | None = None,
 ) -> list[OpResult]:
     """Delete each path for good (folders with everything inside); links are removed, never
     followed, and other file systems mounted inside a folder are not entered. ``roots`` as for
     :func:`move_to_trash`."""
     run = _Run(paths, progress, cancel)
-    for i, res in _precheck(run.paths, check_locks, roots or {}).items():
+    for i, res in _precheck(run.paths, check_locks, roots or {}, guards, also_doomed).items():
         run.set(i, res)
     for i, r in enumerate(run.results):
         if r is not None:

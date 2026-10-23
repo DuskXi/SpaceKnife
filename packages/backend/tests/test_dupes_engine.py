@@ -188,7 +188,7 @@ async def test_a_constant_quick_digest_changes_nothing(
     import spaceknife.dupes.reads as R
 
     monkeypatch.setattr(R, "_quick", lambda size, parts: 42)
-    job, res = await run(await scan(root), ops, tmp_path / "c")
+    _, res = await run(await scan(root), ops, tmp_path / "c")
     assert groups(res) == [{"a1.bin", "a2.bin"}]
 
 
@@ -229,7 +229,7 @@ async def test_appended_and_truncated_files_are_dropped(tmp_path: Path, ops: Ops
                 f.write(b"tail")
             os.truncate(shrink, len(a) - 1)
 
-    job, res = await run(await scan(root), ops, tmp_path / "c", between=between)
+    _, res = await run(await scan(root), ops, tmp_path / "c", between=between)
     assert groups(res) == [{"keep1.bin", "keep2.bin"}]
 
 
@@ -378,7 +378,7 @@ async def test_sparse_and_dense_copies_have_the_same_content(tmp_path: Path, ops
     tail = blob(4096, 16)
     sparse = root / "sparse.bin"
     root.mkdir(parents=True)
-    with open(sparse, "wb") as f:
+    with open(sparse, "wb") as f:  # noqa: ASYNC230
         f.truncate(size - len(tail))
         f.seek(size - len(tail))
         f.write(tail)
@@ -401,7 +401,7 @@ async def test_a_second_run_reads_nothing_and_a_changed_file_only_it(tmp_path: P
     write(root, "c.bin", blob(6 * MIB, 18))  # split by S2
     cache = tmp_path / "c"
     scans = await scan(root)
-    job1, res1 = await run(scans, ops, cache)
+    _, res1 = await run(scans, ops, cache)
     assert groups(res1) == [{"a1.bin", "a2.bin"}]
     job2, res2 = await run(scans, ops, cache)
     assert groups(res2) == [{"a1.bin", "a2.bin"}]
@@ -409,7 +409,7 @@ async def test_a_second_run_reads_nothing_and_a_changed_file_only_it(tmp_path: P
     assert job2.reader_counters()["data_opens"] == 0
     assert job2.counters.meta_ops == 4  # S1 only
     # rewrite a2.bin in place with other bytes in the middle (same size): only it is read
-    with open(p2, "r+b") as f:
+    with open(p2, "r+b") as f:  # noqa: ASYNC230
         f.seek(3 * MIB)
         f.write(b"\xff" * 16)
     job3, res3 = await run(await scan(root), ops, cache)
@@ -443,7 +443,7 @@ async def test_a_forged_cache_entry_cannot_join_files(tmp_path: Path, ops: Ops) 
     write(root, "b.bin", bytes(b))
     cache = tmp_path / "c"
     scans = await scan(root)
-    job, _ = await run(scans, ops, cache)
+    _ = await run(scans, ops, cache)
     # give both entries the same full digest, but with b's stamps off by a nanosecond
     files = list(cache.glob("*.skh"))
     assert len(files) == 1

@@ -45,7 +45,7 @@ from .branch import BranchHues
 from .tags import TagStore
 from .trash import WithoutBins, find_bins, trash_marks
 
-ColorMode = Literal["class", "flat", "time", "branch"]
+ColorMode = Literal["class", "flat", "time", "branch", "dupes"]
 FilterMode = Literal["dim", "hide"]
 ResultsSort = Literal["size", "name", "count"]
 DETAIL_MIN, DETAIL_MAX = 1, 15
@@ -187,6 +187,8 @@ class Frame:
     flash: list[tuple[int, int]] = field(default_factory=list)  # (row, allocation change): file changes
     delta: np.ndarray | None = None  # i8 compare views: signed net change per row (W6)
     dstat: np.ndarray | None = None  # u1 compare views: 0 unchanged, 1 new, 2 deleted, 3 changed
+    dup: np.ndarray | None = None  # u1 dupes colouring: file state / folder tier (docs/dupes.md §10.2)
+    dupg: np.ndarray | None = None  # u4 dupes colouring: group id + 1
 
 
 class View:
@@ -213,6 +215,8 @@ class View:
         registry.get(s.visual)  # KeyError: not a registered visualization
         self.visual = s.visual
         self._colors: dict[str, ColorMode] = dict(s.colors)  # visualization -> its colour mode
+        # the dupes colouring's frame columns: set by the server while results cover this scan
+        self.dupes_annotate: Callable[[NodeStore, Any], tuple[np.ndarray, np.ndarray] | None] | None = None
         self._colors[s.visual] = s.color_mode
         self.visual_options: dict[str, tuple[tuple[str, object], ...]] = {  # LayoutParams.options
             "flame": (("origin", s.flame_origin),),
@@ -759,6 +763,11 @@ class View:
         delta = dstat = None
         if self.compare is not None:
             delta, dstat = self._changes(draw, real)
+        dup = dupg = None
+        if self.color_mode == "dupes" and self.dupes_annotate is not None:
+            cols = self.dupes_annotate(store, draw)
+            if cols is not None:
+                dup, dupg = cols
         return Frame(
             draw=draw,
             flags=flags,
@@ -772,6 +781,8 @@ class View:
             scanned_total=scanned,
             delta=delta,
             dstat=dstat,
+            dup=dup,
+            dupg=dupg,
         )
 
     def _root_row(

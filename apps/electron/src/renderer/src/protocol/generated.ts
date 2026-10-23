@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "d684c62632d423dd";
+export const SCHEMA_HASH = "b1a864b82be74fd2";
 
 export interface AgeCond {
   end: number;
@@ -71,8 +71,8 @@ export interface BasketItem {
   dirs: number;
   files: number;
   id: string;
-  kind: "file" | "dir" | "link" | "other" | "group";
-  /** Small items of an aggregate block (kind 'group') */
+  kind: "file" | "dir" | "link" | "other" | "group" | "dupes";
+  /** Small items of an aggregate block (kind 'group'), or extra copies ('dupes') */
   members: number;
   name: string;
   /** Why it cannot be deleted as is (locked by …, missing …) */
@@ -80,7 +80,7 @@ export interface BasketItem {
   path: string;
   scan_id: string;
   size: number;
-  status: "ready" | "locked" | "missing" | "protected";
+  status: "ready" | "locked" | "missing" | "protected" | "blocked";
   tag: string | null;
   /** Mount point of the volume holding it */
   volume: string;
@@ -447,6 +447,313 @@ export interface DiskPart {
   mount_point: string;
 }
 
+export interface DupeGroup {
+  /** Physical files with this content */
+  copies: number;
+  cross: boolean;
+  id: number;
+  keep_why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
+  /** The first few (DupesGroupParams pages through all) */
+  members: DupeMember[];
+  /** Distinct names among them */
+  names: number;
+  reclaim: number;
+  shared: number;
+  size: number;
+  state: "confirmed" | "shared";
+  total_members: number;
+  volumes: string[];
+}
+
+export interface DupeMember {
+  alloc: number;
+  ctime: number;
+  mtime: number;
+  node: number;
+  path: string;
+  role: "keep" | "extra" | "alias" | "clone" | "needed" | "other_volume" | "pinned";
+  scan_id: string;
+  volume: string;
+  why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
+}
+
+/** A node's place in the results (``tree.node`` with ``dupes.v1``). */
+export interface DupeNodeInfo {
+  copies: number;
+  group: number | null;
+  other_volumes: string[];
+  /** Up to three other copies */
+  others: DupeMember[];
+  reason: string;
+  reclaim: number;
+  /** Folders: bytes of extra copies below it */
+  redundant: number;
+  role: "keep" | "extra" | "alias" | "clone" | "needed" | "other_volume" | "pinned" | null;
+  state: "none" | "pending" | "keep" | "extra" | "shared" | "skipped";
+  why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
+}
+
+export interface DupesBasketParams {
+  /** Only these groups (default: every group) */
+  groups?: number[] | null;
+  job_id: string;
+}
+
+export interface DupesBasketResult {
+  freed: number;
+  groups: number;
+  /** Ids of the basket items made (one per volume) */
+  items: string[];
+  members: number;
+  refused: DupesRefused[];
+}
+
+export interface DupesBytes {
+  cache_hits: number;
+  full: number;
+  full_upper: number;
+  planned_probe: number;
+  probe: number;
+  read: number;
+}
+
+export interface DupesChangedEvent {
+  job_id: string;
+  reason: "verified" | "keep" | "invalidated" | "cleared";
+  version: number;
+}
+
+/** What of a folder exists elsewhere (§8.4): for the user to judge, never a delete. */
+export interface DupesFolderInfo {
+  elsewhere: number;
+  elsewhere_bytes: number;
+  groups: number;
+  node: number;
+  only_here: number;
+  only_here_bytes: number;
+  only_here_list: DupesOnlyHere[];
+  /** Bytes of extra copies below it */
+  redundant: number;
+  same_data: number;
+  same_data_bytes: number;
+  small: number;
+  small_bytes: number;
+  unchecked: number;
+  unchecked_bytes: number;
+}
+
+export interface DupesFolderParams {
+  job_id: string;
+  node: number;
+  scan_id: string;
+}
+
+export interface DupesFolderRow {
+  alloc: number;
+  node: number;
+  path: string;
+  redundant: number;
+}
+
+export interface DupesFoldersPage {
+  items: DupesFolderRow[];
+  total: number;
+  version: number;
+}
+
+export interface DupesFoldersParams {
+  job_id: string;
+  limit?: number;
+  offset?: number;
+  scan_id: string;
+}
+
+export interface DupesFunnel {
+  aliases: number;
+  candidates: number;
+  clones: number;
+  confirmed_files: number;
+  confirmed_groups: number;
+  identified: number;
+  physical: number;
+  probed: number;
+  shared_groups: number;
+  skipped: number;
+  unique: number;
+  verifying: number;
+}
+
+export interface DupesGroupParams {
+  group: number;
+  job_id: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface DupesGroupsPage {
+  items: DupeGroup[];
+  total: number;
+  version: number;
+}
+
+export interface DupesGroupsParams {
+  cross_only?: boolean;
+  include_shared?: boolean;
+  job_id: string;
+  limit?: number;
+  offset?: number;
+  scan_id?: string | null;
+  sort?: "reclaim" | "size" | "copies" | "path";
+  /** Only groups with a copy below this folder (of scan_id) */
+  under?: number | null;
+}
+
+export interface DupesJobParams {
+  job_id: string;
+}
+
+export interface DupesKeepParams {
+  folder_consistent?: boolean;
+  job_id: string;
+  overrides?: DupesOverride[];
+  per_volume?: boolean;
+  prefer?: string[];
+  rule?: "oldest" | "newest" | "shortest";
+}
+
+export interface DupesLast {
+  at: string;
+  files: number;
+  groups: number;
+  reclaim: number;
+}
+
+export interface DupesLedgerVolume {
+  /** Extra copies (files) */
+  extra: number;
+  groups: number;
+  note: string;
+  /** Bytes freed by deleting the extra copies */
+  reclaim: number;
+  /** Bytes of names and clones of one file: deleting frees nothing */
+  shared: number;
+  volume: string;
+}
+
+export interface DupesLoadParams {
+  custom?: number | null;
+  job_id: string;
+  level: "idle" | "quiet" | "balanced" | "max" | "custom";
+}
+
+export interface DupesLocateParams {
+  group: number;
+  job_id: string;
+  limit?: number;
+  view_id: string;
+}
+
+export interface DupesLocateResult {
+  rows: DupesLocateRow[];
+  /** Frame sequence the rows belong to */
+  seq: number;
+  truncated: boolean;
+}
+
+export interface DupesLocateRow {
+  /** False: the copy is inside this folder or block */
+  exact: boolean;
+  role: "keep" | "extra" | "alias" | "clone" | "needed" | "other_volume" | "pinned";
+  row: number;
+}
+
+export interface DupesOnlyHere {
+  alloc: number;
+  node: number;
+  path: string;
+}
+
+export interface DupesOverride {
+  group: number;
+  path: string;
+  role: "keep" | "extra";
+}
+
+export interface DupesPlan {
+  /** Bytes of every candidate (the most a job could read) */
+  bytes: number;
+  candidates: number;
+  /** Cross-volume: files and bytes it adds */
+  cross_extra: Record<string, number> | null;
+  /** small, cloud, system, network, bins, unique */
+  excluded: Record<string, number>;
+  full_bytes_max: number;
+  groups: number;
+  last: DupesLast | null;
+  /** What reading heads and tails costs */
+  probe_bytes: number;
+  /** The most that could be freed, if every candidate had a twin */
+  reclaim_max: number;
+}
+
+export interface DupesRefused {
+  group: number;
+  reason: string;
+}
+
+export interface DupesScope {
+  /** Compare across every given scan */
+  cross_volume?: boolean;
+  include_network?: boolean;
+  include_system?: boolean;
+  min_size?: number;
+  mode?: "all" | "inside" | "against" | "file";
+  /** inside / against: a folder; file: a file (of scan_ids[0]) */
+  node?: number | null;
+  /** Live scans compared together */
+  scan_ids: string[];
+}
+
+export interface DupesStartParams {
+  budget_bytes?: number | null;
+  load?: "idle" | "quiet" | "balanced" | "max" | "custom" | null;
+  load_custom?: number | null;
+  max_seconds?: number | null;
+  /** Stop the running job and start this one */
+  replace?: boolean;
+  scope: DupesScope;
+}
+
+export interface DupesStatus {
+  atime_moved_by_others: number;
+  atime_unkept: number;
+  bytes: DupesBytes;
+  cross_volume: boolean;
+  elapsed_s: number;
+  error: string;
+  /** At most this long still (reading every candidate) */
+  eta_max_s: number | null;
+  extra: number;
+  funnel: DupesFunnel;
+  /** Verified groups with something to free */
+  groups: number;
+  job_id: string;
+  ledger: DupesLedgerVolume[];
+  load: "idle" | "quiet" | "balanced" | "max" | "custom";
+  mode: "all" | "inside" | "against" | "file";
+  /** Share of the groups decided, 0–1 */
+  progress: number | null;
+  /** Bytes read per second, lately */
+  rate: number;
+  reclaim: number;
+  scan_ids: string[];
+  skipped_by_reason: Record<string, number>;
+  state: "planning" | "identifying" | "probing" | "verifying" | "waiting_scan" | "paused" | "done" | "cancelled" | "failed";
+  version: number;
+  /** A scan of this disk runs: the job waits */
+  waiting_for: string;
+}
+
 /** Params for methods that take no arguments. */
 export interface Empty {
 }
@@ -696,6 +1003,10 @@ export interface FrameRoot {
   delta: number | null;
   /** Compare views only */
   dstat: number | null;
+  /** dupes colouring only */
+  dup: number | null;
+  /** dupes colouring only */
+  dupg: number | null;
   flags: number;
   key: number;
   kind: number;
@@ -870,7 +1181,7 @@ export interface NodeInfo {
 }
 
 export interface OpItemResult {
-  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "ambiguous_name" | "error";
+  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "ambiguous_name" | "changed" | "keeper_changed" | "last_copy" | "keeper_busy" | "error";
   message: string;
   ok: boolean;
   path: string;
@@ -1272,7 +1583,7 @@ export interface ScanStartParams {
   /** Percent for load_level=custom */
   load_custom?: number | null;
   /** Disk load limit; None = the setting */
-  load_level?: "max" | "balanced" | "quiet" | "idle" | "custom" | null;
+  load_level?: "idle" | "quiet" | "balanced" | "max" | "custom" | null;
   /** auto and mft: the MFT fast scan for a whole local NTFS volume (the read-only helper asks for administrator rights once, unless the scan.elevate setting is off), else a hard scan; None = the setting */
   method?: "auto" | "mft" | "hard" | null;
   /** Absolute paths; drive roots allowed */
@@ -1560,6 +1871,8 @@ export interface TreeNodeParams {
 }
 
 export interface TreeNodeResult {
+  /** Duplicate-file results for it (dupes.v1) */
+  dupe: DupeNodeInfo | null;
   node: NodeInfo;
   /** False inside the MFT pseudo folders ($NTFS 元数据, $孤立文件): no such path exists */
   on_disk: boolean;
@@ -1760,9 +2073,9 @@ export interface ViewSetParams {
 /** Fields left out keep their value. */
 export interface ViewSettingsParams {
   /** Of the view's current visualization; 'branch' needs visuals.v1 */
-  color_mode?: "class" | "flat" | "time" | "branch" | null;
+  color_mode?: "class" | "flat" | "time" | "branch" | "dupes" | null;
   /** Colour mode per visualization (a split pane or a reopened view keeps them); color_mode, when also given, wins for the current one */
-  colors?: Record<string, "class" | "flat" | "time" | "branch"> | null;
+  colors?: Record<string, "class" | "flat" | "time" | "branch" | "dupes"> | null;
   detail?: number | null;
   /** Compare views: changes shown */
   direction?: "all" | "grow" | "shrink" | null;
@@ -1784,14 +2097,16 @@ export interface ViewState {
   can_forward: boolean;
   can_up: boolean;
   /** Of the current visualization (each remembers its own) */
-  color_mode: "class" | "flat" | "time" | "branch";
+  color_mode: "class" | "flat" | "time" | "branch" | "dupes";
   /** Colour mode each visualization remembers */
-  colors: Record<string, "class" | "flat" | "time" | "branch">;
+  colors: Record<string, "class" | "flat" | "time" | "branch" | "dupes">;
   /** A compare view: areas are changes (W6) */
   compare: boolean;
   detail: number;
   direction: "all" | "grow" | "shrink";
   filter_mode: "dim" | "hide";
+  /** Duplicate-file results or a job cover this scan (the dupes colouring is offered) */
+  has_dupes: boolean;
   /** The scan holds a recycle bin / trash folder (the toggle is offered) */
   has_trash: boolean;
   min_element: number;
@@ -1847,7 +2162,7 @@ export interface VisualInfo {
   /** Can show compare views */
   compare: boolean;
   /** Colour mode a view starts with on this visualization */
-  default_color: "class" | "flat" | "time" | "branch";
+  default_color: "class" | "flat" | "time" | "branch" | "dupes";
   /** Shows free / unknown space at a volume root */
   free_space: boolean;
   icon: string;
@@ -1964,6 +2279,36 @@ export interface Methods {
   "compare.sources": { params: CompareSourcesParams; result: CompareSourcesResult };
   /** Net change, growth and shrink lists and the fill-up estimate for a compare view's zoom root and filter. */
   "compare.summary": { params: CompareSummaryParams; result: CompareSummary };
+  /** Stop the search; what was verified stays, the rest stays unchecked. */
+  "dupes.cancel": { params: DupesJobParams; result: DupesStatus };
+  /** Forget a search and its results. */
+  "dupes.clear": { params: DupesJobParams; result: EmptyResult };
+  /** A folder's extra copies and what of it exists elsewhere (information only, never a delete). */
+  "dupes.folder": { params: DupesFolderParams; result: DupesFolderInfo };
+  /** Folders sorted by the bytes of extra copies below them. */
+  "dupes.folders": { params: DupesFoldersParams; result: DupesFoldersPage };
+  /** One group with its members (paged). */
+  "dupes.group": { params: DupesGroupParams; result: DupeGroup };
+  /** One page of the verified groups, sorted (largest gain first). */
+  "dupes.groups": { params: DupesGroupsParams; result: DupesGroupsPage };
+  /** Set the keep rules and manual choices; roles and the ledger follow. */
+  "dupes.keep": { params: DupesKeepParams; result: DupesStatus };
+  /** Rows of a view's last frame that show or hold the copies of a group (lighting them up). */
+  "dupes.locate": { params: DupesLocateParams; result: DupesLocateResult };
+  /** Pause the search: every file handle is closed. */
+  "dupes.pause": { params: DupesJobParams; result: DupesStatus };
+  /** What a duplicate-file search would read, from the scan alone (no IO). */
+  "dupes.plan": { params: DupesScope; result: DupesPlan };
+  /** Go on after a pause. */
+  "dupes.resume": { params: DupesJobParams; result: DupesStatus };
+  /** Change the search's disk-load level. */
+  "dupes.set_load": { params: DupesLoadParams; result: DupesStatus };
+  /** Start a duplicate-file search in the background; 'dupes.progress' events follow (busy if another runs). */
+  "dupes.start": { params: DupesStartParams; result: DupesStatus };
+  /** State, funnel, bytes read and ledger of a search. */
+  "dupes.status": { params: DupesJobParams; result: DupesStatus };
+  /** Put the extra copies in the delete basket, one item per volume; each copy is checked again first. */
+  "dupes.to_basket": { params: DupesBasketParams; result: DupesBasketResult };
   /** Diagnostics of a template's text. */
   "export.check": { params: ExportCheckParams; result: ExportCheckResult };
   /** Write a view's tree (zoom root or everything, filtered or not) to a file with a template or format. */
@@ -2123,6 +2468,10 @@ export interface Events {
   "classes.changed": ClassesEvent;
   /** A comparison is computing, ready (with its totals) or failed. */
   "compare.progress": CompareProgressEvent;
+  /** Duplicate-file results changed (new groups, keep rules, files changed). */
+  "dupes.changed": DupesChangedEvent;
+  /** A duplicate-file search's state (at most four times a second, every session). */
+  "dupes.progress": DupesStatus;
   /** Load state of a disk for an 'io' subscription (2 Hz). */
   "io.load": IoStatusEvent;
   /** A backend log record for a 'log' subscription. */

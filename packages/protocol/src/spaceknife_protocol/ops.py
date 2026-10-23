@@ -8,8 +8,8 @@ from pydantic import Field
 
 from .base import Params, Payload
 
-BasketItemKind = Literal["file", "dir", "link", "other", "group"]
-BasketItemStatus = Literal["ready", "locked", "missing", "protected"]
+BasketItemKind = Literal["file", "dir", "link", "other", "group", "dupes"]
+BasketItemStatus = Literal["ready", "locked", "missing", "protected", "blocked"]
 OpMode = Literal["trash", "delete"]
 OpCode = Literal[
     "ok",
@@ -21,6 +21,10 @@ OpCode = Literal[
     "exists",
     "cancelled",
     "ambiguous_name",
+    "changed",
+    "keeper_changed",
+    "last_copy",
+    "keeper_busy",
     "error",
 ]
 
@@ -52,7 +56,9 @@ class BasketItem(Payload):
     path: str
     name: str
     kind: BasketItemKind
-    members: int = Field(default=0, description="Small items of an aggregate block (kind 'group')")
+    members: int = Field(
+        default=0, description="Small items of an aggregate block (kind 'group'), or extra copies ('dupes')"
+    )
     alloc: int = Field(description="Bytes freed by deleting it (cloud placeholders, partial hard links: 0)")
     size: int
     files: int = 0

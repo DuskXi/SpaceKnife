@@ -123,6 +123,7 @@ class Counters:
     atime_moved: int = 0
     racy: int = 0
     max_open: int = 0
+    lower_bound: int = 0  # bytes any method must read: verified members not joined from the cache
 
     def as_dict(self) -> dict[str, int]:
         return {k: getattr(self, k) for k in self.__slots__}
@@ -1079,8 +1080,11 @@ class Job:
                 for u in us:
                     self._unique(rows, info, u, size)
                 continue
-            if all(u.known is not None and u.digest is None for u in us):
-                self.counters.cache_joined += len(us)
+            for u in us:
+                if u.digest is None:
+                    self.counters.cache_joined += 1
+                else:
+                    self.counters.lower_bound += size
             for u in us:
                 for i in u.names:
                     self.sel.cand["state"][rows[i]] = C.ST_CONFIRMED  # type: ignore[union-attr]

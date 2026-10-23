@@ -19,8 +19,9 @@ import os
 import shutil
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from loguru import logger
@@ -73,6 +74,7 @@ class OpRun:
     alloc: dict[str, int]  # item path -> freeable bytes (what a success frees)
     scans: dict[str, str]  # path -> scan id (refresh the tree afterwards)
     roots: dict[str, str] = field(default_factory=dict)  # path -> its scan root (ops.trash: case twins)
+    guards: dict[str, Any] = field(default_factory=dict)  # extra copies of duplicate files (dupes.guard)
     done: int = 0
     current: str = ""
     phase: str = "waiting"
@@ -335,6 +337,7 @@ class OpsService:
             scans=scans,
             # kept with each item, so it holds once its scan is closed too
             roots={t.path: t.root for t in targets if t.root},
+            guards=self.basket.guards_for(t.path for t in targets),
             phase="waiting" if params.mode == "delete" else "running",
         )
         self.runs[run.id] = run
@@ -348,6 +351,13 @@ class OpsService:
             total=run.total,
             delay_s=DELETE_DELAY_S if run.mode == "delete" else 0.0,
         )
+
+    def _doomed(self, run: OpRun) -> Callable[[str], bool] | None:
+        """Duplicate-file guards: a keeper is lost too when anything in the basket covers it."""
+        if not run.guards:
+            return None
+        basket = self.basket
+        return lambda path: basket.contains(path) is not None
 
     def _emit(self, run: OpRun, force: bool = True) -> None:
         now = time.monotonic()
@@ -387,6 +397,8 @@ class OpsService:
                     cancel=run.cancel.is_set,
                     sizes=run.sizes,
                     roots=run.roots,
+                    guards=run.guards,
+                    also_doomed=self._doomed(run),
                 )
             else:
                 results = await asyncio.to_thread(
@@ -395,6 +407,8 @@ class OpsService:
                     progress=progress,
                     cancel=run.cancel.is_set,
                     roots=run.roots,
+                    guards=run.guards,
+                    also_doomed=self._doomed(run),
                 )
             run.results = results
             run.done = sum(1 for r in results if r.code != "cancelled")

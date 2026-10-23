@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import Field
 
 from .base import Params, Payload
+from .dupes import DupeNodeInfo
 from .io import IoStatus, LoadLevel
 
 ScanStateName = Literal["queued", "scanning", "done", "cancelled", "failed"]
@@ -269,6 +270,7 @@ class TreeNodeResult(Payload):
         default=True,
         description="False inside the MFT pseudo folders ($NTFS 元数据, $孤立文件): no such path exists",
     )
+    dupe: DupeNodeInfo | None = Field(default=None, description="Duplicate-file results for it (dupes.v1)")
 
 
 class TreeChildrenParams(Params):

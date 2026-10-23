@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 from loguru import logger
 
-from spaceknife_protocol import CAP_VISUALS
+from spaceknife_protocol import CAP_DUPES, CAP_VISUALS
 from spaceknife_protocol import view as pv
 from spaceknife_protocol.binary import encode_frame
 from spaceknife_protocol.errors import ErrorCode
@@ -69,6 +69,7 @@ class ViewHost:
     push_final: bool = False  # the running push renders the scan's final frame
     final_pending: bool = False  # the scan ended while a progress push was rendering
     change_pending: bool = False  # file changes arrived while a push was rendering (M5)
+    has_dupes: bool = False  # duplicate-file results cover its scan (the dupes colouring is offered)
 
 
 @dataclass(slots=True)
@@ -105,6 +106,7 @@ class ViewManager:
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults and live changes)
         self.compares: CompareManager | None = None  # set by CompareManager: compare views (W6)
         self.ops: OpsService | None = None  # set by the server: the basket follows tree changes (W5)
+        self.dupes: Any = None  # server.dupes.DupesManager: the dupes colouring, changed copies
         scans.in_use = self.has_views  # MAX_SCANS eviction must not pull a scan from under its tabs
         scans.on_evict = self._release
 
@@ -306,13 +308,26 @@ class ViewManager:
 
     async def render(self, host: ViewHost, reason: str) -> pv.FrameInfo:
         """Render in a worker thread and queue the binary frame. Call with ``host.lock`` held."""
+        self._dupes_hook(host)
         frame = await compute(host.view.render)
         host.seq += 1
         info = frame_info(host, frame, reason)
         host.session.send_binary(encode_draw(frame, host.view.id, host.seq, CURRENT_REQUEST.get()))
         return info
 
+    def _dupes_hook(self, host: ViewHost) -> None:
+        """Give the view its dupes frame columns while results cover its scan."""
+        d = self.dupes
+        on = d is not None and CAP_DUPES in host.session.capabilities and d.has_dupes(host.scan_id)
+        host.has_dupes = on
+        if on:
+            scan_id = host.scan_id
+            host.view.dupes_annotate = lambda store, draw: d.annotate(scan_id, store, draw)
+        else:
+            host.view.dupes_annotate = None
+
     def update(self, host: ViewHost, frame: pv.FrameInfo | None, changed: bool = True) -> pv.ViewUpdate:
+        self._dupes_hook(host)
         return pv.ViewUpdate(
             state=view_state(host),
             changed=changed,
@@ -343,6 +358,8 @@ class ViewManager:
             moved = new_ids(np.array(chain, dtype=np.int64)) if chain else np.empty(0, dtype=np.int64)
             fallback = next((int(m) for m in moved.tolist() if m >= 0), host.view.home)
             host.view.remap(new_ids, fallback)
+        if self.dupes is not None:
+            self.dupes.remap(scan_id, new_ids)
 
     def flash(self, scan_id: str, changes: dict[int, int]) -> None:
         """The tree changed: views flash what changed (setting 「元素变化闪烁」) and get a new frame."""
@@ -350,6 +367,8 @@ class ViewManager:
             self.compares.on_tree_changed(scan_id)  # live comparisons follow (UI-W6-38)
         if self.ops is not None:
             self.ops.on_tree_changed(scan_id)  # basket sizes and missing items (UI-W5-48)
+        if self.dupes is not None:
+            self.dupes.on_tree_changed(scan_id, changes)  # changed copies leave their groups
         st = self.settings
         flash_on = st is None or bool(st.get("treemap.flash_changes"))
         self._follow_volumes(scan_id)
@@ -376,6 +395,10 @@ class ViewManager:
         for host in self._hosts(scan_id):
             if host.view.store is handle.store:
                 host.view.roots = roots
+
+    def push_change(self, host: ViewHost) -> None:
+        """Render ``host`` again soon (state and frame), as after a tree change."""
+        self._push_change(host)
 
     def _push_change(self, host: ViewHost) -> None:
         if host.push_task is not None and not host.push_task.done():
@@ -466,8 +489,14 @@ def fall_back(s: pv.ViewSettingsParams, caps: Collection[str], *, compare: bool)
             update["visual"] = BASELINE
     if s.color_mode == "branch" and CAP_VISUALS not in caps:
         update["color_mode"] = None
+    if s.color_mode == "dupes" and CAP_DUPES not in caps:
+        update["color_mode"] = None
     if s.colors and CAP_VISUALS not in caps:
         update["colors"] = {vis: mode for vis, mode in s.colors.items() if mode != "branch"}
+    if s.colors and CAP_DUPES not in caps:
+        kept = update.get("colors", s.colors)
+        assert isinstance(kept, dict)
+        update["colors"] = {vis: mode for vis, mode in kept.items() if mode != "dupes"}
     return s.model_copy(update=update) if update else s
 
 
@@ -481,6 +510,10 @@ def apply_settings(view: View, s: pv.ViewSettingsParams, caps: Collection[str]) 
             raise RpcError(ErrorCode.INVALID_PARAMS, tr("这种可视化在当前界面不可用"))
     if CAP_VISUALS not in caps and (
         s.color_mode == "branch" or (s.colors is not None and "branch" in s.colors.values())
+    ):
+        raise RpcError(ErrorCode.INVALID_PARAMS, tr("这种配色在当前界面不可用"))
+    if CAP_DUPES not in caps and (
+        s.color_mode == "dupes" or (s.colors is not None and "dupes" in s.colors.values())
     ):
         raise RpcError(ErrorCode.INVALID_PARAMS, tr("这种配色在当前界面不可用"))
     if s.detail is not None:
@@ -524,6 +557,7 @@ def view_state(host: ViewHost) -> pv.ViewState:
         show_unknown=v.show_unknown,
         show_trash=v.show_trash,
         has_trash=v.has_trash,
+        has_dupes=host.has_dupes,
         visual=v.visual,
         color_mode=v.color_mode,
         colors=v.colors,
@@ -601,6 +635,9 @@ def encode_draw(frame: Frame, view_id: str, seq: int, request_id: int | str | No
     if frame.delta is not None and frame.dstat is not None:  # compare views (W6)
         columns["delta"] = frame.delta
         columns["dstat"] = frame.dstat
+    if frame.dup is not None and frame.dupg is not None:  # the dupes colouring (dupes.v1)
+        columns["dup"] = frame.dup
+        columns["dupg"] = frame.dupg
     return encode_frame(
         stream=pv.view_stream(view_id),
         layout=d.layout,

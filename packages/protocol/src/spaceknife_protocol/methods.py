@@ -25,6 +25,28 @@ from .compare import (
     CompareSummaryParams,
     CompareTask,
 )
+from .dupes import (
+    DupeGroup,
+    DupesBasketParams,
+    DupesBasketResult,
+    DupesChangedEvent,
+    DupesFolderInfo,
+    DupesFolderParams,
+    DupesFoldersPage,
+    DupesFoldersParams,
+    DupesGroupParams,
+    DupesGroupsPage,
+    DupesGroupsParams,
+    DupesJobParams,
+    DupesKeepParams,
+    DupesLoadParams,
+    DupesLocateParams,
+    DupesLocateResult,
+    DupesPlan,
+    DupesScope,
+    DupesStartParams,
+    DupesStatus,
+)
 from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
@@ -377,6 +399,72 @@ COMPARE_NODE = MethodSpec(
     CompareNodeResult,
     "One block of a compare view with both sizes and its children that changed most (hover card).",
 )
+DUPES_PLAN = MethodSpec(
+    "dupes.plan",
+    DupesScope,
+    DupesPlan,
+    "What a duplicate-file search would read, from the scan alone (no IO).",
+)
+DUPES_START = MethodSpec(
+    "dupes.start",
+    DupesStartParams,
+    DupesStatus,
+    "Start a duplicate-file search in the background; 'dupes.progress' events follow (busy if another runs).",
+)
+DUPES_PAUSE = MethodSpec(
+    "dupes.pause", DupesJobParams, DupesStatus, "Pause the search: every file handle is closed."
+)
+DUPES_RESUME = MethodSpec("dupes.resume", DupesJobParams, DupesStatus, "Go on after a pause.")
+DUPES_CANCEL = MethodSpec(
+    "dupes.cancel",
+    DupesJobParams,
+    DupesStatus,
+    "Stop the search; what was verified stays, the rest stays unchecked.",
+)
+DUPES_STATUS = MethodSpec(
+    "dupes.status", DupesJobParams, DupesStatus, "State, funnel, bytes read and ledger of a search."
+)
+DUPES_SET_LOAD = MethodSpec(
+    "dupes.set_load", DupesLoadParams, DupesStatus, "Change the search's disk-load level."
+)
+DUPES_GROUPS = MethodSpec(
+    "dupes.groups",
+    DupesGroupsParams,
+    DupesGroupsPage,
+    "One page of the verified groups, sorted (largest gain first).",
+)
+DUPES_GROUP = MethodSpec("dupes.group", DupesGroupParams, DupeGroup, "One group with its members (paged).")
+DUPES_FOLDER = MethodSpec(
+    "dupes.folder",
+    DupesFolderParams,
+    DupesFolderInfo,
+    "A folder's extra copies and what of it exists elsewhere (information only, never a delete).",
+)
+DUPES_FOLDERS = MethodSpec(
+    "dupes.folders",
+    DupesFoldersParams,
+    DupesFoldersPage,
+    "Folders sorted by the bytes of extra copies below them.",
+)
+DUPES_LOCATE = MethodSpec(
+    "dupes.locate",
+    DupesLocateParams,
+    DupesLocateResult,
+    "Rows of a view's last frame that show or hold the copies of a group (lighting them up).",
+)
+DUPES_KEEP = MethodSpec(
+    "dupes.keep",
+    DupesKeepParams,
+    DupesStatus,
+    "Set the keep rules and manual choices; roles and the ledger follow.",
+)
+DUPES_TO_BASKET = MethodSpec(
+    "dupes.to_basket",
+    DupesBasketParams,
+    DupesBasketResult,
+    "Put the extra copies in the delete basket, one item per volume; each copy is checked again first.",
+)
+DUPES_CLEAR = MethodSpec("dupes.clear", DupesJobParams, EmptyResult, "Forget a search and its results.")
 CLASSES_GET = MethodSpec("classes.get", Empty, ClassesState, "The file class table (W7 文件类别).")
 CLASSES_UPDATE = MethodSpec(
     "classes.update",
@@ -555,6 +643,21 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         COMPARE_CLOSE,
         COMPARE_SUMMARY,
         COMPARE_NODE,
+        DUPES_PLAN,
+        DUPES_START,
+        DUPES_PAUSE,
+        DUPES_RESUME,
+        DUPES_CANCEL,
+        DUPES_STATUS,
+        DUPES_SET_LOAD,
+        DUPES_GROUPS,
+        DUPES_GROUP,
+        DUPES_FOLDER,
+        DUPES_FOLDERS,
+        DUPES_LOCATE,
+        DUPES_KEEP,
+        DUPES_TO_BASKET,
+        DUPES_CLEAR,
         CLASSES_GET,
         CLASSES_UPDATE,
         CLASSES_RESET,
@@ -588,6 +691,17 @@ EVENT_COMPARE_PROGRESS = EventSpec(
     "compare.progress", CompareProgressEvent, "A comparison is computing, ready (with its totals) or failed."
 )
 
+EVENT_DUPES_PROGRESS = EventSpec(
+    "dupes.progress",
+    DupesStatus,
+    "A duplicate-file search's state (at most four times a second, every session).",
+)
+EVENT_DUPES_CHANGED = EventSpec(
+    "dupes.changed",
+    DupesChangedEvent,
+    "Duplicate-file results changed (new groups, keep rules, files changed).",
+)
+
 EVENTS: dict[str, EventSpec[BaseModel]] = {
     spec.name: spec
     for spec in (
@@ -602,5 +716,7 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_COMPARE_PROGRESS,
         EVENT_CLASSES,
         EVENT_UPDATE,
+        EVENT_DUPES_PROGRESS,
+        EVENT_DUPES_CHANGED,
     )
 }

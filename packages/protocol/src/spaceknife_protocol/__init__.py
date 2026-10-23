@@ -22,6 +22,9 @@ CAP_LAYOUT_FLAME = "layout.flame.v1"
 CAP_LAYOUT_POLAR = "layout.polar.v1"
 # Update checks against the GitHub releases: update.* and the update.changed event.
 CAP_UPDATES = "updates.v1"
+# Duplicate files: dupes.*, the dupes.* events, the ``dupes`` colour mode with the ``dup`` / ``dupg``
+# frame columns, TreeNodeResult.dupe and the basket's ``dupes`` items.
+CAP_DUPES = "dupes.v1"
 ALL_CAPABILITIES = (
     CAP_BINARY_FRAMES,
     CAP_SUBSCRIPTIONS,
@@ -31,6 +34,7 @@ ALL_CAPABILITIES = (
     CAP_LAYOUT_FLAME,
     CAP_LAYOUT_POLAR,
     CAP_UPDATES,
+    CAP_DUPES,
 )
 
 

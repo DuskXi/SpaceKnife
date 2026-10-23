@@ -130,9 +130,10 @@ def schema(
         output.write_text(text, encoding="utf-8", newline="\n")
 
 
-from . import cli_run, cli_scan  # noqa: E402
+from . import cli_dupes, cli_run, cli_scan  # noqa: E402
 
 app.command()(cli_scan.scan)
+app.command()(cli_dupes.dupes)
 app.command("run", context_settings=cli_run.CONTEXT_SETTINGS)(cli_run.run)
 app.add_typer(cli_scan.snapshot_app, name="snapshot")
 

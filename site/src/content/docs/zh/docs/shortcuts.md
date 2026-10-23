@@ -251,6 +251,9 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 
 | 命令 | 按键 | 也能用这些词找到 | 备注 |
 | --- | --- | --- | --- |
+| 查找重复文件… | — | `duplicates` · `dupes` · `dedupe` · `same files` | — |
+| 重复文件面板 | — | `duplicates panel` · `dupes panel` | — |
+| 把多余的副本加入删除篮 | — | `duplicates basket` · `delete duplicates` | — |
 | 后退 | <kbd>Backspace</kbd> · <kbd>Alt</kbd>+<kbd>←</kbd> | `back` | — |
 | 前进 | <kbd>Alt</kbd>+<kbd>→</kbd> | `forward` | — |
 | 上一级 | <kbd>Alt</kbd>+<kbd>↑</kbd> | `up` · `parent` | — |
@@ -301,6 +304,7 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | 配色：扁平 | — | `color flat` | — |
 | 配色：修改时间 | — | `color time` · `age` | — |
 | 配色：顶层分支 | — | `color branch` · `top level` | — |
+| 配色：重复 | — | `color duplicates` · `dupes` | — |
 | 可视化：树图 | — | `visualization treemap` · `treemap` | — |
 | 可视化：火焰图 | — | `visualization flame` · `flame graph` · `icicle` | — |
 | 可视化：火焰-极坐标图 | — | `visualization polar` · `polar flame graph` · `radial` · `rings` | — |

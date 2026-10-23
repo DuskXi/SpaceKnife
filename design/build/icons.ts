@@ -41,6 +41,7 @@ export const icons = {
   "copy": "<rect x=\"5.5\" y=\"5.5\" width=\"8\" height=\"8\" rx=\"1.5\"/><path d=\"M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2\"/>",
   "terminal": "<rect x=\"1.5\" y=\"2.5\" width=\"13\" height=\"11\" rx=\"1.5\"/><path d=\"m4.5 6 2 2-2 2M8.5 10.5h3\"/>",
   "diff": "<path d=\"M5 13.5v-9M2.5 7 5 4.5 7.5 7M11 2.5v9M8.5 9 11 11.5 13.5 9\"/>",
+  "dupes": "<rect x=\"2.5\" y=\"2.5\" width=\"7\" height=\"8.5\" rx=\"1.2\"/><rect x=\"6.5\" y=\"5\" width=\"7\" height=\"8.5\" rx=\"1.2\"/><path d=\"M8.5 8.5h3M8.5 11h3\"/>",
   "snapshot": "<path d=\"M2 5.5a1 1 0 0 1 1-1h2l1-1.5h4l1 1.5h2a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z\"/><circle cx=\"8\" cy=\"8.5\" r=\"2.25\"/>",
   "info": "<circle cx=\"8\" cy=\"8\" r=\"6\"/><path d=\"M8 7.5V11M8 5h.01\"/>",
   "warning": "<path d=\"M8 2 14.5 13.5h-13z\"/><path d=\"M8 6.5v3M8 11.5h.01\"/>",

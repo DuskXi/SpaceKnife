@@ -56,7 +56,8 @@ def test_registry_is_consistent() -> None:
 
 def test_visualization_settings_match_the_protocol() -> None:
     assert [o[0] for o in BY_KEY["appearance.default_visual"].options] == list(pv.BUILTIN_VISUALS)
-    modes = list(get_args(pv.ColorModeName))
+    # the duplicate-file colouring is offered only while results exist, never as a default (docs/dupes.md §10.2)
+    modes = [m for m in get_args(pv.ColorModeName) if m != "dupes"]
     for key in ("appearance.default_color_mode", "appearance.partition_color_mode"):
         assert [o[0] for o in BY_KEY[key].options] == modes, key
     assert DEFAULTS["appearance.default_visual"] == "treemap"

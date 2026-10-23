@@ -269,6 +269,23 @@ Limits the disk read load a scan may cause.
 | Live monitoring | On | On `true` · Off `false` | Windows: Uses the USN journal and ReadDirectoryChangesEx. Changed files flash. macOS: Uses FSEvents. Changed files flash. Linux: Uses inotify. Changed files flash. | `scan.monitor` |
 | Event merge interval | 150 ms | 50 to 5000 ms, step 10 | Changes within this time are merged into one refresh. Can be changed when "Live monitoring" is on. | `scan.coalesce_ms` |
 
+#### Duplicate files
+
+Only files that share their size with another are read; files count as duplicates only once their whole contents match.
+
+| Setting | Default | Values | Description | Key |
+| --- | --- | --- | --- | --- |
+| Smallest file | 1 MB | 1 to 4096 MB | Smaller files are not compared (the smaller, the more files to open). | `dupes.min_size` |
+| Disk load | Quiet 35% | Full speed `"max"` · Balanced 70% `"balanced"` · Quiet 35% `"quiet"` · Idle `"idle"` | Disk load ceiling of duplicate searches; a scan on the same disk goes first. | `dupes.load` |
+| Keep by default | Oldest created | Oldest created `"oldest"` · Newest modified `"newest"` · Shortest path `"shortest"` | Which copy of each group stays (change it per group in the panel). | `dupes.keep_rule` |
+| Keep copies on the same side of a folder pair | On | On `true` · Off `false` | When two folders share several identical files, the copies kept are all in the same folder, so the other one can be emptied. | `dupes.folder_consistent` |
+| Compare across drives | Off | On `true` · Off `false` | Compare all open scans together (by default only the current scan). | `dupes.cross_volume` |
+| Across drives, keep at least one copy per volume | On | On `true` · Off `false` | Copies on other drives are often deliberate backups: they are not selected by default. Can be changed when "Compare across drives" is on. | `dupes.cross_keep_per_volume` |
+| Include system and program folders | Off | On `true` · Off `false` | Windows, Program Files, ProgramData and the like; files there are only ever kept, never preselected for deletion. | `dupes.include_system` |
+| Include network drives | Off | On `true` · Off `false` | On network drives the same file cannot be recognised; such files are only kept. | `dupes.include_network` |
+| Files whose access time cannot be kept | Skip | Skip `"skip"` · Read anyway `"read"` | SpaceKnife reads files without changing their access time; when the system does not allow that, skip them or read them anyway. | `dupes.keep_access_time` |
+| Read the contents again before deleting | Off | On `true` · Off `false` | Before deleting, read both the copy to delete and the copy kept again in full (by default only checks that the files did not change). | `dupes.recheck_content` |
+
 ### File classes
 
 Groups files by extension for treemap colors, :class: filters and class statistics.

@@ -357,14 +357,15 @@
             "dir",
             "link",
             "other",
-            "group"
+            "group",
+            "dupes"
           ],
           "title": "Kind",
           "type": "string"
         },
         "members": {
           "default": 0,
-          "description": "Small items of an aggregate block (kind 'group')",
+          "description": "Small items of an aggregate block (kind 'group'), or extra copies ('dupes')",
           "title": "Members",
           "type": "integer"
         },
@@ -396,7 +397,8 @@
             "ready",
             "locked",
             "missing",
-            "protected"
+            "protected",
+            "blocked"
           ],
           "title": "Status",
           "type": "string"
@@ -1983,6 +1985,1562 @@
       "title": "DiskPart",
       "type": "object"
     },
+    "DupeGroup": {
+      "properties": {
+        "copies": {
+          "description": "Physical files with this content",
+          "title": "Copies",
+          "type": "integer"
+        },
+        "cross": {
+          "default": false,
+          "title": "Cross",
+          "type": "boolean"
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "keep_why": {
+          "anyOf": [
+            {
+              "enum": [
+                "rule",
+                "preferred",
+                "folder",
+                "volume",
+                "needed",
+                "manual",
+                "pinned"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Keep Why"
+        },
+        "members": {
+          "description": "The first few (DupesGroupParams pages through all)",
+          "items": {
+            "$ref": "#/$defs/DupeMember"
+          },
+          "title": "Members",
+          "type": "array"
+        },
+        "names": {
+          "description": "Distinct names among them",
+          "title": "Names",
+          "type": "integer"
+        },
+        "reclaim": {
+          "title": "Reclaim",
+          "type": "integer"
+        },
+        "shared": {
+          "default": 0,
+          "title": "Shared",
+          "type": "integer"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "state": {
+          "enum": [
+            "confirmed",
+            "shared"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "total_members": {
+          "default": 0,
+          "title": "Total Members",
+          "type": "integer"
+        },
+        "volumes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "size",
+        "copies",
+        "names",
+        "reclaim",
+        "state",
+        "members"
+      ],
+      "title": "DupeGroup",
+      "type": "object"
+    },
+    "DupeMember": {
+      "properties": {
+        "alloc": {
+          "default": 0,
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "ctime": {
+          "default": 0,
+          "title": "Ctime",
+          "type": "integer"
+        },
+        "mtime": {
+          "default": 0,
+          "title": "Mtime",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "keep",
+            "extra",
+            "alias",
+            "clone",
+            "needed",
+            "other_volume",
+            "pinned"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        },
+        "volume": {
+          "default": "",
+          "title": "Volume",
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "enum": [
+                "rule",
+                "preferred",
+                "folder",
+                "volume",
+                "needed",
+                "manual",
+                "pinned"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Why"
+        }
+      },
+      "required": [
+        "scan_id",
+        "node",
+        "path",
+        "role"
+      ],
+      "title": "DupeMember",
+      "type": "object"
+    },
+    "DupeNodeInfo": {
+      "description": "A node's place in the results (``tree.node`` with ``dupes.v1``).",
+      "properties": {
+        "copies": {
+          "default": 0,
+          "title": "Copies",
+          "type": "integer"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "other_volumes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Other Volumes",
+          "type": "array"
+        },
+        "others": {
+          "description": "Up to three other copies",
+          "items": {
+            "$ref": "#/$defs/DupeMember"
+          },
+          "title": "Others",
+          "type": "array"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "reclaim": {
+          "default": 0,
+          "title": "Reclaim",
+          "type": "integer"
+        },
+        "redundant": {
+          "default": 0,
+          "description": "Folders: bytes of extra copies below it",
+          "title": "Redundant",
+          "type": "integer"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "keep",
+                "extra",
+                "alias",
+                "clone",
+                "needed",
+                "other_volume",
+                "pinned"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        },
+        "state": {
+          "enum": [
+            "none",
+            "pending",
+            "keep",
+            "extra",
+            "shared",
+            "skipped"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "enum": [
+                "rule",
+                "preferred",
+                "folder",
+                "volume",
+                "needed",
+                "manual",
+                "pinned"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Why"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "DupeNodeInfo",
+      "type": "object"
+    },
+    "DupesBasketParams": {
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only these groups (default: every group)",
+          "title": "Groups"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "DupesBasketParams",
+      "type": "object"
+    },
+    "DupesBasketResult": {
+      "properties": {
+        "freed": {
+          "title": "Freed",
+          "type": "integer"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "items": {
+          "description": "Ids of the basket items made (one per volume)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "members": {
+          "title": "Members",
+          "type": "integer"
+        },
+        "refused": {
+          "items": {
+            "$ref": "#/$defs/DupesRefused"
+          },
+          "title": "Refused",
+          "type": "array"
+        }
+      },
+      "required": [
+        "items",
+        "groups",
+        "members",
+        "freed"
+      ],
+      "title": "DupesBasketResult",
+      "type": "object"
+    },
+    "DupesBytes": {
+      "properties": {
+        "cache_hits": {
+          "default": 0,
+          "title": "Cache Hits",
+          "type": "integer"
+        },
+        "full": {
+          "default": 0,
+          "title": "Full",
+          "type": "integer"
+        },
+        "full_upper": {
+          "default": 0,
+          "title": "Full Upper",
+          "type": "integer"
+        },
+        "planned_probe": {
+          "default": 0,
+          "title": "Planned Probe",
+          "type": "integer"
+        },
+        "probe": {
+          "default": 0,
+          "title": "Probe",
+          "type": "integer"
+        },
+        "read": {
+          "default": 0,
+          "title": "Read",
+          "type": "integer"
+        }
+      },
+      "title": "DupesBytes",
+      "type": "object"
+    },
+    "DupesChangedEvent": {
+      "properties": {
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        },
+        "reason": {
+          "enum": [
+            "verified",
+            "keep",
+            "invalidated",
+            "cleared"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "job_id",
+        "version",
+        "reason"
+      ],
+      "title": "DupesChangedEvent",
+      "type": "object"
+    },
+    "DupesFolderInfo": {
+      "description": "What of a folder exists elsewhere (§8.4): for the user to judge, never a delete.",
+      "properties": {
+        "elsewhere": {
+          "default": 0,
+          "title": "Elsewhere",
+          "type": "integer"
+        },
+        "elsewhere_bytes": {
+          "default": 0,
+          "title": "Elsewhere Bytes",
+          "type": "integer"
+        },
+        "groups": {
+          "default": 0,
+          "title": "Groups",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "only_here": {
+          "default": 0,
+          "title": "Only Here",
+          "type": "integer"
+        },
+        "only_here_bytes": {
+          "default": 0,
+          "title": "Only Here Bytes",
+          "type": "integer"
+        },
+        "only_here_list": {
+          "items": {
+            "$ref": "#/$defs/DupesOnlyHere"
+          },
+          "title": "Only Here List",
+          "type": "array"
+        },
+        "redundant": {
+          "description": "Bytes of extra copies below it",
+          "title": "Redundant",
+          "type": "integer"
+        },
+        "same_data": {
+          "default": 0,
+          "title": "Same Data",
+          "type": "integer"
+        },
+        "same_data_bytes": {
+          "default": 0,
+          "title": "Same Data Bytes",
+          "type": "integer"
+        },
+        "small": {
+          "default": 0,
+          "title": "Small",
+          "type": "integer"
+        },
+        "small_bytes": {
+          "default": 0,
+          "title": "Small Bytes",
+          "type": "integer"
+        },
+        "unchecked": {
+          "default": 0,
+          "title": "Unchecked",
+          "type": "integer"
+        },
+        "unchecked_bytes": {
+          "default": 0,
+          "title": "Unchecked Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "redundant"
+      ],
+      "title": "DupesFolderInfo",
+      "type": "object"
+    },
+    "DupesFolderParams": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "node": {
+          "minimum": 1,
+          "title": "Node",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "scan_id",
+        "node"
+      ],
+      "title": "DupesFolderParams",
+      "type": "object"
+    },
+    "DupesFolderRow": {
+      "properties": {
+        "alloc": {
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "redundant": {
+          "title": "Redundant",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "node",
+        "path",
+        "redundant",
+        "alloc"
+      ],
+      "title": "DupesFolderRow",
+      "type": "object"
+    },
+    "DupesFoldersPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/DupesFolderRow"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "total",
+        "items"
+      ],
+      "title": "DupesFoldersPage",
+      "type": "object"
+    },
+    "DupesFoldersParams": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "scan_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "scan_id"
+      ],
+      "title": "DupesFoldersParams",
+      "type": "object"
+    },
+    "DupesFunnel": {
+      "properties": {
+        "aliases": {
+          "default": 0,
+          "title": "Aliases",
+          "type": "integer"
+        },
+        "candidates": {
+          "default": 0,
+          "title": "Candidates",
+          "type": "integer"
+        },
+        "clones": {
+          "default": 0,
+          "title": "Clones",
+          "type": "integer"
+        },
+        "confirmed_files": {
+          "default": 0,
+          "title": "Confirmed Files",
+          "type": "integer"
+        },
+        "confirmed_groups": {
+          "default": 0,
+          "title": "Confirmed Groups",
+          "type": "integer"
+        },
+        "identified": {
+          "default": 0,
+          "title": "Identified",
+          "type": "integer"
+        },
+        "physical": {
+          "default": 0,
+          "title": "Physical",
+          "type": "integer"
+        },
+        "probed": {
+          "default": 0,
+          "title": "Probed",
+          "type": "integer"
+        },
+        "shared_groups": {
+          "default": 0,
+          "title": "Shared Groups",
+          "type": "integer"
+        },
+        "skipped": {
+          "default": 0,
+          "title": "Skipped",
+          "type": "integer"
+        },
+        "unique": {
+          "default": 0,
+          "title": "Unique",
+          "type": "integer"
+        },
+        "verifying": {
+          "default": 0,
+          "title": "Verifying",
+          "type": "integer"
+        }
+      },
+      "title": "DupesFunnel",
+      "type": "object"
+    },
+    "DupesGroupParams": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 200,
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "job_id",
+        "group"
+      ],
+      "title": "DupesGroupParams",
+      "type": "object"
+    },
+    "DupesGroupsPage": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/DupeGroup"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "total",
+        "items"
+      ],
+      "title": "DupesGroupsPage",
+      "type": "object"
+    },
+    "DupesGroupsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "cross_only": {
+          "default": false,
+          "title": "Cross Only",
+          "type": "boolean"
+        },
+        "include_shared": {
+          "default": false,
+          "title": "Include Shared",
+          "type": "boolean"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 100,
+          "maximum": 500,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Id"
+        },
+        "sort": {
+          "default": "reclaim",
+          "enum": [
+            "reclaim",
+            "size",
+            "copies",
+            "path"
+          ],
+          "title": "Sort",
+          "type": "string"
+        },
+        "under": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only groups with a copy below this folder (of scan_id)",
+          "title": "Under"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "DupesGroupsParams",
+      "type": "object"
+    },
+    "DupesJobParams": {
+      "additionalProperties": false,
+      "properties": {
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "DupesJobParams",
+      "type": "object"
+    },
+    "DupesKeepParams": {
+      "additionalProperties": false,
+      "properties": {
+        "folder_consistent": {
+          "default": true,
+          "title": "Folder Consistent",
+          "type": "boolean"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "overrides": {
+          "items": {
+            "$ref": "#/$defs/DupesOverride"
+          },
+          "maxItems": 10000,
+          "title": "Overrides",
+          "type": "array"
+        },
+        "per_volume": {
+          "default": true,
+          "title": "Per Volume",
+          "type": "boolean"
+        },
+        "prefer": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Prefer",
+          "type": "array"
+        },
+        "rule": {
+          "default": "oldest",
+          "enum": [
+            "oldest",
+            "newest",
+            "shortest"
+          ],
+          "title": "Rule",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "DupesKeepParams",
+      "type": "object"
+    },
+    "DupesLast": {
+      "properties": {
+        "at": {
+          "title": "At",
+          "type": "string"
+        },
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "reclaim": {
+          "title": "Reclaim",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "groups",
+        "files",
+        "reclaim"
+      ],
+      "title": "DupesLast",
+      "type": "object"
+    },
+    "DupesLedgerVolume": {
+      "properties": {
+        "extra": {
+          "default": 0,
+          "description": "Extra copies (files)",
+          "title": "Extra",
+          "type": "integer"
+        },
+        "groups": {
+          "default": 0,
+          "title": "Groups",
+          "type": "integer"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        },
+        "reclaim": {
+          "default": 0,
+          "description": "Bytes freed by deleting the extra copies",
+          "title": "Reclaim",
+          "type": "integer"
+        },
+        "shared": {
+          "default": 0,
+          "description": "Bytes of names and clones of one file: deleting frees nothing",
+          "title": "Shared",
+          "type": "integer"
+        },
+        "volume": {
+          "title": "Volume",
+          "type": "string"
+        }
+      },
+      "required": [
+        "volume"
+      ],
+      "title": "DupesLedgerVolume",
+      "type": "object"
+    },
+    "DupesLoadParams": {
+      "additionalProperties": false,
+      "properties": {
+        "custom": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Custom"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "level": {
+          "enum": [
+            "idle",
+            "quiet",
+            "balanced",
+            "max",
+            "custom"
+          ],
+          "title": "Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "level"
+      ],
+      "title": "DupesLoadParams",
+      "type": "object"
+    },
+    "DupesLocateParams": {
+      "additionalProperties": false,
+      "properties": {
+        "group": {
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        },
+        "job_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Job Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 2000,
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "view_id",
+        "group"
+      ],
+      "title": "DupesLocateParams",
+      "type": "object"
+    },
+    "DupesLocateResult": {
+      "properties": {
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/DupesLocateRow"
+          },
+          "title": "Rows",
+          "type": "array"
+        },
+        "seq": {
+          "description": "Frame sequence the rows belong to",
+          "title": "Seq",
+          "type": "integer"
+        },
+        "truncated": {
+          "default": false,
+          "title": "Truncated",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "seq",
+        "rows"
+      ],
+      "title": "DupesLocateResult",
+      "type": "object"
+    },
+    "DupesLocateRow": {
+      "properties": {
+        "exact": {
+          "description": "False: the copy is inside this folder or block",
+          "title": "Exact",
+          "type": "boolean"
+        },
+        "role": {
+          "enum": [
+            "keep",
+            "extra",
+            "alias",
+            "clone",
+            "needed",
+            "other_volume",
+            "pinned"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "row": {
+          "title": "Row",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "row",
+        "exact",
+        "role"
+      ],
+      "title": "DupesLocateRow",
+      "type": "object"
+    },
+    "DupesOnlyHere": {
+      "properties": {
+        "alloc": {
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node",
+        "path",
+        "alloc"
+      ],
+      "title": "DupesOnlyHere",
+      "type": "object"
+    },
+    "DupesOverride": {
+      "properties": {
+        "group": {
+          "minimum": 0,
+          "title": "Group",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "role": {
+          "enum": [
+            "keep",
+            "extra"
+          ],
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group",
+        "path",
+        "role"
+      ],
+      "title": "DupesOverride",
+      "type": "object"
+    },
+    "DupesPlan": {
+      "properties": {
+        "bytes": {
+          "description": "Bytes of every candidate (the most a job could read)",
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "candidates": {
+          "title": "Candidates",
+          "type": "integer"
+        },
+        "cross_extra": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cross-volume: files and bytes it adds",
+          "title": "Cross Extra"
+        },
+        "excluded": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "small, cloud, system, network, bins, unique",
+          "title": "Excluded",
+          "type": "object"
+        },
+        "full_bytes_max": {
+          "title": "Full Bytes Max",
+          "type": "integer"
+        },
+        "groups": {
+          "title": "Groups",
+          "type": "integer"
+        },
+        "last": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DupesLast"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "probe_bytes": {
+          "description": "What reading heads and tails costs",
+          "title": "Probe Bytes",
+          "type": "integer"
+        },
+        "reclaim_max": {
+          "description": "The most that could be freed, if every candidate had a twin",
+          "title": "Reclaim Max",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "candidates",
+        "groups",
+        "bytes",
+        "probe_bytes",
+        "full_bytes_max",
+        "reclaim_max",
+        "excluded"
+      ],
+      "title": "DupesPlan",
+      "type": "object"
+    },
+    "DupesRefused": {
+      "properties": {
+        "group": {
+          "title": "Group",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "group",
+        "reason"
+      ],
+      "title": "DupesRefused",
+      "type": "object"
+    },
+    "DupesScope": {
+      "additionalProperties": false,
+      "properties": {
+        "cross_volume": {
+          "default": false,
+          "description": "Compare across every given scan",
+          "title": "Cross Volume",
+          "type": "boolean"
+        },
+        "include_network": {
+          "default": false,
+          "title": "Include Network",
+          "type": "boolean"
+        },
+        "include_system": {
+          "default": false,
+          "title": "Include System",
+          "type": "boolean"
+        },
+        "min_size": {
+          "default": 1048576,
+          "minimum": 1,
+          "title": "Min Size",
+          "type": "integer"
+        },
+        "mode": {
+          "default": "all",
+          "enum": [
+            "all",
+            "inside",
+            "against",
+            "file"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "inside / against: a folder; file: a file (of scan_ids[0])",
+          "title": "Node"
+        },
+        "scan_ids": {
+          "description": "Live scans compared together",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Scan Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "scan_ids"
+      ],
+      "title": "DupesScope",
+      "type": "object"
+    },
+    "DupesStartParams": {
+      "additionalProperties": false,
+      "properties": {
+        "budget_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Bytes"
+        },
+        "load": {
+          "anyOf": [
+            {
+              "enum": [
+                "idle",
+                "quiet",
+                "balanced",
+                "max",
+                "custom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Load"
+        },
+        "load_custom": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Load Custom"
+        },
+        "max_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Seconds"
+        },
+        "replace": {
+          "default": false,
+          "description": "Stop the running job and start this one",
+          "title": "Replace",
+          "type": "boolean"
+        },
+        "scope": {
+          "$ref": "#/$defs/DupesScope"
+        }
+      },
+      "required": [
+        "scope"
+      ],
+      "title": "DupesStartParams",
+      "type": "object"
+    },
+    "DupesStatus": {
+      "properties": {
+        "atime_moved_by_others": {
+          "default": 0,
+          "title": "Atime Moved By Others",
+          "type": "integer"
+        },
+        "atime_unkept": {
+          "default": 0,
+          "title": "Atime Unkept",
+          "type": "integer"
+        },
+        "bytes": {
+          "$ref": "#/$defs/DupesBytes"
+        },
+        "cross_volume": {
+          "default": false,
+          "title": "Cross Volume",
+          "type": "boolean"
+        },
+        "elapsed_s": {
+          "default": 0,
+          "title": "Elapsed S",
+          "type": "number"
+        },
+        "error": {
+          "default": "",
+          "title": "Error",
+          "type": "string"
+        },
+        "eta_max_s": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "At most this long still (reading every candidate)",
+          "title": "Eta Max S"
+        },
+        "extra": {
+          "default": 0,
+          "title": "Extra",
+          "type": "integer"
+        },
+        "funnel": {
+          "$ref": "#/$defs/DupesFunnel"
+        },
+        "groups": {
+          "default": 0,
+          "description": "Verified groups with something to free",
+          "title": "Groups",
+          "type": "integer"
+        },
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        },
+        "ledger": {
+          "items": {
+            "$ref": "#/$defs/DupesLedgerVolume"
+          },
+          "title": "Ledger",
+          "type": "array"
+        },
+        "load": {
+          "default": "quiet",
+          "enum": [
+            "idle",
+            "quiet",
+            "balanced",
+            "max",
+            "custom"
+          ],
+          "title": "Load",
+          "type": "string"
+        },
+        "mode": {
+          "default": "all",
+          "enum": [
+            "all",
+            "inside",
+            "against",
+            "file"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "progress": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Share of the groups decided, 0–1",
+          "title": "Progress"
+        },
+        "rate": {
+          "default": 0,
+          "description": "Bytes read per second, lately",
+          "title": "Rate",
+          "type": "number"
+        },
+        "reclaim": {
+          "default": 0,
+          "title": "Reclaim",
+          "type": "integer"
+        },
+        "scan_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scan Ids",
+          "type": "array"
+        },
+        "skipped_by_reason": {
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "title": "Skipped By Reason",
+          "type": "object"
+        },
+        "state": {
+          "enum": [
+            "planning",
+            "identifying",
+            "probing",
+            "verifying",
+            "waiting_scan",
+            "paused",
+            "done",
+            "cancelled",
+            "failed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "version": {
+          "default": 0,
+          "title": "Version",
+          "type": "integer"
+        },
+        "waiting_for": {
+          "default": "",
+          "description": "A scan of this disk runs: the job waits",
+          "title": "Waiting For",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id",
+        "state",
+        "scan_ids"
+      ],
+      "title": "DupesStatus",
+      "type": "object"
+    },
     "Empty": {
       "additionalProperties": false,
       "description": "Params for methods that take no arguments.",
@@ -3122,6 +4680,32 @@
           "description": "Compare views only",
           "title": "Dstat"
         },
+        "dup": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "dupes colouring only",
+          "title": "Dup"
+        },
+        "dupg": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "dupes colouring only",
+          "title": "Dupg"
+        },
         "flags": {
           "default": 0,
           "title": "Flags",
@@ -3852,6 +5436,10 @@
             "exists",
             "cancelled",
             "ambiguous_name",
+            "changed",
+            "keeper_changed",
+            "last_copy",
+            "keeper_busy",
             "error"
           ],
           "title": "Code",
@@ -5668,10 +7256,10 @@
           "anyOf": [
             {
               "enum": [
-                "max",
-                "balanced",
-                "quiet",
                 "idle",
+                "quiet",
+                "balanced",
+                "max",
                 "custom"
               ],
               "type": "string"
@@ -7158,6 +8746,18 @@
     },
     "TreeNodeResult": {
       "properties": {
+        "dupe": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DupeNodeInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Duplicate-file results for it (dupes.v1)"
+        },
         "node": {
           "$ref": "#/$defs/NodeInfo"
         },
@@ -8063,7 +9663,8 @@
                 "class",
                 "flat",
                 "time",
-                "branch"
+                "branch",
+                "dupes"
               ],
               "type": "string"
             },
@@ -8083,7 +9684,8 @@
                   "class",
                   "flat",
                   "time",
-                  "branch"
+                  "branch",
+                  "dupes"
                 ],
                 "type": "string"
               },
@@ -8260,7 +9862,8 @@
             "class",
             "flat",
             "time",
-            "branch"
+            "branch",
+            "dupes"
           ],
           "title": "Color Mode",
           "type": "string"
@@ -8271,7 +9874,8 @@
               "class",
               "flat",
               "time",
-              "branch"
+              "branch",
+              "dupes"
             ],
             "type": "string"
           },
@@ -8306,6 +9910,12 @@
           ],
           "title": "Filter Mode",
           "type": "string"
+        },
+        "has_dupes": {
+          "default": false,
+          "description": "Duplicate-file results or a job cover this scan (the dupes colouring is offered)",
+          "title": "Has Dupes",
+          "type": "boolean"
         },
         "has_trash": {
           "default": false,
@@ -8554,7 +10164,8 @@
             "class",
             "flat",
             "time",
-            "branch"
+            "branch",
+            "dupes"
           ],
           "title": "Default Color",
           "type": "string"
@@ -8943,6 +10554,14 @@
       "doc": "A comparison is computing, ready (with its totals) or failed.",
       "payload": "#/$defs/CompareProgressEvent"
     },
+    "dupes.changed": {
+      "doc": "Duplicate-file results changed (new groups, keep rules, files changed).",
+      "payload": "#/$defs/DupesChangedEvent"
+    },
+    "dupes.progress": {
+      "doc": "A duplicate-file search's state (at most four times a second, every session).",
+      "payload": "#/$defs/DupesStatus"
+    },
     "io.load": {
       "doc": "Load state of a disk for an 'io' subscription (2 Hz).",
       "payload": "#/$defs/IoStatusEvent"
@@ -9080,6 +10699,96 @@
       "params": "#/$defs/CompareSummaryParams",
       "requiresSession": true,
       "result": "#/$defs/CompareSummary"
+    },
+    "dupes.cancel": {
+      "doc": "Stop the search; what was verified stays, the rest stays unchecked.",
+      "params": "#/$defs/DupesJobParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.clear": {
+      "doc": "Forget a search and its results.",
+      "params": "#/$defs/DupesJobParams",
+      "requiresSession": true,
+      "result": "#/$defs/EmptyResult"
+    },
+    "dupes.folder": {
+      "doc": "A folder's extra copies and what of it exists elsewhere (information only, never a delete).",
+      "params": "#/$defs/DupesFolderParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesFolderInfo"
+    },
+    "dupes.folders": {
+      "doc": "Folders sorted by the bytes of extra copies below them.",
+      "params": "#/$defs/DupesFoldersParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesFoldersPage"
+    },
+    "dupes.group": {
+      "doc": "One group with its members (paged).",
+      "params": "#/$defs/DupesGroupParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupeGroup"
+    },
+    "dupes.groups": {
+      "doc": "One page of the verified groups, sorted (largest gain first).",
+      "params": "#/$defs/DupesGroupsParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesGroupsPage"
+    },
+    "dupes.keep": {
+      "doc": "Set the keep rules and manual choices; roles and the ledger follow.",
+      "params": "#/$defs/DupesKeepParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.locate": {
+      "doc": "Rows of a view's last frame that show or hold the copies of a group (lighting them up).",
+      "params": "#/$defs/DupesLocateParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesLocateResult"
+    },
+    "dupes.pause": {
+      "doc": "Pause the search: every file handle is closed.",
+      "params": "#/$defs/DupesJobParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.plan": {
+      "doc": "What a duplicate-file search would read, from the scan alone (no IO).",
+      "params": "#/$defs/DupesScope",
+      "requiresSession": true,
+      "result": "#/$defs/DupesPlan"
+    },
+    "dupes.resume": {
+      "doc": "Go on after a pause.",
+      "params": "#/$defs/DupesJobParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.set_load": {
+      "doc": "Change the search's disk-load level.",
+      "params": "#/$defs/DupesLoadParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.start": {
+      "doc": "Start a duplicate-file search in the background; 'dupes.progress' events follow (busy if another runs).",
+      "params": "#/$defs/DupesStartParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.status": {
+      "doc": "State, funnel, bytes read and ledger of a search.",
+      "params": "#/$defs/DupesJobParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesStatus"
+    },
+    "dupes.to_basket": {
+      "doc": "Put the extra copies in the delete basket, one item per volume; each copy is checked again first.",
+      "params": "#/$defs/DupesBasketParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesBasketResult"
     },
     "export.check": {
       "doc": "Diagnostics of a template's text.",
