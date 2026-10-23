@@ -316,6 +316,14 @@ def _linux_volume(path: str) -> VolumeInfo:
             best = m
     if best is None:
         point = _mount_point_by_dev(real)
+        # btrfs: files carry their subvolume's own device number, not the one mountinfo lists; the
+        # mount whose point is where the device number changes is theirs
+        at = [m for m in _linux_mounts() if m.mount_point == point]
+        if at:
+            m = at[-1]
+            return _wsl_marked(
+                m, _posix_from_statvfs(real, point, m.fs_type, m.source, m.fs_type in NETWORK_FS)
+            )
         return _posix_from_statvfs(real, point, "", "", False)
     return _wsl_marked(
         best,

@@ -7,6 +7,7 @@ import threading
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
+from spaceknife_protocol import CAP_DUPES_CLEANUP
 from spaceknife_protocol import palette as pp
 from spaceknife_protocol.base import Empty, EmptyResult
 from spaceknife_protocol.errors import ErrorCode
@@ -121,6 +122,7 @@ def install(server: Server) -> None:
             update_checking=update.checking,
             dupes=server.dupes.palette_status(c.scan_id) if scan_tab and c.scan_id else "",
             has_dupes=scan_tab and bool(c.scan_id) and server.dupes.has_dupes(c.scan_id or ""),
+            cleanup_runs=server.cleanup.runs_count() if CAP_DUPES_CLEANUP in session.capabilities else 0,
         )
         return ctx, handle, view
 

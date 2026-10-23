@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "6705d3c0a7c1ac25";
+export const SCHEMA_HASH = "50f61037efe18d8e";
 
 export interface AgeCond {
   end: number;
@@ -60,6 +60,8 @@ export interface BasketEvent {
 }
 
 export interface BasketExecuteParams {
+  /** Items with status 'link_target': the user knows SpaceKnife's links to them break */
+  ack_link_targets?: boolean;
   /** None: every item */
   ids?: string[] | null;
   mode: "trash" | "delete";

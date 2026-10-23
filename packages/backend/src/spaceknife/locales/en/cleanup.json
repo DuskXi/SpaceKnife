@@ -234,6 +234,8 @@
   "最近还改过": "Changed recently",
   "有": "Yes",
   "有 SpaceKnife 建的符号链接指向它：移走以后这些链接都打不开": "Symbolic links made by SpaceKnife point at it: moving it away breaks them all",
+  "有 {count} 个 SpaceKnife 建的符号链接指向它：删了它，这些链接都打不开": "{count} symbolic links made by SpaceKnife point at it: deleting it breaks them all",
+  "有 {n} 项是 SpaceKnife 建的符号链接的目标：确认这些链接会失效后再执行": "{n} items are targets of symbolic links SpaceKnife made: confirm that those links will break, then run",
   "有{sev}风险的": "with a {sev} risk",
   "有一项要你看一下，已经停下": "An item needs you to look; stopped",
   "有没比较过的附加数据": "Has extra data never compared",

@@ -138,7 +138,7 @@ def _below(store: NodeStore, nodes: np.ndarray, tops: np.ndarray) -> np.ndarray:
 def _recovery_areas(store: NodeStore, roots: Sequence[RootInfo]) -> np.ndarray:
     """Nodes of the cleanup's recovery folders in this tree: ``.SpaceKnife-recovery*`` at the top of
     a root or a volume, and SpaceKnife's own ``data/dupes/cleanup/recovery``."""
-    from ..dupes.cleanup.recovery import AREA
+    from ..dupes.cleanup.recovery import AREA, in_place_originals
     from ..paths import data_dir
 
     found: list[int] = []
@@ -160,6 +160,11 @@ def _recovery_areas(store: NodeStore, roots: Sequence[RootInfo]) -> np.ndarray:
         hit = store.find(str(data_dir() / "dupes" / "cleanup" / "recovery"))
         if hit is not None:
             found.append(int(hit))
+    with contextlib.suppress(Exception):
+        for rec in in_place_originals():
+            hit = store.find(rec)
+            if hit is not None:
+                found.append(int(hit))
     return np.array(sorted(set(found)), dtype=np.int64)
 
 

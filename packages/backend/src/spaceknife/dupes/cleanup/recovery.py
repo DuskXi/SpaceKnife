@@ -212,3 +212,28 @@ def is_recovery_path(path: str) -> bool:
         return True
     name = parts[-1] if parts else ""
     return name.startswith(".~sk-") and name.endswith(".orig")
+
+
+_IN_PLACE: list[tuple[float, list[str]]] = []
+
+
+def in_place_originals() -> list[str]:
+    """Originals kept beside themselves (``.~sk-<run>-<seq>.orig``) that are still there: the search
+    never takes them as candidates. Read from the journals, kept until a run changes them."""
+    from .journal import fold, read_records, run_dirs, runs_root
+
+    try:
+        stamp = runs_root().stat().st_mtime
+    except OSError:
+        return []
+    if _IN_PLACE and _IN_PLACE[0][0] == stamp:
+        return _IN_PLACE[0][1]
+    found: list[str] = []
+    for d in run_dirs():
+        steps, _, _ = fold(read_records(d))
+        for st in steps.values():
+            rec = (st.done or {}).get("rec", "")
+            if rec and is_recovery_path(rec) and not st.undone and not st.purged:
+                found.append(rec)
+    _IN_PLACE[:] = [(stamp, found)]
+    return found

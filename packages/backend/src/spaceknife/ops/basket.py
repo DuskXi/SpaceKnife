@@ -38,7 +38,8 @@ from .paths import protected_reason
 from .trash import OpResult, win32_trims
 
 ItemKind = Literal["file", "dir", "link", "other", "group"]
-Status = Literal["ready", "locked", "missing", "protected"]
+Status = Literal["ready", "locked", "missing", "protected", "link_target"]
+LIVE = ("ready", "locked", "link_target")  # items that are executed (and free space)
 
 # Every user-facing text of this module (M7.5 extracts them for translation).
 TEXT = Texts(
@@ -60,6 +61,7 @@ TEXT = Texts(
         "members_failed": "{count} 项未完成：{message}",
         "list_sep": "、",
         "note_sep": "；",
+        "link_targets": "有 {count} 个 SpaceKnife 建的符号链接指向它：删了它，这些链接都打不开",
     }
 )
 
@@ -212,6 +214,8 @@ class Basket:
         self._absorbed_paths: dict[str, str] = {}  # during one add(): absorbed id -> its path
         self._shared: dict[int, frozenset[bytes]] = {}  # during one add(): folder -> names it holds twice
         self.version = 0  # bumped by every change (pushes compare it)
+        # SpaceKnife-made symbolic links pointing at a path or inside it (the duplicate-file cleanup)
+        self.link_targets: Callable[[str], int] | None = None
 
     # ------------------------------------------------------------------ queries
 
@@ -238,7 +242,7 @@ class Basket:
         with self._lock:
             out: dict[str, int] = {}
             for e in self._entries.values():
-                if e.item.status in ("ready", "locked"):
+                if e.item.status in LIVE:
                     out[e.item.volume] = out.get(e.item.volume, 0) + e.item.alloc
             return out
 
@@ -376,7 +380,7 @@ class Basket:
                         if n not in names:
                             names.append(n)
                 entry.lock_note = TEXT["locked"].format(names=TEXT["list_sep"].join(names)) if names else ""
-                if entry.item.status in ("ready", "locked"):
+                if entry.item.status in LIVE:
                     entry.item.status = self._status(entry)
             self._settle()
 
@@ -759,7 +763,7 @@ class Basket:
         lacking = np.zeros(len(entries), dtype=np.int64)  # file items: other names not in the basket
         by_volume: dict[str, list[int]] = {}
         for i, e in enumerate(entries):
-            if e.item.status in ("ready", "locked") and len(e.measure.ino):
+            if e.item.status in LIVE and len(e.measure.ino):
                 by_volume.setdefault(e.item.volume, []).append(i)
         for idx in by_volume.values():
             ino = np.concatenate([entries[i].measure.ino for i in idx])
@@ -782,12 +786,12 @@ class Basket:
             np.maximum.at(lacking, owner[incomplete], (grp_nlink - counts)[group_of][incomplete])
         for i, e in enumerate(entries):
             item = e.item
-            if item.status in ("ready", "locked"):
+            if item.status in LIVE:
                 item.alloc = int(e.measure.base + gain[i])
             else:
                 item.alloc = 0
             item.size, item.files, item.dirs = e.measure.size, e.measure.files, e.measure.dirs
-            if short[i] and item.status in ("ready", "locked"):
+            if short[i] and item.status in LIVE:
                 e.link_note = (
                     TEXT["links_file"].format(count=int(lacking[i]))
                     if item.kind == "file"
@@ -795,7 +799,13 @@ class Basket:
                 )
             else:
                 e.link_note = ""
+            links = 0
+            if self.link_targets is not None and item.status in LIVE:
+                paths = item.members if e.group else [item.path]
+                links = sum(self.link_targets(m) for m in paths)
+                item.status = "link_target" if links else ("locked" if e.lock_note else "ready")
             notes = [
+                TEXT["link_targets"].format(count=links) if links else "",
                 TEXT["missing"] if item.status == "missing" else "",
                 TEXT["members_missing"].format(count=e.missing_members)
                 if e.missing_members and item.status != "missing"

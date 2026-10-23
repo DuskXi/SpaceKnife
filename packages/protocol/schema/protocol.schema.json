@@ -299,6 +299,12 @@
     "BasketExecuteParams": {
       "additionalProperties": false,
       "properties": {
+        "ack_link_targets": {
+          "default": false,
+          "description": "Items with status 'link_target': the user knows SpaceKnife's links to them break",
+          "title": "Ack Link Targets",
+          "type": "boolean"
+        },
         "ids": {
           "anyOf": [
             {

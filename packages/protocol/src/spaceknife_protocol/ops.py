@@ -118,6 +118,10 @@ class BasketEvent(Payload):
 class BasketExecuteParams(Params):
     mode: OpMode
     ids: list[str] | None = Field(default=None, description="None: every item")
+    ack_link_targets: bool = Field(
+        default=False,
+        description="Items with status 'link_target': the user knows SpaceKnife's links to them break",
+    )
 
 
 class OpTask(Payload):

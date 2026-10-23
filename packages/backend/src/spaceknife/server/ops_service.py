@@ -57,6 +57,7 @@ TEXT = Texts(
         "busy": "还有文件操作在进行，完成后再执行",
         "unknown_task": "没有这个文件操作：{id}",
         "nothing": "删除篮里没有可以执行的项",
+        "link_targets": "有 {n} 项是 SpaceKnife 建的符号链接的目标：确认这些链接会失效后再执行",
         "trash_same": "回收站在同一个卷上：清空回收站后才真正释放空间",
         "trash_used": "{note}，回收站现在有 {size}",
     }
@@ -108,6 +109,7 @@ class OpsService:
     def __init__(self, server: Server) -> None:
         self.server = server
         self.basket = Basket()
+        self.basket.link_targets = self._link_targets
         self.runs: dict[str, OpRun] = {}
         self._ids = itertools.count(1)
         self._trash_info: dict[str, tuple[float, TrashStatus]] = {}
@@ -116,6 +118,11 @@ class OpsService:
         self._lock_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------- state
+
+    def _link_targets(self, path: str) -> int:
+        """SpaceKnife-made symbolic links pointing at ``path`` or inside it (docs/dupes.md §16.11)."""
+        cleanup = getattr(self.server, "cleanup", None)
+        return int(cleanup.link_target_count(path)) if cleanup is not None else 0
 
     def _store_of(self, scan_id: str) -> NodeStore | None:
         handle = self.server.scans.scans.get(scan_id)
@@ -316,6 +323,11 @@ class OpsService:
         if not targets:
             raise RpcError(ErrorCode.INVALID_REQUEST, TEXT["nothing"])
         items = {it.id: it for it in self.basket.items()}
+        linked = {
+            t.item for t in targets if (it := items.get(t.item)) is not None and it.status == "link_target"
+        }
+        if linked and not params.ack_link_targets:
+            raise RpcError(ErrorCode.INVALID_REQUEST, TEXT["link_targets"].format(n=len(linked)))
         alloc: dict[str, int] = {}
         scans: dict[str, str] = {}
         for t in targets:
