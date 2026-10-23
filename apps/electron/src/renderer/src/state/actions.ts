@@ -152,6 +152,20 @@ async function connect(): Promise<void> {
   // plugins.v1: what plugins add, the key table and the plugin list (plugins/store.ts)
   await installPlugins(r);
   for (const s of scans.scans) if (s.state === "scanning" || s.state === "queued") void watchScan(s.scan_id);
+  void openLinkedScan(scans.scans);
+}
+
+let linkedScanOpened = false;
+
+/** The development link of `plugin dev --scan` names its scan (#…&scan=<id>): opened as a tab the
+ * first time this page connects, so the plugin is seen at work without picking it from the list. */
+async function openLinkedScan(scans: readonly ScanStatus[]): Promise<void> {
+  if (linkedScanOpened || typeof location === "undefined") return;
+  const id = new URLSearchParams(location.hash.slice(1)).get("scan");
+  const status = id ? scans.find((x) => x.scan_id === id) : undefined;
+  if (!status || get().tabs.some((x) => x.scanId === status.scan_id)) return;
+  linkedScanOpened = true;
+  await showScan(status.scan_id, scanTitle(status.roots.map((x) => x.path)));
 }
 
 /** After a reconnect the views of the old session are gone: reopen every scan tab, each view with

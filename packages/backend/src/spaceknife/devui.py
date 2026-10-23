@@ -187,8 +187,11 @@ def serve_ui(
     return httpd, f"http://127.0.0.1:{httpd.server_address[1]}", handler
 
 
-def ui_url(origin: str, ws_url: str, token: str) -> str:
-    return f"{origin}/index.html#ws={quote(ws_url)}&token={quote(token)}"
+def ui_url(origin: str, ws_url: str, token: str, scan: str | None = None) -> str:
+    """The development page's address; ``scan``: a scan the page opens as a tab when it connects."""
+    # paths=dialog: files and folders are typed in the app's own dialog, not the browser's prompt
+    tail = "&paths=dialog" + (f"&scan={quote(scan)}" if scan else "")
+    return f"{origin}/index.html#ws={quote(ws_url)}&token={quote(token)}{tail}"
 
 
 # --------------------------------------------------------------------------- plugin dev
@@ -298,9 +301,15 @@ async def _dev(
         rec = await host.link_dev(folder)
         report(rec, "linked")
         info = {"url": server.url, "token": token, "plugin": plugin, "folder": str(folder)}
-        say(f"backend: {server.url}  token: {token}")
+        # the pid: stop this one with kill / Stop-Process -Id, not a pkill -f that matches more
+        say(f"backend: {server.url}  token: {token}  pid: {os.getpid()}")
+        scan_id = None
+        if scan is not None:  # started first: the page's address opens it
+            root = await asyncio.to_thread(lambda: str(scan.expanduser().resolve()))
+            scan_id = (await server.scans.start(ScanStartParams(roots=[root]))).id
+            say(f"scanning {scan}")
         if origin is not None:
-            info["ui"] = ui_url(origin, server.url, token)
+            info["ui"] = ui_url(origin, server.url, token, scan_id)
             say(f"open in a browser: {info['ui']}")
         else:
             say("no built renderer (pnpm build in apps/electron, or --ui DIR): connect a frontend")
@@ -308,10 +317,6 @@ async def _dev(
             say("  " + LINK_IN_APP + f": {folder}")
         if ready is not None:
             ready(info)
-        if scan is not None:
-            root = await asyncio.to_thread(lambda: str(scan.expanduser().resolve()))
-            await server.scans.start(ScanStartParams(roots=[root]))
-            say(f"scanning {scan}")
         seen = _signature(folder)
         while not stop.is_set():
             with contextlib.suppress(TimeoutError):

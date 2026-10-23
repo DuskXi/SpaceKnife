@@ -123,6 +123,33 @@ def _plugin_folder(path: str | os.PathLike[str]) -> Path:
     raise FileNotFoundError(f"no {MANIFEST} in {p} or above")
 
 
+def plugin_module(path: str | os.PathLike[str]) -> Any:
+    """The plugin's own code as a module, for testing its helpers directly::
+
+        mod = plugin_module(__file__)        # the plugin.py above this test file
+        assert mod.group_by_size([...]) == ...
+
+    Imported once per plugin (its ``lib/`` and folder on ``sys.path``, as the host does), apart
+    from the copy :class:`MockHost` runs; ``from plugin import x`` in a test may find another
+    plugin's ``plugin.py`` first, this does not."""
+    import sys
+
+    from ._runtime import load_plugin
+    from .manifest import load_manifest
+
+    folder = _plugin_folder(path)
+    manifest = load_manifest(folder)
+    if manifest.entry is None:
+        raise ValueError(f"{manifest.id} is declarative: it has no code to import")
+    name = "skplugin_test_" + manifest.id.replace(".", "_").replace("-", "_")
+    if name in sys.modules:
+        return sys.modules[name]
+    load_plugin(folder, manifest)  # imports it as the runtime would, as skplugin_<id>
+    module = sys.modules.pop("skplugin_" + manifest.id.replace(".", "_").replace("-", "_"))
+    sys.modules[name] = module  # under its own name: MockHost imports a copy of its own
+    return module
+
+
 @dataclass
 class MockHost:
     folder: Path
@@ -584,7 +611,20 @@ class MockHost:
             self._snapshots += 1
             path = path.with_name(f"{path.stem}-{self._snapshots}{path.suffix}")
         path.parent.mkdir(parents=True, exist_ok=True)
-        snap.save(store, path, roots=roots)
+        c = store.cols
+        files, dirs = int(c["tot_files"][0]), int(c["tot_dirs"][0])
+        stats = {  # the totals the app writes in a snapshot's header (snapshots.list() shows them)
+            "items": files + dirs,
+            "files": files,
+            "dirs": dirs,
+            "bytes_alloc": int(c["tot_alloc"][0]),
+            "bytes_size": int(c["tot_size"][0]),
+            "errors": 0,
+            "state": "done",
+            "roots": [{"path": r, "whole_volume": False} for r in roots],
+            "method": "hard",
+        }
+        snap.save(store, path, roots=roots, stats=stats)
         return str(path)
 
     # ------------------------------------------------------------- side effects
@@ -683,4 +723,4 @@ def _relative(store: Any, ids: list[int]) -> list[str]:
     return sorted(os.path.relpath(store.path(int(i)), root).replace(os.sep, "/") for i in ids)
 
 
-__all__ = ["MockHost", "Proposed", "Tree", "make_tree"]
+__all__ = ["MockHost", "Proposed", "Tree", "make_tree", "plugin_module"]

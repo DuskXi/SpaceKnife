@@ -120,9 +120,11 @@ class InProcessRuntime(PluginRuntime):
         self.dispatcher: Dispatcher | None = None
         self._calls: dict[int, concurrent.futures.Future[tuple[Any, list[bytes]]]] = {}
         self.state = "stopped"
+        self._stopping = False
 
     async def start(self) -> Description:
         self.state = "starting"
+        self._stopping = False
         ready: concurrent.futures.Future[Description] = concurrent.futures.Future()
 
         def run() -> None:
@@ -190,7 +192,7 @@ class InProcessRuntime(PluginRuntime):
         on_chunk: Chunk | None = None,
     ) -> tuple[Any, list[bytes]]:
         d, loop = self.dispatcher, self.loop
-        if d is None or loop is None or self.state != "running":
+        if d is None or loop is None or self.state != "running" or self._stopping:
             raise RuntimeCallError(ErrorCode.PLUGIN_UNAVAILABLE, "the plugin is not running")
         host = self.host_loop
 
@@ -239,7 +241,7 @@ class InProcessRuntime(PluginRuntime):
     async def stop(self, grace: float = 2.0) -> None:
         d, loop = self.dispatcher, self.loop
         if d is not None and loop is not None and self.state == "running":
-            self.state = "stopping"  # no new calls while the stop hook runs and the loop ends
+            self._stopping = True  # no new calls while the stop hook runs and the loop ends
             hooks = [h for (kind, _name), h in d.plugin.handlers.items() if kind == "hook"]
             for h in hooks:
                 spec = next(

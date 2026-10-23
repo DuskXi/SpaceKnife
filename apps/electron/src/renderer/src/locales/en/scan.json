@@ -109,6 +109,7 @@
  "扫描视图": "Scan views",
  "扫描详情": "Scan details",
  "扫描进度": "Scan progress",
+ "拖动可调整顺序": "Drag to reorder",
  "排队中": "Queued",
  "收起侧栏": "Hide sidebar",
  "收起日志面板": "Hide log panel",
@@ -149,6 +150,7 @@
  "正在等待管理员授权…": "Waiting for administrator approval…",
  "正在读取 MFT 主文件表…": "Reading the MFT (master file table)…",
  "正在读取…": "Loading…",
+ "正在连接后端…": "Connecting to the backend…",
  "每秒 {rate} 项": "{rate} items/s",
  "活动时间": "Active time",
  "活动时间 {n}%": "Active time {n}%",
@@ -211,6 +213,5 @@
  "隐藏不匹配": "Hide non-matches",
  "（上次 {n} 项）": "(last scan: {n} items)",
  "，上限 {n}%": ", limit {n}%",
- "，均低于上限 {n}%": ", both under the {n}% limit",
- "拖动可调整顺序": "Drag to reorder"
+ "，均低于上限 {n}%": ", both under the {n}% limit"
 }

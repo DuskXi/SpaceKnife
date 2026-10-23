@@ -12,7 +12,8 @@ import { useApp } from "@/state/store";
 import { Icon } from "@/ui/Icon";
 
 export function BrowserLayer() {
-  return inBrowser() ? <Browser /> : null;
+  // outside browser mode the path dialog still answers a page that asks through it (plugin dev)
+  return inBrowser() ? <Browser /> : <PathDialog />;
 }
 
 function Browser() {

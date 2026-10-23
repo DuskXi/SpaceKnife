@@ -201,6 +201,25 @@ def _settings(items: list[str] | None) -> dict[str, Any]:
     return out
 
 
+def _history(files: list[Path]) -> None:
+    """``--history FILE``: snapshots copied into the temporary backend's history, where
+    ``ctx.snapshots.list()`` finds them (as the app's saved snapshots)."""
+    import shutil
+
+    from .store import snapshot as snap
+
+    for f in files:
+        try:
+            header = snap.read_header(f)
+        except (OSError, snap.SnapshotError) as exc:
+            raise _fail(f"--history {f}: {exc}", 2) from None
+        target = snap.auto_path(list(header.roots), header.created_at)
+        while target.exists():  # two taken in the same second
+            target = target.with_name(f"{target.stem}-1{target.suffix}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, target)
+
+
 async def _mock(
     folder: Path,
     scan: Path | None,
@@ -208,6 +227,7 @@ async def _mock(
     inprocess: bool,
     lang: str | None,
     settings: dict[str, Any] | None = None,
+    history: list[Path] | None = None,
 ) -> Any:
     from spaceknife_sdk.testing import MockHost
 
@@ -223,6 +243,8 @@ async def _mock(
         err.print(f"[red]{exc}[/red]")
         err.print("[dim]spaceknife plugin check shows where[/dim]")
         raise typer.Exit(1) from None
+    if history:
+        _history(history)
     for name, value in (settings or {}).items():
         try:
             await host.set_setting(name, value)
@@ -261,6 +283,10 @@ def call(
     params: Annotated[str, typer.Argument(help="Its params as JSON.")] = "{}",
     scan: Annotated[Path | None, typer.Option(help="Scan this folder first.")] = None,
     snapshot: Annotated[Path | None, typer.Option(help="Use this snapshot as the scan.")] = None,
+    history: Annotated[
+        list[Path] | None,
+        typer.Option("--history", help="A snapshot for ctx.snapshots.list() (repeatable)."),
+    ] = None,
     inprocess: Annotated[bool, typer.Option(help="Run the plugin in this process.")] = False,
     lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
     setting: Annotated[
@@ -281,7 +307,7 @@ def call(
     async def run() -> int:
         from .server.rpc import RpcError
 
-        host = await _mock(folder, scan, snapshot, inprocess, lang, _settings(setting))
+        host = await _mock(folder, scan, snapshot, inprocess, lang, _settings(setting), history)
         try:
             with _plugin_logs(host.plugin_id) as logs:
                 try:
@@ -316,6 +342,10 @@ def render(
     ],
     scan: Annotated[Path | None, typer.Option(help="Scan this folder first.")] = None,
     snapshot: Annotated[Path | None, typer.Option(help="Use this snapshot as the scan.")] = None,
+    history: Annotated[
+        list[Path] | None,
+        typer.Option("--history", help="A snapshot for ctx.snapshots.list() (repeatable)."),
+    ] = None,
     node: Annotated[str | None, typer.Option(help="The node, relative to the scan's root (a/b.txt).")] = None,
     format: Annotated[str, typer.Option(help="text, json or md.")] = "text",
     inprocess: Annotated[bool, typer.Option(help="Run the plugin in this process.")] = False,
@@ -346,7 +376,7 @@ def render(
     async def run() -> int:
         from .server.rpc import RpcError
 
-        host = await _mock(folder, scan, snapshot, inprocess, lang, _settings(setting))
+        host = await _mock(folder, scan, snapshot, inprocess, lang, _settings(setting), history)
         try:
             with _plugin_logs(host.plugin_id) as logs:
                 try:
@@ -648,21 +678,27 @@ def docs(
         str | None, typer.Option(help="One section by its anchor (kind-report, ctx-tree, errors …).")
     ] = None,
     list_sections: Annotated[bool, typer.Option("--list", help="The anchors.")] = False,
+    api: Annotated[
+        bool, typer.Option("--api", help="The API reference (docs/plugin-api.md) instead of the guide.")
+    ] = False,
 ) -> None:
-    """Print the plugin author docs (docs/plugin-dev.md), or one section of them."""
+    """Print the plugin author docs (docs/plugin-dev.md; --api: docs/plugin-api.md), or one section
+    of either (by its anchor)."""
     from spaceknife_sdk import docs as sdk_docs
 
-    text = sdk_docs.text()
+    name = sdk_docs.API if api else sdk_docs.NAME
+    text = sdk_docs.text(name)
     if text is None:
-        raise _fail(
-            "the author docs are not part of this installation (docs/plugin-dev.md in the repository)"
-        )
+        raise _fail(f"the author docs are not part of this installation (docs/{name} in the repository)")
     if list_sections:
-        for anchor, title in sdk_docs.anchors(text):
-            out.print(f"{anchor:<28} {title}")
+        names = (sdk_docs.API,) if api else (sdk_docs.NAME, sdk_docs.API)
+        for doc_name in names:
+            doc = sdk_docs.text(doc_name)
+            for anchor, title in sdk_docs.anchors(doc or ""):
+                out.print(f"{anchor:<28} {title}")
         return
     if section:
-        part = sdk_docs.section(text, section)
+        part = sdk_docs.find(section)
         if part is None:
             raise _fail(f"no section {section!r}: spaceknife plugin docs --list")
         sys.stdout.write(part)

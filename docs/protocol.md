@@ -121,7 +121,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `snapshot.list`、`snapshot.save`、`snapshot.load` | 自动保存的快照列表；保存；以「已完成的扫描」打开快照 |
 | `filter.parse` | 解析过滤式（[语法](filter-syntax.md)）：语法着色 token、诊断（UTF-16 区间 + 错误码 + 可用值）、光标处未完成的条件、补全上下文、规范化条件树与规范形式 |
 | `filter.vocab` | 过滤用的文件类别表，以及本平台不记录的属性和时间 |
-| `view.open` | 在一次扫描上打开一个视图（标签页或分屏窗格），参数含视口（CSS 像素宽高与设备像素比）和可选的初始设置（可视化不可用时退回树图）；返回视图状态并发送第一帧 |
+| `view.open` | 在一次扫描上打开一个视图（标签页或分屏窗格）：`{scan_id, viewport: {width, height, dpr}, settings?}`，`viewport` 是 CSS 像素宽高与设备像素比，`settings` 是可选的初始设置（字段同 `view.set`；可视化不可用时退回树图）；返回 `ViewUpdate`（`state` 是视图状态，含 `view_id`、`zoom_node`、`selected`）并发送第一帧 |
 | `view.zoom`、`view.back`、`view.forward`、`view.up`、`view.home` | 放大进入某块（按上一帧的 `key`，或直接给节点 id）、后退、前进、上一级（刚离开的块被选中）、回到根 |
 | `view.select` | 选中一块或取消选中 |
 | `view.set` | 改细节层级（1–15）、最小元素尺寸、按大小排序、可用/未知空间开关、可视化（`visual`：`visual.list` 里的 id，需 `visuals.v1`；未知或本会话不可用时返回 INVALID_PARAMS）、配色模式（类别 / 扁平 / 时间 / 分支，作用于当前可视化，每种可视化各自记住）、过滤显示方式（暗化 / 隐藏）、视口。只换可视化时缩放根、历史、选中、过滤、细节层级都保持，不记入后退历史，帧的 `reason` 为 `visual` |
@@ -138,6 +138,8 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `palette.preview` | 一个过滤式在整个扫描上的匹配项数与大小（命令面板的过滤直达项与最近过滤项），按规范形与数据版本缓存 |
 | `palette.remember` / `palette.clear` | 记录在面板里执行过的路径跳转（按扫描目标）与过滤（全局）；清除某扫描目标的跳转和全部过滤 |
 | `view.render`、`view.list`、`view.close` | 重发一帧；列出本会话的视图；关闭视图（会话断开或扫描关闭时自动关闭） |
+| `export.targets` | 导出目标：五个模板、三种格式和已启用插件的模板与格式（`name` `title` `description` `kind`（template / format）`extension`（不带点）`file_name` `spacesniffer` `plugin` `options`：插件格式在导出对话框里的字段，写法同设置的元数据） |
+| `export.run` | 导出一个视图：`{view_id, target, source?, path, scope, use_filter, node?, selection, options}`。`target` 是 `export.targets` 的 `name`（或给 `source`：一份模板的文本）；`path` 是要写的文件（文件夹必须存在）；`scope`：`zoom`（视图的缩放根，默认）`all`（全部根）`selection`（`selection` 里的节点，空时取视图的选中项）`node`（`node` 那一个）；`use_filter` 只导出视图的过滤命中的项；`options` 是插件格式的选项值（按名字，没给的取默认）。写临时文件再改名，出错时不留半个文件；返回 `{path, bytes, issues}`（模板的警告） |
 | `update.status` | 更新检查的现状（`UpdateStatus`）：当前版本、安装方式、是否自动检查、通道、上次成功检查的时间与失败原因、下次自动检查的时间 `next_check_at`（自动检查关闭时为空）、落后程度 `level`、最新版本（标题、发布页、说明、本安装方式对应的文件）、卡片是否已关闭 `dismissed`、最新版本所属的系列 `series`（次版本更新为 major.minor，如 `"0.4"`；主版本更新为 major，如 `"1"`；修订版或没有更新时为空）与它是否被跳过 `muted`、下载状态 |
 | `update.check` | 立即检查 GitHub 发布列表（自动检查关闭时也查），检查进行中则等它结束；返回新的 `UpdateStatus` |
 | `update.dismiss` | `{version}` 的卡片 / 对话框已被关闭，此版本不再弹出（徽章保留） |
@@ -156,6 +158,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `extensions.get` | 前端要画的贡献（按 `kinds` 取）：报告、面板、字段、清理、配色（色板、图例）、扫描来源、过滤预设、图标……，按会话语言 |
 | `plugin.fields` | 一个节点的插件字段（`inspector` / `hover`；悬停只给缓存里的，`pending` 表示再问一次） |
 | `insight.node` | 一个节点的洞察卡片：规则的和插件代码的 |
+| `insight.nodes` | 许多节点（≤ 20000）的洞察规则卡片：`{scan_id, nodes}` → `{cards}`，与 `nodes` 一一对应，没有规则的是 null；插件代码的洞察只在 `insight.node` 里 |
 | `plugin.<id>.<名字>` | 插件自己的方法（参数和结果按插件的 schema，`spaceknife plugin schema <文件夹>`）；有二进制结果时随后到达二进制帧 |
 
 | 事件 | 说明 |
@@ -163,10 +166,11 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `extensions.changed` | 注册表变了（插件启用、停用、重新加载，语言切换）：`kinds` 是变了的种类，前端只重新取这些 |
 | `plugin.changed` | 一个插件的状态变了（`PluginInfo`） |
 | `plugin.toast` | 插件的提示（`ctx.toast`） |
+| `plugin.clipboard` | `{plugin, text}`：插件要复制的文字（`ctx.clipboard.write_text`，要 `clipboard` 权限），只发给发起那次调用的会话 |
 | `plugin.progress` | 插件调用的进度（报告、清理），带前端的请求 id |
 | `plugin.<id>.<事件>` | 插件自己的事件；共享状态和流走主题（`$/subscribe`，主题名同样带 `plugin.<id>.` 前缀） |
 
-插件调用的错误码见 §5（-32014 到 -32020）；插件能调的内置方法有白名单（[plugin-dev.md](plugin-dev.md) 第 7 节）。
+插件调用的错误码见 §5（-32014 到 -32020）；插件能调的内置方法有白名单（[plugin-api.md](plugin-api.md#api-core)）。
 
 ### 当前事件与主题
 

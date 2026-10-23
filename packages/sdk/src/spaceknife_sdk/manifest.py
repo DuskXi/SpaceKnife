@@ -197,6 +197,22 @@ class FieldSpec(Spec):
     slots: list[FieldSlot] = Field(default=["inspector"], min_length=1)
     when: When = Field(default_factory=list)
     order: int = 0
+    kinds: list[Literal["file", "dir"]] = Field(
+        default_factory=list, description="Only nodes of these kinds are asked (none: every kind)"
+    )
+    exts: list[str] = Field(
+        default_factory=list,
+        max_length=512,
+        description='Only files with these extensions are asked ("zip", no dot; none: any)',
+    )
+    globs: list[str] = Field(
+        default_factory=list, max_length=64, description="Only nodes whose path matches one are asked"
+    )
+
+    @field_validator("exts")
+    @classmethod
+    def _exts(cls, v: list[str]) -> list[str]:
+        return [x.lower().lstrip("*").lstrip(".") for x in v if x.strip(" .*")]
 
 
 class InsightSpec(Spec):

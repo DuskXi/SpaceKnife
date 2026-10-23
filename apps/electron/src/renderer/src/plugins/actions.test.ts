@@ -24,6 +24,7 @@ vi.mock(import("@/state/actions"), async (original) => ({
 vi.mock(import("./client"), async (original) => ({ ...(await original()), callPlugin: vi.fn() }));
 vi.mock(import("./cleanup"), async (original) => ({ ...(await original()), startCleanup: vi.fn(), reviewCleanup: vi.fn() }));
 vi.mock(import("./confirm"), async (original) => ({ ...(await original()), ask: vi.fn() }));
+vi.mock(import("./sources"), async (original) => ({ ...(await original()), startSourceScan: vi.fn() }));
 
 const runShortcut = vi.fn();
 const cycleVisual = vi.fn();
@@ -169,6 +170,26 @@ describe("runAction", () => {
     expect(shell.openUrl).toHaveBeenCalledWith("https://example.invalid/");
     await runAction({ kind: "url", url: "http://example.invalid/" } as never, plugin);
     expect(shell.openUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("filter and view from a report's tab bring the scan's tab forward", async () => {
+    set({ tabs: [...get().tabs, { id: "t2", kind: "plugin", scanId: "s1", viewIds: [], focusedPane: 0, title: "R", plugin: { kind: "report", id: "a.b.r" } }] as never, active: "t2" });
+    await runAction({ kind: "filter", expr: "*.log" }, { owner: "a.b", viewId: "v1" });
+    expect(editFilter).toHaveBeenCalledWith("v1", "*.log", null, true);
+    expect(get().active).toBe("t1");
+  });
+
+  it("scan_source: lists the selected file with the plugin's source", async () => {
+    const start = vi.mocked((await import("./sources")).startSourceScan).mockResolvedValue("s9");
+    set({ extensions: { sources: [{ id: "a.b.zip", plugin: "a.b", title: "Zip" }] } as never });
+    vi.mocked(call).mockResolvedValue({ path: "/data/pack.zip", on_disk: true } as never);
+    await runAction({ kind: "scan_source", source: "a.b.zip", uri: "$node" }, plugin);
+    expect(call).toHaveBeenCalledWith("tree.node", { scan_id: "s1", node: 7 });
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ id: "a.b.zip" }), "/data/pack.zip");
+    vi.mocked(call).mockResolvedValue({ path: "pack.zip/x", on_disk: false } as never);
+    await runAction({ kind: "scan_source", source: "a.b.zip", uri: "$node" }, plugin);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(get().toast).toBe("这个位置不在磁盘上");
   });
 
   it("an unknown kind says so instead of throwing", async () => {

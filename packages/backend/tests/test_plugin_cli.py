@@ -365,3 +365,35 @@ def test_run_exports_with_an_enabled_plugins_format(tmp_path: Path) -> None:
         check=False,
     )
     assert "example.fmt.md" in shown.stdout, shown.stdout + shown.stderr
+
+
+async def test_call_sees_the_snapshots_given_with_history(tmp_path: Path) -> None:
+    """``--history FILE``: ctx.snapshots.list() in the temporary backend lists it (a plugin that
+    reads history is tried from the command line); docs --api prints the API reference."""
+    home = tmp_path / "home"
+    home.mkdir()
+    folder = tmp_path / "example.hist"
+    folder.mkdir()
+    (folder / "plugin.toml").write_text(
+        'id = "example.hist"\nversion = "0.1.0"\nname = { zh = "历史", en = "History" }\n'
+        'entry = "plugin.py"\npermissions = ["tree.read", "snapshots.read"]\n',
+        encoding="utf-8",
+    )
+    (folder / "plugin.py").write_text(
+        "from spaceknife_sdk import Context, Payload, Plugin\n\nplugin = Plugin()\n\n\n"
+        "class Count(Payload):\n    n: int\n    files: list[int]\n\n\n"
+        "@plugin.method\nasync def count(ctx: Context) -> Count:\n"
+        "    snaps = ctx.snapshots.list()\n    return Count(n=len(snaps), files=[s.files for s in snaps])\n",
+        encoding="utf-8",
+    )
+    async with MockHost.load(folder) as host:
+        host.scan(make_tree({"a.txt": 1, "b": {"c.txt": 2}}, root=str(tmp_path / "tree")))
+        saved = Path(host.snapshot())
+        shutil.copyfile(saved, tmp_path / "one.sks")
+    called = sk(home, "call", str(folder), "count", "--history", str(tmp_path / "one.sks"), "--inprocess")
+    assert called.returncode == 0, called.stderr
+    assert json.loads(called.stdout) == {"n": 1, "files": [2]}
+    api = sk(home, "docs", "--api")
+    assert api.returncode == 0 and api.stdout.startswith("# SpaceKnife 插件 API 参考")
+    part = sk(home, "docs", "--section", "api-hooks")
+    assert part.returncode == 0 and "`settings`" in part.stdout

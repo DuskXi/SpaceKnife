@@ -182,6 +182,7 @@ async def node_fields(
         raise RpcError(ErrorCode.UNKNOWN_NODE, f"node {p.node} does not exist")
     lang = i18n.language()
     wanted = [c for c in EXTENSIONS.of("node_field") if p.slot in c.spec.slots][: FIELD_LIMIT[p.slot]]
+    wanted = [c for c in wanted if _field_wanted(c, store, p.node)]
     version = int(store.version)
     out: list[pp.PluginField] = []
     pending = False
@@ -322,6 +323,30 @@ async def insight_cards(
     got = await asyncio.gather(*(one(c) for c in asked))
     cards += [g for g in got if g is not None]
     return pp.InsightNodeResult(cards=cards)
+
+
+def _field_wanted(c: Any, store: Any, node: int) -> bool:
+    """A field with ``kinds``, ``exts`` or ``globs`` is asked only about the nodes they name."""
+    spec = c.spec
+    kinds, exts, globs = (
+        getattr(spec, "kinds", None),
+        getattr(spec, "exts", None),
+        getattr(spec, "globs", None),
+    )
+    if not (kinds or exts or globs):
+        return True
+    from ..store.nodes import Kind
+
+    kind = int(store.cols["kind"][node])
+    if kinds and not (("file" in kinds and kind == Kind.FILE) or ("dir" in kinds and kind == Kind.DIR)):
+        return False
+    if exts:
+        if kind != Kind.FILE:
+            return False
+        name = store.name(node).lower()
+        if not any(name.endswith("." + x) for x in exts):
+            return False
+    return not globs or _wanted(c, store.path(node).replace("\\", "/").lower())
 
 
 def _wanted(c: Any, path: str) -> bool:

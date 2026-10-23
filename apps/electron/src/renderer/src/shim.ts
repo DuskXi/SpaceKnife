@@ -207,7 +207,8 @@ export async function installShim(): Promise<void> {
         remote: asBrowser ? { hostname: location.hostname, home: "", secure: location.protocol === "https:" } : null,
         justUpdated: params.get("updated") === "1", // demos: show the 「已更新」 note
       },
-      asBrowser ? browserEnv : demoEnv,
+      // plugin dev's page (paths=dialog): the app's own path dialog, not the browser's prompt
+      asBrowser ? browserEnv : params.get("paths") === "dialog" ? { ...demoEnv, askPath } : demoEnv,
     );
     return;
   }

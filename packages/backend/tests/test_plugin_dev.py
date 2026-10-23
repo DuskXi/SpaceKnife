@@ -94,4 +94,27 @@ def test_browser_mode_serves_the_renderer_and_the_panel(tmp_path: Path) -> None:
             urllib.request.urlopen(f"{origin}/plugins/example.other/web/index.html")
     finally:
         httpd.shutdown()
-    assert ui_url("http://h", "ws://x/v1", "t k").endswith("#ws=ws%3A//x/v1&token=t%20k")
+    assert ui_url("http://h", "ws://x/v1", "t k").endswith("#ws=ws%3A//x/v1&token=t%20k&paths=dialog")
+    # plugin dev --scan: the page opens that scan as a tab when it connects
+    assert ui_url("http://h", "ws://x/v1", "t", "scan-1").endswith("&token=t&paths=dialog&scan=scan-1")
+
+
+async def test_dev_scan_is_named_in_the_page_address(tmp_path: Path) -> None:
+    folder = tmp_path / "example.scan"
+    scaffold.write(folder, "example.scan", ["report"])
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "a.txt").write_text("a", encoding="utf-8")
+    said: list[str] = []
+    ready: list[dict[str, Any]] = []
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        _dev(folder, "example.scan", data, 0, "http://ui", [], said.append, stop, ready.append)
+    )
+    try:
+        await _until(lambda: ready)
+        assert "&scan=scan-" in ready[0]["ui"]
+        assert any(s.startswith("backend: ") and " pid: " in s for s in said)  # to stop just this one
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, 30)

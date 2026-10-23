@@ -32,7 +32,10 @@ export function StatusBar() {
   const used = vol ? vol.total - vol.free : 0;
 
   let first: React.ReactNode;
-  if (conn !== "ready") {
+  if (conn === "starting") {
+    // the first connection (a page just opened, plugin dev's link): nothing was lost yet
+    first = <span className="muted">{t("正在连接后端…")}</span>;
+  } else if (conn !== "ready") {
     first = (
       <span className="danger">
         <Icon name="warning" size={14} /> {conn === "failed" ? t("后端不可用") : t("后端连接中断 · 正在重连")}

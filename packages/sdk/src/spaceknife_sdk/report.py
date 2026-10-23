@@ -133,6 +133,24 @@ def col(
     return TableColumn(key=key, label=label, unit=unit, align=align, grow=grow)  # type: ignore[arg-type]
 
 
+def more(cursor: str, *, report: str | None = None) -> TableMore:
+    """The next page of a table: ``r.table(cols, rows=page, more=r.more("200"))``. The frontend
+    calls the report again with ``c.cursor == "200"`` and appends the first table of what it
+    returns (whose ``more`` may go on). ``report``: another report of this plugin by name; by
+    default the report being answered."""
+    from spaceknife_protocol.plugins import wire_name
+
+    ctx = current_context()
+    if report is None:
+        if ctx is None or ctx.call_info.kind != "report":
+            raise ValueError("r.more() outside a report: name the report (r.more(cursor, report=...))")
+        report = ctx.call_info.name
+    plugin = ctx.plugin.id if ctx is not None else ""
+    if not plugin:
+        raise ValueError("r.more() needs a running plugin (the host's call)")
+    return TableMore(method=wire_name(plugin, report), cursor=str(cursor))
+
+
 def table(
     columns: Sequence[TableColumn],
     rows: Rows | Iterable[Mapping[str, Any]],
@@ -364,6 +382,7 @@ __all__ = [
     "kv",
     "md",
     "meter",
+    "more",
     "nodes",
     "progress",
     "render_text",
