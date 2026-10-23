@@ -2276,6 +2276,92 @@
       "title": "DupeNodeInfo",
       "type": "object"
     },
+    "DupesBasketMember": {
+      "properties": {
+        "alloc": {
+          "default": 0,
+          "title": "Alloc",
+          "type": "integer"
+        },
+        "keepers": {
+          "description": "The copies kept for it (one must stay)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Keepers",
+          "type": "array"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "DupesBasketMember",
+      "type": "object"
+    },
+    "DupesBasketMembers": {
+      "description": "The extra copies of a ``dupes`` basket item, each with the copy kept for it: the last place to\ncheck them one by one before deleting.",
+      "properties": {
+        "folders": {
+          "description": "Folders holding them, most first (up to 5)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/DupesBasketMember"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "total",
+        "items"
+      ],
+      "title": "DupesBasketMembers",
+      "type": "object"
+    },
+    "DupesBasketMembersParams": {
+      "additionalProperties": false,
+      "properties": {
+        "item_id": {
+          "description": "A delete-basket item of kind 'dupes'",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Item Id",
+          "type": "string"
+        },
+        "limit": {
+          "default": 200,
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "item_id"
+      ],
+      "title": "DupesBasketMembersParams",
+      "type": "object"
+    },
     "DupesBasketParams": {
       "additionalProperties": false,
       "properties": {
@@ -2412,6 +2498,36 @@
       "title": "DupesChangedEvent",
       "type": "object"
     },
+    "DupesElsewhere": {
+      "description": "A folder holding copies of a folder's files (the coverage bar's 「别处」).",
+      "properties": {
+        "bytes": {
+          "description": "Bytes of the folder's files with a copy there",
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "node": {
+          "default": 0,
+          "title": "Node",
+          "type": "integer"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "scan_id": {
+          "title": "Scan Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "scan_id",
+        "path",
+        "bytes"
+      ],
+      "title": "DupesElsewhere",
+      "type": "object"
+    },
     "DupesFolderInfo": {
       "description": "What of a folder exists elsewhere (§8.4): for the user to judge, never a delete.",
       "properties": {
@@ -2424,6 +2540,14 @@
           "default": 0,
           "title": "Elsewhere Bytes",
           "type": "integer"
+        },
+        "elsewhere_list": {
+          "description": "Where the copies of its files are, most bytes first (up to 5)",
+          "items": {
+            "$ref": "#/$defs/DupesElsewhere"
+          },
+          "title": "Elsewhere List",
+          "type": "array"
         },
         "groups": {
           "default": 0,
@@ -2793,6 +2917,13 @@
           "minimum": 0,
           "title": "Offset",
           "type": "integer"
+        },
+        "query": {
+          "default": "",
+          "description": "Only groups with a copy whose path has this",
+          "maxLength": 200,
+          "title": "Query",
+          "type": "string"
         },
         "scan_id": {
           "anyOf": [
@@ -10881,6 +11012,12 @@
       "params": "#/$defs/CompareSummaryParams",
       "requiresSession": true,
       "result": "#/$defs/CompareSummary"
+    },
+    "dupes.basket_members": {
+      "doc": "The extra copies of a 'dupes' basket item, each with its keeper (paged), to check before deleting.",
+      "params": "#/$defs/DupesBasketMembersParams",
+      "requiresSession": true,
+      "result": "#/$defs/DupesBasketMembers"
     },
     "dupes.cancel": {
       "doc": "Stop the search; what was verified stays, the rest stays unchecked.",

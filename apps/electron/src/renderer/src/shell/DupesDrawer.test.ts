@@ -7,13 +7,14 @@ import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DupeNodeInfo, DupesFolderInfo, DupesPlan } from "@/protocol/generated";
-import { getDupes, resetDupes, setDupes } from "@/state/dupes";
+import { crossIds, dupesSummary, getDupes, resetDupes, setDupes } from "@/state/dupes";
+import { Dup } from "@/treemap/paint";
 import { set } from "@/state/store";
 import { group, scan, status } from "@/state/testing/dupes";
 import { encodeFrame } from "@/visual/testing/fixtures";
 import { Kind } from "@/visual/frame";
 
-import { CoverageBar, DupesDrawer, groupName } from "./DupesDrawer";
+import { CoverageBar, DupesDrawer, DupesLegend, groupName } from "./DupesDrawer";
 import { dupesItem } from "./ContextMenu";
 import { DupeLine, drawnCopies } from "./HoverCard";
 import { colorModes } from "./Toolbar";
@@ -42,6 +43,10 @@ const plan = (over: Partial<DupesPlan> = {}): DupesPlan => ({
   cross_extra: null,
   last: null,
   current: null,
+  min_size: 1 << 20,
+  load: "quiet",
+  scans: [{ scan_id: "s1", roots: ["s1:\\"], candidates: 52460 }],
+  disks: [{ disk: "C:\\", media: "sata_ssd", scans: ["s1"] }],
   ...over,
 });
 
@@ -59,16 +64,49 @@ afterEach(() => vi.clearAllMocks());
 
 describe("before a search", () => {
   it("shows what would be read, what is left out and why, and 「开始查找」", () => {
-    setDupes({ plan: { s1: plan({ last: { at: new Date(Date.now() - 3 * 86400_000).toISOString(), groups: 12, files: 30, reclaim: 5 * 2 ** 30 } }) } });
-    const out = text(html());
+    setDupes({ plan: { s1: plan({ last: { at: new Date(Date.now() - 3 * 86400_000).toISOString(), groups: 12, files: 30, reclaim: 5 * 2 ** 30, rate: 200 << 20 } }) } });
+    const h = html();
+    const out = text(h);
     expect(out).toContain("52,460");
     expect(out).toContain("个文件和别的文件大小相同");
     expect(out).toContain("大小独一无二的 88,000 个文件不读");
-    expect(out).toContain("云占位 31（读内容会触发下载）");
-    expect(out).toContain("小于下限 1,200");
+    expect(out).toContain("云占位 31 个（读内容会触发下载）");
+    expect(out).toContain("1,200 个文件小于下限 1.0 MB");
     expect(out).toMatch(/上次的结果（3 天前）：12 组，可腾出 5(\.0+)? GB · 这次先只核对文件有没有变过/);
+    // the worst case, in bytes and (from the last search here) in time, with the disk
+    expect(out).toMatch(/最坏要读 1(\.0+)? TB（按上次的速度最多约 88 分钟 · SATA SSD）· 最多能腾出 512(\.0+)? GB/);
+    // the load level and optional caps before it starts
+    expect(h).toMatch(/role="radio" aria-checked="true"[^>]*>安静</);
+    expect(out).toContain("最多读");
     expect(out).toContain("开始查找");
-    expect(out).toContain("跨盘比较：把所有打开的扫描放在一起比");
+    expect(out).toContain("跨盘比较：把打开的扫描放在一起比");
+  });
+
+  it("says when the plan could not be made, with 「重试」, instead of estimating forever", () => {
+    setDupes({ planError: { s1: "有一个扫描已经关闭或不在内存里了，请重新扫描或去掉它" } });
+    const out = text(html());
+    expect(out).toContain("没能估计要读多少：有一个扫描已经关闭或不在内存里了");
+    expect(out).toContain("重试");
+    expect(out).not.toContain("正在估计要读多少");
+  });
+
+  it("lists the scans a cross-volume search would compare: only those open in a tab, each can be left out", () => {
+    set({
+      tabs: [
+        { id: "t1", kind: "scan", scanId: "s1", viewIds: ["v1"], focusedPane: 0, title: "C:" },
+        { id: "t2", kind: "scan", scanId: "s2", viewIds: ["v2"], focusedPane: 0, title: "D:" },
+      ],
+      settings: { values: { "dupes.cross_volume": true } } as never,
+      scans: { s1: scan("s1"), s2: scan("s2"), gone: scan("gone") }, // "gone": no tab (closed, or let go)
+    });
+    setDupes({ plan: { s1: plan() }, leftOut: ["s2"] });
+    const h = html();
+    expect(text(h)).toContain("s1:\\");
+    expect(text(h)).toContain("s2:\\");
+    expect(text(h)).not.toContain("gone:\\");
+    expect(crossIds("s1")).toEqual(["s1"]);
+    setDupes({ leftOut: [] });
+    expect(crossIds("s1")).toEqual(["s1", "s2"]);
   });
 
   it("says why a snapshot cannot be searched instead of offering it", () => {
@@ -85,7 +123,7 @@ describe("while it runs", () => {
     const h = html();
     const out = text(h);
     expect(out).toContain("同样大小（不读盘） 10");
-    expect(out).toContain("同一个文件合并后 9");
+    expect(out).toContain("同一个文件的几个名字算一份后 9");
     expect(out).toContain("内容相同（已读完全文核对） 2 组 · 5 个文件");
     expect(out).toContain("核对内容 43%");
     expect(out).toContain("最多还要 3 分钟");
@@ -104,6 +142,46 @@ describe("while it runs", () => {
     expect(out).toContain("等 D: 的扫描结束");
     expect(out).toContain("读取后有 3 个文件的访问时间变了");
   });
+
+  it("says the speed is being estimated before the first rate", () => {
+    setDupes({ byScan: { s1: status({ state: "verifying", progress: 0, rate: 0 }) } });
+    expect(text(html())).toContain("速度估计中");
+  });
+
+  it("shows the cache's step between the sizes and the heads read", () => {
+    setDupes({ byScan: { s1: status({ bytes: { read: 0, probe: 0, full: 0, planned_probe: 0, full_upper: 9 << 20, cache_hits: 260 } }) } });
+    expect(text(html())).toContain("缓存认出（不读盘） 260");
+  });
+});
+
+describe("a search that ended early", () => {
+  it("stopped: the bar stays where it was, the list says the result is incomplete", () => {
+    setDupes({ byScan: { s1: status({ state: "cancelled", progress: 0.3, groups: 0, extra: 0, reclaim: 0, undecided: 7, stop_reason: "cancelled", skipped_by_reason: { stopped: 7 } }) } });
+    const h = html();
+    const out = text(h);
+    expect(h).toContain('aria-valuenow="30"');
+    expect(h).toContain("dp-bar stopped");
+    expect(out).toContain("已停止");
+    expect(out).toContain("还有 7 个候选没核对，结果不完整");
+    expect(out).toContain("查找已停止：7 个候选没核对，结果不完整");
+    expect(out).not.toContain("没有找到内容相同的文件");
+    expect(out).toContain("至少可腾出");
+    expect(dupesSummary(getDupes().byScan.s1!)).toContain("查找重复已停止");
+  });
+
+  it("failed: a readable message (the details are in the log), never the exception", () => {
+    setDupes({ byScan: { s1: status({ state: "failed", progress: 0.5, error: "查找中途出错，已核对的 116 组保留，可以再查一次（详情见日志）", stop_reason: "failed", undecided: 3 }) } });
+    const out = text(html());
+    expect(out).toContain("出错");
+    expect(out).toContain("查找中途出错，已核对的 116 组保留");
+    expect(out).not.toContain("uint8");
+    expect(dupesSummary(getDupes().byScan.s1!)).toBe("查找重复出错");
+  });
+
+  it("a byte cap reached says so", () => {
+    setDupes({ byScan: { s1: status({ state: "done", stop_reason: "budget", undecided: 2, progress: 0.6 }) } });
+    expect(text(html())).toContain("读到上限，停了");
+  });
 });
 
 describe("the results", () => {
@@ -114,14 +192,18 @@ describe("the results", () => {
     expect(out).toContain("可腾出");
     expect(out).toContain("3 份多余的副本 · 2 组");
     expect(out).toContain("f1.bin");
-    expect(out).toContain("f2.bin 等 3 个名字");
+    expect(out).toContain("f2.bin（另有 2 个不同的文件名）");
     expect(out).toContain("C: · D:");
-    expect(out).toContain("内容相同（已读完全文核对） · 按「最早创建」保留");
-    expect(h).toContain('class="dp-role keep"');
+    // the verdict is an icon with its text, the keeper's reason on its role
+    expect(h).toContain('aria-label="内容相同（已读完全文核对）"');
+    expect(h).toMatch(/class="dp-role keep" title="按「最早创建」保留"/);
     expect(h).toContain('class="dp-role extra"');
     expect(out).toContain("保留这一份");
     expect(out).toContain("再显示 100 组");
-    expect(out).toContain("把多余的 3 份加入删除篮 · 可腾出 3.0 MB");
+    expect(out).toContain("把多余的 3 份加入删除篮 3.0 MB");
+    // the filters: by name or path, the folder in view
+    expect(h).toContain('placeholder="按名字或路径筛选"');
+    expect(out).toContain("只看当前文件夹");
     expect(out).toContain("执行前会再核对每一份没有变过");
     expect(out).toContain("清除结果");
     expect(out).toContain("再查一次");
@@ -138,9 +220,9 @@ describe("the results", () => {
 
   it("never calls one file under several names a duplicate", () => {
     setDupes({ byScan: { s1: status() }, groups: [group(3, { state: "shared", reclaim: 0 })], groupsTotal: 1, groupsJob: "dupes-1", includeShared: true });
-    const out = text(html());
-    expect(out).toContain("同一份数据（硬链接或块克隆）：删了不腾空间");
-    expect(out).not.toContain("内容相同（已读完全文核对） ·");
+    const h = html();
+    expect(h).toContain('aria-label="同一份数据（硬链接或块克隆）：删了不腾空间"');
+    expect(h).not.toContain('aria-label="内容相同（已读完全文核对）"');
   });
 
   it("shows another search's list as nothing, not as this one's", () => {
@@ -162,11 +244,12 @@ describe("the results", () => {
   });
 
   it("lists the folders holding the most extra copies", () => {
-    setDupes({ byScan: { s1: status() }, tab: "folders", folders: [{ node: 4, path: "C:\\photos\\2019", redundant: 3 << 20, alloc: 4 << 20 }], foldersTotal: 3 });
+    setDupes({ byScan: { s1: status() }, tab: "folders", folders: [{ node: 4, path: "C:\\backup\\2019", redundant: 3 << 20, alloc: 4 << 20, twin: "C:\\photos\\2019", twin_scan_id: "s1", twin_node: 7, twin_bytes: 3 << 20 }], foldersTotal: 3 });
     const h = html();
-    expect(text(h)).toContain("C:\\photos\\2019");
+    expect(text(h)).toContain("C:\\backup\\2019");
+    expect(text(h)).toContain("75% 在 C:\\photos\\2019 也有"); // the folder it repeats
     expect(h).toContain("width:75%");
-    expect(text(h)).toContain("另 2 个文件夹");
+    expect(text(h)).toContain("再显示 2 个文件夹"); // a real button now
   });
 });
 
@@ -186,6 +269,7 @@ describe("the coverage bar", () => {
     small: 5,
     small_bytes: 4096,
     only_here_list: [{ node: 11, path: "C:\\photos\\a.cr3", alloc: 3 << 20 }],
+    elsewhere_list: [{ scan_id: "s1", node: 12, path: "D:\\backup\\photos", bytes: 1 << 20 }],
   };
 
   it("splits the folder by bytes into elsewhere, only here, the same data and unchecked", () => {
@@ -199,6 +283,10 @@ describe("the coverage bar", () => {
     expect(out).toContain("删除整个文件夹不在这里做");
     expect(h.split("dp-cover-legend")[0]).not.toContain("dp-c-same"); // no bytes, no segment; the legend still names it
     expect(out).toContain("同一份数据 0 B");
+    expect(h).toContain('class="dp-c-only"'); // 「只在这里」 has its colour (a real token, test in app.css)
+    expect(out).toContain("别处的副本主要在：");
+    expect(out).toContain("D:\\backup\\photos");
+    expect(out).toContain("这个文件夹在别处有没有？");
   });
 
   it("shows for a search limited to a folder", () => {
@@ -214,7 +302,7 @@ describe("the hover card line", () => {
   const line = (info: DupeNodeInfo, drawn: number | null = null) => text(renderToString(createElement(DupeLine, { d: info, drawn })));
 
   it("names verified copies, where the others are and whether this one goes", () => {
-    const others = [{ scan_id: "s1", node: 2, path: "C:\\b\\x.bin", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep" as const, why: null }];
+    const others = [{ scan_id: "s1", node: 2, path: "C:\\b\\x.bin", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep" as const, why: null, view: false }];
     const extra = line(d({ state: "extra", copies: 3, reclaim: 96 << 20, others, other_volumes: ["D:"] }), 1);
     expect(extra).toContain("另有 2 份内容相同 · 删掉多余的能腾出 96.0 MB");
     expect(extra).toContain("C:\\b\\x.bin");
@@ -227,10 +315,11 @@ describe("the hover card line", () => {
 
   it("makes no claim while checking, and tells the same data and skips apart", () => {
     expect(line(d({ state: "pending" }))).toBe(" 同样大小的文件正在核对内容… ");
-    expect(line(d({ state: "shared", others: [{ scan_id: "s1", node: 2, path: "C:\\x", volume: "", mtime: 0, ctime: 0, alloc: 0, role: "alias", why: null }] }))).toContain("和 C:\\x 是同一份数据（硬链接或块克隆），删了不腾空间");
+    expect(line(d({ state: "shared", others: [{ scan_id: "s1", node: 2, path: "C:\\x", volume: "", mtime: 0, ctime: 0, alloc: 0, role: "alias", why: null, view: false }] }))).toContain("和 C:\\x 是同一份数据（硬链接或块克隆），删了不腾空间");
     expect(line(d({ state: "skipped", reason: "云占位" }))).toContain("没有比较：云占位");
     expect(line(d({ state: "none", redundant: 300 << 20 }))).toContain("里面有多余的副本 300.0 MB");
     expect(line(d({ state: "none" }))).toBe("");
+    expect(line(d({ state: "unique" }))).toContain("比较过：没有别的文件和它内容相同");
   });
 
   it("counts the copies the picture draws from the group column", () => {
@@ -254,7 +343,16 @@ describe("the context menu entry", () => {
 
   it("lights a verified file's group, and does not replace a finished search for a file without one", () => {
     setDupes({ byScan: { s1: status() } });
+    // what the frame's dup column says decides the reason: no claim of 「没有相同的」 unless compared
+    f.dup = Uint8Array.of(Dup.UNIQUE);
     expect(dupesItem("s1", "v1", false, 5, f, 0, undefined).disabled).toBe("这次查找里没有和它内容相同的文件");
+    f.dup = Uint8Array.of(Dup.SKIPPED);
+    expect(dupesItem("s1", "v1", false, 5, f, 0, undefined).disabled).toBe("这次查找跳过了它（原因见悬停卡）");
+    f.dup = Uint8Array.of(Dup.NONE);
+    expect(dupesItem("s1", "v1", false, 5, f, 0, undefined).disabled).toBe("这次查找没有比较它（小于下限，或不在比较范围里）");
+    setDupes({ byScan: { s1: status({ state: "cancelled", undecided: 4 }) } });
+    expect(dupesItem("s1", "v1", false, 5, f, 0, undefined).disabled).toBe("这次查找没核对完，可以「再查一次」");
+    setDupes({ byScan: { s1: status() } });
     f.dupg = Uint32Array.of(8);
     const item = dupesItem("s1", "v1", false, 5, f, 0, undefined);
     expect(item.label).toBe("另有相同内容的文件 · 点亮它们");
@@ -277,6 +375,45 @@ describe("the colour segment", () => {
 describe("group names", () => {
   it("say how many names the copies go by", () => {
     expect(groupName(group(1))).toBe("f1.bin");
-    expect(groupName(group(1, { names: 2 }))).toBe("f1.bin 等 2 个名字");
+    expect(groupName(group(1, { names: 2 }))).toBe("f1.bin（另有 1 个不同的文件名）");
+  });
+});
+
+describe("the copies of a group", () => {
+  it("show what tells them apart, not the same shortened path twice", () => {
+    const g = group(4, {
+      members: [
+        { scan_id: "s1", node: 1, path: "C:\\Users\\leizi\\Downloads\\Projects\\site\\assets\\video\\intro.mp4", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep", why: "rule", view: false },
+        { scan_id: "s1", node: 2, path: "C:\\Users\\leizi\\Downloads\\Projects\\site-old\\assets\\video\\intro.mp4", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "extra", why: null, view: false },
+      ],
+    });
+    setDupes({ byScan: { s1: status() }, groups: [g], groupsTotal: 1, groupsJob: "dupes-1" });
+    const out = text(html());
+    expect(out).toContain("C:\\…\\site\\…\\intro.mp4");
+    expect(out).toContain("C:\\…\\site-old\\…\\intro.mp4");
+  });
+
+  it("let a copy in another scan be clicked (its tab), and mark another path of the same file", () => {
+    const g = group(5, {
+      cross: true,
+      volumes: ["C:", "D:"],
+      members: [
+        { scan_id: "s1", node: 1, path: "C:\\a\\x.bin", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep", why: "rule", view: false },
+        { scan_id: "s2", node: 2, path: "D:\\b\\x.bin", volume: "D:", mtime: 0, ctime: 0, alloc: 1, role: "extra", why: null, view: false },
+        { scan_id: "s3", node: 3, path: "C:\\sub\\a\\x.bin", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep", why: "rule", view: true },
+      ],
+    });
+    setDupes({ byScan: { s1: status() }, groups: [g], groupsTotal: 1, groupsJob: "dupes-1" });
+    const h = html();
+    expect(h).toContain("切换到它的页签并找到它：D:\\b\\x.bin");
+    expect(h).not.toMatch(/dp-path"[^>]*disabled/);
+    expect(text(h)).toContain("同一个文件");
+  });
+});
+
+describe("the colouring's key", () => {
+  it("names every file state and the folder tiers with their thresholds", () => {
+    const out = text(renderToString(createElement(DupesLegend)));
+    for (const s of ["多余的副本（可删）", "保留的一份", "待核对", "同一份数据（删了不腾空间）", "没有重复，或没比较", "文件夹：多余副本占的比例", "≥ 10%", "≥ 40%", "≥ 80%"]) expect(out).toContain(s);
   });
 });

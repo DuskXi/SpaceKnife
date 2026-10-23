@@ -13,7 +13,7 @@ import { pointerBox } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
-import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, middlePath, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, middlePath, plural, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
@@ -55,6 +55,8 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const keepOpen = useApp((s) => setting(s, "general.hover_keep_open", true));
   const showDates = useApp((s) => setting(s, "general.hover_dates", true));
   const showAge = useApp((s) => setting(s, "general.hover_age", true));
+  // a context menu open on the picture hides the card (it would show around the menu)
+  const menuOpen = useApp((s) => s.menu !== null);
   const [info, setInfo] = useState<TreeNodeResult | null>(null);
   const [parentAlloc, setParentAlloc] = useState(0);
   const card = useRef<HTMLDivElement>(null);
@@ -129,7 +131,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     setPos({ left, top });
   }, [shown, info, bounds.w, bounds.h]);
 
-  if (!shown) return null;
+  if (!shown || menuOpen) return null;
   const f = shown.frame;
   const node = info?.node;
   const facts = hoverFacts(f, shown.target, vocab, node?.ext);
@@ -246,6 +248,7 @@ export function drawnCopies(f: VisualFrame, row: number): number | null {
 export function DupeLine({ d, drawn = null, paths = true }: { d: DupeNodeInfo; drawn?: number | null; paths?: boolean }) {
   if (d.state === "pending") return <div className="hc-dupe">{t("同样大小的文件正在核对内容…")}</div>;
   if (d.state === "skipped") return <div className="hc-dupe muted">{t("没有比较：{reason}", { reason: d.reason })}</div>;
+  if (d.state === "unique") return <div className="hc-dupe muted">{t("比较过：没有别的文件和它内容相同")}</div>;
   if (d.state === "none") return d.redundant > 0 ? <div className="hc-dupe">{t("里面有多余的副本 {size}", { size: fmtSize(d.redundant) })}</div> : null;
   if (d.state === "shared") {
     const other = d.others[0]?.path ?? "";
@@ -255,14 +258,14 @@ export function DupeLine({ d, drawn = null, paths = true }: { d: DupeNodeInfo; d
   const hidden = drawn !== null && drawn < d.copies ? d.copies - drawn : 0;
   return (
     <div className="hc-dupe">
-      <span>{t("另有 {n} 份内容相同 · 删掉多余的能腾出 {size}", { n: fmtInt(others), size: fmtSize(d.reclaim) })}</span>
+      <span>{plural(others, t("另有 {n} 份内容相同 · 删掉多余的能腾出 {size}", { n: fmtInt(others), size: fmtSize(d.reclaim) }), "1 other copy with the same contents · deleting the extra frees {size}", { size: fmtSize(d.reclaim) })}</span>
       {(paths ? d.others.slice(0, 2) : []).map((m) => (
         <span key={`${m.scan_id}:${m.path}`} className="mono">
           {middlePath(m.path, 56)}
         </span>
       ))}
       {d.other_volumes.length > 0 && <span>{t("其中有的在 {vols}", { vols: d.other_volumes.join(" · ") })}</span>}
-      {hidden > 0 && <span className="muted">{t("另 {n} 份不在画面里（在折叠的文件夹或小项里）", { n: fmtInt(hidden) })}</span>}
+      {hidden > 0 && <span className="muted">{plural(hidden, t("另 {n} 份不在画面里（在折叠的文件夹或小项里）", { n: fmtInt(hidden) }), "1 more copy is not drawn (inside a collapsed folder or the small items)")}</span>}
       <span className="hc-dupe-role">{d.state === "extra" ? t("这一份是多余的") : whyText(d.why)}</span>
     </div>
   );
@@ -280,5 +283,5 @@ const whyText = (why: DupeNodeInfo["why"]): string =>
           : why === "manual"
             ? t("手动选择保留")
             : why === "pinned"
-              ? t("只能保留（另有名字，或删除篮删不了它）")
+              ? t("必须保留：它另有硬链接或名字，或名字以点或空格结尾（删除篮删不了）")
               : t("按「{rule}」保留这一份", { rule: ruleLabel(keepOptions().rule) });

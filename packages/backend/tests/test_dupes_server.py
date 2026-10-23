@@ -25,6 +25,7 @@ from spaceknife_protocol.methods import (
     BASKET_CLEAR,
     BASKET_EXECUTE,
     BASKET_LIST,
+    DUPES_BASKET_MEMBERS,
     DUPES_CLEAR,
     DUPES_FOLDER,
     DUPES_FOLDERS,
@@ -219,6 +220,10 @@ async def test_basket_deletes_the_extra_copy_and_keeps_the_keeper(tmp_path: Path
     basket = await client.call(BASKET_LIST, Empty())
     item = basket.items[0]
     assert item.kind == "dupes" and item.members == 1 and item.status == "ready"
+    # the basket lists each copy with the one kept for it (checked one by one before deleting)
+    mem = await client.call(DUPES_BASKET_MEMBERS, pd.DupesBasketMembersParams(item_id=item.id))
+    assert mem.total == 1 and mem.items[0].path == str(files["copy"])
+    assert mem.items[0].keepers == [str(files["keep"])] and mem.folders == [str(files["copy"].parent)]
     waiter = OpsWaiter(client)
     task = await client.call(BASKET_EXECUTE, po.BasketExecuteParams(mode="delete"))
     done = await waiter.done(task.task_id)

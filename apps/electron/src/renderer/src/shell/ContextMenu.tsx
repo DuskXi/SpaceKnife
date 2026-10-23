@@ -9,6 +9,7 @@ import { askFolder, cannotSearch, dupesOf, focusGroup, isRunning, openDrawer, st
 import { activeTab, get, set, toast, useApp } from "@/state/store";
 import { fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { Dup } from "@/treemap/paint";
 import { Kind } from "@/visual/frame";
 import { hitOfKey } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
@@ -353,13 +354,24 @@ export function dupesItem(scanId: string, viewId: string, folder: boolean, node:
       },
     };
   }
-  // a finished search that covered the file found no twin: asking again would replace its results
+  // a finished whole-scan search says what it knows of the file (asking again would replace its
+  // results): no twin only when it was compared; skipped or never compared otherwise
   const settled = status && !isRunning(status) && status.mode === "all";
+  const dup = row >= 0 && frame.dup ? frame.dup[row]! : 0;
+  const known = !settled
+    ? undefined
+    : dup === Dup.UNIQUE
+      ? t("这次查找里没有和它内容相同的文件")
+      : dup === Dup.SKIPPED
+        ? t("这次查找跳过了它（原因见悬停卡）")
+        : status.state === "cancelled" || status.state === "failed" || status.undecided > 0
+          ? t("这次查找没核对完，可以「再查一次」")
+          : t("这次查找没有比较它（小于下限，或不在比较范围里）");
   return {
     id: "dupes",
     icon: "dupes",
     label: t("查找与它相同的文件"),
-    disabled: why ?? (settled ? t("这次查找里没有和它内容相同的文件") : undefined),
+    disabled: why ?? known,
     run: () => node != null && void startSearch(scanId, { mode: "file", node }),
   };
 }

@@ -139,3 +139,64 @@ export function middlePath(path: string, max = 52): string {
   if (rest.length <= 3) return path;
   return [parts.slice(0, rootLen).join(sep), "…", ...rest.slice(-2)].join(sep);
 }
+
+function splitPath(path: string): { sep: string; root: string[]; rest: string[] } {
+  const sep = path.includes("\\") ? "\\" : "/";
+  const parts = path.split(sep);
+  const rootLen = path.startsWith("\\\\") ? 4 : parts[0] === "" ? 2 : 1;
+  return { sep, root: parts.slice(0, rootLen), rest: parts.slice(rootLen) };
+}
+
+/** A long path in `max` characters: its root, then as many of its last segments as fit, filled from
+ * the right (the name always stays): C:\…\Photos\2021\a.jpg. */
+export function fitPath(path: string, max = 52): string {
+  if (path.length <= max) return path;
+  const { sep, root, rest } = splitPath(path);
+  if (rest.length <= 1) return path;
+  const head = root.join(sep);
+  const kept = [rest[rest.length - 1]!];
+  let len = head.length + 2 + sep.length * 2 + kept[0]!.length - 1;
+  for (let i = rest.length - 2; i >= 0; i--) {
+    const add = rest[i]!.length + sep.length;
+    if (len + add > max) break;
+    kept.unshift(rest[i]!);
+    len += add;
+  }
+  if (kept.length === rest.length) return path;
+  return [head, "…", ...kept].join(sep);
+}
+
+/**
+ * Paths of the copies of one file, shortened so that each still shows what tells it from the
+ * others (the drawer's group rows): the root, the segments where they differ, and the name; the
+ * segments all of them share before and after are folded into 「…」. Each fits in `max` where it
+ * can (the differing part is cut from the left, never the name).
+ */
+export function distinctPaths(paths: string[], max = 52): string[] {
+  if (paths.length < 2) return paths.map((p) => fitPath(p, max));
+  const split = paths.map(splitPath);
+  const low = split.map((x) => x.rest.map((s) => s.toLowerCase()));
+  const shortest = Math.min(...low.map((r) => r.length));
+  const sameRoot = split.every((x) => x.root.join("/").toLowerCase() === split[0]!.root.join("/").toLowerCase());
+  let lead = 0;
+  while (sameRoot && lead < shortest - 1 && low.every((r) => r[lead] === low[0]![lead])) lead++;
+  let trail = 1; // the name stays whatever it is
+  while (lead + trail < shortest && low.every((r) => r[r.length - 1 - trail] === low[0]![low[0]!.length - 1 - trail])) trail++;
+  return paths.map((path, k) => {
+    if (path.length <= max) return path;
+    const { sep, root, rest } = split[k]!;
+    const middle = rest.slice(lead, rest.length - trail);
+    const name = rest[rest.length - 1]!;
+    const between = trail > 1; // shared folders between the difference and the name
+    const out: string[] = [root.join(sep)];
+    if (lead > 0) out.push("…");
+    let mid = [...middle];
+    const build = (m: string[], cut: boolean): string => [...out, ...(cut ? ["…"] : []), ...m, ...(between ? ["…"] : []), name].join(sep);
+    let text = build(mid, false);
+    while (text.length > max && mid.length > 1) {
+      mid = mid.slice(1);
+      text = build(mid, lead === 0);
+    }
+    return text.length < path.length ? text : path;
+  });
+}

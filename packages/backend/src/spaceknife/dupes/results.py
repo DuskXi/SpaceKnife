@@ -79,17 +79,21 @@ class _ScanIndex:
     folder_bytes: np.ndarray
     pending: np.ndarray  # sorted candidate nodes still undecided
     skipped: np.ndarray  # sorted candidate nodes skipped
+    unique: np.ndarray  # sorted nodes compared and found to have no twin (size or contents)
 
 
 class _Live:
     """Per scan: candidate nodes still undecided and skipped (changes as groups finish)."""
 
-    __slots__ = ("key", "pending", "skipped", "t")
+    __slots__ = ("key", "pending", "skipped", "t", "unique")
 
-    def __init__(self, key: tuple[int, bool], pending: np.ndarray, skipped: np.ndarray) -> None:
+    def __init__(
+        self, key: tuple[int, bool], pending: np.ndarray, skipped: np.ndarray, unique: np.ndarray
+    ) -> None:
         self.key = key
         self.pending = pending
         self.skipped = skipped
+        self.unique = unique
         self.t = time.monotonic()
 
 
@@ -109,6 +113,7 @@ class Results:
         self._gvalid = np.zeros(256, bool)
         self._gshared = np.zeros(256, bool)
         self._greclaim = np.zeros(256, np.int64)
+        self._vol_groups = np.zeros(256, np.int64)  # valid groups with a copy on each volume
         self._by_cand_group: dict[int, list[int]] = {}
         self.version = 0
         self.lock = threading.RLock()
@@ -222,6 +227,7 @@ class Results:
                 names=names,
             )
             self.groups.append(grp)
+            self._vol_groups[list(vols)] += 1
             self._by_cand_group.setdefault(g, []).append(grp.id)
             self._apply_one(grp)
             self._bump()
@@ -435,9 +441,8 @@ class Results:
             ex_n = np.bincount(vol[extra], minlength=nv)
             ex_b = np.rint(np.bincount(vol[extra], weights=alloc[extra], minlength=nv)).astype(np.int64)
             sh_b = np.rint(np.bincount(vol[shared], weights=alloc[shared], minlength=nv)).astype(np.int64)
-            pairs = np.unique(m["group"][valid].astype(np.int64) * 256 + vol[valid])
-            g_n = np.bincount(pairs % 256, minlength=nv)
-            for v in np.unique(vol[valid]).tolist():
+            g_n = self._vol_groups
+            for v in np.flatnonzero(g_n[:nv] > 0).tolist():
                 out[v] = Ledger(
                     extra=int(ex_n[v]), reclaim=int(ex_b[v]), shared=int(sh_b[v]), groups=int(g_n[v])
                 )
@@ -471,7 +476,7 @@ class Results:
             live = self._live_of(si)
             hit = self._index.get(si)
             if hit is not None and hit.version == self.version:
-                hit.pending, hit.skipped = live.pending, live.skipped
+                hit.pending, hit.skipped, hit.unique = live.pending, live.skipped, live.unique
                 return hit
             m = self.m[: self.n]
             valid = self._valid_rows()
@@ -488,6 +493,7 @@ class Results:
                 fbytes,
                 live.pending,
                 live.skipped,
+                live.unique,
             )
             self._index[si] = idx
             return idx
@@ -501,8 +507,8 @@ class Results:
             hit.key == key or (not final and not hit.key[1] and time.monotonic() - hit.t < LIVE_EVERY_S)
         ):
             return hit
-        pending, skipped = self._pending(si)
-        live = self._live[si] = _Live(key, pending, skipped)
+        pending, skipped, unique = self._pending(si)
+        live = self._live[si] = _Live(key, pending, skipped, unique)
         return live
 
     def _rollup(self, si: int, m: np.ndarray, valid: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -533,10 +539,15 @@ class Results:
         np.add.at(sums, inv, w)
         return u, sums
 
-    def _pending(self, si: int) -> tuple[np.ndarray, np.ndarray]:
+    def _pending(self, si: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         job = self.job
-        if job is None or job.sel is None or not len(job.sel.cand):
-            return np.zeros(0, np.int64), np.zeros(0, np.int64)
+        empty = np.zeros(0, np.int64)
+        if job is None or job.sel is None:
+            return empty, empty, empty
+        lone = job.sel.unique_nodes.get(si)
+        lone = lone.astype(np.int64) if lone is not None else empty
+        if not len(job.sel.cand):
+            return empty, empty, lone
         cand = job.sel.cand
         mine = cand["scan"] == si
         st = cand["state"]
@@ -545,7 +556,12 @@ class Results:
         else:
             pend = mine & np.isin(st, (C.ST_SELECTED, C.ST_PROBED, C.ST_VERIFYING))
         skip = mine & (st == C.ST_SKIPPED)
-        return np.sort(cand["node"][pend].astype(np.int64)), np.sort(cand["node"][skip].astype(np.int64))
+        uniq = np.concatenate([cand["node"][mine & (st == C.ST_UNIQUE)].astype(np.int64), lone])
+        return (
+            np.sort(cand["node"][pend].astype(np.int64)),
+            np.sort(cand["node"][skip].astype(np.int64)),
+            np.sort(uniq),
+        )
 
     def member_of(self, si: int, node: int) -> int:
         """The member row of a node of scan ``si``, or -1."""
@@ -603,7 +619,11 @@ class Results:
                 state[shared_g & hit] = C.DUP_SHARED
                 rest = ~hit
                 if rest.any():
-                    for arr, code in ((idx.pending, C.DUP_PENDING), (idx.skipped, C.DUP_SKIPPED)):
+                    for arr, code in (
+                        (idx.pending, C.DUP_PENDING),
+                        (idx.skipped, C.DUP_SKIPPED),
+                        (idx.unique, C.DUP_UNIQUE),
+                    ):
                         if len(arr):
                             q = np.minimum(np.searchsorted(arr, fn[rest]), len(arr) - 1)
                             mark = arr[q] == fn[rest]
@@ -615,7 +635,11 @@ class Results:
             elif files.any():
                 fn = node[files]
                 state = np.zeros(len(fn), np.uint8)
-                for arr, code in ((idx.pending, C.DUP_PENDING), (idx.skipped, C.DUP_SKIPPED)):
+                for arr, code in (
+                    (idx.pending, C.DUP_PENDING),
+                    (idx.skipped, C.DUP_SKIPPED),
+                    (idx.unique, C.DUP_UNIQUE),
+                ):
                     if len(arr):
                         q = np.minimum(np.searchsorted(arr, fn), len(arr) - 1)
                         mark = (arr[q] == fn) & (state == 0)
@@ -741,7 +765,9 @@ class Results:
             fresh = 0
             for gid in touched:
                 g = self.groups[gid]
-                fresh += g.valid
+                if g.valid:
+                    fresh += 1
+                    self._vol_groups[list(g.volumes)] -= 1
                 g.valid = False  # back to 「待核对」: the next run decides
                 self._apply_one(g)
             self._bump()
@@ -814,6 +840,8 @@ class Results:
                 out.elsewhere, out.elsewhere_bytes = int(other.sum()), int(b[other].sum())
                 out.same_data, out.same_data_bytes = int(same.sum()), int(b[same].sum())
                 only.append(cn[mem][~other & ~same])
+                if other.any():
+                    out.elsewhere_list = self._elsewhere(m, outside, r[other], b[other])
             rest = ~mem
             uniq_st = cst[rest] == C.ST_UNIQUE
             only.append(cn[rest][uniq_st])
@@ -831,6 +859,36 @@ class Results:
         out.small_bytes = max(0, int(cols["tot_alloc"][folder]) - seen)
         return out
 
+    def _elsewhere(
+        self, m: np.ndarray, outside: np.ndarray, rows: np.ndarray, sizes: np.ndarray, limit: int = 5
+    ) -> list[tuple[int, str, int, int]]:
+        """The folders holding the other copies of ``rows`` (a folder's files with a copy elsewhere),
+        by the bytes of those files: (scan, folder path, bytes, node)."""
+        out_rows = np.flatnonzero(outside)
+        order = np.argsort(m["group"][out_rows], kind="stable")
+        out_rows = out_rows[order]
+        og = m["group"][out_rows]
+        unit = m["unit"]
+        paths = self.paths
+        by: dict[tuple[int, str], int] = {}
+        for r, size in zip(rows.tolist(), sizes.tolist(), strict=True):
+            g = int(m["group"][r])
+            lo, hi = int(np.searchsorted(og, g, "left")), int(np.searchsorted(og, g, "right"))
+            seen: set[tuple[int, str]] = set()
+            for o in out_rows[lo:hi].tolist():
+                if int(unit[o]) == int(unit[r]):
+                    continue
+                key = (int(m["scan"][o]), os.path.dirname(paths[o]))
+                if key not in seen:
+                    seen.add(key)
+                    by[key] = by.get(key, 0) + int(size)
+        top = sorted(by.items(), key=lambda kv: (-kv[1], kv[0][1]))[:limit]
+        found: list[tuple[int, str, int, int]] = []
+        for (si, path), nbytes in top:
+            node = self.scans[si].store.find(path)
+            found.append((si, path, nbytes, int(node) if node is not None else 0))
+        return found
+
     # ------------------------------------------------------------------ pages
     def sorted_groups(
         self,
@@ -840,10 +898,12 @@ class Results:
         include_shared: bool = False,
         scan: int | None = None,
         under: tuple[int, int] | None = None,
+        query: str = "",
     ) -> list[Group]:
         from .select import _below
 
-        key_c = (sort, cross_only, include_shared, scan, under)
+        q = query.strip().lower()
+        key_c = (sort, cross_only, include_shared, scan, under, q)
         with self.lock:
             hit = self._sorted.get(key_c)
             if hit is not None and hit[0] == self.version:
@@ -864,6 +924,9 @@ class Results:
                 ]
                 ids = set(np.unique(m["group"][inside]).tolist())
                 gs = [g for g in gs if g.id in ids]
+            if q:
+                paths = self.paths
+                gs = [g for g in gs if any(q in paths[r].lower() for r in range(g.start, g.start + g.count))]
             key = {
                 "reclaim": lambda g: (-g.reclaim, -g.size, g.id),
                 "size": lambda g: (-g.size, g.id),
@@ -924,3 +987,4 @@ class Coverage:
     small: int = 0
     small_bytes: int = 0
     only_here_list: list[tuple[int, str, int]] = field(default_factory=list)  # (node, path, bytes)
+    elsewhere_list: list[tuple[int, str, int, int]] = field(default_factory=list)  # (scan, path, bytes, node)

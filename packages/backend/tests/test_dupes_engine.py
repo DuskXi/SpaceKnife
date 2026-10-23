@@ -858,6 +858,11 @@ async def test_coverage_of_a_folder(tmp_path: Path, ops: Ops) -> None:
     cov = res.coverage(0, folder)
     assert cov.elsewhere == 1 and cov.only_here == 1 and cov.small == 1
     assert cov.only_here_list[0][1].endswith("unique.bin")
+    # where the other copy is: g, with the bytes of f's file that has it
+    g_node = store.find(str(root / "g"))
+    assert cov.elsewhere_list == [
+        (0, str(root / "g"), int(store.cols["alloc"][store.find(str(root / "f" / "a.bin"))]), g_node)
+    ]
 
 
 # --------------------------------------------------------------------------- frames

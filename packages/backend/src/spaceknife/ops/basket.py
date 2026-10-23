@@ -540,6 +540,18 @@ class Basket:
             self._settle()
             return result
 
+    def dupes_members(self, item_id: str) -> list[tuple[str, int, Any]]:
+        """(path, bytes, guard) of each extra copy of a ``dupes`` item (empty for another kind)."""
+        with self._lock:
+            e = self._entries.get(item_id)
+            if e is None or not e.dupes:
+                return []
+            sizes = e.member_sizes if len(e.member_sizes) == len(e.member_keys) else [0] * len(e.member_keys)
+            return [
+                (p, int(sizes[i]), e.guards.get(k))
+                for i, (p, k) in enumerate(zip(e.item.members, e.member_keys, strict=True))
+            ]
+
     def guards_for(self, paths: Iterable[str]) -> dict[str, Any]:
         """The guard of each path that is an extra copy in a ``dupes`` item."""
         with self._lock:

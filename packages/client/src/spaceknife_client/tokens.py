@@ -324,7 +324,7 @@ THEMES: Final[Mapping[str, Mapping[str, TokenValue]]] = {
         'treemap.dupe.share.2': '#E9A6DD',
         'treemap.dupe.share.3': '#A92E97',
         'treemap.dupe.share.4': '#7E1A70',
-        'treemap.dupe.shared': '#9097A3',
+        'treemap.dupe.shared': '#D2D5DA',
         'treemap.dupe.text': '#7E1A70',
         'treemap.flat.file': '#C7D1E5',
         'treemap.flat.folder': '#F3F5F9',

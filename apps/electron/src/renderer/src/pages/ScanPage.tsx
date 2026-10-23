@@ -12,7 +12,7 @@ import { fmtInt, fmtShare, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { HoverCard } from "@/shell/HoverCard";
 import { BasketDrawer } from "@/shell/BasketDrawer";
-import { DupesDrawer } from "@/shell/DupesDrawer";
+import { DupesDrawer, DupesLegend } from "@/shell/DupesDrawer";
 import { useDupes } from "@/state/dupes";
 import { ColumnResizer } from "@/shell/ColumnResizer";
 import { CompareHoverCard, CompareSidebar } from "@/shell/Compare";
@@ -157,6 +157,7 @@ function Pane(props: { tab: Tab; index: number; viewId: string; split: boolean; 
       <div className="pane-map" ref={host}>
         <VisualHost viewId={viewId} onHover={setHover} onContextMenu={(row, frame, ev) => openMenu(viewId, row, frame, ev)} />
         <FilterFloater viewId={viewId} />
+        <DupesKeyFloat viewId={viewId} />
         <HoverCard hover={hover} bounds={bounds} />
       </div>
     </section>
@@ -267,4 +268,17 @@ function openMenu(viewId: string, row: Hit, frame: VisualFrame, ev: React.MouseE
   const followsPointer = componentFor(frame.layout)?.hoverPlacement === "pointer";
   const avoid = followsPointer ? pointerBox({ x: ev.clientX, y: ev.clientY }) : hosts.get(viewId)?.menuAnchor(row)?.avoid;
   set({ menu: { viewId, scanId, key, node: node > 0 ? node : null, x: ev.clientX, y: ev.clientY, avoid } });
+}
+
+/** The 「重复」 colouring's key in a corner of the picture, while the drawer (which has its own) is
+ * closed. */
+function DupesKeyFloat({ viewId }: { viewId: string }) {
+  const on = useApp((s) => s.views[viewId]?.state.color_mode === "dupes");
+  const drawer = useDupes((s) => s.open);
+  if (!on || drawer) return null;
+  return (
+    <div className="dp-key-float">
+      <DupesLegend compact />
+    </div>
+  );
 }

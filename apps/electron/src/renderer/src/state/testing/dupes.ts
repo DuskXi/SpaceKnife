@@ -28,6 +28,8 @@ export const status = (over: Partial<DupesStatus> = {}): DupesStatus =>
     reclaim: 3 << 20,
     version: 1,
     error: "",
+    stop_reason: "",
+    undecided: 0,
     elapsed_s: 1,
     ...over,
   }) as DupesStatus;
@@ -44,8 +46,8 @@ export const group = (id: number, over: Partial<DupeGroup> = {}): DupeGroup => (
   cross: false,
   keep_why: "rule",
   members: [
-    { scan_id: "s1", node: 10 + id, path: `C:\\a\\f${id}.bin`, volume: "C:", mtime: 0, ctime: 0, alloc: 1 << 20, role: "keep", why: "rule" },
-    { scan_id: "s1", node: 20 + id, path: `C:\\b\\f${id}.bin`, volume: "C:", mtime: 0, ctime: 0, alloc: 1 << 20, role: "extra", why: null },
+    { scan_id: "s1", node: 10 + id, path: `C:\\a\\f${id}.bin`, volume: "C:", mtime: 0, ctime: 0, alloc: 1 << 20, role: "keep", why: "rule", view: false },
+    { scan_id: "s1", node: 20 + id, path: `C:\\b\\f${id}.bin`, volume: "C:", mtime: 0, ctime: 0, alloc: 1 << 20, role: "extra", why: null, view: false },
   ],
   total_members: 2,
   ...over,

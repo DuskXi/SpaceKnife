@@ -128,7 +128,7 @@ QtObject {
     readonly property color treemapDupeShare2: theme === "light" ? "#FFE9A6DD" : "#FF7A2F70"
     readonly property color treemapDupeShare3: theme === "light" ? "#FFA92E97" : "#FF96338B"
     readonly property color treemapDupeShare4: theme === "light" ? "#FF7E1A70" : "#FFF28CE2"
-    readonly property color treemapDupeShared: theme === "light" ? "#FF9097A3" : "#FF5A5F6B"
+    readonly property color treemapDupeShared: theme === "light" ? "#FFD2D5DA" : "#FF5A5F6B"
     readonly property color treemapDupeText: theme === "light" ? "#FF7E1A70" : "#FFF28CE2"
     readonly property color treemapFlatFile: theme === "light" ? "#FFC7D1E5" : "#FF2B2F38"
     readonly property color treemapFlatFolder: theme === "light" ? "#FFF3F5F9" : "#FF0C0E12"

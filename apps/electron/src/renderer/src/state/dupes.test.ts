@@ -74,6 +74,33 @@ describe("the group list", () => {
     expect(getDupes().groups.map((g) => g.id)).toEqual([7, 1, 2, 9]);
   });
 
+  it("brings every group shown back on a refresh, past 500, in pages", async () => {
+    setDupes({ groupsJob: "dupes-1", groups: Array.from({ length: 700 }, (_, i) => group(i)), groupsTotal: 900 });
+    mocked.mockResolvedValueOnce(page(Array.from({ length: 500 }, (_, i) => i), 900, 3) as never);
+    mocked.mockResolvedValueOnce(page(Array.from({ length: 200 }, (_, i) => 500 + i), 900, 3) as never);
+    await loadGroups("dupes-1", "refresh");
+    expect(mocked.mock.calls.map((c) => [(c[1] as { offset: number }).offset, (c[1] as { limit: number }).limit])).toEqual([
+      [0, 500],
+      [500, 200],
+    ]);
+    expect(getDupes().groups).toHaveLength(700); // the list keeps its length (UI-WD-04)
+  });
+
+  it("filters by name or path and by the folder in view", async () => {
+    set({ views: { v1: { state: { scan_id: "s1", zoom_node: 42 } } } as never });
+    setDupes({ query: " photo ", underZoom: true });
+    mocked.mockResolvedValueOnce(page([1]) as never);
+    await loadGroups("dupes-1", "reset");
+    expect(mocked.mock.calls[0]![1]).toMatchObject({ query: "photo", scan_id: "s1", under: 42 });
+  });
+
+  it("only takes the scans open in a tab into a cross-volume search", () => {
+    set({ scans: { ...get().scans, old: scan("old") } }); // finished, but its tab is closed
+    expect(crossIds("s1")).toEqual(["s1"]);
+    set({ tabs: [...get().tabs, { id: "t2", kind: "scan", scanId: "s2", viewIds: ["v3"], focusedPane: 0, title: "D:" }] });
+    expect(crossIds("s1")).toEqual(["s1", "s2"]);
+  });
+
   it("drops an answer a newer request overtook", async () => {
     let first!: (v: unknown) => void;
     mocked.mockImplementationOnce(() => new Promise((r) => (first = r)) as never);
@@ -207,7 +234,8 @@ describe("keep rules", () => {
     mocked.mockImplementation((async (m: string) => (m === "dupes.keep" ? status() : page([]))) as never);
     await applyKeep("dupes-1", { rule: "newest" });
     expect(vi.mocked(updateSettings)).toHaveBeenCalledWith({ "dupes.keep_rule": "newest" });
-    expect(mocked.mock.calls[0]).toEqual(["dupes.keep", { job_id: "dupes-1", rule: "shortest", prefer: [], folder_consistent: false, per_volume: true, overrides: [] }]);
+    // no overrides: the backend keeps the manual choices made so far
+    expect(mocked.mock.calls[0]).toEqual(["dupes.keep", { job_id: "dupes-1", rule: "shortest", prefer: [], folder_consistent: false, per_volume: true, overrides: [], reset_overrides: false }]);
   });
 });
 

@@ -396,8 +396,8 @@
             <SolidColorBrush x:Key="SkTreemapDupeShare3Brush" Color="#FFA92E97"/>
             <Color x:Key="SkTreemapDupeShare4">#FF7E1A70</Color>
             <SolidColorBrush x:Key="SkTreemapDupeShare4Brush" Color="#FF7E1A70"/>
-            <Color x:Key="SkTreemapDupeShared">#FF9097A3</Color>
-            <SolidColorBrush x:Key="SkTreemapDupeSharedBrush" Color="#FF9097A3"/>
+            <Color x:Key="SkTreemapDupeShared">#FFD2D5DA</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeSharedBrush" Color="#FFD2D5DA"/>
             <Color x:Key="SkTreemapDupeText">#FF7E1A70</Color>
             <SolidColorBrush x:Key="SkTreemapDupeTextBrush" Color="#FF7E1A70"/>
             <Color x:Key="SkTreemapFlatFile">#FFC7D1E5</Color>

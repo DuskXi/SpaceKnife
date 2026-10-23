@@ -6,10 +6,10 @@
 import { create } from "zustand";
 
 import type { DupeGroup, DupesFolderInfo, DupesFolderRow, DupesGroupsParams, DupesPlan, DupesStatus } from "@/protocol/generated";
-import { fmtSize } from "@/lib/format";
+import { fmtSize, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
-import { call, updateSettings, viewCall } from "./actions";
+import { activate, call, updateSettings, viewCall } from "./actions";
 import { get as getApp, set as setApp, setting, toast } from "./store";
 
 export type DupesTab = "groups" | "folders";
@@ -32,6 +32,14 @@ export interface DupesState {
   byScan: Record<string, DupesStatus>;
   /** the plan shown before a search starts, per scan */
   plan: Record<string, DupesPlan>;
+  /** why the plan could not be made, per scan (shown with 「重试」) */
+  planError: Record<string, string>;
+  /** cross-volume: open scans the user left out of the comparison */
+  leftOut: string[];
+  /** how the next search starts: its load level (null: the setting), and optional caps */
+  startLoad: DupesLoadLevel | null;
+  capGb: number | null;
+  capMinutes: number | null;
   /** the drawer's group list: the first pages in the backend's order, of `groupsJob` */
   groups: DupeGroup[];
   groupsTotal: number;
@@ -41,6 +49,10 @@ export interface DupesState {
   crossOnly: boolean;
   /** also list the groups that are one file under several names, or clones (nothing to free) */
   includeShared: boolean;
+  /** only groups with a copy below the view's zoom folder */
+  underZoom: boolean;
+  /** only groups with a copy whose path has this */
+  query: string;
   folders: DupesFolderRow[];
   foldersTotal: number;
   /** what of a folder exists elsewhere, per job: the folder a search was limited to (modes against /
@@ -48,6 +60,8 @@ export interface DupesState {
   coverage: Record<string, { node: number; info: DupesFolderInfo }>;
   /** the group lit in every pane (hovered in the drawer or in the picture) */
   focus: { jobId: string; group: number } | null;
+  /** a folder and the one holding most of its kept copies, lit while its row is hovered */
+  litFolders: { scanId: string; nodes: number[] } | null;
   /** rows of a view's frame that hold the lit group's copies, from dupes.locate */
   located: Record<string, Located>;
 }
@@ -57,6 +71,11 @@ const initial = (): DupesState => ({
   tab: "groups",
   byScan: {},
   plan: {},
+  planError: {},
+  leftOut: [],
+  startLoad: null,
+  capGb: null,
+  capMinutes: null,
   groups: [],
   groupsTotal: 0,
   groupsVersion: -1,
@@ -64,10 +83,13 @@ const initial = (): DupesState => ({
   sort: "reclaim",
   crossOnly: false,
   includeShared: false,
+  underZoom: false,
+  query: "",
   folders: [],
   foldersTotal: 0,
   coverage: {},
   focus: null,
+  litFolders: null,
   located: {},
 });
 
@@ -133,8 +155,13 @@ export function dupesSummary(s: DupesStatus): string {
     const pct = Math.round(100 * (s.progress ?? 0));
     return t("查找重复 {pct}% · 已读 {read}", { pct: String(pct), read: fmtSize(s.bytes.read) });
   }
+  if (s.state === "failed") return t("查找重复出错");
+  if (stoppedEarly(s)) return t("查找重复已停止 · 可腾出至少 {size}", { size: fmtSize(s.reclaim) });
   return t("重复：可腾出 {size}", { size: fmtSize(s.reclaim) });
 }
+
+/** The search ended before deciding everything (stopped, a byte or time cap, or an error). */
+export const stoppedEarly = (s: DupesStatus): boolean => s.state === "cancelled" || s.state === "failed" || (s.state === "done" && s.stop_reason !== "" && s.undecided > 0);
 
 export function onDupesProgress(ev: DupesStatus): void {
   const d = getDupes();
@@ -194,13 +221,25 @@ export function openDrawer(open = true): void {
 export async function loadPlan(scanId: string): Promise<void> {
   if (cannotSearch(scanId)) return;
   const ids = keepOptions().cross ? crossIds(scanId) : [scanId];
+  const planError = { ...getDupes().planError };
+  delete planError[scanId];
+  const plans = { ...getDupes().plan };
+  delete plans[scanId]; // 「正在估计」 until this one answers
+  setDupes({ planError, plan: plans });
   try {
     const plan = await call("dupes.plan", { scan_ids: ids, cross_volume: ids.length > 1, mode: "all", node: null, min_size: minSize(), include_system: false, include_network: false });
     setDupes({ plan: { ...getDupes().plan, [scanId]: plan } });
     if (plan.current && !dupesOf(scanId)) onDupesProgress(plan.current);
   } catch (err) {
-    toast(String((err as Error).message ?? err));
+    setDupes({ planError: { ...getDupes().planError, [scanId]: readable(err) } });
   }
+}
+
+/** An error the backend sent, as the user reads it (an unknown scan id is said in words). */
+export function readable(err: unknown): string {
+  const msg = String((err as Error)?.message ?? err);
+  if (/scan-[0-9a-f]{6,}/.test(msg) && /没有这个扫描|unknown scan|no such scan/i.test(msg)) return t("有一个扫描已经关闭或不在内存里了，请重新扫描或去掉它");
+  return msg;
 }
 
 const pickedUp = new Set<string>();
@@ -218,13 +257,35 @@ export function minSize(): number {
   return Math.max(1, setting(getApp(), "dupes.min_size", 1)) * 1024 * 1024;
 }
 
-/** Every open, finished live scan, the given one first (cross-volume searches). */
+/** The finished live scans open in a tab (a scan with a tab is never let go by the backend), the
+ * given one first, without the ones the user left out (cross-volume searches). */
 export function crossIds(first: string): string[] {
+  return [first, ...crossChoices(first).filter((c) => c.on && c.scanId !== first).map((c) => c.scanId)].slice(0, 16);
+}
+
+/** Every scan a cross-volume search could take, and whether it does. */
+export function crossChoices(first: string): { scanId: string; label: string; on: boolean }[] {
   const a = getApp();
-  const live = Object.values(a.scans)
-    .filter((s) => s.state === "done" && s.source === "scan")
-    .map((s) => s.scan_id);
-  return [first, ...live.filter((id) => id !== first)].slice(0, 16);
+  const left = new Set(getDupes().leftOut);
+  const seen = new Set<string>();
+  const out: { scanId: string; label: string; on: boolean }[] = [];
+  for (const tab of a.tabs) {
+    const id = tab.scanId;
+    const scan = id ? a.scans[id] : undefined;
+    if (!id || !scan || seen.has(id) || tab.compare || scan.state !== "done" || scan.source !== "scan") continue;
+    seen.add(id);
+    out.push({ scanId: id, label: scan.roots?.map((r) => r.path).join(" · ") || tab.title, on: id === first || !left.has(id) });
+  }
+  out.sort((x, y) => (x.scanId === first ? -1 : y.scanId === first ? 1 : 0));
+  return out;
+}
+
+export function setLeftOut(scanId: string, first: string, out: boolean): void {
+  const left = new Set(getDupes().leftOut);
+  if (out) left.add(scanId);
+  else left.delete(scanId);
+  setDupes({ leftOut: [...left] });
+  void loadPlan(first);
 }
 
 export async function setCross(scanId: string, on: boolean): Promise<void> {
@@ -238,20 +299,21 @@ export async function startSearch(scanId: string, opts: { mode?: "all" | "inside
   // a file or a folder of its own is one scan's question; 「跨盘比较」 widens a whole search
   const mode = opts.mode ?? "all";
   const ids = keepOptions().cross && mode === "all" ? crossIds(scanId) : [scanId];
+  const d = getDupes();
   try {
     const st = await call("dupes.start", {
       scope: { scan_ids: ids, cross_volume: ids.length > 1, mode, node: opts.node ?? null, min_size: minSize(), include_system: false, include_network: false },
-      load: null,
+      load: d.startLoad,
       load_custom: null,
-      budget_bytes: null,
-      max_seconds: null,
+      budget_bytes: d.capGb != null && d.capGb > 0 ? Math.round(d.capGb * 1024 ** 3) : null,
+      max_seconds: d.capMinutes != null && d.capMinutes > 0 ? d.capMinutes * 60 : null,
       replace: false,
     });
     onDupesProgress(st);
     setDupes({ open: true, tab: "groups", groups: [], groupsTotal: 0, groupsVersion: -1, groupsJob: st.job_id });
     setApp({ basketOpen: false });
   } catch (err) {
-    toast(String((err as Error).message ?? err), 3000);
+    toast(readable(err), 3000);
   }
 }
 
@@ -259,7 +321,7 @@ async function control(method: "dupes.pause" | "dupes.resume" | "dupes.cancel", 
   try {
     onDupesProgress(await call(method, { job_id: jobId }));
   } catch (err) {
-    toast(String((err as Error).message ?? err));
+    toast(readable(err));
   }
 }
 
@@ -272,7 +334,7 @@ export async function clearSearch(jobId: string): Promise<void> {
     await call("dupes.clear", { job_id: jobId });
     onDupesChanged({ job_id: jobId, version: 0, reason: "cleared" });
   } catch (err) {
-    toast(String((err as Error).message ?? err));
+    toast(readable(err));
     return;
   }
   // the backend put views in the 「重复」 colouring back to classes: their state follows
@@ -283,55 +345,81 @@ export async function setLoad(jobId: string, level: DupesLoadLevel): Promise<voi
   try {
     onDupesProgress(await call("dupes.set_load", { job_id: jobId, level, custom: null }));
   } catch (err) {
-    toast(String((err as Error).message ?? err));
+    toast(readable(err));
   }
 }
 
 let groupsSeq = 0;
 
+/** The zoom folder of the active tab's focused view (the 「只看当前文件夹」 filter). */
+export function zoomOf(): { scanId: string; node: number } | null {
+  const a = getApp();
+  const tab = a.tabs.find((x) => x.id === a.active);
+  const viewId = tab?.viewIds[tab.focusedPane] ?? tab?.viewIds[0];
+  const st = viewId ? a.views[viewId]?.state : undefined;
+  return tab?.scanId && st && st.zoom_node > 0 ? { scanId: tab.scanId, node: st.zoom_node } : null;
+}
+
 /**
  * The drawer's group list. "reset": the first page (another search, order or filter); "refresh":
- * results changed, so as many as are shown come again in the new order — groups verified meanwhile
- * slot in where they belong and nothing scrolls; "more": the next page.
+ * results changed, so every group shown comes again in the new order (in pages of MAX_PAGE) —
+ * groups verified meanwhile slot in where they belong and the list keeps its length; "more": the
+ * next page.
  */
 export async function loadGroups(jobId: string, how: "reset" | "refresh" | "more" = "reset"): Promise<void> {
   const d = getDupes();
   const same = d.groupsJob === jobId;
   const offset = how === "more" && same ? d.groups.length : 0;
-  const limit = how === "refresh" && same ? Math.min(MAX_PAGE, Math.max(PAGE, d.groups.length)) : PAGE;
+  const want = how === "refresh" && same ? Math.max(PAGE, d.groups.length) : PAGE;
   const seq = ++groupsSeq;
-  try {
-    const page = await call("dupes.groups", {
+  const zoom = d.underZoom ? zoomOf() : null;
+  const ask = (at: number, limit: number) =>
+    call("dupes.groups", {
       job_id: jobId,
-      offset,
+      offset: at,
       limit,
       sort: d.sort,
       cross_only: d.crossOnly,
       include_shared: d.includeShared,
-      scan_id: null,
-      under: null,
+      scan_id: zoom?.scanId ?? null,
+      under: zoom?.node ?? null,
+      query: d.query.trim(),
     });
+  try {
+    const items: DupeGroup[] = [];
+    let page: Awaited<ReturnType<typeof ask>>;
+    for (;;) {
+      const limit = Math.min(MAX_PAGE, want - items.length);
+      page = await ask(offset + items.length, limit);
+      items.push(...page.items);
+      if (page.items.length < limit || items.length >= want || seq !== groupsSeq) break; // a short page: the end
+    }
     if (seq !== groupsSeq) return; // a newer request answers
-    const items = how === "more" && same ? [...getDupes().groups, ...page.items] : page.items;
-    setDupes({ groups: items, groupsTotal: page.total, groupsVersion: page.version, groupsJob: jobId });
+    setDupes({ groups: how === "more" && same ? [...getDupes().groups, ...items] : items, groupsTotal: page.total, groupsVersion: page.version, groupsJob: jobId });
   } catch {
     // a search cleared meanwhile: nothing to show
   }
 }
 
 /** Another order or filter of the group list: the first page again. */
-export function setListing(patch: Partial<Pick<DupesState, "sort" | "crossOnly" | "includeShared">>, jobId: string): void {
+export function setListing(patch: Partial<Pick<DupesState, "sort" | "crossOnly" | "includeShared" | "underZoom" | "query">>, jobId: string): void {
   setDupes(patch);
   void loadGroups(jobId, "reset");
 }
 
-export async function loadFolders(jobId: string, scanId: string): Promise<void> {
+export async function loadFolders(jobId: string, scanId: string, more = false): Promise<void> {
+  const have = more ? getDupes().folders : [];
   try {
-    const page = await call("dupes.folders", { job_id: jobId, scan_id: scanId, offset: 0, limit: PAGE });
-    setDupes({ folders: page.items, foldersTotal: page.total });
+    const page = await call("dupes.folders", { job_id: jobId, scan_id: scanId, offset: have.length, limit: PAGE });
+    setDupes({ folders: [...have, ...page.items], foldersTotal: page.total });
   } catch {
     // ignored: the tab shows what it had
   }
+}
+
+/** Light a folder of the 「文件夹」 page and its twin in the views of their scans (null: none). */
+export function litFolders(scanId: string | null, nodes: number[] = []): void {
+  setDupes({ litFolders: scanId && nodes.length ? { scanId, nodes } : null });
 }
 
 /** The coverage bar (「这个文件夹在别处有没有？」, docs/dupes.md §8.4) of the folder a search was
@@ -368,10 +456,11 @@ export async function askFolder(scanId: string, node: number, label = ""): Promi
 async function keepCall(jobId: string, overrides: { group: number; path: string; role: "keep" | "extra" }[]): Promise<void> {
   const k = keepOptions();
   try {
-    onDupesProgress(await call("dupes.keep", { job_id: jobId, rule: k.rule, prefer: [], folder_consistent: k.folderConsistent, per_volume: k.perVolume, overrides }));
+    // the backend adds these to the search's manual choices (the earlier ones stay)
+    onDupesProgress(await call("dupes.keep", { job_id: jobId, rule: k.rule, prefer: [], folder_consistent: k.folderConsistent, per_volume: k.perVolume, overrides, reset_overrides: false }));
     await loadGroups(jobId, "refresh");
   } catch (err) {
-    toast(String((err as Error).message ?? err));
+    toast(readable(err));
   }
 }
 
@@ -385,7 +474,8 @@ export async function applyKeep(jobId: string, patch: Partial<{ rule: KeepRule; 
   await keepCall(jobId, []);
 }
 
-/** 「保留这一份」 on one member: a manual choice, kept with the search (and through a rerun). */
+/** 「保留这一份」 on one member: a manual choice, added to the earlier ones (another group's stay;
+ * this group's earlier one gives way), kept through rule changes and a rerun. */
 export async function keepThis(jobId: string, group: number, path: string): Promise<void> {
   await keepCall(jobId, [{ group, path, role: "keep" }]);
 }
@@ -394,14 +484,15 @@ export async function toBasket(jobId: string, groups: number[] | null = null): P
   try {
     const r = await call("dupes.to_basket", { job_id: jobId, groups });
     if (r.members > 0) {
-      const refused = r.refused.length ? t("（{n} 组没有加入：保留的那份已在删除篮里）", { n: String(r.refused.length) }) : "";
-      toast(t("已把 {n} 份多余的副本加入删除篮 · 可腾出 {size}", { n: String(r.members), size: fmtSize(r.freed) }) + refused, 4000);
+      const n = r.refused.length;
+      const refused = n ? plural(n, t("（{n} 组没有加入：保留的那份已在删除篮里）", { n: String(n) }), " (1 group left out: the copy kept is in the delete basket already)") : "";
+      toast(plural(r.members, t("已把 {n} 份多余的副本加入删除篮 · 可腾出 {size}", { n: String(r.members), size: fmtSize(r.freed) }), "Added 1 extra copy to the delete basket · {size} to free", { size: fmtSize(r.freed) }) + refused, 4000);
       setDupes({ open: false });
       setApp({ basketOpen: true });
     } else if (r.refused.length) toast(t("没有加入：本组保留的那份已在删除篮里"), 3000);
     else toast(t("没有多余的副本可加入"));
   } catch (err) {
-    toast(String((err as Error).message ?? err), 3000);
+    toast(readable(err), 3000);
   }
 }
 
@@ -434,7 +525,20 @@ export function focusGroup(jobId: string | null, group: number | null, viewIds: 
   }, 100);
 }
 
-/** Show a copy in a view: its block selected, zoomed out to as needed (the result list's way). */
-export async function revealCopy(viewId: string | undefined, node: number): Promise<void> {
+/** Show a copy in a view: its block selected, zoomed out to as needed (the result list's way). A
+ * copy of another scan (cross-volume) switches to that scan's tab first. */
+export async function revealCopy(viewId: string | undefined, node: number, scanId: string | null = null): Promise<void> {
+  if (scanId) {
+    const a = getApp();
+    const here = a.tabs.find((x) => x.id === a.active);
+    if (here?.scanId !== scanId) {
+      const tab = a.tabs.find((x) => x.scanId === scanId && !x.compare);
+      if (!tab) return toast(t("这个扫描没有打开的页签"));
+      activate(tab.id);
+      const vid = tab.viewIds[tab.focusedPane] ?? tab.viewIds[0];
+      if (vid) await viewCall(vid, "view.reveal", { key: node });
+      return;
+    }
+  }
   if (viewId) await viewCall(viewId, "view.reveal", { key: node });
 }

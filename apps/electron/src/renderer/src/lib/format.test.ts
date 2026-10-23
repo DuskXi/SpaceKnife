@@ -10,6 +10,8 @@ import {
   fmtPct,
   fmtShare,
   fmtSize,
+  distinctPaths,
+  fitPath,
   middlePath,
   setUnitBase,
   sizeParts,
@@ -348,5 +350,37 @@ describe("middlePath", () => {
     const p = "\\\\fileserver\\share\\projects\\spaceknife\\packages\\backend\\src\\server";
     expect(p.length).toBeGreaterThan(52);
     expect(middlePath(p).startsWith("\\\\fileserver")).toBe(true);
+  });
+});
+
+describe("fitPath", () => {
+  it("fills the budget from the right and always keeps the name", () => {
+    const p = "C:\\Users\\leizi\\Downloads\\Photos\\2021\\a.jpg";
+    expect(fitPath(p, 100)).toBe(p);
+    expect(fitPath(p, 24)).toBe("C:\\…\\Photos\\2021\\a.jpg");
+    expect(fitPath(p, 5)).toBe("C:\\…\\a.jpg");
+    expect(fitPath("/home/x/a/b/c.txt", 15)).toBe("/home/…/b/c.txt");
+  });
+});
+
+describe("distinctPaths", () => {
+  it("keeps the segment where copies differ and folds what they share", () => {
+    const a = "C:\\Users\\leizi\\Downloads\\Projects\\site\\assets\\video\\intro.mp4";
+    const b = "C:\\Users\\leizi\\Downloads\\Projects\\site-old\\assets\\video\\intro.mp4";
+    expect(distinctPaths([a, b], 40)).toEqual(["C:\\…\\site\\…\\intro.mp4", "C:\\…\\site-old\\…\\intro.mp4"]);
+  });
+
+  it("tells twenty logo.png files apart by their client folder", () => {
+    const paths = Array.from({ length: 20 }, (_, i) => `C:\\work\\clients\\client-${String(i).padStart(2, "0")}\\assets\\logo.png`);
+    const out = distinctPaths(paths, 30);
+    expect(new Set(out).size).toBe(20);
+    expect(out[3]).toBe("C:\\…\\client-03\\…\\logo.png");
+  });
+
+  it("leaves short paths whole and cuts a long difference from the left", () => {
+    expect(distinctPaths(["C:\\a\\x.bin", "C:\\b\\x.bin"], 40)).toEqual(["C:\\a\\x.bin", "C:\\b\\x.bin"]);
+    const out = distinctPaths(["D:\\one\\two\\three\\four\\five\\x.bin", "D:\\other\\x.bin"], 22);
+    expect(out[0]!.endsWith("five\\x.bin")).toBe(true);
+    expect(out[0]!.length).toBeLessThanOrEqual(22);
   });
 });

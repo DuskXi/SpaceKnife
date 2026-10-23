@@ -169,8 +169,10 @@ export function blockRadius(kind: number, g: { fileRadius: number; folderRadius:
 }
 
 /** The 「重复」 colouring (docs/dupes.md §10.2): file states by `dup`, folders and blocks by their tier.
- * `pattern`: stripes for extra copies (45°) and copies still being checked (135°); `rim`: the copy kept. */
-export const Dup = { NONE: 0, PENDING: 1, KEEP: 2, EXTRA: 3, SHARED: 4, SKIPPED: 5 } as const;
+ * `pattern`: stripes for extra copies (45°) and copies still being checked (135°), dots on the top
+ * folder tier (so a folder of ≥ 80 % extra copies never looks like one extra copy); `rim`: the copy
+ * kept. UNIQUE (compared, no twin) is drawn like NONE. */
+export const Dup = { NONE: 0, PENDING: 1, KEEP: 2, EXTRA: 3, SHARED: 4, SKIPPED: 5, UNIQUE: 6 } as const;
 
 export function dupeStyle(f: { kind: Uint8Array; dup?: Uint8Array | null }, i: number): { fill: RGBA; pattern: number; patternColor: RGBA; rim: RGBA | null } {
   const T = palette().treemap;
@@ -180,6 +182,7 @@ export function dupeStyle(f: { kind: Uint8Array; dup?: Uint8Array | null }, i: n
   if (kind !== Kind.FILE) {
     const tier = Math.min(4, v);
     const fill = tier ? rgba((D.share as Record<string, string>)[String(tier)]!) : rgba(T.collapsed);
+    if (tier === 4) return { fill, pattern: Pattern.DOTS, patternColor: rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark), rim: null };
     return { fill, pattern: Pattern.NONE, patternColor: NONE, rim: null };
   }
   switch (v) {
@@ -211,6 +214,19 @@ export function stripeOn(fill: RGBA): RGBA {
 
 /** Stripe period of the 「重复」 colouring's thin stripes, in CSS px (the shader's pattern size). */
 export const DUPE_STRIPE = 2.5;
+
+/** The 「重复」 style of a block that is not an open folder (files and collapsed folders), or null
+ * where the block keeps its usual look. */
+export function dupeOf(f: { kind: Uint8Array; dup?: Uint8Array | null }, i: number, mode: ColorMode, diff: boolean): ReturnType<typeof dupeStyle> | null {
+  const kind = f.kind[i]!;
+  return mode === "dupes" && !diff && (kind === Kind.FILE || kind === Kind.COLLAPSED) ? dupeStyle(f, i) : null;
+}
+
+/** Pattern size of a 「重复」 style (stripes are thin; dots as on the blocks of small items). */
+export const dupePatternSize = (d: ReturnType<typeof dupeStyle> | null): number => (d && (d.pattern === Pattern.STRIPES_45 || d.pattern === Pattern.STRIPES_135) ? DUPE_STRIPE : 6);
+
+/** On stripes the size line takes the name's colour: the paler sub colour is too weak there. */
+export const subOn = (d: ReturnType<typeof dupeStyle> | null, text: string, sub: string): string => (d && (d.pattern === Pattern.STRIPES_45 || d.pattern === Pattern.STRIPES_135) ? text : sub);
 
 /** Fill of a block that is not an open folder. 「顶层分支」 needs the frame's branch and depth columns
  * (a frame without them is neutral). */
@@ -358,16 +374,17 @@ export function paint(f: DrawFrame, o: PaintOptions, reuse?: Float32Array): Pain
       fill = fillOf(f, i, o.colorMode, o.classIds, o.diff?.tiers, o.classColors);
       const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
       const radius = blockRadius(kind, T.geometry) * dpr;
-      const dupe = o.colorMode === "dupes" && !o.diff && kind === Kind.FILE ? dupeStyle(f, i) : null;
+      const dupe = dupeOf(f, i, o.colorMode, !!o.diff);
       b.push(x, y, w, h, fill, {
         radius,
         pattern: aggregate ? Pattern.DOTS : (dupe?.pattern ?? Pattern.NONE),
         patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : (dupe?.patternColor ?? NONE),
-        patternSize: (dupe && dupe.pattern !== Pattern.NONE ? DUPE_STRIPE : 6) * dpr,
+        patternSize: dupePatternSize(dupe) * dpr,
         ...(dupe?.rim ? { border: dupe.rim, borderWidth: Math.max(1, Math.round(1.5 * dpr)) } : {}),
         alpha,
       });
       [text, sub] = labelColors(fill);
+      sub = subOn(dupe, text, sub);
       if (aggregate) {
         line1 = kind === Kind.SMALL ? t("{n} 个小项", { n: o.formatInt(f.count_[i]!) }) : t("+{n} 项", { n: o.formatInt(f.count_[i]!) });
         weight = 400;

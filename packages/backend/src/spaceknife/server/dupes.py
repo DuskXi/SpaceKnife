@@ -518,7 +518,12 @@ class DupesManager:
 
         def page() -> pd.DupesGroupsPage:
             gs = h.results.sorted_groups(
-                p.sort, cross_only=p.cross_only, include_shared=p.include_shared, scan=si, under=under
+                p.sort,
+                cross_only=p.cross_only,
+                include_shared=p.include_shared,
+                scan=si,
+                under=under,
+                query=p.query,
             )
             items = [self._group_model(h, g, limit=8) for g in gs[p.offset : p.offset + p.limit]]
             return pd.DupesGroupsPage(version=h.results.version, total=len(gs), items=items)
@@ -576,6 +581,10 @@ class DupesManager:
             small=cov.small,
             small_bytes=cov.small_bytes,
             only_here_list=[pd.DupesOnlyHere(node=n, path=pth, alloc=a) for n, pth, a in cov.only_here_list],
+            elsewhere_list=[
+                pd.DupesElsewhere(scan_id=h.scan_ids[osi], node=node, path=pth, bytes=nb)
+                for osi, pth, nb, node in cov.elsewhere_list
+            ],
         )
 
     async def folders(self, p: pd.DupesFoldersParams) -> pd.DupesFoldersPage:
@@ -727,6 +736,19 @@ class DupesManager:
             freed=freed,
             refused=refused,
         )
+
+    def basket_members(self, p: pd.DupesBasketMembersParams) -> pd.DupesBasketMembers:
+        rows = self.server.ops.basket.dupes_members(p.item_id)
+        by_dir: dict[str, int] = {}
+        for path, size, _g in rows:
+            d = os.path.dirname(path)
+            by_dir[d] = by_dir.get(d, 0) + max(1, size)
+        folders = [d for d, _ in sorted(by_dir.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
+        items = [
+            pd.DupesBasketMember(path=path, alloc=size, keepers=[k.path for k in g.keepers] if g else [])
+            for path, size, g in rows[p.offset : p.offset + p.limit]
+        ]
+        return pd.DupesBasketMembers(total=len(rows), folders=folders, items=items)
 
     # ------------------------------------------------------------------ views and hover cards
     def annotate(self, scan_id: str, store: Any, draw: Any) -> tuple[np.ndarray, np.ndarray] | None:

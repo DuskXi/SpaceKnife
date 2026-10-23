@@ -190,7 +190,9 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced, trashMode });
   live.current = { pace: { fpsGap, dynaSmooth }, reduced, trashMode };
   const rehoverRef = useRef<() => void>(() => {});
-  const dupeFocus = useRef<{ group: number; seq: number; rows: Set<number> }>({ group: -1, seq: -1, rows: new Set() });
+  // the lit duplicate group (group ≥ 0), or the folders of a 「文件夹」 row and its twin (folders)
+  const dupeFocus = useRef<{ group: number; seq: number; rows: Set<number>; folders: Set<number> | null }>({ group: -1, seq: -1, rows: new Set(), folders: null });
+  const dupeLit = () => dupeFocus.current.group >= 0 || dupeFocus.current.folders !== null;
 
   /** The lit class's rows in `frame` (UI-MAIN-65). Without a class the last rows stay while the
    * veil fades out (`fading`), and go with a new frame. */
@@ -205,6 +207,9 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       const dupg = frame.dupg;
       const extra = dg.seq === frame.info.seq ? dg.rows : null;
       st.focus = rowMarks(g, frame, (i) => (dupg !== null && dupg !== undefined && dupg[i] === want) || (extra !== null && extra.has(i)), -1, frame.info.dpr);
+    } else if (dg.folders !== null) {
+      const want = dg.folders;
+      st.focus = rowMarks(g, frame, (i) => want.has(frame.node[i]!), -1, frame.info.dpr);
     } else if (!fading) st.focus = null;
   };
 
@@ -264,7 +269,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       return more;
     };
     // the veil of the class lit from 「类别统计」 coming in or going
-    const focusFading = () => st.focus !== null && st.focusLevel !== (st.focusCls >= 0 || dupeFocus.current.group >= 0 ? 1 : 0);
+    const focusFading = () => st.focus !== null && st.focusLevel !== (st.focusCls >= 0 || dupeLit() ? 1 : 0);
     // on a canvas of their own: the class lit from 「类别统计」, what lies in a recycle bin, and the
     // folders still being scanned breathing over it (UI-TM-42)
     const drawBreathing = (now: number): boolean => {
@@ -273,9 +278,9 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       if (!bc || !cur) return false;
       const { reduced, trashMode } = live.current;
       if (st.focus) {
-        st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0 || dupeFocus.current.group >= 0, now - st.focusAt, reduced);
+        st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0 || dupeLit(), now - st.focusAt, reduced);
         st.focusAt = now;
-        if (st.focusLevel === 0 && st.focusCls < 0 && dupeFocus.current.group < 0) st.focus = null;
+        if (st.focusLevel === 0 && st.focusCls < 0 && !dupeLit()) st.focus = null;
       }
       if (!st.breath.length && !st.trash.length && !st.focus) {
         fit(bc, 0, 0); // nothing over the view: no full-size layer kept (8–12 B a pixel)
@@ -467,21 +472,24 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   // the duplicate group lit from the drawer or a hover in the 「重复」 colouring (docs/dupes.md §10.3)
   const dupFocus = useDupes((s) => s.focus);
   const located = useDupes((s) => s.located[viewId]);
+  const viewScan = useApp((s) => s.views[viewId]?.state.scan_id);
+  const folders = useDupes((s) => (s.litFolders && s.litFolders.scanId === viewScan ? s.litFolders.nodes : null));
   useEffect(() => {
     const st = r.current;
     dupeFocus.current = {
       group: dupFocus ? dupFocus.group : -1,
       seq: located?.seq ?? -1,
       rows: new Set((located?.rows ?? []).map((x) => x.row)),
+      folders: !dupFocus && folders ? new Set(folders) : null,
     };
-    if (dupFocus) st.focusColor = palette().treemap.dupe.text;
+    if (dupFocus || folders) st.focusColor = palette().treemap.dupe.text;
     const cur = st.cur;
     const component = cur ? componentFor(cur.frame.layout) : null;
     if (cur && component && st.focusCls < 0) relight(component.geometry, cur.frame, true);
     st.focusAt = performance.now();
     loops.breath.run();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dupFocus, located, loops]);
+  }, [dupFocus, located, loops, folders]);
 
   // the class the pointer is on in 「类别统计」 (UI-MAIN-65): its rows lit in the picture, everything
   // else under a veil; the filter stays as it is

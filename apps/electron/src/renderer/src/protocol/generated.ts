@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "30292c0f30591179";
+export const SCHEMA_HASH = "20d022c584e909e0";
 
 export interface AgeCond {
   end: number;
@@ -495,6 +495,31 @@ export interface DupeNodeInfo {
   why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
 }
 
+export interface DupesBasketMember {
+  alloc: number;
+  /** The copies kept for it (one must stay) */
+  keepers: string[];
+  path: string;
+}
+
+/**
+ * The extra copies of a ``dupes`` basket item, each with the copy kept for it: the last place to
+ * check them one by one before deleting.
+ */
+export interface DupesBasketMembers {
+  /** Folders holding them, most first (up to 5) */
+  folders: string[];
+  items: DupesBasketMember[];
+  total: number;
+}
+
+export interface DupesBasketMembersParams {
+  /** A delete-basket item of kind 'dupes' */
+  item_id: string;
+  limit?: number;
+  offset?: number;
+}
+
 export interface DupesBasketParams {
   /** Only these groups (default: every group) */
   groups?: number[] | null;
@@ -525,10 +550,21 @@ export interface DupesChangedEvent {
   version: number;
 }
 
+/** A folder holding copies of a folder's files (the coverage bar's 「别处」). */
+export interface DupesElsewhere {
+  /** Bytes of the folder's files with a copy there */
+  bytes: number;
+  node: number;
+  path: string;
+  scan_id: string;
+}
+
 /** What of a folder exists elsewhere (§8.4): for the user to judge, never a delete. */
 export interface DupesFolderInfo {
   elsewhere: number;
   elsewhere_bytes: number;
+  /** Where the copies of its files are, most bytes first (up to 5) */
+  elsewhere_list: DupesElsewhere[];
   groups: number;
   node: number;
   only_here: number;
@@ -610,6 +646,8 @@ export interface DupesGroupsParams {
   job_id: string;
   limit?: number;
   offset?: number;
+  /** Only groups with a copy whose path has this */
+  query?: string;
   scan_id?: string | null;
   sort?: "reclaim" | "size" | "copies" | "path";
   /** Only groups with a copy below this folder (of scan_id) */
@@ -2325,6 +2363,8 @@ export interface Methods {
   "compare.sources": { params: CompareSourcesParams; result: CompareSourcesResult };
   /** Net change, growth and shrink lists and the fill-up estimate for a compare view's zoom root and filter. */
   "compare.summary": { params: CompareSummaryParams; result: CompareSummary };
+  /** The extra copies of a 'dupes' basket item, each with its keeper (paged), to check before deleting. */
+  "dupes.basket_members": { params: DupesBasketMembersParams; result: DupesBasketMembers };
   /** Stop the search; what was verified stays, the rest stays unchecked. */
   "dupes.cancel": { params: DupesJobParams; result: DupesStatus };
   /** Forget a search and its results. */

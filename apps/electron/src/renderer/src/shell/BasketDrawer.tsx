@@ -1,12 +1,12 @@
 // The delete basket drawer (UI-W5-25…49): what goes, what it frees, then the recycle bin or a
 // permanent deletion (two-step), with undo. The basket itself lives in the backend.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import type { BasketItem, BasketVolume } from "@/protocol/generated";
-import { basketClear, basketExecute, basketRemove } from "@/state/actions";
+import type { BasketItem, BasketVolume, DupesBasketMembers } from "@/protocol/generated";
+import { basketClear, basketExecute, basketRemove, call } from "@/state/actions";
 import { set, useApp } from "@/state/store";
-import { fmtInt, fmtSize, plural } from "@/lib/format";
+import { fitPath, fmtInt, fmtSize, plural } from "@/lib/format";
 import { sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 import { inBrowser, serverName } from "@/lib/host";
@@ -148,18 +148,27 @@ export function BasketDrawer() {
 
 function Row({ it, share }: { it: BasketItem; share: number }) {
   const where = it.path.replace(/[\\/][^\\/]*[\\/]?$/, "");
+  const dupes = it.kind === "dupes";
+  const [open, setOpen] = useState(false);
   return (
     <div className={`bk-row${it.status !== "ready" ? " blocked" : ""}`} role="listitem">
       <div className="bk-row-main">
         <span className={`bk-icon ${it.kind}`}>
-          <Icon name={it.kind === "dir" ? "folder" : it.kind === "group" ? "layers" : "file"} size={15} />
+          <Icon name={it.kind === "dir" ? "folder" : it.kind === "group" ? "layers" : dupes ? "dupes" : "file"} size={15} />
         </span>
         <span className="bk-text">
           <span className="bk-name" title={it.path}>
             {it.kind === "group" ? t("{n} 个小项", { n: fmtInt(it.members) }) : it.name}
             {it.tag && <span className={`tag-mini ${it.tag}`} />}
           </span>
-          <span className="bk-path mono">{where}</span>
+          {dupes ? (
+            <button className="bk-path dp-bk-open" aria-expanded={open} onClick={() => setOpen(!open)}>
+              <Icon name={open ? "chevronDown" : "chevronRight"} size={11} />
+              {open ? t("收起") : t("{volume} · 点开逐份复核：要删的和保留的", { volume: it.volume })}
+            </button>
+          ) : (
+            <span className="bk-path mono">{where}</span>
+          )}
         </span>
         <span className="bk-size">
           <span className="mono">{fmtSize(it.alloc)}</span>
@@ -173,6 +182,46 @@ function Row({ it, share }: { it: BasketItem; share: number }) {
         <div className="bk-warn">
           <Icon name="warning" size={13} /> {it.note || statusText(it.status)}
         </div>
+      )}
+      {dupes && open && <DupesMembers id={it.id} />}
+    </div>
+  );
+}
+
+/** The extra copies of a 「重复文件」 item, each with the copy kept for it (docs/dupes.md §8.5). */
+function DupesMembers({ id }: { id: string }) {
+  const [page, setPage] = useState<DupesBasketMembers | null>(null);
+  const [limit, setLimit] = useState(100);
+  useEffect(() => {
+    let live = true;
+    void call("dupes.basket_members", { item_id: id, offset: 0, limit })
+      .then((p) => live && setPage(p))
+      .catch(() => live && setPage({ total: 0, folders: [], items: [] }));
+    return () => {
+      live = false;
+    };
+  }, [id, limit]);
+  if (!page) return <div className="muted small dp-bk-list">{t("正在读取…")}</div>;
+  return (
+    <div className="dp-bk-list small">
+      {page.folders.length > 0 && <div className="muted">{t("在：{list}", { list: page.folders.map((f) => fitPath(f, 40)).join(" · ") })}</div>}
+      {page.items.map((m) => (
+        <div key={m.path} className="dp-bk-member">
+          <span className="dp-role extra">{t("删")}</span>
+          <span className="mono dp-path" title={m.path}>
+            {fitPath(m.path, 44)}
+          </span>
+          {m.keepers[0] && (
+            <span className="mono dp-path muted" title={m.keepers.join("\n")}>
+              {t("留 {path}", { path: fitPath(m.keepers[0], 36) })}
+            </span>
+          )}
+        </div>
+      ))}
+      {page.total > page.items.length && (
+        <button className="ghost small" onClick={() => setLimit(Math.min(2000, limit + 200))}>
+          {t("再显示一些（共 {n} 份）", { n: fmtInt(page.total) })}
+        </button>
       )}
     </div>
   );

@@ -27,6 +27,8 @@ from .compare import (
 )
 from .dupes import (
     DupeGroup,
+    DupesBasketMembers,
+    DupesBasketMembersParams,
     DupesBasketParams,
     DupesBasketResult,
     DupesChangedEvent,
@@ -465,6 +467,12 @@ DUPES_TO_BASKET = MethodSpec(
     "Put the extra copies in the delete basket, one item per volume; each copy is checked again first.",
 )
 DUPES_CLEAR = MethodSpec("dupes.clear", DupesJobParams, EmptyResult, "Forget a search and its results.")
+DUPES_BASKET_MEMBERS = MethodSpec(
+    "dupes.basket_members",
+    DupesBasketMembersParams,
+    DupesBasketMembers,
+    "The extra copies of a 'dupes' basket item, each with its keeper (paged), to check before deleting.",
+)
 CLASSES_GET = MethodSpec("classes.get", Empty, ClassesState, "The file class table (W7 文件类别).")
 CLASSES_UPDATE = MethodSpec(
     "classes.update",
@@ -658,6 +666,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         DUPES_KEEP,
         DUPES_TO_BASKET,
         DUPES_CLEAR,
+        DUPES_BASKET_MEMBERS,
         CLASSES_GET,
         CLASSES_UPDATE,
         CLASSES_RESET,

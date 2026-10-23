@@ -313,6 +313,10 @@ class Job:
         self.peak_rss = 0
         self.rss0 = 0
         self.urgent: list[int] = []  # groups to take first (a file's own group)
+        # progress by bytes: groups decided count whole, the ones being read by what was read
+        self._total_bytes = 0
+        self._done_bytes = 0
+        self._g_read: dict[int, int] = {}
         self._vol_lock = threading.Lock()
 
     # ------------------------------------------------------------------ control
@@ -651,6 +655,8 @@ class Job:
         sel = await self._select()
         self.sel = sel
         self.funnel.candidates = len(sel)
+        if len(sel.groups):
+            self._total_bytes = int((sel.groups["size"].astype(np.int64) * sel.groups["count"]).sum())
         if self.sink is not None:
             self.sink.start(self)
         self._emit()
@@ -803,6 +809,8 @@ class Job:
             if completed:
                 sel.groups["state"][g] = G_DONE
                 self.done_groups += 1
+                self._done_bytes += int(sel.groups["size"][g]) * int(sel.groups["count"][g])
+            self._g_read.pop(g, None)
             assert self._group_sem is not None
             self._group_sem.release()
             self._emit()
@@ -1015,12 +1023,13 @@ class Job:
         big = len(units) > C.LARGE_GROUP  # S3 takes them 32 at a time: no handle waits for it
         for q, us in by_q.items():
             for a in range(0, len(us), S2_BATCH):
-                calls.append(self._probe_batch(q, size, rows, info, us[a : a + S2_BATCH], big))
+                calls.append(self._probe_batch(g, q, size, rows, info, us[a : a + S2_BATCH], big))
         await asyncio.gather(*calls)
         self.funnel.probed += len(units)
+        self._emit()
 
     async def _probe_batch(
-        self, q: DiskQueue, size: int, rows: list[int], info: list[Any], us: list[Unit], big: bool
+        self, g: int, q: DiskQueue, size: int, rows: list[int], info: list[Any], us: list[Unit], big: bool
     ) -> None:
         sel = self.sel
         assert sel is not None
@@ -1042,6 +1051,7 @@ class Job:
             r = rows[u.rep]
             reason = int(res["reason"][j])
             self.counters.bytes_probe += int(res["bytes"][j])
+            self._g_read[g] = self._g_read.get(g, 0) + int(res["bytes"][j])
             if int(res["atime_unkept"][j]):
                 self.counters.atime_unkept += 1
             if reason != C.OK:
@@ -1175,6 +1185,8 @@ class Job:
                     if self.opts.between is not None:
                         self.opts.between(self, g)
                     nxt: list[Unit] = []
+                    got = int(np.asarray(res["bytes"][: len(pending)], dtype=np.int64).sum())
+                    self._g_read[g] = self._g_read.get(g, 0) + got
                     for j, u in enumerate(pending):
                         self.counters.bytes_full += int(res["bytes"][j])
                         self.counters.reopens += int(res["reopens"][j])
@@ -1192,6 +1204,7 @@ class Job:
                         else:
                             nxt.append(u)
                     pending = nxt
+                    self._emit()  # long reads move the progress (the server sends it ≤ 4 a second)
                 if big:
                     keys_l = [rows[u.rep] for u in chunk if u.reason == 0 and u.digest is None]
                     if keys_l:
@@ -1425,10 +1438,17 @@ class Job:
             self.on_progress(self)
 
     def progress(self) -> float | None:
+        """Share of the work done, by bytes: decided groups whole, groups being read by what was
+        read of them (a pair of 20 GB files moves it while it is read)."""
         sel = self.sel
         if sel is None or not len(sel.groups):
             return 1.0 if self.state == "done" else None
-        return self.done_groups / len(sel.groups)
+        if self._total_bytes <= 0:
+            return self.done_groups / len(sel.groups)
+        partial = 0
+        for g, b in list(self._g_read.items()):
+            partial += min(b, int(sel.groups["size"][g]) * int(sel.groups["count"][g]))
+        return min(1.0, (self._done_bytes + partial) / self._total_bytes)
 
     def reader_counters(self) -> dict[str, int]:
         out: dict[str, int] = {}

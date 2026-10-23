@@ -110,6 +110,7 @@ DUP_KEEP: Final = 2
 DUP_EXTRA: Final = 3
 DUP_SHARED: Final = 4
 DUP_SKIPPED: Final = 5
+DUP_UNIQUE: Final = 6  # compared: no other file has its contents (drawn like DUP_NONE)
 # folders and blocks: share of the row's bytes that are extra copies
 TIER_EDGES: Final = (0.10, 0.40, 0.80)
 

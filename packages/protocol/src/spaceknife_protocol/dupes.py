@@ -31,7 +31,8 @@ DupeNodeState = Literal["none", "pending", "keep", "extra", "shared", "skipped",
 DupesStop = Literal["", "cancelled", "budget", "time", "failed"]
 
 # frame column `dup` (files: state; folders, blocks: tier of the share of extra copies)
-DUP_NONE, DUP_PENDING, DUP_KEEP, DUP_EXTRA, DUP_SHARED, DUP_SKIPPED = 0, 1, 2, 3, 4, 5
+# (6: compared, and no other file has its contents; drawn like 0)
+DUP_NONE, DUP_PENDING, DUP_KEEP, DUP_EXTRA, DUP_SHARED, DUP_SKIPPED, DUP_UNIQUE = 0, 1, 2, 3, 4, 5, 6
 
 _ID = Field(min_length=1, max_length=64)
 
@@ -217,6 +218,7 @@ class DupesGroupsParams(Params):
     under: int | None = Field(
         default=None, ge=1, description="Only groups with a copy below this folder (of scan_id)"
     )
+    query: str = Field(default="", max_length=200, description="Only groups with a copy whose path has this")
 
 
 class DupesGroupsPage(Payload):
@@ -244,6 +246,15 @@ class DupesOnlyHere(Payload):
     alloc: int
 
 
+class DupesElsewhere(Payload):
+    """A folder holding copies of a folder's files (the coverage bar's 「别处」)."""
+
+    scan_id: str
+    node: int = 0
+    path: str
+    bytes: int = Field(description="Bytes of the folder's files with a copy there")
+
+
 class DupesFolderInfo(Payload):
     """What of a folder exists elsewhere (§8.4): for the user to judge, never a delete."""
 
@@ -261,6 +272,9 @@ class DupesFolderInfo(Payload):
     small: int = 0
     small_bytes: int = 0
     only_here_list: list[DupesOnlyHere] = Field(default_factory=list)
+    elsewhere_list: list[DupesElsewhere] = Field(
+        default_factory=list, description="Where the copies of its files are, most bytes first (up to 5)"
+    )
 
 
 class DupesFoldersParams(Params):
@@ -342,6 +356,27 @@ class DupesBasketResult(Payload):
     members: int
     freed: int
     refused: list[DupesRefused] = Field(default_factory=list)
+
+
+class DupesBasketMembersParams(Params):
+    item_id: str = Field(min_length=1, max_length=64, description="A delete-basket item of kind 'dupes'")
+    offset: int = Field(default=0, ge=0)
+    limit: int = Field(default=200, ge=1, le=2000)
+
+
+class DupesBasketMember(Payload):
+    path: str
+    alloc: int = 0
+    keepers: list[str] = Field(default_factory=list, description="The copies kept for it (one must stay)")
+
+
+class DupesBasketMembers(Payload):
+    """The extra copies of a ``dupes`` basket item, each with the copy kept for it: the last place to
+    check them one by one before deleting."""
+
+    total: int
+    folders: list[str] = Field(default_factory=list, description="Folders holding them, most first (up to 5)")
+    items: list[DupesBasketMember]
 
 
 class DupeNodeInfo(Payload):

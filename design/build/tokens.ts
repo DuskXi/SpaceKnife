@@ -620,7 +620,7 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
           "3": "#A92E97",
           "4": "#7E1A70"
         },
-        "shared": "#9097A3",
+        "shared": "#D2D5DA",
         "text": "#7E1A70"
       },
       "flat": {
