@@ -6,12 +6,13 @@
 //! Parsed windows are pushed into the [`Stream`] in record order and their rows appended to the
 //! output columns at once, so the rows, their order included, are those of reading and parsing
 //! one window after the other, whatever the window size or the order in which windows finish.
-//! Memory: the output table (sized for one row per record up front) plus at most
+//! Memory: the output table (sized from the density of the records seen so far) plus at most
 //! `depth + spare` window buffers and the per-window tables, all reused.
 //!
-//! `duty` < 1 (the scan's I/O limit): the reads go in bursts of at most `depth` windows; after
-//! each burst the reader pauses for `busy × (1 − duty) / duty`, `busy` being the time the burst
-//! had reads in flight, so reads are in flight `duty` of the time.
+//! `duty` < 1 (the scan's I/O limit): the reads go in bursts, `depth` windows in flight, each
+//! burst [`BURST`] of busy time long (at least `depth` windows); after each burst the reader
+//! waits until nothing is in flight and pauses for `busy × (1 − duty) / duty`, `busy` being the
+//! time the burst had reads in flight, so reads are in flight `duty` of the time.
 
 use std::collections::HashMap;
 use std::io;
@@ -78,6 +79,9 @@ pub struct Depth {
 }
 
 const EPOCH: Duration = Duration::from_millis(150);
+/// Busy time of one burst under an I/O limit: long against a read's latency (the queue's fill and
+/// drain at both ends cost little), short against the I/O governor's 0.5 s control step.
+pub const BURST: Duration = Duration::from_millis(50);
 const EPOCH_WINDOWS: usize = 16;
 const GAIN: f64 = 1.10;
 
@@ -262,7 +266,7 @@ pub fn scan<E: Engine>(
             && next < nwin
             && reading.len() < depth.now()
             && paused_until.is_none()
-            && !(paced && burst_windows >= depth.now())
+            && !(paced && burst_full(burst_windows, depth.now(), burst_busy, busy_since))
         {
             let buf = match free.pop() {
                 Some(b) => b,
@@ -468,6 +472,12 @@ pub fn scan<E: Engine>(
     st.finish_s = t.elapsed().as_secs_f64();
     (st.deferred, st.extensions, st.fetched, st.redone) = (deferred, extensions, fetched, redone);
     Ok(rows)
+}
+
+/// Whether the current burst (duty < 1) has submitted enough: `depth` windows at least and
+/// [`BURST`] of busy time (closed periods plus the open one).
+fn burst_full(windows: usize, depth: usize, busy: Duration, since: Option<Instant>) -> bool {
+    windows >= depth && busy + since.map_or(Duration::ZERO, |s| s.elapsed()) >= BURST
 }
 
 /// A window whose pieces are all in: clear what no piece wrote, then parse it on the pool.
