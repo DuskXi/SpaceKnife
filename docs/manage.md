@@ -56,6 +56,8 @@ AddResult(added: list[id], merged: list[Merged(path, into)], absorbed: list[id],
 
 - 去重：已在篮里的路径或其祖先在篮里 → merged；新加的是篮里条目的祖先 → 吸收（absorbed）。拒绝：节点 0、GONE 行、MFT 伪目录（VIRTUAL）里的项、受保护路径。
 - 可释放空间：文件为 `alloc`，云占位为 0；硬链接按（卷，ino）合并，只有全部名字都在篮里时计一次，否则注明「另有 N 个硬链接」。Windows 硬扫描没有 ino（=0），硬链接只在 MFT 扫描里可知。
+- **重复文件的条目**（`kind = "dupes"`，[dupes.md](dupes.md) §8.4）：`add_dupes(store, scan_id, [(node, path, guard)], note)` 每 (扫描, 卷) 一个条目，成员是各组多余副本的路径，没有「直接子项」的规则；`targets()` 把它展开成成员。每个成员的守卫（`dupes/guard.py` 的 `Guard`：成员和保留方的身份、大小、mtime、更改时间、USN）存在 `_Entry` 里，不进协议；`guards_for(paths)` 把它们交给执行。成员已在别的条目下 → merged；保留方都已是删除篮的目标 → refused「本组保留的那份已在删除篮里」。之后别的条目盖住了某个保留方，条目标成新状态 `blocked`（不拦用户自己的条目），这些成员执行时跳过；别的条目盖住了成员本身，成员离开这个条目。`reinstate` 带上守卫。
+- **执行前的守卫**（`ops/trash.py` 的 `move_to_trash`、`delete_permanently` 收 `guards`，在已有的只差大小写、已不在、受保护、占用检查之后，`dupes/guard.py` 的 `check`）：成员身份或戳变了 → `changed`；保留方不在、变了、或和成员成了同一身份 → `keeper_changed`；保留方在这次要删的任何路径下（按整次执行的路径集合判断，和顺序无关）→ `last_copy`；开着占用检测时保留方正被打开 → `keeper_busy`；「执行前重读内容」开着时两份重新哈希，不同 → `changed`。`OpCode` 因此多了这四个。
 
 ### 2.3 占用检测与回收站（`ops/locks.py`、`ops/trash.py`）
 

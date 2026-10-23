@@ -1,6 +1,6 @@
 ---
 title: Freeing up space
-description: The context menu, copying paths, the delete basket, moving to the trash with undo, permanent deletion with a 5-second delay, protected locations and the rules for well-known folders.
+description: The context menu, copying paths, the delete basket, moving to the trash with undo, permanent deletion with a 5-second delay, finding duplicate files, protected locations and the rules for well-known folders.
 ---
 
 SpaceKnife never deletes anything the moment you press a key. Everything you want gone goes into the **delete basket** first. The basket shows what it would free, checks what is in use or protected, and only then moves the items to the trash (the default) or deletes them permanently, both with a way back.
@@ -134,6 +134,26 @@ Only one file operation runs at a time.
 Whichever way you delete, every item is checked once more right before it is touched: it must still exist, still not be protected, and not be in use. Items that fail a check are skipped and stay in the basket.
 
 Afterwards the map follows: with [live monitoring](../monitoring/) on, the changes arrive as file changes (blocks disappear, parents flash); with it off, SpaceKnife reads the affected parent folders again.
+
+## Duplicate files
+
+**Find duplicate files** finds files with identical contents, sorts them by the space you get back, and puts the extra copies in the delete basket once you have chosen which copy to keep. It never starts by itself: use **Find duplicate files…** in the command palette, or right-click a file for **Find files identical to it**, or a folder for **Does this folder exist elsewhere?**. Snapshots can't be searched: they show the past, so their contents can't be checked.
+
+- **It reads very little.** Only files that share their size with another file are read (a file whose size is unique is not read at all): a few kilobytes at the head and tail first, and the whole file only while the copies still match, stopping at the first difference. By default only files of 1 MB or more are compared (**Settings › Scan › Duplicate files**), and system and program folders, recycle bins and network drives are left out. The search keeps to the disk load limit (**Quiet** by default), can be paused and stopped, and waits while a scan of the same drive runs.
+- **Files are duplicates only after their whole contents were read and found identical.** The check uses BLAKE3-256 hashes and compares file contents only: not names, times, permissions or alternate data streams. Files still being checked are drawn with grey stripes and never called duplicates.
+- **Not counted as duplicates:** hard links of one file, block clones (ReFS, Btrfs and others) and one file seen through two paths are "the same data": deleting one frees nothing, so they are never offered for deleting. Cloud placeholder files are not read: reading one would download it, and deleting it frees no local space.
+- **Your files are left as they are.** Reads leave access times alone (a file where the system does not allow that is skipped by default), and nothing is written. If access times still change after reading, an antivirus most likely checked the files when they were opened; the panel says so.
+- **A second search reads almost nothing.** What was verified is kept in a cache (by file ID, size and modification time, without file names), so unchanged files only have their metadata looked at; renamed or moved files are read once more.
+
+**The panel** takes the right-hand column: the space to free (by volume), the progress (same size → after merging names of one file → head and tail read → identical groups), the disk load, pause and stop, then the groups sorted by the space they free (each copy with its role: keep, extra, same file…) and a **Folders** page (the folders holding the most extra copies). Hovering over a group lights its copies in every pane. The coloring switch gains **Duplicates**: extra copies are magenta stripes, the copy kept has an outline, and folders are colored by their share of extra copies.
+
+**Which copy is kept**: **Oldest created** by default, or **Newest modified** or **Shortest path**. **Keep copies on the same side of a folder pair** keeps all copies between two folders on one side, so the other side can be emptied as a whole afterwards. At least one copy of each group always stays. **Keep this one** on a copy picks it by hand.
+
+**Into the delete basket**: **Put the N extra copies in the delete basket** adds one item per volume. Right before deleting, each copy is checked again: if it changed, if the copy kept changed or is gone, if the copy kept is among what is being deleted too, or if the copy kept is open in another program, that group is skipped and nothing in it is touched.
+
+**Compare across drives** (off by default) puts all open, finished scans together. There are no hard links or block clones between volumes, so every copy takes its own space; but copies on other drives are often deliberate backups, so by default one copy stays on each volume and copies on other volumes are not preselected.
+
+**Does this folder exist elsewhere?** shows a bar: how much of the folder also exists elsewhere, how much only here, and how much was not checked (too small, for example). It only informs: it never deletes a whole folder.
 
 ## Protected locations
 

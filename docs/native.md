@@ -21,7 +21,7 @@
 
 ## 2. Rust 扩展 `spaceknife_native`（packages/native）
 
-模块布局：`src/lib.rs` 只做注册；`src/mft/` 与 `src/hardscan/` 各自独立（feature `mft` / `hardscan`，默认都开）。Python 包 `python/spaceknife_native/`，类型桩在 `_native.pyi`。
+模块布局：`src/lib.rs` 只做注册；`src/mft/`、`src/hardscan/` 与 `src/dupes/` 各自独立（feature `mft` / `hardscan` / `dupes`，默认都开）。`src/winio.rs`（只在 Windows）放共用的小函数：`keep_access_time`（句柄上 LastAccessTime = −1）由硬扫描和重复文件检测共用。Python 包 `python/spaceknife_native/`，类型桩在 `_native.pyi`。
 
 ### 2.1 MFT（`src/mft/`）
 
@@ -147,6 +147,18 @@ def scan_slice(
 - 有意差异（未截断的切片与 worker 完全一致）：(1) 被预算截断的切片是「已列目录的先序子树」而不是 worker 的 DFS 前缀，引用仍然有效；每个线程按目录检查预算，`max_entries` 最多超出每线程一个目录。(2) Windows 上空的 FAT 根是空列表而不是错误。（名字以点或空格结尾的目录以前也在这里：Win32 会去掉结尾的点和空格，worker 按普通路径打开 `odd.` 列出的是旁边的 `odd`；0.3.4 起 worker 对这样的路径也加 `\\?\` 前缀，两边相同。）(3) Windows 上 NT 路径 32,763–32,767 个单位的目录，worker 报「系统找不到指定的路径」（`os.scandir` 在路径后加 `\*.*` 再交给 `FindFirstFileW`，超出上限）；原生列得出，32,767 时报错误 206。再长的两边都报错误 206。 (4) Windows 上只差大小写、按名字打不到的文件夹（输掉的那一个）、名字完全相同的（DUP）和名字里有路径不能有的字符的（BADNAME）：原生按文件 ID 打开并列出，worker 不能按 ID 打开，报 CASE、DUP、BADNAME 错误（见上「只差大小写的同名项」）。
 - 扫描器的接法（`scan/scanner.py`）：有扩展时 `native_slicer()` 每次调用只用 1 个列目录线程（`threads=1`），由后端的线程池并发多次调用，并发数由 IO 限速器控制（`native_threads()` = min(CPU, 16) 为上限）；每批 256 个目录任务、预算 0.05 s。没有扩展时退回 spawn 进程池。
 - 归并（`NodeStore.ingest_slice`）：一次把整个切片并进节点表——深度用指针跳跃求、合计用分段求和，切片内由深到浅累加，再沿已有祖先各上传一次；与逐列表的 `ingest_listing` 结果逐列一致（真实目录切片与随机切片的等价性测试）。每个列表的归并开销从 30–78 µs 降到 1–3 µs。一个 38 万项的测试目录（热缓存）端到端由 8–10 万项/秒提到 12–30 万项/秒（同一代码多次运行的波动主要来自系统），此时 16 个列目录线程都在忙、归并只占 16–22%：瓶颈已在系统的目录枚举。遍历本身：原生在 Program Files 上是进程池的 3.4–3.9 倍、`/usr` 上 11.7 倍。
+
+### 2.3 重复文件的读取（`src/dupes/`，feature `dupes`）
+
+模块函数 `dupes_identity`、`dupes_extents` 和类 `DupesReader`（每个磁盘队列一个）做重复文件检测的四个读盘阶段，每次调用处理一批（≤256 个名字或约 30 ms），全程释放 GIL；设计见 [dupes.md](dupes.md) §2、§5、§12。
+
+- `dupes_identity(paths)`（S1）：只读元数据，Windows 在只取属性的句柄上（不召回、不改访问时间），POSIX `lstat`/`statx`；身份是 (卷, 128 位文件 ID)，加链接数、纳秒时间、属性、重解析标记、Windows 的 USN 和「名字是否就是它」。
+- `dupes_extents(paths)`（S1b）：块映射，Linux `FS_IOC_FIEMAP`（不带 SYNC），Windows `FSCTL_GET_RETRIEVAL_POINTERS`；每个文件的映射压成 16 B BLAKE3，不常驻。macOS 还没做（APFS 的 clone id 要 `getattrlist`）。
+- `DupesReader.probe`（S2）：一次数据打开，读头尾（≥64 MiB 再读两处中间块），句柄核对身份和戳；SSD 上句柄留给 S3（交接）。
+- `DupesReader.step`（S3）：分段 BLAKE3-256，每个检查点 `finalize(&self)` 取中间摘要；在途请求不跨检查点；句柄租期 2 s，重开时核对身份和戳、从偏移继续；读满后核对长度、EOF 和读后的戳。
+- 打开方式：Windows `FILE_READ_DATA | FILE_WRITE_ATTRIBUTES`、`FILE_FLAG_OPEN_NO_RECALL`、LastAccessTime = −1，不经缓存（压缩、加密、稀疏、WOF、重复数据删除的文件经过滤驱动缓冲读）；Linux `O_NOATIME | O_NOFOLLOW | O_DIRECT`（设备拒绝时缓冲读）；macOS `F_NOCACHE` 和线程级 `setiopolicy_np(IOPOL_TYPE_VFS_ATIME_UPDATES, …, OFF)`（**未在真机验证**）。
+- `suspend(keys)` 关掉句柄（暂停、等别的盘），`drop(keys)` 连哈希器一起丢掉，`open_handles()` 是活着的句柄数（暂停后和测试断言它为 0）。依赖 `blake3` 1.8.7（默认 features，SIMD 按 CPU 运行时选择）。
+- Python 回退（`spaceknife/dupes/reads.py` 的 `FallbackOps`）同一接口：缓冲读、BLAKE2b-256，Linux 上同样带 `O_NOATIME`。
 
 ## 3. 只读扫描助手（`spaceknife/helper/`）
 
