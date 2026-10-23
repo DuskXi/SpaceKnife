@@ -16,6 +16,7 @@ import { DupesDrawer, DupesLegend } from "@/shell/DupesDrawer";
 import { useDupes } from "@/state/dupes";
 import { ColumnResizer } from "@/shell/ColumnResizer";
 import { CompareHoverCard, CompareSidebar } from "@/shell/Compare";
+import { CleanupPage } from "@/shell/cleanup/CleanupPage";
 import { Inspector } from "@/shell/Inspector";
 import { Results } from "@/shell/Results";
 import { isRunning, ScanBand, ScanDetails } from "@/shell/ScanProgress";
@@ -27,6 +28,11 @@ const columnWidth = (w: number) => ({ "--inspector-w": `${w}px` }) as CSSPropert
 
 export function ScanPage({ tab }: { tab: Tab }) {
   if (tab.compare) return <ComparePage tab={tab} />;
+  if (tab.cleanup) {
+    // cleanup mode (docs/dupes.md §16.13.2): the plan, the picture of the tab's first view beside it
+    const vid = tab.viewIds[0];
+    return <CleanupPage tab={tab} map={vid ? <Pane tab={tab} index={0} viewId={vid} split={false} focused onFocus={() => undefined} /> : undefined} />;
+  }
   return <NormalPage tab={tab} />;
 }
 

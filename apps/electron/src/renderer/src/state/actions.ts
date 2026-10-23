@@ -28,6 +28,7 @@ import {
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
 import { onDupesChanged, onDupesProgress, resetDupes } from "./dupes";
+import { onCleanupChanged, onCleanupInterrupted, onCleanupProgress } from "./cleanup";
 import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
@@ -119,6 +120,9 @@ async function connect(): Promise<void> {
   r.on("compare.progress", (ev) => onCompareProgress(ev));
   r.on("dupes.progress", (ev) => onDupesProgress(ev));
   r.on("dupes.changed", (ev) => onDupesChanged(ev));
+  r.on("dupes.cleanup_changed", (ev) => onCleanupChanged(ev));
+  r.on("dupes.cleanup_progress", (ev) => onCleanupProgress(ev));
+  r.on("dupes.cleanup_interrupted", (ev) => onCleanupInterrupted(ev));
   r.on("update.changed", (ev) => applyUpdateStatus(ev.status));
   // the file class table changed (W7): the parser vocabulary and the colours follow
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));
@@ -328,9 +332,9 @@ export async function basketClear(): Promise<void> {
 }
 
 /** Run the basket: into the recycle bin, or deleted for good after the undo window (W5-41…47). */
-export async function basketExecute(mode: "trash" | "delete"): Promise<void> {
+export async function basketExecute(mode: "trash" | "delete", ackLinkTargets = false): Promise<void> {
   try {
-    const task = await call("basket.execute", { mode, ids: null });
+    const task = await call("basket.execute", { mode, ids: null, ack_link_targets: ackLinkTargets });
     // an ops.progress event may already be here: it wins
     set((s) =>
       s.op?.task_id === task.task_id

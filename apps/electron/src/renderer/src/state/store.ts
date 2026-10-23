@@ -42,6 +42,14 @@ export interface Tab {
   title: string;
   /** compare mode (W6): the tab shows a change tree instead of its scan */
   compare?: TabCompare;
+  /** cleanup mode (docs/dupes.md §16.13.2): the tab shows a duplicate-file cleanup plan ("" ids: only
+   * the cleanup history) */
+  cleanup?: TabCleanup;
+}
+
+export interface TabCleanup {
+  planId: string;
+  jobId: string;
 }
 
 /** A tab's comparison: the one shown (viewId) and, while switching ends, the one being computed. */

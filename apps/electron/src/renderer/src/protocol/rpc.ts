@@ -120,8 +120,9 @@ export class Rpc {
       protocol: PROTOCOL_VERSION,
       client: { ...client, kind: "electron" },
       // visuals.v1 and the layouts of the registered visualizations (state/actions.ts imports them first);
-      // dupes.v1: duplicate files (the drawer, the 「重复」 colouring and its frame columns)
-      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", "dupes.v1", ...visualCapabilities()],
+      // dupes.v1: duplicate files (the drawer, the 「重复」 colouring and its frame columns);
+      // dupes.cleanup.v1: their cleanup plans (cleanup mode, docs/dupes.md §16)
+      capabilities: ["binary-frames.v1", "subscriptions", "cancel", "log-stream", "updates.v1", "dupes.v1", "dupes.cleanup.v1", ...visualCapabilities()],
     })) as HelloResult;
     return this.hello;
   }

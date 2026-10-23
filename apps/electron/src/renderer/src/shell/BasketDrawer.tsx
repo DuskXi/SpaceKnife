@@ -26,7 +26,12 @@ export function BasketDrawer() {
   const items = useMemo(() => sorted(basket?.items ?? [], sort), [basket, sort]);
   const total = basket?.freeable ?? 0;
   const vol = mainVolume(basket?.volumes ?? []);
-  const blocked = items.filter((it) => it.status !== "ready");
+  const blocked = items.filter((it) => it.status !== "ready" && it.status !== "link_target");
+  // items that SpaceKnife's own symbolic links (a duplicate-file cleanup) point at: deleting them
+  // breaks those links, so the user says so before anything runs (docs/dupes.md §16.11)
+  const linked = items.filter((it) => it.status === "link_target");
+  const [ackLinks, setAckLinks] = useState(false);
+  const linksOk = !linked.length || ackLinks;
   const [num, unit] = sizeParts(total);
   const noTrash = (basket?.volumes ?? []).filter((v) => !v.trash && v.freeable > 0);
 
@@ -105,11 +110,17 @@ export function BasketDrawer() {
             <Icon name="warning" size={14} /> {plural(blocked.length, t("{n} 项现在不能删除，执行时会跳过", { n: fmtInt(blocked.length) }), "1 item can't be deleted now and will be skipped.")}
           </div>
         )}
+        {linked.length > 0 && (
+          <label className="bk-estimate warn-text cl-check">
+            <input type="checkbox" checked={ackLinks} onChange={(e) => setAckLinks(e.target.checked)} />
+            {plural(linked.length, t("我知道 SpaceKnife 建的符号链接指向其中 {n} 项：删了它们，这些链接都会失效", { n: fmtInt(linked.length) }), "I know symbolic links SpaceKnife made point at 1 item: deleting it breaks them")}
+          </label>
+        )}
         <div className="bk-buttons">
-          <button className="primary flex" disabled={!items.length || !!busy} onClick={() => void basketExecute("trash")}>
+          <button className="primary flex" disabled={!items.length || !!busy || !linksOk} onClick={() => void basketExecute("trash", ackLinks)}>
             <Icon name="basket" size={14} /> {t("移到回收站")}
           </button>
-          <button className="danger-btn" disabled={!items.length || !!busy} onClick={() => setConfirm(true)}>
+          <button className="danger-btn" disabled={!items.length || !!busy || !linksOk} onClick={() => setConfirm(true)}>
             {t("永久删除…")}
           </button>
         </div>
@@ -133,7 +144,7 @@ export function BasketDrawer() {
                 className="danger-btn"
                 onClick={() => {
                   setConfirm(false);
-                  void basketExecute("delete");
+                  void basketExecute("delete", ackLinks);
                 }}
               >
                 {t("永久删除")}
@@ -180,7 +191,13 @@ function Row({ it, share }: { it: BasketItem; share: number }) {
 
 /** Why an item cannot be deleted now, when the backend gave no note. */
 const statusText = (status: BasketItem["status"]): string =>
-  ({ ready: "", locked: t("正被其他程序使用"), missing: t("已经不在磁盘上了"), protected: t("受保护的系统位置，不能删除") })[status];
+  ({
+    ready: "",
+    locked: t("正被其他程序使用"),
+    missing: t("已经不在磁盘上了"),
+    protected: t("受保护的系统位置，不能删除"),
+    link_target: t("SpaceKnife 建的符号链接指向它：删了它，这些链接都打不开"),
+  })[status];
 
 function CapacityBar({ vol }: { vol: BasketVolume }) {
   const used = Math.max(0, vol.total - vol.free - vol.freeable);

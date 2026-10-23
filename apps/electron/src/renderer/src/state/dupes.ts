@@ -6,7 +6,7 @@
 import { create } from "zustand";
 
 import type { DupeGroup, DupesFolderInfo, DupesFolderRow, DupesGroupsParams, DupesPlan, DupesStatus } from "@/protocol/generated";
-import { fmtSize, plural } from "@/lib/format";
+import { fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 import { activate, call, updateSettings, viewCall } from "./actions";
