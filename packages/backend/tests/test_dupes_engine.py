@@ -98,6 +98,13 @@ def probe(size: int) -> int:
     return C.probe_bytes(size)
 
 
+def joins_from_cache(ops: Ops) -> None:
+    """Tests of the cache joining files: the Python reader on Windows has no change time, so its
+    entries are of weak trust and never join (docs/dupes.md §7.3; test_weak_volumes_never_join_*)."""
+    if sys.platform == "win32" and ops.name == "python":
+        pytest.skip("the Python reader on Windows has no change time: its cache never joins files")
+
+
 # --------------------------------------------------------------------------- layouts
 
 
@@ -391,6 +398,7 @@ async def test_sparse_and_dense_copies_have_the_same_content(tmp_path: Path, ops
 
 
 async def test_a_second_run_reads_nothing_and_a_changed_file_only_it(tmp_path: Path, ops: Ops) -> None:
+    joins_from_cache(ops)
     root = tmp_path / "t"
     a = blob(6 * MIB, 17)
     b = bytearray(a)
@@ -421,6 +429,7 @@ async def test_a_second_run_reads_nothing_and_a_changed_file_only_it(tmp_path: P
 
 
 async def test_a_renamed_file_is_read_once_more(tmp_path: Path, ops: Ops) -> None:
+    joins_from_cache(ops)
     root = tmp_path / "t"
     a = blob(2 * MIB, 19)
     write(root, "a1.bin", a)
@@ -496,6 +505,7 @@ async def test_another_algorithm_never_shares_entries(tmp_path: Path) -> None:
 
 
 async def test_a_broken_cache_file_is_rebuilt(tmp_path: Path, ops: Ops) -> None:
+    joins_from_cache(ops)
     root = tmp_path / "t"
     a = blob(2 * MIB, 23)
     write(root, "a1.bin", a)

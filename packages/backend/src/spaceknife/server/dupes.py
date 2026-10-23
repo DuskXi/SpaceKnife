@@ -93,6 +93,9 @@ class DupesManager:
         self.server = server
         self.jobs: dict[str, JobHandle] = {}
         self._ids = itertools.count(1)
+        # what this backend wrote to last.json lately: a plan right after a search sees it even
+        # before the write in the background is done
+        self._last: dict[str, dict[str, Any]] = {}
 
     # ------------------------------------------------------------------ scans and scopes
     def _live(self, scan_ids: list[str]) -> list[ScanHandle]:
@@ -168,6 +171,7 @@ class DupesManager:
                 "bytes": int(num["bytes"]) - int(alone["bytes"]),
             }
         last = await asyncio.to_thread(dcache.read_last)
+        last.update(self._last)
         roots = ";".join(r.path for s in scope.scans for r in s.roots)
         hit: dict[str, Any] = last.get(roots) or {}
         covering = self.for_scan(sc.scan_ids[0])
@@ -273,6 +277,7 @@ class DupesManager:
         entry = {
             roots: {"at": datetime.now(UTC).isoformat(), "groups": groups, "files": files, "reclaim": reclaim}
         }
+        self._last.update(entry)
         loop = asyncio.get_running_loop()
         loop.run_in_executor(None, dcache.write_last, entry)
 
