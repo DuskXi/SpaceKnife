@@ -21,13 +21,18 @@ def parse_mft(data: _Buffer, record_size: int, cluster_size: int) -> dict[str, A
     """Columns of docs/native.md 2.1 (numpy arrays, ``names`` bytes, ``bad_records`` int)."""
 
 def scan_mft(
-    volume: str, duty: float = 1.0, progress: Callable[[int, int], object] | None = None
+    volume: str,
+    duty: float = 1.0,
+    progress: Callable[[int, int], object] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Read and parse the $MFT window by window: ``(parse_mft columns, mft_volume_info keys)``.
 
-    ``duty`` in (0, 1]: the reader pauses so that it is busy that share of the time. Rows are in
-    record order except files with extension records, which come last. ``progress(done, total)``
-    (bytes of $MFT) follows every parsed window, on the parsing thread; its errors are ignored.
+    Several windows are read at once (overlapped, unbuffered reads; how many is found while it
+    reads) and parsed in parallel; rows are in record order except files with extension records,
+    which come last. ``duty`` in (0, 1]: reads are in flight that share of the time.
+    ``progress(done, total)`` (bytes of $MFT) follows every parsed window, on the reading thread;
+    its errors are ignored. ``stats``: filled with the scan's timings and counts (benchmarks).
     """
 
 def _mft_image_info(path: str | os.PathLike[str]) -> dict[str, int]: ...
@@ -37,7 +42,16 @@ def _scan_mft_image(
     duty: float = 1.0,
     window: int = 0,
     progress: Callable[[int, int], object] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]: ...
+def _parse_mft_stream(
+    data: _Buffer,
+    record_size: int,
+    cluster_size: int,
+    window_records: int,
+    concurrent: bool = False,
+    seed: int = 0,
+) -> dict[str, Any]: ...
 
 # --------------------------------------------------------------------------- hard scan (src/hardscan)
 

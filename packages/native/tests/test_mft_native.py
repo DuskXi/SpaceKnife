@@ -298,3 +298,107 @@ def test_scan_mft_image_streams_the_volume(
 
     failing, _ = native._scan_mft_image(str(img), 1.0, window, boom)
     assert_same_rows(failing, table)
+
+
+# --------------------------------------------------------------------------- concurrent streaming
+
+
+def assert_identical(a: dict[str, Any], b: dict[str, Any]) -> None:
+    """The same table, row order and name blob included."""
+    for key, dtype in COLUMN_DTYPES.items():
+        assert a[key].dtype == dtype and b[key].dtype == dtype, key
+        assert np.array_equal(a[key], b[key]), key
+    assert a["names"] == b["names"]
+    assert a["bad_records"] == b["bad_records"]
+
+
+def _images() -> list[tuple[str, bytes]]:
+    rng = np.random.default_rng(5)
+    base = np.frombuffer(im.build_mft(im.sample_records()), dtype=np.uint8)
+    out = [("sample", base.tobytes()), ("synthetic", im.synthetic_mft(20_000, seed=13).tobytes())]
+    for k in range(6):
+        img = base.copy()
+        for _ in range(int(rng.integers(1, 10))):
+            img[int(rng.integers(0, len(img) // RS)) * RS + int(rng.integers(0, RS))] = rng.integers(0, 256)
+        out.append((f"fuzzed{k}", img.tobytes()))
+    return out
+
+
+@pytest.mark.parametrize(("name", "data"), _images())
+def test_concurrent_streaming_is_the_sequential_stream(name: str, data: bytes) -> None:
+    """Windows parsed in parallel, in shuffled order, then put back in record order: the same table
+    as feeding them one by one, row order included, whatever the window size."""
+    ref = native._parse_mft_stream(data, RS, CS, 64)
+    for window in (1, 3, 64, 1000, 100_000):
+        assert_identical(native._parse_mft_stream(data, RS, CS, window), ref)
+        for seed in range(3):
+            assert_identical(native._parse_mft_stream(data, RS, CS, window, True, seed), ref)
+
+
+@pytest.mark.parametrize(
+    ("runs", "split", "valid", "rs", "cs", "window"),
+    [
+        ([(10, 20)], None, None, 1024, 4096, 0),
+        ([(40, 4), (12, 3), (90, 11)], None, None, 1024, 4096, 3 * 1024),
+        ([(40, 6), (12, 3), (90, 9)], 1, None, 1024, 4096, 5 * 1024),
+        ([(40, 6), (12, 3), (90, 9)], 2, 50, 1024, 4096, 1024),
+        ([(64, 201), (1000, 43), (600, 300)], 1, None, 4096, 512, 3 * 4096),
+        ([(64, 201), (1000, 43), (600, 300)], 1, None, 4096, 512, 0),
+    ],
+)
+def test_scan_mft_image_rows_are_the_streams(
+    tmp_path: Path,
+    runs: list[tuple[int, int]],
+    split: int | None,
+    valid: int | None,
+    rs: int,
+    cs: int,
+    window: int,
+) -> None:
+    """Reads in flight, windows parsed out of order: the rows of the in-memory stream, in its order."""
+    recs = [r for r in im.sample_records() if r.number <= 66]
+    img = tmp_path / "vol.img"
+    im.build_volume(img, recs, runs, record_size=rs, cluster_size=cs, split_at=split, valid_records=valid)
+    raw = native._read_mft_image(str(img))
+    stats: dict[str, Any] = {}
+    table, _ = native._scan_mft_image(str(img), 1.0, window, None, stats=stats)
+    total = len(raw)
+    if valid is not None:
+        total = valid * rs
+    assert_identical(table, native._parse_mft_stream(raw[:total], rs, cs, max(1, (window or 8 << 20) // rs)))
+    assert stats["windows"] >= 1 and stats["reads"] >= stats["windows"] - 1
+    assert 1 <= stats["depth"] <= stats["depth_max"] and stats["max_in_flight"] >= 1
+    for key in ("read_s", "busy_s", "paused_s", "parse_cpu_s", "finish_s", "total_s"):
+        assert stats[key] >= 0.0, key
+    paced: dict[str, Any] = {}
+    slow, _ = native._scan_mft_image(str(img), 0.3, window, None, stats=paced)
+    assert_identical(slow, table)
+    assert paced["paused_s"] >= 0.0
+
+
+def test_scan_mft_image_fixed_depth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    img = tmp_path / "vol.img"
+    recs = [r for r in im.sample_records() if r.number <= 66]
+    im.build_volume(img, recs, [(40, 6), (12, 3), (90, 9)], split_at=1)
+    ref, _ = native._scan_mft_image(str(img), 1.0, 1024)
+    for depth in ("1", "3"):
+        monkeypatch.setenv("SPACEKNIFE_MFT_DEPTH", depth)
+        stats: dict[str, Any] = {}
+        table, _ = native._scan_mft_image(str(img), 1.0, 1024, None, stats=stats)
+        assert stats["depth"] == stats["depth_max"] == int(depth)
+        assert stats["max_in_flight"] <= int(depth) + 1  # a window across two runs has two reads
+        assert_identical(table, ref)
+
+
+def test_scan_mft_image_read_errors(tmp_path: Path) -> None:
+    """A read that fails mid-scan (the image ends inside the $MFT) is an OSError, and the scan
+    leaves nothing behind (every read in flight is waited for)."""
+    img = tmp_path / "vol.img"
+    recs = [r for r in im.sample_records() if r.number <= 66]
+    im.build_volume(img, recs, [(10, 4), (200, 30)])
+    data = img.read_bytes()
+    img.write_bytes(data[: 210 * CS])  # the second run's clusters stop short
+    with pytest.raises(OSError, match="read"):
+        native._scan_mft_image(str(img), 1.0, 1024)
+    with pytest.raises(OSError, match="read"):
+        native._scan_mft_image(str(img), 0.5, 0)
