@@ -2,11 +2,14 @@
 
 import { type CSSProperties, useEffect, useState } from "react";
 
-import type { ClassStat, FolderClassInfo, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
-import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
+import type { ClassStat, DupeNodeInfo, FolderClassInfo, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
+import { basketAdd, call, cancellable, editFilter, viewCall } from "@/state/actions";
 import { patchView, readFlag, set, toast, useApp, writeFlag } from "@/state/store";
+import { DupeLine } from "@/shell/HoverCard";
+import { askFolder, isRunning as isRunningDupes, keepThis, openDrawer, revealCopy, useDupes } from "@/state/dupes";
+import { roleLabel } from "@/shell/DupesDrawer";
 import { Kind } from "@/visual/frame";
-import { fmtAgo, fmtCount, fmtInt, fmtPct, fmtShare, fmtSize, plural, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtCount, fmtInt, fmtPct, fmtShare, fmtSize, middlePath, plural, sizeParts } from "@/lib/format";
 import { summaryInterval, useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
@@ -90,7 +93,10 @@ export function Inspector({ viewId }: { viewId: string }) {
         ) : !summary ? (
           <div className="muted">{t("正在读取…")}</div>
         ) : page === "details" ? (
-          <Details s={summary} viewId={viewId} className={className} />
+          <>
+            <Details s={summary} viewId={viewId} className={className} />
+            {scanId && <DupesSection scanId={scanId} viewId={viewId} node={summary.node.id} dir={summary.node.kind === "dir"} path={summary.path} />}
+          </>
         ) : page === "classes" ? (
           <ClassStats s={summary} viewId={viewId} className={className} />
         ) : (
@@ -444,5 +450,84 @@ function SyntheticDetails({ frameKind, size, count }: { frameKind: number; size:
       </div>
       <p className="muted">{text[1]}</p>
     </>
+  );
+}
+
+/** 「相同内容」 / 「重复」 (docs/dupes.md §10.1): the selected item's place in the duplicate-file
+ * results — a file's other copies (find each one, keep this one), a folder's extra copies and what of
+ * it exists elsewhere. Shown once a search covers the scan. */
+function DupesSection({ scanId, viewId, node, dir, path }: { scanId: string; viewId: string; node: number; dir: boolean; path: string }) {
+  const status = useDupes((s) => s.byScan[scanId] ?? null);
+  const version = status?.version ?? -1;
+  const [info, setInfo] = useState<DupeNodeInfo | null>(null);
+  useEffect(() => {
+    setInfo(null);
+    if (version < 0) return;
+    let alive = true;
+    void call("tree.node", { scan_id: scanId, node })
+      .then((r) => {
+        if (alive) setInfo(r.dupe ?? null);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [scanId, node, version]);
+  if (!status || !info) return null;
+  if (dir || info.state === "none") {
+    if (info.redundant <= 0 && isRunningDupes(status)) return null;
+    return (
+      <section className="ins-section dp-ins">
+        <h3>{t("重复")}</h3>
+        <div className="row-between small">
+          <span>{info.redundant > 0 ? t("里面有多余的副本 {size}", { size: fmtSize(info.redundant) }) : t("里面没有已核对的多余副本")}</span>
+          <button className="ghost small" onClick={() => openDrawer()}>
+            {t("查看")}
+          </button>
+        </div>
+        {dir && !isRunningDupes(status) && status.mode === "all" && (
+          <button className="ghost small dp-ask" onClick={() => void askFolder(scanId, node, path.split(/[\\/]/).filter(Boolean).pop() ?? path)}>
+            <Icon name="dupes" size={14} /> {t("这个文件夹在别处有没有？")}
+          </button>
+        )}
+      </section>
+    );
+  }
+  const g = info.group;
+  return (
+    <section className="ins-section dp-ins">
+      <h3>{t("相同内容")}</h3>
+      <DupeLine d={info} />
+      {info.others.length > 0 && (
+        <div className="dp-ins-others">
+          {info.others.map((m) => (
+            <div key={`${m.scan_id}:${m.path}`} className="dp-member">
+              <span className={`dp-role ${m.role}`}>{roleLabel(m.role)}</span>
+              <span className="mono dp-path" title={m.path}>
+                {middlePath(m.path, 40)}
+              </span>
+              {m.volume && m.scan_id !== scanId && <span className="muted small">{m.volume}</span>}
+              {m.scan_id === scanId && (
+                <button className="icon-btn small" title={t("在图里找到它")} aria-label={t("在图里找到它")} onClick={() => void revealCopy(viewId, m.node)}>
+                  <Icon name="reveal" size={13} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="row-between">
+        {info.state === "extra" && g != null ? (
+          <button className="ghost small" title={t("保留这一份，这组别的副本里挑多余的")} onClick={() => void keepThis(status.job_id, g, path)}>
+            {t("保留这一份")}
+          </button>
+        ) : (
+          <span />
+        )}
+        <button className="ghost small" onClick={() => openDrawer()}>
+          {t("在重复文件面板里查看")}
+        </button>
+      </div>
+    </section>
   );
 }

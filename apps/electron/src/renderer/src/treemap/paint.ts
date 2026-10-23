@@ -9,7 +9,7 @@ import { branchFill } from "@/visual/colors";
 
 import { DStat, Flag, Kind, Label, type DrawFrame } from "./frame";
 
-export type ColorMode = "class" | "flat" | "time" | "branch";
+export type ColorMode = "class" | "flat" | "time" | "branch" | "dupes";
 
 /** Floats per instance; see the vertex shader in gl.ts for the meaning of each slot. */
 export const STRIDE = 24;
@@ -168,10 +168,38 @@ export function blockRadius(kind: number, g: { fileRadius: number; folderRadius:
   return kind === Kind.FILE || kind === Kind.SMALL || kind === Kind.MORE ? g.fileRadius : g.folderRadius;
 }
 
+/** The 「重复」 colouring (docs/dupes.md §10.2): file states by `dup`, folders and blocks by their tier.
+ * `pattern`: stripes for extra copies (45°) and copies still being checked (135°); `rim`: the copy kept. */
+export const Dup = { NONE: 0, PENDING: 1, KEEP: 2, EXTRA: 3, SHARED: 4, SKIPPED: 5 } as const;
+
+export function dupeStyle(f: { kind: Uint8Array; dup?: Uint8Array | null }, i: number): { fill: RGBA; pattern: number; patternColor: RGBA; rim: RGBA | null } {
+  const T = palette().treemap;
+  const D = T.dupe;
+  const v = f.dup ? f.dup[i]! : 0;
+  const kind = f.kind[i]!;
+  if (kind !== Kind.FILE) {
+    const tier = Math.min(4, v);
+    const fill = tier ? rgba((D.share as Record<string, string>)[String(tier)]!) : rgba(T.collapsed);
+    return { fill, pattern: Pattern.NONE, patternColor: NONE, rim: null };
+  }
+  switch (v) {
+    case Dup.EXTRA:
+      return { fill: rgba(D.share[4]), pattern: Pattern.STRIPES_45, patternColor: rgba(T.dot.onLight), rim: null };
+    case Dup.PENDING:
+      return { fill: rgba(D.pending), pattern: Pattern.STRIPES_135, patternColor: rgba(T.dot.onDark), rim: null };
+    case Dup.KEEP:
+      return { fill: rgba(T.class.other), pattern: Pattern.NONE, patternColor: NONE, rim: rgba(D.keepRim) };
+    case Dup.SHARED:
+      return { fill: rgba(D.shared), pattern: Pattern.NONE, patternColor: NONE, rim: null };
+    default:
+      return { fill: rgba(T.class.other), pattern: Pattern.NONE, patternColor: NONE, rim: null };
+  }
+}
+
 /** Fill of a block that is not an open folder. 「顶层分支」 needs the frame's branch and depth columns
  * (a frame without them is neutral). */
 export function fillOf(
-  f: Pick<DrawFrame, "kind" | "cls" | "tone" | "delta"> & Partial<Pick<DrawFrame, "branch" | "depth">>,
+  f: Pick<DrawFrame, "kind" | "cls" | "tone" | "delta"> & Partial<Pick<DrawFrame, "branch" | "depth" | "dup">>,
   i: number,
   mode: ColorMode,
   classIds: string[],
@@ -184,6 +212,7 @@ export function fillOf(
     const d = Number(f.delta[i]);
     return d === 0 ? rgba(T.collapsed) : rgba(diffColor(d, tiers));
   }
+  if (mode === "dupes") return dupeStyle(f, i).fill;
   // files, collapsed folders and aggregates take their branch's hue at their depth's tier
   if (mode === "branch") return branchFill(f.branch?.[i] ?? 0, f.depth?.[i] ?? 1);
   if (kind === Kind.COLLAPSED || kind === Kind.MORE) return rgba(T.collapsed);
@@ -313,11 +342,13 @@ export function paint(f: DrawFrame, o: PaintOptions, reuse?: Float32Array): Pain
       fill = fillOf(f, i, o.colorMode, o.classIds, o.diff?.tiers, o.classColors);
       const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
       const radius = blockRadius(kind, T.geometry) * dpr;
+      const dupe = o.colorMode === "dupes" && !o.diff && kind === Kind.FILE ? dupeStyle(f, i) : null;
       b.push(x, y, w, h, fill, {
         radius,
-        pattern: aggregate ? Pattern.DOTS : Pattern.NONE,
-        patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : NONE,
-        patternSize: 6 * dpr,
+        pattern: aggregate ? Pattern.DOTS : (dupe?.pattern ?? Pattern.NONE),
+        patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : (dupe?.patternColor ?? NONE),
+        patternSize: (dupe && dupe.pattern !== Pattern.NONE ? 4 : 6) * dpr,
+        ...(dupe?.rim ? { border: dupe.rim, borderWidth: Math.max(1, Math.round(1.5 * dpr)) } : {}),
         alpha,
       });
       [text, sub] = labelColors(fill);

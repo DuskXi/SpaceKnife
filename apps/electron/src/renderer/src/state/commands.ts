@@ -32,6 +32,7 @@ import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
 import { openHelp } from "./help";
 import { type AppState, activeTab, basketCount, focusedViewId, get, set, toast, toggleLog } from "./store";
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
+import { dupesOf, getDupes, isRunning, openDrawer, startSearch, toBasket } from "./dupes";
 
 /** The selected node of the focused view (not an aggregate block), or null. */
 export function selectedNode(): { scanId: string; viewId: string; node: number } | null {
@@ -115,14 +116,30 @@ export async function runCommand(id: string): Promise<void> {
       return;
     case "view.cycle_color":
       if (st?.compare && viewId) return cycleDirection(viewId);
-      if (st) await setViewSettings(viewId, { color_mode: nextColor(st.color_mode) });
+      if (st) await setViewSettings(viewId, { color_mode: nextColor(st.color_mode, st.has_dupes) });
       return;
     case "view.color.class":
     case "view.color.flat":
     case "view.color.time":
     case "view.color.branch":
+    case "view.color.dupes":
       await setViewSettings(viewId, { color_mode: id.slice(11) as ColorModeName });
       return;
+    case "dupes.find":
+      if (tab.scanId) {
+        const cur = dupesOf(tab.scanId);
+        if (cur && isRunning(cur)) openDrawer();
+        else await startSearch(tab.scanId);
+      }
+      return;
+    case "dupes.panel":
+      openDrawer(!getDupes().open);
+      return;
+    case "dupes.to_basket": {
+      const cur = dupesOf(tab.scanId);
+      if (cur) await toBasket(cur.job_id);
+      return;
+    }
     case "view.cycle_visual":
       if (viewId) await cycleVisual(viewId, 1);
       return;

@@ -180,7 +180,7 @@ function Row({ it, share }: { it: BasketItem; share: number }) {
 
 /** Why an item cannot be deleted now, when the backend gave no note. */
 const statusText = (status: BasketItem["status"]): string =>
-  ({ ready: "", locked: t("正被其他程序使用"), missing: t("已经不在磁盘上了"), protected: t("受保护的系统位置，不能删除") })[status];
+  ({ ready: "", locked: t("正被其他程序使用"), missing: t("已经不在磁盘上了"), protected: t("受保护的系统位置，不能删除"), blocked: t("有几组保留的那份也在删除篮里，执行时这些组跳过") })[status];
 
 function CapacityBar({ vol }: { vol: BasketVolume }) {
   const used = Math.max(0, vol.total - vol.free - vol.freeable);

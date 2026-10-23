@@ -12,7 +12,7 @@ import { HelpSearch, helpTitle } from "@/pages/HelpPage";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
 import { helpGo, helpHistory } from "@/state/help";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
-import { COLOR_MODES, levelsThatFit, offered, visualIcon } from "@/state/visuals";
+import { COLOR_MODES, type ColorModeName, levelsThatFit, offered, visualIcon } from "@/state/visuals";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 import { registeredLayouts } from "@/visual/registry";
@@ -53,6 +53,7 @@ export function Toolbar() {
     cmp ? "compare" : "",
     split ? "split" : "",
     st?.has_trash ? "trash" : "",
+    st?.has_dupes ? "dupes" : "",
     levelsThatFit(view?.info, st?.detail ?? 0) ?? "",
     (view?.info?.breadcrumb ?? EMPTY).map((c) => c.label).join("/"),
   ].join("|");
@@ -143,7 +144,7 @@ export function Toolbar() {
                 <span className="seg-icon">
                   <Icon name="palette" size={14} />
                 </span>
-                {COLOR_MODES.map((m) => (
+                {colorModes(st.has_dupes).map((m) => (
                   <button key={m} role="radio" aria-checked={st.color_mode === m} className={st.color_mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { color_mode: m })}>
                     {colorLabel(m)}
                   </button>
@@ -191,7 +192,9 @@ export function Toolbar() {
   );
 }
 
-const colorLabel = (m: (typeof COLOR_MODES)[number]): string => ({ class: t("类别"), flat: t("扁平"), time: t("时间"), branch: t("分支") })[m];
+const colorLabel = (m: ColorModeName): string => ({ class: t("类别"), flat: t("扁平"), time: t("时间"), branch: t("分支"), dupes: t("重复") })[m];
+/** The colour segment: 「重复」 only while duplicate-file results cover the scan (docs/dupes.md §10.1). */
+export const colorModes = (hasDupes: boolean | undefined): ColorModeName[] => (hasDupes ? [...COLOR_MODES, "dupes"] : [...COLOR_MODES]);
 
 /** The free / unknown space and recycle bin switches (UI-MAIN-21, 22; the bin's when the scan holds one). */
 const SPACE_SWITCHES = [
@@ -269,7 +272,7 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
     groups.push(
       <div key="color" role="group" aria-label={t("配色")}>
         <div className="menu-label" aria-hidden="true">{t("配色（C）")}</div>
-        {COLOR_MODES.map((m) => (
+        {colorModes(st.has_dupes).map((m) => (
           <button key={m} role="menuitemradio" aria-checked={st.color_mode === m} className="menu-item" onClick={pick(() => setViewSettings(viewId, { color_mode: m }))}>
             {check(st.color_mode === m)}
             {colorLabel(m)}

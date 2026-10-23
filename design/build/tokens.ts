@@ -196,6 +196,18 @@ export const tokens = {
       "onDark": "#FFFFFF33",
       "onLight": "#00000033"
     },
+    "dupe": {
+      "keepRim": "#F28CE2",
+      "pending": "#3A3F4C",
+      "share": {
+        "1": "#4A2445",
+        "2": "#7A2F70",
+        "3": "#96338B",
+        "4": "#F28CE2"
+      },
+      "shared": "#5A5F6B",
+      "text": "#F28CE2"
+    },
     "flat": {
       "file": "#2B2F38",
       "folder": "#0C0E12",
@@ -599,6 +611,18 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
         "onDark": "#FFFFFF33",
         "onLight": "#00000033"
       },
+      "dupe": {
+        "keepRim": "#7E1A70",
+        "pending": "#E2E4E9",
+        "share": {
+          "1": "#F3D5EE",
+          "2": "#E9A6DD",
+          "3": "#A92E97",
+          "4": "#7E1A70"
+        },
+        "shared": "#9097A3",
+        "text": "#7E1A70"
+      },
       "flat": {
         "file": "#C7D1E5",
         "folder": "#F3F5F9",
@@ -904,6 +928,14 @@ export const cssVar = {
   "treemap.dimOpacity": "var(--sk-treemap-dim-opacity)",
   "treemap.dot.onDark": "var(--sk-treemap-dot-on-dark)",
   "treemap.dot.onLight": "var(--sk-treemap-dot-on-light)",
+  "treemap.dupe.keepRim": "var(--sk-treemap-dupe-keep-rim)",
+  "treemap.dupe.pending": "var(--sk-treemap-dupe-pending)",
+  "treemap.dupe.share.1": "var(--sk-treemap-dupe-share-1)",
+  "treemap.dupe.share.2": "var(--sk-treemap-dupe-share-2)",
+  "treemap.dupe.share.3": "var(--sk-treemap-dupe-share-3)",
+  "treemap.dupe.share.4": "var(--sk-treemap-dupe-share-4)",
+  "treemap.dupe.shared": "var(--sk-treemap-dupe-shared)",
+  "treemap.dupe.text": "var(--sk-treemap-dupe-text)",
   "treemap.flat.file": "var(--sk-treemap-flat-file)",
   "treemap.flat.folder": "var(--sk-treemap-flat-folder)",
   "treemap.flat.free": "var(--sk-treemap-flat-free)",

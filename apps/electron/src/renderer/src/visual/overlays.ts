@@ -427,6 +427,12 @@ const GLOW_MAX = 2000; // past this many outlines the glow is left out
  * treemap a lit folder holds its blocks, so they are not drawn again. A scope drawn without its
  * contents (a collapsed folder) lights itself when nothing in it can. */
 export function classMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, cls: number, scope: number, dpr: number, newPath: NewPath = path2d): ClassMark {
+  return { ...rowMarks(g, f, (i) => f.cls[i] === cls && CLASS_KINDS.has(f.kind[i]!), scope, dpr, newPath), cls };
+}
+
+/** The rows `pick` chooses in `scope`, lit like a class (classMarks): the copies of a duplicate
+ * group in every pane (docs/dupes.md §10.3), at most GLOW_MAX of them glowing. */
+export function rowMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, pick: (row: number) => boolean, scope: number, dpr: number, newPath: NewPath = path2d): ClassMark {
   const nested = f.layout === "drawlist.v1";
   // rows come before their children, so one pass carries both down the tree
   const inside = scope >= 0 && scope < f.count ? new Uint8Array(f.count) : null;
@@ -453,11 +459,11 @@ export function classMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, cl
       lit[i] = 1;
       continue;
     }
-    if (f.cls[i] !== cls || !CLASS_KINDS.has(f.kind[i]!)) continue;
+    if (!pick(i)) continue;
     if (light(i) && lit) lit[i] = 1;
   }
   if (!rows && inside && (f.kind[scope] === Kind.COLLAPSED || f.kind[scope] === Kind.PENDING)) light(scope);
-  return { cls, cut, outline, rows, outlined };
+  return { cls: -1, cut, outline, rows, outlined };
 }
 
 /** The glow around the lit rows: the class colour, the accent for a class too dark to glow. */

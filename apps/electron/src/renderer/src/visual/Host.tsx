@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { tokens } from "@design/tokens";
 
 import { setViewSettings, viewCall } from "@/state/actions";
+import { useDupes } from "@/state/dupes";
 import { setting, useApp } from "@/state/store";
 import { classColors } from "@/lib/classes";
 import { diffTiers, maxChange } from "@/lib/diff";
@@ -24,6 +25,7 @@ import {
   classFade,
   type ClassMark,
   classMarks,
+  rowMarks,
   drawBreath,
   drawClassMark,
   drawFlash,
@@ -188,13 +190,21 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced, trashMode });
   live.current = { pace: { fpsGap, dynaSmooth }, reduced, trashMode };
   const rehoverRef = useRef<() => void>(() => {});
+  const dupeFocus = useRef<{ group: number; seq: number; rows: Set<number> }>({ group: -1, seq: -1, rows: new Set() });
 
   /** The lit class's rows in `frame` (UI-MAIN-65). Without a class the last rows stay while the
    * veil fades out (`fading`), and go with a new frame. */
   const relight = <F extends VisualFrame>(g: VisualGeometry<F>, frame: F, fading = false): void => {
     const st = r.current;
+    const dg = dupeFocus.current;
     if (st.focusCls >= 0) st.focus = classMarks(g, frame, st.focusCls, frame.rowOf(st.focusNode), frame.info.dpr);
-    else if (!fading) st.focus = null;
+    else if (dg.group >= 0 && frame.dupg) {
+      // the copies of a duplicate group: drawn ones by their group column, hidden ones as located
+      const want = dg.group + 1;
+      const dupg = frame.dupg;
+      const extra = dg.seq === frame.info.seq ? dg.rows : null;
+      st.focus = rowMarks(g, frame, (i) => dupg[i] === want || (extra !== null && extra.has(i)), -1, frame.info.dpr);
+    } else if (!fading) st.focus = null;
   };
 
   // ---------------------------------------------------------------- draw loops
@@ -253,7 +263,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       return more;
     };
     // the veil of the class lit from 「类别统计」 coming in or going
-    const focusFading = () => st.focus !== null && st.focusLevel !== (st.focusCls >= 0 ? 1 : 0);
+    const focusFading = () => st.focus !== null && st.focusLevel !== (st.focusCls >= 0 || dupeFocus.current.group >= 0 ? 1 : 0);
     // on a canvas of their own: the class lit from 「类别统计」, what lies in a recycle bin, and the
     // folders still being scanned breathing over it (UI-TM-42)
     const drawBreathing = (now: number): boolean => {
@@ -262,9 +272,9 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       if (!bc || !cur) return false;
       const { reduced, trashMode } = live.current;
       if (st.focus) {
-        st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0, now - st.focusAt, reduced);
+        st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0 || dupeFocus.current.group >= 0, now - st.focusAt, reduced);
         st.focusAt = now;
-        if (st.focusLevel === 0 && st.focusCls < 0) st.focus = null;
+        if (st.focusLevel === 0 && st.focusCls < 0 && dupeFocus.current.group < 0) st.focus = null;
       }
       if (!st.breath.length && !st.trash.length && !st.focus) {
         fit(bc, 0, 0); // nothing over the view: no full-size layer kept (8–12 B a pixel)
@@ -452,6 +462,25 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     rehoverRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, colorMode, unitEpoch, theme, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
+
+  // the duplicate group lit from the drawer or a hover in the 「重复」 colouring (docs/dupes.md §10.3)
+  const dupFocus = useDupes((s) => s.focus);
+  const located = useDupes((s) => s.located[viewId]);
+  useEffect(() => {
+    const st = r.current;
+    dupeFocus.current = {
+      group: dupFocus ? dupFocus.group : -1,
+      seq: located?.seq ?? -1,
+      rows: new Set((located?.rows ?? []).map((x) => x.row)),
+    };
+    if (dupFocus) st.focusColor = palette().treemap.dupe.text;
+    const cur = st.cur;
+    const component = cur ? componentFor(cur.frame.layout) : null;
+    if (cur && component && st.focusCls < 0) relight(component.geometry, cur.frame, true);
+    st.focusAt = performance.now();
+    loops.breath.run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dupFocus, located, loops]);
 
   // the class the pointer is on in 「类别统计」 (UI-MAIN-65): its rows lit in the picture, everything
   // else under a veil; the filter stays as it is

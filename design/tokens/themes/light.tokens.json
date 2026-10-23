@@ -173,6 +173,18 @@
       "3": { "$value": "#9AD7CB" },
       "4": { "$value": "#C2E7E0", "$description": "更早：最浅，退到框底里" }
     },
+    "dupe": {
+      "pending": { "$value": "#E2E4E9", "$description": "暂定：浅色的「其他」#C7D1E5 太近，取更浅的中性" },
+      "shared": { "$value": "#9097A3" },
+      "share": {
+        "1": { "$value": "#F3D5EE" },
+        "2": { "$value": "#E9A6DD" },
+        "3": { "$value": "#A92E97" },
+        "4": { "$value": "#7E1A70", "$description": "暂定，待用户评审" }
+      },
+      "keepRim": { "$value": "#7E1A70" },
+      "text": { "$value": "#7E1A70" }
+    },
     "dot": {
       "onDark": { "$value": "#FFFFFF33", "$description": "同 carbon（按块亮度 0.18 选点色，规则不变）" },
       "onLight": { "$value": "#00000033", "$description": "同 carbon" }

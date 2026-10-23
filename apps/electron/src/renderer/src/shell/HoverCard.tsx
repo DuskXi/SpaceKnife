@@ -3,16 +3,17 @@
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { FilterVocab, TreeNodeResult } from "@/protocol/generated";
+import type { DupeNodeInfo, FilterVocab, TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
-import { setting, useApp } from "@/state/store";
+import { dupesOf, focusGroup, keepOptions, ruleLabel } from "@/state/dupes";
+import { activeTab, get, setting, useApp } from "@/state/store";
 import { fillOf, labelColors } from "@/treemap/paint";
 import { Flag, Kind } from "@/visual/frame";
 import { pointerBox } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
-import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, middlePath, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
@@ -77,6 +78,17 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   // the node's details, once per target (not per pointer move)
   const frame = shown?.frame ?? null;
   const target = shown?.target ?? null;
+  // 「重复」 colouring: a copy hovered as long as its card needs lights its whole group (docs/dupes.md §10.3)
+  const shownView = shown?.viewId ?? null;
+  useEffect(() => {
+    if (colorMode !== "dupes" || !frame || target === null || target < 0 || !frame.dupg || !scanId || !shownView) return;
+    const g = frame.dupg[target] ?? 0;
+    const status = dupesOf(scanId);
+    if (g <= 0 || !status) return;
+    const tab = activeTab(get());
+    focusGroup(status.job_id, g - 1, tab.viewIds.includes(shownView) ? tab.viewIds : [shownView]);
+    return () => focusGroup(null, null);
+  }, [colorMode, frame, target, scanId, shownView]);
   useEffect(() => {
     setInfo(null);
     if (!frame || target === null || !scanId) return;
@@ -156,6 +168,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
           )}
         </div>
         {flags & Flag.TRASH ? <TrashLine bin={(flags & Flag.TRASH_BIN) !== 0} size={facts.size} /> : null}
+        {info?.dupe ? <DupeLine d={info.dupe} drawn={frame && target !== null && target >= 0 ? drawnCopies(frame, target) : null} /> : null}
         {node && (
           <div className="hc-class muted">
             {dir ? (
@@ -218,3 +231,54 @@ function TrashLine({ bin, size }: { bin: boolean; size: number }) {
     </div>
   );
 }
+
+/** Rows of the frame drawing a copy of the row's group (the row itself included); null: no column. */
+export function drawnCopies(f: VisualFrame, row: number): number | null {
+  const g = f.dupg?.[row] ?? 0;
+  if (!f.dupg || g === 0) return null;
+  let n = 0;
+  for (let i = 0; i < f.count; i++) if (f.dupg[i] === g) n++;
+  return n;
+}
+
+/** Duplicate files (docs/dupes.md §10.4): only copies whose whole contents were read are called
+ * identical; files still being checked make no claim. `drawn`: copies the picture shows. */
+export function DupeLine({ d, drawn = null }: { d: DupeNodeInfo; drawn?: number | null }) {
+  if (d.state === "pending") return <div className="hc-dupe">{t("同样大小的文件正在核对内容…")}</div>;
+  if (d.state === "skipped") return <div className="hc-dupe muted">{t("没有比较：{reason}", { reason: d.reason })}</div>;
+  if (d.state === "none") return d.redundant > 0 ? <div className="hc-dupe">{t("里面有多余的副本 {size}", { size: fmtSize(d.redundant) })}</div> : null;
+  if (d.state === "shared") {
+    const other = d.others[0]?.path ?? "";
+    return <div className="hc-dupe">{t("和 {path} 是同一份数据（硬链接或块克隆），删了不腾空间", { path: middlePath(other, 48) })}</div>;
+  }
+  const others = d.copies - 1;
+  const hidden = drawn !== null && drawn < d.copies ? d.copies - drawn : 0;
+  return (
+    <div className="hc-dupe">
+      <span>{t("另有 {n} 份内容相同 · 删掉多余的能腾出 {size}", { n: fmtInt(others), size: fmtSize(d.reclaim) })}</span>
+      {d.others.slice(0, 2).map((m) => (
+        <span key={`${m.scan_id}:${m.path}`} className="mono">
+          {middlePath(m.path, 56)}
+        </span>
+      ))}
+      {d.other_volumes.length > 0 && <span>{t("其中有的在 {vols}", { vols: d.other_volumes.join(" · ") })}</span>}
+      {hidden > 0 && <span className="muted">{t("另 {n} 份不在画面里（在折叠的文件夹或小项里）", { n: fmtInt(hidden) })}</span>}
+      <span className="hc-dupe-role">{d.state === "extra" ? t("这一份是多余的") : whyText(d.why)}</span>
+    </div>
+  );
+}
+
+const whyText = (why: DupeNodeInfo["why"]): string =>
+  why === "preferred"
+    ? t("在优先保留的位置里")
+    : why === "folder"
+      ? t("和同一对文件夹里的其他组留在同一边")
+      : why === "volume"
+        ? t("每个卷至少留一份")
+        : why === "needed"
+          ? t("程序需要或受保护")
+          : why === "manual"
+            ? t("手动选择保留")
+            : why === "pinned"
+              ? t("只能保留（另有名字，或删除篮删不了它）")
+              : t("按「{rule}」保留这一份", { rule: ruleLabel(keepOptions().rule) });

@@ -55,6 +55,11 @@ export interface VisualFrame {
   /** compare views (W6): signed net change and status per row (0 same, 1 new, 2 deleted, 3 changed) */
   delta: BigInt64Array | null;
   dstat: Uint8Array | null;
+  /** the 「重复」 colouring (dupes.v1): files 0 none · 1 being checked · 2 kept · 3 extra copy · 4 the same
+   * data · 5 skipped; folders and blocks the tier of their share of extra copies (0–4) */
+  dup?: Uint8Array | null;
+  /** the file's duplicate group id + 1 (0: none): the copies light up together */
+  dupg?: Uint32Array | null;
   names: string[];
   /** the layout's geometry columns by name (also set on the frame itself, see RectFrame / PolarFrame) */
   geometry: Record<string, Int32Array>;

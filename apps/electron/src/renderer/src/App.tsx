@@ -203,7 +203,7 @@ function onKey(e: KeyboardEvent): unknown {
   if (!ctrl && !e.altKey && lower === "f") return (done(), void setViewSettings(viewId, { show_free: !st.show_free }));
   if (!ctrl && !e.altKey && lower === "u") return (done(), void setViewSettings(viewId, { show_unknown: !st.show_unknown }));
   if (!ctrl && !e.altKey && lower === "r" && st.has_trash) return (done(), void setViewSettings(viewId, { show_trash: !st.show_trash }));
-  if (!ctrl && !e.altKey && !typeAhead && lower === "c") return (done(), void setViewSettings(viewId, { color_mode: nextColor(st.color_mode) }));
+  if (!ctrl && !e.altKey && !typeAhead && lower === "c") return (done(), void setViewSettings(viewId, { color_mode: nextColor(st.color_mode, st.has_dupes) }));
   // V / Shift+V: the next / previous visualization, comparisons included. The key is also listed by
   // the backend's view.cycle_visual (palette/commands.py): change both together.
   if (!ctrl && !e.altKey && !typeAhead && lower === "v") return (done(), void cycleVisual(viewId, e.shiftKey ? -1 : 1));

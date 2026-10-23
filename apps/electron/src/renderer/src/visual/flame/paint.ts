@@ -3,7 +3,7 @@
 // pointer changes (halo, hover inset), the selection on top. Pure: no GL, no DOM.
 
 import { palette } from "@/lib/theme";
-import { fillOf, labelColors, type Painted, Pattern, type RGBA, rgba, STRIDE, type TagItem, type TextItem } from "@/treemap/paint";
+import { dupeStyle, fillOf, labelColors, type Painted, Pattern, type RGBA, rgba, STRIDE, type TagItem, type TextItem } from "@/treemap/paint";
 import type { PreparedText } from "@/treemap/text";
 
 import { branchFill, center, haloOverlay, ringFill } from "../colors";
@@ -93,6 +93,7 @@ function over(top: RGBA, under: RGBA): RGBA {
 export function fillFor(f: RectFrame, i: number, s: PaintSettings): RGBA {
   if (s.diffTiers && f.delta) return fillOf(f, i, s.colorMode, s.classIds, s.diffTiers, s.classColors);
   if (s.colorMode === "branch") return branchFill(f.branch?.[i] ?? 0, f.depth[i]!);
+  if (s.colorMode === "dupes") return dupeStyle(f, i).fill; // folder bars: a heat map of extra copies
   const kind = f.kind[i]!;
   if (kind === Kind.FOLDER || kind === Kind.COLLAPSED) return ringFill(f.depth[i]!);
   return fillOf(f, i, s.colorMode, s.classIds, undefined, s.classColors);

@@ -1,8 +1,11 @@
 // Status bar (UI-MAIN-48…53): scan result, live monitoring, disk load, free space.
 
+import { useEffect } from "react";
+
 import type { ScanStatus } from "@/protocol/generated";
 import { continueScan, updateSettings } from "@/state/actions";
 import { activeTab, type LoadLevel, set, setting, startFormOf, toast, toggleLog, useApp } from "@/state/store";
+import { dupesSummary, openDrawer, pickUp, useDupes } from "@/state/dupes";
 import { fmtDuration, fmtInt, fmtSize } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 import { activeTip, levelName, levelText, scanPercent } from "@/shell/ScanProgress";
@@ -16,6 +19,10 @@ export function StatusBar() {
   const scan = useApp((s) => (tab.scanId ? s.scans[tab.scanId] : undefined));
   const monitorOn = useApp((s) => setting(s, "scan.monitor", true));
   const live = monitorText(scan, monitorOn);
+  // a duplicate-file search of this scan: while it runs, and its result afterwards (docs/dupes.md §10.1)
+  const dupes = useDupes((s) => (tab.scanId ? (s.byScan[tab.scanId] ?? null) : null));
+  const hasDupes = useApp((s) => tab.viewIds.some((v) => s.views[v]?.state.has_dupes));
+  useEffect(() => pickUp(tab.scanId, hasDupes), [tab.scanId, hasDupes]);
   const conn = useApp((s) => s.conn);
   const volumes = useApp((s) => s.volumes);
   const warnings = useApp((s) => s.logs.filter((l) => l.level === "WARNING" || l.level === "ERROR").length);
@@ -78,6 +85,17 @@ export function StatusBar() {
           <Icon name="play" size={14} />
           <span>{t("继续扫描")}</span>
         </button>
+      )}
+      {dupes && (
+        <>
+          <span className="status-sep" />
+          <button className="status-item" title={t("重复文件面板")} onClick={() => openDrawer()}>
+            <span className="dp-icon">
+              <Icon name="dupes" size={14} />
+            </span>
+            <span>{dupesSummary(dupes)}</span>
+          </button>
+        </>
       )}
       <span className="status-sep" />
       <button

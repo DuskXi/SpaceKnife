@@ -494,6 +494,9 @@ LABELLED = [
     *(f"treemap.diff.grow.{i}" for i in range(4)),
     *(f"treemap.diff.shrink.{i}" for i in range(3)),
     *(f"treemap.time.{i}" for i in range(5)),
+    *(f"treemap.dupe.share.{i}" for i in range(1, 5)),
+    "treemap.dupe.pending",
+    "treemap.dupe.shared",
     *(f"visual.branch.{slot}.{tier}" for slot in range(1, 9) for tier in range(1, 5)),
     "visual.branch.neutral",
     *(f"visual.ring.{i}" for i in range(1, 5)),
@@ -534,6 +537,7 @@ def test_block_labels_are_readable(theme: str) -> None:
         "visual.branch.neutral",
         *(f"treemap.diff.grow.{i}" for i in range(4)),
         *(f"treemap.diff.shrink.{i}" for i in range(3)),
+        *(f"treemap.dupe.share.{i}" for i in range(1, 5)),
         "treemap.collapsed",
     ]
     for key in lit_keys:

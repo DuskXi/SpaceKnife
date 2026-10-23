@@ -101,6 +101,22 @@
             <SolidColorBrush x:Key="SkTreemapDiffShrink1Brush" Color="#FF18497A"/>
             <Color x:Key="SkTreemapDiffShrink2">#FF236AA5</Color>
             <SolidColorBrush x:Key="SkTreemapDiffShrink2Brush" Color="#FF236AA5"/>
+            <Color x:Key="SkTreemapDupeKeepRim">#FFF28CE2</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeKeepRimBrush" Color="#FFF28CE2"/>
+            <Color x:Key="SkTreemapDupePending">#FF3A3F4C</Color>
+            <SolidColorBrush x:Key="SkTreemapDupePendingBrush" Color="#FF3A3F4C"/>
+            <Color x:Key="SkTreemapDupeShare1">#FF4A2445</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare1Brush" Color="#FF4A2445"/>
+            <Color x:Key="SkTreemapDupeShare2">#FF7A2F70</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare2Brush" Color="#FF7A2F70"/>
+            <Color x:Key="SkTreemapDupeShare3">#FF96338B</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare3Brush" Color="#FF96338B"/>
+            <Color x:Key="SkTreemapDupeShare4">#FFF28CE2</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare4Brush" Color="#FFF28CE2"/>
+            <Color x:Key="SkTreemapDupeShared">#FF5A5F6B</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeSharedBrush" Color="#FF5A5F6B"/>
+            <Color x:Key="SkTreemapDupeText">#FFF28CE2</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeTextBrush" Color="#FFF28CE2"/>
             <Color x:Key="SkTreemapFlatFile">#FF2B2F38</Color>
             <SolidColorBrush x:Key="SkTreemapFlatFileBrush" Color="#FF2B2F38"/>
             <Color x:Key="SkTreemapFlatFolder">#FF0C0E12</Color>
@@ -368,6 +384,22 @@
             <SolidColorBrush x:Key="SkTreemapDiffShrink1Brush" Color="#FF85B6E9"/>
             <Color x:Key="SkTreemapDiffShrink2">#FF2569A8</Color>
             <SolidColorBrush x:Key="SkTreemapDiffShrink2Brush" Color="#FF2569A8"/>
+            <Color x:Key="SkTreemapDupeKeepRim">#FF7E1A70</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeKeepRimBrush" Color="#FF7E1A70"/>
+            <Color x:Key="SkTreemapDupePending">#FFE2E4E9</Color>
+            <SolidColorBrush x:Key="SkTreemapDupePendingBrush" Color="#FFE2E4E9"/>
+            <Color x:Key="SkTreemapDupeShare1">#FFF3D5EE</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare1Brush" Color="#FFF3D5EE"/>
+            <Color x:Key="SkTreemapDupeShare2">#FFE9A6DD</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare2Brush" Color="#FFE9A6DD"/>
+            <Color x:Key="SkTreemapDupeShare3">#FFA92E97</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare3Brush" Color="#FFA92E97"/>
+            <Color x:Key="SkTreemapDupeShare4">#FF7E1A70</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeShare4Brush" Color="#FF7E1A70"/>
+            <Color x:Key="SkTreemapDupeShared">#FF9097A3</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeSharedBrush" Color="#FF9097A3"/>
+            <Color x:Key="SkTreemapDupeText">#FF7E1A70</Color>
+            <SolidColorBrush x:Key="SkTreemapDupeTextBrush" Color="#FF7E1A70"/>
             <Color x:Key="SkTreemapFlatFile">#FFC7D1E5</Color>
             <SolidColorBrush x:Key="SkTreemapFlatFileBrush" Color="#FFC7D1E5"/>
             <Color x:Key="SkTreemapFlatFolder">#FFF3F5F9</Color>

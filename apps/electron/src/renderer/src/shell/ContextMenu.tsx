@@ -5,13 +5,14 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { PathForms } from "@/protocol/generated";
 import { basketAdd, basketAddBlock, call, rescanFolder, viewCall } from "@/state/actions";
-import { set, toast, useApp } from "@/state/store";
+import { askFolder, cannotSearch, dupesOf, focusGroup, isRunning, openDrawer, startSearch } from "@/state/dupes";
+import { activeTab, get, set, toast, useApp } from "@/state/store";
 import { fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
 import { hitOfKey } from "@/visual/Host";
 import { rowTitle } from "@/visual/rowTitle";
-import { HIT_NONE, HIT_ROOT } from "@/visual/types";
+import { HIT_NONE, HIT_ROOT, type VisualFrame } from "@/visual/types";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { revealLabel } from "@/shell/Inspector";
 import { classHexNow } from "@/lib/classes";
@@ -33,7 +34,7 @@ const copyLabel = (form: CopyForm): string => ({ raw: t("原样"), quoted: t("�
 /** What needs the server's own desktop (its file manager, a terminal there): not in a browser tab. */
 const SERVER_DESKTOP = new Set(["open", "reveal", "terminal", "system"]);
 
-interface Item {
+export interface Item {
   id: string;
   icon: IconName;
   label: string;
@@ -154,6 +155,7 @@ export function ContextMenu() {
         disabled: folderNode == null || folderNode <= 0 ? t("没有可重新扫描的文件夹") : gone,
         run: () => folderNode != null && void rescanFolder(menu.scanId, folderNode),
       },
+      dupesItem(menu.scanId, menu.viewId, folder, node, frame, row, gone ?? (group ? t("小项聚合块不是一个具体位置") : undefined)),
       {
         id: "basket",
         icon: "basket",
@@ -322,4 +324,42 @@ export function ContextMenu() {
       ))}
     </div>
   );
+}
+
+/** The one duplicate-file entry (docs/dupes.md §10.1): a folder 「这个文件夹在别处有没有？」; a file
+ * 「查找与它相同的文件」, or 「另有相同内容的文件 · 点亮它们」 once its group is verified. Unavailable
+ * ones stay, greyed, with the reason (UI-W5-24). */
+export function dupesItem(scanId: string, viewId: string, folder: boolean, node: number | null, frame: VisualFrame, row: number, disabled: string | undefined): Item {
+  const status = dupesOf(scanId);
+  const why = disabled ?? (cannotSearch(scanId) || undefined);
+  if (folder) {
+    return {
+      id: "dupes",
+      icon: "dupes",
+      label: t("这个文件夹在别处有没有？"),
+      disabled: why ?? (status && isRunning(status) ? t("先等这次查找结束") : undefined),
+      run: () => node != null && void askFolder(scanId, node, (row >= 0 ? frame.names[row] : "") || ""),
+    };
+  }
+  const g = row >= 0 && frame.dupg ? frame.dupg[row]! : 0;
+  if (g > 0 && status) {
+    return {
+      id: "dupes",
+      icon: "dupes",
+      label: t("另有相同内容的文件 · 点亮它们"),
+      run: () => {
+        openDrawer();
+        focusGroup(status.job_id, g - 1, activeTab(get()).viewIds.length ? activeTab(get()).viewIds : [viewId]);
+      },
+    };
+  }
+  // a finished search that covered the file found no twin: asking again would replace its results
+  const settled = status && !isRunning(status) && status.mode === "all";
+  return {
+    id: "dupes",
+    icon: "dupes",
+    label: t("查找与它相同的文件"),
+    disabled: why ?? (settled ? t("这次查找里没有和它内容相同的文件") : undefined),
+    run: () => node != null && void startSearch(scanId, { mode: "file", node }),
+  };
 }

@@ -12,6 +12,8 @@ import { fmtInt, fmtShare, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { HoverCard } from "@/shell/HoverCard";
 import { BasketDrawer } from "@/shell/BasketDrawer";
+import { DupesDrawer } from "@/shell/DupesDrawer";
+import { useDupes } from "@/state/dupes";
 import { ColumnResizer } from "@/shell/ColumnResizer";
 import { CompareHoverCard, CompareSidebar } from "@/shell/Compare";
 import { Inspector } from "@/shell/Inspector";
@@ -92,6 +94,8 @@ function ComparePane({ viewId }: { viewId: string }) {
 function NormalPage({ tab }: { tab: Tab }) {
   const hidden = useApp((s) => s.inspectorHidden);
   const basketOpen = useApp((s) => s.basketOpen);
+  // the 「重复文件」 drawer comes after the basket (docs/dupes.md §10.5)
+  const dupesOpen = useDupes((s) => s.open);
   const focused = tab.viewIds[tab.focusedPane] ?? tab.viewIds[0];
   // the side panel follows the focused view: match results while it filters (UI-W3-27, UI-W3-36)
   const filtering = useApp((s) => (focused ? !!s.views[focused]?.filter?.active : false));
@@ -112,6 +116,8 @@ function NormalPage({ tab }: { tab: Tab }) {
         </div>
         {basketOpen ? (
           <BasketDrawer />
+        ) : dupesOpen ? (
+          <DupesDrawer />
         ) : hidden ? (
           <button className="inspector-open icon-btn" aria-label={t("显示侧栏")} title={t("显示侧栏")} onClick={() => set({ inspectorHidden: false })}>
             <Icon name="sidebar" />

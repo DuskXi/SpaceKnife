@@ -27,6 +27,7 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { onDupesChanged, onDupesProgress, resetDupes } from "./dupes";
 import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
@@ -82,7 +83,10 @@ async function onBackend(st: BackendState): Promise<void> {
   else if (st.state === "failed") set({ conn: "failed", connMessage: st.message });
   else if (st.state === "exited") set({ conn: "failed", connMessage: t("后端已退出（退出码 {code}）", { code: String(st.code) }) });
   else if (st.state === "ready" && (!backendInfo || backendInfo.url !== st.info.url)) {
-    if (backendInfo) resetLogSeq(); // a new backend numbers its records from 1 again
+    if (backendInfo) {
+      resetLogSeq(); // a new backend numbers its records from 1 again
+      resetDupes(); // and has no duplicate-file search
+    }
     backendInfo = st.info;
     await connect();
   }
@@ -113,6 +117,8 @@ async function connect(): Promise<void> {
   r.on("basket.changed", (ev) => set({ basket: ev.state }));
   r.on("ops.progress", (ev) => onOpProgress(ev));
   r.on("compare.progress", (ev) => onCompareProgress(ev));
+  r.on("dupes.progress", (ev) => onDupesProgress(ev));
+  r.on("dupes.changed", (ev) => onDupesChanged(ev));
   r.on("update.changed", (ev) => applyUpdateStatus(ev.status));
   // the file class table changed (W7): the parser vocabulary and the colours follow
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));

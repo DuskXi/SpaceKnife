@@ -53,9 +53,11 @@ export function nextVisual(list: readonly VisualInfo[], layouts: readonly string
   return null;
 }
 
-/** The C key: the next of the four colour modes. */
-export function nextColor(current: ColorModeName): ColorModeName {
-  return COLOR_MODES[(COLOR_MODES.indexOf(current) + 1) % COLOR_MODES.length]!;
+/** The C key: the next of the four colour modes, then 「重复」 while results cover the scan. */
+export function nextColor(current: ColorModeName, hasDupes = false): ColorModeName {
+  const modes: readonly ColorModeName[] = hasDupes ? [...COLOR_MODES, "dupes"] : COLOR_MODES;
+  const at = modes.indexOf(current);
+  return modes[(at + 1) % modes.length]!;
 }
 
 /** Levels the frame's geometry has room for when that is fewer than `detail` (flame.v1 bands,

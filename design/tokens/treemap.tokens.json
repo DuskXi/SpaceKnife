@@ -404,6 +404,42 @@
         "$value": "#173F39"
       }
     },
+    "dupe": {
+      "$type": "color",
+      "$description": "「重复」配色（docs/dupes.md §10.2，暂定，待用户评审）：待核对的文件中性加细斜纹；多余的副本品红加斜纹；保留的一份中性加内描边；同一份数据（硬链接、块克隆）灰；文件夹按多余副本占的比例分四档",
+      "pending": {
+        "$value": "#3A3F4C"
+      },
+      "shared": {
+        "$value": "#5A5F6B"
+      },
+      "share": {
+        "1": {
+          "$value": "#4A2445",
+          "$description": "多余的副本 > 0"
+        },
+        "2": {
+          "$value": "#7A2F70",
+          "$description": "≥ 10 %"
+        },
+        "3": {
+          "$value": "#96338B",
+          "$description": "≥ 40 %"
+        },
+        "4": {
+          "$value": "#F28CE2",
+          "$description": "≥ 80 %，也是多余副本这个文件本身"
+        }
+      },
+      "keepRim": {
+        "$value": "#F28CE2",
+        "$description": "保留的一份：1.5 px 内描边"
+      },
+      "text": {
+        "$value": "#F28CE2",
+        "$description": "悬停卡、抽屉里的强调文字"
+      }
+    },
     "dot": {
       "$type": "color",
       "$description": "聚合块点阵：暗底用亮点、亮底用暗点",

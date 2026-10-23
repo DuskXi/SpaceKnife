@@ -306,6 +306,8 @@ function rootOf(tree: SceneNode): FrameRoot {
     branch: 0,
     delta: tree.delta === undefined ? null : Number(tree.delta),
     dstat: tree.dstat ?? null,
+    dup: null,
+    dupg: null,
   };
 }
 
