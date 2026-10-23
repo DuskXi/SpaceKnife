@@ -335,8 +335,10 @@ def snapshot_show(
         Panel(
             Group(
                 Text(
-                    tr(
+                    plural(
+                        header.node_count - 1,
                         "保存于 {time} · {items} 项 · {size}",
+                        "Saved {time} · 1 item · {size}",
                         time=created,
                         items=fmt.count(header.node_count - 1),
                         size=fmt.size(int(store.cols["tot_alloc"][0])),
