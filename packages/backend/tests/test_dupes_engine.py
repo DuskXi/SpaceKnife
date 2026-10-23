@@ -1177,7 +1177,9 @@ def test_another_serial_on_windows_asks_for_its_own_volume(monkeypatch: pytest.M
     job = Job(Scope([]), options=JobOptions(use_cache=False), ops=FallbackOps())
     same = job._volume(0x55AA_0000_1234ABCD, "C:\\x\\a.bin", root)
     other = job._volume(0x77, "C:\\mnt\\stick\\a.bin", root)
-    assert job.vols[same].trust == "strong" and job.vols[same].fs_type == "NTFS"
+    from spaceknife.dupes.identity import trust_of
+
+    assert job.vols[same].fs_type == "NTFS" and job.vols[same].trust == trust_of(root, native=False)
     assert job.vols[other].fs_type == "exFAT" and job.vols[other].trust == "weak"
 
 
@@ -1245,3 +1247,17 @@ def test_touching_entries_seen_today_does_not_dirty_the_cache(tmp_path: Path) ->
     hits = vc.lookup(np.array([1], np.uint64), np.array([2], np.uint64))
     vc.touch(hits.tolist())
     assert not vc.dirty  # seen today already: nothing to write
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows opens names case-insensitively")
+async def test_a_root_typed_in_another_case_still_finds_copies(tmp_path: Path, ops: Ops) -> None:
+    """``c:\\users\\x\\photos`` typed for ``C:\\Users\\x\\Photos``: no entry has a case twin, so
+    nothing is ambiguous (only a real twin in a folder on the way is)."""
+    root = tmp_path / "Photos"
+    a = blob(2 * MIB, 900)
+    write(root, "Trip/a.bin", a)
+    write(root, "Backup/a.bin", a)
+    lower = Path(str(root).lower())
+    job, res = await run(await scan(lower), ops, tmp_path / "c")
+    assert "ambiguous_name" not in job.skipped_by_reason
+    assert groups(res) == [{"a.bin"}]

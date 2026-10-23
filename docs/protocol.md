@@ -140,15 +140,16 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `update.mute` | 跳过或恢复一个系列的提示（`UpdateMuteParams`：`series` 匹配 `^\d{1,6}(\.\d{1,6})?$`，取 `UpdateStatus.series` 的值；`muted` 默认 `true`，`false` 为恢复）：被跳过的系列的版本不弹卡片、不弹对话框、不显示徽章，也不自动下载（「关于与更新」页仍显示）。返回新的 `UpdateStatus`；恢复后如果「自动下载更新」开启，随即开始自动下载 |
 | `update.releases` | 缓存里最近的发布（`UpdateReleases`，最多 30 个，新的在前，每个的说明最多 16 KiB，不带文件），即「关于与更新」页的发布时间线；还没检查过时为空 |
 | `update.download` / `update.cancel` | 把 `{version}` 对应本安装方式的文件下载到数据目录的 `updates` 文件夹并校验 SHA-256（立即返回，进度见 `update.changed`）；不是当前可更新的版本返回 INVALID_PARAMS，没有对应文件返回 INVALID_REQUEST。停止下载并删除未完成的文件 |
-| `dupes.plan` | 重复文件（`dupes.v1`，[dupes.md](dupes.md)）：一次查找要读多少，**不读盘**：同大小的候选数、组数、字节、头尾要读多少、全文上限、各类排除的计数（小于下限、云占位、受保护、网络、回收站、大小独一无二）、跨盘多出的候选、上一次的结果，以及覆盖这个扫描的作业 `current`（界面重连后据此接上） |
+| `dupes.plan` | 重复文件（`dupes.v1`，[dupes.md](dupes.md)）：一次查找要读多少，**不读盘**：同大小的候选数、组数、字节、头尾要读多少、全文上限、各类排除的计数（小于下限、云占位、受保护、网络、回收站、大小独一无二）、跨盘多出的候选、上一次的结果（含那次的读速 `rate`）、下限 `min_size`、会用的负载档 `load`、要比较的扫描 `scans` 和盘 `disks`（介质），以及覆盖这个扫描的作业 `current`（界面重连后据此接上） |
 | `dupes.start` | 在后台开始查找（`DupesScope`：1–16 个已扫完的实时扫描，`mode` all / inside / against / file，`node`，`cross_volume`，`min_size`），立即返回 `DupesStatus`；已有作业时报错，除非 `replace`，或是 `file` 模式且文件在那个作业里（那一组先做） |
-| `dupes.pause` / `dupes.resume` / `dupes.cancel` / `dupes.status` / `dupes.set_load` | 控制作业：暂停时关掉所有句柄；取消时已核对的留下、写进缓存；作业自己的负载档 |
-| `dupes.groups` / `dupes.group` | 已核对的组，分页（`limit` ≤ 500，排序 reclaim / size / copies / path，`cross_only`、`include_shared`、`under`）；一个组的全部成员 |
-| `dupes.folder` / `dupes.folders` | 一个文件夹在别处有没有（覆盖：在别处有、只在这里、同一份数据、没核对，按字节，加只在这里最大的 50 个）；按多余字节排的文件夹列表 |
+| `dupes.pause` / `dupes.resume` / `dupes.cancel` / `dupes.status` / `dupes.set_load` | 控制作业：暂停时撤回排队的许可、关掉所有句柄；取消时已核对的留下、写进缓存；作业自己的负载档。`DupesStatus` 的 `stop_reason`（cancelled / budget / time / failed）和 `undecided`（停下时没下结论的候选数）说明结果是否完整；`error` 是给用户看的一句话，异常原文只进日志 |
+| `dupes.groups` / `dupes.group` | 已核对的组，分页（`limit` ≤ 500，排序 reclaim / size / copies / path，`cross_only`、`include_shared`、`under`、`query`：路径里含这段文字）；一个组的全部成员。成员的 `view` 为真表示同一个文件经另一条路径（重叠的扫描）看到 |
+| `dupes.folder` / `dupes.folders` | 一个文件夹在别处有没有（覆盖：在别处有、只在这里、同一份数据、没核对，按字节，加只在这里最大的 50 个和别处的副本主要在哪 `elsewhere_list`）；按多余字节排的文件夹列表（只列最深的一层和分支汇合处，每行带对应的文件夹 `twin`） |
 | `dupes.locate` | 一个组在某个视图当前帧里的行（`limit` ≤ 2000）：画出来的份 `exact`，藏在折叠文件夹或聚合块里的给那一块 |
-| `dupes.keep` | 保留规则（基本规则、优先位置、文件夹一致、每卷一份、手动覆盖），立即重算角色、可腾出和配色 |
+| `dupes.keep` | 保留规则（基本规则、优先位置、文件夹一致、每卷一份），立即重算角色、可腾出和配色；`overrides` 加到这次查找已有的手动选择上（同一组新的「保留」替换旧的），`reset_overrides` 先清掉；新查找接过被替换那次的手动选择 |
 | `dupes.to_basket` | 把多余的副本放进删除篮：每 (扫描, 卷) 一个 `dupes` 条目，后端另存删除前的守卫；保留方已在删除篮里的组拒绝 |
-| `dupes.clear` | 清除结果；「重复」配色的视图回到类别配色 |
+| `dupes.basket_members` | 删除篮里一个 `dupes` 条目的多余副本，每份带它的保留方，外加涉及的主要文件夹（分页）：执行前逐份复核 |
+| `dupes.clear` | 清除结果；「重复」配色的视图回到类别配色。关掉扫描或扫描被淘汰时后端自己清掉（`dupes.changed` 的 `cleared`） |
 
 ### 当前事件与主题
 
