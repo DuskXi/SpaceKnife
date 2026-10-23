@@ -5,10 +5,14 @@
 
 use pyo3::prelude::*;
 
+#[cfg(feature = "dupes")]
+mod dupes;
 #[cfg(feature = "hardscan")]
 mod hardscan;
 #[cfg(feature = "mft")]
 mod mft;
+#[cfg(windows)]
+mod winio;
 
 #[pymodule]
 fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -17,5 +21,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mft::register(m)?;
     #[cfg(feature = "hardscan")]
     hardscan::register(m)?;
+    #[cfg(feature = "dupes")]
+    dupes::register(m)?;
     Ok(())
 }

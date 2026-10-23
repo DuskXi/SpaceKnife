@@ -93,6 +93,7 @@ class VolumeInfo:
     reason: str = ""  # cannot be scanned now (no media, disconnected, locked)
     note: str = ""  # can be scanned but is not recommended, and why (shown on the volume card)
     reserved: int = 0  # free only for the super-user (ext4 keeps 5 % by default): neither used nor free
+    fs_flags: int = 0  # Windows: GetVolumeInformationW's file system flags (block cloning, ...)
 
     @property
     def used(self) -> int:
@@ -168,6 +169,7 @@ def _win_volume(path: str) -> VolumeInfo:
         is_remote=drive_type == 4,
         is_removable=drive_type in (2, 5),
         serial=f"{serial.value:08X}" if ok else "",
+        fs_flags=int(fsflags.value) if ok else 0,
     )
 
 

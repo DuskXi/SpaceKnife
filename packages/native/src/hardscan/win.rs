@@ -37,15 +37,15 @@ use std::sync::{Arc, OnceLock};
 
 use windows_sys::Wdk::Foundation::{NtClose, NtQueryObject, OBJECT_ATTRIBUTES, OBJECT_NAME_INFORMATION};
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
+    FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
     FILE_FS_ATTRIBUTE_INFORMATION, FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_ID_INFORMATION,
     FILE_INFORMATION_CLASS, FILE_INTERNAL_INFORMATION, FILE_NAME_INFORMATION, FILE_OPEN_BY_FILE_ID,
     FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
-    FileBasicInformation, FileBothDirectoryInformation, FileFsDeviceInformation,
+    FileBothDirectoryInformation, FileFsDeviceInformation,
     FileIdBothDirectoryInformation, FileIdExtdDirectoryInformation, FileIdInformation,
     FileFsAttributeInformation, FileInternalInformation, FileNameInformation,
     FileNormalizedNameInformation, NtOpenFile, NtQueryDirectoryFile,
-    NtQueryInformationFile, NtQueryVolumeInformationFile, NtSetInformationFile,
+    NtQueryInformationFile, NtQueryVolumeInformationFile,
 };
 use windows_sys::Wdk::System::SystemServices::{
     FILE_FS_DEVICE_INFORMATION, FILE_REMOTE_DEVICE, RtlUpcaseUnicodeChar,
@@ -65,6 +65,8 @@ use windows_sys::Win32::System::Diagnostics::Debug::{
     FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, FormatMessageW,
 };
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
+
+use crate::winio::keep_access_time;
 
 use super::case::{self, CaseKey, Class, First, Outcome, Then, fs, mark, msg};
 use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, secs};
@@ -1171,30 +1173,6 @@ fn file_id(h: &Handle, bits: u8) -> Option<u128> {
             )
         };
         (status >= 0).then(|| info.IndexNumber as u64 as u128)
-    }
-}
-
-/// What is done through `h` no longer updates the directory's last access time (SetFileTime's
-/// -1; FILE_BASIC_INFORMATION's zero fields change nothing). It writes no USN record and leaves
-/// ChangeTime as it was. Best effort.
-fn keep_access_time(h: HANDLE) {
-    let info = FILE_BASIC_INFORMATION {
-        CreationTime: 0,
-        LastAccessTime: -1,
-        LastWriteTime: 0,
-        ChangeTime: 0,
-        FileAttributes: 0,
-    };
-    let mut iosb = IO_STATUS_BLOCK::default();
-    // SAFETY: `info` is a valid FILE_BASIC_INFORMATION for the call.
-    unsafe {
-        NtSetInformationFile(
-            h,
-            &mut iosb,
-            (&raw const info).cast(),
-            size_of::<FILE_BASIC_INFORMATION>() as u32,
-            FileBasicInformation,
-        );
     }
 }
 
