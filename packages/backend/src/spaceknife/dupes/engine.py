@@ -914,6 +914,13 @@ class Job:
             cand["quick"][r] = u.quick & ((1 << 64) - 1)
             cand["state"][r] = C.ST_PROBED
             m, c = int(res["mtime"][j]), int(res["change"][j])
+            row = info[u.rep][1]
+            if (m, c) != (int(row["mtime"]), int(row["change"])):
+                # changed since S1 (same identity: rewritten in place): what the cache said about
+                # it no longer holds; the stamps of this open are the ones recorded
+                row["mtime"], row["change"] = m, c
+                u.known = None
+                u.prefix = None
             if max(m, c) >= wall - racy_ns:
                 u.racy = True
                 self.counters.racy += 1

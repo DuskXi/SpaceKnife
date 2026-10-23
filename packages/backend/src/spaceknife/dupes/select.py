@@ -31,7 +31,7 @@ from . import codes as C
 from .identity import is_network
 
 Mode = Literal["all", "inside", "against", "file"]
-SLICE = 1 << 20
+SLICE = 1 << 17  # rows per slice: temporaries of a few MB, whatever the store
 
 _RULED_OUT = np.uint32(
     Flag.HARDLINK_DUP | Flag.CLOUD | Flag.OFFLINE | Flag.GONE | Flag.ERROR | Flag.PENDING | Flag.VIRTUAL

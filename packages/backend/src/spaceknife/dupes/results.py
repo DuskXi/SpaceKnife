@@ -104,7 +104,7 @@ class Results:
             self.vol_names = [v.name for v in job.vols]
             self.vol_notes = {v.index: list(v.notes) for v in job.vols if v.notes}
             self.finished_at = time.time()
-            self.version += 1
+            self.apply_keep()  # rules across groups (folder-consistent) need them all
 
     def add_group(
         self,
