@@ -60,7 +60,7 @@ class SliceOpts(TypedDict, total=False):
     threads: int  # 0: min(logical CPUs, 16)
     keep_access_time: bool  # Windows and Linux, default True: listing a folder keeps its last access time
     relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
-    skip_final: bool  # Windows, default True: no last query when the buffer had room (local NTFS, ReFS, Btrfs)
+    skip_final: bool  # Windows, default True: no last query if the buffer had room (local NTFS, ReFS, Btrfs)
     dot_check: bool  # Windows, default True: relative opens checked by their listing's "." entry
     keep_where_updated: bool  # Windows, default True: keep_access_time only where access times are updated
     # test seams (docs/native.md 2.2), not part of the interface
