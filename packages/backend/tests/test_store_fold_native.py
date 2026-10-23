@@ -7,6 +7,7 @@ checks that refuse a slice, and readers in another thread while the GIL is relea
 from __future__ import annotations
 
 import threading
+import weakref
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -295,3 +296,52 @@ def test_readers_see_whole_listings_while_the_fold_runs_without_the_gil() -> Non
     before = store.cols["tot_files"][:n].copy()
     store.reaggregate()
     assert np.array_equal(store.cols["tot_files"][:n], before)
+
+
+def test_a_column_replaced_while_the_fold_writes_stays_alive_until_it_is_done() -> None:
+    """NodeStore.compact replaces a column from another thread: the array the fold writes into
+    (without the GIL) must outlive the writes, whichever of the two comes first."""
+    store = NodeStore()
+    root = store.add_root("/r")
+    k = 2_000_000
+    store.reserve(k + 16)
+    entries = {key: np.zeros(k, dtype=COLUMNS[key]) for key in ENTRY_COLUMNS}
+    entries["size"][:] = 7
+    go = threading.Event()
+    seen: list[bool] = []
+
+    class Plan:
+        def __init__(self, *args: Any) -> None:
+            self.plan = NATIVE(*args)
+            self.rows, self.name_bytes = self.plan.rows, self.plan.name_bytes
+
+        def write(self, *args: Any) -> None:
+            go.set()
+            self.plan.write(*args)
+
+        def publish(self, store: NodeStore) -> Any:
+            return self.plan.publish(store)
+
+    def replace() -> None:
+        go.wait()
+        old = store.cols["size"]
+        store.cols["size"] = old.copy()
+        alive = weakref.ref(old)
+        del old
+        seen.append(alive() is not None)
+
+    t = threading.Thread(target=replace)
+    t.start()
+    saved = nodes.NATIVE_FOLD
+    nodes.NATIVE_FOLD = Plan
+    try:
+        store.ingest_slice(
+            np.array([[0, root, 0]]), np.array([0, k]), b"x" * k, np.ones(k, np.uint16), entries
+        )
+    finally:
+        nodes.NATIVE_FOLD = saved
+        t.join()
+    landed = int((store.cols["size"][2 : len(store)] == 7).sum())
+    # replaced before the fold took the column: every row is in the live one; replaced while it
+    # wrote: the old one was still alive (the fold holds it), its rows are in the old array
+    assert landed == k or seen == [True]

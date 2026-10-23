@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 import zstandard
 
 from spaceknife.scan.scanner import Scanner
+from spaceknife.server.scans import ScanManager
 from spaceknife.store import heap, snapshot
-from spaceknife.store.nodes import COLUMNS, ENTRY_COLUMNS, NodeStore
+from spaceknife.store.lock import STRUCTURE
+from spaceknife.store.nodes import COLUMNS, ENTRY_COLUMNS, Flag, Kind, NodeStore
 from spaceknife.store.snapshot import SnapshotError
+from spaceknife_protocol import scan as p
 
 from .tree_fixture import build_tree
 
@@ -162,3 +167,89 @@ async def test_a_single_chunk_store_keeps_its_offset_type(tmp_path: Path) -> Non
     store, _ = snapshot.load(path)
     for key, arr in scanner.store.export_columns().items():
         np.testing.assert_array_equal(store.col(key), arr, err_msg=key)
+
+
+def _entries(k: int, kind: Kind = Kind.FILE) -> dict[str, np.ndarray]:
+    out = {key: np.zeros(k, dtype=COLUMNS[key]) for key in ENTRY_COLUMNS}
+    out["kind"][:] = kind
+    return out
+
+
+def _small_store() -> NodeStore:
+    store = NodeStore()
+    root = store.add_root("/r")
+    store.ingest_names(root, [b"d%d" % i for i in range(10)], _entries(10, Kind.DIR))
+    return store
+
+
+def test_the_view_a_save_writes_is_fixed_when_it_starts() -> None:
+    """Rows and names added, columns replaced (compact) after the view is taken are not in it;
+    rows changed in place are (the version tells)."""
+    store = _small_store()
+    n, names = len(store), store.names_blob
+    view = store.fixed()
+    last_dir = int(np.nonzero(store.cols["kind"][:n] == Kind.DIR)[0][-1])
+    store.ingest_names(last_dir, [b"new%d" % i for i in range(5000)], _entries(5000))
+    store.compact()
+    assert len(view) == n < len(store) and view.version < store.version
+    now = store.export_columns()
+    for key in COLUMNS:
+        assert view.cols[key] is not store.cols[key], key
+        np.testing.assert_array_equal(
+            np.concatenate(list(view.export_pieces(key, 3))), now[key][:n], err_msg=key
+        )
+    assert b"".join(p.tobytes() for p in view.names_parts()) == names
+
+
+def test_a_change_while_saving_writes_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = _small_store()
+    path = tmp_path / "x.sks"
+    path.write_bytes(b"the previous snapshot")
+    real = NodeStore.export_pieces
+    calls = 0
+
+    def racing(self: NodeStore, key: str, rows: int) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 3:  # a monitor adds rows while the save is between columns
+            d = int(np.nonzero(store.cols["kind"][: len(store)] == Kind.DIR)[0][-1])
+            store.ingest_names(d, [b"new%d" % i for i in range(5)], _entries(5))
+        return real(self, key, rows)
+
+    monkeypatch.setattr(NodeStore, "export_pieces", racing)
+    with pytest.raises(snapshot.SnapshotChanged):
+        snapshot.save(store, path, roots=["/r"])
+    assert path.read_bytes() == b"the previous snapshot"
+    assert not path.with_name("x.sks.tmp").exists()
+    monkeypatch.setattr(NodeStore, "export_pieces", real)
+    snapshot.save(store, path, roots=["/r"])
+    loaded, header = snapshot.load(path)
+    assert header.node_count == len(loaded) == len(store)
+
+
+async def test_the_server_saves_again_holding_changes_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SPACEKNIFE_HOME", str(tmp_path / "home"))  # never the real snapshot folder
+    mgr = ScanManager()
+    try:
+        root = build_tree(tmp_path / "root").root
+        handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=0, auto_snapshot=False))
+        assert handle.task is not None
+        await asyncio.wait_for(asyncio.shield(handle.task), 30)
+        real = snapshot.save
+        held: list[bool] = []
+
+        def save(store: NodeStore, *args: Any, **kwargs: Any) -> snapshot.SnapshotHeader:
+            held.append(STRUCTURE.readers > 0)
+            if len(held) == 1:
+                store.mark(1, Flag.ACCESS_DENIED)  # a change while the first try writes
+                store.clear(1, Flag.ACCESS_DENIED)
+                raise snapshot.SnapshotChanged("changed")
+            return real(store, *args, **kwargs)
+
+        monkeypatch.setattr(snapshot, "save", save)
+        info = await mgr.save_snapshot(handle.id, str(tmp_path / "s.sks"))
+        assert held == [False, True] and info.node_count == len(handle.store)
+    finally:
+        await mgr.close()

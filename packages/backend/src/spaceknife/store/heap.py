@@ -45,6 +45,12 @@ class NameHeap:
             heap._used.append(len(arr))  # full: later names go to new chunks
         return heap
 
+    def fixed(self) -> NameHeap:
+        """The heap as it is now: the same chunks, its own lists (names added later are not in it)."""
+        heap = NameHeap(self.alloc)
+        heap._chunks, heap._bases, heap._used = list(self._chunks), list(self._bases), list(self._used)
+        return heap
+
     # ------------------------------------------------------------------ size
 
     @property

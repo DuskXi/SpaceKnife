@@ -49,6 +49,7 @@ from ..scan.scanner import (
 from ..scan.volume import VolumeInfo
 from ..settings import SettingsStore
 from ..store import snapshot
+from ..store.lock import STRUCTURE
 from ..store.nodes import Flag, Kind, NodeStore
 from .compute import compute
 from .rpc import RpcError
@@ -996,10 +997,16 @@ class ScanManager:
         }
 
     def _save(self, handle: ScanHandle, path: Path) -> snapshot.SnapshotHeader:
+        """On a worker thread: without the lock, so file changes go on meanwhile; if one came in,
+        once more holding them back (a whole volume takes about a second)."""
         vols = [r.volume.to_dict() if r.volume else {} for r in handle.roots]
-        return snapshot.save(
-            handle.store, path, roots=[r.path for r in handle.roots], volumes=vols, stats=self._stats(handle)
-        )
+        roots = [r.path for r in handle.roots]
+        try:
+            return snapshot.save(handle.store, path, roots=roots, volumes=vols, stats=self._stats(handle))
+        except snapshot.SnapshotChanged:
+            logger.debug("scan {}: the tree changed while it was saved, saving again", handle.id)
+        with STRUCTURE.read():
+            return snapshot.save(handle.store, path, roots=roots, volumes=vols, stats=self._stats(handle))
 
     async def save_snapshot(self, scan_id: str, target: str | None) -> p.SnapshotInfo:
         handle = self.get(scan_id)
@@ -1012,6 +1019,9 @@ class ScanManager:
             raise RpcError(
                 ErrorCode.SNAPSHOT_ERROR, tr("写不了 {path}：{reason}", path=path, reason=exc.strerror or exc)
             ) from exc
+        except snapshot.SnapshotError as exc:
+            reason = tr("写不了 {path}：{reason}", path=path, reason=exc)
+            raise RpcError(ErrorCode.SNAPSHOT_ERROR, reason) from exc
         handle.snapshot_path = str(path)
         emit("snapshot", tr("快照已保存：{path}", path=path), scan_id=handle.id)
         return snapshot_info(path, header)

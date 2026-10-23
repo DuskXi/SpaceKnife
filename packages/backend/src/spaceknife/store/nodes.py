@@ -19,6 +19,7 @@ they return.
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
 from collections.abc import Iterator, Sequence
@@ -260,8 +261,10 @@ class NodeStore:
         """Give back the growth headroom (up to half of every column) once nothing is added any more.
 
         Copies one column at a time, so the extra memory is one column at most. Readers holding an
-        old column keep a valid, equal copy. Returns the bytes freed. From now on the columns grow
-        a little at a time (:data:`SETTLED_SHARE`).
+        old column keep a valid, equal copy; a writer adding rows meanwhile would lose them (into
+        the old column), so it runs as a reader (``STRUCTURE.read()``) and writers under
+        ``STRUCTURE.write()``. Returns the bytes freed. From now on the columns grow a little at a
+        time (:data:`SETTLED_SHARE`).
         """
         self._settled = True
         n = max(16, self._n)
@@ -871,6 +874,17 @@ class NodeStore:
         return sum(arr[: self._n].nbytes for arr in self.cols.values()) + self._heap.used()
 
     # ------------------------------------------------------------------ (de)serialisation helpers
+
+    def fixed(self) -> NodeStore:
+        """The store as it is now, for a long read without the lock (a snapshot being written): the
+        same arrays and name chunks, but its own row count, column dict and chunk lists, so rows
+        added, columns replaced (:meth:`compact`) or a store adopted meanwhile leave it as it was.
+        Rows changed in place change it too: compare :attr:`version` afterwards."""
+        out = copy.copy(self)
+        out.cols = dict(self.cols)
+        out._heap = self._heap.fixed()
+        out.ext_table = list(self.ext_table)
+        return out
 
     def export_columns(self) -> dict[str, np.ndarray]:
         """The live columns; ``name_off`` points into :attr:`names_blob` (from_columns(separated=True))."""

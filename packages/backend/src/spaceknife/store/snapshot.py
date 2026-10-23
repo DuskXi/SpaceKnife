@@ -80,6 +80,11 @@ class SnapshotError(Exception):
     pass
 
 
+class SnapshotChanged(SnapshotError):
+    """The tree changed while it was saved (nothing was written: save again, with changes held
+    back)."""
+
+
 def root_key(roots: list[str]) -> str:
     """Stable folder name for a set of scan roots."""
     norm = "\n".join(sorted(os.path.normcase(os.path.normpath(r)) for r in roots))
@@ -104,9 +109,15 @@ def save(
     compressed as it is written: :data:`SAVE_ROWS` rows at a time (``name_off`` rebased to the
     names image piece by piece), at most :data:`SAVE_THREADS` compressor threads, so the save holds
     little beyond the compressor's buffers (docs/memory.md §6). The blocks decompress to exactly
-    what ``store.export_columns()`` and ``store.names_blob`` are."""
-    n = len(store)
-    dtypes = store.export_dtypes()
+    what ``store.export_columns()`` and ``store.names_blob`` are.
+
+    The rows, columns and names are fixed when it starts (:meth:`NodeStore.fixed`); a change of the
+    tree meanwhile raises :class:`SnapshotChanged` instead of writing a snapshot that mixes the two
+    (the caller saves again holding ``STRUCTURE.read()``). Nothing is left behind when it fails."""
+    version = store.version  # first: a change under way while the view is taken moves it later
+    view = store.fixed()
+    n = len(view)
+    dtypes = view.export_dtypes()
     created = datetime.now(UTC)
 
     def header(col_info: dict[str, BlockInfo], names_info: BlockInfo) -> SnapshotHeader:
@@ -116,7 +127,7 @@ def save(
             node_count=n,
             volumes=volumes or [],
             stats=stats or {},
-            ext_table=store.ext_table,
+            ext_table=view.ext_table,
             columns=col_info,
             names=names_info,
             checkpoints=checkpoints or {},
@@ -137,33 +148,42 @@ def save(
     compressor = zstandard.ZstdCompressor(level=level, threads=min(SAVE_THREADS, os.cpu_count() or 1))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
-    with open(tmp, "wb") as fh:
-        fh.write(MAGIC)
-        fh.write(_LEN.pack(reserve))
-        fh.write(b" " * reserve)
-        base = fh.tell()
+    try:
+        with open(tmp, "wb") as fh:
+            fh.write(MAGIC)
+            fh.write(_LEN.pack(reserve))
+            fh.write(b" " * reserve)
+            base = fh.tell()
 
-        def block(raw_length: int, pieces: Iterator[np.ndarray], dtype: str = "") -> BlockInfo:
-            start = fh.tell()
-            writer = compressor.stream_writer(fh, size=raw_length, closefd=False, write_size=WRITE_SIZE)
-            for piece in pieces:
-                writer.write(memoryview(np.ascontiguousarray(piece)).cast("B"))
-            writer.flush(zstandard.FLUSH_FRAME)
-            end = fh.tell()
-            return BlockInfo(offset=start - base, length=end - start, raw_length=raw_length, dtype=dtype)
+            def block(raw_length: int, pieces: Iterator[np.ndarray], dtype: str = "") -> BlockInfo:
+                start = fh.tell()
+                writer = compressor.stream_writer(fh, size=raw_length, closefd=False, write_size=WRITE_SIZE)
+                for piece in pieces:
+                    writer.write(memoryview(np.ascontiguousarray(piece)).cast("B"))
+                writer.flush(zstandard.FLUSH_FRAME)
+                end = fh.tell()
+                return BlockInfo(offset=start - base, length=end - start, raw_length=raw_length, dtype=dtype)
 
-        col_info: dict[str, BlockInfo] = {}
-        for key, dt in dtypes.items():
-            col_info[key] = block(n * dt.itemsize, store.export_pieces(key, SAVE_ROWS), dt.str)
-        names_info = block(store.names_size(), iter(store.names_parts()))
-        head = _dump_header(header(col_info, names_info))
-        if len(head) > reserve:  # cannot happen: every number is below the placeholder
-            raise SnapshotError("snapshot header outgrew its room")
-        fh.seek(len(MAGIC) + _LEN.size)
-        fh.write(head + b" " * (reserve - len(head)))
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+            col_info: dict[str, BlockInfo] = {}
+            for key, dt in dtypes.items():
+                col_info[key] = block(n * dt.itemsize, view.export_pieces(key, SAVE_ROWS), dt.str)
+            names_info = block(view.names_size(), iter(view.names_parts()))
+            head = _dump_header(header(col_info, names_info))
+            if len(head) > reserve:  # cannot happen: every number is below the placeholder
+                raise SnapshotError("snapshot header outgrew its room")
+            fh.seek(len(MAGIC) + _LEN.size)
+            fh.write(head + b" " * (reserve - len(head)))
+            fh.flush()
+            os.fsync(fh.fileno())
+        if store.version != version:
+            raise SnapshotChanged("the tree changed while it was saved")
+        os.replace(tmp, path)
+    except BaseException as exc:
+        tmp.unlink(missing_ok=True)
+        changed = store.version != version
+        if changed and isinstance(exc, Exception) and not isinstance(exc, OSError | SnapshotError):
+            raise SnapshotChanged(f"the tree changed while it was saved: {exc}") from exc
+        raise
     return header(col_info, names_info)
 
 

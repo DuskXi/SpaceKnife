@@ -53,7 +53,9 @@ impl<T: Element> In<T> {
         let arr = obj
             .cast::<PyArray1<T>>()
             .map_err(|_| PyValueError::new_err(format!("{what}: not a 1-d array of the store's type")))?;
-        let ro = arr.readonly();
+        let ro = arr
+            .try_readonly()
+            .map_err(|e| PyValueError::new_err(format!("{what}: {e}")))?;
         let s = ro
             .as_slice()
             .map_err(|e| PyValueError::new_err(format!("{what}: {e}")))?;
@@ -72,14 +74,17 @@ impl<T> In<T> {
     }
 }
 
-/// A store column written without the GIL (the backend's own array, kept alive by the caller).
-#[derive(Clone, Copy)]
+/// A store column written without the GIL. It keeps the array alive itself: another thread may
+/// replace the store's column meanwhile (NodeStore.compact; the backend keeps that from happening
+/// during a fold, see `SliceFold::write`), and the old array must outlive the writes into it.
 struct Out<T> {
+    _owner: Py<PyAny>,
     ptr: *mut T,
     len: usize,
 }
 
-// SAFETY: only the fold writes these rows (the store has one writer), see `SliceFold::write`.
+// SAFETY: the owner keeps the memory alive; only the fold writes these rows (the store has one
+// writer), see `SliceFold::write`.
 unsafe impl<T: Send> Send for Out<T> {}
 unsafe impl<T: Send> Sync for Out<T> {}
 
@@ -96,7 +101,9 @@ fn out_of<T: Element>(obj: &Bound<'_, PyAny>, what: &str, rows: usize) -> PyResu
     let arr = obj
         .cast::<PyArray1<T>>()
         .map_err(|_| PyValueError::new_err(format!("{what} has another type")))?;
-    let mut rw = arr.readwrite();
+    let mut rw = arr
+        .try_readwrite()
+        .map_err(|e| PyValueError::new_err(format!("{what}: {e}")))?;
     let s = rw
         .as_slice_mut()
         .map_err(|e| PyValueError::new_err(format!("{what}: {e}")))?;
@@ -104,6 +111,7 @@ fn out_of<T: Element>(obj: &Bound<'_, PyAny>, what: &str, rows: usize) -> PyResu
         return Err(PyValueError::new_err(format!("{what} is too short")));
     }
     Ok(Out {
+        _owner: obj.clone().unbind(),
         ptr: s.as_mut_ptr(),
         len: s.len(),
     })
@@ -441,7 +449,8 @@ impl SliceFold {
         let heap = out_of::<u8>(chunk, "the name chunk", pos + self.name_bytes)?;
         let (parts, listings, n0) = (&self.parts, &mut self.listings, self.n0 as usize);
         let name_bytes = self.name_bytes;
-        py.detach(move || {
+        // the closure borrows the columns: their owners are dropped here, with the GIL
+        py.detach(|| {
             // SAFETY: the rows n0.. are past the store's count, so no reader looks at them, and
             // the caller holds the store's single write; each column is a distinct array.
             unsafe {
