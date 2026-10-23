@@ -12,6 +12,7 @@ import { HelpSearch, helpTitle } from "@/pages/HelpPage";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
 import { helpGo, helpHistory } from "@/state/help";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
+import { dupesOffered, useDupes } from "@/state/dupes";
 import { COLOR_MODES, type ColorModeName, levelsThatFit, offered, visualIcon } from "@/state/visuals";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
@@ -32,6 +33,8 @@ export function Toolbar() {
   const basket = useApp(basketCount);
   const basketOpen = useApp((s) => s.basketOpen);
   const st = view?.state;
+  // 「重复」 joins the colourings once a search covers the scan
+  const dupesOn = useDupes((d) => !!(st && (st.has_dupes || d.byScan[st.scan_id])));
   const scanTab = tab.kind === "scan";
   const settingsTab = tab.kind === "settings";
   const helpTab = tab.kind === "help";
@@ -53,7 +56,7 @@ export function Toolbar() {
     cmp ? "compare" : "",
     split ? "split" : "",
     st?.has_trash ? "trash" : "",
-    st?.has_dupes ? "dupes" : "",
+    dupesOn ? "dupes" : "",
     levelsThatFit(view?.info, st?.detail ?? 0) ?? "",
     (view?.info?.breadcrumb ?? EMPTY).map((c) => c.label).join("/"),
   ].join("|");
@@ -144,7 +147,7 @@ export function Toolbar() {
                 <span className="seg-icon">
                   <Icon name="palette" size={14} />
                 </span>
-                {colorModes(st.has_dupes).map((m) => (
+                {colorModes(dupesOn).map((m) => (
                   <button key={m} role="radio" aria-checked={st.color_mode === m} className={st.color_mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { color_mode: m })}>
                     {colorLabel(m)}
                   </button>
@@ -272,7 +275,7 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
     groups.push(
       <div key="color" role="group" aria-label={t("配色")}>
         <div className="menu-label" aria-hidden="true">{t("配色（C）")}</div>
-        {colorModes(st.has_dupes).map((m) => (
+        {colorModes(dupesOffered(st)).map((m) => (
           <button key={m} role="menuitemradio" aria-checked={st.color_mode === m} className="menu-item" onClick={pick(() => setViewSettings(viewId, { color_mode: m }))}>
             {check(st.color_mode === m)}
             {colorLabel(m)}

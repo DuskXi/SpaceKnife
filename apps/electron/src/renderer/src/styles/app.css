@@ -808,10 +808,16 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .modal-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .modal-buttons button { height: 32px; }
 /* duplicate files (docs/dupes.md §10.5) */
-.dupes-drawer { width: max(360px, var(--inspector-w, 360px)); max-width: max(360px, calc(100vw - var(--sk-layout-map-min))); }
+/* the summary is tall: the drawer scrolls as one, the list keeps room, the commit button stays in view */
+.dupes-drawer { width: max(360px, var(--inspector-w, 360px)); max-width: max(360px, calc(100vw - var(--sk-layout-map-min))); overflow-y: auto; }
+.dupes-drawer .dp-list { flex: 1 0 auto; min-height: 240px; overflow: visible; }
+.dupes-drawer .bk-actions { position: sticky; bottom: 0; background: var(--sk-color-bg-panel); }
 .dupes-drawer .dp-plan { display: flex; flex-direction: column; gap: 10px; }
 .dp-scope { margin-top: -8px; }
 .dp-why { padding: 4px 0; }
+.dp-commit { flex: 1; min-width: 0; }
+.dp-commit span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-again { height: 24px; display: inline-flex; align-items: center; gap: 4px; }
 .dp-start { height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
 .dp-step { display: flex; justify-content: space-between; gap: 8px; }
 .dp-warn { display: flex; gap: 6px; align-items: flex-start; color: var(--sk-color-status-warning); }

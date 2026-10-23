@@ -118,7 +118,7 @@ export function DupesDrawer() {
           </button>
         </div>
         {status ? <Scope s={status} /> : null}
-        {status ? <Summary s={status} /> : why ? <div className="muted small dp-why">{why}</div> : <PlanView plan={plan} scanId={scanId} />}
+        {status ? <Summary s={status} scanId={scanId} /> : why ? <div className="muted small dp-why">{why}</div> : <PlanView plan={plan} scanId={scanId} />}
         {covered && <Coverage s={covered} />}
       </div>
       {status && (
@@ -136,7 +136,7 @@ export function DupesDrawer() {
           </div>
           <LitNote viewIds={tab.viewIds} />
           {view === "groups" ? <GroupList s={status} scanId={scanId} viewIds={tab.viewIds} focused={tab.viewIds[tab.focusedPane]} /> : <FolderList viewId={tab.viewIds[tab.focusedPane]} />}
-          <Actions s={status} scanId={scanId} />
+          <Actions s={status} />
         </>
       )}
     </aside>
@@ -220,7 +220,7 @@ function Excluded({ counts }: { counts: Record<string, number> }) {
   return <div className="muted small dp-excluded">{t("没有比较：{list}", { list: parts.join(" · ") })}</div>;
 }
 
-function Summary({ s }: { s: DupesStatus }) {
+function Summary({ s, scanId }: { s: DupesStatus; scanId: string }) {
   const running = isRunning(s);
   const [num, unit] = sizeParts(s.reclaim);
   const f = s.funnel;
@@ -313,6 +313,12 @@ function Summary({ s }: { s: DupesStatus }) {
           {running && s.rate > 0 && <span className="muted mono">{t("{rate}/秒", { rate: fmtSize(s.rate) })}</span>}
           {running && s.eta_max_s != null && <span className="muted">{t("最多还要 {m} 分钟", { m: String(Math.max(1, Math.ceil(s.eta_max_s / 60))) })}</span>}
           <span className="flex" />
+          {!running && s.mode === "all" && scanId && (
+            <button className="ghost small dp-again" title={t("没变过的文件不再读内容")} onClick={() => void startSearch(scanId)}>
+              <Icon name="refresh" size={13} />
+              {t("再查一次")}
+            </button>
+          )}
           {running && (
             <>
               <button className="icon-btn" title={s.state === "paused" ? t("继续") : t("暂停")} aria-label={s.state === "paused" ? t("继续") : t("暂停")} onClick={() => void pauseSearch(s.job_id, s.state !== "paused")}>
@@ -597,22 +603,15 @@ function FolderList({ viewId }: { viewId: string | undefined }) {
   );
 }
 
-function Actions({ s, scanId }: { s: DupesStatus; scanId: string }) {
-  const done = !isRunning(s);
+function Actions({ s }: { s: DupesStatus }) {
   return (
     <div className="bk-actions">
       <div className="muted small">{t("执行前会再核对每一份没有变过；保留的那份变了或也要删时，这一组跳过")}</div>
       <div className="bk-buttons">
         <button className="primary dp-commit" disabled={s.extra === 0} onClick={() => void toBasket(s.job_id)}>
           <Icon name="basket" />
-          {plural(s.extra, t("把多余的 {n} 份加入删除篮 · 可腾出 {size}", { n: fmtInt(s.extra), size: fmtSize(s.reclaim) }), `Add the extra copy to the delete basket · ${fmtSize(s.reclaim)} to free`)}
+          <span>{plural(s.extra, t("把多余的 {n} 份加入删除篮 · 可腾出 {size}", { n: fmtInt(s.extra), size: fmtSize(s.reclaim) }), `Put the extra copy in the delete basket · ${fmtSize(s.reclaim)} to free`)}</span>
         </button>
-        {done && s.mode === "all" && (
-          <button className="ghost" title={t("没变过的文件不再读内容")} onClick={() => void startSearch(scanId)}>
-            <Icon name="refresh" />
-            {t("再查一次")}
-          </button>
-        )}
       </div>
     </div>
   );

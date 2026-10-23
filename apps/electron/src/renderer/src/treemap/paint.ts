@@ -183,10 +183,14 @@ export function dupeStyle(f: { kind: Uint8Array; dup?: Uint8Array | null }, i: n
     return { fill, pattern: Pattern.NONE, patternColor: NONE, rim: null };
   }
   switch (v) {
-    case Dup.EXTRA:
-      return { fill: rgba(D.share[4]), pattern: Pattern.STRIPES_45, patternColor: rgba(T.dot.onLight), rim: null };
-    case Dup.PENDING:
-      return { fill: rgba(D.pending), pattern: Pattern.STRIPES_135, patternColor: rgba(T.dot.onDark), rim: null };
+    case Dup.EXTRA: {
+      const fill = rgba(D.share[4]);
+      return { fill, pattern: Pattern.STRIPES_45, patternColor: stripeOn(fill), rim: null };
+    }
+    case Dup.PENDING: {
+      const fill = rgba(D.pending);
+      return { fill, pattern: Pattern.STRIPES_135, patternColor: stripeOn(fill), rim: null };
+    }
     case Dup.KEEP:
       return { fill: rgba(T.class.other), pattern: Pattern.NONE, patternColor: NONE, rim: rgba(D.keepRim) };
     case Dup.SHARED:
@@ -195,6 +199,18 @@ export function dupeStyle(f: { kind: Uint8Array; dup?: Uint8Array | null }, i: n
       return { fill: rgba(T.class.other), pattern: Pattern.NONE, patternColor: NONE, rim: null };
   }
 }
+
+/** The second colour of thin stripes on `fill`: a shade of it (the shader paints stripes opaque),
+ * darker on a light fill and lighter on a dark one, so the label on top stays readable. */
+export function stripeOn(fill: RGBA): RGBA {
+  const light = luminance(fill) > 0.18;
+  const k = light ? 0.82 : 1;
+  const add = light ? 0 : 0.14;
+  return [fill[0] * k + add * (1 - fill[0]), fill[1] * k + add * (1 - fill[1]), fill[2] * k + add * (1 - fill[2]), fill[3]];
+}
+
+/** Stripe period of the 「重复」 colouring's thin stripes, in CSS px (the shader's pattern size). */
+export const DUPE_STRIPE = 2.5;
 
 /** Fill of a block that is not an open folder. 「顶层分支」 needs the frame's branch and depth columns
  * (a frame without them is neutral). */
@@ -347,7 +363,7 @@ export function paint(f: DrawFrame, o: PaintOptions, reuse?: Float32Array): Pain
         radius,
         pattern: aggregate ? Pattern.DOTS : (dupe?.pattern ?? Pattern.NONE),
         patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : (dupe?.patternColor ?? NONE),
-        patternSize: (dupe && dupe.pattern !== Pattern.NONE ? 4 : 6) * dpr,
+        patternSize: (dupe && dupe.pattern !== Pattern.NONE ? DUPE_STRIPE : 6) * dpr,
         ...(dupe?.rim ? { border: dupe.rim, borderWidth: Math.max(1, Math.round(1.5 * dpr)) } : {}),
         alpha,
       });

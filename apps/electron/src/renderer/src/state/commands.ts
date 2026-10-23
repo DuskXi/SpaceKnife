@@ -32,7 +32,7 @@ import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
 import { openHelp } from "./help";
 import { type AppState, activeTab, basketCount, focusedViewId, get, set, toast, toggleLog } from "./store";
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
-import { dupesOf, getDupes, isRunning, openDrawer, startSearch, toBasket } from "./dupes";
+import { dupesOf, dupesOffered, getDupes, openDrawer, toBasket } from "./dupes";
 
 /** The selected node of the focused view (not an aggregate block), or null. */
 export function selectedNode(): { scanId: string; viewId: string; node: number } | null {
@@ -116,7 +116,7 @@ export async function runCommand(id: string): Promise<void> {
       return;
     case "view.cycle_color":
       if (st?.compare && viewId) return cycleDirection(viewId);
-      if (st) await setViewSettings(viewId, { color_mode: nextColor(st.color_mode, st.has_dupes) });
+      if (st) await setViewSettings(viewId, { color_mode: nextColor(st.color_mode, dupesOffered(st)) });
       return;
     case "view.color.class":
     case "view.color.flat":
@@ -126,11 +126,9 @@ export async function runCommand(id: string): Promise<void> {
       await setViewSettings(viewId, { color_mode: id.slice(11) as ColorModeName });
       return;
     case "dupes.find":
-      if (tab.scanId) {
-        const cur = dupesOf(tab.scanId);
-        if (cur && isRunning(cur)) openDrawer();
-        else await startSearch(tab.scanId);
-      }
+      // the drawer shows the plan first (what would be read) and 「开始查找」; a search running or
+      // done shows its results
+      if (tab.scanId) openDrawer();
       return;
     case "dupes.panel":
       openDrawer(!getDupes().open);

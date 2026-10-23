@@ -300,6 +300,7 @@ describe("Rpc", () => {
     });
     expect((hello.params as { capabilities: string[] }).capabilities).toContain("binary-frames.v1");
     expect((hello.params as { capabilities: string[] }).capabilities).toContain("updates.v1"); // update.changed
+    expect((hello.params as { capabilities: string[] }).capabilities).toContain("dupes.v1"); // duplicate files
     expect(rpc.hello).toBeNull();
     ws.receive({ jsonrpc: "2.0", id: hello.id, result: HELLO });
     await expect(done).resolves.toEqual(HELLO);

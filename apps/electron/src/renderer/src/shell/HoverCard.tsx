@@ -243,7 +243,7 @@ export function drawnCopies(f: VisualFrame, row: number): number | null {
 
 /** Duplicate files (docs/dupes.md §10.4): only copies whose whole contents were read are called
  * identical; files still being checked make no claim. `drawn`: copies the picture shows. */
-export function DupeLine({ d, drawn = null }: { d: DupeNodeInfo; drawn?: number | null }) {
+export function DupeLine({ d, drawn = null, paths = true }: { d: DupeNodeInfo; drawn?: number | null; paths?: boolean }) {
   if (d.state === "pending") return <div className="hc-dupe">{t("同样大小的文件正在核对内容…")}</div>;
   if (d.state === "skipped") return <div className="hc-dupe muted">{t("没有比较：{reason}", { reason: d.reason })}</div>;
   if (d.state === "none") return d.redundant > 0 ? <div className="hc-dupe">{t("里面有多余的副本 {size}", { size: fmtSize(d.redundant) })}</div> : null;
@@ -256,7 +256,7 @@ export function DupeLine({ d, drawn = null }: { d: DupeNodeInfo; drawn?: number 
   return (
     <div className="hc-dupe">
       <span>{t("另有 {n} 份内容相同 · 删掉多余的能腾出 {size}", { n: fmtInt(others), size: fmtSize(d.reclaim) })}</span>
-      {d.others.slice(0, 2).map((m) => (
+      {(paths ? d.others.slice(0, 2) : []).map((m) => (
         <span key={`${m.scan_id}:${m.path}`} className="mono">
           {middlePath(m.path, 56)}
         </span>

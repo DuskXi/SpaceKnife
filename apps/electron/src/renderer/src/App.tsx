@@ -27,6 +27,7 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { StartPage } from "@/pages/StartPage";
 import { cycleDirection, exitCompare } from "@/state/compare";
 import { cycleVisual, runShortcut, shortcutCommand } from "@/state/commands";
+import { dupesOffered } from "@/state/dupes";
 import { helpHistory, openHelp, openHelpTab } from "@/state/help";
 import { visibleSurface } from "@/state/updates";
 import { nextColor } from "@/state/visuals";
@@ -203,7 +204,7 @@ function onKey(e: KeyboardEvent): unknown {
   if (!ctrl && !e.altKey && lower === "f") return (done(), void setViewSettings(viewId, { show_free: !st.show_free }));
   if (!ctrl && !e.altKey && lower === "u") return (done(), void setViewSettings(viewId, { show_unknown: !st.show_unknown }));
   if (!ctrl && !e.altKey && lower === "r" && st.has_trash) return (done(), void setViewSettings(viewId, { show_trash: !st.show_trash }));
-  if (!ctrl && !e.altKey && !typeAhead && lower === "c") return (done(), void setViewSettings(viewId, { color_mode: nextColor(st.color_mode, st.has_dupes) }));
+  if (!ctrl && !e.altKey && !typeAhead && lower === "c") return (done(), void setViewSettings(viewId, { color_mode: nextColor(st.color_mode, dupesOffered(st)) }));
   // V / Shift+V: the next / previous visualization, comparisons included. The key is also listed by
   // the backend's view.cycle_visual (palette/commands.py): change both together.
   if (!ctrl && !e.altKey && !typeAhead && lower === "v") return (done(), void cycleVisual(viewId, e.shiftKey ? -1 : 1));

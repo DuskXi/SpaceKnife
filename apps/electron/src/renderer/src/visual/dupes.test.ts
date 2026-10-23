@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 
 import type { DupesStatus } from "@/protocol/generated";
 import { palette } from "@/lib/theme";
-import { dupeStyle, Dup, fillOf, paint, Pattern, rgba, STRIDE } from "@/treemap/paint";
+import { dupeStyle, Dup, fillOf, paint, Pattern, rgba, STRIDE, stripeOn } from "@/treemap/paint";
+import { applyTheme } from "@/lib/theme";
 import { dupesOf, dupesSummary, getDupes, isRunning, onDupesChanged, onDupesProgress, setDupes } from "@/state/dupes";
 import { nextColor } from "@/state/visuals";
 
@@ -50,6 +51,21 @@ describe("the 「重复」 colouring", () => {
     expect(pending.pattern).toBe(Pattern.STRIPES_135); // never called a duplicate before it is checked
     expect(dupeStyle(one(Kind.FILE, Dup.SHARED), 0).fill).toEqual(rgba(D().shared));
     expect(dupeStyle(one(Kind.FILE, Dup.NONE), 0).fill).toEqual(rgba(palette().treemap.class.other));
+  });
+
+  it("draws its stripes in a shade of the fill, so labels on them stay readable in both themes", () => {
+    for (const theme of ["dark", "light"] as const) {
+      applyTheme(theme);
+      for (const v of [Dup.EXTRA, Dup.PENDING]) {
+        const st = dupeStyle(one(Kind.FILE, v), 0);
+        expect(st.patternColor).toEqual(stripeOn(st.fill));
+        expect(st.patternColor[3]).toBe(st.fill[3]); // opaque like the fill: the shader paints stripes over nothing
+        const diff = Math.max(...[0, 1, 2].map((k) => Math.abs(st.patternColor[k]! - st.fill[k]!)));
+        expect(diff).toBeGreaterThan(0.02);
+        expect(diff).toBeLessThan(0.25);
+      }
+    }
+    applyTheme("dark");
   });
 
   it("paints folders and blocks by the share of extra copies, in four tiers", () => {
@@ -136,6 +152,24 @@ describe("the 「重复」 colouring in each picture", () => {
     expect(sectorFill(f, file, settings())).toEqual(rgba(D().share[4]));
     f.dup[file] = Dup.NONE;
     expect(sectorFill(f, file, settings())).toEqual(rgba(palette().treemap.class.other));
+  });
+
+  it("flame and polar files keep the stripes and the kept copy's rim", async () => {
+    const { paintFlame } = await import("./flame/paint");
+    const { frame: f } = rectScene({ layout: "flame.v1" });
+    const file = f.rowOf(2);
+    f.dup = new Uint8Array(f.count);
+    f.dup[file] = Dup.EXTRA;
+    const slot = (p: { instances: Float32Array }, k: number) => p.instances.subarray(k * STRIDE, (k + 1) * STRIDE);
+    const extra = slot(paintFlame(f, settings()), file + 1);
+    expect(extra[19]).toBe(Pattern.STRIPES_45);
+    f.dup[file] = Dup.KEEP;
+    const keep = slot(paintFlame(f, settings()), file + 1);
+    expect(keep[19]).toBe(Pattern.NONE);
+    expect(Array.from(keep.subarray(8, 12))).toEqual(rgba(D().keepRim).map((v) => Math.fround(v)));
+    expect(keep[18]).toBeGreaterThanOrEqual(1);
+    // other colourings never stripe a file
+    expect(slot(paintFlame(f, settings({ colorMode: "class" })), file + 1)[19]).toBe(Pattern.NONE);
   });
 
   it("paints everything as not compared while the frame has no column", () => {

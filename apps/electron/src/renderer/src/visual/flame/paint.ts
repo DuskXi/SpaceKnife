@@ -3,7 +3,7 @@
 // pointer changes (halo, hover inset), the selection on top. Pure: no GL, no DOM.
 
 import { palette } from "@/lib/theme";
-import { dupeStyle, fillOf, labelColors, type Painted, Pattern, type RGBA, rgba, STRIDE, type TagItem, type TextItem } from "@/treemap/paint";
+import { DUPE_STRIPE, dupeStyle, fillOf, labelColors, type Painted, Pattern, type RGBA, rgba, STRIDE, type TagItem, type TextItem } from "@/treemap/paint";
 import type { PreparedText } from "@/treemap/text";
 
 import { branchFill, center, haloOverlay, ringFill } from "../colors";
@@ -135,13 +135,16 @@ function barOf(f: RectFrame, i: number, s: PaintSettings): Bar {
   const fill = fillFor(f, i, s);
   const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
   const [text, sub] = labelColors(fill);
+  // 「重复」: files keep the treemap's stripes and the kept copy's rim
+  const dupe = s.colorMode === "dupes" && !s.diffTiers && kind === Kind.FILE ? dupeStyle(f, i) : null;
   return {
     fill,
     shape: {
       radius,
-      pattern: aggregate ? Pattern.DOTS : Pattern.NONE,
-      patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : NONE,
-      patternSize: 6 * dpr,
+      pattern: aggregate ? Pattern.DOTS : (dupe?.pattern ?? Pattern.NONE),
+      patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : (dupe?.patternColor ?? NONE),
+      patternSize: (dupe && dupe.pattern !== Pattern.NONE ? DUPE_STRIPE : 6) * dpr,
+      ...(dupe?.rim ? { border: dupe.rim, borderWidth: Math.max(1, Math.round(1.5 * dpr)) } : {}),
       alpha: dim ? T.dimOpacity : 1,
     },
     text,

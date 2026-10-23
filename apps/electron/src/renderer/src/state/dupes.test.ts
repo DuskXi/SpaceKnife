@@ -13,6 +13,7 @@ import {
   askFolder,
   cannotSearch,
   crossIds,
+  dupesOffered,
   focusGroup,
   getDupes,
   keepOptions,
@@ -184,6 +185,17 @@ describe("starting a search", () => {
     await askFolder("s1", 9);
     expect(mocked.mock.calls[1]![0]).toBe("dupes.start");
     expect(mocked.mock.calls[1]![1]).toMatchObject({ scope: { mode: "against", node: 9 } });
+  });
+});
+
+describe("the 「重复」 colouring", () => {
+  it("is offered once a search covers the scan, before the next view state says so", () => {
+    expect(dupesOffered({ scan_id: "s1", has_dupes: false })).toBe(false);
+    expect(dupesOffered({ scan_id: "s1", has_dupes: true })).toBe(true);
+    onDupesProgress(status({ state: "verifying" }));
+    expect(dupesOffered({ scan_id: "s1", has_dupes: false })).toBe(true);
+    expect(dupesOffered({ scan_id: "s2", has_dupes: false })).toBe(false);
+    expect(dupesOffered(undefined)).toBe(false);
   });
 });
 

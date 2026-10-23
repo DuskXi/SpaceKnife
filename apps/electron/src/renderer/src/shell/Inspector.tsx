@@ -497,7 +497,7 @@ function DupesSection({ scanId, viewId, node, dir, path }: { scanId: string; vie
   return (
     <section className="ins-section dp-ins">
       <h3>{t("相同内容")}</h3>
-      <DupeLine d={info} />
+      <DupeLine d={info} paths={false} />
       {info.others.length > 0 && (
         <div className="dp-ins-others">
           {info.others.map((m) => (

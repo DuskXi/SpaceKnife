@@ -198,12 +198,13 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     const st = r.current;
     const dg = dupeFocus.current;
     if (st.focusCls >= 0) st.focus = classMarks(g, frame, st.focusCls, frame.rowOf(st.focusNode), frame.info.dpr);
-    else if (dg.group >= 0 && frame.dupg) {
-      // the copies of a duplicate group: drawn ones by their group column, hidden ones as located
+    else if (dg.group >= 0 && (frame.dupg || dg.seq === frame.info.seq)) {
+      // the copies of a duplicate group: drawn ones by their group column (the 「重复」 colouring),
+      // and every one dupes.locate found in this frame, hidden in a block or not
       const want = dg.group + 1;
       const dupg = frame.dupg;
       const extra = dg.seq === frame.info.seq ? dg.rows : null;
-      st.focus = rowMarks(g, frame, (i) => dupg[i] === want || (extra !== null && extra.has(i)), -1, frame.info.dpr);
+      st.focus = rowMarks(g, frame, (i) => (dupg !== null && dupg !== undefined && dupg[i] === want) || (extra !== null && extra.has(i)), -1, frame.info.dpr);
     } else if (!fading) st.focus = null;
   };
 

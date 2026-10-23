@@ -5,7 +5,7 @@
 
 import type { PolarGeometry } from "@/protocol/generated";
 import { palette } from "@/lib/theme";
-import { dupeStyle, fillOf, labelColors, Pattern, rgba, type RGBA, type TagItem } from "@/treemap/paint";
+import { DUPE_STRIPE, dupeStyle, fillOf, labelColors, Pattern, rgba, type RGBA, type TagItem } from "@/treemap/paint";
 
 import { branchFill, center, haloOverlay, ringFill } from "../colors";
 import { DStat, Flag, Kind } from "../frame";
@@ -143,10 +143,13 @@ function pushRow(b: SectorBuilder, f: PolarFrame, g: PolarGeometry, i: number, s
   }
   const fill = sectorFill(f, i, s);
   const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
+  // 「重复」: files keep the treemap's stripes and the kept copy's rim
+  const dupe = s.colorMode === "dupes" && !s.diffTiers && kind === Kind.FILE ? dupeStyle(f, i) : null;
   b.push(t0, t1, r0, r1, fill, {
-    pattern: aggregate ? Pattern.DOTS : Pattern.NONE,
-    patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : NONE,
-    patternSize: 6 * dpr,
+    pattern: aggregate ? Pattern.DOTS : (dupe?.pattern ?? Pattern.NONE),
+    patternColor: aggregate ? rgba(luminance(fill) > 0.18 ? T.dot.onLight : T.dot.onDark) : (dupe?.patternColor ?? NONE),
+    patternSize: (dupe && dupe.pattern !== Pattern.NONE ? DUPE_STRIPE : 6) * dpr,
+    ...(dupe?.rim ? { border: dupe.rim, borderWidth: Math.max(1, Math.round(1.5 * dpr)) } : {}),
     alpha,
     gap: g.gap,
   });

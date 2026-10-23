@@ -95,6 +95,13 @@ export function dupesOf(scanId: string | undefined | null): DupesStatus | null {
   return scanId ? (getDupes().byScan[scanId] ?? null) : null;
 }
 
+/** 「重复」 is offered as a colouring while a search covers the view's scan: the view state says so
+ * (`has_dupes`), and so does this interface's own record of the search, which is there before the
+ * next view state is. */
+export function dupesOffered(st: { scan_id: string; has_dupes?: boolean } | null | undefined): boolean {
+  return !!st && (!!st.has_dupes || !!getDupes().byScan[st.scan_id]);
+}
+
 /** The keep rules and the cross-volume switch, from the settings. */
 export function keepOptions(): { rule: KeepRule; folderConsistent: boolean; perVolume: boolean; cross: boolean } {
   const a = getApp();
@@ -260,12 +267,16 @@ export const pauseSearch = (jobId: string, pause: boolean): Promise<void> => con
 export const cancelSearch = (jobId: string): Promise<void> => control("dupes.cancel", jobId);
 
 export async function clearSearch(jobId: string): Promise<void> {
+  const scans = new Set(Object.entries(getDupes().byScan).filter(([, s]) => s.job_id === jobId).map(([id]) => id));
   try {
     await call("dupes.clear", { job_id: jobId });
     onDupesChanged({ job_id: jobId, version: 0, reason: "cleared" });
   } catch (err) {
     toast(String((err as Error).message ?? err));
+    return;
   }
+  // the backend put views in the 「重复」 colouring back to classes: their state follows
+  for (const [viewId, v] of Object.entries(getApp().views)) if (scans.has(v.state.scan_id)) void viewCall(viewId, "view.render", {});
 }
 
 export async function setLoad(jobId: string, level: DupesLoadLevel): Promise<void> {
