@@ -4310,6 +4310,14 @@
           "default": null,
           "title": "Plugin"
         },
+        "priority": {
+          "default": 0,
+          "description": "The rule's or the plugin's: cards are shown highest first",
+          "maximum": 1000,
+          "minimum": -1000,
+          "title": "Priority",
+          "type": "integer"
+        },
         "reason": {
           "title": "Reason",
           "type": "string"

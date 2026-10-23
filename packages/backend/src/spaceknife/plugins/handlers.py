@@ -315,6 +315,7 @@ async def insight_cards(
                 note=str(value.get("note", "")),
                 command=str(value.get("command", "")),
                 path=store.path(p.node),
+                priority=max(-1000, min(1000, int(value.get("priority", 0) or 0))),
             )
         return None
 
@@ -322,6 +323,7 @@ async def insight_cards(
     asked = [c for c in EXTENSIONS.of("insight") if _wanted(c, path)]
     got = await asyncio.gather(*(one(c) for c in asked))
     cards += [g for g in got if g is not None]
+    cards.sort(key=lambda c: -c.priority)  # stable: the rule's card first among equals
     return pp.InsightNodeResult(cards=cards)
 
 
@@ -378,6 +380,7 @@ def _card(found: Any) -> pp.InsightCard:
         note=found.note,
         command=found.command,
         path=found.path,
+        priority=int(getattr(found, "priority", 0)),
     )
 
 

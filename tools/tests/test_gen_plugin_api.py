@@ -68,3 +68,18 @@ def test_the_icon_list_and_commands_are_the_apps() -> None:
     assert all(f"`{name}`" in API for name in icons)
     assert "| `report.export` |" in API
     assert "| `view.rescan` |" in API
+
+
+def test_the_sections_the_tools_name_exist() -> None:
+    """Every ``plugin docs --section X`` a message of the tools suggests leads to a section."""
+    sources = [
+        ROOT / "packages" / "backend" / "src" / "spaceknife" / "plugins" / "check.py",
+        ROOT / "packages" / "backend" / "src" / "spaceknife" / "cli_plugin.py",
+        ROOT / "packages" / "sdk" / "src" / "spaceknife_sdk" / "scaffold.py",
+    ]
+    named = {
+        m for f in sources for m in re.findall(r"--section ([a-z0-9_.-]+)", f.read_text(encoding="utf-8"))
+    }
+    assert named
+    for anchor in named:
+        assert docs.find(anchor) is not None, anchor

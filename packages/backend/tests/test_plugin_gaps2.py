@@ -22,7 +22,7 @@ CODE = """from __future__ import annotations
 
 from typing import Any
 
-from spaceknife_sdk import Context, Node, Payload, Plugin, Report, ReportContext, T, r
+from spaceknife_sdk import Context, Insight, Node, Payload, Plugin, Report, ReportContext, T, r
 
 plugin = Plugin()
 
@@ -64,6 +64,11 @@ def txt(ctx: Context, node: Node) -> str:
 @plugin.node_field(T("文件夹", "Folder"), name="folder", kinds=["dir"], globs=["**/a"])
 def folder(ctx: Context, node: Node) -> str:
     return f"{node.name}:{ctx.slot}"
+
+
+@plugin.insight(globs=["**/node_modules"])
+async def deps(ctx: Context, node: Node) -> Insight | None:
+    return Insight(title=T("依赖", "Dependencies"), reason=T("包管理器装的", "Installed by npm"), priority=5)
 
 
 @plugin.report(T("分页", "Pages"), name="pages")
@@ -146,3 +151,11 @@ def test_a_test_imports_the_plugins_own_code(plugin: Path) -> None:
     mod = plugin_module(plugin / "tests" / "test_x.py")  # any path inside the plugin
     assert mod.txt.__name__ == "txt" and mod.plugin.manifest.id == "t.gaps"
     assert plugin_module(plugin) is mod  # imported once
+
+
+async def test_insight_cards_come_highest_priority_first(plugin: Path) -> None:
+    async with MockHost.load(plugin / "plugin.py") as host:
+        host.scan(make_tree({"app": {"node_modules": {"x.js": 10}}}))
+        cards = await host.insights(node=host.find("app/node_modules"))
+        assert [c.source for c in cards][:1] == ["plugin"] and cards[0].priority == 5
+        assert any(c.source == "rule" for c in cards)  # the built-in rule's card, after it

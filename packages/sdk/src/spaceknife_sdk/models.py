@@ -42,6 +42,7 @@ class Insight(BaseModel):
     app: LocalStr = ""
     note: LocalStr = ""
     command: str = Field(default="", description="Shown, never run")
+    priority: int = Field(default=0, ge=-1000, le=1000, description="Cards are shown highest first")
 
 
 class _Record(BaseModel):

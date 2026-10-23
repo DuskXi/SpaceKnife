@@ -689,6 +689,9 @@ class InsightCard(Payload):
     note: str = ""
     command: str = Field(default="", description="Shown and copyable, never run")
     path: str = ""
+    priority: int = Field(
+        default=0, ge=-1000, le=1000, description="The rule's or the plugin's: cards are shown highest first"
+    )
 
 
 class InsightNodeParams(Params):

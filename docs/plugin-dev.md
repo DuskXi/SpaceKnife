@@ -400,7 +400,7 @@ async def backups(ctx: Context, node: Node) -> Insight | None:
     )
 ```
 
-`Insight` 的字段：`title reason kind cleanup app note command`；`cleanup` 是 `safe tool review keep`；`command` 只显示、可复制，从不运行。
+`Insight` 的字段：`title reason kind cleanup app note command priority`；`cleanup` 是 `safe tool review keep`；`command` 只显示、可复制，从不运行；卡片按 `priority`（规则的或插件给的，默认 0）从高到低排。
 
 <a id="kind-panel"></a>
 #### Web 面板

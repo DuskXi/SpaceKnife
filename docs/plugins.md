@@ -115,9 +115,28 @@
 - 内置插件只能有声明式贡献和导出格式；需要运行时的内置插件（报告、方法……）以后再说。
 - 以后做：WASM 运行时、签名、插件目录、从 Git 安装、操作系统级的沙箱、插件之间的依赖、新的布局格式、Electron 主进程插件。
 
+## 试写第一轮之后的改进
+
+六个作者照文档各写了一个插件（重复文件、开发缓存、文件年龄地图、Markdown 导出、快照增长面板、压缩包来源），在真实宿主里都能用，评估列出 23 处缺口。这一轮在宿主、SDK、命令行和文档里补上（没有改试写的插件），提交是「插件系统改进（一）」到「（七）」：
+
+- **调用槽**：监控器、流不再占插件的 4 个调用槽；排队的时间算进时限，字段等不到槽就先回 `pending`，扫描状态写明「在等插件」。插件停用、重新加载或进程重启后，来源扫描的监控器等它回来再接着监控。
+- **缓存**：插件设置变了，宿主缓存的这个插件的回答（字段、节点集合、权重、图例、对比原因）一起作废，`settings` 钩子带上变了的名字；`ctx.invalidate(kinds)` 让插件自己作废。规则写在 [plugin-api.md](plugin-api.md#api-cache)。
+- **输入对象**：配色、导出、可视化各收一个带 `tree ctx options settings cancelled` 的输入（`ColorInput` `ExportInput` `VisualInput`），不必再读 SDK 的私有模块（`check` 遇到 `_current` 会提醒）；图例可以由代码给（`@plugin.color_legend`）。
+- **导出**：格式可以声明对话框里的选项，范围可以是选中项；`spaceknife run … export <插件格式>` 和 `run help` 认得已启用插件的格式和模板；内置格式的扩展名不带点。
+- **类型与文档**：`Report` 等的文字字段收 `str | Text`，带参数的装饰器有类型，CI 对示例跑 `mypy --strict`（试写插件只剩用不着的 `type: ignore`）。新的 [plugin-api.md](plugin-api.md)：每个对象的字段、内置方法、命令 id、图标名由 `tools/gen_plugin_api.py` 从代码生成并由测试守住，另写调用发生在哪、钩子签名、路径写法、异常、缓存、分页、时限、`MockHost` 全表。
+- **启用确认**：按种类分组列出全部贡献（代码里声明的也算），按键单列并标出冲突；命令行和界面共用同一份摘要。
+- **check**：核对图标名（给出最接近的）、命令动作里引用的可视化、配色、报告、面板；来源在 `fixtures/` 样例上失败算错误；提醒导入 SDK 的私有模块。
+- **Web 面板**：标签页面板默认在后台保留（`keep`）；`sk.host.select(node, { stay: true })`；`sk.ready` 等到第一份 context；context 里有 `slot` 和声明的 `params`；`short_title`；`sk.onTree`；标签标题跟着语言；CSP 去掉 Chromium 不认识的指令；`base.css` 的 `[hidden]`。
+- **界面**：代码权重的可视化标签写比例、悬停卡另写真实大小（`size_unit = "weight"`）；色调可以分主题、引用配色色板（`palette:<配色>#<下标>`）；插件类别有英文名和深色值；来源扫描的条目不给磁盘操作；报告标签页显示副标题、过滤动作切回扫描标签页；复核对话框显示说明；设置页的大小输入、占位符和窄窗口布局。
+- **API**：`ctx.clipboard.write_text`、`ctx.slot`、`TreeView.rel_path`（永远用 `/`）、`root_of`、`file_ids`、`r.more` 分页、字段的 `kinds exts globs`、代码洞察的 `globs` 和 `priority`、`insight.nodes` 批量、扫描来源的 `size` 和 `{ scan_source = … }` 动作、文件夹规则的 `name priority exclude` 和花括号。
+- **测试和命令行**：`MockHost` 与宿主对齐（语言钩子、等设置钩子、停监控器、来源失败抛错、导出带过滤和选项、命令按键预设、快照的合计、合成树不在临时目录）；`plugin_module()` 导入插件自己的代码；`plugin call/render` 的 `--setting`、`--history`、`render source:`、`render export -o`；输出逐行刷新；`plugin dev` 的网址直接打开扫描、用程序的路径对话框、打印 pid；临时数据目录下卸载直接删除。
+- **运行时**：取消一个同步函数时不再结束插件进程（结果到了丢掉，全部工作线程都卡住才重启）；进程内运行时停止时把还在跑的调用取消干净。
+
+还没做的见 TODO.md 插件一条下面。
+
 ---
 
-以下第 1–8 节是动工前写下的经验与要求，保留作为设计依据；实现与它们不同的地方以上面三节为准。
+以下第 1–8 节是动工前写下的经验与要求，保留作为设计依据；实现与它们不同的地方以上面几节为准。
 
 ## 1. 目标
 

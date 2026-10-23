@@ -241,7 +241,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `filter.focus` | 聚焦过滤 | Focus filter |
 | `item.copy_path` | 复制路径 | Copy path |
 | `item.preview` | 预览 | Preview |
-| `item.reveal` | 在文件管理器中显示 | Show in file manager |
+| `item.reveal` | 在资源管理器中显示（Windows） / 在访达中显示（macOS） / 在文件管理器中显示（Linux） | Show in Explorer（Windows） / Show in Finder（macOS） / Show in file manager（Linux） |
 | `item.terminal` | 在此打开终端 | Open terminal here |
 | `nav.back` | 后退 | Back |
 | `nav.forward` | 前进 | Forward |
@@ -512,6 +512,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `app` | str \| Text | `""` | 相关的程序 |
 | `note` | str \| Text | `""` | 补充说明 |
 | `command` | str | `""` | 清理命令：只显示、可复制，从不运行 |
+| `priority` | int | `0` | 详情面板里卡片按它从高到低排（规则的卡片用规则的 `priority`）（≥ -1000，≤ 1000） |
 
 #### `Proposal`
 

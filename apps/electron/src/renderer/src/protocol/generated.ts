@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "d643130b57a38805";
+export const SCHEMA_HASH = "116975b05ba68653";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -939,6 +939,8 @@ export interface InsightCard {
   note: string;
   path: string;
   plugin: string | null;
+  /** The rule's or the plugin's: cards are shown highest first */
+  priority: number;
   reason: string;
   rule: string;
   source: "rule" | "plugin";

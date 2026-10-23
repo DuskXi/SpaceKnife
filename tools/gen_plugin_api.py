@@ -167,6 +167,7 @@ NOTES: dict[tuple[str, str], str] = {
     ("Insight", "app"): "相关的程序",
     ("Insight", "note"): "补充说明",
     ("Insight", "command"): "清理命令：只显示、可复制，从不运行",
+    ("Insight", "priority"): "详情面板里卡片按它从高到低排（规则的卡片用规则的 `priority`）",
     ("Proposal", "node"): "节点下标、`NodeRef` 或绝对路径",
     ("Proposal", "reason"): "复核对话框里每一项的原因",
     ("Proposal", "checked"): "默认勾选",
@@ -336,13 +337,26 @@ def core_block() -> str:
 
 
 def commands_block() -> str:
+    """The app's commands as built on every platform (the same ids; a name that differs by
+    platform, like 「在资源管理器中显示」, lists each), so the table is the same on every machine."""
+    from gen_docs import PLATFORMS, command_variants
     from spaceknife import i18n
-    from spaceknife.palette.commands import registry
 
     en = i18n.catalog("en")
+
+    def names(texts: Sequence[str]) -> str:
+        seen = list(dict.fromkeys(texts))
+        if len(seen) == 1:
+            return _cell(seen[0])
+        where = {
+            t: "、".join(lab for (_n, lab), x in zip(PLATFORMS, texts, strict=True) if x == t) for t in seen
+        }
+        return " / ".join(f"{_cell(t)}（{where[t]}）" for t in seen)
+
     out = ["| 命令 id | 名称 | Name |", "|---|---|---|"]
-    for c in sorted((c for c in registry() if c.owner == "builtin"), key=lambda c: c.id):
-        out.append(f"| `{c.id}` | {_cell(c.name)} | {_cell(en.get(c.name, c.name))} |")
+    for variants in sorted(command_variants(), key=lambda v: v[0].id):
+        zh = [c.name for c in variants]
+        out.append(f"| `{variants[0].id}` | {names(zh)} | {names([en.get(n, n) for n in zh])} |")
     return "\n".join(out) + "\n"
 
 

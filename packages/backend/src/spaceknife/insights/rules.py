@@ -146,6 +146,7 @@ class Insight:
     command: str = ""  # the cleaning command when there is one: shown, never run
     path: str = ""  # the matched item: the path itself, or the folder it is inside
     inside: bool = False  # matched through an ancestor folder (``path`` is that folder)
+    priority: int = 0  # the rule's (-1000…1000): the details panel orders its cards by it
 
 
 @dataclass(frozen=True, slots=True)
@@ -910,6 +911,7 @@ class RuleSet:
             command=rule.command,
             path=self._native(p, i),
             inside=i < len(p.segs) - 1,
+            priority=rule.priority,
         )
 
 

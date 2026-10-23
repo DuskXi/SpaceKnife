@@ -380,7 +380,7 @@ def check_references(
                     f"{where}: {icon!r} is not an icon of the app or of the plugin",
                     severity="warning",
                     fix=("closest: " + ", ".join(near) + "; " if near else "")
-                    + "the list: spaceknife plugin docs --section icon-names; own ones: icons/<name>.svg",
+                    + "the list: spaceknife plugin docs --section api-icons; own ones: icons/<name>.svg",
                 )
             )
     names: dict[str, set[str]] = {}
