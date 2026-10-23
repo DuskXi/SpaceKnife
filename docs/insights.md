@@ -5,13 +5,14 @@
 - 详情栏的洞察卡（[UI-SPEC](UI-SPEC.md) UI-MAIN-41 / 42）：标题、说明、所属应用、清理方式与命令；
 - 快照对比里的变化原因注释（UI-W6-30）：名称后的灰色短注，如 Cyberpunk 2077 后的「游戏更新」。
 
-接口契约见 [manage.md](manage.md) 第 5 节。实现在 `packages/backend/src/spaceknife/insights/`：引擎 `rules.py`，内置规则 `builtin.toml`。
+接口契约见 [manage.md](manage.md) 第 5 节。实现在 `packages/backend/src/spaceknife/insights/`：引擎 `rules.py`；内置规则 `builtin.toml` 是内置插件 `builtin.insights` 的规则文件（`packages/backend/src/spaceknife/plugins/builtin/builtin.insights/insights/builtin.toml`）。插件也能带规则文件（[plugin-dev.md](plugin-dev.md)「洞察规则」）。
 
 ## 1. 规则从哪里来
 
 | 来源 | 位置 | 说明 |
 |---|---|---|
-| 内置规则 | 安装包内的 `spaceknife/insights/builtin.toml` | 随版本更新，不要修改 |
+| 内置规则 | 安装包内的 `spaceknife/plugins/builtin/builtin.insights/insights/builtin.toml` | 随版本更新，不要修改 |
+| 插件的规则 | 各插件的 `insights/*.toml` | 按插件 id 排在内置规则之后、用户规则之前 |
 | 用户规则 | 配置目录下的 `insights/*.toml`（`spaceknife.insights.user_rules_dir()`；设置了 `SPACEKNIFE_HOME` 时在 `$SPACEKNIFE_HOME/config/insights/`） | 按文件名顺序加载，后加载的优先 |
 
 - **按 id 覆盖**：用户规则与内置规则 id 相同时，整条替换内置规则（不是逐字段合并）。

@@ -11,7 +11,7 @@ from spaceknife_protocol.base import Empty
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import EXPORT_CHECK, EXPORT_RUN, EXPORT_TARGETS
 
-from ..i18n import Texts, language, tr
+from ..i18n import Texts, language
 from .compute import compute
 from .rpc import RpcError
 
@@ -43,29 +43,32 @@ def install(server: Server) -> None:
 
     @router.method(EXPORT_TARGETS)
     async def export_targets(session: Session, _: Empty) -> pe.ExportTargets:
-        from ..export import BUILTIN_INFO, FORMATS, builtin_template
+        """The registry's templates and formats: the shipped ones (``builtin.export``) under their
+        own names first, then — for frontends that know plugins — the plugins', by full id."""
+        from ..export import builtin_targets
+        from ..extensions import EXTENSIONS
 
+        info, templates, formats = builtin_targets()
         out: list[pe.ExportTarget] = []
-        for name, info in BUILTIN_INFO.items():
-            tpl = builtin_template(name)
+        for name, item in info.items():
             out.append(
                 pe.ExportTarget(
                     name=name,
-                    title=tr(info.title),  # BuiltinInfo texts are message ids, translated here
-                    description=tr(info.description),
+                    title=item.title,
+                    description=item.description,
                     kind="template",
                     extension="txt",
-                    file_name=tpl.file_name if tpl is not None else "",
-                    spacesniffer=info.spacesniffer,
+                    file_name=templates[name].file_name,
+                    spacesniffer=item.spacesniffer,
                 )
             )
-        for key, f in FORMATS.items():
-            out.append(pe.ExportTarget(name=key, title=tr(f.title), kind="format", extension=f.extension))
+        for key, f in formats.items():
+            out.append(pe.ExportTarget(name=key, title=f.title, kind="format", extension=f.extension))
         if CAP_PLUGINS in session.capabilities:
-            from ..extensions import EXTENSIONS
-
             lang = language()
             for c in EXTENSIONS.of("export_template"):
+                if c.shipped:
+                    continue
                 spec = c.spec
                 out.append(
                     pe.ExportTarget(
@@ -79,6 +82,8 @@ def install(server: Server) -> None:
                     )
                 )
             for c in EXTENSIONS.of("export_format"):
+                if c.shipped:
+                    continue
                 spec = c.spec
                 out.append(
                     pe.ExportTarget(

@@ -168,7 +168,7 @@ spaceknife run scan "D:\Photos" filter "*.jpg;>5mb" export "Simple file list" bi
 | Summary | 汇总 | SpaceSniffer | 只有 footer：`Total size`、`Folders`、`Files` 三行 |
 | Folder tree | 文件夹树 | SpaceKnife | 按层级缩进（每级 4 个空格）的文件夹名和占用 |
 
-模板文本在 `packages/backend/src/spaceknife/export/builtin/*.sktpl`，可以复制一份改成自己的模板。SpaceSniffer 的四个模板与原版逐字一致（片段的拼接顺序由代码引用还原），只是写成了 SpaceKnife 的模板文件格式。名称查找不区分大小写。
+模板文本在内置插件 `builtin.export` 里：`packages/backend/src/spaceknife/plugins/builtin/builtin.export/templates/*.sktpl`，可以复制一份改成自己的模板（或者做成插件的 `[[export_templates]]`，见 [plugin-dev.md](plugin-dev.md)）。SpaceSniffer 的四个模板与原版逐字一致（片段的拼接顺序由代码引用还原），只是写成了 SpaceKnife 的模板文件格式。名称查找不区分大小写。
 
 ## 10. CSV、JSON、HTML
 

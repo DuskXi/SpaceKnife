@@ -256,17 +256,17 @@ interface VisualInstance<F> {
   目标 ≤ 60 ms，验收线 < 120 ms（M2）。复测：`uv run python tools/bench_m2.py --visual flame,flame_polar --nodes 1000000 --budget 120`。
 - 已知的遗留项：扫描推送时 `sizes()` 缓存每次都失效（树图的全量路径）；隐藏模式仍按全长数组构造尺寸；`_scanning_rows` 仍是 O(N)。
 
-## 13. 插件：现在做 / 以后做
+## 13. 插件
 
-覆盖前后端的插件系统（统一通讯层、开放档次、权限与隔离、落地顺序）的经验与要求见 [plugins.md](plugins.md)；本节只说可视化这一类扩展。
+覆盖前后端的插件系统见 [plugins.md](plugins.md)，写插件见 [plugin-dev.md](plugin-dev.md)「可视化」「配色」；本节只说可视化这一类扩展。
 
-**现在做（本次已有）**
-- 后端 `ENGINE_API`、`Engine` 协议、`Visualization` 描述符、注册表、行契约检查；内置可视化和插件走同一条 `register()`。
-- 前端 `VISUAL_API`、`VisualComponent`（纯几何 + GL 实例）、注册表、一致性测试辅助。
-- 协议 `visual.list`，每种布局一个能力名。
+**现在有**
+- 后端 `ENGINE_API`、`Engine` 协议、`Visualization` 描述符、注册表、行契约检查；内置可视化和插件走同一条 `register()`（扩展注册表的 `visualization` 点）。服务端的能力从注册表推导，不再是固定的列表。
+- 插件的可视化是**变体**：选一个内置引擎（`base = treemap | flame | flame_polar`），换一种面积口径（`size = alloc | size | files | items`），或者由插件的函数给每个文件一个权重（`size = "code"`，在插件进程里算，宿主加到文件夹上，按扫描版本缓存，每帧 120 ms 的预算，失败三次后这次会话不再用）。布局格式仍然只有我们维护的三种，`size_unit` 决定标签写字节还是项数。
+- 配色模式也可以来自插件：声明式的规则由宿主算，代码的由插件给每个画出的行一个色板下标，帧里多一列 `pal`（`colors.v1`）。
+- `plugin check` 和 `MockHost.visual()` 用 `check_draw(full=True)` 检查插件可视化的每一帧；`test_layout_contract.py` 照旧覆盖内置引擎。
+- 前端 `VISUAL_API`、`VisualComponent`、注册表、一致性测试辅助不变（前端组件不对插件开放）。
 
-**以后做（不在本次范围）**
-- 发现与加载：entry point `spaceknife.visuals`、插件目录、启用 / 停用、签名与信任。服务端现在声明的能力是固定的 `ALL_CAPABILITIES`，插件带来新布局时要把它的能力加进去。
-- 隔离：现在引擎在进程内 2–4 线程的计算池里跑，持有 `STRUCTURE` 读锁，拿到的是节点列的实时视图。现有护栏（`MAX_ROWS`、契约检查、不跨帧持有引用）只能防失误，防不住恶意代码；加载第三方代码之前必须先做隔离（子进程加只读映射的列视图，或 WASM），并加时间预算、只算最新一次。
-- 插件自带的参数 schema、词表和图标；运行时的 `visual.changed` 事件。
-- 前端组件插件原则上不支持：否则 Qt 和 WinUI3 无法保持一致。新布局要三端各实现一个组件。
+**以后做**
+- 插件自己的布局引擎（远程画行），以及 WASM 运行时。
+- 新的布局格式（时间轴、关系图、表格）：三端各实现一个组件之后才能开放。

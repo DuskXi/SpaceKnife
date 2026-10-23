@@ -3,6 +3,9 @@
 Connects to the backend (only to an address it could have made; the peer must be that backend),
 proves itself with the one-time token, takes ``init``, limits itself and installs the audit hook,
 and only then imports the plugin's code. A frozen backend runs this as ``--plugin-host``.
+
+``--describe <folder>`` (``plugin check``): import a plugin under the audit hook, with no
+permissions, and print its description (or what is wrong) as one JSON line; nothing else runs.
 """
 
 from __future__ import annotations
@@ -16,12 +19,60 @@ from pathlib import Path
 from .. import __version__
 
 
+def describe_main(folder_arg: str) -> int:
+    """Print ``{"description": …}`` or ``{"error": {…}}`` for the plugin in ``folder_arg``."""
+    import tempfile
+    import traceback
+
+    from spaceknife_sdk._audit import Guard, install
+    from spaceknife_sdk._runtime import describe_safely, load_plugin
+    from spaceknife_sdk.errors import ManifestError
+    from spaceknife_sdk.manifest import load_manifest
+
+    from .limits import limit_self
+
+    folder = Path(folder_arg).resolve()
+    out: dict[str, object]
+    limit_self(1024, server_pid=None)
+    sys.path[:] = [p for p in sys.path if p]
+    try:
+        manifest = load_manifest(folder)
+        guard = Guard(
+            plugin_dir=str(folder),
+            storage=tempfile.gettempdir(),
+            granted=frozenset(),
+            roots=[],
+            net_hosts=[],
+            programs=[],
+        )
+        install(guard)
+        plugin = load_plugin(folder, manifest)
+        desc, err = describe_safely(plugin)
+        out = {"description": desc} if desc is not None else {"error": err}
+    except ManifestError as exc:
+        out = {"error": {"code": "invalid", "message": str(exc), "issues": [i.as_dict() for i in exc.issues]}}
+    except BaseException as exc:  # importing the plugin failed
+        out = {
+            "error": {
+                "code": "import",
+                "message": f"{type(exc).__name__}: {exc}",
+                "trace": traceback.format_exc()[-4000:],
+            }
+        }
+    sys.stdout.write(json.dumps(out) + "\n")  # ASCII: whatever the console encoding
+    sys.stdout.flush()
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
+    args_in = sys.argv[1:] if argv is None else argv
+    if args_in[:1] == ["--describe"] and len(args_in) == 2:
+        return describe_main(args_in[1])
     ap = argparse.ArgumentParser(prog="spaceknife-plugin-host")
     ap.add_argument("--pipe", required=True)
     ap.add_argument("--token-file", required=True)
     ap.add_argument("--server-pid", type=int, required=True)
-    args = ap.parse_args(argv)
+    args = ap.parse_args(args_in)
 
     from spaceknife_sdk import wire
     from spaceknife_sdk._audit import Guard, install
@@ -64,6 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         programs=state.exec,
     )
     server.guard = guard
+    state.on_paths = guard.set_roots  # new scans' roots, sources' URIs: readable with files.read
     sys.path[:] = [p for p in sys.path if p]  # no current folder
     try:
         manifest = load_manifest(folder)

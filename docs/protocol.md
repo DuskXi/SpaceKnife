@@ -49,10 +49,11 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 
 ```json
 {"jsonrpc": "2.0", "id": 0, "method": "session.hello",
- "params": {"token": "…", "protocol": "1.1",
+ "params": {"token": "…", "protocol": "1.2",
             "client": {"name": "spaceknife-electron", "version": "0.1.0", "kind": "electron"},
             "capabilities": ["binary-frames.v1", "subscriptions", "cancel", "log-stream",
-                             "visuals.v1", "layout.flame.v1", "layout.polar.v1", "updates.v1"]}}
+                             "visuals.v1", "layout.flame.v1", "layout.polar.v1", "updates.v1",
+                             "plugins.v1", "colors.v1", "panels.v1"]}}
 ```
 
 成功时返回协议版本、服务端信息、`session_id`、双方能力的交集、schema 指纹和各项限制。失败时先回一个错误响应，再按下表关闭连接：
@@ -65,7 +66,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | 参数不合法 | -32602 INVALID_PARAMS | 4400 |
 | 超时未收到 hello | — | 4408 |
 
-次版本号新增的功能只通过 capabilities 协商启用，不靠新增字段本身。当前版本是 1.1；握手只比较主版本号，1.0 的客户端照常连接，只是拿不到它没声明的能力。
+次版本号新增的功能只通过 capabilities 协商启用，不靠新增字段本身。当前版本是 1.2（1.2 加了插件：下面三项能力、§3「插件」的方法和事件、错误码 -32014 到 -32020）；握手只比较主版本号，1.0、1.1 的客户端照常连接，只是拿不到它没声明的能力。服务端的能力从扩展注册表推导（`spaceknife.extensions.capabilities()`），插件不会给自己加能力。
 
 | 能力 | 含义 |
 |---|---|
@@ -77,6 +78,9 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `layout.flame.v1` | 能解码并画 `flame.v1` 帧（火焰图） |
 | `layout.polar.v1` | 能解码并画 `polar.v1` 帧（火焰-极坐标图） |
 | `updates.v1` | 接收 `update.changed`（更新检查结果与下载进度，见 §3「更新检查」） |
+| `plugins.v1` | 插件：§3「插件」的方法和事件、插件的命令和动作（`palette.commands` 的 `action`、`menus`、`owner`）、`export.targets` 里插件的模板和格式、`scan.start` 的 `source` / `uri`、`basket.add` 的 `origin` / `reasons` |
+| `colors.v1` | 插件的配色模式：视图帧带 `pal` 列（§4.1），色板与图例在 `extensions.get` 里 |
+| `panels.v1` | 能显示插件的 Web 面板（`extensions.get` 的 `panels`） |
 
 `drawlist.v1`（树图）是基线，不需要能力。后端只给会话发它协商过的布局：没有对应能力的会话里，新视图和 `view.open` 的可视化退回树图，`view.set` 选不可用的可视化返回 INVALID_PARAMS；配色 `branch` 也只对带 `visuals.v1` 的会话开放。Electron 的能力列表由前端已注册的可视化组件生成。
 
@@ -140,6 +144,29 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `update.mute` | 跳过或恢复一个系列的提示（`UpdateMuteParams`：`series` 匹配 `^\d{1,6}(\.\d{1,6})?$`，取 `UpdateStatus.series` 的值；`muted` 默认 `true`，`false` 为恢复）：被跳过的系列的版本不弹卡片、不弹对话框、不显示徽章，也不自动下载（「关于与更新」页仍显示）。返回新的 `UpdateStatus`；恢复后如果「自动下载更新」开启，随即开始自动下载 |
 | `update.releases` | 缓存里最近的发布（`UpdateReleases`，最多 30 个，新的在前，每个的说明最多 16 KiB，不带文件），即「关于与更新」页的发布时间线；还没检查过时为空 |
 | `update.download` / `update.cancel` | 把 `{version}` 对应本安装方式的文件下载到数据目录的 `updates` 文件夹并校验 SHA-256（立即返回，进度见 `update.changed`）；不是当前可更新的版本返回 INVALID_PARAMS，没有对应文件返回 INVALID_REQUEST。停止下载并删除未完成的文件 |
+
+### 插件（`plugins.v1`）
+
+| 方法 | 说明 |
+|---|---|
+| `plugin.list` | 发现的插件：id、版本、名字、状态（`enabled disabled needs_confirm changed error incompatible crashed`）、内置 / 开发链接、要的权限（带说明）、哈希、进程状态与内存、问题；插件文件夹位置、是否开发者模式 |
+| `plugin.describe` | 启用前要给用户看的：权限（新增的单列）、贡献摘要、按键冲突、是否签名 |
+| `plugin.enable` / `plugin.disable` / `plugin.restart` | 启用（带用户看过的哈希和同意的权限，两者都要对得上）/ 停用 / 重启进程；内置插件不能停用 |
+| `plugin.install` / `plugin.uninstall` / `plugin.link` | 从文件夹或 zip 安装（同 id 时返回 `conflict`，带 `replace` 再装）/ 卸载到回收站 / 开发者模式下链接开发文件夹 |
+| `extensions.get` | 前端要画的贡献（按 `kinds` 取）：报告、面板、字段、清理、配色（色板、图例）、扫描来源、过滤预设、图标……，按会话语言 |
+| `plugin.fields` | 一个节点的插件字段（`inspector` / `hover`；悬停只给缓存里的，`pending` 表示再问一次） |
+| `insight.node` | 一个节点的洞察卡片：规则的和插件代码的 |
+| `plugin.<id>.<名字>` | 插件自己的方法（参数和结果按插件的 schema，`spaceknife plugin schema <文件夹>`）；有二进制结果时随后到达二进制帧 |
+
+| 事件 | 说明 |
+|---|---|
+| `extensions.changed` | 注册表变了（插件启用、停用、重新加载，语言切换）：`kinds` 是变了的种类，前端只重新取这些 |
+| `plugin.changed` | 一个插件的状态变了（`PluginInfo`） |
+| `plugin.toast` | 插件的提示（`ctx.toast`） |
+| `plugin.progress` | 插件调用的进度（报告、清理），带前端的请求 id |
+| `plugin.<id>.<事件>` | 插件自己的事件；共享状态和流走主题（`$/subscribe`，主题名同样带 `plugin.<id>.` 前缀） |
+
+插件调用的错误码见 §5（-32014 到 -32020）；插件能调的内置方法有白名单（[plugin-dev.md](plugin-dev.md) 第 7 节）。
 
 ### 当前事件与主题
 
@@ -207,6 +234,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `name_len` | `<u4` | 本行名称在 `names` blob 中的字节数（0 表示不画文字） |
 | `delta` | `<i8` | 只在对比视图里有：占用的净变化 |
 | `dstat` | `<u1` | 只在对比视图里有：0 未变 · 1 新增 · 2 已删除 · 3 有变化 |
+| `pal` | `<u1` | 只在插件的配色模式下有（`colors.v1`）：每行的色板下标，0 为中性色；`FrameInfo.palette` 是这个配色模式的 id，色板和图例在 `extensions.get` 的 `color_modes` 里 |
 
 blob `names`：各行名称的 UTF-8 编码，按行顺序首尾相接。颜色由前端按共享的令牌规则从 `kind`、`depth`、`cls`、`tone`、`branch`、`flags` 和配色模式算出。
 
@@ -309,4 +337,11 @@ kind 1 是框加标题栏，子块画在框里。`FrameInfo.geometry` 和 `Frame
 | -32011 | SCAN_BUSY |
 | -32012 | UNKNOWN_VIEW |
 | -32013 | SETTINGS_CONFLICT（设置已被其他窗口修改，带上新版本号重试） |
+| -32014 | PERMISSION_DENIED（插件没有这项权限，或调了不允许的方法；`data.permission`） |
+| -32015 | PLUGIN_TIMEOUT |
+| -32016 | PLUGIN_UNAVAILABLE（插件进程起不来、崩溃或卡死） |
+| -32017 | PLUGIN_DISABLED（没启用、改动后没确认、不兼容） |
+| -32018 | STALE_TREE（节点 id 来自整理之前的树，`data.epoch` 是现在的） |
+| -32019 | PLUGIN_ERROR（插件报的错，消息给用户看） |
+| -32020 | PLUGIN_LIMIT（并发、排队或输出超限） |
 | -32800 | REQUEST_CANCELLED |

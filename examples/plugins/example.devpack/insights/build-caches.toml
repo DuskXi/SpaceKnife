@@ -1,0 +1,37 @@
+# Build caches the built-in rules do not know (format: docs/insights.md). Ids are plugin-local in
+# spirit: a user rule with the same id replaces one of these.
+version = 1
+
+[[rule]]
+id = "devpack-turbo"
+kind = "cache"
+title = "Turborepo 缓存"
+app = "Turborepo"
+cleanup = "safe"
+reason = "Turborepo 的本地任务缓存，删掉后下次构建会重新生成。"
+names = [".turbo"]
+i18n.en.title = "Turborepo cache"
+i18n.en.reason = "Turborepo's local task cache; the next build makes it again."
+
+[[rule]]
+id = "devpack-parcel"
+kind = "cache"
+title = "Parcel 缓存"
+app = "Parcel"
+cleanup = "safe"
+reason = "Parcel 打包器的缓存，删掉后下次构建会重新生成。"
+names = [".parcel-cache"]
+i18n.en.title = "Parcel cache"
+i18n.en.reason = "The Parcel bundler's cache; the next build makes it again."
+
+[[rule]]
+id = "devpack-cargo-target"
+kind = "build"
+title = "Cargo 构建目录"
+app = "Rust"
+cleanup = "tool"
+command = "cargo clean"
+reason = "Rust 项目的编译产物（cargo build 生成）。用 cargo clean 清理，下次编译时重新生成。"
+paths = ["**/target/debug", "**/target/release"]
+i18n.en.title = "Cargo build folder"
+i18n.en.reason = "A Rust project's build output (from cargo build). Clean it with cargo clean; the next build makes it again."

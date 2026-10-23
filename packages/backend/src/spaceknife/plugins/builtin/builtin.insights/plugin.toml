@@ -1,0 +1,10 @@
+# The app's insight rules, as a declarative plugin (docs/plugins.md 「内置插件」): insights/*.toml
+# is loaded by convention. Order of the rule sources: this plugin, the other plugins (by id), then
+# the user's folder (config_dir/insights/*.toml); a later rule with the same id replaces an earlier
+# one, `enabled = false` removes it (docs/insights.md).
+id = "builtin.insights"
+version = "1.0.0"
+name = { zh = "洞察规则", en = "Insight rules" }
+description = { zh = "内置的洞察规则：常见程序的文件夹和文件是什么、能不能删、怎样腾出空间。", en = "The built-in insight rules: what common applications' folders and files are, whether they can go, and how to reclaim their space." }
+author = "SpaceKnife"
+icon = "lightbulb"

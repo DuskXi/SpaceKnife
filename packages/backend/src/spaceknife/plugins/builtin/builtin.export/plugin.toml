@@ -1,0 +1,47 @@
+# The app's export templates and formats, as a plugin (docs/plugins.md 「内置插件」): the five
+# templates are declarations, the three formats functions in plugin.py. Their names stay what they
+# were before they were a plugin — a template by its @name (SpaceSniffer's names, case does not
+# matter), a format by its local name (csv / json / html) — and so does every byte they write
+# (packages/backend/tests/test_export.py, test_cli_run.py).
+id = "builtin.export"
+version = "1.0.0"
+name = { zh = "导出", en = "Export" }
+description = { zh = "内置的导出模板（SpaceSniffer 的四个和文件夹树）与 CSV、JSON、HTML 三种格式。", en = "The built-in export templates (SpaceSniffer's four and the folder tree) and the CSV, JSON and HTML formats." }
+author = "SpaceKnife"
+icon = "export"
+entry = "plugin.py"
+permissions = ["tree.read"]
+
+[[export_templates]]
+name = "grouped_by_folder"
+file = "templates/grouped-by-folder.sktpl"
+title = { zh = "按文件夹分组", en = "Grouped by folder" }
+description = { zh = "每个直接含有文件的文件夹一段：完整路径和占用，下面列出其中的文件（占用右对齐）。", en = "One section per folder that directly contains files: its full path and size on disk, followed by its files (sizes right-aligned)." }
+spacesniffer = true
+
+[[export_templates]]
+name = "first_level_folders"
+file = "templates/first-level-folders.sktpl"
+title = { zh = "第一层文件夹", en = "First-level folders" }
+description = { zh = "根下第一层的每个文件夹：完整路径和占用。", en = "Each folder on the first level below the root: full path and size on disk." }
+spacesniffer = true
+
+[[export_templates]]
+name = "simple_file_list"
+file = "templates/simple-file-list.sktpl"
+title = { zh = "文件清单", en = "File list" }
+description = { zh = "每个文件的完整路径，一行一个。", en = "The full path of each file, one per line." }
+spacesniffer = true
+
+[[export_templates]]
+name = "summary"
+file = "templates/summary.sktpl"
+title = { zh = "汇总", en = "Summary" }
+description = { zh = "总占用、文件夹数和文件数。", en = "Total size on disk, number of folders and number of files." }
+spacesniffer = true
+
+[[export_templates]]
+name = "folder_tree"
+file = "templates/folder-tree.sktpl"
+title = { zh = "文件夹树", en = "Folder tree" }
+description = { zh = "按层级缩进的文件夹和占用。", en = "Folders and their size on disk, indented by level." }

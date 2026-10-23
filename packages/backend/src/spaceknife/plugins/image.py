@@ -26,6 +26,8 @@ from loguru import logger
 from ..store.nodes import NodeStore
 
 ALIGN = 8
+HEADER = 16  # MAGIC and the segment's own name: the plugin checks it maps this segment
+MAGIC = b"SKIMG1\0\0"
 RUNNING_EVERY_S = 2.0
 KEEP_VERSIONS = 2
 
@@ -104,14 +106,17 @@ def export(
         else:
             arrays[name] = store.cols[name][:n]
     layout: list[dict[str, Any]] = []
-    offset = 0
+    offset = HEADER
     for name, arr in arrays.items():
         dtype = arr.dtype.newbyteorder("<") if arr.dtype.byteorder == ">" else arr.dtype
         layout.append({"name": name, "dtype": np.dtype(dtype).str, "offset": offset, "length": n})
         offset += arr.nbytes + _pad(arr.nbytes)
-    size = max(offset, ALIGN)
-    name = "sk" + secrets.token_hex(4)
+    size = max(offset, HEADER)
+    tag = secrets.token_bytes(4)
+    name = "sk" + tag.hex()
     shm = Segment(name, size)
+    head = MAGIC + tag + bytes(HEADER - len(MAGIC) - len(tag))
+    shm.mm[:HEADER] = head
     for spec, arr in zip(layout, arrays.values(), strict=True):
         dst = np.ndarray((n,), dtype=np.dtype(spec["dtype"]), buffer=shm.mm, offset=spec["offset"])
         dst[:] = arr
@@ -128,6 +133,7 @@ def export(
         "shm": shm.name,
         "size": size,
         "columns": layout,
+        "head": head.hex(),
     }
     return Exported(key, scan_id, version, epoch, n, frozenset(arrays), shm, desc)
 

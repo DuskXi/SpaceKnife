@@ -1,23 +1,30 @@
 """Exports of a scanned tree: SpaceSniffer-compatible templates, CSV / JSON / HTML, and output files.
 
 ``resolve(name)`` turns what the user names — a built-in template ("Simple file list"), a format
-(``csv`` / ``json`` / ``html``) or a template file — into a target; ``export_chunks`` renders it
-piece by piece and ``write_export`` writes the pieces to a file atomically, as UTF-8.
+(``csv`` / ``json`` / ``html``), a plugin's template or format (by full id) or a template file — into
+a target; ``export_chunks`` renders it piece by piece and ``write_export`` writes the pieces to a
+file atomically, as UTF-8.
+
+The built-in templates and formats are the shipped plugin ``builtin.export``
+(``plugins/builtin/builtin.export/``), registered in the extension registry like any plugin's:
+``BUILTIN_INFO``, ``BUILTIN_TEMPLATES`` and ``FORMATS`` are views of what it registered.
 """
 
 from __future__ import annotations
 
 import os
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
-from ..i18n import Texts, _
+from spaceknife_protocol.text import Text
+
+from ..i18n import Texts, _, language
 from ..store.nodes import NodeStore
-from .builtin import BUILTIN_INFO, BUILTIN_TEMPLATES, BuiltinInfo
 from .formats import (
-    FORMATS,
     ExportFormat,
     export_csv,
     export_html,
@@ -48,6 +55,7 @@ __all__ = [
     "ExportTree",
     "Ordering",
     "TemplateIssue",
+    "builtin_targets",
     "builtin_template",
     "check",
     "export_chunks",
@@ -64,6 +72,79 @@ __all__ = [
     "resolve",
     "write_export",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltinInfo:
+    """A built-in template as the UI lists it (``export.targets``)."""
+
+    name: str  # SpaceSniffer's name (command line, settings); never translated
+    file: str  # in the plugin folder: templates/<file>.sktpl
+    text: Text  # title in both languages
+    desc: Text  # description in both languages
+    spacesniffer: bool  # also built into SpaceSniffer
+
+    @property
+    def title_id(self) -> str:
+        return self.text.zh
+
+    @property
+    def description_id(self) -> str:
+        return self.desc.zh
+
+    @property
+    def title(self) -> str:
+        """The title in the current interface language."""
+        return self.text.get(language())
+
+    @property
+    def description(self) -> str:
+        """The description in the current interface language."""
+        return self.desc.get(language())
+
+
+def _shipped(kind: str) -> list[Any]:
+    from ..extensions import EXTENSIONS
+    from ..plugins import builtins
+
+    builtins.ensure()
+    return [c for c in EXTENSIONS.of(kind) if c.shipped and c.impl is not None]
+
+
+def builtin_targets() -> tuple[dict[str, BuiltinInfo], dict[str, ExportTemplate], dict[str, ExportFormat]]:
+    """The shipped templates (by their names) and formats (by key), in the order the UI lists them."""
+    info: dict[str, BuiltinInfo] = {}
+    templates: dict[str, ExportTemplate] = {}
+    for c in _shipped("export_template"):
+        tpl: ExportTemplate = c.impl
+        spec = c.spec
+        info[tpl.name] = BuiltinInfo(
+            tpl.name, spec.file, spec.title, spec.description or Text(zh=""), bool(spec.spacesniffer)
+        )
+        templates[tpl.name] = tpl
+    formats = {c.impl.key: c.impl for c in _shipped("export_format")}
+    return info, templates, formats
+
+
+def __getattr__(name: str) -> Any:
+    """``BUILTIN_INFO`` (name -> info), ``BUILTIN_TEMPLATES`` (name -> source), ``FORMATS`` (key ->
+    format): read from the registry when used (the shipped plugin registers on first use)."""
+    if name in ("BUILTIN_INFO", "BUILTIN_TEMPLATES", "FORMATS"):
+        info, _templates, formats = builtin_targets()
+        if name == "BUILTIN_INFO":
+            return info
+        if name == "FORMATS":
+            return formats
+        from ..plugins import builtins
+
+        loaded = builtins.get("builtin.export")
+        folder = loaded.folder if loaded is not None else None
+        return {
+            n: (folder / i.file).read_text(encoding="utf-8") if folder is not None else ""
+            for n, i in info.items()
+        }
+    raise AttributeError(name)
+
 
 # User-facing text of this module, translated when read (M7.5).
 TEXT = Texts(
@@ -84,18 +165,21 @@ class ExportError(Exception):
 
 def builtin_template(name: str) -> ExportTemplate | None:
     """A built-in template by its SpaceSniffer name; case does not matter (SpaceSniffer: it does)."""
-    source = BUILTIN_TEMPLATES.get(name)
-    if source is None:
+    _info, templates, _formats = builtin_targets()
+    found = templates.get(name)
+    if found is None:
         folded = name.casefold()
-        name = next((k for k in BUILTIN_TEMPLATES if k.casefold() == folded), "")
-        source = BUILTIN_TEMPLATES.get(name)
-    return parse_template(source, name) if source is not None else None
+        found = next((t for k, t in templates.items() if k.casefold() == folded), None)
+    return found
 
 
 def plugin_targets() -> list[tuple[str, ExportTemplate | ExportFormat]]:
-    """The enabled plugins' templates, then their formats, by full id (export.targets, the CLI)."""
+    """The enabled plugins' templates, then their formats, by full id (export.targets, the CLI);
+    the shipped ones too (``builtin.export.csv``), besides their own names."""
     from ..extensions import EXTENSIONS
+    from ..plugins import builtins
 
+    builtins.ensure()
     out: list[tuple[str, ExportTemplate | ExportFormat]] = []
     for kind in ("export_template", "export_format"):
         for c in EXTENSIONS.of(kind):
@@ -110,7 +194,7 @@ def resolve(name: str, *, cwd: Path | None = None) -> ExportTemplate | ExportFor
     found = builtin_template(name)
     if found is not None:
         return found
-    fmt = FORMATS.get(name.strip().lower())
+    fmt = builtin_targets()[2].get(name.strip().lower())
     if fmt is not None:
         return fmt
     for key, target in plugin_targets():
@@ -120,7 +204,7 @@ def resolve(name: str, *, cwd: Path | None = None) -> ExportTemplate | ExportFor
     if cwd is not None and not path.is_absolute():
         path = cwd / path
     if not path.is_file():
-        raise ExportError(TEXT["not_found"].format(name=name, builtins=_("、").join(BUILTIN_TEMPLATES)))
+        raise ExportError(TEXT["not_found"].format(name=name, builtins=_("、").join(builtin_targets()[0])))
     try:
         if path.stat().st_size > MAX_TEMPLATE_BYTES:
             raise ExportError(TEXT["too_big"].format(path=path, limit=MAX_TEMPLATE_BYTES >> 10))

@@ -43,7 +43,7 @@ from spaceknife_sdk.manifest import (
     VisualizationSpec,
     spec_key,
 )
-from spaceknife_sdk.plugin import Description
+from spaceknife_sdk.plugin import Description, Plugin
 
 from ..extensions.colors import RulePainter
 from ..extensions.registry import Contribution
@@ -347,14 +347,20 @@ def _class(rec: PluginRecord, spec: FileClassSpec) -> FilterClassInfo:
     )
 
 
-def build(host: PluginHost, rec: PluginRecord, desc: Description) -> list[Contribution]:
-    """Every contribution of ``rec``; AdapterError lists what is wrong (nothing is registered then)."""
+def build(
+    host: PluginHost | None, rec: PluginRecord, desc: Description, *, local: Plugin | None = None
+) -> list[Contribution]:
+    """Every contribution of ``rec``; AdapterError lists what is wrong (nothing is registered then).
+
+    ``local``: the plugin's own declarations, loaded in this process (the plugins shipped with the
+    app, :mod:`.builtins`): its code contributions call its functions directly, without a host."""
     specs, issues = specs_of(desc)
     pid = rec.id
     out: list[Contribution] = []
     pinyin = _pinyin(rec)
     seen: set[tuple[str, str]] = set()
     names = {spec_key(k, s) for k, s in specs if k == "command"}
+    own_classes = [_class(rec, s) for _k, s in specs if isinstance(s, FileClassSpec)]
     for kind, spec in specs:
         key = spec_key(kind, spec)
         if (kind, key) in seen:
@@ -362,7 +368,7 @@ def build(host: PluginHost, rec: PluginRecord, desc: Description) -> list[Contri
             continue
         seen.add((kind, key))
         try:
-            out += _one(host, rec, kind, spec, pinyin, names)
+            out += _one(host, rec, kind, spec, pinyin, names, local, own_classes)
         except AdapterError as exc:
             issues += exc.issues
         except (ActionError, ValueError, KeyError) as exc:
@@ -380,7 +386,7 @@ def build(host: PluginHost, rec: PluginRecord, desc: Description) -> list[Contri
                     f"{pid}.{_slug(f.stem)}",
                     pid,
                     None,
-                    (f"{pid}:{rel}", f.read_text("utf-8")),
+                    (_source(rec, rel), f.read_text("utf-8")),
                 )
             )
         except (OSError, UnicodeDecodeError) as exc:
@@ -398,25 +404,74 @@ def build(host: PluginHost, rec: PluginRecord, desc: Description) -> list[Contri
     return out
 
 
+def _source(rec: PluginRecord, rel: str) -> str:
+    """A rule file's source name (in rule problems and logs): ``<plugin id>:<path>``; the shipped
+    plugins' files by their names, as before they were plugins (``builtin.toml``)."""
+    return rel.rsplit("/", 1)[-1] if rec.builtin else f"{rec.id}:{rel}"
+
+
+def _local_format(rec: PluginRecord, spec: ExportFormatSpec, plugin: Plugin) -> Any:
+    """A shipped plugin's export format: its function runs on the export's thread, with a tree view
+    of the store (no host, no plugin process). Its key is the local name (``csv``), as before."""
+    from spaceknife_sdk.models import ExportInfo
+
+    from ..export import ExportFormat
+    from .local import local_tree
+
+    handler = plugin.handlers[("export", spec.name)]
+    fn = handler.fn
+
+    def chunks(store: Any, root: int, *, match: np.ndarray | None = None, filter_text: str = "") -> Any:
+        tree = local_tree(store)
+        if handler.arity >= 4:
+            return fn(tree, int(root), match, ExportInfo(filter=filter_text))
+        return fn(tree, int(root), match)
+
+    return ExportFormat(
+        key=spec.name,
+        title_id=spec.title.zh,
+        extension=spec.extension if spec.extension.startswith(".") else "." + spec.extension,
+        media_type=spec.media_type,
+        bom=spec.bom,
+        chunks=chunks,
+        text=spec.title,
+        description=spec.description,
+        plugin=rec.id,
+    )
+
+
 def _slug(text: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
     return (s or "x")[:24].rstrip("_") or "x"
 
 
 def _one(
-    host: PluginHost,
+    host: PluginHost | None,
     rec: PluginRecord,
     kind: str,
     spec: Spec,
     pinyin: dict[str, list[str]],
     commands: set[str],
+    local: Plugin | None = None,
+    own_classes: list[FilterClassInfo] | None = None,
 ) -> list[Contribution]:
     pid = rec.id
+    hostless = kind in (
+        "export_template",
+        "insight_rules",
+        "file_class",
+        "folder_rule",
+        "icon",
+        "filter_preset",
+    )
+    if host is None and not hostless and not (kind == "export_format" and local is not None):
+        raise AdapterError([Issue("builtin_kind", f"{kind} needs the plugin host")])
     cid = (
         f"{pid}.{spec_key(kind, spec)}" if kind not in ("keybinding", "folder_rule", "insight_rules") else ""
     )
     if kind == "command":
         assert isinstance(spec, CommandSpec)
+        assert host is not None
         return [Contribution("command", cid, pid, spec, _command(host, rec, spec, pinyin), spec.order)]
     if kind == "keybinding":
         assert isinstance(spec, KeySpec)
@@ -428,9 +483,11 @@ def _one(
         return [Contribution("setting", f"{pid}.{spec.name}", pid, spec, _setting(rec, spec))]
     if kind == "visualization":
         assert isinstance(spec, VisualizationSpec)
+        assert host is not None
         return [Contribution("visualization", cid, pid, spec, _visualization(host, rec, spec), spec.order)]
     if kind == "color_mode":
         assert isinstance(spec, ColorModeSpec)
+        assert host is not None
         if spec.by is not None:
             painter: Any = RulePainter(spec, set_of=host.set_mask_for_view)
         else:
@@ -438,6 +495,9 @@ def _one(
         return [Contribution("color_mode", cid, pid, spec, painter)]
     if kind == "export_format":
         assert isinstance(spec, ExportFormatSpec)
+        if local is not None:
+            return [Contribution("export_format", cid, pid, spec, _local_format(rec, spec, local))]
+        assert host is not None
         return [Contribution("export_format", cid, pid, spec, host.remote_format(rec, spec))]
     if kind == "export_template":
         assert isinstance(spec, ExportTemplateSpec)
@@ -451,7 +511,7 @@ def _one(
             raise AdapterError([Issue("rules", f"{spec.file}: {exc}")]) from exc
         return [
             Contribution(
-                "insight_rules", f"{pid}.{_slug(path.stem)}", pid, spec, (f"{pid}:{spec.file}", text)
+                "insight_rules", f"{pid}.{_slug(path.stem)}", pid, spec, (_source(rec, spec.file), text)
             )
         ]
     if kind == "file_class":
@@ -471,9 +531,7 @@ def _one(
         ]
     if kind == "filter_preset":
         assert isinstance(spec, FilterPresetSpec)
-        from ..filter.vocab import platform_vocab
-
-        parsed = parse(spec.expr, None, platform_vocab())
+        parsed = parse(spec.expr, None, preset_vocab(own_classes or []))
         if parsed.normal is None and not any(d.code == "unknown_set" for d in parsed.diagnostics):
             raise AdapterError([Issue("filter", f"filter {spec.name!r}: {spec.expr!r} does not parse")])
         if spec.name in commands:
@@ -515,6 +573,20 @@ def _one(
     # reports, fields, insights, cleanups, node sets, sources, watchers, annotators, hooks: the host
     # calls the plugin by kind and name when it needs them
     return [Contribution(kind, cid, pid, spec, (pid, spec_key(kind, spec)), getattr(spec, "order", 0))]
+
+
+def preset_vocab(own_classes: list[FilterClassInfo]) -> Any:
+    """The filter vocabulary a plugin's presets are parsed with: the app's, plus the classes the
+    same plugin declares (they are registered together with the preset)."""
+    from ..filter.vocab import platform_vocab
+
+    vocab = platform_vocab()
+    if not own_classes:
+        return vocab
+    known = {c.id for c in vocab.classes}
+    return vocab.model_copy(
+        update={"classes": [*vocab.classes, *(c for c in own_classes if c.id not in known)]}
+    )
 
 
 def _builtin_classes() -> set[str]:

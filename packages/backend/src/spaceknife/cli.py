@@ -130,11 +130,12 @@ def schema(
         output.write_text(text, encoding="utf-8", newline="\n")
 
 
-from . import cli_run, cli_scan  # noqa: E402
+from . import cli_plugin, cli_run, cli_scan  # noqa: E402
 
 app.command()(cli_scan.scan)
 app.command("run", context_settings=cli_run.CONTEXT_SETTINGS)(cli_run.run)
 app.add_typer(cli_scan.snapshot_app, name="snapshot")
+app.add_typer(cli_plugin.plugin_app, name="plugin")
 
 
 def _force_utf8_pipes() -> None:

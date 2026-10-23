@@ -2,8 +2,9 @@
 
 A rule (docs/insights.md) names path globs or bare names, plus optional conditions — the parent
 folder's name, platforms, node kinds, a minimum size, exclusions — and says what the item is and
-how to reclaim its space. Rules are TOML: the built-in ``builtin.toml`` plus the user's own files,
-which override built-ins by id.
+how to reclaim its space. Rules are TOML: the built-in ``builtin.toml`` (the shipped plugin
+``builtin.insights``), the enabled plugins' rule files, then the user's own files; a later rule
+overrides an earlier one by id.
 
 Lookups cost a few dict probes per path segment: every pattern is indexed by its most selective
 literal part (its last segment, its parent segment, its extension, or the first three characters
@@ -31,7 +32,6 @@ import threading
 import tomllib
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from importlib import resources
 from itertools import accumulate
 from pathlib import Path
 from typing import Any, Literal, cast, get_args
@@ -946,8 +946,18 @@ def compile_rules(
     return rule_set
 
 
+BUILTIN_PLUGIN = "builtin.insights"
+
+
+def builtin_file() -> Path:
+    """The built-in rules: a rule file of the shipped plugin ``builtin.insights``."""
+    from ..plugins.paths import builtin_dir
+
+    return builtin_dir() / BUILTIN_PLUGIN / "insights" / BUILTIN_SOURCE
+
+
 def builtin_text() -> str:
-    return resources.files(__package__ or "spaceknife.insights").joinpath(BUILTIN_SOURCE).read_text("utf-8")
+    return builtin_file().read_text("utf-8")
 
 
 def user_rules_dir() -> Path:
@@ -975,10 +985,19 @@ def _signature(folder: Path | None) -> tuple[tuple[str, int, int], ...]:
         return ()
 
 
-def set_plugin_sources(sources: list[tuple[str, str]]) -> RuleSet:
-    """The plugins' rule files changed: built-in, then the plugins' (by plugin id), then the user's."""
-    global _plugin_sources
+def set_plugin_sources(sources: list[tuple[str, str]]) -> RuleSet | None:
+    """The registered rule files changed (the shipped plugin's first, then the plugins' by plugin id;
+    the user's come after them): the active set is built again — later, while the shipped plugins
+    are still registering."""
+    global _plugin_sources, _active
+    from ..plugins import builtins
+
     _plugin_sources = list(sources)
+    if builtins.loading() or not builtins.loaded():
+        # built on first use instead: loading the shipped plugins from here (inside the registry's
+        # lock, maybe while another thread loads them) could deadlock
+        _active = None
+        return None
     return load_rules(_user_dir)
 
 
@@ -993,9 +1012,14 @@ def load_rules(extra_dir: Path | None = None, *, host: str | None = None) -> Rul
     file name; later sources override earlier ones by id), made the active set for the module-level
     ``match`` functions."""
     global _active, _user_dir, _user_sig
+    from ..plugins import builtins
+
+    builtins.ensure()  # the built-in rules are a plugin's: registered on first use
     _user_dir = extra_dir
     _user_sig = _signature(extra_dir)
-    sources = [(BUILTIN_SOURCE, builtin_text()), *_plugin_sources]
+    sources = list(_plugin_sources)
+    if not any(name == BUILTIN_SOURCE for name, _text in sources):  # the shipped plugin did not load
+        sources.insert(0, (BUILTIN_SOURCE, builtin_text()))
     problems: list[RuleProblem] = []
     if extra_dir is not None:
         try:
@@ -1020,7 +1044,7 @@ def active_rules() -> RuleSet:
     rule_set = _active
     if rule_set is None:
         with _lock:
-            rule_set = _active if _active is not None else load_rules()
+            rule_set = _active if _active is not None else load_rules(_user_dir)
     return rule_set
 
 

@@ -328,6 +328,9 @@ class ExportTemplateSpec(Spec):
     title: TextLike
     description: TextLike | None = None
     file_name: str = ""
+    spacesniffer: bool = Field(
+        default=False, description="It uses only SpaceSniffer's template language (works there too)"
+    )
 
     @field_validator("file")
     @classmethod
@@ -437,6 +440,7 @@ class MethodDecl(Spec):
     public: bool = True
     params: dict[str, Any] | None = Field(default=None, description="JSON Schema of the params")
     result: dict[str, Any] | None = Field(default=None, description="JSON Schema of the result")
+    doc: str = Field(default="", max_length=400, description="The first paragraph of its docstring")
 
 
 class EventDecl(Spec):

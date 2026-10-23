@@ -103,6 +103,7 @@ class MockHost:
     files_root: Path | None = None
     _env: dict[str, str | None] = field(default_factory=dict)
     _started: bool = False
+    _settings_pending: bool = False
     _stores: list[tuple[str, Any]] = field(default_factory=list)
 
     # ------------------------------------------------------------- setting up
@@ -230,6 +231,9 @@ class MockHost:
                     ),
                 )
                 await self.server.plugins.push_update({"roots": self.server.plugins.api.scan_roots()})
+        if self._settings_pending:  # set_setting: the plugin sees the value before the next call
+            self._settings_pending = False
+            await self.server.plugins.push_update({"settings": True})
         return self.server.plugins
 
     async def scan_dir(self, path: str | os.PathLike[str]) -> str:
@@ -473,12 +477,36 @@ class MockHost:
         return list(self.server.ops.basket.items())
 
     def set_setting(self, name: str, value: Any) -> None:
+        """Change one of the plugin's settings (as the settings page would)."""
         self.server.settings.update({f"plugin.{self.plugin_id}.{name}": value})
+        self._settings_pending = True
 
     def set_lang(self, lang: str) -> None:
         from spaceknife import i18n
 
         i18n.set_language("en" if lang.startswith("en") else "zh-CN")
+
+    # ------------------------------------------------------------- checks
+
+    async def check(self, *, strict: bool = False) -> None:
+        """What ``plugin check`` checks, on this plugin as it runs here: the files and the
+        description, then every code contribution once on synthetic trees. Raises AssertionError
+        listing every problem (warnings too with ``strict``)."""
+        from spaceknife.plugins.check import run_contracts, static_issues
+        from spaceknife_sdk.manifest import load_manifest
+
+        host = await self._ready()
+        rec = host.records[self.plugin_id]
+        assert rec.description is not None
+        issues = static_issues(self.folder, load_manifest(self.folder), rec.description)
+        scan_id = self.scan_id
+        try:
+            issues += await run_contracts(self, rec.description)
+        finally:
+            self.scan_id = scan_id
+        bad = [i for i in issues if i.severity == "error" or (strict and i.severity == "warning")]
+        if bad:
+            raise AssertionError("plugin check:\n" + "\n".join("  " + i.text() for i in bad))
 
     # ------------------------------------------------------------- without async
 

@@ -19,8 +19,21 @@ hidden = [
     *collect_submodules("spaceknife_sdk"),
     *collect_submodules("spaceknife_native"),
 ]
-# locales/*.json, insights/builtin.toml, export/builtin/*.sktpl
+# the standard library plugins may import (spaceknife_sdk/imports.py; plugin check holds plugins to
+# it): nothing of the app's own needs sqlite3, tarfile, zoneinfo …, so PyInstaller would leave them out
+from spaceknife_sdk.imports import STDLIB
+
+for _mod in sorted(STDLIB - {"__future__"}):
+    hidden += collect_submodules(_mod) if _mod in ("xml", "email", "urllib", "concurrent", "asyncio") else [_mod]
+# locales/*.json; the shipped plugins (plugins/builtin/<id>/: plugin.toml, rules, templates, and
+# plugin.py, which is no Python package: the plugin loader imports it from the file)
 datas = collect_data_files("spaceknife", excludes=["**/__pycache__/**"])
+datas += collect_data_files(
+    "spaceknife", includes=["plugins/builtin/**/*.py"], excludes=["**/__pycache__/**"], include_py_files=True
+)
+# the panel bridge copy (plugin build / plugin dev) and the author docs (spaceknife plugin docs)
+datas += collect_data_files("spaceknife_sdk", excludes=["**/__pycache__/**"])
+datas += [(ROOT + "/docs/plugin-dev.md", "spaceknife_sdk/docs")]
 
 a = Analysis(
     [SPECPATH + "/backend_entry.py"],

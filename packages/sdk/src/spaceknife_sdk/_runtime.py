@@ -37,7 +37,7 @@ from ._link import Image
 from .context import CallInfo, Context, PluginSelf, RuntimeState
 from .errors import Cancelled, HostError, ManifestError, PluginError
 from .manifest import Manifest
-from .models import ChangeUnit, Listing, Proposal, ScanInfo, VisualInput
+from .models import ChangeUnit, ExportInfo, Listing, Proposal, ScanInfo, VisualInput
 from .plugin import Handler, Plugin, loaded
 from .tree import Columns
 
@@ -181,6 +181,22 @@ class Dispatcher:
             st.granted = frozenset(msg["granted"])
         if msg.get("roots") is not None:
             st.roots = [str(r) for r in msg["roots"]]
+            self._paths_changed()
+
+    def _paths_changed(self) -> None:
+        st = self.state
+        if st.on_paths is not None:
+            st.on_paths([*st.roots, *st.picked])
+
+    def picked(self, uri: Any) -> None:
+        """A scan source's URI (the user chose it): readable from now on, as scanned folders are."""
+        st = self.state
+        if "files.read" not in st.granted or not isinstance(uri, str) or not os.path.isabs(uri):
+            return
+        real = os.path.realpath(uri)
+        if real not in st.picked:
+            st.picked = [*st.picked[-63:], real]
+            self._paths_changed()
 
     # ------------------------------------------------------------- calls
 
@@ -196,6 +212,8 @@ class Dispatcher:
     ) -> tuple[Any, list[bytes]]:
         """Run one call; returns (JSON value, binary frames) or raises :class:`CallError`."""
         handler = self.plugin.handlers.get((kind, name))
+        if kind in ("source", "watch") and isinstance(params, Mapping):
+            self.picked(params.get("uri"))
         if handler is None:
             raise CallError(ErrorCode.METHOD_NOT_FOUND, f"{self.plugin.id} has no {kind} {name!r}")
         info = CallInfo.from_dict({**ctx_info, "id": call_id, "kind": kind, "name": name})
@@ -286,7 +304,10 @@ class Dispatcher:
                 match = decode_frame(frames[0])[1]["match"].astype(bool)
             root = int(p.get("root", 0))
             tree = ctx.tree
-            gen = h.fn(tree, root, match)
+            if h.arity >= 4:
+                gen = h.fn(tree, root, match, ExportInfo(filter=str(p.get("filter") or "")))
+            else:
+                gen = h.fn(tree, root, match)
             count = await asyncio.get_running_loop().run_in_executor(
                 self.executor, contextvars.copy_context().run, self._drain, gen, ctx, emit
             )
@@ -491,12 +512,18 @@ class ChildLink:
     def image(self, scan_id: str, columns: Sequence[str]) -> Image:
         from .image import map_image
 
-        value, _ = self.request("host.image", {"scan_id": scan_id, "columns": list(columns)})
-        key = str(value.get("key", ""))
-        hit = self._images.get(scan_id)
-        if hit is not None and hit.key == key and set(columns) <= set(hit.columns):
-            return hit
-        image = map_image(value)
+        for attempt in range(2):
+            value, _ = self.request("host.image", {"scan_id": scan_id, "columns": list(columns)})
+            key = str(value.get("key", ""))
+            hit = self._images.get(scan_id)
+            if hit is not None and hit.key == key and set(columns) <= set(hit.columns):
+                return hit
+            try:
+                image = map_image(value)
+                break
+            except OSError as exc:  # released between the answer and the mapping: ask once more
+                if attempt:
+                    raise HostError(ErrorCode.UNKNOWN_SCAN, f"the tree image is gone: {exc}") from None
         if hit is not None:
             hit.close()
             with contextlib.suppress(HostError):

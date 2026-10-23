@@ -1,0 +1,13 @@
+@name=Build output per folder
+# Export template (syntax: docs/export-templates.md): the first-level folders, the largest first.
+@file=Folders.txt
+@blocks=folders
+@sort=size
+@order=desc
+@detail
+{script}
+{   if {<%nestinglevel%>} == {1}
+  ? {   if {<%isfolder%>} == {true}
+      ? {<%disksize%>{&tab}<%pathfile%>{&br}}
+    }
+}

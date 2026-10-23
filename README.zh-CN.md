@@ -120,6 +120,7 @@ macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需�
 - UI 需求规格（512 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
 - 协议：[docs/protocol.md](docs/protocol.md)
 - 可视化（引擎、线上布局、前端组件）：[docs/visuals.md](docs/visuals.md)
+- 插件：写插件 [docs/plugin-dev.md](docs/plugin-dev.md)（`spaceknife plugin new`，例子在 [examples/plugins](examples/plugins)）；设计 [docs/plugins.md](docs/plugins.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
 - 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)

@@ -1,0 +1,166 @@
+{
+ "zh-CN": [
+  {
+   "name": "Grouped by folder",
+   "title": "按文件夹分组",
+   "description": "每个直接含有文件的文件夹一段：完整路径和占用，下面列出其中的文件（占用右对齐）。",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "File report.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "First level folders",
+   "title": "第一层文件夹",
+   "description": "根下第一层的每个文件夹：完整路径和占用。",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "First level.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "Simple file list",
+   "title": "文件清单",
+   "description": "每个文件的完整路径，一行一个。",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "File list.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "Summary",
+   "title": "汇总",
+   "description": "总占用、文件夹数和文件数。",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "Summary.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "Folder tree",
+   "title": "文件夹树",
+   "description": "按层级缩进的文件夹和占用。",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "Folder tree.txt",
+   "spacesniffer": false,
+   "plugin": null
+  },
+  {
+   "name": "csv",
+   "title": "CSV 表格",
+   "description": "",
+   "kind": "format",
+   "extension": ".csv",
+   "file_name": "",
+   "spacesniffer": false,
+   "plugin": null
+  },
+  {
+   "name": "json",
+   "title": "JSON 数据",
+   "description": "",
+   "kind": "format",
+   "extension": ".json",
+   "file_name": "",
+   "spacesniffer": false,
+   "plugin": null
+  },
+  {
+   "name": "html",
+   "title": "HTML 报告",
+   "description": "",
+   "kind": "format",
+   "extension": ".html",
+   "file_name": "",
+   "spacesniffer": false,
+   "plugin": null
+  }
+ ],
+ "en": [
+  {
+   "name": "Grouped by folder",
+   "title": "Grouped by folder",
+   "description": "One section per folder that directly contains files: its full path and size on disk, followed by its files (sizes right-aligned).",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "File report.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "First level folders",
+   "title": "First-level folders",
+   "description": "Each folder on the first level below the root: full path and size on disk.",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "First level.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "Simple file list",
+   "title": "File list",
+   "description": "The full path of each file, one per line.",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "File list.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "Summary",
+   "title": "Summary",
+   "description": "Total size on disk, number of folders and number of files.",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "Summary.txt",
+   "spacesniffer": true,
+   "plugin": null
+  },
+  {
+   "name": "Folder tree",
+   "title": "Folder tree",
+   "description": "Folders and their size on disk, indented by level.",
+   "kind": "template",
+   "extension": "txt",
+   "file_name": "Folder tree.txt",
+   "spacesniffer": false,
+   "plugin": null
+  },
+  {
+   "name": "csv",
+   "title": "CSV table",
+   "description": "",
+   "kind": "format",
+   "extension": ".csv",
+   "file_name": "",
+   "spacesniffer": false,
+   "plugin": null
+  },
+  {
+   "name": "json",
+   "title": "JSON data",
+   "description": "",
+   "kind": "format",
+   "extension": ".json",
+   "file_name": "",
+   "spacesniffer": false,
+   "plugin": null
+  },
+  {
+   "name": "html",
+   "title": "HTML report",
+   "description": "",
+   "kind": "format",
+   "extension": ".html",
+   "file_name": "",
+   "spacesniffer": false,
+   "plugin": null
+  }
+ ]
+}

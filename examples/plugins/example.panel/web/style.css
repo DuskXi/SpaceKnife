@@ -1,0 +1,16 @@
+.row {
+  display: grid;
+  grid-template-columns: 4em 1fr 6em;
+  gap: 8px;
+  align-items: center;
+  margin: 3px 0;
+}
+.bar {
+  height: 12px;
+  border-radius: 3px;
+  background: var(--sk-accent, #4c8bf5);
+}
+.size {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

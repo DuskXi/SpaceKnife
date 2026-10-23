@@ -1,0 +1,566 @@
+"""``spaceknife plugin …``: write, check, try and manage plugins (docs/plugin-dev.md 「命令行」).
+
+    spaceknife plugin new example.hello --with report,command     a working skeleton, built
+    spaceknife plugin check [DIR] [--strict] [--json]              every problem, with the fix
+    spaceknife plugin build [DIR] [--zip]                          generated files; the package
+    spaceknife plugin call DIR METHOD '{"a": 1}' [--scan PATH]     a method's result, events, logs
+    spaceknife plugin render DIR report:NAME [--scan PATH]         a report / field / cleanup / export as text
+    spaceknife plugin dev [DIR] [--scan PATH]                      a backend with the plugin, reloaded on save
+    spaceknife plugin install DIR|ZIP / uninstall ID / list / enable ID / disable ID
+    spaceknife plugin schema [--manifest | DIR]                    JSON Schema of plugin.toml or of a plugin
+    spaceknife plugin docs [--section ANCHOR]                      the author docs, or one section
+
+``call`` and ``render`` run the plugin in a :class:`~spaceknife_sdk.testing.MockHost` (a server
+without a socket, its data in a temporary folder) — in a plugin process, as the app does, unless
+``--inprocess``. ``install``, ``list``, ``enable`` … change the real data folder (``SPACEKNIFE_HOME``
+relocates it); a running app sees the change after its plugins page is refreshed or a restart.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Annotated, Any
+
+import typer
+from rich.console import Console
+
+plugin_app = typer.Typer(
+    help="Write, check, try and manage plugins (docs/plugin-dev.md).",
+    no_args_is_help=True,
+    add_completion=False,
+)
+out = Console(highlight=False, soft_wrap=True)
+err = Console(stderr=True, highlight=False, soft_wrap=True)
+
+DirArg = Annotated[Path, typer.Argument(help="The plugin's folder (default: the current folder).")]
+
+
+def _quiet() -> None:
+    from .log import LogFormat, setup_logging
+
+    setup_logging(os.environ.get("SPACEKNIFE_LOG_LEVEL", "WARNING").upper(), LogFormat.PLAIN)
+
+
+def _folder(target: str | Path) -> Path:
+    """A plugin folder from a path, or the folder of an installed / shipped plugin by id."""
+    p = Path(target).expanduser()
+    if (p / "plugin.toml").is_file():
+        return p.resolve()
+    from spaceknife_protocol.plugins import valid_plugin_id
+
+    from .plugins import paths as ppaths
+
+    name = str(target)
+    if valid_plugin_id(name) or valid_plugin_id(name, builtin=True):
+        for base in (ppaths.plugins_dir(), ppaths.builtin_dir()):
+            if (base / name / "plugin.toml").is_file():
+                return (base / name).resolve()
+    err.print(f"[red]no plugin.toml in {p} (and no installed plugin {name!r})[/red]")
+    raise typer.Exit(2)
+
+
+def _fail(message: str, code: int = 1) -> typer.Exit:
+    err.print(f"[red]{message}[/red]")
+    return typer.Exit(code)
+
+
+# --------------------------------------------------------------------------- writing
+
+
+@plugin_app.command("new")
+def new(
+    plugin_id: Annotated[str, typer.Argument(metavar="ID", help="The plugin id, e.g. example.hello.")],
+    with_: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--with",
+            help="Parts, comma-separated: method report command setting cleanup panel visual color export "
+            "source set field insight hook (default: report,command).",
+        ),
+    ] = None,
+    dir: Annotated[Path | None, typer.Option(help="Where to create it (default: ./ID).")] = None,
+    title: Annotated[str | None, typer.Option(help="The plugin's name (default: from the id).")] = None,
+) -> None:
+    """Create a plugin skeleton that passes `plugin check --strict` and its own tests as it is."""
+    from spaceknife_sdk import scaffold
+
+    from .plugins.build import build as build_plugin
+
+    _quiet()
+    folder = (dir or Path.cwd() / plugin_id).resolve()
+    try:
+        files = scaffold.write(folder, plugin_id, with_ or [], title=title)
+    except (ValueError, FileExistsError) as exc:
+        raise _fail(str(exc), 2) from None
+    result = build_plugin(folder)
+    for i in result.issues:
+        err.print(f"[yellow]{i.text()}[/yellow]")
+    out.print(f"created {folder}")
+    for f in sorted({*(str(p.relative_to(folder)) for p in files), *result.written}):
+        out.print(f"  {f}")
+    out.print("next:")
+    out.print(f"  spaceknife plugin check {folder}")
+    out.print(f"  spaceknife plugin render {folder} report:largest --scan <a folder>")
+    out.print(f"  uv run pytest {folder / 'tests'}")
+    out.print(f"  spaceknife plugin install {folder}")
+
+
+@plugin_app.command("check")
+def check(
+    folder: DirArg = Path("."),
+    as_json: Annotated[
+        bool, typer.Option("--json", help="One JSON document (for tools and agents).")
+    ] = False,
+    strict: Annotated[bool, typer.Option(help="Warnings count as problems too.")] = False,
+    contracts: Annotated[
+        bool, typer.Option(help="Run the code on synthetic trees (--no-contracts: files only).")
+    ] = True,
+    inprocess: Annotated[bool, typer.Option(help="Run the contracts in this process.")] = False,
+) -> None:
+    """Every check (docs/plugin-dev.md 「检查」); exit status 1 when something is wrong."""
+    from .plugins.check import main_check
+
+    _quiet()
+    code = main_check(
+        _folder(folder), strict=strict, as_json=as_json, contracts=contracts, process=not inprocess
+    )
+    raise typer.Exit(code)
+
+
+@plugin_app.command("build")
+def build(
+    folder: DirArg = Path("."),
+    zip: Annotated[bool, typer.Option("--zip", help="Also pack dist/<id>-<version>.zip.")] = False,
+) -> None:
+    """Write generated/schema.json, web/sk-plugin.d.ts, generated/pinyin.json, web/_sk/; list texts
+    without English."""
+    from .plugins.build import build as build_plugin
+
+    _quiet()
+    result = build_plugin(_folder(folder), zip=zip)
+    for i in result.issues:
+        err.print(f"[red]{i.text()}[/red]")
+    if not result.ok:
+        raise typer.Exit(1)
+    for rel in result.written:
+        out.print(f"wrote {rel}")
+    if not result.written:
+        out.print("everything is up to date")
+    if result.missing_en:
+        out.print(f"{len(result.missing_en)} text(s) without English:")
+        for t in result.missing_en:
+            out.print(f"  {t}")
+    if result.zip is not None:
+        out.print(f"packed {result.zip}")
+
+
+# --------------------------------------------------------------------------- trying
+
+
+@contextmanager
+def _plugin_logs(plugin: str) -> Iterator[list[str]]:
+    from loguru import logger
+
+    lines: list[str] = []
+
+    def sink(message: Any) -> None:
+        rec = message.record
+        if rec["extra"].get("source") == f"plugin:{plugin}" or plugin in str(rec["message"])[:200]:
+            lines.append(f"{rec['level'].name}: {rec['message']}")
+
+    handle = logger.add(sink, level="DEBUG", format="{message}")
+    try:
+        yield lines
+    finally:
+        logger.remove(handle)
+
+
+async def _mock(
+    folder: Path, scan: Path | None, snapshot: Path | None, inprocess: bool, lang: str | None
+) -> Any:
+    from spaceknife_sdk.testing import MockHost
+
+    from .plugins.check import _trees
+
+    if lang:
+        os.environ["SPACEKNIFE_LANGUAGE"] = "en" if lang.startswith("en") else "zh-CN"
+    host = MockHost.load(folder, process=not inprocess)
+    try:
+        await host.start()
+    except RuntimeError as exc:  # the host refused it (it does not import, a contribution is wrong)
+        await host.close()
+        err.print(f"[red]{exc}[/red]")
+        err.print("[dim]spaceknife plugin check shows where[/dim]")
+        raise typer.Exit(1) from None
+    if scan is not None:
+        await host.scan_dir(await asyncio.to_thread(lambda: scan.expanduser().resolve()))
+    elif snapshot is not None:
+        from .store import snapshot as snap
+
+        store, _header = snap.load(snapshot)
+        host.scan(store)
+    elif (folder / "fixtures" / "tree").is_dir():
+        await host.scan_dir(folder / "fixtures" / "tree")
+    else:
+        host.scan(_trees()[0])
+        err.print("[dim](a synthetic tree; --scan PATH scans a real folder)[/dim]")
+    return host
+
+
+def _print_side_effects(host: Any, logs: list[str]) -> None:
+    for name, payloads in host.events.items():
+        for p in payloads:
+            err.print(f"event {name}: {json.dumps(p, ensure_ascii=False)}")
+    for t in host.toasts:
+        err.print(f"toast: {t}")
+    for line in logs:
+        err.print(f"log {line}")
+
+
+@plugin_app.command("call")
+def call(
+    target: Annotated[str, typer.Argument(metavar="DIR|ID", help="The plugin's folder or id.")],
+    method: Annotated[str, typer.Argument(help="A method's local name.")],
+    params: Annotated[str, typer.Argument(help="Its params as JSON.")] = "{}",
+    scan: Annotated[Path | None, typer.Option(help="Scan this folder first.")] = None,
+    snapshot: Annotated[Path | None, typer.Option(help="Use this snapshot as the scan.")] = None,
+    inprocess: Annotated[bool, typer.Option(help="Run the plugin in this process.")] = False,
+    lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
+) -> None:
+    """Call a method: prints its JSON result; events, toasts and the plugin's log to stderr."""
+    folder = _folder(target)
+    _quiet()
+    try:
+        args = json.loads(params)
+    except ValueError as exc:
+        raise _fail(f"params are not JSON: {exc}", 2) from None
+    if not isinstance(args, dict):
+        raise _fail("params must be a JSON object", 2)
+
+    async def run() -> int:
+        from .server.rpc import RpcError
+
+        host = await _mock(folder, scan, snapshot, inprocess, lang)
+        try:
+            with _plugin_logs(host.plugin_id) as logs:
+                try:
+                    value, frames = await host.call_frames(method, **args)
+                except RpcError as exc:
+                    _print_side_effects(host, logs)
+                    err.print(f"[red]error {exc.code}: {exc.message}[/red]")
+                    if exc.data:
+                        err.print(json.dumps(exc.data, ensure_ascii=False))
+                    return 1
+                out.print(json.dumps(value, ensure_ascii=False, indent=1, default=str))
+                for f in frames:
+                    shown = {k: (v[:20].tolist(), f"{len(v)} values") for k, v in f.items()}
+                    out.print(f"columns: {shown}")
+                _print_side_effects(host, logs)
+                return 0
+        finally:
+            await host.close()
+
+    raise typer.Exit(asyncio.run(run()))
+
+
+@plugin_app.command("render")
+def render(
+    target: Annotated[str, typer.Argument(metavar="DIR|ID", help="The plugin's folder or id.")],
+    what: Annotated[
+        str,
+        typer.Argument(
+            help="report:NAME, field[:NAME], insight, cleanup:NAME, export:NAME, set:NAME, "
+            "visual:NAME, color:NAME."
+        ),
+    ],
+    scan: Annotated[Path | None, typer.Option(help="Scan this folder first.")] = None,
+    snapshot: Annotated[Path | None, typer.Option(help="Use this snapshot as the scan.")] = None,
+    node: Annotated[str | None, typer.Option(help="The node, relative to the scan's root (a/b.txt).")] = None,
+    format: Annotated[str, typer.Option(help="text, json or md.")] = "text",
+    inprocess: Annotated[bool, typer.Option(help="Run the plugin in this process.")] = False,
+    lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
+) -> None:
+    """Show what a contribution produces, without the app: a report as text, fields, the cleanup's
+    candidates, an export's output, a node set, a visualization's or colour mode's frame."""
+    folder = _folder(target)
+    _quiet()
+    kind, _, name = what.partition(":")
+    if kind not in ("report", "field", "insight", "cleanup", "export", "set", "visual", "color"):
+        raise _fail(f"unknown {kind!r}: report, field, insight, cleanup, export, set, visual or color", 2)
+    if kind in ("report", "cleanup", "export", "set", "visual", "color") and not name:
+        raise _fail(f"{kind}:NAME — which one?", 2)
+
+    async def run() -> int:
+        from .server.rpc import RpcError
+
+        host = await _mock(folder, scan, snapshot, inprocess, lang)
+        try:
+            with _plugin_logs(host.plugin_id) as logs:
+                try:
+                    node_id = host.find(node) if node else None
+                    text = await _render(host, kind, name, node_id, format)
+                except (RpcError, StopIteration, AssertionError) as exc:
+                    _print_side_effects(host, logs)
+                    message = getattr(exc, "message", None) or str(exc) or type(exc).__name__
+                    if isinstance(exc, StopIteration):
+                        message = f"no {node!r} in the scan"
+                    err.print(f"[red]{message}[/red]")
+                    return 1
+                sys.stdout.write(text if text.endswith("\n") else text + "\n")
+                _print_side_effects(host, logs)
+                return 0
+        finally:
+            await host.close()
+
+    raise typer.Exit(asyncio.run(run()))
+
+
+async def _render(host: Any, kind: str, name: str, node: int | None, fmt: str) -> str:
+    def dump(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, indent=1, default=str)
+
+    if kind == "report":
+        rep = await host.report(name, node=node)
+        if fmt == "json":
+            return dump(rep.model_dump(mode="json"))
+        text = str(host.text(rep))
+        return text if fmt != "md" else text.replace("\n", "  \n")
+    if kind in ("field", "insight"):
+        if node is None:
+            node = next(iter(host.store.roots()))
+        items = await (host.fields(node=node) if kind == "field" else host.insights(node=node))
+        rows = [i.model_dump(mode="json") for i in items]
+        if name:
+            rows = [r for r in rows if str(r.get("id", "")).endswith("." + name)]
+        if fmt == "json":
+            return dump(rows)
+        return (
+            "\n".join(
+                f"{r.get('title')}: {r.get('value', r.get('reason', ''))} {r.get('unit', '')}".rstrip()
+                for r in rows
+            )
+            or "(nothing for this node)"
+        )
+    if kind == "cleanup":
+        items = await host.cleanup(name)
+        if fmt == "json":
+            import dataclasses
+
+            return dump([dataclasses.asdict(i) for i in items])
+        lines = [f"{i.path}\t{i.alloc}\t{i.reason}" + ("" if i.checked else "\t(unchecked)") for i in items]
+        return "\n".join([*lines, f"{len(items)} candidate(s), {sum(i.alloc for i in items)} bytes"])
+    if kind == "export":
+        data = await host.export(name)
+        return data if isinstance(data, str) else data.decode("utf-8", "replace")
+    if kind == "set":
+        mask = await host.node_set(name)
+        if mask is None:
+            return "(empty)"
+        import numpy as np
+
+        ids = np.flatnonzero(mask) if mask.dtype == np.bool_ else mask
+        store = host.store
+        return "\n".join(store.path(int(i)) for i in ids[:1000]) + (
+            f"\n… {len(ids) - 1000} more" if len(ids) > 1000 else ""
+        )
+    frame = await (host.visual(name) if kind == "visual" else host.color(name))
+    draw = frame.draw
+    lines = [f"{len(draw)} rows drawn (the row contract holds)"]
+    if kind == "color" and frame.pal is not None:
+        import numpy as np
+
+        counts = np.bincount(frame.pal.astype(np.int64))
+        lines.append("palette index: rows " + ", ".join(f"{i}: {int(c)}" for i, c in enumerate(counts) if c))
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- developing
+
+
+@plugin_app.command("dev")
+def dev(
+    folder: DirArg = Path("."),
+    scan: Annotated[Path | None, typer.Option(help="Start a scan of this folder.")] = None,
+    port: Annotated[int, typer.Option(help="The backend's port (0: a free one).")] = 0,
+    ui: Annotated[
+        Path | None,
+        typer.Option(help="A built renderer (apps/electron/out/renderer) to serve in browser mode."),
+    ] = None,
+    home: Annotated[
+        Path | None,
+        typer.Option(help="Data folder (default: a temporary one; your settings stay untouched)."),
+    ] = None,
+    allow_origin: Annotated[list[str] | None, typer.Option(help="Extra allowed WebSocket origin.")] = None,
+) -> None:
+    """Run a backend with the plugin linked; on every save it is described and started again and the
+    frontends are told (extensions.changed). With a built renderer, also serves the app in a browser."""
+    from .devui import run_dev
+
+    target = _folder(folder)
+    raise typer.Exit(run_dev(target, scan=scan, port=port, ui=ui, home=home, origins=allow_origin or []))
+
+
+# --------------------------------------------------------------------------- managing
+
+
+@contextmanager
+def _host() -> Iterator[Any]:
+    """The real data folder's plugin host, without a server listening."""
+    from .server.app import Server, ServerConfig
+
+    _quiet()
+    loop = asyncio.new_event_loop()
+    server = Server(ServerConfig(token="cli-plugin-token-0123456789", hello_timeout=1.0, ping_interval=None))
+    try:
+        loop.run_until_complete(server.plugins.start())
+        yield loop, server.plugins
+    finally:
+        loop.run_until_complete(server.plugins.close())
+        loop.run_until_complete(server.scans.close())
+        loop.close()
+
+
+def _rpc(fn: Any) -> Any:
+    from .server.rpc import RpcError
+
+    try:
+        return fn()
+    except RpcError as exc:
+        raise _fail(exc.message) from None
+
+
+@plugin_app.command("install")
+def install(
+    source: Annotated[Path, typer.Argument(metavar="DIR|ZIP", help="A plugin folder or a .zip.")],
+    replace: Annotated[bool, typer.Option(help="Replace an installed plugin with the same id.")] = False,
+) -> None:
+    """Install into the data folder's plugins/ (it stays off until enabled)."""
+    with _host() as (loop, host):
+        res = _rpc(lambda: loop.run_until_complete(host.install(str(source.expanduser().resolve()), replace)))
+        if res.conflict:
+            raise _fail(f"{res.id} {res.existing_version} is installed: --replace to install {res.version}")
+        out.print(f"installed {res.id} {res.version}; enable it: spaceknife plugin enable {res.id}")
+
+
+@plugin_app.command("uninstall")
+def uninstall(
+    plugin: Annotated[str, typer.Argument(metavar="ID")],
+    data: Annotated[bool, typer.Option("--data", help="Remove its data folder too.")] = False,
+) -> None:
+    """Move an installed plugin to the recycle bin."""
+    with _host() as (loop, host):
+        _rpc(lambda: loop.run_until_complete(host.uninstall(plugin, data)))
+        out.print(f"uninstalled {plugin}")
+
+
+@plugin_app.command("list")
+def list_(as_json: Annotated[bool, typer.Option("--json")] = False) -> None:
+    """The plugins: shipped, installed and linked, with their state."""
+    with _host() as (_loop, host):
+        res = host.list_plugins()
+    if as_json:
+        out.print_json(json.dumps(res.model_dump(mode="json"), ensure_ascii=False))
+        return
+    out.print(f"folder: {res.folder}" + ("  (developer mode)" if res.dev_mode else ""))
+    for p in res.plugins:
+        tag = "built-in" if p.builtin else "linked" if p.dev else ""
+        out.print(f"  {p.id:<28} {p.version:<10} {p.state:<14} {tag} {p.name}")
+
+
+@plugin_app.command("enable")
+def enable(
+    plugin: Annotated[str, typer.Argument(metavar="ID")],
+    yes: Annotated[bool, typer.Option("--yes", help="Do not ask (scripts).")] = False,
+) -> None:
+    """Enable a plugin: shows what it asks for and asks you to confirm."""
+    with _host() as (loop, host):
+        desc = _rpc(lambda: loop.run_until_complete(host.describe(plugin)))
+        info = desc.plugin
+        out.print(f"{info.id} {info.version}: {info.name}")
+        out.print("permissions:" + ("" if info.permissions else " none"))
+        added = set(desc.added)
+        for perm in info.permissions:
+            mark = " (new)" if perm.id in added else ""
+            warn = " [!]" if perm.warn else ""
+            out.print(f"  {perm.id}{mark}{warn}: {perm.text}")
+        for line in desc.summary:
+            out.print(f"  {line}")
+        for c in desc.conflicts:
+            out.print(f"  [yellow]{c}[/yellow]")
+        if desc.unsigned:
+            out.print("not signed; the audit hook is not an operating-system sandbox")
+        if not yes and not typer.confirm("enable it?"):
+            raise typer.Exit(1)
+        rec = host.records[info.id]
+        res = _rpc(lambda: loop.run_until_complete(host.enable(info.id, rec.hash, rec.requested)))
+        out.print(f"{res.id}: {res.state}")
+
+
+@plugin_app.command("disable")
+def disable(plugin: Annotated[str, typer.Argument(metavar="ID")]) -> None:
+    """Turn a plugin off (its settings and data stay)."""
+    with _host() as (loop, host):
+        res = _rpc(lambda: loop.run_until_complete(host.disable(plugin)))
+        out.print(f"{res.id}: {res.state}")
+
+
+# --------------------------------------------------------------------------- reference
+
+
+@plugin_app.command("schema")
+def schema(
+    folder: Annotated[Path | None, typer.Argument(help="A plugin's folder: its own protocol schema.")] = None,
+    manifest: Annotated[bool, typer.Option("--manifest", help="The JSON Schema of plugin.toml.")] = False,
+) -> None:
+    """Print the JSON Schema of plugin.toml (--manifest), or of a plugin's methods, events and states."""
+    if manifest or folder is None:
+        from spaceknife_sdk.manifest import Manifest
+
+        sys.stdout.write(json.dumps(Manifest.model_json_schema(), indent=1, ensure_ascii=False) + "\n")
+        return
+    from spaceknife_sdk.schema import dumps, export_plugin_schema
+
+    from .plugins.build import describe
+
+    _quiet()
+    desc, issues = describe(_folder(folder))
+    if desc is None:
+        raise _fail("; ".join(i.text() for i in issues))
+    sys.stdout.write(dumps(export_plugin_schema(desc)))
+
+
+@plugin_app.command("docs")
+def docs(
+    section: Annotated[
+        str | None, typer.Option(help="One section by its anchor (kind-report, ctx-tree, errors …).")
+    ] = None,
+    list_sections: Annotated[bool, typer.Option("--list", help="The anchors.")] = False,
+) -> None:
+    """Print the plugin author docs (docs/plugin-dev.md), or one section of them."""
+    from spaceknife_sdk import docs as sdk_docs
+
+    text = sdk_docs.text()
+    if text is None:
+        raise _fail(
+            "the author docs are not part of this installation (docs/plugin-dev.md in the repository)"
+        )
+    if list_sections:
+        for anchor, title in sdk_docs.anchors(text):
+            out.print(f"{anchor:<28} {title}")
+        return
+    if section:
+        part = sdk_docs.section(text, section)
+        if part is None:
+            raise _fail(f"no section {section!r}: spaceknife plugin docs --list")
+        sys.stdout.write(part)
+        return
+    sys.stdout.write(text)
+
+
+__all__ = ["plugin_app"]

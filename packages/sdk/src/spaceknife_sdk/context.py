@@ -58,6 +58,8 @@ class RuntimeState:
     settings: dict[str, Any] = field(default_factory=dict)
     lang: str = "zh-CN"
     roots: list[str] = field(default_factory=list)  # paths of the open scans' roots (files.read)
+    picked: list[str] = field(default_factory=list)  # what the user chose for a scan source (files.read)
+    on_paths: Any = None  # (readable paths) -> None: keeps the audit hook in step (a plugin process)
     catalog: dict[str, str] = field(default_factory=dict)  # the plugin's zh -> en texts
     net_hosts: list[str] = field(default_factory=list)
     exec: list[str] = field(default_factory=list)
@@ -200,10 +202,12 @@ class Files:
         return self._ctx.tree.path(int(item))
 
     def open_path(self, path: str | os.PathLike[str]) -> str:
-        """Check that ``path`` lies inside an open scan (or the plugin's own folders); returns it."""
+        """Check that ``path`` lies inside an open scan, a scan source's URI the user chose, or the
+        plugin's own folders; returns it."""
         require(self._ctx._state, "files.read")
         real = os.path.realpath(os.fspath(path))
-        allowed = [*self._ctx._state.roots, str(self._ctx.plugin.dir), str(self._ctx.plugin.storage)]
+        st = self._ctx._state
+        allowed = [*st.roots, *st.picked, str(self._ctx.plugin.dir), str(self._ctx.plugin.storage)]
         for root in allowed:
             base = os.path.realpath(root)
             if os.path.normcase(real) == os.path.normcase(base) or os.path.normcase(real).startswith(

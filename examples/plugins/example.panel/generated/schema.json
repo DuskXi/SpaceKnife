@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "ExamplePanelHistogram": {
+      "properties": {
+        "unknown": {
+          "title": "Unknown",
+          "type": "integer"
+        },
+        "years": {
+          "items": {
+            "$ref": "#/$defs/ExamplePanelYear"
+          },
+          "title": "Years",
+          "type": "array"
+        }
+      },
+      "required": [
+        "years",
+        "unknown"
+      ],
+      "title": "Histogram",
+      "type": "object"
+    },
+    "ExamplePanelHistogramParams": {
+      "additionalProperties": false,
+      "properties": {
+        "under": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Under"
+        }
+      },
+      "title": "HistogramParams",
+      "type": "object"
+    },
+    "ExamplePanelYear": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        },
+        "year": {
+          "title": "Year",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "year",
+        "files",
+        "bytes"
+      ],
+      "title": "Year",
+      "type": "object"
+    }
+  },
+  "api": 1,
+  "events": {},
+  "methods": {
+    "histogram": {
+      "doc": "Files and bytes per year of last modification (a plain def runs on a worker thread).",
+      "kind": "method",
+      "params": "#/$defs/ExamplePanelHistogramParams",
+      "result": "#/$defs/ExamplePanelHistogram"
+    }
+  },
+  "plugin": "example.panel",
+  "schema_hash": "3b62b0848fcef87c",
+  "schema_version": 1,
+  "states": {},
+  "streams": {},
+  "version": "1.0.0"
+}

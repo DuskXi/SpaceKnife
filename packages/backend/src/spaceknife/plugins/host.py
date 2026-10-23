@@ -41,6 +41,7 @@ from ..extensions import BUILTIN, EXTENSIONS
 from ..extensions import points as ext_points
 from ..i18n import _, tr
 from ..server.rpc import CURRENT_REQUEST, RawResult, Route, RpcError
+from . import builtins
 from . import install as inst
 from . import paths as ppaths
 from .adapters import AdapterError, build
@@ -175,9 +176,7 @@ class PluginHost:
             task.cancel()
         for rec in list(self.records.values()):
             await self._stop_runtime(rec)
-            if not rec.builtin:
-                EXTENSIONS.unregister_owner(rec.id)
-            else:
+            if not rec.builtin:  # the shipped plugins stay: they belong to the process (builtins.py)
                 EXTENSIONS.unregister_owner(rec.id)
         self.images.close()
         if self._flush is not None:
@@ -271,6 +270,13 @@ class PluginHost:
         return desc
 
     async def _activate(self, rec: PluginRecord) -> None:
+        if rec.builtin:  # registered once per process, with or without a host (builtins.py)
+            loaded = await asyncio.to_thread(builtins.get, rec.id)
+            if loaded is None:
+                issues = builtins.failures().get(rec.folder.name) or [Issue("load", "not loaded")]
+                raise AdapterError(issues)
+            rec.description = loaded.description
+            return
         desc = rec.description or await self._describe(rec)
         if desc.id != rec.id or desc.api != PLUGIN_API:
             raise AdapterError([Issue("describe", f"the code describes {desc.id!r} (API {desc.api})")])
@@ -291,6 +297,8 @@ class PluginHost:
             await rec.runtime.update({"settings": self.server.settings.plugin_settings(rec.id)})
 
     async def _deactivate(self, rec: PluginRecord) -> None:
+        if rec.builtin:
+            return
         await self._stop_runtime(rec)
         EXTENSIONS.unregister_owner(rec.id)
         self.images.release_user(rec.id)
@@ -999,6 +1007,8 @@ class PluginHost:
 
     async def restart(self, plugin: str) -> pp.PluginInfo:
         rec = self.get(plugin)
+        if rec.builtin:  # nothing runs on its own: its code is called where it is used
+            return self.info(rec)
         await self._stop_runtime(rec)
         rec.crashes.clear()
         if rec.state == "crashed":
@@ -1346,7 +1356,7 @@ class PluginHost:
                     plugin,
                     "export",
                     name,
-                    {"root": int(root), "scan_id": scan_id},
+                    {"root": int(root), "scan_id": scan_id, "filter": filter_text},
                     ctx={"scan_id": scan_id},
                     frames=frames,
                     on_chunk=on_chunk,

@@ -73,6 +73,16 @@ class ChangeUnit(BaseModel):
     target: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class ExportInfo:
+    """The optional fourth argument of an export format: ``(tree, root, match, info)``.
+
+    ``filter`` is the filter expression the export is limited to ("" when it is not filtered;
+    ``match`` then is None), for a header line such as "Filter: …"."""
+
+    filter: str = ""
+
+
 @dataclass(slots=True)
 class VisualInput:
     """What a code visualization gets: the tree and its options (own settings by name)."""

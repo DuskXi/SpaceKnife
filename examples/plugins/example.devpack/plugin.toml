@@ -1,0 +1,55 @@
+# A developer's cleanup pack, without a line of code: rules for build caches, a file class for build
+# output, a folder rule, a named filter with a key, an export template, a colour mode and a
+# visualization variant. docs/plugin-dev.md 「参考插件」 lists it.
+id = "example.devpack"
+version = "1.0.0"
+name = { zh = "开发者清理包", en = "Developer cleanup pack" }
+description = { zh = "认识常见的构建缓存和构建产物，按它们着色和过滤。", en = "Knows common build caches and build output; colours and filters by them." }
+author = "SpaceKnife examples"
+icon = "code"
+
+# insights/*.toml is loaded by convention (rules: docs/insights.md)
+
+[[classes]]
+name = "build_output"
+title = { zh = "构建产物", en = "Build output" }
+aliases = ["artifacts"]
+exts = ["o", "obj", "a", "lib", "class", "pyc", "pdb", "ilk", "rlib", "rmeta"]
+color = { light = "#B5651D", dark = "#E0A060" }
+
+[[folder_rules]]                       # everything below these folders counts as build output
+glob = "**/target/debug"
+class = "build_output"
+
+[[folder_rules]]
+glob = "**/target/release"
+class = "build_output"
+
+[[filters]]                            # a command "过滤：构建产物" and a word for the filter box
+name = "junk"
+title = { zh = "构建产物", en = "Build output" }
+expr = ":class:example.devpack.build_output"
+
+[[keys]]
+key = "Ctrl+Alt+J"
+command = "junk"
+
+[[export_templates]]
+name = "by_folder"
+file = "templates/by-folder.sktpl"
+title = { zh = "每个文件夹的构建产物", en = "Build output per folder" }
+description = { zh = "第一层文件夹的路径和占用，最大的在前。", en = "The first-level folders with their sizes, the largest first." }
+
+[[color_modes]]
+name = "dev"
+title = { zh = "开发文件", en = "Development files" }
+by = "ext"
+palette = ["muted", "#4C8BF5", "#E0A060", "#56B870"]
+legend = [{ zh = "其他", en = "Other" }, { zh = "源代码", en = "Source code" }, { zh = "构建产物", en = "Build output" }, { zh = "配置", en = "Configuration" }]
+map = { py = 1, rs = 1, ts = 1, js = 1, c = 1, cpp = 1, h = 1, go = 1, java = 1, o = 2, obj = 2, pyc = 2, class = 2, rlib = 2, toml = 3, json = 3, yaml = 3, yml = 3, lock = 3 }
+
+[[visualizations]]
+name = "files_flame"
+title = { zh = "按文件数的火焰图", en = "Flame graph by file count" }
+base = "flame"
+size = "files"

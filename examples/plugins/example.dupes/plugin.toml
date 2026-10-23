@@ -1,0 +1,33 @@
+# Duplicate files: a code plugin (it runs in its own process). docs/plugin-dev.md walks through it.
+# It reads file contents to hash them (files.read); everything else is declared below or with the
+# decorators in plugin.py.
+id = "example.dupes"
+version = "1.0.0"
+name = { zh = "重复文件", en = "Duplicate files" }
+description = { zh = "找出内容相同的文件，把多余的副本放进删除篮。", en = "Finds files with the same contents and puts the extra copies in the delete basket." }
+author = "SpaceKnife examples"
+icon = "copy"
+entry = "plugin.py"
+permissions = ["tree.read", "files.read"]
+
+[[settings]]
+name = "min_size"
+title = { zh = "最小大小", en = "Minimum size" }
+description = { zh = "比它小的文件不比较。", en = "Smaller files are not compared." }
+control = "number"
+default = 1048576
+min = 1
+unit = "B"
+
+[[commands]]
+name = "open"
+title = { zh = "查找重复文件", en = "Find duplicate files" }
+icon = "copy"
+aliases = ["dupes", "duplicates"]
+when = ["done"]
+action = { open = "report:dupes" }
+status = { state = "status", text = { zh = "{groups} 组，多占 {wasted} 字节", en = "{groups} groups, {wasted} bytes extra" } }
+
+[[keys]]
+key = "Ctrl+Alt+D"
+command = "open"

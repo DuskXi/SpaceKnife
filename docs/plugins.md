@@ -1,11 +1,19 @@
-# 插件系统 —— 经验与设计要求
+# 插件系统 —— 设计与现状
 
-状态：**后端（第一阶段）和 Electron 前端（第二阶段）已实现**（见下面两节「实现状态」）；命令行、按插件生成类型的构建步骤和参考插件是第三阶段。本文是为一套覆盖前后端的插件系统准备的。内容分两部分：
+状态：**已实现**：后端（第一阶段）、Electron 前端与 Web 面板（第二阶段）、命令行、作者文档和参考插件（第三阶段）。下面先是总览和三节「实现状态」，然后是动工前写下的经验与要求（第 1–8 节，保留作为依据），最后是第 9 节定下的决定。写插件的人只需要读 [plugin-dev.md](plugin-dev.md)。
 
-- 把可视化做成可替换组件（`ea94b53`，接口约定见 [visuals.md](visuals.md)）时积累下的经验；
-- 由此推出来的要求。
+## 总览：现在有什么
 
-开工前先读这份；动手时如果做法有变，回来改这份。
+| 给谁 | 什么 | 在哪里 |
+|---|---|---|
+| 插件作者 | 作者文档：五分钟上手、每种贡献的字段表和例子、权限、预算、测试、打包、命令行、错误码 | [plugin-dev.md](plugin-dev.md)；`spaceknife plugin docs [--section 锚点]` |
+| 插件作者 | 命令行 `spaceknife plugin new/check/build/call/render/dev/install/uninstall/list/enable/disable/schema/docs`（打包版：`spaceknife-backend plugin …`） | `packages/backend/src/spaceknife/cli_plugin.py` |
+| 插件作者 | SDK：`Plugin` 与装饰器、`T`、`Context`、`TreeView`/`Rows`/`Node`、报告块 `r`、`layout`、结果模型 | `packages/sdk/src/spaceknife_sdk/`（`__init__.py` 的 `__all__`） |
+| 插件作者 | 测试与工具：`testing.MockHost`/`make_tree`、`check`、`schema.export_plugin_schema`、`tsgen.generate_plugin`、`scaffold`（`plugin new` 的模板）、面板桥的副本 `web/` | 同上 |
+| 插件作者 | 参考插件 | `examples/plugins/example.dupes`（代码）、`example.devpack`（纯声明式）、`example.panel`（Web 面板） |
+| 程序自己 | 内置插件：导出模板和 CSV / JSON / HTML（`builtin.export`），洞察规则（`builtin.insights`），与普通插件同一套声明和注册 | `packages/backend/src/spaceknife/plugins/builtin/` |
+| 宿主 | 扩展注册表与扩展点；发现、信任、安装；运行时（插件进程、进程内）；树镜像与查询；检查与构建；浏览器模式的开发服务器 | `packages/backend/src/spaceknife/extensions/`、`plugins/`、`devui.py` |
+| 前端 | 插件数据、动作与键位、报告与放置位置、字段与清理复核、配色、插件页、Web 面板与桥 | `apps/electron/src/renderer/src/plugins/`、`src/main/plugin-files.ts`、`resources/plugin-sdk/` |
 
 ## 实现状态（第一阶段：后端）
 
@@ -40,7 +48,7 @@
 - 扫描来源列完才显示（不是边扫边画），重跑也是整个重跑；监控器只用于插件自己的来源，还没有按文件系统给普通扫描提供监控器的插件接口。
 - 文件夹规则的叠加、代码洞察都只有最基本的部分；悬停字段只读缓存（没有的发一次请求，下次悬停才显示）。
 - macOS 的内存上限只靠心跳检查。
-- 第三阶段：每个插件的协议模式导出和 `plugin build`、命令行 `spaceknife plugin …`、把内置导出和洞察迁成插件。
+- 每个插件的协议模式导出、`plugin build`、命令行和内置插件：第三阶段已做（见下面第三节）。
 
 ## 实现状态（第二阶段：Electron 前端）
 
@@ -60,7 +68,7 @@
   - Electron：`skplugin://<id>/` 协议（`main/plugin-files.ts`），文件来自开发链接、已安装或内置插件的 `web/`，`/_sk/` 是程序自带的 `resources/plugin-sdk/`（`bridge.js`、`base.css`、`sk.d.ts`、`guard.js`）。每个响应带面板的内容安全策略（没有网络、子框架、表单、worker，`sandbox allow-scripts`，`frame-ancestors` 只有应用自己），HTML 最前面插入 `guard.js`。`will-frame-navigate` 只放行面板留在自己插件的文件里，WebRTC 的 IP 处理策略为 `disable_non_proxied_udp`，面板不能申请任何权限（摄像头、通知……）。后端 ready 行加了 `plugins_dir`、`builtin_plugins_dir`、`plugins_trust`。
   - 浏览器模式：无头模式和演示服务器（`tools/demo/m3_web.py`）提供 `/plugins/<id>/web/…`，策略相同，`script-src` 限在这个插件的路径下；主页面的 `frame-src` 改为只允许本服务器。
   - 父页面一侧（`plugins/panel/`）：`sandbox="allow-scripts"` 的 iframe，只认这个 iframe 窗口的 hello，用 MessageChannel 交出一个端口；面板说出自己的地址，不在本插件文件里的就断开。桥只放行本插件的方法、白名单里的内置方法（各按权限；`basket.add` 强制带上面板的来源）、本插件的事件 / 状态 / 流，以及按权限的宿主操作；单条 1 MiB、同时 8 个调用、每秒 50 条；列结果以转移方式交出。`bridge.js` 有 mock 模式（`?mock=fixtures.json`）。
-- **生成的类型**：`tools/gen_ts_protocol.py` 的 `generate_plugin(schema)` 按插件输出 `web/sk-plugin.d.ts`（`Methods`/`Events`/`States` 与 `Sk<…>`）；插件的模式导出和 `plugin build` 在第三阶段接上。
+- **生成的类型**：`generate_plugin(schema)`（第三阶段起在 `spaceknife_sdk/tsgen.py`，`tools/gen_ts_protocol.py` 共用）按插件输出 `web/sk-plugin.d.ts`（`Methods`/`Events`/`States` 与 `Sk<…>`），由 `plugin build` 写出。
 - **文案**：新的界面文字都在 `locales/en/plugins.json`；`tools/i18n_check.py --area electron` 通过。
 - **测试**（vitest）：`plugins/keymap.test.ts`、`actions.test.ts`、`colors.test.ts`（含 `when`）、`report/report.test.ts`、`panel/bridge.test.ts`（用 `plugins/testing/mockBridge.ts`）、`protocol/rpc.test.ts` 的插件部分、`main/plugin-files.test.ts`、`main/plugin-sdk.test.ts`、`main/headless-server.test.ts` 的面板路由。
 
@@ -68,10 +76,48 @@
 
 - 对比侧栏和状态栏的插件报告只做了基本的；工具栏「更多」里的插件命令、开始页的快捷操作同样很薄。
 - 详情面板的插件页没有按 `summaryInterval` 节流（跟随选中项、帧最多每秒一次）。
-- Web 面板的 `bridge.js` mock 模式要在 SpaceKnife 之外的静态服务器上打开，并把 SDK 放在 `web/_sk/`（SpaceKnife 自己的路由不给面板网络）；第三阶段的 `plugin build` / `plugin dev` 再把这一步做顺。
+- Web 面板的 `bridge.js` mock 模式要在 SpaceKnife 之外的静态服务器上打开（SpaceKnife 自己的路由不给面板网络）；第三阶段起 `plugin build` 把桥复制到 `web/_sk/`，`plugin dev` 在浏览器模式里连真后端。
 - WebRTC：Electron 和浏览器模式都靠 `guard.js` 删掉构造函数、拦下子框架，加上 CSP 的 `webrtc 'block'`（浏览器认识时生效）；浏览器模式没有 IP 处理策略这一层，启用对话框里写明了这项残余风险。
 - 实测（Electron 44，Windows，用 DevTools 协议驱动打包前的界面，测试插件的面板放在详情面板里）：面板的源是 `null`；`RTCPeerConnection`、`webkitRTCPeerConnection`、`WebSocket` 都不存在；用 `DOMParser` 加 `adoptNode` 绕过 `createElement` 造出的子框架是另一个不透明源，读它的 `RTCPeerConnection` 报跨源错误，随后被移除；`fetch`、`localStorage`、`cookie`、父页面都拿不到；桥拒绝 `basket.execute`、`settings.update`、没授权的 `snapshot.list` 和 `reveal`、别的插件的方法（都是 -32014）。面板直接跳到别的插件的面板被 `will-frame-navigate` 拦下；跳到外部网址被父页面的 `frame-src` 拦下（停在错误页），再从错误页跳到别的插件同样被拦。浏览器模式的面板路由由 `headless-server.test.ts` 覆盖；手动走查用的浏览器自己拦掉了所有子框架，没能在那里看到面板的画面（其余功能在浏览器模式里都走过一遍）。
 - Qt / WinUI3 前端没有做（它们不声明 `plugins.v1`，后端照旧工作）。
+
+## 实现状态（第三阶段：开发体验与参考插件）
+
+已有：
+
+- **作者文档** [plugin-dev.md](plugin-dev.md)（≤ 1000 行，上手部分 ≤ 100 行）：每节有固定锚点，`plugin check` 的每个问题和 `plugin docs --section` 都用它们。文档里标了 `ex` 的例子由 `tests/test_plugin_docs.py` 拼成一个插件跑过 `check`；每种贡献的每个字段都必须出现在它那一节（同一个测试）；ruff 也格式化文档里的 Python 块。
+- **命令行**（`cli_plugin.py`，`spaceknife plugin …`）：
+  - `new`：`spaceknife_sdk/scaffold.py` 的 14 个部分（`method report command setting cleanup panel visual color export source set field insight hook`），生成后马上 `build`；任一部分单独、全部一起都能通过 `check --strict` 和自带的测试，代码过 ruff（`test_plugin_cli.py`）。
+  - `check`（`plugins/check.py`）：清单；在没有权限的插件进程里 import 并读声明（`plugins/child.py --describe`）；文案、图标、颜色（对比度、重复）、import 白名单、代码用到的 API 与权限（语法树）、规则、模板、过滤预设（认得本插件的类别）、按键冲突、面板里的 WebRTC；契约：插件放进 `MockHost`（默认在插件进程里），可视化在三棵合成树上按行契约检查，配色、导出、报告（上限）、字段、清理、集合、钩子和带样例的扫描来源在一棵上各跑一次；面板的 `fixtures.json` 核对方法名；最后看生成的文件。每个问题有文件和行、错误码、改法和文档锚点；`--json` 给工具和 agent。
+  - `build`（`plugins/build.py`）：`generated/schema.json`（`spaceknife_sdk/schema.py`，模型名带插件的 PascalCase 前缀）、`web/sk-plugin.d.ts`、`generated/pinyin.json`、`web/_sk/` 面板桥副本，列出缺英文的文案；`--zip` 打成 `dist/<id>-<version>.zip`。
+  - `call` / `render`：在临时数据目录的 `MockHost` 里跑（默认插件进程），扫描 `--scan` 的文件夹、`--snapshot` 或合成树；`render` 支持报告、字段、洞察、清理候选、导出、节点集合、可视化和配色。
+  - `dev`（`devui.py`）：后端加开发链接，监视文件夹，保存后重新描述、重启并广播 `extensions.changed`；仓库里构建过前端时同时提供浏览器模式（与 `tools/demo/m3_web.py` 共用同一个面板路由）。
+  - `install/uninstall/list/enable/disable`：用真实数据目录里的插件宿主（不开端口）；`enable` 在终端列出权限并确认（`--yes` 给脚本）。`schema [--manifest | DIR]`、`docs`。
+- **SDK 补全**：`MockHost.check()`（同 `plugin check`，在测试里跑）、`set_setting` 在下一次调用前送到插件进程；`layout`（代码可视化的权重帮手）；`check`；`schema`；`tsgen`；`docs`；`ExportInfo`（导出格式可选的第四个参数，带过滤式）；`MethodDecl.doc`（方法文档串的第一段，进 schema 和 `.d.ts`）；`ExportTemplateSpec.spacesniffer`。
+- **内置插件**（`plugins/builtin/`，`plugins/builtins.py`）：随程序发布的插件在第一次用到时注册（不需要服务器：命令行导出也用它们），用同一个 SDK 加载、`describe`、经同一套适配器注册，属主是自己的 id；不能停用，不锁哈希，不起进程（只允许不需要会话的贡献：声明式的各类和导出格式；导出格式的函数在导出线程里直接调用，树是 `plugins/local.py` 的本地视图）。
+  - `builtin.export`：五个模板是 `[[export_templates]]`（名字仍是模板的 `@name`，即 SpaceSniffer 的名字，大小写不敏感），三种格式是 `@plugin.export_format`，函数体调用原来的 `iter_csv/iter_json/iter_html`（内置插件可以用 `tree.store`）。`export.BUILTIN_INFO / BUILTIN_TEMPLATES / FORMATS`、`resolve`、`export.targets` 都从注册表读。金样：`test_export.py`、`test_cli_run.py` 一字未改并通过；`export.targets` 在两种语言下与迁移前的输出逐项相同（`tests/data/export_targets.golden.json`）。
+  - `builtin.insights`：纯声明式，`insights/builtin.toml`。规则来源的顺序是内置插件 → 其他插件（按 id）→ 用户文件夹；`test_insights.py` 一字未改并通过，新测试验证插件的规则夹在中间。
+  - 注册表排序：原生内置 → 内置插件 → 其他插件。
+- **参考插件**（`examples/plugins/`，pytest 直接收集它们的 `tests/`）：`example.dupes`（方法、事件、共享状态、命令状态行、报告、清理、按键、设置、字段、`:set:dupes`，哈希在 `ctx.compute` 里）、`example.devpack`（规则、类别、文件夹规则、过滤预设与按键、导出模板、按扩展名的配色、按文件数的火焰图）、`example.panel`（按修改年份的条形图面板，`sk.call` / `sk.core`，`fixtures.json` 与方法的结果模型一致）。`tests/test_plugin_examples.py` 对它们和内置插件跑 `check --strict`，并确认示例只用公开的 SDK。
+- **顺带修好的第一、二阶段问题**：
+  - 插件进程的审计钩子不随新的扫描更新可读的根，进程启动后扫描的文件夹 `files.read` 读不了；现在随 `roots` 一起更新。
+  - 扫描来源读不了用户选的文件（必须在已扫描的文件夹里）；现在来源和监控器调用带的 URI 在有 `files.read` 时可读。
+  - 过滤预设引用同一插件声明的类别时解析失败。
+  - Windows 上映射一个已经不存在的共享内存名会静默得到全零：镜像开头现在有宿主写的 16 字节头（`SKIMG1` 加段名），插件映射后先核对，对不上就再要一次，仍不对报 `UNKNOWN_SCAN`。
+- **冻结版实测**（Windows，PyInstaller 6.22.3，2026-10-23，只冻结后端、没打安装包）：`spaceknife-backend plugin list` 列出两个内置插件；对三个示例 `plugin check --strict` 全部通过（读声明和契约都走 `--plugin-host` 进程）；`plugin new` → `check --strict` → `render` → `build --zip` → `install` → `enable --yes` → `uninstall` 一路通过；`run scan … export csv` 和 `export "Simple file list"` 经内置插件导出；`plugin docs --section` 读到打包进去的文档。第一次实测时一个 import 白名单里全部标准库模块的插件报 `No module named 'sqlite3'`：spec 现在按 `spaceknife_sdk/imports.py` 的白名单把这些模块列为隐式导入，重新冻结后这个插件能读声明、能调用。
+- **面板桥只有一份内容**：`packages/sdk/src/spaceknife_sdk/web/` 是 `apps/electron/resources/plugin-sdk/` 的副本（`plugin build`、`plugin dev` 用），测试保证两者逐字节相同。
+
+还很薄或未做：
+
+- 文档的验证：原计划派一个只读 `plugin-dev.md` 的新 agent 写一个小插件、记下 token 与弯路；这一轮没有能派子 agent 的工具，改为照着第 0 节在干净的目录里走了一遍：五条命令都一次通过（WSL 与 Windows）。新 agent 的演练留到下一轮。
+- `check` 的契约只跑一次、用固定的三棵合成树；扫描来源要有 `fixtures/` 样例才跑；监控器和对比原因不跑。
+- `plugin dev` 的浏览器模式需要仓库里构建好的前端；打包版的程序里请用开发者模式链接文件夹。
+- 内置插件只能有声明式贡献和导出格式；需要运行时的内置插件（报告、方法……）以后再说。
+- 以后做：WASM 运行时、签名、插件目录、从 Git 安装、操作系统级的沙箱、插件之间的依赖、新的布局格式、Electron 主进程插件。
+
+---
+
+以下第 1–8 节是动工前写下的经验与要求，保留作为设计依据；实现与它们不同的地方以上面三节为准。
 
 ## 1. 目标
 
@@ -366,9 +412,13 @@ dupes.on("progress", (p) => setDone(p.done / p.total));
 5. **外部进程插件**：复用提权助手的传输层，首个用例是新的扫描来源。
 6. **Web 面板**：等第 9 节的决定。
 
-## 9. 待定的决定
+## 9. 定下的决定
 
-- **开放给谁**：主要是项目作者和高级用户，还是希望形成第三方生态？这决定隔离、签名和分发要做到多严。
-- **计算插件用什么写**：WASM（安全，三个平台同一份二进制，但写插件的门槛高），还是只允许 Python 子进程（好写，但隔离粒度粗、启动慢）。也可以两者都要。
-- **Web 面板**：是否开放；Qt 和 WinUI3 上是内嵌 Web 视图，还是只支持声明式界面。
-- **分发**：文件夹、Git 仓库，还是将来的插件目录。
+| 问题 | 决定（已实现） |
+|---|---|
+| 开放给谁 | 先给高级用户，但按第三方可发布来做：清单、第一次启用时列出权限、按内容哈希锁定、逐个启用 / 停用。签名以后做。 |
+| 代码插件用什么写 | 主档是 Python 插件进程，用宿主协议通讯，隔离、可重启、有资源上限；进程内 Python 只在开发者模式下开放（内置插件除外）。WASM 保留接口（运行时与语言无关），没有做原型。 |
+| 前端 | 处处可用的声明式界面（设置、命令、键位、详情 / 悬停字段、报告文档、借用现有布局格式的可视化），加上 Electron 和浏览器模式里的沙箱 iframe Web 面板，经宿主消息通道调同一套接口。Qt 和 WinUI3 不声明 `plugins.v1`，照旧工作。 |
+| 分发 | 数据目录下的 `plugins/`（便携版同样），从文件夹或 zip 安装；Git 和插件目录以后做。 |
+| 一处声明 | 命令、按键、设置、文案（中英）、协议类型都只声明一次；能力从注册表推导；内置功能走同一个注册：导出和洞察规则是内置插件，命令和按键是单一键位表。 |
+| 写操作 | 删除只能经删除篮由用户确认；没有 `net` 权限不能联网。 |

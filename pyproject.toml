@@ -62,7 +62,7 @@ warn_required_dynamic_aliases = true
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["tools"]
-testpaths = ["packages/protocol/tests", "packages/backend/tests", "packages/client/tests", "packages/native/tests", "packages/sdk/tests", "tools/tests"]
+testpaths = ["packages/protocol/tests", "packages/backend/tests", "packages/client/tests", "packages/native/tests", "packages/sdk/tests", "tools/tests", "examples/plugins"]
 addopts = "-ra --import-mode=importlib"
 # a hung test fails with a stack dump instead of blocking the run (CI jobs have their own limit too)
 timeout = 300
@@ -73,3 +73,4 @@ timeout = 300
 "tools/demo/*" = ["E501"]
 "packages/backend/src/spaceknife/cli_scan.py" = ["E501"]  # Chinese UI strings
 "packages/*/tests/*" = ["E501", "PT018", "ASYNC240"]
+"examples/plugins/*/tests/*" = ["E501", "PT018", "ASYNC240"]

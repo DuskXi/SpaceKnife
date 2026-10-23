@@ -44,10 +44,22 @@ else:
             os.close(fd)
 
 
+class ImageGone(OSError):
+    """The mapping is not the segment the host described (it was released in between)."""
+
+
 def map_image(desc: Mapping[str, Any]) -> Image:
-    """The columns an ``image`` descriptor names, as read-only arrays over the mapping."""
+    """The columns an ``image`` descriptor names, as read-only arrays over the mapping.
+
+    The segment starts with a header the host wrote (``head``): on Windows, mapping a name that
+    no longer exists gives a new zero-filled mapping instead of an error, so the header is checked
+    before any column is read."""
     size = int(desc["size"])
     mm = _map_file(str(desc["file"]), size) if desc.get("file") else _map_shm(str(desc["shm"]), size)
+    head = bytes.fromhex(str(desc.get("head", "")))
+    if head and mm[: len(head)] != head:
+        mm.close()
+        raise ImageGone(f"tree image {desc.get('shm') or desc.get('file')} is gone")
     columns: dict[str, np.ndarray] = {}
     for c in desc["columns"]:
         dtype = np.dtype(str(c["dtype"]))
@@ -65,4 +77,4 @@ def map_image(desc: Mapping[str, Any]) -> Image:
     )
 
 
-__all__ = ["map_image"]
+__all__ = ["ImageGone", "map_image"]

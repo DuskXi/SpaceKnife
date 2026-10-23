@@ -22,10 +22,11 @@ from spaceknife_protocol.plugins import (
 )
 from spaceknife_protocol.text import T, Text
 
+from . import layout
 from . import report as r
 from .context import Context
 from .errors import Cancelled, PluginError
-from .models import Change, ChangeUnit, Insight, Listing, Proposal, ScanInfo, VisualInput
+from .models import Change, ChangeUnit, ExportInfo, Insight, Listing, Proposal, ScanInfo, VisualInput
 from .plugin import Plugin
 from .tree import Columns, Flag, Kind, Node, Rows, TreeView
 
@@ -38,6 +39,7 @@ __all__ = [
     "ChangeUnit",
     "Columns",
     "Context",
+    "ExportInfo",
     "FieldValue",
     "Flag",
     "Insight",
@@ -59,5 +61,6 @@ __all__ = [
     "Toast",
     "TreeView",
     "VisualInput",
+    "layout",
     "r",
 ]

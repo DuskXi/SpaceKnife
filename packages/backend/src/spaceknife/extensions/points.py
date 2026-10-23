@@ -40,12 +40,20 @@ class VisualizationPoint(BasePoint):
         visuals.unregister(c.impl.id if isinstance(c.impl, Visualization) else c.id)
 
 
-def _rule_sources() -> list[tuple[str, str]]:
-    return [c.impl for c in sorted(EXTENSIONS.of("insight_rules"), key=lambda c: (c.owner, c.id)) if c.impl]
+def _rule_sources(
+    adding: Contribution | None = None, removing: Contribution | None = None
+) -> list[tuple[str, str]]:
+    """Rule files in override order: the shipped plugins' (the built-in rules), then by plugin id."""
+    items = [c for c in EXTENSIONS.of("insight_rules") if removing is None or c.id != removing.id]
+    if adding is not None:
+        items.append(adding)
+    ordered = sorted(items, key=lambda c: (not c.shipped, c.owner, c.id))
+    return [c.impl for c in ordered if c.impl]
 
 
 class InsightRulesPoint(BasePoint):
-    """Rule files of plugins: built-in → plugins (by plugin id) → the user's folder."""
+    """Rule files of plugins: the shipped ``builtin.insights`` → plugins (by plugin id) → the
+    user's folder."""
 
     def __init__(self) -> None:
         super().__init__("insight_rules")
@@ -60,12 +68,7 @@ class InsightRulesPoint(BasePoint):
     def _reload(self, adding: Contribution | None = None, removing: Contribution | None = None) -> None:
         from ..insights.rules import set_plugin_sources
 
-        sources = _rule_sources()
-        if adding is not None:
-            sources.append(adding.impl)
-        if removing is not None and removing.impl in sources:
-            sources.remove(removing.impl)
-        set_plugin_sources(sources)
+        set_plugin_sources(_rule_sources(adding, removing))
 
     def add(self, c: Contribution) -> None:
         self._reload(adding=c)

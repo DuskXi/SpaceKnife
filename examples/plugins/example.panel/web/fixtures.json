@@ -1,0 +1,16 @@
+{
+  "lang": "zh-CN",
+  "context": { "scan_id": "scan-1", "view_id": null, "node": null, "selection": [], "compare_id": null },
+  "calls": {
+    "histogram": {
+      "years": [
+        { "year": 2019, "files": 120, "bytes": 734003200 },
+        { "year": 2020, "files": 40, "bytes": 104857600 },
+        { "year": 2021, "files": 3, "bytes": 2048 },
+        { "year": 2022, "files": 900, "bytes": 2147483648 }
+      ],
+      "unknown": 0
+    }
+  },
+  "core": { "tree.summary": { "files": 1063 } }
+}

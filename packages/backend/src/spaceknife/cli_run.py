@@ -39,7 +39,7 @@ from rich.text import Text
 
 from . import fmt
 from .cli_scan import apply_language
-from .export import BUILTIN_INFO, FORMATS, ExportError, ExportFormat, export_chunks, resolve, write_export
+from .export import ExportError, ExportFormat, builtin_targets, export_chunks, resolve, write_export
 from .export.template import ExportTree, Ordering
 from .i18n import Texts, plural, tr
 from .scan.scanner import ScanError, Scanner, ScanProgress, ScanState, native_slicer, native_threads
@@ -648,8 +648,8 @@ def help_text() -> str:
 
 例：spaceknife run scan "D:\\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
 """,
-        builtins=tr("、").join(BUILTIN_INFO),
-        formats=" / ".join(FORMATS),
+        builtins=tr("、").join(builtin_targets()[0]),
+        formats=" / ".join(builtin_targets()[2]),
     )
 
 

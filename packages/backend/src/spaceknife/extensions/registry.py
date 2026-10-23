@@ -20,6 +20,11 @@ from loguru import logger
 BUILTIN = "builtin"
 
 
+def shipped(owner: str) -> bool:
+    """``owner`` is part of the app: the native built-ins or a plugin shipped with it (``builtin.*``)."""
+    return owner == BUILTIN or owner.startswith(BUILTIN + ".")
+
+
 @dataclass(frozen=True, slots=True)
 class Contribution:
     kind: str  # "command", "report", "visualization", …
@@ -32,6 +37,11 @@ class Contribution:
     @property
     def builtin(self) -> bool:
         return self.owner == BUILTIN
+
+    @property
+    def shipped(self) -> bool:
+        """Part of the app: a native built-in or a plugin shipped with it (``builtin.*``)."""
+        return shipped(self.owner)
 
     @property
     def local(self) -> str:
@@ -192,11 +202,21 @@ class Extensions:
     # ------------------------------------------------------------- reading
 
     def of(self, kind: str) -> list[Contribution]:
-        """Contributions of ``kind``: by order, built-ins first, then by plugin and as declared."""
+        """Contributions of ``kind``: by order, built-ins first (native, then the shipped plugins), then
+        by plugin and as declared."""
         with self._lock:
             items = list(self._items.get(kind, {}).values())
             seq = dict(self._seq)
-        return sorted(items, key=lambda c: (c.order, c.owner != BUILTIN, c.owner, seq.get((c.kind, c.id), 0)))
+        return sorted(
+            items,
+            key=lambda c: (
+                c.order,
+                not shipped(c.owner),
+                c.owner != BUILTIN,
+                c.owner,
+                seq.get((c.kind, c.id), 0),
+            ),
+        )
 
     def get(self, kind: str, id: str) -> Contribution | None:
         with self._lock:
@@ -213,4 +233,13 @@ class Extensions:
 
 EXTENSIONS = Extensions()
 
-__all__ = ["BUILTIN", "EXTENSIONS", "BasePoint", "Contribution", "ExtensionError", "Extensions", "Point"]
+__all__ = [
+    "BUILTIN",
+    "EXTENSIONS",
+    "BasePoint",
+    "Contribution",
+    "ExtensionError",
+    "Extensions",
+    "Point",
+    "shipped",
+]

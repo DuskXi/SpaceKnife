@@ -593,16 +593,3 @@ class ExportFormat:
 
             return self.text.get(language())
         return _(self.title_id)
-
-
-def _csv_chunks(
-    store: NodeStore, root: int, *, match: np.ndarray | None = None, filter_text: str = ""
-) -> Iterator[str]:
-    return iter_csv(store, root, match=match)
-
-
-FORMATS: dict[str, ExportFormat] = {
-    "csv": ExportFormat("csv", TEXT.raw("csv"), ".csv", "text/csv", True, _csv_chunks),
-    "json": ExportFormat("json", TEXT.raw("json"), ".json", "application/json", False, iter_json),
-    "html": ExportFormat("html", TEXT.raw("html"), ".html", "text/html", False, iter_html),
-}

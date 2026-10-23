@@ -208,6 +208,7 @@ class Plugin:
             result_schema = h.result.model_json_schema(mode="serialization")
         if name in self.methods:
             self.issues.append(Issue("duplicate", f"method {name!r} is defined twice"))
+        text = inspect.getdoc(h.fn) or ""
         self.methods[name] = MethodDecl(
             name=name,
             kind=kind,
@@ -216,6 +217,7 @@ class Plugin:
             public=public,
             params=params_schema,
             result=result_schema,
+            doc=" ".join(text.split("\n\n", 1)[0].split())[:400],
         )
 
     # ------------------------------------------------------------- communication
@@ -377,7 +379,8 @@ class Plugin:
     # ------------------------------------------------------------- data
 
     def export_format(self, name: str, title: Text | str, **kw: Any) -> Callable[[F], F]:
-        """An export format: ``(tree, root, match) -> Iterator[str]`` (``bytes`` with binary=True)."""
+        """An export format: ``(tree, root, match[, info]) -> Iterator[str]`` (``bytes`` with
+        binary=True); ``info`` is an :class:`~spaceknife_sdk.ExportInfo` (the filter expression)."""
 
         def wrap(f: F) -> F:
             self._declare("export_format", ExportFormatSpec(name=name, title=as_text(title), **kw))

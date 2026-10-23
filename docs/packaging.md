@@ -46,11 +46,12 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 - 入口 [packaging/backend_entry.py](../packaging/backend_entry.py)：`spaceknife-backend serve …` 就是 `python -m spaceknife serve …`；`spaceknife-backend --helper …` 是扫描助手（冻结后没有 `-m`，`helper_command()` 在冻结时返回 `[自身, "--helper"]`）；入口先调用 `multiprocessing.freeze_support()`，spawn 方式的扫描工作进程会重新进入这个可执行文件。
 - 以 `-X utf8` 冻结（spec 里的解释器选项），日志和 ready 行在所有平台都是 UTF-8。冻结的解释器只从自己的包里导入，不读 `PYTHON*` 环境变量，所以提权助手不需要 `-I`。
-- 收进包里的数据：`locales/*.json`、`insights/builtin.toml`、`export/builtin/*.sktpl`；`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）。
+- 收进包里的数据：`locales/*.json`；内置插件 `plugins/builtin/<id>/` 的全部文件（`plugin.toml`、规则、模板，以及 `plugin.py`：它们不是 Python 包，按数据收进来，由插件加载器从文件导入）；SDK 的面板桥副本 `spaceknife_sdk/web/` 和作者文档 `docs/plugin-dev.md`（放在 `spaceknife_sdk/docs/`，`plugin docs` 读它）。`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）。
+- 插件进程：`spaceknife-backend --plugin-host …`（`plugin check` 的读声明是 `--plugin-host --describe <文件夹>`）。插件能 import 的标准库模块有白名单（`spaceknife_sdk/imports.py`），冻结版只保证这些在。
 - Windows 上带图标和版本信息（任务管理器里显示「SpaceKnife backend」）。
 - Linux 上不带构建机的 `libgcc_s.so.1` 和 `libstdc++.so.6`：目标系统都有（glibc 的 `pthread_cancel` 需要 libgcc_s，apt / dnf 需要 libstdc++），manylinux 的 wheel 也这样假设；而 Ubuntu 22.04 的 libgcc_s（GCC 12）需要 `GLIBC_2.35`，打进去在 RHEL 9 上会加载失败。剩下的部分最高需要 `GLIBC_2.34`（原生扩展在 glibc 2.35 上编译，pthread 符号绑定到 2.34 版本），正好是 RHEL 9 的下限；Electron 自身最高 `GLIBC_2.25`。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
-- 命令行也能直接用：安装目录下 `resources/backend/spaceknife-backend scan …`、`run …`、`snapshot …`。
+- 命令行也能直接用：安装目录下 `resources/backend/spaceknife-backend scan …`、`run …`、`snapshot …`、`plugin …`（[plugin-dev.md](plugin-dev.md)「命令行」）。
 
 ## 3. Electron
 

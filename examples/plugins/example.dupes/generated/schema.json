@@ -1,0 +1,141 @@
+{
+  "$defs": {
+    "ExampleDupesFindParams": {
+      "additionalProperties": false,
+      "properties": {
+        "min_size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Size"
+        }
+      },
+      "title": "FindParams",
+      "type": "object"
+    },
+    "ExampleDupesFindResult": {
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/ExampleDupesGroup"
+          },
+          "title": "Groups",
+          "type": "array"
+        },
+        "wasted": {
+          "title": "Wasted",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "groups",
+        "wasted"
+      ],
+      "title": "FindResult",
+      "type": "object"
+    },
+    "ExampleDupesGroup": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "size",
+        "nodes",
+        "paths"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
+    "ExampleDupesProgress": {
+      "properties": {
+        "done": {
+          "title": "Done",
+          "type": "integer"
+        },
+        "total": {
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "done",
+        "total"
+      ],
+      "title": "Progress",
+      "type": "object"
+    },
+    "ExampleDupesStatus": {
+      "properties": {
+        "busy": {
+          "default": false,
+          "title": "Busy",
+          "type": "boolean"
+        },
+        "groups": {
+          "default": 0,
+          "title": "Groups",
+          "type": "integer"
+        },
+        "wasted": {
+          "default": 0,
+          "title": "Wasted",
+          "type": "integer"
+        }
+      },
+      "title": "Status",
+      "type": "object"
+    }
+  },
+  "api": 1,
+  "events": {
+    "progress": {
+      "payload": "#/$defs/ExampleDupesProgress"
+    }
+  },
+  "methods": {
+    "find": {
+      "doc": "Groups of files with the same contents, the largest first.",
+      "kind": "method",
+      "params": "#/$defs/ExampleDupesFindParams",
+      "result": "#/$defs/ExampleDupesFindResult"
+    }
+  },
+  "plugin": "example.dupes",
+  "schema_hash": "9cac499de3488bd4",
+  "schema_version": 1,
+  "states": {
+    "status": {
+      "default": {
+        "busy": false,
+        "groups": 0,
+        "wasted": 0
+      },
+      "payload": "#/$defs/ExampleDupesStatus"
+    }
+  },
+  "streams": {},
+  "version": "1.0.0"
+}

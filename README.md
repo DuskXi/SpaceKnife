@@ -122,6 +122,7 @@ The design documents are in Chinese:
 - UI specification (512 requirements): [docs/UI-SPEC.md](docs/UI-SPEC.md)
 - Protocol: [docs/protocol.md](docs/protocol.md)
 - Visualizations (engines, wire layouts, renderer components): [docs/visuals.md](docs/visuals.md)
+- Plugins: writing one [docs/plugin-dev.md](docs/plugin-dev.md) (`spaceknife plugin new`, examples in [examples/plugins](examples/plugins)); design [docs/plugins.md](docs/plugins.md)
 - Filter syntax (SKF 1): [docs/filter-syntax.md](docs/filter-syntax.md)
 - Design tokens and icons: [design/README.md](design/README.md)
 - Packaging and releases (Windows NSIS, Linux AppImage / deb / rpm): [docs/packaging.md](docs/packaging.md)

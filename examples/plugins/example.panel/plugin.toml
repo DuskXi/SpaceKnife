@@ -1,0 +1,26 @@
+# A web panel: how much was last modified in which year, as bars. The page (web/) runs in a
+# sandboxed frame without network and talks to the app only through sk (web/_sk/bridge.js); its one
+# method is in plugin.py. docs/plugin-dev.md 「Web 面板」 explains the parts.
+id = "example.panel"
+version = "1.0.0"
+name = { zh = "修改时间直方图", en = "Modification years" }
+description = { zh = "按最后修改的年份统计文件的占用，画成条形图。", en = "Totals the files' size by the year they were last modified, as bars." }
+author = "SpaceKnife examples"
+icon = "chart"
+entry = "plugin.py"
+permissions = ["tree.read"]
+
+[[panels]]
+name = "years"
+title = { zh = "修改年份", en = "Modification years" }
+icon = "chart"
+entry = "web/index.html"
+slot = "tab"
+when = ["scan"]
+
+[[commands]]
+name = "open"
+title = { zh = "按修改年份统计", en = "Size by modification year" }
+icon = "chart"
+when = ["done"]
+action = { open = "panel:years" }
