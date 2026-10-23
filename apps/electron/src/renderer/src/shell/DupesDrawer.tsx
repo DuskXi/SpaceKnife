@@ -2,8 +2,9 @@
 // the load level and optional caps), the search's funnel and progress, the space each volume gets
 // back, the keep rules, the verified groups (largest gain first, filtered by name or by the folder
 // in view) or the folders holding the most extra copies with the folder they repeat, and
-// 「把多余的副本加入删除篮」. It follows the tab's scan, like the delete basket, and comes after it in
-// the side column.
+// 「清理方案…」: there is no one-click deletion, every change goes through the reviewed cleanup plan
+// (shell/cleanup). It follows the tab's scan, like the delete basket, and comes after it in the
+// side column.
 
 import { useEffect, useState } from "react";
 
@@ -39,10 +40,10 @@ import {
   setLoad,
   startSearch,
   stoppedEarly,
-  toBasket,
   useDupes,
 } from "@/state/dupes";
 import { activeTab, setting, useApp } from "@/state/store";
+import { cleanupSupported, openCleanup } from "@/state/cleanup";
 import { distinctPaths, fitPath, fmtAgo, fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon } from "@/ui/Icon";
@@ -590,7 +591,7 @@ export function CoverageBar({ info, label, onClose, viewId }: { info: DupesFolde
           ))}
         </details>
       )}
-      <div className="muted small">{t("删除整个文件夹不在这里做：照这条判断，或者把多余的副本加入删除篮")}</div>
+      <div className="muted small">{t("删除整个文件夹不在这里做：照这条判断，或者在清理方案里逐份处理")}</div>
     </div>
   );
 }
@@ -836,14 +837,19 @@ function FolderList({ s, scanId, viewId }: { s: DupesStatus; scanId: string; vie
   );
 }
 
+/** The way to the cleanup plan (docs/dupes.md §16): no deletion from here, only a plan to review. */
 function Actions({ s }: { s: DupesStatus }) {
+  const tabId = useApp((x) => x.active);
+  const ok = cleanupSupported();
+  const busy = isRunning(s);
+  const why = !ok ? t("后端不支持清理方案（版本太旧）") : busy ? t("查找完成后才能制定清理方案") : s.groups === 0 ? t("没有可以清理的组") : "";
   return (
     <div className="bk-actions">
-      <div className="muted small">{t("执行前会再核对每一份没有变过；保留的那份变了或也要删时，这一组跳过")}</div>
+      <div className="muted small">{t("逐组选保留哪几份、其余的怎么处理（回收站、硬链接、符号链接、块克隆），看过风险、确认之后才会改动文件")}</div>
       <div className="bk-buttons">
-        <button className="primary dp-commit" disabled={s.extra === 0} onClick={() => void toBasket(s.job_id)}>
-          <Icon name="basket" />
-          <span className="dp-commit-label">{plural(s.extra, t("把多余的 {n} 份加入删除篮", { n: fmtInt(s.extra) }), "Add 1 extra to the basket")}</span>
+        <button className="primary dp-commit dp-cleanup" disabled={!!why} title={why || undefined} onClick={() => void openCleanup(tabId, s.job_id)}>
+          <Icon name="dupes" />
+          <span className="dp-commit-label">{t("清理方案…")}</span>
           <span className="mono dp-commit-size">{fmtSize(s.reclaim)}</span>
         </button>
       </div>

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "20d022c584e909e0";
+export const SCHEMA_HASH = "e20dfdb63b5ef3e8";
 
 export interface AgeCond {
   end: number;
@@ -71,8 +71,8 @@ export interface BasketItem {
   dirs: number;
   files: number;
   id: string;
-  kind: "file" | "dir" | "link" | "other" | "group" | "dupes";
-  /** Small items of an aggregate block (kind 'group'), or extra copies ('dupes') */
+  kind: "file" | "dir" | "link" | "other" | "group";
+  /** Small items of an aggregate block (kind 'group') */
   members: number;
   name: string;
   /** Why it cannot be deleted as is (locked by …, missing …) */
@@ -80,7 +80,7 @@ export interface BasketItem {
   path: string;
   scan_id: string;
   size: number;
-  status: "ready" | "locked" | "missing" | "protected" | "blocked";
+  status: "ready" | "locked" | "missing" | "protected" | "link_target";
   tag: string | null;
   /** Mount point of the volume holding it */
   volume: string;
@@ -495,46 +495,6 @@ export interface DupeNodeInfo {
   why: "rule" | "preferred" | "folder" | "volume" | "needed" | "manual" | "pinned" | null;
 }
 
-export interface DupesBasketMember {
-  alloc: number;
-  /** The copies kept for it (one must stay) */
-  keepers: string[];
-  path: string;
-}
-
-/**
- * The extra copies of a ``dupes`` basket item, each with the copy kept for it: the last place to
- * check them one by one before deleting.
- */
-export interface DupesBasketMembers {
-  /** Folders holding them, most first (up to 5) */
-  folders: string[];
-  items: DupesBasketMember[];
-  total: number;
-}
-
-export interface DupesBasketMembersParams {
-  /** A delete-basket item of kind 'dupes' */
-  item_id: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface DupesBasketParams {
-  /** Only these groups (default: every group) */
-  groups?: number[] | null;
-  job_id: string;
-}
-
-export interface DupesBasketResult {
-  freed: number;
-  groups: number;
-  /** Ids of the basket items made (one per volume) */
-  items: string[];
-  members: number;
-  refused: DupesRefused[];
-}
-
 export interface DupesBytes {
   cache_hits: number;
   full: number;
@@ -767,11 +727,6 @@ export interface DupesPlanScan {
   candidates: number;
   roots: string[];
   scan_id: string;
-}
-
-export interface DupesRefused {
-  group: number;
-  reason: string;
 }
 
 export interface DupesScope {
@@ -2363,8 +2318,6 @@ export interface Methods {
   "compare.sources": { params: CompareSourcesParams; result: CompareSourcesResult };
   /** Net change, growth and shrink lists and the fill-up estimate for a compare view's zoom root and filter. */
   "compare.summary": { params: CompareSummaryParams; result: CompareSummary };
-  /** The extra copies of a 'dupes' basket item, each with its keeper (paged), to check before deleting. */
-  "dupes.basket_members": { params: DupesBasketMembersParams; result: DupesBasketMembers };
   /** Stop the search; what was verified stays, the rest stays unchecked. */
   "dupes.cancel": { params: DupesJobParams; result: DupesStatus };
   /** Forget a search and its results. */
@@ -2393,8 +2346,6 @@ export interface Methods {
   "dupes.start": { params: DupesStartParams; result: DupesStatus };
   /** State, funnel, bytes read and ledger of a search. */
   "dupes.status": { params: DupesJobParams; result: DupesStatus };
-  /** Put the extra copies in the delete basket, one item per volume; each copy is checked again first. */
-  "dupes.to_basket": { params: DupesBasketParams; result: DupesBasketResult };
   /** Diagnostics of a template's text. */
   "export.check": { params: ExportCheckParams; result: ExportCheckResult };
   /** Write a view's tree (zoom root or everything, filtered or not) to a file with a template or format. */

@@ -18,7 +18,7 @@ def test_the_capability_methods_and_events_are_registered() -> None:
     names = set(METHODS)
     for m in ("plan", "start", "pause", "resume", "cancel", "status", "set_load", "groups", "group"):
         assert f"dupes.{m}" in names
-    for m in ("folder", "folders", "locate", "keep", "to_basket", "clear"):
+    for m in ("folder", "folders", "locate", "keep", "clear"):
         assert f"dupes.{m}" in names
     assert {"dupes.progress", "dupes.changed"} <= set(EVENTS)
 

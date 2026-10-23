@@ -20,7 +20,7 @@ import shutil
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 from loguru import logger
@@ -74,7 +74,6 @@ class OpRun:
     alloc: dict[str, int]  # item path -> freeable bytes (what a success frees)
     scans: dict[str, str]  # path -> scan id (refresh the tree afterwards)
     roots: dict[str, str] = field(default_factory=dict)  # path -> its scan root (ops.trash: case twins)
-    guards: dict[str, Any] = field(default_factory=dict)  # extra copies of duplicate files (dupes.guard)
     done: int = 0
     current: str = ""
     phase: str = "waiting"
@@ -311,7 +310,7 @@ class OpsService:
     # ------------------------------------------------------------- executing (W5-41…49)
 
     def execute(self, session: Session, params: po.BasketExecuteParams) -> po.OpTask:
-        if any(r.phase in ("waiting", "running") for r in self.runs.values()):
+        if self.busy():
             raise RpcError(ErrorCode.INVALID_REQUEST, TEXT["busy"])
         targets = self.basket.targets(params.ids)
         if not targets:
@@ -337,7 +336,6 @@ class OpsService:
             scans=scans,
             # kept with each item, so it holds once its scan is closed too
             roots={t.path: t.root for t in targets if t.root},
-            guards=self.basket.guards_for(t.path for t in targets),
             phase="waiting" if params.mode == "delete" else "running",
         )
         self.runs[run.id] = run
@@ -352,17 +350,23 @@ class OpsService:
             delay_s=DELETE_DELAY_S if run.mode == "delete" else 0.0,
         )
 
-    def _doomed(self, run: OpRun) -> Elsewhere | None:
-        """Duplicate-file guards: a keeper is lost too when anything in the basket covers it, is
-        it under another path (an extra copy of another search), or is a folder above it."""
-        if not run.guards:
-            return None
+    def basket_elsewhere(self) -> Elsewhere:
+        """What the delete basket deletes, for the duplicate-file cleanup's checks (docs/dupes.md
+        §16.11): a keeper covered by a basket item (it, or a folder above it, by path or by identity)
+        is lost, so its group is skipped; a copy covered by one is left to the basket."""
         basket = self.basket
         return Elsewhere(
             covers=lambda path: basket.contains(path) is not None,
-            members=basket.dupes_ids,
-            plain=basket.plain_paths,
+            members=set,
+            plain=lambda: [p for it in basket.items() for p in (it.members or [it.path])],
         )
+
+    def busy(self) -> bool:
+        """A file operation runs: a basket execution waiting or running, or a cleanup run (I8)."""
+        if any(r.phase in ("waiting", "running") for r in self.runs.values()):
+            return True
+        cleanup = getattr(self.server, "cleanup", None)
+        return bool(cleanup is not None and cleanup.busy())
 
     def _emit(self, run: OpRun, force: bool = True) -> None:
         now = time.monotonic()
@@ -402,8 +406,6 @@ class OpsService:
                     cancel=run.cancel.is_set,
                     sizes=run.sizes,
                     roots=run.roots,
-                    guards=run.guards,
-                    also_doomed=self._doomed(run),
                 )
             else:
                 results = await asyncio.to_thread(
@@ -412,8 +414,6 @@ class OpsService:
                     progress=progress,
                     cancel=run.cancel.is_set,
                     roots=run.roots,
-                    guards=run.guards,
-                    also_doomed=self._doomed(run),
                 )
             run.results = results
             run.done = sum(1 for r in results if r.code != "cancelled")

@@ -2,8 +2,9 @@
 
 One search runs at a time per backend. Its results stay until ``dupes.clear``, a new search over
 the same scans, or until one of its scans closes (or leaves memory): then a running search stops
-and the results go (the extra copies already in the delete basket stay there, each with its guard,
-which checks everything again before anything is deleted). Events go to every session that
+and the results go (a cleanup run already started goes on: every step carries its paths and
+identities, docs/dupes.md §16). Nothing here changes a file: cleaning up goes through the cleanup
+plan (``server/dupes_cleanup.py``), reviewed, confirmed and checked again. Events go to every session that
 announced ``dupes.v1``: ``dupes.progress`` at most four times a second, ``dupes.changed`` at most
 once a second; views in the ``dupes`` colouring are repainted at most once a second while groups
 come in.
@@ -37,7 +38,7 @@ from .. import fmt
 from ..dupes import Job, JobOptions, KeepOptions, Results, ScanInput, Scope
 from ..dupes import cache as dcache
 from ..dupes import codes as C
-from ..dupes.guard import Guard, Stamped
+from ..dupes.guard import Stamped
 from ..dupes.select import plan as make_plan
 from ..dupes.select import select
 from ..i18n import Texts, tr
@@ -60,7 +61,6 @@ TEXT = Texts(
         "scanning": "扫描还没有完成，完成后才能查找重复文件",
         "no_scan": "没有这个扫描：{id}",
         "no_view": "这个视图不属于这次查找的扫描",
-        "basket_note": "每组保留一份（{rule}）· 在重复文件面板里查看",
         "may_share": "这个卷能共享数据块，没能查到哪些副本共享：实际腾出的可能更少",
         "network": "网络盘上的文件可能是同一个文件，只保留不删除",
         "failed": "查找中途出错，已核对的 {groups} 组保留，可以再查一次（详情见日志）",
@@ -656,99 +656,6 @@ class DupesManager:
         self._changed(h, "keep", force=True)
         self._repaint(h, force=True)
         return self.status_of(h)
-
-    async def to_basket(self, p: pd.DupesBasketParams) -> pd.DupesBasketResult:
-        h = self.get(p.job_id)
-        res = h.results
-        ops = self.server.ops
-        st = self.server.settings
-        recheck = bool(st and st.get("dupes.recheck_content"))
-        rule = res.keep.rule
-        per_volume = res.keep.per_volume
-        note = TEXT["basket_note"].format(rule=tr(C.TEXT.raw(f"rule_{rule}")))
-        wanted = set(p.groups) if p.groups is not None else None
-        ops_kind = h.job.ops.name
-        by_scan: dict[int, list[tuple[int, str, Guard]]] = {}
-        # (scan, path) -> (group, bytes freed): what the basket refuses or already holds is not counted
-        owner: dict[tuple[int, str], tuple[int, int]] = {}
-        refused: list[pd.DupesRefused] = []
-        with res.lock:
-            for g in res.groups:
-                if not g.valid or g.shared or (wanted is not None and g.id not in wanted):
-                    continue
-                rows = list(range(g.start, g.start + g.count))
-                keepers = [r for r in rows if res.role(r) in (C.ROLE_KEEP, C.ROLE_NEEDED)]
-                # another path of an extra copy is the same file: deleted once, by its own path
-                extras = [r for r in rows if res.role(r) == C.ROLE_EXTRA and not res.is_view(r)]
-                if not extras:
-                    continue
-                if not keepers:
-                    refused.append(pd.DupesRefused(group=g.id, reason="no_keeper"))
-                    continue
-                kst = tuple(_stamped(res, r) for r in keepers)
-                by_vol: dict[int, tuple[Stamped, ...]] = {}
-                if per_volume and len(g.volumes) > 1:
-                    # one copy stays on every volume: the guard checks the keeper of the member's own
-                    for v in g.volumes:
-                        mine = tuple(_stamped(res, r) for r in keepers if int(res.m["vol"][r]) == v)
-                        if mine:
-                            by_vol[v] = mine
-                for r in extras:
-                    keep_these = by_vol.get(int(res.m["vol"][r]), kst)
-                    guard = Guard(
-                        member=_stamped(res, r),
-                        keepers=keep_these,
-                        ops=ops_kind,
-                        recheck_content=recheck,
-                        keep_atime=h.job.opts.keep_atime,
-                    )
-                    si = int(res.m["scan"][r])
-                    by_scan.setdefault(si, []).append((int(res.m["node"][r]), res.paths[r], guard))
-                    owner[(si, res.paths[r])] = (g.id, int(res.m["alloc"][r]))
-        items: list[str] = []
-        members = 0
-        freed = 0
-        groups: set[int] = set()
-        said: set[tuple[int, str]] = set()
-        for si, mem in by_scan.items():
-            sid = h.scan_ids[si]
-            store = res.scans[si].store
-            out = await compute(ops.basket.add_dupes, store, sid, mem, note=note)
-            items.extend(out.added)
-            left_out = {x.path for x in out.refused} | {m.path for m in out.merged}
-            for ref in out.refused:
-                gid = owner.get((si, ref.path), (-1, 0))[0]
-                if (gid, ref.reason) not in said:
-                    said.add((gid, ref.reason))
-                    refused.append(pd.DupesRefused(group=gid, reason=ref.reason))
-            for _node, path, _guard in mem:
-                if path in left_out:
-                    continue
-                gid, alloc = owner[(si, path)]
-                groups.add(gid)
-                members += 1
-                freed += alloc
-        await ops.broadcast()
-        return pd.DupesBasketResult(
-            items=list(dict.fromkeys(items)),
-            groups=len(groups),
-            members=members,
-            freed=freed,
-            refused=refused,
-        )
-
-    def basket_members(self, p: pd.DupesBasketMembersParams) -> pd.DupesBasketMembers:
-        rows = self.server.ops.basket.dupes_members(p.item_id)
-        by_dir: dict[str, int] = {}
-        for path, size, _g in rows:
-            d = os.path.dirname(path)
-            by_dir[d] = by_dir.get(d, 0) + max(1, size)
-        folders = [d for d, _ in sorted(by_dir.items(), key=lambda kv: (-kv[1], kv[0]))[:5]]
-        items = [
-            pd.DupesBasketMember(path=path, alloc=size, keepers=[k.path for k in g.keepers] if g else [])
-            for path, size, g in rows[p.offset : p.offset + p.limit]
-        ]
-        return pd.DupesBasketMembers(total=len(rows), folders=folders, items=items)
 
     # ------------------------------------------------------------------ views and hover cards
     def annotate(self, scan_id: str, store: Any, draw: Any) -> tuple[np.ndarray, np.ndarray] | None:

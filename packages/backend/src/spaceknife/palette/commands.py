@@ -54,6 +54,7 @@ class Context:
     update_checking: bool = False
     dupes: str = ""  # the tab's duplicate-file search: a status text ("" when there is none)
     has_dupes: bool = False  # results or a running search cover the tab's scan
+    cleanup_runs: int = 0  # duplicate-file cleanup runs on record (「重复文件清理记录」)
 
     @property
     def selected_node(self) -> int | None:
@@ -169,6 +170,10 @@ def _dupes_ok(c: Context) -> str | None:
 
 def _has_dupes(c: Context) -> str | None:
     return None if c.has_dupes else _("这个扫描还没有查找重复文件")
+
+
+def _cleanup_runs(c: Context) -> str | None:
+    return None if c.cleanup_runs else _("还没有清理过重复文件")
 
 
 def _dupes_status(c: Context) -> str:
@@ -322,12 +327,21 @@ def _registry() -> tuple[Command, ...]:
             status=_dupes_status,
         ),
         C(
-            "dupes.to_basket",
-            "把多余的副本加入删除篮",
-            "basket",
+            "dupes.cleanup",
+            "重复文件清理方案…",
+            "dupes",
             (),
-            ("duplicates basket", "delete duplicates"),
+            ("cleanup", "dedupe plan", "hard link", "清理重复", "去重"),  # i18n: ignore
             needs=(_tab, _has_dupes),
+            status=_dupes_status,
+        ),
+        C(
+            "dupes.cleanup_runs",
+            "重复文件清理记录",
+            "clock",
+            (),
+            ("cleanup history", "undo cleanup", "recovery area"),
+            needs=(_cleanup_runs,),
         ),
         C("snapshot.save", "保存快照", "snapshot", ("Ctrl+S",), ("save snapshot",), 6, (_tab, _done)),
         C(

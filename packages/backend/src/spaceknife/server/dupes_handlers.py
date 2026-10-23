@@ -9,7 +9,6 @@ from spaceknife_protocol import dupes as pd
 from spaceknife_protocol.base import EmptyResult
 from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import (
-    DUPES_BASKET_MEMBERS,
     DUPES_CANCEL,
     DUPES_CLEAR,
     DUPES_FOLDER,
@@ -24,7 +23,6 @@ from spaceknife_protocol.methods import (
     DUPES_SET_LOAD,
     DUPES_START,
     DUPES_STATUS,
-    DUPES_TO_BASKET,
 )
 
 from ..i18n import tr
@@ -94,19 +92,9 @@ def install(server: Server) -> None:
     async def dupes_locate(session: Session, params: pd.DupesLocateParams) -> pd.DupesLocateResult:
         return await dupes.locate(session, params)
 
-    @router.method(DUPES_BASKET_MEMBERS)
-    async def dupes_basket_members(
-        session: Session, params: pd.DupesBasketMembersParams
-    ) -> pd.DupesBasketMembers:
-        return dupes.basket_members(params)
-
     @router.method(DUPES_KEEP)
     async def dupes_keep(session: Session, params: pd.DupesKeepParams) -> pd.DupesStatus:
         return await dupes.keep(params)
-
-    @router.method(DUPES_TO_BASKET)
-    async def dupes_to_basket(session: Session, params: pd.DupesBasketParams) -> pd.DupesBasketResult:
-        return await dupes.to_basket(params)
 
     @router.method(DUPES_CLEAR)
     async def dupes_clear(session: Session, params: pd.DupesJobParams) -> EmptyResult:

@@ -340,45 +340,6 @@ class DupesKeepParams(Params):
     reset_overrides: bool = Field(default=False, description="Forget the manual choices first")
 
 
-class DupesBasketParams(Params):
-    job_id: str = _ID
-    groups: list[int] | None = Field(default=None, description="Only these groups (default: every group)")
-
-
-class DupesRefused(Payload):
-    group: int
-    reason: str
-
-
-class DupesBasketResult(Payload):
-    items: list[str] = Field(description="Ids of the basket items made (one per volume)")
-    groups: int
-    members: int
-    freed: int
-    refused: list[DupesRefused] = Field(default_factory=list)
-
-
-class DupesBasketMembersParams(Params):
-    item_id: str = Field(min_length=1, max_length=64, description="A delete-basket item of kind 'dupes'")
-    offset: int = Field(default=0, ge=0)
-    limit: int = Field(default=200, ge=1, le=2000)
-
-
-class DupesBasketMember(Payload):
-    path: str
-    alloc: int = 0
-    keepers: list[str] = Field(default_factory=list, description="The copies kept for it (one must stay)")
-
-
-class DupesBasketMembers(Payload):
-    """The extra copies of a ``dupes`` basket item, each with the copy kept for it: the last place to
-    check them one by one before deleting."""
-
-    total: int
-    folders: list[str] = Field(default_factory=list, description="Folders holding them, most first (up to 5)")
-    items: list[DupesBasketMember]
-
-
 class DupeNodeInfo(Payload):
     """A node's place in the results (``tree.node`` with ``dupes.v1``)."""
 

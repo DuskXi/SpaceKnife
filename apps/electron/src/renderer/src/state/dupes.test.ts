@@ -27,7 +27,6 @@ import {
   revealCopy,
   setDupes,
   startSearch,
-  toBasket,
 } from "./dupes";
 import { get, set } from "./store";
 import { group, scan, status } from "./testing/dupes";
@@ -236,27 +235,6 @@ describe("keep rules", () => {
     expect(vi.mocked(updateSettings)).toHaveBeenCalledWith({ "dupes.keep_rule": "newest" });
     // no overrides: the backend keeps the manual choices made so far
     expect(mocked.mock.calls[0]).toEqual(["dupes.keep", { job_id: "dupes-1", rule: "shortest", prefer: [], folder_consistent: false, per_volume: true, overrides: [], reset_overrides: false }]);
-  });
-});
-
-describe("the basket", () => {
-  it("hands the extra copies over and opens the basket", async () => {
-    onDupesProgress(status());
-    setDupes({ open: true });
-    mocked.mockResolvedValue({ items: ["b1"], groups: 2, members: 3, freed: 3 << 20, refused: [{ group: 4, reason: "keeper_in_basket" }] } as never);
-    await toBasket("dupes-1");
-    expect(mocked.mock.calls[0]).toEqual(["dupes.to_basket", { job_id: "dupes-1", groups: null }]);
-    expect(getDupes().open).toBe(false);
-    expect(get().basketOpen).toBe(true);
-    expect(get().toast).toContain("已把 3 份多余的副本加入删除篮");
-    expect(get().toast).toContain("1 组没有加入");
-  });
-
-  it("says why nothing went in", async () => {
-    mocked.mockResolvedValue({ items: [], groups: 0, members: 0, freed: 0, refused: [{ group: 1, reason: "keeper_in_basket" }] } as never);
-    await toBasket("dupes-1");
-    expect(get().basketOpen).toBe(false);
-    expect(get().toast).toBe("没有加入：本组保留的那份已在删除篮里");
   });
 });
 

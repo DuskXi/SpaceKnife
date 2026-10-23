@@ -200,11 +200,13 @@ describe("the results", () => {
     expect(h).toContain('class="dp-role extra"');
     expect(out).toContain("保留这一份");
     expect(out).toContain("再显示 100 组");
-    expect(out).toContain("把多余的 3 份加入删除篮 3.0 MB");
+    // no one-click deletion: the way on is the cleanup plan
+    expect(out).not.toContain("加入删除篮");
+    expect(out).toContain("清理方案…");
     // the filters: by name or path, the folder in view
     expect(h).toContain('placeholder="按名字或路径筛选"');
     expect(out).toContain("只看当前文件夹");
-    expect(out).toContain("执行前会再核对每一份没有变过");
+    expect(out).toContain("看过风险、确认之后才会改动文件");
     expect(out).toContain("清除结果");
     expect(out).toContain("再查一次");
     // the scope and the keep rules

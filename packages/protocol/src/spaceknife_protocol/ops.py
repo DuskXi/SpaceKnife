@@ -8,8 +8,10 @@ from pydantic import Field
 
 from .base import Params, Payload
 
-BasketItemKind = Literal["file", "dir", "link", "other", "group", "dupes"]
-BasketItemStatus = Literal["ready", "locked", "missing", "protected", "blocked"]
+BasketItemKind = Literal["file", "dir", "link", "other", "group"]
+# link_target: symbolic links SpaceKnife made in a duplicate-file cleanup point at it (or into it):
+# executing needs ``ack_link_targets`` (docs/dupes.md §16.11)
+BasketItemStatus = Literal["ready", "locked", "missing", "protected", "link_target"]
 OpMode = Literal["trash", "delete"]
 OpCode = Literal[
     "ok",
@@ -56,9 +58,7 @@ class BasketItem(Payload):
     path: str
     name: str
     kind: BasketItemKind
-    members: int = Field(
-        default=0, description="Small items of an aggregate block (kind 'group'), or extra copies ('dupes')"
-    )
+    members: int = Field(default=0, description="Small items of an aggregate block (kind 'group')")
     alloc: int = Field(description="Bytes freed by deleting it (cloud placeholders, partial hard links: 0)")
     size: int
     files: int = 0

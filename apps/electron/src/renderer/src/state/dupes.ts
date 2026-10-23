@@ -480,22 +480,6 @@ export async function keepThis(jobId: string, group: number, path: string): Prom
   await keepCall(jobId, [{ group, path, role: "keep" }]);
 }
 
-export async function toBasket(jobId: string, groups: number[] | null = null): Promise<void> {
-  try {
-    const r = await call("dupes.to_basket", { job_id: jobId, groups });
-    if (r.members > 0) {
-      const n = r.refused.length;
-      const refused = n ? plural(n, t("（{n} 组没有加入：保留的那份已在删除篮里）", { n: String(n) }), " (1 group left out: the copy kept is in the delete basket already)") : "";
-      toast(plural(r.members, t("已把 {n} 份多余的副本加入删除篮 · 可腾出 {size}", { n: String(r.members), size: fmtSize(r.freed) }), "Added 1 extra copy to the delete basket · {size} to free", { size: fmtSize(r.freed) }) + refused, 4000);
-      setDupes({ open: false });
-      setApp({ basketOpen: true });
-    } else if (r.refused.length) toast(t("没有加入：本组保留的那份已在删除篮里"), 3000);
-    else toast(t("没有多余的副本可加入"));
-  } catch (err) {
-    toast(readable(err), 3000);
-  }
-}
-
 let locateTimer: ReturnType<typeof setTimeout> | null = null;
 
 /** Light a group in every pane (null: none). Copies drawn as blocks light at once from the frame's

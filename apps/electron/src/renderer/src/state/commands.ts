@@ -32,7 +32,8 @@ import { cycleDirection, enterCompare, refreshCompareSources } from "./compare";
 import { openHelp } from "./help";
 import { type AppState, activeTab, basketCount, focusedViewId, get, set, toast, toggleLog } from "./store";
 import { type ColorModeName, nextColor, nextVisual, offered } from "./visuals";
-import { dupesOf, dupesOffered, getDupes, openDrawer, toBasket } from "./dupes";
+import { dupesOf, dupesOffered, getDupes, openDrawer } from "./dupes";
+import { openCleanup, openHistory } from "./cleanup";
 
 /** The selected node of the focused view (not an aggregate block), or null. */
 export function selectedNode(): { scanId: string; viewId: string; node: number } | null {
@@ -133,11 +134,15 @@ export async function runCommand(id: string): Promise<void> {
     case "dupes.panel":
       openDrawer(!getDupes().open);
       return;
-    case "dupes.to_basket": {
+    case "dupes.cleanup": {
+      // the cleanup plan: nothing changes until it is reviewed, approved and confirmed there
       const cur = dupesOf(tab.scanId);
-      if (cur) await toBasket(cur.job_id);
+      if (cur) await openCleanup(tab.id, cur.job_id);
       return;
     }
+    case "dupes.cleanup_runs":
+      await openHistory(tab.id);
+      return;
     case "view.cycle_visual":
       if (viewId) await cycleVisual(viewId, 1);
       return;

@@ -253,7 +253,8 @@ SpaceKnife 的大部分操作都能只用键盘完成。这一页按场景列出
 | --- | --- | --- | --- |
 | 查找重复文件… | — | `duplicates` · `dupes` · `dedupe` · `same files` | — |
 | 重复文件面板 | — | `duplicates panel` · `dupes panel` | — |
-| 把多余的副本加入删除篮 | — | `duplicates basket` · `delete duplicates` | — |
+| 重复文件清理方案… | — | `cleanup` · `dedupe plan` · `hard link` · `清理重复` · `去重` | — |
+| 重复文件清理记录 | — | `cleanup history` · `undo cleanup` · `recovery area` | — |
 | 后退 | <kbd>Backspace</kbd> · <kbd>Alt</kbd>+<kbd>←</kbd> | `back` | — |
 | 前进 | <kbd>Alt</kbd>+<kbd>→</kbd> | `forward` | — |
 | 上一级 | <kbd>Alt</kbd>+<kbd>↑</kbd> | `up` · `parent` | — |

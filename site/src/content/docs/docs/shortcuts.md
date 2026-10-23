@@ -253,7 +253,8 @@ Every other command shows up when you type its name or one of the words below:
 | --- | --- | --- | --- |
 | Find duplicate files… | — | `duplicates` · `dupes` · `dedupe` · `same files` | — |
 | Duplicate files panel | — | `duplicates panel` · `dupes panel` | — |
-| Put the extra copies in the delete basket | — | `duplicates basket` · `delete duplicates` | — |
+| Duplicate-file cleanup plan… | — | `cleanup` · `dedupe plan` · `hard link` · `清理重复` · `去重` | — |
+| Duplicate-file cleanup history | — | `cleanup history` · `undo cleanup` · `recovery area` | — |
 | Back | <kbd>Backspace</kbd> · <kbd>Alt</kbd>+<kbd>←</kbd> | `back` | — |
 | Forward | <kbd>Alt</kbd>+<kbd>→</kbd> | `forward` | — |
 | Up one level | <kbd>Alt</kbd>+<kbd>↑</kbd> | `up` · `parent` | — |
