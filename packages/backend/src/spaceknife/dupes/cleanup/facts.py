@@ -191,6 +191,15 @@ def _win_has_symlink_privilege() -> bool:  # pragma: no cover - Windows
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
     k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
     k32.GetCurrentProcess.restype = wintypes.HANDLE
+    advapi.OpenProcessToken.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.POINTER(wintypes.HANDLE)]
+    advapi.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    k32.CloseHandle.argtypes = [wintypes.HANDLE]
     token = wintypes.HANDLE()
     if not advapi.OpenProcessToken(k32.GetCurrentProcess(), 0x0008, ctypes.byref(token)):  # TOKEN_QUERY
         return False
@@ -788,6 +797,9 @@ def _probe_windows(path: str) -> Probe:  # pragma: no cover - Windows
 
     data = STREAM()
     k32.FindFirstStreamW.restype = wintypes.HANDLE
+    k32.FindFirstStreamW.argtypes = [wintypes.LPCWSTR, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+    k32.FindNextStreamW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    k32.FindClose.argtypes = [wintypes.HANDLE]
     h = k32.FindFirstStreamW(ctypes.c_wchar_p(vpath), 0, ctypes.byref(data), 0)
     if h and h != wintypes.HANDLE(-1).value:
         try:

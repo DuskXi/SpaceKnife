@@ -1147,6 +1147,7 @@ def undo(
     by_seq = {int(s["seq"]): s for s in plan.get("steps", [])}
     journal = Journal.open(run_dir)
     out: dict[int, tuple[str, str]] = {}
+    folders: set[str] = set()
     try:
         for seq, st in sorted(steps.items(), reverse=True):
             if seqs is not None and seq not in seqs:
@@ -1156,6 +1157,8 @@ def undo(
                 continue
             fs.seq = seq
             done = st.done or {}
+            if done.get("rec"):
+                folders.add(os.path.dirname(str(done["rec"])))
             try:
                 if s["action"] == "clone":
                     out[seq] = ("undo_nothing", TEXT["undo_nothing"])
@@ -1179,6 +1182,8 @@ def undo(
                 ctx.progress("undo", len(out), len(steps), s["path"], {})
     finally:
         journal.close()
+    for f in folders:
+        remove_if_empty(f)
     return out
 
 
