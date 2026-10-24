@@ -359,7 +359,9 @@ def open_at(
 ) -> int:
     """Open ``name`` inside the folder handle ``dh``, as listed (no follow, no recall)."""
     buf = ctypes.create_unicode_buffer(name)
-    us = UNICODE_STRING(len(name) * 2, len(name) * 2 + 2, ctypes.cast(buf, ctypes.c_wchar_p))
+    # in UTF-16 code units: a character outside the BMP (an emoji) takes two, not one
+    n = len(name.encode("utf-16-le", "surrogatepass"))
+    us = UNICODE_STRING(n, n + 2, ctypes.cast(buf, ctypes.c_wchar_p))
     oa = OBJECT_ATTRIBUTES(
         ctypes.sizeof(OBJECT_ATTRIBUTES), dh, ctypes.pointer(us), OBJ_CASE_INSENSITIVE, None, None
     )
@@ -414,14 +416,46 @@ def link_handle(h: int, dst_dir: int, name: str) -> None:
     )
 
 
-def delete_handle(h: int) -> None:
-    """Delete the file of ``h`` (opened with DELETE): POSIX semantics, else the classic way."""
-    flags = wintypes.ULONG(0x1 | 0x2)  # FILE_DISPOSITION_FLAG_DELETE | POSIX_SEMANTICS
-    if k32.SetFileInformationByHandle(h, 21, ctypes.byref(flags), 4):  # FileDispositionInfoEx
-        return
+def _set_attrs(h: int, attrs: int) -> bool:
+    """FileBasicInfo with every time 0 (left as they are) and these attributes."""
+    b = ctypes.create_string_buffer(40)
+    ctypes.memmove(ctypes.addressof(b) + 32, (attrs or 0x80).to_bytes(4, "little"), 4)
+    return bool(k32.SetFileInformationByHandle(h, 0, b, 40))
+
+
+def _dispose(h: int, *, ignore_readonly: bool) -> bool:
+    # FILE_DISPOSITION_FLAG_DELETE | POSIX_SEMANTICS (| IGNORE_READONLY_ATTRIBUTE)
+    for v in ((0x1 | 0x2 | 0x10,) if ignore_readonly else ()) + (0x1 | 0x2,):
+        flags = wintypes.ULONG(v)
+        if k32.SetFileInformationByHandle(h, 21, ctypes.byref(flags), 4):  # FileDispositionInfoEx
+            return True
     yes = wintypes.BOOLEAN(True)
-    if not k32.SetFileInformationByHandle(h, 4, ctypes.byref(yes), 1):  # FileDispositionInfo
-        raise _last("delete")
+    return bool(k32.SetFileInformationByHandle(h, 4, ctypes.byref(yes), 1))  # FileDispositionInfo
+
+
+def delete_handle(h: int) -> None:
+    """Delete the file of ``h`` (opened with DELETE): POSIX semantics, else the classic way. A
+    read-only file goes too (an original kept read-only, our link to a read-only keeper): NTFS and
+    ReFS take IGNORE_READONLY_ATTRIBUTE (Windows 10 1809+); where it is refused (WinBtrfs) the
+    attribute is taken off for the delete and given back to the names that stay (``h`` then needs
+    FILE_WRITE_ATTRIBUTES too)."""
+    if _dispose(h, ignore_readonly=True):
+        return
+    err = _last("delete")
+    try:
+        st = stat_handle(h)
+    except OSError:
+        raise err from None
+    if not st.attrs & ATTR_READONLY or not _set_attrs(h, st.attrs & ~ATTR_READONLY):
+        raise err
+    done = False
+    try:
+        done = _dispose(h, ignore_readonly=False)
+        if not done:
+            raise _last("delete")
+    finally:
+        if st.nlink > 1 or not done:  # other names stay (or nothing went): read-only as it was
+            _set_attrs(h, st.attrs)
 
 
 def final_path(h: int) -> str:

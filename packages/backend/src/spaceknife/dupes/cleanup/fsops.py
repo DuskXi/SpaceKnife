@@ -640,8 +640,14 @@ class WinFs(FsOps):  # pragma: no cover - Windows
         self.guard(self._path(dh, name))
         self.fault("remove")
         w = self.w
+        share = w.SHARE_READ | w.SHARE_DELETE
         try:
-            h = w.open_at(dh, name, w.DELETE | w.FILE_READ_ATTRIBUTES, w.SHARE_READ | w.SHARE_DELETE)
+            try:  # write attributes too: a read-only file on WinBtrfs is deleted by taking it off first
+                h = w.open_at(dh, name, w.DELETE | w.FILE_READ_ATTRIBUTES | w.FILE_WRITE_ATTRIBUTES, share)
+            except OSError as exc:
+                if fs_error(exc).code != "denied":
+                    raise
+                h = w.open_at(dh, name, w.DELETE | w.FILE_READ_ATTRIBUTES, share)
         except OSError as exc:
             e = fs_error(exc)
             if e.code == "missing":

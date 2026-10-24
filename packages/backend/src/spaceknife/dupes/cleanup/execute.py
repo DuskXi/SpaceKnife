@@ -357,6 +357,44 @@ def _stop_for(e: FsError) -> str:
     return "stop_disk" if e.code in ("enospc", "eio") else ""
 
 
+def _needs_read(ctx: RunCtx, s: dict[str, Any]) -> bool:
+    verify = ctx.options.get("verify", "auto")
+    return verify == "content" or (verify == "auto" and bool(s.get("verify_content")))
+
+
+def _read_again(ctx: RunCtx, s: dict[str, Any]) -> bool:
+    """Windows, a step to verify by its contents on a volume without a USN for it: any write moves a
+    USN and no program can put one back, so where there is one the stamps already prove enough."""
+    return sys.platform == "win32" and not int(s.get("usn", 0) or 0) and _needs_read(ctx, s)
+
+
+def _contents_hold(ctx: RunCtx, s: dict[str, Any], k: dict[str, Any]) -> str:
+    """Read the copy and the keeper again: "" when both still have the group's contents, else the
+    skip code. Windows only, where a program can put a file's times back (both of them) and a volume
+    may have no USN: the stamps cannot show such a change, only the contents can. A replacement
+    calls it while it holds both open with others kept from writing, so nothing can change after."""
+    from ..guard import Stamped, _digests
+
+    def stamped(x: dict[str, Any]) -> Stamped:
+        return Stamped(
+            x["path"],
+            int(x["dev"]),
+            int(x["fid_lo"]),
+            int(x["fid_hi"]),
+            int(x["size"]),
+            int(x["mtime"]),
+            int(x["change"]),
+            int(x.get("usn", 0)),
+        )
+
+    got = _digests(ctx.ops_kind, [stamped(s), stamped(k)], ctx.keep_atime)
+    if got[0] is None or got[0].hex() != s["digest"]:
+        return "skipped_changed"
+    if got[1] is None or got[1].hex() != s["digest"]:
+        return "skipped_keeper_changed"
+    return ""
+
+
 class _Handles:
     def __init__(self, fs: FsOps) -> None:
         self.fs = fs
@@ -427,6 +465,11 @@ def do_replace(ctx: RunCtx, s: dict[str, Any]) -> Outcome:
         kst = fs.fstat(kh)
         if kst.kind != "file" or not _same(kst, k):
             return Outcome(seq, "skipped_keeper_changed")
+        if not fs.swaps and _read_again(ctx, s):
+            # both held open, others kept from writing: what is read now stays so
+            why = _contents_hold(ctx, s, k)
+            if why:
+                return Outcome(seq, why, "contents differ")
         # the recovery area (same volume): its folder handle before anything is made
         place = _place(ctx, folder, dst.dev)
         rfolder, rname = place.name_for(seq, name, ctx.run_id)
@@ -828,9 +871,9 @@ def _clone_windows(
             a = fs.read_at(kh, n, off)
             b = fs.read_at(ch, n, off)
             if a != b or len(a) != n:
-                return Outcome(
-                    seq, "skipped_changed" if off == 0 else "done_partial", "contents differ", shared=off
-                )
+                # changed after the review: say so (as Linux does when the kernel finds a difference);
+                # the segments before it held the same bytes, so sharing them changed no contents
+                return Outcome(seq, "skipped_changed", "contents differ", shared=off)
             fs.clone_range(ch, kh, off, n)
             off += n
     except FsError as e:
@@ -880,7 +923,11 @@ def do_trash_batch(ctx: RunCtx, batch: list[dict[str, Any]]) -> list[Outcome]:
     out: list[Outcome] = []
     todo: list[dict[str, Any]] = []
     for s in batch:
-        ctx.fs.guard(s["path"])  # the sandbox: refuses before anything
+        try:
+            ctx.fs.guard(s["path"])  # the sandbox: refuses before anything
+        except FsError as e:
+            out.append(Outcome(int(s["seq"]), "skipped_denied", str(e)))
+            continue
         st = trash_status(s["path"], usage=False)
         if not st.available:
             if ctx.no_trash_recovery:
@@ -888,11 +935,27 @@ def do_trash_batch(ctx: RunCtx, batch: list[dict[str, Any]]) -> list[Outcome]:
             else:
                 out.append(Outcome(int(s["seq"]), "skipped_unavailable", st.reason))
             continue
+        if _read_again(ctx, s):
+            # the times may have been put back (no USN on the volume): the contents tell; one
+            # keeper holding them is enough, a changed copy ends it
+            why = "skipped_keeper_lost"
+            for k in s["keepers"]:
+                why = _contents_hold(ctx, s, k)
+                if why != "skipped_keeper_changed":
+                    break
+            if why:
+                out.append(Outcome(int(s["seq"]), why, "contents differ"))
+                continue
         todo.append(s)
     if not todo:
         return out
     ctx.fs.seq = int(todo[0]["seq"])
-    ctx.fs.fault("trash")
+    try:
+        ctx.fs.fault("trash")
+    except FsError as e:  # nothing moved yet: every step of the batch says why
+        return out + [
+            Outcome(int(s["seq"]), _code_of(e, where="copy"), str(e), stop=_stop_for(e)) for s in todo
+        ]
     paths = [s["path"] for s in todo]
     guards = {
         s["path"]: Guard(
@@ -985,6 +1048,36 @@ def expect_own(ctx: RunCtx, s: dict[str, Any]) -> None:
                     k[f] = int(seen[f])
 
 
+def _settle_keeper(ctx: RunCtx, s: dict[str, Any], outs: list[Outcome]) -> None:
+    """The keeper of a hard link as it is once the step's handles are closed: closing them can still
+    move its USN (NTFS writes a close record for a file changed through a handle), and the next step
+    on the same keeper compares it. Taken only when identity, size and modification time are still
+    the ones the step left, so a change by anyone else is still caught."""
+    t = s.get("target")
+    for o in outs:
+        k = o.keeper_after
+        if not t or o.code != "done" or not k:
+            continue
+        folder, name = os.path.split(t["path"])
+        try:
+            dh = ctx.fs.open_dir(folder)
+        except FsError:
+            continue
+        try:
+            st = ctx.fs.stat_at(dh, name)
+        except FsError:
+            st = None
+        finally:
+            ctx.fs.close(dh)
+        if (
+            st is not None
+            and st.ident == _ident(k)
+            and st.size == int(k["size"])
+            and st.mtime == int(k["mtime"])
+        ):
+            o.keeper_after = _stamps(st)
+
+
 def intent_of(ctx: RunCtx, s: dict[str, Any]) -> dict[str, Any]:
     rec = {
         "t": "intent",
@@ -1047,6 +1140,8 @@ def run(ctx: RunCtx, *, skip: dict[int, tuple[str, str]] | None = None) -> dict[
                 outs = [do_clone(ctx, first)]
             else:
                 outs = [do_replace(ctx, first)]
+                if first["action"] == "hardlink":
+                    _settle_keeper(ctx, first, outs)
             pairs: list[tuple[dict[str, Any], Outcome]] = []
             by_seq = {int(s["seq"]): s for s in batch}
             for o in outs:
@@ -1377,6 +1472,16 @@ def _keeper_ok(s: dict[str, Any], done: dict[str, Any], ops: Any) -> str:
     return ""
 
 
+def _change_now(ops_kind: str, path: str) -> int | None:
+    from ..reads import FallbackOps, default_ops
+
+    ops = default_ops() if ops_kind == "native" else FallbackOps()
+    row = ops.identity([path], True)
+    if int(row["reason"][0]) != 0:
+        return None
+    return int(row["change"][0])
+
+
 def purge(
     ctx: RunCtx,
     run_dir: Path,
@@ -1416,6 +1521,13 @@ def purge(
             )
             if need_read:
                 want = done.get("rec_stamps") or {}
+                # the keeper's identity, size and time were checked against the run's (purge_plan);
+                # its change time may have moved since this step (a later link to it, a block clone
+                # from it): the contents read now are the proof, so the read takes today's
+                kchange = _change_now(ctx.ops_kind, k["path"])
+                if kchange is None:
+                    out[seq] = ("refused", TEXT["purge_keeper_changed"])
+                    continue
                 files = [
                     Stamped(
                         rec,
@@ -1433,7 +1545,7 @@ def purge(
                         int(after["fid_hi"]),
                         int(after["size"]),
                         int(after["mtime"]),
-                        int(after.get("change", 0)),
+                        kchange,
                     ),
                 ]
                 got = _digests(ctx.ops_kind, files, ctx.keep_atime)
@@ -1556,6 +1668,21 @@ def _settle(ctx: RunCtx, s: dict[str, Any], st: StepState) -> tuple[str, str, di
         ref = _find_trash_ref(s)
         if ref:
             return "done", "interrupted", {"trash_ref": ref}
+        # a volume without a recycle bin: the step moved it to the recovery area
+        H = _Handles(fs)
+        try:
+            dh = H.add(fs.open_dir(folder))
+            place = _place(ctx, folder, fs.fstat(dh).dev)
+            rfolder, rname = place.name_for(int(s["seq"]), name, ctx.run_id)
+            rdh = dh if not rfolder else H.add(fs.open_dir(rfolder))
+            at_r = fs.stat_at(rdh, rname)
+            if at_r is not None and at_r.ident == copy_id:
+                rec_path = os.path.join(rfolder or folder, rname)
+                return "done", "interrupted", {"rec": rec_path, "rec_stamps": _stamps(at_r)}
+        except FsError:
+            pass
+        finally:
+            H.close()
         return "failed_attention", "not at its path, not found in the recycle bin", {}
     # replacements
     T = tmp_name(ctx.run_id, int(s["seq"]))
@@ -1630,9 +1757,11 @@ def _settle(ctx: RunCtx, s: dict[str, Any], st: StepState) -> tuple[str, str, di
 
 
 def _find_trash_ref(s: dict[str, Any]) -> str:
-    """The recycle bin's record of a path moved there (freedesktop: a .trashinfo naming it)."""
+    """The recycle bin's record of a path moved there: a record naming the path whose item is still
+    the copy (a move keeps the file's identity; an older item of the same name is not it).
+    freedesktop: a .trashinfo; Windows: a ``$I`` record in ``$Recycle.Bin\\<SID>``."""
     if sys.platform == "win32":  # pragma: no cover - Windows
-        return ""
+        return _find_win_trash_ref(s)
     from ...ops.trash import _fd_find, parse_trashinfo
 
     try:
@@ -1650,9 +1779,59 @@ def _find_trash_ref(s: dict[str, Any]) -> str:
                 continue
             p = os.path.join(info_dir, n)
             with open(p, encoding="utf-8", errors="replace") as f:
-                if parse_trashinfo(f.read()) in (want, rel):
-                    return p
+                if parse_trashinfo(f.read()) not in (want, rel):
+                    continue
+            try:
+                got = os.lstat(os.path.join(t.root, "files", n[: -len(".trashinfo")]))
+            except OSError:
+                continue
+            if int(got.st_ino) == int(s["fid_lo"]) | (int(s["fid_hi"]) << 64):
+                return p
     return ""
+
+
+def _find_win_trash_ref(s: dict[str, Any]) -> str:  # pragma: no cover - Windows
+    from ...ops.trash import _win_bin, parse_recycle_info
+    from . import winfs
+
+    try:
+        found = _win_bin(s["path"])
+    except OSError:
+        return ""
+    if isinstance(found, str):
+        return ""
+    want = os.path.normcase(os.path.normpath(s["path"]))
+    copy_id = (int(s["dev"]), int(s["fid_lo"]), int(s["fid_hi"]))
+    best, newest = "", -1.0
+    try:
+        names = os.listdir(found.folder)
+    except OSError:
+        return ""
+    for n in names:
+        if n[:2].upper() != "$I":
+            continue
+        info = os.path.join(found.folder, n)
+        try:
+            with open(info, "rb") as fh:
+                _, when, original = parse_recycle_info(fh.read(1 << 16))
+        except (OSError, ValueError):
+            continue
+        if os.path.normcase(os.path.normpath(original)) != want:
+            continue
+        try:
+            payload = os.path.join(found.folder, "$R" + n[2:])
+            h = winfs.open_path(payload, winfs.FILE_READ_ATTRIBUTES, winfs.SHARE_ALL)
+        except OSError:
+            continue
+        try:
+            st = winfs.stat_handle(h)
+        except OSError:
+            continue
+        finally:
+            winfs.close(h)
+        if (st.dev, st.fid_lo, st.fid_hi) == copy_id and when > newest:
+            best, newest = info, when
+    return best
 
 
 def resolve(ctx: RunCtx, run_dir: Path, seq: int, choice: str) -> str:

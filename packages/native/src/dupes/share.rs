@@ -6,7 +6,9 @@
 //! file deletable. Partly shared extents are only counted (`shared`, Linux FIEMAP_EXTENT_SHARED).
 //!
 //! - Linux: FS_IOC_FIEMAP without FIEMAP_FLAG_SYNC (btrfs, xfs, bcachefs, ocfs2).
-//! - Windows: FSCTL_GET_RETRIEVAL_POINTERS on an attribute-only handle (ReFS; WinBtrfs unknown).
+//! - Windows: FSCTL_GET_RETRIEVAL_POINTERS on an attribute-only handle. A run at LCN −1 (a hole, or
+//!   data ReFS has not placed yet: a file written a moment ago) and runs that stop before the end of
+//!   the file (WinBtrfs answers that way) make the map incomplete: it proves nothing then.
 //! - macOS: not implemented yet (APFS clone ids need getattrlist, untested): UNSUPPORTED.
 
 use super::codes;
@@ -39,6 +41,25 @@ impl Folder {
         let d = self.h.finalize();
         d.as_bytes()[..16].try_into().unwrap()
     }
+}
+
+/// Folds one FSCTL_GET_RETRIEVAL_POINTERS answer — the starting VCN, then (next VCN, LCN) pairs —
+/// into ``folder``; returns the VCN after the last run. An LCN below zero (−1) is no place on the
+/// disk: a hole of a sparse or compressed file, or data not written out yet (ReFS allocates late,
+/// so a file written a moment ago maps as all −1). Two such maps being equal proves nothing about
+/// the contents, so ``allocated`` turns false and the map is not complete.
+pub fn fold_retrieval(start: i64, pairs: &[u64], folder: &mut Folder, allocated: &mut bool) -> i64 {
+    let mut prev = start;
+    for p in pairs.chunks_exact(2) {
+        let next = p[0] as i64;
+        let lcn = p[1] as i64;
+        if lcn < 0 {
+            *allocated = false;
+        }
+        folder.push(prev as u64, lcn, (next - prev) as u64);
+        prev = next;
+    }
+    prev
 }
 
 /// Whether two maps prove that two files share all of their data.
@@ -193,6 +214,8 @@ pub fn extents(path: &str) -> ExtMap {
     };
     let h = f.as_raw_handle() as HANDLE;
     let mut folder = Folder::default();
+    let mut allocated = true;
+    let mut end: i64 = 0;
     let mut vcn: i64 = 0;
     let mut buf = vec![0u64; 8192]; // 64 KiB: ExtentCount, StartingVcn, then (NextVcn, Lcn) pairs
     for _round in 0..4096 {
@@ -226,14 +249,9 @@ pub fn extents(path: &str) -> ExtMap {
             return out;
         }
         let count = (buf[0] & 0xFFFF_FFFF) as usize;
-        let start = buf[1] as i64;
-        let mut prev = start;
-        for i in 0..count.min((buf.len() - 2) / 2) {
-            let next = buf[2 + 2 * i] as i64;
-            let lcn = buf[3 + 2 * i] as i64;
-            folder.push(prev as u64, lcn, (next - prev) as u64);
-            prev = next;
-        }
+        let pairs = &buf[2..2 + 2 * count.min((buf.len() - 2) / 2)];
+        let prev = fold_retrieval(buf[1] as i64, pairs, &mut folder, &mut allocated);
+        end = end.max(prev);
         if ok != 0 {
             break;
         }
@@ -242,11 +260,41 @@ pub fn extents(path: &str) -> ExtMap {
         }
         vcn = prev;
     }
+    // the runs must reach the end of the file: WinBtrfs answers "that was all" well before it
+    if allocated {
+        let size = f.metadata().map(|m| m.len()).ok();
+        match (size, cluster_size(path)) {
+            (Some(n), Some(c)) if (end.max(0) as u64).saturating_mul(c) >= n => {}
+            _ => allocated = false,
+        }
+    }
     out.reason = codes::OK;
-    out.complete = folder.n > 0;
+    out.complete = allocated && folder.n > 0;
     out.extents = folder.n;
     out.hash = folder.digest();
     out
+}
+
+/// Bytes per cluster of the volume holding ``path`` (Windows).
+#[cfg(windows)]
+fn cluster_size(path: &str) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+
+    use windows_sys::Win32::Storage::FileSystem::{GetDiskFreeSpaceW, GetVolumePathNameW};
+
+    let wide: Vec<u16> = super::open::verbatim(path).encode_wide().chain(Some(0)).collect();
+    let mut root = vec![0u16; 1024];
+    // SAFETY: both buffers are valid, NUL-terminated / sized as given.
+    if unsafe { GetVolumePathNameW(wide.as_ptr(), root.as_mut_ptr(), root.len() as u32) } == 0 {
+        return None;
+    }
+    let (mut spc, mut bps, mut free, mut total) = (0u32, 0u32, 0u32, 0u32);
+    // SAFETY: `root` is NUL-terminated; the out pointers are valid.
+    if unsafe { GetDiskFreeSpaceW(root.as_ptr(), &mut spc, &mut bps, &mut free, &mut total) } == 0 {
+        return None;
+    }
+    let c = u64::from(spc) * u64::from(bps);
+    (c > 0).then_some(c)
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
@@ -280,6 +328,35 @@ mod tests {
         let a = map(&[(0, 100, 4096), (4096, 900, 8192)], true);
         let b = map(&[(0, 100, 4096), (4096, 900, 8192)], true);
         assert!(same_data(&a, &b));
+    }
+
+    #[test]
+    fn unallocated_runs_never_make_a_complete_map() {
+        // two different files written a moment ago on ReFS: the same runs, every one at LCN −1
+        let fresh: Vec<u64> = vec![1, u64::MAX, 2048, u64::MAX, 4353, u64::MAX];
+        let fold = |pairs: &[u64]| {
+            let mut f = Folder::default();
+            let mut allocated = true;
+            let end = fold_retrieval(0, pairs, &mut f, &mut allocated);
+            let m = ExtMap {
+                reason: codes::OK,
+                hash: f.digest(),
+                shared: 0,
+                complete: allocated && f.n > 0,
+                extents: f.n,
+            };
+            (m, end)
+        };
+        let (a, end) = fold(&fresh);
+        let (b, _) = fold(&fresh);
+        assert_eq!(end, 4353);
+        assert!(!a.complete && a.hash == b.hash);
+        assert!(!same_data(&a, &b), "data not on the disk yet proves nothing");
+        // allocated runs map completely; a hole in the middle does not
+        let (c, _) = fold(&[16, 1000, 32, 5000]);
+        assert!(c.complete && c.extents == 2);
+        let (d, _) = fold(&[16, 1000, 32, u64::MAX, 48, 2000]);
+        assert!(!d.complete);
     }
 
     #[test]

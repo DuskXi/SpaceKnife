@@ -93,6 +93,10 @@ def volume_caps(vol: Any, *, sys_facts: Any, trash_of: Any = None, probe_exchang
         hard = fs in HARDLINK_FS
         sym = fs in SYMLINK_FS or (fs not in NO_LINK_FS and fs != "" and not vol.network)
         clone = fs in CLONE_FS_LINUX and not mac
+        if clone and fs == "xfs":
+            # made with reflink=0 the kernel refuses every share: say so in the plan already
+            where = os.path.dirname(vol.sample_path) if vol.sample_path else vol.mount
+            clone = xfs_reflink(where) is not False
     if vol.network:
         hard = sym = clone = False
     trash, why = True, ""
@@ -120,6 +124,39 @@ def volume_caps(vol: Any, *, sys_facts: Any, trash_of: Any = None, probe_exchang
         trash_reason=why,
         exchange=exchange,
     )
+
+
+XFS_IOC_FSGEOMETRY = 0x8100587E  # _IOR('X', 126, struct xfs_fsop_geom): 256 bytes, Linux 5.1+
+XFS_GEOM_FLAGS_AT = 92
+XFS_FSOP_GEOM_FLAGS_REFLINK = 0x100000
+_XFS_REFLINK: dict[str, bool | None] = {}
+
+
+def xfs_reflink(folder: str) -> bool | None:
+    """Whether the xfs holding ``folder`` was made with reflink (its geometry says), or None when
+    it cannot be asked (an older kernel): sharing is then tried and the first refusal stops it."""
+    if not sys.platform.startswith("linux"):
+        return None
+    if folder in _XFS_REFLINK:
+        return _XFS_REFLINK[folder]
+    import fcntl
+    import struct
+
+    got: bool | None = None
+    try:
+        fd = os.open(folder, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+    except OSError:
+        return None
+    try:
+        buf = bytearray(256)
+        fcntl.ioctl(fd, XFS_IOC_FSGEOMETRY, buf, True)
+        got = bool(struct.unpack_from("<I", buf, XFS_GEOM_FLAGS_AT)[0] & XFS_FSOP_GEOM_FLAGS_REFLINK)
+    except OSError:
+        got = None
+    finally:
+        os.close(fd)
+    _XFS_REFLINK[folder] = got
+    return got
 
 
 _EXCHANGE: dict[str, bool] = {}

@@ -48,6 +48,7 @@ NETWORK_FS = {
     "fuse.rclone",
     "fuse.gvfsd-fuse",
 }
+SUBVOLUME_FS = {"btrfs", "bcachefs"}  # subvolumes have device numbers of their own
 PSEUDO_FS = {
     "proc",
     "sysfs",
@@ -324,6 +325,17 @@ def _linux_volume(path: str) -> VolumeInfo:
             return _wsl_marked(
                 m, _posix_from_statvfs(real, point, m.fs_type, m.source, m.fs_type in NETWORK_FS)
             )
+        # a subvolume inside a mounted btrfs (or bcachefs): its device number changes at the
+        # subvolume, which is no mount point; the file system is the mount above it
+        above = [
+            m
+            for m in _linux_mounts()
+            if m.fs_type in SUBVOLUME_FS
+            and (real == m.mount_point or real.startswith(m.mount_point.rstrip("/") + "/"))
+        ]
+        if above:
+            m = max(above, key=lambda m: len(m.mount_point))
+            return _wsl_marked(m, _posix_from_statvfs(real, m.mount_point, m.fs_type, m.source, False))
         return _posix_from_statvfs(real, point, "", "", False)
     return _wsl_marked(
         best,
