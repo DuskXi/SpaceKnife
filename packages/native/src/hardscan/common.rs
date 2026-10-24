@@ -71,6 +71,16 @@ pub struct StateOpts {
     pub keep_access_time: bool,
     pub relative_open: bool,
     pub verify_names: bool,
+    /// Windows: leave out a listing's last query when the buffer before it had room for another
+    /// entry (`skip_final`; with `verify_final`, sent anyway and its result counted).
+    pub skip_final: bool,
+    pub verify_final: bool,
+    /// Windows: a relative open is checked by the file id of the "." entry its listing starts with
+    /// (`dot_check`), else by querying the handle.
+    pub dot_check: bool,
+    /// Windows: no FILE_WRITE_ATTRIBUTES where the volume's file system does not update access
+    /// times by the system's setting (`keep_where_updated`).
+    pub keep_where_updated: bool,
     /// Test seams, the private `_fold_strict` and `_extd_self_ids` options (win.rs RootState).
     pub fold_strict: bool,
     pub extd_self_ids: bool,

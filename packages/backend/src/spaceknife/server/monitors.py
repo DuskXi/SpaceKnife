@@ -658,31 +658,34 @@ class ScanMonitor:
             batch, queue = queue[:LIST_BATCH], queue[LIST_BATCH:]
             await self._permit()
             res = await self._slice(batch, opts)
-            remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
-            ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
-            starts = store.ingest_slice(
-                res.refs,
-                res.bounds,
-                res.name_blob,
-                res.name_lens,
-                {k: res.cols[k] for k in ENTRY_COLUMNS},
-                ext,
-            ).tolist()
+            # a writer: NodeStore.compact (on the compute pool, as a reader) replaces the columns,
+            # and rows written into a column it just replaced would be lost
+            async with STRUCTURE.write():
+                remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
+                ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
+                starts = store.ingest_slice(
+                    res.refs,
+                    res.bounds,
+                    res.name_blob,
+                    res.name_lens,
+                    {k: res.cols[k] for k in ENTRY_COLUMNS},
+                    ext,
+                ).tolist()
 
-            def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int | None:
-                """None: the folder left the tree while it was read (store.ingest_slice)."""
-                kind, a, b = ref
-                if kind == 0:
-                    return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
-                return None if starts[a] < 0 else starts[a] + b
+                def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int | None:
+                    """None: the folder left the tree while it was read (store.ingest_slice)."""
+                    kind, a, b = ref
+                    if kind == 0:
+                        return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
+                    return None if starts[a] < 0 else starts[a] + b
 
-            for ref, _path, _msg in res.errors:
-                if (target := resolve(ref)) is not None:
-                    store.mark(target, Flag.ACCESS_DENIED)
-                    store.clear(target, Flag.PENDING)
-            for ref, path, idx in res.frontier:
-                if (target := resolve(ref)) is not None:
-                    queue.append(((0, target, 0), path, idx))
+                for ref, _path, _msg in res.errors:
+                    if (target := resolve(ref)) is not None:
+                        store.mark(target, Flag.ACCESS_DENIED)
+                        store.clear(target, Flag.PENDING)
+                for ref, path, idx in res.frontier:
+                    if (target := resolve(ref)) is not None:
+                        queue.append(((0, target, 0), path, idx))
 
     async def _slice(self, tasks: list[worker.Task], opts: SliceOptions) -> SliceResult:
         slicer = self.owner.scans.slicer()
