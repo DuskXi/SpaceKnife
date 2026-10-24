@@ -1383,6 +1383,8 @@ struct Raw<'a> {
     access: i64,
     write: i64,
     eof: i64,
+    /// AllocationSize of the listing entry (the same offset in all three classes).
+    alloc: i64,
     /// File id and its width in bits (FileIdExtd 128, FileIdBoth 64, FileBoth none: 0).
     id: u128,
     id_bits: u8,
@@ -1442,6 +1444,7 @@ unsafe fn read_entry<'a>(p: *const u8, avail: usize, level: u8) -> Option<(u32, 
             access: field!(i64, E, LastAccessTime),
             write: field!(i64, E, LastWriteTime),
             eof: field!(i64, E, EndOfFile),
+            alloc: field!(i64, E, AllocationSize),
             id,
             id_bits,
             name,
@@ -1505,6 +1508,14 @@ struct Listing {
     up: &'static [u16],
 }
 
+/// Measurement prototype (bench/method): SPACEKNIFE_WIN_ALLOC_FROM_LISTING=1 takes the size on disk
+/// from the listing entry's AllocationSize (on NTFS a value that is not whole clusters is resident
+/// data: 0), with no GetCompressedFileSizeW per sparse or compressed file.
+fn alloc_from_listing() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("SPACEKNIFE_WIN_ALLOC_FROM_LISTING").is_some_and(|v| v == "1"))
+}
+
 fn add_entry(
     raw: &Raw<'_>,
     dir: &[u16],
@@ -1535,6 +1546,13 @@ fn add_entry(
     } else if attrs & (FA_RECALL_ON_DATA_ACCESS | FA_RECALL_ON_OPEN) != 0 {
         flags |= flag::CLOUD;
         0
+    } else if alloc_from_listing() {
+        let a = raw.alloc.max(0);
+        if root.resident_max > 0 && a % cluster != 0 {
+            0
+        } else {
+            a
+        }
     } else if attrs & (FA_COMPRESSED | FA_SPARSE) != 0 {
         let real = if how.pinned { None } else { compressed_size(dir, raw.name) };
         round_up(real.unwrap_or(size), cluster)
@@ -2009,6 +2027,7 @@ mod tests {
             access: 0,
             write: 0,
             eof,
+            alloc: 0,
             id: 0,
             id_bits: 0,
             name: &NAME,
