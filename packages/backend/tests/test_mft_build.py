@@ -9,6 +9,9 @@ cyclic parents, metafiles, the root's own entry, streams, huge and negative valu
 
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -144,6 +147,55 @@ def test_mapped_store(sample: MftTable, monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(mapped.POLICY, "force_bytes", 1)  # every store goes to file-backed memory
     s = both(sample)
     assert s.mapped
+
+
+THREADS = r"""
+import ctypes, os, sys, time
+import numpy as np
+from spaceknife.scan import mft
+
+def threads():
+    if sys.platform != "win32":
+        return len(os.listdir("/proc/self/task"))
+    from ctypes import wintypes as w
+    class Entry(ctypes.Structure):
+        _fields_ = [("size", w.DWORD), ("usage", w.DWORD), ("tid", w.DWORD), ("pid", w.DWORD),
+                    ("base", w.LONG), ("delta", w.LONG), ("flags", w.DWORD)]
+    k = ctypes.WinDLL("kernel32")
+    k.CreateToolhelp32Snapshot.restype = w.HANDLE
+    k.Thread32First.argtypes = k.Thread32Next.argtypes = [w.HANDLE, ctypes.c_void_p]
+    k.CloseHandle.argtypes = [w.HANDLE]
+    snap, e, n = k.CreateToolhelp32Snapshot(4, 0), Entry(), 0  # TH32CS_SNAPTHREAD
+    e.size = ctypes.sizeof(e)
+    ok = k.Thread32First(snap, ctypes.byref(e))
+    while ok:
+        n += e.pid == os.getpid()
+        ok = k.Thread32Next(snap, ctypes.byref(e))
+    k.CloseHandle(snap)
+    return n
+
+table = dict(np.load(sys.argv[1]))
+table["names"] = table["names"].tobytes()
+before = threads()
+mft.table_to_store(table, "C:\\", consume=True)
+deadline = time.monotonic() + 10
+while threads() > before and time.monotonic() < deadline:
+    time.sleep(0.02)
+print(before, threads())
+"""
+
+
+@pytest.mark.skipif(sys.platform == "darwin", reason="threads counted through /proc or Toolhelp")
+def test_the_build_leaves_no_threads_behind(sample: MftTable, tmp_path: Path) -> None:
+    """The build runs on a rayon pool of its own that goes with it: in a fresh process nothing
+    stays behind (rayon's global pool would keep a thread per core in the backend for good)."""
+    path = tmp_path / "table.npz"
+    np.savez(path, **{k: np.frombuffer(v, np.uint8) if k == "names" else v for k, v in sample.items()})
+    out = subprocess.run(
+        [sys.executable, "-c", THREADS, str(path)], capture_output=True, text=True, timeout=120, check=True
+    )
+    before, after = map(int, out.stdout.split())
+    assert after <= before
 
 
 def test_bad_tables_are_refused(sample: MftTable) -> None:

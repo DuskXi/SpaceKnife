@@ -24,7 +24,7 @@ from loguru import logger
 from spaceknife_protocol import scan as p
 from spaceknife_protocol.errors import ErrorCode
 
-from .. import memory, paths
+from .. import memory, native, paths
 from ..events import denied_reason, emit, printable
 from ..filter.names import forget, name_index
 from ..helper import HelperError, SharedHelper, is_elevated
@@ -63,8 +63,9 @@ TICK_S = 0.5  # status pushes while a scan runs, also when nothing lands (MFT re
 CLOSED_KEEP_S = 3600.0  # ScanManager.closed: how long a closed scan's size counts
 RELEASE_DELAY_S = 1.0  # after scan.close: give the heap back once the request is done with the scan
 MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the rest is building
-# the received table (~160 B with the names) plus building the tree from it (~85 B, docs/memory.md §6)
-MFT_BUILD_BYTES_PER_ROW = 280
+# the received table (~160 B with the names) plus building the tree from it (docs/memory.md §6):
+# ~57 B with the native build, ~120 B with the numpy one
+MFT_BUILD_BYTES_PER_ROW = {"native": 220, "numpy": 280}
 SUMMARY_TOP = 50  # largest files in a cached summary: the details panel asks for 5 or 50
 SUMMARY_KEEP = 8  # cached summaries per scan (other nodes of the same store version)
 # a hard scan reserves room for the newest complete snapshot's items, plus this share and these rows
@@ -672,7 +673,8 @@ class ScanManager:
             )
             handle.mft_task = job
             table = await job
-            handle.transient = len(table["record"]) * MFT_BUILD_BYTES_PER_ROW
+            build = "native" if native.has("mft_build") else "numpy"
+            handle.transient = len(table["record"]) * MFT_BUILD_BYTES_PER_ROW[build]
             handle.phase = "build"
             handle.publish()
             st = self.settings

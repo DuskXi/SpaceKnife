@@ -324,7 +324,12 @@ def _images() -> list[tuple[str, bytes]]:
     return out
 
 
-@pytest.mark.parametrize(("name", "data"), _images())
+_IMAGES = _images()
+
+
+# ids by name: the bytes would make the test id (and PYTEST_CURRENT_TEST, capped at 32767
+# characters on Windows) megabytes long
+@pytest.mark.parametrize(("name", "data"), _IMAGES, ids=[name for name, _ in _IMAGES])
 def test_concurrent_streaming_is_the_sequential_stream(name: str, data: bytes) -> None:
     """Windows parsed in parallel, in shuffled order, then put back in record order: the same table
     as feeding them one by one, row order included, whatever the window size."""

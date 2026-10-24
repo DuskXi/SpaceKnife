@@ -826,11 +826,12 @@ def scan_volume(
 ) -> tuple[MftTable, dict[str, int]]:
     """Read and parse the $MFT of a local NTFS volume: ``(table, geometry)``.
 
-    With the native module this streams (32 MiB windows, read and parse overlapping): memory is
-    the table plus a few windows. Without it the whole $MFT is read first (gigabytes on a large
-    system volume). ``duty`` in (0, 1]: the reader is busy that share of the time (I/O limit;
-    honoured by the native reader). ``progress(done, total)`` follows the reading (per window
-    natively, once at the end otherwise). Needs administrator rights; NotImplementedError off Windows.
+    With the native module this streams (8 MiB windows, several read at once, each parsed as it
+    arrives and joined in record order): memory is the table plus the windows in flight. Without
+    it the whole $MFT is read first (gigabytes on a large system volume). ``duty`` in (0, 1]: the
+    disk is busy with the scan that share of the time (I/O limit; honoured by the native reader).
+    ``progress(done, total)`` follows the reading (per window natively, once at the end otherwise).
+    Needs administrator rights; NotImplementedError off Windows.
     """
     mod = native.module()
     if mod is not None and native.has("scan_mft"):

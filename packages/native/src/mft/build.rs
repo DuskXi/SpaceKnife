@@ -143,6 +143,29 @@ fn out_of<T: Element>(a: &Bound<'_, PyArray1<T>>) -> Out<T> {
     Out(a.data())
 }
 
+/// The build's own rayon pool, as many threads as the global pool would have. It goes when the
+/// build returns, threads and all: the backend otherwise runs nothing on rayon's global pool, whose
+/// threads would stay in it for good after the first MFT scan (about 0.1 MB each, docs/memory.md
+/// §6). When it cannot be made, the work runs on the global pool.
+fn build_pool() -> Option<rayon::ThreadPool> {
+    rayon::ThreadPoolBuilder::new()
+        .thread_name(|i| format!("sk-mft-build-{i}"))
+        .build()
+        .ok()
+}
+
+/// `f` without the GIL, on the build's pool.
+fn par<R: Send>(
+    py: Python<'_>,
+    pool: &Option<rayon::ThreadPool>,
+    f: impl FnOnce() -> R + Send,
+) -> R {
+    py.detach(|| match pool {
+        Some(p) => p.install(f),
+        None => f(),
+    })
+}
+
 /// Rows of the breadth-first order and where each level starts.
 struct Topo {
     rows: Vec<u32>,     // node id - 1 -> row
@@ -340,6 +363,7 @@ fn mft_build<'py>(
     count_links_each: bool,
     consume: bool,
 ) -> PyResult<Bound<'py, PyDict>> {
+    let pool = build_pool();
     let mut rec_c = Col::<u64>::get(table, "record")?;
     let mut par_c = Col::<u64>::get(table, "parent")?;
     let mut kind_c = Col::<u8>::get(table, "kind")?;
@@ -374,7 +398,7 @@ fn mft_build<'py>(
     let blob_len = names_c.len;
     {
         let (off, len) = (off_c.slice(), len_c.slice());
-        let bad = py.detach(|| {
+        let bad = par(py, &pool, || {
             off.par_iter()
                 .zip(len)
                 .any(|(&o, &l)| o as usize + l as usize > blob_len)
@@ -389,9 +413,11 @@ fn mft_build<'py>(
     // ---------------------------------------------------------------- 1. parents
     let rec = rec_c.slice();
     let kind = kind_c.slice();
-    let nrec = py.detach(|| rec.par_iter().copied().max().map_or(0, |m| m as usize + 1));
+    let nrec = par(py, &pool, || {
+        rec.par_iter().copied().max().map_or(0, |m| m as usize + 1)
+    });
     let nrec = nrec.max(ROOT_RECORD as usize + 1);
-    let (dup, container, mut pdir) = py.detach(|| -> PyResult<_> {
+    let (dup, container, mut pdir) = par(py, &pool, || -> PyResult<_> {
         let mut first: Vec<AtomicU32> = Vec::new();
         first.try_reserve_exact(nrec).map_err(|_| oom("records"))?;
         first.extend((0..nrec).map(|_| AtomicU32::new(NONE)));
@@ -461,7 +487,7 @@ fn mft_build<'py>(
     done(table, "parent", &mut par_c, consume)?;
 
     // ---------------------------------------------------------------- 2. breadth-first order
-    let (topo, cycles) = py.detach(|| -> PyResult<_> {
+    let (topo, cycles) = par(py, &pool, || -> PyResult<_> {
         let mut topo = breadth_first(&pdir, &container, root_row)?;
         let expected = 1 + pdir.par_iter().filter(|&&d| d >= 0).count();
         let mut cycles = 0usize;
@@ -507,7 +533,7 @@ fn mft_build<'py>(
             out_of(&many_a),
         );
         let (levels, counts, container) = (&topo.levels, &topo.counts, &container);
-        py.detach(|| {
+        par(py, &pool, || {
             // SAFETY (all writes below): every node id is written by exactly one worker
             unsafe {
                 parent.put(0, -1);
@@ -560,7 +586,7 @@ fn mft_build<'py>(
     // ---------------------------------------------------------------- 3. extensions
     let (names, off, len) = (names_c.slice(), off_c.slice(), len_c.slice());
     let name_of = |r: usize| &names[off[r] as usize..off[r] as usize + len[r] as usize];
-    let keys: Vec<ExtKey> = py.detach(|| {
+    let keys: Vec<ExtKey> = par(py, &pool, || {
         let mut keys: Vec<ExtKey> = (0..n)
             .into_par_iter()
             .with_min_len(1 << 12)
@@ -610,7 +636,7 @@ fn mft_build<'py>(
     let ext_a = zeros::<u16>(py, count);
     {
         let (nl, ex) = (out_of(&name_len_a), out_of(&ext_a));
-        py.detach(|| {
+        par(py, &pool, || {
             rows.par_iter()
                 .enumerate()
                 .with_min_len(1 << 12)
@@ -649,7 +675,7 @@ fn mft_build<'py>(
         image_len = acc;
         let image = zeros::<u8>(py, image_len);
         let img = out_of(&image);
-        py.detach(|| {
+        par(py, &pool, || {
             rows.par_iter()
                 .enumerate()
                 .with_min_len(1 << 12)
@@ -664,7 +690,7 @@ fn mft_build<'py>(
         if image_len >= OFF_NARROW_LIMIT {
             let a = zeros::<i64>(py, count);
             let o = out_of(&a);
-            py.detach(|| {
+            par(py, &pool, || {
                 starts
                     .par_iter()
                     .enumerate()
@@ -674,7 +700,7 @@ fn mft_build<'py>(
         } else {
             let a = zeros::<u32>(py, count);
             let o = out_of(&a);
-            py.detach(|| {
+            par(py, &pool, || {
                 starts
                     .par_iter()
                     .enumerate()
@@ -711,13 +737,15 @@ fn mft_build<'py>(
         }
         _ => Vec::new(),
     };
-    let root_first = py.detach(|| rec.par_iter().position_first(|&r| r == ROOT_RECORD));
+    let root_first = par(py, &pool, || {
+        rec.par_iter().position_first(|&r| r == ROOT_RECORD)
+    });
 
     macro_rules! gather {
         ($ty:ty, $fill:expr, |$j:ident, $r:ident| $body:expr) => {{
             let a = zeros::<$ty>(py, count);
             let o = out_of(&a);
-            py.detach(|| {
+            par(py, &pool, || {
                 // SAFETY: node j + 1 is this worker's
                 unsafe { o.put(0, $fill) };
                 rows.par_iter()
@@ -868,7 +896,7 @@ fn mft_build<'py>(
             out_of(&tot_files_a),
             out_of(&tot_dirs_a),
         );
-        py.detach(|| {
+        par(py, &pool, || {
             totals(
                 kind, flags, size, alloc, depth, parent, first, many, nlevels, outs,
             )

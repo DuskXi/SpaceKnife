@@ -32,11 +32,18 @@ def mft_volume_info(volume: str) -> dict[str, int]:
     # cluster_size, record_size, mft_lcn, mft_size, mft_valid_size, mft_fragments, volume_size。
 
 
-def scan_mft(volume: str, duty: float = 1.0) -> tuple[MftTable, dict[str, int]]:
+def scan_mft(volume: str, duty: float = 1.0, progress=None, stats=None) -> tuple[MftTable, dict[str, int]]:
     ...
-    # 主路径：按 $MFT 的 data runs 每次读 32 MiB 窗口，读线程与 rayon 解析重叠（有界通道，最多领先一个窗口）；
-    # duty ∈ (0, 1]：读线程按这个占空比歇一歇（IO 档位换算见 4.3）。峰值内存约等于结果表本身
-    # （C: 845 万项时助手峰值 1.6 GB；整块读入再解析要 10.6 GB）。
+    # 主路径（src/mft/scan.rs、io.rs）：$MFT 按 data runs 切成 8 MiB 的窗口，同时有几个窗口在读；
+    # Windows 上是一个重叠 IO 的无缓冲卷句柄加完成端口，直接读进对齐的窗口缓冲区（不经弹跳缓冲区）。
+    # 读完的窗口立即交给 rayon 解析（一个窗口一个任务），解析完按记录号顺序并入输出列。
+    # 同时在读的窗口数（深度）在扫描中自己找：从 2 开始，每个阶段至少 150 ms 忙碌时间、16 个窗口，
+    # 翻倍能让吞吐多一成以上就翻倍，否则退回上一档不再变，最多 128 MiB 在途（scan::Depth）。
+    # duty ∈ (0, 1]：读按突发进行，每次突发至少占盘 50 ms，之后等在途读完、歇 忙碌时间×(1−duty)/duty，
+    # 盘的忙碌占比就是 duty（IO 档位换算见 4.3）。progress(done, total) 每解析完一个窗口调用一次
+    # （读线程上，短暂拿 GIL；出错忽略）。stats：传入 dict 时写进各阶段耗时和计数（基准用）。
+    # 峰值内存约为结果表加正在读的窗口和结束时搬进 bytes 的名字（C: 886 万项时助手峰值 +1.62 GB，
+    # 旧的流式读法 +2.82 GB，整块读入再解析要 10.6 GB）。
 
 
 def read_mft(volume: str) -> bytes: ...  # 整个 $MFT 读进内存（旧接口，测试与对比用）
@@ -61,18 +68,21 @@ def parse_mft(data, record_size: int, cluster_size: int) -> MftTable:
 | `nlink` | u16 | 硬链接名数（Win32/POSIX 命名空间的名字个数）|
 | `names` | bytes | 名字 blob |
 
-解析规则：只保留 in-use 记录；应用 fixup 并校验，坏记录跳过并计数（`bad_records`）；扩展记录按头部的 base reference（含序列号）合并，所以非驻留的 `$ATTRIBUTE_LIST` 也能处理；同一父目录下同一记录的 DOS 8.3 名与 Win32 名并存时只保留 Win32 名；`$FILE_NAME` 的父引用取自该名字本身（序列号不校验）。流式解析时，带 `$ATTRIBUTE_LIST` 的基础记录推迟到所有窗口读完再输出；没有列表却在后面出现扩展记录的基础记录，结束时按记录号补读重解析——所以行基本按记录号排列，有扩展记录的文件排在最后。
+解析规则：只保留 in-use 记录；应用 fixup 并校验，坏记录跳过并计数（`bad_records`）；扩展记录按头部的 base reference（含序列号）合并，所以非驻留的 `$ATTRIBUTE_LIST` 也能处理；同一父目录下同一记录的 DOS 8.3 名与 Win32 名并存时只保留 Win32 名；`$FILE_NAME` 的父引用取自该名字本身（序列号不校验）。流式解析时，带 `$ATTRIBUTE_LIST` 的基础记录推迟到所有窗口读完再输出（只留解析结果，不留原始记录；结束时并行并入它们的扩展记录）；没有列表却在后面出现扩展记录的基础记录，结束时按记录号补读重解析——所以行基本按记录号排列，有扩展记录的文件排在最后。窗口可以乱序解析完，但总按记录号顺序并入，所以行和行序与逐窗口读解析完全相同，与窗口大小、深度、完成顺序都无关（有测试；D:、F:、K: 的真实 $MFT 镜像上新旧两版逐字节相同）。
 
-后端把 `MftTable` 变成 `NodeStore`（`spaceknife/scan/mft.py` 的 `table_to_store`）：
+流式扫描的输出列按「已读记录的行密度 × 记录总数」预留（多留 2%，不够时同样按投影再扩），每个窗口的表和窗口缓冲区循环使用；名字按窗口分块搬入，最后一次拷进 `bytes`，不再在最后整表拼接（旧做法那一刻是两张表）。
 
-- 按父子关系做 BFS，保证每个目录的子项连续，一次 `NodeStore.from_columns`（新建的列直接接管，不再复制）+ `reaggregate`。
+后端把 `MftTable` 变成 `NodeStore`（`spaceknife/scan/mft.py` 的 `table_to_store`）。有原生扩展时由 `mft_build`（`src/mft/build.rs`）完成，所有步骤在 Rust 里并行：首行与重复名字、按记录找目录行、每行的父目录行、断环、广度优先顺序、子项区间、深度、各列（直接写进节点表可原样接管的 numpy 数组）、`\0name` 名字图像（一次排好，`from_columns(separated=True)`，不再经过 `_separate`）、四个子树合计（按层从深到浅，每层的目录并行求和，等同 `reaggregate`）。这些并行步骤跑在建树自己的 rayon 线程池上（线程数与全局池相同），建完池和线程一起退出，不在后端常驻（见 [memory.md](memory.md) §6）。Python 只给去重后的扩展名编号（`ext_numbers`，与 numpy 建树同一顺序、同一 `str.lower`），没有逐行的 Python 工作。没有原生扩展时用 `_table_to_store_numpy`。两种建树的结果逐列相同——节点顺序、名字图像、扩展名表、store 版本号都相同（`tests/test_mft_build.py` 用样例、环、随机表对照；C:、K:、F:、D: 的真实表上也逐列相同）。建树放在后端而不在助手里：建树要用后端的状态（扫描语言下伪目录的名字、根路径、「扫描 NTFS 备用数据流」「硬链接」设置、映射模式的内存策略），放进助手就要扩大提权进程里跑的代码和白名单协议；而助手发来的表本来就是解析器的列，后端用 `consume=True` 边建边释放表的列，建树在表之外只多 57 B/行（C: 886 万行 +481 MB，numpy 建树 +1014 MB）。
+
+- 按父子关系做 BFS，保证每个目录的子项连续，一次 `NodeStore.from_columns`（新建的列直接接管，不再复制）+ 子树合计。
 - 记录 5 是根；元文件（记录 0–15 与 `$Extend` 树）放进伪目录 `$NTFS 元数据`；父项缺失、不是目录或成环的名字放进 `$孤立文件`（成环时每个环断开一个成员）。伪目录只在非空时创建，带 `Flag.VIRTUAL`；它们下面的项没有真实路径（`tree.node` / `tree.summary` 的 `on_disk = false`，界面禁用「在资源管理器中显示」和「加入删除篮」）。
 - 占用规则同硬扫描：目录与链接不占空间，同一文件的第二个及以后的名字标 `HARDLINK_DUP`；`ino` 是记录号。
 - 备用数据流只在 `include_ads`（设置「扫描 NTFS 备用数据流」）时计入；元文件夹里的流总是计入占用（`$UsnJrnl:$J`、`$Secure:$SDS` 等）。例外是 `$BadClus:$Bad`：它和卷一样长、只映射坏簇，却不带稀疏标志，allocated size 等于整卷大小，所以从不计入（坏簇本身也不计）。
 - `consume=True`：调用方把表交出来，列在拷进节点顺序后立即释放（C: 级的表约 1 GB，建树峰值相应降低）。
+- 环：不经根可达的父链环里，每个环断开最小的那一行放进 `$孤立文件`；环长超过 4096 时（numpy 建树的标签传播到此为止）整个环的成员都断开。两种建树相同。
 - 与硬扫描的有意差异：云占位文件保留 MFT 里真实的 alloc（硬扫描记 0）；MFT 能看到硬扫描被拒绝访问的目录（如 System Volume Information）；元文件放在伪目录里。
 
-测试钩子（不属于公开接口）：`_mft_image_info(path)`、`_read_mft_image(path)`、`_scan_mft_image(path, duty=1.0, window=0)`、`_parse_mft_stream(data, record_size, cluster_size, window_records)`，读带引导扇区的卷镜像或按小窗口驱动流式解析器。
+测试钩子（不属于公开接口）：`_mft_image_info(path)`、`_read_mft_image(path)`、`_scan_mft_image(path, duty=1.0, window=0, progress=None, stats=None)`、`_parse_mft_stream(data, record_size, cluster_size, window_records, concurrent=False, seed=0)`，读带引导扇区的卷镜像或按小窗口驱动流式解析器（`concurrent`：窗口按 `seed` 打乱的顺序并行解析，再按记录号并入，与顺序喂入逐字节相同）。镜像文件在 Windows 上也走重叠 IO 引擎（不提权也能测到它），其他系统用读线程。基准用的环境变量 `SPACEKNIFE_MFT_WINDOW` / `_DEPTH`（固定深度）/ `_SPARE` / `_PIECE` 改窗口大小和深度，不属于接口。
 
 ### 2.2 并行硬扫描（`src/hardscan/`）
 
@@ -185,7 +195,7 @@ def scan_slice(
 ### 4.3 扫描调度（`server/scans.py`）
 
 - 扫描方式 `auto`：Windows 上「整个本地 NTFS 卷」且允许提权（设置 `scan.elevate`，或已有管理员权限 / 活着的已提权助手，不需要弹窗）时用 MFT，其他情况硬扫描。`mft` 强制尝试 MFT（失败回退硬扫描并说明原因），`hard` 强制硬扫描。
-- MFT 读取是一次短时的顺序突发，用占空比限速：`duty` = 极速 1.0 · 空闲 0.2 · 其他档位 上限/100（最低 0.05）。
+- MFT 读取是一次短时的顺序突发，用占空比限速：`duty` = 极速 1.0 · 空闲 0.2 · 其他档位 上限/100（最低 0.05）。读在突发里进行（每次至少占盘 50 ms），突发之间歇够，盘被本次扫描占用的时间比例就是 `duty`（K: 实测 0.7 档 0.70、0.35 档 0.35；旧读法窗口之间有空档，只有 0.54、0.26）。
 - 硬扫描中途「以管理员身份启用 MFT 快速扫描」（`scan.use_mft`，W2-24/25）：硬扫描继续，助手就绪后整树替换；被拒绝则继续硬扫描。
 - 暂停/继续（`scan.pause` / `scan.resume`）：停止派发新批次（在途的完成即止），1 秒内自身读盘归零；继续时从队列断点接着派发。MFT 读取阶段暂停按钮不可用（突发很短）。
 - 快照记录扫描方式（`stats.method`，`SnapshotInfo.method`）；M4 之前的快照没有这个字段，均为硬扫描。
@@ -194,7 +204,7 @@ def scan_slice(
 
 | 项 | 目标 | 结果 |
 |---|---|---|
-| C: 级卷 MFT 扫描 | < 10 s | 安静档（占空比 0.35）：C: 837 万项 22.1 s，F: 107 万项 9.3 s；按约定只做了短时低强度的实测，满速（占空比 1.0）未测 |
-| 内存 | — | C: 助手峰值 1.6 GB（流式），后端建树峰值见 [memory.md](memory.md) §6 |
+| C: 级卷 MFT 扫描 | < 10 s | 2026-10-23（i9-14900K，NVMe，后台约 6 核负载）：助手读解析 C: 886 万项满速 1.86 s（旧读法 4.78 s），均衡档 2.76 s（旧 7.15 s）；后端建树 0.37 s（numpy 建树 11.9 s）；应用里从开始到建好树（均衡档，含启动助手和传表）4.7 s [4.2–5.1]（旧 19.3 s [17.3–21.2]）。更早：安静档 C: 837 万项 22.1 s |
+| 内存 | — | C: 助手峰值 +1.62 GB（旧读法 +2.82 GB），后端建树在表之外 +0.48 GB（旧 +1.01 GB），见 [memory.md](memory.md) §6 |
 | 限速 | 稳态 5 s 均值 ≤ 上限，单点超出 ≤ 5 个百分点，改档 3 s 内收敛 | 控制器与采样的单元测试覆盖收敛与让路逻辑；按约定没有在用户磁盘上做长时间压测，实盘只做了短时检查（38 万项的测试目录，安静档，自身 2% / 整盘 9%，限速未触发） |
 | 原生与纯 Python 一致 | 逐列一致 | MFT（含流式与随机树）、硬扫描（三平台中 Windows 与 Linux）均有逐列比对测试；没有 Rust 工具链时测试照常通过 |
