@@ -24,7 +24,7 @@ import {
   useCleanup,
 } from "@/state/cleanup";
 import { call } from "@/state/actions";
-import { fmtInt, fmtSize, plural } from "@/lib/format";
+import { fitPath, fmtInt, fmtSize, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 import { Sev } from "./parts";
@@ -81,7 +81,7 @@ export function ReviewPage() {
           <div key={v.volume}>
             <span className="strong">{v.volume}</span> {v.fs.toUpperCase()} ·{" "}
             {v.freed_now ? t("马上 {size}", { size: fmtSize(v.freed_now) }) : ""} {v.freed_later ? t("之后 +{size}", { size: fmtSize(v.freed_later) }) : ""}
-            {v.recovery && <span className="muted"> · {t("恢复区 {path}", { path: v.recovery })}</span>}
+            {v.recovery && <span className="muted"> · {t("恢复区：{path}", { path: v.recovery })}</span>}
             {v.trash && <span className="warn"> · {v.trash}</span>}
             {v.snapshots_note && <span className="muted"> · {v.snapshots_note}</span>}
           </div>
@@ -182,7 +182,7 @@ export function ReviewPage() {
           {t("执行…")}
         </button>
       </div>
-      {task && task.kind === "preflight" && (
+      {task && task.kind === "preflight" && approved && (
         <div className="small cl-preflight" role="status">
           {taskRunning(task) ? t("预检中…") : t("预检：{n} 项可以做", { n: fmtInt(task.counts.would_do ?? 0) })}
           {task.skipped.map((s) => (
@@ -223,7 +223,7 @@ function Bucket({ b, open, needsAck }: { b: CleanupBucket; open: boolean; needsA
           {copies.items.map((c) => (
             <div key={c.row} className="cl-bucket-item">
               <span className="mono" title={c.path}>
-                {c.path}
+                {fitPath(c.path, 64)}
               </span>
               <span className="muted"> — {c.risks.find((r) => r.id === b.id)?.text ?? ""}</span>
             </div>
@@ -239,7 +239,7 @@ function Bucket({ b, open, needsAck }: { b: CleanupBucket; open: boolean; needsA
       )}
       {needsAck && !open && (
         <div className="small muted">
-          {b.acked ? t("已确认") : b.unacked < b.copies && b.unacked > 0 ? t("又有 {n} 份落进这类风险，要再确认", { n: fmtInt(b.unacked) }) : t("点「看这些」，看过之后才能确认")}
+          {b.acked ? t("已确认") : b.partly_acked ? t("又有 {n} 份落进这类风险，要再确认", { n: fmtInt(b.unacked) }) : t("点「看这些」，看过之后才能确认")}
         </div>
       )}
     </div>

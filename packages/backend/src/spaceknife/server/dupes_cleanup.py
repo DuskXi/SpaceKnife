@@ -519,20 +519,20 @@ class CleanupManager:
             )
 
     def _recovery_where(self, plan: CleanupPlan) -> dict[int, str]:
+        """Per volume: the recovery area a run would use (the executor's own choice, made the same way)."""
+        from ..dupes.cleanup.recovery import planned_where
         from ..paths import data_dir
 
-        out: dict[int, str] = {}
-        ddev = None
-        with contextlib.suppress(OSError):
-            ddev = os.stat(str(data_dir().parent if not data_dir().exists() else data_dir())).st_dev
         at_root = bool(self._setting("dupes.cleanup.recovery_at_root", True))
+        sandbox = sandbox_from_env()
+        out: dict[int, str] = {}
         for vc in plan.vols:
-            if ddev is not None and sys.platform != "win32" and ddev == vc.dev:
-                out[vc.index] = str(data_dir() / "dupes" / "cleanup" / "recovery")
-            elif at_root:
-                out[vc.index] = os.path.join(vc.mount, ".SpaceKnife-recovery")
-            else:
-                out[vc.index] = K.TEXT["relative"]
+            where = (
+                planned_where(vc.mount, sandbox=sandbox, at_root=at_root, data_dir=data_dir())
+                if vc.mount
+                else ""
+            )
+            out[vc.index] = where or K.TEXT["recovery_in_place"]
         return out
 
     async def resume(self, p: pc.CleanupResumeParams) -> pc.CleanupState:
@@ -593,6 +593,7 @@ class CleanupManager:
             unavailable=d["unavailable"],
             risks_added=d["risks_added"],
             risks_removed=d["risks_removed"],
+            risk_titles=d["risk_titles"],
             protected=d["protected"],
             changed=d["changed"],
             examples=[pc.CleanupDiffRow(**x) for x in d["examples"]],
@@ -975,7 +976,10 @@ class CleanupManager:
 
         ctx.on_batch = on_batch
 
+        held = False  # the preflight asked first: nothing ran, the approval stays for 「执行其余的」
+
         async def go() -> None:
+            nonlocal held
             try:
                 plan_doc = {
                     "run": run_id,
@@ -1020,6 +1024,7 @@ class CleanupManager:
                     )
                     ctx.journal.close()
                     t.state = "stopped"
+                    held = True
                     return
                 t.state = "running"
                 t.phase = "execute"
@@ -1041,7 +1046,8 @@ class CleanupManager:
                 if ctx.journal is not None:
                     ctx.journal.close()
                 self._emit(t, force=True)
-                await self._after_run(h, steps)
+                if not held:
+                    await self._after_run(h, steps)
 
         t.task = loop.create_task(go())
         logger.info("cleanup run {}: {} steps", run_id, len(steps))
@@ -1252,6 +1258,8 @@ class CleanupManager:
                 state = "pending"
             else:
                 state = "skipped"
+            if st is not None and st.undo_code and not st.undone and state == "done":
+                code = st.undo_code  # done, and an undo that did not happen: why it did not
             if filt and filt not in (code, state):
                 continue
             done = (st.done if st else None) or {}

@@ -197,6 +197,7 @@ class StepState:
     message: str = ""
     done: dict[str, Any] | None = None
     undone: bool = False
+    undo_code: str = ""  # the last undo that did not happen: why (undo_taken, undo_changed ...)
     purged: bool = False
     resolved: str = ""
 
@@ -234,6 +235,7 @@ def fold(
             st.message = str(rec.get("why", ""))
         elif t == "undo":
             st.undone = rec.get("code") == "undone"
+            st.undo_code = "" if st.undone else str(rec.get("code", ""))
             if not st.undone:
                 st.message = str(rec.get("why", ""))
         elif t == "purged":

@@ -2,6 +2,8 @@
 // facts beside the keeper's (the cells that differ marked), what can be done and why not, the risks
 // with their evidence, and the full reason chain of its decision.
 
+import { useEffect, useRef } from "react";
+
 import type { CleanupCopyDetail } from "@/protocol/generated";
 import { actionLabel, ACTIONS, setAction, useCleanup } from "@/state/cleanup";
 import { fmtSize } from "@/lib/format";
@@ -11,10 +13,16 @@ import { Sev } from "./parts";
 
 export function CleanupInspector() {
   const d = useCleanup((s) => s.detail);
+  const ref = useRef<HTMLElement>(null);
+  const gid = d?.group.id ?? null;
+  // another group starts at its top
+  useEffect(() => {
+    if (ref.current) ref.current.scrollTop = 0;
+  }, [gid]);
   if (!d) return <aside className="cl-inspector muted small">{t("选一组看它的每一份")}</aside>;
   const g = d.group;
   return (
-    <aside className="cl-inspector" aria-label={t("检查器")}>
+    <aside ref={ref} className="cl-inspector" aria-label={t("检查器")} tabIndex={-1}>
       <div className="cl-ins-head">
         <div className="strong">{g.name}</div>
         <div className="muted small">
@@ -58,8 +66,12 @@ function CopyCard({ c, group, live }: { c: CleanupCopyDetail; group: number; liv
             {c.facts.map((f) => (
               <tr key={f.label} className={f.differs ? "differs" : ""}>
                 <th>{f.label}</th>
-                <td className="mono">{f.this}</td>
-                <td className="mono">{f.keeper}</td>
+                <td className="mono" title={f.this}>
+                  {f.this}
+                </td>
+                <td className="mono" title={f.keeper}>
+                  {f.keeper}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -73,8 +85,10 @@ function CopyCard({ c, group, live }: { c: CleanupCopyDetail; group: number; liv
             return (
               <label key={a} className={`cl-avail-row${why ? " no" : ""}`}>
                 <input type="radio" name={`act-${m.row}`} checked={(m.action ?? "leave") === a} disabled={!live || !!why} onChange={() => void setAction(group, m.path, a)} />
-                <span>{actionLabel(a)}</span>
-                {why && <span className="small muted"> — {why}</span>}
+                <span className="cl-avail-text">
+                  <span>{actionLabel(a)}</span>
+                  {why && <span className="cl-pick-why">{why}</span>}
+                </span>
               </label>
             );
           })}

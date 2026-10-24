@@ -78,6 +78,14 @@ export interface CleanupStore {
   /** a receipt of the last edit (「已改 228 份 · Ctrl+Z 撤回」) */
   receipt: string;
   busy: boolean;
+  /** terms of the filter the backend could not read (left out), in words */
+  problems: string[];
+  /** narrow windows: the inspector shown as a sheet over the table */
+  sheet: boolean;
+  /** the list of keys (「?」) */
+  keysHelp: boolean;
+  /** the run whose dropped steps were already put to the user (asked once) */
+  askedDrops: string;
 }
 
 const initial = (): CleanupStore => ({
@@ -108,6 +116,10 @@ const initial = (): CleanupStore => ({
   interrupted: null,
   receipt: "",
   busy: false,
+  problems: [],
+  sheet: false,
+  keysHelp: false,
+  askedDrops: "",
 });
 
 export const useCleanup = create<CleanupStore>(initial);
@@ -237,9 +249,10 @@ export async function loadGroups(more = false): Promise<void> {
   try {
     const page = await call("dupes.cleanup_groups", { plan_id: c.planId, filter: c.filter, sort: c.sort, offset, limit, include_out: false });
     const groups = more ? [...getCleanup().groups, ...page.items] : page.items;
-    setCleanup({ groups, total: page.total, version: page.version });
+    setCleanup({ groups, total: page.total, version: page.version, problems: page.problems ?? [] });
     const f = getCleanup().focus;
-    if (f === null && groups.length) await inspect(groups[0]!.id);
+    const inList = f !== null && groups.some((g) => g.id === f);
+    if (!inList && !more) await inspect(groups.length ? groups[0]!.id : null);
     else if (f !== null) await inspect(f);
   } catch (err) {
     toast(readable(err));
@@ -328,10 +341,19 @@ export async function openRisk(risk: string | null): Promise<void> {
 }
 
 // ------------------------------------------------------------------ editing
-function receiptOf(before: CleanupState | null, after: CleanupState): string {
-  if (!before) return "";
-  const changed = after.summary.by_action.reduce((n, a) => n + a.copies, 0);
-  return plural(changed, t("已改 · 方案第 {v} 版 · Ctrl+Z 撤回", { v: fmtInt(after.version) }), "Changed · plan version {v} · Ctrl+Z undoes", { v: fmtInt(after.version) });
+/** The receipt of an edit: what it did, then how to take it back. */
+export function receiptOf(what: string): string {
+  return t("{what} · Ctrl+Z 撤回", { what: what || t("已改") });
+}
+
+/** What a previewed edit changed, in copies (and the copies a risk rule turned into 「不动」). */
+export function diffLine(diff: CleanupDiff): string {
+  const keys = new Set([...Object.keys(diff.before), ...Object.keys(diff.after)]);
+  let moved = 0;
+  for (const k of keys) moved += Math.max(0, (diff.after[k] ?? 0) - (diff.before[k] ?? 0));
+  const held = diff.unavailable.risk_rule ?? 0;
+  const line = plural(moved, t("已改 {n} 份（{g} 组）", { n: fmtInt(moved), g: fmtInt(diff.changed) }), "Changed 1 copy ({g} groups)", { g: fmtInt(diff.changed) });
+  return held ? `${line}${t("，其中 {n} 份有高风险，按规则改成了不动", { n: fmtInt(held) })}` : line;
 }
 
 /** An edit, sent with the version it was made on (a newer plan refuses it: it is shown again). */
@@ -340,7 +362,7 @@ export async function edit(e: CleanupEdit, label = ""): Promise<boolean> {
   if (!c.planId || !c.state) return false;
   try {
     const st = await call("dupes.cleanup_edit", { plan_id: c.planId, base_version: c.state.version, edit: e });
-    setCleanup({ state: st, receipt: label || receiptOf(c.state, st), dialog: null });
+    setCleanup({ state: st, receipt: receiptOf(label), dialog: null });
     await loadGroups();
     if (getCleanup().view === "pairs") await loadPairs();
     return true;
@@ -367,7 +389,7 @@ export async function preview(e: CleanupEdit, label: string): Promise<void> {
 export async function commitPreview(includeOverridden = false): Promise<void> {
   const d = getCleanup().dialog;
   if (d?.kind !== "preview") return;
-  await edit({ ...d.edit, include_overridden: includeOverridden }, d.label);
+  await edit({ ...d.edit, include_overridden: includeOverridden }, d.diff.refused ? d.label : diffLine(d.diff));
 }
 
 export async function undoEdit(redo = false): Promise<void> {
@@ -376,7 +398,7 @@ export async function undoEdit(redo = false): Promise<void> {
   if (redo ? !c.state.can_redo : !c.state.can_undo) return;
   try {
     const st = await call(redo ? "dupes.cleanup_redo_edit" : "dupes.cleanup_undo_edit", { plan_id: c.planId, base_version: c.state.version });
-    setCleanup({ state: st, receipt: redo ? t("已重做") : t("已撤回") });
+    setCleanup({ state: st, receipt: redo ? t("已重做 · Ctrl+Z 撤回") : t("已撤回 · Ctrl+Shift+Z 重做") });
     await loadGroups();
   } catch (err) {
     toast(readable(err));
@@ -389,11 +411,19 @@ export function bulkScope(): { groups?: number[]; filter?: string } {
   return c.selected.length ? { groups: c.selected } : { filter: c.filter };
 }
 
-export const keepOnly = (group: number, path: string) => edit({ op: "keep_only", scope: { copies: [{ group, path }] } });
-export const keepAdd = (group: number, path: string) => edit({ op: "keep_add", scope: { copies: [{ group, path }] } });
-export const keepRemove = (group: number, path: string) => edit({ op: "keep_remove", scope: { copies: [{ group, path }] } });
-export const setAction = (group: number, path: string, action: CleanupActionName) => edit({ op: "action_set", action, scope: { copies: [{ group, path }] } });
-export const setTarget = (group: number, path: string, target: string) => edit({ op: "target_set", target, scope: { copies: [{ group, path }] } });
+export const keepOnly = (group: number, path: string) => edit({ op: "keep_only", scope: { copies: [{ group, path }] } }, t("这组只保留这一份"));
+export const keepAdd = (group: number, path: string) => edit({ op: "keep_add", scope: { copies: [{ group, path }] } }, t("也保留这一份"));
+export const keepRemove = (group: number, path: string) => edit({ op: "keep_remove", scope: { copies: [{ group, path }] } }, t("不再保留这一份"));
+export const setAction = (group: number, path: string, action: CleanupActionName) => edit({ op: "action_set", action, scope: { copies: [{ group, path }] } }, t("这一份：{act}", { act: actionLabel(action) }));
+export const setTarget = (group: number, path: string, target: string) => edit({ op: "target_set", target, scope: { copies: [{ group, path }] } }, t("改了链接指向的那份"));
+
+/** One group's copies not kept to an action (a single key): the receipt says how many took it. */
+export async function groupAction(group: number, action: CleanupActionName): Promise<void> {
+  const ok = await edit({ op: "action_set", action, scope: { groups: [group] } }, t("这一组：{act}", { act: actionLabel(action) }));
+  if (!ok || action === "leave") return;
+  const g = getCleanup().groups.find((x) => x.id === group);
+  if (g && !g.actions[action]) setCleanup({ receipt: receiptOf(t("这一组没有能{act}的份：做不到，或者有高风险（见检查器）", { act: actionLabel(action) })) });
+}
 
 export function bulkAction(action: CleanupActionName): Promise<void> {
   return preview({ op: "action_set", action, scope: bulkScope() }, t("{act}：已改", { act: actionLabel(action) }));
@@ -412,9 +442,9 @@ export async function markReviewed(groups: number[], value = true): Promise<void
 }
 
 export const ack = (risk: string) => edit({ op: "ack", risk }, t("已确认这一类风险"));
-export const unack = (risk: string) => edit({ op: "unack", risk });
+export const unack = (risk: string) => edit({ op: "unack", risk }, t("已取消确认"));
 export const setPreset = (preset: string) => preview({ op: "preset", preset: preset as never }, t("预设：{p}", { p: presetLabel(preset) }));
-export const setOptions = (options: NonNullable<CleanupEdit["options"]>) => edit({ op: "options", options });
+export const setOptions = (options: NonNullable<CleanupEdit["options"]>) => edit({ op: "options", options }, t("已改选项"));
 
 export async function resume(accept: boolean): Promise<void> {
   const id = getCleanup().planId;
@@ -465,7 +495,18 @@ export function requestExecute(): void {
   setCleanup({ dialog: { kind: "execute" } });
 }
 
+/** Until the cleanup task this page follows has ended (a run held for a confirmation ends at once). */
+async function settled(ms = 10_000): Promise<void> {
+  const end = Date.now() + ms;
+  while (taskRunning(getCleanup().task) && Date.now() < end) await new Promise((r) => setTimeout(r, 100));
+}
+
 export async function confirmExecute(proceedAfterDrops = false): Promise<void> {
+  if (proceedAfterDrops) {
+    setCleanup({ dialog: null });
+    await settled();
+    await refreshState();
+  }
   const c = getCleanup();
   const tok = await token();
   if (!tok || !c.planId) return;
@@ -608,7 +649,12 @@ export function onCleanupProgress(ev: CleanupProgressEvent): void {
   if (c.task && ev.task_id !== c.task.task_id) return;
   if (!c.task && ev.plan_id !== c.planId) return;
   setCleanup({ task: ev });
-  if (ev.needs_confirm && ev.kind === "execute") setCleanup({ dialog: { kind: "drops", task: ev } });
+  if (ev.needs_confirm && ev.kind === "execute") {
+    // asked once per run; the run itself ends right after (nothing done): no 「完成 0 项」 toast
+    if (c.askedDrops !== ev.task_id) setCleanup({ dialog: { kind: "drops", task: ev }, askedDrops: ev.task_id });
+    if (!taskRunning(ev)) void loadRuns();
+    return;
+  }
   if (!taskRunning(ev)) {
     if (ev.kind === "execute" || ev.kind === "undo" || ev.kind === "purge") void loadRuns();
     if (ev.kind === "execute" && !ev.needs_confirm) void refreshState().then(() => loadGroups());
@@ -651,7 +697,19 @@ export function cleanupKey(e: { key: string; shiftKey: boolean; ctrlKey: boolean
     void undoEdit(e.shiftKey);
     return true;
   }
+  if (mod && (e.key === "a" || e.key === "A")) {
+    setCleanup({ selected: ids, receipt: t("已勾选显示出来的 {n} 组", { n: fmtInt(ids.length) }) });
+    return true;
+  }
   if (mod) return false;
+  if (e.key === "?") {
+    setCleanup({ keysHelp: !c.keysHelp });
+    return true;
+  }
+  if (e.key === "Escape" && c.keysHelp) {
+    setCleanup({ keysHelp: false });
+    return true;
+  }
   switch (e.key) {
     case "ArrowDown":
     case "j":
@@ -687,7 +745,7 @@ export function cleanupKey(e: { key: string; shiftKey: boolean; ctrlKey: boolean
     case "l": {
       if (!g) return false;
       const action = ({ t: "trash", h: "hardlink", s: "symlink", c: "clone", l: "leave" } as const)[e.key];
-      void edit({ op: "action_set", action, scope: { groups: [g.id] } }, t("{act}：已改", { act: actionLabel(action) }));
+      void groupAction(g.id, action);
       return true;
     }
   }

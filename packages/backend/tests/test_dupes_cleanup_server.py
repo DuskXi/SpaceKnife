@@ -101,7 +101,18 @@ async def searched(client: Connection, scan_id: str) -> pd.DupesStatus:
             done.set_result(ev)
 
     client.on_event(EVENT_DUPES_PROGRESS, on)
-    st = await client.call(DUPES_START, pd.DupesStartParams(scope=pd.DupesScope(scan_ids=[scan_id])))
+    params = pd.DupesStartParams(scope=pd.DupesScope(scan_ids=[scan_id]))
+    for _ in range(100):
+        try:
+            st = await client.call(DUPES_START, params)
+            break
+        except RpcError as exc:
+            # the scan's last progress event can come a moment before the scan is let go
+            if "扫描还没有完成" not in exc.message:
+                raise
+            await asyncio.sleep(0.05)
+    else:
+        raise AssertionError("the scan was not let go")
     if st.state not in ("done", "failed"):
         await asyncio.wait_for(done, 60)
     return await client.call(DUPES_STATUS, pd.DupesJobParams(job_id=st.job_id))
@@ -300,6 +311,104 @@ async def test_a_preview_changes_nothing(tmp_path: Path, client: Connection) -> 
     assert next(a for a in st2.summary.by_action if a.action == "trash").copies == 2
 
 
+async def test_also_keeping_a_copy_after_keeping_only_one(tmp_path: Path, client: Connection) -> None:
+    a = blob(2 * MIB, 1)
+    make(tmp_path / "t", {"a/x.bin": a, "b/x.bin": a, "c/x.bin": a})
+    sid = await scanned(client, tmp_path / "t")
+    job = await searched(client, sid)
+    st = await opened(client, job.job_id)
+    page = await client.call(DUPES_CLEANUP_GROUPS, pc.CleanupGroupsParams(plan_id=st.plan_id))
+    g = page.items[0]
+    assert "：" in g.keep_line and "按「按" not in g.keep_line  # the reason, then the path
+    paths = sorted(c.path for c in g.members)
+    ref = lambda path: pc.CleanupScope(copies=[pc.CleanupCopyRef(group=g.id, path=path)])  # noqa: E731
+    st = await edit(client, st, op="keep_only", scope=ref(paths[1]))
+    st = await edit(client, st, op="keep_add", scope=ref(paths[2]))  # 「也保留这一份」 after 「只留它」
+    page = await client.call(DUPES_CLEANUP_GROUPS, pc.CleanupGroupsParams(plan_id=st.plan_id))
+    kept = {c.path for c in page.items[0].members if c.keep != "none"}
+    assert kept == {paths[1], paths[2]}
+
+
+async def test_a_preview_names_its_risks_and_what_a_risk_rule_held_back(
+    tmp_path: Path, client: Connection
+) -> None:
+    a = blob(2 * MIB, 1)
+    make(tmp_path / "t", {"k/a.jpg": a, "Backup/a.jpg": a})
+    sid = await scanned(client, tmp_path / "t")
+    job = await searched(client, sid)
+    st = await opened(client, job.job_id, preset="recommended")
+    diff = await client.call(
+        DUPES_CLEANUP_PREVIEW,
+        pc.CleanupEditParams(
+            plan_id=st.plan_id,
+            base_version=st.version,
+            edit=pc.CleanupEdit(op="action_set", action="hardlink", scope=pc.CleanupScope(filter="")),
+        ),
+    )
+    # a hard link is no backup: high, and 「任何高风险 → 不动」 leaves the copy alone
+    assert diff.unavailable.get("risk_rule") == 1, diff
+    # 「保守」 (no risk-condition rule; the temporary folder of a test may carry app or cache facts
+    # that make 「推荐」 leave everything here): the copy goes to the recycle bin
+    st = await edit(client, st, op="preset", preset="conservative")
+    page = await client.call(DUPES_CLEANUP_GROUPS, pc.CleanupGroupsParams(plan_id=st.plan_id))
+    g = page.items[0]
+    copy = next(c for c in g.members if c.keep == "none")
+    assert copy.action == "trash", copy
+    ref = pc.CleanupScope(copies=[pc.CleanupCopyRef(group=g.id, path=copy.path)])
+    risks = [r for c in page.items[0].members for r in c.risks if r.code == "backup_like"]
+    assert risks and risks[0].text.startswith("「Backup」")  # the folder as it is written
+    diff = await client.call(
+        DUPES_CLEANUP_PREVIEW,
+        pc.CleanupEditParams(
+            plan_id=st.plan_id,
+            base_version=st.version,
+            edit=pc.CleanupEdit(op="action_set", action="leave", scope=ref),
+        ),
+    )
+    assert diff.risks_removed and set(diff.risks_removed) <= set(diff.risk_titles), diff
+    assert diff.risk_titles[risks[0].id] == risks[0].title  # the title the user knows, not R02
+
+
+async def test_the_filter_says_what_it_cannot_read(tmp_path: Path, client: Connection) -> None:
+    a, b = blob(2 * MIB, 1), blob(2 * MIB, 2)
+    make(tmp_path / "t", {"a/x.bin": a, "b/x.bin": a, "a/y.bin": b, "b/y.bin": b})
+    sid = await scanned(client, tmp_path / "t")
+    job = await searched(client, sid)
+    st = await opened(client, job.job_id)
+    page = await client.call(
+        DUPES_CLEANUP_GROUPS, pc.CleanupGroupsParams(plan_id=st.plan_id, filter="size:>>2MB in: tag:nosuch")
+    )
+    assert len(page.problems) == 3 and all("看不懂" in x for x in page.problems)
+    assert page.total == 0  # nothing: a typo never widens what a bulk edit reaches
+    page = await client.call(
+        DUPES_CLEANUP_GROUPS, pc.CleanupGroupsParams(plan_id=st.plan_id, filter="size:>1MB")
+    )
+    assert page.problems == [] and page.total == 2
+
+
+async def test_the_review_names_the_recovery_area_only_where_originals_go(
+    tmp_path: Path, client: Connection
+) -> None:
+    a = blob(2 * MIB, 1)
+    make(tmp_path / "t", {"k/a.jpg": a, "copy/a.jpg": a})
+    sid = await scanned(client, tmp_path / "t")
+    job = await searched(client, sid)
+    st = await opened(client, job.job_id)  # 「保守」: everything to the recycle bin
+    assert [v.recovery for v in st.summary.by_volume] == [""]
+    st = await edit(client, st, op="action_set", action="hardlink", scope=pc.CleanupScope(filter=""))
+    where = st.summary.by_volume[0].recovery
+    # the sandboxed home is on this volume: the data folder's recovery area, as the run will use it
+    assert where.endswith(os.path.join("dupes", "cleanup", "recovery")) and where.startswith(str(tmp_path))
+    page = await client.call(DUPES_CLEANUP_GROUPS, pc.CleanupGroupsParams(plan_id=st.plan_id))
+    detail = await client.call(
+        DUPES_CLEANUP_GROUP, pc.CleanupGroupParams(plan_id=st.plan_id, group=page.items[0].id)
+    )
+    facts = {f.label: f for d in detail.copies for f in d.facts}
+    assert facts["链接数"].this == "1" and facts["链接数"].keeper == "1"
+    assert "继承" in facts["权限"].this or facts["权限"].this[:1].isdigit()  # words or POSIX mode bits
+    assert len(facts["所有者"].this) > 2  # an account name, not an SDDL alias like BA
+
+
 # ------------------------------------------------------------------ running
 @pytest.mark.skipif(
     not POSIX, reason="the POSIX executor; Windows runs the same flow on the Windows checkout"
@@ -460,6 +569,17 @@ async def test_the_preflight_asks_again_when_it_drops_steps(tmp_path: Path, clie
     ev = await tasks.final(task.task_id)
     assert ev.needs_confirm and ev.skipped and ev.skipped[0].code == "skipped_keeper_changed"
     assert files["copy/a.jpg"].read_bytes() == a
+    # nothing ran: the approval stays for 「执行其余的」, which leaves the dropped step alone
+    st = await client.call(DUPES_CLEANUP_STATE, pc.CleanupPlanParams(plan_id=st.plan_id))
+    assert st.approval is not None and st.approval.token == appr.token
+    if st.approval.version == st.version:  # (a monitor that saw the write may have moved the plan on)
+        task = await client.call(
+            DUPES_CLEANUP_EXECUTE,
+            pc.CleanupExecuteParams(plan_id=st.plan_id, token=appr.token, proceed_after_drops=True),
+        )
+        ev = await tasks.final(task.task_id)
+        assert not ev.needs_confirm and ev.counts.get("skipped_keeper_changed") == 1, ev
+        assert files["copy/a.jpg"].read_bytes() == a
 
 
 async def test_a_keeper_in_the_basket_skips_its_group(tmp_path: Path, client: Connection) -> None:

@@ -166,6 +166,34 @@ def place_for(
     return Place("in_place", "", dev, made)
 
 
+def planned_where(folder: str, *, sandbox: Sandbox | None, at_root: bool, data_dir: Path) -> str:
+    """Where :func:`place_for` would put the originals of files in ``folder``, nothing made: a folder,
+    or "" when they would stay in their own folders under a hidden name."""
+    try:
+        dev = os.stat(folder).st_dev
+    except OSError:
+        return ""
+    cand = data_dir / "dupes" / "cleanup" / "recovery"
+    base = data_dir
+    while not base.exists() and base != base.parent:
+        base = base.parent
+    with contextlib.suppress(OSError):
+        if os.stat(base).st_dev == dev and (sandbox is None or sandbox.allows(str(cand))):
+            return str(cand)
+    if sandbox is not None:
+        for root in sandbox.roots:
+            with contextlib.suppress(OSError):
+                if os.stat(root).st_dev == dev:
+                    return os.path.join(root, AREA)
+        return ""
+    if at_root:
+        if sys.platform == "win32":
+            return os.path.join(os.path.splitdrive(os.path.abspath(folder))[0] + "\\", AREA)
+        uid = getattr(os, "getuid", lambda: -1)()
+        return os.path.join(_top_of(folder, dev), f"{AREA}-{uid}")
+    return ""
+
+
 def _readme(folder: str) -> None:
     p = os.path.join(folder, "README.txt")
     if not os.path.exists(p):

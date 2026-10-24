@@ -14,8 +14,9 @@ of them, else :class:`FsError` ``sandbox`` before any system call.
 
 **Faults** (tests only): ``SPACEKNIFE_CLEANUP_FAULT=<phase>@<seq>:<kind>,...`` makes the primitive of
 that phase fail for step ``seq`` (``*`` any step) with ``eio``, ``enospc``, ``eacces``, ``eperm``,
-``exdev``, ``exists``, ``wrong_ident`` or ``exit`` (the process ends at once, as in a crash). It is
-read only while ``SPACEKNIFE_CLEANUP_SANDBOX`` is set too.
+``exdev``, ``exists``, ``wrong_ident`` or ``exit`` (the process ends at once, as in a crash);
+``slow`` only waits 0.6 s there (screenshots of a run in progress). It is read only while
+``SPACEKNIFE_CLEANUP_SANDBOX`` is set too.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import os
 import stat
 import struct
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -197,6 +199,9 @@ class FsOps:
             return
         if kind == "exit":
             os._exit(137)  # a crash between two steps (tests)
+        if kind == "slow":
+            time.sleep(0.6)  # a run slow enough to watch (screenshots)
+            return
         if kind == "wrong_ident":
             self._wrong = True
             return

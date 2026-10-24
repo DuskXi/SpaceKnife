@@ -153,6 +153,9 @@ class RunCtx:
     outcomes: dict[int, Outcome] = field(default_factory=dict)
     stop_reason: str = ""
     no_symlinks: bool = False  # the process lost the right to make them (ERROR_PRIVILEGE_NOT_HELD)
+    # keepers this run changed itself (a hard link adds a name: change time, USN and link count
+    # move): their stamps right after that step, which later steps compare with
+    seen: dict[str, dict[str, int]] = field(default_factory=dict)
     bad_volumes: set[int] = field(default_factory=set)  # volumes where an action proved impossible
 
 
@@ -967,6 +970,21 @@ def _to_recovery(ctx: RunCtx, s: dict[str, Any]) -> Outcome:
 
 
 # ------------------------------------------------------------------ the run
+_OWN_CHANGES = ("change", "usn", "nlink")
+
+
+def expect_own(ctx: RunCtx, s: dict[str, Any]) -> None:
+    """A keeper this run already linked to is expected as that step left it: only what linking
+    changes (change time, USN, link count) is taken from then; its identity, size and modification
+    time are still the approved ones, so a change by anyone else is still caught."""
+    for k in [*([s["target"]] if s.get("target") else []), *s.get("keepers", [])]:
+        seen = ctx.seen.get(k["path"])
+        if seen and (int(seen["dev"]), int(seen["fid_lo"]), int(seen["fid_hi"])) == _ident(k):
+            for f in _OWN_CHANGES:
+                if f in seen:
+                    k[f] = int(seen[f])
+
+
 def intent_of(ctx: RunCtx, s: dict[str, Any]) -> dict[str, Any]:
     rec = {
         "t": "intent",
@@ -1006,15 +1024,18 @@ def run(ctx: RunCtx, *, skip: dict[int, tuple[str, str]] | None = None) -> dict[
             if ctx.cancel.is_set():
                 ctx.stop_reason = ctx.stop_reason or "stop_user"
                 break
-            batch = steps[i : i + BATCH]
-            # keep a batch to one action of one volume: the recycle bin goes per batch
-            first = batch[0]
-            batch = (
-                [x for x in batch if x["action"] == first["action"] and x["vol"] == first["vol"]]
-                if first["action"] == "trash"
-                else [first]
-            )
+            # a batch is a run of trash steps on one volume, in their order (the recycle bin goes
+            # per batch); a step is never taken out of turn, so none is skipped or done twice
+            first = steps[i]
+            batch = [first]
+            if first["action"] == "trash":
+                for x in steps[i + 1 : i + BATCH]:
+                    if x["action"] != "trash" or x["vol"] != first["vol"]:
+                        break
+                    batch.append(x)
             i += len(batch)
+            for s in batch:
+                expect_own(ctx, s)
             if ctx.permit is not None and first["action"] != "clone":
                 ctx.permit(first["path"])
             for s in batch:
@@ -1053,6 +1074,9 @@ def run(ctx: RunCtx, *, skip: dict[int, tuple[str, str]] | None = None) -> dict[
                 rec["freed_later"] = o.freed_later
                 ctx.fs.fault("before_done")
                 journal.write(rec)
+                tgt = by_seq[o.seq].get("target")
+                if o.keeper_after and tgt:
+                    ctx.seen[tgt["path"]] = dict(o.keeper_after)
                 pairs.append((by_seq[o.seq], o))
                 done += 1
                 if o.code.startswith("failed") or o.code == "skipped_error":

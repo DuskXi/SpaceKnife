@@ -281,6 +281,61 @@ def test_a_replacement_and_its_undo(tmp_path: Path, action: str) -> None:
 
 
 @posix_only
+def test_two_links_to_one_keeper_in_one_run(tmp_path: Path) -> None:
+    """Linking moves the keeper's change time and link count: the next link to it still goes, and a
+    change by anyone else in between is still caught."""
+    k, c1 = _pair(tmp_path)
+    c2 = tmp_path / "copy2" / "a.bin"
+    c2.parent.mkdir()
+    c2.write_bytes(k.read_bytes())
+    ctx = _ctx(tmp_path, [_step(1, "hardlink", c1, k), _step(2, "hardlink", c2, k)])
+    report = X.run(ctx)
+    assert report["state"] == "done", ctx.outcomes
+    assert _ino(c1) == _ino(k) == _ino(c2) and os.lstat(k).st_nlink == 3
+    # someone writes the keeper between two links to it: the second is not made
+    k2, d1 = _pair(tmp_path, "b.bin")
+    d2 = tmp_path / "copy2" / "b.bin"
+    d2.write_bytes(k2.read_bytes())
+    ctx = _ctx(
+        tmp_path,
+        [_step(1, "hardlink", d1, k2), _step(2, "hardlink", d2, k2)],
+        run_id="r-20261023-000001-abce",
+    )
+    ctx.on_batch = lambda pairs: k2.write_bytes(b"theirs" * 9000) if pairs[0][1].seq == 1 else None
+    X.run(ctx)
+    assert ctx.outcomes[1].code == "done" and ctx.outcomes[2].code == "skipped_keeper_changed"
+    assert _ino(d2) != _ino(k2)
+
+
+@posix_only
+def test_a_batch_never_takes_a_step_out_of_turn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Recycle-bin steps go in batches of a run of them on one volume: a step between them is neither
+    skipped nor is a later one done twice."""
+    done: list[list[int]] = []
+
+    def trash_batch(ctx: X.RunCtx, batch: list[dict[str, Any]]) -> list[X.Outcome]:
+        done.append([int(s["seq"]) for s in batch])
+        return [X.Outcome(int(s["seq"]), "done") for s in batch]
+
+    def replace(ctx: X.RunCtx, s: dict[str, Any]) -> X.Outcome:
+        done.append([int(s["seq"])])
+        return X.Outcome(int(s["seq"]), "done")
+
+    monkeypatch.setattr(X, "do_trash_batch", trash_batch)
+    monkeypatch.setattr(X, "do_replace", replace)
+    k, c = _pair(tmp_path)
+    acts = ["trash", "hardlink", "trash", "trash", "trash", "trash"]
+    steps = [_step(i + 1, a, c, k) for i, a in enumerate(acts)]
+    for s, vol in zip(steps, (0, 0, 0, 1, 1, 1), strict=True):
+        s["vol"] = vol
+    ctx = _ctx(tmp_path, steps)
+    report = X.run(ctx)
+    assert done == [[1], [2], [3], [4, 5, 6]]
+    assert report["state"] == "done" and sorted(ctx.outcomes) == [1, 2, 3, 4, 5, 6]
+    assert "cancelled" not in ctx.counts
+
+
+@posix_only
 def test_undo_refuses_a_link_changed_after_the_run_and_can_put_the_original_beside(tmp_path: Path) -> None:
     k, c = _pair(tmp_path)
     ctx = _ctx(tmp_path, [_step(1, "symlink", c, k)])

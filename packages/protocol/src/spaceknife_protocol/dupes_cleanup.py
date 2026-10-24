@@ -229,6 +229,9 @@ class CleanupGroupsPage(Payload):
     total: int
     offset: int
     items: list[CleanupGroup]
+    problems: list[str] = Field(
+        default_factory=list, description="Terms of the filter that could not be read (left out), in words"
+    )
 
 
 class CleanupReason(Payload):
@@ -288,6 +291,10 @@ class CleanupBucket(Payload):
     bytes: int
     acked: bool = False
     unacked: int = Field(default=0, description="High kinds: copies not covered by the acknowledgement")
+    partly_acked: bool = Field(
+        default=False,
+        description="Acknowledged once, and copies fell into the kind since (acknowledge again)",
+    )
     example: str = ""
 
 
@@ -402,6 +409,9 @@ class CleanupDiff(Payload):
     )
     risks_added: dict[str, int] = Field(default_factory=dict)
     risks_removed: dict[str, int] = Field(default_factory=dict)
+    risk_titles: dict[str, str] = Field(
+        default_factory=dict, description="The user-facing title of each risk named in the two above"
+    )
     protected: int = Field(default=0, description="Copies chosen by hand that the edit leaves alone")
     changed: int = 0
     examples: list[CleanupDiffRow] = Field(default_factory=list)

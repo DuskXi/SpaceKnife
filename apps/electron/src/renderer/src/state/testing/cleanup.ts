@@ -49,7 +49,7 @@ export function group(id: number, over: Partial<CleanupGroup> = {}): CleanupGrou
     reviewed: false,
     changed_since_review: false,
     state: "in",
-    keep_line: "按「最早创建」保留 C:\\k\\a.jpg", // i18n-ignore
+    keep_line: "按「最早创建」保留：C:\\k\\a.jpg", // i18n-ignore
     cross: false,
     volumes: ["C:"],
     conflict: false,
@@ -62,7 +62,7 @@ export function group(id: number, over: Partial<CleanupGroup> = {}): CleanupGrou
 }
 
 export function bucket(over: Partial<CleanupBucket> = {}): CleanupBucket {
-  return { id: "T01", code: "sync_delete", severity: "high", title: "删除会同步到云端", copies: 3, groups: 3, bytes: 3 << 20, acked: false, unacked: 3, example: "删除会同步到 OneDrive 的云端", ...over }; // i18n-ignore
+  return { id: "T01", code: "sync_delete", severity: "high", title: "删除会同步到云端", copies: 3, groups: 3, bytes: 3 << 20, acked: false, unacked: 3, partly_acked: false, example: "删除会同步到 OneDrive 的云端", ...over }; // i18n-ignore
 }
 
 export function summary(over: Partial<CleanupSummary> = {}): CleanupSummary {

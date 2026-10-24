@@ -118,7 +118,12 @@ def apply(plan: CleanupPlan, edit: Any) -> list[int] | None:
             u = plan.unit_of_row(r)
             if u is None or u[1].forced:
                 continue
-            _manual(P, _hex(plan.groups[gi].digest), u[1].path).keep = "keep"
+            d = _hex(plan.groups[gi].digest)
+            _manual(P, d, u[1].path).keep = "keep"
+            # after 「只留它」 the group keeps its own set: this copy joins it (else the set wins)
+            mg = P.groups.get(d)
+            if mg is not None and mg.keep_set is not None and u[1].path not in mg.keep_set:
+                mg.keep_set = [*mg.keep_set, u[1].path]
         groups = sc.groups
         plan.check_floor(groups)
         return groups
@@ -410,6 +415,11 @@ def preview(plan: CleanupPlan, e: Any) -> dict[str, Any]:
                 plan.recompute(groups)
         except Refused as exc:
             refused = str(exc)
+        if e.op == "action_set" and e.action is not None and not refused:
+            code = K.ACTION_CODE[e.action]
+            for _gi, r in resolve(plan, e.scope).copies:
+                if code != K.A_LEAVE and plan.asrc[r] == K.SRC_ACTION_RISK and plan.want[r] == code:
+                    unavailable["risk_rule"] = unavailable.get("risk_rule", 0) + 1
         a_counts, a_freed = _counts(plan)
         a_risks = _risk_counts(plan)
         changed_rows = np.flatnonzero((plan.act != b_act) | (plan.keep != b_keep))
@@ -434,6 +444,7 @@ def preview(plan: CleanupPlan, e: Any) -> dict[str, Any]:
             "unavailable": unavailable,
             "risks_added": added,
             "risks_removed": removed,
+            "risk_titles": {k: RK.TEXT[f"t_{RK.BY_ID[k].code}"] for k in (*added, *removed) if k in RK.BY_ID},
             "protected": protected,
             "changed": len(np.unique(plan.group_of[changed_rows])) if len(changed_rows) else 0,
             "examples": examples,

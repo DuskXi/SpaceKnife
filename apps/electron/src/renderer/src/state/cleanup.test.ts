@@ -12,8 +12,11 @@ import {
   confirmExecute,
   confirmPurge,
   confirmUndo,
+  diffLine,
   edit,
   getCleanup,
+  groupAction,
+  loadGroups,
   onCleanupProgress,
   openCleanup,
   requestExecute,
@@ -85,7 +88,7 @@ describe("edits", () => {
   });
 
   it("in bulk are previewed first and kept only from the preview", async () => {
-    const diff = { version: 3, before: { trash: 2 }, after: { hardlink: 2 }, freed_before: 1, freed_after: 1, unavailable: {}, risks_added: {}, risks_removed: {}, protected: 1, changed: 2, examples: [], refused: "" };
+    const diff = { version: 3, before: { trash: 2 }, after: { hardlink: 2 }, freed_before: 1, freed_after: 1, unavailable: {}, risks_added: {}, risks_removed: {}, risk_titles: {}, protected: 1, changed: 2, examples: [], refused: "" };
     answer({ "dupes.cleanup_preview": diff, "dupes.cleanup_edit": cstate({ version: 4 }) });
     await bulkAction("hardlink");
     expect(mocked.mock.calls.map((c) => c[0])).toEqual(["dupes.cleanup_preview"]);
@@ -93,6 +96,39 @@ describe("edits", () => {
     await commitPreview(true);
     const sent = mocked.mock.calls.find((c) => c[0] === "dupes.cleanup_edit")!;
     expect((sent[1] as { edit: { op: string; action: string; include_overridden: boolean } }).edit).toMatchObject({ op: "action_set", action: "hardlink", include_overridden: true });
+    // the receipt says what changed, and the way back
+    expect(getCleanup().receipt).toBe("已改 2 份（2 组） · Ctrl+Z 撤回");
+  });
+
+  it("the receipt of a preview says what a risk rule held back", () => {
+    const diff = { version: 3, before: { trash: 3 }, after: { trash: 1, leave: 2 }, freed_before: 3, freed_after: 1, unavailable: { risk_rule: 2 }, risks_added: {}, risks_removed: {}, risk_titles: {}, protected: 0, changed: 2, examples: [], refused: "" };
+    expect(diffLine(diff)).toBe("已改 2 份（2 组），其中 2 份有高风险，按规则改成了不动");
+  });
+
+  it("a single key says so when no copy could take the action", async () => {
+    setCleanup({ groups: [group(1)], focus: 1 });
+    answer({ "dupes.cleanup_edit": cstate({ version: 4 }), "dupes.cleanup_groups": page([1]) });
+    await groupAction(1, "hardlink");
+    expect(getCleanup().receipt).toContain("这一组没有能换成硬链接的份");
+  });
+});
+
+describe("the group list", () => {
+  beforeEach(() => setCleanup({ tabId: "t1", planId: "plan-1", jobId: "dupes-1", state: cstate(), focus: 7 }));
+
+  it("keeps the terms the filter left out, and the inspector follows the list", async () => {
+    answer({ "dupes.cleanup_groups": { ...page([1, 2]), problems: ["看不懂「size:>>2MB」"] } });
+    await loadGroups();
+    expect(getCleanup().problems).toEqual(["看不懂「size:>>2MB」"]);
+    expect(getCleanup().focus).toBe(1); // group 7 is not in the list any more
+  });
+
+  it("? shows the keys, Ctrl+A ticks the groups shown", () => {
+    setCleanup({ groups: [group(1), group(2)] });
+    expect(cleanupKey({ key: "?", shiftKey: true, ctrlKey: false, metaKey: false })).toBe(true);
+    expect(getCleanup().keysHelp).toBe(true);
+    cleanupKey({ key: "a", shiftKey: false, ctrlKey: true, metaKey: false });
+    expect(getCleanup().selected).toEqual([1, 2]);
   });
 });
 
@@ -110,10 +146,30 @@ describe("running", () => {
     expect(getCleanup().view).toBe("run");
   });
 
-  it("asks again when the preflight dropped steps", () => {
+  it("asks again when the preflight dropped steps — once, and without a 「完成 0 项」 toast", async () => {
+    answer({ "dupes.cleanup_runs": { total: 0, items: [] } });
     setCleanup({ task: { task_id: "cleanup-1", kind: "execute", phase: "preflight", state: "preflight", done: 0, total: 2, bytes: 0, current: "", counts: {}, freed_now: 0, freed_later: 0, run_id: "r-1", plan_id: "plan-1", message: "", skipped: [], needs_confirm: false } });
-    onCleanupProgress({ task_id: "cleanup-1", kind: "execute", phase: "confirm", state: "waiting", done: 0, total: 2, bytes: 0, current: "", counts: {}, freed_now: 0, freed_later: 0, run_id: "r-1", plan_id: "plan-1", message: "", skipped: [{ code: "skipped_changed", text: "变了", count: 1, examples: ["C:\\copy\\f1.jpg"] }], needs_confirm: true });
+    const held = { task_id: "cleanup-1", kind: "execute" as const, phase: "confirm", state: "waiting" as const, done: 0, total: 2, bytes: 0, current: "", counts: {}, freed_now: 0, freed_later: 0, run_id: "r-1", plan_id: "plan-1", message: "", skipped: [{ code: "skipped_changed", text: "变了", count: 1, examples: ["C:\\copy\\f1.jpg"] }], needs_confirm: true };
+    onCleanupProgress(held);
     expect(getCleanup().dialog?.kind).toBe("drops");
+    setCleanup({ dialog: null }); // 「取消」
+    onCleanupProgress({ ...held, state: "stopped" }); // the held run ends right after: not asked again
+    expect(getCleanup().dialog).toBe(null);
+    expect(get().toast).toBe(null);
+  });
+
+  it("「执行其余的」 waits for the held run to end and reads the plan again first", async () => {
+    const approval = { token: "0123456789abcdef", version: 3, steps: 2, by_action: {}, acks: {}, at: "" };
+    answer({ "dupes.cleanup_state": cstate({ approval }), "dupes.cleanup_execute": { task_id: "cleanup-2", kind: "execute", run_id: "r-2", total: 2, delay_s: 0 } });
+    const held = { task_id: "cleanup-1", kind: "execute" as const, phase: "confirm", state: "waiting" as const, done: 0, total: 2, bytes: 0, current: "", counts: {}, freed_now: 0, freed_later: 0, run_id: "r-1", plan_id: "plan-1", message: "", skipped: [], needs_confirm: true };
+    setCleanup({ task: held, dialog: { kind: "drops", task: held } });
+    const going = confirmExecute(true);
+    setTimeout(() => onCleanupProgress({ ...held, state: "stopped" }), 150);
+    await going;
+    const methods = mocked.mock.calls.map((c) => c[0]);
+    expect(methods).toEqual(["dupes.cleanup_runs", "dupes.cleanup_state", "dupes.cleanup_execute"]);
+    expect(mocked.mock.calls.at(-1)![1]).toMatchObject({ token: approval.token, proceed_after_drops: true });
+    expect(getCleanup().task?.task_id).toBe("cleanup-2");
   });
 
   it("no key runs, undoes or empties anything", () => {

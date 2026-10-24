@@ -15,7 +15,7 @@ import {
   stopTask,
   useCleanup,
 } from "@/state/cleanup";
-import { fmtInt, fmtSize, plural } from "@/lib/format";
+import { fitPath, fmtInt, fmtSize, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
 import { Modal } from "./parts";
@@ -57,6 +57,8 @@ function PreviewDialog() {
   if (d?.kind !== "preview") return null;
   const diff = d.diff;
   const keys = ["keep", "clone", "hardlink", "symlink", "trash", "leave"];
+  const kept = Object.entries(diff.unavailable).filter(([why]) => why !== "risk_rule");
+  const held = diff.unavailable.risk_rule ?? 0;
   return (
     <Modal title={t("先看一下这次改动")} wide>
       <table className="cl-sum small">
@@ -83,30 +85,19 @@ function PreviewDialog() {
         </tbody>
       </table>
       <div className="small">{plural(diff.changed, t("涉及 {n} 组", { n: fmtInt(diff.changed) }), "1 group changes")}</div>
-      {Object.keys(diff.unavailable).length > 0 && (
+      {kept.length > 0 && (
         <div className="small warn">
           {t("这些份做不到，保持原来的决定：")}
-          {Object.entries(diff.unavailable).map(([why, n]) => (
-            <span key={why}> {reasonLabel(why)} {fmtInt(n)}</span>
+          {kept.map(([why, n]) => (
+            <span key={why} className="cl-reason">
+              {reasonLabel(why)} · {fmtInt(n)}
+            </span>
           ))}
         </div>
       )}
-      {Object.keys(diff.risks_added).length > 0 && (
-        <div className="small">
-          {t("新增的风险：")}
-          {Object.entries(diff.risks_added).map(([id, n]) => (
-            <span key={id} className="mono"> {id}×{n}</span>
-          ))}
-        </div>
-      )}
-      {Object.keys(diff.risks_removed).length > 0 && (
-        <div className="small muted">
-          {t("不再有的风险：")}
-          {Object.entries(diff.risks_removed).map(([id, n]) => (
-            <span key={id} className="mono"> {id}×{n}</span>
-          ))}
-        </div>
-      )}
+      {held > 0 && <div className="small warn">{t("{n} 份有高风险，规则「任何高风险 → 不动」把它们改成了不动（要这样做，先关掉那条规则，或者审阅时确认）", { n: fmtInt(held) })}</div>}
+      <RiskList title={t("新增的风险：")} risks={diff.risks_added} titles={diff.risk_titles ?? {}} />
+      <RiskList title={t("不再有的风险：")} risks={diff.risks_removed} titles={diff.risk_titles ?? {}} muted />
       {diff.protected > 0 && (
         <label className="small cl-check">
           <input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} />
@@ -116,8 +107,13 @@ function PreviewDialog() {
       {diff.examples.length > 0 && (
         <div className="small cl-examples">
           {diff.examples.map((x) => (
-            <div key={x.path} className="mono">
-              {x.path} <span className="muted">{actionLabel(x.before)} → {actionLabel(x.after)}</span>
+            <div key={x.path} className="cl-example">
+              <span className="mono" title={x.path}>
+                {fitPath(x.path, 64)}
+              </span>
+              <span className="muted">
+                {actionLabel(x.before)} → {actionLabel(x.after)}
+              </span>
             </div>
           ))}
         </div>
@@ -127,7 +123,23 @@ function PreviewDialog() {
   );
 }
 
-const reasonLabel = (why: string): string =>
+/** Risks of a preview by title, the most copies first. */
+function RiskList({ title, risks, titles, muted }: { title: string; risks: Record<string, number>; titles: Record<string, string>; muted?: boolean }) {
+  const rows = Object.entries(risks).sort((a, b) => b[1] - a[1]);
+  if (!rows.length) return null;
+  return (
+    <div className={`small cl-risk-list${muted ? " muted" : ""}`}>
+      {title}
+      {rows.map(([id, n]) => (
+        <span key={id} className="cl-reason" title={id}>
+          {titles[id] ?? id} · {fmtInt(n)}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+export const reasonLabel = (why: string): string =>
   ({
     other_volume: t("跨卷"),
     other_subvolume: t("跨子卷"),
@@ -135,15 +147,30 @@ const reasonLabel = (why: string): string =>
     fs_no_symlink: t("文件系统不支持符号链接"),
     fs_no_clone: t("文件系统不能共用数据块"),
     no_symlink_right: t("没有建符号链接的权限"),
-    in_sync_root: t("在同步文件夹里"),
     link_limit: t("名字到了上限"),
+    protected_hardlinks: t("保留那份属于别的用户"),
+    immutable: t("文件不可改动"),
+    in_sync_root: t("在同步文件夹里"),
+    vcs_internal: t("版本库的内部文件"),
+    in_package: t("在 macOS 的包里"),
+    no_trash: t("没有回收站"),
+    no_recovery_area: t("建不了恢复区"),
     no_exchange: t("不支持原子交换"),
-    readonly_inplace: t("只读"),
+    folder_not_writable: t("文件夹不能写"),
+    name_unusable: t("名字不能用"),
+    no_keeper_here: t("这个卷上没有保留点"),
+    already_shared: t("已经共用数据块"),
     network: t("网络盘"),
-    stale: t("文件变了"),
-    keeper: t("是保留点"),
-    forced_keep: t("必须保留"),
+    no_native: t("缺原生模块"),
     macos_off: t("macOS 上默认关"),
+    forced_keep: t("必须保留"),
+    stale: t("文件变了"),
+    readonly_inplace: t("只读"),
+    encrypted: t("加密"),
+    sparse_mismatch: t("稀疏文件不一致"),
+    in_basket: t("在删除篮里"),
+    keeper: t("是保留点"),
+    not_owner: t("不是文件的主人"),
   })[why] ?? why;
 
 function ExecuteDialog() {
@@ -151,6 +178,8 @@ function ExecuteDialog() {
   if (!st) return null;
   const sm = st.summary;
   const n = sm.copies;
+  const has = (a: string) => sm.by_action.some((x) => x.action === a && x.copies > 0);
+  const replacing = has("hardlink") || has("symlink");
   return (
     <Modal title={t("执行清理方案")}>
       <div className="small">
@@ -162,7 +191,13 @@ function ExecuteDialog() {
       <div className="small">
         {sm.by_volume.map((v) => t("{vol} 马上 {now}，之后 {later}", { vol: v.volume, now: fmtSize(v.freed_now), later: fmtSize(v.freed_later) })).join(" · ")}
       </div>
-      <p className="small">{t("每一份执行前都会再核对；原件先放在恢复区，可以撤销；清除恢复区才真正腾出空间")}</p>
+      <ul className="small cl-exec-notes">
+        <li>{t("每一份执行前都会再核对，变过的跳过，从不换成别的处理")}</li>
+        {replacing && <li>{t("换成链接的，原件先放在恢复区：清除恢复区才真正腾出空间")}</li>}
+        {has("trash") && <li>{t("移到回收站的在回收站里：清空回收站才腾出空间")}</li>}
+        {has("clone") && <li>{t("块克隆马上腾出空间，内容不变")}</li>}
+        <li>{t("做完以后在「清理记录」里可以撤销")}</li>
+      </ul>
       <CancelFirst okLabel={plural(n, t("执行 {n} 项", { n: fmtInt(n) }), "Run 1 item")} onOk={() => void confirmExecute(false)} />
     </Modal>
   );

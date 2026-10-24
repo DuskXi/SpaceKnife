@@ -26,7 +26,7 @@ from . import codes as K
 from . import risks as RK
 from .plan import G_IN, G_NAMES, CleanupPlan, _hex
 from .policy import Rule
-from .query import evaluate
+from .query import evaluate, problems
 
 MAC = sys.platform == "darwin"
 
@@ -485,7 +485,9 @@ def groups_page(plan: CleanupPlan, p: pc.CleanupGroupsParams, scan_ids: list[str
         gmask &= plan.gstate == G_IN
     order = _sorted_groups(plan, gmask, p.sort)
     items = [group_model(plan, gi, scan_ids) for gi in order[p.offset : p.offset + p.limit]]
-    return pc.CleanupGroupsPage(version=plan.version, total=len(order), offset=p.offset, items=items)
+    return pc.CleanupGroupsPage(
+        version=plan.version, total=len(order), offset=p.offset, items=items, problems=problems(p.filter)
+    )
 
 
 def _facts_rows(plan: CleanupPlan, r: int, k: int) -> list[pc.CleanupFactRow]:
@@ -493,8 +495,10 @@ def _facts_rows(plan: CleanupPlan, r: int, k: int) -> list[pc.CleanupFactRow]:
         return []
     out: list[pc.CleanupFactRow] = []
 
-    def row(label: str, a: str, b: str) -> None:
-        out.append(pc.CleanupFactRow(label=label, this=a, keeper=b, differs=a != b))
+    def row(label: str, a: str, b: str, differs: bool | None = None) -> None:
+        out.append(
+            pc.CleanupFactRow(label=label, this=a, keeper=b, differs=a != b if differs is None else differs)
+        )
 
     unk = K.TEXT["unknown_owner"]
     a, b = plan.probes.get(r), plan.probes.get(k)
@@ -506,7 +510,16 @@ def _facts_rows(plan: CleanupPlan, r: int, k: int) -> list[pc.CleanupFactRow]:
     def perm(p: Any) -> str:
         if not (p and p.ok):
             return unk
-        return f"{p.mode:o}" if p.mode else f"{p.acl_explicit:016x}"[:8]
+        if p.mode:  # POSIX: the mode bits, and whether an ACL is set
+            return f"{p.mode:o}" + (" + ACL" if p.acl_explicit else "")
+        if p.acl_protected:
+            return tr("不继承文件夹的（自己的 {n} 条）").format(n=p.acl_aces)
+        if p.acl_aces:
+            return tr("继承文件夹的，另有 {n} 条").format(n=p.acl_aces)
+        return tr("继承文件夹的")
+
+    def perm_key(p: Any) -> tuple[int, int, int] | None:
+        return (p.mode, p.acl_explicit, p.acl_inherited) if p and p.ok else None
 
     def attrs(x: int) -> str:
         names = (
@@ -534,7 +547,7 @@ def _facts_rows(plan: CleanupPlan, r: int, k: int) -> list[pc.CleanupFactRow]:
     row(tr("修改时间"), _date(int(plan.m["mtime"][r])), _date(int(plan.m["mtime"][k])))
     row(tr("创建时间"), _date(int(plan.bt[r])), _date(int(plan.bt[k])))
     row(tr("所有者"), a.owner if a and a.ok else unk, b.owner if b and b.ok else unk)
-    row(tr("权限"), perm(a), perm(b))
+    row(tr("权限"), perm(a), perm(b), perm_key(a) is None or perm_key(a) != perm_key(b))
     row(tr("属性"), attrs(r), attrs(k))
     row(tr("「来自网络」标记"), motw(a), motw(b))
     row(tr("备用流和扩展属性"), streams(a), streams(b))
@@ -674,6 +687,7 @@ def bucket(plan: CleanupPlan, i: int) -> pc.CleanupBucket:
         bytes=int(plan.alloc[rows].sum()) if len(rows) else 0,
         acked=bool(ack) and un == 0,
         unacked=un,
+        partly_acked=bool(ack) and un > 0,
         example=example,
     )
 
@@ -702,6 +716,9 @@ def summary(
         sel = reps & (plan.vol == vc.index) & (plan.act > K.A_LEAVE)
         if not sel.any():
             continue
+        held = bool(np.any(sel & np.isin(plan.act, K.REPLACING))) or (
+            not vc.trash and bool(np.any(sel & (plan.act == K.A_TRASH)))
+        )
         by_volume.append(
             pc.CleanupVolumeTotal(
                 volume=vc.name,
@@ -709,7 +726,7 @@ def summary(
                 freed_now=int(now[sel].sum()),
                 freed_later=int(later[sel].sum()),
                 copies=int(sel.sum()),
-                recovery=(recovery or {}).get(vc.index, ""),
+                recovery=(recovery or {}).get(vc.index, "") if held else "",
                 trash="" if vc.trash else (vc.trash_reason or K.TEXT["no_trash_recovery"]),
                 snapshots_note=RK.TEXT["m_snapshot_held"]
                 if vc.fs == "btrfs" and np.any(sel & (plan.act == K.A_CLONE))

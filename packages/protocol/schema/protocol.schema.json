@@ -1204,6 +1204,12 @@
           "title": "Id",
           "type": "string"
         },
+        "partly_acked": {
+          "default": false,
+          "description": "Acknowledged once, and copies fell into the kind since (acknowledge again)",
+          "title": "Partly Acked",
+          "type": "boolean"
+        },
         "severity": {
           "enum": [
             "none",
@@ -1536,6 +1542,14 @@
           "default": "",
           "title": "Refused",
           "type": "string"
+        },
+        "risk_titles": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "The user-facing title of each risk named in the two above",
+          "title": "Risk Titles",
+          "type": "object"
         },
         "risks_added": {
           "additionalProperties": {
@@ -2245,6 +2259,14 @@
         "offset": {
           "title": "Offset",
           "type": "integer"
+        },
+        "problems": {
+          "description": "Terms of the filter that could not be read (left out), in words",
+          "items": {
+            "type": "string"
+          },
+          "title": "Problems",
+          "type": "array"
         },
         "total": {
           "title": "Total",

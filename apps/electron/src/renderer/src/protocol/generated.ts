@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "50f61037efe18d8e";
+export const SCHEMA_HASH = "57ed143e449ec334";
 
 export interface AgeCond {
   end: number;
@@ -276,6 +276,8 @@ export interface CleanupBucket {
   example: string;
   groups: number;
   id: string;
+  /** Acknowledged once, and copies fell into the kind since (acknowledge again) */
+  partly_acked: boolean;
   severity: "none" | "info" | "low" | "medium" | "high" | "blocked";
   title: string;
   /** High kinds: copies not covered by the acknowledgement */
@@ -342,6 +344,8 @@ export interface CleanupDiff {
   /** Copies chosen by hand that the edit leaves alone */
   protected: number;
   refused: string;
+  /** The user-facing title of each risk named in the two above */
+  risk_titles: Record<string, string>;
   risks_added: Record<string, number>;
   risks_removed: Record<string, number>;
   /** Copies left as they were, by reason */
@@ -471,6 +475,8 @@ export interface CleanupGroupParams {
 export interface CleanupGroupsPage {
   items: CleanupGroup[];
   offset: number;
+  /** Terms of the filter that could not be read (left out), in words */
+  problems: string[];
   total: number;
   version: number;
 }

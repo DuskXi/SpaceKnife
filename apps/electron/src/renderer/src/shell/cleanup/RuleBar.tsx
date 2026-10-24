@@ -147,25 +147,23 @@ function RuleCard({ r, index }: { r: CleanupRuleView; index?: number }) {
 }
 
 function toggleRule(r: CleanupRuleView, enabled: boolean): Promise<boolean> {
-  return edit({
-    op: "rule_update",
-    rule_id: r.id,
-    rule: {
-      id: r.id,
-      kind: r.kind,
-      effect: r.effect,
-      when: r.when as never,
-      enabled,
-      label: "",
-      label_key: "",
-      folders: r.folders,
-      n: r.n,
-      criteria: r.criteria as never,
-      fallback: r.fallback as never,
-      target_under: r.target_under,
-      symlink_style: "",
-    },
-  });
+  const label = enabled ? t("已打开规则：{rule}", { rule: r.label }) : t("已关掉规则：{rule}", { rule: r.label });
+  const rule = {
+    id: r.id,
+    kind: r.kind,
+    effect: r.effect,
+    when: r.when as never,
+    enabled,
+    label: "",
+    label_key: "",
+    folders: r.folders,
+    n: r.n,
+    criteria: r.criteria as never,
+    fallback: r.fallback as never,
+    target_under: r.target_under,
+    symlink_style: "" as const,
+  };
+  return edit({ op: "rule_update", rule_id: r.id, rule }, label);
 }
 
 /** A new rule: where (folders, tags, a name pattern), then its effect. Previewed before it is kept. */

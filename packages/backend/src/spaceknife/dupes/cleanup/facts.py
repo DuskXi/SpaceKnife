@@ -532,17 +532,18 @@ class TagIndex:
             return hit
         f = DirFacts()
         key = _key(folder)
-        parts = [p.lower() for p in _SEP.split(folder) if p]
+        written = [p for p in _SEP.split(folder) if p]
+        parts = [p.lower() for p in written]
         if any(p in VCS_NAMES for p in parts):
             f.tags |= K.T_VCS_INTERNAL
         for p in parts:
             if p.endswith(PACKAGE_EXT):
                 f.tags |= K.T_PACKAGE
                 break
-        for p in parts[-3:]:
+        for p, w in zip(parts[-3:], written[-3:], strict=True):
             if p in BACKUP_NAMES or p.startswith(("backup", "备份")):  # i18n: ignore
                 f.tags |= K.T_BACKUP
-                f.backup = p
+                f.backup = w
                 break
         for a in _ancestors(key):
             bit = self.known.get(a)
@@ -655,6 +656,8 @@ class Probe:
     )  # (name, bytes), the mark of the web excluded
     streams_bytes: int = 0
     nlink: int = 0
+    acl_aces: int = 0  # Windows: entries of its own (not inherited)
+    acl_protected: bool = False  # Windows: does not inherit from its folder
     selinux: str = ""
     uid: int = -1
     writable: bool = True  # this process may write it (Linux in-place sharing, Windows read-only)
@@ -764,6 +767,8 @@ def _probe_windows(path: str) -> Probe:  # pragma: no cover - Windows
         if attrs & bit:
             p.bits |= flag
     p.writable = not attrs & 0x1
+    with contextlib.suppress(OSError):
+        p.nlink = os.lstat(path).st_nlink
     # owner and DACL as SDDL: explicit and inherited ACEs digested apart
     need = wintypes.DWORD()
     info = 0x1 | 0x2 | 0x4  # OWNER, GROUP, DACL
@@ -787,6 +792,8 @@ def _probe_windows(path: str) -> Probe:  # pragma: no cover - Windows
                 protected = d.startswith("D:P")
                 p.acl_explicit = _h64("|".join(explicit) + ("P" if protected else ""))
                 p.acl_inherited = _h64("|".join(inherited))
+                p.acl_aces = len(explicit)
+                p.acl_protected = protected
                 if explicit:
                     p.bits |= F_ACL
                 p.owner = _win_account(p.owner)
@@ -827,7 +834,8 @@ def _win_account(sid: str) -> str:  # pragma: no cover - Windows
 
     advapi = ctypes.WinDLL("advapi32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
     psid = ctypes.c_void_p()
-    if len(sid) <= 2 or not advapi.ConvertStringSidToSidW(ctypes.c_wchar_p(sid), ctypes.byref(psid)):
+    # SDDL writes well-known accounts as two letters (BA, SY): the call takes those too
+    if not sid or not advapi.ConvertStringSidToSidW(ctypes.c_wchar_p(sid), ctypes.byref(psid)):
         return sid
     try:
         name = ctypes.create_unicode_buffer(256)

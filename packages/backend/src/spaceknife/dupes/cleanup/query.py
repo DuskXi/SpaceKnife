@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from ...i18n import tr
 from . import codes as K
 from . import risks as RK
 
@@ -91,6 +92,10 @@ def evaluate(plan: CleanupPlan, query: str) -> tuple[np.ndarray, np.ndarray]:
     rmask = np.ones(n, bool)
     rep = plan.is_rep
     for term in split_terms(query or ""):
+        if _why(term):
+            # a term it cannot read matches nothing (said by problems()): a typo never widens what a
+            # bulk edit on 「符合筛选的全部」 reaches
+            return np.zeros(ng, bool), np.zeros(n, bool)
         neg = term.startswith("-") and len(term) > 1
         t = term[1:] if neg else term
         key, sep, val = t.partition(":")
@@ -239,6 +244,74 @@ def evaluate(plan: CleanupPlan, query: str) -> tuple[np.ndarray, np.ndarray]:
         elif grp is not None:
             gmask &= ~grp if neg else grp
     return gmask, rmask & gmask[plan.group_of] if n else rmask
+
+
+_YES_NO = ("yes", "y", "true", "1", "是", "on", "no", "n", "false", "0", "否", "off")  # i18n: ignore
+_SOURCES = ("manual", "fallback", "safety_net", "safety", "pair", "preset", "risk", "forced")
+_STATES = ("in", "stale", "shared", "excluded", "no_extra", "cleaned")
+
+
+def _why(term: str) -> str:
+    """Why :func:`evaluate` cannot read one term ("" when it can)."""
+    t = term[1:] if term.startswith("-") and len(term) > 1 else term
+    key, sep, val = t.partition(":")
+    key = key.lower()
+    why = ""
+    if not sep:
+        return ""
+    v = val.lower()
+    if key in ("risk", "sev"):
+        m = _CMP.match(v) if v else None
+        level = m.group(2) if m else ""
+        if not (level in K.SEV_CODE or v in RK.BY_CODE or val.upper() in RK.IDX):
+            why = tr("要写风险的等级（high、medium、low、info）或风险编号")
+    elif key in ("action", "avail"):
+        if v.lstrip("!" if key == "action" else "") not in K.ACTION_CODE:
+            why = tr("处理要写 leave、trash、hardlink、symlink 或 clone")
+    elif key in ("cross", "conflict", "reviewed", "changed", "acked", "keep"):
+        if v not in _YES_NO:
+            why = tr("要写 yes 或 no")
+    elif key in ("in", "name", "ext", "vol", "fs", "class"):
+        if not val.strip():
+            why = tr("冒号后面是空的")
+    elif key in ("size", "copies"):
+        m = _CMP.match(v) if v else None
+        try:
+            if m is None:
+                raise ValueError(v)
+            _num(m.group(2)) if key == "size" else float(m.group(2))
+        except ValueError:
+            why = tr("要写数值，例如 size:>100MB、copies:>=3")
+    elif key == "mtime":
+        m = _CMP.match(v) if v else None
+        try:
+            if m is None:
+                raise ValueError(v)
+            _date(m.group(2))
+        except ValueError:
+            why = tr("要写日期，例如 mtime:<2020-01-01")
+    elif key == "source":
+        if not (v in _SOURCES or (v.startswith("rule:") and v[5:].isdigit())):
+            why = tr("来源要写 manual、rule:3、fallback、safety_net、pair、preset、risk 或 forced")
+    elif key == "state":
+        if v not in _STATES:
+            why = tr("状态要写 in、stale、shared、excluded、no_extra 或 cleaned")
+    elif key == "tag":
+        bad = [x for x in v.split(",") if x not in K.TAG_CODE]
+        if bad or not v:
+            why = tr("不认识的标签：{tags}", tags=", ".join(bad) or "—")
+    return why
+
+
+def problems(query: str) -> list[str]:
+    """The terms of a filter that :func:`evaluate` cannot read, in the user's words: such a filter
+    matches nothing, and the interface says why under it."""
+    out: list[str] = []
+    for term in split_terms(query or ""):
+        why = _why(term)
+        if why:
+            out.append(tr("看不懂「{term}」：{why}", term=term, why=why))
+    return out
 
 
 def _hexd(g: object) -> str:
