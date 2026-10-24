@@ -117,11 +117,27 @@ class RootOptions:
     verify_names: bool = False
 
 
+def _env_switch(name: str, default: bool) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    return default if not value else value not in ("0", "false", "no", "off")
+
+
 @dataclass(frozen=True, slots=True)
 class SliceOptions:
     roots: tuple[RootOptions, ...]
     budget_s: float = 0.03
     max_entries: int = 100_000
+    # the native Windows walker's switches (spaceknife_native hardscan/mod.rs, docs/native.md
+    # 2.2), from the environment when the options are made: leave out a listing's last query when
+    # the buffer before it had room for another entry (off: 5-13 % less CPU on hot caches, for a
+    # rule that only how the file systems fill their buffers backs), check a relative open by the
+    # "." entry (off: no gain measured), and keep access times only where the file system
+    # updates them
+    skip_final: bool = field(default_factory=lambda: _env_switch("SPACEKNIFE_WIN_SKIP_FINAL", False))
+    dot_check: bool = field(default_factory=lambda: _env_switch("SPACEKNIFE_WIN_DOT_CHECK", False))
+    keep_where_updated: bool = field(
+        default_factory=lambda: _env_switch("SPACEKNIFE_WIN_KEEP_WHERE_UPDATED", True)
+    )
 
 
 @dataclass(slots=True)

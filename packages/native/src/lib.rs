@@ -7,6 +7,7 @@ use pyo3::prelude::*;
 
 #[cfg(feature = "dupes")]
 mod dupes;
+mod fold;
 #[cfg(feature = "hardscan")]
 mod hardscan;
 #[cfg(feature = "mft")]
@@ -23,5 +24,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     hardscan::register(m)?;
     #[cfg(feature = "dupes")]
     dupes::register(m)?;
+    fold::register(m)?;
     Ok(())
 }

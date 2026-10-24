@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import os
 import secrets
-import sys
 import threading
 import time
 from collections import OrderedDict
@@ -24,7 +23,7 @@ from loguru import logger
 from spaceknife_protocol import scan as p
 from spaceknife_protocol.errors import ErrorCode
 
-from .. import memory, paths
+from .. import memory, native, paths
 from ..events import denied_reason, emit, printable
 from ..filter.names import forget, name_index
 from ..helper import HelperError, SharedHelper, is_elevated
@@ -49,6 +48,7 @@ from ..scan.scanner import (
 from ..scan.volume import VolumeInfo
 from ..settings import SettingsStore
 from ..store import snapshot
+from ..store.lock import STRUCTURE
 from ..store.nodes import Flag, Kind, NodeStore
 from .compute import compute
 from .rpc import RpcError
@@ -63,8 +63,9 @@ TICK_S = 0.5  # status pushes while a scan runs, also when nothing lands (MFT re
 CLOSED_KEEP_S = 3600.0  # ScanManager.closed: how long a closed scan's size counts
 RELEASE_DELAY_S = 1.0  # after scan.close: give the heap back once the request is done with the scan
 MFT_READ_SHARE = 0.85  # of an MFT scan's progress: reading and parsing; the rest is building
-# the received table (~160 B with the names) plus building the tree from it (~85 B, docs/memory.md §6)
-MFT_BUILD_BYTES_PER_ROW = 280
+# the received table (~160 B with the names) plus building the tree from it (docs/memory.md §6):
+# ~57 B with the native build, ~120 B with the numpy one
+MFT_BUILD_BYTES_PER_ROW = {"native": 220, "numpy": 280}
 SUMMARY_TOP = 50  # largest files in a cached summary: the details panel asks for 5 or 50
 SUMMARY_KEEP = 8  # cached summaries per scan (other nodes of the same store version)
 # a hard scan reserves room for the newest complete snapshot's items, plus this share and these rows
@@ -621,11 +622,7 @@ class ScanManager:
     @staticmethod
     def _mft_eligible(handle: ScanHandle) -> bool:
         """One whole local NTFS volume on Windows: the $MFT holds exactly this tree."""
-        if sys.platform != "win32" or len(handle.roots) != 1:
-            return False
-        root = handle.roots[0]
-        v = root.volume
-        return root.whole_volume and v is not None and not v.is_remote and v.fs_type.upper() == "NTFS"
+        return mft.mft_unsupported(handle.roots) is None
 
     def mft_ready(self) -> bool:
         """An MFT scan needs no administrator prompt: rights already, or a live elevated helper."""
@@ -672,7 +669,8 @@ class ScanManager:
             )
             handle.mft_task = job
             table = await job
-            handle.transient = len(table["record"]) * MFT_BUILD_BYTES_PER_ROW
+            build = "native" if native.has("mft_build") else "numpy"
+            handle.transient = len(table["record"]) * MFT_BUILD_BYTES_PER_ROW[build]
             handle.phase = "build"
             handle.publish()
             st = self.settings
@@ -874,6 +872,10 @@ class ScanManager:
         if scanner.state == ScanState.DONE:
             # build the name index now, so the first wildcard filter does not pay for it
             await compute(name_index(handle.store).update, len(handle.store))
+        # glibc: the scan's freed temporaries go back to the system (docs/memory.md §8), aside
+        trim = asyncio.get_running_loop().create_task(asyncio.to_thread(memory.trim))
+        self._releases.add(trim)
+        trim.add_done_callback(self._releases.discard)
 
     async def _auto_save(self, handle: ScanHandle) -> None:
         """Save a finished scan to the auto-snapshot folder; a failure only costs a log warning."""
@@ -992,10 +994,16 @@ class ScanManager:
         }
 
     def _save(self, handle: ScanHandle, path: Path) -> snapshot.SnapshotHeader:
+        """On a worker thread: without the lock, so file changes go on meanwhile; if one came in,
+        once more holding them back (a whole volume takes about a second)."""
         vols = [r.volume.to_dict() if r.volume else {} for r in handle.roots]
-        return snapshot.save(
-            handle.store, path, roots=[r.path for r in handle.roots], volumes=vols, stats=self._stats(handle)
-        )
+        roots = [r.path for r in handle.roots]
+        try:
+            return snapshot.save(handle.store, path, roots=roots, volumes=vols, stats=self._stats(handle))
+        except snapshot.SnapshotChanged:
+            logger.debug("scan {}: the tree changed while it was saved, saving again", handle.id)
+        with STRUCTURE.read():
+            return snapshot.save(handle.store, path, roots=roots, volumes=vols, stats=self._stats(handle))
 
     async def save_snapshot(self, scan_id: str, target: str | None) -> p.SnapshotInfo:
         handle = self.get(scan_id)
@@ -1008,6 +1016,9 @@ class ScanManager:
             raise RpcError(
                 ErrorCode.SNAPSHOT_ERROR, tr("写不了 {path}：{reason}", path=path, reason=exc.strerror or exc)
             ) from exc
+        except snapshot.SnapshotError as exc:
+            reason = tr("写不了 {path}：{reason}", path=path, reason=exc)
+            raise RpcError(ErrorCode.SNAPSHOT_ERROR, reason) from exc
         handle.snapshot_path = str(path)
         emit("snapshot", tr("快照已保存：{path}", path=path), scan_id=handle.id)
         return snapshot_info(path, header)

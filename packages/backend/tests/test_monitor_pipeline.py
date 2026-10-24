@@ -19,6 +19,7 @@ from spaceknife.server.monitors import MonitorManager, ScanMonitor
 from spaceknife.server.scans import ScanHandle, ScanManager
 from spaceknife.server.views import ViewManager
 from spaceknife.store import mutate
+from spaceknife.store.lock import STRUCTURE
 from spaceknife.store.nodes import Flag
 from spaceknife_protocol import scan as p
 
@@ -348,3 +349,26 @@ async def test_rescan_the_top_of_several_roots(watched: Any, tmp_path: Path) -> 
 
     await monitors.rescan(handle, 0)
     await until(both)
+
+
+async def test_new_folders_are_folded_in_under_the_write_lock(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NodeStore.compact runs on the compute pool as a reader and replaces the columns: the monitor
+    adds the rows of new folders only while no reader runs."""
+    mgr, _, _ = watched
+    root = build_tree(tmp_path / "root").root
+    handle = await scanned(mgr, root)
+    store = handle.store
+    held: list[bool] = []
+    real = store.ingest_slice
+
+    def ingest(*args: Any, **kwargs: Any) -> Any:
+        held.append(STRUCTURE._writing and STRUCTURE.readers == 0)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(store, "ingest_slice", ingest)
+    (root / "fresh" / "inner" / "deeper").mkdir(parents=True)
+    (root / "fresh" / "inner" / "deeper" / "x.dat").write_bytes(b"x" * 4321)
+    await until(same_as_disk(handle, root))
+    assert held and all(held)

@@ -46,7 +46,7 @@ async def _scan(paths: list[str], workers: int | None) -> list[ScanInput]:
 
     out: list[ScanInput] = []
     for i, p in enumerate(paths):
-        scanner, _ = await _run_scan([p], workers, False)
+        scanner, _, _ = await _run_scan([p], workers, False)  # (scanner, result, method)
         out.append(ScanInput(f"scan-{i}", scanner.store, scanner.roots))
     return out
 
