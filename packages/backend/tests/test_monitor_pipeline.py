@@ -188,7 +188,7 @@ async def test_sizes_follow_the_hard_scan_rule(watched: Any, tmp_path: Path) -> 
     root = build_tree(tmp_path / "root").root
     handle = await scanned(mgr, root)
     f = next(p for p in root.rglob("*") if p.is_file())
-    f.write_bytes(b"r" * 600)  # resident in the MFT record, but the hard scan counts one cluster
+    f.write_bytes(b"r" * 600)  # resident in the MFT record: no cluster listed, one by the estimate
     await until(same_as_disk(handle, root))
 
 

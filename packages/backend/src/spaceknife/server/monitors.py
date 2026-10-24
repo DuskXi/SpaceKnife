@@ -37,7 +37,7 @@ from ..filter.names import forget
 from ..i18n import tr
 from ..monitor import Change, Watcher, create_watcher
 from ..scan import worker
-from ..scan.scanner import verify_names
+from ..scan.scanner import listed_alloc, verify_names
 from ..scan.volume import volume_for
 from ..scan.worker import SliceOptions, SliceResult
 from ..store import mutate
@@ -430,9 +430,14 @@ class ScanMonitor:
                 if ch.size is not None and ch.alloc is None:
                     folders.add(os.path.dirname(ch.path))
                     known[i] = Change("modified", ch.path)
-            if self.handle.method == "hard":  # keep to the hard scan's rule (resident, clusters)
+            if self.handle.method == "hard":  # keep to the hard scan's rule
                 cloud = (c["flags"][np.array(nodes, dtype=np.int64)] & np.uint32(Flag.CLOUD)) != 0
-                known = [self._hard_alloc(ch, bool(k)) for ch, k in zip(known, cloud.tolist(), strict=True)]
+                for i, (ch, k) in enumerate(zip(known, cloud.tolist(), strict=True)):
+                    got = self._hard_alloc(ch, bool(k))
+                    if got is None:  # the scan would ask this file: its folder's listing asks it
+                        folders.add(os.path.dirname(ch.path))
+                        got = Change("modified", ch.path)
+                    known[i] = got
         missing = [i for i, ch in enumerate(known) if ch.size is None and os.name != "nt"]
         if missing:  # the watcher did not say: ask the file system
             looked = await asyncio.to_thread(_stat_many, [known[i].path for i in missing], self._cluster())
@@ -707,7 +712,10 @@ class ScanMonitor:
         # each root's path and name check still apply: a relist must not list a case-only
         # sibling's contents under the other's name
         return tuple(
-            worker.RootOptions(path=r.path, verify_names=verify_names(r.volume)) for r in self.handle.roots
+            worker.RootOptions(
+                path=r.path, verify_names=verify_names(r.volume), listed_alloc=listed_alloc(r.volume)
+            )
+            for r in self.handle.roots
         )
 
     def _root_index(self, path: str) -> int | None:
@@ -718,16 +726,22 @@ class ScanMonitor:
                 return i
         return None
 
-    def _hard_alloc(self, ch: Change, cloud: bool) -> Change:
-        """The allocation a hard scan would report for this size (Windows estimates it: a cloud
-        placeholder occupies nothing, files up to ``resident_max`` live in the MFT record, the rest
-        round up to whole clusters)."""
+    def _hard_alloc(self, ch: Change, cloud: bool) -> Change | None:
+        """The allocation a hard scan would report for this change: a cloud placeholder occupies
+        nothing; under the listing rule (``RootOptions.listed_alloc``) the event's own
+        AllocatedLength, which is the listing's (monitor/win.py ``_alloc`` already gave data kept in
+        the file's record no cluster and left compressed and sparse files to a relist), or None
+        where the scan would ask the file (NTFS: no clusters for a file that is not empty, a
+        WOF-compressed one): its folder is listed again then; otherwise estimated from the size
+        (files up to ``resident_max`` live in the MFT record, the rest round up to whole clusters)."""
         if ch.size is None or ch.alloc is None:
             return ch
         if cloud:
             return Change("modified", ch.path, size=ch.size, alloc=0, mtime=ch.mtime)
         idx = self._root_index(ch.path)
         opts = self._root_opts()[idx] if idx is not None else worker.RootOptions()
+        if opts.listed_alloc:
+            return None if opts.listed_alloc == "NTFS" and ch.alloc == 0 and ch.size > 0 else ch
         cluster = opts.cluster_size or 4096
         alloc = 0 if ch.size <= opts.resident_max else -(-ch.size // cluster) * cluster
         return Change("modified", ch.path, size=ch.size, alloc=alloc, mtime=ch.mtime)

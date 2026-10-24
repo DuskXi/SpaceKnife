@@ -171,6 +171,9 @@ def test_thread_count_does_not_change_output(tree: Path, threads: int) -> None:
 def test_root_options_apply(tree: Path) -> None:
     scan_one(tree, cluster_size=8192, resident_max=512)
     scan_one(tree, cluster_size=0, resident_max=0)
+    if IS_WINDOWS:  # the listing rule as each file system has it (whatever this volume is)
+        for fs in ("NTFS", "ReFS", "Btrfs"):
+            scan_one(tree, cluster_size=4096, listed_alloc=fs)
 
 
 def test_several_tasks_roots_and_failures(tmp_path: Path, tree: Path) -> None:
@@ -319,6 +322,110 @@ def _names(res: SliceResult) -> list[str]:
         out.append(res.name_blob[off : off + n].decode("utf-8", worker.NAME_ERRORS))
         off += n
     return out
+
+
+def _std_alloc(path: Path) -> int:
+    """FileStandardInfo's AllocationSize, as the file system counts the file."""
+    got = worker._ask_alloc(str(path))
+    assert got is not None
+    return got
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="Windows allocation sizes")
+def test_windows_listed_alloc_is_what_the_file_system_counts(tmp_path: Path) -> None:
+    """With ``listed_alloc`` both walkers take a file's size on disk from its listing entry (asking
+    the file where the entry lags: sparse and compressed files just written; WOF files), and give
+    what the file system counts: data kept in the file's record takes no cluster, a sparse file
+    only its written clusters, a compressed file its compressed clusters."""
+    from spaceknife.scan.volume import volume_for
+
+    vol = volume_for(str(tmp_path))
+    fs = {"ntfs": "NTFS", "refs": "ReFS", "btrfs": "Btrfs"}.get(vol.fs_type.lower())
+    if fs is None:
+        pytest.skip(f"listing rule not measured on {vol.fs_type}")
+    root = tmp_path / "listed"
+    root.mkdir()
+    for n in (0, 100, 700, 800, 3000, 5000):
+        (root / f"w_{n:05d}").write_bytes(b"x" * n)
+    with open(root / "setlen_100k", "wb") as f:
+        f.truncate(100_000)
+    sparse = root / "sparse.bin"
+    sparse.write_bytes(b"")
+    have_sparse = _fsctl(sparse, 0x900C4)  # FSCTL_SET_SPARSE
+    with open(sparse, "r+b") as f:  # holes by seeking past the end (truncate would write zeros)
+        for off in (0, 8 << 20, (16 << 20) - 4096):
+            f.seek(off)
+            f.write(b"\xa5" * 4096)
+        f.flush()
+        os.fsync(f.fileno())  # written out: the file's allocation is final, its listing entry lags
+    text = (b"SpaceKnife listed allocation test, compressible text. " * 20000)[: 1 << 20]
+    compressed = root / "compressed.bin"
+    compressed.write_bytes(b"")
+    have_comp = _fsctl(compressed, 0x9C040, (1).to_bytes(2, "little"))  # FSCTL_SET_COMPRESSION
+    with open(compressed, "r+b") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    wof = root / "wof.bin"
+    wof.write_bytes(text)
+    have_wof = fs == "NTFS" and (
+        subprocess.run(["compact.exe", "/c", "/exe:xpress4k", str(wof)], capture_output=True).returncode == 0
+    )
+    settle(root)
+    res = scan_one(root, cluster_size=vol.cluster_size, resident_max=512, listed_alloc=fs)
+    alloc = dict(zip(_names(res), res.cols["alloc"].tolist(), strict=True))
+    cluster = vol.cluster_size
+    for name, got in alloc.items():
+        counted = _std_alloc(root / name)
+        want = 0 if counted % cluster else counted
+        assert got == want, (name, got, counted)
+    if fs == "NTFS":
+        assert alloc["w_00700"] == 0 and alloc["w_00800"] == cluster  # resident, then one cluster
+    if have_sparse:
+        assert 0 < alloc["sparse.bin"] < 1 << 20
+    if have_comp and fs == "NTFS":
+        assert 0 < alloc["compressed.bin"] < 1 << 20
+    if have_wof:
+        assert 0 < alloc["wof.bin"] < 1 << 20
+    # the estimate (no listing rule) stays as it was: 700 B past resident_max, a whole cluster
+    old = scan_one(root, cluster_size=cluster, resident_max=512)
+    old_alloc = dict(zip(_names(old), old.cols["alloc"].tolist(), strict=True))
+    assert old_alloc["w_00700"] == -(-700 // cluster) * cluster
+
+
+def test_listed_alloc_is_for_local_ntfs_refs_and_btrfs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from spaceknife.scan import scanner as scanner_mod
+    from spaceknife.scan.volume import VolumeInfo
+
+    def vol(fs: str, remote: bool = False) -> VolumeInfo:
+        return VolumeInfo("X:\\", "X:", fs, "", 0, 0, 4096, remote, False)
+
+    monkeypatch.setattr(scanner_mod, "sys", SimpleNamespace(**{**vars(sys), "platform": "win32"}))
+    monkeypatch.delenv("SPACEKNIFE_WIN_LISTED_ALLOC", raising=False)
+    assert [scanner_mod.listed_alloc(vol(f)) for f in ("NTFS", "ReFS", "btrfs", "exFAT", "FAT32")] == [
+        "NTFS",
+        "ReFS",
+        "Btrfs",
+        "",
+        "",
+    ]
+    assert scanner_mod.listed_alloc(vol("NTFS", remote=True)) == ""
+    assert scanner_mod.listed_alloc(None) == ""
+    monkeypatch.setenv("SPACEKNIFE_WIN_LISTED_ALLOC", "0")
+    assert scanner_mod.listed_alloc(vol("NTFS")) == ""
+    monkeypatch.setattr(scanner_mod, "sys", SimpleNamespace(**{**vars(sys), "platform": "linux"}))
+    monkeypatch.delenv("SPACEKNIFE_WIN_LISTED_ALLOC")
+    assert scanner_mod.listed_alloc(vol("NTFS")) == ""
+
+
+def test_unknown_listed_alloc_is_refused(tree: Path) -> None:
+    tasks: list[Task] = [((0, 1, 0), str(tree), 0)]
+    opts = SliceOptions(roots=(root_opts(tree, listed_alloc="FAT32"),), **EVERYTHING)
+    with pytest.raises(ValueError, match="listed_alloc"):
+        native.scan_slice(tasks, nopts(opts))
+    if IS_WINDOWS:
+        with pytest.raises(ValueError, match="listed_alloc"):
+            worker.scan_slice(tasks, opts)
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="Windows long paths")
