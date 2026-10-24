@@ -17,7 +17,7 @@
 // bar is cropped off (it shows the free space of the machine's system drive) and the time zone is
 // UTC.
 
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, nativeTheme } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -44,6 +44,10 @@ process.on("uncaughtException", (err) => {
 });
 
 app.whenReady().then(async () => {
+  // the page follows the system's light / dark setting (prefers-color-scheme, which themeSource
+  // drives): fixed to dark here, whatever the desktop running this says, so new pictures match the
+  // ones already published (SHOT_THEME=light for the light theme)
+  nativeTheme.themeSource = env("THEME", "dark") === "light" ? "light" : "dark";
   // window and capture sizes are in window pixels: CSS pixels × ZOOM. An in-memory session: Chromium
   // keeps a page zoom per host, and a saved one would win over this run's zoomFactor.
   const win = new BrowserWindow({

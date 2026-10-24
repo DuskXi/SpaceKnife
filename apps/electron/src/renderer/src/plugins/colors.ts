@@ -2,12 +2,11 @@
 // then the enabled plugins' (extensions.get color_modes, colors.v1), for the toolbar, the C key and
 // 「配色：…」. A plugin's mode paints from the frame's u1 `pal` column through its palette; the
 // palette's entries are resolved here: a semantic name, a design token, class:<id> (the user's
-// class colour), #RRGGBB, or {light, dark} (the app is dark: the dark one).
-
-import { tokens } from "@design/tokens";
+// class colour), #RRGGBB, or {light, dark} (the one of the theme on screen).
 
 import type { ColorModeInfo, ExtensionsState } from "@/protocol/generated";
 import { t } from "@/lib/i18n";
+import { palette, themeName } from "@/lib/theme";
 
 /** One entry of a palette: a semantic name, a token, class:<id>, #RRGGBB, or one per theme. */
 export type PaletteEntry = ColorModeInfo["palette"][number];
@@ -51,19 +50,31 @@ export function nextColorMode(choices: readonly ColorChoice[], current: string, 
   return usable[(at + dir + usable.length) % usable.length]!.id;
 }
 
-const SEMANTIC: Record<string, string> = {
-  accent: tokens.color.accent.default,
-  ok: tokens.color.status.success,
-  warn: tokens.color.status.warning,
-  danger: tokens.color.status.danger,
-  muted: tokens.treemap.class.other,
-};
+/** The semantic names, in the theme on screen. */
+function semantic(name: string): string | null {
+  const c = palette().color;
+  switch (name) {
+    case "accent":
+      return c.accent.default;
+    case "ok":
+      return c.status.success;
+    case "warn":
+      return c.status.warning;
+    case "danger":
+      return c.status.danger;
+    case "muted":
+      return palette().treemap.class.other;
+    default:
+      return null;
+  }
+}
+const muted = (): string => semantic("muted")!;
 
 const HEX = /^#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?$/;
 
 /** A token by its dotted path ("visual.branch.3.2", "treemap.class.video"); null when it is not a colour. */
 function token(path: string): string | null {
-  let node: unknown = tokens;
+  let node: unknown = palette();
   for (const part of path.split(".")) {
     if (!node || typeof node !== "object" || !(part in node)) return null;
     node = (node as Record<string, unknown>)[part];
@@ -73,12 +84,16 @@ function token(path: string): string | null {
 
 /** One palette entry as a hex colour; the neutral colour for anything it can't read. */
 export function resolveColor(entry: PaletteEntry | string | null | undefined, classHex: (id: string) => string): string {
-  if (!entry) return SEMANTIC.muted!;
-  if (typeof entry === "object") return HEX.test(entry.dark) ? entry.dark : HEX.test(entry.light) ? entry.light : SEMANTIC.muted!;
+  if (!entry) return muted();
+  if (typeof entry === "object") {
+    const [own, other] = themeName() === "light" ? [entry.light, entry.dark] : [entry.dark, entry.light];
+    return HEX.test(own) ? own : HEX.test(other) ? other : muted();
+  }
   if (HEX.test(entry)) return entry;
-  if (entry in SEMANTIC) return SEMANTIC[entry]!;
+  const named = semantic(entry);
+  if (named) return named;
   if (entry.startsWith("class:")) return classHex(entry.slice(6));
-  return token(entry) ?? SEMANTIC.muted!;
+  return token(entry) ?? muted();
 }
 
 /** A tone of a report block or field: accent ok warn danger muted, a token, class:<id>, #RRGGBB,
@@ -88,8 +103,8 @@ export function toneColor(tone: PaletteEntry | string | null | undefined, classH
   if (typeof tone === "string" && tone.startsWith("palette:")) {
     const m = /^palette:(.+)#(\d+)$/.exec(tone);
     const info = m ? (ext ?? extensionsNow())?.color_modes.find((x) => x.id === m[1]) : undefined;
-    if (!m || !info) return SEMANTIC.muted!;
-    return paletteHex(info, classHex)[Number(m[2])] ?? SEMANTIC.muted!;
+    if (!m || !info) return muted();
+    return paletteHex(info, classHex)[Number(m[2])] ?? muted();
   }
   return resolveColor(tone, classHex);
 }
@@ -103,7 +118,7 @@ export function bindExtensions(read: () => ExtensionsState | null): void {
 /** A plugin mode's palette as hex colours, index 0 the neutral one; at most 16 entries. */
 export function paletteHex(info: ColorModeInfo, classHex: (id: string) => string): string[] {
   const list = info.palette.slice(0, 16).map((e) => resolveColor(e, classHex));
-  return list.length ? list : [SEMANTIC.muted!];
+  return list.length ? list : [muted()];
 }
 
 /** What the painters need for a plugin's mode (null for the built-in ones). */
@@ -117,7 +132,7 @@ export interface PalettePaint {
 export function palettePaint(id: string, ext: ExtensionsState | null | undefined, classHex: (id: string) => string): PalettePaint | null {
   if (isBuiltinColor(id)) return null;
   const info = ext?.color_modes.find((m) => m.id === id);
-  if (!info) return { colors: [SEMANTIC.muted!], folders: false };
+  if (!info) return { colors: [muted()], folders: false };
   return { colors: paletteHex(info, classHex), folders: info.folders === "palette" };
 }
 

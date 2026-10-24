@@ -10,7 +10,7 @@ import { fmtAgo, fmtCount, fmtInt, fmtPct, fmtShare, fmtSize, plural, sizeParts 
 import { summaryInterval, useThrottled } from "@/lib/throttle";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
-import { classHexNow } from "@/lib/classes";
+import { classHexNow, inkOn } from "@/lib/classes";
 import { byLang, t } from "@/lib/i18n";
 import { tagLabel } from "@/lib/tags";
 import { inBrowser } from "@/lib/host";
@@ -198,7 +198,7 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
   return (
     <>
       <div className="ins-title">
-        <div className="ins-icon" style={cls ? { background: classHexNow(cls), color: "#0A0B0D" } : undefined}>
+        <div className="ins-icon" style={cls ? { background: classHexNow(cls), color: inkOn(classHexNow(cls)) } : undefined}>
           <Icon name={dir ? "folder" : "file"} size={18} />
         </div>
         <div className="ins-name">

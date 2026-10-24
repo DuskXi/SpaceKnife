@@ -115,6 +115,12 @@ describe("rowLabel", () => {
     expect(l.lines[0]!.dy).toBeLessThan(0);
     expect(l.lines[0]!.font).toMatch(/^500 11px /);
     expect(l.lines[1]!.font).toMatch(/^400 10\.5px "Geist Mono"/);
+    // the size line in the sub colour, the name's while lit; the label knows its row
+    expect(l.lines.map((x) => [x.color, x.lit])).toEqual([
+      ["#fff", undefined],
+      ["#ccc", "#fff"],
+    ]);
+    expect(l.row).toBe(i);
   });
 
   it("writes folders semibold, bold on a folder-mask hit, and waiting folders' second line", () => {
@@ -214,5 +220,24 @@ describe("prepare and draw", () => {
     const [l] = prepareLabels(ctx, [{ x: 10, y: 20, rot: Math.PI / 4, align: "right", maxWidth: 100, lines: [{ text: "name", font: "f", color: "#fff", dy: 3 }], alpha: 0.5 }]);
     drawLabels(ctx, [l!], 0.5);
     expect(log).toEqual(["save", "save", "translate 10 20", "rotate 0.785", "fill name 0 3.00 right 0.25", "restore", "restore"]);
+  });
+
+  it("draws a lit row's lines in their lit colours", () => {
+    const { ctx } = fake();
+    const colours: string[] = [];
+    const fillText = ctx.fillText.bind(ctx);
+    ctx.fillText = (s: string, x: number, y: number) => {
+      colours.push(`${s} ${String(ctx.fillStyle)}`);
+      fillText(s, x, y);
+    };
+    const lines = [
+      { text: "name", font: "f", color: "#fff", dy: 0 },
+      { text: "12 B", font: "f", color: "#ccc", lit: "#fff", dy: 12 },
+    ];
+    const prepared = prepareLabels(ctx, [{ x: 0, y: 0, rot: 0, align: "center", maxWidth: 100, lines, alpha: 1, row: 4 }]);
+    drawLabels(ctx, prepared, 1);
+    drawLabels(ctx, prepared, 1, new Set([3]));
+    drawLabels(ctx, prepared, 1, new Set([4]));
+    expect(colours).toEqual(["name #fff", "12 B #ccc", "name #fff", "12 B #ccc", "name #fff", "12 B #fff"]);
   });
 });

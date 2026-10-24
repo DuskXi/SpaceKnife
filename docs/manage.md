@@ -62,14 +62,15 @@ AddResult(added: list[id], merged: list[Merged(path, into)], absorbed: list[id],
 ```python
 def find_lockers(paths) -> dict[path, list[程序名]]        # Windows Restart Manager；Linux /proc/*/fd；macOS lsof
 def trash_status(path) -> TrashStatus(available, reason, location, used, capacity, same_volume)
-def move_to_trash(paths, *, progress=None, cancel=None, sizes=None, check_locks=True) -> list[OpResult]
+def move_to_trash(paths, *, progress=None, cancel=None, sizes=None, check_locks=True, roots=None) -> list[OpResult]
 def restore(refs) -> list[OpResult]                      # 不覆盖已有项（exists）
-def delete_permanently(paths, *, progress=None, cancel=None, check_locks=True) -> list[OpResult]
-OpResult(path, ok, code: ok|missing|denied|locked|protected|no_trash|exists|cancelled|error, message, trash_ref)
+def delete_permanently(paths, *, progress=None, cancel=None, check_locks=True, roots=None) -> list[OpResult]
+OpResult(path, ok, code: ok|missing|denied|locked|protected|no_trash|exists|cancelled|ambiguous_name|error, message, trash_ref)
 ```
 
 - **移到回收站从不变成永久删除**：Windows 用 IFileOperation（FOFX_RECYCLEONDELETE），进度回调拒绝任何不进回收站的删除；卷没有回收站、超过回收站容量、路径太长时逐项返回 `no_trash`，原样不动。Linux 按 freedesktop Trash 规范（`renameat2(RENAME_NOREPLACE)`，跨设备返回 `no_trash`，从不复制）。
 - 执行前逐项复核：仍存在、仍不受保护、未被占用。
+- 只差大小写的同名项（0.3.4，docs/native.md 2.2）：`roots` 给出每个路径所在的扫描根（删除篮加入时就为每一项记下，`ops_service` 执行时传入，扫描已经关闭也照样核对）。Windows 上逐项按路径打开（不要任何权限、不跟随重解析点）读文件系统存的名字（`FileNormalizedNameInfo`，不支持时 `FileNameInfo`），与扫描根自己存的名字接上路径在根以下的各级比较（`worker.task_is`，同一次执行里每个根只读一次）。完全相同就照常执行。不同时，从扫描根往下逐级列出路径经过的文件夹：某一级里既有路径的这个名字、又有一个只差大小写的别的名字，就说明按这个路径可能打开另一项（WinBtrfs 上 `a` 的路径打开的是 `A`，`A` 是符号链接时还会跟着它到别处；NTFS 上不带区分大小写标志的文件夹里 ntfs-3g 写下的 POSIX 名字同理），返回 `ambiguous_name`（「另一项与它只差大小写，按名字会打开另一项；没有改动任何东西」），原样不动；哪一级列不出也同样拒绝。路上没有这样的一对时照常执行：扫描之后只改了大小写（例如 `Photos` 改成 `photos`）、网络盘上存的名字是最先打开它的那个程序用的大小写、存的名字在别处（硬链接的另一个名字、重定向），都不误拦。旧快照、对比视图、Python 遍历器扫出的树、只差大小写的文件都由这一条兜住。Windows 上路径里有名字以点或空格结尾的也拒绝（`ambiguous_name`，「它或上级文件夹的名字以点或空格结尾，Windows 按路径找到的不是它；没有改动任何东西」）：Win32 会去掉结尾的点和空格，`odd.` 的路径删的是旁边的 `odd`，而扫描按 NT 路径（worker 按 `\\?\` 路径）把两个都照原样列出。删除篮加入时拒绝没有路径单独指向的项：名字（或扫描根以下某一级上级的名字）里有路径分隔符（Windows 上 `\` 和 `/`，WinBtrfs 照原样显示 Linux 的文件名；POSIX 上 `\` 是普通字符）、与同一文件夹里另一项的名字完全相同（WinBtrfs 把无效的 UTF-8 显示成 U+FFFD：扫描按 ID 列出各自的内容，按路径删的却是其中一个），以及 Windows 上以点或空格结尾。
 
 ### 2.4 服务层（`server/ops_service.py`）
 
@@ -141,8 +142,8 @@ def load_rules(extra_dir=None, *, host=None) -> RuleSet       # 内置 110 条 +
 
 ## 6. 文件类别与设置导入导出（W7）
 
-- `classes.py`：用户可编辑的类别表存在 `config/classes.json`，启动时成为「当前类别表」（`classes.active()`）；过滤引擎、布局着色、解析词汇都读它。`classes.build(edits)` 校验：类别名唯一且不含 `; : " \`；扩展名用 `;`、空格或逗号分隔，去掉开头的点、不分大小写；「其他」不能删、不能填扩展名、始终最后；内置类别改名后旧名字留作别名（`:class:视频` 仍可用）。类别可带颜色（`#RRGGBB`，空为主题色）。
-- `settings_io.py`：导出 `{"format": "spaceknife-settings", "version": 1, "values": 非默认值, "classes": 自定义类别表或 null}`；导入先给出计划（将改变的项、新类别表、不导入的项及原因），用户确认后才应用。也读 SpaceSniffer 的 `SpaceSnifferConfig.xml`（每个设置一个元素；颜色 `0x00BBGGRR`；模板为 Base64 的 UTF-16LE）：能对应的设置照搬或换算（字号按 7pt=100%，边框对比按 30=10），配色、刷新间隔、缩放时长、DynaZoom、元素比例不导入；文件组按 SpaceSniffer 的名字和扩展名成为类别，内置类别保留 id，SpaceSniffer 默认的三原色改用主题色，用户自选的颜色保留；SpaceSniffer 没有的「文档」类别保留。
+- `classes.py`：用户可编辑的类别表存在 `config/classes.json`，启动时成为「当前类别表」（`classes.active()`）；过滤引擎、布局着色、解析词汇都读它。`classes.build(edits)` 校验：类别名唯一且不含 `; : " \`；扩展名用 `;`、空格或逗号分隔，去掉开头的点、不分大小写；「其他」不能删、不能填扩展名、始终最后；内置类别改名后旧名字留作别名（`:class:视频` 仍可用）。类别可带颜色（`#RRGGBB`，空为主题色），深色、浅色主题各一个：`color` 和 `color_light`；为空时内置类别用当前主题的颜色，自建类别用另一主题的颜色。`classes.json` 是第 2 版；读到第 1 版（或没有版本号）时，`color` 同时当作 `color_light`：那时只有深色主题，用户选的颜色两套主题都用。
+- `settings_io.py`：导出 `{"format": "spaceknife-settings", "version": 1, "values": 非默认值, "classes": 自定义类别表或 null}`；导入先给出计划（将改变的项、新类别表、不导入的项及原因），用户确认后才应用。也读 SpaceSniffer 的 `SpaceSnifferConfig.xml`（每个设置一个元素；颜色 `0x00BBGGRR`；模板为 Base64 的 UTF-16LE）：能对应的设置照搬或换算（字号按 7pt=100%，边框对比按 30=10），配色、刷新间隔、缩放时长、DynaZoom、元素比例不导入；文件组按 SpaceSniffer 的名字和扩展名成为类别，内置类别保留 id，SpaceSniffer 默认的三原色改用主题色，用户自选的颜色保留（两个主题都用它）；SpaceSniffer 没有的「文档」类别保留。
 
 ## 7. 协议
 

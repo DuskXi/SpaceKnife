@@ -7,7 +7,7 @@
 //
 //   SHOT_URL=… SHOT_SNAPSHOT=… SHOT_FRAMES=<dir> SHOT_LOG=<file> electron tools/demo/demo.cjs
 
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, nativeTheme } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -46,6 +46,10 @@ const POINTER = `(() => {
 })()`;
 
 app.whenReady().then(async () => {
+  // the page follows the system's light / dark setting (prefers-color-scheme, which themeSource
+  // drives): fixed to dark here, whatever the desktop running this says, so new pictures match the
+  // ones already published (SHOT_THEME=light for the light theme)
+  nativeTheme.themeSource = env("THEME", "dark") === "light" ? "light" : "dark";
   const win = new BrowserWindow({ width: WIDTH, height: HEIGHT, show: false, webPreferences: { offscreen: true, backgroundThrottling: false } });
   const wc = win.webContents;
   wc.setFrameRate(30);

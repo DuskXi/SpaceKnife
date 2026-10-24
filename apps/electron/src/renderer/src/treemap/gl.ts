@@ -1,8 +1,9 @@
 // WebGL2 instanced renderer for treemap shapes: one draw call per picture.
 //
 // Each instance is a rounded rectangle evaluated as a signed distance field in its own pixel
-// space: fill, optional (dashed) border, stripes / dot patterns, or a soft shadow. A picture can
-// be drawn under an affine transform and an opacity, which is all the zoom animation needs.
+// space: fill, optional (dashed) border, stripes / dot patterns, or a soft shadow (optionally with
+// a hole where the block casting it lies). A picture can be drawn under an affine transform and an
+// opacity, which is all the zoom animation needs.
 
 import { ATTRIBUTES } from "@/visual/glContext";
 
@@ -67,7 +68,16 @@ void main() {
   if (pattern == 4.0) {                                        // soft shadow
     float blur = max(v_extra.x, 1.0);
     float a = 1.0 - smoothstep(-blur * 0.5, blur, d);
-    o = vec4(v_fill.rgb, 1.0) * v_fill.a * a * a * alpha;
+    a *= a;
+    // a hole where the block that casts it lies (border slot: its centre's offset from the
+    // shadow's centre and its size; pattern colour .x: its radius), so the shadow falls around it
+    // and not on it or on what is drawn inside it
+    if (v_border.z > 0.0 && v_border.w > 0.0) {
+      vec2 hh = v_border.zw * 0.5;
+      float dh = sdRound(v_local - v_border.xy, hh, min(v_pcolor.x, min(hh.x, hh.y)));
+      a *= clamp(0.5 + dh / (2.0 * aa), 0.0, 1.0);
+    }
+    o = vec4(v_fill.rgb, 1.0) * v_fill.a * a * alpha;
     return;
   }
   float inside = clamp(0.5 - d / (2.0 * aa), 0.0, 1.0);

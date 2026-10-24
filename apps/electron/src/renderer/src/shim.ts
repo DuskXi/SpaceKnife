@@ -108,6 +108,7 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
       install: async () => t("浏览器里不能安装更新：请在 {host} 上更新 SpaceKnife", { host: server }),
     },
     setLanguage: noop,
+    setTheme: noop, // the browser's own prefers-color-scheme, data-theme for a choice (lib/theme.ts)
     dialog: {
       openSnapshot: () => env.askPath({ title: t("打开快照文件"), hint: t("{host} 上的快照文件（.sks）路径", { host: server }), value: start }),
       openFile: (o) => env.askPath({ title: o.title, hint: t("{host} 上的文件路径（{types}）", { host: server, types: filters(o) }), value: start }),

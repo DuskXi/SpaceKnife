@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "116975b05ba68653";
+export const SCHEMA_HASH = "ee9f72800afa8c2e";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -228,7 +228,10 @@ export interface ClassCond {
 
 /** One class as the editor sends it; order in the list is the display (and colour) order. */
 export interface ClassEdit {
+  /** for the dark theme */
   color?: string;
+  /** for the light theme */
+  color_light?: string;
   extensions?: string[];
   /** None: a new class */
   id?: string | null;
@@ -706,9 +709,9 @@ export interface FilterAction {
 
 export interface FilterClassInfo {
   aliases: string[];
-  /** #RRGGBB chosen by the user; empty: the theme's colour for the id */
+  /** #RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a built-in id, the light choice for a class of the user's */
   color: string;
-  /** A plugin's class: its colour for a light theme */
+  /** #RRGGBB chosen by the user for the light theme (a plugin's class: its own light colour); empty: the light theme's colour for a built-in id, the dark choice for a class of the user's */
   color_light: string;
   extensions: string[];
   id: string;
@@ -1179,7 +1182,7 @@ export interface NodesBlock {
 }
 
 export interface OpItemResult {
-  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "error";
+  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "ambiguous_name" | "error";
   message: string;
   ok: boolean;
   path: string;

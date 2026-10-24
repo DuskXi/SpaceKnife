@@ -11,6 +11,7 @@ import { basketAddMany, call, editFilter, viewCall } from "@/state/actions";
 import { runShortcut } from "@/state/commands";
 import { get, toast, useApp } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { themeName } from "@/lib/theme";
 
 import { callPlugin, onPluginEvent, subscribePlugin } from "../client";
 import { ask } from "../confirm";
@@ -58,6 +59,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
     return st ? `${st.state}:${st.items}:${st.bytes_alloc}` : "";
   });
   const lang = useApp((s) => s.lang);
+  const theme = useApp((s) => s.theme);
   const [h, setH] = useState(height ?? info.height);
   const [refused, setRefused] = useState("");
   const { src, base } = useMemo(() => panelAddress(info.plugin, info.entry, { electron: inElectron(), origin: location.origin }), [info.plugin, info.entry]);
@@ -160,7 +162,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
           onReady: () => {
             setRefused("");
             b.push("lang", { lang: get().lang });
-            b.push("theme", { mode: "dark", vars: themeVars() });
+            b.push("theme", { mode: themeName(), vars: themeVars() });
             b.push("context", panelContext(ctxRef.current, info, placeRef.current));
           },
         },
@@ -179,6 +181,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
 
   useEffect(() => bridge.current?.push("context", panelContext(ctx, info, place)), [ctx, info, place]);
   useEffect(() => bridge.current?.push("lang", { lang }), [lang]);
+  useEffect(() => bridge.current?.push("theme", { mode: theme, vars: themeVars(theme) }), [theme]);
   useEffect(() => {
     if (treeMark) bridge.current?.push("tree", { scan_id: ctx.scan_id });
   }, [treeMark, ctx.scan_id]);

@@ -51,7 +51,18 @@ from .paths import protected_reason
 if TYPE_CHECKING:
     from . import _win
 
-OpCode = Literal["ok", "missing", "denied", "locked", "protected", "no_trash", "exists", "cancelled", "error"]
+OpCode = Literal[
+    "ok",
+    "missing",
+    "denied",
+    "locked",
+    "protected",
+    "no_trash",
+    "exists",
+    "cancelled",
+    "ambiguous_name",
+    "error",
+]
 ProgressFn = Callable[[int, int, "OpResult"], None]  # (items done, items in total, the one just done)
 CancelFn = Callable[[], bool]
 
@@ -84,6 +95,8 @@ TEXT = Texts(
         "not_moved": "未能移到回收站（系统没有说明原因），未做改动",
         "unsupported": "这个系统不支持移到回收站",
         "exists": "原位置已有同名项目，未覆盖",
+        "ambiguous_name": "另一项与它只差大小写，按名字会打开另一项；没有改动任何东西",
+        "trailing_name": "它或上级文件夹的名字以点或空格结尾，Windows 按路径找到的不是它；没有改动任何东西",
         "bad_ref": "不是可还原的回收站条目",
         "gone_from_trash": "回收站中已没有这一项（可能已被清空）",
         "list_sep": "、",
@@ -138,17 +151,79 @@ def _os_error(path: str, exc: OSError) -> OpResult:
 # --------------------------------------------------------------------------- checks
 
 
-def _precheck(paths: Sequence[str], check_locks: bool, own_files: bool = False) -> dict[int, OpResult]:
-    """Per index, the reason an item is skipped: gone, protected, held open (§2.5 re-check)."""
+def _final_name(path: str) -> str | None:
+    """The stored name of what ``path`` opens (Windows; scan.worker.final_name), else None."""
+    from ..scan.worker import final_name
+
+    return final_name(path)
+
+
+def reaches_another(path: str, root: str, *, root_names: dict[str, str | None] | None = None) -> bool:
+    """Whether ``path`` may open an entry other than the one its names say. The file system's
+    stored name of what it opens is compared with the scan ``root``'s own followed by the path's
+    names below it (scan.worker.task_is); where they differ, a folder on the way that holds the
+    path's name and another name equal to it but for case decides: an open by name can take the
+    other one (on WinBtrfs the name of ``a`` opens its sibling ``A``, or follows ``A`` when that is
+    a symlink; POSIX names on NTFS in a folder without the case-sensitive flag do the same).
+    Without such a pair the path still names the item: renamed in case since the scan, another
+    name of a hard link, a redirect. A folder that cannot be listed to tell counts as holding a
+    pair; nothing counts when the stored name is unknown. ``root_names``: the roots' stored names,
+    kept across the calls of one run."""
+    from ..scan.worker import _long_path, names_below, task_is
+
+    below = names_below(path, root)
+    stored = _final_name(path) if below else None
+    if not below or stored is None:
+        return False
+    cache = root_names if root_names is not None else {}
+    if root not in cache:
+        cache[root] = _final_name(root)
+    if task_is(stored, cache[root], below):
+        return False
+    for i, name in enumerate(below):
+        try:
+            entries = os.listdir(_long_path(os.path.join(root, *below[:i])))
+        except OSError:
+            return True
+        if name in entries and any(e != name and e.upper() == name.upper() for e in entries):
+            return True
+    return False
+
+
+def win32_trims(path: str) -> bool:
+    """Whether Win32 rewrites a name of ``path`` (Windows): one ending in a dot or a space loses
+    it, so the path names another item (``odd.`` becomes ``odd``) or none. The scan lists such
+    items as they are; deleting them by such a path would touch the other one."""
+    if sys.platform != "win32":
+        return False
+    rest = os.path.splitdrive(path)[1]
+    return any(
+        n.endswith((".", " ")) for n in rest.replace("/", "\\").split("\\") if n not in ("", ".", "..")
+    )
+
+
+def _precheck(
+    paths: Sequence[str], check_locks: bool, roots: Mapping[str, str], own_files: bool = False
+) -> dict[int, OpResult]:
+    """Per index, the reason an item is skipped: reached by its path only as another entry, gone,
+    protected, held open (§2.5 re-check)."""
     skipped: dict[int, OpResult] = {}
     alive: list[int] = []
+    root_names: dict[str, str | None] = {}
     for i, p in enumerate(paths):
+        if win32_trims(p):  # before lexists: that would look at the other item
+            skipped[i] = _result(p, "ambiguous_name", TEXT["trailing_name"])
+            continue
         if not os.path.lexists(p):
             skipped[i] = _result(p, "missing")
             continue
         reason = None if own_files else protected_reason(p)
         if reason is not None:
             skipped[i] = _result(p, "protected", reason)
+            continue
+        root = roots.get(p)
+        if root is not None and reaches_another(p, root, root_names=root_names):
+            skipped[i] = _result(p, "ambiguous_name")
             continue
         alive.append(i)
     if check_locks and alive:
@@ -221,18 +296,21 @@ def move_to_trash(
     cancel: CancelFn | None = None,
     sizes: Mapping[str, int] | None = None,
     check_locks: bool = True,
+    roots: Mapping[str, str] | None = None,
     own_files: bool = False,
 ) -> list[OpResult]:
     """Move each path to the trash; one result per path, in order. Never deletes anything.
 
     ``sizes``: bytes per path (keyed by the same strings) as last scanned, e.g. the basket's
     targets; folders well below the recycle bin's capacity are then not measured again.
-    ``check_locks``: skip items held open. ``own_files``: the app's own files it put there itself
-    (an installed plugin's folder, inside the app's data directory, which the protection lists
-    keep from the user's file operations); the caller checks the paths.
+    ``check_locks``: skip items held open. ``roots``: the scan root of each path (same keys); a
+    path whose names below it open an entry differing only in case is left alone
+    (``ambiguous_name``, ``reaches_another``). ``own_files``: the app's own files it put there
+    itself (an installed plugin's folder, inside the app's data directory, which the protection
+    lists keep from the user's file operations); the caller checks the paths.
     """
     run = _Run(paths, progress, cancel)
-    for i, res in _precheck(run.paths, check_locks, own_files).items():
+    for i, res in _precheck(run.paths, check_locks, roots or {}, own_files).items():
         run.set(i, res)
     todo = [i for i, r in enumerate(run.results) if r is None]
     if sys.platform == "win32":
@@ -270,11 +348,13 @@ def delete_permanently(
     progress: ProgressFn | None = None,
     cancel: CancelFn | None = None,
     check_locks: bool = True,
+    roots: Mapping[str, str] | None = None,
 ) -> list[OpResult]:
     """Delete each path for good (folders with everything inside); links are removed, never
-    followed, and other file systems mounted inside a folder are not entered."""
+    followed, and other file systems mounted inside a folder are not entered. ``roots`` as for
+    :func:`move_to_trash`."""
     run = _Run(paths, progress, cancel)
-    for i, res in _precheck(run.paths, check_locks).items():
+    for i, res in _precheck(run.paths, check_locks, roots or {}).items():
         run.set(i, res)
     for i, r in enumerate(run.results):
         if r is not None:
@@ -1103,8 +1183,10 @@ __all__ = [
     "move_to_trash",
     "parse_recycle_info",
     "parse_trashinfo",
+    "reaches_another",
     "rename_noreplace",
     "restore",
     "trash_available",
     "trash_status",
+    "win32_trims",
 ]

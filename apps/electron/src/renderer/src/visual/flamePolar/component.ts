@@ -27,6 +27,8 @@ class FlamePolarInstance implements VisualInstance<PolarFrame> {
   private overlayData: Float32Array | null = null;
   private labels: PreparedLabel[] = [];
   private centre: PreparedLabel[] = [];
+  /** the rows the overlay lights: their labels' size lines take the name's colour */
+  private lit: ReadonlySet<number> = new Set();
   private tags: TagItem[] = [];
 
   constructor(private ctx: VisualContext) {
@@ -65,6 +67,7 @@ class FlamePolarInstance implements VisualInstance<PolarFrame> {
     if (!f || !s) return;
     const o = paintOverlay(f, s, this.hovered, this.selected, this.overlayData);
     this.overlayData = o.instances;
+    this.lit = o.lit;
     this.overlay = this.renderer.upload(o.instances, o.count, this.overlay);
     const c = centreLabel(f, s, this.hovered);
     this.centre = c ? prepareLabels(this.ctx.text, [c]) : [];
@@ -81,7 +84,7 @@ class FlamePolarInstance implements VisualInstance<PolarFrame> {
     if (this.overlay) this.renderer.draw(this.overlay, xf, p.alpha);
     const text = p.alpha * (p.zoom ? Math.max(0, 1 - p.zoom.t / LABEL_FADE) : 1);
     if (text > 0) {
-      drawLabels(this.ctx.text, this.labels, text);
+      drawLabels(this.ctx.text, this.labels, text, this.lit);
       drawTags(this.ctx.text, this.tags, f.info.dpr, text);
       drawLabels(this.ctx.text, this.centre, text);
     }

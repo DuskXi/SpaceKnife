@@ -150,7 +150,8 @@ class ClassEdit(Params):
     id: str | None = Field(default=None, max_length=64, description="None: a new class")
     name: str = Field(min_length=1, max_length=64)
     extensions: list[str] = Field(default_factory=list, max_length=4096)
-    color: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$")
+    color: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$", description="for the dark theme")
+    color_light: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$", description="for the light theme")
 
 
 class ClassFolder(Payload):

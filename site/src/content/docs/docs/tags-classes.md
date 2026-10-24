@@ -137,7 +137,7 @@ The **File classes** coloring fills each file's block with the color of its clas
 
 Settings › File classes lists the classes in order. Every change is applied as soon as you leave the field: it is saved, the pictures are recolored and `:class:` filters run again.
 
-- **Color.** Click the color swatch to pick a new color.
+- **Color.** Click the color swatch to pick a new color. The light and the dark theme each have their own class colors, and you change the ones of the current theme. Tick **Also apply to the other theme** below the list to change both. Once you recolor a built-in class, a **Restore the default color** button appears next to its swatch. Colors picked before version 0.3.4, when there was only the dark theme, count for both themes.
 - **Name.** Edit the name in place. The row shows the filter that matches the class, such as `:class:Video`.
 - **Extensions.** Type them separated by `;`, commas or spaces, as in `pak; ucas`. Leading dots are dropped and case doesn't matter.
 - **Order.** Drag a row by its handle. The order decides which color an extension gets when it is in several classes. A row warns with "Already in an earlier class: …" and lists those extensions with the class that colors them.

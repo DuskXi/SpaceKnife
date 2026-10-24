@@ -2,8 +2,12 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
+    <!-- the page's background before the CSS arrives follows the system (then tokens.css, lib/theme.ts) -->
+    <meta name="color-scheme" content="light dark" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' ws://127.0.0.1:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; frame-src skplugin:" />
     <title>SpaceKnife</title>
+    <!-- the theme chosen in the settings, before the styles apply (lib/theme.ts keeps it) -->
+    <script src="/theme-boot.js"></script>
   </head>
   <body>
     <div id="root"></div>

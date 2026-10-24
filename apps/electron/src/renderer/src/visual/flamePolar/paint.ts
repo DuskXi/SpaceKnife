@@ -3,18 +3,15 @@
 // overlay that a hover rewrites on its own. Colours follow the flame graph's rules (docs/visuals.md):
 // the compare scale, then 「顶层分支」, then file colours with ring tones for folders.
 
-import { tokens } from "@design/tokens";
-
 import type { PolarGeometry } from "@/protocol/generated";
+import { palette } from "@/lib/theme";
 import { fillOf, labelColors, paletteFill, Pattern, rgba, type RGBA, type TagItem } from "@/treemap/paint";
 
-import { branchFill, CENTER, HALO_OVERLAY, ringFill } from "../colors";
+import { branchFill, center, haloOverlay, ringFill } from "../colors";
 import { DStat, Flag, Kind } from "../frame";
 import { HIT_ROOT, type Hit, type PaintSettings, type PolarFrame } from "../types";
 import { discRadius, polarGeometry, polarOf } from "./geometry";
 import { rowLabel, type LabelSpec } from "./labels";
-
-const T = tokens.treemap;
 
 /** Floats per instance. */
 export const STRIDE = 24;
@@ -103,6 +100,11 @@ export interface Painted {
   count: number;
 }
 
+export interface PolarOverlay extends Painted {
+  /** the rows lit (the halo), whose labels take their lit colours */
+  lit: Set<number>;
+}
+
 export interface PolarPaint extends Painted {
   labels: LabelSpec[];
   tags: TagItem[];
@@ -117,26 +119,27 @@ export const overlayLimit = (haloLevels: number, rings: number): number => 2 * M
 
 /** Push a row's sector; returns its opacity and label colours. */
 function pushRow(b: SectorBuilder, f: PolarFrame, g: PolarGeometry, i: number, s: PaintSettings): { alpha: number; text: string; sub: string } {
+  const T = palette().treemap;
   const kind = f.kind[i]!;
   const dim = (f.flags[i]! & Flag.DIM) !== 0;
   const dpr = f.info.dpr;
   const [t0, t1, r0, r1] = [f.a0[i]! / g.unit, f.a1[i]! / g.unit, f.r0[i]!, f.r1[i]!];
   let alpha = dim ? T.dimOpacity : 1;
   if (kind === Kind.FREE || kind === Kind.UNKNOWN || kind === Kind.PENDING) {
-    const P = kind === Kind.FREE ? T.free : kind === Kind.UNKNOWN ? T.unknown : T.pending;
+    const S = kind === Kind.FREE ? T.free : kind === Kind.UNKNOWN ? T.unknown : T.pending;
     if (dim) alpha = kind === Kind.PENDING ? T.dimOpacity : 0.55;
-    const edge = rgba(P.border);
-    b.push(t0, t1, r0, r1, rgba(P.stripeA), {
+    const edge = rgba(S.border);
+    b.push(t0, t1, r0, r1, rgba(S.stripeA), {
       border: [edge[0], edge[1], edge[2], Math.min(1, edge[3] * s.borderContrast)],
       borderWidth: Math.max(1, Math.round(dpr)),
       pattern: kind === Kind.UNKNOWN ? Pattern.STRIPES_45 : Pattern.STRIPES_135,
-      patternColor: rgba(P.stripeB),
+      patternColor: rgba(S.stripeB),
       patternSize: (kind === Kind.UNKNOWN ? 3 : kind === Kind.PENDING ? 8 : T.geometry.stripeWidth) * dpr,
       dashed: kind !== Kind.FREE,
       alpha,
       gap: g.gap,
     });
-    return { alpha, text: P.text, sub: P.sub };
+    return { alpha, text: S.text, sub: S.sub };
   }
   const fill = sectorFill(f, i, s);
   const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
@@ -153,6 +156,7 @@ function pushRow(b: SectorBuilder, f: PolarFrame, g: PolarGeometry, i: number, s
 
 /** The picture of a frame: the centre disc, then the rows in order. */
 export function paintFrame(f: PolarFrame, s: PaintSettings, reuse?: Float32Array | null): PolarPaint {
+  const T = palette().treemap;
   const g = polarOf(f);
   const b = new SectorBuilder(reuse, f.count + 1);
   const labels: LabelSpec[] = [];
@@ -169,7 +173,7 @@ export function paintFrame(f: PolarFrame, s: PaintSettings, reuse?: Float32Array
   const rd = discRadius(g);
   if (root && rd > 0) {
     const alpha = root.flags & Flag.DIM ? T.dimOpacity : 1;
-    b.push(0, 1, 0, rd, CENTER.bg, { alpha });
+    b.push(0, 1, 0, rd, center().bg, { alpha });
     if (root.tag) tagAt(HIT_ROOT, root.tag, alpha);
   }
 
@@ -192,10 +196,13 @@ export function paintFrame(f: PolarFrame, s: PaintSettings, reuse?: Float32Array
 /** The overlay: the halo over the ancestors of the hovered and the selected row (the centre disc
  * too); the selection's shadow with the row drawn again above it; the hover outline; the
  * selection's double ring on top. */
-export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, selected: number, reuse?: Float32Array | null): Painted {
+export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, selected: number, reuse?: Float32Array | null): PolarOverlay {
+  const P = palette();
+  const T = P.treemap;
+  const HALO = haloOverlay();
   const g = polarOf(f);
   const b = new SectorBuilder(reuse, overlayLimit(s.haloLevels, g?.rings ?? 0));
-  if (!g) return { instances: b.data, count: 0 };
+  if (!g) return { instances: b.data, count: 0, lit: new Set() };
   const dpr = f.info.dpr;
   const gap = g.gap;
   const rd = discRadius(g);
@@ -230,15 +237,15 @@ export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, sele
       }
     if (picked) litDisc = true;
   } else if (picked) light(selected);
-  if (litDisc && disc) b.push(0, 1, 0, rd, HALO_OVERLAY, { alpha: dimmed(f.info.root!.flags) });
-  for (const i of [...lit].sort((p, q) => p - q)) b.push(...row(i), HALO_OVERLAY, { gap, alpha: dimmed(f.flags[i]!) });
+  if (litDisc && disc) b.push(0, 1, 0, rd, HALO, { alpha: dimmed(f.info.root!.flags) });
+  for (const i of [...lit].sort((p, q) => p - q)) b.push(...row(i), HALO, { gap, alpha: dimmed(f.flags[i]!) });
 
   // the selection's shadow falls around it, not on it: the row goes again on top (UI-W7-31)
   const r = Math.round(T.geometry.selectRingWidth * dpr);
   if (picked && s.selectionShadow) {
-    b.push(...row(selected), [0, 0, 0, 0.65], { pattern: Pattern.SHADOW, patternSize: 32 * dpr, gap, inset: -2 * r });
+    b.push(...row(selected), rgba(P.treemap.state.selectShadow), { pattern: Pattern.SHADOW, patternSize: 32 * dpr, gap, inset: -2 * r });
     pushRow(b, f, g, selected, s);
-    if (lit.has(selected)) b.push(...row(selected), HALO_OVERLAY, { gap, alpha: dimmed(f.flags[selected]!) });
+    if (lit.has(selected)) b.push(...row(selected), HALO, { gap, alpha: dimmed(f.flags[selected]!) });
   }
 
   // hover: a white inset (UI-TM-28)
@@ -253,6 +260,6 @@ export function paintOverlay(f: PolarFrame, s: PaintSettings, hovered: Hit, sele
     b.push(...row(selected), NONE, { border: rgba(T.state.selectOuter), borderWidth: r, gap, inset: -2 * r });
     b.push(...row(selected), NONE, { border: rgba(T.state.selectRing), borderWidth: r, gap, inset: -r });
   }
-  return { instances: b.data, count: b.n };
+  return { instances: b.data, count: b.n, lit };
 }
 

@@ -254,11 +254,16 @@ async function sdkFile(name: string): Promise<string> {
 }
 
 describe("the panel SDK", () => {
-  it("base.css starts with the theme the bridge sends", async () => {
+  it("base.css starts with the theme the bridge sends, dark and light", async () => {
     const css = await sdkFile("base.css");
-    for (const [name, value] of Object.entries(themeVars())) {
-      const m = new RegExp(`${name}:\\s*([^;]+);`).exec(css);
-      expect(m?.[1]?.trim(), name).toBe(value);
+    const at = css.indexOf(':root[data-sk-theme="light"]');
+    expect(at).toBeGreaterThan(0);
+    for (const [theme, block] of [["dark", css.slice(0, at)], ["light", css.slice(at)]] as const) {
+      for (const [name, value] of Object.entries(themeVars(theme))) {
+        if (theme === "light" && (name === "--sk-font" || name === "--sk-mono")) continue; // the same in both
+        const m = new RegExp(`${name}:\\s*([^;]+);`).exec(block);
+        expect(m?.[1]?.trim(), `${theme} ${name}`).toBe(value);
+      }
     }
   });
 

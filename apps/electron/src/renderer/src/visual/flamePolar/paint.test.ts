@@ -2,13 +2,14 @@
 // overlay (halo, hover, selection) within its limit, labels only from label bits; and the sector
 // program's attribute layout, which has to match the instances (the shaders do not run under node).
 
-import { tokens } from "@design/tokens";
+import { themes, tokens } from "@design/tokens";
 import { describe, expect, it } from "vitest";
 
+import { applyTheme } from "@/lib/theme";
 import type { PolarGeometry } from "@/protocol/generated";
 import { fillOf, Pattern, rgba, type RGBA } from "@/treemap/paint";
 
-import { branchFill, CENTER, HALO_OVERLAY, ringFill } from "../colors";
+import { branchFill, center, haloOverlay, ringFill } from "../colors";
 import { DStat, Flag, Kind, Label } from "../frame";
 import { polarScene, SCENE_TREE, type SceneNode } from "../testing/fixtures";
 import { HIT_NONE, HIT_ROOT, type PaintSettings, type PolarFrame } from "../types";
@@ -92,7 +93,7 @@ describe("paintFrame", () => {
     const p = paintFrame(f, S);
     expect(p.count).toBe(f.count + 1);
     expect(inst(p, 0).sector).toEqual([0, 1, 0, discRadius(g)]);
-    expect(inst(p, 0).fill).toEqual(f32(CENTER.bg));
+    expect(inst(p, 0).fill).toEqual(f32(center().bg));
     for (let i = 0; i < f.count; i++) {
       const s = rowInst(p, i).sector;
       expect(s).toEqual(f32([f.a0[i]! / g.unit, f.a1[i]! / g.unit, f.r0[i]!, f.r1[i]!]));
@@ -211,7 +212,7 @@ describe("paintOverlay", () => {
     // disc, sub, docs, then the hover inset
     expect(o.count).toBe(4);
     expect(inst(o, 0).sector).toEqual([0, 1, 0, discRadius(g)]);
-    expect(inst(o, 0).fill).toEqual(f32(HALO_OVERLAY));
+    expect(inst(o, 0).fill).toEqual(f32(haloOverlay()));
     expect([inst(o, 1).sector, inst(o, 2).sector]).toEqual([f.rowOf(3), f.rowOf(5)].map((i) => f32([f.a0[i]! / g.unit, f.a1[i]! / g.unit, f.r0[i]!, f.r1[i]!])));
     expect(inst(o, 3).border).toEqual(f32(rgba(T.state.hoverInset)));
     expect(inst(o, 3).shape[0]).toBe(1);
@@ -219,8 +220,11 @@ describe("paintOverlay", () => {
     expect(paintOverlay(f, { ...S, haloLevels: 1, hoverHighlight: false }, pdf, -1).count).toBe(1);
     // the selection: its parent is the disc
     const sel = paintOverlay(f, { ...S, hoverHighlight: false }, HIT_NONE, selected);
-    expect(inst(sel, 0).fill).toEqual(f32(HALO_OVERLAY));
+    expect(inst(sel, 0).fill).toEqual(f32(haloOverlay()));
     expect(inst(sel, 0).sector[1]).toBe(1);
+    // the rows lit, for the labels' lit colours
+    expect([...o.lit].sort()).toEqual([f.rowOf(3), f.rowOf(5)].sort());
+    expect(sel.lit.size).toBe(0);
   });
 
   it("lifts the selection above its shadow and rings it, grown outward", () => {
@@ -235,6 +239,21 @@ describe("paintOverlay", () => {
     expect(inst(o, 3).border).toEqual(f32(rgba(T.state.selectRing)));
     const flat = paintOverlay(f, { ...S, haloLevels: 0, selectionShadow: false }, HIT_NONE, selected);
     expect([flat.count, inst(flat, 0).extra[2]]).toEqual([2, -2 * r]);
+  });
+
+  it("paints the disc, the halo, the inset and the shadow in the theme on screen", () => {
+    try {
+      applyTheme("light");
+      const L = themes.light;
+      expect(inst(paintFrame(f, S), 0).fill).toEqual(f32(rgba(L.visual.center.bg)));
+      const o = paintOverlay(f, { ...S, selectionShadow: false }, pdf, -1);
+      expect(inst(o, 0).fill).toEqual(f32(rgba(L.visual.haloOverlay)));
+      expect(inst(o, 3).border).toEqual(f32(rgba(L.treemap.state.hoverInset)));
+      expect(inst(paintOverlay(f, { ...S, haloLevels: 0 }, HIT_NONE, selected), 0).fill).toEqual(f32(rgba(L.treemap.state.selectShadow)));
+    } finally {
+      applyTheme("dark");
+    }
+    expect(inst(paintFrame(f, S), 0).fill).toEqual(f32(rgba(themes.dark.visual.center.bg)));
   });
 
   it("outlines the disc when it is hovered", () => {

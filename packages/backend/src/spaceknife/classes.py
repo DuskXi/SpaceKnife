@@ -305,7 +305,14 @@ def build(edits: list[ClassEdit]) -> ClassTable:
             owner = taken.get(spelling.casefold())
             if owner is not None and owner != cid:
                 raise ValueError(TEXT["dup_name"].format(name=spelling, other=_display(out, owner)))
-        info = FilterClassInfo(id=cid, name=name, aliases=aliases, extensions=exts, color=e.color.upper())
+        info = FilterClassInfo(
+            id=cid,
+            name=name,
+            aliases=aliases,
+            extensions=exts,
+            color=e.color.upper(),
+            color_light=e.color_light.upper(),
+        )
         for spelling in (cid, name, *aliases):
             taken[spelling.casefold()] = cid
         if cid == OTHER:
@@ -335,11 +342,29 @@ def _new_id(name: str, used: set[str]) -> str:
 # --------------------------------------------------------------------------- the file
 
 
+# classes.json: version 2 has a colour per theme (``color`` dark, ``color_light`` light; W7 待定 22).
+# A version 1 file was written when there was only the dark theme: its colours are the user's for
+# both themes, so they do not fall back to the light theme's own after the upgrade. The version
+# decides, not whether ``color_light`` is there or empty: "" is the theme's colour in version 2.
+FILE_VERSION = 2
+
+
+def colors_for_both(raw: object) -> object:
+    """A class written before themes (classes.json version 1, a settings export without
+    ``color_light``), with its colour for both themes."""
+    if isinstance(raw, dict) and "color" in raw:
+        return {**raw, "color_light": raw["color"]}
+    return raw
+
+
 def load(path: Path) -> ClassTable:
     """The table saved in ``path``; the built-in one when there is none or it is broken."""
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        classes = tuple(FilterClassInfo.model_validate(c) for c in raw["classes"])
+        items = raw["classes"]
+        if int(raw.get("version", 1)) < 2:
+            items = [colors_for_both(c) for c in items]
+        classes = tuple(FilterClassInfo.model_validate(c) for c in items)
         return ClassTable(classes)
     except FileNotFoundError:
         return DEFAULT_CLASSES
@@ -367,7 +392,7 @@ def save(table: ClassTable, path: Path) -> None:
         path.unlink(missing_ok=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    doc = {"version": 1, "classes": [c.model_dump(mode="json") for c in table.classes]}
+    doc = {"version": FILE_VERSION, "classes": [c.model_dump(mode="json") for c in table.classes]}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(path)

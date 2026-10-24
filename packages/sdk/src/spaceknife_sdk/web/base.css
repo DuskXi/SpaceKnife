@@ -1,7 +1,8 @@
 /* SpaceKnife web panel base style (docs/plugin-dev.md 「Web 面板」): link it with
    <link rel="stylesheet" href="./_sk/base.css"> and the panel looks like the app. The variables are
-   the app's design tokens; the app sends their current values when the panel connects (these are
-   the same values, for the first paint and the bridge's mock mode). */
+   the app's design tokens; the app sends the values of the theme on screen when the panel connects
+   and again when the theme changes (these are the same values, for the first paint and the
+   bridge's mock mode: dark below, light under data-sk-theme="light"). */
 :root {
   --sk-bg: #0E1013;
   --sk-bg-raised: #14161B;
@@ -21,6 +22,23 @@
   --sk-mono: "Geist Mono", "Geist Mono Variable", ui-monospace, "Cascadia Mono", monospace;
   --sk-radius: 6px;
   color-scheme: dark;
+}
+:root[data-sk-theme="light"] {
+  --sk-bg: #F4F6FA;
+  --sk-bg-raised: #FFFFFF;
+  --sk-bg-hover: #DFE1E5;
+  --sk-text: #161920;
+  --sk-muted: #444954;
+  --sk-subtle: #575C68;
+  --sk-disabled: #9B9EA6;
+  --sk-accent: #424AC6;
+  --sk-on-accent: #FFFFFF;
+  --sk-border: #DEE0E4;
+  --sk-border-strong: #CDD0D7;
+  --sk-ok: #006D3D;
+  --sk-warn: #845D00;
+  --sk-danger: #A9212C;
+  color-scheme: light;
 }
 *, *::before, *::after { box-sizing: border-box; }
 [hidden] { display: none !important; }

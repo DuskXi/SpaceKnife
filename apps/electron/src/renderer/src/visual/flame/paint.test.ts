@@ -1,13 +1,14 @@
 // flame.v1 paint: instances per row and overlay, the colour rules, stripes and dots, labels only
 // where the backend set label bits, the root bar, the selection and the halo, the zoom transform.
 
-import { tokens } from "@design/tokens";
+import { themes, tokens } from "@design/tokens";
 import { describe, expect, it } from "vitest";
 
+import { applyTheme } from "@/lib/theme";
 import { fillOf, Pattern, type RGBA, rgba, STRIDE } from "@/treemap/paint";
 import type { PreparedText } from "@/treemap/text";
 
-import { branchFill, CENTER, HALO_OVERLAY, ringFill } from "../colors";
+import { branchFill, center, haloOverlay, ringFill } from "../colors";
 import { DStat, Flag, Kind, Label } from "../frame";
 import { FREE_KEY, rectScene, SCENE_TREE, type SceneNode, SMALL_KEY } from "../testing/fixtures";
 import { HIT_NONE, HIT_ROOT, type PaintSettings, type RectFrame } from "../types";
@@ -44,8 +45,8 @@ const expectRGBA = (actual: ArrayLike<number>, expected: RGBA) => {
   for (let k = 0; k < 4; k++) expect(actual[k]).toBeCloseTo(expected[k]!, 5);
 };
 const lighten = (c: RGBA): RGBA => {
-  const a = HALO_OVERLAY[3];
-  return [0, 1, 2].map((i) => HALO_OVERLAY[i]! * a + c[i]! * (1 - a)).concat(a + c[3] * (1 - a)) as RGBA;
+  const a = haloOverlay()[3];
+  return [0, 1, 2].map((i) => haloOverlay()[i]! * a + c[i]! * (1 - a)).concat(a + c[3] * (1 - a)) as RGBA;
 };
 
 /** A scene tree with the zoom root's children replaced. */
@@ -235,7 +236,7 @@ describe("paintFlame labels", () => {
   it("names the root bar by the last crumb, in bold, with its size", () => {
     const { frame: f } = rectScene({ layout: "flame.v1", info: { breadcrumb: [{ key: 0, label: "C:\\" }, { key: 1, label: "C:\\Users\\lenny" }] } });
     const root = paintFlame(f, settings()).texts[0]!;
-    expect([root.text, root.sub?.text, root.color, root.sub?.color]).toEqual(["lenny", "1000 B", CENTER.text, CENTER.sub]);
+    expect([root.text, root.sub?.text, root.color, root.sub?.color]).toEqual(["lenny", "1000 B", center().text, center().sub]);
     expect(root.font.startsWith("700 ")).toBe(true);
     expect(root.y).toBeCloseTo(169 + 31 / 2 + 11 * 0.36, 5);
     const small = rectScene({ layout: "flame.v1", info: { breadcrumb: [{ key: 1, label: "C:\\" }, { key: SMALL_KEY, label: "small:42" }] } }).frame;
@@ -275,6 +276,29 @@ describe("selection, halo and hover", () => {
   const sel = f.rowOf(2); // a.mp4, depth 1, selected
   const deep = f.rowOf(6); // x.pdf under sub / docs
 
+  it("writes a lit row's size line in its name's colour (the halo takes the lighter ink's spare contrast)", () => {
+    const sized = (c: SceneNode): SceneNode => ({ ...c, flags: (c.flags ?? 0) & ~Flag.SELECTED, label: Label.NAME | Label.SIZE, children: c.children?.map(sized) });
+    const scene = rectScene({ layout: "flame.v1", tree: treeOf(SCENE_TREE.children!.map(sized)), info: { selected_row: 4 } });
+    const g = scene.frame;
+    g.flags[4]! |= Flag.SELECTED; // x.pdf: sub and docs are lit
+    expect(g.key[4]).toBe(6);
+    const lines = (p: { texts: { text: string; color: string }[] }, name: string, size: string) => {
+      const k = p.texts.findIndex((t) => t.text === name);
+      expect(p.texts[k + 1]!.text).toBe(size);
+      return [p.texts[k]!.color, p.texts[k + 1]!.color];
+    };
+    const lit = paintFlame(g, settings());
+    const [name, sizeLine] = lines(lit, "docs", "100 B");
+    expect(sizeLine).toBe(name);
+    // unlit, the size line keeps its own colour
+    const [name0, sizeLine0] = lines(paintFlame(g, settings({ haloLevels: 0 })), "docs", "100 B");
+    expect(name0).toBe(name);
+    expect(sizeLine0).not.toBe(name0);
+    // a row the halo does not reach keeps it too
+    const [a, b] = lines(lit, "a.mp4", "400 B");
+    expect(b).not.toBe(a);
+  });
+
   it("finds the selection by FrameInfo.selected_row", () => {
     expect(selectedOf(f)).toBe(sel);
     expect(selectedOf(rectScene({ layout: "flame.v1", info: { selected_row: null } }).frame)).toBe(-1);
@@ -292,8 +316,8 @@ describe("selection, halo and hover", () => {
   });
 
   it("lights the selection's ancestors in the picture: here only the root bar", () => {
-    expectRGBA(slot(paintFlame(f, settings()), 0).subarray(4, 8), lighten(CENTER.bg));
-    expectRGBA(slot(paintFlame(f, settings({ haloLevels: 0 })), 0).subarray(4, 8), CENTER.bg);
+    expectRGBA(slot(paintFlame(f, settings()), 0).subarray(4, 8), lighten(center().bg));
+    expectRGBA(slot(paintFlame(f, settings({ haloLevels: 0 })), 0).subarray(4, 8), center().bg);
     const under = rectScene({ layout: "flame.v1", tree: treeOf(SCENE_TREE.children!.map((c) => ({ ...c, flags: c.key === 2 ? 0 : c.flags }))), info: { selected_row: 4 } });
     under.frame.flags[4]! |= Flag.SELECTED;
     const p = paintFlame(under.frame, settings());
@@ -309,7 +333,7 @@ describe("selection, halo and hover", () => {
     expect(p.count).toBe(2 + SELECTION_INSTANCES + 1);
     const docs = f.rowOf(5);
     expect(Array.from(slot(p, 0).subarray(0, 4))).toEqual([f.x[docs], f.y[docs], f.w[docs], f.h[docs]]);
-    expectRGBA(slot(p, 0).subarray(4, 8), HALO_OVERLAY);
+    expectRGBA(slot(p, 0).subarray(4, 8), haloOverlay());
     expect(slot(p, 2)[19]).toBe(Pattern.SHADOW);
     expect(Array.from(slot(p, 3))).toEqual(Array.from(bar(paintFlame(f, s), sel)));
     const inset = slot(p, 4);
@@ -322,12 +346,28 @@ describe("selection, halo and hover", () => {
     expectRGBA(slot(p, p.count - 2).subarray(8, 12), rgba(T.state.selectOuter));
   });
 
+  it("paints the root bar, the halo, the inset and the shadow in the theme on screen", () => {
+    try {
+      applyTheme("light");
+      const L = themes.light;
+      expect(center().bg).toEqual(rgba(L.treemap.level[0].headerBg));
+      expectRGBA(slot(paintFlame(f, settings({ haloLevels: 0 })), 0).subarray(4, 8), rgba(L.visual.center.bg));
+      const p = paintFlameOverlay(f, settings(), deep);
+      expectRGBA(slot(p, 0).subarray(4, 8), rgba(L.visual.haloOverlay));
+      expectRGBA(slot(p, 2).subarray(4, 8), rgba(L.treemap.state.selectShadow));
+      expectRGBA(slot(p, 4).subarray(8, 12), rgba(L.treemap.state.hoverInset));
+    } finally {
+      applyTheme("dark");
+    }
+    expectRGBA(slot(paintFlameOverlay(f, settings(), deep), 2).subarray(4, 8), rgba(themes.dark.treemap.state.selectShadow));
+  });
+
   it("lights the root bar for a hover when the selection does not", () => {
     const quiet = rectScene({ layout: "flame.v1", info: { selected_row: null } }).frame;
     const p = paintFlameOverlay(quiet, settings(), quiet.rowOf(4)); // 中文.txt under sub: sub and the root
     expect(p.count).toBe(3);
     expect(Array.from(slot(p, 1).subarray(0, 4))).toEqual([0, 169, 400, 31]);
-    expectRGBA(slot(p, 1).subarray(4, 8), HALO_OVERLAY);
+    expectRGBA(slot(p, 1).subarray(4, 8), haloOverlay());
   });
 
   it("insets the root bar on hover, and nothing with hover highlight off", () => {

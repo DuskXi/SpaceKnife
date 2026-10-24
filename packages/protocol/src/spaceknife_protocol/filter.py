@@ -240,10 +240,20 @@ class FilterClassInfo(Payload):
     aliases: list[str]
     extensions: list[str]
     color: str = Field(
-        default="", description="#RRGGBB chosen by the user; empty: the theme's colour for the id"
+        default="",
+        description=(
+            "#RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a "
+            "built-in id, the light choice for a class of the user's"
+        ),
+    )
+    color_light: str = Field(
+        default="",
+        description=(
+            "#RRGGBB chosen by the user for the light theme (a plugin's class: its own light colour); "
+            "empty: the light theme's colour for a built-in id, the dark choice for a class of the user's"
+        ),
     )
     name_en: str = Field(default="", description="A plugin's class: its English name (shown in English)")
-    color_light: str = Field(default="", description="A plugin's class: its colour for a light theme")
 
 
 class FilterSetInfo(Payload):

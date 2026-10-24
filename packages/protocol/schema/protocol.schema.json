@@ -1097,8 +1097,16 @@
       "properties": {
         "color": {
           "default": "",
+          "description": "for the dark theme",
           "pattern": "^(#[0-9A-Fa-f]{6})?$",
           "title": "Color",
+          "type": "string"
+        },
+        "color_light": {
+          "default": "",
+          "description": "for the light theme",
+          "pattern": "^(#[0-9A-Fa-f]{6})?$",
+          "title": "Color Light",
           "type": "string"
         },
         "extensions": {
@@ -3209,13 +3217,13 @@
         },
         "color": {
           "default": "",
-          "description": "#RRGGBB chosen by the user; empty: the theme's colour for the id",
+          "description": "#RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a built-in id, the light choice for a class of the user's",
           "title": "Color",
           "type": "string"
         },
         "color_light": {
           "default": "",
-          "description": "A plugin's class: its colour for a light theme",
+          "description": "#RRGGBB chosen by the user for the light theme (a plugin's class: its own light colour); empty: the light theme's colour for a built-in id, the dark choice for a class of the user's",
           "title": "Color Light",
           "type": "string"
         },
@@ -5441,6 +5449,7 @@
             "no_trash",
             "exists",
             "cancelled",
+            "ambiguous_name",
             "error"
           ],
           "title": "Code",

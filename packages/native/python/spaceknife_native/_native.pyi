@@ -46,6 +46,13 @@ class RootOpts(TypedDict, total=False):
     cluster_size: int
     resident_max: int
     cross_mounts: bool
+    skip: Sequence[str]
+    protect: Sequence[str]
+    path: str  # the scan root as given: tasks are checked by their names below it
+    verify_names: bool  # Windows: check every task by its stored names (Btrfs roots always are)
+
+ROOT_KEYS: tuple[str, ...]  # the RootOpts keys this build accepts
+OPT_KEYS: tuple[str, ...]  # the option keys of scan_slice this build accepts
 
 class SliceOpts(TypedDict, total=False):
     roots: Sequence[RootOpts]
@@ -54,6 +61,14 @@ class SliceOpts(TypedDict, total=False):
     threads: int  # 0: min(logical CPUs, 16)
     keep_access_time: bool  # Windows and Linux, default True: listing a folder keeps its last access time
     relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
+    skip_final: bool  # Windows, default False: no last query if the buffer had room (local NTFS, ReFS, Btrfs)
+    dot_check: bool  # Windows, default False: relative opens checked by their listing's "." entry
+    keep_where_updated: bool  # Windows, default True: keep_access_time only where access times are updated
+    # test seams (docs/native.md 2.2), not part of the interface
+    _verify_final: bool
+    _fold_strict: bool
+    _extd_self_ids: bool
+    _pinned_cap: int | None
 
 class LinkSet:
     """The (dev, ino) of hard-linked files already counted during a scan (Scanner._fold)."""
@@ -74,6 +89,40 @@ class LinkSet:
 
 def _open_stats(reset: bool = False) -> dict[str, int]:
     """How directories were opened (Windows; empty on POSIX), process-wide since the last reset."""
+
+class SliceFold:
+    """NodeStore.ingest_slices in three steps (docs/native.md 2.3): checks, rows without the GIL,
+    then what readers see."""
+
+    def __init__(
+        self,
+        parts: list[
+            tuple[
+                np.ndarray[Any, np.dtype[np.int64]],  # refs, flattened
+                np.ndarray[Any, np.dtype[np.int64]],  # bounds
+                np.ndarray[Any, np.dtype[np.uint8]],  # name bytes
+                np.ndarray[Any, np.dtype[np.uint16]],  # name lengths
+                dict[str, np.ndarray],  # ENTRY_COLUMNS in the store's types
+                np.ndarray[Any, np.dtype[np.uint16]] | None,  # ext ids
+            ]
+        ],
+        n: int,
+        kind: np.ndarray,
+        flags: np.ndarray,
+        child_count: np.ndarray,
+        depth: np.ndarray,
+    ) -> None:
+        """Raises ValueError as NodeStore.ingest_slice does (nothing written then)."""
+    @property
+    def rows(self) -> int: ...
+    @property
+    def name_bytes(self) -> int: ...
+    @property
+    def listings(self) -> int: ...
+    def write(self, cols: dict[str, np.ndarray], chunk: np.ndarray, pos: int, base: int) -> None:
+        """The new rows and their names (``chunk[pos:pos + name_bytes]`` at offset ``base``), GIL released."""
+    def publish(self, store: Any) -> list[np.ndarray]:
+        """PENDING, version, row count, child ranges, totals; each part's listing starts (-1: skipped)."""
 
 def scan_slice(tasks: list[tuple[tuple[int, int, int], str, int]], opts: SliceOpts | Any) -> dict[str, Any]:
     """Same fields as spaceknife.scan.worker.SliceResult (numpy arrays, bytes, lists).

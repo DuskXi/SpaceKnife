@@ -1,7 +1,8 @@
 // 「设置 › 文件类别」 (UI-W7-33): add, rename, recolour, reorder and delete file classes. Every change
 // is sent at once (classes.update); the backend validates, saves, recolours the treemaps and re-runs
-// :class: filters, and the parser vocabulary follows (classes.changed). Below, the folders the user
-// classed by hand (UI-W7-38, added from the map's menu 「归类」), each one removable.
+// :class: filters, and the parser vocabulary follows (classes.changed). A colour is the theme on
+// screen's (W7 待定 22): each theme keeps its own, 「同时应用到另一主题」 sets both. Below, the folders
+// the user classed by hand (UI-W7-38, added from the map's menu 「归类」), each one removable.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -9,8 +10,9 @@ import type { ClassesState, FilterClassInfo } from "@/protocol/generated";
 import { RpcError } from "@/protocol/rpc";
 import { call } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
-import { classHex } from "@/lib/classes";
+import { colorOf, themeColor, userColor } from "@/lib/classes";
 import { byLang, t } from "@/lib/i18n";
+import { themeName } from "@/lib/theme";
 import { Icon } from "@/ui/Icon";
 
 interface Row {
@@ -18,9 +20,13 @@ interface Row {
   id: string | null;
   name: string;
   exts: string;
+  /** the user's colours for the dark and the light theme, "" for the theme's */
   color: string;
+  color_light: string;
 }
 
+// a new class's colour, the same in both themes (dark text on each, ≥ 5.9:1 in either; they stand
+// apart from the built-in classes in both)
 const NEW_COLORS = ["#5EC8B8", "#D4FF3A", "#F2A65A", "#C77DFF", "#FF6B8A", "#4CC9F0"];
 let nextKey = 1;
 
@@ -36,7 +42,9 @@ const folderNote = (id: string | null): string | null =>
           ? t("另外，系统卷信息和 NTFS 元数据算这一类；已安装的软件和应用数据（Program Files、AppData 等）里没有类别的文件也算")
           : null;
 
-const toRow = (c: FilterClassInfo): Row => ({ key: c.id, id: c.id, name: c.name, exts: c.extensions.join("; "), color: c.color });
+const toRow = (c: FilterClassInfo): Row => ({ key: c.id, id: c.id, name: c.name, exts: c.extensions.join("; "), color: c.color, color_light: c.color_light });
+/** The row's colour field for the theme on screen. */
+const field = (): "color" | "color_light" => (themeName() === "light" ? "color_light" : "color");
 const splitExts = (text: string) =>
   text
     .split(/[;,\s]+/)
@@ -46,7 +54,10 @@ const splitExts = (text: string) =>
 export function ClassesEditor() {
   const vocab = useApp((s) => s.vocab);
   const lang = useApp((s) => s.lang); // the duplicate notes are in the interface language
+  const theme = useApp((s) => s.theme); // the colours shown and changed are this theme's
   const [state, setState] = useState<ClassesState | null>(null);
+  // 「同时应用到另一主题」: a colour picked (or reset) goes to both themes
+  const [both, setBoth] = useState(false);
   const [rows, setRows] = useState<Row[]>([]);
   const [confirm, setConfirm] = useState<string | null>(null); // row key, or "reset"
   const drag = useRef<string | null>(null);
@@ -81,7 +92,7 @@ export function ClassesEditor() {
     setRows(next);
     try {
       const st = await call("classes.update", {
-        classes: next.map((r) => ({ id: r.id, name: r.name.trim(), extensions: r.id === "other" ? [] : [r.exts], color: r.color })),
+        classes: next.map((r) => ({ id: r.id, name: r.name.trim(), extensions: r.id === "other" ? [] : [r.exts], color: r.color, color_light: r.color_light })),
       });
       setState(st);
       // new classes got their ids: keep the rows' keys, take the ids
@@ -96,12 +107,17 @@ export function ClassesEditor() {
   const changed = (key: string) => {
     const r = rows.find((x) => x.key === key);
     const before = state?.classes.find((c) => c.id === r?.id);
-    if (!r || (before && before.name === r.name.trim() && before.extensions.join("; ") === splitExts(r.exts).join("; ") && before.color === r.color)) return;
+    if (
+      !r ||
+      (before && before.name === r.name.trim() && before.extensions.join("; ") === splitExts(r.exts).join("; ") && before.color === r.color && before.color_light === r.color_light)
+    )
+      return;
     void commit(rows.map((x) => (x.key === key ? { ...x, exts: splitExts(x.exts).join("; ") } : x)));
   };
   const add = () => {
     const n = rows.length;
-    const row: Row = { key: `new-${nextKey++}`, id: null, name: t("新类别 {n}", { n }), exts: "", color: NEW_COLORS[n % NEW_COLORS.length]! };
+    const seed = NEW_COLORS[n % NEW_COLORS.length]!;
+    const row: Row = { key: `new-${nextKey++}`, id: null, name: t("新类别 {n}", { n }), exts: "", color: seed, color_light: seed };
     const other = rows.findIndex((r) => r.id === "other");
     const next = [...rows];
     next.splice(other < 0 ? next.length : other, 0, row);
@@ -118,6 +134,8 @@ export function ClassesEditor() {
     if (other >= 0 && other !== next.length - 1) next.push(next.splice(other, 1)[0]!);
     void commit(next);
   };
+  /** The colour fields a pick or a reset changes: the theme on screen's, or both. */
+  const recolor = (hex: string): Partial<Row> => (both ? { color: hex, color_light: hex } : { [field()]: hex });
 
   return (
     <section className="set-group" aria-label={t("文件类别")}>
@@ -128,7 +146,10 @@ export function ClassesEditor() {
       <div className="set-card classes-card" role="list">
         {rows.map((r) => {
           const other = r.id === "other";
-          const hex = r.color || classHex(vocab, r.id ?? "other");
+          const id = r.id ?? "other";
+          const hex = colorOf({ id, color: r.color, color_light: r.color_light });
+          // a built-in class's own colour in this theme can go back to the theme's
+          const resettable = !!r.id && !!themeColor(id) && !!userColor({ id, color: r.color, color_light: r.color_light }, theme);
           return (
             <div
               key={r.key}
@@ -156,7 +177,7 @@ export function ClassesEditor() {
                   type="color"
                   value={hex.slice(0, 7)}
                   aria-label={t("{name} 的颜色", { name: r.name })}
-                  onChange={(e) => patch(r.key, { color: e.target.value.toUpperCase() })}
+                  onChange={(e) => patch(r.key, recolor(e.target.value.toUpperCase()))}
                   onBlur={() => changed(r.key)}
                 />
               </label>
@@ -184,6 +205,15 @@ export function ClassesEditor() {
                 {folderNote(r.id) && <div className="muted small class-note">{folderNote(r.id)}</div>}
               </div>
               <span className="muted small mono class-filter">:class:{r.name.trim()}</span>
+              {/* with the row's other action, in a slot every row has: the names stay where they were, and a row
+                  with the button does not shift */}
+              <span className="class-reset">
+                {resettable && (
+                  <button className="icon-btn tiny" title={t("恢复默认颜色")} aria-label={t("恢复 {name} 的默认颜色", { name: r.name })} onClick={() => void commit(rows.map((x) => (x.key === r.key ? { ...x, ...recolor("") } : x)))}>
+                    <Icon name="refresh" size={12} />
+                  </button>
+                )}
+              </span>
               {!other &&
                 (confirm === r.key ? (
                   <span className="class-confirm">
@@ -235,6 +265,10 @@ export function ClassesEditor() {
               {t("恢复默认类别")}
             </button>
           ))}
+        <label className="export-check small class-both" title={theme === "light" ? t("改的颜色也用在深色主题里") : t("改的颜色也用在浅色主题里")}>
+          <input type="checkbox" checked={both} onChange={(e) => setBoth(e.target.checked)} />
+          {t("同时应用到另一主题")}
+        </label>
       </div>
       <div className="set-group-head">
         <h2>{t("按文件夹归类")}</h2>
@@ -250,7 +284,7 @@ export function ClassesEditor() {
                 {f.path}
               </span>
               <span className="class-folder-class">
-                {cls && <span className="swatch" style={{ background: cls.color || classHex(vocab, cls.id) }} />}
+                {cls && <span className="swatch" style={{ background: colorOf(cls) }} />}
                 {cls ? cls.name : t("只按扩展名")}
               </span>
               <button

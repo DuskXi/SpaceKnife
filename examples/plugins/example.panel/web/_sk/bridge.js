@@ -25,6 +25,7 @@ const stateValues = new Map();
 const subs = new Map();
 const contextHandlers = new Set();
 const langHandlers = new Set();
+const themeHandlers = new Set();
 const treeHandlers = new Set();
 let gotContext = false;
 const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {} };
@@ -38,7 +39,10 @@ function applyTheme(theme) {
   info.theme = theme;
   const vars = theme && theme.vars ? theme.vars : {};
   for (const [k, v] of Object.entries(vars)) if (k.startsWith("--sk-")) document.documentElement.style.setProperty(k, String(v));
-  document.documentElement.dataset.skTheme = (theme && theme.mode) || "dark";
+  const mode = theme && theme.mode === "light" ? "light" : "dark";
+  document.documentElement.dataset.skTheme = mode;
+  document.documentElement.style.colorScheme = mode;
+  for (const cb of themeHandlers) cb(mode);
 }
 
 function applyLang(lang) {
@@ -176,7 +180,7 @@ if (mockFile) {
       info.context = mock.context || {};
       gotContext = true;
       for (const [name, value] of Object.entries(mock.states || {})) stateValues.set(name, value);
-      applyTheme({ mode: "dark", vars: {} });
+      applyTheme({ mode: mock.theme === "light" ? "light" : "dark", vars: {} }); // "theme": "light" in the fixtures
       maybeReady();
       for (const [name, list] of Object.entries(mock.events || {})) {
         (list || []).forEach((payload, i) => setTimeout(() => (eventHandlers.get(name) || []).forEach((cb) => cb(payload)), 200 * (i + 1)));
@@ -253,6 +257,12 @@ const sk = {
   onLang(cb) {
     langHandlers.add(cb);
     return () => langHandlers.delete(cb);
+  },
+  /** The app's theme changed ("dark" | "light"); the --sk-* variables already follow. For what a
+   * canvas paints by itself. */
+  onTheme(cb) {
+    themeHandlers.add(cb);
+    return () => themeHandlers.delete(cb);
   },
   /** The tree of the context's scan changed (a rescan, files changed, the scan went on). */
   onTree(cb) {

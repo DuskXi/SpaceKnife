@@ -11,7 +11,7 @@ import { useThrottled } from "@/lib/throttle";
 import { attrLabel } from "@/shell/FilterBox";
 import { isRunning } from "@/shell/ScanProgress";
 import { Icon, Kbd } from "@/ui/Icon";
-import { classHexNow } from "@/lib/classes";
+import { classHexNow, inkOn } from "@/lib/classes";
 import { t } from "@/lib/i18n";
 
 const ROW_H = 50;
@@ -321,7 +321,7 @@ function ResultLine(props: {
         props.onMenu(e.clientX, e.clientY);
       }}
     >
-      <span className={`res-icon ${r.kind}`} style={cls ? { background: classHexNow(cls) } : undefined}>
+      <span className={`res-icon ${r.kind}`} style={cls ? { background: classHexNow(cls), color: inkOn(classHexNow(cls)) } : undefined}>
         <Icon name={r.kind === "file" ? "file" : r.kind === "folder" ? "folder" : "layers"} size={15} />
       </span>
       <span className="res-text">

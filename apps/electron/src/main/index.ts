@@ -1,15 +1,16 @@
 // Electron main process: one frameless window, the backend child process, a few native services.
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, session, shell } from "electron";
+import { BrowserWindow, app, clipboard, dialog, ipcMain, nativeTheme, protocol, session, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
+import { WINDOW_BG } from "../shared/theme";
 import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
 import { fileIn, mimeOf } from "./files";
 import { isPluginId, servePanelFile } from "./plugin-files";
@@ -17,6 +18,7 @@ import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
+import { ThemeKeeper } from "./theme";
 import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -90,6 +92,38 @@ async function launchBackend(): Promise<void> {
   }
 }
 
+// The theme (W7 外观 · 主题, theme.ts): the last choice is in <userData>/theme.json, restored before the
+// window is created.
+const themeFile = () => join(app.getPath("userData"), "theme.json");
+let themes: ThemeKeeper | null = null;
+
+function restoreTheme(): ThemeKeeper {
+  let text: string | null = null;
+  try {
+    text = readFileSync(themeFile(), "utf8");
+  } catch {
+    // never chosen: 「跟随系统」
+  }
+  return new ThemeKeeper(
+    {
+      native: nativeTheme,
+      setBackground: (color) => win?.setBackgroundColor(color),
+      write: async (text) => {
+        const file = themeFile();
+        await mkdir(dirname(file), { recursive: true });
+        // whole or not at all: a start never reads half a file
+        await writeFile(`${file}.tmp`, text);
+        await rename(`${file}.tmp`, file);
+      },
+      warn: (message) => console.warn(message),
+    },
+    text,
+  );
+}
+
+// (restored before any window: light, as where nothing tells, is only a fallback)
+const windowBackground = () => themes?.background() ?? WINDOW_BG.light;
+
 /** The app icon for the window (Linux; a packaged Windows app shows its executable's icon). */
 function windowIcon(): string | undefined {
   if (process.platform === "linux") return join(app.getAppPath(), "resources", "icon.png");
@@ -107,7 +141,7 @@ function createWindow(): void {
     show: false,
     frame: mac,
     titleBarStyle: mac ? "hiddenInset" : "hidden",
-    backgroundColor: "#08090B",
+    backgroundColor: windowBackground(),
     title: "SpaceKnife",
     icon: windowIcon(),
     webPreferences: {
@@ -175,6 +209,10 @@ function registerIpc(): void {
   ipcMain.handle("sk:openPath", (_e, path: string) => shell.openPath(path));
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
+  // the renderer applies the setting to the page itself; here the window, Electron's UI and the file
+  ipcMain.on("sk:setTheme", (_e, theme: unknown) => themes?.set(theme));
+  // the system's theme changed (or themeSource did): the window's own background follows
+  nativeTheme.on("updated", () => themes?.updated());
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
   // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
@@ -466,6 +504,7 @@ if (CLI.mode === "help" || CLI.mode === "error") {
   app.whenReady().then(() => {
     serveRenderer();
     servePanels();
+    themes = restoreTheme();
     registerIpc();
     createWindow();
     void launchBackend();

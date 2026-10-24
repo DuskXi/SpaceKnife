@@ -44,6 +44,7 @@ const api: SkApi = {
     install: (path, how) => ipcRenderer.invoke("sk:installUpdate", path, how) as Promise<string>,
   },
   setLanguage: (lang) => ipcRenderer.send("sk:setLanguage", lang),
+  setTheme: (theme) => ipcRenderer.send("sk:setTheme", theme),
   dialog: {
     openSnapshot: () => ipcRenderer.invoke("sk:openSnapshot") as Promise<string | null>,
     openFolders: () => ipcRenderer.invoke("sk:openFolders") as Promise<string[]>,

@@ -1,8 +1,7 @@
 // Compare mode (W6): colour tiers of a change, shared by the treemap, the legend and the lists.
 
-import { tokens } from "@design/tokens";
-
 import { getUnitBase } from "./format";
+import { palette } from "./theme";
 
 /** Lower bounds of tiers 1, 2 and 3 in bytes (tier 0 below the first). */
 export type Tiers = [number, number, number];
@@ -32,17 +31,18 @@ export function tierOf(abs: number, tiers: Tiers): number {
   return abs < tiers[0] ? 0 : abs < tiers[1] ? 1 : abs < tiers[2] ? 2 : 3;
 }
 
-const GROW = [0, 1, 2, 3].map((i) => (tokens.treemap.diff.grow as Record<string, string>)[String(i)]!);
-const SHRINK = [0, 1, 2].map((i) => (tokens.treemap.diff.shrink as Record<string, string>)[String(i)]!);
+/** The growth tiers' colours in the theme on screen, smallest change first. */
+export const growColors = (): string[] => [0, 1, 2, 3].map((i) => (palette().treemap.diff.grow as Record<string, string>)[String(i)]!);
+/** The shrinkage tiers' colours in the theme on screen, smallest change first. */
+export const shrinkColors = (): string[] => [0, 1, 2].map((i) => (palette().treemap.diff.shrink as Record<string, string>)[String(i)]!);
 
-/** Growth: four tiers light → deep; shrinkage: three (≥ 3 GB share the deepest), UI-W6-14. */
+/** Growth: four tiers, the biggest change the most prominent; shrinkage: three (≥ 3 GB share the
+ * last), UI-W6-14. */
 export function diffColor(delta: number, tiers: Tiers): string {
   const t = tierOf(Math.abs(delta), tiers);
-  return delta >= 0 ? GROW[t]! : SHRINK[Math.min(t, 2)]!;
+  const D = palette().treemap.diff;
+  return delta >= 0 ? (D.grow as Record<string, string>)[String(t)]! : (D.shrink as Record<string, string>)[String(Math.min(t, 2))]!;
 }
-
-export const GROW_COLORS = GROW;
-export const SHRINK_COLORS = SHRINK;
 
 /** Largest absolute change of the blocks that are coloured: by default files, aggregates and
  * collapsed folders (a treemap's open folders are not filled); a visualization says which rows it

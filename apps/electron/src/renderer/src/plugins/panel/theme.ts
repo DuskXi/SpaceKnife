@@ -1,14 +1,17 @@
-// The theme a web panel gets (its /_sk/base.css reads these variables): the app's design tokens
-// under short names. base.css carries the same values as defaults, so a panel looks right before
-// the first theme message and in the bridge's mock mode (resources/plugin-sdk/base.css; the test
+// The theme a web panel gets (its /_sk/base.css reads these variables): the design tokens of the
+// theme on screen under short names, sent again when it changes. base.css carries the dark theme's
+// values as defaults (and the light ones under [data-sk-theme="light"]), so a panel looks right
+// before the first theme message and in the bridge's mock mode (resources/plugin-sdk/base.css; the test
 // keeps the two in step).
 
-import { tokens } from "@design/tokens";
+import { type ThemeName, themes, tokens } from "@design/tokens";
 
-const c = tokens.color;
+import { themeName } from "@/lib/theme";
 
-/** CSS variable → value, as the panel's bridge.js sets them on its document. */
-export function themeVars(): Record<string, string> {
+/** CSS variable → value for a theme (by default the one on screen), as the panel's bridge.js sets
+ * them on its document. */
+export function themeVars(name: ThemeName = themeName()): Record<string, string> {
+  const c = themes[name].color;
   return {
     "--sk-bg": c.bg.panel,
     "--sk-bg-raised": c.bg.raised,

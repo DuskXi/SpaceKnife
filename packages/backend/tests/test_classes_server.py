@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from spaceknife import classes
 from spaceknife.classes import DEFAULT_CLASSES, build
@@ -128,3 +129,46 @@ def test_build_rules() -> None:
         build([*rows[:-1], ClassEdit(id="other", name="其他", extensions=["x"])])
     with pytest.raises(ValueError, match="不能有"):
         build([ClassEdit(name="a:b"), rows[-1]])
+
+
+def test_each_theme_keeps_its_colour(tmp_path: Path) -> None:
+    # W7 待定 22: a colour picked in the light theme leaves the dark one as it was; both are saved
+    # (classes.json version 2), and "" stays the theme's own colour
+    rows = [ClassEdit(id=c.id, name=c.name, extensions=c.extensions) for c in DEFAULT_CLASSES.classes]
+    rows[0] = ClassEdit(id="video", name=rows[0].name, extensions=rows[0].extensions, color_light="#abcdef")
+    rows[1] = ClassEdit(id="image", name=rows[1].name, extensions=rows[1].extensions, color="#123456")
+    table = build(rows)
+    assert (table.by_id["video"].color, table.by_id["video"].color_light) == ("", "#ABCDEF")
+    assert table.custom
+    path = tmp_path / "classes.json"
+    classes.save(table, path)
+    assert json.loads(path.read_text(encoding="utf-8"))["version"] == 2
+    back = classes.load(path)
+    assert (back.by_id["video"].color, back.by_id["video"].color_light) == ("", "#ABCDEF")
+    assert (back.by_id["image"].color, back.by_id["image"].color_light) == ("#123456", "")
+    with pytest.raises(ValidationError):
+        ClassEdit(name="x", color_light="red")
+
+
+@pytest.mark.parametrize("version", [1, None])
+def test_colours_from_before_themes_stay_in_both(tmp_path: Path, version: int | None) -> None:
+    # a file written when there was only the dark theme: the user's colours are kept in the light
+    # theme too, not dropped for its own (classes.json version 1, or no version at all)
+    rows = [ClassEdit(id=c.id, name=c.name, extensions=c.extensions) for c in DEFAULT_CLASSES.classes]
+    rows[1] = ClassEdit(id="image", name=rows[1].name, extensions=rows[1].extensions, color="#123456")
+    path = tmp_path / "classes.json"
+    classes.save(build(rows), path)
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    for c in doc["classes"]:
+        c.pop("color_light")
+    if version is None:
+        doc.pop("version")
+    else:
+        doc["version"] = version
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    old = classes.load(path)
+    assert (old.by_id["image"].color, old.by_id["image"].color_light) == ("#123456", "#123456")
+    assert (old.by_id["video"].color, old.by_id["video"].color_light) == ("", "")
+    # saved again it is a version 2 file, and reads back the same
+    classes.save(old, path)
+    assert classes.load(path).by_id["image"].color_light == "#123456"

@@ -38,6 +38,7 @@ from ..filter.names import forget
 from ..i18n import tr
 from ..monitor import Change, Watcher, create_watcher
 from ..scan import worker
+from ..scan.scanner import verify_names
 from ..scan.volume import volume_for
 from ..scan.worker import SliceOptions, SliceResult
 from ..store import mutate
@@ -369,7 +370,7 @@ class ScanMonitor:
         if self.trees and quiet and not self.handle.running:
             for path in sorted(self.trees):
                 node, _ = self.index.locate(path)
-                if node is not None and store.cols["kind"][node] == Kind.DIR:
+                if node is not None and store.cols["kind"][node] == Kind.DIR and not self.index.unnamed(node):
                     targets[node] = store.path(node)
             rescan = True
             self.trees.clear()
@@ -393,14 +394,15 @@ class ScanMonitor:
 
     def _targets(self, folders: set[str]) -> dict[int, str]:
         """Folders to list again, by node: missing ones resolve to their deepest known ancestor;
-        folders not listed yet are left to the scan; folders with children in the scan's queue wait."""
+        folders not listed yet are left to the scan; folders with children in the scan's queue wait;
+        folders whose path could open another entry of the very same name stay as scanned."""
         store = self.handle.store
         c = store.cols
         out: dict[int, str] = {}
         for path in folders:
             node, deepest = self.index.locate(path)
             folder = node if node is not None and c["kind"][node] == Kind.DIR else deepest
-            if folder is None or c["kind"][folder] != Kind.DIR:
+            if folder is None or c["kind"][folder] != Kind.DIR or self.index.unnamed(folder):
                 continue
             if c["flags"][folder] & np.uint32(Flag.PENDING):
                 continue  # the scan has not listed it yet: it will read it as it is now
@@ -475,6 +477,16 @@ class ScanMonitor:
                 rel = mutate.relist(
                     store, node, res.name_blob, res.name_lens, {k: res.cols[k] for k in ENTRY_COLUMNS}, ext
                 )
+                # new subfolders no path can open (the very same name twice, a `\` in it): not
+                # scanned by their path, which would list another one, or nothing
+                unreadable = {
+                    int(rel.start) + int(j)
+                    for (kind, at, j), _path, _msg in res.errors
+                    if (kind, at) == (1, 0)
+                }
+                for row in unreadable & set(rel.pending.tolist()):
+                    store.mark(row, Flag.ACCESS_DENIED)
+                    store.clear(row, Flag.PENDING)
                 remap.add(rel.moved_from, rel.moved_to)
                 out.changes += len(rel.added) + len(rel.removed) + len(rel.grown)
                 for i in rel.added.tolist():
@@ -483,9 +495,13 @@ class ScanMonitor:
                     out.flashes[i] = d
                 if len(rel.removed):
                     out.flashes[node] = out.flashes.get(node, 0) - int(rel.removed_alloc.sum())
-                out.pending.extend(rel.pending.tolist())
+                out.pending.extend(i for i in rel.pending.tolist() if i not in unreadable)
                 kept = rel.moved_to[store.cols["kind"][rel.moved_to] == Kind.DIR]
-                out.kept_folders.extend(kept.tolist())
+                # a name the folder holds twice, or one with a separator, is listed by its path as
+                # another folder: those stay as scanned (the scan opened each by its file id), and so
+                # does what lies below them
+                unnamed = _unnamed(res)
+                out.kept_folders.extend(k for k in kept.tolist() if store.name_bytes(k) not in unnamed)
             if remap:
                 store.epoch += 1  # moved rows: node ids plugins hold are stale now
                 moved = remap(np.array(list(out.flashes), dtype=np.int64))
@@ -621,9 +637,14 @@ class ScanMonitor:
         if root_idx is None:
             return None
         opts = SliceOptions(roots=self._root_opts(), budget_s=0.0)  # this folder only
-        res = await self._slice([((0, node, 0), path, root_idx)], opts)
-        if len(res.refs) != 1 or res.errors:
+        task = (0, node, 0)
+        res = await self._slice([(task, path, root_idx)], opts)
+        if len(res.refs) != 1 or tuple(int(x) for x in res.refs[0]) != task:
             return None  # vanished (its parent lists it as gone) or no longer readable
+        if any(tuple(ref) == task for ref, _path, _msg in res.errors):
+            return None  # a folder a path cannot reach (a case-only sibling): stays as scanned
+        # errors of its subfolders (names no path can open) are theirs: the listing stands, and
+        # _relist marks them
         return res
 
     async def _scan_new(self, folders: list[int]) -> None:
@@ -640,31 +661,34 @@ class ScanMonitor:
             batch, queue = queue[:LIST_BATCH], queue[LIST_BATCH:]
             await self._permit()
             res = await self._slice(batch, opts)
-            remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
-            ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
-            starts = store.ingest_slice(
-                res.refs,
-                res.bounds,
-                res.name_blob,
-                res.name_lens,
-                {k: res.cols[k] for k in ENTRY_COLUMNS},
-                ext,
-            ).tolist()
+            # a writer: NodeStore.compact (on the compute pool, as a reader) replaces the columns,
+            # and rows written into a column it just replaced would be lost
+            async with STRUCTURE.write():
+                remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
+                ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
+                starts = store.ingest_slice(
+                    res.refs,
+                    res.bounds,
+                    res.name_blob,
+                    res.name_lens,
+                    {k: res.cols[k] for k in ENTRY_COLUMNS},
+                    ext,
+                ).tolist()
 
-            def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int | None:
-                """None: the folder left the tree while it was read (store.ingest_slice)."""
-                kind, a, b = ref
-                if kind == 0:
-                    return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
-                return None if starts[a] < 0 else starts[a] + b
+                def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int | None:
+                    """None: the folder left the tree while it was read (store.ingest_slice)."""
+                    kind, a, b = ref
+                    if kind == 0:
+                        return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
+                    return None if starts[a] < 0 else starts[a] + b
 
-            for ref, _path, _msg in res.errors:
-                if (target := resolve(ref)) is not None:
-                    store.mark(target, Flag.ACCESS_DENIED)
-                    store.clear(target, Flag.PENDING)
-            for ref, path, idx in res.frontier:
-                if (target := resolve(ref)) is not None:
-                    queue.append(((0, target, 0), path, idx))
+                for ref, _path, _msg in res.errors:
+                    if (target := resolve(ref)) is not None:
+                        store.mark(target, Flag.ACCESS_DENIED)
+                        store.clear(target, Flag.PENDING)
+                for ref, path, idx in res.frontier:
+                    if (target := resolve(ref)) is not None:
+                        queue.append(((0, target, 0), path, idx))
 
     async def _slice(self, tasks: list[worker.Task], opts: SliceOptions) -> SliceResult:
         slicer = self.owner.scans.slicer()
@@ -683,7 +707,11 @@ class ScanMonitor:
         scanner = self.handle.scanner
         if scanner is not None:
             return scanner.root_options
-        return tuple(worker.RootOptions() for _ in self.handle.roots)
+        # each root's path and name check still apply: a relist must not list a case-only
+        # sibling's contents under the other's name
+        return tuple(
+            worker.RootOptions(path=r.path, verify_names=verify_names(r.volume)) for r in self.handle.roots
+        )
 
     def _root_index(self, path: str) -> int | None:
         norm = os.path.normcase(path)
@@ -745,6 +773,24 @@ class ScanMonitor:
             self._fed = len(store)
             self.owner.views.remap(self.handle.id, chains, lambda ids: remap[np.asarray(ids, dtype=np.int64)])
         logger.info("scan {}: compacted after changes, {:,} rows", self.handle.id, len(store))
+
+
+_SEPARATORS = tuple(s.encode() for s in (os.sep, os.altsep) if s)
+
+
+def _unnamed(res: SliceResult) -> set[bytes]:
+    """Names of the listing of ``res`` (one folder) no path stands for alone: held more than once,
+    or with a separator in them (``PathIndex.unnamed``)."""
+    seen: set[bytes] = set()
+    out: set[bytes] = set()
+    at = 0
+    for n in res.name_lens.tolist():
+        name = res.name_blob[at : at + n]
+        at += n
+        if name in seen or any(sep in name for sep in _SEPARATORS):
+            out.add(name)
+        seen.add(name)
+    return out
 
 
 def _common_roots(paths: set[str]) -> set[str]:

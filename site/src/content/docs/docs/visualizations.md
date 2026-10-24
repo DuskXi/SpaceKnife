@@ -217,7 +217,7 @@ The breathing outline and the change flashes share one switch: **Settings › Vi
 
 ## Change flashes
 
-After the scan, live monitoring keeps the picture up to date (see [Live monitoring](../monitoring/)). When a file is added, deleted or changes size, its block flashes: a yellow outline with a glow, two pulses, then it fades.
+After the scan, live monitoring keeps the picture up to date (see [Live monitoring](../monitoring/)). When a file is added, deleted or changes size, its block flashes: a yellow outline with a glow (dark amber in the light theme), two pulses, then it fades.
 
 - When the changed item is not drawn on its own (too small, merged, or inside a collapsed folder), the block that holds it flashes. In the flame graphs, a change inside the zoom root that falls on no bar or sector flashes the root bar or the center disc.
 - With **Reduce motion** on, there is no flashing. The changed block shows a static badge with the change, for example "+212 MB", for about ten seconds, where it fits.

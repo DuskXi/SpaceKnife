@@ -14,6 +14,7 @@ import { palettePaint } from "@/plugins/colors";
 import { diffTiers, maxChange } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { palette } from "@/lib/theme";
 import { type ColorMode, rgba } from "@/treemap/paint";
 
 import { acquireGl, type GlContext } from "./glContext";
@@ -103,8 +104,11 @@ interface Live {
 const binLabel = (bytes: number) =>
   window.sk.platform === "darwin" ? t("废纸篓 · 清空可释放 {size}", { size: fmtSize(bytes) }) : t("回收站 · 清空可释放 {size}", { size: fmtSize(bytes) });
 
-const GROUND = rgba(tokens.treemap.ground);
-const GROUND_RGB = [GROUND[0], GROUND[1], GROUND[2]] as const;
+/** The picture's ground in the theme on screen: what the GL canvas is cleared to. */
+function ground(): readonly [number, number, number] {
+  const [r, g, b] = rgba(palette().treemap.ground);
+  return [r, g, b];
+}
 const ZOOM_MS = 250;
 const SWAP_MS = tokens.motion.duration.swap;
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
@@ -156,8 +160,11 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
 
   const view = useApp((s) => s.views[viewId]);
   const vocab = useApp((s) => s.vocab);
+  // 「主题」 (UI-W7-31 ①): the class colours and everything painted follow the theme on screen
+  const theme = useApp((s) => s.theme);
   const classIds = useMemo(() => vocab?.classes.map((c) => c.id) ?? [], [vocab]);
-  const colors = useMemo(() => classColors(vocab), [vocab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const colors = useMemo(() => classColors(vocab), [vocab, theme]);
   const extensions = useApp((s) => s.extensions);
   const scanning = useApp((s) => {
     const v = s.views[viewId];
@@ -209,7 +216,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       const ctx = tc.getContext("2d")!;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      glc.begin(W, H, GROUND_RGB);
+      glc.begin(W, H, ground());
       const a = st.anim;
       if (a && st.old) {
         const t = Math.min(1, (now - a.start) / a.duration);
@@ -377,7 +384,8 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
   const frame = view?.frame ?? null;
   const colorMode = (view?.state.color_mode ?? "class") as ColorMode;
   // a plugin's colour mode (colors.v1): its palette, resolved against the theme and the class colours
-  const palette = useMemo(() => palettePaint(colorMode, extensions, (id) => classHex(vocab, id)), [colorMode, extensions, vocab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pluginPalette = useMemo(() => palettePaint(colorMode, extensions, (id) => classHex(vocab, id)), [colorMode, extensions, vocab, theme]);
   const stateVisual = view?.state.visual;
   useEffect(() => {
     const st = r.current;
@@ -392,7 +400,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     const total = weights ? weightTotal(frame) : 0;
     const settings: PaintSettings = {
       colorMode,
-      palette,
+      palette: pluginPalette,
       classIds,
       classColors: colors,
       scanning,
@@ -454,7 +462,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     loops.breath.run();
     rehoverRef.current();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, colorMode, palette, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
+  }, [frame, colorMode, pluginPalette, unitEpoch, theme, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
 
   // the class the pointer is on in 「类别统计」 (UI-MAIN-65): its rows lit in the picture, everything
   // else under a veil; the filter stays as it is

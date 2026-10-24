@@ -8,6 +8,7 @@ the physical footprint on macOS. ``None`` where a number cannot be read.
 from __future__ import annotations
 
 import ctypes
+import os
 import sys
 from dataclasses import dataclass
 
@@ -134,6 +135,64 @@ def release() -> None:
             trim = getattr(ctypes.CDLL(None), "malloc_trim", None)  # glibc only (not musl)
             if trim is not None:
                 trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
+# glibc's mallopt parameters (malloc.h)
+M_MMAP_THRESHOLD = -3
+M_ARENA_MAX = -8
+MMAP_THRESHOLD = 4 << 20  # blocks from 4 MiB on are mapped on their own, and unmapped when freed
+ARENA_MAX = 4
+
+
+def _glibc() -> ctypes.CDLL | None:
+    """The C library when it is glibc (it has ``gnu_get_libc_version``; musl and others do not
+    have mallopt's parameters or malloc_trim), else None."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        libc = ctypes.CDLL(None)
+    except OSError:
+        return None
+    if not all(hasattr(libc, name) for name in ("gnu_get_libc_version", "mallopt", "malloc_trim")):
+        return None
+    return libc
+
+
+def tune_allocator() -> bool:
+    """Linux with glibc, at the start of the backend before its threads: a fixed mmap threshold of
+    4 MiB and at most 4 malloc arenas (docs/memory.md §8). By default glibc raises the threshold to
+    the size of every mapped block that is freed (up to 32 MiB), so the scan's temporary arrays and
+    slices of 128 KiB–32 MiB end up in the arenas of 30-odd threads, between long-lived blocks,
+    where freed space stays with the process; a fixed threshold turns that off (man mallopt).
+    ``SPACEKNIFE_GLIBC_DEFAULTS=1`` keeps glibc's own settings. Elsewhere nothing happens. Returns
+    whether both were set."""
+    if os.environ.get("SPACEKNIFE_GLIBC_DEFAULTS") == "1":
+        return False
+    libc = _glibc()
+    if libc is None:
+        return False
+    try:
+        mallopt = libc.mallopt
+        mallopt.argtypes = (ctypes.c_int, ctypes.c_int)
+        mallopt.restype = ctypes.c_int
+        arenas = mallopt(M_ARENA_MAX, ARENA_MAX)
+        threshold = mallopt(M_MMAP_THRESHOLD, MMAP_THRESHOLD)
+    except (OSError, AttributeError):
+        return False
+    return bool(arenas and threshold)
+
+
+def trim() -> None:
+    """glibc: hand the free pages of the malloc arenas back to the system (``malloc_trim(0)``), after
+    a scan and while the backend is idle (docs/memory.md §8). Elsewhere nothing happens."""
+    libc = _glibc()
+    if libc is None:
+        return
+    try:
+        libc.malloc_trim.argtypes = (ctypes.c_size_t,)
+        libc.malloc_trim(0)
     except (OSError, AttributeError):
         pass
 

@@ -119,7 +119,7 @@ Once a card is open, moving to another block switches the card's content at once
 
 - In the polar flame graph the card follows the pointer.
 - No card is shown while a zoom animation runs.
-- **Hover highlight** (**Settings › Appearance**) draws a thin white outline around the block under the pointer; **Mouse trail** leaves fading outlines on the blocks the pointer passes.
+- **Hover highlight** (**Settings › Appearance**) draws a thin outline around the block under the pointer (white in the dark theme, near-black in the light one); **Mouse trail** leaves fading outlines on the blocks the pointer passes.
 - Hovering a row in the results list highlights its block in the picture the same way.
 
 ## Context menu

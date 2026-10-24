@@ -11,7 +11,18 @@ from .base import Params, Payload
 BasketItemKind = Literal["file", "dir", "link", "other", "group"]
 BasketItemStatus = Literal["ready", "locked", "missing", "protected"]
 OpMode = Literal["trash", "delete"]
-OpCode = Literal["ok", "missing", "denied", "locked", "protected", "no_trash", "exists", "cancelled", "error"]
+OpCode = Literal[
+    "ok",
+    "missing",
+    "denied",
+    "locked",
+    "protected",
+    "no_trash",
+    "exists",
+    "cancelled",
+    "ambiguous_name",
+    "error",
+]
 
 
 # --------------------------------------------------------------------------- path formats (W5-09…14)

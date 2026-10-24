@@ -67,6 +67,8 @@ export interface Sk<
   subscribe(stream: string, params: Record<string, unknown> | null, cb: (item: unknown | Columns) => void): () => void;
   onContext(cb: (ctx: PanelContext) => void): () => void;
   onLang(cb: (lang: "zh-CN" | "en") => void): () => void;
+  /** The app's theme changed; the --sk-* variables already follow (for what a canvas paints itself). */
+  onTheme(cb: (mode: "dark" | "light") => void): () => void;
   /** The tree of the context's scan changed (a rescan, files changed, the scan went on). */
   onTree(cb: (e: { scan_id: string | null }) => void): () => void;
   host: {

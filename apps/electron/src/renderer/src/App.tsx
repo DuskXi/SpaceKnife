@@ -34,6 +34,7 @@ export function App() {
   const paletteOpen = useApp((s) => s.paletteOpen);
   const updateDialog = useApp((s) => visibleSurface(s.update, s.updateOpen) === "dialog");
   useApp((s) => s.lang); // 「界面语言」: a change re-renders the whole tree, every t() follows (M7.5)
+  useApp((s) => s.theme); // 「主题」: so do the colours set inline (class swatches, the compare scale)
   const kept = useApp((s) => isKeptPanelTab(tab, s)); // its page stays alive behind other tabs
 
   useEffect(() => {
