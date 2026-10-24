@@ -302,7 +302,13 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
                     } else {
                         Care::Plain
                     };
+                    #[cfg(windows)]
                     let via = parent.as_ref().and_then(|p| sys::via(p, hint, pinned));
+                    #[cfg(unix)]
+                    let via = {
+                        let _ = (&parent, pinned);
+                        sys::via_hint(hint)
+                    };
                     Child {
                         j,
                         node: Node::with_via(path, node.root, true, care, via),
