@@ -3,27 +3,26 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from collections.abc import Callable
 from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import numpy as np
 import typer
 from rich.console import Console, Group
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.text import Text
 
 from . import fmt, i18n
 from .i18n import tr
-from .io import IoRegistry, set_low_io_priority
-from .io.governor import level_limit
-from .paths import snapshots_dir
+from .io.priority import set_low_io_priority
+from .paths import config_dir, snapshots_dir
 from .scan import worker
 from .scan.scanner import (
     NATIVE_BATCH,
@@ -37,8 +36,10 @@ from .scan.scanner import (
     native_slicer,
     native_threads,
 )
-from .store import snapshot
 from .store.nodes import Flag, Kind, NodeStore
+
+if TYPE_CHECKING:
+    from .io import IoRegistry
 
 console = Console()
 snapshot_app = typer.Typer(help="Inspect saved snapshots.", no_args_is_help=True)
@@ -69,6 +70,8 @@ def mft_helper() -> Any:
 def mft_duty(limit: tuple[str, float | None] | None) -> float:
     """The $MFT reader's busy share for ``--disk-limit``, mapped as the app maps its load levels
     (``server.scans.mft_duty``): no limit and max read flat out, idle at 0.2."""
+    from .io.governor import level_limit  # loads the protocol's models: only with --mft
+
     if limit is None or limit[0] == "max":
         return 1.0
     if limit[0] == "idle":
@@ -82,12 +85,30 @@ def apply_language() -> None:
     setting = "system"
     if not os.environ.get("SPACEKNIFE_LANGUAGE"):  # forced (tests): no need to read the settings
         try:
-            from .settings import SettingsStore
-
-            setting = str(SettingsStore().get("general.language"))
+            setting = stored_language()
         except Exception:  # an unreadable settings file must not stop the command
             setting = "system"
     i18n.set_language(i18n.resolve(setting))
+
+
+def stored_language(file: Path | None = None) -> str:
+    """``general.language`` as :class:`~spaceknife.settings.SettingsStore` reads it. The store
+    validates the whole file and falls back to the defaults when anything in it is invalid, so a
+    value other than the default "system" needs the store itself; but without a file, with a file
+    that cannot be read or parsed, or one that does not set another language, every outcome is
+    "system", and the settings registry with the protocol's pydantic models need not load (a
+    good part of the command-line scan's start-up; docs/packaging.md, 命令行扫描的启动)."""
+    file = file or config_dir() / "settings.json"
+    try:
+        doc = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):  # missing, unreadable or not JSON: the store keeps its defaults
+        return "system"
+    values = doc.get("values") if isinstance(doc, dict) else None
+    if not isinstance(values, dict) or values.get("general.language", "system") == "system":
+        return "system"
+    from .settings import SettingsStore
+
+    return str(SettingsStore(file).get("general.language"))
 
 
 def _bar(fraction: float, width: int = 12) -> Text:
@@ -281,6 +302,8 @@ async def _try_mft(scanner: Scanner, method: ScanMethod, limit: tuple[str, float
         return
     if not is_elevated():
         console.print(f"[#8F95A2]{tr('读取 $MFT 需要管理员权限：Windows 会请求一次授权。')}[/#8F95A2]")
+    from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
     progress = Progress(
         SpinnerColumn(style="#8B9CFF"),
         TextColumn(f"[bold]{tr('MFT 快速扫描')}[/bold]"),
@@ -340,6 +363,8 @@ async def _run_scan(
             if method.mft:
                 return scanner, scanner.progress(), method
         if limit is not None and pool is not None:  # paced like the app's scans
+            from .io import IoRegistry  # only here: the governor loads the protocol's models
+
             registry = IoRegistry(max_workers=max(1, threads))
             await registry.start()
             gov = await registry.governor_for_path(scanner.roots[0].path)
@@ -347,6 +372,17 @@ async def _run_scan(
             gov.set_level(limit[0], limit[1])  # type: ignore[arg-type]
             scanner.governor = gov
             low_io = gov.low_io_priority and set_low_io_priority(None, True)
+        if not console.is_terminal or console.is_dumb_terminal:
+            # rich draws the live progress only on a terminal; with the output redirected (scripts,
+            # benchmarks) it would show nothing: no display, no refresh thread, no import
+            try:
+                result = await scanner.run()
+            except asyncio.CancelledError:
+                scanner.cancel()
+                raise
+            return scanner, result, method
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
         progress = Progress(
             SpinnerColumn(style="#8B9CFF"),
             TextColumn(f"[bold]{tr('扫描中')}[/bold]"),
@@ -439,6 +475,8 @@ def scan(
         raise typer.Exit(2) from exc
     snap: Path | None = None
     if result.state == ScanState.DONE and not no_snapshot:
+        from .store import snapshot  # pydantic: only when a snapshot is saved
+
         snap = snapshot.auto_path([r.path for r in scanner.roots])
         _save(scanner, snap, method)
         snapshot.prune(snap.parent)
@@ -514,6 +552,8 @@ def _largest_files(store: NodeStore, limit: int) -> None:
 
 
 def _save(scanner: Scanner, path: Path, method: ScanMethod | None = None) -> None:
+    from .store import snapshot
+
     pr = scanner.progress()
     snapshot.save(
         scanner.store,
@@ -541,6 +581,8 @@ def _save(scanner: Scanner, path: Path, method: ScanMethod | None = None) -> Non
 @snapshot_app.command("list")
 def snapshot_list() -> None:
     """List auto-saved snapshots, newest first."""
+    from .store import snapshot
+
     apply_language()
     found = snapshot.list_snapshots()
     if not found:
@@ -572,6 +614,8 @@ def snapshot_show(
     depth: Annotated[int, typer.Option(help="Levels to expand.")] = 2,
 ) -> None:
     """Show where the space went in a saved snapshot (no rescan)."""
+    from .store import snapshot
+
     apply_language()
     try:
         store, header = snapshot.load(file)

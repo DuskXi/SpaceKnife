@@ -13,7 +13,6 @@ from rich.console import Console
 
 from . import __version__
 from .log import LogFormat, setup_logging
-from .logbus import LogHub
 
 app = typer.Typer(
     name="spaceknife",
@@ -53,6 +52,7 @@ def serve(
     ] = None,
 ) -> None:
     """Run the WebSocket backend. Prints one JSON 'ready' line on stdout once listening."""
+    from .logbus import LogHub
     from .server.app import DEFAULT_ORIGINS, ServerConfig, new_token
     from .server.runner import read_token_line, run_server
 
