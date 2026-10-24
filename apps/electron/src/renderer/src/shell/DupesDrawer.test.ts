@@ -385,8 +385,8 @@ describe("the copies of a group", () => {
   it("show what tells them apart, not the same shortened path twice", () => {
     const g = group(4, {
       members: [
-        { scan_id: "s1", node: 1, path: "C:\\Users\\leizi\\Downloads\\Projects\\site\\assets\\video\\intro.mp4", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep", why: "rule", view: false },
-        { scan_id: "s1", node: 2, path: "C:\\Users\\leizi\\Downloads\\Projects\\site-old\\assets\\video\\intro.mp4", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "extra", why: null, view: false },
+        { scan_id: "s1", node: 1, path: "C:\\Users\\alice\\Downloads\\Projects\\site\\assets\\video\\intro.mp4", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "keep", why: "rule", view: false },
+        { scan_id: "s1", node: 2, path: "C:\\Users\\alice\\Downloads\\Projects\\site-old\\assets\\video\\intro.mp4", volume: "C:", mtime: 0, ctime: 0, alloc: 1, role: "extra", why: null, view: false },
       ],
     });
     setDupes({ byScan: { s1: status() }, groups: [g], groupsTotal: 1, groupsJob: "dupes-1" });

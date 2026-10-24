@@ -355,7 +355,7 @@ describe("middlePath", () => {
 
 describe("fitPath", () => {
   it("fills the budget from the right and always keeps the name", () => {
-    const p = "C:\\Users\\leizi\\Downloads\\Photos\\2021\\a.jpg";
+    const p = "C:\\Users\\alice\\Downloads\\Photos\\2021\\a.jpg";
     expect(fitPath(p, 100)).toBe(p);
     expect(fitPath(p, 24)).toBe("C:\\…\\Photos\\2021\\a.jpg");
     expect(fitPath(p, 5)).toBe("C:\\…\\a.jpg");
@@ -365,8 +365,8 @@ describe("fitPath", () => {
 
 describe("distinctPaths", () => {
   it("keeps the segment where copies differ and folds what they share", () => {
-    const a = "C:\\Users\\leizi\\Downloads\\Projects\\site\\assets\\video\\intro.mp4";
-    const b = "C:\\Users\\leizi\\Downloads\\Projects\\site-old\\assets\\video\\intro.mp4";
+    const a = "C:\\Users\\alice\\Downloads\\Projects\\site\\assets\\video\\intro.mp4";
+    const b = "C:\\Users\\alice\\Downloads\\Projects\\site-old\\assets\\video\\intro.mp4";
     expect(distinctPaths([a, b], 40)).toEqual(["C:\\…\\site\\…\\intro.mp4", "C:\\…\\site-old\\…\\intro.mp4"]);
   });
 
