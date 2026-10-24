@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import os
 import secrets
-import sys
 import threading
 import time
 from collections import OrderedDict
@@ -622,11 +621,7 @@ class ScanManager:
     @staticmethod
     def _mft_eligible(handle: ScanHandle) -> bool:
         """One whole local NTFS volume on Windows: the $MFT holds exactly this tree."""
-        if sys.platform != "win32" or len(handle.roots) != 1:
-            return False
-        root = handle.roots[0]
-        v = root.volume
-        return root.whole_volume and v is not None and not v.is_remote and v.fs_type.upper() == "NTFS"
+        return mft.mft_unsupported(handle.roots) is None
 
     def mft_ready(self) -> bool:
         """An MFT scan needs no administrator prompt: rights already, or a live elevated helper."""

@@ -11,6 +11,7 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 - **Disks** has a big **File classes** bar at the top: the classes of every volume with a known mix added up, with each class's size and share, and which volumes it covers.
 - The help page **Visualizations** explains how the treemap, the flame graph and the polar flame graph each organize the picture, with a table that sets them side by side. The polar flame graph reads like a stacked pie chart with no center area: each ring is one folder level, the angle is the share. A picture of each shows on that page, in the app's help as on the website, and on the website's home page.
 - **New switch: Keep large scans in mapped files** (**Settings › Advanced › Memory**, off by default). When on, a scan of more than about two million items keeps its data in memory-mapped files in the cache folder instead of private memory; the system keeps the parts in use in RAM and can drop the rest at any time. On a drive of 3.2 million items the backend then settles at about 250 MB instead of about 600 MB, and peaks at about 400 MB while scanning instead of about 750 MB, at the same speed. The cost, and why it is off by default: after a scan its data is written to those files once, about 200 bytes per item (about 1.8 GB for a drive of 8.6 million items).
+- **Command line: `scan --mft`** reads the $MFT of a whole local NTFS drive, the app's MFT quick scan, instead of listing it folder by folder (Windows; asks for administrator rights once). It is off by default. A path it can't read that way (a folder rather than a whole drive, a ReFS, FAT, exFAT or Btrfs drive, a network drive, several paths at once) is scanned folder by folder anyway, after a line that says why, and so is a drive whose administrator prompt you refuse. The scan result says which way the drive was read.
 
 ### Fixes
 
@@ -55,6 +56,7 @@ What is already done for the next version, **0.3.4**, and not in a release yet. 
 - 「本机磁盘」顶部加了一条大的「文件类别」条：所有已知类别构成的卷加在一起，写出每类多大、占多少，以及算进了哪些卷。
 - 帮助页「三种可视化」讲清楚树图、火焰图和火焰-极坐标图各自怎样组织信息，加了一张对照表。火焰-极坐标图可以看成一种多层堆叠、没有中心区域的特殊饼图：每一环是一层文件夹，角度就是比例。这一页给三种可视化各配了一张图，软件的帮助页和官网都显示，官网首页也有。
 - **新开关「大扫描存进映射文件」**（「设置 › 高级 › 内存」，默认关）：打开后，约 200 万项以上的扫描把数据存进缓存文件夹里的内存映射文件，不占私有内存；常用的部分由系统留在内存里，其余的随时可以丢掉。320 万项的盘，后端扫完稳定在约 250 MB（不开约 600 MB），扫描中峰值约 400 MB（不开约 750 MB），扫描速度不变。代价是扫完后把数据写进这些文件一次，每项约 200 字节（860 万项的盘约 1.8 GB），所以默认关。
+- **命令行 `scan --mft`**：读取整个本地 NTFS 卷的 $MFT，也就是应用里的 MFT 快速扫描，不再逐个文件夹列目录（Windows；会请求一次管理员权限）。默认不开。读不了的路径（只是一个文件夹而不是整个卷；ReFS、FAT、exFAT、Btrfs 卷；网络盘；一次写了多个路径）照样逐个文件夹扫描，开始前先说明为什么不支持；拒绝管理员授权时也一样。扫描结果里写明这次是怎么读的。
 
 ### 修复
 
