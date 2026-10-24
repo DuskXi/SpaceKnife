@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import multiprocessing
 import os
 import time
 from collections.abc import Callable
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
     from .io import IoRegistry
 
 console = Console()
+# set once ``scan`` has written all its output and saved its snapshot: cli.main() may then end the
+# process without the interpreter's shutdown (cli._end_now)
+output_complete = False
 snapshot_app = typer.Typer(help="Inspect saved snapshots.", no_args_is_help=True)
 
 KIND_ICON = {Kind.DIR: "▸", Kind.FILE: " ", Kind.LINK: "↪", Kind.OTHER: "·"}
@@ -490,6 +494,10 @@ def scan(
         console.print(top_table(store, root.node, top, depth, tr("{path} 里最大的项目", path=root.path)))
         console.print()
     _largest_files(store, top)
+    global output_complete
+    # worker processes of the Python walker still stopping (shutdown without waiting): let the
+    # interpreter's exit wait for them as before
+    output_complete = not multiprocessing.active_children()
 
 
 def profile_panel(scanner: Scanner) -> Panel:

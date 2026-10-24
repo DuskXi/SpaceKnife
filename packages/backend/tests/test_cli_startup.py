@@ -1,4 +1,4 @@
-"""The command-line scan's start-up (docs/packaging.md, 命令行扫描的启动): what it imports, the
+"""The command-line scan's start-up and exit (docs/packaging.md, 命令行扫描的启动): what it imports, the
 language read without the settings models."""
 
 from __future__ import annotations
@@ -48,6 +48,46 @@ def test_scan_without_snapshot_leaves_the_heavy_modules_alone(tmp_path: Path) ->
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "", f"imported at start-up: {out.stdout.strip()}"
+
+
+def test_scan_exits_with_its_output_complete(tmp_path: Path) -> None:
+    """main() ends the process right after the output (cli._end_now): everything is written, the
+    exit status is kept, and an auto-saved snapshot is complete on disk."""
+    facts = build_tree(tmp_path / "root")
+    env = {**os.environ, "SPACEKNIFE_HOME": str(tmp_path / "home"), "COLUMNS": "120"}
+    run = subprocess.run(
+        [sys.executable, "-X", "utf8", "-m", "spaceknife", "scan", str(facts.root), "--top", "3"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        timeout=120,
+    )
+    assert run.returncode == 0, run.stderr
+    assert "movie.mp4" in run.stdout[run.stdout.index("最大的文件") :]  # the last table is there
+    from spaceknife.store import snapshot
+
+    (snap,) = (tmp_path / "home").rglob("*.sks")
+    store, header = snapshot.load(snap)
+    assert header.node_count == len(store) and len(store) > 1
+    bad = subprocess.run(
+        [sys.executable, "-m", "spaceknife", "scan", str(tmp_path / "missing")],
+        capture_output=True,
+        env=env,
+        timeout=120,
+    )
+    assert bad.returncode == 2
+    args = ["scan", str(facts.root), "--workers", "2", "--no-snapshot", "--top", "3"]
+    pooled = subprocess.run(  # the Python walker's worker processes: the usual exit waits for them
+        [sys.executable, "-X", "utf8", "-m", "spaceknife", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env={**env, "SPACEKNIFE_NO_NATIVE": "1"},
+        timeout=120,
+    )
+    assert pooled.returncode == 0, pooled.stderr
+    assert "movie.mp4" in pooled.stdout[pooled.stdout.index("最大的文件") :]
 
 
 @pytest.mark.parametrize(
