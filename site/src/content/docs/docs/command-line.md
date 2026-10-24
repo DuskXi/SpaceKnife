@@ -75,12 +75,13 @@ The scan runs in parallel, the same way as in the app, and shows a live progress
 | `--save FILE` | — | Also save the snapshot to this file |
 | `--no-snapshot` | — | Don't save a snapshot automatically |
 | `--profile` | — | Also print **Where the time went** (see below) |
+| `--mft` | off | Windows: read the drive's $MFT (the MFT quick scan, as in the app) instead of listing folder by folder. Only for one whole local NTFS drive, such as `C:\`; asks for administrator rights once |
 
 Good to know:
 
 - Several paths in one command become one scan with several roots, like picking several locations on the start page.
 - A scan that finishes is saved to the app's snapshot folder. The command line keeps the 10 newest snapshots of each location there, and one a week before that.
-- The command line always does a full scan, folder by folder. The MFT quick scan is only available in the app.
+- Without `--mft` the command line always does a full scan, folder by folder. With `--mft`, a path the MFT quick scan can't read (a folder rather than a whole drive, a ReFS, FAT, exFAT or Btrfs drive, a network drive, several paths, or not Windows) is scanned folder by folder anyway, and the command first prints `The MFT quick scan can't read this: …` with the reason. The same happens, with the reason, when you refuse the administrator prompt. The **Scan result** then says `Method full scan (…)`; a scan that read the $MFT says `Method MFT quick scan`, and `--profile` shows its phases (starting the helper, reading and parsing the $MFT, building the tree) instead of the listing threads.
 - `--disk-limit idle` also reads at the system's low I/O priority, as the **Idle** level does in the app. How the limit works is explained in [Scan speed and disk load](../performance/).
 - Exit codes: `0` when the scan ran, `2` when it couldn't start (for example, the path doesn't exist), `130` when you pressed <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 
@@ -96,6 +97,12 @@ A history for snapshot comparison: run a scan every night from Task Scheduler, c
 
 ```bash
 spaceknife-backend scan /home/lenny --disk-limit idle
+```
+
+A whole system drive by its $MFT, much faster than folder by folder (Windows, administrator rights):
+
+```bash
+spaceknife-backend scan "C:\" --mft
 ```
 
 Measuring without leaving a snapshot behind:

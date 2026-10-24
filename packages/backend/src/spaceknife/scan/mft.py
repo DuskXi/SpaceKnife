@@ -35,7 +35,7 @@ import numpy as np
 from loguru import logger
 
 from .. import native
-from ..i18n import Texts
+from ..i18n import Texts, tr
 from ..store.nodes import OFF_NARROW_LIMIT, Flag, Kind, NodeStore, encode_name
 from ..store.subtree import ranges_to_ids
 
@@ -93,6 +93,36 @@ COLUMN_DTYPES: dict[str, np.dtype[Any]] = {
     "atime": np.dtype("<i8"),
     "nlink": np.dtype("<u2"),
 }
+
+
+class _Root(Protocol):
+    path: str
+    volume: Any  # VolumeInfo | None
+    whole_volume: bool
+
+
+def mft_unsupported(roots: Sequence[_Root]) -> str | None:
+    """Why an MFT fast scan cannot read ``roots`` (the scanner's roots), or None when it can: one
+    root that is a whole local NTFS volume on Windows, whose $MFT holds exactly that tree. The
+    reason is a sentence for the user. The app (ScanManager) and ``spaceknife scan --mft`` share it."""
+    if sys.platform != "win32":
+        return tr("MFT 快速扫描只在 Windows 上可用")
+    if len(roots) != 1:
+        return tr("一次只能读一个卷，这次有 {count} 个扫描位置", count=len(roots))
+    root = roots[0]
+    vol = root.volume
+    if vol is None:
+        return tr("认不出 {path} 所在的卷", path=root.path)
+    if vol.is_remote:
+        return tr("{path} 在网络位置上", path=root.path)
+    if str(vol.fs_type).upper() != "NTFS":
+        fs = vol.fs_type or tr("未知文件系统")
+        return tr("{mount} 是 {fs} 卷，只有 NTFS 卷有 $MFT", mount=vol.mount_point, fs=fs)
+    if not root.whole_volume:
+        return tr(
+            "只能扫整个卷（例如 {mount}），{path} 只是其中的一个文件夹", mount=vol.mount_point, path=root.path
+        )
+    return None
 
 
 def _check_sizes(record_size: int, cluster_size: int) -> None:
