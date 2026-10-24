@@ -385,6 +385,9 @@ async def _run_scan(
             except asyncio.CancelledError:
                 scanner.cancel()
                 raise
+            finally:
+                if not console.is_interactive:  # the empty line rich's Progress.stop() prints there
+                    console.print()
             return scanner, result, method
         from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
