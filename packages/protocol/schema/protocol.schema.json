@@ -20,6 +20,12 @@
           "default": null,
           "title": "Compare Id"
         },
+        "filter": {
+          "default": "",
+          "description": "The view's filter expression ('' = not filtered)",
+          "title": "Filter",
+          "type": "string"
+        },
         "node": {
           "anyOf": [
             {
@@ -63,6 +69,19 @@
           ],
           "default": null,
           "title": "View Id"
+        },
+        "zoom_node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The view's zoom root (where the user is)",
+          "title": "Zoom Node"
         }
       },
       "title": "ActionContext",
@@ -1648,6 +1667,12 @@
     },
     "CommandAction": {
       "properties": {
+        "args": {
+          "additionalProperties": true,
+          "description": "report.export: { format = \"<format or template>\" } picks it",
+          "title": "Args",
+          "type": "object"
+        },
         "command": {
           "title": "Command",
           "type": "string"
@@ -2723,6 +2748,8 @@
           "enum": [
             "switch",
             "segmented",
+            "select",
+            "multi",
             "number",
             "slider",
             "color",
@@ -2751,6 +2778,12 @@
         "description": {
           "default": "",
           "title": "Description",
+          "type": "string"
+        },
+        "group": {
+          "default": "",
+          "description": "A heading the dialog puts it under ( = none)",
+          "title": "Group",
           "type": "string"
         },
         "max": {
@@ -4085,6 +4118,12 @@
           ],
           "title": "Size Unit",
           "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "description": "The zoom root's own size in size_unit (what a row's share is of: 「占权重的 x%」)",
+          "title": "Total",
+          "type": "integer"
         },
         "view_id": {
           "title": "View Id",
@@ -5596,6 +5635,12 @@
     },
     "OpenAction": {
       "properties": {
+        "args": {
+          "additionalProperties": true,
+          "description": "A report's ReportContext.args",
+          "title": "Args",
+          "type": "object"
+        },
         "kind": {
           "const": "open",
           "default": "open",
@@ -8293,6 +8338,12 @@
           "description": "A table's next page (Table.more)",
           "title": "Cursor"
         },
+        "filter": {
+          "default": "",
+          "description": "The view's filter expression ('' = not filtered)",
+          "title": "Filter",
+          "type": "string"
+        },
         "node": {
           "anyOf": [
             {
@@ -8336,6 +8387,19 @@
           ],
           "default": null,
           "title": "View Id"
+        },
+        "zoom_node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The view's zoom root (where the user is)",
+          "title": "Zoom Node"
         }
       },
       "title": "ReportContext",
@@ -9463,6 +9527,8 @@
           "enum": [
             "switch",
             "segmented",
+            "select",
+            "multi",
             "number",
             "slider",
             "color",

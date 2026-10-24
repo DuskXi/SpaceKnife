@@ -34,7 +34,7 @@ from spaceknife_protocol.methods import (
     MethodSpec,
 )
 from spaceknife_sdk.errors import Issue
-from spaceknife_sdk.manifest import PLUGIN_API, ExportFormatSpec
+from spaceknife_sdk.manifest import PLUGIN_API, ExportFormatSpec, SettingSpec
 from spaceknife_sdk.plugin import Description, describe_declarative
 
 from .. import i18n
@@ -132,8 +132,8 @@ class PluginHost:
         self._state_subs: dict[tuple[str, str], dict[str, tuple[Session, Subscription]]] = defaultdict(dict)
         self._stream_tasks: dict[str, asyncio.Task[None]] = {}
         self._set_cache: dict[tuple[str, str], tuple[tuple[int, int], float, np.ndarray]] = {}
-        self._field_cache: dict[tuple[str, str, int, int, int], pp.PluginField | None] = {}
-        self._field_inflight: set[tuple[str, str, int, int, int]] = set()
+        self._field_cache: dict[tuple[str, str, int, int, int, str], pp.PluginField | None] = {}
+        self._field_inflight: set[tuple[str, str, int, int, int, str]] = set()
         self._reasons: dict[tuple[str, str, str, str, int], str] = {}  # change annotators' answers
         self._legends: dict[tuple[str, str, str], tuple[int, list[tuple[str, Any]]]] = {}
         self._legend_asked: set[tuple[str, str, str]] = set()
@@ -1339,12 +1339,31 @@ class PluginHost:
     # ------------------------------------------------------------- code on the render path
 
     def check_command(self, plugin: str, method: str, c: Any) -> str | None:
-        """A command's own availability check (``check = "<method>"``): 50 ms, else available."""
+        """A command's own availability check (``check = "<method>"``): called with the
+        :class:`ActionContext` the command would get (scan, view, selected node, zoom root, filter);
+        50 ms, else available. It returns why the command is unavailable, or nothing."""
         try:
-            value, _ = self.call_sync(plugin, "method", method, {"scan_id": None}, timeout=CHECK_TIMEOUT)
+            value, _ = self.call_sync(plugin, "method", method, self.action_context(c), timeout=CHECK_TIMEOUT)
         except RpcError:
             return None
         return str(value) if isinstance(value, str) and value else None
+
+    def action_context(self, c: Any) -> dict[str, Any]:
+        """The palette's context as a command's :class:`ActionContext` (a check, a command run by
+        the backend): where the user is."""
+        view = getattr(c, "view", None)
+        node = getattr(c, "selected_node", None)
+        if view is None:
+            return {"scan_id": None}
+        filt = view.filter
+        return {
+            "scan_id": self.api.scan_of_store(view.store),
+            "view_id": view.id,
+            "node": node,
+            "selection": [node] if node is not None else [],
+            "zoom_node": int(view.zoom.node),
+            "filter": filt.text if filt.active else "",
+        }
 
     def annotate_changes(self, compare_id: str, items: list[Any]) -> list[Any]:
         """Reasons from the change annotators for items the insight rules left blank (compute
@@ -1545,6 +1564,20 @@ class PluginHost:
 
         return sizes
 
+    def option_default(self, plugin: str, o: SettingSpec) -> Any:
+        """An export option's default: with ``default_from``, that setting's current value."""
+        if o.default_from is None:
+            return o.default
+        try:
+            value = self.server.settings.get(f"plugin.{plugin}.{o.default_from}")
+        except KeyError:
+            return o.default
+        if not isinstance(value, type(o.default)):
+            return o.default
+        if o.options and o.control != "multi" and value not in [v for v, _ in o.options]:
+            return o.default
+        return value
+
     def remote_format(self, rec: PluginRecord, spec: ExportFormatSpec) -> ExportFormat:
         """An export format whose chunks come from the plugin (on the compute thread of export.run)."""
         import queue
@@ -1564,7 +1597,7 @@ class PluginHost:
             selection: list[int] | None = None,
         ) -> Any:
             scan_id = host.api.scan_of_store(store)
-            opts = {o.name: o.default for o in spec.options}
+            opts = {o.name: host.option_default(plugin, o) for o in spec.options}
             opts.update({k: v for k, v in (options or {}).items() if k in opts})
             q: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=64)
 

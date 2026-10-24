@@ -25,6 +25,7 @@ class ExportOption(Payload):
     step: float | None = None
     unit: str = Field(default="", description="B: a size in bytes (shown and typed as a size)")
     placeholder: str = ""
+    group: str = Field(default="", description="A heading the dialog puts it under ( = none)")
 
 
 class ExportTarget(Payload):

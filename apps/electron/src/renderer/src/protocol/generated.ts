@@ -4,16 +4,20 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "ee9f72800afa8c2e";
+export const SCHEMA_HASH = "59a4f2062a30bd9b";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
   args?: Record<string, unknown>;
   compare_id?: string | null;
+  /** The view's filter expression ('' = not filtered) */
+  filter?: string;
   node?: number | null;
   scan_id?: string | null;
   selection?: number[];
   view_id?: string | null;
+  /** The view's zoom root (where the user is) */
+  zoom_node?: number | null;
 }
 
 export interface AgeCond {
@@ -361,6 +365,8 @@ export interface ColumnSpec {
 }
 
 export interface CommandAction {
+  /** report.export: { format = "<format or template>" } picks it */
+  args: Record<string, unknown>;
   command: string;
   kind: "command";
 }
@@ -610,9 +616,11 @@ export interface ExportIssue {
  * ``export_format``); its value goes to export.run ``options`` under ``name``.
  */
 export interface ExportOption {
-  control: "switch" | "segmented" | "number" | "slider" | "color" | "text";
+  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text";
   default: boolean | number | string;
   description: string;
+  /** A heading the dialog puts it under ( = none) */
+  group: string;
   max: number | null;
   min: number | null;
   name: string;
@@ -888,6 +896,8 @@ export interface FrameInfo {
   seq: number;
   /** What 'size' counts: bytes, or files / items */
   size_unit: "bytes" | "count" | "weight";
+  /** The zoom root's own size in size_unit (what a row's share is of: 「占权重的 x%」) */
+  total: number;
   view_id: string;
   /** Visualization that drew this frame */
   visual: string;
@@ -1215,6 +1225,8 @@ export interface OpTaskParams {
 }
 
 export interface OpenAction {
+  /** A report's ReportContext.args */
+  args: Record<string, unknown>;
   kind: "open";
   /** report:<full id> | panel:<full id> | settings:<plugin id> */
   target: string;
@@ -1768,10 +1780,14 @@ export interface ReportContext {
   compare_id?: string | null;
   /** A table's next page (Table.more) */
   cursor?: string | null;
+  /** The view's filter expression ('' = not filtered) */
+  filter?: string;
   node?: number | null;
   scan_id?: string | null;
   selection?: number[];
   view_id?: string | null;
+  /** The view's zoom root (where the user is) */
+  zoom_node?: number | null;
 }
 
 export interface ReportInfo {
@@ -1978,7 +1994,7 @@ export interface SettingChange {
 export interface SettingMeta {
   applies: "now" | "next_scan" | "new_views";
   category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about" | "plugins";
-  control: "switch" | "segmented" | "number" | "slider" | "color" | "text";
+  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text";
   /** 'key' (a switch that must be on) or 'key=value' for this row to be editable */
   depends: string | null;
   description: string;

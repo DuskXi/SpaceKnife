@@ -27,7 +27,7 @@ import numpy as np
 from pydantic import BaseModel, ValidationError
 
 from spaceknife_protocol.binary import decode_frame, encode_frame
-from spaceknife_protocol.errors import ErrorCode
+from spaceknife_protocol.errors import ErrorCode, RequestError
 from spaceknife_protocol.plugins import NodeRef, ReportContext
 from spaceknife_protocol.text import CATALOG, LANG
 
@@ -55,14 +55,8 @@ REQUEST_TIMEOUT = 120.0
 Emit = Callable[[Any, list[bytes]], None]
 
 
-class CallError(Exception):
+class CallError(RequestError):
     """A call failed: what goes back to the host (protocol error code, message, data)."""
-
-    def __init__(self, code: int, message: str, data: Any = None) -> None:
-        super().__init__(message)
-        self.code = int(code)
-        self.message = message
-        self.data = data
 
 
 def error_of(exc: BaseException, log: Callable[[str], None] | None = None) -> CallError:

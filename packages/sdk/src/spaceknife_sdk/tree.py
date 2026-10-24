@@ -280,6 +280,10 @@ class TreeView:
     def __repr__(self) -> str:
         return f"TreeView({self.scan_id}, n={self.n}, epoch={self.epoch})"
 
+    def __len__(self) -> int:
+        """The number of nodes: ids are 0 … len(tree) - 1 (node 0 is the virtual top)."""
+        return self.n
+
     def close(self) -> None:
         """Let go of a snapshot opened with ``ctx.snapshots.open`` before the call ends (at most two
         may be open at once). Nothing happens for a scan's own tree."""

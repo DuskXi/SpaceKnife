@@ -51,5 +51,16 @@ class CloseCode(IntEnum):
     VERSION_MISMATCH = 4426
 
 
+class RequestError(Exception):
+    """A request answered with an error: ``code`` (an :class:`ErrorCode`), ``message`` (for the
+    user), ``data``. What a failed call of a plugin raises in tests (``MockHost``) and clients."""
+
+    def __init__(self, code: int, message: str, data: object = None) -> None:
+        super().__init__(message)
+        self.code = int(code)
+        self.message = message
+        self.data = data
+
+
 class ProtocolError(Exception):
     """Raised by codecs when a message or frame does not follow the protocol."""

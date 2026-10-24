@@ -674,7 +674,10 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
 }
 
 /** The weight of a frame's root (a plugin's weights: the root bar, else the largest row). */
-export function weightTotal(frame: { info: { root: { size: number } | null }; size: ArrayLike<number | bigint> }): number {
+/** What a row's share is of: the zoom root's own size (the frame says it; older backends: the
+ * root bar of a flame, else the largest row). */
+export function weightTotal(frame: { info: { root: { size: number } | null; total?: number }; size: ArrayLike<number | bigint> }): number {
+  if (frame.info.total) return frame.info.total;
   if (frame.info.root?.size) return frame.info.root.size;
   let max = 0;
   for (let i = 0; i < frame.size.length; i++) max = Math.max(max, Number(frame.size[i]));

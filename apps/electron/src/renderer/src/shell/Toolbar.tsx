@@ -19,6 +19,7 @@ import { registeredLayouts } from "@/visual/registry";
 import { runShortcut } from "@/state/commands";
 import { PluginColorItems, PluginColorSegment } from "@/plugins/ColorMenu";
 import { PluginIcon } from "@/plugins/icons";
+import { pluginTabTitle } from "@/plugins/slots";
 
 import { ComparePicker, DIRECTIONS, DirectionSegment, directionLabel, ExitCompare } from "./Compare";
 import { FilterBox } from "./FilterBox";
@@ -35,6 +36,7 @@ export function Toolbar() {
   const basket = useApp(basketCount);
   const basketOpen = useApp((s) => s.basketOpen);
   const st = view?.state;
+  const extensions = useApp((s) => s.extensions); // a plugin tab's title in the language on screen
   const scanTab = tab.kind === "scan";
   const settingsTab = tab.kind === "settings";
   const helpTab = tab.kind === "help";
@@ -112,7 +114,7 @@ export function Toolbar() {
         <nav className="crumbs" aria-label={t("当前位置")} data-fit-min={CRUMBS_MIN}>
           <span className="crumb-cur">
             <Icon name={tab.kind === "machine" ? "diskGauge" : tab.kind === "plugin" ? "layers" : "drive"} />
-            {tab.kind === "machine" ? t("本机磁盘") : tab.kind === "plugin" ? tab.title : t("新扫描")}
+            {tab.kind === "machine" ? t("本机磁盘") : tab.kind === "plugin" ? pluginTabTitle(tab, { extensions }) : t("新扫描")}
           </span>
         </nav>
       ) : (

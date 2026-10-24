@@ -138,6 +138,9 @@ def _needs(host: PluginHost, rec: PluginRecord, when: list[str]) -> tuple[pal.Ne
             pal._view(c)
             or (None if c.view is not None and c.view.compare is not None else _("只在对比中可用"))
         ),
+        "file": lambda c: pal._selection(c) or (None if _selected_kind(c) == "file" else _("只用于文件")),
+        "dir": lambda c: pal._selection(c) or (None if _selected_kind(c) == "dir" else _("只用于文件夹")),
+        "on_disk": lambda c: _("这次扫描的条目不在磁盘上") if c.scan_source or _selected_virtual(c) else None,
     }
     for w in when:
         if w in table:
@@ -166,6 +169,21 @@ def _needs(host: PluginHost, rec: PluginRecord, when: list[str]) -> tuple[pal.Ne
                 return None if other in c.plugins else tr("需要启用插件 {id}", id=other)
 
             out.append(has_plugin)
+        elif w.startswith("ext:"):
+            exts = {e.strip().lower().lstrip(".") for e in w[4:].split(",") if e.strip()}
+
+            def has_ext(c: pal.Context, exts: set[str] = exts) -> str | None:
+                why = pal._selection(c)
+                if why is not None:
+                    return why
+                node, view = c.selected_node, c.view
+                if node is None or view is None:
+                    return _("没有选中项")
+                name = view.store.name(node)
+                ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+                return None if _selected_kind(c) == "file" and ext in exts else _("只用于这几种文件")
+
+            out.append(has_ext)
         elif w.startswith("source:"):
             src = w[7:]
 
@@ -174,6 +192,29 @@ def _needs(host: PluginHost, rec: PluginRecord, when: list[str]) -> tuple[pal.Ne
 
             out.append(from_source)
     return tuple(out)
+
+
+def _selected_kind(c: pal.Context) -> str:
+    """The selected node: "file", "dir" or "" (none, or not a real node)."""
+    node = c.selected_node
+    if node is None or c.view is None:
+        return ""
+    from ..store.nodes import Kind
+
+    kind = int(c.view.store.cols["kind"][node])
+    return "dir" if kind == Kind.DIR else "file" if kind == Kind.FILE else ""
+
+
+def _selected_virtual(c: pal.Context) -> bool:
+    """The selected node (or one above it) is not on this disk (MFT pseudo folders, a source's)."""
+    node = c.selected_node
+    if node is None or c.view is None:
+        return False
+    from ..store.nodes import Flag
+
+    store = c.view.store
+    flags = store.cols["flags"]
+    return any(int(flags[n]) & int(Flag.VIRTUAL) for n in (node, *store.ancestors(node)))
 
 
 def _pinyin(rec: PluginRecord) -> dict[str, list[str]]:
@@ -247,6 +288,8 @@ def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
         texts.append((f"option:{i}", label))
     if spec.placeholder is not None:
         texts.append(("placeholder", spec.placeholder))
+    if spec.unit is not None:
+        texts.append(("unit", spec.unit))
     depends = spec.depends
     if depends and "." not in depends.split("=", 1)[0]:
         depends = f"plugin.{rec.id}.{depends}"
@@ -262,7 +305,7 @@ def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
         min=spec.min,
         max=spec.max,
         step=spec.step,
-        unit=spec.unit,
+        unit=spec.unit.zh if spec.unit is not None else "",
         applies=spec.applies,
         synonyms=tuple(spec.synonyms),
         depends=depends,
@@ -295,7 +338,7 @@ def _visualization(host: PluginHost, rec: PluginRecord, spec: VisualizationSpec)
         icon=spec.icon or base.icon,
         order=100 + spec.order,
         engine=base.engine,
-        default_color=base.default_color,
+        default_color=_color_id(rec, spec.default_color) or base.default_color,
         compare=spec.compare and spec.size == "alloc",
         free_space=base.free_space and spec.size == "alloc",
         options=tuple((o, f"plugin.{rec.id}.{o}") for o in spec.options)
@@ -307,6 +350,15 @@ def _visualization(host: PluginHost, rec: PluginRecord, spec: VisualizationSpec)
         plugin=rec.id,
         text=spec.title,
     )
+
+
+def _color_id(rec: PluginRecord, name: str | None) -> str | None:
+    """A colour mode a contribution names: a built-in one, this plugin's by name, any by full id."""
+    if not name:
+        return None
+    if name in ("class", "flat", "time", "branch") or "." in name:
+        return name
+    return f"{rec.id}.{name}"
 
 
 def _export_template(rec: PluginRecord, spec: ExportTemplateSpec) -> Any:

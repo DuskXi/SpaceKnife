@@ -20,6 +20,9 @@ export interface WhenEnv {
   owner: string | null;
   /** the scan source of the scan, when it came from one (scan.start source) */
   sourceId?: string | null;
+  /** the selected node, when the place knows it (file / dir / ext: need it; without it a selection
+   * is enough) */
+  node?: { kind: "file" | "dir" | "other"; name: string; virtual?: boolean } | null;
 }
 
 /** Why the conditions don't hold (the first that fails), or null when they all do; an unknown
@@ -63,6 +66,23 @@ function check(name: string, arg: string, env: WhenEnv): string | null {
       return env.plugins.includes(arg) ? null : t("需要启用插件「{id}」", { id: arg });
     case "source":
       return env.sourceId && env.sourceId === full(env.owner, arg) ? null : t("只用于这个插件的扫描来源");
+    case "file":
+    case "dir": {
+      if (!env.selection) return t("没有选中项");
+      if (!env.node) return null;
+      if (env.node.kind !== name) return name === "file" ? t("只用于文件") : t("只用于文件夹");
+      return null;
+    }
+    case "ext": {
+      if (!env.selection) return t("没有选中项");
+      if (!env.node) return null;
+      const exts = arg.split(",").map((e) => e.trim().toLowerCase().replace(/^\./, "")).filter(Boolean);
+      const dot = env.node.name.lastIndexOf(".");
+      const ext = dot > 0 ? env.node.name.slice(dot + 1).toLowerCase() : "";
+      return env.node.kind === "file" && exts.includes(ext) ? null : t("只用于这几种文件");
+    }
+    case "on_disk":
+      return env.sourceId || env.node?.virtual ? t("这次扫描的条目不在磁盘上") : null;
     default:
       return t("这个版本不认识的条件：{name}", { name: name || "?" });
   }

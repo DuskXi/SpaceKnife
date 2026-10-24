@@ -633,6 +633,7 @@ def frame_info(host: ViewHost, frame: Frame, reason: str) -> pv.FrameInfo:
         root=pv.FrameRoot(**asdict(frame.root)) if drawn else None,
         palette=frame.palette if frame.pal is not None else None,
         size_unit=frame.size_unit,  # type: ignore[arg-type]
+        total=max(0, int(frame.root.size)),
     )
 
 

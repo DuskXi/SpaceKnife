@@ -196,6 +196,8 @@ export interface AppState {
   op: OpProgressEvent | null;
   /** 「导出报告…」 dialog */
   exportOpen: boolean;
+  /** the template or format it opens on (report.export with args.format), else the last one */
+  exportPick?: string;
   /** macOS without Full Disk Access: the dialog before a scan (shell/FullDiskAccessDialog) */
   fdaPrompt: boolean;
   /** interface language (M7.5): the root re-renders on change, every t() follows */

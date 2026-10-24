@@ -44,6 +44,12 @@ def stuck(ctx: Context, p: Wait) -> Done:
     return Done(tag=p.tag)
 
 
+@plugin.method(timeout=0.3)
+async def blocking(ctx: Context, p: Wait) -> Done:
+    time.sleep(p.seconds)  # noqa: ASYNC251 — never awaits: it holds the plugin's event loop
+    return Done(tag=p.tag)
+
+
 @plugin.method
 async def quick(ctx: Context) -> Done:
     return Done(tag="quick")

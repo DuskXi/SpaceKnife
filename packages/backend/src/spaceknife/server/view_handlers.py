@@ -140,6 +140,8 @@ def install(server: Server) -> None:
                     default_color=v.default_color,
                     available=available,
                     reason=None if available else _("这种可视化在当前界面不可用"),
+                    plugin=v.plugin,
+                    size_unit=v.size_unit,  # type: ignore[arg-type]
                 )
             )
         return pv.VisualListResult(visuals=out)

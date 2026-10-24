@@ -188,11 +188,11 @@ async def node_fields(
     pending = False
     todo = []
     for c in wanted:
-        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner])
-        if key in host._field_cache:
+        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner], lang)
+        if key in host._field_cache:  # per language: a value may be a text (FieldValue(value=T(…)))
             hit = host._field_cache[key]
             if hit is not None:
-                out.append(hit.model_copy(update={"title": c.spec.title.get(lang)}))
+                out.append(hit)
             continue
         todo.append(c)
 
@@ -229,7 +229,7 @@ async def node_fields(
     late: list[Any] = []
 
     async def fetch(c: Any, timeout: float = FIELD_TIMEOUT_S) -> None:  # noqa: ASYNC109
-        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner])
+        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner], lang)
         if key in host._field_inflight:
             return
         host._field_inflight.add(key)
@@ -258,7 +258,7 @@ async def node_fields(
     else:
         await asyncio.gather(*(fetch(c) for c in todo), return_exceptions=True)
         for c in todo:
-            hit = host._field_cache.get((c.id, p.scan_id, p.node, version, host.epochs[c.owner]))
+            hit = host._field_cache.get((c.id, p.scan_id, p.node, version, host.epochs[c.owner], lang))
             if hit is not None:
                 out.append(hit)
         if late:

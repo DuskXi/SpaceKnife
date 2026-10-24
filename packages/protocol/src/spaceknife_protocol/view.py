@@ -278,6 +278,10 @@ class FrameInfo(Payload):
         description="colors.v1: a plugin colour mode drew this frame; its u1 'pal' column follows",
     )
     size_unit: SizeUnit = Field(default="bytes", description="What 'size' counts: bytes, or files / items")
+    total: int = Field(
+        default=0,
+        description="The zoom root's own size in size_unit (what a row's share is of: 「占权重的 x%」)",
+    )
 
 
 class ViewState(Payload):

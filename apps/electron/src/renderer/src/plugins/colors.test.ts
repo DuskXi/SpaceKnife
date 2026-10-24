@@ -163,4 +163,15 @@ describe("when", () => {
     expect(whenReason(["source:zip"], env({ sourceId: "c.d.zip" }))).toBe("只用于这个插件的扫描来源");
     expect(whenReason(["moon_phase"], env())).toBe("这个版本不认识的条件：moon_phase");
   });
+
+  it("file, dir, ext: and on_disk look at the selected node when the place knows it", () => {
+    const file = { kind: "file" as const, name: "a.LOG" };
+    expect(whenReason(["file", "ext:log,txt", "on_disk"], env({ node: file }))).toBeNull();
+    expect(whenReason(["dir"], env({ node: file }))).toBe("只用于文件夹");
+    expect(whenReason(["ext:zip"], env({ node: file }))).toBe("只用于这几种文件");
+    expect(whenReason(["file"], env({ node: { kind: "dir", name: "src" } }))).toBe("只用于文件");
+    expect(whenReason(["file"], env({ selection: false }))).toBe("没有选中项");
+    expect(whenReason(["file"], env())).toBeNull(); // the kind unknown here: a selection is enough
+    expect(whenReason(["on_disk"], env({ sourceId: "a.b.zip" }))).toBe("这次扫描的条目不在磁盘上");
+  });
 });

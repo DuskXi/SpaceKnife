@@ -299,15 +299,16 @@ command = "open_largest"
 | 字段 | 说明 |
 |---|---|
 | `name` `title` `default` | 必需；`default` 是布尔、整数、小数或文字 |
-| `control` | `switch segmented number slider color text`，默认按 `default` 和 `options` 推断 |
+| `control` | `switch segmented select multi number slider color text`；默认按 `default` 和 `options` 推断：4 个以内的选项是 `segmented`，更多是 `select`（下拉）。`multi` 的值是选中的值按 `options` 的顺序用逗号连起来：`default = "name,size"`，读时 `.split(",")` |
 | `description` | 说明 |
-| `options` | `[[值, 标题], …]`：分段选择 |
-| `min` `max` `step` `unit` | 数字的范围、步长和单位（`B`：按大小显示和输入，如 1 MB） |
+| `options` | `[[值, 标题], …]`：可选的值 |
+| `min` `max` `step` `unit` | 数字的范围、步长和单位；`unit` 可以中英成对（`{ zh = "天", en = "days" }`），`B` 按大小显示和输入（1 MB） |
 | `applies` | `now`（默认）`next_scan` `new_views` |
 | `synonyms` | 设置搜索的同义词 |
 | `depends` | 另一个开关设置的名字：它关着时这一项变灰 |
-| `group` | 分组标题 |
+| `group` | 分组标题（设置页写成「插件名 › 分组」） |
 | `placeholder` | 空的文字框里的提示 |
+| `default_from` | 只用于导出格式的选项：默认值取本插件这个设置的当前值 |
 
 ```toml ex
 [[settings]]
@@ -438,9 +439,10 @@ title = { zh = "面板", en = "Board" }
 | `icon` `order` | 工具栏里的图标和位置（50） |
 | `base` | `treemap` `flame`（默认）`flame_polar` |
 | `size` | 面积按什么：`alloc`（占用，默认）`size`（逻辑大小）`files`（文件数）`items`（项数）`code`（函数给权重） |
-| `unit` | 面积的单位：`bytes` `count` 或 `weight`（默认按 `size` 推断：`code` 是 `weight`），决定标签的写法：`weight` 的标签写占上一层的比例，悬停卡另写真实占用 |
+| `unit` | 面积的单位：`bytes` `count` 或 `weight`（默认按 `size` 推断：`code` 是 `weight`），决定标签的写法：`weight` 的标签写占缩放根权重的比例（同一层加起来不超过 100%），悬停卡另写真实占用 |
 | `options` | 本插件的设置名：传给函数的 `v.options` |
 | `compare` | 对比时也可用（False） |
+| `default_color` | 视图切到它时用的配色：`class flat time branch`，或本插件的配色名（其他插件的写全名）；不写跟着 `base` |
 
 ```toml ex
 [[visualizations]]
@@ -450,7 +452,7 @@ base = "flame"
 size = "files"
 ```
 
-代码版：函数给每个节点一个权重（长度 `tree.n` 的数组），宿主只取文件的权重、把它们加到文件夹上。权重是 ≥ 0 的整数，NaN 和负数当 0。`VisualInput` 有 `tree` `options`（声明的选项，按视图里的值）`settings`（本插件全部设置）`ctx` 和 `cancelled`/`check()`。权重按树版本、选项和设置缓存。`spaceknife_sdk.layout` 有几个帮手：`files_only` `by_column` `count` `check`。
+代码版：函数给每个节点一个权重（长度 `len(tree)` 的数组），宿主只取文件的权重、把它们加到文件夹上。权重是 ≥ 0 的整数，NaN 和负数当 0。`VisualInput` 有 `tree` `options`（声明的选项，按视图里的值）`settings`（本插件全部设置）`ctx` 和 `cancelled`/`check()`。权重按树版本、选项和设置缓存。`spaceknife_sdk.layout` 有几个帮手：`files_only` `by_column` `count` `check`。
 
 ```python ex
 @plugin.visualization("by_lines", T("按估计行数", "By estimated lines"), base="treemap")

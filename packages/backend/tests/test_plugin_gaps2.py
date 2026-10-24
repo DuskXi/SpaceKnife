@@ -90,12 +90,18 @@ def plugin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return folder
 
 
-async def test_text_goes_to_the_clipboard_of_who_asked(plugin: Path) -> None:
-    async with MockHost.load(plugin / "plugin.py") as host:
+@pytest.mark.parametrize("process", [False, True], ids=["inprocess", "process"])
+async def test_text_goes_to_the_clipboard_of_who_asked(plugin: Path, process: bool) -> None:
+    # round 2: in a plugin process the clipboard message was not on the wire, the host ended the
+    # process for a protocol violation (MockHost ran in process only)
+    async with MockHost.load(plugin / "plugin.py", process=process) as host:
         host.scan(make_tree({"a.txt": 1}))
         await host.call("copy")
-        assert host.clipboard == ["复制的文字"]
-    async with MockHost.load(plugin / "plugin.py", grant=["tree.read"]) as host:
+        await host.call("copy")
+        assert host.clipboard == ["复制的文字", "复制的文字"]
+        rec = host.server.plugins.records["t.gaps"]
+        assert rec.restarts == 0 and rec.state == "enabled"
+    async with MockHost.load(plugin / "plugin.py", grant=["tree.read"], process=process) as host:
         host.scan(make_tree({"a.txt": 1}))
         with pytest.raises(Exception, match="clipboard"):
             await host.call("copy")

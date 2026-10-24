@@ -142,6 +142,58 @@ async def test_a_stuck_call_is_given_up(monkeypatch: pytest.MonkeyPatch) -> None
         assert rec.runtime.pid != pid
 
 
+async def test_a_blocked_event_loop_is_logged_then_given_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    from loguru import logger
+
+    from spaceknife.plugins.runtime import process as process_mod
+
+    monkeypatch.setattr(process_mod, "CANCEL_GRACE", 0.5)
+    monkeypatch.setattr(process_mod, "CANCEL_LIMIT", 2.0)
+    monkeypatch.setattr(process_mod, "WATCH_EVERY", 0.2)
+    monkeypatch.setattr(host_mod, "BACKOFF_S", (0.05, 0.05, 0.05))
+    lines: list[str] = []
+    sink = logger.add(lambda m: lines.append(str(m)), level="WARNING")
+    try:
+        async with mock("t.slow", process=True) as host:
+            rec = host.server.plugins.records["t.slow"]
+            with pytest.raises(RpcError):
+                await host.call("blocking", seconds=30)
+            await asyncio.sleep(1.0)  # past the grace: said which call, the process still there
+            assert rec.restarts == 0
+            assert any("blocking" in ln and "still runs" in ln for ln in lines)
+            for _ in range(60):  # past the limit: given up, and started again when asked
+                await asyncio.sleep(0.1)
+                if rec.restarts or rec.runtime is None or rec.runtime.state != "running":
+                    break
+            assert any("stopping the plugin" in ln and "blocking" in ln for ln in lines)
+            assert await host.call("quick") == {"tag": "quick", "cancelled": False}
+    finally:
+        logger.remove(sink)
+
+
+def test_every_message_the_sdk_sends_is_on_the_wire() -> None:
+    import ast
+    import typing
+
+    import spaceknife_sdk
+    from spaceknife_sdk import wire
+
+    union = typing.get_args(typing.get_args(wire.FromPlugin)[0])
+    on_wire = {m.model_fields["type"].default for m in union}
+    sent: set[str] = set()
+    for f in Path(spaceknife_sdk.__file__).parent.glob("*.py"):
+        for call in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "notify"
+                and call.args
+                and isinstance(call.args[0], ast.Constant)
+            ):
+                sent.add(str(call.args[0].value))
+    assert sent and sent <= on_wire, sent - on_wire
+
+
 async def test_concurrency_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(host_mod, "MAX_QUEUED", 2)
     async with mock("t.slow") as host:

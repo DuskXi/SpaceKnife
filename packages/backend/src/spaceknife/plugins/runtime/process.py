@@ -36,7 +36,9 @@ from .base import Callbacks, Chunk, PluginRuntime, RuntimeCallError, StartInfo
 CONNECT_TIMEOUT = 10.0
 READY_TIMEOUT = 30.0  # importing the plugin's code (numpy, pydantic …) on a cold disk
 HUNG_AFTER = 30.0  # calls in flight and not a word for this long: it is stuck
-CANCEL_GRACE = 5.0  # a cancelled call still running after this long: the process is stopped
+CANCEL_GRACE = 5.0  # a cancelled call still running after this long: logged (which one)
+CANCEL_LIMIT = 30.0  # … and after this long the process is stopped (its event loop is blocked: an
+# async handler that does not await; a plain def handler is answered at once and its thread dropped)
 WATCH_EVERY = 1.0
 STDERR_LINES = 200
 _ACCEPT_SLICE = 0.25
@@ -103,7 +105,8 @@ class ProcessRuntime(PluginRuntime):
         self._last_seen = time.monotonic()
         self._stopping = False
         self._ready: asyncio.Future[dict[str, Any]] | None = None
-        self._zombies: dict[int, float] = {}  # cancelled calls not answered yet -> when to give up
+        # cancelled calls not answered yet -> (when cancelled, "kind name", warned yet)
+        self._zombies: dict[int, tuple[float, str, bool]] = {}
 
     # ------------------------------------------------------------- lifecycle
 
@@ -354,9 +357,11 @@ class ProcessRuntime(PluginRuntime):
             task.add_done_callback(self._requests.discard)
         elif t == "heartbeat":
             self.rss = msg.rss
+        elif t == "stuck":
+            self.callbacks.notify("stuck", {"threads": msg.threads})
         elif t == "ready":
             pass
-        else:  # event, state, toast, log, progress
+        else:  # event, state, toast, clipboard, log, progress, image_drop
             self.callbacks.notify(t, msg.model_dump(exclude={"type"}))
 
     async def _answer(self, rid: int, method: str, params: dict[str, Any], frames: list[bytes]) -> None:
@@ -394,12 +399,29 @@ class ProcessRuntime(PluginRuntime):
             if p is None or self._stopping:
                 return
             now = time.monotonic()
-            if any(now > until for until in self._zombies.values()):
-                logger.warning("plugin {} did not stop a cancelled call; stopping it", self.start_info.plugin)
-                self.kill()
-                self.state = "crashed"
-                self.callbacks.exited(None, "the plugin did not stop a cancelled call")
-                return
+            for cid, (since, what, warned) in list(self._zombies.items()):
+                if now - since > CANCEL_LIMIT:
+                    logger.warning(
+                        "plugin {}: the cancelled call {} (#{}) still runs after {:.0f} s; stopping the "
+                        "plugin (an async handler that never awaits blocks it: make it a plain def)",
+                        self.start_info.plugin,
+                        what,
+                        cid,
+                        CANCEL_LIMIT,
+                    )
+                    self.kill()
+                    self.state = "crashed"
+                    self.callbacks.exited(None, f"the plugin did not stop a cancelled call ({what})")
+                    return
+                if not warned and now - since > CANCEL_GRACE:
+                    self._zombies[cid] = (since, what, True)
+                    logger.warning(
+                        "plugin {}: the cancelled call {} (#{}) still runs after {:.0f} s",
+                        self.start_info.plugin,
+                        what,
+                        cid,
+                        CANCEL_GRACE,
+                    )
             if self._pending and time.monotonic() - self._last_seen > HUNG_AFTER:
                 logger.warning("plugin {} is not responding; stopping it", self.start_info.plugin)
                 self.kill()
@@ -438,7 +460,7 @@ class ProcessRuntime(PluginRuntime):
             self._last_seen = max(self._last_seen, time.monotonic())
             return await fut
         except asyncio.CancelledError:
-            self._zombies[call_id] = time.monotonic() + CANCEL_GRACE
+            self._zombies[call_id] = (time.monotonic(), f"{kind} {name!r}", False)
             with contextlib.suppress(RuntimeCallError):
                 await self._send({"type": "cancel", "id": call_id})
             raise

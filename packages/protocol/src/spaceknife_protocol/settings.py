@@ -17,7 +17,9 @@ from .filter import FilterClassInfo
 SettingCategory = Literal[
     "general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about", "plugins"
 ]
-SettingControl = Literal["switch", "segmented", "number", "slider", "color", "text"]
+SettingControl = Literal["switch", "segmented", "select", "multi", "number", "slider", "color", "text"]
+"""``select``: a drop-down (many options); ``multi``: several options at once, the value is their
+values joined by commas (``"name,size"``)."""
 SettingApplies = Literal["now", "next_scan", "new_views"]
 SettingValue = bool | int | float | str
 

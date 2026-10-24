@@ -7,6 +7,7 @@ import type { ExportOption, ExportTarget } from "@/protocol/generated";
 import { RpcError } from "@/protocol/rpc";
 import { call } from "@/state/actions";
 import { focusedViewId, set, toast, useApp } from "@/state/store";
+import { MultiChoice } from "@/ui/MultiChoice";
 import { fmtSize, parseSizeText } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon } from "@/ui/Icon";
@@ -33,6 +34,7 @@ export function ExportDialog() {
     return sel != null && sel > 0 && sel >>> 30 === 0 ? sel : null;
   });
   const epoch = useApp((s) => s.exportsEpoch); // plugins added or removed formats: read them again
+  const asked = useApp((s) => s.exportPick); // report.export { format = … }: open on that one
   const [targets, setTargets] = useState<ExportTarget[] | null>(null);
   const [pick, setPick] = useState("Grouped by folder");
   const [scope, setScope] = useState<"zoom" | "all" | "selection">("zoom");
@@ -41,6 +43,12 @@ export function ExportDialog() {
   const [options, setOptions] = useState<Record<string, OptionValue>>({});
 
   useEffect(() => setTargets(null), [epoch]);
+  useEffect(() => {
+    if (open && asked) {
+      setPick(asked);
+      set({ exportPick: undefined });
+    }
+  }, [open, asked]);
   useEffect(() => {
     if (!open || targets) return;
     void call("export.targets", {})
@@ -55,7 +63,7 @@ export function ExportDialog() {
   }, [open]);
   if (!open) return null;
 
-  const close = () => set({ exportOpen: false });
+  const close = () => set({ exportOpen: false, exportPick: undefined });
   const target = targets?.find((x) => x.name === pick) ?? targets?.[0];
   const values: Record<string, OptionValue> = Object.fromEntries((target?.options ?? []).map((o) => [o.name, options[`${target!.name}:${o.name}`] ?? o.default]));
   const setOption = (o: ExportOption, v: OptionValue) => target && setOptions((x) => ({ ...x, [`${target.name}:${o.name}`]: v }));
@@ -98,6 +106,7 @@ export function ExportDialog() {
         <h3 id="export-title">{t("导出报告")}</h3>
         {!viewId && <p className="muted">{t("先打开一次扫描")}</p>}
         {targets === null && <p className="muted">{t("正在读取模板…")}</p>}
+        <div className="export-body">
         {targets && (
           <div className="export-groups" role="radiogroup" aria-label={t("模板与格式")}>
             {(["template", "format"] as const).map((kind) => (
@@ -122,11 +131,15 @@ export function ExportDialog() {
         )}
         {target && target.options.length > 0 && (
           <div className="export-options" aria-label={t("这种格式的选项")}>
-            {target.options.map((o) => (
-              <OptionField key={o.name} o={o} value={values[o.name]!} onChange={(v) => setOption(o, v)} />
+            {target.options.map((o, i) => (
+              <div key={o.name} className="export-options-item">
+                {o.group && o.group !== target.options[i - 1]?.group && <h4>{o.group}</h4>}
+                <OptionField o={o} value={values[o.name]!} onChange={(v) => setOption(o, v)} />
+              </div>
             ))}
           </div>
         )}
+        </div>
         <div className="export-scope">
           {(zoomed || selected != null) && (
             <div className="segmented small" role="radiogroup" aria-label={t("范围")}>
@@ -167,7 +180,8 @@ export function ExportDialog() {
 
 type OptionValue = boolean | number | string;
 
-/** One option of a plugin's format (declared like a setting): a switch, a choice, a number, a size or text. */
+/** One option of a plugin's format (declared like a setting): a switch, a choice (or several), a
+ * number, a size or text. */
 function OptionField({ o, value, onChange }: { o: ExportOption; value: OptionValue; onChange: (v: OptionValue) => void }) {
   const [text, setText] = useState(String(value));
   useEffect(() => setText(o.unit === "B" && typeof value === "number" ? fmtSize(value) : String(value)), [value, o.unit]);
@@ -183,6 +197,13 @@ function OptionField({ o, value, onChange }: { o: ExportOption; value: OptionVal
         <input type="checkbox" checked={!!value} onChange={(e) => onChange(e.target.checked)} />
         {label}
       </label>
+    );
+  if (o.control === "multi")
+    return (
+      <div className="export-multi">
+        {label}
+        <MultiChoice name={o.title} options={o.options} value={String(value ?? "")} onChange={onChange} />
+      </div>
     );
   if (o.options.length)
     return (

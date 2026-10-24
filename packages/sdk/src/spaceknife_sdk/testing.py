@@ -166,6 +166,7 @@ class MockHost:
     _stores: list[tuple[str, Any]] = field(default_factory=list)
     _trees: list[Path] = field(default_factory=list)
     _snapshots: int = 0
+    _made: dict[str, float] = field(default_factory=dict)  # synthetic scan -> when it was made
 
     # ------------------------------------------------------------- setting up
 
@@ -270,6 +271,7 @@ class MockHost:
             store = tree
         scan_id = f"scan-mock{len(self._stores) + 1}"
         self._stores.append((scan_id, store))
+        self._made[scan_id] = time.time()
         self.scan_id = scan_id
         return scan_id
 
@@ -301,8 +303,8 @@ class MockHost:
                         elapsed_s=0.0,
                         rate=0.0,
                         progress=1.0,
-                        started_at=None,
-                        finished_at=None,
+                        started_at=_when(self._made.get(scan_id)),
+                        finished_at=_when(self._made.get(scan_id)),
                     ),
                 )
                 await self.server.plugins.push_update({"roots": self.server.plugins.api.scan_roots()})
@@ -317,6 +319,18 @@ class MockHost:
         busy = [t for t in list(self.server.plugins._background) if not t.done()]
         if busy:
             await asyncio.wait(busy, timeout=35.0)
+
+    async def settled(self) -> None:
+        """Wait until what the host does in the background is done: hover fields asked for late
+        (``fields("hover")`` is empty the first time, as in the app), hooks, settings and language
+        changes. ``fields``, ``report`` … called after this see the results."""
+        await self._ready()
+        for _ in range(100):
+            busy = [t for t in list(self.server.plugins._background) if not t.done()]
+            if not busy and not self._settings_pending:
+                return
+            await self._settle()
+            await asyncio.sleep(0)
 
     async def scan_dir(self, path: str | os.PathLike[str]) -> str:
         """Scan a real folder (a hard scan in this process), wait for it, use it."""
@@ -350,6 +364,12 @@ class MockHost:
                 raise KeyError(rel)
             node = found
         return int(node)
+
+    def path(self, rel: str = "") -> str:
+        """The path of a node as the app shows it (the system's form: ``\\`` on Windows), by its
+        place relative to the root (``"logs/a.txt"``). Compare paths a plugin writes with this,
+        not with ``files_root / "…"`` joined by hand."""
+        return str(self.store.path(self.find(rel)))
 
     # ------------------------------------------------------------- calling the plugin
 
@@ -537,6 +557,20 @@ class MockHost:
             return b"".join(p for p in parts if isinstance(p, bytes))
         return "".join(p for p in parts if isinstance(p, str))
 
+    async def export_text(self, name: str, **kw: Any) -> str:
+        """:meth:`export` of a text format (str)."""
+        out = await self.export(name, **kw)
+        if not isinstance(out, str):
+            raise TypeError(f"{name!r} wrote bytes: use export_bytes")
+        return out
+
+    async def export_bytes(self, name: str, **kw: Any) -> bytes:
+        """:meth:`export` of a binary format (``binary = true``)."""
+        out = await self.export(name, **kw)
+        if not isinstance(out, bytes):
+            raise TypeError(f"{name!r} wrote text: use export_text")
+        return out
+
     async def source(self, name: str, uri: str) -> str:
         """Scan ``uri`` with the plugin's scan source; returns the scan id (now in front). Raises
         RuntimeError with the plugin's message when the listing failed (as the app's status bar
@@ -568,8 +602,96 @@ class MockHost:
 
     def commands(self) -> dict[str, Any]:
         """The plugin's commands as the palette has them: full id -> the command (``.name``,
-        ``.keys``, ``.action``, ``.available(ctx)`` …); filter presets are among them."""
+        ``.keys``, ``.action``, ``.menus`` …); filter presets are among them. Run one with
+        :meth:`command`, ask whether it can run with :meth:`command_available`."""
         return {c.id: c.impl for c in self._owned("command")}
+
+    def _command(self, name: str) -> Any:
+        cid = name if "." in name else f"{self.plugin_id}.{name}"
+        cmd = self.commands().get(cid)
+        if cmd is None:
+            raise KeyError(f"no command {name!r}: the plugin has {sorted(self.commands())}")
+        return cmd
+
+    def _where(
+        self, node: int | None, selection: Sequence[int] | None, zoom_node: int | None, filter: str
+    ) -> dict[str, Any]:
+        sel = [int(n) for n in selection] if selection is not None else ([node] if node is not None else [])
+        return {
+            "scan_id": self.scan_id,
+            "view_id": None,
+            "node": node,
+            "selection": sel,
+            "zoom_node": zoom_node,
+            "filter": filter,
+            "compare_id": None,
+        }
+
+    async def command(
+        self,
+        name: str,
+        /,
+        *,
+        node: int | None = None,
+        selection: Sequence[int] | None = None,
+        zoom_node: int | None = None,
+        filter: str = "",
+        **args: Any,
+    ) -> Any:
+        """Run one of the plugin's commands as the app does with ``node`` selected (its ``when``
+        and ``check`` are not asked: :meth:`command_available` does). A ``call`` action calls its
+        method with the :class:`ActionContext` (``args`` added to the action's own) and returns
+        what it returned; any other action is returned as it is (``{"kind": "open", …}``)."""
+        cmd = self._command(name)
+        action = getattr(cmd, "action", None)
+        if action is None:
+            return None
+        if getattr(action, "kind", "") != "call":
+            return action.model_dump(mode="json") if hasattr(action, "model_dump") else action
+        host = await self._ready()
+        ctx = self._where(node, selection, zoom_node, filter) | {"args": {**action.args, **args}}
+        method = action.method.rsplit(".", 1)[-1]
+        value, _ = await host.call(
+            self.plugin_id, "method", method, ctx, session=self.session, ctx=self._ctx(node)
+        )
+        return value
+
+    async def command_available(self, name: str, /, *, node: int | None = None) -> str | None:
+        """Why the command cannot run with ``node`` selected in a view of the scan in front (its
+        ``when``, then its ``check`` method, as the palette and the menus ask), or None when it can."""
+        from spaceknife.palette.commands import Context as PaletteContext
+        from spaceknife_protocol import view as pv
+
+        cmd = self._command(name)
+        host = await self._ready()
+        assert self.scan_id is not None, "scan something first"
+        vhost = self.server.views.open(
+            self.session, pv.ViewOpenParams(scan_id=self.scan_id, viewport=pv.Viewport(width=800, height=600))
+        )
+        view = vhost.view
+        view.selected = node
+        handle = self.server.scans.scans.get(self.scan_id)
+        source = getattr(handle, "source", "scan") if handle is not None else "scan"
+        pc = PaletteContext(
+            tab="scan",
+            has_scan=True,
+            view=view,
+            settings=self.server.settings,
+            plugins=frozenset(host.enabled_ids()),
+            scan_source=source if isinstance(source, str) and "." in source else "",
+        )
+
+        def ask() -> str | None:
+            for need in cmd.needs:
+                why = need(pc)
+                if why:
+                    return str(why)
+            return None
+
+        try:
+            return await asyncio.to_thread(ask)
+        finally:
+            self.server.views.close(view.id)
 
     def keys(self) -> dict[str, str]:
         """Key -> command id, for every key the plugin binds (its commands' keys and keybindings)."""
@@ -584,8 +706,30 @@ class MockHost:
         return {c.local: c.spec.expr for c in self._owned("filter_preset")}
 
     async def hook(self, event: str, **args: Any) -> None:
+        """Run the plugin's hooks for ``event`` as the host would, raising what they raise.
+        ``scan_done`` / ``scan_closed`` take ``scan`` (default: the scan in front), ``settings``
+        takes ``changed`` (the names of its settings that changed), the others nothing."""
+        from spaceknife.extensions import EXTENSIONS
+        from spaceknife_sdk.manifest import HOOKS
+
+        if event not in HOOKS:
+            raise ValueError(f"unknown hook event {event!r}: one of {', '.join(HOOKS)}")
+        allowed = {"scan_done": {"scan"}, "scan_closed": {"scan"}, "settings": {"changed"}}.get(event, set())
+        extra = set(args) - allowed
+        if extra:
+            raise TypeError(f"hook {event!r} takes {sorted(allowed) or 'nothing'}, not {sorted(extra)}")
         host = await self._ready()
-        await host._hook(host.enabled(self.plugin_id), event, **args)
+        if event in ("scan_done", "scan_closed") and "scan" not in args:
+            args["scan"] = {"scan_id": self.scan_id, "roots": [self.path()], "state": "done"}
+        if event == "settings":
+            args.setdefault("changed", [])
+        if "scan" in args and hasattr(args["scan"], "model_dump"):
+            args["scan"] = args["scan"].model_dump(mode="json")
+        for c in EXTENSIONS.owned(self.plugin_id):
+            if c.kind == "hook" and c.spec.event == event:
+                await host.call(
+                    self.plugin_id, "hook", c.local, {"event": event, **args}, session=self.session
+                )
 
     async def annotate(self, items: Sequence[Mapping[str, Any]], name: str | None = None) -> list[str | None]:
         """A change annotator's reasons for comparison items (``path``, ``kind``, ``status``,
@@ -716,6 +860,12 @@ class MockHost:
                 await self.close()
 
         return asyncio.run(run())
+
+
+def _when(t: float | None) -> Any:
+    from datetime import UTC, datetime
+
+    return None if t is None else datetime.fromtimestamp(t, UTC)
 
 
 def _relative(store: Any, ids: list[int]) -> list[str]:

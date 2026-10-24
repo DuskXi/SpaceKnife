@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 from spaceknife_protocol.base import Params, Payload
+from spaceknife_protocol.errors import ErrorCode, RequestError
 from spaceknife_protocol.plugins import (
     ActionContext,
     BarItem,
@@ -59,6 +60,7 @@ __all__ = [
     "ColorInput",
     "Columns",
     "Context",
+    "ErrorCode",
     "ExportInfo",
     "ExportInput",
     "FieldValue",
@@ -76,6 +78,7 @@ __all__ = [
     "Proposal",
     "Report",
     "ReportContext",
+    "RequestError",
     "Rows",
     "ScanInfo",
     "SnapshotInfo",

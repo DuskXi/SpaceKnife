@@ -26,12 +26,13 @@ export function useScanCtx(scanId: string | null | undefined, viewId?: string | 
   const where = useApp((s) => (viewId ? viewId : scanId ? (viewFor(scanId, s)?.viewId ?? null) : null));
   const selected = useApp((s) => (where ? (s.views[where]?.state.selected ?? null) : null));
   const zoom = useApp((s) => (where ? (s.views[where]?.state.zoom_node ?? null) : null));
+  const filter = useApp((s) => (where && s.views[where]?.filter?.active ? (s.views[where]?.filter?.text ?? "") : ""));
   const compare = useApp((s) => s.tabs.find((x) => x.compare && x.scanId === scanId)?.compare?.shownId ?? null);
   return useMemo(() => {
     // a real node (not an aggregate block): its key is its id
     const node = selected != null && selected > 0 && selected >>> 30 === 0 ? selected : zoom != null && zoom >= 0 ? zoom : null;
-    return { scan_id: scanId ?? null, view_id: where, node, selection: node != null ? [node] : [], compare_id: compare };
-  }, [scanId, where, selected, zoom, compare]);
+    return { scan_id: scanId ?? null, view_id: where, node, selection: node != null ? [node] : [], compare_id: compare, zoom_node: zoom != null && zoom >= 0 ? zoom : null, filter };
+  }, [scanId, where, selected, zoom, compare, filter]);
 }
 
 /** Why a contribution can't show here (its `when`), or null. */

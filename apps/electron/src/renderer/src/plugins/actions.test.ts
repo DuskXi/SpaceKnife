@@ -34,7 +34,7 @@ Object.assign(COMMANDS, { runShortcut, cycleVisual, pickVisual });
 const shell = { copyText: vi.fn(), showItemInFolder: vi.fn(), openPath: vi.fn(), openTerminal: vi.fn(), openUrl: vi.fn() };
 
 const view = (over: Record<string, unknown> = {}) => ({
-  state: { scan_id: "s1", selected: 7, color_mode: "class", visual: "treemap", show_free: false, show_unknown: true, show_trash: false, has_trash: true, compare: false, ...over },
+  state: { scan_id: "s1", selected: 7, color_mode: "class", visual: "treemap", show_free: false, show_unknown: true, show_trash: false, has_trash: true, compare: false, zoom_node: 3, ...over },
   info: { layout: "drawlist.v1" },
 });
 
@@ -73,7 +73,7 @@ describe("runAction", () => {
   it("call: the plugin's method with where the user is; a report answer opens the dialog", async () => {
     vi.mocked(callPlugin).mockResolvedValue({ type: "report", title: "R", blocks: [], actions: [], subtitle: "", footnote: "", empty: "" });
     await runAction({ kind: "call", method: "plugin.a.b.find", args: { x: 1 } }, plugin);
-    expect(callPlugin).toHaveBeenCalledWith("plugin.a.b.find", { scan_id: "s1", view_id: "v1", node: 7, selection: [7], compare_id: null, args: { x: 1 } });
+    expect(callPlugin).toHaveBeenCalledWith("plugin.a.b.find", { scan_id: "s1", view_id: "v1", node: 7, selection: [7], compare_id: null, args: { x: 1 }, zoom_node: 3, filter: "" });
     expect(get().pluginDialog).toMatchObject({ plugin: "a.b", title: "R" });
   });
 
@@ -114,10 +114,13 @@ describe("runAction", () => {
   });
 
   it("command: through the palette's rules, a few levels deep at most", async () => {
-    await runAction({ kind: "command", command: "view.rescan" }, app);
+    await runAction({ kind: "command", command: "view.rescan", args: {} }, app);
     expect(runShortcut).toHaveBeenCalledWith("view.rescan", { depth: 1 });
-    await runAction({ kind: "command", command: "view.rescan" }, { owner: null, depth: 4 });
+    await runAction({ kind: "command", command: "view.rescan", args: {} }, { owner: null, depth: 4 });
     expect(runShortcut).toHaveBeenCalledTimes(1);
+    // 「导出报告…」 opened on a format (report.export with args.format)
+    await runAction({ kind: "command", command: "report.export", args: { format: "a.b.md" } }, app);
+    expect(get()).toMatchObject({ exportOpen: true, exportPick: "a.b.md" });
   });
 
   it("setting: a plugin changes its own settings (or a few display ones), toggles flip", async () => {

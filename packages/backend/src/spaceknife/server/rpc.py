@@ -9,21 +9,18 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from spaceknife_protocol.errors import ErrorCode
+from spaceknife_protocol.errors import ErrorCode, RequestError
 from spaceknife_protocol.methods import MethodSpec
 
 if TYPE_CHECKING:
     from .session import Session
 
 
-class RpcError(Exception):
+class RpcError(RequestError):
     """Raise from a handler to answer the request with a JSON-RPC error."""
 
     def __init__(self, code: int, message: str, data: Any = None) -> None:
-        super().__init__(message)
-        self.code = int(code)
-        self.message = message
-        self.data = data
+        super().__init__(code, message, data)
 
 
 class RawResult:

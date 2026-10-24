@@ -41,21 +41,23 @@ def _issue(i: TemplateIssue) -> pe.ExportIssue:
     )
 
 
-def _option(o: SettingSpec, lang: str) -> pe.ExportOption:
+def _option(o: SettingSpec, lang: str, plugin: str, server: Server) -> pe.ExportOption:
     from spaceknife_protocol.settings import SettingOption
 
+    default = server.plugins.option_default(plugin, o)  # default_from: a setting's current value
     return pe.ExportOption(
         name=o.name,
         title=o.title.get(lang),
         description=o.description.get(lang) if o.description else "",
         control=o.control or "text",
-        default=o.default,
+        default=default,
         options=[SettingOption(value=v, label=label.get(lang)) for v, label in o.options],
         min=o.min,
         max=o.max,
         step=o.step,
-        unit=o.unit,
+        unit=o.unit.get(lang) if o.unit is not None else "",
         placeholder=o.placeholder.get(lang) if o.placeholder else "",
+        group=o.group.get(lang) if o.group else "",
     )
 
 
@@ -122,7 +124,7 @@ def install(server: Server) -> None:
                         kind="format",
                         extension=spec.extension.lstrip("."),
                         plugin=c.owner,
-                        options=[_option(o, lang) for o in spec.options],
+                        options=[_option(o, lang, c.owner, server) for o in spec.options],
                     )
                 )
         return pe.ExportTargets(targets=out)

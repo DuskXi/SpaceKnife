@@ -52,7 +52,8 @@ class Link(Protocol):
         ...
 
     def notify(self, type: str, payload: dict[str, Any]) -> None:
-        """Fire and forget: ``event``, ``state``, ``log``, ``progress``, ``toast``."""
+        """Fire and forget: ``event``, ``state``, ``log``, ``progress``, ``toast``, ``clipboard``,
+        ``image_drop`` (each one a message of :data:`spaceknife_sdk.wire.FROM_PLUGIN`)."""
         ...
 
     def image(self, scan_id: str, columns: Sequence[str]) -> Image:

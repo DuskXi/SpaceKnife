@@ -36,7 +36,7 @@ def test_texts_follow_the_language() -> None:
         assert M(label={"zh": "你好", "en": "Hi"}).label == "Hi"  # type: ignore[arg-type]
         cat = CATALOG.set({"只有中文": "Chinese only"})
         try:
-            assert M(label="只有中文").label == "Chinese only"
+            assert M(label="只有中文").model_dump()["label"] == "Chinese only"  # looked up when written
             assert Text(zh="只有中文").get() == "Chinese only"
         finally:
             CATALOG.reset(cat)

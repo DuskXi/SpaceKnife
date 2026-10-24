@@ -102,13 +102,17 @@ export function actionContext(rc: RunContext, args: Record<string, unknown> = {}
   const viewId = rc.viewId ?? focusedViewId(s);
   const sel = selection();
   const node = rc.node ?? sel?.node ?? null;
+  const view = viewId ? s.views[viewId] : undefined;
   return {
-    scan_id: rc.scanId ?? (viewId ? s.views[viewId]?.state.scan_id : undefined) ?? tab.scanId ?? null,
+    scan_id: rc.scanId ?? view?.state.scan_id ?? tab.scanId ?? null,
     view_id: viewId,
     node,
     selection: rc.selection ?? (node != null ? [node] : []),
     compare_id: tab.compare?.shownId ?? null,
     args,
+    // where the user is: the zoom root and the filter (a command can do what the view shows)
+    zoom_node: view?.state.zoom_node ?? null,
+    filter: view?.filter?.active ? view.filter.text : "",
   };
 }
 
@@ -157,11 +161,14 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
   },
 
   open(a: OpenAction, rc) {
-    openTarget(a.target, actionContext(rc));
+    openTarget(a.target, actionContext(rc, a.args ?? {}));
   },
 
   async command(a: CommandAction, rc) {
     if ((rc.depth ?? 0) > 3) return;
+    // 「导出报告…」 with a format picked: { command = "report.export", args = { format = "<id>" } }
+    const format = a.command === "report.export" ? a.args?.format : undefined;
+    if (typeof format === "string" && format) return set({ exportOpen: true, exportPick: format });
     await COMMANDS.runShortcut(a.command, { depth: (rc.depth ?? 0) + 1 });
   },
 

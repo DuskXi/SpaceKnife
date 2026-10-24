@@ -74,12 +74,12 @@ def _short(kind: str, value: Any, rest: dict[str, Any]) -> dict[str, Any]:
     if kind == "call":
         extra("args")
         return {"kind": "call", "method": value, "args": dict(rest.get("args") or {})}
-    if kind == "open":
-        extra()
-        return {"kind": "open", "target": value}
-    if kind == "command":
-        extra()
-        return {"kind": "command", "command": value}
+    if kind in ("open", "command"):
+        extra("args")
+        out = {"kind": "open", "target": value} if kind == "open" else {"kind": "command", "command": value}
+        if rest.get("args"):  # open: the report's ReportContext.args; report.export: { format = … }
+            out["args"] = dict(rest["args"])
+        return out
     if kind == "view":
         extra()
         return {"kind": "view", "settings": dict(value or {})}

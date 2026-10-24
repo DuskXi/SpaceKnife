@@ -308,11 +308,15 @@ class CallAction(_Action):
 class OpenAction(_Action):
     kind: Literal["open"] = "open"
     target: str = Field(description="report:<full id> | panel:<full id> | settings:<plugin id>")
+    args: dict[str, Any] = Field(default_factory=dict, description="A report's ReportContext.args")
 
 
 class CommandAction(_Action):
     kind: Literal["command"] = "command"
     command: str
+    args: dict[str, Any] = Field(
+        default_factory=dict, description='report.export: { format = "<format or template>" } picks it'
+    )
 
 
 class ViewAction(_Action):
@@ -421,6 +425,8 @@ class ActionContext(Payload):
     selection: list[int] = Field(default_factory=list, max_length=1000)
     compare_id: str | None = None
     args: dict[str, Any] = Field(default_factory=dict)
+    zoom_node: int | None = Field(default=None, description="The view's zoom root (where the user is)")
+    filter: str = Field(default="", description="The view's filter expression ('' = not filtered)")
 
 
 class ReportContext(Payload):
@@ -433,12 +439,14 @@ class ReportContext(Payload):
     compare_id: str | None = None
     cursor: str | None = Field(default=None, description="A table's next page (Table.more)")
     args: dict[str, Any] = Field(default_factory=dict)
+    zoom_node: int | None = Field(default=None, description="The view's zoom root (where the user is)")
+    filter: str = Field(default="", description="The view's filter expression ('' = not filtered)")
 
 
 # --------------------------------------------------------------------------- report documents
 
 Unit = Literal["size", "count", "pct", "date", "ago", "duration", "bytes_per_s", "text", "path"]
-Cell = str | int | float | bool | None
+Cell = LocalStr | int | float | bool | None  # a text cell may be T(…): written in the request's language
 MAX_REPORT_BYTES = 2 << 20
 MAX_TABLE_ROWS = 2000
 MAX_BLOCKS = 200

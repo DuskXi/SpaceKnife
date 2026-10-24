@@ -58,6 +58,7 @@ STDLIB = frozenset(
         "asyncio",
         "concurrent",
         "threading",
+        "contextvars",
         "queue",
         "random",
         "secrets",

@@ -104,6 +104,14 @@ class Toast(Msg):
     session: str | None = None
 
 
+class Clipboard(Msg):
+    """``ctx.clipboard.write_text``: the app of ``session`` puts ``text`` on the clipboard."""
+
+    type: Literal["clipboard"] = "clipboard"
+    text: str = Field(max_length=1 << 20)
+    session: str | None = None
+
+
 class Request(Msg):
     type: Literal["request"] = "request"
     id: Id
@@ -125,6 +133,13 @@ class ImageDrop(Msg):
     key: str = Field(max_length=128)
 
 
+class Stuck(Msg):
+    """Every worker thread is busy with a cancelled call that does not return: restart me."""
+
+    type: Literal["stuck"] = "stuck"
+    threads: int = Field(ge=0, le=1024)
+
+
 class Heartbeat(Msg):
     type: Literal["heartbeat"] = "heartbeat"
     busy: list[int] = Field(default_factory=list, max_length=64)
@@ -141,9 +156,11 @@ FromPlugin = Annotated[
     | Event
     | State
     | Toast
+    | Clipboard
     | Request
     | Log
     | Heartbeat
+    | Stuck
     | ImageDrop,
     Field(discriminator="type"),
 ]
@@ -221,6 +238,7 @@ __all__ = [
     "PIPE_PREFIX",
     "WIRE_VERSION",
     "Chunk",
+    "Clipboard",
     "Error",
     "Event",
     "Heartbeat",
@@ -231,6 +249,7 @@ __all__ = [
     "Request",
     "Result",
     "State",
+    "Stuck",
     "Toast",
     "call_message",
     "check_header",

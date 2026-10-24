@@ -402,6 +402,27 @@ def check_references(
                 )
             )
 
+    for kind, spec in specs:
+        if (
+            isinstance(spec, VisualizationSpec)
+            and spec.default_color
+            and spec.default_color not in BUILTIN_COLORS
+        ):
+            own(
+                "color_mode",
+                spec.default_color.removeprefix(pid + "."),
+                "colour mode",
+                f"visualization {spec.name!r} default_color",
+            )
+        if kind == "export_format":
+            for o in getattr(spec, "options", []):
+                if o.default_from:
+                    own(
+                        "setting",
+                        o.default_from,
+                        "setting",
+                        f"export format {spec_key(kind, spec)!r} option {o.name!r} default_from",
+                    )
     for _kind, spec in specs:
         if not isinstance(spec, CommandSpec) or spec.action is None:
             continue
@@ -797,8 +818,10 @@ async def run_contracts(host: Any, description: Description) -> list[Issue]:
     host.scan(trees[0])
     try:
         node: int | None = host.find("sub")
+        file_node: int | None = host.find("a.log")
     except Exception:
-        node = None
+        node = file_node = None
+    granted = set(getattr(host.server.plugins.records.get(host.plugin_id), "granted", ()) or ())
     for kind, spec in specs:
         name = str(getattr(spec, "name", ""))
         try:
@@ -856,6 +879,17 @@ async def run_contracts(host: Any, description: Description) -> list[Issue]:
                 elif event == "settings":
                     args["changed"] = []
                 await host.server.plugins.call(host.plugin_id, "hook", name, args)
+            elif (
+                isinstance(spec, CommandSpec)
+                and (spec.action or {}).get("kind") == "call"
+                and "." not in str((spec.action or {}).get("method", ""))
+                and not granted & {"net", "exec"}  # nothing leaves the machine during a check
+            ):
+                # as the menus would: on a folder, on a file and with nothing selected, wherever its
+                # `when` and `check` let it run (in the plugin's process, as in the app)
+                for at in (node, file_node, None):
+                    if await host.command_available(name, node=at) is None:
+                        await host.command(name, node=at)
             elif kind == "scan_source":
                 samples = (
                     sorted((host.folder / "fixtures").glob(f"{name}.*"))
@@ -882,6 +916,7 @@ async def run_contracts(host: Any, description: Description) -> list[Issue]:
                 "node_set": "node_set",
                 "scan_source": "source",
                 "hook": "hook",
+                "command": "command",
             }.get(kind, "contract")
             failed(code, f"{kind} {name!r}", exc)
     return out
@@ -1103,7 +1138,8 @@ def static_issues(folder: Path, manifest: Manifest, desc: Description) -> list[I
 
 def needs_contracts(desc: Description) -> bool:
     kinds = {str(c.get("kind")) for c in desc.contributions}
-    return bool(kinds & (CODE_KINDS | {"visualization", "color_mode", "report"}))
+    commands = "command" in kinds and bool(desc.methods)  # a command may call the plugin's code
+    return bool(kinds & (CODE_KINDS | {"visualization", "color_mode", "report"})) or commands
 
 
 def format_text(result: CheckResult, strict: bool = False) -> str:

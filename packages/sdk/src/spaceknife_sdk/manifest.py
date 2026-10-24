@@ -46,8 +46,19 @@ PLUGIN_API = 1
 MANIFEST = "plugin.toml"
 MAX_PALETTE = 16
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
-WHEN_WORDS = ("scan", "done", "scanning", "view", "selection", "scan_view", "compare")
-WHEN_PREFIXES = ("setting:", "cap:", "plugin:", "source:")
+WHEN_WORDS = (
+    "scan",
+    "done",
+    "scanning",
+    "view",
+    "selection",
+    "scan_view",
+    "compare",
+    "file",
+    "dir",
+    "on_disk",
+)
+WHEN_PREFIXES = ("setting:", "cap:", "plugin:", "source:", "ext:")
 MENUS = ("node", "inspector", "toolbar", "start")
 REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual")
 HOOKS = ("start", "stop", "scan_done", "scan_closed", "settings", "lang")
@@ -76,7 +87,8 @@ def _when(values: list[str]) -> list[str]:
     for w in values:
         if w not in WHEN_WORDS and not w.startswith(WHEN_PREFIXES):
             raise ValueError(
-                f"unknown condition {w!r}: one of {', '.join(WHEN_WORDS)} or setting:/cap:/plugin:/source:"
+                f"unknown condition {w!r}: one of {', '.join(WHEN_WORDS)} or "
+                "setting:/cap:/plugin:/source:/ext:"
             )
     return values
 
@@ -129,12 +141,16 @@ class SettingSpec(Spec):
     min: float | None = None
     max: float | None = None
     step: float | None = None
-    unit: str = ""
+    unit: TextLike | None = Field(default=None, description="After the value: 'MB', {zh='天', en='days'}")
     applies: SettingApplies = "now"
     synonyms: list[str] = Field(default_factory=list)
     depends: str | None = None
     group: TextLike | None = None
     placeholder: TextLike | None = Field(default=None, description="Shown in an empty text field")
+    default_from: LocalName | None = Field(
+        default=None,
+        description="An export option: start from the current value of this setting of the plugin",
+    )
 
     @model_validator(mode="after")
     def _control(self) -> SettingSpec:
@@ -143,6 +159,8 @@ class SettingSpec(Spec):
                 "switch"
                 if isinstance(self.default, bool)
                 else "segmented"
+                if 0 < len(self.options) <= 4
+                else "select"
                 if self.options
                 else "number"
                 if isinstance(self.default, int | float)
@@ -155,8 +173,18 @@ class SettingSpec(Spec):
             isinstance(self.default, bool) or not isinstance(self.default, int | float)
         ):
             raise ValueError(f"a {self.control} needs a number default")
-        if self.options and self.default not in [o[0] for o in self.options]:
+        values = [o[0] for o in self.options]
+        if self.control == "multi":
+            if not self.options or not isinstance(self.default, str):
+                raise ValueError('multi needs options and a text default: the chosen values joined by ","')
+            if any(not isinstance(v, str) or "," in v for v in values):
+                raise ValueError("the options of multi are texts without commas")
+            if any(x not in values for x in self.default.split(",") if x):
+                raise ValueError("each value of the default must be one of the options")
+        elif self.options and self.default not in values:
             raise ValueError("the default must be one of the options")
+        if self.control in ("segmented", "select") and not self.options:
+            raise ValueError(f"a {self.control} needs options")
         return self
 
 
@@ -264,6 +292,12 @@ class VisualizationSpec(Spec):
     unit: Literal["bytes", "count", "weight"] | None = Field(
         default=None,
         description="What the areas count (default: bytes for alloc/size, weight for code, else count)",
+    )
+    default_color: str | None = Field(
+        default=None,
+        max_length=64,
+        description="The colour mode a view starts with on it: class flat time branch, or a colour "
+        "mode of this plugin (its name) or of another (its full id)",
     )
 
     def size_unit(self) -> Literal["bytes", "count", "weight"]:

@@ -12,6 +12,7 @@ import { t } from "@/lib/i18n";
 import { accentOf } from "@/lib/theme";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { PluginIcon } from "@/plugins/icons";
+import { MultiChoice } from "@/ui/MultiChoice";
 import { pluginName } from "@/plugins/store";
 
 import { AboutEntry, AboutHeader, ComponentsGroup, ReleaseTimeline } from "./AboutPage";
@@ -215,7 +216,7 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
       {p.id !== "keys" && (
         <div className="settings-columns">
           {groups.map(([group, items]) => (
-            <Group key={group} title={group} note={items[0]?.group_note ?? ""} rows={items} />
+            <Group key={group} title={groupTitle(group, items)} note={items[0]?.group_note ?? ""} rows={items} />
           ))}
           {p.id === "tags" && <ClearTags />}
           {p.id === "advanced" && <AdvancedTools />}
@@ -231,8 +232,20 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
 
 function groupBy(rows: SettingMeta[]): [string, SettingMeta[]][] {
   const out = new Map<string, SettingMeta[]>();
-  for (const r of rows) out.set(r.group, [...(out.get(r.group) ?? []), r]);
-  return [...out.entries()];
+  // a plugin's groups stay its own: two plugins may both have one called 「列表」
+  for (const r of rows) {
+    const key = r.plugin ? `${r.plugin}\u0000${r.group}` : r.group;
+    out.set(key, [...(out.get(key) ?? []), r]);
+  }
+  return [...out.entries()].map(([key, items]) => [items[0]?.group ?? key, items]);
+}
+
+/** A group's heading: a plugin's says which plugin (its name, then the group when it has its own). */
+function groupTitle(group: string, items: SettingMeta[]): string {
+  const plugin = items[0]?.plugin;
+  if (!plugin) return group;
+  const name = pluginName(plugin);
+  return !group || group === name ? name : `${name} › ${group}`;
 }
 
 function Group({ title, note, rows, query }: { title: string; note: string; rows: SettingMeta[]; query?: string }) {
@@ -321,6 +334,28 @@ function Control(props: { meta: SettingMeta; value: Value | undefined; disabled:
           ))}
         </div>
       );
+    case "select":
+      return (
+        <select
+          className="set-select"
+          aria-label={meta.name}
+          aria-describedby={props.describedBy}
+          value={String(value ?? "")}
+          disabled={disabled}
+          onChange={(e) => {
+            const o = meta.options.find((x) => String(x.value) === e.target.value);
+            if (o && o.value !== value) onSave(o.value);
+          }}
+        >
+          {meta.options.map((o) => (
+            <option key={String(o.value)} value={String(o.value)} disabled={!!o.reason} title={o.reason || undefined}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      );
+    case "multi":
+      return <MultiChoice name={meta.name} options={meta.options} value={String(value ?? "")} disabled={disabled} onChange={onSave} />;
     case "color":
       return (
         <div className="set-swatches" role="radiogroup" aria-label={meta.name}>
@@ -503,7 +538,7 @@ function SearchResults({ hits, query }: { hits: SettingMeta[]; query: string }) 
       {byPage.map(([p, rows]) => (
         <div key={p.id} className="settings-result-page">
           {groupBy(rows).map(([group, items]) => (
-            <Group key={group} title={`${p.name} › ${group}`} note="" rows={items} query={query} />
+            <Group key={`${items[0]?.key}`} title={`${p.name} › ${groupTitle(group, items)}`} note="" rows={items} query={query} />
           ))}
         </div>
       ))}
@@ -536,7 +571,7 @@ function KeysPage({ rows }: { rows: SettingMeta[] }) {
   return (
     <div className="settings-columns single">
       {groupBy(rows).map(([group, items]) => (
-        <Group key={group} title={group} note="" rows={items} />
+        <Group key={`${items[0]?.key}`} title={groupTitle(group, items)} note="" rows={items} />
       ))}
       <section className="set-group" aria-label={t("键位表")}>
         <div className="set-group-head">

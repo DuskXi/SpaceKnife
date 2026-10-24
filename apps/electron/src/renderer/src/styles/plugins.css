@@ -256,6 +256,13 @@
 .kept-panel-tab[hidden] { display: none; }
 .report-subtitle { margin: 0 0 10px; }
 .cleanup-description { margin: 0 16px 8px; }
-.export-options { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.export-options { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; border-top: 1px solid var(--sk-color-line-subtle); }
+.export-options h4 { margin: 4px 0 0; font-size: 12px; font-weight: 600; color: var(--sk-color-text-secondary); }
 .export-field { display: flex; align-items: center; gap: 10px; }
-.export-field input, .export-field select { width: 160px; }
+/* the app's field look in both themes (not the browser's white boxes) */
+.export-field input, .export-field select { flex: none; width: 180px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--sk-radius-md); outline: none; background: var(--sk-color-bg-field); box-shadow: inset 0 0 0 1px var(--sk-color-line-strong); color: var(--sk-color-text-primary); font-size: 12px; user-select: text; }
+.export-field input:focus, .export-field select:focus-visible { box-shadow: inset 0 0 0 1px var(--sk-color-accent-default); }
+.export-field select option { background: var(--sk-color-bg-raised); color: var(--sk-color-text-primary); }
+.export-check input, .export-option input { accent-color: var(--sk-color-accent-default); }
+.export-multi { display: flex; flex-direction: column; gap: 6px; }
+.export-multi .set-multi { justify-content: flex-start; max-width: none; }

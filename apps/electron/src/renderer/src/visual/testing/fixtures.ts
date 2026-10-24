@@ -125,6 +125,7 @@ export function rowColumns(layout: string, rows: readonly FixtureRow[]): { colum
 /** A FrameInfo with every field set (a treemap frame of 260 × 100 px unless patched). */
 export function frameInfo(patch: Partial<FrameInfo> = {}): FrameInfo {
   return {
+    total: 0,
     breadcrumb: [{ key: 1, label: "root" }],
     dpr: 1,
     filter: null,

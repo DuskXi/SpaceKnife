@@ -48,6 +48,13 @@ describe("weights", () => {
     expect(shareText(1, 0)).toBe("—");
     expect(weightTotal({ info: { root: null }, size: [5, 9n, 2] })).toBe(9);
   });
+
+  it("share the zoom root's weight in a treemap too (round 2: siblings summed past 100%)", () => {
+    // a treemap frame has no root bar: the frame's total is the zoom root's own weight
+    const frame = { info: { root: null, total: 1000 }, size: [400, 300, 200] };
+    expect(weightTotal(frame)).toBe(1000);
+    expect([400, 300, 200].map((w) => shareText(w, weightTotal(frame)))).toEqual(["40%", "30%", "20%"]);
+  });
 });
 
 describe("onClipboard", () => {

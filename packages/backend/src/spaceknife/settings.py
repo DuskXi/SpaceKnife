@@ -1065,13 +1065,17 @@ def validate_item(spec: Spec, value: Any) -> SettingValue:
         raise SettingsError(
             TEXT["invalid_value"].format(name=spec.text("name", spec.name), msg=err["msg"])
         ) from exc
-    if (
-        spec.options
-        and spec.options_from is None
-        and spec.plugin is not None
-        and got not in [o[0] for o in spec.options]
-    ):
-        raise SettingsError(TEXT["invalid_value"].format(name=spec.text("name", spec.name), msg=f"{got!r}"))
+    if spec.options and spec.options_from is None and spec.plugin is not None:
+        allowed = [o[0] for o in spec.options]
+        # multi: the chosen values joined by commas, each one of the options (in their order)
+        if spec.control == "multi" and isinstance(got, str):
+            parts = [x for x in got.split(",") if x]
+            if all(x in allowed for x in parts):
+                return ",".join(v for v in allowed if v in parts)
+        if spec.control == "multi" or got not in allowed:
+            raise SettingsError(
+                TEXT["invalid_value"].format(name=spec.text("name", spec.name), msg=f"{got!r}")
+            )
     return got  # type: ignore[no-any-return]
 
 

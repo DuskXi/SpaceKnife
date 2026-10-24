@@ -387,6 +387,8 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `compare_id` | str \| None | `None` | 对比视图里的对比 |
 | `cursor` | str \| None | `None` | 表格续读时 `r.more(cursor)` 给的位置；第一页是 None |
 | `args` | dict[str, Any] | `{}` | 打开它的动作带的参数（`{ open = "report:x", args = {…} }`） |
+| `zoom_node` | int \| None | `None` | The view's zoom root (where the user is) |
+| `filter` | str | `""` | The view's filter expression ('' = not filtered) |
 
 #### `ActionContext`
 
@@ -400,6 +402,8 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `selection` | list[int] | `[]` | 选中的节点（≤ 1000 个） |
 | `compare_id` | str \| None | `None` | 对比 |
 | `args` | dict[str, Any] | `{}` | 动作里写的 `args` |
+| `zoom_node` | int \| None | `None` | The view's zoom root (where the user is) |
+| `filter` | str | `""` | The view's filter expression ('' = not filtered) |
 
 ### 输入
 
@@ -469,12 +473,12 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `type` | (`report`) | `"report"` |  |
-| `title` | str \| Text | `""` | 标题（标签页、对话框显示在外面） |
-| `subtitle` | str \| Text | `""` | 标题下的一行 |
+| `title` | str | `""` | 标题（标签页、对话框显示在外面） |
+| `subtitle` | str | `""` | 标题下的一行 |
 | `blocks` | list[MdBlock \| StatsBlock \| KvBlock \| TableBlock \| BarsBlock \| StackBlock \| RingBlock \| MeterBlock \| SparkBlock \| NodesBlock \| CalloutBlock \| ProgressBlock \| SectionBlock] | `[]` | 块（`r.*` 构造） |
 | `actions` | list[LabeledAction] | `[]` | 报告底部的按钮 |
-| `footnote` | str \| Text | `""` | 末尾的小字 |
-| `empty` | str \| Text | `""` | 没有块时显示它 |
+| `footnote` | str | `""` | 末尾的小字 |
+| `empty` | str | `""` | 没有块时显示它 |
 
 #### `Toast`
 
@@ -483,7 +487,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `type` | (`toast`) | `"toast"` |  |
-| `text` | str \| Text | 必需 | 文字（≤ 512 字） |
+| `text` | str | 必需 | 文字（≤ 512 字） |
 | `tone` | (`info` `ok` `warn` `danger`) | `"info"` | 色调 |
 
 #### `FieldValue`
@@ -505,12 +509,12 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `title` | str \| Text | 必需 | 卡片标题：这是什么 |
-| `reason` | str \| Text | 必需 | 为什么这么说 |
+| `title` | str | 必需 | 卡片标题：这是什么 |
+| `reason` | str | 必需 | 为什么这么说 |
 | `kind` | str | `"other"` | 类型（`cache` `build` `log` …，洞察配色按它上色） |
 | `cleanup` | (`safe` `tool` `review` `keep`) | `"review"` | 能不能删：`safe`（随便删）`tool`（用工具清）`review`（先看看）`keep`（别删） |
-| `app` | str \| Text | `""` | 相关的程序 |
-| `note` | str \| Text | `""` | 补充说明 |
+| `app` | str | `""` | 相关的程序 |
+| `note` | str | `""` | 补充说明 |
 | `command` | str | `""` | 清理命令：只显示、可复制，从不运行 |
 | `priority` | int | `0` | 详情面板里卡片按它从高到低排（规则的卡片用规则的 `priority`）（≥ -1000，≤ 1000） |
 
@@ -521,7 +525,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `node` | int \| NodeRef \| str | 必需 | 节点下标、`NodeRef` 或绝对路径 |
-| `reason` | str \| Text | `""` | 复核对话框里每一项的原因（≤ 120 字） |
+| `reason` | str | `""` | 复核对话框里每一项的原因（≤ 120 字） |
 | `checked` | bool | `True` | 默认勾选 |
 
 #### `Change`
@@ -542,7 +546,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `key` | str | 必需 | 行里的键 |
-| `label` | str \| Text | 必需 | 列标题 |
+| `label` | str | 必需 | 列标题 |
 | `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"text"` | 单位（格式化和排序方式） |
 | `align` | (`start` `end` `center`) \| None | `None` | 对齐（数字默认靠右） |
 | `grow` | float \| None | `None` | 宽度份数 |
@@ -562,10 +566,10 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `label` | str \| Text | 必需 |  |
+| `label` | str | 必需 |  |
 | `value` | str \| int \| float \| bool \| None | 必需 |  |
 | `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"count"` |  |
-| `hint` | str \| Text | `""` | 悬停提示 |
+| `hint` | str | `""` | 悬停提示 |
 | `tone` | str \| ThemedColor \| None | `None` |  |
 | `delta` | float \| None | `None` | 变化量（对比报告里显示成 +/−） |
 
@@ -575,7 +579,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `label` | str \| Text | 必需 |  |
+| `label` | str | 必需 |  |
 | `value` | float | 必需 |  |
 | `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"size"` |  |
 | `node` | NodeRef \| None | `None` | 点击时定位 |
@@ -587,7 +591,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `label` | str \| Text | 必需 |  |
+| `label` | str | 必需 |  |
 | `value` | float | 必需 |  |
 | `tone` | str \| ThemedColor \| None | `None` |  |
 
@@ -597,7 +601,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
-| `label` | str \| Text | 必需 |  |
+| `label` | str | 必需 |  |
 | `icon` | str | `""` |  |
 | `action` | CallAction \| OpenAction \| CommandAction \| ViewAction \| CycleAction \| ToggleAction \| FilterAction \| SettingAction \| CleanupAction \| NodeAction \| UrlAction \| ScanSourceAction \| BuiltinAction | 必需 | 动作，写法同命令的 `action` |
 
