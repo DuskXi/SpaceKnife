@@ -1,5 +1,5 @@
 """The command-line scan's start-up and exit (docs/packaging.md, 命令行扫描的启动): what it imports, the
-language read without the settings models."""
+language read without the settings models, the largest files without a full sort."""
 
 from __future__ import annotations
 
@@ -8,10 +8,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from spaceknife.cli_scan import stored_language
 from spaceknife.settings import DEFAULTS, SettingsStore
+from spaceknife.store.subtree import largest
 
 from .tree_fixture import build_tree
 
@@ -120,3 +122,15 @@ def test_stored_language_reads_what_the_settings_store_reads(tmp_path: Path, con
 
 def test_the_fast_language_path_assumes_the_default() -> None:
     assert DEFAULTS["general.language"] == "system"
+
+
+def test_largest_matches_a_stable_sort() -> None:
+    rng = np.random.default_rng(7)
+    ids = np.sort(rng.choice(10_000, size=3_000, replace=False)).astype(np.int64)
+    for alloc in (rng.integers(0, 50, size=ids.size), np.zeros(ids.size, dtype=np.int64)):
+        alloc = alloc.astype(np.int64)
+        for k in (0, 1, 5, 17, 2_999, 3_000, 5_000):
+            expected = ids[np.argsort(-alloc, kind="stable")[:k]]
+            got, sizes = largest(ids, alloc, k)
+            assert np.array_equal(got, expected), k
+            assert np.array_equal(sizes, alloc[np.argsort(-alloc, kind="stable")[:k]])

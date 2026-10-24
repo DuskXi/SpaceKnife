@@ -38,6 +38,7 @@ from .scan.scanner import (
     native_threads,
 )
 from .store.nodes import Flag, Kind, NodeStore
+from .store.subtree import largest
 
 if TYPE_CHECKING:
     from .io import IoRegistry
@@ -548,7 +549,10 @@ def _largest_files(store: NodeStore, limit: int) -> None:
     files = np.nonzero(kind == Kind.FILE)[0]
     if not len(files):
         return
-    order = files[np.argsort(-alloc[files], kind="stable")[:limit]]
+    if 0 <= limit < len(files):  # the same rows without sorting a million files (~30 ms)
+        order, _ = largest(files, alloc[files], limit)
+    else:
+        order = files[np.argsort(-alloc[files], kind="stable")[:limit]]
     table = Table(title=tr("最大的文件"), title_justify="left", box=None, padding=(0, 1))
     table.add_column(tr("占用"), justify="right", style="bold")
     table.add_column(tr("修改于"), justify="right", style="#8F95A2")
