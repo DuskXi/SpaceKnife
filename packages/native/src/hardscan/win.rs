@@ -1506,6 +1506,8 @@ struct Listing {
     pinned: bool,
     btrfs: bool,
     up: &'static [u16],
+    /// When the listing was read (FILETIME, 100 ns since 1601; 0 = unknown).
+    now: i64,
 }
 
 /// Measurement prototype (bench/method): SPACEKNIFE_WIN_ALLOC_FROM_LISTING=1 takes the size on disk
@@ -1514,6 +1516,42 @@ struct Listing {
 fn alloc_from_listing() -> bool {
     static ON: OnceLock<bool> = OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("SPACEKNIFE_WIN_ALLOC_FROM_LISTING").is_some_and(|v| v == "1"))
+}
+
+/// The parent's copy of a file's allocation is written lazily: for a sparse file about 10–15 s after
+/// the last write (measured on NTFS and ReFS, 2026-10-24). Sparse and compressed files written less
+/// than this long ago are asked instead.
+const LISTING_LAG_100NS: i64 = 60 * 10_000_000;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ListedAlloc {
+    Use(i64),
+    /// Ask the file (GetCompressedFileSizeW).
+    Ask,
+}
+
+/// Size on disk of a file from its listing entry (bench/method prototype, v2). `ntfs`: data that is
+/// not whole clusters is resident (0). Asks the file only where the listing is known to be wrong:
+/// a sparse/compressed file written in the last minute (lazy parent entry), and an NTFS file that
+/// lists no clusters although it is too big to be resident and not sparse (WOF-compressed: its
+/// data lives in an alternate stream, and the WOF filter hides the reparse attribute in listings).
+/// WinBtrfs is never asked: its GetCompressedFileSizeW returns the logical size of sparse files.
+fn listed_alloc(attrs: u32, eof: i64, alloc: i64, written: i64, how: Listing, ntfs: bool, cluster: i64) -> ListedAlloc {
+    let a = alloc.max(0);
+    let sparse_or_compressed = attrs & (FA_COMPRESSED | FA_SPARSE) != 0;
+    let recent = how.now != 0 && how.now.saturating_sub(written) < LISTING_LAG_100NS;
+    let no_clusters = ntfs && !sparse_or_compressed && a == 0 && eof > 0;
+    if !how.pinned && !how.btrfs && ((sparse_or_compressed && recent) || no_clusters) {
+        return ListedAlloc::Ask;
+    }
+    ListedAlloc::Use(if ntfs && a % cluster != 0 { 0 } else { a })
+}
+
+fn filetime_now() -> i64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => (d.as_secs() as i64 + SECS_1601_TO_1970) * 10_000_000 + i64::from(d.subsec_nanos() / 100),
+        Err(_) => 0,
+    }
 }
 
 fn add_entry(
@@ -1547,11 +1585,15 @@ fn add_entry(
         flags |= flag::CLOUD;
         0
     } else if alloc_from_listing() {
-        let a = raw.alloc.max(0);
-        if root.resident_max > 0 && a % cluster != 0 {
-            0
-        } else {
-            a
+        let ntfs = root.resident_max > 0;
+        match listed_alloc(attrs, raw.eof, raw.alloc, raw.write, how, ntfs, cluster) {
+            ListedAlloc::Use(a) => a,
+            ListedAlloc::Ask => match compressed_size(dir, raw.name) {
+                // NTFS answers a resident file with its length: it has no clusters
+                Some(real) if ntfs && real % cluster != 0 => 0,
+                Some(real) => real.max(0),
+                None => round_up(size, cluster),
+            },
         }
     } else if attrs & (FA_COMPRESSED | FA_SPARSE) != 0 {
         let real = if how.pinned { None } else { compressed_size(dir, raw.name) };
@@ -1776,6 +1818,7 @@ fn list_into(
         pinned,
         btrfs: state.btrfs(),
         up: upcase(),
+        now: if alloc_from_listing() { filetime_now() } else { 0 },
     };
     // test seam: FileIdExtd ids as WinBtrfs gives them, the listed folder's own
     let own_id = if state.extd_self_ids { file_id(h, 128) } else { None };
@@ -2010,6 +2053,36 @@ mod tests {
         assert_eq!(round_up(4096, 4096), 4096);
         assert_eq!(round_up(4097, 0), 4097);
         assert_eq!(round_up(i64::MAX, 4096), i64::MAX);
+    }
+
+    #[test]
+    fn listed_alloc_rules() {
+        // values as NTFS, ReFS and WinBtrfs listed small probe files (2026-10-24)
+        const S: i64 = 10_000_000;
+        let how = |now: i64, pinned: bool, btrfs: bool| Listing { pinned, btrfs, up: &[], now };
+        let old = how(1_000 * S, false, false);
+        let c = 4096;
+        let use_ = ListedAlloc::Use;
+        // NTFS: resident data lists its length rounded to 8 bytes; non-resident whole clusters
+        assert_eq!(listed_alloc(0x20, 700, 704, 0, old, true, c), use_(0));
+        assert_eq!(listed_alloc(0x20, 425, 4096, 0, old, true, c), use_(4096)); // truncated: not resident again
+        assert_eq!(listed_alloc(0x820, 1 << 20, 131072, 0, old, true, c), use_(131072)); // compressed text
+        assert_eq!(listed_alloc(0x220, 16 << 20, 131072, 0, old, true, c), use_(131072)); // sparse, settled
+        // NTFS: no clusters listed for a file too big to be resident (WOF) -> ask; empty file -> 0
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, old, true, c), ListedAlloc::Ask);
+        assert_eq!(listed_alloc(0x20, 0, 0, 0, old, true, c), use_(0));
+        // sparse or compressed written in the last minute: the parent entry may still be behind
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 990 * S, old, true, c), ListedAlloc::Ask);
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 900 * S, old, true, c), use_(0));
+        assert_eq!(listed_alloc(0x20, 3000, 4096, 990 * S, old, true, c), use_(4096)); // plain: up to date at close
+        // ReFS keeps small files inline and lists their length rounded to 8 bytes: kept as listed
+        assert_eq!(listed_alloc(0x20, 100, 104, 0, old, false, c), use_(104));
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, old, false, c), use_(0));
+        // WinBtrfs and folders opened by id are never asked
+        assert_eq!(listed_alloc(0x220, 64 << 20, 4096, 999 * S, how(1_000 * S, false, true), false, c), use_(4096));
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, how(1_000 * S, true, false), true, c), use_(0));
+        // unknown clock: never "recent"
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 0, how(0, false, false), true, c), use_(0));
     }
 
     fn raw(attrs: u32, tag: u32, eof: i64) -> Raw<'static> {
@@ -2424,6 +2497,7 @@ mod tests {
             pinned: false,
             btrfs: false,
             up: upcase(),
+            now: 0,
         };
         add_entry(
             &raw(attrs, tag, eof),
