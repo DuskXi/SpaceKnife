@@ -284,7 +284,6 @@ Only files that share their size with another are read; files count as duplicate
 | Include system and program folders | Off | On `true` · Off `false` | Windows, Program Files, ProgramData and the like; files there are only ever kept, never preselected for deletion. | `dupes.include_system` |
 | Include network drives | Off | On `true` · Off `false` | On network drives the same file cannot be recognised; such files are only kept. | `dupes.include_network` |
 | Files whose access time cannot be kept | Skip | Skip `"skip"` · Read anyway `"read"` | SpaceKnife reads files without changing their access time; when the system does not allow that, skip them or read them anyway. | `dupes.keep_access_time` |
-| Read the contents again before deleting | Off | On `true` · Off `false` | Before deleting, read both the copy to delete and the copy kept again in full (by default only checks that the files did not change). | `dupes.recheck_content` |
 
 #### Duplicate-file cleanup
 

@@ -891,17 +891,6 @@ def _registry() -> tuple[Spec, ...]:
             synonyms=("atime", "access time"),
             kind=str,
         ),
-        S(
-            "dupes.recheck_content",
-            "scan",
-            "重复文件",
-            "删除前重读内容",
-            "执行删除前把要删的和保留的再完整读一遍（默认只核对文件没有变过）",
-            "switch",
-            False,
-            synonyms=("verify", "recheck"),
-            kind=bool,
-        ),
         # ------------------------------------------------------------ 重复文件 › 清理 (docs/dupes.md §16.14)
         S(
             "dupes.keep_criteria",

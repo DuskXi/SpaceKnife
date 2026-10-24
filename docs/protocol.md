@@ -77,6 +77,8 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `layout.flame.v1` | 能解码并画 `flame.v1` 帧（火焰图） |
 | `layout.polar.v1` | 能解码并画 `polar.v1` 帧（火焰-极坐标图） |
 | `updates.v1` | 接收 `update.changed`（更新检查结果与下载进度，见 §3「更新检查」） |
+| `dupes.v1` | 重复文件的查找：`dupes.*` 事件、`tree.node` 的 `dupe`、帧列 `dup` / `dupg` 和「重复」配色（[dupes.md](dupes.md)） |
+| `dupes.cleanup.v1` | 重复文件的清理方案：`dupes.cleanup_*` 方法和事件（要求同时声明 `dupes.v1`，[dupes.md](dupes.md) §16） |
 
 `drawlist.v1`（树图）是基线，不需要能力。后端只给会话发它协商过的布局：没有对应能力的会话里，新视图和 `view.open` 的可视化退回树图，`view.set` 选不可用的可视化返回 INVALID_PARAMS；配色 `branch` 也只对带 `visuals.v1` 的会话开放。Electron 的能力列表由前端已注册的可视化组件生成。
 
@@ -147,8 +149,11 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `dupes.folder` / `dupes.folders` | 一个文件夹在别处有没有（覆盖：在别处有、只在这里、同一份数据、没核对，按字节，加只在这里最大的 50 个和别处的副本主要在哪 `elsewhere_list`）；按多余字节排的文件夹列表（只列最深的一层和分支汇合处，每行带对应的文件夹 `twin`） |
 | `dupes.locate` | 一个组在某个视图当前帧里的行（`limit` ≤ 2000）：画出来的份 `exact`，藏在折叠文件夹或聚合块里的给那一块 |
 | `dupes.keep` | 保留规则（基本规则、优先位置、文件夹一致、每卷一份），立即重算角色、可腾出和配色；`overrides` 加到这次查找已有的手动选择上（同一组新的「保留」替换旧的），`reset_overrides` 先清掉；新查找接过被替换那次的手动选择 |
-| `dupes.to_basket` | 把多余的副本放进删除篮：每 (扫描, 卷) 一个 `dupes` 条目，后端另存删除前的守卫；保留方已在删除篮里的组拒绝 |
-| `dupes.basket_members` | 删除篮里一个 `dupes` 条目的多余副本，每份带它的保留方，外加涉及的主要文件夹（分页）：执行前逐份复核 |
+| `dupes.cleanup_open` / `_resume` / `_state` / `_close` | 重复文件的清理方案（`dupes.cleanup.v1`，要求同时声明 `dupes.v1`，[dupes.md](dupes.md) §16）：建立或接上一个已完成查找的方案（可带预设），后台开始风险核查；采用或放弃上次存盘的编辑；版本、规则、摘要、门槛；离开时编辑存盘（不存确认）。没有任何方法能不经方案把查找结果变成删除（第一期的 `dupes.to_basket`、`dupes.basket_members` 已去掉） |
+| `dupes.cleanup_preview` / `_edit` / `_undo_edit` / `_redo_edit` / `_import` | 编辑（保留点、处理、目标、排除、规则、文件夹对、预设、选项、过目、确认）：`preview` 不提交，只给改前改后；`edit` 带 `base_version`，对不上报错，每次版本 +1、批准作废；撤回、重做最多 200 步；导入 JSON 按 (摘要, 路径) 采用 |
+| `dupes.cleanup_groups` / `_group` / `_facets` / `_pairs` / `_volumes` / `_summary` / `_risk_copies` / `_sample` / `_who_uses` / `_export` | 组表的一页（`limit` ≤ 500，筛选语法见 dupes.md §16.7.3，读不懂的项写回来、一组也不列）；一组的全部份（事实、可用性和原因、风险和证据、理由链）；分面计数；文件夹对和双向覆盖率；卷 × 卷；按处理、按卷、风险分桶、不做的和兜底的、门槛；一类高风险的份（确认前要能看到）；抽查的组；按需查占用；导出 JSON、CSV 或运行报告到用户选的路径 |
+| `dupes.cleanup_approve` / `_preflight` / `_execute` / `_pause` / `_resume_run` / `_cancel` | 冻结步骤得到令牌（核查没做完、有高风险没确认时拒绝并写出差什么）；只预检（不写任何东西）；拿令牌执行（失败策略、核对方式、`proceed_after_drops`：预检跳过了步骤时先返回清单，用户确认后再执行其余的）；暂停、继续、做完当前这一项就停，都在两步之间生效 |
+| `dupes.cleanup_runs` / `_run` / `_undo_plan` / `_undo` / `_purge_plan` / `_purge` / `_resolve` / `_recover_report` | 清理记录；一次运行的逐项结果；撤销的预检和撤销（可以只撤几项，`beside` 把原件还原到旁边）；清除的预检和清除（`delay_s = 5`，删前核对原件和保留点）；处理要你看一下的项（`put_back` / `keep_as_is`，只改名或什么都不做）；启动时收尾的结果 |
 | `dupes.clear` | 清除结果；「重复」配色的视图回到类别配色。关掉扫描或扫描被淘汰时后端自己清掉（`dupes.changed` 的 `cleared`） |
 
 ### 当前事件与主题
@@ -163,6 +168,9 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `update.changed` | `{status}`：检查开始与结束、下载进度（最多每秒 4 次）、卡片关闭、跳过或恢复一个系列、相关设置或界面语言改变时，推送给所有声明了 `updates.v1` 的会话 |
 | `dupes.progress` | `DupesStatus`（最多每秒 4 次，结束时一次）：阶段、漏斗计数、读了多少、速率、最多还要多久、负载档、在等哪块盘的扫描、按卷的可腾出、跳过原因、访问时间计数、因为文件变化退回「待核对」的组数 |
 | `dupes.changed` | `{job_id, version, reason}`（最多每秒 1 次）：结果变了（verified / keep / invalidated / cleared），列表据此刷新 |
+| `dupes.cleanup_changed` | `{plan_id, version, reason}`：方案变了（edit / facts / results / approved / basket / closed / run） |
+| `dupes.cleanup_progress` | 清理任务的进度（风险核查、预检、执行、撤销、清除、收尾；最多每秒 4 次，结束时一次）：阶段、计数、当前项、腾出、跳过的清单、是否等用户确认 |
+| `dupes.cleanup_interrupted` | 启动时收尾了中断的运行：推给第一个声明了 `dupes.cleanup.v1` 的会话一次 |
 
 ### 更新检查（`updates.v1`）
 

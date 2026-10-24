@@ -153,7 +153,7 @@ def scan_slice(
 模块函数 `dupes_identity`、`dupes_extents` 和类 `DupesReader`（每个磁盘队列一个）做重复文件检测的四个读盘阶段，每次调用处理一批（≤256 个名字或约 30 ms），全程释放 GIL；设计见 [dupes.md](dupes.md) §2、§5、§12。
 
 - `dupes_identity(paths)`（S1）：只读元数据，Windows 在只取属性的句柄上（不召回、不改访问时间），POSIX `lstat`/`statx`；身份是 (卷, 128 位文件 ID)，加链接数、纳秒时间、属性、重解析标记、Windows 的 USN 和「名字是否就是它」。
-- `dupes_extents(paths)`（S1b）：块映射，Linux `FS_IOC_FIEMAP`（不带 SYNC），Windows `FSCTL_GET_RETRIEVAL_POINTERS`；每个文件的映射压成 16 B BLAKE3，不常驻。macOS 还没做（APFS 的 clone id 要 `getattrlist`）。
+- `dupes_extents(paths)`（S1b）：块映射，Linux `FS_IOC_FIEMAP`（不带 SYNC），Windows `FSCTL_GET_RETRIEVAL_POINTERS`；每个文件的映射压成 16 B BLAKE3，不常驻。macOS 还没做（APFS 的 clone id 要 `getattrlist`）。有未分配的段（LCN < 0：ReFS 上刚写下、还没分配数据块的文件），或者这些段没覆盖到文件末尾（WinBtrfs 不到末尾就返回「完成」）时，映射不算完整，不用来认定「同一份数据」（`share.rs`，测试 `unallocated_runs_never_make_a_complete_map`；重复文件清理的实机验证里发现，[dupes.md](dupes.md) §16.20）。清理执行器的文件原语在 Python 里（`dupes/cleanup/fsops.py`、`winfs.py`），不在原生模块里。
 - `DupesReader.probe`（S2）：一次数据打开，读头尾（≥64 MiB 再读两处中间块），句柄核对身份和戳；SSD 上句柄留给 S3（交接）。
 - `DupesReader.step`（S3）：分段 BLAKE3-256，每个检查点 `finalize(&self)` 取中间摘要；在途请求不跨检查点；句柄租期 2 s，重开时核对身份和戳、从偏移继续；读满后核对长度、EOF 和读后的戳。
 - 打开方式：Windows `FILE_READ_DATA | FILE_WRITE_ATTRIBUTES`、`FILE_FLAG_OPEN_NO_RECALL`、LastAccessTime = −1，不经缓存（压缩、加密、稀疏、WOF、重复数据删除的文件经过滤驱动缓冲读）；Linux `O_NOATIME | O_NOFOLLOW | O_DIRECT`（设备拒绝时缓冲读）；macOS `F_NOCACHE` 和线程级 `setiopolicy_np(IOPOL_TYPE_VFS_ATIME_UPDATES, …, OFF)`（**未在真机验证**）。

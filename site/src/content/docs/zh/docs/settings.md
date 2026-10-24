@@ -284,7 +284,6 @@ SpaceKnife 的设置都在一个「设置」标签页里。改动立即保存，
 | 包括系统和程序文件夹 | 关 | 开 `true` · 关 `false` | Windows、Program Files、ProgramData 等；其中的文件只会保留，不会预选删除。 | `dupes.include_system` |
 | 包括网络盘 | 关 | 开 `true` · 关 `false` | 网络盘上认不出同一个文件，这些文件只会保留。 | `dupes.include_network` |
 | 保留不了访问时间的文件 | 跳过 | 跳过 `"skip"` · 照读 `"read"` | SpaceKnife 读文件时不改访问时间；系统不允许时跳过还是照读。 | `dupes.keep_access_time` |
-| 删除前重读内容 | 关 | 开 `true` · 关 `false` | 执行删除前把要删的和保留的再完整读一遍（默认只核对文件没有变过）。 | `dupes.recheck_content` |
 
 #### 重复文件清理
 

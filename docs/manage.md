@@ -56,8 +56,11 @@ AddResult(added: list[id], merged: list[Merged(path, into)], absorbed: list[id],
 
 - 去重：已在篮里的路径或其祖先在篮里 → merged；新加的是篮里条目的祖先 → 吸收（absorbed）。拒绝：节点 0、GONE 行、MFT 伪目录（VIRTUAL）里的项、受保护路径。
 - 可释放空间：文件为 `alloc`，云占位为 0；硬链接按（卷，ino）合并，只有全部名字都在篮里时计一次，否则注明「另有 N 个硬链接」。Windows 硬扫描没有 ino（=0），硬链接只在 MFT 扫描里可知。
-- **重复文件的条目**（`kind = "dupes"`，[dupes.md](dupes.md) §8.4）：`add_dupes(store, scan_id, [(node, path, guard)], note)` 每 (扫描, 卷) 一个条目，成员是各组多余副本的路径，没有「直接子项」的规则；`targets()` 把它展开成成员。每个成员的守卫（`dupes/guard.py` 的 `Guard`：成员和保留方的身份、大小、mtime、更改时间、USN）存在 `_Entry` 里，不进协议；`guards_for(paths)` 把它们交给执行。成员已在别的条目下 → merged；保留方都已是删除篮的目标 → refused「本组保留的那份已在删除篮里」。之后别的条目盖住了某个保留方，条目标成新状态 `blocked`（不拦用户自己的条目），这些成员执行时跳过；别的条目盖住了成员本身，成员离开这个条目。`reinstate` 带上守卫。
-- **执行前的守卫**（`ops/trash.py` 的 `move_to_trash`、`delete_permanently` 收 `guards`，在已有的只差大小写、已不在、受保护、占用检查之后，`dupes/guard.py` 的 `check`）：成员身份或戳变了 → `changed`；保留方不在、变了、或和成员成了同一身份 → `keeper_changed`；保留方在这次要删的任何路径下（按整次执行的路径集合判断，和顺序无关）→ `last_copy`；开着占用检测时保留方正被打开 → `keeper_busy`；「执行前重读内容」开着时两份重新哈希，不同 → `changed`。`OpCode` 因此多了这四个。
+- **不收重复文件**：第一期的 `dupes` 条目（`add_dupes`、`guards_for`、状态 `blocked`）去掉了；重复文件只经清理方案处理（[dupes.md](dupes.md) §16），没有一键删除。
+- **链接目标**：`Basket.link_targets(path)` 由清理服务给出「SpaceKnife 建的符号链接有几个指向它（或它里面）」。有的条目状态是 `link_target`，写「有 {count} 个 SpaceKnife 建的符号链接指向它：删了它，这些链接都打不开」；`basket.execute` 要带 `ack_link_targets`，否则拒绝（「有 {n} 项是 SpaceKnife 建的符号链接的目标：确认这些链接会失效后再执行」），界面在执行确认框里要先勾选。
+- **恢复区受保护**：清理的恢复区（`.SpaceKnife-recovery*`、数据目录里的 `dupes/cleanup/recovery`、原件留在自己文件夹里的隐藏名字）是 `protected_reason`：「SpaceKnife 的恢复区：在『重复文件清理记录』里还原或清除」。
+- **执行前的守卫**（`ops/trash.py` 的 `move_to_trash` 收 `guards` 和 `also_doomed`，在已有的只差大小写、已不在、受保护、占用检查之后，`dupes/guard.py` 的 `check`）：现在只给清理的回收站步骤用。成员身份或戳变了 → `changed`；保留方不在、变了、或和成员成了同一身份 → `keeper_changed`；保留方在这次要删的任何路径下（按整次执行的路径集合判断，和顺序无关）→ `last_copy`；开着占用检测时保留方正被打开 → `keeper_busy`。
+- **同一时间只做一件文件操作**：`OpsService.busy()` 同时看删除篮的任务和清理的运行；清理用 `basket_elsewhere()` 把删除篮里的一切当成要删的，保留点被盖住的组跳过。
 
 ### 2.3 占用检测与回收站（`ops/locks.py`、`ops/trash.py`）
 
