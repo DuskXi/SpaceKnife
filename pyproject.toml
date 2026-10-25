@@ -28,7 +28,9 @@ dev = [
 # Rust/PyO3 acceleration: needs a Rust toolchain to build (`uv sync --group native`); optional
 native = ["spaceknife-native"]
 # M8 installers: the frozen backend (tools/build_package.py; `uv sync --group native --group package`)
-package = ["pyinstaller>=6.11", "maturin>=1.9,<2"]
+# tzdata: zoneinfo's time zones on Windows (no system database there), bundled for plugins (zoneinfo is
+# on their allow-list; packaging/plugin_imports.py)
+package = ["pyinstaller>=6.11", "maturin>=1.9,<2", "tzdata>=2025.2; sys_platform == 'win32'"]
 
 [tool.uv]
 default-groups = ["dev"]

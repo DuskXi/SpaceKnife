@@ -19,12 +19,16 @@ hidden = [
     *collect_submodules("spaceknife_sdk"),
     *collect_submodules("spaceknife_native"),
 ]
-# the standard library plugins may import (spaceknife_sdk/imports.py; plugin check holds plugins to
-# it): nothing of the app's own needs sqlite3, tarfile, zoneinfo …, so PyInstaller would leave them out
-from spaceknife_sdk.imports import STDLIB
+# every module plugins may import: plugin check's allow-list (spaceknife_sdk/imports.py) and the public
+# submodules under it (packaging/plugin_imports.py). Nothing of the app's own needs sqlite3, tarfile,
+# html.parser, numpy.linalg.lapack_lite …, so PyInstaller would leave them out; tools/build_package.py
+# imports each one in a plugin process of the frozen backend afterwards. In a process of its own: it
+# imports them all to see which exist on this platform.
+import subprocess
 
-for _mod in sorted(STDLIB - {"__future__"}):
-    hidden += collect_submodules(_mod) if _mod in ("xml", "email", "urllib", "concurrent", "asyncio") else [_mod]
+hidden += subprocess.run(
+    [sys.executable, SPECPATH + "/plugin_imports.py", "--list"], check=True, capture_output=True, text=True
+).stdout.split()
 # locales/*.json; the shipped plugins (plugins/builtin/<id>/: plugin.toml, rules, templates, and
 # plugin.py, which is no Python package: the plugin loader imports it from the file)
 datas = collect_data_files("spaceknife", excludes=["**/__pycache__/**"])

@@ -25,8 +25,9 @@ Portable → dist/electron/SpaceKnife-<version>-win-<arch>-portable.zip,
 
 Steps: a release build of the native extension (maturin, with the build machine's paths remapped:
 no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
-dist/backend/spaceknife-backend), the frozen backend's smoke test (packaging/smoke_backend.py), on
-Linux the glibc floor of every ELF in the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34),
+dist/backend/spaceknife-backend), the frozen backend's smoke test (packaging/smoke_backend.py), a
+check that every module plugins may import is in it (packaging/plugin_imports.py), on Linux the glibc
+floor of every ELF in the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34),
 on Windows the console launcher SpaceKnife.com (packaging/console-launcher, paths remapped the
 same way), ``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
 ``electron-builder`` (apps/electron/electron-builder.yml), a check that no file of the
@@ -193,6 +194,10 @@ def freeze_backend() -> None:
     done(t0, f"{size / 2**20:.0f} MB")
     t0 = step("frozen backend smoke test")
     run([sys.executable, str(ROOT / "packaging" / "smoke_backend.py"), str(backend_exe())])
+    done(t0)
+    # every module plugin check lets a plugin import, imported in a plugin process of the frozen backend
+    t0 = step("modules plugins may import (packaging/plugin_imports.py)")
+    run([sys.executable, str(ROOT / "packaging" / "plugin_imports.py"), str(backend_exe())])
     done(t0)
 
 
