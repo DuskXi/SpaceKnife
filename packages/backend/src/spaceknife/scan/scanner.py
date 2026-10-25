@@ -79,7 +79,7 @@ class ScanProgress:
     errors: int
     pending_dirs: int
     current_path: str
-    elapsed_s: float
+    elapsed_s: float  # every run of the scan (stopped, then continued), pauses included
     rate: float
     progress: float | None
     started_at: datetime | None
@@ -304,9 +304,12 @@ class Scanner:
         self._denied: list[str] = []
         self.denied_reasons: list[str] = []  # OS message per recorded denied path (log panel)
         self._current = ""
-        self._started: float | None = None
-        self._finished: float | None = None
-        self.started_at: datetime | None = None
+        self._started: float | None = None  # this run's start (perf_counter); None before the first
+        self._finished: float | None = None  # this run's end; None while it runs
+        # earlier runs of this scan (stopped, then 「继续扫描」): elapsed_s adds them, not the waits
+        self._before_s = 0.0
+        self._held_s = 0.0  # the hard runs' time while an MFT read stands in for them
+        self.started_at: datetime | None = None  # the scan's first start, kept by later runs
         self.finished_at: datetime | None = None
         self.message = ""
         self.expected_items: int | None = None  # from the last snapshot of the same roots (UI-W2-15)
@@ -394,9 +397,13 @@ class Scanner:
     # the tree comes from elsewhere (an MFT scan adopted into the store): timing and state only
 
     def begin_external(self) -> None:
+        """The read starts; its tree replaces whatever a hard part listed, and so does its time
+        (scan.use_mft: the next 「约 N 秒」 estimate comes from it). The hard part's time is held
+        for :meth:`reset_external`."""
         self.state = ScanState.SCANNING
-        self._started = time.perf_counter()
-        self.started_at = datetime.now(UTC)
+        self._held_s = self._before_s + self._run_s()
+        self._before_s, self._started, self._paused_s = 0.0, None, 0.0
+        self._next_run()
 
     def finish_external(self, state: ScanState) -> None:
         self.state = state
@@ -406,10 +413,28 @@ class Scanner:
         self._current = ""
 
     def reset_external(self) -> None:
-        """The external read failed: :meth:`run` scans as usual."""
+        """The external read failed: :meth:`run` scans as usual, going on with the hard part's time
+        (not the attempt's: the tree keeps nothing of it)."""
         self.state = ScanState.QUEUED
-        self._started = None
-        self.started_at = None
+        self._before_s, self._held_s = self._held_s, 0.0
+        self._started = self._finished = None
+        self.finished_at = None
+
+    def _run_s(self) -> float:
+        """This run so far, the time it was paused included (``elapsed_s``; the profile leaves it out)."""
+        if self._started is None:
+            return 0.0
+        return (self._finished or time.perf_counter()) - self._started
+
+    def _next_run(self) -> None:
+        """A run starts now: the scan keeps its first start (``started_at``), and an earlier run (a
+        stopped scan going on) counts in ``_before_s``."""
+        self._before_s += self._run_s()
+        self._started = time.perf_counter()
+        self._finished = None
+        self.finished_at = None
+        if self.started_at is None:
+            self.started_at = datetime.now(UTC)
 
     def pause(self) -> None:
         """Stop dispatching batches; those in flight finish within their time budget (W2)."""
@@ -438,10 +463,10 @@ class Scanner:
     ) -> ScanProgress:
         loop = asyncio.get_running_loop()
         self.state = ScanState.SCANNING
-        self._started = time.perf_counter()
-        self.started_at = datetime.now(UTC)
+        self._next_run()
         self._busy_s = self._ingest_s = self._limited_s = self._paused_s = 0.0  # this run's profile
         self._slices = self._folded = 0
+        self._samples.clear()  # the rates come from this run's listing, not across a stop
         if self._paused_since is not None:  # paused while queued
             self._paused_since = self._started
         executor = self._executor
@@ -673,9 +698,7 @@ class Scanner:
 
     def progress(self) -> ScanProgress:
         c = self.store.cols
-        elapsed = 0.0
-        if self._started is not None:
-            elapsed = (self._finished or time.perf_counter()) - self._started
+        elapsed = self._before_s + self._run_s()  # every run of the scan, without the waits between
         items = len(self.store) - 1
         scanned_alloc = int(c["tot_alloc"][0])
         rate, byte_rate = self._rates(items, scanned_alloc, elapsed)
