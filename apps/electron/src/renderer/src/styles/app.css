@@ -531,11 +531,19 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .log-row { position: absolute; left: 0; right: 0; height: 20px; display: flex; align-items: center; gap: 10px; padding: 0 18px 0 12px; white-space: nowrap; }
 .log-row:hover, .log-row.on { background: var(--sk-color-bg-hover); }
 .log-time { flex: none; width: 60px; color: var(--sk-color-text-tertiary); font-size: 11px; }
-.log-level { flex: none; width: 34px; height: 16px; border-radius: 4px; background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); font-size: 10px; line-height: 16px; text-align: center; }
+.log-level { flex: none; min-width: 34px; height: 16px; padding: 0 4px; border-radius: 4px; background: var(--sk-color-bg-raised); color: var(--sk-color-text-secondary); font-size: 10px; line-height: 16px; text-align: center; }
 .log-row:hover .log-level { background: var(--sk-color-bg-active); }
 .log-row.warning .log-level { background: color-mix(in srgb, var(--sk-color-status-warning-fill) 22%, var(--sk-color-status-warning-base)); color: var(--sk-color-status-warning); font-weight: 700; }
 .log-row.error .log-level { background: color-mix(in srgb, var(--sk-color-status-danger) 22%, var(--sk-color-bg-panel)); color: var(--sk-color-status-danger); font-weight: 700; }
-.log-source { flex: none; width: 28px; color: var(--sk-color-text-secondary); }
+.log-source { flex: none; min-width: 28px; color: var(--sk-color-text-secondary); }
+/* The level and source cells (FitCell in LogPanel.tsx): every name of the column, stacked out of
+   sight, sizes the cell, so the columns line up in every row and language; the row's own name
+   fills it (contained: it never widens it), cut with … when longer. */
+.log-fit { display: grid; }
+.log-fit > span { grid-area: 1 / 1; }
+.log-fit-size { visibility: hidden; }
+.log-level .log-fit-size { font-weight: 700; } /* as wide as on warnings and errors */
+.log-fit-text { contain: inline-size; overflow: hidden; text-overflow: ellipsis; }
 .log-msg { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--sk-color-text-primary); }
 .log-msg .mono { font-size: 11px; }
 .log-actions { flex: none; display: none; align-items: center; gap: 4px; }
