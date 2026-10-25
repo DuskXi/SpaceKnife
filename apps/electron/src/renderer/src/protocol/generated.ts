@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "59a4f2062a30bd9b";
+export const SCHEMA_HASH = "f384e950e10b4f6c";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -879,7 +879,7 @@ export interface FrameInfo {
   /** Rows changed by a file change since the last frame (UI-TM-43) */
   flash: FlashItem[];
   /** None for drawlist.v1 */
-  geometry: FlameGeometry | PolarGeometry | null;
+  geometry: FlameGeometry | PolarGeometry | ShapesGeometry | null;
   height: number;
   /** Layout of the binary frame that follows */
   layout: string;
@@ -905,7 +905,10 @@ export interface FrameInfo {
   width: number;
 }
 
-/** The zoom root of a flame.v1 / polar.v1 frame (root bar, centre disc): the same facts as a row. */
+/**
+ * The zoom root of a flame.v1 / polar.v1 / shapes.v1 frame (root bar, centre disc, its shape):
+ * the same facts as a row.
+ */
 export interface FrameRoot {
   branch: number;
   count: number;
@@ -1513,6 +1516,19 @@ export interface PixelRect {
   y: number;
 }
 
+/** A shape of ``shapes.v1``: a rounded rectangle, or a convex polygon (``points``) in its box. */
+export interface PixelShape {
+  h: number;
+  /** x0 y0 x1 y1 … of a convex polygon drawn instead of the rounded rectangle */
+  points: number[];
+  /** Corner radius (r = w/2 = h/2: a circle) */
+  r: number;
+  w: number;
+  /** Bounding box, physical px */
+  x: number;
+  y: number;
+}
+
 export interface PlatformInfo {
   machine: string;
   release: string;
@@ -2082,6 +2098,17 @@ export interface SettingsUpdateParams {
   version?: number | null;
 }
 
+/** ``shapes.v1``: a plugin's own layout, drawn shape by shape. */
+export interface ShapesGeometry {
+  kind: "shapes";
+  /** Why nothing is drawn (the plugin failed or timed out) */
+  message: string;
+  /** A folder's rows lie inside its shape (circle packing); False: elsewhere (an icicle) */
+  nested: boolean;
+  /** The zoom root's own shape (drawn and hit as FrameInfo.root); None: not drawn */
+  root: PixelShape | null;
+}
+
 export interface ShutdownResult {
   accepted: boolean;
 }
@@ -2434,6 +2461,38 @@ export interface ViewAction {
   settings: Record<string, unknown>;
 }
 
+/**
+ * What colours nodes in a view (``colors.of``), one entry per node asked for; the frontend
+ * turns it into colours of the theme on screen as the view paints its blocks (a web panel gets
+ * them from ``sk.colors``).
+ */
+export interface ViewColors {
+  /** Top-level branch slot below the view's zoom root (0 neutral, 1–8) */
+  branch: number[];
+  /** Class index (filter.vocab order), 255: in no one class */
+  cls: number[];
+  /** Levels below the zoom root (1: its child; 0: the root or outside it) */
+  depth: number[];
+  /** 0 file · 2 folder · 3 folder not listed yet · -1 not a node of the scan */
+  kind: number[];
+  /** The colour mode these are for */
+  mode: string;
+  /** Palette index (a plugin's colour mode) */
+  pal: number[] | null;
+  /** A plugin's colour mode: 'pal' indexes its palette */
+  palette: string | null;
+  /** Modification-age band, 0 < 1 d … 4 ≥ 1 y / unknown */
+  tone: number[];
+}
+
+export interface ViewColorsParams {
+  /** A colour mode (None: the view's own) */
+  mode?: string | null;
+  /** Node ids of the view's scan */
+  nodes: number[];
+  view_id: string;
+}
+
 export interface ViewFilterParams {
   cursor?: number | null;
   text: string;
@@ -2612,6 +2671,8 @@ export interface VisualInfo {
   reason: string | null;
   /** What its areas count */
   size_unit: "bytes" | "count" | "weight";
+  /** A plugin's conditions (docs/plugins.md 「when 条件」): where they fail it is shown disabled with the reason */
+  when: string[];
 }
 
 export interface VisualListResult {
@@ -2705,6 +2766,8 @@ export interface Methods {
   "classes.reset": { params: Empty; result: ClassesState };
   /** Replace the file class table (order = colour precedence); views recolour and filters re-run. */
   "classes.update": { params: ClassesUpdateParams; result: ClassesState };
+  /** What colours some nodes in a view (its colour mode or another): classes, age bands, branch slots, a plugin's palette indices. Web panels paint with these (sk.colors). */
+  "colors.of": { params: ViewColorsParams; result: ViewColors };
   /** Forget a comparison (or stop computing it). */
   "compare.close": { params: CompareIdParams; result: EmptyResult };
   /** Totals and ends of a comparison. */

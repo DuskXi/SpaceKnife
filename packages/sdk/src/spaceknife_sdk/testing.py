@@ -500,6 +500,9 @@ class MockHost:
         views.close(view.id)
         if problems:
             raise AssertionError("the frame breaks the row contract: " + "; ".join(problems[:5]))
+        meta = frame.draw.meta
+        if isinstance(meta, pv.ShapesGeometry) and meta.message:  # @plugin.layout failed
+            raise AssertionError(f"the layout drew nothing: {meta.message}")
         return frame
 
     async def export(
@@ -658,10 +661,24 @@ class MockHost:
     async def command_available(self, name: str, /, *, node: int | None = None) -> str | None:
         """Why the command cannot run with ``node`` selected in a view of the scan in front (its
         ``when``, then its ``check`` method, as the palette and the menus ask), or None when it can."""
+        return await self._available(self._command(name), node)
+
+    async def visual_available(self, name: str, /) -> str | None:
+        """Why the plugin's visualization ``name`` cannot be picked in a view of the scan in front
+        (its ``when``, as the visualization switch and 「可视化：…」 ask), or None when it can."""
+        from spaceknife.palette import commands as pal
+
+        await self._ready()
+        cid = f"view.visual.{self.plugin_id}.{name}"
+        cmd = next((c for c in pal.registry() if c.id == cid), None)
+        if cmd is None:
+            raise KeyError(f"no visualization {name!r}")
+        return await self._available(cmd, None)
+
+    async def _available(self, cmd: Any, node: int | None) -> str | None:
         from spaceknife.palette.commands import Context as PaletteContext
         from spaceknife_protocol import view as pv
 
-        cmd = self._command(name)
         host = await self._ready()
         assert self.scan_id is not None, "scan something first"
         vhost = self.server.views.open(
@@ -678,6 +695,7 @@ class MockHost:
             settings=self.server.settings,
             plugins=frozenset(host.enabled_ids()),
             scan_source=source if isinstance(source, str) and "." in source else "",
+            caps=frozenset(self.session.capabilities),
         )
 
         def ask() -> str | None:

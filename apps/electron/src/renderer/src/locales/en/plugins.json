@@ -1,4 +1,8 @@
 {
+ "1 周内": "Within a week",
+ "1 天内": "Within a day",
+ "1 年内": "Within a year",
+ "1 月内": "Within a month",
  "{name}（{plugin}）": "{name} ({plugin})",
  "{name}：出错": "{name}: error",
  "{n} 个": "{n} plugins",
@@ -104,6 +108,7 @@
  "文件指纹 {hash}": "File fingerprint {hash}",
  "方法": "Methods",
  "是": "Yes",
+ "更早或未知": "Older or unknown",
  "替换": "Replace",
  "替换已安装的插件？": "Replace the installed plugin?",
  "最近的错误输出": "Recent error output",

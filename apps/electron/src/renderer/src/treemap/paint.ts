@@ -63,6 +63,8 @@ export interface TextItem {
   /** a header: the size goes right after the name */
   sub?: { text: string; font: string; color: string };
   alpha: number;
+  /** "center": `x` is the middle of the text as shown (shapes.v1's round shapes and polygons) */
+  align?: "center";
 }
 
 export interface TagItem {

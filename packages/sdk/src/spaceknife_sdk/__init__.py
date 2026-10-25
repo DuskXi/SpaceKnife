@@ -42,7 +42,7 @@ from spaceknife_protocol.plugins import (
 )
 from spaceknife_protocol.text import T, Text
 
-from . import layout
+from . import layout, shapes
 from . import report as r
 from .context import Context, FileNotAllowed
 from .errors import Cancelled, PluginError
@@ -60,6 +60,7 @@ from .models import (
     VisualInput,
 )
 from .plugin import Plugin
+from .shapes import BlockKind, LayoutInput, Shapes
 from .tree import Columns, Flag, Kind, Node, Rows, TreeView
 
 __version__ = "0.1.0"
@@ -68,6 +69,7 @@ __all__ = [
     "ActionContext",
     "BarItem",
     "BarsBlock",
+    "BlockKind",
     "CalloutBlock",
     "Cancelled",
     "Change",
@@ -84,6 +86,7 @@ __all__ = [
     "Insight",
     "Kind",
     "KvBlock",
+    "LayoutInput",
     "Listing",
     "MdBlock",
     "MeterBlock",
@@ -104,6 +107,7 @@ __all__ = [
     "Rows",
     "ScanInfo",
     "SectionBlock",
+    "Shapes",
     "SnapshotInfo",
     "SparkBlock",
     "StackBlock",
@@ -120,4 +124,5 @@ __all__ = [
     "VisualInput",
     "layout",
     "r",
+    "shapes",
 ]

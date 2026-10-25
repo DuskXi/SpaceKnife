@@ -105,7 +105,7 @@ default = 1048576
 | [节点字段](#kind-node_field) | — | `@plugin.node_field` | `tree.read` | 详情 1 s，悬停 30 ms | 详情面板、悬停卡 |
 | [洞察](#kind-insight) | — | `@plugin.insight` | `tree.read` | 1 s | 详情面板的洞察卡片 |
 | [Web 面板](#kind-panel) | `[[panels]]` | `plugin.panel` | 看它调用什么 | 桥：单条 1 MiB，8 个并发 | 标签页、详情面板、对话框 |
-| [可视化](#kind-visualization) | `[[visualizations]]` | `@plugin.visualization` | 代码的要 `tree.read` | 每帧 120 ms | 工具栏、V 键 |
+| [可视化](#kind-visualization) | `[[visualizations]]` | `@plugin.visualization`、[`@plugin.layout`](#kind-layout) | 代码的要 `tree.read`（自带布局不要） | 每帧 120 ms；自带布局每个新画面 5 s | 工具栏、V 键 |
 | [配色](#kind-color_mode) | `[[color_modes]]` | `@plugin.color_mode` | 代码的要 `tree.read` | 每帧 20 ms | 工具栏、C 键、图例 |
 | [导出格式](#kind-export_format) | — | `@plugin.export_format` | `tree.read` | 30 s 没有输出就中止 | 导出对话框、命令行 |
 | [导出模板](#kind-export_template) | `[[export_templates]]` | `plugin.export_template` | — | — | 导出对话框、命令行 |
@@ -394,18 +394,20 @@ title = { zh = "面板", en = "Board" }
 <a id="kind-visualization"></a>
 #### 可视化
 
-插件不画图：它选一个内置的画法（`base`），换一种面积的算法。布局格式由程序维护，三种前端都能画，悬停、选中、标签、呼吸这些效果全都有。
+插件不画图：要么选一个内置的画法（`base`），换一种面积的算法；要么[自带布局](#kind-layout)（`@plugin.layout`），自己决定每一块放在哪里、画成什么形状。两种都由程序来画，悬停、选中、标签、配色、缩放、呼吸、两种主题这些效果全都有。
 
 | 字段 | 说明 |
 |---|---|
 | `name` `title` | 必需 |
 | `icon` `order` | 工具栏里的图标和位置（50；插件的排在内置的之后，`visual.list` 报的是 100 + order） |
-| `base` | `treemap` `flame`（默认）`flame_polar` |
+| `base` | `treemap` `flame`（默认）`flame_polar`，或 `shapes`（[自带布局](#kind-layout)，配 `@plugin.layout`） |
+| `fill` `max_rows` `nested` | 只用于自带布局 |
 | `size` | 面积按什么：`alloc`（占用，默认）`size`（逻辑大小）`files`（文件数）`items`（项数）`code`（函数给权重） |
 | `unit` | 面积的单位：`bytes` `count` 或 `weight`（默认按 `size` 推断：`code` 是 `weight`），决定标签的写法：`weight` 的标签写占缩放根权重的比例（同一层加起来不超过 100%），悬停卡另写真实占用 |
 | `options` | 本插件的设置名：传给函数的 `v.options` |
 | `compare` | 对比时也可用（False） |
 | `default_color` | 视图切到它时用的配色：`class flat time branch`，或本插件的配色名（其他插件的写全名）；不写跟着 `base` |
+| `when` | 哪里能选它（`scan done scanning compare scan_view on_disk setting: cap: plugin: source:`，同命令的 `when`）：不满足时工具栏里的按钮变灰、悬停写原因，V 键跳过它 |
 
 ```toml ex
 [[visualizations]]
@@ -424,6 +426,25 @@ def by_lines(v: VisualInput) -> np.ndarray:
 ```
 
 每帧 120 ms；连续失败三次后，这个可视化在这次会话里不再可用。
+
+<a id="kind-layout"></a>
+#### 自带布局的可视化
+
+圆堆积、冰柱图、Voronoi 格子这类画法：程序挑出要画的块，插件的函数说每一块放在哪里、画成什么形状，程序来画。
+
+```python ex
+@plugin.layout("pack", T("圆堆积", "Circle packing"), fill=0.5)
+def pack(v: LayoutInput) -> Shapes:
+    return shapes.pack(v)  # SDK 带的圆堆积；自己排时 out = v.shapes()，每块 out.circle / rect / polygon
+```
+
+- **程序给什么**（`v: LayoutInput`）：缩放根下面值得画的块，父块在前，最多 `max_rows` 个。挑法和内置视图一样（合并小项、聚合块分页、等待扫描、可用和未知空间）；「太小」按面积估计：块占缩放根的份额 × 画布面积 × `fill`（块实际能分到的比例：圆堆积约 0.5，冰柱图 1）比最小元素的平方小就合并。每块有 `node` `parent` `kind` `depth` `size` 和区间 `u0`…`u1`（冰柱图的 x），画布是 `width` × `height` 物理像素。不要权限；要名字等再用 `v.tree`（要 `tree.read`）。
+- **回答什么**（`Shapes`，坐标是物理像素）：每块一个圆角矩形、圆或 3–12 点的凸多边形，或者不画（它里面的块也不画）；下标 −1 是缩放根自己，给了形状就画成可以点的底。圆和多边形的标签居中，矩形的靠左上，放不下的不写。
+- **宿主**：每个新画面调一次（≤ 5 s），按「这些块、这块画布、这些设置」缓存，所以同样的输入要给同样的答案；失败时画布中间写原因。
+
+字段：`size`（`alloc` `size` `files` `items`）、`fill`（0.05–1，默认 0.75，见上）、`max_rows`（100–50 000，默认 5000）、`nested`（文件夹的块在它的形状里面：True，圆堆积；在别处：False，冰柱图），其余同上表。
+
+方法、标签、失败时的样子和冰柱图的写法见 [API 参考](plugin-api.md#api-layout)；完整例子是 `examples/plugins/example.shapes`（圆堆积、六边形、冰柱图）。测试：`frame = await host.visual("pack")`（失败时抛出原因），`plugin render <文件夹> visual:pack` 打印形状的统计。
 
 <a id="kind-color_mode"></a>
 #### 配色
@@ -833,11 +854,14 @@ sk.onContext((ctx) => …);  sk.onLang((lang) => …);  sk.onTheme((mode) => …
 sk.format.size(1536000);  sk.format.count(1234);  sk.format.date(unixSeconds);   // 和界面一样的写法
 sk.host.select(node); sk.host.zoom(node); sk.host.filter("*.log"); sk.host.toast("…");
 sk.host.command("my.tool.open");  sk.host.command("view.visual.flame");   // 本插件的，和视图、导航、过滤、导出的
+sk.view;  sk.onView((v) => …);    // 面板所在视图画的是什么：visual layout color_mode zoom_node selected detail filter …
+const { colors, legend } = await sk.colors(nodes);   // 视图给这些节点上的颜色（#rrggbb）和图例，要 tree.read
 sk.host.basket([node], "原因");   // 要 basket.propose；sk.host.copy 要 clipboard，open / reveal / url 要 host.open
 sk.resize(240);                   // 详情面板和对话框里要的高度
 ```
 
 - **类型**：`spaceknife plugin build` 写出 `web/sk-plugin.d.ts`（本插件的方法、事件、状态）；JS 文件第一行写 `// @ts-check`，再写 `/** @type {typeof import("./sk-plugin").default} */ const typed = sk;`，编辑器就按它检查参数和返回值；`_sk/sk.d.ts` 是桥本身的类型。标签页里程序已经在网页上方显示了标题，网页里不用再写一遍。
+- **视图**：`sk.view` 是面板所在视图（`sk.context.view_id`）现在画的东西：`visual`（可视化 id）`layout` `color_mode` `zoom_node` `zoom_key` `selected` `detail` `filter`（`{ text, active }`）`compare` `size_unit`；换可视化、配色、缩放、选中、过滤时 `sk.onView` 收到新的（马上先收到一次）。`sk.colors(nodes, { mode })` 给出视图按它的配色（或 `mode` 指定的）给这些节点上的颜色，和视图里的一样（主题、用户改过的类别颜色、插件配色的色板都算上）：文件按配色、文件夹用层级色；`legend` 是这些节点里出现的类别、时间档或插件配色的说明。`sk.host.command` 跑视图、导航的命令（`view.color.time` `view.visual.<id>` `view.zoom_in` `nav.up` …）时作用在面板所在的视图上，面板的标签页留在前面。
 - **主题**：`base.css` 定义了 `--sk-*` 变量（`--sk-bg` `--sk-text` `--sk-muted` `--sk-accent` `--sk-border` `--sk-ok` `--sk-warn` `--sk-danger` `--sk-font` `--sk-mono` `--sk-radius` …），主题切换时自动更新；`document.documentElement.dataset.skTheme` 是 `dark` 或 `light`。
 - **限制**：单条消息 1 MiB，同时 8 个调用，每秒 50 条；`basket.execute`、改设置、开始扫描等都调不到。
 - **单独调试（mock 模式）**：`plugin build` 把桥复制到 `web/_sk/`；在 `web/` 里起一个静态服务器（`python -m http.server`），打开 `index.html?mock=fixtures.json`，调用按 `fixtures.json` 回答：`{ "lang": "zh-CN", "theme": "light", "context": {…}, "calls": { "<方法>": <结果> 或 [{ "params": {…}, "result": … }, …] }, "core": { "<内置方法>": <结果> }, "states": {…}, "events": { "<名>": [<载荷>…] } }`。
@@ -966,5 +990,6 @@ async def test_largest() -> None:
 | `example.dupes` | `examples/plugins/example.dupes/` | 代码插件（独立进程）：方法、事件、共享状态、报告、清理、命令和状态行、按键、设置、节点字段、`:set:dupes`；读文件内容算哈希（`files.read`），重活在 `ctx.compute` 里 |
 | `example.devpack` | `examples/plugins/example.devpack/` | 纯声明式：洞察规则、文件类别、文件夹规则、过滤预设和按键、导出模板、按扩展名的配色、按文件数的火焰图 |
 | `example.panel` | `examples/plugins/example.panel/` | Web 面板：按修改年份的条形图，`sk.call` 和 `sk.core`，主题，`fixtures.json` 的 mock 模式 |
+| `example.shapes` | `examples/plugins/example.shapes/` | 自带布局的可视化：圆堆积（`shapes.pack`，可以画成六边形多边形）和自己写的冰柱图，自己的 SVG 图标，不要任何权限 |
 | `builtin.export` | `packages/backend/src/spaceknife/plugins/builtin/builtin.export/` | 程序自带的五个导出模板（声明）和 CSV / JSON / HTML（`@plugin.export_format`） |
 | `builtin.insights` | `packages/backend/src/spaceknife/plugins/builtin/builtin.insights/` | 程序自带的洞察规则，一个纯声明式插件 |

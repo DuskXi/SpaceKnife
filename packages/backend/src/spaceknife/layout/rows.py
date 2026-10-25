@@ -50,10 +50,12 @@ class Label(IntFlag):
     BIG = 4  # area > 52,000 px²: larger type
     SHORT = 8  # height < 22 px: name only, smaller type, centred vertically
     RADIAL = 16  # polar.v1: the name runs along the radius
+    TOP = 32  # shapes.v1: the name sits at the top inside the shape (an expanded folder)
 
 
 L_NAME, L_SIZE, L_BIG, L_SHORT = int(Label.NAME), int(Label.SIZE), int(Label.BIG), int(Label.SHORT)
 L_RADIAL = int(Label.RADIAL)
+L_TOP = int(Label.TOP)
 
 
 def label_box(cw: float, ch: float, big: bool = True) -> int:
@@ -85,6 +87,7 @@ GEOMETRY_COLUMNS: dict[str, tuple[str, ...]] = {
     pv.DRAWLIST_LAYOUT: ("x", "y", "w", "h"),
     pv.FLAME_LAYOUT: ("x", "y", "w", "h"),
     pv.POLAR_LAYOUT: ("a0", "a1", "r0", "r1"),
+    pv.SHAPES_LAYOUT: ("x", "y", "w", "h", "r", "poly"),  # + blob points (layout/shapes.py)
 }
 
 
@@ -109,7 +112,8 @@ class DrawList:
     elapsed_s: float = 0.0
     layout: str = pv.DRAWLIST_LAYOUT  # wire layout of the rows
     visual: str = "treemap"  # the visualization that laid them out
-    meta: pv.FlameGeometry | pv.PolarGeometry | None = None  # FrameInfo.geometry (None: drawlist.v1)
+    meta: pv.FlameGeometry | pv.PolarGeometry | pv.ShapesGeometry | None = None  # FrameInfo.geometry
+    points: np.ndarray | None = None  # shapes.v1: i4 x, y pairs of the polygons (blob points)
     levels: int = 0  # levels below the zoom root the layout could draw
     _index: tuple[np.ndarray, np.ndarray] | None = field(default=None, init=False, repr=False, compare=False)
     _lookups: int = field(default=0, init=False, repr=False, compare=False)

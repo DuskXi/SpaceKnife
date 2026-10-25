@@ -48,6 +48,7 @@ from .models import (
     VisualInput,
 )
 from .plugin import Handler, Plugin, loaded
+from .shapes import LayoutInput, Shapes
 from .tree import Columns
 
 MAX_CHUNK = 1 << 20
@@ -305,6 +306,19 @@ class Dispatcher:
             result = await self._call(h, v)
             arr = np.asarray(result)
             return {"n": int(arr.shape[0])}, [_frame({"v": arr.astype(np.float64)})]
+        if kind == "layout":
+            cols = decode_frame(frames[0])[1] if frames else {}
+            li = LayoutInput.from_wire(dict(p), cols, ctx)
+            shaped = await self._call(h, li)
+            if shaped is None:
+                shaped = li.shapes()
+            # said to the author as they are (the frame shows them, MockHost.visual raises them)
+            if not isinstance(shaped, Shapes):
+                raise PluginError("a layout function returns Shapes (v.shapes(), or shapes.pack(v))")
+            if len(shaped) != len(li):
+                raise PluginError(f"Shapes for {len(shaped)} blocks, the layout got {len(li)}")
+            value, placed, points = shaped.to_wire()
+            return value, [_frame(placed), _frame({"p": points})]
         if kind == "color":
             ids = decode_frame(frames[0])[1]["ids"] if frames else np.zeros(0, dtype=np.int64)
             ids = np.asarray(ids, dtype=np.int64)

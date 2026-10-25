@@ -1,0 +1,29 @@
+# Visualizations with a layout of their own: circle packing and an icicle. The host picks the blocks
+# to draw, plugin.py places them (@plugin.layout) and the host draws them like its own views: hover,
+# selection, labels, colour modes, zoom, themes. docs/plugin-dev.md 「自带布局的可视化」 explains it.
+# It needs no permission: a layout sees only the blocks it is given.
+id = "example.shapes"
+version = "1.0.0"
+name = { zh = "圆堆积与冰柱图", en = "Circle packing and icicle" }
+description = { zh = "两种自带布局的可视化：每个文件夹一个圆、里面装着它的内容；或者从上往下一层一层的冰柱图。", en = "Two visualizations with layouts of their own: every folder a circle holding its contents, or an icicle growing down level by level." }
+author = "SpaceKnife examples"
+icon = "icons/pack.svg"
+entry = "plugin.py"
+permissions = []
+
+[[settings]]
+name = "padding"
+title = { zh = "圆之间的间距", en = "Space between circles" }
+description = { zh = "相邻的圆之间、圆和它所在文件夹的边之间留多少。", en = "How much room is left between neighbouring circles and inside a folder's edge." }
+control = "slider"
+default = 2
+min = 0
+max = 8
+unit = "px"
+
+[[settings]]
+name = "shape"
+title = { zh = "圆堆积的形状", en = "Shape of the packing" }
+description = { zh = "画成圆，或者画成同样大小的六边形。", en = "Draw circles, or hexagons of the same size." }
+default = "circle"
+options = [["circle", { zh = "圆", en = "Circles" }], ["hexagon", { zh = "六边形", en = "Hexagons" }]]

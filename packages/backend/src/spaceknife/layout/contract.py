@@ -18,7 +18,12 @@ list is fine. The rules:
 7. partition layouts (flame.v1, polar.v1) have at most ``MAX_ROWS`` rows;
 8. the geometry matches the layout: its columns (i4, one value per row) and ``meta``; blocks lie on
    the canvas and inside their parent; in a partition the rows of one level share their band or
-   ring and follow each other along it without overlapping.
+   ring and follow each other along it without overlapping. In ``shapes.v1`` (a plugin's own
+   layout, which may leave blocks out: rule 5 checks only sizes and containers there) a row is a
+   non-empty box near the canvas (within its size again on every side), its corner radius at most
+   half its shorter side, its polygon 3 to ``MAX_POLY_POINTS`` convex points inside its box, the
+   ``points`` blob as long as the polygons need; with ``nested`` a row's box lies inside its
+   parent's.
 """
 
 from __future__ import annotations
@@ -195,6 +200,7 @@ def _well_formed(draw: DrawList, problems: list[str]) -> bool:
         pv.DRAWLIST_LAYOUT: type(None),
         pv.FLAME_LAYOUT: pv.FlameGeometry,
         pv.POLAR_LAYOUT: pv.PolarGeometry,
+        pv.SHAPES_LAYOUT: pv.ShapesGeometry,
     }
     if not isinstance(draw.meta, meta[draw.layout]):
         problems.append(
@@ -258,7 +264,7 @@ def _coverage(
     containers += [
         (r, children(int(node[r])), int(draw.size[r])) for r in np.flatnonzero(kind == FOLDER).tolist()
     ]
-    slack = SLACK_PX if draw.meta is None else 2 * draw.meta.gap + 2
+    slack = 2 * draw.meta.gap + 2 if isinstance(draw.meta, pv.FlameGeometry | pv.PolarGeometry) else SLACK_PX
     for row, ids, own in containers:
         under = draw.parent == row
         drawn = node[under & real]
@@ -271,6 +277,8 @@ def _coverage(
             if not np.isin(blocks.get(int(draw.key[i]), ids), ids).all()
         ]
         report(5, f"aggregate members outside its container (row {row})", np.array(outside, dtype=np.int64))
+        if isinstance(draw.meta, pv.ShapesGeometry):
+            continue  # a plugin's layout may leave blocks out
         s = size_of(ids)
         missing = (s > 0) & ~np.isin(ids, drawn) & ~np.isin(ids, every)
         if not missing.any():
@@ -317,6 +325,9 @@ def _geometry(
 ) -> None:
     up = np.where(inner, parent, 0)
     g = {name: col.astype(np.int64) for name, col in draw.geometry.items()}
+    if draw.layout == pv.SHAPES_LAYOUT:
+        _shapes(draw, g, inner, up, report)
+        return
     if draw.layout in (pv.DRAWLIST_LAYOUT, pv.FLAME_LAYOUT):
         x, y, w, h = g["x"], g["y"], g["w"], g["h"]
         report(8, "empty block", (w <= 0) | (h <= 0))
@@ -333,6 +344,47 @@ def _geometry(
         report(8, "empty ring", (r0 < 0) | (r1 <= r0))
         report(8, "sector sticks out of its parent", inner & ((a0 < a0[up]) | (a1 > a1[up]) | (r0 < r1[up])))
         _levels(depth, a0, a1, (r0, r1), report)
+
+
+def _shapes(
+    draw: DrawList,
+    g: dict[str, np.ndarray],
+    inner: np.ndarray,
+    up: np.ndarray,
+    report: Callable[[int, str, np.ndarray], None],
+) -> None:
+    """Rule 8 for ``shapes.v1``."""
+    from .shapes import convex
+
+    x, y, w, h, r, poly = g["x"], g["y"], g["w"], g["h"], g["r"], g["poly"]
+    W, H = draw.width, draw.height
+    report(8, "empty shape", (w <= 0) | (h <= 0))
+    report(8, "shape far off the canvas", (x + w < -W) | (y + h < -H) | (x > 2 * W) | (y > 2 * H))
+    report(8, "corner radius below 0 or over half the shorter side", (r < 0) | (2 * r > np.minimum(w, h)))
+    report(
+        8,
+        "polygon of other than 3 to MAX_POLY_POINTS points",
+        (poly != 0) & ((poly < 3) | (poly > pv.MAX_POLY_POINTS)),
+    )
+    blob = np.zeros(0, dtype=np.int64) if draw.points is None else draw.points.astype(np.int64)
+    pts = blob.reshape(-1, 2)
+    need = int(np.clip(poly, 0, None).sum())
+    if len(blob) != 2 * need:
+        report(8, f"blob points holds {len(blob)} values, the polygons need {2 * need}", poly > 0)
+        return
+    at = 0
+    bad: list[int] = []
+    for i in np.flatnonzero(poly > 0).tolist():
+        p = pts[at : at + int(poly[i])]
+        at += int(poly[i])
+        outside = (p[:, 0] < x[i]) | (p[:, 0] > x[i] + w[i]) | (p[:, 1] < y[i]) | (p[:, 1] > y[i] + h[i])
+        if outside.any() or not convex(p.astype(np.float64)):
+            bad.append(i)
+    report(8, "polygon outside its box or not convex", np.array(bad, dtype=np.int64))
+    meta = draw.meta
+    if isinstance(meta, pv.ShapesGeometry) and meta.nested:
+        out = (x < x[up] - 1) | (y < y[up] - 1) | (x + w > x[up] + w[up] + 1) | (y + h > y[up] + h[up] + 1)
+        report(8, "shape sticks out of its parent", inner & out)
 
 
 def _levels(

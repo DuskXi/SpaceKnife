@@ -77,6 +77,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `visuals.v1` | 理解视图设置的 `visual` 字段、`visual.list`、`FrameInfo` 的 `visual` / `layout` / `geometry` / `root`、配色模式 `branch` 和 `branch` 列 |
 | `layout.flame.v1` | 能解码并画 `flame.v1` 帧（火焰图） |
 | `layout.polar.v1` | 能解码并画 `polar.v1` 帧（火焰-极坐标图） |
+| `layout.shapes.v1` | 能解码并画 `shapes.v1` 帧（插件自带布局的可视化：圆角矩形、圆、凸多边形） |
 | `updates.v1` | 接收 `update.changed`（更新检查结果与下载进度，见 §3「更新检查」） |
 | `plugins.v1` | 插件：§3「插件」的方法和事件、插件的命令和动作（`palette.commands` 的 `action`、`menus`、`owner`）、`export.targets` 里插件的模板和格式、`scan.start` 的 `source` / `uri`、`basket.add` 的 `origin` / `reasons` |
 | `colors.v1` | 插件的配色模式：视图帧带 `pal` 列（§4.1），色板与图例在 `extensions.get` 里 |
@@ -218,8 +219,8 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 |---|---|
 | `visual` | 画这一帧的可视化（`treemap` / `flame` / `flame_polar` / …），缺省为 `treemap` |
 | `layout` | 随后那个二进制帧的布局，缺省为 `drawlist.v1` |
-| `geometry` | 布局的几何参数，按 `kind` 区分：`drawlist.v1` 为 null，`flame.v1` 为 `FlameGeometry`（4.3），`polar.v1` 为 `PolarGeometry`（4.4） |
-| `root` | `FrameRoot`：缩放根本身，画成根条或中心圆，只在 `flame.v1` 和 `polar.v1` 里有。字段 `key node kind size count flags tag tone branch delta dstat` 与同名列的含义相同；它不是一行 |
+| `geometry` | 布局的几何参数，按 `kind` 区分：`drawlist.v1` 为 null，`flame.v1` 为 `FlameGeometry`（4.3），`polar.v1` 为 `PolarGeometry`（4.4），`shapes.v1` 为 `ShapesGeometry`（4.5） |
+| `root` | `FrameRoot`：缩放根本身，画成根条或中心圆，只在 `flame.v1` 和 `polar.v1` 里有（`shapes.v1` 在插件给了根的形状时也有）。字段 `key node kind size count flags tag tone branch delta dstat` 与同名列的含义相同；它不是一行 |
 | `flash[].row` | 变化的块或它最近的已画祖先所在的行；`flame.v1` 和 `polar.v1` 里落不到任何行的变化记为 −1，表示缩放根 |
 
 所有布局的行都有同样的通用列，父块总在子块之前；各布局另加自己的几何列（4.2–4.4）：
@@ -232,7 +233,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `kind` | `<u1` | 0 文件 · 1 展开的文件夹（画法由布局规定）· 2 折叠的文件夹 · 3 等待扫描 · 4 N 个小项 · 5 +N 项 · 6 可用空间 · 7 未知空间 |
 | `depth` | `<u1` | 嵌套层级，缩放根的子项为 1（层级色取 min(depth, 4)） |
 | `cls` | `<u1` | 类别序号（`filter.vocab` 的顺序）：文件、小项块，以及被文件夹类别整个归类的文件夹（如游戏目录）；255 表示不属于某一类（其余文件夹、类别混杂的小项块、「+N 项」、可用 / 未知空间），着色同「其他」 |
-| `label` | `<u1` | 1 名称 · 2 第二行大小 · 4 大号字 · 8 矮块（只显示名称，垂直居中）· 16 径向（只用于 `polar.v1`，文字沿半径方向写） |
+| `label` | `<u1` | 1 名称 · 2 第二行大小 · 4 大号字 · 8 矮块（只显示名称，垂直居中）· 16 径向（只用于 `polar.v1`，文字沿半径方向写）· 32 顶部（只用于 `shapes.v1`，名字写在形状里面的顶部） |
 | `size` | `<i8` | 显示的字节数（面积或长度的口径；隐藏模式下是匹配部分） |
 | `count` | `<u4` | 「N 个小项」的文件数，「+N 项」的条目数 |
 | `flags` | `<u2` | 1 匹配 / 含匹配 · 2 暗化 · 4 命中文件夹掩码（粗体）· 8 自身有标签 · 16 选中 · 32 选中项的祖先（光晕）· 64 扫描进行中、子树还有没列出的文件夹（只标缩放根以下 3 层的文件夹块；`FrameInfo.root.flags` 也可能带这一位）· 128 在回收站 / 废纸篓里，或者就是回收站文件夹本身（Windows `$Recycle.Bin`、macOS `.Trash` / `.Trashes`、Linux `.local/share/Trash` 与 `.Trash-<uid>`；聚合块按所在文件夹；缩放根也会带）· 256 回收站文件夹本身（界面在它上面标出清空能释放多少） |
@@ -252,9 +253,9 @@ blob `names`：各行名称的 UTF-8 编码，按行顺序首尾相接。颜色�
 2. 同一帧里 `key` 不重复。
 3. `kind` ≤ 3 的行是真实节点。
 4. 一个节点最多属于一个聚合块。
-5. 缩放根下的每个节点，要么是一行，要么是聚合块的成员，要么在某个已画行之下；被丢弃的极小块除外。
+5. 缩放根下的每个节点，要么是一行，要么是聚合块的成员，要么在某个已画行之下；被丢弃的极小块除外（`shapes.v1` 不受这条约束：插件可以不画某些块）。
 6. 只有带标签位、且 `kind` ≤ 3 的行才有名称。
-7. `flame.v1` 和 `polar.v1` 每帧最多 50 000 行。
+7. `flame.v1`、`polar.v1` 和 `shapes.v1` 每帧最多 50 000 行。
 8. 同一层（同一带或同一环）的行按 `x` 或 `a0` 递增。
 
 兄弟块之间共享边界值，严丝合缝；子块一定落在父块之内。
@@ -307,6 +308,29 @@ kind 1 是框加标题栏，子块画在框里。`FrameInfo.geometry` 和 `Frame
 | `rings` | 中心圆以外画出的环数 |
 | `gap` | 环之间、相邻扇区之间的缝（下文记作 g） |
 | `unit` | 每圈的角度单位，固定为 1 048 576 |
+
+### 4.5 插件自带的布局 `shapes.v1`
+
+插件的可视化自己排布局时用（docs/plugin-dev.md「自带布局的可视化」）：后端按分区布局的规则挑出要画的块（合并、分页、等待扫描、可用与未知空间、行数上限），插件给每块一个形状，后端检查后发出。
+
+| 列 | 类型 | 含义 |
+|---|---|---|
+| `x` `y` `w` `h` | `<i4` | 形状的外框，物理像素（可以伸出画布，但不超过画布再大一倍） |
+| `r` | `<i4` | 圆角半径，0 ≤ 2r ≤ min(w, h)；2r = w = h 时是圆 |
+| `poly` | `<i4` | 0：画圆角矩形；3–12：改画一个凸多边形，它的点数 |
+
+blob `points`：所有 `poly > 0` 的行的点，`<i4` 的 x、y 交替，按行的顺序首尾相接；点都在本行的外框里。行按顺序画，后画的盖住先画的；命中测试取最后一个包含该点的形状，都不包含时看根的形状。kind 1 是展开的文件夹，画成它自己的形状。
+
+`ShapesGeometry`：
+
+| 字段 | 含义 |
+|---|---|
+| `kind` | 固定为 `"shapes"` |
+| `root` | 缩放根的形状 `{x, y, w, h, r, points}`（`PixelShape`，`points` 非空时是多边形），按 `FrameInfo.root` 画在最下面；null 时不画根，`FrameInfo.root` 也为 null |
+| `nested` | 文件夹的块在它的形状里面（圆堆积）为 true；在别处（冰柱图）为 false |
+| `message` | 插件没能排出布局时的原因（这一帧没有行），前端写在画布中间 |
+
+`colors.of {view_id, nodes, mode?}` 给出任意节点在一个视图里上色用的事实（`kind cls tone branch depth`，插件配色还有 `pal`），网页面板的 `sk.colors` 用它按当前主题算出颜色。
 
 半径的取整：画出的 `r0 = 格子下沿 + ⌈g/2⌉`，`r1 = 格子上沿 − ⌊g/2⌋`。
 

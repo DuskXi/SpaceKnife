@@ -64,8 +64,8 @@ REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual")
 HOOKS = ("start", "stop", "scan_done", "scan_closed", "settings", "lang", "basket")
 COLOR_BY = ("ext", "class", "age", "size", "depth", "name", "set", "insight")
 SIZE_METRICS = ("alloc", "size", "files", "items", "code")
-BASE_VISUALS = ("treemap", "flame", "flame_polar")
-ALL_LAYOUTS = ("drawlist.v1", "flame.v1", "polar.v1")
+BASE_VISUALS = ("treemap", "flame", "flame_polar", "shapes")
+ALL_LAYOUTS = ("drawlist.v1", "flame.v1", "polar.v1", "shapes.v1")
 
 
 def _local(v: str) -> str:
@@ -280,13 +280,15 @@ class PanelSpec(Spec):
 class VisualizationSpec(Spec):
     """A built-in engine (``base``, with its wire layout) sized by another measure: ``size`` names
     one of the store's (``files``: file counts), or ``code`` — a function of the plugin gives each
-    file a weight (``@plugin.visualization``); folders are the sums of their contents."""
+    file a weight (``@plugin.visualization``); folders are the sums of their contents. With
+    ``base = "shapes"`` the plugin lays the blocks out itself (``@plugin.layout``): the host picks
+    what to draw, the function where (circles, rectangles, convex polygons)."""
 
     name: LocalName
     title: TextLike
     icon: str = ""
     order: int = 50
-    base: Literal["treemap", "flame", "flame_polar"] = "flame"
+    base: Literal["treemap", "flame", "flame_polar", "shapes"] = "flame"
     size: Literal["alloc", "size", "files", "items", "code"] = "alloc"
     options: list[LocalName] = Field(default_factory=list, description="Own settings passed to the code")
     compare: bool = False
@@ -300,6 +302,37 @@ class VisualizationSpec(Spec):
         description="The colour mode a view starts with on it: class flat time branch, or a colour "
         "mode of this plugin (its name) or of another (its full id)",
     )
+    when: When = Field(
+        default_factory=list,
+        description="Where it can be picked (scan done scanning compare scan_view on_disk setting: "
+        "cap: plugin: source:); elsewhere it shows disabled with the reason",
+    )
+    fill: float = Field(
+        default=0.75,
+        ge=0.05,
+        le=1.0,
+        description='base = "shapes": how much of its share of the canvas a block really gets (circle '
+        "packing about 0.5, an icicle 1): blocks under the minimum element by that estimate are merged",
+    )
+    max_rows: int = Field(
+        default=5000,
+        ge=100,
+        le=50_000,
+        description='base = "shapes": blocks the layout function gets at most',
+    )
+    nested: bool = Field(
+        default=True,
+        description='base = "shapes": a folder\'s blocks lie inside its shape (circle packing); '
+        "false: elsewhere (an icicle)",
+    )
+
+    @model_validator(mode="after")
+    def _shapes(self) -> VisualizationSpec:
+        if self.base == "shapes" and self.size == "code":
+            raise ValueError(
+                'a visualization with base = "shapes" sizes its blocks by alloc, size, files or items'
+            )
+        return self
 
     def size_unit(self) -> Literal["bytes", "count", "weight"]:
         if self.unit is not None:

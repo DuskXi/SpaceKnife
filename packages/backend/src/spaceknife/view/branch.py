@@ -34,6 +34,10 @@ class BranchHues:
         self._root = None
         self._slots.clear()
 
+    def slot_of(self, key: int) -> int:
+        """The slot a first-level block (its key) got in the frames so far; 0 when it has none."""
+        return self._slots.get(key, 0)
+
     def hues(self, root: int, draw: DrawList) -> np.ndarray:
         """Slot per row of ``draw`` (u1, 0 neutral), laid out below the zoom root keyed ``root``."""
         if root != self._root:

@@ -7,7 +7,9 @@ from typing import TYPE_CHECKING
 
 from spaceknife_protocol import view as pv
 from spaceknife_protocol.base import Empty, EmptyResult
+from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.methods import (
+    COLORS_OF,
     VIEW_BACK,
     VIEW_CLOSE,
     VIEW_FILTER,
@@ -31,6 +33,7 @@ from ..layout import registry
 from ..view.results import effective_tag, relative_path, sorted_rows
 from ..view.state import View, showable
 from .compute import Latest, compute
+from .rpc import RpcError
 from .views import ViewHost, ViewManager, apply_settings, view_state
 
 if TYPE_CHECKING:
@@ -142,6 +145,7 @@ def install(server: Server) -> None:
                     reason=None if available else _("这种可视化在当前界面不可用"),
                     plugin=v.plugin,
                     size_unit=v.size_unit,  # type: ignore[arg-type]
+                    when=list(v.when),
                 )
             )
         return pv.VisualListResult(visuals=out)
@@ -149,6 +153,21 @@ def install(server: Server) -> None:
     @router.method(VIEW_TAG)
     async def view_tag(session: Session, params: pv.ViewTagParams) -> pv.ViewUpdate:
         return await act(session, params.view_id, lambda v: v.tag_selected(params.color), "tag")
+
+    @router.method(COLORS_OF)
+    async def colors_of(session: Session, params: pv.ViewColorsParams) -> pv.ViewColors:
+        from ..view.colors import node_colors
+
+        host = views.get(session, params.view_id)
+        mode = params.mode or host.view.color_mode
+        if mode not in pv.BUILTIN_COLOR_MODES:
+            from ..extensions.colors import color_unavailable
+
+            why = color_unavailable(mode, session.capabilities)
+            if why is not None:
+                raise RpcError(ErrorCode.INVALID_PARAMS, why)
+        async with host.lock:
+            return await compute(node_colors, host.view, params.nodes, mode)
 
     @router.method(VIEW_REVEAL)
     async def view_reveal(session: Session, params: pv.ViewRevealParams) -> pv.ViewUpdate:

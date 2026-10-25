@@ -30,9 +30,13 @@ export function prepareTexts(ctx: CanvasRenderingContext2D, items: TextItem[]): 
       if (nameW + gap + subW > it.maxWidth) name = fit(ctx, it.text, Math.max(0, it.maxWidth - gap - subW));
       const nw = ctx.measureText(name).width;
       const showSub = name.length > 0 ? nw + gap + subW <= it.maxWidth : subW <= it.maxWidth;
-      out.push({ ...it, shown: name, subShown: showSub ? it.sub.text : "", subX: it.x + (name ? nw + gap : 0) });
+      // centred: the name and the size together around x
+      const x = it.align === "center" ? it.x - ((name ? nw : 0) + (showSub ? (name ? gap : 0) + subW : 0)) / 2 : it.x;
+      out.push({ ...it, x, shown: name, subShown: showSub ? it.sub.text : "", subX: x + (name ? nw + gap : 0) });
     } else {
-      out.push({ ...it, shown: fit(ctx, it.text, it.maxWidth), subShown: "", subX: 0 });
+      const shown = fit(ctx, it.text, it.maxWidth);
+      const x = it.align === "center" ? it.x - ctx.measureText(shown).width / 2 : it.x;
+      out.push({ ...it, x, shown, subShown: "", subX: 0 });
     }
   }
   return out;

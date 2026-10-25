@@ -113,7 +113,7 @@
 - `check` 的契约只跑一次、用固定的三棵合成树；扫描来源要有 `fixtures/` 样例才跑；监控器和对比原因不跑。
 - `plugin dev` 的浏览器模式需要仓库里构建好的前端；打包版的程序里请用开发者模式链接文件夹。
 - 内置插件只能有声明式贡献和导出格式；需要运行时的内置插件（报告、方法……）以后再说。
-- 以后做：WASM 运行时、签名、插件目录、从 Git 安装、操作系统级的沙箱、插件之间的依赖、新的布局格式、Electron 主进程插件。
+- 以后做：WASM 运行时、签名、插件目录、从 Git 安装、操作系统级的沙箱、插件之间的依赖、更多布局格式（时间轴、关系图）、Electron 主进程插件。
 
 ## 试写第一轮之后的改进
 
@@ -148,6 +148,15 @@
 - **测试与工具**：`MockHost.command` `command_available` `settled` `path` `export_text` / `export_bytes`，`hook` 检查事件和参数并抛出异常；失败的调用是公开的 `RequestError`；`TreeView` 支持 `len()`；`plugin check` 在插件进程里按 `when` 把命令跑一遍，核对面板 `fixtures.json` 的内置方法回答，打印样例来源列出了什么；`plugin new` 加 `visual-code` `color-code` 两个部分、`ruff.toml`、进程模式的检查测试，并按部分给出下一步；`plugin render` 的 `--call` `--option` `--filter`、`visual:`/`color:` 的 JSON；`plugin call` 遇到报告名时说该用什么。
 - **看真界面**：`spaceknife plugin shot`：一条命令起后端、扫描（合成树或 `--scan`）、无头浏览器，按 `--open` `--do` `--select` `--theme` `--lang` 把界面带到要看的状态，截图并打印页面和面板的报错、面板里的字（`--text`）。界面用开发链接里的词（`state/devlink.ts`）到达那个状态；`plugin dev` 和 `shot` 在前端比源码旧时提醒，`SPACEKNIFE_UI` 指定构建。这个工具在第一次用时就找出了参考面板的两个错（`tree.summary` 少了 `node`、回答的形状不对）。
 - **文档**：一页的[速查](plugin-quick.md)是 `plugin docs` 的默认输出（约 10 KB，全文 66 KB）；`--search` 找到提到某个词的行和所在的节；指南的第 0 节改成指向速查；API 参考补上边界、单位的值、导出输入的含义、取消的规则；`filter-syntax.md` 加 `:set:` 和插件类别，`protocol.md` 加删除篮一节。
+
+## 试写第三轮之后的改进
+
+第三轮六个重复的插件和四个新的复杂插件都做出来了，但剩下的成本来自插件系统盖不住的缺口：作者只能绕开或去读宿主代码。这一轮按缺口分组补上：
+
+- **合并 dev**：带上 MFT 挪进 Rust、命令行 `scan --mft`（88c0dd3）。
+- **自带布局的可视化**（第三轮的阻断）：`@plugin.layout` 和新的布局格式 `shapes.v1`。宿主照内置视图的规则挑块（合并小项、分页、等待扫描、可用与未知空间、`max_rows` 上限），插件的函数给每块一个形状（圆角矩形、圆、3–12 点的凸多边形，或不画），宿主检查后自己画：悬停、选中、标签、配色、缩放动画、呼吸、两种主题、图例、截图都和内置的一样。答案按「这些块、这块画布、这些设置」缓存，失败时画布中间写原因。SDK 带圆堆积（`shapes.pack`），参考插件 `example.shapes` 有圆堆积（可以画成六边形）和冰柱图；`plugin new --with layout`；`plugin render visual:<名>` 报形状的统计。
+- **面板读视图、按视图做事**：`sk.view` / `sk.onView`（视图画的是什么：可视化、配色、缩放、选中、过滤）；`sk.colors(nodes)` 用视图的配色和当前主题给出颜色和图例（新方法 `colors.of`，要 `tree.read`）；`sk.host.command` 的视图命令作用在面板所在的视图上，面板的标签页留在前面（以前面板在前时 `view.color.*` 被拒）。
+- **可视化的 `when` 和图标**：可视化可以声明 `when`，不满足时切换按钮变灰写原因、V 键跳过、「可视化：…」命令不可用；`MockHost.visual_available`。插件自己的 SVG 图标显示在可视化切换和「更多」菜单里（以前是通用图标）。
 
 还没做的见 TODO.md 插件一条下面。
 

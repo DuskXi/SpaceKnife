@@ -22,6 +22,7 @@ cls        <u1    class index (``filter.vocab`` order) of files and small-item b
                   folder class swallows; 255: in no one class (other folders, mixed blocks, "+N items")
 label      <u1    bits: 1 name · 2 size line · 4 large type · 8 short (name only, centred)
                   · 16 radial (``polar.v1`` only: the text runs along the radius)
+                  · 32 top (``shapes.v1`` only: the name sits at the top inside the shape)
 size       <i8    bytes shown (area basis; matched bytes in hide mode)
 count      <u4    files in "N small items", entries in "+N items"
 flags      <u2    1 match · 2 dimmed · 4 folder-mask hit (bold) · 8 own tag · 16 selected
@@ -48,9 +49,18 @@ Geometry columns (``<i4``, whole physical pixels of a ``width`` × ``height`` ca
 * ``polar.v1``: ``a0 a1`` angles (:data:`ANGLE_UNIT` per turn, 0 = 12 o'clock, increasing clockwise on
   screen) and ``r0 r1`` radii from the centre (the ring gap already taken off); kind 1 is an expanded
   solid sector, its children in the next ring. ``FrameInfo.geometry`` is a :class:`PolarGeometry`.
+* ``shapes.v1`` (a plugin's own layout: circle packing, icicles, cells …): ``x y w h`` the row's
+  bounding box, ``r`` its corner radius (0 a rectangle; ``r = w/2 = h/2`` a circle) and ``poly`` the
+  number of points of a convex polygon drawn instead of the rounded rectangle (0: none; at most
+  :data:`MAX_POLY_POINTS`). The points follow in blob ``points``: ``<i4`` x, y pairs of all rows with
+  ``poly > 0``, in row order. Rows are painted in row order, so a later row lies over an earlier one;
+  the pointer hits the last row whose shape holds it. Kind 1 is an expanded folder drawn as its shape
+  (its children inside it when ``ShapesGeometry.nested``). ``FrameInfo.geometry`` is a
+  :class:`ShapesGeometry`.
 
 In ``flame.v1`` and ``polar.v1`` the zoom root itself is the root bar / centre disc described by
-``FrameInfo.root``; it is not a row.
+``FrameInfo.root``; it is not a row. In ``shapes.v1`` it is drawn the same way when
+``ShapesGeometry.root`` gives its shape.
 """
 
 from __future__ import annotations
@@ -66,7 +76,9 @@ from .filter import FilterDiagnostic, TagColor
 DRAWLIST_LAYOUT = "drawlist.v1"
 FLAME_LAYOUT = "flame.v1"
 POLAR_LAYOUT = "polar.v1"
+SHAPES_LAYOUT = "shapes.v1"
 ANGLE_UNIT = 1 << 20  # polar.v1 angle units per turn: every value stays exact in an f32
+MAX_POLY_POINTS = 12  # shapes.v1: points of one polygon at most (Voronoi cells, hexagons, triangles)
 BUILTIN_VISUALS = ("treemap", "flame", "flame_polar")
 VIEW_STREAM_PREFIX = "view:"
 
@@ -169,6 +181,31 @@ class ViewRevealParams(Params):
     key: int = Field(ge=0, lt=2**32, description="A result row's key, or any node id")
 
 
+class ViewColorsParams(Params):
+    view_id: str = _VIEW_ID
+    nodes: list[int] = Field(max_length=20_000, description="Node ids of the view's scan")
+    mode: ColorModeId | None = Field(default=None, description="A colour mode (None: the view's own)")
+
+
+class ViewColors(Payload):
+    """What colours nodes in a view (``colors.of``), one entry per node asked for; the frontend
+    turns it into colours of the theme on screen as the view paints its blocks (a web panel gets
+    them from ``sk.colors``)."""
+
+    mode: ColorModeId = Field(description="The colour mode these are for")
+    palette: str | None = Field(default=None, description="A plugin's colour mode: 'pal' indexes its palette")
+    kind: list[int] = Field(
+        description="0 file · 2 folder · 3 folder not listed yet · -1 not a node of the scan"
+    )
+    cls: list[int] = Field(description="Class index (filter.vocab order), 255: in no one class")
+    tone: list[int] = Field(description="Modification-age band, 0 < 1 d … 4 ≥ 1 y / unknown")
+    branch: list[int] = Field(description="Top-level branch slot below the view's zoom root (0 neutral, 1–8)")
+    depth: list[int] = Field(
+        description="Levels below the zoom root (1: its child; 0: the root or outside it)"
+    )
+    pal: list[int] | None = Field(default=None, description="Palette index (a plugin's colour mode)")
+
+
 class ViewResultsParams(Params):
     view_id: str = _VIEW_ID
     sort: ResultsSortName | None = Field(
@@ -234,11 +271,44 @@ class PolarGeometry(Payload):
     unit: int = Field(default=ANGLE_UNIT, description="Angle units per turn")
 
 
-FrameGeometry = Annotated[FlameGeometry | PolarGeometry, Field(discriminator="kind")]
+class PixelShape(Payload):
+    """A shape of ``shapes.v1``: a rounded rectangle, or a convex polygon (``points``) in its box."""
+
+    x: int = Field(description="Bounding box, physical px")
+    y: int
+    w: int
+    h: int
+    r: int = Field(default=0, description="Corner radius (r = w/2 = h/2: a circle)")
+    points: list[int] = Field(
+        default_factory=list,
+        max_length=2 * MAX_POLY_POINTS,
+        description="x0 y0 x1 y1 … of a convex polygon drawn instead of the rounded rectangle",
+    )
+
+
+class ShapesGeometry(Payload):
+    """``shapes.v1``: a plugin's own layout, drawn shape by shape."""
+
+    kind: Literal["shapes"] = "shapes"
+    root: PixelShape | None = Field(
+        default=None,
+        description="The zoom root's own shape (drawn and hit as FrameInfo.root); None: not drawn",
+    )
+    nested: bool = Field(
+        default=True,
+        description="A folder's rows lie inside its shape (circle packing); False: elsewhere (an icicle)",
+    )
+    message: str = Field(
+        default="", max_length=300, description="Why nothing is drawn (the plugin failed or timed out)"
+    )
+
+
+FrameGeometry = Annotated[FlameGeometry | PolarGeometry | ShapesGeometry, Field(discriminator="kind")]
 
 
 class FrameRoot(Payload):
-    """The zoom root of a flame.v1 / polar.v1 frame (root bar, centre disc): the same facts as a row."""
+    """The zoom root of a flame.v1 / polar.v1 / shapes.v1 frame (root bar, centre disc, its shape):
+    the same facts as a row."""
 
     key: int
     node: int
@@ -374,6 +444,12 @@ class VisualInfo(Payload):
     reason: str | None = Field(default=None, description="Why it is not available (display text)")
     plugin: str | None = Field(default=None, description="The plugin that adds it (None: built in)")
     size_unit: SizeUnit = Field(default="bytes", description="What its areas count")
+    when: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description="A plugin's conditions (docs/plugins.md 「when 条件」): where they fail it is shown "
+        "disabled with the reason",
+    )
 
 
 class VisualListResult(Payload):

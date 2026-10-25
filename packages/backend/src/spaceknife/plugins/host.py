@@ -74,6 +74,7 @@ SET_TIMEOUT = 5.0
 SET_RUNNING_EVERY_S = 5.0
 COLOR_TIMEOUT = 0.02
 VISUAL_TIMEOUT = 0.12
+LAYOUT_TIMEOUT = 5.0  # s: a layout visualization places one picture (the first call also maps the tree)
 ANNOTATE_TIMEOUT = 0.2
 ANNOTATE_BATCH = 500
 MAX_REASONS = 20_000  # remembered change reasons (all comparisons); forgotten all at once beyond
@@ -1619,6 +1620,82 @@ class PluginHost:
             return ArraySizes(hit)
 
         return sizes
+
+    def remote_layout(
+        self, plugin: str, name: str, options: list[tuple[str, str]], store: Any
+    ) -> tuple[Callable[[Any], Any], Callable[[], object]]:
+        """A layout visualization's placer (layout/shapes.py): the hierarchy goes to the plugin's
+        ``@plugin.layout`` function, its shapes come back; and what else its answer depends on
+        (the plugin's cache epoch and the values of the settings ``options`` names)."""
+        import json
+
+        from spaceknife_protocol import view as pv
+
+        from ..layout.shapes import Hierarchy, Placed, PlaceError
+
+        def opts() -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            for opt, skey in options:
+                with contextlib.suppress(KeyError):
+                    out[opt] = self.server.settings.get(skey)
+            return out
+
+        def key() -> object:
+            return (self.epochs[plugin], json.dumps(opts(), sort_keys=True, default=str))
+
+        def place(h: Hierarchy) -> Placed:
+            scan_id = self.api.scan_of_store(store)
+            o = opts()
+            for opt, val in h.options:  # the view's own options win (a split pane, a reopened view)
+                if opt in o:
+                    o[opt] = val
+            frame = encode_frame(stream="plugin.layout", layout="hierarchy.v1", columns=h.columns())
+            try:
+                value, frames = self.call_sync(
+                    plugin,
+                    "layout",
+                    name,
+                    {**h.params(), "scan_id": scan_id, "options": o},
+                    ctx={"scan_id": scan_id} if scan_id else {},
+                    frames=[frame],
+                    timeout=LAYOUT_TIMEOUT,
+                )
+            except RpcError as exc:
+                logger.bind(source=f"plugin:{plugin}").warning("layout {} failed: {}", name, exc.message)
+                if exc.code == ErrorCode.PLUGIN_TIMEOUT:
+                    raise PlaceError(tr("插件没有在 {s} 秒内排好布局", s=f"{LAYOUT_TIMEOUT:g}")) from None
+                raise PlaceError(tr("插件排布局时出错：{why}", why=exc.message[:200])) from None
+            cols = decode_frame(frames[0])[1] if frames else {}
+            pts = decode_frame(frames[1])[1].get("p") if len(frames) > 1 else None
+            n = len(h)
+            if pts is not None and len(pts) > 2 * pv.MAX_POLY_POINTS * n:  # never from the SDK's Shapes
+                raise PlaceError(tr("插件排布局时出错：{why}", why=f"{len(pts)} point coordinates"))
+
+            def col(k: str, dt: Any) -> np.ndarray:
+                v = cols.get(k)
+                return np.zeros(n, dtype=dt) if v is None else np.asarray(v, dtype=dt)
+
+            v = value if isinstance(value, dict) else {}
+            root = v.get("root")
+            root_t = None
+            if isinstance(root, list) and len(root) == 6 and isinstance(root[5], list):
+                with contextlib.suppress(TypeError, ValueError):
+                    root_t = (*(float(a) for a in root[:5]), tuple(float(a) for a in root[5][: 2 * 12]))
+            return Placed(
+                shape=col("shape", np.uint8),
+                x=col("x", np.float64),
+                y=col("y", np.float64),
+                w=col("w", np.float64),
+                h=col("h", np.float64),
+                r=col("r", np.float64),
+                poly=col("poly", np.uint8),
+                points=np.zeros(0) if pts is None else np.asarray(pts, dtype=np.float64),
+                label=col("label", np.uint8),
+                root=root_t,  # type: ignore[arg-type]
+                message=str(v.get("message") or "")[:300],
+            )
+
+        return place, key
 
     def option_default(self, plugin: str, o: SettingSpec) -> Any:
         """An export option's default: with ``default_from``, that setting's current value."""

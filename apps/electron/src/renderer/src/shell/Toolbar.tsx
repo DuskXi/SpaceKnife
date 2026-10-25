@@ -2,7 +2,7 @@
 // colour, switches, split, command palette, delete basket. Acts on the focused view (G7). In a
 // narrow window it folds groups into the 「更多」 menu (toolbarFit.ts).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { ViewState } from "@/protocol/generated";
 import { call, setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
@@ -12,7 +12,7 @@ import { HelpSearch, helpTitle } from "@/pages/HelpPage";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
 import { helpGo, helpHistory } from "@/state/help";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
-import { COLOR_MODES, levelsThatFit, offered, visualIcon } from "@/state/visuals";
+import { COLOR_MODES, levelsThatFit, offered, visualIcon, type WhenOf } from "@/state/visuals";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 import { registeredLayouts } from "@/visual/registry";
@@ -20,6 +20,7 @@ import { runShortcut } from "@/state/commands";
 import { PluginColorItems, PluginColorSegment } from "@/plugins/ColorMenu";
 import { PluginIcon } from "@/plugins/icons";
 import { pluginTabTitle } from "@/plugins/slots";
+import { visualWhen } from "@/plugins/whenEnv";
 
 import { ComparePicker, DIRECTIONS, DirectionSegment, directionLabel, ExitCompare } from "./Compare";
 import { FilterBox } from "./FilterBox";
@@ -224,7 +225,8 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
     box.current?.querySelector<HTMLElement>('[role^="menuitem"][aria-checked="true"]:not(:disabled), [role^="menuitem"]:not(:disabled)')?.focus();
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
-  const visualItems = fold.visualInMenu ? offered(visuals, registeredLayouts(), st.compare) : [];
+  const whenOf = useVisualWhen(st.scan_id, viewId);
+  const visualItems = fold.visualInMenu ? offered(visuals, registeredLayouts(), st.compare, whenOf) : [];
   const chips = fold.chipsInMenu && !compare ? SPACE_SWITCHES.filter((s) => s.id !== "trash" || st.has_trash) : [];
   // plugins' commands for the toolbar (menus "toolbar", thin): always in this menu
   const extra = commands.filter((c) => c.menus.includes("toolbar"));
@@ -257,7 +259,7 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
         {visualItems.map(({ info, enabled, reason }) => (
           <button key={info.id} role="menuitemradio" aria-checked={st.visual === info.id} className="menu-item" disabled={!enabled} title={reason ?? undefined} onClick={pick(() => pickVisual(viewId, info.id))}>
             {check(st.visual === info.id)}
-            <Icon name={visualIcon(info.icon)} size={14} />
+            {info.plugin ? <PluginIcon plugin={info.plugin} name={info.icon} size={14} fallback={visualIcon(info.icon)} /> : <Icon name={visualIcon(info.icon)} size={14} />}
             {info.name}
           </button>
         ))}
@@ -335,7 +337,8 @@ function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState
  * Switching keeps the zoom, the selection, the filter and the history (they live in the backend's view). */
 function VisualSwitch({ viewId, st }: { viewId: string; st: ViewState }) {
   const visuals = useApp((s) => s.visuals);
-  const items = offered(visuals, registeredLayouts(), st.compare);
+  const whenOf = useVisualWhen(st.scan_id, viewId);
+  const items = offered(visuals, registeredLayouts(), st.compare, whenOf);
   if (!items.length) return null; // a backend without visual.list: the treemap only
   return (
     <div className="segmented icon-only" role="radiogroup" aria-label={t("可视化")} title={t("可视化（V）")}>
@@ -343,12 +346,24 @@ function VisualSwitch({ viewId, st }: { viewId: string; st: ViewState }) {
         const on = st.visual === info.id;
         return (
           <button key={info.id} role="radio" aria-checked={on} aria-label={info.name} className={on ? "on" : ""} disabled={!enabled} title={reason ?? info.name} onClick={() => void pickVisual(viewId, info.id)}>
-            <Icon name={visualIcon(info.icon)} size={14} />
+            {/* a plugin's own SVG icon, else the app's icon of that name */}
+            {info.plugin ? <PluginIcon plugin={info.plugin} name={info.icon} size={14} fallback={visualIcon(info.icon)} /> : <Icon name={visualIcon(info.icon)} size={14} />}
           </button>
         );
       })}
     </div>
   );
+}
+
+/** The visualizations' own conditions in a view, re-evaluated when what they look at changes. */
+function useVisualWhen(scanId: string, viewId: string): WhenOf | undefined {
+  const any = useApp((s) => s.visuals.some((v) => v.when?.length));
+  // what the conditions read: the scan's state, the view's comparison, the settings, the plugins, the capabilities
+  const scanState = useApp((s) => s.scans[scanId]?.state);
+  const settings = useApp((s) => s.settings);
+  const plugins = useApp((s) => s.extensions?.plugins);
+  const caps = useApp((s) => s.capabilities);
+  return useMemo(() => (any ? visualWhen(useApp.getState(), scanId, viewId) : undefined), [any, scanId, viewId, scanState, settings, plugins, caps]);
 }
 
 /** Detail level stepper (Ctrl+- / Ctrl+=). The flame graph and the polar flame graph may have room for

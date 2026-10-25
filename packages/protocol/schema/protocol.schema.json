@@ -4018,7 +4018,8 @@
               "discriminator": {
                 "mapping": {
                   "flame": "#/$defs/FlameGeometry",
-                  "polar": "#/$defs/PolarGeometry"
+                  "polar": "#/$defs/PolarGeometry",
+                  "shapes": "#/$defs/ShapesGeometry"
                 },
                 "propertyName": "kind"
               },
@@ -4028,6 +4029,9 @@
                 },
                 {
                   "$ref": "#/$defs/PolarGeometry"
+                },
+                {
+                  "$ref": "#/$defs/ShapesGeometry"
                 }
               ]
             },
@@ -4156,7 +4160,7 @@
       "type": "object"
     },
     "FrameRoot": {
-      "description": "The zoom root of a flame.v1 / polar.v1 frame (root bar, centre disc): the same facts as a row.",
+      "description": "The zoom root of a flame.v1 / polar.v1 / shapes.v1 frame (root bar, centre disc, its shape):\nthe same facts as a row.",
       "properties": {
         "branch": {
           "default": 0,
@@ -7060,6 +7064,51 @@
         "h"
       ],
       "title": "PixelRect",
+      "type": "object"
+    },
+    "PixelShape": {
+      "description": "A shape of ``shapes.v1``: a rounded rectangle, or a convex polygon (``points``) in its box.",
+      "properties": {
+        "h": {
+          "title": "H",
+          "type": "integer"
+        },
+        "points": {
+          "description": "x0 y0 x1 y1 … of a convex polygon drawn instead of the rounded rectangle",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 24,
+          "title": "Points",
+          "type": "array"
+        },
+        "r": {
+          "default": 0,
+          "description": "Corner radius (r = w/2 = h/2: a circle)",
+          "title": "R",
+          "type": "integer"
+        },
+        "w": {
+          "title": "W",
+          "type": "integer"
+        },
+        "x": {
+          "description": "Bounding box, physical px",
+          "title": "X",
+          "type": "integer"
+        },
+        "y": {
+          "title": "Y",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "title": "PixelShape",
       "type": "object"
     },
     "PlatformInfo": {
@@ -9995,6 +10044,44 @@
       "title": "SettingsUpdateParams",
       "type": "object"
     },
+    "ShapesGeometry": {
+      "description": "``shapes.v1``: a plugin's own layout, drawn shape by shape.",
+      "properties": {
+        "kind": {
+          "const": "shapes",
+          "default": "shapes",
+          "title": "Kind",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "description": "Why nothing is drawn (the plugin failed or timed out)",
+          "maxLength": 300,
+          "title": "Message",
+          "type": "string"
+        },
+        "nested": {
+          "default": true,
+          "description": "A folder's rows lie inside its shape (circle packing); False: elsewhere (an icicle)",
+          "title": "Nested",
+          "type": "boolean"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PixelShape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The zoom root's own shape (drawn and hit as FrameInfo.root); None: not drawn"
+        }
+      },
+      "title": "ShapesGeometry",
+      "type": "object"
+    },
     "ShutdownResult": {
       "properties": {
         "accepted": {
@@ -11716,6 +11803,140 @@
       "title": "ViewAction",
       "type": "object"
     },
+    "ViewColors": {
+      "description": "What colours nodes in a view (``colors.of``), one entry per node asked for; the frontend\nturns it into colours of the theme on screen as the view paints its blocks (a web panel gets\nthem from ``sk.colors``).",
+      "properties": {
+        "branch": {
+          "description": "Top-level branch slot below the view's zoom root (0 neutral, 1–8)",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Branch",
+          "type": "array"
+        },
+        "cls": {
+          "description": "Class index (filter.vocab order), 255: in no one class",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Cls",
+          "type": "array"
+        },
+        "depth": {
+          "description": "Levels below the zoom root (1: its child; 0: the root or outside it)",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Depth",
+          "type": "array"
+        },
+        "kind": {
+          "description": "0 file · 2 folder · 3 folder not listed yet · -1 not a node of the scan",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Kind",
+          "type": "array"
+        },
+        "mode": {
+          "description": "The colour mode these are for",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+          "title": "Mode",
+          "type": "string"
+        },
+        "pal": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Palette index (a plugin's colour mode)",
+          "title": "Pal"
+        },
+        "palette": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A plugin's colour mode: 'pal' indexes its palette",
+          "title": "Palette"
+        },
+        "tone": {
+          "description": "Modification-age band, 0 < 1 d … 4 ≥ 1 y / unknown",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Tone",
+          "type": "array"
+        }
+      },
+      "required": [
+        "mode",
+        "kind",
+        "cls",
+        "tone",
+        "branch",
+        "depth"
+      ],
+      "title": "ViewColors",
+      "type": "object"
+    },
+    "ViewColorsParams": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A colour mode (None: the view's own)",
+          "title": "Mode"
+        },
+        "nodes": {
+          "description": "Node ids of the view's scan",
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 20000,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "view_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "View Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "view_id",
+        "nodes"
+      ],
+      "title": "ViewColorsParams",
+      "type": "object"
+    },
     "ViewFilterParams": {
       "additionalProperties": false,
       "properties": {
@@ -12598,6 +12819,15 @@
           ],
           "title": "Size Unit",
           "type": "string"
+        },
+        "when": {
+          "description": "A plugin's conditions (docs/plugins.md 「when 条件」): where they fail it is shown disabled with the reason",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 16,
+          "title": "When",
+          "type": "array"
         }
       },
       "required": [
@@ -13086,6 +13316,12 @@
       "params": "#/$defs/ClassesUpdateParams",
       "requiresSession": true,
       "result": "#/$defs/ClassesState"
+    },
+    "colors.of": {
+      "doc": "What colours some nodes in a view (its colour mode or another): classes, age bands, branch slots, a plugin's palette indices. Web panels paint with these (sk.colors).",
+      "params": "#/$defs/ViewColorsParams",
+      "requiresSession": true,
+      "result": "#/$defs/ViewColors"
     },
     "compare.close": {
       "doc": "Forget a comparison (or stop computing it).",

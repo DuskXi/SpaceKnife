@@ -18,6 +18,7 @@ const visual = (id: string, order: number, patch: Partial<VisualInfo> = {}): Vis
   reason: null,
   plugin: null,
   size_unit: "bytes",
+  when: [],
   ...patch,
 });
 

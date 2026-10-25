@@ -426,6 +426,42 @@ class Plugin:
 
         return wrap
 
+    def layout(
+        self,
+        name: str,
+        title: Text | str,
+        *,
+        size: Literal["alloc", "size", "files", "items"] = "alloc",
+        fill: float = 0.75,
+        nested: bool = True,
+        max_rows: int = 5000,
+        **kw: Any,
+    ) -> Callable[[F], F]:
+        """A visualization with a layout of its own: ``(v: LayoutInput) -> Shapes``. The host picks
+        the blocks (sized by ``size``, merged below the minimum element; ``fill``: how much of its
+        share of the canvas a block really gets), the function places them (circles, rectangles, convex
+        polygons) and the host draws them like a built-in view (docs/plugin-dev.md 「自带布局」).
+        ``nested``: a folder's blocks lie inside its shape; ``max_rows``: blocks per call at most."""
+
+        def wrap(f: F) -> F:
+            spec = VisualizationSpec.model_validate(
+                {
+                    "name": name,
+                    "title": as_text(title),
+                    "base": "shapes",
+                    "size": size,
+                    "fill": fill,
+                    "nested": nested,
+                    "max_rows": max_rows,
+                    **kw,
+                }
+            )
+            self._declare("visualization", spec)
+            self._handler("layout", name, f)
+            return f
+
+        return wrap
+
     @overload
     def color_mode(
         self,

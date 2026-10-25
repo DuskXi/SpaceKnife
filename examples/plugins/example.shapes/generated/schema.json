@@ -1,0 +1,12 @@
+{
+  "$defs": {},
+  "api": 1,
+  "events": {},
+  "methods": {},
+  "plugin": "example.shapes",
+  "schema_hash": "2c09871658ad7e9c",
+  "schema_version": 1,
+  "states": {},
+  "streams": {},
+  "version": "1.0.0"
+}

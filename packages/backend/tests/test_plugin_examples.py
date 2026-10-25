@@ -18,7 +18,12 @@ pytestmark = pytest.mark.timeout(240)
 
 
 def test_the_examples_are_there() -> None:
-    assert [p.name for p in EXAMPLES] == ["example.devpack", "example.dupes", "example.panel"]
+    assert [p.name for p in EXAMPLES] == [
+        "example.devpack",
+        "example.dupes",
+        "example.panel",
+        "example.shapes",
+    ]
     assert [p.name for p in SHIPPED] == ["builtin.export", "builtin.insights"]
     for folder in EXAMPLES:
         assert (folder / "tests" / "test_plugin.py").is_file()

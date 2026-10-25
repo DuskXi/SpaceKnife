@@ -6,11 +6,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PaletteCommand } from "@/protocol/generated";
 
-import { call, rescanFolder, startScan } from "./actions";
+import { call, rescanFolder, setViewSettings, startScan } from "./actions";
 import { runShortcut } from "./commands";
 import { get, set } from "./store";
 
-vi.mock(import("./actions"), async (original) => ({ ...(await original()), call: vi.fn(), rescanFolder: vi.fn(), startScan: vi.fn() }));
+vi.mock(import("./actions"), async (original) => ({ ...(await original()), call: vi.fn(), rescanFolder: vi.fn(), startScan: vi.fn(), setViewSettings: vi.fn() }));
 
 describe("runShortcut", () => {
   const mocked = vi.mocked(call);
@@ -45,6 +45,15 @@ describe("runShortcut", () => {
     set({ views: { v1: { state: { zoom_node: 0 } } } as never });
     await runShortcut("view.rescan");
     expect(rescanFolder).toHaveBeenCalledWith("s1", 0);
+  });
+
+  it("runs a web panel's view command on the panel's view, whatever tab is in front", async () => {
+    mocked.mockResolvedValue({ ...state(true), action: { kind: "view", settings: { color_mode: "time" } } } as never);
+    set({ tabs: [{ id: "t2", kind: "plugin", scanId: "s1", viewIds: [], focusedPane: 0, title: "panel" }], active: "t2", views: { v1: { state: { scan_id: "s1" } } } as never });
+    await runShortcut("view.color.time", { viewId: "v1", scanId: "s1", stay: true });
+    expect(mocked.mock.calls[0]).toEqual(["palette.check", { id: "view.color.time", context: { tab: "scan", scan_id: "s1", view_id: "v1", basket: 0 } }]);
+    expect(setViewSettings).toHaveBeenCalledWith("v1", { color_mode: "time" });
+    expect(get().active).toBe("t2"); // the panel's tab stays in front
   });
 
   it("rescans everything with the scan's roots", async () => {

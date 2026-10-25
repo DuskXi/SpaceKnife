@@ -86,7 +86,7 @@ def new(
         typer.Option(
             "--with",
             help="Parts, comma-separated: method report command setting cleanup panel visual visual-code "
-            "color color-code export source set field insight hook (default: report,command).",
+            "layout color color-code export source set field insight hook (default: report,command).",
         ),
     ] = None,
     dir: Annotated[Path | None, typer.Option(help="Where to create it (default: ./ID).")] = None,
@@ -581,11 +581,39 @@ async def _render(host: Any, kind: str, name: str, node: int | None, fmt: str) -
                 "name": draw.names[i] if i < len(draw.names) else "",
                 "size": int(draw.size[i]),
                 **({"pal": int(frame.pal[i])} if frame.pal is not None else {}),
+                # a plugin's own layout: where each block went (physical px)
+                **(
+                    {k: int(draw.geometry[k][i]) for k in ("x", "y", "w", "h", "r", "poly")}
+                    if draw.layout == "shapes.v1"
+                    else {}
+                ),
             }
             for i in range(len(draw))
         ]
         return dump({"unit": frame.size_unit, "root_size": int(frame.root.size), "rows": rows})
     lines = [f"{len(draw)} rows drawn (the row contract holds)"]
+    meta = draw.meta
+    if draw.layout == "shapes.v1" and meta is not None:
+        import numpy as np
+
+        from spaceknife_protocol import view as pv
+
+        assert isinstance(meta, pv.ShapesGeometry)
+        g = draw.geometry
+        poly = g["poly"] > 0
+        circle = ~poly & (2 * g["r"] >= np.minimum(g["w"], g["h"])) & (g["w"] == g["h"])
+        lines.append(
+            f"shapes: {int(circle.sum())} circles, {int((~poly & ~circle).sum())} rectangles, "
+            f"{int(poly.sum())} polygons; {int((draw.label > 0).sum())} labelled; "
+            f"canvas {draw.width} × {draw.height} px; "
+            + (
+                "no root shape"
+                if meta.root is None
+                else f"root {meta.root.w} × {meta.root.h} at {meta.root.x}, {meta.root.y}"
+            )
+        )
+        if meta.message:
+            lines.append(f"message: {meta.message}")
     if kind == "color" and frame.pal is not None:
         import numpy as np
 

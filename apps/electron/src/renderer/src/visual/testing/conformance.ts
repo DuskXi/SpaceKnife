@@ -2,7 +2,7 @@
 // on their own row, bounds hold anchors and outlines, nothing hits outside the canvas, and empty
 // frames or HIT_NONE never throw. Run per registered component on its fixture scenes; [] = conforms.
 
-import { GEOMETRY_COLUMNS, isWithin } from "../frame";
+import { GEOMETRY_COLUMNS, isNested, isWithin } from "../frame";
 import { HIT_NONE, HIT_ROOT, type Box, type Hit, type Pt, type VisualComponent, type VisualFrame, type VisualGeometry } from "../types";
 import { PathRecorder } from "./fixtures";
 
@@ -81,7 +81,8 @@ function checkTarget<F extends VisualFrame>(g: VisualGeometry<F>, f: F, hit: Hit
   if (!a) errors.push(`${who}: no label anchor (box ${b.major} × ${b.minor})`);
   else {
     const h = g.hitTest(f, a.x, a.y);
-    const own = hit === HIT_ROOT ? h === HIT_ROOT : h >= 0 && isWithin(f, h, hit);
+    // a nested layout draws every row inside the root: one of them may cover the root's anchor
+    const own = hit === HIT_ROOT ? h === HIT_ROOT || (isNested(f) && h >= 0) : h >= 0 && isWithin(f, h, hit);
     if (!own) errors.push(`${who}: hitTest at its label anchor ${fmt(a)} gives ${h}`);
     if (bounds && !inside(bounds, a, 0)) errors.push(`${who}: label anchor ${fmt(a)} outside its bounds`);
   }

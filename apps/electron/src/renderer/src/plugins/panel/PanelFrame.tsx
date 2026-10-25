@@ -2,23 +2,26 @@
 // no same origin, popups, forms, modals or top navigation), served with a strict content security
 // policy by Electron's skplugin:// scheme or, in browser mode, by headless mode's /plugins/<id>/web/.
 // The panel says hello; this frame answers with a MessagePort bound to that plugin and its
-// permissions (bridge.ts), then keeps it told of the context, the theme and the language.
+// permissions (bridge.ts), then keeps it told of the context, the theme, the language and its view
+// (what the view shows: sk.view / sk.onView). Its view commands and sk.colors act on that view.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PanelInfo, ReportContext } from "@/protocol/generated";
 import { basketAddMany, call, editFilter, viewCall } from "@/state/actions";
 import { runShortcut } from "@/state/commands";
-import { get, toast, useApp } from "@/state/store";
+import { type AppState, get, toast, useApp } from "@/state/store";
+import { classHexNow } from "@/lib/classes";
 import { getUnitBase } from "@/lib/format";
 import { t } from "@/lib/i18n";
-import { themeName } from "@/lib/theme";
+import { palette, themeName } from "@/lib/theme";
 
 import { callPlugin, onPluginEvent, subscribePlugin } from "../client";
 import { ask } from "../confirm";
 import { resolveNode, showNode, viewFor } from "../nodes";
 import { pluginName } from "../store";
 import { isHello, PanelBridge } from "./bridge";
+import { panelColors } from "./colors";
 import { themeVars } from "./theme";
 
 /** The address of a panel's entry file, and the prefix every document of that plugin's panels has. */
@@ -47,6 +50,27 @@ export function panelContext(ctx: ReportContext, info: Pick<PanelInfo, "params" 
   return { ...ctx, slot: place ?? info.slot, params: { ...(info.params ?? {}) } };
 }
 
+/** What a panel is told about its view (sk.view, sk.onView): what it shows and where; null without one. */
+export function panelView(s: Pick<AppState, "views">, viewId: string | null): Record<string, unknown> | null {
+  const v = viewId ? s.views[viewId] : undefined;
+  if (!v || !viewId) return null;
+  const st = v.state;
+  return {
+    view_id: viewId,
+    scan_id: st.scan_id,
+    visual: st.visual,
+    layout: v.info?.layout ?? null,
+    color_mode: st.color_mode,
+    zoom_node: st.zoom_node,
+    zoom_key: st.zoom_key,
+    selected: st.selected ?? null,
+    detail: st.detail,
+    filter: v.filter && (v.filter.text || v.filter.active) ? { text: v.filter.text, active: v.filter.active } : null,
+    compare: st.compare,
+    size_unit: v.info?.size_unit ?? "bytes",
+  };
+}
+
 export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx: ReportContext; height?: number; place?: PanelPlace }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const bridge = useRef<PanelBridge | null>(null);
@@ -61,6 +85,8 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
   });
   const lang = useApp((s) => s.lang);
   const theme = useApp((s) => s.theme);
+  // the view the panel is about, as text: told again when what it shows changes
+  const viewMark = useApp((s) => JSON.stringify(panelView(s, ctx.view_id ?? null)));
   const [h, setH] = useState(height ?? info.height);
   const [refused, setRefused] = useState("");
   const { src, base } = useMemo(() => panelAddress(info.plugin, info.entry, { electron: inElectron(), origin: location.origin }), [info.plugin, info.entry]);
@@ -103,8 +129,19 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
           return null;
         }
         case "command":
-          await runShortcut(String(args.command));
+          // on the panel's view, which stays where it is (the panel's tab stays in front)
+          await runShortcut(String(args.command), { viewId: c.view_id, scanId: c.scan_id, stay: true });
           return null;
+        case "colors": {
+          if (!c.view_id) throw new Error(t("需要打开一个扫描视图"));
+          const list = Array.isArray(args.nodes) ? args.nodes : [];
+          const nodes = list.map((x) => (typeof x === "number" ? x : (x as { node?: unknown })?.node)).filter((x): x is number => typeof x === "number");
+          if (nodes.length > 20000) throw new Error("at most 20000 nodes at a time");
+          const mode = typeof args.mode === "string" && args.mode ? args.mode : null;
+          const r = await call("colors.of", { view_id: c.view_id, nodes, mode });
+          const s = get();
+          return panelColors(r, s.vocab, s.extensions, classHexNow, (k) => (palette().treemap.time as Record<string, string>)[String(k)] ?? palette().treemap.time[4]);
+        }
         case "copy":
           window.sk.shell.copyText(String(args.text ?? "").slice(0, 65536));
           toast(t("已复制"));
@@ -165,6 +202,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
             b.push("lang", { lang: get().lang, units: getUnitBase() });
             b.push("theme", { mode: themeName(), vars: themeVars() });
             b.push("context", panelContext(ctxRef.current, info, placeRef.current));
+            b.push("view", { view: panelView(get(), ctxRef.current.view_id ?? null) });
           },
         },
       );
@@ -183,6 +221,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
   useEffect(() => bridge.current?.push("context", panelContext(ctx, info, place)), [ctx, info, place]);
   useEffect(() => bridge.current?.push("lang", { lang, units: getUnitBase() }), [lang]);
   useEffect(() => bridge.current?.push("theme", { mode: theme, vars: themeVars(theme) }), [theme]);
+  useEffect(() => bridge.current?.push("view", { view: JSON.parse(viewMark) as unknown }), [viewMark]);
   useEffect(() => {
     if (treeMark) bridge.current?.push("tree", { scan_id: ctx.scan_id });
   }, [treeMark, ctx.scan_id]);

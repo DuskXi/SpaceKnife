@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -196,6 +196,10 @@ class Visualization:
     sizes: Callable[[Basis], SizeSource] | None = None  # areas other than the store's own bytes
     plugin: str | None = None  # the plugin that adds it (None: built in)
     text: Text | None = None  # a plugin's name in both languages (title_id is the built-ins')
+    # a plugin's ``when``: palette needs of its 「可视化：…」 command (each gives why it does not
+    # hold), and the conditions as written (visual.list: frontends grey it out with the reason)
+    needs: tuple[Callable[[Any], str | None], ...] = ()
+    when: tuple[str, ...] = ()
 
     @property
     def title(self) -> str:

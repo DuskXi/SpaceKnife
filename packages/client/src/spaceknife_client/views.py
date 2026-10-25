@@ -1,7 +1,8 @@
 """Client side of views: pairs each ``ViewUpdate`` with its binary draw-list frame.
 
 Frames of every layout are decoded the same way, column by column (``FrameInfo.layout`` names the
-geometry columns: x y w h for drawlist.v1 and flame.v1, a0 a1 r0 r1 for polar.v1).
+geometry columns: x y w h for drawlist.v1 and flame.v1, a0 a1 r0 r1 for polar.v1, x y w h r poly and
+the blob ``points`` (i4 pairs, decoded) for shapes.v1).
 """
 
 from __future__ import annotations
@@ -18,7 +19,9 @@ from spaceknife_protocol.methods import EVENT_VIEW_FRAME, MethodSpec
 
 from .connection import Connection
 
-LAYOUTS = frozenset({pv.DRAWLIST_LAYOUT, pv.FLAME_LAYOUT, pv.POLAR_LAYOUT})  # what this client decodes
+LAYOUTS = frozenset(
+    {pv.DRAWLIST_LAYOUT, pv.FLAME_LAYOUT, pv.POLAR_LAYOUT, pv.SHAPES_LAYOUT}
+)  # what this client decodes
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +46,10 @@ def decode_draw(header: BinaryFrameHeader, columns: dict[str, np.ndarray]) -> Dr
     starts = ends - lens
     names = [blob[a:b].decode("utf-8") for a, b in zip(starts.tolist(), ends.tolist(), strict=True)]
     view_id = header.stream[len(pv.VIEW_STREAM_PREFIX) :]
-    return DrawFrame(view_id, header.seq, {k: v for k, v in columns.items() if k != "names"}, names)
+    cols = {k: v for k, v in columns.items() if k != "names"}
+    if "points" in cols:  # shapes.v1: x, y pairs of the polygons
+        cols["points"] = np.frombuffer(cols["points"].tobytes(), dtype="<i4").copy()
+    return DrawFrame(view_id, header.seq, cols, names)
 
 
 class ViewClient:

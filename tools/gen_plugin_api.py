@@ -52,6 +52,7 @@ def _models() -> list[tuple[str, type, str]]:
         ("上下文", sdk.ActionContext, "`call` 动作调的方法收到的参数"),
         ("输入", sdk.VisualInput, "代码可视化 `(v) -> 权重数组`"),
         ("输入", sdk.ColorInput, "代码配色 `(c) -> 下标数组`"),
+        ("输入", sdk.LayoutInput, "自带布局的可视化 `(v) -> Shapes`：宿主挑出的块（父块在前）和画布"),
         ("输入", sdk.ExportInput, "导出格式 `(x) -> Iterator[str]`"),
         ("输入", sdk.ExportInfo, "导出格式旧写法 `(tree, root, match, info)` 的第四个参数"),
         ("输入", sdk.ChangeUnit, "对比原因 `(ctx, items)` 的一项"),
@@ -148,6 +149,32 @@ NOTES: dict[tuple[str, str], str] = {
     ("ColorInput", "ids"): "这一帧画出的节点（int64 数组）",
     ("ColorInput", "palette"): "色板长度：返回的下标 < 它",
     ("ColorInput", "ctx"): "调用的上下文",
+    (
+        "LayoutInput",
+        "node",
+    ): "每块的节点（int64 数组）；「N 个小项」「+N 项」是它们所在的文件夹，可用和未知空间是 −1",
+    ("LayoutInput", "parent"): "每块所在的块的下标；−1：直接在缩放根上",
+    (
+        "LayoutInput",
+        "kind",
+    ): "每块是什么（`BlockKind`）：`FILE` `FOLDER`（它的块跟在后面）`COLLAPSED` `PENDING` `SMALL` "
+    "`MORE` `FREE` `UNKNOWN`",
+    ("LayoutInput", "depth"): "层级：1 是缩放根的子项",
+    ("LayoutInput", "size"): "面积代表的量：占用字节，或可视化 `size` 说的那种",
+    ("LayoutInput", "count"): "「N 个小项」「+N 项」的成员数",
+    ("LayoutInput", "u0"): "在缩放根 [0, 1) 里的区间起点：同级按顺序、按大小分（冰柱图的 x）",
+    ("LayoutInput", "u1"): "区间终点",
+    ("LayoutInput", "width"): "画布宽，物理像素",
+    ("LayoutInput", "height"): "画布高，物理像素",
+    ("LayoutInput", "dpr"): "每个 CSS 像素几个物理像素",
+    ("LayoutInput", "font_scale"): "「元素字号」",
+    ("LayoutInput", "min_element"): "值得画的最小块，物理像素",
+    ("LayoutInput", "levels"): "块最深到第几层",
+    ("LayoutInput", "root"): "缩放根的节点",
+    ("LayoutInput", "root_kind"): "缩放根是什么（`BlockKind`）",
+    ("LayoutInput", "root_size"): "缩放根的大小（同 `size`）",
+    ("LayoutInput", "options"): "声明的 `options`（本插件的设置名 → 当前值）",
+    ("LayoutInput", "ctx"): "调用的上下文：`ctx.check()`；有 `tree.read` 时 `v.tree` 读树",
     ("ExportInput", "tree"): "树",
     ("ExportInput", "root"): "要导出的子树：视图所在的位置、选中的项，或 0（全部）",
     ("ExportInput", "match"): "过滤后的布尔掩码（按节点下标）；没过滤时是 None",
@@ -226,6 +253,7 @@ def _limits(info: Any, typ: str) -> str:
 # names the reference does not list (the SDK's machinery, not data) — the test keeps this complete
 NOT_DATA = frozenset({"Plugin", "Context", "TreeView", "Rows", "Columns", "Listing", "Params", "Payload"})
 NOT_DATA |= {"Kind", "Flag", "T", "Text", "Cancelled", "PluginError", "layout", "r"}
+NOT_DATA |= {"BlockKind", "Shapes", "shapes"}  # a layout's kinds, its answer's builder and helpers
 
 _PREFIX = re.compile(
     r"\b(?:typing|types|datetime|pathlib|numpy|collections\.abc|spaceknife_[a-z_]+(?:\.[a-z_]+)*)\."
@@ -298,6 +326,8 @@ def model_rows(cls: type) -> list[tuple[str, str, str, str]]:
         # names its module imports only for type checking (Context in models.py)
         hints = typing.get_type_hints(cls, localns={n: getattr(sdk, n) for n in sdk.__all__})
         for f in dataclasses.fields(cls):
+            if f.name.startswith("_"):
+                continue  # the object's own bookkeeping
             if f.default is not dataclasses.MISSING:
                 default = _default(f.default)
             elif f.default_factory is not dataclasses.MISSING:

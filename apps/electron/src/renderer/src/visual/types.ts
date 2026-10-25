@@ -1,6 +1,6 @@
 // The contract between the view host and a visualization component (docs/visuals.md).
 //
-// A component draws one wire layout (drawlist.v1, flame.v1, polar.v1): its pure geometry answers
+// A component draws one wire layout (drawlist.v1, flame.v1, polar.v1, shapes.v1): its pure geometry answers
 // hit tests, outlines and anchors for the host and the shell; its instances own the GL buffers and
 // labels of one view. The host and the shell only see VisualFrame, the columns every layout shares;
 // the geometry columns are the component's business. All coordinates are physical pixels of the
@@ -71,6 +71,16 @@ export interface RectFrame extends VisualFrame {
   y: Int32Array;
   w: Int32Array;
   h: Int32Array;
+}
+
+/** shapes.v1 (a plugin's own layout): x y w h the box, r its corner radius (half the shorter side: a
+ * circle or a pill), poly the points of a convex polygon drawn instead (0: none); those points are
+ * x, y pairs in `points`, row i's from pointStart[i] (in points) on. */
+export interface ShapesFrame extends RectFrame {
+  r: Int32Array;
+  poly: Int32Array;
+  points: Int32Array;
+  pointStart: Int32Array;
 }
 
 /** polar.v1: sectors, angles in PolarGeometry.unit per turn from 12 o'clock clockwise, radii from the centre. */

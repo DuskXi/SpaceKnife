@@ -85,7 +85,7 @@ class Projection(Protocol):
         """Label bits of a row of ``kind`` drawn as ``cell``."""
         ...
 
-    def meta(self) -> pv.FlameGeometry | pv.PolarGeometry:
+    def meta(self) -> pv.FlameGeometry | pv.PolarGeometry | pv.ShapesGeometry:
         """``FrameInfo.geometry`` of the frame."""
         ...
 

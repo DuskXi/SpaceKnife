@@ -20,6 +20,8 @@ CAP_LOG_STREAM = "log-stream"
 CAP_VISUALS = "visuals.v1"
 CAP_LAYOUT_FLAME = "layout.flame.v1"
 CAP_LAYOUT_POLAR = "layout.polar.v1"
+# Plugin visualizations with a layout of their own (``shapes.v1``: rounded rectangles, circles, polygons).
+CAP_LAYOUT_SHAPES = "layout.shapes.v1"
 # Update checks against the GitHub releases: update.* and the update.changed event.
 CAP_UPDATES = "updates.v1"
 # Plugins (docs/plugins.md): plugin.* and extensions.* methods, the extensions.changed / plugin.changed /
@@ -41,6 +43,7 @@ BASE_CAPABILITIES = (
     CAP_PLUGINS,
     CAP_COLORS,
     CAP_PANELS,
+    CAP_LAYOUT_SHAPES,  # the host's format for plugins' own layouts: there whether one is enabled or not
 )
 # Every capability this version knows: what a client announces by default (packages/client).
 KNOWN_CAPABILITIES = (
@@ -51,6 +54,7 @@ KNOWN_CAPABILITIES = (
     CAP_VISUALS,
     CAP_LAYOUT_FLAME,
     CAP_LAYOUT_POLAR,
+    CAP_LAYOUT_SHAPES,
     CAP_UPDATES,
     CAP_PLUGINS,
     CAP_COLORS,
@@ -72,6 +76,7 @@ __all__ = [
     "CAP_COLORS",
     "CAP_LAYOUT_FLAME",
     "CAP_LAYOUT_POLAR",
+    "CAP_LAYOUT_SHAPES",
     "CAP_LOG_STREAM",
     "CAP_PANELS",
     "CAP_PLUGINS",

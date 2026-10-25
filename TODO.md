@@ -320,8 +320,9 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
   - [x] 试写第一轮（六个插件）找出的 23 处缺口：宿主、SDK、命令行和文档里补上（docs/plugins.md「试写第一轮之后的改进」），新增 API 参考 [docs/plugin-api.md](docs/plugin-api.md)
   - [x] 试写第二轮的 26 处缺口：阻断（插件进程里的剪贴板）和大部分主要、次要缺口补上；`plugin shot`、速查文档（docs/plugins.md「试写第二轮之后的改进」）
   - [ ] 第二轮还剩的：`ctx.invalidate` 只作废一部分节点；扫描来源的元数据随快照保存、`out.dir` 带大小；导出格式拿用户的日期写法（现在只有 `ctx.fmt` 的固定写法）；面板 mock 按返回模型校验 `calls`；快照历史变化的事件、`scan.status` 的「树最后变动的时间」；WSL 里的 Chrome 连不上本机 HTTP 时 `plugin shot` 要用 Windows 那边的程序
+  - [ ] 试写第三轮的缺口（docs/plugins.md「试写第三轮之后的改进」）：阻断（自带布局的可视化，`shapes.v1`）、面板读视图状态和颜色、可视化的 `when` 和图标已补上；其余各组进行中
   - [ ] 试写的插件（不在仓库里，worktree 的 plugins-trial1/）跟上：按新的 `check` 换掉不存在的图标名、去掉 `_current`、重新 `plugin build`；archivesrc 的坏包测试改成 `pytest.raises`，growthpanel 打开历史以外快照的测试改成期望被拒
   - [ ] 派一个只读 `docs/plugin-dev.md` 的新 agent 写一个小插件（如「按扩展名统计」的报告加一条命令），记下 token 用量和走的弯路，回头补文档
   - [ ] 还很薄的部分（docs/plugins.md 三节「还很薄或未做」）：对比侧栏和状态栏的插件报告、工具栏「更多」；扫描来源边扫边画；监控器给普通扫描用；文件夹规则叠加；悬停字段只读缓存；macOS 内存上限只靠心跳；`check` 的契约只跑固定的合成树
-  - [ ] 以后做：WASM 运行时、签名与发布者、插件目录与从 Git 安装、操作系统级沙箱（Windows 低完整性、Linux Landlock + seccomp、macOS sandbox profile）、零拷贝的树视图、按需申请的权限、插件之间的依赖、新的布局格式、Electron 主进程插件、新的 `OpMode`（移动、压缩、硬链接去重）
+  - [ ] 以后做：WASM 运行时、签名与发布者、插件目录与从 Git 安装、操作系统级沙箱（Windows 低完整性、Linux Landlock + seccomp、macOS sandbox profile）、零拷贝的树视图、按需申请的权限、插件之间的依赖、更多布局格式（时间轴、关系图）、Electron 主进程插件、新的 `OpMode`（移动、压缩、硬链接去重）
   - [x] Windows：子进程映射一个不存在的共享内存名时会静默得到一块全零的内存；现在镜像开头有宿主写的头，映射时核对（2026-10-23）

@@ -252,6 +252,25 @@ async def test_by_name(host: MockHost) -> None:
         permissions=("tree.read",),
         doc="kind-visualization",
     ),
+    "layout": Part(
+        imports=("LayoutInput", "Shapes", "T", "shapes"),
+        code='''
+@plugin.layout("pack", T("圆堆积", "Circle packing"), fill=0.5)
+def pack(v: LayoutInput) -> Shapes:
+    """A layout of its own: the host picks the blocks (v: parents first, each with its node, kind,
+    level and size; the canvas in physical px) and draws what this places like its own views.
+    Here the SDK's circle packing; v.shapes() starts an empty answer of your own (a rect, circle
+    or polygon per block, -1 for the zoom root)."""
+    return shapes.pack(v)
+''',
+        test="""
+async def test_pack(host: MockHost) -> None:
+    frame = await host.visual("pack")  # checked against the row contract
+    assert frame.draw.layout == "shapes.v1"
+    assert len(frame.draw) > 0
+""",
+        doc="kind-layout",
+    ),
     "color-code": Part(
         imports=("ColorInput", "Kind", "T"),
         code='''
@@ -435,6 +454,8 @@ ALIASES = {
     "node_field": "field",
     "code_visual": "visual-code",
     "visual_code": "visual-code",
+    "shapes": "layout",
+    "own_layout": "layout",
     "code_color": "color-code",
     "color_code": "color-code",
 }
@@ -622,6 +643,7 @@ def next_steps(folder: Path, parts: Sequence[str]) -> list[str]:
         "report": "report:largest",
         "visual": "visual:by_count",
         "visual-code": "visual:by_name",
+        "layout": "visual:pack",
         "color": "color:age",
         "color-code": "color:big_small",
         "export": "export:md",

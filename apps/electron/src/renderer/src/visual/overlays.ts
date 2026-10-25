@@ -13,7 +13,7 @@ import type { FlashItem } from "@/protocol/generated";
 import { fmtSize } from "@/lib/format";
 import { accentHex, palette, themeName } from "@/lib/theme";
 
-import { Flag, Kind } from "./frame";
+import { Flag, isNested, Kind } from "./frame";
 import { type Box, HIT_ROOT, type Hit, type Pt, type VisualFrame, type VisualGeometry } from "./types";
 
 /** Makes the outlines the overlays stroke: Path2D in the app, a recorder in tests. */
@@ -226,7 +226,7 @@ export const BIN_ICON = (icons.basket.match(/d="([^"]+)"/g) ?? []).map((d) => d.
 export function trashMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, dpr: number, newPath: NewPath = path2d): TrashMark[] {
   const root = f.info.root;
   const rootIn = !!root && (root.flags & Flag.TRASH) !== 0;
-  const nested = f.layout === "drawlist.v1"; // the treemap draws a folder's blocks inside it
+  const nested = isNested(f); // the treemap (a nested plugin layout) draws a folder's blocks inside it
   const inBin = (row: number) => row >= 0 && (f.flags[row]! & Flag.TRASH) !== 0;
   // each row in a bin under its outermost row in the bin (the zoom root when the view is in one)
   const groups = new Map<Hit, number[]>();
@@ -427,7 +427,7 @@ const GLOW_MAX = 2000; // past this many outlines the glow is left out
  * treemap a lit folder holds its blocks, so they are not drawn again. A scope drawn without its
  * contents (a collapsed folder) lights itself when nothing in it can. */
 export function classMarks<F extends VisualFrame>(g: VisualGeometry<F>, f: F, cls: number, scope: number, dpr: number, newPath: NewPath = path2d): ClassMark {
-  const nested = f.layout === "drawlist.v1";
+  const nested = isNested(f);
   // rows come before their children, so one pass carries both down the tree
   const inside = scope >= 0 && scope < f.count ? new Uint8Array(f.count) : null;
   const lit = nested ? new Uint8Array(f.count) : null;

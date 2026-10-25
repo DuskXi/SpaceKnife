@@ -22,10 +22,14 @@ export interface Offered {
   reason: string | null;
 }
 
+/** Why a visualization's own conditions (a plugin's `when`) do not hold here; null when they do. */
+export type WhenOf = (info: VisualInfo) => string | null;
+
 /** The backend's visualizations in its order, each enabled only when the session has it, this
- * renderer has a component for its layout and, in a comparison, it can show changes. Nothing the
- * backend offers is hidden: what can't be drawn here stays visible with its reason. */
-export function offered(list: readonly VisualInfo[], layouts: readonly string[], compare: boolean): Offered[] {
+ * renderer has a component for its layout, in a comparison it can show changes, and its own
+ * conditions (`whenOf`) hold. Nothing the backend offers is hidden: what can't be drawn here stays
+ * visible with its reason. */
+export function offered(list: readonly VisualInfo[], layouts: readonly string[], compare: boolean, whenOf?: WhenOf): Offered[] {
   return [...list]
     .sort((a, b) => a.order - b.order)
     .map((info) => {
@@ -35,7 +39,7 @@ export function offered(list: readonly VisualInfo[], layouts: readonly string[],
           ? t("这个界面画不了这种可视化")
           : compare && !info.compare
             ? t("对比视图里不能用这种可视化")
-            : null;
+            : (whenOf?.(info) ?? null);
       return { info, enabled: reason === null, reason };
     });
 }
@@ -43,8 +47,8 @@ export function offered(list: readonly VisualInfo[], layouts: readonly string[],
 /** The visualization after (dir 1) or before (dir -1) `current` among the enabled ones, wrapping
  * around; null when there is no other one to go to. A current one that is not offered (or not
  * enabled) steps to the first enabled one in that direction from where it stands in the list. */
-export function nextVisual(list: readonly VisualInfo[], layouts: readonly string[], current: string, dir: 1 | -1, compare: boolean): string | null {
-  const items = offered(list, layouts, compare);
+export function nextVisual(list: readonly VisualInfo[], layouts: readonly string[], current: string, dir: 1 | -1, compare: boolean, whenOf?: WhenOf): string | null {
+  const items = offered(list, layouts, compare, whenOf);
   const n = items.length;
   const at = items.findIndex((o) => o.info.id === current);
   const start = at >= 0 ? at : dir === 1 ? n - 1 : 0;
@@ -64,7 +68,7 @@ export function nextColor(current: ColorModeName): ColorModeName {
  * polar.v1 rings); null when every level fits or the layout has no such limit (drawlist.v1). */
 export function levelsThatFit(info: FrameInfo | null | undefined, detail: number): number | null {
   const g = info?.geometry;
-  if (!g) return null;
+  if (!g || g.kind === "shapes") return null;
   const n = g.kind === "flame" ? g.rows : g.rings;
   return n < detail ? n : null;
 }

@@ -124,6 +124,8 @@ from .streams import (
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
 from .update import UpdateChangedEvent, UpdateMuteParams, UpdateReleases, UpdateStatus, UpdateVersionParams
 from .view import (
+    ViewColors,
+    ViewColorsParams,
     ViewFilterParams,
     ViewFrameEvent,
     ViewIdParams,
@@ -330,6 +332,13 @@ VIEW_RESULTS = MethodSpec(
     ViewResultsParams,
     ViewResults,
     "A page of the filter result list, grouped by visible block.",
+)
+COLORS_OF = MethodSpec(
+    "colors.of",
+    ViewColorsParams,
+    ViewColors,
+    "What colours some nodes in a view (its colour mode or another): classes, age bands, branch "
+    "slots, a plugin's palette indices. Web panels paint with these (sk.colors).",
 )
 VISUAL_LIST = MethodSpec(
     "visual.list",
@@ -630,6 +639,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         VIEW_REVEAL,
         VIEW_RESULTS,
         VISUAL_LIST,
+        COLORS_OF,
         SETTINGS_GET,
         SETTINGS_UPDATE,
         SETTINGS_RESET,

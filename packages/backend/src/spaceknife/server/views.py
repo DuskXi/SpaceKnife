@@ -612,7 +612,10 @@ def filter_info(view: View, frame: Frame | None) -> pv.FilterInfo | None:
 
 def frame_info(host: ViewHost, frame: Frame, reason: str) -> pv.FrameInfo:
     d = frame.draw
-    drawn = d.layout != pv.DRAWLIST_LAYOUT  # the zoom root is drawn too: the root bar, the centre disc
+    # the zoom root is drawn too: the root bar, the centre disc, a plugin layout's root shape
+    drawn = d.layout != pv.DRAWLIST_LAYOUT and (
+        not isinstance(d.meta, pv.ShapesGeometry) or d.meta.root is not None
+    )
     return pv.FrameInfo(
         view_id=host.view.id,
         seq=host.seq,
@@ -656,11 +659,14 @@ def encode_draw(frame: Frame, view_id: str, seq: int, request_id: int | str | No
         columns["dstat"] = frame.dstat
     if frame.pal is not None:  # colors.v1: a plugin colour mode's palette index per row
         columns["pal"] = frame.pal
+    blobs = {"names": b"".join(encoded)}
+    if d.points is not None:  # shapes.v1: the polygons' points
+        blobs["points"] = np.ascontiguousarray(d.points, dtype="<i4").tobytes()
     return encode_frame(
         stream=pv.view_stream(view_id),
         layout=d.layout,
         columns=columns,
         seq=seq,
         request_id=request_id,
-        blobs={"names": b"".join(encoded)},
+        blobs=blobs,
     )

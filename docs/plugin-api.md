@@ -166,8 +166,46 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `frame.root` | 缩放根本身（不是一行）；`frame.root.size` 是它的大小（权重可视化里是它的权重：标签的「占权重的 x%」以它为分母） |
 | `frame.pal` | 插件配色时每行的色板下标（`uint8`），否则 None |
 | `frame.size_unit` | `bytes` `count` `weight`：标签怎么写 |
+| `frame.draw.layout` | `drawlist.v1`（树图）`flame.v1` `polar.v1`，自带布局是 `shapes.v1` |
+| `frame.draw.geometry` | 几何列：`shapes.v1` 是 `x y w h`（外框）`r`（圆角，半个短边就是圆）`poly`（多边形的点数，0 不是多边形），物理像素 |
+| `frame.draw.points` | `shapes.v1` 里多边形的点，`x y` 交替，按行的顺序 |
+| `frame.draw.meta` | `shapes.v1` 是 `ShapesGeometry`：`root`（缩放根的形状，没有是 None）`nested` `message`（布局失败的原因） |
 
 **图例在哪**：工具栏的配色菜单里，每种配色下面一行色块和说明（声明的 `legend`、按 `bands` 生成的，或 `@plugin.color_legend` 给的）；没有说明的色板项不显示。
+
+<a id="api-layout"></a>
+### 自带布局：`LayoutInput` 与 `Shapes`
+
+`@plugin.layout` 的函数收到 `LayoutInput`（字段见第 14 节），返回 `Shapes`（`out = v.shapes()`）。坐标都是物理像素，`v.dpr` 个物理像素一个 CSS 像素。
+
+| `Shapes` 的方法 | 形状 |
+|---|---|
+| `out.rect(i, x, y, w, h, radius=0)` | 矩形，圆角 `radius`（半个短边：药丸形，宽高相等时是圆） |
+| `out.circle(i, cx, cy, r)` | 圆 |
+| `out.polygon(i, [(x, y), …])` | 凸多边形，3–12 个点，任一方向；不凸的不画 |
+| `out.rects(ids, x, y, w, h, radius)` `out.circles(ids, cx, cy, r)` | 一次很多块（数组或数） |
+| `out.clear(i)` | 这一块不画了（它里面的块也不画） |
+
+- `i = -1`（`shapes.ROOT`）是缩放根：给了形状就画在最下面，写着名字和大小，悬停、点它（回到上一层）和火焰图的根条一样。
+- 块按顺序画，后画的盖住先画的；指针落在最后一个盖住它的形状上。里面一块都没画的文件夹画成折叠的。
+- 标签：每个方法都有 `label="auto" | "centre" | "top" | "none"`。`auto`：展开的文件夹在 `nested` 布局里画成矩形时名字写在顶部，画成圆或多边形时不写（里面是它的内容），其余写在中间；放得下两行写名字和大小，否则一行，放不下不写。
+- `v.children(i)`：块 i 里的块（−1：缩放根上的）；`v.levels` 层数；`v.min_element` 最小元素（物理像素）；`v.options` 是 `options` 里列出的本插件设置的值。
+- `shapes.pack(v, padding=2, margin=8)`：d3 的圆堆积（front-chain 加最小外接圆），确定的；`shapes.pack_siblings(radii)`、`shapes.enclose(circles)` 是它的两步。
+- 失败：超时（5 s）或出错时这一帧没有行，画布中间写原因（异常只写类型，traceback 在插件日志里；`Shapes` 的块数不对等 SDK 自己的检查写全文）；下一个画面再问。坐标夹在 ±2^24 内，圆的直径取偶数，其余按整像素取整。
+
+冰柱图（`fill = 1`，`nested = False`）：
+
+```python
+@plugin.layout("icicle", T("冰柱图", "Icicle"), fill=1.0, nested=False)
+def icicle(v: LayoutInput) -> Shapes:
+    out = v.shapes()
+    band = min(v.height / (v.levels + 1), 48 * v.dpr)
+    out.rect(-1, 0, 0, v.width, band - 2)  # 缩放根：顶上一条
+    x, w = v.u0 * v.width, (v.u1 - v.u0) * v.width
+    shown = np.flatnonzero(w >= 2 * v.dpr)  # 太窄的不画（它下面的也不画）
+    out.rects(shown, x[shown], v.depth[shown] * band, w[shown] - 2, band - 2)
+    return out
+```
 
 <a id="api-testing"></a>
 ## 10. `MockHost` 一览
@@ -188,6 +226,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常）、对比原因 |
 | `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样运行命令：调用它的方法并返回结果（不是 `call` 动作的命令返回动作本身） |
 | `await host.command_available(name, node=)` | 选中 `node` 时这个命令能不能跑：它的 `when` 和 `check` 给的原因，能跑时 None |
+| `await host.visual_available(name)` | 本插件的可视化在当前扫描的视图里能不能选：它的 `when` 给的原因，能选时 None |
 | `await host.settled()` | 等宿主后台的事做完：悬停字段的后补、钩子、设置和语言的变化 |
 | `host.path("a/b")` | 节点在界面里的路径（系统的写法，Windows 是 `\`）：和插件写出的路径比较时用它 |
 | `await host.export_text(name, …)`、`export_bytes` | 同 `export`，类型确定（文字格式 / 二进制格式） |
@@ -447,6 +486,32 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `ids` | ndarray | 必需 | 这一帧画出的节点（int64 数组） |
 | `palette` | int | `1` | 色板长度：返回的下标 < 它 |
 | `ctx` | Context \| None | `None` | 调用的上下文 |
+
+#### `LayoutInput`
+
+自带布局的可视化 `(v) -> Shapes`：宿主挑出的块（父块在前）和画布。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `node` | ndarray | 必需 | 每块的节点（int64 数组）；「N 个小项」「+N 项」是它们所在的文件夹，可用和未知空间是 −1 |
+| `parent` | ndarray | 必需 | 每块所在的块的下标；−1：直接在缩放根上 |
+| `kind` | ndarray | 必需 | 每块是什么（`BlockKind`）：`FILE` `FOLDER`（它的块跟在后面）`COLLAPSED` `PENDING` `SMALL` `MORE` `FREE` `UNKNOWN` |
+| `depth` | ndarray | 必需 | 层级：1 是缩放根的子项 |
+| `size` | ndarray | 必需 | 面积代表的量：占用字节，或可视化 `size` 说的那种 |
+| `count` | ndarray | 必需 | 「N 个小项」「+N 项」的成员数 |
+| `u0` | ndarray | 必需 | 在缩放根 [0, 1) 里的区间起点：同级按顺序、按大小分（冰柱图的 x） |
+| `u1` | ndarray | 必需 | 区间终点 |
+| `width` | int | `0` | 画布宽，物理像素 |
+| `height` | int | `0` | 画布高，物理像素 |
+| `dpr` | float | `1.0` | 每个 CSS 像素几个物理像素 |
+| `font_scale` | float | `1.0` | 「元素字号」 |
+| `min_element` | float | `14.0` | 值得画的最小块，物理像素 |
+| `levels` | int | `0` | 块最深到第几层 |
+| `root` | int | `0` | 缩放根的节点 |
+| `root_kind` | int | `1` | 缩放根是什么（`BlockKind`） |
+| `root_size` | int | `0` | 缩放根的大小（同 `size`） |
+| `options` | dict[str, Any] | `{}` | 声明的 `options`（本插件的设置名 → 当前值） |
+| `ctx` | Context \| None | `None` | 调用的上下文：`ctx.check()`；有 `tree.read` 时 `v.tree` 读树 |
 
 #### `ExportInput`
 

@@ -55,6 +55,8 @@ export interface RunContext {
   reverse?: boolean;
   /** commands run by commands: stop after a few */
   depth?: number;
+  /** the view's tab is not brought forward (a web panel acting on its view) */
+  stay?: boolean;
 }
 
 type Handler<A> = (a: A, rc: RunContext) => Promise<void> | void;
@@ -178,7 +180,7 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
     const { visual, ...rest } = a.settings as ViewSettingsParams & { visual?: string };
     if (visual) await COMMANDS.pickVisual(viewId, visual);
     if (Object.keys(rest).length) await setViewSettings(viewId, rest);
-    showViewTab(viewId);
+    if (!rc.stay) showViewTab(viewId);
   },
 
   async cycle(a: CycleAction, rc) {
@@ -207,7 +209,7 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
     const viewId = rc.viewId ?? focusedViewId();
     if (!viewId) return toast(t("需要先完成扫描"));
     await editFilter(viewId, a.expr, null, true);
-    showViewTab(viewId); // from a report's tab: the user sees what the filter did
+    if (!rc.stay) showViewTab(viewId); // from a report's tab: the user sees what the filter did
   },
 
   async scan_source(a: ScanSourceAction, rc) {

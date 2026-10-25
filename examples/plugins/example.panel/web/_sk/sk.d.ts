@@ -23,6 +23,34 @@ export interface PanelContext {
   compare_id: string | null;
 }
 
+/** What the panel's view shows (sk.view, sk.onView). */
+export interface PanelView {
+  view_id: string;
+  scan_id: string;
+  /** a visual.list id: "treemap", "flame", "flame_polar", or a plugin's "<plugin>.<name>" */
+  visual: string;
+  /** its frames' layout: "drawlist.v1", "flame.v1", "polar.v1", "shapes.v1" (null before the first frame) */
+  layout: string | null;
+  /** "class", "flat", "time", "branch", or a plugin's colour mode id */
+  color_mode: string;
+  zoom_node: number;
+  zoom_key: number;
+  /** the selected block's key (a node id, or an aggregate's tagged key); null: nothing selected */
+  selected: number | null;
+  detail: number;
+  filter: { text: string; active: boolean } | null;
+  compare: boolean;
+  size_unit: "bytes" | "count" | "weight";
+}
+
+/** What sk.colors answers: a colour per node asked for, and a legend of the colours among them. */
+export interface PanelColors {
+  mode: string;
+  /** #rrggbb per node, "" for what is not a node of the scan */
+  colors: string[];
+  legend: { label: string; color: string }[];
+}
+
 export interface PanelInfo {
   plugin: string;
   lang: "zh-CN" | "en";
@@ -55,6 +83,8 @@ export interface Sk<
   readonly plugin: string;
   readonly lang: "zh-CN" | "en";
   readonly context: PanelContext;
+  /** What the panel's view shows now; null without a view. */
+  readonly view: PanelView | null;
   /** One of this plugin's methods, by its local name. */
   call<K extends keyof Fallback<M, Record<string, { params: unknown; result: unknown }>> & string>(name: K, params?: M[K]["params"], opts?: { signal?: AbortSignal }): Promise<M[K]["result"]>;
   /** A built-in method a panel may use: tree.node tree.children tree.summary tree.find (tree.read),
@@ -71,12 +101,18 @@ export interface Sk<
   onTheme(cb: (mode: "dark" | "light") => void): () => void;
   /** The tree of the context's scan changed (a rescan, files changed, the scan went on). */
   onTree(cb: (e: { scan_id: string | null }) => void): () => void;
+  /** The panel's view changed what it shows; called at once with the current one. */
+  onView(cb: (view: PanelView | null) => void): () => void;
+  /** The colours the view paints these nodes with (its colour mode, or `opts.mode`); needs tree.read. */
+  colors(nodes: (number | NodeRef)[], opts?: { mode?: string }): Promise<PanelColors>;
   host: {
     /** Select it in its scan's view; { stay: true }: the user stays where the panel is. */
     select(node: number | NodeRef, opts?: { stay?: boolean }): Promise<null>;
     zoom(node: number | NodeRef): Promise<null>;
     filter(expr: string): Promise<null>;
-    /** one of this plugin's commands, by its full id */
+    /** one of this plugin's commands (its full id), or one of the app's that change the view
+     * (view.color.*, view.visual.*, view.zoom_in, nav.up, …): on the panel's own view, which stays
+     * where it is */
     command(id: string): Promise<null>;
     toast(text: string): Promise<null>;
     /** needs host.open */

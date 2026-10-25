@@ -11,6 +11,7 @@ import { registeredLayouts } from "@/visual/registry";
 import type { PaletteCommand, PaletteContext } from "@/protocol/generated";
 import { BUILTIN_ACTIONS, COMMANDS, type RunContext, runAction } from "@/plugins/actions";
 import { sourceScanOf, startSourceScan } from "@/plugins/sources";
+import { visualWhen } from "@/plugins/whenEnv";
 
 import {
   basketAdd,
@@ -53,7 +54,7 @@ export async function cycleVisual(viewId: string, dir: 1 | -1): Promise<void> {
   const s = get();
   const st = s.views[viewId]?.state;
   if (!st) return;
-  const next = nextVisual(s.visuals, registeredLayouts(), st.visual, dir, st.compare);
+  const next = nextVisual(s.visuals, registeredLayouts(), st.visual, dir, st.compare, visualWhen(s, st.scan_id, viewId));
   if (next) await switchVisual(viewId, next);
 }
 
@@ -62,7 +63,7 @@ export async function pickVisual(viewId: string, id: string): Promise<void> {
   const s = get();
   const st = s.views[viewId]?.state;
   if (!st || st.visual === id) return;
-  const item = offered(s.visuals, registeredLayouts(), st.compare).find((o) => o.info.id === id);
+  const item = offered(s.visuals, registeredLayouts(), st.compare, visualWhen(s, st.scan_id, viewId)).find((o) => o.info.id === id);
   if (item?.reason) return toast(item.reason);
   await switchVisual(viewId, id);
 }
@@ -75,7 +76,10 @@ async function switchVisual(viewId: string, id: string): Promise<void> {
 }
 
 /** Where the user is, as the backend's commands see it (palette.query, palette.check). */
-export function paletteContext(s: AppState = get()): PaletteContext {
+export function paletteContext(s: AppState = get(), on?: { viewId?: string | null; scanId?: string | null }): PaletteContext {
+  // a web panel's command runs on the panel's view, whatever tab is in front
+  const view = on?.viewId ? s.views[on.viewId] : undefined;
+  if (view) return { tab: "scan", scan_id: on?.scanId ?? view.state.scan_id, view_id: on!.viewId!, basket: basketCount(s) };
   const tab = activeTab(s);
   // the help and disk tabs are, to the backend's commands, tabs without a scan like the settings tab;
   // a plugin's tab is about a scan (its own) but has no view
@@ -94,13 +98,15 @@ export interface ShortcutOptions {
   node?: number | null;
   viewId?: string | null;
   scanId?: string | null;
+  /** the view's tab is not brought forward (a web panel acting on its view) */
+  stay?: boolean;
 }
 
 /** A command's keyboard shortcut (plugins/keymap.ts) or a command run by an action: it runs where
  * the palette would offer it, and elsewhere says why not, as the palette's row does. Which commands
  * are available is the backend's call (palette.check), so the key and the palette never disagree. */
 export async function runShortcut(id: string, opts: ShortcutOptions = {}): Promise<void> {
-  const c = await call("palette.check", { id, context: paletteContext() });
+  const c = await call("palette.check", { id, context: paletteContext(get(), opts) });
   if (!c.enabled) {
     if (!opts.quiet) toast(c.status ? t("{command}：{reason}", { command: c.name, reason: c.status }) : c.name);
     return;
@@ -112,7 +118,7 @@ export async function runShortcut(id: string, opts: ShortcutOptions = {}): Promi
  * the command as the palette or palette.check gave it; otherwise the one of palette.commands. */
 export async function runCommand(id: string, cmd?: PaletteCommand | null, opts: ShortcutOptions = {}): Promise<void> {
   const known = cmd ?? get().commands.find((c) => c.id === id) ?? null;
-  const rc: RunContext = { owner: known?.plugin ?? null, reverse: opts.reverse, depth: opts.depth, node: opts.node, viewId: opts.viewId, scanId: opts.scanId };
+  const rc: RunContext = { owner: known?.plugin ?? null, reverse: opts.reverse, depth: opts.depth, node: opts.node, viewId: opts.viewId, scanId: opts.scanId, stay: opts.stay };
   await runAction(known?.action ?? { kind: "builtin", name: id }, rc);
 }
 

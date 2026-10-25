@@ -14,7 +14,7 @@ uv run pytest my.tool/tests                                    # 合成树上跑
 spaceknife plugin shot my.tool --open report:largest           # 真界面的截图（无头浏览器，不弹窗）
 ```
 
-`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code color color-code export source set field insight hook`。`plugin new` 结束时按选的部分列出下一步的命令。
+`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code layout color color-code export source set field insight hook`。`plugin new` 结束时按选的部分列出下一步的命令。
 
 <a id="quick-tasks"></a>
 ## 2. 我要……
@@ -31,6 +31,7 @@ spaceknife plugin shot my.tool --open report:largest           # 真界面的截
 | 按类别上色、`:class:` 过滤 | `[[classes]]`、`[[folder_rules]] glob/contains/beside` | — | `kind-file_class` |
 | 过滤框里的 `:set:名` | `@plugin.node_set(..)` → 节点下标数组或布尔掩码 | `set` | `kind-node_set` |
 | 换一种面积 / 配色 | `[[visualizations]] size="files"`；代码版 `size="code"`；`[[color_modes]] by="age"`；代码版 `@plugin.color_mode` | `visual` `visual-code` `color` `color-code` | `kind-visualization` `kind-color_mode` |
+| 自己排布局的可视化（圆堆积、冰柱图、多边形格子） | `@plugin.layout("pack", T(..), fill=0.5)` → `shapes.pack(v)`，或 `out = v.shapes()` 再 `out.circle/rect/polygon(i, …)` | `layout` | `kind-layout` |
 | 一种导出格式 | `@plugin.export_format("md", T(..), extension="md", options=[...])` → 逐块 `yield str` | `export` | `kind-export_format` |
 | 把压缩包等当文件夹扫描 | `@plugin.scan_source(..)` → `out.file(path, size)` | `source` | `kind-scan_source` |
 | 一个网页面板 | `[[panels]]` + `web/index.html`、`web/app.js`（`sk.call` / `sk.core`） | `panel` | `panels` |

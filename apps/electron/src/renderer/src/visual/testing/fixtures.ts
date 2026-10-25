@@ -1,11 +1,11 @@
 // Test helpers: wire frames of any layout, and small scenes laid out the way the backend lays them
 // out (docs/protocol.md §4, docs/visuals.md), for geometry and paint tests under node.
 
-import type { FlameGeometry, FrameInfo, FrameRoot, PolarGeometry } from "@/protocol/generated";
+import type { FlameGeometry, FrameInfo, FrameRoot, PolarGeometry, ShapesGeometry } from "@/protocol/generated";
 import { type BinaryFrame, type Column, decodeFrame } from "@/protocol/rpc";
 
 import { decodeVisualFrame, Flag, GEOMETRY_COLUMNS, Kind, Label } from "../frame";
-import type { PathSink, PolarFrame, Pt, RectFrame, VisualFrame } from "../types";
+import type { PathSink, PolarFrame, Pt, RectFrame, ShapesFrame, VisualFrame } from "../types";
 
 // ------------------------------------------------------------------ the wire encoder
 // Mirrors spaceknife_protocol.binary.encode_frame: u32 header length, JSON header, zero padding to
@@ -65,8 +65,8 @@ export interface FixtureRow {
   parent: number;
   kind: number;
   depth: number;
-  /** the layout's geometry columns in order: x y w h, or a0 a1 r0 r1 */
-  geo: readonly [number, number, number, number];
+  /** the layout's geometry columns in order: x y w h, a0 a1 r0 r1, or x y w h r poly */
+  geo: readonly number[];
   cls?: number;
   label?: number;
   size: bigint;
@@ -84,7 +84,7 @@ export interface FixtureRow {
 export const SMALL_KEY = (1 << 30) + 3;
 export const FREE_KEY = 0xc0000001;
 
-const VISUAL_OF: Record<string, string> = { "drawlist.v1": "treemap", "flame.v1": "flame", "polar.v1": "flame_polar" };
+const VISUAL_OF: Record<string, string> = { "drawlist.v1": "treemap", "flame.v1": "flame", "polar.v1": "flame_polar", "shapes.v1": "example.shapes.pack" };
 
 /** Wire columns of rows: the shared ones, the layout's geometry, `branch`, and delta / dstat when used. */
 export function rowColumns(layout: string, rows: readonly FixtureRow[]): { columns: Record<string, Column>; names: Uint8Array } {
@@ -159,10 +159,10 @@ export interface Fixture<F extends VisualFrame = VisualFrame> {
 }
 
 /** Rows encoded as a wire frame of `layout` and decoded again; the layout must be one visual/frame.ts knows. */
-export function encodeFrame<F extends VisualFrame = VisualFrame>(layout: string, rows: readonly FixtureRow[], infoPatch: Partial<FrameInfo> = {}): Fixture<F> {
+export function encodeFrame<F extends VisualFrame = VisualFrame>(layout: string, rows: readonly FixtureRow[], infoPatch: Partial<FrameInfo> = {}, blobs: Record<string, Uint8Array> = {}): Fixture<F> {
   const { columns, names } = rowColumns(layout, rows);
   const info = frameInfo({ layout, visual: VISUAL_OF[layout] ?? "treemap", rows: rows.length, ...infoPatch });
-  const buf = encodeBinary(layout, columns, { names }, info.seq);
+  const buf = encodeBinary(layout, columns, { names, ...blobs }, info.seq);
   const bin = decodeFrame(buf);
   const frame = decodeVisualFrame(bin, info);
   if (!frame) throw new Error(`no decoder for layout ${layout}`);
@@ -384,6 +384,41 @@ export function polarScene(o: SceneOptions & { info?: Partial<FrameInfo> } = {})
   const proj = polarProjection(width, height, dpr, o.detail ?? 5);
   const rows = partition(tree, proj);
   return encodeFrame<PolarFrame>("polar.v1", rows, sceneInfo(tree, rows, { width, height, dpr, geometry: proj.geometry, ...o.info }));
+}
+
+/** A plugin layout's scene (shapes.v1, 400 × 300 px at dpr 1): the zoom root as a circle around
+ * (200, 150) of radius 140, and inside it
+ *
+ *    0 sub (open folder)   circle around (140, 150), r 80
+ *    ├ 1 a.mp4             circle around (110, 150), r 40 (selected, red tag)
+ *    └ 2 x.pdf             hexagon around (180, 150), r 26
+ *    3 cache (waiting)     rounded rectangle 240,100 60×40, r 4
+ *    4 12 small items      circle around (280, 200), r 20
+ */
+export function shapesScene(o: { dpr?: number; root?: boolean; nested?: boolean; info?: Partial<FrameInfo> } = {}): Fixture<ShapesFrame> {
+  const d = o.dpr ?? 1;
+  const circle = (cx: number, cy: number, r: number) => [(cx - r) * d, (cy - r) * d, 2 * r * d, 2 * r * d, r * d, 0];
+  const hex = (cx: number, cy: number, r: number) => Array.from({ length: 6 }, (_, k) => [Math.round((cx + r * Math.cos((k * Math.PI) / 3)) * d), Math.round((cy + r * Math.sin((k * Math.PI) / 3)) * d)]).flat();
+  const pts = hex(180, 150, 26);
+  const xs = pts.filter((_, i) => i % 2 === 0);
+  const ys = pts.filter((_, i) => i % 2 === 1);
+  const rows: FixtureRow[] = [
+    { key: 3, node: 3, parent: -1, kind: Kind.FOLDER, depth: 1, geo: circle(140, 150, 80), size: 600n, branch: 1, flags: Flag.ON_PATH, name: "sub" },
+    { key: 2, node: 2, parent: 0, kind: Kind.FILE, depth: 2, geo: circle(110, 150, 40), cls: 1, label: Label.NAME | Label.SIZE, size: 400n, tag: 1, branch: 1, flags: Flag.MATCH | Flag.SELECTED, name: "a.mp4" },
+    { key: 6, node: 6, parent: 0, kind: Kind.FILE, depth: 2, geo: [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 0, 6], cls: 3, label: Label.NAME | Label.SHORT, size: 150n, branch: 1, name: "x.pdf" },
+    { key: 7, node: 7, parent: -1, kind: Kind.PENDING, depth: 1, geo: [240 * d, 100 * d, 60 * d, 40 * d, 4 * d, 0], label: Label.NAME | Label.SHORT, size: 100n, branch: 2, flags: Flag.SCANNING, name: "cache" },
+    { key: SMALL_KEY, node: 1, parent: -1, kind: Kind.SMALL, depth: 1, geo: circle(280, 200, 20), size: 50n, count: 12, tone: 4 },
+  ];
+  const geometry: ShapesGeometry = {
+    kind: "shapes",
+    root: o.root === false ? null : { x: 60 * d, y: 10 * d, w: 280 * d, h: 280 * d, r: 140 * d, points: [] },
+    nested: o.nested ?? true,
+    message: "",
+  };
+  const blob = new Uint8Array(Int32Array.from(pts).buffer);
+  const tree: SceneNode = { key: 1, node: 1, kind: Kind.FOLDER, size: 1200n, name: "root" };
+  const info = { width: 400 * d, height: 300 * d, dpr: d, geometry, ...(o.root === false ? { root: null } : {}), ...o.info };
+  return encodeFrame<ShapesFrame>("shapes.v1", rows, sceneInfo(tree, rows, info), { points: blob });
 }
 
 // ------------------------------------------------------------------ outlines

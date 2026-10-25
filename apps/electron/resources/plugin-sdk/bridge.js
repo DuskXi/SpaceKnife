@@ -10,7 +10,7 @@
 // `?mock=fixtures.json`; calls are answered from that file (relative to the page):
 // { "context": {...}, "lang": "zh-CN", "calls": { "<method>": <result> },
 // "core": { "<core method>": <result> }, "states": { "<name>": <value> },
-// "events": { "<name>": [<payload>, ...] } }.
+// "events": { "<name>": [<payload>, ...] }, "view": {...}, "colors": <sk.colors answer> }.
 
 const parentWindow = window.parent !== window ? window.parent : null;
 const params = new URLSearchParams(location.search);
@@ -27,8 +27,9 @@ const contextHandlers = new Set();
 const langHandlers = new Set();
 const themeHandlers = new Set();
 const treeHandlers = new Set();
+const viewHandlers = new Set();
 let gotContext = false;
-const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {}, units: 1024 };
+const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {}, units: 1024, view: null };
 let mock = null;
 
 let markReady;
@@ -86,6 +87,10 @@ function onPortMessage(ev) {
       return;
     case "tree":
       for (const cb of treeHandlers) cb({ scan_id: m.scan_id });
+      return;
+    case "view":
+      info.view = m.view || null;
+      for (const cb of viewHandlers) cb(info.view);
       return;
     case "theme":
       applyTheme({ mode: m.mode, vars: m.vars });
@@ -162,6 +167,7 @@ function answerMock(msg) {
   }
   if (msg.type === "host") {
     console.info("[sk mock] host", msg.op, msg.args);
+    if (msg.op === "colors") return mock.colors || { mode: "class", colors: (msg.args.nodes || []).map(() => "#7f8a9a"), legend: [] };
     return null;
   }
   return null;
@@ -190,6 +196,7 @@ if (mockFile) {
       mock = data || {};
       applyLang(mock.lang || info.lang);
       info.context = mock.context || {};
+      info.view = mock.view || null;
       gotContext = true;
       for (const [name, value] of Object.entries(mock.states || {})) stateValues.set(name, value);
       applyTheme({ mode: mock.theme === "light" ? "light" : "dark", vars: {} }); // "theme": "light" in the fixtures
@@ -218,6 +225,11 @@ const sk = {
   },
   get context() {
     return info.context;
+  },
+  /** What the panel's view shows now (null without a view): visual, layout, color_mode, zoom_node,
+   * zoom_key, selected, detail, filter { text, active }, compare, size_unit, view_id, scan_id. */
+  get view() {
+    return info.view;
   },
   /** One of this plugin's methods by its local name. */
   call: (name, params, opts) => request({ type: "call", method: name, params: params || {} }, opts && opts.signal),
@@ -281,11 +293,24 @@ const sk = {
     treeHandlers.add(cb);
     return () => treeHandlers.delete(cb);
   },
+  /** The panel's view changed what it shows (another visualization or colour mode, a zoom, the
+   * selection, the filter); called at once with the current one (null without a view). */
+  onView(cb) {
+    viewHandlers.add(cb);
+    if (isReady) cb(info.view);
+    return () => viewHandlers.delete(cb);
+  },
+  /** The colours the panel's view paints these nodes with (its colour mode, or `opts.mode`): a
+   * #rrggbb per node ("" for what is not a node of the scan) and a legend of those present. Needs
+   * tree.read. */
+  colors: (nodes, opts) => host("colors")({ nodes: (nodes || []).map((n) => (typeof n === "number" ? n : n && n.node)), mode: (opts && opts.mode) || null }),
   host: {
     /** Select a node in its scan's view; { stay: true }: without bringing that tab forward. */
     select: (ref, opts) => host("select")(Object.assign(refArgs(ref), opts && opts.stay ? { stay: true } : {})),
     zoom: (ref) => host("zoom")(refArgs(ref)),
     filter: (expr) => host("filter")({ expr }),
+    /** one of this plugin's commands, or one of the app's that change the view (view.color.*,
+     * view.visual.*, nav.*, …): on the panel's own view, whose tab stays where it is */
     command: (command) => host("command")({ command }),
     toast: (text) => host("toast")({ text }),
     reveal: (ref) => host("reveal")(refArgs(ref)),

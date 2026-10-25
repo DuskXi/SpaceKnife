@@ -112,6 +112,15 @@ def specs_of(desc: Description) -> tuple[list[tuple[str, Spec]], list[Issue]]:
         ):
             issues.append(Issue("no_code", f"visualization {spec.name!r} has no function"))
         if (
+            kind == "visualization"
+            and isinstance(spec, VisualizationSpec)
+            and spec.base == "shapes"
+            and ("layout", spec.name) not in handlers
+        ):
+            issues.append(
+                Issue("no_code", f"visualization {spec.name!r} has no layout function (@plugin.layout)")
+            )
+        if (
             kind == "color_mode"
             and isinstance(spec, ColorModeSpec)
             and spec.by is None
@@ -322,6 +331,8 @@ def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
 
 
 def _visualization(host: PluginHost, rec: PluginRecord, spec: VisualizationSpec) -> Visualization:
+    if spec.base == "shapes":
+        return _shapes_visualization(host, rec, spec)
     base = visuals.get(BASE_ENGINES[spec.base])
     vid = f"{rec.id}.{spec.name}"
     sizes: Callable[[Any], Any] | None
@@ -355,6 +366,53 @@ def _visualization(host: PluginHost, rec: PluginRecord, spec: VisualizationSpec)
         sizes=sizes,
         plugin=rec.id,
         text=spec.title,
+        needs=_needs(host, rec, spec.when),
+        when=tuple(spec.when),
+    )
+
+
+def _shapes_visualization(host: PluginHost, rec: PluginRecord, spec: VisualizationSpec) -> Visualization:
+    """A visualization whose blocks the plugin places itself (``shapes.v1``, layout/shapes.py)."""
+    from spaceknife_protocol import CAP_LAYOUT_SHAPES
+    from spaceknife_protocol import view as pv
+
+    from ..layout.shapes import ShapesEngine
+
+    vid = f"{rec.id}.{spec.name}"
+    options = [(o, f"plugin.{rec.id}.{o}") for o in spec.options]
+    sizes: Callable[[Any], Any] | None = None
+    if spec.size != "alloc":
+
+        def sizes(basis: Any, metric: str = spec.size) -> ColumnSizes:
+            return ColumnSizes(basis, metric)
+
+    def engine(basis: Any) -> ShapesEngine:
+        place, key = host.remote_layout(rec.id, spec.name, options, basis.store)
+        return ShapesEngine(
+            basis, vid, place, fill=spec.fill, max_rows=spec.max_rows, nested=spec.nested, key=key
+        )
+
+    return Visualization(
+        id=vid,
+        api=ENGINE_API,
+        layout=pv.SHAPES_LAYOUT,
+        capability=CAP_LAYOUT_SHAPES,
+        title_id=spec.title.zh,
+        icon=spec.icon or "layers",
+        order=100 + spec.order,
+        engine=engine,
+        default_color=_color_id(rec, spec.default_color) or "class",
+        compare=spec.compare and spec.size == "alloc",
+        free_space=spec.size == "alloc",
+        options=tuple(options),
+        aliases=(spec.title.zh, *([spec.title.en] if spec.title.en else [])),
+        size_metric=spec.size,
+        size_unit=spec.size_unit(),
+        sizes=sizes,
+        plugin=rec.id,
+        text=spec.title,
+        needs=_needs(host, rec, spec.when),
+        when=tuple(spec.when),
     )
 
 

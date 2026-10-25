@@ -551,7 +551,7 @@ def _visual_commands(vis: list[Any]) -> tuple[Command, ...]:
                 v.icon,
                 (),
                 v.aliases,
-                needs=(_visual_ok(v.id),),
+                needs=(_visual_ok(v.id), *v.needs),
                 status=_visual_pick(v.id),
                 typed_only=True,
                 action=ViewAction(settings={"visual": v.id}),
