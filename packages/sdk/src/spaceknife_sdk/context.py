@@ -8,9 +8,11 @@ permissions before asking (the host checks again).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import fnmatch
 import hashlib
+import io
 import os
 import threading
 import time
@@ -23,7 +25,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from pydantic import BaseModel
 
-from spaceknife_protocol.plugins import NodeRef, Permission
+from spaceknife_protocol.plugins import NodeRef, Permission, PluginTaskInfo
 from spaceknife_protocol.text import LANG, Text, fmt_ago, fmt_count, fmt_date, fmt_size, localize
 
 from ._audit import trusted
@@ -69,6 +71,11 @@ class RuntimeState:
     states: dict[str, dict[str, Any]] = field(default_factory=dict)
     state_models: dict[str, type[BaseModel]] = field(default_factory=dict)
     event_names: dict[type, str] = field(default_factory=dict)
+    # worker threads (the manifest's limits.threads), the spares for cancelled calls, and how long
+    # every thread may be held by cancelled calls before the host restarts the process
+    threads: int = 2
+    spare_threads: int = 8
+    stuck_after: float = 30.0
 
 
 @dataclass(slots=True)
@@ -264,14 +271,136 @@ _BASES: dict[tuple[str, ...], tuple[str, ...]] = {}
 HASH_THREADS = 4
 # flags of files whose contents are not here: reading them makes the cloud client fetch them
 NOT_LOCAL = Flag.CLOUD | Flag.OFFLINE
+# reads go in bursts, each with the host's permit for that disk (its disk-load limit, which scans
+# share): a burst is at most this many bytes or this long
+IO_BURST_BYTES = 4 << 20
+IO_BURST_S = 0.05
+IO_FREE_S = 1.0  # the host said "no limit here": ask again after this long
+PROGRESS_EVERY_S = 0.2
+Progress = Callable[[int, int], None]  # (bytes read, bytes in all)
+
+
+class _Lease:
+    """One reader's reads on one disk, in bursts paced by the host's I/O governor."""
+
+    __slots__ = ("_ctx", "base", "free_until", "permit", "since", "used")
+
+    def __init__(self, ctx: Context, base: str) -> None:
+        self._ctx = ctx
+        self.base = base
+        self.permit = 0
+        self.since = 0.0
+        self.used = 0
+        self.free_until = 0.0
+
+    def need(self, n: int) -> None:
+        """Before reading ``n`` bytes: within the current burst, or wait for the next permit."""
+        now = time.monotonic()
+        if now < self.free_until or (
+            self.permit and self.used < IO_BURST_BYTES and now - self.since < IO_BURST_S
+        ):
+            self.used += n
+            return
+        release = [self.permit] if self.permit else []
+        self.permit = 0
+        while True:  # each request waits at most ~2 s: cancelling the call is noticed meanwhile
+            self._ctx.check()
+            value, _ = self._ctx._link.request("host.io", {"base": self.base, "release": release})
+            release = []
+            got = int((value or {}).get("permit") or 0)
+            if got or not (value or {}).get("wait"):
+                break
+        self.since = time.monotonic()
+        self.used = n
+        if got:
+            self.permit = got
+        else:  # no limit on this disk (nothing measures it, or its scan is paused)
+            self.free_until = self.since + IO_FREE_S
+
+    def close(self) -> None:
+        if self.permit:
+            with contextlib.suppress(Exception):
+                self._ctx._link.notify("io_release", {"permits": [self.permit]})
+            self.permit = 0
+
+
+class _PacedFile(io.RawIOBase):
+    """A file read through ``ctx.files``: every read waits for the disk's permit."""
+
+    def __init__(self, raw: io.FileIO, lease: _Lease, owned: bool = True) -> None:
+        super().__init__()
+        self._raw = raw
+        self._lease = lease
+        self._owned = owned  # the lease ends with the file (else a reader of many files keeps it)
+
+    @property
+    def name(self) -> Any:
+        return self._raw.name
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return self._raw.seekable()
+
+    def seek(self, pos: int, whence: int = 0) -> int:
+        return self._raw.seek(pos, whence)
+
+    def tell(self) -> int:
+        return self._raw.tell()
+
+    def fileno(self) -> int:
+        return self._raw.fileno()
+
+    def readinto(self, b: Any) -> int | None:
+        self._lease.need(len(b))
+        return self._raw.readinto(b)
+
+    def close(self) -> None:
+        if not self.closed:
+            try:
+                if self._owned:
+                    self._lease.close()
+                self._raw.close()
+            finally:
+                super().close()
+
+
+class _Meter:
+    """Progress of reading: calls ``fn(done, total)`` at most every 0.2 s, and at the end."""
+
+    def __init__(self, fn: Progress | None, total: int) -> None:
+        self.fn = fn
+        self.total = max(0, total)
+        self.done = 0
+        self._at = 0.0
+        self._lock = threading.Lock()
+
+    def add(self, n: int) -> None:
+        if self.fn is None:
+            return
+        with self._lock:
+            self.done += n
+            now = time.monotonic()
+            if now - self._at < PROGRESS_EVERY_S:
+                return
+            self._at = now
+            done = self.done
+        self.fn(done, max(done, self.total))
+
+    def end(self) -> None:
+        if self.fn is not None:
+            self.fn(self.done, max(self.done, self.total))
 
 
 class Files:
     """``ctx.files``: read files inside the scanned folders. Needs ``files.read``.
 
-    Skip nodes flagged ``Flag.CLOUD`` or ``Flag.OFFLINE`` (placeholders: reading one downloads it)
-    and folders; :meth:`hash_many` does. ``FileNotAllowed`` (a ``PermissionError``): outside what
-    the plugin may read; another ``PermissionError``: the system refused (the user may not either).
+    Reads go through the host's disk-load limit (the level the user chose, shared with scans of the
+    same disk; while one runs, plugins read one burst at a time). Skip nodes flagged ``Flag.CLOUD`` or
+    ``Flag.OFFLINE`` (placeholders: reading one downloads it) and folders; :meth:`hash_many` does.
+    ``FileNotAllowed`` (a ``PermissionError``): outside what the plugin may read; another
+    ``PermissionError``: the system refused (the user may not either).
     """
 
     def __init__(self, ctx: Context) -> None:
@@ -297,30 +426,54 @@ class Files:
             _BASES[key] = hit
         return hit
 
-    def open_path(self, path: str | os.PathLike[str]) -> str:
-        """Check that ``path`` lies inside an open scan, a scan source's URI the user chose, or the
-        plugin's own folders; returns it resolved (``FileNotAllowed`` when it does not)."""
+    def _resolve(self, path: str | os.PathLike[str]) -> tuple[str, str]:
+        """(the resolved path, the allowed folder it lies in); ``FileNotAllowed`` outside them."""
         require(self._ctx._state, "files.read")
         real = os.path.realpath(os.fspath(path))
         low = os.path.normcase(real)
         for base in self._bases():
             if low == base or low.startswith(base + os.sep):
-                trusted.path = real  # the sandbox's own check of this open need not resolve it again
-                return real
+                return real, base
         raise FileNotAllowed(f"{path}: not inside a scanned folder")
 
+    def open_path(self, path: str | os.PathLike[str]) -> str:
+        """Check that ``path`` lies inside an open scan, a scan source's URI the user chose, or the
+        plugin's own folders; returns it resolved (``FileNotAllowed`` when it does not). What reads
+        a path itself (``zipfile.ZipFile(path)``, ``ctx.exec``) is not paced by the disk-load limit:
+        hand such libraries ``ctx.files.open(n)`` (a file object) where they take one."""
+        real, _base = self._resolve(path)
+        trusted.path = real  # the sandbox's own check of this open need not resolve it again
+        return real
+
+    def _open(self, real: str, base: str, lease: _Lease | None = None) -> IO[bytes]:
+        """A resolved path (``_resolve``) for paced reading; with ``lease``, on that reader's permits."""
+        trusted.path = real
+        raw = open(real, "rb", buffering=0)  # noqa: SIM115 — closed with the paced file
+        if lease is None or lease.base != base:
+            paced = _PacedFile(raw, _Lease(self._ctx, base), owned=True)
+        else:
+            paced = _PacedFile(raw, lease, owned=False)
+        return io.BufferedReader(paced, buffer_size=1 << 20)
+
     def open(self, item: NodeLike) -> IO[bytes]:
-        return open(self.open_path(self._path(item)), "rb")
+        """The file for reading (binary, seekable): its reads keep to the disk-load limit."""
+        return self._open(*self._resolve(self._path(item)))
 
     def read(self, item: NodeLike, limit: int = 1 << 20) -> bytes:
         with self.open(item) as fh:
             return fh.read(limit)
 
-    def hash(self, item: NodeLike, algorithm: str = "sha256", *, limit: int | None = None) -> str:
-        """Hex digest of the file (or of its first ``limit`` bytes); checks for cancellation."""
+    def _digest(
+        self,
+        where: tuple[str, str],
+        algorithm: str,
+        limit: int | None,
+        meter: _Meter | None,
+        lease: _Lease | None,
+    ) -> str:
         h = hashlib.new(algorithm)
         left = limit
-        with self.open(item) as fh:
+        with self._open(*where, lease) as fh:
             while True:
                 self._ctx.check()
                 size = 1 << 20 if left is None else min(1 << 20, left)
@@ -330,9 +483,44 @@ class Files:
                 if not chunk:
                     break
                 h.update(chunk)
+                if meter is not None:
+                    meter.add(len(chunk))
                 if left is not None:
                     left -= len(chunk)
         return h.hexdigest()
+
+    def _meter(self, progress: bool | Progress | None, total: int) -> _Meter | None:
+        if not progress:
+            return None
+        if callable(progress):
+            return _Meter(progress, total)
+        ctx = self._ctx
+        text = Text(zh="正在读取文件内容", en="Reading file contents")
+        return _Meter(lambda done, all_: ctx.progress(done, all_, text), total)
+
+    def hash(
+        self,
+        item: NodeLike,
+        algorithm: str = "sha256",
+        *,
+        limit: int | None = None,
+        progress: bool | Progress | None = None,
+    ) -> str:
+        """Hex digest of the file (or of its first ``limit`` bytes); checks for cancellation every
+        MiB. ``progress=True`` reports ``ctx.progress`` (bytes read of the file's size), or give a
+        function ``(done, total)`` (bytes), called at most every 0.2 s and at the end."""
+        where = self._resolve(self._path(item))
+        meter = None
+        if progress:
+            try:
+                size = os.path.getsize(where[0])
+            except OSError:
+                size = 0
+            meter = self._meter(progress, size if limit is None else min(size, limit))
+        out = self._digest(where, algorithm, limit, meter, None)
+        if meter is not None:
+            meter.end()
+        return out
 
     def hash_many(
         self,
@@ -341,11 +529,13 @@ class Files:
         *,
         limit: int | None = None,
         threads: int | None = None,
+        progress: bool | Progress | None = None,
     ) -> list[str | None]:
         """Hex digests of many files (of their first ``limit`` bytes), in order: a few readers at
-        once (``threads``, default :data:`HASH_THREADS`), so the disk stays busy. ``None`` for an
-        item that is a folder, a cloud or offline placeholder (not read: that would download it),
-        gone, or unreadable. Checks for cancellation between files."""
+        once (``threads``, default :data:`HASH_THREADS`), so the disk stays busy within its load
+        limit. ``None`` for an item that is a folder, a cloud or offline placeholder (not read: that
+        would download it), gone, or unreadable. Checks for cancellation every MiB; ``progress`` as
+        in :meth:`hash`, over the bytes of all the files."""
         from concurrent.futures import ThreadPoolExecutor
 
         require(self._ctx._state, "files.read")
@@ -353,34 +543,65 @@ class Files:
         tree = self._ctx.tree
         ids = [int(i) for i in todo if isinstance(i, int | np.integer)]
         skip: set[int] = set()
+        sizes: Any = None
         if ids:
             kinds = tree.col("kind")
             flags = tree.col("flags")
             skip = {i for i in ids if int(kinds[i]) != Kind.FILE or int(flags[i]) & int(NOT_LOCAL)}
+            if progress:
+                sizes = tree.col("size")
         paths: list[str | None] = []
+        total = 0
         for i in todo:
             if (isinstance(i, int | np.integer) and int(i) in skip) or (
                 isinstance(i, Node) and (not i.is_file or i.flags & int(NOT_LOCAL))
             ):
                 paths.append(None)
-            else:
-                paths.append(self._path(i))
+                continue
+            paths.append(self._path(i))
+            if progress:
+                if isinstance(i, int | np.integer) and sizes is not None:
+                    size = int(sizes[int(i)])
+                elif isinstance(i, Node):
+                    size = int(i.size)
+                else:
+                    try:
+                        size = os.path.getsize(paths[-1] or "")
+                    except OSError:
+                        size = 0
+                total += size if limit is None else min(size, limit)
+        meter = self._meter(progress, total)
+        leases: list[_Lease] = []
+        local = threading.local()  # each reader keeps its permit across small files of one disk
 
         def one(path: str | None) -> str | None:
             if path is None or self._ctx.cancelled:
                 return None
+            lease: _Lease | None = getattr(local, "lease", None)
             try:
-                return self.hash(path, algorithm, limit=limit)
+                where = self._resolve(path)
+                if lease is None or lease.base != where[1]:
+                    if lease is not None:
+                        lease.close()
+                    lease = local.lease = _Lease(self._ctx, where[1])
+                    leases.append(lease)
+                return self._digest(where, algorithm, limit, meter, lease)
             except (OSError, ValueError):
                 return None
 
         n = max(1, min(threads or HASH_THREADS, 16))
-        if n == 1 or len(paths) < 4:
-            out = [one(p) for p in paths]
-        else:
-            base = contextvars.copy_context()  # the call's (language, cancellation): one copy a task
-            with ThreadPoolExecutor(n, thread_name_prefix="sk-hash") as pool:
-                out = list(pool.map(lambda p: base.copy().run(one, p), paths))
+        try:
+            if n == 1 or len(paths) < 4:
+                out = [one(p) for p in paths]
+            else:
+                base = contextvars.copy_context()  # the call's (language, cancellation): one copy a task
+                with ThreadPoolExecutor(n, thread_name_prefix="sk-hash") as pool:
+                    out = list(pool.map(lambda p: base.copy().run(one, p), paths))
+        finally:
+            for lease in leases:
+                lease.close()
+        if meter is not None:
+            meter.end()
         self._ctx.check()
         return out
 
@@ -472,6 +693,52 @@ class Snapshots:
         return TreeView(self._ctx._link, value)
 
 
+class TaskInfo(PluginTaskInfo):
+    """A background task as the host keeps track of it (``ctx.tasks``, ``MockHost.task``)."""
+
+
+class Tasks:
+    """``ctx.tasks``: the plugin's background tasks (``@plugin.background``), run by the host."""
+
+    def __init__(self, ctx: Context) -> None:
+        self._ctx = ctx
+
+    def start(
+        self,
+        name: str,
+        params: BaseModel | Mapping[str, Any] | None = None,
+        *,
+        key: str = "",
+        replace: bool = False,
+    ) -> TaskInfo:
+        """Start the task ``name`` with ``params`` (its second argument). One runs per name and
+        ``key`` (a scan id, a folder …): starting it again returns the running one, or with
+        ``replace`` cancels it and starts anew. Returns at once; the task runs on its own, its
+        ``ctx.tree`` the scan of this call (else the scan in front)."""
+        body = params.model_dump(mode="json") if isinstance(params, BaseModel) else dict(params or {})
+        value, _ = self._ctx._link.request(
+            "host.task_start",
+            {
+                "name": name,
+                "key": str(key),
+                "params": body,
+                "replace": bool(replace),
+                "scan_id": self._ctx.call_info.scan_id,
+            },
+        )
+        return TaskInfo.model_validate(value)
+
+    def cancel(self, name: str, *, key: str | None = None) -> int:
+        """Cancel the task ``name`` (only the one of ``key`` when given); returns how many."""
+        value, _ = self._ctx._link.request("host.task_cancel", {"name": name, "key": key})
+        return int((value or {}).get("cancelled", 0))
+
+    def list(self) -> list[TaskInfo]:
+        """This plugin's tasks: the running ones and the last few that ended."""
+        value, _ = self._ctx._link.request("host.tasks", {})
+        return [TaskInfo.model_validate(d) for d in (value or {}).get("tasks", [])]
+
+
 class Log:
     def __init__(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -512,6 +779,7 @@ class Context:
         self._tree: TreeView | None = None
         self._node: Node | bool | None = False
         self._executor = executor
+        self._follow_lang = False  # a background task: the interface language may change meanwhile
         self._last_toast = 0.0
         self.settings = Settings(self)
         self.basket = Basket(self)
@@ -519,6 +787,7 @@ class Context:
         self.files = Files(self)
         self.net = Net(self)
         self.snapshots = Snapshots(self)
+        self.tasks = Tasks(self)
         self.log = Log(self)
 
     # ------------------------------------------------------------- who and where
@@ -616,15 +885,24 @@ class Context:
         )
 
     def progress(self, done: float, total: float, text: Text | str = "") -> None:
-        self._link.notify(
-            "progress",
-            {
-                "id": self.call_info.id,
-                "done": float(done),
-                "total": float(total),
-                "text": localize(text) or "",
-            },
-        )
+        """How far the call is (``total = 0``: it cannot say): a report's or a cleanup's progress
+        bar, a background task's line in the status bar."""
+        msg: dict[str, Any] = {
+            "id": self.call_info.id,
+            "done": float(done),
+            "total": float(total),
+            "text": (localize(text) or "")[:512],
+        }
+        if self._follow_lang and text and not isinstance(text, str):
+            both: dict[str, str] = {}
+            for lang in ("zh-CN", "en"):  # the host shows the one of the language at the time
+                token = LANG.set(lang)
+                try:
+                    both[lang] = (localize(text) or "")[:512]
+                finally:
+                    LANG.reset(token)
+            msg["texts"] = both
+        self._link.notify("progress", msg)
 
     def state[S: BaseModel](self, model: type[S]) -> StateHandle[S]:
         name = next((n for n, m in self._state.state_models.items() if m is model), None)
@@ -685,9 +963,13 @@ class Context:
 
     async def compute(self, fn: Callable[..., R], /, *args: Any) -> R:
         """Run CPU-heavy code on a worker thread; the plugin's event loop stays responsive."""
-        loop = asyncio.get_running_loop()
         cv = contextvars.copy_context()
-        return await loop.run_in_executor(self._executor, lambda: cv.run(fn, *args))
+        workers = self._executor
+        if hasattr(workers, "run"):  # the plugin's worker threads (a cancelled one finishes aside)
+            out: R = await workers.run(lambda: cv.run(fn, *args), f"compute {getattr(fn, '__name__', '')}")
+            return out
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(workers, lambda: cv.run(fn, *args))
 
     # ------------------------------------------------------------- cancellation
 
@@ -696,9 +978,22 @@ class Context:
         return self._cancel.is_set() or time.monotonic() > self.deadline
 
     def check(self) -> None:
-        """Raise :class:`Cancelled` when the call was cancelled or ran out of time."""
+        """Raise :class:`Cancelled` when the call was cancelled or ran out of time. In a background
+        task it also takes up a language switch (``ctx.lang`` and ``T(...)`` follow from here on)."""
+        if self._follow_lang and LANG.get() != self._state.lang:
+            LANG.set(self._state.lang)
         if self.cancelled:
             raise Cancelled()
 
 
-__all__ = ["CallInfo", "Context", "FileNotAllowed", "PluginSelf", "RuntimeState", "Settings", "StateHandle"]
+__all__ = [
+    "CallInfo",
+    "Context",
+    "FileNotAllowed",
+    "PluginSelf",
+    "RuntimeState",
+    "Settings",
+    "StateHandle",
+    "TaskInfo",
+    "Tasks",
+]

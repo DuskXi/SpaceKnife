@@ -266,3 +266,25 @@
 .export-check input, .export-option input { accent-color: var(--sk-color-accent-default); }
 .export-multi { display: flex; flex-direction: column; gap: 6px; }
 .export-multi .set-multi { justify-content: flex-start; max-width: none; }
+
+/* plugins' background tasks in the status bar: the entry, and its list opening upwards */
+.spinner.small { width: 10px; height: 10px; border-width: 1.5px; }
+.plugin-tasks-item { max-width: 280px; }
+.plugin-tasks-item > span:not(.spinner) { overflow: hidden; text-overflow: ellipsis; }
+.menu.plugin-tasks-menu { top: auto; bottom: calc(100% + 6px); right: 0; width: 320px; max-height: min(420px, calc(100vh - 120px)); overflow-y: auto; gap: 2px; white-space: normal; }
+.plugin-tasks-menu .menu-label { padding-left: 8px; }
+.plugin-task { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px 8px; border-radius: var(--sk-radius-sm); color: var(--sk-color-text-primary); }
+.plugin-task:hover { background: var(--sk-color-bg-hover); }
+.plugin-task.ended { opacity: 0.8; }
+.plugin-task-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plugin-task-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.plugin-task-cancel.icon-btn { flex: none; width: 20px; height: 20px; border-radius: var(--sk-radius-sm); }
+.plugin-task-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-task-bar { position: relative; display: block; height: 4px; border-radius: 2px; overflow: hidden; background: var(--sk-color-line-subtle); }
+.plugin-task-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--sk-color-accent-default); transition: width 0.25s ease-out; }
+.plugin-task-bar.indeterminate > span { position: absolute; width: 30%; animation: sk-task-slide 1.2s ease-in-out infinite; }
+@keyframes sk-task-slide { from { left: -30%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .plugin-task-bar.indeterminate > span { animation: none; left: 0; width: 100%; opacity: 0.5; }
+  .plugin-task-bar > span { transition: none; }
+}

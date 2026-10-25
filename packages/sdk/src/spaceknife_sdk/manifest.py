@@ -550,6 +550,19 @@ class AnnotatorSpec(Spec):
 class HookSpec(Spec):
     name: LocalName
     event: Literal["start", "stop", "scan_done", "scan_closed", "settings", "lang"]
+    timeout: float = Field(default=30.0, gt=0, le=600, description="Seconds it may run (longer work: a task)")
+
+
+class BackgroundSpec(Spec):
+    """A background task: long work the host tracks (progress, cancelling, a restart after a crash)."""
+
+    name: LocalName
+    title: TextLike
+    start: Literal["manual", "startup"] = Field(
+        default="manual", description="startup: the host starts it whenever the plugin's process starts"
+    )
+    restart: bool = Field(default=False, description="Started again when the plugin's process crashed")
+    timeout: float | None = Field(default=None, gt=0, le=86400, description="Seconds; none: no limit")
 
 
 class IconSpec(Spec):
@@ -609,6 +622,7 @@ KINDS: dict[str, tuple[type[Spec], str | None]] = {
     "watcher": (WatcherSpec, None),
     "change_annotator": (AnnotatorSpec, None),
     "hook": (HookSpec, None),
+    "background": (BackgroundSpec, None),
     "icon": (IconSpec, "icons"),
 }
 # kinds whose contributions run plugin code (a code entry is needed)
@@ -623,6 +637,7 @@ CODE_KINDS = frozenset(
         "watcher",
         "change_annotator",
         "hook",
+        "background",
     }
 )
 TABLES = {table: kind for kind, (_, table) in KINDS.items() if table is not None}
@@ -642,9 +657,15 @@ def spec_key(kind: str, spec: Spec) -> str:
 # --------------------------------------------------------------------------- the manifest
 
 
+MAX_THREADS = 8  # worker threads a plugin may ask for (limits.threads)
+
+
 class Limits(Spec):
     memory_mb: int = Field(default=1024, ge=64, le=4096)
     timeout_s: int = Field(default=60, ge=1, le=600)
+    threads: int = Field(
+        default=2, ge=1, le=MAX_THREADS, description="Worker threads running plain def calls at once"
+    )
 
 
 class Requires(Spec):
@@ -872,12 +893,14 @@ __all__ = [
     "HOOKS",
     "KINDS",
     "MANIFEST",
+    "MAX_THREADS",
     "MENUS",
     "PLUGIN_API",
     "SIZE_METRICS",
     "TABLES",
     "WHEN_WORDS",
     "AnnotatorSpec",
+    "BackgroundSpec",
     "CleanupSpec",
     "ColorModeSpec",
     "ColorRule",

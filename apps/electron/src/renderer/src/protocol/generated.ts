@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "f384e950e10b4f6c";
+export const SCHEMA_HASH = "bbb6d45e00c7cce6";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -1698,6 +1698,44 @@ export interface PluginProgressEvent {
   total: number;
 }
 
+export interface PluginTaskCancelParams {
+  id: string;
+}
+
+/**
+ * A plugin's background task (``@plugin.background``) as the host keeps track of it: running
+ * ones, and the last few that ended (how they ended). The ``plugin.task`` event sends one whenever
+ * it changes (progress at most a few times a second).
+ */
+export interface PluginTaskInfo {
+  /** 2 and up: started again after the plugin crashed */
+  attempt: number;
+  done: number;
+  ended: number | null;
+  /** Why it failed */
+  error: string;
+  /** Unique while the backend runs */
+  id: string;
+  /** Which one of that name (a scan, a folder …), set by the plugin */
+  key: string;
+  /** The task's local name */
+  name: string;
+  plugin: string;
+  /** Unix seconds */
+  started: number;
+  state: "running" | "restarting" | "done" | "failed" | "cancelled";
+  /** What it is doing (ctx.progress), in the interface language */
+  text: string;
+  /** In the interface language */
+  title: string;
+  /** 0: no measure of how far it is */
+  total: number;
+}
+
+export interface PluginTaskListResult {
+  tasks: PluginTaskInfo[];
+}
+
 export interface PluginToastEvent {
   plugin: string;
   text: string;
@@ -2838,6 +2876,10 @@ export interface Methods {
   "plugin.list": { params: Empty; result: PluginListResult };
   /** Restart a plugin's process (also after it crashed). */
   "plugin.restart": { params: PluginIdParams; result: PluginInfo };
+  /** Cancel a plugin's background task (it ends as cancelled at its next ctx.check()). */
+  "plugin.task_cancel": { params: PluginTaskCancelParams; result: PluginTaskInfo };
+  /** Plugins' background tasks: the running ones and the last few that ended (plugins.v1). */
+  "plugin.tasks": { params: Empty; result: PluginTaskListResult };
   /** Turn a plugin off and move its folder (and with remove_data its data) to the recycle bin. */
   "plugin.uninstall": { params: PluginUninstallParams; result: EmptyResult };
   /** Stop a running scan (partial tree stays). */
@@ -2977,6 +3019,8 @@ export interface Events {
   "plugin.clipboard": PluginClipboardEvent;
   /** Progress of a plugin call (reports, cleanups). */
   "plugin.progress": PluginProgressEvent;
+  /** A plugin's background task started, moved on or ended. */
+  "plugin.task": PluginTaskInfo;
   /** A plugin shows a short message. */
   "plugin.toast": PluginToastEvent;
   /** Status of a scan for a 'scan' subscription. */

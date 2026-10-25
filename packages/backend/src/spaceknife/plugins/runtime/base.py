@@ -58,6 +58,9 @@ class StartInfo:
     dev: bool = False
     memory_mb: int = 1024
     states: dict[str, dict[str, Any]] = field(default_factory=dict)
+    threads: int = 2  # the manifest's limits.threads
+    spare_threads: int = 8  # for cancelled plain-def calls still running (the SDK's Workers)
+    stuck_after: float = 30.0  # s every thread is held by cancelled calls before "stuck"
 
     def message(self) -> dict[str, Any]:
         return {
@@ -76,6 +79,9 @@ class StartInfo:
             "dev": self.dev,
             "memory_mb": self.memory_mb,
             "states": self.states,
+            "threads": self.threads,
+            "spare_threads": self.spare_threads,
+            "stuck_after": self.stuck_after,
         }
 
 

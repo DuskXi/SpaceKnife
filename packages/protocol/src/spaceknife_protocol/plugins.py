@@ -882,6 +882,37 @@ class PluginProgressEvent(Payload):
     text: str = ""
 
 
+PluginTaskState = Literal["running", "restarting", "done", "failed", "cancelled"]
+
+
+class PluginTaskInfo(Payload):
+    """A plugin's background task (``@plugin.background``) as the host keeps track of it: running
+    ones, and the last few that ended (how they ended). The ``plugin.task`` event sends one whenever
+    it changes (progress at most a few times a second)."""
+
+    id: str = Field(description="Unique while the backend runs")
+    plugin: str
+    name: str = Field(description="The task's local name")
+    key: str = Field(default="", description="Which one of that name (a scan, a folder …), set by the plugin")
+    title: str = Field(description="In the interface language")
+    state: PluginTaskState
+    done: float = 0.0
+    total: float = Field(default=0.0, description="0: no measure of how far it is")
+    text: str = Field(default="", description="What it is doing (ctx.progress), in the interface language")
+    started: float = Field(description="Unix seconds")
+    ended: float | None = None
+    attempt: int = Field(default=1, description="2 and up: started again after the plugin crashed")
+    error: str = Field(default="", description="Why it failed")
+
+
+class PluginTaskListResult(Payload):
+    tasks: list[PluginTaskInfo]
+
+
+class PluginTaskCancelParams(Params):
+    id: str = Field(min_length=1, max_length=160)
+
+
 # --------------------------------------------------------------------------- documents
 
 # What the frontends read from, or send to, a plugin's own methods (``plugin.<id>.<name>``): no core

@@ -57,9 +57,21 @@ async def test_field_and_node_set(host: MockHost) -> None:
     assert await host.filter(":set:dupes") == ["a.bin", "b.bin", "sub/d.bin"]
 
 
+async def test_the_background_search(host: MockHost) -> None:
+    # the command starts the task and says so; the task's progress and end are the host's to show
+    toast = await host.command("search")
+    assert "后台" in toast["text"]
+    task = await host.task("search", key=host.scan_id or "")  # the command's (one per scan): until done
+    assert task.state == "done" and task.done == task.total == 4
+    assert host.state("status")["groups"] == 1
+    await host.settled()
+    assert await host.filter(":set:dupes") == ["a.bin", "b.bin", "sub/d.bin"]
+
+
 async def test_in_a_plugin_process() -> None:
     async with MockHost.load(__file__, process=True) as h:  # as the app runs it
         h.scan(TREE)
         await h.set_setting("min_size", 1000)
         assert len((await h.call("find"))["groups"]) == 1
+        assert (await h.task("search")).state == "done"
         await h.check(strict=True)

@@ -44,7 +44,7 @@ from spaceknife_protocol.text import T, Text
 
 from . import layout, shapes
 from . import report as r
-from .context import Context, FileNotAllowed
+from .context import Context, FileNotAllowed, TaskInfo
 from .errors import Cancelled, PluginError
 from .models import (
     Change,
@@ -117,6 +117,7 @@ __all__ = [
     "TableBlock",
     "TableColumn",
     "TableMore",
+    "TaskInfo",
     "Text",
     "ThemedColor",
     "Toast",

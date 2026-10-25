@@ -73,6 +73,8 @@ class Progress(Msg):
     done: float
     total: float
     text: str = Field(default="", max_length=512)
+    # the text in both languages (a T(...)): a background task's stays right after a language switch
+    texts: dict[Literal["zh-CN", "en"], Annotated[str, Field(max_length=512)]] | None = None
 
 
 class Chunk(Msg):
@@ -134,6 +136,13 @@ class ImageDrop(Msg):
     key: str = Field(max_length=128)
 
 
+class IoRelease(Msg):
+    """``ctx.files`` is done with these disk-read permits (``host.io``)."""
+
+    type: Literal["io_release"] = "io_release"
+    permits: list[Annotated[int, Field(ge=1, le=MAX_ID)]] = Field(default_factory=list, max_length=64)
+
+
 class Stuck(Msg):
     """Every worker thread is busy with a cancelled call that does not return: restart me."""
 
@@ -162,7 +171,8 @@ FromPlugin = Annotated[
     | Log
     | Heartbeat
     | Stuck
-    | ImageDrop,
+    | ImageDrop
+    | IoRelease,
     Field(discriminator="type"),
 ]
 FROM_PLUGIN: TypeAdapter[Any] = TypeAdapter(FromPlugin)
@@ -244,6 +254,7 @@ __all__ = [
     "Event",
     "Heartbeat",
     "Hello",
+    "IoRelease",
     "Log",
     "Progress",
     "Ready",

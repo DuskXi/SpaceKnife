@@ -1,0 +1,10 @@
+# Test plugin: background tasks, cancelled plain-def calls, paced file reads.
+id = "t.tasks"
+version = "0.1.0"
+name = { zh = "后台任务测试", en = "Task test" }
+entry = "plugin.py"
+permissions = ["tree.read", "files.read"]
+
+[limits]
+threads = 1
+timeout_s = 30

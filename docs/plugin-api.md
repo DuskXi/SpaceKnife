@@ -96,7 +96,7 @@
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
 | `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
 
-钩子在后台跑，宿主不等结果，出错只记日志；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。测试里 `await host.hook(event, …)` 会检查事件名和参数，钩子抛的异常原样抛出。
+钩子在后台跑，宿主不等结果，出错只记日志；每个钩子 30 秒（`@plugin.on(event, timeout=…)`，≤ 600），更久的事 `ctx.tasks.start` 一个[后台任务](#api-limits)；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。测试里 `await host.hook(event, …)` 会检查事件名和参数，钩子抛的异常原样抛出。
 
 <a id="api-errors"></a>
 ## 5. 异常
@@ -145,11 +145,15 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 `r.more(cursor)` 填好要再调的报告（线上名 `plugin.<id>.<报告名>`，就是当前这个）；界面点「更多」时带着 `c.cursor = cursor` 再调一次，把返回的第一张表的行接在后面。`r.more(cursor, report="other")` 让另一个报告给下一页。`MockHost` 里：`await host.report("all_files", cursor="500")`。
 
 <a id="api-limits"></a>
-## 8. 时限与长度
+## 8. 时限、线程、后台任务与读盘
 
-[plugin-dev.md 7.2 节](plugin-dev.md#permissions)是总表。能改的：`@plugin.method(timeout=…)`、`@plugin.report(…, timeout=…)`（默认 30 秒）、`@plugin.cleanup(…, timeout=…)`（默认 120 秒），都 ≤ 600 秒；清单的 `limits.timeout_s` 是没写时的默认。等宿主的调用槽（每个插件同时 4 个）的时间也算在时限里；监控器和流不占调用槽。
+[plugin-dev.md 7.2 节](plugin-dev.md#permissions)是总表。能改的：`@plugin.method(timeout=…)`、`@plugin.command(…, timeout=…)`、`@plugin.report(…, timeout=…)`（默认 30 秒）、`@plugin.cleanup(…, timeout=…)`（默认 120 秒）、`@plugin.on(…, timeout=…)`（钩子，默认 30 秒），都 ≤ 600 秒；方法、命令和报告另外不超过清单的 `limits.timeout_s`（默认 60：写了 `timeout=300` 也只有 60 秒，要更久就把它也调高）。等宿主的调用槽（每个插件同时 4 个，`limits.threads` 更多时随它）的时间也算在时限里；监控器、流和后台任务不占调用槽。
 
-被取消的调用（时限到了、用户走开了）：普通 `def` 的函数在工作线程里，宿主立即答「取消」并丢掉它后来的结果；`async def` 的函数要在 `await` 处才停得下来——一直不 `await` 的长循环会卡住整个插件进程，5 秒后日志写出是哪个调用，30 秒后宿主结束进程。所有工作线程都卡在被取消的调用里时，插件进程也会重启。
+**线程**：`async def` 的函数在插件进程的事件循环上跑；普通 `def` 的在工作线程上跑，同时 `limits.threads` 个（默认 2，1–8）。线程停不下来：被取消的调用（时限到了、用户走开了、悬停字段的 30 ms、配色的 20 ms 没赶上）宿主立即答「取消」、丢掉它后来的结果，**它的位置马上让给下一个调用**，函数在备用线程上跑完（最多 8 个备用线程；5 秒后还在跑时插件日志写出是哪个调用）。只有备用线程也用完、每个工作线程都被被取消的调用占了 30 秒，宿主才重启插件进程。所以长循环里调 `ctx.check()`（被取消后它抛 `Cancelled`）。`async def` 要在 `await` 处才停得下来：一直不 `await` 的长循环卡住整个事件循环，5 秒后日志写出是哪个调用，30 秒后宿主结束进程——把它写成普通 `def`，或放进 `await ctx.compute(...)`。
+
+**后台任务**（`@plugin.background`）：没有时限（可以给 `timeout=`，≤ 1 天），不占调用槽和工作线程（普通 `def` 每个任务一条自己的线程，`async def` 在事件循环上）。宿主给每个任务一份记录（[`TaskInfo`](#api-models)），所有窗口都看得到（状态栏的任务列表，协议的 `plugin.tasks` 和 `plugin.task` 事件），用户可以取消：普通 `def` 在下一个 `ctx.check()` 停下，`async def` 在下一个 `await`。`ctx.progress(done, total, text)` 写进它的记录（每秒最多推 4 次；`total = 0` 表示说不出进度）。界面语言变了，任务在下一个 `ctx.check()` 换成新的（`ctx.lang`、`T(...)`）。`restart=True`：插件进程崩溃时宿主用同样的参数重新开始（`attempt` 加一，最多 3 次，进程的崩溃上限照样算）；用户停用、重启插件，或 `plugin dev` 重新加载时任务算取消，`start="startup"` 的随新进程再启动。有后台任务在跑时插件进程不算空闲。参数 ≤ 64 KiB 的 JSON；每个插件同时 8 个，结束的留最近 8 个。钩子里只做一会儿就完的事，长的交给 `ctx.tasks.start`（钩子返回后任务照样跑）。
+
+**读盘**：`ctx.files` 的读（`open` 得到的文件、`read`、`hash`、`hash_many`）一段段向宿主要这块盘的许可，和扫描共用同一个磁盘负载上限（用户选的档位：这块盘正在扫描时是那次扫描的，否则是设置里的「磁盘负载」），算在 SpaceKnife 自己的负载里：一段最多 4 MiB 或 50 ms；扫描正在读这块盘时，所有插件一次只读一段，扫描先走；扫描暂停时插件不等它。等许可时也会发现调用被取消。`open_path` 只给出路径：拿路径自己读盘的库（`zipfile.ZipFile(path)`、`ctx.exec` 的程序）不受这个限制，能传文件对象的就传 `ctx.files.open(n)`（可以 `seek`）。
 
 单位的值：`size` 字节；`count` 个数；`pct` 0–1 的小数（0.25 显示成 25%）；`date` `ago` unix 秒；`duration` 秒；`bytes_per_s` 字节每秒。
 
@@ -224,6 +228,7 @@ def icicle(v: LayoutInput) -> Shapes:
 | `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文 |
 | `await host.source(name, uri)`、`host.status(scan_id)` | 用扫描来源扫描（失败抛 `RuntimeError`）；扫描的状态 |
 | `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常）、对比原因 |
+| `await host.task(name, params, key=, wait=True)`、`host.tasks()`、`await host.cancel_task(name, key=)` | 后台任务：启动并等它结束，返回 `TaskInfo`（`state` 是 `done` `failed` `cancelled`，`error` 是失败的原因）；`wait=False` 马上返回；本插件的任务（跑着的和最近结束的）；像取消按钮那样取消并等它停下 |
 | `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样运行命令：调用它的方法并返回结果（不是 `call` 动作的命令返回动作本身） |
 | `await host.command_available(name, node=)` | 选中 `node` 时这个命令能不能跑：它的 `when` 和 `check` 给的原因，能跑时 None |
 | `await host.visual_available(name)` | 本插件的可视化在当前扫描的视图里能不能选：它的 `when` 给的原因，能选时 None |
@@ -463,6 +468,26 @@ def icicle(v: LayoutInput) -> Shapes:
 | `args` | dict[str, Any] | `{}` | 动作里写的 `args` |
 | `zoom_node` | int \| None | `None` | The view's zoom root (where the user is) |
 | `filter` | str | `""` | The view's filter expression ('' = not filtered) |
+
+#### `TaskInfo`
+
+后台任务：`ctx.tasks.start()` 的结果、`ctx.tasks.list()` 的一项、测试里 `host.task()` 的结果。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `id` | str | 必需 | 这次后端运行里唯一的 id |
+| `plugin` | str | 必需 | 插件 id |
+| `name` | str | 必需 | 任务的名字（`@plugin.background` 的第一个参数） |
+| `key` | str | `""` | 同名任务里的哪一个（`ctx.tasks.start(…, key=)`：一个扫描、一个文件夹……） |
+| `title` | str | 必需 | 任务的标题，界面语言 |
+| `state` | (`running` `restarting` `done` `failed` `cancelled`) | 必需 | `running` `restarting`（插件崩溃后重新开始）`done` `failed` `cancelled` |
+| `done` | float | `0.0` | 最近一次 `ctx.progress` 的 `done` |
+| `total` | float | `0.0` | 最近一次 `ctx.progress` 的 `total`；0：说不出进度 |
+| `text` | str | `""` | 最近一次 `ctx.progress` 的文字 |
+| `started` | float | 必需 | 开始时间，unix 秒 |
+| `ended` | float \| None | `None` | 结束时间，unix 秒；还在跑时 None |
+| `attempt` | int | `1` | 第几次跑（崩溃后重新开始时加一） |
+| `error` | str | `""` | 失败的原因（超时、插件的 `PluginError` 文字……） |
 
 ### 输入
 

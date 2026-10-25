@@ -118,6 +118,9 @@ async def test_a_stuck_call_is_given_up(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(process_mod, "CANCEL_GRACE", 1.0)
     monkeypatch.setattr(process_mod, "WATCH_EVERY", 0.2)
     monkeypatch.setattr(host_mod, "BACKOFF_S", (0.05, 0.05, 0.05))
+    # no spare threads (with them it just goes on: test_plugin_round4_runtime); held 1 s = stuck
+    monkeypatch.setattr(host_mod, "SPARE_THREADS", 0)
+    monkeypatch.setattr(host_mod, "STUCK_AFTER_S", 1.0)
     async with mock("t.slow", process=True) as host:
         t0 = time.monotonic()
         with pytest.raises(RpcError) as err:

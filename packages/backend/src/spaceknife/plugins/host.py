@@ -50,6 +50,7 @@ from .hostapi import HostApi
 from .image import Images
 from .runtime.base import Callbacks, PluginRuntime, RuntimeCallError, StartInfo
 from .store import PluginRecord, TrustStore, discover, read_record
+from .tasks import Tasks
 
 if TYPE_CHECKING:
     from ..export import ExportFormat
@@ -57,8 +58,10 @@ if TYPE_CHECKING:
     from ..server.session import Session
     from ..server.topics import Subscription
 
-MAX_CONCURRENT = 4  # calls in flight per plugin (watchers and streams do not count)
+MAX_CONCURRENT = 4  # calls in flight per plugin (watchers and streams do not count); more with threads
 MAX_LONG = 64  # watchers and streams running per plugin (they wait for changes, not compute)
+SPARE_THREADS = 8  # threads a plugin's cancelled plain-def calls finish on (their places go on)
+STUCK_AFTER_S = 30.0  # every call thread held by cancelled calls this long: the process restarts
 MAX_QUEUED = 32  # calls waiting per plugin
 MAX_PROCESSES = 8  # plugin processes at once (the idlest goes first)
 IDLE_STOP_S = 600.0
@@ -82,7 +85,7 @@ HOOK_TIMEOUT = 30.0
 CHECK_TIMEOUT = 0.05
 ROUTED_KINDS = ("method", "report", "cleanup")
 CACHED_KINDS = frozenset({"node_field", "node_set", "visualization", "color_mode", "change_annotator"})
-LONG_KINDS = ("stream", "watch")  # no time limit unless the caller gives one
+LONG_KINDS = ("stream", "watch", "task")  # no time limit unless the caller gives one
 LONG_CALL_S = 10.0 * 365 * 86400  # what the plugin is told for those (its ctx.check() never trips)
 
 
@@ -116,6 +119,7 @@ class PluginHost:
         self.records: dict[str, PluginRecord] = {}
         self.images = Images()
         self.api = HostApi(self)
+        self.tasks = Tasks(self)
         self._ids = itertools.count(1)
         self._slots: dict[str, asyncio.Semaphore] = {}
         self._long_slots: dict[str, asyncio.Semaphore] = {}
@@ -180,9 +184,14 @@ class PluginHost:
             if rec.state == "enabled" and rec.manifest is not None and rec.manifest.activation == "startup":
                 self._spawn(self._ensure_started(rec))
 
+    @property
+    def closed(self) -> bool:
+        return self._closed
+
     async def close(self) -> None:
         self._closed = True
         EXTENSIONS.listeners.pop(f"host-{id(self)}", None)
+        self.tasks.close()
         for task in list(self._stream_tasks.values()) + list(self._background):
             task.cancel()
         for rec in list(self.records.values()):
@@ -241,10 +250,17 @@ class PluginHost:
             rec.issues = list(exc.issues)
             rec.state = "error"
             logger.warning("plugin {} cannot be enabled: {}", rec.id, exc)
+            return
         except RpcError as exc:
             rec.issues = [Issue("start", exc.message)]
             rec.state = "error"
             logger.warning("plugin {} cannot be enabled: {}", rec.id, exc.message)
+            return
+        if not rec.builtin and self.tasks.wants_process(rec) and not self._closed:
+            # a task that runs whenever the plugin does: its process starts now (not when first used)
+            rt = rec.runtime
+            if rt is None or rt.state != "running":
+                self._spawn(self._warm(rec))
 
     def _runtime_kind(self, rec: PluginRecord) -> pp.PluginRuntimeKind:
         if not rec.has_code:
@@ -311,6 +327,7 @@ class PluginHost:
     async def _deactivate(self, rec: PluginRecord) -> None:
         if rec.builtin:
             return
+        self.tasks.forget(rec.id)
         await self._stop_runtime(rec)
         EXTENSIONS.unregister_owner(rec.id)
         self.images.release_user(rec.id)
@@ -354,6 +371,9 @@ class PluginHost:
             dev=rec.dev,
             memory_mb=m.limits.memory_mb,
             states=dict(rec.states),
+            threads=m.limits.threads,
+            spare_threads=SPARE_THREADS,
+            stuck_after=STUCK_AFTER_S,
         )
 
     def _callbacks(self, rec: PluginRecord) -> Callbacks:
@@ -446,6 +466,7 @@ class PluginHost:
             rec.last_used = time.monotonic()
             self._broadcast_plugin(rec)
             self._spawn(self._hook(rec, "start"))
+            self.tasks.process_started(rec)
             return rt
 
     async def _make_room(self) -> None:
@@ -465,6 +486,7 @@ class PluginHost:
         if rt is None:
             return
         rec.runtime = None
+        self.tasks.stopping(rec.id)  # on purpose: its background tasks end as cancelled, none restarts
         try:
             await rt.stop()
         except Exception:
@@ -548,7 +570,9 @@ class PluginHost:
         limit: float | None = timeout
         long = kind in LONG_KINDS
         if long and timeout is None:
-            limit = None  # streams and watchers run until they are cancelled
+            limit = None  # streams, watchers and background tasks run until they are cancelled
+        elif kind == "task":
+            limit = float(timeout or 0) or None  # its declared limit (up to a day)
         else:
             if limit is None:
                 decl = next(
@@ -575,7 +599,8 @@ class PluginHost:
         if long:
             sem = self._long_slots.setdefault(plugin, asyncio.Semaphore(MAX_LONG))
         else:
-            sem = self._slots.setdefault(plugin, asyncio.Semaphore(MAX_CONCURRENT))
+            slots = max(MAX_CONCURRENT, rec.manifest.limits.threads)
+            sem = self._slots.setdefault(plugin, asyncio.Semaphore(slots))
             self._queued[plugin] += 1
         queued = not long
         try:
@@ -631,6 +656,8 @@ class PluginHost:
         }
         info.update(ctx or {})
         self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
+        if kind == "task":
+            self.tasks.call_started(call_id)
         try:
             async with asyncio.timeout_at(deadline):
                 value, out = await rt.call(call_id, kind, name, params, info, frames, on_chunk)
@@ -645,6 +672,7 @@ class PluginHost:
             raise RpcError(exc.code, exc.message, data) from None
         finally:
             self._sites.pop(call_id, None)
+            self.tasks.call_ended(call_id)
             self.api.call_ended(call_id)
         rec.last_used = time.monotonic()
         return value, out
@@ -734,6 +762,14 @@ class PluginHost:
             text = str(payload.get("text", ""))[: 1 << 20]
             target.emit(EVENT_PLUGIN_CLIPBOARD, pp.PluginClipboardEvent(plugin=rec.id, text=text))
         elif type == "progress":
+            if self.tasks.progress(
+                int(payload.get("id", 0)),
+                float(payload.get("done", 0)),
+                float(payload.get("total", 0)),
+                str(payload.get("text", "")),
+                payload.get("texts"),
+            ):
+                return  # a background task's: its record moves on (every window sees it)
             site = self._sites.get(int(payload.get("id", 0)))
             if site is None or site[1] is None:
                 return
@@ -749,11 +785,16 @@ class PluginHost:
             )
         elif type == "image_drop":
             self.images.drop(str(payload.get("key", "")), rec.id)
-        elif type == "stuck":  # every worker thread is in a cancelled call that does not return
+        elif type == "io_release":  # ctx.files is done with these disk-read permits
+            self.api.io_release(rec, payload.get("permits"))
+        elif type == "stuck":  # every call thread held by cancelled calls that do not return, for long
             rt = rec.runtime
             if rt is not None and rt.kind == "process":
                 logger.bind(source=f"plugin:{rec.id}").warning(
-                    "plugin {}: every worker thread is busy with a cancelled call; restarting it", rec.id
+                    "plugin {}: every worker thread has been busy with a cancelled call for {:.0f} s; "
+                    "restarting it",
+                    rec.id,
+                    STUCK_AFTER_S,
                 )
                 rt.give_up("every worker thread is busy with a cancelled call")
 
@@ -1229,8 +1270,9 @@ class PluginHost:
     async def _hook(self, rec: PluginRecord, event: str, **args: Any) -> None:
         for c in EXTENSIONS.owned(rec.id):
             if c.kind == "hook" and c.spec.event == event:
+                limit = float(getattr(c.spec, "timeout", HOOK_TIMEOUT))
                 try:
-                    await self.call(rec.id, "hook", c.local, {"event": event, **args}, timeout=HOOK_TIMEOUT)
+                    await self.call(rec.id, "hook", c.local, {"event": event, **args}, timeout=limit)
                 except (RpcError, asyncio.CancelledError) as exc:
                     logger.bind(source=f"plugin:{rec.id}").warning(
                         "hook {} of {} failed: {}", event, rec.id, getattr(exc, "message", exc)
@@ -1364,6 +1406,8 @@ class PluginHost:
         the processes of the plugins whose fields or insights the details panel asks right away,
         so the first question does not wait for a process to start (a cold start is not counted in
         a field's time anyway, but the user waits for it)."""
+        if event == "lang":
+            self.tasks.relocalize()  # titles and texts of the running background tasks
         owners = {c.owner for c in EXTENSIONS.of("hook") if c.spec.event == event and c.owner != BUILTIN}
         for pid in owners:
             rec = self.records.get(pid)

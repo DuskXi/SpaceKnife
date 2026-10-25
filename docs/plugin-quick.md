@@ -14,7 +14,7 @@ uv run pytest my.tool/tests                                    # 合成树上跑
 spaceknife plugin shot my.tool --open report:largest           # 真界面的截图（无头浏览器，不弹窗）
 ```
 
-`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code layout color color-code export source set field insight hook`。`plugin new` 结束时按选的部分列出下一步的命令。
+`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code layout color color-code export source set field insight hook task`。`plugin new` 结束时按选的部分列出下一步的命令。
 
 <a id="quick-tasks"></a>
 ## 2. 我要……
@@ -36,6 +36,7 @@ spaceknife plugin shot my.tool --open report:largest           # 真界面的截
 | 把压缩包等当文件夹扫描 | `@plugin.scan_source(..)` → `out.file(path, size)` | `source` | `kind-scan_source` |
 | 一个网页面板 | `[[panels]]` + `web/index.html`、`web/app.js`（`sk.call` / `sk.core`） | `panel` | `panels` |
 | 扫描完、设置变了、删除篮变了时做事 | `@plugin.on("scan_done" / "settings" / "lang" / "basket")` | `hook` | `kind-hook`、`api-hooks` |
+| 比调用时限长的事（整盘哈希、一直盯着扫描） | `@plugin.background("name", T(..), start="startup")`；`ctx.tasks.start("name", params, key=)` | `task` | `kind-background`、`api-limits` |
 
 <a id="quick-api"></a>
 ## 3. 最常用的 API
@@ -51,7 +52,7 @@ ctx.settings["min_size"];  ctx.lang;  ctx.t("{n} 个", "{n} items", n=3)
 ctx.fmt.size(n) / .count(n) / .date(t) / .ago(t)                               # 和界面一样的写法
 ctx.toast(T("好了", "Done"), tone="ok");  ctx.progress(i, n);  ctx.check()      # check(): 取消时抛 Cancelled
 ctx.basket.propose([(i, T("旧日志", "Old log"))]);  ctx.basket.withdraw([i])
-ctx.files.read(i, limit=4096);  ctx.files.hash_many(ids, limit=1 << 20)       # 要 files.read；跳过云端占位
+ctx.files.read(i, limit=4096);  ctx.files.hash_many(ids, progress=True)       # 要 files.read；守磁盘负载上限，跳过云端占位
 ctx.clipboard.write_text(T("复制的文字", "Copied text"))                        # 要 clipboard，只在用户发起的调用里
 r.table([r.col("bytes", T("占用", "Size"), "size"), r.col("path", T("位置", "Location"), "path")], rows=rows)
 r.stats([(T("文件", "Files"), n, "count")]);  r.callout(T(..), "warn");  r.md("…")
@@ -60,7 +61,7 @@ r.stats([(T("文件", "Files"), n, "count")]);  r.callout(T(..), "warn");  r.md(
 - 文案：`T("中文", "English")` 写在哪里都行（模块顶层定义的列标题也跟着界面语言变）；占位符可以写 `{n:size}` `{n:count}` `{t:date}` `{t:ago}`；复数：`T("{n} 组", "{n} groups").plural(n, "1 group")`。
 - 命令和报告收到用户在哪：`c.node`（选中项）、`c.selection`、`c.zoom_node`（缩放根）、`c.filter`（过滤式，没过滤是 `""`）、`c.args`（动作里写的参数）。
 - `when`：`scan done scanning view selection scan_view compare file dir on_disk`、`ext:zip,7z`、`setting:名`、`source:名`、`plugin:id`、`cap:能力`。
-- 重活：普通 `def` 在工作线程里跑；`async def` 里不要做长循环（会卡住插件进程，取消不了），要做就 `await ctx.compute(fn, …)`。长循环里调 `ctx.check()`。
+- 重活：普通 `def` 在工作线程里跑（`limits.threads`，默认 2；被取消的调用让出位置、在备用线程上跑完，不会让插件重启）；`async def` 里不要做长循环（会卡住插件进程，取消不了），要做就 `await ctx.compute(fn, …)`。长循环里调 `ctx.check()`。时限：方法、命令、报告默认 30 s，`timeout=` 改，但不超过清单的 `limits.timeout_s`（默认 60）；更长的用后台任务。规则全文：`api-limits`。
 
 <a id="quick-test"></a>
 ## 4. 测试
@@ -89,7 +90,7 @@ async def test_it() -> None:
         await host.check(strict=True)  # 和 plugin check 一样
 ```
 
-还有：`host.call` `cleanup` `insights` `node_set` `filter` `visual` `color` `export_text` `export_bytes` `source` `hook` `snapshot(when=)` `toasts` `clipboard` `basket` `events` `state`（[全表](plugin-api.md#api-testing)）。失败的调用抛 `RequestError`（`.code` 是 `ErrorCode`）。
+还有：`host.call` `cleanup` `insights` `node_set` `filter` `visual` `color` `export_text` `export_bytes` `source` `hook` `task` `tasks` `snapshot(when=)` `toasts` `clipboard` `basket` `events` `state`（[全表](plugin-api.md#api-testing)）。失败的调用抛 `RequestError`（`.code` 是 `ErrorCode`）。
 
 <a id="quick-see"></a>
 ## 5. 在真界面里看

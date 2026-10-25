@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import os
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 from weakref import WeakKeyDictionary
 
 import numpy as np
+from loguru import logger
 from pydantic import BaseModel, ValidationError
 
 from spaceknife_protocol import KNOWN_CAPABILITIES
@@ -42,6 +44,10 @@ if TYPE_CHECKING:
 
 MAX_NODES = 100_000
 MAX_OPEN_SNAPSHOTS = 2  # snapshots one plugin may have open at once (each is a whole tree in memory)
+IO_WAIT_S = 2.0  # a host.io request waits at most this long for a permit (the plugin asks again)
+PERMIT_MAX_S = 2.0  # a disk-read permit not given back after this long goes by itself
+PLUGIN_IO_SCANNING = 1  # plugin read bursts at once on a disk a scan is reading (the scan goes first)
+PLUGIN_IO_MAX = 4  # … and on a disk no scan reads (the governor's limit holds either way)
 
 
 class PluginCaller:
@@ -95,6 +101,11 @@ class HostApi:
         self._basket_added: dict[int, tuple[PluginRecord, int]] = {}  # call -> what it put in the basket
         self._toasted: set[int] = set()  # calls that showed a toast of their own
         self._opened_count = 0
+        # ctx.files reads: the disk of each allowed folder, the permits plugins hold, how many per disk
+        self._govs: dict[str, Any] = {}
+        self._permits: dict[int, tuple[str, Any, asyncio.TimerHandle, int]] = {}
+        self._permit_ids = itertools.count(1)
+        self._io_inflight: dict[int, int] = {}
 
     # ------------------------------------------------------------- snapshots plugins opened
 
@@ -116,9 +127,11 @@ class HostApi:
             self._toasted.clear()
 
     def release_plugin(self, plugin: str) -> None:
-        """The plugin stopped: everything it held goes."""
+        """The plugin stopped: everything it held goes (snapshots, disk-read permits)."""
         for sid in [s for s, (owner, _st) in self._opened.items() if owner == plugin]:
             self._close_snapshot(sid)
+        for pid in [k for k, held in self._permits.items() if held[0] == plugin]:
+            self._drop_permit(pid)
 
     def _close_snapshot(self, sid: str) -> None:
         self._opened.pop(sid, None)
@@ -579,6 +592,137 @@ class HostApi:
         self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
     ) -> tuple[Any, list[bytes]]:
         raise RuntimeCallError(ErrorCode.INVALID_REQUEST, "listings go with the source call's output")
+
+    # ------------------------------------------------------------- background tasks
+
+    async def _task_start(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        """``ctx.tasks.start``: one of the plugin's own declared tasks (``@plugin.background``)."""
+        params = p.get("params") or {}
+        if not isinstance(params, dict):
+            raise RuntimeCallError(ErrorCode.INVALID_PARAMS, "task params are an object")
+        scan = p.get("scan_id")
+        t = self.host.tasks.start(
+            rec,
+            str(p["name"]),
+            params,
+            str(p.get("key") or ""),
+            replace=bool(p.get("replace")),
+            scan_id=scan if isinstance(scan, str) and scan in self.handles() else None,
+        )
+        return self.host.tasks.info(t).model_dump(mode="json"), []
+
+    async def _task_cancel(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        key = p.get("key")
+        n = self.host.tasks.cancel_named(rec.id, str(p["name"]), None if key is None else str(key))
+        return {"cancelled": n}, []
+
+    async def _tasks(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        return {"tasks": [t.model_dump(mode="json") for t in self.host.tasks.list(rec.id)]}, []
+
+    # ------------------------------------------------------------- reading files: the disk-load limit
+
+    async def _governor_of(self, base: str) -> Any:
+        """The I/O governor of the disk holding ``base`` (an allowed folder of ``ctx.files``)."""
+        if base in self._govs:
+            return self._govs[base]
+        scans = getattr(self.server, "scans", None)
+        reg = getattr(scans, "io", None)
+        gov = None
+        if reg is not None:
+            try:
+                gov = await reg.governor_for_path(base)
+            except Exception as exc:  # no disk found: read without pacing
+                logger.debug("no I/O governor for {}: {}", base, exc)
+        if len(self._govs) >= 64:
+            self._govs.clear()
+        self._govs[base] = gov
+        return gov
+
+    def _scanning(self, gov: Any) -> bool:
+        return any(h.running and h.governor is gov for h in list(self.handles().values()))
+
+    def _user_level(self, gov: Any) -> None:
+        """No scan reads this disk: the level the user chose for scans applies to plugins too."""
+        st = getattr(self.server, "settings", None)
+        if st is None:
+            return
+        try:
+            level = str(st.get("scan.load_manual"))
+            custom = float(st.get("scan.custom_limit"))
+        except (KeyError, TypeError, ValueError):
+            return
+        if gov.level != level or (level == "custom" and abs(gov.limit - custom) > 0.5):
+            with contextlib.suppress(ValueError):
+                gov.set_level(level, custom)
+
+    async def _io(self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]) -> tuple[Any, list[bytes]]:
+        """``ctx.files`` asks to read a burst on the disk of ``base``: a permit of that disk's
+        governor (the disk-load limit, shared with scans), at most ``IO_WAIT_S`` of waiting per
+        request (the plugin asks again, and notices a cancel meanwhile). ``release``: permits it is
+        done with. While a scan reads the disk, plugins read one burst at a time."""
+        if "files.read" not in rec.granted:
+            raise _deny("files.read")
+        self.io_release(rec, p.get("release") or [])
+        base = p.get("base")
+        if not isinstance(base, str) or not base:
+            return {"permit": 0}, []
+        gov = await self._governor_of(base)
+        if gov is None or gov.paused:  # nothing to pace with; a paused scan does not hold plugins up
+            return {"permit": 0}, []
+        scanning = self._scanning(gov)
+        if not scanning:
+            self._user_level(gov)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + IO_WAIT_S
+        key = id(gov)
+        while self._io_inflight.get(key, 0) >= (PLUGIN_IO_SCANNING if self._scanning(gov) else PLUGIN_IO_MAX):
+            if loop.time() > deadline:
+                return {"permit": 0, "wait": True}, []
+            await asyncio.sleep(0.01)
+        self._io_inflight[key] = self._io_inflight.get(key, 0) + 1
+        try:
+            permit = await asyncio.wait_for(gov.permit(), max(0.01, deadline - loop.time()))
+        except TimeoutError:
+            self._io_inflight[key] -= 1
+            return {"permit": 0, "wait": True}, []
+        pid = next(self._permit_ids)
+        timer = loop.call_later(PERMIT_MAX_S, self._permit_expired, pid)
+        self._permits[pid] = (rec.id, permit, timer, key)
+        return {"permit": pid}, []
+
+    def _permit_expired(self, pid: int) -> None:
+        held = self._permits.get(pid)
+        if held is not None:
+            logger.bind(source=f"plugin:{held[0]}").debug("a disk-read permit was not given back in time")
+            self._drop_permit(pid)
+
+    def _drop_permit(self, pid: int) -> None:
+        held = self._permits.pop(pid, None)
+        if held is None:
+            return
+        _plugin, permit, timer, key = held
+        timer.cancel()
+        permit.release()
+        self._io_inflight[key] = max(0, self._io_inflight.get(key, 0) - 1)
+
+    def io_release(self, rec: PluginRecord, permits: Any) -> None:
+        """The plugin is done with these permits (its own only)."""
+        for raw in list(permits or [])[:64]:
+            with contextlib.suppress(TypeError, ValueError):
+                pid = int(raw)
+                held = self._permits.get(pid)
+                if held is not None and held[0] == rec.id:
+                    self._drop_permit(pid)
+
+    def io_permits(self) -> int:
+        """Disk-read permits plugins hold now (tests, diagnostics)."""
+        return len(self._permits)
 
     # ------------------------------------------------------------- results the host checks
 

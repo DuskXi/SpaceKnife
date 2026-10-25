@@ -75,6 +75,9 @@ from .plugins import (
     PluginLinkParams,
     PluginListResult,
     PluginProgressEvent,
+    PluginTaskCancelParams,
+    PluginTaskInfo,
+    PluginTaskListResult,
     PluginToastEvent,
     PluginUninstallParams,
 )
@@ -563,6 +566,18 @@ INSIGHT_NODES = MethodSpec(
     InsightNodesResult,
     "The insight rules' card of each of many nodes (no plugin code runs; for filters and plugins).",
 )
+PLUGIN_TASKS = MethodSpec(
+    "plugin.tasks",
+    Empty,
+    PluginTaskListResult,
+    "Plugins' background tasks: the running ones and the last few that ended (plugins.v1).",
+)
+PLUGIN_TASK_CANCEL = MethodSpec(
+    "plugin.task_cancel",
+    PluginTaskCancelParams,
+    PluginTaskInfo,
+    "Cancel a plugin's background task (it ends as cancelled at its next ctx.check()).",
+)
 EVENT_EXTENSIONS = EventSpec(
     "extensions.changed",
     ExtensionsChangedEvent,
@@ -575,6 +590,9 @@ EVENT_PLUGIN_CLIPBOARD = EventSpec(
 )
 EVENT_PLUGIN_PROGRESS = EventSpec(
     "plugin.progress", PluginProgressEvent, "Progress of a plugin call (reports, cleanups)."
+)
+EVENT_PLUGIN_TASK = EventSpec(
+    "plugin.task", PluginTaskInfo, "A plugin's background task started, moved on or ended."
 )
 EVENT_UPDATE = EventSpec(
     "update.changed",
@@ -687,6 +705,8 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         PLUGIN_LINK,
         EXTENSIONS_GET,
         PLUGIN_FIELDS,
+        PLUGIN_TASKS,
+        PLUGIN_TASK_CANCEL,
         INSIGHT_NODE,
         INSIGHT_NODES,
     )
@@ -728,5 +748,6 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_PLUGIN_TOAST,
         EVENT_PLUGIN_CLIPBOARD,
         EVENT_PLUGIN_PROGRESS,
+        EVENT_PLUGIN_TASK,
     )
 }

@@ -26,13 +26,11 @@
   web/                              Web 面板：index.html、app.js…；_sk/ 与 sk-plugin.d.ts 由 build 生成
   generated/                        plugin build 生成：schema.json、pinyin.json
   lib/                              随插件带的纯 Python 依赖（加入 sys.path）
-  fixtures/                         给 check 和测试用的样例（例如扫描来源的样例文件）
-  tests/test_*.py                   测试
+  fixtures/、tests/test_*.py        给 check 和测试用的样例（例如扫描来源的样例文件）、测试
 ```
 
 - 数据目录：Windows `%LOCALAPPDATA%\SpaceKnife`，Linux `~/.local/share/SpaceKnife`，macOS `~/Library/Application Support/SpaceKnife`；便携版和设了 `SPACEKNIFE_HOME` 时是那个目录下的 `data/`。插件页显示实际位置。
-- 插件文件夹对插件只读。可写的是 `ctx.storage`（`<数据目录>/plugin-data/<id>/`，默认配额 256 MiB）。
-- 上限：2000 个文件、64 MiB。`__pycache__`、`.git`、`dist`、`node_modules` 不算。
+- 插件文件夹对插件只读。可写的是 `ctx.storage`（`<数据目录>/plugin-data/<id>/`，默认配额 256 MiB）。插件文件夹的上限：2000 个文件、64 MiB（`__pycache__`、`.git`、`dist`、`node_modules` 不算）。
 
 <a id="manifest"></a>
 ### 1.1 清单 `plugin.toml`
@@ -52,7 +50,7 @@
 | `runtime` | `process`（默认，独立进程）或 `inprocess`（只在开发者模式下生效） |
 | `activation` | `lazy`（默认，第一次用到才启动进程）或 `startup` |
 | `requires` | `{ host = ">=0.2" }`：需要的 SpaceKnife 版本 |
-| `limits` | `{ memory_mb = 1024, timeout_s = 60 }`：进程内存上限（64–4096）和默认时限 |
+| `limits` | `{ memory_mb = 1024, timeout_s = 60, threads = 2 }`：进程内存上限（64–4096）、方法和报告的时限上限、同时跑普通 `def` 调用的线程（1–8）；[运行规则](plugin-api.md#api-limits) |
 | `main` | 保留（Electron 主进程插件），现在写了会报错 |
 
 其余的表（`[[commands]]`、`[[settings]]` …）是贡献，见第 2、3 节。字段写错时 `plugin check` 会给出「是不是想写 …」。完整的 JSON Schema：`spaceknife plugin schema --manifest`。
@@ -98,7 +96,7 @@ default = 1048576
 |---|---|---|---|---|---|
 | [方法](#kind-method) | — | `@plugin.method` | 看它用什么 | 默认 30 s，≤ 600 s；JSON 8 MiB | 动作、报告、面板 |
 | [事件 / 状态 / 流](#kind-event) | — | `@plugin.event` `@plugin.state` `@plugin.stream` | — | 事件 50 条/s，状态 20 次/s | 面板、命令状态行 |
-| [命令](#kind-command) | `[[commands]]` | `@plugin.command` | 看动作 | 30 s | 命令面板、右键菜单、详情面板、工具栏 |
+| [命令](#kind-command) | `[[commands]]` | `@plugin.command` | 看动作 | 30 s（`timeout=`） | 命令面板、右键菜单、详情面板、工具栏 |
 | [按键](#kind-keybinding) | `[[keys]]` | `plugin.keys` | — | — | 全局按键 |
 | [设置](#kind-setting) | `[[settings]]` | `plugin.setting` | — | — | 设置 › 插件 |
 | [报告](#kind-report) | `[[reports]]`（静态） | `@plugin.report` | 通常 `tree.read` | 30 s；2 MiB，每表 2000 行 | 标签页、详情面板、对话框、开始页、对比侧栏、状态栏 |
@@ -116,7 +114,8 @@ default = 1048576
 | [清理](#kind-cleanup) | — | `@plugin.cleanup` | `tree.read` | 120 s，10 万项 | 复核对话框 → 删除篮 |
 | [扫描来源与监控](#kind-scan_source) | — | `@plugin.scan_source` `@plugin.watcher` | 读文件要 `files.read` | 60 s 没有进度提示卡住 | 开始页「新扫描」 |
 | [对比原因与快照](#kind-change_annotator) | — | `@plugin.change_annotator`、`ctx.snapshots` | `snapshots.read` | 每批 200 ms | 对比侧栏、历史报告 |
-| [钩子](#kind-hook) | — | `@plugin.on` | — | 30 s，不等结果 | — |
+| [钩子](#kind-hook) | — | `@plugin.on` | — | 30 s（`timeout=`），不等结果 | — |
+| [后台任务](#kind-background) | — | `@plugin.background`、`ctx.tasks` | 看它用什么 | 不限（`timeout=`），每个插件同时 8 个 | 状态栏的任务列表 |
 | [图标](#icons) | `[[icons]]`、`icons/*.svg` | — | — | 16 KiB | 处处 |
 
 ## 3. 每种贡献
@@ -132,7 +131,7 @@ default = 1048576
 
 选项：`name`（默认是函数名）、`timeout`（30 秒，≤ 600）、`latest`（同一调用方的新请求取消没完成的旧请求，False）、`public`（面板和前端能不能直接调，True）。
 
-签名：`async def f(ctx: Context, p: MyParams) -> MyResult`，没有参数时 `async def f(ctx) -> MyResult`。也可以是普通 `def`，宿主放到工作线程里跑，可以阻塞。返回 `Columns(...)` 时 numpy 列走二进制帧，不经过 JSON。
+签名：`async def f(ctx: Context, p: MyParams) -> MyResult`，没有参数时 `async def f(ctx) -> MyResult`。也可以是普通 `def`，宿主放到工作线程里跑，可以阻塞（被取消时立即答复，函数在备用线程上跑完，[运行规则](plugin-api.md#api-limits)）。返回 `Columns(...)` 时 numpy 列走二进制帧，不经过 JSON。宿主替你做了：路由、参数校验、超时与取消、并发上限、只算最新、错误映射。`raise PluginError(T("需要先选中一个文件夹", "Select a folder first"))` 原样显示给用户；其他异常只显示「插件出错：类型」，回溯进日志。
 
 ```python ex
 class HelloParams(Params):
@@ -148,8 +147,6 @@ async def hello(ctx: Context, p: HelloParams) -> HelloResult:
     """Greets someone (the first paragraph of the docstring becomes the method's doc)."""
     return HelloResult(text=ctx.t("你好，{name}", "Hello, {name}", name=p.name))
 ```
-
-宿主替你做了：路由、参数校验、超时与取消、并发上限、只算最新、错误映射。`raise PluginError(T("需要先选中一个文件夹", "Select a folder first"))` 原样显示给用户；其他异常只显示「插件出错：类型」，回溯进日志。
 
 <a id="kind-event"></a>
 #### 事件、共享状态与流
@@ -557,9 +554,7 @@ title = { zh = "第一层文件夹的占用", en = "First-level folder sizes" }
 <a id="kind-insight_rules"></a>
 #### 洞察规则
 
-`insights/` 下的每个 `*.toml` 都自动加载（也可以在 `[[insight_rules]]` 里用 `file` 列出：`file = "insights/x.toml"`）。格式见 [insights.md](insights.md)。顺序：程序自带的规则 → 各插件的（按插件 id）→ 用户自己的文件夹；后面的规则按 id 覆盖前面的，`enabled = false` 删除一条。
-
-规则也给对比侧栏的变化项提供原因。
+`insights/` 下的每个 `*.toml` 都自动加载（也可以在 `[[insight_rules]]` 里用 `file` 列出：`file = "insights/x.toml"`）。格式见 [insights.md](insights.md)。顺序：程序自带的规则 → 各插件的（按插件 id）→ 用户自己的文件夹；后面的规则按 id 覆盖前面的，`enabled = false` 删除一条。规则也给对比侧栏的变化项提供原因。
 
 ```toml ex-rules
 version = 1
@@ -685,12 +680,12 @@ async def logs(ctx: Context, c: ReportContext) -> list[Proposal]:
 | `watch` | 有对应的监控器（False） |
 | `size` | 树上一个文件算多大：`alloc`（默认，`out.file` 给的占用）或 `size`（例如压缩包解压后的大小） |
 
-签名：`(ctx, uri: str, out: Listing) -> None`。`out.file(path, size=…, alloc=…, mtime=…)`、`out.dir(path)`、`out.root_name(text)`，路径相对来源的根，用 `/`，父文件夹自动补上。用户选的 URI 本身在有 `files.read` 时可读（`ctx.files.open_path(uri)`）。
+签名：`(ctx, uri: str, out: Listing) -> None`。`out.file(path, size=…, alloc=…, mtime=…)`、`out.dir(path)`、`out.root_name(text)`，路径相对来源的根，用 `/`，父文件夹自动补上。用户选的 URI 本身在有 `files.read` 时可读：`ctx.files.open(uri)` 给出守磁盘负载上限的文件对象（`zipfile`、`tarfile` 都收），`open_path(uri)` 只给路径。
 
 ```python ex
 @plugin.scan_source("zip", T("压缩包", "Archive"), pick="file", extensions=[".zip"], watch=True)
 def zip_source(ctx: Context, uri: str, out: Listing) -> None:
-    with zipfile.ZipFile(ctx.files.open_path(uri)) as z:
+    with ctx.files.open(uri) as fh, zipfile.ZipFile(fh) as z:
         for info in z.infolist():
             if not info.is_dir():
                 out.file(info.filename, size=info.file_size, alloc=info.compress_size)
@@ -743,7 +738,21 @@ async def scanned(ctx: Context, scan: ScanInfo) -> None:
     ctx.toast(T("扫描完成：{items} 项", "Scanned {items} items").format(items=scan.items), tone="ok")
 ```
 
-宿主不等钩子的结果；出错记日志。`ctx.toast` 每秒最多一条。
+宿主不等钩子的结果；出错记日志。`timeout`：秒（30，≤ 600），更久的事交给后台任务。`ctx.toast` 每秒最多一条。
+
+<a id="kind-background"></a>
+#### 后台任务
+
+超过调用时限的事（给整盘的文件算哈希、一直盯着扫描）写成后台任务：宿主记着它，状态栏列出它的 `title` 和进度、可以取消。字段：`name` `title`（必需）、`start`（`manual` 默认：`ctx.tasks.start` 才启动；`startup`：插件进程启动就启动，进程也随插件启用而启动）、`restart`（插件进程崩溃后用同样的参数重新开始，最多 3 次；False）、`timeout`（秒，不写就不限）。
+
+```python ex
+@plugin.background("hash_big", T("给大文件算哈希", "Hashing big files"))
+def hash_big(ctx: Context) -> None:
+    ids = ctx.tree.query(">=1mb", kind="file", columns=()).ids
+    ctx.files.hash_many(ids, progress=True)  # 进度进状态栏；取消时在下一个 MiB 停下
+```
+
+签名 `(ctx)` 或 `(ctx, p: 参数模型)`。`ctx.tasks.start(name, params, key="", replace=False)` 马上返回 `TaskInfo`，同名同 `key` 只跑一个（`replace=True` 取消旧的重来）；`ctx.tasks.cancel(name, key=None)`、`.list()`。普通 `def` 在自己的线程上跑，不占调用线程；`ctx.check()` 处停下，也在那里换成新的界面语言。测试：`await host.task(name, params)` 跑完返回 `TaskInfo`（`state` 是 `done` `failed` `cancelled`）。细节见[运行规则](plugin-api.md#api-limits)。
 
 <a id="ctx"></a>
 ## 4. `Context` 与 `TreeView`
@@ -763,12 +772,13 @@ async def scanned(ctx: Context, scan: ScanInfo) -> None:
 | `ctx.basket.propose(items, reason)`、`.withdraw(items)` | 放进删除篮（每项可以是 `(节点, 它自己的原因)`；一个命令里放多少次，用户只看到一条提示，命令自己 `toast` 时没有），返回放进去的项数；拿回本插件放进去的项 | `basket.propose` |
 | `ctx.clipboard.write_text(text)` | 复制到发起调用的那个窗口的剪贴板 | `clipboard` |
 | `ctx.granted`、`ctx.slot`、`ctx.invalidate(*kinds)` | 授予的权限；字段在哪（`inspector` `hover`）；丢掉宿主的缓存 | — |
-| `ctx.files.open(n)`、`.read(n, limit)`、`.hash(n, "sha256", limit=None)`、`.hash_many(ns, limit=)`、`.open_path(path)` | 只读打开扫描范围内的文件（`n` 是节点、下标或路径）；`hash_many` 几个线程一起读，跳过文件夹和云端占位（`Flag.CLOUD` `Flag.OFFLINE`，读它们会下载），读不了的给 None；范围外是 `FileNotAllowed`，系统拒绝是别的 `PermissionError` | `files.read` |
+| `ctx.files.open(n)`、`.read(n, limit)`、`.hash(n, "sha256", limit=None, progress=)`、`.hash_many(ns, limit=, progress=)`、`.open_path(path)` | 只读打开扫描范围内的文件（`n` 是节点、下标或路径），读盘守用户选的磁盘负载上限（和扫描共用，扫描时让路）；`hash_many` 几个线程一起读，跳过文件夹和云端占位（`Flag.CLOUD` `Flag.OFFLINE`，读它们会下载），读不了的给 None；`progress=True` 把读了多少字节报成 `ctx.progress`（或给 `(done, total)` 函数），每读 1 MiB 查一次取消；范围外是 `FileNotAllowed`，系统拒绝是别的 `PermissionError` | `files.read` |
 | `ctx.net.fetch(url, method=, headers=, body=, timeout=)` | HTTP(S)，只能连 `net_hosts`；返回 `status headers body .json() .text()` | `net` |
 | `ctx.exec(argv, timeout=, cwd=, input=)` | 运行 `exec` 里列出的程序；返回 `returncode stdout stderr` | `exec` |
 | `ctx.snapshots.list(root)`、`.open(path)` | 3.5 节 | `snapshots.read` |
 | `ctx.call(method, params)` | 白名单里的内置方法（第 7 节），返回 dict | 各方法自己的 |
 | `await ctx.compute(fn, *args)` | 在工作线程里跑 CPU 密集或阻塞的代码 | — |
+| `ctx.tasks.start(name, params, key=)`、`.cancel(name)`、`.list()` | 后台任务（3.5 节），返回 `TaskInfo` | — |
 | `ctx.check()`、`ctx.cancelled`、`ctx.deadline` | 协作式取消：被取消或超时后 `check()` 抛 `Cancelled`（不要吞掉） | — |
 | `ctx.log.debug/info/warning/error`、`ctx.storage` | 日志（程序的日志面板，带插件来源）；可写的 `Path`（配额 256 MiB） | — |
 
@@ -903,7 +913,8 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 | 节点集合 | 5 s | 每节点 1 bit |
 | 清理 | 120 s | 10 万项 |
 | 导出 | 30 s 没有新块就中止 | 每块 1 MiB |
-| 进程 | 启动 10 s；空闲 10 分钟停止；崩溃后 1 / 5 / 30 秒重启，5 分钟内 3 次就停用 | 内存 1 GiB；同时 4 个调用、排队 32 个；最多 8 个进程 |
+| 后台任务 | 不限（`timeout=`） | 每个插件同时 8 个；结束的留 8 个给界面看 |
+| 进程 | 启动 10 s；空闲 10 分钟停止（有后台任务时不停）；崩溃后 1 / 5 / 30 秒重启，5 分钟内 3 次就停用 | 内存 1 GiB；同时 4 个调用（`limits.threads` 更多时随它）、排队 32 个；普通 `def` 用 2 个线程（`limits.threads`）；最多 8 个进程 |
 
 ### 7.3 错误码
 
@@ -926,19 +937,13 @@ async def test_largest() -> None:
         await host.check(strict=True)  # 和 plugin check 一样的检查
 ```
 
-`make_tree` 的值：大小、`(大小, 修改时间)`（unix 秒或 `"YYYY-MM-DD"`）、`bytes`（真的写成文件，可以读和哈希）、dict（文件夹）。
-
-`host` 的全部方法见 [API 参考](plugin-api.md#api-testing)：命令按菜单那样跑（`await host.command(name, node=…)`）、问能不能跑（`command_available`）、等后台做完（`settled()`）、系统写法的路径（`host.path("a/b")`）、`export_text` / `export_bytes`。失败的调用抛 `spaceknife_sdk.RequestError`（`.code` 是 `ErrorCode`）。要直接测插件自己的函数，用 `plugin_module(__file__)` 导入 `plugin.py`（另一份副本：看不到宿主里那份的状态）。默认在测试的进程里跑（快）；`plugin new` 生成的测试里另有一项 `process=True`，在真的插件进程里再查一遍——剪贴板、沙箱、卡住事件循环这类问题只在那里出现。
-
-`grant=["tree.read"]` 可以只给部分权限，测「缺权限时报 `PERMISSION_DENIED`」。测试需要 pytest 和 pytest-asyncio（SpaceKnife 的开发环境里都有）；`plugin new` 生成的 `pytest.ini` 打开了 asyncio 模式。
+`make_tree` 的值和 `host` 的全部方法见 [API 参考](plugin-api.md#api-testing)：命令按菜单那样跑（`await host.command(name, node=…)`）、问能不能跑（`command_available`）、等后台做完（`settled()`）、系统写法的路径（`host.path("a/b")`）、`export_text` / `export_bytes`。失败的调用抛 `spaceknife_sdk.RequestError`（`.code` 是 `ErrorCode`）。要直接测插件自己的函数，用 `plugin_module(__file__)` 导入 `plugin.py`（另一份副本：看不到宿主里那份的状态）。默认在测试的进程里跑（快）；`plugin new` 生成的测试里另有一项 `process=True`，在真的插件进程里再查一遍——剪贴板、沙箱、卡住事件循环这类问题只在那里出现。`grant=["tree.read"]` 可以只给部分权限，测「缺权限时报 `PERMISSION_DENIED`」。测试需要 pytest 和 pytest-asyncio（SpaceKnife 的开发环境里都有）；`plugin new` 生成的 `pytest.ini` 打开了 asyncio 模式。
 
 <a id="build"></a>
 ## 9. 构建、打包与安装
 
-- `spaceknife plugin build`：写 `generated/schema.json`（本插件的协议 schema，模型名带插件前缀，如 `ExampleDupesFindResult`）、`web/sk-plugin.d.ts`、`generated/pinyin.json`（命令标题的拼音，命令面板按拼音找）、`web/_sk/`（桥的副本，mock 模式用），并列出缺英文的文案。`check` 报告这些文件缺了或过期了。
-- `spaceknife plugin build --zip`：`dist/<id>-<version>.zip`，里面一个 `<id>/` 文件夹。
-- 安装：`spaceknife plugin install <文件夹或 zip>`，或插件页「从文件夹 / zip 安装」。装好的插件在 `<数据目录>/plugins/<id>/`，先是关着的；启用时确认权限。同 id 的要 `--replace`。卸载把文件夹移进回收站（`--data` 连数据一起）。
-- zip 安装会检查：没有绝对路径、`..`、链接和设备文件，≤ 2000 个文件、64 MiB，压缩比 ≤ 100。签名、插件目录和从 Git 安装以后做。
+- `spaceknife plugin build`：写 `generated/schema.json`（本插件的协议 schema，模型名带插件前缀，如 `ExampleDupesFindResult`）、`web/sk-plugin.d.ts`、`generated/pinyin.json`（命令标题的拼音，命令面板按拼音找）、`web/_sk/`（桥的副本，mock 模式用），并列出缺英文的文案。`check` 报告这些文件缺了或过期了。`--zip`：`dist/<id>-<version>.zip`，里面一个 `<id>/` 文件夹。
+- 安装：`spaceknife plugin install <文件夹或 zip>`，或插件页「从文件夹 / zip 安装」。装好的插件在 `<数据目录>/plugins/<id>/`，先是关着的；启用时确认权限。同 id 的要 `--replace`。卸载把文件夹移进回收站（`--data` 连数据一起）。zip 安装会检查：没有绝对路径、`..`、链接和设备文件，≤ 2000 个文件、64 MiB，压缩比 ≤ 100。签名、插件目录和从 Git 安装以后做。
 
 <a id="cli"></a>
 ## 10. 命令行
@@ -952,8 +957,7 @@ async def test_largest() -> None:
 | `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名 \| source:名> [--scan PATH] [--node a/b] [--format text\|json\|md] [--call 方法[={json}] …] [--option k=v …] [--filter 式] [--uri U] [-o FILE] [--setting k=v] [--lang en] [--history FILE]` | 不开界面看到结果；`--call` 先在同一个后端里调方法（先算好结果的字段、集合）；导出的 `--option` `--filter`、`--node`（只导出它）；`visual:` `color:` 的 `--format json` 给出每行的节点、大小和色板下标 |
 | `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
 | `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
-| `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]` | 安装、卸载（真实的数据目录） |
-| `plugin list [--json]`、`enable <id> [--yes]`、`disable <id>` | 列出、启用（列出权限并要求确认）、停用 |
+| `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]`、`list [--json]`、`enable <id> [--yes]`、`disable <id>` | 安装、卸载（真实的数据目录）；列出、启用（列出权限并要求确认）、停用 |
 | `plugin schema [--manifest \| D]` | 清单的 JSON Schema，或插件自己的协议 schema |
 | `plugin docs [--section 锚点] [--search 词] [--list] [--guide] [--api]` | 速查（不带参数）；一节；提到某个词的行；全文 |
 

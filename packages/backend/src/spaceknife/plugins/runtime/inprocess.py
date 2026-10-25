@@ -23,6 +23,7 @@ from spaceknife_sdk._runtime import (
     CallError,
     Dispatcher,
     describe_safely,
+    dispatcher_for,
     load_plugin,
     state_from_init,
     unload_plugin,
@@ -134,7 +135,7 @@ class InProcessRuntime(PluginRuntime):
             try:
                 plugin = load_plugin(self.folder, self.manifest)
                 state = state_from_init(self.start_info.message())
-                self.dispatcher = Dispatcher(plugin, state, InProcessLink(self))
+                self.dispatcher = dispatcher_for(plugin, state, InProcessLink(self))
                 desc, err = describe_safely(plugin)
                 if err is not None or desc is None:
                     ready.set_exception(

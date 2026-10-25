@@ -105,6 +105,7 @@ ANCHORS: dict[str, str] = {
     "stale_generated": "build",
     "chinese_in_en": "texts",
     "long_title": "texts",
+    "timeout_capped": "manifest",
     "not_built": "build",
     "tests": "testing",
 }
@@ -1233,6 +1234,26 @@ def static_issues(folder: Path, manifest: Manifest, desc: Description) -> list[I
     out += check_filters(specs, manifest.id)
     out += check_keys(manifest, specs)
     out += check_panels(folder, specs, [m.name for m in desc.methods])
+    out += check_timeouts(manifest, desc)
+    return out
+
+
+def check_timeouts(manifest: Manifest, desc: Description) -> list[Issue]:
+    """A method, command or report that asks for more time than ``limits.timeout_s`` gets only that."""
+    cap = manifest.limits.timeout_s
+    out: list[Issue] = []
+    for m in desc.methods:
+        if m.kind in ("method", "report") and m.timeout > cap:
+            out.append(
+                _issue(
+                    "timeout_capped",
+                    f"{m.kind} {m.name!r} asks for {m.timeout:g} s, but limits.timeout_s is {cap}: "
+                    f"it gets {cap} s",
+                    severity="warning",
+                    fix=f"[limits] timeout_s = {min(600, int(m.timeout + 0.999))} in plugin.toml (≤ 600), or "
+                    "move work that takes longer into a background task (@plugin.background)",
+                )
+            )
     return out
 
 

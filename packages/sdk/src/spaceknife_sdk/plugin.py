@@ -29,6 +29,7 @@ from .manifest import (
     MANIFEST,
     PLUGIN_API,
     AnnotatorSpec,
+    BackgroundSpec,
     CleanupSpec,
     ColorModeSpec,
     CommandSpec,
@@ -175,7 +176,7 @@ class Plugin:
             self.issues.append(Issue("duplicate", f"{kind} {name!r} is defined twice"))
         hints = _annotations(fn, _defining_locals())
         arity = _arity(fn)
-        if params is None and kind in ("method", "stream") and arity >= 2:
+        if params is None and kind in ("method", "stream", "task") and arity >= 2:
             names = list(inspect.signature(fn).parameters)
             ann = hints.get(names[1])
             if isinstance(ann, type) and issubclass(ann, BaseModel):
@@ -297,16 +298,17 @@ class Plugin:
 
     # ------------------------------------------------------------- interface
 
-    def command(self, name: str, title: Text | str, **kw: Any) -> Callable[[F], F]:
+    def command(self, name: str, title: Text | str, *, timeout: float = 30.0, **kw: Any) -> Callable[[F], F]:
         """A command (palette, keys, menus). Used as a decorator without ``action``, it calls the
-        decorated function (a method taking an :class:`ActionContext`)."""
+        decorated function (a method taking an :class:`ActionContext`; ``timeout`` seconds, ≤ 600
+        and ≤ the manifest's ``limits.timeout_s`` — longer work goes into a background task)."""
         index = len(self.declared)
         self._declare("command", CommandSpec(name=name, title=as_text(title), **kw))
 
         def wrap(f: F) -> F:
             method = f.__name__.rstrip("_")
             h = self._handler("method", method, f, params=ActionContext)
-            self._method(method, "method", 30.0, False, True, h)
+            self._method(method, "method", timeout, False, True, h)
             spec = self.declared[index][1]
             assert isinstance(spec, CommandSpec)
             if spec.action is None:
@@ -618,14 +620,41 @@ class Plugin:
 
         return wrap(fn) if fn is not None else wrap
 
-    def on(self, event: str) -> Callable[[F], F]:
+    def on(self, event: str, *, timeout: float = 30.0) -> Callable[[F], F]:
         """A lifecycle hook: start, stop, scan_done, scan_closed, settings, lang, basket (the delete
-        basket changed: what this plugin proposed may be gone)."""
+        basket changed: what this plugin proposed may be gone). ``timeout``: seconds it may run (≤
+        600); work that takes longer goes into a background task (``ctx.tasks.start``)."""
 
         def wrap(f: F) -> F:
             n = f.__name__.rstrip("_")
-            self._declare("hook", HookSpec(name=n, event=event))  # type: ignore[arg-type]
+            self._declare("hook", HookSpec(name=n, event=event, timeout=timeout))  # type: ignore[arg-type]
             self._handler("hook", n, f)
+            return f
+
+        return wrap
+
+    def background(
+        self,
+        name: str,
+        title: Text | str,
+        *,
+        start: Literal["manual", "startup"] = "manual",
+        restart: bool = False,
+        timeout: float | None = None,
+    ) -> Callable[[F], F]:
+        """A background task: ``(ctx) -> None`` or ``(ctx, p: MyParams) -> None``, as long as it
+        likes (``timeout`` seconds, none: no limit). ``ctx.tasks.start(name, params, key=…)`` starts
+        it; ``start="startup"`` starts it with the plugin's process. The host shows it with the
+        app's other long work (title, ``ctx.progress``, a cancel button), and with ``restart`` starts
+        it again when the plugin's process crashed. A plain ``def`` runs on a thread of its own (not
+        one of the call threads); ``ctx.check()`` stops it when cancelled."""
+
+        def wrap(f: F) -> F:
+            spec = BackgroundSpec(
+                name=name, title=as_text(title), start=start, restart=restart, timeout=timeout
+            )
+            self._declare("background", spec)
+            self._handler("task", name, f)
             return f
 
         return wrap

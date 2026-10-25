@@ -59,6 +59,7 @@ SECTIONS = {
     "watcher": "kind-scan_source",
     "change_annotator": "kind-change_annotator",
     "hook": "kind-hook",
+    "background": "kind-background",
     "icon": "icons",
 }
 

@@ -2,11 +2,14 @@
 
 The search runs when asked (the report, the cleanup, the ``find`` method), on a worker thread
 (``ctx.compute``): files of the same size are hashed — the first 64 KiB, then the whole file for
-those that still match — a few at a time (``ctx.files.hash_many``), with progress events and a
-shared state the command's status line shows. Extra hard links and cloud placeholders are left out
-(they free nothing; reading a placeholder would download it); what the extra copies take is their
-allocated size. The field and the node set only read the last result (a field has 1 s, a set 5 s:
-never enough to hash a disk) and are asked again when a search finishes (``ctx.invalidate``).
+those that still match — a few at a time (``ctx.files.hash_many``: its reads keep to the disk-load
+limit the user chose), with progress and a shared state the command's status line shows. Extra hard
+links and cloud placeholders are left out (they free nothing; reading a placeholder would download
+it); what the extra copies take is their allocated size. The field and the node set only read the
+last result (a field has 1 s, a set 5 s: never enough to hash a disk) and are asked again when a
+search finishes (``ctx.invalidate``). A whole disk takes longer than any call may: the command
+「在后台查找」 starts the ``search`` background task, which the status bar shows with its progress
+and a cancel button; the report then shows what it found.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from collections import defaultdict
 import numpy as np
 
 from spaceknife_sdk import (
+    ActionContext,
     Context,
     FieldValue,
     Flag,
@@ -28,6 +32,7 @@ from spaceknife_sdk import (
     Report,
     ReportContext,
     T,
+    Toast,
     TreeView,
     r,
 )
@@ -101,6 +106,13 @@ def _find(ctx: Context, min_size: int) -> FindResult:
             heads[digest].append(node)
         done += len(nodes)
         ctx.emit(Progress(done=done, total=total))
+        ctx.progress(
+            done,
+            total,
+            T("已比较 {done} / {total} 个文件", "Compared {done} of {total} files").format(
+                done=done, total=total
+            ),
+        )  # the report's progress bar; in the background task, the status bar's
         for digest, same in heads.items():
             if digest is None or len(same) < 2:
                 continue  # unreadable, or unique
@@ -123,16 +135,38 @@ def _find(ctx: Context, min_size: int) -> FindResult:
     return result
 
 
-async def groups(ctx: Context, min_size: int | None = None) -> FindResult:
+def _search(ctx: Context, min_size: int) -> FindResult:
+    """The search with the status line kept up to date (blocking)."""
     state = ctx.state(Status)
     state.update(busy=True)
     try:
-        found = await ctx.compute(_find, ctx, int(min_size or ctx.settings["min_size"]))
+        found = _find(ctx, min_size)
     finally:
         state.update(busy=False)
     state.update(groups=len(found.groups), wasted=found.wasted)
     ctx.invalidate("node_field", "node_set")  # the field and :set:dupes show the new result
     return found
+
+
+async def groups(ctx: Context, min_size: int | None = None) -> FindResult:
+    return await ctx.compute(_search, ctx, int(min_size or ctx.settings["min_size"]))
+
+
+@plugin.background("search", T("查找重复文件", "Finding duplicate files"))
+def search(ctx: Context) -> None:
+    """The whole scan, however long it takes (the status bar shows it; cancelling stops it within a
+    MiB read); the report, the cleanup, the field and the set use what it found."""
+    _search(ctx, int(ctx.settings["min_size"]))
+
+
+@plugin.command(
+    "search", T("在后台查找重复文件", "Find duplicates in the background"), icon="copy", when=["done"]
+)
+def start_search(ctx: Context, a: ActionContext) -> Toast:
+    ctx.tasks.start("search", key=a.scan_id or "")  # one per scan; again while it runs: the same one
+    return Toast(
+        text=T("正在后台查找，进度在状态栏", "Searching in the background; the status bar shows how far")
+    )
 
 
 @plugin.method(latest=True, timeout=600)

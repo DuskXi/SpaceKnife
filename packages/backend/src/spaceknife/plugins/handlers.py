@@ -22,6 +22,8 @@ from spaceknife_protocol.methods import (
     PLUGIN_LINK,
     PLUGIN_LIST,
     PLUGIN_RESTART,
+    PLUGIN_TASK_CANCEL,
+    PLUGIN_TASKS,
     PLUGIN_UNINSTALL,
 )
 
@@ -497,6 +499,16 @@ def install(server: Server) -> None:
     async def plugin_fields(session: Session, params: pp.PluginFieldsParams) -> pp.PluginFieldsResult:
         _need(session)
         return await node_fields(host, session, params)
+
+    @router.method(PLUGIN_TASKS)
+    async def plugin_tasks(session: Session, _: Empty) -> pp.PluginTaskListResult:
+        _need(session)
+        return pp.PluginTaskListResult(tasks=host.tasks.list())
+
+    @router.method(PLUGIN_TASK_CANCEL)
+    async def plugin_task_cancel(session: Session, params: pp.PluginTaskCancelParams) -> pp.PluginTaskInfo:
+        _need(session)
+        return host.tasks.info(host.tasks.cancel(host.tasks.get(params.id)))
 
     @router.method(INSIGHT_NODE)
     async def insight_node(session: Session, params: pp.InsightNodeParams) -> pp.InsightNodeResult:

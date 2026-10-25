@@ -7938,6 +7938,135 @@
       "title": "PluginProgressEvent",
       "type": "object"
     },
+    "PluginTaskCancelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "PluginTaskCancelParams",
+      "type": "object"
+    },
+    "PluginTaskInfo": {
+      "description": "A plugin's background task (``@plugin.background``) as the host keeps track of it: running\nones, and the last few that ended (how they ended). The ``plugin.task`` event sends one whenever\nit changes (progress at most a few times a second).",
+      "properties": {
+        "attempt": {
+          "default": 1,
+          "description": "2 and up: started again after the plugin crashed",
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "done": {
+          "default": 0.0,
+          "title": "Done",
+          "type": "number"
+        },
+        "ended": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended"
+        },
+        "error": {
+          "default": "",
+          "description": "Why it failed",
+          "title": "Error",
+          "type": "string"
+        },
+        "id": {
+          "description": "Unique while the backend runs",
+          "title": "Id",
+          "type": "string"
+        },
+        "key": {
+          "default": "",
+          "description": "Which one of that name (a scan, a folder …), set by the plugin",
+          "title": "Key",
+          "type": "string"
+        },
+        "name": {
+          "description": "The task's local name",
+          "title": "Name",
+          "type": "string"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "started": {
+          "description": "Unix seconds",
+          "title": "Started",
+          "type": "number"
+        },
+        "state": {
+          "enum": [
+            "running",
+            "restarting",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "text": {
+          "default": "",
+          "description": "What it is doing (ctx.progress), in the interface language",
+          "title": "Text",
+          "type": "string"
+        },
+        "title": {
+          "description": "In the interface language",
+          "title": "Title",
+          "type": "string"
+        },
+        "total": {
+          "default": 0.0,
+          "description": "0: no measure of how far it is",
+          "title": "Total",
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "plugin",
+        "name",
+        "title",
+        "state",
+        "started"
+      ],
+      "title": "PluginTaskInfo",
+      "type": "object"
+    },
+    "PluginTaskListResult": {
+      "properties": {
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/PluginTaskInfo"
+          },
+          "title": "Tasks",
+          "type": "array"
+        }
+      },
+      "required": [
+        "tasks"
+      ],
+      "title": "PluginTaskListResult",
+      "type": "object"
+    },
     "PluginToastEvent": {
       "properties": {
         "plugin": {
@@ -13223,6 +13352,10 @@
       "doc": "Progress of a plugin call (reports, cleanups).",
       "payload": "#/$defs/PluginProgressEvent"
     },
+    "plugin.task": {
+      "doc": "A plugin's background task started, moved on or ended.",
+      "payload": "#/$defs/PluginTaskInfo"
+    },
     "plugin.toast": {
       "doc": "A plugin shows a short message.",
       "payload": "#/$defs/PluginToastEvent"
@@ -13532,6 +13665,18 @@
       "params": "#/$defs/PluginIdParams",
       "requiresSession": true,
       "result": "#/$defs/PluginInfo"
+    },
+    "plugin.task_cancel": {
+      "doc": "Cancel a plugin's background task (it ends as cancelled at its next ctx.check()).",
+      "params": "#/$defs/PluginTaskCancelParams",
+      "requiresSession": true,
+      "result": "#/$defs/PluginTaskInfo"
+    },
+    "plugin.tasks": {
+      "doc": "Plugins' background tasks: the running ones and the last few that ended (plugins.v1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/PluginTaskListResult"
     },
     "plugin.uninstall": {
       "doc": "Turn a plugin off and move its folder (and with remove_data its data) to the recycle bin.",

@@ -53,7 +53,114 @@ from .tree import Columns
 
 MAX_CHUNK = 1 << 20
 REQUEST_TIMEOUT = 120.0
+SPARE_THREADS = 8  # threads that take over from cancelled plain-def calls still running
+STUCK_AFTER = 30.0  # s: every call thread held by a cancelled call this long: the host restarts us
+CANCEL_GRACE = 5.0  # s: a cancelled call still running after this long is named in the log
+MAX_TASK_THREADS = 8  # background tasks written as plain def run on threads of their own
 Emit = Callable[[Any, list[bytes]], None]
+
+
+class Workers:
+    """The threads plain ``def`` calls run on: ``threads`` of them at once.
+
+    A thread cannot be stopped: a cancelled call is answered at once and its result dropped
+    (``ctx.check()`` inside it raises from then on). Its place goes to the next call right away and
+    the function finishes on a spare thread (up to ``spare`` of them), so a slow function that was
+    asked for a 20 ms colour or a 30 ms hover field does not block the others. Only when the spare
+    threads are used up too, a cancelled call keeps its place; when every place has been held by
+    cancelled calls for ``stuck_after`` seconds, ``on_stuck`` is called (the host restarts the process)."""
+
+    def __init__(
+        self,
+        threads: int,
+        *,
+        spare: int = SPARE_THREADS,
+        stuck_after: float = STUCK_AFTER,
+        name: str = "sk-plugin",
+        on_stuck: Callable[[int], None] | None = None,
+        log: Callable[[str], None] | None = None,
+    ) -> None:
+        self.threads = max(1, threads)
+        self.spare = max(0, spare)
+        self.stuck_after = stuck_after
+        self.pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=self.threads + self.spare, thread_name_prefix=name
+        )
+        self._slots: asyncio.Semaphore | None = None
+        self.abandoned: dict[asyncio.Future[Any], tuple[float, str]] = {}  # finishing on a spare thread
+        self.held: dict[asyncio.Future[Any], tuple[float, str]] = {}  # cancelled, keeping their place
+        self._on_stuck = on_stuck
+        self._log = log
+        self._stuck_told = False
+
+    def _sem(self) -> asyncio.Semaphore:
+        if self._slots is None:
+            self._slots = asyncio.Semaphore(self.threads)
+        return self._slots
+
+    async def run(self, fn: Callable[[], Any], what: str = "") -> Any:
+        """``fn()`` on a worker thread once a place is free (wrap it in a ``contextvars`` copy's
+        ``run`` when the call's language must come along)."""
+        sem = self._sem()
+        await sem.acquire()
+        loop = asyncio.get_running_loop()
+        fut = loop.run_in_executor(self.pool, fn)
+        try:
+            result = await asyncio.shield(fut)
+        except asyncio.CancelledError:
+            if fut.done():
+                sem.release()
+                raise
+            now = time.monotonic()
+            fut.add_done_callback(_drop_result)
+            if len(self.abandoned) < self.spare:
+                self.abandoned[fut] = (now, what)
+                sem.release()  # its place goes to the next call now; a spare thread finishes it
+
+                def gone(f: asyncio.Future[Any]) -> None:
+                    self.abandoned.pop(f, None)
+
+                fut.add_done_callback(gone)
+            else:
+                self.held[fut] = (now, what)
+
+                def freed(f: asyncio.Future[Any]) -> None:
+                    self.held.pop(f, None)
+                    self._stuck_told = False
+                    sem.release()
+
+                fut.add_done_callback(freed)
+                if len(self.held) >= self.threads:
+                    loop.call_later(self.stuck_after, self._check_stuck)
+            if self._log is not None and what:
+                loop.call_later(CANCEL_GRACE, self._still_running, fut, what)
+            raise
+        except BaseException:
+            sem.release()
+            raise
+        sem.release()
+        return result
+
+    def _still_running(self, fut: asyncio.Future[Any], what: str) -> None:
+        if not fut.done() and self._log is not None:
+            self._log(
+                f"the cancelled call {what} still runs after {CANCEL_GRACE:g} s and keeps a thread: "
+                "call ctx.check() in its loops (a plain def cannot be stopped from outside)"
+            )
+
+    def _check_stuck(self) -> None:
+        now = time.monotonic()
+        old = [f for f, (since, _w) in self.held.items() if not f.done() and now - since >= self.stuck_after]
+        if len(old) >= self.threads and not self._stuck_told and self._on_stuck is not None:
+            self._stuck_told = True
+            self._on_stuck(len(old) + len(self.abandoned))
+
+    def busy(self) -> int:
+        """Cancelled calls whose functions still run."""
+        return len(self.abandoned) + len(self.held)
+
+    def shutdown(self) -> None:
+        self.pool.shutdown(wait=False, cancel_futures=True)
 
 
 class CallError(RequestError):
@@ -140,16 +247,25 @@ class Dispatcher:
         *,
         log: Callable[[str], None] | None = None,
         threads: int = 2,
+        spare: int = SPARE_THREADS,
+        stuck_after: float = STUCK_AFTER,
     ) -> None:
         self.plugin = plugin
         self.state = state
         self.link = link
         self.log = log or (lambda text: link.notify("log", {"level": "ERROR", "message": text[-8000:]}))
         self.threads = threads
-        self.executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=threads, thread_name_prefix="sk-plugin"
-        )
-        self.abandoned: set[asyncio.Future[Any]] = set()  # cancelled functions still running
+
+        def warn(text: str) -> None:
+            link.notify("log", {"level": "WARNING", "message": text[:8000]})
+
+        def stuck(n: int) -> None:
+            link.notify("stuck", {"threads": n})
+
+        self.workers = Workers(threads, spare=spare, stuck_after=stuck_after, on_stuck=stuck, log=warn)
+        # background tasks written as plain def: threads of their own (they may run for hours)
+        self.task_workers = Workers(MAX_TASK_THREADS, spare=MAX_TASK_THREADS, name="sk-task", log=warn)
+        self.executor = self.workers.pool
         self.cancels: dict[int, threading.Event] = {}
         self.tasks: dict[int, asyncio.Task[Any]] = {}
         state.state_models.update(plugin.states)
@@ -164,7 +280,8 @@ class Dispatcher:
             ev.set()
         for task in self.tasks.values():
             task.cancel()
-        self.executor.shutdown(wait=False, cancel_futures=True)
+        self.workers.shutdown()
+        self.task_workers.shutdown()
 
     def busy(self) -> list[int]:
         return sorted(self.cancels)
@@ -225,7 +342,9 @@ class Dispatcher:
         info = CallInfo.from_dict({**ctx_info, "id": call_id, "kind": kind, "name": name})
         cancel = threading.Event()
         self.cancels[call_id] = cancel
-        ctx = Context(self.state, self.link, info, cancel=cancel, executor=self.executor)
+        ctx = Context(self.state, self.link, info, cancel=cancel, executor=self.workers)
+        if kind == "task":
+            ctx._follow_lang = True  # it may outlive a language switch: T(...) follows at ctx.check()
         tokens = (
             LANG.set(str(ctx_info.get("lang") or self.state.lang)),
             CATALOG.set(self.state.catalog),
@@ -249,25 +368,12 @@ class Dispatcher:
             self.cancels.pop(call_id, None)
             self.tasks.pop(call_id, None)
 
-    async def _call(self, h: Handler, *args: Any) -> Any:
+    async def _call(self, h: Handler, *args: Any, workers: Workers | None = None) -> Any:
         if h.is_async:
             return await h.fn(*args)
-        loop = asyncio.get_running_loop()
         cv = contextvars.copy_context()
-        fut = loop.run_in_executor(self.executor, lambda: cv.run(h.fn, *args))
-        try:
-            return await asyncio.shield(fut)
-        except asyncio.CancelledError:
-            # A thread cannot be stopped: the call is answered as cancelled right away and the
-            # function's result, when it comes, is dropped (``ctx.check()`` inside it raises now).
-            # The process is not stopped for it; a function that never returns keeps a worker
-            # thread until the plugin is restarted.
-            fut.add_done_callback(_drop_result)
-            self.abandoned.add(fut)
-            fut.add_done_callback(self.abandoned.discard)
-            if len(self.abandoned) >= self.threads:  # nothing else can run: the host restarts us
-                self.link.notify("stuck", {"threads": len(self.abandoned)})
-            raise
+        # cancelled: answered at once, the function finishes on a spare thread (Workers)
+        return await (workers or self.workers).run(lambda: cv.run(h.fn, *args), f"{h.kind} {h.name!r}")
 
     async def _invoke(
         self, h: Handler, ctx: Context, params: Any, frames: list[bytes], emit: Emit
@@ -355,9 +461,8 @@ class Dispatcher:
                 gen = h.fn(tree, root, match, ExportInfo(filter=filt, options=options))
             else:
                 gen = h.fn(tree, root, match)
-            count = await asyncio.get_running_loop().run_in_executor(
-                self.executor, contextvars.copy_context().run, self._drain, gen, ctx, emit
-            )
+            cv = contextvars.copy_context()
+            count = await self.workers.run(lambda: cv.run(self._drain, gen, ctx, emit), f"export {h.name!r}")
             return {"chunks": count}, []
         if kind == "source":
             out = Listing(
@@ -396,6 +501,15 @@ class Dispatcher:
                 await self._call(h, ctx, list(p.get("changed") or []))
             else:
                 await self._call(h, ctx)
+            return None, []
+        if kind == "task":
+            raw = p.get("params")
+            if h.params is not None and h.arity >= 2:
+                await self._call(h, ctx, h.params.model_validate(dict(raw or {})), workers=self.task_workers)
+            elif h.arity >= 2:
+                await self._call(h, ctx, dict(raw or {}), workers=self.task_workers)
+            else:
+                await self._call(h, ctx, workers=self.task_workers)
             return None, []
         raise CallError(ErrorCode.METHOD_NOT_FOUND, f"unknown call kind {kind!r}")
 
@@ -510,6 +624,21 @@ def state_from_init(init: Mapping[str, Any]) -> RuntimeState:
         net_hosts=[str(h) for h in init.get("net_hosts", ())],
         exec=[str(e) for e in init.get("exec", ())],
         states={k: dict(v) for k, v in (init.get("states") or {}).items()},
+        threads=max(1, min(int(init.get("threads", 2)), 64)),
+        spare_threads=max(0, min(int(init.get("spare_threads", SPARE_THREADS)), 64)),
+        stuck_after=max(0.1, float(init.get("stuck_after", STUCK_AFTER))),
+    )
+
+
+def dispatcher_for(plugin: Plugin, state: RuntimeState, link: Any) -> Dispatcher:
+    """The dispatcher of a plugin with the worker threads its init asked for."""
+    return Dispatcher(
+        plugin,
+        state,
+        link,
+        threads=state.threads,
+        spare=state.spare_threads,
+        stuck_after=state.stuck_after,
     )
 
 
@@ -668,7 +797,7 @@ class ChildServer:
     # ------------------------------------------------------------- serving
 
     def start(self, plugin: Plugin, state: RuntimeState) -> None:
-        self.dispatcher = Dispatcher(plugin, state, self.link)
+        self.dispatcher = dispatcher_for(plugin, state, self.link)
 
     def serve(self) -> int:
         reader = threading.Thread(target=self._read_loop, name="sk-plugin-reader", daemon=True)
@@ -829,7 +958,9 @@ __all__ = [
     "ChildLink",
     "ChildServer",
     "Dispatcher",
+    "Workers",
     "describe_safely",
+    "dispatcher_for",
     "error_of",
     "load_plugin",
     "state_from_init",

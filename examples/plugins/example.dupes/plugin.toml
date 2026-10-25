@@ -10,6 +10,11 @@ icon = "copy"
 entry = "plugin.py"
 permissions = ["tree.read", "files.read"]
 
+# the report and the cleanup may hash a whole folder: up to 10 minutes (the decorators ask for 600 s,
+# this lets them have it). A whole disk takes longer: the "search" background task (plugin.py).
+[limits]
+timeout_s = 600
+
 [[settings]]
 name = "min_size"
 title = { zh = "最小大小", en = "Minimum size" }

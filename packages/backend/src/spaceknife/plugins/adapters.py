@@ -93,6 +93,7 @@ def specs_of(desc: Description) -> tuple[list[tuple[str, Spec]], list[Issue]]:
         "watcher": "watch",
         "change_annotator": "annotate",
         "hook": "hook",
+        "background": "task",
     }
     for kind, spec in out:
         if kind in CODE_KINDS and (code_kind[kind], spec_key(kind, spec)) not in handlers:

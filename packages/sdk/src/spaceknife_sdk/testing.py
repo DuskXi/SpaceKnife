@@ -25,6 +25,7 @@ from typing import Any, Literal
 
 from spaceknife_protocol.plugins import Report
 
+from .context import TaskInfo
 from .manifest import MANIFEST
 from .report import render_text
 
@@ -747,6 +748,52 @@ class MockHost:
                 await host.call(
                     self.plugin_id, "hook", c.local, {"event": event, **args}, session=self.session
                 )
+
+    async def task(
+        self,
+        name: str,
+        /,
+        params: Any = None,
+        *,
+        key: str = "",
+        wait: bool = True,
+        timeout: float = 60.0,  # noqa: ASYNC109 — how long a test waits for the task, at most
+    ) -> TaskInfo:
+        """Start the background task ``name`` as ``ctx.tasks.start`` would and (``wait``) wait until
+        it ends; returns its :class:`TaskInfo` (``state`` is done, failed or cancelled, ``error`` why
+        it failed, ``done total text`` its last progress). ``timeout``: seconds to wait at most."""
+        host = await self._ready()
+        rec = host.records[self.plugin_id]
+        body = params.model_dump(mode="json") if hasattr(params, "model_dump") else dict(params or {})
+        t = host.tasks.start(rec, name, body, key, scan_id=self.scan_id)  # ctx.tree: the scan in front
+        if wait and t.runner is not None:
+            _done, pending = await asyncio.wait({t.runner}, timeout=timeout)
+            if pending:
+                raise TimeoutError(f"the task {name!r} still runs after {timeout:g} s")
+        return TaskInfo.model_validate(host.tasks.info(t).model_dump())
+
+    def tasks(self) -> list[TaskInfo]:
+        """This plugin's background tasks (:class:`TaskInfo`): running ones and the last that ended."""
+        if self.server is None:
+            return []
+        return [
+            TaskInfo.model_validate(t.model_dump()) for t in self.server.plugins.tasks.list(self.plugin_id)
+        ]
+
+    async def cancel_task(self, name: str, /, *, key: str | None = None, wait: bool = True) -> int:
+        """Cancel the task ``name`` (of ``key`` only, when given), as the cancel button would; with
+        ``wait``, until it has ended. Returns how many were cancelled."""
+        host = await self._ready()
+        running = [
+            t
+            for t in list(host.tasks._tasks.values())
+            if t.plugin == self.plugin_id and t.name == name and (key is None or t.key == key) and t.running
+        ]
+        n: int = host.tasks.cancel_named(self.plugin_id, name, key)
+        runners = {t.runner for t in running if t.runner is not None}
+        if wait and runners:
+            await asyncio.wait(runners, timeout=10.0)
+        return n
 
     async def annotate(self, items: Sequence[Mapping[str, Any]], name: str | None = None) -> list[str | None]:
         """A change annotator's reasons for comparison items (``path``, ``kind``, ``status``,

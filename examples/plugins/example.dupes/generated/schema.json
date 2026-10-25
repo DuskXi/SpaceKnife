@@ -1,5 +1,92 @@
 {
   "$defs": {
+    "ExampleDupesActionContext": {
+      "description": "Where the user is when an action runs (sent as the params of a ``call`` action).",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "compare_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Compare Id"
+        },
+        "filter": {
+          "default": "",
+          "description": "The view's filter expression ('' = not filtered)",
+          "title": "Filter",
+          "type": "string"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Scan Id"
+        },
+        "selection": {
+          "items": {
+            "type": "integer"
+          },
+          "maxItems": 1000,
+          "title": "Selection",
+          "type": "array"
+        },
+        "view_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "View Id"
+        },
+        "zoom_node": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The view's zoom root (where the user is)",
+          "title": "Zoom Node"
+        }
+      },
+      "title": "ActionContext",
+      "type": "object"
+    },
     "ExampleDupesFindParams": {
       "additionalProperties": false,
       "properties": {
@@ -107,6 +194,36 @@
       },
       "title": "Status",
       "type": "object"
+    },
+    "ExampleDupesToast": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "tone": {
+          "default": "info",
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger"
+          ],
+          "title": "Tone",
+          "type": "string"
+        },
+        "type": {
+          "const": "toast",
+          "default": "toast",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "Toast",
+      "type": "object"
     }
   },
   "api": 1,
@@ -121,10 +238,15 @@
       "kind": "method",
       "params": "#/$defs/ExampleDupesFindParams",
       "result": "#/$defs/ExampleDupesFindResult"
+    },
+    "start_search": {
+      "kind": "method",
+      "params": "#/$defs/ExampleDupesActionContext",
+      "result": "#/$defs/ExampleDupesToast"
     }
   },
   "plugin": "example.dupes",
-  "schema_hash": "9cac499de3488bd4",
+  "schema_hash": "a4f8c89a1a81d61f",
   "schema_version": 1,
   "states": {
     "status": {

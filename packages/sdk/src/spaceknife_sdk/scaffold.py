@@ -360,7 +360,9 @@ async def test_md_export(host: MockHost) -> None:
 @plugin.scan_source("list", T("文件清单", "File list"), pick="file", extensions=[".txt"])
 def file_list(ctx: Context, uri: str, out: Listing) -> None:
     """Scans a text file of "<size> <path>" lines as if it were a folder (a plain def may block)."""
-    for line in Path(ctx.files.open_path(uri)).read_text(encoding="utf-8").splitlines():
+    with ctx.files.open(uri) as fh:  # its reads keep to the disk-load limit, as all of ctx.files
+        text = fh.read().decode("utf-8")
+    for line in text.splitlines():
         size, _, path = line.strip().partition(" ")
         if path:
             out.file(path, size=int(size))
@@ -445,6 +447,27 @@ async def test_scan_done_hook(host: MockHost) -> None:
 """,
         doc="kind-hook",
     ),
+    "task": Part(
+        imports=("Context", "T"),
+        code='''
+@plugin.background("count", T("数文件", "Counting files"))
+def count(ctx: Context) -> None:
+    """Long work, as long as it takes: the status bar shows its progress and can cancel it. Start
+    it with ctx.tasks.start("count") from a command, a hook or a method."""
+    ids = ctx.tree.query(kind="file", columns=()).ids
+    for i in range(len(ids)):
+        ctx.check()  # cancelled: stop here
+        if i % 1000 == 0:
+            ctx.progress(i, len(ids), T("已数 {n} 个文件", "Counted {n} files").format(n=i))
+''',
+        test="""
+async def test_background_task(host: MockHost) -> None:
+    task = await host.task("count")  # starts it and waits until it ends
+    assert task.state == "done"
+""",
+        permissions=("tree.read",),
+        doc="kind-background",
+    ),
 }
 ALIASES = {
     "visualization": "visual",
@@ -458,6 +481,8 @@ ALIASES = {
     "own_layout": "layout",
     "code_color": "color-code",
     "color_code": "color-code",
+    "background": "task",
+    "tasks": "task",
 }
 
 

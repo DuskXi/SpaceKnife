@@ -162,6 +162,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `plugin.install` / `plugin.uninstall` / `plugin.link` | 从文件夹或 zip 安装（同 id 时返回 `conflict`，带 `replace` 再装）/ 卸载到回收站 / 开发者模式下链接开发文件夹 |
 | `extensions.get` | 前端要画的贡献（按 `kinds` 取）：报告、面板、字段、清理、配色（色板、图例）、扫描来源、过滤预设、图标……，按会话语言 |
 | `plugin.fields` | 一个节点的插件字段（`inspector` / `hover`；悬停只给缓存里的，`pending` 表示再问一次） |
+| `plugin.tasks` / `plugin.task_cancel` | 插件的后台任务（`@plugin.background`）：跑着的和每个插件最近结束的 8 个（`PluginTaskInfo`：标题、状态 `running restarting done failed cancelled`、进度、第几次、失败原因）/ 取消一个（`{id}`，返回它现在的样子） |
 | `insight.node` | 一个节点的洞察卡片：规则的和插件代码的 |
 | `insight.nodes` | 许多节点（≤ 20000）的洞察规则卡片：`{scan_id, nodes}` → `{cards}`，与 `nodes` 一一对应，没有规则的是 null；插件代码的洞察只在 `insight.node` 里 |
 | `plugin.<id>.<名字>` | 插件自己的方法（参数和结果按插件的 schema，`spaceknife plugin schema <文件夹>`）；有二进制结果时随后到达二进制帧 |
@@ -173,6 +174,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `plugin.toast` | 插件的提示（`ctx.toast`） |
 | `plugin.clipboard` | `{plugin, text}`：插件要复制的文字（`ctx.clipboard.write_text`，要 `clipboard` 权限），只发给发起那次调用的会话 |
 | `plugin.progress` | 插件调用的进度（报告、清理），带前端的请求 id |
+| `plugin.task` | 一个后台任务开始、有了进度（每个任务每秒最多 4 次）或结束了（`PluginTaskInfo`），发给所有会话 |
 | `plugin.<id>.<事件>` | 插件自己的事件；共享状态和流走主题（`$/subscribe`，主题名同样带 `plugin.<id>.` 前缀） |
 
 插件调用的错误码见 §5（-32014 到 -32020）；插件能调的内置方法有白名单（[plugin-api.md](plugin-api.md#api-core)）。

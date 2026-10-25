@@ -11,6 +11,7 @@ import { t } from "@/lib/i18n";
 
 import { attachPlugins } from "./client";
 import { bindExtensions } from "./colors";
+import { onTask, refreshTasks } from "./tasks";
 
 bindExtensions(() => get().extensions); // palette:<mode>#<i> tones
 
@@ -109,7 +110,8 @@ export async function installPlugins(r: Rpc): Promise<void> {
   r.on("plugin.toast", onToast);
   r.on("plugin.clipboard", onClipboard);
   r.on("plugin.progress", onProgress);
-  await Promise.allSettled([commands, refreshExtensions(), refreshPlugins()]);
+  r.on("plugin.task", onTask);
+  await Promise.allSettled([commands, refreshExtensions(), refreshPlugins(), refreshTasks()]);
 }
 
 /** The interface language changed: names, titles and legends come in the new one. */
@@ -118,5 +120,6 @@ export function relocalize(): void {
   if (pluginsOn()) {
     void refreshExtensions();
     void refreshPlugins();
+    void refreshTasks();
   }
 }

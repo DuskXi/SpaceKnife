@@ -8,6 +8,7 @@ import { byLang, t } from "@/lib/i18n";
 import { activeTip, levelName, levelText, scanPercent } from "@/shell/ScanProgress";
 import { Icon } from "@/ui/Icon";
 import { StatusPluginItems } from "@/plugins/slots";
+import { TasksStatusItem } from "@/plugins/TasksStatus";
 
 /** The limit of a load level before a scan reports its own (the start page's choice, UI-W1-13). */
 const LEVEL_CAP: Record<LoadLevel, number> = { max: 100, balanced: 70, quiet: 35, idle: 0, custom: 70 };
@@ -131,7 +132,9 @@ export function StatusBar() {
         )}
       </button>
       <span className="flex" />
-      {/* plugins.v1: reports placed in the status bar (slot "status") */}
+      {/* plugins.v1: their background tasks (while any runs, or ended lately), then reports placed
+          in the status bar (slot "status") */}
+      <TasksStatusItem />
       <StatusPluginItems scanId={tab.scanId ?? null} />
       {vol && (
         <button className="status-item" title={t("{fs} · {size}\n已用 {used} / {total}", { fs: vol.fs_type, size: fmtSize(vol.total, true), used: fmtSize(used), total: fmtSize(vol.total, true) })}>

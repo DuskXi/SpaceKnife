@@ -22,6 +22,7 @@ import type {
   PathCheckResult,
   PluginListResult,
   PluginProgressEvent,
+  PluginTaskInfo,
   Report,
   ReportContext,
   ScanStatus,
@@ -223,6 +224,8 @@ export interface AppState {
   plugins: PluginListResult | null;
   /** plugin.progress of running plugin calls, by request id */
   pluginProgress: Record<string, PluginProgressEvent>;
+  /** plugins' background tasks (plugin.tasks, then plugin.task events): running and lately ended */
+  pluginTasks: PluginTaskInfo[];
   pluginDialog: PluginDialog | null;
   cleanup: CleanupReview | null;
   confirm: ConfirmAsk | null;
@@ -349,6 +352,7 @@ export const useApp = create<AppState>(() => ({
   commands: [],
   plugins: null,
   pluginProgress: {},
+  pluginTasks: [],
   pluginDialog: null,
   cleanup: null,
   confirm: null,
