@@ -21,6 +21,7 @@ import type {
   PaletteCommand,
   PathCheckResult,
   PluginListResult,
+  PluginNoticeEvent,
   PluginProgressEvent,
   PluginTaskInfo,
   Report,
@@ -243,6 +244,10 @@ export interface AppState {
   pluginProgress: Record<string, PluginProgressEvent>;
   /** plugins' background tasks (plugin.tasks, then plugin.task events): running and lately ended */
   pluginTasks: PluginTaskInfo[];
+  /** plugins' notices (ctx.notify, plugin.notice events) on screen, oldest first */
+  notices: PluginNoticeEvent[];
+  /** snapshots.changed: how many came (n) and the last one's files (panels with snapshots.read hear of it) */
+  snapshotsChanged: { n: number; saved: string[]; removed: string[] };
   pluginDialog: PluginDialog | null;
   cleanup: CleanupReview | null;
   confirm: ConfirmAsk | null;
@@ -370,6 +375,8 @@ export const useApp = create<AppState>(() => ({
   plugins: null,
   pluginProgress: {},
   pluginTasks: [],
+  notices: [],
+  snapshotsChanged: { n: 0, saved: [], removed: [] },
   pluginDialog: null,
   cleanup: null,
   confirm: null,

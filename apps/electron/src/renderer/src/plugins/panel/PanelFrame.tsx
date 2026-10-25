@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PanelInfo, ReportContext } from "@/protocol/generated";
 import { basketAddMany, call, editFilter, viewCall } from "@/state/actions";
 import { runShortcut } from "@/state/commands";
+import { openCompare } from "@/state/compare";
 import { type AppState, get, toast, useApp } from "@/state/store";
 import { classHexNow } from "@/lib/classes";
 import { getUnitBase } from "@/lib/format";
@@ -85,6 +86,8 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
   });
   const lang = useApp((s) => s.lang);
   const theme = useApp((s) => s.theme);
+  // snapshots were saved or pruned: told as "snapshots" to a panel that may read them
+  const snapshots = useApp((s) => s.snapshotsChanged);
   // the view the panel is about, as text: told again when what it shows changes
   const viewMark = useApp((s) => JSON.stringify(panelView(s, ctx.view_id ?? null)));
   const [h, setH] = useState(height ?? info.height);
@@ -144,6 +147,14 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
           const r = await call("colors.of", { view_id: c.view_id, nodes, mode });
           const s = get();
           return panelColors(r, s.vocab, s.extensions, classHexNow, (k) => (palette().treemap.time as Record<string, string>)[String(k)] ?? palette().treemap.time[4]);
+        }
+        case "compare": {
+          // snapshots.read (checked by the bridge): two snapshot files, or one and "now"
+          const base = String(args.base ?? "");
+          const target = String(args.target ?? "now") || "now";
+          if (!base || base.length > 32767 || target.length > 32767) throw new Error("compare: base and target are snapshot files or \"now\"");
+          await openCompare({ base, target, scanId: typeof args.scan_id === "string" ? args.scan_id : c.scan_id });
+          return null;
         }
         case "copy":
           window.sk.shell.copyText(String(args.text ?? "").slice(0, 65536));
@@ -228,6 +239,9 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
   useEffect(() => {
     if (treeMark) bridge.current?.push("tree", { scan_id: ctx.scan_id });
   }, [treeMark, ctx.scan_id]);
+  useEffect(() => {
+    if (snapshots.n && info.permissions.includes("snapshots.read")) bridge.current?.push("snapshots", { saved: snapshots.saved, removed: snapshots.removed });
+  }, [snapshots, info.permissions]);
 
   if (refused) {
     return (

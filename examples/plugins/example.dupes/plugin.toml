@@ -1,6 +1,6 @@
 # Duplicate files: a code plugin (it runs in its own process). docs/plugin-dev.md walks through it.
-# It reads file contents to hash them (files.read); everything else is declared below or with the
-# decorators in plugin.py.
+# It reads file contents to hash them (files.read) and says when its background search is done
+# (notify); everything else is declared below or with the decorators in plugin.py.
 id = "example.dupes"
 version = "1.0.0"
 name = { zh = "重复文件", en = "Duplicate files" }
@@ -8,7 +8,7 @@ description = { zh = "找出内容相同的文件，把多余的副本放进删�
 author = "SpaceKnife examples"
 icon = "copy"
 entry = "plugin.py"
-permissions = ["tree.read", "files.read"]
+permissions = ["tree.read", "files.read", "notify"]
 
 # the report and the cleanup may hash a whole folder: up to 10 minutes (the decorators ask for 600 s,
 # this lets them have it). A whole disk takes longer: the "search" background task (plugin.py).

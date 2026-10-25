@@ -10,7 +10,7 @@
 //   link as well (#ws=…&token=…) and looks like the app, window buttons that do nothing included;
 //   `&browser=1` shows it the way headless mode does.
 
-import type { BackendState, RemoteInfo, SkApi } from "../../shared/api";
+import type { BackendState, RemoteInfo, SkApi, SystemNotice } from "../../shared/api";
 
 import { t } from "@/lib/i18n";
 import { askPath } from "@/state/browser";
@@ -50,6 +50,8 @@ export interface BrowserEnv {
   askPath: typeof askPath;
   /** a scan ended while the tab was in the background */
   flash(): void;
+  /** a plugin's notice while the tab is in the background: the browser's notification, if allowed */
+  notify?(notice: SystemNotice, clicked: () => void): void;
 }
 
 export interface BrowserApiConfig {
@@ -64,6 +66,7 @@ export interface BrowserApiConfig {
 /** window.sk for a browser tab. */
 export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
   const noop = () => {};
+  const noticeClicks = new Set<(id: string) => void>();
   const server = cfg.remote?.hostname || t("服务器");
   const sep = sepOf(cfg.platform);
   const start = cfg.remote?.home ? cfg.remote.home.replace(/[\\/]+$/, "") + sep : "";
@@ -94,6 +97,11 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
       isMaximized: async () => false,
       flash: () => env.flash(),
       onMaximized: () => noop,
+      notify: (n) => env.notify?.(n, () => noticeClicks.forEach((cb) => cb(n.id))),
+      onNotice: (cb) => {
+        noticeClicks.add(cb);
+        return () => noticeClicks.delete(cb);
+      },
     },
     shell: {
       showItemInFolder: (path) => elsewhere(t("文件在 {host} 上，浏览器里打不开它所在的文件夹。", { host: server }), path),
@@ -161,6 +169,16 @@ const browserEnv: BrowserEnv = {
     const title = document.title;
     document.title = `● ${title}`;
     window.addEventListener("focus", () => (document.title = title), { once: true });
+  },
+  // only when the browser already allows this page's notifications (nothing asks for it here)
+  notify: (n, clicked) => {
+    if (!document.hidden || typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const note = new Notification(n.title, { body: n.body, tag: n.id });
+    note.onclick = () => {
+      window.focus();
+      note.close();
+      clicked();
+    };
   },
 };
 

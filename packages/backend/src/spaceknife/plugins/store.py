@@ -207,6 +207,9 @@ class PluginRecord:
     restarts: int = 0
     last_used: float = 0.0
     keys: list[str] = field(default_factory=list)
+    # its process started before its contributions were registered (first enable, a dev reload):
+    # the start hook runs once they are (PluginHost._activate)
+    start_due: bool = False
 
     @property
     def name(self) -> str:

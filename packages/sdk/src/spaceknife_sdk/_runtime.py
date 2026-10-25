@@ -45,6 +45,8 @@ from .models import (
     Listing,
     Proposal,
     ScanInfo,
+    SnapshotsChange,
+    TreeChange,
     VisualInput,
 )
 from .plugin import Handler, Plugin, loaded
@@ -497,6 +499,10 @@ class Dispatcher:
             event = str(p.get("event", ""))
             if event in ("scan_done", "scan_closed"):
                 await self._call(h, ctx, ScanInfo.model_validate(p.get("scan") or {"scan_id": ""}))
+            elif event == "tree_changed":
+                await self._call(h, ctx, TreeChange.model_validate(p.get("change") or {"scan_id": ""}))
+            elif event == "snapshots":
+                await self._call(h, ctx, SnapshotsChange.model_validate(p.get("change") or {}))
             elif event == "settings":
                 await self._call(h, ctx, list(p.get("changed") or []))
             else:

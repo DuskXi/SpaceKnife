@@ -3,7 +3,16 @@
 // (palette.commands, the key table), and the installed plugins (plugin.list). Read on connect,
 // again for the kinds extensions.changed names and after a language switch (texts come localized).
 
-import type { ExtensionsChangedEvent, PluginClipboardEvent, PluginInfo, PluginProgressEvent, PluginToastEvent, ReportInfo, PanelInfo } from "@/protocol/generated";
+import type {
+  ExtensionsChangedEvent,
+  PluginClipboardEvent,
+  PluginInfo,
+  PluginNoticeEvent,
+  PluginProgressEvent,
+  PluginToastEvent,
+  ReportInfo,
+  PanelInfo,
+} from "@/protocol/generated";
 import type { Rpc } from "@/protocol/rpc";
 import { call } from "@/state/actions";
 import { type AppState, get, set, toast } from "@/state/store";
@@ -11,6 +20,7 @@ import { t } from "@/lib/i18n";
 
 import { attachPlugins } from "./client";
 import { bindExtensions } from "./colors";
+import { onNotice } from "./notices";
 import { onTask, refreshTasks } from "./tasks";
 
 bindExtensions(() => get().extensions); // palette:<mode>#<i> tones
@@ -108,6 +118,7 @@ export async function installPlugins(r: Rpc): Promise<void> {
   r.on("extensions.changed", (ev: ExtensionsChangedEvent) => void refreshFor(ev.kinds));
   r.on("plugin.changed", () => void refreshPlugins());
   r.on("plugin.toast", onToast);
+  r.on("plugin.notice", (ev: PluginNoticeEvent) => onNotice(ev, pluginName(ev.plugin)));
   r.on("plugin.clipboard", onClipboard);
   r.on("plugin.progress", onProgress);
   r.on("plugin.task", onTask);

@@ -107,6 +107,19 @@ class Toast(Msg):
     call: int | None = Field(default=None, ge=0, le=MAX_ID, description="The call that shows it")
 
 
+class Notice(Msg):
+    """``ctx.notify``: a notice with a button running one of the plugin's commands."""
+
+    type: Literal["notice"] = "notice"
+    title: str = Field(max_length=120)
+    body: str = Field(default="", max_length=1000)
+    tone: Literal["info", "ok", "warn", "danger"] = "info"
+    command: str | None = Field(default=None, max_length=128)
+    button: str = Field(default="", max_length=40)
+    args: dict[str, Any] = Field(default_factory=dict)
+    session: str | None = None
+
+
 class Clipboard(Msg):
     """``ctx.clipboard.write_text``: the app of ``session`` puts ``text`` on the clipboard."""
 
@@ -166,6 +179,7 @@ FromPlugin = Annotated[
     | Event
     | State
     | Toast
+    | Notice
     | Clipboard
     | Request
     | Log
@@ -256,6 +270,7 @@ __all__ = [
     "Hello",
     "IoRelease",
     "Log",
+    "Notice",
     "Progress",
     "Ready",
     "Request",

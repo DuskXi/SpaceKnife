@@ -13,6 +13,7 @@ import contextvars
 import fnmatch
 import hashlib
 import io
+import json
 import os
 import threading
 import time
@@ -39,6 +40,8 @@ if TYPE_CHECKING:
 M = TypeVar("M", bound=BaseModel)
 R = TypeVar("R")
 Tone = Literal["info", "ok", "warn", "danger"]
+NOTICE_GAP_S = 5.0  # ctx.notify: at most one notice in this many seconds (the host holds to it too)
+NOTICE_ARGS_MAX = 4096  # ctx.notify: its args, as JSON
 NodeLike = int | NodeRef | Node | str
 
 
@@ -76,6 +79,7 @@ class RuntimeState:
     threads: int = 2
     spare_threads: int = 8
     stuck_after: float = 30.0
+    last_notice: float = -1e9  # ctx.notify: when the last notice went (monotonic)
 
 
 @dataclass(slots=True)
@@ -925,6 +929,50 @@ class Context:
                 "call": self.call_info.id,
             },
         )
+
+    def notify(
+        self,
+        title: Text | str,
+        body: Text | str = "",
+        *,
+        action: str | None = None,
+        button: Text | str | None = None,
+        args: Mapping[str, Any] | None = None,
+        tone: Tone = "info",
+    ) -> bool:
+        """A notice that stays until the user closes it (or about 12 s with the window in front):
+        ``title``, ``body`` and, with ``action`` (one of this plugin's commands by name), a button
+        running that command (``button`` its text, else the command's title; ``args`` go to its
+        action, as a panel's ``sk.host.command(id, args)``). While the window is minimized the
+        system shows it as a notification as well; clicking it brings the window back (and runs
+        the action). For every window, or the one the call came from. At most one every
+        :data:`NOTICE_GAP_S` seconds: False when this one was left out. Needs ``notify``."""
+        require(self._state, "notify")
+        command = None
+        if action:
+            command = action if "." in action else f"{self._state.plugin.id}.{action}"
+            if not command.startswith(self._state.plugin.id + "."):
+                raise ValueError(f"notify: {action!r} is not one of this plugin's commands")
+        extra = dict(args or {})
+        if len(json.dumps(extra, ensure_ascii=False, default=str)) > NOTICE_ARGS_MAX:
+            raise ValueError(f"notify: args take at most {NOTICE_ARGS_MAX} bytes as JSON")
+        now = time.monotonic()
+        if now - self._state.last_notice < NOTICE_GAP_S:
+            return False
+        self._state.last_notice = now
+        self._link.notify(
+            "notice",
+            {
+                "title": (localize(title) or "")[:120],
+                "body": (localize(body) or "")[:1000],
+                "tone": tone,
+                "command": command,
+                "button": (localize(button) or "")[:40] if button else "",
+                "args": json.loads(json.dumps(extra, ensure_ascii=False, default=str)),
+                "session": self.call_info.session,
+            },
+        )
+        return True
 
     # ------------------------------------------------------------- host services
 

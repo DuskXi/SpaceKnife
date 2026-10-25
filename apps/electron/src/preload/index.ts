@@ -30,6 +30,12 @@ const api: SkApi = {
       ipcRenderer.on("sk:maximized", listener);
       return () => ipcRenderer.off("sk:maximized", listener);
     },
+    notify: (notice) => ipcRenderer.send("sk:notify", notice),
+    onNotice(cb) {
+      const listener = (_e: unknown, id: string) => cb(String(id));
+      ipcRenderer.on("sk:notice", listener);
+      return () => ipcRenderer.off("sk:notice", listener);
+    },
   },
   shell: {
     showItemInFolder: (path) => ipcRenderer.send("sk:showItemInFolder", path),

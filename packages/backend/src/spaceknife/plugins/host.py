@@ -34,7 +34,7 @@ from spaceknife_protocol.methods import (
     MethodSpec,
 )
 from spaceknife_sdk.errors import Issue
-from spaceknife_sdk.manifest import PLUGIN_API, ExportFormatSpec, SettingSpec
+from spaceknife_sdk.manifest import HOOK_PERMISSIONS, PLUGIN_API, ExportFormatSpec, SettingSpec
 from spaceknife_sdk.plugin import Description, describe_declarative
 
 from .. import i18n
@@ -48,6 +48,7 @@ from . import paths as ppaths
 from .adapters import AdapterError, build
 from .hostapi import HostApi
 from .image import Images
+from .live import Live
 from .runtime.base import Callbacks, PluginRuntime, RuntimeCallError, StartInfo
 from .store import PluginRecord, TrustStore, discover, read_record
 from .tasks import Tasks
@@ -120,6 +121,7 @@ class PluginHost:
         self.images = Images()
         self.api = HostApi(self)
         self.tasks = Tasks(self)
+        self.live = Live(self)  # tree changes, snapshots and notices: what plugins hear of (live.py)
         self._ids = itertools.count(1)
         self._slots: dict[str, asyncio.Semaphore] = {}
         self._long_slots: dict[str, asyncio.Semaphore] = {}
@@ -192,6 +194,7 @@ class PluginHost:
         self._closed = True
         EXTENSIONS.listeners.pop(f"host-{id(self)}", None)
         self.tasks.close()
+        self.live.close()
         for task in list(self._stream_tasks.values()) + list(self._background):
             task.cancel()
         for rec in list(self.records.values()):
@@ -323,11 +326,18 @@ class PluginHost:
         self._seen_settings[rec.id] = dict(self.server.settings.plugin_settings(rec.id))
         if rec.runtime is not None:  # started to describe itself: its settings exist only now
             await rec.runtime.update({"settings": self.server.settings.plugin_settings(rec.id)})
+        if rec.start_due:  # its process started before this (first enable, a dev reload): now its
+            rec.start_due = False  # hooks are registered and it has its settings
+            rt = rec.runtime
+            if rt is not None and rt.state == "running":
+                self._spawn(self._hook(rec, "start"))
 
     async def _deactivate(self, rec: PluginRecord) -> None:
         if rec.builtin:
             return
+        rec.start_due = False
         self.tasks.forget(rec.id)
+        self.live.forget(rec.id)
         await self._stop_runtime(rec)
         EXTENSIONS.unregister_owner(rec.id)
         self.images.release_user(rec.id)
@@ -465,7 +475,10 @@ class PluginHost:
                 rec.description = desc
             rec.last_used = time.monotonic()
             self._broadcast_plugin(rec)
-            self._spawn(self._hook(rec, "start"))
+            if rec.builtin or EXTENSIONS.owned(rec.id):
+                self._spawn(self._hook(rec, "start"))
+            else:  # started to describe itself (first enable, a dev reload): its hooks are not
+                rec.start_due = True  # registered yet; _activate runs start once they are
             self.tasks.process_started(rec)
             return rt
 
@@ -749,6 +762,8 @@ class PluginHost:
             target = self._session(payload.get("session"))
             for s in [target] if target is not None else self._sessions():
                 s.emit(EVENT_PLUGIN_TOAST, ev)
+        elif type == "notice":
+            self.live.notice(rec, payload, self._session(payload.get("session")))
         elif type == "clipboard":
             # ctx.clipboard.write_text: only with the permission, only for the session that asked
             # (a background call with no session writes nobody's clipboard)
@@ -1267,16 +1282,35 @@ class PluginHost:
 
     # ------------------------------------------------------------- hooks
 
-    async def _hook(self, rec: PluginRecord, event: str, **args: Any) -> None:
-        for c in EXTENSIONS.owned(rec.id):
-            if c.kind == "hook" and c.spec.event == event:
-                limit = float(getattr(c.spec, "timeout", HOOK_TIMEOUT))
-                try:
-                    await self.call(rec.id, "hook", c.local, {"event": event, **args}, timeout=limit)
-                except (RpcError, asyncio.CancelledError) as exc:
-                    logger.bind(source=f"plugin:{rec.id}").warning(
-                        "hook {} of {} failed: {}", event, rec.id, getattr(exc, "message", exc)
-                    )
+    async def _hook(self, rec: PluginRecord, event: str, *, _scan: str | None = None, **args: Any) -> None:
+        """Run the plugin's ``event`` hooks (one after the other); ``_scan``: the scan the hook is
+        about (its ``ctx.tree``)."""
+        need = HOOK_PERMISSIONS.get(event)
+        if need is not None and need not in rec.granted:
+            return  # it may not hear of this (plugin check says so)
+        found = [c for c in EXTENSIONS.owned(rec.id) if c.kind == "hook" and c.spec.event == event]
+        if not found:
+            declared = rec.description is not None and any(
+                d.get("kind") == "hook" and (d.get("spec") or {}).get("event") == event
+                for d in rec.description.contributions
+            )
+            if declared:  # its code has one, the registry not (yet): say so instead of nothing
+                logger.bind(source=f"plugin:{rec.id}").warning(
+                    "hook {} of {} not run: its contributions are not registered (state {})",
+                    event,
+                    rec.id,
+                    rec.state,
+                )
+            return
+        ctx = {"scan_id": _scan} if _scan else None
+        for c in found:
+            limit = float(getattr(c.spec, "timeout", HOOK_TIMEOUT))
+            try:
+                await self.call(rec.id, "hook", c.local, {"event": event, **args}, ctx=ctx, timeout=limit)
+            except (RpcError, asyncio.CancelledError) as exc:
+                logger.bind(source=f"plugin:{rec.id}").warning(
+                    "hook {} of {} failed: {}", event, rec.id, getattr(exc, "message", exc)
+                )
 
     # ------------------------------------------------------------- cached answers
 
@@ -1352,9 +1386,26 @@ class PluginHost:
             changed = sorted(k for k in set(now) | set(before) if now.get(k) != before.get(k))
             if not changed:
                 continue
-            self.invalidate(rec.id)
-            if any(c.kind == "hook" and c.spec.event == "settings" for c in EXTENSIONS.owned(rec.id)):
-                self._spawn(self._hook(rec, "settings", changed=changed))
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:  # no loop (tests changing settings directly): only the caches go
+                self.invalidate(rec.id)
+                continue
+            self._spawn(self._new_settings(rec, changed, dict(now)))
+
+    async def _new_settings(self, rec: PluginRecord, changed: list[str], values: dict[str, Any]) -> None:
+        """A plugin's settings changed: its process gets them first, then its cached answers go
+        (legends, fields and weights are asked again, of a process that has the new values) and its
+        ``settings`` hook runs (``ctx.settings`` already new)."""
+        rt = rec.runtime
+        if rt is not None and rt.state == "running":
+            with contextlib.suppress(Exception):
+                await rt.update({"settings": values})  # sent before every call that follows
+        if rec.state != "enabled":
+            return
+        self.invalidate(rec.id)
+        if any(c.kind == "hook" and c.spec.event == "settings" for c in EXTENSIONS.owned(rec.id)):
+            await self._hook(rec, "settings", changed=changed)
 
     def legend_of(self, c: Any, lang: str) -> list[tuple[str, Any]]:
         """A colour mode's legend now, (text, colour or None) per palette entry: from the plugin's
@@ -1409,10 +1460,12 @@ class PluginHost:
         if event == "lang":
             self.tasks.relocalize()  # titles and texts of the running background tasks
         owners = {c.owner for c in EXTENSIONS.of("hook") if c.spec.event == event and c.owner != BUILTIN}
+        scan = args.get("scan")
+        about = str(scan.get("scan_id") or "") if event == "scan_done" and isinstance(scan, dict) else None
         for pid in owners:
             rec = self.records.get(pid)
             if rec is not None and rec.state == "enabled":
-                self._spawn(self._hook(rec, event, **args))
+                self._spawn(self._hook(rec, event, _scan=about, **args))
         if event == "scan_done":
             asked = {c.owner for kind in ("node_field", "insight") for c in EXTENSIONS.of(kind)}
             for pid in asked - {BUILTIN}:

@@ -78,6 +78,9 @@ async def test_the_background_search(host: MockHost) -> None:
     task = await host.task("search", key=host.scan_id or "")  # the command's (one per scan): until done
     assert task.state == "done" and task.done == task.total == 4
     assert host.state("status")["groups"] == 1
+    # the notice when it is done: its button opens the report
+    assert host.notices[-1]["command"] == "example.dupes.open"
+    assert host.notices[-1]["body"].startswith(("1 组", "1 groups"))
     await host.settled()
     assert await host.filter(":set:dupes") == ["a.bin", "b.bin", "sub/d.bin"]
 

@@ -12,6 +12,7 @@ import type {
   CallAction,
   CleanupAction,
   CommandAction,
+  CompareOpen,
   CycleAction,
   FilterAction,
   LabeledAction,
@@ -30,7 +31,7 @@ import type {
 import { RpcError } from "@/protocol/rpc";
 import { basketAdd, call, editFilter, setViewSettings, updateSettings, viewCall } from "@/state/actions";
 import { activeTab, focusedViewId, get, set, setting, toast } from "@/state/store";
-import { cycleDirection } from "@/state/compare";
+import { cycleDirection, openCompare } from "@/state/compare";
 import { t } from "@/lib/i18n";
 
 import { callPlugin, pluginOf } from "./client";
@@ -161,7 +162,8 @@ function allowed(rc: RunContext, permission: string): boolean {
   return false;
 }
 
-/** What a call answered: a report opens in the dialog, a toast shows, a cleanup goes to review. */
+/** What a call answered: a report opens in the dialog, a toast shows, a cleanup goes to review, a
+ * comparison opens (snapshots.read). */
 async function handleResult(value: unknown, rc: RunContext, ctx: ReportContext): Promise<void> {
   if (!value || typeof value !== "object") return;
   const typed = value as { type?: string };
@@ -174,6 +176,11 @@ async function handleResult(value: unknown, rc: RunContext, ctx: ReportContext):
   } else if (typed.type === "cleanup") {
     const { reviewCleanup } = await import("./cleanup");
     reviewCleanup(rc.owner ?? "", ctx.scan_id ?? "", value as never);
+  } else if (typed.type === "compare") {
+    if (!allowed(rc, "snapshots.read")) return;
+    const c = value as CompareOpen;
+    if (typeof c.base !== "string" || !c.base) return;
+    await openCompare({ base: c.base, target: typeof c.target === "string" && c.target ? c.target : "now", scanId: c.scan_id ?? ctx.scan_id });
   }
 }
 

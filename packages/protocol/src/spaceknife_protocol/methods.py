@@ -75,6 +75,7 @@ from .plugins import (
     PluginInstallResult,
     PluginLinkParams,
     PluginListResult,
+    PluginNoticeEvent,
     PluginProgressEvent,
     PluginTaskCancelParams,
     PluginTaskInfo,
@@ -96,6 +97,7 @@ from .scan import (
     SnapshotListResult,
     SnapshotLoadParams,
     SnapshotSaveParams,
+    SnapshotsChangedEvent,
     TreeChildrenParams,
     TreeChildrenResult,
     TreeFindParams,
@@ -593,6 +595,11 @@ EVENT_EXTENSIONS = EventSpec(
 )
 EVENT_PLUGIN = EventSpec("plugin.changed", PluginChangedEvent, "A plugin's state changed (plugins.v1).")
 EVENT_PLUGIN_TOAST = EventSpec("plugin.toast", PluginToastEvent, "A plugin shows a short message.")
+EVENT_PLUGIN_NOTICE = EventSpec(
+    "plugin.notice",
+    PluginNoticeEvent,
+    "A plugin's notice with a button (it has notify); the OS shows it too when minimized.",
+)
 EVENT_PLUGIN_CLIPBOARD = EventSpec(
     "plugin.clipboard", PluginClipboardEvent, "A plugin puts text on the clipboard (it has clipboard)."
 )
@@ -737,6 +744,9 @@ EVENT_CLASSES = EventSpec("classes.changed", ClassesEvent, "The file class table
 EVENT_COMPARE_PROGRESS = EventSpec(
     "compare.progress", CompareProgressEvent, "A comparison is computing, ready (with its totals) or failed."
 )
+EVENT_SNAPSHOTS_CHANGED = EventSpec(
+    "snapshots.changed", SnapshotsChangedEvent, "Snapshots were saved or pruned (every session)."
+)
 
 EVENTS: dict[str, EventSpec[BaseModel]] = {
     spec.name: spec
@@ -750,11 +760,13 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_BASKET,
         EVENT_OPS_PROGRESS,
         EVENT_COMPARE_PROGRESS,
+        EVENT_SNAPSHOTS_CHANGED,
         EVENT_CLASSES,
         EVENT_UPDATE,
         EVENT_EXTENSIONS,
         EVENT_PLUGIN,
         EVENT_PLUGIN_TOAST,
+        EVENT_PLUGIN_NOTICE,
         EVENT_PLUGIN_CLIPBOARD,
         EVENT_PLUGIN_PROGRESS,
         EVENT_PLUGIN_TASK,

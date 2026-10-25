@@ -129,6 +129,7 @@ Permission = Literal[
     "exec",  # run the programs listed in the manifest
     "host.open",  # open or reveal files, open a terminal or a web page
     "clipboard",  # write to the clipboard
+    "notify",  # notices with a button; a system notification while the window is minimized
 ]
 PERMISSIONS: tuple[Permission, ...] = (
     "tree.read",
@@ -139,6 +140,7 @@ PERMISSIONS: tuple[Permission, ...] = (
     "exec",
     "host.open",
     "clipboard",
+    "notify",
 )
 
 PluginState = Literal[
@@ -654,6 +656,18 @@ class Toast(Payload):
     tone: Literal["info", "ok", "warn", "danger"] = "info"
 
 
+class CompareOpen(Payload):
+    """What a command's method may return to show a comparison (compare mode, W6): two snapshot
+    files, or a snapshot and ``"now"`` (the live tree of a scan of the same folders). The window
+    uses the tab that shows those folders; for ``"now"`` without one it scans them first, for two
+    snapshots it opens ``target`` and compares ``base`` with it. Needs ``snapshots.read``."""
+
+    type: Literal["compare"] = "compare"
+    base: str = Field(min_length=1, max_length=32767, description="A snapshot file, or 'now'")
+    target: str = Field(default="now", min_length=1, max_length=32767, description="Same as base")
+    scan_id: str | None = Field(default=None, max_length=64, description="The scan whose tab compares")
+
+
 # --------------------------------------------------------------------------- fields, insights, cleanups
 
 FieldSlot = Literal["inspector", "hover"]
@@ -871,6 +885,20 @@ class PluginToastEvent(Payload):
     tone: Literal["info", "ok", "warn", "danger"] = "info"
 
 
+class PluginNoticeEvent(Payload):
+    """A plugin's ``ctx.notify`` (it has ``notify``): a notice that stays a while, with a button
+    running one of its commands; while the window is minimized the system shows it as well."""
+
+    plugin: str
+    id: str = Field(max_length=64, description="Unique per notice (one system notification each)")
+    title: str = Field(max_length=120)
+    body: str = Field(default="", max_length=1000)
+    tone: Literal["info", "ok", "warn", "danger"] = "info"
+    command: str | None = Field(default=None, max_length=128, description="One of the plugin's commands")
+    button: str = Field(default="", max_length=40, description="The button's text (else the command's title)")
+    args: dict[str, Any] = Field(default_factory=dict, description="Added to the command's action args")
+
+
 class PluginClipboardEvent(Payload):
     """A plugin's ``ctx.clipboard.write_text`` (it has ``clipboard``): the frontend puts the text on
     the clipboard and says so. Only the session the call came from gets it."""
@@ -928,6 +956,7 @@ class PluginTaskCancelParams(Params):
 DOCUMENTS: dict[str, tuple[type[Payload], Literal["input", "output"]]] = {
     "report": (Report, "output"),
     "toast": (Toast, "output"),
+    "compare": (CompareOpen, "output"),
     "cleanup": (CleanupResult, "output"),
     "action_context": (ActionContext, "input"),
     "report_context": (ReportContext, "input"),

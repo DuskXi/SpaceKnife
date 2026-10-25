@@ -284,7 +284,23 @@
 .plugin-task-bar > span { display: block; height: 100%; border-radius: 2px; background: var(--sk-color-accent-default); transition: width 0.25s ease-out; }
 .plugin-task-bar.indeterminate > span { position: absolute; width: 30%; animation: sk-task-slide 1.2s ease-in-out infinite; }
 @keyframes sk-task-slide { from { left: -30%; } to { left: 100%; } }
+/* plugins' notices (ctx.notify): a stack at the bottom right, the tone as a bar on the left */
+.plugin-notices { position: fixed; right: 16px; bottom: 44px; z-index: 75; display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 340px; max-width: calc(100vw - 32px); pointer-events: none; }
+.plugin-notice { --tone: var(--sk-color-accent-default); pointer-events: auto; position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; padding: 10px 8px 10px 14px; border-radius: var(--sk-radius-lg); background: var(--sk-color-bg-overlay); box-shadow: var(--sk-shadow-popover); overflow: hidden; animation: sk-notice-in 160ms ease-out; }
+.plugin-notice::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--tone); }
+.plugin-notice.tone-ok { --tone: var(--sk-color-status-success); }
+.plugin-notice.tone-warn { --tone: var(--sk-color-status-warning); }
+.plugin-notice.tone-danger { --tone: var(--sk-color-status-danger); }
+.plugin-notice-icon { display: flex; padding-top: 1px; color: var(--tone); }
+.plugin-notice-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.plugin-notice-title { color: var(--sk-color-text-primary); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.plugin-notice-body { display: -webkit-box; overflow: hidden; color: var(--sk-color-text-secondary); font-size: 12px; white-space: pre-line; overflow-wrap: anywhere; -webkit-line-clamp: 5; -webkit-box-orient: vertical; }
+.plugin-notice-from { color: var(--sk-color-text-tertiary); font-size: 11px; }
+.plugin-notice-actions { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; gap: 6px; margin: -4px 0 0; }
+.plugin-notice-button.ghost { height: 28px; padding: 0 10px; font-size: 12px; white-space: nowrap; }
+@keyframes sk-notice-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
+  .plugin-notice { animation: none; }
   .plugin-task-bar.indeterminate > span { animation: none; left: 0; width: 100%; opacity: 0.5; }
   .plugin-task-bar > span { transition: none; }
 }

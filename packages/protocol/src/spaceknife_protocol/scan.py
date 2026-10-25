@@ -394,6 +394,14 @@ class SnapshotListResult(Payload):
     snapshots: list[SnapshotInfo]
 
 
+class SnapshotsChangedEvent(Payload):
+    """Snapshots were saved (a finished scan saves itself, 「保存快照」) or pruned (the oldest
+    automatic ones beyond the number kept): the timeline and the comparison's lists follow."""
+
+    saved: list[str] = Field(default_factory=list, max_length=64, description="Snapshot files written")
+    removed: list[str] = Field(default_factory=list, max_length=64, description="Snapshot files deleted")
+
+
 class SnapshotSaveParams(Params):
     scan_id: str = Field(min_length=1, max_length=64)
     path: str | None = Field(default=None, description="Target file; default = the auto-save folder")

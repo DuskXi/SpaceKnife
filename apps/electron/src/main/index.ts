@@ -7,7 +7,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { BrowserWindow, app, clipboard, dialog, ipcMain, nativeTheme, protocol, session, shell } from "electron";
+import { BrowserWindow, Notification, app, clipboard, dialog, ipcMain, nativeTheme, protocol, session, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
 import { WINDOW_BG } from "../shared/theme";
@@ -191,6 +191,33 @@ function createWindow(): void {
   else void win.loadURL(`${APP_ORIGIN}/index.html`);
 }
 
+// system notifications on screen: kept referenced until closed (a collected one loses its click)
+const notices = new Set<Notification>();
+
+/** A plugin's notice (ctx.notify) while the window is minimized or hidden: a system notification
+ * (and the taskbar's attention, where the system shows none, e.g. a portable build on Windows);
+ * clicking it brings the window back and tells the page which notice it was. */
+function showNotice(raw: unknown): void {
+  if (!win || (!win.isMinimized() && win.isVisible())) return;
+  const n = (raw && typeof raw === "object" ? raw : {}) as { id?: unknown; title?: unknown; body?: unknown };
+  const id = String(n.id ?? "").slice(0, 64);
+  if (process.platform === "darwin") app.dock?.bounce("informational");
+  else win.flashFrame(true);
+  if (!Notification.isSupported() || notices.size >= 8) return;
+  const note = new Notification({ title: String(n.title ?? "").slice(0, 200), body: String(n.body ?? "").slice(0, 1000) });
+  notices.add(note);
+  note.on("close", () => notices.delete(note));
+  note.on("click", () => {
+    notices.delete(note);
+    if (!win) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send("sk:notice", id);
+  });
+  note.show();
+}
+
 function registerIpc(): void {
   ipcMain.handle("sk:backend", () => backendState);
   ipcMain.on("sk:win", (_e, action: string) => {
@@ -204,6 +231,7 @@ function registerIpc(): void {
     }
   });
   app.on("browser-window-focus", (_e, w) => w.flashFrame(false));
+  ipcMain.on("sk:notify", (_e, notice: unknown) => showNotice(notice));
   ipcMain.handle("sk:isMaximized", () => win?.isMaximized() ?? false);
   ipcMain.on("sk:showItemInFolder", (_e, path: string) => shell.showItemInFolder(path));
   ipcMain.handle("sk:openPath", (_e, path: string) => shell.openPath(path));
@@ -501,6 +529,9 @@ if (CLI.mode === "help" || CLI.mode === "error") {
     }),
   );
 } else {
+  // Windows: system notifications (a plugin's ctx.notify while minimized) need the id the installer
+  // gave the Start menu shortcut (electron-builder.yml appId)
+  if (process.platform === "win32" && app.isPackaged) app.setAppUserModelId("io.github.duskxi.spaceknife");
   app.whenReady().then(() => {
     serveRenderer();
     servePanels();

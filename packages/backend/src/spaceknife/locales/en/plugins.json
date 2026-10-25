@@ -17,6 +17,7 @@
  "压缩包里的文件压缩比异常：{name}": "A file in the archive is compressed suspiciously well: {name}",
  "压缩包里的文件大小与记录不符：{name}": "A file in the archive is not the size it says: {name}",
  "压缩包里的文件超过 {n} 个": "The archive holds more than {n} files",
+ "发出通知（窗口最小化时也显示为系统通知）": "Show notifications (also as system notifications while the window is minimized)",
  "变化说明": "Change explanations",
  "只在对比中可用": "Only while comparing",
  "只用于文件": "Files only",

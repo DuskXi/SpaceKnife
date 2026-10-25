@@ -263,29 +263,35 @@ class HostApi:
         scan_id, store = self._store(rec, p, epoch=False)
         return self.tree_info(scan_id, store), []
 
+    def scan_info(self, h: ScanHandle, front: str | None = None) -> dict[str, Any]:
+        """A scan as plugins see it (``ScanInfo``: ``ctx.scans()``, the scan hooks)."""
+        st = h.status()
+        mon = getattr(h, "monitor", None)
+        try:
+            monitoring = mon.status().state if mon is not None else "off"
+        except Exception:
+            monitoring = "failed"
+        return {
+            "scan_id": h.id,
+            "roots": [r.path for r in h.roots],
+            "state": st.state,
+            "items": st.items,
+            "source": getattr(h, "plugin_source", None) or h.source,
+            "started_at": st.started_at.timestamp() if st.started_at else None,
+            "finished_at": st.finished_at.timestamp() if st.finished_at else None,
+            "snapshot": getattr(h, "snapshot_path", None),
+            "front": h.id == front,
+            "on_disk": _on_disk(h),
+            "monitoring": monitoring,
+        }
+
     async def _scans(
         self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
     ) -> tuple[Any, list[bytes]]:
         if "tree.read" not in rec.granted:
             raise _deny("tree.read")
-        out: list[dict[str, Any]] = []
         front = self.active_scan()
-        for sid, h in list(self.handles().items()):
-            st = h.status()
-            out.append(
-                {
-                    "scan_id": sid,
-                    "roots": [r.path for r in h.roots],
-                    "state": st.state,
-                    "items": st.items,
-                    "source": getattr(h, "plugin_source", None) or h.source,
-                    "started_at": st.started_at.timestamp() if st.started_at else None,
-                    "finished_at": st.finished_at.timestamp() if st.finished_at else None,
-                    "snapshot": getattr(h, "snapshot_path", None),
-                    "front": sid == front,
-                    "on_disk": _on_disk(h),
-                }
-            )
+        out = [self.scan_info(h, front) for h in list(self.handles().values())]
         out.sort(key=lambda d: -float(d["finished_at"] or d["started_at"] or 0))  # newest first
         return {"scans": out}, []
 

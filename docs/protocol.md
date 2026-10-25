@@ -173,6 +173,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `extensions.changed` | 注册表变了（插件启用、停用、重新加载，语言切换）：`kinds` 是变了的种类，前端只重新取这些 |
 | `plugin.changed` | 一个插件的状态变了（`PluginInfo`） |
 | `plugin.toast` | 插件的提示（`ctx.toast`） |
+| `plugin.notice` | `{plugin, id, title, body, tone, command, button, args}`：插件的通知（`ctx.notify`，要 `notify` 权限；每个插件 5 秒最多一条，宿主核对过 `command` 是它自己的命令、截过长度）。前端留在屏幕上直到关掉，按钮运行 `command`（带 `args`）；窗口最小化时 Electron 同时弹出系统通知。发给发起调用的会话，钩子和后台任务里发给所有会话 |
 | `plugin.clipboard` | `{plugin, text}`：插件要复制的文字（`ctx.clipboard.write_text`，要 `clipboard` 权限），只发给发起那次调用的会话 |
 | `plugin.progress` | 插件调用的进度（报告、清理），带前端的请求 id |
 | `plugin.task` | 一个后台任务开始、有了进度（每个任务每秒最多 4 次）或结束了（`PluginTaskInfo`），发给所有会话 |
@@ -189,6 +190,7 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `scan.progress` | `scan` 主题（参数 `{scan_id}`）：订阅时立即推送一次当前状态，之后最多每秒 4 次，结束时再推送一次最终状态 |
 | `view.frame` | 不由请求触发的新帧（扫描进行中最多每秒 4 次，扫描结束时一次，设置改变几何参数时一次），随后到达对应的二进制帧 |
 | `settings.changed` | 任何一端修改设置、或设置文件被外部编辑后，推送给所有会话的完整设置文档 |
+| `snapshots.changed` | `{saved, removed}`：存了快照（扫描完成自动保存、`snapshot.save`）或删了超过保留个数的旧快照，推送给所有会话（对比的列表、插件面板的 `sk.onSnapshots` 跟着变；插件的 `snapshots` 钩子同时收到） |
 | `update.changed` | `{status}`：检查开始与结束、下载进度（最多每秒 4 次）、卡片关闭、跳过或恢复一个系列、相关设置或界面语言改变时，推送给所有声明了 `updates.v1` 的会话 |
 
 ### 更新检查（`updates.v1`）

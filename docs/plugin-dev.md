@@ -230,7 +230,7 @@ async def greet(ctx: Context, a: ActionContext) -> Toast:
     return Toast(text=T("你好，{name}", "Hello, {name}").format(name=name), tone="ok")
 ```
 
-函数式命令返回 `Toast`（显示提示）、`Report`（在对话框里打开）或 None。打开、复制、加入删除篮各要对应的权限（`host.open`、`clipboard`、`basket.propose`）。运行命令的一方可以再给参数：面板的 `sk.host.command(id, args)`、MockHost 的 `host.command(name, node=…, **args)`，加在动作自己的 `args` 上（[动作的参数](plugin-api.md#api-action-args)）。
+函数式命令返回 `Toast`（显示提示）、`Report`（在对话框里打开）、`CompareOpen`（打开两份快照或快照与现在的[对比](plugin-api.md#api-live)，要 `snapshots.read`）或 None。打开、复制、加入删除篮各要对应的权限（`host.open`、`clipboard`、`basket.propose`）。运行命令的一方可以再给参数：面板的 `sk.host.command(id, args)`、MockHost 的 `host.command(name, node=…, **args)`，加在动作自己的 `args` 上（[动作的参数](plugin-api.md#api-action-args)）。
 
 <a id="kind-keybinding"></a>
 #### 按键
@@ -726,7 +726,7 @@ async def growth(ctx: Context, c: ReportContext) -> Report:
 <a id="kind-hook"></a>
 #### 钩子
 
-`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动后 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了，一阵变化只来一次：用户拿出了本插件放进去的项、删了它们……）；签名见 [API 参考](plugin-api.md#api-hooks)。`name` 默认是函数名；写错的名字 `check` 从代码里就找出来（`unknown_hook`）。
+`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动、贡献注册好之后——第一次启用和 `plugin dev` 重新加载也一样 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`tree_changed`（打开着的扫描的树变了：实时监控的文件变化、重新扫描；每个扫描每秒最多一次，收到 `TreeChange`：变化所在的文件夹、树的 `version`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了，一阵变化只来一次：用户拿出了本插件放进去的项、删了它们……）、`snapshots`（存了或删了快照，要 `snapshots.read`）；签名和细节见 [API 参考](plugin-api.md#api-hooks)（[树变化与快照](plugin-api.md#api-live)）。`name` 默认是函数名；写错的名字 `check` 从代码里就找出来（`unknown_hook`）。
 
 ```python ex
 @plugin.on("scan_done")
@@ -767,6 +767,7 @@ def hash_big(ctx: Context) -> None:
 | `ctx.state(Model)` | `.get()` `.set(m)` `.update(**fields)` | — |
 | `ctx.basket.propose(items, reason)`、`.withdraw(items)` | 放进删除篮（每项可以是 `(节点, 它自己的原因)`；一个命令里放多少次，用户只看到一条提示，命令自己 `toast` 时没有），返回放进去的项数；拿回本插件放进去的项 | `basket.propose` |
 | `ctx.clipboard.write_text(text)` | 复制到发起调用的那个窗口的剪贴板 | `clipboard` |
+| `ctx.notify(title, body, action=, button=, args=)` | 留在屏幕上的通知，带一个运行本插件命令的按钮；窗口最小化时也是系统通知（[通知](plugin-api.md#api-notify)） | `notify` |
 | `ctx.granted`、`ctx.slot`、`ctx.invalidate(*kinds)` | 授予的权限；字段在哪（`inspector` `hover`）；丢掉宿主的缓存 | — |
 | `ctx.files.open(n)`、`.read(n, limit)`、`.hash(n, "sha256", limit=None, progress=)`、`.hash_many(ns, limit=, progress=)`、`.open_path(path)` | 只读打开扫描范围内的文件（`n` 是节点、下标或路径），读盘守用户选的磁盘负载上限（和扫描共用，扫描时让路）；`hash_many` 几个线程一起读，跳过文件夹和云端占位（`Flag.CLOUD` `Flag.OFFLINE`，读它们会下载），读不了的给 None；`progress=True` 把读了多少字节报成 `ctx.progress`（或给 `(done, total)` 函数），每读 1 MiB 查一次取消；范围外是 `FileNotAllowed`，系统拒绝是别的 `PermissionError` | `files.read` |
 | `ctx.net.fetch(url, method=, headers=, body=, timeout=)` | HTTP(S)，只能连 `net_hosts`；返回 `status headers body .json() .text()` | `net` |
@@ -863,7 +864,7 @@ sk.host.command("my.tool.clean", { rule: "logs" });  sk.host.command("view.visua
 sk.context.args;                  // 打开它的 open 动作带的 args（再打开一次时 sk.onContext 收到新的）
 sk.view;  sk.onView((v) => …);    // 面板所在视图画的是什么：visual layout color_mode zoom_node selected detail filter …
 const { colors, legend } = await sk.colors(nodes);   // 视图给这些节点上的颜色（#rrggbb）和图例，要 tree.read
-sk.host.basket([node], "原因");   // 要 basket.propose；sk.host.copy 要 clipboard，open / reveal / url 要 host.open
+sk.host.basket([node], "原因");   // 要 basket.propose；sk.host.copy 要 clipboard，open / reveal / url 要 host.open；sk.host.compare(快照, "now") 和 sk.onSnapshots 要 snapshots.read
 sk.resize(240);                   // 详情面板和对话框里要的高度
 ```
 
@@ -889,6 +890,7 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 | `exec` | 运行 `exec` 里的程序 |
 | `host.open` | 打开或定位文件、开终端、打开网页 |
 | `clipboard` | 写剪贴板 |
+| `notify` | 通知（`ctx.notify`），窗口最小化时显示为系统通知 |
 
 - 第一次启用时用户看到全部权限（`net`、`exec` 连同主机和程序），只授予确认过的。文件夹按内容哈希锁定：任何文件变了，插件停在「已改动」，用户重新确认后才再启用（开发链接不锁）。
 - 插件进程有审计钩子：没有权限时联网、写插件存储以外的地方、开子进程、`ctypes` 都会被拦下（`PermissionError`）。它不是操作系统级的沙箱，启用对话框也这么写。

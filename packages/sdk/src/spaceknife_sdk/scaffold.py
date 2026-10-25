@@ -456,6 +456,27 @@ async def test_scan_done_hook(host: MockHost) -> None:
 """,
         doc="kind-hook",
     ),
+    "changes": Part(
+        imports=("Context", "T", "TreeChange"),
+        code='''
+@plugin.on("tree_changed")
+def tree_changed(ctx: Context, change: TreeChange) -> None:
+    """Files of an open scan changed (it is monitored live, or was rescanned): at most once a
+    second, with the folders where it happened; ctx.tree is that scan. ctx.notify stays on screen
+    (a system notification while the window is minimized), action= adds a button running one of
+    this plugin's commands."""
+    names = ", ".join(ctx.tree.name(f) for f in change.folders[:3])
+    where = T("变化在：{names}", "Changed in: {names}").format(names=names)
+    ctx.notify(T("文件变了", "Files changed"), where)
+''',
+        test="""
+async def test_tree_changed_hook(host: MockHost) -> None:
+    await host.changed("logs/app.log")  # as when the app applies a file change: the hook runs
+    assert host.notices[-1]["body"].endswith("logs")
+""",
+        permissions=("tree.read", "notify"),
+        doc="kind-hook",
+    ),
     "task": Part(
         imports=("Context", "T"),
         code='''

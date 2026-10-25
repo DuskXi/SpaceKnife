@@ -2,12 +2,12 @@
 // comparison as a "change tree" that views open like a scan (docs/manage.md §3); while a new pair
 // of ends is computed the old result stays on screen, dimmed (UI-W6-41).
 
-import type { CompareProgressEvent } from "@/protocol/generated";
+import type { CompareProgressEvent, SnapshotInfo, SnapshotsChangedEvent } from "@/protocol/generated";
 import { RpcError } from "@/protocol/rpc";
 import { t } from "@/lib/i18n";
 import { isSynthetic } from "@/visual/frame";
 
-import { call, openView, setViewSettings, startScan, viewCall } from "./actions";
+import { call, openSnapshot, openView, setViewSettings, startScan, viewCall } from "./actions";
 import { activeTab, get, patchCompare, set, type Tab, type TabCompare, toast } from "./store";
 
 export const NOW = "now";
@@ -33,12 +33,14 @@ function dropView(viewId: string | null): void {
   });
 }
 
-/** 「与快照对比…」 (UI-W6-01): the latest snapshot of this scan target against now. */
-export async function enterCompare(base?: string): Promise<void> {
+/** 「与快照对比…」 (UI-W6-01): the latest snapshot of this scan target against now; `base` and
+ * `target` (a plugin's CompareOpen, a panel's sk.host.compare): those ends instead. */
+export async function enterCompare(base?: string, target?: string): Promise<void> {
   const tab = activeTab();
   if (tab.kind !== "scan" || !tab.scanId) return;
   if (tab.compare) {
-    if (base && base !== tab.compare.base) await setCompareEnds(tab.id, base, tab.compare.target);
+    const ends = { base: base ?? tab.compare.base, target: target ?? tab.compare.target };
+    if (ends.base !== tab.compare.base || ends.target !== tab.compare.target) await setCompareEnds(tab.id, ends.base, ends.target);
     return;
   }
   let sources;
@@ -48,14 +50,16 @@ export async function enterCompare(base?: string): Promise<void> {
     toast(err instanceof RpcError ? err.message : String(err));
     return;
   }
-  if (!sources.now) return toast(sources.now_note || t("现在还不能对比"));
-  if (!sources.snapshots.length) return toast(t("还没有这个位置的快照：先保存一次快照（Ctrl+S）"));
+  const end = target ?? NOW;
+  if (!sources.now && (end === NOW || base === NOW)) return toast(sources.now_note || t("现在还不能对比"));
+  if (!sources.snapshots.length && !base) return toast(t("还没有这个位置的快照：先保存一次快照（Ctrl+S）"));
   // the newest snapshot that is not this very tree (a finished scan saves itself at once)
   const own = get().scans[tab.scanId]?.snapshot;
   const first = base ?? (sources.snapshots.find((s) => s.path !== own) ?? sources.snapshots[0]!).path;
+  if (first === end) return toast(t("基准和对比目标不能是同一份数据"));
   const compare: TabCompare = {
     base: first,
-    target: NOW,
+    target: end,
     compareId: null,
     phase: "loading",
     progress: null,
@@ -66,7 +70,71 @@ export async function enterCompare(base?: string): Promise<void> {
     sources,
   };
   set((s) => ({ tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, compare } : t)), basketOpen: false }));
-  await startCompare(tab.id, first, NOW);
+  await startCompare(tab.id, first, end);
+}
+
+const fold = (p: string) => (window.sk.platform === "win32" ? p.toLowerCase() : p).replace(/[\\/]+$/, "");
+const rootsKey = (roots: readonly string[]) => roots.map(fold).sort().join("|");
+
+/** The tab showing a finished scan of these folders (`live`: a scan, not an opened snapshot). */
+function tabOfRoots(roots: readonly string[], live: boolean): Tab | undefined {
+  const s = get();
+  const want = rootsKey(roots);
+  return s.tabs.find((t) => {
+    const scan = t.kind === "scan" && t.scanId ? s.scans[t.scanId] : undefined;
+    return scan && scan.state === "done" && (!live || scan.source === "scan") && rootsKey(scan.roots.map((r) => r.path)) === want;
+  });
+}
+
+/** A plugin shows a comparison (a command's CompareOpen, a panel's sk.host.compare): two snapshot
+ * files, or one and "now". The tab of `scanId`, else one showing the snapshots' folders, compares;
+ * for "now" without one the folders are scanned first (then compared, as 「与现在对比」); two
+ * snapshots without one: `target` opens in a new tab and is compared with `base` there. */
+export async function openCompare(req: { base: string; target: string; scanId?: string | null }): Promise<void> {
+  const { base, target } = req;
+  if (base === target) return toast(t("基准和对比目标不能是同一份数据"));
+  const s = get();
+  const scanId = req.scanId;
+  let tab = scanId && s.scans[scanId]?.state === "done" ? s.tabs.find((x) => x.kind === "scan" && x.scanId === scanId) : undefined;
+  let known: SnapshotInfo | undefined;
+  if (!tab) {
+    let list: SnapshotInfo[] = [];
+    try {
+      list = (await call("snapshot.list", {})).snapshots;
+    } catch {
+      /* offline: the active tab tries */
+    }
+    const files = [base, target].filter((x) => x !== NOW).map(fold);
+    known = list.find((x) => files.includes(fold(x.path)));
+    tab = known ? tabOfRoots(known.roots, base === NOW || target === NOW) : undefined;
+  }
+  if (tab) {
+    set({ active: tab.id });
+    return enterCompare(base, target);
+  }
+  if (!known) {
+    // a snapshot saved elsewhere: the tab in front compares (compare.open says when its folders differ)
+    if (activeTab().kind === "scan") return enterCompare(base, target);
+    return toast(t("找不到这个快照：{path}", { path: base === NOW ? target : base }));
+  }
+  if (base === NOW || target === NOW) {
+    const started = await startScan({ roots: known.roots });
+    if (started) {
+      afterScan.set(started, { base, target });
+      toast(t("扫描完成后会自动与这个快照对比"));
+    }
+    return;
+  }
+  // two snapshots and no tab of their folders: the target is opened, and compared with the base
+  await openSnapshot(target);
+  const opened = activeTab();
+  if (opened.kind === "scan" && opened.scanId && fold(get().scans[opened.scanId]?.snapshot ?? "") === fold(target)) await enterCompare(base, NOW);
+}
+
+/** snapshots.changed: the comparisons' lists follow; panels that may read snapshots hear of it. */
+export function onSnapshotsChanged(ev: SnapshotsChangedEvent): void {
+  set((s) => ({ snapshotsChanged: { n: s.snapshotsChanged.n + 1, saved: ev.saved, removed: ev.removed } }));
+  for (const tab of get().tabs) if (tab.compare) void refreshCompareSources(tab.id);
 }
 
 /** Compare other ends (base / target dropdowns, the timeline, swap). */
@@ -209,19 +277,13 @@ export function cycleDirection(viewId: string): void {
   void setViewSettings(viewId, { direction: order[(order.indexOf(st.direction) + 1) % 3] });
 }
 
-/** Scans started by 「与现在对比」: their snapshot is compared with them once they finish. */
-const afterScan = new Map<string, string>();
+/** Scans started by 「与现在对比」 (or a plugin's comparison with now): compared once they finish. */
+const afterScan = new Map<string, { base: string; target: string }>();
 
 /** 「与现在对比」 on the start page (UI-W6-01): the tab already showing that place compares at once;
  * otherwise the place is scanned in this tab and compared when the scan is done. */
 export async function compareWithNow(snapshot: { path: string; roots: string[] }, tabId: string): Promise<void> {
-  const fold = (p: string) => (window.sk.platform === "win32" ? p.toLowerCase() : p).replace(/[\\/]+$/, "");
-  const want = snapshot.roots.map(fold).sort().join("|");
-  const s = get();
-  const tab = s.tabs.find((t) => {
-    const scan = t.kind === "scan" && t.scanId ? s.scans[t.scanId] : undefined;
-    return scan && scan.state === "done" && scan.source === "scan" && scan.roots.map((r) => fold(r.path)).sort().join("|") === want;
-  });
+  const tab = tabOfRoots(snapshot.roots, true);
   if (tab) {
     set({ active: tab.id });
     await enterCompare(snapshot.path);
@@ -229,19 +291,19 @@ export async function compareWithNow(snapshot: { path: string; roots: string[] }
   }
   const scanId = await startScan({ roots: snapshot.roots }, tabId);
   if (scanId) {
-    afterScan.set(scanId, snapshot.path);
+    afterScan.set(scanId, { base: snapshot.path, target: NOW });
     toast(t("扫描完成后会自动与这个快照对比"));
   }
 }
 
 export function compareWhenDone(scanId: string): void {
-  const path = afterScan.get(scanId);
-  if (!path) return;
+  const ends = afterScan.get(scanId);
+  if (!ends) return;
   afterScan.delete(scanId);
   const tab = get().tabs.find((t) => t.scanId === scanId);
   if (!tab) return;
   set({ active: tab.id });
-  void enterCompare(path);
+  void enterCompare(ends.base, ends.target);
 }
 
 /** A snapshot was saved: the timeline and the dropdowns list it (UI-W6-35). */

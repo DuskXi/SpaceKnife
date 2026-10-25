@@ -1824,6 +1824,51 @@
       "title": "CompareNodeResult",
       "type": "object"
     },
+    "CompareOpen": {
+      "description": "What a command's method may return to show a comparison (compare mode, W6): two snapshot\nfiles, or a snapshot and ``\"now\"`` (the live tree of a scan of the same folders). The window\nuses the tab that shows those folders; for ``\"now\"`` without one it scans them first, for two\nsnapshots it opens ``target`` and compares ``base`` with it. Needs ``snapshots.read``.",
+      "properties": {
+        "base": {
+          "description": "A snapshot file, or 'now'",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Base",
+          "type": "string"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The scan whose tab compares",
+          "title": "Scan Id"
+        },
+        "target": {
+          "default": "now",
+          "description": "Same as base",
+          "maxLength": 32767,
+          "minLength": 1,
+          "title": "Target",
+          "type": "string"
+        },
+        "type": {
+          "const": "compare",
+          "default": "compare",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base"
+      ],
+      "title": "CompareOpen",
+      "type": "object"
+    },
     "CompareOpenParams": {
       "additionalProperties": false,
       "properties": {
@@ -6575,7 +6620,8 @@
               "net",
               "exec",
               "host.open",
-              "clipboard"
+              "clipboard",
+              "notify"
             ],
             "type": "string"
           },
@@ -6868,7 +6914,8 @@
             "net",
             "exec",
             "host.open",
-            "clipboard"
+            "clipboard",
+            "notify"
           ],
           "title": "Id",
           "type": "string"
@@ -7347,7 +7394,8 @@
               "net",
               "exec",
               "host.open",
-              "clipboard"
+              "clipboard",
+              "notify"
             ],
             "type": "string"
           },
@@ -7415,7 +7463,8 @@
               "net",
               "exec",
               "host.open",
-              "clipboard"
+              "clipboard",
+              "notify"
             ],
             "type": "string"
           },
@@ -7664,7 +7713,8 @@
               "net",
               "exec",
               "host.open",
-              "clipboard"
+              "clipboard",
+              "notify"
             ],
             "type": "string"
           },
@@ -7919,6 +7969,77 @@
         "dev_mode"
       ],
       "title": "PluginListResult",
+      "type": "object"
+    },
+    "PluginNoticeEvent": {
+      "description": "A plugin's ``ctx.notify`` (it has ``notify``): a notice that stays a while, with a button\nrunning one of its commands; while the window is minimized the system shows it as well.",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "description": "Added to the command's action args",
+          "title": "Args",
+          "type": "object"
+        },
+        "body": {
+          "default": "",
+          "maxLength": 1000,
+          "title": "Body",
+          "type": "string"
+        },
+        "button": {
+          "default": "",
+          "description": "The button's text (else the command's title)",
+          "maxLength": 40,
+          "title": "Button",
+          "type": "string"
+        },
+        "command": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One of the plugin's commands",
+          "title": "Command"
+        },
+        "id": {
+          "description": "Unique per notice (one system notification each)",
+          "maxLength": 64,
+          "title": "Id",
+          "type": "string"
+        },
+        "plugin": {
+          "title": "Plugin",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "title": "Title",
+          "type": "string"
+        },
+        "tone": {
+          "default": "info",
+          "enum": [
+            "info",
+            "ok",
+            "warn",
+            "danger"
+          ],
+          "title": "Tone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "plugin",
+        "id",
+        "title"
+      ],
+      "title": "PluginNoticeEvent",
       "type": "object"
     },
     "PluginProcess": {
@@ -10831,6 +10952,31 @@
       "title": "SnapshotSaveParams",
       "type": "object"
     },
+    "SnapshotsChangedEvent": {
+      "description": "Snapshots were saved (a finished scan saves itself, 「保存快照」) or pruned (the oldest\nautomatic ones beyond the number kept): the timeline and the comparison's lists follow.",
+      "properties": {
+        "removed": {
+          "description": "Snapshot files deleted",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Removed",
+          "type": "array"
+        },
+        "saved": {
+          "description": "Snapshot files written",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "title": "Saved",
+          "type": "array"
+        }
+      },
+      "title": "SnapshotsChangedEvent",
+      "type": "object"
+    },
     "SourceInfo": {
       "properties": {
         "extensions": {
@@ -13679,6 +13825,10 @@
       "direction": "output",
       "model": "#/$defs/CleanupResult"
     },
+    "compare": {
+      "direction": "output",
+      "model": "#/$defs/CompareOpen"
+    },
     "report": {
       "direction": "output",
       "model": "#/$defs/Report"
@@ -13734,6 +13884,10 @@
       "doc": "A plugin puts text on the clipboard (it has clipboard).",
       "payload": "#/$defs/PluginClipboardEvent"
     },
+    "plugin.notice": {
+      "doc": "A plugin's notice with a button (it has notify); the OS shows it too when minimized.",
+      "payload": "#/$defs/PluginNoticeEvent"
+    },
     "plugin.progress": {
       "doc": "Progress of a plugin call (reports, cleanups).",
       "payload": "#/$defs/PluginProgressEvent"
@@ -13753,6 +13907,10 @@
     "settings.changed": {
       "doc": "Settings changed (any client, or the file was edited).",
       "payload": "#/$defs/SettingsChangedEvent"
+    },
+    "snapshots.changed": {
+      "doc": "Snapshots were saved or pruned (every session).",
+      "payload": "#/$defs/SnapshotsChangedEvent"
     },
     "update.changed": {
       "doc": "Update check result or download progress (sessions with updates.v1).",

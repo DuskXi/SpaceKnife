@@ -390,6 +390,8 @@ class ScanManager:
         self._io_starting = False
         self.settings: SettingsStore | None = None  # set by the server (W7 defaults for new scans)
         self.monitors: Any = None  # server.monitors.MonitorManager, set by the server (M5)
+        # (saved, removed) snapshot files: the server tells the windows (snapshots.changed) and plugins
+        self.snapshot_listeners: list[Callable[[list[str], list[str]], None]] = []
         # called when a scan finishes and before its tab closes: keep what it showed (machine.disks)
         self.keepers: list[Callable[[ScanHandle], Awaitable[None]]] = []
         # ("started" | "opened" | "done" | "closed", handle): the plugin host's hooks
@@ -916,6 +918,15 @@ class ScanManager:
             logger.debug("could not prune old snapshots in {}: {}", path.parent, exc)
             deleted = []
         logger.info("scan {} saved to {} ({} old snapshots pruned)", handle.id, path, len(deleted))
+        self._snapshots_changed([str(path)], [str(p) for p in deleted])
+
+    def _snapshots_changed(self, saved: list[str], removed: list[str]) -> None:
+        """Snapshots were written or pruned: the windows' lists and the plugins' hooks follow."""
+        for listener in list(self.snapshot_listeners):
+            try:
+                listener(saved, removed)
+            except Exception:
+                logger.exception("a snapshot listener failed")
 
     def cancel(self, scan_id: str) -> ScanHandle:
         handle = self.get(scan_id)
@@ -1046,6 +1057,7 @@ class ScanManager:
             raise RpcError(ErrorCode.SNAPSHOT_ERROR, reason) from exc
         handle.snapshot_path = str(path)
         emit("snapshot", tr("快照已保存：{path}", path=path), scan_id=handle.id)
+        self._snapshots_changed([str(path)], [])
         return snapshot_info(path, header)
 
     async def load_snapshot(self, target: str) -> ScanHandle:

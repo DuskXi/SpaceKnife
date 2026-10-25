@@ -104,6 +104,8 @@ export interface Sk<
   onTheme(cb: (mode: "dark" | "light") => void): () => void;
   /** The tree of the context's scan changed (a rescan, files changed, the scan went on). */
   onTree(cb: (e: { scan_id: string | null }) => void): () => void;
+  /** Snapshots were saved or pruned (a finished scan saves itself, 「保存快照」); needs snapshots.read. */
+  onSnapshots(cb: (e: { saved: string[]; removed: string[] }) => void): () => void;
   /** The panel's view changed what it shows; called at once with the current one. */
   onView(cb: (view: PanelView | null) => void): () => void;
   /** The colours the view paints these nodes with (its colour mode, or `opts.mode`); needs tree.read. */
@@ -129,6 +131,9 @@ export interface Sk<
     copy(text: string): Promise<null>;
     /** needs basket.propose: into the delete basket (deleting is still the user's step) */
     basket(nodes: (number | NodeRef)[], reason?: string, scanId?: string): Promise<{ added: number }>;
+    /** needs snapshots.read: show a comparison (compare mode) of two snapshot files, or of one and
+     * "now" (the live tree of a scan of the same folders; scanned first when no tab shows them) */
+    compare(base: string, target?: string, scanId?: string): Promise<null>;
   };
   /** The text in the interface language, {placeholders} filled. */
   t(zh: string, en: string, fields?: Record<string, string | number>): string;

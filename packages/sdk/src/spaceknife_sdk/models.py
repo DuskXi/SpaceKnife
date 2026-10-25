@@ -78,6 +78,38 @@ class ScanInfo(_Record):
     snapshot: str | None = Field(default=None, description="The snapshot file it was opened from")
     front: bool = Field(default=False, description="The scan in front (the one ctx.tree reads by default)")
     on_disk: bool = Field(default=True, description="Its nodes are files here (False: a scan source's)")
+    monitoring: Literal["off", "starting", "running", "degraded", "failed"] | str = Field(
+        default="off",
+        description="File changes followed live (the tree_changed hook): off (live monitoring is "
+        "off, a snapshot, a source without a watcher), starting, running, degraded (some changes "
+        "found by polling or rescans), failed",
+    )
+
+
+class TreeChange(_Record):
+    """What the ``tree_changed`` hook gets: the tree of an open scan changed (files changed on disk
+    while it is monitored, 「重新扫描」, a scan source listed again). At most one a second per scan;
+    the changes of that second come together."""
+
+    scan_id: str
+    epoch: int = Field(default=0, description="The node ids below are of this epoch (ctx.tree.epoch)")
+    version: int = Field(default=0, description="The tree's version after the changes (ctx.tree.version)")
+    folders: list[int] = Field(
+        default_factory=list,
+        description="Folders whose contents changed (their sizes changed with them, up to the root), "
+        "at most 256; a scan source listed again: its root",
+    )
+    more: int = Field(default=0, description="About how many more folders changed than are listed")
+    changes: int = Field(default=0, description="Files and folders that changed, added or went")
+
+
+class SnapshotsChange(_Record):
+    """What the ``snapshots`` hook gets (needs ``snapshots.read``): snapshots were saved (a finished
+    scan saves itself, 「保存快照」) or the oldest automatic ones were pruned. ``ctx.snapshots.list()``
+    has the details."""
+
+    saved: list[str] = Field(default_factory=list, description="Snapshot files written")
+    removed: list[str] = Field(default_factory=list, description="Snapshot files deleted")
 
 
 class SnapshotInfo(_Record):
@@ -290,5 +322,7 @@ __all__ = [
     "Proposal",
     "ScanInfo",
     "SnapshotInfo",
+    "SnapshotsChange",
+    "TreeChange",
     "VisualInput",
 ]

@@ -61,7 +61,11 @@ WHEN_WORDS = (
 WHEN_PREFIXES = ("setting:", "cap:", "plugin:", "source:", "ext:")
 MENUS = ("node", "inspector", "toolbar", "start")
 REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual")
-HookEvent = Literal["start", "stop", "scan_done", "scan_closed", "settings", "lang", "basket"]
+HookEvent = Literal[
+    "start", "stop", "scan_done", "scan_closed", "tree_changed", "settings", "lang", "basket", "snapshots"
+]
+# hooks a plugin hears of only with a permission (the host leaves the others out; check says so)
+HOOK_PERMISSIONS: dict[str, str] = {"snapshots": "snapshots.read"}
 HOOKS: tuple[str, ...] = get_args(HookEvent)
 COLOR_BY = ("ext", "class", "age", "size", "depth", "name", "set", "insight")
 SIZE_METRICS = ("alloc", "size", "files", "items", "code")
@@ -993,6 +997,7 @@ __all__ = [
     "CODE_KINDS",
     "COLOR_BY",
     "HOOKS",
+    "HOOK_PERMISSIONS",
     "KINDS",
     "MANIFEST",
     "MAX_THREADS",

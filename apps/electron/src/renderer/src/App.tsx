@@ -24,6 +24,7 @@ import { visibleSurface } from "@/state/updates";
 import { onKey } from "@/plugins/keymap";
 import { CleanupDialog } from "@/plugins/cleanup";
 import { ConfirmDialog } from "@/plugins/confirm";
+import { NoticeStack } from "@/plugins/NoticeStack";
 import { isKeptPanelTab, KeptPanelTabs, PluginDialogHost, PluginTabPage } from "@/plugins/slots";
 
 export function App() {
@@ -79,6 +80,7 @@ export function App() {
       <Palette />
       <ContextMenu />
       <OpToast />
+      <NoticeStack />
       <PluginDialogHost />
       {/* after the plugin dialog: a report there opens these on top of it */}
       <ExportDialog />

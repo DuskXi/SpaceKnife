@@ -29,7 +29,7 @@ import {
   toast,
   writeText,
 } from "./store";
-import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { compareWhenDone, onCompareProgress, onSnapshotsChanged, releaseCompare } from "./compare";
 import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
@@ -117,6 +117,7 @@ async function connect(): Promise<void> {
   r.on("basket.changed", (ev) => set({ basket: ev.state }));
   r.on("ops.progress", (ev) => onOpProgress(ev));
   r.on("compare.progress", (ev) => onCompareProgress(ev));
+  r.on("snapshots.changed", (ev) => onSnapshotsChanged(ev));
   r.on("update.changed", (ev) => applyUpdateStatus(ev.status));
   // the file class table changed (W7): the parser vocabulary and the colours follow
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));

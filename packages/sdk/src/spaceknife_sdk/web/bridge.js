@@ -28,6 +28,7 @@ const langHandlers = new Set();
 const themeHandlers = new Set();
 const treeHandlers = new Set();
 const viewHandlers = new Set();
+const snapshotHandlers = new Set();
 let gotContext = false;
 const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {}, units: 1024, view: null };
 let mock = null;
@@ -87,6 +88,9 @@ function onPortMessage(ev) {
       return;
     case "tree":
       for (const cb of treeHandlers) cb({ scan_id: m.scan_id });
+      return;
+    case "snapshots":
+      for (const cb of snapshotHandlers) cb({ saved: m.saved || [], removed: m.removed || [] });
       return;
     case "view":
       info.view = m.view || null;
@@ -293,6 +297,11 @@ const sk = {
     treeHandlers.add(cb);
     return () => treeHandlers.delete(cb);
   },
+  /** Snapshots were saved or pruned (a finished scan saves itself, 「保存快照」); needs snapshots.read. */
+  onSnapshots(cb) {
+    snapshotHandlers.add(cb);
+    return () => snapshotHandlers.delete(cb);
+  },
   /** The panel's view changed what it shows (another visualization or colour mode, a zoom, the
    * selection, the filter); called at once with the current one (null without a view). */
   onView(cb) {
@@ -320,6 +329,9 @@ const sk = {
     url: (url) => host("url")({ url }),
     copy: (text) => host("copy")({ text }),
     basket: (nodes, reason, scanId) => host("basket")({ nodes, reason: reason || "", scan_id: scanId }),
+    /** needs snapshots.read: show a comparison (compare mode) of two snapshot files, or of one and
+     * "now" (the live tree of a scan of the same folders) */
+    compare: (base, target, scanId) => host("compare")({ base, target: target || "now", scan_id: scanId }),
   },
   /** Numbers as the app writes them (the user's size unit: 1000 or 1024). */
   format: {

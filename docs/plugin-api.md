@@ -123,15 +123,45 @@ plugin.setting(
 
 | `event` | 函数签名 | 什么时候 |
 |---|---|---|
-| `start` | `async def f(ctx) -> None` | 插件进程启动、读完声明之后 |
+| `start` | `async def f(ctx) -> None` | 插件进程启动、它的贡献注册好之后（第一次启用、`plugin dev` 重新加载也一样），`ctx.settings` 已有 |
 | `stop` | `async def f(ctx) -> None` | 进程停止之前（2 秒内做完） |
-| `scan_done` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描完成（`scan.state` 是 `done`） |
+| `scan_done` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描完成（`scan.state` 是 `done`）；`ctx.tree` 是它 |
 | `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉（它的树已经读不到了） |
+| `tree_changed` | `async def f(ctx, change: TreeChange) -> None` | 一个打开着的扫描的树变了（实时监控应用了文件变化、「重新扫描」、扫描来源重新列出）：每个扫描每秒最多一次，`ctx.tree` 是它；见[下一节](#api-live) |
 | `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值 |
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
 | `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……；一阵变化只来一次）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
+| `snapshots` | `async def f(ctx, change: SnapshotsChange) -> None` | 存了快照（扫描完成自动保存、「保存快照」）或删了最旧的自动快照；要 `snapshots.read`（没有时宿主不调它，`check` 报 `missing_permission`） |
 
-`event` 写错时 `check` 从代码里找出来（`unknown_hook`，附最像的名字），导入时也报同样的错。钩子在后台跑，宿主不等结果，出错只记日志；每个钩子 30 秒（`@plugin.on(event, timeout=…)`，≤ 600），更久的事 `ctx.tasks.start` 一个[后台任务](#api-limits)；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。测试里 `await host.hook(event, …)` 会检查事件名和参数，钩子抛的异常原样抛出。
+`event` 写错时 `check` 从代码里找出来（`unknown_hook`，附最像的名字），导入时也报同样的错。钩子在后台跑，宿主不等结果，出错只记日志；每个钩子 30 秒（`@plugin.on(event, timeout=…)`，≤ 600），更久的事 `ctx.tasks.start` 一个[后台任务](#api-limits)；钩子里不能 `ctx.clipboard`，`ctx.toast` 和 `ctx.notify` 发给所有窗口。宿主找到了代码里的钩子却没有注册上它时（插件没启用好）记一行日志，不会悄悄不调。测试里 `await host.hook(event, …)` 会检查事件名和参数（`tree_changed` 的 `change` 不写时是「眼前扫描的根变了」），钩子抛的异常原样抛出。
+
+<a id="api-live"></a>
+### 树变化、快照与对比
+
+- **`tree_changed`**：宿主把一个扫描大约一秒内的变化合成一次调用，插件的钩子还在跑时下一次等它跑完（不会排起队）。`change.folders` 是发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的）的节点下标，属于 `change.epoch`；最多 256 个，`more` 是大约还有几个；节点下标变了（重新列出时挪了行、整理）时还没送出的会跟着换成新的。扫描来源重新列出时 `folders` 是根。文件夹的合计跟着变到根，要看谁长了就比较 `tree.node(f).size`（或自己记下的上一次）。
+- **实时监控**：`ctx.scans()` 的 `ScanInfo.monitoring` 说扫描是否跟着文件变化：磁盘扫描从开始扫描起就挂着监控（设置「实时监控」关着时是 `off`），`starting` 是监控器还在给文件夹加监视；打开的快照是 `off`；扫描来源有 `watch` 的监控器时在列完之后开始。
+- **`snapshots`**：一阵保存和删除（≤ 0.5 秒）合成一次，`change.saved` / `change.removed` 是快照文件；`ctx.snapshots.list()` 读详情。窗口同时收到协议事件 `snapshots.changed`，网页面板用 `sk.onSnapshots(cb)` 听（要 `snapshots.read`）。
+- **打开对比**：命令（或报告按钮）调用的方法返回 `CompareOpen(base=快照, target="now")`，界面就打开对比（W6 的对比模式）；两端可以是两份快照，或一份和 `"now"`（同一组文件夹的实时树）。界面用显示那组文件夹的标签页（`scan_id` 指定时用它的）；比 `"now"` 而没有这样的标签页时先扫描再对比；两份快照而没有时打开 `target` 那份、在它的标签页里和 `base` 比。网页面板：`sk.host.compare(base, target)`。都要 `snapshots.read`。
+
+```python
+@plugin.on("tree_changed")
+def grew(ctx: Context, change: TreeChange) -> None:
+    t = ctx.tree
+    big = [f for f in change.folders if t.node(f).size > 10 << 30]
+    if big:
+        ctx.notify(T("文件夹超过 10 GB", "Folders over 10 GB"), ", ".join(t.name(f) for f in big[:3]))
+
+
+@plugin.command("compare_last", T("和上一份快照比", "Compare with the last snapshot"), when=["done"])
+def compare_last(ctx: Context, a: ActionContext) -> CompareOpen | None:
+    snaps = ctx.snapshots.list()  # 新的在前
+    return CompareOpen(base=snaps[0].path, target="now", scan_id=a.scan_id) if snaps else None
+```
+
+<a id="api-notify"></a>
+### 通知
+
+`ctx.notify(title, body="", *, action=None, button=None, args=None, tone="info") -> bool`（要 `notify`）：窗口右下角出一张卡片，写着插件名、`title` 和 `body`（多行可以），用户关掉之前一直在（窗口在前、指针不在卡片上时过 12 秒自己收起）；`action` 是本插件一条命令的名字（或全名），卡片上多一个按钮运行它（`button` 是按钮的字，不写时用命令的标题；`args` 加在命令的动作上，同 `sk.host.command(id, args)`）。窗口最小化或藏起来时，系统同时弹出通知，点它窗口回来并运行这条命令；没有系统通知的地方（Windows 的便携版、浏览器没给许可）任务栏闪一下。每个插件 5 秒最多一条：返回 False 表示这条被略过（宿主也这样限）。`title` ≤ 120 字、`body` ≤ 1000 字，`args` ≤ 4 KiB 的 JSON；`action` 不是本插件的命令时卡片没有按钮（日志写明）。通知同时进日志面板。来自用户发起的调用时只发给那个窗口，钩子和后台任务里发给所有窗口。测试：`host.notices`（`title body tone command button args`）。
 
 <a id="api-errors"></a>
 ## 5. 异常
@@ -156,11 +186,11 @@ plugin.setting(
 | 节点字段 | 字段、扫描、节点、树的 `version`、界面语言（详情面板和悬停卡共用一份） | 树变了；插件设置变了；`ctx.invalidate("node_field")`。**返回 None 也会被记住**（这一项不显示，直到作废） |
 | 节点集合（`:set:`） | 集合、扫描、树的 `version` | 同上（`"node_set"`）；作废后用到它的过滤自动重算 |
 | 代码可视化的权重 | 可视化、扫描、树的 `version`、它的 `options` 和本插件的设置 | 同上（`"visualization"`）；作废后视图重画 |
-| 配色的图例（`@plugin.color_legend`） | 配色、语言 | 设置变了、语言变了、`ctx.invalidate("color_mode")`；新的算出来之前仍显示旧的，作废时宿主马上去取新的 |
+| 配色的图例（`@plugin.color_legend`） | 配色、语言 | 设置变了、语言变了、`ctx.invalidate("color_mode")`；新的算出来之前仍显示旧的，作废时宿主马上去取新的（设置变了时等插件进程拿到新设置之后才取） |
 | 对比原因 | 对比、变化项 | 设置变了（`"change_annotator"`） |
 | 报告 | 不缓存：按 `refresh` 重新取 | — |
 
-插件设置一变，宿主就把这个插件的全部缓存作废（插件的「缓存纪元」加一），然后调 `settings` 钩子。插件自己的数据变了（它读的文件、它建的索引）、宿主看不出来的时候，调 `ctx.invalidate()`。字段在后台算完了也一样：`ctx.invalidate("node_field")` 之后界面会再要一次。
+插件设置一变，宿主先把新设置交给插件进程，再把这个插件的全部缓存作废（插件的「缓存纪元」加一），然后调 `settings` 钩子：重新取的图例、字段和钩子都看到新值。插件自己的数据变了（它读的文件、它建的索引）、宿主看不出来的时候，调 `ctx.invalidate()`。字段在后台算完了也一样：`ctx.invalidate("node_field")` 之后界面会再要一次。
 
 <a id="api-paging"></a>
 ## 7. 表格分页
@@ -262,7 +292,8 @@ def icicle(v: LayoutInput) -> Shapes:
 | `await host.visual(name)`、`await host.color(name)` | 一帧（[第 9 节](#api-frames)） |
 | `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文 |
 | `await host.source(name, uri)`、`host.status(scan_id)` | 用扫描来源扫描（失败抛 `RuntimeError`）；扫描的状态 |
-| `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常）、对比原因 |
+| `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常；缺权限的钩子抛 `PermissionError`）、对比原因 |
+| `await host.changed(*nodes)` | 当前扫描在这些节点（下标或相对根的路径）上变了，像应用文件变化那样：`tree_changed` 钩子按宿主的方式（合并一秒、文件夹）跑完才返回；树本身不变 |
 | `await host.task(name, params, key=, wait=True)`、`host.tasks()`、`await host.cancel_task(name, key=)` | 后台任务：启动并等它结束，返回 `TaskInfo`（`state` 是 `done` `failed` `cancelled`，`error` 是失败的原因）；`wait=False` 马上返回；本插件的任务（跑着的和最近结束的）；像取消按钮那样取消并等它停下 |
 | `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样对 `node` 运行命令，`args` 加在动作自己的上（同面板的 `sk.host.command(id, args)`）：`call` 返回方法的结果，`cleanup` 返回候选（同 `host.cleanup`），其余返回动作的 dict（带合并后的 `args`） |
 | `await host.command_available(name, node=)` | 选中 `node` 时这个命令能不能跑：它的 `when` 和 `check` 给的原因，能跑时 None |
@@ -270,8 +301,8 @@ def icicle(v: LayoutInput) -> Shapes:
 | `await host.settled()` | 等宿主后台的事做完：悬停字段的后补、钩子、设置和语言的变化 |
 | `host.path("a/b")` | 节点在界面里的路径（系统的写法，Windows 是 `\`）：和插件写出的路径比较时用它 |
 | `await host.export_text(name, …)`、`export_bytes` | 同 `export`，类型确定（文字格式 / 二进制格式） |
-| `host.snapshot(when=None)` | 把当前扫描存成快照（同一秒两次也不重名；`when` 是文件名和快照里记的时间），给读历史的插件 |
-| `host.events`、`host.state(name)`、`host.toasts`、`host.clipboard`、`host.basket` | 副作用：事件、共享状态、提示、复制的文字、删除篮 |
+| `host.snapshot(when=None)` | 把当前扫描存成快照（同一秒两次也不重名；`when` 是文件名和快照里记的时间），给读历史的插件；和程序里一样触发 `snapshots` 钩子（`await host.settled()` 等它） |
+| `host.events`、`host.state(name)`、`host.toasts`、`host.notices`、`host.clipboard`、`host.basket` | 副作用：事件、共享状态、提示、通知（dict：`title body tone command button args`）、复制的文字、删除篮 |
 | `host.commands()`、`host.keys()`、`host.presets()` | 本插件的命令、按键（键 → 命令）、过滤预设 |
 | `await host.set_setting(name, value)`、`await host.set_lang("en")` | 改设置（等 `settings` 钩子跑完）、改语言（触发 `lang` 钩子） |
 | `await host.check(strict=True)` | 和 `plugin check` 一样的检查 |
@@ -422,6 +453,29 @@ def icicle(v: LayoutInput) -> Shapes:
 | `snapshot` | str \| None | `None` | 快照：打开的快照是那个文件；磁盘扫描是它完成时自动保存的那个（没有保存时 None） |
 | `front` | bool | `False` | 用户眼前的那个扫描（`ctx.tree` 默认读它） |
 | `on_disk` | bool | `True` | 节点是这台机器上的文件；扫描来源（`on_disk = false`）的是 False |
+| `monitoring` | (`off` `starting` `running` `degraded` `failed`) \| str | `"off"` | 文件变化是否实时跟着（`tree_changed` 钩子）：`off`（实时监控关着、快照、没有监控器的扫描来源）、`starting`、`running`、`degraded`（部分靠轮询或重新扫描）、`failed` |
+
+#### `TreeChange`
+
+`tree_changed` 钩子的参数：一个打开着的扫描的树变了（每个扫描每秒最多一次）。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `scan_id` | str | 必需 | 变了的扫描（钩子里 `ctx.tree` 就是它） |
+| `epoch` | int | `0` | `folders` 的节点下标属于这个纪元（`ctx.tree.epoch`） |
+| `version` | int | `0` | 变化之后树的版本（`ctx.tree.version`） |
+| `folders` | list[int] | `[]` | 发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的），最多 256 个；扫描来源重新列出时是根 |
+| `more` | int | `0` | 大约还有多少个文件夹变了而没有列出 |
+| `changes` | int | `0` | 这一秒里变了、新增或消失的文件和文件夹数 |
+
+#### `SnapshotsChange`
+
+`snapshots` 钩子的参数（要 `snapshots.read`）：存了或删了快照。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `saved` | list[str] | `[]` | 写下的快照文件 |
+| `removed` | list[str] | `[]` | 删掉的快照文件（自动快照超过保留个数时最旧的） |
 
 #### `SnapshotInfo`
 
@@ -634,6 +688,17 @@ def icicle(v: LayoutInput) -> Shapes:
 | `type` | (`toast`) | `"toast"` |  |
 | `text` | str | 必需 | 文字（≤ 512 字） |
 | `tone` | (`info` `ok` `warn` `danger`) | `"info"` | 色调 |
+
+#### `CompareOpen`
+
+命令的方法返回它时打开对比（要 `snapshots.read`）。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`compare`) | `"compare"` |  |
+| `base` | str | 必需 | 基准：快照文件，或 `now`（同一组文件夹的实时树）（≤ 32767 字） |
+| `target` | str | `"now"` | 对比目标：同上（默认 `now`）（≤ 32767 字） |
+| `scan_id` | str \| None | `None` | 在哪个扫描的标签页里对比；不写时用显示那组文件夹的标签页（≤ 64 字） |
 
 #### `FieldValue`
 

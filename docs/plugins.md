@@ -164,6 +164,11 @@
 - **菜单里的命令按 `when` 变灰**：右键菜单和详情面板的操作行用新方法 `palette.check_many`（一次问几条命令，上下文里带 `node`：菜单点的那一项、详情面板的节点）问它们的 `when` 和 `check`，不可用的变灰并写出原因（以前照样可点，点了才说不行，判断的还是视图的选中项而不是点的那一项）。
 - **动作带参数**：`{ cleanup = "c", args = {…} }` 的参数成为清理的 `c.args`；`report.export` 认 `format scope options use_filter`，从右键菜单来时「选中项」是点的那一项（报告表格勾的几行时是那几行，以前最多送一个）；`open` 面板时 `args` 成为 `sk.context.args`，已经开着的面板收到 `sk.onContext`（标签页和详情面板里的报告同样拿到 `c.args`）；面板的 `sk.host.command(id, args)` 把参数加在命令的动作上；命令动作运行另一个命令时带上点的那一项和参数。`MockHost.command` 对清理动作返回候选，其他动作带合并后的 `args`。
 - **`basket` 钩子能用了**：文档早就写了，`HookSpec` 却不收它，写了的插件启用不了；`check` 从代码里静态检查 `@plugin.on("…")` 的名字（`unknown_hook`，附最像的名字），导入失败时也找得到。
+- **树变化事件**：新钩子 `tree_changed`（`TreeChange`：扫描 id、纪元、`version`、变化所在的文件夹 ≤ 256 个和 `more`、变化数）。宿主在视图闪烁变化的同一处（`views.flash`）收到实时监控、重新扫描和扫描来源重新列出的变化，每个插件每个扫描大约一秒合成一次，钩子还在跑时下一次等它（不排队）；节点下标变了（重新列出时挪了行、整理）时还没送出的文件夹跟着换；钩子的 `ctx.tree` 是那个扫描（`scan_done` 的也是）。`ScanInfo.monitoring`（`off starting running degraded failed`）说扫描是否跟着文件变化；磁盘扫描本来就从开始扫描时挂着监控（实测里「完成 2.5 秒后才开始」是监控器还在给文件夹加监视，`starting`）。`MockHost.changed(*nodes)` 按宿主的方式触发它，`plugin new --with changes` 生成例子。实现在 `plugins/live.py`。
+- **`start` 钩子一定执行**：第一次启用和 `plugin dev` 重新加载时，插件进程是为了读声明而启动的，那时它的钩子还没注册，`start` 被悄悄跳过（第三轮作者测到 ticks 为 0）；现在等贡献注册好、进程拿到设置之后再调。代码里有钩子而注册表里没有时记一行日志。
+- **快照**：新钩子 `snapshots`（`SnapshotsChange`：存下和删掉的快照文件，要 `snapshots.read`，`check` 会要求声明）和协议事件 `snapshots.changed`（所有会话：对比的列表跟着更新，面板 `sk.onSnapshots`）。命令的方法返回 `CompareOpen(base, target)`（新的文档类型 `compare`）、面板 `sk.host.compare(base, target)`（都要 `snapshots.read`）打开对比：用显示那组文件夹的标签页；比 `now` 而没有时先扫描，两份快照而没有时打开 `target` 再和 `base` 比。插件自己算对比数据（不经界面）仍要用 `ctx.snapshots.open` 读两棵树。
+- **通知**：`ctx.notify(title, body, action=, button=, args=, tone=)`，新权限 `notify`（启用对话框写「发出通知（窗口最小化时也显示为系统通知）」）。宿主核对命令是插件自己的、截长度、每个插件 5 秒一条，发 `plugin.notice`；窗口右下角的通知卡片（插件名、标题、正文、按钮、关闭）留到关掉，窗口在前且指针不在上面时 12 秒后收起；窗口最小化或藏起来时 Electron 弹系统通知（Windows 安装版设了 AppUserModelID，便携版和收不到系统通知的地方让任务栏闪），点它窗口回来并运行按钮的命令；浏览器模式在页面已有通知许可时用浏览器的通知。`MockHost.notices`；`example.dupes` 的后台查找结束时发一条，按钮打开报告。
+- **图例跟着设置变**：设置变了以后宿主先把新设置交给插件进程，再作废缓存、重新取图例、调 `settings` 钩子。以前这三件事和「把设置推给各插件进程」是并行的，推送轮到这个插件之前（别的插件进程的管道忙时）图例已经按旧设置算完并记成新的，之后一直是旧的。
 - **删除篮按（卷、文件 id）认硬链接**：Windows 的普通扫描不记文件 id，同一个文件的两个名字放进删除篮时算了两份可释放空间；现在删除篮向系统问这些文件的 id（直接放进去的文件都问，文件夹里的每项最多问 2048 个），和 MFT 扫描记下的记录号一致。
 
 还没做的见 TODO.md 插件一条下面。

@@ -738,29 +738,78 @@ class MockHost:
 
     async def hook(self, event: str, **args: Any) -> None:
         """Run the plugin's hooks for ``event`` as the host would, raising what they raise.
-        ``scan_done`` / ``scan_closed`` take ``scan`` (default: the scan in front), ``settings``
-        takes ``changed`` (the names of its settings that changed), the others nothing."""
+        ``scan_done`` / ``scan_closed`` take ``scan`` (default: the scan in front),
+        ``tree_changed`` takes ``change`` (a :class:`TreeChange` or dict; default: the root of the
+        scan in front changed), ``snapshots`` takes ``change`` (a :class:`SnapshotsChange` or
+        dict), ``settings`` takes ``changed`` (the names of its settings that changed), the others
+        nothing. ``ctx.tree`` of ``scan_done`` and ``tree_changed`` is that scan. A hook that needs
+        a permission the plugin lacks (``snapshots``: ``snapshots.read``) is PermissionError: the
+        app would leave the plugin out."""
         from spaceknife.extensions import EXTENSIONS
-        from spaceknife_sdk.manifest import HOOKS
+        from spaceknife_sdk.manifest import HOOK_PERMISSIONS, HOOKS
 
         if event not in HOOKS:
             raise ValueError(f"unknown hook event {event!r}: one of {', '.join(HOOKS)}")
-        allowed = {"scan_done": {"scan"}, "scan_closed": {"scan"}, "settings": {"changed"}}.get(event, set())
+        allowed = {
+            "scan_done": {"scan"},
+            "scan_closed": {"scan"},
+            "settings": {"changed"},
+            "tree_changed": {"change"},
+            "snapshots": {"change"},
+        }.get(event, set())
         extra = set(args) - allowed
         if extra:
             raise TypeError(f"hook {event!r} takes {sorted(allowed) or 'nothing'}, not {sorted(extra)}")
         host = await self._ready()
+        need = HOOK_PERMISSIONS.get(event)
+        if need is not None and need not in host.records[self.plugin_id].granted:
+            raise PermissionError(f"the {event!r} hook needs {need!r}: the app leaves this plugin out")
         if event in ("scan_done", "scan_closed") and "scan" not in args:
             args["scan"] = {"scan_id": self.scan_id, "roots": [self.path()], "state": "done"}
         if event == "settings":
             args.setdefault("changed", [])
-        if "scan" in args and hasattr(args["scan"], "model_dump"):
-            args["scan"] = args["scan"].model_dump(mode="json")
+        if event == "tree_changed" and "change" not in args:
+            store = self.store
+            args["change"] = {
+                "scan_id": self.scan_id,
+                "epoch": int(store.epoch),
+                "version": int(store.version),
+                "folders": [int(r) for r in store.roots()],
+                "changes": 1,
+            }
+        if event == "snapshots":
+            args.setdefault("change", {})
+        for k in ("scan", "change"):
+            if k in args and hasattr(args[k], "model_dump"):
+                args[k] = args[k].model_dump(mode="json")
+        about = None
+        if event == "scan_done":
+            about = args["scan"].get("scan_id")
+        elif event == "tree_changed":
+            about = args["change"].get("scan_id")
         for c in EXTENSIONS.owned(self.plugin_id):
             if c.kind == "hook" and c.spec.event == event:
                 await host.call(
-                    self.plugin_id, "hook", c.local, {"event": event, **args}, session=self.session
+                    self.plugin_id,
+                    "hook",
+                    c.local,
+                    {"event": event, **args},
+                    session=self.session,
+                    ctx={"scan_id": about} if about else None,
                 )
+
+    async def changed(self, *nodes: int | str, scan_id: str | None = None) -> None:
+        """The tree of the scan in front (or ``scan_id``) changed at these nodes (ids, or paths
+        relative to its root; files or folders), as when the app applies file changes: the
+        plugin's ``tree_changed`` hook runs the way it does in the app (the changes of about a
+        second together, the folders where they happened). Waits until it ran. The tree itself
+        stays as it is."""
+        host = await self._ready()
+        sid = scan_id or self.scan_id
+        assert sid is not None, "scan something first"
+        ids = [self.find(n) if isinstance(n, str) else int(n) for n in nodes]
+        host.live.tree_changed(sid, {i: 0 for i in ids})
+        await self.settled()
 
     async def task(
         self,
@@ -844,6 +893,9 @@ class MockHost:
             "method": "hard",
         }
         snap.save(store, path, roots=roots, stats=stats, created_at=when)  # its time is `when` too
+        if self._started:  # as the app: the windows and the plugins' snapshots hooks hear of it
+            with contextlib.suppress(RuntimeError):
+                self.server.scans._snapshots_changed([str(path)], [])
         return str(path)
 
     # ------------------------------------------------------------- side effects
@@ -860,6 +912,12 @@ class MockHost:
     @property
     def toasts(self) -> list[str]:
         return [p["text"] for n, p in self.session.sent if n == "plugin.toast"]
+
+    @property
+    def notices(self) -> list[dict[str, Any]]:
+        """``ctx.notify`` notices the app showed, oldest first: ``title body tone command button
+        args`` (``command`` the full id of the button's command, or None)."""
+        return [dict(p) for n, p in self.session.sent if n == "plugin.notice"]
 
     @property
     def clipboard(self) -> list[str]:

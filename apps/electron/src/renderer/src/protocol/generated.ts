@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "63ff9bdcf85c4b50";
+export const SCHEMA_HASH = "e4b9740b25b0009c";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -408,6 +408,22 @@ export interface CompareNodeResult {
   /** Its children that changed most */
   children: ChangeItem[];
   item: ChangeItem;
+}
+
+/**
+ * What a command's method may return to show a comparison (compare mode, W6): two snapshot
+ * files, or a snapshot and ``"now"`` (the live tree of a scan of the same folders). The window
+ * uses the tab that shows those folders; for ``"now"`` without one it scans them first, for two
+ * snapshots it opens ``target`` and compares ``base`` with it. Needs ``snapshots.read``.
+ */
+export interface CompareOpen {
+  /** A snapshot file, or 'now' */
+  base: string;
+  /** The scan whose tab compares */
+  scan_id: string | null;
+  /** Same as base */
+  target: string;
+  type: "compare";
 }
 
 export interface CompareOpenParams {
@@ -1408,7 +1424,7 @@ export interface PanelInfo {
   /** Given to the page in its context (sk.context().params) */
   params: Record<string, string | number | boolean>;
   /** What its bridge may do */
-  permissions: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard")[];
+  permissions: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard" | "notify")[];
   plugin: string;
   /** For tabs and narrow places ('' = the title) */
   short_title: string;
@@ -1474,7 +1490,7 @@ export interface PendingCond {
 }
 
 export interface PermissionInfo {
-  id: "tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard";
+  id: "tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard" | "notify";
   /** What it allows, in the interface language */
   text: string;
   /** Stands out: any host, any program */
@@ -1575,7 +1591,7 @@ export interface PluginClipboardEvent {
 /** What the enable dialog shows before the user confirms. */
 export interface PluginDescribeResult {
   /** Permissions the confirmed version did not ask for (an update) */
-  added: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard")[];
+  added: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard" | "notify")[];
   /** Key conflicts, as text */
   conflicts: string[];
   /** What it adds, by kind (its code's contributions too) */
@@ -1590,7 +1606,7 @@ export interface PluginDescribeResult {
 
 export interface PluginEnableParams {
   /** Every permission it asks for */
-  grant?: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard")[];
+  grant?: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard" | "notify")[];
   /** The hash the user saw (plugin.describe) */
   hash?: string;
   id: string;
@@ -1635,7 +1651,7 @@ export interface PluginInfo {
   dev: boolean;
   exec: string[];
   folder: string;
-  granted: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard")[];
+  granted: ("tree.read" | "files.read" | "snapshots.read" | "basket.propose" | "net" | "exec" | "host.open" | "clipboard" | "notify")[];
   /** sha256 of its files (what the user confirmed) */
   hash: string;
   homepage: string;
@@ -1689,6 +1705,25 @@ export interface PluginListResult {
   /** The plugins folder (data_dir/plugins) */
   folder: string;
   plugins: PluginInfo[];
+}
+
+/**
+ * A plugin's ``ctx.notify`` (it has ``notify``): a notice that stays a while, with a button
+ * running one of its commands; while the window is minimized the system shows it as well.
+ */
+export interface PluginNoticeEvent {
+  /** Added to the command's action args */
+  args: Record<string, unknown>;
+  body: string;
+  /** The button's text (else the command's title) */
+  button: string;
+  /** One of the plugin's commands */
+  command: string | null;
+  /** Unique per notice (one system notification each) */
+  id: string;
+  plugin: string;
+  title: string;
+  tone: "info" | "ok" | "warn" | "danger";
 }
 
 export interface PluginProcess {
@@ -2236,6 +2271,17 @@ export interface SnapshotSaveParams {
   /** Target file; default = the auto-save folder */
   path?: string | null;
   scan_id: string;
+}
+
+/**
+ * Snapshots were saved (a finished scan saves itself, 「保存快照」) or pruned (the oldest
+ * automatic ones beyond the number kept): the timeline and the comparison's lists follow.
+ */
+export interface SnapshotsChangedEvent {
+  /** Snapshot files deleted */
+  removed: string[];
+  /** Snapshot files written */
+  saved: string[];
 }
 
 export interface SourceInfo {
@@ -3058,6 +3104,8 @@ export interface Events {
   "plugin.changed": PluginChangedEvent;
   /** A plugin puts text on the clipboard (it has clipboard). */
   "plugin.clipboard": PluginClipboardEvent;
+  /** A plugin's notice with a button (it has notify); the OS shows it too when minimized. */
+  "plugin.notice": PluginNoticeEvent;
   /** Progress of a plugin call (reports, cleanups). */
   "plugin.progress": PluginProgressEvent;
   /** A plugin's background task started, moved on or ended. */
@@ -3068,6 +3116,8 @@ export interface Events {
   "scan.progress": ScanProgressEvent;
   /** Settings changed (any client, or the file was edited). */
   "settings.changed": SettingsChangedEvent;
+  /** Snapshots were saved or pruned (every session). */
+  "snapshots.changed": SnapshotsChangedEvent;
   /** Update check result or download progress (sessions with updates.v1). */
   "update.changed": UpdateChangedEvent;
   /** A frame pushed without a request (scan progress, time). */

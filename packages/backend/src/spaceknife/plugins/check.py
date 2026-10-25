@@ -31,6 +31,7 @@ from spaceknife_protocol.text import Text
 from spaceknife_sdk.errors import Issue, ManifestError
 from spaceknife_sdk.manifest import (
     CODE_KINDS,
+    HOOK_PERMISSIONS,
     MANIFEST,
     ColorModeSpec,
     CommandSpec,
@@ -124,7 +125,10 @@ API_PERMISSIONS = {
     "basket": "basket.propose",
     "snapshots": "snapshots.read",
     "clipboard": "clipboard",
+    "notify": "notify",
 }
+# what the code returns or builds -> the permission the app needs to act on it
+RESULT_PERMISSIONS = {"CompareOpen": "snapshots.read"}
 # kinds whose handlers get a tree (so their code needs tree.read without naming ctx.tree)
 TREE_KINDS = frozenset({"node_field", "insight", "node_set", "export_format", "cleanup"})
 SURFACES = {"light": (0xFF, 0xFF, 0xFF), "dark": (0x08, 0x09, 0x0B)}  # color.bg.window of the themes
@@ -615,6 +619,12 @@ def _ctx_uses(tree: ast.AST) -> dict[str, int]:
             and isinstance(node.args[0].value, str)
         ):
             out.setdefault("call:" + node.args[0].value, node.lineno)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in RESULT_PERMISSIONS
+        ):
+            out.setdefault("result:" + node.func.id, node.lineno)
     return out
 
 
@@ -668,9 +678,16 @@ def check_permissions(folder: Path, manifest: Manifest, specs: Sequence[tuple[st
         except (SyntaxError, UnicodeDecodeError):
             continue  # check_imports reports it
         for attr, line in _ctx_uses(tree).items():
-            perm = ALLOWED.get(attr[5:]) if attr.startswith("call:") else API_PERMISSIONS[attr]
+            if attr.startswith("result:"):
+                perm: str | None = RESULT_PERMISSIONS[attr[7:]]
+            else:
+                perm = ALLOWED.get(attr[5:]) if attr.startswith("call:") else API_PERMISSIONS[attr]
             if perm is not None:
                 used.setdefault(perm, (rel, line))
+    for k, s in specs:  # hooks a plugin hears of only with a permission (the snapshots hook)
+        event = str(getattr(s, "event", "")) if k == "hook" else ""
+        if event in HOOK_PERMISSIONS:
+            used.setdefault(HOOK_PERMISSIONS[event], (manifest.entry or MANIFEST, 0))
     kinds = {k for k, _s in specs}
     if kinds & TREE_KINDS:
         used.setdefault("tree.read", (manifest.entry or MANIFEST, 0))

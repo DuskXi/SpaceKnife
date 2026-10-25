@@ -30,6 +30,13 @@ export interface RemoteInfo {
   secure: boolean;
 }
 
+/** What a system notification says (main/index.ts sk:notify). */
+export interface SystemNotice {
+  id: string;
+  title: string;
+  body: string;
+}
+
 export interface SkApi {
   /** the platform of the computer the files are on (the server's in browser mode, not the browser's) */
   platform: "win32" | "darwin" | "linux";
@@ -58,6 +65,12 @@ export interface SkApi {
     /** Ask for attention: taskbar flash / dock bounce / urgency hint (W7 常规 · 扫描结束提醒). */
     flash(): void;
     onMaximized(cb: (maximized: boolean) => void): () => void;
+    /** A plugin's notice (ctx.notify) as a system notification, shown only while the window is
+     *  minimized or hidden (otherwise the notice in the window says it); clicking it brings the
+     *  window back and tells onNotice. */
+    notify(notice: SystemNotice): void;
+    /** A system notification of `notify` was clicked: its id. */
+    onNotice(cb: (id: string) => void): () => void;
   };
   shell: {
     showItemInFolder(path: string): void;

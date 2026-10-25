@@ -157,8 +157,16 @@ async def groups(ctx: Context, min_size: int | None = None) -> FindResult:
 @plugin.background("search", T("查找重复文件", "Finding duplicate files"))
 def search(ctx: Context) -> None:
     """The whole scan, however long it takes (the status bar shows it; cancelling stops it within a
-    MiB read); the report, the cleanup, the field and the set use what it found."""
-    _search(ctx, int(ctx.settings["min_size"]))
+    MiB read); the report, the cleanup, the field and the set use what it found. When it is done a
+    notice says so, with a button opening the report (a system notification while minimized)."""
+    found = _search(ctx, int(ctx.settings["min_size"]))
+    ctx.notify(
+        T("重复文件找完了", "Duplicate files: done"),
+        T("{groups} 组，多占 {wasted:size}", "{groups} groups, {wasted:size} extra").format(
+            groups=len(found.groups), wasted=found.wasted
+        ),
+        action="open",
+    )
 
 
 @plugin.command(

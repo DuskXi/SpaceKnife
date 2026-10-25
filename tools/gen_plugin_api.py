@@ -45,6 +45,12 @@ def _models() -> list[tuple[str, type, str]]:
 
     return [
         ("上下文", sdk.ScanInfo, "`ctx.scans()` 的一项（新的在前）；`scan_done` `scan_closed` 钩子的参数"),
+        (
+            "上下文",
+            sdk.TreeChange,
+            "`tree_changed` 钩子的参数：一个打开着的扫描的树变了（每个扫描每秒最多一次）",
+        ),
+        ("上下文", sdk.SnapshotsChange, "`snapshots` 钩子的参数（要 `snapshots.read`）：存了或删了快照"),
         ("上下文", sdk.SnapshotInfo, "`ctx.snapshots.list()` 的一项（新的在前）"),
         ("上下文", sdk.NodeRef, "带路径的节点引用：`tree.ref(id)`；报告、字段、动作里的节点"),
         ("上下文", sdk.Node, "`tree.node(id)`；字段、洞察函数的 `node` 参数"),
@@ -63,6 +69,7 @@ def _models() -> list[tuple[str, type, str]]:
         ("输入", sdk.ChangeUnit, "对比原因 `(ctx, items)` 的一项"),
         ("返回", sdk.Report, "报告"),
         ("返回", sdk.Toast, "命令或方法返回它时显示一条提示"),
+        ("返回", sdk.CompareOpen, "命令的方法返回它时打开对比（要 `snapshots.read`）"),
         ("返回", sdk.FieldValue, "节点字段（也可以只返回文字）"),
         ("返回", sdk.Insight, "代码洞察"),
         ("返回", sdk.Proposal, "清理的一个候选"),
@@ -105,6 +112,20 @@ NOTES: dict[tuple[str, str], str] = {
     ): "快照：打开的快照是那个文件；磁盘扫描是它完成时自动保存的那个（没有保存时 None）",
     ("ScanInfo", "front"): "用户眼前的那个扫描（`ctx.tree` 默认读它）",
     ("ScanInfo", "on_disk"): "节点是这台机器上的文件；扫描来源（`on_disk = false`）的是 False",
+    ("ScanInfo", "monitoring"): "文件变化是否实时跟着（`tree_changed` 钩子）：`off`（实时监控关着、快照、"
+    "没有监控器的扫描来源）、`starting`、`running`、`degraded`（部分靠轮询或重新扫描）、`failed`",
+    ("TreeChange", "scan_id"): "变了的扫描（钩子里 `ctx.tree` 就是它）",
+    ("TreeChange", "epoch"): "`folders` 的节点下标属于这个纪元（`ctx.tree.epoch`）",
+    ("TreeChange", "version"): "变化之后树的版本（`ctx.tree.version`）",
+    ("TreeChange", "folders"): "发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的），最多 256 个；"
+    "扫描来源重新列出时是根",
+    ("TreeChange", "more"): "大约还有多少个文件夹变了而没有列出",
+    ("TreeChange", "changes"): "这一秒里变了、新增或消失的文件和文件夹数",
+    ("SnapshotsChange", "saved"): "写下的快照文件",
+    ("SnapshotsChange", "removed"): "删掉的快照文件（自动快照超过保留个数时最旧的）",
+    ("CompareOpen", "base"): "基准：快照文件，或 `now`（同一组文件夹的实时树）",
+    ("CompareOpen", "target"): "对比目标：同上（默认 `now`）",
+    ("CompareOpen", "scan_id"): "在哪个扫描的标签页里对比；不写时用显示那组文件夹的标签页",
     ("TaskInfo", "id"): "这次后端运行里唯一的 id",
     ("TaskInfo", "plugin"): "插件 id",
     ("TaskInfo", "name"): "任务的名字（`@plugin.background` 的第一个参数）",

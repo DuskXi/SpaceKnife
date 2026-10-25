@@ -119,6 +119,7 @@ class Server:
         self.monitors.source_monitor = make_monitor(self.plugins)
         self.compares.annotate = self.plugins.annotate_changes
         self.scans.events.append(self._scan_event)
+        self.scans.snapshot_listeners.append(self._snapshots_changed)
         self.settings.listeners["plugins"] = self._settings_changed
         self._lang = self.settings.state().language
 
@@ -137,21 +138,29 @@ class Server:
         return await start_source(self.plugins, params)
 
     def _scan_event(self, what: str, handle: object) -> None:
-        roots = [r.path for r in getattr(handle, "roots", [])]
-        scan: dict[str, Any] = {
-            "scan_id": getattr(handle, "id", ""),
-            "roots": roots,
-            "items": len(getattr(handle, "store", ())) - 1,
-        }
+        api = self.plugins.api
+        scan: dict[str, Any] = api.scan_info(handle, api.active_scan())  # type: ignore[arg-type]
         if what in ("done", "closed"):
             self.plugins.fire("scan_done" if what == "done" else "scan_closed", scan=scan)
         if what == "closed":
             self.plugins.images.drop_scan(scan["scan_id"])
+            self.plugins.live.forget_scan(scan["scan_id"])
         task = asyncio.get_running_loop().create_task(
             self.plugins.push_update({"roots": self.plugins.api.scan_roots()})
         )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    def _snapshots_changed(self, saved: list[str], removed: list[str]) -> None:
+        """Snapshots were saved or pruned: every window (the timeline, a comparison's lists) and the
+        plugins' ``snapshots`` hooks."""
+        from spaceknife_protocol.methods import EVENT_SNAPSHOTS_CHANGED
+        from spaceknife_protocol.scan import SnapshotsChangedEvent
+
+        ev = SnapshotsChangedEvent(saved=saved[-64:], removed=removed[-64:])
+        for session in list(self.sessions):
+            session.emit(EVENT_SNAPSHOTS_CHANGED, ev)
+        self.plugins.live.snapshots_changed(saved, removed)
 
     def _settings_changed(self, st: SettingsStore) -> None:
         lang = st.state().language

@@ -14,7 +14,7 @@ uv run pytest my.tool/tests                                    # 合成树上跑
 spaceknife plugin shot my.tool --open report:largest           # 真界面的截图（无头浏览器，不弹窗）
 ```
 
-`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code layout color color-code export source set field insight hook task`。`plugin new` 结束时按选的部分列出下一步的命令。
+`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code layout color color-code export source set field insight hook changes task`。`plugin new` 结束时按选的部分列出下一步的命令。
 
 <a id="quick-tasks"></a>
 ## 2. 我要……
@@ -35,7 +35,10 @@ spaceknife plugin shot my.tool --open report:largest           # 真界面的截
 | 一种导出格式 | `@plugin.export_format("md", T(..), extension="md", options=[...])` → 逐块 `yield str` | `export` | `kind-export_format` |
 | 把压缩包等当文件夹扫描 | `@plugin.scan_source(..)` → `out.file(path, size)` | `source` | `kind-scan_source` |
 | 一个网页面板 | `[[panels]]` + `web/index.html`、`web/app.js`（`sk.call` / `sk.core`） | `panel` | `panels` |
-| 扫描完、设置变了、删除篮变了时做事 | `@plugin.on("scan_done" / "settings" / "lang" / "basket")` | `hook` | `kind-hook`、`api-hooks` |
+| 扫描完、设置变了、删除篮变了、存了快照时做事 | `@plugin.on("scan_done" / "settings" / "lang" / "basket" / "snapshots")` | `hook` | `kind-hook`、`api-hooks` |
+| 文件变了时做事（扫描在实时监控） | `@plugin.on("tree_changed")` → `(ctx, change: TreeChange)`：`change.folders`、`ctx.tree` 是那个扫描；`ScanInfo.monitoring` | `changes` | `api-live` |
+| 提醒用户（最小化时是系统通知） | `ctx.notify(T(..), T(..), action="命令名")`（要 `notify`） | `changes` | `api-notify` |
+| 打开两份快照（或快照与现在）的对比 | 命令的方法返回 `CompareOpen(base=快照, target="now")`；面板用 `sk.host` 的 `compare(a, b)`（要 `snapshots.read`） | — | `api-live` |
 | 比调用时限长的事（整盘哈希、一直盯着扫描） | `@plugin.background("name", T(..), start="startup")`；`ctx.tasks.start("name", params, key=)` | `task` | `kind-background`、`api-limits` |
 
 <a id="quick-api"></a>

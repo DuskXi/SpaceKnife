@@ -8,7 +8,7 @@
 // - events, shared states and streams of its own plugin only;
 // - host operations (select, zoom, filter, its own commands and its view's, toast; the view's colours
 //   with tree.read; reveal / open / terminal / url with host.open; copy with clipboard; basket with
-//   basket.propose);
+//   basket.propose; a comparison of snapshots with snapshots.read);
 // - limits: a message ≤ 1 MiB, at most 8 calls at once and 50 messages a second (PLUGIN_LIMIT).
 //
 // The plugin is bound to the iframe by the host (PanelFrame), never taken from a message. Pure: the
@@ -65,6 +65,8 @@ export const HOST_OPS: Readonly<Record<string, string | null>> = {
   basket: "basket.propose",
   // the colours the panel's view paints nodes with (classes, ages: what tree.read shows anyway)
   colors: "tree.read",
+  // show a comparison of snapshots (or of one and the live tree)
+  compare: "snapshots.read",
 };
 
 const LOCAL_NAME = /^[a-z][a-z0-9_]{0,23}$/;
@@ -147,7 +149,7 @@ export class PanelBridge {
   }
 
   /** Something for the panel (context, theme, language, its view): only once it said it is ready. */
-  push(type: "context" | "theme" | "lang" | "tree" | "view", payload: Record<string, unknown>): void {
+  push(type: "context" | "theme" | "lang" | "tree" | "view" | "snapshots", payload: Record<string, unknown>): void {
     if (this.ready && !this.closed) this.post({ type, ...payload });
   }
 

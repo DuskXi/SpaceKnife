@@ -20,6 +20,7 @@ PERMISSION_TEXT = Texts(
         "exec": "运行外部程序：{programs}",
         "host.open": "打开或定位文件、打开终端、打开网页",
         "clipboard": "写入剪贴板",
+        "notify": "发出通知（窗口最小化时也显示为系统通知）",
     }
 )
 
