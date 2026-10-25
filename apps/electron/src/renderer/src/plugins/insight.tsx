@@ -33,6 +33,7 @@ export function InsightCards({ scanId, node, tick }: { scanId: string; node: num
   const [cards, setCards] = useState<InsightCard[]>([]);
   const on = useApp((s) => s.capabilities.includes("plugins.v1"));
   const version = useApp((s) => s.extensions?.version ?? 0);
+  const lang = useApp((s) => s.lang); // the cards are in the interface language: asked again on a switch
   useEffect(() => {
     setCards([]);
     if (!on || node < 0) return;
@@ -43,7 +44,7 @@ export function InsightCards({ scanId, node, tick }: { scanId: string; node: num
       alive = false;
       job.cancel();
     };
-  }, [on, scanId, node, tick, version]);
+  }, [on, scanId, node, tick, version, lang]);
   if (!cards.length) return null;
   return (
     <section className="ins-section insight-cards" aria-label={t("这是什么")}>

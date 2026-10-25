@@ -23,6 +23,7 @@
 - [ ] macOS 便携版实机验证（Intel Mac）：从「下载」解压后直接打开（带隔离属性，会触发 App 转移）能用到旁边的 `data`；放行流程；无缝更新后不再要求放行；放在外置盘（exFAT）上
 - [ ] Mac App Store（可选）：沙盒下用户授权整盘，访问权要用隐式安全范围书签传给后端子进程，先做概念验证
 - [x] 应用内引导开启「完全磁盘访问权限」（扫描前的说明框直接打开系统设置的对应页面；设置「扫描范围 › 受保护的位置」）
+- [ ] 插件在 macOS 上（本机没跑过，2026-10-25）：CI 构建插件分支时核对 ① arm64 和 Intel 上「插件能 import 的模块」一步通过（zoneinfo 在插件沙箱里读系统时区库、`platform.platform()` 读 SystemVersion.plist、numpy 用 Accelerate）② 多收的扩展模块不让 `codesign --verify --deep --strict` 失败 ③ 用 `SpaceKnife.app` 里的后端把参考插件和试写插件装上、启用、`check --strict`、call、render ④ 无头模式下 FSEvents 的写入到 `tree_changed`、后台任务、面板文件 ⑤ ad-hoc 签名的包里插件进程重启不被 Gatekeeper 拦，读受保护位置时授权记在 SpaceKnife 名下 ⑥ 窗口模式的 `skplugin://` 面板
 
 ## M4 收尾
 
@@ -328,6 +329,7 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
   - [ ] 第三轮剩下的：面板主题变量里的类别色、`classes.get` 按语言的名字；插件在 Python 里拿对比数据（对比里的调用现在明确没有扫描的树，`ctx.tree` 报原因：变化树还读不到）；`shot` 连到 `plugin dev`、`render --settle`、面板 JS 的类型检查（`plugin dev` 打印 `ctx.log` 第五轮做了）
   - [x] 试写第四轮的缺口，第五轮只修不写（docs/plugins.md「试写第四轮之后的修正」）：命令的 `check` 和其余带扫描的调用读上下文的那棵树、`check` 出错时命令不可用；`tree_changed` 不怕纪元变（重新映射、重调、并进下一批），`TreeChange` 带路径和前后大小；读盘许可用完就还；`shapes.v1` 选中只画环、细描边、`LayoutInput.label`、根标签、悬停占比；`plugin shot` 能操作画布（`node=a/b`、`@x,y`）、`type:`、JS 的错误、`--setting` 的 JSON 和 `@文件`、PowerShell 5.1 的参数读回；`plugin new --help` 与速查同一份列表、`check` 允许 `sys` `platform`、导出 `LabeledAction` `Block`、`tree.file_ids` 查 `files.read`、后台任务的种类名、`plugin dev` 打出日志和通知；文档的矛盾和缺漏
   - [ ] 第四轮剩下的：MockHost 改树和「扫描中」；扫描来源的宿主内存（每项约 577 B）；来源的文字跟着语言、路径分隔符、失败来源的根；列表设置栏的类型（大小、过滤式、文件夹）与保存时校验；按语言的状态行；不靠永不结束的任务保活；`tree.query` 按名字掩码找文件夹、子树最新修改时间列；导出开关和数字选项的校验；面板主题变量里的类别色；Python 里拿对比数据；比较视图 shapes、变化注解、`scan_closed` 的 `ctx.tree`；`TreeChange.before` 的逻辑大小；nested 悬停光晕盖住里面；`Insight.kind` 的校验；`plugin shot` 在面板里的 `node=` / `@x,y`；经 `uv run` 的 PowerShell 5.1 参数
+  - [ ] 第五轮之后收尾时剩下的（docs/plugins.md「第五轮之后的收尾」）：Windows 上插件在普通 `def` 里自己开事件循环被沙箱拦下（`socketpair` 要 bind 本机地址，放行要能认出真是 `socketpair`）；Linux 上新建文件夹后边写边列的文件可能只进树一半（文件写入不改文件夹的修改时间，监视加上之前写完的）；Windows 上打开 Linux 的 ncdu 导出时详情面板的父文件夹路径用 `\`；macOS 上的插件见「macOS」一节
   - [ ] 试写的插件（不在仓库里，worktree 的 plugins-trial1/）跟上：按新的 `check` 换掉不存在的图标名、去掉 `_current`、重新 `plugin build`；archivesrc 的坏包测试改成 `pytest.raises`，growthpanel 打开历史以外快照的测试改成期望被拒
   - [ ] 派一个只读 `docs/plugin-dev.md` 的新 agent 写一个小插件（如「按扩展名统计」的报告加一条命令），记下 token 用量和走的弯路，回头补文档
   - [ ] 还很薄的部分（docs/plugins.md 三节「还很薄或未做」）：对比侧栏和状态栏的插件报告、工具栏「更多」；监控器给普通扫描用；文件夹规则叠加；悬停字段只读缓存；macOS 内存上限只靠心跳；`check` 的契约只跑固定的合成树

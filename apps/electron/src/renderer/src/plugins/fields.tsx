@@ -19,16 +19,19 @@ import { formatCell, numericUnit } from "./report/format";
 /** Whether any enabled plugin has a field for this place (else nothing is asked). */
 export const useHasFields = (slot: "inspector" | "hover"): boolean => useApp((s) => !!s.extensions?.node_fields.some((f) => f.slots.includes(slot)));
 
-/** The fields of a node for a place; `tick` asks again (the details column's throttled refresh). */
+/** The fields of a node for a place; `tick` asks again (the details column's throttled refresh), so
+ *  does a language switch (titles and values are in the interface language; the backend has
+ *  switched when `lang` changes). */
 export function useFields(scanId: string | null | undefined, node: number | null, slot: "inspector" | "hover", tick: unknown = 0): PluginFieldsResult | null {
   const has = useHasFields(slot);
   const version = useApp((s) => s.extensions?.version ?? 0);
+  const lang = useApp((s) => s.lang);
   const [res, setRes] = useState<PluginFieldsResult | null>(null);
   const [again, setAgain] = useState(0);
   useEffect(() => {
     setRes(null);
     setAgain(0);
-  }, [has, scanId, node, slot, tick, version]);
+  }, [has, scanId, node, slot, tick, version, lang]);
   useEffect(() => {
     if (!has || !scanId || node == null || node < 0) return;
     let alive = true;
@@ -48,7 +51,7 @@ export function useFields(scanId: string | null | undefined, node: number | null
       if (timer) clearTimeout(timer);
       job.cancel();
     };
-  }, [has, scanId, node, slot, tick, version, again]);
+  }, [has, scanId, node, slot, tick, version, lang, again]);
   return res;
 }
 
