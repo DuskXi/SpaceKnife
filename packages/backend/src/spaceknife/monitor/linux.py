@@ -17,8 +17,7 @@ then they wait in a :class:`~spaceknife.monitor.poll.Backlog`), often after the 
 too, and what changed inside a folder in between raises no event. So once a folder's watch is on,
 one ``stat`` compares its mtime with the one the scan recorded
 (:func:`~spaceknife.monitor.poll.listed_changed`): a folder that may have changed is reported as
-``dir`` and listed again. Until every folder handed in is watched or polled the status says
-``starting``.
+``dir`` and listed again.
 
 Decoding (:func:`decode_events`) and interpretation (:func:`interpret`) make no system calls, so
 tests feed them synthetic records — ``IN_Q_OVERFLOW`` is hard to provoke for real.
@@ -574,8 +573,6 @@ class InotifyWatcher:
                 state, detail = "degraded", TEXT["short"].format(count=fmt.count(polled))
             elif polled:
                 state, detail = "degraded", TEXT["polled"].format(count=fmt.count(polled))
-            elif self._incoming or self._poller.settling:
-                state = "starting"  # folders handed in still wait for their watch (and check)
         return WatchStatus(
             state,
             detail,
@@ -702,7 +699,7 @@ class InotifyWatcher:
             self._place(path, listed, since, changes)
         if changes:
             self._emit(changes)
-        self._incoming.advance(len(fed))  # after the changes went out: "starting" until then
+        self._incoming.advance(len(fed))
 
     def _walk_some(self) -> None:
         """Watch folders that appeared and report what is already inside them."""

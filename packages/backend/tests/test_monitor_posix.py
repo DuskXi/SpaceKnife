@@ -384,12 +384,17 @@ def test_live_add_dirs(root: Path, watching: tuple[InotifyWatcher, Collector]) -
 
 
 @linux_only
-def test_live_status_is_starting_until_handed_folders_are_watched(
+def test_live_running_while_handed_folders_wait_for_their_watch(
     root: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Running as soon as the root is watched, also while folders handed in still wait for their
+    watch; a write into one of them in that moment raises no event, and its check reports it."""
     dirs = [root / f"d{i}" for i in range(3)]
     for d in dirs:
         d.mkdir()
+    listed = [int(os.stat(d).st_mtime) for d in dirs]
+    time.sleep(0.2)  # well past the folders' times (listed_changed allows file times some slack)
+    since = time.time_ns()
     w = InotifyWatcher(str(root), poll_interval=0.2)
     gate = threading.Event()
     place = w._take_incoming
@@ -399,15 +404,19 @@ def test_live_status_is_starting_until_handed_folders_are_watched(
         place()
 
     monkeypatch.setattr(w, "_take_incoming", held)
-    w.start(Collector())
+    got = Collector()
+    w.start(got)
     try:
-        assert w.status().state == "running"  # nothing handed in yet: the root is watched
-        w.add_dirs([str(d) for d in dirs])
+        assert w.status().state == "running"  # the root is watched
+        w.add_dirs([str(d) for d in dirs], listed, since_ns=since)
+        (dirs[1] / "late.bin").write_bytes(b"l")  # no watch on it yet ...
         st = w.status()
-        assert (st.state, st.watched_dirs) == ("starting", 1)
+        assert (st.state, st.watched_dirs) == ("running", 1)
         gate.set()
-        wait_until(lambda: w.status().state == "running")
-        assert w.status().watched_dirs == 4
+        got.wait_for(has("dir", dirs[1], is_dir=True))  # ... its check finds the change
+        wait_until(lambda: w.status().watched_dirs == 4)
+        assert w.status().state == "running"
+        assert {c.path for c in got.changes() if c.kind == "dir"} == {str(dirs[1])}
     finally:
         gate.set()
         w.stop()

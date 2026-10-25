@@ -46,7 +46,6 @@ class Watcher(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class WatchStatus:
-    # 逐目录监视：交来的目录还没全部加上监视（或取到轮询基线）时也是 starting
     state: Literal["starting", "running", "degraded", "failed", "stopped"]
     detail: str = ""  # 中文一句话，界面直接显示（如「inotify 监视额度不足，3 万个目录改为轮询」）
     watched_dirs: int = 0  # 有效监视的目录数（Windows 递归监视记为整棵树：-1）
@@ -77,7 +76,7 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 ### 2.2 Linux：inotify（额度）+ 轮询对账（`monitor/linux.py`）
 
 - 每个目录一个 watch，监视器线程看到新目录（`IN_CREATE`/`IN_MOVED_TO`）就立即加 watch 并列一遍，已有条目报 created（覆盖「mkdir 后立刻写入」和整棵树移入）。
-- `add_dirs` 交来的目录按批排队（`poll.Backlog`：保存调用方的列表本身和每目录 4 B 的 mtime），线程每轮最多放 2048 个；每加上一个 watch 就做上面的补查（多一次 stat）。队列没放完（含轮询基线没取完）时状态是 starting。
+- `add_dirs` 交来的目录按批排队（`poll.Backlog`：保存调用方的列表本身和每目录 4 B 的 mtime），线程每轮最多放 2048 个；每加上一个 watch 就做上面的补查（多一次 stat）。
 - 额度：进程内所有扫描共享 `max_user_watches` 的 80%（读不到按 8192）；只有父目录有 watch 的目录才分到 watch（浅层先），其余用内嵌的轮询对账，状态 degraded「inotify 监视额度不足，N 个文件夹改为轮询」。
 - `IN_Q_OVERFLOW`：发 `overflow(root)`，然后逐个校验 watch：过时的删掉、子树清理并重新遍历。根目录的 `IN_DELETE_SELF` / `IN_MOVE_SELF`：`overflow(root)` + `failed`。
 - 文件的 `IN_CLOSE_WRITE` / `IN_ATTRIB` → modified，大小与占用（`st_blocks × 512`）由监视器自己 stat。
@@ -128,7 +127,7 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 4. **溢出**：有 USN 检查点 → 按日志补列被动过的目录；否则子树标脏。**事件风暴**（一个窗口里要列的目录 > 2000 或事件 > 20000）→ 公共祖先标脏。标脏的子树安静 2 秒后逐目录重新列出（新目录增量扫描）。
 5. **应用**：列目录用扫描的同一套代码（原生或纯 Python，只列一层），扫描进行中经它的 IO 限速器；深的目录先 `relist`（祖先的 relist 会把它的新区间一起带走）；之后新目录增量扫描。
 6. **推送**：变化项（新 id）与占用差交给视图（`ViewManager.flash`），视图把它们映射到当前帧的行（块本身、所在聚合块或最近的已绘祖先），随下一帧的 `FrameInfo.flash` 下发；前端闪两次后淡出，「减少动画」时画静态角标（UI-TM-43/44）。可用空间最多每秒重读一次（UI-MAIN-63）。
-7. **状态**：`ScanStatus.monitor`（`MonitorStatus`：state、detail、watcher、监视/轮询目录数、事件数、已应用变化数、溢出、待处理、最近一次耗时）。状态栏「实时监控中 / 启动中 / 部分轮询 / 失败 / 已关闭」，点击开关 `scan.monitor`（UI-MAIN-49/52、UI-W1-12）。有逐目录监视器时，扫描还在列目录、新目录还没全部交出、或监视器还没放完时是 starting（failed、degraded 优先）；全部就绪后流水线主动推一次状态，之后保持 running：之后零星交来的目录（监控自己扫到的新目录、F5）很快放完，期间的改动由补查兜住，不再回到 starting；已停止的扫描继续扫描时重新进入 starting。
+7. **状态**：`ScanStatus.monitor`（`MonitorStatus`：state、detail、watcher、监视/轮询目录数、事件数、已应用变化数、溢出、待处理、最近一次耗时）。状态栏「实时监控中 / 部分轮询 / 失败 / 已关闭」，点击开关 `scan.monitor`（UI-MAIN-49/52、UI-W1-12）。各平台一样：根目录一加上监视就是 running，扫描进行中也是；逐目录监视器还没给某个文件夹加上监视之前，那里的改动由补查兜住（§2）。
 8. **F5 与继续扫描**：`scan.rescan(node)` 把一个文件夹连同子树重新读一遍（实时监控关闭时由不带监视器的被动监控执行）；`scan.continue` 让已停止的硬扫描接着读它队列里剩下的文件夹。
 
 ## 6. 验收（来自 PLAN M5）

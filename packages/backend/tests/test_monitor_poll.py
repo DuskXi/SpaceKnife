@@ -164,9 +164,7 @@ def test_poller_baseline_checks_what_the_scan_recorded(tmp_path: Path) -> None:
     assert p.add(str(moved), secs[moved] - 5, later)  # whole seconds differ
     assert p.add(str(recent), secs[recent], os.stat(recent).st_mtime_ns)  # changed after the scan began
     assert p.add(str(plain))  # nothing recorded: the baseline as before
-    assert p.settling
     assert p.step(0.0) == [Change("dir", str(moved), is_dir=True), Change("dir", str(recent), is_dir=True)]
-    assert not p.settling
     assert p.step(0.0) == []
 
 

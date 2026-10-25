@@ -159,9 +159,11 @@ async def test_a_change_before_a_folder_is_watched_reaches_the_tree(
 
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inotify watches folder by folder")
-async def test_the_status_says_starting_until_every_folder_is_watched(
+async def test_the_status_is_running_while_folders_wait_for_their_watches(
     watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Running as soon as the root is watched, as on every platform: while the scan runs and right
+    after it, with its folders still waiting for their watches. A write in that moment is not lost."""
     mgr, _, _ = watched
     tree = build_tree(tmp_path / "root")
     go = hold_the_feed(monkeypatch)
@@ -173,17 +175,14 @@ async def test_the_status_says_starting_until_every_folder_is_watched(
     mon = handle.monitor
     assert mon is not None
     st = mon.status()
-    assert (st.state, st.watcher, st.watched_dirs) == ("starting", "inotify", 1)  # done, not yet watched
-    assert shown and set(shown) == {"starting"}  # while it scanned, and when it finished
+    assert (st.state, st.watcher, st.watched_dirs) == ("running", "inotify", 1)  # only the root so far
+    assert shown and set(shown) == {"running"}  # while it scanned, and when it finished
+    deep = max((d for d in tree.root.rglob("*") if d.is_dir()), key=lambda d: len(d.parts))
+    (deep / "late.bin").write_bytes(b"l" * 500_000)  # before the folder's watch
     go.set()
-    await until(lambda: mon.status().state == "running")
-    assert mon.status().watched_dirs == tree.dirs + 1
-    await until(lambda: shown[-1] == "running")  # told without waiting for a file change
-    told = len(shown)
-    (tree.root / "later" / "inner").mkdir(parents=True)  # folders the monitor finds itself ...
-    (tree.root / "later" / "inner" / "x.bin").write_bytes(b"x" * 1000)
+    await until(lambda: mon.status().watched_dirs == tree.dirs + 1)
     await until(same_as_disk(handle, tree.root))
-    assert len(shown) > told and set(shown[told:]) == {"running"}  # ... do not bring "starting" back
+    assert mon.status().state == "running" and set(shown) == {"running"}
 
 
 async def test_a_view_follows_moved_ids(watched: Any, tmp_path: Path) -> None:

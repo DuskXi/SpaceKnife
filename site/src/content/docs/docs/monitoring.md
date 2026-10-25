@@ -22,7 +22,7 @@ The live monitoring item in the status bar shows the state of monitoring for the
 | Status bar shows | Meaning |
 |---|---|
 | Live monitoring | Every scanned folder is watched with the system's change notifications. The tooltip counts the changes applied so far ("{n} changes applied"), and how many are still waiting ("{pending} pending"). |
-| Live monitoring · starting | The watchers are being set up (FSEvents can take a moment). On Linux this lasts until the scan is done and every scanned folder has its watch. |
+| Live monitoring · starting | The watchers are being set up (FSEvents can take a moment). |
 | Live monitoring · partly polling | Some or all folders are checked by polling instead of notifications. The tooltip says why, for example "Not enough inotify watches; polling {count} folders instead". |
 | Live monitoring · failed | Watching stopped. The tooltip gives the reason, for example "The watched folder was deleted". |
 | Live monitoring off | Monitoring is switched off. |

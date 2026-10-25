@@ -171,11 +171,6 @@ class DirPoller:
     def __contains__(self, path: object) -> bool:
         return path in self._mtimes
 
-    @property
-    def settling(self) -> bool:
-        """Folders were added whose baseline (and check) is still to be taken."""
-        return bool(self._fresh)
-
     def add(self, path: str, listed: int | None = None, since_ns: int = 0) -> bool:
         """Start polling ``path`` (False: already polled). The baseline is taken at the next step;
         with ``listed`` (the folder's mtime as the scan recorded it, whole seconds) and ``since_ns``

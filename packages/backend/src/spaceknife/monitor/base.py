@@ -30,7 +30,7 @@ class Change:
 
 @dataclass(frozen=True, slots=True)
 class WatchStatus:
-    state: WatchState  # starting: also while folders handed in (add_dirs) still wait for their watch
+    state: WatchState
     detail: str = ""  # one Chinese sentence the UI shows as is (degraded / failed reasons)
     watched_dirs: int = 0  # folders under live watch; -1: the whole tree (recursive watch)
     polled_dirs: int = 0  # folders kept in sync by polling
