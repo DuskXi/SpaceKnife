@@ -111,7 +111,7 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 - `can_relist(store, folder)`：已列出、未 GONE、且没有 `PENDING` 子项（扫描的队列按 id 引用它们）。
 - `compact(store) -> (new_store, remap)`：`GONE` 行超过全表 25% 且多于 10 万行、扫描不在进行时，在计算池里按广度优先重排（重建名字堆），在结构锁下 `adopt`，名字索引重建，视图按 `remap` 换 id。
 
-结构锁（`store/lock.py`）：计算池里的读操作（渲染、汇总、过滤、搜索）在 `STRUCTURE.read()` 下运行；`relist` / `update_stats` / 压缩在事件循环线程上 `async with STRUCTURE.write()`（异步等读者退出，写的过程同步、不 await）。扫描的追加不需要锁。
+结构锁（`store/lock.py`）：计算池里的读操作（渲染、汇总、过滤、搜索）在 `STRUCTURE.read()` 下运行；`relist` / `update_stats` / 压缩在事件循环线程上 `async with STRUCTURE.write()`（异步等读者退出，写的过程同步、不 await）。扫描的追加不需要锁。写者只等它来时已经在跑的读者；这些读者没跑完时新读者照样开始（写者反正进不去），它们跑完后新读者才排到写者后面，所以一个很长的读者（在大盘上建清理方案之类）只耽误改动，不再让所有画面、汇总和别的扫描的视图一起等它，写者也不会被源源不断的短读者饿死。
 
 视图（`view/state.py`）提供 `remap(new_ids, fallback)`：缩放根、选中项、前进/后退历史、小项聚合成员、待闪烁项都换成新 id；指向已删除节点的缩放退回到变化前记下的祖先链里最近的仍存在者。
 
