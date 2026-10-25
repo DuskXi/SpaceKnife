@@ -182,7 +182,7 @@ async def test_a_hook_the_registry_lacks_is_logged(plugin: Path) -> None:
             hp = host.server.plugins
             rec = hp.records["t.r4live"]
             EXTENSIONS.unregister_owner("t.r4live")
-            await hp._hook(rec, "start")
+            await hp._hook(rec, "start", hp.places.nowhere())
             assert any("hook start of t.r4live not run" in line for line in lines)
     finally:
         logger.remove(sink)

@@ -102,7 +102,13 @@ async def test_latest_wins(process: bool) -> None:
 
         async def latest(tag: str, seconds: float) -> object:
             return await hp.call(
-                "t.slow", "method", "latest", {"seconds": seconds, "tag": tag}, session=session, latest=True
+                "t.slow",
+                "method",
+                "latest",
+                {"seconds": seconds, "tag": tag},
+                where=hp.places.nowhere(),
+                session=session,
+                latest=True,
             )
 
         first = asyncio.create_task(latest("first", 3))
@@ -203,7 +209,9 @@ async def test_concurrency_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     async with mock("t.slow") as host:
         hp = await host._ready()
         tasks = [
-            asyncio.create_task(hp.call("t.slow", "method", "latest", {"seconds": 0.5}, timeout=5))
+            asyncio.create_task(
+                hp.call("t.slow", "method", "latest", {"seconds": 0.5}, where=hp.places.nowhere(), timeout=5)
+            )
             for _ in range(8)
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)

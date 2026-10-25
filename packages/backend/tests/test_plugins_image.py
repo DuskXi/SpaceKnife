@@ -157,7 +157,7 @@ async def test_stale_ids_after_the_tree_is_reorganised() -> None:
         res = await hp.api.cleanup_result(
             rec,
             "logs",
-            {"scan_id": host.scan_id},
+            hp.places.request({"scan_id": host.scan_id}),
             [
                 {
                     "node": {"scan_id": host.scan_id, "node": 999, "epoch": 0, "path": store.path(node)},

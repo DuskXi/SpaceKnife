@@ -66,6 +66,28 @@ C = TypeVar("C", bound=type[BaseModel])
 # Set by the runtime while it imports a plugin's entry (the folder and manifest it loads).
 _LOADING: list[tuple[Path, Manifest]] = []
 _INSTANCES: list[Plugin] = []
+# Every kind of call the host makes into plugin code (the runtime runs each). A new one is added
+# here, gets its place in the host's plugins/where.py and a case in the backend's
+# tests/test_plugin_where.py (which checks that every kind here has one).
+CALL_KINDS = (
+    "method",
+    "report",
+    "cleanup",
+    "field",
+    "insight",
+    "set",
+    "visual",
+    "layout",
+    "color",
+    "legend",
+    "export",
+    "source",
+    "watch",
+    "stream",
+    "annotate",
+    "hook",
+    "task",
+)
 
 
 def _snake(name: str) -> str:
@@ -173,6 +195,8 @@ class Plugin:
         *,
         params: type[BaseModel] | None = None,
     ) -> Handler:
+        if kind not in CALL_KINDS:
+            raise ValueError(f"no call kind {kind!r}: add it to CALL_KINDS")
         if (kind, name) in self.handlers:
             self.issues.append(Issue("duplicate", f"{kind} {name!r} is defined twice"))
         hints = _annotations(fn, _defining_locals())
@@ -811,4 +835,4 @@ class _Loading:
         return made[-1] if made else None
 
 
-__all__ = ["Description", "Handler", "Plugin", "describe_declarative", "loaded"]
+__all__ = ["CALL_KINDS", "Description", "Handler", "Plugin", "describe_declarative", "loaded"]

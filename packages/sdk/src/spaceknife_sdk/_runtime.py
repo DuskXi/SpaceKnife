@@ -391,20 +391,15 @@ class Dispatcher:
     ) -> tuple[Any, list[bytes]]:
         kind = h.kind
         p = params if isinstance(params, Mapping) else {}
-        if kind in ("method", "check"):
+        # (what the call is about, ctx.tree among it, is the host's to say: ctx.call_info)
+        if kind == "method":
             if h.params is not None and h.arity >= 2:
-                arg = h.params.model_validate(dict(p))
-                scan = getattr(arg, "scan_id", None)  # an ActionContext: ctx.tree is its scan
-                if isinstance(scan, str) and scan and not ctx.call_info.scan_id:
-                    ctx.call_info.scan_id = scan
-                result = await self._call(h, ctx, arg)
+                result = await self._call(h, ctx, h.params.model_validate(dict(p)))
             else:
                 result = await self._call(h, ctx)
             return self._value(result)
         if kind in ("report", "cleanup"):
             c = ReportContext.model_validate(dict(p))
-            if c.scan_id and not ctx.call_info.scan_id:
-                ctx.call_info.scan_id = c.scan_id
             result = await self._call(h, ctx, c)
             if kind == "cleanup":
                 return [_proposal(i) for i in (result or [])], []

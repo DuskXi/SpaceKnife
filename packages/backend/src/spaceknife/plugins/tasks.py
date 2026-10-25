@@ -242,7 +242,7 @@ class Tasks:
                         "task",
                         t.name,
                         {"params": t.params, "key": t.key},
-                        ctx={"scan_id": t.scan_id} if t.scan_id else None,
+                        where=self.host.places.task(t.scan_id),
                         timeout=float(timeout) if timeout else None,
                     )
                     t.state = "done"

@@ -27,7 +27,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from spaceknife_protocol.errors import ErrorCode
-from spaceknife_protocol.plugins import NodeRef, Permission, PluginTaskInfo
+from spaceknife_protocol.plugins import ActionContext, NodeRef, Permission, PluginTaskInfo
 from spaceknife_protocol.text import LANG, Text, fmt_ago, fmt_count, fmt_date, fmt_size, localize
 
 from ._audit import trusted
@@ -83,9 +83,30 @@ class RuntimeState:
     last_notice: float = -1e9  # ctx.notify: when the last notice went (monotonic)
 
 
+NO_TREE: dict[str, Text] = {  # why a call has no ctx.tree (the host's plugins/where.py)
+    "closed": Text(
+        zh="这个扫描已经关掉了，读不到它的树", en="This scan was closed: its tree can no longer be read"
+    ),
+    "compare": Text(
+        zh="这次调用来自对比：它的节点是对比的变化树的，不是扫描的"
+        "（对比所在的扫描用 ctx.scan(ctx.where.scan_id) 读）",
+        en="This call comes from a comparison: its nodes are the change tree's, not a scan's (read the "
+        "scan it compares with ctx.scan(ctx.where.scan_id))",
+    ),
+    "listing": Text(
+        zh="扫描来源正在列出这棵树：列完之前读不到",
+        en="The scan source is listing this tree: it cannot be read yet",
+    ),
+}
+
+
+def _int(v: Any) -> int | None:
+    return int(v) if isinstance(v, int) and not isinstance(v, bool) else None
+
+
 @dataclass(slots=True)
 class CallInfo:
-    """One call, as the host describes it."""
+    """One call, as the host describes it (its plugins/where.py builds the place of every call)."""
 
     id: int = 0
     kind: str = "method"
@@ -101,10 +122,20 @@ class CallInfo:
     # the tree's epoch when the host made the call: node ids the call came with are of it, and
     # ctx.tree is that tree (a read after the tree was reorganised is STALE_TREE); None: the newest
     epoch: int | None = None
+    # what ctx.tree is: "scan" (scan_id), "front" (the scan in front), or why there is none:
+    # "closed", "compare", "listing" (NO_TREE)
+    tree: str = "front"
+    selection: tuple[int, ...] = ()
+    zoom_node: int | None = None
+    filter: str = ""
+    args: dict[str, Any] = field(default_factory=dict)
+    compare_id: str | None = None
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> CallInfo:
-        epoch = d.get("epoch")
+        sel = d.get("selection")
+        args = d.get("args")
+        tree = d.get("tree")
         return CallInfo(
             id=int(d.get("id", 0)),
             kind=str(d.get("kind", "method")),
@@ -112,12 +143,20 @@ class CallInfo:
             session=d.get("session"),
             scan_id=d.get("scan_id"),
             view_id=d.get("view_id"),
-            node=d.get("node"),
+            node=_int(d.get("node")),
             timeout=float(d.get("timeout", 30.0)),
             request=d.get("request"),
             slot=d.get("slot"),
             units=1000 if d.get("units") == 1000 else 1024,
-            epoch=int(epoch) if isinstance(epoch, int) and not isinstance(epoch, bool) else None,
+            epoch=_int(d.get("epoch")),
+            tree=str(tree) if isinstance(tree, str) else ("scan" if d.get("scan_id") else "front"),
+            selection=tuple(n for n in (_int(x) for x in sel) if n is not None)
+            if isinstance(sel, list)
+            else (),
+            zoom_node=_int(d.get("zoom_node")),
+            filter=str(d.get("filter") or ""),
+            args=dict(args) if isinstance(args, dict) else {},
+            compare_id=d.get("compare_id"),
         )
 
 
@@ -784,7 +823,8 @@ class Tasks:
         """Start the task ``name`` with ``params`` (its second argument). One runs per name and
         ``key`` (a scan id, a folder …): starting it again returns the running one, or with
         ``replace`` cancels it and starts anew. Returns at once; the task runs on its own, its
-        ``ctx.tree`` the scan of this call (else the scan in front)."""
+        ``ctx.tree`` the scan of this call (``ctx.where.scan_id``; one that is not open: the scan
+        in front)."""
         body = params.model_dump(mode="json") if isinstance(params, BaseModel) else dict(params or {})
         value, _ = self._ctx._link.request(
             "host.task_start",
@@ -905,7 +945,10 @@ class Context:
 
     @property
     def tree(self) -> TreeView:
-        """The scan this call is about (else the scan in front). Needs ``tree.read``.
+        """The scan this call is about (``ctx.where.scan_id``; a call about no scan: the scan in
+        front). Needs ``tree.read``. A call that has no scan tree raises ``PluginError`` saying
+        why: a ``scan_closed`` hook (the scan is gone), a call from a comparison (its nodes are the
+        change tree's), a scan source listing the tree.
 
         A call that comes with node ids (a field, a check, a hook, a frame's colours …) gets the
         tree as it was when the host made the call: those ids are of it. When the tree is
@@ -913,6 +956,10 @@ class Context:
         with code ``STALE_TREE``; let it propagate (the host asks again with the new ids, or
         leaves the answer out)."""
         if self._tree is None:
+            why = NO_TREE.get(self.call_info.tree)
+            if why is not None:
+                require(self._state, "tree.read")
+                raise PluginError(why)
             info = self._tree_info(self.call_info.scan_id)
             want = self.call_info.epoch
             if want is not None and int(info.get("epoch", 0)) != want:
@@ -948,6 +995,24 @@ class Context:
     def slot(self) -> str | None:
         """Where a node field is shown: ``"inspector"`` (1 s) or ``"hover"`` (30 ms); else None."""
         return self.call_info.slot
+
+    @property
+    def where(self) -> ActionContext:
+        """Where this call comes from, the same for every kind of call (a command's method gets it
+        as its ``ActionContext`` too): ``scan_id`` (``ctx.tree``), ``view_id``, ``node``,
+        ``selection``, ``zoom_node``, ``filter``, ``args``, ``compare_id``; what the host does not
+        know for this kind of call is None or empty (docs/plugin-api.md 「调用的上下文」)."""
+        i = self.call_info
+        return ActionContext(
+            scan_id=i.scan_id,
+            view_id=i.view_id,
+            node=i.node,
+            selection=list(i.selection),
+            compare_id=i.compare_id,
+            args=dict(i.args),
+            zoom_node=i.zoom_node,
+            filter=i.filter,
+        )
 
     @property
     def node(self) -> Node | None:

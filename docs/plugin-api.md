@@ -16,7 +16,8 @@
 | `ctx.granted` | 用户授予的权限（`frozenset`），例如 `"files.read" in ctx.granted` 时才去读文件内容 |
 | `ctx.slot` | 节点字段被问时在哪：`"inspector"`（详情面板，1 秒）或 `"hover"`（悬停卡，30 毫秒）；其他调用是 None |
 | `ctx.node` | 调用针对的节点：字段和洞察的那一项，报告和清理的 `c.node`；没有时是 None |
-| `ctx.tree` | 调用带的扫描（`c.scan_id`），否则用户眼前的扫描；都没有时抛 `PluginError`「需要先完成扫描」。带着节点下标的调用（字段、洞察、命令和它的 `check`、钩子、一帧的配色和布局、导出……）拿到的是宿主发出调用时的那棵树，那些下标属于它；调用途中树被整理了（[纪元](#api-epoch)变了），再读就抛 `HostError`（`STALE_TREE`），不会答成别的节点。后台任务、流和监控器的 `ctx.tree` 是第一次读时最新的树 |
+| `ctx.where` | 这次调用从哪来：一个 [`ActionContext`](#api-models)（`scan_id` `view_id` `node` `selection` `zoom_node` `filter` `args` `compare_id`）。每种调用都有，宿主在一处按调用的来处填好（命令的方法收到的 `c` 就是它），这种调用没有的是 None 或空；每种调用填什么见[调用的上下文](#api-where) |
+| `ctx.tree` | 这次调用所在的扫描（`ctx.where.scan_id`）；不针对哪个扫描的调用（设置、语言、删除篮、快照、`start` 钩子，配色的图例）是用户眼前的扫描；没有扫描时抛 `PluginError`「需要先完成扫描」。没有扫描的树的调用读它也抛 `PluginError`，写明原因：`scan_closed` 钩子（扫描已经关掉）、对比里的调用（节点是变化树的）、扫描来源列出时（树还在列）。带着节点下标的调用（字段、洞察、命令和它的 `check`、钩子、一帧的配色和布局、导出……）拿到的是宿主发出调用时的那棵树，那些下标属于它；调用途中树被整理了（[纪元](#api-epoch)变了），再读就抛 `HostError`（`STALE_TREE`），不会答成别的节点。后台任务、流和监控器的 `ctx.tree` 是第一次读时最新的树 |
 | `ctx.scan(scan_id)` | 另一个打开着的扫描的树；`ctx.scans()` 列出它们（[`ScanInfo`](#api-models)，新的在前，`front` 标出眼前的那个） |
 | `ctx.invalidate(*kinds)` | 丢掉宿主缓存的本插件的回答（[缓存](#api-cache)）；`kinds` 是 `node_field` `node_set` `visualization` `color_mode` `change_annotator`，不写就是全部。界面随后重新要字段、重新过滤、重画、重新取图例 |
 | `ctx.fmt` | `size(n)`（用户的 1000 / 1024，和界面一样：`1.5 MB`）`count(n)`（`1,234`）`date(t)`（unix 秒 → `2026-10-24 21:30`，本地时间）`ago(t)`（`3 天前` / `3 days ago`）。导出、提示、文字单元格里用它；报告的表格列写单位就行（前端格式化） |
@@ -96,9 +97,34 @@
 | 命令：工具栏（`toolbar`）、命令面板、按键 | 有焦点的视图的扫描 | 有焦点的视图 | 选中项；没选时是 None | `[node]` 或 `[]` |
 | 命令：开始页（`start`） | 眼前的扫描或 None | — | None | `[]` |
 
-聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`，它的 `ctx.tree` 就是 `c.scan_id` 那个扫描（两个扫描都开着时也不会读到另一个）。`check` 抛出异常时命令不可用，原因写成「检查出错：〈错误〉」（`PluginError` 是它的文字，别的异常是「类型: 异常自己的信息」，最多 160 字；同时进插件日志）；50 ms 内没答（插件正忙、进程正在启动、树刚被整理）算可用：动作运行时自己再查一遍。
+聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`，它的 `ctx.tree` 就是 `c.scan_id` 那个扫描（两个扫描都开着时也不会读到另一个；对比视图里没有，见[调用的上下文](#api-where)）。`check` 抛出异常时命令不可用，原因写成「检查出错：〈错误〉」（`PluginError` 是它的文字，别的异常是「类型: 异常自己的信息」，最多 160 字；同时进插件日志）；50 ms 内没答（插件正忙、进程正在启动、树刚被整理）算可用：动作运行时自己再查一遍。
 
 导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）：过滤只命中文件，**文件夹总是 False**，装着命中文件的也是，要不要写出一个文件夹看它下面有没有为 True 的文件；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。「选中项」选了几项时，`root` 是它们共同的上级文件夹，`match` 只在这几项的子树里为真（没过滤时子树里的文件夹也为真，有过滤时再和命中相与）。
+
+<a id="api-where"></a>
+### 调用的上下文：`ctx.where` 与 `ctx.tree`
+
+每种调用都带着它的上下文，宿主在一处（`plugins/where.py`）按调用从哪来填好：`ctx.where`（`ActionContext`）、`ctx.tree`、节点下标的[纪元](#api-epoch)、`ctx.lang`。两个扫描都开着时，每种调用读的都是它所为的那个扫描，不会落到眼前的另一个；没有扫描的树的调用，`ctx.tree` 抛 `PluginError` 说明原因，不会读别的树。纪元一列：「调用开始时」「取下标时」是固定的（那棵树整理了就是 `STALE_TREE`），「不固定」是第一次读时最新的树。
+
+| 调用 | `ctx.tree` | 纪元 | `ctx.where` 里有的 |
+|---|---|---|---|
+| 命令的 `call`、报告、清理 | `c.scan_id` 的扫描 | 调用开始时 | 和参数 `c` 一样 |
+| 面板的 `sk.call`、`sk.subscribe` 的流 | 面板的扫描（`sk.context.scan_id`） | 调用开始时（流不固定） | 面板的 `sk.context`（参数自己写了 `scan_id` `node` 等时以参数为准）；它们不进方法的参数 |
+| 命令的 `check` | 视图的扫描（没有视图时是标签页的） | 取下标时 | 视图、选中的节点、缩放根、过滤 |
+| 字段、洞察 | 那个节点的扫描 | 调用开始时 | `scan_id` `node` `selection`（字段另有 `ctx.slot`） |
+| 节点集合、代码可视化的权重、自带布局 | 视图的扫描 | 取下标时 | `scan_id` |
+| 代码配色 | 视图的扫描 | 这一帧的 | `scan_id` `view_id` `zoom_node` `filter` |
+| 导出 | 导出的扫描 | 导出时 | `node`（就是 `x.root`）`selection` `filter` |
+| `scan_done` / `tree_changed` 钩子 | 那个扫描 | 调用开始时 / `change.epoch` | `scan_id` |
+| `scan_closed` 钩子 | 没有：扫描已经关掉 | — | `scan_id`（关掉的那个） |
+| `start` `stop` `settings` `lang` `basket` `snapshots` 钩子、配色的图例 | 眼前的扫描 | 不固定 | 空（图例的 `ctx.lang` 是要的那种语言） |
+| 后台任务 | 启动它的那次调用的扫描（`start="startup"` 的是眼前的扫描；那个扫描已经关掉时没有） | 不固定 | `scan_id` |
+| 扫描来源列出 | 没有：这棵树正在列 | — | `scan_id`（要填的那个扫描） |
+| 扫描来源的监控器 | 它监控的那个扫描 | 不固定 | `scan_id` |
+| 变化注解 | 对比所在的扫描（条目只有路径，用 `tree.find(path)` 找） | 不固定 | `scan_id` `compare_id` |
+| 对比里的调用：对比视图里的命令、`check`、自带布局，对比侧栏的报告 | 没有：节点是对比的变化树的，不是扫描的；对比所在的扫描用 `ctx.scan(ctx.where.scan_id)` 读 | — | `scan_id`（对比所在的扫描）`compare_id` `view_id` 和变化树的 `node` 等 |
+
+对比视图里不问代码配色、节点集合（块是中性色，`:set:` 什么也不命中），也不提供代码权重的可视化。对比视图里命令的参数 `c.scan_id` 是对比的 id（和 `c.compare_id` 一样），以 `ctx.where` 为准。
 
 <a id="api-action-args"></a>
 ### 动作的参数
@@ -161,7 +187,7 @@ plugin.setting(
 | `start` | `async def f(ctx) -> None` | 插件进程启动、它的贡献注册好之后（第一次启用、`plugin dev` 重新加载也一样），`ctx.settings` 已有 |
 | `stop` | `async def f(ctx) -> None` | 进程停止之前（2 秒内做完） |
 | `scan_done` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描完成（`scan.state` 是 `done`）；`ctx.tree` 是它 |
-| `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉（它的树已经读不到了） |
+| `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉：它的树已经读不到了，`ctx.tree` 抛 `PluginError`（不会读成眼前的另一个扫描） |
 | `tree_changed` | `async def f(ctx, change: TreeChange) -> None` | 一个打开着的扫描的树变了（实时监控应用了文件变化、「重新扫描」、扫描来源重新列出）：每个扫描每秒最多一次，`ctx.tree` 是它（`change.epoch` 那一纪元的树）；见[下一节](#api-live) |
 | `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值。启用后任何时候改的设置（包括进程还在启动时）都在下一次调用或钩子之前到插件进程 |
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
@@ -343,7 +369,7 @@ def icicle(v: LayoutInput) -> Shapes:
 | `MockHost.load(path, grant=…, process=False)` | `path` 所在的插件；`grant=["tree.read"]` 只给部分权限；`process=True` 走真的插件进程 |
 | `host.scan(tree)` / `await host.scan_dir(path)` | 用合成树，或真的扫描一个文件夹 |
 | `host.find("a/x.bin")`、`host.store` | 相对根的路径 → 节点下标（找不到抛 `KeyError`）；存储 |
-| `await host.call(name, **params)`、`call_frames` | 方法：JSON（和二进制列） |
+| `await host.call(name, **params)`、`call_frames` | 方法：JSON（和二进制列）；参数里的 `scan_id` `node` `selection` …… 和应用里一样成为 `ctx.where`，`ctx.tree` 默认是眼前的扫描 |
 | `await host.report(name, node=, cursor=, **ctx)`、`host.text(report)` | 校验过、按上限截过的报告；纯文本 |
 | `await host.fields(slot, node=)`、`await host.insights(node=)` | 字段（`"inspector"` 或 `"hover"`；本插件的字段抛了异常时这里抛 `RuntimeError`，程序里是不显示它）、洞察卡片 |
 | `host.node("a/b")` | 相对根的路径 → [`Node`](#api-models)（`size alloc mtime …`，文件夹是子树合计），和 `ctx.tree.node` 给的一样 |
@@ -353,7 +379,7 @@ def icicle(v: LayoutInput) -> Shapes:
 | `await host.visual(name)`、`await host.color(name)` | 一帧（[第 9 节](#api-frames)） |
 | `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文；`options` 像程序那样校验：没有的选项、不在可选值里的、超出范围的数抛 `RpcError` |
 | `await host.source(name, uri)`、`host.status(scan_id)` | 用扫描来源扫描（失败抛 `RuntimeError`）；扫描的状态 |
-| `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常；缺权限的钩子抛 `PermissionError`）、对比原因 |
+| `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常；缺权限的钩子抛 `PermissionError`；`ctx.tree` 和应用里一样，`scan_closed` 的没有）、对比原因（`ctx.tree` 是眼前的扫描） |
 | `await host.changed(*nodes)` | 当前扫描在这些节点（下标或相对根的路径）上变了，像应用文件变化那样：`tree_changed` 钩子按宿主的方式（合并一秒、文件夹）跑完才返回；树本身不变 |
 | `await host.task(name, params, key=, wait=True)`、`host.tasks()`、`await host.cancel_task(name, key=)` | 后台任务：启动并等它结束，返回 `TaskInfo`（`state` 是 `done` `failed` `cancelled`，`error` 是失败的原因）；`wait=False` 马上返回；本插件的任务（跑着的和最近结束的）；像取消按钮那样取消并等它停下 |
 | `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样对 `node` 运行命令，`args` 加在动作自己的上（同面板的 `sk.host.command(id, args)`）：`call` 返回方法的结果（`Toast`、`CompareOpen` 也是 dict），`cleanup` 返回候选（同 `host.cleanup`）；其余（`open` `command` `view` `filter` `setting` `scan_source` ……）只返回宿主规整过的动作 dict，不运行它：`{"kind": "open", "target": "report:<全名>", "args": {…}}`、`{"kind": "scan_source", "source": "<全名>", "uri": "$node"}`，名字补成全名、`args` 合并好，`$node` 这类占位**不替换**（界面运行动作时才换成节点的路径） |

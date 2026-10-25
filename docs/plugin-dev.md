@@ -760,9 +760,9 @@ def hash_big(ctx: Context) -> None:
 | `ctx.plugin` | `id version dir storage` | — |
 | `ctx.lang`、`ctx.t(zh, en, **fields)`、`ctx.fmt` | 界面语言、即时翻译；`ctx.fmt.size(n)` `.count(n)` `.date(t)` `.ago(t)`：和界面一样写大小（用户的 1000 / 1024）、个数、时间 | — |
 | `ctx.settings[name]`、`.get`、`.set(name, value)` | 本插件的设置 | — |
-| `ctx.tree` | 这次调用所在的扫描（调用带的 `scan_id`，否则当前的扫描），带节点下标的调用拿到的是那一刻的树（[纪元](plugin-api.md#api-epoch)）；没有扫描时报「需要先完成扫描」 | `tree.read` |
+| `ctx.tree` | 这次调用所在的扫描（`ctx.where.scan_id`；不针对扫描的调用是当前的扫描），带节点下标的调用拿到的是那一刻的树（[纪元](plugin-api.md#api-epoch)）；没有扫描时报「需要先完成扫描」；`scan_closed`、对比里的调用、扫描来源列出时没有扫描的树，读它报原因 | `tree.read` |
 | `ctx.scan(scan_id)`、`ctx.scans()` | 其他扫描 | `tree.read` |
-| `ctx.node` | 调用针对的节点（`Node`）或 None | `tree.read` |
+| `ctx.node`、`ctx.where` | 调用针对的节点（`Node`）或 None；这次调用从哪来（`ActionContext`：扫描、视图、节点、选中项、缩放根、过滤、参数、对比，每种调用都有，[各自填什么](plugin-api.md#api-where)） | `tree.read`（`node`） |
 | `ctx.emit(event)`、`ctx.progress(done, total, text)`、`ctx.toast(text, tone)` | 事件；进度；提示（`info ok warn danger`） | — |
 | `ctx.state(Model)` | `.get()` `.set(m)` `.update(**fields)` | — |
 | `ctx.basket.propose(items, reason)`、`.withdraw(items)` | 放进删除篮（每项可以是 `(节点, 它自己的原因)`；一个命令里放多少次，用户只看到一条提示，命令自己 `toast` 时没有），返回放进去的项数；拿回本插件放进去的项 | `basket.propose` |

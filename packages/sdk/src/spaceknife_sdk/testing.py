@@ -398,17 +398,17 @@ class MockHost:
 
     # ------------------------------------------------------------- calling the plugin
 
-    def _ctx(self, node: int | None = None) -> dict[str, Any]:
-        out: dict[str, Any] = {"scan_id": self.scan_id}
-        if node is not None:
-            out["node"] = node
-        return out
+    def _place(self, host: Any, params: Mapping[str, Any]) -> Any:
+        """The context the app gives a call from the frontend with these params (``scan_id``,
+        ``node``, ``selection`` … of an ``ActionContext``), on the scan in front by default."""
+        return host.places.request({"scan_id": self.scan_id, **params})
 
     async def call(self, name: str, /, **params: Any) -> Any:
-        """A method: its JSON result (a dict)."""
+        """A method: its JSON result (a dict). Params that name a context (``scan_id``, ``node``
+        …) are its ``ctx.where`` as in the app; ``ctx.tree`` is the scan in front by default."""
         host = await self._ready()
         value, _frames = await host.call(
-            self.plugin_id, "method", name, params, session=self.session, ctx=self._ctx()
+            self.plugin_id, "method", name, params, where=self._place(host, params), session=self.session
         )
         return value
 
@@ -418,7 +418,7 @@ class MockHost:
 
         host = await self._ready()
         value, frames = await host.call(
-            self.plugin_id, "method", name, params, session=self.session, ctx=self._ctx()
+            self.plugin_id, "method", name, params, where=self._place(host, params), session=self.session
         )
         return value, [decode_frame(f)[1] for f in frames]
 
@@ -426,7 +426,7 @@ class MockHost:
         host = await self._ready()
         params = {"scan_id": self.scan_id, "node": node, **ctx}
         value, _ = await host.call(
-            self.plugin_id, "report", name, params, session=self.session, ctx=self._ctx(node)
+            self.plugin_id, "report", name, params, where=self._place(host, params), session=self.session
         )
         return Report.model_validate(host.api.checked_report(value))
 
@@ -472,11 +472,10 @@ class MockHost:
     async def cleanup(self, name: str, /, **ctx: Any) -> list[Proposed]:
         host = await self._ready()
         params = {"scan_id": self.scan_id, **ctx}
-        value, _ = await host.call(
-            self.plugin_id, "cleanup", name, params, session=self.session, ctx=self._ctx()
-        )
+        where = self._place(host, params)
+        value, _ = await host.call(self.plugin_id, "cleanup", name, params, where=where, session=self.session)
         rec = host.enabled(self.plugin_id)
-        res = await host.api.cleanup_result(rec, name, params, value)
+        res = await host.api.cleanup_result(rec, name, where, value)
         return [
             Proposed(
                 int(i["node"]["node"]), str(i["path"]), str(i["reason"]), bool(i["checked"]), int(i["alloc"])
@@ -713,7 +712,7 @@ class MockHost:
         ctx = self._where(node, selection, zoom_node, filter) | {"args": merged}
         method = action.method.rsplit(".", 1)[-1]
         value, _ = await host.call(
-            self.plugin_id, "method", method, ctx, session=self.session, ctx=self._ctx(node)
+            self.plugin_id, "method", method, ctx, where=host.places.request(ctx), session=self.session
         )
         return value
 
@@ -789,7 +788,8 @@ class MockHost:
         ``tree_changed`` takes ``change`` (a :class:`TreeChange` or dict; default: the root of the
         scan in front changed), ``snapshots`` takes ``change`` (a :class:`SnapshotsChange` or
         dict), ``settings`` takes ``changed`` (the names of its settings that changed), the others
-        nothing. ``ctx.tree`` of ``scan_done`` and ``tree_changed`` is that scan. A hook that needs
+        nothing. ``ctx.tree`` of ``scan_done`` and ``tree_changed`` is that scan; ``scan_closed``
+        has none (reading it raises ``PluginError``: in the app the scan is gone). A hook that needs
         a permission the plugin lacks (``snapshots``: ``snapshots.read``) is PermissionError: the
         app would leave the plugin out."""
         from spaceknife.extensions import EXTENSIONS
@@ -834,11 +834,7 @@ class MockHost:
         for k in ("scan", "change"):
             if k in args and hasattr(args[k], "model_dump"):
                 args[k] = args[k].model_dump(mode="json")
-        about = None
-        if event == "scan_done":
-            about = args["scan"].get("scan_id")
-        elif event == "tree_changed":
-            about = args["change"].get("scan_id")
+        where = host.places.hook(event, args)  # as the app: scan_closed has no tree, its scan is gone
         for c in EXTENSIONS.owned(self.plugin_id):
             if c.kind == "hook" and c.spec.event == event:
                 await host.call(
@@ -846,8 +842,8 @@ class MockHost:
                     "hook",
                     c.local,
                     {"event": event, **args},
+                    where=where,
                     session=self.session,
-                    ctx={"scan_id": about} if about else None,
                 )
 
     async def changed(self, *nodes: int | str, scan_id: str | None = None) -> None:
@@ -916,14 +912,21 @@ class MockHost:
 
     async def annotate(self, items: Sequence[Mapping[str, Any]], name: str | None = None) -> list[str | None]:
         """A change annotator's reasons for comparison items (``path``, ``kind``, ``status``,
-        ``delta``, ``base``, ``target``; missing ones take ChangeUnit's defaults)."""
+        ``delta``, ``base``, ``target``; missing ones take ChangeUnit's defaults). Its ``ctx.tree``
+        is the scan in front, as in the app the scan a comparison was opened from."""
         host = await self._ready()
         if name is None:
             rec = host.records[self.plugin_id]
             name = next(
                 h[1] for h in (rec.description.handlers if rec.description else []) if h[0] == "annotate"
             )
-        value, _ = await host.call(self.plugin_id, "annotate", name, {"items": [dict(i) for i in items]})
+        value, _ = await host.call(
+            self.plugin_id,
+            "annotate",
+            name,
+            {"items": [dict(i) for i in items]},
+            where=host.places.comparison(None, self.scan_id),
+        )
         return [None if v is None else str(v) for v in value]
 
     def snapshot(self, *, when: Any = None) -> str:

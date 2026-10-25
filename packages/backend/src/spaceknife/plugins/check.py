@@ -1028,7 +1028,8 @@ async def run_contracts(host: Any, description: Description) -> list[Issue]:
                     args["scan"] = {"scan_id": host.scan_id, "roots": ["/"], "items": 1}
                 elif event == "settings":
                     args["changed"] = []
-                await host.server.plugins.call(host.plugin_id, "hook", name, args)
+                hp = host.server.plugins
+                await hp.call(host.plugin_id, "hook", name, args, where=hp.places.hook(event, args))
             elif (
                 isinstance(spec, CommandSpec)
                 and (spec.action or {}).get("kind") == "call"

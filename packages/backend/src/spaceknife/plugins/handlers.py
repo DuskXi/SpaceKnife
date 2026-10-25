@@ -207,8 +207,8 @@ async def node_fields(
             "field",
             c.local,
             {"node": p.node, "scan_id": p.scan_id, "slot": p.slot},
+            where=host.places.node(p.scan_id, p.node, slot=p.slot),
             session=session,
-            ctx={"scan_id": p.scan_id, "node": p.node, "slot": p.slot},
             timeout=timeout,
         )
         if value is None:
@@ -308,8 +308,8 @@ async def insight_cards(
                 "insight",
                 c.local,
                 {"node": p.node, "scan_id": p.scan_id},
+                where=host.places.node(p.scan_id, p.node),
                 session=session,
-                ctx={"scan_id": p.scan_id, "node": p.node},
                 timeout=1.0,
             )
         except RpcError:

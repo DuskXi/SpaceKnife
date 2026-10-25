@@ -271,9 +271,8 @@ async def test_a_check_without_a_view_reads_the_scan_of_the_tab(plugin: Path) ->
         host.scan(TREE_B)
         await host.settled()
         hp = host.server.plugins
-        assert hp.action_context(PaletteContext(tab="scan", has_scan=True, scan_id=first)) == {
-            "scan_id": first
-        }
+        where = hp.places.palette(PaletteContext(tab="scan", has_scan=True, scan_id=first))
+        assert (where.tree, where.scan_id, where.action()["scan_id"]) == ("scan", first, first)
 
 
 async def test_a_call_reads_the_tree_of_its_node_ids(plugin: Path) -> None:
@@ -282,12 +281,13 @@ async def test_a_call_reads_the_tree_of_its_node_ids(plugin: Path) -> None:
         await host.settled()
         hp = host.server.plugins
         epoch = int(host.store.epoch)
-        size = (await hp.call(PID, "method", "root_size", {}, ctx={"scan_id": sid, "epoch": epoch}))[0]
+        at = hp.places.request({"scan_id": sid})
+        size = (await hp.call(PID, "method", "root_size", {}, where=at.at(epoch)))[0]
         assert size == {"where": str(host.node("").alloc)}
         # ids of an earlier epoch (the tree was reorganised since the host took them): not read
         # against the new tree, STALE_TREE
         with pytest.raises(RpcError) as err:
-            await hp.call(PID, "method", "root_size", {}, ctx={"scan_id": sid, "epoch": epoch - 1})
+            await hp.call(PID, "method", "root_size", {}, where=at.at(epoch - 1))
         assert err.value.code == ErrorCode.STALE_TREE
 
 

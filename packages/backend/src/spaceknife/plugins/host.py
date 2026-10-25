@@ -12,7 +12,7 @@ import itertools
 import os
 import time
 from collections import defaultdict, deque
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -52,6 +52,7 @@ from .live import Live
 from .runtime.base import Callbacks, PluginRuntime, RuntimeCallError, StartInfo
 from .store import PluginRecord, TrustStore, discover, read_record
 from .tasks import Tasks
+from .where import WHERE_KEY, Places, Where
 
 if TYPE_CHECKING:
     from ..export import ExportFormat
@@ -135,6 +136,7 @@ class PluginHost:
         self.records: dict[str, PluginRecord] = {}
         self.images = Images()
         self.api = HostApi(self)
+        self.places = Places(self.api)  # the context of every call (where.py)
         self.tasks = Tasks(self)
         self.live = Live(self)  # tree changes, snapshots and notices: what plugins hear of (live.py)
         self._ids = itertools.count(1)
@@ -352,7 +354,7 @@ class PluginHost:
             rec.start_due = False  # hooks are registered and it has its settings
             rt = rec.runtime
             if rt is not None and rt.state == "running":
-                self._spawn(self._hook(rec, "start"))
+                self._spawn(self._hook(rec, "start", self.places.nowhere()))
 
     async def _deactivate(self, rec: PluginRecord) -> None:
         if rec.builtin:
@@ -499,7 +501,7 @@ class PluginHost:
             rec.last_used = time.monotonic()
             self._broadcast_plugin(rec)
             if rec.builtin or EXTENSIONS.owned(rec.id):
-                self._spawn(self._hook(rec, "start"))
+                self._spawn(self._hook(rec, "start", self.places.nowhere()))
             else:  # started to describe itself (first enable, a dev reload): its hooks are not
                 rec.start_due = True  # registered yet; _activate runs start once they are
             self.tasks.process_started(rec)
@@ -598,8 +600,8 @@ class PluginHost:
         name: str,
         params: Any = None,
         *,
+        where: Where,
         session: Session | None = None,
-        ctx: Mapping[str, Any] | None = None,
         frames: Sequence[bytes] = (),
         on_chunk: Callable[[Any, list[bytes]], None] | None = None,
         timeout: float | None = None,  # noqa: ASYNC109 — the plugin's limit, enforced inside
@@ -607,7 +609,9 @@ class PluginHost:
         on_wait: Callable[[], None] | None = None,
         on_progress: Callable[[float, float, str], None] | None = None,
     ) -> tuple[Any, list[bytes]]:
-        """Call a plugin's handler; RpcError with a plugin error code when it fails.
+        """Call a plugin's handler; RpcError with a plugin error code when it fails. ``where``: what
+        the call is about (its ``ctx.tree``, the epoch of its node ids, ``ctx.where``), made by
+        ``self.places`` from where the call comes from (where.py).
 
         The time limit counts from here: waiting for one of the plugin's ``MAX_CONCURRENT`` call
         slots is part of it (a field with a 1 s budget never waits longer than that), starting the
@@ -674,7 +678,7 @@ class PluginHost:
                 queued = False
             try:
                 return await self._run_call(
-                    rec, kind, name, params, session, ctx, frames, on_chunk, deadline, on_progress
+                    rec, kind, name, params, session, where, frames, on_chunk, deadline, on_progress
                 )
             finally:
                 sem.release()
@@ -691,7 +695,7 @@ class PluginHost:
         name: str,
         params: Any,
         session: Session | None,
-        ctx: Mapping[str, Any] | None,
+        where: Where,
         frames: Sequence[bytes],
         on_chunk: Callable[[Any, list[bytes]], None] | None,
         deadline: float | None,
@@ -705,19 +709,12 @@ class PluginHost:
         if deadline is not None and cold:
             deadline += loop.time() - t0  # starting the process is not the call's time
         call_id = next(self._ids)
-        info = {
-            "lang": i18n.language(),
-            "units": self.server.settings.unit_base(),  # ctx.fmt.size writes sizes as the app does
-            "session": session.id if session is not None else None,
-            "timeout": max(0.0, deadline - loop.time()) if deadline is not None else LONG_CALL_S,
-        }
-        info.update(ctx or {})
-        if kind not in LONG_KINDS and info.get("scan_id") and info.get("epoch") is None:
-            # its ctx.tree is the tree as it is now: node ids the call carries are of it (a call
-            # that took its ids earlier says their epoch itself)
-            store = self.api.store_of(str(info["scan_id"]))
-            if store is not None:
-                info["epoch"] = int(getattr(store, "epoch", 0))
+        # what it is about: tree, scan, epoch (one "now" is taken here: after the wait for a slot
+        # and the start, right before the call), place, language
+        info = where.wire(self.api)
+        info["units"] = self.server.settings.unit_base()  # ctx.fmt.size writes sizes as the app does
+        info["session"] = session.id if session is not None else None
+        info["timeout"] = max(0.0, deadline - loop.time()) if deadline is not None else LONG_CALL_S
         self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
         if on_progress is not None:
             self._progress_to[call_id] = on_progress
@@ -744,7 +741,15 @@ class PluginHost:
         return value, out
 
     def call_sync(
-        self, plugin: str, kind: str, name: str, params: Any = None, *, timeout: float, **kw: Any
+        self,
+        plugin: str,
+        kind: str,
+        name: str,
+        params: Any = None,
+        *,
+        where: Where,
+        timeout: float,
+        frames: Sequence[bytes] = (),
     ) -> tuple[Any, list[bytes]]:
         """:meth:`call` from a compute thread (frames, colours, sets): waits at most ``timeout``."""
         loop = self._loop
@@ -757,7 +762,7 @@ class PluginHost:
         if here is loop:  # waiting here would hold up the very loop that runs the call
             raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "call_sync on the event loop", {"plugin": plugin})
         fut = asyncio.run_coroutine_threadsafe(
-            self.call(plugin, kind, name, params, timeout=timeout, **kw), loop
+            self.call(plugin, kind, name, params, where=where, timeout=timeout, frames=frames), loop
         )
         try:
             return fut.result(timeout + 0.5)
@@ -914,12 +919,15 @@ class PluginHost:
             assert decl is not None
             if not decl.public:
                 raise RpcError(ErrorCode.PERMISSION_DENIED, f"{name} is not public", {"plugin": plugin})
-            ctx = {k: body.get(k) for k in ("scan_id", "view_id", "node") if body.get(k) is not None}
+            # a call action's ActionContext, a report's ReportContext, a panel's call: the context
+            # is the body's, a panel's comes apart from its params ($where)
+            where = self.places.request(body)
+            body.pop(WHERE_KEY, None)
             value, frames = await self.call(
-                plugin, decl.kind, local, body, session=session, ctx=ctx, latest=decl.latest
+                plugin, decl.kind, local, body, where=where, session=session, latest=decl.latest
             )
             if decl.kind == "cleanup":
-                value = await self.api.cleanup_result(self.enabled(plugin), local, body, value)
+                value = await self.api.cleanup_result(self.enabled(plugin), local, where, value)
             elif decl.kind == "report":
                 value = self.api.checked_report(value)
             request = CURRENT_REQUEST.get()
@@ -982,18 +990,16 @@ class PluginHost:
                     session.send_binary(_restamp(f, name, None))
                 session.emit_raw(name, {"sub": sub.id, "value": value if not frames else None})
 
-            # a stream about a scan (its params name one, as a panel's do): ctx.tree is that scan
-            given = params or {}
-            sctx: dict[str, Any] = {
-                k: given[k] for k in ("scan_id", "view_id") if isinstance(given.get(k), str) and given[k]
-            }
-            if isinstance(given.get("node"), int) and not isinstance(given.get("node"), bool):
-                sctx["node"] = given["node"]
+            # a stream about a scan (its params name one, a panel's context does): ctx.tree is that
+            # scan, not pinned (a stream runs long)
+            given = dict(params or {})
+            where = self.places.request(given, long=True)
+            given.pop(WHERE_KEY, None)
 
             async def run() -> None:
                 try:
                     await self.call(
-                        plugin, "stream", local, params or {}, session=session, ctx=sctx, on_chunk=chunk
+                        plugin, "stream", local, given, where=where, session=session, on_chunk=chunk
                     )
                 except (RpcError, asyncio.CancelledError):
                     pass
@@ -1358,17 +1364,16 @@ class PluginHost:
         self,
         rec: PluginRecord,
         event: str,
+        where: Where,
         *,
-        _scan: str | None = None,
-        _epoch: int | None = None,
         _again: Callable[[], tuple[dict[str, Any], int] | None] | None = None,
         **args: Any,
     ) -> bool:
-        """Run the plugin's ``event`` hooks (one after the other); ``_scan``: the scan the hook is
-        about (its ``ctx.tree``), ``_epoch``: the epoch of the node ids in ``args`` (else the tree's
-        now). With ``_again`` (tree_changed), a hook that met a reorganised tree (STALE_TREE) is
-        called again with what ``_again()`` gives, ``(args, epoch)`` of the tree as it is then, up
-        to HOOK_STALE_RETRIES times; False when one still met it (the caller sends it later)."""
+        """Run the plugin's ``event`` hooks (one after the other); ``where``: what they are about
+        (``self.places.hook`` / ``tree_change``: the scan, the epoch of the node ids in ``args``).
+        With ``_again`` (tree_changed), a hook that met a reorganised tree (STALE_TREE) is called
+        again with what ``_again()`` gives, ``(args, epoch)`` of the tree as it is then, up to
+        HOOK_STALE_RETRIES times; False when one still met it (the caller sends it later)."""
         need = HOOK_PERMISSIONS.get(event)
         if need is not None and need not in rec.granted:
             return True  # it may not hear of this (plugin check says so)
@@ -1387,16 +1392,13 @@ class PluginHost:
                 )
             return True
         ok = True
-        given, epoch = args, _epoch  # what one hook was called again with, the next one gets too
+        given = args  # what one hook was called again with (and where), the next one gets too
         for c in found:
             limit = float(getattr(c.spec, "timeout", HOOK_TIMEOUT))
             for attempt in range(HOOK_STALE_RETRIES + 1):
-                ctx: dict[str, Any] | None = None
-                if _scan:
-                    ctx = {"scan_id": _scan} if epoch is None else {"scan_id": _scan, "epoch": epoch}
                 try:
                     await self.call(
-                        rec.id, "hook", c.local, {"event": event, **given}, ctx=ctx, timeout=limit
+                        rec.id, "hook", c.local, {"event": event, **given}, where=where, timeout=limit
                     )
                     break
                 except (RpcError, asyncio.CancelledError) as exc:
@@ -1407,7 +1409,7 @@ class PluginHost:
                             await asyncio.sleep(STALE_RETRY_S * (attempt + 1))  # (what comes meanwhile
                             fresh = _again()  # comes along)
                         if fresh is not None:
-                            given, epoch = fresh
+                            given, where = fresh[0], where.at(fresh[1])
                             continue
                         ok = False  # the caller sends these changes again with the next ones
                         logger.bind(source=f"plugin:{rec.id}").debug(
@@ -1456,7 +1458,7 @@ class PluginHost:
             self._basket_hook_due = False
             for rec in wanted:
                 if rec.state == "enabled":
-                    await self._hook(rec, "basket")
+                    await self._hook(rec, "basket", self.places.nowhere())
 
         self._spawn(later())
 
@@ -1516,7 +1518,7 @@ class PluginHost:
             return
         self.invalidate(rec.id)
         if any(c.kind == "hook" and c.spec.event == "settings" for c in EXTENSIONS.owned(rec.id)):
-            await self._hook(rec, "settings", changed=changed)
+            await self._hook(rec, "settings", self.places.nowhere(), changed=changed)
 
     def legend_of(self, c: Any, lang: str) -> list[tuple[str, Any]]:
         """A colour mode's legend now, (text, colour or None) per palette entry: from the plugin's
@@ -1550,7 +1552,9 @@ class PluginHost:
         try:
             token = LANG.set(lang)
             try:
-                value, _ = await self.call(c.owner, "legend", c.local, {}, ctx={"lang": lang}, timeout=5.0)
+                value, _ = await self.call(
+                    c.owner, "legend", c.local, {}, where=self.places.nowhere(lang=lang), timeout=5.0
+                )
             finally:
                 LANG.reset(token)
             items = [
@@ -1571,12 +1575,11 @@ class PluginHost:
         if event == "lang":
             self.tasks.relocalize()  # titles and texts of the running background tasks
         owners = {c.owner for c in EXTENSIONS.of("hook") if c.spec.event == event and c.owner != BUILTIN}
-        scan = args.get("scan")
-        about = str(scan.get("scan_id") or "") if event == "scan_done" and isinstance(scan, dict) else None
+        where = self.places.hook(event, args)  # scan_done: its scan; scan_closed: none (it is gone)
         for pid in owners:
             rec = self.records.get(pid)
             if rec is not None and rec.state == "enabled":
-                self._spawn(self._hook(rec, event, _scan=about, **args))
+                self._spawn(self._hook(rec, event, where, **args))
         if event == "scan_done":
             asked = {c.owner for kind in ("node_field", "insight") for c in EXTENSIONS.of(kind)}
             for pid in asked - {BUILTIN}:
@@ -1612,13 +1615,11 @@ class PluginHost:
         CHECK_REASON_MAX characters) and goes to the plugin's log; one that does not answer within
         50 ms (or the plugin is busy, its process starting, the tree reorganised meanwhile) leaves
         it available."""
-        params = self.action_context(c)
-        ctx = {k: params[k] for k in ("scan_id", "view_id", "node") if params.get(k) is not None}
-        epoch = self._epoch_of(c, params.get("scan_id"))
-        if epoch is not None:
-            ctx["epoch"] = epoch
+        where = self.places.palette(c)
         try:
-            value, _ = self.call_sync(plugin, "method", method, params, ctx=ctx, timeout=CHECK_TIMEOUT)
+            value, _ = self.call_sync(
+                plugin, "method", method, where.action(), where=where, timeout=CHECK_TIMEOUT
+            )
         except RpcError as exc:
             if exc.code in CHECK_UNANSWERED:
                 return None
@@ -1638,36 +1639,14 @@ class PluginHost:
             return tr("检查出错：{why}", why=why)
         return str(value) if isinstance(value, str) and value else None
 
-    def _epoch_of(self, c: Any, scan_id: str | None) -> int | None:
-        """The epoch of the tree a palette context's node ids are of (its view's store)."""
-        view = getattr(c, "view", None)
-        store = view.store if view is not None else self.api.store_of(scan_id) if scan_id else None
-        return int(getattr(store, "epoch", 0)) if store is not None else None
-
-    def action_context(self, c: Any) -> dict[str, Any]:
-        """The palette's context as a command's :class:`ActionContext` (a check, a command run by
-        the backend): where the user is. Its scan: the one of the view (whose node ids these are),
-        else the tab's."""
-        view = getattr(c, "view", None)
-        node = getattr(c, "selected_node", None)
-        if view is None:
-            return {"scan_id": getattr(c, "scan_id", None)}
-        filt = view.filter
-        return {
-            "scan_id": self.api.scan_of_store(view.store) or getattr(c, "scan_id", None),
-            "view_id": view.id,
-            "node": node,
-            "selection": [node] if node is not None else [],
-            "zoom_node": int(view.zoom.node),
-            "filter": filt.text if filt.active else "",
-        }
-
     def annotate_changes(self, compare_id: str, items: list[Any]) -> list[Any]:
         """Reasons from the change annotators for items the insight rules left blank (compute
-        threads): at most ``ANNOTATE_BATCH`` items per call, 200 ms each, remembered per comparison."""
+        threads): at most ``ANNOTATE_BATCH`` items per call, 200 ms each, remembered per comparison.
+        Their ``ctx.tree``: the scan the comparison was opened from (items carry paths)."""
         annotators = [c for c in EXTENSIONS.of("change_annotator") if c.owner in self.enabled_ids()]
         if not annotators:
             return items
+        where = self.places.comparison(compare_id)
         out = list(items)
         for c in annotators:
             todo: list[int] = []
@@ -1697,7 +1676,9 @@ class PluginHost:
                     ]
                 }
                 try:
-                    value, _ = self.call_sync(c.owner, "annotate", c.local, payload, timeout=ANNOTATE_TIMEOUT)
+                    value, _ = self.call_sync(
+                        c.owner, "annotate", c.local, payload, where=where, timeout=ANNOTATE_TIMEOUT
+                    )
                 except RpcError as exc:
                     logger.bind(source=f"plugin:{c.owner}").debug(
                         "change annotator {}: {}", c.id, exc.message
@@ -1716,8 +1697,14 @@ class PluginHost:
         return out
 
     def set_masks(self, scan_id: str, store: Any, set_ids: Sequence[str]) -> dict[str, np.ndarray]:
-        """Node sets of a scan (called from compute threads), cached by store version; 5 s each."""
+        """Node sets of a scan (called from compute threads), cached by store version; 5 s each.
+        Only of a scan's tree: a comparison's change tree (a compare view's ``:set:`` filter) has
+        none (its node ids are not a scan's)."""
         out: dict[str, np.ndarray] = {}
+        where = self.places.store(store, scan_id)
+        if where.tree != "scan" or where.scan_id is None:
+            return out
+        scan_id = where.scan_id
         running = self.api.running(scan_id)
         for sid in set_ids:
             c = EXTENSIONS.get("node_set", sid)
@@ -1734,12 +1721,7 @@ class PluginHost:
                 continue
             try:
                 value, frames = self.call_sync(
-                    c.owner,
-                    "set",
-                    c.local,
-                    {"scan_id": scan_id},
-                    ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))},
-                    timeout=SET_TIMEOUT,
+                    c.owner, "set", c.local, {"scan_id": scan_id}, where=where, timeout=SET_TIMEOUT
                 )
             except RpcError as exc:
                 logger.bind(source=f"plugin:{c.owner}").log(
@@ -1777,10 +1759,10 @@ class PluginHost:
         def paint(view: Any, draw: Any) -> np.ndarray:
             rows = len(draw)
             out = np.zeros(rows, dtype=np.uint8)
-            scan_id = self.api.scan_of_store(view.store)
+            where = self.places.view(view)  # a comparison's change tree: no colours (not a scan's ids)
             node = np.asarray(draw.node, dtype=np.int64)
             real = node >= 0
-            if scan_id is None or not real.any():
+            if where.tree != "scan" or not real.any():
                 return out
             ids = node[real]
             frame = encode_frame(stream="plugin.color", layout="ids.v1", columns={"ids": ids})
@@ -1789,8 +1771,8 @@ class PluginHost:
                     plugin,
                     "color",
                     name,
-                    {"scan_id": scan_id, "palette": palette},
-                    ctx={"scan_id": scan_id, "epoch": int(getattr(view.store, "epoch", 0))},
+                    {"scan_id": where.scan_id, "palette": palette},
+                    where=where,
                     frames=[frame],
                     timeout=COLOR_TIMEOUT,
                 )
@@ -1849,7 +1831,8 @@ class PluginHost:
             import json
 
             store = basis.store
-            scan_id = self.api.scan_of_store(store)
+            where = self.places.store(store)
+            scan_id = where.scan_id if where.tree == "scan" else None  # (a scan's weights only)
             opts: dict[str, Any] = {}
             for opt, skey in options:
                 with contextlib.suppress(KeyError):
@@ -1869,7 +1852,7 @@ class PluginHost:
                         "visual",
                         name,
                         {"scan_id": scan_id, "options": opts},
-                        ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))},
+                        where=where,
                         timeout=max(VISUAL_TIMEOUT, 5.0),
                     )
                     w = decode_frame(frames[0])[1]["v"] if frames else np.zeros(0)
@@ -1925,7 +1908,9 @@ class PluginHost:
             return (self.epochs[plugin], json.dumps(opts(), sort_keys=True, default=str))
 
         def place(h: Hierarchy) -> Placed:
-            scan_id = self.api.scan_of_store(store)
+            # a scan's tree; in a compare view the comparison's change tree: the blocks are its,
+            # ctx.tree says there is no scan tree for them (where.py)
+            where = self.places.store(store)
             o = opts()
             for opt, val in h.options:  # the view's own options win (a split pane, a reopened view)
                 if opt in o:
@@ -1936,8 +1921,8 @@ class PluginHost:
                     plugin,
                     "layout",
                     name,
-                    {**h.params(), "scan_id": scan_id, "options": o},
-                    ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))} if scan_id else {},
+                    {**h.params(), "scan_id": where.scan_id, "options": o},
+                    where=where,
                     frames=[frame],
                     timeout=LAYOUT_TIMEOUT,
                 )
@@ -2016,7 +2001,8 @@ class PluginHost:
             options: dict[str, Any] | None = None,
             selection: list[int] | None = None,
         ) -> Any:
-            scan_id = host.api.scan_of_store(store)
+            picked = [int(n) for n in (selection or [])][:100_000]
+            where = host.places.export(store, root, selection=picked, filter_text=filter_text)
             opts = {o.name: host.option_default(plugin, o) for o in spec.options}
             opts.update({k: v for k, v in (options or {}).items() if k in opts})
             q: queue.Queue[tuple[str, Any]] = queue.Queue(maxsize=64)
@@ -2045,12 +2031,12 @@ class PluginHost:
                     name,
                     {
                         "root": int(root),
-                        "scan_id": scan_id,
+                        "scan_id": where.scan_id,
                         "filter": filter_text,
                         "options": opts,
-                        "selection": [int(n) for n in (selection or [])][:100_000],
+                        "selection": picked,
                     },
-                    ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))},
+                    where=where,
                     frames=frames,
                     on_chunk=on_chunk,
                     timeout=600.0,

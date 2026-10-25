@@ -176,12 +176,14 @@ async def _list(
     host: PluginHost,
     c: Contribution,
     uri: str,
+    scan_id: str,
     on_count: Callable[[int], None] | None = None,
     on_wait: Callable[[], None] | None = None,
     on_progress: Callable[[float, float, str], None] | None = None,
     on_partial: Callable[[NodeStore], Awaitable[None]] | None = None,
 ) -> tuple[str, NodeStore]:
-    """Run the source once: (the root's display name, the tree built from what it listed).
+    """Run the source once for the scan ``scan_id``: (the root's display name, the tree built from
+    what it listed); the source's ``ctx.tree`` is none (it is listing it).
 
     ``on_progress(done, total, text)``: the source's ``ctx.progress``; ``on_partial(store)``: the
     tree of what came so far, now and then while it lists (named after the URI until the end)."""
@@ -199,6 +201,7 @@ async def _list(
             "source",
             c.local,
             {"uri": uri},
+            where=host.places.listing(scan_id),
             on_chunk=chunk,
             timeout=LIST_TIMEOUT_S,
             on_wait=on_wait,
@@ -323,7 +326,7 @@ async def start_source(host: PluginHost, params: p.ScanStartParams) -> ScanHandl
 
     async def run() -> None:
         try:
-            name, built = await _list(host, c, uri, counted, waiting, progressed, partial)
+            name, built = await _list(host, c, uri, handle.id, counted, waiting, progressed, partial)
             await put(built)
             handle.roots = [RootInfo(path=name, node=1, volume=None, whole_volume=False)]
             handle.saved_progress = _progress(ScanState.DONE, started, len(handle.store) - 1, handle.store)
@@ -355,7 +358,7 @@ async def relist(host: PluginHost, handle: ScanHandle) -> int:
     c = _source(handle.plugin_source)
     host.enabled(c.owner)
     uri = str(handle.uri)
-    name, built = await _list(host, c, uri)
+    name, built = await _list(host, c, uri, handle.id)
     store = handle.store
     views = host.server.views
     version = store.version
@@ -504,7 +507,12 @@ class SourceMonitor:
             began = time.monotonic()
             try:
                 await self.host.call(
-                    w.owner, "watch", w.local, {"uri": str(self.handle.uri)}, on_chunk=self._on_changes
+                    w.owner,
+                    "watch",
+                    w.local,
+                    {"uri": str(self.handle.uri)},
+                    where=self.host.places.watch(self.handle.id),  # ctx.tree: the scan it watches
+                    on_chunk=self._on_changes,
                 )
                 failures = 0  # the watcher ended by itself: start it again after a pause
             except asyncio.CancelledError:

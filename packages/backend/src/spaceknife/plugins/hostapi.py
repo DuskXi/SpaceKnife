@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from ..server.scans import ScanHandle
     from .host import PluginHost
     from .store import PluginRecord
+    from .where import Where
 
 MAX_NODES = 100_000
 MAX_RULE_FOLDERS = 100_000  # folders ctx.tree.rule_folders gives at most
@@ -166,6 +167,24 @@ class HostApi:
         for sid, (_owner, s) in list(self._opened.items()):
             if s is store:
                 return sid
+        return None
+
+    def compare_of(self, compare_id: str) -> Any:
+        """A comparison by its id (views open them like scans), or None."""
+        compares = getattr(self.server, "compares", None)
+        return compares.compares.get(compare_id) if compares is not None else None
+
+    def view_store(self, view_id: str) -> NodeStore | None:
+        """The tree a view shows (a scan's, a comparison's change tree), or None."""
+        host = self.server.views.views.get(view_id)
+        return host.view.store if host is not None else None
+
+    def compare_of_store(self, store: NodeStore) -> str | None:
+        """The comparison whose change tree ``store`` is, or None."""
+        compares = getattr(self.server, "compares", None)
+        for cid, h in list(compares.compares.items()) if compares is not None else []:
+            if h.tree is not None and h.tree.store is store:
+                return str(cid)
         return None
 
     def running(self, scan_id: str) -> bool:
@@ -796,13 +815,14 @@ class HostApi:
             raise RpcError(ErrorCode.PLUGIN_LIMIT, i18n._("报告超过 2 MiB"))
         return out
 
-    async def cleanup_result(
-        self, rec: PluginRecord, name: str, params: dict[str, Any], value: Any
-    ) -> dict[str, Any]:
-        """Proposals -> the review dialog's rows: resolved, sized, epochs checked."""
+    async def cleanup_result(self, rec: PluginRecord, name: str, where: Where, value: Any) -> dict[str, Any]:
+        """Proposals -> the review dialog's rows: resolved, sized, epochs checked, in the tree the
+        cleanup read (its ``ctx.tree``)."""
         if not isinstance(value, list):
             raise RpcError(ErrorCode.PLUGIN_ERROR, "a cleanup must return a list of proposals")
-        scan_id = params.get("scan_id") or self.active_scan()
+        scan_id = where.scan_id if where.tree == "scan" else None
+        if where.tree == "front":
+            scan_id = self.active_scan()
         store = self.store_of(str(scan_id)) if scan_id else None
         if store is None:
             raise RpcError(ErrorCode.UNKNOWN_SCAN, "no scan")

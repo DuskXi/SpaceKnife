@@ -208,7 +208,7 @@ async def test_call_sync_refuses_the_event_loop() -> None:
         from spaceknife.server.rpc import RpcError
 
         with pytest.raises(RpcError) as err:
-            hp.call_sync("t.full", "method", "hello", {}, timeout=0.1)
+            hp.call_sync("t.full", "method", "hello", {}, where=hp.places.nowhere(), timeout=0.1)
         assert err.value.code == ErrorCode.PLUGIN_UNAVAILABLE
         # from a worker thread it works, and an annotator fills only blank reasons
         items = [
@@ -324,7 +324,9 @@ async def test_a_caller_giving_up_does_not_stop_the_start(monkeypatch: pytest.Mo
         monkeypatch.setattr(ProcessRuntime, "start", slow_start)
         # a frame's colours wait 20 ms: far less than a process takes to start
         with pytest.raises(RpcError):
-            await asyncio.to_thread(hp.call_sync, "t.full", "method", "add", {"a": 1}, timeout=0.02)
+            await asyncio.to_thread(
+                hp.call_sync, "t.full", "method", "add", {"a": 1}, where=hp.places.nowhere(), timeout=0.02
+            )
         await _until(lambda: rec.runtime is not None and rec.runtime.state == "running")
         assert await host.call("add", a=4) == {"total": 4}
 
@@ -344,8 +346,9 @@ async def test_long_lived_calls_have_no_time_limit(monkeypatch: pytest.MonkeyPat
             return await rt_call(self, call_id, kind, name, params, ctx, *a)  # type: ignore[arg-type]
 
         monkeypatch.setattr(type(hp.records["t.full"].runtime), "call", spy)
-        await hp.call("t.full", "stream", "ticks", {}, on_chunk=lambda v, f: None)
-        await hp.call("t.full", "method", "add", {"a": 1})
+        nowhere = hp.places.nowhere()
+        await hp.call("t.full", "stream", "ticks", {}, where=nowhere, on_chunk=lambda v, f: None)
+        await hp.call("t.full", "method", "add", {"a": 1}, where=nowhere)
         assert seen[0] == {"kind": "stream", "timeout": host_module.LONG_CALL_S}
         assert seen[1]["kind"] == "method" and float(seen[1]["timeout"]) <= 600.0  # type: ignore[arg-type]
 
@@ -539,7 +542,7 @@ async def test_a_change_of_settings_drops_the_cached_answers(
         assert hp._field_cache and hp._set_cache
         hooks: list[tuple[str, dict[str, object]]] = []
 
-        async def hook(rec: object, event: str, **args: object) -> None:
+        async def hook(rec: object, event: str, where: object, **args: object) -> None:
             hooks.append((event, args))
 
         monkeypatch.setattr(hp, "_hook", hook)

@@ -412,8 +412,7 @@ class Live:
                     ok = await self.host._hook(
                         rec,
                         "tree_changed",
-                        _scan=scan_id,
-                        _epoch=first[1],
+                        self.host.places.tree_change(scan_id, first[1]),
                         _again=functools.partial(self._again, key, due),
                         **first[0],
                     )
@@ -447,7 +446,14 @@ class Live:
         for plugin, (saved, removed) in due.items():
             rec = self.host.records.get(plugin)
             if rec is not None and rec.state == "enabled":  # each on its own: a slow one holds no other
-                self._start(self.host._hook(rec, "snapshots", change={"saved": saved, "removed": removed}))
+                self._start(
+                    self.host._hook(
+                        rec,
+                        "snapshots",
+                        self.host.places.nowhere(),
+                        change={"saved": saved, "removed": removed},
+                    )
+                )
 
     # ------------------------------------------------------------- notices
 
