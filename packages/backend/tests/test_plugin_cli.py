@@ -249,6 +249,8 @@ def test_call_render_schema_docs(tmp_path: Path) -> None:
     assert called.returncode == 0 and json.loads(called.stdout)["type"] == "toast"
     missing = sk(home, "call", str(folder), "nope")
     assert missing.returncode == 1 and "nope" in missing.stderr
+    nowhere = sk(home, "call", str(folder), "greet", "--scan", str(tmp_path / "not-there"), "--inprocess")
+    assert nowhere.returncode == 2 and "no such folder" in nowhere.stderr  # not a traceback (round 3)
     manifest = json.loads(sk(home, "schema", "--manifest").stdout)
     assert "commands" in manifest["properties"]
     section = sk(home, "docs", "--section", "kind-cleanup")

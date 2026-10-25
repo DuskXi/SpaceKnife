@@ -253,7 +253,11 @@ async def _mock(
             await host.close()
             raise _fail(f"--setting {name}: {exc}", 2) from None
     if scan is not None:
-        await host.scan_dir(await asyncio.to_thread(lambda: scan.expanduser().resolve()))
+        folder_ = await asyncio.to_thread(lambda: scan.expanduser().resolve())
+        if not await asyncio.to_thread(folder_.is_dir):  # say so (a traceback, or a long wait, before)
+            await host.close()
+            raise _fail(f"--scan {scan}: no such folder", 2)
+        await host.scan_dir(folder_)
     elif snapshot is not None:
         from .store import snapshot as snap
 
@@ -682,7 +686,30 @@ def shot(
     wait: Annotated[float, typer.Option(help="Seconds to let it settle before the picture.")] = 1.0,
     text: Annotated[bool, typer.Option("--text", help="Also print the page's visible text.")] = False,
     eval_: Annotated[
-        str | None, typer.Option("--eval", help="Also print what this JavaScript expression gives.")
+        str | None,
+        typer.Option("--eval", help="Print what this JavaScript expression gives, just before the picture."),
+    ] = None,
+    step: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--step",
+            help="An action before the picture (repeatable, in order): click: rclick: dblclick: hover: "
+            "<css or text=…>, set:<element>=<value>, key:<Key>, select:<a/b>, do:<command>, open:<target>, "
+            "wait:<s>, eval:<js>; panel:<step> inside the plugin's panel.",
+        ),
+    ] = None,
+    setting: Annotated[
+        list[str] | None,
+        typer.Option("--setting", help="name=value: one of the plugin's settings (repeatable)."),
+    ] = None,
+    history: Annotated[
+        list[Path] | None,
+        typer.Option(
+            "--history", help="A snapshot for ctx.snapshots.list() and the comparisons (repeatable)."
+        ),
+    ] = None,
+    source: Annotated[
+        str | None, typer.Option("--source", help="<name>:<uri>: scan with the plugin's scan source instead.")
     ] = None,
     ui: Annotated[
         Path | None,
@@ -692,7 +719,7 @@ def shot(
     """A picture of the real interface with the plugin enabled, in a headless browser (nothing opens
     on the desktop): its own backend, temporary data folder and port. Prints the PNG's path and
     what the page and the plugin logged as errors or warnings."""
-    from .devshot import ShotOptions, run_shot
+    from .devshot import ShotOptions, StepError, parse_step, run_shot
 
     target = _folder(folder)
     from spaceknife_sdk.manifest import load_manifest
@@ -702,24 +729,43 @@ def shot(
         w, h = (int(x) for x in size.lower().split("x"))
     except ValueError:
         raise _fail(f"--size {size!r}: write WIDTHxHEIGHT", 2) from None
-    words: list[str] = []
-    for d in do or []:
+
+    def command_word(d: str) -> str:
         kind, _, name = d.partition(":")
         if kind == "visual" and name:
-            words.append(f"view.visual.{name if '.' in name else f'{pid}.{name}'}")
-        elif kind == "color" and name:
-            words.append(f"view.color.{name if '.' in name else f'{pid}.{name}'}")
-        elif d == "export":
-            words.append("report.export")
-        else:
-            words.append(d if "." in d else f"{pid}.{d}")
-    target_open = open_
-    if open_ and ":" in open_:
-        what, _, name = open_.partition(":")
-        if what in ("report", "panel", "export") and "." not in name:
-            target_open = f"{what}:{pid}.{name}"
-    elif open_ == "settings":
-        target_open = f"settings:{pid}"
+            return f"view.visual.{name if '.' in name else f'{pid}.{name}'}"
+        if kind == "color" and name:
+            return f"view.color.{name if '.' in name else f'{pid}.{name}'}"
+        if d == "export":
+            return "report.export"
+        return d if "." in d else f"{pid}.{d}"
+
+    def open_word(o: str) -> str:
+        if ":" in o:
+            what, _, name = o.partition(":")
+            if what in ("report", "panel", "export") and "." not in name:
+                return f"{what}:{pid}.{name}"
+        return f"settings:{pid}" if o == "settings" else o
+
+    words = [command_word(d) for d in do or []]
+    target_open = open_word(open_) if open_ else None
+    steps: list[str] = []
+    for s in step or []:
+        try:
+            _in_panel, kind, arg = parse_step(s)
+        except StepError as exc:
+            raise _fail(f"--step {exc}", 2) from None
+        if kind == "do":
+            s = f"do:{command_word(arg)}"
+        elif kind == "open":
+            s = f"open:{open_word(arg)}"
+        steps.append(s)
+    src = None
+    if source:
+        name, sep, uri = source.partition(":")
+        if not sep or not name:
+            raise _fail(f"--source {source!r}: write <name>:<uri>", 2)
+        src = f"{name if '.' in name else f'{pid}.{name}'}:{uri}"
     opts = ShotOptions(
         scan=scan,
         ui=ui,
@@ -734,6 +780,10 @@ def shot(
         wait=wait,
         text=text,
         eval=eval_,
+        steps=steps,
+        settings=_settings(setting),
+        history=list(history or []),
+        source=src,
     )
     raise typer.Exit(run_shot(target, opts, say=lambda line: out_print(line)))
 

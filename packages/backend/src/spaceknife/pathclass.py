@@ -79,6 +79,7 @@ TEXT = Texts(
         "software": "已安装的软件",
         "appdata": "应用数据",
         "user": "你的设置",
+        "plugin": "插件的文件夹规则 {glob}",
         "bad_file": "文件夹归类 {path} 读不出来，已忽略：{error}",
     }
 )
@@ -792,11 +793,19 @@ class PluginRule:
     exclude: tuple[re.Pattern[str], ...] = field(default=(), compare=False)
     contains: tuple[str, ...] = ()  # lower-case name globs: one of the folder's children must match
     beside: tuple[str, ...] = ()  # … or one of its siblings
+    id: str = ""  # the contribution's full id (<plugin>.<name>)
+
+    @property
+    def owner(self) -> str:
+        return self.id.rsplit(".", 1)[0] if "." in self.id else ""
 
 
 _plugin_rules: tuple[PluginRule, ...] = ()
 _plugin_version = 0
-_overlays: WeakKeyDictionary[NodeStore, tuple[tuple[int, int, int, int], np.ndarray]] = WeakKeyDictionary()
+# per store: (key, the column with the plugins' rules applied, folder -> the rule that decided it)
+_overlays: WeakKeyDictionary[
+    NodeStore, tuple[tuple[int, int, int, int], np.ndarray, dict[int, PluginRule]]
+] = WeakKeyDictionary()
 
 
 def expand_braces(glob: str) -> list[str]:
@@ -841,8 +850,8 @@ def compile_glob(glob: str) -> re.Pattern[str]:
 
 def set_plugin_rules(rules: Iterable[tuple[Any, ...]]) -> None:
     """The enabled plugins' folder rules: (glob, class id, fallback[, priority[, exclude globs[,
-    contains[, beside]]]]), tried by priority (higher first), then in the order given; the first
-    that matches decides. ``contains`` / ``beside``: name globs one of the folder's children / one
+    contains[, beside[, full id]]]]]), tried by priority (higher first), then in the order given; the
+    first that matches decides. ``contains`` / ``beside``: name globs one of the folder's children / one
     of its siblings must match (a ``target`` beside ``Cargo.toml``, a folder holding ``pyvenv.cfg``)."""
     global _plugin_rules, _plugin_version
     made = []
@@ -852,7 +861,8 @@ def set_plugin_rules(rules: Iterable[tuple[Any, ...]]) -> None:
         excl = tuple(compile_glob(x) for x in (r[4] if len(r) > 4 else ()))
         inside = tuple(x.lower() for x in (r[5] if len(r) > 5 else ()))
         beside = tuple(x.lower() for x in (r[6] if len(r) > 6 else ()))
-        made.append(PluginRule(g, c, fb, compile_glob(g), prio, excl, inside, beside))
+        rid = str(r[7]) if len(r) > 7 else ""
+        made.append(PluginRule(g, c, fb, compile_glob(g), prio, excl, inside, beside, rid))
     order = sorted(range(len(made)), key=lambda i: (-made[i].priority, i))
     _plugin_rules = tuple(made[i] for i in order)
     _plugin_version += 1
@@ -866,6 +876,7 @@ def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.n
     if hit is not None and hit[0] == key:
         return hit[1]
     out = col.copy()
+    decided: dict[int, PluginRule] = {}
     c = store.cols
     dirs = np.flatnonzero(c["kind"][:n] == Kind.DIR)
     last = {
@@ -902,9 +913,26 @@ def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.n
                 out[ids[free]] = FALLBACK_BASE + idx
             else:
                 out[ids] = idx + 1
+            decided[d] = r
             break
-    _overlays[store] = (key, out)
+    _overlays[store] = (key, out, decided)
     return out
+
+
+def _decided(store: NodeStore, table: ClassTable) -> dict[int, PluginRule]:
+    """Folder -> the plugin rule that decided its class (worked out with the class column)."""
+    column(store, table)
+    hit = _overlays.get(store)
+    return hit[2] if hit is not None else {}
+
+
+def rule_folders(store: NodeStore, table: ClassTable, rule_id: str) -> np.ndarray:
+    """The folders a plugin's folder rule (its full id) decided the class of, in id order (a folder
+    the user classified, or one below it, is not among them)."""
+    if not _plugin_rules:
+        return np.zeros(0, dtype=np.int64)
+    found = [d for d, r in _decided(store, table).items() if r.id == rule_id]
+    return np.asarray(sorted(found), dtype=np.int64)
 
 
 def _holds(store: NodeStore, folder: int, names: tuple[str, ...], skip: int = -1) -> bool:
@@ -939,6 +967,7 @@ class Reason:
     folder: int  # the folder that decided
     user: bool  # the user's choice
     fallback: bool  # only files whose extension is in no class take it
+    rule: str = ""  # a plugin's folder rule that decided (its full id)
 
 
 def explain(store: NodeStore, node: int, table: ClassTable) -> Reason | None:
@@ -956,6 +985,13 @@ def explain(store: NodeStore, node: int, table: ClassTable) -> Reason | None:
         if f in e.user:
             cid = e.user[f]
             return Reason(cid, TEXT["user"], f, True, False) if cid and cid in table.by_id else None
+    if _plugin_rules:  # then the plugins' rules (applied over the built-in ones), the deepest
+        decided = _decided(store, table)
+        for f in chain:
+            pr = decided.get(f)
+            if pr is not None and pr.class_id in table.by_id:
+                why = TEXT["plugin"].format(glob=pr.glob)
+                return Reason(pr.class_id, why, f, False, pr.fallback, pr.id)
     pick: tuple[int, _Rule] | None = None
     for f in reversed(chain):  # the outermost swallowing rule; else the nearest fallback
         r = e.roots.get(f)

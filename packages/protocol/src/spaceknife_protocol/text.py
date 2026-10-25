@@ -92,6 +92,10 @@ class _Formatter(string.Formatter):
         self.lang = lang
 
     def format_field(self, value: Any, format_spec: str) -> str:
+        if isinstance(value, LocalText):  # a text field of a model: its text, in this language
+            value = value.text
+        if isinstance(value, Text):  # a nested text: in this formatter's language, not the request's
+            value = value.get(self.lang)
         if format_spec == "size":
             return fmt_size(float(value))
         if format_spec == "count":
@@ -127,8 +131,10 @@ class Text(BaseModel):
 
     def format(self, **fields: Any) -> Text:
         """Fill ``str.format`` placeholders in both languages; the result is still a :class:`Text`.
-        Besides the usual specs: ``{n:size}`` (bytes as the app writes them: 1.2 GB), ``{n:count}``
-        (1,234), ``{t:date}`` (unix seconds: 2026-10-24 21:30), ``{t:ago}`` (3 天前 / 3 days ago)."""
+        A field that is a :class:`Text` itself goes in in each language
+        (``T("在{where}", "in {where}").format(where=T("回收站", "the bin"))``). Besides the usual
+        specs: ``{n:size}`` (bytes as the app writes them: 1.2 GB), ``{n:count}`` (1,234), ``{t:date}``
+        (unix seconds: 2026-10-24 21:30), ``{t:ago}`` (3 天前 / 3 days ago)."""
         return Text(
             zh=format_text(self.zh, "zh-CN", **fields),
             en=format_text(self.en, "en", **fields) if self.en else "",

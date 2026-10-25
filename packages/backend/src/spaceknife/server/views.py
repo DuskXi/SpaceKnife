@@ -321,6 +321,12 @@ class ViewManager:
                     await compute(v.refilter)
             await self._repaint(host, "plugin")
 
+    async def repaint_color(self, mode: str) -> None:
+        """Views painted in a plugin's colour mode draw again (its answer came late)."""
+        for host in list(self.views.values()):
+            if str(host.view.color_mode) == mode:
+                await self._repaint(host, "plugin")
+
     async def _repaint(self, host: ViewHost, reason: str) -> None:
         try:
             async with host.lock:

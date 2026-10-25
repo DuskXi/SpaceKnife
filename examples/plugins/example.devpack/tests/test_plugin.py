@@ -12,9 +12,9 @@ from spaceknife_sdk.testing import MockHost, make_tree
 
 TREE = make_tree(
     {
-        "web": {".turbo": {"cache.bin": 4000}, "app.ts": 300, "package.json": 90},
+        "web": {".turbo": {"cache.bin": 4000}, ".next": {"x.js": 800}, "app.ts": 300, "package.json": 90},
         "rust": {"target": {"debug": {"app": 9000, "deps": {"x.rlib": 5000}}}, "main.rs": 200},
-        "c": {"main.o": 700, "main.c": 100, "build.log": 50},
+        "c": {"main.o": 700, "main.c": 100, "build.log": 50, "old": {".next": {"y.js": 70}}},
     }
 )
 
@@ -29,6 +29,11 @@ async def host() -> AsyncIterator[MockHost]:
 async def test_rules_explain_build_caches(host: MockHost) -> None:
     cards = await host.insights(node=host.find("web/.turbo"))
     assert [c.rule for c in cards] == ["devpack-turbo"]
+    assert cards[0].regenerate == "下次 turbo run 会重新生成"
+    # beside: only the .next next to package.json is Next.js's
+    assert [c.rule for c in await host.insights(node=host.find("web/.next"))] == ["devpack-next"]
+    elsewhere = await host.insights(node=host.find("c/old/.next"))  # no project file beside it
+    assert "devpack-next" not in [c.rule for c in elsewhere]
     cards = await host.insights(node=host.find("rust/target/debug"))
     assert cards[0].rule == "devpack-cargo-target" and cards[0].command == "cargo clean"
 

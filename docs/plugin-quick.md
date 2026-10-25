@@ -101,7 +101,7 @@ async def test_it() -> None:
 ```sh
 spaceknife plugin shot my.tool --open report:largest --text           # 截图 + 页面上的字 + 报错
 spaceknife plugin shot my.tool --do visual:by_name --theme light --size 1200x800 -o v.png
-spaceknife plugin shot my.tool --select logs/app.log --open panel:main --lang en
+spaceknife plugin shot my.tool --open panel:main --step "panel:click:text=刷新"  # 先点再截：api-shot
 spaceknife plugin shot my.tool --open export:md       # 导出对话框选好这个格式；--scan 某个文件夹换掉合成树
 spaceknife plugin dev my.tool --scan ~/Downloads      # 一直开着：保存就重新加载，打印浏览器网址
 ```

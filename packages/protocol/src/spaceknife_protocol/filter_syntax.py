@@ -869,6 +869,22 @@ class _Parser:
         bad_attrs = set(self.vocab.unsupported_attrs)
         bad_ages = set(self.vocab.unsupported_ages)
         for c in self.conds:
+            if isinstance(c, MaskCond) and not c.negated and c.pattern.startswith("!:"):
+                # "!:class:x" is a name mask (a name may start with "!"), not a negation: say how
+                # the negation is written; the mask still applies as written
+                self.diags.append(
+                    FilterDiagnostic(
+                        code="bang_negation",
+                        severity="warning",
+                        start=c.start,
+                        end=c.start + 1,
+                        cond_start=c.start,
+                        cond_end=c.end,
+                        text="!",
+                        expected=["|" + c.pattern[1:]],
+                    )
+                )
+                continue
             hit: list[str] = []
             if isinstance(c, AttrCond):
                 hit = [a for a in (*c.required, *c.forbidden) if a in bad_attrs]

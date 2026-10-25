@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { formatCell, isEmptyReport, nextSort, numericUnit, PAGE_MAX, pageOf, share, sortRows } from "./format";
 import { renderReportMd } from "./md";
-import { intervalOf, statesOf } from "./useReport";
+import { intervalOf, settingsKey, statesOf } from "./useReport";
 
 describe("formatCell", () => {
   it("formats each unit", () => {
@@ -93,6 +93,15 @@ describe("refresh", () => {
 
   it("reads the states it follows", () => {
     expect(statesOf(["state:status", "scan", "state:"])).toEqual(["status"]);
+  });
+
+  it("follows its own plugin's settings only (refresh = settings)", () => {
+    const values = { "plugin.a.b.bands": "7d", "plugin.a.b.keep": 2, "plugin.a.bc.x": 1, "appearance.theme": "dark" };
+    const key = settingsKey(values, "a.b");
+    expect(key).toBe(JSON.stringify([["plugin.a.b.bands", "7d"], ["plugin.a.b.keep", 2]]));
+    expect(settingsKey({ ...values, "appearance.theme": "light", "plugin.a.bc.x": 9 }, "a.b")).toBe(key);
+    expect(settingsKey({ ...values, "plugin.a.b.bands": "30d" }, "a.b")).not.toBe(key);
+    expect(settingsKey(undefined, "a.b")).toBe("");
   });
 });
 

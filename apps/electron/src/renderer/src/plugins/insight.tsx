@@ -74,10 +74,20 @@ function Card({ card, scanId, node }: { card: InsightCard; scanId: string; node:
         <strong className="flex">{card.title}</strong>
         {card.source === "plugin" && card.plugin && <span className="muted small">{pluginName(card.plugin)}</span>}
       </header>
+      {card.inside && card.path && (
+        <p className="muted small insight-about" title={card.path}>
+          {t("说的是它所在的文件夹 {name}", { name: card.path.split(/[\\/]/).filter(Boolean).pop() ?? card.path })}
+        </p>
+      )}
       <p>{card.reason}</p>
       {card.app && <p className="muted small">{t("来自：{app}", { app: card.app })}</p>}
       {card.note && <p className="muted small">{card.note}</p>}
       <div className={`insight-advice ${advice.tone}`}>{advice.text}</div>
+      {card.regenerate && (
+        <p className="small insight-regen">
+          <Icon name="refresh" size={12} /> {t("删掉以后：{how}", { how: card.regenerate })}
+        </p>
+      )}
       {card.command && (
         <div className="insight-command">
           <code className="mono" title={t("只显示，SpaceKnife 不会运行它")}>

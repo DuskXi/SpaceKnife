@@ -171,6 +171,12 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     const st = v ? s.scans[v.state.scan_id] : undefined;
     return st?.state === "scanning" || st?.state === "queued";
   });
+  // why a scan that failed shows nothing (a scan source's reason: "not an ncdu export…")
+  const failure = useApp((s) => {
+    const v = s.views[viewId];
+    const st = v ? s.scans[v.state.scan_id] : undefined;
+    return st?.state === "failed" ? st.message || t("扫描失败") : "";
+  });
   // W7: 减少动画, 缩放动画时长, 光晕层数, 悬停高亮, 选中投影; unitEpoch redraws size labels
   const reduced = useReducedMotion(useApp((s) => setting<string>(s, "appearance.reduce_motion", "system")));
   const zoomMs = useApp((s) => setting(s, "treemap.zoom_ms", ZOOM_MS));
@@ -668,7 +674,15 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       <canvas ref={glCanvas} className="treemap-layer" />
       <canvas ref={textCanvas} className="treemap-layer" />
       <canvas ref={breathCanvas} className="treemap-layer" />
-      {empty && <div className="treemap-empty">{view?.state.compare ? t("两次之间没有变化") : t("这里没有任何占用空间的内容")}</div>}
+      {empty && !failure && <div className="treemap-empty">{view?.state.compare ? t("两次之间没有变化") : t("这里没有任何占用空间的内容")}</div>}
+      {empty && failure && (
+        <div className="treemap-empty treemap-failed" role="alert">
+          <div>
+            <div className="strong">{t("没能读出内容")}</div>
+            <div className="small">{failure}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

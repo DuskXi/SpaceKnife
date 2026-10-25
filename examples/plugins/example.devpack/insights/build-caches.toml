@@ -9,9 +9,11 @@ title = "Turborepo 缓存"
 app = "Turborepo"
 cleanup = "safe"
 reason = "Turborepo 的本地任务缓存，删掉后下次构建会重新生成。"
+regenerate = "下次 turbo run 会重新生成"
 names = [".turbo"]
 i18n.en.title = "Turborepo cache"
 i18n.en.reason = "Turborepo's local task cache; the next build makes it again."
+i18n.en.regenerate = "The next turbo run makes it again"
 
 [[rule]]
 id = "devpack-parcel"
@@ -20,9 +22,27 @@ title = "Parcel 缓存"
 app = "Parcel"
 cleanup = "safe"
 reason = "Parcel 打包器的缓存，删掉后下次构建会重新生成。"
+regenerate = "下次 parcel build 会重新生成"
 names = [".parcel-cache"]
 i18n.en.title = "Parcel cache"
 i18n.en.reason = "The Parcel bundler's cache; the next build makes it again."
+i18n.en.regenerate = "The next parcel build makes it again"
+
+# Only a .next beside a project file is Next.js's: beside looks at the folder's neighbours (a .next
+# elsewhere, say a backup's, gets no card from this rule).
+[[rule]]
+id = "devpack-next"
+kind = "build"
+title = "Next.js 构建目录"
+app = "Next.js"
+cleanup = "safe"
+reason = "Next.js 的构建输出和缓存，删掉后下次构建或启动开发服务器时重新生成。"
+regenerate = "下次 next build 或 next dev 会重新生成"
+names = [".next"]
+beside = ["package.json", "next.config.*"]
+i18n.en.title = "Next.js build folder"
+i18n.en.reason = "Next.js's build output and cache; the next build or dev server makes it again."
+i18n.en.regenerate = "The next next build or next dev makes it again"
 
 [[rule]]
 id = "devpack-cargo-target"

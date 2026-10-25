@@ -86,6 +86,8 @@ COLUMNS = (
     "tot_dirs",
     "cls",
 )
+QUERY_LIMIT = 100_000  # rows a query gives when it does not say (Rows.truncated tells)
+QUERY_MAX = 1_000_000  # the most a query may ask for
 # query columns: the store's, plus the effective sizes ("bytes": allocated, subtree totals for
 # folders; "logical": the same for logical sizes), "name" and "path"
 QUERY_COLUMNS = (*COLUMNS, "bytes", "logical", "name", "path")
@@ -199,7 +201,9 @@ class Row:
 
 
 class Rows:
-    """The result of :meth:`TreeView.query`: ``rows.ids``, ``rows["size"]``, ``rows.paths``, rows."""
+    """The result of :meth:`TreeView.query`: ``rows.ids``, ``rows["size"]``, ``rows.paths``, rows.
+
+    ``total`` is how many matched before the limit; ``truncated`` says the rows stop short of it."""
 
     def __init__(
         self,
@@ -217,6 +221,11 @@ class Rows:
 
     def __len__(self) -> int:
         return len(self.ids)
+
+    @property
+    def truncated(self) -> bool:
+        """More rows matched than came back (the query's ``limit``)."""
+        return self.total > len(self.ids)
 
     def __getitem__(self, name: str) -> np.ndarray:
         if name in ("name", "path"):
@@ -437,7 +446,9 @@ class TreeView:
         return np.arange(start, start + count, dtype=np.int32)
 
     def walk(self, id: int | None = None, *, chunk: int = 262_144) -> Iterator[np.ndarray]:
-        """Every node below ``id`` (default: all roots), level by level, in chunks of ids (int64)."""
+        """Every node from ``id`` down (default: from the roots), **level by level** (breadth first:
+        ``id`` itself, then its children, then theirs …; within a level in id order), in chunks of
+        ids (int64). Not depth first: a folder's descendants are not contiguous in what it yields."""
         image = self._ensure(["child_start", "child_count"])
         start_col = image.columns["child_start"].astype(np.int64)
         count_col = image.columns["child_count"].astype(np.int64)
@@ -466,12 +477,17 @@ class TreeView:
         min_size: int | None = None,
         columns: Sequence[str] = ("bytes",),
         sort: str | None = None,
-        limit: int = 100_000,
+        limit: int | None = None,
     ) -> Rows:
         """Rows the host selects: ``where`` is a filter expression (it matches files, as in the
         filter box), ``under`` a subtree, ``kind`` ``file`` / ``dir`` / ``link``, ``min_size`` bytes
         on disk (subtree totals for folders). ``columns`` from :data:`QUERY_COLUMNS`; ``sort`` a
-        column, ``-column`` for descending."""
+        column, ``-column`` for descending.
+
+        At most ``limit`` rows (default :data:`QUERY_LIMIT`, at most :data:`QUERY_MAX`), the first
+        ones in ``sort`` order (in id order without one): ``rows.total`` says how many matched and
+        ``rows.truncated`` whether some were left out. Leaving ``limit`` out and getting a truncated
+        result also writes a warning to the plugin's log."""
         bad = [c for c in columns if c not in QUERY_COLUMNS]
         if bad:
             raise KeyError(f"unknown columns {bad}; use {', '.join(QUERY_COLUMNS)}")
@@ -482,7 +498,7 @@ class TreeView:
             min_size=min_size,
             columns=list(columns),
             sort=sort,
-            limit=int(limit),
+            limit=QUERY_LIMIT if limit is None else max(1, min(int(limit), QUERY_MAX)),
         )
         value, frames = self._link.request("host.query", params)
         if not frames:
@@ -494,7 +510,25 @@ class TreeView:
             if name in cols:
                 blob = cols.pop(name)
                 texts[name] = _split_blob(blob, cols.pop(f"{name}_len"))
-        return Rows(self, ids, dict(cols), texts, int(value.get("total", len(ids))))
+        rows = Rows(self, ids, dict(cols), texts, int(value.get("total", len(ids))))
+        if limit is None and rows.truncated:
+            self._link.notify(
+                "log",
+                {
+                    "level": "WARNING",
+                    "message": f"tree.query({where!r}) matched {rows.total} rows; only the first "
+                    f"{len(rows)} came back (limit={QUERY_LIMIT}): pass limit= (up to {QUERY_MAX}), "
+                    "narrow it with under= / min_size=, or page through it",
+                },
+            )
+        return rows
+
+    def rule_folders(self, rule: str) -> np.ndarray:
+        """The folders a folder rule decided the class of (``[[folder_rule]]``: its name, this
+        plugin's; or another plugin's full id), in id order: the ones it matched itself, not the
+        folders inside them, and not where the user chose a class instead."""
+        value, _ = self._link.request("host.rule_folders", self._params(rule=str(rule)))
+        return np.asarray(value.get("folders", []), dtype=np.int64)
 
     # ------------------------------------------------------------- built-in plugins only
 
@@ -510,6 +544,8 @@ class TreeView:
 __all__ = [
     "COLUMNS",
     "QUERY_COLUMNS",
+    "QUERY_LIMIT",
+    "QUERY_MAX",
     "ClassInfo",
     "Columns",
     "Flag",

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "e4b9740b25b0009c";
+export const SCHEMA_HASH = "b3236a426ffc5d42";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -748,7 +748,7 @@ export interface FilterClassInfo {
 
 /** An error (the expression is not applied) or, with ``severity="warning"``, a hint. */
 export interface FilterDiagnostic {
-  code: "incomplete" | "unterminated_quote" | "text_after_quote" | "bad_escape" | "backslash_in_mask" | "unknown_keyword" | "bad_char" | "unknown_class" | "unknown_set" | "unknown_tag" | "unknown_attr" | "bad_list" | "unknown_prefix" | "bad_operator" | "bad_number" | "missing_unit" | "unknown_unit" | "unit_mismatch" | "out_of_range" | "unsupported";
+  code: "incomplete" | "unterminated_quote" | "text_after_quote" | "bad_escape" | "backslash_in_mask" | "unknown_keyword" | "bad_char" | "unknown_class" | "unknown_set" | "unknown_tag" | "unknown_attr" | "bad_list" | "unknown_prefix" | "bad_operator" | "bad_number" | "missing_unit" | "unknown_unit" | "unit_mismatch" | "out_of_range" | "unsupported" | "bang_negation";
   cond_end: number;
   /** UTF-16 span of the whole condition */
   cond_start: number;
@@ -869,8 +869,12 @@ export interface FolderClassInfo {
   fallback: boolean;
   /** The folder that decided (the node itself or an ancestor) */
   folder: string;
+  /** The plugin whose folder rule decided */
+  plugin: string | null;
   /** What the folder was recognised as, in the interface language */
   reason: string;
+  /** That folder rule's full id */
+  rule: string;
   /** The user chose it (class_folders.json) */
   user: boolean;
 }
@@ -968,14 +972,19 @@ export interface InsightCard {
   cleanup: string;
   /** Shown and copyable, never run */
   command: string;
+  /** The card is about a folder above the node asked (``path`` is that folder) */
+  inside: boolean;
   /** Built-in kinds keep their icons; plugins may name others */
   kind: string;
   note: string;
+  /** The item the card is about (「加入删除篮」 puts it in) */
   path: string;
   plugin: string | null;
   /** The rule's or the plugin's: cards are shown highest first */
   priority: number;
   reason: string;
+  /** How it comes back once deleted (npm install …) */
+  regenerate: string;
   rule: string;
   source: "rule" | "plugin";
   title: string;
@@ -2038,6 +2047,8 @@ export interface ScanStatus {
   pending_dirs: number;
   /** What a fast scan is doing: helper (starting the read-only helper, may wait for the administrator prompt), mft (reading and parsing the $MFT), receive, build; empty otherwise */
   phase: string;
+  /** A plugin's scan source (its full id) when the tree came from one */
+  plugin_source: string | null;
   /** 0..1 against the volume's used space, or against the item count of the last scan of the same roots; None if unknown */
   progress: number | null;
   /** Items per second, averaged over the last few seconds */
@@ -2053,6 +2064,8 @@ export interface ScanStatus {
   state: "queued" | "scanning" | "done" | "cancelled" | "failed";
   /** Used but not scanned bytes (whole-volume scans only) */
   unknown: number | null;
+  /** What that scan source listed */
+  uri: string;
 }
 
 export interface SectionBlock {

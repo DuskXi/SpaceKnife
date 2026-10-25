@@ -109,6 +109,7 @@ FILTER_REASONS = Texts(
         "unit_mismatch": "前缀与单位不同类",
         "out_of_range": "数值超出上限",
         "unsupported": "当前平台不记录这项属性或时间（警告）",
+        "bang_negation": "! 不是取反，按名字匹配；取反写 |（警告）",
     }
 )
 USAGE = Texts(  # how a command with parameters is written (the others: just the name)

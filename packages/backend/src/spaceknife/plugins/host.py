@@ -77,6 +77,12 @@ FIELD_TIMEOUT = {"inspector": 1.0, "hover": 0.03}
 SET_TIMEOUT = 5.0
 SET_RUNNING_EVERY_S = 5.0
 COLOR_TIMEOUT = 0.02
+# A code colour mode that missed its 20 ms (the first frame of a tree maps the tree's columns into the
+# plugin's process, which takes longer) is asked again a moment later, a few times per tree version:
+# the frame that showed neutral colours is drawn again once the columns are there.
+COLOR_RETRY_S = 0.25
+COLOR_RETRIES = 3
+FIELD_LOG_S = 30.0  # a field that keeps failing is logged at most this often
 VISUAL_TIMEOUT = 0.12
 LAYOUT_TIMEOUT = 5.0  # s: a layout visualization places one picture (the first call also maps the tree)
 ANNOTATE_TIMEOUT = 0.2
@@ -132,6 +138,8 @@ class PluginHost:
         self._sites: dict[
             int, tuple[str, Session | None, Any]
         ] = {}  # call id -> (plugin, session, request id)
+        # call id -> who hears its ctx.progress instead of the frontends (a scan source: its scan)
+        self._progress_to: dict[int, Callable[[float, float, str], None]] = {}
         self._start_locks: dict[str, asyncio.Lock] = {}
         self._starting: dict[str, asyncio.Task[PluginRuntime]] = {}
         self._event_rates: dict[str, _Rate] = {}
@@ -146,6 +154,9 @@ class PluginHost:
         self._legends: dict[tuple[str, str, str], tuple[int, list[tuple[str, Any]]]] = {}
         self._legend_asked: set[tuple[str, str, str]] = set()
         self._weights: dict[tuple[str, str, int, int, int, str], np.ndarray] = {}
+        self._color_retries: dict[tuple[str, str, int, int], int] = {}  # COLOR_RETRIES per tree version
+        self.field_errors: dict[tuple[str, int], str] = {}  # (field id, node) -> why it failed, the latest 64
+        self._field_logged: dict[str, float] = {}  # field id -> when its last failure was logged
         self._visual_failures: dict[tuple[str, str], int] = defaultdict(int)
         self._changed: set[str] = set()
         self._flush: asyncio.TimerHandle | None = None
@@ -567,13 +578,16 @@ class PluginHost:
         timeout: float | None = None,  # noqa: ASYNC109 — the plugin's limit, enforced inside
         latest: bool = False,
         on_wait: Callable[[], None] | None = None,
+        on_progress: Callable[[float, float, str], None] | None = None,
     ) -> tuple[Any, list[bytes]]:
         """Call a plugin's handler; RpcError with a plugin error code when it fails.
 
         The time limit counts from here: waiting for one of the plugin's ``MAX_CONCURRENT`` call
         slots is part of it (a field with a 1 s budget never waits longer than that), starting the
         plugin's process is not. Watchers and streams run beside the calls, on slots of their own.
-        ``on_wait`` is called once when the call has to wait for a slot (a scan says so)."""
+        ``on_wait`` is called once when the call has to wait for a slot (a scan says so);
+        ``on_progress(done, total, text)`` hears the call's ``ctx.progress`` (else the frontend of
+        the request that made the call does)."""
         if self._closed:  # shutting down: nothing starts a plugin process again
             raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "plugins are not running", {"plugin": plugin})
         rec = self.enabled(plugin)
@@ -632,7 +646,9 @@ class PluginHost:
                 self._queued[plugin] -= 1
                 queued = False
             try:
-                return await self._run_call(rec, kind, name, params, session, ctx, frames, on_chunk, deadline)
+                return await self._run_call(
+                    rec, kind, name, params, session, ctx, frames, on_chunk, deadline, on_progress
+                )
             finally:
                 sem.release()
         finally:
@@ -652,6 +668,7 @@ class PluginHost:
         frames: Sequence[bytes],
         on_chunk: Callable[[Any, list[bytes]], None] | None,
         deadline: float | None,
+        on_progress: Callable[[float, float, str], None] | None = None,
     ) -> tuple[Any, list[bytes]]:
         plugin = rec.id
         loop = asyncio.get_running_loop()
@@ -669,6 +686,8 @@ class PluginHost:
         }
         info.update(ctx or {})
         self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
+        if on_progress is not None:
+            self._progress_to[call_id] = on_progress
         if kind == "task":
             self.tasks.call_started(call_id)
         try:
@@ -685,6 +704,7 @@ class PluginHost:
             raise RpcError(exc.code, exc.message, data) from None
         finally:
             self._sites.pop(call_id, None)
+            self._progress_to.pop(call_id, None)
             self.tasks.call_ended(call_id)
             self.api.call_ended(call_id)
         rec.last_used = time.monotonic()
@@ -785,6 +805,12 @@ class PluginHost:
                 payload.get("texts"),
             ):
                 return  # a background task's: its record moves on (every window sees it)
+            hear = self._progress_to.get(int(payload.get("id", 0)))
+            if hear is not None:  # a scan source's: its scan's progress
+                with contextlib.suppress(Exception):
+                    text = str(payload.get("text", ""))[:512]
+                    hear(float(payload.get("done", 0)), float(payload.get("total", 0)), text)
+                return
             site = self._sites.get(int(payload.get("id", 0)))
             if site is None or site[1] is None:
                 return
@@ -1648,7 +1674,9 @@ class PluginHost:
                     frames=[frame],
                     timeout=COLOR_TIMEOUT,
                 )
-            except RpcError:
+            except RpcError as exc:
+                if exc.code == ErrorCode.PLUGIN_TIMEOUT:
+                    self._color_again(plugin, name, view.store)
                 return out
             if frames:
                 pal = decode_frame(frames[0])[1]["pal"]
@@ -1659,6 +1687,39 @@ class PluginHost:
             return out
 
         return paint
+
+    def field_failed(self, field_id: str, node: int, why: str) -> None:
+        """A node field raised: it is left out of the details panel and said in the plugin's log."""
+        if len(self.field_errors) >= 64:
+            self.field_errors.pop(next(iter(self.field_errors)))
+        self.field_errors[(field_id, node)] = why
+        now = time.monotonic()
+        if now - self._field_logged.get(field_id, -FIELD_LOG_S) < FIELD_LOG_S:
+            return  # a hover card asks often: the log says it once in a while
+        self._field_logged[field_id] = now
+        owner = field_id.rsplit(".", 1)[0]
+        logger.bind(source=f"plugin:{owner}").warning("field {} on node {} failed: {}", field_id, node, why)
+
+    def _color_again(self, plugin: str, name: str, store: Any) -> None:
+        """A code colour mode's call timed out (from a compute thread): its views are drawn again a
+        moment later, at most COLOR_RETRIES times per tree version."""
+        key = (plugin, name, id(store), int(store.version))
+        n = self._color_retries.get(key, 0)
+        if n >= COLOR_RETRIES or self._loop is None or self._closed:
+            return
+        if len(self._color_retries) > 256:
+            self._color_retries.clear()
+        self._color_retries[key] = n + 1
+        views = getattr(self.server, "views", None)
+        if views is None:
+            return
+
+        async def later() -> None:
+            await asyncio.sleep(COLOR_RETRY_S * (n + 1))
+            await views.repaint_color(f"{plugin}.{name}")
+
+        with contextlib.suppress(RuntimeError):
+            self._loop.call_soon_threadsafe(lambda: self._spawn(later()))
 
     def remote_sizes(self, plugin: str, name: str, options: list[tuple[str, str]]) -> Callable[[Any], Any]:
         """A code visualization's areas: the plugin's weights per file, summed into folders."""

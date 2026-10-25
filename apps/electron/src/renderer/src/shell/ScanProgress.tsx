@@ -120,6 +120,19 @@ export function ScanBand({ scan, title }: { scan: ScanStatus; title: string }) {
               <span className="dot" />
               {scan.paused ? (
                 <span>{t("磁盘读取已暂停，可随时继续")}</span>
+              ) : scan.method === "source" ? (
+                // a plugin's scan source: what it says it is doing (ctx.progress), no estimate
+                <>
+                  <span>{t("每秒 {rate} 项", { rate: fmtRate(scan.rate) })}</span>
+                  {scan.message && (
+                    <>
+                      <span className="dot" />
+                      <span className="sb-message" title={scan.message}>
+                        {scan.message}
+                      </span>
+                    </>
+                  )}
+                </>
               ) : (
                 <>
                   <span>{t("每秒 {rate} 项", { rate: fmtRate(scan.rate) })}</span>

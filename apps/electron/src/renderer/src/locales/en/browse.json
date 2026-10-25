@@ -1,4 +1,5 @@
 {
+ "! 不是取反，这是按名字匹配；取反写成": "! does not negate, this matches names; negate with",
  "+{n} 项": "+{n} more",
  "Ctrl+1–4 · Ctrl+0 清除": "Ctrl+1–4 · Ctrl+0 clears",
  "NTFS 元数据与孤立文件只在 MFT 快速扫描里可见，没有可以打开或删除的对应位置": "NTFS metadata and orphaned files are only visible in an MFT quick scan and have no location to open or delete.",
@@ -8,6 +9,7 @@
  "{files} 个文件 · {dirs} 个文件夹": "{files} files · {dirs} folders",
  "{files} 个文件 · {dirs} 个文件夹 · 修改于 {ago}": "{files} files · {dirs} folders · modified {ago}",
  "{label}（{keys}）": "{label} ({keys})",
+ "{plugin}：{reason}": "{plugin}: {reason}",
  "按文件类别 · {n} 个文件": "By file class · {n} files",
  "{name}，编辑路径（Ctrl+L）": "{name}, edit path (Ctrl+L)",
  "文件数": "Files",
@@ -15,6 +17,7 @@
  "{about}。点击按这一类过滤": "{about}. Click to filter by this class",
  "只显示主要类别": "Show the main classes only",
  "显示全部类别（另有 {n} 个小众类别，共 {size}）": "Show all classes ({n} more niche, {size} in all)",
+ "没有启用的插件提供这个集合": "No enabled plugin offers this set",
  "详情栏宽度": "Details panel width",
  "拖动调整详情栏宽度，双击恢复默认": "Drag to resize the details panel, double-click for the default width",
  "{n} 个小项": "{n} small items",

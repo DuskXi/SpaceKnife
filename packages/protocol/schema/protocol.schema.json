@@ -3412,7 +3412,8 @@
             "unknown_unit",
             "unit_mismatch",
             "out_of_range",
-            "unsupported"
+            "unsupported",
+            "bang_negation"
           ],
           "title": "Code",
           "type": "string"
@@ -3998,9 +3999,28 @@
           "title": "Folder",
           "type": "string"
         },
+        "plugin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The plugin whose folder rule decided",
+          "title": "Plugin"
+        },
         "reason": {
           "description": "What the folder was recognised as, in the interface language",
           "title": "Reason",
+          "type": "string"
+        },
+        "rule": {
+          "default": "",
+          "description": "That folder rule's full id",
+          "title": "Rule",
           "type": "string"
         },
         "user": {
@@ -4431,6 +4451,12 @@
           "title": "Command",
           "type": "string"
         },
+        "inside": {
+          "default": false,
+          "description": "The card is about a folder above the node asked (``path`` is that folder)",
+          "title": "Inside",
+          "type": "boolean"
+        },
         "kind": {
           "description": "Built-in kinds keep their icons; plugins may name others",
           "title": "Kind",
@@ -4443,6 +4469,7 @@
         },
         "path": {
           "default": "",
+          "description": "The item the card is about (「加入删除篮」 puts it in)",
           "title": "Path",
           "type": "string"
         },
@@ -4468,6 +4495,12 @@
         },
         "reason": {
           "title": "Reason",
+          "type": "string"
+        },
+        "regenerate": {
+          "default": "",
+          "description": "How it comes back once deleted (npm install …)",
+          "title": "Regenerate",
           "type": "string"
         },
         "rule": {
@@ -9507,6 +9540,19 @@
           "title": "Phase",
           "type": "string"
         },
+        "plugin_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A plugin's scan source (its full id) when the tree came from one",
+          "title": "Plugin Source"
+        },
         "progress": {
           "anyOf": [
             {
@@ -9606,6 +9652,12 @@
           "default": null,
           "description": "Used but not scanned bytes (whole-volume scans only)",
           "title": "Unknown"
+        },
+        "uri": {
+          "default": "",
+          "description": "What that scan source listed",
+          "title": "Uri",
+          "type": "string"
         }
       },
       "required": [

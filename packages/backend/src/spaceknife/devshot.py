@@ -9,6 +9,15 @@ the page says it is there (``data-sk-dev-ready``), the picture is taken. Printed
 what the page logged as errors or warnings, what the plugin logged, and with ``--text`` the
 visible text of the page. Nothing opens on the desktop.
 
+Steps (``--step``, in the order given, after the page is ready and before the picture) act on the
+page as a user would: ``click:`` ``rclick:`` (a context menu) ``dblclick:`` ``hover:`` an element (a
+CSS selector, or ``text=<its visible text>``), ``set:<element>=<value>`` (an input, a select, a
+check box: ``true``/``false``), ``key:<Key>`` (``Escape``, ``Enter``, ``Control+K`` …), ``select:<a/b>``
+(a node, relative to the root), ``do:<command>``, ``open:<target>`` (as ``--open``), ``wait:<s>``,
+``eval:<JavaScript>`` (prints what it gives). ``panel:<step>`` runs a click, set, key, eval or wait
+inside the plugin's open panel (its own frame). ``--setting``, ``--history`` and ``--source`` set the
+backend up first: the plugin's settings, snapshots in its history, a scan from the plugin's source.
+
 The browser speaks the DevTools protocol over a WebSocket (``websockets``, already a dependency of
 the backend); nothing else is installed.
 """
@@ -314,6 +323,209 @@ class ShotOptions:
     wait: float = 1.0
     text: bool = False
     eval: str | None = None
+    steps: list[str] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=dict)
+    history: list[Path] = field(default_factory=list)
+    source: str | None = None  # "<full source id>:<uri>": the scan comes from the plugin's source
+
+
+STEP_KINDS = ("click", "rclick", "dblclick", "hover", "set", "key", "select", "do", "open", "wait", "eval")
+PANEL_STEPS = ("click", "rclick", "dblclick", "hover", "set", "key", "wait", "eval")
+
+
+class StepError(Exception):
+    """A ``--step`` that is written wrong or could not be done (its element is not there …)."""
+
+
+def parse_step(text: str) -> tuple[bool, str, str]:
+    """``[panel:]<kind>:<argument>`` -> (inside the panel, kind, argument)."""
+    panel = text.startswith("panel:")
+    body = text[6:] if panel else text
+    kind, sep, arg = body.partition(":")
+    kind = kind.strip().lower()
+    if not sep or kind not in STEP_KINDS:
+        raise StepError(f"{text!r}: write <kind>:<argument>, kind one of {', '.join(STEP_KINDS)}")
+    if panel and kind not in PANEL_STEPS:
+        raise StepError(f"{text!r}: inside a panel only {', '.join(PANEL_STEPS)}")
+    if kind == "set" and _split_set(arg) is None:
+        raise StepError(f"{text!r}: write set:<element>=<value>")
+    if kind == "wait":
+        try:
+            float(arg)
+        except ValueError:
+            raise StepError(f"{text!r}: wait:<seconds>") from None
+    return panel, kind, arg
+
+
+def _split_set(arg: str) -> tuple[str, str] | None:
+    """``<element>=<value>`` at the first ``=`` outside brackets and quotes (``input[name=a]=5``)."""
+    depth, quote_ch = 0, ""
+    for i, ch in enumerate(arg):
+        if quote_ch:
+            if ch == quote_ch:
+                quote_ch = ""
+        elif ch in "\"'":
+            quote_ch = ch
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        elif ch == "=" and depth == 0 and i > 0:
+            return arg[:i].strip(), arg[i + 1 :]
+    return None
+
+
+# what a step runs in the page: find an element by CSS selector or by text= (the innermost visible
+# element whose own text is that), scroll it into view, act on it
+_FIND_JS = """
+(t) => {
+  const shown = (e) => e.getClientRects().length > 0;
+  if (t.startsWith("text=")) {
+    const want = t.slice(5).trim();
+    const all = [...document.querySelectorAll("body *")].filter(
+      (e) => shown(e) && ((e.innerText || e.value || e.getAttribute("aria-label") || "").trim() === want));
+    return all.find((e) => !all.some((o) => o !== e && e.contains(o))) || null;
+  }
+  const hit = [...document.querySelectorAll(t)].filter(shown);
+  return hit[0] || document.querySelector(t);
+}
+"""
+_SET_JS = """
+(el, v) => {
+  el.focus();
+  if (el.type === "checkbox" || el.type === "radio") {
+    const want = ["1", "true", "on", "yes"].includes(v.trim().toLowerCase());
+    if (el.checked !== want) el.click();
+    return;
+  }
+  const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype
+    : el instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, "value").set.call(el, v);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  el.blur();
+}
+"""
+_KEY_CODES = {
+    "Enter": 13, "Escape": 27, "Tab": 9, "Backspace": 8, "Delete": 46, " ": 32, "Space": 32,
+    "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40, "Home": 36, "End": 35,
+    "PageUp": 33, "PageDown": 34, **{f"F{i}": 111 + i for i in range(1, 13)},
+}  # fmt: skip
+_MODIFIERS = {"alt": 1, "control": 2, "ctrl": 2, "meta": 4, "cmd": 4, "shift": 8}
+
+
+def _key(spec: str) -> tuple[str, int, int, str]:
+    """``Control+Shift+K`` -> (key, its key code, modifier bits, text typed)."""
+    parts = [p for p in spec.split("+") if p] or [spec]
+    mods = 0
+    for m in parts[:-1]:
+        bit = _MODIFIERS.get(m.strip().lower())
+        if bit is None:
+            raise StepError(f"key:{spec}: unknown modifier {m!r}")
+        mods |= bit
+    key = parts[-1].strip() if parts[-1].strip() else parts[-1]
+    key = " " if key == "Space" else key
+    code = _KEY_CODES.get(key, ord(key.upper()) if len(key) == 1 else 0)
+    text = key if len(key) == 1 and not mods & (1 | 2 | 4) else ""
+    return key, code, mods, text
+
+
+async def run_step(page: Page, step: str) -> str:
+    """Do one ``--step``; what it says (``eval``), else "". StepError when it cannot."""
+    panel, kind, arg = parse_step(step)
+    session: str | None = None
+    if panel:
+        frames = [sid for sid, url in page.frames.items() if "/web/" in url]
+        if not frames:
+            raise StepError("no plugin panel is open (open one first: --open panel:<name>, do:, click:)")
+        session = frames[-1]
+    if kind == "wait":
+        await asyncio.sleep(max(0.0, float(arg)))
+        return ""
+    if kind == "eval":
+        return json.dumps(await page.eval(arg, session=session), ensure_ascii=False, default=str)[:4000]
+    if kind in ("select", "do", "open"):
+        call = {"select": "select", "do": "run", "open": "open"}[kind]
+        expr = f"window.__skDev ? window.__skDev.{call}({json.dumps(arg)}).then(() => 'ok') : 'no hooks'"
+        got = await page.eval(expr)
+        if got != "ok":
+            raise StepError("the page has no development hooks (a build older than this command)")
+        return ""
+    if kind == "key":
+        key, code, mods, text = _key(arg)
+        if session is not None:
+            init = json.dumps(
+                {
+                    "key": key,
+                    "bubbles": True,
+                    "ctrlKey": bool(mods & 2),
+                    "altKey": bool(mods & 1),
+                    "shiftKey": bool(mods & 8),
+                    "metaKey": bool(mods & 4),
+                }
+            )
+            js = (
+                "(() => { const t = document.activeElement || document.body; for (const type of "
+                f"['keydown', 'keyup']) t.dispatchEvent(new KeyboardEvent(type, {init})); }})()"
+            )
+            await page.eval(js, session=session)
+            return ""
+        base = {"key": key, "code": key if len(key) > 1 else f"Key{key.upper()}", "modifiers": mods}
+        base["windowsVirtualKeyCode"] = code
+        await page.send(
+            "Input.dispatchKeyEvent", {"type": "keyDown", **base, **({"text": text} if text else {})}
+        )
+        await page.send("Input.dispatchKeyEvent", {"type": "keyUp", **base})
+        return ""
+    target, value = (_split_set(arg) or ("", "")) if kind == "set" else (arg, "")
+    find = f"({_FIND_JS})({json.dumps(target)})"
+    if kind == "set":
+        js = (
+            f"(() => {{ const el = {find}; if (!el) return false; "
+            f"({_SET_JS})(el, {json.dumps(value)}); return true; }})()"
+        )
+        if not await page.eval(js, session=session):
+            raise StepError(f"no element {target!r}")
+        return ""
+    if session is not None:  # inside a panel's frame: events from script
+        event = {"rclick": "contextmenu", "dblclick": "dblclick", "hover": "mouseover"}.get(kind)
+        init = "{ bubbles: true, cancelable: true }"
+        act = (
+            "el.click();"
+            if event is None
+            else f"el.dispatchEvent(new MouseEvent({json.dumps(event)}, {init}));"
+        )
+        js = f"(() => {{ const el = {find}; if (!el) return false; {act} return true; }})()"
+        if not await page.eval(js, session=session):
+            raise StepError(f"no element {target!r} in the panel")
+        return ""
+    where = await page.eval(
+        f"(() => {{ const el = {find}; if (!el) return null; "
+        "el.scrollIntoView({ block: 'center', inline: 'center' }); "
+        "const r = el.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()"
+    )
+    if not where:
+        raise StepError(f"no element {target!r}")
+    x, y = float(where[0]), float(where[1])
+    await page.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
+    if kind == "hover":
+        return ""
+    button = "right" if kind == "rclick" else "left"
+    clicks = 2 if kind == "dblclick" else 1
+    for n in range(1, clicks + 1):
+        for type_ in ("mousePressed", "mouseReleased"):
+            await page.send(
+                "Input.dispatchMouseEvent",
+                {
+                    "type": type_,
+                    "x": x,
+                    "y": y,
+                    "button": button,
+                    "clickCount": n,
+                    "buttons": 1 if button == "left" else 2,
+                },
+            )
+    return ""
 
 
 def link_words(o: ShotOptions) -> str:
@@ -403,9 +615,19 @@ async def _shot(
         if rec.state != "enabled":
             say(f"{plugin} is {rec.state}: " + "; ".join(i.text() for i in rec.issues))
             return 1
-        handle = await server.scans.start(ScanStartParams(roots=[str(scan)]))
+        if o.settings:  # the plugin's settings, as the settings page would set them
+            server.settings.update({f"plugin.{plugin}.{k}": v for k, v in o.settings.items()})
+        if o.history:
+            _copy_history(o.history)
+        if o.source:
+            sid, _, uri = o.source.partition(":")
+            handle = await server.scans.start(ScanStartParams(source=sid, uri=uri))
+        else:
+            handle = await server.scans.start(ScanStartParams(roots=[str(scan)]))
         if handle.task is not None:
             await handle.task
+        if handle.status().state == "failed":
+            say(f"the scan failed: {handle.status().message}")
         url = ui_url(origin, server.url, token, str(handle.id)) + link_words(o)
         proc, ws_url = await asyncio.to_thread(_open_browser, exe, o.width, o.height, base / "browser")
         async with websockets.connect(ws_url, max_size=None) as ws:
@@ -429,13 +651,22 @@ async def _shot(
             error = await page.eval("document.documentElement.dataset.skDevError || ''")
             if error:
                 say(f"the link's actions failed: {error}")
+            for step in o.steps:  # in order, as a user would; one that cannot stops the rest
+                try:
+                    said = await run_step(page, step)
+                except (StepError, RuntimeError, TimeoutError) as exc:
+                    say(f"step {step!r} failed: {exc} (the picture shows where it stopped)")
+                    break
+                if said:
+                    say(f"step {step!r}: {said}")
+                await asyncio.sleep(0.2)
             await asyncio.sleep(max(0.0, o.wait))
+            if o.eval:  # before the picture: what it reads is what the picture shows
+                say("eval: " + json.dumps(await page.eval(o.eval), ensure_ascii=False, default=str)[:4000])
             out = (o.out or Path.cwd() / f"shot-{plugin}.png").expanduser().resolve()
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(await page.png())
             say(f"picture: {out}")
-            if o.eval:
-                say("eval: " + json.dumps(await page.eval(o.eval), ensure_ascii=False, default=str)[:4000])
             if o.text:
                 text = await page.eval("(document.querySelector('main') || document.body).innerText")
                 say("text:\n" + str(text or "")[:4000])
@@ -461,8 +692,29 @@ async def _shot(
         httpd.shutdown()
 
 
+def _copy_history(files: list[Path]) -> None:
+    """``--history FILE``: snapshots copied into the temporary backend's history."""
+    from .store import snapshot as snap
+
+    for f in files:
+        header = snap.read_header(f)
+        target = snap.auto_path(list(header.roots), header.created_at)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(f, target)
+
+
 def _unique(lines: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(lines))[:40]
 
 
-__all__ = ["TREE", "ShotOptions", "find_browser", "find_renderer", "renderer_stale", "run_shot", "write_tree"]
+__all__ = [
+    "TREE",
+    "ShotOptions",
+    "StepError",
+    "find_browser",
+    "find_renderer",
+    "parse_step",
+    "renderer_stale",
+    "run_shot",
+    "write_tree",
+]

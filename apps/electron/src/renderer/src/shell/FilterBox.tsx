@@ -80,6 +80,8 @@ export const errorText = (code: string): string =>
     unit_mismatch: t("前缀与单位不同类，可用"),
     out_of_range: t("数值超出上限"),
     unsupported: t("此平台不记录"),
+    unknown_set: t("没有启用的插件提供这个集合"),
+    bang_negation: t("! 不是取反，这是按名字匹配；取反写成"),
   }) as Record<string, string>)[code] ?? code;
 
 /** One filter box per view (split panes each have their own, W8). */

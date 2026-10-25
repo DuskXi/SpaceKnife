@@ -175,6 +175,19 @@ function BlockView({ block, env }: { block: Block; env: Env }) {
 }
 
 /** A node link: shown in its view on click. */
+/** A path in a table cell: whole when it fits, else its folders give way first (the name stays). */
+export function PathText({ path }: { path: string }) {
+  const cut = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  const head = cut >= 0 && cut < path.length - 1 ? path.slice(0, cut + 1) : "";
+  const tail = head ? path.slice(cut + 1) : path;
+  return (
+    <span className="report-path">
+      {head && <span className="report-path-head">{head}</span>}
+      <span className="report-path-tail">{tail}</span>
+    </span>
+  );
+}
+
 function NodeLink({ node, children }: { node: NodeRef; children: React.ReactNode }) {
   return (
     <button className="report-link" title={node.path || undefined} onClick={() => void showNode(node)}>
@@ -310,9 +323,11 @@ function Table({ b, env }: { b: TableBlock; env: Env }) {
               {columns.map((c, ci) => {
                 const text = formatCell(r.cells?.[c.key] as Cell, c.unit);
                 const full = c.unit === "path" ? String(r.cells?.[c.key] ?? "") : text;
+                // a path is cut by the column's width, not by its length
+                const shown = c.unit === "path" && full ? <PathText path={full} /> : text;
                 return (
                   <span key={c.key} role="cell" className={`report-td${alignClass(c.align, c.unit)}${numericUnit(c.unit) ? " mono" : ""}`} title={full}>
-                    {ci === linkColumn && r.node ? <NodeLink node={r.node}>{text}</NodeLink> : text}
+                    {ci === linkColumn && r.node ? <NodeLink node={r.node}>{shown}</NodeLink> : shown}
                   </span>
                 );
               })}

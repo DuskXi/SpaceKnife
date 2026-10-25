@@ -345,7 +345,7 @@ def name_length(ctx: Context, node: Node) -> FieldValue | None:
 <a id="kind-insight"></a>
 #### 洞察（代码）
 
-详情面板顶部的洞察卡片：这是什么、能不能删、怎么清理。规则能写的用[洞察规则](#kind-insight_rules)，规则写不出来的才用代码。选项：`name`（默认是函数名）；`globs`（只问路径匹配其中一个的节点，如 `["**/node_modules", "**/*.bak"]`；不写时每个节点都问，详情面板会慢）；`title`（启用确认里的名字）。
+详情面板顶部的洞察卡片：这是什么、能不能删、怎么清理。规则能写的用[洞察规则](#kind-insight_rules)，规则写不出来的才用代码。选项：`name`（默认是函数名）；`globs`（只问路径匹配其中一个的节点，如 `["**/node_modules", "**/*.bak"]`；不写时每个节点都问，详情面板会慢）；`title`（启用确认里的名字）。`Insight(node=上级文件夹)` 让卡片说那个文件夹（「加入删除篮」放它），`regenerate` 写删掉后它怎么回来。
 
 ```python ex
 @plugin.insight
@@ -550,7 +550,7 @@ title = { zh = "第一层文件夹的占用", en = "First-level folder sizes" }
 <a id="kind-insight_rules"></a>
 #### 洞察规则
 
-`insights/` 下的每个 `*.toml` 都自动加载（也可以在 `[[insight_rules]]` 里用 `file` 列出：`file = "insights/x.toml"`）。格式见 [insights.md](insights.md)。顺序：程序自带的规则 → 各插件的（按插件 id）→ 用户自己的文件夹；后面的规则按 id 覆盖前面的，`enabled = false` 删除一条。规则也给对比侧栏的变化项提供原因。
+`insights/` 下的每个 `*.toml` 都自动加载（也可以在 `[[insight_rules]]` 里用 `file` 列出：`file = "insights/x.toml"`）。格式见 [insights.md](insights.md)：规则能要求旁边或里面有某些名字（`beside = ["package.json"]`、`contains = ["pyvenv.cfg"]`），能写 `regenerate`（删掉后怎么回来）。顺序：程序自带的规则 → 各插件的（按插件 id）→ 用户自己的文件夹；后面的规则按 id 覆盖前面的，`enabled = false` 删除一条。规则也给对比侧栏的变化项提供原因。
 
 ```toml ex-rules
 version = 1
@@ -674,9 +674,9 @@ async def logs(ctx: Context, c: ReportContext) -> list[Proposal]:
 | `on_disk` | 列出的路径是真实的磁盘路径（False）；否则打开、显示位置等依赖真实路径的功能关闭 |
 | `ops` | 允许删除（要 `on_disk`；False） |
 | `watch` | 有对应的监控器（False） |
-| `size` | 树上一个文件算多大：`alloc`（默认，`out.file` 给的占用）或 `size`（例如压缩包解压后的大小） |
+| `size` | 视图按哪一列量面积：`alloc`（默认）或 `size`（压缩包解压后的大小）；两列都照列出的保留 |
 
-签名：`(ctx, uri: str, out: Listing) -> None`。`out.file(path, size=…, alloc=…, mtime=…)`、`out.dir(path)`、`out.root_name(text)`，路径相对来源的根，用 `/`，父文件夹自动补上。用户选的 URI 本身在有 `files.read` 时可读：`ctx.files.open(uri)` 给出守磁盘负载上限的文件对象（`zipfile`、`tarfile` 都收），`open_path(uri)` 只给路径。
+签名：`(ctx, uri: str, out: Listing) -> None`。`out.file(path, size=…, alloc=…, mtime=…)`、`out.dir(path)`、`out.root_name(text)`，路径相对来源的根，用 `/`，父文件夹自动补上；`out.file` 还认 `kind` `attrs` 和硬链接的 `ino` `nlink` `dev`，`out.dir` 认文件夹自身的 `size` `alloc`。`ctx.progress` 就是扫描的进度，列得久时已列出的先显示，抛出的异常是写在视图里的失败原因（[细节](plugin-api.md#api-source)）。用户选的 URI 本身在有 `files.read` 时可读：`ctx.files.open(uri)` 给出守磁盘负载上限的文件对象（`zipfile`、`tarfile` 都收），`open_path(uri)` 只给路径。
 
 ```python ex
 @plugin.scan_source("zip", T("压缩包", "Archive"), pick="file", extensions=[".zip"], watch=True)
@@ -873,7 +873,7 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 - **主题**：`base.css` 定义了 `--sk-*` 变量（`--sk-bg` `--sk-text` `--sk-muted` `--sk-accent` `--sk-border` `--sk-ok` `--sk-warn` `--sk-danger` `--sk-font` `--sk-mono` `--sk-radius` …），主题切换时自动更新；`document.documentElement.dataset.skTheme` 是 `dark` 或 `light`。
 - **限制**：单条消息 1 MiB，同时 8 个调用，每秒 50 条；`basket.execute`、改设置、开始扫描等都调不到。
 - **单独调试（mock 模式）**：`plugin build` 把桥复制到 `web/_sk/`；在 `web/` 里起一个静态服务器（`python -m http.server`），打开 `index.html?mock=fixtures.json`，调用按 `fixtures.json` 回答：`{ "lang": "zh-CN", "theme": "light", "context": {…}, "calls": { "<方法>": <结果> 或 [{ "params": {…}, "result": … }, …] }, "core": { "<内置方法>": <结果> }, "states": {…}, "events": { "<名>": [<载荷>…] } }`。
-- **真界面**：`spaceknife plugin shot <文件夹> --open panel:<名> --text`（截图，连面板里的字和报错一起打印），或 `plugin dev`（第 10 节）。
+- **真界面**：`spaceknife plugin shot <文件夹> --open panel:<名> --text`（截图，连面板里的字和报错一起打印；`--step "panel:click:text=应用"` 先在面板里点，[步骤](plugin-api.md#api-shot)），或 `plugin dev`（第 10 节）。
 
 `check` 静态扫描面板代码里的 `RTCPeerConnection`、`RTCDataChannel` 并报错，核对 `fixtures.json` 回答的是不是本插件的方法，`core` 的回答是不是真的长那样。
 
@@ -954,7 +954,7 @@ async def test_largest() -> None:
 | `plugin build [D] [--zip]` | 第 9 节 |
 | `plugin call <D或id> <方法> ['{"a": 1}'] [--scan PATH] [--snapshot FILE] [--history FILE …] [--setting k=v …] [--lang en]` | 起一个临时后端，扫描 `PATH`（不给就用合成树或 `fixtures/tree/`），调用方法，打印 JSON 结果，事件、提示和插件日志打到 stderr |
 | `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名 \| source:名> [--scan PATH] [--node a/b] [--format text\|json\|md] [--call 方法[={json}] …] [--option k=v …] [--filter 式] [--uri U] [-o FILE] [--setting k=v] [--lang en] [--history FILE]` | 不开界面看到结果；`--call` 先在同一个后端里调方法（先算好结果的字段、集合）；导出的 `--option` `--filter`、`--node`（只导出它）；`visual:` `color:` 的 `--format json` 给出每行的节点、大小和色板下标 |
-| `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
+| `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--step 步骤 …] [--setting k=v …] [--history FILE …] [--source 名:URI] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；`--step` 截图前按顺序点按、填写、按键、在面板里操作（[步骤](plugin-api.md#api-shot)），`--eval` 在截图前执行；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
 | `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
 | `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]`、`list [--json]`、`enable <id> [--yes]`、`disable <id>` | 安装、卸载（真实的数据目录）；列出、启用（列出权限并要求确认）、停用 |
 | `plugin schema [--manifest \| D]` | 清单的 JSON Schema，或插件自己的协议 schema |

@@ -667,7 +667,7 @@ action = { open = "report:largest" }""")
     files["tests/test_plugin.py"] = "\n".join(tests) + "\n"
     for p in items:
         files.update(p.files)
-    files[".gitignore"] = "__pycache__/\n.pytest_cache/\n.mypy_cache/\ndist/\n"
+    files[".gitignore"] = "__pycache__/\n.pytest_cache/\n.mypy_cache/\n.ruff_cache/\ndist/\n"
     # its own lint settings (inside another project, that one's strict rules would apply)
     files["ruff.toml"] = 'line-length = 110\n\n[lint]\nselect = ["E", "F", "W", "B", "UP"]\n'
 

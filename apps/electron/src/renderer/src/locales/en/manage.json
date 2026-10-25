@@ -159,6 +159,7 @@
  "没有可重新扫描的文件夹": "There is no folder to rescan.",
  "没有回收站": "No trash",
  "没有增长的项": "Nothing grew",
+ "没能读出内容": "Could not read anything",
  "浏览器模式：地址里缺少 #ws=…&token=…": "Browser mode: the address is missing #ws=…&token=…",
  "清空删除篮": "Empty delete basket",
  "清空删除篮（不删除任何文件）": "Empty the delete basket (no files are deleted)",

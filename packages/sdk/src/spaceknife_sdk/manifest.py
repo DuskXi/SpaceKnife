@@ -60,7 +60,7 @@ WHEN_WORDS = (
 )
 WHEN_PREFIXES = ("setting:", "cap:", "plugin:", "source:", "ext:")
 MENUS = ("node", "inspector", "toolbar", "start")
-REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual")
+REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual", "settings")
 HookEvent = Literal[
     "start", "stop", "scan_done", "scan_closed", "tree_changed", "settings", "lang", "basket", "snapshots"
 ]

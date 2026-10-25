@@ -320,6 +320,19 @@ def test_platform_warnings_do_not_block() -> None:
     ]
 
 
+def test_bang_is_not_negation_but_says_so() -> None:
+    # "!" negates nothing ("|" does): "!:class:video" is a name mask, applied as written, with a
+    # warning that shows the negated spelling (round 3: a plugin's docs wrote "!:set:", 0 matches)
+    result = parse("!:class:video;*.log")
+    assert result.normal is not None
+    assert result.normal.masks == ["!:class:video", "*.log"]
+    assert [(d.code, d.severity, d.text, d.expected) for d in result.diagnostics] == [
+        ("bang_negation", "warning", "!", ["|:class:video"])
+    ]
+    assert parse("!readme.txt").diagnostics == []  # a name that starts with "!" is fine
+    assert parse("|:class:video").diagnostics == []
+
+
 # --------------------------------------------------------------------------- SpaceSniffer help examples
 
 

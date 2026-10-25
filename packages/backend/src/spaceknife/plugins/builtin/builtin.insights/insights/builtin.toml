@@ -207,6 +207,7 @@ app = "Node.js"
 note = "依赖安装"
 cleanup = "safe"
 reason = "项目通过 npm / pnpm / yarn 安装的依赖包。删除是安全的，在项目里重新运行 npm install（或 pnpm / yarn install）即可恢复；不再开发的项目可以直接删掉。"
+regenerate = "在项目里运行 npm install（或 pnpm / yarn install）会装回来"
 node = "dir"
 names = ["node_modules"]
 exclude = [
@@ -219,6 +220,7 @@ priority = 1
 i18n.en.title = "node_modules dependencies"
 i18n.en.note = "Dependency install"
 i18n.en.reason = "Packages a project installed with npm / pnpm / yarn. Deleting is safe: run npm install (or pnpm / yarn install) in the project to restore them; for projects you no longer work on, simply delete it."
+i18n.en.regenerate = "npm install (or pnpm / yarn install) in the project puts them back"
 
 [[rule]]
 id = "python-venv"

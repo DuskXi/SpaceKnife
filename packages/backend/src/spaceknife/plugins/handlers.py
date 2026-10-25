@@ -41,6 +41,7 @@ FIELD_LIMIT = {"inspector": 16, "hover": 4}
 FIELD_CACHE = 2048
 FIELD_TIMEOUT_S = 1.0  # the details panel waits this long (queueing for the plugin included)
 LATE_FIELD_S = 10.0  # a late field is still fetched in the background, for the next ask
+FIELD_RETRIES = 2  # an answer invalidated while it was being worked out is asked again (this often)
 
 
 def _need(session: Session) -> None:
@@ -233,26 +234,32 @@ async def node_fields(
     late: list[Any] = []
 
     async def fetch(c: Any, timeout: float = FIELD_TIMEOUT_S) -> None:  # noqa: ASYNC109
-        key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner], lang)
-        if key in host._field_inflight:
+        for _again in range(FIELD_RETRIES + 1):
+            key = (c.id, p.scan_id, p.node, version, host.epochs[c.owner], lang)
+            if key in host._field_inflight or key in host._field_cache:
+                return
+            host._field_inflight.add(key)
+            try:
+                value = await one(c, timeout)
+            except RpcError as exc:
+                if exc.code == ErrorCode.PLUGIN_TIMEOUT:
+                    late.append(c)  # busy or slow: answered later (the frontend asks again)
+                else:  # the details panel leaves it out; the plugin's log and MockHost say why
+                    host.field_failed(c.id, p.node, exc.message)
+                return
+            except asyncio.CancelledError:
+                return
+            finally:
+                host._field_inflight.discard(key)
+            if key[4] != host.epochs[c.owner]:
+                # invalidated while it was worked out (ctx.invalidate, new settings): this answer is
+                # stale, so it is asked again at once and the next look finds the new one
+                continue
+            host._field_cache[key] = value
+            if len(host._field_cache) > FIELD_CACHE:
+                for k in list(host._field_cache)[: FIELD_CACHE // 4]:
+                    host._field_cache.pop(k, None)
             return
-        host._field_inflight.add(key)
-        try:
-            value = await one(c, timeout)
-        except RpcError as exc:
-            if exc.code == ErrorCode.PLUGIN_TIMEOUT:
-                late.append(c)  # busy or slow: answered later (the frontend asks again)
-            return
-        except asyncio.CancelledError:
-            return
-        finally:
-            host._field_inflight.discard(key)
-        if key[4] != host.epochs[c.owner]:
-            return  # its settings changed meanwhile: this answer is stale
-        host._field_cache[key] = value
-        if len(host._field_cache) > FIELD_CACHE:
-            for k in list(host._field_cache)[: FIELD_CACHE // 4]:
-                host._field_cache.pop(k, None)
 
     if p.slot == "hover":
         if todo:
@@ -309,6 +316,7 @@ async def insight_cards(
             return None
         for rid in value.get("replaces") or []:
             replaced.add(str(rid))
+        about = _about(store, p.node, value.get("node"))  # Insight.node: the folder it is about
         with contextlib.suppress(ValueError, TypeError):
             return pp.InsightCard(
                 source="plugin",
@@ -320,7 +328,9 @@ async def insight_cards(
                 app=str(value.get("app", "")),
                 note=str(value.get("note", "")),
                 command=str(value.get("command", "")),
-                path=store.path(p.node),
+                path=store.path(about),
+                inside=about != p.node,
+                regenerate=str(value.get("regenerate", ""))[:300],
                 priority=max(-1000, min(1000, int(value.get("priority", 0) or 0))),
             )
         return None
@@ -399,6 +409,21 @@ def _rule_plugin(rule_id: str) -> str | None:
     return head if "." in head and "/" not in head and "\\" not in head else None
 
 
+def _about(store: Any, node: int, given: Any) -> int:
+    """The node a code insight's card is about: ``Insight.node`` when it is the node asked or one of
+    its folders (a file inside a project: the project), else the node asked."""
+    target: Any = given.get("node") if isinstance(given, dict) else given
+    if not isinstance(target, int) or isinstance(target, bool) or not 0 < target < len(store):
+        return node
+    x = node
+    parent = store.cols["parent"]
+    while x > 0:
+        if x == target:
+            return target
+        x = int(parent[x])
+    return node
+
+
 def _card(found: Any) -> pp.InsightCard:
     return pp.InsightCard(
         source="rule",
@@ -412,15 +437,16 @@ def _card(found: Any) -> pp.InsightCard:
         note=found.note,
         command=found.command,
         path=found.path,
+        inside=bool(getattr(found, "inside", False)),
+        regenerate=str(getattr(found, "regenerate", "")),
         priority=int(getattr(found, "priority", 0)),
     )
 
 
 async def insight_many(host: PluginHost, p: pp.InsightNodesParams) -> pp.InsightNodesResult:
     """The rules' cards of many nodes at once (the built-in rules and the plugins' rule files)."""
-    from ..insights import match_many
+    from ..insights import match_nodes
     from ..insights.rules import refresh_user_rules
-    from ..store.nodes import Kind
 
     store = host.api.store_of(p.scan_id)
     if store is None:
@@ -433,13 +459,7 @@ async def insight_many(host: PluginHost, p: pp.InsightNodesParams) -> pp.Insight
     lang = i18n.language()
 
     def work() -> list[pp.InsightCard | None]:
-        c = store.cols
-        paths = [store.path(x) for x in p.nodes]
-        kinds = ["dir" if int(c["kind"][x]) == Kind.DIR else "file" for x in p.nodes]
-        sizes: list[int | None] = [
-            int(c["tot_alloc"][x]) if kinds[i] == "dir" else int(c["alloc"][x]) for i, x in enumerate(p.nodes)
-        ]
-        found = match_many(paths, kinds, sizes=sizes, lang=lang)
+        found = match_nodes(store, list(p.nodes), lang=lang)  # contains / beside look at the tree
         return [None if f is None else _card(f) for f in found]
 
     return pp.InsightNodesResult(cards=await compute(work))

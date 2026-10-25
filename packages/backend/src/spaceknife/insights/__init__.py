@@ -23,6 +23,7 @@ from .rules import (
     match,
     match_many,
     match_node,
+    match_nodes,
     user_rules_dir,
 )
 
@@ -43,5 +44,6 @@ __all__ = [
     "match",
     "match_many",
     "match_node",
+    "match_nodes",
     "user_rules_dir",
 ]

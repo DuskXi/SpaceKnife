@@ -109,26 +109,32 @@ class Basis:
         return out
 
     @staticmethod
+    def _measure(store: NodeStore) -> tuple[str, str]:
+        """The columns areas come from, (own, subtree total), by the store's ``measure``."""
+        if getattr(store, "measure", "alloc") == "size":
+            return "size", "tot_size"
+        return "alloc", "tot_alloc"
+
+    @staticmethod
     def effective_sizes(store: NodeStore) -> np.ndarray:
-        """Area basis per node: subtree allocation for folders, own allocation for files."""
+        """Area basis per node: subtree allocation for folders, own allocation for files (logical
+        sizes instead in a store that measures by size: a scan source with ``size = "size"``)."""
         n = len(store)
         c = store.cols
+        own, tot = Basis._measure(store)
         is_dir = c["kind"][:n] == Kind.DIR
         dup = (c["flags"][:n] & np.uint32(Flag.HARDLINK_DUP)) != 0
-        out: np.ndarray = np.where(is_dir, c["tot_alloc"][:n], np.where(dup, 0, c["alloc"][:n])).astype(
-            np.int64
-        )
+        out: np.ndarray = np.where(is_dir, c[tot][:n], np.where(dup, 0, c[own][:n])).astype(np.int64)
         return out
 
     @staticmethod
     def effective_sizes_of(store: NodeStore, ids: np.ndarray) -> np.ndarray:
         """:meth:`effective_sizes` for some nodes only."""
         c = store.cols
+        own, tot = Basis._measure(store)
         is_dir = c["kind"][ids] == Kind.DIR
         dup = (c["flags"][ids] & np.uint32(Flag.HARDLINK_DUP)) != 0
-        out: np.ndarray = np.where(is_dir, c["tot_alloc"][ids], np.where(dup, 0, c["alloc"][ids])).astype(
-            np.int64
-        )
+        out: np.ndarray = np.where(is_dir, c[tot][ids], np.where(dup, 0, c[own][ids])).astype(np.int64)
         return out
 
     def sizes(self) -> np.ndarray:

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from spaceknife_protocol import CAP_PLUGINS
 from spaceknife_protocol import export as pe
@@ -31,8 +32,64 @@ TEXT = Texts(
         "folder": "目标文件夹不存在：{folder}",
         "write": "写不了 {path}：{reason}",
         "no_selection": "没有选中要导出的项",
+        "option_unknown": "导出格式没有选项 {name}（有 {names}）",
+        "option_choice": "导出选项 {name} 的值 {value} 不在可选的 {choices} 里",
+        "option_range": "导出选项 {name} 应在 {min} 到 {max} 之间，给的是 {value}",
+        "option_type": "导出选项 {name} 的值 {value} 不对：{why}",
     }
 )
+
+
+def check_options(specs: list[SettingSpec], values: Mapping[str, Any]) -> dict[str, Any]:
+    """An export format's option values as the dialog or ``report.export`` gives them, checked
+    against the format's declared options (a plugin's format reads no surprises): unknown names,
+    values that are not among a select's or a multi's choices, numbers out of range are refused
+    (RpcError naming the option). A multi's values come back as the declared choices in order."""
+    by_name = {o.name: o for o in specs}
+    out: dict[str, Any] = {}
+    for name, value in values.items():
+        o = by_name.get(name)
+        if o is None:
+            raise RpcError(
+                ErrorCode.INVALID_PARAMS,
+                TEXT["option_unknown"].format(name=name, names=", ".join(by_name) or "-"),
+            )
+        allowed = [v for v, _label in o.options]
+        if allowed and o.control == "multi":
+            parts = value if isinstance(value, list) else [x for x in str(value).split(",") if x]
+            bad = [x for x in parts if x not in allowed]
+            if bad:
+                choices = ", ".join(map(str, allowed))
+                raise RpcError(
+                    ErrorCode.INVALID_PARAMS,
+                    TEXT["option_choice"].format(name=name, value=bad[0], choices=choices),
+                )
+            picked = [v for v in allowed if v in parts]
+            out[name] = picked if isinstance(value, list) else ",".join(map(str, picked))
+            continue
+        if allowed and value not in allowed:
+            raise RpcError(
+                ErrorCode.INVALID_PARAMS,
+                TEXT["option_choice"].format(name=name, value=value, choices=", ".join(map(str, allowed))),
+            )
+        if isinstance(o.default, int | float) and not isinstance(o.default, bool):
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                try:
+                    value = float(str(value)) if isinstance(o.default, float) else int(str(value))
+                except ValueError:
+                    raise RpcError(
+                        ErrorCode.INVALID_PARAMS,
+                        TEXT["option_type"].format(name=name, value=value, why=type(o.default).__name__),
+                    ) from None
+            lo = o.min if o.min is not None else float("-inf")
+            hi = o.max if o.max is not None else float("inf")
+            if not lo <= float(value) <= hi:
+                raise RpcError(
+                    ErrorCode.INVALID_PARAMS,
+                    TEXT["option_range"].format(name=name, value=value, min=o.min, max=o.max),
+                )
+        out[name] = value
+    return out
 
 
 def _issue(i: TemplateIssue) -> pe.ExportIssue:
@@ -192,6 +249,13 @@ def install(server: Server) -> None:
             root = 0
         bom = isinstance(target, ExportFormat) and target.bom
         text = view.filter.text if res is not None else ""
+        options: dict[str, Any] = dict(params.options)
+        if params.target:  # a plugin's format: its declared options
+            from ..extensions import EXTENSIONS
+
+            c = EXTENSIONS.get("export_format", params.target)
+            if c is not None and getattr(c.spec, "options", None) is not None:
+                options = check_options(list(c.spec.options), options)
 
         def work() -> int:
             keep = match
@@ -204,7 +268,7 @@ def install(server: Server) -> None:
                 root,
                 match=keep,
                 filter_text=text,
-                options=dict(params.options),
+                options=options,
                 selection=selection,
             )
             return write_export(path, chunks, bom=bom)

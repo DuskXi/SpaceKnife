@@ -21,6 +21,7 @@ import { InsightCards } from "@/plugins/insight";
 import { unavailable, useCommandStates } from "@/plugins/menuStates";
 import { InspectorPluginPage, inspectorPages } from "@/plugins/slots";
 import { scanSourceOf } from "@/plugins/sources";
+import { pluginName } from "@/plugins/store";
 
 /** The built-in pages; a plugin's is "plugin:<its full id>" (slot "inspector"). */
 type Page = "details" | "classes" | "largest";
@@ -308,9 +309,9 @@ function Details({ s, viewId, className }: { s: TreeSummaryResult; viewId: strin
 /** The folder class the selection takes (UI-W7-38), and what decided it; changed from the menu. */
 function FolderClass({ info, className }: { info: FolderClassInfo; className: (id: string) => string }) {
   const cls = className(info.class_id);
-  const text = info.fallback
-    ? t("其中没有类别的文件算作「{cls}」 · {reason}", { cls, reason: info.reason })
-    : t("整个文件夹算作「{cls}」 · {reason}", { cls, reason: info.reason });
+  // a plugin's folder rule says whose it is (the plugin's name, then the rule)
+  const reason = info.plugin ? t("{plugin}：{reason}", { plugin: pluginName(info.plugin), reason: info.reason }) : info.reason;
+  const text = info.fallback ? t("其中没有类别的文件算作「{cls}」 · {reason}", { cls, reason }) : t("整个文件夹算作「{cls}」 · {reason}", { cls, reason });
   return (
     <div className="ins-fclass" title={t("由 {folder} 决定。右键菜单的「归类」可以更改", { folder: info.folder })}>
       <span className="swatch" style={{ background: classHexNow(info.class_id) }} />

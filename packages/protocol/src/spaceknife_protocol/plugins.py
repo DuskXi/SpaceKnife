@@ -717,7 +717,11 @@ class InsightCard(Payload):
     app: str = ""
     note: str = ""
     command: str = Field(default="", description="Shown and copyable, never run")
-    path: str = ""
+    path: str = Field(default="", description="The item the card is about (「加入删除篮」 puts it in)")
+    inside: bool = Field(
+        default=False, description="The card is about a folder above the node asked (``path`` is that folder)"
+    )
+    regenerate: str = Field(default="", description="How it comes back once deleted (npm install …)")
     priority: int = Field(
         default=0, ge=-1000, le=1000, description="The rule's or the plugin's: cards are shown highest first"
     )

@@ -702,6 +702,7 @@ def _one(
                     tuple(spec.exclude),
                     tuple(spec.contains),
                     tuple(spec.beside),
+                    rid,
                 ),
             )
         ]

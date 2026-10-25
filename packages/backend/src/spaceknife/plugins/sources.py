@@ -3,6 +3,10 @@
 The tree is not on disk unless the source says so: its root is marked virtual, so revealing, opening
 and the delete basket refuse its nodes, and there is no free space (thin, docs/plugins.md).
 
+While it lists, the source's ``ctx.progress`` is the scan's progress, and what it listed so far is
+built aside and put in place now and then (``_Lister``: after a second, then each time the listing
+has doubled); a failure keeps its reason as the scan's message (docs/plugin-api.md 「api-source」).
+
 Such a scan has no platform watcher. Its live side is a :class:`SourceMonitor`: a rescan
 (``scan.rescan``, F5) lists the whole source again and puts the new tree in place, views keeping
 their place by path; when the source declares ``watch = true`` and the plugin has a ``watcher`` for
@@ -16,7 +20,7 @@ import asyncio
 import contextlib
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
@@ -46,13 +50,27 @@ QUIET_S = 1.0  # changes wait this long without new ones before the source runs 
 RETRY_S = (5.0, 30.0, 120.0)  # a watcher that stopped is started again after these pauses
 WAIT_BACK_S = 1.0  # a watcher whose plugin went off (or reloads) looks this often whether it is back
 LIST_TIMEOUT_S = 600.0
+# What came so far is shown while a source lists: the first time after PARTIAL_FIRST_S, then each
+# time the listing has doubled (at least PARTIAL_EVERY_S apart), or every PARTIAL_SLOW_S while it is
+# small (a slow source: a network share). Each build costs as much as the final one; doubling keeps
+# all of them together below one more final build.
+PARTIAL_FIRST_S = 1.0
+PARTIAL_EVERY_S = 1.0
+PARTIAL_SLOW_S = 5.0
+PARTIAL_SMALL = 50_000
 
 
 def _progress(
-    state: ScanState, started: datetime, items: int, store: NodeStore | None = None, message: str = ""
+    state: ScanState,
+    started: datetime,
+    items: int,
+    store: NodeStore | None = None,
+    message: str = "",
+    fraction: float | None = None,
 ) -> ScanProgress:
-    c = store.cols if store is not None else None
+    c = store.cols if store is not None and len(store) else None
     done = state != ScanState.SCANNING
+    elapsed = (datetime.now(UTC) - started).total_seconds()
     return ScanProgress(
         state=state,
         items=items,
@@ -63,13 +81,85 @@ def _progress(
         errors=0,
         pending_dirs=0,
         current_path="",
-        elapsed_s=(datetime.now(UTC) - started).total_seconds(),
-        rate=0.0,
-        progress=1.0 if state == ScanState.DONE else None,
+        elapsed_s=elapsed,
+        rate=items / elapsed if elapsed > 0 and not done else 0.0,
+        progress=1.0 if state == ScanState.DONE else fraction,
         started_at=started,
         finished_at=datetime.now(UTC) if done else None,
         message=message,
     )
+
+
+class _Lister:
+    """One run of a source: the batches into a :class:`Collector`, the source's ``ctx.progress``
+    into the scan's progress, and (``on_partial``) the tree of what came so far, built aside now
+    and then while the listing goes on. While such a build reads the collector, new batches wait."""
+
+    def __init__(
+        self,
+        uri: str,
+        virtual: bool,
+        measure: str,
+        on_partial: Callable[[NodeStore], Awaitable[None]] | None,
+    ) -> None:
+        self.uri = uri
+        self.virtual = virtual
+        self.measure = measure
+        self.on_partial = on_partial
+        self.collector = Collector()
+        self.backlog: list[bytes] = []
+        self.building: asyncio.Task[None] | None = None
+        self.started = time.monotonic()
+        self.last_t = self.started
+        self.last_n = 0
+
+    def chunk(self, frames: list[bytes]) -> None:
+        if self.building is not None and not self.building.done():
+            self.backlog.extend(frames)  # a build reads the collector right now
+        else:
+            for f in frames:
+                self.collector.add_batch(decode_frame(f)[1])
+        self._maybe_partial()
+
+    def _maybe_partial(self) -> None:
+        if self.on_partial is None or (self.building is not None and not self.building.done()):
+            return
+        n, now = self.collector.count, time.monotonic()
+        if n <= self.last_n or now - self.started < PARTIAL_FIRST_S or now - self.last_t < PARTIAL_EVERY_S:
+            return
+        if n < 2 * self.last_n and not (n <= PARTIAL_SMALL and now - self.last_t >= PARTIAL_SLOW_S):
+            return
+        self.building = asyncio.get_running_loop().create_task(self._partial(n), name="source-partial")
+
+    async def _partial(self, n: int) -> None:
+        assert self.on_partial is not None
+        try:
+            built = await asyncio.to_thread(
+                build, self.uri, self.collector.root, virtual=self.virtual, measure=self.measure
+            )
+            self.last_n, self.last_t = n, time.monotonic()
+            await self.on_partial(built)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("showing what a scan source listed so far failed")
+        finally:
+            waiting, self.backlog = self.backlog, []
+            for f in waiting:
+                self.collector.add_batch(decode_frame(f)[1])
+
+    async def finish(self) -> None:
+        """Wait for a build that is running (its waiting batches go in after it)."""
+        if self.building is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self.building
+        for f in self.backlog:
+            self.collector.add_batch(decode_frame(f)[1])
+        self.backlog = []
+
+    def cancel(self) -> None:
+        if self.building is not None:
+            self.building.cancel()
 
 
 def _source(source_id: str | None) -> Contribution:
@@ -85,19 +175,35 @@ async def _list(
     uri: str,
     on_count: Callable[[int], None] | None = None,
     on_wait: Callable[[], None] | None = None,
+    on_progress: Callable[[float, float, str], None] | None = None,
+    on_partial: Callable[[NodeStore], Awaitable[None]] | None = None,
 ) -> tuple[str, NodeStore]:
-    """Run the source once: (the root's display name, the tree built from what it listed)."""
-    collector = Collector()
+    """Run the source once: (the root's display name, the tree built from what it listed).
+
+    ``on_progress(done, total, text)``: the source's ``ctx.progress``; ``on_partial(store)``: the
+    tree of what came so far, now and then while it lists (named after the URI until the end)."""
+    measure = "size" if getattr(c.spec, "size", "alloc") == "size" else "alloc"
+    lister = _Lister(uri, not c.spec.on_disk, measure, on_partial)
 
     def chunk(value: Any, frames: list[bytes]) -> None:
-        for f in frames:
-            collector.add_batch(decode_frame(f)[1])
+        lister.chunk(frames)
         if on_count is not None:
-            on_count(collector.count)
+            on_count(lister.collector.count)
 
-    value, _ = await host.call(
-        c.owner, "source", c.local, {"uri": uri}, on_chunk=chunk, timeout=LIST_TIMEOUT_S, on_wait=on_wait
-    )
+    try:
+        value, _ = await host.call(
+            c.owner,
+            "source",
+            c.local,
+            {"uri": uri},
+            on_chunk=chunk,
+            timeout=LIST_TIMEOUT_S,
+            on_wait=on_wait,
+            on_progress=on_progress,
+        )
+        await lister.finish()
+    finally:
+        lister.cancel()
     twice = int((value or {}).get("duplicates") or 0)
     if twice:
         logger.bind(source=f"plugin:{c.owner}").warning(
@@ -107,10 +213,46 @@ async def _list(
             twice,
         )
     name = str((value or {}).get("root") or uri)
-    if getattr(c.spec, "size", "alloc") == "size":
-        collector.use_size()  # what the tree counts: the files' (unpacked) sizes
-    built = await asyncio.to_thread(build, name, collector.root, virtual=not c.spec.on_disk)
+    built = await asyncio.to_thread(
+        build, name, lister.collector.root, virtual=not c.spec.on_disk, measure=measure
+    )
     return name, built
+
+
+def _by_path(old: NodeStore, new: NodeStore) -> Callable[[np.ndarray], np.ndarray]:
+    """Node ids of ``old`` -> the nodes of ``new`` at the same path (-1: not there), worked out only
+    for the ids asked (a view's zoom, selection and history): the tree of a source still listing is
+    put in place often, a whole :func:`path_remap` each time would cost as much as the build."""
+    names: dict[int, dict[str, int]] = {}
+    roots = dict(zip(old.roots(), new.roots(), strict=False))
+
+    def one(node: int) -> int:
+        if node == 0:
+            return 0
+        chain: list[int] = []
+        p = node
+        while p > 0 and p not in roots:
+            chain.append(p)
+            p = int(old.cols["parent"][p])
+        if p <= 0:
+            return -1
+        at = roots[p]
+        for x in reversed(chain):
+            kids = names.get(at)
+            if kids is None:
+                kids = names[at] = {new.name(ch): ch for ch in new.children(at)}
+            got = kids.get(old.name(x))
+            if got is None:
+                return -1
+            at = got
+        return at
+
+    def apply(ids: np.ndarray) -> np.ndarray:
+        arr = np.asarray(ids, dtype=np.int64)
+        n = len(old)
+        return np.array([one(int(i)) if 0 <= i < n else -1 for i in arr.tolist()], dtype=np.int64)
+
+    return apply
 
 
 async def start_source(host: PluginHost, params: p.ScanStartParams) -> ScanHandle:
@@ -136,27 +278,50 @@ async def start_source(host: PluginHost, params: p.ScanStartParams) -> ScanHandl
     scans.scans[handle.id] = handle
     last = [0.0]
     seen = [0]
+    said: list[Any] = [None, ""]  # the source's ctx.progress: fraction (None: cannot say), text
+    views = host.server.views
+
+    def show(force: bool = False) -> None:
+        now = time.monotonic()
+        if force or now - last[0] > 0.5:
+            last[0] = now
+            shown = handle.store if len(handle.store) > 2 else None
+            handle.saved_progress = _progress(
+                ScanState.SCANNING, started, seen[0], shown, message=said[1], fraction=said[0]
+            )
+            handle.publish()
 
     def counted(count: int) -> None:
         seen[0] = count
-        now = time.monotonic()
-        if now - last[0] > 0.5:
-            last[0] = now
-            handle.saved_progress = _progress(ScanState.SCANNING, started, count)
-            handle.publish()
+        show()
+
+    def progressed(done: float, total: float, text: str) -> None:
+        said[0] = min(1.0, max(0.0, done / total)) if total > 0 else None
+        said[1] = text
+        show()
 
     def waiting() -> None:  # every call slot of the plugin is busy: the status bar says so
-        handle.saved_progress = _progress(
-            ScanState.SCANNING, started, seen[0], message=tr("在等插件 {id}：它正忙", id=c.owner)
-        )
-        handle.publish()
+        said[1] = tr("在等插件 {id}：它正忙", id=c.owner)
+        show(force=True)
+
+    async def put(built: NodeStore) -> None:
+        """A tree replaces what the scan shows (what came so far, or the final one): views keep
+        their zoom, selection and history by path."""
+        async with STRUCTURE.write():
+            old = handle.store.fixed()
+            chains = views.chains(handle.id)
+            handle.store.adopt(built)
+            forget(handle.store)
+            views.remap(handle.id, chains, _by_path(old, handle.store))
+
+    async def partial(built: NodeStore) -> None:
+        await put(built)
+        show(force=True)
 
     async def run() -> None:
         try:
-            name, built = await _list(host, c, uri, counted, waiting)
-            async with STRUCTURE.write():
-                handle.store.adopt(built)
-                forget(handle.store)
+            name, built = await _list(host, c, uri, counted, waiting, progressed, partial)
+            await put(built)
             handle.roots = [RootInfo(path=name, node=1, volume=None, whole_volume=False)]
             handle.saved_progress = _progress(ScanState.DONE, started, len(handle.store) - 1, handle.store)
             scans._event("done", handle)
@@ -164,9 +329,11 @@ async def start_source(host: PluginHost, params: p.ScanStartParams) -> ScanHandl
                 await scans.monitors.start(handle)  # the plugin's watcher, when the source has one
         except RpcError as exc:
             logger.warning("scan source {} failed: {}", c.id, exc.message)
-            handle.saved_progress = _progress(ScanState.FAILED, started, seen[0], message=exc.message)
+            handle.saved_progress = _progress(
+                ScanState.FAILED, started, seen[0], handle.store, message=exc.message
+            )
         except asyncio.CancelledError:
-            handle.saved_progress = _progress(ScanState.CANCELLED, started, seen[0])
+            handle.saved_progress = _progress(ScanState.CANCELLED, started, seen[0], handle.store)
             raise
         finally:
             handle.publish()

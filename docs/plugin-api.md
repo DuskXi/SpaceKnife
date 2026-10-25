@@ -42,11 +42,16 @@
 | `epoch` | 树的纪元：宿主整理树（压缩、监控重新列出）后加一，旧下标随之作废（`STALE_TREE`） |
 | `version` | 树的版本：任何改动都加一。扫描进行中每批结果都会让它变（很频繁）；扫描完成后只在监控、重新扫描、删除改动树时变。宿主的缓存按它作废 |
 
-**方法**：`node(id)` `nodes(ids)` → [`Node`](#api-models)；`name(id)` `names(ids)`；`path(id)` `paths(ids)`；`rel_path(id, under=None)` `rel_paths(ids, under=None)`；`root_of(id)`；`parent(id)`；`children(id)` → 下标数组；`walk(id=None, chunk=…)` → 一块块下标（子树先序）；`col(name)` `cols(*names)` → 只读的整列；`query(…)` → `Rows`；`find(path)` → 下标或 None；`ref(id)` → [`NodeRef`](#api-models)；`file_ids(ids)` → `(设备, 文件 id, 链接数)`（要 `files.read`）；`close()`（快照用完时）。
+**方法**：`node(id)` `nodes(ids)` → [`Node`](#api-models)；`name(id)` `names(ids)`；`path(id)` `paths(ids)`；`rel_path(id, under=None)` `rel_paths(ids, under=None)`；`root_of(id)`；`parent(id)`；`children(id)` → 下标数组；`walk(id=None, chunk=…)` → 一块块下标，**逐层**（先 `id` 自己，再它的子项，再孙辈……同层按下标；不是深度优先，一个文件夹下面的项在结果里不连续）；`col(name)` `cols(*names)` → 只读的整列；`query(…)` → `Rows`（[限量](#api-query)）；`rule_folders(规则)` → 下标数组（[文件夹规则匹配到的](#api-query)）；`find(path)` → 下标或 None；`ref(id)` → [`NodeRef`](#api-models)；`file_ids(ids)` → `(设备, 文件 id, 链接数)`（要 `files.read`）；`close()`（快照用完时）。
 
 **层级**：0 号节点 `depth = 0`，根 `depth = 1`，根下面一层 `2`。`Node.parent` 对 0 号节点是 −1，对根是 0。根的 `name` 是它的完整路径。
 
 **边界**：`query(under=X)` 是 X 下面的项，**不含 X**；不写 `under` 时含各个根（不含 0 号节点）。文件的 `tot_*` 列是 0；`bytes` 列对文件是占用、对文件夹是子树合计、对重复的硬链接是 0。
+
+<a id="api-query"></a>
+**`query` 的限量**：不写 `limit` 时最多 10 万行（`QUERY_LIMIT`），写了最多 100 万（`QUERY_MAX`）；有 `sort` 时取排在前面的，没有时按下标。`rows.total` 是命中的总数，`rows.truncated` 说有没有被截掉；没写 `limit` 又被截掉时插件日志里有一条警告。`where` 按过滤框的规则只命中文件。逐个节点的调用（`tree.node(i)`、`tree.path(i)`）每次都跨进程，几千个以上时用 `query(columns=("path", …))`，或 `nodes(ids)` / `paths(ids)` 一次拿。
+
+**文件夹规则匹配到了什么**：`tree.rule_folders("nm")` 是本插件 `[[folder_rules]]` 里 `name = "nm"` 那条规则决定了类别的文件夹（别的插件的写全名 `<id>.<name>`），按下标排，最多 10 万个：只是规则自己匹配上的文件夹，不含它们里面的；用户自己归了类的文件夹和它下面的不在其中。详情面板解释类别时也写出是哪个插件的哪条规则。
 
 <a id="api-paths"></a>
 **路径的写法**
@@ -117,6 +122,25 @@ plugin.setting(
     ],
 )
 ```
+
+<a id="api-source"></a>
+### 扫描来源：`Listing`、进度与失败
+
+`out.file(path, size, alloc=None, mtime=0, ctime=0, atime=0, *, kind="file", attrs=(), ino=0, nlink=1, dev=0)` 和 `out.dir(path, mtime=0, *, size=0, alloc=0, attrs=())` 记下磁盘扫描也记的东西：
+
+| 参数 | 说明 |
+|---|---|
+| `kind` | `"file"`；`"link"`（符号链接：显示，不进入）；`"other"`（设备、管道、套接字） |
+| `attrs` | `hidden` `system` `readonly` `archive` `compressed` `sparse` `encrypted` `temporary` `notindexed` `offline`（同过滤的 `:attr:`），以及 `cloud`（不在本地的占位）`denied`（读不了的文件夹）`error`（读不了的项）；别的名字抛 `ValueError` |
+| `ino` `nlink` `dev` | 文件 id、链接数、设备：`nlink > 1` 且 `ino` 不是 0 时，同一个（`dev`, `ino`）的几个名字只算一次，按树的顺序第一个算，其余标 `Flag.HARDLINK_DUP`（`bytes` 列为 0），和磁盘扫描一样 |
+| `out.dir(size=, alloc=)` | 文件夹这一项本身占的（不是里面的）：像磁盘扫描的目录块一样算进上一层的合计 |
+
+`size` 和 `alloc` 两列都照列出的保留。来源声明了 `size = "size"` 时，视图的面积、标签和配色按 `size` 量（压缩包解压后的大小），`alloc` 仍是列出的那个（详情面板两个都显示）；存成快照后又按 `alloc` 量。
+
+- **进度**：来源里的 `ctx.progress(done, total, text)` 就是这次扫描的进度：`total > 0` 时状态栏有百分比，`text` 写在扫描条上（`T(...)` 按当时的语言）。
+- **边列边显示**：列了 1 秒以上时，宿主把已经列出的建成树放上去，之后列出的项每翻一倍再建一次（小的来源每 5 秒一次），根的名字是 URI，直到来源结束时用 `out.root_name` 的名字；视图的缩放和选中按路径跟着走。每次建树和最后那次一样贵，所以合起来不超过多建一次。
+- **失败**：来源抛出的异常（`PluginError(T(...))` 最好，说清楚在哪里坏了）成为扫描的失败原因：状态是 `failed`，视图里没有内容时画布中间写「没能读出内容」和这个原因；已经显示出来的部分留着。`MockHost.source` 抛 `RuntimeError`，消息就是它。
+- **`ScanInfo`**：`source` 是来源的全名，`uri` 是它列的 URI，`on_disk` 是来源的 `on_disk`。
 
 <a id="api-hooks"></a>
 ## 4. 钩子收到什么
@@ -286,11 +310,13 @@ def icicle(v: LayoutInput) -> Shapes:
 | `host.find("a/x.bin")`、`host.store` | 相对根的路径 → 节点下标（找不到抛 `KeyError`）；存储 |
 | `await host.call(name, **params)`、`call_frames` | 方法：JSON（和二进制列） |
 | `await host.report(name, node=, cursor=, **ctx)`、`host.text(report)` | 校验过、按上限截过的报告；纯文本 |
-| `await host.fields(slot, node=)`、`await host.insights(node=)` | 字段（`"inspector"` 或 `"hover"`）、洞察卡片 |
+| `await host.fields(slot, node=)`、`await host.insights(node=)` | 字段（`"inspector"` 或 `"hover"`；本插件的字段抛了异常时这里抛 `RuntimeError`，程序里是不显示它）、洞察卡片 |
+| `host.node("a/b")` | 相对根的路径 → [`Node`](#api-models)（`size alloc mtime …`，文件夹是子树合计），和 `ctx.tree.node` 给的一样 |
+| `await host.legend(name)` | 本插件配色的图例文字，和配色菜单里的一样（`@plugin.color_legend` 的会等它答完） |
 | `await host.cleanup(name, node=, args=)` | 复核对话框里的候选：`node path reason checked alloc`（`args` 成为 `c.args`） |
 | `await host.node_set(name)`、`await host.filter(expr)` | 集合的掩码；过滤命中的相对路径 |
 | `await host.visual(name)`、`await host.color(name)` | 一帧（[第 9 节](#api-frames)） |
-| `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文 |
+| `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文；`options` 像程序那样校验：没有的选项、不在可选值里的、超出范围的数抛 `RpcError` |
 | `await host.source(name, uri)`、`host.status(scan_id)` | 用扫描来源扫描（失败抛 `RuntimeError`）；扫描的状态 |
 | `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常；缺权限的钩子抛 `PermissionError`）、对比原因 |
 | `await host.changed(*nodes)` | 当前扫描在这些节点（下标或相对根的路径）上变了，像应用文件变化那样：`tree_changed` 钩子按宿主的方式（合并一秒、文件夹）跑完才返回；树本身不变 |
@@ -312,9 +338,33 @@ def icicle(v: LayoutInput) -> Shapes:
 
 **测试插件自己的函数**：`from spaceknife_sdk.testing import plugin_module`，`mod = plugin_module(__file__)` 得到插件的 `plugin.py`（按宿主的方式导入，`lib/` 也在路径上；它是另一份副本，看不到宿主里那份的状态，`monkeypatch` 它也影响不到宿主）；不要写 `from plugin import x`，那可能导入别的插件的 `plugin.py`。
 
-**合成扫描**：`started_at` 和 `finished_at` 是 `host.scan()` 的时间；`ScanInfo.snapshot` 对普通磁盘扫描是它自动保存的那个快照（不是「从哪个快照打开的」），快照打开的扫描是那个文件。
+**返回值的形状**：`host.toasts` 是字符串的列表（提示的文字）；`host.notices` 是 dict 的列表；`host.basket` 是删除篮的条目（`path name kind scan_id alloc size files dirs status note origin reason`，`origin` 是提议它的清理的全名，用户自己放的是 None；没有节点下标，用 `host.path(...)` 比较 `path`）；`host.events` 是 `{事件名: [载荷…]}`；`host.presets()` 是 `{名字: 过滤式}`；`host.keys()` 是 `{键: 命令全名}`；`host.find` 找不到时抛 `KeyError`；`await host.cleanup(...)` 是 `Proposed(node, path, reason, checked, alloc)` 的列表；`host.status()` 是扫描的状态（`state items message progress monitor …`）。
+
+**合成扫描**：`started_at` 和 `finished_at` 是 `host.scan()` 的时间；`ScanInfo.source` 是 `"scan"`（只有从快照文件打开的才是 `"snapshot"`）；`ScanInfo.snapshot` 对普通磁盘扫描是它自动保存的那个快照（不是「从哪个快照打开的」），快照打开的扫描是那个文件。
 
 **命令行里看历史**：`plugin call` / `plugin render` 的 `--history FILE`（可以写多次）把快照放进临时后端的历史，`ctx.snapshots.list()` 就能看到它们；`--snapshot FILE` 是把一个快照当作当前的扫描。
+
+<a id="api-shot"></a>
+### `plugin shot` 的步骤
+
+`--step`（可以写多次，按顺序）在页面就绪之后、截图之前像用户那样操作；一步做不成时后面的不做，照样截图并说停在哪一步：
+
+| 步骤 | 做什么 |
+|---|---|
+| `click:<元素>` `rclick:<元素>` `dblclick:<元素>` `hover:<元素>` | 用鼠标点、右键（截得到右键菜单）、双击、悬停。`<元素>` 是 CSS 选择器，或 `text=<看得见的文字>`（最里层显示这段文字的元素） |
+| `set:<元素>=<值>` | 填输入框、多行文字、下拉框；勾选框写 `true` / `false`；之后离开输入框（触发校验） |
+| `key:<键>` | `Escape` `Enter` `Tab` `ArrowDown` `F5` `a`，组合键 `Control+K` `Shift+Alt+x` |
+| `select:<a/b>` `do:<命令>` `open:<目标>` | 选中节点（相对根）、运行命令（同 `--do`）、打开（同 `--open`） |
+| `wait:<秒>` `eval:<JS>` | 等一会儿；执行一段 JS 并打印结果 |
+| `panel:<步骤>` | 在打开着的插件面板（它自己的框架）里做 `click` `rclick` `dblclick` `hover` `set` `key` `eval` `wait` |
+
+```bash
+spaceknife plugin shot . --setting min_size=1 --history old.skscan --step "rclick:text=a.log" --step "wait:0.3" -o menu.png
+spaceknife plugin shot . --open panel:main --step "panel:set:#days=30" --step "panel:click:text=应用" --eval "document.title"
+spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.txt" --text
+```
+
+`--eval` 在所有步骤之后、截图之前执行（读到的就是图里的状态）。`--setting 名=值` 先改好本插件的设置，`--history 文件` 把快照放进临时后端的历史（对比和 `ctx.snapshots.list()` 都看得到），`--source 名:URI` 用本插件的扫描来源扫描（代替 `--scan`）。
 
 <a id="api-core"></a>
 ## 11. `ctx.call` 与 `sk.core` 能调的内置方法
@@ -447,6 +497,7 @@ def icicle(v: LayoutInput) -> Shapes:
 | `roots` | list[str] | `[]` | 根的路径（扫描来源的扫描：根的名字） |
 | `items` | int | `0` | 文件夹和文件的个数，不算根 |
 | `source` | str | `"scan"` | `scan`（磁盘扫描）、`snapshot`（打开的快照）或扫描来源的全名 |
+| `uri` | str | `""` | What the scan source listed (its URI);  for the others |
 | `state` | (`scanning` `done` `cancelled` `failed`) \| str | `"done"` | 扫描中、完成、停止、失败 |
 | `started_at` | float \| None | `None` | 开始时间，unix 秒 |
 | `finished_at` | float \| None | `None` | 结束时间，unix 秒；还在扫描时是 None |
@@ -635,7 +686,7 @@ def icicle(v: LayoutInput) -> Shapes:
 |---|---|---|---|
 | `tree` | TreeView | 必需 | 树 |
 | `root` | int | 必需 | 要导出的子树：视图所在的位置、选中的项，或 0（全部） |
-| `match` | ndarray \| None | `None` | 过滤后的布尔掩码（按节点下标）；没过滤时是 None |
+| `match` | ndarray \| None | `None` | 过滤后的布尔掩码（按节点下标）：命中的**文件**是 True；文件夹永远是 False（文件夹本身不命中，看它下面的文件）；只导出选中项时只留选中的子树；没过滤时是 None |
 | `filter` | str | `""` | 过滤式；没过滤时是空 |
 | `options` | dict[str, Any] | `{}` | 导出对话框里选的值（没给的取默认；`spaceknife run` 用默认） |
 | `selection` | list[int] | `[]` | 选中的节点（「选中项」范围） |
@@ -728,6 +779,8 @@ def icicle(v: LayoutInput) -> Shapes:
 | `command` | str | `""` | 清理命令：只显示、可复制，从不运行 |
 | `priority` | int | `0` | 详情面板里卡片按它从高到低排（规则的卡片用规则的 `priority`）（≥ -1000，≤ 1000） |
 | `replaces` | list[str] | `[]` | Ids of insight rules whose card on this node it replaces ('*': any rule's)（≤ 32 个） |
+| `regenerate` | str | `""` | How it comes back once deleted: 「npm install 会装回来」（≤ 300 字） |
+| `node` | int \| NodeRef \| None | `None` | The folder the card is about when it is not the node asked (a file inside a project: the project): the card names it and 「加入删除篮」 puts it in; it must be the node or one of its folders |
 
 #### `Proposal`
 

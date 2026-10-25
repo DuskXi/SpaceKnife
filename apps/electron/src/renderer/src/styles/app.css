@@ -267,6 +267,8 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .treemap { position: absolute; inset: 0; background: var(--sk-treemap-ground); }
 .treemap-layer { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .treemap-empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--sk-color-text-tertiary); }
+.treemap-failed > div { display: grid; gap: 4px; max-width: min(56ch, 80%); text-align: center; overflow-wrap: anywhere; }
+.treemap-failed .strong { color: var(--sk-color-text-secondary); }
 .inspector-open { position: absolute; right: 10px; top: 10px; z-index: 5; background: var(--sk-color-bg-overlay); box-shadow: var(--sk-shadow-popover); }
 .floater {
   position: absolute; right: 10px; top: 10px; z-index: 6; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 6px 0 12px;
@@ -446,6 +448,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .sb-line .flex { flex: 1 1 24px; }
 .sb-line .dot { width: 3px; height: 3px; border-radius: 50%; background: var(--sk-color-text-tertiary); }
 .sb-current { flex: 0 1 auto !important; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--sk-color-text-tertiary); }
+.sb-message { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-bar { position: relative; height: 6px; border-radius: 3px; background: var(--sk-color-line-subtle); overflow: hidden; }
 .sb-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--sk-color-accent-default); transition: width 0.25s ease-out; }
 .sb-bar.indeterminate span { width: 30%; animation: sk-sweep 1.4s ease-in-out infinite; }

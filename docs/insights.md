@@ -52,17 +52,20 @@ i18n.en.title = "Steam game"     # 可选：其他语言的文案
 | `app` | 字符串 | 空 | 所属应用 |
 | `cleanup` | 字符串 | `review` | `safe` 可以直接删除（会自动重建或重新下载）；`tool` 用应用自己的功能或命令清理；`review` 含有个人数据或名字不确定，确认后再删；`keep` 系统或应用必需，不要手动删除 |
 | `command` | 字符串 | 空 | 推荐的清理或查看命令 |
+| `regenerate` | 字符串 | 空 | 删掉以后它怎么回来（「在项目里运行 npm install 会装回来」）：卡片单独写一行 |
 | `paths` | 字符串或列表 | 空 | 路径通配符（第 3 节） |
 | `names` | 字符串或列表 | 空 | 名称通配符：`names = ["x"]` 等于 `paths = ["**/x"]`，不能含路径分隔符 |
 | `parents` | 字符串或列表 | 空 | 上级文件夹的名称通配符，满足其一才算匹配 |
 | `exclude` | 字符串或列表 | 空 | 路径通配符；匹配到的项落在其中任意一个里就不算 |
+| `contains` | 字符串或列表 | 空 | 名称通配符（不分大小写）：匹配到的文件夹里要有其中一个名字，如虚拟环境的 `pyvenv.cfg`（第 4.6 节） |
+| `beside` | 字符串或列表 | 空 | 名称通配符：匹配到的项旁边（同一个文件夹里）要有其中一个名字，如 `node_modules` 旁边的 `package.json`（第 4.6 节） |
 | `platforms` | 字符串或列表 | 全部 | `windows` / `linux` / `macos`，以及 `posix`（= linux + macos）、`all` |
 | `node` | 字符串或列表 | `any` | 匹配哪类节点：`file` / `dir` / `link` / `other` / `any` |
 | `min_size` | 整数或字符串 | 0 | 大小提示：已知大小且小于它时不匹配；整数是字节，字符串如 `"500 MB"`、`"2 GiB"`、`"10m"`（1 KB = 1024 B） |
 | `priority` | 整数 | 0 | 排名第一关键字（第 4.4 节） |
 | `subtree` | 布尔 | `true` | 是否同时覆盖文件夹里的所有内容（第 4.3 节） |
 | `enabled` | 布尔 | `true` | `false` 表示删除同 id 的规则 |
-| `i18n.<语言>.<字段>` | 字符串 | — | 其他语言的 `title` / `reason` / `note` / `app`（第 5 节） |
+| `i18n.<语言>.<字段>` | 字符串 | — | 其他语言的 `title` / `reason` / `note` / `app` / `regenerate`（第 5 节） |
 
 未知字段会让这条规则作废（多半是拼写错误，例如把 `platforms` 写成 `platform`，静默忽略会让规则在所有平台生效）。
 
@@ -136,6 +139,24 @@ i18n.en.title = "Steam game"     # 可选：其他语言的文案
     command: str     # 清理命令（只展示）
     path: str        # 匹配到的项：路径本身，或包含它的那个文件夹（本平台的分隔符）
     inside: bool     # 是否经由上级文件夹匹配
+    regenerate: str  # 删掉以后它怎么回来（规则的 regenerate）
+```
+
+### 4.6 看邻居和内容（contains、beside）
+
+`contains` 和 `beside` 要看树：匹配到的那一项（经由上级匹配时是那个上级文件夹）里有没有、旁边有没有这些名字。`match_node` / `match_nodes`（详情面板、对比原因、洞察配色都用它们）从节点所在的树里看；只有路径的 `match` / `match_many` 没有树可看，带这两个条件的规则对它们不匹配。树的根以上没有可看的东西：扫描根本身的 `beside` 不成立。
+
+```toml
+[[rule]]
+id = "my-node-modules"
+kind = "build"
+title = "项目的依赖"
+cleanup = "safe"
+reason = "项目装的依赖包。"
+regenerate = "在项目里运行 npm install 会装回来"
+names = ["node_modules"]
+beside = ["package.json"]          # 全局的 npm-global/node_modules 旁边没有它：不算
+priority = 3
 ```
 
 ## 5. 多语言
@@ -186,6 +207,7 @@ def load_rules(extra_dir: Path | None = None, *, host: str | None = None) -> Rul
 def match(path: str, kind: str | Kind, *, size: int | None = None, lang: str | None = None) -> Insight | None
 def match_many(paths, kinds="dir", *, sizes=None, lang=None) -> list[Insight | None]   # 兄弟项共享上级的计算
 def match_node(store: NodeStore, node: int, *, lang=None) -> Insight | None             # 用节点的路径、类型和占用
+def match_nodes(store: NodeStore, nodes, *, lang=None) -> list[Insight | None]          # 同一棵树的多个节点
 def compile_rules(sources: Iterable[tuple[str, str]], *, host=None) -> RuleSet           # 从内存中的 TOML 文本构建
 def user_rules_dir() -> Path
 class RuleSet: rules, problems, get(id), match / match_many / match_node（同上）

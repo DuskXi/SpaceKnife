@@ -30,8 +30,8 @@ import re
 import sys
 import threading
 import tomllib
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from itertools import accumulate
 from pathlib import Path
 from typing import Any, Literal, cast, get_args
@@ -87,7 +87,7 @@ ERR = Texts(
         "bad_size": '无法识别的大小 {value!r}（例：1048576、"500 MB"、"2 GiB"）',
         "bad_priority": "priority 应在 -1000 到 1000 之间",
         "bad_lang": "i18n 的语言代码 {value!r} 无效（例：en、zh-tw）",
-        "bad_i18n": "i18n.{lang} 只能包含 title、reason、note、app",
+        "bad_i18n": "i18n.{lang} 只能包含 title、reason、note、app、regenerate",
     }
 )
 TYPE_NAMES = Texts(
@@ -100,8 +100,18 @@ TYPE_NAMES = Texts(
     }
 )
 
-_TEXT_FIELDS = ("title", "reason", "note", "app")
-_MATCH_FIELDS = ("paths", "names", "parents", "exclude", "platforms", "node", "min_size")
+_TEXT_FIELDS = ("title", "reason", "note", "app", "regenerate")
+_MATCH_FIELDS = (
+    "paths",
+    "names",
+    "parents",
+    "exclude",
+    "platforms",
+    "node",
+    "min_size",
+    "contains",
+    "beside",
+)
 _OTHER_FIELDS = ("id", "kind", "cleanup", "command", "priority", "subtree", "enabled", "i18n")
 _RULE_KEYS = frozenset(_TEXT_FIELDS + _MATCH_FIELDS + _OTHER_FIELDS)
 _PLATFORM_ALIASES = {
@@ -147,6 +157,7 @@ class Insight:
     path: str = ""  # the matched item: the path itself, or the folder it is inside
     inside: bool = False  # matched through an ancestor folder (``path`` is that folder)
     priority: int = 0  # the rule's (-1000…1000): the details panel orders its cards by it
+    regenerate: str = ""  # how it comes back once deleted ("npm install puts it back"): the card says it
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +166,7 @@ class RuleText:
     reason: str
     note: str
     app: str
+    regenerate: str = ""
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -176,6 +188,8 @@ class Rule:
     priority: int
     subtree: bool
     source: str
+    contains: tuple[str, ...] = ()  # lower-case name globs: the matched folder holds one of them
+    beside: tuple[str, ...] = ()  # … or the matched item has a sibling called one of them
 
     def texts(self, lang: str | None = None) -> RuleText:
         """Texts in ``lang`` (``en``, ``en-US``, ``zh-TW`` …), falling back field by field to the
@@ -193,6 +207,7 @@ class Rule:
             reason=tr.get("reason", base.reason),
             note=tr.get("note") or (title if "title" in tr else base.note),
             app=tr.get("app", base.app),
+            regenerate=tr.get("regenerate", base.regenerate),
         )
 
 
@@ -456,10 +471,10 @@ def _i18n(raw: Mapping[str, Any]) -> dict[str, dict[str, str]]:
         if not isinstance(fields, dict) or not set(fields) <= set(_TEXT_FIELDS):
             raise _Invalid(ERR["bad_i18n"].format(lang=lang))
         texts: dict[str, str] = {}
-        for field, value in fields.items():
+        for name, value in fields.items():
             if not isinstance(value, str):
-                raise _type_error(f"i18n.{lang}.{field}", "str")
-            texts[field] = value.strip()
+                raise _type_error(f"i18n.{lang}.{name}", "str")
+            texts[name] = value.strip()
         out[tag] = texts
     return out
 
@@ -492,11 +507,19 @@ def _parse_rule(raw: object, source: str) -> tuple[str, Rule | None]:
     reason = _str(raw, "reason")
     if not reason:
         raise _Invalid(ERR["missing"].format(key="reason"))
-    text = RuleText(title=title, reason=reason, note=_str(raw, "note", "") or title, app=_str(raw, "app", ""))
+    text = RuleText(
+        title=title,
+        reason=reason,
+        note=_str(raw, "note", "") or title,
+        app=_str(raw, "app", ""),
+        regenerate=_str(raw, "regenerate", ""),
+    )
 
     names = _expand_all(_strs(raw, "names"))
     parents = _expand_all(_strs(raw, "parents"))
-    for value in (*names, *parents):
+    contains = _expand_all(_strs(raw, "contains"))
+    beside = _expand_all(_strs(raw, "beside"))
+    for value in (*names, *parents, *contains, *beside):
         if not value or "/" in value or "\\" in value:
             raise _Invalid(ERR["name_sep"].format(value=value))
         try:
@@ -541,6 +564,8 @@ def _parse_rule(raw: object, source: str) -> tuple[str, Rule | None]:
         priority=priority,
         subtree=subtree,
         source=source,
+        contains=tuple(x.lower() for x in contains),
+        beside=tuple(x.lower() for x in beside),
     )
 
 
@@ -685,6 +710,9 @@ class _Path:
     cum: list[int]  # cumulative segment lengths: norm[: cum[i] + i] is the path of segment i
     pmask: int
     win: bool
+    # (segment index, "contains" | "beside", lower-case name globs) -> whether the tree has such a
+    # child / sibling there; None: no tree to ask (a rule with contains / beside does not match)
+    probe: Callable[[int, str, tuple[str, ...]], bool] | None = field(default=None)
 
     def upto(self, i: int) -> str:
         return self.norm[: self.cum[i] + i]
@@ -797,10 +825,27 @@ class RuleSet:
         return out
 
     def match_node(self, store: NodeStore, node: int, *, lang: str | None = None) -> Insight | None:
-        """``match`` for a store node (its path, kind and allocated size; ``lang`` as there)."""
-        kind = Kind(int(store.cols["kind"][node]))
-        column = "tot_alloc" if kind == Kind.DIR else "alloc"
-        return self.match(store.path(node), kind, size=int(store.cols[column][node]), lang=lang)
+        """``match`` for a store node (its path, kind and allocated size; ``lang`` as there). Rules
+        with ``contains`` / ``beside`` look at the node's tree."""
+        return self.match_nodes(store, [node], lang=lang)[0]
+
+    def match_nodes(
+        self, store: NodeStore, nodes: Sequence[int], *, lang: str | None = None
+    ) -> list[Insight | None]:
+        """:meth:`match_node` for several nodes of one store."""
+        c = store.cols
+        text_lang = _text_language(lang)
+        out: list[Insight | None] = []
+        # siblings share the work on their folders (the same folders, so the same answers)
+        cache: dict[tuple[int, str], _Ancestors] = {}
+        for node in nodes:
+            kind = Kind(int(c["kind"][node]))
+            column = "tot_alloc" if kind == Kind.DIR else "alloc"
+            p = self._prepare(store.path(node))
+            p.probe = _tree_probe(self, store, int(node), p)
+            hit = self._find(p, _kind_bit(kind), int(c[column][node]), cache)
+            out.append(None if hit is None else self._insight(p, hit, text_lang))
+        return out
 
     # --- internals ----------------------------------------------------------------------------
 
@@ -836,7 +881,18 @@ class RuleSet:
             return False
         if r.parents is not None and (i == 0 or r.parents[fold].fullmatch(p.segs[i - 1]) is None):
             return False
-        return r.exclude is None or r.exclude[fold].fullmatch(prefix) is None
+        if r.exclude is not None and r.exclude[fold].fullmatch(prefix) is not None:
+            return False
+        rule = r.rule
+        if rule.contains or rule.beside:
+            probe = p.probe
+            if probe is None:
+                return False
+            if rule.contains and not probe(i, "contains", rule.contains):
+                return False
+            if rule.beside and not probe(i, "beside", rule.beside):
+                return False
+        return True
 
     def _ancestors(self, p: _Path, upto: int, cache: dict[tuple[int, str], _Ancestors] | None) -> _Ancestors:
         """Subtree matches among segments ``0 .. upto-1`` (the folders containing the item)."""
@@ -912,7 +968,37 @@ class RuleSet:
             path=self._native(p, i),
             inside=i < len(p.segs) - 1,
             priority=rule.priority,
+            regenerate=t.regenerate,
         )
+
+
+def _tree_probe(
+    rules: RuleSet, store: NodeStore, node: int, p: _Path
+) -> Callable[[int, str, tuple[str, ...]], bool]:
+    """Answers a rule's ``contains`` / ``beside`` from the tree: the path's segment ``i`` is the
+    node ``node`` or one of its folders (above the scan's root there is nothing to look at)."""
+    from ..pathclass import _holds
+
+    parent = store.cols["parent"]
+    chain = []  # the node and its folders, the root last
+    x = node
+    while x > 0:
+        chain.append(x)
+        x = int(parent[x])
+    last = len(p.segs) - 1
+    seg_of: dict[int, int] = {}
+    for depth, n in enumerate(chain):
+        seg_of[last - depth] = n  # each folder up is one segment shorter
+
+    def probe(i: int, what: str, names: tuple[str, ...]) -> bool:
+        at = seg_of.get(i)
+        if at is None:
+            return False
+        if what == "contains":
+            return int(store.cols["kind"][at]) == Kind.DIR and _holds(store, at, names)
+        return _holds(store, int(parent[at]), names, skip=at)
+
+    return probe
 
 
 # --- loading ----------------------------------------------------------------------------------
@@ -1066,3 +1152,7 @@ def match_many(
 
 def match_node(store: NodeStore, node: int, *, lang: str | None = None) -> Insight | None:
     return active_rules().match_node(store, node, lang=lang)
+
+
+def match_nodes(store: NodeStore, nodes: Sequence[int], *, lang: str | None = None) -> list[Insight | None]:
+    return active_rules().match_nodes(store, nodes, lang=lang)

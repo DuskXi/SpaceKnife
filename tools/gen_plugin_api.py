@@ -216,7 +216,9 @@ NOTES: dict[tuple[str, str], str] = {
     ("LayoutInput", "ctx"): "调用的上下文：`ctx.check()`；有 `tree.read` 时 `v.tree` 读树",
     ("ExportInput", "tree"): "树",
     ("ExportInput", "root"): "要导出的子树：视图所在的位置、选中的项，或 0（全部）",
-    ("ExportInput", "match"): "过滤后的布尔掩码（按节点下标）；没过滤时是 None",
+    ("ExportInput", "match"): "过滤后的布尔掩码（按节点下标）：命中的**文件**是 True；"
+    "文件夹永远是 False（文件夹本身不命中，看它下面的文件）；"
+    "只导出选中项时只留选中的子树；没过滤时是 None",
     ("ExportInput", "filter"): "过滤式；没过滤时是空",
     ("ExportInput", "options"): "导出对话框里选的值（没给的取默认；`spaceknife run` 用默认）",
     ("ExportInput", "selection"): "选中的节点（「选中项」范围）",

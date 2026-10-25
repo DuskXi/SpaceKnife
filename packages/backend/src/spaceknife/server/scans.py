@@ -236,6 +236,8 @@ def summary_of(server: Any, handle: ScanHandle, node: int, top: int) -> p.TreeSu
             folder=store.path(why.folder),
             user=why.user,
             fallback=why.fallback,
+            plugin=why.rule.rsplit(".", 1)[0] if why.rule else None,
+            rule=why.rule,
         )
         if why is not None
         else None
@@ -356,6 +358,8 @@ class ScanHandle:
             unknown=unknown,
             snapshot=self.snapshot_path,
             source=self.source,
+            plugin_source=self.plugin_source,
+            uri=str(self.uri or "") if self.plugin_source else "",
             method="snapshot" if self.source == "snapshot" else self.method,
             phase=self.phase,
             fallback=self.fallback,

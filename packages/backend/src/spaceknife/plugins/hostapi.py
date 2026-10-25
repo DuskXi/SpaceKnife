@@ -43,6 +43,7 @@ if TYPE_CHECKING:
     from .store import PluginRecord
 
 MAX_NODES = 100_000
+MAX_RULE_FOLDERS = 100_000  # folders ctx.tree.rule_folders gives at most
 MAX_OPEN_SNAPSHOTS = 2  # snapshots one plugin may have open at once (each is a whole tree in memory)
 IO_WAIT_S = 2.0  # a host.io request waits at most this long for a permit (the plugin asks again)
 PERMIT_MAX_S = 2.0  # a disk-read permit not given back after this long goes by itself
@@ -271,12 +272,18 @@ class HostApi:
             monitoring = mon.status().state if mon is not None else "off"
         except Exception:
             monitoring = "failed"
+        # "snapshot" only for a tree opened from a snapshot file (a synthetic tree of MockHost or
+        # plugin call has no file: it reads as a scan)
+        source = getattr(h, "plugin_source", None) or (
+            "snapshot" if h.source == "snapshot" and getattr(h, "snapshot_path", None) else "scan"
+        )
         return {
             "scan_id": h.id,
             "roots": [r.path for r in h.roots],
             "state": st.state,
             "items": st.items,
-            "source": getattr(h, "plugin_source", None) or h.source,
+            "source": source,
+            "uri": str(getattr(h, "uri", None) or "") if getattr(h, "plugin_source", None) else "",
             "started_at": st.started_at.timestamp() if st.started_at else None,
             "finished_at": st.finished_at.timestamp() if st.finished_at else None,
             "snapshot": getattr(h, "snapshot_path", None),
@@ -348,6 +355,19 @@ class HostApi:
             ids = [c.id for c in EXTENSIONS.of("node_set")]
             sets = await asyncio.to_thread(self.host.set_masks, scan_id, store, ids)
         return await compute(query.run, store, b, p, tags=tags, sets=sets)
+
+    async def _rule_folders(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        """``ctx.tree.rule_folders(rule)``: the folders a folder rule decided (MAX_RULE_FOLDERS)."""
+        from .. import pathclass
+
+        _scan_id, store = self._store(rec, p)
+        rule = str(p.get("rule", ""))
+        rid = rule if "." in rule else f"{rec.id}.{rule}"
+        b = self.basis(store)
+        found = await compute(pathclass.rule_folders, store, b.classes, rid)
+        return {"folders": [int(x) for x in found[:MAX_RULE_FOLDERS]]}, []
 
     async def _image(
         self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]

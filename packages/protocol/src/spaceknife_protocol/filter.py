@@ -71,6 +71,9 @@ ErrorCode = Literal[
     "unit_mismatch",  # a size prefix with a time unit or vice versa
     "out_of_range",
     "unsupported",  # warning: valid, but this platform does not record the attribute/time
+    # warning: a name mask written like a negated keyword ("!:class:x"): "|" negates, "!" is part
+    # of a name; ``expected`` holds the negated spelling
+    "bang_negation",
 ]
 
 

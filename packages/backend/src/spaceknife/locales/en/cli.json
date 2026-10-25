@@ -1,6 +1,7 @@
 {
  "  第 {line} 行第 {column} 列（{section}）：{message}": "  Line {line}, column {column} ({section}): {message}",
  "  第 {start} 个字符起「{text}」：{reason}": "  At character {start} (\"{text}\"): {reason}",
+ "! 不是取反，按名字匹配；取反写 |（警告）": "! does not negate, it matches names; negate with | (warning)",
  "--idle-timeout 超出范围": "--idle-timeout is out of range",
  "1 KB = 1000 字节": "1 KB = 1000 bytes",
  "1 KB = 1024 字节": "1 KB = 1024 bytes",

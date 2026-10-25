@@ -153,6 +153,8 @@ class NodeView:
 
 
 class NodeStore:
+    measure = "alloc"  # see __init__ (stores made without it, from columns or a file, measure alloc)
+
     def __init__(self, capacity: int = 1 << 14) -> None:
         self._n = 0
         self._cap = max(16, capacity)
@@ -167,6 +169,9 @@ class NodeStore:
         self.epoch = 0
         self.ext_table: list[str] = [""]
         self._ext_index: dict[str, int] = {"": 0}
+        # what the views measure areas by: "alloc" (bytes on disk, every disk scan) or "size" (a
+        # scan source with size = "size": an archive's unpacked sizes; the columns stay as listed)
+        self.measure = "alloc"
         self._append_one(parent=-1, depth=0, kind=Kind.DIR, flags=Flag.VIRTUAL, name=b"")
 
     # ------------------------------------------------------------------ basics
@@ -867,6 +872,7 @@ class NodeStore:
         self.mapped = other.mapped
         self.ext_table = other.ext_table
         self._ext_index = other._ext_index
+        self.measure = getattr(other, "measure", "alloc")
         self.version = max(self.version, other.version) + 1
         self.epoch += 1
 

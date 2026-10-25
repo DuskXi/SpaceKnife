@@ -28,6 +28,7 @@ from spaceknife_protocol.plugins import Report
 from .context import TaskInfo
 from .manifest import MANIFEST
 from .report import render_text
+from .tree import Node
 
 
 @dataclass(frozen=True, slots=True)
@@ -365,6 +366,30 @@ class MockHost:
             node = found
         return int(node)
 
+    def node(self, rel: str = "") -> Node:
+        """The node at a path relative to the root, as ``ctx.tree.node`` gives it (``size`` ``alloc``
+        ``mtime`` …; folders: subtree totals); KeyError when there is none."""
+        from spaceknife.layout.basis import Basis
+        from spaceknife.plugins import query
+
+        store = self.store
+        return Node.from_dict(query.node_dict(store, Basis(store), self.find(rel)))
+
+    async def legend(self, name: str) -> list[str]:
+        """The texts of the legend of the plugin's colour mode ``name``, as the colour menu shows
+        them now (the one of ``@plugin.color_legend`` once it answered: after :meth:`settled`)."""
+        from spaceknife import i18n
+        from spaceknife.extensions import EXTENSIONS
+
+        host = await self._ready()
+        c = EXTENSIONS.get("color_mode", f"{self.plugin_id}.{name}")
+        if c is None:
+            raise KeyError(f"no colour mode {name!r}")
+        lang = i18n.language()
+        host.legend_of(c, lang)  # asks the plugin (in the background) when it has a legend function
+        await self.settled()
+        return [str(text) for text, _colour in host.legend_of(c, lang)]
+
     def path(self, rel: str = "") -> str:
         """The path of a node as the app shows it (the system's form: ``\\`` on Windows), by its
         place relative to the root (``"logs/a.txt"``). Compare paths a plugin writes with this,
@@ -409,6 +434,10 @@ class MockHost:
         return render_text(report)
 
     async def fields(self, slot: str = "inspector", *, node: int) -> list[Any]:
+        """The fields the details panel (``"inspector"``) or the hover card (``"hover"``: empty the
+        first time, as in the app; :meth:`settled` then ask again) shows for ``node``: the host's
+        ``PluginField`` (``id plugin title value unit tone node action``). A field of this plugin
+        that raised raises here (``RuntimeError`` with its message); the app leaves it out."""
         from spaceknife.plugins.handlers import node_fields
         from spaceknife_protocol.plugins import PluginFieldsParams
 
@@ -418,7 +447,15 @@ class MockHost:
         params = PluginFieldsParams(
             scan_id=self.scan_id, node=node, slot="hover" if slot == "hover" else "inspector"
         )
+        mine = f"{self.plugin_id}."
+        for key in [k for k in host.field_errors if k[0].startswith(mine) and k[1] == node]:
+            host.field_errors.pop(key, None)
         res = await node_fields(host, session, params)
+        failed = [
+            (k[0], why) for k, why in host.field_errors.items() if k[0].startswith(mine) and k[1] == node
+        ]
+        if failed:
+            raise RuntimeError("; ".join(f"field {fid} failed: {why}" for fid, why in failed))
         return list(res.fields)
 
     async def insights(self, *, node: int) -> list[Any]:
@@ -517,15 +554,23 @@ class MockHost:
     ) -> str | bytes:
         """The output of the plugin's export format (or template) for the tree below ``root``, as
         the export dialog makes it: ``filter`` (an expression: only what it matches), ``options``
-        (the format's options; the rest take their defaults), ``selection`` (only these nodes)."""
+        (the format's options; the rest take their defaults), ``selection`` (only these nodes).
+        Option values are checked as the app checks them: an unknown name, a value that is not one
+        of a select's or a multi's choices, a number out of range raise ``RpcError``."""
         from spaceknife.export import common_root, export_chunks, resolve, subtree_mask
+        from spaceknife.extensions import EXTENSIONS
         from spaceknife.filter.engine import FilterContext, evaluate
         from spaceknife.filter.vocab import platform_vocab
         from spaceknife.server.compute import compute
+        from spaceknife.server.export_handlers import check_options
         from spaceknife_protocol.filter_syntax import parse
 
         host = await self._ready()
         target = resolve(f"{self.plugin_id}.{name}")
+        fmt = EXTENSIONS.get("export_format", f"{self.plugin_id}.{name}")
+        given = dict(options or {})
+        if fmt is not None and getattr(fmt.spec, "options", None) is not None:
+            given = check_options(list(fmt.spec.options), given)
         store = self.store
         match = None
         if filter:
@@ -550,7 +595,7 @@ class MockHost:
                     root,
                     match=match,
                     filter_text=filter or "",
-                    options=dict(options or {}),
+                    options=given,
                     selection=picked,
                 )
             )
@@ -701,14 +746,15 @@ class MockHost:
         view = vhost.view
         view.selected = node
         handle = self.server.scans.scans.get(self.scan_id)
-        source = getattr(handle, "source", "scan") if handle is not None else "scan"
+        # as the palette asks (a when of "source:<id>"): the full id of the scan source, else ""
+        source = str(getattr(handle, "plugin_source", None) or "") if handle is not None else ""
         pc = PaletteContext(
             tab="scan",
             has_scan=True,
             view=view,
             settings=self.server.settings,
             plugins=frozenset(host.enabled_ids()),
-            scan_source=source if isinstance(source, str) and "." in source else "",
+            scan_source=source,
             caps=frozenset(self.session.capabilities),
         )
 

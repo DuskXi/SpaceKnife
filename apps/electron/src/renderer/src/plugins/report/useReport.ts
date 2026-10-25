@@ -2,7 +2,8 @@
 // only (a newer one cancels the one before, so does closing it), again when what its `refresh`
 // names changes: the selection, the scan (done again), the view's frames (at most once a second),
 // the comparison, a timer (interval:<s>, at least 5 s), a shared state of its plugin (state:<name>),
-// or the language (its texts come localized). "manual" adds a refresh button (ReportView).
+// its plugin's settings ("settings"), or the language (its texts come localized). "manual" adds a
+// refresh button (ReportView).
 
 import { useEffect, useRef, useState } from "react";
 
@@ -38,6 +39,17 @@ export function intervalOf(refresh: readonly string[]): number | null {
   return null;
 }
 
+/** What a report with refresh "settings" follows: its plugin's setting values, as one key. */
+export function settingsKey(values: Record<string, unknown> | undefined, plugin: string): string {
+  if (!values) return "";
+  const prefix = `plugin.${plugin}.`;
+  const own = Object.keys(values)
+    .filter((k) => k.startsWith(prefix))
+    .sort()
+    .map((k) => [k, values[k]]);
+  return JSON.stringify(own);
+}
+
 /** The shared states a report follows (state:<name>). */
 export const statesOf = (refresh: readonly string[]): string[] => refresh.filter((r) => r.startsWith("state:")).map((r) => r.slice(6)).filter(Boolean);
 
@@ -60,6 +72,7 @@ export function useReport(src: ReportSource | null, ctx: ReportContext, fixed: R
   const progress = useApp((s) => (request != null ? (s.pluginProgress[String(request)] ?? null) : null));
   const selKey = has("selection") ? `${ctx.node ?? ""}|${(ctx.selection ?? []).join(",")}` : "";
   const compareKey = has("compare") ? (ctx.compare_id ?? "") : "";
+  const ownSettings = useApp((s) => (has("settings") && src ? settingsKey(s.settings?.values, src.plugin) : ""));
   const every = intervalOf(refresh);
   const states = statesOf(refresh).join(",");
   const ctxRef = useRef(ctx);
@@ -117,7 +130,7 @@ export function useReport(src: ReportSource | null, ctx: ReportContext, fixed: R
       ac.abort();
       if (id != null) dropProgress(id);
     };
-  }, [fixed, src?.method, ctx.scan_id, selKey, scanKey, frameKey, compareKey, tick, lang]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fixed, src?.method, ctx.scan_id, selKey, scanKey, frameKey, compareKey, ownSettings, tick, lang]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return { report, loading, error, progress, reload: () => setTick((n) => n + 1) };
 }

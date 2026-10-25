@@ -4,7 +4,8 @@
 //   #…&scan=<id>&theme=light&lang=en&select=logs/app.log&do=view.visual.<id>,report.export
 //     &open=report:<full id>|panel:<full id>|settings:<plugin id>|export:<format or template>
 // When it is done (or failed), <html data-sk-dev-ready="1"> (data-sk-dev-error says what failed):
-// what plugin shot waits for before it takes the picture.
+// what plugin shot waits for before it takes the picture. Then window.__skDev (DevHooks) does the
+// same one at a time for plugin shot's --step select:/do:/open:.
 
 import type { ScanStatus } from "@/protocol/generated";
 
@@ -53,35 +54,56 @@ function mark(error?: string): void {
 
 const settle = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** What plugin shot's steps call once the page is ready (window.__skDev). */
+export interface DevHooks {
+  /** select a node by its path relative to the scan's first root (a/b.txt) */
+  select(rel: string): Promise<void>;
+  /** run a command (a full id: view.visual.<id>, <plugin>.<command> …) */
+  run(id: string): Promise<void>;
+  /** open report:<id> | panel:<id> | settings:<plugin> | export:<format> */
+  open(target: string): Promise<void>;
+}
+
+/** The hooks for one scan (the linked one). */
+export function devHooks(scan: ScanStatus): DevHooks {
+  return {
+    async select(rel) {
+      const { showNode } = await import("@/plugins/nodes");
+      const root = scan.roots[0]?.path ?? "";
+      await showNode({ scan_id: scan.scan_id, node: 0, path: joinRoot(root, rel) });
+    },
+    async run(id) {
+      const { runShortcut } = await import("./commands");
+      await runShortcut(id);
+      await settle(150);
+    },
+    async open(target) {
+      if (target.startsWith("export:")) {
+        const { set } = await import("./store");
+        set({ exportOpen: true, exportPick: target.slice(7) }); // the export dialog, on that format
+        return;
+      }
+      const { openTarget } = await import("@/plugins/open");
+      const { actionContext } = await import("@/plugins/actions");
+      openTarget(target, actionContext({ owner: null }));
+    },
+  };
+}
+
 /** Bring the page to the state the address asks for (the linked scan's tab is open). */
 export async function applyDevLink(scan: ScanStatus): Promise<void> {
   const link = parseDevLink(typeof location === "undefined" ? "" : location.hash);
+  const hooks = devHooks(scan);
+  if (typeof window !== "undefined") (window as unknown as { __skDev?: DevHooks }).__skDev = hooks;
   try {
     const { updateSettings } = await import("./actions");
     const values: Record<string, string> = {};
     if (link.theme) values["appearance.theme"] = link.theme;
     if (link.lang) values["general.language"] = link.lang;
     if (Object.keys(values).length) await updateSettings(values);
-    if (link.select) {
-      const { showNode } = await import("@/plugins/nodes");
-      const root = scan.roots[0]?.path ?? "";
-      await showNode({ scan_id: scan.scan_id, node: 0, path: joinRoot(root, link.select) });
-    }
-    if (link.run.length) {
-      const { runShortcut } = await import("./commands");
-      for (const id of link.run) {
-        await runShortcut(id);
-        await settle(150);
-      }
-    }
-    if (link.open?.startsWith("export:")) {
-      const { set } = await import("./store");
-      set({ exportOpen: true, exportPick: link.open.slice(7) }); // the export dialog, on that format
-    } else if (link.open) {
-      const { openTarget } = await import("@/plugins/open");
-      const { actionContext } = await import("@/plugins/actions");
-      openTarget(link.open, actionContext({ owner: null }));
-    }
+    if (link.select) await hooks.select(link.select);
+    for (const id of link.run) await hooks.run(id);
+    if (link.open) await hooks.open(link.open);
     await settle(300);
     mark();
   } catch (err) {

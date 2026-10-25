@@ -210,6 +210,10 @@ class ScanStatus(Payload):
         default=None, description="Path of the snapshot this scan was saved to/loaded from"
     )
     source: Literal["scan", "snapshot"] = "scan"
+    plugin_source: str | None = Field(
+        default=None, description="A plugin's scan source (its full id) when the tree came from one"
+    )
+    uri: str = Field(default="", description="What that scan source listed")
     method: ScanMethodUsed = Field(default="hard", description="How the tree was (or is being) read")
     phase: str = Field(
         default="",
@@ -341,6 +345,8 @@ class FolderClassInfo(Payload):
     folder: str = Field(description="The folder that decided (the node itself or an ancestor)")
     user: bool = Field(description="The user chose it (class_folders.json)")
     fallback: bool = Field(description="Only files whose extension is in no class take it")
+    plugin: str | None = Field(default=None, description="The plugin whose folder rule decided")
+    rule: str = Field(default="", description="That folder rule's full id")
 
 
 class TreeSummaryResult(Payload):

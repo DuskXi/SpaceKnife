@@ -4,15 +4,22 @@
 
 import type { SourceInfo } from "@/protocol/generated";
 import { startScan } from "@/state/actions";
+import { get } from "@/state/store";
 import { t } from "@/lib/i18n";
 
 const bySource = new Map<string, { source: string; uri: string }>();
 
-/** The source a scan of this session came from, or null (a disk scan, a snapshot). */
-export const scanSourceOf = (scanId: string): string | null => bySource.get(scanId)?.source ?? null;
+/** The source a scan came from (this session started it, or its status says so: another window's,
+ * the command line's), or null (a disk scan, a snapshot). */
+export const scanSourceOf = (scanId: string): string | null => sourceScanOf(scanId)?.source ?? null;
 
 /** What to run again for a scan of a source: its source and URI. */
-export const sourceScanOf = (scanId: string): { source: string; uri: string } | null => bySource.get(scanId) ?? null;
+export function sourceScanOf(scanId: string): { source: string; uri: string } | null {
+  const mine = bySource.get(scanId);
+  if (mine) return mine;
+  const st = get().scans[scanId];
+  return st?.plugin_source ? { source: st.plugin_source, uri: st.uri ?? "" } : null;
+}
 
 /** Extensions as the file dialog takes them: ".zip" → "zip". */
 export const dialogExtensions = (src: Pick<SourceInfo, "extensions">): string[] => src.extensions.map((x) => x.replace(/^\*?\./, "")).filter(Boolean);

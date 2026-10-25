@@ -2,26 +2,48 @@
 
 The entries arrive in any order; parent folders are added when missing. The store is built breadth
 first so every folder's children are one contiguous id range (the store's invariant), the same as a
-hard scan's. Thin (docs/plugins.md, 「scan_source」): the whole listing first, then the tree.
+hard scan's. A long listing is built more than once while it arrives (sources.py): what came so far
+is shown, the final tree replaces it.
+
+An entry carries what a disk scan records (the SDK's ``Listing``): kind (file, folder, link, other),
+sizes, times, attribute flags (only those in ``SOURCE_FLAGS``), a file id with its link count and
+device, and a folder's own size. The host counts a hard-linked file once: of the names that share a
+(device, file id) the first in tree order counts, the others get ``HARDLINK_DUP`` as in a disk scan.
 """
 
 from __future__ import annotations
 
 import os
+from collections import deque
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
+from spaceknife_sdk.models import LISTING_ATTRS
+
 from ..store.nodes import ENTRY_COLUMNS, NAME_ERRORS, Flag, Kind, NodeStore
+
+SOURCE_FLAGS = 0
+for _bit in LISTING_ATTRS.values():
+    SOURCE_FLAGS |= _bit
+"""The flags a source may set (``Listing(attrs=…)``); the host's own (pending, virtual, hard-link
+duplicate, mount, gone …) are never taken from a listing."""
+
+# a file: size alloc mtime ctime atime kind flags ino nlink dev
+type FileRow = tuple[int, int, int, int, int, int, int, int, int, int]
+_NO_ID = (0, 0, 0, 1, 0)  # kind flags ino nlink dev of a file listed without them
 
 
 @dataclass(slots=True)
 class _Dir:
     mtime: int = 0
+    size: int = 0  # the folder entry's own size and allocation (not its contents)
+    alloc: int = 0
+    flags: int = 0
     dirs: dict[str, _Dir] = field(default_factory=dict)
-    files: dict[str, tuple[int, int, int, int, int]] = field(default_factory=dict)  # size alloc m c a
+    files: dict[str, tuple[int, ...]] = field(default_factory=dict)  # FileRow (or its first five)
 
 
 def _ext(name: str) -> str:
@@ -29,6 +51,13 @@ def _ext(name: str) -> str:
     if dot <= 0 or len(name) - dot > 17:
         return ""
     return name[dot + 1 :].lower()
+
+
+def _col(cols: Mapping[str, np.ndarray], name: str, n: int, default: int) -> list[int]:
+    got = cols.get(name)
+    if got is None or len(got) != n:  # a batch of an older SDK: the column is not there
+        return [default] * n
+    return [int(x) for x in np.asarray(got).tolist()]
 
 
 class Collector:
@@ -51,9 +80,12 @@ class Collector:
     def add_batch(self, cols: Mapping[str, np.ndarray]) -> int:
         blob = bytes(cols["paths"])
         lens = np.asarray(cols["path_len"], dtype=np.int64)
-        kinds = np.asarray(cols["kind"])
-        size, alloc = np.asarray(cols["size"]), np.asarray(cols["alloc"])
-        mt, ct, at = np.asarray(cols["mtime"]), np.asarray(cols["ctime"]), np.asarray(cols["atime"])
+        n = len(lens)
+        kinds = _col(cols, "kind", n, 0)
+        size, alloc = _col(cols, "size", n, 0), _col(cols, "alloc", n, 0)
+        mt, ct, at = _col(cols, "mtime", n, 0), _col(cols, "ctime", n, 0), _col(cols, "atime", n, 0)
+        flags = _col(cols, "flags", n, 0)
+        ino, nlink, dev = _col(cols, "ino", n, 0), _col(cols, "nlink", n, 1), _col(cols, "dev", n, 0)
         pos = 0
         for i, ln in enumerate(lens.tolist()):
             path = blob[pos : pos + ln].decode("utf-8", NAME_ERRORS)
@@ -61,55 +93,77 @@ class Collector:
             parts = [p for p in path.split("/") if p and p not in (".", "..")]
             if not parts:
                 continue
-            if int(kinds[i]) == 1:
+            fl = flags[i] & SOURCE_FLAGS
+            if kinds[i] == Kind.DIR:
                 d = self._folder(parts)
-                d.mtime = int(mt[i])
+                d.mtime, d.size, d.alloc, d.flags = mt[i], max(0, size[i]), max(0, alloc[i]), fl
             else:
                 parent = self._folder(parts[:-1])
                 name = parts[-1]
                 if name not in parent.files:
                     self.count += 1
-                parent.files[name] = (int(size[i]), int(alloc[i]), int(mt[i]), int(ct[i]), int(at[i]))
+                kind = kinds[i] if kinds[i] in (Kind.FILE, Kind.LINK, Kind.OTHER) else Kind.FILE
+                parent.files[name] = (
+                    max(0, size[i]),
+                    max(0, alloc[i]),
+                    mt[i],
+                    ct[i],
+                    at[i],
+                    int(kind),
+                    fl,
+                    ino[i],
+                    min(max(nlink[i], 0), 65535),
+                    dev[i],
+                )
         return self.count
 
-    def use_size(self) -> None:
-        """Files count with their size (a source with ``size = "size"``: an archive's unpacked
-        sizes) where the tree shows the allocation."""
 
-        todo = [self.root]
-        while todo:
-            d = todo.pop()
-            for name, (size, _alloc, mt, ct, at) in list(d.files.items()):
-                d.files[name] = (size, size, mt, ct, at)
-            todo.extend(d.dirs.values())
-
-
-def build(root_name: str, top: _Dir, *, virtual: bool) -> NodeStore:
-    """The store of one root: breadth first, folders then files of each folder by name."""
+def build(root_name: str, top: _Dir, *, virtual: bool, measure: str = "alloc") -> NodeStore:
+    """The store of one root: breadth first, folders then files of each folder by name. ``measure``:
+    what the views measure areas by (``"size"``: a source with ``size = "size"``)."""
     store = NodeStore()
+    store.measure = measure
     root = store.add_root(root_name, flags=Flag.PENDING | (Flag.VIRTUAL if virtual else Flag.NONE))
     store.set_root_stats(root, mtime=top.mtime)
-    queue: list[tuple[int, _Dir]] = [(root, top)]
+    seen: set[tuple[int, int]] = set()  # (device, file id) of hard-linked files counted already
+    dup = int(Flag.HARDLINK_DUP)
+    queue: deque[tuple[int, _Dir]] = deque([(root, top)])
     while queue:
-        node, d = queue.pop(0)
+        node, d = queue.popleft()
         dir_names = sorted(d.dirs)
         file_names = sorted(d.files)
         names = dir_names + file_names
         n = len(names)
-        entries = {k: np.zeros(n, dtype=np.int64) for k in ENTRY_COLUMNS}
+        entries = {k: np.zeros(n, dtype=np.uint64 if k == "ino" else np.int64) for k in ENTRY_COLUMNS}
         exts = np.zeros(n, dtype=np.uint16)
         for i, name in enumerate(dir_names):
+            sub = d.dirs[name]
             entries["kind"][i] = Kind.DIR
-            entries["mtime"][i] = d.dirs[name].mtime
+            entries["mtime"][i] = sub.mtime
+            entries["size"][i] = sub.size
+            entries["alloc"][i] = sub.alloc
+            entries["flags"][i] = sub.flags
+            entries["nlink"][i] = 1
         for j, name in enumerate(file_names):
             i = len(dir_names) + j
-            s, a, m, c, t = d.files[name]
-            entries["kind"][i] = Kind.FILE
+            row = d.files[name]
+            s, a, m, c, t = row[:5]
+            kind, fl, ino, nlink, dev = row[5:10] if len(row) >= 10 else _NO_ID
+            if kind == Kind.FILE and ino and nlink > 1:
+                key = (dev, ino)
+                if key in seen:
+                    fl |= dup  # another name of a file counted already: adds no bytes
+                else:
+                    seen.add(key)
+            entries["kind"][i] = kind
             entries["size"][i] = s
             entries["alloc"][i] = a
             entries["mtime"][i] = m
             entries["ctime"][i] = c
             entries["atime"][i] = t
+            entries["flags"][i] = fl
+            entries["ino"][i] = ino
+            entries["nlink"][i] = nlink
             exts[i] = store.ext_id(_ext(name))
         first = store.ingest_names(node, [nm.encode("utf-8", NAME_ERRORS) for nm in names], entries, exts)
         for i, name in enumerate(dir_names):
