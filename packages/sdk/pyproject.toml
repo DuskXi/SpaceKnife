@@ -8,6 +8,9 @@ dependencies = [
   "spaceknife-protocol",
   "pydantic>=2.9",
   "numpy>=2.1",
+  # zoneinfo (on the plugins allow-list) has no time zones on Windows without it; the packaged
+  # app bundles it too (packaging/plugin_imports.py)
+  "tzdata>=2025.2; sys_platform == 'win32'",
 ]
 
 [tool.uv.sources]

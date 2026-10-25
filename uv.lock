@@ -729,6 +729,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pydantic" },
     { name = "spaceknife-protocol" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [package.metadata]
@@ -736,6 +737,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.1" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "spaceknife-protocol", editable = "packages/protocol" },
+    { name = "tzdata", marker = "sys_platform == 'win32'", specifier = ">=2025.2" },
 ]
 
 [[package]]

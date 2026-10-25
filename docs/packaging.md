@@ -61,7 +61,7 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 - [packaging/plugin_imports.py](../packaging/plugin_imports.py) 的 `--list` 列出插件能 import 的全部模块：白名单里的每个名字，加上它们在构建机上 import 得到的公开子模块（名字里没有 `_` 开头的段；`asyncio.unix_events` 在 Windows 上没有，就不列），去掉 `NOT_FOR_PLUGINS`（测试代码 `numpy.testing`、`*.tests`、构建工具 `numpy.f2py`、mypy 插件 `pydantic.mypy` 等：`check` 允许，但插件代码运行时用不着，应用也不带 pytest、Fortran 编译器和 mypy）。spec 把这份清单全部放进 `hiddenimports`。
 - 构建时（`tools/build_package.py` 在后端冒烟测试之后）它写一个临时插件：每个模块一句 `import`，再用一用几样背后有扩展模块或数据的东西（sqlite3 的 `iterdump`、各种编码、zlib / gzip / bz2 / lzma、zip 和 tar 的压缩方式、时区、`platform`、numpy 的线性代数和随机数、pydantic.v1 …）。冻结后端的 `plugin check` 不能拒绝其中任何一句 import；`plugin call` 在冻结后端的插件进程里运行它，结果和开发环境（`python -m spaceknife plugin call`，同一个插件、同样的沙箱）比：开发环境做得到而冻结版做不到的，构建失败并写出是哪个模块。两边都做不到的只打一行 `note:`。`tools/tests/test_plugin_imports.py` 查清单和 `check` 一致，并用开发环境的后端把整个检查跑一遍。
-- Windows 没有系统的时区库，`zoneinfo` 要 tzdata 包：它在 `package` 依赖组里（只在 Windows 上装），PyInstaller 的 zoneinfo 钩子把它收进包。Linux 和 macOS 用系统的 `/usr/share/zoneinfo`。
+- Windows 没有系统的时区库，`zoneinfo` 要 tzdata 包：SDK 在 Windows 上依赖它（插件作者的环境和开发环境里 `ZoneInfo(...)` 也能用），`package` 依赖组里也写着（只在 Windows 上装），PyInstaller 的 zoneinfo 钩子把它收进包。Linux 和 macOS 用系统的 `/usr/share/zoneinfo`。
 - 加这个检查之前（0.3.3 的冻结版），插件 import `html.parser`、`json.tool`、`numpy.core.*`、`numpy.lib.user_array`、`numpy.linalg.lapack_lite` 会失败，Windows 上 `zoneinfo` 一个时区也没有。
 - 现在两边都做不到、所以只是 `note:` 的：Windows 上插件代码里自己开事件循环（`asyncio.run`、`asyncio.new_event_loop`）被插件沙箱拦下（`socket.bind`：Windows 的事件循环用本机的一对套接字唤醒自己，没有 `net` 权限的插件不能 bind）；`async def` 的方法和钩子跑在插件进程自己的循环上，不受影响。
 
