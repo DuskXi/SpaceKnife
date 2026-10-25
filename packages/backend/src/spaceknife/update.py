@@ -586,9 +586,24 @@ def save_state(state: UpdateState, file: Path) -> None:
 
 @functools.cache
 def ssl_context() -> ssl.SSLContext:
-    """The default context, plus the system's CA bundle where this Python's OpenSSL loaded none (a
-    bundled build looking in another distribution's folder; a hashed folder it may still find is
-    not counted, and the extra bundle does no harm)."""
+    """How the update check verifies GitHub's certificate.
+
+    Windows and macOS: by the system itself (truststore: CryptoAPI, the Security framework), so a
+    certificate the system has blocked is refused here too, as the eMudhra intermediates of October
+    2026 whose private keys could be worked out (Windows blocks them through its list of disallowed
+    certificates). OpenSSL with the system's roots loaded does not look at that list. Neither checks
+    revocation lists (measured: both accept revoked.badssl.com).
+
+    Elsewhere, and if truststore cannot be loaded: the default context, plus the system's CA bundle
+    where this Python's OpenSSL loaded none (a bundled build looking in another distribution's
+    folder; a hashed folder it may still find is not counted, and the extra bundle does no harm)."""
+    if sys.platform == "win32" or sys.platform == "darwin":
+        try:
+            import truststore
+        except ImportError as exc:
+            logger.warning("update check: no system certificate verification ({}): using OpenSSL", exc)
+        else:
+            return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx = ssl.create_default_context()
     if sys.platform != "win32" and not ctx.cert_store_stats().get("x509_ca"):
         for ca in CA_FILES:
