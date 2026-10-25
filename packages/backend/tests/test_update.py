@@ -718,3 +718,24 @@ def test_palette_commands() -> None:
     assert evaluate(show, Context(tab="settings", update_version="0.4.0")) == (True, "0.4.0")
     about = by_id["app.about"]
     assert evaluate(about, Context(tab="scan", app_version="0.3.3")) == (True, "0.3.3")
+
+
+def test_the_update_check_verifies_certificates_through_the_system() -> None:
+    """Windows and macOS: truststore, the system's own verification (with the certificates it has
+    blocked); elsewhere OpenSSL with the system's bundle. Either way verified, by name."""
+    import ssl
+    import sys
+
+    update.ssl_context.cache_clear()
+    try:
+        ctx = update.ssl_context()
+        if sys.platform == "win32" or sys.platform == "darwin":
+            import truststore
+
+            assert isinstance(ctx, truststore.SSLContext)
+        else:
+            assert type(ctx) is ssl.SSLContext
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname
+    finally:
+        update.ssl_context.cache_clear()
