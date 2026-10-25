@@ -34,7 +34,7 @@ uv run python tools/build_package.py
 
 0. **原生扩展的发布构建**：maturin 单独编译一份 wheel（`build/native-release`），用 `--remap-path-prefix` 把 Cargo、rustup 与仓库目录换成 `/cargo`、`/rustup`、`/spaceknife`，Windows 上 PDB 只记文件名（`/PDBALTPATH:%_PDB%`）：Rust 的 panic 信息和调试路径里会带上构建机的绝对路径（也就带上了用户名），Cargo 的 `trim-paths` 还没稳定。PyInstaller 用这一份，不用开发环境里的。
 1. **冻结后端**：PyInstaller onedir（[packaging/spaceknife-backend.spec](../packaging/spaceknife-backend.spec)）→ `dist/backend/spaceknife-backend/`。Windows 约 67 MB，Linux 约 141 MB（没有 strip，见第 6 节）。
-2. **后端冒烟测试**（[packaging/smoke_backend.py](../packaging/smoke_backend.py)）：`version`（原生扩展必须能加载：`· native 0.1.0`，不是 `none`）；用原生遍历和用 2 个工作进程各扫一次临时小目录；`serve --token-stdin` 握手、`system.info`、stdin 关闭后正常退出。
+2. **后端冒烟测试**（[packaging/smoke_backend.py](../packaging/smoke_backend.py)）：`version`（原生扩展必须能加载：`· native 0.1.0`，不是 `none`）；用原生遍历和用 2 个工作进程各扫一次临时小目录；`serve --token-stdin` 握手、`system.info`、stdin 关闭后正常退出。然后是**插件能 import 的模块**（[packaging/plugin_imports.py](../packaging/plugin_imports.py)，见第 2 节）：每一个都要在冻结后端的插件进程里 import 得到。
 3. **glibc 下限**（只在 Linux）：包里每个 ELF 需要的 glibc 符号版本不超过 2.34（RHEL 9）。
 4. `electron-vite build`；**许可证**（[tools/third_party_licenses.py](../tools/third_party_licenses.py) → `dist/licenses`）；然后 `electron-builder`（[apps/electron/electron-builder.yml](../apps/electron/electron-builder.yml)）。
 5. **不带构建机路径**：冻结的后端和打包好的应用目录里，任何文件都不能出现构建机的家目录（两种斜杠、转义、UTF-8 / UTF-16、不分大小写），否则构建失败；zip 文件（`base_library.zip`）和后端可执行文件里压缩的 Python 模块（PYZ）也逐项解开检查。
@@ -49,11 +49,21 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - 入口 [packaging/backend_entry.py](../packaging/backend_entry.py)：`spaceknife-backend serve …` 就是 `python -m spaceknife serve …`；`spaceknife-backend --helper …` 是扫描助手（冻结后没有 `-m`，`helper_command()` 在冻结时返回 `[自身, "--helper"]`）；入口先调用 `multiprocessing.freeze_support()`，spawn 方式的扫描工作进程会重新进入这个可执行文件。
 - 以 `-X utf8` 冻结（spec 里的解释器选项），日志和 ready 行在所有平台都是 UTF-8。冻结的解释器只从自己的包里导入，不读 `PYTHON*` 环境变量，所以提权助手不需要 `-I`。
 - 收进包里的数据：`locales/*.json`；内置插件 `plugins/builtin/<id>/` 的全部文件（`plugin.toml`、规则、模板，以及 `plugin.py`：它们不是 Python 包，按数据收进来，由插件加载器从文件导入）；SDK 的面板桥副本 `spaceknife_sdk/web/` 和作者文档 `docs/plugin-dev.md`（放在 `spaceknife_sdk/docs/`，`plugin docs` 读它）。`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）和 setuptools（见下面「命令行扫描的启动」）。
-- 插件进程：`spaceknife-backend --plugin-host …`（`plugin check` 的读声明是 `--plugin-host --describe <文件夹>`）。插件能 import 的标准库模块有白名单（`spaceknife_sdk/imports.py`），冻结版只保证这些在。
+- 插件进程：`spaceknife-backend --plugin-host …`（`plugin check` 的读声明是 `--plugin-host --describe <文件夹>`）。插件能 import 的模块有白名单（`spaceknife_sdk/imports.py`），冻结版带上其中每一个（下一节）。
 - Windows 上带图标和版本信息（任务管理器里显示「SpaceKnife backend」）。
 - Linux 上不带构建机的 `libgcc_s.so.1` 和 `libstdc++.so.6`：目标系统都有（glibc 的 `pthread_cancel` 需要 libgcc_s，apt / dnf 需要 libstdc++），manylinux 的 wheel 也这样假设；而 Ubuntu 22.04 的 libgcc_s（GCC 12）需要 `GLIBC_2.35`，打进去在 RHEL 9 上会加载失败。剩下的部分最高需要 `GLIBC_2.34`（原生扩展在 glibc 2.35 上编译，pthread 符号绑定到 2.34 版本），正好是 RHEL 9 的下限；Electron 自身最高 `GLIBC_2.25`。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
 - 命令行也能直接用：安装目录下 `resources/backend/spaceknife-backend scan …`、`run …`、`snapshot …`、`plugin …`（[plugin-dev.md](plugin-dev.md)「命令行」）。
+
+### 插件能 import 的模块
+
+`plugin check` 按白名单（`spaceknife_sdk/imports.py` 的 `STDLIB`、`THIRD_PARTY`，[plugin-dev.md](plugin-dev.md#imports) 7.1 节）查插件的 import，只看名字的第一段：`import xml.dom.minidom`、`from numpy import fft` 也能过。PyInstaller 却只收它分析到的模块，应用自己用不到的（`html.parser`、`sqlite3.dump`、`numpy.linalg.lapack_lite` …）不会自己进包。所以：
+
+- [packaging/plugin_imports.py](../packaging/plugin_imports.py) 的 `--list` 列出插件能 import 的全部模块：白名单里的每个名字，加上它们在构建机上 import 得到的公开子模块（名字里没有 `_` 开头的段；`asyncio.unix_events` 在 Windows 上没有，就不列），去掉 `NOT_FOR_PLUGINS`（测试代码 `numpy.testing`、`*.tests`、构建工具 `numpy.f2py`、mypy 插件 `pydantic.mypy` 等：`check` 允许，但插件代码运行时用不着，应用也不带 pytest、Fortran 编译器和 mypy）。spec 把这份清单全部放进 `hiddenimports`。
+- 构建时（`tools/build_package.py` 在后端冒烟测试之后）它写一个临时插件：每个模块一句 `import`，再用一用几样背后有扩展模块或数据的东西（sqlite3 的 `iterdump`、各种编码、zlib / gzip / bz2 / lzma、zip 和 tar 的压缩方式、时区、`platform`、numpy 的线性代数和随机数、pydantic.v1 …）。冻结后端的 `plugin check` 不能拒绝其中任何一句 import；`plugin call` 在冻结后端的插件进程里运行它，结果和开发环境（`python -m spaceknife plugin call`，同一个插件、同样的沙箱）比：开发环境做得到而冻结版做不到的，构建失败并写出是哪个模块。两边都做不到的只打一行 `note:`。`tools/tests/test_plugin_imports.py` 查清单和 `check` 一致，并用开发环境的后端把整个检查跑一遍。
+- Windows 没有系统的时区库，`zoneinfo` 要 tzdata 包：它在 `package` 依赖组里（只在 Windows 上装），PyInstaller 的 zoneinfo 钩子把它收进包。Linux 和 macOS 用系统的 `/usr/share/zoneinfo`。
+- 加这个检查之前（0.3.3 的冻结版），插件 import `html.parser`、`json.tool`、`numpy.core.*`、`numpy.lib.user_array`、`numpy.linalg.lapack_lite` 会失败，Windows 上 `zoneinfo` 一个时区也没有。
+- 现在两边都做不到、所以只是 `note:` 的：Windows 上插件代码里自己开事件循环（`asyncio.run`、`asyncio.new_event_loop`）被插件沙箱拦下（`socket.bind`：Windows 的事件循环用本机的一对套接字唤醒自己，没有 `net` 权限的插件不能 bind）；`async def` 的方法和钩子跑在插件进程自己的循环上，不受影响。
 
 ### 命令行扫描的启动
 
@@ -186,6 +196,8 @@ uv run python packaging/smoke_app.py dist/electron/win-unpacked/SpaceKnife.exe
 ```bash
 uv run python packaging/smoke_headless.py dist/electron/win-unpacked/SpaceKnife.com
 ```
+
+插件能 import 的模块（第 2 节）在构建里自动检查；单独对一个冻结后端跑：`uv run python packaging/plugin_imports.py dist/backend/spaceknife-backend/spaceknife-backend.exe`。
 
 [packaging/smoke_headless.py](../packaging/smoke_headless.py) 测无头模式：`--headless --listen 127.0.0.1:0` 启动，读打印出的地址，检查页面、`/sk/info` 只认 token、WebSocket 拒绝别的 Origin、用页面自己的 Origin 能和后端握手，再像终端一样停止（SIGINT；Windows 上对 `SpaceKnife.com` 发 Ctrl+Break）。Linux 上不开 xvfb，验证没有显示器也能启动。`Portable build` 工作流在便携版冒烟测试之后跑它。
 
