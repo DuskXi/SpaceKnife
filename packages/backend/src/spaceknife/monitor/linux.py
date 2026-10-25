@@ -12,6 +12,14 @@ so renaming a watched folder re-keys one entry and every path below it follows. 
 appear later (created, or moved in from outside) are watched as soon as their event is read and
 listed once, reporting ``created`` for whatever is already inside (``mkdir`` + write races).
 
+The scan's folders arrive a moment after the scan found them (the server hands them over in ticks,
+then they wait in a :class:`~spaceknife.monitor.poll.Backlog`), often after the scan listed them
+too, and what changed inside a folder in between raises no event. So once a folder's watch is on,
+one ``stat`` compares its mtime with the one the scan recorded
+(:func:`~spaceknife.monitor.poll.listed_changed`): a folder that may have changed is reported as
+``dir`` and listed again. Until every folder handed in is watched or polled the status says
+``starting``.
+
 Decoding (:func:`decode_events`) and interpretation (:func:`interpret`) make no system calls, so
 tests feed them synthetic records — ``IN_Q_OVERFLOW`` is hard to provoke for real.
 
@@ -41,7 +49,7 @@ from loguru import logger
 from .. import fmt
 from ..i18n import Texts
 from .base import Change, Sink, WatchState, WatchStatus
-from .poll import DirPoller, stat_file
+from .poll import Backlog, DirPoller, listed_changed, stat_file
 
 # <sys/inotify.h>
 IN_ACCESS = 0x00000001
@@ -497,7 +505,8 @@ class InotifyWatcher:
         self._limit = int(max_user_watches() * _BUDGET_SHARE)
         self._tree = WatchTree(self.root)
         self._poller = DirPoller(self.root, interval=poll_interval, rate=poll_rate)
-        self._incoming: deque[str] = deque()
+        self._incoming = Backlog()  # from add_dirs, waiting for their watch (or polling)
+        self._root_listed = False  # the scan's record of the root was checked
         self._walk: deque[str] = deque()
         self._recheck: deque[int] = deque()  # watches to revalidate after a queue overflow
         self._ino: _Inotify | None = None
@@ -539,8 +548,8 @@ class InotifyWatcher:
         self._thread = threading.Thread(target=self._run, name="sk-inotify", daemon=True)
         self._thread.start()
 
-    def add_dirs(self, dirs: Iterable[str]) -> None:
-        self._incoming.extend(dirs)
+    def add_dirs(self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0) -> None:
+        self._incoming.add(dirs, mtimes, since_ns)
         self._wake()
 
     def stop(self) -> None:
@@ -565,6 +574,8 @@ class InotifyWatcher:
                 state, detail = "degraded", TEXT["short"].format(count=fmt.count(polled))
             elif polled:
                 state, detail = "degraded", TEXT["polled"].format(count=fmt.count(polled))
+            elif self._incoming or self._poller.settling:
+                state = "starting"  # folders handed in still wait for their watch (and check)
         return WatchStatus(
             state,
             detail,
@@ -611,12 +622,16 @@ class InotifyWatcher:
             return
         self._tree.set_root(wd)
 
-    def _watch(self, path: str, parent: int, name: str) -> int | None:
-        """Watch a folder whose parent is watched; poll it when that is not possible (None)."""
+    def _watch(
+        self, path: str, parent: int, name: str, listed: int | None = None, since_ns: int = 0
+    ) -> int | None:
+        """Watch a folder whose parent is watched; poll it when that is not possible (None).
+        ``listed`` / ``since_ns``: the scan's record of it, which a polling baseline is checked
+        against (the caller checks a watched folder itself)."""
         ino = self._ino
         if ino is None or not self._reserve():
             self._short = self._short or ino is not None
-            self._poller.add(path)
+            self._poller.add(path, listed, since_ns)
             return None
         try:
             wd = ino.add_watch(path, WATCH_MASK)
@@ -628,18 +643,27 @@ class InotifyWatcher:
                 self._kernel_full = self._short = True
             else:
                 logger.debug("inotify_add_watch({}) failed: {}", path, exc)
-            self._poller.add(path)
+            self._poller.add(path, listed, since_ns)
             return None
         if wd in self._tree:  # the same folder under another path (bind mount): one path per watch
             self._release()
-            self._poller.add(path)
+            self._poller.add(path, listed, since_ns)
             return None
         self._tree.add(wd, parent, name)
         return wd
 
-    def _place(self, path: str) -> None:
-        """A folder from add_dirs: watch it (parent watched, budget left) or poll it."""
-        if path == self.root or not path.startswith(self._prefix):
+    def _place(self, path: str, listed: int | None, since_ns: int, out: list[Change]) -> None:
+        """A folder from add_dirs: watch it (parent watched, budget left) or poll it. With the
+        scan's record of it (``listed``), a change since its listing is added to ``out``."""
+        if path == self.root:
+            if listed is not None and not self._root_listed:  # watched (or polled) since start()
+                self._root_listed = True
+                if self._tree.root_wd in self._tree:
+                    self._check(path, listed, since_ns, out)
+                else:
+                    self._poller.add(path, listed, since_ns)
+            return
+        if not path.startswith(self._prefix):
             return
         parent_path, _, name = path.rpartition("/")
         parent_path = parent_path or "/"
@@ -653,14 +677,32 @@ class InotifyWatcher:
             if parent is not None:
                 self._parent_hint = (parent_path, parent)
         if parent is None:
-            self._poller.add(path)  # the parent is polled (or unwatchable): so is this one
+            self._poller.add(path, listed, since_ns)  # the parent is polled (or unwatchable): so is this one
             return
-        if self._tree.lookup(parent, name) is None and path not in self._poller:
-            self._watch(path, parent, name)
+        if self._tree.lookup(parent, name) is not None or path in self._poller:
+            return  # handed in again (its row moved when its parent was listed again): as it is
+        if self._watch(path, parent, name, listed, since_ns) is not None and listed is not None:
+            self._check(path, listed, since_ns, out)
+
+    def _check(self, path: str, listed: int, since_ns: int, out: list[Change]) -> None:
+        """The folder is watched now: did it change after the scan listed it, unseen? (One stat.)"""
+        try:
+            st = os.stat(path, follow_symlinks=path == self.root)
+        except OSError:
+            return  # gone again: its parent's events (or the parent's own check) tell
+        if listed_changed(st.st_mtime_ns, listed, since_ns):
+            out.append(Change("dir", path, is_dir=True))
 
     def _take_incoming(self) -> None:
-        for _ in range(min(len(self._incoming), _ADD_CHUNK)):
-            self._place(self._incoming.popleft())
+        fed = self._incoming.peek(_ADD_CHUNK)
+        if not fed:
+            return
+        changes: list[Change] = []
+        for path, listed, since in fed:
+            self._place(path, listed, since, changes)
+        if changes:
+            self._emit(changes)
+        self._incoming.advance(len(fed))  # after the changes went out: "starting" until then
 
     def _walk_some(self) -> None:
         """Watch folders that appeared and report what is already inside them."""

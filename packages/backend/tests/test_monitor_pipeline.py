@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import os
 import shutil
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -123,6 +124,66 @@ async def test_changes_reach_the_tree(watched: Any, tmp_path: Path) -> None:
     status = handle.status().monitor
     assert status is not None and status.changes > 0 and status.events > 0
     assert mutate.gone_count(handle.store) > 0
+
+
+def hold_the_feed(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    """The scan's folders reach the watchers only once the returned event is set (inotify gets
+    them, and places its watches, a moment after the scan listed them: this stretches that moment)."""
+    go = asyncio.Event()
+    feed = ScanMonitor._feed
+
+    async def held(self: ScanMonitor) -> None:
+        if go.is_set():
+            await feed(self)
+
+    monkeypatch.setattr(ScanMonitor, "_feed", held)
+    return go
+
+
+async def test_a_change_before_a_folder_is_watched_reaches_the_tree(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file written into a folder after the scan listed it, before its watch was placed, raised
+    no event: the check made when the watch is placed lists that folder again."""
+    mgr, _, _ = watched
+    root = build_tree(tmp_path / "root").root
+    go = hold_the_feed(monkeypatch)
+    handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    deep = max((d for d in root.rglob("*") if d.is_dir()), key=lambda d: len(d.parts))
+    (deep / "late.bin").write_bytes(b"l" * 500_000)
+    go.set()
+    await until(same_as_disk(handle, root))
+    check_structure(handle.store)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inotify watches folder by folder")
+async def test_the_status_says_starting_until_every_folder_is_watched(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mgr, _, _ = watched
+    tree = build_tree(tmp_path / "root")
+    go = hold_the_feed(monkeypatch)
+    handle = await mgr.start(p.ScanStartParams(roots=[str(tree.root)], workers=0, auto_snapshot=False))
+    shown: list[str] = []
+    handle.listeners["test"] = lambda st: shown.append(st.monitor.state if st.monitor else "")
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    mon = handle.monitor
+    assert mon is not None
+    st = mon.status()
+    assert (st.state, st.watcher, st.watched_dirs) == ("starting", "inotify", 1)  # done, not yet watched
+    assert shown and set(shown) == {"starting"}  # while it scanned, and when it finished
+    go.set()
+    await until(lambda: mon.status().state == "running")
+    assert mon.status().watched_dirs == tree.dirs + 1
+    await until(lambda: shown[-1] == "running")  # told without waiting for a file change
+    told = len(shown)
+    (tree.root / "later" / "inner").mkdir(parents=True)  # folders the monitor finds itself ...
+    (tree.root / "later" / "inner" / "x.bin").write_bytes(b"x" * 1000)
+    await until(same_as_disk(handle, tree.root))
+    assert len(shown) > told and set(shown[told:]) == {"running"}  # ... do not bring "starting" back
 
 
 async def test_a_view_follows_moved_ids(watched: Any, tmp_path: Path) -> None:

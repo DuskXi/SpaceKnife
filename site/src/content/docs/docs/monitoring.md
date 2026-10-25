@@ -22,7 +22,7 @@ The live monitoring item in the status bar shows the state of monitoring for the
 | Status bar shows | Meaning |
 |---|---|
 | Live monitoring | Every scanned folder is watched with the system's change notifications. The tooltip counts the changes applied so far ("{n} changes applied"), and how many are still waiting ("{pending} pending"). |
-| Live monitoring · starting | The watchers are being set up (FSEvents can take a moment). |
+| Live monitoring · starting | The watchers are being set up (FSEvents can take a moment). On Linux this lasts until the scan is done and every scanned folder has its watch. |
 | Live monitoring · partly polling | Some or all folders are checked by polling instead of notifications. The tooltip says why, for example "Not enough inotify watches; polling {count} folders instead". |
 | Live monitoring · failed | Watching stopped. The tooltip gives the reason, for example "The watched folder was deleted". |
 | Live monitoring off | Monitoring is switched off. |
@@ -47,6 +47,7 @@ SpaceKnife picks the best mechanism the system offers and falls back to polling 
 ### Linux
 
 - One `inotify` watch per folder. New folders get a watch as soon as they appear, and their contents are read at once, so `mkdir` followed by a quick write, or a whole tree moved in, is not missed.
+- A scanned folder gets its watch a moment after the scan read it. Once the watch is on, SpaceKnife checks the folder's modification time against what the scan recorded, so a file created, deleted or renamed in that moment is not missed either: the folder is read again. A file that only changed size in that moment is picked up at its next change, or by a rescan.
 - All open scans share a budget of 80 % of `fs.inotify.max_user_watches`. Folders beyond the budget are polled, and the status bar shows "partly polling".
 - Network file systems (NFS, SMB) and Windows drives under WSL are always polled: the kernel never hears about changes made by other machines (or by Windows).
 - When the kernel's event queue overflows, SpaceKnife reads the watched tree again once things are quiet. Lost events are never ignored silently.

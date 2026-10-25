@@ -14,6 +14,11 @@ reports where something changed; batches are coalesced (``scan.coalesce_ms`` of 
 Changes run under ``STRUCTURE.write()`` on the event loop; views remap their node ids and flash
 what changed. While a hard scan still runs, folders with children waiting in its queue are
 deferred (their ids are in the queue); while an MFT scan reads, everything waits for its tree.
+
+Per-folder watchers (inotify, polling) get the scan's folders in ticks, with the mtime the scan
+recorded for each: a folder that changed between its listing and its watch is reported then
+(``dir``). Until the scan is done and every folder of it is watched or polled, the status says
+``starting``.
 """
 
 from __future__ import annotations
@@ -23,7 +28,9 @@ import contextlib
 import os
 import threading
 import time
+from array import array
 from dataclasses import dataclass
+from itertools import compress
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -35,9 +42,9 @@ from spaceknife_protocol.errors import ErrorCode
 from ..events import emit, printable
 from ..filter.names import forget
 from ..i18n import tr
-from ..monitor import Change, Watcher, create_watcher
+from ..monitor import Change, Watcher, WatchStatus, create_watcher
 from ..scan import worker
-from ..scan.scanner import listed_alloc, verify_names
+from ..scan.scanner import ScanState, listed_alloc, verify_names
 from ..scan.volume import volume_for
 from ..scan.worker import SliceOptions, SliceResult
 from ..store import mutate
@@ -61,6 +68,7 @@ USN_PERIOD_S = 30.0  # checkpoints of the USN journal move on this often
 USN_MAX_ROWS = 1_000_000  # more records to replay than this: list the subtree again instead
 REF_MASK = (1 << 48) - 1  # an NTFS file reference's record number
 SCAN_TICK_S = 0.25  # while a scan runs: hand new folders to the watchers this often
+PER_FOLDER = ("inotify", "poll")  # watchers that take the scan's folders one by one (add_dirs)
 
 
 @dataclass(slots=True)
@@ -121,6 +129,15 @@ class ScanMonitor:
         self.last_apply_ms = 0.0
         self._last_event = 0.0
         self._fed = 0  # rows below this were handed to the watchers
+        # per-folder watchers: a feed after the scan stopped listing handed over all its folders ...
+        self._handed = False
+        # ... and they placed them all: every folder of the scan is watched or polled ("starting"
+        # until then; noted by the loop, which tells the status bar)
+        self._ready = False
+        # the scan listed nothing before this (wall clock, ns): see monitor.poll.listed_changed
+        scanner = handle.scanner
+        began = scanner.started_at if scanner is not None else None
+        self.listed_after = int((time.time() if began is None else min(time.time(), began.timestamp())) * 1e9)
         self._free_at = 0.0
         self._free_due = False  # a change came within FREE_REFRESH_S of the last read
         self.failed = ""
@@ -137,6 +154,7 @@ class ScanMonitor:
             watcher = await self._start_watcher(root.path, self._watcher_for(root.path, root.volume))
             if watcher is not None:
                 self.watchers.append((root.path, watcher))
+        self._ready = not any(w.name in PER_FOLDER for _, w in self.watchers)
         self.task = self._loop.create_task(self._run(), name=f"monitor-{self.handle.id}")
         self.kick()  # a small scan may be done already: its folders need their watches now
 
@@ -216,7 +234,9 @@ class ScanMonitor:
     # ------------------------------------------------------------- status
 
     def status(self) -> p.MonitorStatus:
-        states = [w.status() for _, w in self.watchers]
+        named = [(w.name, w.status()) for _, w in self.watchers]
+        states = [s for _, s in named]
+        setting_up = self._setting_up(named)
         state: Literal["starting", "running", "degraded", "failed"]
         if self.failed and not states:
             state, detail = "failed", self.failed
@@ -225,7 +245,13 @@ class ScanMonitor:
         elif self.failed or any(s.state == "degraded" for s in states):
             state = "degraded"
             detail = self.failed or next(s.detail for s in states if s.state == "degraded")
-        elif states and all(s.state == "running" for s in states):
+        elif (
+            states
+            and not setting_up
+            # once set up, a per-folder watcher placing a few more folders (ones the monitor found,
+            # F5) is still running: the check made as each gets its watch covers the moment
+            and all(s.state == "running" or (s.state == "starting" and n in PER_FOLDER) for n, s in named)
+        ):
             state, detail = "running", ""
         else:
             state, detail = "starting", ""
@@ -245,6 +271,29 @@ class ScanMonitor:
             pending=queued + len(self.deferred) + len(self.trees),
             last_apply_ms=round(self.last_apply_ms, 1),
         )
+
+    def _listing(self) -> bool:
+        """The scan still lists folders (queued, scanning, paused)."""
+        scanner = self.handle.scanner
+        return (
+            self.handle.running
+            and scanner is not None
+            and scanner.state in (ScanState.QUEUED, ScanState.SCANNING)
+        )
+
+    def _setting_up(self, named: list[tuple[str, WatchStatus]]) -> bool:
+        """Per-folder watchers do not have every folder of the scan yet: the scan still lists, its
+        folders were not all handed over, or a watcher still places them. Once over (the loop
+        notes it, and tells the status bar), it stays over until the scan lists again (a stopped
+        scan goes on): rows that come later (folders listed again after a change, new ones) are
+        handed over too, but those folders are watched already, or get their check."""
+        mine = [s for n, s in named if n in PER_FOLDER]
+        if not mine:
+            return False
+        if self._listing():
+            self._ready = self._handed = False
+            return True
+        return not self._ready and not (self._handed and all(s.state != "starting" for s in mine))
 
     # ------------------------------------------------------------- the loop
 
@@ -272,6 +321,9 @@ class ScanMonitor:
                 if self._free_due and now - self._free_at >= FREE_REFRESH_S and await self._refresh_free(now):
                     self.owner.views.volumes_changed(self.handle.id)
                     self.handle.publish()
+                if not self._ready and not self._setting_up([(w.name, w.status()) for _, w in self.watchers]):
+                    self._ready = True  # the last folder got its watch: the status bar learns it now
+                    self.handle.publish()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -280,7 +332,7 @@ class ScanMonitor:
     def _timeout(self) -> float | None:
         if self.trees:
             wait: float | None = max(0.05, QUIET_RESCAN_S - (time.monotonic() - self._last_event))
-        elif self.handle.running or self.deferred or not self.fed:
+        elif self.handle.running or self.deferred or not self.fed or not self._ready:
             wait = SCAN_TICK_S
         else:
             wait = None
@@ -290,30 +342,55 @@ class ScanMonitor:
         return wait
 
     async def _feed(self) -> None:
-        """Hand folders that entered the tree to per-folder watchers (inotify, polling)."""
+        """Hand folders that entered the tree to per-folder watchers (inotify, polling), with the
+        mtime the scan recorded for each (whole seconds, 4 B a folder while they wait): a folder
+        that changed between its listing and its watch is then reported (``dir``).
+
+        Not on Windows: the recursive watch covers the whole tree from the scan's start, polling
+        there is a rare fallback kept as it was, and a listing may give a folder's times from its
+        parent's index entry, which can lag the folder's own."""
+        listing = self._listing()  # before n: once it is over, every row of the scan is below n
+        if listing:
+            self._ready = self._handed = False
+        await self._hand_over()
+        if not listing:
+            self._handed = True
+
+    async def _hand_over(self) -> None:
+        """The folders among the rows added since the last call, shallow first, to each watcher
+        whose root holds them."""
         store = self.handle.store
         n = len(store)
         if self._fed >= n:
             return
-        wanted = [(root, w) for root, w in self.watchers if w.name != "rdcw"]
+        wanted = [(root, w) for root, w in self.watchers if w.name in PER_FOLDER]
         start, self._fed = self._fed, n
         if not wanted:
             return
 
-        def folders() -> list[str]:
+        def folders() -> tuple[list[str], array[int] | None]:
             c = store.cols
             ids = np.arange(start, n, dtype=np.int64)
             skip = np.uint32(Flag.GONE | Flag.MOUNT)  # mount points are never entered by the scan
             ids = ids[(c["kind"][start:n] == Kind.DIR) & ((c["flags"][start:n] & skip) == 0)]
             ids = ids[np.argsort(c["depth"][ids], kind="stable")]  # shallow first
-            return [store.path(int(i)) for i in ids]
+            listed = None
+            if os.name != "nt":
+                listed = array("I")
+                listed.frombytes(c["mtime"][ids].astype(np.uint32).tobytes())
+            return [store.path(int(i)) for i in ids], listed
 
-        paths = await compute(folders)
+        paths, listed = await compute(folders)
+        if not paths:
+            return
         for root, watcher in wanted:
             prefix = root if root.endswith(os.sep) else root + os.sep
-            mine = [q for q in paths if q == root or q.startswith(prefix)]
-            if mine:
-                watcher.add_dirs(mine)
+            inside = [q == root or q.startswith(prefix) for q in paths]
+            if all(inside):  # one root, and no virtual top among them
+                watcher.add_dirs(paths, listed, self.listed_after)
+            elif any(inside):
+                times = None if listed is None else array("I", compress(listed, inside))
+                watcher.add_dirs(list(compress(paths, inside)), times, self.listed_after)
 
     # ------------------------------------------------------------- one batch
 
