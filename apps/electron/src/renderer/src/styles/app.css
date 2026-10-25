@@ -16,6 +16,18 @@ button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: default; }
 :focus-visible { outline: var(--sk-control-focus-ring) solid var(--sk-color-accent-default); outline-offset: 1px; }
+/* Scrollbars, in every scrolling area: a thin rounded thumb on no track and without arrows; under
+   the pointer and while dragged it widens and brightens. Set once here: an area that sets
+   scrollbar-width or scrollbar-color itself falls back to Chromium's own bar. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-thumb { min-width: 32px; min-height: 32px; border: 3px solid transparent; border-radius: 999px; background: var(--sk-color-scroll-thumb) padding-box; }
+::-webkit-scrollbar-thumb:hover, ::-webkit-scrollbar-thumb:active { border-width: 2px; background-color: var(--sk-color-scroll-thumb-hover); }
+@supports not selector(::-webkit-scrollbar) {
+  /* browser mode in a browser without the pseudo-elements (Firefox) */
+  * { scrollbar-width: thin; scrollbar-color: var(--sk-color-scroll-thumb) transparent; }
+}
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .mono { font-family: var(--sk-font-family-mono); }
 .muted { color: var(--sk-color-text-secondary); }
@@ -514,7 +526,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .switch.on { background: var(--sk-color-accent-default); }
 .switch.on span { left: 14px; background: var(--sk-color-text-on-accent); }
 .log-wrap { position: relative; flex: 1 1 auto; min-height: 0; }
-.log-list { position: absolute; inset: 3px 0 0; overflow-y: auto; outline: none; font-size: 12px; scrollbar-width: thin; }
+.log-list { position: absolute; inset: 3px 0 0; overflow-y: auto; outline: none; font-size: 12px; }
 .log-list:focus-visible { box-shadow: inset 0 0 0 1px var(--sk-color-accent-default); }
 .log-row { position: absolute; left: 0; right: 0; height: 20px; display: flex; align-items: center; gap: 10px; padding: 0 18px 0 12px; white-space: nowrap; }
 .log-row:hover, .log-row.on { background: var(--sk-color-bg-hover); }
@@ -972,7 +984,7 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .uc-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 12px; color: var(--sk-color-text-secondary); }
 .uc-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--sk-color-text-tertiary); }
 .uc-tag { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--sk-radius-sm); background: color-mix(in srgb, var(--sk-color-status-warning-fill) 16%, var(--sk-color-status-warning-base)); color: var(--sk-color-status-warning); font-size: 11px; font-weight: 600; }
-.uc-notes { flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-top: 1px solid var(--sk-color-line-subtle); font-size: 12px; line-height: 18px; color: var(--sk-color-text-secondary); user-select: text; scrollbar-width: thin; }
+.uc-notes { flex: 0 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-top: 1px solid var(--sk-color-line-subtle); font-size: 12px; line-height: 18px; color: var(--sk-color-text-secondary); user-select: text; }
 .update-card.dialog .uc-notes { padding: 14px 20px; font-size: 13px; line-height: 20px; }
 .uc-note { margin: 0; overflow-wrap: anywhere; }
 .uc-note.heading { margin-top: 4px; color: var(--sk-color-text-primary); font-weight: 600; }

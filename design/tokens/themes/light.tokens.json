@@ -52,6 +52,10 @@
     "shadow": { "$value": "#12161F57", "$description": "外框的大投影：帮助配图（100%）、命令面板与更新卡（86%）；浅色是 34% 石墨。画布上的投影是 treemap.state.selectShadow" },
     "meter": {
       "used": { "$value": "#868A91", "$description": "状态栏容量条的已用段：在 chrome 上 ≥ 3:1 的最浅中灰，可用段（status.success）仍是条上最显眼的部分" }
+    },
+    "scroll": {
+      "thumb": { "$value": "#A0A5AF", "$description": "滚动条滑块（所有滚动区域；没有轨道和箭头）：在 window 到 raised 的表面上 ≥ 2:1，安静但看得见" },
+      "thumbHover": { "$value": "#7E838E", "$description": "指针在滑块上或正在拖动：在 window 到 raised 的表面上 ≥ 3:1" }
     }
   },
   "treemap": {
