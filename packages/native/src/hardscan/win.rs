@@ -37,7 +37,8 @@ use std::sync::{Arc, OnceLock};
 
 use windows_sys::Wdk::Foundation::{NtClose, NtQueryObject, OBJECT_ATTRIBUTES, OBJECT_NAME_INFORMATION};
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
+    FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE,
+    FILE_STANDARD_INFORMATION, FILE_STAT_INFORMATION, FileStandardInformation, FileStatInformation,
     FILE_FS_ATTRIBUTE_INFORMATION, FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_ID_INFORMATION,
     FILE_INFORMATION_CLASS, FILE_INTERNAL_INFORMATION, FILE_NAME_INFORMATION, FILE_OPEN_BY_FILE_ID,
     FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
@@ -58,9 +59,10 @@ use windows_sys::Win32::Foundation::{
     STATUS_OBJECT_NAME_NOT_FOUND, SetLastError, UNICODE_STRING,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_LIST_DIRECTORY, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     FILE_WRITE_ATTRIBUTES, GetCompressedFileSizeW, GetFullPathNameW, SYNCHRONIZE,
 };
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Diagnostics::Debug::{
     FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, FormatMessageW,
 };
@@ -68,7 +70,7 @@ use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD,
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::case::{self, CaseKey, Class, First, Outcome, Then, fs, mark, msg};
-use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, secs};
+use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, listed, secs};
 
 const FA_READONLY: u32 = 0x1;
 const FA_HIDDEN: u32 = 0x2;
@@ -159,6 +161,9 @@ pub struct RootState {
     /// Ask for FILE_WRITE_ATTRIBUTES only where the file system updates access times
     /// (`atime_updated`; learnt with the file system on the root's first open by path).
     keep_where_updated: bool,
+    /// Files are asked their allocation by NtQueryInformationByName (`ask_alloc`); cleared on the
+    /// root once the system or its file system does not know the call or FileStatInformation.
+    by_name: AtomicBool,
     /// Test seams (private options; docs/native.md 2.2): strict subfolders are opened by their
     /// upcased name (in a case-sensitive NTFS folder that reaches the upper twin, as WinBtrfs's
     /// lookup does), and FileIdExtd listings give every entry the listed folder's own id (as
@@ -190,6 +195,7 @@ impl RootState {
             final_seen: AtomicU32::new(0),
             dot_check: o.dot_check,
             keep_where_updated: o.keep_where_updated,
+            by_name: AtomicBool::new(true),
             fold_strict: o.fold_strict,
             extd_self_ids: o.extd_self_ids,
         }
@@ -259,6 +265,12 @@ pub struct OpenStats {
     /// Roots (per call) whose file system does not update access times by the system's setting:
     /// no FILE_WRITE_ATTRIBUTES there (`keep_where_updated`).
     pub keep_off: AtomicU64,
+    /// Files whose listing entry gave no reliable allocation (`listed_alloc`), asked by name;
+    /// of them, those asked through a handle (no NtQueryInformationByName here), and those that
+    /// could not be asked (the listed value stands).
+    pub alloc_asked: AtomicU64,
+    pub alloc_ask_opened: AtomicU64,
+    pub alloc_ask_failed: AtomicU64,
 }
 
 pub static STATS: OpenStats = OpenStats {
@@ -287,6 +299,9 @@ pub static STATS: OpenStats = OpenStats {
     dot_matched: AtomicU64::new(0),
     dot_unmatched: AtomicU64::new(0),
     keep_off: AtomicU64::new(0),
+    alloc_asked: AtomicU64::new(0),
+    alloc_ask_opened: AtomicU64::new(0),
+    alloc_ask_failed: AtomicU64::new(0),
 };
 
 fn bump(c: &AtomicU64) {
@@ -328,6 +343,9 @@ pub fn open_stats(reset: bool) -> Vec<(&'static str, u64)> {
         ("dot_matched", get(&s.dot_matched)),
         ("dot_unmatched", get(&s.dot_unmatched)),
         ("keep_off", get(&s.keep_off)),
+        ("alloc_asked", get(&s.alloc_asked)),
+        ("alloc_ask_opened", get(&s.alloc_ask_opened)),
+        ("alloc_ask_failed", get(&s.alloc_ask_failed)),
     ]
 }
 
@@ -1382,7 +1400,11 @@ struct Raw<'a> {
     creation: i64,
     access: i64,
     write: i64,
+    /// ChangeTime (metadata changes too: a SetFileTime moves it, `listed_alloc`).
+    change: i64,
     eof: i64,
+    /// AllocationSize of the listing entry (the same offset in all three classes).
+    alloc: i64,
     /// File id and its width in bits (FileIdExtd 128, FileIdBoth 64, FileBoth none: 0).
     id: u128,
     id_bits: u8,
@@ -1441,7 +1463,9 @@ unsafe fn read_entry<'a>(p: *const u8, avail: usize, level: u8) -> Option<(u32, 
             creation: field!(i64, E, CreationTime),
             access: field!(i64, E, LastAccessTime),
             write: field!(i64, E, LastWriteTime),
+            change: field!(i64, E, ChangeTime),
             eof: field!(i64, E, EndOfFile),
+            alloc: field!(i64, E, AllocationSize),
             id,
             id_bits,
             name,
@@ -1497,19 +1521,192 @@ fn hint_of(raw: &Raw<'_>, btrfs: bool) -> Hint {
 
 /// What the entries of one listing are read with.
 #[derive(Clone, Copy)]
-struct Listing {
+struct Listing<'a> {
     /// The folder was opened by file id or lies below such a folder: no path reaches its files
-    /// (compressed and sparse files keep their rounded size: GetCompressedFileSizeW takes a path).
+    /// (the estimate keeps the rounded size of compressed and sparse files: GetCompressedFileSizeW
+    /// takes a path; the listing rule does not ask their files).
     pinned: bool,
     btrfs: bool,
     up: &'static [u16],
+    /// When the listing was read (FILETIME, 100 ns since 1601; 0 = unknown): `listed_alloc`.
+    now: i64,
+    /// The listed folder's handle: files are asked relative to it (`ask_alloc`).
+    dir: HANDLE,
+    state: &'a RootState,
+}
+
+/// How long after a file's last write or change its parent's entry may still show an old
+/// allocation. NTFS and ReFS allocate the clusters of sparse and compressed files only when the
+/// cache writes them out (≈3 s after the write, measured 2026-10-24), and update the parent's
+/// entry when the file is next opened and closed or its delayed close comes (10–15 s without any
+/// open); the file itself answers right after the write-out. A minute leaves room for a busy
+/// lazy writer.
+const LISTING_LAG_100NS: i64 = 60 * 10_000_000;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ListedAlloc {
+    Use(i64),
+    /// Ask the file (`ask_alloc`), then `on_disk`.
+    Ask,
+}
+
+/// What a file system's AllocationSize means on disk: a value that is not whole clusters is data
+/// kept in the file's record or its directory and takes no cluster (NTFS resident data and ReFS
+/// inline data, listed as the length rounded up to 8 bytes; a WinBtrfs sparse file without data
+/// below a cluster lists its length). WinBtrfs lists inline extents as a whole sector: kept, as
+/// Linux counts them too.
+fn on_disk(alloc: i64, cluster: i64) -> i64 {
+    let a = alloc.max(0);
+    if a % cluster != 0 { 0 } else { a }
+}
+
+/// Size on disk of a file from its listing entry, on the file systems this was measured on
+/// (`RootOpts::listed_alloc`, worker.py `_listed_alloc`). The entry's AllocationSize is the file
+/// system's own count (what FileStandardInformation and its MFT record say, for preallocated,
+/// sparse, compressed and resident files alike), so files are not opened, except where the entry
+/// is known to lag or to hide the count (`Ask`):
+/// - sparse and compressed files written or changed in the last minute (`LISTING_LAG_100NS`;
+///   `written` is the later of LastWriteTime and ChangeTime: a SetFileTime after the write moves
+///   the change time);
+/// - NTFS files that list no clusters although they are neither empty, sparse nor compressed:
+///   WOF-compressed files (their data lives in an alternate stream, and the WOF filter hides the
+///   reparse attribute in listings; the file answers with the compressed size).
+///
+/// Never asked: on Btrfs (WinBtrfs lists its inodes as they are; its compressed size is the
+/// logical size of sparse files) and in pinned folders (no name reaches their files for sure).
+fn listed_alloc(attrs: u32, eof: i64, alloc: i64, written: i64, fs: u8, how: &Listing<'_>) -> ListedAlloc {
+    let packed = attrs & (FA_COMPRESSED | FA_SPARSE) != 0;
+    let recent = how.now != 0 && how.now.saturating_sub(written) < LISTING_LAG_100NS;
+    let hidden = fs == listed::NTFS && !packed && alloc <= 0 && eof > 0;
+    let asks = matches!(fs, listed::NTFS | listed::REFS) && !how.pinned;
+    if asks && ((packed && recent) || hidden) {
+        return ListedAlloc::Ask;
+    }
+    ListedAlloc::Use(alloc.max(0))
+}
+
+/// NtQueryInformationByName: Windows 10 1703 and later. Looked up rather than linked, so the
+/// module still loads on older systems (which then open the file, `ask_alloc`).
+type QueryByName = unsafe extern "system" fn(
+    *const OBJECT_ATTRIBUTES,
+    *mut IO_STATUS_BLOCK,
+    *mut core::ffi::c_void,
+    u32,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
+
+fn query_by_name() -> Option<QueryByName> {
+    static FN: OnceLock<Option<QueryByName>> = OnceLock::new();
+    *FN.get_or_init(|| {
+        let ntdll: Vec<u16> = "ntdll.dll\0".encode_utf16().collect();
+        // SAFETY: ntdll is mapped in every process; the name is NUL-terminated.
+        let module = unsafe { GetModuleHandleW(ntdll.as_ptr()) };
+        if module.is_null() {
+            return None;
+        }
+        // SAFETY: the symbol, when present, has this signature (ntifs.h).
+        unsafe { GetProcAddress(module, c"NtQueryInformationByName".as_ptr().cast()) }
+            .map(|f| unsafe { std::mem::transmute::<_, QueryByName>(f) })
+    })
+}
+
+/// The size on disk of the file `name` in the listed folder, as the file system counts it now
+/// (FileStandardInformation's AllocationSize; the same as FileStatInformation's), or None when it
+/// cannot be asked (gone, denied): the listing's value stands. Asked relative to the folder's open
+/// handle with the one name the listing gave: by NtQueryInformationByName, which opens no handle,
+/// else (older systems, file systems without FileStatInformation) by a relative open.
+fn ask_alloc(name: &[u16], how: &Listing<'_>) -> Option<i64> {
+    bump(&STATS.alloc_asked);
+    let mut units = name.to_vec();
+    if units.len() * 2 > u16::MAX as usize {
+        return None;
+    }
+    let us = UNICODE_STRING {
+        Length: (units.len() * 2) as u16,
+        MaximumLength: (units.len() * 2) as u16,
+        Buffer: units.as_mut_ptr(),
+    };
+    // the name exactly as listed: in a case-sensitive folder it is that entry, not a case twin
+    let oa = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: how.dir,
+        ObjectName: &us,
+        Attributes: 0,
+        SecurityDescriptor: ptr::null(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let mut iosb = IO_STATUS_BLOCK::default();
+    if how.state.by_name.load(Ordering::Relaxed)
+        && let Some(query) = query_by_name()
+    {
+        let mut info = FILE_STAT_INFORMATION::default();
+        // SAFETY: `oa` names a file relative to an open directory handle; `info` is writable.
+        let status = unsafe {
+            query(
+                &oa,
+                &mut iosb,
+                (&raw mut info).cast(),
+                size_of::<FILE_STAT_INFORMATION>() as u32,
+                FileStatInformation,
+            )
+        };
+        if status >= 0 {
+            return Some(info.AllocationSize);
+        }
+        if !unsupported(status) {
+            bump(&STATS.alloc_ask_failed);
+            return None;
+        }
+        how.state.by_name.store(false, Ordering::Relaxed);
+    }
+    bump(&STATS.alloc_ask_opened);
+    let mut h: HANDLE = ptr::null_mut();
+    // SAFETY: all pointers are valid for the call.
+    let status = unsafe {
+        NtOpenFile(
+            &mut h,
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            &oa,
+            &mut iosb,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT,
+        )
+    };
+    if status < 0 {
+        bump(&STATS.alloc_ask_failed);
+        return None;
+    }
+    let h = Handle(h);
+    let mut info = FILE_STANDARD_INFORMATION::default();
+    // SAFETY: `info` is writable for its size.
+    let status = unsafe {
+        NtQueryInformationFile(
+            h.0,
+            &mut iosb,
+            (&raw mut info).cast(),
+            size_of::<FILE_STANDARD_INFORMATION>() as u32,
+            FileStandardInformation,
+        )
+    };
+    if status < 0 {
+        bump(&STATS.alloc_ask_failed);
+        return None;
+    }
+    Some(info.AllocationSize)
+}
+
+fn filetime_now() -> i64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => (d.as_secs() as i64 + SECS_1601_TO_1970) * 10_000_000 + i64::from(d.subsec_nanos() / 100),
+        Err(_) => 0,
+    }
 }
 
 fn add_entry(
     raw: &Raw<'_>,
     dir: &[u16],
     root: &RootOpts,
-    how: Listing,
+    how: &Listing<'_>,
     base: usize,
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
@@ -1535,6 +1732,14 @@ fn add_entry(
     } else if attrs & (FA_RECALL_ON_DATA_ACCESS | FA_RECALL_ON_OPEN) != 0 {
         flags |= flag::CLOUD;
         0
+    } else if root.listed_alloc != listed::OFF {
+        let fs = root.listed_alloc;
+        let written = raw.write.max(raw.change);
+        let a = match listed_alloc(attrs, raw.eof, raw.alloc, written, fs, how) {
+            ListedAlloc::Use(a) => a,
+            ListedAlloc::Ask => ask_alloc(raw.name, how).unwrap_or(raw.alloc),
+        };
+        on_disk(a, cluster)
     } else if attrs & (FA_COMPRESSED | FA_SPARSE) != 0 {
         let real = if how.pinned { None } else { compressed_size(dir, raw.name) };
         round_up(real.unwrap_or(size), cluster)
@@ -1758,6 +1963,9 @@ fn list_into(
         pinned,
         btrfs: state.btrfs(),
         up: upcase(),
+        now: if root.listed_alloc != listed::OFF { filetime_now() } else { 0 },
+        dir: h.0,
+        state,
     };
     // test seam: FileIdExtd ids as WinBtrfs gives them, the listed folder's own
     let own_id = if state.extd_self_ids { file_id(h, 128) } else { None };
@@ -1842,7 +2050,7 @@ fn list_into(
                         skip = false;
                     }
                 } else if n != [b'.' as u16, b'.' as u16] {
-                    add_entry(&raw, path, root, how, base, arena, subdirs);
+                    add_entry(&raw, path, root, &how, base, arena, subdirs);
                 }
                 if next == 0 || off + next as usize >= filled {
                     break;
@@ -1994,6 +2202,54 @@ mod tests {
         assert_eq!(round_up(i64::MAX, 4096), i64::MAX);
     }
 
+    #[test]
+    fn listed_alloc_rules() {
+        // values as NTFS, ReFS and WinBtrfs listed small probe files (2026-10-24)
+        const S: i64 = 10_000_000;
+        let state = RootState::new(&StateOpts::default());
+        let how = |now: i64, pinned: bool| Listing {
+            pinned,
+            btrfs: false,
+            up: &[],
+            now,
+            dir: ptr::null_mut(),
+            state: &state,
+        };
+        let old = how(1_000 * S, false);
+        let (ntfs, refs, btrfs) = (listed::NTFS, listed::REFS, listed::BTRFS);
+        let use_ = ListedAlloc::Use;
+        let ask = ListedAlloc::Ask;
+        // the listed value as it is: preallocated, truncated, compressed and settled sparse files
+        assert_eq!(listed_alloc(0x20, 425, 4096, 0, ntfs, &old), use_(4096)); // truncated: not resident again
+        assert_eq!(listed_alloc(0x820, 1 << 20, 131072, 0, ntfs, &old), use_(131072)); // compressed text
+        assert_eq!(listed_alloc(0x220, 16 << 20, 131072, 0, ntfs, &old), use_(131072)); // sparse, settled
+        assert_eq!(listed_alloc(0x20, 700, 704, 0, ntfs, &old), use_(704)); // resident: on_disk makes it 0
+        // NTFS: no clusters listed for a file that is not empty, sparse or compressed (WOF) -> ask
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, ntfs, &old), ask);
+        assert_eq!(listed_alloc(0x20, 0, 0, 0, ntfs, &old), use_(0));
+        assert_eq!(listed_alloc(0x220, 2000, 0, 0, ntfs, &old), use_(0)); // sparse, no data: 0 is right
+        // sparse or compressed, written or changed in the last minute: the parent entry may lag
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 990 * S, ntfs, &old), ask);
+        assert_eq!(listed_alloc(0x820, 1 << 20, 1 << 20, 990 * S, refs, &old), ask);
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 900 * S, ntfs, &old), use_(0));
+        assert_eq!(listed_alloc(0x20, 3000, 4096, 990 * S, ntfs, &old), use_(4096)); // plain: listed at close
+        // ReFS: an empty-looking entry is no WOF file (WOF is NTFS's)
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, refs, &old), use_(0));
+        // WinBtrfs and folders opened by id are never asked; an unknown clock is never "recent"
+        assert_eq!(listed_alloc(0x220, 64 << 20, 4096, 999 * S, btrfs, &old), use_(4096));
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, ntfs, &how(1_000 * S, true)), use_(0));
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 0, ntfs, &how(0, false)), use_(0));
+        // on disk: NTFS resident and ReFS inline data take no cluster, Btrfs inline extents a sector
+        let c = 4096;
+        assert_eq!(on_disk(704, c), 0);
+        assert_eq!(on_disk(104, c), 0);
+        assert_eq!(on_disk(1500, c), 0);
+        assert_eq!(on_disk(8192, c), 8192);
+        assert_eq!(on_disk(4096, c), 4096); // WinBtrfs: a 100-byte file
+        assert_eq!(on_disk(2000, c), 0); // WinBtrfs: a sparse 2000-byte file without data
+        assert_eq!(on_disk(-1, c), 0);
+    }
+
     fn raw(attrs: u32, tag: u32, eof: i64) -> Raw<'static> {
         static NAME: [u16; 5] = [
             b'f' as u16,
@@ -2008,7 +2264,9 @@ mod tests {
             creation: 0,
             access: 0,
             write: 0,
+            change: 0,
             eof,
+            alloc: 0,
             id: 0,
             id_bits: 0,
             name: &NAME,
@@ -2394,23 +2652,32 @@ mod tests {
     }
 
     fn entry(attrs: u32, tag: u32, eof: i64) -> (u8, u32, i64, i64, usize) {
+        entry_with(&raw(attrs, tag, eof), listed::OFF)
+    }
+
+    fn entry_with(raw: &Raw<'_>, listed_alloc: u8) -> (u8, u32, i64, i64, usize) {
         let root = RootOpts {
             cluster_size: 4096,
             resident_max: 512,
+            listed_alloc,
             ..RootOpts::default()
         };
         let mut arena = Arena::default();
         let mut subs = Vec::new();
+        let state = RootState::new(&StateOpts::default());
         let how = Listing {
             pinned: false,
             btrfs: false,
             up: upcase(),
+            now: 0,
+            dir: ptr::null_mut(),
+            state: &state,
         };
         add_entry(
-            &raw(attrs, tag, eof),
+            raw,
             &w("C:\\nowhere-spaceknife"),
             &root,
-            how,
+            &how,
             0,
             &mut arena,
             &mut subs,
@@ -2451,6 +2718,24 @@ mod tests {
             entry(FA_COMPRESSED, 0, 5000),
             (kind::FILE, flag::COMPRESSED, 5000, 8192, 0)
         );
+        // the listing rule: the entry's AllocationSize, resident and inline data as no cluster
+        let listed = |attrs: u32, eof: i64, alloc: i64, fs: u8| {
+            entry_with(&Raw { alloc, ..raw(attrs, 0, eof) }, fs).3
+        };
+        assert_eq!(listed(0x20, 700, 704, listed::NTFS), 0);
+        assert_eq!(listed(0x20, 600, 4096, listed::NTFS), 4096); // shrunk below the resident size
+        assert_eq!(listed(0x20, 3000, 4096, listed::NTFS), 4096);
+        assert_eq!(listed(0x20, 1000, 1 << 20, listed::NTFS), 1 << 20); // preallocated
+        assert_eq!(listed(FA_SPARSE, 16 << 20, 131072, listed::NTFS), 131072);
+        assert_eq!(listed(FA_COMPRESSED, 5000, 4096, listed::NTFS), 4096);
+        assert_eq!(listed(0x20, 1500, 1500, listed::REFS), 0); // inline
+        assert_eq!(listed(0x20, 100, 4096, listed::BTRFS), 4096);
+        assert_eq!(listed(FA_SPARSE, 64 << 20, 8192, listed::BTRFS), 8192);
+        assert_eq!(listed(FA_SPARSE, 2000, 2000, listed::BTRFS), 0);
+        // the estimate: 700 B is past resident_max (512), a cluster, though NTFS keeps it resident
+        assert_eq!(listed(0x20, 700, 704, listed::OFF), 4096);
+        // cloud placeholders stay 0 under the listing rule too
+        assert_eq!(listed(FA_RECALL_ON_DATA_ACCESS, 10_000, 12288, listed::NTFS), 0);
     }
 
     #[test]

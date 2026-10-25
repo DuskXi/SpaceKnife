@@ -197,6 +197,7 @@ def native_slicer() -> Slicer | None:
     scan_slice = mod.scan_slice
     # builds before the check of case-only siblings reject these keys (docs/native.md 2.2)
     names = "verify_names" in getattr(mod, "ROOT_KEYS", ())
+    listed = "listed_alloc" in getattr(mod, "ROOT_KEYS", ())
     known = getattr(mod, "OPT_KEYS", ())
     switches = [k for k in ("skip_final", "dot_check", "keep_where_updated") if k in known]
 
@@ -210,6 +211,7 @@ def native_slicer() -> Slicer | None:
                 **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the keys
                 **({"protect": list(r.protect)} if r.protect else {}),
                 **({"path": r.path, "verify_names": r.verify_names} if names else {}),
+                **({"listed_alloc": r.listed_alloc} if listed else {}),
             }
             for r in opts.roots
         ]
@@ -233,6 +235,18 @@ def verify_names(volume: VolumeInfo | None) -> bool:
     (``RootOptions.verify_names``): Windows on WinBtrfs, where trees Linux made can hold names
     that differ only in case, and an open by name takes the first entry that matches in any case."""
     return sys.platform == "win32" and volume is not None and volume.fs_type.lower() == "btrfs"
+
+
+def listed_alloc(volume: VolumeInfo | None) -> str:
+    """``RootOptions.listed_alloc`` for a root on ``volume``: files take their size on disk from
+    their listing entries on local NTFS, ReFS and WinBtrfs volumes (where the listing was measured
+    against the file system's own count); elsewhere (FAT, exFAT, network shares, other systems), or
+    with SPACEKNIFE_WIN_LISTED_ALLOC=0, it is estimated from the size as before."""
+    if sys.platform != "win32" or volume is None or volume.is_remote:
+        return ""
+    if not worker._env_switch("SPACEKNIFE_WIN_LISTED_ALLOC", True):
+        return ""
+    return {"ntfs": "NTFS", "refs": "ReFS", "btrfs": "Btrfs"}.get(volume.fs_type.lower(), "")
 
 
 def make_pool(workers: int | None = None) -> ProcessPoolExecutor:
@@ -342,6 +356,7 @@ class Scanner:
                     protect=tuple(p for p in protected if inside(p, path)),
                     path=path,
                     verify_names=verify_names(volume),
+                    listed_alloc=listed_alloc(volume),
                 )
             )
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))

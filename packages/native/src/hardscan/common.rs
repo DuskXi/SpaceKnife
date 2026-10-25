@@ -47,6 +47,33 @@ pub struct RootOpts {
     /// Windows: check every task by the stored names below the root, as on Btrfs (where names
     /// fold onto case-sensitive storage, which the walker finds out itself).
     pub verify_names: bool,
+    /// Windows: files take their size on disk from their listing entries' AllocationSize, as this
+    /// file system counts it (`listed`; worker.RootOptions.listed_alloc, win.rs `listed_alloc`).
+    /// `listed::OFF`: estimated from the size (`cluster_size`, `resident_max`, the compressed size
+    /// of sparse and compressed files).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub listed_alloc: u8,
+}
+
+/// worker.RootOptions.listed_alloc: the local file system whose listings give files their size on
+/// disk (the ones it was measured on), or OFF.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod listed {
+    pub const OFF: u8 = 0;
+    pub const NTFS: u8 = 1;
+    pub const REFS: u8 = 2;
+    pub const BTRFS: u8 = 3;
+
+    /// The option's text ("NTFS", "ReFS", "Btrfs", any case; "" = OFF), or None.
+    pub fn parse(name: &str) -> Option<u8> {
+        match name.to_ascii_lowercase().as_str() {
+            "" => Some(OFF),
+            "ntfs" => Some(NTFS),
+            "refs" => Some(REFS),
+            "btrfs" => Some(BTRFS),
+            _ => None,
+        }
+    }
 }
 
 impl Default for RootOpts {
@@ -60,6 +87,7 @@ impl Default for RootOpts {
             protect: Vec::new(),
             path: NativePath::default(),
             verify_names: false,
+            listed_alloc: listed::OFF,
         }
     }
 }
