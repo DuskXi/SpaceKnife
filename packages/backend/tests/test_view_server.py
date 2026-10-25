@@ -40,7 +40,7 @@ from spaceknife_protocol.methods import (
     VIEW_ZOOM,
 )
 
-from .test_scan_server import wait_done
+from .test_scan_server import finished, wait_done
 from .test_view_visuals import FAKES
 from .tree_fixture import build_tree
 
@@ -273,6 +273,7 @@ async def test_views_follow_whether_their_scan_runs(
     tmp_path: Path, server: Server, client: Connection
 ) -> None:
     scan_id = await scanned(tmp_path, client)
+    await finished(server, scan_id)
     vc = ViewClient(client)
     update, _ = await vc.call(
         VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=800, height=600))
