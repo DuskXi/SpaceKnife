@@ -5,10 +5,14 @@
   「重新扫描」, a scan source listed again). Per plugin and scan the changes of about a second come
   together in one call, and a plugin whose hook still runs gets the next one when it is done (never
   a queue of them); at most :data:`TREE_FOLDERS` folders are listed, ``more`` counts the rest. Each
-  folder comes with its path and its size on disk before and after the changes. The folders follow
-  every remap, also while the hook runs: a hook that met a reorganised tree (``STALE_TREE``: live
-  monitoring moved rows meanwhile) is called again with the new ids (host.py ``_hook``), and after
-  :data:`~.host.HOOK_STALE_RETRIES` tries its changes go with the next ones (at most
+  folder comes with its path and its size on disk (``tot_alloc``) before and after the changes:
+  ``before`` as the monitor read it right before the first of them touched the folder (a folder
+  they added: 0; :class:`SizesBefore`), ``after`` as it was right after the last of them was
+  applied, so the calls of one plugin follow on from each other (one call's ``after`` is the next
+  one's ``before``). The folders follow every remap, also while the hook runs: a hook that met a
+  reorganised tree (``STALE_TREE``: live monitoring moved rows meanwhile) is called again with the
+  new ids (host.py ``_hook``) and with the changes that came meanwhile (one call for both), and
+  after :data:`~.host.HOOK_STALE_RETRIES` tries its changes go with the next ones (at most
   :data:`TREE_REQUEUES` times in a row);
 - the ``snapshots`` hook (``snapshots.read`` only): snapshots were saved or pruned;
 - notices (``ctx.notify``, ``notify`` only): checked, bounded, at most one per plugin every
@@ -23,7 +27,7 @@ import functools
 import itertools
 import json
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -45,8 +49,9 @@ if TYPE_CHECKING:
 TREE_EVENT_S = 1.0  # tree_changed: the changes of this long come together (per plugin and scan)
 TREE_FOLDERS = 256  # folders one tree_changed lists (``more`` counts the others)
 TREE_REQUEUES = 5  # changes a hook kept meeting a reorganised tree with: sent again this often, then dropped
-GROWN_CHANGES = 200_000  # changes of one batch whose sizes are followed up the tree (more: sizes unknown)
-GROWN_FOLDERS = 65_536  # folders whose growth one plugin's pending changes follow (more: unknown)
+# folders whose sizes before and after one batch (one plugin's pending changes) are kept, the folders
+# above the changes included (more: before is not known); ~200 B each while they wait (about a second)
+SIZES_FOLDERS = 32_768
 SNAPSHOTS_EVENT_S = 0.5  # the snapshots hook: saves and prunes of this long come together
 SNAPSHOT_PATHS = 64  # paths one snapshots call lists (of saved, of removed)
 NOTICE_GAP_S = 5.0  # a plugin's notices: at most one in this many seconds (the SDK holds to it too)
@@ -59,13 +64,18 @@ class _TreeDue:
 
     epoch: int
     folders: dict[int, None] = field(default_factory=dict)  # an ordered set, at most TREE_FOLDERS
-    # every folder holding a change -> what its size on disk changed by in these changes (its
-    # size before = after - this); None: not known (the tree was replaced, too many changes)
-    grown: dict[int, int] | None = field(default_factory=dict)
+    # every folder the changes involve, the folders above them included -> (its size on disk right
+    # before the first of them, right after the last); None: not known (the tree was replaced, a
+    # scan source listed again, too many folders)
+    sizes: dict[int, tuple[int, int]] | None = field(default_factory=dict)
     more: int = 0
     changes: int = 0
 
-    def add(self, folders: Sequence[int], changes: int, grown: Mapping[int, int] | None = None) -> None:
+    def add(
+        self, folders: Sequence[int], changes: int, sizes: Mapping[int, tuple[int, int]] | None = None
+    ) -> None:
+        """Changes that came after these: their folders, and the sizes (before, after) of the
+        folders they involve (None: not known, and then not known for the whole lot)."""
         self.changes += changes
         for f in folders:
             if f in self.folders:
@@ -74,69 +84,119 @@ class _TreeDue:
                 self.more += 1
             else:
                 self.folders[f] = None
-        if grown is None or self.grown is None or len(self.grown) + len(grown) > GROWN_FOLDERS:
-            self.grown = None
+        mine = self.sizes
+        if sizes is None or mine is None:
+            self.sizes = None
             return
-        for k, v in grown.items():
-            self.grown[k] = self.grown.get(k, 0) + v
+        for f, (b, a) in sizes.items():
+            had = mine.get(f)
+            mine[f] = (b if had is None else had[0], a)  # before: the first one's; after: the last
+        if len(mine) > SIZES_FOLDERS:
+            self.sizes = None
 
     def remap(self, new_ids: Callable[[np.ndarray], np.ndarray]) -> None:
-        """Node ids changed: the folders (and the growth they follow) take their new ids."""
+        """Node ids changed: the folders (and the sizes they come with) take their new ids."""
         if self.folders:
             moved = new_ids(np.fromiter(self.folders, dtype=np.int64, count=len(self.folders)))
             self.folders = dict.fromkeys(int(m) for m in moved.tolist() if m >= 0)
-        if self.grown:
-            keys = np.fromiter(self.grown, dtype=np.int64, count=len(self.grown))
-            moved = new_ids(keys)
-            self.grown = {
-                int(m): d for m, d in zip(moved.tolist(), self.grown.values(), strict=True) if m >= 0
+        if self.sizes:
+            moved = new_ids(np.fromiter(self.sizes, dtype=np.int64, count=len(self.sizes)))
+            self.sizes = {
+                int(m): s for m, s in zip(moved.tolist(), self.sizes.values(), strict=True) if m >= 0
             }
 
     def forget_ids(self, roots: Sequence[int]) -> None:
         """The tree was replaced without a remap: what changed is somewhere below the roots."""
         had = bool(self.folders)
         self.folders = {}
-        self.grown = None
+        self.sizes = None
         if had:
             self.add([int(r) for r in roots], 0)
 
     def then(self, newer: _TreeDue) -> _TreeDue:
-        """These changes (not heard of in the end) followed by ``newer``, of the same epoch."""
+        """These changes followed by ``newer``, of the same epoch: one lot (each folder's size
+        before is the one before these, after the one after ``newer``)."""
         out = _TreeDue(epoch=newer.epoch, more=self.more + newer.more)
-        out.add(list(self.folders), self.changes, self.grown)
-        out.add(list(newer.folders), newer.changes, newer.grown)
+        out.add(list(self.folders), self.changes, self.sizes)
+        out.add(list(newer.folders), newer.changes, newer.sizes)
         return out
 
+    def absorb(self, newer: _TreeDue) -> None:
+        """:meth:`then`, in place (the hook hearing of these is called again with ``newer`` too)."""
+        both = self.then(newer)
+        self.epoch, self.folders, self.sizes = both.epoch, both.folders, both.sizes
+        self.more, self.changes = both.more, both.changes
 
-def grown_by(store: NodeStore, changes: Mapping[int, int]) -> dict[int, int] | None:
-    """What each folder's size on disk changed by in ``changes`` (node -> change of its own
-    allocation): a changed file counts in its folder and every folder above, a changed folder in
-    itself and above. None when there are too many changes to follow (or none were named)."""
-    if not changes or len(changes) > GROWN_CHANGES:
-        return None
-    n = len(store)
-    ids = np.fromiter(changes.keys(), dtype=np.int64, count=len(changes))
-    deltas = np.fromiter(changes.values(), dtype=np.int64, count=len(changes))
-    ok = (ids > 0) & (ids < n)
-    ids, deltas = ids[ok], deltas[ok]
+
+def add_sizes(store: NodeStore, folders: Iterable[int], into: dict[int, int]) -> None:
+    """Each folder of ``folders`` and every folder above it that ``into`` does not have yet: its
+    size on disk as the tree has it now (``tot_alloc``, with everything below it)."""
     c = store.cols
-    parent = c["parent"]
-    cur = np.where(c["kind"][ids] == Kind.DIR, ids, parent[ids].astype(np.int64))
+    tot, parent = c["tot_alloc"], c["parent"]
+    n = len(store)
+    for folder in folders:
+        f = int(folder)
+        while 0 < f < n and f not in into:  # up to a root (its parent is the top, 0)
+            into[f] = int(tot[f])
+            up = int(parent[f])
+            if up == f:
+                break
+            f = up
+
+
+class SizesBefore:
+    """What each folder took on disk (``tot_alloc``) right before a batch of changes first touched
+    it, for ``tree_changed`` (``TreeChange.before``). The scan's monitor calls :meth:`take` before
+    it applies each change, with the folder whose totals the change starts from (a changed file's
+    folder, a folder it lists again): that folder and every one above it are read, each the first
+    time only; :meth:`new` for the folders the batch adds (they took nothing before it); and
+    :meth:`remap` when the batch moves rows. What a folder added by the batch holds (its subtree,
+    scanned before the batch is announced) is then in its ``after`` and its parents' too. ``sizes``
+    is None once more than :data:`SIZES_FOLDERS` folders are involved; :meth:`of` gives None when
+    the tree's ids changed some other way meanwhile."""
+
+    __slots__ = ("epoch", "sizes", "store")
+
+    def __init__(self, store: NodeStore) -> None:
+        self.store = store
+        self.epoch = int(store.epoch)
+        self.sizes: dict[int, int] | None = {}
+
+    def take(self, folders: Iterable[int]) -> None:
+        sizes = self.sizes
+        if sizes is None:
+            return
+        if int(self.store.epoch) != self.epoch:  # ids of another tree now: what was taken is lost
+            self.sizes = None
+            return
+        add_sizes(self.store, folders, sizes)
+        if len(sizes) > SIZES_FOLDERS:
+            self.sizes = None
+
+    def new(self, folders: Iterable[int]) -> None:
+        if self.sizes is not None:
+            for f in folders:
+                self.sizes.setdefault(int(f), 0)
+
+    def remap(self, new_ids: Callable[[np.ndarray], np.ndarray]) -> None:
+        """The batch moved rows (the epoch moved on with them)."""
+        self.epoch = int(self.store.epoch)
+        if self.sizes:
+            moved = new_ids(np.fromiter(self.sizes, dtype=np.int64, count=len(self.sizes)))
+            self.sizes = {
+                int(m): s for m, s in zip(moved.tolist(), self.sizes.values(), strict=True) if m >= 0
+            }
+
+    def of(self, store: NodeStore) -> dict[int, int] | None:
+        """The sizes, when ``store`` (the scan's tree now) is the tree whose ids they use."""
+        return self.sizes if store is self.store and int(store.epoch) == self.epoch else None
+
+
+def sizes_now(store: NodeStore, folders: Iterable[int]) -> dict[int, int]:
+    """``before`` for an announcement of changes already applied that changed no size (or one that
+    only says where to look): the folders and every one above them, as they are now."""
     out: dict[int, int] = {}
-    for _level in range(n):  # one step up per round; a parent is always closer to the top
-        keep = (cur > 0) & (cur < n)
-        cur, deltas = cur[keep], deltas[keep]
-        if not len(cur):
-            break
-        folders, at = np.unique(cur, return_inverse=True)
-        summed = np.zeros(len(folders), dtype=np.int64)
-        np.add.at(summed, at, deltas)
-        for f, d in zip(folders.tolist(), summed.tolist(), strict=True):
-            out[f] = out.get(f, 0) + d
-        if len(out) > GROWN_FOLDERS:
-            return None
-        nxt = parent[folders].astype(np.int64)
-        cur, deltas = np.where(nxt == folders, 0, nxt), summed  # a root's parent is the top (0)
+    add_sizes(store, folders, out)
     return out
 
 
@@ -212,8 +272,12 @@ class Live:
 
     # ------------------------------------------------------------- tree_changed
 
-    def tree_changed(self, scan_id: str, changes: Mapping[int, int]) -> None:
-        """The tree of ``scan_id`` changed (``views.flash``: node -> change of its allocation)."""
+    def tree_changed(
+        self, scan_id: str, changes: Mapping[int, int], before: Mapping[int, int] | None = None
+    ) -> None:
+        """The tree of ``scan_id`` changed (``views.flash``: node -> change of its allocation),
+        just now: the changes are applied. ``before``: each folder they involve (and every one
+        above) -> its size on disk before them (:class:`SizesBefore`); None: not known."""
         host = self.host
         if host._loop is None or host.closed:
             return
@@ -223,7 +287,10 @@ class Live:
             return
         store = handle.store
         folders = changed_folders(store, changes)
-        grown = grown_by(store, changes)
+        sizes: dict[int, tuple[int, int]] | None = None
+        if before is not None:  # after: as they are now, right after the changes
+            n, tot = len(store), store.cols["tot_alloc"]
+            sizes = {int(f): (int(b), int(tot[f])) for f, b in before.items() if 0 < f < n}
         for rec in recs:
             key = (rec.id, scan_id)
             due = self._tree.get(key)
@@ -232,7 +299,7 @@ class Live:
             elif due.epoch != store.epoch:  # an epoch without a remap: from the top
                 due.forget_ids(store.roots())
                 due.epoch = int(store.epoch)
-            due.add(folders, max(1, len(changes)), grown)
+            due.add(folders, max(1, len(changes)), sizes)
             task = self._tree_tasks.get(key)
             if task is None or task.done():
                 self._tree_tasks[key] = self._start(self._deliver_tree(rec.id, scan_id))
@@ -256,24 +323,29 @@ class Live:
                     due.forget_ids(store.roots())
                 due.epoch = epoch
 
+    @staticmethod
+    def _in_step(due: _TreeDue, store: NodeStore) -> None:
+        """Remaps keep ``due`` in step with the tree; any other new epoch: from the top."""
+        if due.epoch != store.epoch:
+            due.forget_ids(store.roots())
+            due.epoch = int(store.epoch)
+
     def _change(self, scan_id: str, due: _TreeDue) -> tuple[dict[str, Any], int] | None:
-        """The hook's args for ``due`` as the tree is now, and their epoch (None: the scan went)."""
+        """The hook's args for ``due`` in the tree's ids now, and their epoch (None: the scan
+        went). Sizes as they were before and after these changes (the tree may have moved on
+        since: later changes come with the next call); not known: before None, after as now."""
         handle = self.host.server.scans.scans.get(scan_id)
         if handle is None:
             return None
         store = handle.store
-        if due.epoch != store.epoch:  # (remaps keep it in step; anything else: from the top)
-            due.forget_ids(store.roots())
-            due.epoch = int(store.epoch)
+        self._in_step(due, store)
         n = len(store)
         folders = [f for f in due.folders if 0 < f < n]
         tot = store.cols["tot_alloc"]
-        after = [int(tot[f]) for f in folders]
-        grown = due.grown
-        before: list[int | None] = [
-            None if grown is None or f not in grown else a - grown[f]
-            for f, a in zip(folders, after, strict=True)
-        ]
+        sizes = due.sizes
+        pairs = [None if sizes is None else sizes.get(f) for f in folders]
+        after = [int(tot[f]) if p is None else p[1] for f, p in zip(folders, pairs, strict=True)]
+        before: list[int | None] = [None if p is None else p[0] for p in pairs]
         change = {
             "scan_id": scan_id,
             "epoch": int(store.epoch),
@@ -286,6 +358,19 @@ class Live:
             "changes": due.changes,
         }
         return {"change": change}, int(store.epoch)
+
+    def _again(self, key: tuple[str, str], due: _TreeDue) -> tuple[dict[str, Any], int] | None:
+        """The hook hearing of ``due`` met a reorganised tree and is called again: in the tree's
+        ids now, and with the changes that came meanwhile (they made the new tree), so that what
+        it is told is the tree it reads: one call for both, sizes before the first and after the
+        last."""
+        handle = self.host.server.scans.scans.get(key[1])
+        newer = self._tree.pop(key, None) if handle is not None else None
+        if handle is not None and newer is not None:
+            self._in_step(due, handle.store)
+            self._in_step(newer, handle.store)
+            due.absorb(newer)
+        return self._change(key[1], due)
 
     def _requeue(self, key: tuple[str, str], due: _TreeDue) -> None:
         """The hook kept meeting a reorganised tree: these changes go with the next ones (they
@@ -304,13 +389,10 @@ class Live:
             return
         self._requeued[key] = n
         store = handle.store
-        if due.epoch != store.epoch:
-            due.forget_ids(store.roots())
-            due.epoch = int(store.epoch)
+        self._in_step(due, store)
         newer = self._tree.get(key)
-        if newer is not None and newer.epoch != due.epoch:
-            newer.forget_ids(store.roots())
-            newer.epoch = due.epoch
+        if newer is not None:
+            self._in_step(newer, store)
         self._tree[key] = due if newer is None else due.then(newer)
 
     async def _deliver_tree(self, plugin: str, scan_id: str) -> None:
@@ -332,7 +414,7 @@ class Live:
                         "tree_changed",
                         _scan=scan_id,
                         _epoch=first[1],
-                        _again=functools.partial(self._change, scan_id, due),
+                        _again=functools.partial(self._again, key, due),
                         **first[0],
                     )
                 finally:
@@ -414,4 +496,14 @@ class Live:
             s.emit(EVENT_PLUGIN_NOTICE, ev)
 
 
-__all__ = ["NOTICE_GAP_S", "SNAPSHOTS_EVENT_S", "TREE_EVENT_S", "TREE_FOLDERS", "Live", "changed_folders"]
+__all__ = [
+    "NOTICE_GAP_S",
+    "SIZES_FOLDERS",
+    "SNAPSHOTS_EVENT_S",
+    "TREE_EVENT_S",
+    "TREE_FOLDERS",
+    "Live",
+    "SizesBefore",
+    "changed_folders",
+    "sizes_now",
+]

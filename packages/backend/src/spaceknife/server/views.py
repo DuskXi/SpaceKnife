@@ -379,14 +379,15 @@ class ViewManager:
         if self.plugins is not None:  # the folders plugins have not heard of yet (tree_changed)
             self.plugins.live.tree_remapped(scan_id, new_ids)
 
-    def flash(self, scan_id: str, changes: dict[int, int]) -> None:
-        """The tree changed: views flash what changed (setting 「元素变化闪烁」) and get a new frame."""
+    def flash(self, scan_id: str, changes: dict[int, int], before: dict[int, int] | None = None) -> None:
+        """The tree changed: views flash what changed (setting 「元素变化闪烁」) and get a new frame.
+        ``before``: the sizes of the folders involved before the changes (plugins.live.SizesBefore)."""
         if self.compares is not None:
             self.compares.on_tree_changed(scan_id)  # live comparisons follow (UI-W6-38)
         if self.ops is not None:
             self.ops.on_tree_changed(scan_id)  # basket sizes and missing items (UI-W5-48)
-        if self.plugins is not None:
-            self.plugins.live.tree_changed(scan_id, changes)  # the plugins' tree_changed hooks
+        if self.plugins is not None:  # the plugins' tree_changed hooks
+            self.plugins.live.tree_changed(scan_id, changes, before)
         st = self.settings
         flash_on = st is None or bool(st.get("treemap.flash_changes"))
         self._follow_volumes(scan_id)

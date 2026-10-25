@@ -43,6 +43,7 @@ from ..events import emit, printable
 from ..filter.names import forget
 from ..i18n import tr
 from ..monitor import Change, Watcher, create_watcher
+from ..plugins.live import SizesBefore
 from ..scan import worker
 from ..scan.scanner import listed_alloc, verify_names
 from ..scan.volume import volume_for
@@ -422,8 +423,9 @@ class ScanMonitor:
         t0 = time.perf_counter()
         changes = 0
         flashes: dict[int, int] = {}
+        before = SizesBefore(store)  # the folders' sizes before this batch (plugins' tree_changed)
         if stats:
-            got = await self._apply_stats(stats, folders)
+            got = await self._apply_stats(stats, folders, before)
             flashes.update(got)
             changes += len(got)
         targets = self._targets(folders)
@@ -438,7 +440,7 @@ class ScanMonitor:
         else:
             rescan = False
         while targets:
-            applied = await self._relist(targets)
+            applied = await self._relist(targets, before, flashes)
             flashes.update(applied.flashes)
             changes += applied.changes
             self._hand_over(applied.readable)  # before their new subfolders (the next _feed)
@@ -450,7 +452,7 @@ class ScanMonitor:
             self.changes += changes
             self.last_apply_ms = (time.perf_counter() - t0) * 1000
             await self._refresh_free(now)  # first: the new frames draw free and unknown space from it
-            self.owner.views.flash(self.handle.id, flashes)
+            self.owner.views.flash(self.handle.id, flashes, before.of(self.handle.store))
             self.handle.publish()
             await self._maybe_compact()
 
@@ -479,9 +481,14 @@ class ScanMonitor:
             out[folder] = store.path(folder)
         return out
 
-    async def _apply_stats(self, stats: dict[str, Change], folders: set[str]) -> dict[int, int]:
-        """Size and time changes of known files, in place; unknown paths make their folder dirty."""
+    async def _apply_stats(
+        self, stats: dict[str, Change], folders: set[str], before: SizesBefore | None = None
+    ) -> dict[int, int]:
+        """Size and time changes of known files, in place; unknown paths make their folder dirty.
+        ``before`` takes the sizes of their folders (and above) first."""
         store = self.handle.store
+        if before is None:
+            before = SizesBefore(store)
         c = store.cols
         nodes: list[int] = []
         for path in stats:
@@ -520,12 +527,22 @@ class ScanMonitor:
         async with STRUCTURE.write():
             live = (c["kind"][ids] == Kind.FILE) & ((c["flags"][ids] & np.uint32(Flag.GONE)) == 0)
             ids, size, alloc, mtime = ids[live], size[live], alloc[live], mtime[live]
+            before.take(np.unique(c["parent"][ids]).tolist())
             delta = mutate.update_stats(store, ids, size, alloc, mtime)
         return {int(i): int(d) for i, d in zip(ids.tolist(), delta.tolist(), strict=True) if d}
 
-    async def _relist(self, targets: dict[int, str]) -> _Applied:
-        """List ``targets`` again (in threads), then fold every listing in, deepest folder first."""
+    async def _relist(
+        self,
+        targets: dict[int, str],
+        before: SizesBefore | None = None,
+        earlier: dict[int, int] | None = None,
+    ) -> _Applied:
+        """List ``targets`` again (in threads), then fold every listing in, deepest folder first.
+        ``before`` takes each folder's size (and those above) right before its listing goes in, and
+        follows the ids the listings move, as do ``earlier`` (the batch's flashes so far)."""
         store = self.handle.store
+        before = SizesBefore(store) if before is None else before
+        earlier = {} if earlier is None else earlier
         listed: dict[int, SliceResult] = {}
         items = sorted(targets.items(), key=lambda kv: -int(store.cols["depth"][kv[0]]))
         for at in range(0, len(items), LIST_BATCH):
@@ -546,9 +563,11 @@ class ScanMonitor:
                     continue
                 remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
                 ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
+                before.take([node])
                 rel = mutate.relist(
                     store, node, res.name_blob, res.name_lens, {k: res.cols[k] for k in ENTRY_COLUMNS}, ext
                 )
+                before.new(rel.added[c["kind"][rel.added] == Kind.DIR].tolist())  # took nothing before
                 if c["flags"][node] & np.uint32(Flag.ACCESS_DENIED):  # a rescan of it, readable now
                     store.clear(node, Flag.ACCESS_DENIED)
                     out.readable.append(path)
@@ -579,10 +598,14 @@ class ScanMonitor:
                 out.kept_folders.extend(k for k in kept.tolist() if store.name_bytes(k) not in unnamed)
             if remap:
                 store.epoch += 1  # moved rows: node ids plugins hold are stale now
-                moved = remap(np.array(list(out.flashes), dtype=np.int64))
-                out.flashes = {
-                    int(m): d for m, d in zip(moved.tolist(), out.flashes.values(), strict=True) if m >= 0
-                }
+                before.remap(remap)
+                for flashes in (out.flashes, earlier):
+                    moved = remap(np.array(list(flashes), dtype=np.int64))
+                    still = {
+                        int(m): d for m, d in zip(moved.tolist(), flashes.values(), strict=True) if m >= 0
+                    }
+                    flashes.clear()
+                    flashes.update(still)
                 out.kept_folders = [
                     int(m) for m in remap(np.array(out.kept_folders, dtype=np.int64)) if m >= 0
                 ]

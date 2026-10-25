@@ -354,7 +354,9 @@ async def test_tree_changed_reads_one_tree_while_the_epoch_moves_on(plugin: Path
             # ctx.tree, then twice while it reads the folders (each time it met the new tree, it
             # was called again with the folders' new ids)
             plan = _churn(host, sid, ["host.tree", "host.node", "host.paths"])
-            hp.live.tree_changed(sid, {x: 300})  # x.bin grew by 300 bytes on disk
+            tot, root = host.store.cols["tot_alloc"], host.find("")
+            # x.bin grew by 300 bytes on disk: a and the root took 300 bytes less before
+            hp.live.tree_changed(sid, {x: 300}, {a: int(tot[a]) - 300, root: int(tot[root]) - 300})
             await host.settled()
             assert plan == [] and int(host.store.epoch) == epoch + 3
             seen = await _seen(host)
@@ -380,9 +382,11 @@ async def test_changes_a_hook_kept_missing_come_with_the_next_ones(
         hp = host.server.plugins
         # every try of the first delivery meets a reorganised tree: its changes wait for the next
         plan = _churn(host, sid, ["host.tree"] * (host_mod.HOOK_STALE_RETRIES + 1))
-        hp.live.tree_changed(sid, {host.find("a/x.bin"): 100})
+        tot, a, top = host.store.cols["tot_alloc"], host.find("a"), host.find("")
+        size_a, size_top = int(tot[a]), int(tot[top])  # (the tree stays: as after both changes)
+        hp.live.tree_changed(sid, {host.find("a/x.bin"): 100}, {a: size_a - 100, top: size_top - 107})
         await _until(lambda: not plan)
-        hp.live.tree_changed(sid, {host.find("same.txt"): 7})  # meanwhile
+        hp.live.tree_changed(sid, {host.find("same.txt"): 7}, {top: size_top - 7})  # meanwhile
         await host.settled()
         seen = await _seen(host)
         assert seen["stale"] == host_mod.HOOK_STALE_RETRIES + 1
@@ -415,31 +419,6 @@ async def test_a_hook_that_always_meets_a_new_tree_is_given_up_on(
             assert not hp.live._tree and not hp.live._requeued
     finally:
         logger.remove(sink)
-
-
-def test_sizes_before_follow_the_changes_up_the_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from spaceknife.plugins.listing import from_spec
-
-    store, _contents = from_spec(
-        {"a": {"b": {"x.bin": 5000}, "y.bin": 300}, "z.bin": 10}, str(tmp_path / "r"), 0
-    )
-
-    def find(rel: str) -> int:
-        node = 1
-        for part in rel.split("/"):
-            node = next(ch for ch in store.children(node) if store.name(ch) == part)
-        return int(node)
-
-    a, b = find("a"), find("a/b")
-    grown = live_mod.grown_by(store, {find("a/b/x.bin"): 4096, find("a/y.bin"): -100, b: 7})
-    assert grown == {b: 4096 + 7, a: 4096 + 7 - 100, 1: 4096 + 7 - 100}
-    assert live_mod.grown_by(store, {}) is None  # a tree replaced (no changes named): not known
-    due = live_mod._TreeDue(epoch=0)
-    due.add([b, a], 2, grown)
-    due.add([a], 1, {a: 5, 1: 5})
-    assert due.grown == {b: 4103, a: 4008, 1: 4008} and list(due.folders) == [b, a]
-    due.remap(lambda ids: np.where(np.asarray(ids) == b, 99, np.asarray(ids)))
-    assert list(due.folders) == [99, a] and due.grown == {99: 4103, a: 4008, 1: 4008}
 
 
 @pytest.mark.parametrize("process", [False, True], ids=["inprocess", "process"])

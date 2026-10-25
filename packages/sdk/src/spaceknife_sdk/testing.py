@@ -855,12 +855,17 @@ class MockHost:
         relative to its root; files or folders), as when the app applies file changes: the
         plugin's ``tree_changed`` hook runs the way it does in the app (the changes of about a
         second together, the folders where they happened). Waits until it ran. The tree itself
-        stays as it is."""
+        stays as it is (each folder's ``before`` is its ``after``): to see sizes change, change
+        files in a folder from :meth:`scan_dir`, whose monitor applies them as the app does."""
+        from spaceknife.plugins.live import changed_folders, sizes_now
+
         host = await self._ready()
         sid = scan_id or self.scan_id
         assert sid is not None, "scan something first"
         ids = [self.find(n) if isinstance(n, str) else int(n) for n in nodes]
-        host.live.tree_changed(sid, {i: 0 for i in ids})
+        changes = {i: 0 for i in ids}
+        store = host.server.scans.scans[sid].store
+        host.live.tree_changed(sid, changes, sizes_now(store, changed_folders(store, changes)))
         await self.settled()
 
     async def task(

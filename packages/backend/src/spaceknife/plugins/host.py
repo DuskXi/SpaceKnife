@@ -1371,9 +1371,9 @@ class PluginHost:
                 )
             return True
         ok = True
+        given, epoch = args, _epoch  # what one hook was called again with, the next one gets too
         for c in found:
             limit = float(getattr(c.spec, "timeout", HOOK_TIMEOUT))
-            given, epoch = args, _epoch
             for attempt in range(HOOK_STALE_RETRIES + 1):
                 ctx: dict[str, Any] | None = None
                 if _scan:
@@ -1386,10 +1386,12 @@ class PluginHost:
                 except (RpcError, asyncio.CancelledError) as exc:
                     stale = isinstance(exc, RpcError) and exc.code == ErrorCode.STALE_TREE
                     if stale and _again is not None:
-                        fresh = _again() if attempt < HOOK_STALE_RETRIES else None
+                        fresh = None
+                        if attempt < HOOK_STALE_RETRIES:
+                            await asyncio.sleep(STALE_RETRY_S * (attempt + 1))  # (what comes meanwhile
+                            fresh = _again()  # comes along)
                         if fresh is not None:
                             given, epoch = fresh
-                            await asyncio.sleep(STALE_RETRY_S * (attempt + 1))
                             continue
                         ok = False  # the caller sends these changes again with the next ones
                         logger.bind(source=f"plugin:{rec.id}").debug(
