@@ -84,6 +84,20 @@ fn tuning(window: usize) -> scan::Tuning {
     }
 }
 
+/// rayon's global pool, where the parse runs, as wide as the CPUs this process may use
+/// (`crate::cpus`; rayon's own count ignores a Windows affinity). Made on the first parse, as it
+/// was before; RAYON_NUM_THREADS still decides when set.
+fn size_global_pool() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+            let _ = rayon::ThreadPoolBuilder::new()
+                .num_threads(crate::cpus::usable())
+                .build_global();
+        }
+    });
+}
+
 /// Parse a $MFT image into the `MftTable` columns (one row per file name).
 #[pyfunction]
 fn parse_mft<'py>(
@@ -93,6 +107,7 @@ fn parse_mft<'py>(
     cluster_size: usize,
 ) -> PyResult<Bound<'py, PyDict>> {
     check_sizes(record_size, cluster_size)?;
+    size_global_pool();
     let buf = PyBuffer::<u8>::get(data)?;
     if !buf.is_c_contiguous() {
         return Err(PyValueError::new_err("data must be a contiguous buffer"));
@@ -404,6 +419,7 @@ fn scan_mft<'py>(
     stats: Option<Bound<'py, PyDict>>,
 ) -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)> {
     check_duty(duty)?;
+    size_global_pool();
     #[cfg(windows)]
     {
         let path = device_path(volume).map_err(PyValueError::new_err)?;
@@ -466,6 +482,7 @@ fn _scan_mft_image<'py>(
     stats: Option<Bound<'py, PyDict>>,
 ) -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)> {
     check_duty(duty)?;
+    size_global_pool();
     let tune = tuning(window);
     let mut st = scan::Stats::default();
     let t0 = std::time::Instant::now();
@@ -507,6 +524,7 @@ fn _parse_mft_stream<'py>(
     seed: u64,
 ) -> PyResult<Bound<'py, PyDict>> {
     check_sizes(record_size, cluster_size)?;
+    size_global_pool();
     let buf = PyBuffer::<u8>::get(data)?;
     if !buf.is_c_contiguous() {
         return Err(PyValueError::new_err("data must be a contiguous buffer"));

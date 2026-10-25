@@ -37,6 +37,7 @@ import zstandard
 from pydantic import BaseModel, ConfigDict, Field
 
 from .. import __version__
+from ..cpus import usable_cpus
 from ..paths import snapshots_dir
 from .nodes import COLUMNS, NodeStore
 
@@ -145,7 +146,7 @@ def save(
             )
         )
     )
-    compressor = zstandard.ZstdCompressor(level=level, threads=min(SAVE_THREADS, os.cpu_count() or 1))
+    compressor = zstandard.ZstdCompressor(level=level, threads=min(SAVE_THREADS, usable_cpus()))
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
     try:

@@ -143,7 +143,7 @@
  "手动": "Manual",
  "手动并发数": "Manual concurrency",
  "手动扫描默认": "Default for manual scans",
- "手动时同时扫描的工作进程数": "How many worker processes scan at the same time in manual mode.",
+ "手动时最多同时列出几个文件夹（没有原生扩展时是工作进程数）": "In manual mode, how many folders are listed at the same time at most (worker processes when the native extension is missing).",
  "打开删除篮": "Open delete basket",
  "打开快照文件…": "Open snapshot file…",
  "扩展名「{ext}」不合法": "Invalid extension \"{ext}\".",

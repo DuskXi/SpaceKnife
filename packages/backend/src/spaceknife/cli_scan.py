@@ -33,6 +33,7 @@ from .scan.scanner import (
     ScanState,
     bulk_listing,
     default_workers,
+    listing_max,
     make_pool,
     native_slicer,
     native_threads,
@@ -370,10 +371,11 @@ async def _run_scan(
         if limit is not None and pool is not None:  # paced like the app's scans
             from .io import IoRegistry  # only here: the governor loads the protocol's models
 
-            registry = IoRegistry(max_workers=max(1, threads))
+            most = listing_max() if slicer is not None else max(1, threads)  # in listings, or processes
+            registry = IoRegistry(max_workers=most)
             await registry.start()
             gov = await registry.governor_for_path(scanner.roots[0].path)
-            gov.set_max_workers(max(1, threads))
+            gov.set_max_workers(most)
             gov.set_level(limit[0], limit[1])  # type: ignore[arg-type]
             scanner.governor = gov
             low_io = gov.low_io_priority and set_low_io_priority(None, True)
@@ -438,8 +440,9 @@ def scan(
     workers: Annotated[
         int | None,
         typer.Option(
-            help="Listing threads (worker processes without the native extension); 0 scans in-process "
-            "with the Python walker. Default: as in the app (SPACEKNIFE_SCAN_THREADS sets it there too)."
+            help="Threads that hand folders to the native walker, which decides how many it lists at "
+            "once (worker processes without the native extension); 0 scans in-process with the Python "
+            "walker. Default: as in the app (SPACEKNIFE_SCAN_THREADS fixes both there too)."
         ),
     ] = None,
     top: Annotated[int, typer.Option(help="Rows per level in the summary.")] = 15,
@@ -520,6 +523,8 @@ def profile_panel(scanner: Scanner) -> Panel:
         ),
         tr("共 {slices} 批", slices=fmt.count(p.slices)),
     ]
+    if p.width:
+        lines.insert(1, tr("列目录宽度 {width}（同时在列的文件夹数，遍历器按读盘和速度调整）", width=p.width))
     if scanner.governor is not None:
         lines.append(
             tr("等磁盘负载上限放行 {limited}（没有任何目录在列）", limited=f"[bold]{p.limited:.0%}[/bold]")

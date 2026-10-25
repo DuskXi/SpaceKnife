@@ -143,12 +143,13 @@ fn out_of<T: Element>(a: &Bound<'_, PyArray1<T>>) -> Out<T> {
     Out(a.data())
 }
 
-/// The build's own rayon pool, as many threads as the global pool would have. It goes when the
+/// The build's own rayon pool, as many threads as the CPUs this process may use. It goes when the
 /// build returns, threads and all: the backend otherwise runs nothing on rayon's global pool, whose
 /// threads would stay in it for good after the first MFT scan (about 0.1 MB each, docs/memory.md
 /// §6). When it cannot be made, the work runs on the global pool.
 fn build_pool() -> Option<rayon::ThreadPool> {
     rayon::ThreadPoolBuilder::new()
+        .num_threads(crate::cpus::usable())
         .thread_name(|i| format!("sk-mft-build-{i}"))
         .build()
         .ok()
