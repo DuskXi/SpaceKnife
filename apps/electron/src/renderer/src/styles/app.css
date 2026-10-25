@@ -322,6 +322,13 @@ button.pane-crumb:hover { background: var(--sk-color-bg-hover); color: var(--sk-
 .ins-fclass { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; line-height: 18px; color: var(--sk-color-text-secondary); }
 .ins-fclass .swatch { width: 8px; height: 8px; }
 .ins-fclass-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* parts of the summary the backend could not work out (tree.summary gaps), and a summary that failed */
+.ins-gaps { display: flex; gap: 8px; padding: 8px 10px; border-radius: var(--sk-radius-md); background: color-mix(in srgb, var(--sk-color-status-warning) 10%, transparent); color: var(--sk-color-text-secondary); font-size: 12px; line-height: 18px; }
+.ins-gaps > svg { flex: none; margin-top: 2px; color: var(--sk-color-status-warning); }
+.ins-gaps ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.ins-failed { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; font-size: 12px; line-height: 18px; }
+.ins-failed-title { display: flex; align-items: center; gap: 6px; color: var(--sk-color-status-warning); font-weight: 500; }
+.ins-failed-reason { color: var(--sk-color-text-secondary); overflow-wrap: anywhere; }
 .ins-section { display: flex; flex-direction: column; gap: 10px; }
 .ins-section h3 { margin: 0; font-size: 11px; font-weight: 500; line-height: 14px; letter-spacing: 0.04em; color: var(--sk-color-text-tertiary); }
 .share { display: flex; flex-direction: column; gap: 6px; }
