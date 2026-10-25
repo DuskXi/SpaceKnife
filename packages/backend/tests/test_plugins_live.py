@@ -469,6 +469,57 @@ async def test_a_watcher_ended_by_a_restart_watches_again_at_once(
         await _until(lambda: mon.reruns > reruns and any(x.endswith("b.txt") for x in _paths(handle.store)))
 
 
+async def test_a_watcher_stopped_by_turning_its_plugin_off_says_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Turning a plugin off stops its process before its record says so: a watcher's call in
+    between fails like a restart (PLUGIN_UNAVAILABLE), here right after a restart ended the one
+    before. It used to count as a second failure in a row: degraded, and the next try RETRY_S[2]
+    (120 s) later (the full Windows run: test_a_watcher_comes_back_after_its_plugin_restarts timed
+    out, about one run in five alone). Now the monitor waits to see which it was: failed while the
+    plugin is off, watching again once it is back."""
+    from spaceknife.server.rpc import RpcError
+
+    monkeypatch.setattr(sources, "QUIET_S", 0.05)
+    monkeypatch.setattr(sources, "WAIT_BACK_S", 0.05)
+    archive = tmp_path / "data.zip"
+    _zip(archive, {"a.txt": b"a"})
+    async with mock("t.full") as host:
+        await host.scan_dir(tmp_path)
+        hp = host.server.plugins
+        real = hp.call
+        watches: list[float] = []
+        turned_off: list[asyncio.Task[Any]] = []
+
+        async def call(plugin: str, kind: str, *args: Any, **kw: Any) -> Any:
+            if kind == "watch":
+                watches.append(time.monotonic())
+                if len(watches) == 1:  # a restart ends the first
+                    await asyncio.sleep(0.05)
+                    raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "the plugin stopped")
+                if len(watches) == 2:  # the user turns it off: the process is gone, the record not yet
+                    turned_off.append(asyncio.create_task(hp.disable("t.full")))
+                    raise RpcError(ErrorCode.PLUGIN_UNAVAILABLE, "the plugin is not running")
+            return await real(plugin, kind, *args, **kw)
+
+        monkeypatch.setattr(hp, "call", call)
+        scan_id = await host.source("zip", str(archive))
+        handle = host.server.scans.scans[scan_id]
+        rec = hp.records["t.full"]
+        await _until(
+            lambda: handle.status().monitor is not None and handle.status().monitor.state == "failed",
+            within=5.0,
+        )
+        await turned_off[0]
+        await hp.enable("t.full", rec.hash, sorted(rec.granted))
+        await _until(lambda: handle.status().monitor.state == "running", within=5.0)
+        mon = handle.monitor
+        assert isinstance(mon, sources.SourceMonitor)
+        reruns = mon.reruns
+        _zip(archive, {"a.txt": b"a", "b.txt": b"bb"})  # and it watches
+        await _until(lambda: mon.reruns > reruns and any(x.endswith("b.txt") for x in _paths(handle.store)))
+
+
 async def test_watchers_do_not_take_the_call_slots(tmp_path: Path) -> None:
     """Every open source scan has a watcher running for as long as it is open; they run beside the
     plugin's calls: with more of them than call slots, new source scans still list and fields

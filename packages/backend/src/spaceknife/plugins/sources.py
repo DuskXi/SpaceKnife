@@ -52,6 +52,7 @@ WAIT_BACK_S = 1.0  # a watcher whose plugin went off (or reloads) looks this oft
 # how a restart ends a watcher's call: its process went first, or the plugin answered the host's
 # cancel first (which one depends on timing: under load the answer often wins)
 RESTARTED = frozenset({ErrorCode.PLUGIN_UNAVAILABLE, ErrorCode.REQUEST_CANCELLED})
+RESTARTS_IN_A_ROW = 3  # quick stops like that in a row before the watcher counts as failing (degraded)
 LIST_TIMEOUT_S = 600.0
 # What came so far is shown while a source lists: the first time after PARTIAL_FIRST_S, then each
 # time the listing has doubled (at least PARTIAL_EVERY_S apart), or every PARTIAL_SLOW_S while it is
@@ -499,6 +500,22 @@ class SourceMonitor:
                 return w
         return None
 
+    async def _settled(self, owner: str) -> bool:
+        """After the watcher's process went: True once the plugin runs again (or, still enabled,
+        after RETRY_S[0]: a plugin started on demand starts with the next call), False once it is
+        off. Turning a plugin off stops its process before its record says so: a call in between
+        fails like a restart, and only waiting tells the two apart."""
+        end = time.monotonic() + RETRY_S[0]
+        while not self._stopped:
+            await asyncio.sleep(WAIT_BACK_S)
+            rec = self.host.records.get(owner)
+            if rec is None or rec.state != "enabled":
+                return False
+            rt = rec.runtime
+            if (rt is not None and rt.state == "running") or time.monotonic() >= end:
+                return True
+        return True
+
     async def _watch(self) -> None:
         assert self.watcher is not None
         w = self.watcher
@@ -522,10 +539,21 @@ class SourceMonitor:
                     failures = 0  # it watched for a while: a new stop (the next plugin dev reload)
                 failures += 1
                 logger.bind(source=f"plugin:{w.owner}").warning("watcher {} stopped: {}", w.id, exc.message)
-                if exc.code in (ErrorCode.PLUGIN_DISABLED, ErrorCode.METHOD_NOT_FOUND):
+                why = exc.message
+                off = exc.code in (ErrorCode.PLUGIN_DISABLED, ErrorCode.METHOD_NOT_FOUND)
+                if exc.code in RESTARTED and failures <= RESTARTS_IN_A_ROW:
+                    # the process went: a restart (plugin dev reloading it) or the plugin being
+                    # turned off (its record says enabled until the process is gone): see which
+                    if await self._settled(w.owner):
+                        # running again: watch again, still running, and list again what changed
+                        # while nobody watched
+                        self.rescan("")
+                        continue
+                    off, why = True, tr("插件 {id} 没有启用", id=w.owner)
+                if off:
                     self.state, self.detail = (
                         "failed",
-                        tr("监控器 {id} 已停止：{why}", id=w.id, why=exc.message),
+                        tr("监控器 {id} 已停止：{why}", id=w.id, why=why),
                     )
                     self.handle.publish()
                     # the plugin is off or reloading: watch again once it is back
@@ -537,12 +565,6 @@ class SourceMonitor:
                     self.handle.publish()
                     self.rescan("")  # what changed while nobody watched
                     failures = 0
-                    continue
-                if exc.code in RESTARTED and failures == 1:
-                    # a restart (plugin dev reloading it) ended the call: watch again soon, still
-                    # running, and list again what changed while nobody watched
-                    await asyncio.sleep(WAIT_BACK_S)
-                    self.rescan("")
                     continue
                 self.state, self.detail = (
                     "degraded",
