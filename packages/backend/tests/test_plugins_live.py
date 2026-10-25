@@ -9,6 +9,7 @@ import zipfile
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -416,6 +417,52 @@ async def test_a_watcher_comes_back_after_its_plugin_restarts(
         await _until(lambda: handle.status().monitor.state == "running")
         reruns = mon.reruns
         _zip(archive, {"a.txt": b"a", "b.txt": b"bb"})
+        await _until(lambda: mon.reruns > reruns and any(x.endswith("b.txt") for x in _paths(handle.store)))
+
+
+@pytest.mark.parametrize(
+    "code", [ErrorCode.REQUEST_CANCELLED, ErrorCode.PLUGIN_UNAVAILABLE], ids=["cancelled", "unavailable"]
+)
+async def test_a_watcher_ended_by_a_restart_watches_again_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, code: ErrorCode
+) -> None:
+    """A restart (plugin dev reloading the plugin) ends the watcher's call: PLUGIN_UNAVAILABLE when
+    the process went first, REQUEST_CANCELLED when the plugin answered the host's cancel first (the
+    full test run under load: test_a_watcher_comes_back_after_its_plugin_restarts timed out). Either
+    way the watcher calls again after WAIT_BACK_S and the monitor says running again. It used to wait
+    RETRY_S[1] (30 s) after a cancel, to stay degraded after either while it watched again, and to
+    count the next reload as a second failure in a row (RETRY_S[2], 120 s)."""
+    from spaceknife.server.rpc import RpcError
+
+    monkeypatch.setattr(sources, "QUIET_S", 0.05)
+    monkeypatch.setattr(sources, "WAIT_BACK_S", 0.05)
+    monkeypatch.setattr(sources, "RETRY_S", (0.3, 30.0, 120.0))  # watched this long: not in a row
+    archive = tmp_path / "data.zip"
+    _zip(archive, {"a.txt": b"a"})
+    async with mock("t.full") as host:
+        await host.scan_dir(tmp_path)
+        hp = host.server.plugins
+        real = hp.call
+        watches: list[float] = []
+
+        async def call(plugin: str, kind: str, *args: Any, **kw: Any) -> Any:
+            if kind == "watch":
+                watches.append(time.monotonic())
+                if len(watches) <= 2:  # two reloads end the first two: at once, then a while later
+                    await asyncio.sleep(0.05 if len(watches) == 1 else 0.6)
+                    raise RpcError(code, "request cancelled")
+            return await real(plugin, kind, *args, **kw)
+
+        monkeypatch.setattr(hp, "call", call)
+        scan_id = await host.source("zip", str(archive))
+        handle = host.server.scans.scans[scan_id]
+        await _until(lambda: len(watches) >= 3, within=5.0)
+        assert watches[1] - watches[0] < 3.0 and watches[2] - watches[1] < 3.0
+        await _until(lambda: handle.status().monitor.state == "running", within=3.0)
+        mon = handle.monitor
+        assert isinstance(mon, sources.SourceMonitor)
+        reruns = mon.reruns
+        _zip(archive, {"a.txt": b"a", "b.txt": b"bb"})  # and it watches
         await _until(lambda: mon.reruns > reruns and any(x.endswith("b.txt") for x in _paths(handle.store)))
 
 

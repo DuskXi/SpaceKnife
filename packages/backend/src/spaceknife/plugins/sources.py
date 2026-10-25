@@ -49,6 +49,9 @@ RERUN_MAX_ITEMS = 100_000  # a watcher's changes list the source again up to thi
 QUIET_S = 1.0  # changes wait this long without new ones before the source runs again
 RETRY_S = (5.0, 30.0, 120.0)  # a watcher that stopped is started again after these pauses
 WAIT_BACK_S = 1.0  # a watcher whose plugin went off (or reloads) looks this often whether it is back
+# how a restart ends a watcher's call: its process went first, or the plugin answered the host's
+# cancel first (which one depends on timing: under load the answer often wins)
+RESTARTED = frozenset({ErrorCode.PLUGIN_UNAVAILABLE, ErrorCode.REQUEST_CANCELLED})
 LIST_TIMEOUT_S = 600.0
 # What came so far is shown while a source lists: the first time after PARTIAL_FIRST_S, then each
 # time the listing has doubled (at least PARTIAL_EVERY_S apart), or every PARTIAL_SLOW_S while it is
@@ -498,6 +501,7 @@ class SourceMonitor:
         w = self.watcher
         failures = 0
         while not self._stopped:
+            began = time.monotonic()
             try:
                 await self.host.call(
                     w.owner, "watch", w.local, {"uri": str(self.handle.uri)}, on_chunk=self._on_changes
@@ -506,6 +510,8 @@ class SourceMonitor:
             except asyncio.CancelledError:
                 raise
             except RpcError as exc:
+                if time.monotonic() - began >= RETRY_S[0]:
+                    failures = 0  # it watched for a while: a new stop (the next plugin dev reload)
                 failures += 1
                 logger.bind(source=f"plugin:{w.owner}").warning("watcher {} stopped: {}", w.id, exc.message)
                 if exc.code in (ErrorCode.PLUGIN_DISABLED, ErrorCode.METHOD_NOT_FOUND):
@@ -524,15 +530,17 @@ class SourceMonitor:
                     self.rescan("")  # what changed while nobody watched
                     failures = 0
                     continue
+                if exc.code in RESTARTED and failures == 1:
+                    # a restart (plugin dev reloading it) ended the call: watch again soon, still
+                    # running, and list again what changed while nobody watched
+                    await asyncio.sleep(WAIT_BACK_S)
+                    self.rescan("")
+                    continue
                 self.state, self.detail = (
                     "degraded",
                     tr("监控器 {id} 已停止：{why}", id=w.id, why=exc.message),
                 )
                 self.handle.publish()
-                if exc.code == ErrorCode.PLUGIN_UNAVAILABLE and failures == 1:
-                    # its process went (a restart, plugin dev reloading it): try again soon
-                    await asyncio.sleep(WAIT_BACK_S)
-                    continue
             await asyncio.sleep(RETRY_S[min(failures, len(RETRY_S) - 1)] if failures else RETRY_S[0])
 
     # ------------------------------------------------------------- listing again
@@ -563,8 +571,9 @@ class SourceMonitor:
                 logger.warning(
                     "scan source {} could not list again: {}", self.handle.plugin_source, exc.message
                 )
-                self.state, self.detail = "degraded", tr("无法重新读取来源：{why}", why=exc.message)
-                self.handle.publish()
+                if self.state != "failed":  # the watcher's plugin is off: that says more
+                    self.state, self.detail = "degraded", tr("无法重新读取来源：{why}", why=exc.message)
+                    self.handle.publish()
                 continue
             self.last_apply_ms = (time.perf_counter() - t0) * 1000
             self.reruns += 1

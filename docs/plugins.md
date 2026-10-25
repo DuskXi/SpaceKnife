@@ -230,6 +230,7 @@
 0.3.4 之前不再找新的缺口，只把已知的做完、做稳、证明。
 
 - **合并 dev**（1b83f90）：带上 Linux 实时监控的修正（文件夹加上 inotify 监视或取轮询基线时，按扫描记下的修改时间补查一次，扫描读过它到加上监视之间的新建、删除、改名不再丢；扫描中的状态已是 `running`；扫描列不出的文件夹不再交给监视）、Rust 管理的列目录线程（宽度按冷热自适应，磁盘负载上限交给 Rust 的闸门）、检查更新交给系统验证证书、Electron 44.9.3、`tree.summary` 一部分算不出时照常给出其余内容（`gaps`）、日志面板的列宽。补查出的变化和别的变化一样经监控器重新列出文件夹（`views.flash`），插件的 `tree_changed` 一起收到：第五轮的探针 lostwrite（91 个文件夹，扫描刚完成就往 `d29/sub/deep` 写 0.5 MB）以前在 Linux 上 6 秒后仍不在树里，合并后在真后端上 3 次都约 1 秒进树，探针的钩子收到这个文件夹（4096 → 507904）。测试 `test_plugin_lostwrite.py`（插件进程和进程内各一遍；关掉补查时两遍都失败）。合并时的取舍：`spaceknife run` 的导出模块照 dev 用到时才导入；悬停卡照 dev 同一节点跨帧不清空详情，「占 父文件夹 N%」仍只用这一项自己的父文件夹；详情面板的插件页不显示 `gaps`。plugin-api 的「实时监控」改成扫描中已是 `running`，并写了 Linux 上的补查。
+- **来源的监控器在插件重启后马上接着监控**：合并后 WSL 上整套测试跑满负载时，`test_a_watcher_comes_back_after_its_plugin_restarts` 等不到 `failed`。重启（`plugin dev` 重新加载）结束监控器的调用时，进程先走就是 `PLUGIN_UNAVAILABLE`，插件先答了宿主的取消就是 `REQUEST_CANCELLED`（负载高时常是后者）；以前只有前者很快再调，后者要等 30 秒（`RETRY_S[1]`），两种之后状态都一直是 `degraded`（其实已经在监控），下一次重新加载又算成连着第二次失败、等 120 秒。现在两种都在 `WAIT_BACK_S` 后再调、状态仍是 `running`、把来源重跑一遍（补上没人监控时的变化）；调用跑过 `RETRY_S[0]` 才结束的算新的一次；重跑失败时不再把插件停用的 `failed` 盖成 `degraded`。测试 `test_a_watcher_ended_by_a_restart_watches_again_at_once`（两种错误码，两次重新加载；改之前两种都失败）。
 
 ---
 
