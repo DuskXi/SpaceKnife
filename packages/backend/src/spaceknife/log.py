@@ -10,7 +10,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from enum import StrEnum
 from pathlib import Path
 from types import FrameType
@@ -21,7 +21,7 @@ from rich.console import Console
 from rich.text import Text
 
 if TYPE_CHECKING:
-    from loguru import Message
+    from loguru import Message, Record
 
     from .logbus import LogHub
 
@@ -79,6 +79,26 @@ def _rich_sink(console: Console) -> Callable[[Message], None]:
 
 _file_sink: int | None = None
 
+# records a command shows on the terminal itself (plugin dev, plugin call: the plugin's own log
+# lines): the terminal sinks leave them out, the log file and the log panel keep them
+_SHOWN: list[Callable[[Record], bool]] = []
+
+
+def on_terminal(record: Record) -> bool:
+    """The terminal sinks' filter: every record but those a command shows there itself."""
+    return not any(shown(record) for shown in _SHOWN)
+
+
+@contextlib.contextmanager
+def shown_elsewhere(shown: Callable[[Record], bool]) -> Iterator[None]:
+    """While inside: records for which ``shown`` is true stay off the terminal sinks (the command
+    prints them its own way), so each line shows once."""
+    _SHOWN.append(shown)
+    try:
+        yield
+    finally:
+        _SHOWN.remove(shown)
+
 
 def set_file_logging(path: Path | None, level: str = "INFO") -> None:
     """(Re)open the rotating log file (W8 待定 8, W7 高级 · 日志文件级别); None closes it."""
@@ -105,15 +125,22 @@ def setup_logging(level: str = "INFO", fmt: LogFormat = LogFormat.RICH, hub: Log
     """Configure loguru sinks. Safe to call more than once (sinks are replaced)."""
     logger.remove()
     if fmt is LogFormat.RICH:
-        logger.add(_rich_sink(Console(stderr=True)), level=level, format="{message}", colorize=False)
+        logger.add(
+            _rich_sink(Console(stderr=True)),
+            level=level,
+            format="{message}",
+            colorize=False,
+            filter=on_terminal,
+        )
     elif fmt is LogFormat.JSON:
-        logger.add(sys.stderr, level=level, serialize=True)
+        logger.add(sys.stderr, level=level, serialize=True, filter=on_terminal)
     else:
         logger.add(
             sys.stderr,
             level=level,
             colorize=False,
             format="{time:HH:mm:ss.SSS} | {level:<8} | {name}:{line} - {message}",
+            filter=on_terminal,
         )
     if hub is not None:
         logger.add(hub.sink, level="DEBUG", format="{message}", colorize=False, catch=True)

@@ -189,18 +189,26 @@ def build(
 
 @contextmanager
 def _plugin_logs(plugin: str) -> Iterator[list[str]]:
+    """What is logged about the plugin while inside, to print after the result (``log …``
+    lines); the terminal's own log sink leaves those out, so each shows once."""
     from loguru import logger
+
+    from .log import shown_elsewhere
 
     lines: list[str] = []
 
+    def about(rec: Any) -> bool:
+        return rec["extra"].get("source") == f"plugin:{plugin}" or plugin in str(rec["message"])[:200]
+
     def sink(message: Any) -> None:
         rec = message.record
-        if rec["extra"].get("source") == f"plugin:{plugin}" or plugin in str(rec["message"])[:200]:
+        if about(rec):
             lines.append(f"{rec['level'].name}: {rec['message']}")
 
     handle = logger.add(sink, level="DEBUG", format="{message}")
     try:
-        yield lines
+        with shown_elsewhere(about):
+            yield lines
     finally:
         logger.remove(handle)
 

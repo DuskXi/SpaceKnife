@@ -169,6 +169,9 @@ class CallError(RequestError):
     """A call failed: what goes back to the host (protocol error code, message, data)."""
 
 
+ERROR_TEXT_MAX = 300  # characters of an exception's own message in a call's error (the log has it all)
+
+
 def error_of(exc: BaseException, log: Callable[[str], None] | None = None) -> CallError:
     """Map what a handler raised to a protocol error (tracebacks stay in the plugin's log)."""
     if isinstance(exc, CallError):
@@ -189,8 +192,14 @@ def error_of(exc: BaseException, log: Callable[[str], None] | None = None) -> Ca
         return CallError(ErrorCode.INVALID_PARAMS, "invalid params", details)
     if log is not None:
         log("".join(traceback.format_exception(exc)))
+    name = type(exc).__name__
+    text = " ".join(str(exc).split())  # its own message, on one line
+    if len(text) > ERROR_TEXT_MAX:
+        text = text[: ERROR_TEXT_MAX - 1] + "…"
     return CallError(
-        ErrorCode.PLUGIN_ERROR, f"plugin error: {type(exc).__name__}", {"type": type(exc).__name__}
+        ErrorCode.PLUGIN_ERROR,
+        f"plugin error: {name}: {text}" if text else f"plugin error: {name}",
+        {"type": name},
     )
 
 

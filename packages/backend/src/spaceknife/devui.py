@@ -25,8 +25,11 @@ import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, unquote, urlsplit
+
+if TYPE_CHECKING:
+    from loguru import Record
 
 # the app's own words for it (the terminal message names the page as the app shows it)
 LINK_IN_APP = "设置 › 插件 › 链接开发文件夹 (developer mode)"  # i18n: ignore
@@ -273,6 +276,7 @@ async def _dev(
 ) -> int:
     from spaceknife_protocol.scan import ScanStartParams
 
+    from .log import shown_elsewhere
     from .plugins.check import describe_in_subprocess
     from .server.app import DEFAULT_ORIGINS, Server, ServerConfig, new_token
 
@@ -318,50 +322,56 @@ async def _dev(
 
     host.dev_watch = heard
 
-    try:
-        rec = await host.link_dev(folder)
-        report(rec, "linked")
-        info = {"url": server.url, "token": token, "plugin": plugin, "folder": str(folder)}
-        # the pid: stop this one with kill / Stop-Process -Id, not a pkill -f that matches more
-        say(f"backend: {server.url}  token: {token}  pid: {os.getpid()}")
-        scan_id = None
-        if scan is not None:  # started first: the page's address opens it
-            root = await asyncio.to_thread(lambda: str(scan.expanduser().resolve()))
-            scan_id = (await server.scans.start(ScanStartParams(roots=[root]))).id
-            say(f"scanning {scan}")
-        if origin is not None:
-            info["ui"] = ui_url(origin, server.url, token, scan_id)
-            say(f"open in a browser: {info['ui']}")
-        else:
-            say("no built renderer (pnpm build in apps/electron, or --ui DIR): connect a frontend")
-            say("to the backend above (--allow-origin), or link the folder in the app:")
-            say("  " + LINK_IN_APP + f": {folder}")
-        if ready is not None:
-            ready(info)
-        seen = _signature(folder)
-        while not stop.is_set():
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), 0.5)
-            if stop.is_set():
-                break
-            now = _signature(folder)
-            if now == seen:
-                continue
-            await asyncio.sleep(0.3)  # an editor writes in several steps
+    def printed(record: Record) -> bool:
+        """The plugin's own log lines: heard() prints them, the log sink not again."""
+        extra = record["extra"]
+        return bool(extra.get("plugin_log")) and extra.get("source") == f"plugin:{plugin}"
+
+    with shown_elsewhere(printed):
+        try:
+            rec = await host.link_dev(folder)
+            report(rec, "linked")
+            info = {"url": server.url, "token": token, "plugin": plugin, "folder": str(folder)}
+            # the pid: stop this one with kill / Stop-Process -Id, not a pkill -f that matches more
+            say(f"backend: {server.url}  token: {token}  pid: {os.getpid()}")
+            scan_id = None
+            if scan is not None:  # started first: the page's address opens it
+                root = await asyncio.to_thread(lambda: str(scan.expanduser().resolve()))
+                scan_id = (await server.scans.start(ScanStartParams(roots=[root]))).id
+                say(f"scanning {scan}")
+            if origin is not None:
+                info["ui"] = ui_url(origin, server.url, token, scan_id)
+                say(f"open in a browser: {info['ui']}")
+            else:
+                say("no built renderer (pnpm build in apps/electron, or --ui DIR): connect a frontend")
+                say("to the backend above (--allow-origin), or link the folder in the app:")
+                say("  " + LINK_IN_APP + f": {folder}")
+            if ready is not None:
+                ready(info)
             seen = _signature(folder)
-            try:
-                old = host.records.get(plugin)
-                if old is None or old.state in ("error", "incompatible", "needs_confirm", "changed"):
-                    rec = await host.link_dev(folder)
-                else:
-                    await host.restart(plugin)
-                    rec = host.records[plugin]
-            except Exception as exc:  # keep watching: the next save may fix it
-                say(f"reload failed: {getattr(exc, 'message', exc)}")
-                continue
-            report(rec, "reloaded")
-    finally:
-        await server.close()
+            while not stop.is_set():
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(stop.wait(), 0.5)
+                if stop.is_set():
+                    break
+                now = _signature(folder)
+                if now == seen:
+                    continue
+                await asyncio.sleep(0.3)  # an editor writes in several steps
+                seen = _signature(folder)
+                try:
+                    old = host.records.get(plugin)
+                    if old is None or old.state in ("error", "incompatible", "needs_confirm", "changed"):
+                        rec = await host.link_dev(folder)
+                    else:
+                        await host.restart(plugin)
+                        rec = host.records[plugin]
+                except Exception as exc:  # keep watching: the next save may fix it
+                    say(f"reload failed: {getattr(exc, 'message', exc)}")
+                    continue
+                report(rec, "reloaded")
+        finally:
+            await server.close()
     return 0
 
 

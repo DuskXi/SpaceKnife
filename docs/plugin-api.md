@@ -96,7 +96,7 @@
 | 命令：工具栏（`toolbar`）、命令面板、按键 | 有焦点的视图的扫描 | 有焦点的视图 | 选中项；没选时是 None | `[node]` 或 `[]` |
 | 命令：开始页（`start`） | 眼前的扫描或 None | — | None | `[]` |
 
-聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`，它的 `ctx.tree` 就是 `c.scan_id` 那个扫描（两个扫描都开着时也不会读到另一个）。`check` 抛出异常时命令不可用，原因写成「检查出错：〈错误〉」（同时进插件日志）；50 ms 内没答（插件正忙、进程正在启动、树刚被整理）算可用：动作运行时自己再查一遍。
+聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`，它的 `ctx.tree` 就是 `c.scan_id` 那个扫描（两个扫描都开着时也不会读到另一个）。`check` 抛出异常时命令不可用，原因写成「检查出错：〈错误〉」（`PluginError` 是它的文字，别的异常是「类型: 异常自己的信息」，最多 160 字；同时进插件日志）；50 ms 内没答（插件正忙、进程正在启动、树刚被整理）算可用：动作运行时自己再查一遍。
 
 导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）：过滤只命中文件，**文件夹总是 False**，装着命中文件的也是，要不要写出一个文件夹看它下面有没有为 True 的文件；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。「选中项」选了几项时，`root` 是它们共同的上级文件夹，`match` 只在这几项的子树里为真（没过滤时子树里的文件夹也为真，有过滤时再和命中相与）。
 
@@ -224,7 +224,7 @@ def compare_last(ctx: Context, a: ActionContext) -> CompareOpen | None:
 | `Cancelled` | `ctx.check()`：调用被取消或超时 | 不要吞掉，让它抛出去 |
 | `PermissionError` | 少了权限：`ctx.files`、`ctx.net`、`ctx.clipboard` …；审计钩子拦下的联网、写文件、开进程。`ctx.files` 读范围外的文件是它的子类 `FileNotAllowed`；系统拒绝（用户自己也读不了）是普通的 `PermissionError` | `PERMISSION_DENIED`。**它是 `OSError` 的子类**：`except OSError:` 会把它一起吞掉，读文件时写 `except (FileNotFoundError, IsADirectoryError):` 这样具体的异常 |
 | `spaceknife_sdk.errors.HostError` | 宿主拒绝了插件的请求：`code` 是协议错误码（如 `STALE_TREE` −32018：树在调用途中被整理了，见[纪元](#api-epoch)） | 不捕获时原样往外传；`tree_changed` 钩子里的 `STALE_TREE` 让宿主用新下标再调它 |
-| 其他异常 | 插件的 bug | 「插件出错：〈类型〉」，回溯进日志 |
+| 其他异常 | 插件的 bug | `plugin error: 〈类型〉: 〈异常自己的信息〉`（`PLUGIN_ERROR`；信息合成一行，最多 300 字），回溯进日志 |
 
 测试和命令行里失败的调用抛 `spaceknife_sdk.RequestError`：`.code`（`spaceknife_sdk.ErrorCode`，如 `PLUGIN_ERROR` `PERMISSION_DENIED`）、`.message`、`.data`。
 

@@ -779,9 +779,9 @@ class PluginHost:
         if self.dev_watch is not None and type in ("log", "toast", "notice"):
             with contextlib.suppress(Exception):  # a terminal that cannot print never stops the plugin
                 self.dev_watch(rec.id, type, payload)
-        if type == "log":
+        if type == "log":  # (plugin_log: its own line, which plugin dev prints its own way)
             level = str(payload.get("level", "INFO"))
-            logger.bind(source=f"plugin:{rec.id}").log(
+            logger.bind(source=f"plugin:{rec.id}", plugin_log=True).log(
                 level if level in ("DEBUG", "INFO", "WARNING", "ERROR") else "INFO",
                 "{}",
                 str(payload.get("message", ""))[:8000],
@@ -1608,8 +1608,10 @@ class PluginHost:
         :class:`ActionContext` the command would get (scan, view, selected node, zoom root, filter),
         its ``ctx.tree`` that scan as it is now. It returns why the command is unavailable, or
         nothing. A check that raises makes the command unavailable with the error as the reason
-        (and goes to the plugin's log); one that does not answer within 50 ms (or the plugin is
-        busy, its process starting, the tree reorganised meanwhile) leaves it available."""
+        (``PluginError``: its text; any other exception: its type and its own message; at most
+        CHECK_REASON_MAX characters) and goes to the plugin's log; one that does not answer within
+        50 ms (or the plugin is busy, its process starting, the tree reorganised meanwhile) leaves
+        it available."""
         params = self.action_context(c)
         ctx = {k: params[k] for k in ("scan_id", "view_id", "node") if params.get(k) is not None}
         epoch = self._epoch_of(c, params.get("scan_id"))
@@ -1620,7 +1622,13 @@ class PluginHost:
         except RpcError as exc:
             if exc.code in CHECK_UNANSWERED:
                 return None
-            why = " ".join(str(exc.message).split())[:CHECK_REASON_MAX] or str(exc.code)
+            said = str(exc.message)
+            if exc.code == ErrorCode.PLUGIN_ERROR:  # an exception: its type and its own message
+                said = said.removeprefix("plugin error: ")
+            why = " ".join(said.split())
+            if len(why) > CHECK_REASON_MAX:
+                why = why[: CHECK_REASON_MAX - 1] + "…"
+            why = why or str(exc.code)
             now = time.monotonic()
             if now - self._field_logged.get(f"check:{plugin}.{method}", -FIELD_LOG_S) >= FIELD_LOG_S:
                 self._field_logged[f"check:{plugin}.{method}"] = now

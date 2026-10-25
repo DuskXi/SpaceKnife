@@ -46,8 +46,9 @@ async def test_invalid_params_and_plugin_errors(process: bool) -> None:
     async with mock("t.crash", process=process) as host:
         with pytest.raises(RpcError) as err:
             await host.call("boom")
-        assert err.value.code == ErrorCode.PLUGIN_ERROR and "ValueError" in err.value.message
-        assert "a bug" not in err.value.message  # no traceback or exception text for the frontends
+        assert err.value.code == ErrorCode.PLUGIN_ERROR
+        # its type and its own message, on one line (bounded); the traceback stays in the log
+        assert err.value.message == "plugin error: ValueError: a bug"
         with pytest.raises(RpcError) as err:
             await host.call("refuse")
         assert err.value.code == ErrorCode.PLUGIN_ERROR and err.value.message == "不行"

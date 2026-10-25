@@ -128,7 +128,7 @@ default = 1048576
 
 选项：`name`（默认是函数名）、`timeout`（30 秒，≤ 600）、`latest`（同一调用方的新请求取消没完成的旧请求，False）、`public`（面板和前端能不能直接调，True）。
 
-签名：`async def f(ctx: Context, p: MyParams) -> MyResult`，没有参数时 `async def f(ctx) -> MyResult`。也可以是普通 `def`，宿主放到工作线程里跑，可以阻塞（被取消时立即答复，函数在备用线程上跑完，[运行规则](plugin-api.md#api-limits)）。返回 `Columns(...)` 时 numpy 列走二进制帧，不经过 JSON。宿主替你做了：路由、参数校验、超时与取消、并发上限、只算最新、错误映射。`raise PluginError(T("需要先选中一个文件夹", "Select a folder first"))` 原样显示给用户；其他异常只显示「插件出错：类型」，回溯进日志。
+签名：`async def f(ctx: Context, p: MyParams) -> MyResult`，没有参数时 `async def f(ctx) -> MyResult`。也可以是普通 `def`，宿主放到工作线程里跑，可以阻塞（被取消时立即答复，函数在备用线程上跑完，[运行规则](plugin-api.md#api-limits)）。返回 `Columns(...)` 时 numpy 列走二进制帧，不经过 JSON。宿主替你做了：路由、参数校验、超时与取消、并发上限、只算最新、错误映射。`raise PluginError(T("需要先选中一个文件夹", "Select a folder first"))` 原样显示给用户；其他异常显示 `plugin error: 类型: 异常自己的信息`，回溯进日志。
 
 ```python ex
 class HelloParams(Params):
@@ -952,7 +952,7 @@ async def test_largest() -> None:
 | `plugin call <D或id> <方法> ['{"a": 1}' 或 @参数.json] [--scan PATH] [--snapshot FILE] [--history FILE …] [--setting k=v …] [--lang en]` | 起一个临时后端，扫描 `PATH`（不给就用合成树或 `fixtures/tree/`），调用方法，打印 JSON 结果，事件、提示和插件日志打到 stderr；`--setting` 的值是 JSON 或 `@文件.json` |
 | `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名 \| source:名> [--scan PATH] [--node a/b] [--format text\|json\|md] [--call 方法[={json}] …] [--option k=v …] [--filter 式] [--uri U] [-o FILE] [--setting k=v] [--lang en] [--history FILE]` | 不开界面看到结果；`--call` 先在同一个后端里调方法（先算好结果的字段、集合）；导出的 `--option` `--filter`、`--node`（只导出它）；`visual:` `color:` 的 `--format json` 给出每行的节点、大小和色板下标 |
 | `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--step 步骤 …] [--setting k=v …] [--history FILE …] [--source 名:URI] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；`--step` 截图前按顺序点按（元素、画布上的节点 `node=a/b`、点 `@x,y`）、填写、打字、按键、在面板里操作（[步骤](plugin-api.md#api-shot)），`--eval` 在截图前执行；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
-| `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；终端里打出插件的 `ctx.log`、提示和通知；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
+| `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；终端里打出插件的 `ctx.log`（每行一遍）、提示和通知；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
 | `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]`、`list [--json]`、`enable <id> [--yes]`、`disable <id>` | 安装、卸载（真实的数据目录）；列出、启用（列出权限并要求确认）、停用 |
 | `plugin schema [--manifest \| D]` | 清单的 JSON Schema，或插件自己的协议 schema |
 | `plugin docs [--section 锚点] [--search 词] [--list] [--guide] [--api]` | 速查（不带参数）；一节；提到某个词的行；全文 |
