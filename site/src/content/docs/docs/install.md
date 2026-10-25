@@ -14,6 +14,7 @@ SpaceKnife is published on the [Releases page](https://github.com/DuskXi/SpaceKn
 | Windows 11 on ARM | `SpaceKnife-<version>-win-arm64-portable.zip` | Portable, ARM (arm64) |
 | macOS 14 or later, Apple Silicon | `SpaceKnife-<version>-mac-arm64.dmg` | Disk image |
 | macOS 14 or later, Intel | `SpaceKnife-<version>-mac-x64.dmg` | Disk image |
+| macOS 14 or later | `SpaceKnife-<version>-mac-<arm64 or x64>-portable.zip` | Portable: unzip and run, data next to the app |
 | Ubuntu 22.04 or later, Debian family | `spaceknife_<version>_amd64.deb` | Package |
 | RHEL 9 or later, Fedora family | `spaceknife-<version>.x86_64.rpm` | Package |
 | Other Linux, x64 | `SpaceKnife-<version>-x86_64.AppImage` | Single file, needs FUSE 2 |
@@ -73,6 +74,10 @@ Next to `SpaceKnife.exe` there is a `data` folder. While it is there, SpaceKnife
 ### Install
 
 Open the dmg and drag SpaceKnife into **Applications**. You need macOS 14 or later; take the `arm64` dmg for Apple Silicon and the `x64` dmg for Intel Macs.
+
+### Portable zip
+
+Unzip `SpaceKnife-<version>-mac-arm64-portable.zip` (Apple Silicon) or `…-mac-x64-portable.zip` (Intel) anywhere you can write, such as your user folder or a USB drive. The folder holds `SpaceKnife.app` and a `data` folder; keep the two together and open `SpaceKnife.app`. It keeps everything in `data` and nothing in your user Library ([portable mode](../data-locations/#portable-mode)). The first launch needs the same one-time permission as the dmg (below), for the app in that folder.
 
 ### First launch: allow it once
 

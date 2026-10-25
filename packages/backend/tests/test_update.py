@@ -331,6 +331,8 @@ ALL_ASSETS = (
     "spaceknife-0.4.0.x86_64.rpm",
     "SpaceKnife-0.4.0-mac-arm64.dmg",
     "SpaceKnife-0.4.0-mac-x64.dmg",
+    "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+    "SpaceKnife-0.4.0-mac-x64-portable.zip",
     "latest.yml",
     "SHA256SUMS.txt",
     "SHA256SUMS-mac-arm64.txt",
@@ -347,7 +349,8 @@ ALL_ASSETS = (
         ("portable", "linux", "x86_64", "SpaceKnife-0.4.0-linux-x64-portable.tar.gz"),
         ("portable", "win32", "ARM64", "SpaceKnife-0.4.0-win-arm64-portable.zip"),
         ("portable", "linux", "aarch64", "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"),
-        ("portable", "darwin", "arm64", None),  # a macOS app is portable already
+        ("portable", "darwin", "arm64", "SpaceKnife-0.4.0-mac-arm64-portable.zip"),
+        ("portable", "darwin", "x86_64", "SpaceKnife-0.4.0-mac-x64-portable.zip"),
         ("appimage", "linux", "x86_64", "SpaceKnife-0.4.0-x86_64.AppImage"),
         ("appimage", "linux", "aarch64", None),
         ("deb", "linux", "x86_64", "spaceknife_0.4.0_amd64.deb"),
@@ -374,7 +377,11 @@ def test_a_portable_copy_on_windows_on_arm_keeps_the_x64_build_without_an_arm_on
 
 
 def test_the_arm_portable_files_are_update_files() -> None:
-    for name in ("SpaceKnife-0.4.0-win-arm64-portable.zip", "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"):
+    for name in (
+        "SpaceKnife-0.4.0-win-arm64-portable.zip",
+        "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+        "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+    ):
         assert str(update.update_file_version(name)) == "0.4.0"
 
 

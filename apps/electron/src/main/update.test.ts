@@ -95,6 +95,7 @@ describe("installRefusal", () => {
       // the processor's build: an x64 copy on Windows on ARM moves to the native one
       ["portable", "win32", winUpdates, "SpaceKnife-0.4.0-win-arm64-portable.zip"],
       ["portable", "linux", linux, "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"],
+      ["portable", "darwin", "/Users/lenny/Apps/SpaceKnife-0.3.4-mac-x64-portable/data/data/updates", "SpaceKnife-0.4.0-mac-x64-portable.zip"],
       ["appimage", "linux", linux, "SpaceKnife-0.4.0-x86_64.AppImage"],
     ];
     for (const [kind, platform, folder, name] of cases) {
@@ -241,6 +242,8 @@ describe("the version of a portable archive", () => {
     expect(portableVersion("SpaceKnife-0.4.0-win-x64-portable.zip")).toBe("0.4.0");
     expect(portableVersion("SpaceKnife-0.4.0-win-arm64-portable.zip")).toBe("0.4.0");
     expect(portableVersion("SpaceKnife-0.4.10-beta.1-linux-arm64-portable.tar.gz")).toBe("0.4.10-beta.1");
+    expect(portableVersion("SpaceKnife-0.4.0-mac-arm64-portable.zip")).toBe("0.4.0");
+    expect(portableVersion("SpaceKnife-0.4.0-mac-x64-portable.tar.gz")).toBeNull();
     expect(portableVersion("SpaceKnife-0.4.0-linux-x64-portable.zip")).toBeNull();
     expect(portableVersion("SpaceKnife-0.4.0-Setup-x64.exe")).toBeNull();
     expect(portableVersion("SpaceKnife-../x-win-x64-portable.zip")).toBeNull();
@@ -270,6 +273,9 @@ describe("the swap of a portable copy", () => {
   });
   it("is done by the new version's own backend, not a script", () => {
     expect(swapHelper(plan.staged, "win32")).toBe(`${plan.staged}\\resources\\backend\\spaceknife-backend.exe`);
+    expect(swapHelper("/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable", "darwin")).toBe(
+      "/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend",
+    );
     expect(swapHelper("/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable", "linux")).toBe(
       "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/resources/backend/spaceknife-backend",
     );

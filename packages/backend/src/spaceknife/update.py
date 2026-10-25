@@ -357,6 +357,8 @@ def asset_templates(kind: InstallKind, system: str, machine: str) -> list[str]:
             return ["SpaceKnife-{v}-win-x64-portable.zip"]
         case "portable" if system.startswith("linux") and a in ("x64", "arm64"):
             return [f"SpaceKnife-{{v}}-linux-{a}-portable.tar.gz"]
+        case "portable" if system == "darwin" and a in ("x64", "arm64"):
+            return [f"SpaceKnife-{{v}}-mac-{a}-portable.zip"]
         case "appimage" if x64:
             return ["SpaceKnife-{v}-x86_64.AppImage"]
         case "deb" if x64:
@@ -472,6 +474,8 @@ _UPDATE_NAMES = tuple(
         "SpaceKnife-{v}-win-arm64-portable.zip",
         "SpaceKnife-{v}-linux-x64-portable.tar.gz",
         "SpaceKnife-{v}-linux-arm64-portable.tar.gz",
+        "SpaceKnife-{v}-mac-arm64-portable.zip",
+        "SpaceKnife-{v}-mac-x64-portable.zip",
         "SpaceKnife-{v}-x86_64.AppImage",
         "spaceknife_{v}_amd64.deb",
         "spaceknife-{v}.x86_64.rpm",

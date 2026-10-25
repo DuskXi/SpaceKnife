@@ -4,7 +4,7 @@
     uv run python tools/build_package.py                  # this platform's installers
     uv run python tools/build_package.py --skip-backend   # reuse dist/backend (Electron changes only)
     uv run python tools/build_package.py --targets deb    # Linux: some targets only
-    uv run python tools/build_package.py --portable       # also the portable archive (Windows, Linux)
+    uv run python tools/build_package.py --portable       # also the portable archive
     uv run python tools/build_package.py --portable --no-installers   # the portable archive only
 
 Everything is built for the build machine's architecture (PyInstaller freezes the interpreter it
@@ -18,10 +18,10 @@ Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage (+ .zsync, needs 
           PATH) and linux-unpacked/
 macOS   → dist/electron/SpaceKnife-<version>-mac-<arch>.dmg for this Mac's architecture (arm64 or
           x64; ad-hoc signed, not notarized) and mac[-arm64]/SpaceKnife.app
-Portable → dist/electron/SpaceKnife-<version>-win-<arch>-portable.zip or
-          …-linux-<arch>-portable.tar.gz (arch x64 or arm64; win-arm64-unpacked/, linux-arm64-unpacked/):
-          the unpacked app plus a data/ folder, which makes it keep its data next to itself
-          (apps/electron/src/main/portable.ts)
+Portable → dist/electron/SpaceKnife-<version>-win-<arch>-portable.zip,
+          …-linux-<arch>-portable.tar.gz or …-mac-<arch>-portable.zip (arch x64 or arm64;
+          win-arm64-unpacked/, linux-arm64-unpacked/): the unpacked app (on macOS SpaceKnife.app) plus
+          a data/ folder, which makes it keep its data next to itself (apps/electron/src/main/portable.ts)
 
 Steps: a release build of the native extension (maturin, with the build machine's paths remapped:
 no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
@@ -440,9 +440,21 @@ SpaceKnife 便携版
 """
 
 
+MAC_NOTE = """
+macOS: keep this folder next to SpaceKnife.app (move the two together). Opened straight from where it
+was unzipped, macOS may run SpaceKnife from a hidden copy (App Translocation); it still finds this
+folder.
+
+macOS：这个文件夹要和 SpaceKnife.app 放在一起（一起移动）。解压后直接打开时，macOS 可能从一个隐藏的副本
+运行 SpaceKnife（App 转移），它照样能找到这个文件夹。
+"""
+
+
 def make_portable() -> Path:
     """The unpacked app plus an empty data/ folder (apps/electron/src/main/portable.ts) in one
-    archive: a zip on Windows, a tar.gz on Linux (keeps the executable bits and symlinks)."""
+    archive: a zip on Windows, a tar.gz on Linux (keeps the executable bits and symlinks), and on
+    macOS a zip made by ditto with SpaceKnife.app beside the folder (keeps the bundle's symbolic
+    links, attributes and signature, as Apple's own tools unpack it)."""
     version = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))["version"]
     src = unpacked_app()
     note = PORTABLE_NOTE.encode()
@@ -468,8 +480,20 @@ def make_portable() -> Path:
             readme = tarfile.TarInfo(f"{name}/data/README.txt")
             readme.size, readme.mode, readme.mtime = len(note), 0o644, now
             tf.addfile(readme, io.BytesIO(note))
+    elif sys.platform == "darwin":
+        name = f"SpaceKnife-{version}-mac-{build_arch()}-portable"
+        out = DIST / "electron" / f"{name}.zip"
+        t0 = step(f"portable archive ({out.name})")
+        stage = DIST / "portable-mac" / name
+        shutil.rmtree(stage.parent, ignore_errors=True)
+        (stage / "data").mkdir(parents=True)
+        run(["ditto", str(src), str(stage / src.name)])
+        (stage / "data" / "README.txt").write_bytes(note + MAC_NOTE.encode())
+        out.unlink(missing_ok=True)
+        run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(stage), str(out)])
+        shutil.rmtree(stage.parent, ignore_errors=True)
     else:
-        raise SystemExit("portable archives are made on Windows and Linux (a macOS app is portable already)")
+        raise SystemExit(f"no portable archive for {sys.platform}")
     done(t0, f"{out.stat().st_size / 2**20:.0f} MB")
     return out
 
@@ -481,7 +505,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--skip-backend", action="store_true", help="reuse dist/backend/spaceknife-backend")
     ap.add_argument("--targets", nargs="+", choices=LINUX_TARGETS, default=list(LINUX_TARGETS), help="Linux")
-    ap.add_argument("--portable", action="store_true", help="also the portable archive (Windows, Linux)")
+    ap.add_argument("--portable", action="store_true", help="also the portable archive")
     ap.add_argument("--no-installers", action="store_true", help="only the unpacked app (and --portable)")
     args = ap.parse_args()
     if not args.skip_backend:

@@ -19,6 +19,8 @@
 - [ ] 再次实机验证（Intel Mac）：上面这些修复、FSEvents 监控（数据卷路径经 firmlink 映射）、回收站（`NSFileManager`）、标题栏与菜单
 - [ ] Developer ID 签名与公证（等 Apple 开发者账号审核）：Hardened Runtime、权限声明、notarytool、CI 里用 Secrets 自动签名
 - [ ] Homebrew cask（官方仓库要求通过 Gatekeeper，等公证）
+- [x] macOS 便携版（2026-10-25）：`mac-<架构>-portable.zip`（`SpaceKnife.app` 旁边一个 `data`，ditto 打包），「macOS build」里解开、校验签名、便携模式冒烟、无缝更新端到端；App 转移时从挂载表找回原位置
+- [ ] macOS 便携版实机验证（Intel Mac）：从「下载」解压后直接打开（带隔离属性，会触发 App 转移）能用到旁边的 `data`；放行流程；无缝更新后不再要求放行；放在外置盘（exFAT）上
 - [ ] Mac App Store（可选）：沙盒下用户授权整盘，访问权要用隐式安全范围书签传给后端子进程，先做概念验证
 - [x] 应用内引导开启「完全磁盘访问权限」（扫描前的说明框直接打开系统设置的对应页面；设置「扫描范围 › 受保护的位置」）
 

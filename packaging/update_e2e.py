@@ -49,6 +49,7 @@ from websockets.sync.client import connect
 from spaceknife.update import parse_checksums
 
 WIN = sys.platform == "win32"
+MAC = sys.platform == "darwin"
 
 
 APP_LOG = Path(tempfile.gettempdir()) / f"sk-update-e2e-app-{os.getpid()}.log"
@@ -187,6 +188,15 @@ def processes() -> list[tuple[int, str]]:
             if pid.strip().isdigit():
                 rows.append((int(pid), cmd))
         return rows
+    if MAC:  # no /proc
+        argv = ["ps", "-axww", "-o", "pid=,command="]
+        out = subprocess.run(argv, capture_output=True, text=True, check=False)
+        rows = []
+        for line in out.stdout.splitlines():
+            pid, _, cmd = line.strip().partition(" ")
+            if pid.isdigit():
+                rows.append((int(pid), cmd.strip()))
+        return rows
     rows = []
     for d in Path("/proc").iterdir():
         if d.name.isdigit():
@@ -291,18 +301,24 @@ def app_env(feed: Feed, **extra: str) -> dict[str, str]:
 
 
 def portable(archive: Path) -> None:
-    m = re.match(r"^SpaceKnife-(.+)-(win|linux)-(x64|arm64)-portable\.(zip|tar\.gz)$", archive.name)
+    m = re.match(r"^SpaceKnife-(.+)-(win|linux|mac)-(x64|arm64)-portable\.(zip|tar\.gz)$", archive.name)
     if not m:
         fail(f"not a portable archive: {archive.name}")
     version, target, arch, ext = m.groups()
     newer = next_patch(version)
     top_old = f"SpaceKnife-{version}-{target}-{arch}-portable"
     top_new = f"SpaceKnife-{newer}-{target}-{arch}-portable"
+    # on macOS the program is SpaceKnife.app next to the data folder
     exe_name = "SpaceKnife.exe" if WIN else "spaceknife"
-    work = Path(tempfile.mkdtemp(prefix="sk-update-e2e-"))
+    if MAC:
+        exe_name = "SpaceKnife.app/Contents/MacOS/SpaceKnife"
+    # resolved: macOS reports /var/folders/… as /private/var/folders/… in command lines
+    work = Path(tempfile.mkdtemp(prefix="sk-update-e2e-")).resolve()
     try:
         step(f"unpack {archive.name}")
-        if ext == "zip":
+        if MAC:  # ditto made it: symbolic links and attributes of the bundle
+            subprocess.run(["ditto", "-x", "-k", str(archive), str(work)], check=True)
+        elif ext == "zip":
             with zipfile.ZipFile(archive) as zf:
                 zf.extractall(work)
         else:
@@ -320,9 +336,16 @@ def portable(archive: Path) -> None:
         offered.parent.mkdir()
         marker = "E2E_NEW_BUILD.txt"
         if ext == "zip":
+
+            def renamed(name: str) -> str:  # ditto keeps attributes in __MACOSX/<the same path>
+                for prefix in ("", "__MACOSX/"):
+                    if name.startswith(prefix + top_old):
+                        return prefix + top_new + name[len(prefix + top_old) :]
+                return name
+
             with zipfile.ZipFile(archive) as src, zipfile.ZipFile(offered, "w", zipfile.ZIP_STORED) as dst:
                 for info in src.infolist():
-                    new = zipfile.ZipInfo(top_new + info.filename[len(top_old) :], info.date_time)
+                    new = zipfile.ZipInfo(renamed(info.filename), info.date_time)
                     new.external_attr, new.compress_type = info.external_attr, zipfile.ZIP_STORED
                     if info.is_dir():
                         dst.writestr(new, b"")

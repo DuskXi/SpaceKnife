@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -84,6 +85,38 @@ def test_the_plan_is_read_and_checked_before_anything_moves(tmp_path: Path) -> N
         Plan.read(write_plan(plan, file))
     with pytest.raises(PlanError, match="can't read"):
         Plan.read(tmp_path / "missing.json")
+
+
+def test_a_macos_copy_keeps_its_executable_in_the_app_bundle(tmp_path: Path) -> None:
+    # the macOS zip: the portable folder holds SpaceKnife.app and data, the executable is in the bundle
+    inner = Path("SpaceKnife.app", "Contents", "MacOS", "SpaceKnife")
+    app = tmp_path / "SpaceKnife-0.3.3-mac-arm64-portable"
+    updates = app / "data" / "data" / "updates"
+    new = updates / "staging-0.3.4" / "SpaceKnife-0.3.4-mac-arm64-portable"
+    for folder, version in ((app, "0.3.3"), (new, "0.3.4")):
+        (folder / inner).parent.mkdir(parents=True)
+        (folder / inner).write_text(version, encoding="utf-8")
+        (folder / "data").mkdir(exist_ok=True)
+    plan = Plan(
+        pid=4242, app=app, new=new, old=updates / "previous-0.3.3", exe=app / inner, log=updates / "u.log"
+    )
+    file = tmp_path / "update-0.3.4.json"
+    assert Plan.read(write_plan(plan, file)) == plan
+    # next to the folder is not in it (a name that only starts like it)
+    beside = tmp_path / "SpaceKnife-0.3.3-mac-arm64-portable-old" / inner
+    with pytest.raises(PlanError, match="is not in"):
+        Plan.read(write_plan(plan, file, exe=str(beside)))
+    started: list[tuple[Path, list[str]]] = []
+    code = update_swap.run(
+        plan, Log(plan.log), wait=lambda _p, _t: True, start=lambda e, a: started.append((e, a))
+    )
+    assert code == 0
+    assert (app / inner).read_text(encoding="utf-8") == "0.3.4"
+    assert started == [(app / inner, ["--updated"])]
+    (new.parent / "x").mkdir()  # an incomplete new version: no executable in its bundle
+    (app / inner).unlink()
+    with pytest.raises(PlanError, match=re.escape("incomplete: no SpaceKnife.app/Contents/MacOS/SpaceKnife")):
+        Plan.read(write_plan(plan, file, new=str(new.parent / "x")))
 
 
 def test_the_new_version_takes_the_place_of_the_old_one(tmp_path: Path) -> None:
