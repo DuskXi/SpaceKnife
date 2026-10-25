@@ -255,7 +255,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 **后台任务**（`@plugin.background`）：没有时限（可以给 `timeout=`，≤ 1 天），不占调用槽和工作线程（普通 `def` 每个任务一条自己的线程，`async def` 在事件循环上）。宿主给每个任务一份记录（[`TaskInfo`](#api-models)），所有窗口都看得到（状态栏的任务列表，协议的 `plugin.tasks` 和 `plugin.task` 事件），用户可以取消：普通 `def` 在下一个 `ctx.check()` 停下，`async def` 在下一个 `await`。`ctx.progress(done, total, text)` 写进它的记录（每秒最多推 4 次；`total = 0` 表示说不出进度）。界面语言变了，任务在下一个 `ctx.check()` 换成新的（`ctx.lang`、`T(...)`）。`restart=True`：插件进程崩溃时宿主用同样的参数重新开始（`attempt` 加一，最多 3 次，进程的崩溃上限照样算）；用户停用、重启插件，或 `plugin dev` 重新加载时任务算取消，`start="startup"` 的随新进程再启动。有后台任务在跑时插件进程不算空闲。参数 ≤ 64 KiB 的 JSON；每个插件同时 8 个，结束的留最近 8 个。钩子里只做一会儿就完的事，长的交给 `ctx.tasks.start`（钩子返回后任务照样跑）。
 
-**读盘**：`ctx.files` 的读（`open` 得到的文件、`read`、`hash`、`hash_many`）一段段向宿主要这块盘的许可，和扫描共用同一个磁盘负载上限（用户选的档位：这块盘正在扫描时是那次扫描的，否则是设置里的「磁盘负载」），算在 SpaceKnife 自己的负载里：一段最多 4 MiB 或 50 ms；扫描正在读这块盘时，所有插件一次只读一段，扫描先走；扫描暂停时插件不等它。等许可时也会发现调用被取消。`open_path` 只给出路径：拿路径自己读盘的库（`zipfile.ZipFile(path)`、`ctx.exec` 的程序）不受这个限制，能传文件对象的就传 `ctx.files.open(n)`（可以 `seek`）。
+**读盘**：`ctx.files` 的读（`open` 得到的文件、`read`、`hash`、`hash_many`）一段段向宿主要这块盘的许可，和扫描共用同一个磁盘负载上限（用户选的档位：这块盘正在扫描时是那次扫描的，否则是设置里的「磁盘负载」），算在 SpaceKnife 自己的负载里：一段最多 4 MiB 或 50 ms。许可只在读的时候拿着：一段读完、一个文件读到头（`open` 的文件读到末尾或关掉）、`hash_many` 的读线程没有文件可读了，许可马上还给宿主，插件的代码做别的事时不占着（没还的 2 秒后宿主收回）；`hash_many` 按节点下标给时，路径一批批地取。扫描正在读这块盘时，所有插件一次只读一段，扫描先走；扫描暂停时插件不等它。等许可时也会发现调用被取消。`open_path` 只给出路径：拿路径自己读盘的库（`zipfile.ZipFile(path)`、`ctx.exec` 的程序）不受这个限制，能传文件对象的就传 `ctx.files.open(n)`（可以 `seek`）。
 
 单位的值：`size` 字节；`count` 个数；`pct` 0–1 的小数（0.25 显示成 25%）；`date` `ago` unix 秒；`duration` 秒；`bytes_per_s` 字节每秒。
 

@@ -286,12 +286,18 @@ NOT_LOCAL = Flag.CLOUD | Flag.OFFLINE
 IO_BURST_BYTES = 4 << 20
 IO_BURST_S = 0.05
 IO_FREE_S = 1.0  # the host said "no limit here": ask again after this long
+PATHS_BATCH = 20_000  # ctx.files.hash_many: paths of node ids asked in requests of this many
 PROGRESS_EVERY_S = 0.2
 Progress = Callable[[int, int], None]  # (bytes read, bytes in all)
 
 
 class _Lease:
-    """One reader's reads on one disk, in bursts paced by the host's I/O governor."""
+    """One reader's reads on one disk, in bursts paced by the host's I/O governor.
+
+    A permit is held only while the reader reads: it goes back as soon as its burst is used up
+    (:meth:`read_done`), the file it was for ends, or the reader has nothing more to read
+    (:meth:`close`), never while the plugin's code does something else. The host takes back a
+    permit kept longer than ``PERMIT_MAX_S`` (2 s) by itself."""
 
     __slots__ = ("_ctx", "base", "free_until", "permit", "since", "used")
 
@@ -326,6 +332,19 @@ class _Lease:
             self.permit = got
         else:  # no limit on this disk (nothing measures it, or its scan is paused)
             self.free_until = self.since + IO_FREE_S
+
+    def read_done(self, asked: int, got: int | None) -> None:
+        """After a read of ``asked`` bytes that gave ``got``: the permit goes back when its burst
+        is used up, or (``got`` short of ``asked``) the file ended."""
+        if not self.permit:
+            return
+        if (
+            got is None
+            or got < asked
+            or self.used >= IO_BURST_BYTES
+            or time.monotonic() - self.since >= IO_BURST_S
+        ):
+            self.close()
 
     def close(self) -> None:
         if self.permit:
@@ -363,8 +382,17 @@ class _PacedFile(io.RawIOBase):
         return self._raw.fileno()
 
     def readinto(self, b: Any) -> int | None:
-        self._lease.need(len(b))
-        return self._raw.readinto(b)
+        asked = len(b)
+        self._lease.need(asked)
+        got = None
+        try:
+            got = self._raw.readinto(b)
+        finally:
+            if self._owned:  # a reader of many files (hash_many) keeps it for the next file
+                self._lease.read_done(asked, got)
+            elif got is not None and got >= asked:
+                self._lease.read_done(asked, got)  # its burst may be used up
+        return got
 
     def close(self) -> None:
         if not self.closed:
@@ -550,16 +578,21 @@ class Files:
 
         require(self._ctx._state, "files.read")
         todo = list(items)
-        tree = self._ctx.tree
         ids = [int(i) for i in todo if isinstance(i, int | np.integer)]
         skip: set[int] = set()
         sizes: Any = None
+        by_id: dict[int, str] = {}
         if ids:
+            tree = self._ctx.tree
             kinds = tree.col("kind")
             flags = tree.col("flags")
             skip = {i for i in ids if int(kinds[i]) != Kind.FILE or int(flags[i]) & int(NOT_LOCAL)}
             if progress:
                 sizes = tree.col("size")
+            want = [i for i in dict.fromkeys(ids) if i not in skip]
+            for at in range(0, len(want), PATHS_BATCH):  # one request per batch, not one per file
+                chunk = want[at : at + PATHS_BATCH]
+                by_id.update(zip(chunk, tree.paths(chunk), strict=True))
         paths: list[str | None] = []
         total = 0
         for i in todo:
@@ -568,7 +601,7 @@ class Files:
             ):
                 paths.append(None)
                 continue
-            paths.append(self._path(i))
+            paths.append(by_id[int(i)] if isinstance(i, int | np.integer) else self._path(i))
             if progress:
                 if isinstance(i, int | np.integer) and sizes is not None:
                     size = int(sizes[int(i)])
@@ -581,35 +614,46 @@ class Files:
                         size = 0
                 total += size if limit is None else min(size, limit)
         meter = self._meter(progress, total)
-        leases: list[_Lease] = []
-        local = threading.local()  # each reader keeps its permit across small files of one disk
+        out: list[str | None] = [None] * len(paths)
+        order = iter(range(len(paths)))
+        taking = threading.Lock()
 
-        def one(path: str | None) -> str | None:
-            if path is None or self._ctx.cancelled:
-                return None
-            lease: _Lease | None = getattr(local, "lease", None)
+        def reader() -> None:
+            """Hashes the next file until none is left. Its permit carries over to the next file
+            of the same disk (small files are one burst), and goes back once it has nothing more
+            to read: a reader that is done never holds up the others."""
+            lease: _Lease | None = None
             try:
-                where = self._resolve(path)
-                if lease is None or lease.base != where[1]:
-                    if lease is not None:
-                        lease.close()
-                    lease = local.lease = _Lease(self._ctx, where[1])
-                    leases.append(lease)
-                return self._digest(where, algorithm, limit, meter, lease)
-            except (OSError, ValueError):
-                return None
+                while not self._ctx.cancelled:
+                    with taking:
+                        i = next(order, None)
+                    if i is None:
+                        return
+                    path = paths[i]
+                    if path is None:
+                        continue
+                    try:
+                        where = self._resolve(path)
+                        if lease is None or lease.base != where[1]:
+                            if lease is not None:
+                                lease.close()
+                            lease = _Lease(self._ctx, where[1])
+                        out[i] = self._digest(where, algorithm, limit, meter, lease)
+                    except (OSError, ValueError):
+                        out[i] = None
+            finally:
+                if lease is not None:
+                    lease.close()
 
-        n = max(1, min(threads or HASH_THREADS, 16))
-        try:
-            if n == 1 or len(paths) < 4:
-                out = [one(p) for p in paths]
-            else:
-                base = contextvars.copy_context()  # the call's (language, cancellation): one copy a task
-                with ThreadPoolExecutor(n, thread_name_prefix="sk-hash") as pool:
-                    out = list(pool.map(lambda p: base.copy().run(one, p), paths))
-        finally:
-            for lease in leases:
-                lease.close()
+        n = max(1, min(threads or HASH_THREADS, 16, len(paths)))
+        if n <= 1 or len(paths) < 4:
+            reader()
+        else:
+            base = contextvars.copy_context()  # the call's (language, cancellation): one copy a reader
+            with ThreadPoolExecutor(n, thread_name_prefix="sk-hash") as pool:
+                running = [pool.submit(base.copy().run, reader) for _ in range(n)]
+            for f in running:
+                f.result()  # what a reader raised (Cancelled …)
         if meter is not None:
             meter.end()
         self._ctx.check()
