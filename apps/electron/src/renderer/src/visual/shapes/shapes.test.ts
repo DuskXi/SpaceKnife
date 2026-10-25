@@ -143,6 +143,58 @@ describe("paint", () => {
     expect(plain.count).toBe(2);
   });
 
+  it("selects an open folder of a nested layout with its rings only, so its contents stay in sight", () => {
+    const pick = (f: ReturnType<typeof shapesScene>["frame"], row: number) => {
+      for (let i = 0; i < f.count; i++) f.flags[i]! &= ~Flag.SELECTED;
+      f.flags[row]! |= Flag.SELECTED;
+      f.info.selected_row = row;
+      return f;
+    };
+    const nested = pick(shapesScene().frame, 0); // sub: a folder whose circles lie in it
+    const rings = paintShapesOverlay(nested, settings({ hoverHighlight: false }), HIT_NONE);
+    expect(rings.count).toBe(2);
+    // neither instance has a fill: nothing is laid over the folder's circles
+    for (let k = 0; k < rings.count; k++) expect(rings.instances[k * SHAPE_STRIDE + SLOT.fill + 3]).toBe(0);
+    // a file in it is lifted as before: its shadow, itself again, the rings
+    const file = pick(shapesScene().frame, 1);
+    expect(paintShapesOverlay(file, settings({ hoverHighlight: false }), HIT_NONE).count).toBe(SELECTION_INSTANCES);
+    // a folder of a layout that puts its blocks elsewhere (an icicle) holds nothing: lifted too
+    const flat = pick(shapesScene({ nested: false }).frame, 0);
+    expect(paintShapesOverlay(flat, settings({ hoverHighlight: false }), HIT_NONE).count).toBe(SELECTION_INSTANCES);
+  });
+
+  it("draws a line inside every shape's edge in the canvas colour, as wide as the frame says", () => {
+    const f = shapesScene({ stroke: 2 }).frame;
+    const p = paintShapes(f, settings());
+    const at = (k: number, slot: number) => p.instances[k * SHAPE_STRIDE + slot]!;
+    const width = (k: number) => at(k, SLOT.shape + 1);
+    expect(width(0)).toBe(0); // the root's shape: on the canvas already
+    expect([width(1), width(2), width(3), width(5)]).toEqual([2, 2, 2, 2]); // sub, a.mp4, the hexagon, the small items
+    // laid over the shape's own fill: opaque (not a see-through ring), and not the fill itself
+    expect(at(2, SLOT.border + 3)).toBe(1);
+    const fill = [0, 1, 2].map((c) => at(2, SLOT.fill + c));
+    const line = [0, 1, 2].map((c) => at(2, SLOT.border + c));
+    expect(line.some((v, c) => v !== fill[c])).toBe(true);
+    // the folder waiting for the scan keeps its own dashed border
+    expect(at(4, SLOT.extra)).toBe(1);
+    expect(width(4)).toBe(1);
+    // none when the plugin asked for none, when 「边框对比」 is 0, or on a shape too small to keep a fill
+    const none = paintShapes(shapesScene({ stroke: 0 }).frame, settings());
+    expect(none.instances[2 * SHAPE_STRIDE + SLOT.shape + 1]).toBe(0);
+    const soft = paintShapes(f, settings({ borderContrast: 0 }));
+    expect(soft.instances[2 * SHAPE_STRIDE + SLOT.shape + 1]).toBe(0);
+    const thick = paintShapes(shapesScene({ stroke: 12 }).frame, settings());
+    expect(thick.instances[5 * SHAPE_STRIDE + SLOT.shape + 1]).toBe(0); // the small items' 40 px circle
+    expect(thick.instances[1 * SHAPE_STRIDE + SLOT.shape + 1]).toBe(12); // sub's 160 px one
+  });
+
+  it("names the root by the scanned folder's own name, not its whole path", () => {
+    const f = shapesScene({ info: { breadcrumb: [{ key: 1, label: "C:\\Users\\lenny\\Downloads\\" }] } }).frame;
+    const p = paintShapes(f, settings());
+    expect(p.texts.map((t) => t.text)).toContain("Downloads");
+    expect(p.texts.some((t) => t.text.includes("Users"))).toBe(false);
+  });
+
   it("zooms a row's box onto the root's shape, keeping it round", () => {
     const f = shapesScene().frame;
     expect(zoomXform(f, { row: 0, t: 0 }, false)).toEqual({ sx: 1, sy: 1, tx: 0, ty: 0 });
@@ -219,7 +271,7 @@ describe("component", () => {
     expect(r.draws).toHaveLength(2);
     expect(texts).toContain("a.mp4");
 
-    const failed = shapesScene({ info: { geometry: { kind: "shapes", root: null, nested: true, message: "插件没有在 5 秒内排好布局" } } }).frame; // i18n-ignore
+    const failed = shapesScene({ info: { geometry: { kind: "shapes", root: null, nested: true, message: "插件没有在 5 秒内排好布局", stroke: 1 } } }).frame; // i18n-ignore
     const empty = { ...failed, count: 0 } as typeof failed;
     texts.length = 0;
     inst.setFrame(empty, settings());

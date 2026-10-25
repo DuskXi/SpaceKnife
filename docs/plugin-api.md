@@ -275,7 +275,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `frame.draw.layout` | `drawlist.v1`（树图）`flame.v1` `polar.v1`，自带布局是 `shapes.v1` |
 | `frame.draw.geometry` | 几何列：`shapes.v1` 是 `x y w h`（外框）`r`（圆角，半个短边就是圆）`poly`（多边形的点数，0 不是多边形），物理像素 |
 | `frame.draw.points` | `shapes.v1` 里多边形的点，`x y` 交替，按行的顺序 |
-| `frame.draw.meta` | `shapes.v1` 是 `ShapesGeometry`：`root`（缩放根的形状，没有是 None）`nested` `message`（布局失败的原因） |
+| `frame.draw.meta` | `shapes.v1` 是 `ShapesGeometry`：`root`（缩放根的形状，没有是 None）`nested` `message`（布局失败的原因）`stroke`（形状边里那条线，物理像素） |
 
 **图例在哪**：工具栏的配色菜单里，每种配色下面一行色块和说明（声明的 `legend`、按 `bands` 生成的，或 `@plugin.color_legend` 给的）；没有说明的色板项不显示。
 
@@ -292,11 +292,14 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `out.rects(ids, x, y, w, h, radius)` `out.circles(ids, cx, cy, r)` | 一次很多块（数组或数） |
 | `out.clear(i)` | 这一块不画了（它里面的块也不画） |
 
-- `i = -1`（`shapes.ROOT`）是缩放根：给了形状就画在最下面，写着名字和大小，悬停、点它（回到上一层）和火焰图的根条一样。
+- `i = -1`（`shapes.ROOT`）是缩放根：给了形状就画在最下面，上沿写着名字和大小（扫描的那个文件夹只写它自己的名字，不写整条路径）。悬停和火焰图的根条一样；单击它在详情面板里显示它，**双击**回到上一层（双击别的块是放大进入）。
 - 块按顺序画，后画的盖住先画的；指针落在最后一个盖住它的形状上。里面一块都没画的文件夹画成折叠的。
+- 线：每个形状的边里面有一条画布底色的细线（和火焰图块之间的缝一样），宽 `out.stroke` 个 CSS 像素：默认 1，0 不画，最多 4（超出时这一帧失败并写明）。深层的块和外层同色时（分支配色超过第 4 层、浅色主题里的文件夹）靠它看得出边。「边框对比」调它的深浅；条纹的块（可用、未知空间、等待扫描）用自己的边框；比 4 条线还窄的形状不画。
+- 选中：一般的块像火焰图那样浮起（投影、自己再画一遍、选中环）；`nested` 布局里展开的文件夹只画选中环，它里面的块照样看得见（和树图选中文件夹一样）。
 - 标签：每个方法都有 `label="auto" | "centre" | "top" | "none"`。`auto`：展开的文件夹在 `nested` 布局里画成矩形时名字写在顶部，画成圆或多边形时不写（里面是它的内容），其余写在中间；放得下两行写名字和大小，否则一行，放不下不写。
+- 标签占的地方在 `v.label`（`LabelSpace`，物理像素，随 `dpr` 和「元素字号」，lu = `dpr` × `font_scale`）：`top` 是顶部标签从形状上沿往下占到的地方（19 lu），`lines` / `line` 是中间写两行 / 一行要的高度（34 / 18 lu），`font` 是字号。`nested` 布局里，一个顶部标签和外层形状（含缩放根）的顶部标签叠在一起时，宿主不写里面那个，所以圆堆积可以给每个展开的文件夹都要 `label="top"`；想让两个名字都在，里面的形状上沿要比外层的低 `v.label.top` 以上。
 - `v.children(i)`：块 i 里的块（−1：缩放根上的）；`v.levels` 层数；`v.min_element` 最小元素（物理像素）；`v.options` 是 `options` 里列出的本插件设置的值。
-- `shapes.pack(v, padding=2, margin=8)`：d3 的圆堆积（front-chain 加最小外接圆），确定的；`shapes.pack_siblings(radii)`、`shapes.enclose(circles)` 是它的两步。
+- `shapes.pack(v, padding=2, margin=8)`：d3 的圆堆积（front-chain 加最小外接圆），确定的；根的圆上沿留出名字那一条（`v.label.top`）；`shapes.pack_siblings(radii)`、`shapes.enclose(circles)` 是它的两步。
 - 失败：超时（5 s）或出错时这一帧没有行，画布中间写原因（异常只写类型，traceback 在插件日志里；`Shapes` 的块数不对等 SDK 自己的检查写全文）；下一个画面再问。坐标夹在 ±2^24 内，圆的直径取偶数，其余按整像素取整。
 
 冰柱图（`fill = 1`，`nested = False`）：
@@ -693,6 +696,18 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 | `root_size` | int | `0` | 缩放根的大小（同 `size`） |
 | `options` | dict[str, Any] | `{}` | 声明的 `options`（本插件的设置名 → 当前值） |
 | `ctx` | Context \| None | `None` | 调用的上下文：`ctx.check()`；有 `tree.read` 时 `v.tree` 读树 |
+| `label` | LabelSpace | 算出 | 宿主的标签占多大地方（`LabelSpace`，物理像素），按 `dpr` × `font_scale` 算出 |
+
+#### `LabelSpace`
+
+`v.label`：宿主的标签占多大地方（物理像素，随 `dpr` 和「元素字号」），想让名字露出来就把它空出来。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `font` | float | 必需 | 名字的字号（11 lu；大标签 13，只写一行时 10.5） |
+| `line` | float | 必需 | 形状中间写一行名字要的高度（18 lu；那里的宽度还要 ≥ 30 lu，形状 ≥ 15 lu 高） |
+| `lines` | float | 必需 | 形状中间写名字和大小两行要的高度（34 lu；那里的宽度还要 ≥ 42 lu） |
+| `top` | float | 必需 | 顶部标签从形状上沿往下占到哪里（4 + 15 lu；那一条的宽度还要 ≥ 40 lu，形状 ≥ 60 lu 高）：嵌套的文件夹比外层的低这么多，两个名字才都写 |
 
 #### `ExportInput`
 

@@ -62,11 +62,11 @@ NONE, BOX, POLYGON = 0, 1, 2
 # label placement a placer may ask for (0: the host decides)
 AUTO, NO_LABEL, CENTRE, TOP = 0, 1, 2, 3
 
-# label geometry (docs/plugin-dev.md 「自带布局的可视化」, frontend visual/shapes/geometry.ts)
-TWO_LINES = 34  # lu: the band two lines of a centred label need
-ONE_LINE = 18  # lu: one line
-TOP_INSET = 4  # lu: a top label's band starts this far below the shape's top
-TOP_BAND = 15  # lu: its height
+# label geometry (protocol view.py SHAPE_LABEL_*, frontend visual/shapes/geometry.ts)
+TWO_LINES = pv.SHAPE_LABEL_TWO_LINES  # lu: the band two lines of a centred label need
+ONE_LINE = pv.SHAPE_LABEL_ONE_LINE  # lu: one line
+TOP_INSET = pv.SHAPE_LABEL_TOP_INSET  # lu: a top label's band starts this far below the shape's top
+TOP_BAND = pv.SHAPE_LABEL_TOP_BAND  # lu: its height
 POLY_INSET = 0.9  # a polygon's text band: this share of its ellipse's chord
 
 
@@ -196,6 +196,7 @@ class Placed:
     label: np.ndarray  # u1 AUTO / NO_LABEL / CENTRE / TOP
     root: tuple[float, float, float, float, float, tuple[float, ...]] | None = None  # x y w h r points
     message: str = ""
+    stroke: float = pv.SHAPE_STROKE  # CSS px: the line inside each shape's edge (0: none)
 
     @classmethod
     def empty(cls, n: int, message: str = "") -> Placed:
@@ -376,6 +377,39 @@ def label_bits(kind: str, w: float, h: float, r: float, mode: int, lu: float) ->
     return L_NAME | L_SHORT if cw >= 30 * lu and h >= 15 * lu else 0
 
 
+Box = tuple[float, float, float, float]  # top, bottom, left, right (px)
+
+
+def _top_label_box(kind: str, x: float, y: float, w: float, h: float, r: float, lu: float, dpr: float) -> Box:
+    """Where a top label is drawn (frontend visual/shapes/paint.ts labelOf): left-aligned in a
+    rectangle, centred across the band in a round shape or a polygon."""
+    t0 = TOP_INSET * lu
+    top, bottom = y + t0, y + t0 + TOP_BAND * lu
+    if kind == "box" and 2 * r < min(w, h) - 1:
+        return top, bottom, x + 6 * dpr, x + w - 6 * dpr
+    half = max(0.0, band_width(kind, w, h, r, t0, t0 + TOP_BAND * lu) - 8 * lu) / 2
+    return top, bottom, x + w / 2 - half, x + w / 2 + half
+
+
+def _root_label_box(s: pv.PixelShape | None, lu: float, dpr: float) -> Box | None:
+    """Where the zoom root's name and size go along the top of its shape (paint.ts paintShapes)."""
+    if s is None:
+        return None
+    kind = "poly" if s.points else "box"
+    t0 = TOP_INSET * lu
+    band = (TOP_BAND + 2) * lu
+    if kind == "box" and 2 * s.r < min(s.w, s.h) - 1:
+        return s.y + t0, s.y + t0 + band, s.x + 6 * dpr, s.x + s.w - 6 * dpr
+    half = max(0.0, band_width(kind, s.w, s.h, s.r, t0, t0 + band) - 8 * lu) / 2
+    if 2 * half <= 30 * lu:  # not written
+        return None
+    return s.y + t0, s.y + t0 + band, s.x + s.w / 2 - half, s.x + s.w / 2 + half
+
+
+def _overlap(a: Box, b: Box) -> bool:
+    return a[0] < b[1] and b[0] < a[1] and a[2] < b[3] and b[2] < a[3]
+
+
 def assemble(draw: DrawList, h: Hierarchy, placed: Placed, basis: Basis, *, nested: bool = True) -> DrawList:
     """The ``shapes.v1`` draw list: the hierarchy's rows that got a shape, with their geometry,
     label bits and names. A row without a shape takes its contents with it; a folder that keeps no
@@ -451,12 +485,20 @@ def assemble(draw: DrawList, h: Hierarchy, placed: Placed, basis: Basis, *, nest
         if is_poly.any()
         else np.zeros(0)
     ).astype(np.int32)
+    root_shape = None
+    if placed.root is not None and message == "":
+        rx, ry, rw, rh, rr, rp = placed.root
+        root_shape = _root_shape(rx, ry, rw, rh, rr, rp)
     # labels
     lu = h.dpr * h.font_scale
     mode = np.asarray(placed.label, dtype=np.int64).reshape(-1)[rows] if n else np.zeros(0, dtype=np.int64)
     label = np.zeros(len(rows), dtype=np.uint8)
     names: list[str] = []
     store = basis.store
+    # in a nested layout, the top label of the nearest shape around each row that has one (the
+    # zoom root's name included): a folder's own top label is left out where it would overlap it
+    around: list[Box | None] = [None] * len(rows)
+    root_box = _root_label_box(root_shape, lu, h.dpr) if nested else None
     for j in range(len(rows)):
         k = int(kind[j])
         m = int(mode[j])
@@ -465,7 +507,18 @@ def assemble(draw: DrawList, h: Hierarchy, placed: Placed, basis: Basis, *, nest
             # circle or a polygon is filled by its contents), elsewhere a label like any block
             boxy = not is_poly[j] and ri[j] * 2 < min(wi[j], hi[j]) - 1
             m = (TOP if boxy else NO_LABEL) if k == FOLDER and nested else CENTRE
-        bits = label_bits("poly" if is_poly[j] else "box", float(wi[j]), float(hi[j]), float(ri[j]), m, lu)
+        shape_kind = "poly" if is_poly[j] else "box"
+        sx, sy, sw, sh, sr = (float(a[j]) for a in (xi, yi, wi, hi, ri))
+        bits = label_bits(shape_kind, sw, sh, sr, m, lu)
+        if nested:
+            outer = around[int(par[j])] if par[j] >= 0 else root_box
+            if bits & L_TOP:
+                mine = _top_label_box(shape_kind, sx, sy, sw, sh, sr, lu, h.dpr)
+                if outer is not None and _overlap(mine, outer):
+                    bits = 0
+                else:
+                    outer = mine
+            around[j] = outer
         label[j] = bits
         node = int(draw.node[rows[j]])
         names.append(store.name(node) if bits and k <= PENDING_RECT and node >= 0 else "")
@@ -474,11 +527,10 @@ def assemble(draw: DrawList, h: Hierarchy, placed: Placed, basis: Basis, *, nest
         for i in rows.tolist()
         if int(draw.key[i]) in draw.members
     }
-    root_shape = None
-    if placed.root is not None and message == "":
-        rx, ry, rw, rh, rr, rp = placed.root
-        root_shape = _root_shape(rx, ry, rw, rh, rr, rp)
-    meta = pv.ShapesGeometry(root=root_shape, nested=nested, message=message[:300])
+    stroke = min(max(float(placed.stroke), 0.0), pv.SHAPE_STROKE_MAX) if math.isfinite(placed.stroke) else 0.0
+    meta = pv.ShapesGeometry(
+        root=root_shape, nested=nested, message=message[:300], stroke=round(stroke * h.dpr, 3)
+    )
     out = DrawList(
         key=draw.key[rows].copy(),
         node=draw.node[rows].copy(),

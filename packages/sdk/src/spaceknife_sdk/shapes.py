@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
+from spaceknife_protocol import view as pv
 from spaceknife_protocol.view import MAX_POLY_POINTS
 
 if TYPE_CHECKING:
@@ -55,6 +56,27 @@ class BlockKind(IntEnum):
     UNKNOWN = 7  # space the scan could not see
 
 
+@dataclass(frozen=True, slots=True)
+class LabelSpace:
+    """The room the host's labels take at this ``dpr`` and font size, physical px: leave it free
+    where a name should show (``v.label``). The host writes a label only where it fits."""
+
+    font: float  # a name's type size
+    line: float  # the height a one-line label needs (in the middle of a shape)
+    lines: float  # the height a name-and-size label needs (in the middle of a shape)
+    top: float  # how far below its shape's top edge a top label reaches
+
+    @classmethod
+    def at(cls, lu: float) -> LabelSpace:
+        """The room at ``lu`` physical px per label unit (``dpr`` × ``font_scale``)."""
+        return cls(
+            font=pv.SHAPE_LABEL_FONT * lu,
+            line=pv.SHAPE_LABEL_ONE_LINE * lu,
+            lines=pv.SHAPE_LABEL_TWO_LINES * lu,
+            top=(pv.SHAPE_LABEL_TOP_INSET + pv.SHAPE_LABEL_TOP_BAND) * lu,
+        )
+
+
 @dataclass(slots=True)
 class LayoutInput:
     """What a layout function gets: the blocks to place and the canvas; it answers a :class:`Shapes`.
@@ -70,7 +92,8 @@ class LayoutInput:
     ``min_element``: the smallest block worth drawing, physical px; ``levels``: how deep the blocks
     go; ``root``: the zoom root's node (``root_kind``, ``root_size`` as for a block); ``options``:
     the values of the settings the visualization's ``options`` names; ``ctx``: the call's context
-    (``ctx.check()``; ``ctx.tree`` with ``tree.read``)."""
+    (``ctx.check()``; ``ctx.tree`` with ``tree.read``); ``label``: the room the host's labels take
+    (a :class:`LabelSpace`, from ``dpr`` and ``font_scale``)."""
 
     node: np.ndarray
     parent: np.ndarray
@@ -91,7 +114,11 @@ class LayoutInput:
     root_size: int = 0
     options: dict[str, Any] = field(default_factory=dict)
     ctx: Context | None = None
+    label: LabelSpace = field(init=False)
     _kids: tuple[np.ndarray, np.ndarray] | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        self.label = LabelSpace.at(self.dpr * self.font_scale)
 
     def __len__(self) -> int:
         return len(self.node)
@@ -156,9 +183,12 @@ class LayoutInput:
 class Shapes:
     """A layout function's answer: one shape per block, or none (then neither the block nor what
     lies in it is drawn). Index ``ROOT`` (-1) is the zoom root itself: give it a shape and it is
-    drawn under its blocks, named and clickable (a click zooms out). Labels: ``"auto"`` (the host
-    decides: centred in a block, at the top of an open folder drawn as a rectangle), ``"centre"``,
-    ``"top"`` or ``"none"``; the host draws a label only where it fits."""
+    drawn under its blocks with its name, and a double click on it goes up a level (a click shows
+    it in the details panel). Labels: ``"auto"`` (the host decides: centred in a block, at the top
+    of an open folder drawn as a rectangle), ``"centre"``, ``"top"`` or ``"none"``; the host draws a
+    label only where it fits (:class:`LabelSpace`). ``stroke``: the line just inside every shape's
+    edge in the canvas colour, CSS px (default 1, at most 4; 0: none): it keeps a block of its
+    folder's colour visible."""
 
     def __init__(self, n: int) -> None:
         self.n = n
@@ -172,6 +202,7 @@ class Shapes:
         self._polys: dict[int, np.ndarray] = {}
         self.root: tuple[float, float, float, float, float, tuple[float, ...]] | None = None
         self.message = ""
+        self.stroke = pv.SHAPE_STROKE
 
     def __len__(self) -> int:
         return self.n
@@ -276,9 +307,16 @@ class Shapes:
             "poly": poly,
             "label": self.label,
         }
+        try:
+            stroke = float(self.stroke)
+        except (TypeError, ValueError):
+            stroke = math.nan
+        if not 0 <= stroke <= pv.SHAPE_STROKE_MAX:  # said to the author (NaN too)
+            raise ValueError(f"Shapes.stroke is 0 to {pv.SHAPE_STROKE_MAX:g} CSS px (got {self.stroke!r})")
         value: dict[str, Any] = {
             "root": [*self.root[:5], list(self.root[5])] if self.root else None,
             "message": self.message,
+            "stroke": stroke,
         }
         return value, cols, points
 
@@ -289,15 +327,18 @@ class Shapes:
 def pack(v: LayoutInput, *, padding: float = 2.0, margin: float = 8.0) -> Shapes:
     """Circle packing (as d3-hierarchy's ``pack``): every folder a circle holding its blocks' circles,
     each block's area by its size. ``padding``: CSS px between circles and inside a folder's edge;
-    ``margin``: CSS px around the zoom root's circle. A circle under one pixel is left out."""
+    ``margin``: CSS px around the zoom root's circle, whose name keeps the band along its top
+    (``v.label.top``) clear. A circle under one pixel is left out."""
     out = v.shapes()
     pad = max(0.0, padding) * v.dpr
     R = max(1.0, min(v.width, v.height) / 2 - max(0.0, margin) * v.dpr)
     cx, cy = v.width / 2, v.height / 2
     out.circle(ROOT, cx, cy, R)
+    # the blocks go in the circle that touches the root's at its bottom and stays below its name
+    inner = max(1.0, R - v.label.top / 2)
     pos = np.zeros((len(v), 3), dtype=np.float64)  # cx, cy, r of each block's circle
     have = np.zeros(len(v), dtype=bool)
-    queue: list[tuple[int, float, float, float]] = [(ROOT, cx, cy, R)]
+    queue: list[tuple[int, float, float, float]] = [(ROOT, cx, cy + R - inner, inner)]
     while queue:
         c, x0, y0, r0 = queue.pop()
         kids = v.children(c)
@@ -522,4 +563,4 @@ def enclose(circles: Sequence[Circle]) -> Circle:
     return e
 
 
-__all__ = ["ROOT", "BlockKind", "LayoutInput", "Shapes", "enclose", "pack", "pack_siblings"]
+__all__ = ["ROOT", "BlockKind", "LabelSpace", "LayoutInput", "Shapes", "enclose", "pack", "pack_siblings"]

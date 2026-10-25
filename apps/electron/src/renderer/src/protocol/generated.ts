@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "b3236a426ffc5d42";
+export const SCHEMA_HASH = "287e401ece1ef201";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -2232,6 +2232,8 @@ export interface ShapesGeometry {
   nested: boolean;
   /** The zoom root's own shape (drawn and hit as FrameInfo.root); None: not drawn */
   root: PixelShape | null;
+  /** A line just inside the edge of each row's shape, in the canvas colour (the gaps between blocks), physical px; 0: none. It keeps a shape of its parent's colour visible */
+  stroke: number;
 }
 
 export interface ShutdownResult {

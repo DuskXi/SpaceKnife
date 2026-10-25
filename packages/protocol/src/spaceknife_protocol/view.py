@@ -79,6 +79,15 @@ POLAR_LAYOUT = "polar.v1"
 SHAPES_LAYOUT = "shapes.v1"
 ANGLE_UNIT = 1 << 20  # polar.v1 angle units per turn: every value stays exact in an f32
 MAX_POLY_POINTS = 12  # shapes.v1: points of one polygon at most (Voronoi cells, hexagons, triangles)
+# shapes.v1 labels, in lu = dpr · font scale: where the host writes one (layout/shapes.py), how the
+# frontend draws it (visual/shapes) and what a plugin's layout is told (the SDK's LayoutInput.label)
+SHAPE_LABEL_FONT = 11.0  # a name's type size (13 in a big label, 10.5 on a single line)
+SHAPE_LABEL_ONE_LINE = 18  # the band a one-line centred label needs (and 30 lu of width)
+SHAPE_LABEL_TWO_LINES = 34  # the band a centred name-and-size label needs (and 42 lu of width)
+SHAPE_LABEL_TOP_INSET = 4  # a top label's band starts this far below its shape's top edge
+SHAPE_LABEL_TOP_BAND = 15  # and is this high (it needs 40 lu of width, the shape 60 lu of height)
+SHAPE_STROKE = 1.0  # CSS px: the line around each shape unless the layout asks for another
+SHAPE_STROKE_MAX = 4.0  # CSS px: the widest a layout may ask for
 BUILTIN_VISUALS = ("treemap", "flame", "flame_polar")
 VIEW_STREAM_PREFIX = "view:"
 
@@ -300,6 +309,13 @@ class ShapesGeometry(Payload):
     )
     message: str = Field(
         default="", max_length=300, description="Why nothing is drawn (the plugin failed or timed out)"
+    )
+    stroke: float = Field(
+        default=0.0,
+        ge=0,
+        le=64,
+        description="A line just inside the edge of each row's shape, in the canvas colour (the gaps "
+        "between blocks), physical px; 0: none. It keeps a shape of its parent's colour visible",
     )
 
 

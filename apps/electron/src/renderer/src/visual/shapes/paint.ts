@@ -1,9 +1,11 @@
 // shapes.v1 paint: the zoom root's shape (when it has one) and one shape per row as instances of
 // gl.ts's program, in the flame graphs' style (solid shapes, open folders on the level tones,
-// dotted aggregates, striped free / unknown space and folders waiting for the scan), with their
-// labels and markers; and the overlay the pointer changes (halo, hover inset), the selection on
-// top. Labels go where the backend's bits say (layout/shapes.py): rectangles left-aligned as in the
-// flame graph, round shapes and polygons centred in the band that holds them. Pure: no GL, no DOM.
+// dotted aggregates, striped free / unknown space and folders waiting for the scan), each with a
+// thin line inside its edge in the canvas colour (ShapesGeometry.stroke: the gaps of the flame
+// graphs, which keep a shape of its folder's colour visible), with their labels and markers; and the
+// overlay the pointer changes (halo, hover inset), the selection on top. Labels go where the
+// backend's bits say (layout/shapes.py): rectangles left-aligned as in the flame graph, round
+// shapes and polygons centred in the band that holds them. Pure: no GL, no DOM.
 
 import { palette } from "@/lib/theme";
 import { labelColors, Pattern, type Painted, type RGBA, rgba, type TagItem, type TextItem } from "@/treemap/paint";
@@ -11,18 +13,22 @@ import type { PreparedText } from "@/treemap/text";
 
 import { center, haloOverlay } from "../colors";
 import { fillFor, haloOf, selectedOf } from "../flame/paint";
-import { DStat, Flag, Kind, Label } from "../frame";
-import { rowTitle } from "../rowTitle";
+import { DStat, Flag, isNested, Kind, Label } from "../frame";
+import { rootTitle, rowTitle } from "../rowTitle";
 import { type DrawPass, HIT_ROOT, type Hit, type PaintSettings, type ShapesFrame } from "../types";
 import { MAX_POINTS, SHAPE_STRIDE, SLOT } from "./gl";
-import { bandWidth, centreOf, isRound, ONE_LINE, rootShape, type Shape, shapeOf, shapesGeometry, TOP_BAND, TOP_INSET, TWO_LINES } from "./geometry";
+import { bandWidth, centreOf, isRound, ONE_LINE, rootShape, type Shape, shapeOf, shapesGeometry, shapesOf, TOP_BAND, TOP_INSET, TWO_LINES } from "./geometry";
 
 const FONT_UI = '"Geist", "Geist Variable", "Noto Sans SC", "Noto Sans SC Variable", system-ui, sans-serif';
 const FONT_MONO = '"Geist Mono", "Geist Mono Variable", ui-monospace, "Cascadia Mono", monospace';
 const NONE: RGBA = [0, 0, 0, 0];
 
-/** Instances the selection adds to the overlay: shadow, the selected shape again, outer and inner ring. */
+/** Instances the selection adds to the overlay: shadow, the selected shape again, outer and inner
+ * ring. An open folder of a nested layout gets the two rings only: its shape holds its contents. */
 export const SELECTION_INSTANCES = 4;
+
+/** Opacity of the line inside each shape's edge (the canvas colour) at 「边框对比」 1. */
+export const STROKE_ALPHA = 0.7;
 
 /** Slot options of one instance (see the shaders in gl.ts). */
 export interface Look {
@@ -148,6 +154,24 @@ function styleOf(f: ShapesFrame, i: number, s: PaintSettings): Styled {
   };
 }
 
+/** The line inside every shape's edge: the canvas colour (theme), its opacity by 「边框对比」, as
+ * wide as the frame says (the plugin's Shapes.stroke); null: none. */
+export function strokeOf(f: ShapesFrame, s: PaintSettings): { color: RGBA; width: number } | null {
+  const width = shapesOf(f)?.stroke ?? 0;
+  const a = Math.min(1, STROKE_ALPHA * s.borderContrast);
+  if (!(width > 0) || !(a > 0)) return null;
+  const g = rgba(palette().treemap.ground);
+  return { color: [g[0], g[1], g[2], g[3] * a], width };
+}
+
+/** A row's look with the line inside its edge: laid over its own fill (the shader mixes the border
+ * in by its alpha, so a translucent one would show what lies under the shape); not on striped rows
+ * (they have their border) nor on a shape too small to keep a fill inside it. */
+function lined(st: Styled, sh: Shape, fill: RGBA, line: { color: RGBA; width: number } | null): Look {
+  if (!line || st.look.border || Math.min(sh.w, sh.h) < 4 * line.width) return st.look;
+  return { ...st.look, border: over(line.color, fill), borderWidth: line.width };
+}
+
 const sizeText = (s: PaintSettings, size: number, delta: number | null): string =>
   s.diffTiers && delta !== null ? s.formatDelta(delta) : s.formatSize(size);
 
@@ -243,13 +267,14 @@ export function paintShapes(f: ShapesFrame, s: PaintSettings, out: ShapeInstance
     }
   };
 
-  // the zoom root's shape: the centre disc's colours, its name and size at the top
+  // the zoom root's shape: the centre disc's colours, its name (the scanned folder's own, not its
+  // whole path: the band at the top of a circle is narrow) and size at the top
   const rs = rootShape(f);
   const root = f.info.root;
   if (rs && root) {
     const alpha = root.flags & Flag.DIM ? T.dimOpacity : 1;
     b.push(rs, lit.root ? over(HALO, CENTER.bg) : CENTER.bg, { alpha });
-    const title = rowTitle(f, HIT_ROOT, s);
+    const title = rootTitle(f, s.formatInt, true);
     if (title.line1) {
       const lu = dpr * fsc;
       const fs = 11 * lu;
@@ -273,10 +298,12 @@ export function paintShapes(f: ShapesFrame, s: PaintSettings, out: ShapeInstance
     marks(HIT_ROOT, root.tag, root.dstat, alpha);
   }
 
+  const line = strokeOf(f, s);
   for (let i = 0; i < f.count; i++) {
     const sh = shapeOf(f, i)!;
     const st = styleOf(f, i, s);
-    b.push(sh, litRows.has(i) ? over(HALO, st.fill) : st.fill, st.look);
+    const fill = litRows.has(i) ? over(HALO, st.fill) : st.fill;
+    b.push(sh, fill, lined(st, sh, fill, line));
     const alpha = st.look.alpha ?? 1;
     const bits = f.label[i]!;
     if (bits & Label.NAME) {
@@ -292,7 +319,9 @@ export function paintShapes(f: ShapesFrame, s: PaintSettings, out: ShapeInstance
 
 /** The pointer's layer over the picture: the halo over the hovered row's ancestors (those the
  * selection does not light already), the selection's shadow, shape and rings on top, the hover
- * inset under the rings. O(depth). `out` is reused. */
+ * inset under the rings. An open folder of a nested layout (circle packing) is selected with its
+ * rings only: its shape again, or a shadow over it, would cover its contents (the treemap's
+ * selected folder keeps them in sight too). O(depth). `out` is reused. */
 export function paintShapesOverlay(f: ShapesFrame, s: PaintSettings, hover: Hit, out: ShapeInstances = new ShapeInstances(16)): Painted {
   const P = palette();
   const T = P.treemap;
@@ -311,14 +340,17 @@ export function paintShapesOverlay(f: ShapesFrame, s: PaintSettings, hover: Hit,
 
   const ring = Math.round(T.geometry.selectRingWidth * dpr);
   const ss = shapeOf(f, sel);
-  if (ss && s.selectionShadow) {
+  const holds = ss !== null && isNested(f) && f.kind[sel] === Kind.FOLDER;
+  if (ss && s.selectionShadow && !holds) {
     b.push({ ...ss, y: ss.y + 12 * dpr, pts: ss.pts ? shiftY(ss.pts, 12 * dpr) : null }, rgba(T.state.selectShadow), {
       pattern: Pattern.SHADOW,
       patternSize: 32 * dpr,
       offset: 2 * ring,
     });
+    // the selected shape again, above its own shadow
     const st = styleOf(f, sel, s);
-    b.push(ss, lit.rows.includes(sel) ? over(HALO, st.fill) : st.fill, st.look);
+    const fill = lit.rows.includes(sel) ? over(HALO, st.fill) : st.fill;
+    b.push(ss, fill, lined(st, ss, fill, strokeOf(f, s)));
   }
   if (s.hoverHighlight) {
     const hs = hover === HIT_ROOT ? rs : shapeOf(f, hover);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { Kind } from "./frame";
-import { rowTitle } from "./rowTitle";
+import { rootTitle, rowTitle } from "./rowTitle";
 import { encodeFrame, polarScene, rectScene, SMALL_KEY, TREEMAP_ROWS } from "./testing/fixtures";
 import { HIT_NONE, HIT_ROOT } from "./types";
 
@@ -59,6 +59,16 @@ describe("rowTitle", () => {
     expect(rowTitle(top, HIT_ROOT, o).line1).toBe("C:");
     const slash = polarScene({ info: { breadcrumb: [{ key: 1, label: "/" }] } }).frame;
     expect(rowTitle(slash, HIT_ROOT, o).line1).toBe("/");
+  });
+
+  it("names a scanned folder by its own name where the label is narrow", () => {
+    const at = (label: string) => rootTitle(polarScene({ info: { breadcrumb: [{ key: 1, label }] } }).frame, fmtInt, true).line1;
+    expect(at("C:\\Users\\lenny\\Downloads\\")).toBe("Downloads");
+    expect(at("/home/lenny/projects")).toBe("projects");
+    expect(at("C:\\")).toBe("C:");
+    expect(at("/")).toBe("/");
+    // the whole path otherwise (the flame graph's root bar has the room)
+    expect(rootTitle(polarScene({ info: { breadcrumb: [{ key: 1, label: "/home/lenny/" }] } }).frame, fmtInt).line1).toBe("/home/lenny");
   });
 
   it("writes an aggregate zoomed into, and a root waiting for the scan", () => {

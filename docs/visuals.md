@@ -82,7 +82,7 @@ class Visualization:
 | `drawlist.v1`（树图，冻结） | `x y w h` | null | null（缩放根就是整个画布） | 框加标题栏，子块在框内 |
 | `flame.v1` | `x y w h` | `FlameGeometry{kind:"flame", origin, row_h, rows, gap, root}` | 根条 | 已展开的实心条，子条在下一带 |
 | `polar.v1` | `a0 a1 r0 r1` | `PolarGeometry{kind:"polar", cx, cy, radius, hole, ring_w, rings, gap, unit}` | 中心圆 | 已展开的实心扇区，子扇区在下一环 |
-| `shapes.v1`（插件自带布局） | `x y w h r poly` + blob `points` | `ShapesGeometry{kind:"shapes", root, nested, message}` | 插件给的根形状（可以没有） | 文件夹自己的形状，块在里面（`nested`）或别处 |
+| `shapes.v1`（插件自带布局） | `x y w h r poly` + blob `points` | `ShapesGeometry{kind:"shapes", root, nested, message, stroke}` | 插件给的根形状（可以没有） | 文件夹自己的形状，块在里面（`nested`）或别处 |
 
 通用列（`key node parent kind depth cls label size count flags tag tone branch name_len`，对比视图另有 `delta dstat`）和每个字段的含义见 protocol.md 4.1–4.4。`FrameRoot` 是缩放根本身（它不是一行），字段与同名列相同。`flash[].row = −1` 表示缩放根，只在分区布局里出现。
 
@@ -267,7 +267,7 @@ interface VisualInstance<F> {
 - 配色模式也可以来自插件：声明式的规则由宿主算，代码的由插件给每个画出的行一个色板下标，帧里多一列 `pal`（`colors.v1`）。
 - `plugin check` 和 `MockHost.visual()` 用 `check_draw(full=True)` 检查插件可视化的每一帧；`test_layout_contract.py` 照旧覆盖内置引擎。
 - 前端 `VISUAL_API`、`VisualComponent`、注册表、一致性测试辅助不变（前端组件不对插件开放）。
-- **插件自带布局**（`@plugin.layout`，`shapes.v1`）：后端的 `layout/shapes.py` 用分区引擎挑块（`ShapesProjection` 把区间换成面积：块占缩放根的份额 × 画布 × `fill`，小于最小元素的平方就合并；不逐层再缩，否则只有一个子项的深链会消失），把这棵层级（`Hierarchy`，≤ `max_rows` 行）发给插件，插件回每块一个形状（`Placed`：圆角矩形或 3–12 点的凸多边形），后端检查（长度、有限值、凸性、坐标夹在 ±2^24）、去掉没形状的块和它们的子孙、按形状算标签位（`band_width`：圆和多边形按能放下文字的那条横带），发出 `shapes.v1`。答案按层级的摘要、画布、选项和插件的缓存纪元缓存（每个引擎 8 份）；失败时帧里没有行，`ShapesGeometry.message` 写原因。前端 `visual/shapes/`：`gl.ts` 是带凸多边形 SDF 的实例化程序（填充、虚线边框、条纹、点阵、阴影都和树图的程序一样，`offset` 让选中环和阴影沿形状外扩），`geometry.ts` 做命中、轮廓（多边形逐边内缩）、锚点，`paint.ts` 按火焰图的样式画（圆和多边形的字居中），缩放动画等比放大到根的形状。
+- **插件自带布局**（`@plugin.layout`，`shapes.v1`）：后端的 `layout/shapes.py` 用分区引擎挑块（`ShapesProjection` 把区间换成面积：块占缩放根的份额 × 画布 × `fill`，小于最小元素的平方就合并；不逐层再缩，否则只有一个子项的深链会消失），把这棵层级（`Hierarchy`，≤ `max_rows` 行）发给插件，插件回每块一个形状（`Placed`：圆角矩形或 3–12 点的凸多边形），后端检查（长度、有限值、凸性、坐标夹在 ±2^24）、去掉没形状的块和它们的子孙、按形状算标签位（`band_width`：圆和多边形按能放下文字的那条横带；`nested` 时和外层顶部标签叠在一起的顶部标签不写），发出 `shapes.v1`（`ShapesGeometry.stroke`：插件要的形状边线，乘了 dpr）。答案按层级的摘要、画布、选项和插件的缓存纪元缓存（每个引擎 8 份）；失败时帧里没有行，`ShapesGeometry.message` 写原因。前端 `visual/shapes/`：`gl.ts` 是带凸多边形 SDF 的实例化程序（填充、虚线边框、条纹、点阵、阴影都和树图的程序一样，`offset` 让选中环和阴影沿形状外扩），`geometry.ts` 做命中、轮廓（多边形逐边内缩）、锚点，`paint.ts` 按火焰图的样式画（圆和多边形的字居中；每个形状边里一条画布底色的细线，盖在自己的填充上、按「边框对比」，和外层同色的深层形状也分得开；根只写扫描的文件夹自己的名字），选中时一般的块浮起（投影、再画一遍、选中环），`nested` 布局里展开的文件夹只画选中环（再画一遍会盖住里面的块），缩放动画等比放大到根的形状。
 
 **以后做**
 - WASM 运行时。

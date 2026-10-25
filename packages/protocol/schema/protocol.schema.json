@@ -10765,6 +10765,14 @@
           ],
           "default": null,
           "description": "The zoom root's own shape (drawn and hit as FrameInfo.root); None: not drawn"
+        },
+        "stroke": {
+          "default": 0.0,
+          "description": "A line just inside the edge of each row's shape, in the canvas colour (the gaps between blocks), physical px; 0: none. It keeps a shape of its parent's colour visible",
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Stroke",
+          "type": "number"
         }
       },
       "title": "ShapesGeometry",

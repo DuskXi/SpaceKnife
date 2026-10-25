@@ -64,6 +64,12 @@ def _models() -> list[tuple[str, type, str]]:
         ("输入", sdk.VisualInput, "代码可视化 `(v) -> 权重数组`"),
         ("输入", sdk.ColorInput, "代码配色 `(c) -> 下标数组`"),
         ("输入", sdk.LayoutInput, "自带布局的可视化 `(v) -> Shapes`：宿主挑出的块（父块在前）和画布"),
+        (
+            "输入",
+            sdk.LabelSpace,
+            "`v.label`：宿主的标签占多大地方（物理像素，随 `dpr` 和「元素字号」），"
+            "想让名字露出来就把它空出来",
+        ),
         ("输入", sdk.ExportInput, "导出格式 `(x) -> Iterator[str]`"),
         ("输入", sdk.ExportInfo, "导出格式旧写法 `(tree, root, match, info)` 的第四个参数"),
         ("输入", sdk.ChangeUnit, "对比原因 `(ctx, items)` 的一项"),
@@ -219,6 +225,12 @@ NOTES: dict[tuple[str, str], str] = {
     ("LayoutInput", "root_size"): "缩放根的大小（同 `size`）",
     ("LayoutInput", "options"): "声明的 `options`（本插件的设置名 → 当前值）",
     ("LayoutInput", "ctx"): "调用的上下文：`ctx.check()`；有 `tree.read` 时 `v.tree` 读树",
+    ("LayoutInput", "label"): "宿主的标签占多大地方（`LabelSpace`，物理像素），按 `dpr` × `font_scale` 算出",
+    ("LabelSpace", "font"): "名字的字号（11 lu；大标签 13，只写一行时 10.5）",
+    ("LabelSpace", "line"): "形状中间写一行名字要的高度（18 lu；那里的宽度还要 ≥ 30 lu，形状 ≥ 15 lu 高）",
+    ("LabelSpace", "lines"): "形状中间写名字和大小两行要的高度（34 lu；那里的宽度还要 ≥ 42 lu）",
+    ("LabelSpace", "top"): "顶部标签从形状上沿往下占到哪里（4 + 15 lu；那一条的宽度还要 ≥ 40 lu，"
+    "形状 ≥ 60 lu 高）：嵌套的文件夹比外层的低这么多，两个名字才都写",
     ("ExportInput", "tree"): "树",
     ("ExportInput", "root"): "要导出的子树：视图所在的位置、选中的项，或 0（全部）",
     ("ExportInput", "match"): "过滤后的布尔掩码（按节点下标）：命中的**文件**是 True；"
@@ -374,7 +386,9 @@ def model_rows(cls: type) -> list[tuple[str, str, str, str]]:
         for f in dataclasses.fields(cls):
             if f.name.startswith("_"):
                 continue  # the object's own bookkeeping
-            if f.default is not dataclasses.MISSING:
+            if not f.init:
+                default = "算出"  # worked out from the other fields (LayoutInput.label)
+            elif f.default is not dataclasses.MISSING:
                 default = _default(f.default)
             elif f.default_factory is not dataclasses.MISSING:
                 default = f"`{f.default_factory()!r}`"

@@ -1931,6 +1931,11 @@ class PluginHost:
             if isinstance(root, list) and len(root) == 6 and isinstance(root[5], list):
                 with contextlib.suppress(TypeError, ValueError):
                     root_t = (*(float(a) for a in root[:5]), tuple(float(a) for a in root[5][: 2 * 12]))
+            stroke = pv.SHAPE_STROKE  # an answer without one (or a bad one): the default line
+            with contextlib.suppress(TypeError, ValueError):
+                s = float(v.get("stroke", pv.SHAPE_STROKE))
+                if 0 <= s <= pv.SHAPE_STROKE_MAX:
+                    stroke = s
             return Placed(
                 shape=col("shape", np.uint8),
                 x=col("x", np.float64),
@@ -1943,6 +1948,7 @@ class PluginHost:
                 label=col("label", np.uint8),
                 root=root_t,  # type: ignore[arg-type]
                 message=str(v.get("message") or "")[:300],
+                stroke=stroke,
             )
 
         return place, key

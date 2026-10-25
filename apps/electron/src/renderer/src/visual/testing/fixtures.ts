@@ -395,7 +395,7 @@ export function polarScene(o: SceneOptions & { info?: Partial<FrameInfo> } = {})
  *    3 cache (waiting)     rounded rectangle 240,100 60×40, r 4
  *    4 12 small items      circle around (280, 200), r 20
  */
-export function shapesScene(o: { dpr?: number; root?: boolean; nested?: boolean; info?: Partial<FrameInfo> } = {}): Fixture<ShapesFrame> {
+export function shapesScene(o: { dpr?: number; root?: boolean; nested?: boolean; stroke?: number; info?: Partial<FrameInfo> } = {}): Fixture<ShapesFrame> {
   const d = o.dpr ?? 1;
   const circle = (cx: number, cy: number, r: number) => [(cx - r) * d, (cy - r) * d, 2 * r * d, 2 * r * d, r * d, 0];
   const hex = (cx: number, cy: number, r: number) => Array.from({ length: 6 }, (_, k) => [Math.round((cx + r * Math.cos((k * Math.PI) / 3)) * d), Math.round((cy + r * Math.sin((k * Math.PI) / 3)) * d)]).flat();
@@ -414,6 +414,7 @@ export function shapesScene(o: { dpr?: number; root?: boolean; nested?: boolean;
     root: o.root === false ? null : { x: 60 * d, y: 10 * d, w: 280 * d, h: 280 * d, r: 140 * d, points: [] },
     nested: o.nested ?? true,
     message: "",
+    stroke: o.stroke ?? 0,
   };
   const blob = new Uint8Array(Int32Array.from(pts).buffer);
   const tree: SceneNode = { key: 1, node: 1, kind: Kind.FOLDER, size: 1200n, name: "root" };

@@ -269,7 +269,7 @@ def pack(v: LayoutInput) -> Shapes:
     """A layout of its own: the host picks the blocks (v: parents first, each with its node, kind,
     level and size; the canvas in physical px) and draws what this places like its own views.
     Here the SDK's circle packing; v.shapes() starts an empty answer of your own (a rect, circle
-    or polygon per block, -1 for the zoom root)."""
+    or polygon per block, -1 for the zoom root; v.label says how much room the labels take)."""
     return shapes.pack(v)
 ''',
         test="""

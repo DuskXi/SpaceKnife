@@ -334,6 +334,9 @@ blob `points`：所有 `poly > 0` 的行的点，`<i4` 的 x、y 交替，按行
 | `root` | 缩放根的形状 `{x, y, w, h, r, points}`（`PixelShape`，`points` 非空时是多边形），按 `FrameInfo.root` 画在最下面；null 时不画根，`FrameInfo.root` 也为 null |
 | `nested` | 文件夹的块在它的形状里面（圆堆积）为 true；在别处（冰柱图）为 false |
 | `message` | 插件没能排出布局时的原因（这一帧没有行），前端写在画布中间 |
+| `stroke` | 每个形状边里那条线的宽度，物理像素（插件的 `Shapes.stroke`，CSS 像素 0–4，默认 1，乘 dpr）；0 不画。前端用画布底色、按「边框对比」画，条纹的行用自己的边框 |
+
+`nested` 布局里，后端写标签位时把顶部标签和外层形状（含根的名字）的顶部标签叠在一起的那个去掉（只留外层的）。
 
 `colors.of {view_id, nodes, mode?}` 给出任意节点在一个视图里上色用的事实（`kind cls tone branch depth`，插件配色还有 `pal`），网页面板的 `sk.colors` 用它按当前主题算出颜色。
 

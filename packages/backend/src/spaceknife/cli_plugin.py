@@ -609,7 +609,7 @@ async def _render(host: Any, kind: str, name: str, node: int | None, fmt: str) -
         lines.append(
             f"shapes: {int(circle.sum())} circles, {int((~poly & ~circle).sum())} rectangles, "
             f"{int(poly.sum())} polygons; {int((draw.label > 0).sum())} labelled; "
-            f"canvas {draw.width} × {draw.height} px; "
+            f"canvas {draw.width} × {draw.height} px; line {meta.stroke:g} px; "
             + (
                 "no root shape"
                 if meta.root is None

@@ -19,7 +19,8 @@ export interface Shape {
   pts: Int32Array | number[] | null;
 }
 
-/** label geometry, in lu = dpr · font scale (mirrors layout/shapes.py) */
+/** label geometry, in lu = dpr · font scale (mirrors spaceknife_protocol/view.py SHAPE_LABEL_*,
+ * which layout/shapes.py and the SDK's LayoutInput.label use) */
 export const TWO_LINES = 34;
 export const ONE_LINE = 18;
 export const TOP_INSET = 4;

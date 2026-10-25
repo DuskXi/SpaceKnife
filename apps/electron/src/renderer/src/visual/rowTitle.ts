@@ -37,8 +37,9 @@ export function rowTitle(f: VisualFrame, row: Hit, o: { scanning: boolean; forma
   }
 }
 
-/** The zoom root: named by the last crumb ('small:N' / 'more:N' for an aggregate zoomed into). */
-function rootTitle(f: VisualFrame, formatInt: (n: number) => string): RowTitle {
+/** The zoom root: named by the last crumb ('small:N' / 'more:N' for an aggregate zoomed into).
+ * `short`: the scanned folder by its own name, not its whole path (where the label is narrow). */
+export function rootTitle(f: VisualFrame, formatInt: (n: number) => string, short = false): RowTitle {
   const crumbs = f.info.breadcrumb;
   const last = crumbs[crumbs.length - 1];
   const root = f.info.root;
@@ -47,6 +48,7 @@ function rootTitle(f: VisualFrame, formatInt: (n: number) => string): RowTitle {
   if (label.startsWith("small:")) return { line1: t("{n} 个小项", { n: formatInt(Number(label.slice(6))) }), line2: null };
   if (label.startsWith("more:")) return { line1: t("+{n} 项", { n: formatInt(Number(label.slice(5))) }), line2: null };
   // the first crumb is the scanned path itself, the others are folder names
-  const name = crumbs.length === 1 ? label.replace(/[\\/]+$/, "") || label : (label.split(/[\\/]/).filter(Boolean).pop() ?? label);
+  const whole = crumbs.length === 1 && !short;
+  const name = whole ? label.replace(/[\\/]+$/, "") || label : (label.split(/[\\/]/).filter(Boolean).pop() ?? label);
   return { line1: name || null, line2: root?.kind === Kind.PENDING ? t("等待扫描…") : null };
 }

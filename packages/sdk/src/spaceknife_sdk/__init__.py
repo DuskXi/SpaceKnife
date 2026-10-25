@@ -63,7 +63,7 @@ from .models import (
     VisualInput,
 )
 from .plugin import Plugin
-from .shapes import BlockKind, LayoutInput, Shapes
+from .shapes import BlockKind, LabelSpace, LayoutInput, Shapes
 from .tree import Columns, Flag, Kind, Node, Rows, TreeView
 
 __version__ = "0.1.0"
@@ -90,6 +90,7 @@ __all__ = [
     "Insight",
     "Kind",
     "KvBlock",
+    "LabelSpace",
     "LayoutInput",
     "Listing",
     "MdBlock",

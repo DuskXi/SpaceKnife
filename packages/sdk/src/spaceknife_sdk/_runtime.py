@@ -428,7 +428,10 @@ class Dispatcher:
                 raise PluginError("a layout function returns Shapes (v.shapes(), or shapes.pack(v))")
             if len(shaped) != len(li):
                 raise PluginError(f"Shapes for {len(shaped)} blocks, the layout got {len(li)}")
-            value, placed, points = shaped.to_wire()
+            try:
+                value, placed, points = shaped.to_wire()
+            except ValueError as exc:  # its own checks (Shapes.stroke)
+                raise PluginError(str(exc)) from None
             return value, [_frame(placed), _frame({"p": points})]
         if kind == "color":
             ids = decode_frame(frames[0])[1]["ids"] if frames else np.zeros(0, dtype=np.int64)
