@@ -856,11 +856,12 @@ def scan_volume(
 ) -> tuple[MftTable, dict[str, int]]:
     """Read and parse the $MFT of a local NTFS volume: ``(table, geometry)``.
 
-    With the native module this streams (32 MiB windows, read and parse overlapping): memory is
-    the table plus a few windows. Without it the whole $MFT is read first (gigabytes on a large
-    system volume). ``duty`` in (0, 1]: the reader is busy that share of the time (I/O limit;
-    honoured by the native reader). ``progress(done, total)`` follows the reading (per window
-    natively, once at the end otherwise). Needs administrator rights; NotImplementedError off Windows.
+    With the native module this streams (8 MiB windows, several read at once, each parsed as it
+    arrives and joined in record order): memory is the table plus the windows in flight. Without
+    it the whole $MFT is read first (gigabytes on a large system volume). ``duty`` in (0, 1]: the
+    disk is busy with the scan that share of the time (I/O limit; honoured by the native reader).
+    ``progress(done, total)`` follows the reading (per window natively, once at the end otherwise).
+    Needs administrator rights; NotImplementedError off Windows.
     """
     mod = native.module()
     if mod is not None and native.has("scan_mft"):
@@ -995,22 +996,10 @@ def _ext_ids(
     long_all = sorted(set().union(*(s for _, s in found)))
     del found
 
-    index = {e: i for i, e in enumerate(ext_table)}
-
-    def ext_id(text: bytes) -> int:
-        ext = text.decode("utf-8", "surrogatepass").lower()
-        idx = index.get(ext)
-        if idx is None:
-            if len(ext_table) >= 65535:
-                return 0
-            idx = index[ext] = len(ext_table)
-            ext_table.append(ext)
-        return idx
-
-    ids = np.array(
-        [ext_id(int(k).to_bytes(8, "little")[: int(k) >> 56]) for k in uniq.tolist()], dtype=np.uint16
-    )
-    long_ids = {k: ext_id(k[1:]) for k in long_all}
+    raws = [int(k).to_bytes(8, "little")[: int(k) >> 56] for k in uniq.tolist()]
+    numbered = ext_numbers([*raws, *(k[1:] for k in long_all)], ext_table)
+    ids = np.array(numbered[: len(raws)], dtype=np.uint16)
+    long_ids = dict(zip(long_all, numbered[len(raws) :], strict=True))
 
     # pass 2: fill them in, chunk by chunk
     def fill(lo: int, hi: int) -> None:
@@ -1021,6 +1010,26 @@ def _ext_ids(
             part[p.long] = np.array([long_ids[k] for k in p.long_keys], dtype=np.uint16)
 
     run(fill)
+    return out
+
+
+def ext_numbers(raws: Sequence[bytes], ext_table: list[str]) -> list[int]:
+    """Ids of raw extensions (UTF-8, surrogatepass), in order: lower-cased, a new one appended to
+    ``ext_table`` (at most 65535 entries; past that 0). The distinct extensions of a volume come
+    in a fixed order (short keys as integers, then long ones as bytes: :func:`_ext_ids`), so both
+    builds number them alike."""
+    index = {e: i for i, e in enumerate(ext_table)}
+    out = []
+    for raw in raws:
+        ext = raw.decode("utf-8", "surrogatepass").lower()
+        idx = index.get(ext)
+        if idx is None:
+            if len(ext_table) >= 65535:
+                out.append(0)
+                continue
+            idx = index[ext] = len(ext_table)
+            ext_table.append(ext)
+        out.append(idx)
     return out
 
 
@@ -1092,6 +1101,73 @@ def table_to_store(
     consume: bool = False,
 ) -> NodeStore:
     """Build the node store of a whole volume from ``MftTable`` columns in one go.
+
+    The native build (``spaceknife_native.mft_build``, all steps in parallel in Rust) when it is
+    installed, else :func:`_table_to_store_numpy`; both give the same store, column for column
+    (node order included; tests compare them). The rules are the numpy build's, below.
+    """
+    opts = {"include_ads": include_ads, "count_links_each": count_links_each, "consume": consume}
+    mod = native.module()
+    if mod is not None and native.has("mft_build"):
+        return _table_to_store_native(mod, table, root_path, **opts)
+    return _table_to_store_numpy(table, root_path, volume_info, **opts)
+
+
+def _table_to_store_native(
+    mod: Any,
+    table: Mapping[str, Any],
+    root_path: str,
+    *,
+    include_ads: bool,
+    count_links_each: bool,
+    consume: bool,
+) -> NodeStore:
+    """:func:`table_to_store` through ``mft_build``: Python only numbers the distinct extensions
+    and wraps the finished columns (adopted by the store as they are, the ``\\0name`` image too).
+    With ``consume`` each table column goes as soon as the build is done with it (docs/memory.md §6)."""
+    work: dict[str, Any] = table if consume and isinstance(table, dict) else dict(table)
+    for key, dtype in COLUMN_DTYPES.items():  # the parser's and the helper's tables already match
+        col = work[key]
+        if not (isinstance(col, np.ndarray) and col.dtype == dtype and col.flags.c_contiguous):
+            work[key] = np.ascontiguousarray(col, dtype=dtype)
+    if not isinstance(work["names"], bytes | bytearray | memoryview | np.ndarray):
+        work["names"] = bytes(work["names"])
+    n = len(work["record"])
+    ext_table = [""]
+    built = mod.mft_build(
+        work,
+        encode_name(root_path),
+        FOLDERS["meta"].encode(),
+        FOLDERS["orphan"].encode(),
+        lambda raws: ext_numbers(raws, ext_table),
+        include_ads=include_ads,
+        count_links_each=count_links_each,
+        consume=consume,
+    )
+    if consume:
+        work.clear()
+        if work is not table:
+            table.clear()  # type: ignore[attr-defined]
+    if built["cycles"]:
+        logger.warning("MFT: {} parent cycles broken (corrupt directory entries)", built["cycles"])
+    orphans = int(built["orphans"])
+    store = NodeStore.from_columns(built["columns"], built["names"], ext_table, separated=True)
+    store.version += 1  # as the numpy build's reaggregate leaves it
+    del built
+    logger.debug("MFT: {:,} names -> {:,} nodes, {:,} orphans", n, len(store), orphans)
+    return store
+
+
+def _table_to_store_numpy(
+    table: Mapping[str, Any],
+    root_path: str,
+    volume_info: Mapping[str, int] | None = None,
+    *,
+    include_ads: bool = False,
+    count_links_each: bool = False,
+    consume: bool = False,
+) -> NodeStore:
+    """Build the node store of a whole volume from ``MftTable`` columns in one go (numpy).
 
     Record 5 becomes the root named ``root_path``; metafiles (records 0–15 and the $Extend tree)
     go under ``$NTFS 元数据``; names whose parent is missing, not a folder or part of a parent

@@ -21,14 +21,34 @@ def parse_mft(data: _Buffer, record_size: int, cluster_size: int) -> dict[str, A
     """Columns of docs/native.md 2.1 (numpy arrays, ``names`` bytes, ``bad_records`` int)."""
 
 def scan_mft(
-    volume: str, duty: float = 1.0, progress: Callable[[int, int], object] | None = None
+    volume: str,
+    duty: float = 1.0,
+    progress: Callable[[int, int], object] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Read and parse the $MFT window by window: ``(parse_mft columns, mft_volume_info keys)``.
 
-    ``duty`` in (0, 1]: the reader pauses so that it is busy that share of the time. Rows are in
-    record order except files with extension records, which come last. ``progress(done, total)``
-    (bytes of $MFT) follows every parsed window, on the parsing thread; its errors are ignored.
+    Several windows are read at once (overlapped, unbuffered reads; how many is found while it
+    reads) and parsed in parallel; rows are in record order except files with extension records,
+    which come last. ``duty`` in (0, 1]: reads are in flight that share of the time.
+    ``progress(done, total)`` (bytes of $MFT) follows every parsed window, on the reading thread;
+    its errors are ignored. ``stats``: filled with the scan's timings and counts (benchmarks).
     """
+
+def mft_build(
+    table: dict[str, Any],
+    root_name: bytes,
+    meta_name: bytes,
+    orphan_name: bytes,
+    ext_ids: Callable[[list[bytes]], list[int]],
+    include_ads: bool = False,
+    count_links_each: bool = False,
+    consume: bool = False,
+) -> dict[str, Any]:
+    """The node store's columns of a ``parse_mft`` table (``scan.mft.table_to_store``):
+    ``{"columns": {name: array}, "names": uint8 \\0name image, "count", "cycles", "orphans"}``.
+    ``ext_ids`` numbers the distinct raw extensions (``scan.mft.ext_numbers``); ``consume``
+    deletes each table column once the build no longer needs it."""
 
 def _mft_image_info(path: str | os.PathLike[str]) -> dict[str, int]: ...
 def _read_mft_image(path: str | os.PathLike[str]) -> bytes: ...
@@ -37,7 +57,16 @@ def _scan_mft_image(
     duty: float = 1.0,
     window: int = 0,
     progress: Callable[[int, int], object] | None = None,
+    stats: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]: ...
+def _parse_mft_stream(
+    data: _Buffer,
+    record_size: int,
+    cluster_size: int,
+    window_records: int,
+    concurrent: bool = False,
+    seed: int = 0,
+) -> dict[str, Any]: ...
 
 # --------------------------------------------------------------------------- hard scan (src/hardscan)
 
