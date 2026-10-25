@@ -27,7 +27,7 @@ from .. import memory, native, paths
 from ..events import denied_reason, emit, printable
 from ..filter.names import forget, name_index
 from ..helper import HelperError, SharedHelper, is_elevated
-from ..i18n import tr
+from ..i18n import Texts, tr
 from ..io import IoGovernor, IoRegistry, set_low_io_priority
 from ..privacy import full_disk_access
 from ..scan import mft
@@ -54,8 +54,11 @@ from .compute import compute
 from .rpc import RpcError
 
 if TYPE_CHECKING:
+    from spaceknife_protocol.filter import TagColor
+
     from ..layout.basis import Basis
     from ..store.subtree import Summary
+    from ..view.tags import TagStore
 
 MAX_SCANS = 8
 IO_START_WAIT_S = 3.0  # a scan started with the backend waits this long for disk sampling
@@ -183,76 +186,210 @@ def cached_summary(store: NodeStore, basis: Basis, node: int, top: int, *, cache
     return s if len(s.top_files) <= top else replace(s, top_files=s.top_files[:top])
 
 
+# What a summary could not work out (tree.summary ``gaps``), and the log lines that say so
+_GAP_TEXT = Texts(
+    {
+        "contents": "子项的统计没能算出（最大的文件、类别统计、最近修改）：{error}",
+        "classes": "文件夹类别没能算出，类别只按扩展名统计：{error}",
+        "top_files": "最大的文件没能列出：{error}",
+        "folder_class": "文件夹归类的来由没能读出：{error}",
+        "tags": "标签没能读出：{error}",
+        "volume": "所在卷的信息没能读出：{error}",
+        "parent": "上级文件夹的信息没能读出：{error}",
+        "failed": "读不到这一项的详情：{error}",
+        "log": "{path} 的详情不完整：{reason}",
+        "log_failed": "读不到 {path} 的详情：{error}",
+    }
+)
+GAP_LOG_KEEP = 256  # (scan, part, error type) already logged as a warning; the same again goes to debug
+_gaps_logged: set[tuple[str, str, str]] = set()
+_gaps_lock = threading.Lock()
+
+
+def _error_text(exc: BaseException) -> str:
+    text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    return printable(text if len(text) <= 300 else text[:299] + "…")
+
+
+def _first_time(scan_id: str, part: str, exc: BaseException) -> bool:
+    """Whether this kind of failure is new for this scan: the details panel asks again every second
+    or so, and a failure that stays logs one warning, not one each time."""
+    key = (scan_id, part, type(exc).__name__)
+    with _gaps_lock:
+        if key in _gaps_logged:
+            return False
+        if len(_gaps_logged) >= GAP_LOG_KEEP:
+            _gaps_logged.clear()
+        _gaps_logged.add(key)
+        return True
+
+
+class _Gaps:
+    """The parts of one summary that failed: each part once, each kind of failure logged once."""
+
+    __slots__ = ("items", "path", "scan_id")
+
+    def __init__(self, scan_id: str, path: str) -> None:
+        self.scan_id = scan_id
+        self.path = path
+        self.items: list[p.SummaryGap] = []
+
+    def add(self, part: p.SummaryPart, exc: BaseException) -> None:
+        if any(g.part == part for g in self.items):
+            return
+        reason = _GAP_TEXT[part].format(error=_error_text(exc))
+        self.items.append(p.SummaryGap(part=part, reason=reason))
+        line = _GAP_TEXT["log"].format(path=printable(self.path), reason=reason)
+        log = logger.opt(exception=exc)
+        if _first_time(self.scan_id, part, exc):
+            log.warning("{}", line)
+        else:
+            log.debug("{}", line)
+
+    def guard[T](self, part: p.SummaryPart, fn: Callable[[], T], fallback: T) -> T:
+        try:
+            return fn()
+        except Exception as exc:
+            self.add(part, exc)
+            return fallback
+
+
+def summary_failed(handle: ScanHandle, node: int, exc: BaseException) -> RpcError:
+    """``tree.summary`` could not even describe the node itself: log it (once per kind of failure)
+    and return the error that says why (the details panel shows it instead of waiting forever)."""
+    error = _error_text(exc)
+    try:
+        path = printable(handle.store.path(node))
+    except Exception:
+        path = f"#{node}"
+    line = _GAP_TEXT["log_failed"].format(path=path, error=error)
+    log = logger.opt(exception=exc)
+    if _first_time(handle.id, "failed", exc):
+        log.error("{}", line)
+    else:
+        log.debug("{}", line)
+    return RpcError(ErrorCode.INTERNAL_ERROR, _GAP_TEXT["failed"].format(error=error))
+
+
 def summary_of(server: Any, handle: ScanHandle, node: int, top: int) -> p.TreeSummaryResult:
     """``tree.summary``: parent, largest files, class totals (with what folder classes took over),
-    newest change, tag, volume, and why the node takes a folder class."""
+    newest change, tag, volume, and why the node takes a folder class.
+
+    Only the node itself (its row, path and whether it is on disk) must be readable. Any other part
+    that fails is left empty and named in ``gaps`` (logged once per scan and kind of failure): the
+    details panel shows most of the answer and why the rest is missing, never waits forever. When
+    the folder classes fail, the class totals are counted by extension alone.
+    """
     from .. import pathclass
     from ..layout.engine import Layout
+    from ..store.subtree import summarize
 
     store = handle.store
+    base = store.path(node)
+    info = node_info(store, node)
+    here = on_disk(store, node)
+    gaps = _Gaps(handle.id, base)
     layout = Layout(store)
     class_ids = layout.class_ids
-    s = cached_summary(store, layout, node, top, cache=not handle.running)
-    shared = server.views.shared(handle.id)
-    tags = shared.tags if shared is not None else None
-    base = store.path(node)
-    tops = []
-    top_cls = layout.cls_of(s.top_files).tolist() if len(s.top_files) else []
-    for f, ci in zip(s.top_files.tolist(), top_cls, strict=True):
-        parent_path = store.path(int(store.cols["parent"][f]))
-        rel = os.path.relpath(parent_path, base) if parent_path != base else ""
-        rel = "" if rel in (".", "") else rel + os.sep
-        tops.append(
-            p.TopFile(
-                node=node_info(store, f),
-                rel_parent=rel,
-                tag=tags.of(store, f) if tags else None,
-                class_id=class_ids[ci],
+    cls_of = layout.cls_of
+    s: Summary | None
+    try:
+        s = cached_summary(store, layout, node, top, cache=not handle.running)
+    except Exception as exc:  # the folder classes or the walk: a walk by extension alone tells which
+        try:
+            s = summarize(store, node, layout.ext_cls_of, len(class_ids), top)
+        except Exception:
+            s = None
+            gaps.add("contents", exc)
+        else:
+            cls_of = layout.ext_cls_of
+            gaps.add("classes", exc)
+
+    def shared_tags() -> TagStore | None:
+        shared = server.views.shared(handle.id)
+        return shared.tags if shared is not None else None
+
+    tags = gaps.guard("tags", shared_tags, None)
+
+    def tag_of(n: int) -> TagColor | None:
+        found = tags
+        return gaps.guard("tags", lambda: found.of(store, n), None) if found is not None else None
+
+    def top_files(s: Summary) -> list[p.TopFile]:
+        ids = s.top_files
+        try:
+            top_cls = cls_of(ids).tolist() if len(ids) else []
+        except Exception as exc:
+            gaps.add("classes", exc)
+            top_cls = layout.ext_cls_of(ids).tolist()
+        out = []
+        for f, ci in zip(ids.tolist(), top_cls, strict=True):
+            parent_path = store.path(int(store.cols["parent"][f]))
+            rel = os.path.relpath(parent_path, base) if parent_path != base else ""
+            rel = "" if rel in (".", "") else rel + os.sep
+            out.append(
+                p.TopFile(node=node_info(store, f), rel_parent=rel, tag=tag_of(f), class_id=class_ids[ci])
             )
-        )
-    order = np.argsort(-s.class_bytes, kind="stable")
+        return out
 
-    def parts(i: int) -> list[p.ClassPart]:
-        if s.class_parts is None:
-            return []
-        row = s.class_parts[i]
-        return [p.ClassPart(class_id=class_ids[j], bytes=int(row[j])) for j in np.argsort(-row) if row[j] > 0]
+    def class_stats(s: Summary) -> list[p.ClassStat]:
+        def parts(i: int) -> list[p.ClassPart]:
+            if s.class_parts is None:
+                return []
+            row = s.class_parts[i]
+            return [
+                p.ClassPart(class_id=class_ids[j], bytes=int(row[j])) for j in np.argsort(-row) if row[j] > 0
+            ]
 
-    classes = [
-        p.ClassStat(
-            class_id=class_ids[i],
-            bytes=int(s.class_bytes[i]),
-            files=int(s.class_files[i]),
-            parts=parts(int(i)),
-        )
-        for i in order
-        if s.class_files[i]
-    ]
-    why = pathclass.explain(store, node, layout.classes)
-    folder_class = (
-        p.FolderClassInfo(
+        return [
+            p.ClassStat(
+                class_id=class_ids[i],
+                bytes=int(s.class_bytes[i]),
+                files=int(s.class_files[i]),
+                parts=parts(int(i)),
+            )
+            for i in np.argsort(-s.class_bytes, kind="stable")
+            if s.class_files[i]
+        ]
+
+    def folder_class() -> p.FolderClassInfo | None:
+        why = pathclass.explain(store, node, layout.classes)
+        if why is None:
+            return None
+        return p.FolderClassInfo(
             class_id=why.class_id,
             reason=why.reason,
             folder=store.path(why.folder),
             user=why.user,
             fallback=why.fallback,
         )
-        if why is not None
-        else None
-    )
-    parent = int(store.cols["parent"][node])
-    root = next((r for r in handle.roots if r.node == node or r.node in store.ancestors(node)), None)
+
+    def parent() -> p.NodeInfo | None:
+        up = int(store.cols["parent"][node])
+        return node_info(store, up) if up > 0 else None
+
+    def volume() -> p.VolumeInfo | None:
+        root = next((r for r in handle.roots if r.node == node or r.node in store.ancestors(node)), None)
+        return volume_model(root.volume) if root is not None else None
+
+    tops: list[p.TopFile] = []
+    classes: list[p.ClassStat] = []
+    if s is not None:
+        done = s
+        tops = gaps.guard("top_files", lambda: top_files(done), [])
+        classes = gaps.guard("contents", lambda: class_stats(done), [])
     return p.TreeSummaryResult(
-        node=node_info(store, node),
+        node=info,
         path=base,
-        parent=node_info(store, parent) if parent > 0 else None,
-        latest_mtime=s.latest_mtime,
+        parent=gaps.guard("parent", parent, None),
+        latest_mtime=s.latest_mtime if s is not None else 0,
         top_files=tops,
         classes=classes,
-        tag=tags.of(store, node) if tags else None,
-        volume=volume_model(root.volume) if root is not None else None,
-        on_disk=on_disk(store, node),
-        folder_class=folder_class,
+        tag=tag_of(node),
+        volume=gaps.guard("volume", volume, None),
+        on_disk=here,
+        folder_class=gaps.guard("folder_class", folder_class, None),
+        gaps=gaps.items,
     )
 
 
