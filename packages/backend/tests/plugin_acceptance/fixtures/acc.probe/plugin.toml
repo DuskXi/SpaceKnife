@@ -1,0 +1,11 @@
+# Acceptance probe (packages/backend/tests/plugin_acceptance): what each kind of call gets.
+id = "acc.probe"
+version = "0.1.0"
+name = { zh = "验收探针", en = "Acceptance probe" }
+description = { zh = "插件系统的验收测试用：记下每种调用拿到的上下文、钩子听到的变化，还有慢的、崩溃的和读文件的调用。", en = "For the plugin system's acceptance tests: what each kind of call gets, what the hooks hear, and calls that are slow, crash or read files." }
+entry = "plugin.py"
+permissions = ["tree.read", "files.read"]
+
+[limits]
+threads = 2
+timeout_s = 60

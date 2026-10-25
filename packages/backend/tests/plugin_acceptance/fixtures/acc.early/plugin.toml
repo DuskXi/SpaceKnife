@@ -1,0 +1,6 @@
+# Acceptance probe (packages/backend/tests/plugin_acceptance): settings changed while it starts.
+id = "acc.early"
+version = "0.1.0"
+name = { zh = "验收探针：启动中改设置", en = "Acceptance probe: settings while starting" }
+description = { zh = "插件系统的验收测试用：一启用就起进程（启动时的后台任务），进程启动得慢。", en = "For the plugin system's acceptance tests: its process starts when it is enabled (a task that starts with it), and starts slowly." }
+entry = "plugin.py"
