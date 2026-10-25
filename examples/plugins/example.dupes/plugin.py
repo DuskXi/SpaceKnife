@@ -187,7 +187,7 @@ async def extra(ctx: Context, c: ReportContext) -> list[Proposal]:
     return out
 
 
-@plugin.node_field(T("同内容的副本", "Copies with the same contents"), kinds=["file"])
+@plugin.node_field(T("同内容的副本", "Same-content copies"), kinds=["file"])
 def copies(ctx: Context, node: Node) -> FieldValue | None:
     """From the last search only (1 s is not enough to hash): nothing until one ran."""
     found = _cached(ctx)

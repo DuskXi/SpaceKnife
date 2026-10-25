@@ -629,7 +629,10 @@ def shot(
     ] = None,
     open_: Annotated[
         str | None,
-        typer.Option("--open", help="report:<name> | panel:<name> | settings (the plugin's own names)."),
+        typer.Option(
+            "--open",
+            help="report:<name> | panel:<name> | export:<format> (the export dialog on it) | settings.",
+        ),
     ] = None,
     do: Annotated[
         list[str] | None,
@@ -685,7 +688,7 @@ def shot(
     target_open = open_
     if open_ and ":" in open_:
         what, _, name = open_.partition(":")
-        if what in ("report", "panel") and "." not in name:
+        if what in ("report", "panel", "export") and "." not in name:
             target_open = f"{what}:{pid}.{name}"
     elif open_ == "settings":
         target_open = f"settings:{pid}"

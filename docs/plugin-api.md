@@ -340,7 +340,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `state` | (`scanning` `done` `cancelled` `failed`) \| str | `"done"` | 扫描中、完成、停止、失败 |
 | `started_at` | float \| None | `None` | 开始时间，unix 秒 |
 | `finished_at` | float \| None | `None` | 结束时间，unix 秒；还在扫描时是 None |
-| `snapshot` | str \| None | `None` | 从哪个快照文件打开的 |
+| `snapshot` | str \| None | `None` | 快照：打开的快照是那个文件；磁盘扫描是它完成时自动保存的那个（没有保存时 None） |
 | `front` | bool | `False` | 用户眼前的那个扫描（`ctx.tree` 默认读它） |
 | `on_disk` | bool | `True` | 节点是这台机器上的文件；扫描来源（`on_disk = false`）的是 False |
 
@@ -634,5 +634,145 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 |---|---|---|---|
 | `light` | str | 必需 | 浅色主题里的颜色 `#RRGGBB` |
 | `dark` | str | 必需 | 深色主题里的颜色 |
+
+### 报告的块
+
+#### `MdBlock`
+
+`r.md(text)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`md`) | `"md"` |  |
+| `text` | str | 必需 |  |
+
+#### `StatsBlock`
+
+`r.stats([...])`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`stats`) | `"stats"` |  |
+| `items` | list[StatItem] | 必需 |  |
+
+#### `KvBlock`
+
+`r.kv([...])`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`kv`) | `"kv"` |  |
+| `items` | list[KvItem] | 必需 |  |
+
+#### `TableBlock`
+
+`r.table(columns, rows=…)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`table`) | `"table"` |  |
+| `columns` | list[TableColumn] | 必需 |  |
+| `rows` | list[TableRow] | 必需 |  |
+| `sort` | str \| None | `None` | Column key, '-key' for descending |
+| `page_size` | int | `50` | ≥ 1，≤ 500 |
+| `select` | bool | `False` |  |
+| `more` | TableMore \| None | `None` |  |
+
+#### `BarsBlock`
+
+`r.bars([...])`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`bars`) | `"bars"` |  |
+| `items` | list[BarItem] | 必需 |  |
+| `max` | float \| None | `None` |  |
+
+#### `StackBlock`
+
+`r.stack(parts, unit)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`stack`) | `"stack"` |  |
+| `parts` | list[PartItem] | 必需 |  |
+| `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"size"` |  |
+
+#### `RingBlock`
+
+`r.ring(parts, unit, center)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`ring`) | `"ring"` |  |
+| `parts` | list[PartItem] | 必需 |  |
+| `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"size"` |  |
+| `center` | str | `""` |  |
+
+#### `MeterBlock`
+
+`r.meter(value, max, label, unit, tone)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`meter`) | `"meter"` |  |
+| `value` | float | 必需 |  |
+| `max` | float | 必需 |  |
+| `label` | str | `""` |  |
+| `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"size"` |  |
+| `tone` | str \| ThemedColor \| None | `None` |  |
+
+#### `SparkBlock`
+
+`r.spark(values, labels, unit)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`spark`) | `"spark"` |  |
+| `values` | list[float] | 必需 |  |
+| `labels` | list[str] | `[]` |  |
+| `unit` | (`size` `count` `pct` `date` `ago` `duration` `bytes_per_s` `text` `path`) | `"size"` |  |
+
+#### `NodesBlock`
+
+`r.nodes([...], actions)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`nodes`) | `"nodes"` |  |
+| `items` | list[NodeItem] | 必需 |  |
+| `actions` | list[LabeledAction] | `[]` |  |
+
+#### `CalloutBlock`
+
+`r.callout(text, tone)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`callout`) | `"callout"` |  |
+| `tone` | (`info` `ok` `warn` `danger`) | `"info"` |  |
+| `text` | str | 必需 |  |
+
+#### `ProgressBlock`
+
+`r.progress(done, total, text)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`progress`) | `"progress"` |  |
+| `done` | float | 必需 |  |
+| `total` | float | 必需 |  |
+| `text` | str | `""` |  |
+
+#### `SectionBlock`
+
+`r.section(title, blocks, collapsed=False)`。
+
+| 字段 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `type` | (`section`) | `"section"` |  |
+| `title` | str | 必需 |  |
+| `blocks` | list[MdBlock \| StatsBlock \| KvBlock \| TableBlock \| BarsBlock \| StackBlock \| RingBlock \| MeterBlock \| SparkBlock \| NodesBlock \| CalloutBlock \| ProgressBlock \| SectionBlock] | 必需 |  |
+| `collapsed` | bool | `False` |  |
 
 <!-- generated:plugin-models:end -->

@@ -62,6 +62,32 @@ action = { open = "report:nothing" }
     assert not result.ok(strict=False)
 
 
+def test_check_warns_of_long_titles_and_chinese_in_english(tmp_path: Path) -> None:
+    folder = tmp_path / "example.titles"
+    scaffold.write(folder, "example.titles", ["command"])
+    toml = (folder / "plugin.toml").read_text(encoding="utf-8")
+    toml += """
+[[commands]]
+name = "long_one"
+title = { zh = "把这一项和它下面所有一样内容的副本都放进删除篮里面", en = "Put this one and every same-content copy under it into the basket" }
+action = { open = "settings" }
+
+[[commands]]
+name = "half_done"
+title = { zh = "复制路径", en = "复制路径" }
+action = { open = "settings" }
+"""
+    (folder / "plugin.toml").write_text(toml, encoding="utf-8")
+    result = check_plugin(folder, contracts=False, subprocess_describe=False)
+    warned = {(i.code, i.severity) for i in result.issues}
+    texts = [i.text() for i in result.issues]
+    assert ("long_title", "warning") in warned, texts
+    assert any("long_one" in t and "at most 20 in Chinese, 40 in English" in t for t in texts), texts
+    assert ("chinese_in_en", "warning") in warned, texts
+    assert any("it is the Chinese one" in t for t in texts), texts
+    assert result.ok(strict=False) and not result.ok(strict=True)  # warnings: --strict fails
+
+
 def test_check_fails_a_source_that_fails_on_its_fixture(tmp_path: Path) -> None:
     folder = tmp_path / "example.badsrc"
     scaffold.write(folder, "example.badsrc", ["source"])

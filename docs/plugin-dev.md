@@ -295,7 +295,7 @@ unit = "B"
 | `name` `title` | 必需；用作装饰器时 `name` 默认是函数名 |
 | `icon` | 图标 |
 | `slot` | 放在哪：`tab`（标签页，默认）`inspector`（详情面板的一页）`dialog` `start`（开始页卡片）`compare`（对比侧栏）`status`（状态栏）`history`（开始页的历史，配 `ctx.snapshots`） |
-| `refresh` | 什么时候重新取：`open`（打开时，默认）`selection`（详情面板默认）`scan`（扫描完成）`frame`（视图变化，≤ 1 次/秒）`compare` `manual` `interval:<秒>`（≥ 5）`state:<状态名>` |
+| `refresh` | 什么时候重新取：`open`（打开时，默认）`selection`（详情面板默认）`scan`（扫描完成）`frame`（视图变化，≤ 1 次/秒）`compare` `manual`（只在用户点「刷新」时）`interval:<秒>`（≥ 5）`state:<状态名>`（那个共享状态变了；报告自己改这个状态不会再触发一次，不会循环） |
 | `when` | 同命令 |
 | `order` | 排序 |
 | `blocks` | 只在 TOML 里：静态报告，不要代码 |
@@ -399,7 +399,7 @@ title = { zh = "面板", en = "Board" }
 | 字段 | 说明 |
 |---|---|
 | `name` `title` | 必需 |
-| `icon` `order` | 工具栏里的图标和位置（50） |
+| `icon` `order` | 工具栏里的图标和位置（50；插件的排在内置的之后，`visual.list` 报的是 100 + order） |
 | `base` | `treemap` `flame`（默认）`flame_polar` |
 | `size` | 面积按什么：`alloc`（占用，默认）`size`（逻辑大小）`files`（文件数）`items`（项数）`code`（函数给权重） |
 | `unit` | 面积的单位：`bytes` `count` 或 `weight`（默认按 `size` 推断：`code` 是 `weight`），决定标签的写法：`weight` 的标签写占缩放根权重的比例（同一层加起来不超过 100%），悬停卡另写真实占用 |
@@ -415,7 +415,7 @@ base = "flame"
 size = "files"
 ```
 
-代码版：函数给每个节点一个权重（长度 `len(tree)` 的数组），宿主只取文件的权重、把它们加到文件夹上。权重是 ≥ 0 的整数，NaN 和负数当 0。`VisualInput` 有 `tree` `options`（声明的选项，按视图里的值）`settings`（本插件全部设置）`ctx` 和 `cancelled`/`check()`。权重按树版本、选项和设置缓存。`spaceknife_sdk.layout` 有几个帮手：`files_only` `by_column` `count` `check`。
+代码版：函数给每个节点一个权重（长度 `len(tree)` 的数组），宿主只取文件的权重、把它们加到文件夹上。权重是 ≥ 0 的整数，NaN 和负数当 0。`VisualInput` 有 `tree` `options`（`options` 里列出的本插件设置的当前值）`settings`（本插件全部设置）`ctx` 和 `cancelled`/`check()`。权重按树版本、选项和设置缓存。`spaceknife_sdk.layout` 有几个帮手：`files_only` `by_column` `count` `check`。
 
 ```python ex
 @plugin.visualization("by_lines", T("按估计行数", "By estimated lines"), base="treemap")
@@ -861,7 +861,7 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 
 - 第一次启用时用户看到全部权限（`net`、`exec` 连同主机和程序），只授予确认过的。文件夹按内容哈希锁定：任何文件变了，插件停在「已改动」，用户重新确认后才再启用（开发链接不锁）。
 - 插件进程有审计钩子：没有权限时联网、写插件存储以外的地方、开子进程、`ctypes` 都会被拦下（`PermissionError`）。它不是操作系统级的沙箱，启用对话框也这么写。
-- `ctx.call` 和面板的 `sk.core` 只能调这些内置方法：`tree.node tree.children tree.summary tree.find`（`tree.read`）、`scan.list scan.status volume.list view.list visual.list filter.parse filter.vocab classes.get export.targets basket.list extensions.get`、`snapshot.list`（`snapshots.read`）、`compare.info compare.summary compare.node insight.node`（`tree.read`）、`basket.add`（`basket.propose`）。删除、改设置、开始扫描、安装插件永远调不到。
+- `ctx.call` 和面板的 `sk.core` 只能调这些内置方法：`tree.node tree.children tree.summary tree.find`（`tree.read`）、`scan.list scan.status volume.list view.list visual.list filter.parse filter.vocab classes.get export.targets basket.list extensions.get`、`snapshot.list`（`snapshots.read`）、`compare.info compare.summary compare.node insight.node insight.nodes`（`tree.read`）、`basket.add`（`basket.propose`）。删除、改设置、开始扫描、安装插件永远调不到。
 
 <a id="imports"></a>
 ### 7.1 能 import 的模块
@@ -926,7 +926,7 @@ async def test_largest() -> None:
 | `plugin build [D] [--zip]` | 第 9 节 |
 | `plugin call <D或id> <方法> ['{"a": 1}'] [--scan PATH] [--snapshot FILE] [--history FILE …] [--setting k=v …] [--lang en]` | 起一个临时后端，扫描 `PATH`（不给就用合成树或 `fixtures/tree/`），调用方法，打印 JSON 结果，事件、提示和插件日志打到 stderr |
 | `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名 \| source:名> [--scan PATH] [--node a/b] [--format text\|json\|md] [--call 方法[={json}] …] [--option k=v …] [--filter 式] [--uri U] [-o FILE] [--setting k=v] [--lang en] [--history FILE]` | 不开界面看到结果；`--call` 先在同一个后端里调方法（先算好结果的字段、集合）；导出的 `--option` `--filter`、`--node`（只导出它）；`visual:` `color:` 的 `--format json` 给出每行的节点、大小和色板下标 |
-| `plugin shot [D] [--open report:名\|panel:名\|settings] [--do 命令 …] [--select a/b] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
+| `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
 | `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
 | `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]` | 安装、卸载（真实的数据目录） |
 | `plugin list [--json]`、`enable <id> [--yes]`、`disable <id>` | 列出、启用（列出权限并要求确认）、停用 |

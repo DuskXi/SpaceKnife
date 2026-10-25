@@ -496,11 +496,14 @@ class PluginHost:
         self._note_crash(rec)
 
     async def idle_sweep(self) -> None:
-        """Stop processes that were not used for a while (no subscriptions, not startup ones)."""
+        """Stop processes that were not used for a while (no subscriptions, not startup ones).
+
+        Only running ones: a process still starting is not idle (its record may never have been
+        used: a slow machine's start would be killed by the sweep that happens to run then)."""
         now = time.monotonic()
         for rec in list(self.records.values()):
             rt = rec.runtime
-            if rt is None or rt.kind != "process" or rt.busy():
+            if rt is None or rt.kind != "process" or rt.state != "running" or rt.busy():
                 continue
             if rec.manifest is not None and rec.manifest.activation == "startup":
                 continue

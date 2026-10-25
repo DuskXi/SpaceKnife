@@ -151,10 +151,12 @@ class _Inputs:
 
 @dataclass(slots=True)
 class VisualInput(_Inputs):
-    """What a code visualization gets: ``(v: VisualInput) -> np.ndarray`` (a weight per node).
+    """What a code visualization gets: ``(v: VisualInput) -> np.ndarray`` (a weight per node,
+    ``len(v.tree)`` of them).
 
-    ``options``: its declared options (own settings by name, as the view has them); ``settings``:
-    all of the plugin's settings; ``ctx``: the call's context (``ctx.check()`` for cancellation)."""
+    ``options``: the current values of the plugin's settings its ``options`` names (by name);
+    ``settings``: all of the plugin's settings; ``ctx``: the call's context (``ctx.check()`` for
+    cancellation)."""
 
     tree: TreeView
     options: dict[str, Any] = field(default_factory=dict)

@@ -68,6 +68,19 @@ def _models() -> list[tuple[str, type, str]]:
         ("报告的部件", sdk.PartItem, "`r.stack` / `r.ring` 的一段"),
         ("报告的部件", pp.LabeledAction, "`r.action(标签, icon, **动作)`：按钮"),
         ("报告的部件", sdk.ThemedColor, "分主题的颜色 `{ light, dark }`"),
+        ("报告的块", sdk.MdBlock, "`r.md(text)`"),
+        ("报告的块", sdk.StatsBlock, "`r.stats([...])`"),
+        ("报告的块", sdk.KvBlock, "`r.kv([...])`"),
+        ("报告的块", sdk.TableBlock, "`r.table(columns, rows=…)`"),
+        ("报告的块", sdk.BarsBlock, "`r.bars([...])`"),
+        ("报告的块", sdk.StackBlock, "`r.stack(parts, unit)`"),
+        ("报告的块", sdk.RingBlock, "`r.ring(parts, unit, center)`"),
+        ("报告的块", sdk.MeterBlock, "`r.meter(value, max, label, unit, tone)`"),
+        ("报告的块", sdk.SparkBlock, "`r.spark(values, labels, unit)`"),
+        ("报告的块", sdk.NodesBlock, "`r.nodes([...], actions)`"),
+        ("报告的块", sdk.CalloutBlock, "`r.callout(text, tone)`"),
+        ("报告的块", sdk.ProgressBlock, "`r.progress(done, total, text)`"),
+        ("报告的块", sdk.SectionBlock, "`r.section(title, blocks, collapsed=False)`"),
     ]
 
 
@@ -80,7 +93,10 @@ NOTES: dict[tuple[str, str], str] = {
     ("ScanInfo", "state"): "扫描中、完成、停止、失败",
     ("ScanInfo", "started_at"): "开始时间，unix 秒",
     ("ScanInfo", "finished_at"): "结束时间，unix 秒；还在扫描时是 None",
-    ("ScanInfo", "snapshot"): "从哪个快照文件打开的",
+    (
+        "ScanInfo",
+        "snapshot",
+    ): "快照：打开的快照是那个文件；磁盘扫描是它完成时自动保存的那个（没有保存时 None）",
     ("ScanInfo", "front"): "用户眼前的那个扫描（`ctx.tree` 默认读它）",
     ("ScanInfo", "on_disk"): "节点是这台机器上的文件；扫描来源（`on_disk = false`）的是 False",
     ("SnapshotInfo", "path"): "快照文件；`ctx.snapshots.open(path)` 打开它",

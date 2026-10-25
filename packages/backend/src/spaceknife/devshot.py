@@ -346,8 +346,8 @@ def run_shot(folder: Path, o: ShotOptions, say: Callable[[str], None] = print) -
         say("no Chrome, Chromium or Edge found: set SPACEKNIFE_BROWSER to one")
         return 2
     os.environ["SPACEKNIFE_PLUGIN_DEV"] = "1"
-    with tempfile.TemporaryDirectory(prefix="sk-plugin-shot-") as tmp:
-        base = Path(tmp)
+    base = Path(tempfile.mkdtemp(prefix="sk-plugin-shot-"))
+    try:
         os.environ["SPACEKNIFE_HOME"] = str(base / "home")
         setup_logging(os.environ.get("SPACEKNIFE_LOG_LEVEL", "WARNING").upper(), LogFormat.PLAIN)
         plugin = load_manifest(folder).id
@@ -356,6 +356,13 @@ def run_shot(folder: Path, o: ShotOptions, say: Callable[[str], None] = print) -
             scan = base / "tree"
             write_tree(TREE, scan)
         return asyncio.run(_shot(folder, plugin, scan.expanduser().resolve(), renderer, exe, base, o, say))
+    finally:
+        # the browser lets go of its profile a moment after it ends (Windows keeps the files locked)
+        for _ in range(20):
+            shutil.rmtree(base, ignore_errors=True)
+            if not base.exists():
+                break
+            time.sleep(0.25)
 
 
 async def _shot(

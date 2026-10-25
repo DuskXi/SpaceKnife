@@ -2,7 +2,7 @@
 // 「看真实界面」): after the linked scan's tab opens, the address may say what to show, so a page
 // can be brought to a state without clicking:
 //   #…&scan=<id>&theme=light&lang=en&select=logs/app.log&do=view.visual.<id>,report.export
-//     &open=report:<full id>|panel:<full id>|settings:<plugin id>
+//     &open=report:<full id>|panel:<full id>|settings:<plugin id>|export:<format or template>
 // When it is done (or failed), <html data-sk-dev-ready="1"> (data-sk-dev-error says what failed):
 // what plugin shot waits for before it takes the picture.
 
@@ -74,7 +74,10 @@ export async function applyDevLink(scan: ScanStatus): Promise<void> {
         await settle(150);
       }
     }
-    if (link.open) {
+    if (link.open?.startsWith("export:")) {
+      const { set } = await import("./store");
+      set({ exportOpen: true, exportPick: link.open.slice(7) }); // the export dialog, on that format
+    } else if (link.open) {
       const { openTarget } = await import("@/plugins/open");
       const { actionContext } = await import("@/plugins/actions");
       openTarget(link.open, actionContext({ owner: null }));

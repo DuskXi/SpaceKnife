@@ -103,6 +103,8 @@ ANCHORS: dict[str, str] = {
     "source": "kind-scan_source",
     "hook": "kind-hook",
     "stale_generated": "build",
+    "chinese_in_en": "texts",
+    "long_title": "texts",
     "not_built": "build",
     "tests": "testing",
 }
@@ -268,6 +270,31 @@ def _last_lines(trace: str) -> str:
 
 # --------------------------------------------------------------------------- static checks
 
+# titles shown in narrow places: longer ones are cut (a field's title sits left of its value)
+TITLE_LIMITS = {"node_field": (12, 24), "setting": (20, 40), "command": (20, 40), "report": (16, 32)}
+
+
+def check_title_lengths(specs: Sequence[tuple[str, Spec]]) -> list[Issue]:
+    """Titles longer than the places that show them (Chinese characters, English letters)."""
+    out: list[Issue] = []
+    for kind, spec in specs:
+        limits = TITLE_LIMITS.get(kind)
+        title = getattr(spec, "title", None)
+        if limits is None or not isinstance(title, Text):
+            continue
+        zh_max, en_max = limits
+        if len(title.zh) > zh_max or len(title.en) > en_max:
+            out.append(
+                _issue(
+                    "long_title",
+                    f"{kind} {spec_key(kind, spec)!r}: its title is long ({len(title.zh)} / {len(title.en)} "
+                    f"characters; at most {zh_max} in Chinese, {en_max} in English fit): it will be cut",
+                    severity="warning",
+                    fix="say the rest in description (settings), the report's subtitle, or the field's value",
+                )
+            )
+    return out
+
 
 def _texts(value: Any, where: str) -> Iterable[tuple[str, Text]]:
     if isinstance(value, Text):
@@ -295,6 +322,17 @@ def check_texts(
         items += list(_texts(spec, f"{kind} {getattr(spec, 'name', '') or ''}".strip()))
     for where, text in items:
         en = text.en or catalog.get(text.zh, "")
+        if text.en and CJK.search(text.en) and text.zh not in seen:
+            seen.add(text.zh)
+            out.append(
+                _issue(
+                    "chinese_in_en",
+                    f"{where}: the English text {text.en!r} has Chinese in it"
+                    + (" (it is the Chinese one)" if text.en == text.zh else ""),
+                    severity="warning",
+                    fix='write the English: T("中文", "English") / { zh = "…", en = "…" }',  # i18n: ignore
+                )
+            )
         if not en and text.zh and text.zh not in seen and CJK.search(text.zh):
             seen.add(text.zh)
             out.append(
@@ -1185,6 +1223,7 @@ def static_issues(folder: Path, manifest: Manifest, desc: Description) -> list[I
 
     specs, out = specs_of(desc)
     out += check_texts(specs, manifest, desc.catalog)
+    out += check_title_lengths(specs)
     out += check_icons(folder, specs)
     out += check_references(folder, manifest, desc, specs)
     out += check_colors(specs)

@@ -905,6 +905,14 @@ body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-sel
 .export-modal { width: 560px; max-width: calc(100vw - 32px); max-height: min(80vh, calc(100vh - 32px)); display: flex; flex-direction: column; }
 .export-modal > h3, .export-modal > .modal-buttons { flex: none; }
 .export-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 -8px; padding: 0 8px; scrollbar-width: thin; }
+.export-modal.with-options { width: 900px; }
+.export-body.with-options { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; overflow: hidden; }
+.export-body.with-options > * { min-height: 0; overflow: auto; scrollbar-width: thin; }
+.export-body.with-options .export-options { border-top: 0; border-left: 1px solid var(--sk-color-line-subtle); padding: 8px 0 8px 16px; }
+@media (max-width: 760px) {
+  .export-body.with-options { display: block; overflow: auto; }
+  .export-body.with-options .export-options { border-left: 0; border-top: 1px solid var(--sk-color-line-subtle); padding: 8px 0; }
+}
 .export-groups { display: flex; flex-direction: column; gap: 12px; margin: 8px 0; }
 .export-group { display: flex; flex-direction: column; gap: 2px; }
 .export-option { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--sk-radius-md); cursor: pointer; }

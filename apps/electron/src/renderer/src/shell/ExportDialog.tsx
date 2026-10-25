@@ -56,6 +56,10 @@ export function ExportDialog() {
       .catch(() => setTargets([]));
   }, [open, targets]);
   useEffect(() => {
+    // the chosen format in sight (opened on one far down the list: report.export with a format)
+    if (open && targets) document.querySelector(".export-option.on")?.scrollIntoView?.({ block: "nearest" });
+  }, [open, targets, pick]);
+  useEffect(() => {
     if (!open) return;
     const key = (e: KeyboardEvent) => e.key === "Escape" && set({ exportOpen: false });
     window.addEventListener("keydown", key);
@@ -99,14 +103,16 @@ export function ExportDialog() {
     }
   };
   const group = (kind: ExportTarget["kind"]) => (targets ?? []).filter((x) => x.kind === kind);
+  const withOptions = !!target && target.options.length > 0;
 
   return (
     <div className="modal-back" role="presentation" onMouseDown={close}>
-      <div className="modal export-modal" role="dialog" aria-modal="true" aria-labelledby="export-title" onMouseDown={(e) => e.stopPropagation()}>
+      <div className={`modal export-modal${withOptions ? " with-options" : ""}`} role="dialog" aria-modal="true" aria-labelledby="export-title" onMouseDown={(e) => e.stopPropagation()}>
         <h3 id="export-title">{t("导出报告")}</h3>
         {!viewId && <p className="muted">{t("先打开一次扫描")}</p>}
         {targets === null && <p className="muted">{t("正在读取模板…")}</p>}
-        <div className="export-body">
+        {/* a format with options: the list and its options side by side, each scrolling by itself */}
+        <div className={`export-body${withOptions ? " with-options" : ""}`}>
         {targets && (
           <div className="export-groups" role="radiogroup" aria-label={t("模板与格式")}>
             {(["template", "format"] as const).map((kind) => (

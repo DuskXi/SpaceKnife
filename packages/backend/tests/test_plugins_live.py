@@ -281,6 +281,30 @@ async def test_idle_processes_stop_and_come_back(monkeypatch: pytest.MonkeyPatch
         assert rec.runtime is not None
 
 
+async def test_the_idle_sweep_leaves_a_starting_process_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    # a record never used (relinked in plugin dev) whose process takes long to start (Windows):
+    # the minute's sweep must not kill it half-way (it then reported "exited (1)")
+    from spaceknife.plugins import host as host_module
+    from spaceknife.plugins.runtime.process import ProcessRuntime
+
+    async with mock("t.full", process=True) as host:
+        hp = await host._ready()
+        rec = hp.records["t.full"]
+        await hp._stop_runtime(rec)
+        rec.last_used = 0.0
+        monkeypatch.setattr(host_module, "IDLE_STOP_S", -1.0)
+        start = ProcessRuntime.start
+
+        async def slow_start(self: ProcessRuntime) -> object:
+            self.state = "starting"
+            await hp.idle_sweep()  # the sweep runs while this one starts
+            return await start(self)
+
+        monkeypatch.setattr(ProcessRuntime, "start", slow_start)
+        assert await host.call("add", a=1) == {"total": 1}
+        assert rec.runtime is not None and rec.runtime.state == "running"
+
+
 async def test_a_caller_giving_up_does_not_stop_the_start(monkeypatch: pytest.MonkeyPatch) -> None:
     from spaceknife.plugins.runtime.process import ProcessRuntime
     from spaceknife.server.rpc import RpcError

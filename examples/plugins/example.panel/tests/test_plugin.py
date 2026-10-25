@@ -39,21 +39,9 @@ async def test_histogram(host: MockHost) -> None:
 
 
 def test_mock_data_matches_the_method() -> None:
-    import importlib.util
-    import sys
+    from spaceknife_sdk.testing import plugin_module
 
-    from spaceknife_sdk.manifest import load_manifest
-    from spaceknife_sdk.plugin import loaded
-
-    spec = importlib.util.spec_from_file_location("example_panel_plugin", FOLDER / "plugin.py")
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    try:
-        with loaded(FOLDER, load_manifest(FOLDER)):
-            spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(spec.name, None)
+    module = plugin_module(__file__)  # the plugin's plugin.py, imported as the host imports it
     fixtures = json.loads((FOLDER / "web" / "fixtures.json").read_text(encoding="utf-8"))
     module.Histogram.model_validate(fixtures["calls"]["histogram"])  # the panel's mock data is real data
 
