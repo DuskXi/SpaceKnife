@@ -132,6 +132,23 @@
 - **测试和命令行**：`MockHost` 与宿主对齐（语言钩子、等设置钩子、停监控器、来源失败抛错、导出带过滤和选项、命令按键预设、快照的合计、合成树不在临时目录）；`plugin_module()` 导入插件自己的代码；`plugin call/render` 的 `--setting`、`--history`、`render source:`、`render export -o`；输出逐行刷新；`plugin dev` 的网址直接打开扫描、用程序的路径对话框、打印 pid；临时数据目录下卸载直接删除。
 - **运行时**：取消一个同步函数时不再结束插件进程（结果到了丢掉，全部工作线程都卡住才重启）；进程内运行时停止时把还在跑的调用取消干净。
 
+## 试写第二轮之后的改进
+
+第二轮仍是那六个插件（作者在第一轮的代码上跟上新宿主），评估列出 26 处缺口（一处阻断），作者的输入 token 比第一轮多了约一半。看作者的调用记录，多出来的主要不在文档：每人用 25–105 次调用自己搭无头浏览器的脚本（CDP、静态服务器、测试数据、起停后端）去看真界面，约占输入的三成；四位作者还在过期的前端上走了弯路。这一轮先合进 dev（浅色主题等），再补缺口、减作者的读和试：
+
+- **阻断**：`ctx.clipboard` 的消息不在插件进程的消息类型里，一调用进程就以协议违规被结束；「所有线程都卡住」的消息同样不在。两者都加上，测试核对 SDK 发出的每种消息都在类型里，剪贴板在进程模式里也测。
+- **运行时**：被取消的调用 5 秒后先在日志里写明是哪一个，30 秒还不停（`async def` 卡住了事件循环）才结束进程；扫描完成时预先启动有字段或洞察的插件进程。
+- **文案**：`LocalStr` 在写出时才按语言取值，模块顶层定义的列标题跟着语言；字段值和表格单元格可以是 `T(...)`；字段缓存按语言分开；占位符 `{n:size}` `{n:count}` `{t:date}` `{t:ago}`；`T(...).plural`；`ctx.fmt`；设置的 `unit` 中英成对；`plugin new --title 中文` 时英文名取 id；工具栏上插件标签页的标题跟着语言。
+- **命令**：`when` 加 `file dir ext: on_disk`；`ActionContext` / `ReportContext` 带 `zoom_node` 和 `filter`；`check` 方法收到同样的上下文；`open`、`command` 动作可以带 `args`（`report.export` 预选格式）。
+- **可视化与配色**：`default_color`；`visual.list` 报出单位和来源；帧带缩放根的大小（`FrameInfo.total`），权重标签不再超过 100%；图例在重新计算时保留旧的、作废时马上去取。
+- **洞察与类别**：`Insight.replaces` 代替同一节点上的规则卡；文件夹规则的 `contains` `beside`；插件规则文件的卡片带插件 id。
+- **设置与导出**：`select`（选项多于 4 个时默认）、`multi`；设置页的分组写成「插件名 › 分组」；导出对话框中间滚动、按钮常在、选项按 `group` 分节、两种主题下输入框可见，选项可以 `default_from` 一个设置。
+- **文件与删除篮**：`ctx.files` 只解析一次允许的根，沙箱不再重复解析同一个路径；`hash_many`（几个线程一起读，跳过云端占位）；范围外是 `FileNotAllowed`；`propose` 每项可以带原因、一个调用只提示一次；`withdraw`；`basket` 钩子；`ctx.call("basket.add")` 也算用到了权限。
+- **快照**：同一秒的自动快照不再互相覆盖；扫描刚完成时 `snapshot.save` 等它收尾而不是拒绝。
+- **测试与工具**：`MockHost.command` `command_available` `settled` `path` `export_text` / `export_bytes`，`hook` 检查事件和参数并抛出异常；失败的调用是公开的 `RequestError`；`TreeView` 支持 `len()`；`plugin check` 在插件进程里按 `when` 把命令跑一遍，核对面板 `fixtures.json` 的内置方法回答，打印样例来源列出了什么；`plugin new` 加 `visual-code` `color-code` 两个部分、`ruff.toml`、进程模式的检查测试，并按部分给出下一步；`plugin render` 的 `--call` `--option` `--filter`、`visual:`/`color:` 的 JSON；`plugin call` 遇到报告名时说该用什么。
+- **看真界面**：`spaceknife plugin shot`：一条命令起后端、扫描（合成树或 `--scan`）、无头浏览器，按 `--open` `--do` `--select` `--theme` `--lang` 把界面带到要看的状态，截图并打印页面和面板的报错、面板里的字（`--text`）。界面用开发链接里的词（`state/devlink.ts`）到达那个状态；`plugin dev` 和 `shot` 在前端比源码旧时提醒，`SPACEKNIFE_UI` 指定构建。这个工具在第一次用时就找出了参考面板的两个错（`tree.summary` 少了 `node`、回答的形状不对）。
+- **文档**：一页的[速查](plugin-quick.md)是 `plugin docs` 的默认输出（约 10 KB，全文 66 KB）；`--search` 找到提到某个词的行和所在的节；指南的第 0 节改成指向速查；API 参考补上边界、单位的值、导出输入的含义、取消的规则；`filter-syntax.md` 加 `:set:` 和插件类别，`protocol.md` 加删除篮一节。
+
 还没做的见 TODO.md 插件一条下面。
 
 ---

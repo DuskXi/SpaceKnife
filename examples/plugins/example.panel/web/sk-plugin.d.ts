@@ -18,16 +18,16 @@ export interface ExamplePanelYear {
   bytes: number;
 }
 
-export interface Methods {
+export type Methods = {
   /** Files and bytes per year of last modification (a plain def runs on a worker thread). */
   histogram: { params: ExamplePanelHistogramParams; result: ExamplePanelHistogram };
-}
+};
 
-export interface Events {
-}
+export type Events = {
+};
 
-export interface States {
-}
+export type States = {
+};
 
 declare const sk: Sk<Methods, Events, States>;
 export default sk;

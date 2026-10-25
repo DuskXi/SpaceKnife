@@ -147,6 +147,10 @@ token 就是启动后端用的那个，放在打印出的链接的片段里（`#
 | `update.releases` | 缓存里最近的发布（`UpdateReleases`，最多 30 个，新的在前，每个的说明最多 16 KiB，不带文件），即「关于与更新」页的发布时间线；还没检查过时为空 |
 | `update.download` / `update.cancel` | 把 `{version}` 对应本安装方式的文件下载到数据目录的 `updates` 文件夹并校验 SHA-256（立即返回，进度见 `update.changed`）；不是当前可更新的版本返回 INVALID_PARAMS，没有对应文件返回 INVALID_REQUEST。停止下载并删除未完成的文件 |
 
+### 删除篮
+
+后端持有删除篮（W5），每个会话看到的是同一个：`basket.list` → `BasketState { items, volumes, freeable }`，变了就推 `basket.changed`（每个会话）。`BasketItem`：`id scan_id path name kind`（`file` `dir` `group`：聚合块的小项）`members alloc`（删掉能腾出的字节：云端占位、部分硬链接是 0）`size files dirs volume status`（`ready` `missing` `locked` …）`note`（为什么不能照原样删）`tag`、`origin`（提议它的插件清理的全名，用户自己加的是 null）`reason`（插件给的原因）。`basket.add { scan_id, nodes, origin?, reasons? }`（插件经 `ctx.call` / `ctx.basket.propose` 调用时 `origin` 由宿主填成插件的 id）、`basket.remove { ids }`、`basket.clear`、`basket.execute`（只有界面能调：插件永远调不到）。
+
 ### 插件（`plugins.v1`）
 
 | 方法 | 说明 |

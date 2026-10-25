@@ -1,9 +1,12 @@
 """Duplicate files: groups of files with the same contents (docs/plugin-dev.md 「参考插件」).
 
-Files of the same size are hashed — the first 64 KiB, then the whole file for those that still
-match — on a worker thread (``ctx.compute``), with progress events and a shared state the command's
-status line shows. One result per scan version and minimum size is kept, so the report, the field,
-the node set and the cleanup share it.
+The search runs when asked (the report, the cleanup, the ``find`` method), on a worker thread
+(``ctx.compute``): files of the same size are hashed — the first 64 KiB, then the whole file for
+those that still match — a few at a time (``ctx.files.hash_many``), with progress events and a
+shared state the command's status line shows. Extra hard links and cloud placeholders are left out
+(they free nothing; reading a placeholder would download it); what the extra copies take is their
+allocated size. The field and the node set only read the last result (a field has 1 s, a set 5 s:
+never enough to hash a disk) and are asked again when a search finishes (``ctx.invalidate``).
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ import numpy as np
 from spaceknife_sdk import (
     Context,
     FieldValue,
+    Flag,
+    Kind,
     Node,
     Params,
     Payload,
@@ -30,6 +35,7 @@ from spaceknife_sdk import (
 plugin = Plugin()
 
 HEAD = 64 << 10  # bytes hashed first
+SKIP = int(Flag.HARDLINK_DUP | Flag.CLOUD | Flag.OFFLINE)  # frees nothing / not on this disk
 
 
 @plugin.event
@@ -57,49 +63,61 @@ class Group(Payload):
 
 class FindResult(Payload):
     groups: list[Group]
-    wasted: int  # bytes the extra copies take
+    wasted: int  # bytes the extra copies take on disk (allocated)
 
 
 _cache: dict[tuple[str, int, int, int], FindResult] = {}
 
 
+def _key(tree: TreeView, min_size: int) -> tuple[str, int, int, int]:
+    return (tree.scan_id, tree.epoch, tree.version, min_size)
+
+
+def _cached(ctx: Context) -> FindResult | None:
+    """The last search of this tree as it is now, if there was one (fields and sets read only this)."""
+    return _cache.get(_key(ctx.tree, int(ctx.settings["min_size"])))
+
+
 def _find(ctx: Context, min_size: int) -> FindResult:
     """The groups (blocking: hashing reads the files; runs on a worker thread)."""
     tree = ctx.tree
-    key = (tree.scan_id, tree.epoch, tree.version, min_size)
+    key = _key(tree, min_size)
     hit = _cache.get(key)
     if hit is not None:
         return hit
-    rows = tree.query(kind="file", min_size=min_size, columns=("size", "path"), limit=500_000)
-    by_size: dict[int, list[tuple[int, str]]] = defaultdict(list)
-    for node, size, path in zip(rows.ids.tolist(), rows["size"].tolist(), rows.paths, strict=True):
-        if size >= min_size:
-            by_size[int(size)].append((int(node), path))
-    todo = [(size, items) for size, items in by_size.items() if len(items) > 1]
-    total = sum(len(items) for _size, items in todo)
+    c = tree.cols("kind", "size", "alloc", "flags")  # whole columns: no row limit to run into
+    files = np.flatnonzero((c["kind"] == Kind.FILE) & (c["size"] >= min_size) & ((c["flags"] & SKIP) == 0))
+    by_size: dict[int, list[int]] = defaultdict(list)
+    for node in files.tolist():
+        by_size[int(c["size"][node])].append(node)
+    todo = [(size, nodes) for size, nodes in by_size.items() if len(nodes) > 1]
+    total = sum(len(nodes) for _size, nodes in todo)
     done = 0
     groups: list[Group] = []
-    for size, items in sorted(todo, reverse=True):
-        heads: dict[str, list[tuple[int, str]]] = defaultdict(list)
-        for node, path in items:
-            heads[ctx.files.hash(path, limit=HEAD)].append((node, path))
-            done += 1
-            if done % 50 == 0:
-                ctx.emit(Progress(done=done, total=total))
-        for same in heads.values():
-            if len(same) < 2:
-                continue
-            full: dict[str, list[tuple[int, str]]] = defaultdict(list)
-            for node, path in same:
-                full[ctx.files.hash(path) if size > HEAD else "head"].append((node, path))
-            for members in full.values():
-                if len(members) > 1:
-                    members.sort(key=lambda m: m[1])
+    for size, nodes in sorted(todo, reverse=True):
+        ctx.check()  # cancelled (a newer search, the user went on): stop here
+        heads: dict[str | None, list[int]] = defaultdict(list)
+        for node, digest in zip(nodes, ctx.files.hash_many(nodes, limit=HEAD), strict=True):
+            heads[digest].append(node)
+        done += len(nodes)
+        ctx.emit(Progress(done=done, total=total))
+        for digest, same in heads.items():
+            if digest is None or len(same) < 2:
+                continue  # unreadable, or unique
+            full: dict[str | None, list[int]] = defaultdict(list)
+            digests = ctx.files.hash_many(same) if size > HEAD else ["head"] * len(same)
+            for node, whole in zip(same, digests, strict=True):
+                full[whole].append(node)
+            for whole, members in full.items():
+                if whole is not None and len(members) > 1:
+                    paths = tree.paths(members)
+                    order = sorted(range(len(members)), key=lambda i: paths[i])
                     groups.append(
-                        Group(size=size, nodes=[m[0] for m in members], paths=[m[1] for m in members])
+                        Group(size=size, nodes=[members[i] for i in order], paths=[paths[i] for i in order])
                     )
     ctx.emit(Progress(done=total, total=total))
-    result = FindResult(groups=groups, wasted=sum(g.size * (len(g.nodes) - 1) for g in groups))
+    wasted = sum(int(c["alloc"][n]) for g in groups for n in g.nodes[1:])
+    result = FindResult(groups=groups, wasted=wasted)
     _cache.clear()  # one scan version at a time
     _cache[key] = result
     return result
@@ -113,6 +131,7 @@ async def groups(ctx: Context, min_size: int | None = None) -> FindResult:
     finally:
         state.update(busy=False)
     state.update(groups=len(found.groups), wasted=found.wasted)
+    ctx.invalidate("node_field", "node_set")  # the field and :set:dupes show the new result
     return found
 
 
@@ -168,11 +187,12 @@ async def extra(ctx: Context, c: ReportContext) -> list[Proposal]:
     return out
 
 
-@plugin.node_field(T("同内容的副本", "Copies with the same contents"))
-async def copies(ctx: Context, node: Node) -> FieldValue | None:
-    if not node.is_file or node.size < int(ctx.settings["min_size"]):
+@plugin.node_field(T("同内容的副本", "Copies with the same contents"), kinds=["file"])
+def copies(ctx: Context, node: Node) -> FieldValue | None:
+    """From the last search only (1 s is not enough to hash): nothing until one ran."""
+    found = _cached(ctx)
+    if found is None or node.size < int(ctx.settings["min_size"]):
         return None
-    found = await groups(ctx)
     for g in found.groups:
         if node.id in g.nodes:
             return FieldValue(value=len(g.nodes) - 1, unit="count")
@@ -180,7 +200,7 @@ async def copies(ctx: Context, node: Node) -> FieldValue | None:
 
 
 @plugin.node_set("dupes", T("重复文件", "Duplicates"), aliases=["duplicates"])
-async def dupes_set(ctx: Context, tree: TreeView) -> np.ndarray:
-    """``:set:dupes`` in the filter box: every file that has a copy."""
-    found = await groups(ctx)
-    return np.asarray([n for g in found.groups for n in g.nodes], dtype=np.int64)
+def dupes_set(ctx: Context, tree: TreeView) -> np.ndarray:
+    """``:set:dupes`` in the filter box: every file that has a copy (after a search ran)."""
+    found = _cached(ctx)
+    return np.asarray([n for g in found.groups for n in g.nodes] if found else [], dtype=np.int64)

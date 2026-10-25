@@ -318,6 +318,8 @@ IO 饱和调查的最终报告（仓库外）建议分步落地：先做第一�
 - [ ] P2：扫描帧之间按 key 补间；火焰图与火焰-极坐标图之间的变形动画；沿弧线弯曲的文字
 - [x] 插件系统（前后端一体）：设计与现状见 [docs/plugins.md](docs/plugins.md)，写插件见 [docs/plugin-dev.md](docs/plugin-dev.md)。统一通讯层（插件声明方法 / 事件 / 状态 / 流，宿主负责传输、类型生成、能力与权限）；能力从注册表推导；插件代码默认在独立进程里（审计钩子、资源上限、只读的树镜像和宿主端查询）；一处声明命令、按键、设置与文案；声明式界面和沙箱 Web 面板；`spaceknife plugin` 命令行；内置导出和洞察规则改成了内置插件；三个参考插件。
   - [x] 试写第一轮（六个插件）找出的 23 处缺口：宿主、SDK、命令行和文档里补上（docs/plugins.md「试写第一轮之后的改进」），新增 API 参考 [docs/plugin-api.md](docs/plugin-api.md)
+  - [x] 试写第二轮的 26 处缺口：阻断（插件进程里的剪贴板）和大部分主要、次要缺口补上；`plugin shot`、速查文档（docs/plugins.md「试写第二轮之后的改进」）
+  - [ ] 第二轮还剩的：`ctx.invalidate` 只作废一部分节点；扫描来源的元数据随快照保存、`out.dir` 带大小；导出格式拿用户的日期写法（现在只有 `ctx.fmt` 的固定写法）；面板 mock 按返回模型校验 `calls`；快照历史变化的事件、`scan.status` 的「树最后变动的时间」；WSL 里的 Chrome 连不上本机 HTTP 时 `plugin shot` 要用 Windows 那边的程序
   - [ ] 试写的插件（不在仓库里，worktree 的 plugins-trial1/）跟上：按新的 `check` 换掉不存在的图标名、去掉 `_current`、重新 `plugin build`；archivesrc 的坏包测试改成 `pytest.raises`，growthpanel 打开历史以外快照的测试改成期望被拒
   - [ ] 派一个只读 `docs/plugin-dev.md` 的新 agent 写一个小插件（如「按扩展名统计」的报告加一条命令），记下 token 用量和走的弯路，回头补文档
   - [ ] 还很薄的部分（docs/plugins.md 三节「还很薄或未做」）：对比侧栏和状态栏的插件报告、工具栏「更多」；扫描来源边扫边画；监控器给普通扫描用；文件夹规则叠加；悬停字段只读缓存；macOS 内存上限只靠心跳；`check` 的契约只跑固定的合成树

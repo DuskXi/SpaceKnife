@@ -48,6 +48,8 @@ from spaceknife_sdk.manifest import (
 )
 from spaceknife_sdk.plugin import Description, describe_declarative
 
+from .allow import ALLOWED
+
 DOC = "docs/plugin-dev.md"
 DESCRIBE_TIMEOUT = 60.0
 
@@ -556,11 +558,22 @@ def _ctx_uses(tree: ast.AST) -> dict[str, int]:
             out.setdefault(node.attr, node.lineno)
         if (
             isinstance(node, ast.Attribute)
-            and node.attr == "propose"
+            and node.attr in ("propose", "withdraw")
             and isinstance(node.value, ast.Attribute)
             and node.value.attr == "basket"
         ):
             out.setdefault("basket", node.lineno)
+        if (  # ctx.call("basket.add", …): the permission that method needs
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "call"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in ("ctx", "context")
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            out.setdefault("call:" + node.args[0].value, node.lineno)
     return out
 
 
@@ -574,8 +587,9 @@ def check_permissions(folder: Path, manifest: Manifest, specs: Sequence[tuple[st
         except (SyntaxError, UnicodeDecodeError):
             continue  # check_imports reports it
         for attr, line in _ctx_uses(tree).items():
-            perm = API_PERMISSIONS[attr]
-            used.setdefault(perm, (rel, line))
+            perm = ALLOWED.get(attr[5:]) if attr.startswith("call:") else API_PERMISSIONS[attr]
+            if perm is not None:
+                used.setdefault(perm, (rel, line))
     kinds = {k for k, _s in specs}
     if kinds & TREE_KINDS:
         used.setdefault("tree.read", (manifest.entry or MANIFEST, 0))
@@ -714,6 +728,43 @@ def check_keys(manifest: Manifest, specs: Sequence[tuple[str, Spec]]) -> list[Is
     return out
 
 
+def _core_fixtures(core: Any) -> list[Issue]:
+    """Mock answers of built-in methods (fixtures.json "core") that the real ones never give: the
+    panel would work in mock mode only."""
+    from pydantic import ValidationError
+
+    from spaceknife_protocol.methods import METHODS
+
+    out: list[Issue] = []
+    for name, value in sorted(core.items()) if isinstance(core, dict) else []:
+        spec = METHODS.get(name)
+        if spec is None:
+            continue
+        answers = (
+            [a.get("result") for a in value if isinstance(a, dict)]
+            if isinstance(value, list) and value and all(isinstance(a, dict) and "result" in a for a in value)
+            else [value]
+        )
+        for answer in answers:
+            try:
+                spec.result.model_validate(answer)
+            except ValidationError as exc:
+                e = exc.errors(include_url=False)[0]
+                where = ".".join(str(x) for x in e.get("loc", ())) or "(the answer)"
+                out.append(
+                    _issue(
+                        "panel",
+                        f"web/fixtures.json core.{name}: not what {name} answers ({where}: {e['msg']})",
+                        file="web/fixtures.json",
+                        severity="warning",
+                        fix=f"its fields: spaceknife plugin schema / docs/protocol.md ({name}); "
+                        "or copy a real answer from plugin dev",
+                    )
+                )
+                break
+    return out
+
+
 def check_panels(
     folder: Path, specs: Sequence[tuple[str, Spec]], methods: Sequence[str] | None = None
 ) -> list[Issue]:
@@ -726,6 +777,7 @@ def check_panels(
             out.append(_issue("panel", f"web/fixtures.json is not JSON: {exc}", file="web/fixtures.json"))
         else:
             calls = mock.get("calls") if isinstance(mock, dict) else None
+            out += _core_fixtures(mock.get("core") if isinstance(mock, dict) else None)
             known = set(methods or ())
             for name in sorted(calls or {}) if isinstance(calls, dict) and methods is not None else []:
                 if name not in known:
@@ -898,6 +950,15 @@ async def run_contracts(host: Any, description: Description) -> list[Issue]:
                 )
                 if samples:
                     await host.source(name, str(samples[0]))
+                    st = host.status()
+                    out.append(
+                        _issue(
+                            "source",
+                            f"scan source {name!r} on fixtures/{samples[0].name}: {st.items} entries, "
+                            f"{st.files} files, {st.bytes_alloc} bytes",
+                            severity="info",
+                        )
+                    )
                     host.scan(trees[0])
         except AssertionError as exc:
             out.append(

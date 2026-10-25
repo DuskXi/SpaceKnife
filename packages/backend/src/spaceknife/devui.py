@@ -237,10 +237,15 @@ def run_dev(
         home = Path(temp.name)
     os.environ["SPACEKNIFE_HOME"] = str(home)
     setup_logging(os.environ.get("SPACEKNIFE_LOG_LEVEL", "WARNING").upper(), LogFormat.PLAIN)
+    from .devshot import find_renderer, renderer_stale
+
     plugin = load_manifest(folder).id
-    renderer = ui if ui is not None else repo_renderer()
+    renderer = find_renderer(ui)  # --ui, SPACEKNIFE_UI, the repository's build
     httpd = origin = None
     if renderer is not None and (renderer / "index.html").is_file():
+        stale = renderer_stale(renderer)
+        if stale:
+            say(f"warning: {stale}")
         httpd, origin, _handler = serve_ui(renderer, linked={plugin: folder})
     try:
         return asyncio.run(_dev(folder, plugin, scan, port, origin, origins, say, stop, ready))

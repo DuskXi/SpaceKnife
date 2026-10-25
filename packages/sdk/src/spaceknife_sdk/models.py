@@ -43,6 +43,11 @@ class Insight(BaseModel):
     note: LocalStr = ""
     command: str = Field(default="", description="Shown, never run")
     priority: int = Field(default=0, ge=-1000, le=1000, description="Cards are shown highest first")
+    replaces: list[str] = Field(
+        default_factory=list,
+        max_length=32,
+        description="Ids of insight rules whose card on this node it replaces ('*': any rule's)",
+    )
 
 
 class _Record(BaseModel):
@@ -197,6 +202,8 @@ class Listing:
         self._clear()
         self.root = ""
         self.sent = 0
+        self.duplicates = 0  # entries whose path was listed before (the last one stays)
+        self._seen: set[int] = set()
 
     def _clear(self) -> None:
         self.paths: list[str] = []
@@ -223,6 +230,11 @@ class Listing:
         p = self._norm(path)
         if not p:
             return
+        key = hash(p)
+        if key in self._seen:
+            self.duplicates += 1  # the host warns: the earlier one's bytes would be gone silently
+        else:
+            self._seen.add(key)
         self.paths.append(p)
         self.kinds.append(kind)
         self.sizes.append(max(0, int(size)))

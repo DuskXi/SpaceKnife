@@ -1,53 +1,16 @@
 # SpaceKnife 插件开发
 
-写插件只需要这一份文档。插件是一个文件夹：一份 `plugin.toml`，需要代码时再加一个 `plugin.py`，需要网页时再加 `web/`。通讯、协议、类型、主题、语言、权限确认都由 SpaceKnife 处理，插件只交数据和函数。
+写插件先读一页的[速查](plugin-quick.md)（`spaceknife plugin docs`）；这一份是全文，按需只读一节。插件是一个文件夹：一份 `plugin.toml`，需要代码时再加一个 `plugin.py`，需要网页时再加 `web/`。通讯、协议、类型、主题、语言、权限确认都由 SpaceKnife 处理，插件只交数据和函数。
 
 - **命令**：仓库里是 `uv run spaceknife plugin …`；打包版里是程序自带的 `spaceknife-backend plugin …`（安装目录的 `resources/backend/`）。下文写 `spaceknife plugin`。
-- **只读一节**：`spaceknife plugin docs --section kind-report`；`--list` 列出锚点。`plugin check` 的每个问题都带着对应一节的锚点。
+- **只读一节**：`spaceknife plugin docs --section kind-report`；`--search 词` 找到提到它的行和所在的节；`--list` 列出三份文档的锚点。`plugin check` 的每个问题都带着对应一节的锚点。
 - **API 参考**：[plugin-api.md](plugin-api.md)（`plugin docs --api`）列出每个对象的字段、调用发生在哪、缓存规则、钩子签名、路径写法、图标名和命令 id。
 - **参考插件**见第 12 节（都有 `tests/`，CI 对它们跑 `plugin check --strict` 和测试）；设计与实现见 [plugins.md](plugins.md)。
 
 <a id="quickstart"></a>
-## 0. 五分钟上手
+## 0. 起步
 
-```sh
-spaceknife plugin new example.hello                       # 1. 生成骨架（默认 --with report,command）
-spaceknife plugin check example.hello --strict            # 2. 检查：应当输出 example.hello: ok (strict)
-spaceknife plugin render example.hello report:largest --scan ~/Downloads   # 3. 不开界面就看到报告
-uv run pytest example.hello/tests                          # 4. 跑它自带的测试
-spaceknife plugin install example.hello && spaceknife plugin enable example.hello   # 5. 装进程序
-```
-
-第 5 步也可以在程序里做：设置 › 插件 › 从文件夹安装，然后打开开关（第一次启用时确认它要的权限）。
-
-生成的骨架已经能用，也已经通过检查：`plugin.toml`（清单）、`plugin.py`（一个报告、一个命令）、`tests/test_plugin.py`（用模拟宿主跑插件）、`generated/`（`plugin build` 生成，不要手改）、`pytest.ini`（单独跑 pytest 时打开 asyncio 模式）。
-
-`plugin.toml` 里的命令打开 `plugin.py` 里的报告：
-
-```toml
-[[commands]]
-name = "open_largest"
-title = { zh = "最大的文件", en = "Largest files" }
-when = ["done"]                     # 扫描完成后才可用
-action = { open = "report:largest" }
-```
-
-```python
-@plugin.report(T("最大的文件", "Largest files"), icon="gauge", refresh=["scan"])
-async def largest(ctx: Context, c: ReportContext) -> Report:
-    rows = ctx.tree.query(kind="file", min_size=1, columns=("bytes", "path"), sort="-bytes", limit=50)
-    cols = [r.col("bytes", T("占用", "Size"), "size"), r.col("path", T("位置", "Location"), "path")]
-    return Report(title=T("最大的文件", "Largest files"), blocks=[r.table(cols, rows=rows)])
-```
-
-改两行试试：把 `limit=50` 改成 `limit=5`，在 `query` 里加上 `where="*.iso;*.zip"`，再跑第 3 步。
-
-边改边看：
-
-- **程序里**：打开设置 › 高级 › 插件 › 开发者模式，在设置 › 插件「链接开发文件夹」，改完点「重启」。
-- **浏览器里**：`spaceknife plugin dev example.hello --scan ~/Downloads` 起一个带着这个插件的后端，监视文件，保存就重新加载；在仓库里构建过前端（`pnpm -C apps/electron build`）时还会打印一个能直接打开的网址。
-
-`plugin new` 的 `--with` 可选：`method report command setting cleanup panel visual color export source set field insight hook`，每一项生成一段带注释的示例和它的测试，例如 `--with report,cleanup,setting`。
+`plugin new` → `plugin check --strict` → `pytest` → `plugin shot`（真界面的截图）四步，见[速查第 1 节](plugin-quick.md#quick-start)；生成的骨架已经通过检查和它自带的测试，`--with` 选的每个部分都是一段能跑的例子。程序里边改边看：设置 › 高级 › 插件 › 开发者模式，在设置 › 插件「链接开发文件夹」，改完点「重启」；浏览器里：`spaceknife plugin dev <文件夹> --scan <要扫描的文件夹>`（第 10 节）。
 
 <a id="layout"></a>
 ## 1. 插件长什么样
@@ -230,21 +193,21 @@ async def ticks(ctx: Context) -> AsyncIterator[Progress]:
 | `icon` | 图标名 |
 | `keys` | 最多 4 个，`["Ctrl+Alt+D"]`；和程序的键冲突时程序的赢（`check` 提醒） |
 | `aliases` | 命令面板里的别名 |
-| `when` | 条件，都满足才可用，否则显示原因：`scan`（有扫描）`done`（扫描完成）`scanning` `view` `selection` `scan_view` `compare`，以及 `setting:<设置名>`（为真）、`cap:<能力>`、`plugin:<插件 id>`（已启用）、`source:<来源名>` |
+| `when` | 条件，都满足才可用，否则显示原因：`scan`（有扫描）`done`（扫描完成）`scanning` `view` `selection` `scan_view` `compare`，选中项是 `file` / `dir` / `ext:zip,7z`（这几种扩展名的文件），`on_disk`（扫描的是磁盘，不是来源），以及 `setting:<设置名>`（为真）、`cap:<能力>`、`plugin:<插件 id>`（已启用）、`source:<来源名>` |
 | `menus` | `node`（节点右键菜单）`inspector`（详情面板操作行）`toolbar` `start` |
 | `action` | 做什么（下表）；用作装饰器时不写，调用被装饰的函数 |
-| `status` | `{ state = "status", text = { zh = "{groups} 组", … } }`：命令面板里显示的状态行，取自共享状态 |
+| `status` | `{ state = "status", text = { zh = "{groups} 组，{bytes:size}", … } }`：命令面板里的状态行，取自共享状态（`:size` `:count` `:date` `:ago` 按界面的写法） |
 | `typed_only` | 只在输入名字时出现（False） |
 | `order` | 排序（0） |
-| `check` | 一个方法名：返回不可用的原因（或 None） |
+| `check` | 一个方法名：`def f(ctx, c: ActionContext) -> str \| None`，收到和命令一样的上下文（选中项、缩放根、过滤），返回不可用的原因；50 ms 内答不出算可用 |
 
 动作，TOML 和 Python 都写成一个键：
 
 | 动作 | 例子 | 说明 |
 |---|---|---|
-| `call` | `{ call = "hello", args = { name = "x" } }` | 调本插件的方法，参数是 `ActionContext`（扫描、视图、选中、`args`） |
-| `open` | `{ open = "report:largest" }`、`panel:years`、`settings` | 打开报告、面板或本插件的设置 |
-| `command` | `{ command = "view.rescan" }` | 运行任意命令 |
+| `call` | `{ call = "hello", args = { name = "x" } }` | 调本插件的方法，参数是 `ActionContext`（扫描、视图、选中、缩放根 `zoom_node`、过滤 `filter`、`args`） |
+| `open` | `{ open = "report:largest", args = { … } }`、`panel:years`、`settings` | 打开报告（`args` 成为它的 `c.args`）、面板或本插件的设置 |
+| `command` | `{ command = "view.rescan" }`；`{ command = "report.export", args = { format = "my.tool.md" } }` | 运行任意命令；导出对话框可以预先选好格式 |
 | `filter` | `{ filter = "*.log;>1mb" }` | 设置过滤 |
 | `view` | `{ view = { visual = "flame" } }` | 改视图设置（`detail min_element sort_by_size show_free show_unknown show_trash visual color_mode filter_mode direction`） |
 | `cycle` | `{ cycle = "color", step = 1 }` | 轮换可视化或配色 |
@@ -375,10 +338,10 @@ blocks = [{ type = "md", text = { zh = "这个插件找出**最大的文件**。
 |---|---|
 | `name` `title` | 必需 |
 | `slots` | `["inspector"]`（默认），可加 `hover` |
-| `when` `order` | 同上 |
+| `when` `order` | 同上；`source:<来源名>` 只在那个来源的扫描里问，`on_disk` 只在磁盘扫描里问 |
 | `kinds` `exts` `globs` | 只问这些节点：`["file"]`/`["dir"]`、扩展名 `["zip", "7z"]`、路径 glob；不写时每个节点都问 |
 
-签名：`async def f(ctx, node: Node) -> FieldValue | str | None`；None 表示这一项不显示。`FieldValue(value=…, unit="size", tone=None, node=None, action=None)`。悬停只显示缓存里的值（第一次悬停时宿主去算，下次显示）；`ctx.slot` 说明在哪。后台算完后 `ctx.invalidate("node_field")` 让界面再要一次。
+签名：`async def f(ctx, node: Node) -> FieldValue | str | None`；None 表示这一项不显示。`FieldValue(value=…, unit="size", tone=None, node=None, action=None)`，`value` 可以是 `T(...)`。悬停只显示缓存里的值（第一次悬停时宿主去算，下次显示；测试里 `await host.settled()`）；详情面板和悬停卡共用一份缓存，按语言分开；`ctx.slot` 说明在哪。后台算完后 `ctx.invalidate("node_field")` 让界面再要一次。
 
 ```python ex
 @plugin.node_field(T("名字长度", "Name length"), slots=["inspector", "hover"])
@@ -389,7 +352,7 @@ def name_length(ctx: Context, node: Node) -> FieldValue | None:
 <a id="kind-insight"></a>
 #### 洞察（代码）
 
-详情面板顶部的洞察卡片：这是什么、能不能删、怎么清理。规则能写的用[洞察规则](#kind-insight_rules)，规则写不出来的才用代码。选项：`name`（默认是函数名）；`globs`（只问路径匹配其中一个的节点，如 `["**/node_modules", "**/*.bak"]`；不写时每个节点都问，详情面板会慢）。
+详情面板顶部的洞察卡片：这是什么、能不能删、怎么清理。规则能写的用[洞察规则](#kind-insight_rules)，规则写不出来的才用代码。选项：`name`（默认是函数名）；`globs`（只问路径匹配其中一个的节点，如 `["**/node_modules", "**/*.bak"]`；不写时每个节点都问，详情面板会慢）；`title`（启用确认里的名字）。
 
 ```python ex
 @plugin.insight
@@ -401,7 +364,7 @@ async def backups(ctx: Context, node: Node) -> Insight | None:
     )
 ```
 
-`Insight` 的字段：`title reason kind cleanup app note command priority`；`cleanup` 是 `safe tool review keep`；`command` 只显示、可复制，从不运行；卡片按 `priority`（规则的或插件给的，默认 0）从高到低排。
+`Insight` 的字段：`title reason kind cleanup app note command priority replaces`；`cleanup` 是 `safe tool review keep`；`command` 只显示、可复制，从不运行；卡片按 `priority`（规则的或插件给的，默认 0）从高到低排；`replaces=["cargo-target"]` 让这张卡代替同一节点上那些规则的卡（`["*"]`：任何规则的），不会再出现结论相反的两张。
 
 <a id="kind-panel"></a>
 #### Web 面板
@@ -610,6 +573,7 @@ i18n.en.reason = "Turborepo's local task cache; the next build makes it again."
 | `name` | 规则名（默认由 glob 的字母数字生成：`**/.venv` 是 `rule_venv`，重名时加 `_2`） |
 | `priority` | 先试优先级高的（0，−100–100），同级按声明顺序；第一条匹配的决定 |
 | `exclude` | 不适用的路径 glob：`["**/steamapps/**"]` |
+| `contains` `beside` | 还要求文件夹里有（`contains`）或旁边有（`beside`）这些名字之一，可以用 `*`：`glob = "**/target"`、`beside = ["Cargo.toml"]`；`contains = ["pyvenv.cfg", "CACHEDIR.TAG"]` |
 
 `title` 两种语言都写：界面是英文时类别显示英文名，中文名留作过滤别名。`color` 写 `{ light, dark }` 时程序按自己的主题取。类别与文件夹的关系：落在文件夹规则（插件的、内置的项目文件夹，或用户选的）里的文件按文件夹的类别算，扩展名不再起作用；`fallback` 只给扩展名不属于任何类别的文件。
 
@@ -750,7 +714,7 @@ async def growth(ctx: Context, c: ReportContext) -> Report:
 <a id="kind-hook"></a>
 #### 钩子
 
-`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动后 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）；签名见 [API 参考](plugin-api.md#api-hooks)。`name` 默认是函数名。
+`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动后 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了：用户拿出了本插件放进去的项、删了它们……）；签名见 [API 参考](plugin-api.md#api-hooks)。`name` 默认是函数名。
 
 ```python ex
 @plugin.on("scan_done")
@@ -768,17 +732,17 @@ async def scanned(ctx: Context, scan: ScanInfo) -> None:
 | 成员 | 说明 | 权限 |
 |---|---|---|
 | `ctx.plugin` | `id version dir storage` | — |
-| `ctx.lang`、`ctx.t(zh, en, **fields)` | 界面语言、即时翻译 | — |
+| `ctx.lang`、`ctx.t(zh, en, **fields)`、`ctx.fmt` | 界面语言、即时翻译；`ctx.fmt.size(n)` `.count(n)` `.date(t)` `.ago(t)`：和界面一样写大小（用户的 1000 / 1024）、个数、时间 | — |
 | `ctx.settings[name]`、`.get`、`.set(name, value)` | 本插件的设置 | — |
 | `ctx.tree` | 这次调用所在的扫描（调用带的 `scan_id`，否则当前的扫描）；没有扫描时报「需要先完成扫描」 | `tree.read` |
 | `ctx.scan(scan_id)`、`ctx.scans()` | 其他扫描 | `tree.read` |
 | `ctx.node` | 调用针对的节点（`Node`）或 None | `tree.read` |
 | `ctx.emit(event)`、`ctx.progress(done, total, text)`、`ctx.toast(text, tone)` | 事件；进度；提示（`info ok warn danger`） | — |
 | `ctx.state(Model)` | `.get()` `.set(m)` `.update(**fields)` | — |
-| `ctx.basket.propose(nodes, reason)` | 放进删除篮，返回放进去的项数 | `basket.propose` |
+| `ctx.basket.propose(items, reason)`、`.withdraw(items)` | 放进删除篮（每项可以是 `(节点, 它自己的原因)`；一个命令里放多少次，用户只看到一条提示，命令自己 `toast` 时没有），返回放进去的项数；拿回本插件放进去的项 | `basket.propose` |
 | `ctx.clipboard.write_text(text)` | 复制到发起调用的那个窗口的剪贴板 | `clipboard` |
 | `ctx.granted`、`ctx.slot`、`ctx.invalidate(*kinds)` | 授予的权限；字段在哪（`inspector` `hover`）；丢掉宿主的缓存 | — |
-| `ctx.files.open(n)`、`.read(n, limit)`、`.hash(n, "sha256", limit=None)`、`.open_path(path)` | 只读打开扫描范围内的文件（`n` 是节点、下标或路径） | `files.read` |
+| `ctx.files.open(n)`、`.read(n, limit)`、`.hash(n, "sha256", limit=None)`、`.hash_many(ns, limit=)`、`.open_path(path)` | 只读打开扫描范围内的文件（`n` 是节点、下标或路径）；`hash_many` 几个线程一起读，跳过文件夹和云端占位（`Flag.CLOUD` `Flag.OFFLINE`，读它们会下载），读不了的给 None；范围外是 `FileNotAllowed`，系统拒绝是别的 `PermissionError` | `files.read` |
 | `ctx.net.fetch(url, method=, headers=, body=, timeout=)` | HTTP(S)，只能连 `net_hosts`；返回 `status headers body .json() .text()` | `net` |
 | `ctx.exec(argv, timeout=, cwd=, input=)` | 运行 `exec` 里列出的程序；返回 `returncode stdout stderr` | `exec` |
 | `ctx.snapshots.list(root)`、`.open(path)` | 3.5 节 | `snapshots.read` |
@@ -808,9 +772,11 @@ first = next(iter(rows))  # 逐行：row.id、row.bytes、row.path
 
 `columns` 可以要：`bytes`（有效占用：文件的占用，文件夹的子树合计，重复的硬链接为 0）`logical`（同样口径的逻辑大小）`name` `path`，以及存储的列 `parent depth kind flags ext size alloc mtime ctime atime ino nlink child_start child_count tot_size tot_alloc tot_files tot_dirs cls`。
 
+`under=X` 是 X 下面的项，不含 X 自己；不写时含各个根（根的 `name` 是完整路径）。命令和报告里 `under=c.zoom_node`、`query(c.filter or None, …)` 就是用户眼前的那部分。文件的 `tot_*` 列是 0（文件夹才有合计）。
+
 **整列**：`tree.col("alloc")`、`tree.cols("kind", "size")`、`tree.children(id)`、`tree.walk(id)`（分块的子树先序）。第一次用到时宿主把这些列导出成只读的共享内存，插件直接映射，不逐个节点远程调用。
 
-**单个节点**：`tree.node(id)` → `Node`（`id name path kind size alloc files dirs mtime ctime atime ext parent depth child_count flags cls`，文件夹的 `size alloc` 是子树合计）；`tree.nodes(ids)`、`tree.name(id)`、`tree.path(id)`（系统自己的分隔符）、`tree.rel_path(id)`（相对根，永远用 `/`）、`tree.find(path)`、`tree.ref(id)`；`tree.roots` 是根的下标（0 号节点是虚拟的顶层）。路径和层级的细节见 [API 参考](plugin-api.md#api-tree)。常量：`Kind.FILE/DIR/LINK/OTHER`、`Flag.HIDDEN` 等。
+**单个节点**：`tree.node(id)` → `Node`（`id name path kind size alloc files dirs mtime ctime atime ext parent depth child_count flags cls`，文件夹的 `size alloc` 是子树合计）；`tree.nodes(ids)`、`tree.name(id)`、`tree.path(id)`（系统自己的分隔符）、`tree.rel_path(id)`（相对根，永远用 `/`）、`tree.find(path)`、`tree.ref(id)`；`tree.roots` 是根的下标（0 号节点是虚拟的顶层），`len(tree)` 是节点数。路径和层级的细节见 [API 参考](plugin-api.md#api-tree)。常量：`Kind.FILE/DIR/LINK/OTHER`、`Flag.HIDDEN` 等。
 
 节点下标只在这棵树的这一「纪元」里有效：宿主整理树之后（压缩、监控重新列出）旧下标报 `STALE_TREE`。要跨调用保存，用 `tree.ref(id)` 得到带路径的 `NodeRef`。
 
@@ -834,7 +800,7 @@ first = next(iter(rows))  # 逐行：row.id、row.bytes、row.path
 | `progress` | `r.progress(done, total, text)` | 进度条 |
 | `section` | `r.section(title, blocks, collapsed=False)` | 可折叠的一节（≤ 4 层） |
 
-单位：`size count pct date ago duration bytes_per_s text path`；前端按用户的设置格式化（1024 或 1000、日期写法、语言）。按钮：`r.action(标签, icon, **动作)`，动作同命令（`cleanup="logs"`、`open="report:x"`、`call="m"` …）。纯文本渲染：`spaceknife_sdk.report.render_text(report)`，`plugin render` 和测试用的就是它。
+单位：`size count pct date ago duration bytes_per_s text path`；前端按用户的设置格式化（1024 或 1000、日期写法、语言）。值：`pct` 是 0–1 的小数，`date` `ago` 是 unix 秒，`duration` 是秒，`size` 是字节。按钮：`r.action(标签, icon, **动作)`，动作同命令（`cleanup="logs"`、`open="report:x"`、`call="m"` …）。纯文本渲染：`spaceknife_sdk.report.render_text(report)`，`plugin render` 和测试用的就是它。
 
 <a id="panels"></a>
 ## 6. Web 面板
@@ -856,25 +822,28 @@ first = next(iter(rows))  # 逐行：row.id、row.bytes、row.path
 ```
 
 ```js
+// @ts-check
 import sk from "./_sk/bridge.js";
 
 await sk.ready;                                    // { plugin, lang, theme, context }
-const hist = await sk.call("histogram", {});       // 本插件的方法
-const sum = await sk.core("tree.summary", { scan_id: sk.context.scan_id });   // 白名单里的内置方法
+const hist = await sk.call("histogram", {});       // 本插件的方法（落在 sk.context 的扫描上）
+const sum = await sk.core("tree.summary", { scan_id: sk.context.scan_id, node: 0 });   // 内置方法，参数照协议
 sk.on("progress", (p) => …);  sk.state("status", (v) => …);  sk.subscribe("ticks", null, (x) => …);
-sk.onContext((ctx) => …);  sk.onLang((lang) => …);  sk.t("中文", "English", { n: 1 });
+sk.onContext((ctx) => …);  sk.onLang((lang) => …);  sk.onTheme((mode) => …);  sk.t("中文", "English", { n: 1 });
+sk.format.size(1536000);  sk.format.count(1234);  sk.format.date(unixSeconds);   // 和界面一样的写法
 sk.host.select(node); sk.host.zoom(node); sk.host.filter("*.log"); sk.host.toast("…");
+sk.host.command("my.tool.open");  sk.host.command("view.visual.flame");   // 本插件的，和视图、导航、过滤、导出的
 sk.host.basket([node], "原因");   // 要 basket.propose；sk.host.copy 要 clipboard，open / reveal / url 要 host.open
 sk.resize(240);                   // 详情面板和对话框里要的高度
 ```
 
-- **类型**：`spaceknife plugin build` 写出 `web/sk-plugin.d.ts`（本插件的方法、事件、状态），`import sk from "./sk-plugin"` 或在 JSDoc 里引用就有补全；`_sk/sk.d.ts` 是桥本身的类型。
+- **类型**：`spaceknife plugin build` 写出 `web/sk-plugin.d.ts`（本插件的方法、事件、状态）；JS 文件第一行写 `// @ts-check`，再写 `/** @type {typeof import("./sk-plugin").default} */ const typed = sk;`，编辑器就按它检查参数和返回值；`_sk/sk.d.ts` 是桥本身的类型。标签页里程序已经在网页上方显示了标题，网页里不用再写一遍。
 - **主题**：`base.css` 定义了 `--sk-*` 变量（`--sk-bg` `--sk-text` `--sk-muted` `--sk-accent` `--sk-border` `--sk-ok` `--sk-warn` `--sk-danger` `--sk-font` `--sk-mono` `--sk-radius` …），主题切换时自动更新；`document.documentElement.dataset.skTheme` 是 `dark` 或 `light`。
 - **限制**：单条消息 1 MiB，同时 8 个调用，每秒 50 条；`basket.execute`、改设置、开始扫描等都调不到。
-- **单独调试（mock 模式）**：`plugin build` 把桥复制到 `web/_sk/`；在 `web/` 里起一个静态服务器（`python -m http.server`），打开 `index.html?mock=fixtures.json`，调用按 `fixtures.json` 回答：`{ "lang": "zh-CN", "context": {…}, "calls": { "<方法>": <结果> }, "core": { "<内置方法>": <结果> }, "states": {…}, "events": { "<名>": [<载荷>…] } }`。
-- **连真后端**：`spaceknife plugin dev`（第 0 节）。
+- **单独调试（mock 模式）**：`plugin build` 把桥复制到 `web/_sk/`；在 `web/` 里起一个静态服务器（`python -m http.server`），打开 `index.html?mock=fixtures.json`，调用按 `fixtures.json` 回答：`{ "lang": "zh-CN", "theme": "light", "context": {…}, "calls": { "<方法>": <结果> 或 [{ "params": {…}, "result": … }, …] }, "core": { "<内置方法>": <结果> }, "states": {…}, "events": { "<名>": [<载荷>…] } }`。
+- **真界面**：`spaceknife plugin shot <文件夹> --open panel:<名> --text`（截图，连面板里的字和报错一起打印），或 `plugin dev`（第 10 节）。
 
-`check` 静态扫描面板代码里的 `RTCPeerConnection`、`RTCDataChannel` 并报错，也核对 `fixtures.json` 回答的是不是本插件的方法。
+`check` 静态扫描面板代码里的 `RTCPeerConnection`、`RTCDataChannel` 并报错，核对 `fixtures.json` 回答的是不是本插件的方法，`core` 的回答是不是真的长那样。
 
 <a id="permissions"></a>
 ## 7. 权限、预算与错误码
@@ -897,7 +866,7 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 <a id="imports"></a>
 ### 7.1 能 import 的模块
 
-打包版只带它分析到的模块，所以插件只能用：SDK、`spaceknife_protocol`、numpy、pydantic、`lib/` 里的纯 Python 包，以及标准库的这些：`json re math statistics collections itertools functools dataclasses datetime time zoneinfo hashlib hmac base64 binascii struct zlib gzip bz2 lzma zipfile tarfile csv io pathlib fnmatch glob typing enum decimal fractions heapq bisect textwrap unicodedata uuid tomllib html xml urllib string difflib operator contextlib asyncio concurrent threading queue random secrets sqlite3 email os abc copy array codecs locale pprint warnings weakref types numbers shlex`。`ctypes cffi socket subprocess multiprocessing ssl select` 不行：联网用 `ctx.net`，运行程序用 `ctx.exec`。`check` 用语法树检查 import。
+打包版只带它分析到的模块，所以插件只能用：SDK、`spaceknife_protocol`、numpy、pydantic、`lib/` 里的纯 Python 包，以及标准库的这些：`json re math statistics collections itertools functools dataclasses datetime time zoneinfo hashlib hmac base64 binascii struct zlib gzip bz2 lzma zipfile tarfile csv io pathlib fnmatch glob typing enum decimal fractions heapq bisect textwrap unicodedata uuid tomllib html xml urllib string difflib operator contextlib asyncio concurrent threading contextvars queue random secrets sqlite3 email os abc copy array codecs locale pprint warnings weakref types numbers shlex`。`ctypes cffi socket subprocess multiprocessing ssl select` 不行：联网用 `ctx.net`，运行程序用 `ctx.exec`。`check` 用语法树检查 import。插件文件夹本身在 `sys.path` 上（`from mypkg import x` 找插件里的 `mypkg/`）；自己开线程时用 `contextvars.copy_context().run(...)` 带上调用的语言，或者用 `ctx.compute`。
 
 ### 7.2 预算
 
@@ -935,7 +904,7 @@ async def test_largest() -> None:
 
 `make_tree` 的值：大小、`(大小, 修改时间)`（unix 秒或 `"YYYY-MM-DD"`）、`bytes`（真的写成文件，可以读和哈希）、dict（文件夹）。
 
-`host` 的全部方法（报告、字段、清理、导出、来源、钩子、快照、副作用、设置和语言）见 [API 参考](plugin-api.md#api-testing)；要直接测插件自己的函数，用 `plugin_module(__file__)` 导入 `plugin.py`。
+`host` 的全部方法见 [API 参考](plugin-api.md#api-testing)：命令按菜单那样跑（`await host.command(name, node=…)`）、问能不能跑（`command_available`）、等后台做完（`settled()`）、系统写法的路径（`host.path("a/b")`）、`export_text` / `export_bytes`。失败的调用抛 `spaceknife_sdk.RequestError`（`.code` 是 `ErrorCode`）。要直接测插件自己的函数，用 `plugin_module(__file__)` 导入 `plugin.py`（另一份副本：看不到宿主里那份的状态）。默认在测试的进程里跑（快）；`plugin new` 生成的测试里另有一项 `process=True`，在真的插件进程里再查一遍——剪贴板、沙箱、卡住事件循环这类问题只在那里出现。
 
 `grant=["tree.read"]` 可以只给部分权限，测「缺权限时报 `PERMISSION_DENIED`」。测试需要 pytest 和 pytest-asyncio（SpaceKnife 的开发环境里都有）；`plugin new` 生成的 `pytest.ini` 打开了 asyncio 模式。
 
@@ -956,19 +925,20 @@ async def test_largest() -> None:
 | `plugin check [D] [--strict] [--json] [--no-contracts] [--inprocess]` | 全部检查；`--json` 给工具和 agent；退出码 1 表示有问题 |
 | `plugin build [D] [--zip]` | 第 9 节 |
 | `plugin call <D或id> <方法> ['{"a": 1}'] [--scan PATH] [--snapshot FILE] [--history FILE …] [--setting k=v …] [--lang en]` | 起一个临时后端，扫描 `PATH`（不给就用合成树或 `fixtures/tree/`），调用方法，打印 JSON 结果，事件、提示和插件日志打到 stderr |
-| `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名> [--scan PATH] [--node a/b] [--format text\|json\|md]` | 不开界面看到结果 |
-| `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描）；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
+| `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名 \| source:名> [--scan PATH] [--node a/b] [--format text\|json\|md] [--call 方法[={json}] …] [--option k=v …] [--filter 式] [--uri U] [-o FILE] [--setting k=v] [--lang en] [--history FILE]` | 不开界面看到结果；`--call` 先在同一个后端里调方法（先算好结果的字段、集合）；导出的 `--option` `--filter`、`--node`（只导出它）；`visual:` `color:` 的 `--format json` 给出每行的节点、大小和色板下标 |
+| `plugin shot [D] [--open report:名\|panel:名\|settings] [--do 命令 …] [--select a/b] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
+| `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
 | `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]` | 安装、卸载（真实的数据目录） |
 | `plugin list [--json]`、`enable <id> [--yes]`、`disable <id>` | 列出、启用（列出权限并要求确认）、停用 |
 | `plugin schema [--manifest \| D]` | 清单的 JSON Schema，或插件自己的协议 schema |
-| `plugin docs [--api] [--section 锚点] [--list]` | 这份文档、API 参考（`--api`）或其中一节 |
+| `plugin docs [--section 锚点] [--search 词] [--list] [--guide] [--api]` | 速查（不带参数）；一节；提到某个词的行；全文 |
 
-`call`、`render`、`check` 的契约检查默认在插件进程里跑（和程序一样），`--inprocess` 在命令自己的进程里跑（快，回溯直接打印）。
+`call`、`render`、`check` 的契约检查默认在插件进程里跑（和程序一样），`--inprocess` 在命令自己的进程里跑（快，回溯直接打印）。`shot`、`dev` 的前端：`--ui`，或环境变量 `SPACEKNIFE_UI`（`pnpm -C apps/electron build` 的 `out/`）；浏览器：Chrome、Chromium 或 Edge，`SPACEKNIFE_BROWSER` 指定。`call` 遇到报告、导出这类名字时提示该用 `render` 的哪种写法。
 
 <a id="errors"></a>
 ## 11. 检查与常见错误
 
-`plugin check` 依次检查：清单；在一个没有权限的进程里 import 并读出声明；文案中英齐全、占位符一致；图标；颜色；import；代码用到的 API 和声明的权限；洞察规则、模板、过滤预设；按键冲突；然后把插件放进模拟宿主，在合成树上把每个带代码的贡献跑一次（可视化在三棵树上按行契约检查；配色的下标、导出、报告的上限、字段、清理、集合、钩子、`fixtures/` 里有样例的扫描来源）；最后看生成的文件是否最新。
+`plugin check` 依次检查：清单；在一个没有权限的进程里 import 并读出声明；文案中英齐全、占位符一致；图标；颜色；import；代码用到的 API 和声明的权限；洞察规则、模板、过滤预设；按键冲突；然后在插件进程里把每个带代码的贡献在合成树上跑一次（可视化在三棵树上按行契约检查；配色的下标、导出、报告的上限、字段、清理、集合、钩子、`fixtures/` 里有样例的扫描来源并打印它列出了什么；命令按它的 `when` 和 `check` 在文件夹、文件和不选时各跑一次，要 `net` / `exec` 的插件不跑）；最后看生成的文件是否最新。
 
 | 错误码 | 意思 | 改法 |
 |---|---|---|
@@ -983,7 +953,7 @@ async def test_largest() -> None:
 | `rules` / `template` / `filter` | 规则文件、模板、过滤式有错 | 见 insights.md、export-templates.md、filter-syntax.md |
 | `key_conflict` / `webrtc` | 和程序或本插件的键冲突 / 面板代码用了 WebRTC | 换键或 `override = true` / 走 `sk.call` |
 | `register` | 宿主拒绝了某项贡献（重名、对不上） | 按消息改 |
-| `visual` `color` `export` `report` `field` `cleanup` `node_set` `hook` `source` | 跑这项贡献时出错或违约 | 用 `plugin render` / `call` 重现 |
+| `visual` `color` `export` `report` `field` `cleanup` `node_set` `hook` `source` `command` | 跑这项贡献时出错或违约 | 用 `plugin render` / `call` 重现 |
 | `not_built` / `stale_generated` | 生成的文件缺了或过期 | `spaceknife plugin build` |
 
 运行时常见的：`PERMISSION_DENIED`（少了权限：清单里加上，重新启用）；`STALE_TREE`（存了节点下标又用：存 `tree.ref(id)`）；`PLUGIN_TIMEOUT`（把重活放进 `await ctx.compute(...)`，长循环里调 `ctx.check()`）；「需要先完成扫描」（命令加 `when = ["done"]`）。

@@ -91,7 +91,8 @@ def test_every_part_together(tmp_path: Path) -> None:
     assert result.ok(strict=True), [i.text() for i in result.issues]
     tests = _pytest(folder, tmp_path / "home")
     assert tests.returncode == 0, tests.stdout + tests.stderr
-    assert "15 passed" in tests.stdout
+    # each part's test, the check (here and in a plugin process), the report following min_size
+    assert f"{len(scaffold.PARTS) + 3} passed" in tests.stdout
     ruff = shutil.which("ruff")
     if ruff is not None:  # what it writes is clean code (the repository's style)
         fmt = subprocess.run(
@@ -111,6 +112,14 @@ def test_each_part_alone(part: str, tmp_path: Path) -> None:
     assert build(folder, isolated=False).ok
     result = check_plugin(folder, process=False, subprocess_describe=False)
     assert result.ok(strict=True), [i.text() for i in result.issues]
+
+
+def test_a_chinese_title_keeps_an_english_name() -> None:
+    toml = scaffold.render("example.dup-finder", [], title="重复文件")["plugin.toml"]
+    assert 'name = { zh = "重复文件", en = "Dup Finder" }' in toml
+    steps = scaffold.next_steps(Path("x"), ["export", "panel"])
+    assert any("export:md" in s for s in steps)
+    assert not any("report:largest" in s for s in steps)
 
 
 def test_new_refuses_bad_ids_and_parts(tmp_path: Path) -> None:

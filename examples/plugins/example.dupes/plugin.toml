@@ -26,7 +26,7 @@ icon = "copy"
 aliases = ["dupes", "duplicates"]
 when = ["done"]
 action = { open = "report:dupes" }
-status = { state = "status", text = { zh = "{groups} 组，多占 {wasted} 字节", en = "{groups} groups, {wasted} bytes extra" } }
+status = { state = "status", text = { zh = "{groups} 组，多占 {wasted:size}", en = "{groups} groups, {wasted:size} extra" } }
 
 [[keys]]
 key = "Ctrl+Alt+D"

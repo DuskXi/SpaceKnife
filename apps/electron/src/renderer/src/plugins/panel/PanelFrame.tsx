@@ -10,6 +10,7 @@ import type { PanelInfo, ReportContext } from "@/protocol/generated";
 import { basketAddMany, call, editFilter, viewCall } from "@/state/actions";
 import { runShortcut } from "@/state/commands";
 import { get, toast, useApp } from "@/state/store";
+import { getUnitBase } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { themeName } from "@/lib/theme";
 
@@ -161,7 +162,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
           onRefused: (href) => setRefused(href || "?"),
           onReady: () => {
             setRefused("");
-            b.push("lang", { lang: get().lang });
+            b.push("lang", { lang: get().lang, units: getUnitBase() });
             b.push("theme", { mode: themeName(), vars: themeVars() });
             b.push("context", panelContext(ctxRef.current, info, placeRef.current));
           },
@@ -180,7 +181,7 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
   }, [info.id, info.plugin, info.permissions, base]);
 
   useEffect(() => bridge.current?.push("context", panelContext(ctx, info, place)), [ctx, info, place]);
-  useEffect(() => bridge.current?.push("lang", { lang }), [lang]);
+  useEffect(() => bridge.current?.push("lang", { lang, units: getUnitBase() }), [lang]);
   useEffect(() => bridge.current?.push("theme", { mode: theme, vars: themeVars(theme) }), [theme]);
   useEffect(() => {
     if (treeMark) bridge.current?.push("tree", { scan_id: ctx.scan_id });

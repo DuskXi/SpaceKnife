@@ -92,6 +92,9 @@ export interface Sk<
   };
   /** The text in the interface language, {placeholders} filled. */
   t(zh: string, en: string, fields?: Record<string, string | number>): string;
+  /** Numbers as the app writes them: size(1536000) "1.5 MB" (the user's unit base), count(1234)
+   * "1,234", date(unixSeconds) "2026-10-24 21:30". */
+  format: { size(bytes: number): string; count(n: number): string; date(unixSeconds: number): string };
   /** Ask for this height (40–800 px) in the details column or a dialog. */
   resize(height: number): void;
 }

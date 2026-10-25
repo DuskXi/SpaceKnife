@@ -165,7 +165,6 @@ class MockHost:
     _settings_pending: bool = False
     _stores: list[tuple[str, Any]] = field(default_factory=list)
     _trees: list[Path] = field(default_factory=list)
-    _snapshots: int = 0
     _made: dict[str, float] = field(default_factory=dict)  # synthetic scan -> when it was made
 
     # ------------------------------------------------------------- setting up
@@ -745,15 +744,13 @@ class MockHost:
 
     def snapshot(self, *, when: Any = None) -> str:
         """Save the scan in front as a snapshot (where the app keeps them); returns its path. For
-        plugins that read history (``ctx.snapshots``); ``when`` is a datetime for the file name."""
+        plugins that read history (``ctx.snapshots``); ``when`` (a datetime) is when it was taken:
+        its file name and the time in it (``SnapshotInfo.created_at``)."""
         from spaceknife.store import snapshot as snap
 
         store = self.store
         roots = [store.name(r) for r in store.roots()]
-        path = snap.auto_path(roots, when)
-        while path.exists():  # two in the same second: the next free name
-            self._snapshots += 1
-            path = path.with_name(f"{path.stem}-{self._snapshots}{path.suffix}")
+        path = snap.auto_path(roots, when)  # a free name, as the app's automatic snapshots
         path.parent.mkdir(parents=True, exist_ok=True)
         c = store.cols
         files, dirs = int(c["tot_files"][0]), int(c["tot_dirs"][0])
@@ -768,7 +765,7 @@ class MockHost:
             "roots": [{"path": r, "whole_volume": False} for r in roots],
             "method": "hard",
         }
-        snap.save(store, path, roots=roots, stats=stats)
+        snap.save(store, path, roots=roots, stats=stats, created_at=when)  # its time is `when` too
         return str(path)
 
     # ------------------------------------------------------------- side effects

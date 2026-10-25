@@ -33,7 +33,7 @@ datas += collect_data_files(
 )
 # the panel bridge copy (plugin build / plugin dev) and the author docs (spaceknife plugin docs)
 datas += collect_data_files("spaceknife_sdk", excludes=["**/__pycache__/**"])
-datas += [(ROOT + f"/docs/{doc}", "spaceknife_sdk/docs") for doc in ("plugin-dev.md", "plugin-api.md")]
+datas += [(ROOT + f"/docs/{doc}", "spaceknife_sdk/docs") for doc in ("plugin-quick.md", "plugin-dev.md", "plugin-api.md")]
 
 a = Analysis(
     [SPECPATH + "/backend_entry.py"],

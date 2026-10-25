@@ -85,12 +85,17 @@ def new(
         list[str] | None,
         typer.Option(
             "--with",
-            help="Parts, comma-separated: method report command setting cleanup panel visual color export "
-            "source set field insight hook (default: report,command).",
+            help="Parts, comma-separated: method report command setting cleanup panel visual visual-code "
+            "color color-code export source set field insight hook (default: report,command).",
         ),
     ] = None,
     dir: Annotated[Path | None, typer.Option(help="Where to create it (default: ./ID).")] = None,
-    title: Annotated[str | None, typer.Option(help="The plugin's name (default: from the id).")] = None,
+    title: Annotated[
+        str | None,
+        typer.Option(
+            help="The plugin's name (default: from the id); a Chinese one keeps the id's as English."
+        ),
+    ] = None,
 ) -> None:
     """Create a plugin skeleton that passes `plugin check --strict` and its own tests as it is."""
     from spaceknife_sdk import scaffold
@@ -110,10 +115,8 @@ def new(
     for f in sorted({*(str(p.relative_to(folder)) for p in files), *result.written}):
         out.print(f"  {f}")
     out.print("next:")
-    out.print(f"  spaceknife plugin check {folder}")
-    out.print(f"  spaceknife plugin render {folder} report:largest --scan <a folder>")
-    out.print(f"  uv run pytest {folder / 'tests'}")
-    out.print(f"  spaceknife plugin install {folder}")
+    for line in scaffold.next_steps(folder, with_ or []):
+        out.print(f"  {line}")
 
 
 @plugin_app.command("check")
@@ -213,9 +216,7 @@ def _history(files: list[Path]) -> None:
             header = snap.read_header(f)
         except (OSError, snap.SnapshotError) as exc:
             raise _fail(f"--history {f}: {exc}", 2) from None
-        target = snap.auto_path(list(header.roots), header.created_at)
-        while target.exists():  # two taken in the same second
-            target = target.with_name(f"{target.stem}-1{target.suffix}")
+        target = snap.auto_path(list(header.roots), header.created_at)  # a free name
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(f, target)
 
@@ -317,6 +318,8 @@ def call(
                     err.print(f"[red]error {exc.code}: {exc.message}[/red]")
                     if exc.data:
                         err.print(json.dumps(exc.data, ensure_ascii=False))
+                    if exc.code == -32601:
+                        err.print(f"[dim]{_not_a_method_hint(host, method, str(folder))}[/dim]")
                     return 1
                 out.print(json.dumps(value, ensure_ascii=False, indent=1, default=str))
                 for f in frames:
@@ -328,6 +331,44 @@ def call(
             await host.close()
 
     raise typer.Exit(asyncio.run(run()))
+
+
+def _not_a_method_hint(host: Any, name: str, folder: str) -> str:
+    """What to run instead when ``name`` is a contribution, not a method (plugin call)."""
+    rec = host.server.plugins.records.get(host.plugin_id)
+    desc = rec.description if rec is not None else None
+    kinds = {str(c.get("kind")): c for c in (desc.contributions if desc else []) if c.get("name") == name}
+    look = {
+        "report": "report",
+        "export_format": "export",
+        "node_set": "set",
+        "visualization": "visual",
+        "color_mode": "color",
+        "cleanup": "cleanup",
+        "scan_source": "source",
+    }
+    for kind, word in look.items():
+        if kind in kinds:
+            return f"{name!r} is a {kind}: spaceknife plugin render {folder} {word}:{name}"
+    if "command" in kinds:
+        return f"{name!r} is a command: its method is the decorated function's name"
+    methods = sorted(m.name for m in (desc.methods if desc else []))
+    return "methods: " + (", ".join(methods) or "(none)")
+
+
+def _calls(items: list[str] | None) -> list[tuple[str, dict[str, Any]]]:
+    """``--call NAME`` or ``--call NAME={json params}`` (repeatable)."""
+    out: list[tuple[str, dict[str, Any]]] = []
+    for item in items or []:
+        name, sep, raw = item.partition("=")
+        try:
+            params = json.loads(raw) if sep else {}
+        except ValueError as exc:
+            raise _fail(f"--call {item!r}: the params are not JSON ({exc})", 2) from None
+        if not isinstance(params, dict) or not name.strip():
+            raise _fail(f"--call {item!r}: write NAME or NAME={{json object}}", 2)
+        out.append((name.strip(), params))
+    return out
 
 
 @plugin_app.command("render")
@@ -358,12 +399,34 @@ def render(
     output: Annotated[
         Path | None, typer.Option("--output", "-o", help="export:NAME — write the file (with its BOM).")
     ] = None,
+    first: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--call",
+            help="Call this method first, in the same backend (NAME or NAME={json}); repeatable: "
+            "a field or set that needs a result computed before shows it.",
+        ),
+    ] = None,
+    option: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--option", help="export:NAME — name=value of one of the format's options (repeatable)."
+        ),
+    ] = None,
+    filter: Annotated[
+        str | None, typer.Option(help="export:NAME — only what this filter expression matches.")
+    ] = None,
 ) -> None:
     """Show what a contribution produces, without the app: a report as text, fields, the cleanup's
-    candidates, an export's output, a node set, a visualization's or colour mode's frame, what a
-    scan source lists."""
+    candidates, an export's output, a node set, a visualization's or colour mode's frame (json:
+    each row's node, size and palette index), what a scan source lists. --node: the selected
+    node (an export: only it)."""
     folder = _folder(target)
     _quiet()
+    calls = _calls(first)
+    options = _settings(option)
+    if uri and "://" not in uri and not os.path.isabs(uri):
+        uri = str(Path(uri).resolve())  # the plugin's process has another working folder
     kind, _, name = what.partition(":")
     kinds = ("report", "field", "insight", "cleanup", "export", "set", "visual", "color", "source")
     if kind not in kinds:
@@ -381,10 +444,18 @@ def render(
             with _plugin_logs(host.plugin_id) as logs:
                 try:
                     node_id = host.find(node) if node else None
+                    for method, params in calls:
+                        await host.call(method, **params)
+                    export_kw: dict[str, Any] = {"options": options, "filter": filter}
+                    if node_id is not None:
+                        export_kw["selection"] = [node_id]
                     if kind == "source":
                         text = await _render_source(host, name, str(uri))
                     elif kind == "export" and output is not None:
-                        text = await _write_export(host, name, output)
+                        text = await _write_export(host, name, output, export_kw)
+                    elif kind == "export":
+                        data = await host.export(name, **export_kw)
+                        text = data if isinstance(data, str) else data.decode("utf-8", "replace")
                     else:
                         text = await _render(host, kind, name, node_id, format)
                 except (RpcError, KeyError, AssertionError, RuntimeError) as exc:
@@ -420,11 +491,11 @@ async def _render_source(host: Any, name: str, uri: str) -> str:
     return "\n".join(lines)
 
 
-async def _write_export(host: Any, name: str, path: Path) -> str:
+async def _write_export(host: Any, name: str, path: Path, kw: dict[str, Any] | None = None) -> str:
     """An export format's output written as the app writes it (its BOM, UTF-8)."""
     from .export import ExportFormat, resolve, write_export
 
-    data = await host.export(name)
+    data = await host.export(name, **(kw or {}))
     target = resolve(f"{host.plugin_id}.{name}")
     bom = isinstance(target, ExportFormat) and target.bom
     written = write_export(path, [data], bom=bom)
@@ -503,6 +574,17 @@ async def _render(host: Any, kind: str, name: str, node: int | None, fmt: str) -
         )
     frame = await (host.visual(name) if kind == "visual" else host.color(name))
     draw = frame.draw
+    if fmt == "json":  # each drawn row: its node, name, size (bytes, count or weight), palette index
+        rows = [
+            {
+                "node": int(draw.node[i]),
+                "name": draw.names[i] if i < len(draw.names) else "",
+                "size": int(draw.size[i]),
+                **({"pal": int(frame.pal[i])} if frame.pal is not None else {}),
+            }
+            for i in range(len(draw))
+        ]
+        return dump({"unit": frame.size_unit, "root_size": int(frame.root.size), "rows": rows})
     lines = [f"{len(draw)} rows drawn (the row contract holds)"]
     if kind == "color" and frame.pal is not None:
         import numpy as np
@@ -531,11 +613,103 @@ def dev(
     allow_origin: Annotated[list[str] | None, typer.Option(help="Extra allowed WebSocket origin.")] = None,
 ) -> None:
     """Run a backend with the plugin linked; on every save it is described and started again and the
-    frontends are told (extensions.changed). With a built renderer, also serves the app in a browser."""
+    frontends are told (extensions.changed). With a built renderer (--ui, SPACEKNIFE_UI, the
+    repository's), also serves the app in a browser; says so when that build is older than its sources."""
     from .devui import run_dev
 
     target = _folder(folder)
     raise typer.Exit(run_dev(target, scan=scan, port=port, ui=ui, home=home, origins=allow_origin or []))
+
+
+@plugin_app.command("shot")
+def shot(
+    folder: DirArg = Path("."),
+    scan: Annotated[
+        Path | None, typer.Option(help="Scan this folder (default: a small synthetic one).")
+    ] = None,
+    open_: Annotated[
+        str | None,
+        typer.Option("--open", help="report:<name> | panel:<name> | settings (the plugin's own names)."),
+    ] = None,
+    do: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--do",
+            help="Run a command first (repeatable): <name> (the plugin's), visual:<name>, color:<name>, "
+            "export (the export dialog), or any command id.",
+        ),
+    ] = None,
+    select: Annotated[
+        str | None, typer.Option(help="Select this node, relative to the root (a/b.txt).")
+    ] = None,
+    theme: Annotated[str | None, typer.Option(help="light or dark.")] = None,
+    lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
+    size: Annotated[str, typer.Option(help="The window: WIDTHxHEIGHT.")] = "1400x900",
+    out: Annotated[
+        Path | None, typer.Option("--out", "-o", help="The PNG (default: ./shot-<id>.png).")
+    ] = None,
+    wait: Annotated[float, typer.Option(help="Seconds to let it settle before the picture.")] = 1.0,
+    text: Annotated[bool, typer.Option("--text", help="Also print the page's visible text.")] = False,
+    eval_: Annotated[
+        str | None, typer.Option("--eval", help="Also print what this JavaScript expression gives.")
+    ] = None,
+    ui: Annotated[
+        Path | None,
+        typer.Option(help="A built interface (out/ or out/renderer of pnpm build; SPACEKNIFE_UI)."),
+    ] = None,
+) -> None:
+    """A picture of the real interface with the plugin enabled, in a headless browser (nothing opens
+    on the desktop): its own backend, temporary data folder and port. Prints the PNG's path and
+    what the page and the plugin logged as errors or warnings."""
+    from .devshot import ShotOptions, run_shot
+
+    target = _folder(folder)
+    from spaceknife_sdk.manifest import load_manifest
+
+    pid = load_manifest(target).id
+    try:
+        w, h = (int(x) for x in size.lower().split("x"))
+    except ValueError:
+        raise _fail(f"--size {size!r}: write WIDTHxHEIGHT", 2) from None
+    words: list[str] = []
+    for d in do or []:
+        kind, _, name = d.partition(":")
+        if kind == "visual" and name:
+            words.append(f"view.visual.{name if '.' in name else f'{pid}.{name}'}")
+        elif kind == "color" and name:
+            words.append(f"view.color.{name if '.' in name else f'{pid}.{name}'}")
+        elif d == "export":
+            words.append("report.export")
+        else:
+            words.append(d if "." in d else f"{pid}.{d}")
+    target_open = open_
+    if open_ and ":" in open_:
+        what, _, name = open_.partition(":")
+        if what in ("report", "panel") and "." not in name:
+            target_open = f"{what}:{pid}.{name}"
+    elif open_ == "settings":
+        target_open = f"settings:{pid}"
+    opts = ShotOptions(
+        scan=scan,
+        ui=ui,
+        width=w,
+        height=h,
+        out=out,
+        theme=theme,
+        lang=("en" if lang.startswith("en") else "zh-CN") if lang else None,
+        select=select,
+        run=words,
+        open=target_open,
+        wait=wait,
+        text=text,
+        eval=eval_,
+    )
+    raise typer.Exit(run_shot(target, opts, say=lambda line: out_print(line)))
+
+
+def out_print(line: str) -> None:
+    sys.stdout.write(line + "\n")
+    sys.stdout.flush()
 
 
 # --------------------------------------------------------------------------- managing
@@ -675,24 +849,25 @@ def schema(
 @plugin_app.command("docs")
 def docs(
     section: Annotated[
-        str | None, typer.Option(help="One section by its anchor (kind-report, ctx-tree, errors …).")
+        str | None, typer.Option(help="One section by its anchor (kind-report, ctx-tree, api-cache …).")
     ] = None,
-    list_sections: Annotated[bool, typer.Option("--list", help="The anchors.")] = False,
-    api: Annotated[
-        bool, typer.Option("--api", help="The API reference (docs/plugin-api.md) instead of the guide.")
-    ] = False,
+    search: Annotated[
+        str | None, typer.Option(help="The lines that mention a word, with their sections' anchors.")
+    ] = None,
+    list_sections: Annotated[bool, typer.Option("--list", help="The anchors of all three docs.")] = False,
+    guide: Annotated[bool, typer.Option("--guide", help="The whole guide (docs/plugin-dev.md).")] = False,
+    api: Annotated[bool, typer.Option("--api", help="The whole API reference (docs/plugin-api.md).")] = False,
 ) -> None:
-    """Print the plugin author docs (docs/plugin-dev.md; --api: docs/plugin-api.md), or one section
-    of either (by its anchor)."""
+    """Print the quick reference (docs/plugin-quick.md: read it first); --section ANCHOR: one section of any
+    of the docs; --search the lines with a word; --guide / --api a whole doc."""
     from spaceknife_sdk import docs as sdk_docs
 
-    name = sdk_docs.API if api else sdk_docs.NAME
+    name = sdk_docs.API if api else sdk_docs.NAME if guide else sdk_docs.QUICK
     text = sdk_docs.text(name)
     if text is None:
         raise _fail(f"the author docs are not part of this installation (docs/{name} in the repository)")
     if list_sections:
-        names = (sdk_docs.API,) if api else (sdk_docs.NAME, sdk_docs.API)
-        for doc_name in names:
+        for doc_name in sdk_docs.ALL:
             doc = sdk_docs.text(doc_name)
             for anchor, title in sdk_docs.anchors(doc or ""):
                 out.print(f"{anchor:<28} {title}")
@@ -702,6 +877,14 @@ def docs(
         if part is None:
             raise _fail(f"no section {section!r}: spaceknife plugin docs --list")
         sys.stdout.write(part)
+        return
+    if search:
+        hits = sdk_docs.search(search)
+        if not hits:
+            raise _fail(f"no line mentions {search!r}")
+        for doc_name, anchor, line_no, line in hits:
+            sys.stdout.write(f"{anchor or doc_name:<24} {doc_name}:{line_no}: {line[:160]}\n")
+        sys.stdout.write("read one: spaceknife plugin docs --section <anchor>\n")
         return
     sys.stdout.write(text)
 

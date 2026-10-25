@@ -98,6 +98,14 @@ async def _list(
     value, _ = await host.call(
         c.owner, "source", c.local, {"uri": uri}, on_chunk=chunk, timeout=LIST_TIMEOUT_S, on_wait=on_wait
     )
+    twice = int((value or {}).get("duplicates") or 0)
+    if twice:
+        logger.bind(source=f"plugin:{c.owner}").warning(
+            "scan source {}: {} entries name a path listed before; the last of each stays (their bytes "
+            "are not added up)",
+            c.id,
+            twice,
+        )
     name = str((value or {}).get("root") or uri)
     if getattr(c.spec, "size", "alloc") == "size":
         collector.use_size()  # what the tree counts: the files' (unpacked) sizes

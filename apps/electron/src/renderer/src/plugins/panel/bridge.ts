@@ -104,6 +104,14 @@ export interface BridgeOptions {
 
 type Msg = { type?: unknown; id?: unknown; [k: string]: unknown };
 
+/** The app's commands a panel may run (sk.host.command): what the view shows, where it is, the
+ * filter box and the export dialog; never the basket, operations, settings or the app. */
+const PANEL_COMMANDS = /^(?:view\.(?:visual|color)\.[\w.-]+|view\.(?:cycle_color|cycle_visual|detail_down|detail_up|zoom_in|zoom_out|toggle_free|toggle_trash|toggle_unknown)|nav\.(?:back|forward|home|up)|filter\.focus|report\.export)$/;
+
+export function panelMayRun(command: string, plugin: string): boolean {
+  return command.startsWith(`${plugin}.`) || PANEL_COMMANDS.test(command);
+}
+
 export class PanelBridge {
   private calls = new Map<number, AbortController>();
   private subs = new Map<number, () => void>();
@@ -314,9 +322,10 @@ export class PanelBridge {
     if (typeof op !== "string" || !Object.hasOwn(HOST_OPS, op)) return this.fail(id, METHOD_NOT_FOUND, `unknown host operation: ${String(op)}`);
     if (!this.allowed(HOST_OPS[op])) return this.fail(id, PERMISSION_DENIED, `needs the ${HOST_OPS[op]} permission`);
     const args = msg.args && typeof msg.args === "object" ? (msg.args as Record<string, unknown>) : {};
-    // its own commands only (a key pack's or the app's are not a panel's to run)
-    if (op === "command" && (typeof args.command !== "string" || !args.command.startsWith(`${this.host.plugin}.`))) {
-      return this.fail(id, PERMISSION_DENIED, "a panel runs its own plugin's commands only");
+    // its own commands, and the app's that only change what the view shows (a key pack's, the
+    // basket's, the settings' are not a panel's to run)
+    if (op === "command" && (typeof args.command !== "string" || !panelMayRun(args.command, this.host.plugin))) {
+      return this.fail(id, PERMISSION_DENIED, "a panel runs its own plugin's commands and the app's view, filter and navigation ones");
     }
     try {
       const value = await this.host.host(op, args);

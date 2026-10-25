@@ -104,6 +104,7 @@ def save(
     stats: dict[str, Any] | None = None,
     checkpoints: dict[str, Any] | None = None,
     level: int = 3,
+    created_at: datetime | None = None,
 ) -> SnapshotHeader:
     """Write ``store`` to ``path`` (atomically). Each column, then the names, is one zstd frame
     compressed as it is written: :data:`SAVE_ROWS` rows at a time (``name_off`` rebased to the
@@ -118,7 +119,7 @@ def save(
     view = store.fixed()
     n = len(view)
     dtypes = view.export_dtypes()
-    created = datetime.now(UTC)
+    created = created_at or datetime.now(UTC)  # created_at: tests that make history
 
     def header(col_info: dict[str, BlockInfo], names_info: BlockInfo) -> SnapshotHeader:
         return SnapshotHeader(
@@ -279,9 +280,18 @@ def _load_blocks(data: memoryview, header: SnapshotHeader) -> tuple[NodeStore, S
 
 
 def auto_path(roots: list[str], when: datetime | None = None, base: Path | None = None) -> Path:
+    """Where the next automatic snapshot of ``roots`` goes: named by the second, and a free name
+    when one of that second is there already (two scans of one folder within a second must not
+    write over each other: ``…-112514.sks``, ``…-112514-2.sks``)."""
     when = when or datetime.now(UTC)
     folder = (base or snapshots_dir()) / root_key(roots)
-    return folder / f"{when.strftime('%Y%m%d-%H%M%S')}{SUFFIX}"
+    stamp = when.strftime("%Y%m%d-%H%M%S")
+    path = folder / f"{stamp}{SUFFIX}"
+    n = 2
+    while path.exists():
+        path = folder / f"{stamp}-{n}{SUFFIX}"
+        n += 1
+    return path
 
 
 def prune(folder: Path, keep_recent: int = KEEP_RECENT) -> list[Path]:
@@ -291,7 +301,7 @@ def prune(folder: Path, keep_recent: int = KEEP_RECENT) -> list[Path]:
     weeks: set[tuple[int, int]] = set()
     for f in files[keep_recent:]:
         try:
-            stamp = datetime.strptime(f.stem, "%Y%m%d-%H%M%S")
+            stamp = datetime.strptime(f.stem[:15], "%Y%m%d-%H%M%S")  # "-2": a second one that second
         except ValueError:
             keep.add(f)
             continue

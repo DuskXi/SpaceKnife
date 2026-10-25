@@ -361,17 +361,31 @@ class Plugin:
     def insight(self, fn: F, /) -> F: ...
     @overload
     def insight(
-        self, fn: None = None, /, *, name: str | None = None, globs: list[str] | None = None
+        self,
+        fn: None = None,
+        /,
+        *,
+        name: str | None = None,
+        globs: list[str] | None = None,
+        title: Text | str | None = None,
     ) -> Callable[[F], F]: ...
     def insight(
-        self, fn: F | None = None, /, *, name: str | None = None, globs: list[str] | None = None
+        self,
+        fn: F | None = None,
+        /,
+        *,
+        name: str | None = None,
+        globs: list[str] | None = None,
+        title: Text | str | None = None,
     ) -> F | Callable[[F], F]:
         """A code insight: ``(ctx, node) -> Insight | None``. ``globs``: only nodes whose path
-        matches one of them are asked (``"**/node_modules"``) — the details panel stays fast."""
+        matches one of them are asked (``"**/node_modules"``) — the details panel stays fast;
+        ``title``: what the enable dialog calls it (default: its name)."""
 
         def wrap(f: F) -> F:
             n = name or f.__name__.rstrip("_")
-            self._declare("insight", InsightSpec(name=n, globs=list(globs or [])))
+            spec = InsightSpec(name=n, globs=list(globs or []), title=as_text(title) if title else None)
+            self._declare("insight", spec)
             self._handler("insight", n, f)
             return f
 
@@ -538,12 +552,16 @@ class Plugin:
 
         return wrap
 
-    def watcher(self, source: str, *, name: str | None = None) -> Callable[[F], F]:
-        """Changes of a source's URI: an async generator ``(ctx, uri) -> list[Change]`` batches."""
+    def watcher(
+        self, source: str, *, name: str | None = None, title: Text | str | None = None
+    ) -> Callable[[F], F]:
+        """Changes of a source's URI: an async generator ``(ctx, uri) -> list[Change]`` batches;
+        ``title``: what the enable dialog calls it (default: 「监控 <the source's title>」)."""
 
         def wrap(f: F) -> F:
             n = name or f.__name__.rstrip("_")
-            self._declare("watcher", WatcherSpec(name=n, source=source))
+            spec = WatcherSpec(name=n, source=source, title=as_text(title) if title else None)
+            self._declare("watcher", spec)
             self._handler("watch", n, f)
             return f
 
@@ -565,7 +583,8 @@ class Plugin:
         return wrap(fn) if fn is not None else wrap
 
     def on(self, event: str) -> Callable[[F], F]:
-        """A lifecycle hook: start, stop, scan_done, scan_closed, settings, lang."""
+        """A lifecycle hook: start, stop, scan_done, scan_closed, settings, lang, basket (the delete
+        basket changed: what this plugin proposed may be gone)."""
 
         def wrap(f: F) -> F:
             n = f.__name__.rstrip("_")

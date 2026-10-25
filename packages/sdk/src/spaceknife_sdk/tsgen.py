@@ -148,18 +148,19 @@ def generate_plugin(schema: dict[str, Any]) -> str:
     def ref_or(spec: dict[str, Any], key: str, default: str) -> str:
         return ref_name(spec[key]) if spec.get(key) else default
 
-    out.append("export interface Methods {\n")
+    # types, not interfaces: an object type has the index signature Sk<M extends Record<…>> wants
+    out.append("export type Methods = {\n")
     for name, spec in sorted(methods.items()):
         out.append(doc(spec.get("doc"), "  "))
         params = ref_or(spec, "params", "Record<string, never>")
         out.append(f"  {name}: {{ params: {params}; result: {ref_or(spec, 'result', 'unknown')} }};\n")
-    out.append("}\n\n")
+    out.append("};\n\n")
     for title, key in (("Events", "events"), ("States", "states")):
-        out.append(f"export interface {title} {{\n")
+        out.append(f"export type {title} = {{\n")
         for name, spec in sorted(schema.get(key, {}).items()):
             out.append(doc(spec.get("doc"), "  "))
             out.append(f"  {name}: {ref_or(spec, 'payload', 'unknown')};\n")
-        out.append("}\n\n")
+        out.append("};\n\n")
     out.append("declare const sk: Sk<Methods, Events, States>;\nexport default sk;\n")
     return "".join(out)
 

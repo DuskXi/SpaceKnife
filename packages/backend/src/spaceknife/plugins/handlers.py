@@ -182,7 +182,9 @@ async def node_fields(
         raise RpcError(ErrorCode.UNKNOWN_NODE, f"node {p.node} does not exist")
     lang = i18n.language()
     wanted = [c for c in EXTENSIONS.of("node_field") if p.slot in c.spec.slots][: FIELD_LIMIT[p.slot]]
-    wanted = [c for c in wanted if _field_wanted(c, store, p.node)]
+    handle = host.api.handles().get(p.scan_id)
+    source = str(getattr(handle, "plugin_source", None) or "") if handle is not None else ""
+    wanted = [c for c in wanted if _when_scan(c, source) and _field_wanted(c, store, p.node)]
     version = int(store.version)
     out: list[pp.PluginField] = []
     pending = False
@@ -303,6 +305,8 @@ async def insight_cards(
             return None
         if not isinstance(value, dict):
             return None
+        for rid in value.get("replaces") or []:
+            replaced.add(str(rid))
         with contextlib.suppress(ValueError, TypeError):
             return pp.InsightCard(
                 source="plugin",
@@ -319,12 +323,28 @@ async def insight_cards(
             )
         return None
 
+    replaced: set[str] = set()  # rule cards a plugin's card says it replaces (Insight.replaces)
     path = store.path(p.node).replace("\\", "/").lower()
     asked = [c for c in EXTENSIONS.of("insight") if _wanted(c, path)]
     got = await asyncio.gather(*(one(c) for c in asked))
+    if replaced:
+        cards = [c for c in cards if c.source != "rule" or ("*" not in replaced and c.rule not in replaced)]
     cards += [g for g in got if g is not None]
     cards.sort(key=lambda c: -c.priority)  # stable: the rule's card first among equals
     return pp.InsightNodeResult(cards=cards)
+
+
+def _when_scan(c: Any, source: str) -> bool:
+    """A field's ``when`` about the scan: ``source:<name>`` (only scans from that scan source),
+    ``on_disk`` (only scans of the disk)."""
+    for w in getattr(c.spec, "when", None) or ():
+        if w.startswith("source:"):
+            name = w[7:]
+            if source != (name if "." in name else f"{c.owner}.{name}"):
+                return False
+        elif w == "on_disk" and source:
+            return False
+    return True
 
 
 def _field_wanted(c: Any, store: Any, node: int) -> bool:
@@ -368,9 +388,19 @@ def _wanted(c: Any, path: str) -> bool:
 _GLOBS: dict[str, tuple[tuple[str, ...], list[Any]]] = {}
 
 
+def _rule_plugin(rule_id: str) -> str | None:
+    """The plugin whose rule file has the rule (its source is ``<plugin id>:<file>``), else None."""
+    from ..insights.rules import active_rules
+
+    rule = active_rules().get(rule_id)
+    head = rule.source.split(":", 1)[0] if rule is not None and ":" in rule.source else ""
+    return head if "." in head and "/" not in head and "\\" not in head else None
+
+
 def _card(found: Any) -> pp.InsightCard:
     return pp.InsightCard(
         source="rule",
+        plugin=_rule_plugin(found.rule),
         rule=found.rule,
         title=found.title,
         reason=found.reason,

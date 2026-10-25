@@ -97,7 +97,9 @@ async def greet(ctx: Context, a: ActionContext) -> Toast:
 ''',
         test="""
 async def test_greet(host: MockHost) -> None:
-    toast = await host.call("greet", node=host.find("notes.txt"))
+    node = host.find("notes.txt")
+    assert await host.command_available("greet", node=node) is None  # its when / check let it run
+    toast = await host.command("greet", node=node)  # as the menu runs it, with notes.txt selected
     assert toast["tone"] == "ok"
 """,
         doc="kind-command",
@@ -113,8 +115,9 @@ default = 1048576
 unit = "B"
 """,
         test="""
-def test_min_size_has_a_default(host: MockHost) -> None:
-    host.set_setting("min_size", 1)  # a test may change it
+async def test_min_size(host: MockHost) -> None:
+    await host.set_setting("min_size", 1 << 30)  # as the settings page does; the plugin sees it next
+    assert host.server.settings.get(f"plugin.{host.plugin_id}.min_size") == 1 << 30
 """,
         needs_code=False,
         doc="kind-setting",
@@ -144,6 +147,13 @@ title = { zh = "面板", en = "Panel" }
 icon = "gauge"
 entry = "web/index.html"
 slot = "tab"
+
+[[commands]]                  # opens the panel (palette, Ctrl+K); without one nobody finds it
+name = "open_panel"
+title = { zh = "打开面板", en = "Open the panel" }
+icon = "gauge"
+when = ["scan"]
+action = { open = "panel:main" }
 """,
         imports=("Context", "Payload"),
         code='''
@@ -181,19 +191,21 @@ async def test_counts(host: MockHost) -> None:
 """,
             "web/app.js": """// The panel. sk is the app's bridge (docs/plugin-dev.md 「Web 面板」);
 // its types for this plugin are in sk-plugin.d.ts (plugin build writes it).
+// @ts-check
 import sk from "./_sk/bridge.js";
 
-const t = (zh, en) => (sk.lang.startsWith("zh") ? zh : en);
-
 async function show() {
-  document.getElementById("title").textContent = t("文件和文件夹", "Files and folders");
+  document.getElementById("title").textContent = sk.t("文件和文件夹", "Files and folders");
   const c = await sk.call("counts");
-  document.getElementById("files").textContent = `${c.files} ${t("个文件", "files")}`;
-  document.getElementById("folders").textContent = `${c.folders} ${t("个文件夹", "folders")}`;
+  const files = sk.format.count(c.files);
+  const folders = sk.format.count(c.folders);
+  document.getElementById("files").textContent = sk.t("{n} 个文件", "{n} files", { n: files });
+  document.getElementById("folders").textContent = sk.t("{n} 个文件夹", "{n} folders", { n: folders });
 }
 
 sk.ready.then(show);
 sk.onContext(show); // another scan or selection
+sk.onLang(show); // the interface language changed
 """,
             "web/fixtures.json": """{
   "lang": "zh-CN",
@@ -218,6 +230,52 @@ async def test_by_count(host: MockHost) -> None:
 """,
         needs_code=False,
         doc="kind-visualization",
+    ),
+    "visual-code": Part(
+        imports=("T", "VisualInput"),
+        code='''
+@plugin.visualization("by_name", T("按名字长度", "By name length"), base="treemap", size="code")
+def by_name(v: VisualInput) -> np.ndarray:
+    """A weight per node (len(v.tree) of them): the host takes the files' and adds them up the
+    folders; labels show each block's share of where the user is (unit "weight")."""
+    files = v.tree.query(kind="file", columns=("name",))
+    weights = np.zeros(len(v.tree), dtype=np.float64)
+    weights[files.ids] = [len(name) for name in files.names]
+    return weights
+''',
+        test="""
+async def test_by_name(host: MockHost) -> None:
+    frame = await host.visual("by_name")  # checked against the row contract
+    assert frame.size_unit == "weight"
+    assert len(frame.draw) > 0
+""",
+        permissions=("tree.read",),
+        doc="kind-visualization",
+    ),
+    "color-code": Part(
+        imports=("ColorInput", "Kind", "T"),
+        code='''
+@plugin.color_mode(
+    "big_small",
+    T("大小两档", "Big or small"),
+    palette=["muted", "accent", "warn"],
+    legend=[T("文件夹", "Folders"), T("小文件", "Small files"), T("大文件（≥ 1 MB）", "Big files (≥ 1 MB)")],
+)
+def big_small(c: ColorInput) -> np.ndarray:
+    """A palette index for each drawn row (c.ids: their nodes); 0 is the neutral colour."""
+    size = c.tree.col("size")[c.ids]
+    out = np.where(size >= 1 << 20, 2, 1).astype(np.uint8)
+    out[c.tree.col("kind")[c.ids] != Kind.FILE] = 0
+    return out
+''',
+        test="""
+async def test_big_small(host: MockHost) -> None:
+    frame = await host.color("big_small")
+    assert frame.pal is not None
+    assert int(frame.pal.max()) == 2  # big.iso
+""",
+        permissions=("tree.read",),
+        doc="kind-color_mode",
     ),
     "color": Part(
         toml="""
@@ -375,6 +433,10 @@ ALIASES = {
     "color_mode": "color",
     "node_set": "set",
     "node_field": "field",
+    "code_visual": "visual-code",
+    "visual_code": "visual-code",
+    "code_color": "color-code",
+    "color_code": "color-code",
 }
 
 
@@ -390,6 +452,9 @@ def parts_of(names: Iterable[str]) -> list[str]:
             if name not in out:
                 out.append(name)
     return out
+
+
+CJK = re.compile("[\u3400-\u9fff]")  # i18n: ignore
 
 
 def _title_of(plugin_id: str) -> str:
@@ -416,6 +481,8 @@ def render(plugin_id: str, parts: Sequence[str], *, title: str | None = None) ->
     chosen = parts_of(parts) if parts else list(DEFAULT)
     items = [PARTS[p] for p in chosen]
     name = title or _title_of(plugin_id)
+    # a Chinese title is the Chinese name; the English one comes from the id (check warns on CJK in en)
+    name_en = _title_of(plugin_id) if CJK.search(name) else name
     code = any(p.needs_code for p in items)
     perms = sorted({perm for p in items for perm in p.permissions})
     min_size = '"min_size"' if "setting" in chosen else ""
@@ -423,8 +490,8 @@ def render(plugin_id: str, parts: Sequence[str], *, title: str | None = None) ->
         f"# {plugin_id}: made by `spaceknife plugin new` (docs/plugin-dev.md). Parts: {', '.join(chosen)}.",
         f'id = "{plugin_id}"',
         'version = "0.1.0"',
-        f'name = {{ zh = "{name}", en = "{name}" }}',
-        f'description = {{ zh = "{name}（由 plugin new 生成）。", en = "{name} (made by plugin new)." }}',
+        f'name = {{ zh = "{name}", en = "{name_en}" }}',
+        f'description = {{ zh = "{name}（由 plugin new 生成）。", en = "{name_en} (made by plugin new)." }}',
     ]
     if code:
         toml.append('entry = "plugin.py"')
@@ -456,7 +523,7 @@ action = { open = "report:largest" }""")
             std.append("from pathlib import Path")
         if std:
             head += [*std, ""]
-        if {"export", "set"} & set(chosen):
+        if {"set", "visual-code", "color-code"} & set(chosen):
             head += ["import numpy as np", ""]
         names = ", ".join(sdk)
         if len(names) + 26 <= 110:
@@ -483,24 +550,41 @@ action = { open = "report:largest" }""")
         "",
         "from spaceknife_sdk.testing import MockHost, make_tree",
         "",
+        "# a small synthetic tree: {name: size | (size, modified) | {…}} (make_tree, docs: testing)",
+        "TREE = make_tree(",
+        "    {",
+        *(f"        {line}" for line in TREE),
+        "    }",
+        ")",
+        "",
         "",
         "@pytest.fixture",
         "async def host() -> AsyncIterator[MockHost]:",
-        '    """The plugin in this folder, with a small synthetic tree scanned."""',
+        '    """The plugin in this folder, with TREE scanned (in this process: fast)."""',
         "    async with MockHost.load(__file__) as h:",
-        "        h.scan(",
-        "            make_tree(",
-        "                {",
-        *(f"                    {line}" for line in TREE),
-        "                }",
-        "            )",
-        "        )",
+        "        h.scan(TREE)",
         "        yield h",
         "",
         "",
         "async def test_plugin_check(host: MockHost) -> None:",
         "    await host.check(strict=True)  # what `spaceknife plugin check` checks",
+        "",
+        "",
+        "async def test_in_a_plugin_process() -> None:",
+        '    """The same in a process of its own, as the app runs it (what only a process does: the',
+        '    clipboard, the sandbox, a slow call)."""',
+        "    async with MockHost.load(__file__, process=True) as h:",
+        "        h.scan(TREE)",
+        "        await h.check(strict=True)",
     ]
+    if "setting" in chosen and "report" in chosen:
+        tests += [
+            "",
+            "",
+            "async def test_the_report_follows_min_size(host: MockHost) -> None:",
+            '    await host.set_setting("min_size", 1 << 30)',
+            '    assert "big.iso" not in host.text(await host.report("largest"))',
+        ]
     for p in items:
         if p.test:
             tests += ["", "", p.test.strip("\n")]
@@ -508,6 +592,9 @@ action = { open = "report:largest" }""")
     for p in items:
         files.update(p.files)
     files[".gitignore"] = "__pycache__/\n.pytest_cache/\n.mypy_cache/\ndist/\n"
+    # its own lint settings (inside another project, that one's strict rules would apply)
+    files["ruff.toml"] = 'line-length = 110\n\n[lint]\nselect = ["E", "F", "W", "B", "UP"]\n'
+
     # for `pytest tests` in this folder (inside the SpaceKnife repository its own settings apply)
     files["pytest.ini"] = "[pytest]\nasyncio_mode = auto\nasyncio_default_fixture_loop_scope = function\n"
     return files
@@ -527,4 +614,28 @@ def write(folder: Path, plugin_id: str, parts: Sequence[str], *, title: str | No
     return out
 
 
-__all__ = ["DEFAULT", "PARTS", "Part", "parts_of", "render", "write"]
+def next_steps(folder: Path, parts: Sequence[str]) -> list[str]:
+    """What to run after ``plugin new`` for these parts (the CLI prints them)."""
+    chosen = parts_of(parts) if parts else list(DEFAULT)
+    out = [f"spaceknife plugin check {folder} --strict", f"uv run pytest {folder / 'tests'}"]
+    look = {
+        "report": "report:largest",
+        "visual": "visual:by_count",
+        "visual-code": "visual:by_name",
+        "color": "color:age",
+        "color-code": "color:big_small",
+        "export": "export:md",
+        "set": "set:big",
+        "cleanup": "cleanup:logs",
+        "field": "field:name_length --node notes.txt",
+    }
+    for p in chosen:
+        if p in look:
+            out.append(f"spaceknife plugin render {folder} {look[p]} --scan <a folder>")
+    if "panel" in chosen:
+        out.append(f"spaceknife plugin shot {folder} --open panel:main  # the real window, headless")
+    out.append(f"spaceknife plugin install {folder}")
+    return out
+
+
+__all__ = ["DEFAULT", "PARTS", "Part", "next_steps", "parts_of", "render", "write"]

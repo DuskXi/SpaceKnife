@@ -25,7 +25,7 @@ TREE = make_tree(
 async def host() -> AsyncIterator[MockHost]:
     async with MockHost.load(__file__) as h:
         h.scan(TREE)
-        h.set_setting("min_size", 1000)
+        await h.set_setting("min_size", 1000)
         yield h
 
 
@@ -46,6 +46,11 @@ async def test_report_and_cleanup(host: MockHost) -> None:
 
 
 async def test_field_and_node_set(host: MockHost) -> None:
+    # they only read the last search (a field has 1 s): nothing before one ran
+    assert await host.fields(node=host.find("sub/d.bin")) == []
+    assert await host.filter(":set:dupes") == []
+    await host.call("find")
+    await host.settled()
     fields = await host.fields(node=host.find("sub/d.bin"))
     assert [f.value for f in fields] == [2]
     assert await host.fields(node=host.find("c.bin")) == []
@@ -55,6 +60,6 @@ async def test_field_and_node_set(host: MockHost) -> None:
 async def test_in_a_plugin_process() -> None:
     async with MockHost.load(__file__, process=True) as h:  # as the app runs it
         h.scan(TREE)
-        h.set_setting("min_size", 1000)
+        await h.set_setting("min_size", 1000)
         assert len((await h.call("find"))["groups"]) == 1
         await h.check(strict=True)

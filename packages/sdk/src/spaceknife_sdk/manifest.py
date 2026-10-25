@@ -61,7 +61,7 @@ WHEN_WORDS = (
 WHEN_PREFIXES = ("setting:", "cap:", "plugin:", "source:", "ext:")
 MENUS = ("node", "inspector", "toolbar", "start")
 REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual")
-HOOKS = ("start", "stop", "scan_done", "scan_closed", "settings", "lang")
+HOOKS = ("start", "stop", "scan_done", "scan_closed", "settings", "lang", "basket")
 COLOR_BY = ("ext", "class", "age", "size", "depth", "name", "set", "insight")
 SIZE_METRICS = ("alloc", "size", "files", "items", "code")
 BASE_VISUALS = ("treemap", "flame", "flame_polar")
@@ -248,6 +248,7 @@ class InsightSpec(Spec):
     globs: list[str] = Field(
         default_factory=list, max_length=64, description="Only nodes whose path matches one are asked"
     )
+    title: TextLike | None = Field(default=None, description="What the enable dialog calls it")
 
 
 class PanelSpec(Spec):
@@ -445,6 +446,16 @@ class FolderRuleSpec(Spec):
     name: LocalName | None = Field(default=None, description="Default: made from the glob")
     priority: int = Field(default=0, ge=-100, le=100, description="Higher first; then declaration order")
     exclude: list[str] = Field(default_factory=list, max_length=32, description="Globs it does not apply to")
+    contains: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description="Only a folder holding one of these names (pyvenv.cfg, CACHEDIR.TAG, *.csproj)",
+    )
+    beside: list[str] = Field(
+        default_factory=list,
+        max_length=16,
+        description="Only a folder next to one of these names (target beside Cargo.toml)",
+    )
 
 
 class NodeSetSpec(Spec):
@@ -496,6 +507,7 @@ class ScanSourceSpec(Spec):
 class WatcherSpec(Spec):
     name: LocalName
     source: LocalName
+    title: TextLike | None = Field(default=None, description="What the enable dialog calls it")
 
 
 class AnnotatorSpec(Spec):

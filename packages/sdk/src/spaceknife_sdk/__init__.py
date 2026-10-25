@@ -31,7 +31,7 @@ from spaceknife_protocol.text import T, Text
 
 from . import layout
 from . import report as r
-from .context import Context
+from .context import Context, FileNotAllowed
 from .errors import Cancelled, PluginError
 from .models import (
     Change,
@@ -64,6 +64,7 @@ __all__ = [
     "ExportInfo",
     "ExportInput",
     "FieldValue",
+    "FileNotAllowed",
     "Flag",
     "Insight",
     "Kind",

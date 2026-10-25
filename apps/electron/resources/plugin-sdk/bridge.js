@@ -28,7 +28,7 @@ const langHandlers = new Set();
 const themeHandlers = new Set();
 const treeHandlers = new Set();
 let gotContext = false;
-const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {} };
+const info = { plugin: "", lang: document.documentElement.lang || "zh-CN", theme: null, context: {}, units: 1024 };
 let mock = null;
 
 let markReady;
@@ -92,6 +92,7 @@ function onPortMessage(ev) {
       maybeReady();
       return;
     case "lang":
+      if (m.units === 1000 || m.units === 1024) info.units = m.units;
       applyLang(m.lang);
       return;
   }
@@ -141,12 +142,23 @@ function request(msg, signal) {
   );
 }
 
+function sameParams(a, b) {
+  return JSON.stringify(a || {}) === JSON.stringify(b || {});
+}
+
 function answerMock(msg) {
   if (msg.type === "call") {
     const table = msg.method.startsWith("core:") ? mock.core || {} : mock.calls || {};
     const key = msg.method.startsWith("core:") ? msg.method.slice(5) : msg.method;
     if (!(key in table)) throw Object.assign(new Error(`mock: no answer for ${msg.method}`), { code: -32601 });
-    return table[key];
+    // an answer per params: "calls": { "find": [{ "params": { "q": "a" }, "result": … }, …] }
+    const answer = table[key];
+    if (Array.isArray(answer) && answer.length && answer.every((x) => x && typeof x === "object" && "result" in x)) {
+      const hit = answer.find((x) => sameParams(x.params, msg.params)) || answer.find((x) => !("params" in x));
+      if (!hit) throw Object.assign(new Error(`mock: no answer for ${msg.method} with these params`), { code: -32602 });
+      return hit.result;
+    }
+    return answer;
   }
   if (msg.type === "host") {
     console.info("[sk mock] host", msg.op, msg.args);
@@ -282,6 +294,33 @@ const sk = {
     url: (url) => host("url")({ url }),
     copy: (text) => host("copy")({ text }),
     basket: (nodes, reason, scanId) => host("basket")({ nodes, reason: reason || "", scan_id: scanId }),
+  },
+  /** Numbers as the app writes them (the user's size unit: 1000 or 1024). */
+  format: {
+    size(bytes) {
+      const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+      const base = info.units;
+      let v = Number(bytes);
+      let i = 0;
+      while (Math.abs(v) >= base && i < units.length - 1) {
+        v /= base;
+        i++;
+      }
+      if (i === 0) return `${Math.round(v)} B`;
+      if (Math.abs(Number(v.toFixed(1))) >= base && i < units.length - 1) {
+        v /= base;
+        i++;
+      }
+      return `${v.toFixed(1)} ${units[i]}`;
+    },
+    count: (n) => Number(n).toLocaleString("en-US"),
+    /** unix seconds as YYYY-MM-DD HH:mm (local time) */
+    date(seconds) {
+      if (!seconds) return "—";
+      const d = new Date(seconds * 1000);
+      const p = (n) => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    },
   },
   /** The text in the interface language. */
   t: (zh, en, fields) => {

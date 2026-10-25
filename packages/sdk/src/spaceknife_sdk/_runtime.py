@@ -29,7 +29,7 @@ from pydantic import BaseModel, ValidationError
 from spaceknife_protocol.binary import decode_frame, encode_frame
 from spaceknife_protocol.errors import ErrorCode, RequestError
 from spaceknife_protocol.plugins import NodeRef, ReportContext
-from spaceknife_protocol.text import CATALOG, LANG
+from spaceknife_protocol.text import CATALOG, LANG, UNIT_BASE
 
 from . import wire
 from ._current import CURRENT
@@ -229,6 +229,7 @@ class Dispatcher:
             LANG.set(str(ctx_info.get("lang") or self.state.lang)),
             CATALOG.set(self.state.catalog),
             CURRENT.set(ctx),
+            UNIT_BASE.set(info.units),
         )
         task = asyncio.current_task()
         if task is not None:
@@ -240,6 +241,7 @@ class Dispatcher:
                 raise
             raise error_of(exc, self.log) from None
         finally:
+            UNIT_BASE.reset(tokens[3])
             CURRENT.reset(tokens[2])
             CATALOG.reset(tokens[1])
             LANG.reset(tokens[0])
@@ -349,7 +351,7 @@ class Dispatcher:
             )
             await self._call(h, ctx, str(p.get("uri", "")), out)
             out.flush()
-            return {"root": out.root, "entries": out.sent}, []
+            return {"root": out.root, "entries": out.sent, "duplicates": out.duplicates}, []
         if kind in ("watch", "stream"):
             if kind == "stream" and h.params is not None and h.arity >= 2:
                 agen = h.fn(ctx, h.params.model_validate(dict(p)))

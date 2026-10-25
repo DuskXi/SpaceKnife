@@ -172,6 +172,9 @@ class OpsService:
         state = await self.state()
         for session in list(self.server.sessions):
             session.emit(EVENT_BASKET, po.BasketEvent(state=state))
+        plugins = getattr(self.server, "plugins", None)
+        if plugins is not None:
+            plugins.basket_changed()  # the plugins' basket hooks
         return state
 
     # ------------------------------------------------------------- path forms (W5-09…14)

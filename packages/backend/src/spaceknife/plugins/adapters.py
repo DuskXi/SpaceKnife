@@ -236,11 +236,17 @@ def _command(
         state_name, text = spec.status.state, spec.status.text
 
         def status_fn(c: pal.Context, state_name: str = state_name, text: Text = text) -> str:
+            from spaceknife_protocol.text import UNIT_BASE
+
             values = rec.states.get(state_name, {})
+            st = c.settings
+            token = UNIT_BASE.set(st.unit_base() if st is not None and hasattr(st, "unit_base") else 1024)
             try:
                 return text.format(**values).get(i18n_language())
-            except (KeyError, IndexError, ValueError):
+            except (KeyError, IndexError, ValueError, TypeError):
                 return ""
+            finally:
+                UNIT_BASE.reset(token)
 
         status = status_fn
     needs = list(_needs(host, rec, spec.when))
@@ -623,7 +629,15 @@ def _one(
                 rid,
                 pid,
                 spec,
-                (spec.glob, cls, spec.mode == "fallback", spec.priority, tuple(spec.exclude)),
+                (
+                    spec.glob,
+                    cls,
+                    spec.mode == "fallback",
+                    spec.priority,
+                    tuple(spec.exclude),
+                    tuple(spec.contains),
+                    tuple(spec.beside),
+                ),
             )
         ]
     if kind == "filter_preset":

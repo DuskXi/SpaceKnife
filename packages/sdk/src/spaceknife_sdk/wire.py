@@ -102,6 +102,7 @@ class Toast(Msg):
     text: str = Field(max_length=512)
     tone: Literal["info", "ok", "warn", "danger"] = "info"
     session: str | None = None
+    call: int | None = Field(default=None, ge=0, le=MAX_ID, description="The call that shows it")
 
 
 class Clipboard(Msg):

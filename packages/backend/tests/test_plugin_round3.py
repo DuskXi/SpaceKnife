@@ -18,7 +18,7 @@ TOML = """id = "t.round3"
 version = "0.1.0"
 name = { zh = "第三轮", en = "Round three" }
 entry = "plugin.py"
-permissions = ["tree.read", "clipboard"]
+permissions = ["tree.read", "clipboard", "files.read", "basket.propose"]
 
 [[settings]]
 name = "cols"
@@ -94,6 +94,38 @@ async def checked(ctx: Context, c: ActionContext) -> Seen:
 @plugin.command("copy", T("复制", "Copy"))
 async def copy(ctx: Context, c: ActionContext) -> None:
     ctx.clipboard.write_text(T("复制了", "copied"))
+
+
+@plugin.method
+def hashes(ctx: Context) -> Seen:
+    t = ctx.tree
+    ids = [t.find(p) for p in t.root_paths] + [t.find(t.root_paths[0] + "/" + n) for n in ("a.log", "b.txt")]
+    out = ctx.files.hash_many([i for i in ids if i is not None], limit=4)
+    try:
+        ctx.files.read("/etc/hostname" if "/" in t.root_paths[0] else "C:/Windows/win.ini")
+        outside = "read"
+    except Exception as exc:
+        outside = type(exc).__name__
+    return Seen(seen={"hashes": out, "outside": outside})
+
+
+@plugin.command("bin_them", T("放进删除篮", "Into the basket"))
+async def bin_them(ctx: Context, c: ActionContext) -> None:
+    t = ctx.tree
+    a, b = t.find(t.root_paths[0] + "/a.log"), t.find(t.root_paths[0] + "/b.txt")
+    ctx.basket.propose([(a, T("甲", "A"))])
+    ctx.basket.propose([(b, T("乙", "B"))])  # a second time in the same call: still one message
+
+
+@plugin.command("take_back", T("拿回", "Take back"))
+async def take_back(ctx: Context, c: ActionContext) -> Seen:
+    t = ctx.tree
+    return Seen(seen={"removed": ctx.basket.withdraw([t.find(t.root_paths[0] + "/a.log")])})
+
+
+@plugin.method
+def numbers(ctx: Context) -> Seen:
+    return Seen(seen={"size": ctx.fmt.size(1536000), "count": ctx.fmt.count(12345), "t": ctx.t("{n:size}", "{n:size}", n=2048)})
 
 
 @plugin.on("scan_done")
@@ -239,6 +271,40 @@ async def test_multi_select_and_unit_settings(plugin: Path) -> None:
         c = next(c for c in EXTENSIONS.of("export_format") if c.owner == "t.round3")
         opt = _option(c.spec.options[0], "zh-CN", "t.round3", host.server)
         assert (opt.default, opt.group, opt.control) == ("name,path", "内容", "multi")
+
+
+@pytest.mark.parametrize("process", [False, True], ids=["inprocess", "process"])
+async def test_files_many_at_once_and_outside(plugin: Path, process: bool) -> None:
+    from spaceknife_sdk import FileNotAllowed
+
+    assert issubclass(FileNotAllowed, PermissionError)
+    tree = make_tree({"a.log": b"aaaa-and-more", "b.txt": b"bbbb"})
+    async with MockHost.load(plugin, process=process) as host:
+        host.scan(tree)
+        seen = (await host.call("hashes"))["seen"]
+        root, a, b = seen["hashes"]
+        assert root is None  # a folder: not read
+        assert a is not None and b is not None and a != b
+        assert seen["outside"] == "FileNotAllowed"
+
+
+async def test_one_basket_message_a_call_and_taking_back(plugin: Path) -> None:
+    async with MockHost.load(plugin) as host:
+        host.scan(make_tree({"a.log": 10, "b.txt": 20}))
+        await host.command("bin_them")
+        assert {i.reason for i in host.basket} == {"甲", "乙"}
+        assert len([t for t in host.toasts if "删除篮" in t]) == 1
+        removed = (await host.command("take_back"))["seen"]["removed"]
+        assert removed == 1 and [i.reason for i in host.basket] == ["乙"]
+
+
+async def test_numbers_as_the_interface_writes_them(plugin: Path) -> None:
+    async with MockHost.load(plugin) as host:
+        host.scan(TREE)
+        seen = (await host.call("numbers"))["seen"]
+        assert seen["count"] == "12,345"
+        assert seen["size"] in ("1.5 MB", "1.5 MB")  # 1024 or 1000: the user's unit base
+        assert seen["t"] in ("2.0 KB", "2.0 KB")
 
 
 async def test_a_visualization_starts_with_its_own_colour_mode(plugin: Path) -> None:

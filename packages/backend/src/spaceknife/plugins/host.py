@@ -134,6 +134,7 @@ class PluginHost:
         self._set_cache: dict[tuple[str, str], tuple[tuple[int, int], float, np.ndarray]] = {}
         self._field_cache: dict[tuple[str, str, int, int, int, str], pp.PluginField | None] = {}
         self._field_inflight: set[tuple[str, str, int, int, int, str]] = set()
+        self._basket_hook_due = False
         self._reasons: dict[tuple[str, str, str, str, int], str] = {}  # change annotators' answers
         self._legends: dict[tuple[str, str, str], tuple[int, list[tuple[str, Any]]]] = {}
         self._legend_asked: set[tuple[str, str, str]] = set()
@@ -620,6 +621,7 @@ class PluginHost:
         call_id = next(self._ids)
         info = {
             "lang": i18n.language(),
+            "units": self.server.settings.unit_base(),  # ctx.fmt.size writes sizes as the app does
             "session": session.id if session is not None else None,
             "timeout": max(0.0, deadline - loop.time()) if deadline is not None else LONG_CALL_S,
         }
@@ -705,6 +707,8 @@ class PluginHost:
                 assert self._loop is not None
                 self._loop.call_later(1.0 / STATES_PER_S, self._push_state, rec, name)
         elif type == "toast":
+            if isinstance(payload.get("call"), int):
+                self.api.toasted(int(payload["call"]))
             text = str(payload.get("text", ""))[:512]
             tone = payload.get("tone", "info")
             ev = pp.PluginToastEvent(
@@ -1241,6 +1245,30 @@ class PluginHost:
         for akey in [k for k in self._reasons if k[0].startswith(prefix)]:
             self._reasons.pop(akey, None)
 
+    def basket_changed(self) -> None:
+        """The delete basket changed: the plugins with a ``basket`` hook hear of it (once for a
+        burst of changes)."""
+        if self._loop is None or self._closed:
+            return
+        wanted = [
+            rec
+            for rec in self.records.values()
+            if rec.state == "enabled"
+            and any(c.kind == "hook" and c.spec.event == "basket" for c in EXTENSIONS.owned(rec.id))
+        ]
+        if not wanted or self._basket_hook_due:
+            return
+        self._basket_hook_due = True
+
+        async def later() -> None:
+            await asyncio.sleep(0.3)
+            self._basket_hook_due = False
+            for rec in wanted:
+                if rec.state == "enabled":
+                    await self._hook(rec, "basket")
+
+        self._spawn(later())
+
     def invalidate(self, plugin: str, kinds: Sequence[str] = ()) -> None:
         """Drop what the host keeps of a plugin's answers (fields, node sets, a code visualization's
         weights, change reasons): its settings changed, or it called ``ctx.invalidate()``. The
@@ -1256,6 +1284,12 @@ class PluginHost:
         if views is not None and self._loop is not None:
             with contextlib.suppress(RuntimeError):
                 self._spawn(views.plugin_changed(plugin))
+        if self._loop is not None:  # its code legends: asked again now, ready when the menu opens
+            lang = i18n.language()
+            for c in EXTENSIONS.owned(plugin):
+                if c.kind == "color_mode":
+                    with contextlib.suppress(RuntimeError):
+                        self.legend_of(c, lang)
 
     def settings_changed(self) -> None:
         """The settings changed: each plugin whose own values changed gets its ``settings`` hook with
@@ -1294,6 +1328,8 @@ class PluginHost:
             if key not in self._legend_asked:
                 self._legend_asked.add(key)
                 self._spawn(self._ask_legend(c, lang, key))
+            if hit is not None:
+                return hit[1]  # the one from before its settings changed, until the new one is here
         impl = c.impl
         if hasattr(impl, "legend"):
             return [(t, None) for t in impl.legend(lang)]
@@ -1320,12 +1356,29 @@ class PluginHost:
             self._legend_asked.discard(key)
 
     def fire(self, event: str, **args: Any) -> None:
-        """Run every enabled plugin's ``event`` hooks (not waited for)."""
+        """Run every enabled plugin's ``event`` hooks (not waited for). A finished scan also starts
+        the processes of the plugins whose fields or insights the details panel asks right away,
+        so the first question does not wait for a process to start (a cold start is not counted in
+        a field's time anyway, but the user waits for it)."""
         owners = {c.owner for c in EXTENSIONS.of("hook") if c.spec.event == event and c.owner != BUILTIN}
         for pid in owners:
             rec = self.records.get(pid)
             if rec is not None and rec.state == "enabled":
                 self._spawn(self._hook(rec, event, **args))
+        if event == "scan_done":
+            asked = {c.owner for kind in ("node_field", "insight") for c in EXTENSIONS.of(kind)}
+            for pid in asked - {BUILTIN}:
+                rec = self.records.get(pid)
+                if (
+                    rec is not None
+                    and rec.state == "enabled"
+                    and (rec.runtime is None or rec.runtime.state != "running")
+                ):
+                    self._spawn(self._warm(rec))
+
+    async def _warm(self, rec: PluginRecord) -> None:
+        with contextlib.suppress(Exception):  # a plugin that cannot start says so when it is asked
+            await self._ensure_started(rec)
 
     async def push_update(self, fields: dict[str, Any]) -> None:
         for rec in self.records.values():

@@ -67,6 +67,7 @@
  "洞察规则文件": "Insight rule files",
  "洞察（代码）": "Insights (code)",
  "清理": "Cleanups",
+ "监控「{source}」": "Watching “{source}”",
  "监控器": "Watchers",
  "监控器 {id} 已停止：{why}": "Watcher {id} stopped: {why}",
  "网页面板": "Web panels",

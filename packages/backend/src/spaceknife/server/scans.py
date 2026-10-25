@@ -1025,6 +1025,11 @@ class ScanManager:
 
     async def save_snapshot(self, scan_id: str, target: str | None) -> p.SnapshotInfo:
         handle = self.get(scan_id)
+        if handle.running and handle.status().state == "done" and handle.task is not None:
+            # the tree is complete; the scan is still finishing (its automatic snapshot, the name
+            # index): wait for that instead of refusing a save asked for right after "done"
+            with contextlib.suppress(Exception):  # a timeout, or the scan failed after all
+                await asyncio.wait_for(asyncio.shield(handle.task), 60)
         if handle.running:
             raise RpcError(ErrorCode.SCAN_BUSY, tr("扫描完成（或停止）后才能保存快照"))
         path = Path(target) if target else snapshot.auto_path([r.path for r in handle.roots])

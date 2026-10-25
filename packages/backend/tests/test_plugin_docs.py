@@ -131,3 +131,27 @@ def test_the_cli_finds_it() -> None:
     part = docs.section(TEXT, "kind-report")
     assert part is not None and part.startswith('<a id="kind-report"></a>') and "#### 报告" in part
     assert '<a id="kind-node_field"></a>' not in part  # stops at the next section
+
+
+QUICK = (ROOT / "docs" / "plugin-quick.md").read_text(encoding="utf-8")
+
+
+def test_the_quick_reference_is_one_short_page() -> None:
+    # what an author reads first (plugin docs prints it): a fraction of the guide
+    assert len(QUICK.encode("utf-8")) < 12_000
+    assert len(QUICK.encode("utf-8")) * 5 < len(TEXT.encode("utf-8"))
+
+
+def test_the_quick_reference_points_at_what_exists() -> None:
+    from spaceknife_sdk import report
+    from spaceknife_sdk.testing import MockHost
+
+    for anchor in set(re.findall(r"`((?:kind|api|quick)-[a-z_]+)`", QUICK)):
+        assert docs.find(anchor) is not None, anchor
+    for name in set(re.findall(r"\bhost\.([a-z_]+)\b", QUICK)):
+        assert hasattr(MockHost, name), name
+    for name in set(re.findall(r"\br\.([a-z_]+)\(", QUICK)):
+        assert hasattr(report, name), name
+    parts = re.search(r"`--with` 的部分[^`]*`([^`]+)`", QUICK)
+    assert parts is not None
+    assert set(parts.group(1).split()) == set(scaffold.PARTS)

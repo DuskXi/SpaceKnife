@@ -790,6 +790,8 @@ class PluginRule:
     regex: re.Pattern[str] = field(default=re.compile(""), compare=False)
     priority: int = 0  # higher first, then the order they were declared in
     exclude: tuple[re.Pattern[str], ...] = field(default=(), compare=False)
+    contains: tuple[str, ...] = ()  # lower-case name globs: one of the folder's children must match
+    beside: tuple[str, ...] = ()  # … or one of its siblings
 
 
 _plugin_rules: tuple[PluginRule, ...] = ()
@@ -838,15 +840,19 @@ def compile_glob(glob: str) -> re.Pattern[str]:
 
 
 def set_plugin_rules(rules: Iterable[tuple[Any, ...]]) -> None:
-    """The enabled plugins' folder rules: (glob, class id, fallback[, priority[, exclude globs]]),
-    tried by priority (higher first), then in the order given; the first that matches decides."""
+    """The enabled plugins' folder rules: (glob, class id, fallback[, priority[, exclude globs[,
+    contains[, beside]]]]), tried by priority (higher first), then in the order given; the first
+    that matches decides. ``contains`` / ``beside``: name globs one of the folder's children / one
+    of its siblings must match (a ``target`` beside ``Cargo.toml``, a folder holding ``pyvenv.cfg``)."""
     global _plugin_rules, _plugin_version
     made = []
     for r in rules:
         g, c, fb = r[0], r[1], r[2]
         prio = int(r[3]) if len(r) > 3 else 0
         excl = tuple(compile_glob(x) for x in (r[4] if len(r) > 4 else ()))
-        made.append(PluginRule(g, c, fb, compile_glob(g), prio, excl))
+        inside = tuple(x.lower() for x in (r[5] if len(r) > 5 else ()))
+        beside = tuple(x.lower() for x in (r[6] if len(r) > 6 else ()))
+        made.append(PluginRule(g, c, fb, compile_glob(g), prio, excl, inside, beside))
     order = sorted(range(len(made)), key=lambda i: (-made[i].priority, i))
     _plugin_rules = tuple(made[i] for i in order)
     _plugin_version += 1
@@ -881,6 +887,10 @@ def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.n
                 continue
             if any(x.match(path) for x in r.exclude):
                 continue
+            if r.contains and not _holds(store, d, r.contains):
+                continue
+            if r.beside and not _holds(store, int(c["parent"][d]), r.beside, skip=d):
+                continue
             if d in user or any(a in user for a in store.ancestors(d)):
                 break
             idx = table.ids.index(r.class_id)
@@ -895,6 +905,22 @@ def _with_plugin_rules(store: NodeStore, table: ClassTable, e: _Entry, col: np.n
             break
     _overlays[store] = (key, out)
     return out
+
+
+def _holds(store: NodeStore, folder: int, names: tuple[str, ...], skip: int = -1) -> bool:
+    """Whether one of ``folder``'s children (``skip`` aside) is called one of ``names`` (lower-case
+    globs, matched without case)."""
+    from fnmatch import fnmatchcase
+
+    if folder <= 0:
+        return False
+    for ch in store.children(folder):
+        if int(ch) == skip:
+            continue
+        name = store.name(int(ch)).lower()
+        if any(fnmatchcase(name, pat) for pat in names):
+            return True
+    return False
 
 
 def resolve(col: np.ndarray, base: np.ndarray, other: int) -> np.ndarray:

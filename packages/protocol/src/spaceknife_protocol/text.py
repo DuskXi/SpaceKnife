@@ -12,6 +12,8 @@ there is no entry.
 
 from __future__ import annotations
 
+import string
+import time
 from collections.abc import Mapping
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Annotated, Any
@@ -28,7 +30,82 @@ from pydantic import (
 
 LANG: ContextVar[str] = ContextVar("spaceknife_lang", default="zh-CN")
 CATALOG: ContextVar[Mapping[str, str] | None] = ContextVar("spaceknife_catalog", default=None)
+UNIT_BASE: ContextVar[int] = ContextVar("spaceknife_unit_base", default=1024)  # the user's 1000 / 1024
 MAX_TEXT = 4096
+_UNITS = ("B", "KB", "MB", "GB", "TB", "PB")
+
+
+def fmt_size(n: float, base: int | None = None, *, whole: bool = False) -> str:
+    """Bytes as the app writes them: ``"63.6 GB"`` (the user's unit base, as the interface)."""
+    b = base or UNIT_BASE.get()
+    v, i = float(n), 0
+    while abs(v) >= b and i < len(_UNITS) - 1:
+        v /= b
+        i += 1
+    if i == 0:
+        return f"{round(v)} B"
+    if abs(round(v, 1)) >= b and i < len(_UNITS) - 1:  # 1048575 B is "1.0 MB", not "1024.0 KB"
+        v /= b
+        i += 1
+    text = str(round(v)) if whole and abs(v - round(v)) < 0.05 else f"{v:.1f}"
+    return f"{text} {_UNITS[i]}"
+
+
+def fmt_count(n: float) -> str:
+    """``"1,234,567"``."""
+    return f"{round(n):,}"
+
+
+def fmt_date(ts: float) -> str:
+    """Unix seconds as ``YYYY-MM-DD HH:MM`` in local time (as the interface); ``—`` for 0."""
+    if not ts:
+        return "—"
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
+def fmt_ago(ts: float, lang: str | None = None, now: float | None = None) -> str:
+    """``"3 天前"`` / ``"3 days ago"`` (minutes, hours, days, months, years)."""
+    en = (lang or LANG.get()) == "en"
+    if not ts:
+        return "unknown" if en else "未知"
+    s = max(0.0, (time.time() if now is None else now) - ts)
+    if s < 60:
+        return "just now" if en else "刚刚"
+    for size, zh, one in (
+        (31_536_000, "年", "year"),
+        (2_592_000, "个月", "month"),
+        (86_400, "天", "day"),
+        (3_600, "小时", "hour"),
+        (60, "分钟", "minute"),
+    ):
+        if s >= size:
+            k = int(s // size)
+            return (f"{k} {one}{'' if k == 1 else 's'} ago") if en else f"{k} {zh}前"
+    return "just now" if en else "刚刚"
+
+
+class _Formatter(string.Formatter):
+    """``str.format`` plus the app's ways of writing numbers: ``{n:size}`` ``{n:count}``
+    ``{t:date}`` ``{t:ago}`` (as the interface writes them, in this formatter's language)."""
+
+    def __init__(self, lang: str) -> None:
+        self.lang = lang
+
+    def format_field(self, value: Any, format_spec: str) -> str:
+        if format_spec == "size":
+            return fmt_size(float(value))
+        if format_spec == "count":
+            return fmt_count(float(value))
+        if format_spec == "date":
+            return fmt_date(float(value))
+        if format_spec == "ago":
+            return fmt_ago(float(value), self.lang)
+        return str(super().format_field(value, format_spec))
+
+
+def format_text(template: str, lang: str = "zh-CN", /, **fields: Any) -> str:
+    """``template.format(**fields)`` with ``:size`` ``:count`` ``:date`` ``:ago``."""
+    return _Formatter(lang).format(template, **fields)
 
 
 class Text(BaseModel):
@@ -49,8 +126,19 @@ class Text(BaseModel):
         return catalog.get(self.zh, self.zh) if catalog else self.zh
 
     def format(self, **fields: Any) -> Text:
-        """Fill ``str.format`` placeholders in both languages; the result is still a :class:`Text`."""
-        return Text(zh=self.zh.format(**fields), en=self.en.format(**fields) if self.en else "")
+        """Fill ``str.format`` placeholders in both languages; the result is still a :class:`Text`.
+        Besides the usual specs: ``{n:size}`` (bytes as the app writes them: 1.2 GB), ``{n:count}``
+        (1,234), ``{t:date}`` (unix seconds: 2026-10-24 21:30), ``{t:ago}`` (3 天前 / 3 days ago)."""
+        return Text(
+            zh=format_text(self.zh, "zh-CN", **fields),
+            en=format_text(self.en, "en", **fields) if self.en else "",
+        )
+
+    def plural(self, n: int, one: str, /, **fields: Any) -> Text:
+        """``T("{n} 组", "{n} groups").plural(n, "1 group")``: the English text for one when ``n``
+        is 1 (Chinese has one form); ``n`` is a field too."""
+        en = one if n == 1 else self.en
+        return Text(zh=self.zh, en=en).format(n=n, **fields)
 
     def __str__(self) -> str:
         return self.get()
@@ -137,4 +225,20 @@ when the model is serialized, so a model made once serves every language)."""
 TextLike = Annotated[Text, BeforeValidator(as_text)]
 """A declared text: ``T(...)``, ``{zh, en}`` (TOML) or a Chinese string (English from the catalog)."""
 
-__all__ = ["CATALOG", "LANG", "LocalStr", "LocalText", "T", "Text", "TextLike", "as_text", "localize"]
+__all__ = [
+    "CATALOG",
+    "LANG",
+    "UNIT_BASE",
+    "LocalStr",
+    "LocalText",
+    "T",
+    "Text",
+    "TextLike",
+    "as_text",
+    "fmt_ago",
+    "fmt_count",
+    "fmt_date",
+    "fmt_size",
+    "format_text",
+    "localize",
+]

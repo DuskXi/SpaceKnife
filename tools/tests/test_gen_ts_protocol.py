@@ -61,12 +61,13 @@ def test_a_plugin_schema_becomes_its_panel_types() -> None:
     assert "  find: { params: ExampleDupesFindParams; result: ExampleDupesFindResult };" in text
     assert "  /** Groups of files with the same content. */\n" in text
     assert "  ping: { params: Record<string, never>; result: ExampleDupesPong };" in text
-    assert "export interface Events {\n  progress: ExampleDupesProgress;\n}" in text
-    assert "export interface States {\n  status: ExampleDupesStatus;\n}" in text
+    # type aliases, not interfaces: Sk<M extends Record<string, …>> takes them (strict tsc, TS2344)
+    assert "export type Events = {\n  progress: ExampleDupesProgress;\n};" in text
+    assert "export type States = {\n  status: ExampleDupesStatus;\n};" in text
     assert text.endswith("declare const sk: Sk<Methods, Events, States>;\nexport default sk;\n")
 
 
 def test_a_plugin_without_code_gets_empty_maps() -> None:
     text = g.generate_plugin({"plugin": "t.decl"})
     for name in ("Methods", "Events", "States"):
-        assert f"export interface {name} {{\n}}" in text
+        assert f"export type {name} = {{\n}};" in text

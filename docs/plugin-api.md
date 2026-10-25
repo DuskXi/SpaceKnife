@@ -2,7 +2,7 @@
 
 [plugin-dev.md](plugin-dev.md) 讲每种贡献怎么写；这一份是查阅用的：插件拿到和交回的每个对象有哪些字段、调用发生在哪、缓存什么时候作废、钩子收到什么、路径怎么写、能引用哪些图标和命令。带「生成」字样的表由 `tools/gen_plugin_api.py` 从代码生成，测试保证它们和代码一致。
 
-- **命令里读**：`spaceknife plugin docs --api`；一节：`spaceknife plugin docs --section api-cache`（锚点都以 `api-` 开头，`--list` 列出两份文档的全部锚点）。
+- **命令里读**：`spaceknife plugin docs --api`；一节：`spaceknife plugin docs --section api-cache`（锚点都以 `api-` 开头，`--list` 列出三份文档的全部锚点，`--search 词` 找到提到它的行）。先读的是一页的[速查](plugin-quick.md)。
 - **字段名**：Python 里是属性（`scan.items`），旧代码按 dict 读（`scan["items"]`、`scan.get("items")`）也行。
 
 <a id="api-ctx"></a>
@@ -18,8 +18,10 @@
 | `ctx.node` | 调用针对的节点：字段和洞察的那一项，报告和清理的 `c.node`；没有时是 None |
 | `ctx.tree` | 调用带的扫描（`c.scan_id`），否则用户眼前的扫描；都没有时抛 `PluginError`「需要先完成扫描」 |
 | `ctx.scan(scan_id)` | 另一个打开着的扫描的树；`ctx.scans()` 列出它们（[`ScanInfo`](#api-models)，新的在前，`front` 标出眼前的那个） |
-| `ctx.invalidate(*kinds)` | 丢掉宿主缓存的本插件的回答（[缓存](#api-cache)）；`kinds` 是 `node_field` `node_set` `visualization` `change_annotator`，不写就是全部。界面随后重新要字段、重新过滤、重画 |
+| `ctx.invalidate(*kinds)` | 丢掉宿主缓存的本插件的回答（[缓存](#api-cache)）；`kinds` 是 `node_field` `node_set` `visualization` `color_mode` `change_annotator`，不写就是全部。界面随后重新要字段、重新过滤、重画、重新取图例 |
+| `ctx.fmt` | `size(n)`（用户的 1000 / 1024，和界面一样：`1.5 MB`）`count(n)`（`1,234`）`date(t)`（unix 秒 → `2026-10-24 21:30`，本地时间）`ago(t)`（`3 天前` / `3 days ago`）。导出、提示、文字单元格里用它；报告的表格列写单位就行（前端格式化） |
 | `ctx.clipboard.write_text(text)` | 把文字放进剪贴板（要 `clipboard`）：只对发起这次调用的那个窗口有效，界面提示「〈插件〉复制了文字」；钩子、监控器这类没有用户发起的调用不复制 |
+| `ctx.basket.propose(items, reason)` / `.withdraw(items)` | `items` 的每项是节点（下标、`Node`、`NodeRef`、绝对路径）或 `(节点, 原因)`；一次调用里放多少次都只提示一次（调用自己 `ctx.toast` 时不提示）。`withdraw` 只拿回本插件放进去的；用户拿出或删掉后插件收到 `basket` 钩子 |
 | `ctx.deadline` | 这次调用的截止时间（`time.monotonic()` 的值）；`ctx.check()` 过了它就抛 `Cancelled` |
 | `ctx.call(method, params)` | 白名单里的内置方法，返回 dict（[表](#api-core)） |
 | `ctx.log` | 写进程序的日志面板，带「plugin:〈id〉」来源；`print` 只进插件进程的 stderr（插件页「最近的错误输出」） |
@@ -32,7 +34,7 @@
 | 属性 | 说明 |
 |---|---|
 | `scan_id` | 扫描的 id |
-| `n` | 节点数：下标 `0 … n-1` |
+| `n`、`len(tree)` | 节点数：下标 `0 … n-1` |
 | `roots` | 根的下标（扫描的每个文件夹一个，通常是 `[1]`）；0 号节点是虚拟的顶层节点，不是文件夹 |
 | `root_paths` | 根的路径，和 `roots` 一一对应 |
 | `virtual` | 这棵树不在磁盘上（`on_disk = false` 的扫描来源） |
@@ -42,7 +44,9 @@
 
 **方法**：`node(id)` `nodes(ids)` → [`Node`](#api-models)；`name(id)` `names(ids)`；`path(id)` `paths(ids)`；`rel_path(id, under=None)` `rel_paths(ids, under=None)`；`root_of(id)`；`parent(id)`；`children(id)` → 下标数组；`walk(id=None, chunk=…)` → 一块块下标（子树先序）；`col(name)` `cols(*names)` → 只读的整列；`query(…)` → `Rows`；`find(path)` → 下标或 None；`ref(id)` → [`NodeRef`](#api-models)；`file_ids(ids)` → `(设备, 文件 id, 链接数)`（要 `files.read`）；`close()`（快照用完时）。
 
-**层级**：0 号节点 `depth = 0`，根 `depth = 1`，根下面一层 `2`。`Node.parent` 对 0 号节点是 −1，对根是 0。
+**层级**：0 号节点 `depth = 0`，根 `depth = 1`，根下面一层 `2`。`Node.parent` 对 0 号节点是 −1，对根是 0。根的 `name` 是它的完整路径。
+
+**边界**：`query(under=X)` 是 X 下面的项，**不含 X**；不写 `under` 时含各个根（不含 0 号节点）。文件的 `tot_*` 列是 0；`bytes` 列对文件是占用、对文件夹是子树合计、对重复的硬链接是 0。
 
 <a id="api-paths"></a>
 **路径的写法**
@@ -75,7 +79,9 @@
 | 命令：详情面板（`inspector`）、工具栏（`toolbar`）、命令面板、按键 | 有焦点的视图的扫描 | 有焦点的视图 | 选中项；没选时是 None | `[node]` 或 `[]` |
 | 命令：开始页（`start`） | 眼前的扫描或 None | — | None | `[]` |
 
-聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数。
+聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`。
+
+导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。
 
 <a id="api-hooks"></a>
 ## 4. 钩子收到什么
@@ -88,8 +94,9 @@
 | `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉（它的树已经读不到了） |
 | `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值 |
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
+| `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
 
-钩子在后台跑，宿主不等结果，出错只记日志；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。
+钩子在后台跑，宿主不等结果，出错只记日志；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。测试里 `await host.hook(event, …)` 会检查事件名和参数，钩子抛的异常原样抛出。
 
 <a id="api-errors"></a>
 ## 5. 异常
@@ -98,9 +105,11 @@
 |---|---|---|
 | `PluginError(T(...))` | 插件自己要告诉用户的话 | 原样显示（`PLUGIN_ERROR`） |
 | `Cancelled` | `ctx.check()`：调用被取消或超时 | 不要吞掉，让它抛出去 |
-| `PermissionError` | 少了权限：`ctx.files`、`ctx.net`、`ctx.clipboard` …；审计钩子拦下的联网、写文件、开进程 | `PERMISSION_DENIED`。**它是 `OSError` 的子类**：`except OSError:` 会把它一起吞掉，读文件时写 `except (FileNotFoundError, IsADirectoryError):` 这样具体的异常 |
+| `PermissionError` | 少了权限：`ctx.files`、`ctx.net`、`ctx.clipboard` …；审计钩子拦下的联网、写文件、开进程。`ctx.files` 读范围外的文件是它的子类 `FileNotAllowed`；系统拒绝（用户自己也读不了）是普通的 `PermissionError` | `PERMISSION_DENIED`。**它是 `OSError` 的子类**：`except OSError:` 会把它一起吞掉，读文件时写 `except (FileNotFoundError, IsADirectoryError):` 这样具体的异常 |
 | `spaceknife_sdk.errors.HostError` | 宿主拒绝了插件的请求：`code` 是协议错误码（如 `STALE_TREE` −32018） | 不捕获时原样往外传 |
 | 其他异常 | 插件的 bug | 「插件出错：〈类型〉」，回溯进日志 |
+
+测试和命令行里失败的调用抛 `spaceknife_sdk.RequestError`：`.code`（`spaceknife_sdk.ErrorCode`，如 `PLUGIN_ERROR` `PERMISSION_DENIED`）、`.message`、`.data`。
 
 <a id="api-cache"></a>
 ## 6. 缓存
@@ -109,10 +118,10 @@
 
 | 什么 | 按什么记 | 什么时候作废 |
 |---|---|---|
-| 节点字段 | 字段、扫描、节点、树的 `version` | 树变了；插件设置变了；`ctx.invalidate("node_field")`。**返回 None 也会被记住**（这一项不显示，直到作废） |
+| 节点字段 | 字段、扫描、节点、树的 `version`、界面语言（详情面板和悬停卡共用一份） | 树变了；插件设置变了；`ctx.invalidate("node_field")`。**返回 None 也会被记住**（这一项不显示，直到作废） |
 | 节点集合（`:set:`） | 集合、扫描、树的 `version` | 同上（`"node_set"`）；作废后用到它的过滤自动重算 |
 | 代码可视化的权重 | 可视化、扫描、树的 `version`、它的 `options` 和本插件的设置 | 同上（`"visualization"`）；作废后视图重画 |
-| 配色的图例（`@plugin.color_legend`） | 配色、语言 | 设置变了、语言变了 |
+| 配色的图例（`@plugin.color_legend`） | 配色、语言 | 设置变了、语言变了、`ctx.invalidate("color_mode")`；新的算出来之前仍显示旧的，作废时宿主马上去取新的 |
 | 对比原因 | 对比、变化项 | 设置变了（`"change_annotator"`） |
 | 报告 | 不缓存：按 `refresh` 重新取 | — |
 
@@ -140,6 +149,10 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 
 [plugin-dev.md 7.2 节](plugin-dev.md#permissions)是总表。能改的：`@plugin.method(timeout=…)`、`@plugin.report(…, timeout=…)`（默认 30 秒）、`@plugin.cleanup(…, timeout=…)`（默认 120 秒），都 ≤ 600 秒；清单的 `limits.timeout_s` 是没写时的默认。等宿主的调用槽（每个插件同时 4 个）的时间也算在时限里；监控器和流不占调用槽。
 
+被取消的调用（时限到了、用户走开了）：普通 `def` 的函数在工作线程里，宿主立即答「取消」并丢掉它后来的结果；`async def` 的函数要在 `await` 处才停得下来——一直不 `await` 的长循环会卡住整个插件进程，5 秒后日志写出是哪个调用，30 秒后宿主结束进程。所有工作线程都卡在被取消的调用里时，插件进程也会重启。
+
+单位的值：`size` 字节；`count` 个数；`pct` 0–1 的小数（0.25 显示成 25%）；`date` `ago` unix 秒；`duration` 秒；`bytes_per_s` 字节每秒。
+
 长度：`Proposal.reason` ≤ 120 字；字段的值 ≤ 200 字；对比原因 ≤ 80 字；`ctx.toast` ≤ 512 字、每秒最多一条；`ctx.log` 一条 ≤ 4000 字；剪贴板 ≤ 1 MiB。
 
 <a id="api-frames"></a>
@@ -150,7 +163,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | 成员 | 说明 |
 |---|---|
 | `frame.draw.node` `key` `parent` `kind` `depth` `size` `count` `cls` | 每一行（一个画出的块）：节点、稳定的键、外层文件夹的行、种类（`RectKind`）、层级（1 是缩放根的子项）、面积依据、聚合块的项数、类别下标 |
-| `frame.root` | 缩放根本身（不是一行） |
+| `frame.root` | 缩放根本身（不是一行）；`frame.root.size` 是它的大小（权重可视化里是它的权重：标签的「占权重的 x%」以它为分母） |
 | `frame.pal` | 插件配色时每行的色板下标（`uint8`），否则 None |
 | `frame.size_unit` | `bytes` `count` `weight`：标签怎么写 |
 
@@ -172,17 +185,24 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `await host.visual(name)`、`await host.color(name)` | 一帧（[第 9 节](#api-frames)） |
 | `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文 |
 | `await host.source(name, uri)`、`host.status(scan_id)` | 用扫描来源扫描（失败抛 `RuntimeError`）；扫描的状态 |
-| `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子、对比原因 |
-| `host.snapshot(when=None)` | 把当前扫描存成快照（同一秒两次也不重名），给读历史的插件 |
+| `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常）、对比原因 |
+| `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样运行命令：调用它的方法并返回结果（不是 `call` 动作的命令返回动作本身） |
+| `await host.command_available(name, node=)` | 选中 `node` 时这个命令能不能跑：它的 `when` 和 `check` 给的原因，能跑时 None |
+| `await host.settled()` | 等宿主后台的事做完：悬停字段的后补、钩子、设置和语言的变化 |
+| `host.path("a/b")` | 节点在界面里的路径（系统的写法，Windows 是 `\`）：和插件写出的路径比较时用它 |
+| `await host.export_text(name, …)`、`export_bytes` | 同 `export`，类型确定（文字格式 / 二进制格式） |
+| `host.snapshot(when=None)` | 把当前扫描存成快照（同一秒两次也不重名；`when` 是文件名和快照里记的时间），给读历史的插件 |
 | `host.events`、`host.state(name)`、`host.toasts`、`host.clipboard`、`host.basket` | 副作用：事件、共享状态、提示、复制的文字、删除篮 |
 | `host.commands()`、`host.keys()`、`host.presets()` | 本插件的命令、按键（键 → 命令）、过滤预设 |
-| `await host.set_setting(name, value)`、`host.set_lang("en")` | 改设置（等 `settings` 钩子跑完）、改语言（触发 `lang` 钩子） |
+| `await host.set_setting(name, value)`、`await host.set_lang("en")` | 改设置（等 `settings` 钩子跑完）、改语言（触发 `lang` 钩子） |
 | `await host.check(strict=True)` | 和 `plugin check` 一样的检查 |
 | `host.call_sync(name, **params)` | 不写 async 测试时 |
 
 `make_tree({...}, root=None)` 的值：大小、`(大小, 修改时间)`、`bytes`（真的写成文件，可以读和哈希）、`(bytes, 修改时间)`、dict（文件夹）；修改时间是 unix 秒或 `"YYYY-MM-DD"`。默认的根在 `~/.spaceknife-mock/` 下（`SPACEKNIFE_MOCK_TREES` 可改），不在临时文件夹里，免得程序自带的「临时文件夹」规则盖住测试要看的东西；`root=` 指定别的位置。
 
-**测试插件自己的函数**：`from spaceknife_sdk.testing import plugin_module`，`mod = plugin_module(__file__)` 得到插件的 `plugin.py`（按宿主的方式导入，`lib/` 也在路径上）；不要写 `from plugin import x`，那可能导入别的插件的 `plugin.py`。
+**测试插件自己的函数**：`from spaceknife_sdk.testing import plugin_module`，`mod = plugin_module(__file__)` 得到插件的 `plugin.py`（按宿主的方式导入，`lib/` 也在路径上；它是另一份副本，看不到宿主里那份的状态，`monkeypatch` 它也影响不到宿主）；不要写 `from plugin import x`，那可能导入别的插件的 `plugin.py`。
+
+**合成扫描**：`started_at` 和 `finished_at` 是 `host.scan()` 的时间；`ScanInfo.snapshot` 对普通磁盘扫描是它自动保存的那个快照（不是「从哪个快照打开的」），快照打开的扫描是那个文件。
 
 **命令行里看历史**：`plugin call` / `plugin render` 的 `--history FILE`（可以写多次）把快照放进临时后端的历史，`ctx.snapshots.list()` 就能看到它们；`--snapshot FILE` 是把一个快照当作当前的扫描。
 
@@ -517,6 +537,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `note` | str | `""` | 补充说明 |
 | `command` | str | `""` | 清理命令：只显示、可复制，从不运行 |
 | `priority` | int | `0` | 详情面板里卡片按它从高到低排（规则的卡片用规则的 `priority`）（≥ -1000，≤ 1000） |
+| `replaces` | list[str] | `[]` | Ids of insight rules whose card on this node it replaces ('*': any rule's)（≤ 32 个） |
 
 #### `Proposal`
 

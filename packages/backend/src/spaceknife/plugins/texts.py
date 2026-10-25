@@ -101,7 +101,8 @@ def _item(kind: str, spec: dict[str, Any], lang: str, titles: dict[str, str]) ->
     if kind == "insight_rules":
         return str(spec.get("file", ""))
     if kind == "watcher":
-        return f"{name} ({spec.get('source', '')})"
+        source = str(spec.get("source", ""))
+        return shown or _("监控「{source}」").format(source=titles.get("source:" + source, source))
     return shown or name
 
 
@@ -114,14 +115,15 @@ def contribution_groups(desc: Any, lang: str, folder: Path | None = None) -> lis
         for kind, sub, pattern in (("insight_rules", "insights", "*.toml"), ("icon", "icons", "*.svg")):
             if (folder / sub).is_dir():
                 by_kind[kind] = [f"{sub}/{f.name}" for f in sorted((folder / sub).glob(pattern))]
-    titles: dict[str, str] = {}
+    titles: dict[str, str] = {}  # a key's command or filter preset, a watcher's source: by title
     for c in desc.contributions:
-        if c.get("kind") == "command":
+        kind = c.get("kind")
+        if kind in ("command", "filter_preset", "scan_source"):
             spec = c.get("spec") or {}
             t = spec.get("title") or {}
-            titles[str(spec.get("name", ""))] = str(
-                (t.get("en") if lang == "en" else None) or t.get("zh", "")
-            )
+            text = str((t.get("en") if lang == "en" else None) or t.get("zh", ""))
+            key = str(spec.get("name", ""))
+            titles["source:" + key if kind == "scan_source" else key] = text
     for c in desc.contributions:
         kind = str(c.get("kind", ""))
         item = _item(kind, c.get("spec") or {}, lang, titles)

@@ -20,13 +20,15 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Literal, TypeVar
 from urllib.parse import urlsplit
 
+import numpy as np
 from pydantic import BaseModel
 
 from spaceknife_protocol.plugins import NodeRef, Permission
-from spaceknife_protocol.text import LANG, Text, localize
+from spaceknife_protocol.text import LANG, Text, fmt_ago, fmt_count, fmt_date, fmt_size, localize
 
+from ._audit import trusted
 from .errors import Cancelled, HostError, PluginError
-from .tree import Node, TreeView
+from .tree import Flag, Kind, Node, TreeView
 
 if TYPE_CHECKING:
     from ._link import Link
@@ -83,6 +85,7 @@ class CallInfo:
     timeout: float = 30.0
     request: int | str | None = None  # the frontend's request id (progress events)
     slot: str | None = None  # a node field: "inspector" or "hover"
+    units: int = 1024  # the user's size unit base (1000 or 1024): ctx.fmt.size
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> CallInfo:
@@ -97,6 +100,7 @@ class CallInfo:
             timeout=float(d.get("timeout", 30.0)),
             request=d.get("request"),
             slot=d.get("slot"),
+            units=1000 if d.get("units") == 1000 else 1024,
         )
 
 
@@ -159,34 +163,58 @@ class Basket:
     def __init__(self, ctx: Context) -> None:
         self._ctx = ctx
 
-    def propose(self, items: Iterable[NodeLike], reason: Text | str = "") -> int:
-        """Add ``items`` with ``reason``; returns how many were added. Needs ``basket.propose``."""
+    def _entries(self, items: Iterable[Any], reason: Text | str) -> list[dict[str, Any]]:
+        tree = self._ctx.tree
+        out: list[dict[str, Any]] = []
+        for item in items:
+            why: Text | str = reason
+            if isinstance(item, tuple):  # (node, its own reason)
+                item, why = item
+            text = (localize(why) if why else "") or ""
+            if isinstance(item, Node):
+                out.append({"node": item.id, "reason": text})
+            elif isinstance(item, NodeRef):
+                if item.epoch == tree.epoch or not item.path:
+                    out.append({"node": item.node, "reason": text})
+                else:
+                    out.append({"path": item.path, "reason": text})
+            elif isinstance(item, str):
+                out.append({"path": item, "reason": text})
+            else:
+                out.append({"node": int(item), "reason": text})
+        return out
+
+    def propose(
+        self, items: Iterable[NodeLike | tuple[NodeLike, Text | str]], reason: Text | str = ""
+    ) -> int:
+        """Add ``items`` to the delete basket; returns how many were added. Each item is a node
+        (id, :class:`Node`, :class:`NodeRef` or absolute path) or ``(node, its own reason)``;
+        ``reason`` is for the items without one. However many calls a command makes, the user gets
+        one message for them at its end (none when the command shows its own toast). Needs
+        ``basket.propose``."""
         require(self._ctx._state, "basket.propose")
         tree = self._ctx.tree
-        nodes: list[int] = []
-        paths: list[str] = []
-        for item in items:
-            if isinstance(item, Node):
-                nodes.append(item.id)
-            elif isinstance(item, NodeRef):
-                nodes.append(item.node) if item.epoch == tree.epoch or not item.path else paths.append(
-                    item.path
-                )
-            elif isinstance(item, str):
-                paths.append(item)
-            else:
-                nodes.append(int(item))
         value, _ = self._ctx._link.request(
             "host.basket",
             {
                 "scan_id": tree.scan_id,
                 "epoch": tree.epoch,
-                "nodes": nodes,
-                "paths": paths,
-                "reason": localize(reason) if reason else "",
+                "items": self._entries(items, reason),
+                "call": self._ctx.call_info.id,
             },
         )
         return int(value.get("added", 0))
+
+    def withdraw(self, items: Iterable[NodeLike]) -> int:
+        """Take back items this plugin put in the basket (others' and the user's stay); returns how
+        many went. Needs ``basket.propose``."""
+        require(self._ctx._state, "basket.propose")
+        tree = self._ctx.tree
+        value, _ = self._ctx._link.request(
+            "host.basket_withdraw",
+            {"scan_id": tree.scan_id, "epoch": tree.epoch, "items": self._entries(items, "")},
+        )
+        return int(value.get("removed", 0))
 
 
 class Clipboard:
@@ -205,8 +233,46 @@ class Clipboard:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class Fmt:
+    """``ctx.fmt``: how the app writes sizes, counts and times (an export, a toast, a cell of text)."""
+
+    units: int = 1024
+
+    def size(self, n: float, *, whole: bool = False) -> str:
+        return fmt_size(n, self.units, whole=whole)
+
+    def count(self, n: float) -> str:
+        return fmt_count(n)
+
+    def date(self, ts: float) -> str:
+        return fmt_date(ts)
+
+    def ago(self, ts: float) -> str:
+        return fmt_ago(ts)
+
+
+class FileNotAllowed(PermissionError):
+    """``ctx.files``: the path is outside the scanned folders, the scan source's URI and the
+    plugin's own folders (the plugin may not read it). A ``PermissionError`` that is not this one
+    is the system's: the user's account may not read the file either."""
+
+
+# the allowed folders, resolved once per set of roots (resolving a path walks its folders)
+_BASES: dict[tuple[str, ...], tuple[str, ...]] = {}
+# readers that ctx.files.hash_many runs at once (each waits on the disk most of the time)
+HASH_THREADS = 4
+# flags of files whose contents are not here: reading them makes the cloud client fetch them
+NOT_LOCAL = Flag.CLOUD | Flag.OFFLINE
+
+
 class Files:
-    """``ctx.files``: read files inside the scanned folders. Needs ``files.read``."""
+    """``ctx.files``: read files inside the scanned folders. Needs ``files.read``.
+
+    Skip nodes flagged ``Flag.CLOUD`` or ``Flag.OFFLINE`` (placeholders: reading one downloads it)
+    and folders; :meth:`hash_many` does. ``FileNotAllowed`` (a ``PermissionError``): outside what
+    the plugin may read; another ``PermissionError``: the system refused (the user may not either).
+    """
 
     def __init__(self, ctx: Context) -> None:
         self._ctx = ctx
@@ -220,20 +286,28 @@ class Files:
             return item.path or self._ctx.tree.path(item.node)
         return self._ctx.tree.path(int(item))
 
+    def _bases(self) -> tuple[str, ...]:
+        st = self._ctx._state
+        key = (*st.roots, "", *st.picked, "", str(self._ctx.plugin.dir), str(self._ctx.plugin.storage))
+        hit = _BASES.get(key)
+        if hit is None:
+            hit = tuple(os.path.normcase(os.path.realpath(r)).rstrip("\\/") for r in key if r)
+            if len(_BASES) > 64:
+                _BASES.clear()
+            _BASES[key] = hit
+        return hit
+
     def open_path(self, path: str | os.PathLike[str]) -> str:
         """Check that ``path`` lies inside an open scan, a scan source's URI the user chose, or the
-        plugin's own folders; returns it."""
+        plugin's own folders; returns it resolved (``FileNotAllowed`` when it does not)."""
         require(self._ctx._state, "files.read")
         real = os.path.realpath(os.fspath(path))
-        st = self._ctx._state
-        allowed = [*st.roots, *st.picked, str(self._ctx.plugin.dir), str(self._ctx.plugin.storage)]
-        for root in allowed:
-            base = os.path.realpath(root)
-            if os.path.normcase(real) == os.path.normcase(base) or os.path.normcase(real).startswith(
-                os.path.normcase(base.rstrip("\\/") + os.sep)
-            ):
+        low = os.path.normcase(real)
+        for base in self._bases():
+            if low == base or low.startswith(base + os.sep):
+                trusted.path = real  # the sandbox's own check of this open need not resolve it again
                 return real
-        raise PermissionError(f"{path}: not inside a scanned folder")
+        raise FileNotAllowed(f"{path}: not inside a scanned folder")
 
     def open(self, item: NodeLike) -> IO[bytes]:
         return open(self.open_path(self._path(item)), "rb")
@@ -259,6 +333,56 @@ class Files:
                 if left is not None:
                     left -= len(chunk)
         return h.hexdigest()
+
+    def hash_many(
+        self,
+        items: Iterable[NodeLike],
+        algorithm: str = "sha256",
+        *,
+        limit: int | None = None,
+        threads: int | None = None,
+    ) -> list[str | None]:
+        """Hex digests of many files (of their first ``limit`` bytes), in order: a few readers at
+        once (``threads``, default :data:`HASH_THREADS`), so the disk stays busy. ``None`` for an
+        item that is a folder, a cloud or offline placeholder (not read: that would download it),
+        gone, or unreadable. Checks for cancellation between files."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        require(self._ctx._state, "files.read")
+        todo = list(items)
+        tree = self._ctx.tree
+        ids = [int(i) for i in todo if isinstance(i, int | np.integer)]
+        skip: set[int] = set()
+        if ids:
+            kinds = tree.col("kind")
+            flags = tree.col("flags")
+            skip = {i for i in ids if int(kinds[i]) != Kind.FILE or int(flags[i]) & int(NOT_LOCAL)}
+        paths: list[str | None] = []
+        for i in todo:
+            if (isinstance(i, int | np.integer) and int(i) in skip) or (
+                isinstance(i, Node) and (not i.is_file or i.flags & int(NOT_LOCAL))
+            ):
+                paths.append(None)
+            else:
+                paths.append(self._path(i))
+
+        def one(path: str | None) -> str | None:
+            if path is None or self._ctx.cancelled:
+                return None
+            try:
+                return self.hash(path, algorithm, limit=limit)
+            except (OSError, ValueError):
+                return None
+
+        n = max(1, min(threads or HASH_THREADS, 16))
+        if n == 1 or len(paths) < 4:
+            out = [one(p) for p in paths]
+        else:
+            base = contextvars.copy_context()  # the call's (language, cancellation): one copy a task
+            with ThreadPoolExecutor(n, thread_name_prefix="sk-hash") as pool:
+                out = list(pool.map(lambda p: base.copy().run(one, p), paths))
+        self._ctx.check()
+        return out
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,9 +538,15 @@ class Context:
         return LANG.get()
 
     def t(self, zh: str, en: str = "", /, **fields: Any) -> str:
-        """The text in the interface language, placeholders filled."""
+        """The text in the interface language, placeholders filled (``{n:size}`` … as T.format)."""
         text = Text(zh=zh, en=en)
         return text.format(**fields).get() if fields else text.get()
+
+    @property
+    def fmt(self) -> Fmt:
+        """Numbers as the interface writes them (the user's size unit, the interface language):
+        ``ctx.fmt.size(n)`` 1.2 GB, ``count(n)`` 1,234, ``date(t)``, ``ago(t)`` 3 天前."""
+        return Fmt(self.call_info.units)
 
     @property
     def granted(self) -> frozenset[str]:
@@ -454,10 +584,11 @@ class Context:
 
     def invalidate(self, *kinds: str) -> None:
         """Forget what the host cached of this plugin's answers — fields, node sets, a code
-        visualization's weights, change reasons (``"node_field"``, ``"node_set"``,
-        ``"visualization"``, ``"change_annotator"``; none: all of them). The host does this by
-        itself when the plugin's settings change; call it when something else changed the answers
-        (a file the plugin reads, a cache it built)."""
+        visualization's weights, its colour modes (legends, the views painting them), change
+        reasons (``"node_field"``, ``"node_set"``, ``"visualization"``, ``"color_mode"``,
+        ``"change_annotator"``; none: all of them). The host does this by itself when the plugin's
+        settings change; call it when something else changed the answers (a file the plugin
+        reads, a cache it built, a result computed in the background)."""
         self._link.request("host.invalidate", {"kinds": list(kinds)})
 
     @property
@@ -507,7 +638,15 @@ class Context:
         if now - self._last_toast < 1.0:
             return
         self._last_toast = now
-        self._link.notify("toast", {"text": localize(text), "tone": tone, "session": self.call_info.session})
+        self._link.notify(
+            "toast",
+            {
+                "text": localize(text),
+                "tone": tone,
+                "session": self.call_info.session,
+                "call": self.call_info.id,
+            },
+        )
 
     # ------------------------------------------------------------- host services
 
@@ -562,4 +701,4 @@ class Context:
             raise Cancelled()
 
 
-__all__ = ["CallInfo", "Context", "PluginSelf", "RuntimeState", "Settings", "StateHandle"]
+__all__ = ["CallInfo", "Context", "FileNotAllowed", "PluginSelf", "RuntimeState", "Settings", "StateHandle"]

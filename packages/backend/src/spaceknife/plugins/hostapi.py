@@ -92,14 +92,28 @@ class HostApi:
         self._bases: WeakKeyDictionary[NodeStore, Basis] = WeakKeyDictionary()
         self._opened: dict[str, tuple[str, NodeStore]] = {}  # opened by plugins: id -> (plugin, store)
         self._opened_in: dict[str, int] = {}  # snapshot id -> the call that opened it (released after it)
+        self._basket_added: dict[int, tuple[PluginRecord, int]] = {}  # call -> what it put in the basket
+        self._toasted: set[int] = set()  # calls that showed a toast of their own
         self._opened_count = 0
 
     # ------------------------------------------------------------- snapshots plugins opened
 
     def call_ended(self, call_id: int) -> None:
-        """A call is over: the snapshots it opened go (``ctx.snapshots.open`` lasts one call)."""
+        """A call is over: the snapshots it opened go (``ctx.snapshots.open`` lasts one call); what
+        it put in the delete basket is told once (unless it showed a toast of its own)."""
         for sid in [s for s, c in self._opened_in.items() if c == call_id]:
             self._close_snapshot(sid)
+        added = self._basket_added.pop(call_id, None)
+        toasted = call_id in self._toasted
+        self._toasted.discard(call_id)
+        if added is not None and not toasted:
+            self._told_basket(added[0], added[1])
+
+    def toasted(self, call_id: int) -> None:
+        """The call showed a toast of its own (``ctx.toast``): the basket message is left out."""
+        self._toasted.add(call_id)
+        if len(self._toasted) > 1024:
+            self._toasted.clear()
 
     def release_plugin(self, plugin: str) -> None:
         """The plugin stopped: everything it held goes."""
@@ -373,25 +387,65 @@ class HostApi:
         if "basket.propose" not in rec.granted:
             raise _deny("basket.propose")
         scan_id, store = self._store(rec, p, epoch=False)
-        nodes = [int(n) for n in p.get("nodes", [])]
-        if nodes and p.get("epoch") is not None and int(p["epoch"]) != int(getattr(store, "epoch", 0)):
-            raise RuntimeCallError(ErrorCode.STALE_TREE, "the tree was reorganised: node ids changed")
-        for path in p.get("paths", []):
-            found = await compute(query.find, store, str(path))
-            if found is not None:
-                nodes.append(found)
-        nodes = list(dict.fromkeys(nodes))[:MAX_NODES]
-        reason = str(p.get("reason", ""))[:200]
+        why = await self._entry_nodes(store, p)
+        nodes = list(why)[:MAX_NODES]
         res = await self.server.ops.add(
             PluginCaller(rec.id),  # type: ignore[arg-type]
-            BasketAddParams(scan_id=scan_id, nodes=nodes, origin=rec.id, reasons=[reason] * len(nodes)),
+            BasketAddParams(scan_id=scan_id, nodes=nodes, origin=rec.id, reasons=[why[n] for n in nodes]),
         )
-        self._told_basket(rec, res.added)
+        call = p.get("call")
+        if isinstance(call, int) and call > 0:  # told once, when the call is over (call_ended)
+            prev = self._basket_added.get(call)
+            self._basket_added[call] = (rec, (prev[1] if prev else 0) + res.added)
+        else:
+            self._told_basket(rec, res.added)
         return {
             "added": res.added,
             "merged": res.merged,
             "refused": [r.model_dump() for r in res.refused],
         }, []
+
+    async def _entry_nodes(self, store: Any, p: dict[str, Any]) -> dict[int, str]:
+        """Node -> reason of a request's ``items`` ({node | path, reason}; older SDKs: ``nodes``,
+        ``paths`` and one ``reason``), in their order; paths are looked up in the tree."""
+        entries = list(p.get("items") or [])
+        if not entries:
+            reason = str(p.get("reason", ""))
+            entries = [{"node": n, "reason": reason} for n in p.get("nodes", [])]
+            entries += [{"path": x, "reason": reason} for x in p.get("paths", [])]
+        stale = p.get("epoch") is not None and int(p["epoch"]) != int(getattr(store, "epoch", 0))
+        if stale and any("node" in e for e in entries):
+            raise RuntimeCallError(ErrorCode.STALE_TREE, "the tree was reorganised: node ids changed")
+        out: dict[int, str] = {}
+        for e in entries:
+            if "node" in e:
+                node: int | None = int(e["node"])
+            else:
+                node = await compute(query.find, store, str(e.get("path", "")))
+            if node is not None and node not in out:
+                out[node] = str(e.get("reason") or "")[:200]
+        return out
+
+    async def _basket_withdraw(
+        self, rec: PluginRecord, p: dict[str, Any], frames: list[bytes]
+    ) -> tuple[Any, list[bytes]]:
+        """Take back what this plugin proposed (never the user's items nor another plugin's)."""
+        if "basket.propose" not in rec.granted:
+            raise _deny("basket.propose")
+        _scan_id, store = self._store(rec, p, epoch=False)
+        wanted = {store.path(n) for n in await self._entry_nodes(store, p)}
+        basket = self.server.ops.basket
+        mine = [
+            it.id
+            for it in basket.items()
+            if it.path in wanted
+            and it.origin is not None
+            and (it.origin == rec.id or it.origin.startswith(rec.id + "."))
+        ]
+        if mine:
+            basket.remove(mine)
+            await self.server.ops.broadcast()
+        return {"removed": len(mine)}, []
 
     def _told_basket(self, rec: PluginRecord, added: int) -> None:
         if added <= 0:

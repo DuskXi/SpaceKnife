@@ -117,6 +117,13 @@ class Guard:
     def check_open(self, path: Any, mode: Any, flags: Any) -> None:
         if path is None or isinstance(path, int):
             return
+        if (
+            isinstance(path, str)
+            and path == getattr(trusted, "path", None)
+            and not (isinstance(mode, str) and any(c in mode for c in "wax+"))
+        ):
+            trusted.path = None  # ctx.files resolved and checked this very path for reading
+            return
         try:
             p = self._norm(os.fsdecode(path))
         except (TypeError, ValueError):
@@ -226,6 +233,7 @@ class _suppress:
 
 
 _installed: Guard | None = None
+trusted = threading.local()  # .path: the last path ctx.files.open_path checked (this thread)
 
 
 def install(guard: Guard) -> Guard:
@@ -241,4 +249,4 @@ def installed() -> Guard | None:
     return _installed
 
 
-__all__ = ["Guard", "install", "installed"]
+__all__ = ["Guard", "install", "installed", "trusted"]

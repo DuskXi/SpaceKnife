@@ -1,4 +1,5 @@
-"""The plugin author docs for ``spaceknife plugin docs``: the guide (``docs/plugin-dev.md``) and the
+"""The plugin author docs for ``spaceknife plugin docs``: the quick reference
+(``docs/plugin-quick.md``: what to read first, one page), the guide (``docs/plugin-dev.md``) and the
 API reference (``docs/plugin-api.md``: every returned object's fields, cache rules, hooks, icon
 names, command ids).
 
@@ -14,8 +15,10 @@ import re
 from importlib import resources
 from pathlib import Path
 
+QUICK = "plugin-quick.md"
 NAME = "plugin-dev.md"
 API = "plugin-api.md"
+ALL = (QUICK, NAME, API)
 ANCHOR = re.compile(r'^<a id="([a-z0-9_.-]+)"></a>\s*$')
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 
@@ -42,13 +45,35 @@ def text(name: str = NAME) -> str | None:
 
 
 def find(anchor: str) -> str | None:
-    """The section ``anchor`` names, in the guide or the reference."""
-    for name in (NAME, API):
+    """The section ``anchor`` names, in the quick reference, the guide or the reference."""
+    for name in ALL:
         doc = text(name)
         part = section(doc, anchor) if doc is not None else None
         if part is not None:
             return part
     return None
+
+
+def search(word: str, limit: int = 40) -> list[tuple[str, str, int, str]]:
+    """Lines that mention ``word`` (any case): (doc, the anchor of the section it is in, line
+    number, the line) — to read just those sections (``--section``) instead of a whole doc."""
+    needle = word.lower()
+    out: list[tuple[str, str, int, str]] = []
+    for name in ALL:
+        doc = text(name)
+        if doc is None:
+            continue
+        anchor = ""
+        for n, line in enumerate(doc.splitlines(), start=1):
+            m = ANCHOR.match(line)
+            if m is not None:
+                anchor = m.group(1)
+                continue
+            if needle in line.lower():
+                out.append((name, anchor, n, line.strip()))
+                if len(out) >= limit:
+                    return out
+    return out
 
 
 def anchors(doc: str) -> list[tuple[str, str]]:
@@ -91,4 +116,4 @@ def section(doc: str, anchor: str) -> str | None:
     return "".join(body).rstrip() + "\n"
 
 
-__all__ = ["API", "NAME", "anchors", "find", "path", "section", "text"]
+__all__ = ["ALL", "API", "NAME", "QUICK", "anchors", "find", "path", "search", "section", "text"]

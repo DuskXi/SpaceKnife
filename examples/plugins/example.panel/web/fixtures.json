@@ -12,5 +12,13 @@
       "unknown": 0
     }
   },
-  "core": { "tree.summary": { "files": 1063 } }
+  "core": {
+    "tree.summary": {
+      "node": { "id": 0, "parent": -1, "name": "", "kind": "dir", "depth": 0, "size": 2986344448, "alloc": 2986344448, "files": 1063 },
+      "path": "",
+      "latest_mtime": 0,
+      "top_files": [],
+      "classes": []
+    }
+  }
 }

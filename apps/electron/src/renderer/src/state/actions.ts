@@ -168,6 +168,9 @@ async function openLinkedScan(scans: readonly ScanStatus[]): Promise<void> {
   if (!status || get().tabs.some((x) => x.scanId === status.scan_id)) return;
   linkedScanOpened = true;
   await showScan(status.scan_id, scanTitle(status.roots.map((x) => x.path)));
+  // the rest of the address (theme, lang, select, do, open): plugin shot's states
+  const { applyDevLink } = await import("./devlink");
+  await applyDevLink(status);
 }
 
 /** After a reconnect the views of the old session are gone: reopen every scan tab, each view with
