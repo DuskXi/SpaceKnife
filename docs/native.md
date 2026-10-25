@@ -95,7 +95,7 @@ def scan_slice(
 与 `spaceknife.scan.worker.scan_slice` **同一输入同一输出**（返回 dict 的键与 `SliceResult` 字段一一对应：`SliceResult(**scan_slice(...))`）。
 
 - `opts`：dict 或带同名属性的对象（`worker.SliceOptions` 可直接传）。未知键报 `ValueError`。
-  - `roots`：每个根一项 `{dev, cluster_size, resident_max, cross_mounts, skip, protect, path, verify_names}`，语义同 `worker.RootOptions`。`path` 是扫描根本身（按用户给的写法），`verify_names`（Windows）让每个任务都按文件系统存的名字核对（见下「只差大小写的同名项」；Btrfs 上原生遍历器自己会打开）。模块属性 `ROOT_KEYS` 列出这个构建认识的根键，扫描器只在认识时才传 `path` / `verify_names`（旧构建拒绝未知键）。
+  - `roots`：每个根一项 `{dev, cluster_size, resident_max, cross_mounts, skip, protect, path, verify_names, listed_alloc}`，语义同 `worker.RootOptions`。`listed_alloc`（Windows；`"NTFS"`、`"ReFS"`、`"Btrfs"` 或 `""`）让文件的占用取列目录项的 AllocationSize，即文件系统自己的计数（不是整簇的值是放在文件记录或目录里的数据，记 0；只有一分钟内写过的稀疏、压缩文件和 NTFS 上 WOF 压缩的文件才单独问文件，`win.rs` 的 `listed_alloc`、`on_disk`、`ask_alloc`），`""` 按大小估算（`cluster_size`、`resident_max`，稀疏和压缩文件按路径问 `GetCompressedFileSizeW`）；扫描器对本地 NTFS、ReFS、WinBtrfs 卷打开它，`SPACEKNIFE_WIN_LISTED_ALLOC=0` 回到估算。`path` 是扫描根本身（按用户给的写法），`verify_names`（Windows）让每个任务都按文件系统存的名字核对（见下「只差大小写的同名项」；Btrfs 上原生遍历器自己会打开）。模块属性 `ROOT_KEYS` 列出这个构建认识的根键，扫描器只在认识时才传 `path` / `verify_names`（旧构建拒绝未知键）。
   - `budget_s`（默认 0.03；≤ 0 表示列一次就停）、`max_entries`（默认 100000）。
   - `threads`：调用内部的列目录线程数，0 表示 min(逻辑 CPU, 16)。
   - `keep_access_time`（默认 True，Windows 和 Linux 上起作用，macOS 忽略）：列目录时不更新文件夹的最后访问时间，见下。
