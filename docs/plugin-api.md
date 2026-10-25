@@ -163,7 +163,7 @@ plugin.setting(
 | `scan_done` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描完成（`scan.state` 是 `done`）；`ctx.tree` 是它 |
 | `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉（它的树已经读不到了） |
 | `tree_changed` | `async def f(ctx, change: TreeChange) -> None` | 一个打开着的扫描的树变了（实时监控应用了文件变化、「重新扫描」、扫描来源重新列出）：每个扫描每秒最多一次，`ctx.tree` 是它（`change.epoch` 那一纪元的树）；见[下一节](#api-live) |
-| `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值 |
+| `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值。启用后任何时候改的设置（包括进程还在启动时）都在下一次调用或钩子之前到插件进程 |
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
 | `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……；一阵变化只来一次）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
 | `snapshots` | `async def f(ctx, change: SnapshotsChange) -> None` | 存了快照（扫描完成自动保存、「保存快照」）或删了最旧的自动快照；要 `snapshots.read`（没有时宿主不调它，`check` 报 `missing_permission`） |

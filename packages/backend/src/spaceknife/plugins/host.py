@@ -493,6 +493,7 @@ class PluginHost:
                     exc.message,
                     {"plugin": rec.id, **(exc.data if isinstance(exc.data, dict) else {})},
                 ) from None
+            await self._caught_up(rec, rt, info)
             if rec.description is None:
                 rec.description = desc
             rec.last_used = time.monotonic()
@@ -503,6 +504,21 @@ class PluginHost:
                 rec.start_due = True  # registered yet; _activate runs start once they are
             self.tasks.process_started(rec)
             return rt
+
+    async def _caught_up(self, rec: PluginRecord, rt: PluginRuntime, info: StartInfo) -> None:
+        """The process just started with ``info``, taken before it started: what changed while
+        it started (a setting changed right after enabling, a scan opened, the language, the
+        permissions) was not sent then (a runtime drops updates until it runs), so it goes now,
+        before any call (``_ensure_started`` returns after this)."""
+        now = self._start_info(rec)
+        fields = {
+            k: getattr(now, k)
+            for k in ("settings", "lang", "granted", "roots")
+            if getattr(now, k) != getattr(info, k)
+        }
+        if fields:
+            with contextlib.suppress(Exception):  # a process that went at once says so on its next call
+                await rt.update(fields)
 
     async def _make_room(self) -> None:
         running = [
