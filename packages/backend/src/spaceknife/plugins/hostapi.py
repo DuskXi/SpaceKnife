@@ -39,6 +39,7 @@ from .runtime.base import RuntimeCallError
 
 if TYPE_CHECKING:
     from ..server.scans import ScanHandle
+    from ..view.state import View
     from .host import PluginHost
     from .store import PluginRecord
     from .where import Where
@@ -176,8 +177,13 @@ class HostApi:
 
     def view_store(self, view_id: str) -> NodeStore | None:
         """The tree a view shows (a scan's, a comparison's change tree), or None."""
+        view = self.view_of(view_id)
+        return view.store if view is not None else None
+
+    def view_of(self, view_id: str) -> View | None:
+        """An open view (its zoom root, filter and selection as they are now), or None."""
         host = self.server.views.views.get(view_id)
-        return host.view.store if host is not None else None
+        return host.view if host is not None else None
 
     def compare_of_store(self, store: NodeStore) -> str | None:
         """The comparison whose change tree ``store`` is, or None."""

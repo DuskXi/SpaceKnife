@@ -124,7 +124,9 @@ def install(server: Server) -> None:
             settings=server.settings,
             plugins=server.plugins.enabled_ids(),
             scan_source=(handle.plugin_source or "") if handle is not None else "",
-            node=c.node if view is not None else None,
+            # without a view the node is of the tab's scan (a plugin's check gets it; the
+            # built-in commands go by selected_node, which needs a view)
+            node=c.node if view is not None or handle is not None else None,
             scan_id=handle.id if handle is not None else None,
         )
         return ctx, handle, view

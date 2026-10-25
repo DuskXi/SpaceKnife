@@ -197,10 +197,6 @@ def _wants(seen: dict[str, Any], want: dict[str, Any]) -> list[str]:
     return out
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="收尾第 3 步（一处把调用的上下文交给每种调用）之前，各种调用拿到的上下文还不齐；那一步合并后去掉这个标记",
-)
 async def test_every_kind_gets_the_whole_context(backend: Backend, probe: str, data: Path) -> None:
     """One place hands a call's context to every kind of call: the scan, the view, the node, the
     selection, the zoom root, the filter and the language, the tree's epoch with node ids. Each

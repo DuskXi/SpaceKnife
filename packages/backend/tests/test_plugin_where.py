@@ -280,6 +280,8 @@ class Case:
     extra: dict[str, Any] = field(default_factory=dict)
 
 
+ON_VIEW = {"scan_id": "A", "view_id": "vZ", "selection": ["n"], "zoom_node": "zZ", "filter": "*.bin"}
+
 CASES = [
     Case(
         "call_action",
@@ -341,6 +343,20 @@ CASES = [
         {"scan_id": "A", "compare_id": "cmp", "view_id": "vC"},
     ),
     Case("report", "report", "report", "A", "A", {"scan_id": "A", "node": "n"}),
+    # a request that names only a view (a method, a report, a stream): where the user is in that
+    # view (its zoom root, filter, selection) comes along; a view without a scan is the view's scan
+    Case("call_on_view", "method", "method", "A", "A", {**ON_VIEW, "node": "n"}),
+    Case("report_on_view", "report", "report", "A", "A", {**ON_VIEW, "node": "n"}),
+    Case("stream_on_view", "stream", "stream", "A", None, ON_VIEW),
+    # a check without a view (a scan tab's details panel): the node the commands are about
+    Case(
+        "check_without_view",
+        "method",
+        "check",
+        "A",
+        "A",
+        {"scan_id": "A", "view_id": None, "node": "n", "selection": ["n"]},
+    ),
     Case("cleanup", "cleanup", "cleanup", "A", "A", {"scan_id": "A", "node": "n"}),
     Case("field", "field", "field", "A", "A", {"scan_id": "A", "node": "n"}, extra={"slot": "inspector"}),
     Case("insight", "insight", "insight", "A", "A", {"scan_id": "A", "node": "n"}),
@@ -435,6 +451,13 @@ async def _scenario(folder: Path, process: bool) -> Got:
             "n": node,
             "zA": int(here.zoom.node),
         }
+        # a view of A zoomed into a, filtered, x.bin selected: requests that name only the view
+        zoomed = view(first)
+        names["zZ"] = host.find("a")
+        assert zoomed.zoom_to_node(names["zZ"])
+        assert zoomed.set_filter("*.bin").normal is not None
+        zoomed.select(node)
+        names["vZ"] = zoomed.id
 
         # a comparison of A with an older tree of it (its change tree: a compare view)
         host.scan_id = older
@@ -476,7 +499,7 @@ async def _scenario(folder: Path, process: bool) -> Got:
             ctx = {"scan_id": first, "view_id": here.id, "node": node, "selection": [node]}
             await route("panel_m")(session, RawParams.model_validate({"x": 1, "$where": ctx}))
 
-        async def check(view_id: str, node_id: int | None) -> None:
+        async def check(view_id: str | None, node_id: int | None) -> None:
             handler = server.router.get(PALETTE_CHECK.name)
             assert handler is not None
             context = ppal.PaletteContext(tab="scan", scan_id=first, view_id=view_id, node=node_id)
@@ -495,6 +518,10 @@ async def _scenario(folder: Path, process: bool) -> Got:
             names["vC"] = names.get("vC") or view(cmp_id).id
             body = {"scan_id": first, "view_id": names["vC"], "node": 1, "compare_id": cmp_id}
             await route("rep")(session, RawParams.model_validate(body))
+
+        async def on_view(method: str) -> None:
+            body = {"scan_id": first, "view_id": names["vZ"], "node": node}
+            await route(method)(session, RawParams.model_validate(body))
 
         async def report() -> None:
             await route("rep")(session, RawParams.model_validate({"scan_id": first, "node": node}))
@@ -569,6 +596,10 @@ async def _scenario(folder: Path, process: bool) -> Got:
             "check_in_compare_view": check_in_compare_view,
             "report_in_compare_panel": report_in_compare_panel,
             "report": report,
+            "call_on_view": lambda: on_view("where_cmd"),
+            "report_on_view": lambda: on_view("rep"),
+            "stream_on_view": lambda: stream({"$where": {"view_id": names["vZ"]}}),
+            "check_without_view": lambda: check(None, node),
             "cleanup": cleanup,
             "field": field_,
             "insight": insight,

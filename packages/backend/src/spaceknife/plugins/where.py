@@ -151,8 +151,30 @@ class Places:
         if cid is not None:
             return self._compared(cid)
         if scan_id is None:
-            return "front", None, None
+            sid = self.api.scan_of_store(shown) if shown is not None else None
+            return ("scan", sid, None) if sid is not None else ("front", None, None)
         return "scan", scan_id, None  # (an unknown one: ctx.tree says so when it is read)
+
+    def _in_view(
+        self, view_id: str | None, tree: TreeOf, scan: str | None, compare: str | None
+    ) -> dict[str, Any]:
+        """Where the user is in the view a request names: its zoom root, filter (when one is
+        applied) and selection as they are now, for what the request leaves out (a method, a
+        report or a stream called with only ``view_id``). Only a view of the tree the request is
+        about (another tree's node ids would name other items)."""
+        view = self.api.view_of(view_id) if view_id else None
+        if view is None:
+            return {}
+        if tree == "scan":
+            if scan is None or self.api.store_of(scan) is not view.store:
+                return {}
+        elif tree != "compare" or compare is None or self.api.compare_of_store(view.store) != compare:
+            return {}
+        filt = view.filter
+        out: dict[str, Any] = {"zoom_node": int(view.zoom.node), "filter": filt.text if filt.active else ""}
+        picked = view.selected
+        out["selection"] = [int(picked)] if picked is not None and 0 < picked < len(view.store) else []
+        return out
 
     def _of_store(self, store: NodeStore, scan_id: str | None = None) -> Where:
         """The tree a frame, an export or a node set is about, by its store."""
@@ -173,8 +195,10 @@ class Places:
     def request(self, body: Mapping[str, Any] | None, *, long: bool = False) -> Where:
         """A frontend's request: a command's ``call`` action (its ``ActionContext``), a report or
         a cleanup (``ReportContext``), a panel's call or stream (its context in ``$where``, under
-        what the params name themselves), a stream's params. Node ids are of the tree as it is
-        when the call starts; a stream's tree is not pinned."""
+        what the params name themselves), a stream's params. A view it names without saying
+        where the user is in it adds its zoom root, filter and selection; a view without a scan
+        is about the view's tree. Node ids are of the tree as it is when the call starts; a
+        stream's tree is not pinned."""
         given = dict(body or {})
         own = given.get(WHERE_KEY)
         where = given
@@ -182,6 +206,7 @@ class Places:
             where = {**own, **{k: given[k] for k in CONTEXT_KEYS if k in given}}
         view_id = _str(where.get("view_id"))
         tree, scan, compare = self._named(_str(where.get("scan_id")), view_id)
+        where = {**self._in_view(view_id, tree, scan, compare), **where}
         args = where.get("args")
         return Where(
             tree,
@@ -199,10 +224,16 @@ class Places:
     def palette(self, c: Any) -> Where:
         """The palette's context (the palette, a context menu, the details panel's actions): a
         command's ``check``. The view's scan (whose node ids these are) and where the user is in
-        it; without a view, the tab's scan."""
+        it; without a view, the tab's scan and the node the commands are about (the details
+        panel's)."""
         view = getattr(c, "view", None)
         if view is None:
-            return self.request({"scan_id": getattr(c, "scan_id", None)})
+            sid = getattr(c, "scan_id", None)
+            store = self.api.store_of(sid) if sid else None
+            node = _int(getattr(c, "node", None))
+            if store is None or node is None or not 0 < node < len(store):
+                node = None
+            return self.request({"scan_id": sid, "node": node, "selection": [node] if node else []})
         node = getattr(c, "selected_node", None)
         filt = view.filter
         return replace(
