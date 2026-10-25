@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger
 
+from ..cpus import usable_cpus
 from ..privacy import inside, protected_folders
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
@@ -101,26 +102,52 @@ def _report(on_progress: Callable[[ScanProgress], None], progress: ScanProgress)
 
 
 def default_workers() -> int:
-    return max(2, min(8, (os.cpu_count() or 4) - 1))
+    """Worker processes of the Python walker."""
+    return max(2, min(8, usable_cpus() - 1))
 
 
-NATIVE_BATCH = 256  # directories per native call (one listing thread each)
+NATIVE_BATCH = 256  # directories per native call
 NATIVE_BUDGET_S = 0.05  # seconds a native call lists before it returns what it has
 
 
+def listing_threads() -> dict[str, Any] | None:
+    """The native walker's shared listing threads (spaceknife_native ``listing_threads``: the CPUs
+    it counts, the start, cold and widest width, the width now; docs/native.md 2.2), or None for a
+    build without them (each call then lists on its own thread)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is None or not native.has("listing_threads") or "gate" not in getattr(mod, "OPT_KEYS", ()):
+        return None
+    info: dict[str, Any] = mod.listing_threads()
+    return info
+
+
 def native_threads() -> int:
-    """Listing threads for the native walker: one per CPU, at most 16 (beyond that NTFS's locks only
-    add contention). On macOS twice the CPUs: APFS listings wait in the kernel often enough that the
-    extra threads keep the CPUs busy (GitHub's macOS runners, 3-CPU arm64 and 4-CPU Intel: +5 % to
-    +15 %; many more starve the main thread that folds the results; docs/packaging.md).
-    SPACEKNIFE_SCAN_THREADS sets it (1–64) for measurements."""
+    """Threads that call the native walker, one slice each. The walker decides how many folders
+    are listed at once (its width: from the start width up to the cold width while the disk is read,
+    narrower where fewer list faster; docs/native.md 2.2); the scanner calls it from as many threads
+    as its start width: the CPUs this process may use, 2–16 (on macOS twice that, 4–16: APFS
+    listings wait in the kernel often enough that more threads keep the CPUs busy;
+    docs/packaging.md). SPACEKNIFE_SCAN_THREADS (1–64) fixes both, for measurements. Builds without
+    the shared listing threads: one listing thread per calling thread, as many."""
+    info = listing_threads()
+    if info is not None:
+        return max(1, int(info["start"]))
     forced = os.environ.get("SPACEKNIFE_SCAN_THREADS", "")
     if forced.isdigit() and int(forced) > 0:
         return min(64, int(forced))
-    cpus = os.cpu_count() or 4
+    cpus = usable_cpus()
     if sys.platform == "darwin":
         return max(4, min(16, 2 * cpus))
     return max(2, min(16, cpus))
+
+
+def listing_max() -> int:
+    """The most folders the native walker lists at once (its widest width): what the disk-load
+    governor's concurrency, counted in listings, may reach (IoGovernor.listing_gate)."""
+    info = listing_threads()
+    return max(1, int(info["max"])) if info is not None else native_threads()
 
 
 @dataclass(slots=True)
@@ -134,6 +161,8 @@ class ScanProfile:
     limited_s: float  # main thread: waiting for the disk-load limit to allow another slice
     slices: int
     items: int  # entries this run added to the tree
+    # the native walker's shared listing threads: the widths it listed at ("16", "8–32"), else ""
+    width: str = ""
 
     @property
     def busy(self) -> float:
@@ -151,9 +180,10 @@ class ScanProfile:
 
     def text(self) -> str:
         bulk = bulk_listing()
+        width = f" (listing width {self.width})" if self.width else ""
         return (
             f"{self.items:,} items in {self.wall_s:.1f}s ({self.items / max(self.wall_s, 1e-9):,.0f}/s); "
-            f"listing threads busy {self.busy:.0%} of {self.threads}; "
+            f"listing threads busy {self.busy:.0%} of {self.threads}{width}; "
             f"main thread folding {self.ingest:.0%}; "
             f"held by the disk-load limit {self.limited:.0%}; "
             f"{self.slices:,} slices" + (f"; getattrlistbulk {bulk}" if bulk else "")
@@ -200,6 +230,9 @@ def native_slicer() -> Slicer | None:
     listed = "listed_alloc" in getattr(mod, "ROOT_KEYS", ())
     known = getattr(mod, "OPT_KEYS", ())
     switches = [k for k in ("skip_final", "dot_check", "keep_where_updated") if k in known]
+    # the shared listing threads (threads 0) where the build has them and takes a disk's gate;
+    # else each call lists on its calling thread
+    shared = "gate" in known
 
     def run(tasks: list[Task], opts: SliceOptions) -> SliceResult:
         roots = [
@@ -221,13 +254,36 @@ def native_slicer() -> Slicer | None:
                 "roots": roots,
                 "budget_s": opts.budget_s,
                 "max_entries": opts.max_entries,
-                "threads": 1,
+                "threads": 0 if shared else 1,
+                **({"gate": opts.gate} if shared and opts.gate is not None else {}),
                 **{k: getattr(opts, k) for k in switches},  # SliceOptions: from the environment
             },
         )
         return SliceResult(**raw)
 
     return run
+
+
+def listing_threads_reset() -> None:
+    """Start over the narrowest and widest width the native walker listed at (``_width_seen``)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is not None and native.has("listing_threads"):
+        mod.listing_threads(reset=True)
+
+
+def _width_seen() -> str:
+    """The widths the native walker listed at since ``listing_threads_reset`` ("16", "8–32";
+    process-wide: scans that ran at the same time share it)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is None or not native.has("listing_threads"):
+        return ""
+    info = mod.listing_threads()
+    low, high = int(info["low"]), int(info["high"])
+    return str(low) if low == high else f"{low}–{high}"
 
 
 def verify_names(volume: VolumeInfo | None) -> bool:
@@ -315,6 +371,7 @@ class Scanner:
         self._paused_since: float | None = None
         self._folded = 0  # entries added to the tree by this run
         self._slices = 0
+        self._width = ""  # ScanProfile.width
 
         root_opts: list[RootOptions] = []
         normalised: list[str] = []
@@ -457,13 +514,20 @@ class Scanner:
         gov = self.governor
         last_report = 0.0
         asked = 0.0
+        # the native walker: the disk's gate holds its listings in flight to the governor's
+        # concurrency (counted in listings), and stops new ones while paused
+        native_slices = self.slicer is not worker.scan_slice
+        gate = gov.listing_gate() if gov is not None and native_slices else None
+        shared = native_slices and listing_threads() is not None
+        if shared:
+            listing_threads_reset()
 
         def dispatch(permit: Permit | None) -> None:
-            parallel = gov.concurrency if gov is not None else self.concurrency
+            parallel = min(gov.concurrency, self.concurrency) if gov is not None else self.concurrency
             share = max(1, min(self.batch_tasks, len(self._queue) // max(1, parallel)))
             batch = [self._queue.popleft() for _ in range(min(share, len(self._queue)))]
             budget = min(0.01, self.budget_s) if len(self._queue) < parallel else self.budget_s
-            opts = SliceOptions(roots=self._root_opts, budget_s=budget)
+            opts = SliceOptions(roots=self._root_opts, budget_s=budget, gate=gate)
             fut = loop.run_in_executor(executor, self.slicer, batch, opts)
             if permit is not None:
                 permit.bind(fut)
@@ -542,6 +606,8 @@ class Scanner:
             self._running.set()
             self._finished = time.perf_counter()
             self.finished_at = datetime.now(UTC)
+            if shared:
+                self._width = _width_seen()
             if thread_pool is not None:
                 thread_pool.shutdown(wait=False, cancel_futures=True)
         result = self.progress()
@@ -586,6 +652,7 @@ class Scanner:
             limited_s=self._limited_s,
             slices=self._slices,
             items=self._folded,
+            width=self._width,
         )
 
     def _fold(self, results: list[SliceResult]) -> None:

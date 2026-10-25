@@ -41,6 +41,7 @@ from ..scan.scanner import (
     ScanState,
     Slicer,
     default_workers,
+    listing_max,
     make_pool,
     native_slicer,
     native_threads,
@@ -380,8 +381,11 @@ class ScanManager:
         # the native walker lists on plain threads (GIL released): no worker processes at all
         self._slicer = None if os.environ.get("SPACEKNIFE_NO_NATIVE") else native_slicer()
         self._threads: ThreadPoolExecutor | None = None
-        self._thread_count = native_threads()
-        self.io = IoRegistry(max_workers=self._thread_count if self._slicer else self._pool_size)
+        self._thread_count = native_threads()  # threads that call the native walker
+        # the governor's concurrency: listings in flight for the native walker (its widest width),
+        # worker processes for the Python walker
+        self._listing_max = listing_max()
+        self.io = IoRegistry(max_workers=self._listing_max if self._slicer else self._pool_size)
         self.helper = SharedHelper()  # one read-only scan helper per backend (MFT; asks for admin once)
         self._low_io = 0  # running scans that lowered this process's I/O priority
         self._io_ready = asyncio.Event()  # set once sampling started (or failed to)
@@ -506,15 +510,21 @@ class ScanManager:
         manual = workers is not None and workers > 0
         executor: Executor | None
         options: dict[str, Any] = {}
+        # the governor's concurrency at most, and the manual one: in listings for the native walker
+        # (the folders it lists at once), in worker processes for the Python walker
+        most = limit = 1
         if workers == 0:  # in-process, one thread (tests, tiny scans): no governor
             executor, concurrency = None, 1
         elif self._slicer is not None:
             executor = self._thread_executor()
             concurrency = min(workers or self._thread_count, self._thread_count)
             options = {"slicer": self._slicer, "batch_tasks": NATIVE_BATCH, "budget_s": NATIVE_BUDGET_S}
+            most = self._listing_max
+            limit = min(workers or most, most)
         else:
             executor = self._executor()
             concurrency = min(workers or self._pool_size, self._pool_size)
+            most = limit = concurrency
         links_each = st is not None and st.get("scan.hardlinks") == "each"
         skip_protected = await asyncio.to_thread(
             wants_skip_protected, params.skip_protected, str(st.get("scan.protected_places")) if st else "ask"
@@ -540,10 +550,10 @@ class ScanManager:
             governor = await self.io.governor_for_path(scanner.roots[0].path)
             level = params.load_level or (str(st.get("scan.load_manual")) if st else "balanced")
             custom = params.load_custom or (int(st.get("scan.custom_limit")) if st else None)
-            governor.set_max_workers(concurrency)
+            governor.set_max_workers(most)
             governor.set_level(level, float(custom) if custom is not None else None)  # type: ignore[arg-type]
             governor.set_yield_when_busy(st is None or bool(st.get("scan.yield_when_busy")))
-            governor.set_manual_concurrency(concurrency if manual else None)
+            governor.set_manual_concurrency(limit if manual else None)
             scanner.governor = governor
         scanner.expected_items = await asyncio.to_thread(last_item_count, [r.path for r in scanner.roots])
         if scanner.expected_items:  # about as many as last time: the columns never grow by copying

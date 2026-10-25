@@ -268,7 +268,19 @@ async def test_profile_leaves_out_the_time_paused(tree: TreeFacts) -> None:
     assert p.wall_s < 0.25 < scanner.progress().elapsed_s  # the elapsed time shown includes the pause
 
 
+def test_native_threads_come_from_the_walker() -> None:
+    """With the native walker's shared listing threads, the scanner calls it from as many threads
+    as the walker's start width (the env knobs are the walker's: tests/test_hardscan.py)."""
+    info = scanner_mod.listing_threads()
+    if info is None:
+        pytest.skip("no native walker with shared listing threads")
+    assert native_threads() == info["start"]
+    assert scanner_mod.listing_max() == info["max"] >= info["cold"] >= info["start"] >= info["least"]
+    assert info["cpus"] == scanner_mod.usable_cpus()
+
+
 def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scanner_mod, "listing_threads", lambda: None)  # builds without them
     monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "24")
     assert native_threads() == 24
     monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "500")
@@ -292,9 +304,10 @@ def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatc
 def test_default_listing_threads(
     monkeypatch: pytest.MonkeyPatch, platform: str, cpus: int, threads: int
 ) -> None:
+    monkeypatch.setattr(scanner_mod, "listing_threads", lambda: None)  # builds without them
     monkeypatch.delenv("SPACEKNIFE_SCAN_THREADS", raising=False)
     monkeypatch.setattr(sys, "platform", platform)
-    monkeypatch.setattr(os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(scanner_mod, "usable_cpus", lambda: cpus)
     assert native_threads() == threads
 
 

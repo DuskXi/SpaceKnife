@@ -144,6 +144,9 @@ class SliceOptions:
     keep_where_updated: bool = field(
         default_factory=lambda: _env_switch("SPACEKNIFE_WIN_KEEP_WHERE_UPDATED", True)
     )
+    # the native walker only: the disk's spaceknife_native.ListingGate (the disk-load limit on its
+    # listings in flight, IoGovernor.listing_gate); never given to the Python walker's processes
+    gate: Any = field(default=None, compare=False)
 
 
 @dataclass(slots=True)
