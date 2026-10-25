@@ -530,8 +530,15 @@ class Runner:
 
         from .filter.engine import FilterContext, evaluate
         from .filter.vocab import platform_vocab
+        from .plugins.headless import has_enabled_plugins
 
+        view = self.view
         result = parse(expr, vocab=platform_vocab())
+        unknown = any(d.code in ("unknown_class", "unknown_set") for d in result.diagnostics)
+        if unknown and self._plugins is None and has_enabled_plugins():
+            # a file class or a node set of an enabled plugin: known once the plugins are started
+            self.plugins().add_store(view.store)
+            result = parse(expr, vocab=platform_vocab())
         lines = []
         for d in result.diagnostics:
             reason = FILTER_REASONS.get(d.code, d.code)
@@ -540,8 +547,12 @@ class Runner:
             raise CommandFailed("\n".join([TEXT["filter_failed"].format(expr=expr), *lines]))
         for line in lines:
             self.err.print(Text(line, style=WARN))
-        view = self.view
-        found = evaluate(view.store, result.normal, FilterContext.current())
+        nf = result.normal
+        sets = None
+        if (nf.sets or nf.not_sets) and self._plugins is not None:  # the plugins' node sets of this tree
+            sid = self._plugins.add_store(view.store)
+            sets = self._plugins.server.plugins.set_masks(sid, view.store, [*nf.sets, *nf.not_sets])
+        found = evaluate(view.store, nf, FilterContext.current(sets=sets))
         view.match, view.filter_text = found.match, expr
         count, alloc, _ = found.totals(0)
         self.say(

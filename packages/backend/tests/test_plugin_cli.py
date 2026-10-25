@@ -378,6 +378,55 @@ def test_run_exports_with_an_enabled_plugins_format(tmp_path: Path) -> None:
     assert "example.fmt.md" in shown.stdout, shown.stdout + shown.stderr
 
 
+def test_run_filters_by_an_enabled_plugins_class_and_set(tmp_path: Path) -> None:
+    """``spaceknife run … filter ":class:<plugin>.<class>"`` and ``":set:<set>"``: a class (and its
+    folder rules) or a node set of an enabled plugin is known once the plugins are started (it said
+    「未知类别」 before)."""
+    home = tmp_path / "home"
+    home.mkdir()
+    sets = tmp_path / "src" / "example.sets"
+    scaffold.write(sets, "example.sets", ["set"])
+    for folder, pid in (
+        (ROOT / "examples" / "plugins" / "example.devpack", "example.devpack"),
+        (sets, "example.sets"),
+    ):
+        assert sk(home, "install", str(folder)).returncode == 0
+        enabled = sk(home, "enable", pid, "--yes")
+        assert enabled.returncode == 0, enabled.stdout + enabled.stderr
+    data = tmp_path / "data"
+    for rel, size in (
+        ("proj/main.o", 10),
+        ("proj/target/debug/app", 20),
+        ("proj/src/main.rs", 30),
+        ("big.iso", 1 << 20),
+    ):
+        (data / rel).parent.mkdir(parents=True, exist_ok=True)
+        (data / rel).write_bytes(b"x" * size)
+    run = subprocess.run(
+        [
+            *RUN,
+            "scan",
+            str(data),
+            "filter",
+            ":class:example.devpack.build_output",
+            "filter",
+            ":set:big",
+            "autoclose",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=_env(home),
+        cwd=home,
+        timeout=180,
+        check=False,
+    )
+    assert run.returncode == 0, run.stdout + run.stderr
+    said = run.stdout + run.stderr
+    assert "过滤 :class:example.devpack.build_output：2 个文件" in said, said
+    assert "过滤 :set:big：1 个文件" in said, said
+
+
 async def test_call_sees_the_snapshots_given_with_history(tmp_path: Path) -> None:
     """``--history FILE``: ctx.snapshots.list() in the temporary backend lists it (a plugin that
     reads history is tried from the command line); docs --api prints the API reference."""

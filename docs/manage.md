@@ -124,7 +124,7 @@ def export_chunks(target, store, root, *, match=None, filter_text="") / write_ex
 ```
 
 - SpaceSniffer 的名称标签是 `file`（含扩展名）和 `filename`（不含），没有 `name`。
-- 命令行 `spaceknife run <命令序列>`（cli.py 注册，实现在 cli_run.py）：`scan`、`load`（.sks）、`filter`、`save`（.sks）、`export`、`autoclose`、`help`，元命令 `@delim=`、`@parser=OS`。只做硬扫描，不提权、不受负载上限约束；`:class:` 使用用户编辑过的类别表，标签条件不可用。
+- 命令行 `spaceknife run <命令序列>`（cli.py 注册，实现在 cli_run.py）：`scan`、`load`（.sks）、`filter`、`save`（.sks）、`export`、`autoclose`、`help`，元命令 `@delim=`、`@parser=OS`。只做硬扫描，不提权、不受负载上限约束；`:class:` 使用用户编辑过的类别表，标签条件不可用；已启用插件的文件类别（连同它们的文件夹规则）和节点集合（`:set:`）用到时才启动插件（`plugins/headless.py`，和导出插件的格式、模板一样）。
 - 界面：命令面板「导出报告…」→ 选模板或格式、范围（当前位置 / 整个扫描）、是否只导出过滤结果 → `export.run`。
 
 ## 5. 洞察规则库（`spaceknife/insights/`）
