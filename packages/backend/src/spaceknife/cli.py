@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import os
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 import typer
 from rich.console import Console
 
 from . import __version__
 from .log import LogFormat, setup_logging
-from .logbus import LogHub
 
 app = typer.Typer(
     name="spaceknife",
@@ -53,6 +54,7 @@ def serve(
     ] = None,
 ) -> None:
     """Run the WebSocket backend. Prints one JSON 'ready' line on stdout once listening."""
+    from .logbus import LogHub
     from .server.app import DEFAULT_ORIGINS, ServerConfig, new_token
     from .server.runner import read_token_line, run_server
 
@@ -152,4 +154,24 @@ def main() -> None:
     from .io.priority import no_cloud_downloads
 
     no_cloud_downloads()  # macOS: never fetch iCloud / File Provider contents (every command)
-    app()
+    try:
+        app()
+    except SystemExit as exc:
+        if cli_scan.output_complete:
+            _end_now(exc.code)
+        raise
+
+
+def _end_now(code: object) -> NoReturn:
+    """End the process once ``scan`` has written all its output and saved its snapshot. The
+    interpreter's own shutdown changes nothing the user sees but takes 30–75 ms after a scan of
+    a million items: joining the idle listing threads, freeing the node table, module cleanup
+    (docs/packaging.md, 命令行扫描的启动). Only after ``scan``: no other thread or log sink of it
+    still holds anything (its log goes to stderr unbuffered by loguru), unlike ``serve``."""
+    if isinstance(code, str):  # sys.exit("message") semantics
+        print(code, file=sys.stderr)
+    status = code if isinstance(code, int) else 0 if code is None else 1
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.flush()
+    os._exit(status)

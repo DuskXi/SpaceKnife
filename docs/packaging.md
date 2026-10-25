@@ -46,11 +46,22 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 - 入口 [packaging/backend_entry.py](../packaging/backend_entry.py)：`spaceknife-backend serve …` 就是 `python -m spaceknife serve …`；`spaceknife-backend --helper …` 是扫描助手（冻结后没有 `-m`，`helper_command()` 在冻结时返回 `[自身, "--helper"]`）；入口先调用 `multiprocessing.freeze_support()`，spawn 方式的扫描工作进程会重新进入这个可执行文件。
 - 以 `-X utf8` 冻结（spec 里的解释器选项），日志和 ready 行在所有平台都是 UTF-8。冻结的解释器只从自己的包里导入，不读 `PYTHON*` 环境变量，所以提权助手不需要 `-I`。
-- 收进包里的数据：`locales/*.json`、`insights/builtin.toml`、`export/builtin/*.sktpl`；`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）。
+- 收进包里的数据：`locales/*.json`、`insights/builtin.toml`、`export/builtin/*.sktpl`；`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）和 setuptools（见下面「命令行扫描的启动」）。
 - Windows 上带图标和版本信息（任务管理器里显示「SpaceKnife backend」）。
 - Linux 上不带构建机的 `libgcc_s.so.1` 和 `libstdc++.so.6`：目标系统都有（glibc 的 `pthread_cancel` 需要 libgcc_s，apt / dnf 需要 libstdc++），manylinux 的 wheel 也这样假设；而 Ubuntu 22.04 的 libgcc_s（GCC 12）需要 `GLIBC_2.35`，打进去在 RHEL 9 上会加载失败。剩下的部分最高需要 `GLIBC_2.34`（原生扩展在 glibc 2.35 上编译，pthread 符号绑定到 2.34 版本），正好是 RHEL 9 的下限；Electron 自身最高 `GLIBC_2.25`。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
 - 命令行也能直接用：安装目录下 `resources/backend/spaceknife-backend scan …`、`run …`、`snapshot …`。
+
+### 命令行扫描的启动
+
+`spaceknife-backend scan <路径> --no-snapshot …`（基准和脚本都这样用）的用时包括进程的启动和退出；目录小的时候它们比扫描本身还长。为此：
+
+- 冻结后端不收 setuptools（spec 的 `excludes`）。它是构建工具，运行时没有代码导入它；但只要收进来，PyInstaller 就会带上运行时钩子 `pyi_rth_setuptools`，每次启动都导入 setuptools 和它自带的 jaraco、packaging 等包（冻结版加 `-X importtime` 在 Windows 上量到 130–230 ms）。可以用 PyInstaller 的 `CArchiveReader` 看可执行文件的目录：不该有 `pyi_rth_setuptools`。
+- `scan` 只导入它用得到的模块：`spaceknife.io` 的名字按需加载子模块（取 `io.priority` 不会带出调速器和协议的 pydantic 模型），`--disk-limit` 时才导入 `IoRegistry`；快照（文件头是 pydantic 模型）只在保存、列出、打开快照时导入；导出模板、`rich.progress`、`LogHub` 也在用到时才导入。界面语言：没有设置文件、文件读不了或不是 JSON、或者文件里的语言就是 `system` 时，`SettingsStore` 的结果一定是 `system`，直接用它；设了别的语言才用 `SettingsStore` 校验整个文件（`cli_scan.stored_language`，测试逐种情况与 `SettingsStore` 对比）。[test_cli_startup.py](../packages/backend/tests/test_cli_startup.py) 在新的解释器里跑一次 `scan --no-snapshot`，检查 pydantic、协议、设置、调速器、快照、导出、服务器和 `rich.progress` 都没有被导入：加了新的模块级导入时它会报出来。asyncio 去不掉：loguru 自己就导入它。
+- 输出不是终端（重定向）时不建进度条：rich 这时本来什么都不画，只在停止时打一个空行；这个空行照样打，输出与原来逐字节一致。
+- 输出写完（自动快照也已保存）后，`cli.main` 先 flush 标准输出和标准错误，再 `os._exit`，跳过解释器的收尾（等空闲的列目录线程、逐个释放节点表、清理模块）。只用于 `scan`，退出码不变；Python 遍历器的工作进程还没退完时照常退出。
+- 「最大的文件」用 `store.subtree.largest` 的部分选择（第 k 大的值，并列时编号小的在前），不对全部文件排序；行和顺序与整体排序相同（130 万项时 35 ms → 7 ms）。
+- 实测（i9-14900K，冻结版，热缓存，扫空文件夹，整个进程的墙钟，每臂 7 轮的中位数）：Windows 全部 CPU 408 → 219 ms、4 个 E 核 701 → 377 ms；WSL（Linux）全部 CPU 236 → 120 ms、4 CPU 228 → 120 ms。其中退出（最后一个字节到进程结束）Windows 28 → 3 ms，Linux 26 → 1 ms。Windows 上扫真实的文件夹（全部 CPU，每臂 5 轮）：34.8 万项的 NTFS 程序文件夹 906 → 666 ms，136 万项的 ReFS 文件夹 964 → 743 ms，130 万项的 NTFS 文件夹 2.82 → 2.62 s；打印 21–45 → 12–23 ms，退出 39–47 → 6–10 ms。
 
 ## 3. Electron
 

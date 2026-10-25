@@ -27,8 +27,25 @@ a = Analysis(
     pathex=[os.environ["SPACEKNIFE_NATIVE_RELEASE"]] if os.environ.get("SPACEKNIFE_NATIVE_RELEASE") else [],
     hiddenimports=hidden,
     datas=datas,
-    # dev tools; pydantic.mypy (the mypy plugin) would pull in mypy itself
-    excludes=["tkinter", "_tkinter", "pytest", "hypothesis", "IPython", "PIL", "resvg_py", "pydantic.mypy", "mypy"],
+    # dev tools; pydantic.mypy (the mypy plugin) would pull in mypy itself. setuptools is a build tool
+    # nothing imports at run time; collected anyway, it brought PyInstaller's runtime hook
+    # pyi_rth_setuptools, which imported setuptools and its vendored packages at every start of the
+    # backend: 130–230 ms of a command-line scan's start-up (docs/packaging.md, 命令行扫描的启动)
+    excludes=[
+        "tkinter",
+        "_tkinter",
+        "pytest",
+        "hypothesis",
+        "IPython",
+        "PIL",
+        "resvg_py",
+        "pydantic.mypy",
+        "mypy",
+        "setuptools",
+        "_distutils_hack",
+        "pkg_resources",
+        "distutils",
+    ],
     noarchive=False,
 )
 LINUX = sys.platform.startswith("linux")
