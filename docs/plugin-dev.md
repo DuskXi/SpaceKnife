@@ -193,7 +193,7 @@ async def ticks(ctx: Context) -> AsyncIterator[Progress]:
 | `status` | `{ state = "status", text = { zh = "{groups} 组，{bytes:size}", … } }`：命令面板里的状态行，取自共享状态（`:size` `:count` `:date` `:ago` 按界面的写法） |
 | `typed_only` | 只在输入名字时出现（False） |
 | `order` | 排序（0） |
-| `check` | 一个方法名：`def f(ctx, c: ActionContext) -> str \| None`，收到和命令一样的上下文（选中项、缩放根、过滤），返回不可用的原因；50 ms 内答不出算可用 |
+| `check` | 一个方法名：`def f(ctx, c: ActionContext) -> str \| None`，收到和命令一样的上下文（选中项、缩放根、过滤），`ctx.tree` 是上下文的扫描；返回不可用的原因。抛异常时不可用（原因是那个错误），50 ms 内答不出算可用 |
 
 动作，TOML 和 Python 都写成一个键：
 
@@ -726,7 +726,7 @@ async def growth(ctx: Context, c: ReportContext) -> Report:
 <a id="kind-hook"></a>
 #### 钩子
 
-`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动、贡献注册好之后——第一次启用和 `plugin dev` 重新加载也一样 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`tree_changed`（打开着的扫描的树变了：实时监控的文件变化、重新扫描；每个扫描每秒最多一次，收到 `TreeChange`：变化所在的文件夹、树的 `version`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了，一阵变化只来一次：用户拿出了本插件放进去的项、删了它们……）、`snapshots`（存了或删了快照，要 `snapshots.read`）；签名和细节见 [API 参考](plugin-api.md#api-hooks)（[树变化与快照](plugin-api.md#api-live)）。`name` 默认是函数名；写错的名字 `check` 从代码里就找出来（`unknown_hook`）。
+`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动、贡献注册好之后——第一次启用和 `plugin dev` 重新加载也一样 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`tree_changed`（打开着的扫描的树变了：实时监控的文件变化、重新扫描；每个扫描每秒最多一次，收到 `TreeChange`：变化所在的文件夹、它们的路径和变化前后的大小、树的 `version`；读树时树又变了，宿主用新下标再调）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了，一阵变化只来一次：用户拿出了本插件放进去的项、删了它们……）、`snapshots`（存了或删了快照，要 `snapshots.read`）；签名和细节见 [API 参考](plugin-api.md#api-hooks)（[树变化与快照](plugin-api.md#api-live)）。`name` 默认是函数名；写错的名字 `check` 从代码里就找出来（`unknown_hook`）。
 
 ```python ex
 @plugin.on("scan_done")
@@ -760,7 +760,7 @@ def hash_big(ctx: Context) -> None:
 | `ctx.plugin` | `id version dir storage` | — |
 | `ctx.lang`、`ctx.t(zh, en, **fields)`、`ctx.fmt` | 界面语言、即时翻译；`ctx.fmt.size(n)` `.count(n)` `.date(t)` `.ago(t)`：和界面一样写大小（用户的 1000 / 1024）、个数、时间 | — |
 | `ctx.settings[name]`、`.get`、`.set(name, value)` | 本插件的设置 | — |
-| `ctx.tree` | 这次调用所在的扫描（调用带的 `scan_id`，否则当前的扫描）；没有扫描时报「需要先完成扫描」 | `tree.read` |
+| `ctx.tree` | 这次调用所在的扫描（调用带的 `scan_id`，否则当前的扫描），带节点下标的调用拿到的是那一刻的树（[纪元](plugin-api.md#api-epoch)）；没有扫描时报「需要先完成扫描」 | `tree.read` |
 | `ctx.scan(scan_id)`、`ctx.scans()` | 其他扫描 | `tree.read` |
 | `ctx.node` | 调用针对的节点（`Node`）或 None | `tree.read` |
 | `ctx.emit(event)`、`ctx.progress(done, total, text)`、`ctx.toast(text, tone)` | 事件；进度；提示（`info ok warn danger`） | — |
@@ -806,7 +806,7 @@ first = next(iter(rows))  # 逐行：row.id、row.bytes、row.path
 
 **单个节点**：`tree.node(id)` → `Node`（`id name path kind size alloc files dirs mtime ctime atime ext parent depth child_count flags cls`，文件夹的 `size alloc` 是子树合计）；`tree.nodes(ids)`、`tree.name(id)`、`tree.path(id)`（系统自己的分隔符）、`tree.rel_path(id)`（相对根，永远用 `/`）、`tree.find(path)`、`tree.ref(id)`；`tree.roots` 是根的下标（0 号节点是虚拟的顶层），`len(tree)` 是节点数。路径和层级的细节见 [API 参考](plugin-api.md#api-tree)。常量：`Kind.FILE/DIR/LINK/OTHER`、`Flag.HIDDEN` 等。
 
-节点下标只在这棵树的这一「纪元」里有效：宿主整理树之后（压缩、监控重新列出）旧下标报 `STALE_TREE`。要跨调用保存，用 `tree.ref(id)` 得到带路径的 `NodeRef`。
+节点下标只在这棵树的这一「纪元」里有效：宿主挪动了行之后（监控着的扫描里每多一个文件都可能，见[纪元](plugin-api.md#api-epoch)）旧下标报 `STALE_TREE`。要跨调用保存，存路径，或用 `tree.ref(id)` 得到带路径的 `NodeRef`。
 
 <a id="report-blocks"></a>
 ## 5. 报告文档

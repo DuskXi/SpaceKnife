@@ -4,7 +4,12 @@
 - the ``tree_changed`` hook: the tree of an open scan changed (file changes applied by its monitor,
   「重新扫描」, a scan source listed again). Per plugin and scan the changes of about a second come
   together in one call, and a plugin whose hook still runs gets the next one when it is done (never
-  a queue of them); at most :data:`TREE_FOLDERS` folders are listed, ``more`` counts the rest;
+  a queue of them); at most :data:`TREE_FOLDERS` folders are listed, ``more`` counts the rest. Each
+  folder comes with its path and its size on disk before and after the changes. The folders follow
+  every remap, also while the hook runs: a hook that met a reorganised tree (``STALE_TREE``: live
+  monitoring moved rows meanwhile) is called again with the new ids (host.py ``_hook``), and after
+  :data:`~.host.HOOK_STALE_RETRIES` tries its changes go with the next ones (at most
+  :data:`TREE_REQUEUES` times in a row);
 - the ``snapshots`` hook (``snapshots.read`` only): snapshots were saved or pruned;
 - notices (``ctx.notify``, ``notify`` only): checked, bounded, at most one per plugin every
   :data:`NOTICE_GAP_S` seconds, sent to the windows as ``plugin.notice`` (a system notification
@@ -14,6 +19,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import itertools
 import json
 import time
@@ -38,6 +44,9 @@ if TYPE_CHECKING:
 
 TREE_EVENT_S = 1.0  # tree_changed: the changes of this long come together (per plugin and scan)
 TREE_FOLDERS = 256  # folders one tree_changed lists (``more`` counts the others)
+TREE_REQUEUES = 5  # changes a hook kept meeting a reorganised tree with: sent again this often, then dropped
+GROWN_CHANGES = 200_000  # changes of one batch whose sizes are followed up the tree (more: sizes unknown)
+GROWN_FOLDERS = 65_536  # folders whose growth one plugin's pending changes follow (more: unknown)
 SNAPSHOTS_EVENT_S = 0.5  # the snapshots hook: saves and prunes of this long come together
 SNAPSHOT_PATHS = 64  # paths one snapshots call lists (of saved, of removed)
 NOTICE_GAP_S = 5.0  # a plugin's notices: at most one in this many seconds (the SDK holds to it too)
@@ -46,14 +55,17 @@ NOTICE_ARGS_MAX = 4096  # a notice's command args, as JSON
 
 @dataclass(slots=True)
 class _TreeDue:
-    """The changes of one scan a plugin has not heard of yet."""
+    """The changes of one scan a plugin has not heard of yet (or is hearing of: in flight)."""
 
     epoch: int
     folders: dict[int, None] = field(default_factory=dict)  # an ordered set, at most TREE_FOLDERS
+    # every folder holding a change -> what its size on disk changed by in these changes (its
+    # size before = after - this); None: not known (the tree was replaced, too many changes)
+    grown: dict[int, int] | None = field(default_factory=dict)
     more: int = 0
     changes: int = 0
 
-    def add(self, folders: Sequence[int], changes: int) -> None:
+    def add(self, folders: Sequence[int], changes: int, grown: Mapping[int, int] | None = None) -> None:
         self.changes += changes
         for f in folders:
             if f in self.folders:
@@ -62,6 +74,70 @@ class _TreeDue:
                 self.more += 1
             else:
                 self.folders[f] = None
+        if grown is None or self.grown is None or len(self.grown) + len(grown) > GROWN_FOLDERS:
+            self.grown = None
+            return
+        for k, v in grown.items():
+            self.grown[k] = self.grown.get(k, 0) + v
+
+    def remap(self, new_ids: Callable[[np.ndarray], np.ndarray]) -> None:
+        """Node ids changed: the folders (and the growth they follow) take their new ids."""
+        if self.folders:
+            moved = new_ids(np.fromiter(self.folders, dtype=np.int64, count=len(self.folders)))
+            self.folders = dict.fromkeys(int(m) for m in moved.tolist() if m >= 0)
+        if self.grown:
+            keys = np.fromiter(self.grown, dtype=np.int64, count=len(self.grown))
+            moved = new_ids(keys)
+            self.grown = {
+                int(m): d for m, d in zip(moved.tolist(), self.grown.values(), strict=True) if m >= 0
+            }
+
+    def forget_ids(self, roots: Sequence[int]) -> None:
+        """The tree was replaced without a remap: what changed is somewhere below the roots."""
+        had = bool(self.folders)
+        self.folders = {}
+        self.grown = None
+        if had:
+            self.add([int(r) for r in roots], 0)
+
+    def then(self, newer: _TreeDue) -> _TreeDue:
+        """These changes (not heard of in the end) followed by ``newer``, of the same epoch."""
+        out = _TreeDue(epoch=newer.epoch, more=self.more + newer.more)
+        out.add(list(self.folders), self.changes, self.grown)
+        out.add(list(newer.folders), newer.changes, newer.grown)
+        return out
+
+
+def grown_by(store: NodeStore, changes: Mapping[int, int]) -> dict[int, int] | None:
+    """What each folder's size on disk changed by in ``changes`` (node -> change of its own
+    allocation): a changed file counts in its folder and every folder above, a changed folder in
+    itself and above. None when there are too many changes to follow (or none were named)."""
+    if not changes or len(changes) > GROWN_CHANGES:
+        return None
+    n = len(store)
+    ids = np.fromiter(changes.keys(), dtype=np.int64, count=len(changes))
+    deltas = np.fromiter(changes.values(), dtype=np.int64, count=len(changes))
+    ok = (ids > 0) & (ids < n)
+    ids, deltas = ids[ok], deltas[ok]
+    c = store.cols
+    parent = c["parent"]
+    cur = np.where(c["kind"][ids] == Kind.DIR, ids, parent[ids].astype(np.int64))
+    out: dict[int, int] = {}
+    for _level in range(n):  # one step up per round; a parent is always closer to the top
+        keep = (cur > 0) & (cur < n)
+        cur, deltas = cur[keep], deltas[keep]
+        if not len(cur):
+            break
+        folders, at = np.unique(cur, return_inverse=True)
+        summed = np.zeros(len(folders), dtype=np.int64)
+        np.add.at(summed, at, deltas)
+        for f, d in zip(folders.tolist(), summed.tolist(), strict=True):
+            out[f] = out.get(f, 0) + d
+        if len(out) > GROWN_FOLDERS:
+            return None
+        nxt = parent[folders].astype(np.int64)
+        cur, deltas = np.where(nxt == folders, 0, nxt), summed  # a root's parent is the top (0)
+    return out
 
 
 def changed_folders(store: NodeStore, changes: Mapping[int, int]) -> list[int]:
@@ -84,6 +160,8 @@ class Live:
     def __init__(self, host: PluginHost) -> None:
         self.host = host
         self._tree: dict[tuple[str, str], _TreeDue] = {}  # (plugin, scan) -> what it has not heard
+        self._inflight: dict[tuple[str, str], _TreeDue] = {}  # … what its hook is hearing of now
+        self._requeued: dict[tuple[str, str], int] = {}  # … sent again in a row (TREE_REQUEUES)
         self._tree_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
         self._snaps: dict[str, tuple[list[str], list[str]]] = {}  # plugin -> (saved, removed)
         self._snap_task: asyncio.Task[None] | None = None
@@ -95,12 +173,16 @@ class Live:
             if task is not None:
                 task.cancel()
         self._tree.clear()
+        self._inflight.clear()
+        self._requeued.clear()
         self._snaps.clear()
 
     def forget(self, plugin: str) -> None:
         """The plugin was turned off: what it had not heard of yet goes."""
         for key in [k for k in self._tree if k[0] == plugin]:
             self._tree.pop(key, None)
+        for key in [k for k in self._requeued if k[0] == plugin]:
+            self._requeued.pop(key, None)
         for key in [k for k in self._tree_tasks if k[0] == plugin]:
             self._tree_tasks.pop(key).cancel()
         self._snaps.pop(plugin, None)
@@ -109,6 +191,8 @@ class Live:
     def forget_scan(self, scan_id: str) -> None:
         for key in [k for k in self._tree if k[1] == scan_id]:
             self._tree.pop(key, None)
+        for key in [k for k in self._requeued if k[1] == scan_id]:
+            self._requeued.pop(key, None)
 
     def _listeners(self, event: str) -> list[PluginRecord]:
         owners = {c.owner for c in EXTENSIONS.of("hook") if c.spec.event == event and c.owner != BUILTIN}
@@ -139,33 +223,95 @@ class Live:
             return
         store = handle.store
         folders = changed_folders(store, changes)
+        grown = grown_by(store, changes)
         for rec in recs:
             key = (rec.id, scan_id)
             due = self._tree.get(key)
-            if due is None or due.epoch != store.epoch:  # (an epoch without a remap: from the top)
-                stale = due is not None and bool(due.folders)
+            if due is None:
                 due = self._tree[key] = _TreeDue(epoch=int(store.epoch))
-                if stale:
-                    due.add([int(r) for r in store.roots()], 0)
-            due.add(folders, max(1, len(changes)))
+            elif due.epoch != store.epoch:  # an epoch without a remap: from the top
+                due.forget_ids(store.roots())
+                due.epoch = int(store.epoch)
+            due.add(folders, max(1, len(changes)), grown)
             task = self._tree_tasks.get(key)
             if task is None or task.done():
                 self._tree_tasks[key] = self._start(self._deliver_tree(rec.id, scan_id))
 
     def tree_remapped(self, scan_id: str, new_ids: Callable[[np.ndarray], np.ndarray]) -> None:
         """Node ids of ``scan_id`` changed (a relist moved rows, a compaction): the folders a plugin
-        has not heard of yet follow."""
+        has not heard of yet follow, and so do those its hook is hearing of right now (it gets them
+        again with these ids when it met the new tree). Each remap moves the epoch on by one."""
         handle = self.host.server.scans.scans.get(scan_id)
         if handle is None:
             return
-        epoch = int(handle.store.epoch)
-        for key, due in self._tree.items():
-            if key[1] != scan_id:
-                continue
-            if due.folders:
-                moved = new_ids(np.fromiter(due.folders, dtype=np.int64, count=len(due.folders)))
-                due.folders = dict.fromkeys(int(m) for m in moved.tolist() if m >= 0)
-            due.epoch = epoch
+        store = handle.store
+        epoch = int(store.epoch)
+        for dues in (self._tree, self._inflight):
+            for key, due in dues.items():
+                if key[1] != scan_id:
+                    continue
+                if due.epoch == epoch - 1:
+                    due.remap(new_ids)
+                elif due.epoch != epoch:  # an epoch went by without a remap: its ids mean nothing now
+                    due.forget_ids(store.roots())
+                due.epoch = epoch
+
+    def _change(self, scan_id: str, due: _TreeDue) -> tuple[dict[str, Any], int] | None:
+        """The hook's args for ``due`` as the tree is now, and their epoch (None: the scan went)."""
+        handle = self.host.server.scans.scans.get(scan_id)
+        if handle is None:
+            return None
+        store = handle.store
+        if due.epoch != store.epoch:  # (remaps keep it in step; anything else: from the top)
+            due.forget_ids(store.roots())
+            due.epoch = int(store.epoch)
+        n = len(store)
+        folders = [f for f in due.folders if 0 < f < n]
+        tot = store.cols["tot_alloc"]
+        after = [int(tot[f]) for f in folders]
+        grown = due.grown
+        before: list[int | None] = [
+            None if grown is None or f not in grown else a - grown[f]
+            for f, a in zip(folders, after, strict=True)
+        ]
+        change = {
+            "scan_id": scan_id,
+            "epoch": int(store.epoch),
+            "version": int(store.version),
+            "folders": folders,
+            "paths": [store.path(f) for f in folders],
+            "before": before,
+            "after": after,
+            "more": due.more,
+            "changes": due.changes,
+        }
+        return {"change": change}, int(store.epoch)
+
+    def _requeue(self, key: tuple[str, str], due: _TreeDue) -> None:
+        """The hook kept meeting a reorganised tree: these changes go with the next ones (they
+        follow remaps like those), at most TREE_REQUEUES times in a row."""
+        n = self._requeued.get(key, 0) + 1
+        handle = self.host.server.scans.scans.get(key[1])
+        if n > TREE_REQUEUES or handle is None:
+            self._requeued.pop(key, None)
+            logger.bind(source=f"plugin:{key[0]}").warning(
+                "hook tree_changed of {}: the tree of {} was reorganised every time it ran ({} deliveries "
+                "in a row); these changes are dropped (does it read a tree kept from another call?)",
+                key[0],
+                key[1],
+                n,
+            )
+            return
+        self._requeued[key] = n
+        store = handle.store
+        if due.epoch != store.epoch:
+            due.forget_ids(store.roots())
+            due.epoch = int(store.epoch)
+        newer = self._tree.get(key)
+        if newer is not None and newer.epoch != due.epoch:
+            newer.forget_ids(store.roots())
+            newer.epoch = due.epoch
+        self._tree[key] = due if newer is None else due.then(newer)
 
     async def _deliver_tree(self, plugin: str, scan_id: str) -> None:
         key = (plugin, scan_id)
@@ -174,20 +320,27 @@ class Live:
                 await asyncio.sleep(TREE_EVENT_S)  # what changes meanwhile comes along
                 due = self._tree.pop(key, None)
                 rec = self.host.records.get(plugin)
-                handle = self.host.server.scans.scans.get(scan_id)
-                if due is None or rec is None or rec.state != "enabled" or handle is None:
+                if due is None or rec is None or rec.state != "enabled":
                     return
-                store = handle.store
-                folders = list(due.folders) if due.epoch == store.epoch else [int(r) for r in store.roots()]
-                change = {
-                    "scan_id": scan_id,
-                    "epoch": int(store.epoch),
-                    "version": int(store.version),
-                    "folders": folders,
-                    "more": due.more,
-                    "changes": due.changes,
-                }
-                await self.host._hook(rec, "tree_changed", _scan=scan_id, change=change)
+                first = self._change(scan_id, due)
+                if first is None:
+                    return
+                self._inflight[key] = due  # remaps reach it while the hook runs
+                try:
+                    ok = await self.host._hook(
+                        rec,
+                        "tree_changed",
+                        _scan=scan_id,
+                        _epoch=first[1],
+                        _again=functools.partial(self._change, scan_id, due),
+                        **first[0],
+                    )
+                finally:
+                    self._inflight.pop(key, None)
+                if ok:
+                    self._requeued.pop(key, None)
+                else:
+                    self._requeue(key, due)
         finally:
             if self._tree_tasks.get(key) is asyncio.current_task():
                 self._tree_tasks.pop(key, None)

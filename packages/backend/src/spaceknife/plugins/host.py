@@ -89,7 +89,16 @@ ANNOTATE_TIMEOUT = 0.2
 ANNOTATE_BATCH = 500
 MAX_REASONS = 20_000  # remembered change reasons (all comparisons); forgotten all at once beyond
 HOOK_TIMEOUT = 30.0
+# a hook about a tree (tree_changed) that met a reorganised tree is called again at once, with the
+# ids of the new one, this many times (STALE_RETRY_S apart); then with the next changes
+HOOK_STALE_RETRIES = 3
+STALE_RETRY_S = 0.05
 CHECK_TIMEOUT = 0.05
+CHECK_REASON_MAX = 160  # characters of a failed check's error shown as the reason
+# a check that could not answer leaves the command available (it was not asked, it did not say no)
+CHECK_UNANSWERED = frozenset(
+    {ErrorCode.PLUGIN_TIMEOUT, ErrorCode.PLUGIN_LIMIT, ErrorCode.STALE_TREE, ErrorCode.REQUEST_CANCELLED}
+)
 ROUTED_KINDS = ("method", "report", "cleanup")
 CACHED_KINDS = frozenset({"node_field", "node_set", "visualization", "color_mode", "change_annotator"})
 LONG_KINDS = ("stream", "watch", "task")  # no time limit unless the caller gives one
@@ -685,6 +694,12 @@ class PluginHost:
             "timeout": max(0.0, deadline - loop.time()) if deadline is not None else LONG_CALL_S,
         }
         info.update(ctx or {})
+        if kind not in LONG_KINDS and info.get("scan_id") and info.get("epoch") is None:
+            # its ctx.tree is the tree as it is now: node ids the call carries are of it (a call
+            # that took its ids earlier says their epoch itself)
+            store = self.api.store_of(str(info["scan_id"]))
+            if store is not None:
+                info["epoch"] = int(getattr(store, "epoch", 0))
         self._sites[call_id] = (plugin, session, CURRENT_REQUEST.get())
         if on_progress is not None:
             self._progress_to[call_id] = on_progress
@@ -946,9 +961,19 @@ class PluginHost:
                     session.send_binary(_restamp(f, name, None))
                 session.emit_raw(name, {"sub": sub.id, "value": value if not frames else None})
 
+            # a stream about a scan (its params name one, as a panel's do): ctx.tree is that scan
+            given = params or {}
+            sctx: dict[str, Any] = {
+                k: given[k] for k in ("scan_id", "view_id") if isinstance(given.get(k), str) and given[k]
+            }
+            if isinstance(given.get("node"), int) and not isinstance(given.get("node"), bool):
+                sctx["node"] = given["node"]
+
             async def run() -> None:
                 try:
-                    await self.call(plugin, "stream", local, params or {}, session=session, on_chunk=chunk)
+                    await self.call(
+                        plugin, "stream", local, params or {}, session=session, ctx=sctx, on_chunk=chunk
+                    )
                 except (RpcError, asyncio.CancelledError):
                     pass
                 finally:
@@ -1308,12 +1333,24 @@ class PluginHost:
 
     # ------------------------------------------------------------- hooks
 
-    async def _hook(self, rec: PluginRecord, event: str, *, _scan: str | None = None, **args: Any) -> None:
+    async def _hook(
+        self,
+        rec: PluginRecord,
+        event: str,
+        *,
+        _scan: str | None = None,
+        _epoch: int | None = None,
+        _again: Callable[[], tuple[dict[str, Any], int] | None] | None = None,
+        **args: Any,
+    ) -> bool:
         """Run the plugin's ``event`` hooks (one after the other); ``_scan``: the scan the hook is
-        about (its ``ctx.tree``)."""
+        about (its ``ctx.tree``), ``_epoch``: the epoch of the node ids in ``args`` (else the tree's
+        now). With ``_again`` (tree_changed), a hook that met a reorganised tree (STALE_TREE) is
+        called again with what ``_again()`` gives, ``(args, epoch)`` of the tree as it is then, up
+        to HOOK_STALE_RETRIES times; False when one still met it (the caller sends it later)."""
         need = HOOK_PERMISSIONS.get(event)
         if need is not None and need not in rec.granted:
-            return  # it may not hear of this (plugin check says so)
+            return True  # it may not hear of this (plugin check says so)
         found = [c for c in EXTENSIONS.owned(rec.id) if c.kind == "hook" and c.spec.event == event]
         if not found:
             declared = rec.description is not None and any(
@@ -1327,16 +1364,41 @@ class PluginHost:
                     rec.id,
                     rec.state,
                 )
-            return
-        ctx = {"scan_id": _scan} if _scan else None
+            return True
+        ok = True
         for c in found:
             limit = float(getattr(c.spec, "timeout", HOOK_TIMEOUT))
-            try:
-                await self.call(rec.id, "hook", c.local, {"event": event, **args}, ctx=ctx, timeout=limit)
-            except (RpcError, asyncio.CancelledError) as exc:
-                logger.bind(source=f"plugin:{rec.id}").warning(
-                    "hook {} of {} failed: {}", event, rec.id, getattr(exc, "message", exc)
-                )
+            given, epoch = args, _epoch
+            for attempt in range(HOOK_STALE_RETRIES + 1):
+                ctx: dict[str, Any] | None = None
+                if _scan:
+                    ctx = {"scan_id": _scan} if epoch is None else {"scan_id": _scan, "epoch": epoch}
+                try:
+                    await self.call(
+                        rec.id, "hook", c.local, {"event": event, **given}, ctx=ctx, timeout=limit
+                    )
+                    break
+                except (RpcError, asyncio.CancelledError) as exc:
+                    stale = isinstance(exc, RpcError) and exc.code == ErrorCode.STALE_TREE
+                    if stale and _again is not None:
+                        fresh = _again() if attempt < HOOK_STALE_RETRIES else None
+                        if fresh is not None:
+                            given, epoch = fresh
+                            await asyncio.sleep(STALE_RETRY_S * (attempt + 1))
+                            continue
+                        ok = False  # the caller sends these changes again with the next ones
+                        logger.bind(source=f"plugin:{rec.id}").debug(
+                            "hook {} of {}: the tree was reorganised {} times while it ran",
+                            event,
+                            rec.id,
+                            attempt + 1,
+                        )
+                        break
+                    logger.bind(source=f"plugin:{rec.id}").warning(
+                        "hook {} of {} failed: {}", event, rec.id, getattr(exc, "message", exc)
+                    )
+                    break
+        return ok
 
     # ------------------------------------------------------------- cached answers
 
@@ -1520,24 +1582,48 @@ class PluginHost:
 
     def check_command(self, plugin: str, method: str, c: Any) -> str | None:
         """A command's own availability check (``check = "<method>"``): called with the
-        :class:`ActionContext` the command would get (scan, view, selected node, zoom root, filter);
-        50 ms, else available. It returns why the command is unavailable, or nothing."""
+        :class:`ActionContext` the command would get (scan, view, selected node, zoom root, filter),
+        its ``ctx.tree`` that scan as it is now. It returns why the command is unavailable, or
+        nothing. A check that raises makes the command unavailable with the error as the reason
+        (and goes to the plugin's log); one that does not answer within 50 ms (or the plugin is
+        busy, its process starting, the tree reorganised meanwhile) leaves it available."""
+        params = self.action_context(c)
+        ctx = {k: params[k] for k in ("scan_id", "view_id", "node") if params.get(k) is not None}
+        epoch = self._epoch_of(c, params.get("scan_id"))
+        if epoch is not None:
+            ctx["epoch"] = epoch
         try:
-            value, _ = self.call_sync(plugin, "method", method, self.action_context(c), timeout=CHECK_TIMEOUT)
-        except RpcError:
-            return None
+            value, _ = self.call_sync(plugin, "method", method, params, ctx=ctx, timeout=CHECK_TIMEOUT)
+        except RpcError as exc:
+            if exc.code in CHECK_UNANSWERED:
+                return None
+            why = " ".join(str(exc.message).split())[:CHECK_REASON_MAX] or str(exc.code)
+            now = time.monotonic()
+            if now - self._field_logged.get(f"check:{plugin}.{method}", -FIELD_LOG_S) >= FIELD_LOG_S:
+                self._field_logged[f"check:{plugin}.{method}"] = now
+                logger.bind(source=f"plugin:{plugin}").warning(
+                    "check {} of {} failed: {}", method, plugin, why
+                )
+            return tr("检查出错：{why}", why=why)
         return str(value) if isinstance(value, str) and value else None
+
+    def _epoch_of(self, c: Any, scan_id: str | None) -> int | None:
+        """The epoch of the tree a palette context's node ids are of (its view's store)."""
+        view = getattr(c, "view", None)
+        store = view.store if view is not None else self.api.store_of(scan_id) if scan_id else None
+        return int(getattr(store, "epoch", 0)) if store is not None else None
 
     def action_context(self, c: Any) -> dict[str, Any]:
         """The palette's context as a command's :class:`ActionContext` (a check, a command run by
-        the backend): where the user is."""
+        the backend): where the user is. Its scan: the one of the view (whose node ids these are),
+        else the tab's."""
         view = getattr(c, "view", None)
         node = getattr(c, "selected_node", None)
         if view is None:
-            return {"scan_id": None}
+            return {"scan_id": getattr(c, "scan_id", None)}
         filt = view.filter
         return {
-            "scan_id": self.api.scan_of_store(view.store),
+            "scan_id": self.api.scan_of_store(view.store) or getattr(c, "scan_id", None),
             "view_id": view.id,
             "node": node,
             "selection": [node] if node is not None else [],
@@ -1621,12 +1707,15 @@ class PluginHost:
                     "set",
                     c.local,
                     {"scan_id": scan_id},
-                    ctx={"scan_id": scan_id},
+                    ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))},
                     timeout=SET_TIMEOUT,
                 )
             except RpcError as exc:
-                logger.bind(source=f"plugin:{c.owner}").warning(
-                    "node set {} unavailable: {}", sid, exc.message
+                logger.bind(source=f"plugin:{c.owner}").log(
+                    "DEBUG" if exc.code == ErrorCode.STALE_TREE else "WARNING",
+                    "node set {} unavailable: {}",
+                    sid,
+                    exc.message,
                 )
                 continue
             arr = decode_frame(frames[0])[1]["v"] if frames else np.zeros(0, dtype=np.uint8)
@@ -1670,7 +1759,7 @@ class PluginHost:
                     "color",
                     name,
                     {"scan_id": scan_id, "palette": palette},
-                    ctx={"scan_id": scan_id},
+                    ctx={"scan_id": scan_id, "epoch": int(getattr(view.store, "epoch", 0))},
                     frames=[frame],
                     timeout=COLOR_TIMEOUT,
                 )
@@ -1749,7 +1838,7 @@ class PluginHost:
                         "visual",
                         name,
                         {"scan_id": scan_id, "options": opts},
-                        ctx={"scan_id": scan_id},
+                        ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))},
                         timeout=max(VISUAL_TIMEOUT, 5.0),
                     )
                     w = decode_frame(frames[0])[1]["v"] if frames else np.zeros(0)
@@ -1760,8 +1849,11 @@ class PluginHost:
                     )
                     hit = subtree_sums(store.cols, len(store), leaf)
                 except RpcError as exc:
-                    logger.bind(source=f"plugin:{plugin}").warning(
-                        "visualization {} failed: {}", name, exc.message
+                    logger.bind(source=f"plugin:{plugin}").log(
+                        "DEBUG" if exc.code == ErrorCode.STALE_TREE else "WARNING",
+                        "visualization {} failed: {}",
+                        name,
+                        exc.message,
                     )
                     hit = None
                 if hit is not None:
@@ -1814,7 +1906,7 @@ class PluginHost:
                     "layout",
                     name,
                     {**h.params(), "scan_id": scan_id, "options": o},
-                    ctx={"scan_id": scan_id} if scan_id else {},
+                    ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))} if scan_id else {},
                     frames=[frame],
                     timeout=LAYOUT_TIMEOUT,
                 )
@@ -1921,7 +2013,7 @@ class PluginHost:
                         "options": opts,
                         "selection": [int(n) for n in (selection or [])][:100_000],
                     },
-                    ctx={"scan_id": scan_id},
+                    ctx={"scan_id": scan_id, "epoch": int(getattr(store, "epoch", 0))},
                     frames=frames,
                     on_chunk=on_chunk,
                     timeout=600.0,

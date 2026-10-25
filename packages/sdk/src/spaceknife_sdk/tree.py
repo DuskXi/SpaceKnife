@@ -22,7 +22,10 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from spaceknife_protocol.binary import decode_frame
+from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.plugins import NodeRef
+
+from .errors import HostError
 
 if TYPE_CHECKING:
     from ._link import Image, Link
@@ -165,6 +168,10 @@ class Columns(dict[str, np.ndarray]):
         return len(next(iter(self.values()))) if dict.__len__(self) else 0
 
 
+def _stale(epoch: int) -> HostError:
+    return HostError(ErrorCode.STALE_TREE, "the tree was reorganised: node ids changed", {"epoch": epoch})
+
+
 def _split_blob(blob: np.ndarray, lengths: np.ndarray) -> list[str]:
     raw = bytes(blob)
     out: list[str] = []
@@ -267,10 +274,15 @@ class Rows:
 
 
 class TreeView:
-    """A read-only view of one scan, valid for one call (the host may change the tree between calls)."""
+    """A read-only view of one scan, valid for one call (the host may change the tree between calls).
 
-    def __init__(self, link: Link, info: Mapping[str, Any]) -> None:
+    Every read is of the tree's ``epoch``: once the host reorganised the tree (moved rows: node ids
+    changed), a read raises ``HostError`` with code ``STALE_TREE`` instead of answering with other
+    nodes. ``pinned`` (``ctx.tree`` of a call that came with node ids): whole columns too."""
+
+    def __init__(self, link: Link, info: Mapping[str, Any], *, pinned: bool = False) -> None:
         self._link = link
+        self._pinned = pinned
         self.scan_id: str = str(info["scan_id"])
         self.epoch: int = int(info.get("epoch", 0))
         self.version: int = int(info.get("version", 0))
@@ -404,6 +416,8 @@ class TreeView:
         """The node at an absolute path (or a path relative to the first root), or None."""
         value, _ = self._link.request("host.find", self._params(path=path))
         found = value.get("node")
+        if found is not None and value.get("epoch") is not None and int(value["epoch"]) != self.epoch:
+            raise _stale(int(value["epoch"]))  # an id of the reorganised tree, not of this one
         return None if found is None else int(found)
 
     def ref(self, id: int, *, path: bool = True) -> NodeRef:
@@ -418,11 +432,14 @@ class TreeView:
         need = set(names) - self._image_cols
         if self._image is None or need:
             cols = sorted(self._image_cols | set(names))
-            self._image = self._link.image(self.scan_id, cols)
+            image = self._link.image(self.scan_id, cols)
+            if image.epoch != self.epoch and self._pinned:
+                raise _stale(image.epoch)  # the call's node ids are not of these columns
+            self._image = image
             self._image_cols = set(cols)
-            self.n = self._image.n
-            if self._image.epoch != self.epoch:
-                self.epoch = self._image.epoch
+            self.n = image.n
+            if image.epoch != self.epoch:
+                self.epoch = image.epoch
                 self._nodes.clear()
         return self._image
 

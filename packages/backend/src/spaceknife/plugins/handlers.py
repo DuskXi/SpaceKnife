@@ -244,6 +244,8 @@ async def node_fields(
             except RpcError as exc:
                 if exc.code == ErrorCode.PLUGIN_TIMEOUT:
                     late.append(c)  # busy or slow: answered later (the frontend asks again)
+                elif exc.code == ErrorCode.STALE_TREE:
+                    pass  # the tree was reorganised meanwhile: no answer for this node id now
                 else:  # the details panel leaves it out; the plugin's log and MockHost say why
                     host.field_failed(c.id, p.node, exc.message)
                 return

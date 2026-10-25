@@ -115,10 +115,15 @@ NOTES: dict[tuple[str, str], str] = {
     ("ScanInfo", "monitoring"): "文件变化是否实时跟着（`tree_changed` 钩子）：`off`（实时监控关着、快照、"
     "没有监控器的扫描来源）、`starting`、`running`、`degraded`（部分靠轮询或重新扫描）、`failed`",
     ("TreeChange", "scan_id"): "变了的扫描（钩子里 `ctx.tree` 就是它）",
-    ("TreeChange", "epoch"): "`folders` 的节点下标属于这个纪元（`ctx.tree.epoch`）",
+    ("TreeChange", "epoch"): "`folders` 的节点下标属于这个纪元：钩子的 `ctx.tree` 就是这一纪元的树"
+    "（[纪元](#api-epoch)）",
     ("TreeChange", "version"): "变化之后树的版本（`ctx.tree.version`）",
     ("TreeChange", "folders"): "发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的），最多 256 个；"
     "扫描来源重新列出时是根",
+    ("TreeChange", "paths"): "`folders` 里每个文件夹的路径（顺序相同）",
+    ("TreeChange", "before"): "每个文件夹连同里面的占用（字节，即 `Node.alloc`）在这些变化之前是多少；"
+    "不知道时是 None（整棵树换掉了，比如扫描来源重新列出）",
+    ("TreeChange", "after"): "每个文件夹连同里面的占用在这些变化之后是多少（和 `ctx.tree` 里的一样）",
     ("TreeChange", "more"): "大约还有多少个文件夹变了而没有列出",
     ("TreeChange", "changes"): "这一秒里变了、新增或消失的文件和文件夹数",
     ("SnapshotsChange", "saved"): "写下的快照文件",

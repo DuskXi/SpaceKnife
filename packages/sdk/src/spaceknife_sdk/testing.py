@@ -756,6 +756,7 @@ class MockHost:
             plugins=frozenset(host.enabled_ids()),
             scan_source=source,
             caps=frozenset(self.session.capabilities),
+            scan_id=self.scan_id,
         )
 
         def ask() -> str | None:
@@ -816,11 +817,16 @@ class MockHost:
             args.setdefault("changed", [])
         if event == "tree_changed" and "change" not in args:
             store = self.store
+            roots = [int(r) for r in store.roots()]
+            alloc = [int(store.cols["tot_alloc"][r]) for r in roots]
             args["change"] = {
                 "scan_id": self.scan_id,
                 "epoch": int(store.epoch),
                 "version": int(store.version),
-                "folders": [int(r) for r in store.roots()],
+                "folders": roots,
+                "paths": [str(store.path(r)) for r in roots],
+                "before": alloc,
+                "after": alloc,
                 "changes": 1,
             }
         if event == "snapshots":

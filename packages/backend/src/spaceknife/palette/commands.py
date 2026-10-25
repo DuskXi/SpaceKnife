@@ -56,6 +56,7 @@ class Context:
     plugins: frozenset[str] = frozenset()  # enabled plugins
     scan_source: str = ""  # the scan source of the scan in front (a plugin's full id), "" for disks
     node: int | None = None  # what the command is about when not the selection (a context menu's block)
+    scan_id: str | None = None  # the scan of the tab (a plugin's check reads that tree)
 
     @property
     def selected_node(self) -> int | None:

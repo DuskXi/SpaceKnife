@@ -72,6 +72,7 @@
  "无法移到回收站：{reason}": "Cannot move to the recycle bin: {reason}",
  "无法重新读取来源：{why}": "Cannot read the source again: {why}",
  "来源的内容有变化，需要重新扫描": "The source changed: scan it again",
+ "检查出错：{why}": "The check failed: {why}",
  "每一项应是一组栏目的值": "each entry is a set of field values",
  "没有「{field}」这一栏": "there is no field \"{field}\"",
  "没有插件 {id}": "There is no plugin {id}",

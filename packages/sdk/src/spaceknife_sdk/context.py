@@ -26,6 +26,7 @@ from urllib.parse import urlsplit
 import numpy as np
 from pydantic import BaseModel
 
+from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.plugins import NodeRef, Permission, PluginTaskInfo
 from spaceknife_protocol.text import LANG, Text, fmt_ago, fmt_count, fmt_date, fmt_size, localize
 
@@ -97,9 +98,13 @@ class CallInfo:
     request: int | str | None = None  # the frontend's request id (progress events)
     slot: str | None = None  # a node field: "inspector" or "hover"
     units: int = 1024  # the user's size unit base (1000 or 1024): ctx.fmt.size
+    # the tree's epoch when the host made the call: node ids the call came with are of it, and
+    # ctx.tree is that tree (a read after the tree was reorganised is STALE_TREE); None: the newest
+    epoch: int | None = None
 
     @staticmethod
     def from_dict(d: Mapping[str, Any]) -> CallInfo:
+        epoch = d.get("epoch")
         return CallInfo(
             id=int(d.get("id", 0)),
             kind=str(d.get("kind", "method")),
@@ -112,6 +117,7 @@ class CallInfo:
             request=d.get("request"),
             slot=d.get("slot"),
             units=1000 if d.get("units") == 1000 else 1024,
+            epoch=int(epoch) if isinstance(epoch, int) and not isinstance(epoch, bool) else None,
         )
 
 
@@ -839,9 +845,23 @@ class Context:
 
     @property
     def tree(self) -> TreeView:
-        """The scan this call is about (else the scan in front). Needs ``tree.read``."""
+        """The scan this call is about (else the scan in front). Needs ``tree.read``.
+
+        A call that comes with node ids (a field, a check, a hook, a frame's colours …) gets the
+        tree as it was when the host made the call: those ids are of it. When the tree is
+        reorganised during the call (live monitoring moved rows), reading it raises ``HostError``
+        with code ``STALE_TREE``; let it propagate (the host asks again with the new ids, or
+        leaves the answer out)."""
         if self._tree is None:
-            self._tree = TreeView(self._link, self._tree_info(self.call_info.scan_id))
+            info = self._tree_info(self.call_info.scan_id)
+            want = self.call_info.epoch
+            if want is not None and int(info.get("epoch", 0)) != want:
+                raise HostError(
+                    ErrorCode.STALE_TREE,
+                    "the tree was reorganised: node ids changed",
+                    {"epoch": info.get("epoch")},
+                )
+            self._tree = TreeView(self._link, info, pinned=want is not None)
         return self._tree
 
     def scan(self, scan_id: str) -> TreeView:

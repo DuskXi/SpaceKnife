@@ -385,6 +385,9 @@ class Dispatcher:
         if kind in ("method", "check"):
             if h.params is not None and h.arity >= 2:
                 arg = h.params.model_validate(dict(p))
+                scan = getattr(arg, "scan_id", None)  # an ActionContext: ctx.tree is its scan
+                if isinstance(scan, str) and scan and not ctx.call_info.scan_id:
+                    ctx.call_info.scan_id = scan
                 result = await self._call(h, ctx, arg)
             else:
                 result = await self._call(h, ctx)

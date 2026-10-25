@@ -103,15 +103,27 @@ class ScanInfo(_Record):
 class TreeChange(_Record):
     """What the ``tree_changed`` hook gets: the tree of an open scan changed (files changed on disk
     while it is monitored, 「重新扫描」, a scan source listed again). At most one a second per scan;
-    the changes of that second come together."""
+    the changes of that second come together. ``folders``, ``paths``, ``before`` and ``after`` go
+    together (``zip`` them): the paths and sizes need no read of the tree."""
 
     scan_id: str
-    epoch: int = Field(default=0, description="The node ids below are of this epoch (ctx.tree.epoch)")
+    epoch: int = Field(
+        default=0, description="The node ids below are of this epoch (the hook's ctx.tree is this tree)"
+    )
     version: int = Field(default=0, description="The tree's version after the changes (ctx.tree.version)")
     folders: list[int] = Field(
         default_factory=list,
         description="Folders whose contents changed (their sizes changed with them, up to the root), "
         "at most 256; a scan source listed again: its root",
+    )
+    paths: list[str] = Field(default_factory=list, description="The path of each folder in folders")
+    before: list[int | None] = Field(
+        default_factory=list,
+        description="Each folder's size on disk (bytes, with what is inside it: Node.alloc) before "
+        "these changes; None where it is not known (the tree was replaced: a scan source listed again)",
+    )
+    after: list[int] = Field(
+        default_factory=list, description="Each folder's size on disk after them (as ctx.tree has it)"
     )
     more: int = Field(default=0, description="About how many more folders changed than are listed")
     changes: int = Field(default=0, description="Files and folders that changed, added or went")

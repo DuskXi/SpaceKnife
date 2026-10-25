@@ -125,6 +125,7 @@ def install(server: Server) -> None:
             plugins=server.plugins.enabled_ids(),
             scan_source=(handle.plugin_source or "") if handle is not None else "",
             node=c.node if view is not None else None,
+            scan_id=handle.id if handle is not None else None,
         )
         return ctx, handle, view
 

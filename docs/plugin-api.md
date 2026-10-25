@@ -16,7 +16,7 @@
 | `ctx.granted` | 用户授予的权限（`frozenset`），例如 `"files.read" in ctx.granted` 时才去读文件内容 |
 | `ctx.slot` | 节点字段被问时在哪：`"inspector"`（详情面板，1 秒）或 `"hover"`（悬停卡，30 毫秒）；其他调用是 None |
 | `ctx.node` | 调用针对的节点：字段和洞察的那一项，报告和清理的 `c.node`；没有时是 None |
-| `ctx.tree` | 调用带的扫描（`c.scan_id`），否则用户眼前的扫描；都没有时抛 `PluginError`「需要先完成扫描」 |
+| `ctx.tree` | 调用带的扫描（`c.scan_id`），否则用户眼前的扫描；都没有时抛 `PluginError`「需要先完成扫描」。带着节点下标的调用（字段、洞察、命令和它的 `check`、钩子、一帧的配色和布局、导出……）拿到的是宿主发出调用时的那棵树，那些下标属于它；调用途中树被整理了（[纪元](#api-epoch)变了），再读就抛 `HostError`（`STALE_TREE`），不会答成别的节点。后台任务、流和监控器的 `ctx.tree` 是第一次读时最新的树 |
 | `ctx.scan(scan_id)` | 另一个打开着的扫描的树；`ctx.scans()` 列出它们（[`ScanInfo`](#api-models)，新的在前，`front` 标出眼前的那个） |
 | `ctx.invalidate(*kinds)` | 丢掉宿主缓存的本插件的回答（[缓存](#api-cache)）；`kinds` 是 `node_field` `node_set` `visualization` `color_mode` `change_annotator`，不写就是全部。界面随后重新要字段、重新过滤、重画、重新取图例 |
 | `ctx.fmt` | `size(n)`（用户的 1000 / 1024，和界面一样：`1.5 MB`）`count(n)`（`1,234`）`date(t)`（unix 秒 → `2026-10-24 21:30`，本地时间）`ago(t)`（`3 天前` / `3 days ago`）。导出、提示、文字单元格里用它；报告的表格列写单位就行（前端格式化） |
@@ -39,7 +39,7 @@
 | `root_paths` | 根的路径，和 `roots` 一一对应 |
 | `virtual` | 这棵树不在磁盘上（`on_disk = false` 的扫描来源） |
 | `classes` | 类别表：`{下标: ClassInfo(index, id, name)}`，`cls` 列的值是这里的下标 |
-| `epoch` | 树的纪元：宿主整理树（压缩、监控重新列出）后加一，旧下标随之作废（`STALE_TREE`） |
+| `epoch` | 树的纪元：宿主挪动了行（监控重新列出、压缩……）后加一，旧下标随之作废（`STALE_TREE`）；什么时候变见[下面](#api-epoch) |
 | `version` | 树的版本：任何改动都加一。扫描进行中每批结果都会让它变（很频繁）；扫描完成后只在监控、重新扫描、删除改动树时变。宿主的缓存按它作废 |
 
 **方法**：`node(id)` `nodes(ids)` → [`Node`](#api-models)；`name(id)` `names(ids)`；`path(id)` `paths(ids)`；`rel_path(id, under=None)` `rel_paths(ids, under=None)`；`root_of(id)`；`parent(id)`；`children(id)` → 下标数组；`walk(id=None, chunk=…)` → 一块块下标，**逐层**（先 `id` 自己，再它的子项，再孙辈……同层按下标；不是深度优先，一个文件夹下面的项在结果里不连续）；`col(name)` `cols(*names)` → 只读的整列；`query(…)` → `Rows`（[限量](#api-query)）；`rule_folders(规则)` → 下标数组（[文件夹规则匹配到的](#api-query)）；`find(path)` → 下标或 None；`ref(id)` → [`NodeRef`](#api-models)；`file_ids(ids)` → `(设备, 文件 id, 链接数)`（要 `files.read`）；`close()`（快照用完时）。
@@ -47,6 +47,15 @@
 **层级**：0 号节点 `depth = 0`，根 `depth = 1`，根下面一层 `2`。`Node.parent` 对 0 号节点是 −1，对根是 0。根的 `name` 是它的完整路径。
 
 **边界**：`query(under=X)` 是 X 下面的项，**不含 X**；不写 `under` 时含各个根（不含 0 号节点）。文件的 `tot_*` 列是 0；`bytes` 列对文件是占用、对文件夹是子树合计、对重复的硬链接是 0。
+
+<a id="api-epoch"></a>
+**纪元什么时候变**：节点下标就是行号，宿主挪动了行，`epoch` 就加一（`version` 则是树有任何改动都加一）：
+
+- 实时监控重新列出一个文件夹：里面新建、删除、改名了文件或文件夹（只是文件的大小、时间变了不算）。重新列出的文件夹里留下的项也换了下标，所以**监控着的扫描里每多一个文件，纪元就可能变一次**；
+- 「重新扫描」一个文件夹；变化多了以后宿主压缩树；
+- 扫描来源重新列出（列得久时边列边显示，每显示一批也算一次）；MFT 扫描换上建好的树。
+
+纪元变了以后：还没送出的 `tree_changed` 文件夹跟着换成新下标；正在跑的调用再读树就抛 `HostError`（`STALE_TREE`）：`tree_changed` 钩子由宿主用新下标再调（[树变化](#api-live)），别的调用这次没有结果（字段、检查算没答，界面下次再问）。要跨调用记住节点，存路径或 `tree.ref(id)`。
 
 <a id="api-query"></a>
 **`query` 的限量**：不写 `limit` 时最多 10 万行（`QUERY_LIMIT`），写了最多 100 万（`QUERY_MAX`）；有 `sort` 时取排在前面的，没有时按下标。`rows.total` 是命中的总数，`rows.truncated` 说有没有被截掉；没写 `limit` 又被截掉时插件日志里有一条警告。`where` 按过滤框的规则只命中文件。逐个节点的调用（`tree.node(i)`、`tree.path(i)`）每次都跨进程，几千个以上时用 `query(columns=("path", …))`，或 `nodes(ids)` / `paths(ids)` 一次拿。
@@ -85,7 +94,7 @@
 | 命令：工具栏（`toolbar`）、命令面板、按键 | 有焦点的视图的扫描 | 有焦点的视图 | 选中项；没选时是 None | `[node]` 或 `[]` |
 | 命令：开始页（`start`） | 眼前的扫描或 None | — | None | `[]` |
 
-聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`。
+聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`，它的 `ctx.tree` 就是 `c.scan_id` 那个扫描（两个扫描都开着时也不会读到另一个）。`check` 抛出异常时命令不可用，原因写成「检查出错：〈错误〉」（同时进插件日志）；50 ms 内没答（插件正忙、进程正在启动、树刚被整理）算可用：动作运行时自己再查一遍。
 
 导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。
 
@@ -151,7 +160,7 @@ plugin.setting(
 | `stop` | `async def f(ctx) -> None` | 进程停止之前（2 秒内做完） |
 | `scan_done` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描完成（`scan.state` 是 `done`）；`ctx.tree` 是它 |
 | `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉（它的树已经读不到了） |
-| `tree_changed` | `async def f(ctx, change: TreeChange) -> None` | 一个打开着的扫描的树变了（实时监控应用了文件变化、「重新扫描」、扫描来源重新列出）：每个扫描每秒最多一次，`ctx.tree` 是它；见[下一节](#api-live) |
+| `tree_changed` | `async def f(ctx, change: TreeChange) -> None` | 一个打开着的扫描的树变了（实时监控应用了文件变化、「重新扫描」、扫描来源重新列出）：每个扫描每秒最多一次，`ctx.tree` 是它（`change.epoch` 那一纪元的树）；见[下一节](#api-live) |
 | `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值 |
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
 | `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……；一阵变化只来一次）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
@@ -162,7 +171,8 @@ plugin.setting(
 <a id="api-live"></a>
 ### 树变化、快照与对比
 
-- **`tree_changed`**：宿主把一个扫描大约一秒内的变化合成一次调用，插件的钩子还在跑时下一次等它跑完（不会排起队）。`change.folders` 是发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的）的节点下标，属于 `change.epoch`；最多 256 个，`more` 是大约还有几个；节点下标变了（重新列出时挪了行、整理）时还没送出的会跟着换成新的。扫描来源重新列出时 `folders` 是根。文件夹的合计跟着变到根，要看谁长了就比较 `tree.node(f).size`（或自己记下的上一次）。
+- **`tree_changed`**：宿主把一个扫描大约一秒内的变化合成一次调用，插件的钩子还在跑时下一次等它跑完（不会排起队）。`change.folders` 是发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的）的节点下标，属于 `change.epoch`，钩子的 `ctx.tree` 就是这一纪元的树；最多 256 个，`more` 是大约还有几个；节点下标变了时还没送出的会跟着换成新的。和 `folders` 一一对应的还有 `paths`（路径）、`before` 和 `after`（文件夹连同里面的占用，字节，即 `Node.alloc`：这些变化之前和之后；不知道时 `before` 是 None，比如扫描来源重新列出、整棵树换掉）：谁长了多少不用读树。扫描来源重新列出时 `folders` 是根。文件夹的合计跟着变到根，更上层的文件夹没有列出，要的话读树（`tree.node(f).parent`）。
+- **读树时树又变了**：监控着的扫描里每多一个文件，纪元就可能变一次（[纪元](#api-epoch)）。钩子读树时撞上了，读的那一步抛 `HostError`（`STALE_TREE`）：**不要捕获它**，宿主马上用新的下标再调这个钩子（同一批变化，最多再调 3 次），还不行就和下一批变化一起送；这样的失败不记警告。所以同样的文件夹可能来不止一次：按路径记账，重复来也无妨。连续 6 批都送不进去时（钩子读的是别的调用存下的树？）宿主放弃这批，记一条警告。
 - **实时监控**：`ctx.scans()` 的 `ScanInfo.monitoring` 说扫描是否跟着文件变化：磁盘扫描从开始扫描起就挂着监控（设置「实时监控」关着时是 `off`），`starting` 是监控器还在给文件夹加监视；打开的快照是 `off`；扫描来源有 `watch` 的监控器时在列完之后开始。
 - **`snapshots`**：一阵保存和删除（≤ 0.5 秒）合成一次，`change.saved` / `change.removed` 是快照文件；`ctx.snapshots.list()` 读详情。窗口同时收到协议事件 `snapshots.changed`，网页面板用 `sk.onSnapshots(cb)` 听（要 `snapshots.read`）。
 - **打开对比**：命令（或报告按钮）调用的方法返回 `CompareOpen(base=快照, target="now")`，界面就打开对比（W6 的对比模式）；两端可以是两份快照，或一份和 `"now"`（同一组文件夹的实时树）。界面用显示那组文件夹的标签页（`scan_id` 指定时用它的）；比 `"now"` 而没有这样的标签页时先扫描再对比；两份快照而没有时打开 `target` 那份、在它的标签页里和 `base` 比。网页面板：`sk.host.compare(base, target)`。都要 `snapshots.read`。
@@ -170,10 +180,13 @@ plugin.setting(
 ```python
 @plugin.on("tree_changed")
 def grew(ctx: Context, change: TreeChange) -> None:
-    t = ctx.tree
-    big = [f for f in change.folders if t.node(f).size > 10 << 30]
+    big = [
+        path
+        for path, before, after in zip(change.paths, change.before, change.after, strict=True)
+        if before is not None and after - before > 1 << 30  # 这一批里长了 1 GiB 以上
+    ]
     if big:
-        ctx.notify(T("文件夹超过 10 GB", "Folders over 10 GB"), ", ".join(t.name(f) for f in big[:3]))
+        ctx.notify(T("文件夹一下长了 1 GB 以上", "Folders grew by over 1 GB"), "\n".join(big[:3]))
 
 
 @plugin.command("compare_last", T("和上一份快照比", "Compare with the last snapshot"), when=["done"])
@@ -195,7 +208,7 @@ def compare_last(ctx: Context, a: ActionContext) -> CompareOpen | None:
 | `PluginError(T(...))` | 插件自己要告诉用户的话 | 原样显示（`PLUGIN_ERROR`） |
 | `Cancelled` | `ctx.check()`：调用被取消或超时 | 不要吞掉，让它抛出去 |
 | `PermissionError` | 少了权限：`ctx.files`、`ctx.net`、`ctx.clipboard` …；审计钩子拦下的联网、写文件、开进程。`ctx.files` 读范围外的文件是它的子类 `FileNotAllowed`；系统拒绝（用户自己也读不了）是普通的 `PermissionError` | `PERMISSION_DENIED`。**它是 `OSError` 的子类**：`except OSError:` 会把它一起吞掉，读文件时写 `except (FileNotFoundError, IsADirectoryError):` 这样具体的异常 |
-| `spaceknife_sdk.errors.HostError` | 宿主拒绝了插件的请求：`code` 是协议错误码（如 `STALE_TREE` −32018） | 不捕获时原样往外传 |
+| `spaceknife_sdk.errors.HostError` | 宿主拒绝了插件的请求：`code` 是协议错误码（如 `STALE_TREE` −32018：树在调用途中被整理了，见[纪元](#api-epoch)） | 不捕获时原样往外传；`tree_changed` 钩子里的 `STALE_TREE` 让宿主用新下标再调它 |
 | 其他异常 | 插件的 bug | 「插件出错：〈类型〉」，回溯进日志 |
 
 测试和命令行里失败的调用抛 `spaceknife_sdk.RequestError`：`.code`（`spaceknife_sdk.ErrorCode`，如 `PLUGIN_ERROR` `PERMISSION_DENIED`）、`.message`、`.data`。
@@ -513,9 +526,12 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 | 字段 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `scan_id` | str | 必需 | 变了的扫描（钩子里 `ctx.tree` 就是它） |
-| `epoch` | int | `0` | `folders` 的节点下标属于这个纪元（`ctx.tree.epoch`） |
+| `epoch` | int | `0` | `folders` 的节点下标属于这个纪元：钩子的 `ctx.tree` 就是这一纪元的树（[纪元](#api-epoch)） |
 | `version` | int | `0` | 变化之后树的版本（`ctx.tree.version`） |
 | `folders` | list[int] | `[]` | 发生变化的文件夹（变了的文件所在的、变了的文件夹和装着它的），最多 256 个；扫描来源重新列出时是根 |
+| `paths` | list[str] | `[]` | `folders` 里每个文件夹的路径（顺序相同） |
+| `before` | list[int \| None] | `[]` | 每个文件夹连同里面的占用（字节，即 `Node.alloc`）在这些变化之前是多少；不知道时是 None（整棵树换掉了，比如扫描来源重新列出） |
+| `after` | list[int] | `[]` | 每个文件夹连同里面的占用在这些变化之后是多少（和 `ctx.tree` 里的一样） |
 | `more` | int | `0` | 大约还有多少个文件夹变了而没有列出 |
 | `changes` | int | `0` | 这一秒里变了、新增或消失的文件和文件夹数 |
 
