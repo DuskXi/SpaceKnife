@@ -1,7 +1,7 @@
 """End-to-end test of 「无缝更新」 and of the uninstaller's cleanup, on a CI runner only.
 
-    python packaging/update_e2e.py portable dist/electron/SpaceKnife-<v>-win-x64-portable.zip
-    xvfb-run -a python packaging/update_e2e.py portable dist/electron/SpaceKnife-<v>-linux-x64-portable.tar.gz
+    python packaging/update_e2e.py portable dist/electron/SpaceKnife-<v>-win-<arch>-portable.zip
+    xvfb-run -a python packaging/update_e2e.py portable dist/electron/*-linux-<arch>-portable.tar.gz
     python packaging/update_e2e.py nsis dist/electron/SpaceKnife-<v>-Setup-x64.exe [--previous <older>]
 
 Both modes serve a release list on 127.0.0.1 (SPACEKNIFE_UPDATE_FEED) that offers the next patch
@@ -291,13 +291,13 @@ def app_env(feed: Feed, **extra: str) -> dict[str, str]:
 
 
 def portable(archive: Path) -> None:
-    m = re.match(r"^SpaceKnife-(.+)-(win|linux)-x64-portable\.(zip|tar\.gz)$", archive.name)
+    m = re.match(r"^SpaceKnife-(.+)-(win|linux)-(x64|arm64)-portable\.(zip|tar\.gz)$", archive.name)
     if not m:
         fail(f"not a portable archive: {archive.name}")
-    version, target, ext = m.groups()
+    version, target, arch, ext = m.groups()
     newer = next_patch(version)
-    top_old = f"SpaceKnife-{version}-{target}-x64-portable"
-    top_new = f"SpaceKnife-{newer}-{target}-x64-portable"
+    top_old = f"SpaceKnife-{version}-{target}-{arch}-portable"
+    top_new = f"SpaceKnife-{newer}-{target}-{arch}-portable"
     exe_name = "SpaceKnife.exe" if WIN else "spaceknife"
     work = Path(tempfile.mkdtemp(prefix="sk-update-e2e-"))
     try:
@@ -345,7 +345,7 @@ def portable(archive: Path) -> None:
                 body = f"{newer}\n".encode()
                 note.size, note.mode, note.mtime = len(body), 0o644, int(time.time())
                 dst.addfile(note, io.BytesIO(body))
-        sums = sums_file(offered.parent, f"SHA256SUMS-portable-{target}-x64.txt", [offered])
+        sums = sums_file(offered.parent, f"SHA256SUMS-portable-{target}-{arch}.txt", [offered])
         feed = Feed(newer, [offered, sums])
         print(f"offering {offered.name} ({offered.stat().st_size >> 20} MB) at {feed.url}", flush=True)
 

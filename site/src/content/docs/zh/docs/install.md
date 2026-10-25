@@ -11,14 +11,16 @@ SpaceKnife 发布在 [Releases 页面](https://github.com/DuskXi/SpaceKnife/rele
 |---|---|---|
 | Windows 10 及以上，x64 | `SpaceKnife-<版本>-Setup-x64.exe` | 安装包，可装给当前用户或所有用户 |
 | Windows 10 及以上，x64 | `SpaceKnife-<版本>-win-x64-portable.zip` | 便携版：解压即用，不用安装 |
+| Windows 11 ARM 版 | `SpaceKnife-<版本>-win-arm64-portable.zip` | 便携版，ARM（arm64） |
 | macOS 14 及以上，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg` | 磁盘映像 |
 | macOS 14 及以上，Intel | `SpaceKnife-<版本>-mac-x64.dmg` | 磁盘映像 |
 | Ubuntu 22.04 及以上 / Debian 系 | `spaceknife_<版本>_amd64.deb` | 软件包 |
 | RHEL 9 及以上 / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` | 软件包 |
 | 其他 Linux，x64 | `SpaceKnife-<版本>-x86_64.AppImage` | 单个文件，需要 FUSE 2 |
 | Linux，x64 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | 便携版：解压即用，不需要 FUSE |
+| Linux，ARM（arm64） | `SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | 便携版，ARM |
 
-Windows 和 Linux 只有 x64 版本，没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）。
+ARM 上的 Windows 和 Linux 有便携版；安装包和软件包只有 x64（ARM 版 Windows 也能模拟运行 x64 安装包）。没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）。
 
 ### 校验下载的文件
 

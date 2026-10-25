@@ -112,7 +112,9 @@
     - **后端**：更新记录现在只保存每个渠道最新的一版（`update.trim`），要改成保存最近约 30 个发布的历史，并限制每条发布说明的大小。
     - 「自动检查更新」和「提示哪些版本」两项设置移到这一页，「常规」里留一个入口。
 - [x] 便携版（小众软件用户请求）：Windows x64 zip、Linux x64 tar.gz，程序旁的 `data` 文件夹存放全部数据（GitHub Actions「Portable build」，解压后以便携模式冒烟）
-- [ ] Windows / Linux ARM64（依赖都有对应 wheel，Electron 也有 arm64 版；缺测试设备）。32 位 Windows 做不了：Electron 44 已不再提供 ia32
+- [x] Windows / Linux ARM64 便携版（2026-10-25）：「Portable build」在 `windows-11-arm`、`ubuntu-22.04-arm` 上构建 `win-arm64` / `linux-arm64` 便携包并跑冒烟和无缝更新测试；便携版更新按处理器架构挑包（Windows on ARM 上的 x64 便携版会换成 arm64 版）
+- [ ] ARM64 真机试用（Windows 11 ARM 笔记本、树莓派 5 之类的 ARM Linux）：扫描、MFT、监控、回收站、无缝更新
+- [ ] ARM64 安装包（NSIS arm64、deb arm64、rpm aarch64、AppImage aarch64）：文件名、更新挑包和发布清单都要跟着改。32 位 Windows 做不了：Electron 44 已不再提供 ia32
 
 ## 索引扫描调研：Btrfs / ReFS / XFS（2026-10-21 记下）
 

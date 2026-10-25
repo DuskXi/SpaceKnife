@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type FileProbe, type InstallKind, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, stepQuits, swapHelper, swapPlanJson } from "./update";
+import { type FileProbe, type InstallKind, installKind, installRefusal, installStep, nsisUpdateArgs, portableVersion, projectPage, stepQuits, swapHelper, swapPlanJson } from "./update";
 
 const none = () => false;
 const only = (...paths: string[]) => (path: string) => paths.includes(path);
@@ -92,6 +92,9 @@ describe("installRefusal", () => {
       ["portable", "win32", winUpdates, "SpaceKnife-0.4.0-win-x64-portable.zip"],
       ["portable", "linux", linux, "SpaceKnife-0.4.0-linux-x64-portable.tar.gz"],
       ["portable", "linux", linux, "SpaceKnife-0.4.0-beta.1-linux-x64-portable.tar.gz"],
+      // the processor's build: an x64 copy on Windows on ARM moves to the native one
+      ["portable", "win32", winUpdates, "SpaceKnife-0.4.0-win-arm64-portable.zip"],
+      ["portable", "linux", linux, "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"],
       ["appimage", "linux", linux, "SpaceKnife-0.4.0-x86_64.AppImage"],
     ];
     for (const [kind, platform, folder, name] of cases) {
@@ -100,6 +103,8 @@ describe("installRefusal", () => {
     }
     const zip = `${linux}/SpaceKnife-0.4.0-win-x64-portable.zip`; // the other platform's archive
     expect(installRefusal(zip, "portable", linux, "linux", fakeFiles([zip], [linux]))).toBe("updateNotAnUpdate");
+    const other = `${linux}/SpaceKnife-0.4.0-linux-riscv64-portable.tar.gz`; // no such build
+    expect(installRefusal(other, "portable", linux, "linux", fakeFiles([other], [linux]))).toBe("updateNotAnUpdate");
     for (const kind of ["dev", "unknown"] as const) {
       const file = `${linux}/SpaceKnife-0.4.0-x86_64.AppImage`;
       expect(installRefusal(file, kind, linux, "linux", fakeFiles([file], [linux]))).toBe("updateNoInstall");
@@ -228,6 +233,17 @@ describe("nsisUpdateArgs", () => {
     expect(nsisUpdateArgs("c:\\program files (x86)\\SpaceKnife\\SpaceKnife.exe", env).at(-1)).toBe("/allusers");
     expect(nsisUpdateArgs("D:\\Apps\\SpaceKnife\\SpaceKnife.exe", env)).toEqual(["--updated", "/S", "--force-run"]);
     expect(nsisUpdateArgs("C:\\Program Files Other\\SpaceKnife\\SpaceKnife.exe", env)).toHaveLength(3);
+  });
+});
+
+describe("the version of a portable archive", () => {
+  it("is read from either platform's archive, x64 or arm64, and nothing else", () => {
+    expect(portableVersion("SpaceKnife-0.4.0-win-x64-portable.zip")).toBe("0.4.0");
+    expect(portableVersion("SpaceKnife-0.4.0-win-arm64-portable.zip")).toBe("0.4.0");
+    expect(portableVersion("SpaceKnife-0.4.10-beta.1-linux-arm64-portable.tar.gz")).toBe("0.4.10-beta.1");
+    expect(portableVersion("SpaceKnife-0.4.0-linux-x64-portable.zip")).toBeNull();
+    expect(portableVersion("SpaceKnife-0.4.0-Setup-x64.exe")).toBeNull();
+    expect(portableVersion("SpaceKnife-../x-win-x64-portable.zip")).toBeNull();
   });
 });
 

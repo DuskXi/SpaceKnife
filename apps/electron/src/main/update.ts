@@ -34,10 +34,18 @@ const RELEASE_FILES: Partial<Record<InstallKind, RegExp>> = {
   rpm: new RegExp(String.raw`^spaceknife-${VERSION}\.x86_64\.rpm$`),
   appimage: new RegExp(String.raw`^SpaceKnife-${VERSION}-x86_64\.AppImage$`),
 };
+// a portable copy may move to the other architecture: the backend takes the processor's build (an x64
+// copy on Windows on ARM becomes the native one; update.py asset_templates)
+const ARCH = String.raw`(?:x64|arm64)`;
 const PORTABLE: Partial<Record<NodeJS.Platform, RegExp>> = {
-  win32: new RegExp(String.raw`^SpaceKnife-${VERSION}-win-x64-portable\.zip$`),
-  linux: new RegExp(String.raw`^SpaceKnife-${VERSION}-linux-x64-portable\.tar\.gz$`),
+  win32: new RegExp(String.raw`^SpaceKnife-${VERSION}-win-${ARCH}-portable\.zip$`),
+  linux: new RegExp(String.raw`^SpaceKnife-${VERSION}-linux-${ARCH}-portable\.tar\.gz$`),
 };
+
+/** The version in a portable archive's name (Windows or Linux, x64 or arm64), or null. */
+export function portableVersion(name: string): string | null {
+  return new RegExp(String.raw`^SpaceKnife-(${VERSION})-(?:win-${ARCH}-portable\.zip|linux-${ARCH}-portable\.tar\.gz)$`).exec(name)?.[1] ?? null;
+}
 
 /** The Windows installer's arguments for a silent update in place, electron-builder's own flags:
  *  --updated keeps the data and skips the pages, --force-run starts the new version afterwards. The

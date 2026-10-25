@@ -18,7 +18,7 @@ import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headles
 import { portableHome } from "./portable";
 import { type Lang, mt, setLang } from "./text";
 import { ThemeKeeper } from "./theme";
-import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
+import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, portableVersion, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -320,7 +320,7 @@ async function replaceAppImage(file: string): Promise<string> {
  *  backend swaps the files once the app has quit (spaceknife.update_swap) and starts it again. No
  *  script: SpaceKnife's own program does it. The "data" folder stays. */
 async function replacePortable(file: string, updates: string): Promise<string> {
-  const version = /^SpaceKnife-(.+)-(?:win|linux)-x64-portable\.(?:zip|tar\.gz)$/.exec(basename(file))?.[1];
+  const version = portableVersion(basename(file));
   const platform = process.platform;
   if (!version || (platform !== "win32" && platform !== "linux")) return mt("updateNoInstall");
   const staging = join(updates, `staging-${version}`);
