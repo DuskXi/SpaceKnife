@@ -84,6 +84,7 @@
  "共 {slices} 批": "{slices} batches",
  "其余 {count} 项": "{count} more",
  "列 {key!r} 的长度或类型不一致": "Column {key!r} differs in length or type",
+ "列目录宽度 {width}（同时在列的文件夹数，遍历器按读盘和速度调整）": "Listing width {width} (folders listed at once; the walker adjusts it to disk reads and speed)",
  "列目录线程平均忙碌 {busy}（系统调用；接近 100% 说明瓶颈在磁盘或文件系统）": "Listing threads busy {busy} on average (system calls; near 100% means the disk or file system is the limit)",
  "列表格式不对": "Malformed list",
  "前缀与单位不同类": "Prefix and unit don't match",

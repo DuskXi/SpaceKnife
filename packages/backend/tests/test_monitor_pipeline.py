@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import os
 import shutil
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -125,6 +126,181 @@ async def test_changes_reach_the_tree(watched: Any, tmp_path: Path) -> None:
     assert mutate.gone_count(handle.store) > 0
 
 
+def hold_the_feed(monkeypatch: pytest.MonkeyPatch) -> asyncio.Event:
+    """The scan's folders reach the watchers only once the returned event is set (inotify gets
+    them, and places its watches, a moment after the scan listed them: this stretches that moment)."""
+    go = asyncio.Event()
+    feed = ScanMonitor._feed
+
+    async def held(self: ScanMonitor) -> None:
+        if go.is_set():
+            await feed(self)
+
+    monkeypatch.setattr(ScanMonitor, "_feed", held)
+    return go
+
+
+async def test_a_change_before_a_folder_is_watched_reaches_the_tree(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A file written into a folder after the scan listed it, before its watch was placed, raised
+    no event: the check made when the watch is placed lists that folder again."""
+    mgr, _, _ = watched
+    root = build_tree(tmp_path / "root").root
+    go = hold_the_feed(monkeypatch)
+    handle = await mgr.start(p.ScanStartParams(roots=[str(root)], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    deep = max((d for d in root.rglob("*") if d.is_dir()), key=lambda d: len(d.parts))
+    (deep / "late.bin").write_bytes(b"l" * 500_000)
+    go.set()
+    await until(same_as_disk(handle, root))
+    check_structure(handle.store)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="inotify watches folder by folder")
+async def test_the_status_is_running_while_folders_wait_for_their_watches(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Running as soon as the root is watched, as on every platform: while the scan runs and right
+    after it, with its folders still waiting for their watches. A write in that moment is not lost."""
+    mgr, _, _ = watched
+    tree = build_tree(tmp_path / "root")
+    go = hold_the_feed(monkeypatch)
+    handle = await mgr.start(p.ScanStartParams(roots=[str(tree.root)], workers=0, auto_snapshot=False))
+    shown: list[str] = []
+    handle.listeners["test"] = lambda st: shown.append(st.monitor.state if st.monitor else "")
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    mon = handle.monitor
+    assert mon is not None
+    st = mon.status()
+    assert (st.state, st.watcher, st.watched_dirs) == ("running", "inotify", 1)  # only the root so far
+    assert shown and set(shown) == {"running"}  # while it scanned, and when it finished
+    deep = max((d for d in tree.root.rglob("*") if d.is_dir()), key=lambda d: len(d.parts))
+    (deep / "late.bin").write_bytes(b"l" * 500_000)  # before the folder's watch
+    go.set()
+    await until(lambda: mon.status().watched_dirs == tree.dirs + 1)
+    await until(same_as_disk(handle, tree.root))
+    assert mon.status().state == "running" and set(shown) == {"running"}
+
+
+async def test_folders_the_scan_could_not_list_are_neither_watched_nor_polled(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every platform, with the folder-by-folder poller: a folder the scan could not list has
+    nothing in the tree to keep up to date, so it is not handed to the watcher (it used to be
+    polled, and listed again for nothing whenever its mtime moved)."""
+    mgr, _, _ = watched
+    tree = build_tree(tmp_path / "root")
+    monkeypatch.setattr(ScanMonitor, "_watcher_for", lambda self, path, volume: self._poller(path))
+    go = hold_the_feed(monkeypatch)
+    handle = await mgr.start(p.ScanStartParams(roots=[str(tree.root)], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    locked = handle.store.find(str(tree.root / "b" / "inner"))
+    assert locked is not None
+    handle.store.mark(locked, Flag.ACCESS_DENIED)  # as a listing that failed marks it
+    mon = handle.monitor
+    assert mon is not None
+    poller = mon.watchers[0][1]._poller
+    go.set()
+    mon.kick()
+    await until(lambda: mon.fed and str(tree.root / "b") in poller)
+    assert len(poller) == tree.dirs  # the root and every folder the scan listed
+    inner = str(tree.root / "b" / "inner")
+    assert inner not in poller
+    # a change inside it, as a recursive watcher (FSEvents, ReadDirectoryChangesW) reports one, does
+    # not open it (macOS's protected places would ask for consent); its parent's own changes do
+    assert mon._targets({inner, os.path.join(inner, "new.txt")}) == {}
+    b = handle.store.find(str(tree.root / "b"))
+    assert mon._targets({str(tree.root / "b")}) == {b: str(tree.root / "b")}
+    # a rescan of it lists it (readable now): no longer marked, and watched from then on
+    _, _, monitors = watched
+    await monitors.rescan(handle, locked)
+    await until(lambda: inner in poller)
+    node = handle.store.find(inner)
+    assert node is not None and not handle.store.cols["flags"][node] & Flag.ACCESS_DENIED
+
+
+async def test_a_folder_is_handed_over_once_the_scan_has_listed_it(
+    watched: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A folder is in the tree before the scan lists it (PENDING), and may then turn out unreadable:
+    it reaches the watcher only once listed. Handed over before, such a folder stayed polled after
+    a scan of / quick enough to end between two hand-overs (「部分轮询」 now and then)."""
+    mgr, _, _ = watched
+    tree = build_tree(tmp_path / "root")
+    monkeypatch.setattr(ScanMonitor, "_watcher_for", lambda self, path, volume: self._poller(path))
+    go = hold_the_feed(monkeypatch)
+    handle = await mgr.start(p.ScanStartParams(roots=[str(tree.root)], workers=0, auto_snapshot=False))
+    assert handle.task is not None
+    await asyncio.wait_for(asyncio.shield(handle.task), 30)
+    store = handle.store
+    inner, sub = str(tree.root / "b" / "inner"), str(tree.root / "a" / "sub")
+    ids = {path: store.find(path) for path in (inner, sub)}
+    for node in ids.values():
+        assert node is not None
+        store.mark(node, Flag.PENDING)  # not listed yet, as in the middle of the scan
+    mon = handle.monitor
+    assert mon is not None
+    poller = mon.watchers[0][1]._poller
+    go.set()
+    mon.kick()
+    await until(lambda: str(tree.root / "b") in poller)
+    assert inner not in poller and sub not in poller and mon.fed  # a stopped scan's queue may wait
+    store.clear(ids[inner], Flag.PENDING)
+    store.mark(ids[inner], Flag.ACCESS_DENIED)  # the scan could not list it after all
+    store.clear(ids[sub], Flag.PENDING)  # listed
+    assert not mon.fed
+    mon.kick()
+    await until(lambda: sub in poller)
+    assert inner not in poller
+    await until(lambda: mon.fed)
+
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux") or getattr(os, "geteuid", lambda: 0)() == 0,
+    reason="inotify; the superuser reads every folder",
+)
+async def test_a_plain_users_scan_with_unreadable_folders_is_fully_watched(
+    watched: Any, tmp_path: Path
+) -> None:
+    """A plain user's scan of / always meets folders it cannot read (/root, /var/lib/private …).
+    inotify cannot watch them either (EACCES), and they used to be polled instead: 「实时监控 ·
+    部分轮询」 after every such scan. Nothing below them is in the tree, so nothing is missed: the
+    monitor is running, with no folder polled."""
+    mgr, _, _ = watched
+    tree = build_tree(tmp_path / "root")
+    locked = tree.root / "locked"
+    (locked / "inside").mkdir(parents=True)
+    locked.chmod(0)
+    try:
+        handle = await scanned(mgr, tree.root)
+        node = handle.store.find(str(locked))
+        assert node is not None and handle.store.cols["flags"][node] & Flag.ACCESS_DENIED
+        mon = handle.monitor
+        await until(lambda: mon.status().watched_dirs == tree.dirs + 1)  # the root and every listed one
+        st = mon.status()
+        assert (st.state, st.polled_dirs) == ("running", 0), st.detail
+        # readable later: a chmod moves no mtime and raises no event for it; a rescan lists it,
+        # and from then on it is watched like the rest
+        locked.chmod(0o755)
+        (locked / "found.bin").write_bytes(b"f" * 4096)
+        _, _, monitors = watched
+        await monitors.rescan(handle, node)
+        await until(same_as_disk(handle, tree.root))
+        node = handle.store.find(str(locked))
+        assert node is not None and not handle.store.cols["flags"][node] & Flag.ACCESS_DENIED
+        await until(lambda: mon.status().watched_dirs == tree.dirs + 3)  # it and the folder inside
+        (locked / "later.bin").write_bytes(b"l" * 4096)  # seen through its own watch
+        await until(same_as_disk(handle, tree.root))
+        st = mon.status()
+        assert (st.state, st.polled_dirs) == ("running", 0), st.detail
+    finally:
+        locked.chmod(0o755)
+
+
 async def test_a_view_follows_moved_ids(watched: Any, tmp_path: Path) -> None:
     mgr, views, _ = watched
     root = build_tree(tmp_path / "root").root
@@ -188,7 +364,7 @@ async def test_sizes_follow_the_hard_scan_rule(watched: Any, tmp_path: Path) -> 
     root = build_tree(tmp_path / "root").root
     handle = await scanned(mgr, root)
     f = next(p for p in root.rglob("*") if p.is_file())
-    f.write_bytes(b"r" * 600)  # resident in the MFT record, but the hard scan counts one cluster
+    f.write_bytes(b"r" * 600)  # resident in the MFT record: no cluster listed, one by the estimate
     await until(same_as_disk(handle, root))
 
 

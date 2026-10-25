@@ -17,6 +17,7 @@ import errno
 import os
 import posixpath
 import stat
+import struct
 import sys
 import time
 from collections.abc import Callable
@@ -115,6 +116,11 @@ class RootOptions:
     # a case-only sibling: subfolders sharing a name and every task are checked by the names the
     # file system stores (`_unreachable`)
     verify_names: bool = False
+    # Windows: files take their size on disk from their listing entries' AllocationSize, as this
+    # local file system counts it ("NTFS", "ReFS" or "Btrfs", where that was measured against the
+    # file system's own count: `_listed_alloc`); "" estimates it from the size (cluster_size,
+    # resident_max, the compressed size of sparse and compressed files)
+    listed_alloc: str = ""
 
 
 def _env_switch(name: str, default: bool) -> bool:
@@ -138,6 +144,9 @@ class SliceOptions:
     keep_where_updated: bool = field(
         default_factory=lambda: _env_switch("SPACEKNIFE_WIN_KEEP_WHERE_UPDATED", True)
     )
+    # the native walker only: the disk's spaceknife_native.ListingGate (the disk-load limit on its
+    # listings in flight, IoGovernor.listing_gate); never given to the Python walker's processes
+    gate: Any = field(default=None, compare=False)
 
 
 @dataclass(slots=True)
@@ -421,6 +430,119 @@ def _compressed_size(path: str) -> int | None:
     return int((high.value << 32) | low)
 
 
+# The listing rule (RootOptions.listed_alloc; hardscan/win.rs `listed_alloc`, `on_disk`, `ask_alloc`)
+
+_LISTED_FS = {"": "", "ntfs": "NTFS", "refs": "ReFS", "btrfs": "Btrfs"}
+_LISTING_LAG = 60 * 10_000_000  # 100 ns units (win.rs LISTING_LAG_100NS)
+_FILETIME_1970 = 116_444_736_000_000_000
+
+
+def _filetime_now() -> int:
+    return time.time_ns() // 100 + _FILETIME_1970
+
+
+def _listed_alloc(fs: str, attrs: int, eof: int, alloc: int, written: int, now: int) -> int | None:
+    """A file's size on disk from its listing entry (win.rs ``listed_alloc``): the entry's
+    AllocationSize, or None where the file must be asked instead (`_ask_alloc`): on NTFS and ReFS a
+    sparse or compressed file written or changed in the last minute (``written``: the later of the
+    two times; the parent's entry lags until the cache writes such files out), and on NTFS a file
+    that lists no clusters although it is neither empty, sparse nor compressed (WOF-compressed)."""
+    if fs in ("NTFS", "ReFS"):
+        packed = attrs & (_FA_COMPRESSED | _FA_SPARSE)
+        recent = now != 0 and now - written < _LISTING_LAG
+        hidden = fs == "NTFS" and not packed and alloc <= 0 and eof > 0
+        if (packed and recent) or hidden:
+            return None
+    return max(0, alloc)
+
+
+def _on_disk(alloc: int, cluster: int) -> int:
+    """win.rs ``on_disk``: an allocation that is not whole clusters is data kept in the file's
+    record (NTFS resident, ReFS inline data, a WinBtrfs sparse file without data) and takes none."""
+    a = max(0, alloc)
+    return 0 if a % cluster else a
+
+
+_info_fns: Any = None
+_FULL_DIR = struct.Struct("<I20xqq8xq4xI")  # FILE_FULL_DIR_INFO: next, write, change, alloc, name bytes
+
+
+def _win_info_fns() -> Any:
+    global _info_fns
+    if _info_fns is None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+        create = k32.CreateFileW
+        create.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        create.restype = wintypes.HANDLE
+        info = k32.GetFileInformationByHandleEx
+        info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        info.restype = wintypes.BOOL
+        close = k32.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        _info_fns = (create, info, close, ctypes)
+    return _info_fns
+
+
+def _listing_allocs(path: str) -> dict[str, list[tuple[int, int]]] | None:
+    """The listing of ``path`` read once more for what os.scandir does not give (FindFirstFileW has
+    neither AllocationSize nor ChangeTime): per name, in listing order (WinBtrfs can list a name
+    twice), the entry's AllocationSize and the later of its LastWriteTime and ChangeTime. None when
+    the folder cannot be read again."""
+    create, info, close, ct = _win_info_fns()
+    list_directory, synchronize, share_all, open_existing, backup = 0x1, 0x00100000, 7, 3, 0x02000000
+    full_dir, full_dir_restart, no_more_files = 14, 15, 18
+    h = create(_long_path(path), list_directory | synchronize, share_all, None, open_existing, backup, None)
+    if h is None or h == ct.c_void_p(-1).value:
+        return None
+    out: dict[str, list[tuple[int, int]]] = {}
+    try:
+        buf = ct.create_string_buffer(65536)
+        cls = full_dir_restart
+        while True:
+            if not info(h, cls, buf, len(buf)):
+                return out if ct.get_last_error() == no_more_files else None
+            cls = full_dir
+            raw = buf.raw
+            off = 0
+            while True:
+                nxt, write, change, alloc, nlen = _FULL_DIR.unpack_from(raw, off)
+                name = raw[off + 68 : off + 68 + nlen].decode("utf-16-le", "surrogatepass")
+                out.setdefault(name, []).append((alloc, max(write, change)))
+                if not nxt:
+                    break
+                off += nxt
+    finally:
+        close(h)
+
+
+def _ask_alloc(path: str) -> int | None:
+    """The size on disk the file system counts for the file ``path`` now (FileStandardInfo's
+    AllocationSize; win.rs ``ask_alloc``), or None when it cannot be read."""
+    create, info, close, ct = _win_info_fns()
+    read_attributes, share_all, open_existing, backup, standard = 0x80, 7, 3, 0x02000000, 1
+    h = create(_long_path(path), read_attributes, share_all, None, open_existing, backup, None)
+    if h is None or h == ct.c_void_p(-1).value:
+        return None
+    try:
+        buf = ct.create_string_buffer(24)
+        if not info(h, standard, buf, len(buf)):
+            return None
+        return int.from_bytes(buf.raw[:8], "little", signed=True)
+    finally:
+        close(h)
+
+
 _ERROR_FILENAME_EXCED_RANGE = 206
 
 
@@ -443,6 +565,11 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
     names: list[str] = []  # the listing's names, to find the ones that share a name
     cluster = max(1, root.cluster_size)
     base = len(acc.kind)
+    fs = _LISTED_FS.get(root.listed_alloc.lower())
+    if fs is None:
+        raise ValueError(f"unknown listed_alloc {root.listed_alloc!r}")
+    listed = _listing_allocs(path) if fs else None
+    now = _filetime_now() if fs else 0
     try:
         listing = os.scandir(_long_path(path))
     except ValueError:  # too long for Windows (a folder renamed longer above a deep tree)
@@ -486,6 +613,17 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
             elif attrs & (_FA_RECALL_ON_DATA_ACCESS | _FA_RECALL_ON_OPEN):
                 flags |= F_CLOUD
                 alloc = 0
+            elif fs:
+                got = listed.get(name) if listed is not None else None
+                if got:
+                    entry_alloc, written = got.pop(0)
+                    a = _listed_alloc(fs, attrs, size, entry_alloc, written, now)
+                    if a is None:
+                        asked = _ask_alloc(os.path.join(path, name))
+                        a = entry_alloc if asked is None else asked
+                else:  # not in the second read of the listing (gone meanwhile): the estimate
+                    a = -(-size // cluster) * cluster
+                alloc = _on_disk(a, cluster)
             elif attrs & (_FA_COMPRESSED | _FA_SPARSE):
                 real = _compressed_size(os.path.join(path, name))
                 alloc = -(-(real if real is not None else size) // cluster) * cluster
@@ -514,10 +652,10 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
     return subdirs
 
 
-_PIECE = 1000  # bytes of path per open in _open_dir: well under PATH_MAX everywhere (macOS: 1,024)
+_PIECE = 1000  # bytes of path per open in open_dir: well under PATH_MAX everywhere (macOS: 1,024)
 
 
-def _open_dir(path: str, flags: int) -> int:
+def open_dir(path: str, flags: int) -> int:
     """``os.open(path, flags)``, also for a path of PATH_MAX bytes or more, which open() refuses
     (ENAMETOOLONG) although the folder is there to list (posix.rs `open_long`): opened a piece of
     whole names at a time, each relative to the folder the one before reached. Resolution is that
@@ -569,7 +707,7 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str,
     assert sys.platform != "win32"
     subdirs: list[tuple[int, str, str]] = []
     base = len(acc.kind)
-    fd = _open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+    fd = open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
     try:
         with os.scandir(fd) as it:
             for entry in it:

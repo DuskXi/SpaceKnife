@@ -2,7 +2,7 @@
 
 import { type CSSProperties, useEffect, useMemo, useState } from "react";
 
-import type { ClassStat, FolderClassInfo, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
+import type { ClassStat, FolderClassInfo, NodeInfo, SummaryGap, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
 import { patchView, readFlag, set, toast, useApp, writeFlag } from "@/state/store";
 import { Kind } from "@/visual/frame";
@@ -46,6 +46,9 @@ export function Inspector({ viewId }: { viewId: string }) {
   const setPage = (p: string) => set({ inspectorPage: p });
   const commands = useApp((s) => s.commands);
   const [summary, setSummary] = useState<TreeSummaryResult | null>(null);
+  // why the summary of a node could not be read: shown instead of 「正在读取…」 forever
+  const [failure, setFailure] = useState<{ node: number; message: string } | null>(null);
+  const [retry, setRetry] = useState(0);
   const frame = view?.frame;
   const scanId = view?.state.scan_id;
   // a scan of a plugin's source that is not on this disk: no revealing, deleting or disk commands
@@ -76,12 +79,23 @@ export function Inspector({ viewId }: { viewId: string }) {
     let alive = true;
     const top = page === "largest" ? 50 : 5;
     const job = cancellable("tree.summary", { scan_id: scanId, node, top });
-    job.promise.then((r) => alive && r && setSummary(r)).catch(() => {});
+    job.promise
+      .then((r) => {
+        if (!alive || !r) return;
+        setSummary(r);
+        setFailure(null);
+      })
+      .catch((err: unknown) => {
+        // the next refresh (or 「重试」) asks again
+        if (alive) setFailure({ node, message: err instanceof Error ? err.message : String(err) });
+      });
     return () => {
       alive = false;
       job.cancel();
     };
-  }, [scanId, node, page, tick]);
+  }, [scanId, node, page, tick, retry]);
+  // a failed refresh of the node shown keeps what was read; a node never read says why
+  const failed = failure && failure.node === node && (!summary || summary.node.id !== node) ? failure : null;
 
   const className = (id: string) => vocab?.classes.find((c) => c.id === id)?.name ?? id;
 
@@ -118,10 +132,22 @@ export function Inspector({ viewId }: { viewId: string }) {
         </div>
       </div>
       <div className="inspector-body">
+        {!pluginPage && synthetic == null && !failed && summary && summary.gaps.length > 0 && <Gaps gaps={summary.gaps} />}
         {pluginPage ? (
           <InspectorPluginPage id={pluginPage} viewId={viewId} />
         ) : synthetic != null && frame ? (
           <SyntheticDetails frameKind={frame.kind[synthetic]!} size={Number(frame.size[synthetic])} count={frame.count_[synthetic]!} />
+        ) : failed ? (
+          <div className="ins-failed" role="alert">
+            <div className="ins-failed-title">
+              <Icon name="warning" size={14} />
+              {t("详情没能读出")}
+            </div>
+            <div className="ins-failed-reason">{failed.message}</div>
+            <button className="ghost small" onClick={() => setRetry((n) => n + 1)}>
+              {t("重试")}
+            </button>
+          </div>
         ) : !summary ? (
           <div className="muted">{t("正在读取…")}</div>
         ) : page === "details" ? (
@@ -136,7 +162,7 @@ export function Inspector({ viewId }: { viewId: string }) {
           <TopList s={summary} viewId={viewId} className={className} />
         )}
       </div>
-      {summary && synthetic == null && !pluginPage && (
+      {summary && synthetic == null && !pluginPage && !failed && (
         <div className="inspector-actions">
           {!inBrowser() && !offDisk && (
             <ActionRow icon="reveal" label={revealLabel()} keys="Ctrl+E" disabled={!summary.on_disk} onClick={() => window.sk.shell.showItemInFolder(summary.path)} />
@@ -183,6 +209,20 @@ export function Inspector({ viewId }: { viewId: string }) {
         </div>
       )}
     </aside>
+  );
+}
+
+/** Parts of the summary the backend could not work out this time; the rest shows as usual. */
+function Gaps({ gaps }: { gaps: SummaryGap[] }) {
+  return (
+    <div className="ins-gaps" role="note" aria-label={t("部分信息没能读出")}>
+      <Icon name="warning" size={14} />
+      <ul>
+        {gaps.map((g) => (
+          <li key={g.part}>{g.reason}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

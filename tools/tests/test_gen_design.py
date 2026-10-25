@@ -384,6 +384,10 @@ def _chrome_pairs(T: dict[str, str]) -> list[Pair]:
     # the status bar's capacity meter
     rows.append(_pair("meter.used on bg.chrome", c["meter.used"], c["bg.chrome"], 3.0))
     rows.append(_pair("status.success on bg.chrome", c["status.success"], c["bg.chrome"], 3.0))
+    # scrollbar thumbs (app.css): quiet at rest, clear under the pointer, on every surface that scrolls
+    for s in ("window", "chrome", "panel", "overlay", "raised"):
+        rows.append(_pair(f"scroll.thumb on bg.{s}", c["scroll.thumb"], c[f"bg.{s}"], 2.0))
+        rows.append(_pair(f"scroll.thumbHover on bg.{s}", c["scroll.thumbHover"], c[f"bg.{s}"], 3.0))
     # tag shapes (UI-TM-49): on the shell's surfaces in the theme's colours; on the canvas, on their
     # dark base over the least fitting block, in the dark theme's colours (text.ts)
     blocks = [

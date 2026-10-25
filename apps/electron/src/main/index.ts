@@ -1,6 +1,6 @@
 // Electron main process: one frameless window, the backend child process, a few native services.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -16,10 +16,10 @@ import { fileIn, mimeOf } from "./files";
 import { isPluginId, servePanelFile } from "./plugin-files";
 import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
-import { portableHome } from "./portable";
+import { appBundle, portableHome, untranslocate } from "./portable";
 import { type Lang, mt, setLang } from "./text";
 import { ThemeKeeper } from "./theme";
-import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
+import { type InstallHow, installKind, installRefusal, installStep, MAC_APP, nsisUpdateArgs, portableVersion, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -28,8 +28,17 @@ const RENDERER_DIR = join(here, "../renderer");
 // --headless / --listen: no window, the interface in a browser (headless.ts); --help: the options
 const CLI = parseCommandLine(process.argv.slice(1));
 
+/** macOS: where a translocated copy really is (portable.ts), from the mount table; null when unknown. */
+function originalPath(path: string): string | null {
+  try {
+    return untranslocate(path, execFileSync("/sbin/mount", { encoding: "utf8", timeout: 3000 }));
+  } catch {
+    return null;
+  }
+}
+
 // A portable copy keeps its data next to the executable: the backend inherits SPACEKNIFE_HOME.
-const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env);
+const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env, originalPath);
 if (portable) process.env.SPACEKNIFE_HOME = portable;
 // what the backend's update check downloads, and what main may start once it is downloaded
 const INSTALL_KIND = installKind(process.execPath, process.platform, app.isPackaged, process.env, portable);
@@ -376,9 +385,9 @@ async function replaceAppImage(file: string): Promise<string> {
  *  backend swaps the files once the app has quit (spaceknife.update_swap) and starts it again. No
  *  script: SpaceKnife's own program does it. The "data" folder stays. */
 async function replacePortable(file: string, updates: string): Promise<string> {
-  const version = /^SpaceKnife-(.+)-(?:win|linux)-x64-portable\.(?:zip|tar\.gz)$/.exec(basename(file))?.[1];
+  const version = portableVersion(basename(file));
   const platform = process.platform;
-  if (!version || (platform !== "win32" && platform !== "linux")) return mt("updateNoInstall");
+  if (!version || !portable || (platform !== "win32" && platform !== "linux" && platform !== "darwin")) return mt("updateNoInstall");
   const staging = join(updates, `staging-${version}`);
   try {
     await rm(staging, { recursive: true, force: true });
@@ -390,9 +399,11 @@ async function replacePortable(file: string, updates: string): Promise<string> {
   }
   const top = (await readdir(staging, { withFileTypes: true })).filter((e) => e.isDirectory());
   const staged = top.length === 1 ? join(staging, top[0]!.name) : null;
-  if (!staged || !(await readdir(staged)).includes(basename(process.execPath))) {
+  // the new version's program: the executable, on macOS the app bundle
+  const program = platform === "darwin" ? MAC_APP : basename(process.execPath);
+  if (!staged || !(await readdir(staged)).includes(program)) {
     const found = top.map((e) => e.name).join(", ") || "nothing";
-    console.warn(`[update] ${basename(file)} is not one folder with ${basename(process.execPath)}: ${found}`);
+    console.warn(`[update] ${basename(file)} is not one folder with ${program}: ${found}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
   const helper = swapHelper(staged, platform);
@@ -400,12 +411,17 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     console.warn(`[update] ${basename(file)} has no ${helper}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
+  // the copy's folder holds its data folder; on macOS the executable is in the bundle there, which a
+  // translocated copy (portable.ts) runs from somewhere else: the swap starts the one in the folder
+  const appDir = dirname(portable);
+  const bundle = appBundle(process.execPath);
+  const exe = platform === "darwin" && bundle ? join(appDir, basename(bundle), "Contents", "MacOS", basename(process.execPath)) : process.execPath;
   const plan = {
     pid: process.pid,
-    appDir: dirname(process.execPath),
+    appDir,
     staged,
     previous: join(updates, `previous-${app.getVersion()}`),
-    exe: process.execPath,
+    exe,
     log: join(updates, `update-${version}.log`),
   };
   await rm(plan.previous, { recursive: true, force: true }); // left by an attempt that was undone
@@ -452,9 +468,10 @@ function startSwap(helper: string, plan: string, cwd: string): Promise<void> {
   });
 }
 
-/** Unpack a portable archive (zip on Windows, tar.gz on Linux) with the system's tar: Windows 10 1803
- *  and later have bsdtar, which reads zip and refuses entries leaving the folder; PowerShell's
- *  Expand-Archive where it is missing. */
+/** Unpack a portable archive (zip on Windows and macOS, tar.gz on Linux) with the system's tools:
+ *  Windows 10 1803 and later have bsdtar, which reads zip and refuses entries leaving the folder
+ *  (PowerShell's Expand-Archive where it is missing); macOS's ditto keeps an app bundle's symbolic
+ *  links and attributes as the archive's own ditto made them. */
 function unpack(file: string, into: string): Promise<void> {
   const run = (cmd: string, args: string[]) =>
     new Promise<void>((done, fail) => {
@@ -462,6 +479,7 @@ function unpack(file: string, into: string): Promise<void> {
       child.once("error", fail);
       child.once("exit", (code) => (code === 0 ? done() : fail(new Error(`${cmd} exited with ${code}`))));
     });
+  if (process.platform === "darwin") return run("/usr/bin/ditto", ["-x", "-k", file, into]);
   if (process.platform !== "win32") return run("tar", ["-xzf", file, "-C", into]);
   return run("tar.exe", ["-xf", file, "-C", into]).catch(() =>
     run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Expand-Archive -LiteralPath '${file.replace(/'/g, "''")}' -DestinationPath '${into.replace(/'/g, "''")}' -Force`]),

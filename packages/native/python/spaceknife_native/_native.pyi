@@ -83,11 +83,30 @@ class RootOpts(TypedDict, total=False):
 ROOT_KEYS: tuple[str, ...]  # the RootOpts keys this build accepts
 OPT_KEYS: tuple[str, ...]  # the option keys of scan_slice this build accepts
 
+class ListingGate:
+    """A limit on listings in flight shared by every ``scan_slice`` call that names it, and its
+    pause (the backend's disk-load limit, one per disk; docs/native.md 2.2)."""
+
+    def __init__(self, limit: int = 1) -> None: ...
+    def set(self, limit: int | None = None, paused: bool | None = None) -> None:
+        """Change the limit (at least 1) and/or the pause; calls waiting for a slot look again."""
+    @property
+    def limit(self) -> int: ...
+    @property
+    def paused(self) -> bool: ...
+    @property
+    def inflight(self) -> int:
+        """Listings in flight now."""
+    def window(self) -> tuple[float, int, bool]:
+        """(seconds spent listing, most listings in flight at once, whether a folder waited for the
+        gate) since the last call."""
+
 class SliceOpts(TypedDict, total=False):
     roots: Sequence[RootOpts]
     budget_s: float
     max_entries: int
-    threads: int  # 0: min(logical CPUs, 16)
+    threads: int  # 0: the shared carriers, within the walker's width; N: a pool of the call's own
+    gate: ListingGate  # the disk's limit on listings in flight
     keep_access_time: bool  # Windows and Linux, default True: listing a folder keeps its last access time
     relative_open: bool  # Windows, default True: found subdirectories are opened from their parent's handle
     skip_final: bool  # Windows, default False: no last query if the buffer had room (local NTFS, ReFS, Btrfs)
@@ -115,6 +134,26 @@ class LinkSet:
         ``flags`` (in place); the first one is remembered. Returns how many were marked."""
     def __len__(self) -> int: ...
     def __contains__(self, key: tuple[int, int]) -> bool: ...
+
+class ListingThreads(TypedDict):
+    cpus: int  # the CPUs this process may use (cpu_count)
+    start: int  # the start width: the scanner's calling threads
+    least: int  # the narrowest a warm probe tries
+    cold: int  # the width while the disk is read
+    max: int  # the widest
+    width: int  # now
+    threads: int  # the carriers' threads now
+    mode: str  # "adaptive", "fixed" (SPACEKNIFE_SCAN_THREADS), "start" (SPACEKNIFE_WALK_ADAPT=0)
+    low: int  # the narrowest width since the last reset
+    high: int  # the widest
+
+def listing_threads(reset: bool = False) -> ListingThreads:
+    """How many folders calls on the shared carriers list at once (docs/native.md 2.2);
+    ``reset``: ``low`` / ``high`` start over from the width now, after this reading."""
+
+def cpu_count() -> int:
+    """The CPUs this process may use: Windows affinity across processor groups, Linux affinity and
+    cgroup v2 quota, else the logical CPUs; at least 1."""
 
 def _open_stats(reset: bool = False) -> dict[str, int]:
     """How directories were opened (Windows; empty on POSIX), process-wide since the last reset."""

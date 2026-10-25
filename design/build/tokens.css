@@ -20,6 +20,8 @@
   --sk-color-line-subtle: #DEE0E4;
   --sk-color-line-swatch: #16192026;
   --sk-color-meter-used: #868A91;
+  --sk-color-scroll-thumb: #A0A5AF;
+  --sk-color-scroll-thumb-hover: #7E838E;
   --sk-color-shadow: #12161F57;
   --sk-color-status-danger: #A9212C;
   --sk-color-status-growth: #A34700;
@@ -265,6 +267,8 @@
     --sk-color-line-subtle: #1D2027;
     --sk-color-line-swatch: #00000000;
     --sk-color-meter-used: #5A5F6B;
+    --sk-color-scroll-thumb: #454A55;
+    --sk-color-scroll-thumb-hover: #6B707C;
     --sk-color-shadow: #000000B3;
     --sk-color-status-danger: #FF6B6B;
     --sk-color-status-growth: #E8963A;
@@ -402,6 +406,8 @@
   --sk-color-line-subtle: #1D2027;
   --sk-color-line-swatch: #00000000;
   --sk-color-meter-used: #5A5F6B;
+  --sk-color-scroll-thumb: #454A55;
+  --sk-color-scroll-thumb-hover: #6B707C;
   --sk-color-shadow: #000000B3;
   --sk-color-status-danger: #FF6B6B;
   --sk-color-status-growth: #E8963A;
@@ -538,6 +544,8 @@
   --sk-color-line-subtle: #DEE0E4;
   --sk-color-line-swatch: #16192026;
   --sk-color-meter-used: #868A91;
+  --sk-color-scroll-thumb: #A0A5AF;
+  --sk-color-scroll-thumb-hover: #7E838E;
   --sk-color-shadow: #12161F57;
   --sk-color-status-danger: #A9212C;
   --sk-color-status-growth: #A34700;

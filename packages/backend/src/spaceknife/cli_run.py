@@ -33,17 +33,13 @@ import numpy as np
 import typer
 from loguru import logger
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.text import Text
 
 from . import fmt
 from .cli_scan import apply_language
-from .export import ExportError, ExportFormat, builtin_targets, export_chunks, resolve, write_export
-from .export.template import ExportTree, Ordering
 from .i18n import Texts, plural, tr
 from .scan.scanner import ScanError, Scanner, ScanProgress, ScanState, native_slicer, native_threads
-from .store import snapshot
 from .store.nodes import NodeStore
 
 # User-facing text of this module, translated when read (M7.5).
@@ -460,6 +456,8 @@ class Runner:
         self.views.append(View(f"scan {arg}", scanner.store, roots, volumes, stats))
 
     async def _scan(self, paths: list[str]) -> tuple[Scanner, ScanProgress]:
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
         slicer = None if os.environ.get("SPACEKNIFE_NO_NATIVE") else native_slicer()
         threads = min(SCAN_THREADS, native_threads()) if slicer is not None else 1
         pool = (
@@ -499,6 +497,8 @@ class Runner:
                 pool.shutdown(wait=False, cancel_futures=True)
 
     def cmd_load(self, arg: str) -> None:
+        from .store import snapshot  # pydantic: loaded with the first command that needs it
+
         paths = _split_paths(arg, folder=False)
         if len(paths) > 1:
             raise CommandFailed(TEXT["load_many"])
@@ -555,6 +555,8 @@ class Runner:
         )
 
     def cmd_save(self, arg: str) -> None:
+        from .store import snapshot
+
         view = self.view
         path = Path(os.path.expanduser(arg))
         try:
@@ -572,6 +574,8 @@ class Runner:
         self.say("saved", MUTED, path=path, size=fmt.size(size))
 
     def cmd_export(self, name: str, arg: str) -> None:
+        from .export import ExportError, ExportFormat, export_chunks, resolve, write_export
+
         view = self.view
         try:
             target = resolve(name)
@@ -618,6 +622,8 @@ class Runner:
         self.out.print(Text(TEXT["view_title"].format(index=index, label=view.label), style="bold"))
         if view.filter_text:
             self.out.print(Text(TEXT["view_filter"].format(expr=view.filter_text), style=MUTED))
+        from .export.template import ExportTree, Ordering
+
         order = Ordering(blocks="mixed", sort="size", descending=True)
         for root in view.store.roots():
             tree = ExportTree(view.store, root, match=view.match, ordering=order)
@@ -650,6 +656,9 @@ class Runner:
 
 
 def help_text() -> str:
+    from .export import builtin_targets  # loaded when used: not part of every command's start-up
+
+    builtins, _, formats = builtin_targets()
     return tr(
         """spaceknife run <命令序列>
 
@@ -674,8 +683,8 @@ def help_text() -> str:
 
 例：spaceknife run scan "D:\\Photos" filter "*.jpg;>5mb" export "Simple file list" big.txt autoclose
 """,
-        builtins=tr("、").join(builtin_targets()[0]),
-        formats=" / ".join(builtin_targets()[2]),
+        builtins=tr("、").join(builtins),
+        formats=" / ".join(formats),
     )
 
 

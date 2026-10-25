@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "287e401ece1ef201";
+export const SCHEMA_HASH = "d39f71675b95d8c6";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -2357,6 +2357,14 @@ export interface SubscribeResult {
   sub: string;
 }
 
+/** A part of a node's summary the backend could not work out; the rest is still given. */
+export interface SummaryGap {
+  /** contents: largest files, class totals and newest change (left empty); classes: the folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, parent: that field (left empty) */
+  part: "contents" | "classes" | "top_files" | "folder_class" | "tags" | "volume" | "parent";
+  /** Why, in the interface language */
+  reason: string;
+}
+
 export interface SystemInfo {
   /** macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected place); None elsewhere or when it cannot be told */
   full_disk_access: boolean | null;
@@ -2482,6 +2490,8 @@ export interface TreeSummaryResult {
   classes: ClassStat[];
   /** The folder class the node (or a file's folder) takes, if any */
   folder_class: FolderClassInfo | null;
+  /** Parts that could not be worked out this time; empty when complete */
+  gaps: SummaryGap[];
   /** Newest modification time in the subtree (0 = unknown) */
   latest_mtime: number;
   node: NodeInfo;

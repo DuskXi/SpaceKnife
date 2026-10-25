@@ -52,6 +52,10 @@
     "shadow": { "$value": "#000000B3", "$description": "外框的大投影：帮助配图（100%）、命令面板与更新卡（86%）。画布上的投影是 treemap.state.selectShadow" },
     "meter": {
       "used": { "$value": "#5A5F6B", "$description": "状态栏容量条的已用段，可用段是 status.success" }
+    },
+    "scroll": {
+      "thumb": { "$value": "#454A55", "$description": "滚动条滑块（所有滚动区域；没有轨道和箭头）：在 window 到 raised 的表面上 ≥ 2:1，安静但看得见" },
+      "thumbHover": { "$value": "#6B707C", "$description": "指针在滑块上或正在拖动：在 window 到 raised 的表面上 ≥ 3:1" }
     }
   }
 }

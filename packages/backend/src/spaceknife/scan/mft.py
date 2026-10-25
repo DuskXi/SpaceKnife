@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import io
-import os
 import sys
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
@@ -35,6 +34,7 @@ import numpy as np
 from loguru import logger
 
 from .. import native
+from ..cpus import usable_cpus
 from ..i18n import Texts, tr
 from ..store.nodes import OFF_NARROW_LIMIT, Flag, Kind, NodeStore, encode_name
 from ..store.subtree import ranges_to_ids
@@ -1268,7 +1268,7 @@ def _table_to_store_numpy(
 
     # what needs the table's columns before they go: extensions, $BadClus, the root's times,
     # the alternate streams of the metafiles
-    workers = min(8, os.cpu_count() or 1)
+    workers = min(8, usable_cpus())
     files = np.flatnonzero(kind == Kind.FILE)
     ext_table = [""]
     with ThreadPoolExecutor(max_workers=min(4, workers), thread_name_prefix="mft-ext") as pool:
