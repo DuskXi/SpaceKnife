@@ -88,7 +88,8 @@ export interface Sk<
   readonly context: PanelContext;
   /** What the panel's view shows now; null without a view. */
   readonly view: PanelView | null;
-  /** One of this plugin's methods, by its local name. */
+  /** One of this plugin's methods, by its local name: about the panel's place (its `ctx.where` is
+   * `context`, its `ctx.tree` the context's scan), unless the params name a `scan_id` of their own. */
   call<K extends keyof Fallback<M, Record<string, { params: unknown; result: unknown }>> & string>(name: K, params?: M[K]["params"], opts?: { signal?: AbortSignal }): Promise<M[K]["result"]>;
   /** A built-in method a panel may use: tree.node tree.children tree.summary tree.find (tree.read),
    * scan.list scan.status volume.list view.list visual.list filter.parse filter.vocab classes.get

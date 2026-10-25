@@ -109,6 +109,34 @@ describe("calls", () => {
     expect(c.host.calls[0]!.params).not.toHaveProperty("key");
   });
 
+  it("sends the panel's context with its own plugin's calls and streams, apart from their params", async () => {
+    const where = { scan_id: "s1", view_id: "v1", node: 4, selection: [4], zoom_node: 1, filter: "", args: { a: 1 } };
+    const subs: { topic: string; params: Record<string, unknown> | null }[] = [];
+    const port = new FakePort();
+    const host = mockHost({
+      permissions: ["tree.read"],
+      where: () => where,
+      subscribe: (topic, params) => {
+        subs.push({ topic, params });
+        return () => {};
+      },
+    });
+    new PanelBridge(host, port, { base: BASE });
+    port.panel({ type: "ready", href: `${BASE}index.html` });
+    port.panel({ type: "call", id: 1, method: "histogram", params: { under: 3 } });
+    port.panel({ type: "call", id: 2, method: "core:tree.summary", params: { scan_id: "s1", node: 0 } });
+    port.panel({ type: "sub", id: 3, topic: "ticks", params: { n: 1 } });
+    port.panel({ type: "sub", id: 4, topic: "ticks", params: null });
+    await settle();
+    // the plugin's ctx.tree is the panel's scan even when the params name none (sk.call("x", {}))
+    expect(host.calls[0]!.params).toEqual({ under: 3, $where: where });
+    expect(host.calls[1]!.params).toEqual({ scan_id: "s1", node: 0 }); // a core method's params as given
+    expect(subs.map((s) => s.params)).toEqual([
+      { n: 1, $where: where },
+      { $where: where },
+    ]);
+  });
+
   it("cancels a call on the panel's word and when the bridge closes", async () => {
     const c = connected();
     let seen: AbortSignal | null = null;

@@ -205,6 +205,8 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
           subscribe: (topic, params, cb) => subscribePlugin(topic, params, cb),
           host: hostOp,
           now: () => performance.now(),
+          // the panel's place: its plugin's calls and streams are about it (ctx.tree, ctx.where)
+          where: () => ({ ...ctxRef.current }),
         },
         channel.port1,
         {

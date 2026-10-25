@@ -4,7 +4,9 @@
 //
 // - calls: its own plugin's methods by local name (plugin.<id>.<name>), or core:<method> for the few
 //   built-in methods a plugin may use, each with the permission it needs (the same list as plugin
-//   code, plugins/allow.py); basket.add always carries the panel as its origin;
+//   code, plugins/allow.py); basket.add always carries the panel as its origin; calls and streams of
+//   its own plugin carry the panel's context ($where, apart from their params: the plugin's ctx.tree
+//   is the panel's scan, ctx.where its place; the backend's plugins/where.py);
 // - events, shared states and streams of its own plugin only;
 // - host operations (select, zoom, filter, its own commands and its view's, toast; the view's colours
 //   with tree.read; reveal / open / terminal / url with host.open; copy with clipboard; basket with
@@ -95,6 +97,16 @@ export interface BridgeHost {
   host(op: string, args: Record<string, unknown>): Promise<unknown> | unknown;
   /** milliseconds, for the rate limit */
   now(): number;
+  /** the panel's context (scan, view, node, selection, zoom root, filter, args …): sent along with the
+   * calls and streams of its own plugin as `$where` */
+  where?(): Record<string, unknown> | null;
+}
+
+/** The context a call or a stream of the panel's own plugin is about, apart from its params. */
+export const WHERE_KEY = "$where";
+
+function withWhere(params: Record<string, unknown>, where: Record<string, unknown> | null | undefined): Record<string, unknown> {
+  return where ? { ...params, [WHERE_KEY]: where } : params;
 }
 
 export interface BridgeOptions {
@@ -262,6 +274,7 @@ export class PanelBridge {
     let params = msg.params && typeof msg.params === "object" ? (msg.params as Record<string, unknown>) : {};
     // what a panel puts in the basket is marked as the panel's (shown in the basket), always
     if (r.core && r.wire === "basket.add") params = { scan_id: params.scan_id, nodes: params.nodes, reasons: params.reasons ?? null, origin: this.host.panel };
+    else if (!r.core) params = withWhere(params, this.host.where?.());
     const ac = new AbortController();
     this.calls.set(id, ac);
     try {
@@ -310,7 +323,9 @@ export class PanelBridge {
     if (typeof id !== "number") return;
     if (typeof topic !== "string" || !LOCAL_NAME.test(topic)) return this.fail(id, INVALID_PARAMS, "bad topic");
     if (this.subs.size >= 16) return this.fail(id, PLUGIN_LIMIT, "too many subscriptions");
-    const params = msg.params && typeof msg.params === "object" ? (msg.params as Record<string, unknown>) : null;
+    const given = msg.params && typeof msg.params === "object" ? (msg.params as Record<string, unknown>) : null;
+    const where = this.host.where?.();
+    const params = where ? withWhere(given ?? {}, where) : given;
     this.subs.get(id)?.();
     this.subs.set(
       id,
