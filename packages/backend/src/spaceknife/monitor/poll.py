@@ -18,6 +18,7 @@ Memory: about 120 B plus the path length per polled folder (measured: 163 B at 4
 
 from __future__ import annotations
 
+import errno
 import math
 import os
 import stat
@@ -55,6 +56,21 @@ def _secs(t: float) -> int:
     if t <= 0:
         return 0
     return _U32_MAX if t >= _U32_MAX else int(t)
+
+
+def _stat_past_path_max(path: str) -> os.stat_result:
+    """``os.stat(path, follow_symlinks=False)`` of a folder whose path is PATH_MAX or longer, which
+    stat refuses (ENAMETOOLONG): opened a piece of the path at a time, as the scan lists it
+    (:func:`~spaceknife.scan.worker.open_dir`). inotify cannot watch such a folder by its path, so it
+    is polled; without this it was polled in vain (never a change, never found gone)."""
+    from ..scan.worker import open_dir
+
+    nofollow = getattr(os, "O_NOFOLLOW", 0)  # the last name as os.stat(follow_symlinks=False) takes it
+    fd = open_dir(path, getattr(os, "O_PATH", os.O_RDONLY) | nofollow | getattr(os, "O_CLOEXEC", 0))
+    try:
+        return os.fstat(fd)
+    finally:
+        os.close(fd)
 
 
 def stat_file(path: str) -> tuple[int, int, int] | None:
@@ -279,8 +295,13 @@ class DirPoller:
             st = os.stat(path, follow_symlinks=path == self.root)
         except (FileNotFoundError, NotADirectoryError):
             return None
-        except OSError:
-            return _UNKNOWN
+        except OSError as exc:
+            if exc.errno != errno.ENAMETOOLONG or sys.platform == "win32":
+                return _UNKNOWN
+            try:
+                st = _stat_past_path_max(path)
+            except OSError as again:  # ELOOP: a symbolic link now (opened without following it)
+                return None if again.errno in (errno.ENOENT, errno.ENOTDIR, errno.ELOOP) else _UNKNOWN
         return st.st_mtime_ns if stat.S_ISDIR(st.st_mode) else None
 
     def _drop(self, gone: list[str]) -> list[Change]:

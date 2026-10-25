@@ -652,10 +652,10 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
     return subdirs
 
 
-_PIECE = 1000  # bytes of path per open in _open_dir: well under PATH_MAX everywhere (macOS: 1,024)
+_PIECE = 1000  # bytes of path per open in open_dir: well under PATH_MAX everywhere (macOS: 1,024)
 
 
-def _open_dir(path: str, flags: int) -> int:
+def open_dir(path: str, flags: int) -> int:
     """``os.open(path, flags)``, also for a path of PATH_MAX bytes or more, which open() refuses
     (ENAMETOOLONG) although the folder is there to list (posix.rs `open_long`): opened a piece of
     whole names at a time, each relative to the folder the one before reached. Resolution is that
@@ -707,7 +707,7 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str,
     assert sys.platform != "win32"
     subdirs: list[tuple[int, str, str]] = []
     base = len(acc.kind)
-    fd = _open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+    fd = open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
     try:
         with os.scandir(fd) as it:
             for entry in it:

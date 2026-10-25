@@ -910,7 +910,7 @@ pub fn bulk_state() -> String {
 const PIECE: usize = 1000;
 
 /// `open(path, oflags)` for a path of PATH_MAX bytes or more, which open() refuses (ENAMETOOLONG)
-/// although the folder is there to list (worker._open_dir): opened a piece of whole names at a
+/// although the folder is there to list (worker.open_dir): opened a piece of whole names at a
 /// time, each piece relative to the folder the one before reached. Resolution is that of one open
 /// of the whole path: symlinks in the middle are followed, `oflags` (O_NOFOLLOW) apply to the last
 /// name only, and the folders on the way need search permission only (O_PATH; elsewhere read
