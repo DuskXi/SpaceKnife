@@ -31,6 +31,7 @@ from typing import Annotated, Any
 import typer
 from rich.console import Console
 from rich.markup import escape
+from typer.core import TyperCommand
 
 plugin_app = typer.Typer(
     help="Write, check, try and manage plugins (docs/plugin-dev.md).",
@@ -78,15 +79,30 @@ def _fail(message: str, code: int = 1) -> typer.Exit:
 # --------------------------------------------------------------------------- writing
 
 
-@plugin_app.command("new")
+class _NewCommand(TyperCommand):
+    """``plugin new``: the help of ``--with`` lists the scaffold's parts from the one list
+    (``spaceknife_sdk.scaffold.PARTS``, also docs/plugin-quick.md's), read only when the help is
+    shown or the command runs: other commands do not import the SDK."""
+
+    def get_params(self, ctx: Any) -> list[Any]:
+        params: list[Any] = super().get_params(ctx)
+        for p in params:
+            text = getattr(p, "help", None)
+            if isinstance(text, str) and "{parts}" in text:
+                from spaceknife_sdk.scaffold import DEFAULT, PARTS
+
+                p.help = text.format(parts=" ".join(PARTS), default=",".join(DEFAULT))
+        return params
+
+
+@plugin_app.command("new", cls=_NewCommand)
 def new(
     plugin_id: Annotated[str, typer.Argument(metavar="ID", help="The plugin id, e.g. example.hello.")],
     with_: Annotated[
         list[str] | None,
         typer.Option(
             "--with",
-            help="Parts, comma-separated: method report command setting cleanup panel visual visual-code "
-            "layout color color-code export source set field insight hook (default: report,command).",
+            help="Parts, comma-separated: {parts} (default: {default}).",
         ),
     ] = None,
     dir: Annotated[Path | None, typer.Option(help="Where to create it (default: ./ID).")] = None,
@@ -190,18 +206,36 @@ def _plugin_logs(plugin: str) -> Iterator[list[str]]:
 
 
 def _settings(items: list[str] | None) -> dict[str, Any]:
-    """``--setting name=value`` (repeatable): JSON values (``true``, ``3``, ``"x"``) or plain text."""
+    """``--setting name=value`` (repeatable): JSON values (``true``, ``3``, ``"x"``, ``[…]``,
+    ``{…}``), ``name=@file.json`` (the value from a file), or plain text."""
+    from .cliargs import json_value
+
     out: dict[str, Any] = {}
     for item in items or []:
         name, sep, raw = item.partition("=")
         if not sep or not name.strip():
             raise _fail(f"--setting {item!r}: write name=value", 2)
         try:
-            value: Any = json.loads(raw)
-        except ValueError:
-            value = raw
-        out[name.strip()] = value
+            out[name.strip()] = json_value(
+                name.strip(), raw, warn=lambda m: err.print(f"[yellow]--setting {m}[/yellow]")
+            )
+        except ValueError as exc:
+            raise _fail(f"--setting {exc}", 2) from None
     return out
+
+
+def _json_arg(text: str, what: str) -> Any:
+    """A JSON argument, or ``@file.json`` for one in a file (no shell quoting to get wrong)."""
+    if text.startswith("@") and len(text) > 1:
+        path = Path(text[1:]).expanduser()
+        try:
+            text = path.read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            raise _fail(f"{what}: cannot read {path}: {exc.strerror or exc}", 2) from None
+    try:
+        return json.loads(text)
+    except ValueError as exc:
+        raise _fail(f"{what} are not JSON: {exc} (a file is safest: @file.json)", 2) from None
 
 
 def _history(files: list[Path]) -> None:
@@ -285,7 +319,7 @@ def _print_side_effects(host: Any, logs: list[str]) -> None:
 def call(
     target: Annotated[str, typer.Argument(metavar="DIR|ID", help="The plugin's folder or id.")],
     method: Annotated[str, typer.Argument(help="A method's local name.")],
-    params: Annotated[str, typer.Argument(help="Its params as JSON.")] = "{}",
+    params: Annotated[str, typer.Argument(help="Its params as JSON, or @file.json.")] = "{}",
     scan: Annotated[Path | None, typer.Option(help="Scan this folder first.")] = None,
     snapshot: Annotated[Path | None, typer.Option(help="Use this snapshot as the scan.")] = None,
     history: Annotated[
@@ -296,16 +330,15 @@ def call(
     lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
     setting: Annotated[
         list[str] | None,
-        typer.Option("--setting", help="name=value: one of the plugin's settings (repeatable)."),
+        typer.Option(
+            "--setting", help="name=value (JSON, or @file.json): one of the plugin's settings (repeatable)."
+        ),
     ] = None,
 ) -> None:
     """Call a method: prints its JSON result; events, toasts and the plugin's log to stderr."""
     folder = _folder(target)
     _quiet()
-    try:
-        args = json.loads(params)
-    except ValueError as exc:
-        raise _fail(f"params are not JSON: {exc}", 2) from None
+    args = _json_arg(params, "params")
     if not isinstance(args, dict):
         raise _fail("params must be a JSON object", 2)
 
@@ -397,7 +430,9 @@ def render(
     lang: Annotated[str | None, typer.Option(help="zh or en.")] = None,
     setting: Annotated[
         list[str] | None,
-        typer.Option("--setting", help="name=value: one of the plugin's settings (repeatable)."),
+        typer.Option(
+            "--setting", help="name=value (JSON, or @file.json): one of the plugin's settings (repeatable)."
+        ),
     ] = None,
     uri: Annotated[str | None, typer.Option(help="source:NAME — what to list (a file, a URL …).")] = None,
     output: Annotated[
@@ -694,13 +729,16 @@ def shot(
         typer.Option(
             "--step",
             help="An action before the picture (repeatable, in order): click: rclick: dblclick: hover: "
-            "<css or text=…>, set:<element>=<value>, key:<Key>, select:<a/b>, do:<command>, open:<target>, "
-            "wait:<s>, eval:<js>; panel:<step> inside the plugin's panel.",
+            "<css or text=…>, node=<a/b> (where the view draws it) or @x,y; set:<element>=<value>, "
+            "type:<text>, key:<Key>, select:<a/b>, do:<command>, open:<target>, wait:<s>, eval:<js>; "
+            "panel:<step> inside the plugin's panel.",
         ),
     ] = None,
     setting: Annotated[
         list[str] | None,
-        typer.Option("--setting", help="name=value: one of the plugin's settings (repeatable)."),
+        typer.Option(
+            "--setting", help="name=value (JSON, or @file.json): one of the plugin's settings (repeatable)."
+        ),
     ] = None,
     history: Annotated[
         list[Path] | None,

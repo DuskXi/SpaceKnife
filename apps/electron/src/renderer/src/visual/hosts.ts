@@ -10,6 +10,10 @@ export interface HostHandle {
   menuAnchor(row: Hit): { x: number; y: number; avoid: Box } | null;
   /** a row's bounds in CSS px relative to the host element; null when the row is not drawn */
   boundsCss(row: Hit): Box | null;
+  /** a point (client px) where the node with this key is under the pointer (its row, or the zoom
+   * root's bar, disc or shape); `null`: the zoom root itself; null when it is not drawn or covered
+   * everywhere (plugin shot's click:node=… steps) */
+  pointOfKey(key: number | null): { x: number; y: number } | null;
 }
 
 export const hosts = new Map<string, HostHandle>();

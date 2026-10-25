@@ -152,6 +152,8 @@ class PluginHost:
         self._start_locks: dict[str, asyncio.Lock] = {}
         self._starting: dict[str, asyncio.Task[PluginRuntime]] = {}
         self._event_rates: dict[str, _Rate] = {}
+        # plugin dev: hears what a plugin says (ctx.log, ctx.toast, ctx.notify) to print it
+        self.dev_watch: Callable[[str, str, dict[str, Any]], None] | None = None
         self._state_rates: dict[str, _Rate] = {}
         self._state_subs: dict[tuple[str, str], dict[str, tuple[Session, Subscription]]] = defaultdict(dict)
         self._stream_tasks: dict[str, asyncio.Task[None]] = {}
@@ -758,6 +760,9 @@ class PluginHost:
         return next((s for s in self.server.sessions if s.id == sid), None)
 
     def _on_notify(self, rec: PluginRecord, type: str, payload: dict[str, Any]) -> None:
+        if self.dev_watch is not None and type in ("log", "toast", "notice"):
+            with contextlib.suppress(Exception):  # a terminal that cannot print never stops the plugin
+                self.dev_watch(rec.id, type, payload)
         if type == "log":
             level = str(payload.get("level", "INFO"))
             logger.bind(source=f"plugin:{rec.id}").log(

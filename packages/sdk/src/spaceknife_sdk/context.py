@@ -464,6 +464,22 @@ class Files:
             _BASES[key] = hit
         return hit
 
+    def allowed(self) -> None:
+        """``PermissionError`` unless the plugin was granted ``files.read``."""
+        require(self._ctx._state, "files.read")
+
+    def entry_path(self, path: str | os.PathLike[str]) -> str:
+        """``path`` with its folders resolved (not its last part: a link stays the link), checked
+        like :meth:`open_path`; ``FileNotAllowed`` outside what the plugin may read."""
+        self.allowed()
+        raw = os.fspath(path)
+        entry = os.path.join(os.path.realpath(os.path.dirname(raw) or "."), os.path.basename(raw))
+        low = os.path.normcase(entry)
+        for base in self._bases():
+            if low == base or low.startswith(base + os.sep):
+                return entry
+        raise FileNotAllowed(f"{path}: not inside a scanned folder")
+
     def _resolve(self, path: str | os.PathLike[str]) -> tuple[str, str]:
         """(the resolved path, the allowed folder it lies in); ``FileNotAllowed`` outside them."""
         require(self._ctx._state, "files.read")

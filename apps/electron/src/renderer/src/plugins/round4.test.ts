@@ -39,6 +39,6 @@ describe("report path cells", () => {
 describe("plugin shot's steps", () => {
   it("have hooks to select, run and open", () => {
     const hooks = devHooks({ scan_id: "scan-1", roots: [{ path: "/data" }] } as unknown as ScanStatus);
-    expect(Object.keys(hooks).sort()).toEqual(["open", "run", "select"]);
+    expect(Object.keys(hooks).sort()).toEqual(["open", "run", "select", "where"]);
   });
 });

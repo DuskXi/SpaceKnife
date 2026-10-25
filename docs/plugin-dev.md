@@ -802,7 +802,7 @@ first = next(iter(rows))  # 逐行：row.id、row.bytes、row.path
 
 `under=X` 是 X 下面的项，不含 X 自己；不写时含各个根（根的 `name` 是完整路径）。命令和报告里 `under=c.zoom_node`、`query(c.filter or None, …)` 就是用户眼前的那部分。文件的 `tot_*` 列是 0（文件夹才有合计）。
 
-**整列**：`tree.col("alloc")`、`tree.cols("kind", "size")`、`tree.children(id)`、`tree.walk(id)`（分块的子树先序）。第一次用到时宿主把这些列导出成只读的共享内存，插件直接映射，不逐个节点远程调用。
+**整列**：`tree.col("alloc")`、`tree.cols("kind", "size")`、`tree.children(id)`、`tree.walk(id)`（分块，逐层：先 `id`，再它的子项，再孙辈）。第一次用到时宿主把这些列导出成只读的共享内存，插件直接映射，不逐个节点远程调用。
 
 **单个节点**：`tree.node(id)` → `Node`（`id name path kind size alloc files dirs mtime ctime atime ext parent depth child_count flags cls`，文件夹的 `size alloc` 是子树合计）；`tree.nodes(ids)`、`tree.name(id)`、`tree.path(id)`（系统自己的分隔符）、`tree.rel_path(id)`（相对根，永远用 `/`）、`tree.find(path)`、`tree.ref(id)`；`tree.roots` 是根的下标（0 号节点是虚拟的顶层），`len(tree)` 是节点数。路径和层级的细节见 [API 参考](plugin-api.md#api-tree)。常量：`Kind.FILE/DIR/LINK/OTHER`、`Flag.HIDDEN` 等。
 
@@ -894,12 +894,13 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 
 - 第一次启用时用户看到全部权限（`net`、`exec` 连同主机和程序），只授予确认过的。文件夹按内容哈希锁定：任何文件变了，插件停在「已改动」，用户重新确认后才再启用（开发链接不锁）。
 - 插件进程有审计钩子：没有权限时联网、写插件存储以外的地方、开子进程、`ctypes` 都会被拦下（`PermissionError`）。它不是操作系统级的沙箱，启用对话框也这么写。
-- `ctx.call` 和面板的 `sk.core` 只能调这些内置方法：`tree.node tree.children tree.summary tree.find`（`tree.read`）、`scan.list scan.status volume.list view.list visual.list filter.parse filter.vocab classes.get export.targets basket.list extensions.get`、`snapshot.list`（`snapshots.read`）、`compare.info compare.summary compare.node insight.node insight.nodes`（`tree.read`）、`basket.add`（`basket.propose`）。删除、改设置、开始扫描、安装插件永远调不到。
+- `ctx.call` 和面板的 `sk.core` 只能调白名单里的内置方法（[表](plugin-api.md#api-core)，各要它的权限）：删除、改设置、开始扫描、安装插件永远调不到。
+- 错误码（`PERMISSION_DENIED` `PLUGIN_TIMEOUT` `STALE_TREE` `PLUGIN_ERROR` …）和插件代码里对应的异常见 [API 参考](plugin-api.md#api-errors)。
 
 <a id="imports"></a>
 ### 7.1 能 import 的模块
 
-打包版只带它分析到的模块，所以插件只能用：SDK、`spaceknife_protocol`、numpy、pydantic、`lib/` 里的纯 Python 包，以及标准库的这些：`json re math statistics collections itertools functools dataclasses datetime time zoneinfo hashlib hmac base64 binascii struct zlib gzip bz2 lzma zipfile tarfile csv io pathlib fnmatch glob typing enum decimal fractions heapq bisect textwrap unicodedata uuid tomllib html xml urllib string difflib operator contextlib asyncio concurrent threading contextvars queue random secrets sqlite3 email os abc copy array codecs locale pprint warnings weakref types numbers shlex`。`ctypes cffi socket subprocess multiprocessing ssl select` 不行：联网用 `ctx.net`，运行程序用 `ctx.exec`。`check` 用语法树检查 import。插件文件夹本身在 `sys.path` 上（`from mypkg import x` 找插件里的 `mypkg/`）；自己开线程时用 `contextvars.copy_context().run(...)` 带上调用的语言，或者用 `ctx.compute`。
+打包版只带它分析到的模块，所以插件只能用：SDK、`spaceknife_protocol`、numpy、pydantic、`lib/` 里的纯 Python 包，以及标准库的这些：`json re math statistics collections itertools functools dataclasses datetime time zoneinfo hashlib hmac base64 binascii struct zlib gzip bz2 lzma zipfile tarfile csv io pathlib fnmatch glob typing enum decimal fractions heapq bisect textwrap unicodedata uuid tomllib html xml urllib string difflib operator contextlib asyncio concurrent threading contextvars queue random secrets sqlite3 email os abc copy array codecs locale pprint warnings weakref types numbers shlex sys platform`（别的标准库模块打包版不一定带，`check` 报 `unknown_import`）。`ctypes cffi socket subprocess multiprocessing ssl select` 不行：联网用 `ctx.net`，运行程序用 `ctx.exec`。`check` 用语法树检查 import。插件文件夹本身在 `sys.path` 上（`from mypkg import x` 找插件里的 `mypkg/`）；自己开线程时用 `contextvars.copy_context().run(...)` 带上调用的语言，或者用 `ctx.compute`。
 
 ### 7.2 预算
 
@@ -914,10 +915,6 @@ sk.resize(240);                   // 详情面板和对话框里要的高度
 | 导出 | 30 s 没有新块就中止 | 每块 1 MiB |
 | 后台任务 | 不限（`timeout=`） | 每个插件同时 8 个；结束的留 8 个给界面看 |
 | 进程 | 启动 10 s；空闲 10 分钟停止（有后台任务时不停）；崩溃后 1 / 5 / 30 秒重启，5 分钟内 3 次就停用 | 内存 1 GiB；同时 4 个调用（`limits.threads` 更多时随它）、排队 32 个；普通 `def` 用 2 个线程（`limits.threads`）；最多 8 个进程 |
-
-### 7.3 错误码
-
-`-32014 PERMISSION_DENIED`（少了权限）、`-32015 PLUGIN_TIMEOUT`、`-32016 PLUGIN_UNAVAILABLE`（进程起不来、崩溃、卡死）、`-32017 PLUGIN_DISABLED`、`-32018 STALE_TREE`（下标过期）、`-32019 PLUGIN_ERROR`（`PluginError` 的文字原样给用户）、`-32020 PLUGIN_LIMIT`（并发、排队或输出超限）。插件代码里对应的异常见 [API 参考](plugin-api.md#api-errors)。
 
 <a id="testing"></a>
 ## 8. 测试
@@ -952,10 +949,10 @@ async def test_largest() -> None:
 | `plugin new <id> [--with 部分,…] [--dir D] [--title 名字]` | 生成能跑、已构建、能通过 `check --strict` 和自带测试的骨架 |
 | `plugin check [D] [--strict] [--json] [--no-contracts] [--inprocess]` | 全部检查；`--json` 给工具和 agent；退出码 1 表示有问题 |
 | `plugin build [D] [--zip]` | 第 9 节 |
-| `plugin call <D或id> <方法> ['{"a": 1}'] [--scan PATH] [--snapshot FILE] [--history FILE …] [--setting k=v …] [--lang en]` | 起一个临时后端，扫描 `PATH`（不给就用合成树或 `fixtures/tree/`），调用方法，打印 JSON 结果，事件、提示和插件日志打到 stderr |
+| `plugin call <D或id> <方法> ['{"a": 1}' 或 @参数.json] [--scan PATH] [--snapshot FILE] [--history FILE …] [--setting k=v …] [--lang en]` | 起一个临时后端，扫描 `PATH`（不给就用合成树或 `fixtures/tree/`），调用方法，打印 JSON 结果，事件、提示和插件日志打到 stderr；`--setting` 的值是 JSON 或 `@文件.json` |
 | `plugin render <D或id> <report:名 \| field[:名] \| insight \| cleanup:名 \| export:名 \| set:名 \| visual:名 \| color:名 \| source:名> [--scan PATH] [--node a/b] [--format text\|json\|md] [--call 方法[={json}] …] [--option k=v …] [--filter 式] [--uri U] [-o FILE] [--setting k=v] [--lang en] [--history FILE]` | 不开界面看到结果；`--call` 先在同一个后端里调方法（先算好结果的字段、集合）；导出的 `--option` `--filter`、`--node`（只导出它）；`visual:` `color:` 的 `--format json` 给出每行的节点、大小和色板下标 |
-| `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--step 步骤 …] [--setting k=v …] [--history FILE …] [--source 名:URI] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；`--step` 截图前按顺序点按、填写、按键、在面板里操作（[步骤](plugin-api.md#api-shot)），`--eval` 在截图前执行；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
-| `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
+| `plugin shot [D] [--open report:名\|panel:名\|export:格式\|settings] [--do 命令 …] [--select a/b] [--step 步骤 …] [--setting k=v …] [--history FILE …] [--source 名:URI] [--theme light\|dark] [--lang en] [--size 1400x900] [-o PNG] [--text] [--eval JS] [--scan PATH] [--ui DIR]` | 无头浏览器里真界面的截图（不开窗口）：自己的临时后端、数据目录和端口；`--do` 是本插件的命令名、`visual:名`、`color:名`、`export` 或任意命令 id；`--step` 截图前按顺序点按（元素、画布上的节点 `node=a/b`、点 `@x,y`）、填写、打字、按键、在面板里操作（[步骤](plugin-api.md#api-shot)），`--eval` 在截图前执行；打印 PNG 的位置、页面和插件的报错，`--text` 还有页面（含面板）上的字 |
+| `plugin dev [D] [--scan PATH] [--port N] [--ui DIR] [--home DIR]` | 后端加开发链接，保存就重新加载并通知前端；终端里打出插件的 `ctx.log`、提示和通知；有构建好的前端时打印浏览器网址（打开就是 `--scan` 的扫描），前端比源码旧时提醒；停它用打印的 pid（`kill <pid>`、`Stop-Process -Id <pid>`），别用会误杀的 `pkill -f` |
 | `plugin install <D\|zip> [--replace]`、`uninstall <id> [--data]`、`list [--json]`、`enable <id> [--yes]`、`disable <id>` | 安装、卸载（真实的数据目录）；列出、启用（列出权限并要求确认）、停用 |
 | `plugin schema [--manifest \| D]` | 清单的 JSON Schema，或插件自己的协议 schema |
 | `plugin docs [--section 锚点] [--search 词] [--list] [--guide] [--api]` | 速查（不带参数）；一节；提到某个词的行；全文 |

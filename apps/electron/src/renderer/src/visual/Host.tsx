@@ -39,6 +39,7 @@ import {
   type TrashMode,
   trashMoves,
 } from "./overlays";
+import { pointOf } from "./pointOf";
 import { componentFor } from "./registry";
 import { breathGap, FPS_GAP, FrameLoop, frameGap, type Pace, type TransitionKind, transitionFor, useDevicePixelRatio, useReducedMotion } from "./scheduler";
 import { type Box, HIT_NONE, HIT_ROOT, type Hit, type HoverInfo, type PaintSettings, type Pt, type VisualComponent, type VisualContext, type VisualFrame, type VisualGeometry, type VisualInstance } from "./types";
@@ -542,6 +543,16 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       boundsCss(hit) {
         const w = where(hit);
         return w ? scaled(w.b, w.k) : null;
+      },
+      pointOfKey(key) {
+        const cur = r.current.cur;
+        const canvas = glCanvas.current;
+        if (!cur || !canvas) return null;
+        const p = pointOf(cur.component.geometry, cur.frame, key == null ? HIT_ROOT : hitOfKey(cur.frame, key));
+        if (!p) return null;
+        const rect = canvas.getBoundingClientRect();
+        const k = rect.width / cur.frame.info.width;
+        return { x: rect.left + p.x * k, y: rect.top + p.y * k };
       },
       menuAnchor(hit) {
         const w = where(hit);

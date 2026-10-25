@@ -8,7 +8,8 @@ may frame only this server's pages. The renderer's shim (``src/renderer/src/shim
 Electron's preload and connects to the backend named in the URL's hash.
 
 ``plugin dev`` also runs the backend with the plugin linked and watches its folder: every change is
-described and started again, and the frontends hear ``extensions.changed``.
+described and started again, and the frontends hear ``extensions.changed``. What the plugin says
+(``ctx.log`` lines, toasts, notices) is printed in its terminal.
 """
 
 from __future__ import annotations
@@ -301,6 +302,21 @@ async def _dev(
 
     def await_describe(f: Path) -> tuple[Any, list[Any]]:
         return describe_in_subprocess(f)
+
+    def heard(pid: str, kind: str, p: dict[str, Any]) -> None:
+        """What the plugin says, in this terminal: its ctx.log lines, toasts and notices."""
+        if pid != plugin:
+            return
+        if kind == "log":
+            say(f"log {str(p.get('level', 'INFO')).lower()}: {str(p.get('message', ''))[:2000]}")
+        elif kind == "toast":
+            say(f"toast ({p.get('tone') or 'info'}): {str(p.get('text', ''))[:512]}")
+        else:
+            body = f" — {str(p.get('body'))[:1000]}" if p.get("body") else ""
+            button = f" [{p.get('button') or p.get('command')}]" if p.get("command") else ""
+            say(f"notice: {str(p.get('title') or '')[:120]}{body}{button}")
+
+    host.dev_watch = heard
 
     try:
         rec = await host.link_dev(folder)

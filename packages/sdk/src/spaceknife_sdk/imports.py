@@ -4,6 +4,7 @@ held to this list (``packaging/spaceknife-backend.spec`` bundles it) even where 
 from __future__ import annotations
 
 import ast
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -76,6 +77,8 @@ STDLIB = frozenset(
         "types",
         "numbers",
         "shlex",
+        "sys",
+        "platform",
         "__future__",
     }
 )
@@ -142,13 +145,23 @@ def check_imports(folder: Path, files: Iterable[Path] | None = None) -> list[Iss
                         )
                     )
                 elif top not in STDLIB and top not in THIRD_PARTY and top not in own:
+                    standard = top in sys.stdlib_module_names
                     issues.append(
                         Issue(
                             "unknown_import",
-                            f"{name}: not in the frozen app",
+                            (
+                                f"{name}: a standard module plugins may not use (the packaged app "
+                                "carries only the listed ones)"
+                                if standard
+                                else f"{name}: not in the packaged app"
+                            ),
                             file=rel,
                             line=getattr(node, "lineno", 0),
-                            fix="put pure-Python dependencies in lib/",
+                            fix=(
+                                "use one of the listed modules (spaceknife plugin docs --section imports)"
+                                if standard
+                                else "put pure-Python dependencies in lib/"
+                            ),
                             severity="warning" if top.startswith("_") else "error",
                         )
                     )

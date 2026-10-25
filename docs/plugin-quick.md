@@ -14,7 +14,11 @@ uv run pytest my.tool/tests                                    # 合成树上跑
 spaceknife plugin shot my.tool --open report:largest           # 真界面的截图（无头浏览器，不弹窗）
 ```
 
-`--with` 的部分（每部分一段带注释的代码和它的测试）：`method report command setting cleanup panel visual visual-code layout color color-code export source set field insight hook changes task`。`plugin new` 结束时按选的部分列出下一步的命令。
+<!-- generated:plugin-parts:start -->
+
+`--with` 的部分：`method report command setting cleanup panel visual visual-code layout color-code color export source set field insight hook changes task`（各是一段带注释的代码和测试；不写时是 `report,command`）。
+
+<!-- generated:plugin-parts:end -->
 
 <a id="quick-tasks"></a>
 ## 2. 我要……

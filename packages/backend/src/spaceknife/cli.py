@@ -153,4 +153,9 @@ def main() -> None:
     from .io.priority import no_cloud_downloads
 
     no_cloud_downloads()  # macOS: never fetch iCloud / File Provider contents (every command)
+    if sys.platform == "win32" and sys.argv[1:2] == ["plugin"]:
+        from .cliargs import as_typed
+
+        # JSON and JavaScript in plugin shot / call / render as typed in Windows PowerShell 5.1
+        sys.argv = as_typed(sys.argv)
     app()

@@ -85,7 +85,7 @@ class ScanInfo(_Record):
         description='"scan" (a disk scan), "snapshot" (opened from a snapshot file) or a scan '
         "source's full id",
     )
-    uri: str = Field(default="", description="What the scan source listed (its URI);  for the others")
+    uri: str = Field(default="", description='What the scan source listed (its URI); "" for the others')
     state: Literal["scanning", "done", "cancelled", "failed"] | str = "done"
     started_at: float | None = None
     finished_at: float | None = None

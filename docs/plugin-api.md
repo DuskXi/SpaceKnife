@@ -42,11 +42,13 @@
 | `epoch` | 树的纪元：宿主挪动了行（监控重新列出、压缩……）后加一，旧下标随之作废（`STALE_TREE`）；什么时候变见[下面](#api-epoch) |
 | `version` | 树的版本：任何改动都加一。扫描进行中每批结果都会让它变（很频繁）；扫描完成后只在监控、重新扫描、删除改动树时变。宿主的缓存按它作废 |
 
-**方法**：`node(id)` `nodes(ids)` → [`Node`](#api-models)；`name(id)` `names(ids)`；`path(id)` `paths(ids)`；`rel_path(id, under=None)` `rel_paths(ids, under=None)`；`root_of(id)`；`parent(id)`；`children(id)` → 下标数组；`walk(id=None, chunk=…)` → 一块块下标，**逐层**（先 `id` 自己，再它的子项，再孙辈……同层按下标；不是深度优先，一个文件夹下面的项在结果里不连续）；`col(name)` `cols(*names)` → 只读的整列；`query(…)` → `Rows`（[限量](#api-query)）；`rule_folders(规则)` → 下标数组（[文件夹规则匹配到的](#api-query)）；`find(path)` → 下标或 None；`ref(id)` → [`NodeRef`](#api-models)；`file_ids(ids)` → `(设备, 文件 id, 链接数)`（要 `files.read`）；`close()`（快照用完时）。
+**方法**：`node(id)` `nodes(ids)` → [`Node`](#api-models)；`name(id)` `names(ids)`；`path(id)` `paths(ids)`；`rel_path(id, under=None)` `rel_paths(ids, under=None)`；`root_of(id)`；`parent(id)`；`children(id)` → 下标数组（一个文件夹的子项是连续的一段下标：`child_start` 起的 `child_count` 个，`tree.cols("child_start", "child_count")` 整列读，按 numpy 排导出顺序时用得上）；`walk(id=None, chunk=…)` → 一块块下标，**逐层**（先 `id` 自己，再它的子项，再孙辈……同层按下标；不是深度优先，一个文件夹下面的项在结果里不连续）；`col(name)` `cols(*names)` → 只读的整列；`query(…)` → `Rows`（[限量](#api-query)）；`rule_folders(规则)` → 下标数组（[文件夹规则匹配到的](#api-query)）；`find(path)` → 下标或 None；`ref(id)` → [`NodeRef`](#api-models)；`file_ids(ids)` → `(设备, 文件 id, 链接数)`，系统现在说的（要 `files.read`，没有时抛 `PermissionError`；和 `ctx.files` 一样只看插件能读的地方，看不了的、扫描来源的树里的都是 None；只读元数据，不受磁盘负载上限节制）；`close()`（快照用完时）。
 
 **层级**：0 号节点 `depth = 0`，根 `depth = 1`，根下面一层 `2`。`Node.parent` 对 0 号节点是 −1，对根是 0。根的 `name` 是它的完整路径。
 
 **边界**：`query(under=X)` 是 X 下面的项，**不含 X**；不写 `under` 时含各个根（不含 0 号节点）。文件的 `tot_*` 列是 0；`bytes` 列对文件是占用、对文件夹是子树合计、对重复的硬链接是 0。
+
+**文件夹的大小**：文件夹的 `size` `alloc`（`Node`、`bytes` 列）是它**里面**的合计，不含它自己那一项（目录块、扫描来源 `out.dir(size=, alloc=)` 给的）：那一项算进上一层的合计。例：`Videos` 里文件共 734,007,296 字节、目录块 4096 字节，`Videos` 的大小是 734,007,296，它的上级多算 4096（ncdu 把目录块算在文件夹自己身上，导入导出时要换算）。**硬链接**多出来的名字（`Flag.HARDLINK_DUP`）`bytes`、`Node.size`、`Node.alloc` 都是 0，大小算在按树的顺序第一个名字上。
 
 <a id="api-epoch"></a>
 **纪元什么时候变**：节点下标就是行号，宿主挪动了行，`epoch` 就加一（`version` 则是树有任何改动都加一）：
@@ -96,7 +98,7 @@
 
 聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`，它的 `ctx.tree` 就是 `c.scan_id` 那个扫描（两个扫描都开着时也不会读到另一个）。`check` 抛出异常时命令不可用，原因写成「检查出错：〈错误〉」（同时进插件日志）；50 ms 内没答（插件正忙、进程正在启动、树刚被整理）算可用：动作运行时自己再查一遍。
 
-导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。
+导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）：过滤只命中文件，**文件夹总是 False**，装着命中文件的也是，要不要写出一个文件夹看它下面有没有为 True 的文件；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。「选中项」选了几项时，`root` 是它们共同的上级文件夹，`match` 只在这几项的子树里为真（没过滤时子树里的文件夹也为真，有过滤时再和命中相与）。
 
 <a id="api-action-args"></a>
 ### 动作的参数
@@ -168,6 +170,14 @@ plugin.setting(
 
 `event` 写错时 `check` 从代码里找出来（`unknown_hook`，附最像的名字），导入时也报同样的错。钩子在后台跑，宿主不等结果，出错只记日志；每个钩子 30 秒（`@plugin.on(event, timeout=…)`，≤ 600），更久的事 `ctx.tasks.start` 一个[后台任务](#api-limits)；钩子里不能 `ctx.clipboard`，`ctx.toast` 和 `ctx.notify` 发给所有窗口。宿主找到了代码里的钩子却没有注册上它时（插件没启用好）记一行日志，不会悄悄不调。测试里 `await host.hook(event, …)` 会检查事件名和参数（`tree_changed` 的 `change` 不写时是「眼前扫描的根变了」），钩子抛的异常原样抛出。
 
+**先后顺序**：宿主保证的只有这几条：
+
+- 同一事件的几个钩子（一个插件写了两个 `scan_done`）按代码里的顺序一个接一个跑；
+- 同一个扫描的 `tree_changed` 一批跑完才送下一批，不会同时跑两个；
+- `settings` 钩子跑时插件进程已经拿到新设置，这个插件缓存的回答已经作废。
+
+不同事件之间**没有顺序**：每次事件各是一次调用，宿主不等前一个（普通 `def` 的钩子在工作线程里，`limits.threads` 个可以同时跑）。例如扫描快完成时改了设置，`settings` 可能比 `scan_done` 晚到；`start` 还没跑完时别的钩子也可能来。所以钩子不要靠「先来的那个钩子记下的状态」：每次读现在的（`ctx.settings`、`ctx.scans()`、`ctx.tree`），共用的状态加锁。
+
 <a id="api-live"></a>
 ### 树变化、快照与对比
 
@@ -213,6 +223,8 @@ def compare_last(ctx: Context, a: ActionContext) -> CompareOpen | None:
 
 测试和命令行里失败的调用抛 `spaceknife_sdk.RequestError`：`.code`（`spaceknife_sdk.ErrorCode`，如 `PLUGIN_ERROR` `PERMISSION_DENIED`）、`.message`、`.data`。
 
+**错误码**：`-32014 PERMISSION_DENIED`（少了权限）、`-32015 PLUGIN_TIMEOUT`、`-32016 PLUGIN_UNAVAILABLE`（进程起不来、崩溃、卡死）、`-32017 PLUGIN_DISABLED`、`-32018 STALE_TREE`（下标过期）、`-32019 PLUGIN_ERROR`（`PluginError` 的文字原样给用户）、`-32020 PLUGIN_LIMIT`（并发、排队或输出超限）。
+
 <a id="api-cache"></a>
 ## 6. 缓存
 
@@ -225,6 +237,7 @@ def compare_last(ctx: Context, a: ActionContext) -> CompareOpen | None:
 | 代码可视化的权重 | 可视化、扫描、树的 `version`、它的 `options` 和本插件的设置 | 同上（`"visualization"`）；作废后视图重画 |
 | 配色的图例（`@plugin.color_legend`） | 配色、语言 | 设置变了、语言变了、`ctx.invalidate("color_mode")`；新的算出来之前仍显示旧的，作废时宿主马上去取新的（设置变了时等插件进程拿到新设置之后才取） |
 | 对比原因 | 对比、变化项 | 设置变了（`"change_annotator"`） |
+| 代码洞察（`@plugin.insight`） | 不缓存：详情面板每显示一个节点就问一次（选中项变了、树变了、插件重新加载后再问），1 秒内没答或出错就没有这张卡 | — |
 | 报告 | 不缓存：按 `refresh` 重新取 | — |
 
 插件设置一变，宿主先把新设置交给插件进程，再把这个插件的全部缓存作废（插件的「缓存纪元」加一），然后调 `settings` 钩子：重新取的图例、字段和钩子都看到新值。插件自己的数据变了（它读的文件、它建的索引）、宿主看不出来的时候，调 `ctx.invalidate()`。字段在后台算完了也一样：`ctx.invalidate("node_field")` 之后界面会再要一次。
@@ -275,6 +288,7 @@ async def all_files(ctx: Context, c: ReportContext) -> Report:
 | `frame.draw.layout` | `drawlist.v1`（树图）`flame.v1` `polar.v1`，自带布局是 `shapes.v1` |
 | `frame.draw.geometry` | 几何列：`shapes.v1` 是 `x y w h`（外框）`r`（圆角，半个短边就是圆）`poly`（多边形的点数，0 不是多边形），物理像素 |
 | `frame.draw.points` | `shapes.v1` 里多边形的点，`x y` 交替，按行的顺序 |
+| `frame.draw.label` | 每行的标签位（`uint8`）：0 不写标签；`1` 名字、`2` 第二行写大小、`4` 大字、`8` 矮块只写名字（字小，竖直居中）、`16` 极坐标里沿半径写、`32` `shapes.v1` 写在形状里的顶上（展开的文件夹）。宿主按块的大小定，`Shapes` 的 `label=` 只是要求，放不下时仍是 0 |
 | `frame.draw.meta` | `shapes.v1` 是 `ShapesGeometry`：`root`（缩放根的形状，没有是 None）`nested` `message`（布局失败的原因）`stroke`（形状边里那条线，物理像素） |
 
 **图例在哪**：工具栏的配色菜单里，每种配色下面一行色块和说明（声明的 `legend`、按 `bands` 生成的，或 `@plugin.color_legend` 给的）；没有说明的色板项不显示。
@@ -337,7 +351,7 @@ def icicle(v: LayoutInput) -> Shapes:
 | `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常；缺权限的钩子抛 `PermissionError`）、对比原因 |
 | `await host.changed(*nodes)` | 当前扫描在这些节点（下标或相对根的路径）上变了，像应用文件变化那样：`tree_changed` 钩子按宿主的方式（合并一秒、文件夹）跑完才返回；树本身不变 |
 | `await host.task(name, params, key=, wait=True)`、`host.tasks()`、`await host.cancel_task(name, key=)` | 后台任务：启动并等它结束，返回 `TaskInfo`（`state` 是 `done` `failed` `cancelled`，`error` 是失败的原因）；`wait=False` 马上返回；本插件的任务（跑着的和最近结束的）；像取消按钮那样取消并等它停下 |
-| `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样对 `node` 运行命令，`args` 加在动作自己的上（同面板的 `sk.host.command(id, args)`）：`call` 返回方法的结果，`cleanup` 返回候选（同 `host.cleanup`），其余返回动作的 dict（带合并后的 `args`） |
+| `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样对 `node` 运行命令，`args` 加在动作自己的上（同面板的 `sk.host.command(id, args)`）：`call` 返回方法的结果（`Toast`、`CompareOpen` 也是 dict），`cleanup` 返回候选（同 `host.cleanup`）；其余（`open` `command` `view` `filter` `setting` `scan_source` ……）只返回宿主规整过的动作 dict，不运行它：`{"kind": "open", "target": "report:<全名>", "args": {…}}`、`{"kind": "scan_source", "source": "<全名>", "uri": "$node"}`，名字补成全名、`args` 合并好，`$node` 这类占位**不替换**（界面运行动作时才换成节点的路径） |
 | `await host.command_available(name, node=)` | 选中 `node` 时这个命令能不能跑：它的 `when` 和 `check` 给的原因，能跑时 None |
 | `await host.visual_available(name)` | 本插件的可视化在当前扫描的视图里能不能选：它的 `when` 给的原因，能选时 None |
 | `await host.settled()` | 等宿主后台的事做完：悬停字段的后补、钩子、设置和语言的变化 |
@@ -368,24 +382,37 @@ def icicle(v: LayoutInput) -> Shapes:
 | 步骤 | 做什么 |
 |---|---|
 | `click:<元素>` `rclick:<元素>` `dblclick:<元素>` `hover:<元素>` | 用鼠标点、右键（截得到右键菜单）、双击、悬停。`<元素>` 是 CSS 选择器，或 `text=<看得见的文字>`（最里层显示这段文字的元素） |
+| `click:node=<a/b>` `rclick:node=…` `dblclick:node=…` `hover:node=…` | 对画布上画出的节点（相对根的路径；`node=` 是缩放根本身）：鼠标落在视图画它的地方（真的鼠标事件，和用户一样走视图自己的处理：单击选中、双击进入文件夹、在缩放根上双击回到上一层、右键出菜单、悬停出悬停卡）。节点没画出来（在没展开的文件夹里、太小、被盖住）时这一步失败并说明 |
+| `click:@x,y` 等 | 在窗口的这个点（CSS 像素，就是截图的像素）点、右键、双击、悬停 |
 | `set:<元素>=<值>` | 填输入框、多行文字、下拉框；勾选框写 `true` / `false`；之后离开输入框（触发校验） |
+| `type:<文字>` | 往有焦点的输入框里打字（先 `click:` 它；`key:Control+A` 再打字就是替换），和键盘输入一样触发输入事件 |
 | `key:<键>` | `Escape` `Enter` `Tab` `ArrowDown` `F5` `a`，组合键 `Control+K` `Shift+Alt+x` |
 | `select:<a/b>` `do:<命令>` `open:<目标>` | 选中节点（相对根）、运行命令（同 `--do`）、打开（同 `--open`） |
 | `wait:<秒>` `eval:<JS>` | 等一会儿；执行一段 JS 并打印结果 |
-| `panel:<步骤>` | 在打开着的插件面板（它自己的框架）里做 `click` `rclick` `dblclick` `hover` `set` `key` `eval` `wait` |
+| `panel:<步骤>` | 在打开着的插件面板（它自己的框架）里做 `click` `rclick` `dblclick` `hover` `set` `type` `key` `eval` `wait`（元素只能用 CSS 选择器或 `text=`） |
 
 ```bash
 spaceknife plugin shot . --setting min_size=1 --history old.skscan --step "rclick:text=a.log" --step "wait:0.3" -o menu.png
 spaceknife plugin shot . --open panel:main --step "panel:set:#days=30" --step "panel:click:text=应用" --eval "document.title"
 spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.txt" --text
+spaceknife plugin shot . --do visual:pack --step "dblclick:node=photos" --step "dblclick:node=" --step "rclick:node=code" -o menu.png
+spaceknife plugin shot . --open settings --lang en --step "click:input[aria-label=Name]" --step "key:Control+A" --step "type:Old logs" --step "key:Tab"
 ```
 
-`--eval` 在所有步骤之后、截图之前执行（读到的就是图里的状态）。`--setting 名=值` 先改好本插件的设置，`--history 文件` 把快照放进临时后端的历史（对比和 `ctx.snapshots.list()` 都看得到），`--source 名:URI` 用本插件的扫描来源扫描（代替 `--scan`）。
+设置页的输入框以设置的标题（列表设置里是栏的标题，按界面语言）为 `aria-label`。
+
+`--eval` 在所有步骤之后、截图之前执行（读到的就是图里的状态）。脚本（`--eval`、`eval:`）抛出时打印 JS 的错误（`ReferenceError: foo is not defined`），照样截图。有一步失败或 `--eval` 出错时退出码是 3（截图仍在），选项写错是 2。
+
+`--setting 名=值` 先改好本插件的设置：值按 JSON 读（`3`、`true`、`["a", "b"]`、`{"k": 1}`），读不成时是文字；`名=@文件.json` 从文件读（最不怕引号）。宿主不收的值（列表设置给了文字、超出范围……）在开始前就说哪一项、为什么。Windows PowerShell 5.1 不转义参数里的双引号（引号外有空格的参数整个套上双引号，其余照写），程序收到的 JSON 和 JS 会丢掉引号甚至断成两个参数；`spaceknife plugin …` 在 Windows 上按 PowerShell 5.1 的写法从命令行原文把它们读回来，所以 `--setting 'rules=[{"glob": "a b"}]'`、`--step 'eval:f("a b")'` 照写就行（`plugin call` 的参数也是，或写 `@params.json`）。经 `uv run` 时读不回来：uv 自己先按 C 运行库的规矩读了参数，再原样转给 Python；这时直接运行 `.venv\Scripts\spaceknife.exe`，或用 `@文件.json`，或把里面的双引号写成 `\"`。
+
+`--history 文件` 把快照放进临时后端的历史（对比和 `ctx.snapshots.list()` 都看得到），`--source 名:URI` 用本插件的扫描来源扫描（代替 `--scan`）。浏览器里的界面没有系统的保存对话框，导出时在页面的路径框里填：`set:.path-dialog-input=<路径>`。
 
 <a id="api-core"></a>
 ## 11. `ctx.call` 与 `sk.core` 能调的内置方法
 
 参数和结果的完整字段见 [protocol.md](protocol.md) 和 `spaceknife schema`。删除、改设置、开始扫描、安装插件永远调不到。常用的几个：`scan.list` → `{scans: [ScanStatus]}`（`scan_id state roots items files dirs bytes_alloc …`，打开的顺序）；`view.list` → `{views: [ViewState]}`（`view_id scan_id zoom_node selected visual color_mode …`：面板（`sk.core`）里是这个窗口的视图，插件代码（`ctx.call`）里是空的，要视图所在的位置用调用带的 `view_id` 和 `node`）；`tree.summary` → 一个节点的合计和最大的子项；`snapshot.list` 同 `ctx.snapshots.list()`。
+
+`filter.parse` → `FilterParse`（dict）：`diagnostics`（每项 `code` `severity`（`error` 时这个过滤式不生效，`warning` 只是提醒）`start` `end`（出错那一段，UTF-16 下标）`text`（那一段原文）`expected`（这里能写的）；**没有给人看的文字**，要显示时自己按 `code` 写）、`normal`（有错时是 None；`normal["canonical"]` 是唯一的规范写法，两个过滤式 `canonical` 相同就命中同样的文件；`masks` `classes` `folders` `sizes` `ages` `sets` 和对应的 `not_*` 是拆开的条件）、`conditions`（逐个条件：`kind` 是 `name` `folder` `class` `set` `tag` `attr` `size` `age`，`text` 是它的规范写法，`negated`）、`tokens`（上色用的 `kind start end`）、`pending`（光标处没写完的条件）、`completion`（光标处的补全）。只想知道写得对不对：`not any(d["severity"] == "error" for d in r["diagnostics"])`。
 
 <!-- generated:plugin-core:start -->
 
@@ -513,7 +540,7 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 | `roots` | list[str] | `[]` | 根的路径（扫描来源的扫描：根的名字） |
 | `items` | int | `0` | 文件夹和文件的个数，不算根 |
 | `source` | str | `"scan"` | `scan`（磁盘扫描）、`snapshot`（打开的快照）或扫描来源的全名 |
-| `uri` | str | `""` | What the scan source listed (its URI);  for the others |
+| `uri` | str | `""` | 扫描来源列的 URI（用户选的文件或地址）；别的扫描是 `""` |
 | `state` | (`scanning` `done` `cancelled` `failed`) \| str | `"done"` | 扫描中、完成、停止、失败 |
 | `started_at` | float \| None | `None` | 开始时间，unix 秒 |
 | `finished_at` | float \| None | `None` | 结束时间，unix 秒；还在扫描时是 None |
@@ -606,12 +633,12 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 | `scan_id` | str \| None | `None` | 所在的扫描（`ctx.tree` 读它） |
 | `view_id` | str \| None | `None` | 所在的视图（有的话） |
 | `node` | int \| None | `None` | 针对的节点：详情面板里是选中项（没选时是缩放根），右键菜单里是点的那一项 |
-| `selection` | list[int] | `[]` | 选中的节点（≤ 1000 个）（≤ 1000 个） |
+| `selection` | list[int] | `[]` | 选中的节点（≤ 1000 个） |
 | `compare_id` | str \| None | `None` | 对比视图里的对比 |
 | `cursor` | str \| None | `None` | 表格续读时 `r.more(cursor)` 给的位置；第一页是 None |
 | `args` | dict[str, Any] | `{}` | 打开它的动作带的参数（`{ open = "report:x", args = {…} }`） |
-| `zoom_node` | int \| None | `None` | The view's zoom root (where the user is) |
-| `filter` | str | `""` | The view's filter expression ('' = not filtered) |
+| `zoom_node` | int \| None | `None` | 视图的缩放根（用户眼前的那一层）；没有视图时 None |
+| `filter` | str | `""` | 视图的过滤式；没过滤是 `""` |
 
 #### `ActionContext`
 
@@ -625,8 +652,8 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 | `selection` | list[int] | `[]` | 选中的节点（≤ 1000 个） |
 | `compare_id` | str \| None | `None` | 对比 |
 | `args` | dict[str, Any] | `{}` | 动作里写的 `args` |
-| `zoom_node` | int \| None | `None` | The view's zoom root (where the user is) |
-| `filter` | str | `""` | The view's filter expression ('' = not filtered) |
+| `zoom_node` | int \| None | `None` | 视图的缩放根（用户眼前的那一层）；没有视图时 None |
+| `filter` | str | `""` | 视图的过滤式；没过滤是 `""` |
 
 #### `TaskInfo`
 
@@ -803,7 +830,7 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 |---|---|---|---|
 | `title` | str | 必需 | 卡片标题：这是什么 |
 | `reason` | str | 必需 | 为什么这么说 |
-| `kind` | str | `"other"` | 类型（`cache` `build` `log` …，洞察配色按它上色） |
+| `kind` | str | `"other"` | 卡片的图标：`app` `cache` `build` `vm` `chat` `game` `system`（同规则文件的 `kind`）；别的值（默认 `other`）显示成一般的信息图标 |
 | `cleanup` | (`safe` `tool` `review` `keep`) | `"review"` | 能不能删：`safe`（随便删）`tool`（用工具清）`review`（先看看）`keep`（别删） |
 | `app` | str | `""` | 相关的程序 |
 | `note` | str | `""` | 补充说明 |
@@ -947,7 +974,7 @@ spaceknife plugin shot . --source list:fixtures/list.txt --step "select:docs/a.t
 | `type` | (`table`) | `"table"` |  |
 | `columns` | list[TableColumn] | 必需 |  |
 | `rows` | list[TableRow] | 必需 |  |
-| `sort` | str \| None | `None` | Column key, '-key' for descending |
+| `sort` | str \| None | `None` | 按哪一列排（列的 key），`-key` 是从大到小 |
 | `page_size` | int | `50` | ≥ 1，≤ 500 |
 | `select` | bool | `False` |  |
 | `more` | TableMore \| None | `None` |  |

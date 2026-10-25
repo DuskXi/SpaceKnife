@@ -372,6 +372,7 @@ function kindLabel(kind: string): string {
     watcher: t("监控器"),
     change_annotator: t("对比原因"),
     hook: t("钩子"),
+    background: t("后台任务"),
     method: t("方法"),
     event: t("事件"),
     state: t("共享状态"),

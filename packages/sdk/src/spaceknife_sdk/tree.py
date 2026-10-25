@@ -400,15 +400,27 @@ class TreeView:
     def file_ids(self, ids: Sequence[int] | np.ndarray) -> list[tuple[int, int, int] | None]:
         """(device, file id, link count) of files, as the system reports them now — for hard links
         where the scan did not record them (``Flag.HARDLINK_DUP`` marks the extra links it saw).
-        Needs ``files.read``; None where a file cannot be read."""
-        import os
+        Needs ``files.read`` (``PermissionError`` without it) and, like ``ctx.files``, looks only
+        inside what the plugin may read; None where a file cannot be looked at (gone, outside,
+        refused) and for every node of a tree that is not on disk (a scan source's). Only the
+        file's metadata is read (``stat``, not paced by the disk-load limit)."""
+        from ._current import current_context
 
+        ctx = current_context()
+        if ctx is None:
+            raise RuntimeError(
+                "tree.file_ids runs inside a call (a thread of your own: contextvars.copy_context().run)"
+            )
+        files = ctx.files
+        files.allowed()  # files.read, else PermissionError
+        if self.virtual:
+            return [None] * len(ids)
         out: list[tuple[int, int, int] | None] = []
         for path in self.paths(ids):
             try:
-                st = os.stat(path, follow_symlinks=False)
+                st = os.stat(files.entry_path(path), follow_symlinks=False)
                 out.append((int(st.st_dev), int(st.st_ino), int(st.st_nlink)))
-            except OSError:
+            except OSError:  # FileNotAllowed is one: outside what the plugin may read
                 out.append(None)
         return out
 

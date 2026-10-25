@@ -11,12 +11,16 @@ visible text of the page. Nothing opens on the desktop.
 
 Steps (``--step``, in the order given, after the page is ready and before the picture) act on the
 page as a user would: ``click:`` ``rclick:`` (a context menu) ``dblclick:`` ``hover:`` an element (a
-CSS selector, or ``text=<its visible text>``), ``set:<element>=<value>`` (an input, a select, a
-check box: ``true``/``false``), ``key:<Key>`` (``Escape``, ``Enter``, ``Control+K`` …), ``select:<a/b>``
-(a node, relative to the root), ``do:<command>``, ``open:<target>`` (as ``--open``), ``wait:<s>``,
-``eval:<JavaScript>`` (prints what it gives). ``panel:<step>`` runs a click, set, key, eval or wait
-inside the plugin's open panel (its own frame). ``--setting``, ``--history`` and ``--source`` set the
-backend up first: the plugin's settings, snapshots in its history, a scan from the plugin's source.
+CSS selector, or ``text=<its visible text>``), a node where the view draws it (``node=<a/b>``,
+relative to the root; ``node=`` the zoom root) or a point (``@x,y``, CSS px of the window: the
+picture's pixels); ``set:<element>=<value>`` (an input, a select, a check box: ``true``/``false``),
+``type:<text>`` (typed into the focused input), ``key:<Key>`` (``Escape``, ``Enter``,
+``Control+K`` …), ``select:<a/b>`` (a node, relative to the root), ``do:<command>``,
+``open:<target>`` (as ``--open``), ``wait:<s>``, ``eval:<JavaScript>`` (prints what it gives).
+``panel:<step>`` runs a click, set, type, key, eval or wait inside the plugin's open panel (its own
+frame). ``--setting``, ``--history`` and ``--source`` set the backend up first: the plugin's
+settings, snapshots in its history, a scan from the plugin's source. A step that fails stops the
+rest (the picture shows where) and the exit status is 3.
 
 The browser speaks the DevTools protocol over a WebSocket (``websockets``, already a dependency of
 the backend); nothing else is installed.
@@ -265,12 +269,31 @@ class Page:
             session=session,
         )
         if r.get("exceptionDetails"):
-            raise RuntimeError(str(r["exceptionDetails"].get("text", "evaluation failed")))
+            raise ScriptError(js_error(r["exceptionDetails"]))
         return (r.get("result") or {}).get("value")
 
     async def png(self) -> bytes:
         r = await self.send("Page.captureScreenshot", {"format": "png", "captureBeyondViewport": False})
         return base64.b64decode(r["data"])
+
+
+class ScriptError(RuntimeError):
+    """JavaScript the page ran threw: the message is the error's (``TypeError: x is not a function``)."""
+
+
+def js_error(details: Mapping[str, Any]) -> str:
+    """What a DevTools ``exceptionDetails`` says, as the console would: the error's name and
+    message (``ReferenceError: foo is not defined``), else what was thrown, else its text."""
+    exc = details.get("exception") or {}
+    desc = str(exc.get("description") or "")
+    if desc:  # a stack follows the message ("    at <anonymous>:1:1"): the message is what helps
+        head = [ln.strip() for ln in desc.splitlines() if not ln.lstrip().startswith("at ")]
+        return " ".join(head)[:800] or desc.splitlines()[0][:800]
+    if "value" in exc:  # throw "text" / throw 3
+        return f"Uncaught {json.dumps(exc['value'], ensure_ascii=False)}"[:800]
+    text = str(details.get("text") or "the script failed")
+    line = details.get("lineNumber")
+    return f"{text} (line {int(line) + 1})" if isinstance(line, int) else text
 
 
 def _open_browser(exe: str, width: int, height: int, profile: Path) -> tuple[subprocess.Popen[bytes], str]:
@@ -329,8 +352,11 @@ class ShotOptions:
     source: str | None = None  # "<full source id>:<uri>": the scan comes from the plugin's source
 
 
-STEP_KINDS = ("click", "rclick", "dblclick", "hover", "set", "key", "select", "do", "open", "wait", "eval")
-PANEL_STEPS = ("click", "rclick", "dblclick", "hover", "set", "key", "wait", "eval")
+STEP_KINDS = (
+    "click", "rclick", "dblclick", "hover", "set", "type", "key", "select", "do", "open", "wait", "eval",
+)  # fmt: skip
+PANEL_STEPS = ("click", "rclick", "dblclick", "hover", "set", "type", "key", "wait", "eval")
+POINTING = ("click", "rclick", "dblclick", "hover")
 
 
 class StepError(Exception):
@@ -349,12 +375,26 @@ def parse_step(text: str) -> tuple[bool, str, str]:
         raise StepError(f"{text!r}: inside a panel only {', '.join(PANEL_STEPS)}")
     if kind == "set" and _split_set(arg) is None:
         raise StepError(f"{text!r}: write set:<element>=<value>")
+    if kind in POINTING and arg.startswith(("node=", "@")):
+        if panel:
+            raise StepError(f"{text!r}: inside a panel, an element (a CSS selector or text=…)")
+        if arg.startswith("@") and _point(arg) is None:
+            raise StepError(f"{text!r}: write {kind}:@x,y (CSS px of the window, as in the picture)")
     if kind == "wait":
         try:
             float(arg)
         except ValueError:
             raise StepError(f"{text!r}: wait:<seconds>") from None
     return panel, kind, arg
+
+
+def _point(arg: str) -> tuple[float, float] | None:
+    """``@x,y`` -> (x, y), or None when it is not two numbers."""
+    x, sep, y = arg[1:].partition(",")
+    try:
+        return (float(x), float(y)) if sep else None
+    except ValueError:
+        return None
 
 
 def _split_set(arg: str) -> tuple[str, str] | None:
@@ -406,6 +446,20 @@ _SET_JS = """
   el.blur();
 }
 """
+# type: inside a panel's frame (Input.insertText reaches the page's focused frame only): the
+# editing command keeps the input's undo and events as typing would; else the value is set
+_TYPE_JS = """
+  const text = __TEXT__;
+  if (document.execCommand && document.execCommand("insertText", false, text)) return true;
+  if (!("value" in t)) return false;
+  const proto = t instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  const at = t.selectionStart ?? t.value.length;
+  const end = t.selectionEnd ?? at;
+  const value = t.value.slice(0, at) + text + t.value.slice(end);
+  Object.getOwnPropertyDescriptor(proto, "value").set.call(t, value);
+  t.dispatchEvent(new InputEvent("input", { bubbles: true, data: text, inputType: "insertText" }));
+  return true;
+"""
 _KEY_CODES = {
     "Enter": 13, "Escape": 27, "Tab": 9, "Backspace": 8, "Delete": 46, " ": 32, "Space": 32,
     "ArrowLeft": 37, "ArrowUp": 38, "ArrowRight": 39, "ArrowDown": 40, "Home": 36, "End": 35,
@@ -443,7 +497,23 @@ async def run_step(page: Page, step: str) -> str:
         await asyncio.sleep(max(0.0, float(arg)))
         return ""
     if kind == "eval":
-        return json.dumps(await page.eval(arg, session=session), ensure_ascii=False, default=str)[:4000]
+        try:
+            value = await page.eval(arg, session=session)
+        except ScriptError as exc:
+            raise StepError(f"the script threw {exc}") from None
+        return json.dumps(value, ensure_ascii=False, default=str)[:4000]
+    if kind == "type":
+        if session is None:  # as the keyboard would (an IME commit): input events, React sees them
+            await page.send("Input.insertText", {"text": arg})
+            return ""
+        js = (
+            "(() => { const t = document.activeElement; if (!t || t === document.body) return false; "
+            + _TYPE_JS
+            + " })()"
+        )
+        if not await page.eval(js.replace("__TEXT__", json.dumps(arg)), session=session):
+            raise StepError("nothing in the panel has the focus (click: an input first)")
+        return ""
     if kind in ("select", "do", "open"):
         call = {"select": "select", "do": "run", "open": "open"}[kind]
         expr = f"window.__skDev ? window.__skDev.{call}({json.dumps(arg)}).then(() => 'ok') : 'no hooks'"
@@ -499,14 +569,19 @@ async def run_step(page: Page, step: str) -> str:
         if not await page.eval(js, session=session):
             raise StepError(f"no element {target!r} in the panel")
         return ""
-    where = await page.eval(
-        f"(() => {{ const el = {find}; if (!el) return null; "
-        "el.scrollIntoView({ block: 'center', inline: 'center' }); "
-        "const r = el.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()"
-    )
-    if not where:
-        raise StepError(f"no element {target!r}")
-    x, y = float(where[0]), float(where[1])
+    if target.startswith("@"):
+        x, y = _point(target) or (0.0, 0.0)
+    elif target.startswith("node="):  # where the view draws it: the page's development hooks say
+        x, y = await _node_point(page, target[5:])
+    else:
+        where = await page.eval(
+            f"(() => {{ const el = {find}; if (!el) return null; "
+            "el.scrollIntoView({ block: 'center', inline: 'center' }); "
+            "const r = el.getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()"
+        )
+        if not where:
+            raise StepError(f"no element {target!r}")
+        x, y = float(where[0]), float(where[1])
     await page.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
     if kind == "hover":
         return ""
@@ -526,6 +601,19 @@ async def run_step(page: Page, step: str) -> str:
                 },
             )
     return ""
+
+
+async def _node_point(page: Page, rel: str) -> tuple[float, float]:
+    """Where the view draws the node at ``rel`` (client px), asked of the page (state/devlink.ts)."""
+    rel = rel.strip().strip("/\\")
+    hooks = "window.__skDev && window.__skDev.where"
+    try:
+        at = await page.eval(f"{hooks} ? window.__skDev.where({json.dumps(rel)}) : 'no hooks'")
+    except ScriptError as exc:
+        raise StepError(str(exc).removeprefix("Error: ")) from None
+    if not isinstance(at, dict):
+        raise StepError("the page cannot say where nodes are drawn (an interface older than this step)")
+    return float(at["x"]), float(at["y"])
 
 
 def link_words(o: ShotOptions) -> str:
@@ -610,13 +698,21 @@ async def _shot(
     )
     await server.start()
     proc: subprocess.Popen[bytes] | None = None
+    failed = False  # a step or --eval failed: exit status 3
     try:
         rec = await server.plugins.link_dev(folder)
         if rec.state != "enabled":
             say(f"{plugin} is {rec.state}: " + "; ".join(i.text() for i in rec.issues))
             return 1
         if o.settings:  # the plugin's settings, as the settings page would set them
-            server.settings.update({f"plugin.{plugin}.{k}": v for k, v in o.settings.items()})
+            from .settings import SettingsError
+
+            for k, v in o.settings.items():
+                try:
+                    server.settings.update({f"plugin.{plugin}.{k}": v})
+                except (SettingsError, KeyError, ValueError, TypeError) as exc:
+                    say(f"--setting {k}: {exc}")
+                    return 2
         if o.history:
             _copy_history(o.history)
         if o.source:
@@ -656,13 +752,19 @@ async def _shot(
                     said = await run_step(page, step)
                 except (StepError, RuntimeError, TimeoutError) as exc:
                     say(f"step {step!r} failed: {exc} (the picture shows where it stopped)")
+                    failed = True
                     break
                 if said:
                     say(f"step {step!r}: {said}")
                 await asyncio.sleep(0.2)
             await asyncio.sleep(max(0.0, o.wait))
             if o.eval:  # before the picture: what it reads is what the picture shows
-                say("eval: " + json.dumps(await page.eval(o.eval), ensure_ascii=False, default=str)[:4000])
+                try:
+                    said = json.dumps(await page.eval(o.eval), ensure_ascii=False, default=str)[:4000]
+                    say(f"eval: {said}")
+                except ScriptError as exc:
+                    say(f"eval failed: {exc}")
+                    failed = True
             out = (o.out or Path.cwd() / f"shot-{plugin}.png").expanduser().resolve()
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(await page.png())
@@ -680,7 +782,7 @@ async def _shot(
                 await page.send("Browser.close", timeout=5)
         for line in _unique(plugin_log):
             say(f"backend: {line[:500]}")
-        return 0
+        return 3 if failed else 0
     finally:
         logger.remove(sink)
         if proc is not None:
@@ -709,10 +811,12 @@ def _unique(lines: Iterable[str]) -> list[str]:
 
 __all__ = [
     "TREE",
+    "ScriptError",
     "ShotOptions",
     "StepError",
     "find_browser",
     "find_renderer",
+    "js_error",
     "parse_step",
     "renderer_stale",
     "run_shot",

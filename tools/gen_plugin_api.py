@@ -1,4 +1,4 @@
-"""Write the generated tables of the plugin API reference (docs/plugin-api.md) from the code.
+"""Write the generated tables of the plugin docs (docs/plugin-api.md, docs/plugin-quick.md) from the code.
 
 Source of truth (hand-edited):
     packages/sdk/src/spaceknife_sdk/            the objects plugin code gets and returns (MODELS)
@@ -6,11 +6,13 @@ Source of truth (hand-edited):
     packages/backend/src/spaceknife/plugins/allow.py   the built-in methods ctx.call may call
     packages/backend/src/spaceknife/palette/commands.py  the app's commands (their ids)
     design/icons/icons.json                     the app's icon names
+    packages/sdk/src/spaceknife_sdk/scaffold.py the parts of ``plugin new --with`` (PARTS)
 
 Generated (never edit by hand; the tests run ``--check``), between
 ``<!-- generated:<name>:start -->`` and ``<!-- generated:<name>:end -->`` of docs/plugin-api.md:
 ``plugin-models`` (every field of every object), ``plugin-core`` (ctx.call / sk.core),
-``plugin-commands`` (command ids for actions and keys), ``plugin-icons`` (icon names).
+``plugin-commands`` (command ids for actions and keys), ``plugin-icons`` (icon names); in
+docs/plugin-quick.md ``plugin-parts`` (the parts of ``plugin new --with``, as its help lists them).
 
 Usage::
 
@@ -35,6 +37,7 @@ from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parent.parent
 DOC = ROOT / "docs" / "plugin-api.md"
+QUICK = ROOT / "docs" / "plugin-quick.md"
 ICONS = ROOT / "design" / "icons" / "icons.json"
 
 
@@ -118,6 +121,12 @@ NOTES: dict[tuple[str, str], str] = {
     ): "快照：打开的快照是那个文件；磁盘扫描是它完成时自动保存的那个（没有保存时 None）",
     ("ScanInfo", "front"): "用户眼前的那个扫描（`ctx.tree` 默认读它）",
     ("ScanInfo", "on_disk"): "节点是这台机器上的文件；扫描来源（`on_disk = false`）的是 False",
+    ("ScanInfo", "uri"): '扫描来源列的 URI（用户选的文件或地址）；别的扫描是 `""`',
+    ("ReportContext", "zoom_node"): "视图的缩放根（用户眼前的那一层）；没有视图时 None",
+    ("ReportContext", "filter"): '视图的过滤式；没过滤是 `""`',
+    ("ActionContext", "zoom_node"): "视图的缩放根（用户眼前的那一层）；没有视图时 None",
+    ("ActionContext", "filter"): '视图的过滤式；没过滤是 `""`',
+    ("TableBlock", "sort"): "按哪一列排（列的 key），`-key` 是从大到小",
     ("ScanInfo", "monitoring"): "文件变化是否实时跟着（`tree_changed` 钩子）：`off`（实时监控关着、快照、"
     "没有监控器的扫描来源）、`starting`、`running`、`degraded`（部分靠轮询或重新扫描）、`failed`",
     ("TreeChange", "scan_id"): "变了的扫描（钩子里 `ctx.tree` 就是它）",
@@ -263,7 +272,11 @@ NOTES: dict[tuple[str, str], str] = {
     ("FieldValue", "action"): "旁边的一个按钮",
     ("Insight", "title"): "卡片标题：这是什么",
     ("Insight", "reason"): "为什么这么说",
-    ("Insight", "kind"): "类型（`cache` `build` `log` …，洞察配色按它上色）",
+    (
+        "Insight",
+        "kind",
+    ): "卡片的图标：`app` `cache` `build` `vm` `chat` `game` `system`（同规则文件的 `kind`）；"
+    "别的值（默认 `other`）显示成一般的信息图标",
     ("Insight", "cleanup"): "能不能删：`safe`（随便删）`tool`（用工具清）`review`（先看看）`keep`（别删）",
     ("Insight", "app"): "相关的程序",
     ("Insight", "note"): "补充说明",
@@ -312,6 +325,7 @@ def _limits(info: Any, typ: str) -> str:
 NOT_DATA = frozenset({"Plugin", "Context", "TreeView", "Rows", "Columns", "Listing", "Params", "Payload"})
 NOT_DATA |= {"Kind", "Flag", "T", "Text", "Cancelled", "PluginError", "layout", "r"}
 NOT_DATA |= {"BlockKind", "Shapes", "shapes"}  # a layout's kinds, its answer's builder and helpers
+NOT_DATA |= {"Block"}  # the union of the report's blocks (each has its table)
 
 _PREFIX = re.compile(
     r"\b(?:typing|types|datetime|pathlib|numpy|collections\.abc|spaceknife_[a-z_]+(?:\.[a-z_]+)*)\."
@@ -374,7 +388,7 @@ def model_rows(cls: type) -> list[tuple[str, str, str, str]]:
                     info.alias or name,
                     typ,
                     default,
-                    f"{note}（{limit}）" if note and limit else note or limit,
+                    f"{note}（{limit}）" if note and limit and limit not in note else note or limit,
                 )
             )
         return rows
@@ -471,46 +485,59 @@ def icons_block() -> str:
     return " ".join(f"`{n}`" for n in names) + "\n"
 
 
+def parts_block() -> str:
+    """The parts of ``plugin new --with`` (scaffold.PARTS: what ``--help`` lists too)."""
+    from spaceknife_sdk.scaffold import DEFAULT, PARTS
+
+    names = " ".join(PARTS)
+    return f"`--with` 的部分：`{names}`（各是一段带注释的代码和测试；不写时是 `{','.join(DEFAULT)}`）。\n"
+
+
 BLOCKS = {
     "plugin-models": models_block,
     "plugin-core": core_block,
     "plugin-commands": commands_block,
     "plugin-icons": icons_block,
 }
+# the other documents with generated blocks
+QUICK_BLOCKS = {"plugin-parts": parts_block}
 
 
 def markers(name: str) -> tuple[str, str]:
     return f"<!-- generated:{name}:start -->", f"<!-- generated:{name}:end -->"
 
 
-def replace_block(text: str, name: str, body: str) -> str:
+def replace_block(text: str, name: str, body: str, doc: Path = DOC) -> str:
     start, end = markers(name)
     i, j = text.find(start), text.find(end)
     if i < 0 or j < i:
-        raise SystemExit(f"{DOC}: no {start} … {end}")
+        raise SystemExit(f"{doc}: no {start} … {end}")
     return text[: i + len(start)] + "\n\n" + body.rstrip() + "\n\n" + text[j:]
 
 
-def wanted() -> str:
-    text = DOC.read_text(encoding="utf-8")
-    for name, make in BLOCKS.items():
-        text = replace_block(text, name, make())
+def wanted(doc: Path = DOC) -> str:
+    text = doc.read_text(encoding="utf-8")
+    for name, make in (BLOCKS if doc == DOC else QUICK_BLOCKS).items():
+        text = replace_block(text, name, make(), doc)
     return text
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--check", action="store_true", help="exit 1 if docs/plugin-api.md is out of date")
+    ap.add_argument("--check", action="store_true", help="exit 1 if a generated block is out of date")
     args = ap.parse_args(argv)
-    text = wanted()
-    if args.check:
-        if DOC.read_text(encoding="utf-8") != text:
-            print(f"{DOC.relative_to(ROOT)} is out of date: uv run python tools/gen_plugin_api.py")
-            return 1
-        return 0
-    DOC.write_text(text, encoding="utf-8", newline="\n")
-    print(f"wrote {DOC.relative_to(ROOT)}")
-    return 0
+    stale = 0
+    for doc in (DOC, QUICK):
+        text = wanted(doc)
+        if doc.read_text(encoding="utf-8") == text:
+            continue
+        if args.check:
+            print(f"{doc.relative_to(ROOT)} is out of date: uv run python tools/gen_plugin_api.py")
+            stale = 1
+            continue
+        doc.write_text(text, encoding="utf-8", newline="\n")
+        print(f"wrote {doc.relative_to(ROOT)}")
+    return stale
 
 
 if __name__ == "__main__":

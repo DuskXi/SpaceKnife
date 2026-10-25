@@ -5,7 +5,8 @@
 //     &open=report:<full id>|panel:<full id>|settings:<plugin id>|export:<format or template>
 // When it is done (or failed), <html data-sk-dev-ready="1"> (data-sk-dev-error says what failed):
 // what plugin shot waits for before it takes the picture. Then window.__skDev (DevHooks) does the
-// same one at a time for plugin shot's --step select:/do:/open:.
+// same one at a time for plugin shot's --step select:/do:/open:, and says where a node is drawn for
+// its canvas steps (click:node=a/b …: plugin shot presses the mouse there).
 
 import type { ScanStatus } from "@/protocol/generated";
 
@@ -62,6 +63,9 @@ export interface DevHooks {
   run(id: string): Promise<void>;
   /** open report:<id> | panel:<id> | settings:<plugin> | export:<format> */
   open(target: string): Promise<void>;
+  /** where the node at `rel` (relative to the first root; "" the view's zoom root) is drawn in the
+   * view of the scan: a point in client px that hits it; an error says why there is none */
+  where(rel: string): Promise<{ x: number; y: number }>;
 }
 
 /** The hooks for one scan (the linked one). */
@@ -86,6 +90,25 @@ export function devHooks(scan: ScanStatus): DevHooks {
       const { openTarget } = await import("@/plugins/open");
       const { actionContext } = await import("@/plugins/actions");
       openTarget(target, actionContext({ owner: null }));
+    },
+    async where(rel) {
+      const { resolveNode, viewFor } = await import("@/plugins/nodes");
+      const { hosts } = await import("@/visual/hosts");
+      const at = viewFor(scan.scan_id);
+      const host = at ? hosts.get(at.viewId) : undefined;
+      if (!rel.trim()) {
+        // the zoom root: the bar, disc or shape a double click goes up from
+        const point = host?.pointOfKey(null);
+        if (!point) throw new Error(host ? "the zoom root has no place of its own in this view (a treemap's blocks fill it)" : "no view of the scan is drawn");
+        return point;
+      }
+      const root = scan.roots[0]?.path ?? "";
+      const node = await resolveNode({ scan_id: scan.scan_id, node: 0, path: joinRoot(root, rel) });
+      if (node == null) throw new Error(`${rel}: no such node in the scan`);
+      if (!host) throw new Error("no view of the scan is drawn");
+      const point = host.pointOfKey(node);
+      if (!point) throw new Error(`${rel} is not drawn in the view (in a folder not opened, too small, or covered): zoom or select first`);
+      return point;
     },
   };
 }
