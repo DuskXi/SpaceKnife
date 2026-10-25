@@ -19,6 +19,8 @@
 - [ ] 再次实机验证（Intel Mac）：上面这些修复、FSEvents 监控（数据卷路径经 firmlink 映射）、回收站（`NSFileManager`）、标题栏与菜单
 - [ ] Developer ID 签名与公证（等 Apple 开发者账号审核）：Hardened Runtime、权限声明、notarytool、CI 里用 Secrets 自动签名
 - [ ] Homebrew cask（官方仓库要求通过 Gatekeeper，等公证）
+- [x] macOS 便携版（2026-10-25）：`mac-<架构>-portable.zip`（`SpaceKnife.app` 旁边一个 `data`，ditto 打包），「macOS build」里解开、校验签名、便携模式冒烟、无缝更新端到端；App 转移时从挂载表找回原位置
+- [ ] macOS 便携版实机验证（Intel Mac）：从「下载」解压后直接打开（带隔离属性，会触发 App 转移）能用到旁边的 `data`；放行流程；无缝更新后不再要求放行；放在外置盘（exFAT）上
 - [ ] Mac App Store（可选）：沙盒下用户授权整盘，访问权要用隐式安全范围书签传给后端子进程，先做概念验证
 - [x] 应用内引导开启「完全磁盘访问权限」（扫描前的说明框直接打开系统设置的对应页面；设置「扫描范围 › 受保护的位置」）
 
@@ -112,7 +114,9 @@
     - **后端**：更新记录现在只保存每个渠道最新的一版（`update.trim`），要改成保存最近约 30 个发布的历史，并限制每条发布说明的大小。
     - 「自动检查更新」和「提示哪些版本」两项设置移到这一页，「常规」里留一个入口。
 - [x] 便携版（小众软件用户请求）：Windows x64 zip、Linux x64 tar.gz，程序旁的 `data` 文件夹存放全部数据（GitHub Actions「Portable build」，解压后以便携模式冒烟）
-- [ ] Windows / Linux ARM64（依赖都有对应 wheel，Electron 也有 arm64 版；缺测试设备）。32 位 Windows 做不了：Electron 44 已不再提供 ia32
+- [x] Windows / Linux ARM64 便携版（2026-10-25）：「Portable build」在 `windows-11-arm`、`ubuntu-22.04-arm` 上构建 `win-arm64` / `linux-arm64` 便携包并跑冒烟和无缝更新测试；便携版更新按处理器架构挑包（Windows on ARM 上的 x64 便携版会换成 arm64 版）
+- [ ] ARM64 真机试用（Windows 11 ARM 笔记本、树莓派 5 之类的 ARM Linux）：扫描、MFT、监控、回收站、无缝更新
+- [ ] ARM64 安装包（NSIS arm64、deb arm64、rpm aarch64、AppImage aarch64）：文件名、更新挑包和发布清单都要跟着改。32 位 Windows 做不了：Electron 44 已不再提供 ia32
 
 ## 索引扫描调研：Btrfs / ReFS / XFS（2026-10-21 记下）
 

@@ -1,12 +1,14 @@
 name: Portable build
 
 # The portable archives (docs/packaging.md): the unpacked app plus a data/ folder that keeps the
-# app's data next to it, a zip on Windows and a tar.gz on Linux. Each archive is unpacked again and
+# app's data next to it, a zip on Windows and a tar.gz on Linux, for x64 and arm64 (each on a runner
+# of its architecture: PyInstaller freezes the interpreter it runs on). Each archive is unpacked again and
 # smoke-tested in portable mode; the archives and their checksums go to the run's artifacts, and a
 # maintainer attaches them to a release. Started by hand (Actions › Portable build › Run workflow),
 # and on dev whenever the packaging changes, so it is checked before it reaches main.
 # With "installers" (by hand, for a release) the same run also builds the Windows installer and the
-# Linux deb / rpm / AppImage from the same commit, with their own checksums.
+# Linux deb / rpm / AppImage from the same commit, with their own checksums (x64 only: the ARM jobs
+# make the portable archives alone).
 # Every run also tests 「无缝更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
 # files, and on Windows the installer upgrades from the newest published release, updates from inside
 # the app and uninstalls cleanly. The Windows job therefore always builds the installer.
@@ -26,6 +28,7 @@ on:
       - apps/electron/electron-builder.yml
       - apps/electron/src/main/portable.ts
       - apps/electron/src/main/update.ts
+      - packages/backend/src/spaceknife/update.py
       - apps/electron/build/installer.nsh
 
 permissions:
@@ -47,9 +50,19 @@ jobs:
           - target: win-x64
             runner: windows-latest
             exe: SpaceKnife.exe
+            installer: true # the installers are published for x64 only
+          - target: win-arm64
+            runner: windows-11-arm
+            exe: SpaceKnife.exe
+            installer: false
           - target: linux-x64
             runner: ubuntu-22.04 # glibc 2.35 build host; the bundle needs at most 2.34 (checked)
             exe: spaceknife
+            installer: true
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm # glibc 2.35 here too
+            exe: spaceknife
+            installer: false
     defaults:
       run:
         shell: bash
@@ -73,8 +86,20 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/electron/pnpm-lock.yaml
 
-      - name: Update Rust
-        run: rustup update stable --no-self-update && rustup default stable
+      # the Windows on ARM runner comes without Rust: rustup for its architecture first
+      - name: Set up Rust
+        run: |
+          if command -v rustup >/dev/null; then
+            rustup update stable --no-self-update && rustup default stable
+          elif [ "$RUNNER_OS" = Windows ]; then
+            target=$([ "$RUNNER_ARCH" = ARM64 ] && echo aarch64 || echo x86_64)-pc-windows-msvc
+            curl -sSfL -o "$RUNNER_TEMP/rustup-init.exe" "https://static.rust-lang.org/rustup/dist/$target/rustup-init.exe"
+            "$RUNNER_TEMP/rustup-init.exe" -y --profile minimal --default-toolchain stable --no-modify-path
+            cygpath -w "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+          else
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
 
       - name: Install Python 3.12 and the build tools
         run: |
@@ -86,16 +111,23 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install rpmbuild and zsyncmake (the rpm and zsync packages)
-        if: inputs.installers && runner.os == 'Linux'
+        if: inputs.installers && matrix.installer && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y rpm zsync
 
+      # what Electron needs to start, which the x64 runner image has and the ARM one may not
+      - name: Install Electron's libraries
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3 libgbm1 libasound2 libgtk-3-0 libxss1 libatk-bridge2.0-0 libdrm2 libxkbcommon0
+
       - name: Build the portable archive
-        if: ${{ !inputs.installers && runner.os == 'Linux' }}
+        if: ${{ !(matrix.installer && (inputs.installers || runner.os == 'Windows')) }}
         run: uv run python tools/build_package.py --portable --no-installers
 
-      # on Windows always: the update test below installs it
+      # on Windows x64 always: the update test below installs it
       - name: Build the portable archive and the installers
-        if: ${{ inputs.installers || runner.os == 'Windows' }}
+        if: ${{ matrix.installer && (inputs.installers || runner.os == 'Windows') }}
         run: uv run python tools/build_package.py --portable
 
       - name: Unpack it again
@@ -142,7 +174,7 @@ jobs:
           fi
 
       - name: Download the newest published installer (the upgrade starts from it)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.installer
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -154,7 +186,7 @@ jobs:
           ls -l dist/previous
 
       - name: Update and uninstall end to end (Windows installer)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && matrix.installer
         timeout-minutes: 25
         run: |
           shopt -s nullglob
@@ -167,7 +199,7 @@ jobs:
         run: sha256sum *-portable.* | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
 
       - name: Checksum the installers
-        if: inputs.installers
+        if: inputs.installers && matrix.installer
         working-directory: dist/electron
         run: |
           shopt -s nullglob
@@ -181,7 +213,7 @@ jobs:
           fi
 
       - uses: actions/upload-artifact@v7
-        if: inputs.installers
+        if: inputs.installers && matrix.installer
         with:
           name: SpaceKnife-installers-${{ matrix.target }}
           path: |

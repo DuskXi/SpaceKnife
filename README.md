@@ -89,8 +89,10 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 | Other Linux x64 | `SpaceKnife-<version>-x86_64.AppImage` (needs FUSE 2, or run it with `--appimage-extract-and-run`) |
 | Windows 10+ x64, portable | `SpaceKnife-<version>-win-x64-portable.zip` (no installation: unzip anywhere and run `SpaceKnife.exe`; snapshots and settings stay in the `data` folder next to it; the first launch takes a few seconds longer while Windows checks the new files) |
 | Linux x64, portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` (extract anywhere and run `./spaceknife`, no FUSE needed; data stays in the `data` folder next to it) |
+| Windows 11 on ARM / ARM Linux, portable | `SpaceKnife-<version>-win-arm64-portable.zip` / `SpaceKnife-<version>-linux-arm64-portable.tar.gz` (the same portable copies, built for arm64; the installers are x64 only) |
 | macOS 14+, Apple Silicon | `SpaceKnife-<version>-mac-arm64.dmg` (preview: not notarized yet, see below) |
 | macOS 14+, Intel | `SpaceKnife-<version>-mac-x64.dmg` (preview: not notarized yet, see below) |
+| macOS 14+, portable | `SpaceKnife-<version>-mac-<arm64 or x64>-portable.zip` (unzip anywhere and open `SpaceKnife.app`; data stays in the `data` folder next to it; allow it once as below) |
 
 Every release includes `SHA256SUMS.txt`.
 

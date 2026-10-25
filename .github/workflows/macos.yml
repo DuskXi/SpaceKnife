@@ -1,9 +1,10 @@
 name: macOS build
 
-# The macOS dmg for each architecture, built on a Mac of that architecture (PyInstaller freezes the
-# interpreter it runs on). Ad-hoc signed and not notarized until there is an Apple Developer ID; the
-# dmg and its checksum go to the run's artifacts, and a maintainer attaches them to a release
-# (docs/packaging.md). Started by hand (Actions › macOS build › Run workflow), and on dev whenever
+# The macOS dmg and portable zip for each architecture, built on a Mac of that architecture
+# (PyInstaller freezes the interpreter it runs on). Ad-hoc signed and not notarized until there is an
+# Apple Developer ID. The portable zip (SpaceKnife.app next to a data/ folder) is unpacked again and
+# smoke-tested in portable mode, and its 「无缝更新」 is tested end to end; the files and their checksums
+# go to the run's artifacts, and a maintainer attaches them to a release (docs/packaging.md). Started by hand (Actions › macOS build › Run workflow), and on dev whenever
 # the packaging changes, so it is checked before it reaches main.
 on:
   workflow_dispatch:
@@ -14,6 +15,8 @@ on:
       - tools/build_package.py
       - packaging/**
       - apps/electron/electron-builder.yml
+      - apps/electron/src/main/portable.ts
+      - apps/electron/src/main/update.ts
 
 permissions:
   contents: read
@@ -67,18 +70,38 @@ jobs:
         working-directory: apps/electron
         run: pnpm install --frozen-lockfile
 
-      - name: Build the dmg
-        run: uv run python tools/build_package.py
+      - name: Build the dmg and the portable zip
+        run: uv run python tools/build_package.py --portable
+
+      # unpacked the way the app unpacks an update (ditto): the bundle's links, attributes and signature
+      - name: Unpack the portable zip again
+        run: |
+          mkdir -p dist/portable-test
+          ditto -x -k dist/electron/*-portable.zip dist/portable-test
+          ls dist/portable-test/*
+          codesign --verify --deep --strict dist/portable-test/*/SpaceKnife.app
+
+      - name: Smoke test in portable mode
+        run: |
+          app=$(ls -d dist/portable-test/*/SpaceKnife.app)
+          uv run python packaging/smoke_app.py --portable "$app/Contents/MacOS/SpaceKnife"
+
+      # a release list on 127.0.0.1 offers the next version (this build again); the test clicks the
+      # update badge and 「无缝更新」 through the DevTools port, like a user
+      - name: Update end to end (portable)
+        timeout-minutes: 15
+        run: uv run python packaging/update_e2e.py portable dist/electron/*-portable.zip
 
       - name: Checksum
         working-directory: dist/electron
-        run: shasum -a 256 *.dmg | tee "SHA256SUMS-mac-${{ matrix.arch }}.txt"
+        run: shasum -a 256 *.dmg *-portable.zip | tee "SHA256SUMS-mac-${{ matrix.arch }}.txt"
 
       - uses: actions/upload-artifact@v7
         with:
           name: SpaceKnife-mac-${{ matrix.arch }}
           path: |
             dist/electron/*.dmg
+            dist/electron/*-portable.zip
             dist/electron/SHA256SUMS-mac-*.txt
           if-no-files-found: error
           retention-days: 14
