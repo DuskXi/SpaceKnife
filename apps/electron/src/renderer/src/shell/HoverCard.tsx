@@ -43,6 +43,13 @@ export function hoverFacts(f: VisualFrame, target: number, vocab: FilterVocab | 
   return { kind: f.kind[target]!, node: f.node[target]!, key: f.key[target]!, size: Number(f.size[target]), cls: f.cls[target]!, columns: f, row: target };
 }
 
+/** What 「占 <父文件夹名> N%」 divides by: the parent fetched for this very node (a card that moved to
+ * another block, or a picture one level up, never divides by the last one's); null while it loads
+ * and for a scanned root, which has no parent folder in the scan. */
+export function shareBase(node: { parent: number } | undefined, parent: { id: number; alloc: number } | null): number | null {
+  return node && parent && node.parent > 0 && parent.id === node.parent && parent.alloc > 0 ? parent.alloc : null;
+}
+
 export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: { w: number; h: number } }) {
   const vocab = useApp((s) => s.vocab);
   const scanId = useApp((s) => (hover ? s.views[hover.viewId]?.state.scan_id : undefined));
@@ -58,7 +65,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const showDates = useApp((s) => setting(s, "general.hover_dates", true));
   const showAge = useApp((s) => setting(s, "general.hover_age", true));
   const [info, setInfo] = useState<TreeNodeResult | null>(null);
-  const [parentAlloc, setParentAlloc] = useState(0);
+  const [parent, setParent] = useState<{ id: number; alloc: number } | null>(null);
   const card = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: 0, top: 0 });
 
@@ -82,6 +89,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const target = shown?.target ?? null;
   useEffect(() => {
     setInfo(null);
+    setParent(null);
     if (!frame || target === null || !scanId) return;
     const { kind, node } = hoverFacts(frame, target, null);
     if (kind >= Kind.SMALL) return;
@@ -92,7 +100,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
         setInfo(r);
         if (r.node.parent > 0) {
           const p = await call("tree.node", { scan_id: scanId, node: r.node.parent });
-          if (alive) setParentAlloc(p.node.alloc);
+          if (alive) setParent({ id: p.node.id, alloc: p.node.alloc });
         }
       })
       .catch(() => {});
@@ -143,6 +151,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
   const folder = info ? info.path.slice(0, Math.max(0, info.path.length - info.node.name.length)).replace(/[\\/]+$/, "") : "";
   const parentName = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
   const flags = shown.target === HIT_ROOT ? (f.info.root?.flags ?? 0) : (f.flags[shown.target] ?? 0);
+  const base = shareBase(node, parent);
 
   return (
     <div ref={card} className="hovercard" role="tooltip" style={pos}>
@@ -161,8 +170,8 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
             <span className="num">{num}</span>
             <span className="unit">{unit}</span>
           </div>
-          {parentAlloc > 0 && node && (
-            <span className="muted">{withNodes(t("占 {name} {share}"), { name: parentName, share: <span className="mono strong">{fmtPct(node.alloc, parentAlloc)}</span> })}</span>
+          {base !== null && node && (
+            <span className="muted">{withNodes(t("占 {name} {share}"), { name: parentName, share: <span className="mono strong">{fmtPct(node.alloc, base)}</span> })}</span>
           )}
         </div>
         {/* a plugin's weights drew the area: what it takes on disk is still the real size */}
