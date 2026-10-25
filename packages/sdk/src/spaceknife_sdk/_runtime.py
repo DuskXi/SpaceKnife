@@ -172,6 +172,24 @@ class CallError(RequestError):
 ERROR_TEXT_MAX = 300  # characters of an exception's own message in a call's error (the log has it all)
 
 
+def _details(exc: ValidationError) -> list[dict[str, Any]]:
+    return [
+        {"loc": [str(p) for p in e["loc"]], "msg": e["msg"], "type": e["type"]}
+        for e in exc.errors(include_url=False, include_context=False, include_input=False)
+    ]
+
+
+def params_of[M: BaseModel](model: type[M], value: Any) -> M:
+    """What the host hands a handler (the call's params, a report's context, a hook's scan or
+    change) as ``model``: what does not fit is the caller's error, INVALID_PARAMS with the details.
+    A model the plugin's own code builds wrongly (or returns: a cleanup's proposals) is its bug:
+    :func:`error_of` says PLUGIN_ERROR with what did not fit."""
+    try:
+        return model.model_validate(value)
+    except ValidationError as exc:
+        raise CallError(ErrorCode.INVALID_PARAMS, "invalid params", _details(exc)) from None
+
+
 def error_of(exc: BaseException, log: Callable[[str], None] | None = None) -> CallError:
     """Map what a handler raised to a protocol error (tracebacks stay in the plugin's log)."""
     if isinstance(exc, CallError):
@@ -184,16 +202,15 @@ def error_of(exc: BaseException, log: Callable[[str], None] | None = None) -> Ca
         return CallError(exc.code, exc.message, exc.data)
     if isinstance(exc, PermissionError):
         return CallError(ErrorCode.PERMISSION_DENIED, str(exc))
-    if isinstance(exc, ValidationError):
-        details = [
-            {"loc": [str(p) for p in e["loc"]], "msg": e["msg"], "type": e["type"]}
-            for e in exc.errors(include_url=False, include_context=False, include_input=False)
-        ]
-        return CallError(ErrorCode.INVALID_PARAMS, "invalid params", details)
     if log is not None:
         log("".join(traceback.format_exception(exc)))
     name = type(exc).__name__
-    text = " ".join(str(exc).split())  # its own message, on one line
+    if isinstance(exc, ValidationError):  # the plugin's own model (its params: params_of)
+        said = "; ".join(f"{'.'.join(d['loc']) or '-'}: {d['msg']}" for d in _details(exc))
+        text = f"{exc.title}: {said}"
+    else:
+        text = str(exc)
+    text = " ".join(text.split())  # its own message, on one line
     if len(text) > ERROR_TEXT_MAX:
         text = text[: ERROR_TEXT_MAX - 1] + "…"
     return CallError(
@@ -394,12 +411,12 @@ class Dispatcher:
         # (what the call is about, ctx.tree among it, is the host's to say: ctx.call_info)
         if kind == "method":
             if h.params is not None and h.arity >= 2:
-                result = await self._call(h, ctx, h.params.model_validate(dict(p)))
+                result = await self._call(h, ctx, params_of(h.params, dict(p)))
             else:
                 result = await self._call(h, ctx)
             return self._value(result)
         if kind in ("report", "cleanup"):
-            c = ReportContext.model_validate(dict(p))
+            c = params_of(ReportContext, dict(p))
             result = await self._call(h, ctx, c)
             if kind == "cleanup":
                 return [_proposal(i) for i in (result or [])], []
@@ -485,7 +502,7 @@ class Dispatcher:
             return {"root": out.root, "entries": out.sent, "duplicates": out.duplicates}, []
         if kind in ("watch", "stream"):
             if kind == "stream" and h.params is not None and h.arity >= 2:
-                agen = h.fn(ctx, h.params.model_validate(dict(p)))
+                agen = h.fn(ctx, params_of(h.params, dict(p)))
             elif kind == "stream":
                 agen = h.fn(ctx)
             else:
@@ -502,17 +519,17 @@ class Dispatcher:
                     emit(_dump(item), [])
             return {"items": n}, []
         if kind == "annotate":
-            items = [ChangeUnit.model_validate(d) for d in p.get("items", [])]
+            items = [params_of(ChangeUnit, d) for d in p.get("items", [])]
             result = await self._call(h, ctx, items)
             return [None if r is None else str(r)[:80] for r in (result or [])], []
         if kind == "hook":
             event = str(p.get("event", ""))
             if event in ("scan_done", "scan_closed"):
-                await self._call(h, ctx, ScanInfo.model_validate(p.get("scan") or {"scan_id": ""}))
+                await self._call(h, ctx, params_of(ScanInfo, p.get("scan") or {"scan_id": ""}))
             elif event == "tree_changed":
-                await self._call(h, ctx, TreeChange.model_validate(p.get("change") or {"scan_id": ""}))
+                await self._call(h, ctx, params_of(TreeChange, p.get("change") or {"scan_id": ""}))
             elif event == "snapshots":
-                await self._call(h, ctx, SnapshotsChange.model_validate(p.get("change") or {}))
+                await self._call(h, ctx, params_of(SnapshotsChange, p.get("change") or {}))
             elif event == "settings":
                 await self._call(h, ctx, list(p.get("changed") or []))
             else:
@@ -521,7 +538,7 @@ class Dispatcher:
         if kind == "task":
             raw = p.get("params")
             if h.params is not None and h.arity >= 2:
-                await self._call(h, ctx, h.params.model_validate(dict(raw or {})), workers=self.task_workers)
+                await self._call(h, ctx, params_of(h.params, dict(raw or {})), workers=self.task_workers)
             elif h.arity >= 2:
                 await self._call(h, ctx, dict(raw or {}), workers=self.task_workers)
             else:
@@ -979,6 +996,7 @@ __all__ = [
     "dispatcher_for",
     "error_of",
     "load_plugin",
+    "params_of",
     "state_from_init",
     "unload_plugin",
 ]

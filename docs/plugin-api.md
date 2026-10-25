@@ -252,7 +252,8 @@ def compare_last(ctx: Context, a: ActionContext) -> CompareOpen | None:
 | `Cancelled` | `ctx.check()`：调用被取消或超时 | 不要吞掉，让它抛出去 |
 | `PermissionError` | 少了权限：`ctx.files`、`ctx.net`、`ctx.clipboard` …；审计钩子拦下的联网、写文件、开进程。`ctx.files` 读范围外的文件是它的子类 `FileNotAllowed`；系统拒绝（用户自己也读不了）是普通的 `PermissionError` | `PERMISSION_DENIED`。**它是 `OSError` 的子类**：`except OSError:` 会把它一起吞掉，读文件时写 `except (FileNotFoundError, IsADirectoryError):` 这样具体的异常 |
 | `spaceknife_sdk.errors.HostError` | 宿主拒绝了插件的请求：`code` 是协议错误码（如 `STALE_TREE` −32018：树在调用途中被整理了，见[纪元](#api-epoch)） | 不捕获时原样往外传；`tree_changed` 钩子里的 `STALE_TREE` 让宿主用新下标再调它 |
-| 其他异常 | 插件的 bug | `plugin error: 〈类型〉: 〈异常自己的信息〉`（`PLUGIN_ERROR`；信息合成一行，最多 300 字），回溯进日志 |
+| 其他异常 | 插件的 bug | `plugin error: 〈类型〉: 〈异常自己的信息〉`（`PLUGIN_ERROR`；信息合成一行，最多 300 字），回溯进日志。插件自己建的模型不合格（`ValidationError`，如清理返回的 `Proposal.reason` 超过 120 字）也是：`plugin error: ValidationError: Proposal: reason: String should have at most 120 characters` |
+| （宿主给的参数不合方法的参数模型） | 调用方传错了 | `INVALID_PARAMS`（`invalid params`，`data` 是每处不合格的位置和原因）；插件代码不会看到它 |
 
 测试和命令行里失败的调用抛 `spaceknife_sdk.RequestError`：`.code`（`spaceknife_sdk.ErrorCode`，如 `PLUGIN_ERROR` `PERMISSION_DENIED`）、`.message`、`.data`。
 

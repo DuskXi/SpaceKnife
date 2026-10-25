@@ -49,6 +49,14 @@ async def test_invalid_params_and_plugin_errors(process: bool) -> None:
         assert err.value.code == ErrorCode.PLUGIN_ERROR
         # its type and its own message, on one line (bounded); the traceback stays in the log
         assert err.value.message == "plugin error: ValueError: a bug"
+        # a model the plugin's own code builds wrongly is its bug too, not invalid params: what did
+        # not fit (a cleanup whose reason was too long said only "invalid params")
+        with pytest.raises(RpcError) as err:
+            await host.call("misbuilt")
+        assert err.value.code == ErrorCode.PLUGIN_ERROR
+        assert err.value.message == (
+            "plugin error: ValidationError: Short: text: String should have at most 5 characters"
+        )
         with pytest.raises(RpcError) as err:
             await host.call("refuse")
         assert err.value.code == ErrorCode.PLUGIN_ERROR and err.value.message == "不行"

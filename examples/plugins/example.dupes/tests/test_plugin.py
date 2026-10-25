@@ -45,6 +45,20 @@ async def test_report_and_cleanup(host: MockHost) -> None:
     assert all(p.reason.startswith("与 ") for p in proposed)
 
 
+async def test_reasons_fit_long_paths() -> None:
+    # the kept copy deep in long folder names (sorted first): the reason names it shortened, under
+    # the scanned folder (a reason holds 120 characters; the whole path made the cleanup fail)
+    deep = {"0" + "a" * 50: {"b" * 50: {"kept.bin": SAME}}}
+    async with MockHost.load(__file__) as h:
+        h.scan(make_tree({**deep, "z.bin": SAME}))
+        await h.set_setting("min_size", 1000)
+        proposed = await h.cleanup("extra")
+        assert [PurePath(p.path).name for p in proposed] == ["z.bin"]
+        reason = proposed[0].reason
+        assert len(reason) <= 120 and reason.endswith("bbb/kept.bin 相同"), reason
+        assert reason.startswith("与 …")
+
+
 async def test_keep_only_this_one(host: MockHost) -> None:
     b = host.find("b.bin")
     # greyed in the menu until a search found copies, and always on folders and unique files

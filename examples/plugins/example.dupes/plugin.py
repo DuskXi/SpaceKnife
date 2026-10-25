@@ -42,6 +42,7 @@ from spaceknife_sdk import (
 plugin = Plugin()
 
 HEAD = 64 << 10  # bytes hashed first
+REASON_PATH = 100  # characters of the kept copy's path in a proposal's reason (it holds 120)
 SKIP = int(Flag.HARDLINK_DUP | Flag.CLOUD | Flag.OFFLINE)  # frees nothing / not on this disk
 
 
@@ -225,16 +226,23 @@ async def extra(ctx: Context, c: ReportContext) -> list[Proposal]:
     command below) only the group of ``c.node``, keeping that one. The user reviews them first."""
     found = await groups(ctx)
     only = c.node if c.args.get("keep") == "node" else None
+    picked = [
+        (g, g.nodes.index(only) if only is not None else 0)
+        for g in found.groups
+        if only is None or only in g.nodes
+    ]
+    # the kept copy by its path under the scanned folder (one request), shortened at its start
+    kept_at = ctx.tree.rel_paths([g.nodes[k] for g, k in picked]) if picked else []
     out = []
-    for g in found.groups:
-        if only is not None and only not in g.nodes:
-            continue
-        kept = g.nodes.index(only) if only is not None else 0
-        for i, node in enumerate(g.nodes):
-            if i != kept:
-                reason = T("与 {keep} 相同", "Same as {keep}").format(keep=g.paths[kept])
-                out.append(Proposal(node=node, reason=reason))
+    for (g, kept), at in zip(picked, kept_at, strict=True):
+        reason = T("与 {keep} 相同", "Same as {keep}").format(keep=_short(at))
+        out += [Proposal(node=node, reason=reason) for i, node in enumerate(g.nodes) if i != kept]
     return out
+
+
+def _short(path: str) -> str:
+    """``path`` in at most REASON_PATH characters: the end kept (the file's name and folders)."""
+    return path if len(path) <= REASON_PATH else "…" + path[-(REASON_PATH - 1) :]
 
 
 @plugin.method
