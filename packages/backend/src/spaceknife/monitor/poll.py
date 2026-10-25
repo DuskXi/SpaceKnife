@@ -8,8 +8,10 @@ own duration) late. File content changes stay invisible: a file's mtime does not
 :meth:`DirPoller.step` whenever :meth:`DirPoller.wake_time` has come. A round stats at most
 ``poll_rate`` folders per second, in small batches spaced out in time, so polling stays a light
 background load. The baseline of a newly added folder is taken right away (in chunks, not rate
-limited): the scan has just listed that folder, so the stat is served from the inode cache, and a
-late baseline would silently swallow a change made in between.
+limited): the scan has just listed that folder, so the stat is served from the inode cache. Still,
+the folder may have changed between the scan's listing and that baseline: when the scan's record of
+its mtime comes along (``add_dirs``), the baseline is checked against it (:func:`listed_changed`)
+and a difference is reported as ``dir``, instead of being taken as the starting point.
 
 Memory: about 120 B plus the path length per polled folder (measured: 163 B at 44-character paths).
 """
@@ -23,7 +25,7 @@ import sys
 import threading
 import time
 from collections import deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
 from loguru import logger
 
@@ -69,6 +71,71 @@ def stat_file(path: str) -> tuple[int, int, int] | None:
     return st.st_size, st.st_blocks * 512, _secs(st.st_mtime)
 
 
+# A file time is stamped from a clock that may lag the wall clock by a tick (and kept to 10 ms on
+# exFAT); file systems that keep whole seconds (ext3, HFS+) or even two (FAT) truncate more.
+_FINE_SLACK_NS = 50_000_000
+_COARSE_SLACK_NS = 2_100_000_000
+
+
+def listed_changed(mtime_ns: int, listed: int, since_ns: int) -> bool:
+    """Whether a folder whose mtime is now ``mtime_ns`` may have changed after the scan listed it.
+
+    ``listed``: its mtime as the scan recorded it, in whole seconds (the tree's ``mtime`` column:
+    the scanners truncate the same double ``st_mtime`` is, ``sec + nsec * 1e-9``); ``since_ns``: a
+    wall-clock time no later than that listing (the scan's start). A folder's mtime moves whenever
+    an entry is added, removed or renamed in it. Whole seconds that differ tell. Within the same
+    second "before the listing" and "after it" look alike, so a folder modified at or after
+    ``since_ns`` is taken as changed (one more listing of it): less the slack its file system's
+    time stamps need, a whole second's worth when the mtime is a whole second.
+    """
+    sec, nsec = divmod(mtime_ns, 1_000_000_000)
+    if _secs(sec + nsec * 1e-9) != listed:
+        return True
+    return mtime_ns >= since_ns - (_FINE_SLACK_NS if nsec else _COARSE_SLACK_NS)
+
+
+class Backlog:
+    """Folders handed to a watcher (``add_dirs``), batch by batch as they came: each batch is the
+    caller's list itself (a list is not copied: it must not change afterwards) with the mtimes the
+    scan recorded for it (4 B each in an ``array``), nothing per folder on top.
+
+    :meth:`add` is safe from any thread; :meth:`peek` and :meth:`advance` belong to the watcher's
+    own thread. A batch leaves only once all of it was placed, so while ``bool(backlog)`` is true
+    some folder handed in is neither watched nor polled yet.
+    """
+
+    def __init__(self) -> None:
+        self._batches: deque[tuple[list[str], Sequence[int] | None, int]] = deque()
+        self._at = 0  # folders of the first batch already placed
+
+    def __bool__(self) -> bool:
+        return bool(self._batches)
+
+    def add(self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0) -> None:
+        paths = dirs if isinstance(dirs, list) else list(dirs)
+        if mtimes is not None and len(mtimes) != len(paths):
+            raise ValueError(f"add_dirs: {len(paths)} folders, {len(mtimes)} mtimes")
+        if paths:
+            self._batches.append((paths, mtimes, since_ns))
+
+    def peek(self, n: int) -> list[tuple[str, int | None, int]]:
+        """Up to ``n`` of the next folders, all of one batch: (path, recorded mtime, since)."""
+        if not self._batches:
+            return []
+        paths, mtimes, since = self._batches[0]
+        end = min(len(paths), self._at + n)
+        if mtimes is None:
+            return [(paths[i], None, since) for i in range(self._at, end)]
+        return [(paths[i], int(mtimes[i]), since) for i in range(self._at, end)]
+
+    def advance(self, n: int) -> None:
+        """The ``n`` folders :meth:`peek` gave were placed."""
+        self._at += n
+        if self._batches and self._at >= len(self._batches[0][0]):
+            self._batches.popleft()
+            self._at = 0
+
+
 _SEPS = (os.sep, os.altsep) if os.altsep else (os.sep,)
 
 
@@ -90,7 +157,9 @@ class DirPoller:
         self.stats = 0  # stat calls so far (diagnostics, tests)
         self.root_lost = False
         self._mtimes: dict[str, int] = {}
-        self._fresh: deque[str] = deque()
+        # baselines to take: (path, mtime the scan recorded or None, since): see listed_changed
+        self._fresh: deque[tuple[str, int | None, int]] = deque()
+        self._root_listed = False  # the scan's record of the root was checked
         self._round: list[str] = []
         self._pos = 0
         self._next_round = time.monotonic() + self.interval
@@ -102,12 +171,23 @@ class DirPoller:
     def __contains__(self, path: object) -> bool:
         return path in self._mtimes
 
-    def add(self, path: str) -> bool:
-        """Start polling ``path`` (False: already polled). The baseline is taken at the next step."""
+    def add(self, path: str, listed: int | None = None, since_ns: int = 0) -> bool:
+        """Start polling ``path`` (False: already polled). The baseline is taken at the next step;
+        with ``listed`` (the folder's mtime as the scan recorded it, whole seconds) and ``since_ns``
+        it is checked first (:func:`listed_changed`): a change since the listing is reported.
+
+        A folder already polled is left as it is: it was handed in again because its row moved (its
+        parent was listed again), and its own baseline stands. Only the root, polled from the start
+        (before the scan read it), takes the scan's record once, when it comes."""
         if path in self._mtimes:
+            if listed is not None and path == self.root and not self._root_listed:
+                self._root_listed = True
+                self._fresh.append((path, listed, since_ns))
             return False
         self._mtimes[path] = _PENDING
-        self._fresh.append(path)
+        self._fresh.append((path, listed, since_ns))
+        if path == self.root and listed is not None:
+            self._root_listed = True
         return True
 
     def rename_tree(self, old: str, new: str) -> None:
@@ -170,19 +250,27 @@ class DirPoller:
         return out
 
     def _baselines(self) -> list[Change]:
+        out: list[Change] = []
         gone: list[str] = []
         done = 0
         while self._fresh and done < _BASELINE_CHUNK:
-            path = self._fresh.popleft()
-            if self._mtimes.get(path) != _PENDING:
-                continue
+            path, listed, since = self._fresh.popleft()
+            old = self._mtimes.get(path)
+            if old is None or (old != _PENDING and listed is None):
+                continue  # dropped meanwhile, or no baseline to take
             done += 1
             mtime = self._probe(path)
             if mtime is None:
                 gone.append(path)  # already gone again: it was in the tree, so report it
-            else:
-                self._mtimes[path] = mtime
-        return self._drop(gone) if gone else []
+                continue
+            if mtime == _UNKNOWN and old != _PENDING:
+                continue  # the root's check, cannot tell now: its baseline stands
+            self._mtimes[path] = mtime
+            if listed is not None and mtime != _UNKNOWN and listed_changed(mtime, listed, since):
+                out.append(Change("dir", path, is_dir=True))
+        if gone:
+            out.extend(self._drop(gone))
+        return out
 
     def _probe(self, path: str) -> int | None:
         """The folder's mtime (ns); None: gone or no longer a folder; ``_UNKNOWN``: cannot tell."""
@@ -221,7 +309,8 @@ class PollWatcher:
     def __init__(self, root: str, *, poll_interval: float = 30.0, poll_rate: int = 2000) -> None:
         self.root = os.path.abspath(root)
         self._poller = DirPoller(self.root, interval=poll_interval, rate=poll_rate)
-        self._incoming: deque[str] = deque([self.root])
+        self._incoming = Backlog()
+        self._incoming.add([self.root])
         self._wake = threading.Event()
         self._lock = threading.RLock()  # sink calls vs. stop()
         self._sink: Sink | None = None
@@ -240,8 +329,8 @@ class PollWatcher:
         self._thread = threading.Thread(target=self._run, name="sk-poll", daemon=True)
         self._thread.start()
 
-    def add_dirs(self, dirs: Iterable[str]) -> None:
-        self._incoming.extend(dirs)
+    def add_dirs(self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0) -> None:
+        self._incoming.add(dirs, mtimes, since_ns)
         self._wake.set()
 
     def stop(self) -> None:
@@ -273,8 +362,10 @@ class PollWatcher:
         poller = self._poller
         try:
             while not self._stopping:
-                for _ in range(min(len(self._incoming), 4096)):
-                    poller.add(self._incoming.popleft())
+                fed = self._incoming.peek(4096)
+                for path, listed, since in fed:
+                    poller.add(path, listed, since)
+                self._incoming.advance(len(fed))
                 changes = poller.step(time.monotonic())
                 if changes:
                     self._emit(changes)
@@ -301,4 +392,4 @@ class PollWatcher:
                 logger.exception(TEXT["log_sink"])
 
 
-__all__ = ["DirPoller", "PollWatcher", "stat_file"]
+__all__ = ["Backlog", "DirPoller", "PollWatcher", "listed_changed", "stat_file"]

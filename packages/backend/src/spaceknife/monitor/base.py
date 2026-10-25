@@ -8,7 +8,7 @@ Watchers never coalesce or drop silently: losing events is reported as an ``over
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -48,9 +48,16 @@ class Watcher(Protocol):
         """Begin watching; ``sink`` is called from the watcher's own thread, a batch at least every
         50 ms while there are events."""
 
-    def add_dirs(self, dirs: Iterable[str]) -> None:
+    def add_dirs(self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0) -> None:
         """Folders that are now part of the scanned tree, shallow first (per-folder watchers and
-        polling need them; recursive watchers ignore the call). Safe from any thread."""
+        polling need them; recursive watchers ignore the call). Safe from any thread.
+
+        ``mtimes``: each folder's mtime as the scan recorded it (whole seconds); ``since_ns``: a
+        wall-clock time no later than any of those listings (the scan's start). A per-folder
+        watcher places a folder's watch a moment after the scan found it, maybe after the scan
+        listed it too, and a change in between raises no event: once the folder is watched (or
+        its polling baseline taken) it is checked against the record (``poll.listed_changed``)
+        and reported as ``dir`` when it may have changed. Without ``mtimes`` nothing is checked."""
 
     def stop(self) -> None:
         """Stop within a second; ``sink`` is not called afterwards. Idempotent."""

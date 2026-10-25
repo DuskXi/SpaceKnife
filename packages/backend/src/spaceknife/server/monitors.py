@@ -14,6 +14,10 @@ reports where something changed; batches are coalesced (``scan.coalesce_ms`` of 
 Changes run under ``STRUCTURE.write()`` on the event loop; views remap their node ids and flash
 what changed. While a hard scan still runs, folders with children waiting in its queue are
 deferred (their ids are in the queue); while an MFT scan reads, everything waits for its tree.
+
+Per-folder watchers (inotify, polling) get the scan's folders in ticks, with the mtime the scan
+recorded for each: a folder that changed between its listing and its watch is reported then
+(``dir``), so the time before a folder's watch is placed is covered too.
 """
 
 from __future__ import annotations
@@ -23,7 +27,9 @@ import contextlib
 import os
 import threading
 import time
+from array import array
 from dataclasses import dataclass
+from itertools import compress
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -61,6 +67,7 @@ USN_PERIOD_S = 30.0  # checkpoints of the USN journal move on this often
 USN_MAX_ROWS = 1_000_000  # more records to replay than this: list the subtree again instead
 REF_MASK = (1 << 48) - 1  # an NTFS file reference's record number
 SCAN_TICK_S = 0.25  # while a scan runs: hand new folders to the watchers this often
+PER_FOLDER = ("inotify", "poll")  # watchers that take the scan's folders one by one (add_dirs)
 
 
 @dataclass(slots=True)
@@ -121,6 +128,10 @@ class ScanMonitor:
         self.last_apply_ms = 0.0
         self._last_event = 0.0
         self._fed = 0  # rows below this were handed to the watchers
+        # the scan listed nothing before this (wall clock, ns): see monitor.poll.listed_changed
+        scanner = handle.scanner
+        began = scanner.started_at if scanner is not None else None
+        self.listed_after = int((time.time() if began is None else min(time.time(), began.timestamp())) * 1e9)
         self._free_at = 0.0
         self._free_due = False  # a change came within FREE_REFRESH_S of the last read
         self.failed = ""
@@ -290,30 +301,45 @@ class ScanMonitor:
         return wait
 
     async def _feed(self) -> None:
-        """Hand folders that entered the tree to per-folder watchers (inotify, polling)."""
+        """Hand folders that entered the tree to per-folder watchers (inotify, polling), with the
+        mtime the scan recorded for each (whole seconds, 4 B a folder while they wait): a folder
+        that changed between its listing and its watch is then reported (``dir``).
+
+        Not on Windows: the recursive watch covers the whole tree from the scan's start, polling
+        there is a rare fallback kept as it was, and a listing may give a folder's times from its
+        parent's index entry, which can lag the folder's own."""
         store = self.handle.store
         n = len(store)
         if self._fed >= n:
             return
-        wanted = [(root, w) for root, w in self.watchers if w.name != "rdcw"]
+        wanted = [(root, w) for root, w in self.watchers if w.name in PER_FOLDER]
         start, self._fed = self._fed, n
         if not wanted:
             return
 
-        def folders() -> list[str]:
+        def folders() -> tuple[list[str], array[int] | None]:
             c = store.cols
             ids = np.arange(start, n, dtype=np.int64)
             skip = np.uint32(Flag.GONE | Flag.MOUNT)  # mount points are never entered by the scan
             ids = ids[(c["kind"][start:n] == Kind.DIR) & ((c["flags"][start:n] & skip) == 0)]
             ids = ids[np.argsort(c["depth"][ids], kind="stable")]  # shallow first
-            return [store.path(int(i)) for i in ids]
+            listed = None
+            if os.name != "nt":
+                listed = array("I")
+                listed.frombytes(c["mtime"][ids].astype(np.uint32).tobytes())
+            return [store.path(int(i)) for i in ids], listed
 
-        paths = await compute(folders)
+        paths, listed = await compute(folders)
+        if not paths:
+            return
         for root, watcher in wanted:
             prefix = root if root.endswith(os.sep) else root + os.sep
-            mine = [q for q in paths if q == root or q.startswith(prefix)]
-            if mine:
-                watcher.add_dirs(mine)
+            inside = [q == root or q.startswith(prefix) for q in paths]
+            if all(inside):  # one root, and no virtual top among them
+                watcher.add_dirs(paths, listed, self.listed_after)
+            elif any(inside):
+                times = None if listed is None else array("I", compress(listed, inside))
+                watcher.add_dirs(list(compress(paths, inside)), times, self.listed_after)
 
     # ------------------------------------------------------------- one batch
 

@@ -7,6 +7,7 @@ import os
 import shutil
 import struct
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -383,6 +384,98 @@ def test_live_add_dirs(root: Path, watching: tuple[InotifyWatcher, Collector]) -
 
 
 @linux_only
+def test_live_running_while_handed_folders_wait_for_their_watch(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Running as soon as the root is watched, also while folders handed in still wait for their
+    watch; a write into one of them in that moment raises no event, and its check reports it."""
+    dirs = [root / f"d{i}" for i in range(3)]
+    for d in dirs:
+        d.mkdir()
+    listed = [int(os.stat(d).st_mtime) for d in dirs]
+    time.sleep(0.2)  # well past the folders' times (listed_changed allows file times some slack)
+    since = time.time_ns()
+    w = InotifyWatcher(str(root), poll_interval=0.2)
+    gate = threading.Event()
+    place = w._take_incoming
+
+    def held() -> None:  # the thread places nothing until the test lets it
+        gate.wait(5)
+        place()
+
+    monkeypatch.setattr(w, "_take_incoming", held)
+    got = Collector()
+    w.start(got)
+    try:
+        assert w.status().state == "running"  # the root is watched
+        w.add_dirs([str(d) for d in dirs], listed, since_ns=since)
+        (dirs[1] / "late.bin").write_bytes(b"l")  # no watch on it yet ...
+        st = w.status()
+        assert (st.state, st.watched_dirs) == ("running", 1)
+        gate.set()
+        got.wait_for(has("dir", dirs[1], is_dir=True))  # ... its check finds the change
+        wait_until(lambda: w.status().watched_dirs == 4)
+        assert w.status().state == "running"
+        assert {c.path for c in got.changes() if c.kind == "dir"} == {str(dirs[1])}
+    finally:
+        gate.set()
+        w.stop()
+
+
+@linux_only
+def test_live_folder_changed_before_its_watch_is_listed_again(root: Path) -> None:
+    """A folder the scan listed before its watch was placed: what changed in between raised no
+    event. One stat once the watch is on finds it, and the folder is listed again (``dir``)."""
+    quiet, changed, older, deep = root / "quiet", root / "changed", root / "older", root / "changed" / "deep"
+    deep.mkdir(parents=True)
+    for d in (quiet, older):
+        d.mkdir()
+    listed = {d: int(os.stat(d).st_mtime) for d in (quiet, changed, older, deep)}  # as the scan records
+    listed[older] -= 5  # the folder's time moved since: whole seconds tell
+    time.sleep(0.2)  # well past the folders' times (listed_changed allows file times some slack)
+    since = time.time_ns()  # the scan started after the folders were made ...
+    (changed / "late.bin").write_bytes(b"l" * 512)  # ... and this came after its listing, unseen
+    w = InotifyWatcher(str(root), poll_interval=0.2)
+    got = Collector()
+    w.start(got)
+    try:
+        order = [quiet, changed, older, deep]
+        w.add_dirs([str(d) for d in order], [listed[d] for d in order], since_ns=since)
+        got.wait_for(has("dir", changed, is_dir=True))
+        got.wait_for(has("dir", older, is_dir=True))
+        wait_until(lambda: w.status().state == "running")
+        assert w.status().watched_dirs == 5
+        flagged = {c.path for c in got.changes() if c.kind == "dir"}
+        assert flagged == {str(changed), str(older)}  # unchanged folders are not listed again
+    finally:
+        w.stop()
+
+
+@linux_only
+def test_live_polled_folder_changed_before_its_baseline_is_listed_again(root: Path) -> None:
+    """Beyond the watch budget the poller's first stat is the check: a change between the scan's
+    listing and that baseline is reported, not taken as the starting point."""
+    a, b = root / "a", root / "b"
+    for d in (a, b):
+        d.mkdir()
+    listed = {d: int(os.stat(d).st_mtime) for d in (a, b)}
+    time.sleep(0.2)
+    since = time.time_ns()
+    (b / "late.bin").write_bytes(b"l")
+    w = InotifyWatcher(str(root), poll_interval=60, max_watches=2)  # the root and a: b is polled
+    got = Collector()
+    w.start(got)
+    try:
+        w.add_dirs([str(a), str(b)], [listed[a], listed[b]], since_ns=since)
+        got.wait_for(has("dir", b, is_dir=True))
+        st = w.status()
+        assert (st.watched_dirs, st.polled_dirs, st.state) == (2, 1, "degraded")
+        assert not has("dir", a)(got.changes())
+    finally:
+        w.stop()
+
+
+@linux_only
 def test_live_budget_polls_the_rest(root: Path) -> None:
     a, b, c = root / "a", root / "a" / "b", root / "a" / "b" / "c"
     c.mkdir(parents=True)
@@ -420,8 +513,8 @@ def test_overflow_revalidation_drops_stale_watches(root: Path) -> None:
     w._ino = ino = linux._Inotify()
     try:
         w._watch_root()
-        w._place(str(d))
-        w._place(str(d / "sub"))
+        w._place(str(d), None, 0, [])
+        w._place(str(d / "sub"), None, 0, [])
         old = w._tree.find(str(d))
         assert old is not None and len(w._tree) == 3
         shutil.rmtree(d)
