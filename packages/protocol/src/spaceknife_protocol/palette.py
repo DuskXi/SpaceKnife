@@ -36,6 +36,12 @@ class PaletteContext(Params):
     basket: int = Field(
         default=0, ge=0, description="Items in the delete basket (held by the frontend until M6)"
     )
+    node: int | None = Field(
+        default=None,
+        ge=0,
+        description="The node the commands are about (a context menu's block, the details panel's "
+        "node); None: the view's selection",
+    )
 
 
 class PaletteQueryParams(Params):
@@ -47,6 +53,14 @@ class PaletteCheckParams(Params):
     """One command, where the user is: a keyboard shortcut runs it only when the palette would."""
 
     id: str = Field(min_length=1, max_length=64, description="A command id (palette.commands)")
+    context: PaletteContext
+
+
+class PaletteCheckManyParams(Params):
+    """Several commands where the user is (a context menu's, the details panel's): each enabled or
+    disabled with the reason, as palette.check answers one."""
+
+    ids: list[str] = Field(min_length=1, max_length=64, description="Command ids (palette.commands)")
     context: PaletteContext
 
 

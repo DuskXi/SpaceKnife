@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PaletteCommand } from "@/protocol/generated";
 
 import { call, rescanFolder, setViewSettings, startScan } from "./actions";
-import { runShortcut } from "./commands";
+import { paletteContext, runShortcut } from "./commands";
 import { get, set } from "./store";
 
 vi.mock(import("./actions"), async (original) => ({ ...(await original()), call: vi.fn(), rescanFolder: vi.fn(), startScan: vi.fn(), setViewSettings: vi.fn() }));
@@ -61,5 +61,18 @@ describe("runShortcut", () => {
     set({ scans: { s1: { roots: [{ path: "C:\\" }, { path: "D:\\" }] } } as never });
     await runShortcut("scan.rescan_all");
     expect(startScan).toHaveBeenCalledWith({ roots: ["C:\\", "D:\\"] }, "t1");
+  });
+});
+
+describe("paletteContext", () => {
+  it("names the node a menu is about (a real node only), so its commands are asked about it", () => {
+    set({
+      tabs: [{ id: "t1", kind: "scan", scanId: "s1", viewIds: ["v1"], focusedPane: 0, title: "C:" }],
+      active: "t1",
+      views: { v1: { state: { scan_id: "s1" } } } as never,
+    });
+    expect(paletteContext(get(), { viewId: "v1", node: 7 })).toEqual({ tab: "scan", scan_id: "s1", view_id: "v1", basket: 0, node: 7 });
+    expect(paletteContext(get(), { viewId: "v1", node: 0xc0000001 })).not.toHaveProperty("node"); // an aggregate block
+    expect(paletteContext(get())).not.toHaveProperty("node");
   });
 });

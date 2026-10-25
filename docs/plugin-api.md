@@ -60,7 +60,7 @@
 | `tree.find(path)` | 绝对路径，或相对第一个根的路径 |
 | `Proposal(node="…")`、`ctx.basket.propose(["…"])` | 绝对路径（系统自己的写法） |
 
-**硬链接**：扫描只记下它见到的额外链接（`Flag.HARDLINK_DUP`，`bytes` 列为 0）。Windows 的普通扫描不给 `ino` 和 `nlink`，要判断两个文件是不是同一个时用 `tree.file_ids(ids)`。
+**硬链接**：扫描只记下它见到的额外链接（`Flag.HARDLINK_DUP`，`bytes` 列为 0）。Windows 的普通扫描不给 `ino` 和 `nlink`，要判断两个文件是不是同一个时用 `tree.file_ids(ids)`。删除篮自己按（卷、文件 id）认同一个文件的几个名字：只放进一个名字时它不算可释放，全放进去时只算一次（扫描没记文件 id 时删除篮向系统问）。
 
 <a id="api-places"></a>
 ## 3. 调用发生在哪
@@ -76,12 +76,47 @@
 | 对比侧栏（`compare`） | 对比标签页的扫描 | 对比视图 | 选中的变化项或缩放根 | `[node]` |
 | 开始页卡片（`start`）、从开始页打开的历史报告（`history`） | None | None | None | `[]` |
 | 命令：右键菜单（`menus = ["node"]`） | 那个视图的扫描 | 那个视图 | 右键点的那一项 | `[node]` |
-| 命令：详情面板（`inspector`）、工具栏（`toolbar`）、命令面板、按键 | 有焦点的视图的扫描 | 有焦点的视图 | 选中项；没选时是 None | `[node]` 或 `[]` |
+| 命令：详情面板（`menus = ["inspector"]`） | 那个视图的扫描 | 那个视图 | 详情面板的节点：选中项，没选时是缩放根 | `[node]` |
+| 命令：工具栏（`toolbar`）、命令面板、按键 | 有焦点的视图的扫描 | 有焦点的视图 | 选中项；没选时是 None | `[node]` 或 `[]` |
 | 命令：开始页（`start`） | 眼前的扫描或 None | — | None | `[]` |
 
-聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`。
+聚合块（「N 个小项」「+N」）不是节点：选中它时报告的 `node` 是缩放根，命令的是 None。右键菜单和详情面板里的命令按上表的 `node` 问 `when` 和 `check`：不可用的变灰，写出原因。`compare_id` 只在对比时有值。`args` 是打开它的动作写的参数（[动作的参数](#api-action-args)）。有视图时还有 `zoom_node`（视图的缩放根，用户眼前的那一层）和 `filter`（视图的过滤式，没过滤是 `""`）：`ctx.tree.query(c.filter or None, under=c.zoom_node, …)` 就是视图里看到的那些文件。命令的 `check` 方法收到同样的 `ActionContext`。
 
 导出格式收到的 `ExportInput`：`root` 是要导出的节点（导出对话框选的「当前位置」是缩放根、「选中项」是选中的节点、「整个扫描」是 0）；`match` 是过滤命中的布尔数组（下标是节点，None 表示没过滤）；`filter` 是那个过滤式；`selection` 是选中的节点；`options` 是对话框里这个格式的选项。
+
+<a id="api-action-args"></a>
+### 动作的参数
+
+动作写的 `args` 交到它打开或运行的东西手里；运行它的一方（面板的 `sk.host.command(id, args)`、测试的 `host.command(name, **args)`）再给的参数加在上面，同名的以运行方的为准：
+
+| 动作 | `args` 到哪 |
+|---|---|
+| `{ call = "m", args = {…} }` | 方法收到的 `ActionContext.args` |
+| `{ cleanup = "c", args = {…} }` | 清理收到的 `ReportContext.args`：一个清理按参数做几种事（「只清理这一条规则」） |
+| `{ open = "report:r", args = {…} }` | 报告的 `c.args`；标签页和详情面板里的报告按新的参数重取 |
+| `{ open = "panel:p", args = {…} }` | 面板的 `sk.context.args`；面板已经开着时换上新的，`sk.onContext` 收到 |
+| `{ command = "c", args = {…} }` | 那个命令的动作（同上几行）；`report.export` 认 `format`（格式或模板）`scope`（`zoom` `all` `selection`）`options`（这个格式的选项，按名字）`use_filter` |
+
+从右键菜单运行时，点的那一项就是 `node` 和 `selection`：清理、`call` 都作用在它上面，`report.export` 打开时「选中项」是它（报告表格里勾了几行时是那几行）。
+
+<a id="api-settings"></a>
+### 结构化设置
+
+`control = "list"` 的设置是一列条目，每条是 `fields` 里那几栏的值；`ctx.settings[名]` 读到 `list[dict]`，`ctx.settings.set(名, [...])` 整个换掉。宿主逐条逐栏校验（栏的类型、范围、选项、`max_length`），最多 `max_items` 条；缺的栏补默认值，多出的栏、过长的文字、超出条数都整个拒绝并说明是第几条哪一栏。设置页按 `fields` 画出每条（增删、上下移，数字和文字离开输入框时保存）。`control = "textarea"` 是多行文字（默认最长 4096 字），`text` 默认 64 字，两者都可以写 `max_length`（≤ 16384）；默认值比它长时 `check` 报错并给出该写的数。导出格式的选项不能是列表。
+
+```python
+plugin.setting(
+    "rules",
+    T("清理规则", "Cleanup rules"),
+    [{"name": "日志", "glob": "*.log", "days": 90}],
+    max_items=20,
+    fields=[
+        {"name": "name", "title": T("名字", "Name"), "default": "", "max_length": 40},
+        {"name": "glob", "title": T("通配符", "Pattern"), "default": "*"},
+        {"name": "days", "title": T("天数", "Days"), "default": 30, "min": 1, "unit": T("天", "days")},
+    ],
+)
+```
 
 <a id="api-hooks"></a>
 ## 4. 钩子收到什么
@@ -94,9 +129,9 @@
 | `scan_closed` | `async def f(ctx, scan: ScanInfo) -> None` | 一个扫描被关掉（它的树已经读不到了） |
 | `settings` | `async def f(ctx, changed: list[str]) -> None` | 本插件的设置变了：`changed` 是变了的局部名，如 `["min_size"]`；`ctx.settings` 已是新值 |
 | `lang` | `async def f(ctx) -> None` | 界面语言变了：`ctx.lang` 已是新的 |
-| `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
+| `basket` | `async def f(ctx) -> None` | 删除篮变了（用户拿出了项、删掉了它们……；一阵变化只来一次）：本插件放进去的可能已经不在了，`ctx.call("basket.list")` 看现在的 |
 
-钩子在后台跑，宿主不等结果，出错只记日志；每个钩子 30 秒（`@plugin.on(event, timeout=…)`，≤ 600），更久的事 `ctx.tasks.start` 一个[后台任务](#api-limits)；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。测试里 `await host.hook(event, …)` 会检查事件名和参数，钩子抛的异常原样抛出。
+`event` 写错时 `check` 从代码里找出来（`unknown_hook`，附最像的名字），导入时也报同样的错。钩子在后台跑，宿主不等结果，出错只记日志；每个钩子 30 秒（`@plugin.on(event, timeout=…)`，≤ 600），更久的事 `ctx.tasks.start` 一个[后台任务](#api-limits)；钩子里不能 `ctx.clipboard`，`ctx.toast` 发给所有窗口。测试里 `await host.hook(event, …)` 会检查事件名和参数，钩子抛的异常原样抛出。
 
 <a id="api-errors"></a>
 ## 5. 异常
@@ -222,14 +257,14 @@ def icicle(v: LayoutInput) -> Shapes:
 | `await host.call(name, **params)`、`call_frames` | 方法：JSON（和二进制列） |
 | `await host.report(name, node=, cursor=, **ctx)`、`host.text(report)` | 校验过、按上限截过的报告；纯文本 |
 | `await host.fields(slot, node=)`、`await host.insights(node=)` | 字段（`"inspector"` 或 `"hover"`）、洞察卡片 |
-| `await host.cleanup(name)` | 复核对话框里的候选：`node path reason checked alloc` |
+| `await host.cleanup(name, node=, args=)` | 复核对话框里的候选：`node path reason checked alloc`（`args` 成为 `c.args`） |
 | `await host.node_set(name)`、`await host.filter(expr)` | 集合的掩码；过滤命中的相对路径 |
 | `await host.visual(name)`、`await host.color(name)` | 一帧（[第 9 节](#api-frames)） |
 | `await host.export(name, filter=, options=, selection=, root=)` | 导出的全文 |
 | `await host.source(name, uri)`、`host.status(scan_id)` | 用扫描来源扫描（失败抛 `RuntimeError`）；扫描的状态 |
 | `await host.hook(event, **args)`、`await host.annotate(items)` | 钩子（检查事件名和参数，抛出钩子里的异常）、对比原因 |
 | `await host.task(name, params, key=, wait=True)`、`host.tasks()`、`await host.cancel_task(name, key=)` | 后台任务：启动并等它结束，返回 `TaskInfo`（`state` 是 `done` `failed` `cancelled`，`error` 是失败的原因）；`wait=False` 马上返回；本插件的任务（跑着的和最近结束的）；像取消按钮那样取消并等它停下 |
-| `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样运行命令：调用它的方法并返回结果（不是 `call` 动作的命令返回动作本身） |
+| `await host.command(name, node=, selection=, zoom_node=, filter=, **args)` | 按菜单那样对 `node` 运行命令，`args` 加在动作自己的上（同面板的 `sk.host.command(id, args)`）：`call` 返回方法的结果，`cleanup` 返回候选（同 `host.cleanup`），其余返回动作的 dict（带合并后的 `args`） |
 | `await host.command_available(name, node=)` | 选中 `node` 时这个命令能不能跑：它的 `when` 和 `check` 给的原因，能跑时 None |
 | `await host.visual_available(name)` | 本插件的可视化在当前扫描的视图里能不能选：它的 `when` 给的原因，能选时 None |
 | `await host.settled()` | 等宿主后台的事做完：悬停字段的后补、钩子、设置和语言的变化 |

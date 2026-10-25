@@ -310,8 +310,9 @@ const sk = {
     zoom: (ref) => host("zoom")(refArgs(ref)),
     filter: (expr) => host("filter")({ expr }),
     /** one of this plugin's commands, or one of the app's that change the view (view.color.*,
-     * view.visual.*, nav.*, …): on the panel's own view, whose tab stays where it is */
-    command: (command) => host("command")({ command }),
+     * view.visual.*, nav.*, …): on the panel's own view, whose tab stays where it is; `args` go to
+     * the command's action (added to its own: a call's ActionContext.args, a cleanup's, a panel's) */
+    command: (command, args) => host("command")(args && typeof args === "object" ? { command, args } : { command }),
     toast: (text) => host("toast")({ text }),
     reveal: (ref) => host("reveal")(refArgs(ref)),
     open: (ref) => host("open")(refArgs(ref)),

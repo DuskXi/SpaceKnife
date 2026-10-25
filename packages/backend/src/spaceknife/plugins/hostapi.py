@@ -482,8 +482,10 @@ class HostApi:
         name = str(p["name"])
         try:
             value = p.get("value")
-            if not isinstance(value, bool | int | float | str):
-                raise RuntimeCallError(ErrorCode.INVALID_PARAMS, "a setting is a bool, a number or a string")
+            if not isinstance(value, bool | int | float | str | list):  # a list: its entries are checked
+                raise RuntimeCallError(
+                    ErrorCode.INVALID_PARAMS, "a setting is a bool, a number, a string or a list of entries"
+                )
             self.server.settings.update({f"plugin.{rec.id}.{name}": value})
         except SettingsError as exc:
             raise RuntimeCallError(ErrorCode.INVALID_PARAMS, str(exc)) from None

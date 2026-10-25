@@ -57,9 +57,39 @@ export interface RunContext {
   depth?: number;
   /** the view's tab is not brought forward (a web panel acting on its view) */
   stay?: boolean;
+  /** given by who runs it (a panel's sk.host.command(id, args)): added to the action's own args */
+  args?: Record<string, unknown>;
 }
 
 type Handler<A> = (a: A, rc: RunContext) => Promise<void> | void;
+
+/** An action's args with what its runner gives (the runner's win). */
+const withArgs = (own: Record<string, unknown> | undefined, rc: RunContext): Record<string, unknown> => ({ ...(own ?? {}), ...(rc.args ?? {}) });
+
+const EXPORT_SCOPES = new Set(["zoom", "all", "selection"]);
+
+/** report.export's args: the format, then the scope, options and filter the dialog opens with; the
+ * node a menu was opened on (or a report table's chosen rows) is what 「选中项」 exports. */
+function askExport(args: Record<string, unknown>, rc: RunContext): void {
+  const format = typeof args.format === "string" && args.format ? args.format : undefined;
+  const scope = typeof args.scope === "string" && EXPORT_SCOPES.has(args.scope) ? (args.scope as "zoom" | "all" | "selection") : undefined;
+  const options: Record<string, boolean | number | string> = {};
+  if (args.options && typeof args.options === "object") {
+    for (const [k, v] of Object.entries(args.options as Record<string, unknown>)) if (typeof v === "boolean" || typeof v === "number" || typeof v === "string") options[k] = v;
+  }
+  const nodes = rc.selection?.length ? rc.selection : rc.node != null && rc.node > 0 ? [rc.node] : undefined;
+  set({
+    exportOpen: true,
+    exportPick: format,
+    exportAsk: {
+      scope: scope ?? (nodes ? "selection" : undefined),
+      options,
+      use_filter: typeof args.use_filter === "boolean" ? args.use_filter : undefined,
+      nodes,
+      viewId: rc.viewId ?? null,
+    },
+  });
+}
 
 /** The app's own commands without a generic action, by id (state/commands.ts fills it). */
 export const BUILTIN_ACTIONS: Record<string, (rc: RunContext) => Promise<void> | void> = {};
@@ -67,7 +97,10 @@ export const BUILTIN_ACTIONS: Record<string, (rc: RunContext) => Promise<void> |
 /** What actions need of the command runner (state/commands.ts fills it in: it imports this module,
  * so this one can't import it back while both load). */
 export const COMMANDS: {
-  runShortcut(id: string, opts: { depth?: number }): Promise<void>;
+  runShortcut(
+    id: string,
+    opts: { depth?: number; node?: number | null; viewId?: string | null; scanId?: string | null; stay?: boolean; args?: Record<string, unknown> },
+  ): Promise<void>;
   cycleVisual(viewId: string, dir: 1 | -1): Promise<void>;
   pickVisual(viewId: string, id: string): Promise<void>;
 } = {
@@ -154,7 +187,7 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
   async call(a: CallAction, rc) {
     const target = pluginOf(a.method);
     if (rc.owner && target !== rc.owner) return toast(t("插件只能调用它自己的方法"));
-    const ctx = actionContext(rc, a.args);
+    const ctx = actionContext(rc, withArgs(a.args, rc));
     try {
       await handleResult(await callPlugin(a.method, ctx), rc, ctx);
     } catch (err) {
@@ -163,15 +196,24 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
   },
 
   open(a: OpenAction, rc) {
-    openTarget(a.target, actionContext(rc, a.args ?? {}));
+    openTarget(a.target, actionContext(rc, withArgs(a.args, rc)));
   },
 
   async command(a: CommandAction, rc) {
     if ((rc.depth ?? 0) > 3) return;
-    // 「导出报告…」 with a format picked: { command = "report.export", args = { format = "<id>" } }
-    const format = a.command === "report.export" ? a.args?.format : undefined;
-    if (typeof format === "string" && format) return set({ exportOpen: true, exportPick: format });
-    await COMMANDS.runShortcut(a.command, { depth: (rc.depth ?? 0) + 1 });
+    const args = withArgs(a.args, rc);
+    // 「导出报告…」 opened on a format, a scope, options: { command = "report.export", args = { format = "<id>", … } };
+    // from a context menu (or a report's chosen rows), on that node
+    if (a.command === "report.export" && (Object.keys(args).length || rc.node != null || rc.selection?.length)) return askExport(args, rc);
+    // the command runs on what this one runs on (the menu's node, the panel's view), with the args
+    await COMMANDS.runShortcut(a.command, {
+      depth: (rc.depth ?? 0) + 1,
+      node: rc.node,
+      viewId: rc.viewId,
+      scanId: rc.scanId,
+      stay: rc.stay,
+      args: Object.keys(args).length ? args : undefined,
+    });
   },
 
   async view(a: ViewAction, rc) {
@@ -239,7 +281,7 @@ const HANDLERS: { [K in Action["kind"]]: Handler<Extract<Action, { kind: K }>> }
     const target = pluginOf(a.method);
     if (rc.owner && target !== rc.owner) return toast(t("插件只能调用它自己的方法"));
     const { startCleanup } = await import("./cleanup");
-    await startCleanup(a.method, target ?? rc.owner ?? "", actionContext(rc));
+    await startCleanup(a.method, target ?? rc.owner ?? "", actionContext(rc, withArgs(a.args, rc)));
   },
 
   async node(a: NodeAction, rc) {

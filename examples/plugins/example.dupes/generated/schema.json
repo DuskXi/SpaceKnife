@@ -239,6 +239,11 @@
       "params": "#/$defs/ExampleDupesFindParams",
       "result": "#/$defs/ExampleDupesFindResult"
     },
+    "has_copies": {
+      "doc": "Why 「只保留这一份」 can't run on ``a.node`` (the menu's file): no copies in the last search.",
+      "kind": "method",
+      "params": "#/$defs/ExampleDupesActionContext"
+    },
     "start_search": {
       "kind": "method",
       "params": "#/$defs/ExampleDupesActionContext",
@@ -246,7 +251,7 @@
     }
   },
   "plugin": "example.dupes",
-  "schema_hash": "a4f8c89a1a81d61f",
+  "schema_hash": "5c9350d354db519a",
   "schema_version": 1,
   "states": {
     "status": {

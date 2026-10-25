@@ -25,6 +25,7 @@ from spaceknife_protocol.text import Text, as_text
 
 from .errors import Issue, ManifestError
 from .manifest import (
+    HOOKS,
     KINDS,
     MANIFEST,
     PLUGIN_API,
@@ -627,6 +628,18 @@ class Plugin:
 
         def wrap(f: F) -> F:
             n = f.__name__.rstrip("_")
+            if event not in HOOKS:
+                code = getattr(f, "__code__", None)
+                self.issues.append(
+                    Issue(
+                        "unknown_hook",
+                        f"@plugin.on({event!r}): there is no such hook",
+                        file=Path(code.co_filename).name if code is not None else "",
+                        line=code.co_firstlineno if code is not None else 0,
+                        fix=f"one of: {', '.join(HOOKS)}",
+                    )
+                )
+                return f
             self._declare("hook", HookSpec(name=n, event=event, timeout=timeout))  # type: ignore[arg-type]
             self._handler("hook", n, f)
             return f

@@ -75,16 +75,19 @@ async function switchVisual(viewId: string, id: string): Promise<void> {
   await setViewSettings(viewId, { visual: id });
 }
 
-/** Where the user is, as the backend's commands see it (palette.query, palette.check). */
-export function paletteContext(s: AppState = get(), on?: { viewId?: string | null; scanId?: string | null }): PaletteContext {
+/** Where the user is, as the backend's commands see it (palette.query, palette.check); `on.node`:
+ * what the command is about when not the view's selection (a context menu's block). */
+export function paletteContext(s: AppState = get(), on?: { viewId?: string | null; scanId?: string | null; node?: number | null }): PaletteContext {
+  // a real node only (an aggregate block's key is no node)
+  const node = on?.node != null && on.node > 0 && on.node >>> 30 === 0 ? { node: on.node } : {};
   // a web panel's command runs on the panel's view, whatever tab is in front
   const view = on?.viewId ? s.views[on.viewId] : undefined;
-  if (view) return { tab: "scan", scan_id: on?.scanId ?? view.state.scan_id, view_id: on!.viewId!, basket: basketCount(s) };
+  if (view) return { tab: "scan", scan_id: on?.scanId ?? view.state.scan_id, view_id: on!.viewId!, basket: basketCount(s), ...node };
   const tab = activeTab(s);
   // the help and disk tabs are, to the backend's commands, tabs without a scan like the settings tab;
   // a plugin's tab is about a scan (its own) but has no view
   const kind = tab.kind === "help" || tab.kind === "machine" ? "settings" : tab.kind === "plugin" ? (tab.scanId ? "scan" : "settings") : tab.kind;
-  return { tab: kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s) };
+  return { tab: kind, scan_id: tab.scanId ?? null, view_id: focusedViewId(s), basket: basketCount(s), ...node };
 }
 
 /** How a key or another command runs one: `quiet` says nothing when the command is unavailable
@@ -100,6 +103,8 @@ export interface ShortcutOptions {
   scanId?: string | null;
   /** the view's tab is not brought forward (a web panel acting on its view) */
   stay?: boolean;
+  /** added to the args of the command's action (a panel's sk.host.command(id, args)) */
+  args?: Record<string, unknown>;
 }
 
 /** A command's keyboard shortcut (plugins/keymap.ts) or a command run by an action: it runs where
@@ -118,7 +123,7 @@ export async function runShortcut(id: string, opts: ShortcutOptions = {}): Promi
  * the command as the palette or palette.check gave it; otherwise the one of palette.commands. */
 export async function runCommand(id: string, cmd?: PaletteCommand | null, opts: ShortcutOptions = {}): Promise<void> {
   const known = cmd ?? get().commands.find((c) => c.id === id) ?? null;
-  const rc: RunContext = { owner: known?.plugin ?? null, reverse: opts.reverse, depth: opts.depth, node: opts.node, viewId: opts.viewId, scanId: opts.scanId, stay: opts.stay };
+  const rc: RunContext = { owner: known?.plugin ?? null, reverse: opts.reverse, depth: opts.depth, node: opts.node, viewId: opts.viewId, scanId: opts.scanId, stay: opts.stay, args: opts.args };
   await runAction(known?.action ?? { kind: "builtin", name: id }, rc);
 }
 

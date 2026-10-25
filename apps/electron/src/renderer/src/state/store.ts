@@ -46,6 +46,19 @@ export interface TabPlugin {
   kind: "report" | "panel";
   /** the contribution's full id */
   id: string;
+  /** what it was opened with (an `open` action's args): ReportContext.args, a panel's sk.context.args */
+  args?: Record<string, unknown>;
+}
+
+/** What 「导出报告…」 opens with when an action asks (report.export with args). */
+export interface ExportAsk {
+  scope?: "zoom" | "all" | "selection";
+  /** the format's options (its export dialog fields) by name */
+  options?: Record<string, boolean | number | string>;
+  use_filter?: boolean;
+  /** what 「选中项」 exports: the node a menu was opened on, a report table's chosen rows */
+  nodes?: number[];
+  viewId?: string | null;
 }
 
 export interface Tab {
@@ -199,6 +212,10 @@ export interface AppState {
   exportOpen: boolean;
   /** the template or format it opens on (report.export with args.format), else the last one */
   exportPick?: string;
+  /** the scope, options and selection it opens with (report.export with args) */
+  exportAsk?: ExportAsk;
+  /** a plugin page of the details column opened with args (an `open` action): by its full id */
+  inspectorArgs?: Record<string, Record<string, unknown>>;
   /** macOS without Full Disk Access: the dialog before a scan (shell/FullDiskAccessDialog) */
   fdaPrompt: boolean;
   /** interface language (M7.5): the root re-renders on change, every t() follows */

@@ -19,6 +19,7 @@ import { tagLabel } from "@/lib/tags";
 import { inBrowser } from "@/lib/host";
 import { runShortcut } from "@/state/commands";
 import { PluginIcon } from "@/plugins/icons";
+import { unavailable, useCommandStates } from "@/plugins/menuStates";
 
 const TAGS = [
   { id: "red", keys: "Ctrl+1" },
@@ -83,6 +84,9 @@ export function ContextMenu() {
   const group = kind === Kind.SMALL || kind === Kind.MORE;
   const folder = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
   const node = menu?.node ?? null;
+  // plugins' commands for this block (menus "node"): greyed with the reason where they can't run on it
+  const pluginIds = useMemo(() => (group ? [] : commands.filter((c) => c.menus.includes("node")).map((c) => c.id)), [commands, group]);
+  const states = useCommandStates(pluginIds, menu && node != null ? { viewId: menu.viewId, scanId: menu.scanId, node } : null);
 
   // the path four ways (copy submenu) and whether it exists on disk at all (MFT pseudo folders)
   useEffect(() => {
@@ -177,6 +181,7 @@ export function ContextMenu() {
           plugin: { id: c.plugin ?? "", icon: c.icon },
           label: c.name,
           keys: c.keys[0],
+          disabled: unavailable(states, c.id) || undefined,
           run: () => void runShortcut(c.id, { node, viewId: menu.viewId, scanId: menu.scanId }),
         })),
       { id: "system", icon: "more", label: t("系统菜单…"), disabled: t("系统原生右键菜单还没有接入（见 TODO）") },
@@ -186,7 +191,7 @@ export function ContextMenu() {
     // the zoom root is what is zoomed into already
     return isRoot ? here.filter((it) => it.id !== "zoom") : here;
     // lang: the labels are made by t(), so a language switch makes them again
-  }, [menu, row, isRoot, frame, forms, group, folder, node, lang, commands]);
+  }, [menu, row, isRoot, frame, forms, group, folder, node, lang, commands, states]);
 
   if (!menu || row === HIT_NONE || !frame) return null;
   const root = isRoot ? frame.info.root! : null;

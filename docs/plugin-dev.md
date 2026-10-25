@@ -2,10 +2,8 @@
 
 写插件先读一页的[速查](plugin-quick.md)（`spaceknife plugin docs`）；这一份是全文，按需只读一节。插件是一个文件夹：一份 `plugin.toml`，需要代码时再加一个 `plugin.py`，需要网页时再加 `web/`。通讯、协议、类型、主题、语言、权限确认都由 SpaceKnife 处理，插件只交数据和函数。
 
-- **命令**：仓库里是 `uv run spaceknife plugin …`；打包版里是程序自带的 `spaceknife-backend plugin …`（安装目录的 `resources/backend/`）。下文写 `spaceknife plugin`。
-- **只读一节**：`spaceknife plugin docs --section kind-report`；`--search 词` 找到提到它的行和所在的节；`--list` 列出三份文档的锚点。`plugin check` 的每个问题都带着对应一节的锚点。
-- **API 参考**：[plugin-api.md](plugin-api.md)（`plugin docs --api`）列出每个对象的字段、调用发生在哪、缓存规则、钩子签名、路径写法、图标名和命令 id。
-- **参考插件**见第 12 节（都有 `tests/`，CI 对它们跑 `plugin check --strict` 和测试）；设计与实现见 [plugins.md](plugins.md)。
+- **命令**：仓库里是 `uv run spaceknife plugin …`；打包版里是程序自带的 `spaceknife-backend plugin …`（安装目录的 `resources/backend/`）。下文写 `spaceknife plugin`。**只读一节**：`spaceknife plugin docs --section kind-report`；`--search 词` 找到提到它的行和所在的节；`--list` 列出三份文档的锚点。`plugin check` 的每个问题都带着对应一节的锚点。
+- **API 参考**：[plugin-api.md](plugin-api.md)（`plugin docs --api`）列出每个对象的字段、调用发生在哪、缓存规则、钩子签名、路径写法、图标名和命令 id。**参考插件**见第 12 节（都有 `tests/`，CI 对它们跑 `plugin check --strict` 和测试）；设计与实现见 [plugins.md](plugins.md)。
 
 <a id="quickstart"></a>
 ## 0. 起步
@@ -29,8 +27,7 @@
   fixtures/、tests/test_*.py        给 check 和测试用的样例（例如扫描来源的样例文件）、测试
 ```
 
-- 数据目录：Windows `%LOCALAPPDATA%\SpaceKnife`，Linux `~/.local/share/SpaceKnife`，macOS `~/Library/Application Support/SpaceKnife`；便携版和设了 `SPACEKNIFE_HOME` 时是那个目录下的 `data/`。插件页显示实际位置。
-- 插件文件夹对插件只读。可写的是 `ctx.storage`（`<数据目录>/plugin-data/<id>/`，默认配额 256 MiB）。插件文件夹的上限：2000 个文件、64 MiB（`__pycache__`、`.git`、`dist`、`node_modules` 不算）。
+- 数据目录：Windows `%LOCALAPPDATA%\SpaceKnife`，Linux `~/.local/share/SpaceKnife`，macOS `~/Library/Application Support/SpaceKnife`；便携版和设了 `SPACEKNIFE_HOME` 时是那个目录下的 `data/`。插件页显示实际位置。插件文件夹对插件只读。可写的是 `ctx.storage`（`<数据目录>/plugin-data/<id>/`，默认配额 256 MiB）。插件文件夹的上限：2000 个文件、64 MiB（`__pycache__`、`.git`、`dist`、`node_modules` 不算）。
 
 <a id="manifest"></a>
 ### 1.1 清单 `plugin.toml`
@@ -191,7 +188,7 @@ async def ticks(ctx: Context) -> AsyncIterator[Progress]:
 | `keys` | 最多 4 个，`["Ctrl+Alt+D"]`；和程序的键冲突时程序的赢（`check` 提醒） |
 | `aliases` | 命令面板里的别名 |
 | `when` | 条件，都满足才可用，否则显示原因：`scan`（有扫描）`done`（扫描完成）`scanning` `view` `selection` `scan_view` `compare`，选中项是 `file` / `dir` / `ext:zip,7z`（这几种扩展名的文件），`on_disk`（扫描的是磁盘，不是来源），以及 `setting:<设置名>`（为真）、`cap:<能力>`、`plugin:<插件 id>`（已启用）、`source:<来源名>` |
-| `menus` | `node`（节点右键菜单）`inspector`（详情面板操作行）`toolbar` `start` |
+| `menus` | `node`（节点右键菜单）`inspector`（详情面板操作行）`toolbar` `start`；菜单和操作行对它们所在的那个节点问 `when` 和 `check`，不可用的变灰并写出原因，运行时那个节点就是 `node` 和 `selection` |
 | `action` | 做什么（下表）；用作装饰器时不写，调用被装饰的函数 |
 | `status` | `{ state = "status", text = { zh = "{groups} 组，{bytes:size}", … } }`：命令面板里的状态行，取自共享状态（`:size` `:count` `:date` `:ago` 按界面的写法） |
 | `typed_only` | 只在输入名字时出现（False） |
@@ -203,14 +200,14 @@ async def ticks(ctx: Context) -> AsyncIterator[Progress]:
 | 动作 | 例子 | 说明 |
 |---|---|---|
 | `call` | `{ call = "hello", args = { name = "x" } }` | 调本插件的方法，参数是 `ActionContext`（扫描、视图、选中、缩放根 `zoom_node`、过滤 `filter`、`args`） |
-| `open` | `{ open = "report:largest", args = { … } }`、`panel:years`、`settings` | 打开报告（`args` 成为它的 `c.args`）、面板或本插件的设置 |
-| `command` | `{ command = "view.rescan" }`；`{ command = "report.export", args = { format = "my.tool.md" } }` | 运行任意命令；导出对话框可以预先选好格式 |
+| `open` | `{ open = "report:largest", args = { … } }`、`panel:years`、`settings` | 打开报告（`args` 成为它的 `c.args`）、面板（`sk.context.args`；已经开着的收到 `sk.onContext`）或本插件的设置 |
+| `command` | `{ command = "view.rescan" }`；`{ command = "report.export", args = { format = "my.tool.md", scope = "selection", options = { … } } }` | 运行任意命令（`args` 交给它的动作）；导出对话框按 `format scope options use_filter` 打开，从右键菜单来时「选中项」是那一项 |
 | `filter` | `{ filter = "*.log;>1mb" }` | 设置过滤 |
 | `view` | `{ view = { visual = "flame" } }` | 改视图设置（`detail min_element sort_by_size show_free show_unknown show_trash visual color_mode filter_mode direction`） |
 | `cycle` | `{ cycle = "color", step = 1 }` | 轮换可视化或配色 |
 | `toggle` | `{ toggle = "show_free" }` | 开关 `show_free show_unknown show_trash sort_by_size` |
 | `setting` | `{ setting = "min_size", value = 1 }`、`toggle = true` | 改本插件的设置 |
-| `cleanup` | `{ cleanup = "extra" }` | 运行一个清理（先复核） |
+| `cleanup` | `{ cleanup = "extra", args = { rule = "logs" } }` | 运行一个清理（先复核），`args` 成为它的 `c.args` |
 | `node` | `{ node = "reveal" }` | 对选中项：`reveal open terminal copy_path select zoom basket` |
 | `url` | `{ url = "https://…" }` | 打开网页（用户先确认；要 `host.open`） |
 | `scan_source` | `{ scan_source = "zip", uri = "$node" }` | 用本插件的扫描来源开一个扫描（`$node`：选中项的路径） |
@@ -233,7 +230,7 @@ async def greet(ctx: Context, a: ActionContext) -> Toast:
     return Toast(text=T("你好，{name}", "Hello, {name}").format(name=name), tone="ok")
 ```
 
-函数式命令返回 `Toast`（显示提示）、`Report`（在对话框里打开）或 None。打开、复制、加入删除篮各要对应的权限（`host.open`、`clipboard`、`basket.propose`）。
+函数式命令返回 `Toast`（显示提示）、`Report`（在对话框里打开）或 None。打开、复制、加入删除篮各要对应的权限（`host.open`、`clipboard`、`basket.propose`）。运行命令的一方可以再给参数：面板的 `sk.host.command(id, args)`、MockHost 的 `host.command(name, node=…, **args)`，加在动作自己的 `args` 上（[动作的参数](plugin-api.md#api-action-args)）。
 
 <a id="kind-keybinding"></a>
 #### 按键
@@ -258,29 +255,28 @@ command = "open_largest"
 
 | 字段 | 说明 |
 |---|---|
-| `name` `title` `default` | 必需；`default` 是布尔、整数、小数或文字 |
-| `control` | `switch segmented select multi number slider color text`；默认按 `default` 和 `options` 推断：4 个以内的选项是 `segmented`，更多是 `select`（下拉）。`multi` 的值是选中的值按 `options` 的顺序用逗号连起来：`default = "name,size"`，读时 `.split(",")` |
+| `name` `title` `default` | 必需；`default` 是布尔、整数、小数、文字，或条目的列表（`list`） |
+| `control` | `switch segmented select multi number slider color text textarea list`；默认按 `default` 和 `options` 推断：4 个以内的选项是 `segmented`，更多是 `select`（下拉），列表默认值是 `list`。`multi` 的值是选中的值按 `options` 的顺序用逗号连起来：`default = "name,size"`，读时 `.split(",")`；`textarea` 是多行文字 |
+| `max_length` | `text` `textarea` 最长几个字（64；`textarea` 4096；≤ 16384）；默认值更长时 `check` 报错并给出要写的数 |
+| `fields` `max_items` | `list`：每个条目的几栏（≤ 12，写法同设置，不能再是列表）和最多几条（50，≤ 500）；设置页里可以增删、上下移、逐栏校验，`ctx.settings[名]` 读到 `list[dict]`，缺的栏补默认值 |
 | `description` | 说明 |
 | `options` | `[[值, 标题], …]`：可选的值 |
 | `min` `max` `step` `unit` | 数字的范围、步长和单位；`unit` 可以中英成对（`{ zh = "天", en = "days" }`），`B` 按大小显示和输入（1 MB） |
 | `applies` | `now`（默认）`next_scan` `new_views` |
-| `synonyms` | 设置搜索的同义词 |
-| `depends` | 另一个开关设置的名字：它关着时这一项变灰 |
-| `group` | 分组标题（设置页写成「插件名 › 分组」） |
-| `placeholder` | 空的文字框里的提示 |
+| `synonyms` `depends` | 设置搜索的同义词；另一个开关设置的名字：它关着时这一项变灰 |
+| `group` `placeholder` | 分组标题（设置页写成「插件名 › 分组」）；空的文字框里的提示 |
 | `default_from` | 只用于导出格式的选项：默认值取本插件这个设置的当前值 |
 
 ```toml ex
 [[settings]]
-name = "min_size"
-title = { zh = "最小大小", en = "Minimum size" }
-description = { zh = "比它小的文件不列出。", en = "Smaller files are left out." }
-default = 1048576
-min = 1
-unit = "B"
+name = "rules"
+title = { zh = "清理规则", en = "Cleanup rules" }
+default = [{ glob = "*.log", days = 90 }]
+fields = [{ name = "glob", title = { zh = "通配符", en = "Pattern" }, default = "*" },
+  { name = "days", title = { zh = "天数", en = "Days" }, default = 30, min = 1, unit = { zh = "天", en = "days" } }]
 ```
 
-读：`ctx.settings["min_size"]`（`ctx.settings.get(name, default)`）；写：`ctx.settings.set(name, value)`。设置键是 `plugin.<id>.<名字>`，出现在设置 › 插件，逐项校验，坏掉一项只回落那一项；插件停用后值留在设置文件里。改动后插件收到 `settings` 钩子（参数是变了的名字），宿主缓存的这个插件的回答（字段、节点集合、权重、图例）同时作废，见[缓存](plugin-api.md#api-cache)。
+读：`ctx.settings["rules"]`（`ctx.settings.get(name, default)`）；写：`ctx.settings.set(name, value)`。设置键是 `plugin.<id>.<名字>`，出现在设置 › 插件，逐项校验，坏掉一项只回落那一项；插件停用后值留在设置文件里。改动后插件收到 `settings` 钩子（参数是变了的名字），宿主缓存的这个插件的回答（字段、节点集合、权重、图例）同时作废，见[缓存](plugin-api.md#api-cache)。
 
 <a id="kind-report"></a>
 #### 报告
@@ -374,7 +370,7 @@ async def backups(ctx: Context, node: Node) -> Insight | None:
 | `short_title` | 标签页上的短标题（默认 `title`） |
 | `icon` | 图标 |
 | `entry` | `web/index.html`（默认），必须在 `web/` 里 |
-| `params` | 给网页的参数（`sk.context().params`）：同一个网页放两处，各带一组 |
+| `params` | 给网页的参数（`sk.context.params`）：同一个网页放两处，各带一组；每次打开不同的用 `open` 动作的 `args`（`sk.context.args`） |
 | `slot` | `tab`（默认）`inspector` `dialog` |
 | `height` | 详情面板和对话框里的高度（320，40–800） |
 | `keep` | 标签页转到后台时保留网页和它的状态（True） |
@@ -730,7 +726,7 @@ async def growth(ctx: Context, c: ReportContext) -> Report:
 <a id="kind-hook"></a>
 #### 钩子
 
-`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动后 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了：用户拿出了本插件放进去的项、删了它们……）；签名见 [API 参考](plugin-api.md#api-hooks)。`name` 默认是函数名。
+`@plugin.on(event)`：`event` 是 `start` `stop`（进程启动后 / 停止前，`stop` 有 2 秒）、`scan_done` `scan_closed`（收到 `ScanInfo`）、`settings`（收到变了的设置名）、`lang`（`ctx.lang` 已是新的）、`basket`（删除篮变了，一阵变化只来一次：用户拿出了本插件放进去的项、删了它们……）；签名见 [API 参考](plugin-api.md#api-hooks)。`name` 默认是函数名；写错的名字 `check` 从代码里就找出来（`unknown_hook`）。
 
 ```python ex
 @plugin.on("scan_done")
@@ -738,7 +734,7 @@ async def scanned(ctx: Context, scan: ScanInfo) -> None:
     ctx.toast(T("扫描完成：{items} 项", "Scanned {items} items").format(items=scan.items), tone="ok")
 ```
 
-宿主不等钩子的结果；出错记日志。`timeout`：秒（30，≤ 600），更久的事交给后台任务。`ctx.toast` 每秒最多一条。
+宿主不等钩子的结果，出错记日志；`timeout`：秒（30，≤ 600），更久的事交给后台任务；`ctx.toast` 每秒最多一条。
 
 <a id="kind-background"></a>
 #### 后台任务
@@ -863,7 +859,8 @@ sk.on("progress", (p) => …);  sk.state("status", (v) => …);  sk.subscribe("t
 sk.onContext((ctx) => …);  sk.onLang((lang) => …);  sk.onTheme((mode) => …);  sk.t("中文", "English", { n: 1 });
 sk.format.size(1536000);  sk.format.count(1234);  sk.format.date(unixSeconds);   // 和界面一样的写法
 sk.host.select(node); sk.host.zoom(node); sk.host.filter("*.log"); sk.host.toast("…");
-sk.host.command("my.tool.open");  sk.host.command("view.visual.flame");   // 本插件的，和视图、导航、过滤、导出的
+sk.host.command("my.tool.clean", { rule: "logs" });  sk.host.command("view.visual.flame");   // 本插件的（args 加在它的动作上），和视图、导航、过滤、导出的
+sk.context.args;                  // 打开它的 open 动作带的 args（再打开一次时 sk.onContext 收到新的）
 sk.view;  sk.onView((v) => …);    // 面板所在视图画的是什么：visual layout color_mode zoom_node selected detail filter …
 const { colors, legend } = await sk.colors(nodes);   // 视图给这些节点上的颜色（#rrggbb）和图例，要 tree.read
 sk.host.basket([node], "原因");   // 要 basket.propose；sk.host.copy 要 clipboard，open / reveal / url 要 host.open
@@ -991,7 +988,7 @@ async def test_largest() -> None:
 
 | 插件 | 位置 | 看点 |
 |---|---|---|
-| `example.dupes` | `examples/plugins/example.dupes/` | 代码插件（独立进程）：方法、事件、共享状态、报告、清理、命令和状态行、按键、设置、节点字段、`:set:dupes`；读文件内容算哈希（`files.read`），重活在 `ctx.compute` 里 |
+| `example.dupes` | `examples/plugins/example.dupes/` | 代码插件（独立进程）：方法、事件、共享状态、报告、清理、命令和状态行、按键、设置、节点字段、`:set:dupes`、后台任务；右键菜单里的「只保留这一份」（按 `when` 和 `check` 变灰，带参数运行清理）；读文件内容算哈希（`files.read`），重活在 `ctx.compute` 里 |
 | `example.devpack` | `examples/plugins/example.devpack/` | 纯声明式：洞察规则、文件类别、文件夹规则、过滤预设和按键、导出模板、按扩展名的配色、按文件数的火焰图 |
 | `example.panel` | `examples/plugins/example.panel/` | Web 面板：按修改年份的条形图，`sk.call` 和 `sk.core`，主题，`fixtures.json` 的 mock 模式 |
 | `example.shapes` | `examples/plugins/example.shapes/` | 自带布局的可视化：圆堆积（`shapes.pack`，可以画成六边形多边形）和自己写的冰柱图，自己的 SVG 图标，不要任何权限 |

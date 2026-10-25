@@ -128,10 +128,13 @@ export function PanelFrame({ info, ctx, height, place }: { info: PanelInfo; ctx:
           if (where) await editFilter(where.viewId, String(args.expr ?? ""), null, true);
           return null;
         }
-        case "command":
-          // on the panel's view, which stays where it is (the panel's tab stays in front)
-          await runShortcut(String(args.command), { viewId: c.view_id, scanId: c.scan_id, stay: true });
+        case "command": {
+          // on the panel's view, which stays where it is (the panel's tab stays in front); args go
+          // to the command's action (its call's ActionContext.args, a cleanup's, a panel it opens)
+          const extra = args.args && typeof args.args === "object" && !Array.isArray(args.args) ? (args.args as Record<string, unknown>) : undefined;
+          await runShortcut(String(args.command), { viewId: c.view_id, scanId: c.scan_id, stay: true, args: extra });
           return null;
+        }
         case "colors": {
           if (!c.view_id) throw new Error(t("需要打开一个扫描视图"));
           const list = Array.isArray(args.nodes) ? args.nodes : [];

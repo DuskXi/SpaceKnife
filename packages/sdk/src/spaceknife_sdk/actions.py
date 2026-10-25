@@ -101,8 +101,11 @@ def _short(kind: str, value: Any, rest: dict[str, Any]) -> dict[str, Any]:
             "toggle": bool(rest.get("toggle")),
         }
     if kind == "cleanup":
-        extra()
-        return {"kind": "cleanup", "cleanup": value}
+        extra("args")
+        out = {"kind": "cleanup", "cleanup": value}
+        if rest.get("args"):  # the cleanup's ReportContext.args
+            out["args"] = dict(rest["args"])
+        return out
     if kind == "node":
         extra()
         return {"kind": "node", "op": value}

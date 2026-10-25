@@ -1,6 +1,6 @@
 // Details panel (UI-MAIN-32…47, G11): details / class statistics / largest files of the selection.
 
-import { type CSSProperties, useEffect, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 
 import type { ClassStat, FolderClassInfo, NodeInfo, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, editFilter, viewCall } from "@/state/actions";
@@ -18,6 +18,7 @@ import { runShortcut } from "@/state/commands";
 import { InspectorFields } from "@/plugins/fields";
 import { PluginIcon } from "@/plugins/icons";
 import { InsightCards } from "@/plugins/insight";
+import { unavailable, useCommandStates } from "@/plugins/menuStates";
 import { InspectorPluginPage, inspectorPages } from "@/plugins/slots";
 import { scanSourceOf } from "@/plugins/sources";
 
@@ -63,6 +64,11 @@ export function Inspector({ viewId }: { viewId: string }) {
   // next one replaces is dropped
   const items = summary && summary.node.id === node ? summary.node.files + summary.node.dirs : 0;
   const tick = useThrottled(seq, summaryInterval(items, running));
+  // plugins' commands for this node: greyed with the reason where they can't run on it (their
+  // `when` and `check`), asked again when the scan finishes or a setting changes
+  const extraIds = useMemo(() => extra.map((c) => c.id), [extra]);
+  const settingsVersion = useApp((s) => s.settings?.version ?? 0);
+  const states = useCommandStates(extraIds, scanId && node != null && node > 0 ? { viewId, scanId, node } : null, `${running}:${settingsVersion}`);
 
   useEffect(() => {
     if (!scanId || node == null || node < 0) return;
@@ -146,16 +152,28 @@ export function Inspector({ viewId }: { viewId: string }) {
           {!offDisk && (
             <ActionRow icon="basket" danger label={t("加入删除篮")} keys="Delete" disabled={!summary.on_disk} onClick={() => scanId && basketAdd(scanId, summary.node.id)} />
           )}
-          {extra.map((c) => (
-            // plugins' commands for the selection (menus "inspector"): they run where the palette would
-            <button key={c.id} className="action-row" onClick={() => void runShortcut(c.id)} title={c.status || undefined}>
-              <span className="muted">
-                <PluginIcon plugin={c.plugin} name={c.icon} />
-              </span>
-              <span className="flex">{c.name}</span>
-              {c.keys[0] && <Kbd>{c.keys[0]}</Kbd>}
-            </button>
-          ))}
+          {extra.map((c) => {
+            // plugins' commands for this node (menus "inspector"): they run where the palette would
+            const why = unavailable(states, c.id);
+            return (
+              <button
+                key={c.id}
+                className="action-row"
+                disabled={!!why}
+                onClick={() => void runShortcut(c.id, { viewId, scanId, node })}
+                title={why || states?.get(c.id)?.status || undefined}
+              >
+                <span className="muted">
+                  <PluginIcon plugin={c.plugin} name={c.icon} />
+                </span>
+                <span className="flex action-row-text">
+                  {c.name}
+                  {why && <span className="action-row-why">{why}</span>}
+                </span>
+                {c.keys[0] && <Kbd>{c.keys[0]}</Kbd>}
+              </button>
+            );
+          })}
           {offDisk ? (
             <div className="muted small inspector-note">{t("这个来源的条目不在磁盘上：不能打开、定位或删除")}</div>
           ) : (

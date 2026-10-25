@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import difflib
 import json
 import re
 import subprocess
@@ -102,6 +103,7 @@ ANCHORS: dict[str, str] = {
     "node_set": "kind-node_set",
     "source": "kind-scan_source",
     "hook": "kind-hook",
+    "unknown_hook": "kind-hook",
     "stale_generated": "build",
     "chinese_in_en": "texts",
     "long_title": "texts",
@@ -613,6 +615,46 @@ def _ctx_uses(tree: ast.AST) -> dict[str, int]:
             and isinstance(node.args[0].value, str)
         ):
             out.setdefault("call:" + node.args[0].value, node.lineno)
+    return out
+
+
+def check_hooks(folder: Path, manifest: Manifest) -> list[Issue]:
+    """``@plugin.on("…")`` with a name that is no hook (read from the code: found even when importing
+    the plugin fails for that very reason)."""
+    from spaceknife_sdk.manifest import HOOKS
+
+    out: list[Issue] = []
+    for path in _code_files(folder, manifest):
+        rel = path.relative_to(folder).as_posix()
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel)
+        except (SyntaxError, UnicodeDecodeError):
+            continue  # check_imports reports it
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for dec in node.decorator_list:
+                if not (
+                    isinstance(dec, ast.Call)
+                    and isinstance(dec.func, ast.Attribute)
+                    and dec.func.attr == "on"
+                    and dec.args
+                    and isinstance(dec.args[0], ast.Constant)
+                    and isinstance(dec.args[0].value, str)
+                    and dec.args[0].value not in HOOKS
+                ):
+                    continue
+                name = dec.args[0].value
+                near = difflib.get_close_matches(name, HOOKS, n=1)
+                out.append(
+                    _issue(
+                        "unknown_hook",
+                        f"@plugin.on({name!r}): there is no such hook",
+                        file=rel,
+                        line=dec.lineno,
+                        fix=(f"did you mean {near[0]!r}? " if near else "") + f"one of: {', '.join(HOOKS)}",
+                    )
+                )
     return out
 
 
@@ -1186,8 +1228,12 @@ def check_plugin(
                 fix="plugin install and plugin build --zip name it for you",
             )
         )
+    hooks = check_hooks(folder, manifest)
+    result.issues += hooks
     if manifest.entry is not None:
         desc, issues = (describe_in_subprocess if subprocess_describe else describe_in_process)(folder)
+        if hooks:  # the same names, as the plugin's own declaration found them
+            issues = [i for i in issues if i.code != "unknown_hook"]
     else:
         try:
             desc, issues = describe_declarative(folder, manifest), []

@@ -135,11 +135,47 @@ describe("runAction", () => {
   });
 
   it("cleanup: its own plugin's cleanup goes to review", async () => {
-    await runAction({ kind: "cleanup", cleanup: "a.b.logs", method: "plugin.a.b.logs" }, plugin);
+    await runAction({ kind: "cleanup", cleanup: "a.b.logs", method: "plugin.a.b.logs", args: {} }, plugin);
     expect(startCleanup).toHaveBeenCalledWith("plugin.a.b.logs", "a.b", expect.objectContaining({ scan_id: "s1", node: 7 }));
     vi.mocked(startCleanup).mockClear();
-    await runAction({ kind: "cleanup", cleanup: "c.d.all", method: "plugin.c.d.all" }, plugin);
+    await runAction({ kind: "cleanup", cleanup: "c.d.all", method: "plugin.c.d.all", args: {} }, plugin);
     expect(startCleanup).not.toHaveBeenCalled();
+  });
+
+  it("cleanup: its args and the runner's go to its ReportContext.args (the menu's node is the selection)", async () => {
+    await runAction({ kind: "cleanup", cleanup: "a.b.logs", method: "plugin.a.b.logs", args: { rule: "logs", keep: 1 } }, { owner: "a.b", node: 9, args: { keep: 2 } });
+    expect(startCleanup).toHaveBeenCalledWith("plugin.a.b.logs", "a.b", expect.objectContaining({ node: 9, selection: [9], args: { rule: "logs", keep: 2 } }));
+  });
+
+  it("command: report.export opens on the format, scope and options; from a menu, on its node", async () => {
+    await runAction({ kind: "command", command: "report.export", args: { format: "a.b.md", scope: "zoom", options: { limit: 5, bad: { x: 1 } }, use_filter: false } }, app);
+    expect(get()).toMatchObject({ exportOpen: true, exportPick: "a.b.md", exportAsk: { scope: "zoom", options: { limit: 5 }, use_filter: false } });
+    expect(get().exportAsk?.options).not.toHaveProperty("bad");
+    set({ exportOpen: false, exportPick: undefined, exportAsk: undefined });
+    // a plugin's command in a context menu whose action is report.export: 「选中项」 is the clicked node
+    await runAction({ kind: "command", command: "report.export", args: {} }, { owner: "a.b", node: 11, viewId: "v1" });
+    expect(get().exportAsk).toMatchObject({ scope: "selection", nodes: [11], viewId: "v1" });
+    // a report table's chosen rows: all of them (at most one went before)
+    await runAction({ kind: "command", command: "report.export", args: { format: "csv" } }, { owner: null, selection: [3, 4, 5] });
+    expect(get().exportAsk).toMatchObject({ scope: "selection", nodes: [3, 4, 5] });
+    expect(runShortcut).not.toHaveBeenCalled();
+  });
+
+  it("command: the command it runs gets the node it was run on and the args", async () => {
+    await runAction({ kind: "command", command: "a.b.find", args: { deep: true } }, { owner: "a.b", node: 4, viewId: "v1", args: { from: "panel" } });
+    expect(runShortcut).toHaveBeenCalledWith("a.b.find", expect.objectContaining({ depth: 1, node: 4, viewId: "v1", args: { deep: true, from: "panel" } }));
+  });
+
+  it("open: a panel gets the args it is opened with; opened again, the new ones", async () => {
+    set({ extensions: { panels: [{ id: "a.b.board", plugin: "a.b", title: "Board", slot: "tab", when: [], params: {} }], reports: [] } as never });
+    await runAction({ kind: "open", target: "panel:a.b.board", args: { rule: 1 } }, plugin);
+    const tab = () => get().tabs.find((x) => x.kind === "plugin");
+    expect(tab()?.plugin).toEqual({ kind: "panel", id: "a.b.board", args: { rule: 1 } });
+    set({ active: "t1" });
+    await runAction({ kind: "open", target: "panel:a.b.board", args: { rule: 2 } }, plugin);
+    expect(get().tabs.filter((x) => x.kind === "plugin")).toHaveLength(1);
+    expect(tab()?.plugin?.args).toEqual({ rule: 2 });
+    expect(get().active).toBe(tab()?.id);
   });
 
   it("node: select and zoom in the view; basket proposes with the plugin as origin", async () => {

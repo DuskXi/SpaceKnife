@@ -308,14 +308,20 @@ class CallAction(_Action):
 class OpenAction(_Action):
     kind: Literal["open"] = "open"
     target: str = Field(description="report:<full id> | panel:<full id> | settings:<plugin id>")
-    args: dict[str, Any] = Field(default_factory=dict, description="A report's ReportContext.args")
+    args: dict[str, Any] = Field(
+        default_factory=dict,
+        description="ReportContext.args of the report, or the panel's sk.context.args (an open "
+        "panel is told again: sk.onContext)",
+    )
 
 
 class CommandAction(_Action):
     kind: Literal["command"] = "command"
     command: str
     args: dict[str, Any] = Field(
-        default_factory=dict, description='report.export: { format = "<format or template>" } picks it'
+        default_factory=dict,
+        description="Given to the command's own action (added to its args); report.export: format "
+        "(a format or template), scope (zoom | all | selection), options, use_filter",
     )
 
 
@@ -351,6 +357,7 @@ class CleanupAction(_Action):
     kind: Literal["cleanup"] = "cleanup"
     cleanup: str = Field(description="Full id of a cleanup contribution")
     method: str = Field(description="Its wire name")
+    args: dict[str, Any] = Field(default_factory=dict, description="The cleanup's ReportContext.args")
 
 
 NodeOp = Literal["reveal", "open", "terminal", "copy_path", "select", "zoom", "basket"]

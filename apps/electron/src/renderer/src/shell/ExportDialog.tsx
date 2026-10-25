@@ -35,20 +35,35 @@ export function ExportDialog() {
   });
   const epoch = useApp((s) => s.exportsEpoch); // plugins added or removed formats: read them again
   const asked = useApp((s) => s.exportPick); // report.export { format = … }: open on that one
+  const ask = useApp((s) => s.exportAsk); // report.export { scope, options, use_filter }, a menu's node
   const [targets, setTargets] = useState<ExportTarget[] | null>(null);
   const [pick, setPick] = useState("Grouped by folder");
   const [scope, setScope] = useState<"zoom" | "all" | "selection">("zoom");
   const [useFilter, setUseFilter] = useState(true);
   const [busy, setBusy] = useState(false);
   const [options, setOptions] = useState<Record<string, OptionValue>>({});
+  // what 「选中项」 exports when an action said (the node a menu was opened on, a report's rows)
+  const [nodes, setNodes] = useState<number[] | null>(null);
 
   useEffect(() => setTargets(null), [epoch]);
   useEffect(() => {
-    if (open && asked) {
+    if (!open) return setNodes(null);
+    if (asked) {
       setPick(asked);
       set({ exportPick: undefined });
     }
-  }, [open, asked]);
+    if (ask) {
+      const format = asked ?? pick;
+      if (ask.scope) setScope(ask.scope);
+      if (ask.use_filter !== undefined) setUseFilter(ask.use_filter);
+      if (ask.options && Object.keys(ask.options).length) {
+        setOptions((x) => ({ ...x, ...Object.fromEntries(Object.entries(ask.options!).map(([k, v]) => [`${format}:${k}`, v])) }));
+      }
+      setNodes(ask.nodes?.length ? ask.nodes.slice(0, 1000) : null);
+      set({ exportAsk: undefined });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per request
+  }, [open, asked, ask]);
   useEffect(() => {
     if (!open || targets) return;
     void call("export.targets", {})
@@ -67,11 +82,12 @@ export function ExportDialog() {
   }, [open]);
   if (!open) return null;
 
-  const close = () => set({ exportOpen: false, exportPick: undefined });
+  const close = () => set({ exportOpen: false, exportPick: undefined, exportAsk: undefined });
   const target = targets?.find((x) => x.name === pick) ?? targets?.[0];
-  const values: Record<string, OptionValue> = Object.fromEntries((target?.options ?? []).map((o) => [o.name, options[`${target!.name}:${o.name}`] ?? o.default]));
+  const values: Record<string, OptionValue> = Object.fromEntries((target?.options ?? []).map((o) => [o.name, options[`${target!.name}:${o.name}`] ?? (o.default as OptionValue)]));
   const setOption = (o: ExportOption, v: OptionValue) => target && setOptions((x) => ({ ...x, [`${target.name}:${o.name}`]: v }));
-  const where = scope === "selection" && selected == null ? (zoomed ? "zoom" : "all") : scope === "zoom" && !zoomed ? "all" : scope;
+  const chosen = nodes ?? (selected != null ? [selected] : []);
+  const where = scope === "selection" && !chosen.length ? (zoomed ? "zoom" : "all") : scope === "zoom" && !zoomed ? "all" : scope;
   const run = async () => {
     if (!target || !viewId) return;
     const path = await window.sk.dialog.saveFile({
@@ -90,7 +106,7 @@ export function ExportDialog() {
         scope: where,
         use_filter: filtering && useFilter,
         node: null,
-        selection: where === "selection" && selected != null ? [selected] : [],
+        selection: where === "selection" ? chosen : [],
         options: values,
       });
       close();
@@ -147,16 +163,16 @@ export function ExportDialog() {
         )}
         </div>
         <div className="export-scope">
-          {(zoomed || selected != null) && (
+          {(zoomed || chosen.length > 0) && (
             <div className="segmented small" role="radiogroup" aria-label={t("范围")}>
               {zoomed && (
                 <button role="radio" aria-checked={where === "zoom"} className={where === "zoom" ? "on" : ""} onClick={() => setScope("zoom")}>
                   {t("当前位置")}
                 </button>
               )}
-              {selected != null && (
+              {chosen.length > 0 && (
                 <button role="radio" aria-checked={where === "selection"} className={where === "selection" ? "on" : ""} onClick={() => setScope("selection")}>
-                  {t("选中项")}
+                  {chosen.length > 1 ? t("选中的 {n} 项", { n: chosen.length }) : t("选中项")}
                 </button>
               )}
               <button role="radio" aria-checked={where === "all"} className={where === "all" ? "on" : ""} onClick={() => setScope("all")}>
@@ -222,6 +238,13 @@ function OptionField({ o, value, onChange }: { o: ExportOption; value: OptionVal
             </option>
           ))}
         </select>
+      </label>
+    );
+  if (o.control === "textarea")
+    return (
+      <label className="export-field export-textarea">
+        {label}
+        <textarea value={text} placeholder={o.placeholder} rows={4} onChange={(e) => setText(e.target.value)} onBlur={() => onChange(text)} onKeyDown={(e) => e.stopPropagation()} />
       </label>
     );
   const numeric = o.control === "number" || o.control === "slider";

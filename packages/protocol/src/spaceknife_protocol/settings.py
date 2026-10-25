@@ -17,17 +17,40 @@ from .filter import FilterClassInfo
 SettingCategory = Literal[
     "general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about", "plugins"
 ]
-SettingControl = Literal["switch", "segmented", "select", "multi", "number", "slider", "color", "text"]
+SettingControl = Literal[
+    "switch", "segmented", "select", "multi", "number", "slider", "color", "text", "textarea", "list"
+]
 """``select``: a drop-down (many options); ``multi``: several options at once, the value is their
-values joined by commas (``"name,size"``)."""
+values joined by commas (``"name,size"``); ``textarea``: text of several lines; ``list``: entries of
+the same few fields (``fields``), the value is a list of ``{field: value}``."""
 SettingApplies = Literal["now", "next_scan", "new_views"]
-SettingValue = bool | int | float | str
+SettingScalar = bool | int | float | str
+SettingEntry = dict[str, SettingScalar]
+SettingValue = bool | int | float | str | list[SettingEntry]
+TEXT_MAX = 64  # the longest text value when a setting does not say (max_length)
 
 
 class SettingOption(Payload):
-    value: SettingValue
+    value: SettingScalar
     label: str
     reason: str = Field(default="", description="Why this option cannot be chosen here ('' = available)")
+
+
+class SettingField(Payload):
+    """One field of a ``list`` setting's entries (a plugin's setting), in the interface language."""
+
+    name: str = Field(description="Its key in each entry")
+    title: str
+    description: str = ""
+    control: SettingControl = Field(description="Never list")
+    default: SettingScalar
+    options: list[SettingOption] = Field(default_factory=list)
+    min: float | None = None
+    max: float | None = None
+    step: float | None = None
+    unit: str = ""
+    placeholder: str = ""
+    max_length: int | None = Field(default=None, description="text, textarea: the longest value")
 
 
 class SettingMeta(Payload):
@@ -57,6 +80,11 @@ class SettingMeta(Payload):
     )
     plugin: str | None = Field(default=None, description="The plugin it belongs to (category 'plugins')")
     placeholder: str = Field(default="", description="Shown in an empty text field")
+    max_length: int | None = Field(
+        default=None, description="text, textarea: the longest value in characters (None: 64)"
+    )
+    fields: list[SettingField] = Field(default_factory=list, description="list: the fields of each entry")
+    max_items: int | None = Field(default=None, description="list: the most entries it holds")
 
 
 class SettingsState(Payload):

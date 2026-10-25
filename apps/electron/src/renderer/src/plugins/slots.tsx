@@ -21,8 +21,9 @@ import { viewFor } from "./nodes";
 import { scanSourceOf } from "./sources";
 import { whenReason } from "./when";
 
-/** The context of a place about `scanId`: its view, that view's selection (else the zoom root). */
-export function useScanCtx(scanId: string | null | undefined, viewId?: string | null): ReportContext {
+/** The context of a place about `scanId`: its view, that view's selection (else the zoom root);
+ * `args`: what it was opened with (an `open` action's args). */
+export function useScanCtx(scanId: string | null | undefined, viewId?: string | null, args?: Record<string, unknown>): ReportContext {
   const where = useApp((s) => (viewId ? viewId : scanId ? (viewFor(scanId, s)?.viewId ?? null) : null));
   const selected = useApp((s) => (where ? (s.views[where]?.state.selected ?? null) : null));
   const zoom = useApp((s) => (where ? (s.views[where]?.state.zoom_node ?? null) : null));
@@ -31,8 +32,9 @@ export function useScanCtx(scanId: string | null | undefined, viewId?: string | 
   return useMemo(() => {
     // a real node (not an aggregate block): its key is its id
     const node = selected != null && selected > 0 && selected >>> 30 === 0 ? selected : zoom != null && zoom >= 0 ? zoom : null;
-    return { scan_id: scanId ?? null, view_id: where, node, selection: node != null ? [node] : [], compare_id: compare, zoom_node: zoom != null && zoom >= 0 ? zoom : null, filter };
-  }, [scanId, where, selected, zoom, compare, filter]);
+    const ctx: ReportContext = { scan_id: scanId ?? null, view_id: where, node, selection: node != null ? [node] : [], compare_id: compare, zoom_node: zoom != null && zoom >= 0 ? zoom : null, filter };
+    return args ? { ...ctx, args } : ctx;
+  }, [scanId, where, selected, zoom, compare, filter, args]);
 }
 
 /** Why a contribution can't show here (its `when`), or null. */
@@ -148,7 +150,7 @@ export function isKeptPanelTab(tab: Tab, s: AppState): boolean {
 
 export function PluginTabPage({ tab }: { tab: Tab }) {
   const p = tab.plugin!;
-  const ctx = useScanCtx(tab.scanId);
+  const ctx = useScanCtx(tab.scanId, undefined, p.args);
   const info = useApp((s) => (p.kind === "report" ? s.extensions?.reports.find((r) => r.id === p.id) : s.extensions?.panels.find((x) => x.id === p.id)));
   const plugin = info?.plugin ?? p.id.slice(0, p.id.lastIndexOf("."));
   const scanTitle = useApp((s) => (tab.scanId ? s.tabs.find((x) => x.kind === "scan" && x.scanId === tab.scanId)?.title : undefined));
@@ -235,7 +237,8 @@ let pagesCache: { key: string; pages: ReturnType<typeof inspectorPages> } | null
 /** A plugin page of the details column, following the selection of its view. */
 export function InspectorPluginPage({ id, viewId }: { id: string; viewId: string }) {
   const scanId = useApp((s) => s.views[viewId]?.state.scan_id ?? null);
-  const ctx = useScanCtx(scanId, viewId);
+  const args = useApp((s) => s.inspectorArgs?.[id]);
+  const ctx = useScanCtx(scanId, viewId, args);
   const panel = useApp((s) => !!s.extensions?.panels.find((p) => p.id === id && p.slot === "inspector"));
   return <Contribution kind={panel ? "panel" : "report"} id={id} ctx={ctx} compact hideTitle place="inspector" />;
 }

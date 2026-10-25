@@ -1619,7 +1619,7 @@ class PluginHost:
             opts: dict[str, Any] = {}
             for opt, skey in options:
                 with contextlib.suppress(KeyError):
-                    opts[opt] = self.server.settings.get(skey)
+                    opts[opt] = self.server.settings.get_value(skey)
             # the options are part of the key: two views with other options, or a change of them
             # (also through the view's own options), are other weights
             for opt, val in (getattr(basis, "options", None) or {}).items():
@@ -1681,7 +1681,7 @@ class PluginHost:
             out: dict[str, Any] = {}
             for opt, skey in options:
                 with contextlib.suppress(KeyError):
-                    out[opt] = self.server.settings.get(skey)
+                    out[opt] = self.server.settings.get_value(skey)
             return out
 
         def key() -> object:
@@ -1746,7 +1746,7 @@ class PluginHost:
         if o.default_from is None:
             return o.default
         try:
-            value = self.server.settings.get(f"plugin.{plugin}.{o.default_from}")
+            value = self.server.settings.get_value(f"plugin.{plugin}.{o.default_from}")
         except KeyError:
             return o.default
         if not isinstance(value, type(o.default)):

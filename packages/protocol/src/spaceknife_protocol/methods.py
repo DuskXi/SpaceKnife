@@ -43,6 +43,7 @@ from .ops import (
     PathFormsParams,
 )
 from .palette import (
+    PaletteCheckManyParams,
     PaletteCheckParams,
     PaletteClearParams,
     PaletteCommand,
@@ -305,6 +306,13 @@ PALETTE_CHECK = MethodSpec(
     PaletteCheckParams,
     PaletteCommand,
     "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+)
+PALETTE_CHECK_MANY = MethodSpec(
+    "palette.check_many",
+    PaletteCheckManyParams,
+    PaletteCommandList,
+    "Several commands' states where the user is, in the order asked (a context menu, the details "
+    "panel's actions: unavailable ones greyed with the reason).",
 )
 PALETTE_PATHS = MethodSpec(
     "palette.paths",
@@ -664,6 +672,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         PALETTE_COMMANDS,
         PALETTE_QUERY,
         PALETTE_CHECK,
+        PALETTE_CHECK_MANY,
         PALETTE_PATHS,
         PALETTE_PREVIEW,
         PALETTE_REMEMBER,

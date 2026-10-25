@@ -113,11 +113,20 @@ description = { zh = "只列出不小于它的文件。", en = "Only files at le
 control = "number"
 default = 1048576
 unit = "B"
+
+[[settings]]                  # a list: entries of the same fields; ctx.settings["rules"] is a list of dicts
+name = "rules"
+title = { zh = "规则", en = "Rules" }
+default = [{ glob = "*.log", days = 90 }]
+fields = [{ name = "glob", title = { zh = "通配符", en = "Pattern" }, default = "*", max_length = 100 },
+  { name = "days", title = { zh = "天数", en = "Days" }, default = 30, min = 1 }]
 """,
         test="""
-async def test_min_size(host: MockHost) -> None:
+async def test_settings(host: MockHost) -> None:
     await host.set_setting("min_size", 1 << 30)  # as the settings page does; the plugin sees it next
     assert host.server.settings.get(f"plugin.{host.plugin_id}.min_size") == 1 << 30
+    await host.set_setting("rules", [{"glob": "*.tmp"}])  # each entry checked; a missing field: its default
+    assert host.server.settings.get_value(f"plugin.{host.plugin_id}.rules") == [{"glob": "*.tmp", "days": 30}]
 """,
         needs_code=False,
         doc="kind-setting",

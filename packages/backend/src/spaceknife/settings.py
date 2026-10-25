@@ -21,13 +21,23 @@ from typing import Any, Literal
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model
 
-from spaceknife_protocol.settings import SettingMeta, SettingOption, SettingsState, SettingValue
+from spaceknife_protocol.settings import (
+    TEXT_MAX,
+    SettingEntry,
+    SettingField,
+    SettingMeta,
+    SettingOption,
+    SettingScalar,
+    SettingsState,
+    SettingValue,
+)
 from spaceknife_protocol.text import Text
 
 from . import i18n, paths
 from .i18n import Texts, _
 
 FILE_VERSION = 1
+LIST_ITEMS = 50  # a list setting's most entries when it does not say (the SDK's default too)
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
 
@@ -41,7 +51,7 @@ class Spec:
     description: str
     control: str
     default: SettingValue
-    options: tuple[tuple[SettingValue, str] | tuple[SettingValue, str, str], ...] = ()
+    options: tuple[tuple[SettingScalar, str] | tuple[SettingScalar, str, str], ...] = ()
     min: float | None = None
     max: float | None = None
     step: float | None = None
@@ -56,6 +66,9 @@ class Spec:
     options_from: str | None = None
     plugin: str | None = None  # a plugin's setting (key plugin.<id>.<name>, category plugins)
     texts: tuple[tuple[str, Text], ...] = ()  # a plugin's texts by field (name, description, group …)
+    max_length: int | None = None  # text, textarea: the longest value (None: TEXT_MAX)
+    fields: tuple[Spec, ...] = ()  # list: the fields of each entry (key: the field's name)
+    max_items: int | None = None  # list: the most entries (None: LIST_ITEMS)
 
     def text(self, name: str, source: str) -> str:
         """A text field in the interface language: a plugin's own pair, else the message id."""
@@ -69,6 +82,11 @@ class Spec:
 TEXT = Texts(
     {
         "invalid_value": "「{name}」的值不合法：{msg}",
+        "invalid_entry": "「{name}」第 {n} 项：{msg}",
+        "not_list": "「{name}」应是一个列表",
+        "too_many": "「{name}」最多 {limit} 项",
+        "unknown_field": "没有「{field}」这一栏",
+        "not_entry": "每一项应是一组栏目的值",
         "unreadable": "无法读取设置文件：{reason}",
         "invalid_file": "设置文件不合法，继续使用上一次的有效设置：{reason}",
         "unknown": "未知设置：{keys}",
@@ -87,7 +105,7 @@ LOAD_LABELS = Texts(
         "custom": "自定义",
     }
 )
-LOAD_LEVELS: tuple[tuple[SettingValue, str], ...] = tuple((k, LOAD_LABELS.raw(k)) for k in LOAD_LABELS)
+LOAD_LEVELS: tuple[tuple[SettingScalar, str], ...] = tuple((k, LOAD_LABELS.raw(k)) for k in LOAD_LABELS)
 # the dark theme's presets, which also name the slot: the light theme has its own colour for each
 # (design/tokens color.accent.*), so the stored value stays the same when the theme changes
 ACCENTS = ("#8B9CFF", "#D4FF3A", "#5EC8B8", "#F2A65A")
@@ -985,7 +1003,7 @@ def _field(spec: Spec, *, aliased: bool = True) -> tuple[Any, Any]:
         return float | int, Field(spec.default, alias=alias, ge=spec.min, le=spec.max)
     if spec.control == "color":
         return str, Field(spec.default, alias=alias, pattern=r"^#[0-9A-Fa-f]{6}$")
-    return str, Field(spec.default, alias=alias, max_length=64)
+    return str, Field(spec.default, alias=alias, max_length=spec.max_length or TEXT_MAX)
 
 
 Values: type[BaseModel] = create_model(  # type: ignore[call-overload]
@@ -1008,12 +1026,12 @@ class ConflictError(SettingsError):
     pass
 
 
-def dynamic_options(spec: Spec) -> list[tuple[SettingValue, str]]:
+def dynamic_options(spec: Spec) -> list[tuple[SettingScalar, str]]:
     """The options of an ``options_from`` setting now: the built-in ones, then the plugins'."""
     from .extensions import EXTENSIONS
     from .layout import registry as visuals
 
-    out: list[tuple[SettingValue, str]] = [(o[0], o[1]) for o in spec.options]
+    out: list[tuple[SettingScalar, str]] = [(o[0], o[1]) for o in spec.options]
     known = {o[0] for o in out}
     if spec.options_from == "visualizations":
         for v in visuals.all_visuals():
@@ -1050,8 +1068,38 @@ def validate(values: dict[str, Any]) -> dict[str, SettingValue]:
 _ITEM_MODELS: dict[tuple[str, int], type[BaseModel]] = {}
 
 
+def _validate_list(spec: Spec, value: Any) -> list[SettingEntry]:
+    """A ``list`` setting's value: at most ``max_items`` entries, each with exactly its fields (a
+    missing one gets the field's default), each value checked as that field."""
+    name = spec.text("name", spec.name)
+    if not isinstance(value, list):
+        raise SettingsError(TEXT["not_list"].format(name=name))
+    limit = spec.max_items or LIST_ITEMS
+    if len(value) > limit:
+        raise SettingsError(TEXT["too_many"].format(name=name, limit=limit))
+    keys = {f.key for f in spec.fields}
+    out: list[SettingEntry] = []
+    for n, entry in enumerate(value, 1):
+        if not isinstance(entry, dict):
+            raise SettingsError(TEXT["invalid_entry"].format(name=name, n=n, msg=TEXT["not_entry"]))
+        unknown = sorted(str(k) for k in set(entry) - keys)
+        if unknown:
+            msg = TEXT["unknown_field"].format(field=unknown[0])
+            raise SettingsError(TEXT["invalid_entry"].format(name=name, n=n, msg=msg))
+        row: SettingEntry = {}
+        for f in spec.fields:
+            try:
+                row[f.key] = validate_item(f, entry.get(f.key, f.default))  # type: ignore[assignment]
+            except SettingsError as exc:
+                raise SettingsError(TEXT["invalid_entry"].format(name=name, n=n, msg=str(exc))) from exc
+        out.append(row)
+    return out
+
+
 def validate_item(spec: Spec, value: Any) -> SettingValue:
     """One value of ``spec``; SettingsError says what is wrong with it."""
+    if spec.control == "list":
+        return _validate_list(spec, value)
     key = (spec.key, id(spec))
     model = _ITEM_MODELS.get(key)
     if model is None:
@@ -1143,9 +1191,30 @@ def meta() -> list[SettingMeta]:
                 depends=s.depends,
                 plugin=s.plugin,
                 placeholder=s.text("placeholder", "") if s.plugin else "",
+                max_length=s.max_length,
+                fields=[_field_meta(f) for f in s.fields],
+                max_items=(s.max_items or LIST_ITEMS) if s.control == "list" else None,
             )
         )
     return out
+
+
+def _field_meta(f: Spec) -> SettingField:
+    """A field of a list setting's entries, in the interface language."""
+    return SettingField(
+        name=f.key,
+        title=f.text("name", f.name),
+        description=f.text("description", f.description) if f.description else "",
+        control=f.control,  # type: ignore[arg-type]
+        default=f.default,  # type: ignore[arg-type]
+        options=_options(f),
+        min=f.min,
+        max=f.max,
+        step=f.step,
+        unit=f.text("unit", f.unit) if f.unit else "",
+        placeholder=f.text("placeholder", ""),
+        max_length=f.max_length,
+    )
 
 
 def system_unit_base() -> Literal[1000, 1024]:
@@ -1282,7 +1351,16 @@ class SettingsStore:
 
     # ------------------------------------------------------------ access
 
-    def get(self, key: str) -> SettingValue:
+    def get(self, key: str) -> SettingScalar:
+        """A setting that holds one value (every built-in one); a plugin's list setting raises
+        TypeError (read it with :meth:`get_value`)."""
+        value = self.get_value(key)
+        if isinstance(value, list):
+            raise TypeError(f"{key} holds a list of entries: read it with get_value")
+        return value
+
+    def get_value(self, key: str) -> SettingValue:
+        """Any setting's value, a plugin's list setting too (its entries)."""
         if key in self.values:
             return self.values[key]
         if key in self.plugin_values:
@@ -1301,7 +1379,9 @@ class SettingsStore:
         out: dict[str, SettingValue] = {}
         for spec in plugin_specs():
             if spec.key.startswith(prefix):
-                out[spec.key[len(prefix) :]] = self.plugin_values.get(spec.key, spec.default)
+                value = self.plugin_values.get(spec.key, spec.default)
+                # a list: the plugin's own copy (its code may change it without changing the setting)
+                out[spec.key[len(prefix) :]] = [dict(e) for e in value] if isinstance(value, list) else value
         return out
 
     def update(self, patch: dict[str, SettingValue], version: int | None = None) -> None:

@@ -45,6 +45,20 @@ async def test_report_and_cleanup(host: MockHost) -> None:
     assert all(p.reason.startswith("与 ") for p in proposed)
 
 
+async def test_keep_only_this_one(host: MockHost) -> None:
+    b = host.find("b.bin")
+    # greyed in the menu until a search found copies, and always on folders and unique files
+    assert await host.command_available("keep_this", node=b) == "先查找一次重复文件"
+    await host.call("find")
+    assert await host.command_available("keep_this", node=b) is None
+    assert await host.command_available("keep_this", node=host.find("c.bin")) == "没有内容和它相同的文件"
+    assert await host.command_available("keep_this", node=host.find("sub")) == "只用于文件"
+    # run on b.bin as its context menu does: the cleanup gets keep = "node", b.bin stays
+    proposed = await host.command("keep_this", node=b)
+    assert sorted(PurePath(p.path).name for p in proposed) == ["a.bin", "d.bin"]
+    assert all("b.bin" in p.reason for p in proposed)
+
+
 async def test_field_and_node_set(host: MockHost) -> None:
     # they only read the last search (a field has 1 s): nothing before one ran
     assert await host.fields(node=host.find("sub/d.bin")) == []

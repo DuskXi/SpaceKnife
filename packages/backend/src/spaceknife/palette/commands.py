@@ -55,13 +55,15 @@ class Context:
     settings: Any = None  # the SettingsStore (commands available while a setting is on)
     plugins: frozenset[str] = frozenset()  # enabled plugins
     scan_source: str = ""  # the scan source of the scan in front (a plugin's full id), "" for disks
+    node: int | None = None  # what the command is about when not the selection (a context menu's block)
 
     @property
     def selected_node(self) -> int | None:
         v = self.view
-        if v is None or v.selected is None or not 0 < v.selected < len(v.store):
+        chosen = self.node if self.node is not None else v.selected if v is not None else None
+        if v is None or chosen is None or not 0 < chosen < len(v.store):
             return None
-        return v.selected
+        return chosen
 
 
 Need = Callable[[Context], str | None]  # None when satisfied, else the reason shown in place of the status

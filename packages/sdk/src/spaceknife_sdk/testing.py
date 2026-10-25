@@ -641,18 +641,31 @@ class MockHost:
         filter: str = "",
         **args: Any,
     ) -> Any:
-        """Run one of the plugin's commands as the app does with ``node`` selected (its ``when``
-        and ``check`` are not asked: :meth:`command_available` does). A ``call`` action calls its
-        method with the :class:`ActionContext` (``args`` added to the action's own) and returns
-        what it returned; any other action is returned as it is (``{"kind": "open", …}``)."""
+        """Run one of the plugin's commands as the app does on ``node`` (a context menu's block, or
+        the selection; its ``when`` and ``check`` are not asked: :meth:`command_available` does).
+        ``args`` are added to the action's own, as a panel's ``sk.host.command(id, args)`` does. A
+        ``call`` action calls its method with the :class:`ActionContext` and returns what it
+        returned; a ``cleanup`` action runs the cleanup and returns its candidates (as
+        :meth:`cleanup`); any other action is returned as a dict with the args it would carry
+        (``{"kind": "open", "target": …, "args": …}``)."""
         cmd = self._command(name)
         action = getattr(cmd, "action", None)
         if action is None:
             return None
-        if getattr(action, "kind", "") != "call":
-            return action.model_dump(mode="json") if hasattr(action, "model_dump") else action
+        kind = getattr(action, "kind", "")
+        merged = {**(getattr(action, "args", None) or {}), **args}
+        if kind == "cleanup":
+            owner, _, local = action.cleanup.rpartition(".")
+            if owner != self.plugin_id:
+                raise ValueError(f"{name!r} runs another plugin's cleanup ({action.cleanup})")
+            return await self.cleanup(local, **self._where(node, selection, zoom_node, filter), args=merged)
+        if kind != "call":
+            out = action.model_dump(mode="json") if hasattr(action, "model_dump") else dict(action)
+            if "args" in out:
+                out["args"] = merged
+            return out
         host = await self._ready()
-        ctx = self._where(node, selection, zoom_node, filter) | {"args": {**action.args, **args}}
+        ctx = self._where(node, selection, zoom_node, filter) | {"args": merged}
         method = action.method.rsplit(".", 1)[-1]
         value, _ = await host.call(
             self.plugin_id, "method", method, ctx, session=self.session, ctx=self._ctx(node)

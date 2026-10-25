@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.2";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "bbb6d45e00c7cce6";
+export const SCHEMA_HASH = "63ff9bdcf85c4b50";
 
 /** Where the user is when an action runs (sent as the params of a ``call`` action). */
 export interface ActionContext {
@@ -300,6 +300,8 @@ export interface ClassesUpdateParams {
 }
 
 export interface CleanupAction {
+  /** The cleanup's ReportContext.args */
+  args: Record<string, unknown>;
   /** Full id of a cleanup contribution */
   cleanup: string;
   kind: "cleanup";
@@ -365,7 +367,7 @@ export interface ColumnSpec {
 }
 
 export interface CommandAction {
-  /** report.export: { format = "<format or template>" } picks it */
+  /** Given to the command's own action (added to its args); report.export: format (a format or template), scope (zoom | all | selection), options, use_filter */
   args: Record<string, unknown>;
   command: string;
   kind: "command";
@@ -616,8 +618,8 @@ export interface ExportIssue {
  * ``export_format``); its value goes to export.run ``options`` under ``name``.
  */
 export interface ExportOption {
-  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text";
-  default: boolean | number | string;
+  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text" | "textarea" | "list";
+  default: boolean | number | string | (Record<string, boolean | number | string>)[];
   description: string;
   /** A heading the dialog puts it under ( = none) */
   group: string;
@@ -636,7 +638,7 @@ export interface ExportRunParams {
   /** scope node: the node */
   node?: number | null;
   /** Values of the format's options (by name) */
-  options?: Record<string, boolean | number | string>;
+  options?: Record<string, boolean | number | string | (Record<string, boolean | number | string>)[]>;
   /** The file to write (its folder must exist) */
   path: string;
   /** The view's zoom root, every scan root, the selected nodes (selection, else the view's), or one node (node) */
@@ -1228,11 +1230,21 @@ export interface OpTaskParams {
 }
 
 export interface OpenAction {
-  /** A report's ReportContext.args */
+  /** ReportContext.args of the report, or the panel's sk.context.args (an open panel is told again: sk.onContext) */
   args: Record<string, unknown>;
   kind: "open";
   /** report:<full id> | panel:<full id> | settings:<plugin id> */
   target: string;
+}
+
+/**
+ * Several commands where the user is (a context menu's, the details panel's): each enabled or
+ * disabled with the reason, as palette.check answers one.
+ */
+export interface PaletteCheckManyParams {
+  context: PaletteContext;
+  /** Command ids (palette.commands) */
+  ids: string[];
 }
 
 /** One command, where the user is: a keyboard shortcut runs it only when the palette would. */
@@ -1279,6 +1291,8 @@ export interface PaletteCommandList {
 export interface PaletteContext {
   /** Items in the delete basket (held by the frontend until M6) */
   basket?: number;
+  /** The node the commands are about (a context menu's block, the details panel's node); None: the view's selection */
+  node?: number | null;
   scan_id?: string | null;
   tab: "scan" | "start" | "settings";
   view_id?: string | null;
@@ -2035,28 +2049,53 @@ export interface SettingAction {
   key: string;
   kind: "setting";
   toggle: boolean;
-  value: boolean | number | string | null;
+  value: boolean | number | string | (Record<string, boolean | number | string>)[] | null;
 }
 
 export interface SettingChange {
-  after: boolean | number | string;
-  before: boolean | number | string;
+  after: boolean | number | string | (Record<string, boolean | number | string>)[];
+  before: boolean | number | string | (Record<string, boolean | number | string>)[];
   key: string;
   name: string;
+}
+
+/** One field of a ``list`` setting's entries (a plugin's setting), in the interface language. */
+export interface SettingField {
+  /** Never list */
+  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text" | "textarea" | "list";
+  default: boolean | number | string;
+  description: string;
+  max: number | null;
+  /** text, textarea: the longest value */
+  max_length: number | null;
+  min: number | null;
+  /** Its key in each entry */
+  name: string;
+  options: SettingOption[];
+  placeholder: string;
+  step: number | null;
+  title: string;
+  unit: string;
 }
 
 export interface SettingMeta {
   applies: "now" | "next_scan" | "new_views";
   category: "general" | "appearance" | "treemap" | "scan" | "classes" | "tags" | "keys" | "advanced" | "about" | "plugins";
-  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text";
+  control: "switch" | "segmented" | "select" | "multi" | "number" | "slider" | "color" | "text" | "textarea" | "list";
   /** 'key' (a switch that must be on) or 'key=value' for this row to be editable */
   depends: string | null;
   description: string;
   enabled: boolean;
+  /** list: the fields of each entry */
+  fields: SettingField[];
   group: string;
   group_note: string;
   key: string;
   max: number | null;
+  /** list: the most entries it holds */
+  max_items: number | null;
+  /** text, textarea: the longest value in characters (None: 64) */
+  max_length: number | null;
   min: number | null;
   name: string;
   options: SettingOption[];
@@ -2110,7 +2149,7 @@ export interface SettingsResetParams {
 }
 
 export interface SettingsState {
-  defaults: Record<string, boolean | number | string>;
+  defaults: Record<string, boolean | number | string | (Record<string, boolean | number | string>)[]>;
   /** The settings file on disk is invalid; the last valid values are in use */
   error: string;
   /** Interface language after resolving 'system' */
@@ -2124,14 +2163,14 @@ export interface SettingsState {
   snapshots: string;
   /** Size unit base after resolving 'system' */
   unit_base: 1000 | 1024;
-  values: Record<string, boolean | number | string>;
+  values: Record<string, boolean | number | string | (Record<string, boolean | number | string>)[]>;
   /** Bumped by every change; send it back with settings.update */
   version: number;
 }
 
 export interface SettingsUpdateParams {
   /** Keys to change; others keep their value */
-  values: Record<string, boolean | number | string>;
+  values: Record<string, boolean | number | string | (Record<string, boolean | number | string>)[]>;
   /** Reject the change if the document moved on since */
   version?: number | null;
 }
@@ -2846,6 +2885,8 @@ export interface Methods {
   "ops.undo": { params: OpTaskParams; result: EmptyResult };
   /** One command's state where the user is (a keyboard shortcut runs it only when it is enabled). */
   "palette.check": { params: PaletteCheckParams; result: PaletteCommand };
+  /** Several commands' states where the user is, in the order asked (a context menu, the details panel's actions: unavailable ones greyed with the reason). */
+  "palette.check_many": { params: PaletteCheckManyParams; result: PaletteCommandList };
   /** Clear the recents of a scan target and the shared filters. */
   "palette.clear": { params: PaletteClearParams; result: EmptyResult };
   /** All commands with names, icons and default keys. */

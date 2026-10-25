@@ -14,6 +14,7 @@ from spaceknife_protocol.errors import ErrorCode
 from spaceknife_protocol.filter_syntax import parse
 from spaceknife_protocol.methods import (
     PALETTE_CHECK,
+    PALETTE_CHECK_MANY,
     PALETTE_CLEAR,
     PALETTE_COMMANDS,
     PALETTE_PATHS,
@@ -123,6 +124,7 @@ def install(server: Server) -> None:
             settings=server.settings,
             plugins=server.plugins.enabled_ids(),
             scan_source=(handle.plugin_source or "") if handle is not None else "",
+            node=c.node if view is not None else None,
         )
         return ctx, handle, view
 
@@ -261,6 +263,28 @@ def install(server: Server) -> None:
         update = server.updates.status()  # on the loop, as for palette.query
         # off the loop: counting the target's snapshots lists a folder
         return await asyncio.to_thread(check, session, params, update)
+
+    def check_many(
+        session: Session, params: pp.PaletteCheckManyParams, update: UpdateStatus
+    ) -> pp.PaletteCommandList:
+        by_id = {c.id: c for c in commands_for(session)}
+        unknown = [i for i in params.ids if i not in by_id]
+        if unknown:
+            raise RpcError(ErrorCode.INVALID_PARAMS, f"unknown command: {unknown[0]}")
+        ctx, _, _ = context_of(session, params.context, update)  # once for all of them
+        out = []
+        for cid in params.ids:
+            enabled, text = command_state(by_id[cid], ctx)
+            out.append(wire(by_id[cid], session, status=text, enabled=enabled))
+        return pp.PaletteCommandList(commands=out)
+
+    @router.method(PALETTE_CHECK_MANY)
+    async def palette_check_many(
+        session: Session, params: pp.PaletteCheckManyParams
+    ) -> pp.PaletteCommandList:
+        update = server.updates.status()
+        # off the loop: a plugin's check method answers within 50 ms each
+        return await asyncio.to_thread(check_many, session, params, update)
 
     # ------------------------------------------------------------------ palette.paths
 

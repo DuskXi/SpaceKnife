@@ -12,7 +12,7 @@ import difflib
 import re
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
 from pydantic import (
     BaseModel,
@@ -36,7 +36,7 @@ from spaceknife_protocol.plugins import (
     valid_local_name,
     valid_plugin_id,
 )
-from spaceknife_protocol.settings import SettingApplies, SettingControl, SettingValue
+from spaceknife_protocol.settings import TEXT_MAX, SettingApplies, SettingControl, SettingScalar, SettingValue
 from spaceknife_protocol.text import Text, TextLike
 
 from .actions import normalize_action
@@ -61,7 +61,8 @@ WHEN_WORDS = (
 WHEN_PREFIXES = ("setting:", "cap:", "plugin:", "source:", "ext:")
 MENUS = ("node", "inspector", "toolbar", "start")
 REFRESH_WORDS = ("open", "selection", "scan", "frame", "compare", "manual")
-HOOKS = ("start", "stop", "scan_done", "scan_closed", "settings", "lang", "basket")
+HookEvent = Literal["start", "stop", "scan_done", "scan_closed", "settings", "lang", "basket"]
+HOOKS: tuple[str, ...] = get_args(HookEvent)
 COLOR_BY = ("ext", "class", "age", "size", "depth", "name", "set", "insight")
 SIZE_METRICS = ("alloc", "size", "files", "items", "code")
 BASE_VISUALS = ("treemap", "flame", "flame_polar", "shapes")
@@ -131,13 +132,20 @@ class KeySpec(Spec):
     override: bool = False
 
 
+TEXTAREA_MAX = 4096  # a textarea's longest value when it does not say (max_length); text: TEXT_MAX
+TEXT_LIMIT = 16384  # the most max_length may say
+LIST_ITEMS = 50  # a list setting's most entries when it does not say (max_items)
+LIST_ITEMS_LIMIT = 500
+LIST_FIELDS_LIMIT = 12
+
+
 class SettingSpec(Spec):
     name: LocalName
     title: TextLike
     default: SettingValue
     control: SettingControl | None = None
     description: TextLike | None = None
-    options: list[tuple[SettingValue, TextLike]] = Field(default_factory=list)
+    options: list[tuple[SettingScalar, TextLike]] = Field(default_factory=list)
     min: float | None = None
     max: float | None = None
     step: float | None = None
@@ -151,12 +159,38 @@ class SettingSpec(Spec):
         default=None,
         description="An export option: start from the current value of this setting of the plugin",
     )
+    max_length: int | None = Field(
+        default=None,
+        ge=1,
+        le=TEXT_LIMIT,
+        description=f"text, textarea: the longest value in characters (default {TEXT_MAX}; textarea "
+        f"{TEXTAREA_MAX})",
+    )
+    fields: list[SettingSpec] = Field(
+        default_factory=list,
+        max_length=LIST_FIELDS_LIMIT,
+        description="list: the fields of each entry (settings without lists: switch, number, text …)",
+    )
+    max_items: int | None = Field(
+        default=None, ge=1, le=LIST_ITEMS_LIMIT, description=f"list: the most entries (default {LIST_ITEMS})"
+    )
+
+    @property
+    def text_limit(self) -> int:
+        """The longest text value (text, textarea, and a text field of a list's entries)."""
+        return self.max_length or (TEXTAREA_MAX if self.control == "textarea" else TEXT_MAX)
+
+    @property
+    def items_limit(self) -> int:
+        return self.max_items or LIST_ITEMS
 
     @model_validator(mode="after")
     def _control(self) -> SettingSpec:
         if self.control is None:
             control: SettingControl = (
-                "switch"
+                "list"
+                if isinstance(self.default, list)
+                else "switch"
                 if isinstance(self.default, bool)
                 else "segmented"
                 if 0 < len(self.options) <= 4
@@ -167,25 +201,86 @@ class SettingSpec(Spec):
                 else "text"
             )
             object.__setattr__(self, "control", control)
-        if self.control == "switch" and not isinstance(self.default, bool):
-            raise ValueError("a switch needs a true/false default")
-        if self.control in ("number", "slider") and (
-            isinstance(self.default, bool) or not isinstance(self.default, int | float)
-        ):
-            raise ValueError(f"a {self.control} needs a number default")
-        values = [o[0] for o in self.options]
-        if self.control == "multi":
-            if not self.options or not isinstance(self.default, str):
-                raise ValueError('multi needs options and a text default: the chosen values joined by ","')
-            if any(not isinstance(v, str) or "," in v for v in values):
-                raise ValueError("the options of multi are texts without commas")
-            if any(x not in values for x in self.default.split(",") if x):
-                raise ValueError("each value of the default must be one of the options")
-        elif self.options and self.default not in values:
-            raise ValueError("the default must be one of the options")
+        if self.control == "list":
+            self._check_list()
+            return self
+        if self.fields or self.max_items is not None:
+            raise ValueError('fields and max_items are for control = "list"')
+        if isinstance(self.default, list):
+            raise ValueError('a list default needs control = "list" and its fields')
+        if self.max_length is not None and self.control not in ("text", "textarea"):
+            raise ValueError("max_length is for text and textarea")
+        problem = scalar_problem(self, self.default)
+        if problem:
+            raise ValueError(f"the default {problem}")
         if self.control in ("segmented", "select") and not self.options:
             raise ValueError(f"a {self.control} needs options")
         return self
+
+    def _check_list(self) -> None:
+        if not self.fields:
+            raise ValueError('a list needs fields: fields = [{ name = "…", title = "…", default = … }, …]')
+        names = [f.name for f in self.fields]
+        if len(set(names)) != len(names):
+            raise ValueError("the fields of a list have different names")
+        for f in self.fields:
+            if f.control == "list":
+                raise ValueError(f"field {f.name!r}: a list can't hold lists")
+        if not isinstance(self.default, list):
+            raise ValueError("a list's default is a list of entries: [{ field = value, … }, …]")
+        if len(self.default) > self.items_limit:
+            raise ValueError(
+                f"the default has {len(self.default)} entries, more than max_items ({self.items_limit})"
+            )
+        if self.options or self.max_length is not None:
+            raise ValueError("a list's options and lengths belong to its fields")
+        for i, entry in enumerate(self.default, 1):
+            unknown = sorted(set(entry) - set(names))
+            if unknown:
+                raise ValueError(
+                    f"entry {i} of the default: no field {unknown[0]!r} (fields: {', '.join(names)})"
+                )
+            for f in self.fields:
+                problem = scalar_problem(f, entry.get(f.name, f.default))
+                if problem:
+                    raise ValueError(f"entry {i} of the default, field {f.name!r}: {problem}")
+        # every entry with every field (a missing one: the field's default), as the host stores them
+        full = [{f.name: entry.get(f.name, f.default) for f in self.fields} for entry in self.default]
+        object.__setattr__(self, "default", full)
+
+
+def scalar_problem(spec: SettingSpec, value: Any) -> str:
+    """What is wrong with ``value`` for a setting that is not a list ('' when it fits)."""
+    control = spec.control
+    if isinstance(value, list | dict):
+        return "is a list, which only a list setting holds"
+    if control == "switch" and not isinstance(value, bool):
+        return "must be true or false (a switch)"
+    if control in ("number", "slider"):
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            return f"must be a number (a {control})"
+        if (spec.min is not None and value < spec.min) or (spec.max is not None and value > spec.max):
+            return f"{value} is outside {spec.min}–{spec.max}"
+    values = [o[0] for o in spec.options]
+    if control == "multi":
+        if not spec.options or not isinstance(value, str):
+            return 'needs options and text: the chosen values joined by ","'
+        if any(not isinstance(v, str) or "," in v for v in values):
+            return "(multi) has options with commas or that are not texts"
+        if any(x not in values for x in value.split(",") if x):
+            return "has a value that is not one of the options"
+        return ""
+    if spec.options and value not in values:
+        return f"{value!r} is not one of the options"
+    if control in ("text", "textarea"):
+        if not isinstance(value, str):
+            return "must be text"
+        if len(value) > spec.text_limit:
+            return (
+                f"is {len(value)} characters, longer than max_length ({spec.text_limit}): declare "
+                f"max_length = {min(TEXT_LIMIT, max(len(value), 64))} or shorten it"
+            )
+    return ""
 
 
 class ReportSpec(Spec):
@@ -429,6 +524,13 @@ class ExportFormatSpec(Spec):
     def _ext(cls, v: str) -> str:
         return v.lstrip(".")  # one form everywhere: without the dot
 
+    @field_validator("options")
+    @classmethod
+    def _options(cls, v: list[SettingSpec]) -> list[SettingSpec]:
+        if any(o.control == "list" for o in v):
+            raise ValueError("an export option can't be a list (the export dialog shows single values)")
+        return v
+
 
 class ExportTemplateSpec(Spec):
     name: LocalName
@@ -549,7 +651,7 @@ class AnnotatorSpec(Spec):
 
 class HookSpec(Spec):
     name: LocalName
-    event: Literal["start", "stop", "scan_done", "scan_closed", "settings", "lang"]
+    event: HookEvent
     timeout: float = Field(default=30.0, gt=0, le=600, description="Seconds it may run (longer work: a task)")
 
 

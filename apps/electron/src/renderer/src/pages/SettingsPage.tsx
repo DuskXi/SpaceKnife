@@ -19,8 +19,11 @@ import { AboutEntry, AboutHeader, ComponentsGroup, ReleaseTimeline } from "./Abo
 import { AdvancedTools, ClearTags } from "./AdvancedTools";
 import { ClassesEditor } from "./ClassesEditor";
 import { PluginsPage } from "./PluginsPage";
+import { type Entry, ListEditor, TextAreaBox } from "./SettingList";
 
-type Value = boolean | number | string;
+type Value = boolean | number | string | Entry[];
+/** Controls laid out under their name, the full width of the row (structured plugin settings). */
+const WIDE = new Set(["textarea", "list"]);
 
 // name and note translate each time they are read (getters), so a language switch applies (M7.5)
 export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName; readonly note: string }[] = [
@@ -279,7 +282,7 @@ function Row({ meta, query }: { meta: SettingMeta; query?: string }) {
   const id = `set-${meta.key}`;
   const save = (v: Value) => void updateSettings({ [meta.key]: v });
   return (
-    <div className={`set-row${disabled ? " disabled" : ""}`} id={id}>
+    <div className={`set-row${disabled ? " disabled" : ""}${WIDE.has(meta.control) ? " wide" : ""}`} id={id}>
       <div className="set-text">
         <div className="set-name">
           <Mark text={meta.name} query={query} />
@@ -374,6 +377,10 @@ function Control(props: { meta: SettingMeta; value: Value | undefined; disabled:
           ))}
         </div>
       );
+    case "textarea":
+      return <TextAreaBox meta={meta} value={String(value ?? "")} disabled={disabled} onSave={onSave} />;
+    case "list":
+      return <ListEditor meta={meta} value={Array.isArray(value) ? value : []} disabled={disabled} onSave={onSave} />;
     case "slider":
       return <Slider meta={meta} value={Number(value ?? 0)} disabled={disabled} onSave={onSave} />;
     case "number":
@@ -498,7 +505,7 @@ function TextBox({ meta, value, disabled, onSave }: { meta: SettingMeta; value: 
       className="set-text-input"
       aria-label={meta.name}
       placeholder={meta.plugin ? meta.placeholder : t("未命名")}
-      maxLength={64}
+      maxLength={meta.max_length ?? 64}
       value={text}
       disabled={disabled}
       onChange={(e) => setText(e.target.value)}

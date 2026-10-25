@@ -1,7 +1,7 @@
 // Everything that talks to the backend: connection, scans, views, filter, tags, updates.
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
-import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
+import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, SettingsUpdateParams, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
 import { Rpc, RpcError } from "@/protocol/rpc";
 // the built-in visualizations register before the first hello announces their layouts
@@ -698,7 +698,7 @@ export function applySettings(state: SettingsState): void {
 }
 
 /** Change settings; saved by the backend at once (UI-W7-22). Retries once after a version conflict. */
-export async function updateSettings(values: Record<string, boolean | number | string>): Promise<boolean> {
+export async function updateSettings(values: SettingsUpdateParams["values"]): Promise<boolean> {
   set({ settingsSave: { state: "saving", message: "" } });
   for (let attempt = 0; attempt < 2; attempt++) {
     try {

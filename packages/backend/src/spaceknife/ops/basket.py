@@ -12,7 +12,10 @@ Freeable space (§2.3) is allocation, minus cloud placeholders (nothing stored l
 links whose other names are not all in the basket (deleting one name frees nothing); a group of
 links that is complete counts once, for the first item holding one of its names. Links are found
 by ``(volume, ino)`` with the scan's ``ino`` / ``nlink`` columns (MFT record numbers on Windows;
-the store keeps no ``st_dev``: one scan root is one file system).
+the store keeps no ``st_dev``: one scan root is one file system). Where the scan recorded no file id
+(a hard scan on Windows lists folders without opening files), the basket asks the system for the
+files' ids itself: every file put in directly, and the files inside folders while there are at most
+``STAT_IDS_MAX`` of them per item (each one is an open of the file).
 
 Every method takes the basket's lock. Methods given a store read it, so they must run where that
 is safe: on the event loop thread, or on a worker inside ``STRUCTURE.read()`` (store.lock).
@@ -895,9 +898,18 @@ def _measure(store: NodeStore, nodes: Sequence[int], *, members: bool = False) -
     counted = (flags & np.uint32(Flag.HARDLINK_DUP)) == 0
     cloud = ((flags & np.uint32(Flag.CLOUD)) != 0) & (kinds != Kind.DIR)
     nlinks = c["nlink"][ids].astype(np.int64)
-    inos = c["ino"][ids]
-    linked = (kinds == Kind.FILE) & (nlinks > 1) & (inos != 0) & ~cloud
+    inos = c["ino"][ids].astype(np.uint64)
     allocs = c["alloc"][ids].astype(np.int64)
+    # files the scan holds no id for (a hard scan on Windows): the system's ids, a bounded number
+    unknown = np.flatnonzero((kinds == Kind.FILE) & (inos == 0) & ~cloud & counted & (allocs > 0))
+    if len(unknown) > STAT_IDS_MAX:
+        direct = np.asarray([n for n in nodes if int(c["kind"][n]) == Kind.FILE], dtype=np.int64)
+        unknown = unknown[np.isin(ids[unknown], direct)][:STAT_IDS_MAX]
+    if len(unknown):
+        got_ino, got_nlink = _file_ids(store, ids[unknown])
+        inos[unknown] = got_ino
+        nlinks[unknown] = got_nlink
+    linked = (kinds == Kind.FILE) & (nlinks > 1) & (inos != 0) & ~cloud
     out.base -= int(allocs[counted & cloud].sum())  # a placeholder frees nothing locally
     out.base -= int(allocs[counted & linked].sum())  # counted again by the basket-wide link pass
     out.base = max(0, out.base)
@@ -905,6 +917,28 @@ def _measure(store: NodeStore, nodes: Sequence[int], *, members: bool = False) -
     out.link_alloc = allocs[linked]
     out.nlink = nlinks[linked]
     return out
+
+
+STAT_IDS_MAX = 2048  # files of one item whose id the basket asks the system for (folders' files)
+_RECORD_MASK = 0xFFFF_FFFF_FFFF  # an NTFS file id without its sequence number: the MFT record number
+
+
+def _file_ids(store: NodeStore, nodes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(file id, link count) of files as the system reports them now; (0, 1) where it can't say.
+    On Windows the id is the MFT record number, the same an MFT scan records."""
+    from ..scan.worker import _long_path
+
+    ino = np.zeros(len(nodes), dtype=np.uint64)
+    nlink = np.ones(len(nodes), dtype=np.int64)
+    for i, node in enumerate(nodes.tolist()):
+        try:
+            st = os.stat(_long_path(store.path(int(node))), follow_symlinks=False)
+        except (OSError, ValueError):
+            continue
+        value = int(st.st_ino)
+        ino[i] = (value & _RECORD_MASK) if os.name == "nt" else (value & 0xFFFF_FFFF_FFFF_FFFF)
+        nlink[i] = int(st.st_nlink)
+    return ino, nlink
 
 
 def _combine(a: _Measure, b: _Measure) -> _Measure:

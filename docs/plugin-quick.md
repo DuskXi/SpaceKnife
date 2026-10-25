@@ -23,8 +23,8 @@ spaceknife plugin shot my.tool --open report:largest           # 真界面的截
 |---|---|---|---|
 | 一张表、一组数字 | `@plugin.report(T("…","…"))` → `Report(blocks=[r.table(...)])` | `report` | `kind-report` |
 | 一个按钮 / 右键菜单项 | `@plugin.command("name", T(..), menus=["node"], when=["file"])` | `command` | `kind-command` |
-| 打开报告、面板、导出对话框 | `[[commands]] action = { open = "report:x" }`；`{ command = "report.export", args = { format = "<全名>" } }` | `command` | `kind-command` |
-| 一项设置 | `[[settings]]`（`select`/`multi` 见 `kind-setting`） | `setting` | `kind-setting` |
+| 打开报告、面板、导出对话框，带参数 | `[[commands]] action = { open = "report:x", args = {…} }`；`{ cleanup = "c", args = {…} }`；`{ command = "report.export", args = { format = "<全名>", scope = "selection" } }` | `command` | `kind-command`、`api-action-args` |
+| 一项设置、一列规则、多行文字 | `[[settings]]`（`select`/`multi`/`textarea`，列表 `fields = [...]`，`max_length`，见 `kind-setting`） | `setting` | `kind-setting`、`api-settings` |
 | 详情面板里多一行 | `@plugin.node_field(T(..), exts=["zip"])` → `FieldValue(value=…, unit="size")` | `field` | `kind-node_field` |
 | 洞察卡片（这是什么、能不能删） | 规则文件 `insights/*.toml`；写不出来时 `@plugin.insight(globs=[...])` → `Insight(..., replaces=["规则 id"])` | `insight` | `kind-insight` |
 | 让清理候选进删除篮 | `@plugin.cleanup(T(..))` → `[Proposal(node=…, reason=T(..))]`；命令里 `ctx.basket.propose([(node, 原因), …])` | `cleanup` | `kind-cleanup` |

@@ -9,7 +9,9 @@ it); what the extra copies take is their allocated size. The field and the node 
 last result (a field has 1 s, a set 5 s: never enough to hash a disk) and are asked again when a
 search finishes (``ctx.invalidate``). A whole disk takes longer than any call may: the command
 「在后台查找」 starts the ``search`` background task, which the status bar shows with its progress
-and a cancel button; the report then shows what it found.
+and a cancel button; the report then shows what it found. 「只保留这一份」 in a file's context menu
+and in the details panel is greyed (with the reason) on folders and on files without copies; it
+runs the same cleanup with an argument (``keep``: that file's group only, that file kept).
 """
 
 from __future__ import annotations
@@ -211,14 +213,44 @@ async def dupes(ctx: Context, c: ReportContext) -> Report:
 
 @plugin.cleanup(T("多余的副本", "Extra copies"), name="extra", icon="copy", timeout=600)
 async def extra(ctx: Context, c: ReportContext) -> list[Proposal]:
-    """All copies but the first of each group (by path); the user reviews them first."""
+    """All copies but the first of each group (by path); with ``args = { keep = "node" }`` (the
+    command below) only the group of ``c.node``, keeping that one. The user reviews them first."""
     found = await groups(ctx)
+    only = c.node if c.args.get("keep") == "node" else None
     out = []
     for g in found.groups:
-        keep = g.paths[0]
-        for node in g.nodes[1:]:
-            out.append(Proposal(node=node, reason=T("与 {keep} 相同", "Same as {keep}").format(keep=keep)))
+        if only is not None and only not in g.nodes:
+            continue
+        kept = g.nodes.index(only) if only is not None else 0
+        for i, node in enumerate(g.nodes):
+            if i != kept:
+                reason = T("与 {keep} 相同", "Same as {keep}").format(keep=g.paths[kept])
+                out.append(Proposal(node=node, reason=reason))
     return out
+
+
+@plugin.method
+def has_copies(ctx: Context, a: ActionContext) -> str:
+    """Why 「只保留这一份」 can't run on ``a.node`` (the menu's file): no copies in the last search."""
+    found = _cached(ctx)
+    if found is None:
+        return ctx.t("先查找一次重复文件", "Find duplicates first")
+    if not any(a.node in g.nodes for g in found.groups):
+        return ctx.t("没有内容和它相同的文件", "No other file has its contents")
+    return ""
+
+
+# on a file in the context menu and the details panel: greyed on folders (when) and on files
+# without copies (check); the clicked file is c.node of the cleanup, ``keep`` tells it what to do
+plugin.command(
+    "keep_this",
+    T("只保留这一份", "Keep only this one"),
+    icon="copy",
+    when=["file"],
+    menus=["node", "inspector"],
+    check="has_copies",
+    action={"cleanup": "extra", "args": {"keep": "node"}},
+)
 
 
 @plugin.node_field(T("同内容的副本", "Same-content copies"), kinds=["file"])

@@ -162,7 +162,7 @@ def _needs(host: PluginHost, rec: PluginRecord, when: list[str]) -> tuple[pal.Ne
             def setting_on(c: pal.Context, full: str = full) -> str | None:
                 st = c.settings
                 try:
-                    return None if st is not None and bool(st.get(full)) else _("需要先打开相应的设置")
+                    return None if st is not None and bool(st.get_value(full)) else _("需要先打开相应的设置")
                 except KeyError:
                     return _("需要先打开相应的设置")
 
@@ -285,9 +285,12 @@ def _command(
     )
 
 
-def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
+def _setting(rec: PluginRecord, spec: SettingSpec, *, key: str = "") -> SettingsSpec:
+    """A plugin's setting as the settings service has it; ``key``: a field of a list's entries."""
     kind: type = (
-        bool
+        list
+        if spec.control == "list"
+        else bool
         if isinstance(spec.default, bool)
         else int
         if isinstance(spec.default, int)
@@ -310,7 +313,7 @@ def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
     if depends and "." not in depends.split("=", 1)[0]:
         depends = f"plugin.{rec.id}.{depends}"
     return SettingsSpec(
-        key=f"plugin.{rec.id}.{spec.name}",
+        key=key or f"plugin.{rec.id}.{spec.name}",
         category="plugins",
         group=group.zh,
         name=spec.title.zh,
@@ -328,6 +331,9 @@ def _setting(rec: PluginRecord, spec: SettingSpec) -> SettingsSpec:
         kind=kind,
         plugin=rec.id,
         texts=tuple(texts),
+        max_length=spec.text_limit if spec.control in ("text", "textarea") else None,
+        fields=tuple(_setting(rec, f, key=f.name) for f in spec.fields),
+        max_items=spec.items_limit if spec.control == "list" else None,
     )
 
 
@@ -646,7 +652,7 @@ def _one(
 
                 def bands_of(key: str = key) -> Any:
                     try:
-                        return host.server.settings.get(key)
+                        return host.server.settings.get_value(key)
                     except KeyError:
                         return None
 

@@ -20,6 +20,9 @@ export interface PanelContext {
   slot?: "tab" | "inspector" | "dialog";
   /** the panel's params from its declaration (one page placed twice, each with its own) */
   params?: Record<string, string | number | boolean>;
+  /** what it was opened with: an `open` action's args ({ open = "panel:x", args = { … } }); opened
+   * again while open, the panel hears the new ones in sk.onContext */
+  args?: Record<string, unknown>;
   compare_id: string | null;
 }
 
@@ -112,8 +115,9 @@ export interface Sk<
     filter(expr: string): Promise<null>;
     /** one of this plugin's commands (its full id), or one of the app's that change the view
      * (view.color.*, view.visual.*, view.zoom_in, nav.up, …): on the panel's own view, which stays
-     * where it is */
-    command(id: string): Promise<null>;
+     * where it is; `args` go to the command's action, added to its own (a call's ActionContext.args,
+     * a cleanup's ReportContext.args, the args of a report or panel it opens) */
+    command(id: string, args?: Record<string, unknown>): Promise<null>;
     toast(text: string): Promise<null>;
     /** needs host.open */
     reveal(node: number | NodeRef): Promise<null>;

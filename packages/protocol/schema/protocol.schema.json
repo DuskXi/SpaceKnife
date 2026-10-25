@@ -1367,6 +1367,12 @@
     },
     "CleanupAction": {
       "properties": {
+        "args": {
+          "additionalProperties": true,
+          "description": "The cleanup's ReportContext.args",
+          "title": "Args",
+          "type": "object"
+        },
         "cleanup": {
           "description": "Full id of a cleanup contribution",
           "title": "Cleanup",
@@ -1669,7 +1675,7 @@
       "properties": {
         "args": {
           "additionalProperties": true,
-          "description": "report.export: { format = \"<format or template>\" } picks it",
+          "description": "Given to the command's own action (added to its args); report.export: format (a format or template), scope (zoom | all | selection), options, use_filter",
           "title": "Args",
           "type": "object"
         },
@@ -2753,7 +2759,9 @@
             "number",
             "slider",
             "color",
-            "text"
+            "text",
+            "textarea",
+            "list"
           ],
           "title": "Control",
           "type": "string"
@@ -2771,6 +2779,28 @@
             },
             {
               "type": "string"
+            },
+            {
+              "items": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              "type": "array"
             }
           ],
           "title": "Default"
@@ -2889,6 +2919,28 @@
               },
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
               }
             ]
           },
@@ -5641,7 +5693,7 @@
       "properties": {
         "args": {
           "additionalProperties": true,
-          "description": "A report's ReportContext.args",
+          "description": "ReportContext.args of the report, or the panel's sk.context.args (an open panel is told again: sk.onContext)",
           "title": "Args",
           "type": "object"
         },
@@ -5661,6 +5713,31 @@
         "target"
       ],
       "title": "OpenAction",
+      "type": "object"
+    },
+    "PaletteCheckManyParams": {
+      "additionalProperties": false,
+      "description": "Several commands where the user is (a context menu's, the details panel's): each enabled or\ndisabled with the reason, as palette.check answers one.",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/PaletteContext"
+        },
+        "ids": {
+          "description": "Command ids (palette.commands)",
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 64,
+          "minItems": 1,
+          "title": "Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ids",
+        "context"
+      ],
+      "title": "PaletteCheckManyParams",
       "type": "object"
     },
     "PaletteCheckParams": {
@@ -5883,6 +5960,20 @@
           "minimum": 0,
           "title": "Basket",
           "type": "integer"
+        },
+        "node": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The node the commands are about (a context menu's block, the details panel's node); None: the view's selection",
+          "title": "Node"
         },
         "scan_id": {
           "anyOf": [
@@ -9606,6 +9697,28 @@
               "type": "string"
             },
             {
+              "items": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
               "type": "null"
             }
           ],
@@ -9634,6 +9747,28 @@
             },
             {
               "type": "string"
+            },
+            {
+              "items": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              "type": "array"
             }
           ],
           "title": "After"
@@ -9651,6 +9786,28 @@
             },
             {
               "type": "string"
+            },
+            {
+              "items": {
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "object"
+              },
+              "type": "array"
             }
           ],
           "title": "Before"
@@ -9671,6 +9828,133 @@
         "after"
       ],
       "title": "SettingChange",
+      "type": "object"
+    },
+    "SettingField": {
+      "description": "One field of a ``list`` setting's entries (a plugin's setting), in the interface language.",
+      "properties": {
+        "control": {
+          "description": "Never list",
+          "enum": [
+            "switch",
+            "segmented",
+            "select",
+            "multi",
+            "number",
+            "slider",
+            "color",
+            "text",
+            "textarea",
+            "list"
+          ],
+          "title": "Control",
+          "type": "string"
+        },
+        "default": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Default"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "max": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max"
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "text, textarea: the longest value",
+          "title": "Max Length"
+        },
+        "min": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min"
+        },
+        "name": {
+          "description": "Its key in each entry",
+          "title": "Name",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/SettingOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "placeholder": {
+          "default": "",
+          "title": "Placeholder",
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Step"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "title",
+        "control",
+        "default"
+      ],
+      "title": "SettingField",
       "type": "object"
     },
     "SettingMeta": {
@@ -9710,7 +9994,9 @@
             "number",
             "slider",
             "color",
-            "text"
+            "text",
+            "textarea",
+            "list"
           ],
           "title": "Control",
           "type": "string"
@@ -9737,6 +10023,14 @@
           "title": "Enabled",
           "type": "boolean"
         },
+        "fields": {
+          "description": "list: the fields of each entry",
+          "items": {
+            "$ref": "#/$defs/SettingField"
+          },
+          "title": "Fields",
+          "type": "array"
+        },
         "group": {
           "title": "Group",
           "type": "string"
@@ -9761,6 +10055,32 @@
           ],
           "default": null,
           "title": "Max"
+        },
+        "max_items": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "list: the most entries it holds",
+          "title": "Max Items"
+        },
+        "max_length": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "text, textarea: the longest value in characters (None: 64)",
+          "title": "Max Length"
         },
         "min": {
           "anyOf": [
@@ -10037,6 +10357,28 @@
               },
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
               }
             ]
           },
@@ -10104,6 +10446,28 @@
               },
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
               }
             ]
           },
@@ -10146,6 +10510,28 @@
               },
               {
                 "type": "string"
+              },
+              {
+                "items": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "type": "object"
+                },
+                "type": "array"
               }
             ]
           },
@@ -13575,6 +13961,12 @@
       "params": "#/$defs/PaletteCheckParams",
       "requiresSession": true,
       "result": "#/$defs/PaletteCommand"
+    },
+    "palette.check_many": {
+      "doc": "Several commands' states where the user is, in the order asked (a context menu, the details panel's actions: unavailable ones greyed with the reason).",
+      "params": "#/$defs/PaletteCheckManyParams",
+      "requiresSession": true,
+      "result": "#/$defs/PaletteCommandList"
     },
     "palette.clear": {
       "doc": "Clear the recents of a scan target and the shared filters.",
