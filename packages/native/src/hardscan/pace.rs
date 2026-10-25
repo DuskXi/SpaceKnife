@@ -20,7 +20,7 @@
 //!   work, or the disk's gate (the backend's disk-load limit) lets fewer through;
 //! - `io`, disk reads per folder listed: Windows, the reads of the scan roots' volumes
 //!   (IOCTL_DISK_PERFORMANCE; other programs' reads of them included); POSIX, this process's
-//!   (getrusage ru_inblock, in 4 KiB);
+//!   (getrusage ru_inblock: on Linux in 4 KiB, macOS counts each read);
 //! - the rate: folders, plus entries / 64, listed per second.
 //!
 //! The rules (`decide`):
@@ -520,7 +520,7 @@ fn decide(c: &mut Ctl, w: &Window, width: usize, l: Widths, now: Instant) -> (&'
 
 /// Disk reads to go by: Windows, the volumes of the scan roots calls named (IOCTL_DISK_PERFORMANCE
 /// on a handle opened without access, as the backend's sampler does); POSIX, this process's own
-/// block reads (getrusage ru_inblock: 512-byte units, given as 4 KiB reads).
+/// block reads (getrusage ru_inblock, `inblock_reads`).
 #[derive(Default)]
 struct Reads {
     /// The roots noted, each with its volume's counters (None: none to be had).
@@ -561,7 +561,19 @@ impl Reads {
         let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
         // SAFETY: ru is writable.
         (unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut ru) } == 0)
-            .then(|| ru.ru_inblock as u64 / 8)
+            .then(|| inblock_reads(ru.ru_inblock as u64))
+    }
+}
+
+/// `ru_inblock` as reads. Linux counts the bytes the process had read from the disk in 512-byte
+/// units (its I/O accounting), so eight make one 4 KiB read; macOS and the BSDs count input
+/// operations, one per read, as the name says.
+#[cfg(unix)]
+fn inblock_reads(inblock: u64) -> u64 {
+    if cfg!(target_os = "linux") {
+        inblock / 8
+    } else {
+        inblock
     }
 }
 
