@@ -3,8 +3,8 @@ name: Portable build
 # The portable archives (docs/packaging.md): the unpacked app plus a data/ folder that keeps the
 # app's data next to it, a zip on Windows and a tar.gz on Linux, for x64 and arm64 (each on a runner
 # of its architecture: PyInstaller freezes the interpreter it runs on). Each archive is unpacked again and
-# smoke-tested in portable mode; the archives and their checksums go to the run's artifacts, and a
-# maintainer attaches them to a release. Started by hand (Actions › Portable build › Run workflow),
+# smoke-tested in portable mode; the archives and their checksums go to the run's artifacts, and the
+# Release workflow publishes them (release.yml). Started by hand (Actions › Portable build › Run workflow),
 # and on dev whenever the packaging changes, so it is checked before it reaches main.
 # With "installers" (by hand, for a release) the same run also builds the Windows installer and the
 # Linux deb / rpm / AppImage from the same commit, with their own checksums (x64 only: the ARM jobs
@@ -12,11 +12,26 @@ name: Portable build
 # Every run also tests 「无缝更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
 # files, and on Windows the installer upgrades from the newest published release, updates from inside
 # the app and uninstalls cleanly. The Windows job therefore always builds the installer.
+# The Release workflow (release.yml) calls it for a release: installers on, the tag's commit, and
+# a build provenance attestation for every file (actions/attest-build-provenance).
 on:
   workflow_dispatch:
     inputs:
       installers:
         description: Also build the installers (for a release)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      installers:
+        type: boolean
+        default: false
+      ref:
+        description: The commit or tag to build (default the caller's)
+        type: string
+        default: ""
+      attest:
+        description: Attest where each file was built
         type: boolean
         default: false
   push:
@@ -63,11 +78,17 @@ jobs:
             runner: ubuntu-22.04-arm # glibc 2.35 here too
             exe: spaceknife
             installer: false
+    permissions:
+      contents: read
+      id-token: write # the attestations, only when the Release workflow asks for them
+      attestations: write
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
@@ -211,6 +232,24 @@ jobs:
             [[ "$info" == gh-releases-zsync\|DuskXi\|SpaceKnife\|latest-all\|* ]]
             ls -l *.AppImage.zsync
           fi
+
+      - name: Attest the portable archive
+        if: inputs.attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/electron/*-portable.zip
+            dist/electron/*-portable.tar.gz
+
+      - name: Attest the installers
+        if: inputs.attest && inputs.installers && matrix.installer
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/electron/*-Setup-x64.exe
+            dist/electron/*.AppImage
+            dist/electron/*.deb
+            dist/electron/*.rpm
 
       - uses: actions/upload-artifact@v7
         if: inputs.installers && matrix.installer
