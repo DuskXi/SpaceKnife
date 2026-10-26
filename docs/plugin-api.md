@@ -437,7 +437,7 @@ spaceknife plugin shot . --open settings --lang en --step "click:input[aria-labe
 
 `--eval` 在所有步骤之后、截图之前执行（读到的就是图里的状态）。脚本（`--eval`、`eval:`）抛出时打印 JS 的错误（`ReferenceError: foo is not defined`），照样截图。有一步失败或 `--eval` 出错时退出码是 3（截图仍在），选项写错是 2。
 
-`--setting 名=值` 先改好本插件的设置：值按 JSON 读（`3`、`true`、`["a", "b"]`、`{"k": 1}`），读不成时是文字；`名=@文件.json` 从文件读（最不怕引号）。宿主不收的值（列表设置给了文字、超出范围……）在开始前就说哪一项、为什么。Windows PowerShell 5.1 不转义参数里的双引号（引号外有空格的参数整个套上双引号，其余照写），程序收到的 JSON 和 JS 会丢掉引号甚至断成两个参数；`spaceknife plugin …` 在 Windows 上按 PowerShell 5.1 的写法从命令行原文把它们读回来，所以 `--setting 'rules=[{"glob": "a b"}]'`、`--step 'eval:f("a b")'` 照写就行（`plugin call` 的参数也是，或写 `@params.json`）。经 `uv run` 时读不回来：uv 自己先按 C 运行库的规矩读了参数，再原样转给 Python；这时直接运行 `.venv\Scripts\spaceknife.exe`，或用 `@文件.json`，或把里面的双引号写成 `\"`。
+`--setting 名=值` 先改好本插件的设置：值按 JSON 读（`3`、`true`、`["a", "b"]`、`{"k": 1}`），读不成时是文字；`名=@文件.json` 从文件读（最不怕引号）。宿主不收的值（列表设置给了文字、超出范围……）在开始前就说哪一项、为什么。Windows PowerShell 5.1 不转义参数里的双引号（引号外有空格的参数整个套上双引号，其余照写），程序收到的 JSON 和 JS 会丢掉引号甚至断成两个参数；`spaceknife plugin …` 在 Windows 上按 PowerShell 5.1 的写法从命令行原文把它们读回来，所以 `--setting 'rules=[{"glob": "a b"}]'`、`--step 'eval:f("a b")'` 照写就行（`plugin call` 的参数也是，或写 `@params.json`）。有几种写法仍读不回来：第一个空格在引号外、里面又有 `" "` 的 JS（`--eval '["a b", "c"].join(" | ")'`、`'"a" + " " + "b"'`）会断成几个参数，以引号开头的 `'"x y"'` 丢掉引号，以 `\` 结尾的路径（`'muted=[{"folder": "C:\\"}]'`）读坏；JS 里改用单引号（`--eval "['a b', 'c'].join(' | ')"`）、把双引号写成 `\"`，设置用 `@文件.json`。经 `uv run` 时读不回来：uv 自己先按 C 运行库的规矩读了参数，再原样转给 Python；这时直接运行 `.venv\Scripts\spaceknife.exe`，或用 `@文件.json`，或把里面的双引号写成 `\"`。
 
 `--history 文件` 把快照放进临时后端的历史（对比和 `ctx.snapshots.list()` 都看得到），`--source 名:URI` 用本插件的扫描来源扫描（代替 `--scan`）。浏览器里的界面没有系统的保存对话框，导出时在页面的路径框里填：`set:.path-dialog-input=<路径>`。
 
