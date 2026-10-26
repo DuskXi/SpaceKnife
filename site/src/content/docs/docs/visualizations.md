@@ -7,11 +7,25 @@ SpaceKnife can draw a scan three ways. All three show the same data and share th
 
 ## The three visualizations
 
+All three start from the zoom root and draw what is inside it, level by level. They differ in how a block shows its size and its place in the folder tree:
+
+| | Treemap | Flame graph | Polar flame graph |
+|---|---|---|---|
+| An item is | a rectangle | a bar | a sector of a ring |
+| Its size is | the area | the length | the angle |
+| A folder level is | a frame inside its parent's frame | a band | a ring |
+| The zoom root is | the whole view | the root bar | the center disc |
+| Good for | finding the biggest files | seeing how deep the space sits | each part's share of the whole |
+
+The pictures show the same made-up 2 TB drive in each visualization, at detail level 5 with the details panel hidden, each in the coloring a new view starts with (**Classes** for the treemap, **Branch** for the flame graphs; see [Coloring](#coloring)).
+
 ### Treemap
 
-The treemap fills the whole view with the zoom root's contents. Every block's area is proportional to the space it takes on disk.
+![Treemap of a made-up 2 TB drive: Videos, Games, Backups, Photos, VMs and Dev as frames of nested blocks, the free space as a green striped block](../../../assets/visualizations/treemap-en.webp)
 
-- An open folder is a frame with a title bar (name and size). Its contents are laid out inside it, and so on down.
+The treemap nests boxes inside boxes. The zoom root fills the whole view and is cut into one rectangle per item, with an area proportional to the space the item takes on disk. A folder's rectangle is a frame, and its contents are cut up inside it the same way, and so on down. So size on screen is the answer: the bigger the block, the more space it takes, however deep it sits.
+
+- An open folder's frame has a title bar with its name and size.
 - Files are solid blocks in their file class color (see [Coloring](#coloring)).
 - By default larger blocks go to the top left of their folder. Turn off **Sort by size** in **Settings › Visualization** to order by name instead; positions then stay steadier while a scan runs.
 - Deeper frames get a slightly lighter background so you can tell the levels apart. **Level contrast** and **Border contrast** in **Settings › Appearance** make the difference stronger or softer.
@@ -22,7 +36,9 @@ The treemap fills the whole view with the zoom root's contents. Every block's ar
 
 ### Flame graph
 
-The flame graph stacks one band per level. The zoom root is the **root bar**, which spans the full width. Its children sit in the next band, each one inside its parent's span, with a length proportional to its size.
+![Flame graph of the same drive: the drive as the root bar at the bottom, above it one band per folder level, each bar as long as its size](../../../assets/visualizations/flame-en.webp)
+
+The flame graph cuts the same tree into horizontal bands, one per level. The zoom root is the **root bar**, which spans the full width. Its children sit in the next band, each a bar with a length proportional to its size, and every bar carries its own children in the band after that, never wider than itself. Read a stack bar by bar to follow a path; compare the bars in one band to compare sizes on one level. The height of a stack is the depth of that branch: in the picture, Photos and VMs end after three bands, while Videos, Games and Backups reach the fifth, the detail level.
 
 - By default the root bar is at the bottom and the levels grow upward. To flip it, set **Settings › Visualization › Flame graph direction** to **Root at top**. Open flame graphs change at once.
 - The root bar shows the zoom root's name in bold, followed by its size.
@@ -33,7 +49,17 @@ The flame graph is good for deep, narrow trees: a long chain of nested folders s
 
 ### Polar flame graph
 
-The polar flame graph is the flame graph wrapped into a circle. The zoom root is the **center disc** and level *k* is the *k*-th ring outward.
+![Polar flame graph of the same drive: the drive's name and size in the center disc, one ring per folder level around it, each sector's angle its share of the size](../../../assets/visualizations/polar-en.webp)
+
+The polar flame graph is the flame graph wrapped into a circle. The zoom root is the **center disc**, each ring around it is one folder level (level *k* is the *k*-th ring outward), and a sector's angle is its share of the size.
+
+You can also read it as a special pie chart: stacked in layers, with no center area.
+
+- The first ring is a pie chart of the zoom root: one slice per item, its angle the item's share.
+- Each ring further out cuts every folder's slice again, into that folder's contents, inside the slice's angle. A file ends there; a folder goes on outward.
+- The middle is not a slice. It stays free for the folder you are looking at: the center disc shows its name and size.
+
+The full circle is the whole zoom root (with free and unknown space when they are shown), so equal angles are equal sizes on every ring, and the distance from the center is the depth. In the picture, Games runs outward through SteamLibrary, steamapps and common to the single games, and the free space is one sector of the first ring.
 
 - Items start at 12 o'clock and run clockwise, largest first (with **Sort by size** on). Each sector's angle is proportional to its size, and a child sector stays inside its parent's angle.
 - The center disc shows the zoom root's name and size. While you hover a sector, the disc shows that sector's name, its size and its share of the zoom root ("{pct} of total").
@@ -76,6 +102,10 @@ What switching keeps and what it doesn't:
 The two pictures cross-fade for 200 ms; with **Reduce motion** on they swap at once. You can switch while a scan runs, while it is paused, on an opened snapshot and in a comparison. The scan itself is not affected.
 
 A visualization this window can't show stays on the toolbar, disabled, and its tooltip says why. <kbd>V</kbd> skips it.
+
+:::note[Narrow windows]
+When the window is too narrow for the whole toolbar, the groups it has no room for move into the **More** menu (**…**) next to them. First the **Free space** and **Unknown space** chips shrink to their swatch, then the **Coloring** group and the chips move into the menu, and the **Visualization** group goes last. The keys work as always.
+:::
 
 Every tab and every split pane has its own visualization. New views start with **Settings › Appearance › Visualization › Default visualization for new views**.
 
@@ -187,7 +217,7 @@ The breathing outline and the change flashes share one switch: **Settings › Vi
 
 ## Change flashes
 
-After the scan, live monitoring keeps the picture up to date (see [Live monitoring](../monitoring/)). When a file is added, deleted or changes size, its block flashes: a yellow outline with a glow, two pulses, then it fades.
+After the scan, live monitoring keeps the picture up to date (see [Live monitoring](../monitoring/)). When a file is added, deleted or changes size, its block flashes: a yellow outline with a glow (dark amber in the light theme), two pulses, then it fades.
 
 - When the changed item is not drawn on its own (too small, merged, or inside a collapsed folder), the block that holds it flashes. In the flame graphs, a change inside the zoom root that falls on no bar or sector flashes the root bar or the center disc.
 - With **Reduce motion** on, there is no flashing. The changed block shows a static badge with the change, for example "+212 MB", for about ten seconds, where it fits.

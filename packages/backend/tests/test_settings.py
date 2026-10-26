@@ -157,6 +157,19 @@ async def test_settings_over_the_protocol(tmp_path: Path, server: Server, client
     assert state.values["scan.unit_base"] == "system"
 
 
+async def test_the_memory_settings_reach_the_mapping_policy(server: Server, client: Connection) -> None:
+    from spaceknife.store import mapped
+
+    assert mapped.POLICY.large is None and mapped.POLICY.fraction == 0.25  # the defaults
+    await client.call(
+        SETTINGS_UPDATE,
+        ps.SettingsUpdateParams(values={"advanced.map_large_scans": True, "advanced.memory_budget": 40}),
+    )
+    assert mapped.POLICY.large == mapped.LARGE_BYTES and mapped.POLICY.fraction == 0.4
+    await client.call(SETTINGS_RESET, ps.SettingsResetParams(category="advanced"))
+    assert mapped.POLICY.large is None and mapped.POLICY.fraction == 0.25
+
+
 async def test_new_views_use_the_settings_and_geometry_is_live(
     tmp_path: Path, server: Server, client: Connection
 ) -> None:

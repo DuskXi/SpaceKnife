@@ -9,6 +9,7 @@ import { call, closeSettings, resetSettings, settingsGo, updateSettings } from "
 import { type SettingsPageId, set, toast, useApp } from "@/state/store";
 import { fmtKeys } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { accentOf } from "@/lib/theme";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
 import { AboutEntry, AboutHeader, ComponentsGroup, ReleaseTimeline } from "./AboutPage";
@@ -316,7 +317,8 @@ function Control(props: { meta: SettingMeta; value: Value | undefined; disabled:
               aria-checked={value === o.value}
               aria-label={String(o.label)}
               className={`set-swatch${value === o.value ? " on" : ""}`}
-              style={{ background: String(o.value) }}
+              // an accent preset as it is in the theme on screen (the setting keeps the dark one's hex)
+              style={{ background: meta.key === "appearance.accent" ? accentOf(String(o.value)) : String(o.value) }}
               disabled={disabled}
               onClick={() => onSave(o.value)}
             />

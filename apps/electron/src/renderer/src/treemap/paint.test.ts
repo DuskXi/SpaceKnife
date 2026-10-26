@@ -1,6 +1,7 @@
-import { tokens } from "@design/tokens";
+import { themes, tokens } from "@design/tokens";
 import { describe, expect, it } from "vitest";
 
+import { applyTheme } from "@/lib/theme";
 import type { FrameInfo } from "@/protocol/generated";
 import type { Column } from "@/protocol/rpc";
 
@@ -295,6 +296,17 @@ describe("paint", () => {
   };
   const slot = (p: { instances: Float32Array }, k: number) => p.instances.subarray(k * STRIDE, (k + 1) * STRIDE);
 
+  it("refills the previous instance array when it is large enough", () => {
+    const f = frameOf(rows);
+    const first = paint(f, opts);
+    const again = paint(f, { ...opts, hovered: 1 }, first.instances); // a hover repaint
+    expect(again.instances).toBe(first.instances);
+    const fresh = paint(f, { ...opts, hovered: 1 });
+    expect(Array.from(again.instances.subarray(0, again.count * STRIDE))).toEqual(Array.from(fresh.instances.subarray(0, fresh.count * STRIDE)));
+    const small = new Float32Array(STRIDE);
+    expect(paint(f, opts, small).instances).not.toBe(small); // too small: a new one
+  });
+
   it("emits one instance per block, two per folder, three for the selection", () => {
     const p = paint(frameOf(rows), opts);
     expect(p.count).toBe(2 + 1 + 1 + 1 + 1 + 1 + 3);
@@ -398,6 +410,19 @@ describe("paint", () => {
     expect(ring[18]).toBe(r);
     expect(Array.from(outer.subarray(0, 4))).toEqual([2 - 2 * r, 20 - 2 * r, 150 + 4 * r, 100 + 4 * r]);
     expect(shadow[19]).toBe(Pattern.SHADOW);
+    // dropped 12 px, with a hole the size of the selected block where it lies: the shadow falls
+    // around the selection, not on it or on its children (UI-TM-28)
+    expect(Array.from(shadow.subarray(0, 4))).toEqual([2 - 2 * r, 20 - 2 * r + 12, 150 + 4 * r, 100 + 4 * r]);
+    expect(Array.from(shadow.subarray(8, 12))).toEqual([0, -12, 150, 100]);
+    expect(shadow[12]).toBe(T.geometry.fileRadius);
+    // a selected folder: its own radius, at the pixel ratio
+    const folder = frameOf([{ ...rows[0]!, flags: Flag.SELECTED }]);
+    const p2 = paint(folder, { ...opts, dpr: 2 });
+    const s2 = slot(p2, p2.count - 3);
+    expect(Array.from(s2.subarray(8, 12))).toEqual([0, -24, 300, 200]);
+    expect(s2[12]).toBe(2 * T.geometry.folderRadius);
+    // without the shadow, no instance for it
+    expect(paint(frameOf(rows), { ...opts, selectionShadow: false }).count).toBe(p.count - 1);
   });
 
   it("places tag dots on tagged blocks big enough to carry them", () => {
@@ -426,6 +451,30 @@ describe("paint", () => {
     const p2 = paint(f, { ...opts, dpr: 2 });
     expect(slot(p2, 1)[3]).toBe(2 * slot(p1, 1)[3]!); // header height
     expect(slot(p2, 0)[18]).toBe(2); // border width
+  });
+
+  it("paints in the colours of the theme on screen (W7 外观 · 主题)", () => {
+    const f = frameOf(rows);
+    const dark = paint(f, { ...opts, hovered: 2 });
+    expectRGBA(slot(dark, dark.count - 3).subarray(4, 8), rgba(themes.dark.treemap.state.selectShadow)); // the selection's shadow
+    try {
+      applyTheme("light");
+      const L = themes.light.treemap;
+      const p = paint(f, { ...opts, hovered: 2 });
+      expectRGBA(slot(p, 0).subarray(4, 8), rgba(L.level[0].bg));
+      expectRGBA(slot(p, 1).subarray(4, 8), rgba(L.halo.bg));
+      expectRGBA(slot(p, 2).subarray(4, 8), rgba(L.class.video));
+      expect(p.texts.find((t) => t.text === "root")!.color).toBe(L.halo.text);
+      expect(p.texts.find((t) => t.text === "可用空间")!.color).toBe(L.free.text);
+      expectRGBA(slot(p, p.count - 4).subarray(8, 12), rgba(L.state.hoverInset));
+      expectRGBA(slot(p, p.count - 3).subarray(4, 8), rgba(themes.light.treemap.state.selectShadow));
+      expectRGBA(slot(p, p.count - 1).subarray(8, 12), rgba(L.state.selectRing));
+      expect(fillOf(f, 1, "flat", opts.classIds)).toEqual(rgba(L.flat.file));
+      expect(L.flat.file).toBe(L.class.other);
+    } finally {
+      applyTheme("dark");
+    }
+    expectRGBA(slot(paint(f, opts), 2).subarray(4, 8), rgba(T.class.video));
   });
 
   it("paints every row of a larger frame", () => {

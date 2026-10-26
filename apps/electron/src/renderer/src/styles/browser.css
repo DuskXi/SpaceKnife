@@ -12,10 +12,11 @@
 }
 .remote-chip svg { flex: none; }
 .remote-name { overflow: hidden; text-overflow: ellipsis; }
-.remote-chip.plain { background: color-mix(in srgb, var(--sk-color-status-warning) 14%, transparent); color: var(--sk-color-status-warning); }
+.remote-chip.plain { background: color-mix(in srgb, var(--sk-color-status-warning-fill) 14%, var(--sk-color-status-warning-base)); color: var(--sk-color-status-warning); }
 .remote-plain {
   flex: none; padding: 0 5px; border-radius: var(--sk-radius-xs); font: 600 10px/16px var(--sk-font-family-mono);
-  background: color-mix(in srgb, currentColor 18%, transparent);
+  /* the fill's tint on the chip (in the dark theme the same as currentColor's: warningFill is the warning) */
+  background: color-mix(in srgb, var(--sk-color-status-warning-fill) 18%, transparent);
 }
 
 /* a path typed instead of picked (shim.ts, BrowserLayer.tsx) */
@@ -23,14 +24,14 @@
 .path-dialog p { margin: 0 0 12px; }
 .path-dialog-input {
   width: 100%; height: var(--sk-control-height-lg); padding: 0 10px; border: 1px solid var(--sk-color-line-strong);
-  border-radius: var(--sk-radius-md); background: var(--sk-color-bg-sunken); color: var(--sk-color-text-primary); font-size: 13px;
+  border-radius: var(--sk-radius-md); background: var(--sk-color-bg-field); color: var(--sk-color-text-primary); font-size: 13px;
 }
 .path-dialog-input:focus { outline: none; box-shadow: var(--sk-control-focus-ring); border-color: var(--sk-color-accent-default); }
 
 /* deleting and moving to the Recycle Bin act on the server: said in the basket */
 .bk-remote {
   display: flex; gap: 8px; align-items: flex-start; margin: 0 12px 8px; padding: 8px 10px; border-radius: var(--sk-radius-md);
-  background: color-mix(in srgb, var(--sk-color-status-warning) 12%, transparent); color: var(--sk-color-text-primary);
+  background: color-mix(in srgb, var(--sk-color-status-warning-fill) 12%, var(--sk-color-status-warning-base)); color: var(--sk-color-text-primary);
   font-size: var(--sk-font-size-small);
 }
 .bk-remote svg { flex: none; margin-top: 1px; color: var(--sk-color-status-warning); }

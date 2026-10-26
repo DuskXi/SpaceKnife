@@ -2,6 +2,8 @@
 
 import { create } from "zustand";
 
+import type { ThemeName } from "@design/tokens";
+
 import type {
   BasketState,
   CompareInfo,
@@ -26,6 +28,7 @@ import type {
 import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
 import { storedInspectorWidth } from "@/lib/inspectorWidth";
+import { onThemeChange, themeName } from "@/lib/theme";
 
 export type TabKind = "start" | "scan" | "settings" | "help" | "machine";
 
@@ -161,6 +164,8 @@ export interface AppState {
   helpNonce: number;
   /** bumped when the size unit base changes, so painted labels are redrawn */
   unitEpoch: number;
+  /** the theme on screen (lib/theme.ts): what is painted on canvases, and colours set inline, follow it */
+  theme: ThemeName;
   startForms: Record<string, StartForm>;
   toast: string | null;
   /** the delete basket, held by the backend (W5); null until it was read */
@@ -247,6 +252,7 @@ export const useApp = create<AppState>(() => ({
   helpQuery: "",
   helpNonce: 0,
   unitEpoch: 0,
+  theme: themeName(),
   startForms: {},
   toast: null,
   basket: null,
@@ -268,6 +274,8 @@ export const useApp = create<AppState>(() => ({
 
 export const set = useApp.setState;
 export const get = useApp.getState;
+
+onThemeChange(() => set({ theme: themeName() }));
 
 export function activeTab(s: AppState = get()): Tab {
   return s.tabs.find((t) => t.id === s.active) ?? s.tabs[0]!;

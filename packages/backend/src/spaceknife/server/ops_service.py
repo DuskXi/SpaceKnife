@@ -72,6 +72,7 @@ class OpRun:
     sizes: dict[str, int]
     alloc: dict[str, int]  # item path -> freeable bytes (what a success frees)
     scans: dict[str, str]  # path -> scan id (refresh the tree afterwards)
+    roots: dict[str, str] = field(default_factory=dict)  # path -> its scan root (ops.trash: case twins)
     done: int = 0
     current: str = ""
     phase: str = "waiting"
@@ -332,6 +333,8 @@ class OpsService:
             sizes={t.path: t.size for t in targets},
             alloc=alloc,
             scans=scans,
+            # kept with each item, so it holds once its scan is closed too
+            roots={t.path: t.root for t in targets if t.root},
             phase="waiting" if params.mode == "delete" else "running",
         )
         self.runs[run.id] = run
@@ -378,11 +381,20 @@ class OpsService:
 
             if run.mode == "trash":
                 results = await asyncio.to_thread(
-                    move_to_trash, run.paths, progress=progress, cancel=run.cancel.is_set, sizes=run.sizes
+                    move_to_trash,
+                    run.paths,
+                    progress=progress,
+                    cancel=run.cancel.is_set,
+                    sizes=run.sizes,
+                    roots=run.roots,
                 )
             else:
                 results = await asyncio.to_thread(
-                    delete_permanently, run.paths, progress=progress, cancel=run.cancel.is_set
+                    delete_permanently,
+                    run.paths,
+                    progress=progress,
+                    cancel=run.cancel.is_set,
+                    roots=run.roots,
                 )
             run.results = results
             run.done = sum(1 for r in results if r.code != "cancelled")

@@ -97,3 +97,11 @@ header.header {
 .sl-markdown-content table {
   font-size: 0.94em;
 }
+
+/* screenshots: framed like the windows on the landing page */
+.sl-markdown-content img {
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px #2a2e37,
+    0 20px 50px -24px rgb(0 0 0 / 0.8);
+}

@@ -12,7 +12,9 @@ Electron 版（UI v1）的安装包：Windows NSIS；Linux AppImage / deb / rpm�
 | `SpaceKnife-<版本>-mac-x64.dmg` | macOS 14+，Intel，ad-hoc 签名、未公证 | 148 MB |
 | `SpaceKnife-<版本>-win-x64-portable.zip` | Windows 10+ x64 便携版（`--portable`） | 174 MB |
 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | Linux x64 便携版（`--portable`） | 161 MB |
-| `win-unpacked/`、`linux-unpacked/`、`mac[-arm64]/SpaceKnife.app` | 免安装目录（冒烟测试、体验环境用） | 约 400 MB |
+| `SpaceKnife-<版本>-win-arm64-portable.zip`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | Windows 11 ARM 版、ARM Linux 的便携版（在 arm64 机器上 `--portable --no-installers`） | — |
+| `SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip` | macOS 14+ 便携版：`SpaceKnife.app` 旁边一个 `data` 文件夹（`--portable`，ditto 打包） | — |
+| `win[-arm64]-unpacked/`、`linux[-arm64]-unpacked/`、`mac[-arm64]/SpaceKnife.app` | 免安装目录（冒烟测试、体验环境用） | 约 400 MB |
 
 ## 1. 构建
 
@@ -24,7 +26,7 @@ uv sync --locked --group native --group package
 uv run python tools/build_package.py
 ```
 
-在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种，macOS 按本机架构出 dmg：PyInstaller 冻结的是正在运行的解释器，交叉不了架构）。`--portable` 另外把免安装目录打成便携包（见第 4 节），`--no-installers` 只出免安装目录（和便携包）。便携包由「Portable build」工作流（[.github/workflows/portable.yml](../.github/workflows/portable.yml)）在 `windows-latest` 与 `ubuntu-22.04` 上构建，解压后用 `smoke_app.py --portable` 跑冒烟测试。两个打包工作流都可以手动触发，dev 分支上改动打包相关文件时也会自动构建。macOS 的两个 dmg 由 GitHub Actions 的「macOS build」工作流（[.github/workflows/macos.yml](../.github/workflows/macos.yml)，手动触发）分别在 `macos-15`（arm64）和 `macos-15-intel`（x64）上构建，dmg 与 SHA256 作为运行产物上传，再由维护者附到 Release 上。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
+在哪个系统上运行就出哪个系统的包（Windows 出 NSIS，Linux 出三种，macOS 按本机架构出 dmg：PyInstaller 冻结的是正在运行的解释器，交叉不了架构）。`--portable` 另外把免安装目录打成便携包（见第 4 节），`--no-installers` 只出免安装目录（和便携包）。一律为构建机自己的架构打包（`tools/build_package.py` 的 `build_arch`，看运行它的 Python）：x64，或在 ARM 机器上 arm64；Windows 和 Linux 的安装包只出 x64，arm64 只出免安装目录和便携包（要安装包时直接报错）。便携包由「Portable build」工作流（[.github/workflows/portable.yml](../.github/workflows/portable.yml)）在 `windows-latest`、`windows-11-arm`、`ubuntu-22.04` 与 `ubuntu-22.04-arm` 上构建（x64 和 arm64 各一份；Windows on ARM 的运行器没有 Rust，工作流先装 rustup，ARM Linux 上先补 Electron 要的库），解压后用 `smoke_app.py --portable` 跑冒烟测试，再测一遍便携版的「无缝更新」；NSIS 安装包的升级与卸载测试只在 x64 上跑。两个打包工作流都可以手动触发，dev 分支上改动打包相关文件时也会自动构建。macOS 的两个 dmg 和两个便携 zip 由 GitHub Actions 的「macOS build」工作流（[.github/workflows/macos.yml](../.github/workflows/macos.yml)，手动触发）分别在 `macos-15`（arm64）和 `macos-15-intel`（x64）上构建；便携 zip 用 ditto 解开后校验签名、以便携模式跑冒烟测试、再测一遍「无缝更新」，dmg、zip 与 SHA256 作为运行产物上传，再由维护者附到 Release 上。`--skip-backend` 复用已冻结的后端（只改了 Electron 时用），Linux 上 `--targets AppImage deb` 可以只出部分格式。
 
 需要：uv（Python 3.12）、Rust 工具链（原生扩展必须打进包，没有它扫描会慢很多：构建前检查它能加载，冻结后的冒烟测试再查一次）、Node 与 pnpm（`apps/electron` 里先 `pnpm install`）。Linux 的 rpm 需要 `rpmbuild`；electron-builder 第一次运行会下载 Electron、NSIS、AppImage 工具与 fpm 到它的缓存目录。
 
@@ -46,11 +48,22 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 
 - 入口 [packaging/backend_entry.py](../packaging/backend_entry.py)：`spaceknife-backend serve …` 就是 `python -m spaceknife serve …`；`spaceknife-backend --helper …` 是扫描助手（冻结后没有 `-m`，`helper_command()` 在冻结时返回 `[自身, "--helper"]`）；入口先调用 `multiprocessing.freeze_support()`，spawn 方式的扫描工作进程会重新进入这个可执行文件。
 - 以 `-X utf8` 冻结（spec 里的解释器选项），日志和 ready 行在所有平台都是 UTF-8。冻结的解释器只从自己的包里导入，不读 `PYTHON*` 环境变量，所以提权助手不需要 `-I`。
-- 收进包里的数据：`locales/*.json`、`insights/builtin.toml`、`export/builtin/*.sktpl`；`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）。
+- 收进包里的数据：`locales/*.json`、`insights/builtin.toml`、`export/builtin/*.sktpl`；`spaceknife*` 的所有子模块都按隐式导入收进来（请求处理器、各平台后端、MFT 读取器是按需导入的）。排除开发工具（pytest、hypothesis、mypy；`pydantic.mypy` 会把 mypy 整个拉进来）和 setuptools（见下面「命令行扫描的启动」）。
 - Windows 上带图标和版本信息（任务管理器里显示「SpaceKnife backend」）。
 - Linux 上不带构建机的 `libgcc_s.so.1` 和 `libstdc++.so.6`：目标系统都有（glibc 的 `pthread_cancel` 需要 libgcc_s，apt / dnf 需要 libstdc++），manylinux 的 wheel 也这样假设；而 Ubuntu 22.04 的 libgcc_s（GCC 12）需要 `GLIBC_2.35`，打进去在 RHEL 9 上会加载失败。剩下的部分最高需要 `GLIBC_2.34`（原生扩展在 glibc 2.35 上编译，pthread 符号绑定到 2.34 版本），正好是 RHEL 9 的下限；Electron 自身最高 `GLIBC_2.25`。
 - 安装目录本身是受保护路径（不能在应用里删除或移动它）。
 - 命令行也能直接用：安装目录下 `resources/backend/spaceknife-backend scan …`、`run …`、`snapshot …`。
+
+### 命令行扫描的启动
+
+`spaceknife-backend scan <路径> --no-snapshot …`（基准和脚本都这样用）的用时包括进程的启动和退出；目录小的时候它们比扫描本身还长。为此：
+
+- 冻结后端不收 setuptools（spec 的 `excludes`）。它是构建工具，运行时没有代码导入它；但只要收进来，PyInstaller 就会带上运行时钩子 `pyi_rth_setuptools`，每次启动都导入 setuptools 和它自带的 jaraco、packaging 等包（冻结版加 `-X importtime` 在 Windows 上量到 130–230 ms）。可以用 PyInstaller 的 `CArchiveReader` 看可执行文件的目录：不该有 `pyi_rth_setuptools`。
+- `scan` 只导入它用得到的模块：`spaceknife.io` 的名字按需加载子模块（取 `io.priority` 不会带出调速器和协议的 pydantic 模型），`--disk-limit` 时才导入 `IoRegistry`；快照（文件头是 pydantic 模型）只在保存、列出、打开快照时导入；导出模板、`rich.progress`、`LogHub` 也在用到时才导入。界面语言：没有设置文件、文件读不了或不是 JSON、或者文件里的语言就是 `system` 时，`SettingsStore` 的结果一定是 `system`，直接用它；设了别的语言才用 `SettingsStore` 校验整个文件（`cli_scan.stored_language`，测试逐种情况与 `SettingsStore` 对比）。[test_cli_startup.py](../packages/backend/tests/test_cli_startup.py) 在新的解释器里跑一次 `scan --no-snapshot`，检查 pydantic、协议、设置、调速器、快照、导出、服务器和 `rich.progress` 都没有被导入：加了新的模块级导入时它会报出来。asyncio 去不掉：loguru 自己就导入它。
+- 输出不是终端（重定向）时不建进度条：rich 这时本来什么都不画，只在停止时打一个空行；这个空行照样打，输出与原来逐字节一致。
+- 输出写完（自动快照也已保存）后，`cli.main` 先 flush 标准输出和标准错误，再 `os._exit`，跳过解释器的收尾（等空闲的列目录线程、逐个释放节点表、清理模块）。只用于 `scan`，退出码不变；Python 遍历器的工作进程还没退完时照常退出。
+- 「最大的文件」用 `store.subtree.largest` 的部分选择（第 k 大的值，并列时编号小的在前），不对全部文件排序；行和顺序与整体排序相同（130 万项时 35 ms → 7 ms）。
+- 实测（i9-14900K，冻结版，热缓存，扫空文件夹，整个进程的墙钟，每臂 7 轮的中位数）：Windows 全部 CPU 408 → 219 ms、4 个 E 核 701 → 377 ms；WSL（Linux）全部 CPU 236 → 120 ms、4 CPU 228 → 120 ms。其中退出（最后一个字节到进程结束）Windows 28 → 3 ms，Linux 26 → 1 ms。Windows 上扫真实的文件夹（全部 CPU，每臂 5 轮）：34.8 万项的 NTFS 程序文件夹 906 → 666 ms，136 万项的 ReFS 文件夹 964 → 743 ms，130 万项的 NTFS 文件夹 2.82 → 2.62 s；打印 21–45 → 12–23 ms，退出 39–47 → 6–10 ms。
 
 ## 3. Electron
 
@@ -82,12 +95,16 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - AppImage 的更新信息：electron-builder 用的运行时留了空的 `.upd_info` 段，构建时写进 `gh-releases-zsync|DuskXi|SpaceKnife|latest-all|SpaceKnife-*-x86_64.AppImage.zsync`（`latest-all`：最新的正式版或预发布版；`latest` 不算预发布），并用 `zsyncmake` 在旁边生成 `.zsync`（`tools/build_package.py` 的 `embed_update_info` / `make_zsync`；本机没装 `zsync` 包时只写更新信息、不生成 .zsync）。这样 AppImageUpdate、AppImageLauncher 之类的工具能增量更新。`./SpaceKnife-*.AppImage --appimage-updateinformation` 打印写进去的信息。
 - 窗口的 app_id / WM_CLASS 与 desktop 文件名一致（`desktopName: spaceknife.desktop`），任务栏能把窗口和启动器图标对上。
 
-**便携版**（Windows zip、Linux tar.gz）：
+**便携版**（Windows zip、Linux tar.gz、macOS zip）：
 
-- 就是免安装目录，外加一个空的 `data` 文件夹（里面一份中英文说明）。打包后的 Windows / Linux 应用启动时，如果可执行文件旁边有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（[src/main/portable.ts](../apps/electron/src/main/portable.ts)）：快照、设置、日志、缓存和 Chromium 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
+- 就是免安装目录（macOS 上是 `SpaceKnife.app`），外加一个空的 `data` 文件夹（里面一份中英文说明）。打包后的应用启动时，如果可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`（[src/main/portable.ts](../apps/electron/src/main/portable.ts)）：快照、设置、日志、缓存和 Chromium 配置都存在里面，不写进用户目录。手动设的 `SPACEKNIFE_HOME` 优先；删掉或重命名 `data`，就改用正常的用户目录。
 - 解压到用户可写的位置（解压到 Program Files 之类的位置会写不进去）。
 - Linux 的 tar.gz 不需要 FUSE。和 AppImage 一样，`chrome-sandbox` 没有 setuid：在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则）可能启动不了，需要加 `--no-sandbox`；目标系统 Ubuntu 22.04 和 RHEL 9 不受影响。
+- 有 x64 和 arm64 两份（`win-arm64`、`linux-arm64`）。便携版更新时按处理器的架构挑包（`spaceknife.update.asset_templates`；Windows 上 Python 读的是处理器的架构，模拟运行的 x64 进程也一样）：Windows on ARM 上的 x64 便携版下一次更新就换成 arm64 版，发布里没有 arm64 包时仍给 x64（Windows 能模拟运行）；ARM Linux 只取 arm64 包。主进程两种架构的包都接受（`portableVersion`、`installRefusal`）。arm64 版目前只在 GitHub 的 ARM 运行器上测过，还没在真机上用过。
 - 没有 32 位 Windows 版：Electron 44 已不再提供 win32-ia32。
+- macOS 的 zip 由 `ditto -c -k --sequesterRsrc --keepParent` 打包（苹果自己的格式：包里的符号链接、扩展属性和签名都在；Python 的 zipfile 会丢），应用更新时也用 `ditto -x -k` 解开（`main/index.ts` 的 `unpack`）。ad-hoc 签名、未公证，第一次打开和 dmg 一样要在「隐私与安全性」里放行；更新由应用自己下载，不带隔离属性，换上的新版本不再问。
+- macOS 的 App 转移（Gatekeeper 路径随机化）：带隔离属性、在解压出来的位置直接打开的应用，会被系统从 `/private/var/folders/…/AppTranslocation/…` 下的只读副本运行，旁边没有 `data`。`portable.ts` 认出这种路径后，用 `/sbin/mount` 的挂载表（只读 nullfs 挂载，`<原路径> on <挂载点> (nullfs, …)`）找回原来的位置，`data` 照样用原位置旁边那个；「无缝更新」替换的也是原位置的文件夹，换好后启动原位置的 `SpaceKnife.app`（替换计划里的可执行文件可以在文件夹的子目录里，`update_swap.Plan.check`）。真机上的 App 转移还没验证过（CI 下载的文件不带隔离属性）。
+- 「完全磁盘访问权限」按应用的签名记：ad-hoc 签名每个版本都不同，每次更新后要重新打开一次开关（dmg 也一样，等 Developer ID 签名之后才会记住）。
 
 **macOS（dmg）**：
 
@@ -98,8 +115,8 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - 扫描 `/` 时不进入 `/System/Volumes/Data`：同一 APFS 卷组的数据卷与系统卷报告同一个设备号，它的文件已经通过 firmlink 在树里（`scan.volume.volume_group_twins`）。云盘里「仅在云端」的文件（`SF_DATALESS`）按占用 0 计，这样的文件夹不进入，进程也设为不物化 dataless 文件，扫描不会触发下载。
 - 磁盘负载在进程内读 IOKit 的块设备统计（与 `iostat` 同源，`ioreg` 为后备）。
 - 文件条目的属性用 `getattrlistbulk` 批量取（文件夹、挂载点、firmlink 仍逐个 `fstatat`）。每个进程读到的第一批文件与 `fstatat` 对照，有差异就整条退回 readdir + `fstatat`；`SPACEKNIFE_NO_BULK=1` 关掉，用来对比速度。文件夹也能从它取（`SPACEKNIFE_BULK_DIRS=1`，同样单独对照），但并不更快：请求文件夹属性让每次调用都变慢，抵掉了省下的 `fstatat`。`spaceknife-backend scan --profile` 打印耗时分解和它的状态。
-- 列目录线程默认是 CPU 数的两倍（4–16），`SPACEKNIFE_SCAN_THREADS` 可以改。
-- 「Scan benchmark」workflow 在 GitHub 的 macOS 运行器上对比各设置：各设置轮流跑，每轮换一个开头；热缓存 6 轮，`sudo purge` 后 3 轮（purge 清不掉 APFS 元数据的缓存，两组差不多）。2026-10-20 扫 /System/Library /usr（3 核 arm64 45 万项，4 核 Intel 70 万项），单位是项/秒：
+- 列目录的起步宽度是可用 CPU 数的两倍（4–16），读盘时加宽到冷宽度，由 Rust 的控制器决定（[native.md](native.md) 2.2「列目录线程」）；`SPACEKNIFE_SCAN_THREADS` 可以固定。
+- 2026-10-20 在 GitHub 的 macOS 运行器上对比过各设置（当时的「Scan benchmark」工作流，后来删掉了，云端不再跑基准）：各设置轮流跑，每轮换一个开头；热缓存 6 轮，`sudo purge` 后 3 轮（purge 清不掉 APFS 元数据的缓存，两组差不多）。扫 /System/Library /usr（3 核 arm64 45 万项，4 核 Intel 70 万项），单位是项/秒：
 
   | | 3 核 arm64 | 4 核 Intel |
   |---|---|---|
@@ -120,12 +137,12 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
   - **NSIS**：
     - 「无缝更新」：主进程先停掉后端，再以 `--updated /S --force-run` 加 `/allusers` 或 `/currentuser`（按安装目录在 Program Files 还是 `%LOCALAPPDATA%` 下）运行新安装程序，然后退出。安装程序从注册表读出原来的安装目录，所有用户安装时自己请求提权，杀掉残留的 SpaceKnife 进程，以 `/S /KEEP_APP_DATA --updated` 运行旧版本的卸载程序，装好后（`--force-run`）启动新版本。
     - 「运行安装程序」：不带参数运行新安装程序（显示安装向导），SpaceKnife 随即退出。它照样就地升级：electron-builder 以 `--updated` 运行旧版本的卸载程序，数据保留。
-  - **便携版**（Windows zip、Linux tar.gz）：
+  - **便携版**（Windows zip、Linux tar.gz、macOS zip）：
     - 「无缝更新」：换文件的是**新版本自己的后端可执行文件**，不再是 PowerShell / sh 脚本（脚本已经去掉）。
-      - 主进程把压缩包解到 `updates/staging-<版本>`（Windows 用 tar.exe，没有时用 Expand-Archive；Linux 用 tar），确认里面唯一的顶层文件夹带着可执行文件和 `resources/backend/spaceknife-backend[.exe]`。
+      - 主进程把压缩包解到 `updates/staging-<版本>`（Windows 用 tar.exe，没有时用 Expand-Archive；Linux 用 tar；macOS 用 ditto），确认里面唯一的顶层文件夹带着可执行文件（macOS 上是 `SpaceKnife.app`）和后端（`resources/backend/spaceknife-backend[.exe]`，macOS 上在 `SpaceKnife.app/Contents/Resources/backend/` 里）。
       - 写出计划 `updates/update-<版本>.json`（版本 1：`v`、`pid`、`app`、`new`、`old`、`exe`、`log`、`keep: ["data"]`）。计划是和每个旧版本的约定：旧应用把它交给更新版本的后端，所以以后的后端要一直能读 `v: 1`。
       - 以 detached 方式启动 `<staging>/resources/backend/spaceknife-backend[.exe] --apply-update <计划>`，等它在 stdout 回一行 `{"ok": true}` 后退出。30 秒没回、回了别的或者它先退出了，应用就照旧运行并提示原因。
-      - 助手（`spaceknife.update_swap`，只用标准库；`packaging/backend_entry.py` 在加载别的东西之前就分派过去）先检查计划：路径都是绝对路径、`exe` 在 `app` 里、新版本里有同名的可执行文件、`old` 是空的。不能用的计划（比如新版本不完整）什么都不动：日志写一行 `not started: …`，回 `{"ok": false, "error": …}`，应用保持打开并提示原因。
+      - 助手（`spaceknife.update_swap`，只用标准库；`packaging/backend_entry.py` 在加载别的东西之前就分派过去）先检查计划：路径都是绝对路径、`exe` 在 `app` 里（macOS 上在 `app/SpaceKnife.app/Contents/MacOS/` 里）、新版本的同一位置有可执行文件、`old` 是空的。不能用的计划（比如新版本不完整）什么都不动：日志写一行 `not started: …`，回 `{"ok": false, "error": …}`，应用保持打开并提示原因。
       - 等应用主进程退出（最多 60 秒，日志「waiting for SpaceKnife (<pid>) to quit」；超时写「SpaceKnife did not quit: kept the old version」）。
       - 把程序目录里除 `data` 以外的条目移到 `updates/previous-<旧版本>`。文件还被占用时（正在关闭的应用自己的子进程、杀毒软件）在 30 秒内反复重试，日志写「busy: …」。
       - 再把新条目移进来。助手自己就在新条目里运行，而 Windows 不让改名一个里面有程序在运行的文件夹，所以整体改不了名的逐个移动，连这也不行的就复制。
@@ -140,8 +157,8 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
   - 新版本带 `--updated` 启动时，预加载脚本拿到 `justUpdated`，界面提示一次「已更新到 SpaceKnife <版本>」。下一次启动后端清理 `updates`，旧安装包、`staging`、`previous`、`update-<版本>.json` 和日志都会删掉。
   - 主进程只启动 `updates` 文件夹里、按本次安装方式的发布文件命名的文件（`installRefusal`）。
 - **发布时的约定**：更新检查靠文件名找文件。发布文件必须沿用下面的名字，并附上对应的校验和文件：
-  - `SpaceKnife-<版本>-Setup-x64.exe`、`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-x86_64.AppImage`、`spaceknife_<版本>_amd64.deb`、`spaceknife-<版本>.x86_64.rpm`、`SpaceKnife-<版本>-mac-arm64.dmg`、`SpaceKnife-<版本>-mac-x64.dmg`；
-  - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`、`SHA256SUMS-mac-<架构>.txt`；
+  - `SpaceKnife-<版本>-Setup-x64.exe`、`SpaceKnife-<版本>-win-x64-portable.zip`、`SpaceKnife-<版本>-win-arm64-portable.zip`、`SpaceKnife-<版本>-linux-x64-portable.tar.gz`、`SpaceKnife-<版本>-linux-arm64-portable.tar.gz`、`SpaceKnife-<版本>-x86_64.AppImage`、`spaceknife_<版本>_amd64.deb`、`spaceknife-<版本>.x86_64.rpm`、`SpaceKnife-<版本>-mac-arm64.dmg`、`SpaceKnife-<版本>-mac-x64.dmg`、`SpaceKnife-<版本>-mac-arm64-portable.zip`、`SpaceKnife-<版本>-mac-x64-portable.zip`；
+  - `SHA256SUMS.txt`（安装包）、`SHA256SUMS-portable-<目标>.txt`（目标是 `win-x64`、`win-arm64`、`linux-x64`、`linux-arm64`）、`SHA256SUMS-mac-<架构>.txt`（dmg 和 macOS 便携 zip）；
   - `SpaceKnife-<版本>-x86_64.AppImage.zsync`（AppImage 里的更新信息指向它）。
   - tag 是 `v<版本>`（语义化版本，可带预发布段）。改名之前先改 `spaceknife.update.pick_asset` 和主进程的 `installRefusal`。
 - **累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。

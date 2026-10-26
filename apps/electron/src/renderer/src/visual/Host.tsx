@@ -13,10 +13,12 @@ import { classColors } from "@/lib/classes";
 import { diffTiers, maxChange } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { palette } from "@/lib/theme";
 import { type ColorMode, rgba } from "@/treemap/paint";
 
 import { acquireGl, type GlContext } from "./glContext";
 import { type HostHandle, hosts } from "./hosts";
+import { HoverLight, hoverTarget } from "./hover";
 import {
   type Breath,
   breathingRows,
@@ -72,7 +74,8 @@ interface HostState {
   anim: Transition | null;
   /** what cur was painted with (repainted after a lost context) */
   settings: PaintSettings | null;
-  hovered: Hit;
+  /** the row lit as hovered: worked out again for every picture by syncHover (visual/hover.ts) */
+  light: HoverLight;
   /** where the pointer is over the picture (client px), null once it left */
   pointer: { x: number; y: number } | null;
   lastZoomKey: number | null;
@@ -102,8 +105,11 @@ interface Live {
 const binLabel = (bytes: number) =>
   window.sk.platform === "darwin" ? t("废纸篓 · 清空可释放 {size}", { size: fmtSize(bytes) }) : t("回收站 · 清空可释放 {size}", { size: fmtSize(bytes) });
 
-const GROUND = rgba(tokens.treemap.ground);
-const GROUND_RGB = [GROUND[0], GROUND[1], GROUND[2]] as const;
+/** The picture's ground in the theme on screen: what the GL canvas is cleared to. */
+function ground(): readonly [number, number, number] {
+  const [r, g, b] = rgba(palette().treemap.ground);
+  return [r, g, b];
+}
 const ZOOM_MS = 250;
 const SWAP_MS = tokens.motion.duration.swap;
 const easeOut = (t: number) => 1 - (1 - t) ** 3;
@@ -113,11 +119,9 @@ export const pointerBox = (p: Pt, r = 12): Box => ({ x: p.x - r, y: p.y - r, w: 
 
 const scaled = (b: Box, k: number): Box => ({ x: b.x * k, y: b.y * k, w: b.w * k, h: b.h * k });
 
-/** The row of a key, or the zoom root when that is the key (result list hover, context menu). */
-export function hitOfKey(f: VisualFrame, key: number): Hit {
-  const row = f.rowOf(key);
-  return row >= 0 ? row : f.info.root?.key === key ? HIT_ROOT : HIT_NONE;
-}
+/** Why the hovered row is worked out again: a new picture (or the end of a transition, a context
+ * back), the pointer moved or left, or the row lit from outside changed. */
+type HoverWhy = "picture" | "move" | "leave" | "key";
 
 function fit(canvas: HTMLCanvasElement, w: number, h: number): void {
   if (canvas.width !== w || canvas.height !== h) {
@@ -138,7 +142,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     old: null,
     anim: null,
     settings: null,
-    hovered: HIT_NONE,
+    light: new HoverLight(),
     pointer: null,
     lastZoomKey: null,
     flash: null,
@@ -155,8 +159,11 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
 
   const view = useApp((s) => s.views[viewId]);
   const vocab = useApp((s) => s.vocab);
+  // 「主题」 (UI-W7-31 ①): the class colours and everything painted follow the theme on screen
+  const theme = useApp((s) => s.theme);
   const classIds = useMemo(() => vocab?.classes.map((c) => c.id) ?? [], [vocab]);
-  const colors = useMemo(() => classColors(vocab), [vocab]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const colors = useMemo(() => classColors(vocab), [vocab, theme]);
   const scanning = useApp((s) => {
     const v = s.views[viewId];
     const st = v ? s.scans[v.state.scan_id] : undefined;
@@ -180,7 +187,11 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
 
   const live = useRef<Live>({ pace: { fpsGap, dynaSmooth }, reduced, trashMode });
   live.current = { pace: { fpsGap, dynaSmooth }, reduced, trashMode };
-  const rehoverRef = useRef<() => void>(() => {});
+  const syncRef = useRef<(why: HoverWhy) => void>(() => {});
+  // a row lit from outside the picture (W3 result list): read where the hovered row is worked out
+  const hoverKey = view?.hoverKey ?? null;
+  const hoverKeyRef = useRef<number | null>(hoverKey);
+  hoverKeyRef.current = hoverKey;
 
   /** The lit class's rows in `frame` (UI-MAIN-65). Without a class the last rows stay while the
    * veil fades out (`fading`), and go with a new frame. */
@@ -207,7 +218,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       const ctx = tc.getContext("2d")!;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      glc.begin(W, H, GROUND_RGB);
+      glc.begin(W, H, ground());
       const a = st.anim;
       if (a && st.old) {
         const t = Math.min(1, (now - a.start) / a.duration);
@@ -230,7 +241,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
         st.anim = null;
         st.old.instance.dispose();
         st.old = null;
-        queueMicrotask(() => rehoverRef.current()); // the block under the pointer, in the new picture
+        queueMicrotask(() => syncRef.current("picture")); // the block under the pointer, in the new picture
         return drawMain(now);
       }
       const dprNow = cur.frame.info.dpr;
@@ -253,18 +264,21 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       const bc = breathCanvas.current;
       const cur = st.cur;
       if (!bc || !cur) return false;
-      const W = cur.frame.info.width;
-      const H = cur.frame.info.height;
-      fit(bc, W, H);
-      const ctx = bc.getContext("2d")!;
-      ctx.clearRect(0, 0, W, H);
       const { reduced, trashMode } = live.current;
       if (st.focus) {
         st.focusLevel = classFade(st.focusLevel, st.focusCls >= 0, now - st.focusAt, reduced);
         st.focusAt = now;
         if (st.focusLevel === 0 && st.focusCls < 0) st.focus = null;
       }
-      if (!st.breath.length && !st.trash.length && !st.focus) return false;
+      if (!st.breath.length && !st.trash.length && !st.focus) {
+        fit(bc, 0, 0); // nothing over the view: no full-size layer kept (8–12 B a pixel)
+        return false;
+      }
+      const W = cur.frame.info.width;
+      const H = cur.frame.info.height;
+      fit(bc, W, H);
+      const ctx = bc.getContext("2d")!;
+      ctx.clearRect(0, 0, W, H);
       const moving = trashMoves(st.trash, trashMode, reduced);
       if (!st.anim) {
         if (st.focus) drawClassMark(ctx, st.focus, st.focusColor, st.focusLevel, W, H, cur.frame.info.dpr);
@@ -318,6 +332,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
         if (st.settings) st.cur.instance.setFrame(st.cur.frame, st.settings);
       }
       loops.main.run();
+      syncRef.current("picture"); // a transition cut short never reaches its end
     };
     canvas.addEventListener("webglcontextlost", lost);
     canvas.addEventListener("webglcontextrestored", restored);
@@ -334,7 +349,36 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       st.ctx = null;
       st.glc = null;
       glc.release();
+      // the 2D layers' backings go now, not at the next major GC (a remount sizes them again)
+      for (const c of [textCanvas.current, breathCanvas.current]) if (c) fit(c, 0, 0);
     };
+  }, [loops]);
+
+  // a hidden window (minimized, or covered: Chromium reports both) keeps no canvas memory: the GL
+  // context is given up (Chromium never sleeps WebGL drawing buffers) and the 2D layers shrink to
+  // nothing; when it shows again, the context comes back and the last frame is painted again
+  useEffect(() => {
+    const st = r.current;
+    let lose: WEBGL_lose_context | null = null;
+    const onVisibility = () => {
+      const glc = st.glc;
+      if (document.hidden) {
+        if (!glc || glc.lost) return;
+        lose = glc.gl.getExtension("WEBGL_lose_context");
+        if (!lose) return;
+        loops.main.stop();
+        loops.breath.stop();
+        lose.loseContext(); // the host's lost handler keeps it restorable (preventDefault)
+        for (const c of [textCanvas.current, breathCanvas.current]) if (c) fit(c, 0, 0);
+      } else if (lose) {
+        const back = lose;
+        lose = null;
+        back.restoreContext(); // webglcontextrestored: the instances make their objects, the frame is painted
+        loops.breath.run();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [loops]);
 
   // ---------------------------------------------------------------- frames
@@ -380,7 +424,7 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
       loops.breath.run(); // 「减少动画」 or 「回收站特效」 may have changed: move again or hold still
       return;
     }
-    st.hovered = HIT_NONE;
+    st.light.dropped(); // the instance gets another frame, or a new instance starts: no row lit
     const zoomKey = view?.state.zoom_key ?? null;
     const prevZoom = st.lastZoomKey;
     st.lastZoomKey = zoomKey;
@@ -410,9 +454,9 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     st.trash = trashMode === "off" ? [] : trashMarks(g, frame, frame.info.dpr);
     relight(g, frame);
     loops.breath.run();
-    rehoverRef.current();
+    syncRef.current("picture");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [frame, colorMode, unitEpoch, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
+  }, [frame, colorMode, unitEpoch, theme, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode]);
 
   // the class the pointer is on in 「类别统计」 (UI-MAIN-65): its rows lit in the picture, everything
   // else under a veil; the filter stays as it is
@@ -432,17 +476,11 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusCls, focusNode, colors, loops]);
 
-  // hover driven from outside (W3 result list): highlight that row like a pointer hover
-  const hoverKey = view?.hoverKey ?? null;
+  // hover driven from outside (W3 result list): that row lit like a pointer hover (new pictures
+  // light it again where the frame is taken in)
   useEffect(() => {
-    const st = r.current;
-    if (!st.cur || st.anim) return;
-    const hit = hoverKey == null ? HIT_NONE : hitOfKey(st.cur.frame, hoverKey);
-    if (hit === st.hovered) return;
-    st.hovered = hit;
-    st.cur.instance.setHover(hit);
-    loops.main.run();
-  }, [hoverKey, frame, loops]);
+    syncRef.current("key");
+  }, [hoverKey]);
 
   // viewport: tell the backend (≥ 10 updates a second while resizing, UI-TM-05); a new device pixel
   // ratio (another monitor) is sent again even when the size stays
@@ -537,56 +575,45 @@ export function VisualHost({ viewId, onHover, onContextMenu }: Props) {
     };
   };
 
-  // a new picture under a pointer that has not moved: the block under it again, so its card stays
-  // up (with this frame's numbers) instead of vanishing until the next mouse move; none while a
-  // transition runs (the end of it calls this again)
-  const rehover = () => {
+  // The hovered row and its card, in one place for every cause (visual/hover.ts): worked out from
+  // where the pointer is and the row lit from outside, for the picture on screen. So a new picture
+  // under a still pointer (a file change, a scan's progress) lights the block under it again and
+  // keeps its card up with this frame's numbers; nothing is lit while a transition runs (its end
+  // calls this again).
+  const syncHover = (why: HoverWhy) => {
     const st = r.current;
+    const cur = st.cur;
     const at = st.pointer;
-    const p = at && !st.anim ? toCanvasAt(at.x, at.y) : null;
-    if (!p || !at) {
-      onHover?.(null);
-      return;
-    }
-    if (p.hit !== st.hovered) {
-      st.hovered = p.hit;
-      p.cur.instance.setHover(p.hit);
+    const moving = st.anim !== null;
+    const p = cur && at && !moving ? toCanvasAt(at.x, at.y) : null;
+    const before = st.light.row;
+    const hit = hoverTarget({ frame: cur?.frame ?? null, moving, pointer: p ? p.hit : null, key: hoverKeyRef.current });
+    if (cur && hit !== before) {
+      if (why === "move" && trailOn && !live.current.reduced && before !== HIT_NONE) {
+        const mark = trailMark(cur.component.geometry, cur.frame, before, performance.now());
+        if (mark) st.trail.push(mark);
+      }
+      st.light.set(cur.instance, hit);
       loops.main.run();
     }
-    onHover?.(p.hit === HIT_NONE ? null : hoverInfo(p, at.x, at.y));
+    // the card is the pointer's: up for its row, with a new picture's numbers, and moving along
+    // with a pointer it follows
+    if (!p || !at || p.hit === HIT_NONE) {
+      if (why !== "move" || hit !== before) onHover?.(null);
+    } else if (why !== "move" || hit !== before || p.cur.component.hoverPlacement === "pointer") {
+      onHover?.(hoverInfo(p, at.x, at.y));
+    }
   };
-  rehoverRef.current = rehover;
+  syncRef.current = syncHover;
 
   const onMove = (ev: React.MouseEvent) => {
-    const st = r.current;
-    st.pointer = { x: ev.clientX, y: ev.clientY };
-    if (st.anim) return;
-    const p = toCanvas(ev);
-    if (!p) return;
-    if (p.hit === st.hovered) {
-      // a card that follows the pointer moves with it inside the row
-      if (p.hit !== HIT_NONE && p.cur.component.hoverPlacement === "pointer") onHover?.(hoverInfo(p, ev.clientX, ev.clientY));
-      return;
-    }
-    if (trailOn && !live.current.reduced && st.hovered !== HIT_NONE) {
-      const mark = trailMark(p.cur.component.geometry, p.f, st.hovered, performance.now());
-      if (mark) st.trail.push(mark);
-    }
-    st.hovered = p.hit;
-    p.cur.instance.setHover(p.hit);
-    loops.main.run();
-    onHover?.(p.hit === HIT_NONE ? null : hoverInfo(p, ev.clientX, ev.clientY));
+    r.current.pointer = { x: ev.clientX, y: ev.clientY };
+    syncHover("move");
   };
 
   const onLeave = () => {
-    const st = r.current;
-    st.pointer = null;
-    if (st.hovered !== HIT_NONE) {
-      st.hovered = HIT_NONE;
-      st.cur?.instance.setHover(HIT_NONE);
-      loops.main.run();
-    }
-    onHover?.(null);
+    r.current.pointer = null;
+    syncHover("leave");
   };
 
   // the zoom root's bar or disc: a click shows it in the details panel (no selection), a double

@@ -118,5 +118,10 @@
  "已超过额定的写入寿命：厂商估计已用 {used}。盘通常还能继续用，只是写入量超过了厂商的保证": "Past its rated write endurance: the vendor estimates {used} used. The drive usually goes on working; it has just been written more than its vendor guarantees",
  "{disk} 已超过额定的写入寿命（厂商估计已用 {used}）": "{disk} is past its rated write endurance (the vendor estimates {used} used)",
  "{disk} 的写入寿命只剩 {pct}": "{disk} has only {pct} of its write endurance left",
- "{disk} 的写入寿命还剩 {pct}": "{disk} has {pct} of its write endurance left"
+ "{disk} 的写入寿命还剩 {pct}": "{disk} has {pct} of its write endurance left",
+ "文件类别": "File classes",
+ "{n} 个卷，共 {size}：{list}": "{n} volumes, {size} in all: {list}",
+ "还没有完整扫描过：{list}": "No complete scan yet: {list}",
+ "其余 {n} 类": "{n} more classes",
+ "扫描一个整卷之后，这里显示所有卷里都是哪些文件；结果会一直保留，直到下一次扫描": "Once a whole volume is scanned, this shows what fills all the volumes; it stays until the next scan"
 }

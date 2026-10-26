@@ -31,11 +31,12 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger
 
+from ..cpus import usable_cpus
 from ..privacy import inside, protected_folders
 from ..store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
 from . import worker
 from .volume import VolumeInfo, is_volume_root, volume_for, volume_group_twins
-from .worker import RootOptions, SliceOptions, SliceResult, Task, merge_slices
+from .worker import RootOptions, SliceOptions, SliceResult, Task
 
 if TYPE_CHECKING:
     from ..io import IoGovernor, Permit
@@ -79,7 +80,7 @@ class ScanProgress:
     errors: int
     pending_dirs: int
     current_path: str
-    elapsed_s: float
+    elapsed_s: float  # every run of the scan (stopped, then continued), pauses included
     rate: float
     progress: float | None
     started_at: datetime | None
@@ -101,26 +102,52 @@ def _report(on_progress: Callable[[ScanProgress], None], progress: ScanProgress)
 
 
 def default_workers() -> int:
-    return max(2, min(8, (os.cpu_count() or 4) - 1))
+    """Worker processes of the Python walker."""
+    return max(2, min(8, usable_cpus() - 1))
 
 
-NATIVE_BATCH = 256  # directories per native call (one listing thread each)
+NATIVE_BATCH = 256  # directories per native call
 NATIVE_BUDGET_S = 0.05  # seconds a native call lists before it returns what it has
 
 
+def listing_threads() -> dict[str, Any] | None:
+    """The native walker's shared listing threads (spaceknife_native ``listing_threads``: the CPUs
+    it counts, the start, cold and widest width, the width now; docs/native.md 2.2), or None for a
+    build without them (each call then lists on its own thread)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is None or not native.has("listing_threads") or "gate" not in getattr(mod, "OPT_KEYS", ()):
+        return None
+    info: dict[str, Any] = mod.listing_threads()
+    return info
+
+
 def native_threads() -> int:
-    """Listing threads for the native walker: one per CPU, at most 16 (beyond that NTFS's locks only
-    add contention). On macOS twice the CPUs: APFS listings wait in the kernel often enough that the
-    extra threads keep the CPUs busy (GitHub's macOS runners, 3-CPU arm64 and 4-CPU Intel: +5 % to
-    +15 %; many more starve the main thread that folds the results; docs/packaging.md).
-    SPACEKNIFE_SCAN_THREADS sets it (1–64) for measurements."""
+    """Threads that call the native walker, one slice each. The walker decides how many folders
+    are listed at once (its width: from the start width up to the cold width while the disk is read,
+    narrower where fewer list faster; docs/native.md 2.2); the scanner calls it from as many threads
+    as its start width: the CPUs this process may use, 2–16 (on macOS twice that, 4–16: APFS
+    listings wait in the kernel often enough that more threads keep the CPUs busy;
+    docs/packaging.md). SPACEKNIFE_SCAN_THREADS (1–64) fixes both, for measurements. Builds without
+    the shared listing threads: one listing thread per calling thread, as many."""
+    info = listing_threads()
+    if info is not None:
+        return max(1, int(info["start"]))
     forced = os.environ.get("SPACEKNIFE_SCAN_THREADS", "")
     if forced.isdigit() and int(forced) > 0:
         return min(64, int(forced))
-    cpus = os.cpu_count() or 4
+    cpus = usable_cpus()
     if sys.platform == "darwin":
         return max(4, min(16, 2 * cpus))
     return max(2, min(16, cpus))
+
+
+def listing_max() -> int:
+    """The most folders the native walker lists at once (its widest width): what the disk-load
+    governor's concurrency, counted in listings, may reach (IoGovernor.listing_gate)."""
+    info = listing_threads()
+    return max(1, int(info["max"])) if info is not None else native_threads()
 
 
 @dataclass(slots=True)
@@ -134,6 +161,8 @@ class ScanProfile:
     limited_s: float  # main thread: waiting for the disk-load limit to allow another slice
     slices: int
     items: int  # entries this run added to the tree
+    # the native walker's shared listing threads: the widths it listed at ("16", "8–32"), else ""
+    width: str = ""
 
     @property
     def busy(self) -> float:
@@ -151,9 +180,10 @@ class ScanProfile:
 
     def text(self) -> str:
         bulk = bulk_listing()
+        width = f" (listing width {self.width})" if self.width else ""
         return (
             f"{self.items:,} items in {self.wall_s:.1f}s ({self.items / max(self.wall_s, 1e-9):,.0f}/s); "
-            f"listing threads busy {self.busy:.0%} of {self.threads}; "
+            f"listing threads busy {self.busy:.0%} of {self.threads}{width}; "
             f"main thread folding {self.ingest:.0%}; "
             f"held by the disk-load limit {self.limited:.0%}; "
             f"{self.slices:,} slices" + (f"; getattrlistbulk {bulk}" if bulk else "")
@@ -174,6 +204,19 @@ def bulk_listing() -> str | None:
 Slicer = Callable[[list[Task], SliceOptions], SliceResult]
 
 
+def link_set() -> Any:
+    """Where a scan keeps the (dev, ino) of hard-linked files it has counted: the native LinkSet
+    (``mark`` runs the loop of ``Scanner._fold`` over a whole slice) or, without the extension, a
+    set of tuples. The Python loop took about a fifth of a warm scan of a Linux system whose uv
+    cache and environments share 160,000 files by hard links (0.5 µs per linked file)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is not None and native.has("LinkSet"):
+        return mod.LinkSet()
+    return set()
+
+
 def native_slicer() -> Slicer | None:
     """The native walker as a slicer (one listing thread per call), or None without the extension."""
     from .. import native
@@ -182,6 +225,14 @@ def native_slicer() -> Slicer | None:
     if mod is None or not native.has("scan_slice"):
         return None
     scan_slice = mod.scan_slice
+    # builds before the check of case-only siblings reject these keys (docs/native.md 2.2)
+    names = "verify_names" in getattr(mod, "ROOT_KEYS", ())
+    listed = "listed_alloc" in getattr(mod, "ROOT_KEYS", ())
+    known = getattr(mod, "OPT_KEYS", ())
+    switches = [k for k in ("skip_final", "dot_check", "keep_where_updated") if k in known]
+    # the shared listing threads (threads 0) where the build has them and takes a disk's gate;
+    # else each call lists on its calling thread
+    shared = "gate" in known
 
     def run(tasks: list[Task], opts: SliceOptions) -> SliceResult:
         roots = [
@@ -192,15 +243,66 @@ def native_slicer() -> Slicer | None:
                 "cross_mounts": r.cross_mounts,
                 **({"skip": list(r.skip)} if r.skip else {}),  # macOS only; older builds lack the keys
                 **({"protect": list(r.protect)} if r.protect else {}),
+                **({"path": r.path, "verify_names": r.verify_names} if names else {}),
+                **({"listed_alloc": r.listed_alloc} if listed else {}),
             }
             for r in opts.roots
         ]
         raw = scan_slice(
-            tasks, {"roots": roots, "budget_s": opts.budget_s, "max_entries": opts.max_entries, "threads": 1}
+            tasks,
+            {
+                "roots": roots,
+                "budget_s": opts.budget_s,
+                "max_entries": opts.max_entries,
+                "threads": 0 if shared else 1,
+                **({"gate": opts.gate} if shared and opts.gate is not None else {}),
+                **{k: getattr(opts, k) for k in switches},  # SliceOptions: from the environment
+            },
         )
         return SliceResult(**raw)
 
     return run
+
+
+def listing_threads_reset() -> None:
+    """Start over the narrowest and widest width the native walker listed at (``_width_seen``)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is not None and native.has("listing_threads"):
+        mod.listing_threads(reset=True)
+
+
+def _width_seen() -> str:
+    """The widths the native walker listed at since ``listing_threads_reset`` ("16", "8–32";
+    process-wide: scans that ran at the same time share it)."""
+    from .. import native
+
+    mod = native.module()
+    if mod is None or not native.has("listing_threads"):
+        return ""
+    info = mod.listing_threads()
+    low, high = int(info["low"]), int(info["high"])
+    return str(low) if low == high else f"{low}–{high}"
+
+
+def verify_names(volume: VolumeInfo | None) -> bool:
+    """Whether listings of this volume check folders by the names the file system stores
+    (``RootOptions.verify_names``): Windows on WinBtrfs, where trees Linux made can hold names
+    that differ only in case, and an open by name takes the first entry that matches in any case."""
+    return sys.platform == "win32" and volume is not None and volume.fs_type.lower() == "btrfs"
+
+
+def listed_alloc(volume: VolumeInfo | None) -> str:
+    """``RootOptions.listed_alloc`` for a root on ``volume``: files take their size on disk from
+    their listing entries on local NTFS, ReFS and WinBtrfs volumes (where the listing was measured
+    against the file system's own count); elsewhere (FAT, exFAT, network shares, other systems), or
+    with SPACEKNIFE_WIN_LISTED_ALLOC=0, it is estimated from the size as before."""
+    if sys.platform != "win32" or volume is None or volume.is_remote:
+        return ""
+    if not worker._env_switch("SPACEKNIFE_WIN_LISTED_ALLOC", True):
+        return ""
+    return {"ntfs": "NTFS", "refs": "ReFS", "btrfs": "Btrfs"}.get(volume.fs_type.lower(), "")
 
 
 def make_pool(workers: int | None = None) -> ProcessPoolExecutor:
@@ -252,15 +354,18 @@ class Scanner:
         self._running = asyncio.Event()
         self._running.set()
         self._cancelled = False
-        self._seen_links: set[tuple[int, int]] = set()
+        self._seen_links = link_set()  # (dev, ino) of hard-linked files already counted
         self._queue: deque[Task] = deque()
         self._errors = 0
         self._denied: list[str] = []
         self.denied_reasons: list[str] = []  # OS message per recorded denied path (log panel)
         self._current = ""
-        self._started: float | None = None
-        self._finished: float | None = None
-        self.started_at: datetime | None = None
+        self._started: float | None = None  # this run's start (perf_counter); None before the first
+        self._finished: float | None = None  # this run's end; None while it runs
+        # earlier runs of this scan (stopped, then 「继续扫描」): elapsed_s adds them, not the waits
+        self._before_s = 0.0
+        self._held_s = 0.0  # the hard runs' time while an MFT read stands in for them
+        self.started_at: datetime | None = None  # the scan's first start, kept by later runs
         self.finished_at: datetime | None = None
         self.message = ""
         self.expected_items: int | None = None  # from the last snapshot of the same roots (UI-W2-15)
@@ -269,6 +374,7 @@ class Scanner:
         self._paused_since: float | None = None
         self._folded = 0  # entries added to the tree by this run
         self._slices = 0
+        self._width = ""  # ScanProfile.width
 
         root_opts: list[RootOptions] = []
         normalised: list[str] = []
@@ -308,6 +414,9 @@ class Scanner:
                     cross_mounts=cross_mounts,
                     skip=() if cross_mounts else volume_group_twins(path),
                     protect=tuple(p for p in protected if inside(p, path)),
+                    path=path,
+                    verify_names=verify_names(volume),
+                    listed_alloc=listed_alloc(volume),
                 )
             )
             self._queue.append(((0, node, 0), path, len(root_opts) - 1))
@@ -345,9 +454,13 @@ class Scanner:
     # the tree comes from elsewhere (an MFT scan adopted into the store): timing and state only
 
     def begin_external(self) -> None:
+        """The read starts; its tree replaces whatever a hard part listed, and so does its time
+        (scan.use_mft: the next 「约 N 秒」 estimate comes from it). The hard part's time is held
+        for :meth:`reset_external`."""
         self.state = ScanState.SCANNING
-        self._started = time.perf_counter()
-        self.started_at = datetime.now(UTC)
+        self._held_s = self._before_s + self._run_s()
+        self._before_s, self._started, self._paused_s = 0.0, None, 0.0
+        self._next_run()
 
     def finish_external(self, state: ScanState) -> None:
         self.state = state
@@ -357,10 +470,28 @@ class Scanner:
         self._current = ""
 
     def reset_external(self) -> None:
-        """The external read failed: :meth:`run` scans as usual."""
+        """The external read failed: :meth:`run` scans as usual, going on with the hard part's time
+        (not the attempt's: the tree keeps nothing of it)."""
         self.state = ScanState.QUEUED
-        self._started = None
-        self.started_at = None
+        self._before_s, self._held_s = self._held_s, 0.0
+        self._started = self._finished = None
+        self.finished_at = None
+
+    def _run_s(self) -> float:
+        """This run so far, the time it was paused included (``elapsed_s``; the profile leaves it out)."""
+        if self._started is None:
+            return 0.0
+        return (self._finished or time.perf_counter()) - self._started
+
+    def _next_run(self) -> None:
+        """A run starts now: the scan keeps its first start (``started_at``), and an earlier run (a
+        stopped scan going on) counts in ``_before_s``."""
+        self._before_s += self._run_s()
+        self._started = time.perf_counter()
+        self._finished = None
+        self.finished_at = None
+        if self.started_at is None:
+            self.started_at = datetime.now(UTC)
 
     def pause(self) -> None:
         """Stop dispatching batches; those in flight finish within their time budget (W2)."""
@@ -389,10 +520,10 @@ class Scanner:
     ) -> ScanProgress:
         loop = asyncio.get_running_loop()
         self.state = ScanState.SCANNING
-        self._started = time.perf_counter()
-        self.started_at = datetime.now(UTC)
+        self._next_run()
         self._busy_s = self._ingest_s = self._limited_s = self._paused_s = 0.0  # this run's profile
         self._slices = self._folded = 0
+        self._samples.clear()  # the rates come from this run's listing, not across a stop
         if self._paused_since is not None:  # paused while queued
             self._paused_since = self._started
         executor = self._executor
@@ -408,13 +539,20 @@ class Scanner:
         gov = self.governor
         last_report = 0.0
         asked = 0.0
+        # the native walker: the disk's gate holds its listings in flight to the governor's
+        # concurrency (counted in listings), and stops new ones while paused
+        native_slices = self.slicer is not worker.scan_slice
+        gate = gov.listing_gate() if gov is not None and native_slices else None
+        shared = native_slices and listing_threads() is not None
+        if shared:
+            listing_threads_reset()
 
         def dispatch(permit: Permit | None) -> None:
-            parallel = gov.concurrency if gov is not None else self.concurrency
+            parallel = min(gov.concurrency, self.concurrency) if gov is not None else self.concurrency
             share = max(1, min(self.batch_tasks, len(self._queue) // max(1, parallel)))
             batch = [self._queue.popleft() for _ in range(min(share, len(self._queue)))]
             budget = min(0.01, self.budget_s) if len(self._queue) < parallel else self.budget_s
-            opts = SliceOptions(roots=self._root_opts, budget_s=budget)
+            opts = SliceOptions(roots=self._root_opts, budget_s=budget, gate=gate)
             fut = loop.run_in_executor(executor, self.slicer, batch, opts)
             if permit is not None:
                 permit.bind(fut)
@@ -493,6 +631,8 @@ class Scanner:
             self._running.set()
             self._finished = time.perf_counter()
             self.finished_at = datetime.now(UTC)
+            if shared:
+                self._width = _width_seen()
             if thread_pool is not None:
                 thread_pool.shutdown(wait=False, cancel_futures=True)
         result = self.progress()
@@ -519,7 +659,7 @@ class Scanner:
         t0 = time.perf_counter()
         n0 = len(self.store)
         try:
-            self._fold(merge_slices(list(results)))
+            self._fold(list(results))
         finally:
             self._folded += len(self.store) - n0
             self._ingest_s += time.perf_counter() - t0
@@ -537,40 +677,54 @@ class Scanner:
             limited_s=self._limited_s,
             slices=self._slices,
             items=self._folded,
+            width=self._width,
         )
 
-    def _fold(self, res: SliceResult) -> None:
+    def _fold(self, results: list[SliceResult]) -> None:
+        """Slices that came in together, folded as one (what worker.merge_slices and one fold of
+        the merged slice did, without the merged copy): hard links and extensions slice by slice
+        in order, one NodeStore.ingest_slices (natively without the GIL where the extension is),
+        then errors and the frontier."""
         store = self.store
-        cols = res.cols
-        n_entries = len(res.name_lens)
-        if n_entries and not self.count_links_each:
-            cand = np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]
-            if len(cand):
-                flags = cols["flags"]
-                for i in cand.tolist():
-                    key = (int(cols["dev"][i]), int(cols["ino"][i]))
-                    if key in self._seen_links:
-                        flags[i] |= np.uint32(Flag.HARDLINK_DUP)
-                    else:
-                        self._seen_links.add(key)
-        remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
-        ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
-        # the whole slice in one go (mount points stay unentered: never PENDING)
-        starts = store.ingest_slice(
-            res.refs,
-            res.bounds,
-            res.name_blob,
-            res.name_lens,
-            {key: cols[key] for key in ENTRY_COLUMNS},
-            ext_global,
-        )
-        if res.paths:
-            self._current = res.paths[-1]
-        skipped = int(np.count_nonzero(starts < 0))
+        parts = []
+        for res in results:
+            cols = res.cols
+            n_entries = len(res.name_lens)
+            if n_entries and not self.count_links_each:
+                seen = self._seen_links
+                if not isinstance(seen, set):  # native: the same loop, in one call
+                    seen.mark(cols["dev"], cols["ino"], cols["nlink"], cols["kind"], cols["flags"])
+                elif len(cand := np.nonzero((cols["nlink"] > 1) & (cols["kind"] == Kind.FILE))[0]):
+                    flags = cols["flags"]
+                    for i in cand.tolist():
+                        key = (int(cols["dev"][i]), int(cols["ino"][i]))
+                        if key in seen:
+                            flags[i] |= np.uint32(Flag.HARDLINK_DUP)
+                        else:
+                            seen.add(key)
+            remap = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
+            ext_global = remap[res.ext_ids] if n_entries else res.ext_ids
+            parts.append(
+                (
+                    res.refs,
+                    res.bounds,
+                    res.name_blob,
+                    res.name_lens,
+                    {key: cols[key] for key in ENTRY_COLUMNS},
+                    ext_global,
+                )
+            )
+        # the whole slices in one go (mount points stay unentered: never PENDING)
+        all_starts = store.ingest_slices(parts)
+        skipped = 0
+        for res, starts in zip(results, all_starts, strict=True):
+            if res.paths:
+                self._current = res.paths[-1]
+            skipped += int(np.count_nonzero(starts < 0))
         if skipped:
             logger.debug("scan: {} listing(s) of folders deleted while they were read, skipped", skipped)
 
-        def resolve(refs: list[tuple[int, int, int]]) -> list[int]:
+        def resolve(refs: list[tuple[int, int, int]], starts: np.ndarray) -> list[int]:
             """The nodes results refer to; -1 for one that left the tree while it was read."""
             if not refs:
                 return []
@@ -587,29 +741,31 @@ class Scanner:
             nodes: list[int] = out.tolist()
             return nodes
 
-        for (_, path, msg), node in zip(res.errors, resolve([e[0] for e in res.errors]), strict=True):
-            if node < 0:
-                continue
-            store.mark(node, Flag.ACCESS_DENIED)
-            store.clear(node, Flag.PENDING)
-            self._errors += 1
-            if len(self._denied) < MAX_RECORDED_DENIED:
-                self._denied.append(path)
-                self.denied_reasons.append(msg)
-        nodes = resolve([f[0] for f in res.frontier])
-        self._queue.extend(
-            ((0, node, 0), path, root_idx)
-            for (_, path, root_idx), node in zip(res.frontier, nodes, strict=True)
-            if node >= 0
-        )
+        for res, starts in zip(results, all_starts, strict=True):
+            for (_, path, msg), node in zip(
+                res.errors, resolve([e[0] for e in res.errors], starts), strict=True
+            ):
+                if node < 0:
+                    continue
+                store.mark(node, Flag.ACCESS_DENIED)
+                store.clear(node, Flag.PENDING)
+                self._errors += 1
+                if len(self._denied) < MAX_RECORDED_DENIED:
+                    self._denied.append(path)
+                    self.denied_reasons.append(msg)
+        for res, starts in zip(results, all_starts, strict=True):
+            nodes = resolve([f[0] for f in res.frontier], starts)
+            self._queue.extend(
+                ((0, node, 0), path, root_idx)
+                for (_, path, root_idx), node in zip(res.frontier, nodes, strict=True)
+                if node >= 0
+            )
 
     # ------------------------------------------------------------------ reporting
 
     def progress(self) -> ScanProgress:
         c = self.store.cols
-        elapsed = 0.0
-        if self._started is not None:
-            elapsed = (self._finished or time.perf_counter()) - self._started
+        elapsed = self._before_s + self._run_s()  # every run of the scan, without the waits between
         items = len(self.store) - 1
         scanned_alloc = int(c["tot_alloc"][0])
         rate, byte_rate = self._rates(items, scanned_alloc, elapsed)

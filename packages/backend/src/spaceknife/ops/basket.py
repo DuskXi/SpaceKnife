@@ -35,7 +35,7 @@ from ..store.lookup import PathIndex
 from ..store.nodes import Flag, Kind, NodeStore
 from ..store.subtree import subtree_ids
 from .paths import protected_reason
-from .trash import OpResult
+from .trash import OpResult, win32_trims
 
 ItemKind = Literal["file", "dir", "link", "other", "group"]
 Status = Literal["ready", "locked", "missing", "protected"]
@@ -46,6 +46,9 @@ TEXT = Texts(
         "group_name": "{folder} 中 {count} 个小项",
         "bad_node": "扫描结果中没有这一项",
         "virtual": "MFT 伪文件夹中的项不在磁盘上",
+        "bad_name": "它或上级文件夹的名字里有路径不能有的字符，没有路径能找到它",
+        "dup_name": "它或上级文件夹与同一文件夹里的另一项名字完全相同，按路径找到的可能是另一项",
+        "trailing_name": "它或上级文件夹的名字以点或空格结尾，Windows 按路径找到的不是它",
         "not_folder": "小项聚合块的所在位置不是文件夹",
         "not_member": "不是所在文件夹的直接子项",
         "missing": "已不存在",
@@ -81,6 +84,7 @@ class BasketItem:
     files: int = 0
     dirs: int = 0
     volume: str = ""  # mount point of the volume holding it
+    root: str = ""  # the scan root it was found under (ops.trash: names that reach a case-only sibling)
     status: Status = "ready"
     note: str = ""  # Chinese: who holds it open, hard links, what failed …
 
@@ -112,6 +116,7 @@ class Target:
     item: str  # item id
     path: str
     size: int  # bytes it holds as last scanned (max of logical and allocated): trash capacity checks
+    root: str = ""  # the scan root it was found under
 
 
 @dataclass(slots=True)
@@ -145,6 +150,16 @@ class _Entry:
 
     def covered(self) -> list[str]:
         return self.member_keys if self.group else [self.key]
+
+
+def _unnameable(name: str) -> bool:
+    """No path can hold this name, so a delete by path would reach something else or nothing:
+    on Windows the characters worker.unnameable lists, elsewhere only the separator."""
+    if os.name == "nt":
+        from ..scan.worker import unnameable
+
+        return unnameable(name)
+    return os.sep in name
 
 
 def _key(path: str) -> str:
@@ -195,6 +210,7 @@ class Basket:
         self._volume_of = volume_of or default_volume_of
         self._volumes: dict[str, str] = {}  # scan root path -> mount point
         self._absorbed_paths: dict[str, str] = {}  # during one add(): absorbed id -> its path
+        self._shared: dict[int, frozenset[bytes]] = {}  # during one add(): folder -> names it holds twice
         self.version = 0  # bumped by every change (pushes compare it)
 
     # ------------------------------------------------------------------ queries
@@ -247,9 +263,13 @@ class Basket:
                         if len(e.member_sizes) == len(e.item.members)
                         else [0] * len(e.item.members)
                     )
-                    out.extend(Target(e.item.id, p, s) for p, s in zip(e.item.members, sizes, strict=True))
+                    out.extend(
+                        Target(e.item.id, p, s, e.item.root)
+                        for p, s in zip(e.item.members, sizes, strict=True)
+                    )
                 else:
-                    out.append(Target(e.item.id, e.item.path, max(e.item.size, e.measure.base, e.item.alloc)))
+                    size = max(e.item.size, e.measure.base, e.item.alloc)
+                    out.append(Target(e.item.id, e.item.path, size, e.item.root))
             return out
 
     def lock_targets(self) -> list[str]:
@@ -283,6 +303,7 @@ class Basket:
                     if into is not None:
                         result.merged.append(Merged(path, into))
             self._absorbed_paths.clear()
+            self._shared.clear()
             self._settle()
             return result
 
@@ -397,7 +418,15 @@ class Basket:
                     keys = [_key(m) for m in item.members]
                     known.member_sizes = [0] * len(keys)
                     self._insert_group(
-                        item.path, item.scan_id, item.volume, list(item.members), keys, known, None, result
+                        item.path,
+                        item.scan_id,
+                        item.volume,
+                        item.root,
+                        list(item.members),
+                        keys,
+                        known,
+                        None,
+                        result,
                     )
                     continue
                 entry = _Entry(
@@ -413,9 +442,40 @@ class Basket:
         c = store.cols
         if node <= 0 or node >= len(store) or c["flags"][node] & np.uint32(Flag.GONE):
             return TEXT["bad_node"]
-        if any(c["flags"][n] & np.uint32(Flag.VIRTUAL) for n in (node, *store.ancestors(node))):
+        line = (node, *store.ancestors(node))
+        if any(c["flags"][n] & np.uint32(Flag.VIRTUAL) for n in line):
             return TEXT["virtual"]
+        below = [n for n in line if c["depth"][n] > 1]  # the scan root's own name is a path
+        # a name no path can hold (WinBtrfs shows Linux names with a \ or : as they are): its path
+        # names something else, or nothing
+        if any(_unnameable(store.name(n)) for n in below):
+            return TEXT["bad_name"]
+        # the very same name twice in one folder (WinBtrfs shows invalid UTF-8 as U+FFFD): the scan
+        # lists each with its own contents, the path opens one of them
+        if any(store.name_bytes(n) in self._shared_names(store, int(c["parent"][n])) for n in below):
+            return TEXT["dup_name"]
+        if win32_trims(store.path(node)):
+            return TEXT["trailing_name"]
         return None
+
+    def _shared_names(self, store: NodeStore, folder: int) -> frozenset[bytes]:
+        """Names more than one entry of ``folder`` has (cached for one :meth:`add`)."""
+        hit = self._shared.get(folder)
+        if hit is None:
+            seen: set[bytes] = set()
+            twice: set[bytes] = set()
+            for i in store.children(folder):
+                name = store.name_bytes(i)
+                (twice if name in seen else seen).add(name)
+            hit = self._shared[folder] = frozenset(twice)
+        return hit
+
+    @staticmethod
+    def _root_path(store: NodeStore, node: int) -> str:
+        parent = store.cols["parent"]
+        while int(parent[node]) > 0:
+            node = int(parent[node])
+        return store.name(node)
 
     def _add_node(self, store: NodeStore, scan_id: str, node: int, result: AddResult) -> None:
         bad = self._check_node(store, node)
@@ -440,6 +500,7 @@ class Basket:
             kind=kind,
             scan_id=scan_id,
             volume=self._volume(store, node),
+            root=self._root_path(store, node),
         )
         entry = _Entry(
             item=item, key=key, measure=_measure(store, [node]), fingerprint=_fingerprint(store, [node])
@@ -491,6 +552,7 @@ class Basket:
             folder_path,
             scan_id,
             self._volume(store, folder),
+            self._root_path(store, folder),
             paths,
             keys,
             _measure(store, nodes, members=True),
@@ -503,6 +565,7 @@ class Basket:
         folder_path: str,
         scan_id: str,
         volume: str,
+        root: str,
         paths: list[str],
         keys: list[str],
         measure: _Measure,
@@ -539,6 +602,7 @@ class Basket:
                 kind="group",
                 scan_id=scan_id,
                 volume=volume,
+                root=root,
             )
             entry = _Entry(item=item, key=folder_key)
             self._entries[item.id] = entry
@@ -667,11 +731,7 @@ class Basket:
         self.version += 1
 
     def _volume(self, store: NodeStore, node: int) -> str:
-        root = node
-        parent = store.cols["parent"]
-        while int(parent[root]) > 0:
-            root = int(parent[root])
-        root_path = store.name(root)
+        root_path = self._root_path(store, node)
         hit = self._volumes.get(root_path)
         if hit is None:
             hit = self._volumes[root_path] = self._volume_of(root_path)

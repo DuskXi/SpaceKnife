@@ -32,6 +32,7 @@ You don't have to look them up: **Settings › Advanced** shows them.
 | `update.json` | data | The last update check, the recent releases with their notes, and the versions whose update card you closed |
 | `updates/` | data | A downloaded new version until it runs, and while a portable copy is replaced, its new and old program files. Emptied at the next start ([Nothing left behind](../updates-privacy/#nothing-left-behind)) |
 | `palette_recent.json` | data | Recent jumps and filters of the command palette |
+| `volume_summaries.json` | data | What the Disks page kept of each volume's last complete scan (file classes, largest folders) |
 | `settings.json` | configuration | Your settings |
 | `classes.json` | configuration | Your file classes |
 | `columns/` | cache | Scan data moved out of memory for very large scans |
@@ -60,7 +61,7 @@ For a bug report, **Settings › Advanced › Copy diagnostics** puts the versio
 
 ### Cache
 
-When a scan's data grows past **Settings › Advanced › Scan data memory limit** (25% of physical memory by default), new parts of it go to memory-mapped files in the cache instead of private memory. These files remove themselves when they are no longer needed, and anything a crash leaves behind is removed at the next start. **Clear cache…** removes what isn't in use.
+Scans of more than about two million items when **Settings › Advanced › Keep large scans in mapped files** is on (it is off by default), and scan data beyond **Settings › Advanced › Scan data memory limit** (25% of physical memory by default), go to memory-mapped files in the cache instead of private memory. These files remove themselves when they are no longer needed, and anything a crash leaves behind is removed at the next start. **Clear cache…** removes what isn't in use.
 
 ## SPACEKNIFE_HOME
 
@@ -104,13 +105,14 @@ The [command line](../command-line/) reads the same variable, so `spaceknife-bac
 
 ## Portable mode
 
-The portable archives (`SpaceKnife-<version>-win-x64-portable.zip` and `SpaceKnife-<version>-linux-x64-portable.tar.gz`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts on Windows or Linux, it looks for that folder: if there is a `data` folder next to the executable, it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface profile all stay in it, and nothing is written to your user profile.
+The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-linux-<arch>-portable.tar.gz` and `SpaceKnife-<version>-mac-<arch>-portable.zip`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface profile all stay in it, and nothing is written to your user profile.
 
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.
 - Unpack the archive somewhere you can write: a folder under Program Files, for example, doesn't work.
 - The in-app update knows it is a portable copy: it downloads the portable archive, and **Seamless update** replaces the program files and keeps `data`; **Replace it yourself** shows the archive so that you unpack it over the old files (see [Upgrading](../install/#upgrading)).
-- The macOS app and the AppImage have no portable mode. On macOS, use `SPACEKNIFE_HOME` instead.
+- On macOS, an app opened straight from where it was unzipped may be run from a hidden read-only copy (App Translocation). SpaceKnife finds the original folder and still keeps its data in `data` there.
+- An app installed from the dmg (with no `data` folder next to it in Applications) and the AppImage have no portable mode.
 
 :::caution[The command line and portable mode]
 Only the app looks for the `data` folder; the command line inside a portable copy doesn't. To work with a portable copy's snapshots from a terminal, point `SPACEKNIFE_HOME` at its `data` folder, as in the example below.

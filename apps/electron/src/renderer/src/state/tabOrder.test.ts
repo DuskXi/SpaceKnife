@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { dropIndex, moveTo, stepIndex } from "./tabOrder";
+import { dropIndex, moveTo, placeTab, stepIndex } from "./tabOrder";
 
 const tabs = ["a", "b", "c", "d"].map((id) => ({ id }));
 const ids = (list: { id: string }[]) => list.map((x) => x.id).join("");
@@ -41,5 +41,21 @@ describe("Ctrl+Shift+PgUp / PgDn", () => {
     expect(stepIndex(tabs, "a", -1)).toBeNull();
     expect(stepIndex(tabs, "d", 1)).toBeNull();
     expect(stepIndex(tabs, "x", 1)).toBeNull();
+  });
+});
+
+describe("a scan or snapshot opened from a start tab", () => {
+  const scan = { id: "s" };
+
+  it("takes the start tab's place, or comes last without one", () => {
+    expect(ids(placeTab(tabs, scan, "b")!)).toBe("ascd");
+    expect(ids(placeTab(tabs, scan)!)).toBe("abcds");
+    expect(ids(tabs)).toBe("abcd");
+  });
+
+  it("has nowhere to go once that start tab was closed while it loaded", () => {
+    // showScan then frees the new view and the scan: nothing stays in the backend with no tab
+    expect(placeTab(tabs, scan, "x")).toBeNull();
+    expect(placeTab([], scan, "a")).toBeNull();
   });
 });

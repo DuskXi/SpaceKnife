@@ -8,7 +8,7 @@ const appVersion = process.argv.find((arg) => arg.startsWith(VERSION_ARG))?.slic
 
 const api: SkApi = {
   platform: process.platform as SkApi["platform"],
-  version: appVersion ?? process.env.npm_package_version ?? "0.3.3",
+  version: appVersion ?? process.env.npm_package_version ?? "0.3.4",
   host: "app",
   remote: null,
   justUpdated: process.argv.includes("--sk-updated"),
@@ -43,6 +43,7 @@ const api: SkApi = {
     install: (path, how) => ipcRenderer.invoke("sk:installUpdate", path, how) as Promise<string>,
   },
   setLanguage: (lang) => ipcRenderer.send("sk:setLanguage", lang),
+  setTheme: (theme) => ipcRenderer.send("sk:setTheme", theme),
   dialog: {
     openSnapshot: () => ipcRenderer.invoke("sk:openSnapshot") as Promise<string | null>,
     openFolders: () => ipcRenderer.invoke("sk:openFolders") as Promise<string[]>,

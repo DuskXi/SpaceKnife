@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import { headingsOf, NAV, ORDER, PAGES, page, search } from "./docs";
 import { render } from "./markdown";
+import { picture } from "./pictures";
 import { type DocLang, siteUrl } from "./site";
 
 const LANGS: DocLang[] = ["en", "zh"];
@@ -13,7 +14,7 @@ const LANGS: DocLang[] = ["en", "zh"];
 /** The elements the renderer makes; anything else would be HTML that came through. */
 const ELEMENTS = new Set([
   "p", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "li", "blockquote", "hr", "br", "pre", "code", "em", "strong", "s", "a",
-  "kbd", "div", "span", "table", "thead", "tbody", "tr", "th", "td", "aside", "button", "svg", "path", "circle", "rect", "line", "polyline",
+  "kbd", "div", "span", "table", "thead", "tbody", "tr", "th", "td", "aside", "button", "svg", "path", "circle", "rect", "line", "polyline", "img",
 ]);
 
 /** The output without the code (inline and blocks): what is left was written as prose. */
@@ -51,7 +52,14 @@ describe.each(LANGS)("every %s page", (lang) => {
     expect(text.match(/&lt;[a-zA-Z!/][^\n]{0,40}/g) ?? [], "raw HTML").toEqual([]);
     // an aside that didn't open (a misspelt kind, a missing blank line) is left as ":::" text
     expect(text.match(/(^|>)\s*:::[^\n]{0,30}/gm) ?? [], "asides").toEqual([]);
-    expect(r.html.includes('class="help-image"'), "images").toBe(false);
+    // pictures: each has a description and is one of the bundled pictures, shown with its size
+    const pictures = [...p.body.matchAll(/!\[([^\]]*)\]\(([^)\s]+)\)/g)];
+    for (const [, alt, src] of pictures) {
+      expect(alt!.trim(), `${src}: description`).not.toBe("");
+      expect(picture(src!, lang), `${src}: not a picture in site/src/assets`).toBeDefined();
+    }
+    expect(r.html.includes('class="help-image"'), "pictures shown as their description").toBe(false);
+    expect([...r.html.matchAll(/<img class="help-picture" src="[^"]+" alt="[^"]+" width="\d+" height="\d+"/g)].length, "pictures").toBe(pictures.length);
   });
 
   it.each(ORDER)("%s links only to pages and headings that exist", (id) => {

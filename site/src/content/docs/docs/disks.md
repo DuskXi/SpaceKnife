@@ -19,6 +19,7 @@ The top of the page is a dashboard:
 - **Capacity**: the disks' total size; the ring shows how much of your volumes' space is used, and the line below says how much is used and free.
 - **Volumes**: how many local volumes there are, and how many SpaceKnife knows from a scan or a snapshot.
 - **Fastest link**: the fastest connection of any disk, what it carries and which disk it is.
+- **File classes**: one big bar that adds up the [file classes](../tags-classes/) of every volume whose mix is known (an open scan, or what was kept of the last one), with each class's size and share below; the line under the title names the volumes it covers and the local volumes with no complete scan yet.
 - **Capacity by type**: a bar of the capacity by storage type, from the fastest (NVMe SSD, brightest) to the slowest (external drives and cards); the table under it gives each type's disks, size and share.
 - **Findings**: what is worth knowing, the ones to look at first:
 
@@ -115,12 +116,19 @@ Under each volume, a line says what SpaceKnife knows of it from a scan of the wh
 |---|---|
 | **Scanned 2 hours ago · 1,234,567 files · 1.9 TB**, the largest file classes and the largest top-level folders | A scan of the volume open in a tab. **Show** goes to that tab. |
 | **Scanning · 120,000 files** | A scan of the volume still running. |
-| **Snapshot 3 days ago · … files · …** | The newest [snapshot](../snapshots-compare/) of the volume, when no scan of it is open. **Open snapshot** opens it. |
+| **Scanned 2 hours ago · …** with the classes and folders, but no scan open | What was kept of the volume's last complete scan, see [What stays](#what-stays). **Open snapshot** opens that scan's snapshot. |
+| **Snapshot 3 days ago · … files · …** | The newest [snapshot](../snapshots-compare/) of the volume (counts only), when no scan of it is open and nothing was kept. **Open snapshot** opens it. |
 | **Not scanned yet** | Neither. **Scan…** opens a start page with the volume picked, so you can check the options first. |
 
 Only scans of a whole volume count here; a scan of a folder on it doesn't.
 
 Once a scan of the volume is done, a bar under its line shows the mix of its largest [file classes](../tags-classes/) with their sizes, and the line after names its largest top-level folders. When a volume has two or more complete snapshots, a small line chart shows how much it held at each of the last 12, and the text next to it how much it changed since the one before the newest, for example **+18.0 GB since the snapshot of 3 days ago**.
+
+### What stays
+
+When a scan of a whole volume is done, SpaceKnife keeps the volume's scan time, file count, size, every file class and its largest folders in `volume_summaries.json` in the data folder (and once more before the scan's tab closes). After you leave this page, close the scan's tab, reload the window or restart SpaceKnife, the volume still shows them, until the next complete scan replaces them; a stopped scan doesn't.
+
+What is kept belongs to that one volume: it shows only when the drive letter or mount point and the volume's identity (its serial number, else its file system and size) both match, so another drive on the same letter never gets it. An unplugged drive keeps its entry; one not seen for 90 days is dropped, and at most 64 volumes are kept.
 
 ## Where the facts come from
 

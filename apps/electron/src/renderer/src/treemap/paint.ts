@@ -1,10 +1,10 @@
 // Turns a draw frame into GPU instances (shapes) and canvas labels, following the carbon theme
-// (docs/UI-SPEC.md T section: colours, geometry, label rules, layering).
-
-import { tokens } from "@design/tokens";
+// (docs/UI-SPEC.md T section: colours, geometry, label rules, layering) in the colours of the theme
+// on screen (lib/theme.ts palette(), read at each paint).
 
 import { diffColor, type Tiers } from "@/lib/diff";
 import { t } from "@/lib/i18n";
+import { palette } from "@/lib/theme";
 import { branchFill } from "@/visual/colors";
 
 import { DStat, Flag, Kind, Label, type DrawFrame } from "./frame";
@@ -15,7 +15,6 @@ export type ColorMode = "class" | "flat" | "time" | "branch";
 export const STRIDE = 24;
 export const Pattern = { NONE: 0, STRIPES_135: 1, STRIPES_45: 2, DOTS: 3, SHADOW: 4 } as const;
 
-const T = tokens.treemap;
 const FONT_UI = '"Geist", "Geist Variable", "Noto Sans SC", "Noto Sans SC Variable", system-ui, sans-serif';
 const FONT_MONO = '"Geist Mono", "Geist Mono Variable", ui-monospace, "Cascadia Mono", monospace';
 
@@ -45,6 +44,7 @@ const contrast = (a: RGBA, b: RGBA) => {
 };
 /** UI-TM-19: white or near-black text, whichever contrasts more with the fill. */
 export function labelColors(fill: RGBA): [string, string] {
+  const T = palette().treemap;
   return contrast(fill, rgba(T.label.light)) >= contrast(fill, rgba(T.label.dark))
     ? [T.label.light, T.label.lightSub]
     : [T.label.dark, T.label.darkSub];
@@ -113,8 +113,9 @@ export interface Painted {
 class Builder {
   data: Float32Array;
   n = 0;
-  constructor(capacity: number) {
-    this.data = new Float32Array(Math.max(64, capacity) * STRIDE);
+  constructor(capacity: number, reuse?: Float32Array) {
+    const want = Math.max(64, capacity) * STRIDE;
+    this.data = reuse && reuse.length >= want ? reuse : new Float32Array(want);
   }
   push(
     x: number,
@@ -161,6 +162,12 @@ class Builder {
 
 const NONE: RGBA = [0, 0, 0, 0];
 
+/** The corner radius (CSS px) a block of `kind` is drawn with: files and aggregates the file
+ * radius, folders, collapsed folders and free / unknown / pending space the folder radius. */
+export function blockRadius(kind: number, g: { fileRadius: number; folderRadius: number }): number {
+  return kind === Kind.FILE || kind === Kind.SMALL || kind === Kind.MORE ? g.fileRadius : g.folderRadius;
+}
+
 /** Fill of a block that is not an open folder. 「顶层分支」 needs the frame's branch and depth columns
  * (a frame without them is neutral). */
 export function fillOf(
@@ -171,6 +178,7 @@ export function fillOf(
   tiers?: Tiers,
   classColors?: string[],
 ): RGBA {
+  const T = palette().treemap;
   const kind = f.kind[i]!;
   if (tiers && f.delta) {
     const d = Number(f.delta[i]);
@@ -179,7 +187,7 @@ export function fillOf(
   // files, collapsed folders and aggregates take their branch's hue at their depth's tier
   if (mode === "branch") return branchFill(f.branch?.[i] ?? 0, f.depth?.[i] ?? 1);
   if (kind === Kind.COLLAPSED || kind === Kind.MORE) return rgba(T.collapsed);
-  if (mode === "flat") return rgba(T.class.other);
+  if (mode === "flat") return rgba(T.flat.file);
   if (mode === "time" && (kind === Kind.FILE || kind === Kind.SMALL)) {
     return rgba((T.time as Record<string, string>)[String(f.tone[i])] ?? T.time[4]);
   }
@@ -189,9 +197,13 @@ export function fillOf(
   return rgba((T.class as Record<string, string>)[cls] ?? T.class.other);
 }
 
-export function paint(f: DrawFrame, o: PaintOptions): Painted {
+/** The instances and labels of a frame. `reuse`: the `instances` of the previous paint, filled again
+ * when it is large enough (its contents are uploaded at once, so nothing else holds on to them). */
+export function paint(f: DrawFrame, o: PaintOptions, reuse?: Float32Array): Painted {
+  const P = palette();
+  const T = P.treemap;
   const dpr = o.dpr;
-  const b = new Builder(f.count * 2 + 8);
+  const b = new Builder(f.count * 2 + 8, reuse);
   const texts: TextItem[] = [];
   const tags: TagItem[] = [];
   const bw = Math.max(1, Math.round(dpr));
@@ -276,21 +288,21 @@ export function paint(f: DrawFrame, o: PaintOptions): Painted {
     let weight = 500;
     let alpha = dim ? T.dimOpacity : 1;
     if (kind === Kind.FREE || kind === Kind.UNKNOWN || kind === Kind.PENDING) {
-      const P = kind === Kind.FREE ? T.free : kind === Kind.UNKNOWN ? T.unknown : T.pending;
+      const S = kind === Kind.FREE ? T.free : kind === Kind.UNKNOWN ? T.unknown : T.pending;
       if (dim) alpha = kind === Kind.PENDING ? T.dimOpacity : 0.55;
-      fill = rgba(P.stripeA);
+      fill = rgba(S.stripeA);
       b.push(x, y, w, h, fill, {
-        border: rgba(P.border),
+        border: rgba(S.border),
         borderWidth: bw,
         pattern: kind === Kind.UNKNOWN ? Pattern.STRIPES_45 : Pattern.STRIPES_135,
-        patternColor: rgba(P.stripeB),
+        patternColor: rgba(S.stripeB),
         patternSize: (kind === Kind.UNKNOWN ? 3 : kind === Kind.PENDING ? 8 : T.geometry.stripeWidth) * dpr,
         radius: T.geometry.folderRadius * dpr,
         dashed: kind !== Kind.FREE,
         alpha,
       });
-      text = P.text;
-      sub = P.sub;
+      text = S.text;
+      sub = S.sub;
       if (kind === Kind.FREE) line1 = t("可用空间");
       if (kind === Kind.UNKNOWN) line1 = o.scanning ? t("未知空间 · 尚未扫描") : t("未知空间");
       if (kind === Kind.PENDING) {
@@ -300,7 +312,7 @@ export function paint(f: DrawFrame, o: PaintOptions): Painted {
     } else {
       fill = fillOf(f, i, o.colorMode, o.classIds, o.diff?.tiers, o.classColors);
       const aggregate = kind === Kind.SMALL || kind === Kind.MORE;
-      const radius = (kind === Kind.COLLAPSED ? T.geometry.folderRadius : T.geometry.fileRadius) * dpr;
+      const radius = blockRadius(kind, T.geometry) * dpr;
       b.push(x, y, w, h, fill, {
         radius,
         pattern: aggregate ? Pattern.DOTS : Pattern.NONE,
@@ -371,11 +383,17 @@ export function paint(f: DrawFrame, o: PaintOptions): Painted {
     const i = selected;
     const r = Math.round(T.geometry.selectRingWidth * dpr);
     const [x, y, w, h] = [f.x[i]!, f.y[i]!, f.w[i]!, f.h[i]!];
+    // the shadow falls around the selection, not on it: it is drawn over the blocks, so it leaves a
+    // hole where the selected block (and everything inside it) lies, as the flame graphs redraw
+    // their selected row over its shadow
+    const dy = 12 * dpr;
     if (o.selectionShadow !== false)
-      b.push(x - 2 * r, y - 2 * r + 12 * dpr, w + 4 * r, h + 4 * r, [0, 0, 0, 0.65], {
+      b.push(x - 2 * r, y - 2 * r + dy, w + 4 * r, h + 4 * r, rgba(P.treemap.state.selectShadow), {
         pattern: Pattern.SHADOW,
         patternSize: 32 * dpr,
         radius: 7 * dpr,
+        border: [0, -dy, w, h],
+        patternColor: [blockRadius(f.kind[i]!, T.geometry) * dpr, 0, 0, 0],
       });
     b.push(x - 2 * r, y - 2 * r, w + 4 * r, h + 4 * r, NONE, { border: rgba(T.state.selectOuter), borderWidth: r, radius: 7 * dpr });
     b.push(x - r, y - r, w + 2 * r, h + 2 * r, NONE, { border: rgba(T.state.selectRing), borderWidth: r, radius: 6 * dpr });

@@ -810,8 +810,16 @@
       "properties": {
         "color": {
           "default": "",
+          "description": "for the dark theme",
           "pattern": "^(#[0-9A-Fa-f]{6})?$",
           "title": "Color",
+          "type": "string"
+        },
+        "color_light": {
+          "default": "",
+          "description": "for the light theme",
+          "pattern": "^(#[0-9A-Fa-f]{6})?$",
+          "title": "Color Light",
           "type": "string"
         },
         "extensions": {
@@ -917,6 +925,39 @@
         "files"
       ],
       "title": "ClassStat",
+      "type": "object"
+    },
+    "ClassTotal": {
+      "description": "The file classes of every volume whose mix is known (an open complete scan, or what was kept\nof the last one), added up.",
+      "properties": {
+        "bytes": {
+          "description": "The scanned bytes of those volumes",
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "classes": {
+          "description": "Every class with bytes, largest first",
+          "items": {
+            "$ref": "#/$defs/ClassStat"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "volumes": {
+          "description": "Their mount points",
+          "items": {
+            "type": "string"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes",
+        "bytes",
+        "volumes"
+      ],
+      "title": "ClassTotal",
       "type": "object"
     },
     "ClassesEvent": {
@@ -2228,8 +2269,14 @@
         },
         "color": {
           "default": "",
-          "description": "#RRGGBB chosen by the user; empty: the theme's colour for the id",
+          "description": "#RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a built-in id, the light choice for a class of the user's",
           "title": "Color",
+          "type": "string"
+        },
+        "color_light": {
+          "default": "",
+          "description": "#RRGGBB chosen by the user for the light theme; empty: the light theme's colour for a built-in id, the dark choice for a class of the user's",
+          "title": "Color Light",
           "type": "string"
         },
         "extensions": {
@@ -3499,6 +3546,18 @@
     },
     "MachineDisks": {
       "properties": {
+        "classes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClassTotal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None until a volume's mix is known"
+        },
         "collected_at": {
           "format": "date-time",
           "title": "Collected At",
@@ -3792,6 +3851,7 @@
             "no_trash",
             "exists",
             "cancelled",
+            "ambiguous_name",
             "error"
           ],
           "title": "Code",
@@ -6829,6 +6889,36 @@
       "title": "SubscribeResult",
       "type": "object"
     },
+    "SummaryGap": {
+      "description": "A part of a node's summary the backend could not work out; the rest is still given.",
+      "properties": {
+        "part": {
+          "description": "contents: largest files, class totals and newest change (left empty); classes: the folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, parent: that field (left empty)",
+          "enum": [
+            "contents",
+            "classes",
+            "top_files",
+            "folder_class",
+            "tags",
+            "volume",
+            "parent"
+          ],
+          "title": "Part",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why, in the interface language",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "reason"
+      ],
+      "title": "SummaryGap",
+      "type": "object"
+    },
     "SystemInfo": {
       "properties": {
         "full_disk_access": {
@@ -7171,6 +7261,14 @@
           ],
           "default": null,
           "description": "The folder class the node (or a file's folder) takes, if any"
+        },
+        "gaps": {
+          "description": "Parts that could not be worked out this time; empty when complete",
+          "items": {
+            "$ref": "#/$defs/SummaryGap"
+          },
+          "title": "Gaps",
+          "type": "array"
         },
         "latest_mtime": {
           "description": "Newest modification time in the subtree (0 = unknown)",
@@ -8766,7 +8864,7 @@
           "type": "integer"
         },
         "classes": {
-          "description": "Open scans: the largest file classes",
+          "description": "Open and kept scans: the largest file classes",
           "items": {
             "$ref": "#/$defs/ClassStat"
           },
@@ -8791,7 +8889,7 @@
           "type": "integer"
         },
         "folders": {
-          "description": "Open scans: the largest top-level folders",
+          "description": "Open and kept scans: the largest top-level folders",
           "items": {
             "$ref": "#/$defs/FolderStat"
           },
@@ -8846,10 +8944,11 @@
           "title": "Snapshot"
         },
         "source": {
-          "description": "A scan open in this backend, or the newest snapshot",
+          "description": "A scan open in this backend; what was kept of the volume's last complete scan (its classes and folders too, across closed tabs and restarts); or the newest snapshot (counts only)",
           "enum": [
             "scan",
-            "snapshot"
+            "snapshot",
+            "kept"
           ],
           "title": "Source",
           "type": "string"

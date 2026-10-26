@@ -1,5 +1,5 @@
 {
-  "$description": "树图 carbon 主题（A2 基线）。语义见 docs/UI-SPEC.md 的 T 节；所有文字对比度 ≥ 4.5:1。",
+  "$description": "树图 carbon 主题（A2 基线，暗色值；浅色值在 themes/light.tokens.json）。语义见 docs/UI-SPEC.md 的 T 节；所有文字对比度 ≥ 4.5:1。",
   "treemap": {
     "ground": {
       "$type": "color",
@@ -7,7 +7,7 @@
     },
     "level": {
       "$type": "color",
-      "$description": "文件夹框按嵌套深度取色，超过第 4 层沿用第 4 层",
+      "$description": "文件夹框按嵌套深度取色，越深离树图底色越远一档（暗色越深越亮，浅色越深越暗），超过第 4 层沿用第 4 层",
       "0": {
         "bg": {
           "$value": "#0C0E12"
@@ -132,6 +132,25 @@
         "$value": "#2B2F38"
       }
     },
+    "flat": {
+      "$type": "color",
+      "$description": "「扁平」配色（UI-W7-31 ⑤）的默认色：卷、文件夹、文件、可用空间、未知空间。都是别名，每个主题各自解析",
+      "volume": {
+        "$value": "{treemap.level.0.headerBg}"
+      },
+      "folder": {
+        "$value": "{treemap.level.0.bg}"
+      },
+      "file": {
+        "$value": "{treemap.class.other}"
+      },
+      "free": {
+        "$value": "{treemap.free.stripeB}"
+      },
+      "unknown": {
+        "$value": "{treemap.unknown.stripeB}"
+      }
+    },
     "label": {
       "$type": "color",
       "light": {
@@ -252,6 +271,14 @@
       },
       "newBadgeText": {
         "$value": "#0A0B0D"
+      },
+      "deletedBadgeBg": {
+        "$value": "#0B0C10B8",
+        "$description": "对比视图「已删除」角标的底色，描边 color.text.secondary、字 color.text.primary"
+      },
+      "selectShadow": {
+        "$value": "#000000A6",
+        "$description": "选中投影（树图、火焰图、火焰-极坐标图；树图把投影在选中块里挖掉），回收站角标的文字阴影"
       }
     },
     "diff": {

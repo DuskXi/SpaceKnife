@@ -12,9 +12,12 @@ import threading
 
 import numpy as np
 
+from spaceknife import pathclass
+from spaceknife.classes import DEFAULT_CLASSES
+from spaceknife.layout.basis import Basis
 from spaceknife.layout.engine import Layout, LayoutParams, RootSpec
 from spaceknife.store.nodes import COLUMNS, ENTRY_COLUMNS, Kind, NodeStore
-from spaceknife.store.subtree import subtree_ids
+from spaceknife.store.subtree import subtree_ids, summarize
 
 
 def _entries(dirs: int, files: int) -> dict[str, np.ndarray]:
@@ -77,6 +80,53 @@ def test_subtree_walks_stay_exact_while_a_scan_ingests() -> None:
         sys.setswitchinterval(old)
     assert not problems, problems[0]
     assert subtree_ids(store, 0).size == len(store) - 1  # every node below the virtual root, once
+
+
+def test_summaries_classify_every_node_while_a_scan_ingests() -> None:
+    """The details panel's summaries during a hard scan: each one classifies the nodes of its walk
+    with the folder class column, which these threads work out while the writer folds listings."""
+    store = NodeStore()
+    root = store.add_root("/r")
+    pending = [root]
+    stop = threading.Event()
+    problems: list[str] = []
+    basis = Basis(store, DEFAULT_CLASSES)
+
+    def writer() -> None:
+        k = 0
+        while pending and len(store) < 40_000 and not stop.is_set():
+            d = pending.pop(0)
+            names = [f"n{k}_{i}".encode() for i in range(8)]
+            if k % 5 == 0:
+                names[4] = b"Cargo.toml"  # a project: its folder's subtree is worked out again
+            start = store.ingest_names(d, names, _entries(4, 4))
+            pending.extend(range(start, start + 4))
+            k += 1
+
+    def reader() -> None:
+        while not stop.is_set():
+            try:
+                summarize(store, root, basis.cls_of, len(basis.class_ids), 5)
+            except Exception as exc:
+                problems.append(f"{type(exc).__name__}: {exc}")
+                return
+
+    old = sys.getswitchinterval()
+    sys.setswitchinterval(1e-6)  # switch threads as often as possible: provoke the race
+    try:
+        threads = [threading.Thread(target=writer)] + [threading.Thread(target=reader) for _ in range(2)]
+        for t in threads:
+            t.start()
+        threads[0].join(30)
+        stop.set()
+        for t in threads:
+            t.join()
+    finally:
+        sys.setswitchinterval(old)
+    assert not problems, problems[0]
+    kept = pathclass.column(store, DEFAULT_CLASSES).copy()
+    pathclass._entries.pop(store, None)
+    assert np.array_equal(kept, pathclass.column(store, DEFAULT_CLASSES))  # as if worked out at the end
 
 
 def test_layout_skips_a_half_published_range() -> None:

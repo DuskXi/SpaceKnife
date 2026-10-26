@@ -145,8 +145,9 @@ class FolderStat(Payload):
 class VolumeScan(Payload):
     """What SpaceKnife knows of a volume from a scan of its root."""
 
-    source: Literal["scan", "snapshot"] = Field(
-        description="A scan open in this backend, or the newest snapshot"
+    source: Literal["scan", "snapshot", "kept"] = Field(
+        description="A scan open in this backend; what was kept of the volume's last complete scan "
+        "(its classes and folders too, across closed tabs and restarts); or the newest snapshot (counts only)"
     )
     scan_id: str | None = Field(default=None, description="The open scan (its tab can be shown)")
     snapshot: str | None = Field(default=None, description="The snapshot file")
@@ -158,9 +159,11 @@ class VolumeScan(Payload):
     dirs: int | None = None
     bytes_alloc: int = 0
     method: Literal["hard", "mft"] | None = None
-    classes: list[ClassStat] = Field(default_factory=list, description="Open scans: the largest file classes")
+    classes: list[ClassStat] = Field(
+        default_factory=list, description="Open and kept scans: the largest file classes"
+    )
     folders: list[FolderStat] = Field(
-        default_factory=list, description="Open scans: the largest top-level folders"
+        default_factory=list, description="Open and kept scans: the largest top-level folders"
     )
 
 
@@ -184,10 +187,20 @@ class VolumeOverview(Payload):
     )
 
 
+class ClassTotal(Payload):
+    """The file classes of every volume whose mix is known (an open complete scan, or what was kept
+    of the last one), added up."""
+
+    classes: list[ClassStat] = Field(description="Every class with bytes, largest first")
+    bytes: int = Field(description="The scanned bytes of those volumes")
+    volumes: list[str] = Field(description="Their mount points")
+
+
 class MachineDisks(Payload):
     disks: list[PhysicalDisk]
     volumes: list[VolumeOverview]
     collected_at: datetime
+    classes: ClassTotal | None = Field(default=None, description="None until a volume's mix is known")
 
 
 class ReadHealthParams(Payload):
@@ -208,6 +221,7 @@ class ReadHealthResult(Payload):
 
 
 __all__ = [
+    "ClassTotal",
     "DiskHealth",
     "DiskInterface",
     "DiskIo",

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "fddfc4bed8e8889f";
+export const SCHEMA_HASH = "313a9a0847ee6858";
 
 export interface AgeCond {
   end: number;
@@ -177,7 +177,10 @@ export interface ClassCond {
 
 /** One class as the editor sends it; order in the list is the display (and colour) order. */
 export interface ClassEdit {
+  /** for the dark theme */
   color?: string;
+  /** for the light theme */
+  color_light?: string;
   extensions?: string[];
   /** None: a new class */
   id?: string | null;
@@ -203,6 +206,19 @@ export interface ClassStat {
   files: number;
   /** Files a folder class took over, by the class of their extension, largest first (「游戏 · 其中视频 3 GB」); empty when none */
   parts: ClassPart[];
+}
+
+/**
+ * The file classes of every volume whose mix is known (an open complete scan, or what was kept
+ * of the last one), added up.
+ */
+export interface ClassTotal {
+  /** The scanned bytes of those volumes */
+  bytes: number;
+  /** Every class with bytes, largest first */
+  classes: ClassStat[];
+  /** Their mount points */
+  volumes: string[];
 }
 
 export interface ClassesEvent {
@@ -505,8 +521,10 @@ export interface ExportTargets {
 
 export interface FilterClassInfo {
   aliases: string[];
-  /** #RRGGBB chosen by the user; empty: the theme's colour for the id */
+  /** #RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a built-in id, the light choice for a class of the user's */
   color: string;
+  /** #RRGGBB chosen by the user for the light theme; empty: the light theme's colour for a built-in id, the dark choice for a class of the user's */
+  color_light: string;
   extensions: string[];
   id: string;
   name: string;
@@ -782,6 +800,8 @@ export interface LogRecordEvent {
 }
 
 export interface MachineDisks {
+  /** None until a volume's mix is known */
+  classes: ClassTotal | null;
   collected_at: string;
   disks: PhysicalDisk[];
   volumes: VolumeOverview[];
@@ -850,7 +870,7 @@ export interface NodeInfo {
 }
 
 export interface OpItemResult {
-  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "error";
+  code: "ok" | "missing" | "denied" | "locked" | "protected" | "no_trash" | "exists" | "cancelled" | "ambiguous_name" | "error";
   message: string;
   ok: boolean;
   path: string;
@@ -1482,6 +1502,14 @@ export interface SubscribeResult {
   sub: string;
 }
 
+/** A part of a node's summary the backend could not work out; the rest is still given. */
+export interface SummaryGap {
+  /** contents: largest files, class totals and newest change (left empty); classes: the folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, parent: that field (left empty) */
+  part: "contents" | "classes" | "top_files" | "folder_class" | "tags" | "volume" | "parent";
+  /** Why, in the interface language */
+  reason: string;
+}
+
 export interface SystemInfo {
   /** macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected place); None elsewhere or when it cannot be told */
   full_disk_access: boolean | null;
@@ -1559,6 +1587,8 @@ export interface TreeSummaryResult {
   classes: ClassStat[];
   /** The folder class the node (or a file's folder) takes, if any */
   folder_class: FolderClassInfo | null;
+  /** Parts that could not be worked out this time; empty when complete */
+  gaps: SummaryGap[];
   /** Newest modification time in the subtree (0 = unknown) */
   latest_mtime: number;
   node: NodeInfo;
@@ -1891,11 +1921,11 @@ export interface VolumeScan {
   /** When the scan finished (or started, while it runs) */
   at: string | null;
   bytes_alloc: number;
-  /** Open scans: the largest file classes */
+  /** Open and kept scans: the largest file classes */
   classes: ClassStat[];
   dirs: number | null;
   files: number;
-  /** Open scans: the largest top-level folders */
+  /** Open and kept scans: the largest top-level folders */
   folders: FolderStat[];
   method: "hard" | "mft" | null;
   running: boolean;
@@ -1903,8 +1933,8 @@ export interface VolumeScan {
   scan_id: string | null;
   /** The snapshot file */
   snapshot: string | null;
-  /** A scan open in this backend, or the newest snapshot */
-  source: "scan" | "snapshot";
+  /** A scan open in this backend; what was kept of the volume's last complete scan (its classes and folders too, across closed tabs and restarts); or the newest snapshot (counts only) */
+  source: "scan" | "snapshot" | "kept";
 }
 
 export interface Methods {

@@ -45,7 +45,7 @@ from ..scan.volume import VolumeInfo, list_volumes, volume_for
 from ..store import snapshot
 from .compute import Latest
 from .rpc import RpcError
-from .scans import node_info, on_disk, snapshot_info, summary_of, volume_model
+from .scans import node_info, on_disk, snapshot_info, summary_failed, summary_of, volume_model
 from .topics import Subscription
 
 if TYPE_CHECKING:
@@ -166,9 +166,14 @@ def install(server: Server) -> None:
     async def tree_summary(session: Session, params: p.TreeSummaryParams) -> p.TreeSummaryResult:
         handle = scans.get(params.scan_id)
         scans.check_node(handle, params.node)
-        return await latest.run(
-            ("tree.summary", session.id), summary_of, server, handle, params.node, params.top
-        )
+        try:
+            return await latest.run(
+                ("tree.summary", session.id), summary_of, server, handle, params.node, params.top
+            )
+        except RpcError:
+            raise
+        except Exception as exc:  # the node itself is unreadable: say why, not "internal error"
+            raise summary_failed(handle, params.node, exc) from exc
 
     @router.method(SNAPSHOT_LIST)
     async def snapshot_list(session: Session, _: Empty) -> p.SnapshotListResult:

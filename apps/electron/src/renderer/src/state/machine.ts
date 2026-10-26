@@ -2,7 +2,7 @@
 // are tested. Rates are line rates as the interfaces are sold (SATA 6 Gb/s, USB 5 Gb/s); PCIe links
 // are named by generation and lanes, with what they carry after encoding (≈ GB/s).
 
-import type { DiskLink, MachineDisks, PhysicalDisk, SnapshotPoint, VolumeOverview } from "@/protocol/generated";
+import type { ClassTotal, DiskLink, MachineDisks, PhysicalDisk, SnapshotPoint, VolumeOverview } from "@/protocol/generated";
 import { fmtAgo, fmtSize } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
 
@@ -417,6 +417,25 @@ export function healthNoteText(note: PhysicalDisk["health_note"]): string {
  * doesn't keep that part. */
 export function recordGap(d: PhysicalDisk): string {
   return healthNoteText(d.health_note) || (d.health ? t("这块盘的记录里没有这一项") : t("这块盘没有提供自己的记录"));
+}
+
+/** The page's class total as rows: the largest `top` classes, then the rest in one row. Shares
+ * are of the classes' sum, so they add up to 100%. */
+export function classRows(total: ClassTotal | null | undefined, top = 8): { key: string; classId: string | null; bytes: number; share: number; count: number }[] {
+  if (!total) return [];
+  const sum = total.classes.reduce((s, c) => s + c.bytes, 0);
+  if (sum <= 0) return [];
+  const rows = total.classes.slice(0, top).map((c) => ({ key: c.class_id, classId: c.class_id as string | null, bytes: c.bytes, share: c.bytes / sum, count: 1 }));
+  const rest = total.classes.slice(top);
+  const restBytes = rest.reduce((s, c) => s + c.bytes, 0);
+  if (restBytes > 0) rows.push({ key: "_rest", classId: null, bytes: restBytes, share: restBytes / sum, count: rest.length });
+  return rows;
+}
+
+/** Local volumes the class total leaves out: no complete scan of them is known. */
+export function classGaps(data: MachineDisks): string[] {
+  const covered = new Set(data.classes?.volumes ?? []);
+  return data.volumes.filter((v) => !v.volume.reason && v.disks.length > 0 && !covered.has(v.volume.mount_point)).map((v) => v.volume.mount_point);
 }
 
 /** Write endurance left, %: 100 minus the vendor's estimate of what is used (NVMe "percentage

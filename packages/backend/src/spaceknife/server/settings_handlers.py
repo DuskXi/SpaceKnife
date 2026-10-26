@@ -49,6 +49,7 @@ def install(server: Server) -> None:
             set_file_logging(paths.logs_dir() / "spaceknife.log", str(level))
             applied["log_level"] = level
         mapped.POLICY.fraction = int(st.get("advanced.memory_budget")) / 100  # the next growth / load
+        mapped.POLICY.large = mapped.LARGE_BYTES if st.get("advanced.map_large_scans") else None
         server.views.apply_settings_live(st)
         monitor = bool(st.get("scan.monitor"))
         if applied.get("monitor", monitor) != monitor:  # live monitoring switched on or off

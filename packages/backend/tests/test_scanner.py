@@ -3,11 +3,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 import pytest
 
+from spaceknife import native
+from spaceknife.scan import scanner as scanner_mod
 from spaceknife.scan import worker
 from spaceknife.scan.scanner import ScanError, Scanner, ScanState, make_pool, native_threads
 from spaceknife.scan.volume import volume_for
@@ -166,6 +169,43 @@ async def test_posix_links_hardlinks_and_denied(tmp_path: Path) -> None:
         assert result.errors == 1
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="link counts (Windows hard scans report none yet)")
+@pytest.mark.parametrize("budget_s", [0.0, 1.0])
+async def test_hard_links_count_once_with_either_link_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, budget_s: float
+) -> None:
+    """Names of one file in other folders and in the same folder: one name per file is counted,
+    and the native LinkSet marks exactly the names the Python set marks (in many slices or one)."""
+    root = tmp_path / "links"
+    for d in ("a", "b/c"):
+        (root / d).mkdir(parents=True)
+    for i in range(30):
+        first = root / "a" / f"f{i}"
+        first.write_bytes(b"x" * (100 + i))
+        for other in (root / "b" / f"g{i}", root / "b" / "c" / f"h{i}", root / "a" / f"f{i}-again"):
+            os.link(first, other)
+    (root / "single").write_bytes(b"y" * 7)
+
+    async def scan() -> tuple[dict[str, bool], int, bool]:
+        scanner = Scanner([str(root)], budget_s=budget_s)
+        await scanner.run()
+        store, c = scanner.store, scanner.store.cols
+        dups = {
+            store.path(i): bool(c["flags"][i] & Flag.HARDLINK_DUP)
+            for i in range(1, len(store))
+            if c["kind"][i] == Kind.FILE
+        }
+        return dups, int(c["tot_size"][scanner.roots[0].node]), isinstance(scanner._seen_links, set)
+
+    native_dups, native_total, native_is_set = await scan()
+    monkeypatch.setattr(scanner_mod, "link_set", set)
+    python_dups, python_total, python_is_set = await scan()
+    assert python_is_set and native_is_set == (not native.has("LinkSet"))
+    assert native_dups == python_dups
+    assert native_total == python_total == sum(100 + i for i in range(30)) + 7
+    assert sum(not dup for dup in python_dups.values()) == 31  # one name of each file, and "single"
+
+
 async def test_scan_runs_inside_running_loop_without_blocking(tree: TreeFacts) -> None:
     scanner = Scanner([str(tree.root)], budget_s=0.0)
     ticks = 0
@@ -229,7 +269,108 @@ async def test_profile_leaves_out_the_time_paused(tree: TreeFacts) -> None:
     assert p.wall_s < 0.25 < scanner.progress().elapsed_s  # the elapsed time shown includes the pause
 
 
+TICK = 0.01  # perf_counter readings a moment apart (the times below are compared with measured ones)
+
+
+async def stopped_after(scanner: Scanner, seconds: float) -> float:
+    """Run ``scanner`` held paused for ``seconds`` (nothing listed), then stop it, leaving every
+    folder still to read; the wall time it took (the part lasts at most that)."""
+    t0 = time.perf_counter()
+    scanner.pause()
+    task = asyncio.create_task(scanner.run())
+    await asyncio.sleep(seconds)
+    scanner.cancel()
+    await task
+    assert scanner.state == ScanState.CANCELLED and scanner.has_queue
+    return time.perf_counter() - t0
+
+
+async def test_a_continued_scan_takes_the_time_of_both_parts(tree: TreeFacts) -> None:
+    """Stopped, then 「继续扫描」: the time shown is the two parts together, without the wait in
+    between. It used to be the second part alone (「82 万项 · 0.6 秒」 for a scan that took 0.85 s),
+    and below zero while that part ran."""
+    scanner = Scanner([str(tree.root)])
+    wall = await stopped_after(scanner, 0.3)
+    first = scanner.progress()
+    assert 0.25 < first.elapsed_s <= wall + TICK
+    await asyncio.sleep(0.6)  # stopped: does not count
+    real = scanner.slicer
+    slowed: list[bool] = []
+
+    def slow_first(batch: list[worker.Task], opts: worker.SliceOptions) -> SliceResult:
+        if not slowed:  # the continued part lists for a while
+            slowed.append(True)
+            time.sleep(0.5)
+        return real(batch, opts)
+
+    scanner.slicer = slow_first
+    scanner.uncancel()
+    t1 = time.perf_counter()
+    task = asyncio.create_task(scanner.run())
+    await asyncio.sleep(0.15)
+    meanwhile = scanner.progress()
+    so_far = time.perf_counter() - t1
+    assert meanwhile.state == ScanState.SCANNING
+    assert first.elapsed_s + 0.1 < meanwhile.elapsed_s <= first.elapsed_s + so_far + TICK
+    assert meanwhile.finished_at is None and meanwhile.started_at == first.started_at
+    done = await task
+    second = time.perf_counter() - t1
+    assert done.state == ScanState.DONE and done.items == tree.files + tree.dirs + 1  # + the root
+    assert done.elapsed_s == scanner.progress().elapsed_s
+    # both parts (the second listed for 0.5 s), never the 0.6 s wait between them
+    assert first.elapsed_s + 0.45 < done.elapsed_s <= first.elapsed_s + second + TICK
+    assert done.started_at == first.started_at and done.finished_at is not None
+    assert done.rate == pytest.approx(done.items / done.elapsed_s)
+
+
+async def test_switching_to_the_mft_read_times_only_that_read(tree: TreeFacts) -> None:
+    """scan.use_mft stops the hard scan and reads the $MFT instead: the tree is the read's, and so
+    is the time (the next 「约 N 秒」 estimate comes from it). It used to be below zero meanwhile."""
+    scanner = Scanner([str(tree.root)])
+    await stopped_after(scanner, 0.3)
+    started_at = scanner.progress().started_at
+    scanner.uncancel()
+    t0 = time.perf_counter()
+    scanner.begin_external()
+    await asyncio.sleep(0.1)
+    reading = scanner.progress()
+    assert 0.05 < reading.elapsed_s <= time.perf_counter() - t0 + TICK  # not the hard part's 0.3 s
+    assert reading.finished_at is None and reading.started_at == started_at  # began with the hard part
+    scanner.finish_external(ScanState.DONE)
+    assert 0.05 < scanner.progress().elapsed_s <= time.perf_counter() - t0 + TICK
+
+
+async def test_a_failed_mft_read_goes_on_with_the_hard_parts_time(tree: TreeFacts) -> None:
+    """The $MFT read fails and the hard scan reads the rest: its two parts count, the attempt does
+    not (it read nothing the tree kept)."""
+    scanner = Scanner([str(tree.root)])
+    await stopped_after(scanner, 0.3)
+    hard = scanner.progress().elapsed_s
+    scanner.uncancel()
+    scanner.begin_external()
+    await asyncio.sleep(0.3)
+    scanner.reset_external()
+    assert scanner.progress().elapsed_s == pytest.approx(hard)
+    t0 = time.perf_counter()
+    done = await scanner.run()
+    rest = time.perf_counter() - t0
+    assert done.state == ScanState.DONE
+    assert hard < done.elapsed_s <= hard + rest + TICK  # the 0.3 s attempt would be on top
+
+
+def test_native_threads_come_from_the_walker() -> None:
+    """With the native walker's shared listing threads, the scanner calls it from as many threads
+    as the walker's start width (the env knobs are the walker's: tests/test_hardscan.py)."""
+    info = scanner_mod.listing_threads()
+    if info is None:
+        pytest.skip("no native walker with shared listing threads")
+    assert native_threads() == info["start"]
+    assert scanner_mod.listing_max() == info["max"] >= info["cold"] >= info["start"] >= info["least"]
+    assert info["cpus"] == scanner_mod.usable_cpus()
+
+
 def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(scanner_mod, "listing_threads", lambda: None)  # builds without them
     monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "24")
     assert native_threads() == 24
     monkeypatch.setenv("SPACEKNIFE_SCAN_THREADS", "500")
@@ -253,9 +394,10 @@ def test_scan_threads_can_be_set_for_measurements(monkeypatch: pytest.MonkeyPatc
 def test_default_listing_threads(
     monkeypatch: pytest.MonkeyPatch, platform: str, cpus: int, threads: int
 ) -> None:
+    monkeypatch.setattr(scanner_mod, "listing_threads", lambda: None)  # builds without them
     monkeypatch.delenv("SPACEKNIFE_SCAN_THREADS", raising=False)
     monkeypatch.setattr(sys, "platform", platform)
-    monkeypatch.setattr(os, "cpu_count", lambda: cpus)
+    monkeypatch.setattr(scanner_mod, "usable_cpus", lambda: cpus)
     assert native_threads() == threads
 
 
@@ -280,12 +422,13 @@ def _store_rows(scanner: Scanner) -> list[tuple[object, ...]]:
 
 
 async def test_slices_folded_together_build_the_same_tree(tree: TreeFacts) -> None:
-    """Slices that land together are folded as one (worker.merge_slices): the tree is the same as
-    folding them one by one, references between listings, frontiers and extensions included."""
+    """Slices that land together are folded as one (NodeStore.ingest_slices, as worker.merge_slices
+    did): the tree is the same as folding them one by one, references between listings, frontiers
+    and extensions included."""
     recorded: list[SliceResult] = []
     live = Scanner([str(tree.root)], budget_s=0.0)  # one folder per slice: many small slices
     fold = live._fold
-    live._fold = lambda res: (recorded.append(res), fold(res))[1]  # type: ignore[method-assign]
+    live._fold = lambda results: (recorded.extend(results), fold(results))[1]  # type: ignore[method-assign]
     await live.run()
     assert len(recorded) > 5
 

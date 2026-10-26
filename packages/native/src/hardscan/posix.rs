@@ -6,8 +6,9 @@
 #[cfg(target_os = "linux")]
 use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
+use std::sync::Arc;
 
-use super::common::{Arena, NativePath, RootOpts, Row, ext_len_with, flag, kind, secs};
+use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, secs};
 
 /// The row worker.py writes when an entry cannot be stat'ed.
 const ERROR_ROW: Row = Row {
@@ -61,13 +62,106 @@ fn is_skipped(skip: &[Vec<u8>], dir: &[u8], name: &[u8]) -> bool {
     })
 }
 
-/// Nothing to learn per root on POSIX.
-pub struct RootState;
+/// Per root and call: whether listings keep folders' access times (Linux).
+pub struct RootState {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    keep: bool,
+}
 
 impl RootState {
-    pub fn new() -> Self {
-        Self
+    /// `keep_access_time` works on Linux (O_NOATIME; macOS has nothing like it). The rest are
+    /// Windows options: opening a subdirectory relative to its parent measured no faster here, and
+    /// names are bytes compared exactly.
+    pub fn new(o: &StateOpts) -> Self {
+        Self {
+            keep: o.keep_access_time,
+        }
     }
+}
+
+/// Listing through `fd` leaves the folder's access time as it was: O_NOATIME, set once it is open
+/// (fcntl F_SETFL), which the kernel allows to the folder's owner and to CAP_FOWNER; for anyone
+/// else it is refused and the folder is listed as before. Under relatime the first listing of a
+/// day otherwise rewrites the inode of every folder whose access time is a day old (on Btrfs a
+/// copy-on-write of metadata that snapshots shared). Best effort.
+#[cfg(target_os = "linux")]
+fn keep_access_time(fd: libc::c_int) {
+    // SAFETY: a plain call on our descriptor. F_SETFL replaces the status flags: O_RDONLY is 0,
+    // and O_DIRECTORY, O_NOFOLLOW and O_CLOEXEC are not status flags, so only O_NOATIME changes.
+    unsafe { libc::fcntl(fd, libc::F_SETFL, libc::O_NOATIME) };
+}
+
+/// Windows hands a listed directory's handle to its subdirectories (win.rs); here nothing is, and
+/// no folder is opened by file id (none is pinned, none strict: names are compared as bytes).
+/// What a found subdirectory keeps from its parent's listing: on Linux, whether its owner is this
+/// process's (file-system) user or the process may override that (CAP_FOWNER), i.e. whether
+/// O_NOATIME is allowed on it (`noatime_allowed`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Hint {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    noatime: bool,
+}
+pub type Parent = ();
+/// How a found subdirectory is opened: on Linux with O_NOATIME in the open itself when its owner
+/// allows it, else without it and without trying (`list_path`).
+pub struct Via {
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    noatime: bool,
+}
+
+/// walk.rs: a found subdirectory's way of being opened (no parent handle is kept here).
+pub fn via_hint(hint: Hint) -> Option<Via> {
+    Some(Via {
+        noatime: hint.noatime,
+    })
+}
+
+pub fn marks(_hint: &Hint) -> u8 {
+    0
+}
+
+/// Linux: whether O_NOATIME is allowed on a folder owned by `uid` (open(2): the caller's
+/// file-system user owns it, or it has CAP_FOWNER). A wrong guess costs nothing but the old way:
+/// an open with O_NOATIME that is refused (EPERM) is made again without it.
+#[cfg(target_os = "linux")]
+fn noatime_allowed(uid: u32) -> bool {
+    static MINE: std::sync::OnceLock<(u32, bool)> = std::sync::OnceLock::new();
+    let &(fsuid, fowner) = MINE.get_or_init(|| {
+        // SAFETY: setfsuid(-1) changes nothing (an invalid id) and returns the current one.
+        let fsuid = unsafe { libc::setfsuid(u32::MAX as libc::uid_t) } as u32;
+        (fsuid, has_cap_fowner())
+    });
+    fowner || uid == fsuid
+}
+
+/// Linux: CAP_FOWNER is in this thread's effective capabilities (capget, version 3).
+#[cfg(target_os = "linux")]
+fn has_cap_fowner() -> bool {
+    const VERSION_3: u32 = 0x2008_0522;
+    const CAP_FOWNER: u32 = 3;
+    #[repr(C)]
+    struct Header {
+        version: u32,
+        pid: libc::c_int,
+    }
+    #[repr(C)]
+    #[derive(Clone, Copy, Default)]
+    struct Data {
+        effective: u32,
+        permitted: u32,
+        inheritable: u32,
+    }
+    let mut h = Header { version: VERSION_3, pid: 0 };
+    let mut d = [Data::default(); 2];
+    // SAFETY: header and two data records as capget(2) takes them for version 3.
+    let r = unsafe { libc::syscall(libc::SYS_capget, &mut h as *mut Header, d.as_mut_ptr()) };
+    r == 0 && d[0].effective & (1 << CAP_FOWNER) != 0
+}
+
+pub fn cap_hit() {}
+
+pub fn open_stats(_reset: bool) -> Vec<(&'static str, u64)> {
+    Vec::new()
 }
 
 /// Python's OSError.strerror for an errno (the C library's message).
@@ -166,14 +260,20 @@ impl Meta {
     }
 }
 
-/// fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW); None when it fails.
+/// fstatat(dirfd, name, AT_SYMLINK_NOFOLLOW); None when it fails (macOS: the bulk listing checks with it).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn stat_entry(dirfd: libc::c_int, name: &CStr) -> Option<Meta> {
+    stat_owned(dirfd, name).map(|(m, _)| m)
+}
+
+/// `stat_entry` and the entry's owner (st_uid).
+fn stat_owned(dirfd: libc::c_int, name: &CStr) -> Option<(Meta, u32)> {
     let mut st: libc::stat = unsafe { std::mem::zeroed() };
     // SAFETY: name is NUL-terminated, st is writable.
     if unsafe { libc::fstatat(dirfd, name.as_ptr(), &mut st, libc::AT_SYMLINK_NOFOLLOW) } != 0 {
         return None;
     }
-    Some(Meta::from_stat(&st))
+    Some((Meta::from_stat(&st), st.st_uid as u32))
 }
 
 fn add_entry(
@@ -183,17 +283,17 @@ fn add_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) {
-    push_entry(
-        stat_entry(dirfd, name),
-        name.to_bytes(),
-        dir,
-        root,
-        base,
-        arena,
-        subdirs,
-    );
+    let stat = stat_owned(dirfd, name);
+    let had = subdirs.len();
+    push_entry(stat.map(|(m, _)| m), name.to_bytes(), dir, root, base, arena, subdirs);
+    #[cfg(target_os = "linux")]
+    if let (Some((_, uid)), Some(sub)) = (stat, subdirs.get_mut(had)) {
+        sub.2.noatime = noatime_allowed(uid);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = had;
 }
 
 /// One entry's row (ERROR_ROW without `meta`); a folder to descend goes to `subdirs`.
@@ -204,7 +304,7 @@ fn push_entry(
     root: &RootOpts,
     base: usize,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) {
     let name_start = arena.names.len();
     arena.names.extend_from_slice(raw);
@@ -257,7 +357,7 @@ fn push_entry(
     };
     arena.push_row(name_start, row);
     if descend {
-        subdirs.push((j, join_posix(dir, raw).into_boxed_slice()));
+        subdirs.push((j, join_posix(dir, raw).into_boxed_slice(), Hint::default()));
     }
 }
 
@@ -805,28 +905,132 @@ pub fn bulk_state() -> String {
     bulk::state()
 }
 
+/// Bytes of path given to one open by `open_long`: well under PATH_MAX everywhere (macOS: 1,024
+/// with the NUL; a name is at most 255).
+const PIECE: usize = 1000;
+
+/// `open(path, oflags)` for a path of PATH_MAX bytes or more, which open() refuses (ENAMETOOLONG)
+/// although the folder is there to list (worker.open_dir): opened a piece of whole names at a
+/// time, each piece relative to the folder the one before reached. Resolution is that of one open
+/// of the whole path: symlinks in the middle are followed, `oflags` (O_NOFOLLOW) apply to the last
+/// name only, and the folders on the way need search permission only (O_PATH; elsewhere read
+/// permission too, so a few such paths still fail, as they did before). A piece that is too long
+/// only once its symlinks are followed (macOS) is opened again one name at a time.
+fn open_long(path: &[u8], oflags: libc::c_int) -> Result<Fd, i32> {
+    #[cfg(target_os = "linux")]
+    let middle = libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC;
+    #[cfg(not(target_os = "linux"))]
+    let middle = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
+    let mut dir: Option<Fd> = None;
+    let mut rest = path;
+    // macOS counts a followed symlink's target into the 1,024 bytes of the piece being resolved:
+    // once a piece is too long that way, go on one name at a time (a target alone always fits)
+    let mut one = false;
+    loop {
+        let (piece, tail) = if one {
+            // a leading "/" stays with the first name
+            match rest.get(1..).and_then(|r| r.iter().position(|&b| b == b'/')) {
+                Some(j) => (&rest[..j + 1], &rest[j + 2..]),
+                None => (rest, &rest[rest.len()..]),
+            }
+        } else if rest.len() <= PIECE {
+            (rest, &rest[rest.len()..])
+        } else {
+            // a leading "/" stays with the first piece
+            match rest[1..=PIECE].iter().rposition(|&b| b == b'/') {
+                Some(j) => (&rest[..j + 1], &rest[j + 2..]),
+                None => return Err(libc::ENAMETOOLONG),
+            }
+        };
+        let tail = &tail[tail.iter().take_while(|&&b| b == b'/').count()..]; // "a//b": no "/b"
+        let last = tail.is_empty();
+        let c = CString::new(piece).map_err(|_| libc::EINVAL)?;
+        let at = dir.as_ref().map_or(libc::AT_FDCWD, |d| d.0);
+        // SAFETY: c is NUL-terminated; `at` is open (or AT_FDCWD) until `dir` is replaced below.
+        let fd = unsafe { libc::openat(at, c.as_ptr(), if last { oflags } else { middle }) };
+        if fd < 0 {
+            let code = errno();
+            if code == libc::ENAMETOOLONG && !one && piece[1..].contains(&b'/') {
+                one = true;
+                continue;
+            }
+            return Err(code);
+        }
+        let fd = Fd(fd);
+        if last {
+            return Ok(fd);
+        }
+        dir = Some(fd);
+        rest = tail;
+    }
+}
+
 /// Lists `path` into `arena` (worker._list_posix); subdirectories to descend go to `subdirs`.
 /// Directories found by this call are opened with O_NOFOLLOW (a swap for a symlink is refused);
 /// given tasks are opened like the worker does, so a root may itself be a symlink.
 pub fn list_dir(
     path: &[u8],
     discovered: bool,
+    via: Option<Via>,
     root: &RootOpts,
-    _state: &RootState,
+    state: &RootState,
     arena: &mut Arena,
-    subdirs: &mut Vec<(u32, NativePath)>,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
+) -> Result<(Option<Arc<Parent>>, bool), String> {
+    list_path(path, discovered, via, root, state, arena, subdirs).map(|()| (None, false))
+}
+
+/// open(2) of a folder to list; ENAMETOOLONG goes piece by piece (`open_long`).
+fn open_dir(path: &[u8], c: &CStr, oflags: libc::c_int) -> Result<Fd, i32> {
+    // SAFETY: c is NUL-terminated.
+    match unsafe { libc::open(c.as_ptr(), oflags) } {
+        fd if fd >= 0 => Ok(Fd(fd)),
+        _ => match errno() {
+            libc::ENAMETOOLONG => open_long(path, oflags),
+            code => Err(code),
+        },
+    }
+}
+
+fn list_path(
+    path: &[u8],
+    discovered: bool,
+    via: Option<Via>,
+    root: &RootOpts,
+    state: &RootState,
+    arena: &mut Arena,
+    subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) -> Result<(), String> {
     let c = CString::new(path).map_err(|_| "embedded null byte".to_owned())?;
     let mut oflags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC;
     if discovered {
         oflags |= libc::O_NOFOLLOW;
     }
-    // SAFETY: c is NUL-terminated.
-    let fd = unsafe { libc::open(c.as_ptr(), oflags) };
-    if fd < 0 {
-        return Err(errno_message(errno()));
-    }
-    let fd = Fd(fd);
+    #[cfg(target_os = "linux")]
+    let fd = match via {
+        // a found subfolder: its owner, from the parent's fstatat, says whether O_NOATIME is
+        // allowed, so it goes into the open itself (one system call fewer than the fcntl below);
+        // a folder it is not allowed on is listed as before without trying (the fcntl would be
+        // refused). Refused all the same (another owner since, a user namespace that does not map
+        // the owner): opened again without it, as the fcntl would have left it.
+        Some(v) if state.keep && v.noatime => match open_dir(path, &c, oflags | libc::O_NOATIME) {
+            Err(libc::EPERM) => open_dir(path, &c, oflags).map_err(errno_message)?,
+            fd => fd.map_err(errno_message)?,
+        },
+        Some(_) => open_dir(path, &c, oflags).map_err(errno_message)?,
+        None => {
+            let fd = open_dir(path, &c, oflags).map_err(errno_message)?;
+            if state.keep {
+                keep_access_time(fd.0);
+            }
+            fd
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let fd = {
+        let _ = (state, via);
+        open_dir(path, &c, oflags).map_err(errno_message)?
+    };
     let base = arena.len();
     #[cfg(target_os = "macos")]
     {
@@ -881,9 +1085,109 @@ mod tests {
     }
 
     #[test]
+    fn paths_past_path_max_open_piece_by_piece() {
+        let base = std::env::temp_dir().join(format!("spaceknife-long-{}", std::process::id()));
+        std::fs::create_dir(&base).unwrap();
+        let mut path = base.as_os_str().as_encoded_bytes().to_vec();
+        let name = CString::new(vec![b'd'; 200]).unwrap();
+        // SAFETY: plain calls on NUL-terminated names and our own descriptors.
+        let mut dir = Fd(unsafe { libc::open(CString::new(path.clone()).unwrap().as_ptr(), libc::O_RDONLY) });
+        let mut depth = 0;
+        while path.len() <= 5000 {
+            unsafe {
+                assert_eq!(libc::mkdirat(dir.0, name.as_ptr(), 0o755), 0);
+                dir = Fd(libc::openat(dir.0, name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY));
+            }
+            assert!(dir.0 >= 0);
+            path.extend_from_slice(b"/");
+            path.extend_from_slice(name.as_bytes());
+            depth += 1;
+        }
+        let ino = |fd: libc::c_int| {
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { libc::fstat(fd, &mut st) }, 0);
+            st.st_ino
+        };
+        let flags = libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC | libc::O_NOFOLLOW;
+        let c = CString::new(path.clone()).unwrap();
+        assert_eq!(unsafe { libc::open(c.as_ptr(), flags) }, -1);
+        assert_eq!(errno(), libc::ENAMETOOLONG);
+        assert_eq!(ino(open_long(&path, flags).unwrap().0), ino(dir.0));
+        // doubled slashes, and a symlink in the middle (followed, as one open would)
+        let doubled = String::from_utf8(path.clone()).unwrap().replacen("/d", "//d", 3);
+        assert_eq!(ino(open_long(doubled.as_bytes(), flags).unwrap().0), ino(dir.0));
+        let first = base.join("d".repeat(200));
+        std::os::unix::fs::symlink(&first, base.join("via")).unwrap();
+        let mut via = base.join("via").as_os_str().as_encoded_bytes().to_vec();
+        via.extend_from_slice(&path[first.as_os_str().len()..]);
+        assert_eq!(ino(open_long(&via, flags).unwrap().0), ino(dir.0));
+        // the last name keeps O_NOFOLLOW; failures give the errno one open would
+        let mut missing = path.clone();
+        missing.extend_from_slice(b"/missing");
+        assert_eq!(open_long(&missing, flags).err(), Some(libc::ENOENT));
+        let dangling = CString::new("dangling").unwrap();
+        unsafe { assert_eq!(libc::symlinkat(c"/nonexistent".as_ptr(), dir.0, dangling.as_ptr()), 0) };
+        std::os::unix::fs::symlink("/nonexistent", base.join("dangling")).unwrap();
+        let short = CString::new(base.join("dangling").as_os_str().as_encoded_bytes()).unwrap();
+        assert_eq!(unsafe { libc::open(short.as_ptr(), flags) }, -1);
+        let mut link = path.clone();
+        link.extend_from_slice(b"/dangling");
+        assert_eq!(open_long(&link, flags).err(), Some(errno()));
+        let mut gap = path.clone();
+        gap.extend_from_slice(b"/");
+        gap.extend_from_slice(&[b'x'; PIECE + 1]);
+        assert_eq!(open_long(&gap, flags).err(), Some(libc::ENAMETOOLONG));
+        drop(dir);
+        assert!(depth > 4096 / 201);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
     fn joins_like_posixpath() {
         assert_eq!(join_posix(b"/", b"x"), b"/x");
         assert_eq!(join_posix(b"/a", b"x"), b"/a/x");
         assert_eq!(join_posix(b"", b"x"), b"x");
+    }
+
+    /// Linux: a found subfolder of ours is opened with O_NOATIME in the open itself and keeps its
+    /// access time, as the fcntl kept it; without keep_access_time it is updated (relatime: an
+    /// access time older than the change time).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn found_subfolders_keep_their_access_time() {
+        use std::os::unix::ffi::OsStrExt;
+        let base = std::env::temp_dir().join(format!("spaceknife-noatime-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("sub")).unwrap();
+        std::fs::write(base.join("sub/f"), b"x").unwrap();
+        let sub = CString::new(base.join("sub").as_os_str().as_bytes()).unwrap();
+        let old = |c: &CString| {
+            // 2001-09-09, older than any change time here
+            let ts = [libc::timespec { tv_sec: 1_000_000_000, tv_nsec: 0 }, libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT }];
+            assert_eq!(unsafe { libc::utimensat(libc::AT_FDCWD, c.as_ptr(), ts.as_ptr(), 0) }, 0);
+        };
+        let atime = |c: &CString| {
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            assert_eq!(unsafe { libc::stat(c.as_ptr(), &mut st) }, 0);
+            st.st_atime
+        };
+        for keep in [true, false] {
+            let state = RootState::new(&StateOpts { keep_access_time: keep, ..StateOpts::default() });
+            let path = base.as_os_str().as_bytes();
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            let c = CString::new(path).unwrap();
+            assert_eq!(unsafe { libc::stat(c.as_ptr(), &mut st) }, 0);
+            let root = RootOpts { dev: st.st_dev as u64, ..RootOpts::default() };
+            let (mut arena, mut subs) = (Arena::default(), Vec::new());
+            list_dir(path, false, None, &root, &state, &mut arena, &mut subs).unwrap();
+            assert_eq!(subs.len(), 1);
+            let (_, child, hint) = subs.pop().unwrap();
+            assert!(hint.noatime, "our own folder");
+            old(&sub);
+            let (mut arena, mut subs) = (Arena::default(), Vec::new());
+            list_dir(&child, true, via_hint(hint), &root, &state, &mut arena, &mut subs).unwrap();
+            assert_eq!(arena.len(), 1);
+            assert_eq!(atime(&sub) == 1_000_000_000, keep, "keep_access_time {keep}");
+        }
+        std::fs::remove_dir_all(&base).unwrap();
     }
 }

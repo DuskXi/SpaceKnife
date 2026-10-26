@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -11,14 +12,22 @@ from spaceknife.disks import Probe
 from spaceknife.helper import HelperDenied, HelperError, HelperUnavailable
 from spaceknife.scan.volume import VolumeInfo
 from spaceknife.server import Server, machine_handlers
+from spaceknife.server.volume_summaries import Kept, VolumeSummaries, identity
 from spaceknife_client.connection import Connection
 from spaceknife_protocol import scan as p
 from spaceknife_protocol.base import Empty
 from spaceknife_protocol.machine import DiskHealth, DiskPart, PhysicalDisk, ReadHealthParams
-from spaceknife_protocol.methods import MACHINE_DISKS, MACHINE_READ_HEALTH, SCAN_START, VOLUME_LIST
+from spaceknife_protocol.methods import (
+    MACHINE_DISKS,
+    MACHINE_READ_HEALTH,
+    SCAN_CLOSE,
+    SCAN_START,
+    VOLUME_LIST,
+)
+from spaceknife_protocol.scan import ClassStat
 
 from .test_disks import nvme_log
-from .test_scan_server import wait_done
+from .test_scan_server import finished, wait_done
 from .tree_fixture import build_tree
 
 
@@ -45,6 +54,7 @@ async def test_what_a_scan_and_a_snapshot_tell(
     root = str(facts.root)
     started = await client.call(SCAN_START, p.ScanStartParams(roots=[root]))
     status = await wait_done(client, started.scan_id)
+    await finished(server, started.scan_id)
     # let the scanned folder stand in for a whole volume
     key = os.path.normcase(os.path.normpath(root))
     monkeypatch.setattr(machine_handlers, "_whole_root", lambda h: key if h.id == started.scan_id else None)
@@ -207,3 +217,56 @@ async def test_records_when_rights_are_not_given(
         "needs_admin",
         "usb",
     ]  # still offered
+
+
+# ---------------------------------------------------------------- what a scan showed, kept
+
+
+async def test_what_a_scan_showed_is_kept(
+    tmp_path: Path, client: Connection, server: Server, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Closing the scan's tab keeps its classes and folders; a new backend still shows them, and they
+    add up to the page's class total."""
+    facts = build_tree(tmp_path / "root")
+    started = await client.call(SCAN_START, p.ScanStartParams(roots=[str(facts.root)]))
+    status = await wait_done(client, started.scan_id)
+    # let the scanned folder stand in for its whole volume
+    monkeypatch.setattr(machine_handlers, "_whole_root", lambda h: "x" if h.id == started.scan_id else None)
+    volume = server.scans.get(started.scan_id).roots[0].volume
+    assert volume is not None
+    await client.call(SCAN_CLOSE, p.ScanIdParams(scan_id=started.scan_id))
+
+    summaries = VolumeSummaries()  # read back from the file, as after a restart
+    kept = summaries.get(volume)
+    assert kept is not None and (kept.files, kept.bytes_alloc) == (status.files, status.bytes_alloc)
+    assert kept.classes and kept.folders and kept.at == status.finished_at
+    assert [c.bytes for c in kept.classes] == sorted((c.bytes for c in kept.classes), reverse=True)
+
+    out = machine_handlers.overview(server, [volume], Probe(), {}, summaries.get)
+    scan = out.volumes[0].scan
+    assert scan is not None and scan.source == "kept" and scan.scan_id is None
+    assert scan.classes == kept.classes[: machine_handlers.TOP_CLASSES] and scan.folders == kept.folders
+    assert out.classes is not None
+    assert (out.classes.volumes, out.classes.bytes) == ([volume.mount_point], status.bytes_alloc)
+    assert sum(c.bytes for c in out.classes.classes) == sum(c.bytes for c in kept.classes)
+
+    # a stopped scan keeps nothing; without a known mix there is no total
+    assert machine_handlers.overview(server, [volume], Probe(), {}).classes is None
+
+
+def test_class_total_adds_up_volumes(server: Server) -> None:
+    def vol(mount: str, serial: str) -> VolumeInfo:
+        return VolumeInfo(mount, mount, "NTFS", "", 10**12, 10**11, 4096, False, False, serial=serial)
+
+    c, d, e = vol("C:\\", "1"), vol("D:\\", "2"), vol("E:\\", "3")
+    store = {
+        identity(c): Kept(mount="C:\\", identity=identity(c), at=datetime.now(UTC), seen=datetime.now(UTC),
+                          bytes_alloc=700, classes=[ClassStat(class_id="game", bytes=500, files=5),
+                                                    ClassStat(class_id="code", bytes=200, files=50)]),
+        identity(d): Kept(mount="D:\\", identity=identity(d), at=datetime.now(UTC), seen=datetime.now(UTC),
+                          bytes_alloc=300, classes=[ClassStat(class_id="code", bytes=350, files=30)]),
+    }  # fmt: skip
+    out = machine_handlers.overview(server, [c, d, e], Probe(), {}, lambda v: store.get(identity(v)))
+    total = out.classes
+    assert total is not None and total.volumes == ["C:\\", "D:\\"] and total.bytes == 1000  # E: never scanned
+    assert [(x.class_id, x.bytes, x.files) for x in total.classes] == [("code", 550, 80), ("game", 500, 5)]

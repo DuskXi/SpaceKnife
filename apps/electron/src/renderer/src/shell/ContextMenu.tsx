@@ -9,7 +9,7 @@ import { set, toast, useApp } from "@/state/store";
 import { fmtInt, fmtSize } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
-import { hitOfKey } from "@/visual/Host";
+import { hitOfKey } from "@/visual/hover";
 import { rowTitle } from "@/visual/rowTitle";
 import { HIT_NONE, HIT_ROOT } from "@/visual/types";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";

@@ -1,22 +1,24 @@
 // Electron main process: one frameless window, the backend child process, a few native services.
 
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { chmod, copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import { BrowserWindow, app, clipboard, dialog, ipcMain, protocol, shell } from "electron";
+import { BrowserWindow, app, clipboard, dialog, ipcMain, nativeTheme, protocol, shell } from "electron";
 
 import type { BackendState } from "../shared/api";
+import { WINDOW_BG } from "../shared/theme";
 import { type Backend, type BackendOptions, bundledBackend, startBackend } from "./backend";
 import { fileIn, mimeOf } from "./files";
 import { DEFAULT_PORT, ht, parseCommandLine } from "./headless";
 import { exitFlushed, prepareHeadless, runHeadless, systemLang } from "./headless-main";
-import { portableHome } from "./portable";
+import { appBundle, portableHome, untranslocate } from "./portable";
 import { type Lang, mt, setLang } from "./text";
-import { type InstallHow, installKind, installRefusal, installStep, nsisUpdateArgs, projectPage, swapHelper, swapPlanJson } from "./update";
+import { ThemeKeeper } from "./theme";
+import { type InstallHow, installKind, installRefusal, installStep, MAC_APP, nsisUpdateArgs, portableVersion, projectPage, swapHelper, swapPlanJson } from "./update";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const APP_ORIGIN = "app://spaceknife";
@@ -25,8 +27,17 @@ const RENDERER_DIR = join(here, "../renderer");
 // --headless / --listen: no window, the interface in a browser (headless.ts); --help: the options
 const CLI = parseCommandLine(process.argv.slice(1));
 
+/** macOS: where a translocated copy really is (portable.ts), from the mount table; null when unknown. */
+function originalPath(path: string): string | null {
+  try {
+    return untranslocate(path, execFileSync("/sbin/mount", { encoding: "utf8", timeout: 3000 }));
+  } catch {
+    return null;
+  }
+}
+
 // A portable copy keeps its data next to the executable: the backend inherits SPACEKNIFE_HOME.
-const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env);
+const portable = portableHome(process.execPath, process.platform, app.isPackaged, process.env, originalPath);
 if (portable) process.env.SPACEKNIFE_HOME = portable;
 // what the backend's update check downloads, and what main may start once it is downloaded
 const INSTALL_KIND = installKind(process.execPath, process.platform, app.isPackaged, process.env, portable);
@@ -85,6 +96,38 @@ async function launchBackend(): Promise<void> {
   }
 }
 
+// The theme (W7 外观 · 主题, theme.ts): the last choice is in <userData>/theme.json, restored before the
+// window is created.
+const themeFile = () => join(app.getPath("userData"), "theme.json");
+let themes: ThemeKeeper | null = null;
+
+function restoreTheme(): ThemeKeeper {
+  let text: string | null = null;
+  try {
+    text = readFileSync(themeFile(), "utf8");
+  } catch {
+    // never chosen: 「跟随系统」
+  }
+  return new ThemeKeeper(
+    {
+      native: nativeTheme,
+      setBackground: (color) => win?.setBackgroundColor(color),
+      write: async (text) => {
+        const file = themeFile();
+        await mkdir(dirname(file), { recursive: true });
+        // whole or not at all: a start never reads half a file
+        await writeFile(`${file}.tmp`, text);
+        await rename(`${file}.tmp`, file);
+      },
+      warn: (message) => console.warn(message),
+    },
+    text,
+  );
+}
+
+// (restored before any window: light, as where nothing tells, is only a fallback)
+const windowBackground = () => themes?.background() ?? WINDOW_BG.light;
+
 /** The app icon for the window (Linux; a packaged Windows app shows its executable's icon). */
 function windowIcon(): string | undefined {
   if (process.platform === "linux") return join(app.getAppPath(), "resources", "icon.png");
@@ -102,7 +145,7 @@ function createWindow(): void {
     show: false,
     frame: mac,
     titleBarStyle: mac ? "hiddenInset" : "hidden",
-    backgroundColor: "#08090B",
+    backgroundColor: windowBackground(),
     title: "SpaceKnife",
     icon: windowIcon(),
     webPreferences: {
@@ -152,6 +195,10 @@ function registerIpc(): void {
   ipcMain.handle("sk:openPath", (_e, path: string) => shell.openPath(path));
   ipcMain.on("sk:copyText", (_e, text: string) => clipboard.writeText(text));
   ipcMain.on("sk:setLanguage", (_e, lang: Lang) => setLang(lang));
+  // the renderer applies the setting to the page itself; here the window, Electron's UI and the file
+  ipcMain.on("sk:setTheme", (_e, theme: unknown) => themes?.set(theme));
+  // the system's theme changed (or themeSource did): the window's own background follows
+  nativeTheme.on("updated", () => themes?.updated());
   ipcMain.on("sk:openTerminal", (_e, dir: string) => openTerminal(dir));
   // one fixed settings pane, not a URL from the renderer (spaceknife.privacy.FULL_DISK_ACCESS_SETTINGS)
   ipcMain.on("sk:openFullDiskAccess", () => {
@@ -282,9 +329,9 @@ async function replaceAppImage(file: string): Promise<string> {
  *  backend swaps the files once the app has quit (spaceknife.update_swap) and starts it again. No
  *  script: SpaceKnife's own program does it. The "data" folder stays. */
 async function replacePortable(file: string, updates: string): Promise<string> {
-  const version = /^SpaceKnife-(.+)-(?:win|linux)-x64-portable\.(?:zip|tar\.gz)$/.exec(basename(file))?.[1];
+  const version = portableVersion(basename(file));
   const platform = process.platform;
-  if (!version || (platform !== "win32" && platform !== "linux")) return mt("updateNoInstall");
+  if (!version || !portable || (platform !== "win32" && platform !== "linux" && platform !== "darwin")) return mt("updateNoInstall");
   const staging = join(updates, `staging-${version}`);
   try {
     await rm(staging, { recursive: true, force: true });
@@ -296,9 +343,11 @@ async function replacePortable(file: string, updates: string): Promise<string> {
   }
   const top = (await readdir(staging, { withFileTypes: true })).filter((e) => e.isDirectory());
   const staged = top.length === 1 ? join(staging, top[0]!.name) : null;
-  if (!staged || !(await readdir(staged)).includes(basename(process.execPath))) {
+  // the new version's program: the executable, on macOS the app bundle
+  const program = platform === "darwin" ? MAC_APP : basename(process.execPath);
+  if (!staged || !(await readdir(staged)).includes(program)) {
     const found = top.map((e) => e.name).join(", ") || "nothing";
-    console.warn(`[update] ${basename(file)} is not one folder with ${basename(process.execPath)}: ${found}`);
+    console.warn(`[update] ${basename(file)} is not one folder with ${program}: ${found}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
   const helper = swapHelper(staged, platform);
@@ -306,12 +355,17 @@ async function replacePortable(file: string, updates: string): Promise<string> {
     console.warn(`[update] ${basename(file)} has no ${helper}`);
     return mt("updateUnpackFailed", { error: basename(file) });
   }
+  // the copy's folder holds its data folder; on macOS the executable is in the bundle there, which a
+  // translocated copy (portable.ts) runs from somewhere else: the swap starts the one in the folder
+  const appDir = dirname(portable);
+  const bundle = appBundle(process.execPath);
+  const exe = platform === "darwin" && bundle ? join(appDir, basename(bundle), "Contents", "MacOS", basename(process.execPath)) : process.execPath;
   const plan = {
     pid: process.pid,
-    appDir: dirname(process.execPath),
+    appDir,
     staged,
     previous: join(updates, `previous-${app.getVersion()}`),
-    exe: process.execPath,
+    exe,
     log: join(updates, `update-${version}.log`),
   };
   await rm(plan.previous, { recursive: true, force: true }); // left by an attempt that was undone
@@ -358,9 +412,10 @@ function startSwap(helper: string, plan: string, cwd: string): Promise<void> {
   });
 }
 
-/** Unpack a portable archive (zip on Windows, tar.gz on Linux) with the system's tar: Windows 10 1803
- *  and later have bsdtar, which reads zip and refuses entries leaving the folder; PowerShell's
- *  Expand-Archive where it is missing. */
+/** Unpack a portable archive (zip on Windows and macOS, tar.gz on Linux) with the system's tools:
+ *  Windows 10 1803 and later have bsdtar, which reads zip and refuses entries leaving the folder
+ *  (PowerShell's Expand-Archive where it is missing); macOS's ditto keeps an app bundle's symbolic
+ *  links and attributes as the archive's own ditto made them. */
 function unpack(file: string, into: string): Promise<void> {
   const run = (cmd: string, args: string[]) =>
     new Promise<void>((done, fail) => {
@@ -368,6 +423,7 @@ function unpack(file: string, into: string): Promise<void> {
       child.once("error", fail);
       child.once("exit", (code) => (code === 0 ? done() : fail(new Error(`${cmd} exited with ${code}`))));
     });
+  if (process.platform === "darwin") return run("/usr/bin/ditto", ["-x", "-k", file, into]);
   if (process.platform !== "win32") return run("tar", ["-xzf", file, "-C", into]);
   return run("tar.exe", ["-xf", file, "-C", into]).catch(() =>
     run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `Expand-Archive -LiteralPath '${file.replace(/'/g, "''")}' -DestinationPath '${into.replace(/'/g, "''")}' -Force`]),
@@ -409,6 +465,7 @@ if (CLI.mode === "help" || CLI.mode === "error") {
 } else {
   app.whenReady().then(() => {
     serveRenderer();
+    themes = restoreTheme();
     registerIpc();
     createWindow();
     void launchBackend();

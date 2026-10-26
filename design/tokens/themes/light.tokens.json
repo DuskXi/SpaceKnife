@@ -1,0 +1,255 @@
+{
+  "$description": "A2「石墨 + 沉浸的对比度」的浅色模式（不是已否决的 B「纸本」）：版式、几何和类别色相不变，只换颜色。外框表面保持暗色的次序和步距（sunken < window < chrome < panel < overlay < raised，raised 是白色），线、悬停、文字、强调色和状态色往对比方向走（浅色里变暗）；可视化以底色为一极，绕白底镜像。覆盖 design/tokens 里暗色基础令牌的颜色和投影，路径和 $type 不变；每个不是别名的颜色令牌都写一遍（与暗色同值的也写），新加颜色令牌时要同时给出浅色值（tools/tests/test_gen_design.py 检查）。别名在合并之后解析，所以 visual.center.* 不用写。",
+  "color": {
+    "$type": "color",
+    "bg": {
+      "window": { "$value": "#E9EBEF", "$description": "窗口底色、标题栏、启动页与设置页底色；输入框和分段控件的底槽。除 sunken 外最暗的表面，和暗色一样（暗色 window 也是最暗的一级）" },
+      "chrome": { "$value": "#EFF1F6", "$description": "工具栏、状态栏、活动标签：比 window 亮一档（暗色同样亮一档）" },
+      "panel": { "$value": "#F4F6FA", "$description": "详情栏、设置卡片、驱动器卡片、删除篮：比 chrome 再亮一档" },
+      "overlay": { "$value": "#F9FBFE", "$description": "菜单、过滤面板、对话框、悬停卡页脚：比 panel 再亮一档，加投影和 1px 强线" },
+      "raised": { "$value": "#FFFFFF", "$description": "图标底、键帽、徽章、幽灵按钮、悬停卡和命令面板主体：最高一层是纯白。和暗色一样 raised 比 overlay 亮，所以悬停卡主体比页脚亮、命令面板比页脚亮，层次不反" },
+      "hover": { "$value": "#DFE1E5", "$description": "悬停：比所有表面都暗（状态往对比方向走）。到 window 的距离等于暗色 hover 到 raised 的距离" },
+      "active": { "$value": "#D8DBE2", "$description": "按下、选中的标签按钮、拖动中的标签：比 hover 再暗一档" },
+      "sunken": { "$value": "#E5E7EB", "$description": "比 window 暗一档的凹槽（浏览器模式的路径输入框）；暗色里它和树图底同值，浅色里树图底是白色，两者分开" },
+      "scrim": { "$value": "#161B2438", "$description": "命令面板的遮罩：22% 石墨，浅色里背后不去色（去色会把橙、黄块压成卡其色）；对话框背景用它的 75%" },
+      "selected": { "$value": "{color.bg.raised}", "$description": "分段控件、段标签、开着的图标按钮的选中片：白色凸起片（线框稿），比底槽亮一档，同暗色" },
+      "field": { "$value": "{color.bg.raised}", "$description": "文本框和数字框的底：白色，配 line.strong 的边。浅色里灰底的框放在白色或近白的卡片上像禁用或只读，所以不跟暗色走凹槽" }
+    },
+    "line": {
+      "subtle": { "$value": "#DEE0E4", "$description": "细分隔线：在 window 上 ≈1.2:1、在白色上 ≈1.3:1，和暗色 1.1–1.2:1 同一量级" },
+      "strong": { "$value": "#CDD0D7", "$description": "控件边框、强分隔线、浮层 1px 外圈" },
+      "swatch": { "$value": "#16192026", "$description": "小色块和容量构成条各段的 1px 内描边：主文字 15%（同「文件类别」的取色块）。浅色里压缩包、数据、其他、代码这些浅色块和浅蓝的 NVMe 段在浅色表面上不到 2:1，靠这圈分出边界" }
+    },
+    "text": {
+      "primary": { "$value": "#161920", "$description": "主文字（白色上 ≈15:1，暗色 ≈17:1）" },
+      "secondary": { "$value": "#444954", "$description": "次级文字（panel 上 ≈8.5:1，暗色 9.1:1）" },
+      "tertiary": { "$value": "#575C68", "$description": "说明文字：window–raised 各底色上 ≥ 5.6:1，hover / active 上 ≥ 4.5:1（暗色在 active 上也只有 5.36）" },
+      "disabled": { "$value": "#9B9EA6", "$description": "禁用文字：≈2.2:1，与暗色 2.0–2.4:1 相当（禁用态豁免 4.5:1，但要看得出）" },
+      "onAccent": { "$value": "#FFFFFF", "$description": "浅色的四个强调色都是深色，字用白色（UI-W7-31 ②：强调色上的字自动 ≥ 4.5:1）" },
+      "onWarning": { "$value": "#0A0B0D", "$description": "警告填充色（status.warningFill）上的文字：状态栏的警告计数；同暗色，近黑" }
+    },
+    "accent": {
+      "default": { "$value": "#424AC6", "$description": "长春花蓝 #8B9CFF 的浅色版：同一槽位、同一色相，压到能当文字也能当底色的亮度；白字 ≥ 4.5:1，在自己 16–18% 的浅底上当文字 ≥ 4.5:1" },
+      "lime": { "$value": "#4F6200", "$description": "电光青柠 #D4FF3A 的浅色版：同一槽位、同一色相（121.8°），亮度降到 L=0.465。这是同时满足「白字 ≥ 4.6」「当文字在各表面和 hover 上 ≥ 4.52」「在自己 16–18% 的浅底上当文字 ≥ 4.52」的最亮值" },
+      "teal": { "$value": "#00665B", "$description": "青绿 #5EC8B8 的浅色版：同一槽位、同一色相（182.3°），亮度降到 L=0.458。这是同时满足「白字 ≥ 4.6」「当文字在各表面和 hover 上 ≥ 4.52」「在自己 16–18% 的浅底上当文字 ≥ 4.52」的最亮值" },
+      "orange": { "$value": "#954104", "$description": "橙 #F2A65A 的浅色版：同一槽位、色相 64°→48°（64° 在白字需要的亮度下是焦褐色，48° 仍是橙），亮度降到 L=0.480。这是同时满足「白字 ≥ 4.6」「当文字在各表面和 hover 上 ≥ 4.52」「在自己 16–18% 的浅底上当文字 ≥ 4.52」的最亮值" }
+    },
+    "status": {
+      "success": { "$value": "#006D3D", "$description": "#3FCB80 的浅色版（L=0.470）。在自己 18% 的浅底（关于页「新」）上也 ≥ 4.55" },
+      "warning": { "$value": "#845D00", "$description": "#F5C542 的浅色版（L=0.507）。色相 88°→80°：同样 4.5:1 的亮度下 80° 是琥珀金，88° 是橄榄褐。只当文字用；浅底（日志警告级、提示条、芯片）和计数徽章改用新令牌 status.warningFill（浅色是亮黄，暗色是本令牌的别名，所以暗色不变）" },
+      "danger": { "$value": "#A9212C", "$description": "#FF6B6B 的浅色版（L=0.480）。在自己 22% 的浅底（日志错误级）上也 ≥ 4.55" },
+      "growth": { "$value": "#A34700", "$description": "#E8963A 的浅色版（L=0.510）。色相 65°→48°（同橙色强调色）：65° 在这个亮度下是褐色；暗色里增长色和橙色强调色本来就几乎同色" },
+      "warningFill": { "$value": "#F5C542", "$description": "警告的填充色：亮黄（同 treemap.state.newBadgeBg），配深字 text.onWarning；警告的浅底（日志级别、提示条）按它调淡，文字仍用 status.warning" },
+      "warningBase": { "$value": "#FFF8D6", "$description": "警告浅底下面垫的淡黄：亮黄按 8–22% 调进它，帮助页的「注意」框、提示条、芯片是 #FEF4CA–#FDEDB5 的浅黄。直接叠在冷灰表面上会成米色、卡其色（最像已否决的「纸本」），所以浅色里浅底不透明" }
+    },
+    "tag": {
+      "red": { "$value": "#DC434A", "$description": "▲ 外框表面上的标签形状（详情栏、标签按钮、结果列表）：在所有表面含 bg.active（选中的标签按钮）上 ≥ 3:1。画布上的标签不用它：底座两套主题都是深色，画布固定取暗色的标签色" },
+      "yellow": { "$value": "#957700", "$description": "■ 外框表面上的标签形状（详情栏、标签按钮、结果列表）：在所有表面含 bg.active（选中的标签按钮）上 ≥ 3:1。画布上的标签不用它：底座两套主题都是深色，画布固定取暗色的标签色" },
+      "green": { "$value": "#008D4F", "$description": "● 外框表面上的标签形状（详情栏、标签按钮、结果列表）：在所有表面含 bg.active（选中的标签按钮）上 ≥ 3:1。画布上的标签不用它：底座两套主题都是深色，画布固定取暗色的标签色" },
+      "blue": { "$value": "#3D78DE", "$description": "◆ 外框表面上的标签形状（详情栏、标签按钮、结果列表）：在所有表面含 bg.active（选中的标签按钮）上 ≥ 3:1。画布上的标签不用它：底座两套主题都是深色，画布固定取暗色的标签色" },
+      "base": { "$value": "#000000B8", "$description": "标签小底座：两套主题都是 72% 黑（UI-TM-49 原文），所以画布上的标签图形两套主题都取暗色的 color.tag.*，对比度和暗色完全一样" }
+    },
+    "shadow": { "$value": "#12161F57", "$description": "外框的大投影：帮助配图（100%）、命令面板与更新卡（86%）；浅色是 34% 石墨。画布上的投影是 treemap.state.selectShadow" },
+    "meter": {
+      "used": { "$value": "#868A91", "$description": "状态栏容量条的已用段：在 chrome 上 ≥ 3:1 的最浅中灰，可用段（status.success）仍是条上最显眼的部分" }
+    },
+    "scroll": {
+      "thumb": { "$value": "#A0A5AF", "$description": "滚动条滑块（所有滚动区域；没有轨道和箭头）：在 window 到 raised 的表面上 ≥ 2:1，安静但看得见" },
+      "thumbHover": { "$value": "#7E838E", "$description": "指针在滑块上或正在拖动：在 window 到 raised 的表面上 ≥ 3:1" }
+    }
+  },
+  "treemap": {
+    "ground": { "$value": "#FFFFFF", "$description": "树图底、顶层块之间的缝、火焰图和火焰-极坐标图的空白画布：白色（暗色的近黑底是离对比最远的一极，浅色的这一极是白）" },
+    "level": {
+      "0": {
+        "bg": { "$value": "#F3F5F9", "$description": "文件夹框底：到白底的距离与暗色到近黑底的距离相同（×0.85），越深离底色越远一档（暗色越深越亮，浅色越深越暗）。层级对比滑块从第 1 层往外推，最大 ×5 时第 4 层也不会被夹成白色" },
+        "border": { "$value": "#D4D7DE", "$description": "框线：和外框的线一样往对比方向走" },
+        "headerBg": { "$value": "#EAECF0", "$description": "标题栏：比框底离底色更远一档（暗色比框底亮，浅色比框底暗）" },
+        "headerText": { "$value": "#161920", "$description": "标题栏文件夹名" },
+        "headerSub": { "$value": "#505562", "$description": "标题栏大小行：≈6.3:1（暗色 6.5–7.0）" }
+      },
+      "1": {
+        "bg": { "$value": "#EEF0F4" },
+        "border": { "$value": "#CFD2D9" },
+        "headerBg": { "$value": "#E4E6EA" },
+        "headerText": { "$value": "#171A21" },
+        "headerSub": { "$value": "#4C515E" }
+      },
+      "2": {
+        "bg": { "$value": "#E9EBEF" },
+        "border": { "$value": "#C9CCD3" },
+        "headerBg": { "$value": "#DFE1E5" },
+        "headerText": { "$value": "#181B22" },
+        "headerSub": { "$value": "#494E5B" }
+      },
+      "3": {
+        "bg": { "$value": "#E4E6EA" },
+        "border": { "$value": "#C3C6CD" },
+        "headerBg": { "$value": "#D8DBE2" },
+        "headerText": { "$value": "#191C23" },
+        "headerSub": { "$value": "#464B57" }
+      }
+    },
+    "halo": {
+      "bg": { "$value": "#BDCBEE", "$description": "祖先光晕：比所有标题栏离底色更远、带强调色调的蓝灰（暗色 #26304A 的镜像）" },
+      "text": { "$value": "#0A0F1D", "$description": "光晕上的名称：比普通标题栏更黑（暗色是纯白）" },
+      "sub": { "$value": "#39435F" }
+    },
+    "collapsed": { "$value": "#D8DBE0", "$description": "折叠文件夹 / 「+N 项」：在框底和「其他」之间、几乎无彩（暗色次序相同：框底 < 折叠 < 其他）" },
+    "class": {
+      "video": { "$value": "#E07A1F", "$description": "同 carbon" },
+      "image": { "$value": "#2F8FDB", "$description": "同 carbon" },
+      "audio": { "$value": "#9B4586", "$description": "同 carbon" },
+      "archive": { "$value": "#D8B837", "$description": "同色相同彩度，亮度 0.829→0.790：在浅色框底上分得开（与框底 ≥ 1.4:1），仍配深字" },
+      "exec": { "$value": "#1FAE8A", "$description": "同 carbon" },
+      "doc": { "$value": "#505DC6", "$description": "同 carbon" },
+      "game": { "$value": "#BE1022", "$description": "同 carbon" },
+      "code": { "$value": "#95ABD7", "$description": "同色相，亮度 0.840→0.740、彩度 0.060→0.069：与「其他」拉开（暗色里它靠「比其他亮得多」区分，浅色里「其他」变浅了，只能让代码变深）" },
+      "data": { "$value": "#4CD39F", "$description": "同色相，亮度 0.853→0.780、彩度 0.122→0.140：浅薄荷在白框上会化掉，并且在绿色盲下和浅灰「其他」重合；压一点、加一点彩度后，正常、红色盲、绿色盲下类别两两最小色差 ≥ 9.5" },
+      "other": { "$value": "#C7D1E5", "$description": "其他 / 扁平配色的文件：退到背景里的冷灰（暗色是比框底亮一点的深灰，浅色是比框底暗一点的浅灰，同为「最不显眼的类别」）。带 0.03 的冷色（接近常见的 slate 灰），色盲下与薄荷「数据」靠冷暖分开" }
+    },
+    "label": {
+      "light": { "$value": "#FFFFFF", "$description": "同 carbon（UI-TM-19 的白字）" },
+      "lightSub": { "$value": "#FFFFFFDB", "$description": "同 carbon" },
+      "dark": { "$value": "#0A0B0D", "$description": "同 carbon（UI-TM-19 的深字）" },
+      "darkSub": { "$value": "#0A0B0DD6", "$description": "同 carbon" }
+    },
+    "free": {
+      "stripeA": { "$value": "#DDFBE8", "$description": "可用空间：浅绿条纹，深绿字（暗色深绿条纹、亮绿字的镜像）" },
+      "stripeB": { "$value": "#C9F4DA" },
+      "border": { "$value": "#75C297" },
+      "text": { "$value": "#005936", "$description": "名称：在两条条纹上都 ≥ 7:1" },
+      "sub": { "$value": "#117449", "$description": "大小行：两条条纹上都 ≥ 4.8:1" }
+    },
+    "unknown": {
+      "stripeA": { "$value": "#F4F6FA", "$description": "未知空间：浅灰细条纹" },
+      "stripeB": { "$value": "#ECEEF4" },
+      "border": { "$value": "#C0C3CB" },
+      "text": { "$value": "#4B4F59" },
+      "sub": { "$value": "#646873" }
+    },
+    "trash": {
+      "veil": { "$value": "#FFFFFF73", "$description": "= 树图底的 45%（同暗色：底色的 45% 蒙层，浅色里是把块洗淡）" },
+      "hatch": { "$value": "#CC483D2E", "$description": "交叉细纹：轮廓色的 18%（同暗色比例）" },
+      "outline": { "$value": "#CC483D", "$description": "虚线轮廓，也是悬停卡里「在回收站里」的文字色：白色上 ≥ 4.6:1，框底上 ≥ 3.6:1" },
+      "sweep": { "$value": "#FFFFFF8C", "$description": "流光：白光（暗色是淡珊瑚光）。蒙层把块洗淡后，白光在中等亮度的块上看得见" },
+      "badgeBg": { "$value": "#CC483D", "$description": "「清空可释放」角标：与轮廓同色，白字" },
+      "badgeText": { "$value": "#FFFFFF" }
+    },
+    "classFocus": {
+      "veil": { "$value": "#FFFFFFD9", "$description": "= 树图底的 85%（同暗色）" },
+      "outline": { "$value": "#0A0B0D8C", "$description": "类别高亮细边：深色 55%（暗色是白色 55%）" }
+    },
+    "pending": {
+      "stripeA": { "$value": "#F3F5F9", "$description": "等待扫描：浅灰宽条纹" },
+      "stripeB": { "$value": "#E9ECF2" },
+      "border": { "$value": "#C2C7D0" },
+      "text": { "$value": "#4A4E59" },
+      "sub": { "$value": "#616671" }
+    },
+    "state": {
+      "selectRing": { "$value": "#FFFFFF", "$description": "选中内环固定白色（UI-W7-31 ②、UI-TM-28）" },
+      "selectOuter": { "$value": "#000000B3", "$description": "外侧 70% 黑环：浅色里由它负责轮廓（白底上 ≥ 5:1）" },
+      "hoverInset": { "$value": "#0A0B0DE6", "$description": "悬停内描边：深色 90%（暗色是白色 90%）。浅色块上白描边看不见；外侧紧贴着浅色的缝，深色描边在任何块上都能和缝分开" },
+      "flash": { "$value": "#AB6C00", "$description": "变化闪烁（2px 描边 + 18px 光晕）：琥珀，L=0.585，在白底和所有框底、标题栏上 ≥ 3.1:1（非文字 3:1）" },
+      "newBadgeBg": { "$value": "#F5C542", "$description": "「减少动画」的变化量角标：同暗色的黄底深字（UI-TM-44 原文成立）" },
+      "newBadgeText": { "$value": "#0A0B0D" },
+      "deletedBadgeBg": { "$value": "#FFFFFFE0", "$description": "对比视图「已删除」角标的底色：88% 白，描边 color.text.secondary、字 color.text.primary" },
+      "selectShadow": { "$value": "#12161F52", "$description": "选中投影（树图、火焰图、火焰-极坐标图；树图把投影在选中块里挖掉），回收站角标的文字阴影：32% 石墨" }
+    },
+    "diff": {
+      "grow": {
+        "0": { "$value": "#F9D1BA", "$description": "增长 < 1 GB：最浅" },
+        "1": { "$value": "#F6A97A" },
+        "2": { "$value": "#ED8032" },
+        "3": { "$value": "#D76900", "$description": "增长 ≥ 8 GB：最深（「最深增长色」UI-W6-14 字面成立）。色相 57°→52°、彩度拉满：同亮度下 57° 发褐" }
+      },
+      "shrink": {
+        "0": { "$value": "#C6DCF3", "$description": "减少 < 1 GB：最浅" },
+        "1": { "$value": "#85B6E9" },
+        "2": { "$value": "#2569A8", "$description": "减少 ≥ 3 GB：最深，白字" }
+      }
+    },
+    "time": {
+      "0": { "$value": "#0E7461", "$description": "< 1 天：最深（最近的最醒目，同暗色）" },
+      "1": { "$value": "#2FA18B" },
+      "2": { "$value": "#61C0AD" },
+      "3": { "$value": "#9AD7CB" },
+      "4": { "$value": "#C2E7E0", "$description": "更早：最浅，退到框底里" }
+    },
+    "dot": {
+      "onDark": { "$value": "#FFFFFF33", "$description": "同 carbon（按块亮度 0.18 选点色，规则不变）" },
+      "onLight": { "$value": "#00000033", "$description": "同 carbon" }
+    }
+  },
+  "visual": {
+    "branch": {
+      "1": {
+        "1": { "$value": "#85CCEE", "$description": "第 1 档（淡）：同色相，亮度 0.86→0.81、彩度 ×1.15，在白底上分得开" },
+        "2": { "$value": "#0BB4EC", "$description": "第 2、4 档与暗色同值：同一个分支在两套主题里是同一个颜色（UI-VZ-10 的档位次序不变）" },
+        "3": { "$value": "#006B8F", "$description": "第 3 档：同色相同彩度，亮度 0.52→0.495，让白色大小行也 ≥ 4.5:1（暗色这一档 1、3、5、7 槽的大小行只有 4.26–4.41）" },
+        "4": { "$value": "#024F6A" }
+      },
+      "2": {
+        "1": { "$value": "#EDB38B" },
+        "2": { "$value": "#EB883B" },
+        "3": { "$value": "#944C05" },
+        "4": { "$value": "#6A3913" }
+      },
+      "3": {
+        "1": { "$value": "#8ED3AD" },
+        "2": { "$value": "#2FC183" },
+        "3": { "$value": "#00754B" },
+        "4": { "$value": "#0C5537" }
+      },
+      "4": {
+        "1": { "$value": "#EAABCD" },
+        "2": { "$value": "#E57BBA" },
+        "3": { "$value": "#904272" },
+        "4": { "$value": "#673352" }
+      },
+      "5": {
+        "1": { "$value": "#79D3D2" },
+        "2": { "$value": "#08BCBC" },
+        "3": { "$value": "#007071" },
+        "4": { "$value": "#045353" }
+      },
+      "6": {
+        "1": { "$value": "#F4ACA4" },
+        "2": { "$value": "#F47B74" },
+        "3": { "$value": "#9B413E" },
+        "4": { "$value": "#6E3330" }
+      },
+      "7": {
+        "1": { "$value": "#B5CB8D" },
+        "2": { "$value": "#8FB43F" },
+        "3": { "$value": "#526D0B" },
+        "4": { "$value": "#3D4F15" }
+      },
+      "8": {
+        "1": { "$value": "#D2B2EB" },
+        "2": { "$value": "#C188EA" },
+        "3": { "$value": "#774C94" },
+        "4": { "$value": "#56396A" }
+      },
+      "neutral": { "$value": "#A2A6AE", "$description": "槽位 0：中性灰，到白底的距离同暗色到近黑底的距离" }
+    },
+    "ring": {
+      "1": { "$value": "#939AA8", "$description": "文件夹环 / 文件夹条：越往外越接近底色（暗色越往外越暗，浅色越往外越浅）" },
+      "2": { "$value": "#A0A7B5" },
+      "3": { "$value": "#ABB1C0" },
+      "4": { "$value": "#B4BBC9" }
+    },
+    "haloOverlay": { "$value": "#0A0B0D1A", "$description": "分区布局的祖先光晕：深色 10%（暗色是白色 10%）" }
+  },
+  "shadow": {
+    "$type": "shadow",
+    "popover": {
+      "$value": [
+        { "color": "#12161F29", "offsetX": {"value": 0, "unit": "px"}, "offsetY": {"value": 12, "unit": "px"}, "blur": {"value": 32, "unit": "px"}, "spread": {"value": 0, "unit": "px"} },
+        { "color": "{color.line.strong}", "offsetX": {"value": 0, "unit": "px"}, "offsetY": {"value": 0, "unit": "px"}, "blur": {"value": 0, "unit": "px"}, "spread": {"value": 1, "unit": "px"} }
+      ],
+      "$description": "浮层投影：浅色里黑影 45% 降到 16% 石墨，外圈 1px 仍是 {color.line.strong}（别名，自动跟随主题）"
+    }
+  }
+}

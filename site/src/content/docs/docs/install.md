@@ -11,14 +11,17 @@ SpaceKnife is published on the [Releases page](https://github.com/DuskXi/SpaceKn
 |---|---|---|
 | Windows 10 or later, x64 | `SpaceKnife-<version>-Setup-x64.exe` | Installer, for the current user or all users |
 | Windows 10 or later, x64 | `SpaceKnife-<version>-win-x64-portable.zip` | Portable: unzip and run, no installation |
+| Windows 11 on ARM | `SpaceKnife-<version>-win-arm64-portable.zip` | Portable, ARM (arm64) |
 | macOS 14 or later, Apple Silicon | `SpaceKnife-<version>-mac-arm64.dmg` | Disk image |
 | macOS 14 or later, Intel | `SpaceKnife-<version>-mac-x64.dmg` | Disk image |
+| macOS 14 or later | `SpaceKnife-<version>-mac-<arm64 or x64>-portable.zip` | Portable: unzip and run, data next to the app |
 | Ubuntu 22.04 or later, Debian family | `spaceknife_<version>_amd64.deb` | Package |
 | RHEL 9 or later, Fedora family | `spaceknife-<version>.x86_64.rpm` | Package |
 | Other Linux, x64 | `SpaceKnife-<version>-x86_64.AppImage` | Single file, needs FUSE 2 |
 | Linux, x64 | `SpaceKnife-<version>-linux-x64-portable.tar.gz` | Portable: extract and run, no FUSE |
+| Linux, ARM (arm64) | `SpaceKnife-<version>-linux-arm64-portable.tar.gz` | Portable, ARM |
 
-Windows and Linux builds are x64 only; there is no 32-bit Windows build. The Linux builds need glibc 2.34 or later (the level of RHEL 9; Ubuntu 22.04 has 2.35).
+On ARM, Windows and Linux have the portable archives; the installers and packages are x64 only (Windows on ARM can also run the x64 installer, emulated). There is no 32-bit Windows build. The Linux builds need glibc 2.34 or later (the level of RHEL 9; Ubuntu 22.04 has 2.35).
 
 ### Check the download
 
@@ -71,6 +74,10 @@ Next to `SpaceKnife.exe` there is a `data` folder. While it is there, SpaceKnife
 ### Install
 
 Open the dmg and drag SpaceKnife into **Applications**. You need macOS 14 or later; take the `arm64` dmg for Apple Silicon and the `x64` dmg for Intel Macs.
+
+### Portable zip
+
+Unzip `SpaceKnife-<version>-mac-arm64-portable.zip` (Apple Silicon) or `…-mac-x64-portable.zip` (Intel) anywhere you can write, such as your user folder or a USB drive. The folder holds `SpaceKnife.app` and a `data` folder; keep the two together and open `SpaceKnife.app`. It keeps everything in `data` and nothing in your user Library ([portable mode](../data-locations/#portable-mode)). The first launch needs the same one-time permission as the dmg (below), for the app in that folder.
 
 ### First launch: allow it once
 

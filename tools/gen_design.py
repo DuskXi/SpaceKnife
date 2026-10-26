@@ -1,14 +1,21 @@
 """Compile design tokens and icons into artefacts for all three frontends.
 
 Source of truth (hand-edited):
-    design/tokens/*.tokens.json   DTCG-style tokens ($value / $type / $description, "{alias}" refs)
+    design/tokens/*.tokens.json   DTCG-style tokens ($value / $type / $description, "{alias}" refs):
+                                  the dark theme, the base every theme starts from
+    design/tokens/themes/<theme>.tokens.json
+                                  a theme's overrides: the same paths with other values, colours and
+                                  shadows only, $type unchanged ("set + theme modifier", as in the
+                                  DTCG resolver module). Aliases resolve after the merge, so a token
+                                  that points at an overridden one follows it.
     design/icons/icons.json       16×16 stroke icons (inner SVG markup)
 
 Generated (never edit by hand; CI runs ``--check``):
-    design/build/tokens.css                          Electron (CSS custom properties)
-    design/build/tokens.ts                           Electron (typed constants, WebGL palette)
-    design/build/qml/SpaceKnife/Tokens/Tokens.qml    Qt (QML singleton) + qmldir
-    design/build/xaml/Tokens.xaml                    WinUI3 (ResourceDictionary)
+    design/build/tokens.css                          Electron (CSS custom properties: light on :root,
+                                                     dark through prefers-color-scheme or data-theme)
+    design/build/tokens.ts                           Electron (typed constants, WebGL palette per theme)
+    design/build/qml/SpaceKnife/Tokens/Tokens.qml    Qt (QML singleton with a `theme` property) + qmldir
+    design/build/xaml/Tokens.xaml                    WinUI3 (ResourceDictionary with ThemeDictionaries)
     packages/client/src/spaceknife_client/tokens.py  Python frontends (Qt/WinUI view layer)
     design/build/icons/*.svg, design/build/icons.ts  icons
 
@@ -30,6 +37,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 TOKENS_DIR = ROOT / "design" / "tokens"
+THEMES_SUBDIR = "themes"
 ICONS_JSON = ROOT / "design" / "icons" / "icons.json"
 BUILD = ROOT / "design" / "build"
 PY_OUT = ROOT / "packages" / "client" / "src" / "spaceknife_client" / "tokens.py"
@@ -46,6 +54,10 @@ GENERIC_FAMILIES = {
     "ui-sans-serif",
     "cursive",
 }
+# the base files hold the dark theme; every other theme overrides some of its colours and shadows
+THEMES = ("dark", "light")
+BASE_THEME = "dark"
+THEMED_TYPES = {"color", "shadow"}
 SUPPORTED_TYPES = {
     "color",
     "dimension",
@@ -201,8 +213,93 @@ def normalise(typ: str, value: Any, where: str) -> Any:
     raise TokenError(f"{where}: unsupported $type {typ!r}")
 
 
-def load_tokens(directory: Path = TOKENS_DIR) -> list[Token]:
-    return sorted(resolve(collect(load_tree(directory))), key=lambda t: t.path)
+def _token_paths(tree: dict[str, Any], path: tuple[str, ...] = ()) -> list[str]:
+    """Dotted paths of the tokens in a (partial) tree."""
+    out: list[str] = []
+    for key, node in tree.items():
+        if key.startswith("$") or not isinstance(node, dict):
+            continue
+        if "$value" in node:
+            out.append(".".join((*path, key)))
+        else:
+            out += _token_paths(node, (*path, key))
+    return out
+
+
+def overlay(base: dict[str, Any], override: dict[str, Any], path: tuple[str, ...] = ()) -> dict[str, Any]:
+    """``base`` with the tokens of ``override`` in their places (new dicts; neither argument changes).
+
+    Every path of ``override`` must exist in ``base``: a token replaces a token, a group goes into a
+    group, and a group's ``$type`` stays. ``$description`` may be replaced; other ``$`` keys are
+    notes and are dropped."""
+    out = dict(base)
+    for key, node in override.items():
+        where = ".".join((*path, key))
+        if key.startswith("$"):
+            if key == "$description":
+                out[key] = node
+            elif key == "$type" and node != base.get("$type"):
+                raise TokenError(f"{'.'.join(path) or '(root)'}: a theme cannot change $type")
+            continue
+        if key not in base:
+            raise TokenError(f"{where}: not in the base tokens (a theme only overrides existing tokens)")
+        under = base[key]
+        if (
+            not isinstance(node, dict)
+            or not isinstance(under, dict)
+            or ("$value" in node) != ("$value" in under)
+        ):
+            raise TokenError(f"{where}: a theme must replace a token with a token and a group with a group")
+        if "$value" in node:
+            out[key] = {
+                **under,
+                **{k: v for k, v in node.items() if k in ("$value", "$type", "$description")},
+            }
+        else:
+            out[key] = overlay(under, node, (*path, key))
+    return out
+
+
+def theme_tree(directory: Path = TOKENS_DIR, theme: str = BASE_THEME) -> dict[str, Any]:
+    """The token tree of ``theme``: the base files with the theme's overrides merged in."""
+    if theme not in THEMES:
+        raise TokenError(f"unknown theme {theme!r} (one of {', '.join(THEMES)})")
+    base = load_tree(directory)
+    if theme == BASE_THEME:
+        return base
+    file = directory / THEMES_SUBDIR / f"{theme}.tokens.json"
+    if not file.exists():
+        raise TokenError(f"theme {theme!r}: {file} not found")
+    data = json.loads(file.read_text(encoding="utf-8"))
+    override = {k: v for k, v in data.items() if not k.startswith("$")}
+    tree = overlay(base, override)
+    before, after = collect(base), collect(tree)
+    for name in _token_paths(override):
+        if after[name][0] != before[name][0]:
+            raise TokenError(f"{name}: a theme cannot change $type ({before[name][0]} -> {after[name][0]})")
+        if before[name][0] not in THEMED_TYPES:
+            raise TokenError(f"{name}: a theme overrides only color and shadow tokens, not {before[name][0]}")
+    return tree
+
+
+def load_tokens(directory: Path = TOKENS_DIR, theme: str = BASE_THEME) -> list[Token]:
+    return sorted(resolve(collect(theme_tree(directory, theme))), key=lambda t: t.path)
+
+
+def load_themes(directory: Path = TOKENS_DIR) -> dict[str, list[Token]]:
+    """Every theme's tokens, the base theme first; all of them have the same paths and types."""
+    themes = {name: load_tokens(directory, name) for name in THEMES}
+    shape = [(t.path, t.type) for t in themes[BASE_THEME]]
+    for name, tokens in themes.items():
+        if [(t.path, t.type) for t in tokens] != shape:
+            raise TokenError(f"theme {name!r} does not have the base tokens' paths and types")
+    return themes
+
+
+def themed(themes: dict[str, list[Token]]) -> set[str]:
+    """Dotted paths whose resolved value differs between the themes."""
+    values = [{t.dotted: t.value for t in tokens} for tokens in themes.values()]
+    return {name for name, value in values[0].items() if any(v[name] != value for v in values[1:])}
 
 
 # --------------------------------------------------------------------------- naming
@@ -265,10 +362,31 @@ def css_value(token: Token) -> str:
 # --------------------------------------------------------------------------- emitters
 
 
-def emit_css(tokens: list[Token]) -> str:
-    lines = [f"/* {HEADER} */", ":root {"]
-    lines += [f"  --sk-{kebab(t.path)}: {css_value(t)};" for t in tokens]
-    lines.append("}")
+def css_declarations(tokens: list[Token]) -> list[str]:
+    """``--sk-<path>: <value>;`` for each token."""
+    return [f"--sk-{kebab(t.path)}: {css_value(t)};" for t in tokens]
+
+
+def emit_css(themes: dict[str, list[Token]]) -> str:
+    """Light on :root (so a page that knows nothing else starts light); dark when the system asks for
+    it (prefers-color-scheme, which Electron's nativeTheme.themeSource drives) unless the page says
+    data-theme="light", or anywhere data-theme="dark". The theme blocks hold only what differs."""
+    varying = themed(themes)
+
+    def block(selector: str, scheme: str, tokens: list[Token], indent: str = "") -> list[str]:
+        body = [f"color-scheme: {scheme};", *css_declarations(tokens)]
+        return [f"{indent}{selector} {{", *(f"{indent}  {line}" for line in body), f"{indent}}}"]
+
+    dark = [t for t in themes["dark"] if t.dotted in varying]
+    light = [t for t in themes["light"] if t.dotted in varying]
+    lines = [f"/* {HEADER} */", *block(":root", "light", themes["light"])]
+    lines += [
+        "@media (prefers-color-scheme: dark) {",
+        *block(':root:not([data-theme="light"])', "dark", dark, "  "),
+        "}",
+    ]
+    lines += block('[data-theme="dark"]', "dark", dark)
+    lines += block('[data-theme="light"]', "light", light)
     return "\n".join(lines) + "\n"
 
 
@@ -290,26 +408,66 @@ def _ts_leaf(t: Token) -> Any:
     return t.value
 
 
-def emit_ts(tokens: list[Token]) -> str:
+def emit_ts(themes: dict[str, list[Token]]) -> str:
+    tokens = themes[BASE_THEME]
     body = json.dumps(_nested(tokens, _ts_leaf), indent=2, ensure_ascii=False)
+    others = "".join(
+        f"  {name}: "
+        + json.dumps(_nested(theme, _ts_leaf), indent=2, ensure_ascii=False).replace("\n", "\n  ")
+        + ",\n"
+        for name, theme in themes.items()
+        if name != BASE_THEME
+    )
     css_map = json.dumps(
         {t.dotted: f"var(--sk-{kebab(t.path)})" for t in tokens}, indent=2, ensure_ascii=False
     )
+    names = " | ".join(f'"{name}"' for name in themes)
     return (
         f"// {HEADER}\n\n"
+        f"/** The {BASE_THEME} theme (the base files). Colours follow the theme through `themes`. */\n"
         f"export const tokens = {body} as const;\n\n"
         "export type Tokens = typeof tokens;\n\n"
+        f"export type ThemeName = {names};\n\n"
+        "type Widen<T> = T extends string\n"
+        "  ? string\n"
+        "  : T extends number\n"
+        "    ? number\n"
+        "    : T extends readonly (infer U)[]\n"
+        "      ? readonly Widen<U>[]\n"
+        "      : { readonly [K in keyof T]: Widen<T[K]> };\n\n"
+        "/** A theme's tokens: the shape of `tokens` with any value. */\n"
+        "export type Theme = Widen<Tokens>;\n\n"
+        "/** Every theme's tokens (each a whole tree: a key missing or extra fails to compile). */\n"
+        "export const themes: Readonly<Record<ThemeName, Theme>> = {\n"
+        f"  {BASE_THEME}: tokens,\n"
+        f"{others}"
+        "};\n\n"
         "/** CSS custom property reference for each token, e.g. cssVar['color.bg.window']. */\n"
         f"export const cssVar = {css_map} as const;\n"
     )
 
 
-def emit_qml(tokens: list[Token]) -> str:
-    lines = [f"// {HEADER}", "pragma Singleton", "import QtQuick", "", "QtObject {"]
-    for t in tokens:
+def emit_qml(themes: dict[str, list[Token]]) -> str:
+    varying = themed(themes)
+    light = {t.dotted: t.value for t in themes["light"]}
+    lines = [
+        f"// {HEADER}",
+        "pragma Singleton",
+        "import QtQuick",
+        "",
+        "QtObject {",
+        '    // "dark" or "light": the themed colours follow it. By default the system\'s colour scheme',
+        "    // (Qt 6.5+ QStyleHints.colorScheme, 2 = Qt::ColorScheme::Dark), light when it says nothing;",
+        "    // a frontend sets it for the theme setting (UI-W7-31 ①)",
+        '    property string theme: Qt.styleHints.colorScheme === 2 ? "dark" : "light"',
+    ]
+    for t in themes[BASE_THEME]:
         name = camel(t.path)
         v = t.value
         match t.type:
+            case "color" if t.dotted in varying:
+                value = f'theme === "light" ? "{argb(light[t.dotted])}" : "{argb(v)}"'
+                lines.append(f"    readonly property color {name}: {value}")
             case "color":
                 lines.append(f'    readonly property color {name}: "{argb(v)}"')
             case "dimension" | "number":
@@ -336,16 +494,39 @@ def _xml(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def emit_xaml(tokens: list[Token]) -> str:
+def _xaml_themed(t: Token, indent: str) -> list[str]:
+    key = "Sk" + pascal(t.path)
+    if t.type == "color":
+        return [
+            f'{indent}<Color x:Key="{key}">{argb(t.value)}</Color>',
+            f'{indent}<SolidColorBrush x:Key="{key}Brush" Color="{argb(t.value)}"/>',
+        ]
+    return [f'{indent}<x:String x:Key="{key}Css">{_xml(css_value(t))}</x:String>']
+
+
+def emit_xaml(themes: dict[str, list[Token]]) -> str:
+    varying = themed(themes)
     lines = [
         f"<!-- {HEADER} -->",
         "<ResourceDictionary",
         '    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"',
         '    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">',
+        "    <ResourceDictionary.ThemeDictionaries>",
     ]
-    for t in tokens:
+    # WinUI picks "Light" or "Dark" by the requested theme and falls back to "Default" (high contrast
+    # among them): the dark theme is "Default", so every themed key resolves in any theme
+    for key, name in (("Default", "dark"), ("Light", "light")):
+        lines.append(f'        <ResourceDictionary x:Key="{key}">')
+        for t in themes[name]:
+            if t.dotted in varying:
+                lines += _xaml_themed(t, " " * 12)
+        lines.append("        </ResourceDictionary>")
+    lines.append("    </ResourceDictionary.ThemeDictionaries>")
+    for t in themes[BASE_THEME]:
         key = "Sk" + pascal(t.path)
         v = t.value
+        if t.dotted in varying:
+            continue
         match t.type:
             case "color":
                 lines.append(f'    <Color x:Key="{key}">{argb(v)}</Color>')
@@ -375,21 +556,36 @@ def _py_literal(t: Token) -> str:
     return repr(v)
 
 
-def emit_py(tokens: list[Token]) -> str:
-    entries = "\n".join(f"    {t.dotted!r}: {_py_literal(t)}," for t in tokens)
+def emit_py(themes: dict[str, list[Token]]) -> str:
+    varying = themed(themes)
+    entries = "\n".join(f"    {t.dotted!r}: {_py_literal(t)}," for t in themes[BASE_THEME])
+    others = "".join(
+        f"    {name!r}: {{\n        **TOKENS,\n"
+        + "".join(f"        {t.dotted!r}: {_py_literal(t)},\n" for t in theme if t.dotted in varying)
+        + "    },\n"
+        for name, theme in themes.items()
+        if name != BASE_THEME
+    )
     return (
         f'"""{HEADER}\n\n'
         "Flat dotted-path → value map for the Python frontends (Qt, WinUI3). Colors are\n"
         "'#RRGGBB[AA]' strings, dimensions are px, durations are ms, shadows are CSS strings.\n"
+        f"TOKENS is the {BASE_THEME} theme (the base tokens), THEMES holds every theme; a frontend passes\n"
+        "the theme on screen to token() (UI-W7-31 ①: light unless the system or the setting says dark).\n"
         '"""\n\n'
         "from __future__ import annotations\n\n"
         "from collections.abc import Mapping\n"
         "from typing import Final\n\n"
         "TokenValue = str | int | float | tuple[str, ...] | tuple[float, ...]\n\n"
-        f"TOKENS: Final[Mapping[str, TokenValue]] = {{\n{entries}\n}}\n\n\n"
-        "def token(path: str) -> TokenValue:\n"
-        '    """Value of the token at ``path`` (e.g. ``"color.bg.window"``)."""\n'
-        "    return TOKENS[path]\n"
+        f"TOKENS: Final[Mapping[str, TokenValue]] = {{\n{entries}\n}}\n\n"
+        "THEMES: Final[Mapping[str, Mapping[str, TokenValue]]] = {\n"
+        f"    {BASE_THEME!r}: TOKENS,\n"
+        f"{others}"
+        "}\n\n\n"
+        f'def token(path: str, theme: str = "{BASE_THEME}") -> TokenValue:\n'
+        '    """Value of the token at ``path`` (e.g. ``"color.bg.window"``) in ``theme`` (the base, dark\n'
+        '    theme when not given)."""\n'
+        "    return THEMES[theme][path]\n"
     )
 
 
@@ -431,16 +627,16 @@ def emit_icons_ts(meta: dict[str, Any], icons: dict[str, str]) -> str:
 
 
 def artefacts() -> dict[Path, str]:
-    tokens = load_tokens()
+    themes = load_themes()
     meta, icons = load_icons()
     files: dict[Path, str] = {
-        BUILD / "tokens.css": emit_css(tokens),
-        BUILD / "tokens.ts": emit_ts(tokens),
-        BUILD / "qml" / "SpaceKnife" / "Tokens" / "Tokens.qml": emit_qml(tokens),
+        BUILD / "tokens.css": emit_css(themes),
+        BUILD / "tokens.ts": emit_ts(themes),
+        BUILD / "qml" / "SpaceKnife" / "Tokens" / "Tokens.qml": emit_qml(themes),
         BUILD / "qml" / "SpaceKnife" / "Tokens" / "qmldir": QMLDIR,
-        BUILD / "xaml" / "Tokens.xaml": emit_xaml(tokens),
+        BUILD / "xaml" / "Tokens.xaml": emit_xaml(themes),
         BUILD / "icons.ts": emit_icons_ts(meta, icons),
-        PY_OUT: emit_py(tokens),
+        PY_OUT: emit_py(themes),
     }
     for name, inner in icons.items():
         files[BUILD / "icons" / f"{kebab((name,))}.svg"] = svg_document(meta, inner)

@@ -74,6 +74,18 @@ jobs:
           uv python install 3.12
           uv sync --locked --group native
 
+      # The Rust unit tests of packages/native (MFT parsing, the walkers' entry rules, the file id
+      # check of Windows' relative opens). They link the workspace's Python, whose library must also
+      # be found when the test binary runs (python3.dll on Windows, libpython elsewhere).
+      - name: Native unit tests
+        shell: bash
+        run: |
+          py=$(uv run python -c "import sys; print(sys.executable)")
+          base=$(uv run python -c "import sys; print(sys.base_prefix)")
+          if [ "$RUNNER_OS" = Windows ]; then base=$(cygpath -u "$base"); fi
+          export PYO3_PYTHON="$py" PATH="$base:$PATH" LD_LIBRARY_PATH="$base/lib" DYLD_LIBRARY_PATH="$base/lib"
+          cargo test --release --lib --manifest-path packages/native/Cargo.toml
+
       - name: Lint
         run: |
           uv run ruff check .

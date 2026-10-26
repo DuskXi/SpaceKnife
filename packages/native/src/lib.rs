@@ -5,6 +5,8 @@
 
 use pyo3::prelude::*;
 
+mod cpus;
+mod fold;
 #[cfg(feature = "hardscan")]
 mod hardscan;
 #[cfg(feature = "mft")]
@@ -17,5 +19,7 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     mft::register(m)?;
     #[cfg(feature = "hardscan")]
     hardscan::register(m)?;
+    fold::register(m)?;
+    cpus::register(m)?;
     Ok(())
 }

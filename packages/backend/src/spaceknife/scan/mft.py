@@ -22,11 +22,9 @@
 from __future__ import annotations
 
 import io
-import itertools
-import os
 import sys
 from collections import defaultdict
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,8 +34,9 @@ import numpy as np
 from loguru import logger
 
 from .. import native
-from ..i18n import Texts
-from ..store.nodes import Flag, Kind, NodeStore, encode_name
+from ..cpus import usable_cpus
+from ..i18n import Texts, tr
+from ..store.nodes import OFF_NARROW_LIMIT, Flag, Kind, NodeStore, encode_name
 from ..store.subtree import ranges_to_ids
 
 MftTable = dict[str, Any]
@@ -94,6 +93,36 @@ COLUMN_DTYPES: dict[str, np.dtype[Any]] = {
     "atime": np.dtype("<i8"),
     "nlink": np.dtype("<u2"),
 }
+
+
+class _Root(Protocol):
+    path: str
+    volume: Any  # VolumeInfo | None
+    whole_volume: bool
+
+
+def mft_unsupported(roots: Sequence[_Root]) -> str | None:
+    """Why an MFT fast scan cannot read ``roots`` (the scanner's roots), or None when it can: one
+    root that is a whole local NTFS volume on Windows, whose $MFT holds exactly that tree. The
+    reason is a sentence for the user. The app (ScanManager) and ``spaceknife scan --mft`` share it."""
+    if sys.platform != "win32":
+        return tr("MFT 快速扫描只在 Windows 上可用")
+    if len(roots) != 1:
+        return tr("一次只能读一个卷，这次有 {count} 个扫描位置", count=len(roots))
+    root = roots[0]
+    vol = root.volume
+    if vol is None:
+        return tr("认不出 {path} 所在的卷", path=root.path)
+    if vol.is_remote:
+        return tr("{path} 在网络位置上", path=root.path)
+    if str(vol.fs_type).upper() != "NTFS":
+        fs = vol.fs_type or tr("未知文件系统")
+        return tr("{mount} 是 {fs} 卷，只有 NTFS 卷有 $MFT", mount=vol.mount_point, fs=fs)
+    if not root.whole_volume:
+        return tr(
+            "只能扫整个卷（例如 {mount}），{path} 只是其中的一个文件夹", mount=vol.mount_point, path=root.path
+        )
+    return None
 
 
 def _check_sizes(record_size: int, cluster_size: int) -> None:
@@ -827,11 +856,12 @@ def scan_volume(
 ) -> tuple[MftTable, dict[str, int]]:
     """Read and parse the $MFT of a local NTFS volume: ``(table, geometry)``.
 
-    With the native module this streams (32 MiB windows, read and parse overlapping): memory is
-    the table plus a few windows. Without it the whole $MFT is read first (gigabytes on a large
-    system volume). ``duty`` in (0, 1]: the reader is busy that share of the time (I/O limit;
-    honoured by the native reader). ``progress(done, total)`` follows the reading (per window
-    natively, once at the end otherwise). Needs administrator rights; NotImplementedError off Windows.
+    With the native module this streams (8 MiB windows, several read at once, each parsed as it
+    arrives and joined in record order): memory is the table plus the windows in flight. Without
+    it the whole $MFT is read first (gigabytes on a large system volume). ``duty`` in (0, 1]: the
+    disk is busy with the scan that share of the time (I/O limit; honoured by the native reader).
+    ``progress(done, total)`` follows the reading (per window natively, once at the end otherwise).
+    Needs administrator rights; NotImplementedError off Windows.
     """
     mod = native.module()
     if mod is not None and native.has("scan_mft"):
@@ -884,26 +914,35 @@ def _load_u64(padded: np.ndarray, pos: np.ndarray) -> np.ndarray:
 
 
 class _ExtPart(NamedTuple):
-    short: np.ndarray  # indices of names with a 1–7 byte extension
+    short: np.ndarray  # positions (in the chunk) of names with a 1–7 byte extension
     keys: np.ndarray  # their uint64 keys: the bytes after the dot, the length in the top byte
-    uniq: np.ndarray  # distinct keys of this part
-    long: np.ndarray  # indices of names with an 8–64 byte extension
-    long_dot: np.ndarray
-    long_len: np.ndarray
+    long: np.ndarray  # positions of names with an 8–64 byte extension
+    long_keys: list[bytes]  # their length byte + extension bytes, in the same order
+
+
+# names per chunk of the extension pass: each chunk's temporaries (~80 B a name) go before the next
+EXT_CHUNK = 1 << 18
+# rows per chunk when a table column is copied into node order
+GATHER_CHUNK = 1 << 20
 
 
 def _ext_ids(
     blob: bytes,
     off: np.ndarray,
     length: np.ndarray,
+    rows: np.ndarray,
     ext_table: list[str],
     pool: ThreadPoolExecutor | None = None,
-    workers: int = 1,
+    chunk: int = EXT_CHUNK,
 ) -> np.ndarray:
-    """Extension ids with scan.worker's rule: the text after the last dot, lower-cased, when the
-    dot is not the first character and at most 16 characters follow it. Appends to ``ext_table``.
-    Fastest with names in blob order; splits the work over ``pool``."""
-    n = len(off)
+    """Extension ids of the names of ``rows`` (``off`` / ``length`` into ``blob``) with
+    scan.worker's rule: the text after the last dot, lower-cased, when the dot is not the first
+    character and at most 16 characters follow it. Appends to ``ext_table``.
+
+    Works through ``chunk`` names at a time (over ``pool``), so the temporaries stay bounded on a
+    volume of millions of names: a first pass collects the distinct extensions, which get their ids
+    in sorted order (short ones first), a second fills them in."""
+    n = len(rows)
     out = np.zeros(n, dtype=np.uint16)
     if not n:
         return out
@@ -911,14 +950,17 @@ def _ext_ids(
     raw[: len(blob)] = np.frombuffer(blob, dtype=np.uint8)
     last = len(raw) - 1
     dots = np.flatnonzero(raw[: len(blob)] == 0x2E)
+    spans = [(lo, min(lo + chunk, n)) for lo in range(0, n, chunk)]
 
     def scan(lo: int, hi: int) -> _ExtPart:
-        o = off[lo:hi]
-        end = o + length[lo:hi]
+        sel = rows[lo:hi]
+        o = off[sel].astype(np.int64)
+        end = o + length[sel]
         j = np.searchsorted(dots, end) - 1
         dot = dots[np.maximum(j, 0)] if dots.size else np.zeros(hi - lo, dtype=np.int64)
         elen = end - dot - 1
         ok = (j >= 0) & (dot > o) & (elen > 0) & (elen <= 64)
+        del o, end, j
         mid = np.flatnonzero(ok & (elen > 16))  # 17–64 bytes: count the characters
         if mid.size:
             lead = (raw[np.minimum((dot[mid] + 1)[:, None] + np.arange(64), last)] & 0xC0) != 0x80
@@ -928,72 +970,93 @@ def _ext_ids(
         mask = (np.uint64(1) << (el * np.uint64(8))) - np.uint64(1)
         keys = ((_load_u64(raw, dot[short]) >> np.uint64(8)) & mask) | (el << np.uint64(56))
         long = np.flatnonzero(ok & (elen > 7))
-        return _ExtPart(short + lo, keys, np.unique(keys), long + lo, dot[long], elen[long])
+        long_keys: list[bytes] = []
+        if long.size:  # longer ones: length byte + bytes as fixed-width strings
+            ld, ll = dot[long], elen[long]
+            width = int(ll.max())
+            mat = np.zeros((len(long), width + 1), dtype=np.uint8)
+            mat[:, 0] = ll
+            mat[:, 1:] = np.where(
+                np.arange(width) < ll[:, None], raw[np.minimum((ld + 1)[:, None] + np.arange(width), last)], 0
+            )
+            long_keys = [bytes(row[: 1 + row[0]]) for row in mat]
+        return _ExtPart(short, keys, long, long_keys)
 
-    bounds = np.linspace(0, n, max(1, min(workers, n // 100_000)) + 1).astype(np.int64).tolist()
-    spans = list(itertools.pairwise(bounds))
-    parts = list(pool.map(lambda s: scan(*s), spans)) if pool is not None else [scan(*s) for s in spans]
+    def run(fn: Callable[[int, int], Any]) -> list[Any]:
+        return list(pool.map(lambda s: fn(*s), spans)) if pool is not None else [fn(*s) for s in spans]
 
+    # pass 1: the distinct extensions (keys of the same length byte have the same length, so the
+    # byte order of the long keys is that of the zero-padded strings)
+    def distinct(lo: int, hi: int) -> tuple[np.ndarray, set[bytes]]:
+        p = scan(lo, hi)
+        return np.unique(p.keys), set(p.long_keys)
+
+    found = run(distinct)
+    uniq = np.unique(np.concatenate([u for u, _ in found]))
+    long_all = sorted(set().union(*(s for _, s in found)))
+    del found
+
+    raws = [int(k).to_bytes(8, "little")[: int(k) >> 56] for k in uniq.tolist()]
+    numbered = ext_numbers([*raws, *(k[1:] for k in long_all)], ext_table)
+    ids = np.array(numbered[: len(raws)], dtype=np.uint16)
+    long_ids = dict(zip(long_all, numbered[len(raws) :], strict=True))
+
+    # pass 2: fill them in, chunk by chunk
+    def fill(lo: int, hi: int) -> None:
+        p = scan(lo, hi)
+        part = out[lo:hi]
+        part[p.short] = ids[np.searchsorted(uniq, p.keys)]
+        if p.long.size:
+            part[p.long] = np.array([long_ids[k] for k in p.long_keys], dtype=np.uint16)
+
+    run(fill)
+    return out
+
+
+def ext_numbers(raws: Sequence[bytes], ext_table: list[str]) -> list[int]:
+    """Ids of raw extensions (UTF-8, surrogatepass), in order: lower-cased, a new one appended to
+    ``ext_table`` (at most 65535 entries; past that 0). The distinct extensions of a volume come
+    in a fixed order (short keys as integers, then long ones as bytes: :func:`_ext_ids`), so both
+    builds number them alike."""
     index = {e: i for i, e in enumerate(ext_table)}
-
-    def ext_id(text: bytes) -> int:
-        ext = text.decode("utf-8", "surrogatepass").lower()
+    out = []
+    for raw in raws:
+        ext = raw.decode("utf-8", "surrogatepass").lower()
         idx = index.get(ext)
         if idx is None:
             if len(ext_table) >= 65535:
-                return 0
+                out.append(0)
+                continue
             idx = index[ext] = len(ext_table)
             ext_table.append(ext)
-        return idx
-
-    uniq = np.unique(np.concatenate([p.uniq for p in parts]))
-    ids = np.array(
-        [ext_id(int(k).to_bytes(8, "little")[: int(k) >> 56]) for k in uniq.tolist()], dtype=np.uint16
-    )
-
-    def fill(p: _ExtPart) -> None:
-        out[p.short] = ids[np.searchsorted(uniq, p.keys)]
-
-    if pool is not None:
-        list(pool.map(fill, parts))
-    else:
-        for p in parts:
-            fill(p)
-    sel = np.concatenate([p.long for p in parts])
-    if sel.size:  # longer ones: length byte + bytes as fixed-width strings
-        dot = np.concatenate([p.long_dot for p in parts])
-        el = np.concatenate([p.long_len for p in parts])
-        width = int(el.max())
-        mat = np.zeros((len(sel), width + 1), dtype=np.uint8)
-        mat[:, 0] = el
-        mat[:, 1:] = np.where(
-            np.arange(width) < el[:, None], raw[np.minimum((dot + 1)[:, None] + np.arange(width), last)], 0
-        )
-        uniq_s, inv = np.unique(mat.view(f"S{width + 1}").reshape(-1), return_inverse=True)
-        padded = [bytes(k).ljust(width + 1, b"\0") for k in uniq_s.tolist()]
-        out[sel] = np.array([ext_id(p[1 : 1 + p[0]]) for p in padded], dtype=np.uint16)[inv.reshape(-1)]
+        out.append(idx)
     return out
 
 
 def _csr(pdir: np.ndarray, total: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Children of every row, in row order: (rows grouped by parent, group start, group size)."""
+    """Children of every row, in row order: (rows grouped by parent, group start, group size),
+    all int32."""
     keys = np.where(pdir >= 0, pdir, total)  # rows without a parent sort last and are cut off
-    counts = np.bincount(keys, minlength=total + 1)[:total].astype(np.int64)
-    order = _stable_argsort(keys, total)[: int(counts.sum())]
-    return order, np.cumsum(counts) - counts, counts
+    counts = np.bincount(keys, minlength=total + 1)[:total].astype(np.int32)
+    packed = _stable_argsort(keys, total)
+    del keys
+    order = packed[: int(counts.sum(dtype=np.int64))].astype(np.int32)
+    del packed
+    starts = (np.cumsum(counts, dtype=np.int64) - counts).astype(np.int32)
+    return order, starts, counts
 
 
 def _bfs(
     order: np.ndarray, starts: np.ndarray, counts: np.ndarray, container: np.ndarray, root: int
 ) -> tuple[list[np.ndarray], np.ndarray]:
     """Rows level by level from ``root`` and each folder's first child id (ids count from 1)."""
-    levels = [np.array([root], dtype=np.int64)]
-    child_start = np.zeros(len(counts), dtype=np.int64)
+    levels = [np.array([root], dtype=np.int32)]
+    child_start = np.zeros(len(counts), dtype=np.int32)
     next_id = 2
     frontier = levels[0]
     while frontier.size:
         cnt = counts[frontier]
-        child_start[frontier] = next_id + np.cumsum(cnt) - cnt
+        child_start[frontier] = next_id + np.cumsum(cnt, dtype=np.int64) - cnt
         kids = order[ranges_to_ids(starts[frontier], cnt)]
         if not kids.size:
             break
@@ -1039,6 +1102,73 @@ def table_to_store(
 ) -> NodeStore:
     """Build the node store of a whole volume from ``MftTable`` columns in one go.
 
+    The native build (``spaceknife_native.mft_build``, all steps in parallel in Rust) when it is
+    installed, else :func:`_table_to_store_numpy`; both give the same store, column for column
+    (node order included; tests compare them). The rules are the numpy build's, below.
+    """
+    opts = {"include_ads": include_ads, "count_links_each": count_links_each, "consume": consume}
+    mod = native.module()
+    if mod is not None and native.has("mft_build"):
+        return _table_to_store_native(mod, table, root_path, **opts)
+    return _table_to_store_numpy(table, root_path, volume_info, **opts)
+
+
+def _table_to_store_native(
+    mod: Any,
+    table: Mapping[str, Any],
+    root_path: str,
+    *,
+    include_ads: bool,
+    count_links_each: bool,
+    consume: bool,
+) -> NodeStore:
+    """:func:`table_to_store` through ``mft_build``: Python only numbers the distinct extensions
+    and wraps the finished columns (adopted by the store as they are, the ``\\0name`` image too).
+    With ``consume`` each table column goes as soon as the build is done with it (docs/memory.md §6)."""
+    work: dict[str, Any] = table if consume and isinstance(table, dict) else dict(table)
+    for key, dtype in COLUMN_DTYPES.items():  # the parser's and the helper's tables already match
+        col = work[key]
+        if not (isinstance(col, np.ndarray) and col.dtype == dtype and col.flags.c_contiguous):
+            work[key] = np.ascontiguousarray(col, dtype=dtype)
+    if not isinstance(work["names"], bytes | bytearray | memoryview | np.ndarray):
+        work["names"] = bytes(work["names"])
+    n = len(work["record"])
+    ext_table = [""]
+    built = mod.mft_build(
+        work,
+        encode_name(root_path),
+        FOLDERS["meta"].encode(),
+        FOLDERS["orphan"].encode(),
+        lambda raws: ext_numbers(raws, ext_table),
+        include_ads=include_ads,
+        count_links_each=count_links_each,
+        consume=consume,
+    )
+    if consume:
+        work.clear()
+        if work is not table:
+            table.clear()  # type: ignore[attr-defined]
+    if built["cycles"]:
+        logger.warning("MFT: {} parent cycles broken (corrupt directory entries)", built["cycles"])
+    orphans = int(built["orphans"])
+    store = NodeStore.from_columns(built["columns"], built["names"], ext_table, separated=True)
+    store.version += 1  # as the numpy build's reaggregate leaves it
+    del built
+    logger.debug("MFT: {:,} names -> {:,} nodes, {:,} orphans", n, len(store), orphans)
+    return store
+
+
+def _table_to_store_numpy(
+    table: Mapping[str, Any],
+    root_path: str,
+    volume_info: Mapping[str, int] | None = None,
+    *,
+    include_ads: bool = False,
+    count_links_each: bool = False,
+    consume: bool = False,
+) -> NodeStore:
+    """Build the node store of a whole volume from ``MftTable`` columns in one go (numpy).
+
     Record 5 becomes the root named ``root_path``; metafiles (records 0–15 and the $Extend tree)
     go under ``$NTFS 元数据``; names whose parent is missing, not a folder or part of a parent
     cycle go under ``$孤立文件`` (each pseudo folder only when non-empty). Sizes follow the hard
@@ -1048,13 +1178,16 @@ def table_to_store(
     ``$BadClus:$Bad`` never counts: it is as long as the volume and maps only the bad clusters,
     but carries no sparse flag, so its allocated size claims the whole volume.
     ``volume_info`` (``mft_volume_info``) is accepted for symmetry; nothing in it is needed.
-    ``consume``: the caller hands the table over — its columns are dropped as soon as they are
-    copied into node order (a C:-sized table is about a gigabyte: the build peak shrinks by it).
+
+    Memory (docs/memory.md §6): row indices are int32; each table column is copied in chunks
+    straight into its final node column, in the store's own dtype, and with ``consume`` (the
+    caller hands the table over) dropped right after, so no whole node-order copy of the table
+    ever exists next to it. About 80 B a row beyond the table at the peak (was ~310).
     """
     del volume_info
-    rec = np.asarray(table["record"]).astype(np.int64)
-    par = np.asarray(table["parent"]).astype(np.int64)
-    kind = np.asarray(table["kind"]).astype(np.uint8, copy=False)
+    rec = np.asarray(table["record"])
+    par = np.asarray(table["parent"])
+    kind = np.asarray(table["kind"])
     blob: bytes = table["names"]
     n = len(rec)
     if n and bool(np.all(rec[1:] >= rec[:-1])):
@@ -1069,15 +1202,18 @@ def table_to_store(
     nrec = max(int(rec.max()) + 1 if n else 0, ROOT_RECORD + 1)
     container = np.ones(total, dtype=bool)
     container[:n] = (kind == Kind.DIR) & ~dup
-    dir_row = np.full(nrec, -1, dtype=np.int64)
-    first_dirs = np.flatnonzero(container[:n])
+    dir_row = np.full(nrec, -1, dtype=np.int32)
+    first_dirs = np.flatnonzero(container[:n]).astype(np.int32)
     dir_row[rec[first_dirs]] = first_dirs
     dir_row[ROOT_RECORD] = root_row
 
-    pdir = np.full(total, -1, dtype=np.int64)
+    pdir = np.full(total, -1, dtype=np.int32)
     pd = pdir[:n]
     known = (par >= 0) & (par < nrec)
     pd[known] = dir_row[par[known]]
+    del known, par
+    if consume:  # the parents are in pdir now
+        del table["parent"]  # type: ignore[attr-defined]
     pd[pd < 0] = orphan_row
     loops = first_dirs[pd[first_dirs] == first_dirs]  # a folder that is its own parent
     pd[loops] = orphan_row
@@ -1085,6 +1221,7 @@ def table_to_store(
     pd[rec == ROOT_RECORD] = -2  # the root's own "." entry is the root node itself
     for row in (meta_row, orphan_row):  # pseudo folders only when they hold something
         pdir[row] = root_row if bool(np.any(pd == row)) else -1
+    del dir_row, first_dirs, loops
 
     # breadth-first ids: every folder's children get one contiguous id range
     order, starts, counts = _csr(pdir, total)
@@ -1097,59 +1234,51 @@ def table_to_store(
         logger.warning("MFT: {} parent cycles broken (corrupt directory entries)", len(breakers))
         pdir[breakers] = orphan_row
         pdir[orphan_row] = root_row
+        del seen, breakers
         order, starts, counts = _csr(pdir, total)
         levels, child_start = _bfs(order, starts, counts, container, root_row)
+    del order, starts
     rows = np.concatenate(levels)
     count = len(rows) + 1
     vpos = np.flatnonzero(rows >= n) + 1  # node ids of the root and the pseudo folders
     virt = rows[vpos - 1]
-    src = np.minimum(rows, max(n - 1, 0))  # pseudo nodes read row 0 for now, patched below
-    node_of_row = np.zeros(total, dtype=np.int64)
-    node_of_row[rows] = np.arange(1, count)
-    parent_node = node_of_row[np.maximum(pdir, 0)]
-    parent_node[pdir < 0] = 0
+    src = np.minimum(rows, max(n - 1, 0)).astype(np.int32)  # pseudo nodes read row 0 for now, patched below
+    node_of_row = np.zeros(total, dtype=np.int32)
+    node_of_row[rows] = np.arange(1, count, dtype=np.int32)
 
-    def gather(values: Any, index: np.ndarray) -> np.ndarray:
-        arr = np.asarray(values)
-        return np.take(arr, index) if len(arr) else np.zeros(len(index), dtype=arr.dtype)
+    # the tree's columns, in the store's dtypes (adopted by NodeStore.from_columns as they are)
+    cols: dict[str, np.ndarray] = {}
+    parent_of_row = node_of_row[np.maximum(pdir, 0)]
+    parent_of_row[pdir < 0] = 0
+    cols["parent"] = parent = np.empty(count, dtype=np.int32)
+    parent[0] = -1
+    parent[1:] = parent_of_row[rows]
+    del parent_of_row
+    cols["depth"] = depth = np.empty(count, dtype=np.uint16)
+    depth[0] = 0
+    depth[1:] = np.repeat(np.arange(1, len(levels) + 1, dtype=np.uint16), [len(lv) for lv in levels])
+    is_cont = container[rows]
+    cols["child_start"] = first = np.empty(count, dtype=np.int32)
+    cols["child_count"] = many = np.empty(count, dtype=np.int32)
+    first[0] = many[0] = 1
+    first[1:] = np.where(is_cont, child_start[rows], 0)
+    many[1:] = np.where(is_cont, counts[rows], 0)
+    orphans = int(counts[orphan_row]) if pdir[orphan_row] >= 0 else 0
+    del is_cont, child_start, container
 
-    # node-order copies of the columns: independent gathers that release the GIL, in parallel
-    by_row: dict[str, Any] = {
-        key: table[key]
-        for key in (
-            "kind",
-            "flags",
-            "size",
-            "alloc",
-            "mtime",
-            "ctime",
-            "atime",
-            "nlink",
-            "name_off",
-            "name_len",
-        )
-    }
-    by_row |= {"ino": rec, "dup": dup}
-    if include_ads:
-        by_row |= {"ads_size": table["ads_size"], "ads_alloc": table["ads_alloc"]}
-    by_tree = {"parent": parent_node, "container": container, "child_start": child_start, "counts": counts}
-    ext_table = [""]
+    # what needs the table's columns before they go: extensions, $BadClus, the root's times,
+    # the alternate streams of the metafiles
+    workers = min(8, usable_cpus())
     files = np.flatnonzero(kind == Kind.FILE)
-    workers = min(8, os.cpu_count() or 1)
-    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mft-store") as pool:
-        jobs = {key: pool.submit(gather, values, src) for key, values in by_row.items()}
-        jobs |= {key: pool.submit(gather, values, rows) for key, values in by_tree.items()}
-        noff = np.asarray(table["name_off"]).astype(np.int64)[files]
-        nlen = np.asarray(table["name_len"]).astype(np.int64)[files]
-        ext_rows = np.zeros(n, dtype=np.uint16)
-        ext_rows[files] = _ext_ids(blob, noff, nlen, ext_table, pool, workers)
-        got = {key: job.result() for key, job in jobs.items()}
-        got["ext"] = gather(ext_rows, src)
-    del ext_rows, noff, nlen, files, jobs
+    ext_table = [""]
+    with ThreadPoolExecutor(max_workers=min(4, workers), thread_name_prefix="mft-ext") as pool:
+        ext_files = _ext_ids(
+            blob, np.asarray(table["name_off"]), np.asarray(table["name_len"]), files, ext_table, pool
+        )
+    ext_rows = np.zeros(n, dtype=np.uint16)
+    ext_rows[files] = ext_files
+    del ext_files, files
     bad_nodes = node_of_row[np.flatnonzero(rec == BADCLUS_RECORD)]
-    if include_ads:
-        got["ads_size"][bad_nodes - 1] = 0
-        got["ads_alloc"][bad_nodes - 1] = 0
     root_rows = np.flatnonzero(rec == ROOT_RECORD)
     root_times = (
         {t: int(np.asarray(table[t])[root_rows[0]]) for t in ("mtime", "ctime", "atime")}
@@ -1166,51 +1295,83 @@ def table_to_store(
         meta_ads = (node_of_row[meta_rows], np.asarray(table["ads_alloc"])[meta_rows])
         meta_ads[1][rec[meta_rows] == BADCLUS_RECORD] = 0
         del in_meta, meta_rows
-    if consume:  # everything needed is in node order now: let the table go
-        for key in [k for k in table if k != "names"]:
-            del table[key]  # type: ignore[attr-defined]
-    del by_row, by_tree, src, dup, par
+    del levels, node_of_row, pdir, counts, rows
 
-    def node_col(key: str, dtype: Any, fill: int = 0) -> np.ndarray:
+    def node_col(values: Any, dtype: Any, fill: int = 0, clip: bool = False) -> np.ndarray:
+        """A column in node order and its final dtype, copied in chunks (bounded temporaries)."""
+        arr = np.asarray(values)
         out = np.empty(count, dtype=dtype)
         out[0] = fill
-        out[1:] = got.pop(key)  # the node-order copy is not needed again: free it now
+        body = out[1:]
+        for i in range(0, count - 1, GATHER_CHUNK):
+            idx = src[i : i + GATHER_CHUNK]
+            part = arr[idx] if len(arr) else np.zeros(len(idx), dtype=arr.dtype)
+            body[i : i + len(part)] = np.clip(part, 0, _U32_MAX) if clip else part
         out[vpos] = fill
         return out
 
-    cols: dict[str, np.ndarray] = {}
-    k = node_col("kind", np.uint8, Kind.DIR)
-    cols["kind"] = k
-    cols["parent"] = np.concatenate(([-1], got.pop("parent")))
-    cols["depth"] = np.concatenate([[0], *(np.full(len(lv), i + 1) for i, lv in enumerate(levels))])
-    flags = node_col("flags", np.uint32)
+    def from_table(key: str, dtype: Any, fill: int = 0, clip: bool = False) -> np.ndarray:
+        out = node_col(table[key], dtype, fill, clip)
+        if consume:  # in node order now: the table's column goes at once
+            del table[key]  # type: ignore[attr-defined]
+        return out
+
+    plan: list[tuple[str, Any, int, bool]] = [
+        ("kind", np.uint8, Kind.DIR, False),
+        ("flags", np.uint32, 0, False),
+        ("size", np.int64, 0, False),
+        ("alloc", np.int64, 0, False),
+        ("mtime", np.uint32, 0, True),
+        ("ctime", np.uint32, 0, True),
+        ("atime", np.uint32, 0, True),
+        ("nlink", np.uint16, 1, False),
+        ("name_off", np.uint32 if len(blob) + 64 < OFF_NARROW_LIMIT else np.int64, 0, False),
+        ("name_len", np.uint16, 0, False),
+    ]
+    if include_ads:
+        plan += [("ads_size", np.int64, 0, False), ("ads_alloc", np.int64, 0, False)]
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="mft-store") as pool:
+        jobs = {key: pool.submit(from_table, key, dt, fill, clip) for key, dt, fill, clip in plan}
+        jobs["ino"] = pool.submit(node_col, rec, np.uint64)
+        jobs["dup"] = pool.submit(node_col, dup, bool)
+        jobs["ext"] = pool.submit(node_col, ext_rows, np.uint16)
+        got = {key: job.result() for key, job in jobs.items()}
+    if consume:  # what is left of the table besides the names
+        for key in [k for k in table if k != "names"]:
+            del table[key]  # type: ignore[attr-defined]
+    del jobs, rec, kind, dup, ext_rows
+
+    k = cols["kind"] = got.pop("kind")
+    flags = cols["flags"] = got.pop("flags")
+    dup_nodes = got.pop("dup")
     if not count_links_each:  # the 「每个链接都计」 setting: every name of a file counts
-        flags[node_col("dup", bool)] |= np.uint32(Flag.HARDLINK_DUP)
+        flags[dup_nodes] |= np.uint32(Flag.HARDLINK_DUP)
+    del dup_nodes
     flags[vpos] = np.where(virt == root_row, 0, np.uint32(Flag.VIRTUAL))
     flags[0] = Flag.VIRTUAL
-    cols["flags"] = flags
 
-    size = node_col("size", np.int64)
+    size, alloc = got.pop("size"), got.pop("alloc")
     size[k == Kind.DIR] = 0
-    alloc = node_col("alloc", np.int64)
     alloc[k != Kind.FILE] = 0
     if include_ads:
-        size += node_col("ads_size", np.int64)
-        alloc += node_col("ads_alloc", np.int64)
+        ads_size, ads_alloc = got.pop("ads_size"), got.pop("ads_alloc")
+        ads_size[bad_nodes] = 0
+        ads_alloc[bad_nodes] = 0
+        size += ads_size
+        alloc += ads_alloc
+        del ads_size, ads_alloc
     elif meta_ads is not None:
         alloc[meta_ads[0]] += meta_ads[1]
     cols["size"], cols["alloc"] = size, alloc
 
     for t in ("mtime", "ctime", "atime"):
-        v = node_col(t, np.int64)
+        v = cols[t] = got.pop(t)
         if t in root_times:
-            v[1] = root_times[t]
-        cols[t] = np.clip(v, 0, _U32_MAX).astype(np.uint32)
-        del v
-    cols["ino"] = node_col("ino", np.uint64)
+            v[1] = min(max(root_times[t], 0), _U32_MAX)
+    cols["ino"] = got.pop("ino")
     cols["ino"][1] = ROOT_RECORD
-    cols["nlink"] = node_col("nlink", np.uint16, 1)
-    cols["ext"] = node_col("ext", np.uint16)
+    cols["nlink"] = got.pop("nlink")
+    cols["ext"] = got.pop("ext")
 
     # names: the table's blob, then the root and the pseudo folders
     extra = {
@@ -1218,22 +1379,14 @@ def table_to_store(
         meta_row: FOLDERS["meta"].encode(),
         orphan_row: FOLDERS["orphan"].encode(),
     }
-    name_off = node_col("name_off", np.int64)
-    name_len = node_col("name_len", np.int64)
+    name_off, name_len = got.pop("name_off"), got.pop("name_len")
     tail = bytearray()
     for pos, row in zip(vpos.tolist(), virt.tolist(), strict=True):
         name_off[pos] = len(blob) + len(tail)
         name_len[pos] = len(extra[row])
         tail += extra[row]
-    cols["name_off"], cols["name_len"] = name_off, name_len.astype(np.uint16)
-
-    is_cont = got.pop("container")
-    cols["child_start"] = np.concatenate(([1], np.where(is_cont, got.pop("child_start"), 0)))
-    cols["child_count"] = np.concatenate(([1], np.where(is_cont, got.pop("counts"), 0)))
-    orphans = int(counts[orphan_row]) if pdir[orphan_row] >= 0 else 0
+    cols["name_off"], cols["name_len"] = name_off, name_len
     got.clear()
-    del is_cont, rec, kind, container, dir_row, pdir, order, starts, counts, levels, child_start
-    del rows, node_of_row, parent_node
 
     names = bytes(blob) + bytes(tail)
     if consume:

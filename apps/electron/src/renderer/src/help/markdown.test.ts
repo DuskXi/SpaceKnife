@@ -21,6 +21,18 @@ describe("markdown subset", () => {
     expect(outline("## 过滤（进阶）\n\n```\n## not a heading\n```\n")).toEqual([{ depth: 2, id: "过滤进阶", text: "过滤（进阶）" }]);
   });
 
+  it("shows the pictures the pages name with their size, anything else as its description", () => {
+    // the same file from the English and the Chinese page's folder
+    const en = html("![The treemap](../../../assets/visualizations/treemap-en.webp)", "en", "visualizations");
+    expect(en).toMatch(/^<p><img class="help-picture" src="[^"]*treemap-en[^"]*\.webp" alt="The treemap" width="1800" height="917" loading="lazy" decoding="async"><\/p>\n$/);
+    const zh = html("![树图](../../../../assets/visualizations/treemap.webp)", "zh", "visualizations");
+    expect(zh).toMatch(/<img class="help-picture" src="[^"]*treemap[^"]*\.webp" alt="树图" width="1800" height="917"/);
+    // a path the Chinese page would need, written in an English one, is outside site/src
+    expect(html("![wrong folder](../../../../assets/visualizations/treemap.webp)")).toBe('<p><span class="help-image">wrong folder</span></p>\n');
+    expect(html("![on the web](https://example.com/a.png)")).toBe('<p><span class="help-image">on the web</span></p>\n');
+    expect(html('![a "quote" & <tag>](nothing.png)')).toBe('<p><span class="help-image">a &quot;quote&quot; &amp; &lt;tag&gt;</span></p>\n');
+  });
+
   it("turns <kbd> into key caps and keeps every other tag as text", () => {
     expect(html("Press <kbd>Ctrl</kbd>+<kbd>K</kbd>.")).toBe('<p>Press <kbd class="kbd">Ctrl</kbd>+<kbd class="kbd">K</kbd>.</p>\n');
     expect(html("<kbd>Shift</kbd> then <b>bold</b>")).toBe('<p><kbd class="kbd">Shift</kbd> then &lt;b&gt;bold&lt;/b&gt;</p>\n');

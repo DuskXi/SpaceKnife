@@ -32,6 +32,7 @@ Linux 上设置了 `XDG_DATA_HOME`、`XDG_CONFIG_HOME`、`XDG_CACHE_HOME` 时，
 | `update.json` | 数据 | 上一次更新检查、最近的版本和它们的发布说明，以及关掉过更新卡片的版本 |
 | `updates/` | 数据 | 下载好的新版本（直到它运行起来）；便携版替换时，还有新旧两份程序文件。下次启动时清空（[不留残余](../updates-privacy/#不留残余)） |
 | `palette_recent.json` | 数据 | 命令面板最近的路径跳转和过滤 |
+| `volume_summaries.json` | 数据 | 「本机磁盘」保留的每个卷上一次完整扫描的结果（文件类别、最大的文件夹） |
 | `settings.json` | 配置 | 你的设置 |
 | `classes.json` | 配置 | 你的文件类别 |
 | `columns/` | 缓存 | 超大扫描时移出内存的扫描数据 |
@@ -60,7 +61,7 @@ SpaceKnife 自己的这些文件夹和它的安装目录都是受保护的：不
 
 ### 缓存
 
-扫描数据超过「设置 › 高级 › 扫描数据内存上限」（默认是物理内存的 25%）后，新的部分存进缓存里的内存映射文件，不占私有内存。这些文件不再需要时会自己删除，崩溃后残留的会在下次启动时清掉。「清除缓存…」删除没有在用的部分。
+打开「设置 › 高级 › 大扫描存进映射文件」（默认关）时约 200 万项以上的扫描，以及扫描数据超过「设置 › 高级 › 扫描数据内存上限」（默认是物理内存的 25%）之后的部分，存进缓存里的内存映射文件，不占私有内存。这些文件不再需要时会自己删除，崩溃后残留的会在下次启动时清掉。「清除缓存…」删除没有在用的部分。
 
 ## SPACEKNIFE_HOME
 
@@ -104,13 +105,14 @@ SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Conten
 
 ## 便携模式
 
-便携包（`SpaceKnife-<版本>-win-x64-portable.zip` 和 `SpaceKnife-<版本>-linux-x64-portable.tar.gz`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 在 Windows 和 Linux 上每次启动都会找这个文件夹：可执行文件旁边有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和界面配置都存在里面，不写进你的用户目录。
+便携包（`SpaceKnife-<版本>-win-<架构>-portable.zip`、`SpaceKnife-<版本>-linux-<架构>-portable.tar.gz` 和 `SpaceKnife-<版本>-mac-<架构>-portable.zip`）在程序旁边带一个空的 `data` 文件夹，里面只有一份简短说明。SpaceKnife 每次启动都会找这个文件夹：可执行文件旁边（macOS 上是 `SpaceKnife.app` 旁边）有 `data` 文件夹，就把它当作 `SPACEKNIFE_HOME`。快照、设置、日志、缓存和界面配置都存在里面，不写进你的用户目录。
 
 - 手动设置的 `SPACEKNIFE_HOME` 优先于 `data` 文件夹。
 - 删掉或重命名 `data`，这份程序就改用正常的用户目录；放回去又是便携的。
 - 解压到自己能写入的位置：比如 Program Files 下面就不行。
 - 软件内的更新知道这是便携版：它下载便携包，「无缝更新」替换程序文件、留下 `data`；「自己替换」把压缩包显示出来，由你解压覆盖（见[升级](../install/#升级)）。
-- macOS 应用和 AppImage 没有便携模式。macOS 上改用 `SPACEKNIFE_HOME`。
+- macOS 上，解压后直接打开的应用可能被系统放到一个隐藏的只读副本里运行（App 转移）。SpaceKnife 会找到原来的文件夹，数据照样存在那里的 `data` 里。
+- 从 dmg 装进「应用程序」的应用（旁边没有 `data` 文件夹）和 AppImage 没有便携模式。
 
 :::caution[命令行不认便携模式]
 只有应用本身会找 `data` 文件夹，便携版里的命令行不会。要在终端里操作便携版的快照，把 `SPACEKNIFE_HOME` 指向它的 `data` 文件夹，见下面的例子。

@@ -8,7 +8,7 @@ use std::sync::Mutex;
 use super::record::{AT_DATA, AT_END, FILE_SIG, REF_MASK, fixup, u16_at, u32_at, u64_at};
 
 const AT_ATTRIBUTE_LIST: u32 = 0x20;
-const PIECE: usize = 16 << 20; // bytes per read request
+pub const PIECE: usize = 16 << 20; // bytes per read request
 const MAX_CLUSTER: usize = 2 << 20; // NTFS allows up to 2 MiB clusters
 const MAX_LIST: u64 = 64 << 20; // an $ATTRIBUTE_LIST larger than this is corrupt
 const ALIGN: usize = 4096; // buffer alignment for unbuffered (sector-aligned) I/O
@@ -179,7 +179,7 @@ impl Aligned {
     }
 }
 
-fn round_up(v: usize, to: usize) -> usize {
+pub fn round_up(v: usize, to: usize) -> usize {
     v.div_ceil(to) * to
 }
 
@@ -417,9 +417,9 @@ pub fn read_into<R: ReadAt>(
     Ok(())
 }
 
-/// Read bytes `[start, start + out.len())` of the $MFT `$DATA` into `out` (a window of the
-/// streaming scan); bytes past the valid data length read as zero. Same request size and readers
-/// as [`read_into`].
+/// Read bytes `[start, start + out.len())` of the $MFT `$DATA` into `out` (one record fetched
+/// again after the streaming scan); bytes past the valid data length read as zero. Same pieces
+/// and readers as [`read_into`].
 pub fn read_range<R: ReadAt>(
     devs: &[R],
     geo: &Geometry,
@@ -427,38 +427,80 @@ pub fn read_range<R: ReadAt>(
     start: u64,
     out: &mut [u8],
 ) -> io::Result<()> {
-    let cluster = geo.cluster as u64;
-    let end = start + out.len() as u64;
-    let valid_end = (round_up(lay.valid_size as usize, geo.cluster) as u64).min(end);
-    // (destination, volume offset, skip): clusters are read whole, `skip` bytes are dropped
-    let mut pieces: Vec<(&mut [u8], Option<u64>, usize)> = Vec::new();
+    let pieces = plan_window(geo, lay, start, out.len(), PIECE);
+    let mut parts: Vec<(&mut [u8], Option<u64>, usize)> = Vec::with_capacity(pieces.len());
     let mut rest: &mut [u8] = out;
-    let mut pos = start; // logical position of rest[0]
+    for p in &pieces {
+        let (dst, tail) = std::mem::take(&mut rest).split_at_mut(p.len); // pieces are back to back
+        rest = tail;
+        parts.push((dst, p.at, p.skip));
+    }
+    read_pieces(devs, geo, parts)?;
+    zero_tail(lay, start, out, &pieces);
+    Ok(())
+}
+
+/// One read of a window of the $MFT: `len` bytes for window offset `dst`, from volume offset
+/// `at` (None: a sparse run, zeros); clusters are read whole, so the first `skip` bytes read are
+/// not part of the window (a window that starts inside a cluster).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Piece {
+    pub dst: usize,
+    pub len: usize,
+    pub at: Option<u64>,
+    pub skip: usize,
+}
+
+/// The reads that fill bytes `[start, start + len)` of the $MFT `$DATA` (the pieces of
+/// [`read_range`]): at most `max_piece` bytes each (counting `skip`), in window order. Bytes the
+/// pieces do not cover (past the valid data length or the runs) and the stale rest of the last
+/// valid cluster are what [`zero_tail`] clears.
+pub fn plan_window(
+    geo: &Geometry,
+    lay: &Layout,
+    start: u64,
+    len: usize,
+    max_piece: usize,
+) -> Vec<Piece> {
+    let cluster = geo.cluster as u64;
+    let end = start + len as u64;
+    let valid_end = (round_up(lay.valid_size as usize, geo.cluster) as u64).min(end);
+    let mut pieces = Vec::new();
+    let mut pos = start;
     for r in &lay.runs {
-        let (lo, hi) = (r.vcn * cluster, (r.vcn + r.len) * cluster);
+        let hi = (r.vcn + r.len) * cluster;
         if hi <= pos || pos >= valid_end {
             continue;
         }
         while pos < hi && pos < valid_end {
             let first_cluster = pos / cluster;
             let skip = (pos - first_cluster * cluster) as usize;
-            let take = ((hi.min(valid_end) - pos) as usize).min(PIECE - skip).min(rest.len());
-            let (dst, tail) = std::mem::take(&mut rest).split_at_mut(take);
-            rest = tail;
-            let at = r.lcn.map(|l| (l + first_cluster - r.vcn) * cluster);
-            pieces.push((dst, at, skip));
+            let take = ((hi.min(valid_end) - pos) as usize)
+                .min(max_piece.saturating_sub(skip).max(geo.cluster))
+                .min((end - pos) as usize);
+            pieces.push(Piece {
+                dst: (pos - start) as usize,
+                len: take,
+                at: r.lcn.map(|l| (l + first_cluster - r.vcn) * cluster),
+                skip,
+            });
             pos += take as u64;
         }
-        let _ = lo;
     }
-    rest.fill(0); // past the valid data length (or the runs): zero
-    read_pieces(devs, geo, pieces)?;
+    pieces
+}
+
+/// After a window's pieces are in: zeros where no piece wrote (past the valid data length or the
+/// runs; reads overshoot to whole sectors there) and over the stale rest of the last valid cluster.
+pub fn zero_tail(lay: &Layout, start: u64, window: &mut [u8], pieces: &[Piece]) {
+    let covered = pieces.last().map_or(0, |p| p.dst + p.len);
+    let len = window.len();
+    window[covered.min(len)..].fill(0);
+    let end = start + window.len() as u64;
     if end > lay.valid_size {
-        // whole clusters were read: the rest of the last valid cluster is stale
-        let from = (lay.valid_size.saturating_sub(start) as usize).min(out.len());
-        out[from..].fill(0);
+        let from = (lay.valid_size.saturating_sub(start) as usize).min(window.len());
+        window[from..].fill(0);
     }
-    Ok(())
 }
 
 /// Read `(destination, volume offset, skip)` pieces with one thread per reader.
@@ -472,7 +514,7 @@ fn read_pieces<R: ReadAt>(
     std::thread::scope(|s| {
         for dev in devs {
             s.spawn(|| {
-                let mut bounce = Aligned::new(PIECE);
+                let mut bounce: Option<Aligned> = None; // as large as the largest piece needs
                 loop {
                     let Some((dst, at, skip)) = queue.lock().unwrap().next() else {
                         break;
@@ -485,7 +527,10 @@ fn read_pieces<R: ReadAt>(
                         continue;
                     };
                     let want = round_up(skip + dst.len(), geo.sector);
-                    let buf = bounce.get(want);
+                    if bounce.as_ref().is_none_or(|b| b.len < want) {
+                        bounce = Some(Aligned::new(want));
+                    }
+                    let buf = bounce.as_mut().unwrap().get(want);
                     if let Err(e) = dev.read_exact_at(buf, at) {
                         failure.lock().unwrap().get_or_insert(e);
                         break;

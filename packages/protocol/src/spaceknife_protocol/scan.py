@@ -328,6 +328,20 @@ class FolderClassInfo(Payload):
     fallback: bool = Field(description="Only files whose extension is in no class take it")
 
 
+SummaryPart = Literal["contents", "classes", "top_files", "folder_class", "tags", "volume", "parent"]
+
+
+class SummaryGap(Payload):
+    """A part of a node's summary the backend could not work out; the rest is still given."""
+
+    part: SummaryPart = Field(
+        description="contents: largest files, class totals and newest change (left empty); classes: the "
+        "folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, "
+        "parent: that field (left empty)"
+    )
+    reason: str = Field(description="Why, in the interface language")
+
+
 class TreeSummaryResult(Payload):
     """Everything the details panel shows for one node (UI-MAIN-35…43, G11)."""
 
@@ -347,6 +361,9 @@ class TreeSummaryResult(Payload):
     )
     folder_class: FolderClassInfo | None = Field(
         default=None, description="The folder class the node (or a file's folder) takes, if any"
+    )
+    gaps: list[SummaryGap] = Field(
+        default_factory=list, description="Parts that could not be worked out this time; empty when complete"
     )
 
 

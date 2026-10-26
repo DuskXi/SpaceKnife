@@ -9,6 +9,7 @@ import { setting, useApp } from "@/state/store";
 import { fillOf, labelColors } from "@/treemap/paint";
 import { Flag, Kind } from "@/visual/frame";
 import { pointerBox } from "@/visual/Host";
+import { sameTarget } from "@/visual/hover";
 import { rowTitle } from "@/visual/rowTitle";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
@@ -22,9 +23,6 @@ const DELAY = 300;
 function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.ReactNode[] {
   return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
 }
-
-/** The same target: the card stays (and only moves when it follows the pointer). */
-export const sameTarget = (a: HoverInfo | null, b: HoverInfo | null) => !!a && !!b && a.viewId === b.viewId && a.frame === b.frame && a.target === b.target;
 
 /** What a card keeps clear of: the row's box, or a small box around the pointer. */
 export const cardAvoid = (h: HoverInfo): Box => (h.placement === "pointer" ? pointerBox(h.pointer) : h.avoid);
@@ -74,16 +72,19 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
-  // the node's details, once per target (not per pointer move)
-  const frame = shown?.frame ?? null;
-  const target = shown?.target ?? null;
+  // the node's details, once per node (not per pointer move); a new picture asks again (its numbers
+  // may have changed) and the card keeps what it shows until the answer comes
+  const facts0 = shown ? hoverFacts(shown.frame, shown.target, null) : null;
+  const detailNode = facts0 && facts0.kind < Kind.SMALL ? facts0.node : null;
+  const seq = shown?.frame.info.seq ?? 0;
   useEffect(() => {
-    setInfo(null);
-    if (!frame || target === null || !scanId) return;
-    const { kind, node } = hoverFacts(frame, target, null);
-    if (kind >= Kind.SMALL) return;
+    if (detailNode === null || !scanId) {
+      setInfo(null);
+      return;
+    }
+    setInfo((cur) => (cur && cur.node.id === detailNode ? cur : null));
     let alive = true;
-    void call("tree.node", { scan_id: scanId, node })
+    void call("tree.node", { scan_id: scanId, node: detailNode })
       .then(async (r) => {
         if (!alive) return;
         setInfo(r);
@@ -96,7 +97,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     return () => {
       alive = false;
     };
-  }, [frame, target, scanId]);
+  }, [detailNode, scanId, seq]);
 
   // right of the block, top-aligned; else left; else below / above (UI-MAIN-29)
   useLayoutEffect(() => {

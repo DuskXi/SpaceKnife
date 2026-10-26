@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from spaceknife.filter.engine import FilterContext
+from spaceknife.layout.basis import Basis, LazySizes
 from spaceknife.server import Server
 from spaceknife_client.connection import Connection, RemoteError
 from spaceknife_client.views import ViewClient
@@ -181,8 +182,13 @@ async def test_nodes_found_before_they_are_sized(
     assert node is not None
     shared = server.views.shared(scan_id)
     assert shared is not None
-    sizes = shared.layout.sizes()[: node.id]  # taken while the scan had not reached "sub" yet
-    monkeypatch.setattr(shared.layout, "sizes", lambda: sizes)
+    made = LazySizes.__init__
+
+    def taken_earlier(self: LazySizes, basis: Basis) -> None:
+        made(self, basis)
+        self.n = node.id  # taken while the scan had not reached "sub" yet
+
+    monkeypatch.setattr(LazySizes, "__init__", taken_earlier)
     ctx = pp.PaletteContext(tab="scan", scan_id=scan_id)
     res = await client.call(PALETTE_QUERY, pp.PaletteQueryParams(text="", context=ctx))
     jump = res.recent[0]

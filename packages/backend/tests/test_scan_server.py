@@ -53,6 +53,15 @@ async def wait_done(client: Connection, scan_id: str) -> p.ScanStatus:
     return await asyncio.wait_for(done, timeout=60)
 
 
+async def finished(server: Server, scan_id: str) -> None:
+    """Until the scan's own task is over: after the status that says it is done and names its
+    snapshot, it still prunes old snapshots, keeps the volume's summary and indexes the names, and
+    it counts as running (``ScanHandle.running``) until then."""
+    task = server.scans.get(scan_id).task
+    if task is not None:
+        await asyncio.wait_for(asyncio.shield(task), timeout=60)
+
+
 @pytest.mark.parametrize("workers", [0, 2])
 async def test_scan_over_the_protocol(tmp_path: Path, client: Connection, workers: int) -> None:
     facts = build_tree(tmp_path / "root")

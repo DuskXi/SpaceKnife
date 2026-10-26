@@ -2,18 +2,16 @@
 // treemap/gl.ts's rounded-rectangle program, with their labels and markers; and the overlay the
 // pointer changes (halo, hover inset), the selection on top. Pure: no GL, no DOM.
 
-import { tokens } from "@design/tokens";
-
+import { palette } from "@/lib/theme";
 import { fillOf, labelColors, type Painted, Pattern, type RGBA, rgba, STRIDE, type TagItem, type TextItem } from "@/treemap/paint";
 import type { PreparedText } from "@/treemap/text";
 
-import { branchFill, CENTER, HALO_OVERLAY, ringFill } from "../colors";
+import { branchFill, center, haloOverlay, ringFill } from "../colors";
 import { DStat, Flag, Kind, Label } from "../frame";
 import { rowTitle } from "../rowTitle";
 import { type DrawPass, HIT_ROOT, type Hit, type PaintSettings, type RectFrame, type VisualFrame } from "../types";
 import { flameGeometry, flameOf, rootBar } from "./geometry";
 
-const T = tokens.treemap;
 // as treemap/paint.ts
 const FONT_UI = '"Geist", "Geist Variable", "Noto Sans SC", "Noto Sans SC Variable", system-ui, sans-serif';
 const FONT_MONO = '"Geist Mono", "Geist Mono Variable", ui-monospace, "Cascadia Mono", monospace';
@@ -110,26 +108,27 @@ interface Bar {
 
 /** A row's bar: solid and rounded, dotted for aggregates, striped for free / unknown space and folders waiting for the scan. */
 function barOf(f: RectFrame, i: number, s: PaintSettings): Bar {
+  const T = palette().treemap;
   const dpr = f.info.dpr;
   const kind = f.kind[i]!;
   const dim = (f.flags[i]! & Flag.DIM) !== 0;
   const radius = T.geometry.fileRadius * dpr;
   if (kind === Kind.FREE || kind === Kind.UNKNOWN || kind === Kind.PENDING) {
-    const P = kind === Kind.FREE ? T.free : kind === Kind.UNKNOWN ? T.unknown : T.pending;
+    const S = kind === Kind.FREE ? T.free : kind === Kind.UNKNOWN ? T.unknown : T.pending;
     return {
-      fill: rgba(P.stripeA),
+      fill: rgba(S.stripeA),
       shape: {
-        border: rgba(P.border),
+        border: rgba(S.border),
         borderWidth: Math.max(1, Math.round(dpr)),
         pattern: kind === Kind.UNKNOWN ? Pattern.STRIPES_45 : Pattern.STRIPES_135,
-        patternColor: rgba(P.stripeB),
+        patternColor: rgba(S.stripeB),
         patternSize: (kind === Kind.UNKNOWN ? 3 : kind === Kind.PENDING ? 8 : T.geometry.stripeWidth) * dpr,
         radius,
         dashed: kind !== Kind.FREE,
         alpha: dim ? (kind === Kind.PENDING ? T.dimOpacity : 0.55) : 1,
       },
-      text: P.text,
-      sub: P.sub,
+      text: S.text,
+      sub: S.sub,
     };
   }
   const fill = fillFor(f, i, s);
@@ -175,6 +174,9 @@ const sizeText = (s: PaintSettings, size: number, delta: number | null): string 
  * in the fills; labels only where the backend set label bits. `out` is reused: the result's
  * `instances` is its buffer. */
 export function paintFlame(f: RectFrame, s: PaintSettings, out: Instances = new Instances(f.count + 1)): Painted {
+  const T = palette().treemap;
+  const CENTER = center();
+  const HALO = haloOverlay();
   const dpr = f.info.dpr;
   const fsc = s.fontScale;
   const b = out.reset(f.count + 1);
@@ -201,7 +203,7 @@ export function paintFlame(f: RectFrame, s: PaintSettings, out: Instances = new 
   const root = f.info.root;
   if (bar && root) {
     const alpha = root.flags & Flag.DIM ? T.dimOpacity : 1;
-    b.push(bar.x, bar.y, bar.w, bar.h, lit.root ? over(HALO_OVERLAY, CENTER.bg) : CENTER.bg, { radius, alpha });
+    b.push(bar.x, bar.y, bar.w, bar.h, lit.root ? over(HALO, CENTER.bg) : CENTER.bg, { radius, alpha });
     const title = rowTitle(f, HIT_ROOT, s);
     const px = 11 * fsc * dpr;
     texts.push({
@@ -222,7 +224,7 @@ export function paintFlame(f: RectFrame, s: PaintSettings, out: Instances = new 
     const flags = f.flags[i]!;
     const [x, y, w, h] = [f.x[i]!, f.y[i]!, f.w[i]!, f.h[i]!];
     const r = barOf(f, i, s);
-    b.push(x, y, w, h, litRows.has(i) ? over(HALO_OVERLAY, r.fill) : r.fill, r.shape);
+    b.push(x, y, w, h, litRows.has(i) ? over(HALO, r.fill) : r.fill, r.shape);
     const alpha = r.shape.alpha ?? 1;
 
     // labels (UI-TM-14..17): the backend decided; laid out like the treemap's file blocks
@@ -244,13 +246,15 @@ export function paintFlame(f: RectFrame, s: PaintSettings, out: Instances = new 
         maxWidth: w - 6 * dpr - (f.tag[i] ? 22 : 5) * dpr,
         alpha,
       });
+      // a lit row's size line takes the name's colour: the halo takes the contrast the size line's
+      // lighter ink has to spare (UI-TM-29)
       if (!short && lbl & Label.SIZE)
         texts.push({
           x: x + 6 * dpr,
           y: y1 + (big ? 16 : 14) * fsc * dpr,
           text: title.line2 ?? sizeText(s, Number(f.size[i]), f.delta ? Number(f.delta[i]) : null),
           font: `400 ${(big ? 11.5 : 10.5) * fsc * dpr}px ${FONT_MONO}`,
-          color: r.sub,
+          color: litRows.has(i) ? r.text : r.sub,
           maxWidth: w - 11 * dpr,
           alpha,
         });
@@ -264,6 +268,9 @@ export function paintFlame(f: RectFrame, s: PaintSettings, out: Instances = new 
  * selection does not light already), the selection's shadow, bar and rings (UI-TM-28: on top of
  * everything), and the hover inset under the rings (UI-TM-30). O(depth). `out` is reused. */
 export function paintFlameOverlay(f: RectFrame, s: PaintSettings, hover: Hit, out: Instances = new Instances(16)): Painted {
+  const P = palette();
+  const T = P.treemap;
+  const HALO = haloOverlay();
   const dpr = f.info.dpr;
   const b = out.reset();
   const radius = T.geometry.fileRadius * dpr;
@@ -272,22 +279,22 @@ export function paintFlameOverlay(f: RectFrame, s: PaintSettings, hover: Hit, ou
   const lit = haloOf(f, hover, s.haloLevels);
   for (const p of lit.rows) {
     if (selLit.rows.includes(p)) continue;
-    b.push(f.x[p]!, f.y[p]!, f.w[p]!, f.h[p]!, HALO_OVERLAY, { radius, alpha: f.flags[p]! & Flag.DIM ? T.dimOpacity : 1 });
+    b.push(f.x[p]!, f.y[p]!, f.w[p]!, f.h[p]!, HALO, { radius, alpha: f.flags[p]! & Flag.DIM ? T.dimOpacity : 1 });
   }
   const bar = rootBar(f);
-  if (lit.root && !selLit.root && bar) b.push(bar.x, bar.y, bar.w, bar.h, HALO_OVERLAY, { radius, alpha: f.info.root!.flags & Flag.DIM ? T.dimOpacity : 1 });
+  if (lit.root && !selLit.root && bar) b.push(bar.x, bar.y, bar.w, bar.h, HALO, { radius, alpha: f.info.root!.flags & Flag.DIM ? T.dimOpacity : 1 });
 
   const ring = Math.round(T.geometry.selectRingWidth * dpr);
   const sb = flameGeometry.bounds(f, sel);
   if (sb && s.selectionShadow) {
-    b.push(sb.x - 2 * ring, sb.y - 2 * ring + 12 * dpr, sb.w + 4 * ring, sb.h + 4 * ring, [0, 0, 0, 0.65], {
+    b.push(sb.x - 2 * ring, sb.y - 2 * ring + 12 * dpr, sb.w + 4 * ring, sb.h + 4 * ring, rgba(P.treemap.state.selectShadow), {
       pattern: Pattern.SHADOW,
       patternSize: 32 * dpr,
       radius: 7 * dpr,
     });
     // the selected bar again, above its own shadow
     const r = barOf(f, sel, s);
-    b.push(sb.x, sb.y, sb.w, sb.h, lit.rows.includes(sel) ? over(HALO_OVERLAY, r.fill) : r.fill, r.shape);
+    b.push(sb.x, sb.y, sb.w, sb.h, lit.rows.includes(sel) ? over(HALO, r.fill) : r.fill, r.shape);
   }
   if (s.hoverHighlight) {
     const hb = flameGeometry.bounds(f, hover);

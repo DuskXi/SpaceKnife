@@ -1,5 +1,5 @@
 {
-  "$description": "A2「石墨 + 沉浸的对比度」外框色板（暗色）。亮色主题待设计评审后补充。",
+  "$description": "A2「石墨 + 沉浸的对比度」外框色板（暗色，基础令牌）。浅色主题的值在 themes/light.tokens.json。",
   "color": {
     "$type": "color",
     "bg": {
@@ -10,18 +10,23 @@
       "raised": { "$value": "#14161B", "$description": "输入框、卡片、分段控件" },
       "hover": { "$value": "#1A1D23" },
       "active": { "$value": "#1E2128", "$description": "按下 / 选中段" },
-      "sunken": { "$value": "#060709", "$description": "树图区底色" }
+      "sunken": { "$value": "#060709", "$description": "凹槽（浏览器模式路径对话框的输入框）" },
+      "selected": { "$value": "{color.bg.hover}", "$description": "分段控件、段标签、开着的图标按钮的选中片（暗色与悬停同色）" },
+      "field": { "$value": "{color.bg.window}", "$description": "文本框和数字框的底：暗色是比卡片更暗的凹槽（同窗口底色）" },
+      "scrim": { "$value": "#00000099", "$description": "命令面板的遮罩（暗色里背后再去色，浅色里不去色）；对话框背景用它的 75%" }
     },
     "line": {
       "subtle": { "$value": "#1D2027", "$description": "细分隔线" },
-      "strong": { "$value": "#2A2E37", "$description": "控件边框、强分隔线" }
+      "strong": { "$value": "#2A2E37", "$description": "控件边框、强分隔线" },
+      "swatch": { "$value": "#00000000", "$description": "小色块和容量构成条各段的 1px 内描边（类别色块、图例、本机磁盘的条）：暗色不画（透明），色块本来就从深底上跳出来" }
     },
     "text": {
       "primary": { "$value": "#F1F2F5" },
       "secondary": { "$value": "#AEB3BE" },
       "tertiary": { "$value": "#8F95A2", "$description": "说明文字，任何面板底色上 ≥ 5.6:1" },
       "disabled": { "$value": "#4A4E58" },
-      "onAccent": { "$value": "#0B0C10" }
+      "onAccent": { "$value": "#0B0C10", "$description": "强调色上的文字：四个预设上都 ≥ 4.5:1（UI-W7-31 ②）" },
+      "onWarning": { "$value": "#0A0B0D", "$description": "警告填充色（status.warningFill）上的文字：状态栏的警告计数" }
     },
     "accent": {
       "default": { "$value": "#8B9CFF", "$description": "默认强调色（长春花蓝）" },
@@ -32,6 +37,8 @@
     "status": {
       "success": { "$value": "#3FCB80" },
       "warning": { "$value": "#F5C542" },
+      "warningFill": { "$value": "{color.status.warning}", "$description": "警告的填充色：状态栏的警告计数（配 text.onWarning）、警告的浅色底（日志级别、提示条按它调淡）；暗色与警告色相同" },
+      "warningBase": { "$value": "#00000000", "$description": "警告浅底下面垫的底：浅底是 warningFill 按比例调进这个颜色。暗色透明，浅底直接叠在所在的表面上" },
       "danger": { "$value": "#FF6B6B" },
       "growth": { "$value": "#E8963A", "$description": "「较快照增长」胶囊文字" }
     },
@@ -41,6 +48,14 @@
       "green": { "$value": "#3FE08A", "$description": "绿色标签，形状 ●" },
       "blue": { "$value": "#5A97FF", "$description": "蓝色标签，形状 ◆" },
       "base": { "$value": "#000000B8", "$description": "标签小底座" }
+    },
+    "shadow": { "$value": "#000000B3", "$description": "外框的大投影：帮助配图（100%）、命令面板与更新卡（86%）。画布上的投影是 treemap.state.selectShadow" },
+    "meter": {
+      "used": { "$value": "#5A5F6B", "$description": "状态栏容量条的已用段，可用段是 status.success" }
+    },
+    "scroll": {
+      "thumb": { "$value": "#454A55", "$description": "滚动条滑块（所有滚动区域；没有轨道和箭头）：在 window 到 raised 的表面上 ≥ 2:1，安静但看得见" },
+      "thumbHover": { "$value": "#6B707C", "$description": "指针在滑块上或正在拖动：在 window 到 raised 的表面上 ≥ 3:1" }
     }
   }
 }

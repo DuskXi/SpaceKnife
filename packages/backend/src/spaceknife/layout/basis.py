@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 
 from .. import pathclass
@@ -11,6 +13,26 @@ from ..store.nodes import Flag, Kind, NodeStore
 NO_CLASS = 255
 """``cls`` of a row in no one class: a folder no folder class swallows, an aggregate of mixed
 classes, "+N items". It paints like the Other class but never counts as it (the class hover highlight)."""
+
+
+class LazySizes:
+    """:meth:`Basis.sizes` without the whole-store array (8 B a node, worked out again after every
+    change): ``sizes[ids]`` and ``len(sizes)`` compute only the nodes asked for. For the palette;
+    ``len`` is the node count when it was made, like an array taken then."""
+
+    __slots__ = ("basis", "n")
+
+    def __init__(self, basis: Basis) -> None:
+        self.basis = basis
+        self.n = len(basis.store)
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, ids: Any) -> Any:
+        if isinstance(ids, int | np.integer):
+            return int(self.basis.sizes_of(np.array([ids], dtype=np.int64))[0])
+        return self.basis.sizes_of(np.asarray(ids, dtype=np.int64))
 
 
 class Basis:
@@ -110,7 +132,8 @@ class Basis:
         return out
 
     def sizes(self) -> np.ndarray:
-        """:meth:`effective_sizes`, cached until the store changes."""
+        """:meth:`effective_sizes`, cached until the store changes. 8 B a node, worked out again after
+        every change: engines and the palette use :meth:`sizes_of` / :class:`LazySizes` instead."""
         store = self.store
         cached = self._sizes
         if cached is None or cached[0] != store.version or cached[1] != len(store):

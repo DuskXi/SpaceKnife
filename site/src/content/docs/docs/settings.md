@@ -150,7 +150,7 @@ Theme, accent color, animation and the look of the visualizations. Changes apply
 
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
-| Theme | Match system | Match system `"system"` · Light `"light"` (not available yet) · Dark `"dark"` | Dark is a graphite theme with strong contrast. | `appearance.theme` |
+| Theme | Match system | Match system `"system"` · Light `"light"` · Dark `"dark"` | With Match system, the theme follows your system's light or dark setting. | `appearance.theme` |
 | Accent color | `"#8B9CFF"` | `"#8B9CFF"` · `"#D4FF3A"` · `"#5EC8B8"` · `"#F2A65A"` | Used by primary buttons, the current navigation item, switches, sliders and focus rings. | `appearance.accent` |
 
 #### Animation
@@ -166,7 +166,7 @@ Theme, accent color, animation and the look of the visualizations. Changes apply
 | Level contrast | 10 | 0 to 50 | How much the shade differs between neighboring levels (flat ↔ deep). | `appearance.level_contrast` |
 | Border contrast | 10 | 0 to 50 | How strong block borders are (soft ↔ sharp). | `appearance.border_contrast` |
 | Highlight halo levels | 3 | 0 to 10 | How many ancestor title bars light up on hover or selection (subtle ↔ vivid). | `appearance.halo_levels` |
-| Hover highlight | On | On `true` · Off `false` | The block under the mouse gets a white inner outline. | `appearance.hover_highlight` |
+| Hover highlight | On | On `true` · Off `false` | The block under the mouse gets an inner outline (white in the dark theme, near-black in the light one). | `appearance.hover_highlight` |
 | Mouse trail | Off | On `true` · Off `false` | Blocks the mouse passes over fade out. | `appearance.mouse_trail` |
 | Recycle Bin effect | Moving | Moving `"animated"` · Still `"static"` · Off `"off"` | What lies in the Recycle Bin / Trash is shaded and hatched inside a dashed outline, and the bin itself says how much emptying it frees. "Moving": the dashes march and a band of light sweeps across now and then (still with "Reduce motion"). | `appearance.trash_effect` |
 | Selection shadow | On | On `true` · Off `false` | The selected block casts a shadow, so it is easier to follow. | `appearance.selection_shadow` |
@@ -245,7 +245,7 @@ Limits the disk read load a scan may cause.
 | Use low I/O priority when idle | On | On `true` · Off `false` | The "Idle" level uses the low I/O priority and leaves the disk to the apps you are using. Applies from the next scan. | `scan.idle_low_io` |
 | Give way when the disk is busy | On | On `true` · Off `false` | When other programs push the whole disk past the limit, the scan slows down to a minimum. Applies from the next scan. | `scan.yield_when_busy` |
 | Maximum concurrency | Auto | Auto `"auto"` · Manual `"manual"` | Auto: chosen from the number of processor cores. Manual: the number below. Applies from the next scan. | `scan.concurrency` |
-| Manual concurrency | 4 | 1 to 64 | How many worker processes scan at the same time in manual mode. Applies from the next scan. Can be changed when "Maximum concurrency" is set to "Manual". | `scan.workers` |
+| Manual concurrency | 4 | 1 to 64 | In manual mode, how many folders are listed at the same time at most (worker processes when the native extension is missing). Applies from the next scan. Can be changed when "Maximum concurrency" is set to "Manual". | `scan.workers` |
 
 #### Scan scope
 
@@ -331,6 +331,7 @@ Settings file, logs, cache and snapshots.
 
 | Setting | Default | Values | Description | Key |
 | --- | --- | --- | --- | --- |
+| Keep large scans in mapped files | Off | On `true` · Off `false` | When on, scans whose node table passes 256 MB (about two million items) go to memory-mapped files on disk and take no private memory; after the scan this writes about 200 bytes per item to disk once. Applies from the next scan. | `advanced.map_large_scans` |
 | Scan data memory limit | 25 % | 5 to 90 %, step 5 | Once scan data passes this share of physical memory, new node tables go to memory-mapped files on disk: they take no private commit, and the system keeps the parts in use in memory. Applies from the next scan. | `advanced.memory_budget` |
 
 ### About & updates

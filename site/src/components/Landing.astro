@@ -1,9 +1,16 @@
 ---
 // The landing page, in either language. Text: src/i18n/content.ts; downloads: the newest GitHub
-// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.py).
+// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.py);
+// the three visualizations: src/assets/visualizations (tools/demo/screenshots.py --views).
 import { getImage, Picture } from "astro:assets";
 
 import { icons } from "../../../design/build/icons";
+import viewFlameEn from "../assets/visualizations/flame-en.webp";
+import viewFlameZh from "../assets/visualizations/flame.webp";
+import viewPolarEn from "../assets/visualizations/polar-en.webp";
+import viewPolarZh from "../assets/visualizations/polar.webp";
+import viewTreemapEn from "../assets/visualizations/treemap-en.webp";
+import viewTreemapZh from "../assets/visualizations/treemap.webp";
 import compareEn from "../../../docs/images/compare-en.png";
 import compareZh from "../../../docs/images/compare.png";
 import filterEn from "../../../docs/images/filter-en.png";
@@ -34,6 +41,12 @@ const SHOTS = {
   en: { treemap: treemapEn, filter: filterEn, compare: compareEn, palette: paletteEn },
   zh: { treemap: treemapZh, filter: filterZh, compare: compareZh, palette: paletteZh },
 }[c.lang];
+const VIEWS = {
+  en: { treemap: viewTreemapEn, flame: viewFlameEn, polar: viewPolarEn },
+  zh: { treemap: viewTreemapZh, flame: viewFlameZh, polar: viewPolarZh },
+}[c.lang];
+const VIEW_ICONS = { treemap: "vizTreemap", flame: "vizFlame", polar: "vizFlamePolar" } as const;
+const docs = `${base}${c.lang === "en" ? "" : "zh/"}docs/`;
 // stable, optimized copies for the structured data
 const shotUrls = await Promise.all(
   c.shots.map(async (s) => `${site}${(await getImage({ src: SHOTS[s.id], format: "webp", width: 1440 })).src}`),
@@ -179,6 +192,32 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
       </ul>
     </section>
 
+    <section id="views" class="wrap section">
+      <h2>{c.viewsTitle}</h2>
+      <p class="section-sub">{c.viewsSub}</p>
+      <!-- wide: the cards pick the one picture shown under them; narrow: each card above its picture -->
+      <div class="views" data-active={c.views[0]!.id}>
+        {c.views.map((v, i) => (
+          <Fragment>
+            <button type="button" class="view-card" style={`--col: ${i + 1}`} data-view={v.id} aria-pressed={i === 0 ? "true" : "false"} aria-controls={`view-${v.id}`}>
+              <span class="view-head">
+                <span class="feature-icon" set:html={`<svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon(VIEW_ICONS[v.id])}</svg>`} />
+                <span>
+                  <span class="view-name">{v.name}</span>
+                  <span class="view-tag">{v.tag}</span>
+                </span>
+              </span>
+              <span class="view-body">{v.body}</span>
+            </button>
+            <figure class="window view-shot" id={`view-${v.id}`} data-view={v.id}>
+              <Picture src={VIEWS[v.id]} formats={["avif", "webp"]} fallbackFormat="webp" widths={[720, 1080, 1440, 1800]} sizes="(min-width: 1240px) 1152px, 96vw" alt={v.alt} loading="lazy" />
+            </figure>
+          </Fragment>
+        ))}
+      </div>
+      <p class="views-more"><a href={`${docs}visualizations/`}>{c.viewsMore} →</a></p>
+    </section>
+
     <section id="screenshots" class="wrap section">
       <h2>{c.shotsTitle}</h2>
       <p class="section-sub">{c.shotsSub}</p>
@@ -296,6 +335,16 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
     if (demo) {
       if (matchMedia("(prefers-reduced-motion: reduce)").matches) demo.controls = true;
       else void demo.play().catch(() => (demo.controls = true));
+    }
+    // the three visualizations: a card shows its picture (wide screens show one at a time)
+    for (const views of document.querySelectorAll<HTMLElement>(".views")) {
+      const cards = [...views.querySelectorAll<HTMLButtonElement>(".view-card")];
+      for (const card of cards) {
+        card.addEventListener("click", () => {
+          views.dataset.active = card.dataset.view;
+          for (const c of cards) c.setAttribute("aria-pressed", String(c === card));
+        });
+      }
     }
     for (const b of document.querySelectorAll<HTMLButtonElement>("button.copy")) {
       b.addEventListener("click", async () => {

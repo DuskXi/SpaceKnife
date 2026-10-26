@@ -17,6 +17,13 @@ most one worker per period while under the setpoint (proportional when the gain 
 multiplicative decrease (at most halving) when over the limit. Yielding (G3): when the others alone
 exceed the limit, the scan drops to 5 % duty until they fall back.
 
+The native walker lists the folders of one batch on several threads at once, as many as its width
+(docs/native.md 2.2). For it the governor keeps a gate (:meth:`IoGovernor.listing_gate`, a
+``spaceknife_native.ListingGate``) that holds its listings in flight to ``concurrency`` and stops new
+ones while paused; the governor then counts in listings: the mean and the peak in flight of a
+window are the gate's, so ``u`` is in listings in flight, as it was when every batch had one
+listing thread. Batches are still dispatched by permit, at most ``concurrency`` of them.
+
 :class:`GovernorCore` is the synchronous, clock-free logic (tests drive it with a simulated disk);
 :class:`IoGovernor` wraps it for asyncio. One governor per physical disk, shared by every scan on it.
 """
@@ -405,12 +412,25 @@ class GovernorCore:
             return s.busy
         return max(0.0, min(1.0, s.busy, s.queue / self.q_eff))
 
-    def observe(self, sample: DiskSample | None, now: float, wall: float | None = None) -> None:
-        """Feed the load of the window that just ended (None: no data) and run one control step."""
+    def observe(
+        self,
+        sample: DiskSample | None,
+        now: float,
+        wall: float | None = None,
+        listings: tuple[float, int, bool] | None = None,
+    ) -> None:
+        """Feed the load of the window that just ended (None: no data) and run one control step.
+        ``listings``: the native walker's gate over the same window (seconds spent listing, the
+        most listings in flight at once, whether a listing had to wait for the gate): the
+        concurrency is then counted in listings in flight rather than in batches."""
         self._integrate(now)
         span = now - self._win_t0
         n_bar = (self._area - self._win_area0) / span if span > 0 else 0.0
         peak, blocked = self._win_peak, self._win_blocked
+        if listings is not None:
+            busy_s, peak, refused = listings
+            n_bar = busy_s / span if span > 0 else 0.0
+            blocked = blocked or refused
         self._win_t0, self._win_area0 = now, self._area
         self._win_peak, self._win_blocked = self.inflight, bool(self._waiters)
         self._last_n = n_bar
@@ -681,6 +701,7 @@ class IoGovernor:
         self._timer: asyncio.TimerHandle | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._listeners: list[Callable[[IoStatus], None]] = []
+        self._gate: Any = None  # spaceknife_native.ListingGate, once listing_gate() made it
 
     # ------------------------------------------------------------------ properties
 
@@ -719,6 +740,27 @@ class IoGovernor:
 
     # ------------------------------------------------------------------ dispatch
 
+    def listing_gate(self) -> Any:
+        """The disk's gate for the native walker's listings (``spaceknife_native.ListingGate``),
+        made on first use: it holds the listings in flight to :attr:`concurrency` and lets no new
+        one start while paused (but those a call must list where it found them, docs/native.md
+        2.2). From then on the governor counts in listings (module docs). None without the native
+        module."""
+        if self._gate is None:
+            from .. import native
+
+            mod = native.module()
+            if mod is None or not native.has("ListingGate"):
+                return None
+            self._gate = mod.ListingGate(self.core.concurrency)
+            self._sync_gate()
+        return self._gate
+
+    def _sync_gate(self) -> None:
+        gate = self._gate
+        if gate is not None:
+            gate.set(limit=self.core.concurrency, paused=self.core.paused)
+
     async def permit(self) -> Permit:
         """Wait until one more batch may be dispatched on this disk (FIFO across scans)."""
         loop = asyncio.get_running_loop()
@@ -742,6 +784,7 @@ class IoGovernor:
             raise
 
     def _pump(self) -> None:
+        self._sync_gate()
         now = self._clock()
         for key in self.core.grant(now):
             fut = self._futures.pop(key, None)
@@ -802,13 +845,22 @@ class IoGovernor:
 
     def observe(self, sample: DiskSample | None, wall: float | None = None) -> None:
         """Called by the registry with every new sample of this disk."""
-        self.core.observe(sample, self._clock(), wall)
+        listings = self._gate.window() if self._gate is not None else None
+        self.core.observe(sample, self._clock(), wall, listings)
         self._pump()
 
     # ------------------------------------------------------------------ status
 
     def status(self, history: bool = True) -> IoStatus:
-        return self.core.status(history)
+        status = self.core.status(history)
+        gate = self._gate
+        if gate is None:
+            return status
+        # in listings: those in flight now, and (automatic) no more than the walker's width
+        concurrency = status.concurrency
+        if status.auto:
+            concurrency = min(concurrency, _walker_width() or concurrency)
+        return status.model_copy(update={"concurrency": concurrency, "inflight": int(gate.inflight)})
 
     def subscribe(self, callback: Callable[[IoStatus], None]) -> Callable[[], None]:
         """Status pushes (2 Hz, from the registry); returns the unsubscribe function."""
@@ -833,6 +885,19 @@ class IoGovernor:
                 cb(status)
             except Exception:
                 logger.exception("io status listener failed")
+
+
+def _walker_width() -> int | None:
+    """The native walker's width now (folders listed at once), or None."""
+    from .. import native
+
+    mod = native.module()
+    if mod is None or not native.has("listing_threads"):
+        return None
+    try:
+        return int(mod.listing_threads()["width"])
+    except Exception:
+        return None
 
 
 __all__ = [

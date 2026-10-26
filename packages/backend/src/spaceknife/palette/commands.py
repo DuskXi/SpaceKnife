@@ -2,8 +2,10 @@
 
 Every frontend runs a command by its ``id``. Names match the labels used on menus and buttons;
 aliases add English words, and the full pinyin and pinyin initials of the name are generated so
-that ``qhps`` finds 切换配色 (W4 待定 6). Keys use a neutral notation (``Ctrl+Shift+F5``) that
-frontends render per platform; the keymap becomes editable with W7 (M6).
+that ``qhps`` finds 切换配色 (W4 待定 6): read from ``pinyin.json`` (``tools/gen_pinyin.py``), so
+the backend does not import pypinyin (~50 MB of dictionaries) for a fixed set of names. Keys use
+a neutral notation (``Ctrl+Shift+F5``) that frontends render per platform; the keymap becomes
+editable with W7 (M6).
 
 M7.5: names, statuses and reasons are Chinese message ids, translated when the palette answers
 (:func:`label`, :func:`evaluate`); in the English interface the English name is searched first and
@@ -12,13 +14,13 @@ the hits light up on it, the Chinese name, its pinyin and the aliases still find
 
 from __future__ import annotations
 
+import json
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from functools import cache
+from pathlib import Path
 from typing import Any
-
-from pypinyin import lazy_pinyin
 
 from spaceknife_protocol import CAP_VISUALS
 
@@ -510,14 +512,31 @@ def _registry() -> tuple[Command, ...]:
     )
 
 
-def _each_char(text: str) -> Any:
+def each_char(text: str) -> Any:
     return list(text)  # one entry per non-hanzi character, so entries line up with the name
+
+
+@cache
+def _pinyin_table() -> dict[str, list[str]]:
+    text = Path(__file__).with_name("pinyin.json").read_text(encoding="utf-8")
+    table: dict[str, list[str]] = json.loads(text)
+    return table
+
+
+def _syllables(name: str) -> list[str]:
+    """The pinyin of a command name (one entry per character), from the generated table."""
+    known = _pinyin_table().get(name)
+    if known is not None:
+        return known
+    from pypinyin import lazy_pinyin  # a name the table misses: run tools/gen_pinyin.py
+
+    return lazy_pinyin(name, errors=each_char)
 
 
 def _search_keys(cmd: Command) -> tuple[tuple[str, tuple[int, ...] | None], ...]:
     """(text, map from text index to name index or None) for the name, its pinyin and its aliases."""
     name = cmd.name
-    syllables = lazy_pinyin(name, errors=_each_char)
+    syllables = _syllables(name)
     full: list[str] = []
     full_map: list[int] = []
     initials: list[str] = []

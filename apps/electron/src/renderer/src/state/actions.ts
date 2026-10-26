@@ -27,11 +27,13 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
-import { moveTo, stepIndex } from "./tabOrder";
+import { moveTo, placeTab, stepIndex } from "./tabOrder";
 import { FramePairer, frameKey } from "./frames";
 import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
 import type { InstallHow } from "../../../shared/install";
+import { isThemeSetting, type ThemeSetting } from "../../../shared/theme";
 import { getLang, setLang, t } from "@/lib/i18n";
+import { applyAccent, applyTheme } from "@/lib/theme";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
@@ -466,8 +468,7 @@ async function startScanNow(params: ScanStartParams, replaceTab?: string): Promi
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status }, logDismissed: false }));
     void watchScan(status.scan_id);
-    await showScan(status.scan_id, scanTitle(params.roots), replaceTab);
-    return status.scan_id;
+    return (await showScan(status.scan_id, scanTitle(params.roots), replaceTab)) ? status.scan_id : null;
   } catch (err) {
     toast(err instanceof RpcError ? t("无法开始扫描：{error}", { error: err.message }) : String(err));
     return null;
@@ -511,15 +512,22 @@ export async function openSnapshot(path: string, replaceTab?: string): Promise<v
   }
 }
 
-async function showScan(scanId: string, title: string, replaceTab?: string): Promise<void> {
+/** Put a scan's new view in a tab: in place of the start tab it came from, or a new one. False when
+ * that start tab was closed meanwhile (the snapshot was still loading, the scan still starting):
+ * then the view and, unless another tab shows it, the scan are freed at once instead of staying in
+ * the backend with no tab. */
+async function showScan(scanId: string, title: string, replaceTab?: string): Promise<boolean> {
   const viewId = await openView(scanId);
   const tab: Tab = { id: newTabId(), kind: "scan", scanId, viewIds: [viewId], focusedPane: 0, title };
   const old = replaceTab ? get().tabs.find((t) => t.id === replaceTab) : undefined;
-  set((s) => {
-    const tabs = replaceTab ? s.tabs.map((t) => (t.id === replaceTab ? tab : t)) : [...s.tabs, tab];
-    return { tabs, active: tab.id };
-  });
+  const tabs = placeTab(get().tabs, tab, replaceTab);
+  if (!tabs) {
+    releaseTab(tab);
+    return false;
+  }
+  set({ tabs, active: tab.id });
   if (old) releaseTab(old);
+  return true;
 }
 
 /** Close a tab's views and, when no other tab shows it any more, stop and free its scan (UI-W2-51, W8). */
@@ -597,7 +605,7 @@ export async function closeSettings(): Promise<void> {
 
 // ------------------------------------------------------------------ settings (W7)
 
-let accentApplied = "";
+let themeApplied: ThemeSetting | null = null;
 
 /** The title of a tab named by a word of the interface, not by a place (start, settings, help). */
 function fixedTitle(tab: Tab): string | null {
@@ -613,11 +621,17 @@ export function applySettings(state: SettingsState): void {
   const prev = get().settings;
   const base = state.unit_base === 1000 ? 1000 : 1024;
   setUnitBase(base);
-  const accent = String(state.values["appearance.accent"] ?? "");
-  if (accent && accent !== accentApplied) {
-    document.documentElement.style.setProperty("--sk-color-accent-default", accent);
-    accentApplied = accent;
+  // 「主题」 (UI-W7-31 ①): the page at once (CSS variables), the canvases on their next frame (the
+  // store's theme), main for the window and the next start; the accent keeps its slot in either
+  const theme = state.values["appearance.theme"];
+  const choice = isThemeSetting(theme) ? theme : "system";
+  if (choice !== themeApplied) {
+    applyTheme(choice);
+    window.sk.setTheme(choice);
+    themeApplied = choice;
   }
+  // a preset follows the theme through its slot, a colour of the user's stays as it is (lib/theme.ts)
+  applyAccent(String(state.values["appearance.accent"] ?? ""));
   const motion = state.values["appearance.reduce_motion"];
   document.documentElement.dataset.motion = motion === "on" ? "reduce" : motion === "off" ? "full" : "";
   // 「界面语言」 (M7.5): every t() follows at the next render; texts the backend made (volume notes,

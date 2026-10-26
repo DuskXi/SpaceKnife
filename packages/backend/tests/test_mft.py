@@ -525,3 +525,23 @@ def test_extension_at_end_of_blob() -> None:
         "c." + "é" * 17: "",
         "d.Abcdefghij": "abcdefghij",
     }
+
+
+def test_extension_ids_do_not_depend_on_the_chunk() -> None:
+    # names in chunks keep the temporaries bounded (docs/memory.md §6): the ids and their order
+    # are the same for any chunk size, short and long extensions mixed
+    spec = {
+        f"f{i}.{ext}": 1
+        for i, ext in enumerate(["TXT", "zip", "Abcdefghij", "txt", "longerext", "", "7z"] * 9)
+    }
+    table = parse_mft_numpy(im.build_mft(im.tree_records(spec)), RS, CS)
+    files = np.flatnonzero(table["kind"] == Kind.FILE)
+    runs = []
+    for chunk in (1, 7, mft.EXT_CHUNK):
+        ext_table = [""]
+        ids = mft._ext_ids(
+            table["names"], table["name_off"], table["name_len"], files, ext_table, chunk=chunk
+        )
+        runs.append((ids.tolist(), ext_table))
+    assert runs[0] == runs[1] == runs[2]
+    assert sorted(runs[0][1]) == ["", "7z", "abcdefghij", "longerext", "txt", "zip"]

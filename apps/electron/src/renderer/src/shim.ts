@@ -107,6 +107,7 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
       install: async () => t("浏览器里不能安装更新：请在 {host} 上更新 SpaceKnife", { host: server }),
     },
     setLanguage: noop,
+    setTheme: noop, // the browser's own prefers-color-scheme, data-theme for a choice (lib/theme.ts)
     dialog: {
       openSnapshot: () => env.askPath({ title: t("打开快照文件"), hint: t("{host} 上的快照文件（.sks）路径", { host: server }), value: start }),
       openFile: (o) => env.askPath({ title: o.title, hint: t("{host} 上的文件路径（{types}）", { host: server, types: filters(o) }), value: start }),
@@ -201,7 +202,7 @@ export async function installShim(): Promise<void> {
       {
         state: token ? { state: "ready", info: { url: ws, token, pid: 0 } } : { state: "failed", message: t("浏览器模式：地址里缺少 #ws=…&token=…") },
         platform: (params.get("platform") as SkApi["platform"]) ?? guessPlatform(),
-        version: "0.3.3-web",
+        version: "0.3.4-web",
         host: asBrowser ? "browser" : "app",
         remote: asBrowser ? { hostname: location.hostname, home: "", secure: location.protocol === "https:" } : null,
         justUpdated: params.get("updated") === "1", // demos: show the 「已更新」 note

@@ -25,6 +25,7 @@ function zoomTransform(f: RectFrame, row: number, t: number): { sx: number; sy: 
 class TreemapInstance implements VisualInstance<RectFrame> {
   private renderer: GlRenderer;
   private picture: Picture | null = null;
+  private scratch: Float32Array | undefined; // the instance array, refilled by every repaint
   private texts: PreparedText[] = [];
   private tags: TagItem[] = [];
   private frame: RectFrame | null = null;
@@ -69,7 +70,8 @@ class TreemapInstance implements VisualInstance<RectFrame> {
       levelContrast: s.levelContrast,
       borderContrast: s.borderContrast,
       diff: s.diffTiers && f.delta ? { tiers: s.diffTiers, formatDelta: s.formatDelta } : undefined,
-    });
+    }, this.scratch);
+    this.scratch = painted.instances;
     this.picture = this.renderer.upload(painted.instances, painted.count, this.picture);
     this.texts = prepareTexts(this.ctx.text, painted.texts);
     this.tags = painted.tags;
@@ -94,6 +96,7 @@ class TreemapInstance implements VisualInstance<RectFrame> {
     this.renderer.dispose(this.picture);
     this.picture = null;
     this.frame = null;
+    this.scratch = undefined;
   }
 
   contextRestored(): void {

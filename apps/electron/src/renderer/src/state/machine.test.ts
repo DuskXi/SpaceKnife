@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DiskHealth, DiskLink, MachineDisks, PhysicalDisk, VolumeInfo, VolumeOverview } from "@/protocol/generated";
 
-import { bandwidthText, byMedia, healthFindings, healthNoteText,
+import { bandwidthText, byMedia, classGaps, classRows, healthFindings, healthNoteText,
   recordGap, lifeLeft, powerOnText, diskMap, diskName, diskUsed, elsewhere, fastest, findings, fullest, growth, linkBandwidth, linkMBps, linkNotes, linkShare, linkText, orderedDisks, pcieMBps, rateText, showMap, summary, totals, volumesOf } from "./machine";
 
 const link = (patch: Partial<DiskLink>): DiskLink => ({
@@ -120,7 +120,7 @@ describe("disks", () => {
 
   it("puts the system disk first, then by volume, empty slots last", () => {
     const data: MachineDisks = {
-      collected_at: "2026-10-21T00:00:00Z",
+      collected_at: "2026-10-21T00:00:00Z", classes: null,
       volumes: [],
       disks: [
         disk({ id: "PhysicalDrive0", number: 0, parts: [{ mount_point: "D:\\", bytes: 10 }] }),
@@ -157,7 +157,7 @@ describe("disks", () => {
 
   it("splits the volumes into those on each disk and the others", () => {
     const d = disk({ parts: [{ mount_point: "D:\\", bytes: 1 }, { mount_point: "C:\\", bytes: 1 }] });
-    const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", disks: [d], volumes: [volume("C:\\"), volume("D:\\"), volume("Z:\\")] };
+    const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", classes: null, disks: [d], volumes: [volume("C:\\"), volume("D:\\"), volume("Z:\\")] };
     expect(volumesOf(data, d).map((v) => v.volume.mount_point)).toEqual(["D:\\", "C:\\"]);
     expect(elsewhere(data).map((v) => v.volume.mount_point)).toEqual(["Z:\\"]);
   });
@@ -179,7 +179,7 @@ describe("the dashboard", () => {
   const slot = disk({ id: "d9", number: 9, size: null, media: "usb_flash", interface: "usb", parts: [] });
   const on = (v: VolumeOverview, ids: string[]): VolumeOverview => ({ ...v, disks: ids });
   const data: MachineDisks = {
-    collected_at: "2026-10-21T00:00:00Z",
+    collected_at: "2026-10-21T00:00:00Z", classes: null,
     disks: [nvme, sata, reader, slot],
     volumes: [on(volume("C:\\", 2700, 4000), ["d3"]), on(volume("H:\\", 1900, 2000), ["d2"]), on(volume("E:\\", 400, 500), ["d8"]), volume("Z:\\", 10, 100)],
   };
@@ -285,7 +285,7 @@ describe("what a disk records about itself", () => {
   });
 
   it("goes into the page's findings", () => {
-    const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", volumes: [], disks: [disk({ health: record({ media_errors: 1 }) })] };
+    const data: MachineDisks = { collected_at: "2026-10-21T00:00:00Z", classes: null, volumes: [], disks: [disk({ health: record({ media_errors: 1 }) })] };
     expect(findings(data).map((x) => x.level)).toEqual(["warn"]);
   });
 
@@ -300,5 +300,29 @@ describe("what a disk records about itself", () => {
     for (const note of ["usb", "unsupported", "needs_admin", "unavailable"] as const) expect(healthNoteText(note)).not.toBe("");
     expect(powerOnText(30)).toBe("30 小时");
     expect(powerOnText(8070)).toBe("336 天");
+  });
+});
+
+describe("the class total", () => {
+  const cls = (class_id: string, bytes: number) => ({ class_id, bytes, files: 1, parts: [] });
+
+  it("lists the largest classes, then the rest in one row, with shares of the sum", () => {
+    expect(classRows(null)).toEqual([]);
+    const total = { classes: [cls("game", 600), cls("code", 300), cls("image", 60), cls("video", 40)], bytes: 1000, volumes: ["C:\\"] };
+    const rows = classRows(total, 2);
+    expect(rows.map((r) => [r.key, r.bytes, r.count])).toEqual([["game", 600, 1], ["code", 300, 1], ["_rest", 100, 2]]);
+    expect(rows.reduce((s, r) => s + r.share, 0)).toBeCloseTo(1);
+    expect(rows[2]!.classId).toBeNull();
+    expect(classRows(total).map((r) => r.key)).toEqual(["game", "code", "image", "video"]); // no rest row
+  });
+
+  it("names the local volumes it leaves out", () => {
+    const data: MachineDisks = {
+      collected_at: "2026-10-21T00:00:00Z",
+      disks: [],
+      volumes: [{ ...volume("C:\\"), disks: ["d0"] }, { ...volume("D:\\"), disks: ["d1"] }, { ...volume("Z:\\"), disks: [] }],
+      classes: { classes: [cls("game", 1)], bytes: 1, volumes: ["C:\\"] },
+    };
+    expect(classGaps(data)).toEqual(["D:\\"]); // Z: is on no known disk (a network place)
   });
 });

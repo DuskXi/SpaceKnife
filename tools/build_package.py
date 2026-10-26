@@ -4,8 +4,13 @@
     uv run python tools/build_package.py                  # this platform's installers
     uv run python tools/build_package.py --skip-backend   # reuse dist/backend (Electron changes only)
     uv run python tools/build_package.py --targets deb    # Linux: some targets only
-    uv run python tools/build_package.py --portable       # also the portable archive (Windows, Linux)
+    uv run python tools/build_package.py --portable       # also the portable archive
     uv run python tools/build_package.py --portable --no-installers   # the portable archive only
+
+Everything is built for the build machine's architecture (PyInstaller freezes the interpreter it
+runs on): x64, or arm64 on Windows on ARM, ARM Linux and Apple Silicon. The installers are published
+for x64 only (and macOS arm64): on an x64-less ARM machine of Windows or Linux only --no-installers
+(the unpacked app and the portable archive) is built.
 
 Windows → dist/electron/SpaceKnife-<version>-Setup-x64.exe (NSIS, unsigned) and win-unpacked/
 Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage (+ .zsync, needs ``zsyncmake``),
@@ -13,9 +18,10 @@ Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage (+ .zsync, needs 
           PATH) and linux-unpacked/
 macOS   → dist/electron/SpaceKnife-<version>-mac-<arch>.dmg for this Mac's architecture (arm64 or
           x64; ad-hoc signed, not notarized) and mac[-arm64]/SpaceKnife.app
-Portable → dist/electron/SpaceKnife-<version>-win-x64-portable.zip or …-linux-x64-portable.tar.gz:
-          the unpacked app plus a data/ folder, which makes it keep its data next to itself
-          (apps/electron/src/main/portable.ts)
+Portable → dist/electron/SpaceKnife-<version>-win-<arch>-portable.zip,
+          …-linux-<arch>-portable.tar.gz or …-mac-<arch>-portable.zip (arch x64 or arm64;
+          win-arm64-unpacked/, linux-arm64-unpacked/): the unpacked app (on macOS SpaceKnife.app) plus
+          a data/ folder, which makes it keep its data next to itself (apps/electron/src/main/portable.ts)
 
 Steps: a release build of the native extension (maturin, with the build machine's paths remapped:
 no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
@@ -36,10 +42,12 @@ import importlib.util
 import io
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import time
 import zipfile
@@ -285,17 +293,30 @@ def check_no_build_paths(root: Path) -> None:
     done(t0, f"{files} files, {members} archive members")
 
 
-def mac_arm64() -> bool:
-    return sys.platform == "darwin" and os.uname().machine == "arm64"
+def build_arch() -> str:
+    """The architecture of this build, the build machine's own: "x64" or "arm64". Read from the
+    interpreter that runs this (PyInstaller freezes it into the backend), so a build in an emulated
+    x64 Python on an ARM machine is an x64 build."""
+    # win-amd64, win-arm64, linux-x86_64, linux-aarch64, macosx-11.0-arm64, …
+    plat = sysconfig.get_platform().lower()
+    if plat.endswith("universal2"):  # a macOS interpreter of both architectures runs as this Mac's
+        plat = platform.machine().lower()
+    if plat.endswith(("amd64", "x86_64")):
+        return "x64"
+    if plat.endswith(("arm64", "aarch64")):
+        return "arm64"
+    raise SystemExit(f"no builds for {sysconfig.get_platform()}: x64 and arm64 only")
 
 
 def unpacked_app() -> Path:
-    """electron-builder's unpacked app: the folder the installer is made from."""
+    """electron-builder's unpacked app: the folder the installer is made from (an arm64 build's
+    folder names its architecture, an x64 build's does not)."""
+    arm = build_arch() == "arm64"
     if sys.platform == "win32":
-        return DIST / "electron" / "win-unpacked"
+        return DIST / "electron" / ("win-arm64-unpacked" if arm else "win-unpacked")
     if sys.platform == "darwin":
-        return DIST / "electron" / ("mac-arm64" if mac_arm64() else "mac") / "SpaceKnife.app"
-    return DIST / "electron" / "linux-unpacked"
+        return DIST / "electron" / ("mac-arm64" if arm else "mac") / "SpaceKnife.app"
+    return DIST / "electron" / ("linux-arm64-unpacked" if arm else "linux-unpacked")
 
 
 def check_mac_signature(app: Path) -> None:
@@ -319,21 +340,22 @@ def build_electron(targets: list[str], installers: bool) -> None:
     done(t0)
     if not backend_exe().exists():
         raise SystemExit(f"no frozen backend at {BACKEND_DIR}: run without --skip-backend")
-    arch = "--x64"
+    # the frozen backend runs on this machine's architecture only, so the app is built for it too
+    arch = f"--{build_arch()}"
+    if installers and arch == "--arm64" and sys.platform != "darwin":
+        raise SystemExit("installers are published for x64 only: build arm64 with --no-installers (portable)")
     if sys.platform == "win32":
-        platform = ["--win", "nsis" if installers else "dir"]
+        pack = ["--win", "nsis" if installers else "dir"]
     elif sys.platform.startswith("linux"):
         if installers and "rpm" in targets and shutil.which("rpmbuild") is None:
             raise SystemExit("rpm needs rpmbuild on PATH (or leave it out: --targets AppImage deb)")
-        platform = ["--linux", *targets] if installers else ["--linux", "dir"]
+        pack = ["--linux", *targets] if installers else ["--linux", "dir"]
     elif sys.platform == "darwin":
-        # the frozen backend runs on this Mac's architecture only, so the app is built for it too
-        platform = ["--mac", "dmg" if installers else "dir"]
-        arch = "--arm64" if mac_arm64() else "--x64"
+        pack = ["--mac", "dmg" if installers else "dir"]
     else:
         raise SystemExit(f"no installers for {sys.platform}")
-    t0 = step(f"installers (electron-builder {' '.join(platform[1:])} {arch[2:]})")
-    run(["pnpm", "exec", "electron-builder", *platform, arch, "--publish", "never"], cwd=ELECTRON)
+    t0 = step(f"installers (electron-builder {' '.join(pack[1:])} {arch[2:]})")
+    run(["pnpm", "exec", "electron-builder", *pack, arch, "--publish", "never"], cwd=ELECTRON)
     done(t0)
     if installers and sys.platform.startswith("linux") and "AppImage" in targets:
         version = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))["version"]
@@ -418,14 +440,26 @@ SpaceKnife 便携版
 """
 
 
+MAC_NOTE = """
+macOS: keep this folder next to SpaceKnife.app (move the two together). Opened straight from where it
+was unzipped, macOS may run SpaceKnife from a hidden copy (App Translocation); it still finds this
+folder.
+
+macOS：这个文件夹要和 SpaceKnife.app 放在一起（一起移动）。解压后直接打开时，macOS 可能从一个隐藏的副本
+运行 SpaceKnife（App 转移），它照样能找到这个文件夹。
+"""
+
+
 def make_portable() -> Path:
     """The unpacked app plus an empty data/ folder (apps/electron/src/main/portable.ts) in one
-    archive: a zip on Windows, a tar.gz on Linux (keeps the executable bits and symlinks)."""
+    archive: a zip on Windows, a tar.gz on Linux (keeps the executable bits and symlinks), and on
+    macOS a zip made by ditto with SpaceKnife.app beside the folder (keeps the bundle's symbolic
+    links, attributes and signature, as Apple's own tools unpack it)."""
     version = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))["version"]
     src = unpacked_app()
     note = PORTABLE_NOTE.encode()
     if sys.platform == "win32":
-        name = f"SpaceKnife-{version}-win-x64-portable"
+        name = f"SpaceKnife-{version}-win-{build_arch()}-portable"
         out = DIST / "electron" / f"{name}.zip"
         t0 = step(f"portable archive ({out.name})")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
@@ -434,7 +468,7 @@ def make_portable() -> Path:
                     zf.write(path, f"{name}/{path.relative_to(src).as_posix()}")
             zf.writestr(f"{name}/data/README.txt", PORTABLE_NOTE.replace("\n", "\r\n"))  # Notepad-friendly
     elif sys.platform.startswith("linux"):
-        name = f"SpaceKnife-{version}-linux-x64-portable"
+        name = f"SpaceKnife-{version}-linux-{build_arch()}-portable"
         out = DIST / "electron" / f"{name}.tar.gz"
         t0 = step(f"portable archive ({out.name})")
         with tarfile.open(out, "w:gz", compresslevel=6) as tf:
@@ -446,8 +480,20 @@ def make_portable() -> Path:
             readme = tarfile.TarInfo(f"{name}/data/README.txt")
             readme.size, readme.mode, readme.mtime = len(note), 0o644, now
             tf.addfile(readme, io.BytesIO(note))
+    elif sys.platform == "darwin":
+        name = f"SpaceKnife-{version}-mac-{build_arch()}-portable"
+        out = DIST / "electron" / f"{name}.zip"
+        t0 = step(f"portable archive ({out.name})")
+        stage = DIST / "portable-mac" / name
+        shutil.rmtree(stage.parent, ignore_errors=True)
+        (stage / "data").mkdir(parents=True)
+        run(["ditto", str(src), str(stage / src.name)])
+        (stage / "data" / "README.txt").write_bytes(note + MAC_NOTE.encode())
+        out.unlink(missing_ok=True)
+        run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(stage), str(out)])
+        shutil.rmtree(stage.parent, ignore_errors=True)
     else:
-        raise SystemExit("portable archives are made on Windows and Linux (a macOS app is portable already)")
+        raise SystemExit(f"no portable archive for {sys.platform}")
     done(t0, f"{out.stat().st_size / 2**20:.0f} MB")
     return out
 
@@ -459,7 +505,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--skip-backend", action="store_true", help="reuse dist/backend/spaceknife-backend")
     ap.add_argument("--targets", nargs="+", choices=LINUX_TARGETS, default=list(LINUX_TARGETS), help="Linux")
-    ap.add_argument("--portable", action="store_true", help="also the portable archive (Windows, Linux)")
+    ap.add_argument("--portable", action="store_true", help="also the portable archive")
     ap.add_argument("--no-installers", action="store_true", help="only the unpacked app (and --portable)")
     args = ap.parse_args()
     if not args.skip_backend:
