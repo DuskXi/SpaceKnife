@@ -1,0 +1,39 @@
+name: Release check
+
+# Reads a published release the way an installed SpaceKnife reads it (tools/release.py check):
+# it must be the newest of its channel, every kind of install must find its file under the exact
+# name, and every file must match the checksum the app would read for it (each file is downloaded
+# and hashed). Runs when a release is published (also a draft the Release workflow left, published
+# by hand), and by hand for any version.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to check (X.Y.Z)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Read the release as SpaceKnife does
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+
+      - name: Install Python 3.12 and the backend
+        run: |
+          uv python install 3.12
+          uv sync --locked
+
+      - name: Every kind of install finds its file and checksum
+        env:
+          VERSION: ${{ inputs.version || github.event.release.tag_name }}
+        run: COLUMNS=160 uv run python tools/release.py check "${VERSION#v}" --download

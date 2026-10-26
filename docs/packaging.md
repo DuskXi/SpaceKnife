@@ -164,6 +164,18 @@ Linux 包在 WSL（Ubuntu 22.04）里构建：把工作区同步到 WSL 自己�
 - **累积更新**：还没发布的更改随做随记在仓库根目录的 [UNRELEASED.md](../UNRELEASED.md)（中英双语，「新功能」「修复」两节，和发布说明同一个结构）。两份 README 的顶部导航里固定链接到它。
   - 发布时，它就是发布说明的正文：再补上下载表和已知限制。
   - 发布之后，在 dev 上把它清空：只留标题、语言切换、开头那句说明（版本号改成下一版），以及每节下面的「（暂无）」/「(nothing yet)」。
+- **发布**（从 0.3.4 起由 CI 发布，文件不经过任何人的电脑）：
+  1. dev 上改版本号（`apps/electron/package.json`、预加载的后备版本、`shim.ts` 的网页版版本、问题模板的占位符），把 `UNRELEASED.md` 压成 `release-notes/<版本>.md`：先英文后中文，下载表的大小写成 `{{size:文件名}}`，构建运行写成 `{{build_runs}}`，也可以用 `{{version}}`；工作流填进去，写错的占位符或不属于这个发布的文件名会让发布失败。
+  2. PR dev → main，等「CI passed」再合并。
+  3. 在 main 的合并提交上本地签名打 tag（`git tag -s v<版本> <提交> -m "SpaceKnife <版本>"`）并推送。CI 不持有签名的私钥。
+  4. tag 推上去就触发 **Release** 工作流（`.github/workflows/release.yml`）：
+     - 检查 tag 是带签名的附注 tag 且 GitHub 认可签名、文件和 main 完全相同、应用的版本号就是 tag 的版本、`release-notes/<版本>.md` 存在、同名的发布还没有；
+     - 用 `Portable build`（带安装包）和 `macOS build` 从 tag 构建全部文件，两者都给每个文件生成构建来源证明（`actions/attest-build-provenance`，可以用 `gh attestation verify <文件> --repo DuskXi/SpaceKnife` 核对）；
+     - `tools/release.py assemble` 核对每份校验和文件、确认正好是这个发布该有的文件（上面的名单），把两份安装包的校验和合并成 `SHA256SUMS.txt`，填好发布说明；汇总结果也作为运行的产物 `release-<版本>` 留 14 天；
+     - 建成预发布的草稿（0.x 和带预发布段的版本都是预发布）。
+  5. 在 GitHub 上看一眼草稿，点发布。**Release check** 工作流（`release-check.yml`）在发布时用 `tools/release.py check` 按已安装的 SpaceKnife 的方式读这个发布：它是自己渠道里最新的，每种安装方式都按确切的名字找到文件，每个文件下载下来和应用会读到的校验和相同。
+  - 手动运行 Release（Actions › Release › Run workflow）给已经在 GitHub 上的 tag 发布。可以填同一份文件树的 `Portable build`（带安装包）和 `macOS build` 运行号，直接用它们的文件，不再构建（工作流核对两个运行成功、构建的提交和 tag 的文件完全相同；这时没有构建来源证明，发布说明链接到那两个运行）。`dry_run` 只核对和汇总，不建发布；`publish` 不留草稿，直接发布并立刻读回检查。
+  - `tools/release.py` 在本机也能跑（`assemble` 接 `gh run download` 下载的产物，`check` 读真实的发布列表），测试在 `tools/tests/test_release.py`。
 
 **数据位置**（`SPACEKNIFE_HOME` 会把这些全部放进同一个目录）：
 
