@@ -21,7 +21,7 @@ from rich.table import Table
 from rich.text import Text
 
 from . import fmt, i18n
-from .i18n import tr
+from .i18n import plural, tr
 from .io.priority import set_low_io_priority
 from .paths import config_dir, snapshots_dir
 from .scan import worker
@@ -216,7 +216,12 @@ def summary_panel(
             )
         lines.append(line)
     if result.errors:
-        denied = tr("{count} 个文件夹无法访问", count=result.errors)
+        denied = plural(
+            result.errors,
+            "{count} 个文件夹无法访问",
+            "1 folder couldn't be accessed",
+            count=result.errors,
+        )
         lines.append(
             tr(
                 "{denied}（已计入未知空间），例如 {example}",
@@ -623,7 +628,13 @@ def snapshot_list() -> None:
             path.name,
         )
     console.print(table)
-    total = tr("共 {count} 个快照，位于 {folder}", count=len(found), folder=snapshots_dir())
+    total = plural(
+        len(found),
+        "共 {count} 个快照，位于 {folder}",
+        "1 snapshot in {folder}",
+        count=len(found),
+        folder=snapshots_dir(),
+    )
     console.print(f"[#8F95A2]{total}[/#8F95A2]")
 
 
@@ -647,8 +658,10 @@ def snapshot_show(
         Panel(
             Group(
                 Text(
-                    tr(
+                    plural(
+                        header.node_count - 1,
                         "保存于 {time} · {items} 项 · {size}",
+                        "Saved {time} · 1 item · {size}",
                         time=created,
                         items=fmt.count(header.node_count - 1),
                         size=fmt.size(int(store.cols["tot_alloc"][0])),
