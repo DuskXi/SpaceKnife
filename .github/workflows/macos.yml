@@ -1,0 +1,133 @@
+name: macOS build
+
+# The macOS dmg and portable zip for each architecture, built on a Mac of that architecture
+# (PyInstaller freezes the interpreter it runs on). Ad-hoc signed and not notarized until there is an
+# Apple Developer ID. The portable zip (SpaceKnife.app next to a data/ folder) is unpacked again and
+# smoke-tested in portable mode, and its 「无缝更新」 is tested end to end; the files and their checksums
+# go to the run's artifacts, and the Release workflow publishes them (release.yml, docs/packaging.md). Started by hand (Actions › macOS build › Run workflow), and on dev whenever
+# the packaging changes, so it is checked before it reaches main.
+on:
+  workflow_dispatch:
+  # the Release workflow (release.yml) calls it for a release: the tag's commit, and a build
+  # provenance attestation for every file (actions/attest-build-provenance)
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build (default the caller's)
+        type: string
+        default: ""
+      attest:
+        description: Attest where each file was built
+        type: boolean
+        default: false
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/macos.yml
+      - tools/build_package.py
+      - packaging/**
+      - apps/electron/electron-builder.yml
+      - apps/electron/src/main/portable.ts
+      - apps/electron/src/main/update.ts
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dmg:
+    name: macOS · ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: x64
+            runner: macos-15-intel
+    permissions:
+      contents: read
+      id-token: write # the attestations, only when the Release workflow asks for them
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+        with:
+          enable-cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/electron/pnpm-lock.yaml
+
+      - name: Update Rust
+        run: rustup update stable --no-self-update && rustup default stable
+
+      - name: Install Python 3.12 and the build tools
+        run: |
+          uv python install 3.12
+          uv sync --locked --group native --group package
+
+      - name: Install the Electron app's dependencies
+        working-directory: apps/electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the dmg and the portable zip
+        run: uv run python tools/build_package.py --portable
+
+      # unpacked the way the app unpacks an update (ditto): the bundle's links, attributes and signature
+      - name: Unpack the portable zip again
+        run: |
+          mkdir -p dist/portable-test
+          ditto -x -k dist/electron/*-portable.zip dist/portable-test
+          ls dist/portable-test/*
+          codesign --verify --deep --strict dist/portable-test/*/SpaceKnife.app
+
+      - name: Smoke test in portable mode
+        run: |
+          app=$(ls -d dist/portable-test/*/SpaceKnife.app)
+          uv run python packaging/smoke_app.py --portable "$app/Contents/MacOS/SpaceKnife"
+
+      # a release list on 127.0.0.1 offers the next version (this build again); the test clicks the
+      # update badge and 「无缝更新」 through the DevTools port, like a user
+      - name: Update end to end (portable)
+        timeout-minutes: 15
+        run: uv run python packaging/update_e2e.py portable dist/electron/*-portable.zip
+
+      - name: Checksum
+        working-directory: dist/electron
+        run: shasum -a 256 *.dmg *-portable.zip | tee "SHA256SUMS-mac-${{ matrix.arch }}.txt"
+
+      - name: Attest the files
+        if: inputs.attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/electron/*.dmg
+            dist/electron/*-portable.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SpaceKnife-mac-${{ matrix.arch }}
+          path: |
+            dist/electron/*.dmg
+            dist/electron/*-portable.zip
+            dist/electron/SHA256SUMS-mac-*.txt
+          if-no-files-found: error
+          retention-days: 14

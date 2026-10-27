@@ -15,7 +15,9 @@ import functools
 import os
 import re
 import sys
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass, replace
+from typing import Any
 
 from ..i18n import Texts
 
@@ -353,8 +355,9 @@ def _linux_list() -> list[VolumeInfo]:
 # --------------------------------------------------------------------------- macOS
 
 
-def _darwin_statfs(path: str) -> tuple[str, str, str, bool] | None:
-    """(fs type, mount point, source, is_local) via statfs(2); None if unavailable."""
+@functools.cache
+def _statfs_struct() -> Any:
+    """``struct statfs`` (macOS, 64-bit inodes: the layout statfs$INODE64 / getfsstat$INODE64 fill)."""
     import ctypes
 
     class StatFs(ctypes.Structure):
@@ -378,15 +381,30 @@ def _darwin_statfs(path: str) -> tuple[str, str, str, bool] | None:
             ("f_reserved", ctypes.c_uint32 * 7),
         ]
 
+    return StatFs
+
+
+def _libc_fn(*symbols: str) -> Any:
+    """The first of ``symbols`` libc exports (x86_64 Macs: the $INODE64 variants), or None."""
+    import ctypes
+
     libc = ctypes.CDLL(None, use_errno=True)
-    fn = None
-    for symbol in ("statfs$INODE64", "statfs"):
-        fn = getattr(libc, symbol, None)
-        if fn is not None:
-            break
+    for symbol in symbols:
+        try:
+            return getattr(libc, symbol)
+        except AttributeError:
+            continue
+    return None
+
+
+def _darwin_statfs(path: str) -> tuple[str, str, str, bool] | None:
+    """(fs type, mount point, source, is_local) via statfs(2); None if unavailable."""
+    import ctypes
+
+    fn = _libc_fn("statfs$INODE64", "statfs")
     if fn is None:
         return None
-    buf = StatFs()
+    buf = _statfs_struct()()
     if fn(os.fsencode(path), ctypes.byref(buf)) != 0:
         return None
     mnt_local = 0x00001000
@@ -401,6 +419,99 @@ def _darwin_statfs(path: str) -> tuple[str, str, str, bool] | None:
 # The APFS Data volume: macOS presents it at "/" together with the sealed system volume (one
 # volume group, joined by firmlinks), so user files under /Users, /private/var… belong to "/".
 DARWIN_DATA = "/System/Volumes/Data"
+FIRMLINKS = "/usr/share/firmlinks"  # macOS 10.15+: "<path under />	<path in the Data volume>"
+
+
+def _darwin_mounts() -> list[str]:
+    """Mount point of every mounted file system (getfsstat(2)); [] if unavailable."""
+    import ctypes
+
+    fn = _libc_fn("getfsstat$INODE64", "getfsstat")
+    if fn is None:
+        return []
+    fn.restype = ctypes.c_int
+    fn.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_int]
+    nowait = 2  # MNT_NOWAIT: what the kernel has, without asking each file system
+    StatFs = _statfs_struct()
+    for _ in range(3):  # mounts may come and go between the two calls
+        count = fn(None, 0, nowait)
+        if count <= 0:
+            return []
+        buf = (StatFs * (count + 8))()
+        got = fn(buf, ctypes.sizeof(buf), nowait)
+        if 0 <= got < count + 8:
+            return [buf[i].f_mntonname.decode(errors="replace") for i in range(got)]
+    return []
+
+
+def volume_group_twins(
+    root: str,
+    mounts: Iterable[str] | None = None,
+    dev_of: Callable[[str], int] | None = None,
+) -> tuple[str, ...]:
+    """Mount points below a mounted ``root`` that report the same device as ``root``.
+
+    On macOS that is the other half of an APFS volume group: the Data volume, mounted at
+    /System/Volumes/Data below the system volume at "/" and reporting the same st_dev. Its files
+    are already in the tree through the firmlinks (/Users, /Applications, /Library, /private…),
+    so a scan of "/" must not enter it a second time. Elsewhere (and for roots that are not
+    mount points) there are none.
+    """
+    if mounts is None:
+        if sys.platform != "darwin":
+            return ()
+        mounts = _darwin_mounts()
+    stat_dev = dev_of or (lambda p: os.stat(p).st_dev)
+    points = {m.rstrip("/") or "/" for m in mounts}
+    base = root.rstrip("/") or "/"
+    if base not in points:
+        return ()
+    try:
+        dev = stat_dev(base)
+    except OSError:
+        return ()
+    prefix = base if base == "/" else base + "/"
+    twins = []
+    for point in sorted(points):
+        if point == base or not point.startswith(prefix):
+            continue
+        try:
+            if stat_dev(point) == dev:
+                twins.append(point)
+        except OSError:
+            continue
+    return tuple(twins)
+
+
+def parse_firmlinks(text: str) -> tuple[tuple[str, str], ...]:
+    """(path under "/", path inside the Data volume) per line of /usr/share/firmlinks, the longest
+    Data-volume path first (a deeper firmlink wins over its parent)."""
+    pairs = []
+    for line in text.splitlines():
+        source, tab, target = line.partition("	")
+        source, target = source.strip().rstrip("/"), target.strip().strip("/")
+        if tab and source.startswith("/") and target:
+            pairs.append((source, target))
+    return tuple(sorted(pairs, key=lambda p: len(p[1]), reverse=True))
+
+
+@functools.cache
+def darwin_firmlinks() -> tuple[tuple[str, str], ...]:
+    try:
+        with open(FIRMLINKS, encoding="utf-8") as f:
+            return parse_firmlinks(f.read())
+    except OSError:
+        return ()
+
+
+def through_firmlinks(path: str, twin: str, firmlinks: Sequence[tuple[str, str]] | None = None) -> str | None:
+    """A path inside a volume-group twin as the firmlinks show it under "/"
+    (/System/Volumes/Data/Users/x → /Users/x); None when no firmlink leads there."""
+    rel = path[len(twin) :].strip("/")
+    for source, target in darwin_firmlinks() if firmlinks is None else firmlinks:
+        if rel == target or rel.startswith(target + "/"):
+            return source + rel[len(target) :]
+    return None
 
 
 def _darwin_volume(path: str) -> VolumeInfo:

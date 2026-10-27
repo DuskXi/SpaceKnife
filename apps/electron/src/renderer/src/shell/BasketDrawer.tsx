@@ -9,6 +9,7 @@ import { set, useApp } from "@/state/store";
 import { fmtInt, fmtSize, plural } from "@/lib/format";
 import { sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
+import { inBrowser, serverName } from "@/lib/host";
 import { Icon } from "@/ui/Icon";
 
 type Sort = "size" | "name" | "path";
@@ -92,6 +93,12 @@ export function BasketDrawer() {
         </div>
       )}
       <span className="flex" />
+      {inBrowser() && items.length > 0 && (
+        <div className="bk-remote" role="note">
+          <Icon name="globe" size={14} />
+          <div>{t("这些文件在 {host} 上：移到回收站和永久删除都作用于那台电脑，撤销的 5 秒也照常", { host: serverName() })}</div>
+        </div>
+      )}
       <div className="bk-actions">
         {blocked.length > 0 && (
           <div className="bk-estimate warn-text">
@@ -112,6 +119,12 @@ export function BasketDrawer() {
           <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="bk-confirm" onMouseDown={(e) => e.stopPropagation()}>
             <h3 id="bk-confirm">{plural(items.length, t("永久删除 {n} 项（{size}）？", { n: fmtInt(items.length), size: fmtSize(total) }), "Delete 1 item ({size}) permanently?", { size: fmtSize(total) })}</h3>
             <p className="muted">{t("不进回收站，无法从回收站还原。执行前有 5 秒可以撤销。")}</p>
+            {inBrowser() && (
+              <p className="remote-line">
+                <Icon name="globe" size={13} />
+                {t("删除的是 {host} 上的文件", { host: serverName() })}
+              </p>
+            )}
             <div className="modal-buttons">
               <button className="ghost" autoFocus onClick={() => setConfirm(false)}>
                 {t("取消")}

@@ -7,7 +7,9 @@ import sys
 from pathlib import Path
 
 import pytest
+import typer
 
+from spaceknife.cli_scan import load_limit
 from spaceknife.server import Server
 from spaceknife_client.connection import Connection, RemoteError
 from spaceknife_protocol import scan as p
@@ -49,6 +51,15 @@ async def wait_done(client: Connection, scan_id: str) -> p.ScanStatus:
     client.on_event(EVENT_SCAN_PROGRESS, on_event)
     await client.subscribe(p.TOPIC_SCAN, p.ScanTopicParams(scan_id=scan_id))
     return await asyncio.wait_for(done, timeout=60)
+
+
+async def finished(server: Server, scan_id: str) -> None:
+    """Until the scan's own task is over: after the status that says it is done and names its
+    snapshot, it still prunes old snapshots, keeps the volume's summary and indexes the names, and
+    it counts as running (``ScanHandle.running``) until then."""
+    task = server.scans.get(scan_id).task
+    if task is not None:
+        await asyncio.wait_for(asyncio.shield(task), timeout=60)
 
 
 @pytest.mark.parametrize("workers", [0, 2])
@@ -150,6 +161,15 @@ def test_cli_scan_and_snapshot_commands(tmp_path: Path) -> None:
     scan = run("scan", str(facts.root), "--workers", "0", "--top", "3")
     assert scan.returncode == 0, scan.stderr
     assert "扫描结果" in scan.stdout and "最大的文件" in scan.stdout and "movie.mp4" in scan.stdout
+    profiled = run("scan", str(facts.root), "--top", "3", "--profile", "--no-snapshot")  # as in the app
+    assert profiled.returncode == 0, profiled.stderr
+    assert "耗时分解" in profiled.stdout and "列目录线程平均忙碌" in profiled.stdout
+    limited = run(
+        "scan", str(facts.root), "--top", "3", "--profile", "--no-snapshot", "--disk-limit", "quiet"
+    )
+    assert limited.returncode == 0, limited.stderr
+    assert "等磁盘负载上限放行" in limited.stdout
+    assert run("scan", str(facts.root), "--disk-limit", "fast").returncode == 2
     listing = run("snapshot", "list")
     assert listing.returncode == 0
     assert "共 1 个快照" in listing.stdout
@@ -159,6 +179,15 @@ def test_cli_scan_and_snapshot_commands(tmp_path: Path) -> None:
     assert show.returncode == 0 and "最大的项目" in show.stdout
     bad = run("scan", str(tmp_path / "missing"))
     assert bad.returncode == 2
+
+
+def test_cli_disk_limit_values() -> None:
+    assert load_limit("balanced") == ("balanced", None)
+    assert load_limit(" Quiet ") == ("quiet", None)
+    assert load_limit("45%") == ("custom", 45.0)
+    for bad in ("0", "101", "fast", "", "-5"):
+        with pytest.raises(typer.BadParameter):
+            load_limit(bad)
 
 
 async def test_scan_events_for_the_log_panel(tmp_path: Path, server: Server, client: Connection) -> None:

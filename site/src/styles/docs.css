@@ -1,0 +1,107 @@
+/* The documentation (Starlight) in the website's graphite palette (src/styles/global.css): the same
+   fonts, accent and surfaces, dark only. */
+
+:root,
+:root[data-theme="dark"] {
+  --sl-font: "Geist Variable", "Noto Sans SC Variable", system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
+  --sl-font-mono: "Geist Mono Variable", ui-monospace, "SFMono-Regular", Consolas, monospace;
+
+  --sl-color-accent-low: #1b1f3a;
+  --sl-color-accent: #8b9cff;
+  --sl-color-accent-high: #d6dcff;
+
+  --sl-color-white: #f1f2f5;
+  --sl-color-gray-1: #e2e4ea;
+  --sl-color-gray-2: #aeb3be;
+  --sl-color-gray-3: #8f95a2;
+  --sl-color-gray-4: #4b505b;
+  --sl-color-gray-5: #2a2e37;
+  --sl-color-gray-6: #14161b;
+  --sl-color-gray-7: #0e1013;
+  --sl-color-black: #08090b;
+
+  --sl-color-bg: #08090b;
+  --sl-color-bg-nav: rgb(8 9 11 / 0.82);
+  --sl-color-bg-sidebar: #08090b;
+  --sl-color-hairline: #1d2027;
+  --sl-color-hairline-light: #2a2e37;
+  --sl-color-hairline-shade: #060709;
+  --sl-color-bg-inline-code: #1a1d23;
+
+  --sl-color-text-accent: #a9b6ff;
+
+  /* the asides (note = blue, tip = purple, caution = orange, danger = red): muted surfaces */
+  --sl-color-blue-low: #121826;
+  --sl-color-blue: #7fa8e8;
+  --sl-color-blue-high: #cfe0fb;
+  --sl-color-purple-low: #161a2c;
+  --sl-color-purple: #8b9cff;
+  --sl-color-purple-high: #d6dcff;
+  --sl-color-orange-low: #221a10;
+  --sl-color-orange: #f2a65a;
+  --sl-color-orange-high: #f8d9b5;
+  --sl-color-red-low: #26131a;
+  --sl-color-red: #ff7a7a;
+  --sl-color-red-high: #ffd0d0;
+  --sl-color-green-low: #0f201d;
+  --sl-color-green: #5ec8b8;
+  --sl-color-green-high: #c8efe9;
+
+  color-scheme: dark;
+}
+
+/* the glow behind the landing page, fainter */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(60rem 36rem at 50% -14rem, rgb(139 156 255 / 0.12), transparent 70%), #08090b;
+}
+
+header.header {
+  backdrop-filter: saturate(140%) blur(12px);
+}
+
+.site-title {
+  color: #f1f2f5;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.sl-markdown-content :is(h1, h2, h3, h4) {
+  letter-spacing: -0.015em;
+}
+
+/* keyboard keys, like the app's <Kbd>. Starlight's block spacing (between siblings, after the last child
+   of a list item) would also catch these inline keys: <kbd>Ctrl</kbd>+<kbd>K</kbd> are siblings. */
+.sl-markdown-content kbd {
+  margin: 0 !important;
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.05em 0.45em;
+  border: 1px solid #2a2e37;
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: #14161b;
+  color: #e2e4ea;
+  font-family: var(--sl-font-mono);
+  font-size: 0.85em;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.sl-markdown-content table {
+  font-size: 0.94em;
+}
+
+/* screenshots: framed like the windows on the landing page */
+.sl-markdown-content img {
+  border-radius: 10px;
+  box-shadow:
+    0 0 0 1px #2a2e37,
+    0 20px 50px -24px rgb(0 0 0 / 0.8);
+}

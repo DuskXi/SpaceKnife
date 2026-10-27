@@ -810,8 +810,16 @@
       "properties": {
         "color": {
           "default": "",
+          "description": "for the dark theme",
           "pattern": "^(#[0-9A-Fa-f]{6})?$",
           "title": "Color",
+          "type": "string"
+        },
+        "color_light": {
+          "default": "",
+          "description": "for the light theme",
+          "pattern": "^(#[0-9A-Fa-f]{6})?$",
+          "title": "Color Light",
           "type": "string"
         },
         "extensions": {
@@ -849,6 +857,45 @@
       "title": "ClassEdit",
       "type": "object"
     },
+    "ClassFolder": {
+      "description": "The user's choice for one folder: its files take ``class_id`` whatever their extension.",
+      "properties": {
+        "class_id": {
+          "description": "A class id, or \"\" for by extension only (no folder class)",
+          "title": "Class Id",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "class_id"
+      ],
+      "title": "ClassFolder",
+      "type": "object"
+    },
+    "ClassPart": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "class_id": {
+          "description": "The class the files would have by their extension",
+          "title": "Class Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "class_id",
+        "bytes"
+      ],
+      "title": "ClassPart",
+      "type": "object"
+    },
     "ClassStat": {
       "properties": {
         "bytes": {
@@ -862,6 +909,14 @@
         "files": {
           "title": "Files",
           "type": "integer"
+        },
+        "parts": {
+          "description": "Files a folder class took over, by the class of their extension, largest first (「游戏 · 其中视频 3 GB」); empty when none",
+          "items": {
+            "$ref": "#/$defs/ClassPart"
+          },
+          "title": "Parts",
+          "type": "array"
         }
       },
       "required": [
@@ -870,6 +925,39 @@
         "files"
       ],
       "title": "ClassStat",
+      "type": "object"
+    },
+    "ClassTotal": {
+      "description": "The file classes of every volume whose mix is known (an open complete scan, or what was kept\nof the last one), added up.",
+      "properties": {
+        "bytes": {
+          "description": "The scanned bytes of those volumes",
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "classes": {
+          "description": "Every class with bytes, largest first",
+          "items": {
+            "$ref": "#/$defs/ClassStat"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "volumes": {
+          "description": "Their mount points",
+          "items": {
+            "type": "string"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "classes",
+        "bytes",
+        "volumes"
+      ],
+      "title": "ClassTotal",
       "type": "object"
     },
     "ClassesEvent": {
@@ -882,6 +970,36 @@
         "state"
       ],
       "title": "ClassesEvent",
+      "type": "object"
+    },
+    "ClassesFolderParams": {
+      "additionalProperties": false,
+      "properties": {
+        "class_id": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A class id; \"\" for by extension only; None forgets the choice (automatic again)",
+          "title": "Class Id"
+        },
+        "path": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ClassesFolderParams",
       "type": "object"
     },
     "ClassesState": {
@@ -903,6 +1021,14 @@
             "$ref": "#/$defs/FilterClassInfo"
           },
           "title": "Defaults",
+          "type": "array"
+        },
+        "folders": {
+          "description": "The user's folder choices, by path",
+          "items": {
+            "$ref": "#/$defs/ClassFolder"
+          },
+          "title": "Folders",
           "type": "array"
         }
       },
@@ -1528,6 +1654,335 @@
       "title": "Crumb",
       "type": "object"
     },
+    "DiskHealth": {
+      "description": "What the disk records about itself: the NVMe SMART / Health log (log page 02h) or the ATA\nDevice Statistics log (04h). Fields the disk doesn't keep are None.",
+      "properties": {
+        "available_spare": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: spare blocks left, %",
+          "title": "Available Spare"
+        },
+        "critical_warning": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: critical warning bits, 0 = none",
+          "title": "Critical Warning"
+        },
+        "media_errors": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: unrecovered data integrity errors",
+          "title": "Media Errors"
+        },
+        "percentage_used": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: the share of its rated endurance used, the vendor's estimate (can pass 100)",
+          "title": "Percentage Used"
+        },
+        "power_cycles": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power Cycles"
+        },
+        "power_on_hours": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Power On Hours"
+        },
+        "read_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the record was read with administrator rights (Linux: machine.read_health); None: read just now. The temperature is always the current one.",
+          "title": "Read At"
+        },
+        "read_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Read over the disk's life",
+          "title": "Read Bytes"
+        },
+        "source": {
+          "enum": [
+            "nvme",
+            "ata"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "spare_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NVMe: the spare % below which it warns",
+          "title": "Spare Threshold"
+        },
+        "temperature_c": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Now, in °C",
+          "title": "Temperature C"
+        },
+        "unsafe_shutdowns": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unsafe Shutdowns"
+        },
+        "written_bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Written over the disk's life",
+          "title": "Written Bytes"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "DiskHealth",
+      "type": "object"
+    },
+    "DiskIo": {
+      "description": "Read and written since the system started (the operating system's counters).",
+      "properties": {
+        "read_bytes": {
+          "title": "Read Bytes",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the counters started: the system's boot",
+          "title": "Since"
+        },
+        "written_bytes": {
+          "title": "Written Bytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "read_bytes",
+        "written_bytes"
+      ],
+      "title": "DiskIo",
+      "type": "object"
+    },
+    "DiskLink": {
+      "description": "A link: the negotiated rate and, when the system tells it, the most the device supports.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "pcie",
+            "sata",
+            "usb"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "max_pcie_gen": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the most the device supports",
+          "title": "Max Pcie Gen"
+        },
+        "max_pcie_width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the most lanes the device supports",
+          "title": "Max Pcie Width"
+        },
+        "max_rate_mbps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SATA / USB: the most the device (SATA: and its port) supports; None when not known",
+          "title": "Max Rate Mbps"
+        },
+        "pcie_gen": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the negotiated generation, 1-6",
+          "title": "Pcie Gen"
+        },
+        "pcie_width": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PCIe: the negotiated lanes",
+          "title": "Pcie Width"
+        },
+        "rate_mbps": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SATA / USB: the negotiated line rate in Mb/s (SATA 1500, 3000, 6000; USB 12, 480, 5000, 10000, 20000)",
+          "title": "Rate Mbps"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "DiskLink",
+      "type": "object"
+    },
+    "DiskPart": {
+      "description": "A volume's share of a disk.",
+      "properties": {
+        "bytes": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "How much of the disk it takes; None when not known",
+          "title": "Bytes"
+        },
+        "mount_point": {
+          "title": "Mount Point",
+          "type": "string"
+        }
+      },
+      "required": [
+        "mount_point"
+      ],
+      "title": "DiskPart",
+      "type": "object"
+    },
     "Empty": {
       "additionalProperties": false,
       "description": "Params for methods that take no arguments.",
@@ -1814,8 +2269,14 @@
         },
         "color": {
           "default": "",
-          "description": "#RRGGBB chosen by the user; empty: the theme's colour for the id",
+          "description": "#RRGGBB chosen by the user for the dark theme; empty: the dark theme's colour for a built-in id, the light choice for a class of the user's",
           "title": "Color",
+          "type": "string"
+        },
+        "color_light": {
+          "default": "",
+          "description": "#RRGGBB chosen by the user for the light theme; empty: the light theme's colour for a built-in id, the dark choice for a class of the user's",
+          "title": "Color Light",
           "type": "string"
         },
         "extensions": {
@@ -2313,6 +2774,54 @@
       "title": "FilterVocab",
       "type": "object"
     },
+    "FlameGeometry": {
+      "description": "``flame.v1``: one band per level, the zoom root's bar in band 0.",
+      "properties": {
+        "gap": {
+          "description": "Gap between bands and between neighbouring bars, physical px",
+          "title": "Gap",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "flame",
+          "default": "flame",
+          "title": "Kind",
+          "type": "string"
+        },
+        "origin": {
+          "description": "Side of the canvas holding the root bar",
+          "enum": [
+            "top",
+            "bottom"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "root": {
+          "$ref": "#/$defs/PixelRect",
+          "description": "The zoom root's bar"
+        },
+        "row_h": {
+          "description": "Band pitch in physical px (bar height + gap)",
+          "title": "Row H",
+          "type": "integer"
+        },
+        "rows": {
+          "description": "Levels drawn beyond the root bar",
+          "title": "Rows",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "origin",
+        "row_h",
+        "rows",
+        "gap",
+        "root"
+      ],
+      "title": "FlameGeometry",
+      "type": "object"
+    },
     "FlashItem": {
       "properties": {
         "delta": {
@@ -2321,7 +2830,7 @@
           "type": "integer"
         },
         "row": {
-          "description": "Row of this frame's draw list: the changed block or its drawn ancestor",
+          "description": "Row of this frame's draw list: the changed block or its drawn ancestor; -1 = the zoom root (flame.v1 / polar.v1 only)",
           "title": "Row",
           "type": "integer"
         }
@@ -2331,6 +2840,44 @@
         "delta"
       ],
       "title": "FlashItem",
+      "type": "object"
+    },
+    "FolderClassInfo": {
+      "description": "Why a folder's files take a folder class (spaceknife.pathclass).",
+      "properties": {
+        "class_id": {
+          "title": "Class Id",
+          "type": "string"
+        },
+        "fallback": {
+          "description": "Only files whose extension is in no class take it",
+          "title": "Fallback",
+          "type": "boolean"
+        },
+        "folder": {
+          "description": "The folder that decided (the node itself or an ancestor)",
+          "title": "Folder",
+          "type": "string"
+        },
+        "reason": {
+          "description": "What the folder was recognised as, in the interface language",
+          "title": "Reason",
+          "type": "string"
+        },
+        "user": {
+          "description": "The user chose it (class_folders.json)",
+          "title": "User",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "class_id",
+        "reason",
+        "folder",
+        "user",
+        "fallback"
+      ],
+      "title": "FolderClassInfo",
       "type": "object"
     },
     "FolderCond": {
@@ -2373,6 +2920,24 @@
       "title": "FolderCond",
       "type": "object"
     },
+    "FolderStat": {
+      "properties": {
+        "bytes": {
+          "title": "Bytes",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "bytes"
+      ],
+      "title": "FolderStat",
+      "type": "object"
+    },
     "FrameInfo": {
       "properties": {
         "breadcrumb": {
@@ -2405,9 +2970,42 @@
           "title": "Flash",
           "type": "array"
         },
+        "geometry": {
+          "anyOf": [
+            {
+              "discriminator": {
+                "mapping": {
+                  "flame": "#/$defs/FlameGeometry",
+                  "polar": "#/$defs/PolarGeometry"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/FlameGeometry"
+                },
+                {
+                  "$ref": "#/$defs/PolarGeometry"
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None for drawlist.v1",
+          "title": "Geometry"
+        },
         "height": {
           "title": "Height",
           "type": "integer"
+        },
+        "layout": {
+          "default": "drawlist.v1",
+          "description": "Layout of the binary frame that follows",
+          "title": "Layout",
+          "type": "string"
         },
         "layout_ms": {
           "title": "Layout Ms",
@@ -2417,6 +3015,18 @@
           "default": "",
           "title": "Reason",
           "type": "string"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FrameRoot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The zoom root (flame.v1 / polar.v1)"
         },
         "rows": {
           "title": "Rows",
@@ -2447,6 +3057,12 @@
           "title": "View Id",
           "type": "string"
         },
+        "visual": {
+          "default": "treemap",
+          "description": "Visualization that drew this frame",
+          "title": "Visual",
+          "type": "string"
+        },
         "width": {
           "description": "Canvas size in physical px",
           "title": "Width",
@@ -2465,6 +3081,86 @@
         "layout_ms"
       ],
       "title": "FrameInfo",
+      "type": "object"
+    },
+    "FrameRoot": {
+      "description": "The zoom root of a flame.v1 / polar.v1 frame (root bar, centre disc): the same facts as a row.",
+      "properties": {
+        "branch": {
+          "default": 0,
+          "title": "Branch",
+          "type": "integer"
+        },
+        "count": {
+          "default": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Compare views only",
+          "title": "Delta"
+        },
+        "dstat": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Compare views only",
+          "title": "Dstat"
+        },
+        "flags": {
+          "default": 0,
+          "title": "Flags",
+          "type": "integer"
+        },
+        "key": {
+          "title": "Key",
+          "type": "integer"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "integer"
+        },
+        "node": {
+          "title": "Node",
+          "type": "integer"
+        },
+        "size": {
+          "title": "Size",
+          "type": "integer"
+        },
+        "tag": {
+          "default": 0,
+          "title": "Tag",
+          "type": "integer"
+        },
+        "tone": {
+          "default": 4,
+          "title": "Tone",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "node",
+        "kind",
+        "size"
+      ],
+      "title": "FrameRoot",
       "type": "object"
     },
     "HelloParams": {
@@ -2631,6 +3327,32 @@
           ],
           "default": null,
           "title": "Q Eff"
+        },
+        "read_bps": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes read per second on the whole disk, last sample",
+          "title": "Read Bps"
+        },
+        "read_latency_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Mean time per read on the whole disk, ms",
+          "title": "Read Latency Ms"
         },
         "self_pct": {
           "title": "Self Pct",
@@ -2820,6 +3542,48 @@
         "message"
       ],
       "title": "LogRecordEvent",
+      "type": "object"
+    },
+    "MachineDisks": {
+      "properties": {
+        "classes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ClassTotal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "None until a volume's mix is known"
+        },
+        "collected_at": {
+          "format": "date-time",
+          "title": "Collected At",
+          "type": "string"
+        },
+        "disks": {
+          "items": {
+            "$ref": "#/$defs/PhysicalDisk"
+          },
+          "title": "Disks",
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "$ref": "#/$defs/VolumeOverview"
+          },
+          "title": "Volumes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "disks",
+        "volumes",
+        "collected_at"
+      ],
+      "title": "MachineDisks",
       "type": "object"
     },
     "MaintenanceInfo": {
@@ -3087,6 +3851,7 @@
             "no_trash",
             "exists",
             "cancelled",
+            "ambiguous_name",
             "error"
           ],
           "title": "Code",
@@ -3229,6 +3994,28 @@
         "task_id"
       ],
       "title": "OpTaskParams",
+      "type": "object"
+    },
+    "PaletteCheckParams": {
+      "additionalProperties": false,
+      "description": "One command, where the user is: a keyboard shortcut runs it only when the palette would.",
+      "properties": {
+        "context": {
+          "$ref": "#/$defs/PaletteContext"
+        },
+        "id": {
+          "description": "A command id (palette.commands)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "context"
+      ],
+      "title": "PaletteCheckParams",
       "type": "object"
     },
     "PaletteClearParams": {
@@ -4080,6 +4867,197 @@
       "title": "PendingCond",
       "type": "object"
     },
+    "PhysicalDisk": {
+      "properties": {
+        "controller_link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The PCIe link of the controller a SATA disk hangs on, when the system tells it: an add-in card's lanes can be slower than the disk's SATA link"
+        },
+        "firmware": {
+          "default": "",
+          "title": "Firmware",
+          "type": "string"
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskHealth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the disk records about itself"
+        },
+        "health_note": {
+          "default": "",
+          "description": "Why `health` is missing or partial: behind a USB bridge that doesn't pass it on, the disk keeps no such log, the system needs administrator rights for it, or it has no way to it",
+          "enum": [
+            "",
+            "usb",
+            "unsupported",
+            "needs_admin",
+            "unavailable"
+          ],
+          "title": "Health Note",
+          "type": "string"
+        },
+        "id": {
+          "description": "The system's name for it: PhysicalDrive3 (Windows), nvme0n1 (Linux), disk2 (macOS)",
+          "title": "Id",
+          "type": "string"
+        },
+        "interface": {
+          "default": "unknown",
+          "enum": [
+            "nvme",
+            "sata",
+            "sas",
+            "scsi",
+            "ata",
+            "usb",
+            "sd",
+            "thunderbolt",
+            "virtual",
+            "raid",
+            "other",
+            "unknown"
+          ],
+          "title": "Interface",
+          "type": "string"
+        },
+        "io": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskIo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Read and written since the system started"
+        },
+        "link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DiskLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The disk's own link: PCIe (NVMe), SATA or USB"
+        },
+        "media": {
+          "default": "unknown",
+          "enum": [
+            "nvme_ssd",
+            "sata_ssd",
+            "ssd",
+            "hdd",
+            "usb_hdd",
+            "usb_ssd",
+            "usb_flash",
+            "sd_card",
+            "network",
+            "virtual",
+            "unknown"
+          ],
+          "title": "Media",
+          "type": "string"
+        },
+        "model": {
+          "description": "As the device reports it; '' when it doesn't",
+          "title": "Model",
+          "type": "string"
+        },
+        "number": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Windows: the disk number of Disk Management",
+          "title": "Number"
+        },
+        "parts": {
+          "description": "The volumes on it, in disk order when known",
+          "items": {
+            "$ref": "#/$defs/DiskPart"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "removable": {
+          "default": false,
+          "title": "Removable",
+          "type": "boolean"
+        },
+        "serial": {
+          "default": "",
+          "title": "Serial",
+          "type": "string"
+        },
+        "size": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Bytes; None while no medium is in (an empty card reader)",
+          "title": "Size"
+        },
+        "system": {
+          "default": false,
+          "description": "Holds the system volume",
+          "title": "System",
+          "type": "boolean"
+        },
+        "trim": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Whether the disk takes TRIM / UNMAP; None when not known",
+          "title": "Trim"
+        },
+        "vendor": {
+          "default": "",
+          "title": "Vendor",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "model"
+      ],
+      "title": "PhysicalDisk",
+      "type": "object"
+    },
     "PingParams": {
       "additionalProperties": false,
       "properties": {
@@ -4126,6 +5104,34 @@
       "title": "PingResult",
       "type": "object"
     },
+    "PixelRect": {
+      "properties": {
+        "h": {
+          "title": "H",
+          "type": "integer"
+        },
+        "w": {
+          "title": "W",
+          "type": "integer"
+        },
+        "x": {
+          "title": "X",
+          "type": "integer"
+        },
+        "y": {
+          "title": "Y",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "w",
+        "h"
+      ],
+      "title": "PixelRect",
+      "type": "object"
+    },
     "PlatformInfo": {
       "properties": {
         "machine": {
@@ -4147,6 +5153,68 @@
         "machine"
       ],
       "title": "PlatformInfo",
+      "type": "object"
+    },
+    "PolarGeometry": {
+      "description": "``polar.v1``: the zoom root is the centre disc, level k the k-th ring around it.",
+      "properties": {
+        "cx": {
+          "description": "Centre, physical px",
+          "title": "Cx",
+          "type": "integer"
+        },
+        "cy": {
+          "title": "Cy",
+          "type": "integer"
+        },
+        "gap": {
+          "description": "Gap between rings and between neighbouring sectors, physical px",
+          "title": "Gap",
+          "type": "integer"
+        },
+        "hole": {
+          "description": "Radius of the centre disc",
+          "title": "Hole",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "polar",
+          "default": "polar",
+          "title": "Kind",
+          "type": "string"
+        },
+        "radius": {
+          "description": "Outer edge of the last ring",
+          "title": "Radius",
+          "type": "integer"
+        },
+        "ring_w": {
+          "description": "Ring pitch: ring k spans [hole + (k-1)·ring_w, hole + k·ring_w)",
+          "title": "Ring W",
+          "type": "integer"
+        },
+        "rings": {
+          "description": "Levels drawn around the centre disc",
+          "title": "Rings",
+          "type": "integer"
+        },
+        "unit": {
+          "default": 1048576,
+          "description": "Angle units per turn",
+          "title": "Unit",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cx",
+        "cy",
+        "radius",
+        "hole",
+        "ring_w",
+        "rings",
+        "gap"
+      ],
+      "title": "PolarGeometry",
       "type": "object"
     },
     "ProgressEvent": {
@@ -4226,6 +5294,49 @@
         "upper"
       ],
       "title": "Range",
+      "type": "object"
+    },
+    "ReadHealthParams": {
+      "properties": {
+        "disks": {
+          "description": "Ids of the disks to read; []: every disk whose record needs administrator rights",
+          "items": {
+            "type": "string"
+          },
+          "title": "Disks",
+          "type": "array"
+        }
+      },
+      "title": "ReadHealthParams",
+      "type": "object"
+    },
+    "ReadHealthResult": {
+      "description": "``read``: the records were read (a disk that did not answer says why in its health_note);\n``denied``: the user closed the password prompt; ``unavailable``: no way to ask for administrator\nrights here (``message`` says why); ``nothing``: no disk needed it.",
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineDisks"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        },
+        "outcome": {
+          "enum": [
+            "read",
+            "denied",
+            "unavailable",
+            "nothing"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        }
+      },
+      "required": [
+        "outcome",
+        "machine"
+      ],
+      "title": "ReadHealthResult",
       "type": "object"
     },
     "Refusal": {
@@ -4600,6 +5711,19 @@
           "minItems": 1,
           "title": "Roots",
           "type": "array"
+        },
+        "skip_protected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "macOS without Full Disk Access: leave out the places that would each ask for consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown as not accessible; None = the scan.protected_places setting",
+          "title": "Skip Protected"
         },
         "workers": {
           "anyOf": [
@@ -5000,7 +6124,8 @@
             "classes",
             "tags",
             "keys",
-            "advanced"
+            "advanced",
+            "about"
           ],
           "title": "Category",
           "type": "string"
@@ -5286,7 +6411,8 @@
                 "classes",
                 "tags",
                 "keys",
-                "advanced"
+                "advanced",
+                "about"
               ],
               "type": "string"
             },
@@ -5634,6 +6760,31 @@
       "title": "SnapshotLoadParams",
       "type": "object"
     },
+    "SnapshotPoint": {
+      "description": "A complete snapshot of a whole volume: how much it held then.",
+      "properties": {
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        },
+        "bytes_alloc": {
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "files": {
+          "title": "Files",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "at",
+        "bytes_alloc",
+        "files"
+      ],
+      "title": "SnapshotPoint",
+      "type": "object"
+    },
     "SnapshotSaveParams": {
       "additionalProperties": false,
       "properties": {
@@ -5738,8 +6889,51 @@
       "title": "SubscribeResult",
       "type": "object"
     },
+    "SummaryGap": {
+      "description": "A part of a node's summary the backend could not work out; the rest is still given.",
+      "properties": {
+        "part": {
+          "description": "contents: largest files, class totals and newest change (left empty); classes: the folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, parent: that field (left empty)",
+          "enum": [
+            "contents",
+            "classes",
+            "top_files",
+            "folder_class",
+            "tags",
+            "volume",
+            "parent"
+          ],
+          "title": "Part",
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why, in the interface language",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "reason"
+      ],
+      "title": "SummaryGap",
+      "type": "object"
+    },
     "SystemInfo": {
       "properties": {
+        "full_disk_access": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "macOS: whether SpaceKnife has Full Disk Access (no consent prompt per protected place); None elsewhere or when it cannot be told",
+          "title": "Full Disk Access"
+        },
         "pid": {
           "title": "Pid",
           "type": "integer"
@@ -5821,6 +7015,12 @@
     },
     "TopFile": {
       "properties": {
+        "class_id": {
+          "default": "other",
+          "description": "The file's class (colour): by extension, and by size for ts / mts",
+          "title": "Class Id",
+          "type": "string"
+        },
         "node": {
           "$ref": "#/$defs/NodeInfo"
         },
@@ -6050,6 +7250,26 @@
           "title": "Classes",
           "type": "array"
         },
+        "folder_class": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FolderClassInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The folder class the node (or a file's folder) takes, if any"
+        },
+        "gaps": {
+          "description": "Parts that could not be worked out this time; empty when complete",
+          "items": {
+            "$ref": "#/$defs/SummaryGap"
+          },
+          "title": "Gaps",
+          "type": "array"
+        },
         "latest_mtime": {
           "description": "Newest modification time in the subtree (0 = unknown)",
           "title": "Latest Mtime",
@@ -6141,6 +7361,406 @@
         "sub"
       ],
       "title": "UnsubscribeParams",
+      "type": "object"
+    },
+    "UpdateAsset": {
+      "properties": {
+        "name": {
+          "description": "File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "From the release's SHA256SUMS*.txt; None when it publishes none",
+          "title": "Sha256"
+        },
+        "size": {
+          "description": "Bytes",
+          "minimum": 0,
+          "title": "Size",
+          "type": "integer"
+        },
+        "url": {
+          "description": "Its download URL on github.com",
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "size",
+        "url"
+      ],
+      "title": "UpdateAsset",
+      "type": "object"
+    },
+    "UpdateChangedEvent": {
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/UpdateStatus"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "UpdateChangedEvent",
+      "type": "object"
+    },
+    "UpdateDownload": {
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it failed, in the session's language",
+          "title": "Error"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The downloaded file, once done",
+          "title": "Path"
+        },
+        "received": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Received",
+          "type": "integer"
+        },
+        "state": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "downloading",
+            "verifying",
+            "done",
+            "failed",
+            "cancelled"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        },
+        "verified": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 matched (True), did not (never kept), no checksum published (None)",
+          "title": "Verified"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Version"
+        }
+      },
+      "title": "UpdateDownload",
+      "type": "object"
+    },
+    "UpdateInfo": {
+      "properties": {
+        "asset": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateAsset"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The file for this kind of install; None: only the release page"
+        },
+        "name": {
+          "description": "The release title",
+          "title": "Name",
+          "type": "string"
+        },
+        "notes": {
+          "default": "",
+          "description": "Release notes (Markdown), at most 16 KiB",
+          "title": "Notes",
+          "type": "string"
+        },
+        "prerelease": {
+          "description": "Marked as a pre-release on GitHub",
+          "title": "Prerelease",
+          "type": "boolean"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "tag": {
+          "title": "Tag",
+          "type": "string"
+        },
+        "url": {
+          "description": "The release page",
+          "title": "Url",
+          "type": "string"
+        },
+        "version": {
+          "description": "Without the leading v: 0.4.0, 0.4.0-beta.1",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "tag",
+        "name",
+        "prerelease",
+        "url"
+      ],
+      "title": "UpdateInfo",
+      "type": "object"
+    },
+    "UpdateMuteParams": {
+      "additionalProperties": false,
+      "properties": {
+        "muted": {
+          "default": true,
+          "description": "False turns its prompts back on",
+          "title": "Muted",
+          "type": "boolean"
+        },
+        "series": {
+          "description": "A series as UpdateStatus.series names it: \"0.4\" (every 0.4.x) or \"1\" (every 1.x)",
+          "pattern": "^\\d{1,6}(\\.\\d{1,6})?$",
+          "title": "Series",
+          "type": "string"
+        }
+      },
+      "required": [
+        "series"
+      ],
+      "title": "UpdateMuteParams",
+      "type": "object"
+    },
+    "UpdateReleases": {
+      "properties": {
+        "releases": {
+          "description": "The recent releases, newest first (at most 30, notes at most 16 KiB each, no asset)",
+          "items": {
+            "$ref": "#/$defs/UpdateInfo"
+          },
+          "title": "Releases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "releases"
+      ],
+      "title": "UpdateReleases",
+      "type": "object"
+    },
+    "UpdateStatus": {
+      "properties": {
+        "channel": {
+          "enum": [
+            "stable",
+            "preview"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "checked_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Last successful check",
+          "title": "Checked At"
+        },
+        "checking": {
+          "default": false,
+          "title": "Checking",
+          "type": "boolean"
+        },
+        "current": {
+          "description": "Version of the running app",
+          "title": "Current",
+          "type": "string"
+        },
+        "dismissed": {
+          "default": false,
+          "description": "The card / dialog for this version was closed (the badge stays)",
+          "title": "Dismissed",
+          "type": "boolean"
+        },
+        "download": {
+          "$ref": "#/$defs/UpdateDownload"
+        },
+        "enabled": {
+          "description": "Automatic checks are on (setting general.update_check)",
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The last check failed: why (offline, rate limited)",
+          "title": "Error"
+        },
+        "install_kind": {
+          "enum": [
+            "nsis",
+            "portable",
+            "appimage",
+            "deb",
+            "rpm",
+            "dmg",
+            "dev",
+            "unknown"
+          ],
+          "title": "Install Kind",
+          "type": "string"
+        },
+        "latest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdateInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The newest release, when it is newer"
+        },
+        "level": {
+          "default": "none",
+          "description": "How far behind the newest release this app is",
+          "enum": [
+            "none",
+            "patch",
+            "minor",
+            "major"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "muted": {
+          "default": false,
+          "description": "The user turned off the prompts of that series: no card, dialog or badge, no automatic download (the 「关于与更新」 page still shows it)",
+          "title": "Muted",
+          "type": "boolean"
+        },
+        "next_check_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the next automatic check is due; None while automatic checks are off, and where the backend makes none (tests, demos, tools)",
+          "title": "Next Check At"
+        },
+        "series": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The series of the newest release that update.mute takes: its major.minor for a minor update (\"0.4\"), its major for a major one (\"1\"); None for a patch release or no update",
+          "title": "Series"
+        }
+      },
+      "required": [
+        "current",
+        "install_kind",
+        "enabled",
+        "channel"
+      ],
+      "title": "UpdateStatus",
+      "type": "object"
+    },
+    "UpdateVersionParams": {
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "description": "The version shown (latest.version)",
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "UpdateVersionParams",
       "type": "object"
     },
     "ViewFilterParams": {
@@ -6480,7 +8100,8 @@
               "enum": [
                 "class",
                 "flat",
-                "time"
+                "time",
+                "branch"
               ],
               "type": "string"
             },
@@ -6489,7 +8110,30 @@
             }
           ],
           "default": null,
+          "description": "Of the view's current visualization; 'branch' needs visuals.v1",
           "title": "Color Mode"
+        },
+        "colors": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "enum": [
+                  "class",
+                  "flat",
+                  "time",
+                  "branch"
+                ],
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Colour mode per visualization (a split pane or a reopened view keeps them); color_mode, when also given, wins for the current one",
+          "title": "Colors"
         },
         "detail": {
           "anyOf": [
@@ -6566,6 +8210,19 @@
           "default": null,
           "title": "Show Free"
         },
+        "show_trash": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The recycle bins: drawn, or taken out of the picture",
+          "title": "Show Trash"
+        },
         "show_unknown": {
           "anyOf": [
             {
@@ -6600,6 +8257,22 @@
             }
           ],
           "default": null
+        },
+        "visual": {
+          "anyOf": [
+            {
+              "maxLength": 48,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A visual.list id (needs visuals.v1)",
+          "title": "Visual"
         }
       },
       "title": "ViewSettingsParams",
@@ -6620,13 +8293,29 @@
           "type": "boolean"
         },
         "color_mode": {
+          "description": "Of the current visualization (each remembers its own)",
           "enum": [
             "class",
             "flat",
-            "time"
+            "time",
+            "branch"
           ],
           "title": "Color Mode",
           "type": "string"
+        },
+        "colors": {
+          "additionalProperties": {
+            "enum": [
+              "class",
+              "flat",
+              "time",
+              "branch"
+            ],
+            "type": "string"
+          },
+          "description": "Colour mode each visualization remembers",
+          "title": "Colors",
+          "type": "object"
         },
         "compare": {
           "default": false,
@@ -6655,6 +8344,12 @@
           ],
           "title": "Filter Mode",
           "type": "string"
+        },
+        "has_trash": {
+          "default": false,
+          "description": "The scan holds a recycle bin / trash folder (the toggle is offered)",
+          "title": "Has Trash",
+          "type": "boolean"
         },
         "min_element": {
           "title": "Min Element",
@@ -6690,6 +8385,12 @@
           "title": "Show Free",
           "type": "boolean"
         },
+        "show_trash": {
+          "default": true,
+          "description": "The recycle bins are drawn (not taken out of the picture)",
+          "title": "Show Trash",
+          "type": "boolean"
+        },
         "show_unknown": {
           "title": "Show Unknown",
           "type": "boolean"
@@ -6704,6 +8405,12 @@
         },
         "viewport": {
           "$ref": "#/$defs/Viewport"
+        },
+        "visual": {
+          "default": "treemap",
+          "description": "A visual.list id",
+          "title": "Visual",
+          "type": "string"
         },
         "zoom_key": {
           "title": "Zoom Key",
@@ -6866,6 +8573,101 @@
       "title": "Viewport",
       "type": "object"
     },
+    "VisualInfo": {
+      "description": "One visualization this server offers (``visual.list``).",
+      "properties": {
+        "available": {
+          "description": "This session negotiated what it needs",
+          "title": "Available",
+          "type": "boolean"
+        },
+        "compare": {
+          "description": "Can show compare views",
+          "title": "Compare",
+          "type": "boolean"
+        },
+        "default_color": {
+          "description": "Colour mode a view starts with on this visualization",
+          "enum": [
+            "class",
+            "flat",
+            "time",
+            "branch"
+          ],
+          "title": "Default Color",
+          "type": "string"
+        },
+        "free_space": {
+          "description": "Shows free / unknown space at a volume root",
+          "title": "Free Space",
+          "type": "boolean"
+        },
+        "icon": {
+          "title": "Icon",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "layout": {
+          "description": "Layout of its frames",
+          "title": "Layout",
+          "type": "string"
+        },
+        "name": {
+          "description": "Display name in the session's language",
+          "title": "Name",
+          "type": "string"
+        },
+        "order": {
+          "title": "Order",
+          "type": "integer"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Why it is not available (display text)",
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "id",
+        "layout",
+        "name",
+        "icon",
+        "order",
+        "compare",
+        "free_space",
+        "default_color",
+        "available"
+      ],
+      "title": "VisualInfo",
+      "type": "object"
+    },
+    "VisualListResult": {
+      "properties": {
+        "visuals": {
+          "items": {
+            "$ref": "#/$defs/VisualInfo"
+          },
+          "title": "Visuals",
+          "type": "array"
+        }
+      },
+      "required": [
+        "visuals"
+      ],
+      "title": "VisualListResult",
+      "type": "object"
+    },
     "VolumeInfo": {
       "properties": {
         "cluster_size": {
@@ -6999,6 +8801,164 @@
       ],
       "title": "VolumeListResult",
       "type": "object"
+    },
+    "VolumeOverview": {
+      "properties": {
+        "disks": {
+          "description": "Ids of the disks it lives on ([]: none known)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Disks",
+          "type": "array"
+        },
+        "history": {
+          "description": "The complete snapshots of the whole volume, newest first (at most 12): how it grew",
+          "items": {
+            "$ref": "#/$defs/SnapshotPoint"
+          },
+          "title": "History",
+          "type": "array"
+        },
+        "scan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VolumeScan"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "volume": {
+          "$ref": "#/$defs/VolumeInfo"
+        }
+      },
+      "required": [
+        "volume"
+      ],
+      "title": "VolumeOverview",
+      "type": "object"
+    },
+    "VolumeScan": {
+      "description": "What SpaceKnife knows of a volume from a scan of its root.",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When the scan finished (or started, while it runs)",
+          "title": "At"
+        },
+        "bytes_alloc": {
+          "default": 0,
+          "title": "Bytes Alloc",
+          "type": "integer"
+        },
+        "classes": {
+          "description": "Open and kept scans: the largest file classes",
+          "items": {
+            "$ref": "#/$defs/ClassStat"
+          },
+          "title": "Classes",
+          "type": "array"
+        },
+        "dirs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dirs"
+        },
+        "files": {
+          "default": 0,
+          "title": "Files",
+          "type": "integer"
+        },
+        "folders": {
+          "description": "Open and kept scans: the largest top-level folders",
+          "items": {
+            "$ref": "#/$defs/FolderStat"
+          },
+          "title": "Folders",
+          "type": "array"
+        },
+        "method": {
+          "anyOf": [
+            {
+              "enum": [
+                "hard",
+                "mft"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Method"
+        },
+        "running": {
+          "default": false,
+          "title": "Running",
+          "type": "boolean"
+        },
+        "scan_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The open scan (its tab can be shown)",
+          "title": "Scan Id"
+        },
+        "snapshot": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The snapshot file",
+          "title": "Snapshot"
+        },
+        "source": {
+          "description": "A scan open in this backend; what was kept of the volume's last complete scan (its classes and folders too, across closed tabs and restarts); or the newest snapshot (counts only)",
+          "enum": [
+            "scan",
+            "snapshot",
+            "kept"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "title": "VolumeScan",
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -7040,6 +9000,10 @@
     "settings.changed": {
       "doc": "Settings changed (any client, or the file was edited).",
       "payload": "#/$defs/SettingsChangedEvent"
+    },
+    "update.changed": {
+      "doc": "Update check result or download progress (sessions with updates.v1).",
+      "payload": "#/$defs/UpdateChangedEvent"
     },
     "view.frame": {
       "doc": "A frame pushed without a request (scan progress, time).",
@@ -7094,6 +9058,12 @@
       "params": "#/$defs/BasketRemoveParams",
       "requiresSession": true,
       "result": "#/$defs/BasketState"
+    },
+    "classes.folder": {
+      "doc": "Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38).",
+      "params": "#/$defs/ClassesFolderParams",
+      "requiresSession": true,
+      "result": "#/$defs/ClassesState"
     },
     "classes.get": {
       "doc": "The file class table (W7 文件类别).",
@@ -7185,6 +9155,18 @@
       "requiresSession": true,
       "result": "#/$defs/IoStatusList"
     },
+    "machine.disks": {
+      "doc": "This computer's disks with their links, the volumes on each and what scans tell of each volume.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/MachineDisks"
+    },
+    "machine.read_health": {
+      "doc": "Read the disks' own records that need administrator rights (Linux: the elevated helper, behind polkit's password prompt). Only when the user asks; the answer is the whole page again.",
+      "params": "#/$defs/ReadHealthParams",
+      "requiresSession": true,
+      "result": "#/$defs/ReadHealthResult"
+    },
     "ops.cancel": {
       "doc": "Stop a running file operation.",
       "params": "#/$defs/OpTaskParams",
@@ -7196,6 +9178,12 @@
       "params": "#/$defs/OpTaskParams",
       "requiresSession": true,
       "result": "#/$defs/EmptyResult"
+    },
+    "palette.check": {
+      "doc": "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+      "params": "#/$defs/PaletteCheckParams",
+      "requiresSession": true,
+      "result": "#/$defs/PaletteCommand"
     },
     "palette.clear": {
       "doc": "Clear the recents of a scan target and the shared filters.",
@@ -7425,6 +9413,48 @@
       "requiresSession": true,
       "result": "#/$defs/TreeSummaryResult"
     },
+    "update.cancel": {
+      "doc": "Stop a running download.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.check": {
+      "doc": "Check the GitHub releases now (also when automatic checks are off).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.dismiss": {
+      "doc": "The card / dialog for this version was closed.",
+      "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.download": {
+      "doc": "Download this version's file for this install into the updates folder (progress: update.changed).",
+      "params": "#/$defs/UpdateVersionParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.mute": {
+      "doc": "Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic download for its releases.",
+      "params": "#/$defs/UpdateMuteParams",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
+    "update.releases": {
+      "doc": "The recent releases with their notes (the timeline of the About & updates page).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateReleases"
+    },
+    "update.status": {
+      "doc": "What the last update check found (updates.v1).",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/UpdateStatus"
+    },
     "view.back": {
       "doc": "Back to the previous zoom root.",
       "params": "#/$defs/ViewIdParams",
@@ -7515,6 +9545,12 @@
       "requiresSession": true,
       "result": "#/$defs/ViewUpdate"
     },
+    "visual.list": {
+      "doc": "Visualizations this server offers and whether this session can show each.",
+      "params": "#/$defs/Empty",
+      "requiresSession": true,
+      "result": "#/$defs/VisualListResult"
+    },
     "volume.list": {
       "doc": "Volumes offered on the start page (W1).",
       "params": "#/$defs/Empty",
@@ -7528,6 +9564,6 @@
       "params": "#/$defs/CancelParams"
     }
   },
-  "protocol": "1.0",
+  "protocol": "1.1",
   "title": "SpaceKnife protocol"
 }

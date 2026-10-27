@@ -13,11 +13,16 @@ Keep this module import-light: every pool process imports it at start-up.
 
 from __future__ import annotations
 
+import errno
 import os
+import posixpath
 import stat
+import struct
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import numpy as np
@@ -25,6 +30,7 @@ import numpy as np
 KIND_FILE, KIND_DIR, KIND_LINK, KIND_OTHER = 0, 1, 2, 3
 
 # Mirrors spaceknife.store.nodes.Flag (kept literal so workers don't import the store).
+F_ACCESS_DENIED = 1 << 0
 F_MOUNT = 1 << 1
 F_COMPRESSED = 1 << 3
 F_SPARSE = 1 << 4
@@ -39,6 +45,8 @@ F_ENCRYPTED = 1 << 13
 F_TEMPORARY = 1 << 14
 F_NOT_INDEXED = 1 << 15
 F_OFFLINE = 1 << 16
+SF_DATALESS = 0x40000000  # macOS st_flags: contents in the cloud (iCloud Drive, File Provider)
+DARWIN = sys.platform == "darwin"
 
 IS_WINDOWS = sys.platform == "win32"
 NAME_ERRORS = "surrogatepass" if IS_WINDOWS else "surrogateescape"
@@ -78,6 +86,18 @@ _ATTR_FLAGS = (
 Ref = tuple[int, int, int]
 Task = tuple[Ref, str, int]  # (ref, absolute directory path, root index)
 
+# Listing errors of folders their name does not reach (Windows: a case-only sibling's name opens
+# the other entry, docs/native.md 2.2). The native walker has the same texts (hardscan/case.rs);
+# events.denied_reason gives them their wording in the log. The worker cannot open by file id, so
+# such folders are errors here (CAP and INCOMPLETE are the native walker's only).
+CASE_ERROR = (
+    "cannot be opened by its name: another entry in this folder has the same name in a different case"
+)
+DUP_ERROR = "cannot be opened by its name: another entry in this folder has the same name as Windows shows it"
+BADNAME_ERROR = "cannot be opened by its name: it contains a character Windows names cannot hold"
+CAP_ERROR = "not read: too many entries in one pass in folders that can only be opened by file id"
+INCOMPLETE_ERROR = "listed incompletely when opened by its file id"
+
 
 @dataclass(frozen=True, slots=True)
 class RootOptions:
@@ -85,6 +105,27 @@ class RootOptions:
     cluster_size: int = 4096  # Windows hard scan: allocation = size rounded up to clusters
     resident_max: int = 0  # NTFS: files this small live inside the MFT record (0 clusters)
     cross_mounts: bool = False
+    # folders not to enter, as mount points (macOS: the other half of the root's APFS volume
+    # group, already in the tree through the firmlinks; scan.volume.volume_group_twins)
+    skip: tuple[str, ...] = ()
+    # folders not to enter, as not accessible (macOS: places that would ask for consent one by
+    # one without Full Disk Access, when the user chose to leave them out; spaceknife.privacy)
+    protect: tuple[str, ...] = ()
+    path: str = ""  # the scan root as given (tasks are checked by their names below it)
+    # Windows: names fold onto case-sensitive storage here (WinBtrfs), so an open by name can reach
+    # a case-only sibling: subfolders sharing a name and every task are checked by the names the
+    # file system stores (`_unreachable`)
+    verify_names: bool = False
+    # Windows: files take their size on disk from their listing entries' AllocationSize, as this
+    # local file system counts it ("NTFS", "ReFS" or "Btrfs", where that was measured against the
+    # file system's own count: `_listed_alloc`); "" estimates it from the size (cluster_size,
+    # resident_max, the compressed size of sparse and compressed files)
+    listed_alloc: str = ""
+
+
+def _env_switch(name: str, default: bool) -> bool:
+    value = os.environ.get(name, "").strip().lower()
+    return default if not value else value not in ("0", "false", "no", "off")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +133,20 @@ class SliceOptions:
     roots: tuple[RootOptions, ...]
     budget_s: float = 0.03
     max_entries: int = 100_000
+    # the native Windows walker's switches (spaceknife_native hardscan/mod.rs, docs/native.md
+    # 2.2), from the environment when the options are made: leave out a listing's last query when
+    # the buffer before it had room for another entry (off: 5-13 % less CPU on hot caches, for a
+    # rule that only how the file systems fill their buffers backs), check a relative open by the
+    # "." entry (off: no gain measured), and keep access times only where the file system
+    # updates them
+    skip_final: bool = field(default_factory=lambda: _env_switch("SPACEKNIFE_WIN_SKIP_FINAL", False))
+    dot_check: bool = field(default_factory=lambda: _env_switch("SPACEKNIFE_WIN_DOT_CHECK", False))
+    keep_where_updated: bool = field(
+        default_factory=lambda: _env_switch("SPACEKNIFE_WIN_KEEP_WHERE_UPDATED", True)
+    )
+    # the native walker only: the disk's spaceknife_native.ListingGate (the disk-load limit on its
+    # listings in flight, IoGovernor.listing_gate); never given to the Python walker's processes
+    gate: Any = field(default=None, compare=False)
 
 
 @dataclass(slots=True)
@@ -106,7 +161,55 @@ class SliceResult:
     ext_ids: np.ndarray  # uint16 per entry, ids into ext_table
     frontier: list[Task]
     errors: list[tuple[Ref, str, str]]
-    elapsed: float = 0.0
+    elapsed: float = 0.0  # seconds spent listing (not waiting to start, nor handing the result over)
+
+
+def _shift(ref: Ref | np.ndarray, listings: int) -> Ref:
+    kind, j, i = (int(x) for x in ref)
+    return (kind, j, i) if kind == 0 else (kind, j + listings, i)
+
+
+def merge_slices(results: list[SliceResult]) -> SliceResult:
+    """Several slices as one, their listings one after another: the store folds them in one call
+    and pays its per-call costs once. Listings of different slices never name each other, so only
+    the references inside each slice (``(1, listing, entry)``) move. Extensions get one table."""
+    if len(results) == 1:
+        return results[0]
+    refs: list[np.ndarray] = []
+    bounds: list[np.ndarray] = [np.zeros(1, dtype=np.int64)]
+    ext_ids: list[np.ndarray] = []
+    frontier: list[Task] = []
+    errors: list[tuple[Ref, str, str]] = []
+    table: dict[str, int] = {}
+    listings = entries = 0
+    for r in results:
+        rr = np.array(r.refs, dtype=np.int64).reshape(-1, 3)
+        rr[rr[:, 0] != 0, 1] += listings
+        refs.append(rr)
+        bounds.append(np.asarray(r.bounds, dtype=np.int64)[1:] + entries)
+        remap = np.array([table.setdefault(e, len(table)) for e in r.ext_table], dtype=np.uint16)
+        ext_ids.append(remap[np.asarray(r.ext_ids, dtype=np.intp)])
+        if listings:
+            frontier += [(_shift(ref, listings), path, root) for ref, path, root in r.frontier]
+            errors += [(_shift(ref, listings), path, msg) for ref, path, msg in r.errors]
+        else:
+            frontier += r.frontier
+            errors += r.errors
+        listings += len(rr)
+        entries += len(r.name_lens)
+    return SliceResult(
+        refs=np.concatenate(refs),
+        paths=[p for r in results for p in r.paths],
+        bounds=np.concatenate(bounds),
+        name_blob=b"".join(r.name_blob for r in results),
+        name_lens=np.concatenate([r.name_lens for r in results]),
+        cols={key: np.concatenate([r.cols[key] for r in results]) for key in results[0].cols},
+        ext_table=list(table),
+        ext_ids=np.concatenate(ext_ids),
+        frontier=frontier,
+        errors=errors,
+        elapsed=sum(r.elapsed for r in results),
+    )
 
 
 @dataclass(slots=True)
@@ -149,11 +252,159 @@ def _secs(t: float) -> int:
 
 
 def _long_path(path: str) -> str:
-    if not IS_WINDOWS or len(path) < 240 or path.startswith("\\\\?\\"):
+    """``path`` as Win32 calls must get it: with the ``\\\\?\\`` prefix when it is long, or when a
+    name in it ends in a dot or space (Win32 trims those: the folder ``odd.`` would list ``odd``)."""
+    if not IS_WINDOWS or path.startswith("\\\\?\\"):
+        return path
+    if len(path) < 240 and not (".\\" in path or " \\" in path or path.endswith((".", " "))):
         return path
     if path.startswith("\\\\"):
         return "\\\\?\\UNC\\" + path[2:]
     return "\\\\?\\" + path
+
+
+_final_name_fns: Any = None
+
+
+def final_name(path: str) -> str | None:
+    """The stored name of what ``path`` opens (Windows: its path below the volume's root as the
+    file system stores it, e.g. ``\\usr\\share\\terminfo\\A``; normalised, FileNormalizedNameInfo,
+    where the file system has it: NTFS gives long names for 8.3 short names), or None when it
+    cannot be read, and on other systems. Opened with no access rights and without following a
+    reparse point at the end, as the open by name the listing does would."""
+    if not IS_WINDOWS:
+        return None
+    global _final_name_fns
+    if _final_name_fns is None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+        create = k32.CreateFileW
+        create.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        create.restype = wintypes.HANDLE
+        info = k32.GetFileInformationByHandleEx
+        info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        info.restype = wintypes.BOOL
+        close = k32.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        _final_name_fns = (create, info, close, ctypes)
+    create, info, close, ct = _final_name_fns
+    share_all, open_existing = 7, 3
+    backup_semantics, open_reparse_point = 0x02000000, 0x00200000
+    file_normalized_name_info, file_name_info = 24, 2
+    h = create(
+        _long_path(path), 0, share_all, None, open_existing, backup_semantics | open_reparse_point, None
+    )
+    if h is None or h == ct.c_void_p(-1).value:
+        return None
+    try:
+        # exactly 64 KiB (room for any name of an NT path): WinBtrfs refuses a buffer of a few
+        # bytes more with ERROR_MORE_DATA (measured 2026-10-22)
+        buf = ct.create_string_buffer(65536)
+        if not info(h, file_normalized_name_info, buf, len(buf)) and not info(
+            h, file_name_info, buf, len(buf)
+        ):
+            return None
+        n = int.from_bytes(buf.raw[:4], "little")
+        return str(buf.raw[4 : 4 + n].decode("utf-16-le", "surrogatepass"))
+    finally:
+        close(h)
+
+
+def names_below(path: str, root: str) -> list[str] | None:
+    """The names of ``path`` below the scan root ``root`` as given (the root part of a stored name
+    is the root's own stored name, ``task_is``: a root typed in another case, a SUBST drive, a
+    mount folder), or None for the root itself, a path not below it, or no root (hardscan/case.rs
+    ``below_root``)."""
+    if not root or not path.startswith(root):
+        return None
+    rest = path[len(root) :]
+    if not (root.endswith(("\\", "/")) or rest.startswith(("\\", "/"))):
+        return None  # C:\data2 is not below C:\data
+    below = [n for n in rest.replace("/", "\\").split("\\") if n]
+    return below or None
+
+
+def _names(path: str) -> list[str]:
+    return [n for n in path.replace("/", "\\").split("\\") if n]
+
+
+def task_is(stored: str, root: str | None, below: list[str]) -> bool:
+    """Whether a folder is stored under the names its path gives it below the scan root, exactly:
+    its stored name is the root's own (``root``) followed by ``below``. Without the root's, its last
+    names must be ``below``; a stored name with fewer names than that was reached some other way
+    (through a symlink that won the name). hardscan/case.rs ``task_is``."""
+    names = _names(stored)
+    if root is not None:
+        return names == _names(root) + below
+    return len(names) >= len(below) and names[len(names) - len(below) :] == below
+
+
+def case_marks(names: list[str], dirs: list[int]) -> dict[int, str]:
+    """How the subfolders ``dirs`` (indexes into ``names``, one listing's entry names) must be
+    opened, on roots that ``verify_names``: ``strict`` when another entry has the same name under
+    ``str.upper()`` (it groups every pair the Windows upcase does, and a few more: checked by
+    test; the stored name decides), ``dup`` for a subfolder after the first entry of the very same
+    name (WinBtrfs shows invalid UTF-8 as U+FFFD), ``bad`` for a name no Windows path can hold
+    (:func:`unnameable`). Unmarked subfolders are not in the result."""
+    groups: dict[str, list[int]] = {}
+    for j, name in enumerate(names):
+        groups.setdefault(name.upper(), []).append(j)
+    is_dir = set(dirs)
+    marks: dict[int, str] = {}
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        seen: set[str] = set()
+        for j in group:
+            if j in is_dir:
+                marks[j] = "dup" if names[j] in seen else "strict"
+            seen.add(names[j])
+    for j in dirs:
+        if unnameable(names[j]):
+            marks[j] = "bad"
+    return marks
+
+
+_UNNAMEABLE = frozenset('\\/:*?"<>|') | frozenset(map(chr, range(1, 32)))
+
+
+def unnameable(name: str) -> bool:
+    """A name no Windows path can hold (hardscan/case.rs ``unnameable``): a separator, the stream
+    separator ``:``, a wildcard or DOS wildcard (``* ? " < >``), ``|`` or a control character.
+    WinBtrfs lists Linux names that have them as they are."""
+    return any(c in _UNNAMEABLE for c in name)
+
+
+_NO_NAME = {"dup": DUP_ERROR, "bad": BADNAME_ERROR}
+
+
+def _unreachable(path: str, root: RootOptions, mark: str, root_name: Callable[[], str | None]) -> str | None:
+    """Why the folder ``path`` names cannot be listed by that path (roots that ``verify_names``):
+    an exact duplicate's or a ``\\`` name's never can; a task, or a subfolder whose name another
+    entry shares, only when the file system stores it under those names below the root (else the
+    open reached a case-only sibling, something below one, or what a sibling that is a symlink
+    points to). ``root_name``: the root's own stored name (read once per slice). Checked when the
+    folder's turn comes, not at its parent's listing: a relist of the parent alone (the monitor's)
+    stays free of such errors, and every task that comes back from the frontier is checked again.
+    When the stored name cannot be read, the folder is listed as before and the listing gives any
+    error."""
+    if mark in _NO_NAME:
+        return _NO_NAME[mark]
+    if mark in ("strict", "task") and (below := names_below(path, root.path)) is not None:
+        stored = final_name(path)
+        if stored is not None and not task_is(stored, root_name(), below):
+            return CASE_ERROR
+    return None
 
 
 _get_compressed_size: Any = None
@@ -179,13 +430,155 @@ def _compressed_size(path: str) -> int | None:
     return int((high.value << 32) | low)
 
 
-def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]]:
-    subdirs: list[tuple[int, str]] = []
+# The listing rule (RootOptions.listed_alloc; hardscan/win.rs `listed_alloc`, `on_disk`, `ask_alloc`)
+
+_LISTED_FS = {"": "", "ntfs": "NTFS", "refs": "ReFS", "btrfs": "Btrfs"}
+_LISTING_LAG = 60 * 10_000_000  # 100 ns units (win.rs LISTING_LAG_100NS)
+_FILETIME_1970 = 116_444_736_000_000_000
+
+
+def _filetime_now() -> int:
+    return time.time_ns() // 100 + _FILETIME_1970
+
+
+def _listed_alloc(fs: str, attrs: int, eof: int, alloc: int, written: int, now: int) -> int | None:
+    """A file's size on disk from its listing entry (win.rs ``listed_alloc``): the entry's
+    AllocationSize, or None where the file must be asked instead (`_ask_alloc`): on NTFS and ReFS a
+    sparse or compressed file written or changed in the last minute (``written``: the later of the
+    two times; the parent's entry lags until the cache writes such files out), and on NTFS a file
+    that lists no clusters although it is neither empty, sparse nor compressed (WOF-compressed)."""
+    if fs in ("NTFS", "ReFS"):
+        packed = attrs & (_FA_COMPRESSED | _FA_SPARSE)
+        recent = now != 0 and now - written < _LISTING_LAG
+        hidden = fs == "NTFS" and not packed and alloc <= 0 and eof > 0
+        if (packed and recent) or hidden:
+            return None
+    return max(0, alloc)
+
+
+def _on_disk(alloc: int, cluster: int) -> int:
+    """win.rs ``on_disk``: an allocation that is not whole clusters is data kept in the file's
+    record (NTFS resident, ReFS inline data, a WinBtrfs sparse file without data) and takes none."""
+    a = max(0, alloc)
+    return 0 if a % cluster else a
+
+
+_info_fns: Any = None
+_FULL_DIR = struct.Struct("<I20xqq8xq4xI")  # FILE_FULL_DIR_INFO: next, write, change, alloc, name bytes
+
+
+def _win_info_fns() -> Any:
+    global _info_fns
+    if _info_fns is None:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+        create = k32.CreateFileW
+        create.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        create.restype = wintypes.HANDLE
+        info = k32.GetFileInformationByHandleEx
+        info.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p, wintypes.DWORD]
+        info.restype = wintypes.BOOL
+        close = k32.CloseHandle
+        close.argtypes = [wintypes.HANDLE]
+        _info_fns = (create, info, close, ctypes)
+    return _info_fns
+
+
+def _listing_allocs(path: str) -> dict[str, list[tuple[int, int]]] | None:
+    """The listing of ``path`` read once more for what os.scandir does not give (FindFirstFileW has
+    neither AllocationSize nor ChangeTime): per name, in listing order (WinBtrfs can list a name
+    twice), the entry's AllocationSize and the later of its LastWriteTime and ChangeTime. None when
+    the folder cannot be read again."""
+    create, info, close, ct = _win_info_fns()
+    list_directory, synchronize, share_all, open_existing, backup = 0x1, 0x00100000, 7, 3, 0x02000000
+    full_dir, full_dir_restart, no_more_files = 14, 15, 18
+    h = create(_long_path(path), list_directory | synchronize, share_all, None, open_existing, backup, None)
+    if h is None or h == ct.c_void_p(-1).value:
+        return None
+    out: dict[str, list[tuple[int, int]]] = {}
+    try:
+        buf = ct.create_string_buffer(65536)
+        cls = full_dir_restart
+        while True:
+            if not info(h, cls, buf, len(buf)):
+                return out if ct.get_last_error() == no_more_files else None
+            cls = full_dir
+            raw = buf.raw
+            off = 0
+            while True:
+                nxt, write, change, alloc, nlen = _FULL_DIR.unpack_from(raw, off)
+                name = raw[off + 68 : off + 68 + nlen].decode("utf-16-le", "surrogatepass")
+                out.setdefault(name, []).append((alloc, max(write, change)))
+                if not nxt:
+                    break
+                off += nxt
+    finally:
+        close(h)
+
+
+def _ask_alloc(path: str) -> int | None:
+    """The size on disk the file system counts for the file ``path`` now (FileStandardInfo's
+    AllocationSize; win.rs ``ask_alloc``), or None when it cannot be read."""
+    create, info, close, ct = _win_info_fns()
+    read_attributes, share_all, open_existing, backup, standard = 0x80, 7, 3, 0x02000000, 1
+    h = create(_long_path(path), read_attributes, share_all, None, open_existing, backup, None)
+    if h is None or h == ct.c_void_p(-1).value:
+        return None
+    try:
+        buf = ct.create_string_buffer(24)
+        if not info(h, standard, buf, len(buf)):
+            return None
+        return int.from_bytes(buf.raw[:8], "little", signed=True)
+    finally:
+        close(h)
+
+
+_ERROR_FILENAME_EXCED_RANGE = 206
+
+
+def _too_long(path: str) -> OSError:
+    """The error a Win32 call gives a path past 32,767 units (os.scandir raises ValueError before
+    calling one); its strerror is CPython's for that code, as the native walker's win_message."""
+    assert sys.platform == "win32"
+    import ctypes
+
+    text = ctypes.FormatError(_ERROR_FILENAME_EXCED_RANGE)  # type: ignore[attr-defined,unused-ignore]
+    while text and (text[-1] <= " " or text[-1] == "."):  # trimmed like OSError.strerror
+        text = text[:-1]
+    return OSError(0, text, path, _ERROR_FILENAME_EXCED_RANGE)
+
+
+def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str, str]]:
+    """Lists ``path`` into ``acc``; returns the subfolders to descend as ``(j, path, mark)`` (marks:
+    ``case_marks``, only on roots that ``verify_names``)."""
+    subdirs: list[tuple[int, str, str]] = []
+    names: list[str] = []  # the listing's names, to find the ones that share a name
     cluster = max(1, root.cluster_size)
     base = len(acc.kind)
-    with os.scandir(_long_path(path)) as it:
+    fs = _LISTED_FS.get(root.listed_alloc.lower())
+    if fs is None:
+        raise ValueError(f"unknown listed_alloc {root.listed_alloc!r}")
+    listed = _listing_allocs(path) if fs else None
+    now = _filetime_now() if fs else 0
+    try:
+        listing = os.scandir(_long_path(path))
+    except ValueError:  # too long for Windows (a folder renamed longer above a deep tree)
+        raise _too_long(path) from None
+    with listing as it:
         for entry in it:
             name = entry.name
+            if root.verify_names:
+                names.append(name)
             flags = 0
             try:
                 st: Any = entry.stat(follow_symlinks=False)
@@ -220,6 +613,17 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
             elif attrs & (_FA_RECALL_ON_DATA_ACCESS | _FA_RECALL_ON_OPEN):
                 flags |= F_CLOUD
                 alloc = 0
+            elif fs:
+                got = listed.get(name) if listed is not None else None
+                if got:
+                    entry_alloc, written = got.pop(0)
+                    a = _listed_alloc(fs, attrs, size, entry_alloc, written, now)
+                    if a is None:
+                        asked = _ask_alloc(os.path.join(path, name))
+                        a = entry_alloc if asked is None else asked
+                else:  # not in the second read of the listing (gone meanwhile): the estimate
+                    a = -(-size // cluster) * cluster
+                alloc = _on_disk(a, cluster)
             elif attrs & (_FA_COMPRESSED | _FA_SPARSE):
                 real = _compressed_size(os.path.join(path, name))
                 alloc = -(-(real if real is not None else size) // cluster) * cluster
@@ -240,15 +644,70 @@ def _list_windows(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, st
             acc.dev.append(0)
             acc.ext.append(acc.ext_id(name) if kind == KIND_FILE else 0)
             if kind == KIND_DIR:
-                subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name)))
+                subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name), ""))
+    if root.verify_names and subdirs and len(names) >= 2:
+        marks = case_marks(names, [j for j, _, _ in subdirs])
+        if marks:
+            subdirs = [(j, p, marks.get(j, "")) for j, p, _ in subdirs]
     return subdirs
 
 
-def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]]:
+_PIECE = 1000  # bytes of path per open in open_dir: well under PATH_MAX everywhere (macOS: 1,024)
+
+
+def open_dir(path: str, flags: int) -> int:
+    """``os.open(path, flags)``, also for a path of PATH_MAX bytes or more, which open() refuses
+    (ENAMETOOLONG) although the folder is there to list (posix.rs `open_long`): opened a piece of
+    whole names at a time, each relative to the folder the one before reached. Resolution is that
+    of one open of the whole path: symlinks in the middle are followed, ``flags`` apply to the last
+    name only, and the folders on the way need search permission only (O_PATH, Linux). A piece that
+    is too long only once its symlinks are followed (macOS) is opened again one name at a time."""
+    try:
+        return os.open(path, flags)
+    except OSError as exc:
+        if exc.errno != errno.ENAMETOOLONG:
+            raise
+    middle = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    rest = os.fsencode(path)
+    fd: int | None = None
+    one = False  # macOS counts a followed symlink's target into the piece: then one name at a time
+    try:
+        while True:
+            if one:
+                cut = rest.find(b"/", 1)  # a leading "/" stays with the first name
+                piece, tail = (rest, b"") if cut < 0 else (rest[:cut], rest[cut + 1 :])
+            elif len(rest) <= _PIECE:
+                piece, tail = rest, b""
+            else:
+                cut = rest.rfind(b"/", 1, _PIECE + 1)  # a leading "/" stays with the first piece
+                if cut < 0:
+                    raise OSError(errno.ENAMETOOLONG, os.strerror(errno.ENAMETOOLONG), path)
+                piece, tail = rest[:cut], rest[cut + 1 :]
+            tail = tail.lstrip(b"/")
+            try:
+                opened = os.open(piece, flags if not tail else middle, dir_fd=fd)
+            except OSError as exc:
+                if exc.errno == errno.ENAMETOOLONG and not one and b"/" in piece[1:]:
+                    one = True
+                    continue
+                raise
+            if fd is not None:
+                os.close(fd)
+            fd = opened
+            if not tail:
+                return opened
+            rest = tail
+    except BaseException:
+        if fd is not None:
+            os.close(fd)
+        raise
+
+
+def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str, str]]:
     assert sys.platform != "win32"
-    subdirs: list[tuple[int, str]] = []
+    subdirs: list[tuple[int, str, str]] = []
     base = len(acc.kind)
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
+    fd = open_dir(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0))
     try:
         with os.scandir(fd) as it:
             for entry in it:
@@ -276,12 +735,20 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                     continue
                 mode = st.st_mode
                 descend = False
+                if DARWIN and getattr(st, "st_flags", 0) & SF_DATALESS:
+                    flags |= (
+                        F_CLOUD  # takes no local space; a folder is not entered: listing would download it
+                    )
                 if stat.S_ISDIR(mode):
                     kind = KIND_DIR
-                    if st.st_dev != root.dev and not root.cross_mounts:
+                    if (st.st_dev != root.dev and not root.cross_mounts) or (
+                        root.skip and posixpath.join(path, name) in root.skip
+                    ):
                         flags |= F_MOUNT
+                    elif root.protect and posixpath.join(path, name) in root.protect:
+                        flags |= F_ACCESS_DENIED
                     else:
-                        descend = True
+                        descend = not flags & F_CLOUD
                 elif stat.S_ISLNK(mode):
                     kind = KIND_LINK
                 elif stat.S_ISREG(mode):
@@ -303,7 +770,7 @@ def _list_posix(path: str, root: RootOptions, acc: _Acc) -> list[tuple[int, str]
                 acc.dev.append(st.st_dev)
                 acc.ext.append(acc.ext_id(name) if kind == KIND_FILE else 0)
                 if descend:
-                    subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name)))
+                    subdirs.append((len(acc.kind) - 1 - base, os.path.join(path, name), ""))
     finally:
         os.close(fd)
     return subdirs
@@ -318,14 +785,29 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
     deadline = started + opts.budget_s
     acc = _Acc()
     errors: list[tuple[Ref, str, str]] = []
-    stack: list[Task] = list(reversed(tasks))
+    # (ref, path, root index, mark): tasks are "task", subfolders as case_marks marked them
+    stack: list[tuple[Ref, str, int, str]] = [
+        (ref, path, root, "task") for ref, path, root in reversed(tasks)
+    ]
+    root_names: dict[int, str | None] = {}  # each root's own stored name, once it is needed
+
+    def root_name(i: int) -> str | None:
+        if i not in root_names:
+            root_names[i] = final_name(opts.roots[i].path)
+        return root_names[i]
+
     while stack:
         if acc.refs and (time.perf_counter() >= deadline or len(acc.kind) >= opts.max_entries):
             break
-        ref, path, root_idx = stack.pop()
+        ref, path, root_idx, mark = stack.pop()
+        root = opts.roots[root_idx]
+        why = _unreachable(path, root, mark, partial(root_name, root_idx)) if root.verify_names else None
+        if why is not None:
+            errors.append((ref, path, why))
+            continue
         listing = len(acc.refs)
         try:
-            subdirs = _list_dir(path, opts.roots[root_idx], acc)
+            subdirs = _list_dir(path, root, acc)
         except OSError as exc:
             # Roll back entries appended before the failure (e.g. scandir died mid-way).
             del acc.names[acc.bounds[-1] :]
@@ -338,9 +820,14 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
         acc.refs.append(ref)
         acc.paths.append(path)
         acc.bounds.append(len(acc.kind))
-        for j, sub_path in reversed(subdirs):
-            stack.append(((1, listing, j), sub_path, root_idx))
-    frontier = list(reversed(stack))
+        for j, sub_path, sub_mark in reversed(subdirs):
+            stack.append(((1, listing, j), sub_path, root_idx, sub_mark))
+    frontier: list[Task] = []
+    for ref, path, root_idx, mark in reversed(stack):
+        if mark in _NO_NAME:  # no path reaches it: never a task
+            errors.append((ref, path, _NO_NAME[mark]))
+        else:
+            frontier.append((ref, path, root_idx))
     count = len(acc.kind)
     cols: dict[str, np.ndarray] = {
         "kind": np.array(acc.kind, dtype=np.uint8),
@@ -370,5 +857,9 @@ def scan_slice(tasks: list[Task], opts: SliceOptions) -> SliceResult:
 
 
 def warm_up() -> int:
-    """Pool initializer target: import everything once so the first real slice is fast."""
+    """Pool initializer target: import everything once so the first real slice is fast; on macOS
+    the worker process never downloads cloud files either (io.priority.no_cloud_downloads)."""
+    from ..io.priority import no_cloud_downloads
+
+    no_cloud_downloads()
     return os.getpid()

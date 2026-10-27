@@ -14,6 +14,10 @@ reports where something changed; batches are coalesced (``scan.coalesce_ms`` of 
 Changes run under ``STRUCTURE.write()`` on the event loop; views remap their node ids and flash
 what changed. While a hard scan still runs, folders with children waiting in its queue are
 deferred (their ids are in the queue); while an MFT scan reads, everything waits for its tree.
+
+Per-folder watchers (inotify, polling) get the scan's folders in ticks, with the mtime the scan
+recorded for each: a folder that changed between its listing and its watch is reported then
+(``dir``), so the time before a folder's watch is placed is covered too.
 """
 
 from __future__ import annotations
@@ -23,7 +27,9 @@ import contextlib
 import os
 import threading
 import time
-from dataclasses import dataclass
+from array import array
+from dataclasses import dataclass, field
+from itertools import compress
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -37,6 +43,7 @@ from ..filter.names import forget
 from ..i18n import tr
 from ..monitor import Change, Watcher, create_watcher
 from ..scan import worker
+from ..scan.scanner import listed_alloc, verify_names
 from ..scan.volume import volume_for
 from ..scan.worker import SliceOptions, SliceResult
 from ..store import mutate
@@ -60,6 +67,7 @@ USN_PERIOD_S = 30.0  # checkpoints of the USN journal move on this often
 USN_MAX_ROWS = 1_000_000  # more records to replay than this: list the subtree again instead
 REF_MASK = (1 << 48) - 1  # an NTFS file reference's record number
 SCAN_TICK_S = 0.25  # while a scan runs: hand new folders to the watchers this often
+PER_FOLDER = ("inotify", "poll")  # watchers that take the scan's folders one by one (add_dirs)
 
 
 @dataclass(slots=True)
@@ -68,6 +76,7 @@ class _Applied:
     pending: list[int]  # new folders to scan
     kept_folders: list[int]  # folders whose rows moved (subtree rescans continue below them)
     changes: int
+    readable: list[str] = field(default_factory=list)  # listed at last: the scan could not (rescans)
 
 
 class _Remap:
@@ -111,6 +120,7 @@ class ScanMonitor:
         self._loop = asyncio.get_running_loop()
         self._wake = asyncio.Event()
         self.task: asyncio.Task[None] | None = None
+        self.usn_task: asyncio.Task[None] | None = None  # the first change-journal checkpoint
         self.deferred: set[str] = set()  # folders whose children still wait in the scan's queue
         self.trees: set[str] = set()  # subtrees to list again once quiet
         self.events = 0
@@ -118,8 +128,15 @@ class ScanMonitor:
         self.overflows = 0
         self.last_apply_ms = 0.0
         self._last_event = 0.0
-        self._fed = 0  # rows below this were handed to the watchers
+        self._fed = 0  # rows below this were handed to the watchers (or wait in _waiting)
+        self._waiting = np.empty(0, dtype=np.int64)  # folders of those rows the scan has yet to list
+        self._ids_gen = 0  # bumped when every id changes (compaction, an MFT tree): _waiting is stale
+        # the scan listed nothing before this (wall clock, ns): see monitor.poll.listed_changed
+        scanner = handle.scanner
+        began = scanner.started_at if scanner is not None else None
+        self.listed_after = int((time.time() if began is None else min(time.time(), began.timestamp())) * 1e9)
         self._free_at = 0.0
+        self._free_due = False  # a change came within FREE_REFRESH_S of the last read
         self.failed = ""
         # Windows: per volume (journal id, safe checkpoint, newer checkpoint) of the USN journal, to
         # replay what an overflow lost; the safe one lags one period behind (events still buffered)
@@ -186,23 +203,33 @@ class ScanMonitor:
 
     @property
     def fed(self) -> bool:
-        """Every folder of the tree was handed to the watchers."""
-        return self._fed >= len(self.handle.store)
+        """Every folder of the tree was handed to the watchers (all but those the scan has yet to
+        list: a stopped scan's queue)."""
+        return self._fed >= len(self.handle.store) and not (len(self._waiting) and self._waiting_listed())
+
+    def _waiting_listed(self) -> bool:
+        """Some folder held back while it was waiting to be listed has been listed (or found
+        unreadable) since."""
+        flags = self.handle.store.cols["flags"][self._waiting]
+        return bool(((flags & np.uint32(Flag.PENDING)) == 0).any())
 
     def rebuilt(self) -> None:
         """The whole tree was replaced (an MFT scan finished): every id is new."""
         self.index.forget()
         self._fed = 0
+        self._waiting = np.empty(0, dtype=np.int64)
+        self._ids_gen += 1
 
     async def stop(self) -> None:
         for _, watcher in self.watchers:
             await asyncio.to_thread(watcher.stop)
         self.watchers.clear()
-        if self.task is not None:
-            self.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await self.task
-            self.task = None
+        for task in (self.task, self.usn_task):
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+        self.task = self.usn_task = None
 
     def _sink(self, batch: list[Change]) -> None:  # watcher threads
         with self._lock:
@@ -264,6 +291,10 @@ class ScanMonitor:
                         self._queue[:0] = batch
                     continue
                 await self._process(batch)
+                now = time.monotonic()
+                if self._free_due and now - self._free_at >= FREE_REFRESH_S and await self._refresh_free(now):
+                    self.owner.views.volumes_changed(self.handle.id)
+                    self.handle.publish()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -271,36 +302,79 @@ class ScanMonitor:
 
     def _timeout(self) -> float | None:
         if self.trees:
-            return max(0.05, QUIET_RESCAN_S - (time.monotonic() - self._last_event))
-        if self.handle.running or self.deferred or not self.fed:
-            return SCAN_TICK_S
-        return None
+            wait: float | None = max(0.05, QUIET_RESCAN_S - (time.monotonic() - self._last_event))
+        elif self.handle.running or self.deferred or not self.fed:
+            wait = SCAN_TICK_S
+        else:
+            wait = None
+        if self._free_due:  # wake up to read the free space once the second is over
+            due = max(0.05, FREE_REFRESH_S - (time.monotonic() - self._free_at))
+            wait = due if wait is None else min(wait, due)
+        return wait
 
     async def _feed(self) -> None:
-        """Hand folders that entered the tree to per-folder watchers (inotify, polling)."""
+        """Hand folders that entered the tree to per-folder watchers (inotify, polling), with the
+        mtime the scan recorded for each (whole seconds, 4 B a folder while they wait): a folder
+        that changed between its listing and its watch is then reported (``dir``).
+
+        Not on Windows: the recursive watch covers the whole tree from the scan's start, polling
+        there is a rare fallback kept as it was, and a listing may give a folder's times from its
+        parent's index entry, which can lag the folder's own.
+
+        Folders the scan could not list (``ACCESS_DENIED``: a plain user's scan of / meets dozens,
+        such as /root) are left out: the tree holds nothing of theirs to keep up to date, inotify
+        cannot watch them either (EACCES), and polling them only listed them again, in vain, when
+        their mtime moved; it also made every such scan 「部分轮询」. Their own renaming or removal
+        still shows through their parent's watch. One that becomes readable later (chmod) is listed
+        by the next rescan of it or a folder above it, as before: a change of permissions moves
+        no mtime, and inotify reports none for a folder it does not watch.
+
+        So a folder is handed over once the scan has listed it: until then (``PENDING``) it is not
+        known to be readable, and it waits in ``_waiting`` (8 B a folder). Handed over before, a
+        folder the scan then could not list stayed polled. A change between its listing and its
+        watch is caught by the mtime check above."""
         store = self.handle.store
         n = len(store)
-        if self._fed >= n:
+        if self._fed >= n and not (len(self._waiting) and self._waiting_listed()):
             return
-        wanted = [(root, w) for root, w in self.watchers if w.name != "rdcw"]
+        wanted = [(root, w) for root, w in self.watchers if w.name in PER_FOLDER]
         start, self._fed = self._fed, n
+        waiting, gen = self._waiting, self._ids_gen
         if not wanted:
+            self._waiting = np.empty(0, dtype=np.int64)
             return
 
-        def folders() -> list[str]:
+        def folders() -> tuple[list[str], array[int] | None, np.ndarray]:
             c = store.cols
             ids = np.arange(start, n, dtype=np.int64)
-            skip = np.uint32(Flag.GONE | Flag.MOUNT)  # mount points are never entered by the scan
-            ids = ids[(c["kind"][start:n] == Kind.DIR) & ((c["flags"][start:n] & skip) == 0)]
+            ids = np.concatenate([waiting, ids[c["kind"][start:n] == Kind.DIR]])
+            flags = c["flags"][ids]
+            # mount points are never entered by the scan; folders it could not list hold nothing
+            skip = np.uint32(Flag.GONE | Flag.MOUNT | Flag.ACCESS_DENIED)
+            keep = (flags & skip) == 0
+            ids, flags = ids[keep], flags[keep]
+            later = (flags & np.uint32(Flag.PENDING)) != 0
+            held, ids = ids[later], ids[~later]
             ids = ids[np.argsort(c["depth"][ids], kind="stable")]  # shallow first
-            return [store.path(int(i)) for i in ids]
+            listed = None
+            if os.name != "nt":
+                listed = array("I")
+                listed.frombytes(c["mtime"][ids].astype(np.uint32).tobytes())
+            return [store.path(int(i)) for i in ids], listed, held
 
-        paths = await compute(folders)
+        paths, listed, still = await compute(folders)
+        if gen == self._ids_gen:  # else every id changed meanwhile (compaction, an MFT tree)
+            self._waiting = still
+        if not paths:
+            return
         for root, watcher in wanted:
             prefix = root if root.endswith(os.sep) else root + os.sep
-            mine = [q for q in paths if q == root or q.startswith(prefix)]
-            if mine:
-                watcher.add_dirs(mine)
+            inside = [q == root or q.startswith(prefix) for q in paths]
+            if all(inside):  # one root, and no virtual top among them
+                watcher.add_dirs(paths, listed, self.listed_after)
+            elif any(inside):
+                times = None if listed is None else array("I", compress(listed, inside))
+                watcher.add_dirs(list(compress(paths, inside)), times, self.listed_after)
 
     # ------------------------------------------------------------- one batch
 
@@ -355,7 +429,7 @@ class ScanMonitor:
         if self.trees and quiet and not self.handle.running:
             for path in sorted(self.trees):
                 node, _ = self.index.locate(path)
-                if node is not None and store.cols["kind"][node] == Kind.DIR:
+                if node is not None and store.cols["kind"][node] == Kind.DIR and not self.index.unnamed(node):
                     targets[node] = store.path(node)
             rescan = True
             self.trees.clear()
@@ -365,6 +439,7 @@ class ScanMonitor:
             applied = await self._relist(targets)
             flashes.update(applied.flashes)
             changes += applied.changes
+            self._hand_over(applied.readable)  # before their new subfolders (the next _feed)
             await self._scan_new(applied.pending)
             # a subtree rescan goes on below every folder that stayed
             targets = {k: store.path(k) for k in applied.kept_folders} if rescan else {}
@@ -372,24 +447,30 @@ class ScanMonitor:
         if changes or flashes:
             self.changes += changes
             self.last_apply_ms = (time.perf_counter() - t0) * 1000
+            await self._refresh_free(now)  # first: the new frames draw free and unknown space from it
             self.owner.views.flash(self.handle.id, flashes)
-            await self._refresh_free(now)
             self.handle.publish()
             await self._maybe_compact()
 
     def _targets(self, folders: set[str]) -> dict[int, str]:
         """Folders to list again, by node: missing ones resolve to their deepest known ancestor;
-        folders not listed yet are left to the scan; folders with children in the scan's queue wait."""
+        folders not listed yet are left to the scan; folders with children in the scan's queue wait;
+        folders whose path could open another entry of the very same name stay as scanned."""
         store = self.handle.store
         c = store.cols
         out: dict[int, str] = {}
         for path in folders:
             node, deepest = self.index.locate(path)
             folder = node if node is not None and c["kind"][node] == Kind.DIR else deepest
-            if folder is None or c["kind"][folder] != Kind.DIR:
+            if folder is None or c["kind"][folder] != Kind.DIR or self.index.unnamed(folder):
                 continue
             if c["flags"][folder] & np.uint32(Flag.PENDING):
                 continue  # the scan has not listed it yet: it will read it as it is now
+            if c["flags"][folder] & np.uint32(Flag.ACCESS_DENIED):
+                # the scan could not list it (or was not to: macOS's protected places, which ask
+                # for consent when opened); a change inside, which a recursive watcher (FSEvents,
+                # ReadDirectoryChangesW) reports, does not open it: a rescan of it tries again
+                continue
             if not mutate.can_relist(store, folder):
                 self.deferred.add(store.path(folder))
                 continue
@@ -416,9 +497,14 @@ class ScanMonitor:
                 if ch.size is not None and ch.alloc is None:
                     folders.add(os.path.dirname(ch.path))
                     known[i] = Change("modified", ch.path)
-            if self.handle.method == "hard":  # keep to the hard scan's rule (resident, clusters)
+            if self.handle.method == "hard":  # keep to the hard scan's rule
                 cloud = (c["flags"][np.array(nodes, dtype=np.int64)] & np.uint32(Flag.CLOUD)) != 0
-                known = [self._hard_alloc(ch, bool(k)) for ch, k in zip(known, cloud.tolist(), strict=True)]
+                for i, (ch, k) in enumerate(zip(known, cloud.tolist(), strict=True)):
+                    got = self._hard_alloc(ch, bool(k))
+                    if got is None:  # the scan would ask this file: its folder's listing asks it
+                        folders.add(os.path.dirname(ch.path))
+                        got = Change("modified", ch.path)
+                    known[i] = got
         missing = [i for i, ch in enumerate(known) if ch.size is None and os.name != "nt"]
         if missing:  # the watcher did not say: ask the file system
             looked = await asyncio.to_thread(_stat_many, [known[i].path for i in missing], self._cluster())
@@ -461,6 +547,19 @@ class ScanMonitor:
                 rel = mutate.relist(
                     store, node, res.name_blob, res.name_lens, {k: res.cols[k] for k in ENTRY_COLUMNS}, ext
                 )
+                if c["flags"][node] & np.uint32(Flag.ACCESS_DENIED):  # a rescan of it, readable now
+                    store.clear(node, Flag.ACCESS_DENIED)
+                    out.readable.append(path)
+                # new subfolders no path can open (the very same name twice, a `\` in it): not
+                # scanned by their path, which would list another one, or nothing
+                unreadable = {
+                    int(rel.start) + int(j)
+                    for (kind, at, j), _path, _msg in res.errors
+                    if (kind, at) == (1, 0)
+                }
+                for row in unreadable & set(rel.pending.tolist()):
+                    store.mark(row, Flag.ACCESS_DENIED)
+                    store.clear(row, Flag.PENDING)
                 remap.add(rel.moved_from, rel.moved_to)
                 out.changes += len(rel.added) + len(rel.removed) + len(rel.grown)
                 for i in rel.added.tolist():
@@ -469,9 +568,13 @@ class ScanMonitor:
                     out.flashes[i] = d
                 if len(rel.removed):
                     out.flashes[node] = out.flashes.get(node, 0) - int(rel.removed_alloc.sum())
-                out.pending.extend(rel.pending.tolist())
+                out.pending.extend(i for i in rel.pending.tolist() if i not in unreadable)
                 kept = rel.moved_to[store.cols["kind"][rel.moved_to] == Kind.DIR]
-                out.kept_folders.extend(kept.tolist())
+                # a name the folder holds twice, or one with a separator, is listed by its path as
+                # another folder: those stay as scanned (the scan opened each by its file id), and so
+                # does what lies below them
+                unnamed = _unnamed(res)
+                out.kept_folders.extend(k for k in kept.tolist() if store.name_bytes(k) not in unnamed)
             if remap:
                 moved = remap(np.array(list(out.flashes), dtype=np.int64))
                 out.flashes = {
@@ -606,10 +709,26 @@ class ScanMonitor:
         if root_idx is None:
             return None
         opts = SliceOptions(roots=self._root_opts(), budget_s=0.0)  # this folder only
-        res = await self._slice([((0, node, 0), path, root_idx)], opts)
-        if len(res.refs) != 1 or res.errors:
+        task = (0, node, 0)
+        res = await self._slice([(task, path, root_idx)], opts)
+        if len(res.refs) != 1 or tuple(int(x) for x in res.refs[0]) != task:
             return None  # vanished (its parent lists it as gone) or no longer readable
+        if any(tuple(ref) == task for ref, _path, _msg in res.errors):
+            return None  # a folder a path cannot reach (a case-only sibling): stays as scanned
+        # errors of its subfolders (names no path can open) are theirs: the listing stands, and
+        # _relist marks them
         return res
+
+    def _hand_over(self, paths: list[str]) -> None:
+        """Folders a rescan could list at last (readable now): to the per-folder watchers, which
+        :meth:`_feed` left them out of while the scan could not list them."""
+        for root, watcher in self.watchers:
+            if watcher.name not in PER_FOLDER:
+                continue
+            prefix = root if root.endswith(os.sep) else root + os.sep
+            inside = [q for q in paths if q.startswith(prefix)]
+            if inside:
+                watcher.add_dirs(inside)
 
     async def _scan_new(self, folders: list[int]) -> None:
         """Scan folders that appeared (like the scan itself: listings in threads, ingest here)."""
@@ -625,27 +744,34 @@ class ScanMonitor:
             batch, queue = queue[:LIST_BATCH], queue[LIST_BATCH:]
             await self._permit()
             res = await self._slice(batch, opts)
-            remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
-            ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
-            starts = store.ingest_slice(
-                res.refs,
-                res.bounds,
-                res.name_blob,
-                res.name_lens,
-                {k: res.cols[k] for k in ENTRY_COLUMNS},
-                ext,
-            ).tolist()
+            # a writer: NodeStore.compact (on the compute pool, as a reader) replaces the columns,
+            # and rows written into a column it just replaced would be lost
+            async with STRUCTURE.write():
+                remap_ext = np.array([store.ext_id(e) for e in res.ext_table], dtype=np.uint16)
+                ext = remap_ext[res.ext_ids] if len(res.ext_ids) else res.ext_ids
+                starts = store.ingest_slice(
+                    res.refs,
+                    res.bounds,
+                    res.name_blob,
+                    res.name_lens,
+                    {k: res.cols[k] for k in ENTRY_COLUMNS},
+                    ext,
+                ).tolist()
 
-            def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int:
-                kind, a, b = ref
-                return a if kind == 0 else starts[a] + b
+                def resolve(ref: tuple[int, int, int], starts: list[int] = starts) -> int | None:
+                    """None: the folder left the tree while it was read (store.ingest_slice)."""
+                    kind, a, b = ref
+                    if kind == 0:
+                        return None if store.cols["flags"][a] & np.uint32(Flag.GONE) else a
+                    return None if starts[a] < 0 else starts[a] + b
 
-            for ref, _path, _msg in res.errors:
-                node = resolve(ref)
-                store.mark(node, Flag.ACCESS_DENIED)
-                store.clear(node, Flag.PENDING)
-            for ref, path, idx in res.frontier:
-                queue.append(((0, resolve(ref), 0), path, idx))
+                for ref, _path, _msg in res.errors:
+                    if (target := resolve(ref)) is not None:
+                        store.mark(target, Flag.ACCESS_DENIED)
+                        store.clear(target, Flag.PENDING)
+                for ref, path, idx in res.frontier:
+                    if (target := resolve(ref)) is not None:
+                        queue.append(((0, target, 0), path, idx))
 
     async def _slice(self, tasks: list[worker.Task], opts: SliceOptions) -> SliceResult:
         slicer = self.owner.scans.slicer()
@@ -664,7 +790,14 @@ class ScanMonitor:
         scanner = self.handle.scanner
         if scanner is not None:
             return scanner.root_options
-        return tuple(worker.RootOptions() for _ in self.handle.roots)
+        # each root's path and name check still apply: a relist must not list a case-only
+        # sibling's contents under the other's name
+        return tuple(
+            worker.RootOptions(
+                path=r.path, verify_names=verify_names(r.volume), listed_alloc=listed_alloc(r.volume)
+            )
+            for r in self.handle.roots
+        )
 
     def _root_index(self, path: str) -> int | None:
         norm = os.path.normcase(path)
@@ -674,16 +807,22 @@ class ScanMonitor:
                 return i
         return None
 
-    def _hard_alloc(self, ch: Change, cloud: bool) -> Change:
-        """The allocation a hard scan would report for this size (Windows estimates it: a cloud
-        placeholder occupies nothing, files up to ``resident_max`` live in the MFT record, the rest
-        round up to whole clusters)."""
+    def _hard_alloc(self, ch: Change, cloud: bool) -> Change | None:
+        """The allocation a hard scan would report for this change: a cloud placeholder occupies
+        nothing; under the listing rule (``RootOptions.listed_alloc``) the event's own
+        AllocatedLength, which is the listing's (monitor/win.py ``_alloc`` already gave data kept in
+        the file's record no cluster and left compressed and sparse files to a relist), or None
+        where the scan would ask the file (NTFS: no clusters for a file that is not empty, a
+        WOF-compressed one): its folder is listed again then; otherwise estimated from the size
+        (files up to ``resident_max`` live in the MFT record, the rest round up to whole clusters)."""
         if ch.size is None or ch.alloc is None:
             return ch
         if cloud:
             return Change("modified", ch.path, size=ch.size, alloc=0, mtime=ch.mtime)
         idx = self._root_index(ch.path)
         opts = self._root_opts()[idx] if idx is not None else worker.RootOptions()
+        if opts.listed_alloc:
+            return None if opts.listed_alloc == "NTFS" and ch.alloc == 0 and ch.size > 0 else ch
         cluster = opts.cluster_size or 4096
         alloc = 0 if ch.size <= opts.resident_max else -(-ch.size // cluster) * cluster
         return Change("modified", ch.path, size=ch.size, alloc=alloc, mtime=ch.mtime)
@@ -692,15 +831,23 @@ class ScanMonitor:
         vol = self.handle.roots[0].volume
         return vol.cluster_size if vol is not None else 4096
 
-    async def _refresh_free(self, now: float) -> None:
-        """Free space moves with the changes (status bar, unknown space): read it again, rarely."""
+    async def _refresh_free(self, now: float) -> bool:
+        """Free space moves with the changes (status bar, free and unknown space of the views): read
+        it again at most once every FREE_REFRESH_S. A change within that time is read once it is up
+        (``_free_due``, the loop wakes for it), so the last change of a burst is not missed. True when
+        a volume's free or used space changed."""
         if now - self._free_at < FREE_REFRESH_S:
-            return
-        self._free_at = now
+            self._free_due = True
+            return False
+        self._free_at, self._free_due = now, False
+        changed = False
         for root in self.handle.roots:
             if root.volume is not None and root.whole_volume:
                 with contextlib.suppress(OSError):
-                    root.volume = await asyncio.to_thread(volume_for, root.path)
+                    fresh = await asyncio.to_thread(volume_for, root.path)
+                    changed |= (fresh.free, fresh.used) != (root.volume.free, root.volume.used)
+                    root.volume = fresh
+        return changed
 
     async def _maybe_compact(self) -> None:
         store = self.handle.store
@@ -716,8 +863,30 @@ class ScanMonitor:
             forget(store)
             self.index.forget()
             self._fed = len(store)
+            if len(self._waiting):  # a stopped scan's folders still to list: their new ids
+                moved = remap[self._waiting]
+                self._waiting = moved[moved >= 0].astype(np.int64)
+            self._ids_gen += 1
             self.owner.views.remap(self.handle.id, chains, lambda ids: remap[np.asarray(ids, dtype=np.int64)])
         logger.info("scan {}: compacted after changes, {:,} rows", self.handle.id, len(store))
+
+
+_SEPARATORS = tuple(s.encode() for s in (os.sep, os.altsep) if s)
+
+
+def _unnamed(res: SliceResult) -> set[bytes]:
+    """Names of the listing of ``res`` (one folder) no path stands for alone: held more than once,
+    or with a separator in them (``PathIndex.unnamed``)."""
+    seen: set[bytes] = set()
+    out: set[bytes] = set()
+    at = 0
+    for n in res.name_lens.tolist():
+        name = res.name_blob[at : at + n]
+        at += n
+        if name in seen or any(sep in name for sep in _SEPARATORS):
+            out.add(name)
+        seen.add(name)
+    return out
 
 
 def _common_roots(paths: set[str]) -> set[str]:
@@ -772,9 +941,12 @@ class MonitorManager:
             return
         mon = ScanMonitor(self, handle)
         await mon.start()
-        await mon.start_usn()
         self.monitors[handle.id] = mon
         handle.monitor = mon
+        # The checkpoint asks the elevated helper, which answers one request at a time and may be
+        # reading this very scan's MFT for half a minute: scan.start (and the window waiting for it)
+        # must not wait for that. Until it is taken an overflow rescans instead of replaying.
+        mon.usn_task = asyncio.get_running_loop().create_task(mon.start_usn(), name=f"usn-{handle.id}")
 
     async def stop(self, scan_id: str) -> None:
         passive = self.passive.pop(scan_id, None)
@@ -791,7 +963,8 @@ class MonitorManager:
 
     async def rescan(self, handle: ScanHandle, node: int) -> None:
         """Read a folder again with everything below it (F5 「重新扫描当前视图」); with live
-        monitoring off a monitor without watchers does it."""
+        monitoring off a monitor without watchers does it. Node 0, the top of a scan of several
+        roots, reads every root again."""
         if handle.running:
             raise RpcError(ErrorCode.SCAN_BUSY, tr("扫描进行中，完成后再重新扫描"))
         mon = self.monitors.get(handle.id) or self.passive.get(handle.id)
@@ -799,7 +972,8 @@ class MonitorManager:
             mon = ScanMonitor(self, handle, watch=False)
             await mon.start()
             self.passive[handle.id] = mon
-        mon.rescan(handle.store.path(node))
+        for n in [r.node for r in handle.roots] if node == 0 else [node]:
+            mon.rescan(handle.store.path(n))
 
     async def apply_settings(self) -> None:
         """``scan.monitor`` switched: start or stop monitoring every open scan."""

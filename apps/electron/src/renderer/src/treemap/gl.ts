@@ -1,8 +1,11 @@
 // WebGL2 instanced renderer for treemap shapes: one draw call per picture.
 //
 // Each instance is a rounded rectangle evaluated as a signed distance field in its own pixel
-// space: fill, optional (dashed) border, stripes / dot patterns, or a soft shadow. A picture can
-// be drawn under an affine transform and an opacity, which is all the zoom animation needs.
+// space: fill, optional (dashed) border, stripes / dot patterns, or a soft shadow (optionally with
+// a hole where the block casting it lies). A picture can be drawn under an affine transform and an
+// opacity, which is all the zoom animation needs.
+
+import { ATTRIBUTES } from "@/visual/glContext";
 
 import { STRIDE } from "./paint";
 
@@ -65,7 +68,16 @@ void main() {
   if (pattern == 4.0) {                                        // soft shadow
     float blur = max(v_extra.x, 1.0);
     float a = 1.0 - smoothstep(-blur * 0.5, blur, d);
-    o = vec4(v_fill.rgb, 1.0) * v_fill.a * a * a * alpha;
+    a *= a;
+    // a hole where the block that casts it lies (border slot: its centre's offset from the
+    // shadow's centre and its size; pattern colour .x: its radius), so the shadow falls around it
+    // and not on it or on what is drawn inside it
+    if (v_border.z > 0.0 && v_border.w > 0.0) {
+      vec2 hh = v_border.zw * 0.5;
+      float dh = sdRound(v_local - v_border.xy, hh, min(v_pcolor.x, min(hh.x, hh.y)));
+      a *= clamp(0.5 + dh / (2.0 * aa), 0.0, 1.0);
+    }
+    o = vec4(v_fill.rgb, 1.0) * v_fill.a * a * alpha;
     return;
   }
   float inside = clamp(0.5 - d / (2.0 * aa), 0.0, 1.0);
@@ -100,6 +112,7 @@ export interface Picture {
   vao: WebGLVertexArrayObject;
   buffer: WebGLBuffer;
   count: number;
+  capacity: number; // bytes the buffer holds: it only grows, and is updated in place
 }
 
 export class GlRenderer {
@@ -112,7 +125,7 @@ export class GlRenderer {
   private uScale: WebGLUniformLocation;
 
   constructor(canvas: HTMLCanvasElement) {
-    const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, antialias: false, alpha: false });
+    const gl = canvas.getContext("webgl2", ATTRIBUTES); // the host's context (visual/glContext.ts)
     if (!gl) throw new Error("WebGL2 is not available");
     this.gl = gl;
     this.program = link(gl, VS, FS);
@@ -125,16 +138,32 @@ export class GlRenderer {
     this.uScale = gl.getUniformLocation(this.program, "u_scale")!;
   }
 
+  /** Instances into a picture. `previous` keeps its vertex array and its buffer, which only grows
+   * and is updated in place: a hover repaint allocates nothing on the GPU side (like the polar
+   * flame graph's sectors.ts). */
   upload(data: Float32Array, count: number, previous?: Picture | null): Picture {
     const gl = this.gl;
-    const vao = previous?.vao ?? gl.createVertexArray()!;
-    const buffer = previous?.buffer ?? gl.createBuffer()!;
+    const need = count * STRIDE * 4;
+    if (previous) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, previous.buffer);
+      if (need > previous.capacity) {
+        previous.capacity = Math.max(need, 2 * previous.capacity);
+        gl.bufferData(gl.ARRAY_BUFFER, previous.capacity, gl.DYNAMIC_DRAW);
+      }
+      if (count) gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, count * STRIDE);
+      previous.count = count;
+      return previous;
+    }
+    const vao = gl.createVertexArray()!;
+    const buffer = gl.createBuffer()!;
     gl.bindVertexArray(vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.quad);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, data.subarray(0, count * STRIDE), gl.DYNAMIC_DRAW);
+    const capacity = Math.max(need, 64 * STRIDE * 4);
+    gl.bufferData(gl.ARRAY_BUFFER, capacity, gl.DYNAMIC_DRAW);
+    if (count) gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, count * STRIDE);
     const bytes = STRIDE * 4;
     const attrs: [number, number, number][] = [
       [1, 4, 0],
@@ -150,16 +179,24 @@ export class GlRenderer {
       gl.vertexAttribDivisor(loc, 1);
     }
     gl.bindVertexArray(null);
-    return { vao, buffer, count };
+    return { vao, buffer, count, capacity };
   }
 
+  /** Clear to the ground colour (the clear ignores the viewport), set premultiplied blending, then use(). */
   begin(width: number, height: number, ground: [number, number, number]): void {
     const gl = this.gl;
-    gl.viewport(0, 0, width, height);
     gl.clearColor(ground[0], ground[1], ground[2], 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    this.use(width, height);
+  }
+
+  /** Make this program current for a width × height canvas without clearing or touching the blend
+   * state: another program may already have drawn into this context in the same frame. */
+  use(width: number, height: number): void {
+    const gl = this.gl;
+    gl.viewport(0, 0, width, height);
     gl.useProgram(this.program);
     gl.uniform2f(this.uRes, width, height);
   }

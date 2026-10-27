@@ -1,10 +1,13 @@
-// Everything that talks to the backend: connection, scans, views, filter, tags.
+// Everything that talks to the backend: connection, scans, views, filter, tags, updates.
 
 import type { BackendInfo, BackendState } from "../../../shared/api";
-import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, ViewSettingsParams, ViewUpdate } from "@/protocol/generated";
+import type { FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
-import { type BinaryFrame, Rpc, RpcError } from "@/protocol/rpc";
-import { decodeDraw } from "@/treemap/frame";
+import { Rpc, RpcError } from "@/protocol/rpc";
+// the built-in visualizations register before the first hello announces their layouts
+import "@/visual/builtins";
+import { decodeVisualFrame, isKnownLayout } from "@/visual/frame";
+import { componentFor } from "@/visual/registry";
 
 import {
   activeTab,
@@ -24,12 +27,20 @@ import {
   writeText,
 } from "./store";
 import { compareWhenDone, onCompareProgress, releaseCompare } from "./compare";
+import { moveTo, placeTab, stepIndex } from "./tabOrder";
+import { FramePairer, frameKey } from "./frames";
+import { announced, downloading, downloadOf, hasUpdate, seriesName, visibleSurface } from "./updates";
+import type { InstallHow } from "../../../shared/install";
+import { isThemeSetting, type ThemeSetting } from "../../../shared/theme";
 import { getLang, setLang, t } from "@/lib/i18n";
+import { applyAccent, applyTheme } from "@/lib/theme";
 
 let rpc: Rpc | null = null;
 let backendInfo: BackendInfo | null = null;
-const binaries = new Map<string, BinaryFrame>();
-const waiters = new Map<string, (f: BinaryFrame) => void>();
+
+/** Layouts this renderer decodes and has a component for. */
+const drawable = (layout: string) => isKnownLayout(layout) && componentFor(layout) !== null;
+const frames = new FramePairer(drawable);
 
 export function client(): Rpc {
   if (!rpc || !rpc.open) throw new RpcError(-32006, t("后端未连接"));
@@ -59,6 +70,8 @@ export function cancellable<M extends MethodName>(method: M, params: Methods[M][
 export async function boot(): Promise<void> {
   window.sk.onBackend((st) => void onBackend(st));
   await onBackend(await window.sk.backend());
+  // started again by 「无缝更新」: say once that it worked (the details are in 「关于与更新」)
+  if (window.sk.justUpdated) toast(t("已更新到 SpaceKnife {version}", { version: window.sk.version }), 5000);
 }
 
 let backendGone = false; // exited / failed: stop reconnecting until a new backend is ready
@@ -83,6 +96,7 @@ async function connect(): Promise<void> {
   try {
     const hello = await r.connect(backendInfo.url, backendInfo.token, { name: "spaceknife-electron", version: window.sk.version });
     rpc = r;
+    frames.clear();
     set({ conn: "ready", connMessage: "", serverVersion: hello.server.version });
   } catch (err) {
     if (backendGone) return; // keep the 「后端已退出」 message; a new 'ready' starts over
@@ -92,13 +106,14 @@ async function connect(): Promise<void> {
     return;
   }
   connectedOnce = true;
-  r.onBinary(onBinary);
+  r.onBinary((f) => frames.accept(f));
   r.on("view.frame", (ev) => void applyFrame(ev.frame));
   r.on("scan.progress", (ev) => onScanStatus(ev.status));
   r.on("settings.changed", (ev) => applySettings(ev.state));
   r.on("basket.changed", (ev) => set({ basket: ev.state }));
   r.on("ops.progress", (ev) => onOpProgress(ev));
   r.on("compare.progress", (ev) => onCompareProgress(ev));
+  r.on("update.changed", (ev) => applyUpdateStatus(ev.status));
   // the file class table changed (W7): the parser vocabulary and the colours follow
   r.on("classes.changed", () => void r.call("filter.vocab", {}).then((vocab) => set({ vocab })).catch(() => undefined));
   r.on("log.record", (ev) => addLog(ev));
@@ -111,27 +126,33 @@ async function connect(): Promise<void> {
     setTimeout(() => void reconnect(), 800);
   });
   void r.call("$/subscribe", { topic: "log", params: { backlog: 500, min_level: "INFO" } }).catch(() => {});
-  const [vocab, volumes, snapshots, scans, settings, basket] = await Promise.all([
+  const [vocab, volumes, snapshots, scans, settings, basket, visuals, update] = await Promise.all([
     r.call("filter.vocab", {}),
     r.call("volume.list", {}),
     r.call("snapshot.list", {}),
     r.call("scan.list", {}),
     r.call("settings.get", {}),
     r.call("basket.list", {}).catch(() => null),
+    r.call("visual.list", {}).catch(() => null), // a server before visuals.v1 has only the treemap
+    r.call("update.status", {}).catch(() => null), // a server before updates.v1 checks for none
   ]);
   applySettings(settings);
   set({
     basket,
     vocab,
+    visuals: visuals?.visuals ?? [],
     volumes: volumes.volumes,
     snapshots: snapshots.snapshots,
     scans: Object.fromEntries(scans.scans.map((s) => [s.scan_id, s])),
   });
+  if (update) applyUpdateStatus(update);
   for (const s of scans.scans) if (s.state === "scanning" || s.state === "queued") void watchScan(s.scan_id);
 }
 
-/** After a reconnect the views of the old session are gone: reopen every scan tab. */
+/** After a reconnect the views of the old session are gone: reopen every scan tab, each view with
+ * the visualization and display settings it had. */
 async function reconnect(): Promise<void> {
+  const before = get().views;
   await connect();
   if (!rpc) return;
   addLocalLog("INFO", t("已重新连接"));
@@ -141,43 +162,41 @@ async function reconnect(): Promise<void> {
   for (const t of tabs) {
     if (!get().scans[t.scanId!]) continue;
     const ids: string[] = [];
-    for (let i = 0; i < Math.max(1, t.viewIds.length); i++) ids.push(await openView(t.scanId!));
+    for (let i = 0; i < Math.max(1, t.viewIds.length); i++) {
+      ids.push(await openLike(t.scanId!, t.viewIds[i] ? before[t.viewIds[i]!]?.state : undefined));
+    }
     set((s) => ({ tabs: s.tabs.map((x) => (x.id === t.id ? { ...x, viewIds: ids } : x)) }));
   }
 }
 
 // ------------------------------------------------------------------ frames
 
-function onBinary(f: BinaryFrame): void {
-  if (f.header.layout !== "drawlist.v1") return;
-  const key = `${f.header.stream}#${f.header.seq}`;
-  const w = waiters.get(key);
-  if (w) {
-    waiters.delete(key);
-    w(f);
-  } else {
-    binaries.set(key, f);
-    if (binaries.size > 32) binaries.delete(binaries.keys().next().value!);
-  }
-}
-
-function binaryFor(info: FrameInfo): Promise<BinaryFrame> {
-  const key = `view:${info.view_id}#${info.seq}`;
-  const got = binaries.get(key);
-  if (got) {
-    binaries.delete(key);
-    return Promise.resolve(got);
-  }
-  return new Promise((resolve) => waiters.set(key, resolve));
-}
+/** Views already told that their visualization cannot be drawn here. */
+const fellBack = new Set<string>();
 
 async function applyFrame(info: FrameInfo): Promise<void> {
   const cur = get().views[info.view_id];
   if (!cur || (cur.info && info.seq <= cur.info.seq)) return;
-  const bin = await binaryFor(info);
+  // a server before visuals.v1 sends no layout: its frames are all drawlist.v1
+  if (info.layout === undefined) info = { ...info, layout: "drawlist.v1", visual: "treemap" };
+  // a layout this renderer cannot draw: no waiting for its binary frame, the picture on screen
+  // stays, and the view goes back to the treemap
+  if (!drawable(info.layout)) return fallBack(info);
+  const bin = await frames.waitFor(frameKey(`view:${info.view_id}`, info.seq));
   const now = get().views[info.view_id];
-  if (!now || (now.info && info.seq <= now.info.seq)) return;
-  patchView(info.view_id, { info, frame: decodeDraw(bin, info), previous: now.frame, filter: info.filter ?? now.filter });
+  if (!bin || !now || (now.info && info.seq <= now.info.seq)) return;
+  const frame = decodeVisualFrame(bin, info);
+  if (!frame) return fallBack(info);
+  patchView(info.view_id, { info, frame, filter: info.filter ?? now.filter });
+}
+
+function fallBack(info: FrameInfo): void {
+  if (info.visual === "treemap") return; // nothing to go back to
+  if (!fellBack.has(info.view_id)) {
+    fellBack.add(info.view_id);
+    toast(t("这个界面画不了这种可视化，已换回树图"));
+  }
+  void setViewSettings(info.view_id, { visual: "treemap" });
 }
 
 async function applyUpdate(viewId: string, upd: ViewUpdate): Promise<void> {
@@ -188,7 +207,7 @@ async function applyUpdate(viewId: string, upd: ViewUpdate): Promise<void> {
 // ------------------------------------------------------------------ views
 
 export function defaultViewport(): { width: number; height: number; dpr: number } {
-  const inspector = get().inspectorHidden ? 0 : 320;
+  const inspector = get().inspectorHidden ? 0 : get().inspectorWidth;
   return {
     width: Math.max(200, window.innerWidth - inspector),
     height: Math.max(200, window.innerHeight - 40 - 48 - 28),
@@ -196,13 +215,14 @@ export function defaultViewport(): { width: number; height: number; dpr: number 
   };
 }
 
-export async function openView(scanId: string): Promise<string> {
-  const upd = await call("view.open", { scan_id: scanId, viewport: defaultViewport() });
+/** A new view of a scan (or of a comparison); `settings` start it like another view (split, reconnect). */
+export async function openView(scanId: string, settings?: ViewSettingsParams): Promise<string> {
+  const upd = await call("view.open", { scan_id: scanId, viewport: defaultViewport(), ...(settings ? { settings } : {}) });
   const viewId = upd.state.view_id;
   set((s) => ({
     views: {
       ...s.views,
-      [viewId]: { state: upd.state, info: null, frame: null, filter: null, parse: null, filterText: "", previous: null, hoverKey: null },
+      [viewId]: { state: upd.state, info: null, frame: null, filter: null, parse: null, filterText: "", hoverKey: null },
     },
   }));
   if (upd.frame) await applyFrame(upd.frame);
@@ -239,6 +259,29 @@ export async function viewCall<M extends ViewMethod>(
 
 export const setViewSettings = (viewId: string | null, settings: ViewSettingsParams) =>
   viewCall(viewId, "view.set", { settings });
+
+/** What a view passes on to one opened like it: its visualization and what it shows. */
+export function carried(st: ViewState): ViewSettingsParams {
+  return {
+    visual: st.visual,
+    colors: st.colors,
+    color_mode: st.color_mode,
+    detail: st.detail,
+    show_free: st.show_free,
+    show_unknown: st.show_unknown,
+    show_trash: st.show_trash,
+  };
+}
+
+/** A new view started like another one (split, reconnect); a plain one when the server refuses that. */
+async function openLike(scanId: string, like: ViewState | undefined): Promise<string> {
+  if (!like) return openView(scanId);
+  try {
+    return await openView(scanId, carried(like));
+  } catch {
+    return openView(scanId);
+  }
+}
 
 // ------------------------------------------------------------------ delete basket (W5)
 
@@ -318,6 +361,12 @@ function onOpProgress(ev: OpProgressEvent): void {
 const filterTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const filterCalls = new Map<string, () => void>();
 
+/** Leave filtering: the filter box empties, the side panel goes back to the details (the
+ * 「匹配结果」 header's 「清除过滤」, the floater's ×, Esc on the map with nothing selected). */
+export function clearFilter(viewId: string): void {
+  void editFilter(viewId, "", null, true);
+}
+
 export async function editFilter(viewId: string, text: string, cursor: number | null, immediate = false): Promise<void> {
   patchView(viewId, { filterText: text });
   try {
@@ -356,14 +405,70 @@ export async function watchScan(scanId: string): Promise<void> {
   }
 }
 
+export type ProtectedChoice = "settings" | "skip" | "allow" | "cancel";
+let protectedAnswer: ((choice: ProtectedChoice) => void) | null = null;
+
+/** Show the Full Disk Access dialog and wait for the answer (one at a time: a second ask cancels the first). */
+function askProtectedPlaces(): Promise<ProtectedChoice> {
+  return new Promise((resolve) => {
+    protectedAnswer?.("cancel");
+    protectedAnswer = resolve;
+    set({ fdaPrompt: true });
+  });
+}
+
+export function answerProtectedPlaces(choice: ProtectedChoice, remember: boolean): void {
+  set({ fdaPrompt: false });
+  if (remember && (choice === "skip" || choice === "allow")) void updateSettings({ "scan.protected_places": choice });
+  const answer = protectedAnswer;
+  protectedAnswer = null;
+  answer?.(choice);
+}
+
+/** macOS before a scan: the places that would each ask for consent. undefined: the backend applies
+ *  the scan.protected_places setting; true / false: skip them or not (the user chose now); null:
+ *  no scan (System Settings opened, or the dialog closed). */
+async function protectedPlaces(): Promise<boolean | null | undefined> {
+  if (window.sk.platform !== "darwin" || setting(get(), "scan.protected_places", "ask") !== "ask") return undefined;
+  const info = await call("system.info", {}).catch(() => null);
+  if (info?.full_disk_access !== false) return undefined;
+  const choice = await askProtectedPlaces();
+  if (choice === "settings") {
+    window.sk.shell.openFullDiskAccess();
+    toast(t("在列表里打开 SpaceKnife 的开关，再按提示重新打开 SpaceKnife"));
+    return null;
+  }
+  return choice === "cancel" ? null : choice === "skip";
+}
+
+/** Start tabs whose scan is being started: a second Enter or click while the first one opens its
+ * view (which can take a while on a busy backend) must not start the same scan again. */
+const startingTabs = new Set<string>();
+
 export async function startScan(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
+  if (replaceTab) {
+    if (startingTabs.has(replaceTab)) return null;
+    startingTabs.add(replaceTab);
+  }
+  try {
+    return await startScanNow(params, replaceTab);
+  } finally {
+    if (replaceTab) startingTabs.delete(replaceTab);
+  }
+}
+
+async function startScanNow(params: ScanStartParams, replaceTab?: string): Promise<string | null> {
+  if (params.skip_protected == null) {
+    const skip = await protectedPlaces();
+    if (skip === null) return null;
+    if (skip !== undefined) params = { ...params, skip_protected: skip };
+  }
   try {
     const status = await call("scan.start", params);
     // a new scan re-arms "open on warnings" after the user closed the panel (W8 待定 5)
     set((s) => ({ scans: { ...s.scans, [status.scan_id]: status }, logDismissed: false }));
     void watchScan(status.scan_id);
-    await showScan(status.scan_id, scanTitle(params.roots), replaceTab);
-    return status.scan_id;
+    return (await showScan(status.scan_id, scanTitle(params.roots), replaceTab)) ? status.scan_id : null;
   } catch (err) {
     toast(err instanceof RpcError ? t("无法开始扫描：{error}", { error: err.message }) : String(err));
     return null;
@@ -389,9 +494,10 @@ export const resumeScan = (scanId: string) => scanControl("scan.resume", { scan_
 export const useMft = (scanId: string) => scanControl("scan.use_mft", { scan_id: scanId });
 /** A stopped hard scan reads the folders it had left (W2 待定 16). */
 export const continueScan = (scanId: string) => scanControl("scan.continue", { scan_id: scanId });
-/** Read a folder of the tree again with everything below it (F5, M5). */
+/** Read a folder of the tree again with everything below it (F5, M5); node 0, the top of a scan of
+ * several roots, reads every root again. */
 export async function rescanFolder(scanId: string, node: number): Promise<void> {
-  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast(t("正在重新扫描这个文件夹…"));
+  if (await scanControl("scan.rescan", { scan_id: scanId, node })) toast(node === 0 ? t("正在重新扫描所有位置…") : t("正在重新扫描这个文件夹…"));
 }
 export const setScanLoad = (scanId: string, level: LoadLevel, custom?: number | null, concurrency?: number | null) =>
   scanControl("scan.set_load", { scan_id: scanId, level, custom: custom ?? null, concurrency: concurrency ?? null });
@@ -406,15 +512,22 @@ export async function openSnapshot(path: string, replaceTab?: string): Promise<v
   }
 }
 
-async function showScan(scanId: string, title: string, replaceTab?: string): Promise<void> {
+/** Put a scan's new view in a tab: in place of the start tab it came from, or a new one. False when
+ * that start tab was closed meanwhile (the snapshot was still loading, the scan still starting):
+ * then the view and, unless another tab shows it, the scan are freed at once instead of staying in
+ * the backend with no tab. */
+async function showScan(scanId: string, title: string, replaceTab?: string): Promise<boolean> {
   const viewId = await openView(scanId);
   const tab: Tab = { id: newTabId(), kind: "scan", scanId, viewIds: [viewId], focusedPane: 0, title };
   const old = replaceTab ? get().tabs.find((t) => t.id === replaceTab) : undefined;
-  set((s) => {
-    const tabs = replaceTab ? s.tabs.map((t) => (t.id === replaceTab ? tab : t)) : [...s.tabs, tab];
-    return { tabs, active: tab.id };
-  });
+  const tabs = placeTab(get().tabs, tab, replaceTab);
+  if (!tabs) {
+    releaseTab(tab);
+    return false;
+  }
+  set({ tabs, active: tab.id });
   if (old) releaseTab(old);
+  return true;
 }
 
 /** Close a tab's views and, when no other tab shows it any more, stop and free its scan (UI-W2-51, W8). */
@@ -455,6 +568,14 @@ export function openSettingsTab(page?: SettingsPageId): void {
   if (typeof page === "string") settingsGo(page); // callers may be event handlers: ignore event objects
 }
 
+/** 「本机磁盘」: one tab at most (the start page's button, the palette). */
+export function openMachineTab(): void {
+  const existing = get().tabs.find((x) => x.kind === "machine");
+  if (existing) return set({ active: existing.id });
+  const tab: Tab = { id: newTabId(), kind: "machine", viewIds: [], focusedPane: 0, title: t("本机磁盘") };
+  set((x) => ({ tabs: [...x.tabs, tab], active: tab.id }));
+}
+
 /** Show a settings page; recorded in the tab's page history (UI-W7-02, UI-W7-03). */
 export function settingsGo(page: SettingsPageId): void {
   const s = get();
@@ -484,26 +605,42 @@ export async function closeSettings(): Promise<void> {
 
 // ------------------------------------------------------------------ settings (W7)
 
-let accentApplied = "";
+let themeApplied: ThemeSetting | null = null;
+
+/** The title of a tab named by a word of the interface, not by a place (start, settings, help). */
+function fixedTitle(tab: Tab): string | null {
+  if (tab.kind === "start") return t("新扫描");
+  if (tab.kind === "settings") return t("设置");
+  if (tab.kind === "help") return t("帮助");
+  if (tab.kind === "machine") return t("本机磁盘");
+  return null;
+}
 
 /** Take a settings document from the backend and apply what the frontend itself renders. */
 export function applySettings(state: SettingsState): void {
   const prev = get().settings;
   const base = state.unit_base === 1000 ? 1000 : 1024;
   setUnitBase(base);
-  const accent = String(state.values["appearance.accent"] ?? "");
-  if (accent && accent !== accentApplied) {
-    document.documentElement.style.setProperty("--sk-color-accent-default", accent);
-    accentApplied = accent;
+  // 「主题」 (UI-W7-31 ①): the page at once (CSS variables), the canvases on their next frame (the
+  // store's theme), main for the window and the next start; the accent keeps its slot in either
+  const theme = state.values["appearance.theme"];
+  const choice = isThemeSetting(theme) ? theme : "system";
+  if (choice !== themeApplied) {
+    applyTheme(choice);
+    window.sk.setTheme(choice);
+    themeApplied = choice;
   }
+  // a preset follows the theme through its slot, a colour of the user's stays as it is (lib/theme.ts)
+  applyAccent(String(state.values["appearance.accent"] ?? ""));
   const motion = state.values["appearance.reduce_motion"];
   document.documentElement.dataset.motion = motion === "on" ? "reduce" : motion === "off" ? "full" : "";
   // 「界面语言」 (M7.5): every t() follows at the next render; texts the backend made (volume notes,
   // class names) are fetched again, painted labels redrawn
   const langChanged = state.language !== getLang() || state.language !== get().lang;
+  // always: index.html starts as zh-CN, and English at the first launch is no "change"
+  document.documentElement.lang = state.language;
   if (langChanged) {
     setLang(state.language);
-    document.documentElement.lang = state.language;
     window.sk.setLanguage(state.language);
   }
   set((s) => ({
@@ -511,13 +648,17 @@ export function applySettings(state: SettingsState): void {
     logAuto: Boolean(state.values["general.log_auto_open"] ?? true),
     unitEpoch: prev?.unit_base !== state.unit_base || langChanged ? s.unitEpoch + 1 : s.unitEpoch,
     lang: state.language,
-    // the start and settings tabs carry a made-up title: it follows the language
-    tabs: langChanged ? s.tabs.map((tab) => (tab.kind === "start" ? { ...tab, title: t("新扫描") } : tab.kind === "settings" ? { ...tab, title: t("设置") } : tab)) : s.tabs,
+    // the start, settings and help tabs carry a made-up title: it follows the language
+    tabs: langChanged ? s.tabs.map((tab) => (fixedTitle(tab) == null ? tab : { ...tab, title: fixedTitle(tab)! })) : s.tabs,
   }));
   if (langChanged && prev) {
     void refreshLists();
     void call("filter.vocab", {})
       .then((vocab) => set({ vocab }))
+      .catch(() => undefined);
+    // the visualizations' names are in the session's language
+    void call("visual.list", {})
+      .then((r) => set({ visuals: r.visuals }))
       .catch(() => undefined);
   }
 }
@@ -579,6 +720,23 @@ export function activate(id: string): void {
   set({ active: id });
 }
 
+/** UI-MAIN-04: put tab `id` after `index` other tabs (dragging it in the title bar). */
+export function moveTab(id: string, index: number): void {
+  set((s) => ({ tabs: moveTo(s.tabs, id, index) }));
+}
+
+/** The tabs back in a remembered order (Esc while dragging). */
+export function restoreTabOrder(ids: readonly string[]): void {
+  set((s) => ({ tabs: ids.flatMap((id) => s.tabs.filter((t) => t.id === id)).concat(s.tabs.filter((t) => !ids.includes(t.id))) }));
+}
+
+/** Ctrl+Shift+PgUp / PgDn, 「标签左移」 / 「标签右移」: the active tab one slot left or right. */
+export function moveActiveTab(step: -1 | 1): void {
+  const s = get();
+  const to = stepIndex(s.tabs, s.active, step);
+  if (to !== null) moveTab(s.active, to);
+}
+
 /** W8: split the active scan tab into two panes (a second view of the same scan). */
 export async function toggleSplit(): Promise<void> {
   const tab = activeTab();
@@ -588,7 +746,8 @@ export async function toggleSplit(): Promise<void> {
     closePane(tab.id, tab.viewIds[tab.focusedPane === 0 ? 1 : 0]!);
     return;
   }
-  const viewId = await openView(tab.scanId);
+  // the new pane starts like the focused one
+  const viewId = await openLike(tab.scanId, get().views[tab.viewIds[tab.focusedPane] ?? tab.viewIds[0]!]?.state);
   set((s) => ({ tabs: s.tabs.map((t) => (t.id === tab.id ? { ...t, viewIds: [...t.viewIds, viewId], focusedPane: 1 } : t)) }));
 }
 
@@ -618,6 +777,39 @@ export async function refreshVolumes(): Promise<void> {
   }
 }
 
+/** Read this computer's disks (machine.disks) for the start page's card and 「本机磁盘」: at most
+ * once a minute unless `force` (the page's 「刷新」); a failure keeps what was read before. */
+export async function refreshMachine(force = false): Promise<void> {
+  const s = get();
+  if (s.machineLoading || s.conn !== "ready" || (!force && s.machine && Date.now() - s.machineAt < 60_000)) return;
+  set({ machineLoading: true });
+  try {
+    set({ machine: await call("machine.disks", {}), machineAt: Date.now() });
+  } catch (err) {
+    if (force) toast(t("读取磁盘失败：{error}", { error: err instanceof Error ? err.message : String(err) }));
+  } finally {
+    set({ machineLoading: false });
+  }
+}
+
+/** Read the disks' own records that need administrator rights (machine.read_health; Linux:
+ * polkit's password prompt). Only from the button on a disk card, never by itself; one prompt
+ * reads every such disk. Why nothing was read shows on the disk whose button was clicked. */
+export async function readDiskRecords(disk: string): Promise<void> {
+  const s = get();
+  if (s.machineReading || s.conn !== "ready") return;
+  set({ machineReading: disk, machineReadNote: null });
+  try {
+    const r = await call("machine.read_health", { disks: [] });
+    const failed = r.outcome === "denied" || r.outcome === "unavailable";
+    set({ machine: r.machine, machineAt: Date.now(), machineReadNote: failed ? { disk, text: r.message } : null });
+  } catch (err) {
+    set({ machineReadNote: { disk, text: err instanceof Error ? err.message : String(err) } });
+  } finally {
+    set({ machineReading: null });
+  }
+}
+
 export async function refreshLists(): Promise<void> {
   try {
     const [volumes, snapshots] = await Promise.all([call("volume.list", {}), call("snapshot.list", {})]);
@@ -625,4 +817,98 @@ export async function refreshLists(): Promise<void> {
   } catch {
     /* offline */
   }
+}
+
+// ------------------------------------------------------------------ updates (updates.v1)
+
+/** Versions whose card was closed here: a status the backend sent before it heard of it stays closed. */
+const closedVersions = new Set<string>();
+
+/** A status from the backend (an answer, or update.changed). A download that ends while no update
+ * card is on screen says so in a toast; the badge shows the rest. */
+function applyUpdateStatus(next: UpdateStatus): void {
+  if (next.latest && !next.dismissed && closedVersions.has(next.latest.version)) next = { ...next, dismissed: true };
+  const before = downloadOf(get().update);
+  set((s) => ({ update: next, updateOpen: s.updateOpen && announced(next) }));
+  const after = downloadOf(next);
+  if (!downloading(before) || downloading(after) || visibleSurface(next, get().updateOpen) !== "none") return;
+  if (after.state === "done") toast(t("SpaceKnife {version} 已下载", { version: after.version ?? "" }));
+  else if (after.state === "failed") toast(t("更新下载失败：{error}", { error: after.error ?? "" }));
+}
+
+async function updateCall<M extends "update.dismiss" | "update.mute" | "update.download" | "update.cancel">(method: M, params: Methods[M]["params"]): Promise<void> {
+  try {
+    applyUpdateStatus((await call(method, params)) as UpdateStatus);
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+/** 「检查更新」 (app.check_updates): now, also when automatic checks are off; a newer release opens
+ * its card under the badge. */
+export async function checkUpdates(): Promise<void> {
+  toast(t("正在检查更新…"));
+  try {
+    const st = await call("update.check", {});
+    applyUpdateStatus(st);
+    if (st.error) toast(t("检查更新失败：{error}", { error: st.error }));
+    else if (st.muted && hasUpdate(st)) {
+      // a series the user skipped: no card; 「关于与更新」 shows it and turns its prompts back on
+      toast(t("发现新版本 {version}（已跳过 {series} 的提示，见「关于与更新」）", { version: st.latest.version, series: seriesName(st.series ?? "") }));
+    } else if (hasUpdate(st)) {
+      set({ updateOpen: true });
+      toast(t("发现新版本 {version}", { version: st.latest.version }));
+    } else toast(t("已是最新版本"));
+  } catch (err) {
+    toast(err instanceof RpcError ? err.message : String(err));
+  }
+}
+
+/** The badge and 「查看更新」 (app.show_update): the card under the badge; nothing known yet: check. */
+export function showUpdate(): Promise<void> {
+  const st = get().update;
+  if (!hasUpdate(st)) return checkUpdates();
+  if (st.muted) {
+    openSettingsTab("about"); // no badge to open it under: the page has it, and the way back on
+    return Promise.resolve();
+  }
+  set({ updateOpen: true });
+  return Promise.resolve();
+}
+
+/** Close the update card or dialog (×, Esc, 「以后再说」): neither opens by itself again for this
+ * version; the badge stays. */
+export function closeUpdate(): void {
+  const st = get().update;
+  set({ updateOpen: false });
+  if (!hasUpdate(st) || st.dismissed) return;
+  closedVersions.add(st.latest.version);
+  set({ update: { ...st, dismissed: true } }); // closed at once, whatever the backend answers
+  void updateCall("update.dismiss", { version: st.latest.version });
+}
+
+export function toggleUpdateCard(): void {
+  if (get().updateOpen) closeUpdate();
+  else set({ updateOpen: true });
+}
+
+/** 「跳过 0.4.x」 (muted) / 「恢复提示」: every release of the series stays quiet (no card, dialog,
+ * badge or automatic download) or speaks up again (update.mute). */
+export function muteUpdates(series: string, muted: boolean): void {
+  const st = get().update;
+  if (st?.series === series) set({ update: { ...st, muted }, updateOpen: muted ? false : get().updateOpen });
+  if (muted) toast(t("{series} 的版本不再提示；可以在「关于与更新」里恢复", { series: seriesName(series) }));
+  void updateCall("update.mute", { series, muted });
+}
+
+/** 「一键下载」 / 「重试」: the file for this kind of install, into the backend's updates folder. */
+export const downloadUpdate = (version: string) => updateCall("update.download", { version });
+export const cancelUpdate = () => updateCall("update.cancel", {});
+
+/** One of the card's two big buttons: 「无缝更新」 or the classic way (shared/install.ts). Main does it
+ * (main/index.ts installUpdate); the app quits once that has started, else the reason is shown. Only
+ * ever from a click: nothing installs by itself. */
+export async function installUpdate(path: string, how: InstallHow): Promise<void> {
+  const reason = await window.sk.update.install(path, how);
+  if (reason) toast(reason);
 }

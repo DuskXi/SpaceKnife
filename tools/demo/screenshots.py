@@ -8,8 +8,11 @@ renderer with a backend for that home (tools/demo/m3_web.py), and runs tools/dem
 in the repo's Electron with an off-screen window: treemap with a hover card, a filter, the command
 palette and a snapshot comparison. ``--lang en`` captures the English interface as well
 (``*-en.png``). ``--video`` records the short demo instead (tools/demo/demo.cjs: hover, zoom into a
-folder, a typed filter, the palette, a comparison) and encodes it with ffmpeg into
-``demo[-en].mp4`` (H.264) and ``demo[-en].gif``. Needs ``pnpm build`` in apps/electron first.
+folder, the flame graph and the polar flame graph, a typed filter, the palette, a comparison) and encodes it with ffmpeg into
+``demo[-en].mp4`` (H.264) and ``demo[-en].gif``. ``--views`` takes the three visualizations of the
+same volume instead (treemap, flame graph, polar flame graph; details panel hidden, 1.25× sharp) for
+the website's pages and writes them as WebP to ``site/src/assets/visualizations`` (``treemap.webp``,
+``flame.webp``, ``polar.webp``, ``*-en.webp``). Needs ``pnpm build`` in apps/electron first.
 """
 
 from __future__ import annotations
@@ -24,6 +27,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 ELECTRON = ROOT / "apps" / "electron" / "node_modules" / "electron" / "dist"
+VIEWS_OUT = ROOT / "site" / "src" / "assets" / "visualizations"
+# --views: a 1440 × 760 window (CSS pixels; the toolbar needs the width), drawn at 1.25 pixels per
+# CSS pixel, at the detail level a new view starts with; each can be overridden from the environment
+VIEWS_SIZE = {"SHOT_WIDTH": "1440", "SHOT_HEIGHT": "760", "SHOT_ZOOM": "1.25", "SHOT_LEVEL": "5"}
+WEBP_QUALITY = 90
 
 
 def electron_exe() -> Path:
@@ -34,7 +42,7 @@ def electron_exe() -> Path:
     return ELECTRON / "electron"
 
 
-def capture(home: Path, out: Path, lang: str, snap: Path, video: bool = False) -> int:
+def capture(home: Path, out: Path, lang: str, snap: Path, video: bool = False, views: bool = False) -> int:
     env = {**os.environ, "SPACEKNIFE_LANGUAGE": lang}
     url_file = home / "url.txt"
     url_file.unlink(missing_ok=True)
@@ -66,6 +74,11 @@ def capture(home: Path, out: Path, lang: str, snap: Path, video: bool = False) -
         if video:
             shutil.rmtree(frames, ignore_errors=True)
             shot_env["SHOT_FRAMES"] = str(frames)
+        pngs = home / f"views-{lang}"
+        if views:
+            shutil.rmtree(pngs, ignore_errors=True)
+            shot_env |= {"SHOT_SET": "views", "SHOT_OUT": str(pngs)}
+            shot_env |= {k: os.environ.get(k, v) for k, v in VIEWS_SIZE.items()}
         if lang == "en":
             shot_env |= {
                 "SHOT_SUFFIX": "-en",
@@ -75,10 +88,29 @@ def capture(home: Path, out: Path, lang: str, snap: Path, video: bool = False) -
         code = subprocess.run(argv, check=False, timeout=300, env=shot_env).returncode
         if video and code == 0:
             code = encode(frames, out, "-en" if lang == "en" else "")
+        if views and code == 0:
+            code = to_webp(pngs, out)
         return code
     finally:
         server.terminate()
         server.wait(timeout=30)
+
+
+def to_webp(pngs: Path, out: Path) -> int:
+    """The captured PNGs as WebP, near lossless (the website makes its own sizes and formats from them)."""
+    from PIL import Image
+
+    files = sorted(pngs.glob("*.png"))
+    if len(files) != 3:
+        print(f"expected 3 pictures in {pngs}, found {len(files)}", file=sys.stderr)
+        return 1
+    out.mkdir(parents=True, exist_ok=True)
+    for png in files:
+        webp = out / f"{png.stem}.webp"
+        with Image.open(png) as im:
+            im.convert("RGB").save(webp, "WEBP", quality=WEBP_QUALITY, method=6)
+        print(f"{webp.name}  {webp.stat().st_size / 1024:.0f} KB")
+    return 0
 
 
 def encode(frames: Path, out: Path, suffix: str) -> int:
@@ -121,10 +153,15 @@ def encode(frames: Path, out: Path, suffix: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--home", required=True, type=Path, help="an isolated, neutral folder (wiped first)")
-    ap.add_argument("--out", type=Path, default=ROOT / "docs" / "images")
+    ap.add_argument("--out", type=Path, help="default: docs/images (--views: site/src/assets/visualizations)")
     ap.add_argument("--lang", choices=["zh-CN", "en", "both"], default="zh-CN")
-    ap.add_argument("--video", action="store_true", help="record the demo (GIF + MP4) instead of screenshots")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--video", action="store_true", help="record the demo (GIF + MP4) instead of screenshots"
+    )
+    mode.add_argument("--views", action="store_true", help="the three visualizations (WebP) for the website")
     args = ap.parse_args()
+    args.out = args.out or (VIEWS_OUT if args.views else ROOT / "docs" / "images")
     if not (ROOT / "apps" / "electron" / "out" / "renderer" / "index.html").exists():
         print("run `pnpm build` in apps/electron first", file=sys.stderr)
         return 1
@@ -139,7 +176,7 @@ def main() -> int:
     langs = ["zh-CN", "en"] if args.lang == "both" else [args.lang]
     code = 0
     for lang in langs:
-        code |= capture(args.home, args.out.resolve(), lang, newest, video=args.video)
+        code |= capture(args.home, args.out.resolve(), lang, newest, video=args.video, views=args.views)
     return code
 
 

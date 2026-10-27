@@ -40,6 +40,7 @@ class Point:
     yielding: bool
     concurrency: int
     u: float
+    listings: float = 0.0  # mean listings in flight over the window (listing mode)
 
 
 @dataclass
@@ -49,6 +50,10 @@ class Sim:
     Measured like the real samplers: busy = share of time with I/O outstanding, queue = mean depth;
     the governor sees ``rho = min(busy, queue / q_eff)``. Batches slow down when the queue exceeds
     the disk's parallelism. ``others(t)`` is the other programs' load in rho units.
+
+    ``fanout`` > 0: the native walker's batches, each listing up to that many folders at once, all
+    of them together at most the governor's concurrency (the disk's gate); ``q_worker`` is then per
+    listing in flight, and the governor is fed the gate's window (``GovernorCore.observe``).
     """
 
     media: str = "sata_ssd"
@@ -60,6 +65,7 @@ class Sim:
     noise: float = 0.02
     spikes: float = 0.0  # chance per window that the device stalls (queue × 1.5–2, like a GC pause)
     sample_s: float = 0.25  # the registry samples at 4 Hz while a scan runs
+    fanout: int = 0
     seed: int = 1
     t: float = 0.0
     scans: list[Scan] = field(default_factory=list)
@@ -76,6 +82,8 @@ class Sim:
         self._keys: dict[int, int] = {}  # waiter key -> scan index
         self._seq = 0
         self._acc = [0.0, 0.0, 0.0, 0.0]  # busy, queue, others-alone rho, n
+        self._gate = [0.0, 0, False]  # listing mode: listing-seconds, peak, a listing waited
+        self.most_listings = 0.0  # listing mode: the most in flight at any tick
 
     def add_scan(self, workers: int = 16) -> int:
         self.scans.append(Scan(workers))
@@ -110,7 +118,16 @@ class Sim:
         while self.t < until - 1e-9:
             self.t = round(self.t + TICK, 9)
             others_q = self.others(self.t) * self.q_eff
-            q = others_q + self.q_worker * len(self.batches)
+            n = len(self.batches)
+            listings = float(n)
+            if self.fanout:
+                listings = float(min(self.core.concurrency, self.fanout * n))
+                gate = self._gate
+                gate[0] = float(gate[0]) + listings * TICK
+                gate[1] = max(int(gate[1]), int(listings))
+                gate[2] = bool(gate[2]) or self.fanout * n > self.core.concurrency
+                self.most_listings = max(self.most_listings, listings)
+            q = others_q + self.q_worker * listings
             slow = max(1.0, q / self.q_eff)
             finished = []
             for b in self.batches:
@@ -148,7 +165,11 @@ class Sim:
             queue=max(0.0, queue * (1 + noise) * stall),
         )
         total_true = self._rho(busy, queue)
-        self.core.observe(sample, self.t, wall=self.t)
+        listings = None
+        if self.fanout:
+            listings = (float(self._gate[0]), int(self._gate[1]), bool(self._gate[2]))
+            self._gate = [0.0, int(self.core.concurrency if self.batches else 0), False]
+        self.core.observe(sample, self.t, wall=self.t, listings=listings)
         for key in self.core.grant(self.t):
             idx = self._keys.pop(int(key))  # type: ignore[call-overload]
             self.scans[idx].waiting -= 1
@@ -162,6 +183,7 @@ class Sim:
                 self.core.yielding,
                 self.core.concurrency,
                 self.core.u,
+                listings[0] / span if listings is not None else 0.0,
             )
         )
         self._acc = [0.0, 0.0, 0.0, 0.0]
@@ -219,6 +241,65 @@ def test_converges_within_3s(media: str, q_eff: float, q_worker: float, level: L
     assert min(mas) >= 0.9 * limit, mas  # … and within 10 % of it
     est = [p.self_est for p in sim.window(8.0, 25.0)]
     assert abs(sum(est) / len(est) - sim.mean_self(8.0, 25.0)) < 0.03  # the estimate tracks the truth
+
+
+@pytest.mark.parametrize(
+    ("media", "q_eff", "q_worker", "level", "limit"),
+    [
+        ("sata_ssd", 8.0, 0.8, "balanced", 0.70),
+        ("hdd", 1.0, 0.9, "quiet", 0.35),
+        ("nvme_ssd", 32.0, 0.9, "balanced", 0.70),
+    ],
+)
+def test_counted_in_listings_the_limit_holds(
+    media: str, q_eff: float, q_worker: float, level: Level, limit: float
+) -> None:
+    """The native walker's batches list several folders each; the gate holds them all to the
+    governor's concurrency, which is then counted in listings: the limit holds as with one listing
+    per batch."""
+    sim = Sim(media=media, q_eff=q_eff, q_worker=q_worker, fanout=8, max_workers=64)
+    start(sim, level, workers=4)
+    sim.run(25.0)
+    mas = sim.moving_averages(6.0, 25.0)
+    assert max(mas) <= limit + 0.005, mas
+    settled = sim.moving_averages(12.0, 25.0)  # an NVMe takes a while to reach ~25 listings
+    assert min(settled) >= 0.85 * limit, settled
+    assert max(sim.seconds(6.0, 25.0)) <= limit + 0.05
+
+
+def test_counted_in_listings_it_goes_past_the_batches_in_flight() -> None:
+    """Four batches that could list 64 folders at once: where the disk allows it, the listings go
+    well past the four batches (counted in batches, a window's peak would cap it near five)."""
+    sim = Sim(media="nvme_ssd", q_eff=32.0, q_worker=0.3, fanout=16, max_workers=64)
+    start(sim, "balanced", workers=4)
+    sim.run(20.0)
+    assert sim.mean_self(10.0, 20.0) <= 0.70
+    late = sim.window(10.0, 20.0)
+    assert sum(p.listings for p in late) / len(late) > 20
+    assert sim.most_listings <= max(p.concurrency for p in sim.points)
+    # at the max level: the most the walker may list at once
+    sim = Sim(media="nvme_ssd", q_eff=32.0, q_worker=0.3, fanout=16, max_workers=64)
+    start(sim, "max", workers=4)
+    sim.run(8.0)
+    assert sim.core.concurrency == 64
+    assert sim.most_listings == 64
+
+
+def test_counted_in_listings_an_idle_gate_is_a_clean_window() -> None:
+    """While no listing is in flight (a probe holds the dispatch), the window shows the others alone,
+    whatever the batches in flight wait for."""
+    core = GovernorCore(DiskRef(DiskId("g0"), media="sata_ssd"), max_workers=64, now=0.0)  # type: ignore[arg-type]
+    core.set_level("balanced", None, 0.0)
+    assert core.try_acquire(0.0)  # a batch in flight, listing nothing (all its folders wait)
+    sample = DiskSample(t=0.25, dt=0.25, busy=0.2, queue=1.6)
+    core.observe(sample, 0.25, wall=0.25, listings=(0.0, 0, True))
+    assert core.others is not None and core.others == pytest.approx(0.2, abs=0.01)
+    # the same window counted in batches is not clean: one was in flight the whole time
+    other = GovernorCore(DiskRef(DiskId("g1"), media="sata_ssd"), max_workers=64, now=0.0)  # type: ignore[arg-type]
+    other.set_level("balanced", None, 0.0)
+    assert other.try_acquire(0.0)
+    other.observe(sample, 0.25, wall=0.25)
+    assert other.others is None
 
 
 def test_level_change_applies_within_3s() -> None:
@@ -374,3 +455,16 @@ def test_open_loop_without_samples() -> None:
     st = core.status()
     assert not st.measured and st.self_pct == 0.0
     assert core.u == pytest.approx(8 * 0.35)
+
+
+def test_status_reports_the_disks_read_rate_and_latency() -> None:
+    core = GovernorCore(DiskRef(DiskId("disk0"), media="nvme"))
+    sample = DiskSample(
+        t=1.0, dt=0.5, busy=0.2, queue=0.4, read_iops=2000, read_latency=0.00042, read_bps=1.5e8
+    )
+    core.observe(sample, 1.0)
+    st = core.status()
+    assert st.measured and st.read_bps == 150_000_000 and st.read_latency_ms == pytest.approx(0.42)
+    core.observe(None, 1.5)  # no data: nothing to show
+    st = core.status()
+    assert not st.measured and st.read_bps is None and st.read_latency_ms is None

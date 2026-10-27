@@ -299,6 +299,7 @@ describe("Rpc", () => {
       params: { token: "secret", protocol: PROTOCOL_VERSION, client: { name: "test", version: "1.2.3", kind: "electron" } },
     });
     expect((hello.params as { capabilities: string[] }).capabilities).toContain("binary-frames.v1");
+    expect((hello.params as { capabilities: string[] }).capabilities).toContain("updates.v1"); // update.changed
     expect(rpc.hello).toBeNull();
     ws.receive({ jsonrpc: "2.0", id: hello.id, result: HELLO });
     await expect(done).resolves.toEqual(HELLO);

@@ -2,6 +2,8 @@
 
 import { create } from "zustand";
 
+import type { ThemeName } from "@design/tokens";
+
 import type {
   BasketState,
   CompareInfo,
@@ -12,18 +14,23 @@ import type {
   FilterVocab,
   FrameInfo,
   LogRecordEvent,
+  MachineDisks,
   OpProgressEvent,
   PathCheckResult,
   ScanStatus,
   SettingsState,
   SnapshotInfo,
+  UpdateStatus,
   ViewState,
+  VisualInfo,
   VolumeInfo,
 } from "@/protocol/generated";
-import type { DrawFrame } from "@/treemap/frame";
+import type { VisualFrame } from "@/visual/types";
 import { getLang, type Lang, t } from "@/lib/i18n";
+import { storedInspectorWidth } from "@/lib/inspectorWidth";
+import { onThemeChange, themeName } from "@/lib/theme";
 
-export type TabKind = "start" | "scan" | "settings";
+export type TabKind = "start" | "scan" | "settings" | "help" | "machine";
 
 export interface Tab {
   id: string;
@@ -57,25 +64,35 @@ export interface TabCompare {
 export interface ViewData {
   state: ViewState;
   info: FrameInfo | null;
-  frame: DrawFrame | null;
+  /** the latest frame, of whatever layout its visualization draws */
+  frame: VisualFrame | null;
   filter: FilterInfo | null;
   parse: FilterParse | null;
   filterText: string;
-  /** previous frame, kept for the zoom animation */
-  previous: DrawFrame | null;
   /** block highlighted from outside the treemap (W3 result list hover, UI-W3-33) */
   hoverKey: number | null;
+  /** class lit in the picture from 「类别统计」 (UI-MAIN-65), within the node whose make-up the
+   * panel shows; the filter stays as it is */
+  hoverClass?: { id: string; node: number } | null;
 }
 
 export type ConnState = "starting" | "ready" | "lost" | "failed";
 
-export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"] as const;
+export const SETTINGS_PAGES = ["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"] as const;
 export type SettingsPageId = (typeof SETTINGS_PAGES)[number];
 
 /** The page shown when settings open: the last one visited, else 「常规」 (UI-W7-01). */
 function lastSettingsPage(): SettingsPageId {
   const v = readText("sk.settingsPage");
   return (SETTINGS_PAGES as readonly string[]).includes(v ?? "") ? (v as SettingsPageId) : "general";
+}
+
+/** A place in the help (help/docs.ts): a page and, when a link named one, a heading on it. */
+export interface HelpLoc {
+  page: string;
+  anchor: string | null;
+  /** where the page was scrolled to when the user left it (history entries) */
+  scroll?: number;
 }
 
 /** One line of the log panel (W8): a backend event, or a local one (connection). */
@@ -120,6 +137,8 @@ export interface AppState {
   views: Record<string, ViewData>;
   paletteOpen: boolean;
   inspectorHidden: boolean;
+  /** preferred width of the details column, px (UI-MAIN-64) */
+  inspectorWidth: number;
   logOpen: boolean;
   logTab: "log" | "stats";
   /** open the panel by itself when a warning arrives (UI-W8-30) */
@@ -136,8 +155,17 @@ export interface AppState {
   settingsSave: { state: "saved" | "saving" | "error"; message: string };
   /** the tab to go back to when the settings tab is closed with 「完成」 */
   settingsReturnTo: string | null;
+  /** the help tab (pages/HelpPage): the page shown, its history and the search */
+  help: HelpLoc;
+  helpBack: HelpLoc[];
+  helpForward: HelpLoc[];
+  helpQuery: string;
+  /** bumped on every move, so going to the heading already shown scrolls to it again */
+  helpNonce: number;
   /** bumped when the size unit base changes, so painted labels are redrawn */
   unitEpoch: number;
+  /** the theme on screen (lib/theme.ts): what is painted on canvases, and colours set inline, follow it */
+  theme: ThemeName;
   startForms: Record<string, StartForm>;
   toast: string | null;
   /** the delete basket, held by the backend (W5); null until it was read */
@@ -149,8 +177,27 @@ export interface AppState {
   op: OpProgressEvent | null;
   /** 「导出报告…」 dialog */
   exportOpen: boolean;
+  /** macOS without Full Disk Access: the dialog before a scan (shell/FullDiskAccessDialog) */
+  fdaPrompt: boolean;
   /** interface language (M7.5): the root re-renders on change, every t() follows */
   lang: Lang;
+  /** visualizations the backend offers (visual.list), empty until connected */
+  visuals: VisualInfo[];
+  /** update checks (updates.v1): what the last one found and the download; null until connected,
+   * and from a backend without them */
+  update: UpdateStatus | null;
+  /** the update card opened from the title bar's badge (shell/UpdateBadge) */
+  updateOpen: boolean;
+  /** 「本机磁盘」 (machine.disks): the start page's card and the page; null until first read */
+  machine: MachineDisks | null;
+  /** Date.now() of that read, 0 before it */
+  machineAt: number;
+  /** a read of machine.disks is under way */
+  machineLoading: boolean;
+  /** machine.read_health is under way: the disk whose button started it */
+  machineReading: string | null;
+  /** why the last machine.read_health read nothing (prompt closed, no way to ask), on that disk */
+  machineReadNote: { disk: string; text: string } | null;
 }
 
 /** Where the context menu opens and for what (a treemap block or a result row). */
@@ -186,6 +233,7 @@ export const useApp = create<AppState>(() => ({
   views: {},
   paletteOpen: false,
   inspectorHidden: false,
+  inspectorWidth: storedInspectorWidth(),
   logOpen: false,
   logTab: "log",
   logAuto: true,
@@ -198,7 +246,13 @@ export const useApp = create<AppState>(() => ({
   settingsQuery: "",
   settingsSave: { state: "saved", message: "" },
   settingsReturnTo: null,
+  help: { page: readText("sk.helpPage") || "index", anchor: null },
+  helpBack: [],
+  helpForward: [],
+  helpQuery: "",
+  helpNonce: 0,
   unitEpoch: 0,
+  theme: themeName(),
   startForms: {},
   toast: null,
   basket: null,
@@ -206,11 +260,22 @@ export const useApp = create<AppState>(() => ({
   menu: null,
   op: null,
   exportOpen: false,
+  fdaPrompt: false,
   lang: getLang(),
+  visuals: [],
+  update: null,
+  updateOpen: false,
+  machine: null,
+  machineAt: 0,
+  machineLoading: false,
+  machineReading: null,
+  machineReadNote: null,
 }));
 
 export const set = useApp.setState;
 export const get = useApp.getState;
+
+onThemeChange(() => set({ theme: themeName() }));
 
 export function activeTab(s: AppState = get()): Tab {
   return s.tabs.find((t) => t.id === s.active) ?? s.tabs[0]!;
@@ -312,10 +377,10 @@ export function writeFlag(key: string, value: boolean): void {
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
-export function toast(message: string): void {
+export function toast(message: string, ms = 1800): void {
   set({ toast: message });
   if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => set({ toast: null }), 1800);
+  toastTimer = setTimeout(() => set({ toast: null }), ms);
 }
 
 /** Items in the delete basket (toolbar badge, palette). */

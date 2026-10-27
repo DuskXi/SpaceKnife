@@ -13,6 +13,7 @@ import { createInterface } from "node:readline";
 
 import type { BackendInfo } from "../shared/api";
 import { mt } from "./text";
+import type { InstallKind } from "./update";
 
 export interface BackendOptions {
   repoRoot: string;
@@ -22,11 +23,16 @@ export interface BackendOptions {
   home?: string;
   /** OS UI language (app.getPreferredSystemLanguages), for 「跟随系统」 */
   locale?: string;
+  /** for the update checks (update.*): the app's version, how it was installed (update.ts) */
+  appVersion?: string;
+  installKind?: InstallKind;
   onLog?: (line: string) => void;
 }
 
 export interface Backend {
   info: BackendInfo;
+  /** where the backend downloads updates (its ready line): main uses update files from there only */
+  updatesDir: string | null;
   proc: ChildProcess;
   stop(): Promise<void>;
 }
@@ -56,6 +62,8 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
   if (opts.home) env.SPACEKNIFE_HOME = resolve(opts.home);
   // 「界面语言 · 跟随系统」 (M7.5): the OS UI language as Electron sees it
   if (opts.locale) env.SPACEKNIFE_SYSTEM_LOCALE = opts.locale;
+  if (opts.appVersion) env.SPACEKNIFE_APP_VERSION = opts.appVersion;
+  if (opts.installKind) env.SPACEKNIFE_INSTALL_KIND = opts.installKind;
   const proc = spawn(opts.bundled ?? pythonFor(opts.repoRoot), args, {
     cwd: opts.bundled ? dirname(opts.bundled) : opts.repoRoot,
     env,
@@ -72,9 +80,10 @@ export function startBackend(opts: BackendOptions): Promise<Backend> {
     lines.once("line", (line) => {
       clearTimeout(timer);
       try {
-        const ready = JSON.parse(line) as { url: string; pid: number };
+        const ready = JSON.parse(line) as { url: string; pid: number; updates_dir?: string };
         resolveReady({
           info: { url: ready.url, token, pid: ready.pid },
+          updatesDir: ready.updates_dir ?? null,
           proc,
           stop: () => stop(proc),
         });

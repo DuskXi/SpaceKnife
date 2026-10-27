@@ -1,0 +1,276 @@
+name: Portable build
+
+# The portable archives (docs/packaging.md): the unpacked app plus a data/ folder that keeps the
+# app's data next to it, a zip on Windows and a tar.gz on Linux, for x64 and arm64 (each on a runner
+# of its architecture: PyInstaller freezes the interpreter it runs on). Each archive is unpacked again and
+# smoke-tested in portable mode; the archives and their checksums go to the run's artifacts, and the
+# Release workflow publishes them (release.yml). Started by hand (Actions › Portable build › Run workflow),
+# and on dev whenever the packaging changes, so it is checked before it reaches main.
+# With "installers" (by hand, for a release) the same run also builds the Windows installer and the
+# Linux deb / rpm / AppImage from the same commit, with their own checksums (x64 only: the ARM jobs
+# make the portable archives alone).
+# Every run also tests 「无缝更新」 end to end (packaging/update_e2e.py): the portable copy swaps its
+# files, and on Windows the installer upgrades from the newest published release, updates from inside
+# the app and uninstalls cleanly. The Windows job therefore always builds the installer.
+# The Release workflow (release.yml) calls it for a release: installers on, the tag's commit, and
+# a build provenance attestation for every file (actions/attest-build-provenance).
+on:
+  workflow_dispatch:
+    inputs:
+      installers:
+        description: Also build the installers (for a release)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      installers:
+        type: boolean
+        default: false
+      ref:
+        description: The commit or tag to build (default the caller's)
+        type: string
+        default: ""
+      attest:
+        description: Attest where each file was built
+        type: boolean
+        default: false
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/portable.yml
+      - tools/build_package.py
+      - packaging/**
+      - apps/electron/electron-builder.yml
+      - apps/electron/src/main/portable.ts
+      - apps/electron/src/main/update.ts
+      - packages/backend/src/spaceknife/update.py
+      - apps/electron/build/installer.nsh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: Portable · ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-latest
+            exe: SpaceKnife.exe
+            installer: true # the installers are published for x64 only
+          - target: win-arm64
+            runner: windows-11-arm
+            exe: SpaceKnife.exe
+            installer: false
+          - target: linux-x64
+            runner: ubuntu-22.04 # glibc 2.35 build host; the bundle needs at most 2.34 (checked)
+            exe: spaceknife
+            installer: true
+          - target: linux-arm64
+            runner: ubuntu-22.04-arm # glibc 2.35 here too
+            exe: spaceknife
+            installer: false
+    permissions:
+      contents: read
+      id-token: write # the attestations, only when the Release workflow asks for them
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+        with:
+          enable-cache: true
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/electron/pnpm-lock.yaml
+
+      # the Windows on ARM runner comes without Rust: rustup for its architecture first
+      - name: Set up Rust
+        run: |
+          if command -v rustup >/dev/null; then
+            rustup update stable --no-self-update && rustup default stable
+          elif [ "$RUNNER_OS" = Windows ]; then
+            target=$([ "$RUNNER_ARCH" = ARM64 ] && echo aarch64 || echo x86_64)-pc-windows-msvc
+            curl -sSfL -o "$RUNNER_TEMP/rustup-init.exe" "https://static.rust-lang.org/rustup/dist/$target/rustup-init.exe"
+            "$RUNNER_TEMP/rustup-init.exe" -y --profile minimal --default-toolchain stable --no-modify-path
+            cygpath -w "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
+          else
+            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
+            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          fi
+
+      - name: Install Python 3.12 and the build tools
+        run: |
+          uv python install 3.12
+          uv sync --locked --group native --group package
+
+      - name: Install the Electron app's dependencies
+        working-directory: apps/electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Install rpmbuild and zsyncmake (the rpm and zsync packages)
+        if: inputs.installers && matrix.installer && runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y rpm zsync
+
+      # what Electron needs to start, which the x64 runner image has and the ARM one may not
+      - name: Install Electron's libraries
+        if: runner.os == 'Linux' && runner.arch == 'ARM64'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnss3 libgbm1 libasound2 libgtk-3-0 libxss1 libatk-bridge2.0-0 libdrm2 libxkbcommon0
+
+      - name: Build the portable archive
+        if: ${{ !(matrix.installer && (inputs.installers || runner.os == 'Windows')) }}
+        run: uv run python tools/build_package.py --portable --no-installers
+
+      # on Windows x64 always: the update test below installs it
+      - name: Build the portable archive and the installers
+        if: ${{ matrix.installer && (inputs.installers || runner.os == 'Windows') }}
+        run: uv run python tools/build_package.py --portable
+
+      - name: Unpack it again
+        run: |
+          mkdir -p dist/portable-test
+          if [ "$RUNNER_OS" = Windows ]; then
+            uv run python -m zipfile -e dist/electron/*-portable.zip dist/portable-test
+          else
+            tar -xzf dist/electron/*-portable.tar.gz -C dist/portable-test
+          fi
+          ls dist/portable-test/*
+
+      - name: Smoke test in portable mode
+        run: |
+          app=$(ls -d dist/portable-test/*/"${{ matrix.exe }}")
+          if [ "$RUNNER_OS" = Linux ]; then
+            if ! command -v xvfb-run >/dev/null; then
+              sudo apt-get update && sudo apt-get install -y xvfb
+            fi
+            xvfb-run -a uv run python packaging/smoke_app.py --portable "$app"
+          else
+            uv run python packaging/smoke_app.py --portable "$app"
+          fi
+
+      # no window, the interface over HTTP (--headless); on Linux without a display (no xvfb-run),
+      # on Windows through SpaceKnife.com
+      - name: Headless mode smoke test
+        run: |
+          dir=$(dirname "$(ls -d dist/portable-test/*/"${{ matrix.exe }}")")
+          if [ "$RUNNER_OS" = Windows ]; then app="$dir/SpaceKnife.com"; else app="$dir/spaceknife"; fi
+          uv run python packaging/smoke_headless.py "$app"
+
+      # a release list on 127.0.0.1 offers the next version (this build again); the test clicks the
+      # update badge and 「无缝更新」 through the DevTools port, like a user
+      - name: Update end to end (portable)
+        timeout-minutes: 15
+        run: |
+          shopt -s nullglob
+          archive=(dist/electron/*-portable.zip dist/electron/*-portable.tar.gz)
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python packaging/update_e2e.py portable "${archive[0]}"
+          else
+            uv run python packaging/update_e2e.py portable "${archive[0]}"
+          fi
+
+      - name: Download the newest published installer (the upgrade starts from it)
+        if: runner.os == 'Windows' && matrix.installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --repo DuskXi/SpaceKnife --limit 10 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft | not)][0].tagName')
+          echo "newest release: $tag"
+          gh release download "$tag" --repo DuskXi/SpaceKnife --dir dist/previous \
+            --pattern '*-Setup-x64.exe' --pattern 'SHA256SUMS.txt'
+          ls -l dist/previous
+
+      - name: Update and uninstall end to end (Windows installer)
+        if: runner.os == 'Windows' && matrix.installer
+        timeout-minutes: 25
+        run: |
+          shopt -s nullglob
+          setup=(dist/electron/SpaceKnife-*-Setup-x64.exe)
+          previous=(dist/previous/SpaceKnife-*-Setup-x64.exe)
+          uv run python packaging/update_e2e.py nsis "${setup[0]}" --previous "${previous[0]}"
+
+      - name: Checksum
+        working-directory: dist/electron
+        run: sha256sum *-portable.* | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
+
+      - name: Checksum the installers
+        if: inputs.installers && matrix.installer
+        working-directory: dist/electron
+        run: |
+          shopt -s nullglob
+          sha256sum *-Setup-x64.exe *.AppImage *.deb *.rpm | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
+          if [ "$RUNNER_OS" = Linux ]; then
+            # AppImageUpdate reads the update information the build wrote, and the .zsync next to it
+            info=$(./*.AppImage --appimage-updateinformation)
+            echo "update information: $info"
+            [[ "$info" == gh-releases-zsync\|DuskXi\|SpaceKnife\|latest-all\|* ]]
+            ls -l *.AppImage.zsync
+          fi
+
+      - name: Attest the portable archive
+        if: inputs.attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/electron/*-portable.zip
+            dist/electron/*-portable.tar.gz
+
+      - name: Attest the installers
+        if: inputs.attest && inputs.installers && matrix.installer
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/electron/*-Setup-x64.exe
+            dist/electron/*.AppImage
+            dist/electron/*.deb
+            dist/electron/*.rpm
+
+      - uses: actions/upload-artifact@v7
+        if: inputs.installers && matrix.installer
+        with:
+          name: SpaceKnife-installers-${{ matrix.target }}
+          path: |
+            dist/electron/*-Setup-x64.exe
+            dist/electron/*.AppImage
+            dist/electron/*.AppImage.zsync
+            dist/electron/*.deb
+            dist/electron/*.rpm
+            dist/electron/SHA256SUMS-installers-*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SpaceKnife-portable-${{ matrix.target }}
+          path: |
+            dist/electron/*-portable.zip
+            dist/electron/*-portable.tar.gz
+            dist/electron/SHA256SUMS-portable-*.txt
+          if-no-files-found: error
+          retention-days: 14

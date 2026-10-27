@@ -8,16 +8,19 @@ import { call, setViewSettings, viewCall } from "@/state/actions";
 import { exitCompare, NOW, setCompareEnds, swapCompare } from "@/state/compare";
 import { runCommand } from "@/state/commands";
 import { patchView, setting, type Tab, toast, useApp } from "@/state/store";
-import { diffColor, diffTiers, GROW_COLORS, maxChange, SHRINK_COLORS, type Tiers } from "@/lib/diff";
+import { diffColor, diffTiers, growColors, maxChange, shrinkColors, type Tiers } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
-import { Kind } from "@/treemap/frame";
-import type { HoverInfo } from "@/treemap/Treemap";
+import { cardAvoid, hoverFacts } from "@/shell/HoverCard";
+import { sameTarget } from "@/visual/hover";
+import { Kind } from "@/visual/frame";
+import { componentFor } from "@/visual/registry";
+import type { HoverInfo } from "@/visual/types";
 import { Icon, type IconName } from "@/ui/Icon";
 
 const LIST_LIMIT = 12;
-const DIRECTIONS = ["all", "grow", "shrink"] as const;
-const directionLabel = (d: (typeof DIRECTIONS)[number]): string => ({ all: t("全部"), grow: t("增长"), shrink: t("减少") })[d];
+export const DIRECTIONS = ["all", "grow", "shrink"] as const;
+export const directionLabel = (d: (typeof DIRECTIONS)[number]): string => ({ all: t("全部"), grow: t("增长"), shrink: t("减少") })[d];
 
 const pad = (n: number) => String(n).padStart(2, "0");
 function stamp(iso: string): string {
@@ -52,13 +55,15 @@ const sideName = (side: CompareSide) => (side.kind === "now" ? t("现在") : sta
 // ------------------------------------------------------------------ toolbar
 
 /** 对比选择器 (UI-W6-03…06): 「对比」 · base ▾ › target ▾ · swap. */
-export function ComparePicker({ tab }: { tab: Tab }) {
+/** The two ends of a comparison, in the toolbar. In a narrow window it shrinks (the snapshot names
+ * get an ellipsis) down to 260 px; `compact` leaves out the word 「对比」. */
+export function ComparePicker({ tab, compact = false }: { tab: Tab; compact?: boolean }) {
   const c = tab.compare!;
   return (
-    <div className="cmp-picker" role="group" aria-label={t("快照对比")}>
-      <span className="cmp-label">
+    <div className="cmp-picker" role="group" aria-label={t("快照对比")} data-fit-min={260}>
+      <span className="cmp-label" title={compact ? t("对比") : undefined}>
         <Icon name="diff" size={14} />
-        {t("对比")}
+        {!compact && t("对比")}
       </span>
       <EndMenu tab={tab} which="base" />
       <span className="cmp-arrow" aria-hidden="true">
@@ -96,7 +101,7 @@ function EndMenu({ tab, which }: { tab: Tab; which: "base" | "target" }) {
     void (which === "base" ? setCompareEnds(tab.id, to, c.target) : setCompareEnds(tab.id, c.base, to));
   };
   return (
-    <div className="cmp-end" ref={box}>
+    <div className={`cmp-end${spec === NOW ? " now" : ""}`} ref={box}>
       <button
         className="cmp-end-btn"
         aria-haspopup="listbox"
@@ -149,11 +154,12 @@ export function DirectionSegment({ viewId }: { viewId: string }) {
   );
 }
 
-export function ExitCompare({ tab }: { tab: Tab }) {
+/** 「退出对比」; `compact` (a narrow window): the icon alone, the text stays its name and tooltip. */
+export function ExitCompare({ tab, compact = false }: { tab: Tab; compact?: boolean }) {
   return (
-    <button className="outline-btn" onClick={() => void exitCompare(tab.id)} title={t("退出对比（Esc）")}>
+    <button className={`outline-btn${compact ? " icon-only" : ""}`} onClick={() => void exitCompare(tab.id)} aria-label={t("退出对比")} title={t("退出对比（Esc）")}>
       <Icon name="close" size={14} />
-      {t("退出对比")}
+      {!compact && t("退出对比")}
     </button>
   );
 }
@@ -182,7 +188,11 @@ export function CompareSidebar({ tab }: { tab: Tab }) {
     };
   }, [viewId, seq, c.info?.revision]);
 
-  const legend = useMemo(() => diffTiers(frame?.delta ? maxChange(frame.delta, frame.kind) : 0), [frame]);
+  // the same scale as the map: the rows its visualization fills
+  const legend = useMemo(() => {
+    const g = frame ? componentFor(frame.layout)?.geometry : undefined;
+    return diffTiers(frame?.delta ? maxChange(frame.delta, frame.kind, g ? (row) => g.filled(frame, row) : undefined) : 0);
+  }, [frame]);
   const maxAbs = Math.max(1, ...(sum?.grow_items ?? []).map((i) => Math.abs(i.delta)), ...(sum?.shrink_items ?? []).map((i) => Math.abs(i.delta)));
 
   return (
@@ -299,15 +309,15 @@ function Summary({ sum }: { sum: CompareSummary }) {
         {unit && <span className="cmp-unit">{unit}</span>}
       </div>
       <div className="cmp-ratio" role="img" aria-label={t("增长 {grow}，减少 {shrink}", { grow: fmtSize(sum.grow), shrink: fmtSize(sum.shrink) })}>
-        {total > 0 && <span style={{ flexGrow: sum.grow, background: GROW_COLORS[3] }} />}
-        {total > 0 && sum.shrink > 0 && <span style={{ flexGrow: sum.shrink, background: SHRINK_COLORS[2] }} />}
+        {total > 0 && <span style={{ flexGrow: sum.grow, background: growColors()[3] }} />}
+        {total > 0 && sum.shrink > 0 && <span style={{ flexGrow: sum.shrink, background: shrinkColors()[2] }} />}
       </div>
       <div className="row-between small">
         <span>
-          <span className="cmp-swatch" style={{ background: GROW_COLORS[3] }} /> {t("增长")} <span className="mono">{fmtSize(sum.grow)}</span>
+          <span className="cmp-swatch" style={{ background: growColors()[3] }} /> {t("增长")} <span className="mono">{fmtSize(sum.grow)}</span>
         </span>
         <span>
-          <span className="cmp-swatch" style={{ background: SHRINK_COLORS[2] }} /> {t("减少")} <span className="mono">{fmtSize(sum.shrink)}</span>
+          <span className="cmp-swatch" style={{ background: shrinkColors()[2] }} /> {t("减少")} <span className="mono">{fmtSize(sum.shrink)}</span>
         </span>
       </div>
       {showFill && (
@@ -336,11 +346,11 @@ function Legend({ heads }: { heads: string[] }) {
           </span>
         ))}
         <span className="small">{t("增长")}</span>
-        {GROW_COLORS.map((c) => (
+        {growColors().map((c) => (
           <span key={c} className="cmp-chip" style={{ background: c }} />
         ))}
         <span className="small">{t("减少")}</span>
-        {SHRINK_COLORS.map((c, i) => (
+        {shrinkColors().map((c, i) => (
           <span key={c} className="cmp-chip" style={{ background: c, gridColumn: i === 2 ? "span 2" : undefined }} />
         ))}
       </div>
@@ -470,7 +480,9 @@ const HOVER_DELAY = 250;
 /** UI-W6-20…22: both sizes, the change in percent, and the children that changed most. */
 export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: { w: number; h: number } }) {
   const [shown, setShown] = useState<HoverInfo | null>(null);
-  const [info, setInfo] = useState<CompareNodeResult | null>(null);
+  // the change's details and the key they are of
+  const [held, setHeld] = useState<{ key: number; r: CompareNodeResult } | null>(null);
+  const info = held?.r ?? null;
   const target = useApp((s) => {
     const t = s.tabs.find((x) => x.compare?.viewId === hover?.viewId);
     return t?.compare?.info?.target ?? null;
@@ -482,30 +494,36 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
   useEffect(() => {
     if (shown === hover) return;
     if (!hover) return setShown(null);
-    if (keepOpen && shown) return setShown(hover);
+    if ((keepOpen || sameTarget(shown, hover)) && shown) return setShown(hover);
     setShown(null);
     const timer = setTimeout(() => setShown(hover), HOVER_DELAY);
     return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
+  // the change's details, once per target (not per pointer move); a new picture of a live
+  // comparison asks again and the card keeps what it shows until the answer comes
+  const viewId = shown?.viewId ?? null;
+  const facts0 = shown ? hoverFacts(shown.frame, shown.target, null) : null;
+  const key = facts0 && facts0.kind !== Kind.FREE && facts0.kind !== Kind.UNKNOWN ? facts0.key : null;
+  const seq = shown?.frame.info.seq ?? 0;
   useEffect(() => {
-    setInfo(null);
-    if (!shown) return;
-    const kind = shown.frame.kind[shown.row]!;
-    if (kind === Kind.FREE || kind === Kind.UNKNOWN) return;
+    if (!viewId || key === null) {
+      setHeld(null);
+      return;
+    }
+    setHeld((cur) => (cur && cur.key === key ? cur : null));
     let alive = true;
-    const key = shown.frame.key[shown.row]!;
-    void call("compare.node", { view_id: shown.viewId, key, children: 4 })
-      .then((r) => alive && setInfo(r))
+    void call("compare.node", { view_id: viewId, key, children: 4 })
+      .then((r) => alive && setHeld({ key, r }))
       .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [shown]);
+  }, [viewId, key, seq]);
 
   useLayoutEffect(() => {
     if (!shown || !card.current) return;
-    const r = shown.rect;
+    const r = cardAvoid(shown);
     const cw = card.current.offsetWidth;
     const ch = card.current.offsetHeight;
     let left = r.x + Math.min(r.w, 24) + 12;

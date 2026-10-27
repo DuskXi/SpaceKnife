@@ -1,5 +1,5 @@
 {
-  "$description": "树图 carbon 主题（A2 基线）。语义见 docs/UI-SPEC.md 的 T 节；所有文字对比度 ≥ 4.5:1。",
+  "$description": "树图 carbon 主题（A2 基线，暗色值；浅色值在 themes/light.tokens.json）。语义见 docs/UI-SPEC.md 的 T 节；所有文字对比度 ≥ 4.5:1。",
   "treemap": {
     "ground": {
       "$type": "color",
@@ -7,7 +7,7 @@
     },
     "level": {
       "$type": "color",
-      "$description": "文件夹框按嵌套深度取色，超过第 4 层沿用第 4 层",
+      "$description": "文件夹框按嵌套深度取色，越深离树图底色越远一档（暗色越深越亮，浅色越深越暗），超过第 4 层沿用第 4 层",
       "0": {
         "bg": {
           "$value": "#0C0E12"
@@ -116,8 +116,39 @@
       "doc": {
         "$value": "#505DC6"
       },
+      "game": {
+        "$description": "游戏：深红。游戏安装目录里的文件不论扩展名都算它；亮度与彩度和其余类别拉开，色盲下仍可分",
+        "$value": "#BE1022"
+      },
+      "code": {
+        "$description": "代码/开发：浅石板蓝。大量小文件的区域保持安静；亮度与其余类别拉开，色盲下仍可分",
+        "$value": "#B7CBF3"
+      },
+      "data": {
+        "$description": "数据/模型：薄荷。亮度与其余类别拉开，色盲下仍可分",
+        "$value": "#7BE8B9"
+      },
       "other": {
         "$value": "#2B2F38"
+      }
+    },
+    "flat": {
+      "$type": "color",
+      "$description": "「扁平」配色（UI-W7-31 ⑤）的默认色：卷、文件夹、文件、可用空间、未知空间。都是别名，每个主题各自解析",
+      "volume": {
+        "$value": "{treemap.level.0.headerBg}"
+      },
+      "folder": {
+        "$value": "{treemap.level.0.bg}"
+      },
+      "file": {
+        "$value": "{treemap.class.other}"
+      },
+      "free": {
+        "$value": "{treemap.free.stripeB}"
+      },
+      "unknown": {
+        "$value": "{treemap.unknown.stripeB}"
       }
     },
     "label": {
@@ -171,6 +202,38 @@
         "$value": "#7E8493"
       }
     },
+    "trash": {
+      "$type": "color",
+      "$description": "回收站 / 废纸篓里的块：压暗的蒙层、交叉细纹、虚线轮廓与流光，回收站本身的「清空可释放」标签",
+      "veil": {
+        "$value": "#06070973"
+      },
+      "hatch": {
+        "$value": "#FF85772E"
+      },
+      "outline": {
+        "$value": "#FF8577"
+      },
+      "sweep": {
+        "$value": "#FFD9D32E"
+      },
+      "badgeBg": {
+        "$value": "#FF8577"
+      },
+      "badgeText": {
+        "$value": "#0A0B0D"
+      }
+    },
+    "classFocus": {
+      "$type": "color",
+      "$description": "悬停「类别统计」里的一类：图上其余部分压暗的蒙层，这一类的块保持原色并描一圈细边，外发光取类别色（太暗的类别用强调色）",
+      "veil": {
+        "$value": "#060709D9"
+      },
+      "outline": {
+        "$value": "#FFFFFF8C"
+      }
+    },
     "pending": {
       "$type": "color",
       "stripeA": {
@@ -208,6 +271,14 @@
       },
       "newBadgeText": {
         "$value": "#0A0B0D"
+      },
+      "deletedBadgeBg": {
+        "$value": "#0B0C10B8",
+        "$description": "对比视图「已删除」角标的底色，描边 color.text.secondary、字 color.text.primary"
+      },
+      "selectShadow": {
+        "$value": "#000000A6",
+        "$description": "选中投影（树图、火焰图、火焰-极坐标图；树图把投影在选中块里挖掉），回收站角标的文字阴影"
       }
     },
     "diff": {

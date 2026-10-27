@@ -2,16 +2,56 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev] # work happens on dev; main changes by merging dev
   pull_request:
+  workflow_dispatch: # a manual run tests everything
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changed areas
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      python: ${{ steps.areas.outputs.python }}
+      electron: ${{ steps.areas.outputs.electron }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # the commits a push or pull request is compared against
+
+      # Pull request: its merge commit against the base it merges into. Push: the pushed commits.
+      # A manual run, a new branch, or a force push whose old commit is gone runs everything.
+      # The rules are in .github/scripts/ci-areas.sh.
+      - name: Decide which jobs run
+        id: areas
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          base=
+          if [ "$EVENT" = pull_request ]; then
+            base=HEAD^1
+          elif [ "$EVENT" = push ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base=$BEFORE
+          fi
+          if [ -n "$base" ]; then
+            git -c core.quotepath=off diff --name-only --no-renames "$base" HEAD > changed.txt
+            areas=$(bash .github/scripts/ci-areas.sh < changed.txt)
+          else
+            echo "(everything)" > changed.txt
+            areas=$'python=true\nelectron=true'
+          fi
+          echo "$areas" | tee -a "$GITHUB_OUTPUT"
+          { echo "### Jobs to run"; echo; echo "$areas" | sed 's/^/- /'; echo; echo "Changed files:"; echo; echo '```'; cat changed.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
   python:
     name: Python · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30  # the suite takes a few minutes; a hang must not hold a runner for hours
     strategy:
@@ -27,10 +67,24 @@ jobs:
         with:
           enable-cache: true
 
+      # the native extension too (Rust is on every runner image): its walkers are checked against
+      # the Python ones on each OS, macOS's getattrlistbulk path included
       - name: Install Python 3.12 and the workspace
         run: |
           uv python install 3.12
-          uv sync --locked
+          uv sync --locked --group native
+
+      # The Rust unit tests of packages/native (MFT parsing, the walkers' entry rules, the file id
+      # check of Windows' relative opens). They link the workspace's Python, whose library must also
+      # be found when the test binary runs (python3.dll on Windows, libpython elsewhere).
+      - name: Native unit tests
+        shell: bash
+        run: |
+          py=$(uv run python -c "import sys; print(sys.executable)")
+          base=$(uv run python -c "import sys; print(sys.base_prefix)")
+          if [ "$RUNNER_OS" = Windows ]; then base=$(cygpath -u "$base"); fi
+          export PYO3_PYTHON="$py" PATH="$base:$PATH" LD_LIBRARY_PATH="$base/lib" DYLD_LIBRARY_PATH="$base/lib"
+          cargo test --release --lib --manifest-path packages/native/Cargo.toml
 
       - name: Lint
         run: |
@@ -51,6 +105,8 @@ jobs:
 
   electron:
     name: Electron · ${{ matrix.os }}
+    needs: changes
+    if: needs.changes.outputs.electron == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -84,6 +140,17 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
+      # Every renderer text needs an English entry (t() falls back to the Chinese source). The check
+      # needs node_modules, which the python job doesn't install; the result is the same on every OS.
+      - name: Set up uv
+        if: runner.os == 'Linux'
+        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+
+      - name: Translations
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: uv run --no-project --python 3.12 tools/i18n_check.py --area electron
+
       - name: Type check
         run: pnpm typecheck
 
@@ -92,3 +159,24 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # The one check branch protection requires: skipped jobs report under their unexpanded matrix
+  # name, so requiring each job would leave a pull request waiting forever.
+  result:
+    name: CI passed
+    needs: [changes, python, electron]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job that ran succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case "$r" in
+              success | skipped) ;;
+              *) echo "::error::a job ended with $r"; exit 1 ;;
+            esac
+          done

@@ -1,6 +1,7 @@
 # PyInstaller spec of the frozen backend (M8): onedir dist/backend/spaceknife-backend/.
 # Built by tools/build_package.py (needs `uv sync --group native --group package`); the Electron
-# installers ship the folder as resources/backend/ (apps/electron/electron-builder.yml).
+# installers ship the folder as resources/backend/ (apps/electron/electron-builder.yml). PyInstaller
+# freezes the interpreter it runs on, so each OS and CPU architecture is built on its own machine.
 # ruff: noqa
 import json
 import os
@@ -26,25 +27,45 @@ a = Analysis(
     pathex=[os.environ["SPACEKNIFE_NATIVE_RELEASE"]] if os.environ.get("SPACEKNIFE_NATIVE_RELEASE") else [],
     hiddenimports=hidden,
     datas=datas,
-    # dev tools; pydantic.mypy (the mypy plugin) would pull in mypy itself
-    excludes=["tkinter", "_tkinter", "pytest", "hypothesis", "IPython", "PIL", "resvg_py", "pydantic.mypy", "mypy"],
+    # dev tools; pydantic.mypy (the mypy plugin) would pull in mypy itself. setuptools is a build tool
+    # nothing imports at run time; collected anyway, it brought PyInstaller's runtime hook
+    # pyi_rth_setuptools, which imported setuptools and its vendored packages at every start of the
+    # backend: 130–230 ms of a command-line scan's start-up (docs/packaging.md, 命令行扫描的启动)
+    excludes=[
+        "tkinter",
+        "_tkinter",
+        "pytest",
+        "hypothesis",
+        "IPython",
+        "PIL",
+        "resvg_py",
+        "pydantic.mypy",
+        "mypy",
+        "setuptools",
+        "_distutils_hack",
+        "pkg_resources",
+        "distutils",
+    ],
     noarchive=False,
 )
 LINUX = sys.platform.startswith("linux")
+MAC = sys.platform == "darwin"
 if LINUX:
     # Every target system has its own GCC runtime (glibc's pthread_cancel needs libgcc_s; apt and
     # dnf need libstdc++), as manylinux wheels assume; the build host's copies may need a newer
     # glibc than RHEL 9's 2.34 (Ubuntu 22.04's libgcc_s, GCC 12: GLIBC_2.35). tools/build_package.py
     # checks the glibc floor of everything that stays.
     a.binaries = [b for b in a.binaries if not b[0].startswith(("libgcc_s.so", "libstdc++.so"))]
+if LINUX or MAC:
     # Python's build configuration (_sysconfigdata_*) names where this interpreter is installed,
     # under the build machine's home folder: compile a copy without it (the paths mean nothing in
     # the frozen app; tools/build_package.py rejects any build-machine path in the bundle).
     home = os.path.expanduser("~")
+    neutral = "/Users/builder" if MAC else "/home/builder"
     pure = []
     for name, src, typecode in a.pure:
         if name.startswith("_sysconfigdata") and src and src.endswith(".py"):
-            text = open(src, encoding="utf-8").read().replace(home, "/home/builder")
+            text = open(src, encoding="utf-8").read().replace(home, neutral)
             src = os.path.join(workpath, name + ".py")
             with open(src, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -92,7 +113,9 @@ exe = EXE(
     console=True,  # stdio pipes to Electron; started hidden (windowsHide / SW_HIDE)
     strip=False,  # strip breaks the libraries auditwheel patched (numpy's openblas: not page-aligned)
     upx=False,
-    icon=ROOT + "/apps/electron/build/icon.ico",
+    # Windows: the backend's icon in Task Manager. macOS would convert the .ico for nothing (the app
+    # bundle's icon comes from electron-builder); Linux ignores it.
+    icon=ROOT + "/apps/electron/build/icon.ico" if sys.platform == "win32" else None,
     version=version,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="spaceknife-backend", strip=False, upx=False)

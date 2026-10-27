@@ -1,4 +1,5 @@
-// Off-screen recording of a short demo (README GIF, website and social video): run by
+// Off-screen recording of a short demo (README GIF, website and social video: hover, zoom, the
+// flame graph and the polar flame graph, a filter, the palette, a comparison): run by
 // tools/demo/screenshots.py --video with the repo's Electron as the main script. Nothing is shown on
 // screen. The page is driven like screenshots.cjs (mock snapshot, status bar cropped off, UTC) and a
 // timer saves the latest off-screen frame at a fixed rate to SHOT_FRAMES as JPEG files; ffmpeg turns
@@ -6,7 +7,7 @@
 //
 //   SHOT_URL=… SHOT_SNAPSHOT=… SHOT_FRAMES=<dir> SHOT_LOG=<file> electron tools/demo/demo.cjs
 
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, nativeTheme } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 
@@ -45,6 +46,10 @@ const POINTER = `(() => {
 })()`;
 
 app.whenReady().then(async () => {
+  // the page follows the system's light / dark setting (prefers-color-scheme, which themeSource
+  // drives): fixed to dark here, whatever the desktop running this says, so new pictures match the
+  // ones already published (SHOT_THEME=light for the light theme)
+  nativeTheme.themeSource = env("THEME", "dark") === "light" ? "light" : "dark";
   const win = new BrowserWindow({ width: WIDTH, height: HEIGHT, show: false, webPreferences: { offscreen: true, backgroundThrottling: false } });
   const wc = win.webContents;
   wc.setFrameRate(30);
@@ -125,28 +130,118 @@ app.whenReady().then(async () => {
     await js(POINTER);
     move(1000, 300);
     await sleep(4000); // layout, first frames, toasts gone: recording starts on a settled screen
-    const r = await js(`(() => { const c = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0].getBoundingClientRect(); return { x: c.x, y: c.y, w: c.width, h: c.height }; })()`);
+    const canvas = () => js(`(() => { const c = [...document.querySelectorAll("canvas")].sort((a, b) => b.width * b.height - a.width * a.height)[0].getBoundingClientRect(); return { x: c.x, y: c.y, w: c.width, h: c.height }; })()`);
+    const r = await canvas();
     const at = (fx, fy) => [r.x + r.w * fx, r.y + r.h * fy];
+    // the toolbar's visualization switch: treemap, flame graph, polar flame graph
+    const VIS = `[...document.querySelectorAll(".segmented.icon-only [role=radio]")]`;
+    const visButtons = () => js(`${VIS}.map((b) => { const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })`);
+    const pickVisual = (i) => js(`(() => { const b = ${VIS}[${i}]; if (b) b.click(); return !!b; })()`);
+    // what the hover card names under (x, y)
+    const titleAt = async (x, y) => {
+      move(x, y);
+      await sleep(420);
+      return js(`document.querySelector(".hovercard .hc-title")?.textContent ?? ""`);
+    };
+    // walk from (x, y) in steps of (dx, dy): the first title is the zoom root, the next one a folder
+    // right under it; its middle along the walk is where to point (found by name, so either language)
+    const childAlong = async (x, y, dx, dy, steps) => {
+      let root = null;
+      let child = null;
+      let first = -1;
+      let last = -1;
+      for (let i = 0; i < steps; i++) {
+        const name = await titleAt(x + dx * i, y + dy * i);
+        if (!name) {
+          if (child) break;
+          continue;
+        }
+        if (root === null || (child === null && name === root)) {
+          root = name;
+          continue;
+        }
+        if (child === null) {
+          child = name;
+          first = i;
+        }
+        if (name !== child) break;
+        last = i;
+      }
+      if (child === null) throw new Error(`no folder found under ${root}`);
+      const mid = (first + last) / 2;
+      return { x: x + dx * mid, y: y + dy * mid, name: child };
+    };
+
+    // before recording: where the flame graph and the polar flame graph draw a big folder under the
+    // root (the same mock data and window give the same layout during the recording)
+    if (!(await pickVisual(1))) throw new Error("no visualization switch in the toolbar");
+    await sleep(2500);
+    const fr = await canvas();
+    const flame = await childAlong(fr.x + fr.w * 0.1, fr.y + fr.h - 3, 0, -6, 40); // root bar at the bottom
+    log(`flame: ${flame.name} at ${Math.round(flame.x)},${Math.round(flame.y)}`);
+    await pickVisual(2);
+    await sleep(2500);
+    const pr = await canvas();
+    const ray = (35 * Math.PI) / 180; // clockwise from twelve o'clock, where the biggest sectors start
+    const polar = await childAlong(pr.x + pr.w / 2, pr.y + pr.h / 2, 6 * Math.sin(ray), -6 * Math.cos(ray), 60);
+    log(`polar: ${polar.name} at ${Math.round(polar.x)},${Math.round(polar.y)}`);
+    await pickVisual(0);
+    move(1000, 300);
+    await sleep(3000);
 
     record();
     log("recording");
     // 1. hover across the drive
-    await sleep(800);
+    await sleep(600);
     await glide(...at(0.62, 0.3), 900);
-    await sleep(700);
+    await sleep(600);
     await glide(...at(0.3, 0.45), 900);
-    await sleep(900);
-    await glide(...at(0.12, 0.2), 800);
     await sleep(700);
     // 2. zoom into Videos (double-click its title) and back out
     await glide(r.x + 40, r.y + 8, 600);
     await sleep(300);
     await click(2);
-    await sleep(1800);
+    await sleep(1700);
     await glide(...at(0.45, 0.5), 800);
-    await sleep(1200);
+    await sleep(1000);
     await key("Backspace");
+    await sleep(1400);
+    // 3. the flame graph from the toolbar: hover, zoom into a folder (the bars stretch) and back
+    const vis = await visButtons();
+    await glide(vis[1].x, vis[1].y, 900);
+    await sleep(250);
+    await click();
+    await sleep(1400);
+    await glide(flame.x + fr.w * 0.35, flame.y - 40, 900);
+    await sleep(800);
+    await glide(flame.x, flame.y, 700);
+    await sleep(400);
+    await click(2);
+    await sleep(1800);
+    await glide(fr.x + fr.w * 0.55, flame.y - 60, 800);
+    await sleep(900);
+    await key("Backspace");
+    await sleep(1400);
+    // 4. the polar flame graph: the same tree in rings; zoom into a sector and back
+    await glide(vis[2].x, vis[2].y, 900);
+    await sleep(250);
+    await click();
     await sleep(1500);
+    await glide(polar.x + (polar.x - (pr.x + pr.w / 2)) * 0.6, polar.y + (polar.y - (pr.y + pr.h / 2)) * 0.6, 900);
+    await sleep(900);
+    await glide(polar.x, polar.y, 700);
+    await sleep(400);
+    await click(2);
+    await sleep(2000);
+    await glide(pr.x + pr.w * 0.38, pr.y + pr.h * 0.6, 800);
+    await sleep(900);
+    await key("Backspace");
+    await sleep(1400);
+    // back to the treemap
+    await glide(vis[0].x, vis[0].y, 800);
+    await sleep(250);
+    await click();
+    await sleep(1400);
     // 3. a filter, typed
     const f = await js(`(() => { const i = document.querySelector(".filter input").getBoundingClientRect(); return { x: i.x + 40, y: i.y + i.height / 2 }; })()`);
     await glide(f.x, f.y, 700);

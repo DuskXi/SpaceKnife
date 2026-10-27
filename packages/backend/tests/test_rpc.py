@@ -101,10 +101,18 @@ async def test_log_subscription_streams_records(client: Connection) -> None:
     sub = await client.subscribe(TOPIC_LOG, LogTopicParams(min_level="INFO", backlog=0))
     logger.debug("debug is below the floor")
     logger.warning("磁盘读取 {}", "warn-marker")
-    event = await asyncio.wait_for(got.get(), timeout=2)
+
+    async def ours() -> LogRecordEvent:
+        # the server logs too, on its own schedule (e.g. a disk-load sampler unavailable on CI VMs)
+        while True:
+            event = await got.get()
+            assert event.level != "DEBUG"
+            if "warn-marker" in event.message:
+                return event
+
+    event = await asyncio.wait_for(ours(), timeout=2)
     assert event.sub == sub
     assert event.level == "WARNING"
-    assert "warn-marker" in event.message
     await client.unsubscribe(sub)
     with pytest.raises(RemoteError) as info:
         await client.unsubscribe(sub)

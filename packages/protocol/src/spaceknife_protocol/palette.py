@@ -42,6 +42,13 @@ class PaletteQueryParams(Params):
     context: PaletteContext
 
 
+class PaletteCheckParams(Params):
+    """One command, where the user is: a keyboard shortcut runs it only when the palette would."""
+
+    id: str = Field(min_length=1, max_length=64, description="A command id (palette.commands)")
+    context: PaletteContext
+
+
 class PaletteCommand(Payload):
     id: str = Field(description="Run by the frontend; stable across versions")
     name: str

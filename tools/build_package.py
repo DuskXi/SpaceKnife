@@ -4,30 +4,51 @@
     uv run python tools/build_package.py                  # this platform's installers
     uv run python tools/build_package.py --skip-backend   # reuse dist/backend (Electron changes only)
     uv run python tools/build_package.py --targets deb    # Linux: some targets only
+    uv run python tools/build_package.py --portable       # also the portable archive
+    uv run python tools/build_package.py --portable --no-installers   # the portable archive only
+
+Everything is built for the build machine's architecture (PyInstaller freezes the interpreter it
+runs on): x64, or arm64 on Windows on ARM, ARM Linux and Apple Silicon. The installers are published
+for x64 only (and macOS arm64): on an x64-less ARM machine of Windows or Linux only --no-installers
+(the unpacked app and the portable archive) is built.
 
 Windows → dist/electron/SpaceKnife-<version>-Setup-x64.exe (NSIS, unsigned) and win-unpacked/
-Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage, spaceknife_<version>_amd64.deb,
-          spaceknife-<version>.x86_64.rpm (needs ``rpmbuild`` on PATH) and linux-unpacked/
+Linux   → dist/electron/SpaceKnife-<version>-x86_64.AppImage (+ .zsync, needs ``zsyncmake``),
+          spaceknife_<version>_amd64.deb, spaceknife-<version>.x86_64.rpm (needs ``rpmbuild`` on
+          PATH) and linux-unpacked/
+macOS   → dist/electron/SpaceKnife-<version>-mac-<arch>.dmg for this Mac's architecture (arm64 or
+          x64; ad-hoc signed, not notarized) and mac[-arm64]/SpaceKnife.app
+Portable → dist/electron/SpaceKnife-<version>-win-<arch>-portable.zip,
+          …-linux-<arch>-portable.tar.gz or …-mac-<arch>-portable.zip (arch x64 or arm64;
+          win-arm64-unpacked/, linux-arm64-unpacked/): the unpacked app (on macOS SpaceKnife.app) plus
+          a data/ folder, which makes it keep its data next to itself (apps/electron/src/main/portable.ts)
 
 Steps: a release build of the native extension (maturin, with the build machine's paths remapped:
 no home folder or user name in the binaries), PyInstaller (packaging/spaceknife-backend.spec →
 dist/backend/spaceknife-backend), the frozen backend's smoke test (packaging/smoke_backend.py), on
 Linux the glibc floor of every ELF in the bundle (docs/PLAN.md: RHEL 9 / Ubuntu 22.04, glibc 2.34),
-``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
-``electron-builder`` (apps/electron/electron-builder.yml), and a check that no file of the
-packaged app contains the build machine's home path. The native extension is required: an
-installer without it would scan at a fraction of the speed. See docs/packaging.md.
+on Windows the console launcher SpaceKnife.com (packaging/console-launcher, paths remapped the
+same way), ``electron-vite build``, the license files (tools/third_party_licenses.py → dist/licenses),
+``electron-builder`` (apps/electron/electron-builder.yml), a check that no file of the
+packaged app contains the build machine's home path, and on macOS a check of the app's ad-hoc
+signature. The native extension is required: an installer without it would scan at a fraction of
+the speed. See docs/packaging.md.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import io
+import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import sys
+import sysconfig
+import tarfile
 import time
 import zipfile
 from collections.abc import Iterator
@@ -39,9 +60,14 @@ ROOT = Path(__file__).resolve().parent.parent
 ELECTRON = ROOT / "apps" / "electron"
 DIST = ROOT / "dist"
 BACKEND_DIR = DIST / "backend" / "spaceknife-backend"
+CONSOLE_LAUNCHER = DIST / "console" / "SpaceKnife.com"  # Windows: electron-builder.yml win.extraFiles
 NATIVE_RELEASE = ROOT / "build" / "native-release"  # spaceknife_native/ of the release wheel
 GLIBC_FLOOR = (2, 34)  # RHEL 9; Ubuntu 22.04 has 2.35
 LINUX_TARGETS = ("AppImage", "deb", "rpm")
+# AppImageUpdate and similar tools read this (AppImageSpec: ELF section .upd_info): the newest
+# release or pre-release of this repository (``latest`` would skip pre-releases), and the .zsync
+# published next to its AppImage
+APPIMAGE_UPDATE_INFO = "gh-releases-zsync|DuskXi|SpaceKnife|latest-all|SpaceKnife-*-x86_64.AppImage.zsync"
 
 console = Console()
 
@@ -64,15 +90,10 @@ def backend_exe() -> Path:
     return BACKEND_DIR / ("spaceknife-backend.exe" if sys.platform == "win32" else "spaceknife-backend")
 
 
-def native_release() -> None:
-    """The native extension as shipped: a release wheel whose panic messages and debug-info paths
-    name /cargo, /rustup and /spaceknife instead of the build machine's folders (Cargo's
-    trim-paths is not stable yet), unpacked into NATIVE_RELEASE for PyInstaller."""
-    t0 = step("native extension (release build, build paths remapped)")
-    hint = "run `uv sync --locked --group native --group package`"
-    for module in ("PyInstaller", "maturin"):
-        if importlib.util.find_spec(module) is None:
-            raise SystemExit(f"no {module}: {hint}")
+def remapped_rust_env() -> dict[str, str]:
+    """Cargo's environment for a shipped binary: panic messages and debug-info paths name /cargo,
+    /rustup and /spaceknife instead of the build machine's folders (Cargo's trim-paths is not
+    stable yet)."""
     home = Path.home()
     flags = [
         f"--remap-path-prefix={os.environ.get('CARGO_HOME') or home / '.cargo'}=/cargo",
@@ -81,7 +102,42 @@ def native_release() -> None:
     ]
     if sys.platform == "win32":
         flags.append("-Clink-arg=/PDBALTPATH:%_PDB%")  # the PDB's file name only, not its full path
-    env = {**os.environ, "CARGO_ENCODED_RUSTFLAGS": "\x1f".join(flags)}
+    return {**os.environ, "CARGO_ENCODED_RUSTFLAGS": "\x1f".join(flags)}
+
+
+def console_launcher() -> None:
+    """Windows: SpaceKnife.com, the console entry next to SpaceKnife.exe (packaging/console-launcher).
+    A terminal waits for it, so headless mode can ask its question there and Ctrl+C stops it;
+    electron-builder.yml copies it from CONSOLE_LAUNCHER."""
+    t0 = step("console launcher (SpaceKnife.com)")
+    target = ROOT / "build" / "console-target"
+    run(
+        [
+            "cargo",
+            "build",
+            "--release",
+            "--locked",
+            "--manifest-path",
+            str(ROOT / "packaging" / "console-launcher" / "Cargo.toml"),
+            "--target-dir",
+            str(target),
+        ],
+        env=remapped_rust_env(),
+    )
+    CONSOLE_LAUNCHER.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(target / "release" / "spaceknife-console.exe", CONSOLE_LAUNCHER)
+    done(t0, f"{CONSOLE_LAUNCHER.stat().st_size // 1024} KB")
+
+
+def native_release() -> None:
+    """The native extension as shipped: a release wheel with the build paths remapped
+    (remapped_rust_env), unpacked into NATIVE_RELEASE for PyInstaller."""
+    t0 = step("native extension (release build, build paths remapped)")
+    hint = "run `uv sync --locked --group native --group package`"
+    for module in ("PyInstaller", "maturin"):
+        if importlib.util.find_spec(module) is None:
+            raise SystemExit(f"no {module}: {hint}")
+    env = remapped_rust_env()
     wheels = ROOT / "build" / "native-wheel"
     shutil.rmtree(wheels, ignore_errors=True)
     run(
@@ -207,10 +263,18 @@ def _contents(path: Path) -> Iterator[tuple[str, bytes]]:
                     yield name, member
 
 
+# GitHub-hosted runners: a home folder that names no person. Wheels from PyPI that were built on
+# such runners (pydantic-core, zstandard, …) contain it too, so it cannot be told apart from ours.
+RUNNER_HOMES = {"/Users/runner", "/home/runner", r"C:\Users\runneradmin"}
+
+
 def check_no_build_paths(root: Path) -> None:
     """No file of the packaged app may contain the build machine's home path (user name),
     including inside zip files and the frozen backend's module archive."""
     t0 = step(f"no build-machine paths in {root.relative_to(ROOT)}")
+    if os.environ.get("GITHUB_ACTIONS") == "true" and str(Path.home()) in RUNNER_HOMES:
+        done(t0, f"skipped: {Path.home()} is the GitHub runner's home, not a user's")
+        return
     patterns = home_path_patterns()
     bad: list[str] = []
     files = members = 0
@@ -229,7 +293,45 @@ def check_no_build_paths(root: Path) -> None:
     done(t0, f"{files} files, {members} archive members")
 
 
-def build_electron(targets: list[str]) -> None:
+def build_arch() -> str:
+    """The architecture of this build, the build machine's own: "x64" or "arm64". Read from the
+    interpreter that runs this (PyInstaller freezes it into the backend), so a build in an emulated
+    x64 Python on an ARM machine is an x64 build."""
+    # win-amd64, win-arm64, linux-x86_64, linux-aarch64, macosx-11.0-arm64, …
+    plat = sysconfig.get_platform().lower()
+    if plat.endswith("universal2"):  # a macOS interpreter of both architectures runs as this Mac's
+        plat = platform.machine().lower()
+    if plat.endswith(("amd64", "x86_64")):
+        return "x64"
+    if plat.endswith(("arm64", "aarch64")):
+        return "arm64"
+    raise SystemExit(f"no builds for {sysconfig.get_platform()}: x64 and arm64 only")
+
+
+def unpacked_app() -> Path:
+    """electron-builder's unpacked app: the folder the installer is made from (an arm64 build's
+    folder names its architecture, an x64 build's does not)."""
+    arm = build_arch() == "arm64"
+    if sys.platform == "win32":
+        return DIST / "electron" / ("win-arm64-unpacked" if arm else "win-unpacked")
+    if sys.platform == "darwin":
+        return DIST / "electron" / ("mac-arm64" if arm else "mac") / "SpaceKnife.app"
+    return DIST / "electron" / ("linux-arm64-unpacked" if arm else "linux-unpacked")
+
+
+def check_mac_signature(app: Path) -> None:
+    """The whole bundle carries a valid ad-hoc signature (electron-builder.yml: identity "-"): an
+    Apple Silicon Mac runs no unsigned code, and a broken signature makes Gatekeeper call the app
+    "damaged" instead of offering "Open Anyway"."""
+    t0 = step("ad-hoc signature of the app")
+    run(["codesign", "--verify", "--deep", "--strict", str(app)])
+    info = subprocess.run(["codesign", "-dv", str(app)], capture_output=True, text=True, check=True).stderr
+    if "Signature=adhoc" not in info:
+        raise SystemExit(f"{app.name} is not ad-hoc signed:\n{info}")
+    done(t0, "valid, ad-hoc")
+
+
+def build_electron(targets: list[str], installers: bool) -> None:
     t0 = step("Electron app (electron-vite build)")
     run(["pnpm", "-s", "build"], cwd=ELECTRON)
     done(t0)
@@ -238,20 +340,162 @@ def build_electron(targets: list[str]) -> None:
     done(t0)
     if not backend_exe().exists():
         raise SystemExit(f"no frozen backend at {BACKEND_DIR}: run without --skip-backend")
+    # the frozen backend runs on this machine's architecture only, so the app is built for it too
+    arch = f"--{build_arch()}"
+    if installers and arch == "--arm64" and sys.platform != "darwin":
+        raise SystemExit("installers are published for x64 only: build arm64 with --no-installers (portable)")
     if sys.platform == "win32":
-        platform = ["--win", "nsis"]
+        pack = ["--win", "nsis" if installers else "dir"]
     elif sys.platform.startswith("linux"):
-        if "rpm" in targets and shutil.which("rpmbuild") is None:
+        if installers and "rpm" in targets and shutil.which("rpmbuild") is None:
             raise SystemExit("rpm needs rpmbuild on PATH (or leave it out: --targets AppImage deb)")
-        platform = ["--linux", *targets]
+        pack = ["--linux", *targets] if installers else ["--linux", "dir"]
+    elif sys.platform == "darwin":
+        pack = ["--mac", "dmg" if installers else "dir"]
     else:
-        raise SystemExit("installers are built on Windows and Linux only (macOS packaging is deferred)")
-    t0 = step(f"installers (electron-builder {' '.join(platform[1:])})")
-    run(["pnpm", "exec", "electron-builder", *platform, "--x64", "--publish", "never"], cwd=ELECTRON)
+        raise SystemExit(f"no installers for {sys.platform}")
+    t0 = step(f"installers (electron-builder {' '.join(pack[1:])} {arch[2:]})")
+    run(["pnpm", "exec", "electron-builder", *pack, arch, "--publish", "never"], cwd=ELECTRON)
     done(t0)
-    check_no_build_paths(
-        DIST / "electron" / ("win-unpacked" if sys.platform == "win32" else "linux-unpacked")
-    )
+    if installers and sys.platform.startswith("linux") and "AppImage" in targets:
+        version = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))["version"]
+        appimage = DIST / "electron" / f"SpaceKnife-{version}-x86_64.AppImage"
+        t0 = step(f"update information and .zsync ({appimage.name})")
+        embed_update_info(appimage)
+        zsync = make_zsync(appimage)
+        done(t0, zsync.name if zsync else "no zsyncmake: no .zsync")
+    check_no_build_paths(unpacked_app())
+    if sys.platform == "darwin":
+        check_mac_signature(unpacked_app())
+
+
+def elf_section(path: Path, name: str) -> tuple[int, int] | None:
+    """(file offset, size) of a section of a little-endian ELF64 file, or None."""
+    with open(path, "rb") as f:
+        head = f.read(64)
+        if len(head) < 64 or head[:4] != b"ELF" or head[4] != 2 or head[5] != 1:
+            raise SystemExit(f"{path.name}: not a little-endian ELF64 file")
+        shoff = int.from_bytes(head[0x28:0x30], "little")
+        entsize, count, names_at = (int.from_bytes(head[i : i + 2], "little") for i in (0x3A, 0x3C, 0x3E))
+        f.seek(shoff)
+        table = f.read(entsize * count)
+
+        def header(i: int) -> tuple[int, int, int]:  # sh_name, sh_offset, sh_size
+            h = table[i * entsize : (i + 1) * entsize]
+            return tuple(int.from_bytes(h[a:b], "little") for a, b in ((0, 4), (24, 32), (32, 40)))  # type: ignore[return-value]
+
+        _, at, size = header(names_at)
+        f.seek(at)
+        names = f.read(size)
+    wanted = name.encode()
+    for i in range(count):
+        n, at, size = header(i)
+        if names[n : names.find(b"\x00", n)] == wanted:
+            return at, size
+    return None
+
+
+def embed_update_info(appimage: Path, info: str = APPIMAGE_UPDATE_INFO) -> None:
+    """Write the AppImage's update information into its runtime's .upd_info section (the runtime
+    electron-builder uses has one, empty), so that AppImageUpdate and similar tools can update it."""
+    found = elf_section(appimage, ".upd_info")
+    if found is None:
+        raise SystemExit(f"{appimage.name}: its runtime has no .upd_info section")
+    at, size = found
+    raw = info.encode()
+    if len(raw) >= size:
+        raise SystemExit(f"update information longer than .upd_info ({len(raw)} >= {size} bytes)")
+    with open(appimage, "r+b") as f:
+        f.seek(at)
+        f.write(raw.ljust(size, b"\x00"))
+        f.seek(at)
+        if f.read(size).rstrip(b"\x00") != raw:
+            raise SystemExit(f"{appimage.name}: update information did not stick")
+
+
+def make_zsync(appimage: Path) -> Path | None:
+    """The .zsync the update information points at, next to the AppImage. Its URL is the AppImage's
+    file name, which tools resolve next to the .zsync (the same release). None without zsyncmake
+    (the ``zsync`` package): a local build then has no .zsync; the release build installs it."""
+    tool = shutil.which("zsyncmake")
+    if tool is None:
+        console.print("  [yellow]zsyncmake not found (package zsync): no .zsync[/yellow]")
+        return None
+    out = appimage.with_name(appimage.name + ".zsync")
+    argv = [tool, "-u", appimage.name, "-o", out.name, appimage.name]
+    subprocess.run(argv, cwd=appimage.parent, check=True)
+    return out
+
+
+PORTABLE_NOTE = """SpaceKnife portable
+
+This "data" folder makes this copy of SpaceKnife portable: its snapshots, settings and browser
+profile are kept here, next to the program, and nothing is written to your user profile. Delete or
+rename the folder to use the usual per-user folders instead.
+
+SpaceKnife 便携版
+
+这个 data 文件夹让这份 SpaceKnife 以便携方式运行：快照、设置和浏览器配置都保存在这里（程序旁边），
+不写进你的用户目录。删除或重命名这个文件夹，就会改用正常的用户目录。
+"""
+
+
+MAC_NOTE = """
+macOS: keep this folder next to SpaceKnife.app (move the two together). Opened straight from where it
+was unzipped, macOS may run SpaceKnife from a hidden copy (App Translocation); it still finds this
+folder.
+
+macOS：这个文件夹要和 SpaceKnife.app 放在一起（一起移动）。解压后直接打开时，macOS 可能从一个隐藏的副本
+运行 SpaceKnife（App 转移），它照样能找到这个文件夹。
+"""
+
+
+def make_portable() -> Path:
+    """The unpacked app plus an empty data/ folder (apps/electron/src/main/portable.ts) in one
+    archive: a zip on Windows, a tar.gz on Linux (keeps the executable bits and symlinks), and on
+    macOS a zip made by ditto with SpaceKnife.app beside the folder (keeps the bundle's symbolic
+    links, attributes and signature, as Apple's own tools unpack it)."""
+    version = json.loads((ELECTRON / "package.json").read_text(encoding="utf-8"))["version"]
+    src = unpacked_app()
+    note = PORTABLE_NOTE.encode()
+    if sys.platform == "win32":
+        name = f"SpaceKnife-{version}-win-{build_arch()}-portable"
+        out = DIST / "electron" / f"{name}.zip"
+        t0 = step(f"portable archive ({out.name})")
+        with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+            for path in sorted(src.rglob("*")):
+                if path.is_file():
+                    zf.write(path, f"{name}/{path.relative_to(src).as_posix()}")
+            zf.writestr(f"{name}/data/README.txt", PORTABLE_NOTE.replace("\n", "\r\n"))  # Notepad-friendly
+    elif sys.platform.startswith("linux"):
+        name = f"SpaceKnife-{version}-linux-{build_arch()}-portable"
+        out = DIST / "electron" / f"{name}.tar.gz"
+        t0 = step(f"portable archive ({out.name})")
+        with tarfile.open(out, "w:gz", compresslevel=6) as tf:
+            tf.add(src, arcname=name)
+            now = int(time.time())
+            folder = tarfile.TarInfo(f"{name}/data")
+            folder.type, folder.mode, folder.mtime = tarfile.DIRTYPE, 0o755, now
+            tf.addfile(folder)
+            readme = tarfile.TarInfo(f"{name}/data/README.txt")
+            readme.size, readme.mode, readme.mtime = len(note), 0o644, now
+            tf.addfile(readme, io.BytesIO(note))
+    elif sys.platform == "darwin":
+        name = f"SpaceKnife-{version}-mac-{build_arch()}-portable"
+        out = DIST / "electron" / f"{name}.zip"
+        t0 = step(f"portable archive ({out.name})")
+        stage = DIST / "portable-mac" / name
+        shutil.rmtree(stage.parent, ignore_errors=True)
+        (stage / "data").mkdir(parents=True)
+        run(["ditto", str(src), str(stage / src.name)])
+        (stage / "data" / "README.txt").write_bytes(note + MAC_NOTE.encode())
+        out.unlink(missing_ok=True)
+        run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent", str(stage), str(out)])
+        shutil.rmtree(stage.parent, ignore_errors=True)
+    else:
+        raise SystemExit(f"no portable archive for {sys.platform}")
+    done(t0, f"{out.stat().st_size / 2**20:.0f} MB")
+    return out
 
 
 def main() -> int:
@@ -261,16 +505,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--skip-backend", action="store_true", help="reuse dist/backend/spaceknife-backend")
     ap.add_argument("--targets", nargs="+", choices=LINUX_TARGETS, default=list(LINUX_TARGETS), help="Linux")
+    ap.add_argument("--portable", action="store_true", help="also the portable archive")
+    ap.add_argument("--no-installers", action="store_true", help="only the unpacked app (and --portable)")
     args = ap.parse_args()
     if not args.skip_backend:
         freeze_backend()
         check_no_build_paths(BACKEND_DIR)
     if sys.platform.startswith("linux"):
         check_glibc()
-    build_electron(args.targets)
+    if sys.platform == "win32":
+        console_launcher()
+    build_electron(args.targets, installers=not args.no_installers)
+    if args.portable:
+        make_portable()
     out = DIST / "electron"
     for f in sorted(out.iterdir()):
-        if f.is_file() and f.suffix in {".exe", ".AppImage", ".deb", ".rpm"}:
+        if f.is_file() and f.suffix in {".exe", ".AppImage", ".deb", ".rpm", ".dmg", ".zip", ".gz"}:
             console.print(f"  {f.relative_to(ROOT)}  [dim]{f.stat().st_size / 2**20:.0f} MB[/dim]")
     return 0
 

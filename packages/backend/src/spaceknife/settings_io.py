@@ -28,6 +28,7 @@ from spaceknife_protocol.filter import FilterClassInfo
 from spaceknife_protocol.settings import SettingValue
 
 from . import classes as class_table
+from . import pathclass
 from .i18n import Texts, _, language
 from .settings import BY_KEY, DEFAULTS, SettingsStore, validate
 
@@ -41,6 +42,7 @@ TEXT = Texts(
         "unreadable": "读不了 {path}：{reason}",
         "unknown_format": "不认识这个文件：既不是 SpaceKnife 导出的设置，"
         "也不是 SpaceSniffer 的 SpaceSnifferConfig.xml",
+        "bad_folders": "文件夹归类的格式不对，已忽略",
         "bad_json": "设置文件不是有效的 JSON：{reason}",
         "bad_xml": "SpaceSniffer 配置不是有效的 XML：{reason}",
         "newer": "这份设置来自更新版本的 SpaceKnife（格式 {version}），无法导入",
@@ -87,6 +89,7 @@ class ImportPlan:
     source: Literal["spaceknife", "spacesniffer"]
     values: dict[str, SettingValue] = field(default_factory=dict)  # only what changes
     classes: tuple[FilterClassInfo, ...] | None = None  # a new class table, if it changes
+    folders: list[tuple[str, str]] | None = None  # new folder choices (UI-W7-38), if they change
     skipped: list[str] = field(default_factory=list)  # notes, in the language of the moment
 
 
@@ -104,6 +107,7 @@ def export_document(store: SettingsStore) -> dict[str, Any]:
         "version": 1,
         "values": {k: v for k, v in sorted(store.values.items()) if v != DEFAULTS[k]},
         "classes": [c.model_dump(mode="json") for c in table.classes] if table.custom else None,
+        "class_folders": [{"path": p, "class": c} for p, c in pathclass.folders()] or None,
     }
 
 
@@ -169,13 +173,30 @@ def _plan_spaceknife(raw: bytes, current: dict[str, SettingValue]) -> ImportPlan
     wanted.update({k: v for k, v in values.items() if k not in DEFAULTS})
     _finish(plan, wanted, current)
     raw_classes = doc.get("classes")
+    # an export from before the light theme has no color_light (every export since writes it, ""
+    # for the theme's colour): its colours are the user's for both themes, as in classes.json v1
     table = (
-        class_table.ClassTable(tuple(FilterClassInfo.model_validate(c) for c in raw_classes))
+        class_table.ClassTable(
+            tuple(
+                FilterClassInfo.model_validate(
+                    c if isinstance(c, dict) and "color_light" in c else class_table.colors_for_both(c)
+                )
+                for c in raw_classes
+            )
+        )
         if raw_classes
         else class_table.DEFAULT_CLASSES
     )
     if table.classes != class_table.active().classes:
         plan.classes = table.classes
+    raw_folders = doc.get("class_folders") or []
+    try:
+        folders = sorted((str(f["path"]), str(f["class"])) for f in raw_folders)
+    except (KeyError, TypeError):
+        folders = []
+        plan.skipped.append(TEXT["bad_folders"])
+    if folders != pathclass.folders():
+        plan.folders = folders
     return plan
 
 
@@ -288,14 +309,10 @@ def _classes_from(groups: ET.Element, plan: ImportPlan) -> class_table.ClassTabl
         cid = known.id if known is not None and known.id not in used and known.id != OTHER else None
         if cid:
             used.add(cid)
-        edits.append(
-            ClassEdit(
-                id=cid,
-                name=name,
-                extensions=[_text(g, "extensions") or ""],
-                color=_ss_color(_text(g, "color")),
-            )
-        )
+        color = _ss_color(_text(g, "color"))
+        # SpaceSniffer has one set of colours: they go to both themes
+        exts = [_text(g, "extensions") or ""]
+        edits.append(ClassEdit(id=cid, name=name, extensions=exts, color=color, color_light=color))
     for c in BUILTIN_CLASSES:  # SpaceKnife-only classes stay; 「其他」 last
         if c.id not in used and c.id != OTHER:
             edits.append(ClassEdit(id=c.id, name=c.name, extensions=c.extensions))

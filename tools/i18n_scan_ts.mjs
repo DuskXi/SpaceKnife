@@ -30,7 +30,8 @@ const { parse } = loadParser();
 
 const CJK = /[㐀-鿿！-｠　-〿]/;
 const SKIP_DIRS = new Set(["node_modules", "out", "dist", "locales"]);
-const SKIP_FILES = new Set(["text.ts"]); // main/text.ts: the main process keeps its own zh / en table
+// main/text.ts and main/headless.ts: the main process keeps its own zh / en tables (dialogs, the terminal)
+const SKIP_FILES = new Set(["text.ts", "headless.ts"]);
 
 function* files(dir) {
   for (const name of readdirSync(dir)) {

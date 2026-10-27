@@ -75,6 +75,8 @@ LOAD_LABELS = Texts(
     }
 )
 LOAD_LEVELS: tuple[tuple[SettingValue, str], ...] = tuple((k, LOAD_LABELS.raw(k)) for k in LOAD_LABELS)
+# the dark theme's presets, which also name the slot: the light theme has its own colour for each
+# (design/tokens color.accent.*), so the stored value stays the same when the theme changes
 ACCENTS = ("#8B9CFF", "#D4FF3A", "#5EC8B8", "#F2A65A")
 
 
@@ -164,16 +166,52 @@ def _registry() -> tuple[Spec, ...]:
             synonyms=("log", "denied", "warning"),
             kind=bool,
         ),
+        # ------------------------------------------------------------ 关于与更新 (the keys stay general.*)
+        S(
+            "general.update_check",
+            "about",
+            "更新",
+            "自动检查更新",
+            "每天最多一次，只读取 GitHub 上本项目的发布列表，不发送任何使用数据；小版本只在右上角提示",
+            "switch",
+            True,
+            synonyms=("update", "upgrade", "release", "version", "升级", "新版本"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
+            "general.update_download",
+            "about",
+            "更新",
+            "自动下载更新",
+            "发现新版本后在后台下载并校验；只有你在更新卡片里点了「无缝更新」或安装方式才会安装，从不自己安装",
+            "switch",
+            True,
+            depends="general.update_check",
+            synonyms=("update", "download", "auto", "下载"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
+            "general.update_channel",
+            "about",
+            "更新",
+            "提示哪些版本",
+            "预览版是 GitHub 上标为预发布（Pre-release）的版本",
+            "segmented",
+            "preview",
+            (("preview", "包括预览版"), ("stable", "只要正式版")),
+            synonyms=("update", "channel", "beta", "prerelease", "预发布"),  # i18n: ignore
+            kind=str,
+        ),
         # ------------------------------------------------------------ 外观
         S(
             "appearance.theme",
             "appearance",
             "主题",
             "主题",
-            "深色为 A2「石墨 + 沉浸的对比度」",
+            "跟随系统时按系统的浅色 / 深色设置切换",
             "segmented",
             "system",
-            (("system", "跟随系统"), ("light", "浅色", "浅色主题待设计（W7 待定 20）"), ("dark", "深色")),
+            (("system", "跟随系统"), ("light", "浅色"), ("dark", "深色")),
             synonyms=("theme", "dark", "light"),
             kind=str,
         ),
@@ -248,7 +286,7 @@ def _registry() -> tuple[Spec, ...]:
             "appearance",
             "树图视觉",
             "悬停高亮",
-            "鼠标下的元素加白色内描边",
+            "鼠标下的元素加一圈内描边（深色主题白色，浅色主题近黑色）",
             "switch",
             True,
             synonyms=("hover", "highlight"),
@@ -266,6 +304,19 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "appearance.trash_effect",
+            "appearance",
+            "树图视觉",
+            "回收站特效",
+            "回收站 / 废纸篓里的东西蒙上一层暗纹、围上虚线，回收站本身标出清空后能释放多少；"
+            "「动态」时虚线流动、偶尔扫过一道光（「减少动画」时不动）",
+            "segmented",
+            "animated",
+            (("animated", "动态"), ("static", "静态"), ("off", "关")),
+            synonyms=("trash", "recycle bin", "回收站", "废纸篓"),  # i18n: ignore
+            kind=str,
+        ),
+        S(
             "appearance.selection_shadow",
             "appearance",
             "树图视觉",
@@ -280,13 +331,39 @@ def _registry() -> tuple[Spec, ...]:
             "appearance.default_color_mode",
             "appearance",
             "配色样式",
-            "新视图默认配色",
-            "与工具栏的「类别｜扁平｜时间」对应",
+            "树图默认配色",
+            "与工具栏的「类别｜扁平｜时间｜分支」对应",
             "segmented",
             "class",
-            (("class", "文件类别"), ("flat", "扁平"), ("time", "修改时间")),
+            (("class", "文件类别"), ("flat", "扁平"), ("time", "修改时间"), ("branch", "顶层分支")),
             applies="new_views",
-            synonyms=("color", "flat", "classes"),
+            synonyms=("color", "flat", "classes", "branch"),
+            kind=str,
+        ),
+        S(
+            "appearance.default_visual",
+            "appearance",
+            "可视化",
+            "新视图默认可视化",
+            "与工具栏的「树图｜火焰图｜火焰-极坐标图」对应",
+            "segmented",
+            "treemap",
+            (("treemap", "树图"), ("flame", "火焰图"), ("flame_polar", "火焰-极坐标图")),
+            applies="new_views",
+            synonyms=("visualization", "treemap", "flame", "flame_polar", "polar"),
+            kind=str,
+        ),
+        S(
+            "appearance.partition_color_mode",
+            "appearance",
+            "可视化",
+            "火焰图和火焰-极坐标图默认配色",
+            "新视图切到火焰图或火焰-极坐标图时使用",
+            "segmented",
+            "branch",
+            (("class", "文件类别"), ("flat", "扁平"), ("time", "修改时间"), ("branch", "顶层分支")),
+            applies="new_views",
+            synonyms=("color", "flame", "polar", "branch"),
             kind=str,
         ),
         # ------------------------------------------------------------ 树图
@@ -295,7 +372,7 @@ def _registry() -> tuple[Spec, ...]:
             "treemap",
             "几何",
             "元素字号",
-            "标题栏高度和标签显示阈值随字号等比缩放",
+            "标题栏、条和环的高度以及标签显示阈值随字号等比缩放",
             "slider",
             100,
             min=80,
@@ -325,7 +402,7 @@ def _registry() -> tuple[Spec, ...]:
             "treemap",
             "几何",
             "元素比例",
-            "偏高 ↔ 偏宽；0 表示尽量接近正方形",
+            "只影响树图：偏高 ↔ 偏宽；0 表示尽量接近正方形",
             "slider",
             0,
             min=-60,
@@ -374,6 +451,18 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "treemap.show_trash",
+            "treemap",
+            "几何",
+            "新视图显示回收站",
+            "扫描里有回收站 / 废纸篓时显示它；关掉后回收站不占画面，其余的块放大填满",
+            "switch",
+            True,
+            applies="new_views",
+            synonyms=("trash", "recycle bin", "回收站", "废纸篓"),  # i18n: ignore
+            kind=bool,
+        ),
+        S(
             "treemap.sort_by_size",
             "treemap",
             "几何",
@@ -383,6 +472,18 @@ def _registry() -> tuple[Spec, ...]:
             True,
             synonyms=("sort", "order"),
             kind=bool,
+        ),
+        S(
+            "treemap.flame_origin",
+            "treemap",
+            "火焰图",
+            "火焰图方向",
+            "根所在的一侧",
+            "segmented",
+            "bottom",
+            (("top", "根在上"), ("bottom", "根在下")),
+            synonyms=("flame", "direction", "orientation", "root", "icicle"),
+            kind=str,
         ),
         S(
             "treemap.zoom_ms",
@@ -404,7 +505,7 @@ def _registry() -> tuple[Spec, ...]:
             "treemap",
             "动画",
             "动画帧率",
-            "对应 SpaceSniffer 的「流畅 ↔ 卡顿」",
+            "动画重绘的频率",
             "segmented",
             "display",
             (("display", "跟随显示器"), ("60", "60 fps"), ("30", "30 fps")),
@@ -500,6 +601,8 @@ def _registry() -> tuple[Spec, ...]:
             "quiet",
             LOAD_LEVELS,
             group_note="限制扫描造成的磁盘读取占用",
+            # nothing reads this yet: the monitor's rescans wait for the running scan's governor only
+            reason="还没有接入：实时监控的定点重扫不按这一档限速",
             synonyms=("load", "incremental"),
             kind=str,
         ),
@@ -525,7 +628,7 @@ def _registry() -> tuple[Spec, ...]:
             "scan",
             "磁盘负载上限与并发",
             "空闲时使用系统低 I/O 优先级",
-            "后台重扫与「空闲」档位使用低 I/O 优先级，不与前台程序抢磁盘",
+            "「空闲」档位使用系统低 I/O 优先级，不与前台程序抢磁盘",
             "switch",
             True,
             applies="next_scan",
@@ -565,7 +668,7 @@ def _registry() -> tuple[Spec, ...]:
             "scan",
             "磁盘负载上限与并发",
             "手动并发数",
-            "手动时同时扫描的工作进程数",
+            "手动时最多同时列出几个文件夹（没有原生扩展时是工作进程数）",
             "number",
             4,
             min=1,
@@ -603,6 +706,25 @@ def _registry() -> tuple[Spec, ...]:
             kind=bool,
         ),
         S(
+            "scan.protected_places",
+            "scan",
+            "扫描范围",
+            "受保护的位置",
+            "没有「完全磁盘访问权限」时，macOS 会为桌面、文稿、下载、云盘、照片图库和"
+            "其他应用的数据逐个弹窗询问",
+            "segmented",
+            "ask",
+            options=(
+                ("ask", "扫描前询问"),
+                ("skip", "跳过，不弹窗"),
+                ("allow", "照常访问"),
+            ),
+            applies="next_scan",
+            reason="" if IS_MAC else "只在 macOS 上需要",
+            synonyms=("full disk access", "privacy", "tcc", "permission", "prompt", "完全磁盘访问"),
+            kind=str,
+        ),
+        S(
             "scan.hardlinks",
             "scan",
             "统计口径",
@@ -637,7 +759,7 @@ def _registry() -> tuple[Spec, ...]:
                 if IS_WIN
                 else "使用 FSEvents，变化的文件会闪烁提示"
                 if IS_MAC
-                else "使用 fanotify / inotify，变化的文件会闪烁提示"
+                else "使用 inotify，变化的文件会闪烁提示"
             ),
             "switch",
             True,
@@ -779,6 +901,19 @@ def _registry() -> tuple[Spec, ...]:
             step=1,
             synonyms=("snapshot", "retention", "keep"),
             kind=int,
+        ),
+        S(
+            "advanced.map_large_scans",
+            "advanced",
+            "内存",
+            "大扫描存进映射文件",
+            "开启后，节点表超过 256 MB（约 200 万项）的扫描存进磁盘映射文件，不占私有内存；"
+            "代价是扫完后每项约写盘 200 字节",
+            "switch",
+            False,  # the writes: docs/memory.md §3
+            applies="next_scan",
+            synonyms=("memory", "ram", "mmap", "large", "内存映射"),  # i18n: ignore
+            kind=bool,
         ),
         S(
             "advanced.memory_budget",

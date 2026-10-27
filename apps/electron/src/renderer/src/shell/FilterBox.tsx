@@ -161,7 +161,7 @@ export function FilterBox({ viewId, disabled, pane }: { viewId: string | null; d
   };
 
   return (
-    <div className={`filter${disabled ? " disabled" : ""}${pane ? " pane-filter" : ""}`}>
+    <div className={`filter${disabled ? " disabled" : ""}${pane ? " pane-filter" : ""}`} data-help="filtering">
       <label htmlFor={inputId} className="sr-only">
         {pane ? t("过滤{pane}", { pane }) : t("过滤")}
       </label>

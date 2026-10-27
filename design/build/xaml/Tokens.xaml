@@ -2,62 +2,556 @@
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <Color x:Key="SkColorAccentDefault">#FF8B9CFF</Color>
-    <SolidColorBrush x:Key="SkColorAccentDefaultBrush" Color="#FF8B9CFF"/>
-    <Color x:Key="SkColorAccentLime">#FFD4FF3A</Color>
-    <SolidColorBrush x:Key="SkColorAccentLimeBrush" Color="#FFD4FF3A"/>
-    <Color x:Key="SkColorAccentOrange">#FFF2A65A</Color>
-    <SolidColorBrush x:Key="SkColorAccentOrangeBrush" Color="#FFF2A65A"/>
-    <Color x:Key="SkColorAccentTeal">#FF5EC8B8</Color>
-    <SolidColorBrush x:Key="SkColorAccentTealBrush" Color="#FF5EC8B8"/>
-    <Color x:Key="SkColorBgActive">#FF1E2128</Color>
-    <SolidColorBrush x:Key="SkColorBgActiveBrush" Color="#FF1E2128"/>
-    <Color x:Key="SkColorBgChrome">#FF0C0D10</Color>
-    <SolidColorBrush x:Key="SkColorBgChromeBrush" Color="#FF0C0D10"/>
-    <Color x:Key="SkColorBgHover">#FF1A1D23</Color>
-    <SolidColorBrush x:Key="SkColorBgHoverBrush" Color="#FF1A1D23"/>
-    <Color x:Key="SkColorBgOverlay">#FF111318</Color>
-    <SolidColorBrush x:Key="SkColorBgOverlayBrush" Color="#FF111318"/>
-    <Color x:Key="SkColorBgPanel">#FF0E1013</Color>
-    <SolidColorBrush x:Key="SkColorBgPanelBrush" Color="#FF0E1013"/>
-    <Color x:Key="SkColorBgRaised">#FF14161B</Color>
-    <SolidColorBrush x:Key="SkColorBgRaisedBrush" Color="#FF14161B"/>
-    <Color x:Key="SkColorBgSunken">#FF060709</Color>
-    <SolidColorBrush x:Key="SkColorBgSunkenBrush" Color="#FF060709"/>
-    <Color x:Key="SkColorBgWindow">#FF08090B</Color>
-    <SolidColorBrush x:Key="SkColorBgWindowBrush" Color="#FF08090B"/>
-    <Color x:Key="SkColorLineStrong">#FF2A2E37</Color>
-    <SolidColorBrush x:Key="SkColorLineStrongBrush" Color="#FF2A2E37"/>
-    <Color x:Key="SkColorLineSubtle">#FF1D2027</Color>
-    <SolidColorBrush x:Key="SkColorLineSubtleBrush" Color="#FF1D2027"/>
-    <Color x:Key="SkColorStatusDanger">#FFFF6B6B</Color>
-    <SolidColorBrush x:Key="SkColorStatusDangerBrush" Color="#FFFF6B6B"/>
-    <Color x:Key="SkColorStatusGrowth">#FFE8963A</Color>
-    <SolidColorBrush x:Key="SkColorStatusGrowthBrush" Color="#FFE8963A"/>
-    <Color x:Key="SkColorStatusSuccess">#FF3FCB80</Color>
-    <SolidColorBrush x:Key="SkColorStatusSuccessBrush" Color="#FF3FCB80"/>
-    <Color x:Key="SkColorStatusWarning">#FFF5C542</Color>
-    <SolidColorBrush x:Key="SkColorStatusWarningBrush" Color="#FFF5C542"/>
+    <ResourceDictionary.ThemeDictionaries>
+        <ResourceDictionary x:Key="Default">
+            <Color x:Key="SkColorAccentDefault">#FF8B9CFF</Color>
+            <SolidColorBrush x:Key="SkColorAccentDefaultBrush" Color="#FF8B9CFF"/>
+            <Color x:Key="SkColorAccentLime">#FFD4FF3A</Color>
+            <SolidColorBrush x:Key="SkColorAccentLimeBrush" Color="#FFD4FF3A"/>
+            <Color x:Key="SkColorAccentOrange">#FFF2A65A</Color>
+            <SolidColorBrush x:Key="SkColorAccentOrangeBrush" Color="#FFF2A65A"/>
+            <Color x:Key="SkColorAccentTeal">#FF5EC8B8</Color>
+            <SolidColorBrush x:Key="SkColorAccentTealBrush" Color="#FF5EC8B8"/>
+            <Color x:Key="SkColorBgActive">#FF1E2128</Color>
+            <SolidColorBrush x:Key="SkColorBgActiveBrush" Color="#FF1E2128"/>
+            <Color x:Key="SkColorBgChrome">#FF0C0D10</Color>
+            <SolidColorBrush x:Key="SkColorBgChromeBrush" Color="#FF0C0D10"/>
+            <Color x:Key="SkColorBgField">#FF08090B</Color>
+            <SolidColorBrush x:Key="SkColorBgFieldBrush" Color="#FF08090B"/>
+            <Color x:Key="SkColorBgHover">#FF1A1D23</Color>
+            <SolidColorBrush x:Key="SkColorBgHoverBrush" Color="#FF1A1D23"/>
+            <Color x:Key="SkColorBgOverlay">#FF111318</Color>
+            <SolidColorBrush x:Key="SkColorBgOverlayBrush" Color="#FF111318"/>
+            <Color x:Key="SkColorBgPanel">#FF0E1013</Color>
+            <SolidColorBrush x:Key="SkColorBgPanelBrush" Color="#FF0E1013"/>
+            <Color x:Key="SkColorBgRaised">#FF14161B</Color>
+            <SolidColorBrush x:Key="SkColorBgRaisedBrush" Color="#FF14161B"/>
+            <Color x:Key="SkColorBgScrim">#99000000</Color>
+            <SolidColorBrush x:Key="SkColorBgScrimBrush" Color="#99000000"/>
+            <Color x:Key="SkColorBgSelected">#FF1A1D23</Color>
+            <SolidColorBrush x:Key="SkColorBgSelectedBrush" Color="#FF1A1D23"/>
+            <Color x:Key="SkColorBgSunken">#FF060709</Color>
+            <SolidColorBrush x:Key="SkColorBgSunkenBrush" Color="#FF060709"/>
+            <Color x:Key="SkColorBgWindow">#FF08090B</Color>
+            <SolidColorBrush x:Key="SkColorBgWindowBrush" Color="#FF08090B"/>
+            <Color x:Key="SkColorLineStrong">#FF2A2E37</Color>
+            <SolidColorBrush x:Key="SkColorLineStrongBrush" Color="#FF2A2E37"/>
+            <Color x:Key="SkColorLineSubtle">#FF1D2027</Color>
+            <SolidColorBrush x:Key="SkColorLineSubtleBrush" Color="#FF1D2027"/>
+            <Color x:Key="SkColorLineSwatch">#00000000</Color>
+            <SolidColorBrush x:Key="SkColorLineSwatchBrush" Color="#00000000"/>
+            <Color x:Key="SkColorMeterUsed">#FF5A5F6B</Color>
+            <SolidColorBrush x:Key="SkColorMeterUsedBrush" Color="#FF5A5F6B"/>
+            <Color x:Key="SkColorScrollThumb">#FF454A55</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbBrush" Color="#FF454A55"/>
+            <Color x:Key="SkColorScrollThumbHover">#FF6B707C</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbHoverBrush" Color="#FF6B707C"/>
+            <Color x:Key="SkColorShadow">#B3000000</Color>
+            <SolidColorBrush x:Key="SkColorShadowBrush" Color="#B3000000"/>
+            <Color x:Key="SkColorStatusDanger">#FFFF6B6B</Color>
+            <SolidColorBrush x:Key="SkColorStatusDangerBrush" Color="#FFFF6B6B"/>
+            <Color x:Key="SkColorStatusGrowth">#FFE8963A</Color>
+            <SolidColorBrush x:Key="SkColorStatusGrowthBrush" Color="#FFE8963A"/>
+            <Color x:Key="SkColorStatusSuccess">#FF3FCB80</Color>
+            <SolidColorBrush x:Key="SkColorStatusSuccessBrush" Color="#FF3FCB80"/>
+            <Color x:Key="SkColorStatusWarning">#FFF5C542</Color>
+            <SolidColorBrush x:Key="SkColorStatusWarningBrush" Color="#FFF5C542"/>
+            <Color x:Key="SkColorStatusWarningBase">#00000000</Color>
+            <SolidColorBrush x:Key="SkColorStatusWarningBaseBrush" Color="#00000000"/>
+            <Color x:Key="SkColorTagBlue">#FF5A97FF</Color>
+            <SolidColorBrush x:Key="SkColorTagBlueBrush" Color="#FF5A97FF"/>
+            <Color x:Key="SkColorTagGreen">#FF3FE08A</Color>
+            <SolidColorBrush x:Key="SkColorTagGreenBrush" Color="#FF3FE08A"/>
+            <Color x:Key="SkColorTagRed">#FFFF5D61</Color>
+            <SolidColorBrush x:Key="SkColorTagRedBrush" Color="#FFFF5D61"/>
+            <Color x:Key="SkColorTagYellow">#FFFFD23F</Color>
+            <SolidColorBrush x:Key="SkColorTagYellowBrush" Color="#FFFFD23F"/>
+            <Color x:Key="SkColorTextDisabled">#FF4A4E58</Color>
+            <SolidColorBrush x:Key="SkColorTextDisabledBrush" Color="#FF4A4E58"/>
+            <Color x:Key="SkColorTextOnAccent">#FF0B0C10</Color>
+            <SolidColorBrush x:Key="SkColorTextOnAccentBrush" Color="#FF0B0C10"/>
+            <Color x:Key="SkColorTextPrimary">#FFF1F2F5</Color>
+            <SolidColorBrush x:Key="SkColorTextPrimaryBrush" Color="#FFF1F2F5"/>
+            <Color x:Key="SkColorTextSecondary">#FFAEB3BE</Color>
+            <SolidColorBrush x:Key="SkColorTextSecondaryBrush" Color="#FFAEB3BE"/>
+            <Color x:Key="SkColorTextTertiary">#FF8F95A2</Color>
+            <SolidColorBrush x:Key="SkColorTextTertiaryBrush" Color="#FF8F95A2"/>
+            <x:String x:Key="SkShadowPopoverCss">0px 12px 32px 0px #00000073, 0px 0px 0px 1px #2A2E37</x:String>
+            <Color x:Key="SkTreemapClassArchive">#FFE5C547</Color>
+            <SolidColorBrush x:Key="SkTreemapClassArchiveBrush" Color="#FFE5C547"/>
+            <Color x:Key="SkTreemapClassCode">#FFB7CBF3</Color>
+            <SolidColorBrush x:Key="SkTreemapClassCodeBrush" Color="#FFB7CBF3"/>
+            <Color x:Key="SkTreemapClassData">#FF7BE8B9</Color>
+            <SolidColorBrush x:Key="SkTreemapClassDataBrush" Color="#FF7BE8B9"/>
+            <Color x:Key="SkTreemapClassOther">#FF2B2F38</Color>
+            <SolidColorBrush x:Key="SkTreemapClassOtherBrush" Color="#FF2B2F38"/>
+            <Color x:Key="SkTreemapClassFocusOutline">#8CFFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapClassFocusOutlineBrush" Color="#8CFFFFFF"/>
+            <Color x:Key="SkTreemapClassFocusVeil">#D9060709</Color>
+            <SolidColorBrush x:Key="SkTreemapClassFocusVeilBrush" Color="#D9060709"/>
+            <Color x:Key="SkTreemapCollapsed">#FF232731</Color>
+            <SolidColorBrush x:Key="SkTreemapCollapsedBrush" Color="#FF232731"/>
+            <Color x:Key="SkTreemapDiffGrow0">#FF5E3410</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow0Brush" Color="#FF5E3410"/>
+            <Color x:Key="SkTreemapDiffGrow1">#FF7A4312</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow1Brush" Color="#FF7A4312"/>
+            <Color x:Key="SkTreemapDiffGrow2">#FF9A5313</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow2Brush" Color="#FF9A5313"/>
+            <Color x:Key="SkTreemapDiffGrow3">#FFF08A2A</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow3Brush" Color="#FFF08A2A"/>
+            <Color x:Key="SkTreemapDiffShrink0">#FF0F3050</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffShrink0Brush" Color="#FF0F3050"/>
+            <Color x:Key="SkTreemapDiffShrink1">#FF18497A</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffShrink1Brush" Color="#FF18497A"/>
+            <Color x:Key="SkTreemapDiffShrink2">#FF236AA5</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffShrink2Brush" Color="#FF236AA5"/>
+            <Color x:Key="SkTreemapFlatFile">#FF2B2F38</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatFileBrush" Color="#FF2B2F38"/>
+            <Color x:Key="SkTreemapFlatFolder">#FF0C0E12</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatFolderBrush" Color="#FF0C0E12"/>
+            <Color x:Key="SkTreemapFlatFree">#FF0A1D13</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatFreeBrush" Color="#FF0A1D13"/>
+            <Color x:Key="SkTreemapFlatUnknown">#FF121318</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatUnknownBrush" Color="#FF121318"/>
+            <Color x:Key="SkTreemapFlatVolume">#FF13151B</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatVolumeBrush" Color="#FF13151B"/>
+            <Color x:Key="SkTreemapFreeBorder">#FF1C5A3B</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeBorderBrush" Color="#FF1C5A3B"/>
+            <Color x:Key="SkTreemapFreeStripeA">#FF06140D</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeStripeABrush" Color="#FF06140D"/>
+            <Color x:Key="SkTreemapFreeStripeB">#FF0A1D13</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeStripeBBrush" Color="#FF0A1D13"/>
+            <Color x:Key="SkTreemapFreeSub">#FF41B47C</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeSubBrush" Color="#FF41B47C"/>
+            <Color x:Key="SkTreemapFreeText">#FF5BE3A0</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeTextBrush" Color="#FF5BE3A0"/>
+            <Color x:Key="SkTreemapGround">#FF060709</Color>
+            <SolidColorBrush x:Key="SkTreemapGroundBrush" Color="#FF060709"/>
+            <Color x:Key="SkTreemapHaloBg">#FF26304A</Color>
+            <SolidColorBrush x:Key="SkTreemapHaloBgBrush" Color="#FF26304A"/>
+            <Color x:Key="SkTreemapHaloSub">#FFC9D0E2</Color>
+            <SolidColorBrush x:Key="SkTreemapHaloSubBrush" Color="#FFC9D0E2"/>
+            <Color x:Key="SkTreemapHaloText">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapHaloTextBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkTreemapLevel0Bg">#FF0C0E12</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0BgBrush" Color="#FF0C0E12"/>
+            <Color x:Key="SkTreemapLevel0Border">#FF22262F</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0BorderBrush" Color="#FF22262F"/>
+            <Color x:Key="SkTreemapLevel0HeaderBg">#FF13151B</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0HeaderBgBrush" Color="#FF13151B"/>
+            <Color x:Key="SkTreemapLevel0HeaderSub">#FF9AA0AE</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0HeaderSubBrush" Color="#FF9AA0AE"/>
+            <Color x:Key="SkTreemapLevel0HeaderText">#FFF1F2F5</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0HeaderTextBrush" Color="#FFF1F2F5"/>
+            <Color x:Key="SkTreemapLevel1Bg">#FF101217</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1BgBrush" Color="#FF101217"/>
+            <Color x:Key="SkTreemapLevel1Border">#FF272B35</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1BorderBrush" Color="#FF272B35"/>
+            <Color x:Key="SkTreemapLevel1HeaderBg">#FF171A20</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1HeaderBgBrush" Color="#FF171A20"/>
+            <Color x:Key="SkTreemapLevel1HeaderSub">#FF9AA0AE</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1HeaderSubBrush" Color="#FF9AA0AE"/>
+            <Color x:Key="SkTreemapLevel1HeaderText">#FFEEEFF3</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1HeaderTextBrush" Color="#FFEEEFF3"/>
+            <Color x:Key="SkTreemapLevel2Bg">#FF13161B</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2BgBrush" Color="#FF13161B"/>
+            <Color x:Key="SkTreemapLevel2Border">#FF2C303B</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2BorderBrush" Color="#FF2C303B"/>
+            <Color x:Key="SkTreemapLevel2HeaderBg">#FF1B1E25</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2HeaderBgBrush" Color="#FF1B1E25"/>
+            <Color x:Key="SkTreemapLevel2HeaderSub">#FF9DA3B1</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2HeaderSubBrush" Color="#FF9DA3B1"/>
+            <Color x:Key="SkTreemapLevel2HeaderText">#FFECEDF1</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2HeaderTextBrush" Color="#FFECEDF1"/>
+            <Color x:Key="SkTreemapLevel3Bg">#FF171A20</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3BgBrush" Color="#FF171A20"/>
+            <Color x:Key="SkTreemapLevel3Border">#FF313642</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3BorderBrush" Color="#FF313642"/>
+            <Color x:Key="SkTreemapLevel3HeaderBg">#FF1F232A</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3HeaderBgBrush" Color="#FF1F232A"/>
+            <Color x:Key="SkTreemapLevel3HeaderSub">#FFA0A6B4</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3HeaderSubBrush" Color="#FFA0A6B4"/>
+            <Color x:Key="SkTreemapLevel3HeaderText">#FFE9EAEF</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3HeaderTextBrush" Color="#FFE9EAEF"/>
+            <Color x:Key="SkTreemapPendingBorder">#FF303542</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingBorderBrush" Color="#FF303542"/>
+            <Color x:Key="SkTreemapPendingStripeA">#FF0C0E12</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingStripeABrush" Color="#FF0C0E12"/>
+            <Color x:Key="SkTreemapPendingStripeB">#FF12151B</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingStripeBBrush" Color="#FF12151B"/>
+            <Color x:Key="SkTreemapPendingSub">#FF808695</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingSubBrush" Color="#FF808695"/>
+            <Color x:Key="SkTreemapPendingText">#FF9EA4B2</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingTextBrush" Color="#FF9EA4B2"/>
+            <Color x:Key="SkTreemapStateDeletedBadgeBg">#B80B0C10</Color>
+            <SolidColorBrush x:Key="SkTreemapStateDeletedBadgeBgBrush" Color="#B80B0C10"/>
+            <Color x:Key="SkTreemapStateFlash">#FFF5C542</Color>
+            <SolidColorBrush x:Key="SkTreemapStateFlashBrush" Color="#FFF5C542"/>
+            <Color x:Key="SkTreemapStateHoverInset">#E6FFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapStateHoverInsetBrush" Color="#E6FFFFFF"/>
+            <Color x:Key="SkTreemapStateSelectShadow">#A6000000</Color>
+            <SolidColorBrush x:Key="SkTreemapStateSelectShadowBrush" Color="#A6000000"/>
+            <Color x:Key="SkTreemapTime0">#FF7FE0C9</Color>
+            <SolidColorBrush x:Key="SkTreemapTime0Brush" Color="#FF7FE0C9"/>
+            <Color x:Key="SkTreemapTime1">#FF3FB39A</Color>
+            <SolidColorBrush x:Key="SkTreemapTime1Brush" Color="#FF3FB39A"/>
+            <Color x:Key="SkTreemapTime2">#FF258672</Color>
+            <SolidColorBrush x:Key="SkTreemapTime2Brush" Color="#FF258672"/>
+            <Color x:Key="SkTreemapTime3">#FF1C5F53</Color>
+            <SolidColorBrush x:Key="SkTreemapTime3Brush" Color="#FF1C5F53"/>
+            <Color x:Key="SkTreemapTime4">#FF173F39</Color>
+            <SolidColorBrush x:Key="SkTreemapTime4Brush" Color="#FF173F39"/>
+            <Color x:Key="SkTreemapTrashBadgeBg">#FFFF8577</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashBadgeBgBrush" Color="#FFFF8577"/>
+            <Color x:Key="SkTreemapTrashBadgeText">#FF0A0B0D</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashBadgeTextBrush" Color="#FF0A0B0D"/>
+            <Color x:Key="SkTreemapTrashHatch">#2EFF8577</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashHatchBrush" Color="#2EFF8577"/>
+            <Color x:Key="SkTreemapTrashOutline">#FFFF8577</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashOutlineBrush" Color="#FFFF8577"/>
+            <Color x:Key="SkTreemapTrashSweep">#2EFFD9D3</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashSweepBrush" Color="#2EFFD9D3"/>
+            <Color x:Key="SkTreemapTrashVeil">#73060709</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashVeilBrush" Color="#73060709"/>
+            <Color x:Key="SkTreemapUnknownBorder">#FF343844</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownBorderBrush" Color="#FF343844"/>
+            <Color x:Key="SkTreemapUnknownStripeA">#FF0C0D11</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownStripeABrush" Color="#FF0C0D11"/>
+            <Color x:Key="SkTreemapUnknownStripeB">#FF121318</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownStripeBBrush" Color="#FF121318"/>
+            <Color x:Key="SkTreemapUnknownSub">#FF7E8493</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownSubBrush" Color="#FF7E8493"/>
+            <Color x:Key="SkTreemapUnknownText">#FFA3A9B6</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownTextBrush" Color="#FFA3A9B6"/>
+            <Color x:Key="SkVisualBranch11">#FF9EDBF9</Color>
+            <SolidColorBrush x:Key="SkVisualBranch11Brush" Color="#FF9EDBF9"/>
+            <Color x:Key="SkVisualBranch13">#FF067398</Color>
+            <SolidColorBrush x:Key="SkVisualBranch13Brush" Color="#FF067398"/>
+            <Color x:Key="SkVisualBranch21">#FFF8C5A2</Color>
+            <SolidColorBrush x:Key="SkVisualBranch21Brush" Color="#FFF8C5A2"/>
+            <Color x:Key="SkVisualBranch23">#FF9C5313</Color>
+            <SolidColorBrush x:Key="SkVisualBranch23Brush" Color="#FF9C5313"/>
+            <Color x:Key="SkVisualBranch31">#FFA6E1C0</Color>
+            <SolidColorBrush x:Key="SkVisualBranch31Brush" Color="#FFA6E1C0"/>
+            <Color x:Key="SkVisualBranch33">#FF067D51</Color>
+            <SolidColorBrush x:Key="SkVisualBranch33Brush" Color="#FF067D51"/>
+            <Color x:Key="SkVisualBranch41">#FFF6BEDC</Color>
+            <SolidColorBrush x:Key="SkVisualBranch41Brush" Color="#FFF6BEDC"/>
+            <Color x:Key="SkVisualBranch43">#FF984979</Color>
+            <SolidColorBrush x:Key="SkVisualBranch43Brush" Color="#FF984979"/>
+            <Color x:Key="SkVisualBranch51">#FF95E1E0</Color>
+            <SolidColorBrush x:Key="SkVisualBranch51Brush" Color="#FF95E1E0"/>
+            <Color x:Key="SkVisualBranch53">#FF047879</Color>
+            <SolidColorBrush x:Key="SkVisualBranch53Brush" Color="#FF047879"/>
+            <Color x:Key="SkVisualBranch61">#FFFFBFB8</Color>
+            <SolidColorBrush x:Key="SkVisualBranch61Brush" Color="#FFFFBFB8"/>
+            <Color x:Key="SkVisualBranch63">#FFA34945</Color>
+            <SolidColorBrush x:Key="SkVisualBranch63Brush" Color="#FFA34945"/>
+            <Color x:Key="SkVisualBranch71">#FFC6DAA4</Color>
+            <SolidColorBrush x:Key="SkVisualBranch71Brush" Color="#FFC6DAA4"/>
+            <Color x:Key="SkVisualBranch73">#FF597417</Color>
+            <SolidColorBrush x:Key="SkVisualBranch73Brush" Color="#FF597417"/>
+            <Color x:Key="SkVisualBranch81">#FFE0C4F6</Color>
+            <SolidColorBrush x:Key="SkVisualBranch81Brush" Color="#FFE0C4F6"/>
+            <Color x:Key="SkVisualBranch83">#FF7E539C</Color>
+            <SolidColorBrush x:Key="SkVisualBranch83Brush" Color="#FF7E539C"/>
+            <Color x:Key="SkVisualBranchNeutral">#FF494D54</Color>
+            <SolidColorBrush x:Key="SkVisualBranchNeutralBrush" Color="#FF494D54"/>
+            <Color x:Key="SkVisualCenterBg">#FF13151B</Color>
+            <SolidColorBrush x:Key="SkVisualCenterBgBrush" Color="#FF13151B"/>
+            <Color x:Key="SkVisualCenterSub">#FF9AA0AE</Color>
+            <SolidColorBrush x:Key="SkVisualCenterSubBrush" Color="#FF9AA0AE"/>
+            <Color x:Key="SkVisualCenterText">#FFF1F2F5</Color>
+            <SolidColorBrush x:Key="SkVisualCenterTextBrush" Color="#FFF1F2F5"/>
+            <Color x:Key="SkVisualHaloOverlay">#1AFFFFFF</Color>
+            <SolidColorBrush x:Key="SkVisualHaloOverlayBrush" Color="#1AFFFFFF"/>
+            <Color x:Key="SkVisualRing1">#FF5B6375</Color>
+            <SolidColorBrush x:Key="SkVisualRing1Brush" Color="#FF5B6375"/>
+            <Color x:Key="SkVisualRing2">#FF4D5566</Color>
+            <SolidColorBrush x:Key="SkVisualRing2Brush" Color="#FF4D5566"/>
+            <Color x:Key="SkVisualRing3">#FF424A5B</Color>
+            <SolidColorBrush x:Key="SkVisualRing3Brush" Color="#FF424A5B"/>
+            <Color x:Key="SkVisualRing4">#FF394151</Color>
+            <SolidColorBrush x:Key="SkVisualRing4Brush" Color="#FF394151"/>
+        </ResourceDictionary>
+        <ResourceDictionary x:Key="Light">
+            <Color x:Key="SkColorAccentDefault">#FF424AC6</Color>
+            <SolidColorBrush x:Key="SkColorAccentDefaultBrush" Color="#FF424AC6"/>
+            <Color x:Key="SkColorAccentLime">#FF4F6200</Color>
+            <SolidColorBrush x:Key="SkColorAccentLimeBrush" Color="#FF4F6200"/>
+            <Color x:Key="SkColorAccentOrange">#FF954104</Color>
+            <SolidColorBrush x:Key="SkColorAccentOrangeBrush" Color="#FF954104"/>
+            <Color x:Key="SkColorAccentTeal">#FF00665B</Color>
+            <SolidColorBrush x:Key="SkColorAccentTealBrush" Color="#FF00665B"/>
+            <Color x:Key="SkColorBgActive">#FFD8DBE2</Color>
+            <SolidColorBrush x:Key="SkColorBgActiveBrush" Color="#FFD8DBE2"/>
+            <Color x:Key="SkColorBgChrome">#FFEFF1F6</Color>
+            <SolidColorBrush x:Key="SkColorBgChromeBrush" Color="#FFEFF1F6"/>
+            <Color x:Key="SkColorBgField">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkColorBgFieldBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkColorBgHover">#FFDFE1E5</Color>
+            <SolidColorBrush x:Key="SkColorBgHoverBrush" Color="#FFDFE1E5"/>
+            <Color x:Key="SkColorBgOverlay">#FFF9FBFE</Color>
+            <SolidColorBrush x:Key="SkColorBgOverlayBrush" Color="#FFF9FBFE"/>
+            <Color x:Key="SkColorBgPanel">#FFF4F6FA</Color>
+            <SolidColorBrush x:Key="SkColorBgPanelBrush" Color="#FFF4F6FA"/>
+            <Color x:Key="SkColorBgRaised">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkColorBgRaisedBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkColorBgScrim">#38161B24</Color>
+            <SolidColorBrush x:Key="SkColorBgScrimBrush" Color="#38161B24"/>
+            <Color x:Key="SkColorBgSelected">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkColorBgSelectedBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkColorBgSunken">#FFE5E7EB</Color>
+            <SolidColorBrush x:Key="SkColorBgSunkenBrush" Color="#FFE5E7EB"/>
+            <Color x:Key="SkColorBgWindow">#FFE9EBEF</Color>
+            <SolidColorBrush x:Key="SkColorBgWindowBrush" Color="#FFE9EBEF"/>
+            <Color x:Key="SkColorLineStrong">#FFCDD0D7</Color>
+            <SolidColorBrush x:Key="SkColorLineStrongBrush" Color="#FFCDD0D7"/>
+            <Color x:Key="SkColorLineSubtle">#FFDEE0E4</Color>
+            <SolidColorBrush x:Key="SkColorLineSubtleBrush" Color="#FFDEE0E4"/>
+            <Color x:Key="SkColorLineSwatch">#26161920</Color>
+            <SolidColorBrush x:Key="SkColorLineSwatchBrush" Color="#26161920"/>
+            <Color x:Key="SkColorMeterUsed">#FF868A91</Color>
+            <SolidColorBrush x:Key="SkColorMeterUsedBrush" Color="#FF868A91"/>
+            <Color x:Key="SkColorScrollThumb">#FFA0A5AF</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbBrush" Color="#FFA0A5AF"/>
+            <Color x:Key="SkColorScrollThumbHover">#FF7E838E</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbHoverBrush" Color="#FF7E838E"/>
+            <Color x:Key="SkColorShadow">#5712161F</Color>
+            <SolidColorBrush x:Key="SkColorShadowBrush" Color="#5712161F"/>
+            <Color x:Key="SkColorStatusDanger">#FFA9212C</Color>
+            <SolidColorBrush x:Key="SkColorStatusDangerBrush" Color="#FFA9212C"/>
+            <Color x:Key="SkColorStatusGrowth">#FFA34700</Color>
+            <SolidColorBrush x:Key="SkColorStatusGrowthBrush" Color="#FFA34700"/>
+            <Color x:Key="SkColorStatusSuccess">#FF006D3D</Color>
+            <SolidColorBrush x:Key="SkColorStatusSuccessBrush" Color="#FF006D3D"/>
+            <Color x:Key="SkColorStatusWarning">#FF845D00</Color>
+            <SolidColorBrush x:Key="SkColorStatusWarningBrush" Color="#FF845D00"/>
+            <Color x:Key="SkColorStatusWarningBase">#FFFFF8D6</Color>
+            <SolidColorBrush x:Key="SkColorStatusWarningBaseBrush" Color="#FFFFF8D6"/>
+            <Color x:Key="SkColorTagBlue">#FF3D78DE</Color>
+            <SolidColorBrush x:Key="SkColorTagBlueBrush" Color="#FF3D78DE"/>
+            <Color x:Key="SkColorTagGreen">#FF008D4F</Color>
+            <SolidColorBrush x:Key="SkColorTagGreenBrush" Color="#FF008D4F"/>
+            <Color x:Key="SkColorTagRed">#FFDC434A</Color>
+            <SolidColorBrush x:Key="SkColorTagRedBrush" Color="#FFDC434A"/>
+            <Color x:Key="SkColorTagYellow">#FF957700</Color>
+            <SolidColorBrush x:Key="SkColorTagYellowBrush" Color="#FF957700"/>
+            <Color x:Key="SkColorTextDisabled">#FF9B9EA6</Color>
+            <SolidColorBrush x:Key="SkColorTextDisabledBrush" Color="#FF9B9EA6"/>
+            <Color x:Key="SkColorTextOnAccent">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkColorTextOnAccentBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkColorTextPrimary">#FF161920</Color>
+            <SolidColorBrush x:Key="SkColorTextPrimaryBrush" Color="#FF161920"/>
+            <Color x:Key="SkColorTextSecondary">#FF444954</Color>
+            <SolidColorBrush x:Key="SkColorTextSecondaryBrush" Color="#FF444954"/>
+            <Color x:Key="SkColorTextTertiary">#FF575C68</Color>
+            <SolidColorBrush x:Key="SkColorTextTertiaryBrush" Color="#FF575C68"/>
+            <x:String x:Key="SkShadowPopoverCss">0px 12px 32px 0px #12161F29, 0px 0px 0px 1px #CDD0D7</x:String>
+            <Color x:Key="SkTreemapClassArchive">#FFD8B837</Color>
+            <SolidColorBrush x:Key="SkTreemapClassArchiveBrush" Color="#FFD8B837"/>
+            <Color x:Key="SkTreemapClassCode">#FF95ABD7</Color>
+            <SolidColorBrush x:Key="SkTreemapClassCodeBrush" Color="#FF95ABD7"/>
+            <Color x:Key="SkTreemapClassData">#FF4CD39F</Color>
+            <SolidColorBrush x:Key="SkTreemapClassDataBrush" Color="#FF4CD39F"/>
+            <Color x:Key="SkTreemapClassOther">#FFC7D1E5</Color>
+            <SolidColorBrush x:Key="SkTreemapClassOtherBrush" Color="#FFC7D1E5"/>
+            <Color x:Key="SkTreemapClassFocusOutline">#8C0A0B0D</Color>
+            <SolidColorBrush x:Key="SkTreemapClassFocusOutlineBrush" Color="#8C0A0B0D"/>
+            <Color x:Key="SkTreemapClassFocusVeil">#D9FFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapClassFocusVeilBrush" Color="#D9FFFFFF"/>
+            <Color x:Key="SkTreemapCollapsed">#FFD8DBE0</Color>
+            <SolidColorBrush x:Key="SkTreemapCollapsedBrush" Color="#FFD8DBE0"/>
+            <Color x:Key="SkTreemapDiffGrow0">#FFF9D1BA</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow0Brush" Color="#FFF9D1BA"/>
+            <Color x:Key="SkTreemapDiffGrow1">#FFF6A97A</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow1Brush" Color="#FFF6A97A"/>
+            <Color x:Key="SkTreemapDiffGrow2">#FFED8032</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow2Brush" Color="#FFED8032"/>
+            <Color x:Key="SkTreemapDiffGrow3">#FFD76900</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffGrow3Brush" Color="#FFD76900"/>
+            <Color x:Key="SkTreemapDiffShrink0">#FFC6DCF3</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffShrink0Brush" Color="#FFC6DCF3"/>
+            <Color x:Key="SkTreemapDiffShrink1">#FF85B6E9</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffShrink1Brush" Color="#FF85B6E9"/>
+            <Color x:Key="SkTreemapDiffShrink2">#FF2569A8</Color>
+            <SolidColorBrush x:Key="SkTreemapDiffShrink2Brush" Color="#FF2569A8"/>
+            <Color x:Key="SkTreemapFlatFile">#FFC7D1E5</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatFileBrush" Color="#FFC7D1E5"/>
+            <Color x:Key="SkTreemapFlatFolder">#FFF3F5F9</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatFolderBrush" Color="#FFF3F5F9"/>
+            <Color x:Key="SkTreemapFlatFree">#FFC9F4DA</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatFreeBrush" Color="#FFC9F4DA"/>
+            <Color x:Key="SkTreemapFlatUnknown">#FFECEEF4</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatUnknownBrush" Color="#FFECEEF4"/>
+            <Color x:Key="SkTreemapFlatVolume">#FFEAECF0</Color>
+            <SolidColorBrush x:Key="SkTreemapFlatVolumeBrush" Color="#FFEAECF0"/>
+            <Color x:Key="SkTreemapFreeBorder">#FF75C297</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeBorderBrush" Color="#FF75C297"/>
+            <Color x:Key="SkTreemapFreeStripeA">#FFDDFBE8</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeStripeABrush" Color="#FFDDFBE8"/>
+            <Color x:Key="SkTreemapFreeStripeB">#FFC9F4DA</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeStripeBBrush" Color="#FFC9F4DA"/>
+            <Color x:Key="SkTreemapFreeSub">#FF117449</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeSubBrush" Color="#FF117449"/>
+            <Color x:Key="SkTreemapFreeText">#FF005936</Color>
+            <SolidColorBrush x:Key="SkTreemapFreeTextBrush" Color="#FF005936"/>
+            <Color x:Key="SkTreemapGround">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapGroundBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkTreemapHaloBg">#FFBDCBEE</Color>
+            <SolidColorBrush x:Key="SkTreemapHaloBgBrush" Color="#FFBDCBEE"/>
+            <Color x:Key="SkTreemapHaloSub">#FF39435F</Color>
+            <SolidColorBrush x:Key="SkTreemapHaloSubBrush" Color="#FF39435F"/>
+            <Color x:Key="SkTreemapHaloText">#FF0A0F1D</Color>
+            <SolidColorBrush x:Key="SkTreemapHaloTextBrush" Color="#FF0A0F1D"/>
+            <Color x:Key="SkTreemapLevel0Bg">#FFF3F5F9</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0BgBrush" Color="#FFF3F5F9"/>
+            <Color x:Key="SkTreemapLevel0Border">#FFD4D7DE</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0BorderBrush" Color="#FFD4D7DE"/>
+            <Color x:Key="SkTreemapLevel0HeaderBg">#FFEAECF0</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0HeaderBgBrush" Color="#FFEAECF0"/>
+            <Color x:Key="SkTreemapLevel0HeaderSub">#FF505562</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0HeaderSubBrush" Color="#FF505562"/>
+            <Color x:Key="SkTreemapLevel0HeaderText">#FF161920</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel0HeaderTextBrush" Color="#FF161920"/>
+            <Color x:Key="SkTreemapLevel1Bg">#FFEEF0F4</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1BgBrush" Color="#FFEEF0F4"/>
+            <Color x:Key="SkTreemapLevel1Border">#FFCFD2D9</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1BorderBrush" Color="#FFCFD2D9"/>
+            <Color x:Key="SkTreemapLevel1HeaderBg">#FFE4E6EA</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1HeaderBgBrush" Color="#FFE4E6EA"/>
+            <Color x:Key="SkTreemapLevel1HeaderSub">#FF4C515E</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1HeaderSubBrush" Color="#FF4C515E"/>
+            <Color x:Key="SkTreemapLevel1HeaderText">#FF171A21</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel1HeaderTextBrush" Color="#FF171A21"/>
+            <Color x:Key="SkTreemapLevel2Bg">#FFE9EBEF</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2BgBrush" Color="#FFE9EBEF"/>
+            <Color x:Key="SkTreemapLevel2Border">#FFC9CCD3</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2BorderBrush" Color="#FFC9CCD3"/>
+            <Color x:Key="SkTreemapLevel2HeaderBg">#FFDFE1E5</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2HeaderBgBrush" Color="#FFDFE1E5"/>
+            <Color x:Key="SkTreemapLevel2HeaderSub">#FF494E5B</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2HeaderSubBrush" Color="#FF494E5B"/>
+            <Color x:Key="SkTreemapLevel2HeaderText">#FF181B22</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel2HeaderTextBrush" Color="#FF181B22"/>
+            <Color x:Key="SkTreemapLevel3Bg">#FFE4E6EA</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3BgBrush" Color="#FFE4E6EA"/>
+            <Color x:Key="SkTreemapLevel3Border">#FFC3C6CD</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3BorderBrush" Color="#FFC3C6CD"/>
+            <Color x:Key="SkTreemapLevel3HeaderBg">#FFD8DBE2</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3HeaderBgBrush" Color="#FFD8DBE2"/>
+            <Color x:Key="SkTreemapLevel3HeaderSub">#FF464B57</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3HeaderSubBrush" Color="#FF464B57"/>
+            <Color x:Key="SkTreemapLevel3HeaderText">#FF191C23</Color>
+            <SolidColorBrush x:Key="SkTreemapLevel3HeaderTextBrush" Color="#FF191C23"/>
+            <Color x:Key="SkTreemapPendingBorder">#FFC2C7D0</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingBorderBrush" Color="#FFC2C7D0"/>
+            <Color x:Key="SkTreemapPendingStripeA">#FFF3F5F9</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingStripeABrush" Color="#FFF3F5F9"/>
+            <Color x:Key="SkTreemapPendingStripeB">#FFE9ECF2</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingStripeBBrush" Color="#FFE9ECF2"/>
+            <Color x:Key="SkTreemapPendingSub">#FF616671</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingSubBrush" Color="#FF616671"/>
+            <Color x:Key="SkTreemapPendingText">#FF4A4E59</Color>
+            <SolidColorBrush x:Key="SkTreemapPendingTextBrush" Color="#FF4A4E59"/>
+            <Color x:Key="SkTreemapStateDeletedBadgeBg">#E0FFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapStateDeletedBadgeBgBrush" Color="#E0FFFFFF"/>
+            <Color x:Key="SkTreemapStateFlash">#FFAB6C00</Color>
+            <SolidColorBrush x:Key="SkTreemapStateFlashBrush" Color="#FFAB6C00"/>
+            <Color x:Key="SkTreemapStateHoverInset">#E60A0B0D</Color>
+            <SolidColorBrush x:Key="SkTreemapStateHoverInsetBrush" Color="#E60A0B0D"/>
+            <Color x:Key="SkTreemapStateSelectShadow">#5212161F</Color>
+            <SolidColorBrush x:Key="SkTreemapStateSelectShadowBrush" Color="#5212161F"/>
+            <Color x:Key="SkTreemapTime0">#FF0E7461</Color>
+            <SolidColorBrush x:Key="SkTreemapTime0Brush" Color="#FF0E7461"/>
+            <Color x:Key="SkTreemapTime1">#FF2FA18B</Color>
+            <SolidColorBrush x:Key="SkTreemapTime1Brush" Color="#FF2FA18B"/>
+            <Color x:Key="SkTreemapTime2">#FF61C0AD</Color>
+            <SolidColorBrush x:Key="SkTreemapTime2Brush" Color="#FF61C0AD"/>
+            <Color x:Key="SkTreemapTime3">#FF9AD7CB</Color>
+            <SolidColorBrush x:Key="SkTreemapTime3Brush" Color="#FF9AD7CB"/>
+            <Color x:Key="SkTreemapTime4">#FFC2E7E0</Color>
+            <SolidColorBrush x:Key="SkTreemapTime4Brush" Color="#FFC2E7E0"/>
+            <Color x:Key="SkTreemapTrashBadgeBg">#FFCC483D</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashBadgeBgBrush" Color="#FFCC483D"/>
+            <Color x:Key="SkTreemapTrashBadgeText">#FFFFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashBadgeTextBrush" Color="#FFFFFFFF"/>
+            <Color x:Key="SkTreemapTrashHatch">#2ECC483D</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashHatchBrush" Color="#2ECC483D"/>
+            <Color x:Key="SkTreemapTrashOutline">#FFCC483D</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashOutlineBrush" Color="#FFCC483D"/>
+            <Color x:Key="SkTreemapTrashSweep">#8CFFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashSweepBrush" Color="#8CFFFFFF"/>
+            <Color x:Key="SkTreemapTrashVeil">#73FFFFFF</Color>
+            <SolidColorBrush x:Key="SkTreemapTrashVeilBrush" Color="#73FFFFFF"/>
+            <Color x:Key="SkTreemapUnknownBorder">#FFC0C3CB</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownBorderBrush" Color="#FFC0C3CB"/>
+            <Color x:Key="SkTreemapUnknownStripeA">#FFF4F6FA</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownStripeABrush" Color="#FFF4F6FA"/>
+            <Color x:Key="SkTreemapUnknownStripeB">#FFECEEF4</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownStripeBBrush" Color="#FFECEEF4"/>
+            <Color x:Key="SkTreemapUnknownSub">#FF646873</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownSubBrush" Color="#FF646873"/>
+            <Color x:Key="SkTreemapUnknownText">#FF4B4F59</Color>
+            <SolidColorBrush x:Key="SkTreemapUnknownTextBrush" Color="#FF4B4F59"/>
+            <Color x:Key="SkVisualBranch11">#FF85CCEE</Color>
+            <SolidColorBrush x:Key="SkVisualBranch11Brush" Color="#FF85CCEE"/>
+            <Color x:Key="SkVisualBranch13">#FF006B8F</Color>
+            <SolidColorBrush x:Key="SkVisualBranch13Brush" Color="#FF006B8F"/>
+            <Color x:Key="SkVisualBranch21">#FFEDB38B</Color>
+            <SolidColorBrush x:Key="SkVisualBranch21Brush" Color="#FFEDB38B"/>
+            <Color x:Key="SkVisualBranch23">#FF944C05</Color>
+            <SolidColorBrush x:Key="SkVisualBranch23Brush" Color="#FF944C05"/>
+            <Color x:Key="SkVisualBranch31">#FF8ED3AD</Color>
+            <SolidColorBrush x:Key="SkVisualBranch31Brush" Color="#FF8ED3AD"/>
+            <Color x:Key="SkVisualBranch33">#FF00754B</Color>
+            <SolidColorBrush x:Key="SkVisualBranch33Brush" Color="#FF00754B"/>
+            <Color x:Key="SkVisualBranch41">#FFEAABCD</Color>
+            <SolidColorBrush x:Key="SkVisualBranch41Brush" Color="#FFEAABCD"/>
+            <Color x:Key="SkVisualBranch43">#FF904272</Color>
+            <SolidColorBrush x:Key="SkVisualBranch43Brush" Color="#FF904272"/>
+            <Color x:Key="SkVisualBranch51">#FF79D3D2</Color>
+            <SolidColorBrush x:Key="SkVisualBranch51Brush" Color="#FF79D3D2"/>
+            <Color x:Key="SkVisualBranch53">#FF007071</Color>
+            <SolidColorBrush x:Key="SkVisualBranch53Brush" Color="#FF007071"/>
+            <Color x:Key="SkVisualBranch61">#FFF4ACA4</Color>
+            <SolidColorBrush x:Key="SkVisualBranch61Brush" Color="#FFF4ACA4"/>
+            <Color x:Key="SkVisualBranch63">#FF9B413E</Color>
+            <SolidColorBrush x:Key="SkVisualBranch63Brush" Color="#FF9B413E"/>
+            <Color x:Key="SkVisualBranch71">#FFB5CB8D</Color>
+            <SolidColorBrush x:Key="SkVisualBranch71Brush" Color="#FFB5CB8D"/>
+            <Color x:Key="SkVisualBranch73">#FF526D0B</Color>
+            <SolidColorBrush x:Key="SkVisualBranch73Brush" Color="#FF526D0B"/>
+            <Color x:Key="SkVisualBranch81">#FFD2B2EB</Color>
+            <SolidColorBrush x:Key="SkVisualBranch81Brush" Color="#FFD2B2EB"/>
+            <Color x:Key="SkVisualBranch83">#FF774C94</Color>
+            <SolidColorBrush x:Key="SkVisualBranch83Brush" Color="#FF774C94"/>
+            <Color x:Key="SkVisualBranchNeutral">#FFA2A6AE</Color>
+            <SolidColorBrush x:Key="SkVisualBranchNeutralBrush" Color="#FFA2A6AE"/>
+            <Color x:Key="SkVisualCenterBg">#FFEAECF0</Color>
+            <SolidColorBrush x:Key="SkVisualCenterBgBrush" Color="#FFEAECF0"/>
+            <Color x:Key="SkVisualCenterSub">#FF505562</Color>
+            <SolidColorBrush x:Key="SkVisualCenterSubBrush" Color="#FF505562"/>
+            <Color x:Key="SkVisualCenterText">#FF161920</Color>
+            <SolidColorBrush x:Key="SkVisualCenterTextBrush" Color="#FF161920"/>
+            <Color x:Key="SkVisualHaloOverlay">#1A0A0B0D</Color>
+            <SolidColorBrush x:Key="SkVisualHaloOverlayBrush" Color="#1A0A0B0D"/>
+            <Color x:Key="SkVisualRing1">#FF939AA8</Color>
+            <SolidColorBrush x:Key="SkVisualRing1Brush" Color="#FF939AA8"/>
+            <Color x:Key="SkVisualRing2">#FFA0A7B5</Color>
+            <SolidColorBrush x:Key="SkVisualRing2Brush" Color="#FFA0A7B5"/>
+            <Color x:Key="SkVisualRing3">#FFABB1C0</Color>
+            <SolidColorBrush x:Key="SkVisualRing3Brush" Color="#FFABB1C0"/>
+            <Color x:Key="SkVisualRing4">#FFB4BBC9</Color>
+            <SolidColorBrush x:Key="SkVisualRing4Brush" Color="#FFB4BBC9"/>
+        </ResourceDictionary>
+    </ResourceDictionary.ThemeDictionaries>
+    <Color x:Key="SkColorStatusWarningFill">#FFF5C542</Color>
+    <SolidColorBrush x:Key="SkColorStatusWarningFillBrush" Color="#FFF5C542"/>
     <Color x:Key="SkColorTagBase">#B8000000</Color>
     <SolidColorBrush x:Key="SkColorTagBaseBrush" Color="#B8000000"/>
-    <Color x:Key="SkColorTagBlue">#FF5A97FF</Color>
-    <SolidColorBrush x:Key="SkColorTagBlueBrush" Color="#FF5A97FF"/>
-    <Color x:Key="SkColorTagGreen">#FF3FE08A</Color>
-    <SolidColorBrush x:Key="SkColorTagGreenBrush" Color="#FF3FE08A"/>
-    <Color x:Key="SkColorTagRed">#FFFF5D61</Color>
-    <SolidColorBrush x:Key="SkColorTagRedBrush" Color="#FFFF5D61"/>
-    <Color x:Key="SkColorTagYellow">#FFFFD23F</Color>
-    <SolidColorBrush x:Key="SkColorTagYellowBrush" Color="#FFFFD23F"/>
-    <Color x:Key="SkColorTextDisabled">#FF4A4E58</Color>
-    <SolidColorBrush x:Key="SkColorTextDisabledBrush" Color="#FF4A4E58"/>
-    <Color x:Key="SkColorTextOnAccent">#FF0B0C10</Color>
-    <SolidColorBrush x:Key="SkColorTextOnAccentBrush" Color="#FF0B0C10"/>
-    <Color x:Key="SkColorTextPrimary">#FFF1F2F5</Color>
-    <SolidColorBrush x:Key="SkColorTextPrimaryBrush" Color="#FFF1F2F5"/>
-    <Color x:Key="SkColorTextSecondary">#FFAEB3BE</Color>
-    <SolidColorBrush x:Key="SkColorTextSecondaryBrush" Color="#FFAEB3BE"/>
-    <Color x:Key="SkColorTextTertiary">#FF8F95A2</Color>
-    <SolidColorBrush x:Key="SkColorTextTertiaryBrush" Color="#FF8F95A2"/>
+    <Color x:Key="SkColorTextOnWarning">#FF0A0B0D</Color>
+    <SolidColorBrush x:Key="SkColorTextOnWarningBrush" Color="#FF0A0B0D"/>
     <x:Double x:Key="SkControlFocusRing">2</x:Double>
     <x:Double x:Key="SkControlHeightLg">32</x:Double>
     <x:Double x:Key="SkControlHeightMd">28</x:Double>
@@ -81,6 +575,9 @@
     <x:Int32 x:Key="SkFontWeightSemibold">600</x:Int32>
     <x:Double x:Key="SkLayoutFilterMaxWidth">420</x:Double>
     <x:Double x:Key="SkLayoutInspector">320</x:Double>
+    <x:Double x:Key="SkLayoutInspectorMax">640</x:Double>
+    <x:Double x:Key="SkLayoutInspectorMin">280</x:Double>
+    <x:Double x:Key="SkLayoutMapMin">360</x:Double>
     <x:Double x:Key="SkLayoutStatusbar">28</x:Double>
     <x:Double x:Key="SkLayoutTabHeight">34</x:Double>
     <x:Double x:Key="SkLayoutTitlebar">40</x:Double>
@@ -88,6 +585,7 @@
     <x:Double x:Key="SkLayoutWindowButton">46</x:Double>
     <x:Double x:Key="SkMotionDurationFastMs">120</x:Double>
     <x:Double x:Key="SkMotionDurationFlashMs">900</x:Double>
+    <x:Double x:Key="SkMotionDurationSwapMs">200</x:Double>
     <x:Double x:Key="SkMotionDurationZoomMs">220</x:Double>
     <x:String x:Key="SkMotionEasingOut">0,0,0.2,1</x:String>
     <x:String x:Key="SkMotionEasingStandard">0.2,0,0,1</x:String>
@@ -96,7 +594,6 @@
     <x:Double x:Key="SkRadiusPill">999</x:Double>
     <x:Double x:Key="SkRadiusSm">4</x:Double>
     <x:Double x:Key="SkRadiusXs">2</x:Double>
-    <x:String x:Key="SkShadowPopoverCss">0px 12px 32px 0px #00000073, 0px 0px 0px 1px #2A2E37</x:String>
     <x:Double x:Key="SkSpace1">2</x:Double>
     <x:Double x:Key="SkSpace2">4</x:Double>
     <x:Double x:Key="SkSpace3">6</x:Double>
@@ -106,51 +603,23 @@
     <x:Double x:Key="SkSpace7">20</x:Double>
     <x:Double x:Key="SkSpace8">24</x:Double>
     <x:Double x:Key="SkSpace9">32</x:Double>
-    <Color x:Key="SkTreemapClassArchive">#FFE5C547</Color>
-    <SolidColorBrush x:Key="SkTreemapClassArchiveBrush" Color="#FFE5C547"/>
     <Color x:Key="SkTreemapClassAudio">#FF9B4586</Color>
     <SolidColorBrush x:Key="SkTreemapClassAudioBrush" Color="#FF9B4586"/>
     <Color x:Key="SkTreemapClassDoc">#FF505DC6</Color>
     <SolidColorBrush x:Key="SkTreemapClassDocBrush" Color="#FF505DC6"/>
     <Color x:Key="SkTreemapClassExec">#FF1FAE8A</Color>
     <SolidColorBrush x:Key="SkTreemapClassExecBrush" Color="#FF1FAE8A"/>
+    <Color x:Key="SkTreemapClassGame">#FFBE1022</Color>
+    <SolidColorBrush x:Key="SkTreemapClassGameBrush" Color="#FFBE1022"/>
     <Color x:Key="SkTreemapClassImage">#FF2F8FDB</Color>
     <SolidColorBrush x:Key="SkTreemapClassImageBrush" Color="#FF2F8FDB"/>
-    <Color x:Key="SkTreemapClassOther">#FF2B2F38</Color>
-    <SolidColorBrush x:Key="SkTreemapClassOtherBrush" Color="#FF2B2F38"/>
     <Color x:Key="SkTreemapClassVideo">#FFE07A1F</Color>
     <SolidColorBrush x:Key="SkTreemapClassVideoBrush" Color="#FFE07A1F"/>
-    <Color x:Key="SkTreemapCollapsed">#FF232731</Color>
-    <SolidColorBrush x:Key="SkTreemapCollapsedBrush" Color="#FF232731"/>
-    <Color x:Key="SkTreemapDiffGrow0">#FF5E3410</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffGrow0Brush" Color="#FF5E3410"/>
-    <Color x:Key="SkTreemapDiffGrow1">#FF7A4312</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffGrow1Brush" Color="#FF7A4312"/>
-    <Color x:Key="SkTreemapDiffGrow2">#FF9A5313</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffGrow2Brush" Color="#FF9A5313"/>
-    <Color x:Key="SkTreemapDiffGrow3">#FFF08A2A</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffGrow3Brush" Color="#FFF08A2A"/>
-    <Color x:Key="SkTreemapDiffShrink0">#FF0F3050</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffShrink0Brush" Color="#FF0F3050"/>
-    <Color x:Key="SkTreemapDiffShrink1">#FF18497A</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffShrink1Brush" Color="#FF18497A"/>
-    <Color x:Key="SkTreemapDiffShrink2">#FF236AA5</Color>
-    <SolidColorBrush x:Key="SkTreemapDiffShrink2Brush" Color="#FF236AA5"/>
     <x:Double x:Key="SkTreemapDimOpacity">0.12</x:Double>
     <Color x:Key="SkTreemapDotOnDark">#33FFFFFF</Color>
     <SolidColorBrush x:Key="SkTreemapDotOnDarkBrush" Color="#33FFFFFF"/>
     <Color x:Key="SkTreemapDotOnLight">#33000000</Color>
     <SolidColorBrush x:Key="SkTreemapDotOnLightBrush" Color="#33000000"/>
-    <Color x:Key="SkTreemapFreeBorder">#FF1C5A3B</Color>
-    <SolidColorBrush x:Key="SkTreemapFreeBorderBrush" Color="#FF1C5A3B"/>
-    <Color x:Key="SkTreemapFreeStripeA">#FF06140D</Color>
-    <SolidColorBrush x:Key="SkTreemapFreeStripeABrush" Color="#FF06140D"/>
-    <Color x:Key="SkTreemapFreeStripeB">#FF0A1D13</Color>
-    <SolidColorBrush x:Key="SkTreemapFreeStripeBBrush" Color="#FF0A1D13"/>
-    <Color x:Key="SkTreemapFreeSub">#FF41B47C</Color>
-    <SolidColorBrush x:Key="SkTreemapFreeSubBrush" Color="#FF41B47C"/>
-    <Color x:Key="SkTreemapFreeText">#FF5BE3A0</Color>
-    <SolidColorBrush x:Key="SkTreemapFreeTextBrush" Color="#FF5BE3A0"/>
     <x:Double x:Key="SkTreemapGeometryFileRadius">3</x:Double>
     <x:Double x:Key="SkTreemapGeometryFolderPadding">2</x:Double>
     <x:Double x:Key="SkTreemapGeometryFolderRadius">5</x:Double>
@@ -162,14 +631,6 @@
     <x:Double x:Key="SkTreemapGeometrySelectRingWidth">2</x:Double>
     <x:Double x:Key="SkTreemapGeometrySizeLineMinHeight">31</x:Double>
     <x:Double x:Key="SkTreemapGeometryStripeWidth">7</x:Double>
-    <Color x:Key="SkTreemapGround">#FF060709</Color>
-    <SolidColorBrush x:Key="SkTreemapGroundBrush" Color="#FF060709"/>
-    <Color x:Key="SkTreemapHaloBg">#FF26304A</Color>
-    <SolidColorBrush x:Key="SkTreemapHaloBgBrush" Color="#FF26304A"/>
-    <Color x:Key="SkTreemapHaloSub">#FFC9D0E2</Color>
-    <SolidColorBrush x:Key="SkTreemapHaloSubBrush" Color="#FFC9D0E2"/>
-    <Color x:Key="SkTreemapHaloText">#FFFFFFFF</Color>
-    <SolidColorBrush x:Key="SkTreemapHaloTextBrush" Color="#FFFFFFFF"/>
     <Color x:Key="SkTreemapLabelDark">#FF0A0B0D</Color>
     <SolidColorBrush x:Key="SkTreemapLabelDarkBrush" Color="#FF0A0B0D"/>
     <Color x:Key="SkTreemapLabelDarkSub">#D60A0B0D</Color>
@@ -178,60 +639,6 @@
     <SolidColorBrush x:Key="SkTreemapLabelLightBrush" Color="#FFFFFFFF"/>
     <Color x:Key="SkTreemapLabelLightSub">#DBFFFFFF</Color>
     <SolidColorBrush x:Key="SkTreemapLabelLightSubBrush" Color="#DBFFFFFF"/>
-    <Color x:Key="SkTreemapLevel0Bg">#FF0C0E12</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel0BgBrush" Color="#FF0C0E12"/>
-    <Color x:Key="SkTreemapLevel0Border">#FF22262F</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel0BorderBrush" Color="#FF22262F"/>
-    <Color x:Key="SkTreemapLevel0HeaderBg">#FF13151B</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel0HeaderBgBrush" Color="#FF13151B"/>
-    <Color x:Key="SkTreemapLevel0HeaderSub">#FF9AA0AE</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel0HeaderSubBrush" Color="#FF9AA0AE"/>
-    <Color x:Key="SkTreemapLevel0HeaderText">#FFF1F2F5</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel0HeaderTextBrush" Color="#FFF1F2F5"/>
-    <Color x:Key="SkTreemapLevel1Bg">#FF101217</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel1BgBrush" Color="#FF101217"/>
-    <Color x:Key="SkTreemapLevel1Border">#FF272B35</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel1BorderBrush" Color="#FF272B35"/>
-    <Color x:Key="SkTreemapLevel1HeaderBg">#FF171A20</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel1HeaderBgBrush" Color="#FF171A20"/>
-    <Color x:Key="SkTreemapLevel1HeaderSub">#FF9AA0AE</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel1HeaderSubBrush" Color="#FF9AA0AE"/>
-    <Color x:Key="SkTreemapLevel1HeaderText">#FFEEEFF3</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel1HeaderTextBrush" Color="#FFEEEFF3"/>
-    <Color x:Key="SkTreemapLevel2Bg">#FF13161B</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel2BgBrush" Color="#FF13161B"/>
-    <Color x:Key="SkTreemapLevel2Border">#FF2C303B</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel2BorderBrush" Color="#FF2C303B"/>
-    <Color x:Key="SkTreemapLevel2HeaderBg">#FF1B1E25</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel2HeaderBgBrush" Color="#FF1B1E25"/>
-    <Color x:Key="SkTreemapLevel2HeaderSub">#FF9DA3B1</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel2HeaderSubBrush" Color="#FF9DA3B1"/>
-    <Color x:Key="SkTreemapLevel2HeaderText">#FFECEDF1</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel2HeaderTextBrush" Color="#FFECEDF1"/>
-    <Color x:Key="SkTreemapLevel3Bg">#FF171A20</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel3BgBrush" Color="#FF171A20"/>
-    <Color x:Key="SkTreemapLevel3Border">#FF313642</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel3BorderBrush" Color="#FF313642"/>
-    <Color x:Key="SkTreemapLevel3HeaderBg">#FF1F232A</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel3HeaderBgBrush" Color="#FF1F232A"/>
-    <Color x:Key="SkTreemapLevel3HeaderSub">#FFA0A6B4</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel3HeaderSubBrush" Color="#FFA0A6B4"/>
-    <Color x:Key="SkTreemapLevel3HeaderText">#FFE9EAEF</Color>
-    <SolidColorBrush x:Key="SkTreemapLevel3HeaderTextBrush" Color="#FFE9EAEF"/>
-    <Color x:Key="SkTreemapPendingBorder">#FF303542</Color>
-    <SolidColorBrush x:Key="SkTreemapPendingBorderBrush" Color="#FF303542"/>
-    <Color x:Key="SkTreemapPendingStripeA">#FF0C0E12</Color>
-    <SolidColorBrush x:Key="SkTreemapPendingStripeABrush" Color="#FF0C0E12"/>
-    <Color x:Key="SkTreemapPendingStripeB">#FF12151B</Color>
-    <SolidColorBrush x:Key="SkTreemapPendingStripeBBrush" Color="#FF12151B"/>
-    <Color x:Key="SkTreemapPendingSub">#FF808695</Color>
-    <SolidColorBrush x:Key="SkTreemapPendingSubBrush" Color="#FF808695"/>
-    <Color x:Key="SkTreemapPendingText">#FF9EA4B2</Color>
-    <SolidColorBrush x:Key="SkTreemapPendingTextBrush" Color="#FF9EA4B2"/>
-    <Color x:Key="SkTreemapStateFlash">#FFF5C542</Color>
-    <SolidColorBrush x:Key="SkTreemapStateFlashBrush" Color="#FFF5C542"/>
-    <Color x:Key="SkTreemapStateHoverInset">#E6FFFFFF</Color>
-    <SolidColorBrush x:Key="SkTreemapStateHoverInsetBrush" Color="#E6FFFFFF"/>
     <Color x:Key="SkTreemapStateNewBadgeBg">#FFF5C542</Color>
     <SolidColorBrush x:Key="SkTreemapStateNewBadgeBgBrush" Color="#FFF5C542"/>
     <Color x:Key="SkTreemapStateNewBadgeText">#FF0A0B0D</Color>
@@ -240,24 +647,46 @@
     <SolidColorBrush x:Key="SkTreemapStateSelectOuterBrush" Color="#B3000000"/>
     <Color x:Key="SkTreemapStateSelectRing">#FFFFFFFF</Color>
     <SolidColorBrush x:Key="SkTreemapStateSelectRingBrush" Color="#FFFFFFFF"/>
-    <Color x:Key="SkTreemapTime0">#FF7FE0C9</Color>
-    <SolidColorBrush x:Key="SkTreemapTime0Brush" Color="#FF7FE0C9"/>
-    <Color x:Key="SkTreemapTime1">#FF3FB39A</Color>
-    <SolidColorBrush x:Key="SkTreemapTime1Brush" Color="#FF3FB39A"/>
-    <Color x:Key="SkTreemapTime2">#FF258672</Color>
-    <SolidColorBrush x:Key="SkTreemapTime2Brush" Color="#FF258672"/>
-    <Color x:Key="SkTreemapTime3">#FF1C5F53</Color>
-    <SolidColorBrush x:Key="SkTreemapTime3Brush" Color="#FF1C5F53"/>
-    <Color x:Key="SkTreemapTime4">#FF173F39</Color>
-    <SolidColorBrush x:Key="SkTreemapTime4Brush" Color="#FF173F39"/>
-    <Color x:Key="SkTreemapUnknownBorder">#FF343844</Color>
-    <SolidColorBrush x:Key="SkTreemapUnknownBorderBrush" Color="#FF343844"/>
-    <Color x:Key="SkTreemapUnknownStripeA">#FF0C0D11</Color>
-    <SolidColorBrush x:Key="SkTreemapUnknownStripeABrush" Color="#FF0C0D11"/>
-    <Color x:Key="SkTreemapUnknownStripeB">#FF121318</Color>
-    <SolidColorBrush x:Key="SkTreemapUnknownStripeBBrush" Color="#FF121318"/>
-    <Color x:Key="SkTreemapUnknownSub">#FF7E8493</Color>
-    <SolidColorBrush x:Key="SkTreemapUnknownSubBrush" Color="#FF7E8493"/>
-    <Color x:Key="SkTreemapUnknownText">#FFA3A9B6</Color>
-    <SolidColorBrush x:Key="SkTreemapUnknownTextBrush" Color="#FFA3A9B6"/>
+    <Color x:Key="SkVisualBranch12">#FF0BB4EC</Color>
+    <SolidColorBrush x:Key="SkVisualBranch12Brush" Color="#FF0BB4EC"/>
+    <Color x:Key="SkVisualBranch14">#FF024F6A</Color>
+    <SolidColorBrush x:Key="SkVisualBranch14Brush" Color="#FF024F6A"/>
+    <Color x:Key="SkVisualBranch22">#FFEB883B</Color>
+    <SolidColorBrush x:Key="SkVisualBranch22Brush" Color="#FFEB883B"/>
+    <Color x:Key="SkVisualBranch24">#FF6A3913</Color>
+    <SolidColorBrush x:Key="SkVisualBranch24Brush" Color="#FF6A3913"/>
+    <Color x:Key="SkVisualBranch32">#FF2FC183</Color>
+    <SolidColorBrush x:Key="SkVisualBranch32Brush" Color="#FF2FC183"/>
+    <Color x:Key="SkVisualBranch34">#FF0C5537</Color>
+    <SolidColorBrush x:Key="SkVisualBranch34Brush" Color="#FF0C5537"/>
+    <Color x:Key="SkVisualBranch42">#FFE57BBA</Color>
+    <SolidColorBrush x:Key="SkVisualBranch42Brush" Color="#FFE57BBA"/>
+    <Color x:Key="SkVisualBranch44">#FF673352</Color>
+    <SolidColorBrush x:Key="SkVisualBranch44Brush" Color="#FF673352"/>
+    <Color x:Key="SkVisualBranch52">#FF08BCBC</Color>
+    <SolidColorBrush x:Key="SkVisualBranch52Brush" Color="#FF08BCBC"/>
+    <Color x:Key="SkVisualBranch54">#FF045353</Color>
+    <SolidColorBrush x:Key="SkVisualBranch54Brush" Color="#FF045353"/>
+    <Color x:Key="SkVisualBranch62">#FFF47B74</Color>
+    <SolidColorBrush x:Key="SkVisualBranch62Brush" Color="#FFF47B74"/>
+    <Color x:Key="SkVisualBranch64">#FF6E3330</Color>
+    <SolidColorBrush x:Key="SkVisualBranch64Brush" Color="#FF6E3330"/>
+    <Color x:Key="SkVisualBranch72">#FF8FB43F</Color>
+    <SolidColorBrush x:Key="SkVisualBranch72Brush" Color="#FF8FB43F"/>
+    <Color x:Key="SkVisualBranch74">#FF3D4F15</Color>
+    <SolidColorBrush x:Key="SkVisualBranch74Brush" Color="#FF3D4F15"/>
+    <Color x:Key="SkVisualBranch82">#FFC188EA</Color>
+    <SolidColorBrush x:Key="SkVisualBranch82Brush" Color="#FFC188EA"/>
+    <Color x:Key="SkVisualBranch84">#FF56396A</Color>
+    <SolidColorBrush x:Key="SkVisualBranch84Brush" Color="#FF56396A"/>
+    <x:Double x:Key="SkVisualFlameGap">2</x:Double>
+    <x:Double x:Key="SkVisualFlameRowMax">48</x:Double>
+    <x:Double x:Key="SkVisualFlameRowMin">20</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarGap">2</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarHoleMaxRatio">0.4</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarHoleMin">36</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarHoleRatio">0.24</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarMargin">8</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarRingMin">14</x:Double>
+    <x:Double x:Key="SkVisualFlamePolarSegments">32</x:Double>
 </ResourceDictionary>

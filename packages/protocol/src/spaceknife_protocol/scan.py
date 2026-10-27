@@ -119,6 +119,12 @@ class ScanStartParams(Params):
     ads: bool | None = Field(
         default=None, description="Count NTFS alternate data streams (MFT scans); None = the setting"
     )
+    skip_protected: bool | None = Field(
+        default=None,
+        description="macOS without Full Disk Access: leave out the places that would each ask for "
+        "consent (Desktop, Documents, Downloads, cloud drives, Photos library, other apps' data), shown "
+        "as not accessible; None = the scan.protected_places setting",
+    )
 
 
 class ScanSetLoadParams(Params):
@@ -291,12 +297,49 @@ class TopFile(Payload):
         description="Folder of the file relative to the summarised node, ending in a separator"
     )
     tag: Literal["red", "yellow", "green", "blue"] | None = None
+    class_id: str = Field(
+        default="other", description="The file's class (colour): by extension, and by size for ts / mts"
+    )
+
+
+class ClassPart(Payload):
+    class_id: str = Field(description="The class the files would have by their extension")
+    bytes: int
 
 
 class ClassStat(Payload):
     class_id: str
     bytes: int
     files: int
+    parts: list[ClassPart] = Field(
+        default_factory=list,
+        description="Files a folder class took over, by the class of their extension, largest first "
+        "(「游戏 · 其中视频 3 GB」); empty when none",
+    )
+
+
+class FolderClassInfo(Payload):
+    """Why a folder's files take a folder class (spaceknife.pathclass)."""
+
+    class_id: str
+    reason: str = Field(description="What the folder was recognised as, in the interface language")
+    folder: str = Field(description="The folder that decided (the node itself or an ancestor)")
+    user: bool = Field(description="The user chose it (class_folders.json)")
+    fallback: bool = Field(description="Only files whose extension is in no class take it")
+
+
+SummaryPart = Literal["contents", "classes", "top_files", "folder_class", "tags", "volume", "parent"]
+
+
+class SummaryGap(Payload):
+    """A part of a node's summary the backend could not work out; the rest is still given."""
+
+    part: SummaryPart = Field(
+        description="contents: largest files, class totals and newest change (left empty); classes: the "
+        "folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, "
+        "parent: that field (left empty)"
+    )
+    reason: str = Field(description="Why, in the interface language")
 
 
 class TreeSummaryResult(Payload):
@@ -315,6 +358,12 @@ class TreeSummaryResult(Payload):
     on_disk: bool = Field(
         default=True,
         description="False inside the MFT pseudo folders ($NTFS 元数据, $孤立文件): no such path exists",
+    )
+    folder_class: FolderClassInfo | None = Field(
+        default=None, description="The folder class the node (or a file's folder) takes, if any"
+    )
+    gaps: list[SummaryGap] = Field(
+        default_factory=list, description="Parts that could not be worked out this time; empty when complete"
     )
 
 

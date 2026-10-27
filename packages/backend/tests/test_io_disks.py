@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -17,7 +18,12 @@ from spaceknife.io.disks import (
     linux_whole_disk,
     local_disks,
 )
-from spaceknife.io.priority import io_priority_is_low, set_low_io_priority, set_thread_low_io_priority
+from spaceknife.io.priority import (
+    io_priority_is_low,
+    no_cloud_downloads,
+    set_low_io_priority,
+    set_thread_low_io_priority,
+)
 
 
 def test_this_checkout_maps_to_a_physical_disk() -> None:
@@ -81,6 +87,19 @@ def test_darwin_whole_disk_from_diskutil_info() -> None:
 needs_priority = pytest.mark.skipif(sys.platform == "darwin", reason="covered by the macOS policy API")
 
 
+@pytest.fixture(autouse=True)
+def normal_io_priority() -> Iterator[None]:
+    """The priority tests start from normal I/O priority. Some environments start every process at
+    low (GitHub's Windows runners: see the "process I/O priority at start" report header), which
+    children inherit: raise it for the test and put it back afterwards."""
+    started_low = io_priority_is_low() is True
+    if started_low:
+        assert set_low_io_priority(None, False)
+    yield
+    if started_low:
+        set_low_io_priority(None, True)
+
+
 @needs_priority
 def test_process_io_priority_round_trip() -> None:
     assert io_priority_is_low() is False
@@ -131,3 +150,9 @@ def test_windows_background_mode() -> None:
     finally:
         assert set_low_io_priority(None, False, background_mode=True)
     assert io_priority_is_low() is False
+
+
+def test_no_cloud_downloads_is_a_macos_process_policy() -> None:
+    """macOS 10.15+: setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, …, OFF) succeeds (CI
+    checks the constants on a real macOS); elsewhere there is nothing to set."""
+    assert no_cloud_downloads() is (sys.platform == "darwin")

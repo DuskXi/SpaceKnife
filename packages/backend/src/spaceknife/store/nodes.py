@@ -19,11 +19,13 @@ they return.
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
+from typing import Any
 
 import numpy as np
 
@@ -89,11 +91,42 @@ COLUMNS: dict[str, np.dtype[np.generic]] = {
 }
 
 ROW_BYTES = sum(dt.itemsize for dt in COLUMNS.values())
+# column growth (NodeStore._grow, docs/memory.md §3): by half while a scan adds rows; once the
+# store is complete (compacted or loaded), a file change adds 1/16 or 64 Ki rows, whichever is more
+GROWTH = 1.5
+SETTLED_SHARE = 16
+SETTLED_MIN_STEP = 1 << 16
 _OFF_WIDE = np.dtype("<i8")
 OFF_NARROW_LIMIT = 2**32  # name offsets fit uint32 below this many bytes of names
 
 # Columns a scanner provides for new entries (the rest are derived by the store).
 ENTRY_COLUMNS = ("kind", "flags", "size", "alloc", "mtime", "ctime", "atime", "ino", "nlink")
+
+# One slice for NodeStore.ingest_slices: refs, bounds, name_blob, name_lens, entries, ext_ids.
+type SlicePart = tuple[
+    np.ndarray,
+    np.ndarray,
+    bytes | memoryview | np.ndarray,
+    np.ndarray,
+    dict[str, np.ndarray],
+    np.ndarray | None,
+]
+
+
+def _native_fold() -> Any:
+    """The native fold of slices (``spaceknife_native.SliceFold``, docs/native.md 2.3), or None:
+    without the extension, in a build without it, or with ``SPACEKNIFE_PY_FOLD=1`` (the rollback
+    switch: the numpy fold of :meth:`NodeStore._ingest_slice_py`)."""
+    if os.environ.get("SPACEKNIFE_PY_FOLD") == "1":
+        return None
+    from .. import native
+
+    mod = native.module()
+    return getattr(mod, "SliceFold", None) if mod is not None else None
+
+
+# what NodeStore.ingest_slices folds with (tests set it to None to compare both)
+NATIVE_FOLD: Any = _native_fold()
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +157,7 @@ class NodeStore:
         self._n = 0
         self._cap = max(16, capacity)
         self.mapped = False  # columns and new name chunks in file-backed memory (see .mapped)
+        self._settled = False  # complete (compacted or loaded): grows a little at a time
         self._heap = NameHeap()
         self.cols: dict[str, np.ndarray] = {k: self._zeros(self._cap, dt) for k, dt in COLUMNS.items()}
         mapped.POLICY.register(self)
@@ -168,7 +202,7 @@ class NodeStore:
     def _zeros(self, count: int, dtype: np.dtype[np.generic]) -> np.ndarray:
         if self.mapped:
             try:
-                return mapped.mapped_zeros(count, dtype)
+                return mapped.mapped_zeros(count, dtype, growable=True)
             except OSError:  # no room for the file: plain memory still works
                 self._unmap()
         return np.zeros(count, dtype=dtype)
@@ -194,16 +228,32 @@ class NodeStore:
         return view
 
     def _grow(self, need: int) -> None:
-        if self._n + need <= self._cap:
+        want = self._n + need
+        if want <= self._cap:
             return
-        cap = self._cap
-        while self._n + need > cap:
-            cap *= 2
+        if self._settled:  # a file change of a complete tree: never double a whole volume's columns
+            cap = want + max(SETTLED_MIN_STEP, want // SETTLED_SHARE)
+        else:
+            cap = self._cap
+            while want > cap:
+                cap = int(cap * GROWTH) + 1
+        self._resize(cap)
+
+    def reserve(self, rows: int) -> None:
+        """Room for ``rows`` nodes in one go: a scan that expects about as many as last time (the
+        newest snapshot of its roots) never copies its columns to grow, and ends with little headroom.
+        More rows than that still grow the columns as usual."""
+        if rows > self._cap:
+            self._resize(rows)
+
+    def _resize(self, cap: int) -> None:
         if not self.mapped and mapped.POLICY.should_map(self, cap * ROW_BYTES + self._heap.reserved()):
             self._map()
         for key, arr in self.cols.items():
-            new = self._zeros(cap, arr.dtype)
-            new[: self._n] = arr[: self._n]
+            new = mapped.grow(arr, cap) if self.mapped else None  # in place: nothing copied or rewritten
+            if new is None:
+                new = self._zeros(cap, arr.dtype)
+                new[: self._n] = arr[: self._n]
             self.cols[key] = new
         self._cap = cap
 
@@ -211,11 +261,17 @@ class NodeStore:
         """Give back the growth headroom (up to half of every column) once nothing is added any more.
 
         Copies one column at a time, so the extra memory is one column at most. Readers holding an
-        old column keep a valid, equal copy. Returns the bytes freed.
+        old column keep a valid, equal copy; a writer adding rows meanwhile would lose them (into
+        the old column), so it runs as a reader (``STRUCTURE.read()``) and writers under
+        ``STRUCTURE.write()``. Returns the bytes freed. From now on the columns grow a little at a
+        time (:data:`SETTLED_SHARE`).
         """
+        self._settled = True
         n = max(16, self._n)
         if self._cap <= n:
             return 0
+        if all(mapped.is_mapped(a) for a in self.cols.values()):
+            return 0  # the unused tail of a mapped file was never touched: no memory, and no rewrite
         freed = 0
         for key, arr in self.cols.items():
             freed += (len(arr) - n) * arr.itemsize
@@ -339,6 +395,23 @@ class NodeStore:
         self._propagate(dir_id, size, alloc, files, dirs)
         return start
 
+    def _gone_listings(self, refs: np.ndarray) -> np.ndarray:
+        """Per listing of a slice: does it list a folder that left the tree (``GONE``), or lie
+        inside one? (References out of range are left to ingest_slice's checks.)"""
+        inner = refs[:, 0] != 0
+        gone = np.zeros(len(refs), dtype=bool)
+        old = refs[~inner, 1]
+        known = (old >= 0) & (old < self._n)
+        hit = np.zeros(len(old), dtype=bool)
+        hit[known] = (self.cols["flags"][old[known]] & np.uint32(Flag.GONE)) != 0
+        gone[~inner] = hit
+        if bool(gone.any()):
+            for k in np.flatnonzero(inner).tolist():  # inner listings name earlier ones only
+                j = int(refs[k, 1])
+                if 0 <= j < k and gone[j]:
+                    gone[k] = True
+        return gone
+
     def ingest_slice(
         self,
         refs: np.ndarray,
@@ -349,7 +422,97 @@ class NodeStore:
         ext_ids: np.ndarray | None = None,
     ) -> np.ndarray:
         """Append a whole slice of listings at once (a scan worker's ``SliceResult``); returns the
-        first new id of every listing. The result equals :meth:`ingest_listing` per listing.
+        first new id of every listing (-1: skipped, see below). The result equals
+        :meth:`ingest_listing` per listing; how it is computed: :meth:`_ingest_slice_py`, or the
+        native fold (:meth:`ingest_slices`)."""
+        return self.ingest_slices([(refs, bounds, name_blob, name_lens, entries, ext_ids)])[0]
+
+    def ingest_slices(self, parts: Sequence[SlicePart]) -> list[np.ndarray]:
+        """Several slices folded as one, their listings one after another (what
+        ``worker.merge_slices`` followed by one :meth:`ingest_slice` gives, without the merged
+        copy; ``ext_ids`` are ids of this store's :attr:`ext_table` already); the starts of each
+        part's listings.
+
+        With the native extension the entries are written in one pass without the GIL, the
+        listing threads keep running meanwhile (``spaceknife_native.SliceFold``, docs/native.md
+        2.3): checks, skipped listings, columns, names, PENDING, MOUNT, totals and the order in
+        which readers in other threads see them are those of :meth:`_ingest_slice_py`, which
+        folds without it (and with ``SPACEKNIFE_PY_FOLD=1``).
+        """
+        if not parts:
+            return []
+        fold = NATIVE_FOLD
+        if fold is None:
+            return self._ingest_slices_py(parts)
+        prepared = []
+        for refs, bounds, blob, lens, entries, ext in parts:
+            names = blob if isinstance(blob, np.ndarray) else np.frombuffer(blob, dtype=np.uint8)
+            prepared.append(
+                (
+                    np.ascontiguousarray(np.asarray(refs, dtype=np.int64).reshape(-1, 3)).reshape(-1),
+                    np.ascontiguousarray(bounds, dtype=np.int64),
+                    np.ascontiguousarray(names, dtype=np.uint8),
+                    np.ascontiguousarray(lens, dtype=np.uint16),
+                    {key: np.ascontiguousarray(entries[key], dtype=COLUMNS[key]) for key in ENTRY_COLUMNS},
+                    None if ext is None else np.ascontiguousarray(ext, dtype=np.uint16),
+                )
+            )
+        c = self.cols
+        plan = fold(prepared, self._n, c["kind"], c["flags"], c["child_count"], c["depth"])  # checks
+        if plan.rows:
+            need = plan.name_bytes
+            self._grow(plan.rows)
+            chunk, base, pos = self._heap.run(need)
+            self._fit_offsets(base + pos + need)
+            plan.write(self.cols, chunk, pos, base)  # rows past self._n: no reader sees them yet
+            self._heap.commit(pos + need)
+        starts: list[np.ndarray] = plan.publish(self)  # PENDING, version, _n, ranges, totals
+        return starts
+
+    def _ingest_slices_py(self, parts: Sequence[SlicePart]) -> list[np.ndarray]:
+        """:meth:`ingest_slices` with numpy: the parts merged (as worker.merge_slices does) and
+        folded by :meth:`_ingest_slice_py`."""
+        if len(parts) == 1:
+            return [self._ingest_slice_py(*parts[0])]
+        refs: list[np.ndarray] = []
+        bounds: list[np.ndarray] = [np.zeros(1, dtype=np.int64)]
+        blobs: list[bytes] = []
+        lens: list[np.ndarray] = []
+        exts: list[np.ndarray] = []
+        counts: list[int] = []
+        listings = rows = 0
+        for r, b, blob, ln, _entries, ext in parts:
+            rr = np.array(r, dtype=np.int64).reshape(-1, 3)
+            rr[rr[:, 0] != 0, 1] += listings
+            refs.append(rr)
+            bounds.append(np.asarray(b, dtype=np.int64)[1:] + rows)
+            blobs.append(bytes(blob))
+            lens.append(np.asarray(ln))
+            exts.append(np.zeros(len(ln), dtype=np.uint16) if ext is None else np.asarray(ext))
+            counts.append(len(rr))
+            listings += len(rr)
+            rows += len(ln)
+        starts = self._ingest_slice_py(
+            np.concatenate(refs),
+            np.concatenate(bounds),
+            b"".join(blobs),
+            np.concatenate(lens),
+            {key: np.concatenate([np.asarray(p[4][key]) for p in parts]) for key in ENTRY_COLUMNS},
+            None if all(p[5] is None for p in parts) else np.concatenate(exts),
+        )
+        cuts = np.cumsum(counts)[:-1]
+        return list(np.split(starts, cuts))
+
+    def _ingest_slice_py(
+        self,
+        refs: np.ndarray,
+        bounds: np.ndarray,
+        name_blob: bytes | memoryview | np.ndarray,
+        name_lens: np.ndarray,
+        entries: dict[str, np.ndarray],
+        ext_ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """:meth:`ingest_slice` with numpy (without the native extension).
 
         Listing ``k`` lists the directory ``refs[k]`` names — ``(0, node, 0)``: a node already in
         the store; ``(1, j, i)``: entry ``i`` of an earlier listing ``j`` of this slice — and its
@@ -359,6 +522,10 @@ class NodeStore:
         A few dozen numpy calls per slice instead of per listing: depths by pointer jumping over
         the listings, totals by segment sums, folded inside the slice deepest first and then up
         the existing ancestors once per listed node of the store.
+
+        A folder can leave the tree while a worker reads it: a monitor relists a folder above it
+        and marks what was removed ``GONE``. Its listing, and every listing inside it, is skipped;
+        their start is -1.
         """
         c = self.cols
         refs = np.asarray(refs, dtype=np.int64).reshape(-1, 3)
@@ -368,6 +535,13 @@ class NodeStore:
         starts: np.ndarray = n0 + bounds[:-1]
         if listings == 0:
             return starts
+        gone = self._gone_listings(refs)
+        if bool(gone.any()):
+            kept = ~gone
+            out = np.full(listings, -1, dtype=np.int64)
+            rest = _keep_listings(kept, refs, bounds, name_blob, name_lens, entries, ext_ids)
+            out[kept] = self._ingest_slice_py(*rest)
+            return out
         counts = np.diff(bounds)
         total = int(bounds[-1])
         inner = refs[:, 0] != 0
@@ -459,16 +633,23 @@ class NodeStore:
         new = np.flatnonzero(inner)
         for col, i in zip(tot, range(4), strict=True):
             col[dirs[new]] = acc[new, i]  # new directories start from zero
-        # listed nodes of the store pass their subtree totals up their chain, root included
+        # listed nodes of the store pass their subtree totals up their chain, root included: the
+        # chains first, then one addition per total
         top = np.flatnonzero(~inner)
         node, add = dirs[top], acc[top]
         parent = c["parent"]
+        chain: list[np.ndarray] = []
+        adds: list[np.ndarray] = []
         while len(node):
-            for col, i in zip(tot, range(4), strict=True):
-                np.add.at(col, node, add[:, i])
+            chain.append(node)
+            adds.append(add)
             node = parent[node].astype(np.int64)
             keep = node >= 0
             node, add = node[keep], add[keep]
+        if chain:
+            nodes, amounts = np.concatenate(chain), np.concatenate(adds)
+            for col, i in zip(tot, range(4), strict=True):
+                np.add.at(col, nodes, amounts[:, i])
         return starts
 
     def _propagate(self, node: int, size: int, alloc: int, files: int, dirs: int) -> None:
@@ -641,22 +822,30 @@ class NodeStore:
         )
 
     def find(self, path: str) -> int | None:
-        """Node id for an absolute path inside one of the roots, or None."""
-        target = os.path.normcase(os.path.normpath(path))
+        """Node id for an absolute path inside one of the roots, or None. Each name is matched in
+        its exact case first, case-insensitively (``normcase``) only when a single entry has it
+        that way: a folder can hold names that differ only in case (WinBtrfs, a case-sensitive
+        NTFS folder), and ``A`` must never resolve to ``a``."""
         for root in self.roots():
-            root_path = os.path.normcase(os.path.normpath(self.name(root)))
-            if target == root_path:
-                return root
-            prefix = root_path if root_path.endswith(os.sep) else root_path + os.sep
-            if not target.startswith(prefix):
+            parts = split_below(path, self.name(root))
+            if parts is None:
                 continue
             node = root
-            for part in target[len(prefix) :].split(os.sep):
-                match = next(
-                    (ch for ch in self.children(node) if os.path.normcase(self.name(ch)) == part), None
-                )
+            for part in parts:
+                key = os.path.normcase(part)
+                match: int | None = None
+                folded: list[int] = []
+                for ch in self.children(node):
+                    own = self.name(ch)
+                    if own == part:
+                        match = ch
+                        break
+                    if os.path.normcase(own) == key:
+                        folded.append(ch)
                 if match is None:
-                    return None
+                    if len(folded) != 1:
+                        return None
+                    match = folded[0]
                 node = match
             return node
         return None
@@ -671,6 +860,7 @@ class NodeStore:
         self._heap = other._heap
         self._n = other._n
         self._cap = other._cap
+        self._settled = other._settled
         self.mapped = other.mapped
         self.ext_table = other.ext_table
         self._ext_index = other._ext_index
@@ -685,11 +875,38 @@ class NodeStore:
 
     # ------------------------------------------------------------------ (de)serialisation helpers
 
+    def fixed(self) -> NodeStore:
+        """The store as it is now, for a long read without the lock (a snapshot being written): the
+        same arrays and name chunks, but its own row count, column dict and chunk lists, so rows
+        added, columns replaced (:meth:`compact`) or a store adopted meanwhile leave it as it was.
+        Rows changed in place change it too: compare :attr:`version` afterwards."""
+        out = copy.copy(self)
+        out.cols = dict(self.cols)
+        out._heap = self._heap.fixed()
+        out.ext_table = list(self.ext_table)
+        return out
+
     def export_columns(self) -> dict[str, np.ndarray]:
         """The live columns; ``name_off`` points into :attr:`names_blob` (from_columns(separated=True))."""
         out = {k: arr[: self._n] for k, arr in self.cols.items()}
         out["name_off"] = self._heap.rebase(out["name_off"])
         return out
+
+    def export_dtypes(self) -> dict[str, np.dtype[np.generic]]:
+        """The dtype of every column of :meth:`export_columns` (``name_off`` rebased: int64 once the
+        names span more than one heap chunk), in its order."""
+        out = {k: arr.dtype for k, arr in self.cols.items()}
+        if self._heap.chunks() > 1:
+            out["name_off"] = _OFF_WIDE
+        return out
+
+    def export_pieces(self, key: str, rows: int) -> Iterator[np.ndarray]:
+        """Column ``key`` of :meth:`export_columns`, ``rows`` at a time (snapshot writing: no copy of
+        a whole column; ``name_off`` rebased piece by piece)."""
+        col = self.cols[key]
+        for a in range(0, self._n, max(1, rows)):
+            piece = col[a : min(self._n, a + rows)]
+            yield self._heap.rebase(piece) if key == "name_off" else piece
 
     @classmethod
     def from_columns(
@@ -711,6 +928,7 @@ class NodeStore:
         store._n = n
         store.version = 0
         store._cap = max(16, n)
+        store._settled = True  # complete: later changes grow it a little at a time
         store.mapped = False
         store._heap = NameHeap()
         image_len = len(names) if separated else int(np.asarray(columns["name_len"]).sum(dtype=np.int64)) + n
@@ -743,6 +961,34 @@ class NodeStore:
         store.ext_table = list(ext_table) or [""]
         store._ext_index = {e: i for i, e in enumerate(store.ext_table)}
         return store
+
+
+def _keep_listings(
+    keep: np.ndarray,
+    refs: np.ndarray,
+    bounds: np.ndarray,
+    name_blob: bytes | memoryview | np.ndarray,
+    name_lens: np.ndarray,
+    entries: dict[str, np.ndarray],
+    ext_ids: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray, bytes, np.ndarray, dict[str, np.ndarray], np.ndarray | None]:
+    """A slice without the listings ``keep`` leaves out (with their entries and names); the
+    references between the listings that stay are renumbered."""
+    counts = np.diff(bounds)
+    rows = np.repeat(keep, counts)
+    lengths = np.asarray(name_lens, dtype=np.int64)
+    renumber = np.cumsum(keep) - 1
+    refs = refs[keep].copy()
+    inner = refs[:, 0] != 0
+    refs[inner, 1] = renumber[refs[inner, 1]]
+    return (
+        refs,
+        np.concatenate(([0], np.cumsum(counts[keep]))).astype(np.int64),
+        np.frombuffer(name_blob, dtype=np.uint8)[np.repeat(rows, lengths)].tobytes(),
+        lengths[rows],
+        {key: np.asarray(col)[rows] for key, col in entries.items()},
+        None if ext_ids is None else np.asarray(ext_ids)[rows],
+    )
 
 
 def _adoptable(col: np.ndarray | None, dtype: np.dtype[np.generic], length: int) -> bool:
@@ -792,3 +1038,21 @@ def encode_name(name: str) -> bytes:
 
 def decode_name(raw: bytes) -> str:
     return raw.decode("utf-8", NAME_ERRORS)
+
+
+def split_below(path: str, root: str) -> list[str] | None:
+    """The names of ``path`` below the scan root ``root``, in their own case, or None when it is
+    not inside it (``[]``: the root itself). Both are normalised; the root part is compared with
+    normcase, so a root typed in another case is the same root."""
+    target = os.path.normpath(path)
+    root_path = os.path.normpath(root)
+    if os.path.normcase(target[: len(root_path)]) != os.path.normcase(root_path):
+        return None
+    rest = target[len(root_path) :]
+    if not rest:
+        return []
+    if not root_path.endswith(os.sep):
+        if not rest.startswith(os.sep):
+            return None  # C:\data2 is not inside C:\data
+        rest = rest[1:]
+    return rest.split(os.sep)

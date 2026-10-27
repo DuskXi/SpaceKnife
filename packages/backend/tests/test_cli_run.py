@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
-from spaceknife import cli_run
+from spaceknife import cli_run, i18n
 from spaceknife.cli_run import (
     Command,
     command_tail,
@@ -227,6 +227,33 @@ def test_template_file_and_view_summary(tree: Path, tmp_path: Path) -> None:
     # without autoclose the views are summarised on stdout (the headless stand-in for a window)
     assert cli_run.TEXT["view_title"].format(index=1, label=f"scan {tree}") in stdout
     assert f"docs{os.sep}" in stdout and "readme.md" in stdout
+
+
+def test_counts_of_one_in_english(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """English says "1 item", "1 file", "1 folder" (#1); Chinese has no plural forms."""
+    monkeypatch.setenv("SPACEKNIFE_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "one" / "sub").mkdir(parents=True)
+    (tmp_path / "one" / "a.txt").write_bytes(b"x")
+    (tmp_path / "empty").mkdir()
+    tokens = ["scan", "empty", "scan", "one", "filter", "*.txt", "save", "one.sks", "load", "one.sks"]
+    try:
+        i18n.set_language("en")
+        code, stdout, stderr = run(tokens)
+    finally:
+        i18n.set_language("zh-CN")
+    assert code == 0, stderr
+    scanned = [line.split(": ", 1)[1] for line in stderr.splitlines() if line.startswith("Scanned ")]
+    assert [s.split(",")[0] for s in scanned] == ["1 item", "3 items"]  # the folder itself counts
+    assert "Filter *.txt: 1 file, " in stderr
+    assert "Opened snapshot one.sks: 3 items, " in stderr
+    totals = [line.rsplit(", ", 1)[0] for line in stdout.splitlines() if line.endswith(" on disk")]
+    assert totals == ["0 files, 0 folders", "1 file, 0 folders", "1 file, 1 folder"]  # the three views
+
+    code, stdout, stderr = run(tokens)
+    assert code == 0, stderr
+    assert "过滤 *.txt：1 个文件，" in stderr
+    assert "共 1 个文件、1 个文件夹，占用 " in stdout
 
 
 def test_several_roots_in_one_scan(tree: Path, tmp_path: Path) -> None:

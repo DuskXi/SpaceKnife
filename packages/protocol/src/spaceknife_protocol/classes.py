@@ -4,8 +4,14 @@ A class is a named set of extensions; ``id`` is also the design-token key ``tree
 Names are matched case-insensitively against the display name, the aliases and the id.
 SpaceSniffer 2.0.5.18's class names are aliases, so its filters keep working
 (``:class:Audio/Music``), and its extension lists are included, extended with current formats.
+``code`` and ``data`` are SpaceKnife's own: source code and build output, and models, datasets
+and databases (on a developer's disk most of what used to be 「其他」). ``game`` has no extensions:
+recognised folders fill it, and recognised project folders and model caches fill ``code`` and ``data``
+whatever the extensions inside (``spaceknife.pathclass``).
 An extension may belong to several classes (``3gp``): the first class in order gives the colour,
-every class matches it in filters. ``other`` holds every file in no class.
+every class matches it in filters. ``ts`` and ``mts`` are both video and code: the backend tells a
+file apart by its size (``spaceknife.classes.STREAM_SPLITS``). ``other`` holds every file in no
+class.
 """
 
 from __future__ import annotations
@@ -29,38 +35,75 @@ BUILTIN_CLASSES: tuple[FilterClassInfo, ...] = (
         "video",
         "视频",
         "Video|Videos|Movies|Video/Movies",
-        "mp4 mkv mov avi wmv webm m4v flv ts m2ts mts vob mpg mpeg mpe m1s qt rm rmvb 3gp f4v ogv",
+        "mp4 mkv mov avi wmv webm m4v flv ts m2ts mts vob mpg mpeg mpe m1s qt rm rmvb 3gp f4v ogv"
+        # camera, broadcast and game video
+        " mxf dv divx y4m m2t m2v h264 h265 hevc ivf asf wtv mk3d ogm lrv insv braw r3d bik bk2 usm",
     ),
     _c(
         "image",
         "图片",
         "Image|Images|Picture|Pictures|Pictures/Images|Photos",
         "jpg jpeg png gif bmp tif tiff heic heif webp avif jxl svg ico psd"
-        " raw nef rw2 cr2 cr3 arw dng orf raf",
+        " raw nef rw2 cr2 cr3 arw dng orf raf"
+        # more camera RAW, HDR and textures, design and vector files
+        " srw x3f pef rwl mrw dcr kdc erf mef mos nrw sr2 srf iiq 3fr"
+        " jfif jpe jp2 j2k jxr hdp wdp apng qoi svgz exr hdr dds ktx ktx2 tga pcx pbm pgm ppm pnm"
+        " icns cur ani psb xcf kra clip pdn sai afphoto afdesign ai eps emf wmf cdr sketch fig xd",
     ),
     _c(
         "audio",
         "音频",
         "Audio|Music|Audio/Music",
-        "mp3 flac wav m4a aac ogg opus wma aif aiff alp au ac3 amr mp2 voc ape mid midi dsf 3gp",
+        "mp3 flac wav m4a aac ogg opus wma aif aiff alp au ac3 amr mp2 voc ape mid midi dsf 3gp"
+        " m4b m4r caf mka wv tta dts mpc spx weba oga gsm ra aifc w64 rf64 dff xm s3m it sf2 wem bnk",
     ),
     _c(
         "archive",
         "压缩包/镜像",
         "压缩包|镜像|Archive|Archives|Disk images|Archives/Disk images",
-        "zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2",
+        "zip 7z 7zip rar tar gz tgz bz2 xz zst lz lzma cab iso img dmg wim esd vhd vhdx vmdk qcow2"
+        " tbz tbz2 txz tzst lz4 lzo br sz zpaq zipx arj lha lzh cpio xar sit sitx"
+        # virtual machine disks and memory, disc images
+        " vdi qcow avhdx hdd hds vmem vmsn ova xva sparseimage nrg",
     ),
     _c(
         "exec",
         "程序/系统",
         "程序|系统|Program|Programs|Executable|Executables|System files|Executables/System files",
-        "exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log",
+        "exe dll sys msi msix appx com bat cmd ps1 sh so dylib ko efi drv ocx cpl ini log"
+        # app packages and extensions, runtime modules, updates, dumps and event logs
+        " apk aab xapk ipa deb rpm snap appimage jar war ear vsix crx xpi pyd node wasm"
+        " msp msu mui tlb winmd dmp mdmp etl evtx",
     ),
     _c(
         "doc",
         "文档",
         "Document|Documents|Docs",
-        "pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key",
+        "pdf doc docx xls xlsx ppt pptx odt ods odp rtf txt md csv epub pages numbers key"
+        " docm dotx dotm xlsm xlsb pptm odg wps et dps hwp ofd xps oxps djvu chm mobi azw azw3 fb2"
+        " tex rst org tsv vsd vsdx one eml msg pst ost mbox",
+    ),
+    # filled by folders (spaceknife.pathclass): everything in a recognised game install
+    _c("game", "游戏", "Game|Games", ""),
+    _c(
+        "code",
+        "代码/开发",
+        "代码|开发|Code|Source code|Development|Dev",
+        "c h cc cpp cxx hh hpp hxx cs java kt kts scala groovy gradle go rs swift m mm"
+        " py pyi pyw pyx ipynb js mjs cjs jsx ts tsx mts cts vue svelte css scss sass less"
+        " php rb pl pm lua r jl dart ex exs erl hs elm clj cljs fs fsx vb cmake"
+        # build output and caches of compilers and package managers
+        " pyc pyo class o lib a pdb ilk idb pch ipch tlog whl egg gem nupkg",
+    ),
+    _c(
+        "data",
+        "数据/模型",
+        "数据|模型|Data|Datasets|Models|Databases",
+        # model weights, datasets and scientific data
+        "safetensors gguf ggml ckpt pt pth onnx tflite mlmodel h5 hdf5 he5 nc npy npz pkl pickle"
+        " joblib parquet arrow feather avro orc tfrecord jsonl ndjson json fits fts fit mat"
+        # databases
+        " db sqlite sqlite3 db3 duckdb mdb accdb ldb vscdb realm ibd myd myi mdf ldf ndf dbf kdbx sql",
     ),
     _c(OTHER, "其他", "Other|Others|Unclassified", ""),
 )
@@ -75,6 +118,9 @@ ENGLISH_NAMES: dict[str, str] = {
     "archive": "Archives",
     "exec": "Programs",
     "doc": "Documents",
+    "game": "Games",
+    "code": "Code",
+    "data": "Data",
     OTHER: "Other",
 }
 
@@ -101,13 +147,31 @@ class ClassEdit(Params):
     id: str | None = Field(default=None, max_length=64, description="None: a new class")
     name: str = Field(min_length=1, max_length=64)
     extensions: list[str] = Field(default_factory=list, max_length=4096)
-    color: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$")
+    color: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$", description="for the dark theme")
+    color_light: str = Field(default="", pattern=r"^(#[0-9A-Fa-f]{6})?$", description="for the light theme")
+
+
+class ClassFolder(Payload):
+    """The user's choice for one folder: its files take ``class_id`` whatever their extension."""
+
+    path: str
+    class_id: str = Field(description='A class id, or "" for by extension only (no folder class)')
 
 
 class ClassesState(Payload):
     classes: list[FilterClassInfo]
     defaults: list[FilterClassInfo]
     custom: bool = Field(description="The table differs from the built-in one")
+    folders: list[ClassFolder] = Field(default_factory=list, description="The user's folder choices, by path")
+
+
+class ClassesFolderParams(Params):
+    path: str = Field(min_length=1, max_length=4096)
+    class_id: str | None = Field(
+        default=None,
+        max_length=64,
+        description='A class id; "" for by extension only; None forgets the choice (automatic again)',
+    )
 
 
 class ClassesUpdateParams(Params):

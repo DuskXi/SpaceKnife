@@ -18,6 +18,9 @@ export const icons = {
   "folder": "<path d=\"M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z\"/>",
   "file": "<path d=\"M4 1.5h5L12.5 5v9a.5.5 0 0 1-.5.5H4a.5.5 0 0 1-.5-.5v-12a.5.5 0 0 1 .5-.5z\"/><path d=\"M9 1.5V5h3.5\"/>",
   "drive": "<rect x=\"1.75\" y=\"4\" width=\"12.5\" height=\"8\" rx=\"1.75\"/><path d=\"M4.5 9.5h.01M7 9.5h4\"/>",
+  "diskGauge": "<path d=\"M3.5 7a4.5 4.5 0 0 1 9 0\"/><path d=\"m8 7 2.25-2.5\"/><rect x=\"1.75\" y=\"9.5\" width=\"12.5\" height=\"4.5\" rx=\"1.5\"/><path d=\"M4.5 11.75h.01M7 11.75h4\"/>",
+  "thermometer": "<path d=\"M6.5 9.6V3.5a1.5 1.5 0 0 1 3 0v6.1a2.75 2.75 0 1 1-3 0z\"/><path d=\"M8 11.75h.01\"/>",
+  "globe": "<circle cx=\"8\" cy=\"8\" r=\"5.75\"/><path d=\"M2.25 8h11.5M8 2.25c1.55 1.6 2.35 3.5 2.35 5.75S9.55 12.15 8 13.75M8 2.25C6.45 3.85 5.65 5.75 5.65 8s.8 4.15 2.35 5.75\"/>",
   "basket": "<path d=\"M2.5 4.5h11M6.5 4.5V3h3v1.5M4 4.5l.7 8.2a1 1 0 0 0 1 .8h4.6a1 1 0 0 0 1-.8l.7-8.2\"/>",
   "settings": "<path d=\"M2.5 4.5h6M11.5 4.5h2M2.5 11.5h2M7.5 11.5h6\"/><circle cx=\"10\" cy=\"4.5\" r=\"1.5\"/><circle cx=\"6\" cy=\"11.5\" r=\"1.5\"/>",
   "layers": "<path d=\"M8 2.5 13.5 5.5 8 8.5 2.5 5.5z\"/><path d=\"M2.5 8.5 8 11.5l5.5-3\"/>",
@@ -50,7 +53,10 @@ export const icons = {
   "windowMaximize": "<rect x=\"3.5\" y=\"3.5\" width=\"9\" height=\"9\" rx=\"1.5\"/>",
   "windowClose": "<path d=\"m4 4 8 8M12 4l-8 8\"/>",
   "check": "<path d=\"m3.5 8.5 3 3 6-7\"/>",
-  "upload": "<path d=\"M8 10.5v-8M5 5.5l3-3 3 3M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2\"/>"
+  "upload": "<path d=\"M8 10.5v-8M5 5.5l3-3 3 3M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2\"/>",
+  "vizTreemap": "<rect x=\"2\" y=\"2.5\" width=\"12\" height=\"11\" rx=\"1.5\"/><path d=\"M9 2.5v11M9 8h5M2 10h7\"/>",
+  "vizFlame": "<path d=\"M2 2.5h4v3.75h5V10h3v3.5H2z\"/><path d=\"M2 6.25h4M2 10h9M8.5 6.25V10\"/>",
+  "vizFlamePolar": "<circle cx=\"8\" cy=\"8\" r=\"1.5\"/><circle cx=\"8\" cy=\"8\" r=\"4\"/><path d=\"M8 1.5a6.5 6.5 0 0 1 3.25 12.13M5.25 13.89a6.5 6.5 0 0 1-3.53-4.21\"/>"
 } as const;
 
 export type IconName = keyof typeof icons;

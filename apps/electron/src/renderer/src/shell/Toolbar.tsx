@@ -1,16 +1,28 @@
-// Toolbar (UI-MAIN-10…26): navigation, breadcrumb / path edit, filter, detail, colour, switches,
-// split, command palette, delete basket. Acts on the focused view (G7).
+// Toolbar (UI-MAIN-10…26): navigation, breadcrumb / path edit, filter, visualization, detail,
+// colour, switches, split, command palette, delete basket. Acts on the focused view (G7). In a
+// narrow window it folds groups into the 「更多」 menu (toolbarFit.ts).
 
 import { useEffect, useRef, useState } from "react";
 
+import type { ViewState } from "@/protocol/generated";
 import { call, setViewSettings, settingsGo, settingsHistory, toggleSplit, viewCall } from "@/state/actions";
+import { pickVisual } from "@/state/commands";
+import { OVERVIEW } from "@/help/docs";
+import { HelpSearch, helpTitle } from "@/pages/HelpPage";
 import { PAGES, SettingsSearch } from "@/pages/SettingsPage";
+import { helpGo, helpHistory } from "@/state/help";
 import { activeTab, basketCount, focusedViewId, set, useApp } from "@/state/store";
+import { COLOR_MODES, levelsThatFit, offered, visualIcon } from "@/state/visuals";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
+import { registeredLayouts } from "@/visual/registry";
 
-import { ComparePicker, DirectionSegment, ExitCompare } from "./Compare";
+import { ComparePicker, DIRECTIONS, DirectionSegment, directionLabel, ExitCompare } from "./Compare";
 import { FilterBox } from "./FilterBox";
+import { type Collapse, collapse, useCollapseLevel } from "./toolbarFit";
+
+/** The breadcrumb keeps this much of itself (or all, when shorter) before groups fold away. */
+const CRUMBS_MIN = 160;
 
 export function Toolbar() {
   const tab = useApp((s) => activeTab(s));
@@ -22,23 +34,41 @@ export function Toolbar() {
   const st = view?.state;
   const scanTab = tab.kind === "scan";
   const settingsTab = tab.kind === "settings";
+  const helpTab = tab.kind === "help";
   const settingsPage = useApp((s) => s.settingsPage);
-  const canBack = useApp((s) => (settingsTab ? s.settingsBack.length > 0 : !!st?.can_back));
-  const canForward = useApp((s) => (settingsTab ? s.settingsForward.length > 0 : !!st?.can_forward));
+  const helpPage = useApp((s) => (helpTab ? helpTitle(s.lang, s.help.page) : ""));
+  const canBack = useApp((s) => (settingsTab ? s.settingsBack.length > 0 : helpTab ? s.helpBack.length > 0 : !!st?.can_back));
+  const canForward = useApp((s) => (settingsTab ? s.settingsForward.length > 0 : helpTab ? s.helpForward.length > 0 : !!st?.can_forward));
+  const back = () => (settingsTab ? settingsHistory(-1) : helpTab ? helpHistory(-1) : void viewCall(viewId, "view.back"));
+  const forward = () => (settingsTab ? settingsHistory(1) : helpTab ? helpHistory(1) : void viewCall(viewId, "view.forward"));
   const cmp = scanTab ? tab.compare : undefined;
   const split = scanTab && !cmp && tab.viewIds.length > 1;
+  const lang = useApp((s) => s.lang);
+  const bar = useRef<HTMLDivElement>(null);
+  // what decides the toolbar's width: when it changes, the toolbar works out again what fits
+  const shown = [
+    lang,
+    tab.id,
+    tab.kind,
+    cmp ? "compare" : "",
+    split ? "split" : "",
+    st?.has_trash ? "trash" : "",
+    levelsThatFit(view?.info, st?.detail ?? 0) ?? "",
+    (view?.info?.breadcrumb ?? EMPTY).map((c) => c.label).join("/"),
+  ].join("|");
+  const fold = collapse(useCollapseLevel(bar, shown));
 
   return (
-    <div className="toolbar" role="toolbar" aria-label={t("视图工具栏")}>
+    <div className="toolbar" role="toolbar" aria-label={t("视图工具栏")} ref={bar}>
       <nav className="nav" aria-label={t("导航")}>
-        <IconBtn icon="back" label={t("后退")} keys="Backspace" disabled={!canBack} onClick={() => (settingsTab ? settingsHistory(-1) : void viewCall(viewId, "view.back"))} />
-        <IconBtn icon="forward" label={t("前进")} keys="Alt+→" disabled={!canForward} onClick={() => (settingsTab ? settingsHistory(1) : void viewCall(viewId, "view.forward"))} />
+        <IconBtn icon="back" label={t("后退")} keys="Backspace" disabled={!canBack} onClick={back} />
+        <IconBtn icon="forward" label={t("前进")} keys="Alt+→" disabled={!canForward} onClick={forward} />
         <IconBtn icon="up" label={t("上一级")} keys="Alt+↑" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.up")} />
         <IconBtn icon="home" label={t("根")} keys="Ctrl+Home" disabled={!st?.can_up} onClick={() => void viewCall(viewId, "view.home")} />
       </nav>
       <div className="vsep" />
       {settingsTab ? (
-        <nav className="crumbs" aria-label={t("当前位置")}>
+        <nav className="crumbs" aria-label={t("当前位置")} data-fit-min={CRUMBS_MIN}>
           <span className="crumb-seg">
             <button className="crumb" onClick={() => settingsGo("general")}>
               <Icon name="settings" />
@@ -54,88 +84,97 @@ export function Toolbar() {
             </span>
           </span>
         </nav>
+      ) : helpTab ? (
+        <nav className="crumbs" aria-label={t("当前位置")} data-fit-min={CRUMBS_MIN}>
+          <span className="crumb-seg">
+            <button className="crumb" onClick={() => helpGo(OVERVIEW)}>
+              <Icon name="info" />
+              {t("帮助")}
+            </button>
+          </span>
+          <span className="crumb-seg">
+            <span className="crumb-arrow">
+              <Icon name="chevronRight" size={12} />
+            </span>
+            <span className="crumb-cur" aria-current="page">
+              {helpPage}
+            </span>
+          </span>
+        </nav>
       ) : cmp ? (
-        <ComparePicker tab={tab} />
+        <ComparePicker tab={tab} compact={fold.compact} />
       ) : scanTab && !split ? (
         <Breadcrumb viewId={viewId} />
       ) : !scanTab ? (
-        <nav className="crumbs" aria-label={t("当前位置")}>
+        <nav className="crumbs" aria-label={t("当前位置")} data-fit-min={CRUMBS_MIN}>
           <span className="crumb-cur">
-            <Icon name="drive" />
-            {t("新扫描")}
+            <Icon name={tab.kind === "machine" ? "diskGauge" : "drive"} />
+            {tab.kind === "machine" ? t("本机磁盘") : t("新扫描")}
           </span>
         </nav>
       ) : (
         <span className="flexless" />
       )}
       {settingsTab && <SettingsSearch />}
-      {!split && !settingsTab && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
+      {helpTab && <HelpSearch />}
+      {!split && !settingsTab && !helpTab && <FilterBox viewId={scanTab ? viewId : null} disabled={!scanTab} />}
       <div className="toolbar-right">
         {cmp && (
           <>
             {st && viewId && (
-              <div className="stepper" role="group" aria-label={t("细节层级")}>
-                <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
-                  <Icon name="minus" size={14} />
-                </button>
-                <div className="stepper-mid">
-                  <Icon name="layers" size={14} />
-                  <span className="muted">{t("层级")}</span>
-                  <span className="num">{st.detail}</span>
-                </div>
-                <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
-                  <Icon name="plus" size={14} />
-                </button>
-              </div>
+              <>
+                {!fold.visualInMenu && <VisualSwitch viewId={viewId} st={st} />}
+                <DetailStepper viewId={viewId} st={st} compact={fold.compact} />
+              </>
             )}
-            {viewId && <DirectionSegment viewId={viewId} />}
-            <ExitCompare tab={tab} />
+            {viewId && !fold.coloringInMenu && <DirectionSegment viewId={viewId} />}
+            {st && viewId && <MoreMenu viewId={viewId} st={st} fold={fold} compare />}
+            <ExitCompare tab={tab} compact={fold.compact} />
             <div className="vsep wide" />
             <IconBtn icon="split" label={t("对比模式下不能分屏")} disabled onClick={() => undefined} />
           </>
         )}
-        {scanTab && st && !cmp && (
+        {scanTab && st && viewId && !cmp && (
           <>
-            <div className="stepper" role="group" aria-label={t("细节层级")}>
-              <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
-                <Icon name="minus" size={14} />
-              </button>
-              <div className="stepper-mid">
-                <Icon name="layers" size={14} />
-                <span className="muted">{t("层级")}</span>
-                <span className="num">{st.detail}</span>
+            {!fold.visualInMenu && <VisualSwitch viewId={viewId} st={st} />}
+            <DetailStepper viewId={viewId} st={st} compact={fold.compact} />
+            {!fold.coloringInMenu && (
+              <div className="segmented" role="radiogroup" aria-label={t("配色")} title={t("配色（C）")}>
+                <span className="seg-icon">
+                  <Icon name="palette" size={14} />
+                </span>
+                {COLOR_MODES.map((m) => (
+                  <button key={m} role="radio" aria-checked={st.color_mode === m} className={st.color_mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { color_mode: m })}>
+                    {colorLabel(m)}
+                  </button>
+                ))}
               </div>
-              <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
-                <Icon name="plus" size={14} />
-              </button>
-            </div>
-            <div className="segmented" role="radiogroup" aria-label={t("配色")} title={t("配色（C）")}>
-              <span className="seg-icon">
-                <Icon name="palette" size={14} />
-              </span>
-              {(["class", "flat", "time"] as const).map((m) => (
-                <button key={m} role="radio" aria-checked={st.color_mode === m} className={st.color_mode === m ? "on" : ""} onClick={() => void setViewSettings(viewId, { color_mode: m })}>
-                  {{ class: t("类别"), flat: t("扁平"), time: t("时间") }[m]}
+            )}
+            {!fold.chipsInMenu &&
+              SPACE_SWITCHES.filter((s) => s.id !== "trash" || st.has_trash).map((s) => (
+                // the recycle bin's only when the scan holds one (and not in a comparison)
+                <button
+                  key={s.id}
+                  className={`chip${s.on(st) ? " on" : ""}${fold.chipSwatches ? " swatch-only" : ""}`}
+                  aria-pressed={s.on(st)}
+                  aria-label={s.label()}
+                  title={s.title()}
+                  onClick={() => void setViewSettings(viewId, s.flip(st))}
+                >
+                  <span className={`chip-swatch ${s.id}`} />
+                  {!fold.chipSwatches && s.label()}
                 </button>
               ))}
-            </div>
-            <button className={`chip${st.show_free ? " on" : ""}`} aria-pressed={st.show_free} title={t("可用空间（F）")} onClick={() => void setViewSettings(viewId, { show_free: !st.show_free })}>
-              <span className="chip-swatch free" />
-              {t("可用空间")}
-            </button>
-            <button className={`chip${st.show_unknown ? " on" : ""}`} aria-pressed={st.show_unknown} title={t("未知空间（U）")} onClick={() => void setViewSettings(viewId, { show_unknown: !st.show_unknown })}>
-              <span className="chip-swatch unknown" />
-              {t("未知空间")}
-            </button>
+            <MoreMenu viewId={viewId} st={st} fold={fold} compare={false} />
             <div className="vsep wide" />
             <IconBtn icon="split" label={t("分屏")} pressed={split} onClick={() => void toggleSplit()} />
           </>
         )}
-        <button className={`palette-btn${paletteOpen ? " on" : ""}`} aria-label={t("命令面板（Ctrl+K）")} title={t("命令面板（Ctrl+K）")} aria-expanded={paletteOpen} onClick={() => set({ paletteOpen: !paletteOpen })}>
+        <button className={`palette-btn${paletteOpen ? " on" : ""}${fold.compact ? " compact" : ""}`} aria-label={t("命令面板（Ctrl+K）")} title={t("命令面板（Ctrl+K）")} aria-expanded={paletteOpen} onClick={() => set({ paletteOpen: !paletteOpen })}>
           <Icon name="command" />
-          <Kbd>Ctrl+K</Kbd>
+          {!fold.compact && <Kbd>Ctrl+K</Kbd>}
         </button>
-        {tab.kind !== "settings" && (
+        {!settingsTab && !helpTab && (
           <button
             className={`icon-btn basket${basketOpen ? " on" : ""}`}
             aria-label={t("删除篮，{n} 项", { n: basket })}
@@ -148,6 +187,166 @@ export function Toolbar() {
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+const colorLabel = (m: (typeof COLOR_MODES)[number]): string => ({ class: t("类别"), flat: t("扁平"), time: t("时间"), branch: t("分支") })[m];
+
+/** The free / unknown space and recycle bin switches (UI-MAIN-21, 22; the bin's when the scan holds one). */
+const SPACE_SWITCHES = [
+  { id: "free", key: "F", label: () => t("可用空间"), title: () => t("可用空间（F）"), on: (st: ViewState) => st.show_free, flip: (st: ViewState) => ({ show_free: !st.show_free }) },
+  { id: "unknown", key: "U", label: () => t("未知空间"), title: () => t("未知空间（U）"), on: (st: ViewState) => st.show_unknown, flip: (st: ViewState) => ({ show_unknown: !st.show_unknown }) },
+  { id: "trash", key: "R", label: () => binName(), title: () => t("回收站（R）"), on: (st: ViewState) => st.show_trash, flip: (st: ViewState) => ({ show_trash: !st.show_trash }) },
+] as const;
+
+/** 「更多」: the groups a narrow window folded away (toolbarFit.ts), as one menu. Shown only when
+ * something is folded. Picking an item applies it and closes the menu, as the group would have. */
+function MoreMenu({ viewId, st, fold, compare }: { viewId: string; st: ViewState; fold: Collapse; compare: boolean }) {
+  const visuals = useApp((s) => s.visuals);
+  const dir = useApp((s) => s.views[viewId]?.state.direction ?? "all");
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    window.addEventListener("mousedown", close);
+    // the checked item of the first group takes the focus, so arrows and Enter work at once
+    box.current?.querySelector<HTMLElement>('[role^="menuitem"][aria-checked="true"]:not(:disabled), [role^="menuitem"]:not(:disabled)')?.focus();
+    return () => window.removeEventListener("mousedown", close);
+  }, [open]);
+  const visualItems = fold.visualInMenu ? offered(visuals, registeredLayouts(), st.compare) : [];
+  const chips = fold.chipsInMenu && !compare ? SPACE_SWITCHES.filter((s) => s.id !== "trash" || st.has_trash) : [];
+  if (!visualItems.length && !fold.coloringInMenu && !chips.length) return null;
+  const pick = (act: () => unknown) => () => {
+    setOpen(false);
+    button.current?.focus();
+    void act();
+  };
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      setOpen(false);
+      button.current?.focus();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      e.stopPropagation();
+      const items = Array.from(box.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? []);
+      const at = items.indexOf(document.activeElement as HTMLElement);
+      const to = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (at + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items[to]?.focus();
+    }
+  };
+  const check = (on: boolean) => <span className="menu-check">{on && <Icon name="check" size={14} />}</span>;
+  const groups: React.ReactNode[] = [];
+  if (visualItems.length)
+    groups.push(
+      <div key="visual" role="group" aria-label={t("可视化")}>
+        <div className="menu-label" aria-hidden="true">{t("可视化（V）")}</div>
+        {visualItems.map(({ info, enabled, reason }) => (
+          <button key={info.id} role="menuitemradio" aria-checked={st.visual === info.id} className="menu-item" disabled={!enabled} title={reason ?? undefined} onClick={pick(() => pickVisual(viewId, info.id))}>
+            {check(st.visual === info.id)}
+            <Icon name={visualIcon(info.icon)} size={14} />
+            {info.name}
+          </button>
+        ))}
+      </div>,
+    );
+  if (fold.coloringInMenu && compare)
+    groups.push(
+      <div key="direction" role="group" aria-label={t("显示的变化")}>
+        <div className="menu-label" aria-hidden="true">{t("显示的变化（C）")}</div>
+        {DIRECTIONS.map((d) => (
+          <button key={d} role="menuitemradio" aria-checked={dir === d} className="menu-item" onClick={pick(() => setViewSettings(viewId, { direction: d }))}>
+            {check(dir === d)}
+            {directionLabel(d)}
+          </button>
+        ))}
+      </div>,
+    );
+  if (fold.coloringInMenu && !compare)
+    groups.push(
+      <div key="color" role="group" aria-label={t("配色")}>
+        <div className="menu-label" aria-hidden="true">{t("配色（C）")}</div>
+        {COLOR_MODES.map((m) => (
+          <button key={m} role="menuitemradio" aria-checked={st.color_mode === m} className="menu-item" onClick={pick(() => setViewSettings(viewId, { color_mode: m }))}>
+            {check(st.color_mode === m)}
+            {colorLabel(m)}
+          </button>
+        ))}
+      </div>,
+    );
+  if (chips.length)
+    groups.push(
+      <div key="space" role="group" aria-label={t("显示")}>
+        <div className="menu-label" aria-hidden="true">{t("显示")}</div>
+        {chips.map((s) => (
+          <button key={s.id} role="menuitemcheckbox" aria-checked={s.on(st)} className="menu-item" onClick={pick(() => setViewSettings(viewId, s.flip(st)))}>
+            {check(s.on(st))}
+            <span className={`chip-swatch ${s.id}`} />
+            {s.label()}
+            <span className="menu-key">{s.key}</span>
+          </button>
+        ))}
+      </div>,
+    );
+  return (
+    <div className="menu-anchor" ref={box}>
+      <button ref={button} className={`icon-btn${open ? " on" : ""}`} aria-label={t("更多")} title={t("更多")} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="more" />
+      </button>
+      {open && (
+        <div className="menu toolbar-more" role="menu" aria-label={t("更多")} onKeyDown={onKey}>
+          {groups.flatMap((g, i) => (i ? [<div key={`sep-${i}`} className="menu-sep" role="separator" />, g] : [g]))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Visualization switch (V / Shift+V): an icon segment for each visualization the backend offers.
+ * One this renderer or this view can't show stays in place, disabled, with the reason as its tooltip.
+ * Switching keeps the zoom, the selection, the filter and the history (they live in the backend's view). */
+function VisualSwitch({ viewId, st }: { viewId: string; st: ViewState }) {
+  const visuals = useApp((s) => s.visuals);
+  const items = offered(visuals, registeredLayouts(), st.compare);
+  if (!items.length) return null; // a backend without visual.list: the treemap only
+  return (
+    <div className="segmented icon-only" role="radiogroup" aria-label={t("可视化")} title={t("可视化（V）")}>
+      {items.map(({ info, enabled, reason }) => {
+        const on = st.visual === info.id;
+        return (
+          <button key={info.id} role="radio" aria-checked={on} aria-label={info.name} className={on ? "on" : ""} disabled={!enabled} title={reason ?? info.name} onClick={() => void pickVisual(viewId, info.id)}>
+            <Icon name={visualIcon(info.icon)} size={14} />
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Detail level stepper (Ctrl+- / Ctrl+=). The flame graph and the polar flame graph may have room for
+ * fewer levels than asked for: the stepper then says how many are drawn. `compact` (a narrow window)
+ * leaves out the word 「层级」; the group's name and the buttons' tooltips still say it. */
+function DetailStepper({ viewId, st, compact }: { viewId: string; st: ViewState; compact: boolean }) {
+  const info = useApp((s) => s.views[viewId]?.info);
+  const fit = levelsThatFit(info, st.detail);
+  const fitText = fit == null ? null : t("画得下 {n} 层", { n: fit });
+  return (
+    <div className="stepper" role="group" aria-label={t("细节层级")}>
+      <button aria-label={t("降低细节层级（Ctrl+-）")} title={t("降低细节层级（Ctrl+-）")} disabled={st.detail <= 1} onClick={() => void setViewSettings(viewId, { detail: st.detail - 1 })}>
+        <Icon name="minus" size={14} />
+      </button>
+      <div className="stepper-mid" title={fitText ?? undefined}>
+        <Icon name="layers" size={14} />
+        {!compact && <span className="muted">{t("层级")}</span>}
+        <span className="num">{st.detail}</span>
+        {fitText && <span className="muted">{fitText}</span>}
+      </div>
+      <button aria-label={t("提高细节层级（Ctrl+=）")} title={t("提高细节层级（Ctrl+=）")} disabled={st.detail >= 15} onClick={() => void setViewSettings(viewId, { detail: st.detail + 1 })}>
+        <Icon name="plus" size={14} />
+      </button>
     </div>
   );
 }
@@ -232,7 +431,7 @@ function Breadcrumb({ viewId }: { viewId: string | null }) {
     return c.label.split(/[\\/]/).filter(Boolean).pop() ?? c.label;
   };
   return (
-    <nav className="crumbs" aria-label={t("当前位置")}>
+    <nav className="crumbs" aria-label={t("当前位置")} data-fit-min={CRUMBS_MIN}>
       {crumbs.map((c, i) => {
         const last = i === crumbs.length - 1;
         return (
@@ -274,3 +473,6 @@ function fullPath(crumbs: { key: number; label: string }[], fallback: string): s
   const [first, ...rest] = parts;
   return [first!.replace(/[\\/]+$/, ""), ...rest].join(sep) + (rest.length ? "" : sep);
 }
+
+/** The recycle bin's name on this system: macOS calls it the Trash. */
+const binName = () => (window.sk.platform === "darwin" ? t("废纸篓") : t("回收站"));

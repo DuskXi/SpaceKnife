@@ -1,15 +1,19 @@
 // Hover card (UI-MAIN-29…31): beside the hovered block, never covering it; flips to stay inside.
+// Where a row's box can be most of the drawing (a large sector), the card follows the pointer.
 
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import type { TreeNodeResult } from "@/protocol/generated";
+import type { FilterVocab, TreeNodeResult } from "@/protocol/generated";
 import { call } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
-import { Kind } from "@/treemap/frame";
-import type { HoverInfo } from "@/treemap/Treemap";
 import { fillOf, labelColors } from "@/treemap/paint";
+import { Flag, Kind } from "@/visual/frame";
+import { pointerBox } from "@/visual/Host";
+import { sameTarget } from "@/visual/hover";
+import { rowTitle } from "@/visual/rowTitle";
+import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 import { classColors } from "@/lib/classes";
-import { fmtAgo, fmtDateTime, fmtInt, fmtPct, sizeParts } from "@/lib/format";
+import { fmtAgo, fmtDateTime, fmtInt, fmtPct, fmtSize, sizeParts } from "@/lib/format";
 import { t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
@@ -20,10 +24,29 @@ function withNodes(text: string, nodes: Record<string, React.ReactNode>): React.
   return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
 }
 
+/** What a card keeps clear of: the row's box, or a small box around the pointer. */
+export const cardAvoid = (h: HoverInfo): Box => (h.placement === "pointer" ? pointerBox(h.pointer) : h.avoid);
+
+/** What a hovered row (or the zoom root) is, for the cards: one row of the frame's columns. */
+export function hoverFacts(f: VisualFrame, target: number, vocab: FilterVocab | null, ext?: string) {
+  const root = target === HIT_ROOT ? f.info.root : null;
+  if (root) {
+    // the zoom root has no class column: a file root takes the class of its extension once known
+    const cls = ext === undefined ? -1 : (vocab?.classes.findIndex((c) => c.extensions.includes(ext)) ?? -1);
+    const one = { kind: Uint8Array.of(root.kind), cls: Uint8Array.of(cls < 0 ? 255 : cls), tone: Uint8Array.of(root.tone), branch: Uint8Array.of(root.branch), depth: Uint8Array.of(1), delta: null };
+    return { kind: root.kind, node: root.node, key: root.key, size: root.size, cls, columns: one, row: 0 };
+  }
+  return { kind: f.kind[target]!, node: f.node[target]!, key: f.key[target]!, size: Number(f.size[target]), cls: f.cls[target]!, columns: f, row: target };
+}
+
 export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: { w: number; h: number } }) {
   const vocab = useApp((s) => s.vocab);
   const scanId = useApp((s) => (hover ? s.views[hover.viewId]?.state.scan_id : undefined));
   const colorMode = useApp((s) => (hover ? s.views[hover.viewId]?.state.color_mode : "class")) ?? "class";
+  const scanning = useApp((s) => {
+    const st = scanId ? s.scans[scanId] : undefined;
+    return st?.state === "scanning" || st?.state === "queued";
+  });
   const [shown, setShown] = useState<HoverInfo | null>(null);
   // W7 常规 · 悬停提示
   const keepOpen = useApp((s) => setting(s, "general.hover_keep_open", true));
@@ -40,8 +63,8 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
       setShown(null);
       return;
     }
-    if (keepOpen && shown) {
-      setShown(hover); // moving between blocks: the open card switches in place
+    if ((keepOpen || sameTarget(shown, hover)) && shown) {
+      setShown(hover); // moving between blocks (or with the pointer): the open card switches in place
       return;
     }
     setShown(null);
@@ -49,14 +72,19 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
+  // the node's details, once per node (not per pointer move); a new picture asks again (its numbers
+  // may have changed) and the card keeps what it shows until the answer comes
+  const facts0 = shown ? hoverFacts(shown.frame, shown.target, null) : null;
+  const detailNode = facts0 && facts0.kind < Kind.SMALL ? facts0.node : null;
+  const seq = shown?.frame.info.seq ?? 0;
   useEffect(() => {
-    setInfo(null);
-    if (!shown || !scanId) return;
-    const kind = shown.frame.kind[shown.row]!;
-    if (kind >= Kind.SMALL) return;
+    if (detailNode === null || !scanId) {
+      setInfo(null);
+      return;
+    }
+    setInfo((cur) => (cur && cur.node.id === detailNode ? cur : null));
     let alive = true;
-    const node = shown.frame.node[shown.row]!;
-    void call("tree.node", { scan_id: scanId, node })
+    void call("tree.node", { scan_id: scanId, node: detailNode })
       .then(async (r) => {
         if (!alive) return;
         setInfo(r);
@@ -69,12 +97,12 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
     return () => {
       alive = false;
     };
-  }, [shown, scanId]);
+  }, [detailNode, scanId, seq]);
 
   // right of the block, top-aligned; else left; else below / above (UI-MAIN-29)
   useLayoutEffect(() => {
     if (!shown || !card.current) return;
-    const r = shown.rect;
+    const r = cardAvoid(shown);
     const cw = card.current.offsetWidth;
     const ch = card.current.offsetHeight;
     let left = r.x + r.w + 10;
@@ -92,27 +120,20 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
 
   if (!shown) return null;
   const f = shown.frame;
-  const row = shown.row;
-  const kind = f.kind[row]!;
-  const fill = fillOf(f, row, colorMode as "class", vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
+  const node = info?.node;
+  const facts = hoverFacts(f, shown.target, vocab, node?.ext);
+  const kind = facts.kind;
+  const fill = fillOf(facts.columns, facts.row, colorMode, vocab?.classes.map((c) => c.id) ?? [], undefined, classColors(vocab));
   const [fg] = labelColors(fill);
   const bg = `rgb(${fill.slice(0, 3).map((v) => Math.round(v * 255)).join(",")})`;
-  const [num, unit] = sizeParts(Number(f.size[row]));
-  const cls = vocab?.classes[f.cls[row]!];
-  const node = info?.node;
+  const [num, unit] = sizeParts(facts.size);
+  const cls = vocab?.classes[facts.cls];
   const dir = kind === Kind.FOLDER || kind === Kind.COLLAPSED || kind === Kind.PENDING;
-  const title =
-    kind === Kind.SMALL
-      ? t("{n} 个小项", { n: fmtInt(f.count_[row]!) })
-      : kind === Kind.MORE
-        ? t("+{n} 项", { n: fmtInt(f.count_[row]!) })
-        : kind === Kind.FREE
-          ? t("可用空间")
-          : kind === Kind.UNKNOWN
-            ? t("未知空间")
-            : (node?.name ?? f.names[row] ?? "");
+  const named = rowTitle(f, shown.target, { scanning, formatInt: (n) => fmtInt(n) }).line1;
+  const title = (kind < Kind.SMALL ? node?.name : null) ?? named ?? "";
   const folder = info ? info.path.slice(0, Math.max(0, info.path.length - info.node.name.length)).replace(/[\\/]+$/, "") : "";
   const parentName = folder.split(/[\\/]/).filter(Boolean).pop() ?? "";
+  const flags = shown.target === HIT_ROOT ? (f.info.root?.flags ?? 0) : (f.flags[shown.target] ?? 0);
 
   return (
     <div ref={card} className="hovercard" role="tooltip" style={pos}>
@@ -135,6 +156,7 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
             <span className="muted">{withNodes(t("占 {name} {share}"), { name: parentName, share: <span className="mono strong">{fmtPct(node.alloc, parentAlloc)}</span> })}</span>
           )}
         </div>
+        {flags & Flag.TRASH ? <TrashLine bin={(flags & Flag.TRASH_BIN) !== 0} size={facts.size} /> : null}
         {node && (
           <div className="hc-class muted">
             {dir ? (
@@ -176,6 +198,24 @@ export function HoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: 
         <Kbd>Space</Kbd>
         <span>{t("预览")}</span>
       </div>
+    </div>
+  );
+}
+
+/** In a recycle bin (「回收站特效」): its space comes back only when the bin is emptied. */
+function TrashLine({ bin, size }: { bin: boolean; size: number }) {
+  const mac = window.sk.platform === "darwin";
+  const text = bin
+    ? mac
+      ? t("废纸篓：清空后可释放 {size}", { size: fmtSize(size) })
+      : t("回收站：清空后可释放 {size}", { size: fmtSize(size) })
+    : mac
+      ? t("在废纸篓里：清空废纸篓后才释放空间")
+      : t("在回收站里：清空回收站后才释放空间");
+  return (
+    <div className="hc-trash">
+      <Icon name="basket" size={12} />
+      <span>{text}</span>
     </div>
   );
 }

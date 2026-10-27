@@ -9,17 +9,35 @@
 </p>
 
 <p align="center">
-  <a href="README.md">English</a> · <b>简体中文</b> · <a href="https://spaceknife.kaltsit.dev/zh/">官网</a> · <a href="https://github.com/DuskXi/SpaceKnife/releases">下载</a>
+  <a href="README.md">English</a> · <b>简体中文</b> · <a href="https://spaceknife.kaltsit.dev/zh/">官网</a> · <a href="https://github.com/DuskXi/SpaceKnife/releases">下载</a> · <a href="UNRELEASED.md#简体中文">即将发布</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/DuskXi/SpaceKnife/releases"><img alt="最新版本" src="https://img.shields.io/github/v/release/DuskXi/SpaceKnife?include_prereleases&label=%E7%89%88%E6%9C%AC"></a>
+  <a href="https://duskxi.github.io/spaceknife-stats/"><img alt="下载次数" src="https://img.shields.io/github/downloads/DuskXi/SpaceKnife/total?label=%E4%B8%8B%E8%BD%BD"></a>
+  <a href="https://github.com/DuskXi/SpaceKnife/stargazers"><img alt="GitHub Star" src="https://img.shields.io/github/stars/DuskXi/SpaceKnife?style=flat&label=Star"></a>
+  <a href="https://github.com/DuskXi/SpaceKnife/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/DuskXi/SpaceKnife/ci.yml?branch=main&label=CI"></a>
+  <a href="https://github.com/DuskXi/SpaceKnife/commits/dev"><img alt="最近提交" src="https://img.shields.io/github/last-commit/DuskXi/SpaceKnife/dev?label=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4"></a>
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/github/license/DuskXi/SpaceKnife?label=%E8%AE%B8%E5%8F%AF%E8%AF%81"></a>
-  <img alt="Windows 与 Linux" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux-8B9CFF">
+</p>
+<p align="center">
+  <img alt="Windows、Linux 与 macOS" src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%2010%2B%20%7C%20Linux%20%7C%20macOS%2014%2B-8B9CFF">
+  <img alt="界面：英文与简体中文" src="https://img.shields.io/badge/%E7%95%8C%E9%9D%A2-English%20%7C%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-8B9CFF">
+  <a href="https://spaceknife.kaltsit.dev/zh/docs/"><img alt="文档" src="https://img.shields.io/website?url=https%3A%2F%2Fspaceknife.kaltsit.dev%2Fdocs%2F&label=%E6%96%87%E6%A1%A3&up_message=%E5%9C%A8%E7%BA%BF&down_message=%E7%A6%BB%E7%BA%BF"></a>
+  <img alt="没有遥测" src="https://img.shields.io/badge/%E9%81%A5%E6%B5%8B-%E6%97%A0-2ea44f">
+  <a href="https://github.com/DuskXi/SpaceKnife/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22"><img alt="新手任务" src="https://img.shields.io/github/issues/DuskXi/SpaceKnife/good%20first%20issue?color=7057ff&label=%E6%96%B0%E6%89%8B%E4%BB%BB%E5%8A%A1"></a>
+</p>
+<p align="center">
+  <img alt="Python 3.12" src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white">
+  <img alt="Rust 原生扩展" src="https://img.shields.io/badge/Rust-%E5%8E%9F%E7%94%9F%E6%89%A9%E5%B1%95-000000?logo=rust&logoColor=white">
+  <img alt="Electron" src="https://img.shields.io/github/package-json/dependency-version/DuskXi/SpaceKnife/dev/electron/main?filename=apps%2Felectron%2Fpackage.json&logo=electron&logoColor=white&color=47848F&label=Electron">
+  <a href="https://github.com/astral-sh/uv"><img alt="uv" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/uv/main/assets/badge/v0.json"></a>
+  <a href="https://github.com/astral-sh/ruff"><img alt="Ruff" src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json"></a>
+  <img alt="用 mypy 检查类型" src="https://img.shields.io/badge/types-mypy-2a6db2">
 </p>
 
 <p align="center">
-  <img src="docs/images/demo.gif" width="880" alt="SpaceKnife 演示：在一块 2 TB 的磁盘上悬停查看、放大进入文件夹、过滤大视频、用命令面板搜索、对比两次快照（模拟数据）">
+  <img src="docs/images/demo.gif" width="880" alt="SpaceKnife 演示：在一块 2 TB 的磁盘上悬停查看、放大进入文件夹、切换到火焰图和火焰-极坐标图、过滤大视频、用命令面板搜索、对比两次快照（模拟数据）">
 </p>
 
 SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少空间：块越大，占用越多，一眼就能找到占地方的东西。它支持 NTFS MFT 快速扫描和可限制磁盘负载的并发扫描，扫描后自动保存快照，可以看出两次之间什么变大了、什么是新出现的；删除默认进回收站，可以撤销。界面有简体中文和英文。
@@ -49,9 +67,10 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 ## 功能
 
 - **实时树图**：WebGL 渲染，边扫边画；缩放动画、悬停详情、细节层级、小项聚合，可用空间与未知空间也画出来；可分屏开两个视图。
+- **三种可视化**：树图、火焰图、火焰-极坐标图，扫描中也能随时切换，每个视图各用各的。
 - **快**：Rust 原生扩展做并行目录遍历；Windows 上可读取 NTFS 主文件表（MFT）快速扫描（通过一个只读的提权助手，需要管理员确认）。
 - **不拖慢电脑**：扫描可以限制自己造成的磁盘负载（极速 / 均衡 / 安静 / 空闲 / 自定义），别的程序在用磁盘时自动让路。
-- **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询），变化的块会闪烁。
+- **实时监控**：扫描后继续跟踪文件变化（Windows ReadDirectoryChangesW + USN 日志补偿；Linux inotify，额度不够时改为轮询；macOS FSEvents），变化的块会闪烁。
 - **过滤语言**：按名称、类型、大小、时间、属性、标签过滤，可以组合；与 SpaceSniffer 的过滤写法兼容并做了扩展（[语法](docs/filter-syntax.md)）。
 - **快照与对比**：扫描后自动保存快照；任意两次对比，或与「现在」对比，只看增长或减少。
 - **安全的清理**：右键菜单与删除篮，默认移到回收站，可以撤销；系统和程序目录受保护。
@@ -68,14 +87,41 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 | Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
 | RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
 | 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
+| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
+| Linux x64 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里） |
+| ARM 版 Windows 11 / ARM Linux 便携版 | `SpaceKnife-<版本>-win-arm64-portable.zip` / `SpaceKnife-<版本>-linux-arm64-portable.tar.gz`（同样的便携版，为 arm64 构建；安装包只有 x64） |
+| macOS 14+，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg`（预览版：还没经过苹果公证，见下文） |
+| macOS 14+，Intel | `SpaceKnife-<版本>-mac-x64.dmg`（预览版：还没经过苹果公证，见下文） |
+| macOS 14+ 便携版 | `SpaceKnife-<版本>-mac-<arm64 或 x64>-portable.zip`（解压到任意位置，打开 `SpaceKnife.app`；数据存在旁边的 `data` 文件夹里；第一次打开同样要按下文放行一次） |
 
-每个版本都附带 `SHA256SUMS.txt`。macOS 版暂不提供。
+每个版本都附带 `SHA256SUMS.txt`。
+
+从 0.3.1 起，SpaceKnife 每天最多检查一次本仓库的发布（不发送任何关于你或你的文件的信息）。小版本只在右上角显示徽章；版本跨度更大时还会显示更新概要。新版本在后台下载，并按发布里的校验和核对。从 0.3.3 起，更新卡片提供两种安装方式：「无缝更新」（Windows 安装版、便携版和 AppImage）换上新版本并重新打开 SpaceKnife，经典方式打开安装程序、磁盘映像或安装包（或者显示下载的文件，由你自己替换）；「跳过 0.4.x」让整个系列不再提示。SpaceKnife 从不自己安装更新：只有你点了才会开始。可以在「设置 › 关于与更新」里关掉检查。
+
+### macOS：第一次打开
+
+macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需要手动放行一次：
+
+1. 打开 dmg，把 SpaceKnife 拖进「应用程序」。
+2. 打开 SpaceKnife，系统提示无法验证它是否包含恶意软件，点「完成」。
+3. 打开「系统设置 › 隐私与安全性」，往下找到 SpaceKnife 已被阻止的提示，点「仍要打开」，再点一次「仍要打开」并输入密码。
+
+之后就能正常打开；安装新版本后需要再放行一次。macOS 14 上也可以在「应用程序」里右键 SpaceKnife 选「打开」。习惯用终端的话：`xattr -dr com.apple.quarantine /Applications/SpaceKnife.app`。
+
+想不被逐个文件夹的授权提示打断、扫到所有位置，给 SpaceKnife 开「完全磁盘访问权限」（系统设置 › 隐私与安全性 › 完全磁盘访问权限 › +），然后重新打开它。不开的话，邮件、信息等受保护的位置计入未知空间。更新版本后，在这个列表里把 SpaceKnife 关掉再打开一次。
+
+## 觉得好用？点个 Star
+
+如果 SpaceKnife 帮你找回了磁盘空间，欢迎点一下页面顶部的 ⭐ Star。只要点一下，却是别人发现这个项目的主要途径：Star 数是 GitHub 排名和推荐仓库的重要依据。它也让我们知道这件事值得继续做下去。
+
+也可以这样参与：在 [Issues](https://github.com/DuskXi/SpaceKnife/issues) 里报告问题、提建议，在 [Discussions](https://github.com/DuskXi/SpaceKnife/discussions) 里提问和交流，认领一个[新手任务](https://github.com/DuskXi/SpaceKnife/labels/good%20first%20issue)（见 [CONTRIBUTING.md](CONTRIBUTING.md)），或者推荐给硬盘快满了的朋友。
 
 ## 文档
 
 - 计划：[docs/PLAN.md](docs/PLAN.md)
-- UI 需求规格（484 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
+- UI 需求规格（512 条）：[docs/UI-SPEC.md](docs/UI-SPEC.md)
 - 协议：[docs/protocol.md](docs/protocol.md)
+- 可视化（引擎、线上布局、前端组件）：[docs/visuals.md](docs/visuals.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
 - 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)
@@ -103,6 +149,8 @@ uv run spaceknife serve
 ```bash
 uv run spaceknife scan "C:\Program Files"
 ```
+
+加 `--profile` 可以看耗时分解：列目录线程有多忙（系统调用），主线程把结果合并进树用了多久。环境变量 `SPACEKNIFE_SCAN_THREADS` 设定列目录线程数（命令行和应用都认），用来对比。
 
 ```bash
 uv run spaceknife snapshot list

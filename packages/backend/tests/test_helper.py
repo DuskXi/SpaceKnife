@@ -1,7 +1,8 @@
 """Elevated scan helper (spaceknife.helper): framing, auth, lifecycle, bulk transfer.
 
-Nothing here ever shows a UAC prompt: ``elevate=True`` is only exercised with ShellExecuteEx
-mocked. Helpers run as plain subprocesses; when the test process itself has administrator
+Nothing here ever shows a UAC prompt or polkit's password dialog: ``elevate=True`` is only
+exercised with ShellExecuteEx mocked, or (Linux) with a stand-in ``pkexec`` that runs the helper as
+the same user. Helpers run as plain subprocesses; when the test process itself has administrator
 rights (Windows), they are started with a Safer "normal user" token so that they really are
 unprivileged. MFT parsing is replaced by a synthetic ``spaceknife.scan.mft`` injected into the
 helper process (``BOOT``), so no real volume is read.
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import os
 import re
 import signal
@@ -27,6 +29,7 @@ import pytest
 from pydantic import ValidationError
 
 import spaceknife.helper.client as client_mod
+import spaceknife.helper.launch as launch_mod
 from spaceknife.helper import (
     HelperClient,
     HelperDenied,
@@ -37,7 +40,14 @@ from spaceknife.helper import (
 )
 from spaceknife.helper.auth import new_token, read_token_file, write_token_file
 from spaceknife.helper.client import concat_batches
-from spaceknife.helper.launch import HelperProcess, elevated_params, helper_command
+from spaceknife.helper.launch import (
+    HelperProcess,
+    elevated_params,
+    helper_command,
+    in_appimage,
+    pkexec_error,
+    start_pkexec,
+)
 from spaceknife.helper.messages import (
     HEADER,
     KIND_BINARY,
@@ -370,6 +380,12 @@ def no_uac(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(_win32, "shell_execute", forbidden)
 
 
+@pytest.fixture(autouse=True)
+def no_pkexec(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A test that reached the real pkexec would ask for a password: there is none to find."""
+    monkeypatch.setattr(launch_mod, "PKEXEC_PATHS", ())
+
+
 @pytest.fixture
 async def helper(unprivileged: None) -> AsyncIterator[HelperClient]:
     client = await HelperClient.launch(elevate=False, command=FAKE_COMMAND)
@@ -580,6 +596,32 @@ def test_addresses_are_validated() -> None:
         "",
     ]:
         assert not valid_address(bad), bad
+
+
+@pytest.mark.skipif(
+    IS_WINDOWS, reason="unix socket listener; the pipe listener times out inside the pipe wait"
+)
+async def test_listener_keeps_a_connection_that_races_the_timeout() -> None:
+    import socket
+
+    listener = Listener()
+    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+
+    def connect_then_stall() -> None:
+        client.connect(listener.address)
+        time.sleep(0.2)  # the connection and the accept timeout become due in the same loop iteration
+
+    asyncio.get_running_loop().call_later(0.02, connect_then_stall)
+    try:
+        try:
+            channel = await listener.accept(0.1)
+        except TimeoutError:
+            channel = await listener.accept(2)  # still queued: _accept's next slice picks it up
+        assert channel.peer_pid == os.getpid()
+        channel.close()
+    finally:
+        client.close()
+        listener.close()
 
 
 def test_helper_refuses_bad_arguments(tmp_path: Path) -> None:
@@ -1043,8 +1085,131 @@ def _popen(argv: list[str]) -> HelperProcess:
     return start_subprocess(argv)
 
 
-@pytest.mark.skipif(IS_WINDOWS, reason="POSIX elevation is not implemented yet")
-async def test_posix_elevation_not_supported() -> None:
+# --------------------------------------------------------------------------- pkexec (Linux)
+
+AGENT_MISSING = "Error executing command as another user: No authentication agent found."
+
+
+def test_pkexec_exit_codes() -> None:
+    assert isinstance(pkexec_error(126, []), HelperDenied)
+    agent = pkexec_error(127, [AGENT_MISSING])
+    assert isinstance(agent, HelperUnavailable) and agent.code == "no_agent"
+    refused = pkexec_error(
+        127,
+        ["Error executing command as another user: Not authorized", "", "This incident has been reported."],
+    )
+    assert refused is not None and refused.code == "not_authorized" and "Not authorized" in refused.message
+    assert pkexec_error(0, []) is None and pkexec_error(3, ["x"]) is None  # the helper's own exit codes
+
+
+def test_appimage_cannot_elevate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    assert not in_appimage("/opt/SpaceKnife/resources/backend/spaceknife-backend/spaceknife-backend")
+    assert in_appimage("/tmp/.mount_SpaceKAbC123/resources/backend/spaceknife-backend/spaceknife-backend")
+    monkeypatch.setenv("APPIMAGE", "/home/lenny/Applications/SpaceKnife.AppImage")
+    assert in_appimage("/opt/anything")
+
+
+def test_start_pkexec_refuses_before_asking(monkeypatch: pytest.MonkeyPatch) -> None:
+    argv = [sys.executable, "-I", "-m", "spaceknife.helper"]
+    with pytest.raises(HelperUnavailable) as err:  # no pkexec (the no_pkexec fixture)
+        start_pkexec(argv)
+    assert err.value.code == "not_supported" and "pkexec" in err.value.message
+    monkeypatch.setattr(launch_mod, "PKEXEC_PATHS", ("/usr/bin/pkexec",))
+    monkeypatch.setattr(launch_mod.os, "access", lambda path, mode: True)
+
+    def never(*args: object, **kwargs: object) -> object:
+        raise AssertionError("must refuse before starting pkexec")
+
+    monkeypatch.setattr(launch_mod.subprocess, "Popen", never)
+    monkeypatch.setenv("APPIMAGE", "/home/lenny/Applications/SpaceKnife.AppImage")
+    with pytest.raises(HelperUnavailable) as err:
+        start_pkexec(argv)
+    assert err.value.code == "not_supported" and "AppImage" in err.value.message
+    monkeypatch.delenv("APPIMAGE")
+    with pytest.raises(HelperUnavailable) as err:
+        start_pkexec(["python3", "-m", "spaceknife.helper"])
+    assert err.value.code == "not_supported"  # pkexec needs an absolute path
+
+
+def test_pkexec_command_and_its_stderr(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, Any] = {}
+
+    class FakePopen:
+        pid = 4321
+
+        def __init__(self, argv: list[str], **kwargs: Any) -> None:
+            seen.update(argv=argv, **kwargs)
+            self.stderr = io.BytesIO(f"{AGENT_MISSING}\n".encode())
+
+        def poll(self) -> int | None:
+            return None
+
+        def kill(self) -> None:
+            raise PermissionError(1, "Operation not permitted")  # the helper runs as root by now
+
+    monkeypatch.setattr(launch_mod, "PKEXEC_PATHS", ("/usr/bin/pkexec",))
+    monkeypatch.setattr(launch_mod.os, "access", lambda path, mode: True)
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    monkeypatch.setattr(launch_mod.subprocess, "Popen", FakePopen)
+    argv = [sys.executable, "-I", "-m", "spaceknife.helper", "--pipe", "x"]
+    proc = start_pkexec(argv)
+    assert seen["argv"] == ["/usr/bin/pkexec", *argv]
+    assert seen["start_new_session"] is True  # never pkexec's text prompt on the backend's terminal
+    assert (seen["stdin"], seen["stdout"], seen["stderr"]) == (
+        subprocess.DEVNULL,
+        subprocess.DEVNULL,
+        subprocess.PIPE,
+    )
+    error = proc.exit_error(127)  # type: ignore[attr-defined]
+    assert error is not None and error.code == "no_agent"
+    proc.terminate()  # not ours to kill any more: no error
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="pkexec is Linux's")
+async def test_launch_through_a_stand_in_pkexec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, unprivileged: None
+) -> None:
+    """Everything but polkit is real: the helper starts through "pkexec" (a script that runs it as
+    the same user), connects and authenticates; a dismissed or refused prompt says why."""
+    monkeypatch.setattr(client_mod, "is_elevated", lambda: False)
+    monkeypatch.delenv("APPIMAGE", raising=False)
+    fake = tmp_path / "pkexec"
+    fake.write_text('#!/bin/sh\nexec "$@"\n')
+    fake.chmod(0o755)
+    monkeypatch.setattr(launch_mod, "PKEXEC_PATHS", (str(fake),))
+    client = await HelperClient.launch(elevate=True)
+    try:
+        assert (await client.ping())["pid"] == client.pid
+        with pytest.raises(HelperError) as err:
+            await client.disk_health("sda")
+        assert err.value.code == "needs_admin"  # the stand-in ran it as this user
+    finally:
+        await client.close()
+    for script, kind, code in (
+        ("exit 126", HelperDenied, "denied"),
+        (f"echo '{AGENT_MISSING}' >&2; exit 127", HelperUnavailable, "no_agent"),
+    ):
+        fake.write_text(f"#!/bin/sh\n{script}\n")
+        with pytest.raises(kind) as failed:
+            await HelperClient.launch(elevate=True)
+        assert failed.value.code == code
+
+
+async def test_disk_health_needs_linux_and_admin(helper: HelperClient) -> None:
+    with pytest.raises(HelperError) as err:
+        await helper.disk_health("nvme0n1")
+    assert err.value.code == ("needs_admin" if sys.platform.startswith("linux") else "not_supported")
+    assert not isinstance(err.value, HelperUnavailable)
+    assert (await helper.ping())["pid"] == helper.pid  # still usable
+    for bad in ("../etc/shadow", "sda1", "loop0"):
+        with pytest.raises(HelperError) as err:
+            await helper.disk_health(bad)
+        assert err.value.code == "invalid_request"  # never sent
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS has no elevated helper")
+async def test_mac_elevation_not_supported() -> None:
     if is_elevated():
         pytest.skip("running as root")
     with pytest.raises(HelperUnavailable) as err:

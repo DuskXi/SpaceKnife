@@ -169,6 +169,8 @@ async def run_server(
         "pid": os.getpid(),
         "protocol": PROTOCOL_VERSION,
         "subprotocol": SUBPROTOCOL,
+        # where update files are downloaded: Electron main starts only files from there
+        "updates_dir": str(server.updates.updates_dir),
     }
     if token_generated:
         ready["token"] = config.token

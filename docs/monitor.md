@@ -35,9 +35,11 @@ class Watcher(Protocol):
     name: str  # "rdcw" | "inotify" | "fsevents" | "poll"
 
     def start(self, sink: Callable[[list[Change]], None]) -> None: ...  # 在自己的线程里调用 sink
+    # 已进入树的目录（浅层先）；逐目录监视与轮询要用，递归监视忽略。
+    # mtimes：扫描记下的各目录 mtime（整秒）；since_ns：不晚于这些列目录的时刻（扫描开始），见下面的「补查」
     def add_dirs(
-        self, dirs: Iterable[str]
-    ) -> None: ...  # 已进入树的目录（浅层先）；逐目录监视与轮询要用，递归监视忽略
+        self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0
+    ) -> None: ...
     def stop(self) -> None: ...  # 1 秒内返回，之后不再调用 sink
     def status(self) -> WatchStatus: ...
 
@@ -60,6 +62,7 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 - `sink` 收到的批次至少每 50 ms 一批（有事件时），路径是 `str`（Windows 按 Win32 路径；POSIX 按 `os.fsdecode`，不可解码的字节用 surrogateescape，和扫描一致）。
 - 监视器自己不合并、不去重；但同一批里同一路径重复的 `modified` 可以只留最后一条。
 - 任何时候丢了事件（缓冲区溢出、队列溢出、监视失效），都必须发一条 `overflow`（路径是受影响的最小已知目录），绝不静默丢失。
+- **补查（逐目录监视与轮询）**：目录在父目录的列表里出现之后，隔一会儿（流水线按 tick 交出、监视器排队放）才加上监视；它自己的列目录若在加监视之前，这中间的改动不产生事件。所以 `add_dirs` 带上扫描记下的 mtime 时，目录加上 watch 后（轮询：取基线时）stat 一次，按 `poll.listed_changed` 判断：整秒数和记录不同，或者 mtime 不早于 `since_ns` 减去余量（同一秒里分不清在列目录之前还是之后，按变了算；余量照顾文件时间的精度：一般 50 ms，mtime 是整秒时按只记整秒甚至两秒的文件系统算，2.1 s），就发一条 `dir`，由流水线重新列出这个目录。只看目录的 mtime，所以抓得到这段时间里的新建、删除、改名，抓不到已有文件的原地改写（要等它下次变化或重新扫描）。已经在监视或轮询的目录再次交来（父目录 relist 后行号变了）不再核对；根目录在启动时就已监视，第一次交来时核对一次。
 
 ### 2.1 Windows：`ReadDirectoryChangesExW`（`monitor/win.py`）
 
@@ -73,7 +76,9 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 ### 2.2 Linux：inotify（额度）+ 轮询对账（`monitor/linux.py`）
 
 - 每个目录一个 watch，监视器线程看到新目录（`IN_CREATE`/`IN_MOVED_TO`）就立即加 watch 并列一遍，已有条目报 created（覆盖「mkdir 后立刻写入」和整棵树移入）。
+- `add_dirs` 交来的目录按批排队（`poll.Backlog`：保存调用方的列表本身和每目录 4 B 的 mtime），线程每轮最多放 2048 个；每加上一个 watch 就做上面的补查（多一次 stat）。
 - 额度：进程内所有扫描共享 `max_user_watches` 的 80%（读不到按 8192）；只有父目录有 watch 的目录才分到 watch（浅层先），其余用内嵌的轮询对账，状态 degraded「inotify 监视额度不足，N 个文件夹改为轮询」。
+- 扫描列不出的文件夹（`ACCESS_DENIED`，普通用户扫 `/` 时有几十个，如 `/root`）根本不交过来（§5 第 1 步），所以不占额度、不轮询，也不让状态变成「部分轮询」。路径达到 PATH_MAX（4,096 字节）的文件夹 inotify 按路径加不上（ENAMETOOLONG），交给轮询；轮询像扫描一样分段打开它取 mtime（`worker.open_dir`），这时「部分轮询」是真的。
 - `IN_Q_OVERFLOW`：发 `overflow(root)`，然后逐个校验 watch：过时的删掉、子树清理并重新遍历。根目录的 `IN_DELETE_SELF` / `IN_MOVE_SELF`：`overflow(root)` + `failed`。
 - 文件的 `IN_CLOSE_WRITE` / `IN_ATTRIB` → modified，大小与占用（`st_blocks × 512`）由监视器自己 stat。
 - fanotify（`FAN_MARK_FILESYSTEM`）需要 `CAP_SYS_ADMIN`，等 Linux 提权助手（见 TODO）。网络卷与 WSL 经 9P 挂的 Windows 盘：内核收不到对端的改动，流水线直接改用轮询。
@@ -85,7 +90,7 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 
 ### 2.4 轮询（`monitor/poll.py`）
 
-- 通用兜底：记录每个目录的 mtime，每 `poll_interval`（30 s）秒比对一轮，每秒最多 stat `poll_rate`（2000）个目录、分小批进行（不经 IO 限速器，靠这个速率保持轻量）。mtime 变了 → `dir`；目录消失 → `deleted`（只报最上层）。只能发现目录内容的增删改名，发现不了文件内容的大小变化。状态始终是 degraded（「未使用系统的文件变化通知……」）。
+- 通用兜底：记录每个目录的 mtime，每 `poll_interval`（30 s）秒比对一轮，每秒最多 stat `poll_rate`（2000）个目录、分小批进行（不经 IO 限速器，靠这个速率保持轻量）。mtime 变了 → `dir`；目录消失 → `deleted`（只报最上层）。取基线时有扫描的记录就先补查。只能发现目录内容的增删改名，发现不了文件内容的大小变化。状态始终是 degraded（「未使用系统的文件变化通知……」）。路径达到 PATH_MAX 的文件夹 stat 会报 ENAMETOOLONG，改为分段打开后 `fstat`（以前一直「说不清」，永远发现不了变化）。
 
 ## 3. 提权助手：USN 补偿（Windows，`helper/usn.py`）
 
@@ -111,20 +116,20 @@ def create_watcher(root: str, *, poll_interval: float = 30.0, poll_rate: int = 2
 - `can_relist(store, folder)`：已列出、未 GONE、且没有 `PENDING` 子项（扫描的队列按 id 引用它们）。
 - `compact(store) -> (new_store, remap)`：`GONE` 行超过全表 25% 且多于 10 万行、扫描不在进行时，在计算池里按广度优先重排（重建名字堆），在结构锁下 `adopt`，名字索引重建，视图按 `remap` 换 id。
 
-结构锁（`store/lock.py`）：计算池里的读操作（渲染、汇总、过滤、搜索）在 `STRUCTURE.read()` 下运行；`relist` / `update_stats` / 压缩在事件循环线程上 `async with STRUCTURE.write()`（异步等读者退出，写的过程同步、不 await）。扫描的追加不需要锁。
+结构锁（`store/lock.py`）：计算池里的读操作（渲染、汇总、过滤、搜索）在 `STRUCTURE.read()` 下运行；`relist` / `update_stats` / 压缩在事件循环线程上 `async with STRUCTURE.write()`（异步等读者退出，写的过程同步、不 await）。扫描的追加不需要锁。写者只等它来时已经在跑的读者；这些读者没跑完时新读者照样开始（写者反正进不去），它们跑完后新读者才排到写者后面，所以一个很长的读者（在大盘上建清理方案之类）只耽误改动，不再让所有画面、汇总和别的扫描的视图一起等它，写者也不会被源源不断的短读者饿死。
 
 视图（`view/state.py`）提供 `remap(new_ids, fallback)`：缩放根、选中项、前进/后退历史、小项聚合成员、待闪烁项都换成新 id；指向已删除节点的缩放退回到变化前记下的祖先链里最近的仍存在者。
 
 ## 5. 变化流水线（`spaceknife/server/monitors.py`）
 
-1. **启动**：每个扫描（不含快照）一个 `ScanMonitor`，扫描一开始就启动；监视器在线程里启动，原生监视器一启动就失败 → 轮询。扫描进行中每 0.25 s、扫描结束时立即把新目录交给逐目录监视器（跳过挂载点）。
+1. **启动**：每个扫描（不含快照）一个 `ScanMonitor`，扫描一开始就启动；监视器在线程里启动，原生监视器一启动就失败 → 轮询。扫描进行中每 0.25 s、扫描结束时立即把新目录交给逐目录监视器（inotify、轮询；跳过挂载点和扫描列不出的文件夹：树里没有它们的内容要跟进，inotify 也加不上（EACCES），以前轮询它们只会在 mtime 变了时白白再列一次；它们自己的改名、删除由父目录的监视看到；文件夹等扫描列过之后才交，列之前不知道能不能读，以前提前交出去、后来发现列不出的会一直轮询），连同节点表里各目录的 mtime（Windows 除外：列目录给的目录时间可能来自父目录的索引项，比目录自己的旧；那里递归监视从扫描开始就覆盖整棵树）。`since_ns` 取扫描开始的时刻。
 2. **合并**：安静窗口 `scan.coalesce_ms`（默认 150 ms），持续有事件时最长 1 s 也要处理一次。MFT 扫描读取期间事件全部留到整树就绪后再处理。
-3. **归类**：文件的 `modified` → `update_stats`（硬扫描的树在 Windows 上按硬扫描的占用规则从大小推算：云占位 0、常驻 ≤ 512 B 为 0、其余按簇；占用未知的压缩/稀疏文件 → 重新列出所在目录）；其余 → 所在目录（`renamed` 两边、`dir` 本身）「要重新列出」。路径还没扫描到 → 交给扫描；目录有 `PENDING` 子项 → 延后到扫描读完。
+3. **归类**：文件的 `modified` → `update_stats`（硬扫描的树在 Windows 上按硬扫描的占用规则从大小推算：云占位 0、常驻 ≤ 512 B 为 0、其余按簇；占用未知的压缩/稀疏文件 → 重新列出所在目录）；其余 → 所在目录（`renamed` 两边、`dir` 本身）「要重新列出」。路径还没扫描到 → 交给扫描；目录有 `PENDING` 子项 → 延后到扫描读完；落在扫描列不出的文件夹里（递归监视器 FSEvents、`ReadDirectoryChangesW` 会报来）→ 不去打开它：macOS 的受保护位置一打开就弹授权，其余的本来就列不出。
 4. **溢出**：有 USN 检查点 → 按日志补列被动过的目录；否则子树标脏。**事件风暴**（一个窗口里要列的目录 > 2000 或事件 > 20000）→ 公共祖先标脏。标脏的子树安静 2 秒后逐目录重新列出（新目录增量扫描）。
 5. **应用**：列目录用扫描的同一套代码（原生或纯 Python，只列一层），扫描进行中经它的 IO 限速器；深的目录先 `relist`（祖先的 relist 会把它的新区间一起带走）；之后新目录增量扫描。
 6. **推送**：变化项（新 id）与占用差交给视图（`ViewManager.flash`），视图把它们映射到当前帧的行（块本身、所在聚合块或最近的已绘祖先），随下一帧的 `FrameInfo.flash` 下发；前端闪两次后淡出，「减少动画」时画静态角标（UI-TM-43/44）。可用空间最多每秒重读一次（UI-MAIN-63）。
-7. **状态**：`ScanStatus.monitor`（`MonitorStatus`：state、detail、watcher、监视/轮询目录数、事件数、已应用变化数、溢出、待处理、最近一次耗时）。状态栏「实时监控中 / 部分轮询 / 失败 / 已关闭」，点击开关 `scan.monitor`（UI-MAIN-49/52、UI-W1-12）。
-8. **F5 与继续扫描**：`scan.rescan(node)` 把一个文件夹连同子树重新读一遍（实时监控关闭时由不带监视器的被动监控执行）；`scan.continue` 让已停止的硬扫描接着读它队列里剩下的文件夹。
+7. **状态**：`ScanStatus.monitor`（`MonitorStatus`：state、detail、watcher、监视/轮询目录数、事件数、已应用变化数、溢出、待处理、最近一次耗时）。状态栏「实时监控中 / 部分轮询 / 失败 / 已关闭」，点击开关 `scan.monitor`（UI-MAIN-49/52、UI-W1-12）。各平台一样：根目录一加上监视就是 running，扫描进行中也是；逐目录监视器还没给某个文件夹加上监视之前，那里的改动由补查兜住（§2）。
+8. **F5 与继续扫描**：`scan.rescan(node)` 把一个文件夹连同子树重新读一遍（实时监控关闭时由不带监视器的被动监控执行）。以前列不出、现在能列的文件夹（权限改了：chmod 不改 mtime，也没有它自己的事件，只能靠这里）列出后去掉 `ACCESS_DENIED`，交给逐目录监视器，之后和别的文件夹一样监视；`scan.continue` 让已停止的硬扫描接着读它队列里剩下的文件夹。
 
 ## 6. 验收（来自 PLAN M5）
 

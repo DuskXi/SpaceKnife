@@ -34,8 +34,8 @@ ELECTRON_CATALOG = ELECTRON / "renderer" / "src" / "locales" / "en"
 CJK = re.compile(r"[\u3400-\u9fff\uff01-\uff60\u3000-\u303f]")
 WRAPPERS = {"_", "tr"}
 TABLES = {"Texts"}
-# definitions whose texts are translated where they are shown (settings meta, palette, …)
-REGISTERED = {"S", "C", "_c", "BuiltinInfo", "_Option"}
+# definitions whose texts are translated where they are shown (settings meta, palette, visual.list, …)
+REGISTERED = {"S", "C", "_c", "BuiltinInfo", "_Option", "Visualization"}
 IGNORE = re.compile(r"#\s*i18n:\s*ignore\s*$")
 
 
@@ -227,6 +227,8 @@ def main() -> int:
         found = scan_electron()
         if found is None:
             print("electron: skipped (needs node and apps/electron/node_modules)")
+            if args.area == "electron":  # asked for by name (CI): not checking is a failure
+                bad += 1
         else:
             ids, problems = found
             ids = {k: v for k, v in ids.items() if not only or any((ROOT / f).resolve() in only for f in v)}

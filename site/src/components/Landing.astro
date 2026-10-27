@@ -1,9 +1,16 @@
 ---
 // The landing page, in either language. Text: src/i18n/content.ts; downloads: the newest GitHub
-// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.py).
+// release (src/data/release.ts); screenshots: docs/images (mock data, tools/demo/screenshots.py);
+// the three visualizations: src/assets/visualizations (tools/demo/screenshots.py --views).
 import { getImage, Picture } from "astro:assets";
 
 import { icons } from "../../../design/build/icons";
+import viewFlameEn from "../assets/visualizations/flame-en.webp";
+import viewFlameZh from "../assets/visualizations/flame.webp";
+import viewPolarEn from "../assets/visualizations/polar-en.webp";
+import viewPolarZh from "../assets/visualizations/polar.webp";
+import viewTreemapEn from "../assets/visualizations/treemap-en.webp";
+import viewTreemapZh from "../assets/visualizations/treemap.webp";
 import compareEn from "../../../docs/images/compare-en.png";
 import compareZh from "../../../docs/images/compare.png";
 import filterEn from "../../../docs/images/filter-en.png";
@@ -34,6 +41,12 @@ const SHOTS = {
   en: { treemap: treemapEn, filter: filterEn, compare: compareEn, palette: paletteEn },
   zh: { treemap: treemapZh, filter: filterZh, compare: compareZh, palette: paletteZh },
 }[c.lang];
+const VIEWS = {
+  en: { treemap: viewTreemapEn, flame: viewFlameEn, polar: viewPolarEn },
+  zh: { treemap: viewTreemapZh, flame: viewFlameZh, polar: viewPolarZh },
+}[c.lang];
+const VIEW_ICONS = { treemap: "vizTreemap", flame: "vizFlame", polar: "vizFlamePolar" } as const;
+const docs = `${base}${c.lang === "en" ? "" : "zh/"}docs/`;
 // stable, optimized copies for the structured data
 const shotUrls = await Promise.all(
   c.shots.map(async (s) => `${site}${(await getImage({ src: SHOTS[s.id], format: "webp", width: 1440 })).src}`),
@@ -45,8 +58,11 @@ const jsonLd = structuredData(c, release, pageUrl, shotUrls, `${site}${base}og-$
 
 const icon = (name: string) => (icons as Record<string, string>)[name] ?? "";
 const win = release.assets.windows;
-const kinds: Exclude<AssetKind, "sums">[] = ["windows", "deb", "rpm", "appimage"];
-const kindIcon: Record<string, string> = { windows: "drive", deb: "terminal", rpm: "terminal", appimage: "layers" };
+const kinds: Exclude<AssetKind, "sums">[] = ["windows", "portableWin", "macArm64", "macX64", "deb", "rpm", "appimage", "portableLinux"];
+const kindIcon: Record<string, string> = { windows: "drive", portableWin: "folder", macArm64: "command", macX64: "command", deb: "terminal", rpm: "terminal", appimage: "layers", portableLinux: "folder" };
+// macOS dmgs are attached to a release later than the other installers: until then a Mac visitor
+// gets the generic button and the "not yet" note
+const hasMac = Boolean(release.assets.macArm64 || release.assets.macX64);
 
 // a faint treemap behind the hero (squarified, fixed sizes: the same picture on every build)
 interface Rect { x: number; y: number; w: number; h: number; tone: number }
@@ -96,6 +112,7 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
         <a href="#screenshots">{c.nav.screenshots}</a>
         <a href="#download">{c.nav.download}</a>
         <a href="#faq">{c.nav.faq}</a>
+        <a href={c.lang === "en" ? `${base}docs/` : `${base}zh/docs/`}>{c.nav.docs}</a>
       </nav>
       <div class="nav-actions">
         <a class="lang" href={other} hreflang={c.lang === "en" ? "zh-CN" : "en"} lang={c.lang === "en" ? "zh-CN" : "en"}>{c.nav.switchTo}</a>
@@ -126,7 +143,7 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
           <span class="grad">{c.hero.h1b}</span>
         </h1>
         <p class="sub">{c.hero.sub}</p>
-        <div class="cta">
+        <div class="cta" data-mac={hasMac ? "yes" : "no"}>
           {win && (
             <a class="btn primary cta-windows" href={win.url}>
               <svg viewBox="0 0 16 16" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10" /></svg>
@@ -135,15 +152,16 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
             </a>
           )}
           <a class="btn primary cta-linux" href="#download">{c.hero.ctaLinux}</a>
+          {hasMac && <a class="btn primary cta-mac" href="#download">{c.hero.ctaMac}</a>}
           <a class="btn primary cta-other" href="#download">{c.hero.ctaOther}</a>
           <a class="btn ghost" href={REPO_URL} rel="noopener">{c.hero.ctaGithub}</a>
         </div>
         <p class="hero-meta">{c.hero.meta}</p>
-        <p class="hero-mac">{c.download.mac}</p>
+        <p class="hero-mac">{hasMac ? c.download.mac : c.download.macNone}</p>
       </div>
       <div class="wrap shot-hero">
         <figure class="window tilt">
-          <video class="demo" src={demo} poster={poster} width="1280" height="776" muted loop playsinline preload="metadata" aria-label={c.hero.shotAlt}></video>
+          <video class="demo" src={demo} poster={poster} width="1280" height="776" muted loop playsinline preload="metadata" aria-label={c.hero.demoAlt}></video>
         </figure>
         <p class="note">{c.mockNote}</p>
       </div>
@@ -172,6 +190,32 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
           </li>
         ))}
       </ul>
+    </section>
+
+    <section id="views" class="wrap section">
+      <h2>{c.viewsTitle}</h2>
+      <p class="section-sub">{c.viewsSub}</p>
+      <!-- wide: the cards pick the one picture shown under them; narrow: each card above its picture -->
+      <div class="views" data-active={c.views[0]!.id}>
+        {c.views.map((v, i) => (
+          <Fragment>
+            <button type="button" class="view-card" style={`--col: ${i + 1}`} data-view={v.id} aria-pressed={i === 0 ? "true" : "false"} aria-controls={`view-${v.id}`}>
+              <span class="view-head">
+                <span class="feature-icon" set:html={`<svg viewBox="0 0 16 16" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icon(VIEW_ICONS[v.id])}</svg>`} />
+                <span>
+                  <span class="view-name">{v.name}</span>
+                  <span class="view-tag">{v.tag}</span>
+                </span>
+              </span>
+              <span class="view-body">{v.body}</span>
+            </button>
+            <figure class="window view-shot" id={`view-${v.id}`} data-view={v.id}>
+              <Picture src={VIEWS[v.id]} formats={["avif", "webp"]} fallbackFormat="webp" widths={[720, 1080, 1440, 1800]} sizes="(min-width: 1240px) 1152px, 96vw" alt={v.alt} loading="lazy" />
+            </figure>
+          </Fragment>
+        ))}
+      </div>
+      <p class="views-more"><a href={`${docs}visualizations/`}>{c.viewsMore} →</a></p>
     </section>
 
     <section id="screenshots" class="wrap section">
@@ -248,7 +292,7 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
         <a href={release.url} rel="noopener">{c.download.allReleases}</a>
         {release.assets.sums && <> · <a href={release.assets.sums.url}>{c.download.checksums}</a></>}
         {" · "}
-        {c.download.mac}
+        {hasMac ? c.download.mac : c.download.macNone}
       </p>
     </section>
 
@@ -291,6 +335,16 @@ squarify([34, 21, 18, 13, 11, 9, 8, 7, 6, 5, 5, 4, 4, 3, 3, 2, 2, 2, 1, 1, 1], 0
     if (demo) {
       if (matchMedia("(prefers-reduced-motion: reduce)").matches) demo.controls = true;
       else void demo.play().catch(() => (demo.controls = true));
+    }
+    // the three visualizations: a card shows its picture (wide screens show one at a time)
+    for (const views of document.querySelectorAll<HTMLElement>(".views")) {
+      const cards = [...views.querySelectorAll<HTMLButtonElement>(".view-card")];
+      for (const card of cards) {
+        card.addEventListener("click", () => {
+          views.dataset.active = card.dataset.view;
+          for (const c of cards) c.setAttribute("aria-pressed", String(c === card));
+        });
+      }
     }
     for (const b of document.querySelectorAll<HTMLButtonElement>("button.copy")) {
       b.addEventListener("click", async () => {

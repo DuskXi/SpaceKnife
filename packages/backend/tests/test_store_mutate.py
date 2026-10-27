@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -10,6 +11,7 @@ import numpy as np
 import pytest
 
 from spaceknife.scan import worker
+from spaceknife.scan.scanner import Scanner, ScanState
 from spaceknife.scan.worker import RootOptions, SliceOptions
 from spaceknife.store import mutate
 from spaceknife.store.nodes import ENTRY_COLUMNS, Flag, Kind, NodeStore
@@ -194,3 +196,74 @@ def test_a_vanished_root_lists_empty(tree: tuple[Path, NodeStore]) -> None:
     assert all(int(store.cols[k][1]) == 0 for k in mutate.TOTALS)
     assert all(int(store.cols[k][0]) == 0 for k in mutate.TOTALS[:3])
     check_structure(store)
+
+
+# ------------------------------------------------------------------ folders deleted while being read
+
+
+def gone_tree(tmp_path: Path) -> Path:
+    root = tmp_path / "r"
+    (root / "gone" / "a" / "b").mkdir(parents=True)
+    (root / "gone" / "a" / "b" / "f.bin").write_bytes(b"x" * 100)
+    (root / "gone" / "a" / "g.txt").write_bytes(b"y" * 10)
+    (root / "keep").mkdir()
+    (root / "keep" / "k.txt").write_bytes(b"z" * 10)
+    return root
+
+
+def test_listings_of_folders_deleted_meanwhile_are_skipped(tmp_path: Path) -> None:
+    """A worker reads a/ while a/ still waits in the queue; then gone/ is deleted and the monitor
+    relists the root, which marks gone/'s subtree GONE. The stale listing of a/ (and of b/ inside
+    it) is skipped instead of failing with "not a directory"."""
+    root = gone_tree(tmp_path)
+    store = NodeStore()
+    node = store.add_root(str(root))
+
+    def one_level(task: worker.Task) -> list[worker.Task]:
+        res = worker.scan_slice([task], opts(root, budget=0.0))
+        starts = store.ingest_slice(
+            res.refs, res.bounds, res.name_blob, res.name_lens, cols(res), ext_ids(store, res)
+        ).tolist()
+        return [((0, a if k == 0 else starts[a] + b, 0), p, i) for (k, a, b), p, i in res.frontier]
+
+    queued = one_level(((0, node, 0), str(root), 0))
+    one_level(next(t for t in queued if t[1].endswith("keep")))
+    (a_task,) = one_level(next(t for t in queued if t[1].endswith("gone")))
+    stale = worker.scan_slice([a_task], opts(root))  # a/ and b/ inside it, in one slice
+    assert len(stale.refs) == 2
+    shutil.rmtree(root / "gone")
+    assert mutate.can_relist(store, node)  # the monitor may relist the root: no child is pending
+    relist_path(store, root, node)
+    size = len(store)
+    starts = store.ingest_slice(
+        stale.refs, stale.bounds, stale.name_blob, stale.name_lens, cols(stale), ext_ids(store, stale)
+    )
+    assert starts.tolist() == [-1, -1] and len(store) == size
+    assert facts(store) == facts(scan(root))
+
+
+def test_scanner_finishes_when_queued_folders_are_deleted(tmp_path: Path) -> None:
+    """The same race through Scanner._apply: the stale result's pending folders and errors are
+    dropped, nothing of the deleted subtree is queued, and the scan completes."""
+    root = gone_tree(tmp_path)
+    scanner = Scanner([str(root)], budget_s=0.0)
+    store = scanner.store
+    root_opts = SliceOptions(roots=scanner._root_opts, budget_s=0.0)
+    scanner._apply(worker.scan_slice([scanner._queue.popleft()], root_opts))
+    for name in ("keep", "gone"):
+        task = next(t for t in scanner._queue if t[1].endswith(name))
+        scanner._queue.remove(task)
+        scanner._apply(worker.scan_slice([task], root_opts))
+    a_task = next(t for t in scanner._queue if t[1].endswith(os.path.join("gone", "a")))
+    scanner._queue.remove(a_task)
+    stale = worker.scan_slice([a_task], SliceOptions(roots=scanner._root_opts, budget_s=0.0))
+    shutil.rmtree(root / "gone")
+    assert mutate.can_relist(store, scanner.roots[0].node)
+    relist_path(store, root, scanner.roots[0].node)
+    scanner._apply(stale)  # b/ was its pending subfolder: not queued, no error
+    assert all("gone" not in path for _, path, _ in scanner._queue)
+    result = asyncio.run(scanner.run())
+    assert result.state == ScanState.DONE
+    fresh = Scanner([str(root)])  # same options (cluster size, resident files) as the scanner above
+    asyncio.run(fresh.run())
+    assert facts(store) == facts(fresh.store)

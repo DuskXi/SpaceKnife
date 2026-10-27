@@ -14,7 +14,9 @@ from pydantic import Field
 from .base import Params, Payload
 from .filter import FilterClassInfo
 
-SettingCategory = Literal["general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced"]
+SettingCategory = Literal[
+    "general", "appearance", "treemap", "scan", "classes", "tags", "keys", "advanced", "about"
+]
 SettingControl = Literal["switch", "segmented", "number", "slider", "color", "text"]
 SettingApplies = Literal["now", "next_scan", "new_views"]
 SettingValue = bool | int | float | str

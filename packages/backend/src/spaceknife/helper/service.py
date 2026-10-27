@@ -39,6 +39,7 @@ from .messages import (
     USN_LAYOUT,
     USN_STREAM,
     Begin,
+    DiskHealth,
     Error,
     ErrorCode,
     FrameError,
@@ -165,6 +166,8 @@ class Service:
                 result, extras = self._read_usn(request.id, call)
             elif isinstance(call, ScanMft):
                 result, extras = self._scan_mft(request.id, call)
+            elif isinstance(call, DiskHealth):
+                result = dict(self._disk_health(call))
             else:
                 result, extras = self._scan_mft_image(request.id, call)
         except OpError as exc:
@@ -203,6 +206,22 @@ class Service:
         if self._elevated:
             raise OpError("forbidden", _("scan_mft_image 只在非提权助手中可用"))
         return self._scan(req_id, "scan_volume_image", call.path, call.batch_rows, call.duty)
+
+    def _disk_health(self, call: DiskHealth) -> dict[str, str]:
+        """The raw health pages of a Linux disk (``disks.passthrough``): NVMe log 02h, or ATA
+        IDENTIFY and the Device Statistics pages, as hex."""
+        if not sys.platform.startswith("linux"):
+            raise OpError("not_supported", _("助手只在 Linux 上读取磁盘自己的健康记录"))
+        if not self._elevated:
+            raise OpError("needs_admin", _("需要管理员权限"))
+        from ..disks import passthrough
+
+        try:
+            return passthrough.read_record(call.disk)
+        except passthrough.PassthroughError as exc:
+            raise OpError("not_supported", exc.message) from exc
+        except (OSError, ValueError) as exc:
+            raise OpError("io_error", tr("读取 {disk} 失败：{reason}", disk=call.disk, reason=exc)) from exc
 
     def _usn_volume(self, volume: str) -> str:
         """``X:`` of a local NTFS volume whose journal the (elevated) helper may read."""

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 from .base import Empty, EmptyResult
-from .classes import ClassesEvent, ClassesState, ClassesUpdateParams
+from .classes import ClassesEvent, ClassesFolderParams, ClassesState, ClassesUpdateParams
 from .compare import (
     CompareIdParams,
     CompareInfo,
@@ -28,6 +28,7 @@ from .compare import (
 from .export import ExportCheckParams, ExportCheckResult, ExportRunParams, ExportRunResult, ExportTargets
 from .filter import FilterParse, FilterParseParams, FilterVocab
 from .io import IoStatusEvent, IoStatusList
+from .machine import MachineDisks, ReadHealthParams, ReadHealthResult
 from .ops import (
     BasketAddParams,
     BasketAddResult,
@@ -42,7 +43,9 @@ from .ops import (
     PathFormsParams,
 )
 from .palette import (
+    PaletteCheckParams,
     PaletteClearParams,
+    PaletteCommand,
     PaletteCommandList,
     PalettePaths,
     PalettePathsParams,
@@ -96,6 +99,7 @@ from .streams import (
     UnsubscribeParams,
 )
 from .system import PingParams, PingResult, ShutdownResult, SystemInfo
+from .update import UpdateChangedEvent, UpdateMuteParams, UpdateReleases, UpdateStatus, UpdateVersionParams
 from .view import (
     ViewFilterParams,
     ViewFrameEvent,
@@ -111,6 +115,7 @@ from .view import (
     ViewTagParams,
     ViewUpdate,
     ViewZoomParams,
+    VisualListResult,
 )
 
 
@@ -267,6 +272,12 @@ PALETTE_QUERY = MethodSpec(
     PaletteResult,
     "Commands, recents and direct items for the palette input.",
 )
+PALETTE_CHECK = MethodSpec(
+    "palette.check",
+    PaletteCheckParams,
+    PaletteCommand,
+    "One command's state where the user is (a keyboard shortcut runs it only when it is enabled).",
+)
 PALETTE_PATHS = MethodSpec(
     "palette.paths",
     PalettePathsParams,
@@ -296,6 +307,12 @@ VIEW_RESULTS = MethodSpec(
     ViewResultsParams,
     ViewResults,
     "A page of the filter result list, grouped by visible block.",
+)
+VISUAL_LIST = MethodSpec(
+    "visual.list",
+    Empty,
+    VisualListResult,
+    "Visualizations this server offers and whether this session can show each.",
 )
 
 CANCEL = NotificationSpec("$/cancel", CancelParams, "Cancel an in-flight request (answered with -32800).")
@@ -368,6 +385,12 @@ CLASSES_UPDATE = MethodSpec(
     "Replace the file class table (order = colour precedence); views recolour and filters re-run.",
 )
 CLASSES_RESET = MethodSpec("classes.reset", Empty, ClassesState, "Back to the built-in file classes.")
+CLASSES_FOLDER = MethodSpec(
+    "classes.folder",
+    ClassesFolderParams,
+    ClassesState,
+    "Choose the class of a folder's files (empty: by extension only), or forget the choice (UI-W7-38).",
+)
 EXPORT_TARGETS = MethodSpec(
     "export.targets", Empty, ExportTargets, "Built-in export templates and formats (W4 「导出报告…」)."
 )
@@ -403,16 +426,73 @@ TAGS_CLEAR_SAVED = MethodSpec(
     "tags.clear_saved", Empty, MaintenanceInfo, "Forget every remembered tag (all scan roots)."
 )
 
+UPDATE_STATUS = MethodSpec(
+    "update.status", Empty, UpdateStatus, "What the last update check found (updates.v1)."
+)
+UPDATE_CHECK = MethodSpec(
+    "update.check", Empty, UpdateStatus, "Check the GitHub releases now (also when automatic checks are off)."
+)
+UPDATE_DISMISS = MethodSpec(
+    "update.dismiss", UpdateVersionParams, UpdateStatus, "The card / dialog for this version was closed."
+)
+UPDATE_MUTE = MethodSpec(
+    "update.mute",
+    UpdateMuteParams,
+    UpdateStatus,
+    "Turn the prompts of a series (UpdateStatus.series) off or back on: no card, dialog, badge or automatic"
+    " download for its releases.",
+)
+UPDATE_DOWNLOAD = MethodSpec(
+    "update.download",
+    UpdateVersionParams,
+    UpdateStatus,
+    "Download this version's file for this install into the updates folder (progress: update.changed).",
+)
+UPDATE_CANCEL = MethodSpec("update.cancel", Empty, UpdateStatus, "Stop a running download.")
+UPDATE_RELEASES = MethodSpec(
+    "update.releases",
+    Empty,
+    UpdateReleases,
+    "The recent releases with their notes (the timeline of the About & updates page).",
+)
+MACHINE_DISKS = MethodSpec(
+    "machine.disks",
+    Empty,
+    MachineDisks,
+    "This computer's disks with their links, the volumes on each and what scans tell of each volume.",
+)
+MACHINE_READ_HEALTH = MethodSpec(
+    "machine.read_health",
+    ReadHealthParams,
+    ReadHealthResult,
+    "Read the disks' own records that need administrator rights (Linux: the elevated helper, behind "
+    "polkit's password prompt). Only when the user asks; the answer is the whole page again.",
+)
+EVENT_UPDATE = EventSpec(
+    "update.changed",
+    UpdateChangedEvent,
+    "Update check result or download progress (sessions with updates.v1).",
+)
+
 METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
     spec.name: spec
     for spec in (
         SESSION_HELLO,
         SYSTEM_INFO,
+        UPDATE_STATUS,
+        UPDATE_CHECK,
+        UPDATE_DISMISS,
+        UPDATE_MUTE,
+        UPDATE_DOWNLOAD,
+        UPDATE_RELEASES,
+        UPDATE_CANCEL,
         SYSTEM_PING,
         APP_SHUTDOWN,
         SUBSCRIBE,
         UNSUBSCRIBE,
         VOLUME_LIST,
+        MACHINE_DISKS,
+        MACHINE_READ_HEALTH,
         SCAN_CHECK_PATHS,
         SCAN_START,
         SCAN_CANCEL,
@@ -450,11 +530,13 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         VIEW_TAG,
         VIEW_REVEAL,
         VIEW_RESULTS,
+        VISUAL_LIST,
         SETTINGS_GET,
         SETTINGS_UPDATE,
         SETTINGS_RESET,
         PALETTE_COMMANDS,
         PALETTE_QUERY,
+        PALETTE_CHECK,
         PALETTE_PATHS,
         PALETTE_PREVIEW,
         PALETTE_REMEMBER,
@@ -476,6 +558,7 @@ METHODS: dict[str, MethodSpec[BaseModel, BaseModel]] = {
         CLASSES_GET,
         CLASSES_UPDATE,
         CLASSES_RESET,
+        CLASSES_FOLDER,
         EXPORT_TARGETS,
         EXPORT_CHECK,
         EXPORT_RUN,
@@ -518,5 +601,6 @@ EVENTS: dict[str, EventSpec[BaseModel]] = {
         EVENT_OPS_PROGRESS,
         EVENT_COMPARE_PROGRESS,
         EVENT_CLASSES,
+        EVENT_UPDATE,
     )
 }

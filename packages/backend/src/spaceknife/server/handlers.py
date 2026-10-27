@@ -15,6 +15,7 @@ from spaceknife_protocol.methods import APP_SHUTDOWN, SUBSCRIBE, SYSTEM_INFO, SY
 from spaceknife_protocol.streams import TOPIC_LOG, SubscribeParams, SubscribeResult, UnsubscribeParams
 from spaceknife_protocol.system import PingParams, PingResult, PlatformInfo, ShutdownResult, SystemInfo
 
+from ..privacy import full_disk_access
 from .rpc import RpcError
 from .topics import log_topic
 
@@ -29,6 +30,7 @@ def install(server: Server) -> None:
     from .diag import install as install_diag
     from .export_handlers import install as install_export_handlers
     from .filter_handlers import install as install_filter_handlers
+    from .machine_handlers import install as install_machine_handlers
     from .maintenance_handlers import install as install_maintenance_handlers
     from .ops_handlers import install as install_ops_handlers
     from .palette_handlers import install as install_palette_handlers
@@ -48,6 +50,7 @@ def install(server: Server) -> None:
     install_ops_handlers(server)
     install_export_handlers(server)
     install_maintenance_handlers(server)
+    install_machine_handlers(server)
     install_diag(server)
 
     @router.method(SYSTEM_INFO)
@@ -60,6 +63,7 @@ def install(server: Server) -> None:
                 system=platform.system(), release=platform.release(), machine=platform.machine()
             ),
             sessions=len(server.sessions),
+            full_disk_access=await asyncio.to_thread(full_disk_access),
         )
 
     @router.method(SYSTEM_PING)

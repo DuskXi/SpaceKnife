@@ -33,17 +33,13 @@ import numpy as np
 import typer
 from loguru import logger
 from rich.console import Console
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
 from rich.text import Text
 
 from . import fmt
 from .cli_scan import apply_language
-from .export import BUILTIN_INFO, FORMATS, ExportError, ExportFormat, export_chunks, resolve, write_export
-from .export.template import ExportTree, Ordering
-from .i18n import Texts, tr
+from .i18n import Texts, plural, tr
 from .scan.scanner import ScanError, Scanner, ScanProgress, ScanState, native_slicer, native_threads
-from .store import snapshot
 from .store.nodes import NodeStore
 
 # User-facing text of this module, translated when read (M7.5).
@@ -80,7 +76,9 @@ TEXT = Texts(
         "col_name": "名称",
         "col_disk": "占用",
         "col_share": "占比",
-        "view_total": "共 {files} 个文件、{folders} 个文件夹，占用 {size}",
+        "view_total": "共 {files}、{folders}，占用 {size}",  # the counts: view_files, view_folders
+        "view_files": "{files} 个文件",
+        "view_folders": "{folders} 个文件夹",
         "view_filter": "过滤 {expr}",
         "rest": "…其余 {count} 项",
     }
@@ -365,8 +363,10 @@ class Runner:
         self.views: list[View] = []
         self.autoclose = False
 
-    def say(self, key: str, style: str = "", **kw: object) -> None:
-        self.err.print(Text(TEXT[key].format(**kw), style=style))
+    def say(self, key: str, style: str = "", *, n: int | None = None, one: str = "", **kw: object) -> None:
+        """Print ``TEXT[key]`` filled in; with a count ``n``, English says ``one`` for a single thing."""
+        text = TEXT[key].format(**kw) if n is None else plural(n, TEXT.raw(key), one, **kw)
+        self.err.print(Text(text, style=style))
 
     def run(self, commands: Sequence[Command]) -> int:
         for cmd in commands:
@@ -405,13 +405,22 @@ class Runner:
         self.say(
             "scanned",
             MUTED,
+            n=result.items,
+            one="Scanned {paths}: 1 item, {size} on disk, in {time}",
             paths="; ".join(roots),
             items=fmt.count(result.items),
             size=fmt.size(result.bytes_alloc),
             time=fmt.duration(result.elapsed_s),
         )
         if result.errors:
-            self.say("denied", WARN, count=result.errors, example=result.denied[0] if result.denied else "")
+            self.say(
+                "denied",
+                WARN,
+                n=result.errors,
+                one="1 folder couldn't be accessed, e.g. {example}",
+                count=result.errors,
+                example=result.denied[0] if result.denied else "",
+            )
         stats = {
             "items": result.items,
             "files": result.files,
@@ -431,6 +440,8 @@ class Runner:
         self.views.append(View(f"scan {arg}", scanner.store, roots, volumes, stats))
 
     async def _scan(self, paths: list[str]) -> tuple[Scanner, ScanProgress]:
+        from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
         slicer = None if os.environ.get("SPACEKNIFE_NO_NATIVE") else native_slicer()
         threads = min(SCAN_THREADS, native_threads()) if slicer is not None else 1
         pool = (
@@ -470,6 +481,8 @@ class Runner:
                 pool.shutdown(wait=False, cancel_futures=True)
 
     def cmd_load(self, arg: str) -> None:
+        from .store import snapshot  # pydantic: loaded with the first command that needs it
+
         paths = _split_paths(arg, folder=False)
         if len(paths) > 1:
             raise CommandFailed(TEXT["load_many"])
@@ -482,11 +495,14 @@ class Runner:
             raise CommandFailed(TEXT["load_failed"].format(path=path, reason=exc)) from exc
         except OSError as exc:
             raise CommandFailed(TEXT["load_failed"].format(path=path, reason=exc.strerror or exc)) from exc
+        items = header.node_count - 1
         self.say(
             "loaded",
             MUTED,
+            n=items,
+            one="Opened snapshot {path}: 1 item, {size} on disk",
             path=path,
-            items=fmt.count(header.node_count - 1),
+            items=fmt.count(items),
             size=fmt.size(int(store.cols["tot_alloc"][0])),
         )
         view = View(f"load {arg}", store, list(header.roots), list(header.volumes), dict(header.stats))
@@ -512,9 +528,19 @@ class Runner:
         found = evaluate(view.store, result.normal, FilterContext.current())
         view.match, view.filter_text = found.match, expr
         count, alloc, _ = found.totals(0)
-        self.say("filtered", MUTED, expr=expr, count=fmt.count(count), size=fmt.size(alloc))
+        self.say(
+            "filtered",
+            MUTED,
+            n=count,
+            one="Filter {expr}: 1 file, {size} on disk",
+            expr=expr,
+            count=fmt.count(count),
+            size=fmt.size(alloc),
+        )
 
     def cmd_save(self, arg: str) -> None:
+        from .store import snapshot
+
         view = self.view
         path = Path(os.path.expanduser(arg))
         try:
@@ -532,6 +558,8 @@ class Runner:
         self.say("saved", MUTED, path=path, size=fmt.size(size))
 
     def cmd_export(self, name: str, arg: str) -> None:
+        from .export import ExportError, ExportFormat, export_chunks, resolve, write_export
+
         view = self.view
         try:
             target = resolve(name)
@@ -569,6 +597,8 @@ class Runner:
         self.out.print(Text(TEXT["view_title"].format(index=index, label=view.label), style="bold"))
         if view.filter_text:
             self.out.print(Text(TEXT["view_filter"].format(expr=view.filter_text), style=MUTED))
+        from .export.template import ExportTree, Ordering
+
         order = Ordering(blocks="mixed", sort="size", descending=True)
         for root in view.store.roots():
             tree = ExportTree(view.store, root, match=view.match, ordering=order)
@@ -592,13 +622,17 @@ class Runner:
                 table.add_row(Text(label, style=MUTED), fmt.size(rest), f"{share * 100:.1f}%")
             self.out.print(table)
             line = TEXT["view_total"].format(
-                files=fmt.count(files), folders=fmt.count(folders), size=fmt.size(total)
+                files=plural(files, TEXT.raw("view_files"), "1 file", files=fmt.count(files)),
+                folders=plural(folders, TEXT.raw("view_folders"), "1 folder", folders=fmt.count(folders)),
+                size=fmt.size(total),
             )
             self.out.print(Text(line, style=MUTED))
         self.out.print()
 
 
 def help_text() -> str:
+    from .export import BUILTIN_INFO, FORMATS  # loaded when used: not part of every command's start-up
+
     return tr(
         """spaceknife run <命令序列>
 
@@ -665,8 +699,9 @@ def run(ctx: typer.Context) -> None:
 
     setup_logging("WARNING", LogFormat.RICH)
     apply_language()
-    from . import classes
+    from . import classes, pathclass
 
     classes.load_user()  # the user's file classes (W7) also apply to :class: here
+    pathclass.load_user()  # and their folder choices
     tokens = list(ctx.args)
     raise typer.Exit(main(tokens, raw=windows_command_tail(tokens)))

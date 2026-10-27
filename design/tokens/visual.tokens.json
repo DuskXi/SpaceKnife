@@ -1,0 +1,224 @@
+{
+  "$description": "可视化（树图、火焰图、火焰-极坐标图）共用的配色与分区布局的几何常量。几何常量后端各写一份（layout/flame.py、layout/flame_polar.py），测试核对两边相同。",
+  "visual": {
+    "branch": {
+      "$type": "color",
+      "$description": "「顶层分支」配色：槽位 1–8 各一个色相（OKLCH 色相大致等距，避开闪烁黄与强调色；相邻槽位色相相差较大），档位取 min(depth, 4)：第 1 档淡色，第 2 档最饱和，第 3–4 档逐级变暗（第 2、4 档两套主题同值）；每档配白字或深字对比度都 ≥ 4.5:1。待设计评审与色盲检查",
+      "1": {
+        "1": {
+          "$value": "#9EDBF9"
+        },
+        "2": {
+          "$value": "#0BB4EC"
+        },
+        "3": {
+          "$value": "#067398"
+        },
+        "4": {
+          "$value": "#024F6A"
+        }
+      },
+      "2": {
+        "1": {
+          "$value": "#F8C5A2"
+        },
+        "2": {
+          "$value": "#EB883B"
+        },
+        "3": {
+          "$value": "#9C5313"
+        },
+        "4": {
+          "$value": "#6A3913"
+        }
+      },
+      "3": {
+        "1": {
+          "$value": "#A6E1C0"
+        },
+        "2": {
+          "$value": "#2FC183"
+        },
+        "3": {
+          "$value": "#067D51"
+        },
+        "4": {
+          "$value": "#0C5537"
+        }
+      },
+      "4": {
+        "1": {
+          "$value": "#F6BEDC"
+        },
+        "2": {
+          "$value": "#E57BBA"
+        },
+        "3": {
+          "$value": "#984979"
+        },
+        "4": {
+          "$value": "#673352"
+        }
+      },
+      "5": {
+        "1": {
+          "$value": "#95E1E0"
+        },
+        "2": {
+          "$value": "#08BCBC"
+        },
+        "3": {
+          "$value": "#047879"
+        },
+        "4": {
+          "$value": "#045353"
+        }
+      },
+      "6": {
+        "1": {
+          "$value": "#FFBFB8"
+        },
+        "2": {
+          "$value": "#F47B74"
+        },
+        "3": {
+          "$value": "#A34945"
+        },
+        "4": {
+          "$value": "#6E3330"
+        }
+      },
+      "7": {
+        "1": {
+          "$value": "#C6DAA4"
+        },
+        "2": {
+          "$value": "#8FB43F"
+        },
+        "3": {
+          "$value": "#597417"
+        },
+        "4": {
+          "$value": "#3D4F15"
+        }
+      },
+      "8": {
+        "1": {
+          "$value": "#E0C4F6"
+        },
+        "2": {
+          "$value": "#C188EA"
+        },
+        "3": {
+          "$value": "#7E539C"
+        },
+        "4": {
+          "$value": "#56396A"
+        }
+      },
+      "neutral": {
+        "$value": "#494D54",
+        "$description": "槽位 0：第 1 层的聚合块、可用/未知空间等不属于任何分支的块"
+      }
+    },
+    "ring": {
+      "$type": "color",
+      "$description": "非分支配色下火焰图的文件夹条和火焰-极坐标图的文件夹扇区，按 min(depth, 4) 取色，越往外越接近底色（暗色越往外越暗，浅色越往外越浅）",
+      "1": {
+        "$value": "#5B6375"
+      },
+      "2": {
+        "$value": "#4D5566"
+      },
+      "3": {
+        "$value": "#424A5B"
+      },
+      "4": {
+        "$value": "#394151"
+      }
+    },
+    "center": {
+      "$type": "color",
+      "$description": "火焰图的根条和火焰-极坐标图的中心圆（缩放根）",
+      "bg": {
+        "$value": "{treemap.level.0.headerBg}"
+      },
+      "text": {
+        "$value": "{treemap.level.0.headerText}"
+      },
+      "sub": {
+        "$value": "{treemap.level.0.headerSub}"
+      }
+    },
+    "haloOverlay": {
+      "$type": "color",
+      "$value": "#FFFFFF1A",
+      "$description": "分区布局里悬停/选中项的祖先段上叠的一层光晕"
+    },
+    "flame": {
+      "$type": "dimension",
+      "$description": "火焰图：条高（含缝）在 rowMin–rowMax CSS px 之间，乘字号缩放",
+      "rowMin": {
+        "$value": {
+          "value": 20,
+          "unit": "px"
+        }
+      },
+      "rowMax": {
+        "$value": {
+          "value": 48,
+          "unit": "px"
+        }
+      },
+      "gap": {
+        "$value": {
+          "value": 2,
+          "unit": "px"
+        }
+      }
+    },
+    "flamePolar": {
+      "$description": "火焰-极坐标图：外边距、中心孔（半径的比例与下限、上限比例）、最小环宽、缝、每个扇区细分的段数",
+      "margin": {
+        "$type": "dimension",
+        "$value": {
+          "value": 8,
+          "unit": "px"
+        }
+      },
+      "holeRatio": {
+        "$type": "number",
+        "$value": 0.24
+      },
+      "holeMin": {
+        "$type": "dimension",
+        "$value": {
+          "value": 36,
+          "unit": "px"
+        }
+      },
+      "holeMaxRatio": {
+        "$type": "number",
+        "$value": 0.4
+      },
+      "ringMin": {
+        "$type": "dimension",
+        "$value": {
+          "value": 14,
+          "unit": "px"
+        }
+      },
+      "gap": {
+        "$type": "dimension",
+        "$value": {
+          "value": 2,
+          "unit": "px"
+        }
+      },
+      "segments": {
+        "$type": "number",
+        "$value": 32
+      }
+    }
+  }
+}

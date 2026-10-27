@@ -21,8 +21,11 @@ import numpy as np
 from spaceknife_protocol.filter_syntax import normalize_glob
 
 from ..filter.names import char_regex, name_index
+from ..layout.basis import LazySizes
 from ..store.nodes import Flag, Kind, NodeStore
 from .fuzzy import score
+
+Sizes = np.ndarray | LazySizes  # area basis per node: an array, or worked out per lookup
 
 _DRIVE = re.compile(r"^[A-Za-z]:(?:[\\/]|$)")
 SEPARATORS = "\\/" if sys.platform == "win32" else "/"
@@ -97,7 +100,7 @@ def _subsequence(q: str) -> tuple[re.Pattern[bytes], bool]:
     return re.compile(gap.join(parts), re.DOTALL), lower
 
 
-def _top(ids: np.ndarray, sizes: np.ndarray, k: int) -> np.ndarray:
+def _top(ids: np.ndarray, sizes: Sizes, k: int) -> np.ndarray:
     if k <= 0 or not ids.size:
         return ids[:0]
     s = sizes[ids]
@@ -124,7 +127,7 @@ def _hits(name: str, query: str, tier: int) -> list[tuple[int, int]]:
 
 def search(
     store: NodeStore,
-    sizes: np.ndarray,
+    sizes: Sizes,
     query: str,
     limit: int,
     *,
@@ -179,9 +182,7 @@ def search(
     return [_hit(store, sizes, node, q, tier, glob=wild) for node, tier in picked], total
 
 
-def _hit(
-    store: NodeStore, sizes: np.ndarray, node: int, query: str, tier: int, *, glob: bool = False
-) -> PathHit:
+def _hit(store: NodeStore, sizes: Sizes, node: int, query: str, tier: int, *, glob: bool = False) -> PathHit:
     c = store.cols
     name = store.name(node)
     is_dir = bool(c["kind"][node] == Kind.DIR)
@@ -201,7 +202,7 @@ def _hit(
 
 
 def children(
-    store: NodeStore, sizes: np.ndarray, folder: int, partial: str, limit: int
+    store: NodeStore, sizes: Sizes, folder: int, partial: str, limit: int
 ) -> tuple[list[PathHit], int]:
     """A folder's children for a path typed up to ``partial`` (UI-W4-37): prefix, inside, scattered."""
     kids = np.fromiter(store.children(folder), dtype=np.int64)
@@ -241,14 +242,14 @@ class PathInput:
     complete: str | None
 
 
-def _sized(store: NodeStore | None, sizes: np.ndarray | None, path: str) -> int | None:
+def _sized(store: NodeStore | None, sizes: Sizes | None, path: str) -> int | None:
     """The node at ``path`` once it has a size: one added after ``sizes`` was taken (scan running)
     counts as not scanned yet."""
     node = store.find(path) if store is not None and sizes is not None else None
     return node if node is not None and sizes is not None and node < len(sizes) else None
 
 
-def resolve(store: NodeStore | None, sizes: np.ndarray | None, text: str) -> PathInput:
+def resolve(store: NodeStore | None, sizes: Sizes | None, text: str) -> PathInput:
     path = expand(text)
     node = _sized(store, sizes, path)
     complete = completion(store, sizes, path)
@@ -263,7 +264,7 @@ def resolve(store: NodeStore | None, sizes: np.ndarray | None, text: str) -> Pat
     return PathInput("outside" if exists else "missing", path, None, is_dir, None, complete)
 
 
-def completion(store: NodeStore | None, sizes: np.ndarray | None, path: str) -> str | None:
+def completion(store: NodeStore | None, sizes: Sizes | None, path: str) -> str | None:
     """The path completed by one segment (Tab), folders with a trailing separator."""
     folder, partial = split_last(path)
     if not folder:

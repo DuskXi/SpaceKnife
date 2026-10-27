@@ -9,8 +9,10 @@ import { call, closeSettings, resetSettings, settingsGo, updateSettings } from "
 import { type SettingsPageId, set, toast, useApp } from "@/state/store";
 import { fmtKeys } from "@/lib/format";
 import { t } from "@/lib/i18n";
+import { accentOf } from "@/lib/theme";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 
+import { AboutEntry, AboutHeader, ComponentsGroup, ReleaseTimeline } from "./AboutPage";
 import { AdvancedTools, ClearTags } from "./AdvancedTools";
 import { ClassesEditor } from "./ClassesEditor";
 
@@ -35,17 +37,18 @@ export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName;
     },
     icon: "palette",
     get note() {
-      return t("主题、强调色、动画与树图视觉；更改立即生效");
+      return t("主题、强调色、动画与可视化外观；更改立即生效");
     },
   },
   {
+    // the category id stays "treemap" (settings keys treemap.*); the page covers every visualization
     id: "treemap",
     get name() {
-      return t("树图");
+      return t("可视化");
     },
     icon: "layers",
     get note() {
-      return t("几何与动画；修改后已打开的视图立即重排，「新视图…」类只影响之后新开的视图");
+      return t("几何、火焰图方向与动画；修改后已打开的视图立即重排，「新视图…」类只影响之后新开的视图");
     },
   },
   {
@@ -98,11 +101,21 @@ export const PAGES: { id: SettingsPageId; readonly name: string; icon: IconName;
       return t("设置文件、日志、缓存与快照");
     },
   },
+  {
+    id: "about",
+    get name() {
+      return t("关于与更新");
+    },
+    icon: "info",
+    get note() {
+      return t("版本信息、更新与发布时间线");
+    },
+  },
 ];
 const GROUPS: SettingsPageId[][] = [
   ["general", "appearance", "treemap"],
   ["scan", "classes", "tags"],
-  ["keys", "advanced"],
+  ["keys", "advanced", "about"],
 ];
 const pageName = (id: string) => PAGES.find((p) => p.id === id)?.name ?? id;
 
@@ -182,6 +195,7 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
         <h1>{p.name}</h1>
         <p className="muted">{p.note}</p>
       </header>
+      {p.id === "about" && <AboutHeader />}
       {p.id === "classes" && <ClassesEditor />}
       {p.id === "keys" && <KeysPage rows={rows} />}
       {p.id !== "keys" && (
@@ -192,8 +206,11 @@ function Page({ id, meta }: { id: SettingsPageId; meta: SettingMeta[] }) {
           {p.id === "tags" && <ClearTags />}
           {p.id === "advanced" && <AdvancedTools />}
           {p.id === "advanced" && <FilesGroup />}
+          {p.id === "about" && <ComponentsGroup />}
+          {p.id === "general" && <AboutEntry />}
         </div>
       )}
+      {p.id === "about" && <ReleaseTimeline />}
     </>
   );
 }
@@ -300,7 +317,8 @@ function Control(props: { meta: SettingMeta; value: Value | undefined; disabled:
               aria-checked={value === o.value}
               aria-label={String(o.label)}
               className={`set-swatch${value === o.value ? " on" : ""}`}
-              style={{ background: String(o.value) }}
+              // an accent preset as it is in the theme on screen (the setting keeps the dark one's hex)
+              style={{ background: meta.key === "appearance.accent" ? accentOf(String(o.value)) : String(o.value) }}
               disabled={disabled}
               onClick={() => onSave(o.value)}
             />

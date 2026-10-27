@@ -5,7 +5,7 @@
 import type { CompareProgressEvent } from "@/protocol/generated";
 import { RpcError } from "@/protocol/rpc";
 import { t } from "@/lib/i18n";
-import { isSynthetic } from "@/treemap/frame";
+import { isSynthetic } from "@/visual/frame";
 
 import { call, openView, setViewSettings, startScan, viewCall } from "./actions";
 import { activeTab, get, patchCompare, set, type Tab, type TabCompare, toast } from "./store";
@@ -146,9 +146,12 @@ export function onCompareProgress(ev: CompareProgressEvent): void {
 }
 
 async function show(tabId: string, ev: CompareProgressEvent): Promise<void> {
+  // the new ends keep the changes shown and the visualization of the comparison on screen
+  const shown = tabOf(tabId)?.compare?.viewId;
+  const was = shown ? get().views[shown]?.state : undefined;
   let viewId: string;
   try {
-    viewId = await openView(ev.compare_id);
+    viewId = await openView(ev.compare_id, was ? { direction: was.direction, visual: was.visual, color_mode: was.color_mode } : undefined);
   } catch (err) {
     return failed(tabId, err instanceof RpcError ? err.message : String(err));
   }
@@ -160,8 +163,6 @@ async function show(tabId: string, ev: CompareProgressEvent): Promise<void> {
   }
   const oldView = c.viewId;
   const oldId = c.shownId;
-  const dir = oldView ? get().views[oldView]?.state.direction : undefined;
-  if (dir && dir !== "all") await setViewSettings(viewId, { direction: dir });
   patchCompare(tabId, { shownId: ev.compare_id, viewId, info: ev.info, phase: "ready", progress: 1, message: "" });
   dropView(oldView);
   if (oldId && oldId !== ev.compare_id) quietly(call("compare.close", { compare_id: oldId }));

@@ -5,11 +5,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { SnapshotInfo, VolumeInfo } from "@/protocol/generated";
 import { call, openSnapshot, refreshLists, refreshVolumes, startScan } from "@/state/actions";
+import { MachineCard } from "@/pages/MachineCard";
 import { type LoadLevel, patchStartForm, type ScanMethod, setting, startFormOf, type Tab, toast, useApp } from "@/state/store";
 import { fmtInt, fmtKeys, fmtShare, fmtSize, fmtSizeAs } from "@/lib/format";
 import { Icon, type IconName, Kbd } from "@/ui/Icon";
 import { compareWithNow } from "@/state/compare";
 import { byLang, t } from "@/lib/i18n";
+import { inBrowser, serverName } from "@/lib/host";
 
 // the labels translate each time they are read (getters), so a language switch applies (M7.5)
 export const MEDIA_ZH: Record<string, string> = {
@@ -91,6 +93,7 @@ export function StartPage({ tab }: { tab: Tab }) {
   const conn = useApp((s) => s.conn);
   const form = useApp((s) => startFormOf(s, tab.id));
   const [refreshing, setRefreshing] = useState(false);
+  const [starting, setStarting] = useState(false);
   const [dragging, setDragging] = useState(false);
   const pathInput = useRef<HTMLInputElement>(null);
   const patch = (p: Parameters<typeof patchStartForm>[1]) => patchStartForm(tab.id, p);
@@ -143,9 +146,12 @@ export function StartPage({ tab }: { tab: Tab }) {
   const needsAdmin = viaMft && !elevated;
 
   const start = () => {
-    if (!ready) return;
+    if (!ready || starting) return;
     const capable = mftCapable(selected);
-    void startScan({ roots, method: capable ? form.method : "hard", load_level: form.load, ads: capable && form.ads }, tab.id);
+    setStarting(true);
+    void startScan({ roots, method: capable ? form.method : "hard", load_level: form.load, ads: capable && form.ads }, tab.id).finally(() =>
+      setStarting(false),
+    );
   };
 
   const onKey = (e: React.KeyboardEvent) => {
@@ -169,7 +175,8 @@ export function StartPage({ tab }: { tab: Tab }) {
       const file = files[i]!;
       const path = window.sk.files.pathOf(file);
       if (!path) {
-        toast(t("浏览器模式下无法读取拖入文件的路径"));
+        // a browser tab gets no paths, and what it gets is this computer's, not the server's
+        toast(inBrowser() ? t("拖进来的是这台电脑上的文件：请输入 {host} 上的路径", { host: serverName() }) : t("浏览器模式下无法读取拖入文件的路径"), 4000);
         return;
       }
       const isDir = items[i]?.webkitGetAsEntry()?.isDirectory ?? false;
@@ -219,9 +226,15 @@ export function StartPage({ tab }: { tab: Tab }) {
             <div className="path-area">
               <div className="path-label">
                 <span>{t("或输入路径（多个路径用 ; 分隔）")}</span>
-                <span className="muted small">
-                  <Icon name="upload" size={13} /> {t("也可以把文件夹直接拖进窗口")}
-                </span>
+                {inBrowser() ? (
+                  <span className="muted small">
+                    <Icon name="globe" size={13} /> {t("{host} 上的路径", { host: serverName() })}
+                  </span>
+                ) : (
+                  <span className="muted small">
+                    <Icon name="upload" size={13} /> {t("也可以把文件夹直接拖进窗口")}
+                  </span>
+                )}
               </div>
               <div className="path-row">
                 <span className="path-icon">
@@ -244,15 +257,17 @@ export function StartPage({ tab }: { tab: Tab }) {
                     }
                   }}
                 />
-                <button
-                  className="ghost"
-                  onClick={async () => {
-                    const picked = await window.sk.dialog.openFolders();
-                    if (picked.length) patch({ path: [...paths, ...picked].join("; "), picked: null });
-                  }}
-                >
-                  {t("浏览…")}
-                </button>
+                {!inBrowser() && (
+                  <button
+                    className="ghost"
+                    onClick={async () => {
+                      const picked = await window.sk.dialog.openFolders();
+                      if (picked.length) patch({ path: [...paths, ...picked].join("; "), picked: null });
+                    }}
+                  >
+                    {t("浏览…")}
+                  </button>
+                )}
               </div>
               {errors.map((e) => (
                 <div key={e.path} className="path-error" role="alert">
@@ -295,9 +310,9 @@ export function StartPage({ tab }: { tab: Tab }) {
                 </div>
               )}
             </div>
-            <button className="primary big" disabled={!ready} onClick={start}>
+            <button className="primary big" disabled={!ready || starting} aria-busy={starting} onClick={start}>
               <Icon name="play" />
-              {t("开始扫描")}
+              {starting ? t("正在开始…") : t("开始扫描")}
               <Kbd>Enter</Kbd>
             </button>
           </div>
@@ -505,6 +520,7 @@ function Recents({ tab }: { tab: Tab }) {
 
   return (
     <aside className="start-side" aria-label={t("最近")}>
+      <MachineCard />
       <div className="start-title">
         <h2>
           {t("最近")} <span className="mono muted">{records.length}</span>

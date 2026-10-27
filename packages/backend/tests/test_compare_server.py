@@ -131,6 +131,17 @@ async def test_snapshot_against_now(tmp_path: Path, client: Connection) -> None:
     )
     assert update.state.direction == "grow"
     assert frame is not None and "two.bin" not in frame.names
+    # a view opened like it (new ends, a split pane) keeps showing growth only
+    update, frame = await vc.call(
+        VIEW_OPEN,
+        pv.ViewOpenParams(
+            scan_id=info.compare_id,
+            viewport=pv.Viewport(width=900, height=600),
+            settings=pv.ViewSettingsParams(direction="grow"),
+        ),
+    )
+    assert update.state.direction == "grow"
+    assert frame is not None and "two.bin" not in frame.names
 
     await client.call(COMPARE_CLOSE, pc.CompareIdParams(compare_id=info.compare_id))
     with pytest.raises(RemoteError):

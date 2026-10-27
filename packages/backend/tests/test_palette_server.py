@@ -10,12 +10,14 @@ from pathlib import Path
 import pytest
 
 from spaceknife.filter.engine import FilterContext
+from spaceknife.layout.basis import Basis, LazySizes
 from spaceknife.server import Server
-from spaceknife_client.connection import Connection
+from spaceknife_client.connection import Connection, RemoteError
 from spaceknife_client.views import ViewClient
 from spaceknife_protocol import palette as pp
 from spaceknife_protocol import view as pv
 from spaceknife_protocol.methods import (
+    PALETTE_CHECK,
     PALETTE_CLEAR,
     PALETTE_PATHS,
     PALETTE_PREVIEW,
@@ -128,6 +130,29 @@ async def select_seed(tmp_path: Path, client: Connection, path: Path) -> tuple[s
     return scan_id, update.state.view_id, node.id
 
 
+async def test_check_one_command_where_the_user_is(tmp_path: Path, client: Connection) -> None:
+    # a keyboard shortcut asks palette.check: the same availability and reason as the palette's row
+    scan_id = await scanned(tmp_path, client)
+    vc = ViewClient(client)
+    update, _ = await vc.call(
+        VIEW_OPEN, pv.ViewOpenParams(scan_id=scan_id, viewport=pv.Viewport(width=1000, height=700))
+    )
+    on_scan = pp.PaletteContext(tab="scan", scan_id=scan_id, view_id=update.state.view_id)
+    query = await client.call(PALETTE_QUERY, pp.PaletteQueryParams(text="", context=on_scan))
+    for cmd in query.commands:
+        checked = await client.call(PALETTE_CHECK, pp.PaletteCheckParams(id=cmd.id, context=on_scan))
+        assert checked == cmd.model_copy(update={"hits": []})
+
+    save = await client.call(PALETTE_CHECK, pp.PaletteCheckParams(id="snapshot.save", context=on_scan))
+    assert save.enabled and save.keys == ["Ctrl+S"]
+    on_start = pp.PaletteContext(tab="start")
+    for cid in ("view.rescan", "scan.rescan_all", "snapshot.save"):
+        idle = await client.call(PALETTE_CHECK, pp.PaletteCheckParams(id=cid, context=on_start))
+        assert not idle.enabled and idle.status == "需要先完成扫描"
+    with pytest.raises(RemoteError, match="unknown command"):
+        await client.call(PALETTE_CHECK, pp.PaletteCheckParams(id="no.such.command", context=on_scan))
+
+
 async def test_selected_scan_root_seeds_with_its_last_segment(tmp_path: Path, client: Connection) -> None:
     scan_id, view_id, root = await select_seed(tmp_path, client, tmp_path / "root")  # stored as a full path
     ctx = pp.PaletteContext(tab="scan", scan_id=scan_id, view_id=view_id)
@@ -157,8 +182,13 @@ async def test_nodes_found_before_they_are_sized(
     assert node is not None
     shared = server.views.shared(scan_id)
     assert shared is not None
-    sizes = shared.layout.sizes()[: node.id]  # taken while the scan had not reached "sub" yet
-    monkeypatch.setattr(shared.layout, "sizes", lambda: sizes)
+    made = LazySizes.__init__
+
+    def taken_earlier(self: LazySizes, basis: Basis) -> None:
+        made(self, basis)
+        self.n = node.id  # taken while the scan had not reached "sub" yet
+
+    monkeypatch.setattr(LazySizes, "__init__", taken_earlier)
     ctx = pp.PaletteContext(tab="scan", scan_id=scan_id)
     res = await client.call(PALETTE_QUERY, pp.PaletteQueryParams(text="", context=ctx))
     jump = res.recent[0]
