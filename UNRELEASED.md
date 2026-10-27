@@ -10,7 +10,7 @@ What is already done for the next version, **0.3.5**, and not in a release yet. 
 
 ### Fixes
 
-(nothing yet)
+- **Singular English counts on the command line**: a scan with one unreadable folder says "1 folder couldn't be accessed", `snapshot list` says "1 snapshot in …" and `snapshot show` "· 1 item ·". Thanks to @swastiktawate ([#9](https://github.com/DuskXi/SpaceKnife/pull/9)).
 
 ---
 
@@ -24,4 +24,4 @@ What is already done for the next version, **0.3.5**, and not in a release yet. 
 
 ### 修复
 
-（暂无）
+- **命令行的英文单数**：有一个文件夹读不了的扫描写「1 folder couldn't be accessed」，`snapshot list` 写「1 snapshot in …」，`snapshot show` 写「· 1 item ·」。感谢 @swastiktawate（[#9](https://github.com/DuskXi/SpaceKnife/pull/9)）。
