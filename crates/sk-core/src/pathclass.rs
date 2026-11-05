@@ -74,14 +74,41 @@ fn t(s: &str) -> String {
 // --------------------------------------------------------------------------- the names the rules know
 
 const PROJECT_FILES: &[&str] = &[
-    "package.json", "cargo.toml", "pyproject.toml", "setup.py", "go.mod", "cmakelists.txt",
-    "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "pom.xml",
-    "composer.json", "gemfile", "pubspec.yaml", "package.swift", "mix.exs", "deno.json",
-    "meson.build", "project.godot",
+    "package.json",
+    "cargo.toml",
+    "pyproject.toml",
+    "setup.py",
+    "go.mod",
+    "cmakelists.txt",
+    "build.gradle",
+    "build.gradle.kts",
+    "settings.gradle",
+    "settings.gradle.kts",
+    "pom.xml",
+    "composer.json",
+    "gemfile",
+    "pubspec.yaml",
+    "package.swift",
+    "mix.exs",
+    "deno.json",
+    "meson.build",
+    "project.godot",
 ];
 const PROJECT_ANY: &[&str] = &[".git", ".hg", ".svn"];
-const PROJECT_EXTS: &[&str] = &["sln", "csproj", "vcxproj", "fsproj", "vbproj", "uproject", "xcodeproj", "xcworkspace"];
-const GAME_FILES: &[(&str, &str)] = &[("unityplayer.dll", "Unity 游戏"), (".build.info", "暴雪游戏")];
+const PROJECT_EXTS: &[&str] = &[
+    "sln",
+    "csproj",
+    "vcxproj",
+    "fsproj",
+    "vbproj",
+    "uproject",
+    "xcodeproj",
+    "xcworkspace",
+];
+const GAME_FILES: &[(&str, &str)] = &[
+    ("unityplayer.dll", "Unity 游戏"),
+    (".build.info", "暴雪游戏"),
+];
 const CANON: &[(&str, &str)] = &[
     ("cargo.toml", "Cargo.toml"),
     ("cmakelists.txt", "CMakeLists.txt"),
@@ -89,13 +116,22 @@ const CANON: &[(&str, &str)] = &[
     ("package.swift", "Package.swift"),
 ];
 const LAUNCHERS: &[(&str, &[&str])] = &[
-    ("epic games", &["launcher", "directxredist", "epiconlineservices"]),
+    (
+        "epic games",
+        &["launcher", "directxredist", "epiconlineservices"],
+    ),
     ("gog games", &[]),
     ("xboxgames", &["gamesave"]),
     ("ea games", &[]),
     ("riot games", &["riot client"]),
 ];
-const LAUNCHER_HOMES: &[&str] = &["gog galaxy", "ubisoft game launcher", "hoyoplay", "mihoyo launcher", "hypergryph launcher"];
+const LAUNCHER_HOMES: &[&str] = &[
+    "gog galaxy",
+    "ubisoft game launcher",
+    "hoyoplay",
+    "mihoyo launcher",
+    "hypergryph launcher",
+];
 const STEAM: &str = "steamapps";
 const MINECRAFT: &str = ".minecraft";
 const SAVES_IN_DOCUMENTS: &[&str] = &["my games", "paradox interactive"];
@@ -104,18 +140,57 @@ const MODELS_ANYWHERE: &[&str] = &[".ollama", ".lmstudio"];
 const MODELS_IN_CACHE: &[&str] = &["huggingface", "lm-studio", "torch"];
 const SYSTEM_AT_TOP: &[&str] = &["system volume information"];
 const SOFTWARE_AT_TOP: &[&str] = &[
-    "program files", "program files (x86)", "programdata", "windows", "applications", "usr", "opt",
-    "library", "system",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "windows",
+    "applications",
+    "usr",
+    "opt",
+    "library",
+    "system",
 ];
 const SOFTWARE_IN_HOME: &[&str] = &["appdata", "library", ".local", ".config"];
 const NO_PROJECTS: &[&str] = &[
-    "node_modules", "site-packages", "dist-packages", ".cargo", ".rustup", ".npm", ".gradle", ".m2",
-    ".nuget", ".vscode", ".vscode-server", ".cursor", ".cache", ".conda", "anaconda3", "miniconda3",
-    ".pyenv", "$recycle.bin", ".trash", "windowsapps", "steamapps",
+    "node_modules",
+    "site-packages",
+    "dist-packages",
+    ".cargo",
+    ".rustup",
+    ".npm",
+    ".gradle",
+    ".m2",
+    ".nuget",
+    ".vscode",
+    ".vscode-server",
+    ".cursor",
+    ".cache",
+    ".conda",
+    "anaconda3",
+    "miniconda3",
+    ".pyenv",
+    "$recycle.bin",
+    ".trash",
+    "windowsapps",
+    "steamapps",
 ];
 const USER_FOLDERS: &[&str] = &[
-    "desktop", "documents", "downloads", "pictures", "videos", "music", "movies", "public", "dropbox",
-    "icloud drive", "saved games", "favorites", "links", "contacts", "searches", "3d objects",
+    "desktop",
+    "documents",
+    "downloads",
+    "pictures",
+    "videos",
+    "music",
+    "movies",
+    "public",
+    "dropbox",
+    "icloud drive",
+    "saved games",
+    "favorites",
+    "links",
+    "contacts",
+    "searches",
+    "3d objects",
 ];
 const HOME_PARENTS: &[&str] = &["users", "home"];
 const HELPERS: &[&str] = &["games", "content", "paks", "engine", ".cache", "go", "pkg"];
@@ -127,15 +202,30 @@ struct Known {
 }
 
 fn key(name: &[u8]) -> u32 {
-    ((name.len() as u32) << 16) | ((name[0].to_ascii_lowercase() as u32) << 8) | name[name.len() - 1].to_ascii_lowercase() as u32
+    ((name.len() as u32) << 16)
+        | ((name[0].to_ascii_lowercase() as u32) << 8)
+        | name[name.len() - 1].to_ascii_lowercase() as u32
 }
 
 static KNOWN: LazyLock<Known> = LazyLock::new(|| {
     let mut names: HashSet<&'static [u8]> = HashSet::new();
     let lists: [&[&str]; 16] = [
-        PROJECT_FILES, PROJECT_ANY, LAUNCHER_HOMES, SAVES_IN_DOCUMENTS, SAVES_IN_HOME, MODELS_ANYWHERE,
-        MODELS_IN_CACHE, SYSTEM_AT_TOP, SOFTWARE_AT_TOP, SOFTWARE_IN_HOME, NO_PROJECTS, USER_FOLDERS,
-        HOME_PARENTS, HELPERS, &[STEAM], &[MINECRAFT],
+        PROJECT_FILES,
+        PROJECT_ANY,
+        LAUNCHER_HOMES,
+        SAVES_IN_DOCUMENTS,
+        SAVES_IN_HOME,
+        MODELS_ANYWHERE,
+        MODELS_IN_CACHE,
+        SYSTEM_AT_TOP,
+        SOFTWARE_AT_TOP,
+        SOFTWARE_IN_HOME,
+        NO_PROJECTS,
+        USER_FOLDERS,
+        HOME_PARENTS,
+        HELPERS,
+        &[STEAM],
+        &[MINECRAFT],
     ];
     for l in lists {
         names.extend(l.iter().map(|s| s.as_bytes()));
@@ -147,7 +237,11 @@ static KNOWN: LazyLock<Known> = LazyLock::new(|| {
     }
     let keys = names.iter().map(|n| key(n)).collect();
     let max_len = names.iter().map(|n| n.len()).max().unwrap_or(0);
-    Known { names, keys, max_len }
+    Known {
+        names,
+        keys,
+        max_len,
+    }
 });
 
 static VOLUME: LazyLock<Regex> = LazyLock::new(|| {
@@ -163,7 +257,11 @@ struct Choices {
     folders: HashMap<String, (String, String)>,
 }
 
-static CHOICES: LazyLock<Mutex<Choices>> = LazyLock::new(|| Mutex::new(Choices { folders: HashMap::new() }));
+static CHOICES: LazyLock<Mutex<Choices>> = LazyLock::new(|| {
+    Mutex::new(Choices {
+        folders: HashMap::new(),
+    })
+});
 static CHOICES_VERSION: AtomicU64 = AtomicU64::new(0);
 
 fn norm(path: &str) -> String {
@@ -185,7 +283,10 @@ pub fn folders_version() -> u64 {
 /// Replaces every choice.
 pub fn replace_folders(items: impl IntoIterator<Item = (String, String)>) {
     let mut c = CHOICES.lock().unwrap();
-    c.folders = items.into_iter().map(|(p, cid)| (norm(&p), (p, cid))).collect();
+    c.folders = items
+        .into_iter()
+        .map(|(p, cid)| (norm(&p), (p, cid)))
+        .collect();
     CHOICES_VERSION.fetch_add(1, Ordering::AcqRel);
 }
 
@@ -213,19 +314,40 @@ pub fn load(path: &Path) -> Vec<(String, String)> {
         Ok(t) => t,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
         Err(e) => {
-            tracing::warn!("{}", crate::tr!("文件夹归类 {path} 读不出来，已忽略：{error}", path = path.display().to_string(), error = e.to_string()));
+            tracing::warn!(
+                "{}",
+                crate::tr!(
+                    "文件夹归类 {path} 读不出来，已忽略：{error}",
+                    path = path.display().to_string(),
+                    error = e.to_string()
+                )
+            );
             return Vec::new();
         }
     };
-    let parsed = serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| {
-        v.get("folders")?
-            .as_array()?
-            .iter()
-            .map(|f| Some((f.get("path")?.as_str()?.to_owned(), f.get("class")?.as_str()?.to_owned())))
-            .collect::<Option<Vec<_>>>()
-    });
+    let parsed = serde_json::from_str::<serde_json::Value>(&text)
+        .ok()
+        .and_then(|v| {
+            v.get("folders")?
+                .as_array()?
+                .iter()
+                .map(|f| {
+                    Some((
+                        f.get("path")?.as_str()?.to_owned(),
+                        f.get("class")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect::<Option<Vec<_>>>()
+        });
     parsed.unwrap_or_else(|| {
-        tracing::warn!("{}", crate::tr!("文件夹归类 {path} 读不出来，已忽略：{error}", path = path.display().to_string(), error = "invalid"));
+        tracing::warn!(
+            "{}",
+            crate::tr!(
+                "文件夹归类 {path} 读不出来，已忽略：{error}",
+                path = path.display().to_string(),
+                error = "invalid"
+            )
+        );
         Vec::new()
     })
 }
@@ -278,7 +400,12 @@ fn base(nodes: &Nodes, node: NodeId) -> String {
 
 /// Nodes in `[a, b)` whose (ASCII-lower-cased) name the rules know, with that name; also names
 /// starting with `$ntfs` right below a scan root (the MFT scan's folder, in the UI language).
-fn names_among(nodes: &Nodes, a: NodeId, b: NodeId, roots: &HashSet<NodeId>) -> BTreeMap<NodeId, String> {
+fn names_among(
+    nodes: &Nodes,
+    a: NodeId,
+    b: NodeId,
+    roots: &HashSet<NodeId>,
+) -> BTreeMap<NodeId, String> {
     let known = &*KNOWN;
     let mut out = BTreeMap::new();
     let mut buf = Vec::with_capacity(known.max_len);
@@ -323,7 +450,14 @@ struct Found {
 }
 
 impl Found {
-    fn add(&mut self, nodes: &Nodes, folder: i64, rule: u8, reason: String, marker: Option<NodeId>) {
+    fn add(
+        &mut self,
+        nodes: &Nodes,
+        folder: i64,
+        rule: u8,
+        reason: String,
+        marker: Option<NodeId>,
+    ) {
         let n = nodes.len() as i64;
         if !(0 < folder && folder < n) || nodes.kind(folder as NodeId) != Kind::Dir {
             return;
@@ -334,7 +468,14 @@ impl Found {
             Some(old) => is_fallback(old.rule) && !is_fallback(rule),
         };
         if replace {
-            self.roots.insert(folder, Rule { rule, reason, evidence: marker.is_some() });
+            self.roots.insert(
+                folder,
+                Rule {
+                    rule,
+                    reason,
+                    evidence: marker.is_some(),
+                },
+            );
         }
         if let Some(m) = marker {
             self.evidence.insert(m, folder);
@@ -355,8 +496,20 @@ fn detect(nodes: &Nodes, a: NodeId, b: NodeId) -> Found {
         .into_iter()
         .filter(|(i, _)| !is_gone(nodes, *i))
         .collect();
-    let name_of = |i: i64| if 0 < i && i < n { base(nodes, i as NodeId) } else { String::new() };
-    let par = |i: i64| if 0 < i && i < n { nodes.parent(i as NodeId) as i64 } else { 0 };
+    let name_of = |i: i64| {
+        if 0 < i && i < n {
+            base(nodes, i as NodeId)
+        } else {
+            String::new()
+        }
+    };
+    let par = |i: i64| {
+        if 0 < i && i < n {
+            nodes.parent(i as NodeId) as i64
+        } else {
+            0
+        }
+    };
     let at_top = |i: i64| {
         let p = par(i);
         p > 0 && roots.contains(&(p as NodeId)) && VOLUME.is_match(&nodes.name(p as NodeId))
@@ -375,8 +528,15 @@ fn detect(nodes: &Nodes, a: NodeId, b: NodeId) -> Found {
         let nm = nm.as_str();
         if PROJECT_ANY.contains(&nm) || (PROJECT_FILES.contains(&nm) && !folder) {
             let marker = CANON.iter().find(|c| c.0 == nm).map_or(nm, |c| c.1);
-            found.add(nodes, p, PROJECT, crate::tr!("项目（{marker}）", marker = marker), Some(i));
-        } else if let Some((_, reason)) = GAME_FILES.iter().find(|g| g.0 == nm).filter(|_| !folder) {
+            found.add(
+                nodes,
+                p,
+                PROJECT,
+                crate::tr!("项目（{marker}）", marker = marker),
+                Some(i),
+            );
+        } else if let Some((_, reason)) = GAME_FILES.iter().find(|g| g.0 == nm).filter(|_| !folder)
+        {
             found.add(nodes, p, GAME, t(reason), Some(i));
         }
         if !folder {
@@ -389,7 +549,9 @@ fn detect(nodes: &Nodes, a: NodeId, b: NodeId) -> Found {
             found.add(nodes, i64_, GAME, t("Steam 游戏库"), None);
         } else if nm == MINECRAFT {
             found.add(nodes, i64_, GAME, t("Minecraft"), None);
-        } else if MODELS_ANYWHERE.contains(&nm) || (MODELS_IN_CACHE.contains(&nm) && name_of(p) == ".cache") {
+        } else if MODELS_ANYWHERE.contains(&nm)
+            || (MODELS_IN_CACHE.contains(&nm) && name_of(p) == ".cache")
+        {
             found.add(nodes, i64_, MODELS, t("模型缓存"), None);
         } else if (SAVES_IN_DOCUMENTS.contains(&nm) && name_of(p) == "documents")
             || (SAVES_IN_HOME.contains(&nm) && is_home(p))
@@ -410,19 +572,36 @@ fn detect(nodes: &Nodes, a: NodeId, b: NodeId) -> Found {
             // Unreal: <game>/<project>/Content/Paks
             let proj = par(p);
             let top = par(proj);
-            let engine = top > 0 && nodes.children(top as NodeId).any(|k| name_of(k as i64) == "engine");
-            found.add(nodes, if engine { top } else { proj }, GAME, t("Unreal 游戏"), Some(i));
+            let engine = top > 0
+                && nodes
+                    .children(top as NodeId)
+                    .any(|k| name_of(k as i64) == "engine");
+            found.add(
+                nodes,
+                if engine { top } else { proj },
+                GAME,
+                t("Unreal 游戏"),
+                Some(i),
+            );
         }
         let launcher = LAUNCHERS.iter().find(|l| l.0 == nm);
-        let holder = launcher.is_some() || (nm == "games" && LAUNCHER_HOMES.contains(&name_of(p).as_str()));
+        let holder =
+            launcher.is_some() || (nm == "games" && LAUNCHER_HOMES.contains(&name_of(p).as_str()));
         if holder {
             // a launcher's folder of games: each child folder is a game
             let skip: &[&str] = launcher.map_or(&[], |l| l.1);
-            let who = if nm == "games" { nodes.name(p as NodeId).into_owned() } else { nodes.name(i).into_owned() };
+            let who = if nm == "games" {
+                nodes.name(p as NodeId).into_owned()
+            } else {
+                nodes.name(i).into_owned()
+            };
             let label = crate::tr!("{name} 的游戏", name = who);
             let kids: Vec<NodeId> = nodes.children(i).collect();
             for k in kids {
-                if nodes.kind(k) == Kind::Dir && !is_gone(nodes, k) && !skip.contains(&name_of(k as i64).as_str()) {
+                if nodes.kind(k) == Kind::Dir
+                    && !is_gone(nodes, k)
+                    && !skip.contains(&name_of(k as i64).as_str())
+                {
                     found.add(nodes, k as i64, GAME, label.clone(), None);
                 }
             }
@@ -439,7 +618,12 @@ fn detect(nodes: &Nodes, a: NodeId, b: NodeId) -> Found {
 
 /// Project files by extension (`*.sln` …) among rows `[a, b)`; and the folders that may hold an
 /// engine build: those with an `.exe` and those with a `<name>_Data` folder or a `.pck`.
-fn engines(nodes: &Nodes, a: NodeId, b: NodeId, found: &mut Found) -> (HashSet<NodeId>, HashSet<NodeId>) {
+fn engines(
+    nodes: &Nodes,
+    a: NodeId,
+    b: NodeId,
+    found: &mut Found,
+) -> (HashSet<NodeId>, HashSet<NodeId>) {
     let table = nodes.ext_table();
     let project: HashSet<u16> = table
         .iter()
@@ -447,8 +631,14 @@ fn engines(nodes: &Nodes, a: NodeId, b: NodeId, found: &mut Found) -> (HashSet<N
         .filter(|(_, e)| PROJECT_EXTS.contains(&e.as_ref()))
         .map(|(i, _)| i as u16)
         .collect();
-    let exe_id = table.iter().position(|e| e.as_ref() == "exe").map(|i| i as u16);
-    let pck_id = table.iter().position(|e| e.as_ref() == "pck").map(|i| i as u16);
+    let exe_id = table
+        .iter()
+        .position(|e| e.as_ref() == "exe")
+        .map(|i| i as u16);
+    let pck_id = table
+        .iter()
+        .position(|e| e.as_ref() == "pck")
+        .map(|i| i as u16);
     let mut exe = HashSet::new();
     let mut other = HashSet::new();
     let exts = nodes.exts();
@@ -462,7 +652,13 @@ fn engines(nodes: &Nodes, a: NodeId, b: NodeId, found: &mut Found) -> (HashSet<N
             continue;
         }
         if e != 0 && project.contains(&e) {
-            found.add(nodes, p as i64, PROJECT, crate::tr!("项目（{marker}）", marker = nodes.name(i).into_owned()), Some(i));
+            found.add(
+                nodes,
+                p as i64,
+                PROJECT,
+                crate::tr!("项目（{marker}）", marker = nodes.name(i).into_owned()),
+                Some(i),
+            );
         }
         if Some(e) == exe_id && e != 0 {
             exe.insert(p as NodeId);
@@ -515,18 +711,27 @@ fn project_guard(nodes: &Nodes, folder: NodeId, roots: &HashSet<NodeId>) -> bool
     }
     let p = nodes.parent(folder);
     let own = base(nodes, folder);
-    let pname = if p > 0 { base(nodes, p as NodeId) } else { String::new() };
+    let pname = if p > 0 {
+        base(nodes, p as NodeId)
+    } else {
+        String::new()
+    };
     if HOME_PARENTS.contains(&pname.as_str()) || HOME_PARENTS.contains(&own.as_str()) {
         return false;
     }
     if p > 0 && roots.contains(&(p as NodeId)) {
-        let joined = format!("{}/{}", nodes.name(p as NodeId).trim_end_matches(['\\', '/']), nodes.name(folder));
+        let joined = format!(
+            "{}/{}",
+            nodes.name(p as NodeId).trim_end_matches(['\\', '/']),
+            nodes.name(folder)
+        );
         if HOME.is_match(&joined) {
             return false;
         }
     }
     let home = (p > 0 && roots.contains(&(p as NodeId)) && HOME.is_match(&nodes.name(p as NodeId)))
-        || (p > 0 && nodes.parent(p as NodeId) > 0
+        || (p > 0
+            && nodes.parent(p as NodeId) > 0
             && HOME_PARENTS.contains(&base(nodes, nodes.parent(p as NodeId) as NodeId).as_str()));
     !(home && (USER_FOLDERS.contains(&own.as_str()) || own.starts_with("onedrive")))
 }
@@ -542,7 +747,14 @@ fn encode(table: &ClassTable) -> HashMap<u8, u8> {
             continue;
         }
         if let Some(idx) = table.index_of(cid).filter(|&i| i < SWALLOW_MAX) {
-            out.insert(rule, if is_fallback(rule) { FALLBACK_BASE + idx as u8 } else { idx as u8 + 1 });
+            out.insert(
+                rule,
+                if is_fallback(rule) {
+                    FALLBACK_BASE + idx as u8
+                } else {
+                    idx as u8 + 1
+                },
+            );
         }
     }
     out
@@ -648,11 +860,16 @@ impl Entry {
         }
         let mut changed = Vec::new();
         for (folder, r) in found.roots {
-            if r.rule == PROJECT && (self.blocked_above(nodes, folder) || !project_guard(nodes, folder, &roots)) {
+            if r.rule == PROJECT
+                && (self.blocked_above(nodes, folder) || !project_guard(nodes, folder, &roots))
+            {
                 continue;
             }
             let value = codes.get(&r.rule).copied().unwrap_or(0);
-            let old_swallows = self.roots.get(&folder).is_some_and(|o| !is_fallback(o.rule));
+            let old_swallows = self
+                .roots
+                .get(&folder)
+                .is_some_and(|o| !is_fallback(o.rule));
             if value == 0 || (old_swallows && is_fallback(r.rule)) {
                 continue;
             }
@@ -694,14 +911,17 @@ impl Entry {
         self.roots.clear();
         self.evidence.clear();
         let found = detect(nodes, 1, n as NodeId);
-        let dirs: Vec<NodeId> = (1..n as NodeId).filter(|&i| nodes.kind(i) == Kind::Dir && !is_gone(nodes, i)).collect();
+        let dirs: Vec<NodeId> = (1..n as NodeId)
+            .filter(|&i| nodes.kind(i) == Kind::Dir && !is_gone(nodes, i))
+            .collect();
         // blocking first (projects are kept only where nothing above blocks them), then the rules
         for &f in &found.blocks {
             self.blocks[f as usize] = true;
         }
         for level in levels(nodes, &dirs) {
             for d in level {
-                self.blocked[d as usize] = self.blocked[parent_of(nodes, d)] || self.blocks[d as usize];
+                self.blocked[d as usize] =
+                    self.blocked[parent_of(nodes, d)] || self.blocks[d as usize];
             }
         }
         self.take(nodes, found, table);
@@ -715,14 +935,20 @@ impl Entry {
     fn update(&mut self, nodes: &Nodes, table: &ClassTable, n: usize, version: u64) {
         self.grow(n);
         let mut dirty: HashSet<NodeId> = HashSet::new();
-        let gone_roots: Vec<NodeId> = self.roots.keys().copied().filter(|&f| is_gone(nodes, f)).collect();
+        let gone_roots: Vec<NodeId> = self
+            .roots
+            .keys()
+            .copied()
+            .filter(|&f| is_gone(nodes, f))
+            .collect();
         for f in gone_roots {
             self.roots.remove(&f); // relisted: found again below
             self.own[f as usize] = 0;
         }
         let mut alive: HashMap<NodeId, usize> = HashMap::new();
         let codes = encode(table);
-        let mut markers: Vec<(NodeId, NodeId)> = self.evidence.iter().map(|(&m, &f)| (m, f)).collect();
+        let mut markers: Vec<(NodeId, NodeId)> =
+            self.evidence.iter().map(|(&m, &f)| (m, f)).collect();
         markers.sort_unstable();
         for (marker, folder) in markers {
             if is_gone(nodes, marker) {
@@ -777,7 +1003,12 @@ impl Entry {
             }
             let below = below(nodes, folder, n);
             let mut dirs = vec![folder];
-            dirs.extend(below.iter().copied().filter(|&i| nodes.kind(i) == Kind::Dir));
+            dirs.extend(
+                below
+                    .iter()
+                    .copied()
+                    .filter(|&i| nodes.kind(i) == Kind::Dir),
+            );
             self.propagate(nodes, &dirs);
             self.fill(nodes, below.into_iter());
         }
@@ -881,7 +1112,11 @@ impl FolderClasses {
         Self::default()
     }
 
-    fn entry<'a>(&'a self, nodes: &Nodes, table: &Arc<ClassTable>) -> std::sync::MutexGuard<'a, Entry> {
+    fn entry<'a>(
+        &'a self,
+        nodes: &Nodes,
+        table: &Arc<ClassTable>,
+    ) -> std::sync::MutexGuard<'a, Entry> {
         let mut e = self.entry.lock().unwrap_or_else(|p| p.into_inner());
         let key = (Arc::as_ptr(table) as usize, folders_version());
         let version = nodes.version();
@@ -905,7 +1140,11 @@ impl FolderClasses {
     /// Why `node` (a folder, or a file's folder) takes a folder class, if it does.
     pub fn explain(&self, nodes: &Nodes, node: NodeId, table: &Arc<ClassTable>) -> Option<Reason> {
         let e = self.entry(nodes, table);
-        let node = if nodes.kind(node) != Kind::Dir { nodes.parent(node).max(0) as NodeId } else { node };
+        let node = if nodes.kind(node) != Kind::Dir {
+            nodes.parent(node).max(0) as NodeId
+        } else {
+            node
+        };
         let mut chain = Vec::new();
         let mut p = node as i64;
         while p > 0 && chain.len() <= nodes.len() {

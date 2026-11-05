@@ -15,8 +15,8 @@ use std::collections::BTreeSet;
 
 use sk_store::{NodeId, Nodes};
 
-use super::util::{fill, size as fmt_size, tr};
 use super::tree::{Blocks, Element, ExportTree, Mask, Ordering, SortKey, export_roots, text_of};
+use super::util::{fill, size as fmt_size, tr};
 use super::{ExportError, Sink};
 
 pub const BAD_TAG: &str = "*BAD TAG*";
@@ -39,7 +39,8 @@ mod msg {
     pub const BAD_CALL: &str = "{name} 的写法应为 {usage}";
     pub const BAD_OPTION: &str = "选项 @{key} 的值 {value!r} 无效，可选：{allowed}";
     pub const UNKNOWN_OPTION: &str = "未知的选项 @{key}，已忽略";
-    pub const BAD_LINE: &str = "这一行既不是 @选项=值，也不是段标记（@header / @detail / @footer），已忽略";
+    pub const BAD_LINE: &str =
+        "这一行既不是 @选项=值，也不是段标记（@header / @detail / @footer），已忽略";
     pub const DUPLICATE_SECTION: &str = "@{name} 段出现了不止一次，以最后一次为准";
     pub const IF_OPERAND: &str = "缺少值或值没有用 {{}} 括起来";
     pub const IF_OPERATOR: &str = "缺少比较运算符（== != < <= > >=）";
@@ -256,8 +257,20 @@ struct Cx<'t, 'e> {
 impl Tag {
     fn put(self, cx: &Cx<'_, '_>, out: &mut String) {
         let (tree, el) = (cx.tree, cx.el);
-        let counts = || if el.is_dir { tree.counts(el.pos) } else { (0, 0) };
-        let local = || if el.is_dir { tree.local_counts(el.pos) } else { (0, 0) };
+        let counts = || {
+            if el.is_dir {
+                tree.counts(el.pos)
+            } else {
+                (0, 0)
+            }
+        };
+        let local = || {
+            if el.is_dir {
+                tree.local_counts(el.pos)
+            } else {
+                (0, 0)
+            }
+        };
         let num = |out: &mut String, v: u64| {
             use std::fmt::Write;
             let _ = write!(out, "{v}");
@@ -383,8 +396,14 @@ impl Node {
                 let pad = args[1].text(cx);
                 let length = args[2].text(cx);
                 let length = length.trim();
-                let ok = !pad.is_empty() && !length.is_empty() && length.bytes().all(|b| b.is_ascii_digit());
-                let want = if ok { length.parse::<usize>().ok().filter(|&n| n <= MAX_PAD) } else { None };
+                let ok = !pad.is_empty()
+                    && !length.is_empty()
+                    && length.bytes().all(|b| b.is_ascii_digit());
+                let want = if ok {
+                    length.parse::<usize>().ok().filter(|&n| n <= MAX_PAD)
+                } else {
+                    None
+                };
                 let Some(want) = want else {
                     out.push_str(BAD_PAD);
                     return;
@@ -542,7 +561,11 @@ fn decimal(s: &str) -> Option<Decimal> {
     let int = int.trim_start_matches('0').to_owned();
     let frac = frac.trim_end_matches('0').to_owned();
     let zero = int.is_empty() && frac.is_empty();
-    Some(Decimal { negative: negative && !zero, int, frac })
+    Some(Decimal {
+        negative: negative && !zero,
+        int,
+        frac,
+    })
 }
 
 impl Ord for Decimal {
@@ -645,13 +668,19 @@ impl Parser<'_> {
                     if inner {
                         return (out, i);
                     }
-                    self.issue(i, "stray_close", Severity::Warning, fill(&tr(msg::STRAY_CLOSE), &[]));
+                    self.issue(
+                        i,
+                        "stray_close",
+                        Severity::Warning,
+                        fill(&tr(msg::STRAY_CLOSE), &[]),
+                    );
                     out.push(Node::Text("}".into()));
                     i += 1;
                 }
                 _ => {
                     // "<%"
-                    let end = (i + 2..n.saturating_sub(1)).find(|&k| self.t[k] == '%' && self.t[k + 1] == '>');
+                    let end = (i + 2..n.saturating_sub(1))
+                        .find(|&k| self.t[k] == '%' && self.t[k + 1] == '>');
                     match end {
                         None => {
                             self.issue(i, "unclosed_tag", Severity::Error, tr(msg::UNCLOSED_TAG));
@@ -701,7 +730,13 @@ impl Parser<'_> {
             end += 1;
         }
         let (word, end) = if end > letters {
-            (self.t[j..end].iter().collect::<String>().to_ascii_lowercase(), end)
+            (
+                self.t[j..end]
+                    .iter()
+                    .collect::<String>()
+                    .to_ascii_lowercase(),
+                end,
+            )
         } else {
             (String::new(), j)
         };
@@ -726,7 +761,12 @@ impl Parser<'_> {
         }
         let (items, k) = self.items(i + 1, true);
         if k >= n {
-            self.issue(i, "unclosed_group", Severity::Error, fill(&tr(msg::UNCLOSED_GROUP), &[]));
+            self.issue(
+                i,
+                "unclosed_group",
+                Severity::Error,
+                fill(&tr(msg::UNCLOSED_GROUP), &[]),
+            );
             return (seq(items), n);
         }
         (seq(items), k + 1)
@@ -779,7 +819,10 @@ impl Parser<'_> {
             let node = if pad {
                 let mut it = args.into_iter();
                 let a = [it.next().unwrap(), it.next().unwrap(), it.next().unwrap()];
-                Node::Pad { left: word == "leftpad", args: Box::new(a) }
+                Node::Pad {
+                    left: word == "leftpad",
+                    args: Box::new(a),
+                }
             } else {
                 let body = Box::new(args.pop().unwrap());
                 match word {
@@ -791,7 +834,10 @@ impl Parser<'_> {
             };
             return (node, k + 1);
         }
-        let m = fill(&tr(msg::BAD_CALL), &[("name", word), ("usage", &usage(word))]);
+        let m = fill(
+            &tr(msg::BAD_CALL),
+            &[("name", word), ("usage", &usage(word))],
+        );
         self.issue(start, "bad_call", Severity::Error, m);
         let marker = if pad { BAD_PAD } else { BAD_CALL };
         (Node::Text(marker.into()), self.skip_group(start))
@@ -799,29 +845,40 @@ impl Parser<'_> {
 
     fn call_if(&mut self, start: usize, i: usize) -> (Node, usize) {
         let fail = |p: &mut Self, detail: &str| -> (Node, usize) {
-            let m = fill(&tr(msg::BAD_IF), &[("usage", &usage("if")), ("detail", &fill(&tr(detail), &[]))]);
+            let m = fill(
+                &tr(msg::BAD_IF),
+                &[("usage", &usage("if")), ("detail", &fill(&tr(detail), &[]))],
+            );
             p.issue(start, "bad_if", Severity::Error, m);
             (Node::Text(BAD_IF.into()), p.skip_group(start))
         };
         let (a, i) = self.arg(i);
-        let Some(a) = a else { return fail(self, msg::IF_OPERAND) };
+        let Some(a) = a else {
+            return fail(self, msg::IF_OPERAND);
+        };
         let j = self.ws(i);
         let Some(op) = COMPARISONS.iter().copied().find(|o| self.starts_with(j, o)) else {
             return fail(self, msg::IF_OPERATOR);
         };
         let (b, i) = self.arg(j + op.len());
-        let Some(b) = b else { return fail(self, msg::IF_OPERAND) };
+        let Some(b) = b else {
+            return fail(self, msg::IF_OPERAND);
+        };
         let j = self.ws(i);
         if j >= self.t.len() || self.t[j] != '?' {
             return fail(self, msg::IF_QUESTION);
         }
         let (yes, i) = self.arg(j + 1);
-        let Some(yes) = yes else { return fail(self, msg::IF_OPERAND) };
+        let Some(yes) = yes else {
+            return fail(self, msg::IF_OPERAND);
+        };
         let mut j = self.ws(i);
         let mut no = None;
         if j < self.t.len() && self.t[j] == ':' {
             let (n, i) = self.arg(j + 1);
-            let Some(n) = n else { return fail(self, msg::IF_OPERAND) };
+            let Some(n) = n else {
+                return fail(self, msg::IF_OPERAND);
+            };
             no = Some(n);
             j = self.ws(i);
         }
@@ -869,11 +926,18 @@ struct Compiled {
     static_text: Option<String>,
 }
 
-fn compile(raw: &str, section: Section, first_line: u32, issues: &mut Vec<TemplateIssue>) -> Compiled {
+fn compile(
+    raw: &str,
+    section: Section,
+    first_line: u32,
+    issues: &mut Vec<TemplateIssue>,
+) -> Compiled {
     let raw: Vec<char> = raw.chars().collect();
     let (text, origin) = if has_script(&raw) {
         // script mode: line breaks and tabs are layout, not output
-        let origin: Vec<usize> = (0..raw.len()).filter(|&i| !matches!(raw[i], '\r' | '\n' | '\t')).collect();
+        let origin: Vec<usize> = (0..raw.len())
+            .filter(|&i| !matches!(raw[i], '\r' | '\n' | '\t'))
+            .collect();
         (origin.iter().map(|&i| raw[i]).collect(), Some(origin))
     } else {
         (raw.clone(), None)
@@ -893,12 +957,22 @@ fn compile(raw: &str, section: Section, first_line: u32, issues: &mut Vec<Templa
         Node::Seq(items) if items.iter().all(|i| matches!(i, Node::Text(_))) => Some(
             items
                 .iter()
-                .map(|i| if let Node::Text(t) = i { t.as_str() } else { "" })
+                .map(|i| {
+                    if let Node::Text(t) = i {
+                        t.as_str()
+                    } else {
+                        ""
+                    }
+                })
                 .collect(),
         ),
         _ => None,
     };
-    Compiled { node, tags, static_text }
+    Compiled {
+        node,
+        tags,
+        static_text,
+    }
 }
 
 /// A parsed template file: sections, ordering, display data and diagnostics.
@@ -923,11 +997,16 @@ impl ExportTemplate {
 
     /// The tags the template uses (lower case).
     pub fn tags(&self) -> BTreeSet<&'static str> {
-        self.compiled.iter().flat_map(|c| c.tags.iter().copied()).collect()
+        self.compiled
+            .iter()
+            .flat_map(|c| c.tags.iter().copied())
+            .collect()
     }
 
     pub fn needs_counts(&self) -> bool {
-        self.compiled.iter().any(|c| c.tags.iter().any(|t| COUNT_TAGS.contains(t)))
+        self.compiled
+            .iter()
+            .any(|c| c.tags.iter().any(|t| COUNT_TAGS.contains(t)))
     }
 }
 
@@ -945,7 +1024,9 @@ fn line_is_section(line: &str) -> Option<Section> {
 /// `[ \t]*@([A-Za-z]+)[ \t]*=(.*)`
 fn option_line(line: &str) -> Option<(String, &str)> {
     let t = line.trim_start_matches([' ', '\t']).strip_prefix('@')?;
-    let end = t.find(|c: char| !c.is_ascii_alphabetic()).unwrap_or(t.len());
+    let end = t
+        .find(|c: char| !c.is_ascii_alphabetic())
+        .unwrap_or(t.len());
     if end == 0 {
         return None;
     }
@@ -979,7 +1060,11 @@ pub fn parse_template(source: &str, name: &str) -> ExportTemplate {
         let mut current: Option<Section> = None;
         let mut body: Vec<&str> = Vec::new();
         let mut start = 0u32;
-        let close = |current: Option<Section>, body: &[&str], start: u32, sections: &mut [Option<(String, u32)>; 3], issues: &mut Vec<TemplateIssue>| {
+        let close = |current: Option<Section>,
+                     body: &[&str],
+                     start: u32,
+                     sections: &mut [Option<(String, u32)>; 3],
+                     issues: &mut Vec<TemplateIssue>| {
             if let Some(cur) = current {
                 if sections[idx(cur)].is_some() {
                     issues.push(TemplateIssue {
@@ -1046,10 +1131,15 @@ pub fn parse_template(source: &str, name: &str) -> ExportTemplate {
                             (_, v) => ordering.descending = v == "desc",
                         }
                     } else {
-                        let quoted = format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"));
+                        let quoted =
+                            format!("'{}'", value.replace('\\', "\\\\").replace('\'', "\\'"));
                         let m = fill(
                             &tr(msg::BAD_OPTION).replace("{value!r}", "{value}"),
-                            &[("key", &key), ("value", &quoted), ("allowed", &allowed.join(" / "))],
+                            &[
+                                ("key", &key),
+                                ("value", &quoted),
+                                ("allowed", &allowed.join(" / ")),
+                            ],
                         );
                         warn(&mut issues, "bad_option", m);
                     }
@@ -1067,7 +1157,12 @@ pub fn parse_template(source: &str, name: &str) -> ExportTemplate {
         let (raw, first) = sections[idx(s)].clone().unwrap_or_default();
         compile(&raw, s, first.max(1), &mut issues)
     });
-    let raw_of = |s: Section| sections[idx(s)].as_ref().map(|x| x.0.clone()).unwrap_or_default();
+    let raw_of = |s: Section| {
+        sections[idx(s)]
+            .as_ref()
+            .map(|x| x.0.clone())
+            .unwrap_or_default()
+    };
     ExportTemplate {
         name: opt_name.unwrap_or_else(|| name.to_owned()),
         file_name: opt_file.unwrap_or_default(),
@@ -1108,7 +1203,13 @@ pub fn render_chunks(
     for r in export_roots(nodes, root) {
         let tree = ExportTree::new(nodes, r, mask, template.ordering, counts, now)?;
         let top = tree.root_element();
-        header.node.put(&Cx { tree: &tree, el: &top }, &mut buf);
+        header.node.put(
+            &Cx {
+                tree: &tree,
+                el: &top,
+            },
+            &mut buf,
+        );
         if detail.static_text.as_deref() != Some("") {
             tree.walk(|el| -> Result<(), ExportError> {
                 detail.node.put(&Cx { tree: &tree, el }, &mut buf);
@@ -1119,7 +1220,13 @@ pub fn render_chunks(
                 Ok(())
             })?;
         }
-        footer.node.put(&Cx { tree: &tree, el: &top }, &mut buf);
+        footer.node.put(
+            &Cx {
+                tree: &tree,
+                el: &top,
+            },
+            &mut buf,
+        );
     }
     if !buf.is_empty() {
         sink(&buf)?;

@@ -137,7 +137,10 @@ fn windows(paths: &[String]) -> HashMap<String, Vec<String>> {
     }
     // who holds any file of `group` open; None when Restart Manager refuses the query
     let held = |group: &[&str]| -> Option<Vec<String>> {
-        let files: Vec<String> = group.iter().flat_map(|p| names[p].iter().cloned()).collect();
+        let files: Vec<String> = group
+            .iter()
+            .flat_map(|p| names[p].iter().cloned())
+            .collect();
         match super::win::rm_lockers(&files) {
             Ok(list) => Some(unique(list.into_iter().map(|(_, n)| n))),
             Err(e) => {
@@ -200,7 +203,11 @@ fn process_name(pid: &str, proc: &Path) -> String {
     match std::fs::read(proc.join(pid).join("comm")) {
         Ok(raw) => {
             let s = String::from_utf8_lossy(&raw).trim().to_string();
-            if s.is_empty() { format!("PID {pid}") } else { s }
+            if s.is_empty() {
+                format!("PID {pid}")
+            } else {
+                s
+            }
         }
         Err(_) => format!("PID {pid}"),
     }

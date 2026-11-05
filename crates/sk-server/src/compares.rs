@@ -18,8 +18,8 @@ use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, RwLock};
 use sk_core::diff::{
-    Change, ChangeTree, CompareOptions, DOMINANT, DiffError, Direction, MINOR, Status, change_item, compare_with,
-    rest_item,
+    Change, ChangeTree, CompareOptions, DOMINANT, DiffError, Direction, MINOR, Status, change_item,
+    compare_with, rest_item,
 };
 use sk_core::filter::NameIndex;
 use sk_core::layout::Basis;
@@ -29,9 +29,9 @@ use sk_core::view::trash::TrashCache;
 use sk_core::view::{ArrayChanges, CompareSource, View, ViewContext};
 use sk_protocol::ErrorCode;
 use sk_protocol::compare::{
-    ChangeItem, ChangeKind, ChangeStatus, CompareDirection, CompareInfo, CompareNodeResult, CompareOpenParams,
-    ComparePhase, CompareProgressEvent, CompareSide, CompareSideKind, CompareSourcesResult, CompareSummary,
-    CompareTask, NOW,
+    ChangeItem, ChangeKind, ChangeStatus, CompareDirection, CompareInfo, CompareNodeResult,
+    CompareOpenParams, ComparePhase, CompareProgressEvent, CompareSide, CompareSideKind,
+    CompareSourcesResult, CompareSummary, CompareTask, NOW,
 };
 use sk_protocol::methods::CompareProgress;
 use sk_protocol::scan::{ScanSource, TreeNodeResult};
@@ -108,8 +108,15 @@ impl CompareHandle {
     /// Its file is there to open or delete: the target is the live tree and it was not deleted.
     pub fn on_disk(&self, tree: &ChangeTree, node: NodeId) -> bool {
         self.target_spec == NOW
-            && self.scan.upgrade().is_some_and(|s| s.source == ScanSource::Scan)
-            && tree.diff.status.get(node as usize).is_some_and(|s| *s != Status::Removed)
+            && self
+                .scan
+                .upgrade()
+                .is_some_and(|s| s.source == ScanSource::Scan)
+            && tree
+                .diff
+                .status
+                .get(node as usize)
+                .is_some_and(|s| *s != Status::Removed)
     }
 
     fn info_of(&self, st: &CmpState) -> Option<CompareInfo> {
@@ -123,7 +130,9 @@ impl CompareHandle {
             target: st.target.clone()?,
             grow: roots.iter().map(|&r| d.grow[r as usize]).sum(),
             shrink: roots.iter().map(|&r| d.shrink[r as usize]).sum(),
-            changed: (1..d.len()).filter(|&i| d.grow[i] + d.shrink[i] > 0).count() as i64,
+            changed: (1..d.len())
+                .filter(|&i| d.grow[i] + d.shrink[i] > 0)
+                .count() as i64,
             nodes: d.len() as i64,
             live: self.live(),
             revision: st.revision,
@@ -141,7 +150,11 @@ impl CompareHandle {
             phase: st.phase,
             progress: st.progress,
             message: st.message.clone(),
-            info: if st.phase == ComparePhase::Ready { self.info_of(&st) } else { None },
+            info: if st.phase == ComparePhase::Ready {
+                self.info_of(&st)
+            } else {
+                None
+            },
         }
     }
 
@@ -185,7 +198,11 @@ pub fn now_side(h: &ScanHandle) -> CompareSide {
     let nodes = h.store.read();
     CompareSide {
         kind: CompareSideKind::Now,
-        path: if h.source == ScanSource::Snapshot { h.st.lock().snapshot_path.clone() } else { None },
+        path: if h.source == ScanSource::Snapshot {
+            h.st.lock().snapshot_path.clone()
+        } else {
+            None
+        },
         created_at: when,
         bytes_alloc: h.roots.read().iter().map(|r| nodes.tot_alloc(r.node)).sum(),
         node_count: nodes.len() as i64,
@@ -201,7 +218,11 @@ fn side(scan: &ScanHandle, spec: &str) -> RpcResult<(Store, CompareSide)> {
     let (store, header) = snapshot::load(&path).map_err(|e| {
         RpcError::new(
             ErrorCode::SnapshotError,
-            tr!("打不开快照 {path}：{error}", path = path.display().to_string(), error = e.to_string()),
+            tr!(
+                "打不开快照 {path}：{error}",
+                path = path.display().to_string(),
+                error = e.to_string()
+            ),
         )
     })?;
     let mine = scan.root_paths();
@@ -209,7 +230,11 @@ fn side(scan: &ScanHandle, spec: &str) -> RpcResult<(Store, CompareSide)> {
         let sep = sk_core::i18n::t("、");
         return Err(RpcError::new(
             ErrorCode::SnapshotError,
-            tr!("快照的扫描位置和当前标签不同：{a} ≠ {b}", a = header.roots.join(sep), b = mine.join(sep)),
+            tr!(
+                "快照的扫描位置和当前标签不同：{a} ≠ {b}",
+                a = header.roots.join(sep),
+                b = mine.join(sep)
+            ),
         ));
     }
     let info = snapshot_info(&path, &header);
@@ -254,23 +279,36 @@ fn compute(h: &Arc<CompareHandle>, scan: &ScanHandle) -> Result<ChangeTree, Fail
         compare_with(
             &b,
             &t,
-            CompareOptions { progress: Some(&mut progress), cancel: Some(&cancelled), ..CompareOptions::default() },
+            CompareOptions {
+                progress: Some(&mut progress),
+                cancel: Some(&cancelled),
+                ..CompareOptions::default()
+            },
         )
     };
     let diff = match diff {
         Ok(d) => d,
         Err(DiffError::Cancelled) => return Err(Failure::Cancelled),
-        Err(e) => return Err(Failure::Failed(tr!("对比失败：{error}", error = e.to_string()))),
+        Err(e) => {
+            return Err(Failure::Failed(tr!(
+                "对比失败：{error}",
+                error = e.to_string()
+            )));
+        }
     };
-    ChangeTree::of(&diff, StoreOptions::default()).map_err(|e| Failure::Failed(tr!("对比失败：{error}", error = e.to_string())))
+    ChangeTree::of(&diff, StoreOptions::default())
+        .map_err(|e| Failure::Failed(tr!("对比失败：{error}", error = e.to_string())))
 }
 
 /// The views' context and change source over a change tree (the scan's tags).
 fn ready_of(tree: ChangeTree, scan: &ScanHandle) -> Ready {
     let tree = Arc::new(tree);
     let store = tree.store().clone();
-    let roots: Vec<sk_core::view::RootInfo> =
-        store.read().roots().map(sk_core::view::RootInfo::folder).collect();
+    let roots: Vec<sk_core::view::RootInfo> = store
+        .read()
+        .roots()
+        .map(sk_core::view::RootInfo::folder)
+        .collect();
     let ctx = Arc::new(ViewContext {
         store,
         roots: RwLock::new(roots),
@@ -284,14 +322,24 @@ fn ready_of(tree: ChangeTree, scan: &ScanHandle) -> Ready {
     let source: Arc<dyn CompareSource> = Arc::new(ArrayChanges::new(
         tree.diff.delta.clone(),
         tree.diff.status.iter().map(|s| *s as u8).collect(),
-        move |d, m| t.amounts(d != CompareDirection::Shrink, d != CompareDirection::Grow, m),
+        move |d, m| {
+            t.amounts(
+                d != CompareDirection::Shrink,
+                d != CompareDirection::Grow,
+                m,
+            )
+        },
     ));
     Ready { tree, ctx, source }
 }
 
 impl CompareManager {
     pub fn new(_config: &Config, _settings: &Arc<SettingsStore>) -> CompareManager {
-        CompareManager { compares: Mutex::new(HashMap::new()), order: Mutex::new(Vec::new()), ids: AtomicU64::new(1) }
+        CompareManager {
+            compares: Mutex::new(HashMap::new()),
+            order: Mutex::new(Vec::new()),
+            ids: AtomicU64::new(1),
+        }
     }
 
     pub fn lookup(&self, id: &str) -> Option<Arc<CompareHandle>> {
@@ -299,12 +347,18 @@ impl CompareManager {
     }
 
     pub fn get(&self, id: &str) -> RpcResult<Arc<CompareHandle>> {
-        self.lookup(id).ok_or_else(|| RpcError::new(ErrorCode::UnknownScan, tr!("没有这个对比：{id}", id = id)))
+        self.lookup(id).ok_or_else(|| {
+            RpcError::new(ErrorCode::UnknownScan, tr!("没有这个对比：{id}", id = id))
+        })
     }
 
     fn all(&self) -> Vec<Arc<CompareHandle>> {
         let m = self.compares.lock();
-        self.order.lock().iter().filter_map(|id| m.get(id).cloned()).collect()
+        self.order
+            .lock()
+            .iter()
+            .filter_map(|id| m.get(id).cloned())
+            .collect()
     }
 
     /// A ready comparison opens like a scan: its context and change source.
@@ -315,7 +369,10 @@ impl CompareManager {
 
     /// The view contexts of every comparison (the filter vocabulary follows the language).
     pub fn contexts(&self) -> Vec<Arc<ViewContext>> {
-        self.all().iter().filter_map(|h| h.ready().map(|r| r.ctx.clone())).collect()
+        self.all()
+            .iter()
+            .filter_map(|h| h.ready().map(|r| r.ctx.clone()))
+            .collect()
     }
 
     // ------------------------------------------------------------- sources
@@ -323,30 +380,51 @@ impl CompareManager {
     pub fn sources(&self, server: &Server, scan_id: &str) -> RpcResult<CompareSourcesResult> {
         let h = server.scans.get(scan_id)?;
         let key = snapshot::root_key(&h.root_paths());
-        let own = if h.source == ScanSource::Snapshot { h.st.lock().snapshot_path.clone() } else { None };
+        let own = if h.source == ScanSource::Snapshot {
+            h.st.lock().snapshot_path.clone()
+        } else {
+            None
+        };
         let found = snapshot::list_snapshots(&sk_core::paths::snapshots_dir());
         let snapshots = found
             .iter()
             .filter(|(p, hd)| {
-                snapshot::root_key(&hd.roots) == key && own.as_deref() != Some(p.display().to_string().as_str())
+                snapshot::root_key(&hd.roots) == key
+                    && own.as_deref() != Some(p.display().to_string().as_str())
             })
             .map(|(p, hd)| snapshot_info(p, hd))
             .collect();
         if h.running() {
-            return Ok(CompareSourcesResult { snapshots, now: None, now_note: tr!("扫描还没有完成，完成后才能与「现在」对比") });
+            return Ok(CompareSourcesResult {
+                snapshots,
+                now: None,
+                now_note: tr!("扫描还没有完成，完成后才能与「现在」对比"),
+            });
         }
-        Ok(CompareSourcesResult { snapshots, now: Some(now_side(&h)), now_note: String::new() })
+        Ok(CompareSourcesResult {
+            snapshots,
+            now: Some(now_side(&h)),
+            now_note: String::new(),
+        })
     }
 
     // ------------------------------------------------------------- lifecycle
 
-    pub fn open(&self, server: &Arc<Server>, session: &Arc<Session>, params: &CompareOpenParams) -> RpcResult<CompareTask> {
+    pub fn open(
+        &self,
+        server: &Arc<Server>,
+        session: &Arc<Session>,
+        params: &CompareOpenParams,
+    ) -> RpcResult<CompareTask> {
         let scan = server.scans.get(&params.scan_id)?;
         if params.base == params.target {
             return Err(RpcError::invalid_params(tr!("基准和对比目标是同一份数据")));
         }
         if (params.base == NOW || params.target == NOW) && scan.running() {
-            return Err(RpcError::new(ErrorCode::ScanBusy, tr!("扫描还没有完成，完成后才能与「现在」对比")));
+            return Err(RpcError::new(
+                ErrorCode::ScanBusy,
+                tr!("扫描还没有完成，完成后才能与「现在」对比"),
+            ));
         }
         self.make_room(server);
         let h = Arc::new(CompareHandle {
@@ -406,7 +484,10 @@ impl CompareManager {
 
     fn make_room(&self, server: &Arc<Server>) {
         while self.compares.lock().len() >= MAX_COMPARES {
-            let idle = self.all().into_iter().find(|h| !server.views.has_views(&h.id));
+            let idle = self
+                .all()
+                .into_iter()
+                .find(|h| !server.views.has_views(&h.id));
             match idle {
                 Some(h) => self.close(server, &h.id),
                 None => return,
@@ -479,7 +560,8 @@ impl CompareManager {
             let wait = {
                 let st = h.st.lock();
                 let Some(dirty) = st.dirty_at else { return };
-                let due = (dirty + LIVE_QUIET).max(st.computed_at.map_or(dirty, |c| c + LIVE_MIN_GAP));
+                let due =
+                    (dirty + LIVE_QUIET).max(st.computed_at.map_or(dirty, |c| c + LIVE_MIN_GAP));
                 due.saturating_duration_since(Instant::now())
             };
             if !wait.is_zero() {
@@ -487,12 +569,16 @@ impl CompareManager {
                 continue;
             }
             h.st.lock().dirty_at = None;
-            let Some(scan) = server.scans.lookup(&h.scan_id) else { return };
+            let Some(scan) = server.scans.lookup(&h.scan_id) else {
+                return;
+            };
             if scan.running() {
                 return;
             }
             let (hh, sc) = (h.clone(), scan.clone());
-            let res = tokio::task::spawn_blocking(move || compute(&hh, &sc).map(|t| ready_of(t, &sc))).await;
+            let res =
+                tokio::task::spawn_blocking(move || compute(&hh, &sc).map(|t| ready_of(t, &sc)))
+                    .await;
             let ready = match res {
                 Ok(Ok(r)) => Arc::new(r),
                 Ok(Err(f)) => {
@@ -517,7 +603,10 @@ impl CompareManager {
                 st.computed_at = Some(Instant::now());
             }
             h.set(ComparePhase::Ready, Some(1.0), String::new());
-            server.views.replace_store(server, &h.id, ready.ctx.clone(), ready.source.clone()).await;
+            server
+                .views
+                .replace_store(server, &h.id, ready.ctx.clone(), ready.source.clone())
+                .await;
             h.emit(true);
         }
     }
@@ -527,9 +616,14 @@ impl CompareManager {
     /// `tree.node` on a comparison's change tree (None: not a comparison).
     pub fn tree_node(&self, id: &str, node: NodeId) -> Option<RpcResult<TreeNodeResult>> {
         let h = self.lookup(id)?;
-        let Some(r) = h.ready() else { return Some(Err(not_ready())) };
+        let Some(r) = h.ready() else {
+            return Some(Err(not_ready()));
+        };
         if node as usize >= r.tree.len() {
-            return Some(Err(RpcError::new(ErrorCode::UnknownNode, format!("unknown node: {node}"))));
+            return Some(Err(RpcError::new(
+                ErrorCode::UnknownNode,
+                format!("unknown node: {node}"),
+            )));
         }
         let nodes = r.tree.store().read();
         Some(Ok(TreeNodeResult {
@@ -559,7 +653,12 @@ impl CompareManager {
     }
 
     /// `compare.summary` (blocking: call on a compute thread).
-    pub fn summary_of(&self, server: &Server, host: &ViewHost, limit: usize) -> RpcResult<CompareSummary> {
+    pub fn summary_of(
+        &self,
+        server: &Server,
+        host: &ViewHost,
+        limit: usize,
+    ) -> RpcResult<CompareSummary> {
         let (h, r) = self.host_ready(host)?;
         let v = host.view.lock();
         Ok(summary(server, &h, &r.tree, &v, limit))
@@ -583,7 +682,10 @@ impl CompareManager {
                 let nodes = tree.store().read();
                 let folder = nodes.parent(ids[0]).max(0) as NodeId;
                 let start: usize = draw.name_len[..row].iter().map(|&l| l as usize).sum();
-                let label = String::from_utf8_lossy(&draw.names[start..start + draw.name_len[row] as usize]).into_owned();
+                let label = String::from_utf8_lossy(
+                    &draw.names[start..start + draw.name_len[row] as usize],
+                )
+                .into_owned();
                 let d = &tree.diff;
                 let item = ChangeItem {
                     node: folder,
@@ -594,7 +696,10 @@ impl CompareManager {
                     base: ids.iter().map(|&i| d.base_alloc[i as usize]).sum(),
                     target: ids.iter().map(|&i| d.target_alloc[i as usize]).sum(),
                     status: ChangeStatus::Changed,
-                    new_files: ids.iter().map(|&i| i64::from(tree.new_files[i as usize])).sum(),
+                    new_files: ids
+                        .iter()
+                        .map(|&i| i64::from(tree.new_files[i as usize]))
+                        .sum(),
                     members: ids.len() as i64,
                     reason: String::new(),
                     on_disk: false,
@@ -608,7 +713,11 @@ impl CompareManager {
                 let node = node as NodeId;
                 let kids: Vec<NodeId> = {
                     let nodes = tree.store().read();
-                    if nodes.is_dir(node) { nodes.children(node).collect() } else { Vec::new() }
+                    if nodes.is_dir(node) {
+                        nodes.children(node).collect()
+                    } else {
+                        Vec::new()
+                    }
                 };
                 (item(&h, tree, node, scope), kids)
             }
@@ -618,9 +727,16 @@ impl CompareManager {
         if children > 0 && !kids.is_empty() {
             let mut order = kids;
             order.sort_by_key(|&k| std::cmp::Reverse(tree.diff.delta[k as usize].abs()));
-            top = order.into_iter().take(children).map(|k| item(&h, tree, k, scope)).collect();
+            top = order
+                .into_iter()
+                .take(children)
+                .map(|k| item(&h, tree, k, scope))
+                .collect();
         }
-        Ok(CompareNodeResult { item: card, children: top })
+        Ok(CompareNodeResult {
+            item: card,
+            children: top,
+        })
     }
 }
 
@@ -628,11 +744,13 @@ impl CompareManager {
 fn item(h: &CompareHandle, tree: &ChangeTree, node: NodeId, scope: NodeId) -> ChangeItem {
     let reason = {
         let nodes = tree.store().read();
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sk_core::insights::match_node(&nodes, node, None)))
-            .ok()
-            .flatten()
-            .map(|i| i.note)
-            .unwrap_or_default()
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            sk_core::insights::match_node(&nodes, node, None)
+        }))
+        .ok()
+        .flatten()
+        .map(|i| i.note)
+        .unwrap_or_default()
     };
     change_item(tree, node, scope, reason, h.on_disk(tree, node))
 }
@@ -653,35 +771,90 @@ fn units(
     limit: usize,
 ) -> (Vec<ChangeItem>, i64) {
     if let Some(m) = members {
-        let mut ids: Vec<NodeId> = m.iter().copied().filter(|&n| amount.get(n as usize).copied().unwrap_or(0) > 0).collect();
+        let mut ids: Vec<NodeId> = m
+            .iter()
+            .copied()
+            .filter(|&n| amount.get(n as usize).copied().unwrap_or(0) > 0)
+            .collect();
         ids.sort_by_key(|&n| std::cmp::Reverse(amount[n as usize]));
-        let shown = ids.iter().take(limit).map(|&n| item(h, tree, n, scope)).collect();
+        let shown = ids
+            .iter()
+            .take(limit)
+            .map(|&n| item(h, tree, n, scope))
+            .collect();
         return (shown, ids.len() as i64);
     }
-    let all = tree.diff.changes(direction, limit.max(COUNT_UNITS), scope, Some(amount), DOMINANT, MINOR);
-    let items = all.iter().take(limit).map(|u| unit_item(h, tree, u, scope)).collect();
+    let all = tree.diff.changes(
+        direction,
+        limit.max(COUNT_UNITS),
+        scope,
+        Some(amount),
+        DOMINANT,
+        MINOR,
+    );
+    let items = all
+        .iter()
+        .take(limit)
+        .map(|u| unit_item(h, tree, u, scope))
+        .collect();
     (items, all.len() as i64)
 }
 
-fn summary(server: &Server, h: &CompareHandle, tree: &ChangeTree, view: &View, limit: usize) -> CompareSummary {
+fn summary(
+    server: &Server,
+    h: &CompareHandle,
+    tree: &ChangeTree,
+    view: &View,
+    limit: usize,
+) -> CompareSummary {
     let z = &view.zoom;
-    let matched = view.filter.result.as_ref().filter(|_| view.filter.active()).map(|r| r.matched.clone());
+    let matched = view
+        .filter
+        .result
+        .as_ref()
+        .filter(|_| view.filter.active())
+        .map(|r| r.matched.clone());
     let (grow, shrink) = match &matched {
-        Some(m) => (tree.amounts(true, false, Some(m)), tree.amounts(false, true, Some(m))),
+        Some(m) => (
+            tree.amounts(true, false, Some(m)),
+            tree.amounts(false, true, Some(m)),
+        ),
         None => (tree.diff.grow.clone(), tree.diff.shrink.clone()),
     };
     let members: Option<Vec<NodeId>> = z.members.as_ref().map(|m| m.as_ref().clone());
     let at = |v: &[i64], n: NodeId| v.get(n as usize).copied().unwrap_or(0);
     let (g, s) = match &members {
-        Some(m) => (m.iter().map(|&n| at(&grow, n)).sum(), m.iter().map(|&n| at(&shrink, n)).sum()),
+        Some(m) => (
+            m.iter().map(|&n| at(&grow, n)).sum(),
+            m.iter().map(|&n| at(&shrink, n)).sum(),
+        ),
         None => (at(&grow, z.node), at(&shrink, z.node)),
     };
     let whole = members.is_none() && z.node == view.home;
-    let (grow_items, grow_count) = units(h, tree, Direction::Grow, &grow, members.as_deref(), z.node, limit);
-    let (shrink_items, shrink_count) = units(h, tree, Direction::Shrink, &shrink, members.as_deref(), z.node, limit);
+    let (grow_items, grow_count) = units(
+        h,
+        tree,
+        Direction::Grow,
+        &grow,
+        members.as_deref(),
+        z.node,
+        limit,
+    );
+    let (shrink_items, shrink_count) = units(
+        h,
+        tree,
+        Direction::Shrink,
+        &shrink,
+        members.as_deref(),
+        z.node,
+        limit,
+    );
     let (base, target) = {
         let st = h.st.lock();
-        (st.base.clone().expect("ready"), st.target.clone().expect("ready"))
+        (
+            st.base.clone().expect("ready"),
+            st.target.clone().expect("ready"),
+        )
     };
     let span = (target.created_at - base.created_at).num_milliseconds() as f64 / 1000.0;
     let net = g - s;
@@ -689,7 +862,12 @@ fn summary(server: &Server, h: &CompareHandle, tree: &ChangeTree, view: &View, l
     if h.target_spec == NOW
         && let Some(scan) = server.scans.lookup(&h.scan_id)
     {
-        let frees: Vec<i64> = scan.roots.read().iter().filter_map(|r| r.volume.as_ref().map(|v| v.free)).collect();
+        let frees: Vec<i64> = scan
+            .roots
+            .read()
+            .iter()
+            .filter_map(|r| r.volume.as_ref().map(|v| v.free))
+            .collect();
         if !frees.is_empty() {
             free = Some(frees.iter().sum());
         }
@@ -704,7 +882,11 @@ fn summary(server: &Server, h: &CompareHandle, tree: &ChangeTree, view: &View, l
             days = Some(f as f64 / d);
         }
     }
-    let scope = if z.node > 0 { tree.store().read().path_lossy(z.node) } else { String::new() };
+    let scope = if z.node > 0 {
+        tree.store().read().path_lossy(z.node)
+    } else {
+        String::new()
+    };
     CompareSummary {
         view_id: view.id.clone(),
         compare_id: h.id.clone(),

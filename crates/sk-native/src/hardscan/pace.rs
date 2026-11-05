@@ -1054,10 +1054,16 @@ mod tests {
             ("stay", 8)
         );
         // the CPUs nearly all busy: the listings do not wait for each other, no narrower width
-        assert_eq!(decide(&mut ctl(t), &warm(0.9, 0.95, 1000.0), 16, L, t), ("hold", 16));
+        assert_eq!(
+            decide(&mut ctl(t), &warm(0.9, 0.95, 1000.0), 16, L, t),
+            ("hold", 16)
+        );
         let mut c = ctl(t);
         c.up_next = false;
-        assert_eq!(decide(&mut c, &warm(0.9, 0.95, 1000.0), 8, L, t), ("try", 16)); // up still
+        assert_eq!(
+            decide(&mut c, &warm(0.9, 0.95, 1000.0), 8, L, t),
+            ("try", 16)
+        ); // up still
         // at the least only up; at the start width only down
         let mut c = ctl(t);
         c.up_next = false;

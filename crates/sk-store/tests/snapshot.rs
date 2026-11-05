@@ -179,9 +179,19 @@ fn saves_in_one_second_do_not_overwrite_each_other() {
         snapshot::save(&store.read(), &path, &opts).unwrap();
         made.push(path);
     }
-    let names: Vec<String> = made.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    let names: Vec<String> = made
+        .iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
     let stamp = snapshot::stamp(when);
-    assert_eq!(names, [format!("{stamp}.sks"), format!("{stamp}_001.sks"), format!("{stamp}_002.sks")]);
+    assert_eq!(
+        names,
+        [
+            format!("{stamp}.sks"),
+            format!("{stamp}_001.sks"),
+            format!("{stamp}_002.sks")
+        ]
+    );
     let mut sorted = names.clone();
     sorted.sort();
     assert_eq!(sorted, names, "later saves sort after earlier ones");

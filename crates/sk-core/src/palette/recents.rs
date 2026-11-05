@@ -72,7 +72,10 @@ impl Recents {
             .chain(st.jumps.values().flatten())
             .map(|e| e.at)
             .fold(0.0, f64::max);
-        Recents { file, state: Mutex::new(st) }
+        Recents {
+            file,
+            state: Mutex::new(st),
+        }
     }
 
     pub fn add_jump(&self, target: &str, path: &str) -> std::io::Result<()> {
@@ -80,8 +83,15 @@ impl Recents {
         let mut st = self.state.lock();
         let at = now(&mut st);
         let items = st.jumps.remove(target).unwrap_or_default();
-        let entry = Entry { kind: RecentKind::Jump, text: path.to_owned(), at };
-        st.jumps.insert(target.to_owned(), push(items, entry, |e| path_key(&e.text) != key));
+        let entry = Entry {
+            kind: RecentKind::Jump,
+            text: path.to_owned(),
+            at,
+        };
+        st.jumps.insert(
+            target.to_owned(),
+            push(items, entry, |e| path_key(&e.text) != key),
+        );
         save(&self.file, &st)
     }
 
@@ -89,7 +99,15 @@ impl Recents {
         let mut st = self.state.lock();
         let at = now(&mut st);
         let items = std::mem::take(&mut st.filters);
-        st.filters = push(items, Entry { kind: RecentKind::Filter, text: text.to_owned(), at }, |e| e.text != text);
+        st.filters = push(
+            items,
+            Entry {
+                kind: RecentKind::Filter,
+                text: text.to_owned(),
+                at,
+            },
+            |e| e.text != text,
+        );
         save(&self.file, &st)
     }
 
@@ -106,7 +124,10 @@ impl Recents {
     /// Jumps of `target` and all filters, newest first.
     pub fn entries(&self, target: Option<&str>) -> Vec<Entry> {
         let st = self.state.lock();
-        let mut out: Vec<Entry> = target.and_then(|t| st.jumps.get(t)).cloned().unwrap_or_default();
+        let mut out: Vec<Entry> = target
+            .and_then(|t| st.jumps.get(t))
+            .cloned()
+            .unwrap_or_default();
         out.extend(st.filters.iter().cloned());
         out.sort_by(|a, b| b.at.total_cmp(&a.at));
         out
@@ -123,24 +144,45 @@ fn now(st: &mut State) -> f64 {
 }
 
 fn push(items: Vec<Entry>, entry: Entry, keep: impl Fn(&Entry) -> bool) -> Vec<Entry> {
-    std::iter::once(entry).chain(items.into_iter().filter(|e| keep(e))).take(KEEP).collect()
+    std::iter::once(entry)
+        .chain(items.into_iter().filter(|e| keep(e)))
+        .take(KEEP)
+        .collect()
 }
 
 fn load(file: &Path) -> State {
-    let Ok(text) = std::fs::read_to_string(file) else { return State::default() };
-    let Ok(data) = serde_json::from_str::<Payload>(&text) else { return State::default() };
+    let Ok(text) = std::fs::read_to_string(file) else {
+        return State::default();
+    };
+    let Ok(data) = serde_json::from_str::<Payload>(&text) else {
+        return State::default();
+    };
     let entries = |kind: RecentKind, v: Vec<Item>| -> Vec<Entry> {
-        v.into_iter().take(KEEP).map(|i| Entry { kind, text: i.text, at: i.at }).collect()
+        v.into_iter()
+            .take(KEEP)
+            .map(|i| Entry {
+                kind,
+                text: i.text,
+                at: i.at,
+            })
+            .collect()
     };
     State {
-        jumps: data.jumps.into_iter().map(|(k, v)| (k, entries(RecentKind::Jump, v))).collect(),
+        jumps: data
+            .jumps
+            .into_iter()
+            .map(|(k, v)| (k, entries(RecentKind::Jump, v)))
+            .collect(),
         filters: entries(RecentKind::Filter, data.filters),
         last: 0.0,
     }
 }
 
 fn save(file: &Path, st: &State) -> std::io::Result<()> {
-    let item = |e: &Entry| Item { text: e.text.clone(), at: e.at };
+    let item = |e: &Entry| Item {
+        text: e.text.clone(),
+        at: e.at,
+    };
     let payload = Payload {
         version: 1,
         jumps: st

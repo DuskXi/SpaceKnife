@@ -32,7 +32,10 @@ async fn ping_and_info() {
 async fn unknown_method() {
     let srv = server().await;
     let c = Client::open(&srv.url).await;
-    assert_eq!(c.err("nope.method", json!({})).await.code, code(ErrorCode::MethodNotFound));
+    assert_eq!(
+        c.err("nope.method", json!({})).await.code,
+        code(ErrorCode::MethodNotFound)
+    );
 }
 
 #[tokio::test]
@@ -41,11 +44,20 @@ async fn invalid_params_are_reported_with_details() {
     let c = Client::open(&srv.url).await;
     let e = c.err("test.sleep", json!({"payload": "x"})).await;
     assert_eq!(e.code, code(ErrorCode::InvalidParams));
-    assert!(e.data.as_ref().and_then(Value::as_array).is_some_and(|a| !a.is_empty()));
+    assert!(
+        e.data
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|a| !a.is_empty())
+    );
     // a real method's params: unknown fields and constraints
-    let e = c.err("system.ping", json!({"payload": "x", "extra": 1})).await;
+    let e = c
+        .err("system.ping", json!({"payload": "x", "extra": 1}))
+        .await;
     assert_eq!(e.code, code(ErrorCode::InvalidParams));
-    let e = c.err("view.results", json!({"view_id": "v", "limit": 100000})).await;
+    let e = c
+        .err("view.results", json!({"view_id": "v", "limit": 100000}))
+        .await;
     assert_eq!(e.code, code(ErrorCode::InvalidParams));
 }
 
@@ -56,7 +68,10 @@ async fn cancel_in_flight_request() {
     let (id, rx) = c.send("test.sleep", json!({"seconds": 10}));
     tokio::time::sleep(Duration::from_millis(100)).await;
     c.notify("$/cancel", json!({"id": id}));
-    let r = tokio::time::timeout(Duration::from_secs(2), rx).await.unwrap().unwrap();
+    let r = tokio::time::timeout(Duration::from_secs(2), rx)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(r.unwrap_err().code, code(ErrorCode::RequestCancelled));
     let session = srv.server.sessions().into_iter().next().unwrap();
     for _ in 0..50 {
@@ -82,15 +97,26 @@ async fn concurrent_requests_complete_independently() {
     assert_eq!(slow.await.unwrap().unwrap(), json!({}));
 }
 
-async fn raw_session(url: &str) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
+async fn raw_session(
+    url: &str,
+) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>> {
     let mut ws = raw(url, None, true).await.unwrap();
-    ws.send(Message::text(hello_frame(TOKEN, PROTOCOL_VERSION, 0, &["subscriptions".to_owned()]))).await.unwrap();
+    ws.send(Message::text(hello_frame(
+        TOKEN,
+        PROTOCOL_VERSION,
+        0,
+        &["subscriptions".to_owned()],
+    )))
+    .await
+    .unwrap();
     next_json(&mut ws).await;
     ws
 }
 
 async fn next_json(
-    ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    ws: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
 ) -> Value {
     loop {
         match ws.next().await {
@@ -105,7 +131,9 @@ async fn next_json(
 async fn duplicate_request_id_is_rejected() {
     let srv = server().await;
     let mut ws = raw_session(&srv.url).await;
-    let req = json!({"jsonrpc": "2.0", "id": 9, "method": "test.sleep", "params": {"seconds": 0.5}}).to_string();
+    let req =
+        json!({"jsonrpc": "2.0", "id": 9, "method": "test.sleep", "params": {"seconds": 0.5}})
+            .to_string();
     ws.send(Message::text(req.clone())).await.unwrap();
     ws.send(Message::text(req)).await.unwrap();
     let first = next_json(&mut ws).await;
@@ -149,7 +177,9 @@ async fn inbound_messages_over_1_mib_close_the_connection() {
 async fn log_subscription_streams_records() {
     let srv = server().await;
     let c = Client::open(&srv.url).await;
-    let sub = c.subscribe("log", json!({"min_level": "INFO", "backlog": 0})).await;
+    let sub = c
+        .subscribe("log", json!({"min_level": "INFO", "backlog": 0}))
+        .await;
     tracing::debug!("debug is below the floor");
     tracing::warn!("磁盘读取 warn-marker");
     let ev = c
@@ -173,7 +203,11 @@ async fn subscribe_requires_negotiated_capability() {
     assert_eq!(e.code, code(ErrorCode::InvalidRequest));
     let c = Client::open_caps(&srv.url, &["subscriptions"]).await;
     let e = c.err("$/subscribe", json!({"topic": "log"})).await;
-    assert_eq!(e.code, code(ErrorCode::InvalidRequest), "log-stream not negotiated");
+    assert_eq!(
+        e.code,
+        code(ErrorCode::InvalidRequest),
+        "log-stream not negotiated"
+    );
 }
 
 #[tokio::test]
@@ -182,7 +216,13 @@ async fn unknown_topic() {
     let c = Client::open(&srv.url).await;
     let e = c.err("$/subscribe", json!({"topic": "nope"})).await;
     assert_eq!(e.code, code(ErrorCode::UnknownTopic));
-    assert!(e.data.unwrap()["topics"].as_array().unwrap().iter().any(|t| t == "scan"));
+    assert!(
+        e.data.unwrap()["topics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|t| t == "scan")
+    );
 }
 
 #[tokio::test]
@@ -191,7 +231,10 @@ async fn binary_frames_reach_the_client() {
     let c = Client::open(&srv.url).await;
     let session = srv.server.sessions().into_iter().next().unwrap();
     let x: Vec<f32> = vec![0.0, 1.0, 2.0];
-    let frame = FrameBuilder::new("drawlist", "rect.v1").column("x", &x[..]).finish().unwrap();
+    let frame = FrameBuilder::new("drawlist", "rect.v1")
+        .column("x", &x[..])
+        .finish()
+        .unwrap();
     session.send_binary(frame);
     let got = c.binary(2.0).await;
     let decoded = sk_protocol::binary::decode_frame(&got).unwrap();
@@ -218,16 +261,23 @@ async fn app_shutdown_requests_server_stop() {
     let c = Client::open(&srv.url).await;
     let r = c.ok("app.shutdown", json!({})).await;
     assert_eq!(r["accepted"], true);
-    tokio::time::timeout(Duration::from_secs(2), srv.server.wait_shutdown()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(2), srv.server.wait_shutdown())
+        .await
+        .unwrap();
     assert_eq!(c.closed(5.0).await, Some(1001));
-    tokio::time::timeout(Duration::from_secs(10), srv.wait()).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), srv.wait())
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
 async fn every_method_is_routed() {
     let srv = server().await;
     let names = srv.server.router.names();
-    for m in sk_protocol::methods::METHODS.iter().filter(|m| m.name != "session.hello") {
+    for m in sk_protocol::methods::METHODS
+        .iter()
+        .filter(|m| m.name != "session.hello")
+    {
         assert!(names.contains(&m.name), "{} has no handler", m.name);
     }
 }

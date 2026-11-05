@@ -44,9 +44,9 @@ use win as sys;
 use std::fmt;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::{Arena, NativePath, RootOpts, StateOpts};

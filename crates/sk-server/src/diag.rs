@@ -70,16 +70,29 @@ pub fn report(server: &Server) -> String {
             h.id,
             sk_core::fmt::count(nodes.len() as i64),
             nodes.memory_bytes() as f64 / 1048576.0,
-            if nodes.columns_mapped() { " (mapped)" } else { "" },
+            if nodes.columns_mapped() {
+                " (mapped)"
+            } else {
+                ""
+            },
             nodes.names_size() as f64 / 1048576.0,
             h.ctx.names.memory_bytes() as f64 / 1048576.0,
         ));
     }
     let (free, slots) = crate::compute::stats();
-    lines.push(format!("  views {}, compute {} of {} slots busy", server.views.len(), slots - free.min(slots), slots));
+    lines.push(format!(
+        "  views {}, compute {} of {} slots busy",
+        server.views.len(),
+        slots - free.min(slots),
+        slots
+    ));
     for s in server.sessions() {
         let (count, size) = s.outbox_stats();
-        lines.push(format!("  session {}: outbox {count} messages, {:.1} MB", s.id, size as f64 / 1048576.0));
+        lines.push(format!(
+            "  session {}: outbox {count} messages, {:.1} MB",
+            s.id,
+            size as f64 / 1048576.0
+        ));
     }
     lines.join("\n")
 }
@@ -104,7 +117,9 @@ pub fn trim_due(private: u64, trimmed: &mut Option<u64>) -> bool {
 /// The idle trim: when no scan runs and the process grew by [`TRIM_GROWTH`] since the last trim,
 /// give the heap's free pages back. `trimmed` is the private memory after the last trim.
 pub fn idle_trim(server: &Server, trimmed: &mut Option<u64>) {
-    let Some(private) = process_memory().private else { return };
+    let Some(private) = process_memory().private else {
+        return;
+    };
     if !idle(server) {
         if let Some(t) = trimmed {
             *t = (*t).min(private);
@@ -119,18 +134,25 @@ pub fn idle_trim(server: &Server, trimmed: &mut Option<u64>) {
 
 /// One look: true when it warned.
 pub fn check(server: &Server, last: &mut u64) -> bool {
-    let Some(private) = process_memory().private else { return false };
+    let Some(private) = process_memory().private else {
+        return false;
+    };
     let limit = 2 * accounted(server) + SLACK + retained(server);
     if private <= limit || (private as f64) <= *last as f64 * 1.25 {
         return false;
     }
     release(); // freed but kept by the heap: give it back, then judge
-    let Some(private) = process_memory().private else { return false };
+    let Some(private) = process_memory().private else {
+        return false;
+    };
     if private <= limit {
         return false;
     }
     *last = private;
-    tracing::warn!("memory above what the scans account for:\n{}", report(server));
+    tracing::warn!(
+        "memory above what the scans account for:\n{}",
+        report(server)
+    );
     events::emit(
         Source::System,
         &tr!(

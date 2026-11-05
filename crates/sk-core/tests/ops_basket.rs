@@ -8,10 +8,10 @@ use std::time::Instant;
 
 use sk_core::ops::basket::{AddResult, Basket, BasketItem, Merged, default_volume_of};
 use sk_core::ops::trash::{OpCode, OpResult};
+use sk_protocol::compare::ChangeKind;
+use sk_protocol::ops::BasketItemStatus as St;
 use sk_store::testing::{Spec, build_with, d, f, find};
 use sk_store::{Col, Flags, NodeId, Store};
-use sk_protocol::ops::BasketItemStatus as St;
-use sk_protocol::compare::ChangeKind;
 
 const KB4: i64 = 4096;
 
@@ -20,11 +20,21 @@ fn spec() -> Spec {
     small.push(("big.iso".into(), f(100_000)));
     let small: Vec<(&str, Spec)> = small.iter().map(|(n, s)| (n.as_str(), s.clone())).collect();
     d([
-        ("docs", d([("a.txt", f(1000)), ("b.txt", f(2000)), ("sub", d([("c.bin", f(5000))]))])),
+        (
+            "docs",
+            d([
+                ("a.txt", f(1000)),
+                ("b.txt", f(2000)),
+                ("sub", d([("c.bin", f(5000))])),
+            ]),
+        ),
         ("small", d(small)),
         ("links", d([("x.dat", f(8192))])),
         ("other", d([("y.dat", f(8192))])),
-        ("cloud", d([("online.docx", f(50_000)), ("local.docx", f(3000))])),
+        (
+            "cloud",
+            d([("online.docx", f(50_000)), ("local.docx", f(3000))]),
+        ),
     ])
 }
 
@@ -80,7 +90,10 @@ fn reaggregate(store: &Store) {
 }
 
 fn merged(path: &str, into: &str) -> Merged {
-    Merged { path: path.to_string(), into: into.to_string() }
+    Merged {
+        path: path.to_string(),
+        into: into.to_string(),
+    }
 }
 
 fn by_id(b: &Basket) -> HashMap<String, BasketItem> {
@@ -92,7 +105,9 @@ fn group_name(folder: &str, count: usize) -> String {
 }
 
 fn small_members(store: &Store, idx: &[usize]) -> Vec<i64> {
-    idx.iter().map(|i| node(store, &format!("small/s{i}.log"))).collect()
+    idx.iter()
+        .map(|i| node(store, &format!("small/s{i}.log")))
+        .collect()
 }
 
 // --------------------------------------------------------------------------- containment
@@ -108,11 +123,27 @@ fn add_a_file() {
     let item = &items[0];
     assert_eq!(item.id, res.added[0]);
     assert_eq!(
-        (item.path.as_str(), item.name.as_str(), item.kind, item.scan_id.as_str()),
-        (path_of("docs/a.txt").as_str(), "a.txt", ChangeKind::File, "scan1")
+        (
+            item.path.as_str(),
+            item.name.as_str(),
+            item.kind,
+            item.scan_id.as_str()
+        ),
+        (
+            path_of("docs/a.txt").as_str(),
+            "a.txt",
+            ChangeKind::File,
+            "scan1"
+        )
     );
-    assert_eq!((item.size, item.alloc, item.files, item.dirs), (1000, KB4, 1, 0));
-    assert_eq!((item.volume.as_str(), item.status, item.note.as_str()), ("VOL", St::Ready, ""));
+    assert_eq!(
+        (item.size, item.alloc, item.files, item.dirs),
+        (1000, KB4, 1, 0)
+    );
+    assert_eq!(
+        (item.volume.as_str(), item.status, item.note.as_str()),
+        ("VOL", St::Ready, "")
+    );
     assert!(item.members.is_empty());
     assert_eq!(b.contains(&item.path), Some(item.id.clone()));
     assert_eq!(b.contains(&path_of("docs")), None);
@@ -136,11 +167,19 @@ fn child_of_an_item_is_merged() {
     let store = store();
     let b = basket();
     let docs = add(&b, &store, "s", &[node(&store, "docs")]).added[0].clone();
-    let res = add(&b, &store, "s", &[node(&store, "docs/sub/c.bin"), node(&store, "docs/b.txt")]);
+    let res = add(
+        &b,
+        &store,
+        "s",
+        &[node(&store, "docs/sub/c.bin"), node(&store, "docs/b.txt")],
+    );
     assert!(res.added.is_empty());
     assert_eq!(
         res.merged,
-        [merged(&path_of("docs/sub/c.bin"), &docs), merged(&path_of("docs/b.txt"), &docs)]
+        [
+            merged(&path_of("docs/sub/c.bin"), &docs),
+            merged(&path_of("docs/b.txt"), &docs)
+        ]
     );
     assert_eq!(b.contains(&path_of("docs/sub/c.bin")), Some(docs));
 }
@@ -149,7 +188,13 @@ fn child_of_an_item_is_merged() {
 fn ancestor_absorbs_items() {
     let store = store();
     let b = basket();
-    let mut first = add(&b, &store, "s", &[node(&store, "docs/a.txt"), node(&store, "docs/sub/c.bin")]).added;
+    let mut first = add(
+        &b,
+        &store,
+        "s",
+        &[node(&store, "docs/a.txt"), node(&store, "docs/sub/c.bin")],
+    )
+    .added;
     assert_eq!(first.len(), 2);
     let res = add(&b, &store, "s", &[node(&store, "docs")]);
     let mut absorbed = res.absorbed.clone();
@@ -159,8 +204,14 @@ fn ancestor_absorbs_items() {
     let items = b.items();
     assert_eq!(items.len(), 1);
     let item = &items[0];
-    assert_eq!((item.id.as_str(), item.kind, item.name.as_str()), (res.added[0].as_str(), ChangeKind::Dir, "docs"));
-    assert_eq!((item.size, item.alloc, item.files, item.dirs), (8000, 4 * KB4, 3, 1));
+    assert_eq!(
+        (item.id.as_str(), item.kind, item.name.as_str()),
+        (res.added[0].as_str(), ChangeKind::Dir, "docs")
+    );
+    assert_eq!(
+        (item.size, item.alloc, item.files, item.dirs),
+        (8000, 4 * KB4, 3, 1)
+    );
     assert_eq!(b.freeable(), HashMap::from([("VOL".to_string(), 4 * KB4)]));
 }
 
@@ -172,7 +223,11 @@ fn child_and_parent_in_one_call() {
         &b,
         &store,
         "s",
-        &[node(&store, "docs/sub/c.bin"), node(&store, "docs/sub"), node(&store, "docs")],
+        &[
+            node(&store, "docs/sub/c.bin"),
+            node(&store, "docs/sub"),
+            node(&store, "docs"),
+        ],
     );
     assert_eq!(res.added.len(), 1);
     let docs = res.added[0].clone();
@@ -183,7 +238,10 @@ fn child_and_parent_in_one_call() {
     want.sort();
     assert_eq!(paths, want);
     assert!(res.merged.iter().all(|m| m.into == docs));
-    assert_eq!(b.items().iter().map(|i| i.id.clone()).collect::<Vec<_>>(), [docs]);
+    assert_eq!(
+        b.items().iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+        [docs]
+    );
 }
 
 #[test]
@@ -192,7 +250,12 @@ fn refusals() {
     let b = basket();
     let n = store.read().len() as i64;
     let res = add(&b, &store, "s", &[0, n + 5, -1]);
-    assert!(res.refused.iter().all(|r| r.reason == "扫描结果中没有这一项") && res.refused.len() == 3);
+    assert!(
+        res.refused
+            .iter()
+            .all(|r| r.reason == "扫描结果中没有这一项")
+            && res.refused.len() == 3
+    );
     let cloud = node(&store, "cloud") as NodeId;
     store.write().mark(cloud, Flags::VIRTUAL); // an MFT pseudo folder
     let res = add(&b, &store, "s", &[node(&store, "cloud/local.docx")]);
@@ -205,12 +268,28 @@ fn refusals() {
 fn protected_items_are_refused() {
     // everything under SpaceKnife's own data folder
     let data = sk_core::paths::data_dir();
-    let own = build_with(&d([("snapshots", d([("c.sks", f(10))]))]), &data.to_string_lossy(), 1, &[]);
+    let own = build_with(
+        &d([("snapshots", d([("c.sks", f(10))]))]),
+        &data.to_string_lossy(),
+        1,
+        &[],
+    );
     let b = basket();
     let r = own.read().roots().next().unwrap() as i64;
-    let res = b.add(&own.read(), "own", &[node(&own, "snapshots/c.sks"), r], None).unwrap();
+    let res = b
+        .add(
+            &own.read(),
+            "own",
+            &[node(&own, "snapshots/c.sks"), r],
+            None,
+        )
+        .unwrap();
     assert_eq!(res.refused.len(), 2);
-    assert!(res.refused.iter().all(|x| x.reason == "SpaceKnife 自己的数据目录"));
+    assert!(
+        res.refused
+            .iter()
+            .all(|x| x.reason == "SpaceKnife 自己的数据目录")
+    );
     assert_eq!(b.len(), 0);
 }
 
@@ -231,15 +310,28 @@ fn group_is_one_item() {
     let store = store();
     let b = basket();
     let folder = node(&store, "small");
-    let res = add_group(&b, &store, folder, &small_members(&store, &[0, 1, 2, 3, 4, 5]));
+    let res = add_group(
+        &b,
+        &store,
+        folder,
+        &small_members(&store, &[0, 1, 2, 3, 4, 5]),
+    );
     let gid = res.added[0].clone();
     let items = b.items();
     let item = &items[0];
-    assert_eq!((item.id.as_str(), item.kind, item.path.as_str()), (gid.as_str(), ChangeKind::Group, path_of("small").as_str()));
+    assert_eq!(
+        (item.id.as_str(), item.kind, item.path.as_str()),
+        (gid.as_str(), ChangeKind::Group, path_of("small").as_str())
+    );
     assert_eq!(item.name, group_name("small", 6));
-    let want: Vec<String> = (0..6).map(|i| path_of(&format!("small/s{i}.log"))).collect();
+    let want: Vec<String> = (0..6)
+        .map(|i| path_of(&format!("small/s{i}.log")))
+        .collect();
     assert_eq!(item.members, want);
-    assert_eq!((item.size, item.alloc, item.files, item.dirs), ((10..16).sum::<i64>(), 6 * KB4, 6, 0));
+    assert_eq!(
+        (item.size, item.alloc, item.files, item.dirs),
+        ((10..16).sum::<i64>(), 6 * KB4, 6, 0)
+    );
     let res = add(&b, &store, "s", &[node(&store, "small/s3.log")]);
     assert_eq!(res.merged, [merged(&path_of("small/s3.log"), &gid)]);
     let res = add(&b, &store, "s", &[node(&store, "small/big.iso")]);
@@ -268,7 +360,10 @@ fn group_grows_and_folder_absorbs_it() {
     want.sort();
     assert_eq!(absorbed, want);
     let items = b.items();
-    assert_eq!((items[0].kind, items[0].alloc), (ChangeKind::Dir, 6 * KB4 + 102_400));
+    assert_eq!(
+        (items[0].kind, items[0].alloc),
+        (ChangeKind::Dir, 6 * KB4 + 102_400)
+    );
 }
 
 #[test]
@@ -282,12 +377,25 @@ fn group_member_rules() {
     assert_eq!(res.refused.len(), 1);
     assert_eq!(res.refused[0].reason, "不是所在文件夹的直接子项");
     assert_eq!(b.items()[0].members.len(), 1);
-    assert!(b.add(&store.read(), "s", &[folder, folder], Some(&small_members(&store, &[1]))).is_err());
+    assert!(
+        b.add(
+            &store.read(),
+            "s",
+            &[folder, folder],
+            Some(&small_members(&store, &[1]))
+        )
+        .is_err()
+    );
     let res = add_group(&b, &store, node(&store, "small/s5.log"), &[]);
     assert_eq!(res.refused[0].reason, "小项聚合块的所在位置不是文件夹");
     // a group inside a folder that is already in the basket is merged as a whole
     let docs = add(&b, &store, "s", &[node(&store, "docs")]).added[0].clone();
-    let res = add_group(&b, &store, node(&store, "docs/sub"), &[node(&store, "docs/sub/c.bin")]);
+    let res = add_group(
+        &b,
+        &store,
+        node(&store, "docs/sub"),
+        &[node(&store, "docs/sub/c.bin")],
+    );
     assert_eq!(res.merged, [merged(&path_of("docs/sub"), &docs)]);
 }
 
@@ -295,10 +403,20 @@ fn group_member_rules() {
 fn targets_expand_groups() {
     let store = store();
     let b = basket();
-    let gid = add_group(&b, &store, node(&store, "small"), &small_members(&store, &[0, 1])).added[0].clone();
+    let gid = add_group(
+        &b,
+        &store,
+        node(&store, "small"),
+        &small_members(&store, &[0, 1]),
+    )
+    .added[0]
+        .clone();
     let fid = add(&b, &store, "s", &[node(&store, "docs/b.txt")]).added[0].clone();
     let targets = b.targets(None);
-    let got: Vec<(String, String, i64)> = targets.iter().map(|t| (t.item.clone(), t.path.clone(), t.size)).collect();
+    let got: Vec<(String, String, i64)> = targets
+        .iter()
+        .map(|t| (t.item.clone(), t.path.clone(), t.size))
+        .collect();
     assert_eq!(
         got,
         [
@@ -307,9 +425,16 @@ fn targets_expand_groups() {
             (fid.clone(), path_of("docs/b.txt"), KB4),
         ]
     );
-    let only: Vec<String> = b.targets(Some(&[fid])).into_iter().map(|t| t.path).collect();
+    let only: Vec<String> = b
+        .targets(Some(&[fid]))
+        .into_iter()
+        .map(|t| t.path)
+        .collect();
     assert_eq!(only, [path_of("docs/b.txt")]);
-    assert_eq!(b.lock_targets(), targets.iter().map(|t| t.path.clone()).collect::<Vec<_>>());
+    assert_eq!(
+        b.lock_targets(),
+        targets.iter().map(|t| t.path.clone()).collect::<Vec<_>>()
+    );
 }
 
 // --------------------------------------------------------------------------- freeable (§2.3)
@@ -351,7 +476,10 @@ fn hard_links_inside_folders() {
     let lid = add(&b, &store, "s", &[node(&store, "links")]).added[0].clone();
     let item = b.get(&lid).unwrap();
     assert_eq!(item.alloc, 0);
-    assert_eq!(item.note, "其中 1 个文件在别处还有硬链接，删除后不释放这部分空间");
+    assert_eq!(
+        item.note,
+        "其中 1 个文件在别处还有硬链接，删除后不释放这部分空间"
+    );
     add(&b, &store, "s", &[node(&store, "other")]);
     assert_eq!(b.freeable(), vol(8192));
     assert!(b.items().iter().all(|i| i.note.is_empty()));
@@ -366,7 +494,11 @@ fn hard_link_with_a_name_outside_the_scan() {
     let b = basket();
     add(&b, &store, "s", &[x, y]);
     assert_eq!(b.freeable(), vol(0)); // the third name keeps the data alive
-    assert!(b.items().iter().all(|i| i.note == "另有 1 个硬链接不在删除篮中，删除后不释放空间"));
+    assert!(
+        b.items()
+            .iter()
+            .all(|i| i.note == "另有 1 个硬链接不在删除篮中，删除后不释放空间")
+    );
 }
 
 #[test]
@@ -401,7 +533,13 @@ fn freeable_per_volume() {
         b.freeable(),
         HashMap::from([("C:\\".to_string(), 12_288), ("D:\\".to_string(), 8192)])
     );
-    assert_eq!(b.items().iter().map(|i| i.volume.clone()).collect::<Vec<_>>(), ["C:\\", "D:\\"]);
+    assert_eq!(
+        b.items()
+            .iter()
+            .map(|i| i.volume.clone())
+            .collect::<Vec<_>>(),
+        ["C:\\", "D:\\"]
+    );
 }
 
 #[test]
@@ -420,21 +558,37 @@ fn refresh_after_tree_changes() {
     let b = basket();
     let aid = add(&b, &store, "s", &[node(&store, "docs/a.txt")]).added[0].clone();
     let sid = add(&b, &store, "s", &[node(&store, "docs/sub")]).added[0].clone();
-    let gid = add_group(&b, &store, node(&store, "small"), &small_members(&store, &[0, 1])).added[0].clone();
+    let gid = add_group(
+        &b,
+        &store,
+        node(&store, "small"),
+        &small_members(&store, &[0, 1]),
+    )
+    .added[0]
+        .clone();
     let changed = d([
         ("docs", d([("a.txt", f(10_000)), ("b.txt", f(2000))])), // a grew, sub is gone
         ("small", d([("s0.log", f(10)), ("big.iso", f(100_000))])), // s1 is gone
         ("links", d([("x.dat", f(8192))])),
         ("other", d([("y.dat", f(8192))])),
-        ("cloud", d([("online.docx", f(50_000)), ("local.docx", f(3000))])),
+        (
+            "cloud",
+            d([("online.docx", f(50_000)), ("local.docx", f(3000))]),
+        ),
     ]);
     let newer = build_with(&changed, &root(), KB4, &[]);
     let current: std::cell::RefCell<Option<Store>> = std::cell::RefCell::new(Some(newer));
     let mut of = |_: &str| current.borrow().clone();
     assert_eq!(b.refresh(&mut of), std::slice::from_ref(&sid));
     let got = by_id(&b);
-    assert_eq!((got[&aid].size, got[&aid].alloc, got[&aid].status), (10_000, 12_288, St::Ready));
-    assert_eq!((got[&sid].status, got[&sid].alloc, got[&sid].note.as_str()), (St::Missing, 0, "已不存在"));
+    assert_eq!(
+        (got[&aid].size, got[&aid].alloc, got[&aid].status),
+        (10_000, 12_288, St::Ready)
+    );
+    assert_eq!(
+        (got[&sid].status, got[&sid].alloc, got[&sid].note.as_str()),
+        (St::Missing, 0, "已不存在")
+    );
     assert_eq!((got[&gid].status, got[&gid].alloc), (St::Ready, KB4));
     assert_eq!(got[&gid].note, "其中 1 项已不存在");
     assert_eq!(got[&gid].name, group_name("small", 1));
@@ -454,7 +608,12 @@ fn refresh_after_tree_changes() {
 fn refresh_skips_unchanged_items() {
     let store = store();
     let b = basket();
-    add(&b, &store, "s", &[node(&store, "docs"), node(&store, "small/big.iso")]);
+    add(
+        &b,
+        &store,
+        "s",
+        &[node(&store, "docs"), node(&store, "small/big.iso")],
+    );
     let v0 = b.items();
     b.refresh(&mut |_: &str| Some(store.clone()));
     assert_eq!(b.items(), v0);
@@ -473,18 +632,38 @@ fn lockers_mark_items() {
     let store = store();
     let b = basket();
     let aid = add(&b, &store, "s", &[node(&store, "docs/a.txt")]).added[0].clone();
-    let gid = add_group(&b, &store, node(&store, "small"), &small_members(&store, &[0, 1])).added[0].clone();
+    let gid = add_group(
+        &b,
+        &store,
+        node(&store, "small"),
+        &small_members(&store, &[0, 1]),
+    )
+    .added[0]
+        .clone();
     let before = b.freeable();
     b.set_lockers(&HashMap::from([
         (path_of("docs/a.txt"), vec!["Word".to_string()]),
-        (path_of("small/s1.log"), vec!["Excel".to_string(), "Word".to_string()]),
+        (
+            path_of("small/s1.log"),
+            vec!["Excel".to_string(), "Word".to_string()],
+        ),
     ]));
     let got = by_id(&b);
-    assert_eq!((got[&aid].status, got[&aid].note.as_str()), (St::Locked, "正在被 Word 使用，需先退出"));
-    assert_eq!((got[&gid].status, got[&gid].note.as_str()), (St::Locked, "正在被 Excel、Word 使用，需先退出"));
+    assert_eq!(
+        (got[&aid].status, got[&aid].note.as_str()),
+        (St::Locked, "正在被 Word 使用，需先退出")
+    );
+    assert_eq!(
+        (got[&gid].status, got[&gid].note.as_str()),
+        (St::Locked, "正在被 Excel、Word 使用，需先退出")
+    );
     assert_eq!(b.freeable(), before); // held items still count (UI-W5-31)
     b.set_lockers(&HashMap::new());
-    assert!(b.items().iter().all(|i| i.status == St::Ready && i.note.is_empty()));
+    assert!(
+        b.items()
+            .iter()
+            .all(|i| i.status == St::Ready && i.note.is_empty())
+    );
 }
 
 fn op(path: &str, code: OpCode, message: &str, r: &str) -> OpResult {
@@ -497,19 +676,45 @@ fn apply_results_and_reinstate() {
     let b = basket();
     let aid = add(&b, &store, "s", &[node(&store, "docs/a.txt")]).added[0].clone();
     let bid = add(&b, &store, "s", &[node(&store, "docs/b.txt")]).added[0].clone();
-    let gid = add_group(&b, &store, node(&store, "small"), &small_members(&store, &[0, 1, 2])).added[0].clone();
+    let gid = add_group(
+        &b,
+        &store,
+        node(&store, "small"),
+        &small_members(&store, &[0, 1, 2]),
+    )
+    .added[0]
+        .clone();
     let results = [
         op(&path_of("docs/a.txt"), OpCode::Ok, "已移到回收站", "ref-a"),
         op(&path_of("docs/b.txt"), OpCode::Denied, "没有权限", ""),
-        op(&path_of("small/s0.log"), OpCode::Ok, "已移到回收站", "ref-0"),
-        op(&path_of("small/s1.log"), OpCode::Ok, "已移到回收站", "ref-1"),
+        op(
+            &path_of("small/s0.log"),
+            OpCode::Ok,
+            "已移到回收站",
+            "ref-0",
+        ),
+        op(
+            &path_of("small/s1.log"),
+            OpCode::Ok,
+            "已移到回收站",
+            "ref-1",
+        ),
         op(&path_of("small/s2.log"), OpCode::Cancelled, "已取消", ""),
     ];
     let left = b.apply_results(&results);
-    let got: Vec<(String, Vec<String>)> = left.iter().map(|i| (i.id.clone(), i.members.clone())).collect();
+    let got: Vec<(String, Vec<String>)> = left
+        .iter()
+        .map(|i| (i.id.clone(), i.members.clone()))
+        .collect();
     assert_eq!(
         got,
-        [(aid.clone(), vec![]), (gid.clone(), vec![path_of("small/s0.log"), path_of("small/s1.log")])]
+        [
+            (aid.clone(), vec![]),
+            (
+                gid.clone(),
+                vec![path_of("small/s0.log"), path_of("small/s1.log")]
+            )
+        ]
     );
     let got = by_id(&b);
     let mut ids: Vec<&String> = got.keys().collect();
@@ -517,7 +722,10 @@ fn apply_results_and_reinstate() {
     let mut want = vec![&bid, &gid];
     want.sort();
     assert_eq!(ids, want);
-    assert_eq!((got[&bid].note.as_str(), got[&bid].status), ("没有权限", St::Ready));
+    assert_eq!(
+        (got[&bid].note.as_str(), got[&bid].status),
+        ("没有权限", St::Ready)
+    );
     assert_eq!(got[&gid].members, [path_of("small/s2.log")]);
     assert_eq!(got[&gid].alloc, KB4);
     assert_eq!(got[&gid].note, "1 项未完成：已取消");
@@ -538,10 +746,19 @@ fn apply_results_and_reinstate() {
 fn clear_and_remove() {
     let store = store();
     let b = basket();
-    let ids = add(&b, &store, "s", &[node(&store, "docs/a.txt"), node(&store, "links")]).added;
+    let ids = add(
+        &b,
+        &store,
+        "s",
+        &[node(&store, "docs/a.txt"), node(&store, "links")],
+    )
+    .added;
     let v = b.version();
     b.remove(&[ids[0].clone(), "no-such-id".to_string()]);
-    assert_eq!(b.items().iter().map(|i| i.id.clone()).collect::<Vec<_>>(), [ids[1].clone()]);
+    assert_eq!(
+        b.items().iter().map(|i| i.id.clone()).collect::<Vec<_>>(),
+        [ids[1].clone()]
+    );
     assert!(b.version() > v);
     b.clear();
     assert!(b.is_empty() && b.freeable().is_empty() && b.contains(&path_of("links")).is_none());
@@ -557,14 +774,22 @@ fn many_items_stay_fast() {
     let big_root = std::env::temp_dir().join("sk-basket-big");
     let big = build_with(&d([("bulk", d(bulk))]), &big_root.to_string_lossy(), 1, &[]);
     let folder = node(&big, "bulk");
-    let files: Vec<i64> = big.read().children(folder as NodeId).map(|c| c as i64).collect();
+    let files: Vec<i64> = big
+        .read()
+        .children(folder as NodeId)
+        .map(|c| c as i64)
+        .collect();
     let b = basket();
     let started = Instant::now();
     assert_eq!(add(&b, &big, "s", &files).added.len(), n);
     let res = add(&b, &big, "s", &[folder]);
     assert_eq!((res.absorbed.len(), b.len()), (n, 1));
     b.clear();
-    let gid = b.add(&big.read(), "s", &[folder], Some(&files)).unwrap().added[0].clone();
+    let gid = b
+        .add(&big.read(), "s", &[folder], Some(&files))
+        .unwrap()
+        .added[0]
+        .clone();
     assert_eq!(b.targets(None).len(), n);
     let done: Vec<OpResult> = b.lock_targets()[..n / 2]
         .iter()
@@ -608,7 +833,9 @@ fn odd_name(stem: &str) -> Option<std::ffi::OsString> {
 /// executed by it (the shown path, with U+FFFD, names nothing).
 #[test]
 fn names_that_are_not_unicode_are_executed_by_their_real_path() {
-    let (Some(single), Some(member)) = (odd_name("single"), odd_name("member")) else { return };
+    let (Some(single), Some(member)) = (odd_name("single"), odd_name("member")) else {
+        return;
+    };
     let tmp = tempfile::tempdir().unwrap();
     let top = tmp.path().join("scan");
     let folder = top.join("group");
@@ -623,8 +850,15 @@ fn names_that_are_not_unicode_are_executed_by_their_real_path() {
     let store = scanner.store().clone();
     let (n_single, n_folder, n_member) = {
         let r = store.read();
-        let at = |p: &Path| r.find_path(p).unwrap_or_else(|| panic!("{p:?} not in the tree")) as i64;
-        (at(&top.join(&single)), at(&folder), at(&folder.join(&member)))
+        let at = |p: &Path| {
+            r.find_path(p)
+                .unwrap_or_else(|| panic!("{p:?} not in the tree")) as i64
+        };
+        (
+            at(&top.join(&single)),
+            at(&folder),
+            at(&folder.join(&member)),
+        )
     };
     let b = basket();
     let res = add(&b, &store, "s", &[n_single]);
@@ -641,7 +875,11 @@ fn names_that_are_not_unicode_are_executed_by_their_real_path() {
     // found again in the tree (not missing)
     let missing = b.refresh(&mut |_| Some(store.clone()));
     assert!(missing.is_empty(), "{missing:?}");
-    assert!(b.items().iter().all(|i| i.status == St::Ready), "{:?}", b.items());
+    assert!(
+        b.items().iter().all(|i| i.status == St::Ready),
+        "{:?}",
+        b.items()
+    );
     // executed by the real paths
     let targets = b.targets(None);
     let os: Vec<PathBuf> = targets.iter().map(|t| t.os_path.clone()).collect();

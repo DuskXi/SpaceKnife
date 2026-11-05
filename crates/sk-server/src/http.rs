@@ -60,8 +60,14 @@ fn secure_headers(h: &mut HeaderMap) {
 /// A `Host` header worth echoing into the page's policy: a name or an address, an optional port.
 pub fn host_ok(host: &str) -> bool {
     let port = if let Some(rest) = host.strip_prefix('[') {
-        let Some((addr, tail)) = rest.split_once(']') else { return false };
-        if addr.is_empty() || !addr.bytes().all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.') {
+        let Some((addr, tail)) = rest.split_once(']') else {
+            return false;
+        };
+        if addr.is_empty()
+            || !addr
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.')
+        {
             return false;
         }
         tail
@@ -70,21 +76,29 @@ pub fn host_ok(host: &str) -> bool {
             Some(i) => (&host[..i], &host[i..]),
             None => (host, ""),
         };
-        if name.is_empty() || !name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') {
+        if name.is_empty()
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+        {
             return false;
         }
         port
     };
     match port.strip_prefix(':') {
         None => port.is_empty(),
-        Some(digits) => (1..=5).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit()),
+        Some(digits) => {
+            (1..=5).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
+        }
     }
 }
 
 /// The browser's `Origin` is the origin it loaded the page from: the scheme and the `Host` it asked
 /// for (another site's page carries its own: cross-site WebSocket hijacking).
 pub fn same_origin(origin: Option<&str>, host: Option<&str>, secure: bool) -> bool {
-    let (Some(origin), Some(host)) = (origin, host) else { return false };
+    let (Some(origin), Some(host)) = (origin, host) else {
+        return false;
+    };
     if !host_ok(host) {
         return false;
     }
@@ -94,9 +108,17 @@ pub fn same_origin(origin: Option<&str>, host: Option<&str>, secure: bool) -> bo
 
 /// `index.html` with a CSP letting the page reach this server's WebSocket by the name it used.
 pub fn served_index(html: &str, host: &str) -> String {
-    let Some(start) = html.find("connect-src ") else { return html.to_owned() };
-    let end = html[start..].find([';', '"']).map_or(html.len(), |e| start + e);
-    format!("{}connect-src 'self' ws://{host} wss://{host}{}", &html[..start], &html[end..])
+    let Some(start) = html.find("connect-src ") else {
+        return html.to_owned();
+    };
+    let end = html[start..]
+        .find([';', '"'])
+        .map_or(html.len(), |e| start + e);
+    format!(
+        "{}connect-src 'self' ws://{host} wss://{host}{}",
+        &html[..start],
+        &html[end..]
+    )
 }
 
 fn header_str(h: &HeaderMap, name: header::HeaderName) -> Option<&str> {
@@ -118,7 +140,11 @@ async fn ws_endpoint(
         Some(o) => {
             server.config.allowed_origins.iter().any(|a| a == o)
                 || (server.config.static_dir.is_some()
-                    && same_origin(Some(o), header_str(&headers, header::HOST), server.config.secure))
+                    && same_origin(
+                        Some(o),
+                        header_str(&headers, header::HOST),
+                        server.config.secure,
+                    ))
         }
     };
     if !allowed {
@@ -128,7 +154,8 @@ async fn ws_endpoint(
         Ok(ws) => ws,
         Err(_) if server.config.static_dir.is_some() => {
             let mut r = plain(StatusCode::UPGRADE_REQUIRED, "Upgrade Required\n");
-            r.headers_mut().insert(header::UPGRADE, HeaderValue::from_static("websocket"));
+            r.headers_mut()
+                .insert(header::UPGRADE, HeaderValue::from_static("websocket"));
             return r;
         }
         Err(e) => return e.into_response(),
@@ -140,7 +167,11 @@ async fn ws_endpoint(
         .flat_map(|v| v.split(','))
         .any(|p| p.trim() == SUBPROTOCOL);
     if !offered {
-        return (StatusCode::BAD_REQUEST, format!("subprotocol {SUBPROTOCOL:?} required\n")).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("subprotocol {SUBPROTOCOL:?} required\n"),
+        )
+            .into_response();
     }
     let limit = server.config.max_inbound_bytes;
     ws.protocols([SUBPROTOCOL])
@@ -159,7 +190,9 @@ struct HeadlessInfo {
 }
 
 fn bearer_ok(h: &HeaderMap, token: &str) -> bool {
-    let Some(v) = header_str(h, header::AUTHORIZATION) else { return false };
+    let Some(v) = header_str(h, header::AUTHORIZATION) else {
+        return false;
+    };
     let mut parts = v.split_whitespace();
     match (parts.next(), parts.next(), parts.next()) {
         (Some(scheme), Some(t), None) if scheme.eq_ignore_ascii_case("bearer") => {
@@ -177,7 +210,9 @@ pub fn hostname() -> String {
             return v;
         }
     }
-    std::fs::read_to_string("/etc/hostname").map(|s| s.trim().to_owned()).unwrap_or_else(|_| "localhost".to_owned())
+    std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_else(|_| "localhost".to_owned())
 }
 
 async fn info(State(server): State<Arc<Server>>, method: Method, headers: HeaderMap) -> Response {
@@ -186,21 +221,31 @@ async fn info(State(server): State<Arc<Server>>, method: Method, headers: Header
     }
     if !bearer_ok(&headers, &server.config.token) {
         let mut r = plain(StatusCode::UNAUTHORIZED, "Unauthorized\n");
-        r.headers_mut().insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-        r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        r.headers_mut()
+            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
+        r.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
         return r;
     }
     let body = HeadlessInfo {
         platform: crate::app::platform_name(),
-        version: server.config.app_version.clone().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned()),
+        version: server
+            .config
+            .app_version
+            .clone()
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned()),
         hostname: hostname(),
         home: sk_core::paths::home_dir().display().to_string(),
         secure: server.config.secure,
     };
     let mut r = Response::new(Body::from(serde_json::to_vec(&body).unwrap_or_default()));
     secure_headers(r.headers_mut());
-    r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static("application/json; charset=utf-8"));
-    r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    r.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json; charset=utf-8"),
+    );
+    r.headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     r
 }
 
@@ -241,7 +286,12 @@ fn percent_decode(s: &str) -> Option<String> {
 }
 
 pub fn mime_of(path: &Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase).as_deref() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .as_deref()
+    {
         Some("html") | Some("htm") => "text/html; charset=utf-8",
         Some("js") | Some("mjs") => "text/javascript; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
@@ -261,18 +311,28 @@ pub fn mime_of(path: &Path) -> &'static str {
     }
 }
 
-async fn static_file(State(server): State<Arc<Server>>, method: Method, uri: Uri, headers: HeaderMap) -> Response {
+async fn static_file(
+    State(server): State<Arc<Server>>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
     if method != Method::GET && method != Method::HEAD {
         let mut r = plain(StatusCode::METHOD_NOT_ALLOWED, "Method Not Allowed\n");
-        r.headers_mut().insert(header::ALLOW, HeaderValue::from_static("GET, HEAD"));
+        r.headers_mut()
+            .insert(header::ALLOW, HeaderValue::from_static("GET, HEAD"));
         return r;
     }
     let host = header_str(&headers, header::HOST).unwrap_or("");
     if !host_ok(host) {
         return plain(StatusCode::BAD_REQUEST, "Bad Request\n");
     }
-    let Some(root) = &server.config.static_dir else { return plain(StatusCode::NOT_FOUND, "Not Found\n") };
-    let Some(file) = file_in(root, uri.path()) else { return plain(StatusCode::NOT_FOUND, "Not Found\n") };
+    let Some(root) = &server.config.static_dir else {
+        return plain(StatusCode::NOT_FOUND, "Not Found\n");
+    };
+    let Some(file) = file_in(root, uri.path()) else {
+        return plain(StatusCode::NOT_FOUND, "Not Found\n");
+    };
     let body = match tokio::fs::read(&file).await {
         Ok(b) => b,
         Err(_) => return plain(StatusCode::NOT_FOUND, "Not Found\n"),
@@ -282,16 +342,34 @@ async fn static_file(State(server): State<Arc<Server>>, method: Method, uri: Uri
     let mut r;
     if mime.starts_with("text/html") {
         let html = served_index(&String::from_utf8_lossy(&body), host);
-        r = Response::new(if head { Body::empty() } else { Body::from(html) });
-        r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-        r.headers_mut().insert(header::CONTENT_SECURITY_POLICY, HeaderValue::from_static("frame-ancestors 'none'"));
+        r = Response::new(if head {
+            Body::empty()
+        } else {
+            Body::from(html)
+        });
+        r.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        r.headers_mut().insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("frame-ancestors 'none'"),
+        );
     } else {
-        r = Response::new(if head { Body::empty() } else { Body::from(body) });
-        let cache = if uri.path().starts_with("/assets/") { "public, max-age=31536000, immutable" } else { "no-cache" };
-        r.headers_mut().insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
+        r = Response::new(if head {
+            Body::empty()
+        } else {
+            Body::from(body)
+        });
+        let cache = if uri.path().starts_with("/assets/") {
+            "public, max-age=31536000, immutable"
+        } else {
+            "no-cache"
+        };
+        r.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(cache));
     }
     secure_headers(r.headers_mut());
-    r.headers_mut().insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
+    r.headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
     r
 }
 
@@ -304,7 +382,8 @@ pub(crate) fn tls_acceptor(cert: &Path, key: &Path) -> anyhow::Result<TlsAccepto
         .map_err(|e| anyhow::anyhow!("cannot read the certificate {}: {e}", cert.display()))?
         .collect::<Result<_, _>>()
         .map_err(|e| anyhow::anyhow!("invalid certificate {}: {e}", cert.display()))?;
-    let key = PrivateKeyDer::from_pem_file(key).map_err(|e| anyhow::anyhow!("invalid key {}: {e}", key.display()))?;
+    let key = PrivateKeyDer::from_pem_file(key)
+        .map_err(|e| anyhow::anyhow!("invalid key {}: {e}", key.display()))?;
     let provider = Arc::new(tokio_rustls::rustls::crypto::ring::default_provider());
     let config = tokio_rustls::rustls::ServerConfig::builder_with_provider(provider)
         .with_safe_default_protocol_versions()?
@@ -321,7 +400,9 @@ pub(crate) struct TlsListener {
 
 impl TlsListener {
     pub(crate) fn new(listener: TcpListener, acceptor: TlsAcceptor) -> TlsListener {
-        let local = listener.local_addr().unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 0)));
+        let local = listener
+            .local_addr()
+            .unwrap_or_else(|_| SocketAddr::from(([127, 0, 0, 1], 0)));
         let (tx, rx) = tokio::sync::mpsc::channel(64);
         tokio::spawn(async move {
             loop {
@@ -336,7 +417,11 @@ impl TlsListener {
                 let acceptor = acceptor.clone();
                 let sender = tx.clone();
                 tokio::spawn(async move {
-                    let hs = tokio::time::timeout(std::time::Duration::from_secs(10), acceptor.accept(tcp)).await;
+                    let hs = tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        acceptor.accept(tcp),
+                    )
+                    .await;
                     match hs {
                         Ok(Ok(stream)) => {
                             let _ = sender.send((stream, addr)).await;
@@ -382,9 +467,21 @@ mod tests {
         assert!(!host_ok("evil.com/x"));
         assert!(!host_ok("a:b"));
         assert!(!host_ok(""));
-        assert!(same_origin(Some("http://box:8080"), Some("box:8080"), false));
-        assert!(!same_origin(Some("https://box:8080"), Some("box:8080"), false));
-        assert!(!same_origin(Some("http://evil:8080"), Some("box:8080"), false));
+        assert!(same_origin(
+            Some("http://box:8080"),
+            Some("box:8080"),
+            false
+        ));
+        assert!(!same_origin(
+            Some("https://box:8080"),
+            Some("box:8080"),
+            false
+        ));
+        assert!(!same_origin(
+            Some("http://evil:8080"),
+            Some("box:8080"),
+            false
+        ));
         assert!(!same_origin(None, Some("box"), false));
     }
 
@@ -395,7 +492,10 @@ mod tests {
         assert!(out.contains("connect-src 'self' ws://box:8080 wss://box:8080; img-src"));
         let root = Path::new("/srv/ui");
         assert_eq!(file_in(root, "/"), Some(root.join("index.html")));
-        assert_eq!(file_in(root, "/assets/a.js"), Some(root.join("assets").join("a.js")));
+        assert_eq!(
+            file_in(root, "/assets/a.js"),
+            Some(root.join("assets").join("a.js"))
+        );
         assert_eq!(file_in(root, "/../secret"), None);
         assert_eq!(file_in(root, "/%2e%2e/secret"), None);
     }

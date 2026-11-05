@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use parking_lot::Mutex;
 use sk_core::events::{self, EventLevel, Source};
-use sk_core::monitor::pipeline::{IdRemap, MAX_WAIT, MonitorHandle, MonitorHooks, MonitorOptions, ScanMonitor};
+use sk_core::monitor::pipeline::{
+    IdRemap, MAX_WAIT, MonitorHandle, MonitorHooks, MonitorOptions, ScanMonitor,
+};
 use sk_core::scan::RootInfo;
 use sk_core::tr;
 use sk_protocol::ErrorCode;
@@ -53,7 +55,11 @@ impl ServerHooks {
 
     /// Views follow moved ids: `now` with the writer's view, `later` (a closure taking its own
     /// reader) for views busy right now.
-    fn remap_views(&self, now: &dyn Fn(NodeId) -> Option<NodeId>, later: &dyn Fn() -> Arc<dyn Fn(NodeId) -> Option<NodeId> + Send + Sync>) {
+    fn remap_views(
+        &self,
+        now: &dyn Fn(NodeId) -> Option<NodeId>,
+        later: &dyn Fn() -> Arc<dyn Fn(NodeId) -> Option<NodeId> + Send + Sync>,
+    ) {
         if let Some(server) = self.server.upgrade() {
             server.views.remap(&self.scan_id, now, later);
         }
@@ -80,11 +86,22 @@ impl MonitorHooks for ServerHooks {
     }
 
     fn compacted(&mut self, _nodes: &Nodes, remap: &[i32]) {
-        let map = |id: NodeId| remap.get(id as usize).copied().filter(|&n| n >= 0).map(|n| n as NodeId);
+        let map = |id: NodeId| {
+            remap
+                .get(id as usize)
+                .copied()
+                .filter(|&n| n >= 0)
+                .map(|n| n as NodeId)
+        };
         let owned: std::cell::OnceCell<Arc<Vec<i32>>> = std::cell::OnceCell::new();
         self.remap_views(&map, &|| {
             let v = owned.get_or_init(|| Arc::new(remap.to_vec())).clone();
-            Arc::new(move |id| v.get(id as usize).copied().filter(|&n| n >= 0).map(|n| n as NodeId))
+            Arc::new(move |id| {
+                v.get(id as usize)
+                    .copied()
+                    .filter(|&n| n >= 0)
+                    .map(|n| n as NodeId)
+            })
         });
         if let Some(h) = self.scan.upgrade() {
             h.ctx.names.forget();
@@ -98,11 +115,16 @@ impl MonitorHooks for ServerHooks {
     }
 
     fn volumes_changed(&mut self, roots: &[RootInfo]) {
-        let (Some(server), Some(h)) = (self.server.upgrade(), self.scan.upgrade()) else { return };
+        let (Some(server), Some(h)) = (self.server.upgrade(), self.scan.upgrade()) else {
+            return;
+        };
         {
             let mut mine = h.roots.write();
             for r in roots {
-                if let Some(m) = mine.iter_mut().find(|m| m.node == r.node || m.path == r.path) {
+                if let Some(m) = mine
+                    .iter_mut()
+                    .find(|m| m.node == r.node || m.path == r.path)
+                {
                     m.volume = r.volume.clone();
                 }
             }
@@ -116,7 +138,13 @@ impl MonitorHooks for ServerHooks {
     }
 
     fn message(&mut self, text: String) {
-        events::emit(Source::Monitor, &text, EventLevel::Info, Some(&self.scan_id), None);
+        events::emit(
+            Source::Monitor,
+            &text,
+            EventLevel::Info,
+            Some(&self.scan_id),
+            None,
+        );
     }
 }
 
@@ -140,7 +168,10 @@ impl MonitorManager {
             watch,
             coalesce: coalesce(server),
             hard_rule: h.st.lock().method == ScanMethodUsed::Hard,
-            gate: h.governor.clone().map(|g| Arc::new(g) as Arc<dyn sk_core::scan::IoGate>),
+            gate: h
+                .governor
+                .clone()
+                .map(|g| Arc::new(g) as Arc<dyn sk_core::scan::IoGate>),
             usn: if cfg!(windows) {
                 Some(server.scans.helper.clone() as Arc<dyn sk_core::monitor::pipeline::UsnSource>)
             } else {
@@ -148,14 +179,30 @@ impl MonitorManager {
             },
             // changes the scan's listings may have missed count from its start (None: not started
             // yet, the monitor's own start is earlier than any listing)
-            listed_after: scanner.progress().started_at.map(std::time::SystemTime::from),
+            listed_after: scanner
+                .progress()
+                .started_at
+                .map(std::time::SystemTime::from),
             ..MonitorOptions::default()
         };
         // relists list like the scan did (root path, name check, Windows allocation option)
-        let monitor = ScanMonitor::new(h.store.clone(), h.roots.read().clone(), scanner.root_options(), opts);
+        let monitor = ScanMonitor::new(
+            h.store.clone(),
+            h.roots.read().clone(),
+            scanner.root_options(),
+            opts,
+        );
         let handle = monitor.handle();
-        let mon = Arc::new(Mon { monitor: Mutex::new(monitor), handle, status: Mutex::new(None) });
-        let mut hooks = ServerHooks { server: Arc::downgrade(server), scan: Arc::downgrade(h), scan_id: h.id.clone() };
+        let mon = Arc::new(Mon {
+            monitor: Mutex::new(monitor),
+            handle,
+            status: Mutex::new(None),
+        });
+        let mut hooks = ServerHooks {
+            server: Arc::downgrade(server),
+            scan: Arc::downgrade(h),
+            scan_id: h.id.clone(),
+        };
         let m = mon.clone();
         let wait = coalesce(server);
         std::thread::Builder::new()
@@ -195,7 +242,10 @@ impl MonitorManager {
 
     /// Watch a scan from its start (UI-W2-09).
     pub fn start(&self, server: &Arc<Server>, h: &Arc<ScanHandle>) {
-        if h.source != ScanSource::Scan || self.monitors.lock().contains_key(&h.id) || !Self::enabled(server) {
+        if h.source != ScanSource::Scan
+            || self.monitors.lock().contains_key(&h.id)
+            || !Self::enabled(server)
+        {
             return;
         }
         if let Some(mon) = Self::spawn(server, h, true) {
@@ -212,7 +262,13 @@ impl MonitorManager {
     }
 
     pub fn close(&self) {
-        let ids: Vec<String> = self.monitors.lock().keys().chain(self.passive.lock().keys()).cloned().collect();
+        let ids: Vec<String> = self
+            .monitors
+            .lock()
+            .keys()
+            .chain(self.passive.lock().keys())
+            .cloned()
+            .collect();
         for id in ids {
             self.stop(&id);
         }
@@ -251,15 +307,22 @@ impl MonitorManager {
     /// without watchers does it. Node 0, the top of a scan of several roots, reads every root.
     pub fn rescan(&self, server: &Arc<Server>, h: &Arc<ScanHandle>, node: NodeId) -> RpcResult<()> {
         if h.running() {
-            return Err(RpcError::new(ErrorCode::ScanBusy, tr!("扫描进行中，完成后再重新扫描")));
+            return Err(RpcError::new(
+                ErrorCode::ScanBusy,
+                tr!("扫描进行中，完成后再重新扫描"),
+            ));
         }
         if h.source != ScanSource::Scan {
             return Err(RpcError::invalid_request(tr!("快照不能重新扫描")));
         }
-        let mon = match self.find(&h.id).or_else(|| self.passive.lock().get(&h.id).cloned()) {
+        let mon = match self
+            .find(&h.id)
+            .or_else(|| self.passive.lock().get(&h.id).cloned())
+        {
             Some(m) => m,
             None => {
-                let m = Self::spawn(server, h, false).ok_or_else(|| RpcError::internal("cannot start a rescan"))?;
+                let m = Self::spawn(server, h, false)
+                    .ok_or_else(|| RpcError::internal("cannot start a rescan"))?;
                 self.passive.lock().insert(h.id.clone(), m.clone());
                 m
             }

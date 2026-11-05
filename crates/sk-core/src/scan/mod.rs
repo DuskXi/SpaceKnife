@@ -25,8 +25,8 @@ use sk_store::{Appender, EntryBatch, Flags, NodeId, SliceRef, StoreError};
 
 pub use gate::{IoGate, Permit};
 pub use scanner::{
-    RootInfo, ScanError, ScanOptions, ScanProfile, ScanProgress, Scanner, scan_path, BYTES_CEILING,
-    ESTIMATE_AFTER_S, MAX_RECORDED_DENIED, RATE_WINDOW_S,
+    BYTES_CEILING, ESTIMATE_AFTER_S, MAX_RECORDED_DENIED, RATE_WINDOW_S, RootInfo, ScanError,
+    ScanOptions, ScanProfile, ScanProgress, Scanner, scan_path,
 };
 pub use sk_protocol::scan::ScanStateName as ScanState;
 
@@ -43,7 +43,9 @@ pub const NATIVE_BUDGET: std::time::Duration = std::time::Duration::from_millis(
 /// measurements.
 pub fn shared_listing() -> bool {
     !matches!(
-        std::env::var("SPACEKNIFE_SCAN_SHARED").map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        std::env::var("SPACEKNIFE_SCAN_SHARED")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref(),
         Ok("0" | "false" | "no" | "off")
     )
 }
@@ -128,9 +130,7 @@ pub fn path_inside(path: &Path, root: &Path) -> bool {
         return true;
     }
     let sep = |b: u8| b == b'/' || (cfg!(windows) && b == b'\\');
-    p.len() > r.len()
-        && p.starts_with(&r)
-        && (r.last().is_some_and(|&b| sep(b)) || sep(p[r.len()]))
+    p.len() > r.len() && p.starts_with(&r) && (r.last().is_some_and(|&b| sep(b)) || sep(p[r.len()]))
 }
 
 /// A slice's entry columns as the store's [`EntryBatch`]: the columns are moved, not copied;
@@ -238,9 +238,11 @@ pub fn fold_slice(
                 let n = n as NodeId;
                 ((n as usize) < app.len() && !app.flags(n).intersects(Flags::GONE)).then_some(n)
             }
-            Ref::Entry { listing, entry } => {
-                starts.get(listing as usize).copied().flatten().map(|s| s + entry)
-            }
+            Ref::Entry { listing, entry } => starts
+                .get(listing as usize)
+                .copied()
+                .flatten()
+                .map(|s| s + entry),
         }
     };
     for e in errors {

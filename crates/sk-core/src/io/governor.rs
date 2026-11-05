@@ -67,12 +67,18 @@ pub struct MediaProfile {
 }
 
 pub fn profile(media: Media) -> MediaProfile {
-    let p = |q_eff: Option<f64>, initial: f64, cap: Option<usize>| MediaProfile { q_eff, initial, cap };
+    let p = |q_eff: Option<f64>, initial: f64, cap: Option<usize>| MediaProfile {
+        q_eff,
+        initial,
+        cap,
+    };
     match media {
         Media::NvmeSsd => p(Some(32.0), 4.0, None),
-        Media::SataSsd | Media::Ssd | Media::Virtual => {
-            p(Some(8.0), if media == Media::Virtual { 2.0 } else { 3.0 }, None)
-        }
+        Media::SataSsd | Media::Ssd | Media::Virtual => p(
+            Some(8.0),
+            if media == Media::Virtual { 2.0 } else { 3.0 },
+            None,
+        ),
         Media::Hdd | Media::UsbHdd => p(Some(1.0), 1.0, Some(2)), // low concurrency: seeks thrash (UI-W2-37)
         Media::UsbSsd => p(Some(2.0), 2.0, Some(4)),
         Media::UsbFlash => p(Some(2.0), 1.0, Some(2)),
@@ -98,7 +104,9 @@ pub fn setpoint(limit: f64) -> f64 {
 }
 
 fn wall_now() -> f64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0.0, |d| d.as_secs_f64())
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |d| d.as_secs_f64())
 }
 
 fn round_to(x: f64, digits: i32) -> f64 {
@@ -279,7 +287,9 @@ impl GovernorCore {
         if let Some(m) = self.manual {
             return m;
         }
-        self.max_workers.min(self.profile.cap.unwrap_or(self.max_workers)).max(1)
+        self.max_workers
+            .min(self.profile.cap.unwrap_or(self.max_workers))
+            .max(1)
     }
 
     /// Start intensity: the media prior, or what one I/O-bound worker per `Q_eff` predicts.
@@ -332,7 +342,13 @@ impl GovernorCore {
         self.u = self.u.max(U_MIN).min(self.cap() as f64);
         self.tokens = self.tokens.min(self.burst());
         if old != new {
-            tracing::debug!("io {}: level {} ({:.0}%) u={:.2}", self.disk.id, level.as_str(), new * 100.0, self.u);
+            tracing::debug!(
+                "io {}: level {} ({:.0}%) u={:.2}",
+                self.disk.id,
+                level.as_str(),
+                new * 100.0,
+                self.u
+            );
         }
     }
 
@@ -377,7 +393,8 @@ impl GovernorCore {
             return;
         }
         self.area += self.inflight as f64 * dt;
-        self.tokens = (self.tokens + (self.u - self.inflight as f64) * dt).clamp(-1.0, self.burst());
+        self.tokens =
+            (self.tokens + (self.u - self.inflight as f64) * dt).clamp(-1.0, self.burst());
         self.t = now;
     }
 
@@ -402,7 +419,8 @@ impl GovernorCore {
 
     pub fn can_dispatch(&mut self, now: f64) -> bool {
         self.integrate(now);
-        if !self.pauses.is_empty() || self.probe_blocks(now) || self.inflight >= self.concurrency() {
+        if !self.pauses.is_empty() || self.probe_blocks(now) || self.inflight >= self.concurrency()
+        {
             return false;
         }
         !self.duty_limited() || self.tokens >= self.price()
@@ -460,7 +478,11 @@ impl GovernorCore {
         let price = self.price();
         if self.duty_limited() && self.tokens < price {
             let rate = self.u - self.inflight as f64;
-            return if rate <= 0.0 { None } else { Some(now + (price - self.tokens) / rate + 1e-4) };
+            return if rate <= 0.0 {
+                None
+            } else {
+                Some(now + (price - self.tokens) / rate + 1e-4)
+            };
         }
         Some(now)
     }
@@ -493,7 +515,9 @@ impl GovernorCore {
     /// what is in service, lower it (slowly, never below a quarter of the prior). Otherwise drift
     /// back to the prior, which forgets passing interference.
     fn learn_q_eff(&mut self, s: &DiskSample, own_share: f64) {
-        let (Some(prior), Some(mut q)) = (self.profile.q_eff, self.q_eff) else { return };
+        let (Some(prior), Some(mut q)) = (self.profile.q_eff, self.q_eff) else {
+            return;
+        };
         let (lat, iops) = (s.read_latency.unwrap_or(0.0), s.read_iops.unwrap_or(0.0));
         if lat == 0.0 || iops == 0.0 || iops * s.dt < 20.0 || own_share < 0.7 {
             self.q_eff = Some(q + 0.002 * (prior - q));
@@ -502,7 +526,11 @@ impl GovernorCore {
         }
         let size = s.read_bps.unwrap_or(0.0) / iops;
         // 4 KiB … 1 MiB+
-        let class = if size <= 4096.0 { 0 } else { ((size / 4096.0).log2().round() as usize).min(8) };
+        let class = if size <= 4096.0 {
+            0
+        } else {
+            ((size / 4096.0).log2().round() as usize).min(8)
+        };
         let drift = 1.0 + 0.004 * s.dt; // old minima are forgotten over minutes
         let r = match self.lat_ref[class] {
             None => lat,
@@ -547,7 +575,11 @@ impl GovernorCore {
     ) {
         self.integrate(now);
         let span = now - self.win_t0;
-        let mut n_bar = if span > 0.0 { (self.area - self.win_area0) / span } else { 0.0 };
+        let mut n_bar = if span > 0.0 {
+            (self.area - self.win_area0) / span
+        } else {
+            0.0
+        };
         let (mut peak, mut blocked) = (self.win_peak, self.win_blocked);
         if let Some((busy_s, lpeak, refused)) = listings {
             n_bar = if span > 0.0 { busy_s / span } else { 0.0 };
@@ -603,7 +635,11 @@ impl GovernorCore {
         if held && clean {
             // a quiet baseline needs fewer probes; a moving one, more
             let moved = previous.is_none_or(|p| (self.others.unwrap_or(0.0) - p).abs() >= 0.03);
-            self.probe_every = if moved { PROBE_EVERY } else { PROBE_EVERY_MAX.min(2.0 * self.probe_every) };
+            self.probe_every = if moved {
+                PROBE_EVERY
+            } else {
+                PROBE_EVERY_MAX.min(2.0 * self.probe_every)
+            };
         }
         if clean {
             self.update_yield();
@@ -621,7 +657,10 @@ impl GovernorCore {
             let measured = (rho - g * n_bar).max(0.0);
             // A probe is rare and deliberate: trust it, unless it moves the baseline a lot (a
             // device stall can spill into the probe window): then half-trust it and confirm.
-            let alpha = if probe && self.others.is_some_and(|o| (measured - o).abs() > 0.1) && !self.confirm {
+            let alpha = if probe
+                && self.others.is_some_and(|o| (measured - o).abs() > 0.1)
+                && !self.confirm
+            {
                 self.confirm = true;
                 0.5
             } else if probe {
@@ -644,7 +683,8 @@ impl GovernorCore {
         let base = self.others.unwrap_or(0.0);
         self.self_load = (rho - base).min(rho).max(0.0);
         let saturated = rho >= SATURATED;
-        if saturated && n_bar >= 0.2
+        if saturated
+            && n_bar >= 0.2
             && let Some(g_ref) = self.g_ref
         {
             // a full disk hides who is using it: total minus baseline says nothing any more, so
@@ -692,7 +732,12 @@ impl GovernorCore {
             self.u_before_yield = self.u;
             self.u = U_YIELD;
             self.tokens = self.tokens.min(0.0);
-            tracing::info!("io {}: yielding (others {:.0}% > {:.0}%)", self.disk.id, others * 100.0, threshold * 100.0);
+            tracing::info!(
+                "io {}: yielding (others {:.0}% > {:.0}%)",
+                self.disk.id,
+                others * 100.0,
+                threshold * 100.0
+            );
         } else if self.yielding && others < 0.85 * threshold {
             self.leave_yield();
         }
@@ -700,7 +745,11 @@ impl GovernorCore {
 
     fn leave_yield(&mut self) {
         self.yielding = false;
-        self.u = if self.limited() { U_MIN.max(0.5 * self.u_before_yield) } else { self.cap() as f64 };
+        self.u = if self.limited() {
+            U_MIN.max(0.5 * self.u_before_yield)
+        } else {
+            self.cap() as f64
+        };
         tracing::info!("io {}: yield over, u={:.2}", self.disk.id, self.u);
     }
 
@@ -725,7 +774,11 @@ impl GovernorCore {
         // additive increase: +1 worker per STEP_PERIOD; far below the setpoint (scan start, after
         // a yield) grow by up to half the intensity per period instead, like TCP slow start
         let far = load < 0.5 * target;
-        let per_period = if far { (0.5 * self.u).max(1.0).min(self.u.max(0.1)) } else { 1.0 };
+        let per_period = if far {
+            (0.5 * self.u).max(1.0).min(self.u.max(0.1))
+        } else {
+            1.0
+        };
         let step = per_period * dt / STEP_PERIOD;
         // The gain (own load per batch in flight) hardly depends on the intensity, so filtering
         // it damps measurement noise without delaying the response to our own changes (n̄ is exact).
@@ -756,7 +809,11 @@ impl GovernorCore {
                 let wanted = target / g; // linear plant: load ∝ batches in flight
                 self.u += step.min((Self::INCREASE_GAIN * (wanted - self.u)).max(0.0));
             } else {
-                self.u += if self.u >= 1.0 { step } else { self.u.max(0.1) * step };
+                self.u += if self.u >= 1.0 {
+                    step
+                } else {
+                    self.u.max(0.1) * step
+                };
             }
         }
         if !blocked {
@@ -791,7 +848,10 @@ impl GovernorCore {
     fn record(&mut self, span: f64, wall: Option<f64>) {
         let span = span.max(0.0);
         let a = span.min(1.0); // EWMA over about one second
-        for (i, value) in [self.self_load, self.total, self.active].into_iter().enumerate() {
+        for (i, value) in [self.self_load, self.total, self.active]
+            .into_iter()
+            .enumerate()
+        {
             self.shown[i] += a * (value - self.shown[i]);
         }
         let b = &mut self.bucket;
@@ -839,7 +899,11 @@ impl GovernorCore {
             q_eff: self.q_eff.map(|q| round_to(q, 2)),
             read_bps: self.read_bps.map(f64::round),
             read_latency_ms: self.read_latency.map(|l| round_to(1000.0 * l, 3)),
-            history: if history { self.history.iter().cloned().collect() } else { Vec::new() },
+            history: if history {
+                self.history.iter().cloned().collect()
+            } else {
+                Vec::new()
+            },
         }
     }
 }
@@ -1002,7 +1066,9 @@ impl IoGovernor {
             let wait = st
                 .core
                 .wake_time(now)
-                .map_or(Duration::from_millis(50), |w| Duration::from_secs_f64((w - now).clamp(0.0, 0.05)));
+                .map_or(Duration::from_millis(50), |w| {
+                    Duration::from_secs_f64((w - now).clamp(0.0, 0.05))
+                });
             if !wait.is_zero() {
                 self.cond.wait_for(&mut st, wait);
             }
@@ -1109,8 +1175,9 @@ impl IoGovernor {
         if let Some(g) = self.gate.get() {
             // in listings: those in flight now, and (automatic) no more than the walker's width
             if status.auto {
-                status.concurrency =
-                    status.concurrency.min(sk_native::hardscan::listing_threads(false).width as _);
+                status.concurrency = status
+                    .concurrency
+                    .min(sk_native::hardscan::listing_threads(false).width as _);
             }
             status.inflight = g.inflight() as _;
         }
@@ -1133,7 +1200,12 @@ impl IoGovernor {
     }
 
     pub fn push(&self) {
-        let listeners: Vec<Listener> = self.listeners.lock().iter().map(|(_, l)| l.clone()).collect();
+        let listeners: Vec<Listener> = self
+            .listeners
+            .lock()
+            .iter()
+            .map(|(_, l)| l.clone())
+            .collect();
         if listeners.is_empty() {
             return;
         }

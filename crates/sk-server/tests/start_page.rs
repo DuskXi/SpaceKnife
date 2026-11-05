@@ -16,7 +16,11 @@ fn check_paths_states_and_merging() {
     std::fs::create_dir(tmp.path().join("c")).unwrap();
     std::fs::write(tmp.path().join("f.txt"), "x").unwrap();
     let s = |p: std::path::PathBuf| p.to_string_lossy().into_owned();
-    let (a, b, c) = (s(tmp.path().join("a")), s(tmp.path().join("a").join("b")), s(tmp.path().join("c")));
+    let (a, b, c) = (
+        s(tmp.path().join("a")),
+        s(tmp.path().join("a").join("b")),
+        s(tmp.path().join("c")),
+    );
     let res = check_paths(&[
         format!(" {b} "),
         a.clone(),
@@ -26,7 +30,11 @@ fn check_paths_states_and_merging() {
         c.clone(),
         a.clone(),
     ]);
-    let states: Vec<(PathCheckState, Option<String>)> = res.items.iter().map(|i| (i.state, i.merged_into.clone())).collect();
+    let states: Vec<(PathCheckState, Option<String>)> = res
+        .items
+        .iter()
+        .map(|i| (i.state, i.merged_into.clone()))
+        .collect();
     assert_eq!(
         states,
         [
@@ -39,7 +47,10 @@ fn check_paths_states_and_merging() {
         ]
     );
     assert!(res.roots == [a.clone(), c.clone()] || res.roots == [c, a]);
-    assert_eq!((res.items[0].path.as_str(), res.items[0].normalized.as_str()), (b.as_str(), b.as_str())); // trimmed
+    assert_eq!(
+        (res.items[0].path.as_str(), res.items[0].normalized.as_str()),
+        (b.as_str(), b.as_str())
+    ); // trimmed
     assert!(!res.items[1].volume.is_empty()); // the volume holding the folder
     assert_eq!(res.items[3].message, "路径不存在");
     assert_eq!(res.items[2].message, "不是文件夹");
@@ -67,12 +78,20 @@ async fn volumes_and_checks_over_the_protocol() {
     let vols = vols["volumes"].as_array().unwrap();
     assert!(!vols.is_empty());
     assert_eq!(vols.iter().filter(|v| v["is_system"] == true).count(), 1);
-    assert!(vols.iter().all(|v| MediaName::from_str(v["media"].as_str().unwrap()).is_some()));
+    assert!(
+        vols.iter()
+            .all(|v| MediaName::from_str(v["media"].as_str().unwrap()).is_some())
+    );
     let tmp = tempfile::tempdir().unwrap();
     let res = client
         .ok("scan.check_paths", json!({"paths": [tmp.path().to_string_lossy(), tmp.path().join("x").to_string_lossy()]}))
         .await;
-    let states: Vec<&str> = res["items"].as_array().unwrap().iter().map(|i| i["state"].as_str().unwrap()).collect();
+    let states: Vec<&str> = res["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["state"].as_str().unwrap())
+        .collect();
     assert_eq!(states, ["ok", "missing"]);
     assert_eq!(res["roots"], json!([tmp.path().to_string_lossy()]));
 }

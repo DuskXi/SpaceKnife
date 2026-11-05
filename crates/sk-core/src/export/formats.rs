@@ -13,9 +13,12 @@ use std::fmt::Write as _;
 
 use sk_store::{Flags, Kind, NodeId, Nodes};
 
-use super::util::{UNIT_BASE, fill, language, size as fmt_size, thousands, tr};
 use super::template::{html_escape, json_escape_into, local_time};
-use super::tree::{Blocks, Element, ExportTree, Mask, Ordering, Piece, SortKey, decode_units, export_roots, text_of};
+use super::tree::{
+    Blocks, Element, ExportTree, Mask, Ordering, Piece, SortKey, decode_units, export_roots,
+    text_of,
+};
+use super::util::{UNIT_BASE, fill, language, size as fmt_size, thousands, tr};
 use super::{ExportError, Sink};
 
 /// Message ids of the HTML report and the format titles.
@@ -110,7 +113,10 @@ pub fn kind_name(kind: Kind) -> &'static str {
 
 /// The attribute names of a flag set.
 pub fn attributes(flags: Flags) -> impl Iterator<Item = &'static str> {
-    ATTRIBUTES.into_iter().filter(move |(f, _)| flags.intersects(*f)).map(|(_, n)| n)
+    ATTRIBUTES
+        .into_iter()
+        .filter(move |(f, _)| flags.intersects(*f))
+        .map(|(_, n)| n)
 }
 
 fn now_secs() -> f64 {
@@ -122,7 +128,9 @@ fn now_secs() -> f64 {
 fn exact_time(ts: i64) -> String {
     use chrono::{LocalResult, TimeZone};
     match chrono::Local.timestamp_opt(ts, 0) {
-        LocalResult::Single(t) | LocalResult::Ambiguous(t, _) => t.format("%Y-%m-%dT%H:%M:%S%:z").to_string(),
+        LocalResult::Single(t) | LocalResult::Ambiguous(t, _) => {
+            t.format("%Y-%m-%dT%H:%M:%S%:z").to_string()
+        }
         LocalResult::None => chrono::DateTime::from_timestamp(ts, 0)
             .map(|t| t.format("%Y-%m-%dT%H:%M:%S+00:00").to_string())
             .unwrap_or_default(),
@@ -131,7 +139,11 @@ fn exact_time(ts: i64) -> String {
 
 /// ISO 8601 local time with its offset (`2026-10-18T12:30:00+08:00`); "" when unknown.
 pub fn iso_time(ts: i64) -> String {
-    if ts > 0 { exact_time(ts) } else { String::new() }
+    if ts > 0 {
+        exact_time(ts)
+    } else {
+        String::new()
+    }
 }
 
 /// [`iso_time`] for many timestamps: the zone offset is looked up once per UTC day (at its first
@@ -153,7 +165,9 @@ impl LocalTimes {
             .or_insert_with(|| {
                 use chrono::{Offset, TimeZone};
                 let at = |ts: i64| match chrono::Local.timestamp_opt(ts, 0) {
-                    chrono::LocalResult::Single(t) => Some(t.offset().fix().local_minus_utc() as i64),
+                    chrono::LocalResult::Single(t) => {
+                        Some(t.offset().fix().local_minus_utc() as i64)
+                    }
                     _ => None,
                 };
                 let (first, last) = (at(day * 86400)?, at(day * 86400 + 86399)?);
@@ -240,7 +254,12 @@ fn csv_cell(text: &str, out: &mut String) {
 }
 
 /// RFC 4180 CSV (CRLF rows, a header row), one row per element, depth first.
-pub fn csv_chunks(nodes: &Nodes, root: NodeId, mask: Mask<'_>, sink: &mut Sink<'_>) -> Result<(), ExportError> {
+pub fn csv_chunks(
+    nodes: &Nodes,
+    root: NodeId,
+    mask: Mask<'_>,
+    sink: &mut Sink<'_>,
+) -> Result<(), ExportError> {
     let mut buf = CSV_COLUMNS.join(",");
     buf.push_str("\r\n");
     let mut times = LocalTimes::new();
@@ -282,7 +301,9 @@ pub fn export_csv(nodes: &Nodes, root: NodeId, mask: Mask<'_>) -> Result<String,
     collect(|sink| csv_chunks(nodes, root, mask, sink))
 }
 
-fn collect(f: impl FnOnce(&mut Sink<'_>) -> Result<(), ExportError>) -> Result<String, ExportError> {
+fn collect(
+    f: impl FnOnce(&mut Sink<'_>) -> Result<(), ExportError>,
+) -> Result<String, ExportError> {
     let mut out = String::new();
     f(&mut |s: &str| {
         out.push_str(s);
@@ -400,7 +421,12 @@ pub fn json_chunks(
     Ok(())
 }
 
-pub fn export_json(nodes: &Nodes, root: NodeId, mask: Mask<'_>, filter_text: &str) -> Result<String, ExportError> {
+pub fn export_json(
+    nodes: &Nodes,
+    root: NodeId,
+    mask: Mask<'_>,
+    filter_text: &str,
+) -> Result<String, ExportError> {
     collect(|sink| json_chunks(nodes, root, mask, filter_text, None, sink))
 }
 
@@ -473,15 +499,33 @@ pub struct HtmlOptions {
 
 impl Default for HtmlOptions {
     fn default() -> Self {
-        HtmlOptions { depth: 4, top: 30, largest: 50, extensions: 20, now: None }
+        HtmlOptions {
+            depth: 4,
+            top: 30,
+            largest: 50,
+            extensions: 20,
+            now: None,
+        }
     }
 }
 
 fn share(part: i64, whole: i64) -> f64 {
-    if whole > 0 { part as f64 / whole as f64 } else { 0.0 }
+    if whole > 0 {
+        part as f64 / whole as f64
+    } else {
+        0.0
+    }
 }
 
-fn html_row(out: &mut String, name: &str, alloc: i64, whole: i64, depth: u32, cls: &str, tag: &str) {
+fn html_row(
+    out: &mut String,
+    name: &str,
+    alloc: i64,
+    whole: i64,
+    depth: u32,
+    cls: &str,
+    tag: &str,
+) {
     let pct = format!("{:.1}%", share(alloc, whole) * 100.0);
     let name = html_escape(name);
     let _ = write!(
@@ -494,7 +538,14 @@ fn html_row(out: &mut String, name: &str, alloc: i64, whole: i64, depth: u32, cl
 }
 
 fn structure(tree: &ExportTree<'_>, out: &mut String, depth: u32, top: usize) {
-    fn folder(tree: &ExportTree<'_>, out: &mut String, pos: u32, level: u32, depth: u32, top: usize) {
+    fn folder(
+        tree: &ExportTree<'_>,
+        out: &mut String,
+        pos: u32,
+        level: u32,
+        depth: u32,
+        top: usize,
+    ) {
         let whole = tree.sizes(pos).1;
         let kids = tree.children(pos);
         let (shown, rest) = kids.split_at(kids.len().min(top));
@@ -508,7 +559,15 @@ fn structure(tree: &ExportTree<'_>, out: &mut String, depth: u32, top: usize) {
                 folder(tree, out, k, level + 1, depth, top);
                 out.push_str("</details>");
             } else {
-                html_row(out, &name, alloc, whole, level, if is_dir { "dir leaf" } else { "leaf" }, "div");
+                html_row(
+                    out,
+                    &name,
+                    alloc,
+                    whole,
+                    level,
+                    if is_dir { "dir leaf" } else { "leaf" },
+                    "div",
+                );
             }
         }
         if !rest.is_empty() {
@@ -519,7 +578,15 @@ fn structure(tree: &ExportTree<'_>, out: &mut String, depth: u32, top: usize) {
     }
     let all = tree.sizes(0).1;
     out.push_str("<details open>");
-    html_row(out, &text_of(&tree.root_name), all, all, 0, "dir", "summary");
+    html_row(
+        out,
+        &text_of(&tree.root_name),
+        all,
+        all,
+        0,
+        "dir",
+        "summary",
+    );
     folder(tree, out, 0, 1, depth, top);
     out.push_str("</details>");
 }
@@ -531,7 +598,10 @@ fn visible_leaves(tree: &ExportTree<'_>) -> Vec<u32> {
 }
 
 fn largest(tree: &ExportTree<'_>, out: &mut String, limit: usize) {
-    let mut leaves: Vec<(i64, u32)> = visible_leaves(tree).into_iter().map(|p| (tree.alloc_key(p), p)).collect();
+    let mut leaves: Vec<(i64, u32)> = visible_leaves(tree)
+        .into_iter()
+        .map(|p| (tree.alloc_key(p), p))
+        .collect();
     if leaves.is_empty() || limit == 0 {
         let _ = write!(out, "<p class=\"note\">{}</p>", tr(text::EMPTY));
         return;
@@ -570,7 +640,9 @@ fn extensions(tree: &ExportTree<'_>, out: &mut String, limit: usize) {
     }
     let mut sums: HashMap<u16, (i64, i64)> = HashMap::new(); // ext -> (bytes, files)
     for &p in &leaves {
-        let e = sums.entry(tree.nodes.ext(tree.ids[p as usize])).or_default();
+        let e = sums
+            .entry(tree.nodes.ext(tree.ids[p as usize]))
+            .or_default();
         e.0 += tree.alloc_key(p);
         e.1 += 1;
     }
@@ -588,7 +660,11 @@ fn extensions(tree: &ExportTree<'_>, out: &mut String, limit: usize) {
     );
     for (ext, sum, count) in order {
         let name = tree.nodes.ext_name(ext);
-        let label = if name.is_empty() { tr(text::NO_EXT) } else { format!(".{name}") };
+        let label = if name.is_empty() {
+            tr(text::NO_EXT)
+        } else {
+            format!(".{name}")
+        };
         let _ = write!(
             out,
             "<tr><td class=\"mono\">{}</td><td class=\"num\">{}</td><td class=\"num\">{}</td><td class=\"num muted\">{:.1}%</td></tr>",
@@ -641,7 +717,14 @@ pub fn export_html(
         let cards = [
             (tr(text::DISK), fmt_size(alloc)),
             (tr(text::LOGICAL), fmt_size(size)),
-            (tr(if tree.masked { text::MATCHED } else { text::FILES }), thousands(files as i64)),
+            (
+                tr(if tree.masked {
+                    text::MATCHED
+                } else {
+                    text::FILES
+                }),
+                thousands(files as i64),
+            ),
             (tr(text::FOLDERS), thousands(folders as i64)),
         ];
         let _ = write!(
@@ -662,7 +745,10 @@ pub fn export_html(
         }
         let note = fill(
             &tr(text::STRUCTURE_NOTE),
-            &[("top", &opts.top.to_string()), ("depth", &opts.depth.to_string())],
+            &[
+                ("top", &opts.top.to_string()),
+                ("depth", &opts.depth.to_string()),
+            ],
         );
         let _ = write!(
             out,
@@ -671,15 +757,27 @@ pub fn export_html(
             html_escape(&note)
         );
         structure(&tree, &mut out, opts.depth, opts.top);
-        let _ = write!(out, "</div></section><section><h2>{}</h2>", tr(text::LARGEST));
+        let _ = write!(
+            out,
+            "</div></section><section><h2>{}</h2>",
+            tr(text::LARGEST)
+        );
         largest(&tree, &mut out, opts.largest);
         let _ = write!(out, "</section><section><h2>{}</h2>", tr(text::EXTENSIONS));
         extensions(&tree, &mut out, opts.extensions);
         out.push_str("</section></div>");
     }
-    let base = tr(if UNIT_BASE == 1000 { text::BASE_1000 } else { text::BASE_1024 });
+    let base = tr(if UNIT_BASE == 1000 {
+        text::BASE_1000
+    } else {
+        text::BASE_1024
+    });
     let footer = fill(&tr(text::FOOTER), &[("version", VERSION), ("base", &base)]);
-    let _ = writeln!(out, "<footer>{}</footer></main></body></html>", html_escape(&footer));
+    let _ = writeln!(
+        out,
+        "<footer>{}</footer></main></body></html>",
+        html_escape(&footer)
+    );
     Ok(out)
 }
 

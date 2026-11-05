@@ -34,32 +34,56 @@ impl LocalFeed {
                 std::thread::spawn(move || serve(conn, &r3, &q3));
             }
         });
-        LocalFeed { port, routes, requests }
+        LocalFeed {
+            port,
+            routes,
+            requests,
+        }
     }
 
     fn url(&self, path: &str) -> String {
         format!("http://127.0.0.1:{}{path}", self.port)
     }
 
-    fn route(&self, path: &str, f: impl Fn(&Headers) -> (u16, Vec<(String, String)>, Vec<u8>) + Send + Sync + 'static) {
-        self.routes.lock().unwrap().insert(path.to_owned(), Box::new(f));
+    fn route(
+        &self,
+        path: &str,
+        f: impl Fn(&Headers) -> (u16, Vec<(String, String)>, Vec<u8>) + Send + Sync + 'static,
+    ) {
+        self.routes
+            .lock()
+            .unwrap()
+            .insert(path.to_owned(), Box::new(f));
     }
 
     /// Serve `body` at `path` (with a Content-Length unless `length` is false).
     fn file(&self, path: &str, body: Vec<u8>, length: bool) -> String {
         self.route(path, move |_| {
-            let h = if length { vec![("Content-Length".into(), body.len().to_string())] } else { vec![] };
+            let h = if length {
+                vec![("Content-Length".into(), body.len().to_string())]
+            } else {
+                vec![]
+            };
             (200, h, body.clone())
         });
         self.url(path)
     }
 
     fn hits(&self, path: &str) -> usize {
-        self.requests.lock().unwrap().iter().filter(|(p, _)| p == path).count()
+        self.requests
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(p, _)| p == path)
+            .count()
     }
 }
 
-fn serve(conn: TcpStream, routes: &Mutex<HashMap<String, Route>>, requests: &Mutex<Vec<(String, Headers)>>) {
+fn serve(
+    conn: TcpStream,
+    routes: &Mutex<HashMap<String, Route>>,
+    requests: &Mutex<Vec<(String, Headers)>>,
+) {
     let mut reader = BufReader::new(conn.try_clone().unwrap());
     let mut line = String::new();
     if reader.read_line(&mut line).is_err() {
@@ -76,7 +100,10 @@ fn serve(conn: TcpStream, routes: &Mutex<HashMap<String, Route>>, requests: &Mut
             headers.insert(k.trim().to_lowercase(), v.trim().to_owned());
         }
     }
-    requests.lock().unwrap().push((path.clone(), headers.clone()));
+    requests
+        .lock()
+        .unwrap()
+        .push((path.clone(), headers.clone()));
     let response = routes.lock().unwrap().get(&path).map(|r| r(&headers));
     let (status, extra, body) = response.unwrap_or((404, vec![], b"not found".to_vec()));
     let mut out = conn;
@@ -124,7 +151,11 @@ fn release(version: &str, names: &[&str]) -> Release {
         notes: String::new(),
         assets: names
             .iter()
-            .map(|n| Asset { name: (*n).into(), size: 10, url: format!("{BASE}/download/v{version}/{n}") })
+            .map(|n| Asset {
+                name: (*n).into(),
+                size: 10,
+                url: format!("{BASE}/download/v{version}/{n}"),
+            })
             .collect(),
     }
 }
@@ -142,7 +173,15 @@ fn version_parsing() {
     assert_eq!(v("0.4.0-beta.1").pre, ["beta", "1"]);
     assert_eq!(v("1.0.0+build.7"), Version::new(1, 0, 0));
     assert_eq!(v("0.4.0-rc.2").to_string(), "0.4.0-rc.2");
-    for bad in ["0.4", "latest", "v1.2.3.4", "1.02.0", "nightly-2026-10-01", "1.0.0-", ""] {
+    for bad in [
+        "0.4",
+        "latest",
+        "v1.2.3.4",
+        "1.02.0",
+        "nightly-2026-10-01",
+        "1.0.0-",
+        "",
+    ] {
         assert!(Version::parse(bad).is_none(), "{bad}");
     }
 }
@@ -150,8 +189,17 @@ fn version_parsing() {
 #[test]
 fn version_order_is_semver() {
     let ordered = [
-        "1.0.0-alpha", "1.0.0-alpha.1", "1.0.0-alpha.beta", "1.0.0-beta", "1.0.0-beta.2", "1.0.0-beta.11",
-        "1.0.0-rc.1", "1.0.0", "1.0.1", "1.1.0", "2.0.0",
+        "1.0.0-alpha",
+        "1.0.0-alpha.1",
+        "1.0.0-alpha.beta",
+        "1.0.0-beta",
+        "1.0.0-beta.2",
+        "1.0.0-beta.11",
+        "1.0.0-rc.1",
+        "1.0.0",
+        "1.0.1",
+        "1.1.0",
+        "2.0.0",
     ];
     let parsed: Vec<Version> = ordered.iter().map(|s| v(s)).collect();
     let mut sorted = parsed.clone();
@@ -164,15 +212,39 @@ fn version_order_is_semver() {
 #[test]
 fn every_part_is_a_number_of_any_length() {
     let ordered = [
-        "0.3.2", "0.3.9", "0.3.10", "0.3.11", "0.3.99", "0.3.100", "0.9.12", "0.10.0", "0.99.99", "0.100.0",
-        "1.0.0", "1.9.0", "1.10.0", "9.0.0", "10.0.0", "100.200.300",
+        "0.3.2",
+        "0.3.9",
+        "0.3.10",
+        "0.3.11",
+        "0.3.99",
+        "0.3.100",
+        "0.9.12",
+        "0.10.0",
+        "0.99.99",
+        "0.100.0",
+        "1.0.0",
+        "1.9.0",
+        "1.10.0",
+        "9.0.0",
+        "10.0.0",
+        "100.200.300",
     ];
     let mut parsed: Vec<Version> = ordered.iter().rev().map(|s| v(s)).collect();
     parsed.sort();
-    assert_eq!(parsed.iter().map(Version::to_string).collect::<Vec<_>>(), ordered);
+    assert_eq!(
+        parsed.iter().map(Version::to_string).collect::<Vec<_>>(),
+        ordered
+    );
     assert!(v("0.3.10-beta.10") > v("0.3.10-beta.9"));
-    let list = parse_releases(&json!([gh("v0.3.9"), gh("v0.3.10"), gh("v0.3.2")]), RELEASES_URL).unwrap();
-    assert_eq!(choose(&list, UpdateChannel::Stable).unwrap().version, "0.3.10");
+    let list = parse_releases(
+        &json!([gh("v0.3.9"), gh("v0.3.10"), gh("v0.3.2")]),
+        RELEASES_URL,
+    )
+    .unwrap();
+    assert_eq!(
+        choose(&list, UpdateChannel::Stable).unwrap().version,
+        "0.3.10"
+    );
 }
 
 #[test]
@@ -203,9 +275,15 @@ fn levels() {
 #[test]
 fn series_that_can_be_muted() {
     assert_eq!(series(Some("0.3.2"), Some("0.4.1")).as_deref(), Some("0.4"));
-    assert_eq!(series(Some("0.3.2"), Some("0.4.0-beta.1")).as_deref(), Some("0.4"));
+    assert_eq!(
+        series(Some("0.3.2"), Some("0.4.0-beta.1")).as_deref(),
+        Some("0.4")
+    );
     assert_eq!(series(Some("0.3.2"), Some("1.2.0")).as_deref(), Some("1"));
-    assert_eq!(series(Some("0.9.9"), Some("0.10.0")).as_deref(), Some("0.10"));
+    assert_eq!(
+        series(Some("0.9.9"), Some("0.10.0")).as_deref(),
+        Some("0.10")
+    );
     assert_eq!(series(Some("0.3.2"), Some("0.3.3")), None);
     assert_eq!(series(Some("0.4.0"), Some("0.4.0")), None);
     assert_eq!(series(Some("dev"), Some("0.4.0")), None);
@@ -235,35 +313,65 @@ fn parse_releases_skips_drafts_and_odd_tags() {
         "junk",
     ]);
     let got = parse_releases(&data, RELEASES_URL).unwrap();
-    assert_eq!(got.iter().map(|r| r.version.as_str()).collect::<Vec<_>>(), ["0.4.0-rc.1", "0.4.0-beta.1", "0.3.1", "0.3.0"]);
+    assert_eq!(
+        got.iter().map(|r| r.version.as_str()).collect::<Vec<_>>(),
+        ["0.4.0-rc.1", "0.4.0-beta.1", "0.3.1", "0.3.0"]
+    );
     assert!(got[1].prerelease && !got[0].prerelease && got[0].preview());
     assert!(got[2].published_at.is_none() && got[2].notes == "notes");
-    assert_eq!(got[3].published_at, DateTime::parse_from_rfc3339("2026-10-01T12:00:00Z").ok().map(|d| d.with_timezone(&Utc)));
+    assert_eq!(
+        got[3].published_at,
+        DateTime::parse_from_rfc3339("2026-10-01T12:00:00Z")
+            .ok()
+            .map(|d| d.with_timezone(&Utc))
+    );
     assert_eq!(got[3].assets[0].name, "SpaceKnife-0.3.0-Setup-x64.exe");
     assert_eq!(got[3].assets[0].size, 10);
-    assert!(parse_releases(&json!({"message": "Not Found"}), RELEASES_URL).unwrap_err().contains("release list"));
+    assert!(
+        parse_releases(&json!({"message": "Not Found"}), RELEASES_URL)
+            .unwrap_err()
+            .contains("release list")
+    );
 }
 
 #[test]
 fn choose_by_channel() {
     let pre = |t: &str| gh_with(t, |r| r["prerelease"] = json!(true));
-    let releases =
-        parse_releases(&json!([gh("v0.3.1"), pre("v0.4.0-beta.2"), pre("v0.4.0-beta.10"), gh("v0.3.0")]), RELEASES_URL)
-            .unwrap();
-    assert_eq!(choose(&releases, UpdateChannel::Preview).unwrap().version, "0.4.0-beta.10");
-    assert_eq!(choose(&releases, UpdateChannel::Stable).unwrap().version, "0.3.1");
+    let releases = parse_releases(
+        &json!([
+            gh("v0.3.1"),
+            pre("v0.4.0-beta.2"),
+            pre("v0.4.0-beta.10"),
+            gh("v0.3.0")
+        ]),
+        RELEASES_URL,
+    )
+    .unwrap();
+    assert_eq!(
+        choose(&releases, UpdateChannel::Preview).unwrap().version,
+        "0.4.0-beta.10"
+    );
+    assert_eq!(
+        choose(&releases, UpdateChannel::Stable).unwrap().version,
+        "0.3.1"
+    );
     assert!(choose(&[], UpdateChannel::Preview).is_none());
     let previews: Vec<Release> = releases.iter().filter(|r| r.preview()).cloned().collect();
     assert!(choose(&previews, UpdateChannel::Stable).is_none());
     assert_eq!(
-        trim(&releases).iter().map(|r| r.version.as_str()).collect::<Vec<_>>(),
+        trim(&releases)
+            .iter()
+            .map(|r| r.version.as_str())
+            .collect::<Vec<_>>(),
         ["0.4.0-beta.10", "0.4.0-beta.2", "0.3.1", "0.3.0"]
     );
 }
 
 #[test]
 fn trim_keeps_the_newest_releases() {
-    let mut items: Vec<Value> = (0..4).flat_map(|m| (0..12).map(move |p| gh(&format!("v0.{m}.{p}")))).collect();
+    let mut items: Vec<Value> = (0..4)
+        .flat_map(|m| (0..12).map(move |p| gh(&format!("v0.{m}.{p}"))))
+        .collect();
     items.push(gh("nightly"));
     let kept = trim(&parse_releases(&Value::Array(items), RELEASES_URL).unwrap());
     assert_eq!(kept.len(), HISTORY_KEEP);
@@ -278,9 +386,15 @@ fn only_github_urls_are_kept() {
         r["assets"] = json!([{"name": "SpaceKnife-0.4.0-Setup-x64.exe", "size": 5, "browser_download_url": "https://x.io/a"}]);
     });
     let got = parse_releases(&json!([evil]), RELEASES_URL).unwrap();
-    assert_eq!(got[0].url, "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0");
+    assert_eq!(
+        got[0].url,
+        "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0"
+    );
     assert!(got[0].assets.is_empty());
-    assert!(allowed_url("https://github.com/DuskXi/SpaceKnife/releases/download/v1/x.exe", RELEASES_URL));
+    assert!(allowed_url(
+        "https://github.com/DuskXi/SpaceKnife/releases/download/v1/x.exe",
+        RELEASES_URL
+    ));
     assert!(!allowed_url("http://github.com/x", RELEASES_URL));
     assert!(!allowed_url("https://github.com.evil.io/x", RELEASES_URL));
     let local = "http://127.0.0.1:8123/releases";
@@ -290,8 +404,15 @@ fn only_github_urls_are_kept() {
 
 #[test]
 fn notes_are_capped() {
-    let long: String = (0..5000).map(|i| format!("- 修复第 {i} 个问题")).collect::<Vec<_>>().join("\n");
-    let got = parse_releases(&json!([gh_with("v0.4.0", |r| r["body"] = json!(long))]), RELEASES_URL).unwrap();
+    let long: String = (0..5000)
+        .map(|i| format!("- 修复第 {i} 个问题"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let got = parse_releases(
+        &json!([gh_with("v0.4.0", |r| r["body"] = json!(long))]),
+        RELEASES_URL,
+    )
+    .unwrap();
     assert!(got[0].notes.len() <= NOTES_MAX + 4 && got[0].notes.ends_with("\n…"));
     assert_eq!(cap_notes("short", NOTES_MAX), "short");
 }
@@ -301,7 +422,10 @@ fn info() {
     let r = release("0.4.0", &["SpaceKnife-0.4.0-Setup-x64.exe"]);
     let sha = "ab".repeat(32);
     let i = to_info(&r, r.assets.first(), Some(&sha));
-    assert_eq!((i.version.as_str(), i.tag.as_str(), i.name.as_str()), ("0.4.0", "v0.4.0", "v0.4.0"));
+    assert_eq!(
+        (i.version.as_str(), i.tag.as_str(), i.name.as_str()),
+        ("0.4.0", "v0.4.0", "v0.4.0")
+    );
     let a = i.asset.unwrap();
     assert_eq!((a.sha256.as_deref(), a.size), (Some(sha.as_str()), 10));
     assert!(to_info(&r, None, None).asset.is_none());
@@ -340,19 +464,69 @@ fn pick_assets() {
     use InstallKind::*;
     let r = release("0.4.0", ALL_ASSETS);
     for (kind, system, machine, name) in [
-        (Nsis, "win32", "AMD64", Some("SpaceKnife_0.4.0_x64-setup.exe")),
-        (Nsis, "win32", "ARM64", Some("SpaceKnife_0.4.0_x64-setup.exe")),
-        (Portable, "win32", "AMD64", Some("SpaceKnife-0.4.0-win-x64-portable.zip")),
-        (Portable, "linux", "x86_64", Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz")),
-        (Portable, "win32", "ARM64", Some("SpaceKnife-0.4.0-win-arm64-portable.zip")),
-        (Portable, "linux", "aarch64", Some("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz")),
-        (Portable, "darwin", "arm64", Some("SpaceKnife-0.4.0-mac-arm64-portable.zip")),
-        (Portable, "darwin", "x86_64", Some("SpaceKnife-0.4.0-mac-x64-portable.zip")),
+        (
+            Nsis,
+            "win32",
+            "AMD64",
+            Some("SpaceKnife_0.4.0_x64-setup.exe"),
+        ),
+        (
+            Nsis,
+            "win32",
+            "ARM64",
+            Some("SpaceKnife_0.4.0_x64-setup.exe"),
+        ),
+        (
+            Portable,
+            "win32",
+            "AMD64",
+            Some("SpaceKnife-0.4.0-win-x64-portable.zip"),
+        ),
+        (
+            Portable,
+            "linux",
+            "x86_64",
+            Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz"),
+        ),
+        (
+            Portable,
+            "win32",
+            "ARM64",
+            Some("SpaceKnife-0.4.0-win-arm64-portable.zip"),
+        ),
+        (
+            Portable,
+            "linux",
+            "aarch64",
+            Some("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"),
+        ),
+        (
+            Portable,
+            "darwin",
+            "arm64",
+            Some("SpaceKnife-0.4.0-mac-arm64-portable.zip"),
+        ),
+        (
+            Portable,
+            "darwin",
+            "x86_64",
+            Some("SpaceKnife-0.4.0-mac-x64-portable.zip"),
+        ),
         (Portable, "linux", "riscv64", None),
-        (Appimage, "linux", "x86_64", Some("SpaceKnife_0.4.0_amd64.AppImage")),
+        (
+            Appimage,
+            "linux",
+            "x86_64",
+            Some("SpaceKnife_0.4.0_amd64.AppImage"),
+        ),
         (Appimage, "linux", "aarch64", None),
         (Deb, "linux", "x86_64", Some("SpaceKnife_0.4.0_amd64.deb")),
-        (Rpm, "linux", "x86_64", Some("SpaceKnife-0.4.0-1.x86_64.rpm")),
+        (
+            Rpm,
+            "linux",
+            "x86_64",
+            Some("SpaceKnife-0.4.0-1.x86_64.rpm"),
+        ),
         (Dmg, "darwin", "arm64", Some("SpaceKnife_0.4.0_aarch64.dmg")),
         (Dmg, "darwin", "x86_64", Some("SpaceKnife_0.4.0_x64.dmg")),
         (Dev, "win32", "AMD64", None),
@@ -366,16 +540,29 @@ fn pick_assets() {
 #[test]
 fn a_portable_copy_on_windows_on_arm_keeps_the_x64_build_without_an_arm_one() {
     // a release before the ARM builds (or one whose ARM build failed): Windows runs x64 emulated
-    let r = release("0.4.0", &["SpaceKnife-0.4.0-win-x64-portable.zip", "SpaceKnife-0.4.0-linux-x64-portable.tar.gz"]);
-    let got = pick_asset(&r, InstallKind::Portable, Some("win32"), Some("ARM64")).map(|a| a.name.as_str());
+    let r = release(
+        "0.4.0",
+        &[
+            "SpaceKnife-0.4.0-win-x64-portable.zip",
+            "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
+        ],
+    );
+    let got = pick_asset(&r, InstallKind::Portable, Some("win32"), Some("ARM64"))
+        .map(|a| a.name.as_str());
     assert_eq!(got, Some("SpaceKnife-0.4.0-win-x64-portable.zip"));
     // Linux runs no x64 build on ARM
     assert!(pick_asset(&r, InstallKind::Portable, Some("linux"), Some("aarch64")).is_none());
     assert_eq!(
         asset_templates(InstallKind::Portable, "win32", "ARM64"),
-        ["SpaceKnife-{v}-win-arm64-portable.zip", "SpaceKnife-{v}-win-x64-portable.zip"]
+        [
+            "SpaceKnife-{v}-win-arm64-portable.zip",
+            "SpaceKnife-{v}-win-x64-portable.zip"
+        ]
     );
-    assert_eq!(asset_template(InstallKind::Portable, "win32", "ARM64").as_deref(), Some("SpaceKnife-{v}-win-arm64-portable.zip"));
+    assert_eq!(
+        asset_template(InstallKind::Portable, "win32", "ARM64").as_deref(),
+        Some("SpaceKnife-{v}-win-arm64-portable.zip")
+    );
     assert!(asset_template(InstallKind::Dev, "win32", "AMD64").is_none());
 }
 
@@ -387,7 +574,11 @@ fn the_arm_and_mac_portable_files_are_update_files() {
         "SpaceKnife-0.4.0-mac-arm64-portable.zip",
         "SpaceKnife-0.4.0-mac-x64-portable.zip",
     ] {
-        assert_eq!(update_file_version(name).map(|v| v.to_string()).as_deref(), Some("0.4.0"), "{name}");
+        assert_eq!(
+            update_file_version(name).map(|v| v.to_string()).as_deref(),
+            Some("0.4.0"),
+            "{name}"
+        );
     }
 }
 
@@ -397,19 +588,45 @@ fn update_checks_verify_certificates_through_the_system() {
     // store on Linux): a certificate the system has blocked is refused here too
     for url in [RELEASES_URL, "http://127.0.0.1:9/releases"] {
         let a = agent(url, TIMEOUT);
-        assert!(matches!(a.config().tls_config().root_certs(), ureq::tls::RootCerts::PlatformVerifier), "{url}");
+        assert!(
+            matches!(
+                a.config().tls_config().root_certs(),
+                ureq::tls::RootCerts::PlatformVerifier
+            ),
+            "{url}"
+        );
     }
 }
 
 #[test]
 fn pick_asset_tolerates_the_packagers_spelling() {
-    let r = release("0.4.0-beta.1", &["SpaceKnife-0.4.0~beta.1-1.x86_64.rpm", "SpaceKnife_0.4.0-beta.1_amd64.deb"]);
+    let r = release(
+        "0.4.0-beta.1",
+        &[
+            "SpaceKnife-0.4.0~beta.1-1.x86_64.rpm",
+            "SpaceKnife_0.4.0-beta.1_amd64.deb",
+        ],
+    );
     let pick = |k| pick_asset(&r, k, Some("linux"), Some("x86_64")).map(|a| a.name.clone());
-    assert_eq!(pick(InstallKind::Rpm).as_deref(), Some("SpaceKnife-0.4.0~beta.1-1.x86_64.rpm"));
-    assert_eq!(pick(InstallKind::Deb).as_deref(), Some("SpaceKnife_0.4.0-beta.1_amd64.deb"));
+    assert_eq!(
+        pick(InstallKind::Rpm).as_deref(),
+        Some("SpaceKnife-0.4.0~beta.1-1.x86_64.rpm")
+    );
+    assert_eq!(
+        pick(InstallKind::Deb).as_deref(),
+        Some("SpaceKnife_0.4.0-beta.1_amd64.deb")
+    );
     let odd = release("0.4.0", &["SpaceKnife_../../x_x64-setup.exe"]);
     assert!(pick_asset(&odd, InstallKind::Nsis, Some("win32"), Some("AMD64")).is_none());
-    assert!(pick_asset(&release("0.4.0", &[]), InstallKind::Nsis, Some("win32"), Some("AMD64")).is_none());
+    assert!(
+        pick_asset(
+            &release("0.4.0", &[]),
+            InstallKind::Nsis,
+            Some("win32"),
+            Some("AMD64")
+        )
+        .is_none()
+    );
 }
 
 // ---------------------------------------------------------------- checksums
@@ -432,11 +649,27 @@ fn checksums() {
     assert!(!is_checksum_file("SHA256SUMS.txt.sig") && !is_checksum_file("notes.txt"));
     let r = release("0.4.0", ALL_ASSETS);
     let order = |name: &str| -> Vec<String> {
-        checksum_files(&r, &Asset { name: name.into(), size: 0, url: "u".into() }).iter().map(|a| a.name.clone()).collect()
+        checksum_files(
+            &r,
+            &Asset {
+                name: name.into(),
+                size: 0,
+                url: "u".into(),
+            },
+        )
+        .iter()
+        .map(|a| a.name.clone())
+        .collect()
     };
-    assert_eq!(order("SpaceKnife-0.4.0-mac-arm64.dmg")[0], "SHA256SUMS-mac-arm64.txt");
+    assert_eq!(
+        order("SpaceKnife-0.4.0-mac-arm64.dmg")[0],
+        "SHA256SUMS-mac-arm64.txt"
+    );
     assert_eq!(order("SpaceKnife_0.4.0_x64-setup.exe")[0], "SHA256SUMS.txt");
-    assert_eq!(order("SpaceKnife-0.4.0-win-x64-portable.zip")[0], "SHA256SUMS-portable-win-x64.txt");
+    assert_eq!(
+        order("SpaceKnife-0.4.0-win-x64-portable.zip")[0],
+        "SHA256SUMS-portable-win-x64.txt"
+    );
     assert_eq!(order("SpaceKnife-0.4.0-Setup-x64.exe")[0], "SHA256SUMS.txt");
     assert_eq!(order("x").len(), 3);
 }
@@ -446,15 +679,39 @@ fn checksums() {
 #[test]
 fn update_file_versions() {
     let f = |n: &str| update_file_version(n).map(|v| v.to_string());
-    assert_eq!(f("SpaceKnife-0.3.2-Setup-x64.exe").as_deref(), Some("0.3.2"));
-    assert_eq!(f("SpaceKnife-0.4.0-beta.1-win-x64-portable.zip").as_deref(), Some("0.4.0-beta.1"));
-    assert_eq!(f("SpaceKnife-0.3.10-linux-x64-portable.tar.gz").as_deref(), Some("0.3.10"));
-    assert_eq!(f("SpaceKnife-0.3.2-x86_64.AppImage").as_deref(), Some("0.3.2"));
-    assert_eq!(f("spaceknife_0.4.0~beta.1_amd64.deb").as_deref(), Some("0.4.0-beta.1"));
+    assert_eq!(
+        f("SpaceKnife-0.3.2-Setup-x64.exe").as_deref(),
+        Some("0.3.2")
+    );
+    assert_eq!(
+        f("SpaceKnife-0.4.0-beta.1-win-x64-portable.zip").as_deref(),
+        Some("0.4.0-beta.1")
+    );
+    assert_eq!(
+        f("SpaceKnife-0.3.10-linux-x64-portable.tar.gz").as_deref(),
+        Some("0.3.10")
+    );
+    assert_eq!(
+        f("SpaceKnife-0.3.2-x86_64.AppImage").as_deref(),
+        Some("0.3.2")
+    );
+    assert_eq!(
+        f("spaceknife_0.4.0~beta.1_amd64.deb").as_deref(),
+        Some("0.4.0-beta.1")
+    );
     assert_eq!(f("spaceknife-0.3.2.x86_64.rpm").as_deref(), Some("0.3.2"));
-    assert_eq!(f("SpaceKnife-0.3.2-mac-arm64.dmg").as_deref(), Some("0.3.2"));
-    assert_eq!(f("SpaceKnife_0.4.1_x64-setup.exe").as_deref(), Some("0.4.1"));
-    assert_eq!(f("SpaceKnife_0.4.1-beta.2_amd64.AppImage").as_deref(), Some("0.4.1-beta.2"));
+    assert_eq!(
+        f("SpaceKnife-0.3.2-mac-arm64.dmg").as_deref(),
+        Some("0.3.2")
+    );
+    assert_eq!(
+        f("SpaceKnife_0.4.1_x64-setup.exe").as_deref(),
+        Some("0.4.1")
+    );
+    assert_eq!(
+        f("SpaceKnife_0.4.1-beta.2_amd64.AppImage").as_deref(),
+        Some("0.4.1-beta.2")
+    );
     assert_eq!(f("SpaceKnife_0.4.1_amd64.deb").as_deref(), Some("0.4.1"));
     assert_eq!(f("SpaceKnife-0.4.1-1.x86_64.rpm").as_deref(), Some("0.4.1"));
     assert_eq!(f("SpaceKnife_0.4.1_aarch64.dmg").as_deref(), Some("0.4.1"));
@@ -463,7 +720,12 @@ fn update_file_versions() {
     for n in ["update-0.3.3.ps1", "update-0.3.3.sh", "update-0.3.3.log"] {
         assert_eq!(f(n).as_deref(), Some("0.3.3"));
     }
-    for other in ["notes.txt", "SpaceKnife-Setup.exe", "staging-", "SpaceKnife-0.3.2-Setup-x64.exe.part"] {
+    for other in [
+        "notes.txt",
+        "SpaceKnife-Setup.exe",
+        "staging-",
+        "SpaceKnife-0.3.2-Setup-x64.exe.part",
+    ] {
         assert!(f(other).is_none(), "{other}");
     }
 }
@@ -503,12 +765,25 @@ fn clean_updates_folder() {
             "update-0.3.2.log",
         ]
     );
-    let mut left: Vec<String> =
-        std::fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    let mut left: Vec<String> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
     left.sort();
-    assert_eq!(left, ["SpaceKnife-0.3.3-Setup-x64.exe", "SpaceKnife-0.4.0-beta.1-x86_64.AppImage", "readme.txt", "staging-0.3.3"]);
+    assert_eq!(
+        left,
+        [
+            "SpaceKnife-0.3.3-Setup-x64.exe",
+            "SpaceKnife-0.4.0-beta.1-x86_64.AppImage",
+            "readme.txt",
+            "staging-0.3.3"
+        ]
+    );
     std::fs::write(folder.join("SpaceKnife-0.3.4-Setup-x64.exe.part"), "x").unwrap();
-    assert_eq!(clean_updates(&folder, None), ["SpaceKnife-0.3.4-Setup-x64.exe.part"]);
+    assert_eq!(
+        clean_updates(&folder, None),
+        ["SpaceKnife-0.3.4-Setup-x64.exe.part"]
+    );
     assert!(clean_updates(&tmp.path().join("missing"), Some("0.3.2")).is_empty());
 }
 
@@ -520,7 +795,9 @@ fn state_round_trip_and_damage() {
     let file = tmp.path().join("data").join("update.json");
     assert_eq!(load_state(&file, RELEASES_URL), UpdateState::default());
     let state = UpdateState {
-        checked_at: DateTime::parse_from_rfc3339("2026-10-20T08:00:00Z").ok().map(|d| d.with_timezone(&Utc)),
+        checked_at: DateTime::parse_from_rfc3339("2026-10-20T08:00:00Z")
+            .ok()
+            .map(|d| d.with_timezone(&Utc)),
         etag: Some("W/\"abc\"".into()),
         releases: vec![release("0.4.0", &["SpaceKnife-0.4.0-Setup-x64.exe"])],
         dismissed: vec!["0.4.0".into()],
@@ -549,11 +826,25 @@ fn fetch_with_etag() {
         if h.get("if-none-match").map(String::as_str) == Some("\"v1\"") {
             return (304, vec![("ETag".into(), "\"v1\"".into())], vec![]);
         }
-        (200, vec![("ETag".into(), "\"v1\"".into()), ("Content-Length".into(), body.len().to_string())], body.clone())
+        (
+            200,
+            vec![
+                ("ETag".into(), "\"v1\"".into()),
+                ("Content-Length".into(), body.len().to_string()),
+            ],
+            body.clone(),
+        )
     });
     let got = fetch_releases(&feed.url("/releases"), None, UA, TIMEOUT).unwrap();
     assert_eq!(got.etag.as_deref(), Some("\"v1\""));
-    assert_eq!(got.releases.unwrap().iter().map(|r| r.version.as_str()).collect::<Vec<_>>(), ["0.4.0", "0.3.0"]);
+    assert_eq!(
+        got.releases
+            .unwrap()
+            .iter()
+            .map(|r| r.version.as_str())
+            .collect::<Vec<_>>(),
+        ["0.4.0", "0.3.0"]
+    );
     let again = fetch_releases(&feed.url("/releases"), Some("\"v1\""), UA, TIMEOUT).unwrap();
     assert!(again.releases.is_none() && again.etag.as_deref() == Some("\"v1\""));
     let reqs = feed.requests.lock().unwrap();
@@ -570,10 +861,22 @@ fn fetch_errors() {
     let feed = LocalFeed::start();
     let reset = (Utc::now().timestamp() + 600).to_string();
     feed.route("/limited", move |_| {
-        (403, vec![("X-RateLimit-Remaining".into(), "0".into()), ("X-RateLimit-Reset".into(), reset.clone())],
-            br#"{"message": "API rate limit exceeded"}"#.to_vec())
+        (
+            403,
+            vec![
+                ("X-RateLimit-Remaining".into(), "0".into()),
+                ("X-RateLimit-Reset".into(), reset.clone()),
+            ],
+            br#"{"message": "API rate limit exceeded"}"#.to_vec(),
+        )
     });
-    feed.route("/limited-plain", |_| (403, vec![], br#"{"message": "API rate limit exceeded for 1.2.3.4"}"#.to_vec()));
+    feed.route("/limited-plain", |_| {
+        (
+            403,
+            vec![],
+            br#"{"message": "API rate limit exceeded for 1.2.3.4"}"#.to_vec(),
+        )
+    });
     feed.route("/forbidden", |_| (403, vec![], b"no".to_vec()));
     feed.route("/broken", |_| (500, vec![], b"oops".to_vec()));
     feed.file("/garbage", b"<html>not json</html>".to_vec(), true);
@@ -584,14 +887,18 @@ fn fetch_errors() {
     });
     let error = |path: &str| fetch_releases(&feed.url(path), None, UA, TIMEOUT).unwrap_err();
     let limited = error("/limited");
-    assert!(matches!(limited, UpdateError::RateUntil { minutes: 10 | 11 }), "{limited:?}");
+    assert!(
+        matches!(limited, UpdateError::RateUntil { minutes: 10 | 11 }),
+        "{limited:?}"
+    );
     assert!(limited.message().contains("10") || limited.message().contains("11"));
     assert_eq!(error("/limited-plain"), UpdateError::Rate);
     assert_eq!(error("/forbidden"), UpdateError::Http { code: 403 });
     assert_eq!(error("/broken").message(), "GitHub 返回了错误：HTTP 500");
     assert_eq!(error("/garbage"), UpdateError::BadList);
     assert_eq!(error("/object"), UpdateError::BadList);
-    let slow = fetch_releases(&feed.url("/slow"), None, UA, Duration::from_millis(200)).unwrap_err();
+    let slow =
+        fetch_releases(&feed.url("/slow"), None, UA, Duration::from_millis(200)).unwrap_err();
     assert_eq!(slow, UpdateError::Timeout);
     assert_eq!(slow.message(), "连接 GitHub 超时");
 }
@@ -599,8 +906,18 @@ fn fetch_errors() {
 #[test]
 fn fetch_offline() {
     let _g = crate::i18n::TEST_LOCK.lock();
-    let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port(); // nobody listens
-    let err = fetch_releases(&format!("http://127.0.0.1:{port}/releases"), None, UA, Duration::from_secs(5)).unwrap_err();
+    let port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port(); // nobody listens
+    let err = fetch_releases(
+        &format!("http://127.0.0.1:{port}/releases"),
+        None,
+        UA,
+        Duration::from_secs(5),
+    )
+    .unwrap_err();
     assert_eq!(err.key(), "offline", "{err:?}");
     assert!(err.message().starts_with("连不上 GitHub："));
 }
@@ -610,20 +927,54 @@ fn fetch_checksum_files() {
     let _g = crate::i18n::TEST_LOCK.lock();
     let feed = LocalFeed::start();
     let digest = "d".repeat(64);
-    let all = feed.file("/SHA256SUMS.txt", format!("{}  other.exe\n", "e".repeat(64)).into_bytes(), true);
-    let mac = feed.file("/SHA256SUMS-mac-arm64.txt", format!("{digest}  SpaceKnife-0.4.0-mac-arm64.dmg\n").into_bytes(), true);
+    let all = feed.file(
+        "/SHA256SUMS.txt",
+        format!("{}  other.exe\n", "e".repeat(64)).into_bytes(),
+        true,
+    );
+    let mac = feed.file(
+        "/SHA256SUMS-mac-arm64.txt",
+        format!("{digest}  SpaceKnife-0.4.0-mac-arm64.dmg\n").into_bytes(),
+        true,
+    );
     let mut r = release("0.4.0", &[]);
     r.assets = vec![
-        Asset { name: "SHA256SUMS.txt".into(), size: 0, url: all },
-        Asset { name: "SHA256SUMS-mac-arm64.txt".into(), size: 0, url: mac },
+        Asset {
+            name: "SHA256SUMS.txt".into(),
+            size: 0,
+            url: all,
+        },
+        Asset {
+            name: "SHA256SUMS-mac-arm64.txt".into(),
+            size: 0,
+            url: mac,
+        },
     ];
-    let dmg = Asset { name: "SpaceKnife-0.4.0-mac-arm64.dmg".into(), size: 0, url: "u".into() };
-    assert_eq!(fetch_checksums(&r, &dmg, UA, TIMEOUT).unwrap(), Some(digest));
+    let dmg = Asset {
+        name: "SpaceKnife-0.4.0-mac-arm64.dmg".into(),
+        size: 0,
+        url: "u".into(),
+    };
+    assert_eq!(
+        fetch_checksums(&r, &dmg, UA, TIMEOUT).unwrap(),
+        Some(digest)
+    );
     assert_eq!(feed.hits("/SHA256SUMS.txt"), 0); // the likeliest file had it
-    let none = Asset { name: "none.exe".into(), size: 0, url: "u".into() };
+    let none = Asset {
+        name: "none.exe".into(),
+        size: 0,
+        url: "u".into(),
+    };
     assert_eq!(fetch_checksums(&r, &none, UA, TIMEOUT).unwrap(), None);
-    assert_eq!(fetch_checksums(&release("0.4.0", &[]), &dmg, UA, TIMEOUT).unwrap(), None);
-    r.assets = vec![Asset { name: "SHA256SUMS.txt".into(), size: 0, url: feed.url("/missing") }];
+    assert_eq!(
+        fetch_checksums(&release("0.4.0", &[]), &dmg, UA, TIMEOUT).unwrap(),
+        None
+    );
+    r.assets = vec![Asset {
+        name: "SHA256SUMS.txt".into(),
+        size: 0,
+        url: feed.url("/missing"),
+    }];
     let err = fetch_checksums(&r, &dmg, UA, TIMEOUT).unwrap_err();
     assert_eq!(err.key(), "sums");
     assert!(err.message().contains("HTTP 404"));
@@ -711,14 +1062,29 @@ fn download_cancel_and_failures() {
     assert_eq!(r.unwrap_err(), UpdateError::DownloadHttp { code: 404 });
     let short = feed.file("/short.exe", data[..1000].to_vec(), false); // no length: ends when the server closes
     let (r, _) = fetch_file(&short, &dest, None, n, None);
-    assert_eq!(r.unwrap_err(), UpdateError::Incomplete { received: 1000, expected: n });
+    assert_eq!(
+        r.unwrap_err(),
+        UpdateError::Incomplete {
+            received: 1000,
+            expected: n
+        }
+    );
     assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
 }
 
 #[test]
 fn environment() {
     // only the parts that do not race with other tests reading the environment
-    assert_eq!(system(), if cfg!(windows) { "win32" } else if cfg!(target_os = "macos") { "darwin" } else { "linux" });
+    assert_eq!(
+        system(),
+        if cfg!(windows) {
+            "win32"
+        } else if cfg!(target_os = "macos") {
+            "darwin"
+        } else {
+            "linux"
+        }
+    );
     assert_eq!(arch("AMD64"), "x64");
     assert_eq!(arch("aarch64"), "arm64");
     assert!(updates_dir().ends_with("updates"));
@@ -726,6 +1092,9 @@ fn environment() {
     assert_eq!(install_kind_from(" NSIS "), InstallKind::Nsis);
     assert_eq!(install_kind_from("snap"), InstallKind::Unknown);
     assert_eq!(feed_url_from(""), RELEASES_URL);
-    assert_eq!(feed_url_from("http://127.0.0.1:8123/releases"), "http://127.0.0.1:8123/releases");
+    assert_eq!(
+        feed_url_from("http://127.0.0.1:8123/releases"),
+        "http://127.0.0.1:8123/releases"
+    );
     assert_eq!(feed_url_from("https://example.com/releases"), RELEASES_URL); // never another host
 }

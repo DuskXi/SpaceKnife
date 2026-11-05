@@ -145,18 +145,32 @@ impl HelperClient {
     pub fn launch(opts: LaunchOptions) -> Result<HelperClient, HelperError> {
         let elevated_now = opts.assume_elevated.unwrap_or_else(is_elevated);
         let uac = opts.elevate && !elevated_now;
-        let prompt = if cfg!(windows) { CONNECT_TIMEOUT_UAC } else { CONNECT_TIMEOUT_POLKIT };
-        let timeout = opts.connect_timeout.unwrap_or(if uac { prompt } else { CONNECT_TIMEOUT });
+        let prompt = if cfg!(windows) {
+            CONNECT_TIMEOUT_UAC
+        } else {
+            CONNECT_TIMEOUT_POLKIT
+        };
+        let timeout = opts
+            .connect_timeout
+            .unwrap_or(if uac { prompt } else { CONNECT_TIMEOUT });
         let deadline = Instant::now() + timeout;
         let token = new_token();
-        let mut listener = Listener::new()
-            .map_err(|e| HelperError::unavailable(tr!("无法创建助手通道：{reason}", reason = e.to_string()), "unavailable"))?;
+        let mut listener = Listener::new().map_err(|e| {
+            HelperError::unavailable(
+                tr!("无法创建助手通道：{reason}", reason = e.to_string()),
+                "unavailable",
+            )
+        })?;
         let mut token_path: Option<PathBuf> = None;
         let mut process: Option<Box<dyn HelperProcess>> = None;
         let mut chan: Option<Channel> = None;
         let result = (|| {
-            let start_failed =
-                |e: std::io::Error| HelperError::unavailable(tr!("无法启动扫描助手：{reason}", reason = e.to_string()), "unavailable");
+            let start_failed = |e: std::io::Error| {
+                HelperError::unavailable(
+                    tr!("无法启动扫描助手：{reason}", reason = e.to_string()),
+                    "unavailable",
+                )
+            };
             let path = write_token_file(&token, None).map_err(start_failed)?;
             token_path = Some(path.clone());
             let mut argv = match &opts.command {
@@ -176,7 +190,11 @@ impl HelperClient {
                 ]
                 .map(OsString::from),
             );
-            let proc = if uac { start_elevated(&argv, &opts.elevator, timeout)? } else { start_subprocess(&argv)? };
+            let proc = if uac {
+                start_elevated(&argv, &opts.elevator, timeout)?
+            } else {
+                start_subprocess(&argv)?
+            };
             let proc = process.insert(proc);
             let c = chan.insert(accept(&mut listener, proc.as_mut(), deadline)?);
             handshake(c, proc.as_mut(), &token, deadline)
@@ -273,7 +291,10 @@ impl HelperClient {
             return Err(HelperError::unavailable(t("扫描助手已关闭"), "closed"));
         }
         if let Some(why) = &st.broken {
-            return Err(HelperError::unavailable(tr!("扫描助手不可用：{reason}", reason = why), "exited"));
+            return Err(HelperError::unavailable(
+                tr!("扫描助手不可用：{reason}", reason = why),
+                "exited",
+            ));
         }
         Ok(())
     }
@@ -290,7 +311,10 @@ impl HelperClient {
             }
             Err(ChanError::Frame(e)) => {
                 self.break_off(&tr!("无效帧：{reason}", reason = &e.0));
-                Err(HelperError::unavailable(tr!("扫描助手发送了无效帧：{reason}", reason = &e.0), "protocol"))
+                Err(HelperError::unavailable(
+                    tr!("扫描助手发送了无效帧：{reason}", reason = &e.0),
+                    "protocol",
+                ))
             }
             Err(e) => {
                 self.break_off(&tr!("连接断开：{reason}", reason = e.to_string()));
@@ -315,7 +339,10 @@ impl HelperClient {
         on_bulk: &mut dyn FnMut(Bulk<'_, '_>) -> Result<ControlFlow<()>, HelperError>,
     ) -> Result<(Scalars, Scalars), HelperError> {
         if let Err(why) = call.validate() {
-            return Err(HelperError::error(tr!("无效的参数：{reason}", reason = why), code::INVALID_REQUEST));
+            return Err(HelperError::error(
+                tr!("无效的参数：{reason}", reason = why),
+                code::INVALID_REQUEST,
+            ));
         }
         let _io = self.io.lock();
         self.check_usable()?;
@@ -324,7 +351,10 @@ impl HelperClient {
             st.next_id += 1;
             st.next_id
         };
-        if let Err(e) = self.chan.send_message(&Request::new(id, call), Some(self.request_timeout)) {
+        if let Err(e) = self
+            .chan
+            .send_message(&Request::new(id, call), Some(self.request_timeout))
+        {
             self.break_off(&tr!("发送失败：{reason}", reason = e.to_string()));
             return Err(HelperError::unavailable(t("扫描助手已退出"), "exited"));
         }
@@ -336,8 +366,9 @@ impl HelperClient {
                 if draining {
                     continue;
                 }
-                let frame = decode_frame(&body)
-                    .map_err(|e| self.protocol_error(&tr!("无效的数据帧：{reason}", reason = e.0)))?;
+                let frame = decode_frame(&body).map_err(|e| {
+                    self.protocol_error(&tr!("无效的数据帧：{reason}", reason = e.0))
+                })?;
                 if (frame.header.stream.as_str(), frame.header.layout.as_str()) != stream
                     || frame.header.request_id.as_ref() != Some(&rid)
                 {
@@ -352,13 +383,18 @@ impl HelperClient {
                 }
                 continue;
             }
-            let reply = Reply::parse(&body)
-                .map_err(|why| {
-                    tracing::debug!("helper reply: {why}");
-                    self.protocol_error(&tr!("无法解析的消息（{count} 处错误）", count = 1))
-                })?;
+            let reply = Reply::parse(&body).map_err(|why| {
+                tracing::debug!("helper reply: {why}");
+                self.protocol_error(&tr!("无法解析的消息（{count} 处错误）", count = 1))
+            })?;
             match reply {
-                Reply::Progress { id: rid_, phase, elapsed, done, total } if rid_ == id => {
+                Reply::Progress {
+                    id: rid_,
+                    phase,
+                    elapsed,
+                    done,
+                    total,
+                } if rid_ == id => {
                     if let Some(p) = progress.as_mut() {
                         let read = (total > 0).then(|| (done as f64 / total as f64).min(1.0));
                         p(phase, elapsed, read);
@@ -369,8 +405,16 @@ impl HelperClient {
                         draining = true;
                     }
                 }
-                Reply::Response { id: rid_, result, extras } if rid_ == id => return Ok((result, extras)),
-                Reply::Error { id: eid, code: c, message } if eid.is_none() || eid == Some(id) => {
+                Reply::Response {
+                    id: rid_,
+                    result,
+                    extras,
+                } if rid_ == id => return Ok((result, extras)),
+                Reply::Error {
+                    id: eid,
+                    code: c,
+                    message,
+                } if eid.is_none() || eid == Some(id) => {
                     if c == code::BAD_FRAME {
                         // the helper closes the connection after this
                         self.break_off(&message);
@@ -379,7 +423,9 @@ impl HelperClient {
                     return Err(HelperError::error(message, c));
                 }
                 other => {
-                    return Err(self.protocol_error(&tr!("意外的 {kind} 消息", kind = other.type_name())));
+                    return Err(
+                        self.protocol_error(&tr!("意外的 {kind} 消息", kind = other.type_name()))
+                    );
                 }
             }
         }
@@ -387,42 +433,57 @@ impl HelperClient {
 
     fn simple(&self, call: Call) -> Result<Scalars, HelperError> {
         let mut unexpected = |_: Bulk<'_, '_>| Err(self.protocol_error(t("意外的数据帧")));
-        self.exchange(call, None, (MFT_STREAM, MFT_LAYOUT), &mut unexpected).map(|(result, _)| result)
+        self.exchange(call, None, (MFT_STREAM, MFT_LAYOUT), &mut unexpected)
+            .map(|(result, _)| result)
     }
 
     /// Copy the batches straight into a table allocated from `begin` (no second copy).
-    fn table<T: BulkTable>(&self, call: Call, progress: Option<ProgressFn<'_>>) -> Result<(T, Scalars, Scalars), HelperError> {
+    fn table<T: BulkTable>(
+        &self,
+        call: Call,
+        progress: Option<ProgressFn<'_>>,
+    ) -> Result<(T, Scalars, Scalars), HelperError> {
         let mut table: Option<T> = None;
         let mut declared = 0u64;
         let mut got = 0u64;
-        let (result, extras) = self.exchange(call, progress, (T::STREAM, T::LAYOUT), &mut |item| {
-            match item {
-                Bulk::Begin { rows } => {
-                    let mut t = T::default();
-                    t.reserve(rows as usize);
-                    table = Some(t);
-                    declared = rows;
-                }
-                Bulk::Frame(frame) => {
-                    let Some(t) = table.as_mut() else {
-                        return Err(self.protocol_error(t("数据帧之前没有 begin")));
-                    };
-                    let n = frame.header.count;
-                    if got + n > declared {
-                        return Err(self.protocol_error(&tr!("数据行数超过声明的 {rows}", rows = declared)));
+        let (result, extras) =
+            self.exchange(call, progress, (T::STREAM, T::LAYOUT), &mut |item| {
+                match item {
+                    Bulk::Begin { rows } => {
+                        let mut t = T::default();
+                        t.reserve(rows as usize);
+                        table = Some(t);
+                        declared = rows;
                     }
-                    add_checked(t, frame).map_err(|why| self.protocol_error(&why))?;
-                    got += n;
+                    Bulk::Frame(frame) => {
+                        let Some(t) = table.as_mut() else {
+                            return Err(self.protocol_error(t("数据帧之前没有 begin")));
+                        };
+                        let n = frame.header.count;
+                        if got + n > declared {
+                            return Err(self.protocol_error(&tr!(
+                                "数据行数超过声明的 {rows}",
+                                rows = declared
+                            )));
+                        }
+                        add_checked(t, frame).map_err(|why| self.protocol_error(&why))?;
+                        got += n;
+                    }
                 }
-            }
-            Ok(ControlFlow::Continue(()))
-        })?;
+                Ok(ControlFlow::Continue(()))
+            })?;
         let Some(table) = table else {
-            return Err(HelperError::unavailable(t("扫描助手没有返回数据"), "protocol"));
+            return Err(HelperError::unavailable(
+                t("扫描助手没有返回数据"),
+                "protocol",
+            ));
         };
         if got != declared {
             return Err(HelperError::unavailable(
-                tr!("扫描助手协议错误：{reason}", reason = tr!("声明 {rows} 行，收到 {got} 行", rows = declared, got = got)),
+                tr!(
+                    "扫描助手协议错误：{reason}",
+                    reason = tr!("声明 {rows} 行，收到 {got} 行", rows = declared, got = got)
+                ),
                 "protocol",
             ));
         }
@@ -439,12 +500,19 @@ impl HelperClient {
     /// Drive type, filesystem, label, serial, sector/cluster size of a local NTFS `X:`; with
     /// administrator rights also record_size, mft_start_lcn, mft_valid_data_length …
     pub fn volume_info(&self, volume: &str) -> Result<Scalars, HelperError> {
-        self.simple(Call::VolumeInfo { volume: volume.into() })
+        self.simple(Call::VolumeInfo {
+            volume: volume.into(),
+        })
     }
 
     /// Read and parse the `$MFT` of `volume` in the helper; the whole table, as a local parse
     /// returns it. Geometry and timings are in [`last_scan`](Self::last_scan) afterwards.
-    pub fn scan_mft(&self, volume: &str, opts: MftOptions, progress: Option<ProgressFn<'_>>) -> Result<MftTable, HelperError> {
+    pub fn scan_mft(
+        &self,
+        volume: &str,
+        opts: MftOptions,
+        progress: Option<ProgressFn<'_>>,
+    ) -> Result<MftTable, HelperError> {
         let call = Call::ScanMft {
             volume: volume.into(),
             batch_rows: opts.batch_rows,
@@ -454,7 +522,12 @@ impl HelperClient {
     }
 
     /// [`scan_mft`](Self::scan_mft) on an NTFS volume image file (unelevated helpers only; tests).
-    pub fn scan_mft_image(&self, path: &str, opts: MftOptions, progress: Option<ProgressFn<'_>>) -> Result<MftTable, HelperError> {
+    pub fn scan_mft_image(
+        &self,
+        path: &str,
+        opts: MftOptions,
+        progress: Option<ProgressFn<'_>>,
+    ) -> Result<MftTable, HelperError> {
         let call = Call::ScanMftImage {
             path: path.into(),
             batch_rows: opts.batch_rows,
@@ -463,9 +536,16 @@ impl HelperClient {
         self.mft_table(call, progress)
     }
 
-    fn mft_table(&self, call: Call, progress: Option<ProgressFn<'_>>) -> Result<MftTable, HelperError> {
+    fn mft_table(
+        &self,
+        call: Call,
+        progress: Option<ProgressFn<'_>>,
+    ) -> Result<MftTable, HelperError> {
         let (mut table, result, extras) = self.table::<MftTable>(call, progress)?;
-        table.bad_records = extras.get("bad_records").and_then(Value::as_u64).unwrap_or(0);
+        table.bad_records = extras
+            .get("bad_records")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
         *self.last_scan.lock() = result;
         Ok(table)
     }
@@ -527,7 +607,9 @@ impl HelperClient {
     /// `(journal_id, next_usn)` is the checkpoint to [`read_usn`](Self::read_usn) from later.
     /// Error `usn_inactive` when the volume has no active journal.
     pub fn query_usn(&self, volume: &str) -> Result<Scalars, HelperError> {
-        self.simple(Call::QueryUsn { volume: volume.into() })
+        self.simple(Call::QueryUsn {
+            volume: volume.into(),
+        })
     }
 
     /// Journal records from the checkpoint `(journal_id, start_usn)` up to the journal's end (at
@@ -554,9 +636,18 @@ impl HelperClient {
         *self.last_usn.lock() = result;
         Ok(UsnTable {
             rows,
-            journal_id: extras.get("journal_id").and_then(Value::as_u64).unwrap_or(journal_id),
-            next_usn: extras.get("next_usn").and_then(Value::as_i64).unwrap_or(start_usn),
-            truncated: extras.get("truncated").and_then(Value::as_bool).unwrap_or(false),
+            journal_id: extras
+                .get("journal_id")
+                .and_then(Value::as_u64)
+                .unwrap_or(journal_id),
+            next_usn: extras
+                .get("next_usn")
+                .and_then(Value::as_i64)
+                .unwrap_or(start_usn),
+            truncated: extras
+                .get("truncated")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         })
     }
 
@@ -582,12 +673,17 @@ impl HelperClient {
                 st.next_id
             };
             let quick = Some(Duration::from_secs(2));
-            if self.chan.send_message(&Request::new(id, Call::Shutdown {}), quick).is_ok() {
+            if self
+                .chan
+                .send_message(&Request::new(id, Call::Shutdown {}), quick)
+                .is_ok()
+            {
                 let deadline = Instant::now() + Duration::from_secs(2);
                 while Instant::now() < deadline {
                     match self.chan.read_frame(quick, quick, MAX_BINARY_BYTES) {
                         Ok((KIND_JSON, body)) => {
-                            if matches!(Reply::parse(&body), Ok(Reply::Response { id: r, .. }) if r == id) {
+                            if matches!(Reply::parse(&body), Ok(Reply::Response { id: r, .. }) if r == id)
+                            {
                                 break;
                             }
                         }
@@ -611,7 +707,9 @@ impl Drop for HelperClient {
 
 /// Append one frame to `table`: the names blob, then the columns with `name_off` rebased.
 fn add_checked<T: BulkTable>(table: &mut T, frame: &DecodedFrame<'_>) -> Result<(), String> {
-    let blob = frame.blob("names").ok_or_else(|| t("缺少名字数据").to_owned())?;
+    let blob = frame
+        .blob("names")
+        .ok_or_else(|| t("缺少名字数据").to_owned())?;
     let base = table.names().len();
     if base + blob.len() > u32::MAX as usize {
         return Err(t("名字总长超过 4 GiB").to_owned());
@@ -619,7 +717,11 @@ fn add_checked<T: BulkTable>(table: &mut T, frame: &DecodedFrame<'_>) -> Result<
     let start = table.rows();
     table.add_frame(frame, base as u32)?;
     let (off, len) = (&table.name_off()[start..], &table.name_len()[start..]);
-    if off.iter().zip(len).any(|(&o, &l)| o as usize - base + l as usize > blob.len()) {
+    if off
+        .iter()
+        .zip(len)
+        .any(|(&o, &l)| o as usize - base + l as usize > blob.len())
+    {
         return Err(t("名字偏移越界").to_owned());
     }
     table.names_mut().extend_from_slice(blob);
@@ -627,17 +729,27 @@ fn add_checked<T: BulkTable>(table: &mut T, frame: &DecodedFrame<'_>) -> Result<
 }
 
 /// Wait for the helper to connect, giving up early if it exits.
-fn accept(listener: &mut Listener, process: &mut dyn HelperProcess, deadline: Instant) -> Result<Channel, HelperError> {
+fn accept(
+    listener: &mut Listener,
+    process: &mut dyn HelperProcess,
+    deadline: Instant,
+) -> Result<Channel, HelperError> {
     loop {
         let now = Instant::now();
         if now >= deadline {
-            return Err(HelperError::unavailable(t("扫描助手没有按时连接"), "timeout"));
+            return Err(HelperError::unavailable(
+                t("扫描助手没有按时连接"),
+                "timeout",
+            ));
         }
         match listener.accept(ACCEPT_SLICE.min(deadline - now)) {
             Ok(chan) => return Ok(chan),
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                return Err(HelperError::unavailable(tr!("扫描助手鉴权失败：{reason}", reason = e.to_string()), "auth"));
+                return Err(HelperError::unavailable(
+                    tr!("扫描助手鉴权失败：{reason}", reason = e.to_string()),
+                    "auth",
+                ));
             }
             Err(e) => {
                 return Err(HelperError::unavailable(
@@ -650,7 +762,10 @@ fn accept(listener: &mut Listener, process: &mut dyn HelperProcess, deadline: In
             if let Some(err) = process.exit_error(code) {
                 return Err(err); // pkexec: refused or dismissed
             }
-            return Err(HelperError::unavailable(tr!("扫描助手启动后退出（退出码 {code}）", code = code), "exited"));
+            return Err(HelperError::unavailable(
+                tr!("扫描助手启动后退出（退出码 {code}）", code = code),
+                "exited",
+            ));
         }
     }
 }
@@ -662,13 +777,25 @@ fn auth_failed(why: &str) -> HelperError {
 }
 
 /// First frame must be a hello with our token, from the process we launched. Returns (pid, elevated).
-fn handshake(chan: &Channel, process: &mut dyn HelperProcess, token: &str, deadline: Instant) -> Result<(u32, bool), HelperError> {
+fn handshake(
+    chan: &Channel,
+    process: &mut dyn HelperProcess,
+    token: &str,
+    deadline: Instant,
+) -> Result<(u32, bool), HelperError> {
     let left = deadline.saturating_duration_since(Instant::now());
     let timeout = left.min(HELLO_TIMEOUT).max(Duration::from_millis(500));
     let (kind, body) = match chan.read_frame(Some(timeout), Some(timeout), 0) {
         Ok(f) => f,
-        Err(ChanError::Timeout) => return Err(HelperError::unavailable(t("扫描助手没有发送 hello"), "timeout")),
-        Err(ChanError::Frame(e)) => return Err(auth_failed(&tr!("首帧无效（{reason}）", reason = &e.0))),
+        Err(ChanError::Timeout) => {
+            return Err(HelperError::unavailable(
+                t("扫描助手没有发送 hello"),
+                "timeout",
+            ));
+        }
+        Err(ChanError::Frame(e)) => {
+            return Err(auth_failed(&tr!("首帧无效（{reason}）", reason = &e.0)));
+        }
         Err(e) => {
             return Err(HelperError::unavailable(
                 tr!("扫描助手在握手时断开：{reason}", reason = e.to_string()),
@@ -676,12 +803,26 @@ fn handshake(chan: &Channel, process: &mut dyn HelperProcess, token: &str, deadl
             ));
         }
     };
-    let hello = if kind == KIND_JSON { Reply::parse(&body).ok() } else { None };
-    let Some(Reply::Hello { version, token: theirs, pid, elevated }) = hello else {
+    let hello = if kind == KIND_JSON {
+        Reply::parse(&body).ok()
+    } else {
+        None
+    };
+    let Some(Reply::Hello {
+        version,
+        token: theirs,
+        pid,
+        elevated,
+    }) = hello
+    else {
         return Err(auth_failed(t("首帧不是 hello")));
     };
     if version != PROTOCOL_VERSION {
-        return Err(auth_failed(&tr!("协议版本 {got}，需要 {need}", got = version, need = PROTOCOL_VERSION)));
+        return Err(auth_failed(&tr!(
+            "协议版本 {got}，需要 {need}",
+            got = version,
+            need = PROTOCOL_VERSION
+        )));
     }
     if !tokens_match(&theirs, token) {
         return Err(auth_failed(t("令牌不符")));

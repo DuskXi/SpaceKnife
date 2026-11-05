@@ -30,7 +30,10 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    let _permit = PERMITS.acquire().await.map_err(|_| RpcError::internal("compute pool closed"))?;
+    let _permit = PERMITS
+        .acquire()
+        .await
+        .map_err(|_| RpcError::internal("compute pool closed"))?;
     tokio::task::spawn_blocking(f).await.map_err(|e| {
         if e.is_panic() {
             tracing::error!("a computation panicked: {e}");
@@ -45,7 +48,9 @@ where
     F: FnOnce() -> T + Send + 'static,
     T: Send + 'static,
 {
-    tokio::task::spawn_blocking(f).await.map_err(|_| RpcError::internal("internal error"))
+    tokio::task::spawn_blocking(f)
+        .await
+        .map_err(|_| RpcError::internal("internal error"))
 }
 
 /// Latest-wins slots: a call still waiting when a newer one with the same key arrives is dropped
@@ -56,7 +61,9 @@ pub struct Latest<K> {
 
 impl<K: Hash + Eq + Clone + Send + 'static> Default for Latest<K> {
     fn default() -> Self {
-        Latest { gens: Mutex::new(HashMap::new()) }
+        Latest {
+            gens: Mutex::new(HashMap::new()),
+        }
     }
 }
 
@@ -90,15 +97,19 @@ impl<K: Hash + Eq + Clone + Send + Sync + 'static> Latest<K> {
                 }
             }
         }
-        let slot = Slot { gens: &self.gens, key, generation };
+        let slot = Slot {
+            gens: &self.gens,
+            key,
+            generation,
+        };
         let permit = PERMITS.acquire().await;
         let stale = slot.gens.lock().get(&slot.key) != Some(&slot.generation);
         match (permit, stale) {
             (Err(_), _) => Err(RpcError::internal("compute pool closed")),
             (_, true) => Err(RpcError::superseded()),
-            (Ok(_p), false) => {
-                tokio::task::spawn_blocking(f).await.map_err(|_| RpcError::internal("internal error"))
-            }
+            (Ok(_p), false) => tokio::task::spawn_blocking(f)
+                .await
+                .map_err(|_| RpcError::internal("internal error")),
         }
     }
 

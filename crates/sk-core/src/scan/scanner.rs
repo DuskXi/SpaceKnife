@@ -205,7 +205,11 @@ impl ScanProfile {
         );
         if self.width.1 > 0 {
             let (low, high) = self.width;
-            let w = if low == high { low.to_string() } else { format!("{low}–{high}") };
+            let w = if low == high {
+                low.to_string()
+            } else {
+                format!("{low}–{high}")
+            };
             s = s.replacen(
                 &format!("of {};", self.threads),
                 &format!("of {} (listing width {w});", self.threads),
@@ -255,8 +259,9 @@ struct Shared {
 impl Shared {
     /// This run so far, the time it was paused included (`elapsed_s`; the profile leaves it out).
     fn run_time_at(st: &Shared, now: Instant) -> Duration {
-        st.started
-            .map_or(Duration::ZERO, |s| st.finished.unwrap_or(now).saturating_duration_since(s))
+        st.started.map_or(Duration::ZERO, |s| {
+            st.finished.unwrap_or(now).saturating_duration_since(s)
+        })
     }
 
     fn run_time(st: &Shared) -> Duration {
@@ -307,7 +312,9 @@ pub struct Scanner {
 
 impl std::fmt::Debug for Scanner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Scanner").field("roots", &self.roots()).finish()
+        f.debug_struct("Scanner")
+            .field("roots", &self.roots())
+            .finish()
     }
 }
 
@@ -368,12 +375,20 @@ impl Scanner {
                     Flags::PENDING,
                     times,
                 )?;
-                let whole = vol.as_ref().is_some_and(|v| volume::is_volume_root(&path, v));
-                let ntfs = cfg!(windows) && vol.as_ref().is_some_and(|v| v.fs_type.eq_ignore_ascii_case("NTFS"));
+                let whole = vol
+                    .as_ref()
+                    .is_some_and(|v| volume::is_volume_root(&path, v));
+                let ntfs = cfg!(windows)
+                    && vol
+                        .as_ref()
+                        .is_some_and(|v| v.fs_type.eq_ignore_ascii_case("NTFS"));
                 let skip = if opts.cross_mounts {
                     Vec::new()
                 } else {
-                    volume::volume_group_twins(&shown).into_iter().map(PathBuf::from).collect()
+                    volume::volume_group_twins(&shown)
+                        .into_iter()
+                        .map(PathBuf::from)
+                        .collect()
                 };
                 root_opts.push(RootOptions {
                     dev: dev_of(&meta),
@@ -381,7 +396,12 @@ impl Scanner {
                     resident_max: if ntfs { 512 } else { 0 },
                     cross_mounts: opts.cross_mounts,
                     skip,
-                    protect: opts.protect.iter().filter(|p| path_inside(p, &path)).cloned().collect(),
+                    protect: opts
+                        .protect
+                        .iter()
+                        .filter(|p| path_inside(p, &path))
+                        .cloned()
+                        .collect(),
                     path: Some(path.clone()),
                     verify_names: verify_names(vol.as_ref()),
                     listed_alloc: super::winopts::listed_alloc(vol.as_ref()),
@@ -391,10 +411,19 @@ impl Scanner {
                     path: path.clone(),
                     root: (root_opts.len() - 1) as u32,
                 });
-                infos.push(RootInfo { path, node, volume: vol, whole_volume: whole });
+                infos.push(RootInfo {
+                    path,
+                    node,
+                    volume: vol,
+                    whole_volume: whole,
+                });
             }
         }
-        let concurrency = if opts.concurrency == 0 { native_threads() } else { opts.concurrency };
+        let concurrency = if opts.concurrency == 0 {
+            native_threads()
+        } else {
+            opts.concurrency
+        };
         Ok(Scanner {
             store,
             roots: RwLock::new(infos),
@@ -449,7 +478,12 @@ impl Scanner {
 
     /// Changes a root's record: its volume read again (free space moves with changes).
     pub fn update_root(&self, root: usize, f: impl FnOnce(&mut RootInfo)) {
-        if let Some(r) = self.roots.write().unwrap_or_else(|e| e.into_inner()).get_mut(root) {
+        if let Some(r) = self
+            .roots
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .get_mut(root)
+        {
             f(r);
         }
     }
@@ -478,7 +512,9 @@ impl Scanner {
     pub fn set_expected_items(&self, items: Option<i64>) {
         self.st().expected_items = items;
         if let Some(n) = items.filter(|&n| n > 0) {
-            self.store.appender().reserve((n as usize).saturating_mul(21) / 20 + 1024);
+            self.store
+                .appender()
+                .reserve((n as usize).saturating_mul(21) / 20 + 1024);
         }
     }
 
@@ -614,7 +650,11 @@ impl Scanner {
         // once; the disk's gate holds them to the governor's concurrency (counted in listings) and
         // stops new ones while paused. Else a pool owned by each calling thread.
         let shared = super::shared_listing();
-        let listing_gate = if shared { self.opts.gate.as_ref().and_then(|g| g.listing_gate()) } else { None };
+        let listing_gate = if shared {
+            self.opts.gate.as_ref().and_then(|g| g.listing_gate())
+        } else {
+            None
+        };
         if shared {
             hardscan::listing_threads(true);
         }
@@ -730,9 +770,9 @@ impl Scanner {
             // dispatch
             if !self.paused() {
                 loop {
-                    let parallel = gate
-                        .as_ref()
-                        .map_or(self.concurrency, |g| g.concurrency().clamp(1, self.concurrency));
+                    let parallel = gate.as_ref().map_or(self.concurrency, |g| {
+                        g.concurrency().clamp(1, self.concurrency)
+                    });
                     if inflight >= parallel || self.st().queue.is_empty() {
                         break;
                     }
@@ -759,7 +799,11 @@ impl Scanner {
                         let n = st.queue.len();
                         let share = (n / parallel.max(1)).clamp(1, self.opts.batch_tasks.max(1));
                         let tasks: Vec<Task> = st.queue.drain(..share.min(n)).collect();
-                        let opts = if st.queue.len() < parallel { short.clone() } else { full.clone() };
+                        let opts = if st.queue.len() < parallel {
+                            short.clone()
+                        } else {
+                            full.clone()
+                        };
                         st.inflight += 1;
                         (tasks, opts)
                     };
@@ -768,7 +812,14 @@ impl Scanner {
                         break;
                     }
                     inflight += 1;
-                    if jobs.send(Job { tasks, opts, permit }).is_err() {
+                    if jobs
+                        .send(Job {
+                            tasks,
+                            opts,
+                            permit,
+                        })
+                        .is_err()
+                    {
                         return Some("the listing threads stopped".into());
                     }
                 }
@@ -779,10 +830,15 @@ impl Scanner {
             } else if inflight == 0 {
                 Duration::from_millis(1) // the gate held the batch (it waited a tick already)
             } else {
-                interval.saturating_sub(last_report.elapsed()).max(Duration::from_millis(1))
+                interval
+                    .saturating_sub(last_report.elapsed())
+                    .max(Duration::from_millis(1))
             };
             let mut landed: Vec<SliceResult> = Vec::new();
-            let take = |msg: Msg, inflight: &mut usize, landed: &mut Vec<SliceResult>, fail: &mut Option<String>| {
+            let take = |msg: Msg,
+                        inflight: &mut usize,
+                        landed: &mut Vec<SliceResult>,
+                        fail: &mut Option<String>| {
                 if let Msg::Done(res, permit) = msg {
                     drop(permit);
                     *inflight -= 1;
@@ -801,7 +857,9 @@ impl Scanner {
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
-                Err(mpsc::RecvTimeoutError::Disconnected) => return Some("scan channel closed".into()),
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Some("scan channel closed".into());
+                }
             }
             if !landed.is_empty()
                 && let Err(e) = self.apply(landed)
@@ -881,11 +939,15 @@ impl Scanner {
     pub fn profile(&self) -> ScanProfile {
         let st = self.st();
         let end = st.finished.unwrap_or_else(Instant::now);
-        let paused = st.paused_total + st.paused_since.map_or(Duration::ZERO, |s| end.saturating_duration_since(s));
+        let paused = st.paused_total
+            + st.paused_since
+                .map_or(Duration::ZERO, |s| end.saturating_duration_since(s));
         ScanProfile {
-            wall_s: st
-                .started
-                .map_or(0.0, |s| end.saturating_duration_since(s).saturating_sub(paused).as_secs_f64()),
+            wall_s: st.started.map_or(0.0, |s| {
+                end.saturating_duration_since(s)
+                    .saturating_sub(paused)
+                    .as_secs_f64()
+            }),
             threads: self.concurrency,
             busy_s: st.busy.as_secs_f64(),
             ingest_s: st.ingest.as_secs_f64(),
@@ -914,11 +976,16 @@ impl Scanner {
         let elapsed = (st.before + Shared::run_time_at(&st, now)).as_secs_f64();
         let (rate, byte_rate) = Self::rates(&mut st, items, alloc, elapsed, now);
         let running = st.state == ScanState::Scanning;
-        let used: i64 = if !roots.is_empty() && roots.iter().all(|r| r.whole_volume && r.volume.is_some()) {
-            roots.iter().filter_map(|r| r.volume.as_ref()).map(VolumeInfo::used).sum()
-        } else {
-            0
-        };
+        let used: i64 =
+            if !roots.is_empty() && roots.iter().all(|r| r.whole_volume && r.volume.is_some()) {
+                roots
+                    .iter()
+                    .filter_map(|r| r.volume.as_ref())
+                    .map(VolumeInfo::used)
+                    .sum()
+            } else {
+                0
+            };
         // By items when the last scan of these roots says how many there are; else by bytes against
         // the volume's used space, up to BYTES_CEILING (used space is no exact total).
         let expected = st.expected_items.unwrap_or(0);
@@ -977,7 +1044,10 @@ impl Scanner {
             return overall();
         }
         let samples = &mut st.samples;
-        if samples.back().is_none_or(|s| now.duration_since(s.0).as_secs_f64() >= 0.25) {
+        if samples
+            .back()
+            .is_none_or(|s| now.duration_since(s.0).as_secs_f64() >= 0.25)
+        {
             samples.push_back((now, items, alloc));
         }
         while samples.len() > 2 && now.duration_since(samples[1].0).as_secs_f64() >= RATE_WINDOW_S {

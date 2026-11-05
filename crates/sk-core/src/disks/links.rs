@@ -49,7 +49,11 @@ pub fn sata_identify(word76: u16, word77: u16) -> Option<DiskLink> {
         return None;
     }
     let top_gen = (1..=3).filter(|g| word76 & (1 << g) != 0).max();
-    let current = if word77 != 0 && word77 != 0xFFFF { (word77 >> 1) & 0x7 } else { 0 };
+    let current = if word77 != 0 && word77 != 0xFFFF {
+        (word77 >> 1) & 0x7
+    } else {
+        0
+    };
     let rate = sata_mbps(current);
     let top = top_gen.and_then(sata_mbps);
     if rate.is_none() && top.is_none() {
@@ -64,8 +68,9 @@ fn number(s: &str) -> Option<f64> {
 
 /// Mb/s from "6.0 Gbps" (Linux sata_spd), "3 Gigabit" (macOS) or "1.5 Gb/s"; None otherwise.
 pub fn gbps_text(text: &str) -> Option<i64> {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:Gbps|Gb/s|Gigabit|G)").expect("regex"));
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(?:Gbps|Gb/s|Gigabit|G)").expect("regex")
+    });
     let m = RE.captures(text)?;
     Some((number(&m[1])? * 1000.0).round() as i64)
 }
@@ -77,12 +82,20 @@ pub fn pcie_gen_code(code: Option<u32>) -> Option<i64> {
 
 /// The generation from "16.0 GT/s PCIe" (Linux) or "8.0 GT/s" (macOS); None for "Unknown".
 pub fn pcie_gen_text(text: &str) -> Option<i64> {
-    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*GT/s").expect("regex"));
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*GT/s").expect("regex"));
     let v = number(&RE.captures(text)?[1])?;
-    [(2.5, 1), (5.0, 2), (8.0, 3), (16.0, 4), (32.0, 5), (64.0, 6)]
-        .iter()
-        .find(|(gts, _)| *gts == v)
-        .map(|&(_, g)| g)
+    [
+        (2.5, 1),
+        (5.0, 2),
+        (8.0, 3),
+        (16.0, 4),
+        (32.0, 5),
+        (64.0, 6),
+    ]
+    .iter()
+    .find(|(gts, _)| *gts == v)
+    .map(|&(_, g)| g)
 }
 
 /// Lanes from "4" (Linux) or "x4" (macOS).
@@ -96,7 +109,12 @@ pub fn pcie_width_text(text: &str) -> Option<i64> {
     [1, 2, 4, 8, 12, 16, 32].contains(&w).then_some(w)
 }
 
-pub fn pcie(gen_: Option<i64>, width: Option<i64>, max_gen: Option<i64>, max_width: Option<i64>) -> Option<DiskLink> {
+pub fn pcie(
+    gen_: Option<i64>,
+    width: Option<i64>,
+    max_gen: Option<i64>,
+    max_width: Option<i64>,
+) -> Option<DiskLink> {
     if gen_.is_none() && width.is_none() {
         return None;
     }
@@ -158,7 +176,8 @@ pub fn usb_linux(speed: &str, version: &str) -> Option<DiskLink> {
 
 /// macOS' "device_speed" ("high_speed", "super_speed") or link speed text ("Up to 5 Gb/s").
 pub fn usb_mac(text: &str) -> Option<DiskLink> {
-    static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*(Gb|Mb)/s").expect("regex"));
+    static RE: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)\s*(Gb|Mb)/s").expect("regex"));
     let rate = match text.trim().to_lowercase().as_str() {
         "low_speed" => Some(1),
         "full_speed" => Some(12),
@@ -171,7 +190,8 @@ pub fn usb_mac(text: &str) -> Option<DiskLink> {
             Some((v * if &m[2] == "Gb" { 1000.0 } else { 1.0 }).round() as i64)
         }),
     };
-    rate.filter(|&r| r != 0).map(|r| rate_link(LinkKind::Usb, Some(r), None))
+    rate.filter(|&r| r != 0)
+        .map(|r| rate_link(LinkKind::Usb, Some(r), None))
 }
 
 #[cfg(test)]
@@ -201,7 +221,9 @@ mod tests {
         assert_eq!(gbps_text("1.5 Gbps"), Some(1500));
         assert_eq!(gbps_text("3 Gigabit"), Some(3000));
         assert_eq!(gbps_text("<unknown>"), None);
-        let gens: Vec<_> = ["2.5 GT/s PCIe", "8.0 GT/s", "16.0 GT/s PCIe", "Unknown"].map(pcie_gen_text).to_vec();
+        let gens: Vec<_> = ["2.5 GT/s PCIe", "8.0 GT/s", "16.0 GT/s PCIe", "Unknown"]
+            .map(pcie_gen_text)
+            .to_vec();
         assert_eq!(gens, vec![Some(1), Some(3), Some(4), None]);
         assert_eq!(pcie_width_text("4"), Some(4));
         assert_eq!(pcie_width_text("x16"), Some(16));
@@ -218,7 +240,10 @@ mod tests {
         // recorded: a USB 3 card reader behind a USB 2 hub port (high speed, SuperSpeed capable)
         assert_eq!(usb_windows(Some(2), Some(0x2)), usb(Some(480), Some(5000)));
         assert_eq!(usb_windows(Some(3), Some(0x3)), usb(Some(5000), Some(5000)));
-        assert_eq!(usb_windows(Some(3), Some(0xF)), usb(Some(10000), Some(10000)));
+        assert_eq!(
+            usb_windows(Some(3), Some(0xF)),
+            usb(Some(10000), Some(10000))
+        );
         assert_eq!(usb_windows(Some(2), None), usb(Some(480), None));
         assert_eq!(usb_windows(None, None), None);
         assert_eq!(usb_linux("480", " 3.00"), usb(Some(480), Some(5000)));

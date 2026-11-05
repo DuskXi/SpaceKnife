@@ -4,13 +4,11 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use sk_core::diff::{
-    ChangeTree, DOMINANT, DiffError, DiffTree, Direction, MINOR, Status, compare, compare_with,
-    CompareOptions, short_label,
+    ChangeTree, CompareOptions, DOMINANT, DiffError, DiffTree, Direction, MINOR, Status, compare,
+    compare_with, short_label,
 };
 use sk_store::testing::{Rng, check_invariants};
-use sk_store::{
-    Entry, EntryBatch, Flags, Kind, NodeId, Nodes, Store, StoreOptions, Times, mutate,
-};
+use sk_store::{Entry, EntryBatch, Flags, Kind, NodeId, Nodes, Store, StoreOptions, Times, mutate};
 
 // --------------------------------------------------------------------------- building trees
 
@@ -27,7 +25,10 @@ fn f(size: i64) -> S {
 }
 
 fn d(kids: Vec<(&str, S)>) -> S {
-    S::D(kids.into_iter().map(|(n, s)| (n.to_string(), s)).collect(), 0)
+    S::D(
+        kids.into_iter().map(|(n, s)| (n.to_string(), s)).collect(),
+        0,
+    )
 }
 
 fn kids(spec: &S) -> &[(String, S)] {
@@ -69,7 +70,11 @@ fn build_roots(roots: &[(&str, &S)], order: Order) -> Store {
                     S::F(size, alloc, dup, kind) => Entry {
                         size: *size,
                         alloc: alloc.unwrap_or(*size),
-                        flags: if *dup { Flags::HARDLINK_DUP } else { Flags::NONE },
+                        flags: if *dup {
+                            Flags::HARDLINK_DUP
+                        } else {
+                            Flags::NONE
+                        },
                         nlink: if *dup { 2 } else { 1 },
                         ..Entry::new(name.as_bytes(), *kind)
                     },
@@ -167,7 +172,11 @@ fn eff(nodes: &Nodes, r: i32, alloc: bool) -> i64 {
     }
     let r = r as u32;
     if nodes.is_dir(r) {
-        return if alloc { nodes.tot_alloc(r) } else { nodes.tot_size(r) };
+        return if alloc {
+            nodes.tot_alloc(r)
+        } else {
+            nodes.tot_size(r)
+        };
     }
     if nodes.flags(r).intersects(Flags::HARDLINK_DUP) {
         return 0;
@@ -197,7 +206,10 @@ fn pairs(base: &Nodes, target: &Nodes, b: i32, t: i32, fold: bool, top: bool) ->
         if top {
             name = normpath(&name);
         }
-        (if folded { ref_fold(&name) } else { name }, nodes.is_dir(r as u32))
+        (
+            if folded { ref_fold(&name) } else { name },
+            nodes.is_dir(r as u32),
+        )
     };
     let mut matched: HashMap<i32, i32> = HashMap::new();
     let mut taken: HashSet<i32> = HashSet::new();
@@ -212,21 +224,34 @@ fn pairs(base: &Nodes, target: &Nodes, b: i32, t: i32, fold: bool, top: bool) ->
         let mut waiting: HashMap<(String, bool), VecDeque<i32>> = HashMap::new();
         for &cb in &kb {
             if !taken.contains(&cb) {
-                waiting.entry(key(base, cb, folded)).or_default().push_back(cb);
+                waiting
+                    .entry(key(base, cb, folded))
+                    .or_default()
+                    .push_back(cb);
             }
         }
         for &ct in &kt {
             if matched.contains_key(&ct) {
                 continue;
             }
-            if let Some(cb) = waiting.get_mut(&key(target, ct, folded)).and_then(|q| q.pop_front()) {
+            if let Some(cb) = waiting
+                .get_mut(&key(target, ct, folded))
+                .and_then(|q| q.pop_front())
+            {
                 matched.insert(ct, cb);
                 taken.insert(cb);
             }
         }
     }
-    let mut out: Vec<(i32, i32)> = kt.iter().map(|&ct| (*matched.get(&ct).unwrap_or(&-1), ct)).collect();
-    out.extend(kb.iter().filter(|cb| !taken.contains(cb)).map(|&cb| (cb, -1)));
+    let mut out: Vec<(i32, i32)> = kt
+        .iter()
+        .map(|&ct| (*matched.get(&ct).unwrap_or(&-1), ct))
+        .collect();
+    out.extend(
+        kb.iter()
+            .filter(|cb| !taken.contains(cb))
+            .map(|&cb| (cb, -1)),
+    );
     out
 }
 
@@ -245,7 +270,11 @@ fn reference(base: &Nodes, target: &Nodes, fold: bool) -> HashMap<(i32, i32), Ro
         for (cb, ct) in pairs(base, target, b, t, fold, (b, t) == (0, 0)) {
             let (mut g, mut s, status) = visit(base, target, fold, cb, ct, out);
             let od = own(target, ct) - own(base, cb);
-            let is_dir = if ct >= 0 { target.is_dir(ct as u32) } else { base.is_dir(cb as u32) };
+            let is_dir = if ct >= 0 {
+                target.is_dir(ct as u32)
+            } else {
+                base.is_dir(cb as u32)
+            };
             if is_dir {
                 g += od.max(0);
                 s += (-od).max(0);
@@ -254,13 +283,22 @@ fn reference(base: &Nodes, target: &Nodes, fold: bool) -> HashMap<(i32, i32), Ro
             shrink += s;
             changed |= status != Status::Unchanged;
         }
-        let is_dir = if t >= 0 { target.is_dir(t as u32) } else { base.is_dir(b as u32) };
+        let is_dir = if t >= 0 {
+            target.is_dir(t as u32)
+        } else {
+            base.is_dir(b as u32)
+        };
         if !is_dir {
             let od = own(target, t) - own(base, b);
             grow = od.max(0);
             shrink = (-od).max(0);
         }
-        let ends = (eff(base, b, true), eff(target, t, true), eff(base, b, false), eff(target, t, false));
+        let ends = (
+            eff(base, b, true),
+            eff(target, t, true),
+            eff(base, b, false),
+            eff(target, t, false),
+        );
         let status = if b < 0 {
             Status::Added
         } else if t < 0 {
@@ -280,7 +318,10 @@ fn reference(base: &Nodes, target: &Nodes, fold: bool) -> HashMap<(i32, i32), Ro
                 Status::Unchanged
             }
         };
-        out.insert((b, t), (status, ends.0, ends.1, ends.2, ends.3, grow, shrink));
+        out.insert(
+            (b, t),
+            (status, ends.0, ends.1, ends.2, ends.3, grow, shrink),
+        );
         (grow, shrink, status)
     }
     let mut out = HashMap::new();
@@ -329,7 +370,10 @@ fn check_union(tree: &DiffTree, base: &Nodes, target: &Nodes) {
     assert_eq!(s.flags(0), Flags::VIRTUAL);
     check_invariants(&s).unwrap();
     for u in 1..n as NodeId {
-        assert!((s.parent(u) as i64) < u as i64, "ids grow below their parent");
+        assert!(
+            (s.parent(u) as i64) < u as i64,
+            "ids grow below their parent"
+        );
         assert!(!s.flags(u).intersects(Flags::GONE));
         if !s.is_dir(u) {
             assert_eq!(s.child_count(u), 0);
@@ -380,12 +424,22 @@ fn name(tree: &DiffTree, u: usize) -> String {
 #[test]
 fn added_removed_changed_unchanged() {
     let base = build(&d(vec![
-        ("a", d(vec![("x.txt", f(10)), ("y.bin", f(100)), ("old.log", f(30))])),
+        (
+            "a",
+            d(vec![
+                ("x.txt", f(10)),
+                ("y.bin", f(100)),
+                ("old.log", f(30)),
+            ]),
+        ),
         ("keep.dat", f(5)),
         ("same", d(vec![("z", f(1))])),
     ]));
     let target = build(&d(vec![
-        ("a", d(vec![("x.txt", f(10)), ("y.bin", f(300)), ("new.log", f(7))])),
+        (
+            "a",
+            d(vec![("x.txt", f(10)), ("y.bin", f(300)), ("new.log", f(7))]),
+        ),
         ("keep.dat", f(5)),
         ("same", d(vec![("z", f(1))])),
         ("fresh", d(vec![("q", f(2))])),
@@ -401,14 +455,23 @@ fn added_removed_changed_unchanged() {
     assert_eq!(st("fresh"), Status::Added);
     assert_eq!(st("fresh/q"), Status::Added);
     let a = row(&tree, "a");
-    assert_eq!((tree.base_alloc[a], tree.target_alloc[a], tree.delta[a]), (140, 317, 177));
+    assert_eq!(
+        (tree.base_alloc[a], tree.target_alloc[a], tree.delta[a]),
+        (140, 317, 177)
+    );
     assert_eq!((tree.grow[a], tree.shrink[a]), (207, 30));
     let r = top(&tree);
-    assert_eq!((tree.delta[r], tree.grow[r], tree.shrink[r]), (179, 209, 30));
+    assert_eq!(
+        (tree.delta[r], tree.grow[r], tree.shrink[r]),
+        (179, 209, 30)
+    );
     let s = tree.store.read();
     assert_eq!(s.alloc(row(&tree, "a/y.bin") as NodeId), 300);
     assert_eq!(s.alloc(row(&tree, "a/old.log") as NodeId), 30);
-    let names: Vec<String> = s.children(a as NodeId).map(|c| s.name(c).into_owned()).collect();
+    let names: Vec<String> = s
+        .children(a as NodeId)
+        .map(|c| s.name(c).into_owned())
+        .collect();
     assert_eq!(names, ["x.txt", "y.bin", "new.log", "old.log"]);
 }
 
@@ -445,14 +508,28 @@ fn rename_is_removed_and_added() {
 fn windows_rule_folds_case() {
     let base = build_at(
         &d(vec![
-            ("Docs", d(vec![("Report.TXT", f(10)), ("Ärger.txt", f(4)), ("naïve", f(2))])),
+            (
+                "Docs",
+                d(vec![
+                    ("Report.TXT", f(10)),
+                    ("Ärger.txt", f(4)),
+                    ("naïve", f(2)),
+                ]),
+            ),
             ("MiXeD", f(1)),
         ]),
         if cfg!(windows) { "C:\\Data" } else { "/Data" },
     );
     let target = build_at(
         &d(vec![
-            ("docs", d(vec![("report.txt", f(12)), ("ärger.TXT", f(4)), ("NAÏVE", f(2))])),
+            (
+                "docs",
+                d(vec![
+                    ("report.txt", f(12)),
+                    ("ärger.TXT", f(4)),
+                    ("NAÏVE", f(2)),
+                ]),
+            ),
             ("mixed", f(1)),
         ]),
         if cfg!(windows) { "c:\\data" } else { "/data" },
@@ -468,11 +545,17 @@ fn windows_rule_folds_case() {
 
 #[test]
 fn windows_rule_prefers_the_exact_spelling() {
-    let base = build(&d(vec![("A", f(1)), ("a", f(2)), ("Bb", f(3)), ("bB", f(4))]));
+    let base = build(&d(vec![
+        ("A", f(1)),
+        ("a", f(2)),
+        ("Bb", f(3)),
+        ("bB", f(4)),
+    ]));
     let target = build(&d(vec![("a", f(2)), ("A", f(1)), ("bb", f(30))]));
     let tree = check(&base, &target, true);
-    let got: HashSet<(String, Status)> =
-        (2..tree.len()).map(|u| (name(&tree, u), tree.status[u])).collect();
+    let got: HashSet<(String, Status)> = (2..tree.len())
+        .map(|u| (name(&tree, u), tree.status[u]))
+        .collect();
     assert!(got.contains(&("a".into(), Status::Unchanged)));
     assert!(got.contains(&("A".into(), Status::Unchanged)));
     assert!(got.contains(&("bb".into(), Status::Changed)));
@@ -481,7 +564,11 @@ fn windows_rule_prefers_the_exact_spelling() {
 
 #[test]
 fn posix_rule_is_exact() {
-    let tree = check(&build(&d(vec![("Readme", f(1))])), &build(&d(vec![("README", f(1))])), false);
+    let tree = check(
+        &build(&d(vec![("Readme", f(1))])),
+        &build(&d(vec![("README", f(1))])),
+        false,
+    );
     let mut st: Vec<u8> = tree.status[2..].iter().map(|&s| s as u8).collect();
     st.sort();
     assert_eq!(st, [Status::Added as u8, Status::Removed as u8]);
@@ -501,7 +588,11 @@ fn kind_change_is_removed_and_added() {
         ("y", d(vec![("in", f(5))])),
         ("link", S::F(10, None, false, Kind::Link)),
     ]));
-    let target = build(&d(vec![("x", d(vec![("inner", f(7))])), ("y", f(9)), ("link", f(10))]));
+    let target = build(&d(vec![
+        ("x", d(vec![("inner", f(7))])),
+        ("y", f(9)),
+        ("link", f(10)),
+    ]));
     let tree = check(&base, &target, false);
     assert_eq!(tree.status[row_k(&tree, "x", Kind::File)], Status::Removed);
     assert_eq!(tree.status[row_k(&tree, "x", Kind::Dir)], Status::Added);
@@ -549,7 +640,10 @@ fn empty_trees() {
     let tree = compare(&e1.read(), &e2.read(), Some(false)).unwrap();
     assert_eq!(tree.len(), 1);
     assert_eq!(tree.status[0], Status::Unchanged);
-    assert!(tree.changes(Direction::Grow, 10, 0, None, DOMINANT, MINOR).is_empty());
+    assert!(
+        tree.changes(Direction::Grow, 10, 0, None, DOMINANT, MINOR)
+            .is_empty()
+    );
     let full = build(&d(vec![("a", d(vec![("b", f(3))]))]));
     let added = check(&e1, &full, false);
     assert!(added.status[1..].iter().all(|&s| s == Status::Added));
@@ -592,8 +686,10 @@ fn multiple_roots() {
     let target = build_roots(&[("/b/", &y5), ("/c", &z)], Order::Bfs); // "/b/" normalises to "/b"
     let tree = check(&base, &target, false);
     let s = tree.store.read();
-    let roots: HashMap<String, Status> =
-        s.roots().map(|r| (s.name(r).into_owned(), tree.status[r as usize])).collect();
+    let roots: HashMap<String, Status> = s
+        .roots()
+        .map(|r| (s.name(r).into_owned(), tree.status[r as usize]))
+        .collect();
     assert_eq!(roots["/b/"], Status::Changed);
     assert_eq!(roots["/c"], Status::Added);
     assert_eq!(roots["/a"], Status::Removed);
@@ -602,7 +698,10 @@ fn multiple_roots() {
 #[test]
 fn other_layouts_and_gone_rows() {
     let spec = d(vec![
-        ("a", d(vec![("b", d(vec![("c", f(1)), ("d", f(2))])), ("e", f(3))])),
+        (
+            "a",
+            d(vec![("b", d(vec![("c", f(1)), ("d", f(2))])), ("e", f(3))]),
+        ),
         ("f", d(vec![("g", d(vec![("h", f(4))]))])),
         ("i", f(5)),
     ]);
@@ -611,7 +710,11 @@ fn other_layouts_and_gone_rows() {
     for folder in ["a", "a/b", "f/g", ""] {
         let node = {
             let t = target.read();
-            if folder.is_empty() { t.roots().next().unwrap() } else { find(&t, folder, None) }
+            if folder.is_empty() {
+                t.roots().next().unwrap()
+            } else {
+                find(&t, folder, None)
+            }
         };
         relist_same(&target, node);
     }
@@ -639,8 +742,9 @@ fn names_from_several_heap_chunks() {
     let mk = |rev: bool| -> S {
         let folders: Vec<(String, S)> = (0..60)
             .map(|i| {
-                let mut files: Vec<(String, S)> =
-                    (0..30).map(|j| (format!("{long}{j:04}.dat"), f(i + j))).collect();
+                let mut files: Vec<(String, S)> = (0..30)
+                    .map(|j| (format!("{long}{j:04}.dat"), f(i + j)))
+                    .collect();
                 if rev {
                     files.reverse();
                     if i == 7 {
@@ -657,7 +761,10 @@ fn names_from_several_heap_chunks() {
     let target = build_roots(&[("/r", &ts)], Order::Dfs);
     assert!(base.read().name_chunks() > 1 && target.read().name_chunks() > 1);
     let tree = check(&base, &target, false);
-    assert_eq!(tree.status.iter().filter(|&&s| s == Status::Added).count(), 1);
+    assert_eq!(
+        tree.status.iter().filter(|&&s| s == Status::Added).count(),
+        1
+    );
 }
 
 #[test]
@@ -700,19 +807,32 @@ fn progress_and_cancel() {
 #[test]
 fn the_layout_engine_draws_the_union() {
     use sk_core::layout::contract::check_draw;
-    use sk_core::layout::{ArraySizes, Basis, DrawList, LayoutParams, RootSpec, SizeSource, StoreSizes, treemap};
+    use sk_core::layout::{
+        ArraySizes, Basis, DrawList, LayoutParams, RootSpec, SizeSource, StoreSizes, treemap,
+    };
     let names = |n: usize, size: &dyn Fn(usize) -> i64| -> S {
         S::D((0..n).map(|i| (format!("f{i}"), f(size(i)))).collect(), 0)
     };
-    let base = build(&d(vec![("a", names(20, &|i| 100 * i as i64)), ("b", d(vec![("g", f(5000))]))]));
+    let base = build(&d(vec![
+        ("a", names(20, &|i| 100 * i as i64)),
+        ("b", d(vec![("g", f(5000))])),
+    ]));
     let target = build(&d(vec![
-        ("a", names(25, &|i| 100 * i as i64 + if i % 3 != 0 { 50 } else { 0 })),
+        (
+            "a",
+            names(25, &|i| 100 * i as i64 + if i % 3 != 0 { 50 } else { 0 }),
+        ),
         ("c", d(vec![("h", f(800))])),
     ]));
     let tree = check(&base, &target, false);
     let nodes = tree.store.read();
     let root = RootSpec::node(nodes.roots().next().unwrap());
-    let params = LayoutParams { width: 600.0, height: 400.0, min_element: 1.0, ..LayoutParams::default() };
+    let params = LayoutParams {
+        width: 600.0,
+        height: 400.0,
+        min_element: 1.0,
+        ..LayoutParams::default()
+    };
     let basis = Basis::default();
     let lay = |sizes: &dyn SizeSource| {
         let mut out = DrawList::new();
@@ -725,14 +845,18 @@ fn the_layout_engine_draws_the_union() {
     let changed = lay(&ArraySizes(std::sync::Arc::new(tree.area())));
     assert!(!normal.is_empty() && !changed.is_empty());
     let drawn: HashSet<i32> = changed.node.iter().copied().collect();
-    assert!(drawn.contains(&(row(&tree, "b/g") as i32)) && drawn.contains(&(row(&tree, "c/h") as i32)));
+    assert!(
+        drawn.contains(&(row(&tree, "b/g") as i32)) && drawn.contains(&(row(&tree, "c/h") as i32))
+    );
     assert!(!drawn.contains(&(row(&tree, "a/f0") as i32))); // unchanged: no area
 }
 
 // --------------------------------------------------------------------------- change units
 
 fn rel(path: &str) -> String {
-    path.replace('\\', "/").trim_start_matches("/r/").to_string()
+    path.replace('\\', "/")
+        .trim_start_matches("/r/")
+        .to_string()
 }
 
 fn changes(tree: &DiffTree, dir: Direction, limit: usize) -> Vec<sk_core::diff::Change> {
@@ -751,16 +875,28 @@ fn changes_ranking() {
     many.extend((0..100).map(|i| (format!("n{i:03}"), f(9))));
     let target = build(&S::D(
         vec![
-            ("one".into(), d(vec![("keep", f(1000)), ("tiny", f(2)), ("big.iso", f(1000))])),
+            (
+                "one".into(),
+                d(vec![
+                    ("keep", f(1000)),
+                    ("tiny", f(2)),
+                    ("big.iso", f(1000)),
+                ]),
+            ),
             ("many".into(), S::D(many, 0)),
-            ("two".into(), d(vec![("p", f(310)), ("q", f(260)), ("r", f(2))])),
+            (
+                "two".into(),
+                d(vec![("p", f(310)), ("q", f(260)), ("r", f(2))]),
+            ),
         ],
         0,
     ));
     let tree = check(&base, &target, false);
     let grow = changes(&tree, Direction::Grow, 10);
-    let got: Vec<(String, i64, bool)> =
-        grow.iter().map(|c| (rel(&c.path), c.amount, c.rest)).collect();
+    let got: Vec<(String, i64, bool)> = grow
+        .iter()
+        .map(|c| (rel(&c.path), c.amount, c.rest))
+        .collect();
     let want: Vec<(String, i64, bool)> = [
         ("one/big.iso", 1000, false),
         ("many", 900, false),
@@ -777,17 +913,29 @@ fn changes_ranking() {
     assert_eq!(grow.iter().map(|c| c.amount).sum::<i64>(), tree.grow[0]);
     let unit = &grow[0];
     assert_eq!(
-        (unit.status, unit.kind, unit.base_alloc, unit.target_alloc, unit.delta),
+        (
+            unit.status,
+            unit.kind,
+            unit.base_alloc,
+            unit.target_alloc,
+            unit.delta
+        ),
         (Status::Added, Kind::File, 0, 1000, 1000)
     );
     let shrink = changes(&tree, Direction::Shrink, 10);
     assert_eq!(shrink.len(), 1);
-    assert_eq!((rel(&shrink[0].path), shrink[0].amount, shrink[0].status), ("gone/g".into(), 400, Status::Removed));
+    assert_eq!(
+        (rel(&shrink[0].path), shrink[0].amount, shrink[0].status),
+        ("gone/g".into(), 400, Status::Removed)
+    );
     assert_eq!(changes(&tree, Direction::Grow, 2).len(), 2);
     assert!(changes(&tree, Direction::Grow, 0).is_empty());
     let whole = tree.changes(Direction::Grow, 10, 0, None, 2.0, MINOR);
     assert_eq!(whole.len(), 1);
-    assert_eq!((whole[0].path.as_str(), whole[0].amount), ("/r", tree.grow[0]));
+    assert_eq!(
+        (whole[0].path.as_str(), whole[0].amount),
+        ("/r", tree.grow[0])
+    );
     assert!(Direction::parse("bigger").is_err());
 }
 
@@ -807,11 +955,20 @@ fn changes_in_a_scope_and_with_other_amounts() {
     let two = row(&tree, "two") as NodeId;
     let inside = tree.changes(Direction::Grow, 10, two, None, DOMINANT, MINOR);
     let got: Vec<(String, i64)> = inside.iter().map(|c| (rel(&c.path), c.amount)).collect();
-    assert_eq!(got, [("two/p".to_string(), 300), ("two/q".to_string(), 250)]);
+    assert_eq!(
+        got,
+        [("two/p".to_string(), 300), ("two/q".to_string(), 250)]
+    );
     let p = row(&tree, "two/p") as NodeId;
-    assert_eq!(tree.changes(Direction::Grow, 10, p, None, DOMINANT, MINOR)[0].amount, 300);
+    assert_eq!(
+        tree.changes(Direction::Grow, 10, p, None, DOMINANT, MINOR)[0].amount,
+        300
+    );
     let three = row(&tree, "three") as NodeId;
-    assert!(tree.changes(Direction::Grow, 10, three, None, DOMINANT, MINOR).is_empty());
+    assert!(
+        tree.changes(Direction::Grow, 10, three, None, DOMINANT, MINOR)
+            .is_empty()
+    );
     let mut amount = vec![0i64; tree.len()];
     {
         let s = tree.store.read();
@@ -826,23 +983,47 @@ fn changes_in_a_scope_and_with_other_amounts() {
     }
     let only_two = tree.changes(Direction::Grow, 10, 0, Some(&amount), DOMINANT, MINOR);
     let got: Vec<(String, i64)> = only_two.iter().map(|c| (rel(&c.path), c.amount)).collect();
-    assert_eq!(got, [("two/p".to_string(), 300), ("two/q".to_string(), 250)]);
+    assert_eq!(
+        got,
+        [("two/p".to_string(), 300), ("two/q".to_string(), 250)]
+    );
     assert_eq!((only_two[0].delta, only_two[0].target_alloc), (300, 310));
 }
 
 // --------------------------------------------------------------------------- random trees
 
 const NAMES: &[&str] = &[
-    "a", "A", "b", "ab", "Ab", "aB", "x.txt", "X.TXT", "ä", "Ä", "中文", "long-name-0123456789",
-    "LONG-name-0123456789", "é", "\u{212a}",
+    "a",
+    "A",
+    "b",
+    "ab",
+    "Ab",
+    "aB",
+    "x.txt",
+    "X.TXT",
+    "ä",
+    "Ä",
+    "中文",
+    "long-name-0123456789",
+    "LONG-name-0123456789",
+    "é",
+    "\u{212a}",
 ];
 
 fn leaf(rng: &mut Rng) -> S {
     if rng.chance(0.5) {
         return f(rng.range(0, 2000));
     }
-    let alloc = if rng.chance(0.5) { None } else { Some(rng.range(0, 4097)) };
-    let kind = if rng.chance(0.5) { Kind::File } else { Kind::Link };
+    let alloc = if rng.chance(0.5) {
+        None
+    } else {
+        Some(rng.range(0, 4097))
+    };
+    let kind = if rng.chance(0.5) {
+        Kind::File
+    } else {
+        Kind::Link
+    };
     S::F(rng.range(0, 2000), alloc, rng.chance(0.5), kind)
 }
 
@@ -861,7 +1042,11 @@ fn random_tree(rng: &mut Rng, depth: u32, budget: &mut i32) -> S {
         let v = if depth > 0 && rng.chance(0.35) {
             let inner = random_tree(rng, depth - 1, budget);
             if rng.chance(0.3) {
-                if let S::D(k, _) = inner { S::D(k, rng.range(0, 65)) } else { inner }
+                if let S::D(k, _) = inner {
+                    S::D(k, rng.range(0, 65))
+                } else {
+                    inner
+                }
             } else {
                 inner
             }
@@ -903,7 +1088,10 @@ fn mutated(rng: &mut Rng, spec: &S) -> S {
         }
         let mut name = name;
         let sw = swapcase(&name);
-        if op == "recase" && !kids(spec).iter().any(|(k, _)| *k == sw) && !out.iter().any(|(k, _)| *k == sw) {
+        if op == "recase"
+            && !kids(spec).iter().any(|(k, _)| *k == sw)
+            && !out.iter().any(|(k, _)| *k == sw)
+        {
             name = sw;
         }
         let is_dir = matches!(value, S::D(..));
@@ -945,7 +1133,11 @@ fn random_trees_match_the_reference() {
             random_tree(&mut rng, 3, &mut budget)
         };
         let fold = rng.chance(0.5);
-        let order = if rng.chance(0.5) { Order::Bfs } else { Order::Dfs };
+        let order = if rng.chance(0.5) {
+            Order::Bfs
+        } else {
+            Order::Dfs
+        };
         let base = build(&spec);
         let target = build_roots(&[("/r", &other)], order);
         if rng.chance(0.5) {
@@ -1006,7 +1198,10 @@ fn changes_partition_random_trees() {
     for fold in [false, true] {
         let tree = check(&base, &target, fold);
         let s = tree.store.read();
-        for (dir, total) in [(Direction::Grow, tree.grow[0]), (Direction::Shrink, tree.shrink[0])] {
+        for (dir, total) in [
+            (Direction::Grow, tree.grow[0]),
+            (Direction::Shrink, tree.shrink[0]),
+        ] {
             let units = changes(&tree, dir, 1_000_000);
             assert_eq!(units.iter().map(|c| c.amount).sum::<i64>(), total);
             let amounts: Vec<i64> = units.iter().map(|c| c.amount).collect();
@@ -1038,14 +1233,19 @@ fn change_tree_keeps_what_changed() {
     let ct = ChangeTree::of(&tree, StoreOptions::default()).unwrap();
     let s = ct.store().read();
     check_invariants(&s).unwrap();
-    let names: Vec<String> = (0..s.len() as NodeId).map(|i| s.path_lossy(i).replace('\\', "/")).collect();
+    let names: Vec<String> = (0..s.len() as NodeId)
+        .map(|i| s.path_lossy(i).replace('\\', "/"))
+        .collect();
     assert_eq!(names, ["", "/r", "/r/a", "/r/a/y", "/r/a/new"]);
     let a = 2;
     assert_eq!(s.tot_alloc(a), 67);
     assert_eq!(s.alloc(3), 60);
     assert_eq!(ct.new_files[1], 1);
     assert_eq!(ct.diff.delta[a as usize], -53);
-    assert_eq!(ct.amounts(true, false, Some(&[false, false, false, false, true])), vec![7, 7, 7, 0, 7]);
+    assert_eq!(
+        ct.amounts(true, false, Some(&[false, false, false, false, true])),
+        vec![7, 7, 7, 0, 7]
+    );
     assert_eq!(short_label(&s, 3, 0), "y");
 }
 
@@ -1053,13 +1253,19 @@ fn change_tree_keeps_what_changed() {
 fn short_labels() {
     let spec = d(vec![(
         "WeChat Files",
-        d(vec![("wxid_abc12345", d(vec![("Video", d(vec![("v.mp4", f(5))]))]))]),
+        d(vec![(
+            "wxid_abc12345",
+            d(vec![("Video", d(vec![("v.mp4", f(5))]))]),
+        )]),
     )]);
     let store = build(&spec);
     let s = store.read();
     let video = find(&s, "WeChat Files/wxid_abc12345/Video", None);
     let sep = std::path::MAIN_SEPARATOR;
-    assert_eq!(short_label(&s, video, 0), format!("WeChat Files{sep}…{sep}Video"));
+    assert_eq!(
+        short_label(&s, video, 0),
+        format!("WeChat Files{sep}…{sep}Video")
+    );
     let file = find(&s, "WeChat Files/wxid_abc12345/Video/v.mp4", None);
     assert_eq!(short_label(&s, file, 0), "v.mp4");
 }
@@ -1087,5 +1293,9 @@ fn bench_large_compare() {
     }
     let t0 = std::time::Instant::now();
     let same = compare(&b, &b, Some(true)).unwrap();
-    eprintln!("self-compare {} rows in {:.3} s", same.len(), t0.elapsed().as_secs_f64());
+    eprintln!(
+        "self-compare {} rows in {:.3} s",
+        same.len(),
+        t0.elapsed().as_secs_f64()
+    );
 }

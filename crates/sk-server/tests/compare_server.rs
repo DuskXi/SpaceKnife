@@ -43,7 +43,12 @@ fn change_files(root: &Path) {
 
 /// A scan with its auto snapshot.
 async fn scan_saved(c: &Client, root: &Path) -> Value {
-    let st = c.ok("scan.start", json!({"roots": [root.to_string_lossy()], "workers": 0, "auto_snapshot": true})).await;
+    let st = c
+        .ok(
+            "scan.start",
+            json!({"roots": [root.to_string_lossy()], "workers": 0, "auto_snapshot": true}),
+        )
+        .await;
     let id = st["scan_id"].as_str().unwrap().to_owned();
     let mut st = wait_done(c, &id).await;
     for _ in 0..100 {
@@ -57,11 +62,17 @@ async fn scan_saved(c: &Client, root: &Path) -> Value {
 }
 
 async fn compared(c: &Client, scan_id: &str, base: &str, target: &str) -> Value {
-    let task = c.ok("compare.open", json!({"scan_id": scan_id, "base": base, "target": target})).await;
+    let task = c
+        .ok(
+            "compare.open",
+            json!({"scan_id": scan_id, "base": base, "target": target}),
+        )
+        .await;
     let id = task["compare_id"].as_str().unwrap().to_owned();
     let ev = c
         .event_where("compare.progress", 60.0, |e| {
-            e["compare_id"] == id.as_str() && ["ready", "failed", "cancelled"].contains(&e["phase"].as_str().unwrap())
+            e["compare_id"] == id.as_str()
+                && ["ready", "failed", "cancelled"].contains(&e["phase"].as_str().unwrap())
         })
         .await;
     assert_eq!(ev["phase"], "ready", "{}", ev["message"]);
@@ -101,7 +112,11 @@ fn frame_of(buf: &[u8]) -> Frame {
 async fn view_call(c: &Client, method: &str, params: Value) -> (Value, Option<Frame>) {
     c.drain_binary().await;
     let up = c.ok(method, params).await;
-    let frame = if up["frame"].is_null() { None } else { Some(frame_of(&c.binary(10.0).await)) };
+    let frame = if up["frame"].is_null() {
+        None
+    } else {
+        Some(frame_of(&c.binary(10.0).await))
+    };
     (up, frame)
 }
 
@@ -113,14 +128,22 @@ async fn snapshot_against_now() {
     let root = tmp.path().join("root");
     build_tree(&root);
     let first = scan_saved(&c, &root).await;
-    let snap = first["snapshot"].as_str().expect("auto snapshot").to_owned();
+    let snap = first["snapshot"]
+        .as_str()
+        .expect("auto snapshot")
+        .to_owned();
     change_files(&root);
     tokio::time::sleep(Duration::from_millis(1100)).await; // snapshot names have a 1 s resolution
     let now = scan_saved(&c, &root).await;
     let scan_id = now["scan_id"].as_str().unwrap();
 
     let sources = c.ok("compare.sources", json!({"scan_id": scan_id})).await;
-    let paths: Vec<&str> = sources["snapshots"].as_array().unwrap().iter().map(|s| s["path"].as_str().unwrap()).collect();
+    let paths: Vec<&str> = sources["snapshots"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["path"].as_str().unwrap())
+        .collect();
     assert!(paths.contains(&snap.as_str()));
     assert_eq!(sources["now"]["kind"], "now");
 
@@ -132,8 +155,12 @@ async fn snapshot_against_now() {
     let cmp = info["compare_id"].as_str().unwrap().to_owned();
 
     // the change tree as a view: areas are |change|, frames carry delta and dstat
-    let (up, frame) =
-        view_call(&c, "view.open", json!({"scan_id": cmp, "viewport": {"width": 900, "height": 600}})).await;
+    let (up, frame) = view_call(
+        &c,
+        "view.open",
+        json!({"scan_id": cmp, "viewport": {"width": 900, "height": 600}}),
+    )
+    .await;
     let frame = frame.expect("a frame");
     assert_eq!(up["state"]["compare"], true);
     assert!(!frame.names.iter().any(|n| n == "many")); // unchanged folders are not in the change tree
@@ -155,21 +182,39 @@ async fn snapshot_against_now() {
     assert_eq!(top["status"], "new");
     assert_eq!(top["on_disk"], true);
     let shrink: Vec<&Value> = summary["shrink_items"].as_array().unwrap().iter().collect();
-    assert_eq!(shrink.iter().map(|i| i["status"].as_str().unwrap()).collect::<Vec<_>>(), ["deleted"]);
+    assert_eq!(
+        shrink
+            .iter()
+            .map(|i| i["status"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["deleted"]
+    );
     assert!(shrink[0]["path"].as_str().unwrap().ends_with("two.bin"));
     assert_eq!(shrink[0]["on_disk"], false);
 
     // hover card of folder a: one grown and one deleted child
     let a_key = frame.keys[frame.names.iter().position(|n| n == "a").unwrap()];
-    let card = c.ok("compare.node", json!({"view_id": view_id, "key": a_key})).await;
+    let card = c
+        .ok("compare.node", json!({"view_id": view_id, "key": a_key}))
+        .await;
     assert_eq!(card["item"]["kind"], "dir");
-    let mut st: Vec<&str> = card["children"].as_array().unwrap().iter().map(|k| k["status"].as_str().unwrap()).collect();
+    let mut st: Vec<&str> = card["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|k| k["status"].as_str().unwrap())
+        .collect();
     st.sort_unstable();
     st.dedup();
     assert_eq!(st, ["changed", "deleted"]);
 
     // 「增长」 only: the deleted file leaves the layout
-    let (up, frame) = view_call(&c, "view.set", json!({"view_id": view_id, "settings": {"direction": "grow"}})).await;
+    let (up, frame) = view_call(
+        &c,
+        "view.set",
+        json!({"view_id": view_id, "settings": {"direction": "grow"}}),
+    )
+    .await;
     assert_eq!(up["state"]["direction"], "grow");
     assert!(!frame.expect("a frame").names.iter().any(|n| n == "two.bin"));
     // a view opened like it keeps showing growth only
@@ -183,7 +228,9 @@ async fn snapshot_against_now() {
     assert!(!frame.expect("a frame").names.iter().any(|n| n == "two.bin"));
 
     // tree.node on a change tree row
-    let node = c.ok("tree.node", json!({"scan_id": cmp, "node": a_key})).await;
+    let node = c
+        .ok("tree.node", json!({"scan_id": cmp, "node": a_key}))
+        .await;
     assert_eq!(node["node"]["name"], "a");
     let info2 = c.ok("compare.info", json!({"compare_id": cmp})).await;
     assert_eq!(info2["grow"].as_i64().unwrap(), grow);
@@ -205,19 +252,40 @@ async fn errors() {
     let elsewhere = scan_saved(&c, &other).await;
     let scan_id = st["scan_id"].as_str().unwrap();
     // both ends the same
-    c.err("compare.open", json!({"scan_id": scan_id, "base": "now", "target": "now"})).await;
+    c.err(
+        "compare.open",
+        json!({"scan_id": scan_id, "base": "now", "target": "now"}),
+    )
+    .await;
     // a snapshot of another root fails with a clear message
     let task = c
-        .ok("compare.open", json!({"scan_id": scan_id, "base": elsewhere["snapshot"], "target": "now"}))
+        .ok(
+            "compare.open",
+            json!({"scan_id": scan_id, "base": elsewhere["snapshot"], "target": "now"}),
+        )
         .await;
     let id = task["compare_id"].as_str().unwrap().to_owned();
     let ev = c
-        .event_where("compare.progress", 30.0, |e| e["compare_id"] == id.as_str() && e["phase"] == "failed")
+        .event_where("compare.progress", 30.0, |e| {
+            e["compare_id"] == id.as_str() && e["phase"] == "failed"
+        })
         .await;
-    assert!(ev["message"].as_str().unwrap().contains("扫描位置"), "{}", ev["message"]);
+    assert!(
+        ev["message"].as_str().unwrap().contains("扫描位置"),
+        "{}",
+        ev["message"]
+    );
     // not ready / unknown
     let e = c.err("compare.info", json!({"compare_id": id})).await;
-    assert_eq!(e.code, i64::from(sk_protocol::ErrorCode::InvalidRequest.code()));
-    let e = c.err("compare.info", json!({"compare_id": "cmp-999"})).await;
-    assert_eq!(e.code, i64::from(sk_protocol::ErrorCode::UnknownScan.code()));
+    assert_eq!(
+        e.code,
+        i64::from(sk_protocol::ErrorCode::InvalidRequest.code())
+    );
+    let e = c
+        .err("compare.info", json!({"compare_id": "cmp-999"}))
+        .await;
+    assert_eq!(
+        e.code,
+        i64::from(sk_protocol::ErrorCode::UnknownScan.code())
+    );
 }

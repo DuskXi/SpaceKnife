@@ -97,12 +97,21 @@ pub fn ata_sector_size(identify: &[u8]) -> i64 {
 }
 
 /// Device Statistics pages 01h and 05h; None when the disk reports nothing of use.
-pub fn ata_statistics(general: &[u8], temperature: Option<&[u8]>, sector: i64) -> Option<DiskHealth> {
+pub fn ata_statistics(
+    general: &[u8],
+    temperature: Option<&[u8]>,
+    sector: i64,
+) -> Option<DiskHealth> {
     let (hours, cycles) = (stat(general, 0x10, 32), stat(general, 0x08, 32));
     let (written, read) = (stat(general, 0x18, 48), stat(general, 0x28, 48));
     // a signed byte
-    let temp = temperature.and_then(|p| stat(p, 0x08, 8)).map(|t| if t > 127 { t - 256 } else { t });
-    if [hours, cycles, written, read, temp].iter().all(Option::is_none) {
+    let temp = temperature
+        .and_then(|p| stat(p, 0x08, 8))
+        .map(|t| if t > 127 { t - 256 } else { t });
+    if [hours, cycles, written, read, temp]
+        .iter()
+        .all(Option::is_none)
+    {
         return None;
     }
     Some(DiskHealth {
@@ -120,7 +129,10 @@ fn hex(pages: &BTreeMap<String, String>, key: &str) -> Option<Vec<u8>> {
     if v.is_empty() || v.len() % 2 != 0 {
         return None;
     }
-    (0..v.len()).step_by(2).map(|i| u8::from_str_radix(v.get(i..i + 2)?, 16).ok()).collect()
+    (0..v.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(v.get(i..i + 2)?, 16).ok())
+        .collect()
 }
 
 /// The record from the helper's `disk_health` answer: `{kind: nvme, log}` or `{kind: ata,
@@ -143,7 +155,10 @@ pub fn linux_stat(text: &str) -> Option<(i64, i64)> {
     if fields.len() < 7 {
         return None;
     }
-    Some((fields[2].parse::<i64>().ok()? * 512, fields[6].parse::<i64>().ok()? * 512))
+    Some((
+        fields[2].parse::<i64>().ok()? * 512,
+        fields[6].parse::<i64>().ok()? * 512,
+    ))
 }
 
 /// When the system started: the counters of the system's I/O statistics start there.
@@ -156,14 +171,30 @@ fn uptime() -> Option<f64> {
     #[cfg(windows)]
     {
         // SAFETY: no preconditions.
-        Some(unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } as f64 / 1000.0)
+        Some(
+            unsafe { windows_sys::Win32::System::SystemInformation::GetTickCount64() } as f64
+                / 1000.0,
+        )
     }
     #[cfg(target_os = "macos")]
     {
-        let out = std::process::Command::new("sysctl").args(["-n", "kern.boottime"]).output().ok()?;
+        let out = std::process::Command::new("sysctl")
+            .args(["-n", "kern.boottime"])
+            .output()
+            .ok()?;
         let text = String::from_utf8_lossy(&out.stdout);
-        let sec: i64 = text.split("sec =").nth(1)?.split(',').next()?.trim().parse().ok()?;
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs_f64();
+        let sec: i64 = text
+            .split("sec =")
+            .nth(1)?
+            .split(',')
+            .next()?
+            .trim()
+            .parse()
+            .ok()?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs_f64();
         Some(now - sec as f64)
     }
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -186,9 +217,14 @@ pub(crate) mod tests {
         b[3] = get("spare", 100) as u8;
         b[4] = get("threshold", 10) as u8;
         b[5] = get("used", 9) as u8;
-        for (offset, key) in
-            [(32, "units_read"), (48, "units_written"), (112, "cycles"), (128, "hours"), (144, "unsafe"), (160, "media")]
-        {
+        for (offset, key) in [
+            (32, "units_read"),
+            (48, "units_written"),
+            (112, "cycles"),
+            (128, "hours"),
+            (144, "unsafe"),
+            (160, "media"),
+        ] {
             b[offset..offset + 16].copy_from_slice(&get(key, 0).to_le_bytes());
         }
         b
@@ -210,18 +246,34 @@ pub(crate) mod tests {
         let h = nvme_health(&log).unwrap();
         assert_eq!(h.source, HealthSource::Nvme);
         assert_eq!(
-            (h.temperature_c, h.percentage_used, h.available_spare, h.spare_threshold),
+            (
+                h.temperature_c,
+                h.percentage_used,
+                h.available_spare,
+                h.spare_threshold
+            ),
             (Some(47), Some(9), Some(100), Some(10))
         );
         assert_eq!(h.read_bytes, Some(206_874_470 * 512_000));
         assert_eq!(h.written_bytes, Some(493_120_475 * 512_000));
         assert_eq!(
-            (h.power_cycles, h.power_on_hours, h.unsafe_shutdowns, h.media_errors, h.critical_warning),
+            (
+                h.power_cycles,
+                h.power_on_hours,
+                h.unsafe_shutdowns,
+                h.media_errors,
+                h.critical_warning
+            ),
             (Some(686), Some(8070), Some(106), Some(0), Some(0))
         );
         assert!(nvme_health(&[0u8; 512]).is_none()); // an empty answer
         assert!(nvme_health(&[1u8; 100]).is_none()); // a short one
-        assert_eq!(nvme_health(&nvme_log(&[("kelvin", 0)])).unwrap().temperature_c, None);
+        assert_eq!(
+            nvme_health(&nvme_log(&[("kelvin", 0)]))
+                .unwrap()
+                .temperature_c,
+            None
+        );
     }
 
     #[test]
@@ -235,10 +287,21 @@ pub(crate) mod tests {
         temps[0x08..0x10].copy_from_slice(&qword(24, true));
         let h = ata_statistics(&general, Some(&temps), 512).unwrap();
         assert_eq!(h.source, HealthSource::Ata);
-        assert_eq!((h.power_cycles, h.power_on_hours, h.temperature_c), (Some(2859), Some(30322), Some(24)));
-        assert_eq!((h.written_bytes, h.read_bytes), (Some(25_974_947_733 * 512), None));
+        assert_eq!(
+            (h.power_cycles, h.power_on_hours, h.temperature_c),
+            (Some(2859), Some(30322), Some(24))
+        );
+        assert_eq!(
+            (h.written_bytes, h.read_bytes),
+            (Some(25_974_947_733 * 512), None)
+        );
         temps[0x08..0x10].copy_from_slice(&qword(0xF6, true)); // −10 °C, a signed byte
-        assert_eq!(ata_statistics(&general, Some(&temps), 512).unwrap().temperature_c, Some(-10));
+        assert_eq!(
+            ata_statistics(&general, Some(&temps), 512)
+                .unwrap()
+                .temperature_c,
+            Some(-10)
+        );
         assert!(ata_statistics(&[0u8; 512], None, 512).is_none()); // nothing supported
     }
 
@@ -264,8 +327,11 @@ pub(crate) mod tests {
 
     #[test]
     fn from_pages_rejects_junk() {
-        let pages =
-            |kv: &[(&str, &str)]| kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect::<BTreeMap<_, _>>();
+        let pages = |kv: &[(&str, &str)]| {
+            kv.iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect::<BTreeMap<_, _>>()
+        };
         assert!(from_pages(&pages(&[])).is_none());
         assert!(from_pages(&pages(&[("kind", "nvme"), ("log", "zz")])).is_none());
         assert!(from_pages(&pages(&[("kind", "ata"), ("general", "")])).is_none());

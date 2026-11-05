@@ -35,13 +35,46 @@ pub const WSL_DRIVE_NOTE: &str =
     "WSL 经 9P 协议访问的 Windows 盘，扫描会非常慢；建议用 Windows 版的 SpaceKnife 扫描";
 
 pub const NETWORK_FS: &[&str] = &[
-    "nfs", "nfs4", "cifs", "smb3", "smbfs", "afpfs", "webdav", "davfs", "9p", "ceph", "glusterfs",
-    "fuse.sshfs", "fuse.rclone", "fuse.gvfsd-fuse",
+    "nfs",
+    "nfs4",
+    "cifs",
+    "smb3",
+    "smbfs",
+    "afpfs",
+    "webdav",
+    "davfs",
+    "9p",
+    "ceph",
+    "glusterfs",
+    "fuse.sshfs",
+    "fuse.rclone",
+    "fuse.gvfsd-fuse",
 ];
 pub const PSEUDO_FS: &[&str] = &[
-    "proc", "sysfs", "devtmpfs", "devpts", "tmpfs", "cgroup", "cgroup2", "debugfs", "tracefs",
-    "securityfs", "pstore", "bpf", "configfs", "efivarfs", "autofs", "mqueue", "hugetlbfs",
-    "fusectl", "binfmt_misc", "rpc_pipefs", "nsfs", "squashfs", "overlay", "ramfs",
+    "proc",
+    "sysfs",
+    "devtmpfs",
+    "devpts",
+    "tmpfs",
+    "cgroup",
+    "cgroup2",
+    "debugfs",
+    "tracefs",
+    "securityfs",
+    "pstore",
+    "bpf",
+    "configfs",
+    "efivarfs",
+    "autofs",
+    "mqueue",
+    "hugetlbfs",
+    "fusectl",
+    "binfmt_misc",
+    "rpc_pipefs",
+    "nsfs",
+    "squashfs",
+    "overlay",
+    "ramfs",
 ];
 
 /// A mounted volume (Python `VolumeInfo`).
@@ -259,14 +292,22 @@ mod win {
         VolumeInfo {
             mount_point: root.to_owned(),
             device: root.trim_end_matches('\\').to_owned(),
-            fs_type: if ok { from_wide(&fsname) } else { String::new() },
+            fs_type: if ok {
+                from_wide(&fsname)
+            } else {
+                String::new()
+            },
             label: if ok { from_wide(&label) } else { String::new() },
             total: total as i64,
             free: total_free as i64,
             cluster_size: cluster,
             is_remote: dt == DRIVE_REMOTE,
             is_removable: dt == DRIVE_REMOVABLE || dt == DRIVE_CDROM,
-            serial: if ok { format!("{serial:08X}") } else { String::new() },
+            serial: if ok {
+                format!("{serial:08X}")
+            } else {
+                String::new()
+            },
             ..Default::default()
         }
     }
@@ -299,7 +340,11 @@ mod win {
             if matches!(dt, 0 | 1 | DRIVE_CDROM) {
                 continue; // unknown, no root, CD-ROM
             }
-            let remote = if dt == DRIVE_REMOTE { remote_path(&root) } else { String::new() };
+            let remote = if dt == DRIVE_REMOTE {
+                remote_path(&root)
+            } else {
+                String::new()
+            };
             let mut vol = match volume(Path::new(&root)) {
                 Ok(v) => v,
                 Err(e) => {
@@ -356,7 +401,9 @@ fn unescape_octal(s: &str) -> String {
             && i + 4 <= b.len()
             && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
         {
-            let v = (b[i + 1] - b'0') as u32 * 64 + (b[i + 2] - b'0') as u32 * 8 + (b[i + 3] - b'0') as u32;
+            let v = (b[i + 1] - b'0') as u32 * 64
+                + (b[i + 2] - b'0') as u32 * 8
+                + (b[i + 3] - b'0') as u32;
             out.push(v as u8);
             i += 4;
         } else {
@@ -401,13 +448,24 @@ pub fn in_wsl() -> bool {
     *WSL.get_or_init(|| {
         cfg!(target_os = "linux")
             && std::fs::read("/proc/sys/kernel/osrelease")
-                .map(|b| String::from_utf8_lossy(&b).to_lowercase().contains("microsoft"))
+                .map(|b| {
+                    String::from_utf8_lossy(&b)
+                        .to_lowercase()
+                        .contains("microsoft")
+                })
                 .unwrap_or(false)
     })
 }
 
 /// WSL plumbing mounted into every distribution: never a scan target.
-const WSL_HIDDEN: &[&str] = &["/mnt/wsl", "/mnt/wslg", "/usr/lib/wsl", "/usr/lib/modules", "/Docker/", "/init"];
+const WSL_HIDDEN: &[&str] = &[
+    "/mnt/wsl",
+    "/mnt/wslg",
+    "/usr/lib/wsl",
+    "/usr/lib/modules",
+    "/Docker/",
+    "/init",
+];
 
 /// `C:` for a Windows drive mounted into WSL over 9P (DrvFs), else "".
 pub fn wsl_drive(m: &Mount) -> String {
@@ -460,7 +518,11 @@ pub fn volume_from_statvfs(
         mount_point: mount_point.to_owned(),
         device: source.to_owned(),
         fs_type: fs_type.to_owned(),
-        label: if label.is_empty() { mount_point.to_owned() } else { label.to_owned() },
+        label: if label.is_empty() {
+            mount_point.to_owned()
+        } else {
+            label.to_owned()
+        },
         total: st.blocks as i64 * frsize,
         free: st.bavail as i64 * frsize,
         reserved: st.bfree.saturating_sub(st.bavail) as i64 * frsize,
@@ -470,7 +532,11 @@ pub fn volume_from_statvfs(
             .iter()
             .any(|p| mount_point.starts_with(p)),
         dev,
-        remote_path: if remote { source.to_owned() } else { String::new() },
+        remote_path: if remote {
+            source.to_owned()
+        } else {
+            String::new()
+        },
         ..Default::default()
     }
 }
@@ -539,7 +605,14 @@ mod posix {
     ) -> io::Result<VolumeInfo> {
         let st = statvfs(path)?;
         let dev = std::fs::metadata(path)?.dev();
-        Ok(volume_from_statvfs(st, dev, mount_point, fs_type, source, remote))
+        Ok(volume_from_statvfs(
+            st,
+            dev,
+            mount_point,
+            fs_type,
+            source,
+            remote,
+        ))
     }
 
     pub(super) fn mount_point_by_dev(path: &Path) -> io::Result<String> {
@@ -586,7 +659,9 @@ mod linux {
                 || real_s.starts_with(&format!("{}/", m.mount_point.trim_end_matches('/')));
             if same
                 && inside
-                && best.as_ref().is_none_or(|b| m.mount_point.len() > b.mount_point.len())
+                && best
+                    .as_ref()
+                    .is_none_or(|b| m.mount_point.len() > b.mount_point.len())
             {
                 best = Some(m);
             }
@@ -598,7 +673,8 @@ mod linux {
             }
             Some(m) => {
                 let remote = NETWORK_FS.contains(&m.fs_type.as_str());
-                let vol = posix::from_statvfs(&real, &m.mount_point, &m.fs_type, &m.source, remote)?;
+                let vol =
+                    posix::from_statvfs(&real, &m.mount_point, &m.fs_type, &m.source, remote)?;
                 Ok(wsl_marked(&m, vol, in_wsl()))
             }
         }
@@ -635,7 +711,9 @@ mod darwin {
 
     fn cstr(b: &[libc::c_char]) -> String {
         // SAFETY: fixed arrays the kernel NUL-terminates.
-        unsafe { CStr::from_ptr(b.as_ptr()) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(b.as_ptr()) }
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// (fs type, mount point, source, is_local) via statfs(2).
@@ -668,7 +746,10 @@ mod darwin {
             let bytes = (cap * std::mem::size_of::<libc::statfs>()) as libc::c_int;
             let got = unsafe { libc::getfsstat(buf.as_mut_ptr(), bytes, MNT_NOWAIT) };
             if got >= 0 && (got as usize) < cap {
-                return buf[..got as usize].iter().map(|s| cstr(&s.f_mntonname)).collect();
+                return buf[..got as usize]
+                    .iter()
+                    .map(|s| cstr(&s.f_mntonname))
+                    .collect();
             }
         }
         Vec::new()
@@ -686,7 +767,11 @@ mod darwin {
     }
 
     pub(super) fn list() -> Vec<VolumeInfo> {
-        let mut paths = vec![if Path::new(DARWIN_DATA).is_dir() { DARWIN_DATA.to_owned() } else { "/".to_owned() }];
+        let mut paths = vec![if Path::new(DARWIN_DATA).is_dir() {
+            DARWIN_DATA.to_owned()
+        } else {
+            "/".to_owned()
+        }];
         if let Ok(rd) = std::fs::read_dir("/Volumes") {
             let mut names: Vec<String> = rd
                 .flatten()
@@ -699,7 +784,9 @@ mod darwin {
         let mut out = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for p in paths {
-            let Ok(v) = volume(Path::new(&p)) else { continue };
+            let Ok(v) = volume(Path::new(&p)) else {
+                continue;
+            };
             if seen.insert(v.mount_point.clone()) {
                 out.push(v);
             }
@@ -714,7 +801,9 @@ pub fn volume_group_twins(root: &str) -> Vec<String> {
     #[cfg(target_os = "macos")]
     {
         use std::os::unix::fs::MetadataExt;
-        volume_group_twins_in(root, &darwin::mounts(), |p| std::fs::metadata(p).map(|m| m.dev()))
+        volume_group_twins_in(root, &darwin::mounts(), |p| {
+            std::fs::metadata(p).map(|m| m.dev())
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -731,7 +820,11 @@ pub fn volume_group_twins_in(
 ) -> Vec<String> {
     let norm = |m: &str| {
         let t = m.trim_end_matches('/');
-        if t.is_empty() { "/".to_owned() } else { t.to_owned() }
+        if t.is_empty() {
+            "/".to_owned()
+        } else {
+            t.to_owned()
+        }
     };
     let mut points: Vec<String> = mounts.iter().map(|m| norm(m)).collect();
     points.sort();
@@ -740,8 +833,14 @@ pub fn volume_group_twins_in(
     if !points.contains(&base) {
         return Vec::new();
     }
-    let Ok(dev) = dev_of(&base) else { return Vec::new() };
-    let prefix = if base == "/" { base.clone() } else { format!("{base}/") };
+    let Ok(dev) = dev_of(&base) else {
+        return Vec::new();
+    };
+    let prefix = if base == "/" {
+        base.clone()
+    } else {
+        format!("{base}/")
+    };
     points
         .into_iter()
         .filter(|p| *p != base && p.starts_with(&prefix))
@@ -777,7 +876,11 @@ pub fn darwin_firmlinks() -> &'static [(String, String)] {
 
 /// A path inside a volume-group twin as the firmlinks show it under "/"
 /// (/System/Volumes/Data/Users/x → /Users/x); None when no firmlink leads there.
-pub fn through_firmlinks(path: &str, twin: &str, firmlinks: Option<&[(String, String)]>) -> Option<String> {
+pub fn through_firmlinks(
+    path: &str,
+    twin: &str,
+    firmlinks: Option<&[(String, String)]>,
+) -> Option<String> {
     let rel = path.get(twin.len()..)?.trim_matches('/');
     let links = firmlinks.unwrap_or_else(|| darwin_firmlinks());
     for (source, target) in links {
@@ -824,10 +927,17 @@ mod tests {
 
     #[test]
     fn volume_group_twins_are_mounts_below_a_root_with_its_device() {
-        let mounts: Vec<String> = ["/", "/dev", "/System/Volumes/VM", "/System/Volumes/Preboot", "/System/Volumes/Data", "/Volumes/USB"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let mounts: Vec<String> = [
+            "/",
+            "/dev",
+            "/System/Volumes/VM",
+            "/System/Volumes/Preboot",
+            "/System/Volumes/Data",
+            "/Volumes/USB",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
         let dev = |p: &str| -> io::Result<u64> {
             Ok(match p {
                 "/" | "/System/Volumes/Data" => 21,
@@ -838,7 +948,10 @@ mod tests {
                 _ => return Err(io::ErrorKind::NotFound.into()),
             })
         };
-        assert_eq!(volume_group_twins_in("/", &mounts, dev), vec!["/System/Volumes/Data"]);
+        assert_eq!(
+            volume_group_twins_in("/", &mounts, dev),
+            vec!["/System/Volumes/Data"]
+        );
         assert!(volume_group_twins_in("/System/Volumes/Data", &mounts, dev).is_empty());
         assert!(volume_group_twins_in("/System", &mounts, dev).is_empty());
         assert!(volume_group_twins_in("/Volumes/USB", &mounts, dev).is_empty());
@@ -852,10 +965,16 @@ mod tests {
         let data = "/System/Volumes/Data";
         let l = Some(links.as_slice());
         let f = |p: &str| through_firmlinks(&format!("{data}{p}"), data, l);
-        assert_eq!(f("/Users/lenny/Documents/a.txt").as_deref(), Some("/Users/lenny/Documents/a.txt"));
+        assert_eq!(
+            f("/Users/lenny/Documents/a.txt").as_deref(),
+            Some("/Users/lenny/Documents/a.txt")
+        );
         assert_eq!(f("/Users").as_deref(), Some("/Users"));
         assert_eq!(f("/usr/local/bin/x").as_deref(), Some("/usr/local/bin/x"));
-        assert_eq!(f("/System/Library/Caches/c").as_deref(), Some("/System/Library/Caches/c"));
+        assert_eq!(
+            f("/System/Library/Caches/c").as_deref(),
+            Some("/System/Library/Caches/c")
+        );
         assert_eq!(f("/.Spotlight-V100/x"), None);
         assert_eq!(f("/UsersX/y"), None);
     }
@@ -863,7 +982,13 @@ mod tests {
     // ------------------------------------------------------------- test_volume_wsl
 
     fn mount(point: &str, fs: &str, source: &str, minor: u32) -> Mount {
-        Mount { mount_point: point.into(), fs_type: fs.into(), source: source.into(), major: 0, minor }
+        Mount {
+            mount_point: point.into(),
+            fs_type: fs.into(),
+            source: source.into(),
+            major: 0,
+            minor,
+        }
     }
 
     fn mounts() -> Vec<Mount> {
@@ -871,10 +996,20 @@ mod tests {
             mount("/", "ext4", "/dev/sdf", 1),
             mount("/mnt/c", "9p", "C:\\", 2),
             mount("/mnt/d", "9p", "D:\\", 3),
-            mount("/Docker/host", "9p", "C:\\Program Files\\Docker\\Docker\\resources", 4),
+            mount(
+                "/Docker/host",
+                "9p",
+                "C:\\Program Files\\Docker\\Docker\\resources",
+                4,
+            ),
             mount("/usr/lib/wsl/drivers", "9p", "drivers", 5),
             mount("/mnt/wslg/distro", "ext4", "/dev/sdf", 6),
-            mount("/mnt/wsl/docker-desktop/cli-tools", "iso9660", "/dev/loop0", 7),
+            mount(
+                "/mnt/wsl/docker-desktop/cli-tools",
+                "iso9660",
+                "/dev/loop0",
+                7,
+            ),
             mount("/srv/share", "nfs4", "nas:/export", 8),
         ]
     }
@@ -890,7 +1025,11 @@ mod tests {
             free: 50,
             cluster_size: 4096,
             is_remote: remote,
-            remote_path: if remote { m.source.clone() } else { String::new() },
+            remote_path: if remote {
+                m.source.clone()
+            } else {
+                String::new()
+            },
             ..Default::default()
         })
     }
@@ -903,12 +1042,22 @@ mod tests {
             let points: std::collections::HashSet<&str> =
                 listed.iter().map(|v| v.mount_point.as_str()).collect();
             if wsl {
-                assert_eq!(points, ["/", "/mnt/c", "/mnt/d", "/srv/share"].into_iter().collect());
+                assert_eq!(
+                    points,
+                    ["/", "/mnt/c", "/mnt/d", "/srv/share"]
+                        .into_iter()
+                        .collect()
+                );
                 let c = listed.iter().find(|v| v.mount_point == "/mnt/c").unwrap();
                 assert_eq!(c.label, tr(TEXT_WSL_LABEL).replace("{drive}", "C:"));
                 assert_eq!(c.note, tr(WSL_DRIVE_NOTE));
                 assert!(c.is_remote && c.remote_path.is_empty());
-                assert!(listed.iter().filter(|v| !v.mount_point.starts_with("/mnt/")).all(|v| v.note.is_empty()));
+                assert!(
+                    listed
+                        .iter()
+                        .filter(|v| !v.mount_point.starts_with("/mnt/"))
+                        .all(|v| v.note.is_empty())
+                );
             } else {
                 assert!(points.contains("/Docker/host") && points.contains("/mnt/wslg/distro"));
                 assert!(listed.iter().all(|v| v.note.is_empty()));
@@ -926,9 +1075,18 @@ mod tests {
 
     #[test]
     fn root_reserved_blocks_are_neither_used_nor_free() {
-        let st = StatVfs { frsize: 4096, bsize: 4096, blocks: 1000, bfree: 800, bavail: 750 };
+        let st = StatVfs {
+            frsize: 4096,
+            bsize: 4096,
+            blocks: 1000,
+            bfree: 800,
+            bavail: 750,
+        };
         let v = volume_from_statvfs(st, 1, "/", "ext4", "/dev/sda1", false);
-        assert_eq!((v.total, v.free, v.reserved, v.used()), (1000 * 4096, 750 * 4096, 50 * 4096, 200 * 4096));
+        assert_eq!(
+            (v.total, v.free, v.reserved, v.used()),
+            (1000 * 4096, 750 * 4096, 50 * 4096, 200 * 4096)
+        );
     }
 
     #[test]

@@ -75,7 +75,9 @@ impl DiskRef {
     }
 
     fn network(remote: &str, mount: &str) -> Self {
-        Self::new(format!("net:{remote}"), DiskKind::Network).with_media(Media::Network).with_mount(mount)
+        Self::new(format!("net:{remote}"), DiskKind::Network)
+            .with_media(Media::Network)
+            .with_mount(mount)
     }
 
     fn volume(mount: &str) -> Self {
@@ -103,7 +105,9 @@ mod win {
     use std::sync::{LazyLock, Mutex};
 
     use windows_sys::Win32::NetworkManagement::WNet::WNetGetConnectionW;
-    use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives, GetVolumePathNameW};
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetDriveTypeW, GetLogicalDrives, GetVolumePathNameW,
+    };
 
     use super::*;
     use crate::disks::windows::{IOCTL_STORAGE_GET_DEVICE_NUMBER, device_extents, volume_name};
@@ -121,7 +125,9 @@ mod win {
         if !out.is_empty() {
             return out;
         }
-        let Some(h) = Handle::open(device, 0, 3, 0) else { return out };
+        let Some(h) = Handle::open(device, 0, 3, 0) else {
+            return out;
+        };
         if let Ok(raw) = h.ioctl(IOCTL_STORAGE_GET_DEVICE_NUMBER, &[], 12)
             && raw.len() >= 12
             && u32::from_le_bytes(raw[0..4].try_into().expect("4 bytes")) == 7
@@ -140,7 +146,11 @@ mod win {
             return None;
         }
         let r = from_wide(&buf);
-        Some(if r.ends_with('\\') { r } else { format!("{r}\\") })
+        Some(if r.ends_with('\\') {
+            r
+        } else {
+            format!("{r}\\")
+        })
     }
 
     fn remote(root: &str) -> String {
@@ -183,12 +193,17 @@ mod win {
             // DRIVE_REMOTE
             return DiskRef::network(&remote(root), root);
         }
-        let device = volume_name(root).unwrap_or_else(|| format!("\\\\.\\{}", &root[..2.min(root.len())]));
+        let device =
+            volume_name(root).unwrap_or_else(|| format!("\\\\.\\{}", &root[..2.min(root.len())]));
         let numbers = disk_numbers(&device);
         let Some(&number) = numbers.first() else {
             return DiskRef::volume(root);
         };
-        let media = if root.len() == 3 { media_of(root, root.trim_end_matches('\\'), false) } else { Media::Unknown };
+        let media = if root.len() == 3 {
+            media_of(root, root.trim_end_matches('\\'), false)
+        } else {
+            Media::Unknown
+        };
         DiskRef {
             number: Some(number),
             media,
@@ -233,7 +248,11 @@ pub fn linux_whole_disk(sys_path: &Path, root: &Path) -> Option<String> {
         }
         let slaves = path.join("slaves");
         let mut inner: Vec<String> = std::fs::read_dir(&slaves)
-            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
             .unwrap_or_default();
         inner.sort();
         if let Some(first) = inner.first() {
@@ -252,14 +271,21 @@ pub fn linux_whole_disk(sys_path: &Path, root: &Path) -> Option<String> {
 pub fn linux_physical_disks(root: &Path) -> Vec<String> {
     let base = root.join("block");
     let mut names: Vec<String> = std::fs::read_dir(&base)
-        .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
         .unwrap_or_default();
     names.sort();
     names
         .into_iter()
         .filter(|n| {
             let real = std::fs::canonicalize(base.join(n)).unwrap_or_else(|_| base.join(n));
-            !real.to_string_lossy().replace('\\', "/").contains("/devices/virtual/")
+            !real
+                .to_string_lossy()
+                .replace('\\', "/")
+                .contains("/devices/virtual/")
         })
         .collect()
 }
@@ -270,7 +296,10 @@ pub fn unescape_octal(s: &str) -> String {
     let mut out = Vec::with_capacity(b.len());
     let mut i = 0;
     while i < b.len() {
-        if b[i] == b'\\' && i + 3 < b.len() && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c)) {
+        if b[i] == b'\\'
+            && i + 3 < b.len()
+            && b[i + 1..i + 4].iter().all(|c| (b'0'..=b'7').contains(c))
+        {
             out.push(((b[i + 1] - b'0') << 6) | ((b[i + 2] - b'0') << 3) | (b[i + 3] - b'0'));
             i += 4;
         } else {
@@ -294,7 +323,12 @@ mod linux {
         let dev = std::fs::metadata(path)?.dev();
         let (major, minor) = (libc::major(dev), libc::minor(dev));
         let mut name = if major != 0 {
-            linux_whole_disk(&Path::new(SYS).join("dev/block").join(format!("{major}:{minor}")), Path::new(SYS))
+            linux_whole_disk(
+                &Path::new(SYS)
+                    .join("dev/block")
+                    .join(format!("{major}:{minor}")),
+                Path::new(SYS),
+            )
         } else {
             None
         };
@@ -303,13 +337,24 @@ mod linux {
             // btrfs / overlay / network: anonymous st_dev, go through the mount source
             let v = crate::volume::volume_for(path)?;
             if v.is_remote {
-                let remote = if v.remote_path.is_empty() { &v.mount_point } else { &v.remote_path };
+                let remote = if v.remote_path.is_empty() {
+                    &v.mount_point
+                } else {
+                    &v.remote_path
+                };
                 return Ok(DiskRef::network(&unescape_octal(remote), ""));
             }
             if v.device.starts_with("/dev/") {
-                let real = std::fs::canonicalize(&v.device).unwrap_or_else(|_| PathBuf::from(&v.device));
-                let dev = real.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                name = linux_whole_disk(&Path::new(SYS).join("class/block").join(dev), Path::new(SYS));
+                let real =
+                    std::fs::canonicalize(&v.device).unwrap_or_else(|_| PathBuf::from(&v.device));
+                let dev = real
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                name = linux_whole_disk(
+                    &Path::new(SYS).join("class/block").join(dev),
+                    Path::new(SYS),
+                );
             }
             vol = Some(v);
         }
@@ -320,13 +365,19 @@ mod linux {
             };
             return Ok(DiskRef::volume(&v.mount_point));
         };
-        Ok(DiskRef::physical(name.clone()).with_media(media_of("", &format!("/dev/{name}"), false)).with_name(name))
+        Ok(DiskRef::physical(name.clone())
+            .with_media(media_of("", &format!("/dev/{name}"), false))
+            .with_name(name))
     }
 
     pub fn local() -> Vec<DiskRef> {
         linux_physical_disks(Path::new(SYS))
             .into_iter()
-            .map(|n| DiskRef::physical(n.clone()).with_media(media_of("", &format!("/dev/{n}"), false)).with_name(n))
+            .map(|n| {
+                DiskRef::physical(n.clone())
+                    .with_media(media_of("", &format!("/dev/{n}"), false))
+                    .with_name(n)
+            })
             .collect()
     }
 }
@@ -348,17 +399,28 @@ pub fn darwin_whole_disk(info: &Value, lookup: &dyn Fn(&str) -> Value) -> Option
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
     {
-        if let Some(parent) = lookup(store).get("ParentWholeDisk").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        if let Some(parent) = lookup(store)
+            .get("ParentWholeDisk")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+        {
             return Some(parent.to_owned());
         }
         if let Some(d) = bsd(store) {
             return Some(d);
         }
     }
-    if let Some(parent) = info.get("ParentWholeDisk").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+    if let Some(parent) = info
+        .get("ParentWholeDisk")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+    {
         return Some(parent.to_owned());
     }
-    bsd(info.get("DeviceIdentifier").and_then(Value::as_str).unwrap_or(""))
+    bsd(info
+        .get("DeviceIdentifier")
+        .and_then(Value::as_str)
+        .unwrap_or(""))
 }
 
 #[cfg(target_os = "macos")]
@@ -382,13 +444,21 @@ mod darwin {
             return r.clone();
         }
         let r = if remote {
-            DiskRef::network(if remote_path.is_empty() { mount } else { remote_path }, mount)
+            DiskRef::network(
+                if remote_path.is_empty() {
+                    mount
+                } else {
+                    remote_path
+                },
+                mount,
+            )
         } else {
             match darwin_whole_disk(&diskutil(mount), &diskutil) {
                 None => DiskRef::volume(mount),
-                Some(name) => {
-                    DiskRef::physical(name.clone()).with_name(name).with_media(media_of(mount, "", false)).with_mount(mount)
-                }
+                Some(name) => DiskRef::physical(name.clone())
+                    .with_name(name)
+                    .with_media(media_of(mount, "", false))
+                    .with_mount(mount),
             }
         };
         let mut cache = CACHE.lock().expect("cache");
@@ -449,7 +519,10 @@ pub fn disk_ref_for_path(path: &Path) -> DiskRef {
         }
     };
     // a probe must never break a scan
-    std::panic::catch_unwind(run).ok().flatten().unwrap_or_else(fallback)
+    std::panic::catch_unwind(run)
+        .ok()
+        .flatten()
+        .unwrap_or_else(fallback)
 }
 
 #[cfg(unix)]
@@ -493,7 +566,10 @@ mod tests {
         let here = std::env::current_dir().unwrap();
         let r = disk_ref_for_path(&here);
         if cfg!(windows) {
-            assert!(r.id.starts_with("PhysicalDrive") && r.number.is_some(), "{r:?}");
+            assert!(
+                r.id.starts_with("PhysicalDrive") && r.number.is_some(),
+                "{r:?}"
+            );
             assert_eq!(r.id, format!("PhysicalDrive{}", r.number.unwrap()));
             let system = std::env::var("SYSTEMDRIVE").unwrap_or_else(|_| "C:".into());
             assert!(disk_for_path(Path::new(&format!("{system}\\"))).starts_with("PhysicalDrive"));
@@ -502,12 +578,21 @@ mod tests {
             return; // no block device behind the checkout (overlay / tmpfs)
         }
         assert!(r.sampled());
-        assert!(cfg!(target_os = "macos") || local_disks().iter().any(|d| d.id == r.id), "{r:?}");
+        assert!(
+            cfg!(target_os = "macos") || local_disks().iter().any(|d| d.id == r.id),
+            "{r:?}"
+        );
     }
 
     #[test]
     fn mapping_never_fails() {
-        let r = disk_ref_for_path(&std::env::current_dir().unwrap().join("no").join("such").join("dir"));
+        let r = disk_ref_for_path(
+            &std::env::current_dir()
+                .unwrap()
+                .join("no")
+                .join("such")
+                .join("dir"),
+        );
         assert!(!r.id.is_empty()); // resolved through the existing part of the path, or a vol: stand-in
     }
 
@@ -515,7 +600,10 @@ mod tests {
     #[test]
     fn unc_roots_are_network_disks() {
         let r = win_ref_for_root("\\\\nas\\share\\"); // decided from the path alone, no network access
-        assert!(r.kind == DiskKind::Network && r.id == "net:\\\\nas\\share" && !r.sampled(), "{r:?}");
+        assert!(
+            r.kind == DiskKind::Network && r.id == "net:\\\\nas\\share" && !r.sampled(),
+            "{r:?}"
+        );
     }
 
     #[cfg(unix)]
@@ -535,9 +623,18 @@ mod tests {
         symlink(&nvme, classes.join("nvme0n1")).unwrap();
         symlink(&dm, classes.join("dm-0")).unwrap();
         symlink(classes.join("nvme0n1p2"), dm.join("slaves/nvme0n1p2")).unwrap();
-        assert_eq!(linux_whole_disk(&classes.join("nvme0n1p2"), &sysfs).as_deref(), Some("nvme0n1")); // partition → disk
-        assert_eq!(linux_whole_disk(&classes.join("nvme0n1"), &sysfs).as_deref(), Some("nvme0n1"));
-        assert_eq!(linux_whole_disk(&classes.join("dm-0"), &sysfs).as_deref(), Some("nvme0n1")); // LVM / LUKS
+        assert_eq!(
+            linux_whole_disk(&classes.join("nvme0n1p2"), &sysfs).as_deref(),
+            Some("nvme0n1")
+        ); // partition → disk
+        assert_eq!(
+            linux_whole_disk(&classes.join("nvme0n1"), &sysfs).as_deref(),
+            Some("nvme0n1")
+        );
+        assert_eq!(
+            linux_whole_disk(&classes.join("dm-0"), &sysfs).as_deref(),
+            Some("nvme0n1")
+        ); // LVM / LUKS
         assert_eq!(linux_whole_disk(&classes.join("missing"), &sysfs), None);
     }
 
@@ -557,8 +654,18 @@ mod tests {
         let apfs = json!({"DeviceIdentifier": "disk3s1s1", "APFSPhysicalStores": [{"APFSPhysicalStore": "disk0s2"}]});
         assert_eq!(darwin_whole_disk(&apfs, &lookup).as_deref(), Some("disk0"));
         let none = |_: &str| json!({});
-        assert_eq!(darwin_whole_disk(&json!({"DeviceIdentifier": "disk4s1", "ParentWholeDisk": "disk4"}), &none).as_deref(), Some("disk4"));
-        assert_eq!(darwin_whole_disk(&json!({"DeviceIdentifier": "disk5s2"}), &none).as_deref(), Some("disk5"));
+        assert_eq!(
+            darwin_whole_disk(
+                &json!({"DeviceIdentifier": "disk4s1", "ParentWholeDisk": "disk4"}),
+                &none
+            )
+            .as_deref(),
+            Some("disk4")
+        );
+        assert_eq!(
+            darwin_whole_disk(&json!({"DeviceIdentifier": "disk5s2"}), &none).as_deref(),
+            Some("disk5")
+        );
         assert_eq!(darwin_whole_disk(&json!({}), &none), None);
     }
 

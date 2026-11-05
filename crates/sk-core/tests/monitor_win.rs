@@ -28,7 +28,13 @@ impl Collector {
         })
     }
     fn changes(&self) -> Vec<Change> {
-        self.batches.lock().unwrap().iter().flatten().cloned().collect()
+        self.batches
+            .lock()
+            .unwrap()
+            .iter()
+            .flatten()
+            .cloned()
+            .collect()
     }
     fn wait_for(&self, pred: impl Fn(&Change) -> bool) -> Change {
         let end = Instant::now() + TIMEOUT;
@@ -38,7 +44,11 @@ impl Collector {
                 return c.clone();
             }
             let left = end.saturating_duration_since(Instant::now());
-            assert!(!left.is_zero(), "no matching change; got {:?}", g.iter().flatten().collect::<Vec<_>>());
+            assert!(
+                !left.is_zero(),
+                "no matching change; got {:?}",
+                g.iter().flatten().collect::<Vec<_>>()
+            );
             g = self.cv.wait_timeout(g, left).unwrap().0;
         }
     }
@@ -77,7 +87,10 @@ fn file_lifecycle() {
     let (w, sink) = start(&root, None);
     let p = root.join("a.txt");
     std::fs::write(&p, b"x").unwrap();
-    assert_eq!(sink.wait_for(is(ChangeKind::Created, &p)).is_dir, Some(false));
+    assert_eq!(
+        sink.wait_for(is(ChangeKind::Created, &p)).is_dir,
+        Some(false)
+    );
     {
         use std::io::Write;
         let mut f = std::fs::OpenOptions::new().append(true).open(&p).unwrap();
@@ -86,18 +99,36 @@ fn file_lifecycle() {
     let m = sink.wait_for(|c| is(ChangeKind::Modified, &p)(c) && c.size == Some(5001));
     assert_eq!(m.is_dir, Some(false));
     assert!(m.alloc.unwrap() >= 5001);
-    let mtime = std::fs::metadata(&p).unwrap().modified().unwrap().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let mtime = std::fs::metadata(&p)
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
     assert!((m.mtime.unwrap() - mtime).abs() <= 2);
     let q = root.join("b.txt");
     std::fs::rename(&p, &q).unwrap();
     let r = sink.wait_for(is(ChangeKind::Renamed, &q));
     assert_eq!((r.old_path, r.is_dir), (Some(p.clone()), Some(false)));
     std::fs::remove_file(&q).unwrap();
-    assert_eq!(sink.wait_for(is(ChangeKind::Deleted, &q)).is_dir, Some(false));
+    assert_eq!(
+        sink.wait_for(is(ChangeKind::Deleted, &q)).is_dir,
+        Some(false)
+    );
     let st = w.status();
-    assert_eq!((st.state, st.detail.as_str(), st.watched_dirs, st.overflows), (WatchState::Running, "", -1, 0));
+    assert_eq!(
+        (st.state, st.detail.as_str(), st.watched_dirs, st.overflows),
+        (WatchState::Running, "", -1, 0)
+    );
     assert!(st.events as usize == sink.changes().len() && st.events >= 4);
-    assert!(!sink.threads.lock().unwrap().contains(&std::thread::current().id()));
+    assert!(
+        !sink
+            .threads
+            .lock()
+            .unwrap()
+            .contains(&std::thread::current().id())
+    );
     assert!(sink.changes().iter().all(|c| c.path.starts_with(&root)));
     w.stop();
 }
@@ -108,7 +139,10 @@ fn folders() {
     let (w, sink) = start(&root, None);
     let d = root.join("d");
     std::fs::create_dir(&d).unwrap();
-    assert_eq!(sink.wait_for(is(ChangeKind::Created, &d)).is_dir, Some(true));
+    assert_eq!(
+        sink.wait_for(is(ChangeKind::Created, &d)).is_dir,
+        Some(true)
+    );
     std::fs::write(d.join("c.bin"), b"").unwrap();
     sink.wait_for(is(ChangeKind::Created, &d.join("c.bin")));
     let e = root.join("e");
@@ -117,7 +151,12 @@ fn folders() {
     assert_eq!((r.old_path, r.is_dir), (Some(d.clone()), Some(true)));
     std::fs::write(e.join("c.bin"), [b'z'; 10]).unwrap();
     sink.wait_for(|c| is(ChangeKind::Modified, &e.join("c.bin"))(c) && c.size == Some(10));
-    assert!(sink.changes().iter().filter(|c| c.kind == ChangeKind::Modified).all(|c| c.is_dir == Some(false)));
+    assert!(
+        sink.changes()
+            .iter()
+            .filter(|c| c.kind == ChangeKind::Modified)
+            .all(|c| c.is_dir == Some(false))
+    );
     w.stop();
 }
 
@@ -234,7 +273,14 @@ fn deleted_root_fails() {
     std::fs::remove_dir_all(&root).unwrap();
     sink.wait_for(is(ChangeKind::Overflow, &root));
     let st = w.status();
-    assert_eq!((st.state, st.detail.as_str(), st.watched_dirs), (WatchState::Failed, sk_core::i18n::t("监视的文件夹已被删除"), 0));
+    assert_eq!(
+        (st.state, st.detail.as_str(), st.watched_dirs),
+        (
+            WatchState::Failed,
+            sk_core::i18n::t("监视的文件夹已被删除"),
+            0
+        )
+    );
     assert_eq!(st.overflows, 1);
     wait_until(|| w.finished());
     w.stop();
@@ -248,7 +294,13 @@ fn moved_root_fails() {
     std::fs::rename(&root, t.path().join("moved")).unwrap();
     sink.wait_for(is(ChangeKind::Overflow, &root));
     let st = w.status();
-    assert_eq!((st.state, st.detail.as_str()), (WatchState::Failed, sk_core::i18n::t("监视的文件夹已被移动或改名")));
+    assert_eq!(
+        (st.state, st.detail.as_str()),
+        (
+            WatchState::Failed,
+            sk_core::i18n::t("监视的文件夹已被移动或改名")
+        )
+    );
     w.stop();
 }
 
@@ -270,11 +322,15 @@ fn missing_root_fails_without_overflow() {
 fn plain_call_fallback() {
     let (_t, root) = rooted();
     let w = RdcwWatcher::new(&root, None);
-    w.use_extended.store(false, std::sync::atomic::Ordering::SeqCst);
+    w.use_extended
+        .store(false, std::sync::atomic::Ordering::SeqCst);
     let c = Arc::new(Collector::default());
     w.start(c.sink()).unwrap();
     wait_until(|| w.status().state == WatchState::Running);
-    assert_eq!(w.status().detail, sk_core::i18n::t("此卷不提供扩展变化信息，文件大小变化需重新列出目录"));
+    assert_eq!(
+        w.status().detail,
+        sk_core::i18n::t("此卷不提供扩展变化信息，文件大小变化需重新列出目录")
+    );
     let p = root.join("a.txt");
     std::fs::write(&p, b"x").unwrap();
     assert_eq!(c.wait_for(is(ChangeKind::Created, &p)).is_dir, None);
@@ -284,7 +340,10 @@ fn plain_call_fallback() {
         f.write_all(&[b'y'; 100]).unwrap();
     }
     let m = c.wait_for(is(ChangeKind::Modified, &p));
-    assert_eq!((m.size, m.alloc, m.mtime, m.is_dir), (None, None, None, None));
+    assert_eq!(
+        (m.size, m.alloc, m.mtime, m.is_dir),
+        (None, None, None, None)
+    );
     let q = root.join("b.txt");
     std::fs::rename(&p, &q).unwrap();
     assert_eq!(c.wait_for(is(ChangeKind::Renamed, &q)).old_path, Some(p));

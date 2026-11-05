@@ -33,7 +33,8 @@ use super::rich::{Column, Console, MUTED, Style, Table, Text, WARN};
 
 /// User-facing texts of this module (Chinese source text; translated when shown).
 pub mod text {
-    pub const UNKNOWN: &str = "未知的命令「{word}」（可用：help scan load filter save export autoclose）";
+    pub const UNKNOWN: &str =
+        "未知的命令「{word}」（可用：help scan load filter save export autoclose）";
     pub const INCOMPLETE: &str = "命令 {name} 不完整，写法：{usage}";
     pub const NO_VIEW: &str = "{name} 前面没有 scan 或 load：它要作用于前一个打开的视图";
     pub const UNCLOSED: &str = "参数缺少结尾的分隔符 {delim}";
@@ -46,7 +47,8 @@ pub mod text {
     pub const SCANNED: &str = "已扫描 {paths}：{items} 项，占用 {size}，用时 {time}";
     pub const DENIED: &str = "{count} 个文件夹无法访问，例如 {example}";
     pub const LOAD_FAILED: &str = "无法打开快照 {path}：{reason}";
-    pub const LOAD_SNS: &str = "{path} 看起来是 SpaceSniffer 快照（.sns）：这种格式没有公开，SpaceKnife 读不了";
+    pub const LOAD_SNS: &str =
+        "{path} 看起来是 SpaceSniffer 快照（.sns）：这种格式没有公开，SpaceKnife 读不了";
     pub const LOAD_MANY: &str = "一个 load 只能打开一个快照；要打开多个，请写多个 load";
     pub const LOADED: &str = "已打开快照 {path}：{items} 项，占用 {size}";
     pub const FILTER_FAILED: &str = "过滤表达式有误：{expr}";
@@ -144,7 +146,10 @@ pub struct Command {
 
 impl Command {
     pub fn new(name: &str, args: &[&str]) -> Command {
-        Command { name: name.to_owned(), args: args.iter().map(|a| a.to_string()).collect() }
+        Command {
+            name: name.to_owned(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+        }
     }
 }
 
@@ -315,10 +320,16 @@ pub fn group<S: AsRef<str>>(words: &[S]) -> (Vec<Command>, Vec<String>) {
             continue;
         };
         if words.len() - i - 1 < n {
-            errors.push(f(text::INCOMPLETE, &[("name", s(name.as_str())), ("usage", s(t(usage(&name))))]));
+            errors.push(f(
+                text::INCOMPLETE,
+                &[("name", s(name.as_str())), ("usage", s(t(usage(&name))))],
+            ));
             break;
         }
-        let args = words[i + 1..i + 1 + n].iter().map(|w| w.as_ref().to_owned()).collect();
+        let args = words[i + 1..i + 1 + n]
+            .iter()
+            .map(|w| w.as_ref().to_owned())
+            .collect();
         commands.push(Command { name, args });
         i += 1 + n;
     }
@@ -347,7 +358,11 @@ pub fn parse_command_line<S: AsRef<str>>(tokens: &[S], raw: Option<&str>) -> Par
     }
     let (commands, more) = group(&words);
     errors.extend(more);
-    Parsed { commands, errors, parser }
+    Parsed {
+        commands,
+        errors,
+        parser,
+    }
 }
 
 /// The text after the first bare word `command` of a raw command line, or None.
@@ -431,17 +446,27 @@ pub struct View {
 pub struct CommandFailed(pub String);
 
 fn expanduser(p: &str) -> String {
-    sk_core::paths::expand_user(p).to_string_lossy().into_owned()
+    sk_core::paths::expand_user(p)
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// `a;b` → two paths, unless the whole text names an existing folder (or file) itself.
 fn split_paths(arg: &str, folder: bool) -> Vec<String> {
     let whole = expanduser(arg.trim());
-    let exists = if folder { Path::new(&whole).is_dir() } else { Path::new(&whole).is_file() };
+    let exists = if folder {
+        Path::new(&whole).is_dir()
+    } else {
+        Path::new(&whole).is_file()
+    };
     if exists || !arg.contains(';') {
         return vec![whole];
     }
-    arg.split(';').map(str::trim).filter(|p| !p.is_empty()).map(expanduser).collect()
+    arg.split(';')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .map(expanduser)
+        .collect()
 }
 
 /// `OSError.strerror` as Python's `open()` reports it (the C runtime's errno text).
@@ -509,7 +534,8 @@ impl Runner<'_> {
                 return EXIT_ERROR;
             }
             if super::interrupt::interrupted() {
-                self.err.text(&Text::styled(t(text::INTERRUPTED), Style::YELLOW));
+                self.err
+                    .text(&Text::styled(t(text::INTERRUPTED), Style::YELLOW));
                 return EXIT_INTERRUPTED;
             }
         }
@@ -522,14 +548,27 @@ impl Runner<'_> {
     }
 
     fn view(&mut self) -> &mut View {
-        self.views.last_mut().expect("group() made sure a scan / load came first")
+        self.views
+            .last_mut()
+            .expect("group() made sure a scan / load came first")
     }
 
     fn cmd_scan(&mut self, arg: &str) -> Result<(), CommandFailed> {
         let paths = split_paths(arg, true);
         let threads = SCAN_THREADS.min(sk_core::scan::native_threads());
-        let scanner = Scanner::new(&paths, ScanOptions { concurrency: threads, ..Default::default() })
-            .map_err(|e| CommandFailed(f(text::SCAN_FAILED, &[("paths", s(paths.join("; "))), ("reason", s(e.to_string()))])))?;
+        let scanner = Scanner::new(
+            &paths,
+            ScanOptions {
+                concurrency: threads,
+                ..Default::default()
+            },
+        )
+        .map_err(|e| {
+            CommandFailed(f(
+                text::SCAN_FAILED,
+                &[("paths", s(paths.join("; "))), ("reason", s(e.to_string()))],
+            ))
+        })?;
         super::interrupt::cooperative(true);
         let mut check = |_: &sk_core::scan::ScanProgress| {
             if super::interrupt::interrupted() {
@@ -542,14 +581,20 @@ impl Runner<'_> {
             self.err.blank(); // the empty line rich's Progress.stop() prints on a redirected console
         }
         let infos = scanner.roots();
-        let roots: Vec<String> = infos.iter().map(|r| r.path.to_string_lossy().into_owned()).collect();
+        let roots: Vec<String> = infos
+            .iter()
+            .map(|r| r.path.to_string_lossy().into_owned())
+            .collect();
         if super::interrupt::interrupted() {
             return Ok(());
         }
         if result.state != ScanState::Done {
             return Err(CommandFailed(f(
                 text::SCAN_STOPPED,
-                &[("state", s(result.state.as_str())), ("paths", s(roots.join("; ")))],
+                &[
+                    ("state", s(result.state.as_str())),
+                    ("paths", s(roots.join("; "))),
+                ],
             )));
         }
         self.say(
@@ -570,11 +615,20 @@ impl Runner<'_> {
                 WARN,
                 Some(result.errors),
                 "1 folder couldn't be accessed, e.g. {example}",
-                &[("count", s(result.errors)), ("example", s(result.denied.first().cloned().unwrap_or_default()))],
+                &[
+                    ("count", s(result.errors)),
+                    (
+                        "example",
+                        s(result.denied.first().cloned().unwrap_or_default()),
+                    ),
+                ],
             );
         }
         let iso = |d: Option<sk_protocol::DateTime>| {
-            d.map_or(serde_json::Value::Null, |d| d.to_rfc3339_opts(chrono::SecondsFormat::Micros, false).into())
+            d.map_or(serde_json::Value::Null, |d| {
+                d.to_rfc3339_opts(chrono::SecondsFormat::Micros, false)
+                    .into()
+            })
         };
         let mut stats = serde_json::Map::new();
         for (k, v) in [
@@ -602,7 +656,12 @@ impl Runner<'_> {
         }
         let volumes = infos
             .iter()
-            .map(|r| r.volume.as_ref().and_then(|v| serde_json::to_value(v.to_protocol()).ok()).unwrap_or_else(|| serde_json::json!({})))
+            .map(|r| {
+                r.volume
+                    .as_ref()
+                    .and_then(|v| serde_json::to_value(v.to_protocol()).ok())
+                    .unwrap_or_else(|| serde_json::json!({}))
+            })
             .collect();
         self.views.push(View {
             label: format!("scan {arg}"),
@@ -625,13 +684,22 @@ impl Runner<'_> {
         let path = PathBuf::from(&paths[0]);
         let shown = py_path(&path);
         let (store, header) = snapshot::load(&path).map_err(|e| {
-            let sns = path.extension().is_some_and(|x| x.eq_ignore_ascii_case("sns"));
+            let sns = path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("sns"));
             CommandFailed(match e {
-                snapshot::SnapshotError::Io(io) => {
-                    f(text::LOAD_FAILED, &[("path", s(shown.as_str())), ("reason", s(os_reason(&io)))])
-                }
+                snapshot::SnapshotError::Io(io) => f(
+                    text::LOAD_FAILED,
+                    &[("path", s(shown.as_str())), ("reason", s(os_reason(&io)))],
+                ),
                 _ if sns => f(text::LOAD_SNS, &[("path", s(shown.as_str()))]),
-                other => f(text::LOAD_FAILED, &[("path", s(shown.as_str())), ("reason", s(other.to_string()))]),
+                other => f(
+                    text::LOAD_FAILED,
+                    &[
+                        ("path", s(shown.as_str())),
+                        ("reason", s(other.to_string())),
+                    ],
+                ),
             })
         })?;
         let items = header.node_count as i64 - 1;
@@ -641,7 +709,11 @@ impl Runner<'_> {
             MUTED,
             Some(items),
             "Opened snapshot {path}: 1 item, {size} on disk",
-            &[("path", s(shown.as_str())), ("items", s(fmt::count(items))), ("size", s(fmt::size(total as f64)))],
+            &[
+                ("path", s(shown.as_str())),
+                ("items", s(fmt::count(items))),
+                ("size", s(fmt::size(total as f64))),
+            ],
         );
         self.views.push(View {
             label: format!("load {arg}"),
@@ -659,7 +731,11 @@ impl Runner<'_> {
     fn cmd_filter(&mut self, expr: &str) -> Result<(), CommandFailed> {
         let table = sk_core::classes::active();
         let lang = i18n::language().as_str();
-        let vocab = sk_core::filter::vocab::compiled_vocab(&sk_core::classes::shown(&table), sk_core::classes::version(), lang);
+        let vocab = sk_core::filter::vocab::compiled_vocab(
+            &sk_core::classes::shown(&table),
+            sk_core::classes::version(),
+            lang,
+        );
         let parsed = vocab.parse(expr, None);
         let lines: Vec<String> = parsed
             .diagnostics
@@ -670,7 +746,14 @@ impl Runner<'_> {
                     "" => code.to_owned(),
                     r => t(r).to_owned(),
                 };
-                f(text::FILTER_DIAG, &[("start", s(d.start + 1)), ("text", s(d.text.as_str())), ("reason", s(reason))])
+                f(
+                    text::FILTER_DIAG,
+                    &[
+                        ("start", s(d.start + 1)),
+                        ("text", s(d.text.as_str())),
+                        ("reason", s(reason)),
+                    ],
+                )
             })
             .collect();
         let Some(normal) = parsed.normal else {
@@ -695,7 +778,11 @@ impl Runner<'_> {
             MUTED,
             Some(count),
             "Filter {expr}: 1 file, {size} on disk",
-            &[("expr", s(expr)), ("count", s(fmt::count(count))), ("size", s(fmt::size(alloc as f64)))],
+            &[
+                ("expr", s(expr)),
+                ("count", s(fmt::count(count))),
+                ("size", s(fmt::size(alloc as f64))),
+            ],
         );
         Ok(())
     }
@@ -716,14 +803,30 @@ impl Runner<'_> {
             let r = view.store.read();
             snapshot::save(&r, &path, &opts)
         };
-        let fail = |reason: String| CommandFailed(f(text::SAVE_FAILED, &[("path", s(shown.as_str())), ("reason", s(reason))]));
+        let fail = |reason: String| {
+            CommandFailed(f(
+                text::SAVE_FAILED,
+                &[("path", s(shown.as_str())), ("reason", s(reason))],
+            ))
+        };
         match saved {
             Ok(_) => {}
             Err(snapshot::SnapshotError::Io(e)) => return Err(fail(os_reason(&e))),
             Err(e) => return Err(fail(e.to_string())),
         }
-        let size = std::fs::metadata(&path).map_err(|e| fail(os_reason(&e)))?.len();
-        self.say(text::SAVED, MUTED, None, "", &[("path", s(shown.as_str())), ("size", s(fmt::size(size as f64)))]);
+        let size = std::fs::metadata(&path)
+            .map_err(|e| fail(os_reason(&e)))?
+            .len();
+        self.say(
+            text::SAVED,
+            MUTED,
+            None,
+            "",
+            &[
+                ("path", s(shown.as_str())),
+                ("size", s(fmt::size(size as f64))),
+            ],
+        );
         Ok(())
     }
 
@@ -732,7 +835,11 @@ impl Runner<'_> {
         let what = match &target {
             Target::Format(fmt) => fmt.title(),
             Target::Template(tpl) => {
-                let what = if tpl.name.is_empty() { name.to_owned() } else { tpl.name.clone() };
+                let what = if tpl.name.is_empty() {
+                    name.to_owned()
+                } else {
+                    tpl.name.clone()
+                };
                 let issue = |i: &export::TemplateIssue| {
                     f(
                         text::TEMPLATE_ISSUE,
@@ -763,21 +870,30 @@ impl Runner<'_> {
         let filter_text = view.filter_text.clone();
         let written = {
             let r = view.store.read();
-            export::write_export(&path, target.bom(), |sink| export::export_chunks(&target, &r, 0, mask, &filter_text, sink))
+            export::write_export(&path, target.bom(), |sink| {
+                export::export_chunks(&target, &r, 0, mask, &filter_text, sink)
+            })
         };
         let written = written.map_err(|e| {
             let reason = match e {
                 export::ExportError::Io(io) => os_reason(&io),
                 other => other.to_string(),
             };
-            CommandFailed(f(text::EXPORT_FAILED, &[("path", s(shown.as_str())), ("reason", s(reason))]))
+            CommandFailed(f(
+                text::EXPORT_FAILED,
+                &[("path", s(shown.as_str())), ("reason", s(reason))],
+            ))
         })?;
         self.say(
             text::EXPORTED,
             MUTED,
             None,
             "",
-            &[("what", s(what)), ("path", s(shown.as_str())), ("size", s(fmt::size(written as f64)))],
+            &[
+                ("what", s(what)),
+                ("path", s(shown.as_str())),
+                ("size", s(fmt::size(written as f64))),
+            ],
         );
         Ok(())
     }
@@ -786,19 +902,37 @@ impl Runner<'_> {
 
     fn summary(&mut self, index: usize, at: usize) {
         let view = &self.views[at];
-        self.out.text(&Text::styled(&f(text::VIEW_TITLE, &[("index", s(index)), ("label", s(view.label.as_str()))]), Style::BOLD));
+        self.out.text(&Text::styled(
+            &f(
+                text::VIEW_TITLE,
+                &[("index", s(index)), ("label", s(view.label.as_str()))],
+            ),
+            Style::BOLD,
+        ));
         if !view.filter_text.is_empty() {
-            self.out.text(&Text::styled(&f(text::VIEW_FILTER, &[("expr", s(view.filter_text.as_str()))]), MUTED));
+            self.out.text(&Text::styled(
+                &f(text::VIEW_FILTER, &[("expr", s(view.filter_text.as_str()))]),
+                MUTED,
+            ));
         }
         let r = view.store.read();
-        let order = Ordering { blocks: export::Blocks::Mixed, sort: export::SortKey::Size, descending: true };
+        let order = Ordering {
+            blocks: export::Blocks::Mixed,
+            sort: export::SortKey::Size,
+            descending: true,
+        };
         for root in r.roots() {
-            let Ok(tree) = ExportTree::new(&r, root, view.matched.as_deref(), order, true, None) else { continue };
+            let Ok(tree) = ExportTree::new(&r, root, view.matched.as_deref(), order, true, None)
+            else {
+                continue;
+            };
             let (_, total) = tree.sizes(0);
             let (files, folders) = tree.counts(0);
-            self.out.text(&Text::plain(&export::text_of(&tree.root_path)));
+            self.out
+                .text(&Text::plain(&export::text_of(&tree.root_path)));
             // position -> (node, folder) of the root's children
-            let mut first_level: std::collections::HashMap<u32, (NodeId, bool)> = Default::default();
+            let mut first_level: std::collections::HashMap<u32, (NodeId, bool)> =
+                Default::default();
             let _ = tree.walk(|el| {
                 if el.level == 1 {
                     first_level.insert(el.pos, (el.node, el.is_dir));
@@ -808,10 +942,21 @@ impl Runner<'_> {
             let mut table = Table::new(None, false);
             table
                 .column(Column::new(t(text::COL_NAME)).no_wrap().max(48))
-                .column(Column::new(t(text::COL_DISK)).right().style(Style::BOLD).no_wrap())
+                .column(
+                    Column::new(t(text::COL_DISK))
+                        .right()
+                        .style(Style::BOLD)
+                        .no_wrap(),
+                )
                 .column(Column::new(t(text::COL_SHARE)).right().no_wrap());
             let kids = tree.children(0);
-            let share_of = |a: i64| if total != 0 { a as f64 / total as f64 } else { 0.0 };
+            let share_of = |a: i64| {
+                if total != 0 {
+                    a as f64 / total as f64
+                } else {
+                    0.0
+                }
+            };
             for &pos in kids.iter().take(SUMMARY_ROWS) {
                 let (_, alloc) = tree.sizes(pos);
                 let (node, is_dir) = first_level.get(&pos).copied().unwrap_or((0, false));
@@ -826,8 +971,14 @@ impl Runner<'_> {
                 ]);
             }
             if kids.len() > SUMMARY_ROWS {
-                let rest: i64 = kids[SUMMARY_ROWS..].iter().map(|&p| tree.alloc_key(p)).sum();
-                let label = f(text::REST, &[("count", s(fmt::count((kids.len() - SUMMARY_ROWS) as i64)))]);
+                let rest: i64 = kids[SUMMARY_ROWS..]
+                    .iter()
+                    .map(|&p| tree.alloc_key(p))
+                    .sum();
+                let label = f(
+                    text::REST,
+                    &[("count", s(fmt::count((kids.len() - SUMMARY_ROWS) as i64)))],
+                );
                 table.row(vec![
                     Text::styled(&label, MUTED),
                     Text::plain(&fmt::size(rest as f64)),
@@ -835,10 +986,26 @@ impl Runner<'_> {
                 ]);
             }
             self.out.table(&table);
-            let files_text = i18n::plural(files as i64, text::VIEW_FILES, "1 file", &[("files", s(fmt::count(files as i64)))]);
-            let folders_text =
-                i18n::plural(folders as i64, text::VIEW_FOLDERS, "1 folder", &[("folders", s(fmt::count(folders as i64)))]);
-            let line = f(text::VIEW_TOTAL, &[("files", s(files_text)), ("folders", s(folders_text)), ("size", s(fmt::size(total as f64)))]);
+            let files_text = i18n::plural(
+                files as i64,
+                text::VIEW_FILES,
+                "1 file",
+                &[("files", s(fmt::count(files as i64)))],
+            );
+            let folders_text = i18n::plural(
+                folders as i64,
+                text::VIEW_FOLDERS,
+                "1 folder",
+                &[("folders", s(fmt::count(folders as i64)))],
+            );
+            let line = f(
+                text::VIEW_TOTAL,
+                &[
+                    ("files", s(files_text)),
+                    ("folders", s(folders_text)),
+                    ("size", s(fmt::size(total as f64))),
+                ],
+            );
             self.out.text(&Text::styled(&line, MUTED));
         }
         drop(r);
@@ -850,14 +1017,23 @@ impl Runner<'_> {
 pub fn help_text() -> String {
     let builtins: Vec<&str> = export::BUILTINS.iter().map(|b| b.name).collect();
     let formats: Vec<&str> = export::FORMATS.iter().map(|f| f.key).collect();
-    tr!(text::HELP, builtins = builtins.join(t("、")), formats = formats.join(" / "))
+    tr!(
+        text::HELP,
+        builtins = builtins.join(t("、")),
+        formats = formats.join(" / ")
+    )
 }
 
 /// Run a command sequence; returns the exit code (0, 2 = a command failed, 130 = interrupted).
 ///
 /// `tokens` are the arguments after `run` as the system split them; `raw` the same part of the
 /// raw command line, when known (Windows), which the internal parser then reads instead.
-pub fn main<S: AsRef<str>>(tokens: &[S], raw: Option<&str>, out: &mut Console, err: &mut Console) -> i32 {
+pub fn main<S: AsRef<str>>(
+    tokens: &[S],
+    raw: Option<&str>,
+    out: &mut Console,
+    err: &mut Console,
+) -> i32 {
     if tokens.is_empty() && raw.is_none_or(|r| r.trim().is_empty()) {
         out.text(&Text::plain(&help_text()));
         return EXIT_OK;
@@ -871,7 +1047,12 @@ pub fn main<S: AsRef<str>>(tokens: &[S], raw: Option<&str>, out: &mut Console, e
         err.text(&Text::styled(t(text::HELP_HINT), MUTED));
         return EXIT_ERROR;
     }
-    let mut runner = Runner { out, err, views: Vec::new(), autoclose: false };
+    let mut runner = Runner {
+        out,
+        err,
+        views: Vec::new(),
+        autoclose: false,
+    };
     runner.run(&parsed.commands)
 }
 

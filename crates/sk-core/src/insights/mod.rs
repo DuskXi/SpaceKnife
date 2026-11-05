@@ -169,14 +169,20 @@ impl Rule {
             return self.text.clone();
         }
         let base = &self.text;
-        let title = tr.get("title").cloned().unwrap_or_else(|| base.title.clone());
+        let title = tr
+            .get("title")
+            .cloned()
+            .unwrap_or_else(|| base.title.clone());
         let note = match tr.get("note").filter(|n| !n.is_empty()) {
             Some(n) => n.clone(),
             None if tr.contains_key("title") => title.clone(),
             None => base.note.clone(),
         };
         RuleText {
-            reason: tr.get("reason").cloned().unwrap_or_else(|| base.reason.clone()),
+            reason: tr
+                .get("reason")
+                .cloned()
+                .unwrap_or_else(|| base.reason.clone()),
             app: tr.get("app").cloned().unwrap_or_else(|| base.app.clone()),
             title,
             note,
@@ -220,7 +226,9 @@ fn msg(key: &str) -> &'static str {
     t(match key {
         "file_unreadable" => "无法读取洞察规则文件 {source}：{error}",
         "file_syntax" => "洞察规则文件 {source} 不是有效的 TOML：{error}",
-        "file_version" => "洞察规则文件 {source} 的格式版本 {version} 不受支持（支持 {supported}），已跳过",
+        "file_version" => {
+            "洞察规则文件 {source} 的格式版本 {version} 不受支持（支持 {supported}），已跳过"
+        }
         "file_keys" => "洞察规则文件 {source} 有未知的顶层字段 {keys}，已忽略",
         "file_rules" => "洞察规则文件 {source} 的 rule 应为表数组（[[rule]]）",
         "rule_skipped" => "跳过洞察规则 {rule}（{source}）：{error}",
@@ -298,7 +306,13 @@ fn invalid_value(template: &str, value: &str, fields: &[(&str, Arg)]) -> Invalid
 }
 
 fn type_error(key: &str, expected: &str) -> Invalid {
-    invalid(err("type"), &[("key", key.into()), ("expected", type_name(expected).into())])
+    invalid(
+        err("type"),
+        &[
+            ("key", key.into()),
+            ("expected", type_name(expected).into()),
+        ],
+    )
 }
 
 // --------------------------------------------------------------------------- globs
@@ -396,7 +410,11 @@ fn split_glob(pattern: &str) -> Result<(Vec<String>, bool), Invalid> {
         return Err(Invalid(err("tilde").into()));
     }
     let absolute = p.starts_with('/');
-    let mut segs: Vec<String> = p.split('/').filter(|s| !s.is_empty()).map(String::from).collect();
+    let mut segs: Vec<String> = p
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect();
     if absolute {
         segs.insert(0, String::new());
     }
@@ -519,8 +537,9 @@ fn anchor_of(segs: &[String]) -> Option<Anchor> {
     if last == "**" {
         return None;
     }
-    let parent = (segs.len() >= 2 && segs[segs.len() - 2] != "**" && literal(&segs[segs.len() - 2]))
-        .then(|| segs[segs.len() - 2].to_lowercase());
+    let parent =
+        (segs.len() >= 2 && segs[segs.len() - 2] != "**" && literal(&segs[segs.len() - 2]))
+            .then(|| segs[segs.len() - 2].to_lowercase());
     if literal(last) {
         return Some(Anchor::Name(last.to_lowercase(), parent));
     }
@@ -533,7 +552,9 @@ fn anchor_of(segs: &[String]) -> Option<Anchor> {
             return Some(Anchor::Ext(ext.to_lowercase()));
         }
     }
-    let cut = last.find(['*', '?', '[']).map_or(last.chars().count(), |b| last[..b].chars().count());
+    let cut = last
+        .find(['*', '?', '['])
+        .map_or(last.chars().count(), |b| last[..b].chars().count());
     if cut >= 3 {
         let low: String = last.chars().take(cut).collect::<String>().to_lowercase();
         return Some(Anchor::Prefix(low.chars().take(3).collect()));
@@ -561,7 +582,11 @@ impl Lazy {
     }
 
     fn get(&self, fold: bool) -> &Regex {
-        let (cell, flags) = if fold { (&self.ci, "(?i)") } else { (&self.cs, "") };
+        let (cell, flags) = if fold {
+            (&self.ci, "(?i)")
+        } else {
+            (&self.cs, "")
+        };
         cell.get_or_init(|| {
             Regex::new(&format!("{flags}{}", self.source))
                 .unwrap_or_else(|_| Regex::new("^\\b\\B$").unwrap())
@@ -577,14 +602,33 @@ impl Lazy {
 
 const TEXT_FIELDS: [&str; 4] = ["title", "reason", "note", "app"];
 const RULE_KEYS: [&str; 19] = [
-    "title", "reason", "note", "app", "paths", "names", "parents", "exclude", "platforms", "node",
-    "min_size", "id", "kind", "cleanup", "command", "priority", "subtree", "enabled", "i18n",
+    "title",
+    "reason",
+    "note",
+    "app",
+    "paths",
+    "names",
+    "parents",
+    "exclude",
+    "platforms",
+    "node",
+    "min_size",
+    "id",
+    "kind",
+    "cleanup",
+    "command",
+    "priority",
+    "subtree",
+    "enabled",
+    "i18n",
 ];
 const PLATFORMS: [&str; 3] = ["windows", "linux", "macos"];
 const NODE_NAMES: [&str; 4] = ["file", "dir", "link", "other"];
 
-static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]*$").unwrap());
-static LANG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$").unwrap());
+static ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9._-]*$").unwrap());
+static LANG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$").unwrap());
 static SIZE_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)^\s*(\d+(?:\.\d+)?)\s*([kmgtp]?)(?:i?b)?\s*$").unwrap());
 
@@ -614,7 +658,11 @@ fn get_strs(raw: &Table, key: &str) -> Result<Vec<String>, Invalid> {
     }
 }
 
-fn choices(raw: &Table, key: &str, allowed: &[(&str, &[&'static str])]) -> Result<HashSet<&'static str>, Invalid> {
+fn choices(
+    raw: &Table,
+    key: &str,
+    allowed: &[(&str, &[&'static str])],
+) -> Result<HashSet<&'static str>, Invalid> {
     let values = get_strs(raw, key)?;
     if values.is_empty() {
         return Err(invalid(err("empty_choice"), &[("key", key.into())]));
@@ -639,7 +687,13 @@ fn choices(raw: &Table, key: &str, allowed: &[(&str, &[&'static str])]) -> Resul
 fn show(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
-        Value::Boolean(b) => if *b { "True".into() } else { "False".into() },
+        Value::Boolean(b) => {
+            if *b {
+                "True".into()
+            } else {
+                "False".into()
+            }
+        }
         other => other.to_string(),
     }
 }
@@ -717,10 +771,17 @@ fn parse_rule(raw: &Value, source: &str) -> Result<(String, Option<Rule>), Inval
         Some(Value::Boolean(b)) => *b,
         Some(_) => return Err(type_error("enabled", "bool")),
     };
-    let mut unknown: Vec<&str> = raw.keys().map(String::as_str).filter(|k| !RULE_KEYS.contains(k)).collect();
+    let mut unknown: Vec<&str> = raw
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !RULE_KEYS.contains(k))
+        .collect();
     if !unknown.is_empty() {
         unknown.sort();
-        return Err(invalid(err("unknown"), &[("keys", unknown.join(t("、")).into())]));
+        return Err(invalid(
+            err("unknown"),
+            &[("keys", unknown.join(t("、")).into())],
+        ));
     }
     if !enabled {
         return Ok((id, None));
@@ -728,7 +789,14 @@ fn parse_rule(raw: &Value, source: &str) -> Result<(String, Option<Rule>), Inval
     let kind_s = get_str(raw, "kind", None)?.to_lowercase();
     let all_kinds: Vec<&str> = InsightKind::ALL.iter().map(|k| k.as_str()).collect();
     let kind = InsightKind::parse(&kind_s).ok_or_else(|| {
-        invalid_value(err("bad_choice"), &kind_s, &[("key", "kind".into()), ("choices", all_kinds.join(" / ").into())])
+        invalid_value(
+            err("bad_choice"),
+            &kind_s,
+            &[
+                ("key", "kind".into()),
+                ("choices", all_kinds.join(" / ").into()),
+            ],
+        )
     })?;
     let cleanup_s = get_str(raw, "cleanup", Some("review"))?.to_lowercase();
     let all_cleanups: Vec<&str> = Cleanup::ALL.iter().map(|k| k.as_str()).collect();
@@ -736,7 +804,10 @@ fn parse_rule(raw: &Value, source: &str) -> Result<(String, Option<Rule>), Inval
         invalid_value(
             err("bad_choice"),
             &cleanup_s,
-            &[("key", "cleanup".into()), ("choices", all_cleanups.join(" / ").into())],
+            &[
+                ("key", "cleanup".into()),
+                ("choices", all_cleanups.join(" / ").into()),
+            ],
         )
     })?;
     let title = get_str(raw, "title", None)?;
@@ -766,7 +837,11 @@ fn parse_rule(raw: &Value, source: &str) -> Result<(String, Option<Rule>), Inval
                 .map_err(|e| Invalid(e.to_string()))
         });
         if let Err(e) = checked {
-            return Err(invalid_value(err("bad_glob"), value, &[("error", e.0.into())]));
+            return Err(invalid_value(
+                err("bad_glob"),
+                value,
+                &[("error", e.0.into())],
+            ));
         }
     }
     let mut all = get_strs(raw, "paths")?;
@@ -785,7 +860,11 @@ fn parse_rule(raw: &Value, source: &str) -> Result<(String, Option<Rule>), Inval
                     .map_err(|e| Invalid(e.to_string()))
             });
         if let Err(e) = checked {
-            return Err(invalid_value(err("bad_glob"), value, &[("error", e.0.into())]));
+            return Err(invalid_value(
+                err("bad_glob"),
+                value,
+                &[("error", e.0.into())],
+            ));
         }
     }
     let platform_aliases: &[(&str, &[&'static str])] = &[
@@ -859,11 +938,17 @@ fn parse_file(text: &str, source: &str) -> Parsed {
         Ok(d) => d,
         Err(e) => {
             let detail = e.to_string().trim().replace('\n', " ");
-            let m = format(msg("file_syntax"), &[("source", source.into()), ("error", detail.into())]);
+            let m = format(
+                msg("file_syntax"),
+                &[("source", source.into()), ("error", detail.into())],
+            );
             return (Vec::new(), vec![file_problem(m)]);
         }
     };
-    let version = data.get("version").cloned().unwrap_or(Value::Integer(FORMAT_VERSION));
+    let version = data
+        .get("version")
+        .cloned()
+        .unwrap_or(Value::Integer(FORMAT_VERSION));
     let ok_version = match &version {
         Value::Integer(i) => *i == FORMAT_VERSION,
         Value::Float(f) => *f == FORMAT_VERSION as f64,
@@ -872,21 +957,38 @@ fn parse_file(text: &str, source: &str) -> Parsed {
     if !ok_version {
         let m = format(
             msg("file_version"),
-            &[("source", source.into()), ("version", show(&version).into()), ("supported", FORMAT_VERSION.into())],
+            &[
+                ("source", source.into()),
+                ("version", show(&version).into()),
+                ("supported", FORMAT_VERSION.into()),
+            ],
         );
         return (Vec::new(), vec![file_problem(m)]);
     }
-    let mut extra: Vec<&str> = data.keys().map(String::as_str).filter(|k| *k != "version" && *k != "rule").collect();
+    let mut extra: Vec<&str> = data
+        .keys()
+        .map(String::as_str)
+        .filter(|k| *k != "version" && *k != "rule")
+        .collect();
     if !extra.is_empty() {
         extra.sort();
-        let m = format(msg("file_keys"), &[("source", source.into()), ("keys", extra.join(t("、")).into())]);
+        let m = format(
+            msg("file_keys"),
+            &[
+                ("source", source.into()),
+                ("keys", extra.join(t("、")).into()),
+            ],
+        );
         problems.push(file_problem(m));
     }
     let entries = match data.get("rule") {
         None => Vec::new(),
         Some(Value::Array(a)) => a.clone(),
         Some(_) => {
-            problems.push(file_problem(format(msg("file_rules"), &[("source", source.into())])));
+            problems.push(file_problem(format(
+                msg("file_rules"),
+                &[("source", source.into())],
+            )));
             return (Vec::new(), problems);
         }
     };
@@ -904,7 +1006,11 @@ fn parse_file(text: &str, source: &str) -> Parsed {
             Err(e) => {
                 let m = format(
                     msg("rule_skipped"),
-                    &[("rule", label.clone().into()), ("source", source.into()), ("error", e.0.into())],
+                    &[
+                        ("rule", label.clone().into()),
+                        ("source", source.into()),
+                        ("error", e.0.into()),
+                    ],
                 );
                 problems.push(RuleProblem {
                     source: source.to_string(),
@@ -914,7 +1020,10 @@ fn parse_file(text: &str, source: &str) -> Parsed {
             }
             Ok((id, rule)) => {
                 if seen.contains(&id) {
-                    let m = format(msg("rule_duplicate"), &[("rule", id.clone().into()), ("source", source.into())]);
+                    let m = format(
+                        msg("rule_duplicate"),
+                        &[("rule", id.clone().into()), ("source", source.into())],
+                    );
                     problems.push(RuleProblem {
                         source: source.to_string(),
                         rule: id.clone(),
@@ -995,7 +1104,13 @@ impl Index {
     fn add(&mut self, m: usize, anchor: &Option<Anchor>) {
         match anchor {
             None => self.generic.push(m),
-            Some(Anchor::Name(k, p)) => self.name.entry(k.clone()).or_default().entry(p.clone()).or_default().push(m),
+            Some(Anchor::Name(k, p)) => self
+                .name
+                .entry(k.clone())
+                .or_default()
+                .entry(p.clone())
+                .or_default()
+                .push(m),
             Some(Anchor::Parent(k)) => self.parent.entry(k.clone()).or_default().push(m),
             Some(Anchor::Ext(k)) => self.ext.entry(k.clone()).or_default().push(m),
             Some(Anchor::Prefix(k)) => self.prefix.entry(k.clone()).or_default().push(m),
@@ -1079,13 +1194,21 @@ impl RuleSet {
     /// `rules` in tie-break order (earlier wins on equal priority, depth and specificity);
     /// `host` (`windows` / `linux` / `macos`, default: this one) decides how POSIX-form paths
     /// are matched.
-    pub fn new(rules: Vec<Rule>, problems: Vec<RuleProblem>, host: Option<&str>) -> Result<RuleSet, InsightsError> {
+    pub fn new(
+        rules: Vec<Rule>,
+        problems: Vec<RuleProblem>,
+        host: Option<&str>,
+    ) -> Result<RuleSet, InsightsError> {
         let host = host.map_or_else(|| host_platform().to_string(), str::to_string);
         if !PLATFORMS.contains(&host.as_str()) {
             return Err(InsightsError::Host(host));
         }
         let win_host = host == "windows";
-        let posix_mask = if win_host { LINUX | MAC } else { pmask_of(&host) };
+        let posix_mask = if win_host {
+            LINUX | MAC
+        } else {
+            pmask_of(&host)
+        };
         let mut compiled: Vec<Compiled> = Vec::with_capacity(rules.len());
         let mut matchers: Vec<Matcher> = Vec::new();
         for (order, rule) in rules.into_iter().enumerate() {
@@ -1097,11 +1220,20 @@ impl RuleSet {
             let exclude: Vec<String> = rule
                 .exclude
                 .iter()
-                .filter_map(|p| split_glob(p).and_then(|(s, _)| glob_regex(&s)).ok().map(|r| r.0))
+                .filter_map(|p| {
+                    split_glob(p)
+                        .and_then(|(s, _)| glob_regex(&s))
+                        .ok()
+                        .map(|r| r.0)
+                })
                 .collect();
             for pattern in &rule.patterns {
-                let Ok((segs, anchored)) = split_glob(pattern) else { continue };
-                let Ok((rx, score)) = glob_regex(&segs) else { continue };
+                let Ok((segs, anchored)) = split_glob(pattern) else {
+                    continue;
+                };
+                let Ok((rx, score)) = glob_regex(&segs) else {
+                    continue;
+                };
                 matchers.push(Matcher {
                     rule: order,
                     pattern: Lazy::new(&[rx]).unwrap(),
@@ -1112,7 +1244,11 @@ impl RuleSet {
                 });
             }
             compiled.push(Compiled {
-                pmask: rule.platforms.iter().map(|p| pmask_of(p)).fold(0, |a, b| a | b),
+                pmask: rule
+                    .platforms
+                    .iter()
+                    .map(|p| pmask_of(p))
+                    .fold(0, |a, b| a | b),
                 nmask: rule.nodes.iter().map(|n| name_bit(n)).fold(0, |a, b| a | b),
                 min_size: rule.min_size,
                 prio: -rule.priority,
@@ -1131,7 +1267,11 @@ impl RuleSet {
                 sub.add(rank, &m.anchor);
             }
         }
-        let by_id = compiled.iter().enumerate().map(|(i, c)| (c.rule.id.clone(), i)).collect();
+        let by_id = compiled
+            .iter()
+            .enumerate()
+            .map(|(i, c)| (c.rule.id.clone(), i))
+            .collect();
         Ok(RuleSet {
             unanchored: own.generic.len(),
             compiled,
@@ -1167,7 +1307,13 @@ impl RuleSet {
 
     /// The insight for `path` (a `kind` node; `size` in bytes enables `min_size`), with texts in
     /// `lang` (None: the interface language; `Some("")`: the rule's own texts).
-    pub fn match_path(&self, path: &str, kind: Kind, size: Option<i64>, lang: Option<&str>) -> Option<Insight> {
+    pub fn match_path(
+        &self,
+        path: &str,
+        kind: Kind,
+        size: Option<i64>,
+        lang: Option<&str>,
+    ) -> Option<Insight> {
         let p = self.prepare(path);
         let hit = self.find(&p, kind_bit(kind), size, None)?;
         Some(self.insight(&p, hit, &text_language(lang)))
@@ -1211,7 +1357,11 @@ impl RuleSet {
     /// [`RuleSet::match_path`] for a store node (its path, kind and allocated size).
     pub fn match_node(&self, nodes: &Nodes, node: NodeId, lang: Option<&str>) -> Option<Insight> {
         let kind = nodes.kind(node);
-        let size = if kind == Kind::Dir { nodes.tot_alloc(node) } else { nodes.alloc(node) };
+        let size = if kind == Kind::Dir {
+            nodes.tot_alloc(node)
+        } else {
+            nodes.alloc(node)
+        };
         self.match_path(&nodes.path_lossy(node), kind, Some(size), lang)
     }
 
@@ -1236,7 +1386,11 @@ impl RuleSet {
         }
         if p.len() > 1 && p.ends_with('/') {
             let trimmed = p.trim_end_matches('/');
-            p = if trimmed.is_empty() { "/".into() } else { trimmed.to_string() };
+            p = if trimmed.is_empty() {
+                "/".into()
+            } else {
+                trimmed.to_string()
+            };
         }
         let segs: Vec<String> = p.split('/').map(String::from).collect();
         let mut ends = Vec::with_capacity(segs.len());
@@ -1245,9 +1399,17 @@ impl RuleSet {
             at += s.len() + usize::from(i > 0);
             ends.push(at);
         }
-        let low = p.to_lowercase().split('/').map(String::from).collect::<Vec<_>>();
+        let low = p
+            .to_lowercase()
+            .split('/')
+            .map(String::from)
+            .collect::<Vec<_>>();
         // lower-casing may change byte lengths: keep segments aligned with `segs`
-        let low = if low.len() == segs.len() { low } else { segs.iter().map(|s| s.to_lowercase()).collect() };
+        let low = if low.len() == segs.len() {
+            low
+        } else {
+            segs.iter().map(|s| s.to_lowercase()).collect()
+        };
         PathInfo {
             norm: p,
             segs,
@@ -1258,7 +1420,15 @@ impl RuleSet {
         }
     }
 
-    fn collect(&self, index: &Index, low: &[String], start: usize, stop: usize, pmask: u32, out: &mut Vec<Cand>) {
+    fn collect(
+        &self,
+        index: &Index,
+        low: &[String],
+        start: usize,
+        stop: usize,
+        pmask: u32,
+        out: &mut Vec<Cand>,
+    ) {
         let push = |list: &[usize], i: usize, out: &mut Vec<Cand>| {
             for &m in list {
                 if self.compiled[self.matchers[m].rule].pmask & pmask != 0 {
@@ -1266,7 +1436,11 @@ impl RuleSet {
                 }
             }
         };
-        let mut prev: Option<&str> = if start > 0 { Some(&low[start - 1]) } else { None };
+        let mut prev: Option<&str> = if start > 0 {
+            Some(&low[start - 1])
+        } else {
+            None
+        };
         for (i, seg) in low.iter().enumerate().take(stop).skip(start) {
             if let Some(buckets) = index.name.get(seg) {
                 if let Some(found) = buckets.get(&None) {
@@ -1326,7 +1500,9 @@ impl RuleSet {
         {
             return false;
         }
-        r.exclude.as_ref().is_none_or(|x| !x.full_match(fold, prefix))
+        r.exclude
+            .as_ref()
+            .is_none_or(|x| !x.full_match(fold, prefix))
     }
 
     /// Subtree matches among segments `0 .. upto` (the folders containing the item).
@@ -1360,7 +1536,9 @@ impl RuleSet {
             .filter(|c| self.matchers[c.0].rule == rule)
             .collect();
         mine.sort_by_key(|c| (c.1, self.matchers[c.0].rank));
-        let hit = mine.into_iter().find(|&c| self.accepts(c, p, kind_bit(Kind::Dir), None));
+        let hit = mine
+            .into_iter()
+            .find(|&c| self.accepts(c, p, kind_bit(Kind::Dir), None));
         anc.outer.insert(rule, hit);
         hit
     }
@@ -1376,7 +1554,14 @@ impl RuleSet {
         let mut local;
         let anc: &mut Ancestors = match cache {
             Some(cache) => {
-                let key = (p.pmask, if last > 0 { p.upto(last - 1).to_string() } else { String::new() });
+                let key = (
+                    p.pmask,
+                    if last > 0 {
+                        p.upto(last - 1).to_string()
+                    } else {
+                        String::new()
+                    },
+                );
                 cache.entry(key).or_insert_with(|| self.ancestors(p, last))
             }
             None => {
@@ -1415,10 +1600,18 @@ impl RuleSet {
     fn native(&self, p: &PathInfo, i: usize) -> String {
         let prefix = p.upto(i);
         if !p.win {
-            return if prefix.is_empty() { "/".into() } else { prefix.to_string() };
+            return if prefix.is_empty() {
+                "/".into()
+            } else {
+                prefix.to_string()
+            };
         }
         let prefix = prefix.replace('/', "\\");
-        if prefix.ends_with(':') { format!("{prefix}\\") } else { prefix }
+        if prefix.ends_with(':') {
+            format!("{prefix}\\")
+        } else {
+            prefix
+        }
     }
 
     fn insight(&self, p: &PathInfo, hit: Cand, lang: &str) -> Insight {
@@ -1453,7 +1646,11 @@ fn text_language(lang: Option<&str>) -> String {
 /// A rule set from TOML texts `(source name, text)`; a rule in a later source replaces the
 /// earlier rule with the same id (and wins ties), `enabled = false` removes it. Problems are
 /// logged as warnings and kept in [`RuleSet::problems`].
-pub fn compile_rules(sources: &[(String, String)], host: Option<&str>, problems: Vec<RuleProblem>) -> Result<RuleSet, InsightsError> {
+pub fn compile_rules(
+    sources: &[(String, String)],
+    host: Option<&str>,
+    problems: Vec<RuleProblem>,
+) -> Result<RuleSet, InsightsError> {
     let mut merged: HashMap<String, (usize, usize, Rule)> = HashMap::new();
     let mut found = problems;
     for (s_idx, (source, text)) in sources.iter().enumerate() {
@@ -1465,7 +1662,13 @@ pub fn compile_rules(sources: &[(String, String)], host: Option<&str>, problems:
                 && prev.0 != s_idx
                 && rule.is_some()
             {
-                tracing::debug!("{}", format(msg("rule_override"), &[("rule", id.clone().into()), ("source", source.into())]));
+                tracing::debug!(
+                    "{}",
+                    format(
+                        msg("rule_override"),
+                        &[("rule", id.clone().into()), ("source", source.into())]
+                    )
+                );
             }
             if let Some(rule) = rule {
                 merged.insert(id, (s_idx, pos, rule));
@@ -1483,7 +1686,11 @@ pub fn compile_rules(sources: &[(String, String)], host: Option<&str>, problems:
         "{}",
         format(
             msg("rules_loaded"),
-            &[("count", set.len().into()), ("files", sources.len().into()), ("skipped", skipped.into())]
+            &[
+                ("count", set.len().into()),
+                ("files", sources.len().into()),
+                ("skipped", skipped.into())
+            ]
         )
     );
     Ok(set)
@@ -1503,8 +1710,12 @@ static ACTIVE: RwLock<Option<Arc<RuleSet>>> = RwLock::new(None);
 
 /// Built-in rules plus every `*.toml` in `extra_dir` (by file name; user rules override
 /// built-ins by id), made the active set for the module-level lookups.
-pub fn load_rules(extra_dir: Option<&Path>, host: Option<&str>) -> Result<Arc<RuleSet>, InsightsError> {
-    let mut sources: Vec<(String, String)> = vec![(BUILTIN_SOURCE.to_string(), BUILTIN_TEXT.to_string())];
+pub fn load_rules(
+    extra_dir: Option<&Path>,
+    host: Option<&str>,
+) -> Result<Arc<RuleSet>, InsightsError> {
+    let mut sources: Vec<(String, String)> =
+        vec![(BUILTIN_SOURCE.to_string(), BUILTIN_TEXT.to_string())];
     let mut problems = Vec::new();
     if let Some(dir) = extra_dir {
         let mut files: Vec<PathBuf> = match std::fs::read_dir(dir) {
@@ -1516,8 +1727,18 @@ pub fn load_rules(extra_dir: Option<&Path>, host: Option<&str>) -> Result<Arc<Ru
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => {
                 let source = dir.to_string_lossy().into_owned();
-                let m = format(msg("file_unreadable"), &[("source", source.clone().into()), ("error", e.to_string().into())]);
-                problems.push(RuleProblem { source, rule: String::new(), message: m });
+                let m = format(
+                    msg("file_unreadable"),
+                    &[
+                        ("source", source.clone().into()),
+                        ("error", e.to_string().into()),
+                    ],
+                );
+                problems.push(RuleProblem {
+                    source,
+                    rule: String::new(),
+                    message: m,
+                });
                 Vec::new()
             }
         };
@@ -1527,12 +1748,32 @@ pub fn load_rules(extra_dir: Option<&Path>, host: Option<&str>) -> Result<Arc<Ru
             match std::fs::read(&f).map(String::from_utf8) {
                 Ok(Ok(text)) => sources.push((source, text)),
                 Ok(Err(e)) => {
-                    let m = format(msg("file_unreadable"), &[("source", source.clone().into()), ("error", e.to_string().into())]);
-                    problems.push(RuleProblem { source, rule: String::new(), message: m });
+                    let m = format(
+                        msg("file_unreadable"),
+                        &[
+                            ("source", source.clone().into()),
+                            ("error", e.to_string().into()),
+                        ],
+                    );
+                    problems.push(RuleProblem {
+                        source,
+                        rule: String::new(),
+                        message: m,
+                    });
                 }
                 Err(e) => {
-                    let m = format(msg("file_unreadable"), &[("source", source.clone().into()), ("error", e.to_string().into())]);
-                    problems.push(RuleProblem { source, rule: String::new(), message: m });
+                    let m = format(
+                        msg("file_unreadable"),
+                        &[
+                            ("source", source.clone().into()),
+                            ("error", e.to_string().into()),
+                        ],
+                    );
+                    problems.push(RuleProblem {
+                        source,
+                        rule: String::new(),
+                        message: m,
+                    });
                 }
             }
         }
@@ -1552,8 +1793,12 @@ pub fn active_rules() -> Arc<RuleSet> {
         return set.clone();
     }
     let set = Arc::new(
-        compile_rules(&[(BUILTIN_SOURCE.to_string(), BUILTIN_TEXT.to_string())], None, Vec::new())
-            .expect("the host platform is known"),
+        compile_rules(
+            &[(BUILTIN_SOURCE.to_string(), BUILTIN_TEXT.to_string())],
+            None,
+            Vec::new(),
+        )
+        .expect("the host platform is known"),
     );
     *slot = Some(set.clone());
     set
@@ -1564,7 +1809,12 @@ pub fn reset_active() {
     *ACTIVE.write() = None;
 }
 
-pub fn match_path(path: &str, kind: Kind, size: Option<i64>, lang: Option<&str>) -> Option<Insight> {
+pub fn match_path(
+    path: &str,
+    kind: Kind,
+    size: Option<i64>,
+    lang: Option<&str>,
+) -> Option<Insight> {
     active_rules().match_path(path, kind, size, lang)
 }
 
@@ -1595,7 +1845,10 @@ mod tests {
     #[test]
     fn anchors() {
         let (segs, _) = split_glob("Code/Cache").unwrap();
-        assert_eq!(anchor_of(&segs), Some(Anchor::Name("cache".into(), Some("code".into()))));
+        assert_eq!(
+            anchor_of(&segs),
+            Some(Anchor::Name("cache".into(), Some("code".into())))
+        );
         let (segs, _) = split_glob("*.tar.gz").unwrap();
         assert_eq!(anchor_of(&segs), Some(Anchor::Ext(".gz".into())));
         let (segs, _) = split_glob("pre*").unwrap();

@@ -26,7 +26,10 @@ fn sk_home() -> &'static Path {
 
 #[test]
 fn windows_forms_spaces_and_unicode() {
-    let f = path_forms(r"C:\Users\lenny\Videos\2026-08 青海自驾.mp4", Some(System::Windows));
+    let f = path_forms(
+        r"C:\Users\lenny\Videos\2026-08 青海自驾.mp4",
+        Some(System::Windows),
+    );
     assert_eq!(f.raw, r"C:\Users\lenny\Videos\2026-08 青海自驾.mp4");
     assert_eq!(f.quoted, r#""C:\Users\lenny\Videos\2026-08 青海自驾.mp4""#);
     assert_eq!(f.posix, "/mnt/c/Users/lenny/Videos/2026-08 青海自驾.mp4");
@@ -42,7 +45,10 @@ fn windows_forms_plain_and_reserved() {
         r"C:\Users\lenny\Downloads\Win11_25H2_Chinese_Simplified_x64.iso",
         Some(System::Windows),
     );
-    assert_eq!(f.uri, "file:///C:/Users/lenny/Downloads/Win11_25H2_Chinese_Simplified_x64.iso");
+    assert_eq!(
+        f.uri,
+        "file:///C:/Users/lenny/Downloads/Win11_25H2_Chinese_Simplified_x64.iso"
+    );
     let g = path_forms(r"D:\a#b\c%d;e&f.txt", Some(System::Windows));
     assert_eq!(g.uri, "file:///D:/a%23b/c%25d%3Be%26f.txt");
     assert_eq!(path_forms("C:\\", Some(System::Windows)).uri, "file:///C:/");
@@ -97,14 +103,21 @@ fn posix_forms_undecodable_bytes() {
 fn forms_default_to_this_system() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("a b.txt").to_string_lossy().into_owned();
-    let this = if cfg!(windows) { System::Windows } else { System::Linux };
+    let this = if cfg!(windows) {
+        System::Windows
+    } else {
+        System::Linux
+    };
     assert_eq!(path_forms(&path, None), path_forms(&path, Some(this)));
 }
 
 // --------------------------------------------------------------------------- Windows rules
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-    pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    pairs
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 fn win() -> sk_core::ops::Rules {
@@ -179,7 +192,10 @@ fn windows_rules() {
             (r"C:\Users\lenny\AppData\Local", Some("profile")),
             (r"C:\Users\lenny\AppData\Local\Temp", None),
             (r"C:\Users\lenny\AppData\Local\SpaceKnife", Some("app")),
-            (r"C:\Users\lenny\AppData\Local\SpaceKnife\snapshots\x.sks", Some("app")),
+            (
+                r"C:\Users\lenny\AppData\Local\SpaceKnife\snapshots\x.sks",
+                Some("app"),
+            ),
             (r"C:\Apps\SpaceKnife\python.exe", Some("program")),
             (r"C:\$Recycle.Bin", Some("trash")),
             (r"D:\$RECYCLE.BIN\S-1-5-21-1\$RABC.txt", Some("trash")),
@@ -245,11 +261,29 @@ fn linux_rules() {
 
 #[test]
 fn linux_rules_follow_xdg_data_home() {
-    let rules = platform_rules(System::Linux, "/home/u", &env(&[("XDG_DATA_HOME", "/data/xdg")]), &[], &[]);
-    assert_eq!(match_rules("/data/xdg/Trash/files/a", &rules), Some("trash"));
+    let rules = platform_rules(
+        System::Linux,
+        "/home/u",
+        &env(&[("XDG_DATA_HOME", "/data/xdg")]),
+        &[],
+        &[],
+    );
+    assert_eq!(
+        match_rules("/data/xdg/Trash/files/a", &rules),
+        Some("trash")
+    );
     assert_eq!(match_rules("/data/xdg/other", &rules), None);
-    let relative = platform_rules(System::Linux, "/home/u", &env(&[("XDG_DATA_HOME", "rel/xdg")]), &[], &[]);
-    assert_eq!(match_rules("/home/u/.local/share/Trash/x", &relative), Some("trash"));
+    let relative = platform_rules(
+        System::Linux,
+        "/home/u",
+        &env(&[("XDG_DATA_HOME", "rel/xdg")]),
+        &[],
+        &[],
+    );
+    assert_eq!(
+        match_rules("/home/u/.local/share/Trash/x", &relative),
+        Some("trash")
+    );
 }
 
 #[test]
@@ -279,7 +313,10 @@ fn mac_rules() {
             ("/Users/u/.Trash", Some("trash")),
             ("/Users/u/.Trash/old.dmg", Some("trash")),
             ("/Volumes/USB/.Trashes/501/x", Some("trash")),
-            ("/Users/u/Library/Application Support/SpaceKnife/x", Some("app")),
+            (
+                "/Users/u/Library/Application Support/SpaceKnife/x",
+                Some("app"),
+            ),
             ("/Users/u/Movies/a.mov", None),
         ],
     );
@@ -306,14 +343,24 @@ fn protected_reason_on_this_system() {
     let plain = dir.path().join("plain.txt");
     std::fs::write(&plain, b"x").unwrap();
     assert_eq!(protected_key(&plain.to_string_lossy()), None);
-    assert_eq!(protected_key(&dir.path().join("not there").to_string_lossy()), None);
+    assert_eq!(
+        protected_key(&dir.path().join("not there").to_string_lossy()),
+        None
+    );
     let user_home = sk_core::paths::home_dir();
     assert_eq!(protected_key(&user_home.to_string_lossy()), Some("home"));
     let anchor: PathBuf = dir.path().ancestors().last().unwrap().to_path_buf();
     assert_eq!(protected_key(&anchor.to_string_lossy()), Some("root"));
     let data = home.join("data");
-    assert_eq!(protected_key(&data.join("snapshots").join("c.sks").to_string_lossy()), Some("app"));
-    let exe_dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+    assert_eq!(
+        protected_key(&data.join("snapshots").join("c.sks").to_string_lossy()),
+        Some("app")
+    );
+    let exe_dir = std::env::current_exe()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .to_path_buf();
     assert_eq!(protected_key(&exe_dir.to_string_lossy()), Some("program"));
 }
 
@@ -361,6 +408,12 @@ fn protected_reason_mount_points() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("mnt")).unwrap();
     std::fs::write(dir.path().join("file"), b"").unwrap();
-    assert_eq!(protected_key(&dir.path().join("mnt").to_string_lossy()), None);
-    assert_eq!(protected_key(&dir.path().join("file").to_string_lossy()), None);
+    assert_eq!(
+        protected_key(&dir.path().join("mnt").to_string_lossy()),
+        None
+    );
+    assert_eq!(
+        protected_key(&dir.path().join("file").to_string_lossy()),
+        None
+    );
 }

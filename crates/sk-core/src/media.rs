@@ -129,10 +129,23 @@ fn win_media(root: &str) -> Media {
     if drive.len() != 2 || drive.as_bytes()[1] != b':' {
         return Media::Unknown;
     }
-    let path: Vec<u16> = format!("\\\\.\\{drive}").encode_utf16().chain([0]).collect();
+    let path: Vec<u16> = format!("\\\\.\\{drive}")
+        .encode_utf16()
+        .chain([0])
+        .collect();
     // access 0: the storage property queries work without read rights (no elevation)
     // SAFETY: NUL-terminated path; share read|write, OPEN_EXISTING.
-    let h = unsafe { CreateFileW(path.as_ptr(), 0, 3, std::ptr::null(), OPEN_EXISTING, 0, std::ptr::null_mut()) };
+    let h = unsafe {
+        CreateFileW(
+            path.as_ptr(),
+            0,
+            3,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
     if h.is_null() || h == INVALID_HANDLE_VALUE {
         return Media::Unknown;
     }
@@ -175,7 +188,9 @@ fn win_media(root: &str) -> Media {
 // --------------------------------------------------------------------------- Linux (pure file reads)
 
 fn read_trim(path: &Path) -> String {
-    std::fs::read_to_string(path).map(|s| s.trim().to_owned()).unwrap_or_default()
+    std::fs::read_to_string(path)
+        .map(|s| s.trim().to_owned())
+        .unwrap_or_default()
 }
 
 /// sysfs directory of the whole disk behind a block device (partitions, dm/LVM resolved).
@@ -191,7 +206,10 @@ fn linux_disk(dev: &str, depth: u32) -> Option<std::path::PathBuf> {
     if depth < 16
         && let Ok(rd) = std::fs::read_dir(&slaves)
     {
-        let mut inner: Vec<String> = rd.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+        let mut inner: Vec<String> = rd
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
         inner.sort();
         if let Some(first) = inner.first() {
             return linux_disk(&format!("/dev/{first}"), depth + 1);
@@ -204,7 +222,13 @@ fn linux_disk(dev: &str, depth: u32) -> Option<std::path::PathBuf> {
 }
 
 /// vendor / model of hypervisors' emulated disks (they often claim to rotate: WSL's ext4 VHDX does)
-const VIRTUAL_DISKS: &[&str] = &["msft virtual disk", "vmware", "qemu", "vbox", "virtual disk"];
+const VIRTUAL_DISKS: &[&str] = &[
+    "msft virtual disk",
+    "vmware",
+    "qemu",
+    "vbox",
+    "virtual disk",
+];
 
 /// A disk's sysfs folder names a hypervisor's emulated disk.
 pub fn virtual_disk(disk: &Path) -> bool {
@@ -226,10 +250,17 @@ fn linux_media(device: &str) -> Media {
     let Some(disk) = linux_disk(device, 0) else {
         return Media::Unknown;
     };
-    let name = disk.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = disk
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let ds = disk.to_string_lossy();
     let rot = read_trim(&disk.join("queue").join("rotational"));
-    let rotational = if rot.is_empty() { None } else { Some(rot == "1") };
+    let rotational = if rot.is_empty() {
+        None
+    } else {
+        Some(rot == "1")
+    };
     let removable = read_trim(&disk.join("removable")) == "1";
     let bus = if ds.contains("/usb") {
         "usb"
@@ -237,7 +268,9 @@ fn linux_media(device: &str) -> Media {
         "nvme"
     } else if name.starts_with("mmcblk") {
         "sd"
-    } else if ["loop", "zram", "vd", "xvd"].iter().any(|p| name.starts_with(p))
+    } else if ["loop", "zram", "vd", "xvd"]
+        .iter()
+        .any(|p| name.starts_with(p))
         || ds.contains("/virtual/")
         || virtual_disk(&disk)
     {
@@ -304,7 +337,11 @@ pub fn classify_diskutil(info: &DiskutilInfo) -> Media {
         "other"
     };
     if info.virtual_or_physical == "Virtual" && bus == "other" {
-        return if rotational.is_none() { Media::Virtual } else { classify("other", rotational, false) };
+        return if rotational.is_none() {
+            Media::Virtual
+        } else {
+            classify("other", rotational, false)
+        };
     }
     classify(bus, rotational, info.ejectable && bus == "usb")
 }
@@ -369,7 +406,12 @@ mod tests {
         let info = parse_diskutil_plist(xml).unwrap();
         assert_eq!(info.solid_state, Some(true));
         assert_eq!(classify_diskutil(&info), Media::NvmeSsd);
-        let usb = DiskutilInfo { bus_protocol: "USB".into(), solid_state: None, ejectable: true, ..Default::default() };
+        let usb = DiskutilInfo {
+            bus_protocol: "USB".into(),
+            solid_state: None,
+            ejectable: true,
+            ..Default::default()
+        };
         assert_eq!(classify_diskutil(&usb), Media::UsbFlash);
     }
 

@@ -7,9 +7,9 @@ use std::sync::atomic::Ordering;
 use sk_core::layout::registry;
 use sk_core::tr;
 use sk_core::view::{results_page, showable};
+use sk_protocol::EmptyResult;
 use sk_protocol::methods::*;
 use sk_protocol::view::{ViewListResult, VisualInfo, VisualListResult};
-use sk_protocol::EmptyResult;
 
 use crate::compute::Latest;
 use crate::rpc::Router;
@@ -20,7 +20,10 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
     r.add::<ViewOpen, _, _>(|call, p| async move {
         let server = &call.server;
         let host = server.views.open(server, &call.session, &p)?;
-        server.views.act(&host, Some(call.id.clone()), |_| Ok((true, "open"))).await
+        server
+            .views
+            .act(&host, Some(call.id.clone()), |_| Ok((true, "open")))
+            .await
     });
 
     r.add::<ViewClose, _, _>(|call, p| async move {
@@ -36,15 +39,24 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
             .views
             .all()
             .into_iter()
-            .filter(|h| h.session_id == session_id && p.scan_id.as_deref().is_none_or(|s| s == h.scan_id))
+            .filter(|h| {
+                h.session_id == session_id && p.scan_id.as_deref().is_none_or(|s| s == h.scan_id)
+            })
             .collect();
         crate::compute::blocking(move || {
             let mut views: Vec<_> = hosts
                 .iter()
-                .map(|h| (h.id.clone(), sk_core::view::view_state(&h.view.lock(), &h.scan_id)))
+                .map(|h| {
+                    (
+                        h.id.clone(),
+                        sk_core::view::view_state(&h.view.lock(), &h.scan_id),
+                    )
+                })
                 .collect();
             views.sort_by_key(|(id, _)| id.trim_start_matches("view-").parse::<u64>().unwrap_or(0));
-            ViewListResult { views: views.into_iter().map(|(_, s)| s).collect() }
+            ViewListResult {
+                views: views.into_iter().map(|(_, s)| s).collect(),
+            }
         })
         .await
     });
@@ -53,26 +65,67 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
         ($marker:ty, $reason:literal, $f:expr) => {
             r.add::<$marker, _, _>(|call, p| async move {
                 let host = call.server.views.get(&call.session, &p.view_id)?;
-                call.server.views.act(&host, Some(call.id.clone()), move |v| Ok(($f(v, &p), $reason))).await
+                call.server
+                    .views
+                    .act(&host, Some(call.id.clone()), move |v| {
+                        Ok(($f(v, &p), $reason))
+                    })
+                    .await
             });
         };
     }
-    nav!(ViewRender, "render", |_: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| true);
-    nav!(ViewZoom, "zoom", |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewZoomParams| v.zoom_into(p.key));
-    nav!(ViewBack, "back", |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_back());
-    nav!(ViewForward, "forward", |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_forward());
-    nav!(ViewUp, "up", |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_up());
-    nav!(ViewHome, "home", |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_home());
-    nav!(ViewSelect, "select", |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewSelectParams| {
-        if v.selected == p.key {
-            false
-        } else {
-            v.select(p.key);
-            true
+    nav!(
+        ViewRender,
+        "render",
+        |_: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| true
+    );
+    nav!(
+        ViewZoom,
+        "zoom",
+        |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewZoomParams| v.zoom_into(p.key)
+    );
+    nav!(
+        ViewBack,
+        "back",
+        |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_back()
+    );
+    nav!(
+        ViewForward,
+        "forward",
+        |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_forward()
+    );
+    nav!(
+        ViewUp,
+        "up",
+        |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_up()
+    );
+    nav!(
+        ViewHome,
+        "home",
+        |v: &mut sk_core::view::View, _: &sk_protocol::view::ViewIdParams| v.go_home()
+    );
+    nav!(
+        ViewSelect,
+        "select",
+        |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewSelectParams| {
+            if v.selected == p.key {
+                false
+            } else {
+                v.select(p.key);
+                true
+            }
         }
-    });
-    nav!(ViewTag, "tag", |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewTagParams| v.tag_selected(p.color));
-    nav!(ViewReveal, "reveal", |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewRevealParams| v.reveal(p.key));
+    );
+    nav!(
+        ViewTag,
+        "tag",
+        |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewTagParams| v.tag_selected(p.color)
+    );
+    nav!(
+        ViewReveal,
+        "reveal",
+        |v: &mut sk_core::view::View, p: &sk_protocol::view::ViewRevealParams| v.reveal(p.key)
+    );
 
     r.add::<ViewSet, _, _>(|call, p| async move {
         let host = call.server.views.get(&call.session, &p.view_id)?;
@@ -84,7 +137,14 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
                 apply_settings(v, &p.settings, &caps)?;
                 let changed = settings_key(v) != before;
                 // another visualization: the frontend cross-fades instead of re-laying out in place
-                Ok((changed, if v.visual != visual { "visual" } else { "settings" }))
+                Ok((
+                    changed,
+                    if v.visual != visual {
+                        "visual"
+                    } else {
+                        "settings"
+                    },
+                ))
             })
             .await
     });
@@ -99,10 +159,17 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
                 if h.filter_gen.load(Ordering::SeqCst) != generation {
                     return Ok((false, "filter")); // a newer expression is already waiting: skip this one
                 }
-                let canon = |v: &sk_core::view::View| v.filter.normal.as_ref().map(|n| n.canonical.clone());
-                let before = (canon(v), v.filter.result.as_ref().map(|r| Arc::as_ptr(r) as usize));
+                let canon =
+                    |v: &sk_core::view::View| v.filter.normal.as_ref().map(|n| n.canonical.clone());
+                let before = (
+                    canon(v),
+                    v.filter.result.as_ref().map(|r| Arc::as_ptr(r) as usize),
+                );
                 v.set_filter(&p.text, p.cursor);
-                let after = (canon(v), v.filter.result.as_ref().map(|r| Arc::as_ptr(r) as usize));
+                let after = (
+                    canon(v),
+                    v.filter.result.as_ref().map(|r| Arc::as_ptr(r) as usize),
+                );
                 Ok((after != before, "filter"))
             })
             .await
@@ -146,7 +213,13 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
                         v.results_sort = s;
                     }
                     let mut cache = h.results.lock();
-                    results_page(&v, &mut cache, h.seq.load(Ordering::SeqCst), p.offset as usize, p.limit as usize)
+                    results_page(
+                        &v,
+                        &mut cache,
+                        h.seq.load(Ordering::SeqCst),
+                        p.offset as usize,
+                        p.limit as usize,
+                    )
                 })
                 .await
         }

@@ -348,7 +348,11 @@ pub struct CompareOptions<'a> {
 }
 
 /// Merge `base` and `target` by path ([`compare_with`] without progress or cancel).
-pub fn compare(base: &Nodes, target: &Nodes, fold_case: Option<bool>) -> Result<DiffTree, DiffError> {
+pub fn compare(
+    base: &Nodes,
+    target: &Nodes,
+    fold_case: Option<bool>,
+) -> Result<DiffTree, DiffError> {
     compare_with(
         base,
         target,
@@ -505,7 +509,10 @@ impl Pairs<'_, '_> {
         }
         for (j, &row) in s.kt.iter().enumerate() {
             let m = s.mt[j];
-            out.push((if m >= 0 { s.kb[m as usize] as i32 } else { -1 }, row as i32));
+            out.push((
+                if m >= 0 { s.kb[m as usize] as i32 } else { -1 },
+                row as i32,
+            ));
         }
         for (i, &row) in s.kb.iter().enumerate() {
             if s.mb[i] < 0 {
@@ -819,7 +826,11 @@ impl Merge<'_, '_> {
                     .enumerate()
                     .for_each(|(u, v)| {
                         let (from_t, r) = src(u);
-                        *v = if from_t { tcol[r as usize] } else { bcol[r as usize] };
+                        *v = if from_t {
+                            tcol[r as usize]
+                        } else {
+                            bcol[r as usize]
+                        };
                     });
             }
             gather(c.kind, &src, b.nodes.kinds_raw(), t.nodes.kinds_raw());
@@ -848,10 +859,7 @@ impl Merge<'_, '_> {
                     *v = if from_t {
                         t.nodes.ext(r)
                     } else {
-                        ext_map
-                            .get(b.nodes.ext(r) as usize)
-                            .copied()
-                            .unwrap_or(0)
+                        ext_map.get(b.nodes.ext(r) as usize).copied().unwrap_or(0)
                     };
                 });
             c.kind[0] = DIR;

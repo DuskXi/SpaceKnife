@@ -90,7 +90,11 @@ impl Shared {
     fn interval(&self) -> f64 {
         let busy = self.govs.lock().iter().any(|g| g.active());
         let floor = self.sampler_info.lock().2;
-        floor.max(if busy { self.opts.active_interval } else { self.opts.idle_interval })
+        floor.max(if busy {
+            self.opts.active_interval
+        } else {
+            self.opts.idle_interval
+        })
     }
 
     fn sample_loop(&self) {
@@ -155,7 +159,11 @@ impl Shared {
             if supported && d.sampled() && seen {
                 continue;
             }
-            if !samples.is_empty() && supported && d.sampled() && self.unmatched.lock().insert(d.id.clone()) {
+            if !samples.is_empty()
+                && supported
+                && d.sampled()
+                && self.unmatched.lock().insert(d.id.clone())
+            {
                 let mut measured: Vec<&String> = samples.keys().collect();
                 measured.sort();
                 let measured: Vec<&str> = measured.into_iter().map(String::as_str).collect();
@@ -231,17 +239,32 @@ impl IoRegistry {
         }
         *self.shared.stop.lock() = false;
         let sampler = (self.factory)();
-        *self.shared.sampler_info.lock() = (sampler.name(), sampler.supported(), sampler.min_interval());
+        *self.shared.sampler_info.lock() =
+            (sampler.name(), sampler.supported(), sampler.min_interval());
         let refs = sampler.refs();
         *self.shared.sampler.lock() = Some(sampler);
         for r in &refs {
             self.shared.ensure(r);
         }
-        tracing::debug!("io registry: sampler {}, {} disks", self.sampler_name(), self.shared.govs.lock().len());
+        tracing::debug!(
+            "io registry: sampler {}, {} disks",
+            self.sampler_name(),
+            self.shared.govs.lock().len()
+        );
         let s = self.shared.clone();
-        threads.push(std::thread::Builder::new().name("sk-io-sample".into()).spawn(move || s.sample_loop()).expect("spawn"));
+        threads.push(
+            std::thread::Builder::new()
+                .name("sk-io-sample".into())
+                .spawn(move || s.sample_loop())
+                .expect("spawn"),
+        );
         let s = self.shared.clone();
-        threads.push(std::thread::Builder::new().name("sk-io-push".into()).spawn(move || s.push_loop()).expect("spawn"));
+        threads.push(
+            std::thread::Builder::new()
+                .name("sk-io-push".into())
+                .spawn(move || s.push_loop())
+                .expect("spawn"),
+        );
     }
 
     pub fn stop(&self) {
@@ -268,9 +291,18 @@ impl IoRegistry {
         if let Some(g) = self.shared.find(disk) {
             return g;
         }
-        let known = self.shared.sampler.lock().as_ref().and_then(|s| s.disk_ref(disk));
+        let known = self
+            .shared
+            .sampler
+            .lock()
+            .as_ref()
+            .and_then(|s| s.disk_ref(disk));
         let r = known.unwrap_or_else(|| {
-            let kind = if disk.starts_with("net:") || disk.starts_with("vol:") { DiskKind::Volume } else { DiskKind::Physical };
+            let kind = if disk.starts_with("net:") || disk.starts_with("vol:") {
+                DiskKind::Volume
+            } else {
+                DiskKind::Physical
+            };
             DiskRef::new(disk, kind)
         });
         self.shared.ensure(&r)

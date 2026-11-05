@@ -24,7 +24,9 @@ pub type Scored = (i64, Vec<(usize, usize)>);
 
 fn is_cjk(ch: char) -> bool {
     let o = ch as u32;
-    (0x3400..=0x9FFF).contains(&o) || (0xF900..=0xFAFF).contains(&o) || (0x20000..=0x3134F).contains(&o)
+    (0x3400..=0x9FFF).contains(&o)
+        || (0xF900..=0xFAFF).contains(&o)
+        || (0x20000..=0x3134F).contains(&o)
 }
 
 fn word_start(text: &[char], j: usize) -> bool {
@@ -54,7 +56,11 @@ fn low(c: char) -> Low {
 
 /// (score, matched index runs over `text`), or None if it does not match.
 pub fn score(query: &str, text: &str) -> Option<Scored> {
-    let q: Vec<Low> = query.chars().filter(|c| !c.is_whitespace()).map(low).collect();
+    let q: Vec<Low> = query
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .map(low)
+        .collect();
     if q.is_empty() {
         return Some((0, Vec::new()));
     }
@@ -77,12 +83,20 @@ pub fn score(query: &str, text: &str) -> Option<Scored> {
     if k < n {
         return None;
     }
-    let bonus: Vec<i64> = (0..m).map(|j| if word_start(&chars, j) { WORD_START } else { 0 }).collect();
+    let bonus: Vec<i64> = (0..m)
+        .map(|j| if word_start(&chars, j) { WORD_START } else { 0 })
+        .collect();
     let mut prev = vec![NEG; m];
     let mut back: Vec<Vec<isize>> = Vec::with_capacity(n);
     for j in 0..m {
         if t[j] == q[0] {
-            prev[j] = MATCH + bonus[j] + if j == 0 { FIRST_CHAR } else { -(j as i64).min(LEADING_MAX) };
+            prev[j] = MATCH
+                + bonus[j]
+                + if j == 0 {
+                    FIRST_CHAR
+                } else {
+                    -(j as i64).min(LEADING_MAX)
+                };
         }
     }
     back.push(vec![-1; m]);
@@ -106,7 +120,11 @@ pub fn score(query: &str, text: &str) -> Option<Scored> {
                 continue;
             }
             let via_gap = best;
-            let via_run = if prev[j - 1] > NEG { prev[j - 1] + CONSECUTIVE } else { NEG };
+            let via_run = if prev[j - 1] > NEG {
+                prev[j - 1] + CONSECUTIVE
+            } else {
+                NEG
+            };
             if via_run >= via_gap && via_run > NEG {
                 cur[j] = via_run + MATCH + bonus[j];
                 ptr[j] = j as isize - 1;
@@ -135,7 +153,11 @@ pub fn score(query: &str, text: &str) -> Option<Scored> {
         picks.push(p as usize);
     }
     picks.reverse();
-    let flat = |v: &[Low]| -> Vec<char> { v.iter().flat_map(|l| l.iter().copied().filter(|&c| c != '\0')).collect() };
+    let flat = |v: &[Low]| -> Vec<char> {
+        v.iter()
+            .flat_map(|l| l.iter().copied().filter(|&c| c != '\0'))
+            .collect()
+    };
     if flat(&t) == flat(&q) {
         total += EXACT;
     } else if picks[0] == 0 && picks[n - 1] == n - 1 {
@@ -167,7 +189,12 @@ pub fn utf16_spans(text: &str, spans: &[(usize, usize)]) -> Vec<(usize, usize)> 
     }
     spans
         .iter()
-        .map(|&(a, b)| (offsets[a.min(offsets.len() - 1)], offsets[b.min(offsets.len() - 1)]))
+        .map(|&(a, b)| {
+            (
+                offsets[a.min(offsets.len() - 1)],
+                offsets[b.min(offsets.len() - 1)],
+            )
+        })
         .collect()
 }
 
@@ -175,6 +202,9 @@ pub fn utf16_spans(text: &str, spans: &[(usize, usize)]) -> Vec<(usize, usize)> 
 pub fn protocol_spans(text: &str, spans: &[(usize, usize)]) -> Vec<sk_protocol::palette::Span> {
     utf16_spans(text, spans)
         .into_iter()
-        .map(|(a, b)| sk_protocol::palette::Span { start: a as u32, end: b as u32 })
+        .map(|(a, b)| sk_protocol::palette::Span {
+            start: a as u32,
+            end: b as u32,
+        })
         .collect()
 }

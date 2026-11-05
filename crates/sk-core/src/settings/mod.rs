@@ -19,7 +19,8 @@ use std::time::SystemTime;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sk_protocol::settings::{
-    SettingCategory, SettingControl, SettingMeta, SettingOption, SettingValue, SettingsState, UnitBase,
+    SettingCategory, SettingControl, SettingMeta, SettingOption, SettingValue, SettingsState,
+    UnitBase,
 };
 
 pub use registry::{ACCENTS, Kind, LOAD_LEVELS, Spec};
@@ -33,10 +34,19 @@ pub const FILE_VERSION: i64 = 1;
 pub type Values = BTreeMap<String, SettingValue>;
 
 static REGISTRY: LazyLock<Vec<Spec>> = LazyLock::new(registry::registry);
-static BY_KEY: LazyLock<HashMap<&'static str, usize>> =
-    LazyLock::new(|| REGISTRY.iter().enumerate().map(|(i, s)| (s.key, i)).collect());
-static DEFAULTS: LazyLock<Values> =
-    LazyLock::new(|| REGISTRY.iter().map(|s| (s.key.to_owned(), s.default.clone())).collect());
+static BY_KEY: LazyLock<HashMap<&'static str, usize>> = LazyLock::new(|| {
+    REGISTRY
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.key, i))
+        .collect()
+});
+static DEFAULTS: LazyLock<Values> = LazyLock::new(|| {
+    REGISTRY
+        .iter()
+        .map(|s| (s.key.to_owned(), s.default.clone()))
+        .collect()
+});
 
 /// Every setting, in page order.
 pub fn registry() -> &'static [Spec] {
@@ -66,7 +76,11 @@ pub enum SettingsError {
 }
 
 fn num(v: f64) -> String {
-    if v.fract() == 0.0 { format!("{}", v as i64) } else { v.to_string() }
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        v.to_string()
+    }
 }
 
 fn literal_list(opts: &[(&str, &str, &str)]) -> String {
@@ -96,12 +110,18 @@ pub fn check_value(spec: &Spec, value: &SettingValue) -> Result<SettingValue, St
                 if let Some(min) = spec.min
                     && (*i as f64) < min
                 {
-                    return Err(format!("Input should be greater than or equal to {}", num(min)));
+                    return Err(format!(
+                        "Input should be greater than or equal to {}",
+                        num(min)
+                    ));
                 }
                 if let Some(max) = spec.max
                     && (*i as f64) > max
                 {
-                    return Err(format!("Input should be less than or equal to {}", num(max)));
+                    return Err(format!(
+                        "Input should be less than or equal to {}",
+                        num(max)
+                    ));
                 }
                 Ok(value.clone())
             }
@@ -151,7 +171,13 @@ pub fn validate(values: &Values) -> Result<Values, SettingsError> {
 /// The settings' metadata in the current language (M7.5); the Chinese name stays searchable.
 pub fn meta() -> Vec<SettingMeta> {
     let source = i18n::language() == i18n::SOURCE;
-    let tx = |s: &str| if s.is_empty() { String::new() } else { t(s).to_owned() };
+    let tx = |s: &str| {
+        if s.is_empty() {
+            String::new()
+        } else {
+            t(s).to_owned()
+        }
+    };
     registry()
         .iter()
         .map(|s| {
@@ -250,7 +276,12 @@ impl SettingsStore {
         let file = file.unwrap_or_else(|| paths::config_dir().join("settings.json"));
         let store = SettingsStore {
             file,
-            inner: Mutex::new(Inner { version: 0, values: defaults().clone(), error: None, mtime: None }),
+            inner: Mutex::new(Inner {
+                version: 0,
+                values: defaults().clone(),
+                error: None,
+                mtime: None,
+            }),
             listeners: Mutex::new(Vec::new()),
         };
         {
@@ -313,8 +344,12 @@ impl SettingsStore {
             .filter(|(k, v)| defaults().get(*k) != Some(*v))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let doc = SettingsFile { version: FILE_VERSION, values: changed };
-        let text = serde_json::to_string_pretty(&doc).map_err(|e| SettingsError::Io(e.to_string()))?;
+        let doc = SettingsFile {
+            version: FILE_VERSION,
+            values: changed,
+        };
+        let text =
+            serde_json::to_string_pretty(&doc).map_err(|e| SettingsError::Io(e.to_string()))?;
         let tmp = self.file.with_extension("tmp");
         std::fs::write(&tmp, text).map_err(io)?;
         std::fs::rename(&tmp, &self.file).map_err(io)?;
@@ -346,9 +381,14 @@ impl SettingsStore {
     pub fn error(&self) -> String {
         match &self.inner.lock().error {
             None => String::new(),
-            Some((FileProblem::Unreadable, r)) => tr!("无法读取设置文件：{reason}", reason = r.as_str()),
+            Some((FileProblem::Unreadable, r)) => {
+                tr!("无法读取设置文件：{reason}", reason = r.as_str())
+            }
             Some((FileProblem::Invalid, r)) => {
-                tr!("设置文件不合法，继续使用上一次的有效设置：{reason}", reason = r.as_str())
+                tr!(
+                    "设置文件不合法，继续使用上一次的有效设置：{reason}",
+                    reason = r.as_str()
+                )
             }
         }
     }
@@ -388,9 +428,16 @@ impl SettingsStore {
     /// Change some settings (validated; `version`: reject when the document moved on). True when
     /// anything changed (then saved and the listeners told).
     pub fn update(&self, patch: &Values, version: Option<i64>) -> Result<bool, SettingsError> {
-        let unknown: Vec<&str> = patch.keys().filter(|k| by_key(k).is_none()).map(String::as_str).collect();
+        let unknown: Vec<&str> = patch
+            .keys()
+            .filter(|k| by_key(k).is_none())
+            .map(String::as_str)
+            .collect();
         if !unknown.is_empty() {
-            return Err(SettingsError::Invalid(tr!("未知设置：{keys}", keys = unknown.join(", "))));
+            return Err(SettingsError::Invalid(tr!(
+                "未知设置：{keys}",
+                keys = unknown.join(", ")
+            )));
         }
         {
             let mut g = self.inner.lock();
@@ -434,7 +481,10 @@ impl SettingsStore {
         {
             let mut g = self.inner.lock();
             let mut values = g.values.clone();
-            for s in registry().iter().filter(|s| category.is_none_or(|c| c == s.category)) {
+            for s in registry()
+                .iter()
+                .filter(|s| category.is_none_or(|c| c == s.category))
+            {
                 values.insert(s.key.to_owned(), s.default.clone());
             }
             if values == g.values {
@@ -485,7 +535,11 @@ impl SettingsStore {
     // ------------------------------------------------------------ listeners
 
     /// Call `listener` after every change (replaces one of the same name).
-    pub fn add_listener(&self, name: &str, listener: impl Fn(&SettingsStore) + Send + Sync + 'static) {
+    pub fn add_listener(
+        &self,
+        name: &str,
+        listener: impl Fn(&SettingsStore) + Send + Sync + 'static,
+    ) {
         let mut g = self.listeners.lock();
         g.retain(|(n, _)| n != name);
         g.push((name.to_owned(), Arc::new(listener)));
@@ -496,7 +550,12 @@ impl SettingsStore {
     }
 
     fn notify(&self) {
-        let listeners: Vec<Listener> = self.listeners.lock().iter().map(|(_, l)| l.clone()).collect();
+        let listeners: Vec<Listener> = self
+            .listeners
+            .lock()
+            .iter()
+            .map(|(_, l)| l.clone())
+            .collect();
         for l in listeners {
             if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| l(self))).is_err() {
                 tracing::error!("settings listener failed");
@@ -511,7 +570,10 @@ mod tests {
     use sk_protocol::view::{BUILTIN_VISUALS, ColorModeName};
 
     fn vals(items: &[(&str, SettingValue)]) -> Values {
-        items.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect()
+        items
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), v.clone()))
+            .collect()
     }
 
     #[test]
@@ -521,7 +583,13 @@ mod tests {
         for s in registry() {
             assert!(!s.name.is_empty() && !s.description.is_empty(), "{}", s.key);
             if !s.options.is_empty() && s.control == SettingControl::Segmented {
-                assert!(s.options.iter().any(|o| SettingValue::Str(o.0.into()) == s.default), "{}", s.key);
+                assert!(
+                    s.options
+                        .iter()
+                        .any(|o| SettingValue::Str(o.0.into()) == s.default),
+                    "{}",
+                    s.key
+                );
             }
             if let (Some(min), Some(max), SettingValue::Int(d)) = (s.min, s.max, &s.default) {
                 assert!(min <= *d as f64 && *d as f64 <= max, "{}", s.key);
@@ -534,7 +602,14 @@ mod tests {
         let en = i18n::catalog(i18n::Language::En);
         let mut missing = Vec::new();
         for s in registry() {
-            let mut texts = vec![s.group, s.name, s.description, s.group_note, s.unit, s.reason];
+            let mut texts = vec![
+                s.group,
+                s.name,
+                s.description,
+                s.group_note,
+                s.unit,
+                s.reason,
+            ];
             texts.extend(s.options.iter().flat_map(|o| [o.1, o.2]));
             for text in texts {
                 let has_han = text.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c));
@@ -548,14 +623,27 @@ mod tests {
 
     #[test]
     fn visualization_settings_match_the_protocol() {
-        let opts = |k: &str| by_key(k).unwrap().options.iter().map(|o| o.0).collect::<Vec<_>>();
+        let opts = |k: &str| {
+            by_key(k)
+                .unwrap()
+                .options
+                .iter()
+                .map(|o| o.0)
+                .collect::<Vec<_>>()
+        };
         assert_eq!(opts("appearance.default_visual"), BUILTIN_VISUALS);
         let modes: Vec<&str> = ColorModeName::ALL.iter().map(|m| m.as_str()).collect();
-        for key in ["appearance.default_color_mode", "appearance.partition_color_mode"] {
+        for key in [
+            "appearance.default_color_mode",
+            "appearance.partition_color_mode",
+        ] {
             assert_eq!(opts(key), modes, "{key}");
         }
         assert_eq!(defaults()["appearance.default_visual"], "treemap".into());
-        assert_eq!(defaults()["appearance.partition_color_mode"], "branch".into());
+        assert_eq!(
+            defaults()["appearance.partition_color_mode"],
+            "branch".into()
+        );
         assert_eq!(defaults()["treemap.flame_origin"], "bottom".into());
         let mut v = defaults().clone();
         v.insert("appearance.default_visual".into(), "pie".into());
@@ -573,31 +661,69 @@ mod tests {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let s2 = seen.clone();
         st.add_listener("t", move |s| s2.lock().push(s.version()));
-        st.update(&vals(&[("scan.unit_base", "1000".into()), ("treemap.min_element", 16.into())]), None)
-            .unwrap();
+        st.update(
+            &vals(&[
+                ("scan.unit_base", "1000".into()),
+                ("treemap.min_element", 16.into()),
+            ]),
+            None,
+        )
+        .unwrap();
         assert_eq!(st.unit_base(), UnitBase::Si);
         assert_eq!(*seen.lock(), [1]);
-        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
-        assert_eq!(saved["values"], serde_json::json!({"scan.unit_base": "1000", "treemap.min_element": 16}));
+        let saved: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(
+            saved["values"],
+            serde_json::json!({"scan.unit_base": "1000", "treemap.min_element": 16})
+        );
         assert_eq!(SettingsStore::new(Some(file.clone())).values(), st.values());
         let bad = |k: &str, v: SettingValue| st.update(&vals(&[(k, v)]), None).unwrap_err();
-        assert!(matches!(bad("treemap.min_element", 99.into()), SettingsError::Invalid(_)));
-        assert!(matches!(bad("treemap.min_element", 9.5.into()), SettingsError::Invalid(_)));
-        assert!(matches!(bad("scan.unit_base", "999".into()), SettingsError::Invalid(_)));
-        assert!(matches!(bad("appearance.accent", "red".into()), SettingsError::Invalid(_)));
+        assert!(matches!(
+            bad("treemap.min_element", 99.into()),
+            SettingsError::Invalid(_)
+        ));
+        assert!(matches!(
+            bad("treemap.min_element", 9.5.into()),
+            SettingsError::Invalid(_)
+        ));
+        assert!(matches!(
+            bad("scan.unit_base", "999".into()),
+            SettingsError::Invalid(_)
+        ));
+        assert!(matches!(
+            bad("appearance.accent", "red".into()),
+            SettingsError::Invalid(_)
+        ));
         assert!(matches!(bad("nope", 1.into()), SettingsError::Invalid(_)));
-        assert!(matches!(bad("treemap.dynazoom", true.into()), SettingsError::Invalid(_)));
-        assert!(matches!(bad("general.hover_age", 1.into()), SettingsError::Invalid(_)));
+        assert!(matches!(
+            bad("treemap.dynazoom", true.into()),
+            SettingsError::Invalid(_)
+        ));
+        assert!(matches!(
+            bad("general.hover_age", 1.into()),
+            SettingsError::Invalid(_)
+        ));
         assert!(matches!(
             st.update(&vals(&[("treemap.min_element", 12.into())]), Some(0)),
             Err(SettingsError::Conflict(_))
         ));
-        st.update(&vals(&[("treemap.min_element", 12.into())]), Some(st.version())).unwrap();
+        st.update(
+            &vals(&[("treemap.min_element", 12.into())]),
+            Some(st.version()),
+        )
+        .unwrap();
         assert_eq!(st.get_int("treemap.min_element"), 12);
-        assert!(!st.update(&vals(&[("treemap.min_element", 12.into())]), None).unwrap()); // no change
+        assert!(
+            !st.update(&vals(&[("treemap.min_element", 12.into())]), None)
+                .unwrap()
+        ); // no change
         assert_eq!(*seen.lock(), [1, 2]);
         st.reset(Some(SettingCategory::Treemap)).unwrap();
-        assert_eq!(st.get("treemap.min_element"), defaults().get("treemap.min_element").cloned());
+        assert_eq!(
+            st.get("treemap.min_element"),
+            defaults().get("treemap.min_element").cloned()
+        );
         assert_eq!(st.get_str("scan.unit_base"), "1000"); // other pages untouched
         st.reset(None).unwrap();
         assert_eq!(st.values(), *defaults());
@@ -609,12 +735,18 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let file = tmp.path().join("settings.json");
         let st = SettingsStore::new(Some(file.clone()));
-        st.update(&vals(&[("general.hover_age", false.into())]), None).unwrap();
+        st.update(&vals(&[("general.hover_age", false.into())]), None)
+            .unwrap();
         let touch = |secs: u64| {
             let f = std::fs::File::options().write(true).open(&file).unwrap();
-            f.set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs)).unwrap();
+            f.set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+                .unwrap();
         };
-        std::fs::write(&file, r#"{"version": 1, "values": {"general.hover_age": true, "tags.omit_ctrl": false}}"#).unwrap();
+        std::fs::write(
+            &file,
+            r#"{"version": 1, "values": {"general.hover_age": true, "tags.omit_ctrl": false}}"#,
+        )
+        .unwrap();
         touch(1);
         assert!(st.poll());
         assert!(!st.get_bool("tags.omit_ctrl") && st.error().is_empty());
@@ -643,7 +775,11 @@ mod tests {
         let st = SettingsStore::new(Some(tmp.path().join("s.json")));
         let state = st.state();
         assert_eq!(state.meta.len(), registry().len());
-        let lang = state.meta.iter().find(|m| m.key == "general.language").unwrap();
+        let lang = state
+            .meta
+            .iter()
+            .find(|m| m.key == "general.language")
+            .unwrap();
         assert_eq!(lang.name, "界面语言");
         i18n::set_language(i18n::Language::En);
         let meta = meta();
@@ -651,6 +787,12 @@ mod tests {
         let lang = meta.iter().find(|m| m.key == "general.language").unwrap();
         assert_ne!(lang.name, "界面语言");
         assert!(lang.synonyms.iter().any(|s| s == "界面语言"));
-        assert!(!meta.iter().find(|m| m.key == "treemap.dynazoom").unwrap().enabled);
+        assert!(
+            !meta
+                .iter()
+                .find(|m| m.key == "treemap.dynazoom")
+                .unwrap()
+                .enabled
+        );
     }
 }

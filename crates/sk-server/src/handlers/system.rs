@@ -8,7 +8,7 @@ use sk_protocol::streams::{SubscribeResult, TOPIC_LOG};
 use sk_protocol::system::{PingResult, PlatformInfo, ShutdownResult, SystemInfo};
 use sk_protocol::{CAP_LOG_STREAM, CAP_SUBSCRIPTIONS, EmptyResult, ErrorCode};
 
-use crate::rpc::{RpcError, Router};
+use crate::rpc::{Router, RpcError};
 use crate::topics::{TopicRegistry, open_log};
 
 /// The OS release (`platform.release()`), asked once.
@@ -22,7 +22,10 @@ fn read_os_release() -> String {
     #[cfg(windows)]
     {
         // RtlGetVersion is the honest one; the version from the registry is good enough here
-        if let Ok(out) = std::process::Command::new("cmd").args(["/C", "ver"]).output() {
+        if let Ok(out) = std::process::Command::new("cmd")
+            .args(["/C", "ver"])
+            .output()
+        {
             let text = String::from_utf8_lossy(&out.stdout);
             if let Some(v) = text.split("Version ").nth(1) {
                 let v = v.trim().trim_end_matches(']');
@@ -83,22 +86,35 @@ fn machine() -> &'static str {
 }
 
 pub fn install(r: &mut Router, t: &mut TopicRegistry) {
-    t.register(TOPIC_LOG, |server, session, params| open_log(server.log_bus.clone(), session, params));
+    t.register(TOPIC_LOG, |server, session, params| {
+        open_log(server.log_bus.clone(), session, params)
+    });
 
     r.add::<SystemInfoMethod, _, _>(|call, _| async move {
         let server = &call.server;
-        let (release, fda) = crate::compute::blocking(|| (os_release(), sk_core::privacy::full_disk_access(None))).await?;
+        let (release, fda) =
+            crate::compute::blocking(|| (os_release(), sk_core::privacy::full_disk_access(None)))
+                .await?;
         Ok(SystemInfo {
             server: server.server_info.clone(),
             pid: i64::from(std::process::id()),
             started_at: server.started_at,
-            platform: PlatformInfo { system: os_system().to_owned(), release, machine: machine().to_owned() },
+            platform: PlatformInfo {
+                system: os_system().to_owned(),
+                release,
+                machine: machine().to_owned(),
+            },
             sessions: server.sessions().len() as i64,
             full_disk_access: fda,
         })
     });
 
-    r.add::<SystemPing, _, _>(|_, p| async move { Ok(PingResult { payload: p.payload, server_time: chrono::Utc::now() }) });
+    r.add::<SystemPing, _, _>(|_, p| async move {
+        Ok(PingResult {
+            payload: p.payload,
+            server_time: chrono::Utc::now(),
+        })
+    });
 
     r.add::<AppShutdown, _, _>(|call, _| async move {
         // answer first, then stop: the response must reach the client before sockets close
@@ -113,10 +129,14 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
     r.add::<Subscribe, _, _>(|call, p| async move {
         let s = &call.session;
         if !s.has_cap(CAP_SUBSCRIPTIONS) {
-            return Err(RpcError::invalid_request("subscriptions capability was not negotiated"));
+            return Err(RpcError::invalid_request(
+                "subscriptions capability was not negotiated",
+            ));
         }
         if p.topic == TOPIC_LOG && !s.has_cap(CAP_LOG_STREAM) {
-            return Err(RpcError::invalid_request("log-stream capability was not negotiated"));
+            return Err(RpcError::invalid_request(
+                "log-stream capability was not negotiated",
+            ));
         }
         let sub = call.server.topics.open(&call.server, s, &p)?;
         let id = sub.id.clone();
@@ -126,7 +146,10 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
 
     r.add::<Unsubscribe, _, _>(|call, p| async move {
         if !call.session.remove_subscription(&p.sub) {
-            return Err(RpcError::new(ErrorCode::UnknownSubscription, format!("unknown subscription: {}", p.sub)));
+            return Err(RpcError::new(
+                ErrorCode::UnknownSubscription,
+                format!("unknown subscription: {}", p.sub),
+            ));
         }
         Ok(EmptyResult {})
     });

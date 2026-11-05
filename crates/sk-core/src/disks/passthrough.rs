@@ -183,7 +183,9 @@ pub fn read_nvme_log(kernel: &mut dyn Kernel) -> Result<Vec<u8>, RecordError> {
         )));
     }
     if buf.iter().all(|&b| b == 0) {
-        return Err(RecordError::Passthrough(t("NVMe 控制器返回了空的健康日志").to_owned()));
+        return Err(RecordError::Passthrough(
+            t("NVMe 控制器返回了空的健康日志").to_owned(),
+        ));
     }
     Ok(buf)
 }
@@ -270,7 +272,12 @@ pub fn sg_failure(hdr: &SgIoHdr, sense: &[u8]) -> Option<String> {
             return None; // NO SENSE / RECOVERED ERROR: done
         }
     }
-    Some(tr!("设备报告 {key:x}/{asc:02x}/{ascq:02x}", key = key, asc = asc, ascq = ascq))
+    Some(tr!(
+        "设备报告 {key:x}/{asc:02x}/{ascq:02x}",
+        key = key,
+        asc = asc,
+        ascq = ascq
+    ))
 }
 
 /// One 512-byte PIO data-in command through SG_IO.
@@ -295,7 +302,10 @@ pub fn ata_read(kernel: &mut dyn Kernel, cdb: &[u8; 16]) -> Result<Vec<u8>, Reco
         return Err(RecordError::Passthrough(why));
     }
     if hdr.resid > 0 {
-        return Err(RecordError::Passthrough(tr!("只读回 {n} 字节", n = SECTOR as i64 - hdr.resid as i64)));
+        return Err(RecordError::Passthrough(tr!(
+            "只读回 {n} 字节",
+            n = SECTOR as i64 - hdr.resid as i64
+        )));
     }
     Ok(data)
 }
@@ -312,14 +322,24 @@ pub type AtaPages = (Vec<u8>, Vec<u8>, Option<Vec<u8>>);
 pub fn read_ata(kernel: &mut dyn Kernel) -> Result<AtaPages, RecordError> {
     let identify = ata_read(kernel, &identify_device())?;
     if identify.iter().all(|&b| b == 0) || !identify_ok(&identify) {
-        return Err(RecordError::Passthrough(t("磁盘返回的识别信息无效").to_owned()));
+        return Err(RecordError::Passthrough(
+            t("磁盘返回的识别信息无效").to_owned(),
+        ));
     }
-    let general = ata_read(kernel, &read_log_ext(ATA_LOG_DEVICE_STATISTICS, STATS_GENERAL))?;
+    let general = ata_read(
+        kernel,
+        &read_log_ext(ATA_LOG_DEVICE_STATISTICS, STATS_GENERAL),
+    )?;
     if general[2] != STATS_GENERAL {
         // the page header names its page
-        return Err(RecordError::Passthrough(t("磁盘没有设备统计日志").to_owned()));
+        return Err(RecordError::Passthrough(
+            t("磁盘没有设备统计日志").to_owned(),
+        ));
     }
-    let temperature = match ata_read(kernel, &read_log_ext(ATA_LOG_DEVICE_STATISTICS, STATS_TEMPERATURE)) {
+    let temperature = match ata_read(
+        kernel,
+        &read_log_ext(ATA_LOG_DEVICE_STATISTICS, STATS_TEMPERATURE),
+    ) {
         Ok(page) if page[2] == STATS_TEMPERATURE => Some(page),
         Ok(_) | Err(RecordError::Passthrough(_)) => None,
         Err(e) => return Err(e),
@@ -346,7 +366,10 @@ pub fn read_record<K: Kernel>(
         out.insert("kind".into(), "ata".into());
         out.insert("identify".into(), hex(&identify));
         out.insert("general".into(), hex(&general));
-        out.insert("temperature".into(), temperature.map(|p| hex(&p)).unwrap_or_default());
+        out.insert(
+            "temperature".into(),
+            temperature.map(|p| hex(&p)).unwrap_or_default(),
+        );
     }
     Ok(out)
 }
@@ -360,15 +383,29 @@ impl Kernel for SystemDisk {
     fn nvme_admin(&mut self, cmd: &mut NvmeAdminCmd) -> io::Result<i32> {
         use std::os::fd::AsRawFd;
         // SAFETY: a valid fd and a command whose buffer outlives the call.
-        let rc = unsafe { libc::ioctl(self.0.as_raw_fd(), NVME_IOCTL_ADMIN_CMD as _, cmd as *mut NvmeAdminCmd) };
-        if rc < 0 { Err(io::Error::last_os_error()) } else { Ok(rc) }
+        let rc = unsafe {
+            libc::ioctl(
+                self.0.as_raw_fd(),
+                NVME_IOCTL_ADMIN_CMD as _,
+                cmd as *mut NvmeAdminCmd,
+            )
+        };
+        if rc < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(rc)
+        }
     }
 
     fn sg_io(&mut self, hdr: &mut SgIoHdr) -> io::Result<()> {
         use std::os::fd::AsRawFd;
         // SAFETY: a valid fd and a header whose buffers outlive the call.
         let rc = unsafe { libc::ioctl(self.0.as_raw_fd(), SG_IO as _, hdr as *mut SgIoHdr) };
-        if rc < 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+        if rc < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -394,7 +431,10 @@ pub fn open_disk(name: &str) -> Result<SystemDisk, RecordError> {
     let path = std::ffi::CString::new(format!("/dev/{name}")).map_err(|_| not_a_disk(name))?;
     // SAFETY: a valid C string.
     let fd = unsafe {
-        libc::open(path.as_ptr(), libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOFOLLOW)
+        libc::open(
+            path.as_ptr(),
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_CLOEXEC | libc::O_NOFOLLOW,
+        )
     };
     if fd < 0 {
         return Err(io::Error::last_os_error().into());
@@ -403,7 +443,10 @@ pub fn open_disk(name: &str) -> Result<SystemDisk, RecordError> {
     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
     let file = std::fs::File::from(fd);
     if !file.metadata()?.file_type().is_block_device() {
-        return Err(RecordError::Invalid(tr!("不是块设备：/dev/{name}", name = name)));
+        return Err(RecordError::Invalid(tr!(
+            "不是块设备：/dev/{name}",
+            name = name
+        )));
     }
     Ok(SystemDisk(file.into()))
 }
@@ -423,7 +466,10 @@ mod tests {
     #[test]
     fn command_layouts() {
         assert_eq!(size_of::<NvmeAdminCmd>(), 72); // struct nvme_passthru_cmd
-        assert_eq!((3u64 << 30) | (72 << 16) | ((b'N' as u64) << 8) | 0x41, NVME_IOCTL_ADMIN_CMD);
+        assert_eq!(
+            (3u64 << 30) | (72 << 16) | ((b'N' as u64) << 8) | 0x41,
+            NVME_IOCTL_ADMIN_CMD
+        );
         if size_of::<usize>() == 8 {
             assert_eq!(size_of::<SgIoHdr>(), 88); // struct sg_io_hdr on 64-bit Linux
             assert_eq!(std::mem::offset_of!(SgIoHdr, dxferp), 16);
@@ -432,24 +478,47 @@ mod tests {
             assert_eq!(std::mem::offset_of!(SgIoHdr, resid), 72);
         }
         let cmd = nvme_get_log(0x1234, 512, NVME_LOG_SMART);
-        assert_eq!((cmd.opcode, cmd.nsid, cmd.addr, cmd.data_len), (0x02, 0xFFFF_FFFF, 0x1234, 512));
+        assert_eq!(
+            (cmd.opcode, cmd.nsid, cmd.addr, cmd.data_len),
+            (0x02, 0xFFFF_FFFF, 0x1234, 512)
+        );
         assert_eq!(cmd.cdw10, 0x007F_0002); // 128 dwords (0-based), log 02h
     }
 
     #[test]
     fn ata_commands() {
-        assert_eq!(identify_device(), [0x85, 0x08, 0x0E, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xEC, 0]);
+        assert_eq!(
+            identify_device(),
+            [0x85, 0x08, 0x0E, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0xEC, 0]
+        );
         // READ LOG EXT, 48-bit: log address in LBA 7:0, page in 15:8
-        assert_eq!(read_log_ext(0x04, 0x01), [0x85, 0x09, 0x0E, 0, 0, 0, 1, 0, 0x04, 0, 0x01, 0, 0, 0, 0x2F, 0]);
+        assert_eq!(
+            read_log_ext(0x04, 0x01),
+            [
+                0x85, 0x09, 0x0E, 0, 0, 0, 1, 0, 0x04, 0, 0x01, 0, 0, 0, 0x2F, 0
+            ]
+        );
         assert_eq!(read_log_ext(0x04, 0x05)[10], 0x05);
     }
 
     #[test]
     fn disk_names() {
-        for bad in ["sda1", "nvme0", "nvme0n1p2", "../sda", "sda/../../etc/shadow", "loop0", "dm-0", ""] {
+        for bad in [
+            "sda1",
+            "nvme0",
+            "nvme0n1p2",
+            "../sda",
+            "sda/../../etc/shadow",
+            "loop0",
+            "dm-0",
+            "",
+        ] {
             let err = check_disk_name(bad).unwrap_err();
             assert!(matches!(err, RecordError::Invalid(_)), "{bad}");
-            assert!(err.to_string().contains("不是一块磁盘") || err.to_string().contains("disk"), "{err}");
+            assert!(
+                err.to_string().contains("不是一块磁盘") || err.to_string().contains("disk"),
+                "{err}"
+            );
         }
     }
 
@@ -493,7 +562,10 @@ mod tests {
         }
 
         fn sg_io(&mut self, hdr: &mut SgIoHdr) -> io::Result<()> {
-            assert_eq!((hdr.interface_id, hdr.dxfer_direction), (b'S' as i32, SG_DXFER_FROM_DEV));
+            assert_eq!(
+                (hdr.interface_id, hdr.dxfer_direction),
+                (b'S' as i32, SG_DXFER_FROM_DEV)
+            );
             if self.resid != 0 {
                 hdr.resid = self.resid;
                 return Ok(());
@@ -502,7 +574,11 @@ mod tests {
             let cdb = unsafe { std::slice::from_raw_parts(hdr.cmdp, hdr.cmd_len as usize) };
             let key = (cdb[14], cdb[10]);
             let default = Reply::Check(0x02, vec![0x72, 0x05, 0x20, 0x00, 0, 0, 0, 0]);
-            let reply = self.replies.iter().find(|(k, _)| *k == key).map_or(&default, |(_, r)| r);
+            let reply = self
+                .replies
+                .iter()
+                .find(|(k, _)| *k == key)
+                .map_or(&default, |(_, r)| r);
             match reply {
                 Reply::Data(d) => unsafe {
                     std::ptr::copy_nonoverlapping(d.as_ptr(), hdr.dxferp as *mut u8, d.len());
@@ -557,20 +633,38 @@ mod tests {
 
     #[test]
     fn nvme_record() {
-        let log = nvme_log(&[("units_read", 206_874_470), ("units_written", 493_120_475), ("cycles", 686), ("hours", 8070)]);
+        let log = nvme_log(&[
+            ("units_read", 206_874_470),
+            ("units_written", 493_120_475),
+            ("cycles", 686),
+            ("hours", 8070),
+        ]);
         let got = read_record("nvme0n1", |_| Ok(Fake::nvme(log.clone(), 0))).unwrap();
         assert_eq!(got, pages(&[("kind", "nvme".into()), ("log", hex(&log))]));
         let record = from_pages(&got).unwrap();
         assert_eq!(record.written_bytes, Some(493_120_475 * 512_000));
         assert!(nvme_health(&log).is_some());
         let err = read_record("nvme0n1", |_| Ok(Fake::nvme(log.clone(), 0x2))).unwrap_err();
-        assert!(matches!(&err, RecordError::Passthrough(m) if m.contains("0x2")), "{err}");
-        assert!(matches!(read_record("nvme0n1", |_| Ok(Fake::nvme(vec![0; 512], 0))), Err(RecordError::Passthrough(_))));
+        assert!(
+            matches!(&err, RecordError::Passthrough(m) if m.contains("0x2")),
+            "{err}"
+        );
+        assert!(matches!(
+            read_record("nvme0n1", |_| Ok(Fake::nvme(vec![0; 512], 0))),
+            Err(RecordError::Passthrough(_))
+        ));
     }
 
     #[test]
     fn ata_record() {
-        let general = stats_page(1, &[(0x08, qword(2859, true)), (0x10, qword(30322, true)), (0x18, qword(25_974_947_733, true))]);
+        let general = stats_page(
+            1,
+            &[
+                (0x08, qword(2859, true)),
+                (0x10, qword(30322, true)),
+                (0x18, qword(25_974_947_733, true)),
+            ],
+        );
         let temps = stats_page(5, &[(0x08, qword(31, true))]);
         let kernel = || {
             Fake::sat(vec![
@@ -590,7 +684,14 @@ mod tests {
             ])
         );
         let record = from_pages(&got).unwrap();
-        assert_eq!((record.power_cycles, record.power_on_hours, record.temperature_c), (Some(2859), Some(30322), Some(31)));
+        assert_eq!(
+            (
+                record.power_cycles,
+                record.power_on_hours,
+                record.temperature_c
+            ),
+            (Some(2859), Some(30322), Some(31))
+        );
         assert_eq!(record.written_bytes, Some(25_974_947_733 * 4096)); // 4 KiB logical sectors
 
         // no temperature page: the rest still comes back
@@ -601,7 +702,10 @@ mod tests {
         ]);
         let got = read_record("sdb", |_| Ok(no_temp)).unwrap();
         assert_eq!(got["temperature"], "");
-        assert_eq!(from_pages(&got).unwrap().written_bytes, Some(25_974_947_733 * 512));
+        assert_eq!(
+            from_pages(&got).unwrap().written_bytes,
+            Some(25_974_947_733 * 512)
+        );
     }
 
     #[test]
@@ -616,15 +720,30 @@ mod tests {
             ((0x2F, 1), Reply::Check(0x02, ata_error_sense())),
         ]);
         let err = read_record("sdd", |_| Ok(no_log)).unwrap_err();
-        assert!(err.to_string().contains("拒绝") || err.to_string().contains("refused"), "{err}");
+        assert!(
+            err.to_string().contains("拒绝") || err.to_string().contains("refused"),
+            "{err}"
+        );
         // a page that isn't the one asked for
-        let wrong = Fake::sat(vec![((0xEC, 0), Reply::Data(identify_words(None))), ((0x2F, 1), Reply::Data(stats_page(3, &[])))]);
-        assert!(matches!(read_record("sde", |_| Ok(wrong)), Err(RecordError::Passthrough(_))));
+        let wrong = Fake::sat(vec![
+            ((0xEC, 0), Reply::Data(identify_words(None))),
+            ((0x2F, 1), Reply::Data(stats_page(3, &[]))),
+        ]);
+        assert!(matches!(
+            read_record("sde", |_| Ok(wrong)),
+            Err(RecordError::Passthrough(_))
+        ));
         // identify data that fails its checksum
         let mut broken = identify_words(None);
         broken[0] ^= 1;
-        let bad = Fake::sat(vec![((0xEC, 0), Reply::Data(broken)), ((0x2F, 1), Reply::Data(general))]);
-        assert!(matches!(read_record("sdf", |_| Ok(bad)), Err(RecordError::Passthrough(_))));
+        let bad = Fake::sat(vec![
+            ((0xEC, 0), Reply::Data(broken)),
+            ((0x2F, 1), Reply::Data(general)),
+        ]);
+        assert!(matches!(
+            read_record("sdf", |_| Ok(bad)),
+            Err(RecordError::Passthrough(_))
+        ));
     }
 
     #[test]

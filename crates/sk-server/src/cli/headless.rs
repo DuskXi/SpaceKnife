@@ -7,7 +7,7 @@
 
 use std::io::{IsTerminal as _, Write as _};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs as _};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Args;
 
@@ -88,7 +88,9 @@ pub fn parse_listen(text: &str) -> Result<Listen, CliError> {
         host = LOOPBACK.into();
         port = Some(v.into());
     } else if let Some(rest) = v.strip_prefix('[') {
-        let Some(close) = rest.find(']') else { return Err(CliError::BadAddress) };
+        let Some(close) = rest.find(']') else {
+            return Err(CliError::BadAddress);
+        };
         let inner = &rest[..close];
         let after = &rest[close + 1..];
         if !is_v6(inner) {
@@ -110,7 +112,11 @@ pub fn parse_listen(text: &str) -> Result<Listen, CliError> {
         port = None;
     } else if let Some(at) = v.find(':') {
         let h = &v[..at];
-        host = if h.is_empty() { LOOPBACK.into() } else { h.into() };
+        host = if h.is_empty() {
+            LOOPBACK.into()
+        } else {
+            h.into()
+        };
         let p = &v[at + 1..];
         if !digits(p) {
             return Err(CliError::BadPort);
@@ -127,7 +133,10 @@ pub fn parse_listen(text: &str) -> Result<Listen, CliError> {
         None => DEFAULT_PORT,
         Some(p) => p.parse::<u16>().map_err(|_| CliError::BadPort)?,
     };
-    Ok(Listen { host: host.strip_suffix('.').unwrap_or(&host).to_owned(), port })
+    Ok(Listen {
+        host: host.strip_suffix('.').unwrap_or(&host).to_owned(),
+        port,
+    })
 }
 
 /// How far an address reaches. A host name other than localhost counts as the network: what it
@@ -152,7 +161,11 @@ pub fn exposure(host: &str) -> Exposure {
 
 /// A host as it appears in a URL (IPv6 in brackets).
 pub fn url_host(host: &str) -> String {
-    if is_v6(host) { format!("[{host}]") } else { host.to_owned() }
+    if is_v6(host) {
+        format!("[{host}]")
+    } else {
+        host.to_owned()
+    }
 }
 
 /// An address in the terminal's texts: host:port, IPv6 bracketed.
@@ -182,11 +195,27 @@ fn encode_uri_component(s: &str) -> String {
 /// The addresses to open in a browser: the one listened on, or for 0.0.0.0 / :: each address of
 /// this computer that others can reach (IPv4; IPv6 too for ::, without link-local ones), then this
 /// computer's own. The token rides in the fragment, which browsers don't send to the server.
-pub fn browser_urls(listen: &Listen, port: u16, token: &str, secure: bool, interfaces: &[NetworkAddress]) -> Vec<String> {
+pub fn browser_urls(
+    listen: &Listen,
+    port: u16,
+    token: &str,
+    secure: bool,
+    interfaces: &[NetworkAddress],
+) -> Vec<String> {
     let scheme = if secure { "https" } else { "http" };
-    let url = |host: &str| format!("{scheme}://{}:{port}/#token={}", url_host(host), encode_uri_component(token));
+    let url = |host: &str| {
+        format!(
+            "{scheme}://{}:{port}/#token={}",
+            url_host(host),
+            encode_uri_component(token)
+        )
+    };
     if exposure(&listen.host) != Exposure::All {
-        return vec![url(if listen.host == LOOPBACK { "localhost" } else { &listen.host })];
+        return vec![url(if listen.host == LOOPBACK {
+            "localhost"
+        } else {
+            &listen.host
+        })];
     }
     let v6 = listen.host != "0.0.0.0";
     let mut hosts: Vec<String> = Vec::new();
@@ -197,8 +226,12 @@ pub fn browser_urls(listen: &Listen, port: u16, token: &str, secure: bool, inter
         let text = a.address.to_string();
         let ok = match a.address {
             IpAddr::V4(_) => true,
-            IpAddr::V6(_) => v6 && !text.to_lowercase().starts_with("fe8") && !text.to_lowercase().starts_with("fe9")
-                && !text.to_lowercase().starts_with("fea") && !text.to_lowercase().starts_with("feb"),
+            IpAddr::V6(_) => {
+                v6 && !text.to_lowercase().starts_with("fe8")
+                    && !text.to_lowercase().starts_with("fe9")
+                    && !text.to_lowercase().starts_with("fea")
+                    && !text.to_lowercase().starts_with("feb")
+            }
         };
         if ok && !hosts.contains(&text) {
             hosts.push(text);
@@ -307,7 +340,15 @@ pub fn warning_lines(lang: Lang, listen: &Listen, user: &str, secure: bool) -> V
     let address = show_listen(listen);
     vec![
         ht(lang, "warnTitle", &[]),
-        ht(lang, if exposure(&listen.host) == Exposure::All { "warnAll" } else { "warnOne" }, &[("address", address)]),
+        ht(
+            lang,
+            if exposure(&listen.host) == Exposure::All {
+                "warnAll"
+            } else {
+                "warnOne"
+            },
+            &[("address", address)],
+        ),
         ht(lang, "warnPower", &[("user", user.to_owned())]),
         ht(lang, "warnToken", &[]),
         ht(lang, if secure { "warnTls" } else { "warnPlain" }, &[]),
@@ -332,42 +373,87 @@ pub fn listen_error(lang: Lang, listen: &Listen, err: &std::io::Error) -> String
 }
 
 fn user_name() -> String {
-    std::env::var("USERNAME").or_else(|_| std::env::var("USER")).unwrap_or_else(|_| "?".into())
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "?".into())
 }
 
 fn paint(tty: bool, code: &str, text: &str) -> String {
-    if tty { format!("\x1b[{code}m{text}\x1b[0m") } else { text.to_owned() }
+    if tty {
+        format!("\x1b[{code}m{text}\x1b[0m")
+    } else {
+        text.to_owned()
+    }
 }
 
-/// The built interface next to the executable: `ui/`, else `resources/ui/` (an install layout).
+/// The built interface the app bundle ships (`tauri.bundle.json` resource `ui/`), found from the executable.
 pub fn default_ui_dir() -> PathBuf {
     let exe = std::env::current_exe().ok();
-    let dir = exe.as_deref().and_then(|e| e.parent()).map(PathBuf::from).unwrap_or_default();
-    for candidate in [dir.join("ui"), dir.join("resources").join("ui")] {
-        if candidate.join("index.html").is_file() {
-            return candidate;
-        }
+    // an installed /usr/bin entry may be a link: look from where the program really is
+    let exe = exe.map(|e| std::fs::canonicalize(&e).unwrap_or(e));
+    let dir = exe
+        .as_deref()
+        .and_then(|e| e.parent())
+        .map(PathBuf::from)
+        .unwrap_or_default();
+    ui_candidates(&dir)
+        .into_iter()
+        .find(|c| c.join("index.html").is_file())
+        .unwrap_or_else(|| dir.join("ui"))
+}
+
+/// Where Tauri's bundles put the `ui/` resource, relative to the folder of `spaceknife-cli`:
+/// - portable copies and the Windows installer: next to the program (`ui/`, older layouts `resources/ui/`);
+/// - deb / rpm (`/usr/bin` → `/usr/lib/SpaceKnife`) and the AppImage (`usr/bin` → `usr/lib/SpaceKnife`);
+/// - macOS (`SpaceKnife.app/Contents/MacOS` → `Contents/Resources`).
+pub fn ui_candidates(dir: &Path) -> Vec<PathBuf> {
+    let mut out = vec![dir.join("ui"), dir.join("resources").join("ui")];
+    if let Some(up) = dir.parent() {
+        out.push(up.join("lib").join("SpaceKnife").join("ui"));
+        out.push(up.join("lib").join("spaceknife").join("ui"));
+        out.push(up.join("Resources").join("ui"));
     }
-    dir.join("ui")
+    out
 }
 
 /// `spaceknife-cli headless`: returns the exit code.
 pub fn headless(args: HeadlessArgs) -> i32 {
     super::apply_language();
-    let lang = if sk_core::i18n::language() == sk_core::i18n::Language::ZhCn { Lang::Zh } else { Lang::En };
+    let lang = if sk_core::i18n::language() == sk_core::i18n::Language::ZhCn {
+        Lang::Zh
+    } else {
+        Lang::En
+    };
     let port = DEFAULT_PORT.to_string();
     let err_tty = std::io::stderr().is_terminal();
     let out_tty = std::io::stdout().is_terminal();
     let fail = |key: &str, value: &str| {
-        eprintln!("{}", ht(lang, key, &[("value", value.to_owned()), ("port", port.clone())]));
+        eprintln!(
+            "{}",
+            ht(
+                lang,
+                key,
+                &[("value", value.to_owned()), ("port", port.clone())]
+            )
+        );
         eprintln!("{}", ht(lang, "seeHelp", &[]));
         2
     };
     if args.tls_cert.is_some() != args.tls_key.is_some() {
-        return fail("tlsPair", if args.tls_cert.is_none() { "--tls-cert" } else { "--tls-key" });
+        return fail(
+            "tlsPair",
+            if args.tls_cert.is_none() {
+                "--tls-cert"
+            } else {
+                "--tls-key"
+            },
+        );
     }
     let listen = match args.listen.as_deref() {
-        None => Listen { host: LOOPBACK.into(), port: DEFAULT_PORT },
+        None => Listen {
+            host: LOOPBACK.into(),
+            port: DEFAULT_PORT,
+        },
         Some(text) => match parse_listen(text) {
             Ok(l) => l,
             Err(CliError::BadAddress) => return fail("badAddress", text),
@@ -378,7 +464,14 @@ pub fn headless(args: HeadlessArgs) -> i32 {
         (Some(c), Some(k)) => {
             for f in [c, k] {
                 if let Err(e) = std::fs::read(f) {
-                    eprintln!("{}", ht(lang, "tlsRead", &[("error", format!("{}: {e}", f.display()))]));
+                    eprintln!(
+                        "{}",
+                        ht(
+                            lang,
+                            "tlsRead",
+                            &[("error", format!("{}: {e}", f.display()))]
+                        )
+                    );
                     return 2;
                 }
             }
@@ -388,14 +481,20 @@ pub fn headless(args: HeadlessArgs) -> i32 {
     };
     let ui = args.ui.clone().unwrap_or_else(default_ui_dir);
     if !ui.join("index.html").is_file() {
-        eprintln!("{}", ht(lang, "noUi", &[("path", ui.display().to_string())]));
+        eprintln!(
+            "{}",
+            ht(lang, "noUi", &[("path", ui.display().to_string())])
+        );
         return 2;
     }
     let reach = exposure(&listen.host);
     if reach != Exposure::Loopback {
         let lines = warning_lines(lang, &listen, &user_name(), tls.is_some());
         eprintln!();
-        eprintln!("{}", paint(err_tty, "1;97;41", &format!(" ⚠ {} ", lines[0])));
+        eprintln!(
+            "{}",
+            paint(err_tty, "1;97;41", &format!(" ⚠ {} ", lines[0]))
+        );
         for line in &lines[1..] {
             eprintln!("{}", paint(err_tty, "33", &format!("  {line}")));
         }
@@ -410,7 +509,10 @@ pub fn headless(args: HeadlessArgs) -> i32 {
             eprint!("{}", paint(err_tty, "1", &ht(lang, "question", &[])));
             let _ = std::io::stderr().flush();
             let mut answer = String::new();
-            let got = std::io::stdin().read_line(&mut answer).ok().filter(|&n| n > 0);
+            let got = std::io::stdin()
+                .read_line(&mut answer)
+                .ok()
+                .filter(|&n| n > 0);
             if got.is_none() {
                 eprintln!();
             }
@@ -424,7 +526,10 @@ pub fn headless(args: HeadlessArgs) -> i32 {
     super::serve::init_logging("WARNING", "plain");
     let addr: Option<SocketAddr> = match listen.host.parse::<IpAddr>() {
         Ok(ip) => Some(SocketAddr::new(ip, listen.port)),
-        Err(_) => (listen.host.as_str(), listen.port).to_socket_addrs().ok().and_then(|mut a| a.next()),
+        Err(_) => (listen.host.as_str(), listen.port)
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.next()),
     };
     let Some(addr) = addr else {
         let e = std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "cannot resolve");
@@ -441,7 +546,10 @@ pub fn headless(args: HeadlessArgs) -> i32 {
         app_version: Some(env!("CARGO_PKG_VERSION").to_owned()),
         ..Default::default()
     };
-    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("{}", ht(lang, "backendFailed", &[("error", e.to_string())]));
@@ -454,20 +562,45 @@ pub fn headless(args: HeadlessArgs) -> i32 {
             Err(e) => {
                 match e.chain().find_map(|c| c.downcast_ref::<std::io::Error>()) {
                     Some(io) => eprintln!("{}", listen_error(lang, &listen, io)),
-                    None => eprintln!("{}", ht(lang, "backendFailed", &[("error", format!("{e:#}"))])),
+                    None => eprintln!(
+                        "{}",
+                        ht(lang, "backendFailed", &[("error", format!("{e:#}"))])
+                    ),
                 }
                 return 1;
             }
         };
-        let interfaces = if reach == Exposure::All { network_addresses() } else { Vec::new() };
+        let interfaces = if reach == Exposure::All {
+            network_addresses()
+        } else {
+            Vec::new()
+        };
         println!();
-        println!("{}", paint(out_tty, "1", &ht(lang, "ready", &[("version", env!("CARGO_PKG_VERSION").to_owned())])));
+        println!(
+            "{}",
+            paint(
+                out_tty,
+                "1",
+                &ht(
+                    lang,
+                    "ready",
+                    &[("version", env!("CARGO_PKG_VERSION").to_owned())]
+                )
+            )
+        );
         println!("{}", ht(lang, "openIn", &[]));
         for url in browser_urls(&listen, handle.port, &token, tls.is_some(), &interfaces) {
             println!("  {}", paint(out_tty, "36", &url));
         }
         if reach == Exposure::Loopback {
-            println!("{}", paint(out_tty, "2", &ht(lang, "onlyHere", &[("port", handle.port.to_string())])));
+            println!(
+                "{}",
+                paint(
+                    out_tty,
+                    "2",
+                    &ht(lang, "onlyHere", &[("port", handle.port.to_string())])
+                )
+            );
         } else if tls.is_none() {
             println!("{}", paint(out_tty, "33", &ht(lang, "plainNote", &[])));
         }
@@ -498,11 +631,13 @@ mod imp {
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
     use windows_sys::Win32::Foundation::ERROR_BUFFER_OVERFLOW;
     use windows_sys::Win32::NetworkManagement::IpHelper::{
-        GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses,
-        IF_TYPE_SOFTWARE_LOOPBACK, IP_ADAPTER_ADDRESSES_LH,
+        GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER, GAA_FLAG_SKIP_MULTICAST,
+        GetAdaptersAddresses, IF_TYPE_SOFTWARE_LOOPBACK, IP_ADAPTER_ADDRESSES_LH,
     };
     use windows_sys::Win32::NetworkManagement::Ndis::IfOperStatusUp;
-    use windows_sys::Win32::Networking::WinSock::{AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6};
+    use windows_sys::Win32::Networking::WinSock::{
+        AF_INET, AF_INET6, AF_UNSPEC, SOCKADDR_IN, SOCKADDR_IN6,
+    };
 
     pub fn addresses() -> Vec<NetworkAddress> {
         let flags = GAA_FLAG_SKIP_ANYCAST | GAA_FLAG_SKIP_MULTICAST | GAA_FLAG_SKIP_DNS_SERVER;
@@ -512,7 +647,13 @@ mod imp {
             buf = vec![0u64; (size as usize).div_ceil(8)];
             // SAFETY: a buffer of `size` bytes, 8-aligned.
             let rc = unsafe {
-                GetAdaptersAddresses(AF_UNSPEC as u32, flags, std::ptr::null(), buf.as_mut_ptr().cast(), &mut size)
+                GetAdaptersAddresses(
+                    AF_UNSPEC as u32,
+                    flags,
+                    std::ptr::null(),
+                    buf.as_mut_ptr().cast(),
+                    &mut size,
+                )
             };
             if rc == 0 {
                 break;
@@ -529,14 +670,20 @@ mod imp {
                 let a = &*p;
                 let internal = a.IfType == IF_TYPE_SOFTWARE_LOOPBACK;
                 // as Node's os.networkInterfaces(): adapters that are up
-                let mut u = if a.OperStatus == IfOperStatusUp { a.FirstUnicastAddress } else { std::ptr::null_mut() };
+                let mut u = if a.OperStatus == IfOperStatusUp {
+                    a.FirstUnicastAddress
+                } else {
+                    std::ptr::null_mut()
+                };
                 while !u.is_null() {
                     let sa = (*u).Address.lpSockaddr;
                     if !sa.is_null() {
                         let ip = match (*sa).sa_family {
                             AF_INET => {
                                 let v4 = &*(sa as *const SOCKADDR_IN);
-                                Some(IpAddr::V4(Ipv4Addr::from(u32::from_be(v4.sin_addr.S_un.S_addr))))
+                                Some(IpAddr::V4(Ipv4Addr::from(u32::from_be(
+                                    v4.sin_addr.S_un.S_addr,
+                                ))))
                             }
                             AF_INET6 => {
                                 let v6 = &*(sa as *const SOCKADDR_IN6);
@@ -545,7 +692,10 @@ mod imp {
                             _ => None,
                         };
                         if let Some(ip) = ip {
-                            out.push(NetworkAddress { address: ip, internal: internal || ip.is_loopback() });
+                            out.push(NetworkAddress {
+                                address: ip,
+                                internal: internal || ip.is_loopback(),
+                            });
                         }
                     }
                     u = (*u).Next;
@@ -586,7 +736,10 @@ mod imp {
                         None
                     };
                     if let Some(ip) = ip {
-                        out.push(NetworkAddress { address: ip, internal: internal || ip.is_loopback() });
+                        out.push(NetworkAddress {
+                            address: ip,
+                            internal: internal || ip.is_loopback(),
+                        });
                     }
                 }
                 p = ifa.ifa_next;
@@ -603,7 +756,12 @@ mod tests {
 
     #[test]
     fn listen_values() {
-        let l = |h: &str, p: u16| Ok(Listen { host: h.into(), port: p });
+        let l = |h: &str, p: u16| {
+            Ok(Listen {
+                host: h.into(),
+                port: p,
+            })
+        };
         assert_eq!(parse_listen("9000"), l(LOOPBACK, 9000));
         assert_eq!(parse_listen(":0"), l(LOOPBACK, 0));
         assert_eq!(parse_listen("0.0.0.0"), l("0.0.0.0", DEFAULT_PORT));
@@ -626,18 +784,43 @@ mod tests {
         assert_eq!(exposure("0.0.0.0"), Exposure::All);
         assert_eq!(exposure("::"), Exposure::All);
         assert_eq!(exposure("192.168.1.2"), Exposure::Network);
-        let loop_ = Listen { host: LOOPBACK.into(), port: 8375 };
-        assert_eq!(browser_urls(&loop_, 8375, "a b", false, &[]), ["http://localhost:8375/#token=a%20b"]);
-        let all = Listen { host: "::".into(), port: 1 };
+        let loop_ = Listen {
+            host: LOOPBACK.into(),
+            port: 8375,
+        };
+        assert_eq!(
+            browser_urls(&loop_, 8375, "a b", false, &[]),
+            ["http://localhost:8375/#token=a%20b"]
+        );
+        let all = Listen {
+            host: "::".into(),
+            port: 1,
+        };
         let ifs = [
-            NetworkAddress { address: "10.0.0.2".parse().unwrap(), internal: false },
-            NetworkAddress { address: "fe80::1".parse().unwrap(), internal: false },
-            NetworkAddress { address: "2001:db8::1".parse().unwrap(), internal: false },
-            NetworkAddress { address: "127.0.0.1".parse().unwrap(), internal: true },
+            NetworkAddress {
+                address: "10.0.0.2".parse().unwrap(),
+                internal: false,
+            },
+            NetworkAddress {
+                address: "fe80::1".parse().unwrap(),
+                internal: false,
+            },
+            NetworkAddress {
+                address: "2001:db8::1".parse().unwrap(),
+                internal: false,
+            },
+            NetworkAddress {
+                address: "127.0.0.1".parse().unwrap(),
+                internal: true,
+            },
         ];
         assert_eq!(
             browser_urls(&all, 1, "t", true, &ifs),
-            ["https://10.0.0.2:1/#token=t", "https://[2001:db8::1]:1/#token=t", "https://localhost:1/#token=t"]
+            [
+                "https://10.0.0.2:1/#token=t",
+                "https://[2001:db8::1]:1/#token=t",
+                "https://localhost:1/#token=t"
+            ]
         );
     }
 
@@ -645,5 +828,49 @@ mod tests {
     fn answers() {
         assert!(confirmed(Some("y\n")) && confirmed(Some(" YES ")) && confirmed(Some("ｙ")));
         assert!(!confirmed(Some("")) && !confirmed(None) && !confirmed(Some("n")));
+    }
+}
+
+#[cfg(test)]
+mod ui_dir_tests {
+    use super::ui_candidates;
+    use std::path::Path;
+
+    #[test]
+    fn finds_the_bundles_ui_folder_in_every_install_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let layouts: [(&str, &str); 4] = [
+            ("portable", "ui"),                   // next to the program
+            ("usr/bin", "usr/lib/SpaceKnife/ui"), // deb, rpm, AppImage
+            (
+                "SpaceKnife.app/Contents/MacOS",
+                "SpaceKnife.app/Contents/Resources/ui",
+            ), // macOS
+            ("old", "resources/ui"),
+        ];
+        for (bin, ui) in layouts {
+            let root = tmp.path().join(bin.replace('/', "_"));
+            let bin_dir = root.join(bin);
+            let ui_dir = if ui == "ui" || ui == "resources/ui" {
+                bin_dir.join(ui)
+            } else {
+                root.join(ui)
+            };
+            std::fs::create_dir_all(&ui_dir).unwrap();
+            std::fs::create_dir_all(&bin_dir).unwrap();
+            std::fs::write(ui_dir.join("index.html"), "<!doctype html>").unwrap();
+            let found = ui_candidates(&bin_dir)
+                .into_iter()
+                .find(|c| c.join("index.html").is_file());
+            assert_eq!(
+                found
+                    .as_deref()
+                    .map(Path::canonicalize)
+                    .transpose()
+                    .unwrap(),
+                Some(ui_dir.canonicalize().unwrap()),
+                "{bin}"
+            );
+        }
     }
 }

@@ -37,7 +37,12 @@ fn a_file_held_by_this_test() {
     let free = dir.path().join("free.txt");
     std::fs::write(&free, b"y").unwrap();
     let handle = held_open(&held);
-    let got = find_lockers(&[s(&held), s(&free), s(&folder), s(&dir.path().join("missing"))]);
+    let got = find_lockers(&[
+        s(&held),
+        s(&free),
+        s(&folder),
+        s(&dir.path().join("missing")),
+    ]);
     let keys: HashSet<&String> = got.keys().collect();
     assert_eq!(keys, HashSet::from([&s(&held), &s(&folder)]), "{got:?}"); // the folder: anything inside
     assert!(!got[&s(&held)].is_empty());
@@ -64,7 +69,11 @@ fn proc_scan_matches_files_and_folders() {
     std::fs::write(&file_a, b"").unwrap();
     let other = format!("{} (deleted)", s(&target_dir.join("other.txt")));
     for (pid, comm, targets) in [
-        ("101", "editor", vec![s(&file_a), "socket:[1234]".into(), "pipe:[9]".into()]),
+        (
+            "101",
+            "editor",
+            vec![s(&file_a), "socket:[1234]".into(), "pipe:[9]".into()],
+        ),
         ("202", "indexer", vec![other, "/dev/null".into()]),
         ("303", "viewer", vec![s(&file_a)]),
     ] {
@@ -77,10 +86,16 @@ fn proc_scan_matches_files_and_folders() {
     }
     std::fs::create_dir(proc.join("404")).unwrap(); // fds we may not read: skipped
     std::fs::create_dir(proc.join("self")).unwrap(); // not a pid
-    let got = locks::linux(&[s(&file_a), s(&target_dir), s(&tmp.join("unrelated"))], &proc);
+    let got = locks::linux(
+        &[s(&file_a), s(&target_dir), s(&tmp.join("unrelated"))],
+        &proc,
+    );
     let want: HashMap<String, Vec<String>> = HashMap::from([
         (s(&file_a), vec!["editor".to_string(), "viewer".to_string()]),
-        (s(&target_dir), vec!["editor".to_string(), "viewer".to_string()]),
+        (
+            s(&target_dir),
+            vec!["editor".to_string(), "viewer".to_string()],
+        ),
     ]);
     assert_eq!(got, want);
 }
@@ -91,5 +106,8 @@ fn lsof_output_is_parsed() {
     let out = format!("p12\ncPhotoshop\nn{inside}\np34\ncFinder\nn/somewhere/else\n");
     let wanted = HashMap::from([("/tmp/proj".to_string(), "/tmp/proj".to_string())]);
     let got = locks::parse_lsof(&out, &wanted);
-    assert_eq!(got, HashMap::from([("/tmp/proj".to_string(), vec!["Photoshop".to_string()])]));
+    assert_eq!(
+        got,
+        HashMap::from([("/tmp/proj".to_string(), vec!["Photoshop".to_string()])])
+    );
 }

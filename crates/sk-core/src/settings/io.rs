@@ -55,7 +55,13 @@ const SS_BOOL: &[(&str, &str)] = &[
     ("mouseTrail", "appearance.mouse_trail"),
     ("hilightShadow", "appearance.selection_shadow"),
 ];
-const SS_DEFAULT_COLORS: &[&str] = &["0x000000ff", "0x0000ffff", "0x00ff0000", "0x0000ff00", "0x00c080ff"];
+const SS_DEFAULT_COLORS: &[&str] = &[
+    "0x000000ff",
+    "0x0000ffff",
+    "0x00ff0000",
+    "0x0000ff00",
+    "0x00c080ff",
+];
 /// SpaceSniffer's default label size (pt): SpaceKnife's 100 %.
 const SS_FONT_SIZE: f64 = 7.0;
 /// SpaceSniffer's default border contrast: SpaceKnife's 10.
@@ -77,7 +83,13 @@ pub struct ImportPlan {
 
 impl ImportPlan {
     fn new(source: ImportSource) -> ImportPlan {
-        ImportPlan { source, values: Values::new(), classes: None, folders: None, skipped: Vec::new() }
+        ImportPlan {
+            source,
+            values: Values::new(),
+            classes: None,
+            folders: None,
+            skipped: Vec::new(),
+        }
     }
 
     /// The changes as `settings.import` lists them (names in the current language).
@@ -119,11 +131,20 @@ pub fn export_document(values: &Values, table: &ClassTable, folders: &[(String, 
         .filter(|(k, v)| defaults().get(*k) != Some(*v))
         .map(|(k, v)| (k.clone(), serde_json::to_value(v).unwrap_or(Value::Null)))
         .collect();
-    let classes = if table.custom() { json!(table.classes()) } else { Value::Null };
+    let classes = if table.custom() {
+        json!(table.classes())
+    } else {
+        Value::Null
+    };
     let folders = if folders.is_empty() {
         Value::Null
     } else {
-        Value::Array(folders.iter().map(|(p, c)| json!({"path": p, "class": c})).collect())
+        Value::Array(
+            folders
+                .iter()
+                .map(|(p, c)| json!({"path": p, "class": c}))
+                .collect(),
+        )
     };
     json!({
         "format": FORMAT,
@@ -143,7 +164,10 @@ pub fn export_to(
 ) -> std::io::Result<()> {
     let text = serde_json::to_string_pretty(&export_document(values, table, folders))
         .map_err(std::io::Error::other)?;
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.tmp"));
     std::fs::write(&tmp, text)?;
     std::fs::rename(&tmp, path)
@@ -152,9 +176,17 @@ pub fn export_to(
 // --------------------------------------------------------------------------- import
 
 /// What importing `path` would change, compared with `current` and `ctx`.
-pub fn read_plan(path: &Path, current: &Values, ctx: &ImportContext<'_>) -> Result<ImportPlan, ImportError> {
+pub fn read_plan(
+    path: &Path,
+    current: &Values,
+    ctx: &ImportContext<'_>,
+) -> Result<ImportPlan, ImportError> {
     let unreadable = |e: std::io::Error| {
-        ImportError(tr!("读不了 {path}：{reason}", path = path, reason = e.to_string()))
+        ImportError(tr!(
+            "读不了 {path}：{reason}",
+            path = path,
+            reason = e.to_string()
+        ))
     };
     let size = std::fs::metadata(path).map_err(unreadable)?.len();
     if size > MAX_BYTES {
@@ -187,13 +219,17 @@ fn to_setting(v: &Value) -> Option<SettingValue> {
 fn finish(plan: &mut ImportPlan, wanted: Vec<(String, Value)>, current: &Values) {
     for (key, value) in wanted {
         let Some(spec) = by_key(&key) else {
-            plan.skipped.push(tr!("未知设置 {key}（来自其他版本），已跳过", key = key.as_str()));
+            plan.skipped.push(tr!(
+                "未知设置 {key}（来自其他版本），已跳过",
+                key = key.as_str()
+            ));
             continue;
         };
         let setting = to_setting(&value);
         if !spec.reason.is_empty() {
             if setting.as_ref() != current.get(&key) {
-                plan.skipped.push(tr!("当前版本不可修改，已跳过：{name}", name = t(spec.name)));
+                plan.skipped
+                    .push(tr!("当前版本不可修改，已跳过：{name}", name = t(spec.name)));
             }
             continue;
         }
@@ -207,7 +243,11 @@ fn finish(plan: &mut ImportPlan, wanted: Vec<(String, Value)>, current: &Values)
                 Value::String(s) => s.clone(),
                 other => other.to_string(),
             };
-            plan.skipped.push(tr!("设置值不合法，已跳过：{key} = {value}", key = key.as_str(), value = shown));
+            plan.skipped.push(tr!(
+                "设置值不合法，已跳过：{key} = {value}",
+                key = key.as_str(),
+                value = shown
+            ));
             continue;
         };
         if current.get(&key) != Some(&checked) {
@@ -216,12 +256,20 @@ fn finish(plan: &mut ImportPlan, wanted: Vec<(String, Value)>, current: &Values)
     }
 }
 
-fn plan_spaceknife(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> Result<ImportPlan, ImportError> {
-    let bad_json = |reason: String| ImportError(tr!("设置文件不是有效的 JSON：{reason}", reason = reason));
+fn plan_spaceknife(
+    raw: &[u8],
+    current: &Values,
+    ctx: &ImportContext<'_>,
+) -> Result<ImportPlan, ImportError> {
+    let bad_json =
+        |reason: String| ImportError(tr!("设置文件不是有效的 JSON：{reason}", reason = reason));
     let text = std::str::from_utf8(raw).map_err(|e| bad_json(e.to_string()))?;
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let doc: Value = serde_json::from_str(text).map_err(|e| bad_json(e.to_string()))?;
-    let Some(doc) = doc.as_object().filter(|d| d.get("format").and_then(Value::as_str) == Some(FORMAT)) else {
+    let Some(doc) = doc
+        .as_object()
+        .filter(|d| d.get("format").and_then(Value::as_str) == Some(FORMAT))
+    else {
         return Err(unknown_format());
     };
     let version = doc.get("version").and_then(Value::as_i64).unwrap_or(1);
@@ -233,7 +281,10 @@ fn plan_spaceknife(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> Res
     }
     let mut plan = ImportPlan::new(ImportSource::Spaceknife);
     let empty = Map::new();
-    let values = doc.get("values").and_then(Value::as_object).unwrap_or(&empty);
+    let values = doc
+        .get("values")
+        .and_then(Value::as_object)
+        .unwrap_or(&empty);
     // an export lists only non-defaults: everything else goes back to its default
     let mut wanted: Vec<(String, Value)> = super::registry()
         .iter()
@@ -245,18 +296,31 @@ fn plan_spaceknife(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> Res
             (s.key.to_owned(), v)
         })
         .collect();
-    wanted.extend(values.iter().filter(|(k, _)| by_key(k).is_none()).map(|(k, v)| (k.clone(), v.clone())));
+    wanted.extend(
+        values
+            .iter()
+            .filter(|(k, _)| by_key(k).is_none())
+            .map(|(k, v)| (k.clone(), v.clone())),
+    );
     finish(&mut plan, wanted, current);
 
     // an export from before the light theme has no color_light: its colours are the user's for
     // both themes, as in classes.json v1
-    let table = match doc.get("classes").and_then(Value::as_array).filter(|a| !a.is_empty()) {
+    let table = match doc
+        .get("classes")
+        .and_then(Value::as_array)
+        .filter(|a| !a.is_empty())
+    {
         None => ClassTable::builtin(),
         Some(items) => {
             let classes = items
                 .iter()
                 .map(|c| {
-                    let c = if c.get("color_light").is_some() { c.clone() } else { classes::colors_for_both(c.clone()) };
+                    let c = if c.get("color_light").is_some() {
+                        c.clone()
+                    } else {
+                        classes::colors_for_both(c.clone())
+                    };
                     serde_json::from_value::<FilterClassInfo>(c)
                 })
                 .collect::<Result<Vec<_>, _>>()
@@ -281,7 +345,8 @@ fn plan_spaceknife(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> Res
         Some(_) => None,
     };
     let folders = folders.unwrap_or_else(|| {
-        plan.skipped.push(t("文件夹归类的格式不对，已忽略").to_owned());
+        plan.skipped
+            .push(t("文件夹归类的格式不对，已忽略").to_owned());
         Vec::new()
     });
     let mut folders = folders;
@@ -312,7 +377,9 @@ fn clamp(v: i64, key: &str) -> i64 {
 
 /// `0x00BBGGRR` (a Delphi TColor) -> `#RRGGBB`; SpaceSniffer's own defaults -> theme ("").
 fn ss_color(text: Option<&str>) -> String {
-    let Some(text) = text.map(str::trim).filter(|t| !t.is_empty()) else { return String::new() };
+    let Some(text) = text.map(str::trim).filter(|t| !t.is_empty()) else {
+        return String::new();
+    };
     let low = text.to_lowercase();
     if SS_DEFAULT_COLORS.contains(&low.as_str()) {
         return String::new();
@@ -333,7 +400,13 @@ fn decode_xml(raw: &[u8]) -> Result<String, String> {
             .as_chunks::<2>()
             .0
             .iter()
-            .map(|&c| if le { u16::from_le_bytes(c) } else { u16::from_be_bytes(c) })
+            .map(|&c| {
+                if le {
+                    u16::from_le_bytes(c)
+                } else {
+                    u16::from_be_bytes(c)
+                }
+            })
             .collect();
         return String::from_utf16(&units).map_err(|e| e.to_string());
     }
@@ -341,8 +414,17 @@ fn decode_xml(raw: &[u8]) -> Result<String, String> {
     Ok(text.strip_prefix('\u{feff}').unwrap_or(text).to_owned())
 }
 
-fn plan_spacesniffer(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> Result<ImportPlan, ImportError> {
-    let bad_xml = |reason: String| ImportError(tr!("SpaceSniffer 配置不是有效的 XML：{reason}", reason = reason));
+fn plan_spacesniffer(
+    raw: &[u8],
+    current: &Values,
+    ctx: &ImportContext<'_>,
+) -> Result<ImportPlan, ImportError> {
+    let bad_xml = |reason: String| {
+        ImportError(tr!(
+            "SpaceSniffer 配置不是有效的 XML：{reason}",
+            reason = reason
+        ))
+    };
     let text = decode_xml(raw).map_err(bad_xml)?;
     let doc = roxmltree::Document::parse(&text).map_err(|e| bad_xml(e.to_string()))?;
     let root = doc.root_element();
@@ -359,7 +441,11 @@ fn plan_spacesniffer(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> R
         text_of(where_, tag).and_then(|v| v.parse::<i64>().ok())
     };
     for &(tag, key) in SS_BOOL {
-        let v = if child(root, tag).is_some() { flag(tag, Some(root)) } else { flag(tag, colors) };
+        let v = if child(root, tag).is_some() {
+            flag(tag, Some(root))
+        } else {
+            flag(tag, colors)
+        };
         if let Some(v) = v {
             wanted.push((key.to_owned(), Value::Bool(v)));
         }
@@ -372,35 +458,65 @@ fn plan_spacesniffer(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> R
     }
     if let Some(n) = number("fontSize", Some(root)) {
         let scaled = (n as f64 / SS_FONT_SIZE * 100.0).round_ties_even() as i64;
-        wanted.push(("treemap.font_scale".into(), json!(clamp(scaled, "treemap.font_scale"))));
+        wanted.push((
+            "treemap.font_scale".into(),
+            json!(clamp(scaled, "treemap.font_scale")),
+        ));
     }
     match text_of(Some(root), "initialStyle").as_deref() {
         Some("flat") => wanted.push(("appearance.default_color_mode".into(), json!("flat"))),
-        Some("fileClasses") => wanted.push(("appearance.default_color_mode".into(), json!("class"))),
+        Some("fileClasses") => {
+            wanted.push(("appearance.default_color_mode".into(), json!("class")))
+        }
         _ => {}
     }
     if let Some(n) = number("levelContrast", colors) {
-        wanted.push(("appearance.level_contrast".into(), json!(clamp(n, "appearance.level_contrast"))));
+        wanted.push((
+            "appearance.level_contrast".into(),
+            json!(clamp(n, "appearance.level_contrast")),
+        ));
     }
     if let Some(n) = number("borderContrast", colors) {
         let scaled = (n as f64 * 10.0 / SS_BORDER).round_ties_even() as i64;
-        wanted.push(("appearance.border_contrast".into(), json!(clamp(scaled, "appearance.border_contrast"))));
+        wanted.push((
+            "appearance.border_contrast".into(),
+            json!(clamp(scaled, "appearance.border_contrast")),
+        ));
     }
     if let Some(n) = number("hilightHaloLevels", colors) {
-        wanted.push(("appearance.halo_levels".into(), json!(clamp(n, "appearance.halo_levels"))));
+        wanted.push((
+            "appearance.halo_levels".into(),
+            json!(clamp(n, "appearance.halo_levels")),
+        ));
     }
     finish(&mut plan, wanted, current);
-    if colors.is_some_and(|c| ["driveColor", "folderColor", "fileColor"].iter().any(|t| child(c, t).is_some())) {
+    if colors.is_some_and(|c| {
+        ["driveColor", "folderColor", "fileColor"]
+            .iter()
+            .any(|t| child(c, t).is_some())
+    }) {
         plan.skipped.push(
             t("SpaceSniffer 的配色（磁盘 / 文件夹 / 文件 / 可用 / 未知空间颜色）：SpaceKnife 的树图配色固定，不导入")
                 .to_owned(),
         );
     }
     for (tag, note) in [
-        ("refreshDelayMs", "刷新间隔 refreshDelayMs：SpaceKnife 自动调节刷新，不需要"),
-        ("zoomTimeMs", "缩放时长 zoomTimeMs：单位与 SpaceKnife 不同，不导入（可在「树图 › 缩放动画时长」里调）"),
-        ("useRealZoom", "实时缩放 useRealZoom（DynaZoom）：还没有实现"),
-        ("proportions", "元素比例 proportions：两边的刻度不同，不导入（可在「树图 › 元素比例」里调）"),
+        (
+            "refreshDelayMs",
+            "刷新间隔 refreshDelayMs：SpaceKnife 自动调节刷新，不需要",
+        ),
+        (
+            "zoomTimeMs",
+            "缩放时长 zoomTimeMs：单位与 SpaceKnife 不同，不导入（可在「树图 › 缩放动画时长」里调）",
+        ),
+        (
+            "useRealZoom",
+            "实时缩放 useRealZoom（DynaZoom）：还没有实现",
+        ),
+        (
+            "proportions",
+            "元素比例 proportions：两边的刻度不同，不导入（可在「树图 › 元素比例」里调）",
+        ),
     ] {
         if child(root, tag).is_some() {
             plan.skipped.push(t(note).to_owned());
@@ -412,7 +528,10 @@ fn plan_spacesniffer(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> R
             plan.classes = Some(Arc::new(table));
         }
     }
-    for cfg in root.descendants().filter(|n| n.has_tag_name("exportConfig")) {
+    for cfg in root
+        .descendants()
+        .filter(|n| n.has_tag_name("exportConfig"))
+    {
         let name = text_of(Some(cfg), "description").unwrap_or_default();
         if !name.is_empty() && !ctx.builtin_templates.contains(&name.as_str()) {
             plan.skipped.push(tr!(
@@ -424,11 +543,17 @@ fn plan_spacesniffer(raw: &[u8], current: &Values, ctx: &ImportContext<'_>) -> R
     Ok(plan)
 }
 
-fn classes_from(groups: roxmltree::Node<'_, '_>, plan: &mut ImportPlan) -> Result<ClassTable, String> {
+fn classes_from(
+    groups: roxmltree::Node<'_, '_>,
+    plan: &mut ImportPlan,
+) -> Result<ClassTable, String> {
     let find_builtin = |name: &str| {
         let folded = casefold(name);
         builtin_classes().iter().find(|c| {
-            std::iter::once(&c.id).chain(std::iter::once(&c.name)).chain(&c.aliases).any(|s| casefold(s) == folded)
+            std::iter::once(&c.id)
+                .chain(std::iter::once(&c.name))
+                .chain(&c.aliases)
+                .any(|s| casefold(s) == folded)
         })
     };
     let mut edits: Vec<ClassEdit> = Vec::new();
@@ -471,7 +596,10 @@ fn classes_from(groups: roxmltree::Node<'_, '_>, plan: &mut ImportPlan) -> Resul
             ));
         }
     }
-    let other = builtin_classes().iter().find(|c| c.id == OTHER).expect("an other class");
+    let other = builtin_classes()
+        .iter()
+        .find(|c| c.id == OTHER)
+        .expect("an other class");
     edits.push(ClassEdit {
         id: Some(OTHER.to_owned()),
         name: other.name.clone(),
@@ -486,10 +614,17 @@ fn classes_from(groups: roxmltree::Node<'_, '_>, plan: &mut ImportPlan) -> Resul
 mod tests {
     use super::*;
 
-    const SS_DEFAULT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/SpaceSnifferConfig.default.xml");
+    const SS_DEFAULT: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/data/SpaceSnifferConfig.default.xml"
+    );
 
     fn ctx(active: &ClassTable) -> ImportContext<'_> {
-        ImportContext { active, folders: &[], builtin_templates: &[] }
+        ImportContext {
+            active,
+            folders: &[],
+            builtin_templates: &[],
+        }
     }
 
     #[test]
@@ -506,7 +641,10 @@ mod tests {
         for g in doc.descendants().filter(|n| n.has_tag_name("fileGroup")) {
             let name = text_of(Some(g), "name").unwrap();
             let mut exts: Vec<String> = Vec::new();
-            for e in text_of(Some(g), "extensions").unwrap_or_default().split(';') {
+            for e in text_of(Some(g), "extensions")
+                .unwrap_or_default()
+                .split(';')
+            {
                 if !e.is_empty() && !exts.iter().any(|x| x == e) {
                     exts.push(e.to_owned());
                 }
@@ -526,29 +664,45 @@ mod tests {
         assert!(!plan.values.contains_key("treemap.min_element")); // 10 in both
         assert!(plan.skipped.iter().any(|s| s.contains("zoomTimeMs")));
         let changes = plan.changes(defaults());
-        assert!(changes.iter().any(|c| c.key == "treemap.initial_detail" && c.before == SettingValue::Int(5)));
+        assert!(
+            changes
+                .iter()
+                .any(|c| c.key == "treemap.initial_detail" && c.before == SettingValue::Int(5))
+        );
     }
 
     #[test]
     fn spacesniffer_custom_colour() {
         let _g = crate::i18n::TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
-        let text = std::fs::read_to_string(SS_DEFAULT)
-            .unwrap()
-            .replacen("<color>0x000000FF</color>", "<color>0x00336699</color>", 1);
+        let text = std::fs::read_to_string(SS_DEFAULT).unwrap().replacen(
+            "<color>0x000000FF</color>",
+            "<color>0x00336699</color>",
+            1,
+        );
         let file = tmp.path().join("c.xml");
         std::fs::write(&file, text).unwrap();
         let builtin = ClassTable::builtin();
         let plan = read_plan(&file, defaults(), &ctx(&builtin)).unwrap();
         let classes = plan.classes.unwrap();
-        let video = classes.classes().iter().find(|c| c.name == "Video/Movies").unwrap();
-        assert_eq!((video.color.as_str(), video.color_light.as_str()), ("#996633", "#996633"));
+        let video = classes
+            .classes()
+            .iter()
+            .find(|c| c.name == "Video/Movies")
+            .unwrap();
+        assert_eq!(
+            (video.color.as_str(), video.color_light.as_str()),
+            ("#996633", "#996633")
+        );
     }
 
     #[test]
     fn export_from_before_themes_keeps_colours_in_both() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut rows: Vec<Value> = builtin_classes().iter().map(|c| serde_json::to_value(c).unwrap()).collect();
+        let mut rows: Vec<Value> = builtin_classes()
+            .iter()
+            .map(|c| serde_json::to_value(c).unwrap())
+            .collect();
         rows[1]["color"] = json!("#123456");
         let old: Vec<Value> = rows
             .iter()
@@ -578,7 +732,10 @@ mod tests {
         let builtin = ClassTable::builtin();
         for (name, body) in [("a.json", "{nope"), ("b.xml", "<x/>"), ("c.txt", "hello")] {
             std::fs::write(tmp.path().join(name), body).unwrap();
-            assert!(read_plan(&tmp.path().join(name), defaults(), &ctx(&builtin)).is_err(), "{name}");
+            assert!(
+                read_plan(&tmp.path().join(name), defaults(), &ctx(&builtin)).is_err(),
+                "{name}"
+            );
         }
         assert!(read_plan(&tmp.path().join("missing.json"), defaults(), &ctx(&builtin)).is_err());
     }
@@ -604,7 +761,11 @@ mod tests {
         assert!(plan.classes.is_none());
         assert_eq!(plan.folders, Some(folders.clone()));
         // into the values it came from: nothing
-        let c = ImportContext { active: &builtin, folders: &folders, builtin_templates: &[] };
+        let c = ImportContext {
+            active: &builtin,
+            folders: &folders,
+            builtin_templates: &[],
+        };
         let plan = read_plan(&out, &values, &c).unwrap();
         assert!(plan.values.is_empty() && plan.folders.is_none() && plan.skipped.is_empty());
     }

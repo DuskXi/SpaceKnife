@@ -27,7 +27,13 @@ fn main() {
     };
     for run in 1..=repeat {
         let t0 = Instant::now();
-        let scanner = match Scanner::new(&[path.as_str()], ScanOptions { concurrency: threads, ..Default::default() }) {
+        let scanner = match Scanner::new(
+            &[path.as_str()],
+            ScanOptions {
+                concurrency: threads,
+                ..Default::default()
+            },
+        ) {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("{e}");

@@ -25,8 +25,8 @@ use sk_core::tr;
 use sk_protocol::ErrorCode;
 use sk_protocol::methods::{BasketChanged, OpsProgress};
 use sk_protocol::ops::{
-    BasketAddParams, BasketAddResult, BasketEvent, BasketExecuteParams, BasketState, BasketVolume, OpCode, OpMode,
-    OpPhase, OpProgressEvent, OpTask, PathForms, Refusal,
+    BasketAddParams, BasketAddResult, BasketEvent, BasketExecuteParams, BasketState, BasketVolume,
+    OpCode, OpMode, OpPhase, OpProgressEvent, OpTask, PathForms, Refusal,
 };
 use sk_store::{NodeId, Store};
 
@@ -91,7 +91,10 @@ pub struct OpRun {
 impl OpRun {
     fn event(&self) -> OpProgressEvent {
         let st = self.st.lock();
-        let is_final = matches!(st.phase, OpPhase::Done | OpPhase::Cancelled | OpPhase::Undone);
+        let is_final = matches!(
+            st.phase,
+            OpPhase::Done | OpPhase::Cancelled | OpPhase::Undone
+        );
         OpProgressEvent {
             task_id: self.id.clone(),
             mode: self.mode,
@@ -99,9 +102,14 @@ impl OpRun {
             total: self.total,
             current: st.current.clone(),
             phase: st.phase,
-            results: if is_final { st.results.iter().map(OpResult::to_protocol).collect() } else { Vec::new() },
+            results: if is_final {
+                st.results.iter().map(OpResult::to_protocol).collect()
+            } else {
+                Vec::new()
+            },
             freed: st.freed,
-            can_undo: st.phase == OpPhase::Waiting || (st.phase == OpPhase::Done && !st.refs.is_empty()),
+            can_undo: st.phase == OpPhase::Waiting
+                || (st.phase == OpPhase::Done && !st.refs.is_empty()),
         }
     }
 
@@ -184,7 +192,9 @@ impl OpsService {
             return s.clone();
         }
         let s = sk_core::ops::trash_status(volume, true);
-        self.trash_info.lock().insert(volume.to_owned(), (Instant::now(), s.clone()));
+        self.trash_info
+            .lock()
+            .insert(volume.to_owned(), (Instant::now(), s.clone()));
         s
     }
 
@@ -192,16 +202,28 @@ impl OpsService {
     pub fn state_sync(&self) -> BasketState {
         let items = self.basket.items();
         let freeable = self.basket.freeable();
-        let mounts: std::collections::BTreeSet<String> =
-            items.iter().filter(|i| !i.volume.is_empty()).map(|i| i.volume.clone()).collect();
+        let mounts: std::collections::BTreeSet<String> = items
+            .iter()
+            .filter(|i| !i.volume.is_empty())
+            .map(|i| i.volume.clone())
+            .collect();
         let mut volumes = Vec::new();
         for mount in mounts {
-            let (total, free) = sk_core::volume::volume_for(Path::new(&mount)).map_or((0, 0), |v| (v.total, v.free));
+            let (total, free) = sk_core::volume::volume_for(Path::new(&mount))
+                .map_or((0, 0), |v| (v.total, v.free));
             let st = self.trash(&mount);
             let note = if st.available {
-                let mut note = if st.same_volume { tr!(text::TRASH_SAME) } else { st.location.clone() };
+                let mut note = if st.same_volume {
+                    tr!(text::TRASH_SAME)
+                } else {
+                    st.location.clone()
+                };
                 if st.used >= 0 {
-                    note = tr!(text::TRASH_USED, note = note, size = sk_core::fmt::size(st.used as f64));
+                    note = tr!(
+                        text::TRASH_USED,
+                        note = note,
+                        size = sk_core::fmt::size(st.used as f64)
+                    );
                 }
                 note
             } else {
@@ -231,13 +253,23 @@ impl OpsService {
     /// The basket to every session.
     pub async fn broadcast(&self, server: &Arc<Server>) -> RpcResult<BasketState> {
         let state = self.state(server).await?;
-        server.broadcast::<BasketChanged>(&BasketEvent { state: state.clone() }, None);
+        server.broadcast::<BasketChanged>(
+            &BasketEvent {
+                state: state.clone(),
+            },
+            None,
+        );
         Ok(state)
     }
 
     // ------------------------------------------------------------- path forms (W5-09…14)
 
-    pub async fn path_forms(&self, server: &Arc<Server>, scan_id: &str, node: NodeId) -> RpcResult<PathForms> {
+    pub async fn path_forms(
+        &self,
+        server: &Arc<Server>,
+        scan_id: &str,
+        node: NodeId,
+    ) -> RpcResult<PathForms> {
         if let Some(r) = server.compares.tree_node(scan_id, node) {
             let r = r?;
             let mut f = sk_core::ops::path_forms(&r.path, None);
@@ -257,7 +289,12 @@ impl OpsService {
 
     // ------------------------------------------------------------- adding
 
-    pub async fn add(&self, server: &Arc<Server>, session: &Arc<Session>, p: BasketAddParams) -> RpcResult<BasketAddResult> {
+    pub async fn add(
+        &self,
+        server: &Arc<Server>,
+        session: &Arc<Session>,
+        p: BasketAddParams,
+    ) -> RpcResult<BasketAddResult> {
         let mut scan_id = p.scan_id.clone();
         let mut nodes: Vec<i64> = p.nodes.iter().map(|&n| i64::from(n)).collect();
         let mut members: Option<Vec<i64>> = None;
@@ -272,7 +309,10 @@ impl OpsService {
                 match frame.draw.members.get(&key).filter(|g| !g.is_empty()) {
                     Some(group) => {
                         let parent = i64::from(v.store().read().parent(group[0]));
-                        Some((vec![parent], Some(group.iter().map(|&m| i64::from(m)).collect::<Vec<_>>())))
+                        Some((
+                            vec![parent],
+                            Some(group.iter().map(|&m| i64::from(m)).collect::<Vec<_>>()),
+                        ))
                     }
                     None => Some((vec![i64::from(frame.draw.node[row])], None)),
                 }
@@ -297,11 +337,27 @@ impl OpsService {
                         .tree_node(&scan_id, *n as NodeId)
                         .and_then(|r| r.ok())
                         .map_or_else(|| n.to_string(), |r| r.path);
-                    refused.push(Refused { path, reason: tr!(text::NOT_ON_DISK) });
+                    refused.push(Refused {
+                        path,
+                        reason: tr!(text::NOT_ON_DISK),
+                    });
                 }
-                return self.added(server, sk_core::ops::AddResult { refused, ..Default::default() }).await;
+                return self
+                    .added(
+                        server,
+                        sk_core::ops::AddResult {
+                            refused,
+                            ..Default::default()
+                        },
+                    )
+                    .await;
             }
-            None => return Err(RpcError::new(ErrorCode::UnknownScan, format!("unknown scan: {scan_id}"))),
+            None => {
+                return Err(RpcError::new(
+                    ErrorCode::UnknownScan,
+                    format!("unknown scan: {scan_id}"),
+                ));
+            }
         };
         let mut result = sk_core::ops::AddResult::default();
         if !nodes.is_empty() && members.as_ref().is_none_or(|m| !m.is_empty()) {
@@ -320,14 +376,25 @@ impl OpsService {
         out
     }
 
-    async fn added(&self, server: &Arc<Server>, r: sk_core::ops::AddResult) -> RpcResult<BasketAddResult> {
+    async fn added(
+        &self,
+        server: &Arc<Server>,
+        r: sk_core::ops::AddResult,
+    ) -> RpcResult<BasketAddResult> {
         let state = self.broadcast(server).await?;
         Ok(BasketAddResult {
             state,
             added: r.added.len() as i64,
             merged: r.merged.len() as i64,
             absorbed: r.absorbed.len() as i64,
-            refused: r.refused.iter().map(|x| Refusal { path: x.path.clone(), reason: x.reason.clone() }).collect(),
+            refused: r
+                .refused
+                .iter()
+                .map(|x| Refusal {
+                    path: x.path.clone(),
+                    reason: x.reason.clone(),
+                })
+                .collect(),
         })
     }
 
@@ -382,7 +449,11 @@ impl OpsService {
         let srv = server.clone();
         server.rt.spawn(async move {
             loop {
-                let due = srv.ops.dirty_at.lock().map_or(Instant::now(), |t| t + REFRESH_QUIET);
+                let due = srv
+                    .ops
+                    .dirty_at
+                    .lock()
+                    .map_or(Instant::now(), |t| t + REFRESH_QUIET);
                 let now = Instant::now();
                 if due <= now {
                     break;
@@ -410,22 +481,43 @@ impl OpsService {
 
     // ------------------------------------------------------------- executing (W5-41…49)
 
-    pub fn execute(&self, server: &Arc<Server>, session: &Arc<Session>, p: &BasketExecuteParams) -> RpcResult<OpTask> {
-        if self.runs.lock().iter().any(|r| matches!(r.phase(), OpPhase::Waiting | OpPhase::Running)) {
+    pub fn execute(
+        &self,
+        server: &Arc<Server>,
+        session: &Arc<Session>,
+        p: &BasketExecuteParams,
+    ) -> RpcResult<OpTask> {
+        if self
+            .runs
+            .lock()
+            .iter()
+            .any(|r| matches!(r.phase(), OpPhase::Waiting | OpPhase::Running))
+        {
             return Err(RpcError::invalid_request(tr!(text::BUSY)));
         }
         let targets = self.basket.targets(p.ids.as_deref());
         if targets.is_empty() {
             return Err(RpcError::invalid_request(tr!(text::NOTHING)));
         }
-        let items: HashMap<String, BasketItem> = self.basket.items().into_iter().map(|i| (i.id.clone(), i)).collect();
+        let items: HashMap<String, BasketItem> = self
+            .basket
+            .items()
+            .into_iter()
+            .map(|i| (i.id.clone(), i))
+            .collect();
         let mut alloc = HashMap::new();
         let mut scans = HashMap::new();
         for t in &targets {
-            let Some(it) = items.get(&t.item) else { continue };
+            let Some(it) = items.get(&t.item) else {
+                continue;
+            };
             scans.insert(t.path.clone(), it.scan_id.clone());
             // a group frees its members' share; a single item its own freeable bytes
-            let a = if it.members.is_empty() { it.alloc } else { it.alloc / it.members.len().max(1) as i64 };
+            let a = if it.members.is_empty() {
+                it.alloc
+            } else {
+                it.alloc / it.members.len().max(1) as i64
+            };
             alloc.insert(t.path.clone(), a);
         }
         let delete = p.mode == OpMode::Delete;
@@ -438,11 +530,19 @@ impl OpsService {
             sizes: targets.iter().map(|t| (t.path.clone(), t.size)).collect(),
             alloc,
             scans,
-            roots: targets.iter().filter(|t| !t.root.is_empty()).map(|t| (t.path.clone(), t.root.clone())).collect(),
+            roots: targets
+                .iter()
+                .filter(|t| !t.root.is_empty())
+                .map(|t| (t.path.clone(), t.root.clone()))
+                .collect(),
             st: Mutex::new(RunState {
                 done: 0,
                 current: String::new(),
-                phase: if delete { OpPhase::Waiting } else { OpPhase::Running },
+                phase: if delete {
+                    OpPhase::Waiting
+                } else {
+                    OpPhase::Running
+                },
                 results: Vec::new(),
                 freed: 0,
                 left: Vec::new(),
@@ -460,10 +560,17 @@ impl OpsService {
                 runs.remove(0);
             }
         }
-        tracing::info!("file operation {}: {} {} items", run.id, p.mode.as_str(), run.total);
+        tracing::info!(
+            "file operation {}: {} {} items",
+            run.id,
+            p.mode.as_str(),
+            run.total
+        );
         let delay = self.delete_delay();
         let (srv, r) = (server.clone(), run.clone());
-        server.rt.spawn(async move { srv.ops.run_op(&srv, r, delay).await });
+        server
+            .rt
+            .spawn(async move { srv.ops.run_op(&srv, r, delay).await });
         Ok(OpTask {
             task_id: run.id.clone(),
             mode: run.mode,
@@ -520,17 +627,34 @@ impl OpsService {
             Ok(results) => {
                 let left = self.basket.apply_results(&results);
                 let ok = results.iter().filter(|r| r.ok).count();
-                let failed: Vec<&OpResult> =
-                    results.iter().filter(|r| !r.ok && r.code != OpCode::Cancelled).collect();
+                let failed: Vec<&OpResult> = results
+                    .iter()
+                    .filter(|r| !r.ok && r.code != OpCode::Cancelled)
+                    .collect();
                 for f in failed.iter().take(20) {
                     tracing::warn!("{}: {} ({})", f.path, f.message, f.code.as_str());
                 }
                 let mut st = run.st.lock();
-                st.done = results.iter().filter(|r| r.code != OpCode::Cancelled).count() as i64;
-                st.freed = results.iter().filter(|r| r.ok).map(|r| run.alloc.get(&r.path).copied().unwrap_or(0)).sum();
-                st.refs = results.iter().filter(|r| r.ok && !r.trash_ref.is_empty()).map(|r| r.trash_ref.clone()).collect();
+                st.done = results
+                    .iter()
+                    .filter(|r| r.code != OpCode::Cancelled)
+                    .count() as i64;
+                st.freed = results
+                    .iter()
+                    .filter(|r| r.ok)
+                    .map(|r| run.alloc.get(&r.path).copied().unwrap_or(0))
+                    .sum();
+                st.refs = results
+                    .iter()
+                    .filter(|r| r.ok && !r.trash_ref.is_empty())
+                    .map(|r| r.trash_ref.clone())
+                    .collect();
                 st.left = left;
-                st.phase = if run.cancel.load(Ordering::SeqCst) { OpPhase::Cancelled } else { OpPhase::Done };
+                st.phase = if run.cancel.load(Ordering::SeqCst) {
+                    OpPhase::Cancelled
+                } else {
+                    OpPhase::Done
+                };
                 tracing::info!(
                     "file operation {}: {ok} ok, {} failed, {} freed",
                     run.id,
@@ -545,7 +669,14 @@ impl OpsService {
             }
         }
         run.emit(true);
-        let done: Vec<String> = run.st.lock().results.iter().filter(|r| r.ok).map(|r| r.path.clone()).collect();
+        let done: Vec<String> = run
+            .st
+            .lock()
+            .results
+            .iter()
+            .filter(|r| r.ok)
+            .map(|r| r.path.clone())
+            .collect();
         self.after(server, &run, &done);
         let _ = self.broadcast(server).await;
     }
@@ -565,7 +696,9 @@ impl OpsService {
             }
         }
         for (scan_id, parents) in by_scan {
-            let Some(h) = server.scans.lookup(scan_id) else { continue };
+            let Some(h) = server.scans.lookup(scan_id) else {
+                continue;
+            };
             if h.running() || server.monitors.status(scan_id).is_some() {
                 continue; // the file change hooks see it
             }
@@ -615,17 +748,25 @@ impl OpsService {
                 _ => return Ok(()),
             }
         };
-        let results = tokio::task::spawn_blocking(move || sk_core::ops::restore(&refs)).await.map_err(rpc_internal)?;
+        let results = tokio::task::spawn_blocking(move || sk_core::ops::restore(&refs))
+            .await
+            .map_err(rpc_internal)?;
         for r in results.iter().filter(|r| !r.ok) {
             tracing::warn!("restoring {}: {} ({})", r.path, r.message, r.code.as_str());
         }
-        let restored: HashSet<String> = results.iter().filter(|r| r.ok).map(|r| r.path.clone()).collect();
+        let restored: HashSet<String> = results
+            .iter()
+            .filter(|r| r.ok)
+            .map(|r| r.path.clone())
+            .collect();
         let back: Vec<BasketItem> = run
             .st
             .lock()
             .left
             .iter()
-            .filter(|it| restored.contains(&it.path) || it.members.iter().any(|m| restored.contains(m)))
+            .filter(|it| {
+                restored.contains(&it.path) || it.members.iter().any(|m| restored.contains(m))
+            })
             .cloned()
             .collect();
         self.basket.reinstate(&back);

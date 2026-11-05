@@ -54,7 +54,11 @@ pub fn map_events(
         let (flags, eid) = (*flags, *eid);
         i += 1;
         if flags & (DROPPED | F_MUST_SCAN_SUBDIRS) != 0 {
-            let at = if flags & DROPPED != 0 { root } else { path.as_path() };
+            let at = if flags & DROPPED != 0 {
+                root
+            } else {
+                path.as_path()
+            };
             out.push(Change::overflow(at));
             continue;
         }
@@ -84,10 +88,18 @@ pub fn map_events(
                     continue;
                 }
             }
-            let kind = if here { ChangeKind::Created } else { ChangeKind::Deleted };
+            let kind = if here {
+                ChangeKind::Created
+            } else {
+                ChangeKind::Deleted
+            };
             out.push(Change::new(kind, path.clone(), is_dir));
         } else if flags & (F_ITEM_CREATED | F_ITEM_REMOVED) != 0 {
-            let kind = if exists(path) { ChangeKind::Created } else { ChangeKind::Deleted };
+            let kind = if exists(path) {
+                ChangeKind::Created
+            } else {
+                ChangeKind::Deleted
+            };
             out.push(Change::new(kind, path.clone(), is_dir));
         } else if flags & (F_ITEM_MODIFIED | F_ITEM_INODE_META_MOD) != 0
             && is_dir != Some(true)
@@ -109,7 +121,10 @@ pub struct FsEventsWatcher;
 #[cfg(not(target_os = "macos"))]
 impl FsEventsWatcher {
     pub fn new(_root: &Path) -> std::io::Result<FsEventsWatcher> {
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "FSEvents is macOS only"))
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "FSEvents is macOS only",
+        ))
     }
 }
 
@@ -144,8 +159,14 @@ mod imp {
         static kCFRunLoopDefaultMode: CFRef;
         static kCFTypeArrayCallBacks: c_void;
         fn CFRelease(cf: CFRef);
-        fn CFStringCreateWithFileSystemRepresentation(alloc: CFRef, buffer: *const c_char) -> CFRef;
-        fn CFArrayCreate(alloc: CFRef, values: *const CFRef, num: isize, callbacks: *const c_void) -> CFRef;
+        fn CFStringCreateWithFileSystemRepresentation(alloc: CFRef, buffer: *const c_char)
+        -> CFRef;
+        fn CFArrayCreate(
+            alloc: CFRef,
+            values: *const CFRef,
+            num: isize,
+            callbacks: *const c_void,
+        ) -> CFRef;
         fn CFRunLoopGetCurrent() -> CFRef;
         fn CFRunLoopRunInMode(mode: CFRef, seconds: f64, return_after_source_handled: u8) -> i32;
         fn CFRunLoopStop(rl: CFRef);
@@ -199,14 +220,23 @@ mod imp {
             }
             let real = self.real.to_string_lossy();
             let root = self.root.to_string_lossy();
-            if real != root && (path == real || path.starts_with(&format!("{}/", real.trim_end_matches('/')))) {
+            if real != root
+                && (path == real || path.starts_with(&format!("{}/", real.trim_end_matches('/'))))
+            {
                 path = format!("{root}{}", &path[real.len()..]);
             }
             Some(PathBuf::from(path))
         }
     }
 
-    extern "C" fn on_events(_s: CFRef, info: *mut c_void, n: usize, paths: *mut c_void, flags: *const u32, ids: *const u64) {
+    extern "C" fn on_events(
+        _s: CFRef,
+        info: *mut c_void,
+        n: usize,
+        paths: *mut c_void,
+        flags: *const u32,
+        ids: *const u64,
+    ) {
         // SAFETY: `info` is the Arc<Shared> pointer the stream was created with (alive while it runs).
         let sh = unsafe { &*(info as *const Shared) };
         let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -214,15 +244,24 @@ mod imp {
             let mut events = Vec::with_capacity(n);
             for k in 0..n {
                 // SAFETY: FSEvents hands `n` C strings, flags and ids.
-                let (p, f, id) = unsafe { (CStr::from_ptr(*paths.add(k)), *flags.add(k), *ids.add(k)) };
+                let (p, f, id) =
+                    unsafe { (CStr::from_ptr(*paths.add(k)), *flags.add(k), *ids.add(k)) };
                 if let Some(path) = sh.local(p.to_bytes()) {
                     events.push((path, f, id));
                 }
             }
-            let (changes, lost) = map_events(&events, &sh.root, &|p| std::fs::symlink_metadata(p).is_ok(), &stat_file);
+            let (changes, lost) = map_events(
+                &events,
+                &sh.root,
+                &|p| std::fs::symlink_metadata(p).is_ok(),
+                &stat_file,
+            );
             sh.emitter.emit(changes);
             if lost {
-                *sh.state.lock().unwrap() = (WatchState::Failed, t("扫描根目录已被删除或移走，实时监控已停止"));
+                *sh.state.lock().unwrap() = (
+                    WatchState::Failed,
+                    t("扫描根目录已被删除或移走，实时监控已停止"),
+                );
                 // SAFETY: we are on the run loop's thread.
                 unsafe { CFRunLoopStop(CFRunLoopGetCurrent()) };
             }
@@ -266,7 +305,8 @@ mod imp {
         let mut started = false;
         let mut stream: CFRef = std::ptr::null();
         let result: Result<(), String> = (|| unsafe {
-            let c = CString::new(sh.root.as_os_str().as_bytes()).map_err(|_| t("无法创建路径字符串"))?;
+            let c = CString::new(sh.root.as_os_str().as_bytes())
+                .map_err(|_| t("无法创建路径字符串"))?;
             let path = CFStringCreateWithFileSystemRepresentation(std::ptr::null(), c.as_ptr());
             if path.is_null() {
                 return Err(t("无法创建路径字符串"));
@@ -284,7 +324,15 @@ mod imp {
                 release: std::ptr::null(),
                 copy_description: std::ptr::null(),
             };
-            stream = FSEventStreamCreate(std::ptr::null(), on_events, &ctx, paths, SINCE_NOW, LATENCY, CREATE_FLAGS);
+            stream = FSEventStreamCreate(
+                std::ptr::null(),
+                on_events,
+                &ctx,
+                paths,
+                SINCE_NOW,
+                LATENCY,
+                CREATE_FLAGS,
+            );
             CFRelease(paths);
             if stream.is_null() {
                 return Err(t("FSEventStreamCreate 失败"));
@@ -298,7 +346,9 @@ mod imp {
             sh.run_loop.store(rl as usize, Ordering::SeqCst);
             *sh.state.lock().unwrap() = (WatchState::Running, String::new());
             let _ = ready.send(());
-            while !sh.emitter.stopping.load(Ordering::SeqCst) && sh.state.lock().unwrap().0 == WatchState::Running {
+            while !sh.emitter.stopping.load(Ordering::SeqCst)
+                && sh.state.lock().unwrap().0 == WatchState::Running
+            {
                 if CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.25, 0) == RUN_FINISHED {
                     return Err(t("CFRunLoop 没有可运行的源"));
                 }
@@ -306,8 +356,18 @@ mod imp {
             Ok(())
         })();
         if let Err(e) = result {
-            tracing::warn!("{}", crate::tr!("FSEvents 监视失败：{path}：{error}", path = sh.root.display().to_string(), error = e.clone()));
-            *sh.state.lock().unwrap() = (WatchState::Failed, crate::tr!("FSEvents 不可用（{error}），实时监控已停止", error = e));
+            tracing::warn!(
+                "{}",
+                crate::tr!(
+                    "FSEvents 监视失败：{path}：{error}",
+                    path = sh.root.display().to_string(),
+                    error = e.clone()
+                )
+            );
+            *sh.state.lock().unwrap() = (
+                WatchState::Failed,
+                crate::tr!("FSEvents 不可用（{error}），实时监控已停止", error = e),
+            );
             if started {
                 sh.emitter.emit(vec![Change::overflow(sh.root.clone())]);
             }
@@ -398,8 +458,16 @@ mod tests {
             &[
                 ev("/r/old", F_ITEM_RENAMED | F_ITEM_IS_DIR, 10),
                 ev("/r/new", F_ITEM_RENAMED | F_ITEM_IS_DIR, 11),
-                ev("/r/here", F_ITEM_CREATED | F_ITEM_REMOVED | F_ITEM_IS_FILE, 12),
-                ev("/r/gone", F_ITEM_CREATED | F_ITEM_REMOVED | F_ITEM_IS_FILE, 13),
+                ev(
+                    "/r/here",
+                    F_ITEM_CREATED | F_ITEM_REMOVED | F_ITEM_IS_FILE,
+                    12,
+                ),
+                ev(
+                    "/r/gone",
+                    F_ITEM_CREATED | F_ITEM_REMOVED | F_ITEM_IS_FILE,
+                    13,
+                ),
                 ev("/r/file", F_ITEM_MODIFIED | F_ITEM_IS_FILE, 14),
                 ev("/r/vanished", F_ITEM_MODIFIED | F_ITEM_IS_FILE, 15),
                 ev("/r/a", 0, 16),
@@ -414,18 +482,29 @@ mod tests {
             &numbers,
         );
         assert!(!lost);
-        assert_eq!(out, vec![
-            Change::renamed("/r/new", Some("/r/old".into()), Some(true)),
-            Change::new(ChangeKind::Created, "/r/here", Some(false)),
-            Change::new(ChangeKind::Deleted, "/r/gone", Some(false)),
-            Change::modified("/r/file", 10, Some(4096), 99),
-            Change::new(ChangeKind::Dir, "/r/a", Some(true)),
-            Change::overflow("/r/sub"),
-            Change::overflow("/r"),
-            Change::new(ChangeKind::Deleted, "/r/lonely", Some(false)),
-            Change::new(ChangeKind::Created, "/r/b", Some(false)),
-        ]);
-        let (out, lost) = map_events(&[ev("/r", F_ROOT_CHANGED, 1), ev("/r/late", F_ITEM_CREATED, 2)], &root, &exists, &numbers);
+        assert_eq!(
+            out,
+            vec![
+                Change::renamed("/r/new", Some("/r/old".into()), Some(true)),
+                Change::new(ChangeKind::Created, "/r/here", Some(false)),
+                Change::new(ChangeKind::Deleted, "/r/gone", Some(false)),
+                Change::modified("/r/file", 10, Some(4096), 99),
+                Change::new(ChangeKind::Dir, "/r/a", Some(true)),
+                Change::overflow("/r/sub"),
+                Change::overflow("/r"),
+                Change::new(ChangeKind::Deleted, "/r/lonely", Some(false)),
+                Change::new(ChangeKind::Created, "/r/b", Some(false)),
+            ]
+        );
+        let (out, lost) = map_events(
+            &[
+                ev("/r", F_ROOT_CHANGED, 1),
+                ev("/r/late", F_ITEM_CREATED, 2),
+            ],
+            &root,
+            &exists,
+            &numbers,
+        );
         assert!(lost);
         assert_eq!(out, vec![Change::overflow("/r")]);
     }

@@ -13,7 +13,9 @@ pub mod fuzzy;
 pub mod paths;
 pub mod recents;
 
-pub use commands::{Command, Context, ShownVisual, ViewFacts, evaluate, label, match_command, registry};
+pub use commands::{
+    Command, Context, ShownVisual, ViewFacts, evaluate, label, match_command, registry,
+};
 pub use fuzzy::{score, utf16_spans};
 pub use paths::{PathHit, PathInput, SearchOptions, Sizes};
 pub use recents::Recents;

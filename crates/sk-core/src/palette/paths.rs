@@ -60,14 +60,23 @@ impl PathHit {
 pub fn looks_like_path(text: &str) -> bool {
     let t = text.trim();
     let b = t.as_bytes();
-    let drive = b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b.len() == 2 || b[2] == b'\\' || b[2] == b'/');
+    let drive = b.len() >= 2
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b.len() == 2 || b[2] == b'\\' || b[2] == b'/');
     drive || t.starts_with("\\\\") || t.starts_with('/') || t.starts_with('~')
 }
 
 /// The text as a path: `~` expanded, `/` as `\` on Windows.
 pub fn expand(text: &str) -> String {
-    let t = crate::paths::expand_user(text.trim()).to_string_lossy().into_owned();
-    if cfg!(windows) { t.replace('/', "\\") } else { t }
+    let t = crate::paths::expand_user(text.trim())
+        .to_string_lossy()
+        .into_owned();
+    if cfg!(windows) {
+        t.replace('/', "\\")
+    } else {
+        t
+    }
 }
 
 /// Without trailing separators, except for a root (a drive root or `/`).
@@ -93,7 +102,11 @@ pub fn split_last(path: &str) -> (&str, &str) {
 }
 
 fn with_sep(path: String) -> String {
-    if path.ends_with(SEPARATORS) { path } else { path + &MAIN_SEP.to_string() }
+    if path.ends_with(SEPARATORS) {
+        path
+    } else {
+        path + &MAIN_SEP.to_string()
+    }
 }
 
 /// The display path of a node.
@@ -134,7 +147,10 @@ fn escape(q: &str) -> String {
 /// The single-character case variants of a character (as the name index compares them).
 fn variants(ch: char) -> Vec<char> {
     let mut out = vec![ch];
-    for v in [ch.to_lowercase().collect::<Vec<_>>(), ch.to_uppercase().collect::<Vec<_>>()] {
+    for v in [
+        ch.to_lowercase().collect::<Vec<_>>(),
+        ch.to_uppercase().collect::<Vec<_>>(),
+    ] {
         if v.len() == 1 && !out.contains(&v[0]) {
             out.push(v[0]);
         }
@@ -196,15 +212,30 @@ fn hits_of(name: &str, query: &str, tier: u8) -> Vec<(usize, usize)> {
     score(query, name).map(|s| s.1).unwrap_or_default()
 }
 
-fn hit(nodes: &Nodes, sizes: &dyn Sizes, node: NodeId, query: &str, tier: u8, glob: bool) -> PathHit {
+fn hit(
+    nodes: &Nodes,
+    sizes: &dyn Sizes,
+    node: NodeId,
+    query: &str,
+    tier: u8,
+    glob: bool,
+) -> PathHit {
     let name = nodes.name(node).into_owned();
     let is_dir = nodes.is_dir(node);
     let parent = nodes.parent(node);
     let full = nodes.path_lossy(node);
-    let hits = if tier == 4 || glob { Vec::new() } else { hits_of(&name, query, tier) };
+    let hits = if tier == 4 || glob {
+        Vec::new()
+    } else {
+        hits_of(&name, query, tier)
+    };
     PathHit {
         node,
-        parent: if parent > 0 { nodes.path_lossy(parent as NodeId) } else { String::new() },
+        parent: if parent > 0 {
+            nodes.path_lossy(parent as NodeId)
+        } else {
+            String::new()
+        },
         is_dir,
         alloc: sizes.size(nodes, node),
         hits,
@@ -281,16 +312,31 @@ pub fn search(
             picked.push((node, if wild { 1 } else { tier as u8 }));
         }
     }
-    let hits = picked.into_iter().map(|(node, tier)| hit(nodes, sizes, node, q, tier, wild)).collect();
+    let hits = picked
+        .into_iter()
+        .map(|(node, tier)| hit(nodes, sizes, node, q, tier, wild))
+        .collect();
     (hits, total)
 }
 
 /// A folder's children for a path typed up to `partial` (UI-W4-37): prefix, inside, scattered.
-pub fn children(nodes: &Nodes, sizes: &dyn Sizes, folder: NodeId, partial: &str, limit: usize) -> (Vec<PathHit>, usize) {
+pub fn children(
+    nodes: &Nodes,
+    sizes: &dyn Sizes,
+    folder: NodeId,
+    partial: &str,
+    limit: usize,
+) -> (Vec<PathHit>, usize) {
     // listed after `sizes` was taken (scan running): no size yet
-    let kids: Vec<NodeId> = nodes.children(folder).filter(|&k| (k as usize) < sizes.n()).collect();
+    let kids: Vec<NodeId> = nodes
+        .children(folder)
+        .filter(|&k| (k as usize) < sizes.n())
+        .collect();
     if partial.is_empty() {
-        let hits = top(nodes, &kids, sizes, limit).into_iter().map(|k| hit(nodes, sizes, k, "", 4, false)).collect();
+        let hits = top(nodes, &kids, sizes, limit)
+            .into_iter()
+            .map(|k| hit(nodes, sizes, k, "", 4, false))
+            .collect();
         return (hits, kids.len());
     }
     let p = partial.to_lowercase();
@@ -312,7 +358,11 @@ pub fn children(nodes: &Nodes, sizes: &dyn Sizes, folder: NodeId, partial: &str,
     }
     ranked.sort_unstable();
     let total = ranked.len();
-    let hits = ranked.into_iter().take(limit).map(|(t, _, k)| hit(nodes, sizes, k, partial, t, false)).collect();
+    let hits = ranked
+        .into_iter()
+        .take(limit)
+        .map(|(t, _, k)| hit(nodes, sizes, k, partial, t, false))
+        .collect();
     (hits, total)
 }
 
@@ -342,7 +392,14 @@ pub fn resolve(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, text: &str) -> 
     let path = expand(text);
     let complete = completion(nodes, sizes, &path);
     if let (Some(node), Some(n), Some(s)) = (sized(nodes, sizes, &path), nodes, sizes) {
-        return PathInput { state: PathState::InScan, node: Some(node), is_dir: n.is_dir(node), alloc: Some(s.size(n, node)), complete, path };
+        return PathInput {
+            state: PathState::InScan,
+            node: Some(node),
+            is_dir: n.is_dir(node),
+            alloc: Some(s.size(n, node)),
+            complete,
+            path,
+        };
     }
     let meta = std::fs::metadata(&path);
     let (exists, is_dir) = match &meta {
@@ -350,7 +407,11 @@ pub fn resolve(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, text: &str) -> 
         Err(_) => (false, false),
     };
     PathInput {
-        state: if exists { PathState::Outside } else { PathState::Missing },
+        state: if exists {
+            PathState::Outside
+        } else {
+            PathState::Missing
+        },
         path,
         node: None,
         is_dir,
@@ -376,7 +437,15 @@ pub fn completion(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) 
             .filter(|c| c.2.starts_with(&p))
             .min()?;
         let k = best.3;
-        return Some(format!("{folder}{}{}", n.name(k), if n.is_dir(k) { MAIN_SEP.to_string() } else { String::new() }));
+        return Some(format!(
+            "{folder}{}{}",
+            n.name(k),
+            if n.is_dir(k) {
+                MAIN_SEP.to_string()
+            } else {
+                String::new()
+            }
+        ));
     }
     let mut found: Vec<(bool, String, String, bool)> = Vec::new();
     for e in std::fs::read_dir(folder).ok()?.flatten() {
@@ -390,5 +459,12 @@ pub fn completion(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) 
         found.push((!no_follow_dir, lower, name, is_dir));
     }
     let (_, _, name, is_dir) = found.into_iter().min()?;
-    Some(format!("{folder}{name}{}", if is_dir { MAIN_SEP.to_string() } else { String::new() }))
+    Some(format!(
+        "{folder}{name}{}",
+        if is_dir {
+            MAIN_SEP.to_string()
+        } else {
+            String::new()
+        }
+    ))
 }

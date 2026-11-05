@@ -22,14 +22,14 @@ use sk_core::settings::SettingsStore;
 use sk_core::tr;
 use sk_core::view::state::BASELINE;
 use sk_core::view::{
-    CompareSource, ResultsCache, View, ViewContext, ViewSettings, encode_frame_into, filter_info, frame_info, showable,
-    view_state,
+    CompareSource, ResultsCache, View, ViewContext, ViewSettings, encode_frame_into, filter_info,
+    frame_info, showable, view_state,
 };
 use sk_protocol::filter_syntax::CompiledVocab;
 use sk_protocol::methods::ViewFrame;
 use sk_protocol::view::{
-    ColorModeName, DRAWLIST_LAYOUT, FLAME_LAYOUT, FrameInfo, POLAR_LAYOUT, ViewFrameEvent, ViewOpenParams,
-    ViewSettingsParams, ViewUpdate,
+    ColorModeName, DRAWLIST_LAYOUT, FLAME_LAYOUT, FrameInfo, POLAR_LAYOUT, ViewFrameEvent,
+    ViewOpenParams, ViewSettingsParams, ViewUpdate,
 };
 use sk_protocol::{CAP_VISUALS, ErrorCode, RequestId};
 use sk_store::NodeId;
@@ -104,7 +104,11 @@ fn apply_pending(pending: &Mutex<Vec<PendingRemap>>, v: &mut View) {
 
 /// The nearest node of `chain` still there (else the view's home, else the top).
 fn fallback_of(chain: &[NodeId], f: &dyn Fn(NodeId) -> Option<NodeId>, home: NodeId) -> NodeId {
-    chain.iter().find_map(|&n| f(n)).or_else(|| f(home)).unwrap_or(0)
+    chain
+        .iter()
+        .find_map(|&n| f(n))
+        .or_else(|| f(home))
+        .unwrap_or(0)
 }
 
 /// What a view opens on: a scan or a ready comparison.
@@ -125,7 +129,11 @@ pub struct ViewManager {
 /// The filter vocabulary of the active class table in the interface language.
 pub fn current_vocab() -> Arc<CompiledVocab> {
     let map = ClassMap::active();
-    sk_core::filter::vocab::compiled_vocab(map.classes(), sk_core::classes::version(), sk_core::i18n::language().as_str())
+    sk_core::filter::vocab::compiled_vocab(
+        map.classes(),
+        sk_core::classes::version(),
+        sk_core::i18n::language().as_str(),
+    )
 }
 
 /// 「元素比例」 −60…60 → the width / height cells aim for: 0.5 (taller) … 1 (square) … 2 (wider).
@@ -151,7 +159,12 @@ impl ViewManager {
     }
 
     fn hosts(&self, scan_id: &str) -> Vec<Arc<ViewHost>> {
-        self.views.lock().values().filter(|h| h.scan_id == scan_id).cloned().collect()
+        self.views
+            .lock()
+            .values()
+            .filter(|h| h.scan_id == scan_id)
+            .cloned()
+            .collect()
     }
 
     pub fn has_views(&self, scan_id: &str) -> bool {
@@ -165,7 +178,9 @@ impl ViewManager {
             .get(view_id)
             .filter(|h| h.session_id == session.id)
             .cloned()
-            .ok_or_else(|| RpcError::new(ErrorCode::UnknownView, format!("unknown view: {view_id}")))
+            .ok_or_else(|| {
+                RpcError::new(ErrorCode::UnknownView, format!("unknown view: {view_id}"))
+            })
     }
 
     /// Any session's view.
@@ -175,17 +190,32 @@ impl ViewManager {
 
     pub fn target(&self, server: &Server, id: &str) -> RpcResult<Target> {
         if let Some(h) = server.scans.lookup(id) {
-            return Ok(Target { id: h.id.clone(), ctx: h.ctx.clone(), compare: None, running: h.running() });
+            return Ok(Target {
+                id: h.id.clone(),
+                ctx: h.ctx.clone(),
+                compare: None,
+                running: h.running(),
+            });
         }
         if let Some((ctx, source)) = server.compares.view_target(id) {
-            return Ok(Target { id: id.to_owned(), ctx, compare: Some(source), running: false });
+            return Ok(Target {
+                id: id.to_owned(),
+                ctx,
+                compare: Some(source),
+                running: false,
+            });
         }
-        Err(RpcError::new(ErrorCode::UnknownScan, format!("unknown scan: {id}")))
+        Err(RpcError::new(
+            ErrorCode::UnknownScan,
+            format!("unknown scan: {id}"),
+        ))
     }
 
     /// Make sure the scan tells the views its status (once per scan).
     fn listen(&self, server: &Arc<Server>, scan_id: &str) {
-        let Some(h) = server.scans.lookup(scan_id) else { return };
+        let Some(h) = server.scans.lookup(scan_id) else {
+            return;
+        };
         let weak = Arc::downgrade(server);
         let id = scan_id.to_owned();
         h.add_listener(
@@ -198,17 +228,32 @@ impl ViewManager {
         );
     }
 
-    pub fn open(&self, server: &Arc<Server>, session: &Arc<Session>, params: &ViewOpenParams) -> RpcResult<Arc<ViewHost>> {
+    pub fn open(
+        &self,
+        server: &Arc<Server>,
+        session: &Arc<Session>,
+        params: &ViewOpenParams,
+    ) -> RpcResult<Arc<ViewHost>> {
         if self.len() >= MAX_VIEWS {
-            return Err(RpcError::invalid_request(tr!("打开的视图太多了，先关掉一些标签或窗格")));
+            return Err(RpcError::invalid_request(tr!(
+                "打开的视图太多了，先关掉一些标签或窗格"
+            )));
         }
         let t = self.target(server, &params.scan_id)?;
         let caps = session.capabilities();
         let compare = t.compare.is_some();
         let settings = new_view_settings(&server.settings, caps, compare);
-        let mut view = View::new(&format!("view-{}", self.ids.fetch_add(1, Ordering::SeqCst) + 1), t.ctx.clone(), settings)
-            .ok_or_else(|| RpcError::internal("no such visualization"))?;
-        view.set_viewport(params.viewport.width, params.viewport.height, params.viewport.dpr);
+        let mut view = View::new(
+            &format!("view-{}", self.ids.fetch_add(1, Ordering::SeqCst) + 1),
+            t.ctx.clone(),
+            settings,
+        )
+        .ok_or_else(|| RpcError::internal("no such visualization"))?;
+        view.set_viewport(
+            params.viewport.width,
+            params.viewport.height,
+            params.viewport.dpr,
+        );
         view.scanning = t.running && marks_scanning(&server.settings);
         view.compare = t.compare.clone(); // before the settings: the direction only applies to compare views
         if let Some(s) = &params.settings {
@@ -266,7 +311,12 @@ impl ViewManager {
 
     /// Run `action` on the view (on a blocking thread), render when it changed something (or
     /// `force`), queue the binary frame, and answer with the view's update.
-    pub async fn act<F>(&self, host: &Arc<ViewHost>, request: Option<RequestId>, action: F) -> RpcResult<ViewUpdate>
+    pub async fn act<F>(
+        &self,
+        host: &Arc<ViewHost>,
+        request: Option<RequestId>,
+        action: F,
+    ) -> RpcResult<ViewUpdate>
     where
         F: FnOnce(&mut View) -> RpcResult<(bool, &'static str)> + Send + 'static,
     {
@@ -300,7 +350,12 @@ impl ViewManager {
     }
 
     /// Render a frame for a push (the caller holds `host.lock`); the binary frame is queued.
-    async fn render_push(&self, host: &Arc<ViewHost>, reason: &'static str, refilter: bool) -> RpcResult<FrameInfo> {
+    async fn render_push(
+        &self,
+        host: &Arc<ViewHost>,
+        reason: &'static str,
+        refilter: bool,
+    ) -> RpcResult<FrameInfo> {
         let h = host.clone();
         let (info, buf) = compute(move || {
             let mut v = h.view.lock();
@@ -330,9 +385,17 @@ impl ViewManager {
         }
     }
 
-    fn spawn_repaint(&self, server: &Arc<Server>, host: &Arc<ViewHost>, reason: &'static str, refilter: bool) {
+    fn spawn_repaint(
+        &self,
+        server: &Arc<Server>,
+        host: &Arc<ViewHost>,
+        reason: &'static str,
+        refilter: bool,
+    ) {
         let (srv, h) = (server.clone(), host.clone());
-        server.rt.spawn(async move { srv.views.repaint(&h, reason, refilter).await });
+        server
+            .rt
+            .spawn(async move { srv.views.repaint(&h, reason, refilter).await });
     }
 
     // ------------------------------------------------------------- settings
@@ -347,14 +410,19 @@ impl ViewManager {
         let origin = st.get_str("treemap.flame_origin");
         for host in self.all() {
             let changed = {
-                let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else { continue };
-                let mut changed =
-                    (v.min_element, v.sort_by_size, v.font_scale, v.aspect) != (min_element, sort_by_size, font_scale, aspect);
+                let Some(mut v) = host.view.try_lock_for(Duration::from_millis(200)) else {
+                    continue;
+                };
+                let mut changed = (v.min_element, v.sort_by_size, v.font_scale, v.aspect)
+                    != (min_element, sort_by_size, font_scale, aspect);
                 v.min_element = min_element;
                 v.sort_by_size = sort_by_size;
                 v.font_scale = font_scale;
                 v.aspect = aspect;
-                let flame = vec![("origin".to_owned(), sk_core::layout::api::OptValue::Str(origin.clone()))];
+                let flame = vec![(
+                    "origin".to_owned(),
+                    sk_core::layout::api::OptValue::Str(origin.clone()),
+                )];
                 if v.visual_options.get("flame") != Some(&flame) {
                     v.visual_options.insert("flame".to_owned(), flame);
                     changed = changed || v.visual == "flame";
@@ -400,7 +468,12 @@ impl ViewManager {
 
     /// Node ids changed (call with the store's writer held: never lock the store here). Views
     /// not busy follow at once; busy ones before their next use.
-    pub fn remap(&self, scan_id: &str, now: &dyn Fn(NodeId) -> Option<NodeId>, later: &dyn Fn() -> IdMap) {
+    pub fn remap(
+        &self,
+        scan_id: &str,
+        now: &dyn Fn(NodeId) -> Option<NodeId>,
+        later: &dyn Fn() -> IdMap,
+    ) {
         for host in self.hosts(scan_id) {
             let chain = host.chain.lock().clone();
             match host.view.try_lock() {
@@ -451,7 +524,13 @@ impl ViewManager {
     }
 
     /// A live comparison was computed again: its views move to the new change tree.
-    pub async fn replace_store(&self, server: &Arc<Server>, compare_id: &str, ctx: Arc<ViewContext>, source: Arc<dyn CompareSource>) {
+    pub async fn replace_store(
+        &self,
+        server: &Arc<Server>,
+        compare_id: &str,
+        ctx: Arc<ViewContext>,
+        source: Arc<dyn CompareSource>,
+    ) {
         for host in self.hosts(compare_id) {
             {
                 let _g = host.lock.lock().await;
@@ -472,7 +551,12 @@ impl ViewManager {
 
     /// A scan published its status: views mark the folders still being listed and get frames
     /// (at most every [`PUSH_INTERVAL`] while it runs, once at the end).
-    pub fn on_scan(&self, server: &Arc<Server>, scan_id: &str, state: sk_protocol::scan::ScanStateName) {
+    pub fn on_scan(
+        &self,
+        server: &Arc<Server>,
+        scan_id: &str,
+        state: sk_protocol::scan::ScanStateName,
+    ) {
         use sk_protocol::scan::ScanStateName as S;
         let is_final = matches!(state, S::Done | S::Cancelled | S::Failed);
         let marks = state == S::Scanning && marks_scanning(&server.settings);
@@ -498,9 +582,17 @@ impl ViewManager {
         }
     }
 
-    fn spawn_push(&self, server: &Arc<Server>, host: &Arc<ViewHost>, is_final: bool, reason: &'static str) {
+    fn spawn_push(
+        &self,
+        server: &Arc<Server>,
+        host: &Arc<ViewHost>,
+        is_final: bool,
+        reason: &'static str,
+    ) {
         let (srv, h) = (server.clone(), host.clone());
-        server.rt.spawn(async move { srv.views.push(&h, is_final, reason).await });
+        server
+            .rt
+            .spawn(async move { srv.views.push(&h, is_final, reason).await });
     }
 
     async fn push(&self, host: &Arc<ViewHost>, mut is_final: bool, mut reason: &'static str) {
@@ -509,7 +601,9 @@ impl ViewManager {
                 let _guard = host.lock.lock().await;
                 let refilter = {
                     let p = host.push.lock();
-                    is_final || p.last_refilter.is_none_or(|t| t.elapsed() >= REFILTER_INTERVAL)
+                    is_final
+                        || p.last_refilter
+                            .is_none_or(|t| t.elapsed() >= REFILTER_INTERVAL)
                 };
                 let why = if !reason.is_empty() {
                     reason
@@ -552,7 +646,12 @@ impl ViewManager {
 }
 
 /// Render the view (locked) and encode its binary frame: (FrameInfo, frame bytes).
-fn render_locked(h: &ViewHost, v: &mut View, reason: &str, request: Option<&RequestId>) -> (FrameInfo, Vec<u8>) {
+fn render_locked(
+    h: &ViewHost,
+    v: &mut View,
+    reason: &str,
+    request: Option<&RequestId>,
+) -> (FrameInfo, Vec<u8>) {
     let seq = h.seq.fetch_add(1, Ordering::SeqCst) + 1;
     let frame = v.render();
     let mut buf = Vec::with_capacity(h.frame_hint.load(Ordering::Relaxed));
@@ -563,8 +662,11 @@ fn render_locked(h: &ViewHost, v: &mut View, reason: &str, request: Option<&Requ
     {
         let nodes = v.ctx.store.read();
         let z = v.zoom.node;
-        *h.chain.lock() =
-            if (z as usize) < nodes.len() { std::iter::once(z).chain(nodes.ancestors(z)).collect() } else { Vec::new() };
+        *h.chain.lock() = if (z as usize) < nodes.len() {
+            std::iter::once(z).chain(nodes.ancestors(z)).collect()
+        } else {
+            Vec::new()
+        };
     }
     let frame = v.last.as_ref().expect("just rendered");
     (frame_info(v, frame, seq, reason), buf)
@@ -582,7 +684,11 @@ pub fn new_view_settings(st: &SettingsStore, caps: &[String], compare: bool) -> 
     let full = caps.iter().any(|c| c == CAP_VISUALS);
     let mode = |key: &str| {
         let v = ColorModeName::from_str(&st.get_str(key)).unwrap_or(ColorModeName::Class);
-        if v == ColorModeName::Branch && !full { ColorModeName::Class } else { v }
+        if v == ColorModeName::Branch && !full {
+            ColorModeName::Class
+        } else {
+            v
+        }
     };
     let tree = mode("appearance.default_color_mode");
     let part = mode("appearance.partition_color_mode");
@@ -598,10 +704,9 @@ pub fn new_view_settings(st: &SettingsStore, caps: &[String], compare: bool) -> 
         Some(vis) if vis.compare || !compare => vis.id,
         _ => BASELINE.to_owned(),
     };
-    let color_mode = colors
-        .get(&visual)
-        .copied()
-        .unwrap_or_else(|| registry::get(&visual).map_or(ColorModeName::Class, |v| v.default_color));
+    let color_mode = colors.get(&visual).copied().unwrap_or_else(|| {
+        registry::get(&visual).map_or(ColorModeName::Class, |v| v.default_color)
+    });
     ViewSettings {
         detail: st.get_int("treemap.initial_detail").clamp(1, 15) as u32,
         min_element: setting_f64(st, "treemap.min_element"),
@@ -636,7 +741,13 @@ pub fn fall_back(s: &ViewSettingsParams, caps: &[String], compare: bool) -> View
     if let Some(colors) = &s.colors
         && !full
     {
-        out.colors = Some(colors.iter().filter(|(_, m)| **m != ColorModeName::Branch).map(|(k, v)| (k.clone(), *v)).collect());
+        out.colors = Some(
+            colors
+                .iter()
+                .filter(|(_, m)| **m != ColorModeName::Branch)
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+        );
     }
     out
 }
@@ -653,7 +764,9 @@ pub fn apply_settings(view: &mut View, s: &ViewSettingsParams, caps: &[String]) 
     let full = caps.iter().any(|c| c == CAP_VISUALS);
     if !full
         && (s.color_mode == Some(ColorModeName::Branch)
-            || s.colors.as_ref().is_some_and(|c| c.values().any(|m| *m == ColorModeName::Branch)))
+            || s.colors
+                .as_ref()
+                .is_some_and(|c| c.values().any(|m| *m == ColorModeName::Branch)))
     {
         return Err(RpcError::invalid_params(tr!("这种配色在当前界面不可用")));
     }

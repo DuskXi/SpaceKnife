@@ -46,7 +46,13 @@ pub enum EventLevel {
 }
 
 /// Log a user-facing event.
-pub fn emit(source: Source, message: &str, level: EventLevel, scan_id: Option<&str>, path: Option<&str>) {
+pub fn emit(
+    source: Source,
+    message: &str,
+    level: EventLevel,
+    scan_id: Option<&str>,
+    path: Option<&str>,
+) {
     let event = source.as_str();
     let scan_id = scan_id.unwrap_or("");
     let path = path.unwrap_or("");
@@ -99,8 +105,12 @@ const DENIED_ZH: &str = "拒绝"; // in a Chinese system's "access denied" messa
 /// OS error text -> the wording used in the log panel.
 pub fn denied_reason(message: &str) -> String {
     let own = match message {
-        m if m == messages::CASE => Some("同一文件夹里另有一项与它只差大小写，按名字打开的是那一项"),
-        m if m == messages::DUP => Some("同一文件夹里另有一项在 Windows 上显示为同一个名字，按名字分不开"),
+        m if m == messages::CASE => {
+            Some("同一文件夹里另有一项与它只差大小写，按名字打开的是那一项")
+        }
+        m if m == messages::DUP => {
+            Some("同一文件夹里另有一项在 Windows 上显示为同一个名字，按名字分不开")
+        }
         m if m == messages::BADNAME => Some("名字里有 Windows 的名字里不能有的字符，按名字打不开"),
         m if m == messages::CAP => Some("只能按文件 ID 打开的文件夹一次要读的项太多，这次没有读"),
         m if m == messages::INCOMPLETE => Some("按文件 ID 打开时没有列全"),
@@ -119,7 +129,11 @@ pub fn denied_reason(message: &str) -> String {
         return t("拒绝访问").to_owned();
     }
     let trimmed = message.trim_end_matches(['。', '.', ' ']);
-    if trimmed.is_empty() { t("无法读取").to_owned() } else { trimmed.to_owned() }
+    if trimmed.is_empty() {
+        t("无法读取").to_owned()
+    } else {
+        trimmed.to_owned()
+    }
 }
 
 #[cfg(test)]
@@ -131,9 +145,15 @@ mod tests {
         let _g = crate::i18n::TEST_LOCK.lock();
         assert_eq!(denied_reason("Access is denied. "), "拒绝访问");
         assert_eq!(denied_reason("拒绝访问。"), "拒绝访问");
-        assert_eq!(denied_reason("The device is not ready."), "The device is not ready");
+        assert_eq!(
+            denied_reason("The device is not ready."),
+            "The device is not ready"
+        );
         assert_eq!(denied_reason("。"), "无法读取");
-        assert_eq!(denied_reason(messages::INCOMPLETE), "按文件 ID 打开时没有列全");
+        assert_eq!(
+            denied_reason(messages::INCOMPLETE),
+            "按文件 ID 打开时没有列全"
+        );
     }
 
     #[test]
@@ -154,7 +174,13 @@ mod tests {
         let bus = Arc::new(crate::log::LogBus::new(10));
         let sub = tracing_subscriber::registry().with(bus.layer());
         tracing::subscriber::with_default(sub, || {
-            emit(Source::Delete, "已删除 {x}", EventLevel::Warning, Some("s1"), Some("C:\\a"));
+            emit(
+                Source::Delete,
+                "已删除 {x}",
+                EventLevel::Warning,
+                Some("s1"),
+                Some("C:\\a"),
+            );
         });
         let e = &bus.recent(1, sk_protocol::streams::LogLevel::Trace)[0];
         assert_eq!(e.message, "已删除 {x}");

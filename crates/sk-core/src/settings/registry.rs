@@ -127,8 +127,12 @@ pub const LOAD_LEVELS: &[(&str, &str)] = &[
 /// (design/tokens color.accent.*), so the stored value stays the same when the theme changes.
 pub const ACCENTS: [&str; 4] = ["#8B9CFF", "#D4FF3A", "#5EC8B8", "#F2A65A"];
 
-const COLOR_MODES: &[(&str, &str)] =
-    &[("class", "文件类别"), ("flat", "扁平"), ("time", "修改时间"), ("branch", "顶层分支")];
+const COLOR_MODES: &[(&str, &str)] = &[
+    ("class", "文件类别"),
+    ("flat", "扁平"),
+    ("time", "修改时间"),
+    ("branch", "顶层分支"),
+];
 const SCAN_GROUP_NOTE: &str = "限制扫描造成的磁盘读取占用";
 
 pub(crate) fn registry() -> Vec<Spec> {

@@ -13,31 +13,37 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 use windows_sys::Win32::Foundation::{
-    CloseHandle, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_IO_PENDING, ERROR_NO_DATA, ERROR_OPERATION_ABORTED,
-    ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED, GENERIC_READ, GENERIC_WRITE, GetLastError,
-    HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_OBJECT_0, WAIT_TIMEOUT,
+    CloseHandle, ERROR_BROKEN_PIPE, ERROR_CANCELLED, ERROR_IO_PENDING, ERROR_NO_DATA,
+    ERROR_OPERATION_ABORTED, ERROR_PIPE_BUSY, ERROR_PIPE_CONNECTED, ERROR_PIPE_NOT_CONNECTED,
+    GENERIC_READ, GENERIC_WRITE, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows_sys::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows_sys::Win32::Security::{
-    CheckTokenMembership, CreateWellKnownSid, GetTokenInformation, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
-    TokenUser, WinBuiltinAdministratorsSid,
+    CheckTokenMembership, CreateWellKnownSid, GetTokenInformation, SECURITY_ATTRIBUTES,
+    TOKEN_QUERY, TOKEN_USER, TokenUser, WinBuiltinAdministratorsSid,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceW, GetDriveTypeW, GetVolumeInformationW, OPEN_EXISTING,
-    PIPE_ACCESS_DUPLEX, QueryDosDeviceW, ReadFile, SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
+    CREATE_NEW, CreateFileW, FILE_ATTRIBUTE_TEMPORARY, FILE_FLAG_FIRST_PIPE_INSTANCE,
+    FILE_FLAG_OVERLAPPED, FILE_SHARE_READ, FILE_SHARE_WRITE, GetDiskFreeSpaceW, GetDriveTypeW,
+    GetVolumeInformationW, OPEN_EXISTING, PIPE_ACCESS_DUPLEX, QueryDosDeviceW, ReadFile,
+    SECURITY_IDENTIFICATION, SECURITY_SQOS_PRESENT, WriteFile,
 };
-use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize};
-use windows_sys::Win32::System::IO::{CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED};
+use windows_sys::Win32::System::Com::{
+    COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+};
+use windows_sys::Win32::System::IO::{
+    CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED,
+};
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
     PIPE_REJECT_REMOTE_CLIENTS, WaitNamedPipeW,
 };
 use windows_sys::Win32::System::Threading::{
-    CreateEventW, GetCurrentProcess, GetExitCodeProcess, GetProcessId, INFINITE, OpenProcessToken, SetEvent,
-    TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
+    CreateEventW, GetCurrentProcess, GetExitCodeProcess, GetProcessId, INFINITE, OpenProcessToken,
+    SetEvent, TerminateProcess, WaitForMultipleObjects, WaitForSingleObject,
 };
 use windows_sys::Win32::UI::Shell::{SHELLEXECUTEINFOW, ShellExecuteExW};
 
@@ -58,7 +64,9 @@ pub(crate) fn wide(s: impl AsRef<OsStr>) -> Vec<u16> {
 /// The UTF-16 string up to the first NUL (or the whole buffer), lossily.
 pub(crate) fn from_wide(buf: &[u16]) -> String {
     let end = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    OsString::from_wide(&buf[..end]).to_string_lossy().into_owned()
+    OsString::from_wide(&buf[..end])
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// A NUL-terminated UTF-16 string at `p`.
@@ -104,7 +112,17 @@ impl Handle {
     pub(crate) fn open(path: &str, access: u32, share: u32, flags: u32) -> Option<Handle> {
         let w = wide(path);
         // SAFETY: valid NUL-terminated path; no security attributes or template.
-        let h = unsafe { CreateFileW(w.as_ptr(), access, share, null(), OPEN_EXISTING, flags, null_mut()) };
+        let h = unsafe {
+            CreateFileW(
+                w.as_ptr(),
+                access,
+                share,
+                null(),
+                OPEN_EXISTING,
+                flags,
+                null_mut(),
+            )
+        };
         valid(h).then_some(Handle(h))
     }
 
@@ -117,7 +135,11 @@ impl Handle {
             DeviceIoControl(
                 self.0,
                 code,
-                if input.is_empty() { null() } else { input.as_ptr().cast() },
+                if input.is_empty() {
+                    null()
+                } else {
+                    input.as_ptr().cast()
+                },
                 input.len() as u32,
                 out.as_mut_ptr().cast(),
                 out_size as u32,
@@ -205,7 +227,12 @@ impl SecurityAttributes {
         let mut sd: *mut c_void = null_mut();
         // SAFETY: valid SDDL string and out-pointer.
         let ok = unsafe {
-            ConvertStringSecurityDescriptorToSecurityDescriptorW(w.as_ptr(), SDDL_REVISION_1, &mut sd, null_mut())
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                w.as_ptr(),
+                SDDL_REVISION_1,
+                &mut sd,
+                null_mut(),
+            )
         };
         if ok == 0 {
             return Err(io::Error::last_os_error());
@@ -234,7 +261,15 @@ pub fn write_private_file(path: &std::path::Path, data: &[u8]) -> io::Result<()>
     let w = wide(path);
     // SAFETY: valid path and security attributes.
     let h = unsafe {
-        CreateFileW(w.as_ptr(), GENERIC_WRITE, 0, &sa.sa, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY, null_mut())
+        CreateFileW(
+            w.as_ptr(),
+            GENERIC_WRITE,
+            0,
+            &sa.sa,
+            CREATE_NEW,
+            FILE_ATTRIBUTE_TEMPORARY,
+            null_mut(),
+        )
     };
     if !valid(h) {
         return Err(io::Error::last_os_error());
@@ -242,7 +277,15 @@ pub fn write_private_file(path: &std::path::Path, data: &[u8]) -> io::Result<()>
     let h = Handle(h);
     let mut written = 0u32;
     // SAFETY: valid buffer.
-    let ok = unsafe { WriteFile(h.0, data.as_ptr(), data.len() as u32, &mut written, null_mut()) };
+    let ok = unsafe {
+        WriteFile(
+            h.0,
+            data.as_ptr(),
+            data.len() as u32,
+            &mut written,
+            null_mut(),
+        )
+    };
     if ok == 0 || written as usize != data.len() {
         return Err(io::Error::last_os_error());
     }
@@ -259,7 +302,13 @@ pub fn is_admin() -> bool {
     let mut member = 0i32;
     // SAFETY: buffers sized as documented.
     unsafe {
-        if CreateWellKnownSid(WinBuiltinAdministratorsSid, null_mut(), sid.as_mut_ptr().cast(), &mut size) == 0 {
+        if CreateWellKnownSid(
+            WinBuiltinAdministratorsSid,
+            null_mut(),
+            sid.as_mut_ptr().cast(),
+            &mut size,
+        ) == 0
+        {
             return false;
         }
         if CheckTokenMembership(null_mut(), sid.as_mut_ptr().cast(), &mut member) == 0 {
@@ -295,7 +344,11 @@ unsafe impl Sync for Pipe {}
 fn event() -> io::Result<HANDLE> {
     // SAFETY: manual-reset, initially unsignalled, unnamed.
     let h = unsafe { CreateEventW(null(), 1, 0, null()) };
-    if h.is_null() { Err(io::Error::last_os_error()) } else { Ok(h) }
+    if h.is_null() {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(h)
+    }
 }
 
 fn closed_or_error(err: u32) -> io::Error {
@@ -319,7 +372,10 @@ impl Pipe {
         Ok(Self {
             handle,
             cancel,
-            state: Mutex::new(PipeState { closed: false, users: 0 }),
+            state: Mutex::new(PipeState {
+                closed: false,
+                users: 0,
+            }),
         })
     }
 
@@ -355,7 +411,10 @@ impl Pipe {
     fn enter(&self) -> io::Result<HANDLE> {
         let mut st = self.state.lock();
         if st.closed {
-            return Err(io::Error::new(io::ErrorKind::ConnectionAborted, t("管道已关闭")));
+            return Err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                t("管道已关闭"),
+            ));
         }
         st.users += 1;
         Ok(self.handle)
@@ -373,7 +432,11 @@ impl Pipe {
     }
 
     /// Start one overlapped operation and wait for it; returns the byte count.
-    fn run(&self, timeout: Option<Duration>, start: impl FnOnce(HANDLE, *mut OVERLAPPED) -> i32) -> io::Result<usize> {
+    fn run(
+        &self,
+        timeout: Option<Duration>,
+        start: impl FnOnce(HANDLE, *mut OVERLAPPED) -> i32,
+    ) -> io::Result<usize> {
         let handle = self.enter()?;
         let result = (|| {
             let ev = event()?;
@@ -406,7 +469,10 @@ impl Pipe {
                 if outcome == WAIT_TIMEOUT {
                     return Err(io::Error::new(io::ErrorKind::TimedOut, t("管道读写超时")));
                 }
-                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, t("管道已关闭")));
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    t("管道已关闭"),
+                ));
             }
             Err(closed_or_error(err))
         })();
@@ -417,7 +483,8 @@ impl Pipe {
     /// Server end: wait for the client to connect.
     pub fn accept(&self, timeout: Option<Duration>) -> io::Result<()> {
         // SAFETY: valid handle and OVERLAPPED.
-        self.run(timeout, |h, ov| unsafe { ConnectNamedPipe(h, ov) }).map(|_| ())
+        self.run(timeout, |h, ov| unsafe { ConnectNamedPipe(h, ov) })
+            .map(|_| ())
     }
 
     /// Read at least one byte into `buf`; `UnexpectedEof` when the other end has closed.
@@ -425,14 +492,22 @@ impl Pipe {
         let size = buf.len().min(MAX_IO_CHUNK) as u32;
         let ptr = buf.as_mut_ptr();
         // SAFETY: `buf` outlives the operation (run waits for it to finish).
-        let got = match self.run(timeout, |h, ov| unsafe { ReadFile(h, ptr, size, null_mut(), ov) }) {
+        let got = match self.run(timeout, |h, ov| unsafe {
+            ReadFile(h, ptr, size, null_mut(), ov)
+        }) {
             Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, t("管道已断开")));
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    t("管道已断开"),
+                ));
             }
             other => other?,
         };
         if got == 0 && size > 0 {
-            return Err(io::Error::new(io::ErrorKind::UnexpectedEof, t("管道已断开")));
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                t("管道已断开"),
+            ));
         }
         Ok(got)
     }
@@ -441,7 +516,9 @@ impl Pipe {
         let size = buf.len().min(MAX_IO_CHUNK) as u32;
         let ptr = buf.as_ptr();
         // SAFETY: `buf` outlives the operation.
-        self.run(timeout, |h, ov| unsafe { WriteFile(h, ptr, size, null_mut(), ov) })
+        self.run(timeout, |h, ov| unsafe {
+            WriteFile(h, ptr, size, null_mut(), ov)
+        })
     }
 
     fn pid(&self, query: unsafe extern "system" fn(HANDLE, *mut u32) -> i32) -> io::Result<u32> {
@@ -498,7 +575,17 @@ pub fn connect_pipe(name: &str, timeout: Duration) -> io::Result<Pipe> {
     let flags = FILE_FLAG_OVERLAPPED | SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION;
     let open = || {
         // SAFETY: valid name.
-        unsafe { CreateFileW(w.as_ptr(), GENERIC_READ | GENERIC_WRITE, 0, null(), OPEN_EXISTING, flags, null_mut()) }
+        unsafe {
+            CreateFileW(
+                w.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                null(),
+                OPEN_EXISTING,
+                flags,
+                null_mut(),
+            )
+        }
     };
     let mut h = open();
     if !valid(h) && last_error() == ERROR_PIPE_BUSY {
@@ -600,7 +687,12 @@ pub fn shell_execute(params: &ShellExecuteParams) -> io::Result<ProcessHandle> {
     let parameters = wide(&params.parameters);
     let directory = params.directory.as_ref().map(wide);
     // SAFETY: COM initialisation of this thread, balanced below.
-    let com = unsafe { CoInitializeEx(null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32) };
+    let com = unsafe {
+        CoInitializeEx(
+            null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        )
+    };
     let result = (|| {
         // SAFETY: zeroed SHELLEXECUTEINFOW is valid; the strings outlive the call.
         let mut info: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
@@ -686,15 +778,29 @@ pub fn volume_details(volume: &str) -> VolumeDetails {
             fs.as_mut_ptr(),
             261,
         ) != 0;
-        let geometry = GetDiskFreeSpaceW(root.as_ptr(), &mut spc, &mut bps, &mut nfree, &mut nclusters) != 0;
+        let geometry = GetDiskFreeSpaceW(
+            root.as_ptr(),
+            &mut spc,
+            &mut bps,
+            &mut nfree,
+            &mut nclusters,
+        ) != 0;
         VolumeDetails {
             drive_type: GetDriveTypeW(root.as_ptr()),
             device,
             fs_type: if ok { from_wide(&fs) } else { String::new() },
             label: if ok { from_wide(&label) } else { String::new() },
-            serial: if ok { format!("{serial:08X}") } else { String::new() },
+            serial: if ok {
+                format!("{serial:08X}")
+            } else {
+                String::new()
+            },
             bytes_per_sector: if geometry { u64::from(bps) } else { 0 },
-            cluster_size: if geometry { u64::from(spc) * u64::from(bps) } else { 0 },
+            cluster_size: if geometry {
+                u64::from(spc) * u64::from(bps)
+            } else {
+                0
+            },
         }
     }
 }
@@ -705,7 +811,15 @@ pub fn ntfs_volume_data(volume: &str) -> io::Result<Scalars> {
     let w = wide(&path);
     // SAFETY: valid path.
     let h = unsafe {
-        CreateFileW(w.as_ptr(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, null(), OPEN_EXISTING, 0, null_mut())
+        CreateFileW(
+            w.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            null(),
+            OPEN_EXISTING,
+            0,
+            null_mut(),
+        )
     };
     if !valid(h) {
         return Err(io::Error::last_os_error());
@@ -713,7 +827,10 @@ pub fn ntfs_volume_data(volume: &str) -> io::Result<Scalars> {
     let h = Handle(h);
     let raw = h.ioctl(FSCTL_GET_NTFS_VOLUME_DATA, &[], 96)?;
     if raw.len() < 96 {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "short NTFS_VOLUME_DATA_BUFFER"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "short NTFS_VOLUME_DATA_BUFFER",
+        ));
     }
     let i64_at = |o: usize| i64::from_le_bytes(raw[o..o + 8].try_into().expect("8 bytes"));
     let u32_at = |o: usize| u32::from_le_bytes(raw[o..o + 4].try_into().expect("4 bytes"));

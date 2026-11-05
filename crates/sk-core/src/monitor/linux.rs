@@ -44,7 +44,14 @@ pub const IN_ONLYDIR: u32 = 0x0100_0000;
 pub const IN_DONT_FOLLOW: u32 = 0x0200_0000;
 pub const IN_ISDIR: u32 = 0x4000_0000;
 
-const EVENTS: u32 = IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO | IN_CLOSE_WRITE | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF;
+const EVENTS: u32 = IN_CREATE
+    | IN_DELETE
+    | IN_MOVED_FROM
+    | IN_MOVED_TO
+    | IN_CLOSE_WRITE
+    | IN_ATTRIB
+    | IN_DELETE_SELF
+    | IN_MOVE_SELF;
 pub const WATCH_MASK: u32 = EVENTS | IN_ONLYDIR | IN_DONT_FOLLOW;
 /// the scan root itself may be a symbolic link to a folder
 pub const ROOT_MASK: u32 = EVENTS | IN_ONLYDIR;
@@ -64,7 +71,12 @@ pub struct RawEvent {
 
 impl RawEvent {
     pub fn new(wd: i32, mask: u32, cookie: u32, name: &[u8]) -> RawEvent {
-        RawEvent { wd, mask, cookie, name: name.to_vec() }
+        RawEvent {
+            wd,
+            mask,
+            cookie,
+            name: name.to_vec(),
+        }
     }
 }
 
@@ -84,7 +96,12 @@ pub fn decode_events(buf: &[u8]) -> Vec<RawEvent> {
         let raw = &buf[pos..pos + len];
         let name = raw.split(|&b| b == 0).next().unwrap_or(&[]);
         pos += len;
-        out.push(RawEvent { wd, mask, cookie, name: name.to_vec() });
+        out.push(RawEvent {
+            wd,
+            mask,
+            cookie,
+            name: name.to_vec(),
+        });
     }
     out
 }
@@ -93,7 +110,11 @@ pub fn decode_events(buf: &[u8]) -> Vec<RawEvent> {
 pub fn encode_events(events: &[RawEvent]) -> Vec<u8> {
     let mut out = Vec::new();
     for e in events {
-        let padded = if e.name.is_empty() { 0 } else { (e.name.len() + 1).div_ceil(16) * 16 };
+        let padded = if e.name.is_empty() {
+            0
+        } else {
+            (e.name.len() + 1).div_ceil(16) * 16
+        };
         out.extend_from_slice(&e.wd.to_ne_bytes());
         out.extend_from_slice(&e.mask.to_ne_bytes());
         out.extend_from_slice(&e.cookie.to_ne_bytes());
@@ -143,7 +164,13 @@ pub struct WatchTree {
 
 impl WatchTree {
     pub fn new(root: &[u8]) -> WatchTree {
-        WatchTree { root: root.to_vec(), root_wd: -1, node: HashMap::new(), child: HashMap::new(), order: Vec::new() }
+        WatchTree {
+            root: root.to_vec(),
+            root_wd: -1,
+            node: HashMap::new(),
+            child: HashMap::new(),
+            order: Vec::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -191,7 +218,8 @@ impl WatchTree {
     pub fn wds(&mut self) -> Vec<i32> {
         let node = &self.node;
         let mut seen = HashSet::new();
-        self.order.retain(|w| node.contains_key(w) && seen.insert(*w));
+        self.order
+            .retain(|w| node.contains_key(w) && seen.insert(*w));
         self.order.clone()
     }
 
@@ -232,7 +260,11 @@ impl WatchTree {
         if path == self.root.as_slice() {
             return Some(self.root_wd);
         }
-        let prefix = if self.root.ends_with(b"/") { self.root.clone() } else { join(&self.root, b"") };
+        let prefix = if self.root.ends_with(b"/") {
+            self.root.clone()
+        } else {
+            join(&self.root, b"")
+        };
         let rest = path.strip_prefix(prefix.as_slice())?;
         let mut wd = self.root_wd;
         for name in rest.split(|&b| b == b'/') {
@@ -340,7 +372,9 @@ pub fn interpret(events: &[RawEvent], tree: &mut WatchTree) -> Interpreted {
             }
             continue; // IN_MOVE_SELF: the parent's IN_MOVED_FROM / IN_MOVED_TO carry the move
         }
-        let Some(folder) = tree.path(ev.wd) else { continue };
+        let Some(folder) = tree.path(ev.wd) else {
+            continue;
+        };
         if ev.name.is_empty() {
             continue; // about the folder itself (IN_ATTRIB)
         }
@@ -348,14 +382,26 @@ pub fn interpret(events: &[RawEvent], tree: &mut WatchTree) -> Interpreted {
         let is_dir = mask & IN_ISDIR != 0;
         if mask & IN_MOVED_FROM != 0 {
             modified.retain(|m| *m != path);
-            let j = if ev.cookie != 0 { moved_to.get(&ev.cookie).copied() } else { None };
+            let j = if ev.cookie != 0 {
+                moved_to.get(&ev.cookie).copied()
+            } else {
+                None
+            };
             let dst = j.filter(|&j| j > i).map(|j| (j, &events[j]));
             let dst_folder = dst.and_then(|(_, d)| tree.path(d.wd));
-            let child = if is_dir { tree.lookup(ev.wd, &ev.name) } else { None };
+            let child = if is_dir {
+                tree.lookup(ev.wd, &ev.name)
+            } else {
+                None
+            };
             if let (Some((j, dst)), Some(dst_folder)) = (dst, dst_folder) {
                 paired.insert(j);
                 let new = join(&dst_folder, &dst.name);
-                out.changes.push(Change::renamed(path_of(&new), Some(path_of(&path)), Some(is_dir)));
+                out.changes.push(Change::renamed(
+                    path_of(&new),
+                    Some(path_of(&path)),
+                    Some(is_dir),
+                ));
                 if is_dir {
                     if let Some(victim) = tree.lookup(dst.wd, &dst.name)
                         && Some(victim) != child
@@ -369,14 +415,22 @@ pub fn interpret(events: &[RawEvent], tree: &mut WatchTree) -> Interpreted {
                     out.moved_dirs.push((path_of(&path), path_of(&new)));
                 }
             } else {
-                out.changes.push(Change::new(ChangeKind::Deleted, path_of(&path), Some(is_dir)));
+                out.changes.push(Change::new(
+                    ChangeKind::Deleted,
+                    path_of(&path),
+                    Some(is_dir),
+                ));
                 if let Some(c) = child {
                     tree.remove(c);
                     out.detached.push(c);
                 }
             }
         } else if mask & IN_MOVED_TO != 0 {
-            out.changes.push(Change::new(ChangeKind::Created, path_of(&path), Some(is_dir)));
+            out.changes.push(Change::new(
+                ChangeKind::Created,
+                path_of(&path),
+                Some(is_dir),
+            ));
             if is_dir {
                 if let Some(victim) = tree.lookup(ev.wd, &ev.name) {
                     tree.remove(victim);
@@ -385,13 +439,21 @@ pub fn interpret(events: &[RawEvent], tree: &mut WatchTree) -> Interpreted {
                 out.new_dirs.push(path_of(&path));
             }
         } else if mask & IN_CREATE != 0 {
-            out.changes.push(Change::new(ChangeKind::Created, path_of(&path), Some(is_dir)));
+            out.changes.push(Change::new(
+                ChangeKind::Created,
+                path_of(&path),
+                Some(is_dir),
+            ));
             if is_dir {
                 out.new_dirs.push(path_of(&path));
             }
         } else if mask & IN_DELETE != 0 {
             modified.retain(|m| *m != path);
-            out.changes.push(Change::new(ChangeKind::Deleted, path_of(&path), Some(is_dir)));
+            out.changes.push(Change::new(
+                ChangeKind::Deleted,
+                path_of(&path),
+                Some(is_dir),
+            ));
             if is_dir && let Some(c) = tree.lookup(ev.wd, &ev.name) {
                 tree.remove(c); // rmdir: the kernel drops that (childless) watch itself
             }
@@ -406,11 +468,19 @@ pub fn interpret(events: &[RawEvent], tree: &mut WatchTree) -> Interpreted {
 
 /// A batch ending in an `IN_MOVED_FROM` whose `IN_MOVED_TO` has not arrived yet.
 pub fn dangling_moves(events: &[RawEvent]) -> bool {
-    let froms: HashSet<u32> = events.iter().filter(|e| e.mask & IN_MOVED_FROM != 0 && e.cookie != 0).map(|e| e.cookie).collect();
+    let froms: HashSet<u32> = events
+        .iter()
+        .filter(|e| e.mask & IN_MOVED_FROM != 0 && e.cookie != 0)
+        .map(|e| e.cookie)
+        .collect();
     if froms.is_empty() {
         return false;
     }
-    let tos: HashSet<u32> = events.iter().filter(|e| e.mask & IN_MOVED_TO != 0).map(|e| e.cookie).collect();
+    let tos: HashSet<u32> = events
+        .iter()
+        .filter(|e| e.mask & IN_MOVED_TO != 0)
+        .map(|e| e.cookie)
+        .collect();
     !froms.is_subset(&tos)
 }
 
@@ -460,7 +530,9 @@ mod imp {
 
     fn give_budget(n: usize) {
         let mut u = BUDGET.load(Ordering::SeqCst);
-        while let Err(now) = BUDGET.compare_exchange_weak(u, u.saturating_sub(n), Ordering::SeqCst, Ordering::SeqCst) {
+        while let Err(now) =
+            BUDGET.compare_exchange_weak(u, u.saturating_sub(n), Ordering::SeqCst, Ordering::SeqCst)
+        {
             u = now;
         }
     }
@@ -488,13 +560,21 @@ mod imp {
         fn open() -> std::io::Result<Inotify> {
             // SAFETY: plain syscall.
             let fd = unsafe { libc::inotify_init1(libc::IN_NONBLOCK | libc::IN_CLOEXEC) };
-            if fd < 0 { Err(std::io::Error::last_os_error()) } else { Ok(Inotify { fd }) }
+            if fd < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(Inotify { fd })
+            }
         }
         fn add_watch(&self, path: &[u8], mask: u32) -> std::io::Result<i32> {
             let c = cpath(path);
             // SAFETY: NUL-terminated path.
             let wd = unsafe { libc::inotify_add_watch(self.fd, c.as_ptr(), mask) };
-            if wd < 0 { Err(std::io::Error::last_os_error()) } else { Ok(wd) }
+            if wd < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(wd)
+            }
         }
         fn rm_watch(&self, wd: i32) {
             // SAFETY: EINVAL when the kernel already dropped it: nothing to do.
@@ -529,13 +609,23 @@ mod imp {
     }
 
     fn wait_readable(fds: &[i32], timeout_ms: i32) -> Vec<i32> {
-        let mut p: Vec<libc::pollfd> = fds.iter().map(|&fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }).collect();
+        let mut p: Vec<libc::pollfd> = fds
+            .iter()
+            .map(|&fd| libc::pollfd {
+                fd,
+                events: libc::POLLIN,
+                revents: 0,
+            })
+            .collect();
         // SAFETY: valid pollfd array.
         let r = unsafe { libc::poll(p.as_mut_ptr(), p.len() as libc::nfds_t, timeout_ms) };
         if r <= 0 {
             return Vec::new();
         }
-        p.iter().filter(|x| x.revents & libc::POLLIN != 0).map(|x| x.fd).collect()
+        p.iter()
+            .filter(|x| x.revents & libc::POLLIN != 0)
+            .map(|x| x.fd)
+            .collect()
     }
 
     struct State {
@@ -575,10 +665,19 @@ mod imp {
     }
 
     impl InotifyWatcher {
-        pub fn new(root: &Path, poll_interval: f64, poll_rate: u32, max_watches: Option<usize>) -> InotifyWatcher {
+        pub fn new(
+            root: &Path,
+            poll_interval: f64,
+            poll_rate: u32,
+            max_watches: Option<usize>,
+        ) -> InotifyWatcher {
             let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
             let rb = bytes_of(&root);
-            let prefix = if rb.ends_with(b"/") { rb.clone() } else { [rb.as_slice(), b"/"].concat() };
+            let prefix = if rb.ends_with(b"/") {
+                rb.clone()
+            } else {
+                [rb.as_slice(), b"/"].concat()
+            };
             InotifyWatcher {
                 sh: Arc::new(Shared {
                     prefix,
@@ -586,7 +685,11 @@ mod imp {
                     limit: (max_user_watches() as f64 * BUDGET_SHARE) as usize,
                     st: Mutex::new(State {
                         tree: WatchTree::new(&rb),
-                        poller: DirPoller::new(&root, Duration::from_secs_f64(poll_interval.max(0.01)), poll_rate),
+                        poller: DirPoller::new(
+                            &root,
+                            Duration::from_secs_f64(poll_interval.max(0.01)),
+                            poll_rate,
+                        ),
                         walk: VecDeque::new(),
                         recheck: VecDeque::new(),
                         ino: None,
@@ -656,9 +759,19 @@ mod imp {
                         self.kernel_full = true;
                         self.short = true;
                     } else {
-                        self.fallback = crate::tr!("无法监视扫描根目录（{reason}），全部文件夹改为轮询", reason = why(&e));
+                        self.fallback = crate::tr!(
+                            "无法监视扫描根目录（{reason}），全部文件夹改为轮询",
+                            reason = why(&e)
+                        );
                     }
-                    tracing::warn!("{}", crate::tr!("inotify 无法监视 {path}：{error}", path = sh.root.display().to_string(), error = e.to_string()));
+                    tracing::warn!(
+                        "{}",
+                        crate::tr!(
+                            "inotify 无法监视 {path}：{error}",
+                            path = sh.root.display().to_string(),
+                            error = e.to_string()
+                        )
+                    );
                 }
             }
         }
@@ -666,17 +779,32 @@ mod imp {
         /// Watch a folder whose parent is watched; poll it when that is not possible (None).
         /// `listed` / `since_ns`: the scan's record of it, which a polling baseline is checked
         /// against (the caller checks a watched folder itself).
-        fn watch(&mut self, sh: &Shared, path: &Path, parent: i32, name: &[u8], listed: Option<u32>, since_ns: i64) -> Option<i32> {
+        fn watch(
+            &mut self,
+            sh: &Shared,
+            path: &Path,
+            parent: i32,
+            name: &[u8],
+            listed: Option<u32>,
+            since_ns: i64,
+        ) -> Option<i32> {
             if self.ino.is_none() || !self.reserve(sh) {
                 self.short = self.short || self.ino.is_some();
                 self.poller.add_listed(path.to_path_buf(), listed, since_ns);
                 return None;
             }
-            match self.ino.as_ref().unwrap().add_watch(&bytes_of(path), WATCH_MASK) {
+            match self
+                .ino
+                .as_ref()
+                .unwrap()
+                .add_watch(&bytes_of(path), WATCH_MASK)
+            {
                 Err(e) => {
                     self.release(1);
                     match e.raw_os_error() {
-                        Some(libc::ENOENT) | Some(libc::ENOTDIR) | Some(libc::ELOOP) => return None,
+                        Some(libc::ENOENT) | Some(libc::ENOTDIR) | Some(libc::ELOOP) => {
+                            return None;
+                        }
                         Some(libc::ENOSPC) => {
                             self.kernel_full = true;
                             self.short = true;
@@ -703,7 +831,11 @@ mod imp {
         fn split(path: &[u8]) -> (Vec<u8>, Vec<u8>) {
             match path.iter().rposition(|&b| b == b'/') {
                 Some(i) => {
-                    let parent = if i == 0 { b"/".to_vec() } else { path[..i].to_vec() };
+                    let parent = if i == 0 {
+                        b"/".to_vec()
+                    } else {
+                        path[..i].to_vec()
+                    };
                     (parent, path[i + 1..].to_vec())
                 }
                 None => (b"/".to_vec(), path.to_vec()),
@@ -712,7 +844,14 @@ mod imp {
 
         /// A folder from add_dirs: watch it (parent watched, budget left) or poll it. With the
         /// scan's record of it (`listed`), a change since its listing is added to `out`.
-        fn place(&mut self, sh: &Shared, path: PathBuf, listed: Option<u32>, since_ns: i64, out: &mut Vec<Change>) {
+        fn place(
+            &mut self,
+            sh: &Shared,
+            path: PathBuf,
+            listed: Option<u32>,
+            since_ns: i64,
+            out: &mut Vec<Change>,
+        ) {
             let pb = bytes_of(&path);
             if path == sh.root {
                 if let Some(listed) = listed
@@ -735,7 +874,11 @@ mod imp {
             if name.is_empty() {
                 return;
             }
-            let hinted = self.parent_hint.as_ref().filter(|(p, _)| *p == parent_path).map(|(_, wd)| *wd);
+            let hinted = self
+                .parent_hint
+                .as_ref()
+                .filter(|(p, _)| *p == parent_path)
+                .map(|(_, wd)| *wd);
             let parent = match hinted {
                 Some(wd) => Some(wd),
                 None => {
@@ -754,7 +897,9 @@ mod imp {
             if self.tree.lookup(parent, &name).is_some() || self.poller.contains(&path) {
                 return; // handed in again (its row moved when its parent was listed again): as it is
             }
-            if self.watch(sh, &path, parent, &name, listed, since_ns).is_some()
+            if self
+                .watch(sh, &path, parent, &name, listed, since_ns)
+                .is_some()
                 && let Some(listed) = listed
             {
                 Self::check(&sh.root, &path, listed, since_ns, out);
@@ -763,7 +908,11 @@ mod imp {
 
         /// The folder is watched now: did it change after the scan listed it, unseen? (One stat.)
         fn check(root: &Path, path: &Path, listed: u32, since_ns: i64, out: &mut Vec<Change>) {
-            let m = if path == root { std::fs::metadata(path) } else { std::fs::symlink_metadata(path) };
+            let m = if path == root {
+                std::fs::metadata(path)
+            } else {
+                std::fs::symlink_metadata(path)
+            };
             let Ok(m) = m else {
                 return; // gone again: its parent's events (or the parent's own check) tell
             };
@@ -782,10 +931,14 @@ mod imp {
             let mut changes = Vec::new();
             let mut done = 0;
             while done < WALK_CHUNK {
-                let Some(path) = self.walk.pop_front() else { break };
+                let Some(path) = self.walk.pop_front() else {
+                    break;
+                };
                 let pb = bytes_of(&path);
                 let (parent_path, name) = Self::split(&pb);
-                let Some(parent) = self.tree.find(&parent_path) else { continue };
+                let Some(parent) = self.tree.find(&parent_path) else {
+                    continue;
+                };
                 if self.tree.lookup(parent, &name).is_some() || self.poller.contains(&path) {
                     continue;
                 }
@@ -793,7 +946,9 @@ mod imp {
                 if self.watch(sh, &path, parent, &name, None, 0).is_none() {
                     continue;
                 }
-                let Ok(rd) = std::fs::read_dir(&path) else { continue };
+                let Ok(rd) = std::fs::read_dir(&path) else {
+                    continue;
+                };
                 for entry in rd.flatten() {
                     let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
                     changes.push(Change::new(ChangeKind::Created, entry.path(), Some(is_dir)));
@@ -812,14 +967,21 @@ mod imp {
             let ino = self.ino.as_ref().unwrap();
             for _ in 0..self.recheck.len().min(ADD_CHUNK) {
                 let wd = self.recheck.pop_front().unwrap();
-                let Some(path) = self.tree.path(wd).filter(|_| self.tree.contains(wd)) else { continue };
+                let Some(path) = self.tree.path(wd).filter(|_| self.tree.contains(wd)) else {
+                    continue;
+                };
                 let root = wd == self.tree.root_wd;
-                let got = ino.add_watch(&path, if root { ROOT_MASK } else { WATCH_MASK }).unwrap_or(-1);
+                let got = ino
+                    .add_watch(&path, if root { ROOT_MASK } else { WATCH_MASK })
+                    .unwrap_or(-1);
                 if got == wd {
                     continue;
                 }
                 if root {
-                    *sh.state.lock().unwrap() = (WatchState::Failed, t("扫描根目录已被删除或移走，实时监控已停止"));
+                    *sh.state.lock().unwrap() = (
+                        WatchState::Failed,
+                        t("扫描根目录已被删除或移走，实时监控已停止"),
+                    );
                     return (true, vec![Change::overflow(sh.root.clone())]);
                 }
                 stale = true;
@@ -877,7 +1039,10 @@ mod imp {
                 }
             }
             if res.root_lost {
-                *sh.state.lock().unwrap() = (WatchState::Failed, t("扫描根目录已被删除或移走，实时监控已停止"));
+                *sh.state.lock().unwrap() = (
+                    WatchState::Failed,
+                    t("扫描根目录已被删除或移走，实时监控已停止"),
+                );
             }
             (res.root_lost, changes)
         }
@@ -911,17 +1076,23 @@ mod imp {
                 emit.extend(st.walk_some(&sh));
                 emit.extend(st.poller.step(Instant::now()));
                 if st.poller.root_lost {
-                    *sh.state.lock().unwrap() = (WatchState::Failed, t("扫描根目录已不存在，实时监控已停止"));
+                    *sh.state.lock().unwrap() =
+                        (WatchState::Failed, t("扫描根目录已不存在，实时监控已停止"));
                     drop(st);
                     sh.emitter.emit(emit);
                     return;
                 }
-                timeout_ms = if !sh.incoming.lock().unwrap().is_empty() || !st.walk.is_empty() || !st.recheck.is_empty() {
+                timeout_ms = if !sh.incoming.lock().unwrap().is_empty()
+                    || !st.walk.is_empty()
+                    || !st.recheck.is_empty()
+                {
                     0
                 } else {
-                    st.poller
-                        .wake_time()
-                        .map_or(1000, |w| w.saturating_duration_since(Instant::now()).as_millis().min(1000) as i32)
+                    st.poller.wake_time().map_or(1000, |w| {
+                        w.saturating_duration_since(Instant::now())
+                            .as_millis()
+                            .min(1000) as i32
+                    })
                 };
             }
             sh.emitter.emit(emit);
@@ -964,8 +1135,18 @@ mod imp {
                 match Inotify::open() {
                     Ok(i) => st.ino = Some(i),
                     Err(e) => {
-                        st.fallback = crate::tr!("inotify 不可用（{reason}），全部文件夹改为轮询", reason = why(&e));
-                        tracing::warn!("{}", crate::tr!("inotify 不可用（{error}）：{path} 改为轮询", error = e.to_string(), path = self.sh.root.display().to_string()));
+                        st.fallback = crate::tr!(
+                            "inotify 不可用（{reason}），全部文件夹改为轮询",
+                            reason = why(&e)
+                        );
+                        tracing::warn!(
+                            "{}",
+                            crate::tr!(
+                                "inotify 不可用（{error}）：{path} 改为轮询",
+                                error = e.to_string(),
+                                path = self.sh.root.display().to_string()
+                            )
+                        );
                     }
                 }
                 if st.ino.is_some() {
@@ -983,7 +1164,13 @@ mod imp {
             self.worker.spawn("sk-inotify", move || {
                 let body = std::panic::AssertUnwindSafe(|| run(sh.clone(), wake_r));
                 if std::panic::catch_unwind(body).is_err() {
-                    tracing::error!("{}", crate::tr!("inotify 监视线程出错：{path}", path = sh.root.display().to_string()));
+                    tracing::error!(
+                        "{}",
+                        crate::tr!(
+                            "inotify 监视线程出错：{path}",
+                            path = sh.root.display().to_string()
+                        )
+                    );
                     *sh.state.lock().unwrap() = (WatchState::Failed, t("实时监控出错，已停止"));
                     sh.emitter.emit(vec![Change::overflow(sh.root.clone())]);
                 }
@@ -1030,9 +1217,21 @@ mod imp {
                 if !st.fallback.is_empty() {
                     (state, detail) = (WatchState::Degraded, st.fallback.clone());
                 } else if polled > 0 && st.short {
-                    (state, detail) = (WatchState::Degraded, crate::tr!("inotify 监视额度不足，{count} 个文件夹改为轮询", count = polled));
+                    (state, detail) = (
+                        WatchState::Degraded,
+                        crate::tr!(
+                            "inotify 监视额度不足，{count} 个文件夹改为轮询",
+                            count = polled
+                        ),
+                    );
                 } else if polled > 0 {
-                    (state, detail) = (WatchState::Degraded, crate::tr!("{count} 个文件夹无法用 inotify 监视，改为轮询", count = polled));
+                    (state, detail) = (
+                        WatchState::Degraded,
+                        crate::tr!(
+                            "{count} 个文件夹无法用 inotify 监视，改为轮询",
+                            count = polled
+                        ),
+                    );
                 }
             }
             WatchStatus {
@@ -1071,7 +1270,10 @@ mod tests {
 
     #[test]
     fn decode_events_strips_padding() {
-        let evs = vec![RawEvent::new(1, IN_CREATE, 0, b"x.txt"), RawEvent::new(2, IN_ATTRIB, 0, b"")];
+        let evs = vec![
+            RawEvent::new(1, IN_CREATE, 0, b"x.txt"),
+            RawEvent::new(2, IN_ATTRIB, 0, b""),
+        ];
         let buf = encode_events(&evs);
         assert_eq!(decode_events(&buf), evs);
         assert_eq!(decode_events(&buf[..buf.len() - 1]).len(), 1); // a truncated event ends it
@@ -1100,11 +1302,14 @@ mod tests {
             ],
             &mut t,
         );
-        assert_eq!(r.changes, vec![
-            Change::new(ChangeKind::Created, p("/r/a/f"), Some(false)),
-            Change::new(ChangeKind::Created, p("/r/a/b/d"), Some(true)),
-            Change::new(ChangeKind::Deleted, p("/r/old"), Some(false)),
-        ]);
+        assert_eq!(
+            r.changes,
+            vec![
+                Change::new(ChangeKind::Created, p("/r/a/f"), Some(false)),
+                Change::new(ChangeKind::Created, p("/r/a/b/d"), Some(true)),
+                Change::new(ChangeKind::Deleted, p("/r/old"), Some(false)),
+            ]
+        );
         assert_eq!(r.modified, vec![p("/r/a/g"), p("/r/a/f")]);
         assert_eq!(r.new_dirs, vec![p("/r/a/b/d")]);
     }
@@ -1112,7 +1317,13 @@ mod tests {
     #[test]
     fn deleted_file_is_not_stat_ed() {
         let mut t = tree();
-        let r = interpret(&[RawEvent::new(2, IN_CLOSE_WRITE, 0, b"f"), RawEvent::new(2, IN_DELETE, 0, b"f")], &mut t);
+        let r = interpret(
+            &[
+                RawEvent::new(2, IN_CLOSE_WRITE, 0, b"f"),
+                RawEvent::new(2, IN_DELETE, 0, b"f"),
+            ],
+            &mut t,
+        );
         assert!(r.modified.is_empty());
     }
 
@@ -1128,20 +1339,35 @@ mod tests {
             ],
             &mut t,
         );
-        assert_eq!(r.changes, vec![
-            Change::renamed(p("/r/y"), Some(p("/r/a/x")), Some(false)),
-            Change::new(ChangeKind::Deleted, p("/r/a/gone"), Some(false)),
-            Change::new(ChangeKind::Created, p("/r/came"), Some(false)),
-        ]);
+        assert_eq!(
+            r.changes,
+            vec![
+                Change::renamed(p("/r/y"), Some(p("/r/a/x")), Some(false)),
+                Change::new(ChangeKind::Deleted, p("/r/a/gone"), Some(false)),
+                Change::new(ChangeKind::Created, p("/r/came"), Some(false)),
+            ]
+        );
         assert!(dangling_moves(&[RawEvent::new(2, IN_MOVED_FROM, 5, b"x")]));
-        assert!(!dangling_moves(&[RawEvent::new(2, IN_MOVED_FROM, 5, b"x"), RawEvent::new(2, IN_MOVED_TO, 5, b"y")]));
+        assert!(!dangling_moves(&[
+            RawEvent::new(2, IN_MOVED_FROM, 5, b"x"),
+            RawEvent::new(2, IN_MOVED_TO, 5, b"y")
+        ]));
     }
 
     #[test]
     fn folder_rename_rekeys_the_subtree() {
         let mut t = tree();
-        let r = interpret(&[RawEvent::new(1, IN_MOVED_FROM | IN_ISDIR, 3, b"a"), RawEvent::new(1, IN_MOVED_TO | IN_ISDIR, 3, b"z")], &mut t);
-        assert_eq!(r.changes, vec![Change::renamed(p("/r/z"), Some(p("/r/a")), Some(true))]);
+        let r = interpret(
+            &[
+                RawEvent::new(1, IN_MOVED_FROM | IN_ISDIR, 3, b"a"),
+                RawEvent::new(1, IN_MOVED_TO | IN_ISDIR, 3, b"z"),
+            ],
+            &mut t,
+        );
+        assert_eq!(
+            r.changes,
+            vec![Change::renamed(p("/r/z"), Some(p("/r/a")), Some(true))]
+        );
         assert_eq!(r.moved_dirs, vec![(p("/r/a"), p("/r/z"))]);
         assert_eq!(t.path(3).unwrap(), b"/r/z/b");
         assert_eq!(t.find(b"/r/z/b"), Some(3));
@@ -1151,8 +1377,14 @@ mod tests {
     #[test]
     fn folder_moved_out_detaches_its_watches() {
         let mut t = tree();
-        let r = interpret(&[RawEvent::new(1, IN_MOVED_FROM | IN_ISDIR, 4, b"a")], &mut t);
-        assert_eq!(r.changes, vec![Change::new(ChangeKind::Deleted, p("/r/a"), Some(true))]);
+        let r = interpret(
+            &[RawEvent::new(1, IN_MOVED_FROM | IN_ISDIR, 4, b"a")],
+            &mut t,
+        );
+        assert_eq!(
+            r.changes,
+            vec![Change::new(ChangeKind::Deleted, p("/r/a"), Some(true))]
+        );
         assert_eq!(r.detached, vec![2]);
         assert_eq!(t.orphans(), vec![3]);
     }
@@ -1160,10 +1392,22 @@ mod tests {
     #[test]
     fn folder_moved_in_is_walked_and_rmdir() {
         let mut t = tree();
-        let r = interpret(&[RawEvent::new(1, IN_MOVED_TO | IN_ISDIR, 4, b"new")], &mut t);
+        let r = interpret(
+            &[RawEvent::new(1, IN_MOVED_TO | IN_ISDIR, 4, b"new")],
+            &mut t,
+        );
         assert_eq!(r.new_dirs, vec![p("/r/new")]);
-        let r = interpret(&[RawEvent::new(2, IN_DELETE | IN_ISDIR, 0, b"b"), RawEvent::new(3, IN_DELETE_SELF, 0, b"")], &mut t);
-        assert_eq!(r.changes, vec![Change::new(ChangeKind::Deleted, p("/r/a/b"), Some(true))]);
+        let r = interpret(
+            &[
+                RawEvent::new(2, IN_DELETE | IN_ISDIR, 0, b"b"),
+                RawEvent::new(3, IN_DELETE_SELF, 0, b""),
+            ],
+            &mut t,
+        );
+        assert_eq!(
+            r.changes,
+            vec![Change::new(ChangeKind::Deleted, p("/r/a/b"), Some(true))]
+        );
         assert!(!t.contains(3));
     }
 
@@ -1175,7 +1419,13 @@ mod tests {
         assert_eq!(r.detached, vec![3]);
         for mask in [IN_DELETE_SELF, IN_MOVE_SELF, IN_UNMOUNT] {
             let mut t = tree();
-            let r = interpret(&[RawEvent::new(1, mask, 0, b""), RawEvent::new(2, IN_CREATE, 0, b"late")], &mut t);
+            let r = interpret(
+                &[
+                    RawEvent::new(1, mask, 0, b""),
+                    RawEvent::new(2, IN_CREATE, 0, b"late"),
+                ],
+                &mut t,
+            );
             assert!(r.root_lost);
             assert_eq!(r.changes, vec![Change::overflow(p("/r"))]);
         }
@@ -1196,7 +1446,10 @@ mod tests {
         }
 
         fn now_ns() -> i64 {
-            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as i64
         }
 
         fn wait_until(secs: u64, cond: impl Fn() -> bool) {
@@ -1210,12 +1463,20 @@ mod tests {
         fn start(w: &InotifyWatcher) -> Arc<Mutex<Vec<Change>>> {
             let got = Arc::new(Mutex::new(Vec::new()));
             let g = got.clone();
-            w.start(Arc::new(move |b| g.lock().unwrap().extend(b))).unwrap();
+            w.start(Arc::new(move |b| g.lock().unwrap().extend(b)))
+                .unwrap();
             got
         }
 
-        fn dirs_reported(got: &Mutex<Vec<Change>>) -> std::collections::HashSet<std::path::PathBuf> {
-            got.lock().unwrap().iter().filter(|c| c.kind == ChangeKind::Dir).map(|c| c.path.clone()).collect()
+        fn dirs_reported(
+            got: &Mutex<Vec<Change>>,
+        ) -> std::collections::HashSet<std::path::PathBuf> {
+            got.lock()
+                .unwrap()
+                .iter()
+                .filter(|c| c.kind == ChangeKind::Dir)
+                .map(|c| c.path.clone())
+                .collect()
         }
 
         /// Running as soon as the root is watched, also while folders handed in still wait for
@@ -1251,7 +1512,8 @@ mod tests {
         fn folder_changed_before_its_watch_is_listed_again() {
             let tmp = tempfile::tempdir().unwrap();
             let root = tmp.path().to_path_buf();
-            let (quiet, changed, older) = (root.join("quiet"), root.join("changed"), root.join("older"));
+            let (quiet, changed, older) =
+                (root.join("quiet"), root.join("changed"), root.join("older"));
             let deep = changed.join("deep");
             std::fs::create_dir_all(&deep).unwrap();
             std::fs::create_dir(&quiet).unwrap();
@@ -1290,7 +1552,10 @@ mod tests {
             w.add_dirs(vec![a.clone(), b.clone()], Some(times), since);
             wait_until(5, || dirs_reported(&got).contains(&b));
             let st = w.status();
-            assert_eq!((st.watched_dirs, st.polled_dirs, st.state), (2, 1, WatchState::Degraded));
+            assert_eq!(
+                (st.watched_dirs, st.polled_dirs, st.state),
+                (2, 1, WatchState::Degraded)
+            );
             assert!(!dirs_reported(&got).contains(&a));
             w.stop();
         }
@@ -1319,7 +1584,11 @@ mod tests {
                     // SAFETY: plain syscalls on descriptors we own.
                     let below = unsafe {
                         libc::mkdirat(dir.as_raw_fd(), cname.as_ptr(), 0o755);
-                        libc::openat(dir.as_raw_fd(), cname.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY)
+                        libc::openat(
+                            dir.as_raw_fd(),
+                            cname.as_ptr(),
+                            libc::O_RDONLY | libc::O_DIRECTORY,
+                        )
                     };
                     assert!(below >= 0);
                     // SAFETY: a descriptor we just opened
@@ -1337,7 +1606,13 @@ mod tests {
                 let mut dir = std::fs::File::open(&root).unwrap();
                 for _ in &chain {
                     // SAFETY: as above
-                    let below = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+                    let below = unsafe {
+                        libc::openat(
+                            dir.as_raw_fd(),
+                            cname.as_ptr(),
+                            libc::O_RDONLY | libc::O_DIRECTORY,
+                        )
+                    };
                     assert!(below >= 0);
                     // SAFETY: as above
                     dir = unsafe { std::fs::File::from_raw_fd(below) };
@@ -1345,12 +1620,24 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(1100)); // a later mtime, even in whole seconds
                 let f = std::ffi::CString::new("new.txt").unwrap();
                 // SAFETY: as above
-                let fd = unsafe { libc::openat(dir.as_raw_fd(), f.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o644) };
+                let fd = unsafe {
+                    libc::openat(
+                        dir.as_raw_fd(),
+                        f.as_ptr(),
+                        libc::O_CREAT | libc::O_WRONLY,
+                        0o644,
+                    )
+                };
                 assert!(fd >= 0);
                 // SAFETY: as above
                 unsafe { libc::close(fd) };
             }
-            wait_until(10, || got.lock().unwrap().iter().any(|c| c.kind == ChangeKind::Dir && c.path == deepest));
+            wait_until(10, || {
+                got.lock()
+                    .unwrap()
+                    .iter()
+                    .any(|c| c.kind == ChangeKind::Dir && c.path == deepest)
+            });
             w.stop();
         }
     }

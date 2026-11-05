@@ -21,7 +21,10 @@ fn tree() -> (tempfile::TempDir, PathBuf, TreeFacts) {
 }
 
 fn opts(budget_ms: u64) -> ScanOptions {
-    ScanOptions { budget: Duration::from_millis(budget_ms), ..Default::default() }
+    ScanOptions {
+        budget: Duration::from_millis(budget_ms),
+        ..Default::default()
+    }
 }
 
 fn scanner(root: &Path, o: ScanOptions) -> Scanner {
@@ -42,7 +45,8 @@ fn check_totals(s: &Scanner, facts: &TreeFacts) {
 }
 
 fn find(r: &Nodes, p: &Path) -> NodeId {
-    r.find_path(p).unwrap_or_else(|| panic!("{} not in the tree", p.display()))
+    r.find_path(p)
+        .unwrap_or_else(|| panic!("{} not in the tree", p.display()))
 }
 
 #[test]
@@ -56,7 +60,10 @@ fn scan_matches_tree() {
     let r = s.store().read();
     let movie = find(&r, &root.join("a").join("sub").join("movie.mp4"));
     let v = r.view(movie);
-    assert_eq!((v.size, v.ext.as_str(), v.kind), (123456, "mp4", Kind::File));
+    assert_eq!(
+        (v.size, v.ext.as_str(), v.kind),
+        (123456, "mp4", Kind::File)
+    );
     let photo = find(&r, &root.join("中文 文件夹").join("照片.jpg"));
     assert_eq!(r.name(photo), "照片.jpg");
     assert_eq!(p.items as usize, facts.files + facts.dirs + 1);
@@ -68,7 +75,13 @@ fn scan_matches_tree() {
 fn zero_budget_and_one_thread_give_identical_result() {
     let (_t, root, facts) = tree();
     for (budget, threads) in [(0, 1), (0, 4), (1, 2)] {
-        let s = scanner(&root, ScanOptions { concurrency: threads, ..opts(budget) });
+        let s = scanner(
+            &root,
+            ScanOptions {
+                concurrency: threads,
+                ..opts(budget)
+            },
+        );
         let p = run(&s);
         assert_eq!(p.state, ScanState::Done);
         check_totals(&s, &facts);
@@ -78,7 +91,13 @@ fn zero_budget_and_one_thread_give_identical_result() {
 #[test]
 fn cancel_leaves_consistent_partial_tree() {
     let (_t, root, facts) = tree();
-    let s = scanner(&root, ScanOptions { concurrency: 1, ..opts(0) });
+    let s = scanner(
+        &root,
+        ScanOptions {
+            concurrency: 1,
+            ..opts(0)
+        },
+    );
     let mut cb = |_: &ScanProgress| s.cancel();
     let p = s.run(Some(&mut cb), Duration::ZERO);
     assert_eq!(p.state, ScanState::Cancelled);
@@ -110,12 +129,35 @@ fn progress_callback_and_final_report() {
         scan_id: "x".into(),
         state: ScanState::Queued,
         roots: s.roots().iter().map(|r| r.to_protocol()).collect(),
-        items: 0, files: 0, dirs: 0, bytes_alloc: 0, bytes_size: 0, errors: 0, pending_dirs: 0,
-        current_path: String::new(), elapsed_s: 0.0, rate: 0.0, byte_rate: 0.0, progress: None,
-        remaining_s: None, expected_items: None, started_at: None, finished_at: None,
-        denied: vec![], message: String::new(), free: None, unknown: None, snapshot: None,
-        source: Default::default(), method: Default::default(), phase: String::new(),
-        fallback: String::new(), mft_available: false, paused: false, io: None, monitor: None,
+        items: 0,
+        files: 0,
+        dirs: 0,
+        bytes_alloc: 0,
+        bytes_size: 0,
+        errors: 0,
+        pending_dirs: 0,
+        current_path: String::new(),
+        elapsed_s: 0.0,
+        rate: 0.0,
+        byte_rate: 0.0,
+        progress: None,
+        remaining_s: None,
+        expected_items: None,
+        started_at: None,
+        finished_at: None,
+        denied: vec![],
+        message: String::new(),
+        free: None,
+        unknown: None,
+        snapshot: None,
+        source: Default::default(),
+        method: Default::default(),
+        phase: String::new(),
+        fallback: String::new(),
+        mft_available: false,
+        paused: false,
+        io: None,
+        monitor: None,
     };
     p.apply_to(&mut status);
     assert_eq!(status.items, p.items);
@@ -130,16 +172,27 @@ fn bad_roots() {
     assert!(matches!(e, ScanError::Access { .. }), "{e}");
     assert!(e.to_string().contains("cannot access"));
     std::fs::write(tmp.path().join("f.txt"), "x").unwrap();
-    let e = Scanner::new(&[tmp.path().join("f.txt").to_string_lossy()], ScanOptions::default()).unwrap_err();
+    let e = Scanner::new(
+        &[tmp.path().join("f.txt").to_string_lossy()],
+        ScanOptions::default(),
+    )
+    .unwrap_err();
     assert!(e.to_string().contains("not a directory"));
     let none: [&str; 0] = [];
-    assert!(matches!(Scanner::new(&none, ScanOptions::default()), Err(ScanError::NoRoots)));
+    assert!(matches!(
+        Scanner::new(&none, ScanOptions::default()),
+        Err(ScanError::NoRoots)
+    ));
 }
 
 #[test]
 fn nested_roots_are_deduplicated() {
     let (_t, root, _) = tree();
-    let s = Scanner::new(&[root.to_string_lossy(), root.join("a").to_string_lossy()], ScanOptions::default()).unwrap();
+    let s = Scanner::new(
+        &[root.to_string_lossy(), root.join("a").to_string_lossy()],
+        ScanOptions::default(),
+    )
+    .unwrap();
     let roots = s.roots();
     assert_eq!(roots.len(), 1);
     assert_eq!(roots[0].path, root);
@@ -153,7 +206,11 @@ fn multiple_roots() {
     std::fs::create_dir_all(&b).unwrap();
     let fa = build_disk_tree(&a).unwrap();
     let fb = build_disk_tree(&b).unwrap();
-    let s = Scanner::new(&[a.to_string_lossy(), b.to_string_lossy()], ScanOptions::default()).unwrap();
+    let s = Scanner::new(
+        &[a.to_string_lossy(), b.to_string_lossy()],
+        ScanOptions::default(),
+    )
+    .unwrap();
     run(&s);
     assert_eq!(s.roots().len(), 2);
     assert_eq!(s.store().read().tot_size(0) as u64, fa.size + fb.size);
@@ -175,7 +232,10 @@ fn windows_allocation_rounding() {
     let cluster = s.roots()[0].volume.as_ref().unwrap().cluster_size;
     let r = s.store().read();
     assert_eq!(r.alloc(find(&r, &tmp.path().join("small.txt"))), 0);
-    assert_eq!(r.alloc(find(&r, &tmp.path().join("big.bin"))), (5000 + cluster - 1) / cluster * cluster);
+    assert_eq!(
+        r.alloc(find(&r, &tmp.path().join("big.bin"))),
+        (5000 + cluster - 1) / cluster * cluster
+    );
 }
 
 #[cfg(unix)]
@@ -199,8 +259,12 @@ fn posix_links_hardlinks_and_denied() {
     let link = find(&r, &root.join("link-to-dir"));
     assert_eq!(r.kind(link), Kind::Link);
     assert_eq!(r.child_count(link), 0);
-    let data = r.flags(find(&r, &root.join("dir/data"))).intersects(Flags::HARDLINK_DUP);
-    let hard = r.flags(find(&r, &root.join("hard"))).intersects(Flags::HARDLINK_DUP);
+    let data = r
+        .flags(find(&r, &root.join("dir/data")))
+        .intersects(Flags::HARDLINK_DUP);
+    let hard = r
+        .flags(find(&r, &root.join("hard")))
+        .intersects(Flags::HARDLINK_DUP);
     assert!(data != hard);
     assert_eq!(r.tot_size(s.roots()[0].node), 10_000 + r.size(link));
     if unsafe { libc::geteuid() } != 0 {
@@ -220,7 +284,11 @@ fn hard_links_count_once_in_many_slices_or_one() {
     for i in 0..30 {
         let first = root.join(format!("a/f{i}"));
         std::fs::write(&first, vec![b'x'; 100 + i]).unwrap();
-        for other in [format!("b/g{i}"), format!("b/c/h{i}"), format!("a/f{i}-again")] {
+        for other in [
+            format!("b/g{i}"),
+            format!("b/c/h{i}"),
+            format!("a/f{i}-again"),
+        ] {
             std::fs::hard_link(&first, root.join(other)).unwrap();
         }
     }
@@ -233,7 +301,10 @@ fn hard_links_count_once_in_many_slices_or_one() {
             .filter(|&i| r.kind(i) == Kind::File && !r.flags(i).intersects(Flags::HARDLINK_DUP))
             .count();
         assert_eq!(counted, 31);
-        assert_eq!(r.tot_size(s.roots()[0].node), (0..30).map(|i| 100 + i).sum::<i64>() + 7);
+        assert_eq!(
+            r.tot_size(s.roots()[0].node),
+            (0..30).map(|i| 100 + i).sum::<i64>() + 7
+        );
     }
 }
 
@@ -307,7 +378,13 @@ fn profile_leaves_out_the_time_paused() {
 #[test]
 fn readers_run_while_the_scan_appends() {
     let (_t, root, facts) = tree();
-    let s = Arc::new(scanner(&root, ScanOptions { concurrency: 2, ..opts(0) }));
+    let s = Arc::new(scanner(
+        &root,
+        ScanOptions {
+            concurrency: 2,
+            ..opts(0)
+        },
+    ));
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (s2, d2) = (s.clone(), done.clone());
     let reader = std::thread::spawn(move || {
@@ -358,7 +435,10 @@ impl IoGate for CountingGate {
         loop {
             let cur = self.inflight.load(Ordering::SeqCst);
             if cur < self.limit
-                && self.inflight.compare_exchange(cur, cur + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok()
+                && self
+                    .inflight
+                    .compare_exchange(cur, cur + 1, Ordering::SeqCst, Ordering::SeqCst)
+                    .is_ok()
             {
                 self.peak.fetch_max(cur + 1, Ordering::SeqCst);
                 self.permits.fetch_add(1, Ordering::SeqCst);
@@ -394,7 +474,14 @@ fn hard_scans_run_under_the_disk_governor() {
         permits: Arc::new(AtomicUsize::new(0)),
         paused: Mutex::new(Vec::new()),
     });
-    let s = Arc::new(scanner(&root, ScanOptions { concurrency: 8, gate: Some(gate.clone()), ..opts(0) }));
+    let s = Arc::new(scanner(
+        &root,
+        ScanOptions {
+            concurrency: 8,
+            gate: Some(gate.clone()),
+            ..opts(0)
+        },
+    ));
     s.pause();
     let s2 = s.clone();
     let h = std::thread::spawn(move || run(&s2));
@@ -453,7 +540,13 @@ fn hard_scans_run_under_the_io_governor() {
     let (_t, root, facts) = tree();
     let gov = sk_core::io::IoGovernor::new(sk_core::io::disk_ref_for_path(&root), 4);
     let gate: Arc<dyn IoGate> = Arc::new(gov.clone());
-    let s = Arc::new(scanner(&root, ScanOptions { gate: Some(gate), ..opts(0) }));
+    let s = Arc::new(scanner(
+        &root,
+        ScanOptions {
+            gate: Some(gate),
+            ..opts(0)
+        },
+    ));
     s.pause();
     assert!(gov.paused());
     let s2 = s.clone();
@@ -503,10 +596,20 @@ fn a_continued_scan_takes_the_time_of_both_parts() {
     }
     let (_t, root, facts) = tree();
     let gate = Arc::new(SlowOnce(std::sync::atomic::AtomicBool::new(false)));
-    let s = Arc::new(scanner(&root, ScanOptions { gate: Some(gate.clone()), ..Default::default() }));
+    let s = Arc::new(scanner(
+        &root,
+        ScanOptions {
+            gate: Some(gate.clone()),
+            ..Default::default()
+        },
+    ));
     let wall = stopped_after(&s, 0.3);
     let first = s.progress();
-    assert!(0.25 < first.elapsed_s && first.elapsed_s <= wall + TICK, "{}", first.elapsed_s);
+    assert!(
+        0.25 < first.elapsed_s && first.elapsed_s <= wall + TICK,
+        "{}",
+        first.elapsed_s
+    );
     std::thread::sleep(Duration::from_millis(600)); // stopped: does not count
     s.uncancel();
     gate.0.store(true, Ordering::SeqCst); // the continued part lists for a while
@@ -530,7 +633,8 @@ fn a_continued_scan_takes_the_time_of_both_parts() {
     assert_eq!(done.state, ScanState::Done);
     assert_eq!(done.items as usize, facts.files + facts.dirs + 1);
     assert!(
-        first.elapsed_s + 0.45 < done.elapsed_s && done.elapsed_s <= first.elapsed_s + second + TICK,
+        first.elapsed_s + 0.45 < done.elapsed_s
+            && done.elapsed_s <= first.elapsed_s + second + TICK,
         "{} {}",
         first.elapsed_s,
         done.elapsed_s

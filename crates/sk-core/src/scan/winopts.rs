@@ -31,7 +31,11 @@ fn switch_value(value: Option<&str>, default: bool) -> bool {
 /// elsewhere (FAT, exFAT, network shares, other systems, not Windows), or with
 /// `SPACEKNIFE_WIN_LISTED_ALLOC=0`, estimated from the size.
 pub fn listed_alloc(volume: Option<&VolumeInfo>) -> ListedAlloc {
-    listed_alloc_with(volume, cfg!(windows), env_switch("SPACEKNIFE_WIN_LISTED_ALLOC", true))
+    listed_alloc_with(
+        volume,
+        cfg!(windows),
+        env_switch("SPACEKNIFE_WIN_LISTED_ALLOC", true),
+    )
 }
 
 fn listed_alloc_with(volume: Option<&VolumeInfo>, windows: bool, enabled: bool) -> ListedAlloc {
@@ -99,20 +103,33 @@ mod tests {
                 ListedAlloc::Off
             ]
         );
-        assert_eq!(listed_alloc_with(Some(&vol("NTFS", true)), true, true), ListedAlloc::Off);
+        assert_eq!(
+            listed_alloc_with(Some(&vol("NTFS", true)), true, true),
+            ListedAlloc::Off
+        );
         assert_eq!(listed_alloc_with(None, true, true), ListedAlloc::Off);
         // SPACEKNIFE_WIN_LISTED_ALLOC=0, and other systems
-        assert_eq!(listed_alloc_with(Some(&vol("NTFS", false)), true, false), ListedAlloc::Off);
-        assert_eq!(listed_alloc_with(Some(&vol("NTFS", false)), false, true), ListedAlloc::Off);
+        assert_eq!(
+            listed_alloc_with(Some(&vol("NTFS", false)), true, false),
+            ListedAlloc::Off
+        );
+        assert_eq!(
+            listed_alloc_with(Some(&vol("NTFS", false)), false, true),
+            ListedAlloc::Off
+        );
     }
 
     #[test]
     fn defaults_match_main() {
         // with none of the variables set (the test process does not set them)
         let mut o = SliceOptions::default();
-        if ["SPACEKNIFE_WIN_SKIP_FINAL", "SPACEKNIFE_WIN_DOT_CHECK", "SPACEKNIFE_WIN_KEEP_WHERE_UPDATED"]
-            .iter()
-            .all(|k| std::env::var_os(k).is_none())
+        if [
+            "SPACEKNIFE_WIN_SKIP_FINAL",
+            "SPACEKNIFE_WIN_DOT_CHECK",
+            "SPACEKNIFE_WIN_KEEP_WHERE_UPDATED",
+        ]
+        .iter()
+        .all(|k| std::env::var_os(k).is_none())
         {
             apply_env(&mut o);
             assert!(!o.skip_final && !o.dot_check && o.keep_where_updated);

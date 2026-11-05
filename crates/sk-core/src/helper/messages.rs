@@ -105,7 +105,9 @@ pub enum Call {
     Ping {},
     /// Drive type, filesystem, label, serial, sector / cluster size of a local NTFS `X:`; elevated
     /// also the FSCTL_GET_NTFS_VOLUME_DATA fields.
-    VolumeInfo { volume: String },
+    VolumeInfo {
+        volume: String,
+    },
     ScanMft {
         volume: String,
         #[serde(default = "default_batch_rows")]
@@ -124,7 +126,9 @@ pub enum Call {
         duty: f64,
     },
     /// The change journal's state: `{journal_id, first_usn, next_usn, max_size …}`.
-    QueryUsn { volume: String },
+    QueryUsn {
+        volume: String,
+    },
     /// Journal records from `start_usn` (a checkpoint of journal `journal_id`), as binary frames;
     /// the response's extras carry `{journal_id, next_usn, rows, truncated}`.
     ReadUsn {
@@ -138,7 +142,9 @@ pub enum Call {
     },
     /// A disk's own health record (Linux, elevated): the raw pages as hex, `{kind: nvme, log}` or
     /// `{kind: ata, identify, general, temperature}`. Only fixed read-only commands are sent.
-    DiskHealth { disk: String },
+    DiskHealth {
+        disk: String,
+    },
     Shutdown {},
 }
 
@@ -187,12 +193,20 @@ impl Call {
         match self {
             Call::Ping {} | Call::Shutdown {} => Ok(()),
             Call::VolumeInfo { volume } | Call::QueryUsn { volume } => check_volume(volume),
-            Call::ScanMft { volume, batch_rows, duty } => {
+            Call::ScanMft {
+                volume,
+                batch_rows,
+                duty,
+            } => {
                 check_volume(volume)?;
                 check_rows("batch_rows", *batch_rows, MAX_BATCH_ROWS)?;
                 check_duty(*duty)
             }
-            Call::ScanMftImage { path, batch_rows, duty } => {
+            Call::ScanMftImage {
+                path,
+                batch_rows,
+                duty,
+            } => {
                 let n = path.chars().count();
                 if n == 0 || n > 32767 {
                     return field("path", "String should have 1 to 32767 characters");
@@ -200,7 +214,13 @@ impl Call {
                 check_rows("batch_rows", *batch_rows, MAX_BATCH_ROWS)?;
                 check_duty(*duty)
             }
-            Call::ReadUsn { volume, start_usn, max_rows, duty, .. } => {
+            Call::ReadUsn {
+                volume,
+                start_usn,
+                max_rows,
+                duty,
+                ..
+            } => {
                 check_volume(volume)?;
                 if *start_usn < 0 {
                     return field("start_usn", "Input should be greater than or equal to 0");
@@ -212,7 +232,10 @@ impl Call {
                 if valid_linux_disk(disk) {
                     Ok(())
                 } else {
-                    field("disk", "String should match pattern '^(nvme\\d{1,3}n\\d{1,3}|sd[a-z]{1,4})$'")
+                    field(
+                        "disk",
+                        "String should match pattern '^(nvme\\d{1,3}n\\d{1,3}|sd[a-z]{1,4})$'",
+                    )
                 }
             }
         }
@@ -369,7 +392,11 @@ impl Reply {
         let scalars_ok = |m: &Scalars| m.values().all(|v| !v.is_array() && !v.is_object());
         match self {
             Reply::Hello { token, pid, .. } => {
-                if token.len() != 64 || !token.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')) {
+                if token.len() != 64
+                    || !token
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+                {
                     return Err("token: String should match pattern '^[0-9a-f]{64}$'".into());
                 }
                 if *pid == 0 {
@@ -457,9 +484,13 @@ mod tests {
 
     #[test]
     fn requests_are_strictly_validated() {
-        let ok = Request::parse(br#"{"type":"request","id":3,"call":{"op":"scan_mft","volume":"d:"}}"#).unwrap();
+        let ok =
+            Request::parse(br#"{"type":"request","id":3,"call":{"op":"scan_mft","volume":"d:"}}"#)
+                .unwrap();
         assert_eq!(ok.call.op(), "scan_mft");
-        assert!(matches!(ok.call, Call::ScanMft { batch_rows: DEFAULT_BATCH_ROWS, duty, .. } if duty == 1.0));
+        assert!(
+            matches!(ok.call, Call::ScanMft { batch_rows: DEFAULT_BATCH_ROWS, duty, .. } if duty == 1.0)
+        );
         let bad: &[&[u8]] = &[
             br#"{"type":"request","id":1,"call":{"op":"scan_mft","volume":"C:\\"}}"#,
             br#"{"type":"request","id":1,"call":{"op":"scan_mft","volume":"CC:"}}"#,
@@ -476,16 +507,26 @@ mod tests {
             br#"{"type":"request","id":1,"call":{"op":"ping"},"x":1}"#,
         ];
         for raw in bad {
-            assert!(Request::parse(raw).is_err(), "{}", String::from_utf8_lossy(raw));
+            assert!(
+                Request::parse(raw).is_err(),
+                "{}",
+                String::from_utf8_lossy(raw)
+            );
         }
-        assert!(Reply::parse(br#"{"type":"hello","version":1,"token":"XYZ","pid":1,"elevated":false}"#).is_err());
+        assert!(
+            Reply::parse(br#"{"type":"hello","version":1,"token":"XYZ","pid":1,"elevated":false}"#)
+                .is_err()
+        );
         let hello = Reply::Hello {
             version: 1,
             token: "a".repeat(64),
             pid: 7,
             elevated: false,
         };
-        assert_eq!(Reply::parse(&serde_json::to_vec(&hello).unwrap()).unwrap(), hello);
+        assert_eq!(
+            Reply::parse(&serde_json::to_vec(&hello).unwrap()).unwrap(),
+            hello
+        );
         assert!(Reply::parse(br#"{"type":"response","id":1,"result":{"a":[1]}}"#).is_err());
         assert!(Reply::parse(br#"{"type":"error","code":"nope","message":"x"}"#).is_err());
     }
@@ -498,7 +539,9 @@ mod tests {
                 .as_bytes(),
         )
         .unwrap();
-        assert!(matches!(ok.call, Call::ReadUsn { journal_id, max_rows: 1_000_000, .. } if journal_id == top));
+        assert!(
+            matches!(ok.call, Call::ReadUsn { journal_id, max_rows: 1_000_000, .. } if journal_id == top)
+        );
         let again = Request::parse(&serde_json::to_vec(&ok).unwrap()).unwrap();
         assert_eq!(again, ok); // 64-bit ids survive JSON
         let big = top as u128 + 1;
@@ -509,10 +552,12 @@ mod tests {
             r#""op":"read_usn","volume":"C:","start_usn":"5","journal_id":1"#.to_owned(),
             format!(r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":{big}"#),
             r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"max_rows":0"#.to_owned(),
-            r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"max_rows":4000001"#.to_owned(),
+            r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"max_rows":4000001"#
+                .to_owned(),
             r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"duty":0"#.to_owned(),
             r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"duty":1.5"#.to_owned(),
-            r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"path":"C:\\x""#.to_owned(),
+            r#""op":"read_usn","volume":"C:","start_usn":0,"journal_id":1,"path":"C:\\x""#
+                .to_owned(),
             r#""op":"read_usn","volume":"C:","start_usn":0"#.to_owned(),
         ];
         for call in bad {
@@ -524,7 +569,10 @@ mod tests {
         extras.insert("next_usn".into(), (1u64 << 62).into());
         extras.insert("truncated".into(), true.into());
         let reply = Reply::response(3, Scalars::new(), extras);
-        assert_eq!(Reply::parse(&serde_json::to_vec(&reply).unwrap()).unwrap(), reply);
+        assert_eq!(
+            Reply::parse(&serde_json::to_vec(&reply).unwrap()).unwrap(),
+            reply
+        );
     }
 
     #[test]
@@ -532,15 +580,31 @@ mod tests {
         for good in ["nvme0n1", "nvme12n3", "sda", "sdab"] {
             assert!(valid_linux_disk(good), "{good}");
         }
-        for bad in ["sda1", "nvme0", "nvme0n1p2", "../sda", "loop0", "dm-0", "", "sdabcde", "nvme1234n1"] {
+        for bad in [
+            "sda1",
+            "nvme0",
+            "nvme0n1p2",
+            "../sda",
+            "loop0",
+            "dm-0",
+            "",
+            "sdabcde",
+            "nvme1234n1",
+        ] {
             assert!(!valid_linux_disk(bad), "{bad}");
         }
     }
 
     #[test]
     fn frame_header_checks() {
-        assert_eq!(check_header(&frame_header(KIND_JSON, 10), 0), Ok((KIND_JSON, 10)));
-        assert_eq!(check_header(&frame_header(KIND_BINARY, 100), 100), Ok((KIND_BINARY, 100)));
+        assert_eq!(
+            check_header(&frame_header(KIND_JSON, 10), 0),
+            Ok((KIND_JSON, 10))
+        );
+        assert_eq!(
+            check_header(&frame_header(KIND_BINARY, 100), 100),
+            Ok((KIND_BINARY, 100))
+        );
         assert!(check_header(&frame_header(KIND_BINARY, 101), 100).is_err());
         assert!(check_header(&frame_header(KIND_JSON, MAX_CONTROL_BYTES + 1), 0).is_err());
         assert!(check_header(&[1, 0, 0, 0, 0x00], 0).is_err());

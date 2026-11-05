@@ -17,7 +17,10 @@ pub fn new_token() -> String {
     getrandom::fill(&mut buf).expect("the system's random source");
     let mut out = String::with_capacity(43);
     for chunk in buf.chunks(3) {
-        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, &b)| acc | (u32::from(b) << (16 - 8 * i)));
+        let n = chunk
+            .iter()
+            .enumerate()
+            .fold(0u32, |acc, (i, &b)| acc | (u32::from(b) << (16 - 8 * i)));
         let chars = chunk.len() + 1;
         for i in 0..chars {
             out.push(ALPHABET[((n >> (18 - 6 * i)) & 63) as usize] as char);
@@ -29,7 +32,10 @@ pub fn new_token() -> String {
 /// Equal, in time independent of where they differ (both hashed first: lengths leak nothing).
 pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     let (ha, hb) = (Sha256::digest(a), Sha256::digest(b));
-    ha.iter().zip(hb.iter()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+    ha.iter()
+        .zip(hb.iter())
+        .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+        == 0
 }
 
 /// The OS's message for an I/O error, without Rust's " (os error N)" suffix.
@@ -64,7 +70,12 @@ pub fn volume_to_json(v: &sk_core::volume::VolumeInfo) -> serde_json::Value {
 
 /// [`volume_to_json`] read back (missing fields: defaults).
 pub fn volume_from_json(v: &serde_json::Value) -> sk_core::volume::VolumeInfo {
-    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or_default().to_owned();
+    let s = |k: &str| {
+        v.get(k)
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_owned()
+    };
     let i = |k: &str| v.get(k).and_then(|x| x.as_i64()).unwrap_or(0);
     let b = |k: &str| v.get(k).and_then(|x| x.as_bool()).unwrap_or(false);
     sk_core::volume::VolumeInfo {
@@ -94,7 +105,10 @@ mod tests {
     fn tokens_and_ids() {
         let t = new_token();
         assert_eq!(t.len(), 43);
-        assert!(t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
+        assert!(
+            t.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        );
         assert_ne!(t, new_token());
         assert_eq!(random_hex(4).len(), 8);
         assert!(constant_time_eq(b"abc", b"abc"));

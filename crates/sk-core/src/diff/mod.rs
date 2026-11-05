@@ -14,8 +14,8 @@ mod text;
 pub use changes::{
     ChangeTree, change_item, change_kind, change_status, rest_item, short_label, subtree_sums,
 };
+pub use engine::Change;
 pub use engine::{
     CompareOptions, DOMINANT, DiffError, DiffTree, Direction, MINOR, Status, compare, compare_with,
     status_label,
 };
-pub use engine::Change;

@@ -100,13 +100,24 @@ fn level_name(level: &Level) -> &'static str {
 /// Chatty dependencies: only their warnings and errors.
 fn noisy(meta: &Metadata<'_>) -> bool {
     const NOISY: &[&str] = &[
-        "ureq", "rustls", "hyper", "h2", "tungstenite", "tokio_tungstenite", "mio", "want", "axum",
-        "tower", "reqwest",
+        "ureq",
+        "rustls",
+        "hyper",
+        "h2",
+        "tungstenite",
+        "tokio_tungstenite",
+        "mio",
+        "want",
+        "axum",
+        "tower",
+        "reqwest",
     ];
     *meta.level() > Level::WARN && {
         let target = meta.target();
         NOISY.iter().any(|n| {
-            target.strip_prefix(n).is_some_and(|r| r.is_empty() || r.starts_with("::"))
+            target
+                .strip_prefix(n)
+                .is_some_and(|r| r.is_empty() || r.starts_with("::"))
         })
     }
 }
@@ -195,7 +206,14 @@ impl LogBus {
         let (entry, listeners) = {
             let mut g = self.inner.lock();
             g.seq += 1;
-            let entry = Arc::new(LogEntry { seq: g.seq, time: Utc::now(), level, source, message, extra });
+            let entry = Arc::new(LogEntry {
+                seq: g.seq,
+                time: Utc::now(),
+                level,
+                source,
+                message,
+                extra,
+            });
             if g.buffer.len() >= self.capacity {
                 g.buffer.pop_front();
             }
@@ -221,8 +239,14 @@ impl LogBus {
         }
         let floor = level_no(min_level);
         let g = self.inner.lock();
-        let mut out: Vec<_> =
-            g.buffer.iter().rev().filter(|e| e.level_no() >= floor).take(limit).cloned().collect();
+        let mut out: Vec<_> = g
+            .buffer
+            .iter()
+            .rev()
+            .filter(|e| e.level_no() >= floor)
+            .take(limit)
+            .cloned()
+            .collect();
         out.reverse();
         out
     }
@@ -237,7 +261,8 @@ impl LogBus {
         let mut g = self.inner.lock();
         g.next_token += 1;
         let token = g.next_token;
-        g.listeners.insert(token, (level_no(min_level), Arc::new(listener)));
+        g.listeners
+            .insert(token, (level_no(min_level), Arc::new(listener)));
         token
     }
 
@@ -254,7 +279,13 @@ impl LogBus {
         let mut recent: Vec<_> = if backlog == 0 {
             Vec::new()
         } else {
-            g.buffer.iter().rev().filter(|e| e.level_no() >= floor).take(backlog).cloned().collect()
+            g.buffer
+                .iter()
+                .rev()
+                .filter(|e| e.level_no() >= floor)
+                .take(backlog)
+                .cloned()
+                .collect()
         };
         recent.reverse();
         g.next_token += 1;
@@ -272,7 +303,9 @@ impl LogBus {
     }
 
     /// The tracing layer that feeds this bus (DEBUG and above).
-    pub fn layer<S: Subscriber + for<'a> LookupSpan<'a>>(self: &Arc<Self>) -> impl Layer<S> + Send + Sync + 'static {
+    pub fn layer<S: Subscriber + for<'a> LookupSpan<'a>>(
+        self: &Arc<Self>,
+    ) -> impl Layer<S> + Send + Sync + 'static {
         BusLayer { bus: self.clone() }
             .with_filter(filter_fn(|m| *m.level() <= Level::DEBUG && !noisy(m)))
     }
@@ -323,7 +356,8 @@ impl<S: Subscriber> Layer<S> for BusLayer {
             .filter(|s| !s.is_empty())
             .or(f.log_target)
             .unwrap_or_else(|| meta.target().to_owned());
-        self.bus.push(from_tracing(meta.level()), source, f.message, f.extra);
+        self.bus
+            .push(from_tracing(meta.level()), source, f.message, f.extra);
     }
 }
 
@@ -382,7 +416,13 @@ impl RotatingFile {
         }
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let size = file.metadata()?.len();
-        Ok(RotatingFile { path: path.to_owned(), file, size, max, keep })
+        Ok(RotatingFile {
+            path: path.to_owned(),
+            file,
+            size,
+            max,
+            keep,
+        })
     }
 
     fn numbered(&self, n: usize) -> PathBuf {
@@ -394,7 +434,11 @@ impl RotatingFile {
     fn rotate(&mut self) -> io::Result<()> {
         self.file.flush()?;
         if self.keep == 0 {
-            self.file = OpenOptions::new().create(true).write(true).truncate(true).open(&self.path)?;
+            self.file = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&self.path)?;
             self.size = 0;
             return Ok(());
         }
@@ -407,8 +451,15 @@ impl RotatingFile {
         }
         // std opens files with FILE_SHARE_DELETE on Windows: the open file can be renamed
         let renamed = std::fs::rename(&self.path, self.numbered(1));
-        self.file = OpenOptions::new().create(true).append(true).open(&self.path)?;
-        self.size = if renamed.is_ok() { 0 } else { self.file.metadata()?.len() };
+        self.file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)?;
+        self.size = if renamed.is_ok() {
+            0
+        } else {
+            self.file.metadata()?.len()
+        };
         Ok(())
     }
 }
@@ -519,7 +570,12 @@ pub struct LogConfig {
 
 impl Default for LogConfig {
     fn default() -> Self {
-        LogConfig { level: LevelFilter::INFO, format: LogFormat::Plain, bus: None, file: None }
+        LogConfig {
+            level: LevelFilter::INFO,
+            format: LogFormat::Plain,
+            bus: None,
+            file: None,
+        }
     }
 }
 
@@ -551,7 +607,10 @@ pub fn subscriber(cfg: &LogConfig) -> impl Subscriber + Send + Sync + for<'a> Lo
                 .with_max_level_hint(LevelFilter::DEBUG),
         );
     let bus = cfg.bus.as_ref().map(|b| b.layer());
-    tracing_subscriber::registry().with(stderr).with(file).with(bus)
+    tracing_subscriber::registry()
+        .with(stderr)
+        .with(file)
+        .with(bus)
 }
 
 /// Install the process-wide subscriber (and route the `log` crate into it). Safe to call more
@@ -566,7 +625,12 @@ pub fn init(cfg: &LogConfig) -> io::Result<()> {
 
 /// Write the formatted fields of an event as `message k=v …` (used by tests and tools).
 pub fn describe(entry: &LogEntry) -> String {
-    let mut out = format!("{} {} {}", entry.level.as_str(), entry.source, entry.message);
+    let mut out = format!(
+        "{} {} {}",
+        entry.level.as_str(),
+        entry.source,
+        entry.message
+    );
     for (k, v) in &entry.extra {
         let _ = write!(out, " {k}={v}");
     }
@@ -611,7 +675,10 @@ mod tests {
         assert_eq!(bus.subscribers(), 1);
         bus.unsubscribe(t2);
         let ev = backlog[1].to_event("sub-1");
-        assert_eq!((ev.sub.as_str(), ev.seq, ev.message.as_str()), ("sub-1", 5, "five"));
+        assert_eq!(
+            (ev.sub.as_str(), ev.seq, ev.message.as_str()),
+            ("sub-1", 5, "five")
+        );
     }
 
     #[test]
@@ -634,7 +701,10 @@ mod tests {
     fn the_file_layer_follows_its_level() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("spaceknife.log");
-        let cfg = LogConfig { level: LevelFilter::OFF, ..LogConfig::default() };
+        let cfg = LogConfig {
+            level: LevelFilter::OFF,
+            ..LogConfig::default()
+        };
         set_file_logging(Some(&path), LevelFilter::INFO).unwrap();
         tracing::subscriber::with_default(subscriber(&cfg), || {
             tracing::info!(n = 1, "kept");
@@ -644,8 +714,14 @@ mod tests {
         });
         set_file_logging(None, LevelFilter::INFO).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("| INFO     | sk_core::log:") && text.contains("kept n=1"), "{text}");
-        assert!(!text.contains("- dropped") && text.contains("now kept"), "{text}");
+        assert!(
+            text.contains("| INFO     | sk_core::log:") && text.contains("kept n=1"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("- dropped") && text.contains("now kept"),
+            "{text}"
+        );
         assert_eq!(text.lines().count(), 2);
     }
 }

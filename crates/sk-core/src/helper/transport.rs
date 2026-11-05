@@ -83,7 +83,10 @@ pub fn valid_address(address: &str) -> bool {
             .and_then(|n| n.to_str())
             .and_then(|n| n.strip_prefix("spaceknife-helper-"))
             .is_some_and(|rest| {
-                !rest.is_empty() && rest.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'z' | b'_'))
+                !rest.is_empty()
+                    && rest
+                        .bytes()
+                        .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'z' | b'_'))
             });
         path.is_absolute() && path.file_name().is_some_and(|n| n == SOCKET_NAME) && dir_ok
     }
@@ -115,7 +118,13 @@ impl Channel {
         let mut got = 0;
         while got < buf.len() {
             match self.inner.read(&mut buf[got..], timeout) {
-                Ok(0) => return Err(if got > 0 { incomplete() } else { ChanError::Eof }),
+                Ok(0) => {
+                    return Err(if got > 0 {
+                        incomplete()
+                    } else {
+                        ChanError::Eof
+                    });
+                }
                 Ok(n) => got += n,
                 Err(e) => {
                     let e = ChanError::from(e);
@@ -174,7 +183,11 @@ impl Channel {
         Ok((kind, body))
     }
 
-    pub fn send_message<T: Serialize>(&self, message: &T, timeout: Option<Duration>) -> Result<(), ChanError> {
+    pub fn send_message<T: Serialize>(
+        &self,
+        message: &T,
+        timeout: Option<Duration>,
+    ) -> Result<(), ChanError> {
         let (head, body) = json_frame(message);
         self.send(&[&head, &body], timeout)
     }
@@ -185,7 +198,10 @@ pub fn connect(address: &str, timeout: Duration) -> io::Result<Channel> {
     if !valid_address(address) {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            tr!("无效的助手地址：{address}", address = format!("{address:?}")),
+            tr!(
+                "无效的助手地址：{address}",
+                address = format!("{address:?}")
+            ),
         ));
     }
     imp::connect(address, timeout)
@@ -269,7 +285,10 @@ mod imp {
 
         pub fn accept(&mut self, wait: Duration) -> io::Result<Channel> {
             let Some(pipe) = &self.0 else {
-                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, t("监听已关闭")));
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    t("监听已关闭"),
+                ));
             };
             pipe.accept(Some(wait))?;
             let pipe = self.0.take().expect("checked above");
@@ -323,11 +342,21 @@ mod imp {
         let fd = sock.as_raw_fd();
         #[cfg(target_os = "linux")]
         {
-            let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+            let mut cred = libc::ucred {
+                pid: 0,
+                uid: 0,
+                gid: 0,
+            };
             let mut len = size_of::<libc::ucred>() as libc::socklen_t;
             // SAFETY: valid fd and out-buffer of the given length.
             let rc = unsafe {
-                libc::getsockopt(fd, libc::SOL_SOCKET, libc::SO_PEERCRED, (&mut cred as *mut libc::ucred).cast(), &mut len)
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_PEERCRED,
+                    (&mut cred as *mut libc::ucred).cast(),
+                    &mut len,
+                )
             };
             if rc != 0 {
                 return Err(io::Error::last_os_error());
@@ -341,7 +370,9 @@ mod imp {
             let mut pid: libc::pid_t = 0;
             let mut len = size_of::<libc::pid_t>() as libc::socklen_t;
             // SAFETY: valid fd and out-buffer of the given length.
-            let rc = unsafe { libc::getsockopt(fd, 0, 2, (&mut pid as *mut libc::pid_t).cast(), &mut len) };
+            let rc = unsafe {
+                libc::getsockopt(fd, 0, 2, (&mut pid as *mut libc::pid_t).cast(), &mut len)
+            };
             if rc != 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -365,12 +396,19 @@ mod imp {
 
         fn timeouts(&self, timeout: Option<Duration>, write: bool) -> io::Result<()> {
             let t = timeout.map(|d| d.max(Duration::from_millis(1)));
-            if write { self.sock.set_write_timeout(t) } else { self.sock.set_read_timeout(t) }
+            if write {
+                self.sock.set_write_timeout(t)
+            } else {
+                self.sock.set_read_timeout(t)
+            }
         }
 
         fn check(&self) -> io::Result<()> {
             if self.closed.load(Ordering::Acquire) {
-                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, t("套接字已关闭")));
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    t("套接字已关闭"),
+                ));
             }
             Ok(())
         }
@@ -387,7 +425,10 @@ mod imp {
                         return Err(io::Error::new(io::ErrorKind::TimedOut, t("套接字读写超时")));
                     }
                     Ok(0) if self.closed.load(Ordering::Acquire) => {
-                        return Err(io::Error::new(io::ErrorKind::ConnectionAborted, t("套接字已关闭")));
+                        return Err(io::Error::new(
+                            io::ErrorKind::ConnectionAborted,
+                            t("套接字已关闭"),
+                        ));
                     }
                     other => return other,
                 }
@@ -448,13 +489,19 @@ mod imp {
 
         pub fn accept(&mut self, wait: Duration) -> io::Result<Channel> {
             let Some(sock) = &self.sock else {
-                return Err(io::Error::new(io::ErrorKind::ConnectionAborted, t("监听已关闭")));
+                return Err(io::Error::new(
+                    io::ErrorKind::ConnectionAborted,
+                    t("监听已关闭"),
+                ));
             };
             let deadline = Instant::now() + wait;
             let conn = loop {
                 match sock.accept() {
                     Ok((conn, _)) => break conn,
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::Interrupted => {
+                    Err(e)
+                        if e.kind() == io::ErrorKind::WouldBlock
+                            || e.kind() == io::ErrorKind::Interrupted =>
+                    {
                         if !wait_until(deadline, Duration::from_millis(10)) {
                             return Err(io::Error::new(io::ErrorKind::TimedOut, t("等待连接超时")));
                         }
@@ -509,12 +556,18 @@ mod tests {
         let mut listener = Listener::new().unwrap();
         assert!(valid_address(listener.address()), "{}", listener.address());
         #[cfg(windows)]
-        assert!(listener.address().starts_with(PIPE_PREFIX) && listener.address().len() == PIPE_PREFIX.len() + 32);
+        assert!(
+            listener.address().starts_with(PIPE_PREFIX)
+                && listener.address().len() == PIPE_PREFIX.len() + 32
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let dir = std::path::Path::new(listener.address()).parent().unwrap();
-            assert_eq!(std::fs::metadata(dir).unwrap().permissions().mode() & 0o777, 0o700);
+            assert_eq!(
+                std::fs::metadata(dir).unwrap().permissions().mode() & 0o777,
+                0o700
+            );
         }
         listener.close();
         for bad in [
@@ -536,11 +589,24 @@ mod tests {
         let client = std::thread::spawn(move || {
             let chan = connect(&address, Duration::from_secs(5)).unwrap();
             assert_eq!(chan.peer_pid(), std::process::id());
-            let (kind, body) = chan.read_frame(Some(Duration::from_secs(5)), Some(Duration::from_secs(5)), 0).unwrap();
-            assert_eq!((kind, body.as_slice()), (super::super::messages::KIND_JSON, b"{\"a\":1}".as_slice()));
-            chan.send_message(&serde_json::json!({"b": 2}), Some(Duration::from_secs(5))).unwrap();
+            let (kind, body) = chan
+                .read_frame(
+                    Some(Duration::from_secs(5)),
+                    Some(Duration::from_secs(5)),
+                    0,
+                )
+                .unwrap();
+            assert_eq!(
+                (kind, body.as_slice()),
+                (super::super::messages::KIND_JSON, b"{\"a\":1}".as_slice())
+            );
+            chan.send_message(&serde_json::json!({"b": 2}), Some(Duration::from_secs(5)))
+                .unwrap();
             // the other end closes: a clean EOF
-            assert!(matches!(chan.read_frame(Some(Duration::from_secs(5)), None, 0), Err(ChanError::Eof)));
+            assert!(matches!(
+                chan.read_frame(Some(Duration::from_secs(5)), None, 0),
+                Err(ChanError::Eof)
+            ));
         });
         let mut chan = None;
         for _ in 0..100 {
@@ -555,11 +621,21 @@ mod tests {
         }
         let chan = chan.expect("connected");
         assert_eq!(chan.peer_pid(), std::process::id());
-        chan.send_message(&serde_json::json!({"a": 1}), Some(Duration::from_secs(5))).unwrap();
-        let (_, body) = chan.read_frame(Some(Duration::from_secs(5)), Some(Duration::from_secs(5)), 0).unwrap();
+        chan.send_message(&serde_json::json!({"a": 1}), Some(Duration::from_secs(5)))
+            .unwrap();
+        let (_, body) = chan
+            .read_frame(
+                Some(Duration::from_secs(5)),
+                Some(Duration::from_secs(5)),
+                0,
+            )
+            .unwrap();
         assert_eq!(body, b"{\"b\":2}");
         // a read with a short timeout times out
-        assert!(matches!(chan.read_frame(Some(Duration::from_millis(50)), None, 0), Err(ChanError::Timeout)));
+        assert!(matches!(
+            chan.read_frame(Some(Duration::from_millis(50)), None, 0),
+            Err(ChanError::Timeout)
+        ));
         chan.close();
         assert!(chan.is_closed());
         client.join().unwrap();
@@ -588,9 +664,14 @@ mod tests {
             c2.close();
         });
         let t0 = Instant::now();
-        let err = chan.read_frame(Some(Duration::from_secs(10)), None, 0).unwrap_err();
+        let err = chan
+            .read_frame(Some(Duration::from_secs(10)), None, 0)
+            .unwrap_err();
         assert!(t0.elapsed() < Duration::from_millis(700), "{err:?}");
-        assert!(matches!(err, ChanError::Closed(_) | ChanError::Eof), "{err:?}");
+        assert!(
+            matches!(err, ChanError::Closed(_) | ChanError::Eof),
+            "{err:?}"
+        );
         closer.join().unwrap();
         peer.join().unwrap();
     }

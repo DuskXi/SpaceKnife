@@ -6,15 +6,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use sk_core::settings::io::{ImportContext, export_to, read_plan};
-use sk_core::{classes, paths, pathclass, tr};
+use sk_core::{classes, pathclass, paths, tr};
 use sk_protocol::methods::{
-    SettingsExport, SettingsImport, SystemCacheClear, SystemHelperStop, SystemMaintenance, TagsClearSaved,
+    SettingsExport, SettingsImport, SystemCacheClear, SystemHelperStop, SystemMaintenance,
+    TagsClearSaved,
 };
 use sk_protocol::settings::{MaintenanceInfo, SettingsImportResult};
 use sk_protocol::{EmptyResult, ErrorCode};
 
 use crate::app::Server;
-use crate::rpc::{RpcError, RpcResult, Router};
+use crate::rpc::{Router, RpcError, RpcResult};
 use crate::topics::TopicRegistry;
 
 /// (bytes, files) below a folder; a missing one: (0, 0). Small folders only (cache, snapshots).
@@ -22,7 +23,9 @@ fn tree_bytes(root: &Path) -> (i64, i64) {
     let (mut total, mut files) = (0i64, 0i64);
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(it) = std::fs::read_dir(&dir) else { continue };
+        let Ok(it) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for e in it.flatten() {
             let Ok(ft) = e.file_type() else { continue };
             if ft.is_dir() {
@@ -39,16 +42,24 @@ fn tree_bytes(root: &Path) -> (i64, i64) {
 /// Delete what can be deleted: column files of live scans are open (Windows refuses, POSIX keeps
 /// the mapping), the rest goes.
 fn clear_cache(root: &Path) {
-    let Ok(it) = std::fs::read_dir(root) else { return };
+    let Ok(it) = std::fs::read_dir(root) else {
+        return;
+    };
     for e in it.flatten() {
         let p = e.path();
         let is_dir = e.file_type().is_ok_and(|t| t.is_dir() && !t.is_symlink());
-        let _ = if is_dir { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
+        let _ = if is_dir {
+            std::fs::remove_dir_all(&p)
+        } else {
+            std::fs::remove_file(&p)
+        };
     }
 }
 
 fn count_files(dir: &Path, depth: usize, ext: &str) -> i64 {
-    let Ok(it) = std::fs::read_dir(dir) else { return 0 };
+    let Ok(it) = std::fs::read_dir(dir) else {
+        return 0;
+    };
     let mut n = 0;
     for e in it.flatten() {
         let p = e.path();
@@ -89,12 +100,25 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
         let path = PathBuf::from(&p.path);
         let folder = path.parent().map(Path::to_path_buf).unwrap_or_default();
         if !folder.is_dir() {
-            return Err(RpcError::invalid_params(tr!("目标文件夹不存在：{folder}", folder = folder.display().to_string())));
+            return Err(RpcError::invalid_params(tr!(
+                "目标文件夹不存在：{folder}",
+                folder = folder.display().to_string()
+            )));
         }
         let st = call.server.settings.clone();
         let res = crate::compute::blocking(move || {
-            export_to(&path, &st.values(), &classes::active(), &pathclass::folders()).map_err(|e| {
-                tr!("写不了 {path}：{reason}", path = path.display().to_string(), reason = crate::util::os_message(&e))
+            export_to(
+                &path,
+                &st.values(),
+                &classes::active(),
+                &pathclass::folders(),
+            )
+            .map_err(|e| {
+                tr!(
+                    "写不了 {path}：{reason}",
+                    path = path.display().to_string(),
+                    reason = crate::util::os_message(&e)
+                )
             })
         })
         .await?;
@@ -112,7 +136,11 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
             let active = classes::active();
             let folders = pathclass::folders();
             let names: Vec<&str> = sk_core::export::BUILTINS.iter().map(|b| b.name).collect();
-            let ctx = ImportContext { active: &active, folders: &folders, builtin_templates: &names };
+            let ctx = ImportContext {
+                active: &active,
+                folders: &folders,
+                builtin_templates: &names,
+            };
             read_plan(&path, &cur, &ctx)
         })
         .await?
@@ -132,7 +160,12 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
             if let Some(table) = &plan.classes {
                 super::classes::apply_table(&server, table.clone()).await?;
             }
-            tracing::info!("settings imported from {} ({}): {} changes", p.path, plan.source.as_str(), changes.len());
+            tracing::info!(
+                "settings imported from {} ({}): {} changes",
+                p.path,
+                plan.source.as_str(),
+                changes.len()
+            );
         }
         Ok(SettingsImportResult {
             source: plan.source,

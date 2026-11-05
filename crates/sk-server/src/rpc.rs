@@ -27,7 +27,11 @@ pub struct RpcError {
 
 impl RpcError {
     pub fn new(code: ErrorCode, message: impl Into<String>) -> RpcError {
-        RpcError { code: code.code().into(), message: message.into(), data: None }
+        RpcError {
+            code: code.code().into(),
+            message: message.into(),
+            data: None,
+        }
     }
 
     pub fn with_data(mut self, data: Value) -> RpcError {
@@ -82,7 +86,8 @@ pub struct Call {
 pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// A type-erased handler: raw params in, the encoded response frame out.
-pub type Handler = Arc<dyn Fn(Call, Option<Box<RawValue>>) -> BoxFuture<RpcResult<String>> + Send + Sync>;
+pub type Handler =
+    Arc<dyn Fn(Call, Option<Box<RawValue>>) -> BoxFuture<RpcResult<String>> + Send + Sync>;
 
 /// Method name → handler.
 #[derive(Default, Clone)]
@@ -125,7 +130,10 @@ impl Router {
         Fut: Future<Output = RpcResult<String>> + Send + 'static,
     {
         let h: Handler = Arc::new(move |call, raw| Box::pin(handler(call, raw)));
-        assert!(self.routes.insert(name.to_owned(), h).is_none(), "method {name:?} registered twice");
+        assert!(
+            self.routes.insert(name.to_owned(), h).is_none(),
+            "method {name:?} registered twice"
+        );
     }
 
     pub fn get(&self, name: &str) -> Option<&Handler> {
@@ -140,5 +148,8 @@ impl Router {
 }
 
 pub fn not_found(name: &str) -> RpcError {
-    RpcError::new(ErrorCode::MethodNotFound, format!("method not found: {name}"))
+    RpcError::new(
+        ErrorCode::MethodNotFound,
+        format!("method not found: {name}"),
+    )
 }

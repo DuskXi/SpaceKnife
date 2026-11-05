@@ -21,13 +21,16 @@ use std::ptr::{null, null_mut};
 use sk_protocol::base::DateTime;
 use sk_protocol::machine::{DiskHealth, DiskInterface, DiskIo, DiskLink, HealthNote, PhysicalDisk};
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-    CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_Get_DevNode_PropertyW, CM_Get_Device_IDW, CM_Get_Device_Interface_ListW,
-    CM_Get_Device_Interface_List_SizeW, CM_Get_Parent, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, SP_DEVICE_INTERFACE_DATA,
-    SP_DEVINFO_DATA, SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
+    CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_Get_DevNode_PropertyW, CM_Get_Device_IDW,
+    CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_ListW, CM_Get_Parent,
+    DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, SP_DEVICE_INTERFACE_DATA, SP_DEVINFO_DATA,
+    SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
     SetupDiGetDeviceInterfaceDetailW,
 };
 use windows_sys::Win32::Foundation::{DEVPROPKEY, GENERIC_WRITE};
-use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE, GetVolumeNameForVolumeMountPointW};
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_SHARE_READ, FILE_SHARE_WRITE, GetVolumeNameForVolumeMountPointW,
+};
 use windows_sys::core::GUID;
 
 use super::health::{ata_sector_size, ata_statistics, nvme_health};
@@ -99,22 +102,46 @@ fn text_at(b: &[u8], at: usize) -> String {
     if at == 0 || at >= b.len() {
         return String::new();
     }
-    let end = b[at..].iter().position(|&c| c == 0).map_or(b.len(), |p| at + p);
+    let end = b[at..]
+        .iter()
+        .position(|&c| c == 0)
+        .map_or(b.len(), |p| at + p);
     String::from_utf8_lossy(&b[at..end]).trim().to_owned()
 }
 
 /// StorageDeviceProtocolSpecificProperty: STORAGE_PROTOCOL_SPECIFIC_DATA (40 bytes) follows the
 /// query's two DWORDs; the answer is a STORAGE_PROTOCOL_DATA_DESCRIPTOR (8 bytes) with the same
 /// 40-byte block, then the data.
-fn protocol_data(h: &Handle, protocol: u32, data_type: u32, value: u32, length: usize, sub: u32) -> Option<Vec<u8>> {
-    let fields = [protocol, data_type, value, sub, 40, length as u32, 0, 0, 0, 0];
+fn protocol_data(
+    h: &Handle,
+    protocol: u32,
+    data_type: u32,
+    value: u32,
+    length: usize,
+    sub: u32,
+) -> Option<Vec<u8>> {
+    let fields = [
+        protocol,
+        data_type,
+        value,
+        sub,
+        40,
+        length as u32,
+        0,
+        0,
+        0,
+        0,
+    ];
     let spec: Vec<u8> = fields.iter().flat_map(|x| x.to_le_bytes()).collect();
     let raw = query(h, 50, 8 + 40 + length, &spec)?;
     (raw.len() >= 48 + length).then(|| raw[48..48 + length].to_vec())
 }
 
 fn ascii(b: &[u8]) -> String {
-    String::from_utf8_lossy(b).replace('\0', " ").trim().to_owned()
+    String::from_utf8_lossy(b)
+        .replace('\0', " ")
+        .trim()
+        .to_owned()
 }
 
 fn prop_u32(inst: u32, fmtid: GUID, pid: u32) -> Option<u32> {
@@ -123,14 +150,27 @@ fn prop_u32(inst: u32, fmtid: GUID, pid: u32) -> Option<u32> {
     let mut value = 0u32;
     let mut size = 4u32;
     // SAFETY: a 4-byte buffer of the size passed.
-    let r = unsafe { CM_Get_DevNode_PropertyW(inst, &key, &mut kind, (&mut value as *mut u32).cast(), &mut size, 0) };
+    let r = unsafe {
+        CM_Get_DevNode_PropertyW(
+            inst,
+            &key,
+            &mut kind,
+            (&mut value as *mut u32).cast(),
+            &mut size,
+            0,
+        )
+    };
     (r == 0).then_some(value)
 }
 
 fn device_id(inst: u32) -> String {
     let mut buf = vec![0u16; 512];
     // SAFETY: buffer of the given length.
-    if unsafe { CM_Get_Device_IDW(inst, buf.as_mut_ptr(), 512, 0) } == 0 { from_wide(&buf) } else { String::new() }
+    if unsafe { CM_Get_Device_IDW(inst, buf.as_mut_ptr(), 512, 0) } == 0 {
+        from_wide(&buf)
+    } else {
+        String::new()
+    }
 }
 
 fn parent(inst: u32) -> Option<u32> {
@@ -159,7 +199,12 @@ fn disk_nodes() -> Vec<(u32, String, u32)> {
     // SAFETY: SetupAPI enumeration; every structure is sized as documented and the list is
     // destroyed at the end.
     unsafe {
-        let info = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_DISK, null(), null_mut(), DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
+        let info = SetupDiGetClassDevsW(
+            &GUID_DEVINTERFACE_DISK,
+            null(),
+            null_mut(),
+            DIGCF_PRESENT | DIGCF_DEVICEINTERFACE,
+        );
         if info == -1 || info == 0 {
             return found;
         }
@@ -167,7 +212,9 @@ fn disk_nodes() -> Vec<(u32, String, u32)> {
         loop {
             let mut iface: SP_DEVICE_INTERFACE_DATA = std::mem::zeroed();
             iface.cbSize = size_of::<SP_DEVICE_INTERFACE_DATA>() as u32;
-            if SetupDiEnumDeviceInterfaces(info, null(), &GUID_DEVINTERFACE_DISK, index, &mut iface) == 0 {
+            if SetupDiEnumDeviceInterfaces(info, null(), &GUID_DEVINTERFACE_DISK, index, &mut iface)
+                == 0
+            {
                 break;
             }
             index += 1;
@@ -181,10 +228,20 @@ fn disk_nodes() -> Vec<(u32, String, u32)> {
             *(detail.as_mut_ptr() as *mut u32) = if size_of::<usize>() == 8 { 8 } else { 6 };
             let mut node: SP_DEVINFO_DATA = std::mem::zeroed();
             node.cbSize = size_of::<SP_DEVINFO_DATA>() as u32;
-            if SetupDiGetDeviceInterfaceDetailW(info, &iface, detail.as_mut_ptr().cast(), need, null_mut(), &mut node) == 0 {
+            if SetupDiGetDeviceInterfaceDetailW(
+                info,
+                &iface,
+                detail.as_mut_ptr().cast(),
+                need,
+                null_mut(),
+                &mut node,
+            ) == 0
+            {
                 continue;
             }
-            let path = crate::helper::win32::from_wide_ptr((detail.as_ptr() as *const u8).add(4) as *const u16);
+            let path = crate::helper::win32::from_wide_ptr(
+                (detail.as_ptr() as *const u8).add(4) as *const u16
+            );
             let Some(h) = open(&path) else { continue };
             if let Ok(number) = h.ioctl(IOCTL_STORAGE_GET_DEVICE_NUMBER, &[], 12)
                 && number.len() >= 8
@@ -216,8 +273,12 @@ fn hub_path(hub: u32) -> Option<String> {
     let mut size = 0u32;
     // SAFETY: valid GUID and instance string; buffer sized from the first call.
     unsafe {
-        if CM_Get_Device_Interface_List_SizeW(&mut size, &GUID_DEVINTERFACE_USB_HUB, instance.as_ptr(), CM_GET_DEVICE_INTERFACE_LIST_PRESENT)
-            != 0
+        if CM_Get_Device_Interface_List_SizeW(
+            &mut size,
+            &GUID_DEVINTERFACE_USB_HUB,
+            instance.as_ptr(),
+            CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
+        ) != 0
             || size <= 1
         {
             return None;
@@ -247,11 +308,18 @@ fn usb_link(device: u32) -> Option<DiskLink> {
     // CurrentConfigurationValue(1) Speed(1) …
     let mut q = port.to_le_bytes().to_vec();
     q.resize(512, 0);
-    let ex = h.ioctl(IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX, &q, 512).ok();
+    let ex = h
+        .ioctl(IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX, &q, 512)
+        .ok();
     let speed = ex.filter(|e| e.len() > 23).map(|e| e[4 + 18 + 1]);
     // USB_NODE_CONNECTION_INFORMATION_EX_V2: ConnectionIndex Length SupportedUsbProtocols Flags
-    let q2: Vec<u8> = [port, 16, 0x7, 0].iter().flat_map(|x| x.to_le_bytes()).collect();
-    let v2 = h.ioctl(IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX_V2, &q2, 16).ok();
+    let q2: Vec<u8> = [port, 16, 0x7, 0]
+        .iter()
+        .flat_map(|x| x.to_le_bytes())
+        .collect();
+    let v2 = h
+        .ioctl(IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX_V2, &q2, 16)
+        .ok();
     let flags = v2.filter(|v| v.len() >= 16).map(|v| u32_at(&v, 12));
     usb_windows(speed, flags)
 }
@@ -274,7 +342,10 @@ fn links(inst: u32, iface: DiskInterface) -> (Option<DiskLink>, Option<DiskLink>
 
 /// DISK_PERFORMANCE: BytesRead and BytesWritten since the boot (LARGE_INTEGERs at 0 and 8).
 fn disk_io(h: &Handle, since: Option<DateTime>) -> Option<DiskIo> {
-    let perf = h.ioctl(IOCTL_DISK_PERFORMANCE, &[], 88).ok().filter(|p| p.len() >= 16)?;
+    let perf = h
+        .ioctl(IOCTL_DISK_PERFORMANCE, &[], 88)
+        .ok()
+        .filter(|p| p.len() >= 16)?;
     Some(DiskIo {
         read_bytes: u64_at(&perf, 0) as i64,
         written_bytes: u64_at(&perf, 8) as i64,
@@ -287,9 +358,14 @@ fn disk(number: u32, path: &str, inst: u32, since: Option<DateTime>) -> Option<P
     let dev = query(&h, 0, 1024, &[]).filter(|d| d.len() >= 32)?; // STORAGE_DEVICE_DESCRIPTOR
     let removable = dev[10] != 0;
     let bus = u32_at(&dev, 28);
-    let [vendor, mut model, mut firmware, mut serial] = [12, 16, 20, 24].map(|at| text_at(&dev, u32_at(&dev, at) as usize));
-    let rotational = query(&h, 7, 12, &[]).filter(|s| s.len() > 8).map(|s| s[8] != 0); // seek penalty
-    let trim = query(&h, 8, 12, &[]).filter(|s| s.len() > 8).map(|s| s[8] != 0);
+    let [vendor, mut model, mut firmware, mut serial] =
+        [12, 16, 20, 24].map(|at| text_at(&dev, u32_at(&dev, at) as usize));
+    let rotational = query(&h, 7, 12, &[])
+        .filter(|s| s.len() > 8)
+        .map(|s| s[8] != 0); // seek penalty
+    let trim = query(&h, 8, 12, &[])
+        .filter(|s| s.len() > 8)
+        .map(|s| s[8] != 0);
     let size = h
         .ioctl(IOCTL_DISK_GET_DRIVE_GEOMETRY_EX, &[], 256)
         .ok()
@@ -303,14 +379,25 @@ fn disk(number: u32, path: &str, inst: u32, since: Option<DateTime>) -> Option<P
         DiskInterface::Sata => {
             let words = protocol_data(&h, 2, 1, 0, 512, 0); // ProtocolTypeAta, AtaDataTypeIdentify
             if let Some(w) = &words {
-                link = sata_identify(u16::from_le_bytes([w[152], w[153]]), u16::from_le_bytes([w[154], w[155]]));
+                link = sata_identify(
+                    u16::from_le_bytes([w[152], w[153]]),
+                    u16::from_le_bytes([w[154], w[155]]),
+                );
             }
             // AtaDataTypeLogPage: Device Statistics
             if let Some(general) = protocol_data(&h, 2, 2, 0x04, 512, 1) {
                 let temps = protocol_data(&h, 2, 2, 0x04, 512, 5);
-                health = ata_statistics(&general, temps.as_deref(), ata_sector_size(words.as_deref().unwrap_or(&[])));
+                health = ata_statistics(
+                    &general,
+                    temps.as_deref(),
+                    ata_sector_size(words.as_deref().unwrap_or(&[])),
+                );
             }
-            note = if health.is_some() { HealthNote::None } else { HealthNote::Unsupported };
+            note = if health.is_some() {
+                HealthNote::None
+            } else {
+                HealthNote::Unsupported
+            };
         }
         DiskInterface::Nvme => {
             // ProtocolTypeNvme, Identify, CNS = controller
@@ -322,7 +409,11 @@ fn disk(number: u32, path: &str, inst: u32, since: Option<DateTime>) -> Option<P
             }
             // NVMeDataTypeLogPage, SMART / Health (02h)
             health = protocol_data(&h, 3, 2, 2, 512, 0).and_then(|log| nvme_health(&log));
-            note = if health.is_some() { HealthNote::None } else { HealthNote::Unsupported };
+            note = if health.is_some() {
+                HealthNote::None
+            } else {
+                HealthNote::Unsupported
+            };
         }
         DiskInterface::Usb => note = HealthNote::Usb,
         DiskInterface::Virtual | DiskInterface::Raid => {}
@@ -338,7 +429,11 @@ fn disk(number: u32, path: &str, inst: u32, since: Option<DateTime>) -> Option<P
     Some(PhysicalDisk {
         number: Some(number as i64),
         model: model.split_whitespace().collect::<Vec<_>>().join(" "),
-        vendor: if ["", "ata", "nvme"].contains(&vendor_l.as_str()) { String::new() } else { vendor },
+        vendor: if ["", "ata", "nvme"].contains(&vendor_l.as_str()) {
+            String::new()
+        } else {
+            vendor
+        },
         serial: serial.trim_end_matches('.').to_owned(),
         firmware,
         size: size.filter(|&s| s > 0),
@@ -349,7 +444,11 @@ fn disk(number: u32, path: &str, inst: u32, since: Option<DateTime>) -> Option<P
         link,
         controller_link: controller,
         health,
-        health_note: if size.unwrap_or(0) > 0 { note } else { HealthNote::None },
+        health_note: if size.unwrap_or(0) > 0 {
+            note
+        } else {
+            HealthNote::None
+        },
         io,
         ..new_disk(&format!("PhysicalDrive{number}"))
     })
@@ -357,7 +456,11 @@ fn disk(number: u32, path: &str, inst: u32, since: Option<DateTime>) -> Option<P
 
 /// `\\?\Volume{GUID}` of a mount point (no trailing backslash).
 pub(crate) fn volume_name(mount_point: &str) -> Option<String> {
-    let root = if mount_point.ends_with('\\') { mount_point.to_owned() } else { format!("{mount_point}\\") };
+    let root = if mount_point.ends_with('\\') {
+        mount_point.to_owned()
+    } else {
+        format!("{mount_point}\\")
+    };
     let w = wide(&root);
     let mut buf = [0u16; 64];
     // SAFETY: buffer of the given length.
@@ -369,7 +472,9 @@ pub(crate) fn volume_name(mount_point: &str) -> Option<String> {
 
 /// (disk number, starting offset, length) of a volume device's extents.
 pub(crate) fn device_extents(device: &str) -> Vec<(u32, i64, i64)> {
-    let Some(h) = open(device) else { return Vec::new() };
+    let Some(h) = open(device) else {
+        return Vec::new();
+    };
     let Ok(raw) = h.ioctl(IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS, &[], 8 + 24 * 32) else {
         return Vec::new();
     };
@@ -380,7 +485,11 @@ pub(crate) fn device_extents(device: &str) -> Vec<(u32, i64, i64)> {
     (0..count)
         .map(|i| {
             let at = 8 + i * 24; // DISK_EXTENT: DiskNumber(4) pad(4) StartingOffset(8) ExtentLength(8)
-            (u32_at(&raw, at), u64_at(&raw, at + 8) as i64, u64_at(&raw, at + 16) as i64)
+            (
+                u32_at(&raw, at),
+                u64_at(&raw, at + 8) as i64,
+                u64_at(&raw, at + 16) as i64,
+            )
         })
         .collect()
 }
@@ -400,15 +509,23 @@ pub fn probe(volumes: &[VolumeInfo], since: Option<DateTime>) -> Probe {
         if v.is_remote {
             continue; // a slot without a medium still names its disk
         }
-        let extents = volume_name(&v.mount_point).map(|n| device_extents(&n)).unwrap_or_default();
+        let extents = volume_name(&v.mount_point)
+            .map(|n| device_extents(&n))
+            .unwrap_or_default();
         if extents.is_empty() {
             continue;
         }
-        let parts = extents.iter().map(|&(n, _, len)| (format!("PhysicalDrive{n}"), Some(len).filter(|&l| l != 0))).collect();
+        let parts = extents
+            .iter()
+            .map(|&(n, _, len)| (format!("PhysicalDrive{n}"), Some(len).filter(|&l| l != 0)))
+            .collect();
         result.parts.insert(v.mount_point.clone(), parts);
         result.offsets.insert(v.mount_point.clone(), extents[0].1);
         if v.mount_point.to_lowercase() == system {
-            let on: Vec<String> = extents.iter().map(|(n, _, _)| format!("PhysicalDrive{n}")).collect();
+            let on: Vec<String> = extents
+                .iter()
+                .map(|(n, _, _)| format!("PhysicalDrive{n}"))
+                .collect();
             for d in &mut result.disks {
                 if on.contains(&d.id) {
                     d.system = true;

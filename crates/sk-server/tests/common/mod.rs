@@ -12,7 +12,7 @@ use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
 use sk_protocol::methods::Method;
 use sk_server::app::Tuning;
-use sk_server::rpc::{RpcError, Router};
+use sk_server::rpc::{Router, RpcError};
 use sk_server::{ServeOptions, ServerHandle};
 use tokio::sync::{mpsc, oneshot};
 use tokio_tungstenite::tungstenite::Message;
@@ -28,7 +28,11 @@ pub fn init() -> PathBuf {
     static LOG: Once = Once::new();
     let home = HOME
         .get_or_init(|| {
-            let dir = tempfile::Builder::new().prefix("sk-home-").tempdir().expect("temp dir").keep();
+            let dir = tempfile::Builder::new()
+                .prefix("sk-home-")
+                .tempdir()
+                .expect("temp dir")
+                .keep();
             // SAFETY: set once, before any server of this test binary starts
             unsafe {
                 std::env::set_var("SPACEKNIFE_HOME", &dir);
@@ -54,11 +58,21 @@ pub struct SleepParams {
 
 /// Start a server for a test: hello timeout 0.5 s, no update checks, the `test.sleep` method.
 pub async fn server() -> ServerHandle {
-    server_with(ServeOptions { token: TOKEN.to_owned(), ..ServeOptions::default() }, |_| {}).await
+    server_with(
+        ServeOptions {
+            token: TOKEN.to_owned(),
+            ..ServeOptions::default()
+        },
+        |_| {},
+    )
+    .await
 }
 
 /// [`server`] with other options and more routes.
-pub async fn server_with(opts: ServeOptions, routes: impl FnOnce(&mut Router) + Send + 'static) -> ServerHandle {
+pub async fn server_with(
+    opts: ServeOptions,
+    routes: impl FnOnce(&mut Router) + Send + 'static,
+) -> ServerHandle {
     init();
     let mut tuning = Tuning::for_tests();
     tuning.routes = Some(Box::new(move |r: &mut Router| {
@@ -69,14 +83,17 @@ pub async fn server_with(opts: ServeOptions, routes: impl FnOnce(&mut Router) + 
                     .with_data(json!([{"loc": [], "msg": e.to_string(), "type": "value_error"}]))
             })?;
             if !(0.0..=30.0).contains(&p.seconds) {
-                return Err(RpcError::invalid_params("invalid params").with_data(json!([{"loc": ["seconds"]}])));
+                return Err(RpcError::invalid_params("invalid params")
+                    .with_data(json!([{"loc": ["seconds"]}])));
             }
             tokio::time::sleep(Duration::from_secs_f64(p.seconds)).await;
             Ok(sk_protocol::encode_response(&call.id, &json!({})))
         });
         routes(r);
     }));
-    sk_server::start_with(opts, tuning).await.expect("server starts")
+    sk_server::start_with(opts, tuning)
+        .await
+        .expect("server starts")
 }
 
 /// An error answer.
@@ -102,7 +119,10 @@ pub struct Client {
 }
 
 pub fn all_caps() -> Vec<String> {
-    sk_protocol::ALL_CAPABILITIES.iter().map(|s| (*s).to_owned()).collect()
+    sk_protocol::ALL_CAPABILITIES
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect()
 }
 
 /// Open a raw WebSocket to `url` with the subprotocol (and an optional origin).
@@ -116,12 +136,18 @@ pub async fn raw(
 > {
     let mut req = url.into_client_request()?;
     if subprotocol {
-        req.headers_mut().insert("Sec-WebSocket-Protocol", HeaderValue::from_static(sk_protocol::SUBPROTOCOL));
+        req.headers_mut().insert(
+            "Sec-WebSocket-Protocol",
+            HeaderValue::from_static(sk_protocol::SUBPROTOCOL),
+        );
     }
     if let Some(o) = origin {
-        req.headers_mut().insert("Origin", HeaderValue::from_str(o).unwrap());
+        req.headers_mut()
+            .insert("Origin", HeaderValue::from_str(o).unwrap());
     }
-    tokio_tungstenite::connect_async(req).await.map(|(ws, _)| ws)
+    tokio_tungstenite::connect_async(req)
+        .await
+        .map(|(ws, _)| ws)
 }
 
 pub fn hello_frame(token: &str, protocol: &str, id: u64, caps: &[String]) -> String {
@@ -136,17 +162,38 @@ pub fn hello_frame(token: &str, protocol: &str, id: u64, caps: &[String]) -> Str
 
 impl Client {
     pub async fn open(url: &str) -> Client {
-        Client::open_with(url, TOKEN, all_caps(), None).await.expect("hello")
+        Client::open_with(url, TOKEN, all_caps(), None)
+            .await
+            .expect("hello")
     }
 
     pub async fn open_caps(url: &str, caps: &[&str]) -> Client {
-        Client::open_with(url, TOKEN, caps.iter().map(|s| (*s).to_owned()).collect(), None).await.expect("hello")
+        Client::open_with(
+            url,
+            TOKEN,
+            caps.iter().map(|s| (*s).to_owned()).collect(),
+            None,
+        )
+        .await
+        .expect("hello")
     }
 
-    pub async fn open_with(url: &str, token: &str, caps: Vec<String>, origin: Option<&str>) -> Result<Client, Remote> {
+    pub async fn open_with(
+        url: &str,
+        token: &str,
+        caps: Vec<String>,
+        origin: Option<&str>,
+    ) -> Result<Client, Remote> {
         let ws = raw(url, origin, true).await.expect("connect");
         let (mut sink, mut stream) = ws.split();
-        sink.send(Message::text(hello_frame(token, sk_protocol::PROTOCOL_VERSION, 0, &caps))).await.unwrap();
+        sink.send(Message::text(hello_frame(
+            token,
+            sk_protocol::PROTOCOL_VERSION,
+            0,
+            &caps,
+        )))
+        .await
+        .unwrap();
         let first = loop {
             match stream.next().await {
                 Some(Ok(Message::Text(t))) => break serde_json::from_str::<Value>(&t).unwrap(),
@@ -229,7 +276,11 @@ impl Client {
     }
 
     /// Send a request; its id.
-    pub fn send(&self, method: &str, params: Value) -> (u64, oneshot::Receiver<Result<Value, Remote>>) {
+    pub fn send(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> (u64, oneshot::Receiver<Result<Value, Remote>>) {
         let id = self.next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         self.pending.lock().unwrap().insert(id, tx);
@@ -248,7 +299,13 @@ impl Client {
         tokio::time::timeout(Duration::from_secs(60), rx)
             .await
             .unwrap_or_else(|_| panic!("{method} timed out"))
-            .unwrap_or_else(|_| Err(Remote { code: 0, message: "connection closed".into(), data: None }))
+            .unwrap_or_else(|_| {
+                Err(Remote {
+                    code: 0,
+                    message: "connection closed".into(),
+                    data: None,
+                })
+            })
     }
 
     /// A typed call.
@@ -256,7 +313,9 @@ impl Client {
     where
         M::Result: DeserializeOwned,
     {
-        let v = self.call(M::NAME, serde_json::to_value(params).unwrap()).await?;
+        let v = self
+            .call(M::NAME, serde_json::to_value(params).unwrap())
+            .await?;
         Ok(serde_json::from_value(v).unwrap_or_else(|e| panic!("{} result: {e}", M::NAME)))
     }
 
@@ -323,7 +382,9 @@ impl Client {
     }
 
     pub async fn subscribe(&self, topic: &str, params: Value) -> String {
-        let v = self.ok("$/subscribe", json!({"topic": topic, "params": params})).await;
+        let v = self
+            .ok("$/subscribe", json!({"topic": topic, "params": params}))
+            .await;
         v["sub"].as_str().unwrap().to_owned()
     }
 
@@ -353,7 +414,12 @@ pub fn sample_tree() -> tempfile::TempDir {
     let dir = tempfile::tempdir().unwrap();
     make_tree(
         dir.path(),
-        &[("a/one.txt", 10_000), ("a/two.jpg", 50_000), ("b/c/three.mp4", 200_000), ("top.bin", 1_000)],
+        &[
+            ("a/one.txt", 10_000),
+            ("a/two.jpg", 50_000),
+            ("b/c/three.mp4", 200_000),
+            ("top.bin", 1_000),
+        ],
     );
     dir
 }
@@ -361,7 +427,10 @@ pub fn sample_tree() -> tempfile::TempDir {
 /// Start a scan of `path` (in-process, one thread) and wait for it to finish; its status.
 pub async fn scan(client: &Client, path: &std::path::Path) -> Value {
     let st = client
-        .ok("scan.start", json!({"roots": [path.to_string_lossy()], "workers": 0, "auto_snapshot": false}))
+        .ok(
+            "scan.start",
+            json!({"roots": [path.to_string_lossy()], "workers": 0, "auto_snapshot": false}),
+        )
         .await;
     let id = st["scan_id"].as_str().unwrap().to_owned();
     wait_done(client, &id).await
@@ -409,7 +478,8 @@ pub fn build_tree(root: &std::path::Path) -> TreeFacts {
     ];
     files.extend((0..300).map(|i| (format!("many/f{i:03}.log"), 100 + i)));
     let extra = ["b", "b/inner"];
-    let mut dirs: std::collections::BTreeSet<String> = extra.iter().map(|s| (*s).to_owned()).collect();
+    let mut dirs: std::collections::BTreeSet<String> =
+        extra.iter().map(|s| (*s).to_owned()).collect();
     for (rel, size) in &files {
         let p = root.join(rel);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();

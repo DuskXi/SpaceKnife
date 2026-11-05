@@ -64,10 +64,17 @@ impl Subscription {
         let flag = Arc::new(SubFlag {
             id: id.clone(),
             closed: AtomicBool::new(false),
-            min_gap: rate_hz.filter(|r| *r > 0.0).map(|r| Duration::from_secs_f64(1.0 / r)),
+            min_gap: rate_hz
+                .filter(|r| *r > 0.0)
+                .map(|r| Duration::from_secs_f64(1.0 / r)),
             last: Mutex::new(None),
         });
-        Subscription { topic: topic.to_owned(), id, flag, on_close: Mutex::new(None) }
+        Subscription {
+            topic: topic.to_owned(),
+            id,
+            flag,
+            on_close: Mutex::new(None),
+        }
     }
 
     pub fn on_close(&self, f: impl FnOnce() + Send + 'static) {
@@ -83,8 +90,9 @@ impl Subscription {
     }
 }
 
-pub type TopicFactory =
-    Arc<dyn Fn(&Arc<Server>, &Arc<Session>, &SubscribeParams) -> RpcResult<Subscription> + Send + Sync>;
+pub type TopicFactory = Arc<
+    dyn Fn(&Arc<Server>, &Arc<Session>, &SubscribeParams) -> RpcResult<Subscription> + Send + Sync,
+>;
 
 #[derive(Default, Clone)]
 pub struct TopicRegistry {
@@ -95,16 +103,27 @@ impl TopicRegistry {
     pub fn register(
         &mut self,
         name: &str,
-        f: impl Fn(&Arc<Server>, &Arc<Session>, &SubscribeParams) -> RpcResult<Subscription> + Send + Sync + 'static,
+        f: impl Fn(&Arc<Server>, &Arc<Session>, &SubscribeParams) -> RpcResult<Subscription>
+        + Send
+        + Sync
+        + 'static,
     ) {
         self.factories.insert(name.to_owned(), Arc::new(f));
     }
 
-    pub fn open(&self, server: &Arc<Server>, session: &Arc<Session>, params: &SubscribeParams) -> RpcResult<Subscription> {
+    pub fn open(
+        &self,
+        server: &Arc<Server>,
+        session: &Arc<Session>,
+        params: &SubscribeParams,
+    ) -> RpcResult<Subscription> {
         match self.factories.get(&params.topic) {
             Some(f) => f(server, session, params),
-            None => Err(RpcError::new(ErrorCode::UnknownTopic, format!("unknown topic: {}", params.topic))
-                .with_data(serde_json::json!({ "topics": self.names() }))),
+            None => Err(RpcError::new(
+                ErrorCode::UnknownTopic,
+                format!("unknown topic: {}", params.topic),
+            )
+            .with_data(serde_json::json!({ "topics": self.names() }))),
         }
     }
 
@@ -117,19 +136,26 @@ impl TopicRegistry {
 
 /// `log` topic: replays a backlog, then streams new records at or above `min_level`. Records
 /// arrive on the logging thread and only go into the session's queue there.
-pub fn open_log(bus: Arc<LogBus>, session: &Arc<Session>, params: &SubscribeParams) -> RpcResult<Subscription> {
-    let opts: LogTopicParams = params.topic_params().map_err(|e| RpcError::from_params(&e, "invalid log topic params"))?;
+pub fn open_log(
+    bus: Arc<LogBus>,
+    session: &Arc<Session>,
+    params: &SubscribeParams,
+) -> RpcResult<Subscription> {
+    let opts: LogTopicParams = params
+        .topic_params()
+        .map_err(|e| RpcError::from_params(&e, "invalid log topic params"))?;
     let sub = Subscription::new(TOPIC_LOG, None);
     let flag = sub.flag.clone();
     let weak = Arc::downgrade(session);
-    let (backlog, token) = bus.subscribe_with_backlog(opts.backlog as usize, opts.min_level, move |entry| {
-        if flag.closed() {
-            return;
-        }
-        if let Some(s) = weak.upgrade() {
-            s.emit::<LogRecord>(&entry.to_event(&flag.id));
-        }
-    });
+    let (backlog, token) =
+        bus.subscribe_with_backlog(opts.backlog as usize, opts.min_level, move |entry| {
+            if flag.closed() {
+                return;
+            }
+            if let Some(s) = weak.upgrade() {
+                s.emit::<LogRecord>(&entry.to_event(&flag.id));
+            }
+        });
     for e in backlog {
         session.emit::<LogRecord>(&e.to_event(&sub.id));
     }

@@ -17,18 +17,21 @@ use sk_core::events::{self, EventLevel, Source};
 use sk_core::helper::{HelperClient, LaunchOptions, MftOptions, Phase, SharedHelper};
 use sk_core::io::{IoGovernor, IoRegistry, Level, RegistryOptions};
 use sk_core::scan::mft::{MftBuild, table_to_store};
-use sk_core::scan::{RootInfo, ScanOptions, ScanProgress, ScanState, Scanner, native_threads, normalise_root};
+use sk_core::scan::{
+    RootInfo, ScanOptions, ScanProgress, ScanState, Scanner, native_threads, normalise_root,
+};
 use sk_core::settings::SettingsStore;
+use sk_core::summary::Walk;
 use sk_core::view::{TagStore, ViewContext};
 use sk_core::volume::VolumeInfo;
 use sk_core::{paths, tr};
 use sk_protocol::ErrorCode;
 use sk_protocol::methods::ScanProgress as ScanProgressEvent_;
 use sk_protocol::scan::{
-    self as p, NodeInfo, NodeKindName, ScanMethod, ScanMethodUsed, ScanSource, ScanStartParams, ScanStatus,
+    self as p, NodeInfo, NodeKindName, ScanMethod, ScanMethodUsed, ScanSource, ScanStartParams,
+    ScanStatus,
 };
 use sk_store::snapshot::{self, SaveOptions, SnapshotHeader};
-use sk_core::summary::Walk;
 use sk_store::subtree::Summary;
 use sk_store::{Flags, Kind, NodeId, Nodes, Store};
 
@@ -102,15 +105,19 @@ type SummaryKey = (NodeId, u64, usize, usize, u64);
 
 impl std::fmt::Debug for ScanHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ScanHandle").field("id", &self.id).finish_non_exhaustive()
+        f.debug_struct("ScanHandle")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
     }
 }
 
 /// The tags file of a scan's roots (setting 「记住标签」).
 pub fn tags_file(settings: &SettingsStore, roots: &[String]) -> Option<PathBuf> {
-    settings
-        .get_bool("tags.remember")
-        .then(|| paths::data_dir().join("tags").join(format!("{}.json", snapshot::root_key(roots))))
+    settings.get_bool("tags.remember").then(|| {
+        paths::data_dir()
+            .join("tags")
+            .join(format!("{}.json", snapshot::root_key(roots)))
+    })
 }
 
 fn view_roots(roots: &[RootInfo]) -> Vec<sk_core::view::RootInfo> {
@@ -137,7 +144,10 @@ impl ScanHandle {
         governor: Option<Arc<IoGovernor>>,
         method: ScanMethodUsed,
     ) -> ScanHandle {
-        let paths_: Vec<String> = roots.iter().map(|r| r.path.to_string_lossy().into_owned()).collect();
+        let paths_: Vec<String> = roots
+            .iter()
+            .map(|r| r.path.to_string_lossy().into_owned())
+            .collect();
         let tags = TagStore::new(tags_file(settings, &paths_));
         let folder_classes = Arc::new(sk_core::pathclass::FolderClasses::new());
         let basis = sk_core::layout::Basis::default().with_folder_classes(folder_classes.clone());
@@ -182,7 +192,11 @@ impl ScanHandle {
     }
 
     pub fn root_paths(&self) -> Vec<String> {
-        self.roots.read().iter().map(|r| r.path.to_string_lossy().into_owned()).collect()
+        self.roots
+            .read()
+            .iter()
+            .map(|r| r.path.to_string_lossy().into_owned())
+            .collect()
     }
 
     pub fn progress(&self) -> ScanProgress {
@@ -195,7 +209,10 @@ impl ScanHandle {
 
     /// (share done, seconds left) of a running MFT scan, from how much of the $MFT was read.
     fn mft_progress(st: &HandleState) -> Option<(f64, Option<f64>)> {
-        if st.method != ScanMethodUsed::Mft || !st.running || !matches!(st.phase.as_str(), "mft" | "receive" | "build") {
+        if st.method != ScanMethodUsed::Mft
+            || !st.running
+            || !matches!(st.phase.as_str(), "mft" | "receive" | "build")
+        {
             return None;
         }
         let done = if st.phase == "mft" {
@@ -253,7 +270,11 @@ impl ScanHandle {
                 status.remaining_s = left;
             }
             status.snapshot = st.snapshot_path.clone();
-            status.method = if self.source == ScanSource::Snapshot { ScanMethodUsed::Snapshot } else { st.method };
+            status.method = if self.source == ScanSource::Snapshot {
+                ScanMethodUsed::Snapshot
+            } else {
+                st.method
+            };
             status.phase = st.phase.clone();
             status.fallback = st.fallback.clone();
             if let Some(g) = &self.governor
@@ -262,10 +283,21 @@ impl ScanHandle {
                 status.io = Some(g.status(true));
             }
         }
-        let whole: Vec<&RootInfo> = roots.iter().filter(|r| r.whole_volume && r.volume.is_some()).collect();
+        let whole: Vec<&RootInfo> = roots
+            .iter()
+            .filter(|r| r.whole_volume && r.volume.is_some())
+            .collect();
         if !whole.is_empty() && whole.len() == roots.len() {
-            let free: i64 = whole.iter().filter_map(|r| r.volume.as_ref()).map(|v| v.free).sum();
-            let used: i64 = whole.iter().filter_map(|r| r.volume.as_ref()).map(VolumeInfo::used).sum();
+            let free: i64 = whole
+                .iter()
+                .filter_map(|r| r.volume.as_ref())
+                .map(|v| v.free)
+                .sum();
+            let used: i64 = whole
+                .iter()
+                .filter_map(|r| r.volume.as_ref())
+                .map(VolumeInfo::used)
+                .sum();
             let scanned = self.store.read().tot_alloc(0);
             status.free = Some(free);
             status.unknown = Some((used - scanned).max(0));
@@ -276,7 +308,12 @@ impl ScanHandle {
 
     /// Tell the listeners (the `scan` topic, the views) the current status.
     pub fn publish(&self, server: &Server) {
-        let listeners: Vec<StatusListener> = self.listeners.lock().iter().map(|(_, l)| l.clone()).collect();
+        let listeners: Vec<StatusListener> = self
+            .listeners
+            .lock()
+            .iter()
+            .map(|(_, l)| l.clone())
+            .collect();
         if listeners.is_empty() {
             return;
         }
@@ -312,7 +349,10 @@ impl ScanHandle {
     /// The node exists.
     pub fn check_node(&self, node: NodeId) -> RpcResult<()> {
         if (node as usize) >= self.store.len() {
-            return Err(RpcError::new(ErrorCode::UnknownNode, format!("node {node} does not exist in {}", self.id)));
+            return Err(RpcError::new(
+                ErrorCode::UnknownNode,
+                format!("node {node} does not exist in {}", self.id),
+            ));
         }
         Ok(())
     }
@@ -333,11 +373,14 @@ impl ScanHandle {
         let mut g = self.summaries.lock();
         let nodes = self.store.read();
         let map = self.ctx.basis.class_map();
-        let key: SummaryKey =
-            (node, nodes.version(), nodes.len(), Arc::as_ptr(&map) as usize, sk_core::pathclass::folders_version());
-        if cache
-            && let Some(i) = g.iter().position(|(k, t, _)| *k == key && *t >= top)
-        {
+        let key: SummaryKey = (
+            node,
+            nodes.version(),
+            nodes.len(),
+            Arc::as_ptr(&map) as usize,
+            sk_core::pathclass::folders_version(),
+        );
+        if cache && let Some(i) = g.iter().position(|(k, t, _)| *k == key && *t >= top) {
             let hit = g.remove(i);
             let s = hit.2.clone();
             g.push(hit);
@@ -381,7 +424,11 @@ fn flag_names(flags: Flags) -> Vec<String> {
         (Flags::ADS, "ads"),
         (Flags::GONE, "gone"),
     ];
-    NAMES.iter().filter(|(f, _)| flags.contains(*f)).map(|(_, n)| (*n).to_owned()).collect()
+    NAMES
+        .iter()
+        .filter(|(f, _)| flags.contains(*f))
+        .map(|(_, n)| (*n).to_owned())
+        .collect()
 }
 
 /// `NodeInfo` of a node.
@@ -402,8 +449,16 @@ pub fn node_info(nodes: &Nodes, node: NodeId) -> NodeInfo {
         depth: i64::from(nodes.depth(node)),
         size,
         alloc,
-        files: if is_dir { nodes.tot_files(node) as i64 } else { 0 },
-        dirs: if is_dir { nodes.tot_dirs(node) as i64 } else { 0 },
+        files: if is_dir {
+            nodes.tot_files(node) as i64
+        } else {
+            0
+        },
+        dirs: if is_dir {
+            nodes.tot_dirs(node) as i64
+        } else {
+            0
+        },
         child_count: i64::from(nodes.child_count(node)),
         mtime: i64::from(nodes.mtime(node)),
         ctime: i64::from(nodes.ctime(node)),
@@ -441,7 +496,10 @@ pub struct ScanManager {
 impl ScanManager {
     pub fn new(_config: &Config, settings: &Arc<SettingsStore>) -> ScanManager {
         // the governor counts in folders listed at once (the walker's gate), up to its widest width
-        let opts = RegistryOptions { max_workers: sk_core::scan::listing_max(), ..RegistryOptions::default() };
+        let opts = RegistryOptions {
+            max_workers: sk_core::scan::listing_max(),
+            ..RegistryOptions::default()
+        };
         let (io_ready, _) = tokio::sync::watch::channel(false);
         ScanManager {
             scans: Mutex::new(HashMap::new()),
@@ -469,7 +527,11 @@ impl ScanManager {
 
     pub fn list(&self) -> Vec<Arc<ScanHandle>> {
         let scans = self.scans.lock();
-        self.order.lock().iter().filter_map(|id| scans.get(id).cloned()).collect()
+        self.order
+            .lock()
+            .iter()
+            .filter_map(|id| scans.get(id).cloned())
+            .collect()
     }
 
     pub fn lookup(&self, id: &str) -> Option<Arc<ScanHandle>> {
@@ -477,7 +539,8 @@ impl ScanManager {
     }
 
     pub fn get(&self, id: &str) -> RpcResult<Arc<ScanHandle>> {
-        self.lookup(id).ok_or_else(|| RpcError::new(ErrorCode::UnknownScan, format!("unknown scan: {id}")))
+        self.lookup(id)
+            .ok_or_else(|| RpcError::new(ErrorCode::UnknownScan, format!("unknown scan: {id}")))
     }
 
     fn insert(&self, h: Arc<ScanHandle>) {
@@ -500,7 +563,11 @@ impl ScanManager {
             let oldest = all
                 .iter()
                 .filter(|h| !h.running() && !server.views.has_views(&h.id))
-                .min_by_key(|h| h.progress().finished_at.map_or(i64::MAX, |t| t.timestamp_millis()))
+                .min_by_key(|h| {
+                    h.progress()
+                        .finished_at
+                        .map_or(i64::MAX, |t| t.timestamp_millis())
+                })
                 .cloned();
             let Some(oldest) = oldest else {
                 return Err(RpcError::new(
@@ -517,15 +584,23 @@ impl ScanManager {
 
     // ------------------------------------------------------------------ scans
 
-    pub async fn start(&self, server: &Arc<Server>, params: ScanStartParams) -> RpcResult<Arc<ScanHandle>> {
+    pub async fn start(
+        &self,
+        server: &Arc<Server>,
+        params: ScanStartParams,
+    ) -> RpcResult<Arc<ScanHandle>> {
         self.make_room(server)?;
         let st = self.settings.clone();
         let mut workers = params.workers;
         if workers.is_none() && st.get_str("scan.concurrency") == "manual" {
             workers = Some(st.get_int("scan.workers").max(0) as u32);
         }
-        let cross = params.cross_mounts.unwrap_or_else(|| st.get_bool("scan.cross_mounts"));
-        let auto = params.auto_snapshot.unwrap_or_else(|| st.get_bool("advanced.auto_snapshot"));
+        let cross = params
+            .cross_mounts
+            .unwrap_or_else(|| st.get_bool("scan.cross_mounts"));
+        let auto = params
+            .auto_snapshot
+            .unwrap_or_else(|| st.get_bool("advanced.auto_snapshot"));
         let manual = workers.is_some_and(|w| w > 0);
         let threads = native_threads();
         let (gated, concurrency) = match workers {
@@ -535,7 +610,8 @@ impl ScanManager {
         };
         let links_each = st.get_str("scan.hardlinks") == "each";
         let skip_protected = params.skip_protected.unwrap_or_else(|| {
-            st.get_str("scan.protected_places") == "skip" && sk_core::privacy::full_disk_access(None) == Some(false)
+            st.get_str("scan.protected_places") == "skip"
+                && sk_core::privacy::full_disk_access(None) == Some(false)
         });
         // a scan right after the backend started waits a moment for disk sampling
         if gated && self.io_starting.load(Ordering::SeqCst) && !*self.io_ready.borrow() {
@@ -550,13 +626,20 @@ impl ScanManager {
                 .load_level
                 .or_else(|| Level::from_str(&st.get_str("scan.load_manual")))
                 .unwrap_or(Level::Balanced);
-            let custom = params.load_custom.map(f64::from).or_else(|| Some(st.get_int("scan.custom_limit") as f64));
+            let custom = params
+                .load_custom
+                .map(f64::from)
+                .or_else(|| Some(st.get_int("scan.custom_limit") as f64));
             // in folders listed at once (the walker's gate, docs/native.md 4.2), up to its widest width
             let most = sk_core::scan::listing_max();
             gov.set_max_workers(most);
             gov.set_level(level, custom);
             gov.set_yield_when_busy(st.get_bool("scan.yield_when_busy"));
-            gov.set_manual_concurrency(workers.filter(|_| manual).map(|w| (w as usize).clamp(1, most)));
+            gov.set_manual_concurrency(
+                workers
+                    .filter(|_| manual)
+                    .map(|w| (w as usize).clamp(1, most)),
+            );
             Some(gov)
         } else {
             None
@@ -565,8 +648,14 @@ impl ScanManager {
             concurrency,
             cross_mounts: cross,
             count_links_each: links_each,
-            protect: if skip_protected { sk_core::privacy::protected_folders(None) } else { Vec::new() },
-            gate: governor.clone().map(|g| Arc::new(g) as Arc<dyn sk_core::scan::IoGate>),
+            protect: if skip_protected {
+                sk_core::privacy::protected_folders(None)
+            } else {
+                Vec::new()
+            },
+            gate: governor
+                .clone()
+                .map(|g| Arc::new(g) as Arc<dyn sk_core::scan::IoGate>),
             ..ScanOptions::default()
         };
         let roots_in = params.roots.clone();
@@ -579,7 +668,10 @@ impl ScanManager {
             // the expected total (progress by items, room reserved up front) and the media probes
             // (they may block: warm their cache before status() needs them)
             let sc = scanner.clone();
-            let paths_: Vec<String> = roots.iter().map(|r| r.path.to_string_lossy().into_owned()).collect();
+            let paths_: Vec<String> = roots
+                .iter()
+                .map(|r| r.path.to_string_lossy().into_owned())
+                .collect();
             let vols: Vec<VolumeInfo> = roots.iter().filter_map(|r| r.volume.clone()).collect();
             crate::compute::blocking(move || {
                 sc.set_expected_items(last_item_count(&paths_));
@@ -619,13 +711,21 @@ impl ScanManager {
             .name(format!("scan-{}", handle.id))
             .spawn(move || run_scan(&srv, &h))
             .map_err(|e| RpcError::new(ErrorCode::ScanFailed, e.to_string()))?;
-        tracing::info!("scan {} started: {}", handle.id, handle.root_paths().join(", "));
+        tracing::info!(
+            "scan {} started: {}",
+            handle.id,
+            handle.root_paths().join(", ")
+        );
         Ok(handle)
     }
 
     /// An MFT scan needs no administrator prompt: rights already, or a live elevated helper.
     pub fn mft_ready(&self) -> bool {
-        sk_core::helper::is_elevated() || self.helper.current().is_some_and(|c| c.alive() && c.elevated())
+        sk_core::helper::is_elevated()
+            || self
+                .helper
+                .current()
+                .is_some_and(|c| c.alive() && c.elevated())
     }
 
     fn mft_wanted(&self, h: &ScanHandle) -> bool {
@@ -669,7 +769,9 @@ impl ScanManager {
     pub fn use_mft(&self, server: &Arc<Server>, id: &str) -> RpcResult<Arc<ScanHandle>> {
         let h = self.get(id)?;
         if !h.mft_ok {
-            return Err(RpcError::invalid_request(tr!("只有整个本地 NTFS 卷能用 MFT 快速扫描")));
+            return Err(RpcError::invalid_request(tr!(
+                "只有整个本地 NTFS 卷能用 MFT 快速扫描"
+            )));
         }
         {
             let mut st = h.st.lock();
@@ -689,7 +791,10 @@ impl ScanManager {
                     hh.st.lock().fallback = tr!("{reason}，继续硬扫描", reason = e.message.clone());
                     events::emit(
                         Source::Scan,
-                        &tr!("未能启用 MFT 快速扫描：{reason}；继续硬扫描", reason = e.message),
+                        &tr!(
+                            "未能启用 MFT 快速扫描：{reason}；继续硬扫描",
+                            reason = e.message
+                        ),
                         EventLevel::Warning,
                         Some(&hh.id),
                         None,
@@ -698,7 +803,10 @@ impl ScanManager {
                 Ok(client) => {
                     let mut st = hh.st.lock();
                     let scanner = hh.scanner.as_ref();
-                    if st.running && st.method == ScanMethodUsed::Hard && scanner.is_some_and(|s| !s.cancelled()) {
+                    if st.running
+                        && st.method == ScanMethodUsed::Hard
+                        && scanner.is_some_and(|s| !s.cancelled())
+                    {
                         st.upgrade = Some(client);
                         drop(st);
                         if let Some(s) = scanner {
@@ -755,7 +863,11 @@ impl ScanManager {
         Ok(h)
     }
 
-    pub fn set_load(&self, server: &Server, params: &p::ScanSetLoadParams) -> RpcResult<Arc<ScanHandle>> {
+    pub fn set_load(
+        &self,
+        server: &Server,
+        params: &p::ScanSetLoadParams,
+    ) -> RpcResult<Arc<ScanHandle>> {
         let h = self.get(&params.scan_id)?;
         let Some(gov) = &h.governor else {
             return Err(RpcError::invalid_request(tr!("这次扫描没有磁盘负载控制")));
@@ -810,16 +922,34 @@ impl ScanManager {
 
     // ------------------------------------------------------------------ snapshots
 
-    pub async fn save_snapshot(&self, id: &str, target: Option<String>) -> RpcResult<p::SnapshotInfo> {
+    pub async fn save_snapshot(
+        &self,
+        id: &str,
+        target: Option<String>,
+    ) -> RpcResult<p::SnapshotInfo> {
         let h = self.get(id)?;
         if h.running() {
-            return Err(RpcError::new(ErrorCode::ScanBusy, tr!("扫描完成（或停止）后才能保存快照")));
+            return Err(RpcError::new(
+                ErrorCode::ScanBusy,
+                tr!("扫描完成（或停止）后才能保存快照"),
+            ));
         }
-        let path = target.map(PathBuf::from).unwrap_or_else(|| auto_path(&h.root_paths()));
+        let path = target
+            .map(PathBuf::from)
+            .unwrap_or_else(|| auto_path(&h.root_paths()));
         let (hh, pp) = (h.clone(), path.clone());
-        let header = crate::compute::blocking(move || save(&hh, &pp)).await?.map_err(|e| {
-            RpcError::new(ErrorCode::SnapshotError, tr!("写不了 {path}：{reason}", path = path.display().to_string(), reason = e))
-        })?;
+        let header = crate::compute::blocking(move || save(&hh, &pp))
+            .await?
+            .map_err(|e| {
+                RpcError::new(
+                    ErrorCode::SnapshotError,
+                    tr!(
+                        "写不了 {path}：{reason}",
+                        path = path.display().to_string(),
+                        reason = e
+                    ),
+                )
+            })?;
         h.st.lock().snapshot_path = Some(path.display().to_string());
         events::emit(
             Source::Snapshot,
@@ -831,13 +961,26 @@ impl ScanManager {
         Ok(snapshot_info(&path, &header))
     }
 
-    pub async fn load_snapshot(&self, server: &Arc<Server>, target: &str) -> RpcResult<Arc<ScanHandle>> {
+    pub async fn load_snapshot(
+        &self,
+        server: &Arc<Server>,
+        target: &str,
+    ) -> RpcResult<Arc<ScanHandle>> {
         self.make_room(server)?;
         let path = PathBuf::from(target);
         let pp = path.clone();
-        let (store, header) = crate::compute::blocking(move || snapshot::load(&pp)).await?.map_err(|e| {
-            RpcError::new(ErrorCode::SnapshotError, tr!("打不开快照 {path}：{error}", path = target, error = e.to_string()))
-        })?;
+        let (store, header) = crate::compute::blocking(move || snapshot::load(&pp))
+            .await?
+            .map_err(|e| {
+                RpcError::new(
+                    ErrorCode::SnapshotError,
+                    tr!(
+                        "打不开快照 {path}：{error}",
+                        path = target,
+                        error = e.to_string()
+                    ),
+                )
+            })?;
         let stats = &header.stats;
         let root_meta: HashMap<String, bool> = stats
             .get("roots")
@@ -845,7 +988,12 @@ impl ScanManager {
             .map(|a| {
                 a.iter()
                     .filter_map(|m| {
-                        Some((m.get("path")?.as_str()?.to_owned(), m.get("whole_volume").and_then(|w| w.as_bool()).unwrap_or(false)))
+                        Some((
+                            m.get("path")?.as_str()?.to_owned(),
+                            m.get("whole_volume")
+                                .and_then(|w| w.as_bool())
+                                .unwrap_or(false),
+                        ))
                     })
                     .collect()
             })
@@ -886,7 +1034,10 @@ impl ScanManager {
                 errors: stats.get("errors").and_then(|v| v.as_i64()).unwrap_or(0),
                 pending_dirs: 0,
                 current_path: String::new(),
-                elapsed_s: stats.get("elapsed_s").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                elapsed_s: stats
+                    .get("elapsed_s")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0),
                 rate: 0.0,
                 progress: (state == ScanState::Done).then_some(1.0),
                 started_at: parse("started_at"),
@@ -894,7 +1045,11 @@ impl ScanManager {
                 denied: stats
                     .get("denied")
                     .and_then(|v| v.as_array())
-                    .map(|a| a.iter().filter_map(|d| d.as_str().map(str::to_owned)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|d| d.as_str().map(str::to_owned))
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 message: String::new(),
                 byte_rate: 0.0,
@@ -908,14 +1063,27 @@ impl ScanManager {
             Some(p::TreeMethod::Mft) => ScanMethodUsed::Mft,
             _ => ScanMethodUsed::Hard,
         };
-        let h = ScanHandle::new(&self.settings, store, roots, ScanSource::Snapshot, None, Some(saved), None, method);
+        let h = ScanHandle::new(
+            &self.settings,
+            store,
+            roots,
+            ScanSource::Snapshot,
+            None,
+            Some(saved),
+            None,
+            method,
+        );
         h.st.lock().snapshot_path = Some(target.to_owned());
         let h = Arc::new(h);
         self.insert(h.clone());
         tracing::info!("opened snapshot {target} as {}", h.id);
         events::emit(
             Source::Snapshot,
-            &tr!("已打开快照 {path}（{count} 项）", path = target, count = sk_core::fmt::count(header.node_count as i64 - 1)),
+            &tr!(
+                "已打开快照 {path}（{count} 项）",
+                path = target,
+                count = sk_core::fmt::count(header.node_count as i64 - 1)
+            ),
             EventLevel::Info,
             Some(&h.id),
             None,
@@ -930,7 +1098,10 @@ fn mft_eligible(roots: &[RootInfo]) -> bool {
         return false;
     }
     let r = &roots[0];
-    r.whole_volume && r.volume.as_ref().is_some_and(|v| !v.is_remote && v.fs_type.eq_ignore_ascii_case("NTFS"))
+    r.whole_volume
+        && r.volume
+            .as_ref()
+            .is_some_and(|v| !v.is_remote && v.fs_type.eq_ignore_ascii_case("NTFS"))
 }
 
 /// The auto-snapshot file of `roots` now.
@@ -940,7 +1111,11 @@ pub fn auto_path(roots: &[String]) -> PathBuf {
 
 fn stats_of(h: &ScanHandle) -> serde_json::Map<String, serde_json::Value> {
     let pr = h.progress();
-    let method = if h.st.lock().method == ScanMethodUsed::Mft { "mft" } else { "hard" };
+    let method = if h.st.lock().method == ScanMethodUsed::Mft {
+        "mft"
+    } else {
+        "hard"
+    };
     let v = serde_json::json!({
         "items": pr.items,
         "files": pr.files,
@@ -968,10 +1143,17 @@ fn stats_of(h: &ScanHandle) -> serde_json::Map<String, serde_json::Value> {
 pub fn save(h: &ScanHandle, path: &Path) -> Result<SnapshotHeader, String> {
     let roots = h.roots.read().clone();
     let opts = SaveOptions {
-        roots: roots.iter().map(|r| r.path.to_string_lossy().into_owned()).collect(),
+        roots: roots
+            .iter()
+            .map(|r| r.path.to_string_lossy().into_owned())
+            .collect(),
         volumes: roots
             .iter()
-            .map(|r| r.volume.as_ref().map_or(serde_json::json!({}), crate::util::volume_to_json))
+            .map(|r| {
+                r.volume
+                    .as_ref()
+                    .map_or(serde_json::json!({}), crate::util::volume_to_json)
+            })
             .collect(),
         stats: stats_of(h),
         // the CPUs this process may use (affinity, cgroup quota), not the machine's
@@ -990,7 +1172,11 @@ pub fn save(h: &ScanHandle, path: &Path) -> Result<SnapshotHeader, String> {
 
 /// State a snapshot was saved in; snapshots that lack it were finished scans.
 pub fn saved_state(stats: &serde_json::Map<String, serde_json::Value>) -> ScanState {
-    let state = stats.get("state").and_then(|v| v.as_str()).and_then(ScanState::from_str).unwrap_or(ScanState::Done);
+    let state = stats
+        .get("state")
+        .and_then(|v| v.as_str())
+        .and_then(ScanState::from_str)
+        .unwrap_or(ScanState::Done);
     match state {
         ScanState::Queued | ScanState::Scanning => ScanState::Cancelled,
         s => s,
@@ -998,7 +1184,10 @@ pub fn saved_state(stats: &serde_json::Map<String, serde_json::Value>) -> ScanSt
 }
 
 pub fn saved_method(stats: &serde_json::Map<String, serde_json::Value>) -> Option<p::TreeMethod> {
-    stats.get("method").and_then(|v| v.as_str()).and_then(p::TreeMethod::from_str)
+    stats
+        .get("method")
+        .and_then(|v| v.as_str())
+        .and_then(p::TreeMethod::from_str)
 }
 
 /// Items of the newest complete snapshot of these roots: the expected total of a new scan.
@@ -1012,7 +1201,9 @@ pub fn last_item_count(roots: &[String]) -> Option<i64> {
     found.sort();
     found.reverse();
     for file in found {
-        let Ok(header) = snapshot::read_header(&file) else { continue };
+        let Ok(header) = snapshot::read_header(&file) else {
+            continue;
+        };
         if saved_state(&header.stats) == ScanState::Done {
             return Some((header.node_count as i64 - 1).max(0));
         }
@@ -1024,11 +1215,20 @@ pub fn snapshot_info(path: &Path, header: &SnapshotHeader) -> p::SnapshotInfo {
     let size = std::fs::metadata(path).map_or(0, |m| m.len() as i64);
     p::SnapshotInfo {
         path: path.display().to_string(),
-        created_at: chrono::DateTime::from_timestamp(header.created_at as i64, 0).unwrap_or_default(),
+        created_at: chrono::DateTime::from_timestamp(header.created_at as i64, 0)
+            .unwrap_or_default(),
         roots: header.roots.clone(),
         node_count: header.node_count as i64,
-        bytes_alloc: header.stats.get("bytes_alloc").and_then(|v| v.as_i64()).unwrap_or(0),
-        files: header.stats.get("files").and_then(|v| v.as_i64()).unwrap_or(0),
+        bytes_alloc: header
+            .stats
+            .get("bytes_alloc")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
+        files: header
+            .stats
+            .get("files")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0),
         file_bytes: size,
         method: saved_method(&header.stats),
     }
@@ -1057,7 +1257,9 @@ fn spawn_ticker(server: &Arc<Server>, h: &Arc<ScanHandle>) {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
-            let (Some(srv), Some(h)) = (weak_srv.upgrade(), weak_h.upgrade()) else { return };
+            let (Some(srv), Some(h)) = (weak_srv.upgrade(), weak_h.upgrade()) else {
+                return;
+            };
             if !h.running() {
                 return;
             }
@@ -1150,7 +1352,11 @@ fn run_mft(server: &Arc<Server>, h: &Arc<ScanHandle>, client: Option<Arc<HelperC
     };
     let client = match client {
         Some(c) => c,
-        None => match server.scans.helper.get(server.settings.get_bool("scan.elevate")) {
+        None => match server
+            .scans
+            .helper
+            .get(server.settings.get_bool("scan.elevate"))
+        {
             Ok(c) => c,
             Err(e) => {
                 clear();
@@ -1176,14 +1382,26 @@ fn run_mft(server: &Arc<Server>, h: &Arc<ScanHandle>, client: Option<Arc<HelperC
     let hh = h.clone();
     let mut progress = move |phase: Phase, elapsed: f64, read: Option<f64>| {
         let mut st = hh.st.lock();
-        st.phase = if phase == Phase::Send { "receive" } else { "mft" }.into();
+        st.phase = if phase == Phase::Send {
+            "receive"
+        } else {
+            "mft"
+        }
+        .into();
         st.mft_elapsed = elapsed;
         st.mft_at = Instant::now();
         if read.is_some() {
             st.mft_read = read;
         }
     };
-    let table = client.scan_mft(&volume, MftOptions { duty, ..MftOptions::default() }, Some(&mut progress));
+    let table = client.scan_mft(
+        &volume,
+        MftOptions {
+            duty,
+            ..MftOptions::default()
+        },
+        Some(&mut progress),
+    );
     let table = match table {
         Ok(t) => t,
         Err(e) => {
@@ -1241,14 +1459,24 @@ fn run_hard(server: &Arc<Server>, h: &Arc<ScanHandle>, again: bool) {
         tr!("开始扫描 {paths}（硬扫描）", paths = listed)
     };
     let first = roots.first().map(|r| r.path.to_string_lossy().into_owned());
-    events::emit(Source::Scan, &started, EventLevel::Info, Some(&h.id), first.as_deref());
+    events::emit(
+        Source::Scan,
+        &started,
+        EventLevel::Info,
+        Some(&h.id),
+        first.as_deref(),
+    );
     for r in &roots {
         if let Some(v) = &r.volume
             && !v.note.is_empty()
         {
             events::emit(
                 Source::Scan,
-                &tr!("{path}：{note}", path = r.path.display().to_string(), note = v.note.clone()),
+                &tr!(
+                    "{path}：{note}",
+                    path = r.path.display().to_string(),
+                    note = v.note.clone()
+                ),
                 EventLevel::Warning,
                 Some(&h.id),
                 None,
@@ -1264,10 +1492,16 @@ fn run_hard(server: &Arc<Server>, h: &Arc<ScanHandle>, again: bool) {
         if denied.len() > reported {
             let reasons = scanner.denied_reasons();
             for (i, path) in denied.iter().enumerate().skip(reported) {
-                let reason = reasons.get(i).map_or_else(|| tr!("拒绝访问"), |r| events::denied_reason(r));
+                let reason = reasons
+                    .get(i)
+                    .map_or_else(|| tr!("拒绝访问"), |r| events::denied_reason(r));
                 events::emit(
                     Source::Perm,
-                    &tr!("无法访问 {path}：{reason}，已计入未知空间", path = path.clone(), reason = reason),
+                    &tr!(
+                        "无法访问 {path}：{reason}，已计入未知空间",
+                        path = path.clone(),
+                        reason = reason
+                    ),
                     EventLevel::Warning,
                     Some(&h.id),
                     Some(path),
@@ -1279,7 +1513,11 @@ fn run_hard(server: &Arc<Server>, h: &Arc<ScanHandle>, again: bool) {
     scanner.run(Some(&mut progressed), TICK);
     let upgrade = {
         let mut st = h.st.lock();
-        if scanner.state() == ScanState::Cancelled { st.upgrade.take() } else { None }
+        if scanner.state() == ScanState::Cancelled {
+            st.upgrade.take()
+        } else {
+            None
+        }
     };
     if let Some(client) = upgrade {
         scanner.uncancel(); // that cancel was ours: a user's stop from now on counts again
@@ -1302,14 +1540,21 @@ fn finish(server: &Arc<Server>, h: &Arc<ScanHandle>, reported: Option<usize>) {
     server.monitors.kick(&h.id); // the last folders of the scan get their watches now
     // nothing is added any more: give back the growth headroom
     let freed = h.store.appender().compact();
-    tracing::debug!("scan {}: compacted the node store, {:.0} MB freed", h.id, freed as f64 / 1048576.0);
+    tracing::debug!(
+        "scan {}: compacted the node store, {:.0} MB freed",
+        h.id,
+        freed as f64 / 1048576.0
+    );
     let done = scanner.progress();
     if let Some(rep) = reported
         && done.errors > rep as i64
     {
         events::emit(
             Source::Perm,
-            &tr!("另有 {count} 个文件夹无法访问，已计入未知空间", count = sk_core::fmt::count(done.errors - rep as i64)),
+            &tr!(
+                "另有 {count} 个文件夹无法访问，已计入未知空间",
+                count = sk_core::fmt::count(done.errors - rep as i64)
+            ),
             EventLevel::Warning,
             Some(&h.id),
             None,
@@ -1327,7 +1572,13 @@ fn finish(server: &Arc<Server>, h: &Arc<ScanHandle>, reported: Option<usize>) {
             } else {
                 tr!("硬扫描完成：{took}", took = took)
             };
-            events::emit(Source::Scan, &text, EventLevel::Info, Some(&h.id), first.as_deref());
+            events::emit(
+                Source::Scan,
+                &text,
+                EventLevel::Info,
+                Some(&h.id),
+                first.as_deref(),
+            );
         }
         ScanState::Cancelled => events::emit(
             Source::Scan,
@@ -1337,8 +1588,18 @@ fn finish(server: &Arc<Server>, h: &Arc<ScanHandle>, reported: Option<usize>) {
             first.as_deref(),
         ),
         _ => {
-            let msg = if done.message.is_empty() { tr!("未知错误") } else { done.message.clone() };
-            events::emit(Source::Scan, &tr!("扫描失败：{error}", error = msg), EventLevel::Error, Some(&h.id), first.as_deref());
+            let msg = if done.message.is_empty() {
+                tr!("未知错误")
+            } else {
+                done.message.clone()
+            };
+            events::emit(
+                Source::Scan,
+                &tr!("扫描失败：{error}", error = msg),
+                EventLevel::Error,
+                Some(&h.id),
+                first.as_deref(),
+            );
         }
     }
     if done.state == ScanState::Done {
@@ -1371,8 +1632,15 @@ fn auto_save(server: &Server, h: &ScanHandle) {
     }
     h.st.lock().snapshot_path = Some(path.display().to_string());
     let keep = server.settings.get_int("advanced.snapshot_keep").max(1) as usize;
-    let pruned = path.parent().map(|dir| snapshot::prune(dir, keep).map(|v| v.len()).unwrap_or(0)).unwrap_or(0);
-    tracing::info!("scan {} saved to {} ({pruned} old snapshots pruned)", h.id, path.display());
+    let pruned = path
+        .parent()
+        .map(|dir| snapshot::prune(dir, keep).map(|v| v.len()).unwrap_or(0))
+        .unwrap_or(0);
+    tracing::info!(
+        "scan {} saved to {} ({pruned} old snapshots pruned)",
+        h.id,
+        path.display()
+    );
 }
 
 /// The scan's progress event name (re-exported for the handlers).

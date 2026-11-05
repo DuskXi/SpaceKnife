@@ -129,7 +129,10 @@ mod imp {
     }
 
     pub fn release() {
-        let info = OptimizeInfo { version: 1, flags: 0 }; // HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION
+        let info = OptimizeInfo {
+            version: 1,
+            flags: 0,
+        }; // HEAP_OPTIMIZE_RESOURCES_CURRENT_VERSION
         // SAFETY: a null heap handle with HeapOptimizeResources means every heap of the process.
         unsafe {
             HeapSetInformation(
@@ -159,8 +162,16 @@ mod imp {
         let text = std::fs::read_to_string("/proc/self/status").ok()?;
         let (mut rss, mut anon, mut swap) = (None, None, None);
         for line in text.lines() {
-            let Some((key, rest)) = line.split_once(':') else { continue };
-            let kb = || rest.split_whitespace().next()?.parse::<u64>().ok().map(|v| v * 1024);
+            let Some((key, rest)) = line.split_once(':') else {
+                continue;
+            };
+            let kb = || {
+                rest.split_whitespace()
+                    .next()?
+                    .parse::<u64>()
+                    .ok()
+                    .map(|v| v * 1024)
+            };
             match key {
                 "VmRSS" => rss = kb(),
                 "RssAnon" => anon = kb(),
@@ -168,7 +179,10 @@ mod imp {
                 _ => {}
             }
         }
-        Some(ProcessMemory { private: anon.map(|a| a + swap.unwrap_or(0)), resident: rss })
+        Some(ProcessMemory {
+            private: anon.map(|a| a + swap.unwrap_or(0)),
+            resident: rss,
+        })
     }
 
     pub fn release() {
@@ -183,7 +197,12 @@ mod imp {
 
     pub fn physical_memory() -> Option<u64> {
         // SAFETY: sysconf has no preconditions.
-        let (pages, size) = unsafe { (libc::sysconf(libc::_SC_PHYS_PAGES), libc::sysconf(libc::_SC_PAGESIZE)) };
+        let (pages, size) = unsafe {
+            (
+                libc::sysconf(libc::_SC_PHYS_PAGES),
+                libc::sysconf(libc::_SC_PAGESIZE),
+            )
+        };
         (pages > 0 && size > 0).then(|| pages as u64 * size as u64)
     }
 }
@@ -244,7 +263,12 @@ mod imp {
 
     pub fn physical_memory() -> Option<u64> {
         // SAFETY: sysconf has no preconditions.
-        let (pages, size) = unsafe { (libc::sysconf(libc::_SC_PHYS_PAGES), libc::sysconf(libc::_SC_PAGESIZE)) };
+        let (pages, size) = unsafe {
+            (
+                libc::sysconf(libc::_SC_PHYS_PAGES),
+                libc::sysconf(libc::_SC_PAGESIZE),
+            )
+        };
         (pages > 0 && size > 0).then(|| pages as u64 * size as u64)
     }
 }

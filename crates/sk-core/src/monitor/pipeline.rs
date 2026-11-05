@@ -76,23 +76,57 @@ pub trait UsnSource: Send + Sync {
     /// `(journal_id, next_usn)` of a local NTFS volume `X:`.
     fn query(&self, volume: &str) -> Result<(u64, u64), String>;
     /// Records from the checkpoint `(journal_id, start_usn)` to the journal's end.
-    fn read(&self, volume: &str, start_usn: u64, journal_id: u64, max_rows: usize) -> Result<UsnRead, String>;
+    fn read(
+        &self,
+        volume: &str,
+        start_usn: u64,
+        journal_id: u64,
+        max_rows: usize,
+    ) -> Result<UsnRead, String>;
 }
 
 impl UsnSource for crate::helper::SharedHelper {
     fn query(&self, volume: &str) -> Result<(u64, u64), String> {
-        let c = self.current().filter(|c| c.elevated()).ok_or("no elevated helper")?;
+        let c = self
+            .current()
+            .filter(|c| c.elevated())
+            .ok_or("no elevated helper")?;
         let j = c.query_usn(volume).map_err(|e| e.to_string())?;
-        let get = |k: &str| j.get(k).and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|i| i.max(0) as u64)));
-        Ok((get("journal_id").ok_or("no journal_id")?, get("next_usn").ok_or("no next_usn")?))
+        let get = |k: &str| {
+            j.get(k)
+                .and_then(|v| v.as_u64().or_else(|| v.as_i64().map(|i| i.max(0) as u64)))
+        };
+        Ok((
+            get("journal_id").ok_or("no journal_id")?,
+            get("next_usn").ok_or("no next_usn")?,
+        ))
     }
 
-    fn read(&self, volume: &str, start_usn: u64, journal_id: u64, max_rows: usize) -> Result<UsnRead, String> {
-        let c = self.current().filter(|c| c.elevated()).ok_or("no elevated helper")?;
+    fn read(
+        &self,
+        volume: &str,
+        start_usn: u64,
+        journal_id: u64,
+        max_rows: usize,
+    ) -> Result<UsnRead, String> {
+        let c = self
+            .current()
+            .filter(|c| c.elevated())
+            .ok_or("no elevated helper")?;
         let t = c
-            .read_usn(volume, start_usn as i64, journal_id, max_rows as u64, 1.0, None)
+            .read_usn(
+                volume,
+                start_usn as i64,
+                journal_id,
+                max_rows as u64,
+                1.0,
+                None,
+            )
             .map_err(|e| e.to_string())?;
-        Ok(UsnRead { parent_frn: t.rows.parent_frn, truncated: t.truncated })
+        Ok(UsnRead {
+            parent_frn: t.rows.parent_frn,
+            truncated: t.truncated,
+        })
     }
 }
 
@@ -135,7 +169,8 @@ impl IdRemap {
         if old.is_empty() {
             return;
         }
-        let mut pairs: Vec<(NodeId, NodeId)> = old.iter().copied().zip(new.iter().copied()).collect();
+        let mut pairs: Vec<(NodeId, NodeId)> =
+            old.iter().copied().zip(new.iter().copied()).collect();
         pairs.sort_unstable();
         self.steps.push(pairs.into_iter().unzip());
     }
@@ -302,14 +337,18 @@ fn bytes(p: &Path) -> &[u8] {
 }
 
 fn parent_dir(p: &Path) -> PathBuf {
-    p.parent().map_or_else(|| p.to_path_buf(), Path::to_path_buf)
+    p.parent()
+        .map_or_else(|| p.to_path_buf(), Path::to_path_buf)
 }
 
 /// The common folder of `paths` per drive / file system root.
 pub fn common_roots(paths: &HashSet<PathBuf>) -> HashSet<PathBuf> {
     let mut groups: HashMap<std::ffi::OsString, Vec<&PathBuf>> = HashMap::new();
     for p in paths {
-        let key = p.components().next().map_or_else(Default::default, |c| c.as_os_str().to_os_string());
+        let key = p
+            .components()
+            .next()
+            .map_or_else(Default::default, |c| c.as_os_str().to_os_string());
         groups.entry(key).or_default().push(p);
     }
     let mut out = HashSet::new();
@@ -360,7 +399,11 @@ pub fn hard_alloc(size: i64, alloc: i64, cloud: bool, opts: &RootOptions) -> Opt
     if size <= opts.resident_max {
         return Some(0);
     }
-    let cluster = if opts.cluster_size > 0 { opts.cluster_size } else { 4096 };
+    let cluster = if opts.cluster_size > 0 {
+        opts.cluster_size
+    } else {
+        4096
+    };
     Some((size + cluster - 1) / cluster * cluster)
 }
 
@@ -370,7 +413,9 @@ fn unnamed(res: &SliceResult) -> HashSet<Vec<u8>> {
     let mut seen = HashSet::new();
     let mut out = HashSet::new();
     for name in res.entries.names() {
-        let sep = name.iter().any(|&b| b == b'/' || (cfg!(windows) && b == b'\\'));
+        let sep = name
+            .iter()
+            .any(|&b| b == b'/' || (cfg!(windows) && b == b'\\'));
         if !seen.insert(name.to_vec()) || sep {
             out.insert(name.to_vec());
         }
@@ -379,7 +424,12 @@ fn unnamed(res: &SliceResult) -> HashSet<Vec<u8>> {
 }
 
 impl ScanMonitor {
-    pub fn new(store: Store, roots: Vec<RootInfo>, root_opts: Arc<Vec<RootOptions>>, opts: MonitorOptions) -> ScanMonitor {
+    pub fn new(
+        store: Store,
+        roots: Vec<RootInfo>,
+        root_opts: Arc<Vec<RootOptions>>,
+        opts: MonitorOptions,
+    ) -> ScanMonitor {
         let now = SystemTime::now();
         let began = opts.listed_after.map_or(now, |t| t.min(now));
         let listed_after = began
@@ -436,7 +486,10 @@ impl ScanMonitor {
     pub fn start(&mut self) {
         let (interval, rate) = (self.opts.poll_interval, self.opts.poll_rate);
         self.start_with(&mut |root: &RootInfo| -> Box<dyn Watcher> {
-            let remote = root.volume.as_ref().is_some_and(|v| v.is_remote || !v.note.is_empty());
+            let remote = root
+                .volume
+                .as_ref()
+                .is_some_and(|v| v.is_remote || !v.note.is_empty());
             if !cfg!(windows) && remote {
                 Box::new(PollWatcher::new(&root.path, interval, rate))
             } else {
@@ -460,12 +513,30 @@ impl ScanMonitor {
         self.kick();
     }
 
-    fn start_watcher(&mut self, path: &Path, watcher: Box<dyn Watcher>) -> Option<Box<dyn Watcher>> {
-        let poll = || Box::new(PollWatcher::new(path, self.opts.poll_interval, self.opts.poll_rate)) as Box<dyn Watcher>;
+    fn start_watcher(
+        &mut self,
+        path: &Path,
+        watcher: Box<dyn Watcher>,
+    ) -> Option<Box<dyn Watcher>> {
+        let poll = || {
+            Box::new(PollWatcher::new(
+                path,
+                self.opts.poll_interval,
+                self.opts.poll_rate,
+            )) as Box<dyn Watcher>
+        };
         if let Err(e) = watcher.start(self.sink()) {
-            tracing::warn!("cannot watch {} with {}: {e}", path.display(), watcher.name());
+            tracing::warn!(
+                "cannot watch {} with {}: {e}",
+                path.display(),
+                watcher.name()
+            );
             if watcher.name() == "poll" {
-                self.failed = crate::tr!("无法监视 {path}：{error}", path = path.display().to_string(), error = e.to_string());
+                self.failed = crate::tr!(
+                    "无法监视 {path}：{error}",
+                    path = path.display().to_string(),
+                    error = e.to_string()
+                );
                 return None;
             }
             return self.start_watcher(path, poll());
@@ -512,7 +583,9 @@ impl ScanMonitor {
         }
         let r = self.store.read();
         let n = r.len();
-        self.waiting.iter().any(|&i| (i as usize) < n && !r.flags(i).intersects(Flags::PENDING))
+        self.waiting
+            .iter()
+            .any(|&i| (i as usize) < n && !r.flags(i).intersects(Flags::PENDING))
     }
 
     /// The whole tree was replaced (an MFT scan finished): every id is new.
@@ -525,7 +598,10 @@ impl ScanMonitor {
 
     /// A handle for other threads (stop, kick, rescan, push changes).
     pub fn handle(&self) -> MonitorHandle {
-        MonitorHandle { inbox: self.inbox.clone(), stop: self.stop.clone() }
+        MonitorHandle {
+            inbox: self.inbox.clone(),
+            stop: self.stop.clone(),
+        }
     }
 
     /// Stops the watchers (and a running loop).
@@ -540,14 +616,24 @@ impl ScanMonitor {
     // ------------------------------------------------------------- status
 
     pub fn status(&self) -> MonitorStatus {
-        let states: Vec<_> = self.watchers.iter().map(|(_, w)| (w.name(), w.status())).collect();
+        let states: Vec<_> = self
+            .watchers
+            .iter()
+            .map(|(_, w)| (w.name(), w.status()))
+            .collect();
         let (state, detail) = if !self.failed.is_empty() && states.is_empty() {
             (MonitorState::Failed, self.failed.clone())
         } else if let Some((_, s)) = states.iter().find(|(_, s)| s.state == WatchState::Failed) {
             (MonitorState::Failed, s.detail.clone())
-        } else if !self.failed.is_empty() || states.iter().any(|(_, s)| s.state == WatchState::Degraded) {
+        } else if !self.failed.is_empty()
+            || states.iter().any(|(_, s)| s.state == WatchState::Degraded)
+        {
             let d = if self.failed.is_empty() {
-                states.iter().find(|(_, s)| s.state == WatchState::Degraded).map(|(_, s)| s.detail.clone()).unwrap_or_default()
+                states
+                    .iter()
+                    .find(|(_, s)| s.state == WatchState::Degraded)
+                    .map(|(_, s)| s.detail.clone())
+                    .unwrap_or_default()
             } else {
                 self.failed.clone()
             };
@@ -560,7 +646,8 @@ impl ScanMonitor {
         let mut names: Vec<&str> = states.iter().map(|(n, _)| *n).collect();
         names.sort_unstable();
         names.dedup();
-        let queued = self.inbox.queue.lock().unwrap().len() + self.inbox.rescans.lock().unwrap().len();
+        let queued =
+            self.inbox.queue.lock().unwrap().len() + self.inbox.rescans.lock().unwrap().len();
         MonitorStatus {
             state,
             detail,
@@ -585,7 +672,11 @@ impl ScanMonitor {
     pub fn timeout(&self, hooks: &dyn MonitorHooks) -> Option<Duration> {
         let mut wait = if !self.trees.is_empty() {
             let since = self.last_event.map_or(QUIET_RESCAN, |t| t.elapsed());
-            Some(QUIET_RESCAN.saturating_sub(since).max(Duration::from_millis(50)))
+            Some(
+                QUIET_RESCAN
+                    .saturating_sub(since)
+                    .max(Duration::from_millis(50)),
+            )
         } else if hooks.scan_running() || !self.deferred.is_empty() || !self.fed() {
             Some(SCAN_TICK)
         } else {
@@ -593,7 +684,9 @@ impl ScanMonitor {
         };
         if self.free_due {
             let since = self.free_at.map_or(FREE_REFRESH, |t| t.elapsed());
-            let due = FREE_REFRESH.saturating_sub(since).max(Duration::from_millis(50));
+            let due = FREE_REFRESH
+                .saturating_sub(since)
+                .max(Duration::from_millis(50));
             wait = Some(wait.map_or(due, |w| w.min(due)));
         }
         wait
@@ -634,11 +727,15 @@ impl ScanMonitor {
             q.extend(later);
             return;
         }
-        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(batch, hooks)));
+        let r =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.process(batch, hooks)));
         if r.is_err() {
             tracing::error!("applying file changes failed");
         }
-        if self.free_due && self.free_at.is_none_or(|t| t.elapsed() >= FREE_REFRESH) && self.refresh_free() {
+        if self.free_due
+            && self.free_at.is_none_or(|t| t.elapsed() >= FREE_REFRESH)
+            && self.refresh_free()
+        {
             hooks.volumes_changed(&self.roots);
         }
     }
@@ -677,7 +774,11 @@ impl ScanMonitor {
             let fresh = (start.max(1) as NodeId..n as NodeId).filter(|&i| r.kind(i) == Kind::Dir);
             let skip = Flags::GONE | Flags::MOUNT | Flags::ACCESS_DENIED;
             let mut ids: Vec<NodeId> = Vec::new();
-            for i in waiting.into_iter().filter(|&i| (i as usize) < n).chain(fresh) {
+            for i in waiting
+                .into_iter()
+                .filter(|&i| (i as usize) < n)
+                .chain(fresh)
+            {
                 let f = r.flags(i);
                 if f.intersects(skip) {
                     continue; // mount points are never entered by the scan; unlistable ones hold nothing
@@ -701,8 +802,19 @@ impl ScanMonitor {
             if inside.iter().all(|&b| b) {
                 w.add_dirs(paths.clone(), mtimes.clone(), self.listed_after);
             } else if inside.iter().any(|&b| b) {
-                let mine: Vec<PathBuf> = paths.iter().zip(&inside).filter(|x| *x.1).map(|x| x.0.clone()).collect();
-                let times = mtimes.as_ref().map(|m| m.iter().zip(&inside).filter(|x| *x.1).map(|x| *x.0).collect());
+                let mine: Vec<PathBuf> = paths
+                    .iter()
+                    .zip(&inside)
+                    .filter(|x| *x.1)
+                    .map(|x| x.0.clone())
+                    .collect();
+                let times = mtimes.as_ref().map(|m| {
+                    m.iter()
+                        .zip(&inside)
+                        .filter(|x| *x.1)
+                        .map(|x| *x.0)
+                        .collect()
+                });
                 w.add_dirs(mine, times, self.listed_after);
             }
         }
@@ -718,7 +830,11 @@ impl ScanMonitor {
             if !matches!(w.name(), "inotify" | "poll") {
                 continue;
             }
-            let inside: Vec<PathBuf> = paths.iter().filter(|p| p.starts_with(root)).cloned().collect();
+            let inside: Vec<PathBuf> = paths
+                .iter()
+                .filter(|p| p.starts_with(root))
+                .cloned()
+                .collect();
             if !inside.is_empty() {
                 w.add_dirs(inside, None, 0);
             }
@@ -770,7 +886,10 @@ impl ScanMonitor {
             let mut all = folders.clone();
             all.extend(stats.keys().map(|p| parent_dir(p)));
             self.trees.extend(common_roots(&all));
-            hooks.message(crate::tr!("文件变化过多（{count} 条），稍后重新扫描受影响的文件夹", count = n_batch));
+            hooks.message(crate::tr!(
+                "文件变化过多（{count} 条），稍后重新扫描受影响的文件夹",
+                count = n_batch
+            ));
             folders.clear();
             stats.clear();
         }
@@ -784,7 +903,10 @@ impl ScanMonitor {
             flashes.extend(got);
         }
         let mut targets = self.targets(&folders);
-        let quiet = self.last_event.is_none_or(|t| now.duration_since(t) >= QUIET_RESCAN) || (n_batch == 0 && !self.trees.is_empty());
+        let quiet = self
+            .last_event
+            .is_none_or(|t| now.duration_since(t) >= QUIET_RESCAN)
+            || (n_batch == 0 && !self.trees.is_empty());
         let rescan = !self.trees.is_empty() && quiet && !running;
         if rescan {
             let r = self.store.read();
@@ -866,7 +988,11 @@ impl ScanMonitor {
     }
 
     /// Size and time changes of known files, in place; unknown paths make their folder dirty.
-    fn apply_stats(&mut self, stats: HashMap<PathBuf, Change>, folders: &mut HashSet<PathBuf>) -> HashMap<NodeId, i64> {
+    fn apply_stats(
+        &mut self,
+        stats: HashMap<PathBuf, Change>,
+        folders: &mut HashSet<PathBuf>,
+    ) -> HashMap<NodeId, i64> {
         let mut known: Vec<(NodeId, Change)> = Vec::new();
         {
             let r = self.store.read();
@@ -889,20 +1015,29 @@ impl ScanMonitor {
                     {
                         // keep to the hard scan's rule
                         let cloud = r.flags(*node).intersects(Flags::CLOUD);
-                        let ro = self.root_index(&ch.path).and_then(|i| self.root_opts.get(i)).cloned().unwrap_or_default();
+                        let ro = self
+                            .root_index(&ch.path)
+                            .and_then(|i| self.root_opts.get(i))
+                            .cloned()
+                            .unwrap_or_default();
                         match hard_alloc(size, alloc, cloud, &ro) {
                             Some(a) => ch.alloc = Some(a),
                             None => {
                                 // the scan would ask this file: its folder's listing asks it
                                 folders.insert(parent_dir(&ch.path));
-                                *ch = Change::new(ChangeKind::Modified, ch.path.clone(), Some(false));
+                                *ch =
+                                    Change::new(ChangeKind::Modified, ch.path.clone(), Some(false));
                             }
                         }
                     }
                 } else if ch.size.is_none() {
                     // the watcher did not say: ask the file system
                     if let Ok(m) = std::fs::metadata(&ch.path) {
-                        let cluster = self.roots.first().and_then(|r| r.volume.as_ref()).map_or(4096, |v| v.cluster_size.max(1));
+                        let cluster = self
+                            .roots
+                            .first()
+                            .and_then(|r| r.volume.as_ref())
+                            .map_or(4096, |v| v.cluster_size.max(1));
                         #[cfg(unix)]
                         let alloc = {
                             use std::os::unix::fs::MetadataExt;
@@ -911,7 +1046,12 @@ impl ScanMonitor {
                         #[cfg(not(unix))]
                         let alloc = (m.len() as i64 + cluster - 1) / cluster * cluster;
                         let _ = cluster;
-                        *ch = Change::modified(ch.path.clone(), m.len() as i64, Some(alloc), super::secs(m.modified()));
+                        *ch = Change::modified(
+                            ch.path.clone(),
+                            m.len() as i64,
+                            Some(alloc),
+                            super::secs(m.modified()),
+                        );
                     }
                 }
             }
@@ -927,7 +1067,10 @@ impl ScanMonitor {
         let alloc: Vec<i64> = known.iter().map(|k| k.1.alloc.unwrap()).collect();
         let mtime: Vec<i64> = known.iter().map(|k| k.1.mtime.unwrap_or(0)).collect();
         let delta = mutate::update_stats(&mut w, &ids, &size, &alloc, Some(&mtime));
-        ids.into_iter().zip(delta).filter(|(_, d)| *d != 0).collect()
+        ids.into_iter()
+            .zip(delta)
+            .filter(|(_, d)| *d != 0)
+            .collect()
     }
 
     fn permit(&self, running: bool) {
@@ -943,9 +1086,22 @@ impl ScanMonitor {
     /// Lists one folder (only it); None: vanished, or a folder a path cannot reach.
     fn list_one(&self, node: NodeId, path: &Path) -> Option<SliceResult> {
         let root = self.root_index(path)?;
-        let opts = SliceOptions { roots: self.root_opts.as_ref().clone(), budget: Duration::ZERO, threads: 1, ..SliceOptions::default() };
+        let opts = SliceOptions {
+            roots: self.root_opts.as_ref().clone(),
+            budget: Duration::ZERO,
+            threads: 1,
+            ..SliceOptions::default()
+        };
         let task = Ref::Node(node as u64);
-        let res = hardscan::scan_slice(vec![Task { target: task, path: path.to_path_buf(), root: root as u32 }], &opts).ok()?;
+        let res = hardscan::scan_slice(
+            vec![Task {
+                target: task,
+                path: path.to_path_buf(),
+                root: root as u32,
+            }],
+            &opts,
+        )
+        .ok()?;
         if res.refs.len() != 1 || res.refs[0] != task {
             return None; // vanished (its parent lists it as gone) or no longer readable
         }
@@ -956,10 +1112,18 @@ impl ScanMonitor {
     }
 
     /// Lists `targets` again (in threads), then folds every listing in, deepest folder first.
-    fn relist(&mut self, targets: &HashMap<NodeId, PathBuf>, hooks: &mut dyn MonitorHooks, running: bool) -> Applied {
+    fn relist(
+        &mut self,
+        targets: &HashMap<NodeId, PathBuf>,
+        hooks: &mut dyn MonitorHooks,
+        running: bool,
+    ) -> Applied {
         let mut items: Vec<(NodeId, PathBuf, u16)> = {
             let r = self.store.read();
-            targets.iter().map(|(&k, p)| (k, p.clone(), r.depth(k))).collect()
+            targets
+                .iter()
+                .map(|(&k, p)| (k, p.clone(), r.depth(k)))
+                .collect()
         };
         items.sort_by_key(|i| std::cmp::Reverse(i.2));
         let mut listed: HashMap<NodeId, SliceResult> = HashMap::new();
@@ -967,8 +1131,13 @@ impl ScanMonitor {
             self.permit(running);
             let this: &ScanMonitor = self;
             let got: Vec<(NodeId, Option<SliceResult>)> = std::thread::scope(|s| {
-                let hs: Vec<_> = chunk.iter().map(|(n, p, _)| (n, s.spawn(move || this.list_one(*n, p)))).collect();
-                hs.into_iter().map(|(n, h)| (*n, h.join().ok().flatten())).collect()
+                let hs: Vec<_> = chunk
+                    .iter()
+                    .map(|(n, p, _)| (n, s.spawn(move || this.list_one(*n, p))))
+                    .collect();
+                hs.into_iter()
+                    .map(|(n, h)| (*n, h.join().ok().flatten()))
+                    .collect()
             });
             listed.extend(got.into_iter().filter_map(|(n, r)| r.map(|r| (n, r))));
         }
@@ -976,7 +1145,9 @@ impl ScanMonitor {
         let mut w = self.store.write();
         let mut remap = IdRemap::default();
         for (node, path, _) in items {
-            let Some(res) = listed.remove(&node) else { continue };
+            let Some(res) = listed.remove(&node) else {
+                continue;
+            };
             if !mutate::can_relist(&w, node) || w.path(node) != path {
                 continue;
             }
@@ -990,14 +1161,19 @@ impl ScanMonitor {
                 })
                 .collect();
             let batch = entry_batch(&w, res.entries, &res.ext_table);
-            let Ok(rel) = mutate::relist(&mut w, node, &batch) else { continue };
+            let Ok(rel) = mutate::relist(&mut w, node, &batch) else {
+                continue;
+            };
             if w.flags(node).intersects(Flags::ACCESS_DENIED) {
                 // a rescan of a folder the scan could not list, readable now: watched from now on
                 w.clear(node, Flags::ACCESS_DENIED);
                 out.readable.push(path.clone());
             }
             // new subfolders no path can open: not scanned by their path
-            let unreadable: HashSet<NodeId> = unreadable.into_iter().map(|j| rel.start + j as NodeId).collect();
+            let unreadable: HashSet<NodeId> = unreadable
+                .into_iter()
+                .map(|j| rel.start + j as NodeId)
+                .collect();
             for &row in &rel.pending {
                 if unreadable.contains(&row) {
                     w.mark(row, Flags::ACCESS_DENIED);
@@ -1015,10 +1191,17 @@ impl ScanMonitor {
             if !rel.removed.is_empty() {
                 *out.flashes.entry(node).or_default() -= rel.removed_alloc.iter().sum::<i64>();
             }
-            out.pending.extend(rel.pending.iter().copied().filter(|r| !unreadable.contains(r)));
+            out.pending.extend(
+                rel.pending
+                    .iter()
+                    .copied()
+                    .filter(|r| !unreadable.contains(r)),
+            );
             // names a folder holds twice, or with a separator, stay as scanned, with what lies below
             out.kept_folders.extend(
-                rel.moved_to.iter().copied().filter(|&k| w.kind(k) == Kind::Dir && !unnamed_names.contains(w.name_bytes(k))),
+                rel.moved_to.iter().copied().filter(|&k| {
+                    w.kind(k) == Kind::Dir && !unnamed_names.contains(w.name_bytes(k))
+                }),
             );
         }
         if !remap.is_empty() {
@@ -1028,8 +1211,16 @@ impl ScanMonitor {
                     out.flashes.insert(m, d);
                 }
             }
-            out.kept_folders = out.kept_folders.iter().filter_map(|&k| remap.map(&w, k)).collect();
-            out.pending = out.pending.iter().filter_map(|&k| remap.map(&w, k)).collect();
+            out.kept_folders = out
+                .kept_folders
+                .iter()
+                .filter_map(|&k| remap.map(&w, k))
+                .collect();
+            out.pending = out
+                .pending
+                .iter()
+                .filter_map(|&k| remap.map(&w, k))
+                .collect();
             hooks.remapped(&w, &remap);
         }
         out
@@ -1043,7 +1234,11 @@ impl ScanMonitor {
                 .iter()
                 .filter_map(|&node| {
                     let path = r.path(node);
-                    self.root_index(&path).map(|i| Task { target: Ref::Node(node as u64), path, root: i as u32 })
+                    self.root_index(&path).map(|i| Task {
+                        target: Ref::Node(node as u64),
+                        path,
+                        root: i as u32,
+                    })
                 })
                 .collect()
         };
@@ -1057,7 +1252,9 @@ impl ScanMonitor {
             let rest = queue.split_off(queue.len().min(LIST_BATCH));
             let batch = std::mem::replace(&mut queue, rest);
             self.permit(running);
-            let Ok(res) = hardscan::scan_slice(batch, &opts) else { return };
+            let Ok(res) = hardscan::scan_slice(batch, &opts) else {
+                return;
+            };
             // under the writer, like every other change of the monitor: never while a reader
             // (render, summary, a compaction's copy) runs on the store (7ded44c)
             let mut w = self.store.write();
@@ -1089,7 +1286,9 @@ impl ScanMonitor {
 
     /// Takes a checkpoint of each volume's change journal (when an overflow needs replaying).
     pub fn start_usn(&mut self) {
-        let Some(src) = self.opts.usn.clone() else { return };
+        let Some(src) = self.opts.usn.clone() else {
+            return;
+        };
         for vol in self.usn_volumes() {
             match src.query(&vol) {
                 Ok((jid, next)) => {
@@ -1103,11 +1302,17 @@ impl ScanMonitor {
 
     /// Moves the checkpoints on (the safe one to the previous newer one), every [`USN_PERIOD`].
     fn usn_tick(&mut self, now: Instant) {
-        if self.usn.is_empty() || self.usn_at.is_some_and(|t| now.duration_since(t) < USN_PERIOD) {
+        if self.usn.is_empty()
+            || self
+                .usn_at
+                .is_some_and(|t| now.duration_since(t) < USN_PERIOD)
+        {
             return;
         }
         self.usn_at = Some(now);
-        let Some(src) = self.opts.usn.clone() else { return };
+        let Some(src) = self.opts.usn.clone() else {
+            return;
+        };
         let vols: Vec<String> = self.usn.keys().cloned().collect();
         for vol in vols {
             let (jid, _, newer) = self.usn[&vol];
@@ -1127,13 +1332,21 @@ impl ScanMonitor {
 
     /// Folders touched since the safe checkpoint of the volumes holding `lost`, from the journal;
     /// None when that is not possible (no journal, no rights, too many records).
-    fn replay_usn(&mut self, lost: &HashSet<PathBuf>, hooks: &mut dyn MonitorHooks) -> Option<HashSet<PathBuf>> {
+    fn replay_usn(
+        &mut self,
+        lost: &HashSet<PathBuf>,
+        hooks: &mut dyn MonitorHooks,
+    ) -> Option<HashSet<PathBuf>> {
         let src = self.opts.usn.clone()?;
         let vols: HashSet<String> = lost
             .iter()
             .map(|p| {
                 let s = p.to_string_lossy();
-                if s.as_bytes().get(1) == Some(&b':') { s[..2].to_uppercase() } else { String::new() }
+                if s.as_bytes().get(1) == Some(&b':') {
+                    s[..2].to_uppercase()
+                } else {
+                    String::new()
+                }
             })
             .collect();
         if vols.is_empty() || !vols.iter().all(|v| self.usn.contains_key(v)) {
@@ -1156,7 +1369,10 @@ impl ScanMonitor {
         frn.sort_unstable();
         frn.dedup();
         let nodes = self.nodes_of_frn(&frn)?;
-        hooks.message(crate::tr!("变化通知溢出：按 USN 日志补齐 {count} 个文件夹", count = nodes.len()));
+        hooks.message(crate::tr!(
+            "变化通知溢出：按 USN 日志补齐 {count} 个文件夹",
+            count = nodes.len()
+        ));
         let r = self.store.read();
         Some(nodes.into_iter().map(|n| r.path(n)).collect())
     }
@@ -1247,7 +1463,13 @@ impl ScanMonitor {
         let waiting = std::mem::take(&mut self.waiting);
         self.waiting = waiting
             .into_iter()
-            .filter_map(|i| remap.get(i as usize).copied().filter(|&m| m >= 0).map(|m| m as NodeId))
+            .filter_map(|i| {
+                remap
+                    .get(i as usize)
+                    .copied()
+                    .filter(|&m| m >= 0)
+                    .map(|m| m as NodeId)
+            })
             .collect();
         tracing::info!("compacted after changes, {} rows", w.len());
     }

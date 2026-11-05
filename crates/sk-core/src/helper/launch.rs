@@ -125,7 +125,10 @@ impl PkexecProcess {
 
 fn read_tail(stream: impl io::Read, tail: &Mutex<VecDeque<String>>) {
     use std::io::BufRead as _;
-    for line in io::BufReader::new(stream).split(b'\n').map_while(Result::ok) {
+    for line in io::BufReader::new(stream)
+        .split(b'\n')
+        .map_while(Result::ok)
+    {
         let line = String::from_utf8_lossy(&line).trim_end().to_owned();
         if line.is_empty() {
             continue;
@@ -187,13 +190,23 @@ pub fn pkexec_error(code: i32, stderr: &[String]) -> Option<HelperError> {
             "no_agent",
         ));
     }
-    let reason = if text.is_empty() { code.to_string() } else { text };
-    Some(HelperError::unavailable(tr!("系统没有给予管理员授权：{reason}", reason = reason), "not_authorized"))
+    let reason = if text.is_empty() {
+        code.to_string()
+    } else {
+        text
+    };
+    Some(HelperError::unavailable(
+        tr!("系统没有给予管理员授权：{reason}", reason = reason),
+        "not_authorized",
+    ))
 }
 
 /// pkexec at a fixed absolute path (never looked up in PATH), from `candidates`.
 pub fn pkexec_path(candidates: &[&str]) -> Option<String> {
-    candidates.iter().find(|p| is_executable(p)).map(|p| (*p).to_owned())
+    candidates
+        .iter()
+        .find(|p| is_executable(p))
+        .map(|p| (*p).to_owned())
 }
 
 fn is_executable(path: &str) -> bool {
@@ -218,11 +231,20 @@ pub fn in_appimage(executable: &str) -> bool {
 /// `pkexec argv…` (Linux): the desktop's polkit agent shows the password dialog while the helper
 /// is being started; the caller waits for it to connect. Its own session, so pkexec never falls
 /// back to asking on the backend's terminal. `pkexec` is the path to use (from [`pkexec_path`]).
-pub fn start_pkexec(argv: &[OsString], pkexec: Option<&str>) -> Result<Box<dyn HelperProcess>, HelperError> {
+pub fn start_pkexec(
+    argv: &[OsString],
+    pkexec: Option<&str>,
+) -> Result<Box<dyn HelperProcess>, HelperError> {
     let Some(pkexec) = pkexec else {
-        return Err(HelperError::unavailable(t("找不到 pkexec：请求管理员授权需要 polkit"), "not_supported"));
+        return Err(HelperError::unavailable(
+            t("找不到 pkexec：请求管理员授权需要 polkit"),
+            "not_supported",
+        ));
     };
-    let exe = argv.first().map(|a| a.to_string_lossy().into_owned()).unwrap_or_default();
+    let exe = argv
+        .first()
+        .map(|a| a.to_string_lossy().into_owned())
+        .unwrap_or_default();
     if in_appimage(&exe) {
         return Err(HelperError::unavailable(
             t("AppImage 版本不能以管理员身份运行助手；请改用 deb 或 rpm 安装包"),
@@ -230,10 +252,16 @@ pub fn start_pkexec(argv: &[OsString], pkexec: Option<&str>) -> Result<Box<dyn H
         ));
     }
     if !std::path::Path::new(&exe).is_absolute() || !exe.starts_with('/') {
-        return Err(HelperError::unavailable(tr!("助手的路径不是绝对路径：{path}", path = exe), "not_supported"));
+        return Err(HelperError::unavailable(
+            tr!("助手的路径不是绝对路径：{path}", path = exe),
+            "not_supported",
+        ));
     }
     let mut cmd = Command::new(pkexec);
-    cmd.args(argv).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(argv)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt as _;
@@ -245,9 +273,12 @@ pub fn start_pkexec(argv: &[OsString], pkexec: Option<&str>) -> Result<Box<dyn H
             });
         }
     }
-    let child = cmd
-        .spawn()
-        .map_err(|e| HelperError::unavailable(tr!("无法启动 pkexec：{reason}", reason = e.to_string()), "exited"))?;
+    let child = cmd.spawn().map_err(|e| {
+        HelperError::unavailable(
+            tr!("无法启动 pkexec：{reason}", reason = e.to_string()),
+            "exited",
+        )
+    })?;
     Ok(Box::new(PkexecProcess::new(child)))
 }
 
@@ -255,7 +286,10 @@ pub fn start_pkexec(argv: &[OsString], pkexec: Option<&str>) -> Result<Box<dyn H
 /// (never looked up in PATH), so nothing user-writable outside the installation can inject code
 /// into the administrator process.
 pub fn helper_command() -> io::Result<Vec<OsString>> {
-    Ok(vec![std::env::current_exe()?.into_os_string(), HELPER_SUBCOMMAND.into()])
+    Ok(vec![
+        std::env::current_exe()?.into_os_string(),
+        HELPER_SUBCOMMAND.into(),
+    ])
 }
 
 /// Unelevated helper: stdin / stdout null, stderr shared (the helper's log).
@@ -270,9 +304,12 @@ pub fn start_subprocess(argv: &[OsString]) -> Result<Box<dyn HelperProcess>, Hel
         use std::os::windows::process::CommandExt as _;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: the backend may have no console to share
     }
-    let child = cmd
-        .spawn()
-        .map_err(|e| HelperError::unavailable(tr!("无法启动扫描助手：{reason}", reason = e.to_string()), "exited"))?;
+    let child = cmd.spawn().map_err(|e| {
+        HelperError::unavailable(
+            tr!("无法启动扫描助手：{reason}", reason = e.to_string()),
+            "exited",
+        )
+    })?;
     Ok(Box::new(ChildProcess::new(child)))
 }
 
@@ -319,20 +356,27 @@ pub use super::win32::ShellExecuteParams;
 /// ShellExecuteExW arguments for `argv` behind the UAC prompt, hidden and without UI.
 #[cfg(windows)]
 pub fn elevated_params(argv: &[OsString]) -> ShellExecuteParams {
-    let args: Vec<String> = argv.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let args: Vec<String> = argv
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     ShellExecuteParams {
         verb: "runas".into(),
         file: args.first().cloned().unwrap_or_default(),
         parameters: list2cmdline(&args[1.min(args.len())..]),
         directory: None,
         show: SW_HIDE,
-        mask: SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NO_CONSOLE | SEE_MASK_FLAG_NO_UI | SEE_MASK_NOASYNC,
+        mask: SEE_MASK_NOCLOSEPROCESS
+            | SEE_MASK_NO_CONSOLE
+            | SEE_MASK_FLAG_NO_UI
+            | SEE_MASK_NOASYNC,
     }
 }
 
 /// How the UAC prompt is shown: the real `ShellExecuteExW`, or a stand-in (tests).
 #[cfg(windows)]
-pub type ShellExecuteFn = Arc<dyn Fn(&ShellExecuteParams) -> io::Result<Box<dyn HelperProcess>> + Send + Sync>;
+pub type ShellExecuteFn =
+    Arc<dyn Fn(&ShellExecuteParams) -> io::Result<Box<dyn HelperProcess>> + Send + Sync>;
 
 #[cfg(windows)]
 struct UacProcess(super::win32::ProcessHandle);
@@ -366,7 +410,9 @@ impl Drop for UacProcess {
 /// The real ShellExecuteExW (shows the UAC prompt).
 #[cfg(windows)]
 pub fn real_shell_execute() -> ShellExecuteFn {
-    Arc::new(|params| Ok(Box::new(UacProcess(super::win32::shell_execute(params)?)) as Box<dyn HelperProcess>))
+    Arc::new(|params| {
+        Ok(Box::new(UacProcess(super::win32::shell_execute(params)?)) as Box<dyn HelperProcess>)
+    })
 }
 
 /// How an elevated helper is started.
@@ -415,18 +461,24 @@ pub fn start_elevated(
             .name("sk-helper-uac".into())
             .spawn(move || {
                 let result = run(&params);
-                if let Err(std::sync::mpsc::TrySendError::Disconnected(Ok(mut late))) = tx.try_send(result) {
+                if let Err(std::sync::mpsc::TrySendError::Disconnected(Ok(mut late))) =
+                    tx.try_send(result)
+                {
                     late.close(); // the caller gave up meanwhile
                 }
             })
             .map_err(|e| HelperError::unavailable(e.to_string(), "exited"))?;
         match rx.recv_timeout(timeout) {
             Ok(Ok(proc)) => Ok(proc),
-            Ok(Err(err)) if err.raw_os_error() == Some(ERROR_CANCELLED) => Err(HelperError::denied()),
-            Ok(Err(err)) if err.kind() == io::ErrorKind::PermissionDenied => Err(HelperError::unavailable(
-                tr!("无法启动扫描助手：{reason}", reason = err.to_string()),
-                "unavailable",
-            )),
+            Ok(Err(err)) if err.raw_os_error() == Some(ERROR_CANCELLED) => {
+                Err(HelperError::denied())
+            }
+            Ok(Err(err)) if err.kind() == io::ErrorKind::PermissionDenied => {
+                Err(HelperError::unavailable(
+                    tr!("无法启动扫描助手：{reason}", reason = err.to_string()),
+                    "unavailable",
+                ))
+            }
             Ok(Err(err)) => Err(HelperError::unavailable(
                 tr!("无法启动扫描助手：{reason}", reason = err.to_string()),
                 "exited",
@@ -437,7 +489,10 @@ pub fn start_elevated(
     #[cfg(not(any(windows, target_os = "linux")))]
     {
         let _ = (argv, elevator, timeout);
-        Err(HelperError::unavailable(t("当前平台暂不支持提权助手"), "not_supported"))
+        Err(HelperError::unavailable(
+            t("当前平台暂不支持提权助手"),
+            "not_supported",
+        ))
     }
 }
 
@@ -447,16 +502,28 @@ mod tests {
 
     #[test]
     fn cmdline_quoting() {
-        assert_eq!(list2cmdline(&["-I", "-m", "x", "--pipe", r"\\.\pipe\x y"]), r#"-I -m x --pipe "\\.\pipe\x y""#);
-        assert_eq!(list2cmdline(&["a\"b", "", r"c\", r"d e\"]), r#"a\"b "" c\ "d e\\""#);
+        assert_eq!(
+            list2cmdline(&["-I", "-m", "x", "--pipe", r"\\.\pipe\x y"]),
+            r#"-I -m x --pipe "\\.\pipe\x y""#
+        );
+        assert_eq!(
+            list2cmdline(&["a\"b", "", r"c\", r"d e\"]),
+            r#"a\"b "" c\ "d e\\""#
+        );
         assert_eq!(list2cmdline::<&str>(&[]), "");
     }
 
     #[cfg(windows)]
     #[test]
     fn shell_execute_params() {
-        let argv: Vec<OsString> =
-            [r"C:\Program Files\SK\spaceknife.exe", "helper", "--pipe", r"\\.\pipe\x y"].map(OsString::from).to_vec();
+        let argv: Vec<OsString> = [
+            r"C:\Program Files\SK\spaceknife.exe",
+            "helper",
+            "--pipe",
+            r"\\.\pipe\x y",
+        ]
+        .map(OsString::from)
+        .to_vec();
         let p = elevated_params(&argv);
         assert_eq!(p.verb, "runas");
         assert_eq!(p.file, r"C:\Program Files\SK\spaceknife.exe");
@@ -469,7 +536,8 @@ mod tests {
         assert_eq!(cmd[1], "helper");
     }
 
-    const AGENT_MISSING: &str = "Error executing command as another user: No authentication agent found.";
+    const AGENT_MISSING: &str =
+        "Error executing command as another user: No authentication agent found.";
 
     #[test]
     fn pkexec_exit_codes() {
@@ -505,9 +573,13 @@ mod tests {
         let err = start_pkexec(&argv, None).err().unwrap();
         assert_eq!(err.code, "not_supported");
         assert!(err.message.contains("pkexec"));
-        let err = start_pkexec(&["/tmp/.mount_X/sk".into()], Some("/nonexistent/pkexec")).err().unwrap();
+        let err = start_pkexec(&["/tmp/.mount_X/sk".into()], Some("/nonexistent/pkexec"))
+            .err()
+            .unwrap();
         assert!(err.code == "not_supported" && err.message.contains("AppImage"));
-        let err = start_pkexec(&["spaceknife".into()], Some("/nonexistent/pkexec")).err().unwrap();
+        let err = start_pkexec(&["spaceknife".into()], Some("/nonexistent/pkexec"))
+            .err()
+            .unwrap();
         assert_eq!(err.code, "not_supported"); // pkexec needs an absolute path
     }
 

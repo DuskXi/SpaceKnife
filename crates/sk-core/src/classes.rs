@@ -80,7 +80,9 @@ impl PartialEq for ClassTable {
 }
 
 static DEFAULT: LazyLock<Arc<ClassTable>> = LazyLock::new(|| {
-    Arc::new(ClassTable::new(builtin_classes().to_vec()).expect("the built-in class table is valid"))
+    Arc::new(
+        ClassTable::new(builtin_classes().to_vec()).expect("the built-in class table is valid"),
+    )
 });
 
 impl ClassTable {
@@ -105,14 +107,22 @@ impl ClassTable {
         }
         let mut names: HashMap<String, &str> = HashMap::new();
         for c in &classes {
-            for name in std::iter::once(&c.id).chain(std::iter::once(&c.name)).chain(&c.aliases) {
+            for name in std::iter::once(&c.id)
+                .chain(std::iter::once(&c.name))
+                .chain(&c.aliases)
+            {
                 let owner = *names.entry(casefold(name)).or_insert(&c.id);
                 if owner != c.id {
                     return Err(format!("class name {name:?} is used by two classes"));
                 }
             }
         }
-        Ok(ClassTable { classes, ids, other_index, ext_classes })
+        Ok(ClassTable {
+            classes,
+            ids,
+            other_index,
+            ext_classes,
+        })
     }
 
     /// The built-in table.
@@ -144,7 +154,9 @@ impl ClassTable {
     pub fn class_indices_of(&self, ext: &str) -> &[u8] {
         let found = match self.ext_classes.get(ext) {
             Some(v) => Some(v),
-            None if ext.chars().any(char::is_uppercase) => self.ext_classes.get(&ext.to_lowercase()),
+            None if ext.chars().any(char::is_uppercase) => {
+                self.ext_classes.get(&ext.to_lowercase())
+            }
             None => None,
         };
         found.map_or(&[], Vec::as_slice)
@@ -152,7 +164,10 @@ impl ClassTable {
 
     /// Ids of the classes `ext` belongs to (empty: 「其他」).
     pub fn classes_of(&self, ext: &str) -> Vec<&str> {
-        self.class_indices_of(ext).iter().map(|&i| self.ids[i as usize].as_str()).collect()
+        self.class_indices_of(ext)
+            .iter()
+            .map(|&i| self.ids[i as usize].as_str())
+            .collect()
     }
 
     /// The class that colours `ext`: its first class, else `other`.
@@ -166,7 +181,10 @@ impl ClassTable {
     /// extensions (including "no extension") that are in no class.
     pub fn ext_mask<E: AsRef<str>>(&self, class_id: &str, ext_table: &[E]) -> Vec<bool> {
         if class_id == OTHER {
-            return ext_table.iter().map(|e| self.class_indices_of(e.as_ref()).is_empty()).collect();
+            return ext_table
+                .iter()
+                .map(|e| self.class_indices_of(e.as_ref()).is_empty())
+                .collect();
         }
         let Some(idx) = self.index_of(class_id) else {
             return vec![false; ext_table.len()];
@@ -186,14 +204,22 @@ impl ClassTable {
         if !owners.contains(&stream) {
             return None;
         }
-        let rest = owners.iter().filter(|o| **o != stream).map(|s| (*s).to_owned()).collect();
+        let rest = owners
+            .iter()
+            .filter(|o| **o != stream)
+            .map(|s| (*s).to_owned())
+            .collect();
         Some((stream, packet, rest))
     }
 
     /// The classes one file belongs to (empty: 「其他」); the reference for the column forms.
     pub fn file_classes(&self, ext: &str, size: i64) -> Vec<String> {
         match self.split_of(ext) {
-            None => self.classes_of(ext).into_iter().map(str::to_owned).collect(),
+            None => self
+                .classes_of(ext)
+                .into_iter()
+                .map(str::to_owned)
+                .collect(),
             Some((stream, packet, rest)) => {
                 if looks_like_stream(size, packet) {
                     vec![stream.to_owned()]
@@ -213,7 +239,12 @@ impl ClassTable {
                 continue;
             }
             if let Some((stream, packet, rest)) = self.split_of(e) {
-                out.push(Split { ext_id: i, packet, stream: stream.to_owned(), rest });
+                out.push(Split {
+                    ext_id: i,
+                    packet,
+                    stream: stream.to_owned(),
+                    rest,
+                });
             }
         }
         out
@@ -230,12 +261,16 @@ impl ClassTable {
         let by_ext = self.ext_mask(class_id, ext_table);
         let splits = self.splits(ext_table);
         if splits.is_empty() {
-            return ext.iter().map(|&e| by_ext.get(e as usize).copied().unwrap_or(false)).collect();
+            return ext
+                .iter()
+                .map(|&e| by_ext.get(e as usize).copied().unwrap_or(false))
+                .collect();
         }
         // per extension id: None (by extension) or Some((packet, stream matches, plain matches))
         let mut rule: Vec<Option<(i64, bool, bool)>> = vec![None; ext_table.len()];
         for sp in &splits {
-            let plain = sp.rest.iter().any(|r| r == class_id) || (class_id == OTHER && sp.rest.is_empty());
+            let plain =
+                sp.rest.iter().any(|r| r == class_id) || (class_id == OTHER && sp.rest.is_empty());
             rule[sp.ext_id] = Some((sp.packet, class_id == sp.stream, plain));
         }
         ext.iter()
@@ -261,7 +296,8 @@ impl ClassTable {
 
 // --------------------------------------------------------------------------- the active table
 
-static ACTIVE: LazyLock<RwLock<Arc<ClassTable>>> = LazyLock::new(|| RwLock::new(ClassTable::builtin()));
+static ACTIVE: LazyLock<RwLock<Arc<ClassTable>>> =
+    LazyLock::new(|| RwLock::new(ClassTable::builtin()));
 static VERSION: AtomicU64 = AtomicU64::new(0);
 
 /// The table in use now (the user's, else the built-in one).
@@ -283,14 +319,20 @@ pub fn set_active(table: Arc<ClassTable>) {
 /// The table's classes as the interface shows them (built-in names in its language, M7.5).
 pub fn shown(table: &ClassTable) -> Vec<FilterClassInfo> {
     let lang = i18n::language();
-    table.classes.iter().map(|c| localized(c, lang.as_str())).collect()
+    table
+        .classes
+        .iter()
+        .map(|c| localized(c, lang.as_str()))
+        .collect()
 }
 
 /// A built-in class's name as shown in a translated interface -> its own name (not a rename).
 fn own_name(cid: Option<&str>, name: &str) -> String {
     let lang = i18n::language();
     if lang != SOURCE
-        && let Some(base) = builtin_classes().iter().find(|c| Some(c.id.as_str()) == cid)
+        && let Some(base) = builtin_classes()
+            .iter()
+            .find(|c| Some(c.id.as_str()) == cid)
         && name == localized(base, lang.as_str()).name
     {
         return base.name.clone();
@@ -354,11 +396,17 @@ pub fn build(edits: &[ClassEdit]) -> Result<ClassTable, String> {
         if name.is_empty() {
             return Err(t("类别名不能为空").to_owned());
         }
-        let mut bad: Vec<char> = name.chars().filter(|c| matches!(c, ';' | ':' | '"' | '\\')).collect();
+        let mut bad: Vec<char> = name
+            .chars()
+            .filter(|c| matches!(c, ';' | ':' | '"' | '\\'))
+            .collect();
         if !bad.is_empty() {
             bad.sort_unstable();
             bad.dedup();
-            return Err(tr!("类别名里不能有「{chars}」", chars = bad.into_iter().collect::<String>()));
+            return Err(tr!(
+                "类别名里不能有「{chars}」",
+                chars = bad.into_iter().collect::<String>()
+            ));
         }
         let mut exts: Vec<String> = Vec::new();
         for chunk in &e.extensions {
@@ -386,15 +434,23 @@ pub fn build(edits: &[ClassEdit]) -> Result<ClassTable, String> {
         let base = builtin_classes().iter().find(|c| c.id == cid);
         let name_fold = casefold(&name);
         let mut aliases: Vec<String> = base
-            .map(|b| b.aliases.iter().filter(|a| casefold(a) != name_fold).cloned().collect())
+            .map(|b| {
+                b.aliases
+                    .iter()
+                    .filter(|a| casefold(a) != name_fold)
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default();
         if let Some(b) = base
             && casefold(&b.name) != name_fold
         {
             aliases.push(b.name.clone()); // renamed: `:class:<old name>` keeps working
         }
-        let spellings: Vec<String> =
-            std::iter::once(cid.clone()).chain(std::iter::once(name.clone())).chain(aliases.clone()).collect();
+        let spellings: Vec<String> = std::iter::once(cid.clone())
+            .chain(std::iter::once(name.clone()))
+            .chain(aliases.clone())
+            .collect();
         for spelling in &spellings {
             if let Some(owner) = taken.get(&casefold(spelling))
                 && *owner != cid
@@ -447,9 +503,17 @@ pub fn colors_for_both(raw: Value) -> Value {
 
 fn parse_file(text: &str) -> Result<ClassTable, String> {
     let raw: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let items = raw.get("classes").and_then(Value::as_array).ok_or("no 'classes' list")?.clone();
+    let items = raw
+        .get("classes")
+        .and_then(Value::as_array)
+        .ok_or("no 'classes' list")?
+        .clone();
     let version = raw.get("version").and_then(Value::as_i64).unwrap_or(1);
-    let items: Vec<Value> = if version < 2 { items.into_iter().map(colors_for_both).collect() } else { items };
+    let items: Vec<Value> = if version < 2 {
+        items.into_iter().map(colors_for_both).collect()
+    } else {
+        items
+    };
     let classes = items
         .into_iter()
         .map(serde_json::from_value::<FilterClassInfo>)
@@ -463,13 +527,27 @@ pub fn load(path: &Path) -> Arc<ClassTable> {
     match std::fs::read_to_string(path) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => ClassTable::builtin(),
         Err(e) => {
-            tracing::warn!("{}", tr!("类别表 {} 读不出来，改用内置类别：{}", path = path, reason = e.to_string()));
+            tracing::warn!(
+                "{}",
+                tr!(
+                    "类别表 {} 读不出来，改用内置类别：{}",
+                    path = path,
+                    reason = e.to_string()
+                )
+            );
             ClassTable::builtin()
         }
         Ok(text) => match parse_file(&text) {
             Ok(t) => Arc::new(t),
             Err(e) => {
-                tracing::warn!("{}", tr!("类别表 {} 读不出来，改用内置类别：{}", path = path, reason = e));
+                tracing::warn!(
+                    "{}",
+                    tr!(
+                        "类别表 {} 读不出来，改用内置类别：{}",
+                        path = path,
+                        reason = e
+                    )
+                );
                 ClassTable::builtin()
             }
         },
@@ -516,8 +594,19 @@ mod tests {
 
     fn sizes() -> Vec<i64> {
         vec![
-            0, 1, 4096, 65_536, STREAM_ALIGNED_MIN - 188, TS_REC, TS_REC + 1, MTS_REC, MTS_REC + 1,
-            3 << 20, STREAM_ANY_MIN - 1, STREAM_ANY_MIN, 5 * STREAM_ANY_MIN + 7,
+            0,
+            1,
+            4096,
+            65_536,
+            STREAM_ALIGNED_MIN - 188,
+            TS_REC,
+            TS_REC + 1,
+            MTS_REC,
+            MTS_REC + 1,
+            3 << 20,
+            STREAM_ANY_MIN - 1,
+            STREAM_ANY_MIN,
+            5 * STREAM_ANY_MIN + 7,
         ]
     }
 
@@ -545,10 +634,21 @@ mod tests {
             let set: HashSet<_> = c.extensions.iter().collect();
             assert_eq!(set.len(), c.extensions.len(), "{}", c.id);
             for e in &c.extensions {
-                assert!(e.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()), "{e}");
+                assert!(
+                    e.chars()
+                        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()),
+                    "{e}"
+                );
             }
         }
-        assert!(builtin_classes().iter().find(|c| c.id == OTHER).unwrap().extensions.is_empty());
+        assert!(
+            builtin_classes()
+                .iter()
+                .find(|c| c.id == OTHER)
+                .unwrap()
+                .extensions
+                .is_empty()
+        );
         assert_eq!(builtin_classes().last().unwrap().id, OTHER);
     }
 
@@ -600,7 +700,12 @@ mod tests {
 
     #[test]
     fn user_edits_decide_the_split() {
-        let video: Vec<&str> = builtin_classes()[0].extensions.iter().map(String::as_str).filter(|e| *e != "ts").collect();
+        let video: Vec<&str> = builtin_classes()[0]
+            .extensions
+            .iter()
+            .map(String::as_str)
+            .filter(|e| *e != "ts")
+            .collect();
         let no_ts = edited(&[("video", Some(video))]);
         assert_eq!(no_ts.file_classes("ts", STREAM_ANY_MIN), ["code"]);
         assert!(no_ts.splits(&["", "ts"]).is_empty());
@@ -621,7 +726,10 @@ mod tests {
                 size.push(s);
             }
         }
-        for table in [ClassTable::builtin().as_ref().clone(), edited(&[("code", None)])] {
+        for table in [
+            ClassTable::builtin().as_ref().clone(),
+            edited(&[("code", None)]),
+        ] {
             for cid in table.ids() {
                 let got = table.node_mask(cid, &ext_table, &ext, &size);
                 let want: Vec<bool> = ext
@@ -629,7 +737,11 @@ mod tests {
                     .zip(&size)
                     .map(|(&e, &s)| {
                         let fc = table.file_classes(ext_table[e as usize], s);
-                        if fc.is_empty() { cid == OTHER } else { fc.iter().any(|c| c == cid) }
+                        if fc.is_empty() {
+                            cid == OTHER
+                        } else {
+                            fc.iter().any(|c| c == cid)
+                        }
                     })
                     .collect();
                 assert_eq!(got, want, "{cid}");
@@ -647,14 +759,19 @@ mod tests {
             color: String::new(),
             color_light: String::new(),
         };
-        let many: Vec<ClassEdit> =
-            (0..MAX_CLASSES).map(|i| edit(None, format!("c{i}"), vec![format!("e{i}")])).collect();
+        let many: Vec<ClassEdit> = (0..MAX_CLASSES)
+            .map(|i| edit(None, format!("c{i}"), vec![format!("e{i}")]))
+            .collect();
         let mut most = many[..MAX_CLASSES - 1].to_vec();
         most.push(edit(Some(OTHER), "其他".into(), vec![]));
         assert_eq!(build(&most).unwrap().classes().len(), MAX_CLASSES);
         let mut too_many = many.clone();
         too_many.push(edit(Some(OTHER), "其他".into(), vec![]));
-        assert!(build(&too_many).unwrap_err().contains(&MAX_CLASSES.to_string()));
+        assert!(
+            build(&too_many)
+                .unwrap_err()
+                .contains(&MAX_CLASSES.to_string())
+        );
         const { assert!(MAX_CLASSES < 255) };
     }
 
@@ -682,7 +799,14 @@ mod tests {
         assert!(build(&[edit(Some(OTHER), "其他", &["x"])]).is_err());
         assert!(build(&[edit(None, "a:b", &[]), edit(Some(OTHER), "其他", &[])]).is_err());
         assert!(build(&[edit(None, "x", &[])]).is_err()); // no other
-        assert!(build(&[edit(None, "Video", &[]), edit(Some("video"), "视频", &[]), edit(Some(OTHER), "o", &[])]).is_err());
+        assert!(
+            build(&[
+                edit(None, "Video", &[]),
+                edit(Some("video"), "视频", &[]),
+                edit(Some(OTHER), "o", &[])
+            ])
+            .is_err()
+        );
     }
 
     #[test]

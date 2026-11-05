@@ -65,8 +65,9 @@ pub struct ChannelClosed(pub String);
 // --------------------------------------------------------------------------- seams
 
 /// `scan_mft_image(path, duty, progress)` → (table, geometry scalars).
-pub type ScanImageFn =
-    Box<dyn Fn(&str, f64, &mut dyn FnMut(u64, u64)) -> io::Result<(MftTable, Scalars)> + Send + Sync>;
+pub type ScanImageFn = Box<
+    dyn Fn(&str, f64, &mut dyn FnMut(u64, u64)) -> io::Result<(MftTable, Scalars)> + Send + Sync,
+>;
 pub type OpenUsnFn = Box<dyn Fn(&str) -> Result<Box<dyn UsnDevice>, UsnError> + Send + Sync>;
 pub type CheckNtfsFn = Box<dyn Fn(&str) -> Result<Scalars, OpError> + Send + Sync>;
 
@@ -95,7 +96,11 @@ pub fn geometry_scalars(g: &MftGeometry) -> Scalars {
     m
 }
 
-fn real_scan_image(path: &str, duty: f64, progress: &mut dyn FnMut(u64, u64)) -> io::Result<(MftTable, Scalars)> {
+fn real_scan_image(
+    path: &str,
+    duty: f64,
+    progress: &mut dyn FnMut(u64, u64),
+) -> io::Result<(MftTable, Scalars)> {
     let opts = sk_native::mft::ScanOptions {
         duty,
         progress: Some(progress),
@@ -105,7 +110,11 @@ fn real_scan_image(path: &str, duty: f64, progress: &mut dyn FnMut(u64, u64)) ->
     Ok((table, geometry_scalars(&geo)))
 }
 
-fn real_scan_volume(volume: &str, duty: f64, progress: &mut dyn FnMut(u64, u64)) -> io::Result<(MftTable, Scalars)> {
+fn real_scan_volume(
+    volume: &str,
+    duty: f64,
+    progress: &mut dyn FnMut(u64, u64),
+) -> io::Result<(MftTable, Scalars)> {
     let opts = sk_native::mft::ScanOptions {
         duty,
         progress: Some(progress),
@@ -122,14 +131,27 @@ pub fn check_ntfs(volume: &str) -> Result<Scalars, OpError> {
         let d = super::win32::volume_details(volume);
         let upper = volume.to_uppercase();
         if !LOCAL_DRIVES.contains(&d.drive_type) {
-            return Err(OpError::new(code::NOT_NTFS, tr!("{volume} 不是本地卷", volume = &upper)));
+            return Err(OpError::new(
+                code::NOT_NTFS,
+                tr!("{volume} 不是本地卷", volume = &upper),
+            ));
         }
         if d.device.starts_with("\\??\\") {
-            return Err(OpError::new(code::NOT_NTFS, tr!("{volume} 是 SUBST 映射的文件夹，不是卷", volume = &upper)));
+            return Err(OpError::new(
+                code::NOT_NTFS,
+                tr!("{volume} 是 SUBST 映射的文件夹，不是卷", volume = &upper),
+            ));
         }
         if d.fs_type != "NTFS" {
-            let fs = if d.fs_type.is_empty() { t("无法识别").to_owned() } else { d.fs_type.clone() };
-            return Err(OpError::new(code::NOT_NTFS, tr!("{volume} 不是 NTFS 卷（{fs}）", volume = &upper, fs = fs)));
+            let fs = if d.fs_type.is_empty() {
+                t("无法识别").to_owned()
+            } else {
+                d.fs_type.clone()
+            };
+            return Err(OpError::new(
+                code::NOT_NTFS,
+                tr!("{volume} 不是 NTFS 卷（{fs}）", volume = &upper, fs = fs),
+            ));
         }
         Ok(d.scalars())
     }
@@ -143,13 +165,18 @@ pub fn check_ntfs(volume: &str) -> Result<Scalars, OpError> {
 /// The error a failed `$MFT` read is reported with.
 fn mft_failure(e: io::Error) -> OpError {
     match e.kind() {
-        io::ErrorKind::PermissionDenied => {
-            OpError::new(code::NEEDS_ADMIN, tr!("需要管理员权限：{reason}", reason = e.to_string()))
-        }
-        io::ErrorKind::Unsupported => {
-            OpError::new(code::NOT_SUPPORTED, tr!("MFT 读取不可用：{reason}", reason = e.to_string()))
-        }
-        _ => OpError::new(code::IO_ERROR, tr!("读取 $MFT 失败：{reason}", reason = e.to_string())),
+        io::ErrorKind::PermissionDenied => OpError::new(
+            code::NEEDS_ADMIN,
+            tr!("需要管理员权限：{reason}", reason = e.to_string()),
+        ),
+        io::ErrorKind::Unsupported => OpError::new(
+            code::NOT_SUPPORTED,
+            tr!("MFT 读取不可用：{reason}", reason = e.to_string()),
+        ),
+        _ => OpError::new(
+            code::IO_ERROR,
+            tr!("读取 $MFT 失败：{reason}", reason = e.to_string()),
+        ),
     }
 }
 
@@ -183,7 +210,11 @@ pub trait BulkTable: Default {
     /// Room for `rows` rows.
     fn reserve(&mut self, rows: usize);
     /// Append one decoded frame (its names blob already appended at `base`); the rows added.
-    fn add_frame(&mut self, f: &sk_protocol::binary::DecodedFrame<'_>, base: u32) -> Result<usize, String>;
+    fn add_frame(
+        &mut self,
+        f: &sk_protocol::binary::DecodedFrame<'_>,
+        base: u32,
+    ) -> Result<usize, String>;
     fn names_mut(&mut self) -> &mut Vec<u8>;
 }
 
@@ -193,11 +224,17 @@ fn extend_column<T: sk_protocol::binary::Element>(
     name: &str,
     rows: usize,
 ) -> Result<(), String> {
-    let view = f.column(name).ok_or_else(|| tr!("缺少列 {name}", name = name))?;
+    let view = f
+        .column(name)
+        .ok_or_else(|| tr!("缺少列 {name}", name = name))?;
     if view.dtype != T::DTYPE || view.count != rows {
         return Err(tr!("列 {key} 的长度或类型不一致", key = name));
     }
-    out.extend(view.bytes.chunks_exact(view.dtype.size()).map(T::from_le_slice));
+    out.extend(
+        view.bytes
+            .chunks_exact(view.dtype.size())
+            .map(T::from_le_slice),
+    );
     Ok(())
 }
 
@@ -292,7 +329,11 @@ pub fn batch_bounds(name_len: &[u16], batch_rows: usize, names_budget: usize) ->
 /// The names of one batch as their own blob, plus offsets into it.
 ///
 /// A contiguous (or nearly so) range is sliced; scattered names are gathered in row order.
-pub fn rebase_names<'a>(names: &'a [u8], off: &[u32], len: &[u16]) -> Result<(std::borrow::Cow<'a, [u8]>, Vec<u32>), String> {
+pub fn rebase_names<'a>(
+    names: &'a [u8],
+    off: &[u32],
+    len: &[u16],
+) -> Result<(std::borrow::Cow<'a, [u8]>, Vec<u32>), String> {
     if off.is_empty() {
         return Ok((std::borrow::Cow::Borrowed(&[]), Vec::new()));
     }
@@ -329,8 +370,15 @@ pub fn encode_batch<T: BulkTable>(
     request_id: &RequestId,
     out: &mut Vec<u8>,
 ) -> Result<(), String> {
-    let (blob, rebased) = rebase_names(table.names(), &table.name_off()[r.clone()], &table.name_len()[r.clone()])?;
-    let mut b = FrameBuilder::new(T::STREAM, T::LAYOUT).seq(seq).is_final(is_final).request_id(Some(request_id));
+    let (blob, rebased) = rebase_names(
+        table.names(),
+        &table.name_off()[r.clone()],
+        &table.name_len()[r.clone()],
+    )?;
+    let mut b = FrameBuilder::new(T::STREAM, T::LAYOUT)
+        .seq(seq)
+        .is_final(is_final)
+        .request_id(Some(request_id));
     table.push_columns(&mut b, r, &rebased);
     b.push_blob("names", &blob);
     b.finish_into(out).map_err(|e| e.0)
@@ -376,7 +424,9 @@ impl<'c> Service<'c> {
 
     fn send_frame(&self, buffers: &[&[u8]]) -> Result<(), ChannelClosed> {
         let _guard = self.write_lock.lock();
-        self.chan.send(buffers, Some(self.io_timeout)).map_err(|e| ChannelClosed(e.to_string()))
+        self.chan
+            .send(buffers, Some(self.io_timeout))
+            .map_err(|e| ChannelClosed(e.to_string()))
     }
 
     pub fn send(&self, reply: &Reply) -> Result<(), ChannelClosed> {
@@ -399,7 +449,11 @@ impl<'c> Service<'c> {
 
     fn serve_inner(&self, idle_timeout: Duration) -> Result<(), ChannelClosed> {
         loop {
-            let (kind, body) = match self.chan.read_frame(Some(idle_timeout), Some(self.io_timeout), MAX_CONTROL_BYTES) {
+            let (kind, body) = match self.chan.read_frame(
+                Some(idle_timeout),
+                Some(self.io_timeout),
+                MAX_CONTROL_BYTES,
+            ) {
                 Ok(frame) => frame,
                 Err(ChanError::Timeout) => {
                     tracing::info!("idle for {:.0} s, exiting", idle_timeout.as_secs_f64());
@@ -455,13 +509,30 @@ impl<'c> Service<'c> {
             }
             Call::VolumeInfo { volume } => self.volume_info(volume).map(|r| (r, Scalars::new())),
             Call::QueryUsn { volume } => self.query_usn(volume).map(|r| (r, Scalars::new())),
-            Call::ReadUsn { volume, start_usn, journal_id, max_rows, duty } => {
-                self.read_usn(id, volume, *start_usn, *journal_id, *max_rows as usize, *duty)?
-            }
-            Call::ScanMft { volume, batch_rows, duty } => self.scan_mft(id, volume, *batch_rows as usize, *duty)?,
-            Call::ScanMftImage { path, batch_rows, duty } => {
-                self.scan_mft_image(id, path, *batch_rows as usize, *duty)?
-            }
+            Call::ReadUsn {
+                volume,
+                start_usn,
+                journal_id,
+                max_rows,
+                duty,
+            } => self.read_usn(
+                id,
+                volume,
+                *start_usn,
+                *journal_id,
+                *max_rows as usize,
+                *duty,
+            )?,
+            Call::ScanMft {
+                volume,
+                batch_rows,
+                duty,
+            } => self.scan_mft(id, volume, *batch_rows as usize, *duty)?,
+            Call::ScanMftImage {
+                path,
+                batch_rows,
+                duty,
+            } => self.scan_mft_image(id, path, *batch_rows as usize, *duty)?,
             Call::DiskHealth { disk } => self.disk_health(disk).map(|r| (r, Scalars::new())),
         };
         match outcome {
@@ -489,34 +560,70 @@ impl<'c> Service<'c> {
         #[cfg(windows)]
         if self.elevated {
             let data = super::win32::ntfs_volume_data(volume).map_err(|e| {
-                OpError::new(code::IO_ERROR, tr!("读取 NTFS 卷参数失败：{reason}", reason = e.to_string()))
+                OpError::new(
+                    code::IO_ERROR,
+                    tr!("读取 NTFS 卷参数失败：{reason}", reason = e.to_string()),
+                )
             })?;
             result.extend(data);
         }
         Ok(result)
     }
 
-    fn scan_mft(&self, id: u64, volume: &str, batch_rows: usize, duty: f64) -> Result<OpResult, ChannelClosed> {
+    fn scan_mft(
+        &self,
+        id: u64,
+        volume: &str,
+        batch_rows: usize,
+        duty: f64,
+    ) -> Result<OpResult, ChannelClosed> {
         if !self.elevated {
             return Ok(Err(OpError::new(code::NEEDS_ADMIN, t("需要管理员权限"))));
         }
         if !cfg!(windows) {
-            return Ok(Err(OpError::new(code::NOT_SUPPORTED, t("MFT 快速扫描只支持 Windows NTFS 卷"))));
+            return Ok(Err(OpError::new(
+                code::NOT_SUPPORTED,
+                t("MFT 快速扫描只支持 Windows NTFS 卷"),
+            )));
         }
         if let Err(e) = self.check_ntfs(volume) {
             return Ok(Err(e));
         }
         let volume = volume.to_uppercase();
-        self.scan(id, batch_rows, &|duty, progress| real_scan_volume(&volume, duty, progress), duty)
+        self.scan(
+            id,
+            batch_rows,
+            &|duty, progress| real_scan_volume(&volume, duty, progress),
+            duty,
+        )
     }
 
-    fn scan_mft_image(&self, id: u64, path: &str, batch_rows: usize, duty: f64) -> Result<OpResult, ChannelClosed> {
+    fn scan_mft_image(
+        &self,
+        id: u64,
+        path: &str,
+        batch_rows: usize,
+        duty: f64,
+    ) -> Result<OpResult, ChannelClosed> {
         if self.elevated {
-            return Ok(Err(OpError::new(code::FORBIDDEN, t("scan_mft_image 只在非提权助手中可用"))));
+            return Ok(Err(OpError::new(
+                code::FORBIDDEN,
+                t("scan_mft_image 只在非提权助手中可用"),
+            )));
         }
         match &self.hooks.scan_image {
-            Some(f) => self.scan(id, batch_rows, &|duty, progress| f(path, duty, progress), duty),
-            None => self.scan(id, batch_rows, &|duty, progress| real_scan_image(path, duty, progress), duty),
+            Some(f) => self.scan(
+                id,
+                batch_rows,
+                &|duty, progress| f(path, duty, progress),
+                duty,
+            ),
+            None => self.scan(
+                id,
+                batch_rows,
+                &|duty, progress| real_scan_image(path, duty, progress),
+                duty,
+            ),
         }
     }
 
@@ -550,7 +657,10 @@ impl<'c> Service<'c> {
 
     fn disk_health(&self, disk: &str) -> Result<Scalars, OpError> {
         if !cfg!(target_os = "linux") {
-            return Err(OpError::new(code::NOT_SUPPORTED, t("助手只在 Linux 上读取磁盘自己的健康记录")));
+            return Err(OpError::new(
+                code::NOT_SUPPORTED,
+                t("助手只在 Linux 上读取磁盘自己的健康记录"),
+            ));
         }
         if !self.elevated {
             return Err(OpError::new(code::NEEDS_ADMIN, t("需要管理员权限")));
@@ -559,7 +669,10 @@ impl<'c> Service<'c> {
         {
             use crate::disks::passthrough::{RecordError, read_record_system};
             return match read_record_system(disk) {
-                Ok(pages) => Ok(pages.into_iter().map(|(k, v)| (k, Value::from(v))).collect()),
+                Ok(pages) => Ok(pages
+                    .into_iter()
+                    .map(|(k, v)| (k, Value::from(v)))
+                    .collect()),
                 Err(RecordError::Passthrough(why)) => Err(OpError::new(code::NOT_SUPPORTED, why)),
                 Err(RecordError::Invalid(why)) => Err(OpError::new(
                     code::IO_ERROR,
@@ -567,14 +680,21 @@ impl<'c> Service<'c> {
                 )),
                 Err(RecordError::Io(e)) => Err(OpError::new(
                     code::IO_ERROR,
-                    tr!("读取 {disk} 失败：{reason}", disk = disk, reason = e.to_string()),
+                    tr!(
+                        "读取 {disk} 失败：{reason}",
+                        disk = disk,
+                        reason = e.to_string()
+                    ),
                 )),
             };
         }
         #[allow(unreachable_code)]
         {
             let _ = disk;
-            Err(OpError::new(code::NOT_SUPPORTED, t("助手只在 Linux 上读取磁盘自己的健康记录")))
+            Err(OpError::new(
+                code::NOT_SUPPORTED,
+                t("助手只在 Linux 上读取磁盘自己的健康记录"),
+            ))
         }
     }
 
@@ -647,7 +767,12 @@ impl<'c> Service<'c> {
     }
 
     /// Bulk frames of `batch_rows` rows; frame k+1 is encoded while frame k is written.
-    fn send_table<T: BulkTable + Sync>(&self, id: u64, table: &T, batch_rows: usize) -> Result<Scalars, ChannelClosed> {
+    fn send_table<T: BulkTable + Sync>(
+        &self,
+        id: u64,
+        table: &T,
+        batch_rows: usize,
+    ) -> Result<Scalars, ChannelClosed> {
         let rows = table.rows();
         let bounds = batch_bounds(table.name_len(), batch_rows, NAMES_BUDGET);
         let frames = bounds.len();
@@ -675,7 +800,14 @@ impl<'c> Service<'c> {
                 .expect("spawn the frame writer");
             for (seq, r) in bounds.iter().enumerate() {
                 let mut buf = back_rx.try_recv().unwrap_or_default();
-                if let Err(why) = encode_batch(table, r.clone(), seq as u64, seq + 1 == frames, &request_id, &mut buf) {
+                if let Err(why) = encode_batch(
+                    table,
+                    r.clone(),
+                    seq as u64,
+                    seq + 1 == frames,
+                    &request_id,
+                    &mut buf,
+                ) {
                     failure = Some(OpError::new(code::INTERNAL, why));
                     break;
                 }
@@ -685,7 +817,9 @@ impl<'c> Service<'c> {
                 }
             }
             drop(tx);
-            writer.join().unwrap_or_else(|_| Err(ChannelClosed("frame writer panicked".into())))
+            writer
+                .join()
+                .unwrap_or_else(|_| Err(ChannelClosed("frame writer panicked".into())))
         });
         written?;
         if let Some(e) = failure {
@@ -713,10 +847,15 @@ impl<'c> Service<'c> {
             std::thread::Builder::new()
                 .name("sk-helper-beat".into())
                 .spawn_scoped(s, move || {
-                    while let Err(mpsc::RecvTimeoutError::Timeout) = stop_rx.recv_timeout(HEARTBEAT) {
+                    while let Err(mpsc::RecvTimeoutError::Timeout) = stop_rx.recv_timeout(HEARTBEAT)
+                    {
                         let progress = Reply::Progress {
                             id,
-                            phase: if beat.phase.load(Ordering::Relaxed) == 0 { Phase::Scan } else { Phase::Send },
+                            phase: if beat.phase.load(Ordering::Relaxed) == 0 {
+                                Phase::Scan
+                            } else {
+                                Phase::Send
+                            },
                             elapsed: start.elapsed().as_secs_f64(),
                             done: beat.done.load(Ordering::Relaxed),
                             total: beat.total.load(Ordering::Relaxed),
@@ -765,15 +904,28 @@ fn parse_args(args: &[OsString]) -> Result<Args, String> {
             Some((n, v)) if n.starts_with("--") => (n.to_owned(), Some(OsString::from(v))),
             _ => (flag.to_string(), None),
         };
-        let mut value = || inline.clone().or_else(|| it.next().cloned()).ok_or_else(|| format!("{name}: expected a value"));
+        let mut value = || {
+            inline
+                .clone()
+                .or_else(|| it.next().cloned())
+                .ok_or_else(|| format!("{name}: expected a value"))
+        };
         match name.as_str() {
             "--pipe" => pipe = Some(value()?.to_string_lossy().into_owned()),
             "--token-file" => token_file = Some(PathBuf::from(value()?)),
             "--server-pid" => {
-                server_pid = Some(value()?.to_string_lossy().parse::<u32>().map_err(|e| format!("--server-pid: {e}"))?)
+                server_pid = Some(
+                    value()?
+                        .to_string_lossy()
+                        .parse::<u32>()
+                        .map_err(|e| format!("--server-pid: {e}"))?,
+                )
             }
             "--idle-timeout" => {
-                idle_timeout = value()?.to_string_lossy().parse::<f64>().map_err(|e| format!("--idle-timeout: {e}"))?
+                idle_timeout = value()?
+                    .to_string_lossy()
+                    .parse::<f64>()
+                    .map_err(|e| format!("--idle-timeout: {e}"))?
             }
             "--log-level" => {
                 let v = value()?.to_string_lossy().to_uppercase();
@@ -835,7 +987,10 @@ pub fn run_main_with(args: &[OsString], hooks: Hooks) -> i32 {
     let token = match read_token_file(&args.token_file) {
         Ok(t) => t,
         Err(e) => {
-            tracing::error!("{}", tr!("无法读取令牌文件：{reason}", reason = e.to_string()));
+            tracing::error!(
+                "{}",
+                tr!("无法读取令牌文件：{reason}", reason = e.to_string())
+            );
             return 2;
         }
     };
@@ -874,7 +1029,10 @@ pub fn run_main_with(args: &[OsString], hooks: Hooks) -> i32 {
             tracing::error!("{}", tr!("发送 hello 失败：{reason}", reason = e.0));
             return 3;
         }
-        tracing::debug!("connected to backend {} (elevated: {elevated})", args.server_pid);
+        tracing::debug!(
+            "connected to backend {} (elevated: {elevated})",
+            args.server_pid
+        );
         service.serve(Duration::from_secs_f64(args.idle_timeout));
         0
     })();
@@ -923,7 +1081,10 @@ mod tests {
             macro_rules! permute {
                 ($($f:ident),*) => { $( t.$f = perm.iter().map(|&p| t.$f[p]).collect(); )* };
             }
-            permute!(record, parent, name_off, name_len, kind, flags, size, alloc, ads_size, ads_alloc, mtime, ctime, atime, nlink);
+            permute!(
+                record, parent, name_off, name_len, kind, flags, size, alloc, ads_size, ads_alloc,
+                mtime, ctime, atime, nlink
+            );
         }
         t
     }
@@ -940,8 +1101,14 @@ mod tests {
     fn batches_split_by_rows_and_name_bytes() {
         let lengths = [100u16; 10];
         assert_eq!(batch_bounds(&lengths, 4, 10_000), vec![0..4, 4..8, 8..10]);
-        assert_eq!(batch_bounds(&lengths, 100, 250), vec![0..2, 2..4, 4..6, 6..8, 8..10]);
-        assert_eq!(batch_bounds(&lengths, 100, 50), (0..10).map(|i| i..i + 1).collect::<Vec<_>>()); // one oversized name each
+        assert_eq!(
+            batch_bounds(&lengths, 100, 250),
+            vec![0..2, 2..4, 4..6, 6..8, 8..10]
+        );
+        assert_eq!(
+            batch_bounds(&lengths, 100, 50),
+            (0..10).map(|i| i..i + 1).collect::<Vec<_>>()
+        ); // one oversized name each
         assert_eq!(batch_bounds(&[], 5, 10), vec![0..0]);
     }
 
@@ -957,9 +1124,20 @@ mod tests {
             }
         }
         let ordered = synth(1000, false);
-        let (blob, new_off) = rebase_names(&ordered.names, &ordered.name_off[10..20], &ordered.name_len[10..20]).unwrap();
+        let (blob, new_off) = rebase_names(
+            &ordered.names,
+            &ordered.name_off[10..20],
+            &ordered.name_len[10..20],
+        )
+        .unwrap();
         assert_eq!(new_off[0], 0);
-        assert_eq!(blob.len(), ordered.name_len[10..20].iter().map(|&l| l as usize).sum::<usize>());
+        assert_eq!(
+            blob.len(),
+            ordered.name_len[10..20]
+                .iter()
+                .map(|&l| l as usize)
+                .sum::<usize>()
+        );
         assert!(rebase_names(b"abc", &[2], &[5]).is_err());
     }
 
@@ -983,7 +1161,10 @@ mod tests {
         }
         assert_eq!(joined.record, table.record);
         assert_eq!(joined.nlink, table.nlink);
-        assert_eq!(gather(&joined.names, &joined.name_off, &joined.name_len), gather(&table.names, &table.name_off, &table.name_len));
+        assert_eq!(
+            gather(&joined.names, &joined.name_off, &joined.name_len),
+            gather(&table.names, &table.name_off, &table.name_len)
+        );
         // an empty table still makes one frame with every column
         let empty = MftTable::default();
         encode_batch(&empty, 0..0, 0, true, &rid, &mut buf).unwrap();
@@ -994,11 +1175,31 @@ mod tests {
 
     #[test]
     fn helper_arguments() {
-        let ok = parse_args(&["--pipe", "p", "--token-file", "/t", "--server-pid", "12", "--idle-timeout=0.5"].map(OsString::from)).unwrap();
-        assert_eq!((ok.pipe.as_str(), ok.server_pid, ok.idle_timeout), ("p", 12, 0.5));
+        let ok = parse_args(
+            &[
+                "--pipe",
+                "p",
+                "--token-file",
+                "/t",
+                "--server-pid",
+                "12",
+                "--idle-timeout=0.5",
+            ]
+            .map(OsString::from),
+        )
+        .unwrap();
+        assert_eq!(
+            (ok.pipe.as_str(), ok.server_pid, ok.idle_timeout),
+            ("p", 12, 0.5)
+        );
         assert!(parse_args(&["--pipe", "p"].map(OsString::from)).is_err());
         assert!(parse_args(&["--bogus", "1"].map(OsString::from)).is_err());
-        assert!(parse_args(&["--pipe", "p", "--token-file", "/t", "--server-pid", "x"].map(OsString::from)).is_err());
+        assert!(
+            parse_args(
+                &["--pipe", "p", "--token-file", "/t", "--server-pid", "x"].map(OsString::from)
+            )
+            .is_err()
+        );
     }
 
     #[test]

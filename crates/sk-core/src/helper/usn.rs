@@ -42,7 +42,15 @@ const V2_SIZE: usize = 60;
 const V3_SIZE: usize = 76;
 
 /// Output columns of `read_usn`, layout `usn.v1` (plus the `names` blob), in wire order.
-pub const COLUMNS: [&str; 7] = ["frn", "parent_frn", "usn", "reason", "attrs", "name_off", "name_len"];
+pub const COLUMNS: [&str; 7] = [
+    "frn",
+    "parent_frn",
+    "usn",
+    "reason",
+    "attrs",
+    "name_off",
+    "name_len",
+];
 
 /// A journal operation failed; `code` is the helper's error code (`usn_gone` …).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -175,7 +183,8 @@ impl UsnRows {
         self.usn.extend_from_slice(&other.usn);
         self.reason.extend_from_slice(&other.reason);
         self.attrs.extend_from_slice(&other.attrs);
-        self.name_off.extend(other.name_off.iter().map(|o| o + base as u32));
+        self.name_off
+            .extend(other.name_off.iter().map(|o| o + base as u32));
         self.name_len.extend_from_slice(&other.name_len);
         self.names.extend_from_slice(&other.names);
         Ok(())
@@ -213,7 +222,10 @@ pub fn utf16_to_wtf8(units: &[u8], out: &mut Vec<u8>) {
     while i < n {
         let u = unit(i) as u32;
         i += 1;
-        let cp = if (0xD800..0xDC00).contains(&u) && i < n && (0xDC00..0xE000).contains(&(unit(i) as u32)) {
+        let cp = if (0xD800..0xDC00).contains(&u)
+            && i < n
+            && (0xDC00..0xE000).contains(&(unit(i) as u32))
+        {
             let lo = unit(i) as u32;
             i += 1;
             0x10000 + ((u - 0xD800) << 10) + (lo - 0xDC00)
@@ -222,7 +234,9 @@ pub fn utf16_to_wtf8(units: &[u8], out: &mut Vec<u8>) {
         };
         match cp {
             0..=0x7F => out.push(cp as u8),
-            0x80..=0x7FF => out.extend_from_slice(&[0xC0 | (cp >> 6) as u8, 0x80 | (cp & 0x3F) as u8]),
+            0x80..=0x7FF => {
+                out.extend_from_slice(&[0xC0 | (cp >> 6) as u8, 0x80 | (cp & 0x3F) as u8])
+            }
             0x800..=0xFFFF => out.extend_from_slice(&[
                 0xE0 | (cp >> 12) as u8,
                 0x80 | ((cp >> 6) & 0x3F) as u8,
@@ -255,7 +269,10 @@ pub fn parse_read_buffer(buf: &[u8], limit: Option<usize>) -> Result<UsnChunk, S
     let mut rows = UsnRows::with_capacity(((end - 8) / 96).min(limit.unwrap_or(usize::MAX)));
     while pos < end {
         if end - pos < 8 {
-            return Err(tr!("USN 读取结果末尾有 {size} 字节不完整的记录", size = end - pos));
+            return Err(tr!(
+                "USN 读取结果末尾有 {size} 字节不完整的记录",
+                size = end - pos
+            ));
         }
         let length = u32_at(buf, pos) as usize;
         let major = u16_at(buf, pos + 4);
@@ -283,13 +300,32 @@ pub fn parse_read_buffer(buf: &[u8], limit: Option<usize>) -> Result<UsnChunk, S
         }
         let rec = &buf[pos..pos + length];
         let (frn, parent, usn, reason, attrs, name_len, name_off) = if major == 2 {
-            (u64_at(rec, 8), u64_at(rec, 16), u64_at(rec, 24) as i64, u32_at(rec, 40), u32_at(rec, 52), u16_at(rec, 56), u16_at(rec, 58))
+            (
+                u64_at(rec, 8),
+                u64_at(rec, 16),
+                u64_at(rec, 24) as i64,
+                u32_at(rec, 40),
+                u32_at(rec, 52),
+                u16_at(rec, 56),
+                u16_at(rec, 58),
+            )
         } else {
-            (u64_at(rec, 8), u64_at(rec, 24), u64_at(rec, 40) as i64, u32_at(rec, 56), u32_at(rec, 68), u16_at(rec, 72), u16_at(rec, 74))
+            (
+                u64_at(rec, 8),
+                u64_at(rec, 24),
+                u64_at(rec, 40) as i64,
+                u32_at(rec, 56),
+                u32_at(rec, 68),
+                u16_at(rec, 72),
+                u16_at(rec, 74),
+            )
         };
         let (start, nbytes) = (name_off as usize, name_len as usize);
         if start < head || start + nbytes > length || nbytes % 2 != 0 {
-            return Err(tr!("第 {index} 条 USN 记录的文件名越界或长度为奇数", index = rows.len() + 1));
+            return Err(tr!(
+                "第 {index} 条 USN 记录的文件名越界或长度为奇数",
+                index = rows.len() + 1
+            ));
         }
         let before = rows.names.len();
         utf16_to_wtf8(&rec[start..start + nbytes], &mut rows.names);
@@ -372,11 +408,17 @@ impl UsnStats {
 
 /// Read buffer for at most `max_rows` records: small reads stay small.
 pub fn buffer_size(max_rows: usize) -> usize {
-    max_rows.saturating_mul(BYTES_PER_ROW).clamp(MIN_BUFFER, MAX_BUFFER)
+    max_rows
+        .saturating_mul(BYTES_PER_ROW)
+        .clamp(MIN_BUFFER, MAX_BUFFER)
 }
 
 /// `usn_gone` unless the records from `start_usn` on are all still there.
-pub fn check_checkpoint(journal: &Journal, start_usn: i64, journal_id: u64) -> Result<(), UsnError> {
+pub fn check_checkpoint(
+    journal: &Journal,
+    start_usn: i64,
+    journal_id: u64,
+) -> Result<(), UsnError> {
     if journal.journal_id != journal_id {
         return Err(UsnError::new(
             code::USN_GONE,
@@ -400,7 +442,11 @@ pub fn check_checkpoint(journal: &Journal, start_usn: i64, journal_id: u64) -> R
     if start_usn > journal.next_usn {
         return Err(UsnError::new(
             code::USN_GONE,
-            tr!("检查点 {start} 超出日志末尾 {end}", start = start_usn, end = journal.next_usn),
+            tr!(
+                "检查点 {start} 超出日志末尾 {end}",
+                start = start_usn,
+                end = journal.next_usn
+            ),
         ));
     }
     Ok(())
@@ -434,7 +480,14 @@ pub fn read_journal(
     opts: ReadOptions<'_>,
 ) -> Result<(UsnTable, UsnStats), UsnError> {
     let t0 = Instant::now();
-    read_journal_paced(device, start_usn, journal_id, opts, &mut || t0.elapsed(), &mut std::thread::sleep)
+    read_journal_paced(
+        device,
+        start_usn,
+        journal_id,
+        opts,
+        &mut || t0.elapsed(),
+        &mut std::thread::sleep,
+    )
 }
 
 /// [`read_journal`] with the clock and the sleep passed in (tests).
@@ -474,12 +527,17 @@ pub fn read_journal_paced(
         let busy = clock().saturating_sub(started);
         stats.reads += 1;
         stats.bytes_read += buf.len() as u64;
-        let chunk = parse_read_buffer(&buf, Some(max_rows - out.len()))
-            .map_err(|why| UsnError::new(code::IO_ERROR, tr!("USN 日志记录无法解析：{reason}", reason = why)))?;
+        let chunk = parse_read_buffer(&buf, Some(max_rows - out.len())).map_err(|why| {
+            UsnError::new(
+                code::IO_ERROR,
+                tr!("USN 日志记录无法解析：{reason}", reason = why),
+            )
+        })?;
         if out.is_empty() {
             out = chunk.rows;
         } else {
-            out.append(&chunk.rows).map_err(|why| UsnError::new(code::IO_ERROR, why))?;
+            out.append(&chunk.rows)
+                .map_err(|why| UsnError::new(code::IO_ERROR, why))?;
         }
         stats.skipped += chunk.skipped;
         if chunk.truncated {
@@ -492,7 +550,10 @@ pub fn read_journal_paced(
         }
         pos = chunk.next_usn;
         if let Some(p) = opts.progress.as_mut() {
-            p((pos.min(target) - start_usn) as u64, (target - start_usn) as u64);
+            p(
+                (pos.min(target) - start_usn) as u64,
+                (target - start_usn) as u64,
+            );
         }
         if opts.duty < 1.0 && pos < target {
             sleep(busy.mul_f64((1.0 - opts.duty) / opts.duty));
@@ -513,9 +574,10 @@ fn recheck(device: &mut dyn UsnDevice, journal_id: u64, err: UsnError) -> UsnErr
         return err;
     }
     match device.query() {
-        Ok(j) if j.journal_id != journal_id => {
-            UsnError::new(code::USN_GONE, tr!("读取期间 USN 日志被重建（{reason}）", reason = err.message))
-        }
+        Ok(j) if j.journal_id != journal_id => UsnError::new(
+            code::USN_GONE,
+            tr!("读取期间 USN 日志被重建（{reason}）", reason = err.message),
+        ),
         _ => err,
     }
 }
@@ -529,7 +591,10 @@ pub fn open_volume(volume: &str) -> Result<Box<dyn UsnDevice>, UsnError> {
     #[cfg(not(windows))]
     {
         let _ = volume;
-        Err(UsnError::new(code::NOT_SUPPORTED, t("USN 日志只支持 Windows NTFS 卷")))
+        Err(UsnError::new(
+            code::NOT_SUPPORTED,
+            t("USN 日志只支持 Windows NTFS 卷"),
+        ))
     }
 }
 
@@ -549,7 +614,12 @@ mod win {
         let code = err.raw_os_error().unwrap_or(0) as u32;
         UsnError::new(
             error_code(code),
-            tr!("{what}失败：[WinError {code}] {reason}", what = what, code = code, reason = err.to_string()),
+            tr!(
+                "{what}失败：[WinError {code}] {reason}",
+                what = what,
+                code = code,
+                reason = err.to_string()
+            ),
         )
     }
 
@@ -564,8 +634,13 @@ mod win {
         pub fn open(volume: &str) -> Result<Self, UsnError> {
             let volume = volume.to_uppercase();
             let path = format!("\\\\.\\{volume}");
-            let Some(handle) = Handle::open(&path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0) else {
-                return Err(fail(&tr!("打开卷 {volume}", volume = &volume), std::io::Error::last_os_error()));
+            let Some(handle) =
+                Handle::open(&path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, 0)
+            else {
+                return Err(fail(
+                    &tr!("打开卷 {volume}", volume = &volume),
+                    std::io::Error::last_os_error(),
+                ));
             };
             Ok(Self {
                 volume,
@@ -578,9 +653,15 @@ mod win {
     impl UsnDevice for VolumeJournal {
         fn query(&mut self) -> Result<Journal, UsnError> {
             let what = tr!("查询 {volume} 的 USN 日志", volume = &self.volume);
-            let out = self.handle.ioctl(FSCTL_QUERY_USN_JOURNAL, &[], JOURNAL_BUFFER).map_err(|e| fail(&what, e))?;
+            let out = self
+                .handle
+                .ioctl(FSCTL_QUERY_USN_JOURNAL, &[], JOURNAL_BUFFER)
+                .map_err(|e| fail(&what, e))?;
             if out.len() < 56 {
-                return Err(UsnError::new(code::IO_ERROR, tr!("USN 日志信息只有 {size} 字节", size = out.len())));
+                return Err(UsnError::new(
+                    code::IO_ERROR,
+                    tr!("USN 日志信息只有 {size} 字节", size = out.len()),
+                ));
             }
             if out.len() >= 60 {
                 let max_major = u16_at(&out, 58);
@@ -598,7 +679,12 @@ mod win {
             })
         }
 
-        fn read(&mut self, start_usn: i64, journal_id: u64, size: usize) -> Result<Vec<u8>, UsnError> {
+        fn read(
+            &mut self,
+            start_usn: i64,
+            journal_id: u64,
+            size: usize,
+        ) -> Result<Vec<u8>, UsnError> {
             // READ_USN_JOURNAL_DATA_V1: StartUsn, ReasonMask, ReturnOnlyOnClose, Timeout,
             // BytesToWaitFor, UsnJournalID, MinMajorVersion, MaxMajorVersion (sizeof 48)
             let mut data = Vec::with_capacity(48);
@@ -612,7 +698,9 @@ mod win {
             data.extend_from_slice(&self.max_major.to_le_bytes());
             data.extend_from_slice(&[0; 4]);
             let what = tr!("读取 {volume} 的 USN 日志", volume = &self.volume);
-            self.handle.ioctl(FSCTL_READ_USN_JOURNAL, &data, size).map_err(|e| fail(&what, e))
+            self.handle
+                .ioctl(FSCTL_READ_USN_JOURNAL, &data, size)
+                .map_err(|e| fail(&what, e))
         }
     }
 }

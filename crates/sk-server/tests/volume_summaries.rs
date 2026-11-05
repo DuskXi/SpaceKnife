@@ -43,10 +43,23 @@ fn kept(v: &VolumeInfo, at: DateTime<Utc>) -> Kept {
         method: Some(TreeMethod::Mft),
         snapshot: None,
         classes: vec![
-            ClassStat { class_id: "game".into(), bytes: 211_000_000_000, files: 9_000, parts: vec![] },
-            ClassStat { class_id: "archive".into(), bytes: 62_000_000_000, files: 400, parts: vec![] },
+            ClassStat {
+                class_id: "game".into(),
+                bytes: 211_000_000_000,
+                files: 9_000,
+                parts: vec![],
+            },
+            ClassStat {
+                class_id: "archive".into(),
+                bytes: 62_000_000_000,
+                files: 400,
+                parts: vec![],
+            },
         ],
-        folders: vec![FolderStat { name: "Koikatsu Party".into(), bytes: 211_000_000_000 }],
+        folders: vec![FolderStat {
+            name: "Koikatsu Party".into(),
+            bytes: 211_000_000_000,
+        }],
     }
 }
 
@@ -60,7 +73,13 @@ fn kept_across_a_restart() {
     let again = SummaryStore::open(Some(file.clone())); // a new backend reads the same file
     let k = again.get(&d()).unwrap();
     assert_eq!(k, kept(&d(), now()));
-    assert_eq!(k.classes.iter().map(|c| c.class_id.as_str()).collect::<Vec<_>>(), ["game", "archive"]);
+    assert_eq!(
+        k.classes
+            .iter()
+            .map(|c| c.class_id.as_str())
+            .collect::<Vec<_>>(),
+        ["game", "archive"]
+    );
     assert_eq!(k.folders[0].name, "Koikatsu Party");
     assert!(!file.with_extension("tmp").exists());
 }
@@ -70,8 +89,16 @@ fn only_the_same_volume() {
     let tmp = tempfile::tempdir().unwrap();
     let store = SummaryStore::open(Some(tmp.path().join("s.json")));
     store.put([kept(&d(), now())]);
-    assert!(store.get(&volume("D:\\", "0000-0001", 800_000_000_000)).is_none()); // another drive on D:
-    assert!(store.get(&volume("E:\\", "7A3C-11F0", 800_000_000_000)).is_none());
+    assert!(
+        store
+            .get(&volume("D:\\", "0000-0001", 800_000_000_000))
+            .is_none()
+    ); // another drive on D:
+    assert!(
+        store
+            .get(&volume("E:\\", "7A3C-11F0", 800_000_000_000))
+            .is_none()
+    );
     let no_serial = volume("D:\\", "", 800_000_000_000);
     assert_eq!(identity(&no_serial), "ntfs:800000000000");
     store.put([kept(&no_serial, now())]);
@@ -83,10 +110,19 @@ fn only_the_same_volume() {
 fn a_newer_scan_replaces_an_older_one() {
     let tmp = tempfile::tempdir().unwrap();
     let store = SummaryStore::open(Some(tmp.path().join("s.json")));
-    store.put([Kept { files: 1, ..kept(&d(), now()) }]);
-    store.put([Kept { files: 2, ..kept(&d(), now() - Duration::hours(1)) }]); // older: ignored
+    store.put([Kept {
+        files: 1,
+        ..kept(&d(), now())
+    }]);
+    store.put([Kept {
+        files: 2,
+        ..kept(&d(), now() - Duration::hours(1))
+    }]); // older: ignored
     assert_eq!(store.get(&d()).unwrap().files, 1);
-    store.put([Kept { files: 3, ..kept(&d(), now() + Duration::hours(1)) }]);
+    store.put([Kept {
+        files: 3,
+        ..kept(&d(), now() + Duration::hours(1))
+    }]);
     assert_eq!(store.get(&d()).unwrap().files, 3);
 }
 
@@ -98,7 +134,10 @@ fn no_write_when_nothing_changed() {
     store.put([kept(&d(), now())]);
     let stamp = std::fs::metadata(&file).unwrap().modified().unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20));
-    store.put([Kept { seen: now() + Duration::minutes(5), ..kept(&d(), now()) }]); // the same scan read again
+    store.put([Kept {
+        seen: now() + Duration::minutes(5),
+        ..kept(&d(), now())
+    }]); // the same scan read again
     store.seen(&[d()], Some(now() + Duration::hours(1))); // seen within the day
     assert_eq!(std::fs::metadata(&file).unwrap().modified().unwrap(), stamp);
 }
@@ -108,9 +147,13 @@ fn bounded_and_forgotten() {
     let tmp = tempfile::tempdir().unwrap();
     let store = SummaryStore::open(Some(tmp.path().join("s.json")));
     let recent = Utc::now();
-    let drives: Vec<VolumeInfo> =
-        (0..KEEP + 5).map(|i| volume(&format!("/media/drive{i}"), &format!("S{i}"), 1 << 40)).collect();
-    store.put(drives.iter().enumerate().map(|(i, v)| Kept { seen: recent - Duration::minutes(i as i64), ..kept(v, recent) }));
+    let drives: Vec<VolumeInfo> = (0..KEEP + 5)
+        .map(|i| volume(&format!("/media/drive{i}"), &format!("S{i}"), 1 << 40))
+        .collect();
+    store.put(drives.iter().enumerate().map(|(i, v)| Kept {
+        seen: recent - Duration::minutes(i as i64),
+        ..kept(v, recent)
+    }));
     assert_eq!(store.len(), KEEP);
     assert!(store.get(&drives[0]).is_some() && store.get(drives.last().unwrap()).is_none()); // the least recently seen go
     // an unplugged drive keeps its entry for a while, then goes; a present one stays
@@ -138,13 +181,25 @@ fn what_the_page_shows_of_it() {
     let snap = tmp.path().join("D-0198a2ef3ad2").join("2026-10-21.sks");
     std::fs::create_dir_all(snap.parent().unwrap()).unwrap();
     std::fs::write(&snap, b"x").unwrap();
-    let k = Kept { snapshot: Some(snap.display().to_string()), ..kept(&d(), now()) };
+    let k = Kept {
+        snapshot: Some(snap.display().to_string()),
+        ..kept(&d(), now())
+    };
     let scan = k.volume_scan(1);
     assert_eq!(scan.source.as_str(), "kept");
     assert!(scan.scan_id.is_none() && !scan.running);
     assert_eq!(scan.files, 42_533);
-    assert_eq!(scan.snapshot.as_deref(), Some(snap.display().to_string().as_str()));
-    assert_eq!(scan.classes.iter().map(|c| c.class_id.as_str()).collect::<Vec<_>>(), ["game"]);
+    assert_eq!(
+        scan.snapshot.as_deref(),
+        Some(snap.display().to_string().as_str())
+    );
+    assert_eq!(
+        scan.classes
+            .iter()
+            .map(|c| c.class_id.as_str())
+            .collect::<Vec<_>>(),
+        ["game"]
+    );
     assert_eq!(scan.folders, k.folders);
     std::fs::remove_file(&snap).unwrap();
     assert!(k.volume_scan(5).snapshot.is_none()); // the snapshot is gone: nothing to open

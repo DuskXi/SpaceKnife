@@ -113,7 +113,10 @@ pub fn scan(args: ScanArgs) -> i32 {
     super::init_warnings();
     super::apply_language();
     let mut out = Console::stdout();
-    interrupt::install(line_text(&Text::styled(&tr!("已中断"), Style::YELLOW), &out));
+    interrupt::install(line_text(
+        &Text::styled(&tr!("已中断"), Style::YELLOW),
+        &out,
+    ));
     let code = scan_with(&args, &mut out);
     out.flush();
     code
@@ -131,7 +134,10 @@ pub fn scan_with(args: &ScanArgs, out: &mut Console) -> i32 {
     let (scanner, result, method) = match run_scan(args, limit, out) {
         Ok(r) => r,
         Err(reason) => {
-            out.text(&Text::styled(&tr!("无法扫描：{reason}", reason = reason), Style::RED));
+            out.text(&Text::styled(
+                &tr!("无法扫描：{reason}", reason = reason),
+                Style::RED,
+            ));
             return 2;
         }
     };
@@ -142,7 +148,10 @@ pub fn scan_with(args: &ScanArgs, out: &mut Console) -> i32 {
     let roots = scanner.roots();
     let mut snap = None;
     if result.state == ScanState::Done && !args.no_snapshot {
-        let keys: Vec<String> = roots.iter().map(|r| r.path.to_string_lossy().into_owned()).collect();
+        let keys: Vec<String> = roots
+            .iter()
+            .map(|r| r.path.to_string_lossy().into_owned())
+            .collect();
         let path = snapshot::auto_path(&keys, None, &sk_core::paths::snapshots_dir());
         if save(&scanner, &path, &method) {
             if let Some(folder) = path.parent() {
@@ -154,14 +163,24 @@ pub fn scan_with(args: &ScanArgs, out: &mut Console) -> i32 {
     if let Some(path) = &args.save {
         save(&scanner, path, &method);
     }
-    out.panel(&summary(&scanner, &roots, &result, snap.as_deref(), &method), &tr!("扫描结果"));
+    out.panel(
+        &summary(&scanner, &roots, &result, snap.as_deref(), &method),
+        &tr!("扫描结果"),
+    );
     if args.profile {
-        let (lines, title) = if method.mft { mft_profile(&method) } else { profile(&scanner, method.gated) };
+        let (lines, title) = if method.mft {
+            mft_profile(&method)
+        } else {
+            profile(&scanner, method.gated)
+        };
         out.panel(&lines, &title);
     }
     let r = scanner.store().read();
     for root in &roots {
-        let title = tr!("{path} 里最大的项目", path = root.path.display().to_string());
+        let title = tr!(
+            "{path} 里最大的项目",
+            path = root.path.display().to_string()
+        );
         out.table(&top_table(&r, root.node, args.top, args.depth, &title));
         out.blank();
     }
@@ -175,24 +194,39 @@ fn line_text(text: &Text, out: &Console) -> String {
     let mut c = Console::capture(out.width);
     c.text(text);
     let s = c.take();
-    if cfg!(windows) { s.replace('\n', "\r\n") } else { s }
+    if cfg!(windows) {
+        s.replace('\n', "\r\n")
+    } else {
+        s
+    }
 }
 
 type Limit = Option<(sk_core::io::Level, Option<f64>)>;
 
-fn run_scan(args: &ScanArgs, limit: Limit, out: &mut Console) -> Result<(Arc<Scanner>, ScanProgress, ScanMethod), String> {
+fn run_scan(
+    args: &ScanArgs,
+    limit: Limit,
+    out: &mut Console,
+) -> Result<(Arc<Scanner>, ScanProgress, ScanMethod), String> {
     let concurrency = match args.workers {
         Some(0) => 1, // Python's in-process walker: one listing at a time
         Some(n) => n,
         None => 0,
     };
-    let mut opts = ScanOptions { concurrency, cross_mounts: args.cross_mounts && !args.no_cross_mounts, ..Default::default() };
+    let mut opts = ScanOptions {
+        concurrency,
+        cross_mounts: args.cross_mounts && !args.no_cross_mounts,
+        ..Default::default()
+    };
     // the disk-load limit: paced like the app's scans
     let mut registry = None;
     let mut low_io = false;
     if let Some((level, custom)) = limit {
         let most = sk_core::scan::listing_max(); // the governor counts folders listed at once
-        let reg = sk_core::io::IoRegistry::new(sk_core::io::RegistryOptions { max_workers: most, ..Default::default() });
+        let reg = sk_core::io::IoRegistry::new(sk_core::io::RegistryOptions {
+            max_workers: most,
+            ..Default::default()
+        });
         reg.start();
         let first = sk_core::scan::normalise_root(&args.paths[0]);
         let gov = reg.governor_for_path(&first);
@@ -205,7 +239,11 @@ fn run_scan(args: &ScanArgs, limit: Limit, out: &mut Console) -> Result<(Arc<Sca
     let gated = opts.gate.is_some();
     let result = (|| {
         let scanner = Arc::new(Scanner::new(&args.paths, opts).map_err(|e| e.to_string())?);
-        let mut method = ScanMethod { asked: args.mft, gated, ..Default::default() };
+        let mut method = ScanMethod {
+            asked: args.mft,
+            gated,
+            ..Default::default()
+        };
         if args.mft {
             try_mft(&scanner, &mut method, limit, out);
             if method.mft {
@@ -282,25 +320,39 @@ fn progress_line(out: &mut Console, tick: usize, started: Instant, p: &ScanProgr
     let path = if p.current_path.chars().count() < 60 {
         p.current_path.clone()
     } else {
-        let tail: String = p.current_path.chars().rev().take(58).collect::<Vec<_>>().into_iter().rev().collect();
+        let tail: String = p
+            .current_path
+            .chars()
+            .rev()
+            .take(58)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
         format!("…{tail}")
     };
     let mut t = Text::styled(&SPINNER[tick % SPINNER.len()].to_string(), ACCENT);
-    t.push(" ", Style::NONE).push(&tr!("扫描中"), Style::BOLD).push(" ", Style::NONE);
+    t.push(" ", Style::NONE)
+        .push(&tr!("扫描中"), Style::BOLD)
+        .push(" ", Style::NONE);
     t.append(bar_text(p.progress, 28, tick));
-    let pct = p.progress.map(|f| format!("{:4.1}%", f * 100.0)).unwrap_or_default();
+    let pct = p
+        .progress
+        .map(|f| format!("{:4.1}%", f * 100.0))
+        .unwrap_or_default();
     t.push(&format!(" {pct} "), Style::NONE);
     let rate = i18n::format("{r:,.0f}", &[("r", Arg::Float(p.rate))]);
     t.push(
-        &tr!(
-            "{task.fields[items]} 项 · {task.fields[size]} · 每秒 {task.fields[rate]} 项",
-        )
-        .replace("{task.fields[items]}", &fmt::count(p.items))
-        .replace("{task.fields[size]}", &fmt::size(p.bytes_alloc as f64))
-        .replace("{task.fields[rate]}", &rate),
+        &tr!("{task.fields[items]} 项 · {task.fields[size]} · 每秒 {task.fields[rate]} 项",)
+            .replace("{task.fields[items]}", &fmt::count(p.items))
+            .replace("{task.fields[size]}", &fmt::size(p.bytes_alloc as f64))
+            .replace("{task.fields[rate]}", &rate),
         Style::NONE,
     );
-    t.push(&format!(" {} ", elapsed_clock(started.elapsed())), Style::rgb(0xF5C542));
+    t.push(
+        &format!(" {} ", elapsed_clock(started.elapsed())),
+        Style::rgb(0xF5C542),
+    );
     t.push(&path, MUTED);
     let mut c = Console::capture(out.width.saturating_sub(1));
     c.color = out.color;
@@ -324,13 +376,22 @@ fn clear_progress(out: &mut Console) {
 fn try_mft(scanner: &Arc<Scanner>, method: &mut ScanMethod, limit: Limit, out: &mut Console) {
     let roots = scanner.roots();
     if let Some(reason) = mft_unsupported(&roots) {
-        out.text(&Text::styled(&tr!("不支持 MFT 快速扫描：{reason}。改用硬扫描。", reason = &reason), WARN));
+        out.text(&Text::styled(
+            &tr!(
+                "不支持 MFT 快速扫描：{reason}。改用硬扫描。",
+                reason = &reason
+            ),
+            WARN,
+        ));
         method.fallback = reason;
         return;
     }
     let elevated = sk_core::helper::is_elevated();
     if !elevated {
-        out.text(&Text::styled(t("读取 $MFT 需要管理员权限：Windows 会请求一次授权。"), MUTED));
+        out.text(&Text::styled(
+            t("读取 $MFT 需要管理员权限：Windows 会请求一次授权。"),
+            MUTED,
+        ));
     }
     out.flush();
     let live = out.interactive();
@@ -343,10 +404,20 @@ fn try_mft(scanner: &Arc<Scanner>, method: &mut ScanMethod, limit: Limit, out: &
         }
         use std::io::Write as _;
         let mut line = Text::styled("⠿ ", ACCENT);
-        line.push(t("MFT 快速扫描"), Style::BOLD).push(" ", Style::NONE);
-        line.append(bar_text(fraction, 28, started.elapsed().as_millis() as usize / 100));
-        let pct = fraction.map(|f| format!("{:4.1}%", f * 100.0)).unwrap_or_default();
-        line.push(&format!(" {pct} {} ", elapsed_clock(started.elapsed())), Style::NONE);
+        line.push(t("MFT 快速扫描"), Style::BOLD)
+            .push(" ", Style::NONE);
+        line.append(bar_text(
+            fraction,
+            28,
+            started.elapsed().as_millis() as usize / 100,
+        ));
+        let pct = fraction
+            .map(|f| format!("{:4.1}%", f * 100.0))
+            .unwrap_or_default();
+        line.push(
+            &format!(" {pct} {} ", elapsed_clock(started.elapsed())),
+            Style::NONE,
+        );
         line.push(step, MUTED);
         let mut c = Console::capture(width.saturating_sub(1));
         c.color = color;
@@ -356,7 +427,14 @@ fn try_mft(scanner: &Arc<Scanner>, method: &mut ScanMethod, limit: Limit, out: &
         let _ = write!(o, "\r{}\x1b[K", line.trim_end_matches('\n'));
         let _ = o.flush();
     };
-    let outcome = read_mft(scanner, &roots[0], method, mft_duty(limit), elevated, &mut show);
+    let outcome = read_mft(
+        scanner,
+        &roots[0],
+        method,
+        mft_duty(limit),
+        elevated,
+        &mut show,
+    );
     if live {
         clear_progress(out);
     } else {
@@ -365,7 +443,10 @@ fn try_mft(scanner: &Arc<Scanner>, method: &mut ScanMethod, limit: Limit, out: &
     match outcome {
         Ok(()) => method.mft = true,
         Err(reason) => {
-            out.text(&Text::styled(&tr!("MFT 快速扫描不可用：{reason}；改用硬扫描", reason = &reason), WARN));
+            out.text(&Text::styled(
+                &tr!("MFT 快速扫描不可用：{reason}；改用硬扫描", reason = &reason),
+                WARN,
+            ));
             method.fallback = reason;
         }
     }
@@ -394,41 +475,64 @@ fn read_mft(
             reading = Instant::now();
             show(t("读取 $MFT"), None);
             let mut progress = |done: u64, total: u64| {
-                show(t("读取 $MFT"), (total > 0).then(|| done as f64 / total as f64));
+                show(
+                    t("读取 $MFT"),
+                    (total > 0).then(|| done as f64 / total as f64),
+                );
             };
-            let (tbl, _info) = sk_core::scan::mft::scan_volume(&volume, duty, Some(&mut progress), None)
-                .map_err(|e| e.to_string())?;
+            let (tbl, _info) =
+                sk_core::scan::mft::scan_volume(&volume, duty, Some(&mut progress), None)
+                    .map_err(|e| e.to_string())?;
             table = tbl;
-            method.phases.push(("read", reading.elapsed().as_secs_f64()));
+            method
+                .phases
+                .push(("read", reading.elapsed().as_secs_f64()));
         } else {
             show(t("启动读取 $MFT 的只读助手"), None);
-            let shared = sk_core::helper::SharedHelper::new(sk_core::helper::LaunchOptions::default());
+            let shared =
+                sk_core::helper::SharedHelper::new(sk_core::helper::LaunchOptions::default());
             let client = shared.get(true).map_err(|e| e.message.clone())?;
             helper = Some(shared);
             reading = Instant::now();
-            method.phases.push(("helper", (reading - started).as_secs_f64()));
+            method
+                .phases
+                .push(("helper", (reading - started).as_secs_f64()));
             let mut sending: Option<Instant> = None;
-            let mut progress = |phase: sk_core::helper::Phase, _elapsed: f64, read: Option<f64>| match phase {
-                sk_core::helper::Phase::Send => {
-                    sending.get_or_insert_with(Instant::now);
-                    show(t("接收读到的表"), None);
-                }
-                sk_core::helper::Phase::Scan => show(t("读取 $MFT"), read),
+            let mut progress =
+                |phase: sk_core::helper::Phase, _elapsed: f64, read: Option<f64>| match phase {
+                    sk_core::helper::Phase::Send => {
+                        sending.get_or_insert_with(Instant::now);
+                        show(t("接收读到的表"), None);
+                    }
+                    sk_core::helper::Phase::Scan => show(t("读取 $MFT"), read),
+                };
+            let opts = sk_core::helper::MftOptions {
+                duty,
+                ..Default::default()
             };
-            let opts = sk_core::helper::MftOptions { duty, ..Default::default() };
-            table = client.scan_mft(&volume, opts, Some(&mut progress)).map_err(|e| e.message.clone())?;
+            table = client
+                .scan_mft(&volume, opts, Some(&mut progress))
+                .map_err(|e| e.message.clone())?;
             let received = Instant::now();
-            method.phases.push(("read", (sending.unwrap_or(received) - reading).as_secs_f64()));
+            method.phases.push((
+                "read",
+                (sending.unwrap_or(received) - reading).as_secs_f64(),
+            ));
             if let Some(s) = sending {
-                method.phases.push(("receive", (received - s).as_secs_f64()));
+                method
+                    .phases
+                    .push(("receive", (received - s).as_secs_f64()));
             }
         }
         let building = Instant::now();
         show(t("建树"), None);
-        let store = sk_core::scan::mft::table_to_store(table, &root_path, &Default::default()).map_err(|e| e.to_string())?;
+        let store = sk_core::scan::mft::table_to_store(table, &root_path, &Default::default())
+            .map_err(|e| e.to_string())?;
         scanner.store().write().adopt(&store);
         drop(store);
-        method.phases.push(("build", building.elapsed().as_secs_f64()));
+        method
+            .phases
+            .push(("build", building.elapsed().as_secs_f64()));
         scanner.finish_external(ScanState::Done);
         Ok(())
     })();
@@ -463,7 +567,13 @@ fn tx(s: String) -> Text {
 }
 
 /// The summary panel's lines (`summary_panel`).
-pub fn summary(scanner: &Scanner, roots: &[RootInfo], result: &ScanProgress, snap: Option<&Path>, method: &ScanMethod) -> Text {
+pub fn summary(
+    scanner: &Scanner,
+    roots: &[RootInfo],
+    result: &ScanProgress,
+    snap: Option<&Path>,
+    method: &ScanMethod,
+) -> Text {
     let state = match result.state {
         ScanState::Done => Text::styled(t("完成"), Style::GREEN),
         ScanState::Cancelled => Text::styled(t("已停止（结果不完整）"), Style::YELLOW),
@@ -475,7 +585,11 @@ pub fn summary(scanner: &Scanner, roots: &[RootInfo], result: &ScanProgress, sna
         fill(
             t("状态 {state}    用时 {time}    速度 每秒 {rate} 项"),
             Style::NONE,
-            &[("state", state), ("time", tx(fmt::duration(result.elapsed_s))), ("rate", tx(rate))],
+            &[
+                ("state", state),
+                ("time", tx(fmt::duration(result.elapsed_s))),
+                ("rate", tx(rate)),
+            ],
         ),
         fill(
             t("项目 {items}（文件 {files} · 文件夹 {folders}）"),
@@ -490,7 +604,10 @@ pub fn summary(scanner: &Scanner, roots: &[RootInfo], result: &ScanProgress, sna
             t("占用 {size}    逻辑大小 {logical}"),
             Style::NONE,
             &[
-                ("size", Text::styled(&fmt::size(result.bytes_alloc as f64), Style::BOLD)),
+                (
+                    "size",
+                    Text::styled(&fmt::size(result.bytes_alloc as f64), Style::BOLD),
+                ),
                 ("logical", tx(fmt::size(result.bytes_size as f64))),
             ],
         ),
@@ -499,23 +616,38 @@ pub fn summary(scanner: &Scanner, roots: &[RootInfo], result: &ScanProgress, sna
         if method.mft {
             lines.push(Text::plain(t("方式 MFT 快速扫描（读取卷的 $MFT）")));
         } else {
-            lines.push(fill(t("方式 硬扫描（{reason}）"), Style::NONE, &[("reason", Text::styled(&method.fallback, WARN))]));
+            lines.push(fill(
+                t("方式 硬扫描（{reason}）"),
+                Style::NONE,
+                &[("reason", Text::styled(&method.fallback, WARN))],
+            ));
         }
     }
     for root in roots {
         let Some(vol) = &root.volume else { continue };
-        let fs = if vol.fs_type.is_empty() { t("未知").to_owned() } else { vol.fs_type.clone() };
+        let fs = if vol.fs_type.is_empty() {
+            t("未知").to_owned()
+        } else {
+            vol.fs_type.clone()
+        };
         let mut line = fill(
             t("卷 {mount} · {fs} · 共 {total}"),
             Style::NONE,
-            &[("mount", tx(vol.mount_point.clone())), ("fs", tx(fs)), ("total", tx(fmt::size(vol.total as f64)))],
+            &[
+                ("mount", tx(vol.mount_point.clone())),
+                ("fs", tx(fs)),
+                ("total", tx(fmt::size(vol.total as f64))),
+            ],
         );
         if let Some((free, unknown)) = scanner.space_summary(root) {
             line.push(" · ", Style::NONE);
             line.append(fill(
                 t("可用 {free} · 未知空间 {unknown}"),
                 Style::NONE,
-                &[("free", Text::styled(&fmt::size(free as f64), Style::GREEN)), ("unknown", tx(fmt::size(unknown as f64)))],
+                &[
+                    ("free", Text::styled(&fmt::size(free as f64), Style::GREEN)),
+                    ("unknown", tx(fmt::size(unknown as f64))),
+                ],
             ));
         }
         lines.push(line);
@@ -531,13 +663,20 @@ pub fn summary(scanner: &Scanner, roots: &[RootInfo], result: &ScanProgress, sna
         lines.push(fill(
             t("{denied}（已计入未知空间），例如 {example}"),
             Style::NONE,
-            &[("denied", Text::styled(&denied, WARN)), ("example", tx(example))],
+            &[
+                ("denied", Text::styled(&denied, WARN)),
+                ("example", tx(example)),
+            ],
         ));
     }
     if let Some(p) = snap {
         lines.push(Text::styled(&tr!("快照已保存：{path}", path = p), MUTED));
     }
-    let ntfs = roots.iter().any(|r| r.volume.as_ref().is_some_and(|v| v.fs_type.to_uppercase() == "NTFS"));
+    let ntfs = roots.iter().any(|r| {
+        r.volume
+            .as_ref()
+            .is_some_and(|v| v.fs_type.to_uppercase() == "NTFS")
+    });
     if !method.mft && ntfs {
         // hard scan on Windows: explain the accounting limits honestly
         lines.push(Text::styled(
@@ -565,20 +704,35 @@ fn profile(scanner: &Scanner, gated: bool) -> (Text, String) {
     let walker = t("原生遍历器");
     let bold = |s: String| Text::styled(&s, Style::BOLD);
     let mut lines = vec![
-        Text::plain(&tr!("{walker} · 列目录并发 {threads}", walker = walker, threads = p.threads)),
+        Text::plain(&tr!(
+            "{walker} · 列目录并发 {threads}",
+            walker = walker,
+            threads = p.threads
+        )),
         fill(
             t("列目录线程平均忙碌 {busy}（系统调用；接近 100% 说明瓶颈在磁盘或文件系统）"),
             Style::NONE,
             &[("busy", bold(percent0(p.busy())))],
         ),
-        fill(t("主线程合并结果 {ingest}（接近 100% 说明瓶颈在合并，加线程无用）"), Style::NONE, &[("ingest", bold(percent0(p.ingest())))]),
+        fill(
+            t("主线程合并结果 {ingest}（接近 100% 说明瓶颈在合并，加线程无用）"),
+            Style::NONE,
+            &[("ingest", bold(percent0(p.ingest())))],
+        ),
         Text::plain(&tr!("共 {slices} 批", slices = fmt::count(p.slices as i64))),
     ];
     if gated {
-        lines.push(fill(t("等磁盘负载上限放行 {limited}（没有任何目录在列）"), Style::NONE, &[("limited", bold(percent0(p.limited())))]));
+        lines.push(fill(
+            t("等磁盘负载上限放行 {limited}（没有任何目录在列）"),
+            Style::NONE,
+            &[("limited", bold(percent0(p.limited())))],
+        ));
     }
     if cfg!(target_os = "macos") {
-        lines.push(Text::plain(&tr!("批量列目录（getattrlistbulk）：{state}", state = sk_native::hardscan::bulk_listing())));
+        lines.push(Text::plain(&tr!(
+            "批量列目录（getattrlistbulk）：{state}",
+            state = sk_native::hardscan::bulk_listing()
+        )));
     }
     (join_lines(lines), tr!("耗时分解"))
 }
@@ -614,12 +768,32 @@ pub fn top_table(r: &Nodes, node: NodeId, limit: usize, depth: usize, title: &st
     let mut table = Table::new(Some(title.to_owned()), false);
     table
         .column(Column::new(t("名称")).no_wrap().max(44))
-        .column(Column::new(t("占用")).right().style(Style::BOLD).min(8).no_wrap())
+        .column(
+            Column::new(t("占用"))
+                .right()
+                .style(Style::BOLD)
+                .min(8)
+                .no_wrap(),
+        )
         .column(Column::new(t("占比")).right().min(6).no_wrap())
         .column(Column::new("").no_wrap().min(12).max(18))
         .column(Column::new(t("文件数")).right().style(MUTED).no_wrap());
-    let share_of = |alloc: i64| if total != 0 { alloc as f64 / total as f64 } else { 0.0 };
-    fn add(r: &Nodes, table: &mut Table, parent: NodeId, level: usize, limit: usize, depth: usize, share_of: &dyn Fn(i64) -> f64) {
+    let share_of = |alloc: i64| {
+        if total != 0 {
+            alloc as f64 / total as f64
+        } else {
+            0.0
+        }
+    };
+    fn add(
+        r: &Nodes,
+        table: &mut Table,
+        parent: NodeId,
+        level: usize,
+        limit: usize,
+        depth: usize,
+        share_of: &dyn Fn(i64) -> f64,
+    ) {
         let children = r.sorted_children(parent, SortBy::Size, true);
         let shown = &children[..limit.min(children.len())];
         let indent = "  ".repeat(level);
@@ -641,8 +815,18 @@ pub fn top_table(r: &Nodes, node: NodeId, limit: usize, depth: usize, title: &st
             if denied {
                 label.push(&format!("  {}", t("无法访问")), WARN);
             }
-            let files = if kind == Kind::Dir { fmt::count(r.tot_files(child) as i64) } else { String::new() };
-            table.row(vec![label, tx(fmt::size(alloc as f64)), tx(pct(share)), bar(share), tx(files)]);
+            let files = if kind == Kind::Dir {
+                fmt::count(r.tot_files(child) as i64)
+            } else {
+                String::new()
+            };
+            table.row(vec![
+                label,
+                tx(fmt::size(alloc as f64)),
+                tx(pct(share)),
+                bar(share),
+                tx(files),
+            ]);
             if level + 1 < depth && kind == Kind::Dir && r.child_count(child) > 0 {
                 add(r, table, child, level + 1, limit, depth, share_of);
             }
@@ -651,8 +835,17 @@ pub fn top_table(r: &Nodes, node: NodeId, limit: usize, depth: usize, title: &st
         if !rest.is_empty() {
             let rest_alloc: i64 = rest.iter().map(|&i| r.effective_size(i).1).sum();
             let share = share_of(rest_alloc);
-            let label = format!("{indent}  {}", tr!("…其余 {count} 项", count = fmt::count(rest.len() as i64)));
-            table.row(vec![Text::styled(&label, MUTED), tx(fmt::size(rest_alloc as f64)), tx(pct(share)), bar(share), Text::new()]);
+            let label = format!(
+                "{indent}  {}",
+                tr!("…其余 {count} 项", count = fmt::count(rest.len() as i64))
+            );
+            table.row(vec![
+                Text::styled(&label, MUTED),
+                tx(fmt::size(rest_alloc as f64)),
+                tx(pct(share)),
+                bar(share),
+                Text::new(),
+            ]);
         }
     }
     add(r, &mut table, node, 0, limit, depth, &share_of);
@@ -668,7 +861,8 @@ pub fn largest(r: &Nodes, limit: usize) -> Vec<NodeId> {
     let allocs = r.allocs();
     let file = Kind::File as u8;
     // a min-heap of the best `limit` (key: alloc, then the lower id)
-    let mut heap: BinaryHeap<std::cmp::Reverse<(i64, std::cmp::Reverse<NodeId>)>> = BinaryHeap::with_capacity(limit + 1);
+    let mut heap: BinaryHeap<std::cmp::Reverse<(i64, std::cmp::Reverse<NodeId>)>> =
+        BinaryHeap::with_capacity(limit + 1);
     for (i, (&k, &a)) in kinds.iter().zip(allocs).enumerate() {
         if k != file {
             continue;
@@ -685,7 +879,9 @@ pub fn largest(r: &Nodes, limit: usize) -> Vec<NodeId> {
     }
     let mut keys: Vec<(i64, std::cmp::Reverse<NodeId>)> = heap.into_iter().map(|k| k.0).collect();
     keys.sort_by(|a, b| b.cmp(a));
-    keys.into_iter().map(|(_, std::cmp::Reverse(id))| id).collect()
+    keys.into_iter()
+        .map(|(_, std::cmp::Reverse(id))| id)
+        .collect()
 }
 
 /// The largest files table (`_largest_files`); None when there are no files.
@@ -703,13 +899,20 @@ pub fn largest_files(r: &Nodes, limit: usize) -> Option<Table> {
         .column(Column::new(t("修改于")).right().style(MUTED))
         .column(Column::new(t("路径")).fold());
     for id in ids {
-        table.row(vec![tx(fmt::size(r.alloc(id) as f64)), tx(fmt::age(r.mtime(id) as i64, None)), tx(r.path_lossy(id))]);
+        table.row(vec![
+            tx(fmt::size(r.alloc(id) as f64)),
+            tx(fmt::age(r.mtime(id) as i64, None)),
+            tx(r.path_lossy(id)),
+        ]);
     }
     Some(table)
 }
 
 fn iso(dt: Option<sk_protocol::DateTime>) -> serde_json::Value {
-    dt.map_or(serde_json::Value::Null, |d| d.to_rfc3339_opts(chrono::SecondsFormat::Micros, false).into())
+    dt.map_or(serde_json::Value::Null, |d| {
+        d.to_rfc3339_opts(chrono::SecondsFormat::Micros, false)
+            .into()
+    })
 }
 
 /// Saves the scan's tree as a snapshot; false (and a note on stderr) when it cannot.
@@ -741,10 +944,18 @@ fn save(scanner: &Scanner, path: &Path, method: &ScanMethod) -> bool {
     );
     put("method", if method.mft { "mft" } else { "hard" }.into());
     let opts = snapshot::SaveOptions {
-        roots: roots.iter().map(|r| r.path.to_string_lossy().into_owned()).collect(),
+        roots: roots
+            .iter()
+            .map(|r| r.path.to_string_lossy().into_owned())
+            .collect(),
         volumes: roots
             .iter()
-            .map(|r| r.volume.as_ref().and_then(|v| serde_json::to_value(v.to_protocol()).ok()).unwrap_or_else(|| serde_json::json!({})))
+            .map(|r| {
+                r.volume
+                    .as_ref()
+                    .and_then(|v| serde_json::to_value(v.to_protocol()).ok())
+                    .unwrap_or_else(|| serde_json::json!({}))
+            })
             .collect(),
         stats,
         threads: sk_native::cpus::usable().min(snapshot::SAVE_THREADS),
@@ -757,7 +968,14 @@ fn save(scanner: &Scanner, path: &Path, method: &ScanMethod) -> bool {
     match snapshot::save(&r, path, &opts) {
         Ok(_) => true,
         Err(e) => {
-            eprintln!("{}", tr!("无法保存快照 {path}：{reason}", path = path, reason = e.to_string()));
+            eprintln!(
+                "{}",
+                tr!(
+                    "无法保存快照 {path}：{reason}",
+                    path = path,
+                    reason = e.to_string()
+                )
+            );
             false
         }
     }
@@ -772,7 +990,9 @@ pub fn snapshot_list() -> i32 {
     let folder = sk_core::paths::snapshots_dir();
     let found = snapshot::list_snapshots(&folder);
     if found.is_empty() {
-        out.text(&Text::plain(t("还没有快照。先运行 spaceknife scan <路径>。")));
+        out.text(&Text::plain(t(
+            "还没有快照。先运行 spaceknife scan <路径>。",
+        )));
         out.flush();
         return 0;
     }
@@ -784,13 +1004,20 @@ pub fn snapshot_list() -> i32 {
         .column(Column::new(t("项目")).right().no_wrap())
         .column(Column::new(t("快照文件")).style(MUTED).no_wrap());
     for (path, header) in &found {
-        let alloc = header.stats.get("bytes_alloc").and_then(|v| v.as_i64()).unwrap_or(0);
+        let alloc = header
+            .stats
+            .get("bytes_alloc")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         table.row(vec![
             tx(local_minutes(header.created_at)),
             tx(header.roots.join("; ")),
             tx(fmt::size(alloc as f64)),
             tx(fmt::count(header.node_count as i64 - 1)),
-            tx(path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+            tx(path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()),
         ]);
     }
     out.table(&table);
@@ -798,7 +1025,10 @@ pub fn snapshot_list() -> i32 {
         found.len() as i64,
         "共 {count} 个快照，位于 {folder}",
         "1 snapshot in {folder}",
-        &[("count", Arg::from(found.len())), ("folder", Arg::from(&folder))],
+        &[
+            ("count", Arg::from(found.len())),
+            ("folder", Arg::from(&folder)),
+        ],
     );
     out.text(&Text::styled(&total, MUTED));
     out.flush();
@@ -807,7 +1037,11 @@ pub fn snapshot_list() -> i32 {
 
 fn local_minutes(secs: u64) -> String {
     chrono::DateTime::from_timestamp(secs as i64, 0)
-        .map(|d| d.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+        .map(|d| {
+            d.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
+        })
         .unwrap_or_default()
 }
 
@@ -818,7 +1052,10 @@ pub fn snapshot_show(file: &Path, top: usize, depth: usize) -> i32 {
     let (store, header): (Store, _) = match snapshot::load(file) {
         Ok(s) => s,
         Err(e) => {
-            out.text(&Text::styled(&tr!("无法打开快照：{reason}", reason = e.to_string()), Style::RED));
+            out.text(&Text::styled(
+                &tr!("无法打开快照：{reason}", reason = e.to_string()),
+                Style::RED,
+            ));
             out.flush();
             return 2;
         }
@@ -835,7 +1072,10 @@ pub fn snapshot_show(file: &Path, top: usize, depth: usize) -> i32 {
             ("size", Arg::from(fmt::size(r.tot_alloc(0) as f64))),
         ],
     );
-    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     out.panel(&Text::plain(&line), &tr!("快照 {name}", name = name));
     for root in r.roots() {
         let title = tr!("{path} 里最大的项目", path = r.name(root).into_owned());

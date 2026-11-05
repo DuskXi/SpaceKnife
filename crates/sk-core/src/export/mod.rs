@@ -10,9 +10,9 @@
 //! per export request.
 
 mod formats;
-mod util;
 mod template;
 mod tree;
+mod util;
 
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -20,14 +20,14 @@ use std::path::{Path, PathBuf};
 use sk_store::{NodeId, Nodes};
 
 pub use formats::{
-    ATTRIBUTES, CSV_COLUMNS, ExportFormat, FORMATS, FormatKey, HtmlOptions, JSON_FORMAT, JSON_VERSION,
-    LocalTimes, REPORT_ORDER, attributes, csv_chunks, export_csv, export_html, export_json, format, iso_time,
-    json_chunks, kind_name,
+    ATTRIBUTES, CSV_COLUMNS, ExportFormat, FORMATS, FormatKey, HtmlOptions, JSON_FORMAT,
+    JSON_VERSION, LocalTimes, REPORT_ORDER, attributes, csv_chunks, export_csv, export_html,
+    export_json, format, iso_time, json_chunks, kind_name,
 };
 pub use template::{
-    BAD_CALL, BAD_IF, BAD_PAD, BAD_TAG, CHUNK_BYTES, ExportTemplate, MAX_PAD, Section, Severity, TemplateIssue,
-    check, compare, csv_field, html_escape, local_time, parse_template, render, render_chunks, tag_names,
-    tag_value, usage,
+    BAD_CALL, BAD_IF, BAD_PAD, BAD_TAG, CHUNK_BYTES, ExportTemplate, MAX_PAD, Section, Severity,
+    TemplateIssue, check, compare, csv_field, html_escape, local_time, parse_template, render,
+    render_chunks, tag_names, tag_value, usage,
 };
 pub use tree::{Blocks, Element, ExportTree, Mask, Ordering, SortKey, export_roots, text_of};
 
@@ -40,8 +40,7 @@ pub type Sink<'a> = dyn FnMut(&str) -> std::io::Result<()> + 'a;
 pub const MAX_TEMPLATE_BYTES: u64 = 1 << 20;
 
 mod text {
-    pub const NOT_FOUND: &str =
-        "找不到导出模板「{name}」：它既不是内置模板（{builtins}），也不是 csv / json / html，也没有这个模板文件";
+    pub const NOT_FOUND: &str = "找不到导出模板「{name}」：它既不是内置模板（{builtins}），也不是 csv / json / html，也没有这个模板文件";
     pub const TOO_BIG: &str = "模板文件 {path} 太大（超过 {limit} KB），不像是模板";
     pub const NOT_UTF8: &str = "模板文件 {path} 不是 UTF-8 编码";
     pub const UNREADABLE: &str = "无法读取模板文件 {path}：{reason}";
@@ -68,7 +67,11 @@ pub enum ExportError {
 }
 
 fn builtin_names() -> String {
-    BUILTINS.iter().map(|b| b.name).collect::<Vec<_>>().join(&tr(text::LIST_SEP))
+    BUILTINS
+        .iter()
+        .map(|b| b.name)
+        .collect::<Vec<_>>()
+        .join(&tr(text::LIST_SEP))
 }
 
 // ---------------------------------------------------------------------------------- built-ins
@@ -151,7 +154,9 @@ pub static BUILTINS: [BuiltinInfo; 5] = [
 pub fn builtin_info(name: &str) -> Option<&'static BuiltinInfo> {
     BUILTINS.iter().find(|b| b.name == name).or_else(|| {
         let folded = sk_protocol::filter_syntax::casefold(name);
-        BUILTINS.iter().find(|b| sk_protocol::filter_syntax::casefold(b.name) == folded)
+        BUILTINS
+            .iter()
+            .find(|b| sk_protocol::filter_syntax::casefold(b.name) == folded)
     })
 }
 
@@ -211,7 +216,10 @@ pub fn resolve(name: &str, cwd: Option<&Path>) -> Result<Target, ExportError> {
     }
     let bytes = std::fs::read(&path).map_err(|e| ExportError::Unreadable(path.clone(), e))?;
     let source = String::from_utf8(bytes).map_err(|_| ExportError::NotUtf8(path.clone()))?;
-    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
     Ok(Target::Template(Box::new(parse_template(&source, &stem))))
 }
 
@@ -238,7 +246,10 @@ pub fn write_export(
     bom: bool,
     produce: impl FnOnce(&mut Sink<'_>) -> Result<(), ExportError>,
 ) -> Result<u64, ExportError> {
-    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let tmp = path.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
     let result = (|| -> Result<u64, ExportError> {
         let file = std::fs::File::create(&tmp)?;

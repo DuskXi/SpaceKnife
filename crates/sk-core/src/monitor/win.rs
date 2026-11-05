@@ -43,7 +43,11 @@ fn i64_at(b: &[u8], at: usize) -> i64 {
 
 /// FILETIME (100 ns since 1601) → Unix seconds; 0 (unknown) stays 0, nothing below 0.
 pub fn unix_of_filetime(ft: i64) -> i64 {
-    if ft <= 0 { 0 } else { (ft / 10_000_000 - EPOCH_SECS).max(0) }
+    if ft <= 0 {
+        0
+    } else {
+        (ft / 10_000_000 - EPOCH_SECS).max(0)
+    }
 }
 
 /// Notification buffers → changes. One per watcher: it keeps a rename's old name when the new
@@ -62,7 +66,12 @@ pub struct NotifyDecoder {
 
 impl NotifyDecoder {
     pub fn new(root: &Path) -> NotifyDecoder {
-        NotifyDecoder { root: root.to_path_buf(), extended: true, cluster: 0, held: None }
+        NotifyDecoder {
+            root: root.to_path_buf(),
+            extended: true,
+            cluster: 0,
+            held: None,
+        }
     }
 
     /// The held old name as `deleted` (its new name never came: the name is gone anyway).
@@ -86,7 +95,11 @@ impl NotifyDecoder {
 
     pub fn decode(&mut self, data: &[u8]) -> Vec<Change> {
         let mut out: Vec<Change> = Vec::new();
-        let head = if self.extended { EXT_HEADER } else { STD_HEADER };
+        let head = if self.extended {
+            EXT_HEADER
+        } else {
+            STD_HEADER
+        };
         let end = data.len();
         let mut off = 0usize;
         let mut modified = 0;
@@ -115,7 +128,9 @@ impl NotifyDecoder {
                 .map(|c| u16::from_le_bytes(*c))
                 .collect();
             let path = self.join(&units);
-            let is_dir = self.extended.then_some(attrs & FILE_ATTRIBUTE_DIRECTORY != 0);
+            let is_dir = self
+                .extended
+                .then_some(attrs & FILE_ATTRIBUTE_DIRECTORY != 0);
             if self.held.is_some() && action != FILE_ACTION_RENAMED_NEW_NAME {
                 out.extend(self.flush());
             }
@@ -128,7 +143,12 @@ impl NotifyDecoder {
                         modified += 1;
                     } else if is_dir != Some(true) {
                         // a folder's own times changed: its entries tell the rest
-                        out.push(Change::modified(path, size.max(0), self.alloc(alloc, attrs), unix_of_filetime(ft)));
+                        out.push(Change::modified(
+                            path,
+                            size.max(0),
+                            self.alloc(alloc, attrs),
+                            unix_of_filetime(ft),
+                        ));
                         modified += 1;
                     }
                 }
@@ -138,7 +158,11 @@ impl NotifyDecoder {
                         Some((p, d)) => (Some(p), d),
                         None => (None, None),
                     };
-                    out.push(Change::renamed(path, old, if is_dir.is_none() { old_dir } else { is_dir }));
+                    out.push(Change::renamed(
+                        path,
+                        old,
+                        if is_dir.is_none() { old_dir } else { is_dir },
+                    ));
                 }
                 _ => {}
             }
@@ -187,7 +211,11 @@ pub fn encode_records(records: &[(u32, &str, u32, i64, i64, i64)], extended: boo
         let len = (head + units.len() * 2 + 7) & !7;
         let at = out.len();
         out.resize(at + len, 0);
-        let next = if k + 1 == records.len() { 0 } else { len as u32 };
+        let next = if k + 1 == records.len() {
+            0
+        } else {
+            len as u32
+        };
         out[at..at + 4].copy_from_slice(&next.to_le_bytes());
         out[at + 4..at + 8].copy_from_slice(&action.to_le_bytes());
         let name_at = if extended {
@@ -220,14 +248,14 @@ mod imp {
     use std::time::{Duration, Instant};
 
     use windows_sys::Win32::Foundation::{
-        CloseHandle, ERROR_IO_INCOMPLETE, ERROR_NOTIFY_ENUM_DIR, ERROR_OPERATION_ABORTED, GetLastError,
-        HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
+        CloseHandle, ERROR_IO_INCOMPLETE, ERROR_NOTIFY_ENUM_DIR, ERROR_OPERATION_ABORTED,
+        GetLastError, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileStandardInfo, GetDiskFreeSpaceW,
-        GetDriveTypeW, GetFileInformationByHandleEx, GetFinalPathNameByHandleW, GetVolumePathNameW,
-        OPEN_EXISTING, ReadDirectoryChangesExW, ReadDirectoryChangesW,
+        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OVERLAPPED, FILE_LIST_DIRECTORY,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_STANDARD_INFO, FileStandardInfo,
+        GetDiskFreeSpaceW, GetDriveTypeW, GetFileInformationByHandleEx, GetFinalPathNameByHandleW,
+        GetVolumePathNameW, OPEN_EXISTING, ReadDirectoryChangesExW, ReadDirectoryChangesW,
     };
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Threading::{
@@ -252,7 +280,11 @@ mod imp {
     const CANCEL_WAIT_MS: u32 = 2000;
 
     fn wide(p: &Path) -> Vec<u16> {
-        long_path(p).as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+        long_path(p)
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect()
     }
 
     fn long_path(p: &Path) -> PathBuf {
@@ -269,7 +301,11 @@ mod imp {
     fn message(err: u32) -> String {
         let e = std::io::Error::from_raw_os_error(err as i32);
         let m = crate::volume::os_message(&e);
-        if m.is_empty() { crate::tr!("错误 {code}", code = err) } else { m }
+        if m.is_empty() {
+            crate::tr!("错误 {code}", code = err)
+        } else {
+            m
+        }
     }
 
     fn volume_path(p: &Path) -> Vec<u16> {
@@ -300,7 +336,10 @@ mod imp {
         let v = volume_path(path);
         let (mut spc, mut bps, mut free, mut total) = (0u32, 0u32, 0u32, 0u32);
         // SAFETY: NUL-terminated root; out pointers to locals.
-        if !v.is_empty() && unsafe { GetDiskFreeSpaceW(v.as_ptr(), &mut spc, &mut bps, &mut free, &mut total) } != 0 {
+        if !v.is_empty()
+            && unsafe { GetDiskFreeSpaceW(v.as_ptr(), &mut spc, &mut bps, &mut free, &mut total) }
+                != 0
+        {
             return spc as i64 * bps as i64;
         }
         0
@@ -347,7 +386,11 @@ mod imp {
             *self.state.lock().unwrap() = (WatchState::Failed, detail.clone());
             tracing::warn!(
                 "{}",
-                crate::tr!("文件监视失败：{path}：{detail}", path = self.root.display().to_string(), detail = detail)
+                crate::tr!(
+                    "文件监视失败：{path}：{detail}",
+                    path = self.root.display().to_string(),
+                    detail = detail
+                )
             );
             if self.armed.load(Ordering::SeqCst) {
                 let mut batch = decoder.flush();
@@ -380,7 +423,9 @@ mod imp {
                     stop_event: AtomicUsize::new(0),
                     handle: AtomicUsize::new(0),
                     extended: AtomicBool::new(true),
-                    buffer: AtomicUsize::new(buffer_size.map_or(0, |b| b.max(MIN_BUFFER).div_ceil(8) * 8)),
+                    buffer: AtomicUsize::new(
+                        buffer_size.map_or(0, |b| b.max(MIN_BUFFER).div_ceil(8) * 8),
+                    ),
                     done: AtomicBool::new(false),
                 }),
                 buffer_size: buffer_size.map(|b| b.max(MIN_BUFFER).div_ceil(8) * 8),
@@ -440,16 +485,30 @@ mod imp {
             if h == INVALID_HANDLE_VALUE || h.is_null() {
                 // SAFETY: plain call.
                 let err = unsafe { GetLastError() };
-                self.sh.fail(crate::tr!("无法监视此文件夹：{reason}", reason = message(err)), &mut self.decoder);
+                self.sh.fail(
+                    crate::tr!("无法监视此文件夹：{reason}", reason = message(err)),
+                    &mut self.decoder,
+                );
                 return false;
             }
             self.handle = h;
             self.sh.handle.store(h as usize, Ordering::SeqCst);
             let network = is_network_path(&self.sh.root);
-            let size = explicit.unwrap_or(if network { NETWORK_BUFFER } else { LOCAL_BUFFER });
-            let sizes = if explicit.is_some() || size <= NETWORK_BUFFER { vec![size] } else { vec![size, NETWORK_BUFFER] };
+            let size = explicit.unwrap_or(if network {
+                NETWORK_BUFFER
+            } else {
+                LOCAL_BUFFER
+            });
+            let sizes = if explicit.is_some() || size <= NETWORK_BUFFER {
+                vec![size]
+            } else {
+                vec![size, NETWORK_BUFFER]
+            };
             let exts: &[bool] = if ext_ok { &[true, false] } else { &[false] };
-            self.attempts = exts.iter().flat_map(|&e| sizes.iter().map(move |&s| (e, s))).collect();
+            self.attempts = exts
+                .iter()
+                .flat_map(|&e| sizes.iter().map(move |&s| (e, s)))
+                .collect();
             self.check_every = if network { CHECK_NETWORK } else { CHECK_LOCAL };
             self.decoder.cluster = cluster_size(&self.sh.root);
             self.final_path = final_path(h);
@@ -487,13 +546,21 @@ mod imp {
             self.sh.extended.store(self.extended, Ordering::SeqCst);
             self.sh.buffer.store(self.size, Ordering::SeqCst);
             if !self.sh.stopping() {
-                let detail = if self.extended { String::new() } else { t("此卷不提供扩展变化信息，文件大小变化需重新列出目录") };
+                let detail = if self.extended {
+                    String::new()
+                } else {
+                    t("此卷不提供扩展变化信息，文件大小变化需重新列出目录")
+                };
                 *self.sh.state.lock().unwrap() = (WatchState::Running, detail);
             }
             tracing::debug!(
                 "watching {} ({}, buffer {} KiB)",
                 self.sh.root.display(),
-                if self.extended { "ReadDirectoryChangesExW" } else { "ReadDirectoryChangesW" },
+                if self.extended {
+                    "ReadDirectoryChangesExW"
+                } else {
+                    "ReadDirectoryChangesW"
+                },
                 self.size >> 10
             );
             true
@@ -553,7 +620,9 @@ mod imp {
                     next_check.saturating_duration_since(Instant::now())
                 };
                 // SAFETY: two valid event handles.
-                let r = unsafe { WaitForMultipleObjects(2, handles.as_ptr(), 0, wait.as_millis() as u32) };
+                let r = unsafe {
+                    WaitForMultipleObjects(2, handles.as_ptr(), 0, wait.as_millis() as u32)
+                };
                 if self.sh.stopping() || r == WAIT_OBJECT_0 + 1 {
                     return;
                 }
@@ -563,7 +632,10 @@ mod imp {
                 } else if r != WAIT_OBJECT_0 {
                     // SAFETY: plain call.
                     let e = unsafe { GetLastError() };
-                    self.sh.fail(crate::tr!("监视意外中断：{reason}", reason = message(e)), &mut self.decoder);
+                    self.sh.fail(
+                        crate::tr!("监视意外中断：{reason}", reason = message(e)),
+                        &mut self.decoder,
+                    );
                     return;
                 } else if !self.completion() {
                     return;
@@ -584,7 +656,11 @@ mod imp {
             let mut got = 0u32;
             // SAFETY: our handle and OVERLAPPED.
             let ok = unsafe { GetOverlappedResult(self.handle, &*self.ov, &mut got, 0) };
-            let err = if ok != 0 { 0 } else { unsafe { GetLastError() } };
+            let err = if ok != 0 {
+                0
+            } else {
+                unsafe { GetLastError() }
+            };
             if err != ERROR_IO_INCOMPLETE {
                 self.pending = false;
             }
@@ -609,7 +685,8 @@ mod imp {
             }
             let n = (got as usize).min(self.size);
             // SAFETY: the buffer holds `size` bytes, `n` of them written by the completed read.
-            let data: Vec<u8> = unsafe { std::slice::from_raw_parts(self.buf.as_ptr().cast::<u8>(), n) }.to_vec();
+            let data: Vec<u8> =
+                unsafe { std::slice::from_raw_parts(self.buf.as_ptr().cast::<u8>(), n) }.to_vec();
             self.completed += 1;
             let reissue = self.issue(); // keep a read pending while this batch is decoded
             let batch = if overflow {
@@ -659,7 +736,10 @@ mod imp {
                 return t("监视的文件夹已被删除");
             }
             let now = final_path(self.handle);
-            if !self.final_path.is_empty() && !now.is_empty() && now.to_lowercase() != self.final_path.to_lowercase() {
+            if !self.final_path.is_empty()
+                && !now.is_empty()
+                && now.to_lowercase() != self.final_path.to_lowercase()
+            {
                 // a POSIX-style delete moves the still-open folder to \$Extend\$Deleted
                 return if now.to_lowercase().contains("\\$extend\\$deleted\\") {
                     t("监视的文件夹已被删除")
@@ -680,9 +760,18 @@ mod imp {
                 unsafe { CancelIoEx(self.handle, &*self.ov) };
                 // the buffer and OVERLAPPED must outlive the read: wait for the cancellation
                 if unsafe { WaitForSingleObject(self.io_event, CANCEL_WAIT_MS) } != WAIT_OBJECT_0 {
-                    tracing::warn!("{}", crate::tr!("文件监视的读取未能取消，保留其缓冲区：{path}", path = self.sh.root.display().to_string()));
+                    tracing::warn!(
+                        "{}",
+                        crate::tr!(
+                            "文件监视的读取未能取消，保留其缓冲区：{path}",
+                            path = self.sh.root.display().to_string()
+                        )
+                    );
                     std::mem::forget(std::mem::take(&mut self.buf));
-                    std::mem::forget(std::mem::replace(&mut self.ov, Box::new(unsafe { std::mem::zeroed() })));
+                    std::mem::forget(std::mem::replace(
+                        &mut self.ov,
+                        Box::new(unsafe { std::mem::zeroed() }),
+                    ));
                 }
             }
             if !self.handle.is_null() {
@@ -717,7 +806,9 @@ mod imp {
 
         fn start(&self, sink: Sink) -> std::io::Result<()> {
             if self.worker.started() || self.shared.stopping() {
-                return Err(std::io::Error::other("RdcwWatcher.start() may only be called once, before stop()"));
+                return Err(std::io::Error::other(
+                    "RdcwWatcher.start() may only be called once, before stop()",
+                ));
             }
             // SAFETY: plain calls; handles are closed by the Reader.
             let io_event = unsafe { CreateEventW(std::ptr::null(), 1, 0, std::ptr::null()) };
@@ -734,44 +825,56 @@ mod imp {
                 }
                 return Err(e);
             }
-            self.shared.stop_event.store(stop_event as usize, Ordering::SeqCst);
+            self.shared
+                .stop_event
+                .store(stop_event as usize, Ordering::SeqCst);
             *self.shared.emitter.sink.lock().unwrap() = Some(sink);
             let sh = self.shared.clone();
             let explicit = self.buffer_size;
             let ext_ok = self.use_extended.load(Ordering::SeqCst);
             let (io_u, stop_u) = (io_event as usize, stop_event as usize);
-            self.worker.spawn(&format!("rdcw {}", self.shared.root.display()), move || {
-                let mut r = Reader {
-                    decoder: NotifyDecoder::new(&sh.root),
-                    sh,
-                    handle: std::ptr::null_mut(),
-                    io_event: io_u as HANDLE,
-                    stop_event: stop_u as HANDLE,
-                    // SAFETY: an all-zero OVERLAPPED is valid.
-                    ov: Box::new(unsafe { std::mem::zeroed() }),
-                    buf: Vec::new(),
-                    size: 0,
-                    extended: ext_ok,
-                    pending: false,
-                    completed: 0,
-                    attempts: Vec::new(),
-                    final_path: String::new(),
-                    check_every: CHECK_LOCAL,
-                };
-                let body = std::panic::AssertUnwindSafe(|| {
-                    if r.open(explicit, ext_ok) && r.arm() {
-                        r.run();
+            self.worker
+                .spawn(&format!("rdcw {}", self.shared.root.display()), move || {
+                    let mut r = Reader {
+                        decoder: NotifyDecoder::new(&sh.root),
+                        sh,
+                        handle: std::ptr::null_mut(),
+                        io_event: io_u as HANDLE,
+                        stop_event: stop_u as HANDLE,
+                        // SAFETY: an all-zero OVERLAPPED is valid.
+                        ov: Box::new(unsafe { std::mem::zeroed() }),
+                        buf: Vec::new(),
+                        size: 0,
+                        extended: ext_ok,
+                        pending: false,
+                        completed: 0,
+                        attempts: Vec::new(),
+                        final_path: String::new(),
+                        check_every: CHECK_LOCAL,
+                    };
+                    let body = std::panic::AssertUnwindSafe(|| {
+                        if r.open(explicit, ext_ok) && r.arm() {
+                            r.run();
+                        }
+                    });
+                    if std::panic::catch_unwind(body).is_err() {
+                        let sh = r.sh.clone();
+                        tracing::error!(
+                            "{}",
+                            crate::tr!(
+                                "文件监视线程异常：{path}",
+                                path = sh.root.display().to_string()
+                            )
+                        );
+                        sh.fail(
+                            crate::tr!("监视意外中断：{reason}", reason = "panic"),
+                            &mut r.decoder,
+                        );
                     }
-                });
-                if std::panic::catch_unwind(body).is_err() {
                     let sh = r.sh.clone();
-                    tracing::error!("{}", crate::tr!("文件监视线程异常：{path}", path = sh.root.display().to_string()));
-                    sh.fail(crate::tr!("监视意外中断：{reason}", reason = "panic"), &mut r.decoder);
-                }
-                let sh = r.sh.clone();
-                drop(r);
-                sh.done.store(true, Ordering::SeqCst);
-            })
+                    drop(r);
+                    sh.done.store(true, Ordering::SeqCst);
+                })
         }
 
         fn add_dirs(&self, _dirs: Vec<PathBuf>, _mtimes: Option<Vec<u32>>, _since_ns: i64) {
@@ -817,7 +920,11 @@ mod tests {
     use super::*;
 
     fn root() -> PathBuf {
-        if cfg!(windows) { PathBuf::from("C:\\w") } else { PathBuf::from("/w") }
+        if cfg!(windows) {
+            PathBuf::from("C:\\w")
+        } else {
+            PathBuf::from("/w")
+        }
     }
 
     #[test]
@@ -833,7 +940,14 @@ mod tests {
                 (FILE_ACTION_MODIFIED, "tiny.txt", 0x20, 10, 16, ft), // resident: no clusters
                 (FILE_ACTION_MODIFIED, "packed.bin", 0x800, 10, 4096, ft),
                 (FILE_ACTION_MODIFIED, "cloud.docx", 0x400000, 10, 4096, ft),
-                (FILE_ACTION_MODIFIED, "dir", FILE_ATTRIBUTE_DIRECTORY, 0, 0, ft),
+                (
+                    FILE_ACTION_MODIFIED,
+                    "dir",
+                    FILE_ATTRIBUTE_DIRECTORY,
+                    0,
+                    0,
+                    ft,
+                ),
                 (FILE_ACTION_REMOVED, "gone.txt", 0x20, 0, 0, 0),
             ],
             true,
@@ -841,13 +955,25 @@ mod tests {
         let got = d.decode(&buf);
         let r = root();
         assert_eq!(got.len(), 7, "{got:?}");
-        assert_eq!(got[0], Change::new(ChangeKind::Created, r.join("new.txt"), Some(false)));
-        assert_eq!(got[1], Change::new(ChangeKind::Created, r.join("dir"), Some(true)));
-        assert_eq!(got[2], Change::modified(r.join("big.bin"), 5000, Some(8192), 1_700_000_000));
+        assert_eq!(
+            got[0],
+            Change::new(ChangeKind::Created, r.join("new.txt"), Some(false))
+        );
+        assert_eq!(
+            got[1],
+            Change::new(ChangeKind::Created, r.join("dir"), Some(true))
+        );
+        assert_eq!(
+            got[2],
+            Change::modified(r.join("big.bin"), 5000, Some(8192), 1_700_000_000)
+        );
         assert_eq!(got[3].alloc, Some(0));
         assert_eq!(got[4].alloc, None);
         assert_eq!(got[5].alloc, Some(0));
-        assert_eq!(got[6], Change::new(ChangeKind::Deleted, r.join("gone.txt"), Some(false)));
+        assert_eq!(
+            got[6],
+            Change::new(ChangeKind::Deleted, r.join("gone.txt"), Some(false))
+        );
     }
 
     #[test]
@@ -862,28 +988,59 @@ mod tests {
             true,
         );
         let got = d.decode(&buf);
-        assert_eq!(got.iter().map(|c| (c.path.clone(), c.size)).collect::<Vec<_>>(), vec![
-            (root().join("b"), Some(2)),
-            (root().join("a"), Some(3))
-        ]);
+        assert_eq!(
+            got.iter()
+                .map(|c| (c.path.clone(), c.size))
+                .collect::<Vec<_>>(),
+            vec![(root().join("b"), Some(2)), (root().join("a"), Some(3))]
+        );
     }
 
     #[test]
     fn decode_renames_across_reads() {
         let mut d = NotifyDecoder::new(&root());
-        let got = d.decode(&encode_records(&[(FILE_ACTION_RENAMED_OLD_NAME, "old", 0x10, 0, 0, 0)], true));
-        assert!(got.is_empty());
-        let got = d.decode(&encode_records(&[(FILE_ACTION_RENAMED_NEW_NAME, "new", 0x10, 0, 0, 0)], true));
-        assert_eq!(got, vec![Change::renamed(root().join("new"), Some(root().join("old")), Some(true))]);
-        // an old name whose new name never comes is a deletion
-        d.decode(&encode_records(&[(FILE_ACTION_RENAMED_OLD_NAME, "x", 0x20, 0, 0, 0)], true));
-        assert_eq!(d.flush(), vec![Change::new(ChangeKind::Deleted, root().join("x"), Some(false))]);
-        // ... or is followed by another action
         let got = d.decode(&encode_records(
-            &[(FILE_ACTION_RENAMED_OLD_NAME, "y", 0x20, 0, 0, 0), (FILE_ACTION_ADDED, "z", 0x20, 0, 0, 0)],
+            &[(FILE_ACTION_RENAMED_OLD_NAME, "old", 0x10, 0, 0, 0)],
             true,
         ));
-        assert_eq!(got[0], Change::new(ChangeKind::Deleted, root().join("y"), Some(false)));
+        assert!(got.is_empty());
+        let got = d.decode(&encode_records(
+            &[(FILE_ACTION_RENAMED_NEW_NAME, "new", 0x10, 0, 0, 0)],
+            true,
+        ));
+        assert_eq!(
+            got,
+            vec![Change::renamed(
+                root().join("new"),
+                Some(root().join("old")),
+                Some(true)
+            )]
+        );
+        // an old name whose new name never comes is a deletion
+        d.decode(&encode_records(
+            &[(FILE_ACTION_RENAMED_OLD_NAME, "x", 0x20, 0, 0, 0)],
+            true,
+        ));
+        assert_eq!(
+            d.flush(),
+            vec![Change::new(
+                ChangeKind::Deleted,
+                root().join("x"),
+                Some(false)
+            )]
+        );
+        // ... or is followed by another action
+        let got = d.decode(&encode_records(
+            &[
+                (FILE_ACTION_RENAMED_OLD_NAME, "y", 0x20, 0, 0, 0),
+                (FILE_ACTION_ADDED, "z", 0x20, 0, 0, 0),
+            ],
+            true,
+        ));
+        assert_eq!(
+            got[0],
+            Change::new(ChangeKind::Deleted, root().join("y"), Some(false))
+        );
         assert_eq!(got[1].kind, ChangeKind::Created);
     }
 
@@ -892,7 +1049,10 @@ mod tests {
         let mut d = NotifyDecoder::new(&root());
         d.extended = false;
         let buf = encode_records(
-            &[(FILE_ACTION_MODIFIED, "a b\\c.txt", 0, 0, 0, 0), (FILE_ACTION_ADDED, "中文.txt", 0, 0, 0, 0)],
+            &[
+                (FILE_ACTION_MODIFIED, "a b\\c.txt", 0, 0, 0, 0),
+                (FILE_ACTION_ADDED, "中文.txt", 0, 0, 0, 0),
+            ],
             false,
         );
         let got = d.decode(&buf);
@@ -900,7 +1060,10 @@ mod tests {
         assert_eq!(got[0].size, None);
         assert_eq!(got[0].is_dir, None);
         assert!(got[0].path.ends_with("c.txt"));
-        assert_eq!(got[1], Change::new(ChangeKind::Created, root().join("中文.txt"), None));
+        assert_eq!(
+            got[1],
+            Change::new(ChangeKind::Created, root().join("中文.txt"), None)
+        );
         // a torn buffer ends the batch
         assert!(d.decode(&buf[..10]).is_empty());
     }

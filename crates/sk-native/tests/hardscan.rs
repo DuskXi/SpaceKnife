@@ -822,7 +822,14 @@ fn gates_and_the_shared_carriers_do_not_change_output() {
     let mut opts = SliceOptions::unbounded(vec![root_opts(&t.root)]);
     opts.threads = 1;
     let first = scan(vec![task(1, &t.root, 0)], &opts);
-    for (threads, limit) in [(0, None), (0, Some(1)), (0, Some(2)), (0, Some(5)), (7, Some(2)), (8, Some(64))] {
+    for (threads, limit) in [
+        (0, None),
+        (0, Some(1)),
+        (0, Some(2)),
+        (0, Some(5)),
+        (7, Some(2)),
+        (8, Some(64)),
+    ] {
         opts.threads = threads;
         let gate = limit.map(ListingGate::new);
         opts.gate = gate.clone();
@@ -1197,8 +1204,15 @@ mod windows {
                 fs_name.len() as u32,
             );
             let end = fs_name.iter().position(|&c| c == 0).unwrap_or(0);
-            let name = if ok != 0 { String::from_utf16_lossy(&fs_name[..end]) } else { String::new() };
-            ((u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow), name)
+            let name = if ok != 0 {
+                String::from_utf16_lossy(&fs_name[..end])
+            } else {
+                String::new()
+            };
+            (
+                (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+                name,
+            )
         }
     }
 
@@ -1448,7 +1462,10 @@ mod windows {
             unsafe { GetDiskFreeSpaceW(vol.as_ptr(), &mut spc, &mut bps, &mut free, &mut total) }
                 != 0
         );
-        let n = fs_name.iter().position(|&u| u == 0).unwrap_or(fs_name.len());
+        let n = fs_name
+            .iter()
+            .position(|&u| u == 0)
+            .unwrap_or(fs_name.len());
         (
             String::from_utf16_lossy(&fs_name[..n]),
             i64::from(spc) * i64::from(bps),
@@ -1577,7 +1594,10 @@ mod windows {
                 ..root_opts(&root)
             },
         );
-        let i = name_strings(&old).iter().position(|n| n == "w_00700").unwrap();
+        let i = name_strings(&old)
+            .iter()
+            .position(|n| n == "w_00700")
+            .unwrap();
         assert_eq!(old.entries.alloc[i], cluster);
     }
 

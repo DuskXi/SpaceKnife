@@ -207,7 +207,13 @@ fn message_ids(src: &str) -> Vec<(usize, String)> {
     };
     let mut out = Vec::new();
     // call sites: (head, arguments before the text)
-    for (head, skip) in [("tr!(", 0), ("t(", 0), ("tr_with(", 0), ("t_in(", 1), ("plural(", 1)] {
+    for (head, skip) in [
+        ("tr!(", 0),
+        ("t(", 0),
+        ("tr_with(", 0),
+        ("t_in(", 1),
+        ("plural(", 1),
+    ] {
         let mut from = 0;
         while let Some(found) = src[from..].find(head) {
             let at = from + found;
@@ -225,14 +231,19 @@ fn message_ids(src: &str) -> Vec<(usize, String)> {
             i = skip_ws(src, i);
             if src[i..].starts_with("match ") {
                 // t(match key { "k" => "text", … })
-                let Some(open) = src[i..].find('{').map(|o| i + o) else { continue };
-                let Some(close) = matching_brace(src, open) else { continue };
+                let Some(open) = src[i..].find('{').map(|o| i + o) else {
+                    continue;
+                };
+                let Some(close) = matching_brace(src, open) else {
+                    continue;
+                };
                 let body = &src[open..close];
                 let mut k = 0;
                 while let Some(arrow) = body[k..].find("=>") {
                     let j = skip_ws(body, k + arrow + 2);
                     k = k + arrow + 2;
-                    if let Some((text, _)) = (j < body.len()).then(|| string_at(body, j)).flatten() {
+                    if let Some((text, _)) = (j < body.len()).then(|| string_at(body, j)).flatten()
+                    {
                         out.push((line_of(open + j), text));
                     }
                 }
@@ -286,13 +297,25 @@ fn every_message_id_has_an_english_entry() {
         for (line, text) in message_ids(&src) {
             seen += 1;
             if !en.contains_key(text.as_str()) {
-                let rel = file.strip_prefix(crates).unwrap_or(file).display().to_string();
+                let rel = file
+                    .strip_prefix(crates)
+                    .unwrap_or(file)
+                    .display()
+                    .to_string();
                 missing.push(format!("{rel}:{line}: {text:?}"));
             }
         }
     }
-    assert!(seen > 500, "the scan found only {seen} message ids: is it still reading the sources?");
-    assert!(missing.is_empty(), "{} texts without an English entry:\n{}", missing.len(), missing.join("\n"));
+    assert!(
+        seen > 500,
+        "the scan found only {seen} message ids: is it still reading the sources?"
+    );
+    assert!(
+        missing.is_empty(),
+        "{} texts without an English entry:\n{}",
+        missing.len(),
+        missing.join("\n")
+    );
 }
 
 #[test]
@@ -317,6 +340,12 @@ mod tests {
     fn t() { tr!("壬"); }
 }
 "##;
-    let got: Vec<String> = message_ids(&without_tests(src)).into_iter().map(|(_, t)| t).collect();
-    assert_eq!(got, ["甲 {x}", "戊 续", "乙", "己", "丙", "{count} 丁", "辛"]);
+    let got: Vec<String> = message_ids(&without_tests(src))
+        .into_iter()
+        .map(|(_, t)| t)
+        .collect();
+    assert_eq!(
+        got,
+        ["甲 {x}", "戊 续", "乙", "己", "丙", "{count} 丁", "辛"]
+    );
 }

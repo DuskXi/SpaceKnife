@@ -120,7 +120,11 @@ impl SummaryStore {
         match std::fs::read(&file) {
             Ok(bytes) => match serde_json::from_slice::<File>(&bytes) {
                 Ok(f) if f.version == VERSION => {
-                    entries = f.volumes.into_iter().map(|e| (key(&e.mount, &e.identity), e)).collect();
+                    entries = f
+                        .volumes
+                        .into_iter()
+                        .map(|e| (key(&e.mount, &e.identity), e))
+                        .collect();
                 }
                 Ok(_) => {}
                 Err(e) => tracing::warn!("volume summaries unreadable, starting over: {e}"),
@@ -128,19 +132,28 @@ impl SummaryStore {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => tracing::warn!("volume summaries unreadable, starting over: {e}"),
         }
-        SummaryStore { file, entries: Mutex::new(entries) }
+        SummaryStore {
+            file,
+            entries: Mutex::new(entries),
+        }
     }
 
     fn save(&self, entries: &HashMap<String, Kept>) {
         let mut volumes: Vec<Kept> = entries.values().cloned().collect();
         volumes.sort_by(|a, b| a.mount.cmp(&b.mount));
-        let payload = File { version: VERSION, volumes };
+        let payload = File {
+            version: VERSION,
+            volumes,
+        };
         let write = || -> std::io::Result<()> {
             if let Some(dir) = self.file.parent() {
                 std::fs::create_dir_all(dir)?;
             }
             let tmp = self.file.with_extension("tmp");
-            std::fs::write(&tmp, serde_json::to_vec(&payload).map_err(std::io::Error::other)?)?;
+            std::fs::write(
+                &tmp,
+                serde_json::to_vec(&payload).map_err(std::io::Error::other)?,
+            )?;
             std::fs::rename(&tmp, &self.file)
         };
         if let Err(e) = write() {
@@ -150,14 +163,24 @@ impl SummaryStore {
     }
 
     fn prune(entries: &mut HashMap<String, Kept>, now: DateTime<Utc>) {
-        let mut live: Vec<Kept> = entries.values().filter(|e| now - e.seen <= forget()).cloned().collect();
+        let mut live: Vec<Kept> = entries
+            .values()
+            .filter(|e| now - e.seen <= forget())
+            .cloned()
+            .collect();
         live.sort_by_key(|e| std::cmp::Reverse(e.seen));
         live.truncate(KEEP);
-        *entries = live.into_iter().map(|e| (key(&e.mount, &e.identity), e)).collect();
+        *entries = live
+            .into_iter()
+            .map(|e| (key(&e.mount, &e.identity), e))
+            .collect();
     }
 
     pub fn get(&self, v: &VolumeInfo) -> Option<Kept> {
-        self.entries.lock().get(&key(&v.mount_point, &identity(v))).cloned()
+        self.entries
+            .lock()
+            .get(&key(&v.mount_point, &identity(v)))
+            .cloned()
     }
 
     /// Keep these, each unless an entry of a newer scan of the same volume is kept already.
@@ -167,7 +190,10 @@ impl SummaryStore {
         for e in entries {
             let k = key(&e.mount, &e.identity);
             if let Some(old) = g.get(&k) {
-                let same = Kept { seen: e.seen, ..old.clone() } == e;
+                let same = Kept {
+                    seen: e.seen,
+                    ..old.clone()
+                } == e;
                 if old.at > e.at || same {
                     continue;
                 }

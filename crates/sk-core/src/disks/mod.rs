@@ -104,12 +104,27 @@ mod tests {
         assert_eq!(unique.len(), ids.len());
         for (mount, parts) in &found.parts {
             assert!(volumes.iter().any(|v| &v.mount_point == mount), "{mount}");
-            assert!(parts.iter().all(|(d, _)| ids.contains(&d.as_str())), "{parts:?}");
+            assert!(
+                parts.iter().all(|(d, _)| ids.contains(&d.as_str())),
+                "{parts:?}"
+            );
         }
         if cfg!(windows) {
-            assert!(found.disks.iter().all(|d| Some(d.id.clone()) == d.number.map(|n| format!("PhysicalDrive{n}"))));
+            assert!(
+                found
+                    .disks
+                    .iter()
+                    .all(|d| Some(d.id.clone()) == d.number.map(|n| format!("PhysicalDrive{n}")))
+            );
             assert!(found.disks.iter().filter(|d| d.system).count() <= 1);
-            println!("disks: {:#?}", found.disks.iter().map(|d| (&d.id, &d.model, d.media, &d.link, &d.health)).collect::<Vec<_>>());
+            println!(
+                "disks: {:#?}",
+                found
+                    .disks
+                    .iter()
+                    .map(|d| (&d.id, &d.model, d.media, &d.link, &d.health))
+                    .collect::<Vec<_>>()
+            );
         }
     }
 }

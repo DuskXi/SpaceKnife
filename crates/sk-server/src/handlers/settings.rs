@@ -9,7 +9,7 @@ use sk_protocol::ErrorCode;
 use sk_protocol::methods::{SettingsGet, SettingsReset, SettingsUpdate};
 
 use crate::app::Server;
-use crate::rpc::{RpcError, RpcResult, Router};
+use crate::rpc::{Router, RpcError, RpcResult};
 use crate::topics::TopicRegistry;
 
 fn mapped(e: SettingsError) -> RpcError {
@@ -26,7 +26,10 @@ struct Applied {
     monitor: Option<bool>,
 }
 
-static APPLIED: Mutex<Applied> = Mutex::new(Applied { log_level: None, monitor: None });
+static APPLIED: Mutex<Applied> = Mutex::new(Applied {
+    log_level: None,
+    monitor: None,
+});
 
 /// The live effects of the settings: the log file's level, the memory budget, the views'
 /// geometry, live monitoring, the filter vocabulary's language.
@@ -46,7 +49,10 @@ pub fn apply_live(server: &Arc<Server>, st: &SettingsStore) {
     }
     let policy = sk_store::Policy::global();
     policy.set_fraction(st.get_int("advanced.memory_budget") as f64 / 100.0); // the next growth / load
-    policy.set_large(st.get_bool("advanced.map_large_scans").then_some(sk_store::mapped::LARGE_BYTES));
+    policy.set_large(
+        st.get_bool("advanced.map_large_scans")
+            .then_some(sk_store::mapped::LARGE_BYTES),
+    );
     server.views.apply_settings_live(server, st);
     server.views.refresh_vocab(server);
     if monitor_changed {
@@ -60,8 +66,10 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
     r.add::<SettingsUpdate, _, _>(|call, p| async move {
         let st = call.server.settings.clone();
         // the listeners run here: they emit and schedule frames (non-blocking)
-        let res: RpcResult<()> =
-            crate::compute::blocking(move || st.update(&p.values, p.version).map(|_| ()).map_err(mapped)).await?;
+        let res: RpcResult<()> = crate::compute::blocking(move || {
+            st.update(&p.values, p.version).map(|_| ()).map_err(mapped)
+        })
+        .await?;
         res?;
         Ok(call.server.settings.state())
     });
@@ -69,7 +77,8 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
     r.add::<SettingsReset, _, _>(|call, p| async move {
         let st = call.server.settings.clone();
         let res: RpcResult<()> =
-            crate::compute::blocking(move || st.reset(p.category).map(|_| ()).map_err(mapped)).await?;
+            crate::compute::blocking(move || st.reset(p.category).map(|_| ()).map_err(mapped))
+                .await?;
         res?;
         Ok(call.server.settings.state())
     });

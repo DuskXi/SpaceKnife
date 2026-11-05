@@ -100,7 +100,9 @@ pub(crate) fn decode_units<'a>(raw: &'a [u8], mut f: impl FnMut(Piece<'a>)) {
                     && (0xA0..=0xBF).contains(&at[1])
                     && (0x80..=0xBF).contains(&at[2])
                 {
-                    f(Piece::Unit(0xD000 | ((at[1] as u16 & 0x3F) << 6) | (at[2] as u16 & 0x3F)));
+                    f(Piece::Unit(
+                        0xD000 | ((at[1] as u16 & 0x3F) << 6) | (at[2] as u16 & 0x3F),
+                    ));
                     rest = &at[3..];
                 } else {
                     f(Piece::Unit(0xDC00 | at[0] as u16));
@@ -152,7 +154,10 @@ pub(crate) fn root_basename(path: &[u8]) -> &[u8] {
     let trimmed = &path[..end];
     let (drive, rest) = split_drive(trimmed);
     let rest_start = drive.len();
-    let start = rest.iter().rposition(|&b| is_sep(b)).map_or(rest_start, |k| rest_start + k + 1);
+    let start = rest
+        .iter()
+        .rposition(|&b| is_sep(b))
+        .map_or(rest_start, |k| rest_start + k + 1);
     let base = &trimmed[start..];
     if base.is_empty() { path } else { base }
 }
@@ -250,7 +255,11 @@ impl<'n> ExportTree<'n> {
             nodes.name_bytes(root).to_vec()
         };
         let parent = dirname(&root_path);
-        let root_parent = if parent == root_path.as_slice() { Vec::new() } else { parent.to_vec() };
+        let root_parent = if parent == root_path.as_slice() {
+            Vec::new()
+        } else {
+            parent.to_vec()
+        };
         let mut tree = ExportTree {
             nodes,
             root,
@@ -303,7 +312,8 @@ impl<'n> ExportTree<'n> {
                 let mut count = 0u32;
                 if nodes.is_dir(node) {
                     for c in nodes.children(node) {
-                        if flags[c as usize].load(std::sync::atomic::Ordering::Relaxed) & gone == 0 {
+                        if flags[c as usize].load(std::sync::atomic::Ordering::Relaxed) & gone == 0
+                        {
                             ids.push(c);
                             count += 1;
                         }
@@ -382,7 +392,9 @@ impl<'n> ExportTree<'n> {
             }
         }
         if mask.is_some() {
-            let mut vis: Vec<bool> = (0..m).map(|p| own_leaf[p] || (self.is_dir[p] && files[p] > 0)).collect();
+            let mut vis: Vec<bool> = (0..m)
+                .map(|p| own_leaf[p] || (self.is_dir[p] && files[p] > 0))
+                .collect();
             vis[0] = true;
             self.vis = Some(vis);
             self.sub_size = Some(sub_size);
@@ -594,7 +606,11 @@ impl<'n> ExportTree<'n> {
 
 /// The roots an export covers: node 0 (the virtual top) stands for every scan root.
 pub fn export_roots(nodes: &Nodes, root: NodeId) -> Vec<NodeId> {
-    if root == 0 { nodes.roots().collect() } else { vec![root] }
+    if root == 0 {
+        nodes.roots().collect()
+    } else {
+        vec![root]
+    }
 }
 
 #[cfg(test)]

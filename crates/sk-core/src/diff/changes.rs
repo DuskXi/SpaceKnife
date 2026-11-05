@@ -130,9 +130,7 @@ impl ChangeTree {
         drop(u);
         let nodes = store.read();
         let new_leaf: Vec<i64> = (0..m)
-            .map(|k| {
-                (pruned.status[k] == Status::Added && !nodes.is_dir(k as NodeId)) as i64
-            })
+            .map(|k| (pruned.status[k] == Status::Added && !nodes.is_dir(k as NodeId)) as i64)
             .collect();
         let new_files = subtree_sums(&nodes, &new_leaf)
             .into_iter()
@@ -220,13 +218,65 @@ pub fn subtree_sums(nodes: &Nodes, leaf: &[i64]) -> Vec<i64> {
 // --------------------------------------------------------------------------- short labels (W6-32)
 
 const GENERIC: &[&str] = &[
-    "data", "cache", "caches", "download", "downloads", "video", "videos", "file", "files",
-    "image", "images", "temp", "tmp", "bin", "lib", "lib64", "src", "local", "roaming", "appdata",
-    "default", "user", "users", "storage", "filestorage", "share", "shared", "misc", "store",
-    "backup", "backups", "content", "contents", "resources", "assets", "logs", "log", "db",
-    "database", "packages", "package", "modules", "node_modules", "build", "dist", "out",
-    "output", "target", "release", "debug", "x64", "x86", "win64", "amd64", "common", "program",
-    "programs", "app", "apps",
+    "data",
+    "cache",
+    "caches",
+    "download",
+    "downloads",
+    "video",
+    "videos",
+    "file",
+    "files",
+    "image",
+    "images",
+    "temp",
+    "tmp",
+    "bin",
+    "lib",
+    "lib64",
+    "src",
+    "local",
+    "roaming",
+    "appdata",
+    "default",
+    "user",
+    "users",
+    "storage",
+    "filestorage",
+    "share",
+    "shared",
+    "misc",
+    "store",
+    "backup",
+    "backups",
+    "content",
+    "contents",
+    "resources",
+    "assets",
+    "logs",
+    "log",
+    "db",
+    "database",
+    "packages",
+    "package",
+    "modules",
+    "node_modules",
+    "build",
+    "dist",
+    "out",
+    "output",
+    "target",
+    "release",
+    "debug",
+    "x64",
+    "x86",
+    "win64",
+    "amd64",
+    "common",
+    "program",
+    "programs",
+    "app",
+    "apps",
 ];
 
 /// An id-like name: letters and digits (both) of 8+ characters, or hex of 12+.
@@ -240,7 +290,10 @@ fn id_like(name: &str) -> bool {
     {
         return true;
     }
-    n >= 12 && name.chars().all(|c| c.is_ascii_hexdigit() || "-{}".contains(c))
+    n >= 12
+        && name
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || "-{}".contains(c))
 }
 
 fn generic(name: &str) -> bool {
@@ -295,7 +348,13 @@ pub fn change_status(status: Status) -> ChangeStatus {
 
 /// The change item of a row of a change tree. `reason`: the insight note (insights rules),
 /// `on_disk`: the target is the live tree and the row was not deleted.
-pub fn change_item(tree: &ChangeTree, node: NodeId, scope: NodeId, reason: String, on_disk: bool) -> ChangeItem {
+pub fn change_item(
+    tree: &ChangeTree,
+    node: NodeId,
+    scope: NodeId,
+    reason: String,
+    on_disk: bool,
+) -> ChangeItem {
     let nodes = tree.diff.store.read();
     let i = node as usize;
     ChangeItem {

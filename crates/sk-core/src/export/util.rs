@@ -12,7 +12,8 @@ pub(crate) fn language() -> &'static str {
 
 /// `str.format` with named string fields over a translated message.
 pub(crate) fn fill(template: &str, fields: &[(&str, &str)]) -> String {
-    let args: Vec<(&str, crate::i18n::Arg)> = fields.iter().map(|(k, v)| (*k, (*v).into())).collect();
+    let args: Vec<(&str, crate::i18n::Arg)> =
+        fields.iter().map(|(k, v)| (*k, (*v).into())).collect();
     crate::i18n::format(template, &args)
 }
 

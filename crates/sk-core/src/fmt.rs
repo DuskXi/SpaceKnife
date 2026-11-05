@@ -9,7 +9,11 @@ use chrono::{DateTime, Utc};
 use crate::i18n::t;
 use crate::tr;
 
-pub const UNIT_BASE: u32 = if cfg!(target_os = "macos") { 1000 } else { 1024 };
+pub const UNIT_BASE: u32 = if cfg!(target_os = "macos") {
+    1000
+} else {
+    1024
+};
 const UNITS: [&str; 6] = ["B", "KB", "MB", "GB", "TB", "PB"];
 
 /// `1.5 MB`, `123 B`, `-2.0 KB` in base [`UNIT_BASE`].
@@ -60,7 +64,11 @@ pub fn duration(seconds: f64) -> String {
         return tr!("{n} 秒", n = format!("{seconds:.1}"));
     }
     let total = seconds as i64;
-    tr!("{minutes} 分 {seconds} 秒", minutes = total / 60, seconds = total % 60)
+    tr!(
+        "{minutes} 分 {seconds} 秒",
+        minutes = total / 60,
+        seconds = total % 60
+    )
 }
 
 /// Relative age of a unix timestamp in the current language, e.g. `3 天前`.

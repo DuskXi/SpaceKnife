@@ -19,7 +19,9 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 use sk_protocol::base::DateTime;
-use sk_protocol::machine::{DiskHealth, DiskInterface, DiskIo, DiskLink, HealthNote, HealthSource, LinkKind, PhysicalDisk};
+use sk_protocol::machine::{
+    DiskHealth, DiskInterface, DiskIo, DiskLink, HealthNote, HealthSource, LinkKind, PhysicalDisk,
+};
 
 use super::health::{empty_health, linux_stat};
 use super::links::{gbps_text, pcie, pcie_gen_text, pcie_width_text, rate_link, usb_linux};
@@ -29,7 +31,13 @@ use crate::volume::VolumeInfo;
 
 /// Logical, optical, floppy devices.
 pub const SKIP: [&str; 9] = ["loop", "ram", "zram", "dm-", "md", "sr", "fd", "nbd", "zd"];
-const VIRTUAL: [&str; 5] = ["msft virtual disk", "vmware", "qemu", "vbox", "virtual disk"];
+const VIRTUAL: [&str; 5] = [
+    "msft virtual disk",
+    "vmware",
+    "qemu",
+    "vbox",
+    "virtual disk",
+];
 
 /// The filesystem as sysfs walks need it (tests pass a fake).
 pub trait Sysfs {
@@ -49,14 +57,21 @@ pub struct RealSysfs;
 
 impl Sysfs for RealSysfs {
     fn real(&self, path: &str) -> String {
-        std::fs::canonicalize(path).map_or_else(|_| path.to_owned(), |p| p.to_string_lossy().into_owned())
+        std::fs::canonicalize(path)
+            .map_or_else(|_| path.to_owned(), |p| p.to_string_lossy().into_owned())
     }
     fn read(&self, path: &str) -> String {
-        std::fs::read(path).map(|b| String::from_utf8_lossy(&b).trim().to_owned()).unwrap_or_default()
+        std::fs::read(path)
+            .map(|b| String::from_utf8_lossy(&b).trim().to_owned())
+            .unwrap_or_default()
     }
     fn listdir(&self, path: &str) -> Vec<String> {
         let mut out: Vec<String> = std::fs::read_dir(path)
-            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
             .unwrap_or_default();
         out.sort();
         out
@@ -65,7 +80,9 @@ impl Sysfs for RealSysfs {
         std::path::Path::new(path).exists()
     }
     fn readlink(&self, path: &str) -> String {
-        std::fs::read_link(path).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default()
+        std::fs::read_link(path)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default()
     }
 }
 
@@ -86,8 +103,9 @@ fn int(text: &str) -> Option<i64> {
 }
 
 fn is_pci_function(name: &str) -> bool {
-    static RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$").expect("regex"));
+    static RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"^[0-9a-f]{4}:[0-9a-f]{2}:[0-9a-f]{2}\.[0-7]$").expect("regex")
+    });
     RE.is_match(name)
 }
 
@@ -111,7 +129,10 @@ fn pci_link(fs: &dyn Sysfs, pci: Option<&str>) -> Option<DiskLink> {
 fn usb_dir(path: &str) -> Option<String> {
     static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+-\d+(\.\d+)*$").expect("regex"));
     let parts: Vec<&str> = path.split('/').collect();
-    (1..parts.len()).rev().find(|&i| RE.is_match(parts[i])).map(|i| parts[..=i].join("/"))
+    (1..parts.len())
+        .rev()
+        .find(|&i| RE.is_match(parts[i]))
+        .map(|i| parts[..=i].join("/"))
 }
 
 /// The serial in /dev/disk/by-id/ata-<model>_<serial> (or scsi-SATA_…) of disk `name`.
@@ -153,20 +174,29 @@ fn interface(fs: &dyn Sysfs, name: &str, path: &str) -> DiskInterface {
     }
     if name.starts_with("vd")
         || name.starts_with("xvd")
-        || ["/virtio", "/vmbus", "/xen", "/virtual/"].iter().any(|s| path.contains(s))
+        || ["/virtio", "/vmbus", "/xen", "/virtual/"]
+            .iter()
+            .any(|s| path.contains(s))
     {
         return DiskInterface::Virtual;
     }
-    let who = format!("{} {}", fs.read(&format!("{path}/device/vendor")), fs.read(&format!("{path}/device/model")))
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let who = format!(
+        "{} {}",
+        fs.read(&format!("{path}/device/vendor")),
+        fs.read(&format!("{path}/device/model"))
+    )
+    .to_lowercase()
+    .split_whitespace()
+    .collect::<Vec<_>>()
+    .join(" ");
     if VIRTUAL.iter().any(|v| who.contains(v)) {
         return DiskInterface::Virtual;
     }
     if let Some(port) = ata_port(path) {
-        return if fs.read(&format!("/sys/class/ata_link/link{port}/sata_spd")).is_empty() {
+        return if fs
+            .read(&format!("/sys/class/ata_link/link{port}/sata_spd"))
+            .is_empty()
+        {
             DiskInterface::Ata
         } else {
             DiskInterface::Sata
@@ -220,15 +250,23 @@ fn disk(fs: &dyn Sysfs, name: &str, since: Option<DateTime>) -> Option<PhysicalD
         return None; // an absent device (nbd, an unused md slot)
     }
     let rot = fs.read(&format!("{path}/queue/rotational"));
-    let rotational = if rot.is_empty() { None } else { Some(rot == "1") };
+    let rotational = if rot.is_empty() {
+        None
+    } else {
+        Some(rot == "1")
+    };
     let discard = int(&fs.read(&format!("{path}/queue/discard_max_bytes")));
     let dev = format!("{path}/device");
     let iface = interface(fs, name, &path);
     let read = |p: &str| fs.read(&format!("{dev}/{p}"));
-    let mut model = Some(read("model")).filter(|s| !s.is_empty()).unwrap_or_else(|| read("name"));
+    let mut model = Some(read("model"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| read("name"));
     let mut vendor = read("vendor");
     let mut serial = read("serial");
-    let firmware = Some(read("firmware_rev")).filter(|s| !s.is_empty()).unwrap_or_else(|| read("rev"));
+    let firmware = Some(read("firmware_rev"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| read("rev"));
     let mut link = None;
     let mut controller = None;
     match iface {
@@ -245,7 +283,10 @@ fn disk(fs: &dyn Sysfs, name: &str, since: Option<DateTime>) -> Option<PhysicalD
         }
         DiskInterface::Usb => {
             if let Some(usb) = usb_dir(&path) {
-                link = usb_linux(&fs.read(&format!("{usb}/speed")), &fs.read(&format!("{usb}/version")));
+                link = usb_linux(
+                    &fs.read(&format!("{usb}/speed")),
+                    &fs.read(&format!("{usb}/version")),
+                );
                 if model.is_empty() {
                     model = fs.read(&format!("{usb}/product"));
                     if vendor.is_empty() {
@@ -275,7 +316,11 @@ fn disk(fs: &dyn Sysfs, name: &str, since: Option<DateTime>) -> Option<PhysicalD
     match iface {
         DiskInterface::Nvme | DiskInterface::Sata | DiskInterface::Ata => {
             if let Some(temp) = hwmon_temp(fs, &dev) {
-                let source = if iface == DiskInterface::Nvme { HealthSource::Nvme } else { HealthSource::Ata };
+                let source = if iface == DiskInterface::Nvme {
+                    HealthSource::Nvme
+                } else {
+                    HealthSource::Ata
+                };
                 health = Some(DiskHealth {
                     temperature_c: Some(temp),
                     ..empty_health(source)
@@ -298,7 +343,11 @@ fn disk(fs: &dyn Sysfs, name: &str, since: Option<DateTime>) -> Option<PhysicalD
     let has_size = sectors.unwrap_or(0) != 0;
     Some(PhysicalDisk {
         model: squash(&model),
-        vendor: if ["", "ATA", "NVME"].contains(&vendor_up.as_str()) { String::new() } else { squash(&vendor) },
+        vendor: if ["", "ATA", "NVME"].contains(&vendor_up.as_str()) {
+            String::new()
+        } else {
+            squash(&vendor)
+        },
         serial: serial.trim().to_owned(),
         firmware: firmware.trim().to_owned(),
         size: sectors.filter(|&s| s != 0).map(|s| s * 512),
@@ -322,7 +371,9 @@ fn leaves(fs: &dyn Sysfs, name: &str, depth: usize) -> Vec<(String, Option<i64>,
     if depth > 8 || !fs.exists(&path) {
         return Vec::new();
     }
-    let size = int(&fs.read(&format!("{path}/size"))).filter(|&s| s != 0).map(|s| s * 512);
+    let size = int(&fs.read(&format!("{path}/size")))
+        .filter(|&s| s != 0)
+        .map(|s| s * 512);
     if fs.exists(&format!("{path}/partition")) {
         let start = int(&fs.read(&format!("{path}/start"))).map(|s| s * 512);
         return vec![(basename(dirname(&path)).to_owned(), size, start)];
@@ -331,7 +382,10 @@ fn leaves(fs: &dyn Sysfs, name: &str, depth: usize) -> Vec<(String, Option<i64>,
     if slaves.is_empty() {
         return vec![(name.to_owned(), size, Some(0))];
     }
-    let found: Vec<_> = slaves.iter().flat_map(|s| leaves(fs, s, depth + 1)).collect();
+    let found: Vec<_> = slaves
+        .iter()
+        .flat_map(|s| leaves(fs, s, depth + 1))
+        .collect();
     if found.len() == 1 {
         // one disk under it (LVM on one partition, LUKS): this volume's size
         let (disk, inner, start) = found.into_iter().next().expect("one");
@@ -339,7 +393,10 @@ fn leaves(fs: &dyn Sysfs, name: &str, depth: usize) -> Vec<(String, Option<i64>,
         return vec![(disk, smallest, start)];
     }
     // spread over several: unknown split
-    found.into_iter().map(|(d, _, start)| (d, None, start)).collect()
+    found
+        .into_iter()
+        .map(|(d, _, start)| (d, None, start))
+        .collect()
 }
 
 pub fn probe(volumes: &[VolumeInfo], fs: &dyn Sysfs, since: Option<DateTime>) -> Probe {
@@ -355,7 +412,8 @@ pub fn probe(volumes: &[VolumeInfo], fs: &dyn Sysfs, since: Option<DateTime>) ->
             Err(_) => tracing::debug!("disk {name} probe failed"),
         }
     }
-    let known: std::collections::HashSet<String> = result.disks.iter().map(|d| d.id.clone()).collect();
+    let known: std::collections::HashSet<String> =
+        result.disks.iter().map(|d| d.id.clone()).collect();
     for v in volumes {
         if v.is_remote || !v.device.starts_with("/dev/") {
             continue;
@@ -367,7 +425,10 @@ pub fn probe(volumes: &[VolumeInfo], fs: &dyn Sysfs, since: Option<DateTime>) ->
         if found.is_empty() {
             continue;
         }
-        result.parts.insert(v.mount_point.clone(), found.iter().map(|(d, s, _)| (d.clone(), *s)).collect());
+        result.parts.insert(
+            v.mount_point.clone(),
+            found.iter().map(|(d, s, _)| (d.clone(), *s)).collect(),
+        );
         if let Some(start) = found[0].2 {
             result.offsets.insert(v.mount_point.clone(), start);
         }
@@ -428,7 +489,9 @@ pub(crate) mod tests {
             for part in path.trim_matches('/').split('/') {
                 out = format!("{out}/{part}");
                 for _ in 0..16 {
-                    let Some(target) = self.links.get(&out) else { break };
+                    let Some(target) = self.links.get(&out) else {
+                        break;
+                    };
                     out = if target.starts_with('/') {
                         normpath(target)
                     } else {
@@ -439,7 +502,10 @@ pub(crate) mod tests {
             out
         }
         fn read(&self, path: &str) -> String {
-            self.files.get(&self.real(path)).map(|s| s.trim().to_owned()).unwrap_or_default()
+            self.files
+                .get(&self.real(path))
+                .map(|s| s.trim().to_owned())
+                .unwrap_or_default()
         }
         fn listdir(&self, path: &str) -> Vec<String> {
             let base = format!("{}/", self.real(path).trim_end_matches('/'));
@@ -461,13 +527,23 @@ pub(crate) mod tests {
         }
     }
 
-    fn disk_at(fs: &mut FakeFs, name: &str, path: &str, sectors: i64, rot: &str, removable: &str) -> String {
+    fn disk_at(
+        fs: &mut FakeFs,
+        name: &str,
+        path: &str,
+        sectors: i64,
+        rot: &str,
+        removable: &str,
+    ) -> String {
         fs.link(&format!("/sys/block/{name}"), path);
         fs.link(&format!("/sys/class/block/{name}"), path);
         fs.file(&format!("{path}/size"), &sectors.to_string());
         fs.file(&format!("{path}/queue/rotational"), rot);
         fs.file(&format!("{path}/removable"), removable);
-        fs.file(&format!("{path}/queue/discard_max_bytes"), if rot == "1" { "0" } else { "2147450880" });
+        fs.file(
+            &format!("{path}/queue/discard_max_bytes"),
+            if rot == "1" { "0" } else { "2147450880" },
+        );
         path.to_owned()
     }
 
@@ -502,17 +578,44 @@ pub(crate) mod tests {
         let mut fs = FakeFs::default();
         // an NVMe drive (PCIe 5.0 capable, in a 4.0 slot) holding the system
         let nvme_pci = "/sys/devices/pci0000:00/0000:00:1d.0/0000:3d:00.0";
-        let nvme = disk_at(&mut fs, "nvme0n1", &format!("{nvme_pci}/nvme/nvme0/nvme0n1"), 7814037168, "0", "0");
+        let nvme = disk_at(
+            &mut fs,
+            "nvme0n1",
+            &format!("{nvme_pci}/nvme/nvme0/nvme0n1"),
+            7814037168,
+            "0",
+            "0",
+        );
         fs.link(&format!("{nvme}/device"), &format!("{nvme_pci}/nvme/nvme0"));
-        fs.file(&format!("{nvme_pci}/nvme/nvme0/model"), "ZHITAI TiPro9000 4TB                    ");
-        fs.file(&format!("{nvme_pci}/nvme/nvme0/serial"), "ZTC84T0AB251751VWB  ");
+        fs.file(
+            &format!("{nvme_pci}/nvme/nvme0/model"),
+            "ZHITAI TiPro9000 4TB                    ",
+        );
+        fs.file(
+            &format!("{nvme_pci}/nvme/nvme0/serial"),
+            "ZTC84T0AB251751VWB  ",
+        );
         fs.file(&format!("{nvme_pci}/nvme/nvme0/firmware_rev"), "ZTA31003");
-        pci(&mut fs, nvme_pci, "16.0 GT/s PCIe", "4", "32.0 GT/s PCIe", "4");
+        pci(
+            &mut fs,
+            nvme_pci,
+            "16.0 GT/s PCIe",
+            "4",
+            "32.0 GT/s PCIe",
+            "4",
+        );
         part(&mut fs, &nvme, "nvme0n1p1", 2048, 1048576);
         part(&mut fs, &nvme, "nvme0n1p2", 1050624, 7812986544);
         // a SATA SSD on an add-in controller with one PCIe 2.0 lane
         let card = "/sys/devices/pci0000:00/0000:00:1c.4/0000:03:00.0";
-        let sda = disk_at(&mut fs, "sda", &format!("{card}/ata5/host4/target4:0:0/4:0:0:0/block/sda"), 3907029168, "0", "0");
+        let sda = disk_at(
+            &mut fs,
+            "sda",
+            &format!("{card}/ata5/host4/target4:0:0/4:0:0:0/block/sda"),
+            3907029168,
+            "0",
+            "0",
+        );
         let sda_dev = format!("{card}/ata5/host4/target4:0:0/4:0:0:0");
         fs.link(&format!("{sda}/device"), &sda_dev);
         fs.file(&format!("{sda_dev}/vendor"), "ATA     ");
@@ -520,14 +623,33 @@ pub(crate) mod tests {
         fs.file(&format!("{sda_dev}/rev"), "M3CR");
         fs.file("/sys/class/ata_link/link5/sata_spd", "6.0 Gbps");
         pci(&mut fs, card, "5.0 GT/s PCIe", "1", "5.0 GT/s PCIe", "1");
-        fs.link("/dev/disk/by-id/ata-CT2000MX500SSD1_2247E688D3C9", "../../sda");
-        fs.link("/dev/disk/by-id/ata-CT2000MX500SSD1_2247E688D3C9-part1", "../../sda1");
+        fs.link(
+            "/dev/disk/by-id/ata-CT2000MX500SSD1_2247E688D3C9",
+            "../../sda",
+        );
+        fs.link(
+            "/dev/disk/by-id/ata-CT2000MX500SSD1_2247E688D3C9-part1",
+            "../../sda1",
+        );
         part(&mut fs, &sda, "sda1", 2048, 3907026944);
         // a hard disk on the chipset's SATA (no link of its own), under LVM
         let chip = "/sys/devices/pci0000:00/0000:00:17.0";
-        let sdb = disk_at(&mut fs, "sdb", &format!("{chip}/ata1/host0/target0:0:0/0:0:0:0/block/sdb"), 7814037168, "1", "0");
-        fs.link(&format!("{sdb}/device"), &format!("{chip}/ata1/host0/target0:0:0/0:0:0:0"));
-        fs.file(&format!("{chip}/ata1/host0/target0:0:0/0:0:0:0/model"), "WDC WD40EFRX-68N32N0");
+        let sdb = disk_at(
+            &mut fs,
+            "sdb",
+            &format!("{chip}/ata1/host0/target0:0:0/0:0:0:0/block/sdb"),
+            7814037168,
+            "1",
+            "0",
+        );
+        fs.link(
+            &format!("{sdb}/device"),
+            &format!("{chip}/ata1/host0/target0:0:0/0:0:0:0"),
+        );
+        fs.file(
+            &format!("{chip}/ata1/host0/target0:0:0/0:0:0:0/model"),
+            "WDC WD40EFRX-68N32N0",
+        );
         fs.file("/sys/class/ata_link/link1/sata_spd", "3.0 Gbps");
         pci(&mut fs, chip, "Unknown", "0", "Unknown", "0");
         part(&mut fs, &sdb, "sdb1", 2048, 7814035087);
@@ -540,7 +662,14 @@ pub(crate) mod tests {
         // a USB 3 card reader on a USB 2 port
         let reader = "/sys/devices/pci0000:00/0000:00:14.0/usb1/1-4/1-4.2";
         let sdc_dev = format!("{reader}/1-4.2:1.0/host6/target6:0:0/6:0:0:0");
-        let sdc = disk_at(&mut fs, "sdc", &format!("{sdc_dev}/block/sdc"), 998244352, "0", "1");
+        let sdc = disk_at(
+            &mut fs,
+            "sdc",
+            &format!("{sdc_dev}/block/sdc"),
+            998244352,
+            "0",
+            "1",
+        );
         fs.link(&format!("{sdc}/device"), &sdc_dev);
         fs.file(&format!("{sdc_dev}/vendor"), "Generic ");
         fs.file(&format!("{sdc_dev}/model"), "STORAGE DEVICE  ");
@@ -549,13 +678,41 @@ pub(crate) mod tests {
         fs.file(&format!("{reader}/serial"), "000000001532");
         // an SD card on the SoC, a virtio disk, a loop device and an empty nbd
         let mmc = "/sys/devices/platform/soc/fe340000.mmc/mmc_host/mmc0/mmc0:aaaa";
-        let sd = disk_at(&mut fs, "mmcblk0", &format!("{mmc}/block/mmcblk0"), 124735488, "0", "0");
+        let sd = disk_at(
+            &mut fs,
+            "mmcblk0",
+            &format!("{mmc}/block/mmcblk0"),
+            124735488,
+            "0",
+            "0",
+        );
         fs.link(&format!("{sd}/device"), mmc);
         fs.file(&format!("{mmc}/name"), "SC64G");
         fs.file(&format!("{mmc}/serial"), "0x1234abcd");
-        disk_at(&mut fs, "vda", "/sys/devices/pci0000:00/0000:00:04.0/virtio1/block/vda", 20971520, "1", "0");
-        disk_at(&mut fs, "loop0", "/sys/devices/virtual/block/loop0", 1000, "0", "0");
-        disk_at(&mut fs, "nbd0", "/sys/devices/virtual/block/nbd0", 0, "0", "0");
+        disk_at(
+            &mut fs,
+            "vda",
+            "/sys/devices/pci0000:00/0000:00:04.0/virtio1/block/vda",
+            20971520,
+            "1",
+            "0",
+        );
+        disk_at(
+            &mut fs,
+            "loop0",
+            "/sys/devices/virtual/block/loop0",
+            1000,
+            "0",
+            "0",
+        );
+        disk_at(
+            &mut fs,
+            "nbd0",
+            "/sys/devices/virtual/block/nbd0",
+            0,
+            "0",
+            "0",
+        );
         fs
     }
 
@@ -576,38 +733,116 @@ pub(crate) mod tests {
         ];
         let found = probe(&volumes, &fs, None);
         let disks = by_id(&found);
-        assert_eq!(disks.keys().cloned().collect::<Vec<_>>(), ["mmcblk0", "nvme0n1", "sda", "sdb", "sdc", "vda"]);
+        assert_eq!(
+            disks.keys().cloned().collect::<Vec<_>>(),
+            ["mmcblk0", "nvme0n1", "sda", "sdb", "sdc", "vda"]
+        );
 
         let nvme = &disks["nvme0n1"];
-        assert_eq!((nvme.model.as_str(), nvme.serial.as_str(), nvme.firmware.as_str()), ("ZHITAI TiPro9000 4TB", "ZTC84T0AB251751VWB", "ZTA31003"));
-        assert_eq!((nvme.interface, nvme.media, nvme.size, nvme.trim, nvme.system), (DiskInterface::Nvme, Media::NvmeSsd, Some(7814037168 * 512), Some(true), true));
+        assert_eq!(
+            (
+                nvme.model.as_str(),
+                nvme.serial.as_str(),
+                nvme.firmware.as_str()
+            ),
+            ("ZHITAI TiPro9000 4TB", "ZTC84T0AB251751VWB", "ZTA31003")
+        );
+        assert_eq!(
+            (
+                nvme.interface,
+                nvme.media,
+                nvme.size,
+                nvme.trim,
+                nvme.system
+            ),
+            (
+                DiskInterface::Nvme,
+                Media::NvmeSsd,
+                Some(7814037168 * 512),
+                Some(true),
+                true
+            )
+        );
         assert_eq!(nvme.link, pcie(Some(4), Some(4), Some(5), Some(4)));
 
         let sata = &disks["sda"];
-        assert_eq!((sata.model.as_str(), sata.vendor.as_str(), sata.serial.as_str(), sata.media), ("CT2000MX500SSD1", "", "2247E688D3C9", Media::SataSsd));
+        assert_eq!(
+            (
+                sata.model.as_str(),
+                sata.vendor.as_str(),
+                sata.serial.as_str(),
+                sata.media
+            ),
+            ("CT2000MX500SSD1", "", "2247E688D3C9", Media::SataSsd)
+        );
         assert_eq!(sata.link, Some(rate_link(LinkKind::Sata, Some(6000), None)));
-        assert_eq!(sata.controller_link, pcie(Some(2), Some(1), Some(2), Some(1)));
+        assert_eq!(
+            sata.controller_link,
+            pcie(Some(2), Some(1), Some(2), Some(1))
+        );
 
         let hdd = &disks["sdb"];
-        assert_eq!((hdd.media, hdd.trim, &hdd.controller_link), (Media::Hdd, Some(false), &None)); // chipset: no link reported
+        assert_eq!(
+            (hdd.media, hdd.trim, &hdd.controller_link),
+            (Media::Hdd, Some(false), &None)
+        ); // chipset: no link reported
         assert_eq!(hdd.link, Some(rate_link(LinkKind::Sata, Some(3000), None)));
 
         let reader = &disks["sdc"];
-        assert_eq!((reader.interface, reader.vendor.as_str(), reader.model.as_str(), reader.serial.as_str()), (DiskInterface::Usb, "Generic", "STORAGE DEVICE", "000000001532"));
+        assert_eq!(
+            (
+                reader.interface,
+                reader.vendor.as_str(),
+                reader.model.as_str(),
+                reader.serial.as_str()
+            ),
+            (
+                DiskInterface::Usb,
+                "Generic",
+                "STORAGE DEVICE",
+                "000000001532"
+            )
+        );
         assert!(reader.removable);
-        assert_eq!(reader.link, Some(rate_link(LinkKind::Usb, Some(480), Some(5000))));
+        assert_eq!(
+            reader.link,
+            Some(rate_link(LinkKind::Usb, Some(480), Some(5000)))
+        );
 
         let card = &disks["mmcblk0"];
-        assert_eq!((card.interface, card.media, card.model.as_str(), card.serial.as_str()), (DiskInterface::Sd, Media::SdCard, "SC64G", "1234abcd"));
-        assert_eq!((disks["vda"].interface, disks["vda"].media), (DiskInterface::Virtual, Media::Virtual));
+        assert_eq!(
+            (
+                card.interface,
+                card.media,
+                card.model.as_str(),
+                card.serial.as_str()
+            ),
+            (DiskInterface::Sd, Media::SdCard, "SC64G", "1234abcd")
+        );
+        assert_eq!(
+            (disks["vda"].interface, disks["vda"].media),
+            (DiskInterface::Virtual, Media::Virtual)
+        );
 
         // volumes: their disk, their size on it, and where they start
-        assert_eq!(found.parts["/"], vec![("nvme0n1".to_owned(), Some(7812986544 * 512))]);
+        assert_eq!(
+            found.parts["/"],
+            vec![("nvme0n1".to_owned(), Some(7812986544 * 512))]
+        );
         assert_eq!(found.offsets["/boot/efi"], 2048 * 512);
         assert!(found.offsets["/boot/efi"] < found.offsets["/"]);
-        assert_eq!(found.parts["/data"], vec![("sda".to_owned(), Some(3907026944 * 512))]);
-        assert_eq!(found.parts["/media"], vec![("sdb".to_owned(), Some(4000000000 * 512))]); // the LV, not the whole PV
-        assert_eq!(found.parts["/run/media/card"], vec![("sdc".to_owned(), Some(998244352 * 512))]); // no partitions
+        assert_eq!(
+            found.parts["/data"],
+            vec![("sda".to_owned(), Some(3907026944 * 512))]
+        );
+        assert_eq!(
+            found.parts["/media"],
+            vec![("sdb".to_owned(), Some(4000000000 * 512))]
+        ); // the LV, not the whole PV
+        assert_eq!(
+            found.parts["/run/media/card"],
+            vec![("sdc".to_owned(), Some(998244352 * 512))]
+        ); // no partitions
         assert!(!found.parts.contains_key("/mnt/share"));
     }
 
@@ -623,7 +858,10 @@ pub(crate) mod tests {
         fs.link(&format!("{lv}/slaves/sdb1"), &sdb1);
         fs.link("/dev/mapper/vg-big", "../dm-1");
         let found = probe(&[vol("/big", "/dev/mapper/vg-big")], &fs, None);
-        assert_eq!(found.parts["/big"], vec![("sda".to_owned(), None), ("sdb".to_owned(), None)]); // split unknown
+        assert_eq!(
+            found.parts["/big"],
+            vec![("sda".to_owned(), None), ("sdb".to_owned(), None)]
+        ); // split unknown
     }
 
     #[test]
@@ -639,12 +877,24 @@ pub(crate) mod tests {
         let nvme = &disks["nvme0n1"];
         let h = nvme.health.as_ref().unwrap();
         assert_eq!((h.source, h.temperature_c), (HealthSource::Nvme, Some(48)));
-        assert_eq!((h.written_bytes, nvme.health_note), (None, HealthNote::NeedsAdmin)); // lifetime: root only
+        assert_eq!(
+            (h.written_bytes, nvme.health_note),
+            (None, HealthNote::NeedsAdmin)
+        ); // lifetime: root only
         let io = nvme.io.as_ref().unwrap();
         assert_eq!((io.read_bytes, io.written_bytes), (2000 * 512, 4000 * 512));
-        assert_eq!(disks["sda"].health.as_ref().unwrap().temperature_c, Some(31));
-        assert_eq!((disks["sdb"].health.is_none(), disks["sdb"].health_note), (true, HealthNote::NeedsAdmin)); // no drivetemp
-        assert_eq!((disks["sdc"].health.is_none(), disks["sdc"].health_note), (true, HealthNote::Usb));
+        assert_eq!(
+            disks["sda"].health.as_ref().unwrap().temperature_c,
+            Some(31)
+        );
+        assert_eq!(
+            (disks["sdb"].health.is_none(), disks["sdb"].health_note),
+            (true, HealthNote::NeedsAdmin)
+        ); // no drivetemp
+        assert_eq!(
+            (disks["sdc"].health.is_none(), disks["sdc"].health_note),
+            (true, HealthNote::Usb)
+        );
     }
 
     #[test]
@@ -654,6 +904,9 @@ pub(crate) mod tests {
         fs.file(&format!("{sdc}/removable"), "0");
         fs.file(&format!("{sdc}/queue/rotational"), "1");
         let drive = by_id(&probe(&[], &fs, None))["sdc"].clone();
-        assert_eq!((drive.media, drive.health_note), (Media::UsbHdd, HealthNote::NeedsAdmin));
+        assert_eq!(
+            (drive.media, drive.health_note),
+            (Media::UsbHdd, HealthNote::NeedsAdmin)
+        );
     }
 }

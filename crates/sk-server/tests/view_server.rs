@@ -52,7 +52,11 @@ impl Frame {
             names.push(String::from_utf8_lossy(&blob[at..at + n as usize]).into_owned());
             at += n as usize;
         }
-        Frame { header, names, cols }
+        Frame {
+            header,
+            names,
+            cols,
+        }
     }
 
     fn len(&self) -> usize {
@@ -60,7 +64,10 @@ impl Frame {
     }
 
     fn row(&self, name: &str) -> usize {
-        self.names.iter().position(|n| n == name).unwrap_or_else(|| panic!("{name} not in {:?}", self.names))
+        self.names
+            .iter()
+            .position(|n| n == name)
+            .unwrap_or_else(|| panic!("{name} not in {:?}", self.names))
     }
 
     fn col(&self, name: &str, row: usize) -> i64 {
@@ -110,7 +117,12 @@ async fn pushed(c: &Client) -> (Value, Frame) {
 
 async fn scanned(c: &Client, tmp: &Path) -> (String, TreeFacts) {
     let facts = build_tree(&tmp.join("root"));
-    let st = c.ok("scan.start", json!({"roots": [facts.root], "workers": 0, "auto_snapshot": false})).await;
+    let st = c
+        .ok(
+            "scan.start",
+            json!({"roots": [facts.root], "workers": 0, "auto_snapshot": false}),
+        )
+        .await;
     let id = st["scan_id"].as_str().unwrap().to_owned();
     wait_final(c, &id, false).await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -129,16 +141,26 @@ async fn open_navigate_and_back() {
     let c = Client::open(&srv.url).await;
     let tmp = tempfile::tempdir().unwrap();
     let (scan_id, _) = scanned(&c, tmp.path()).await;
-    let (update, frame) =
-        vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": {"width": 1000, "height": 700, "dpr": 1.25}})).await;
+    let (update, frame) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": {"width": 1000, "height": 700, "dpr": 1.25}}),
+    )
+    .await;
     let frame = frame.expect("a frame");
     let info = &update["frame"];
     assert_eq!(frame.len() as i64, info["rows"].as_i64().unwrap());
     assert!(frame.len() > 0);
-    assert_eq!((info["width"].as_i64(), info["height"].as_i64()), (Some(1250), Some(875)));
+    assert_eq!(
+        (info["width"].as_i64(), info["height"].as_i64()),
+        (Some(1250), Some(875))
+    );
     assert_eq!(frame.header["columns"]["x"]["dtype"], "<i4");
     assert_eq!(frame.header["columns"]["flags"]["dtype"], "<u2");
-    assert!(frame.header["request_id"].is_u64(), "the binary frame names the request");
+    assert!(
+        frame.header["request_id"].is_u64(),
+        "the binary frame names the request"
+    );
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
     assert_eq!(info["breadcrumb"].as_array().unwrap().len(), 1);
     assert_eq!(info["breadcrumb"][0]["key"], update["state"]["zoom_node"]);
@@ -148,8 +170,17 @@ async fn open_navigate_and_back() {
     let frame = frame.unwrap();
     assert_eq!(update["state"]["zoom_node"], key);
     assert_eq!(update["state"]["can_back"], true);
-    assert_eq!(update["frame"]["breadcrumb"].as_array().unwrap().last().unwrap()["label"], "a");
-    assert!(frame.names.contains(&"two.bin".to_owned()) && frame.names.contains(&"one.bin".to_owned()));
+    assert_eq!(
+        update["frame"]["breadcrumb"]
+            .as_array()
+            .unwrap()
+            .last()
+            .unwrap()["label"],
+        "a"
+    );
+    assert!(
+        frame.names.contains(&"two.bin".to_owned()) && frame.names.contains(&"one.bin".to_owned())
+    );
     let (update, frame) = vok(&c, "view.up", json!({"view_id": view_id})).await;
     let frame = frame.unwrap();
     assert_eq!(update["state"]["selected"], key);
@@ -187,29 +218,61 @@ async fn filter_dim_errors_and_hide() {
     )
     .await;
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
-    let (update, frame) = vok(&c, "view.filter", json!({"view_id": view_id, "text": "*.mp4"})).await;
+    let (update, frame) = vok(
+        &c,
+        "view.filter",
+        json!({"view_id": view_id, "text": "*.mp4"}),
+    )
+    .await;
     let frame = frame.unwrap();
     let f = &update["filter"];
-    assert_eq!((f["active"].as_bool(), f["files"].as_i64(), f["size"].as_i64()), (Some(true), Some(1), Some(123456)));
+    assert_eq!(
+        (
+            f["active"].as_bool(),
+            f["files"].as_i64(),
+            f["size"].as_i64()
+        ),
+        (Some(true), Some(1), Some(123456))
+    );
     assert!(frame.col("flags", frame.row("movie.mp4")) & i64::from(flag::MATCH) != 0);
     if frame.names.iter().any(|n| n == "c.txt") {
         assert!(frame.col("flags", frame.row("c.txt")) & i64::from(flag::DIM) != 0);
     }
     // an error keeps the last valid filter and sends no frame
-    let (update, frame) = vok(&c, "view.filter", json!({"view_id": view_id, "text": "*.mp4;>500xb"})).await;
+    let (update, frame) = vok(
+        &c,
+        "view.filter",
+        json!({"view_id": view_id, "text": "*.mp4;>500xb"}),
+    )
+    .await;
     assert!(frame.is_none());
     let f = &update["filter"];
     assert_eq!(f["stale"], true);
     assert_eq!(f["diagnostics"][0]["code"], "unknown_unit");
     assert_eq!(f["files"], 1);
     // hide mode: only the match is laid out
-    let (_, frame) = vok(&c, "view.set", json!({"view_id": view_id, "settings": {"filter_mode": "hide"}})).await;
+    let (_, frame) = vok(
+        &c,
+        "view.set",
+        json!({"view_id": view_id, "settings": {"filter_mode": "hide"}}),
+    )
+    .await;
     assert!(frame.is_some());
-    vok(&c, "view.filter", json!({"view_id": view_id, "text": "*.mp4"})).await;
+    vok(
+        &c,
+        "view.filter",
+        json!({"view_id": view_id, "text": "*.mp4"}),
+    )
+    .await;
     let (_, frame) = vok(&c, "view.render", json!({"view_id": view_id})).await;
     let frame = frame.unwrap();
-    let leaves: Vec<&String> =
-        frame.names.iter().enumerate().filter(|(i, n)| frame.col("kind", *i) == 0 && !n.is_empty()).map(|x| x.1).collect();
+    let leaves: Vec<&String> = frame
+        .names
+        .iter()
+        .enumerate()
+        .filter(|(i, n)| frame.col("kind", *i) == 0 && !n.is_empty())
+        .map(|x| x.1)
+        .collect();
     assert_eq!(leaves, vec!["movie.mp4"]);
     srv.shutdown();
 }
@@ -221,14 +284,31 @@ async fn results_and_reveal() {
     let c = Client::open(&srv.url).await;
     let tmp = tempfile::tempdir().unwrap();
     let (scan_id, facts) = scanned(&c, tmp.path()).await;
-    let (update, _) =
-        vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(1200.0, 900.0), "settings": {"detail": 1}})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(1200.0, 900.0), "settings": {"detail": 1}}),
+    )
+    .await;
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
     let empty = c.ok("view.results", json!({"view_id": view_id})).await;
-    assert_eq!((empty["active"].as_bool(), empty["total"].as_i64()), (Some(false), Some(0)));
+    assert_eq!(
+        (empty["active"].as_bool(), empty["total"].as_i64()),
+        (Some(false), Some(0))
+    );
     assert_eq!(empty["rows"], json!([]));
-    let (update, _) = vok(&c, "view.filter", json!({"view_id": view_id, "text": "*.mp4;*.txt"})).await;
-    let res = c.ok("view.results", json!({"view_id": view_id, "sort": "name", "limit": 500})).await;
+    let (update, _) = vok(
+        &c,
+        "view.filter",
+        json!({"view_id": view_id, "text": "*.mp4;*.txt"}),
+    )
+    .await;
+    let res = c
+        .ok(
+            "view.results",
+            json!({"view_id": view_id, "sort": "name", "limit": 500}),
+        )
+        .await;
     assert_eq!(res["active"], true);
     assert_eq!(res["sort"], "name");
     assert_eq!(res["seq"], update["frame"]["seq"]);
@@ -238,8 +318,16 @@ async fn results_and_reveal() {
     assert_eq!(count, update["filter"]["files"].as_i64().unwrap());
     let alloc: i64 = rows.iter().map(|r| r["alloc"].as_i64().unwrap()).sum();
     assert_eq!(alloc, res["alloc"].as_i64().unwrap());
-    assert_eq!(res["max_alloc"].as_i64(), rows.iter().map(|r| r["alloc"].as_i64().unwrap()).max());
-    let page = c.ok("view.results", json!({"view_id": view_id, "offset": 1, "limit": 1})).await;
+    assert_eq!(
+        res["max_alloc"].as_i64(),
+        rows.iter().map(|r| r["alloc"].as_i64().unwrap()).max()
+    );
+    let page = c
+        .ok(
+            "view.results",
+            json!({"view_id": view_id, "offset": 1, "limit": 1}),
+        )
+        .await;
     assert_eq!(page["sort"], "name");
     assert_eq!(page["offset"], 1);
     assert_eq!(page["rows"], json!(rows[1..2]));
@@ -247,7 +335,10 @@ async fn results_and_reveal() {
     assert_eq!(list["views"][0]["results_sort"], "name");
     // locate the movie: at detail 1 it is folded away, so the view navigates to show it
     let movie = c
-        .ok("tree.find", json!({"scan_id": scan_id, "path": facts.root.join("a").join("sub").join("movie.mp4")}))
+        .ok(
+            "tree.find",
+            json!({"scan_id": scan_id, "path": facts.root.join("a").join("sub").join("movie.mp4")}),
+        )
         .await;
     let id = movie["node"]["id"].clone();
     let (update, frame) = vok(&c, "view.reveal", json!({"view_id": view_id, "key": id})).await;
@@ -265,7 +356,12 @@ async fn tag_the_selection() {
     let c = Client::open(&srv.url).await;
     let tmp = tempfile::tempdir().unwrap();
     let (scan_id, _) = scanned(&c, tmp.path()).await;
-    let (update, frame) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(1000.0, 700.0)})).await;
+    let (update, frame) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(1000.0, 700.0)}),
+    )
+    .await;
     let frame = frame.unwrap();
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
     let key = frame.col("key", frame.row("a"));
@@ -273,8 +369,16 @@ async fn tag_the_selection() {
     let (_, frame) = vok(&c, "view.tag", json!({"view_id": view_id, "color": "red"})).await;
     let frame = frame.unwrap();
     assert_eq!(frame.col("tag", frame.row("a")), 1);
-    let (update, _) = vok(&c, "view.filter", json!({"view_id": view_id, "text": ":red"})).await;
-    assert_eq!(update["filter"]["files"], 3, "everything in a inherits the tag");
+    let (update, _) = vok(
+        &c,
+        "view.filter",
+        json!({"view_id": view_id, "text": ":red"}),
+    )
+    .await;
+    assert_eq!(
+        update["filter"]["files"], 3,
+        "everything in a inherits the tag"
+    );
     let (_, frame) = vok(&c, "view.tag", json!({"view_id": view_id, "color": null})).await;
     let frame = frame.unwrap();
     assert_eq!(frame.col("tag", frame.row("a")), 0);
@@ -288,12 +392,19 @@ async fn scan_status_pushes_frames_and_marks_scanning() {
     let c = Client::open(&srv.url).await;
     let tmp = tempfile::tempdir().unwrap();
     let (scan_id, _) = scanned(&c, tmp.path()).await;
-    let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
     let host = srv.server.views.lookup(&view_id).unwrap();
     assert!(!host.view.lock().scanning, "opened after the scan ended");
     let server = srv.server.clone();
-    server.views.on_scan(&server, &scan_id, ScanStateName::Scanning);
+    server
+        .views
+        .on_scan(&server, &scan_id, ScanStateName::Scanning);
     assert!(host.view.lock().scanning);
     let (info, frame) = pushed(&c).await;
     assert_eq!(info["reason"], "scan");
@@ -316,27 +427,47 @@ async fn final_status_during_a_push_renders_the_final_frame_once() {
     let c = Client::open(&srv.url).await;
     let tmp = tempfile::tempdir().unwrap();
     let (scan_id, _) = scanned(&c, tmp.path()).await;
-    let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
     let host = srv.server.views.lookup(&view_id).unwrap();
     let server = srv.server.clone();
     // hold the view: the progress push waits, the final status arrives meanwhile
     let guard = host.lock.lock().await;
-    server.views.on_scan(&server, &scan_id, ScanStateName::Scanning);
+    server
+        .views
+        .on_scan(&server, &scan_id, ScanStateName::Scanning);
     server.views.on_scan(&server, &scan_id, ScanStateName::Done);
     server.views.on_scan(&server, &scan_id, ScanStateName::Done);
     drop(guard);
     let (a, _) = pushed(&c).await;
     let (b, _) = pushed(&c).await;
-    assert_eq!((a["reason"].as_str(), b["reason"].as_str()), (Some("scan"), Some("scan-final")));
+    assert_eq!(
+        (a["reason"].as_str(), b["reason"].as_str()),
+        (Some("scan"), Some("scan-final"))
+    );
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let more: Vec<_> = c.drain_events().await.into_iter().filter(|(m, _)| m == "view.frame").collect();
+    let more: Vec<_> = c
+        .drain_events()
+        .await
+        .into_iter()
+        .filter(|(m, _)| m == "view.frame")
+        .collect();
     assert!(more.is_empty(), "the final frame is not repeated: {more:?}");
     // a closed view gets no pushes
     c.ok("view.close", json!({"view_id": view_id})).await;
     server.views.on_scan(&server, &scan_id, ScanStateName::Done);
     tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(c.drain_events().await.iter().all(|(m, _)| m != "view.frame"));
+    assert!(
+        c.drain_events()
+            .await
+            .iter()
+            .all(|(m, _)| m != "view.frame")
+    );
     srv.shutdown();
 }
 
@@ -347,26 +478,55 @@ async fn views_belong_to_their_session_and_scan() {
     let c = Client::open(&srv.url).await;
     let tmp = tempfile::tempdir().unwrap();
     let (scan_id, _) = scanned(&c, tmp.path()).await;
-    let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
     let view_id = update["state"]["view_id"].clone();
     let list = c.ok("view.list", json!({})).await;
     assert_eq!(list["views"].as_array().unwrap().len(), 1);
     assert_eq!(list["views"][0]["view_id"], view_id);
     let other = Client::open(&srv.url).await;
-    assert_eq!(other.err("view.render", json!({"view_id": view_id})).await.code, code(ErrorCode::UnknownView));
+    assert_eq!(
+        other
+            .err("view.render", json!({"view_id": view_id}))
+            .await
+            .code,
+        code(ErrorCode::UnknownView)
+    );
     other.close().await;
     c.ok("view.close", json!({"view_id": view_id})).await;
-    assert_eq!(c.err("view.render", json!({"view_id": view_id})).await.code, code(ErrorCode::UnknownView));
+    assert_eq!(
+        c.err("view.render", json!({"view_id": view_id})).await.code,
+        code(ErrorCode::UnknownView)
+    );
     // closing the scan closes its views
-    vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)})).await;
+    vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
     c.ok("scan.close", json!({"scan_id": scan_id})).await;
     assert!(srv.server.views.is_empty());
-    let e = c.err("view.open", json!({"scan_id": scan_id, "viewport": viewport(8.0, 8.0)})).await;
+    let e = c
+        .err(
+            "view.open",
+            json!({"scan_id": scan_id, "viewport": viewport(8.0, 8.0)}),
+        )
+        .await;
     assert_eq!(e.code, code(ErrorCode::UnknownScan));
     // a session's views go with it
     let (scan_id, _) = scanned(&c, &tmp.path().join("again")).await;
     let third = Client::open(&srv.url).await;
-    vok(&third, "view.open", json!({"scan_id": scan_id, "viewport": viewport(80.0, 60.0)})).await;
+    vok(
+        &third,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(80.0, 60.0)}),
+    )
+    .await;
     assert_eq!(srv.server.views.len(), 1);
     third.close().await;
     for _ in 0..100 {
@@ -389,9 +549,18 @@ async fn switching_the_visualization_keeps_each_colour_mode() {
     let vp = viewport(800.0, 600.0);
     let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": vp})).await;
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
-    vok(&c, "view.set", json!({"view_id": view_id, "settings": {"color_mode": "time"}})).await;
-    let (update, frame) =
-        vok(&c, "view.set", json!({"view_id": view_id, "settings": {"visual": "flame", "color_mode": "flat"}})).await;
+    vok(
+        &c,
+        "view.set",
+        json!({"view_id": view_id, "settings": {"color_mode": "time"}}),
+    )
+    .await;
+    let (update, frame) = vok(
+        &c,
+        "view.set",
+        json!({"view_id": view_id, "settings": {"visual": "flame", "color_mode": "flat"}}),
+    )
+    .await;
     let info = &update["frame"];
     assert_eq!(info["reason"], "visual");
     assert_eq!(info["layout"], "flame.v1");
@@ -402,22 +571,59 @@ async fn switching_the_visualization_keeps_each_colour_mode() {
     assert_eq!(st["colors"]["treemap"], "time");
     assert_eq!(st["colors"]["flame"], "flat");
     // a split pane / a reconnect opens with what the old view carried
-    let like = json!({"visual": st["visual"], "colors": st["colors"], "color_mode": st["color_mode"]});
-    let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": vp, "settings": like})).await;
-    assert_eq!((update["state"]["visual"].as_str(), update["state"]["color_mode"].as_str()), (Some("flame"), Some("flat")));
+    let like =
+        json!({"visual": st["visual"], "colors": st["colors"], "color_mode": st["color_mode"]});
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": vp, "settings": like}),
+    )
+    .await;
+    assert_eq!(
+        (
+            update["state"]["visual"].as_str(),
+            update["state"]["color_mode"].as_str()
+        ),
+        (Some("flame"), Some("flat"))
+    );
     let vid = update["state"]["view_id"].clone();
-    let (update, _) = vok(&c, "view.set", json!({"view_id": vid, "settings": {"visual": "treemap"}})).await;
+    let (update, _) = vok(
+        &c,
+        "view.set",
+        json!({"view_id": vid, "settings": {"visual": "treemap"}}),
+    )
+    .await;
     assert_eq!(update["state"]["color_mode"], "time");
     // unknown visualizations in the map are left out; unknown visuals are INVALID_PARAMS
-    let (update, _) =
-        vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": vp, "settings": {"colors": {"pie": "flat"}}})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": vp, "settings": {"colors": {"pie": "flat"}}}),
+    )
+    .await;
     assert!(update["state"]["colors"].get("pie").is_none());
-    let e = c.err("view.set", json!({"view_id": vid, "settings": {"visual": "pie"}})).await;
+    let e = c
+        .err(
+            "view.set",
+            json!({"view_id": vid, "settings": {"visual": "pie"}}),
+        )
+        .await;
     assert_eq!(e.code, code(ErrorCode::InvalidParams));
     let vis = c.ok("visual.list", json!({})).await;
-    let ids: Vec<&str> = vis["visuals"].as_array().unwrap().iter().map(|v| v["id"].as_str().unwrap()).collect();
+    let ids: Vec<&str> = vis["visuals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["id"].as_str().unwrap())
+        .collect();
     assert_eq!(ids, ["treemap", "flame", "flame_polar"]);
-    assert!(vis["visuals"].as_array().unwrap().iter().all(|v| v["available"] == true));
+    assert!(
+        vis["visuals"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|v| v["available"] == true)
+    );
     srv.shutdown();
 }
 
@@ -436,20 +642,36 @@ async fn older_frontends_stay_on_the_treemap() {
     .await;
     assert!(frame.is_some());
     let st = &update["state"];
-    assert_eq!((st["visual"].as_str(), st["color_mode"].as_str()), (Some("treemap"), Some("class")));
+    assert_eq!(
+        (st["visual"].as_str(), st["color_mode"].as_str()),
+        (Some("treemap"), Some("class"))
+    );
     assert_eq!(update["frame"]["layout"], "drawlist.v1");
     let view_id = st["view_id"].clone();
     for settings in [json!({"visual": "flame"}), json!({"color_mode": "branch"})] {
-        let e = old.err("view.set", json!({"view_id": view_id, "settings": settings})).await;
+        let e = old
+            .err(
+                "view.set",
+                json!({"view_id": view_id, "settings": settings}),
+            )
+            .await;
         assert_eq!(e.code, code(ErrorCode::InvalidParams));
     }
     let host = srv.server.views.lookup(view_id.as_str().unwrap()).unwrap();
     {
         let v = host.view.lock();
-        assert_eq!((v.visual.as_str(), v.color_mode().as_str()), ("treemap", "class"));
+        assert_eq!(
+            (v.visual.as_str(), v.color_mode().as_str()),
+            ("treemap", "class")
+        );
     }
     let vis = old.ok("visual.list", json!({})).await;
-    let avail: Vec<bool> = vis["visuals"].as_array().unwrap().iter().map(|v| v["available"].as_bool().unwrap()).collect();
+    let avail: Vec<bool> = vis["visuals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["available"].as_bool().unwrap())
+        .collect();
     assert_eq!(avail, [true, false, false]);
     srv.shutdown();
 }
@@ -465,15 +687,30 @@ async fn monitored_changes_reach_open_views() {
     let (scan_id, facts) = scanned(&c, tmp.path()).await;
     let handle = srv.server.scans.get(&scan_id).unwrap();
     for _ in 0..250 {
-        if srv.server.monitors.status(&scan_id).is_some_and(|s| matches!(s.state, sk_protocol::scan::MonitorState::Running)) {
+        if srv
+            .server
+            .monitors
+            .status(&scan_id)
+            .is_some_and(|s| matches!(s.state, sk_protocol::scan::MonitorState::Running))
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
     let view_id = update["state"]["view_id"].as_str().unwrap().to_owned();
     // zoom into a/sub: its id must follow when "a" is listed again
-    let sub = c.ok("tree.find", json!({"scan_id": scan_id, "path": facts.root.join("a").join("sub")})).await;
+    let sub = c
+        .ok(
+            "tree.find",
+            json!({"scan_id": scan_id, "path": facts.root.join("a").join("sub")}),
+        )
+        .await;
     let sub_id = sub["node"]["id"].as_u64().unwrap();
     vok(&c, "view.zoom", json!({"view_id": view_id, "key": sub_id})).await;
     c.drain_events().await;
@@ -483,8 +720,17 @@ async fn monitored_changes_reach_open_views() {
     let one = facts.root.join("a").join("one.bin");
     let mut ok = false;
     for _ in 0..100 {
-        let gone = c.ok("tree.find", json!({"scan_id": scan_id, "path": one})).await["node"].is_null();
-        let added = !c.ok("tree.find", json!({"scan_id": scan_id, "path": facts.root.join("a").join("added.bin")})).await["node"].is_null();
+        let gone = c
+            .ok("tree.find", json!({"scan_id": scan_id, "path": one}))
+            .await["node"]
+            .is_null();
+        let added = !c
+            .ok(
+                "tree.find",
+                json!({"scan_id": scan_id, "path": facts.root.join("a").join("added.bin")}),
+            )
+            .await["node"]
+            .is_null();
         if gone && added {
             ok = true;
             break;
@@ -515,16 +761,30 @@ async fn new_views_take_the_settings_and_follow_live_geometry() {
     let version = st["version"].clone();
     c.ok("settings.update", json!({"values": {"treemap.initial_detail": 3, "appearance.default_visual": "flame"}, "version": version}))
         .await;
-    let (update, _) = vok(&c, "view.open", json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)})).await;
+    let (update, _) = vok(
+        &c,
+        "view.open",
+        json!({"scan_id": scan_id, "viewport": viewport(800.0, 600.0)}),
+    )
+    .await;
     assert_eq!(update["state"]["detail"], 3);
     assert_eq!(update["state"]["visual"], "flame");
     c.drain_events().await;
-    c.ok("settings.update", json!({"values": {"treemap.sort_by_size": false}})).await;
+    c.ok(
+        "settings.update",
+        json!({"values": {"treemap.sort_by_size": false}}),
+    )
+    .await;
     let ev = c.event("settings.changed", 5.0).await;
     assert_eq!(ev["state"]["values"]["treemap.sort_by_size"], false);
     let (info, _) = pushed(&c).await;
     assert_eq!(info["reason"], "settings");
-    let e = c.err("settings.update", json!({"values": {"treemap.sort_by_size": true}, "version": 0})).await;
+    let e = c
+        .err(
+            "settings.update",
+            json!({"values": {"treemap.sort_by_size": true}, "version": 0}),
+        )
+        .await;
     assert_eq!(e.code, code(ErrorCode::SettingsConflict));
     c.ok("settings.reset", json!({})).await;
     let _ = Arc::strong_count(&srv.server);

@@ -78,7 +78,11 @@ impl OpResult {
 fn default_message(code: OpCode) -> String {
     let key = code.as_str();
     let t = text(key);
-    if t.is_empty() { key.to_string() } else { t.to_string() }
+    if t.is_empty() {
+        key.to_string()
+    } else {
+        t.to_string()
+    }
 }
 
 fn result(path: &str, code: OpCode) -> OpResult {
@@ -166,7 +170,10 @@ pub fn os_error(path: &str, e: &io::Error) -> OpResult {
         return result_msg(path, OpCode::Locked, text("locked_unknown"));
     }
     #[cfg(unix)]
-    let denied_errno = matches!(raw, Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS));
+    let denied_errno = matches!(
+        raw,
+        Some(libc::EACCES) | Some(libc::EPERM) | Some(libc::EROFS)
+    );
     #[cfg(not(unix))]
     let denied_errno = false;
     if e.kind() == io::ErrorKind::PermissionDenied || denied_errno {
@@ -220,7 +227,11 @@ pub fn reaches_another(
                 Err(_) => return true,
             };
         let upper = name.to_uppercase();
-        if entries.contains(name) && entries.iter().any(|e| e != name && e.to_uppercase() == upper) {
+        if entries.contains(name)
+            && entries
+                .iter()
+                .any(|e| e != name && e.to_uppercase() == upper)
+        {
             return true;
         }
         folder.push(name);
@@ -234,7 +245,11 @@ pub fn win32_trims(path: &str) -> bool {
     if !cfg!(windows) {
         return false;
     }
-    let rest = if path.as_bytes().get(1) == Some(&b':') { &path[2..] } else { path };
+    let rest = if path.as_bytes().get(1) == Some(&b':') {
+        &path[2..]
+    } else {
+        path
+    };
     rest.split(['\\', '/'])
         .filter(|n| !n.is_empty() && *n != "." && *n != "..")
         .any(|n| n.ends_with('.') || n.ends_with(' '))
@@ -254,7 +269,10 @@ fn precheck(
     for (i, p) in paths.iter().enumerate() {
         if win32_trims(p) {
             // before lexists: that would look at the other item
-            skipped.insert(i, result_msg(p, OpCode::AmbiguousName, text("trailing_name")));
+            skipped.insert(
+                i,
+                result_msg(p, OpCode::AmbiguousName, text("trailing_name")),
+            );
             continue;
         }
         if !lexists(&os[i]) {
@@ -283,7 +301,11 @@ fn precheck(
                 let names = who.join(text("list_sep"));
                 skipped.insert(
                     i,
-                    result_msg(&paths[i], OpCode::Locked, &fill(text("locked"), &[("names", names.into())])),
+                    result_msg(
+                        &paths[i],
+                        OpCode::Locked,
+                        &fill(text("locked"), &[("names", names.into())]),
+                    ),
                 );
             }
         }
@@ -338,7 +360,10 @@ impl<'a> Run<'a> {
     fn new<P: AsRef<Path>>(given: &[P], progress: Option<ProgressFn<'a>>) -> Run<'a> {
         let os: Vec<PathBuf> = given.iter().map(|p| p.as_ref().to_path_buf()).collect();
         Run {
-            paths: os.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+            paths: os
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect(),
             results: vec![None; os.len()],
             os,
             progress,
@@ -355,7 +380,9 @@ impl<'a> Run<'a> {
         if let Some(p) = self.progress.as_mut() {
             // a broken observer must not stop the operation
             let done = self.done;
-            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| p(done, total, &r))).is_err() {
+            if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| p(done, total, &r)))
+                .is_err()
+            {
                 tracing::warn!("progress callback failed");
             }
         }
@@ -408,7 +435,10 @@ pub fn trash_status(path: &str, usage: bool) -> TrashStatus {
         }
     };
     run().unwrap_or_else(|e| {
-        TrashStatus::unavailable(&fill(text("error"), &[("detail", strerror(&e).into())]), true)
+        TrashStatus::unavailable(
+            &fill(text("error"), &[("detail", strerror(&e).into())]),
+            true,
+        )
     })
 }
 
@@ -422,10 +452,17 @@ pub fn move_to_trash<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> Vec<Op
     let empty_sizes = HashMap::new();
     let cancel = opts.cancel;
     let mut run = Run::new(paths, opts.progress);
-    for (i, r) in precheck(&run.paths, &run.os, opts.check_locks, opts.roots.unwrap_or(&empty_roots)) {
+    for (i, r) in precheck(
+        &run.paths,
+        &run.os,
+        opts.check_locks,
+        opts.roots.unwrap_or(&empty_roots),
+    ) {
         run.set(i, r);
     }
-    let todo: Vec<usize> = (0..paths.len()).filter(|&i| run.results[i].is_none()).collect();
+    let todo: Vec<usize> = (0..paths.len())
+        .filter(|&i| run.results[i].is_none())
+        .collect();
     #[cfg(windows)]
     win_trash(&mut run, &todo, opts.sizes.unwrap_or(&empty_sizes), cancel);
     #[cfg(not(windows))]
@@ -473,7 +510,12 @@ pub fn delete_permanently<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> V
     let empty_roots = HashMap::new();
     let cancel = opts.cancel;
     let mut run = Run::new(paths, opts.progress);
-    for (i, r) in precheck(&run.paths, &run.os, opts.check_locks, opts.roots.unwrap_or(&empty_roots)) {
+    for (i, r) in precheck(
+        &run.paths,
+        &run.os,
+        opts.check_locks,
+        opts.roots.unwrap_or(&empty_roots),
+    ) {
         run.set(i, r);
     }
     for i in 0..paths.len() {
@@ -606,7 +648,11 @@ fn delete_one(path: &str, p: &Path, cancel: Option<CancelFn<'_>>) -> OpResult {
                 return Ok(Some(result_msg(
                     path,
                     OpCode::Cancelled,
-                    if deleted { text("cancelled_partly") } else { "" },
+                    if deleted {
+                        text("cancelled_partly")
+                    } else {
+                        ""
+                    },
                 )));
             }
             if let Some(e) = error {
@@ -665,16 +711,25 @@ pub fn parse_recycle_info(data: &[u8]) -> Result<(i64, f64, String), String> {
     if path.is_empty() {
         return Err("record has no path".into());
     }
-    Ok((size, (filetime - 116_444_736_000_000_000) as f64 / 1e7, path))
+    Ok((
+        size,
+        (filetime - 116_444_736_000_000_000) as f64 / 1e7,
+        path,
+    ))
 }
 
 /// `$R…` path in the bin → its `$I…` record.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn info_of(recycled: &str) -> String {
     let p = Path::new(recycled);
-    let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = p
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let rest: String = name.chars().skip(2).collect();
-    p.with_file_name(format!("$I{rest}")).to_string_lossy().into_owned()
+    p.with_file_name(format!("$I{rest}"))
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// The result of a failed shell deletion.
@@ -685,7 +740,9 @@ pub fn hr_result(path: &str, hr: i32) -> OpResult {
     if matches!(value, 0x8027_0027 | 0x8027_0028) || (win32 && matches!(code, 32 | 33)) {
         return result_msg(path, OpCode::Locked, text("locked_unknown"));
     }
-    if matches!(value, 0x8027_0002 | 0x8027_0021 | 0x8027_0022 | 0x8027_003F) || (win32 && code == 5) {
+    if matches!(value, 0x8027_0002 | 0x8027_0021 | 0x8027_0022 | 0x8027_003F)
+        || (win32 && code == 5)
+    {
         return result(path, OpCode::Denied);
     }
     if win32 && matches!(code, 2 | 3) {
@@ -701,7 +758,10 @@ pub fn hr_result(path: &str, hr: i32) -> OpResult {
     result_msg(
         path,
         OpCode::Error,
-        &fill(text("error"), &[("detail", format!("0x{value:08X}").into())]),
+        &fill(
+            text("error"),
+            &[("detail", format!("0x{value:08X}").into())],
+        ),
     )
 }
 
@@ -725,7 +785,11 @@ fn win_bin(path: &str) -> io::Result<Result<Bin, &'static str>> {
     if kind == win::DRIVE_REMOVABLE {
         return Ok(Err(text("no_bin_removable")));
     }
-    let guid = if kind == win::DRIVE_FIXED { win::volume_guid(&root) } else { String::new() };
+    let guid = if kind == win::DRIVE_FIXED {
+        win::volume_guid(&root)
+    } else {
+        String::new()
+    };
     if guid.is_empty() {
         return Ok(Err(text("no_bin_volume")));
     }
@@ -760,7 +824,11 @@ fn win_status(path: &str, usage: bool) -> io::Result<TrashStatus> {
             available: true,
             reason: String::new(),
             location: bin.folder.clone(),
-            used: if usage { super::win::bin_usage(&bin.root).0 } else { -1 },
+            used: if usage {
+                super::win::bin_usage(&bin.root).0
+            } else {
+                -1
+            },
             capacity: bin.capacity as i64,
             same_volume: true,
         }),
@@ -860,7 +928,12 @@ fn match_unmatched(
 }
 
 #[cfg(windows)]
-fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, cancel: Option<CancelFn<'_>>) {
+fn win_trash(
+    run: &mut Run<'_>,
+    todo: &[usize],
+    sizes: &HashMap<String, i64>,
+    cancel: Option<CancelFn<'_>>,
+) {
     use super::fmt_size;
     use super::win;
     let max = seams::max_path();
@@ -946,8 +1019,10 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
     for batch in batches {
         let mut pending = batch;
         while !pending.is_empty() && !cancelled(cancel) {
-            let where_: HashMap<String, usize> =
-                pending.iter().map(|&i| (win_key(&run.paths[i]), i)).collect();
+            let where_: HashMap<String, usize> = pending
+                .iter()
+                .map(|&i| (win_key(&run.paths[i]), i))
+                .collect();
             let batch_paths: Vec<PathBuf> = pending.iter().map(|&i| run.os[i].clone()).collect();
             let outcome = {
                 let run_ref = &mut *run;
@@ -957,7 +1032,10 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
                     if let Some(recycled) = &entry.recycled {
                         let at = pending_ref[k];
                         let p = run_ref.paths[at].clone();
-                        run_ref.set(at, OpResult::new(&p, OpCode::Ok, text("trashed"), &info_of(recycled)));
+                        run_ref.set(
+                            at,
+                            OpResult::new(&p, OpCode::Ok, text("trashed"), &info_of(recycled)),
+                        );
                     }
                 };
                 win::recycle(&batch_paths, cancel, &mut on_item)
@@ -980,9 +1058,14 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
                 let key = win_key(&path);
                 let recycled = entry.recycled.clone().or_else(|| late.get(&i).cloned());
                 if let Some(r) = recycled {
-                    run.set(i, OpResult::new(&path, OpCode::Ok, text("trashed"), &info_of(&r)));
+                    run.set(
+                        i,
+                        OpResult::new(&path, OpCode::Ok, text("trashed"), &info_of(&r)),
+                    );
                 } else if entry.refused
-                    || refused.iter().any(|r| *r == key || r.starts_with(&format!("{key}\\")))
+                    || refused
+                        .iter()
+                        .any(|r| *r == key || r.starts_with(&format!("{key}\\")))
                 {
                     run.set(i, result_msg(&path, OpCode::NoTrash, text("refused")));
                 } else if outcome.cancelled && entry.hr < 0 {
@@ -1020,11 +1103,20 @@ fn win_restore(r: &str) -> io::Result<OpResult> {
     use super::win;
     let info = super::paths::absolute(Path::new(r));
     let folder = info.parent().map(Path::to_path_buf).unwrap_or_default();
-    let name = info.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = info
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let bin_dir = folder.parent().map(Path::to_path_buf).unwrap_or_default();
-    let base = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let base = |p: &Path| {
+        p.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
     let volume_ok = || -> bool {
-        let Some(top) = bin_dir.parent() else { return false };
+        let Some(top) = bin_dir.parent() else {
+            return false;
+        };
         let top = top.to_string_lossy();
         let top = format!("{}\\", top.trim_end_matches('\\'));
         win::volume_root(&info.to_string_lossy())
@@ -1051,7 +1143,11 @@ fn win_restore(r: &str) -> io::Result<OpResult> {
     };
     let payload = folder.join(format!("$R{}", &name[2..]));
     if std::fs::symlink_metadata(&payload).is_err() {
-        return Ok(result_msg(&original, OpCode::Missing, text("gone_from_trash")));
+        return Ok(result_msg(
+            &original,
+            OpCode::Missing,
+            text("gone_from_trash"),
+        ));
     }
     if lexists(&original) {
         return Ok(result(&original, OpCode::Exists));
@@ -1122,9 +1218,15 @@ fn wide_os(p: &Path) -> Vec<u16> {
     let s = p.to_string_lossy();
     let long = names::long_path(&s);
     if long.len() != s.len() {
-        return std::ffi::OsStr::new(&long).encode_wide().chain(std::iter::once(0)).collect();
+        return std::ffi::OsStr::new(&long)
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
     }
-    p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    p.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// A no-replace rename: Some(result), or None when this file system cannot.
@@ -1137,7 +1239,11 @@ fn native_noreplace(src: &Path, dst: &Path) -> Option<io::Result<()>> {
     #[cfg(target_os = "macos")]
     let rc = {
         unsafe extern "C" {
-            fn renamex_np(from: *const libc::c_char, to: *const libc::c_char, flags: libc::c_uint) -> libc::c_int;
+            fn renamex_np(
+                from: *const libc::c_char,
+                to: *const libc::c_char,
+                flags: libc::c_uint,
+            ) -> libc::c_int;
         }
         const RENAME_EXCL: libc::c_uint = 0x0000_0004;
         // SAFETY: NUL-terminated strings.
@@ -1210,7 +1316,8 @@ fn unquote(s: &str) -> Vec<u8> {
     while i < b.len() {
         if b[i] == b'%'
             && i + 2 < b.len()
-            && let Ok(v) = u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or("zz"), 16)
+            && let Ok(v) =
+                u8::from_str_radix(std::str::from_utf8(&b[i + 1..i + 3]).unwrap_or("zz"), 16)
         {
             out.push(v);
             i += 3;
@@ -1333,7 +1440,8 @@ pub mod fd {
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 if !create {
                     let parent = path.parent().unwrap_or(Path::new("/"));
-                    let c = std::ffi::CString::new(parent.as_os_str().as_bytes()).unwrap_or_default();
+                    let c =
+                        std::ffi::CString::new(parent.as_os_str().as_bytes()).unwrap_or_default();
                     // SAFETY: a NUL-terminated path.
                     return unsafe { libc::access(c.as_ptr(), libc::W_OK | libc::X_OK) } == 0;
                 }
@@ -1375,7 +1483,10 @@ pub mod fd {
             if create {
                 make_subdirs(&home)?;
             }
-            return Ok(Ok(FdTrash { root: home, topdir: None }));
+            return Ok(Ok(FdTrash {
+                root: home,
+                topdir: None,
+            }));
         }
         let uid = uid();
         let top = mount_top(path, dev);
@@ -1387,12 +1498,24 @@ pub mod fd {
             // not a link, sticky: usable
             let mine = admin.join(uid.to_string());
             if usable_dir(&mine, uid, create) {
-                return Ok(ready(FdTrash { root: mine, topdir: Some(top) }, create));
+                return Ok(ready(
+                    FdTrash {
+                        root: mine,
+                        topdir: Some(top),
+                    },
+                    create,
+                ));
             }
         }
         let mine = top.join(format!(".Trash-{uid}"));
         if usable_dir(&mine, uid, create) {
-            return Ok(ready(FdTrash { root: mine, topdir: Some(top) }, create));
+            return Ok(ready(
+                FdTrash {
+                    root: mine,
+                    topdir: Some(top),
+                },
+                create,
+            ));
         }
         Ok(Err(text("no_trash_dir")))
     }
@@ -1404,7 +1527,11 @@ pub mod fd {
                 available: true,
                 reason: String::new(),
                 location: t.root.to_string_lossy().into_owned(),
-                used: if usage { tree_bytes(&t.root.join("files")) } else { -1 },
+                used: if usage {
+                    tree_bytes(&t.root.join("files"))
+                } else {
+                    -1
+                },
                 capacity: 0,
                 same_volume: true,
             }),
@@ -1415,13 +1542,17 @@ pub mod fd {
         let (mut total, mut seen) = (0i64, 0usize);
         let mut stack = vec![path.to_path_buf()];
         while let Some(folder) = stack.pop() {
-            let Ok(it) = std::fs::read_dir(&folder) else { continue };
+            let Ok(it) = std::fs::read_dir(&folder) else {
+                continue;
+            };
             for entry in it.flatten() {
                 seen += 1;
                 if seen > TRASH_USAGE_LIMIT {
                     return -1;
                 }
-                let Ok(m) = std::fs::symlink_metadata(entry.path()) else { continue };
+                let Ok(m) = std::fs::symlink_metadata(entry.path()) else {
+                    continue;
+                };
                 if m.is_dir() {
                     stack.push(entry.path());
                 }
@@ -1516,7 +1647,9 @@ pub mod fd {
                 let _ = std::fs::remove_file(&info);
                 match e.raw_os_error() {
                     Some(libc::EEXIST) => continue,
-                    Some(libc::EXDEV) => return result_msg(path, OpCode::NoTrash, text("cross_mount")),
+                    Some(libc::EXDEV) => {
+                        return result_msg(path, OpCode::NoTrash, text("cross_mount"));
+                    }
                     _ => return os_error(path, &e),
                 }
             }
@@ -1530,7 +1663,11 @@ pub mod fd {
         let info_dir = info.parent().map(Path::to_path_buf).unwrap_or_default();
         let root = info_dir.parent().map(Path::to_path_buf).unwrap_or_default();
         let uid = uid();
-        let name = |p: &Path| p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let name = |p: &Path| {
+            p.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
         if !info.to_string_lossy().ends_with(".trashinfo") || name(&info_dir) != "info" {
             return Ok(result_msg(r, OpCode::Error, text("bad_ref")));
         }
@@ -1564,12 +1701,19 @@ pub mod fd {
         };
         let original = PathBuf::from(norm(&original));
         let original_s = original.to_string_lossy().into_owned();
-        let file = info.file_name().map(|n| n.as_bytes().to_vec()).unwrap_or_default();
+        let file = info
+            .file_name()
+            .map(|n| n.as_bytes().to_vec())
+            .unwrap_or_default();
         let payload = root
             .join("files")
             .join(OsStr::from_bytes(&file[..file.len() - ".trashinfo".len()]));
         if std::fs::symlink_metadata(&payload).is_err() {
-            return Ok(result_msg(&original_s, OpCode::Missing, text("gone_from_trash")));
+            return Ok(result_msg(
+                &original_s,
+                OpCode::Missing,
+                text("gone_from_trash"),
+            ));
         }
         if std::fs::symlink_metadata(&original).is_ok() {
             return Ok(result(&original_s, OpCode::Exists));
@@ -1601,7 +1745,10 @@ fn mac_status(path: &str) -> io::Result<TrashStatus> {
     Ok(TrashStatus {
         available: true,
         reason: String::new(),
-        location: crate::paths::home_dir().join(".Trash").to_string_lossy().into_owned(),
+        location: crate::paths::home_dir()
+            .join(".Trash")
+            .to_string_lossy()
+            .into_owned(),
         used: -1,
         capacity: 0,
         same_volume: true,
@@ -1622,11 +1769,20 @@ fn mac_trash(path: &str) -> OpResult {
         match done {
             Err(err) => {
                 let detail = err.localizedDescription().to_string();
-                result_msg(path, OpCode::Error, &fill(text("error"), &[("detail", detail.into())]))
+                result_msg(
+                    path,
+                    OpCode::Error,
+                    &fill(text("error"), &[("detail", detail.into())]),
+                )
             }
             Ok(()) => {
-                let landed = out.and_then(|u| u.path()).map(|p| p.to_string()).unwrap_or_default();
-                let original = super::paths::absolute(Path::new(path)).to_string_lossy().into_owned();
+                let landed = out
+                    .and_then(|u| u.path())
+                    .map(|p| p.to_string())
+                    .unwrap_or_default();
+                let original = super::paths::absolute(Path::new(path))
+                    .to_string_lossy()
+                    .into_owned();
                 let r = serde_json::json!({"trashed": landed, "original": original}).to_string();
                 OpResult::new(path, OpCode::Ok, text("trashed"), &r)
             }
@@ -1638,7 +1794,12 @@ fn mac_trash(path: &str) -> OpResult {
 fn mac_restore(r: &str) -> io::Result<OpResult> {
     let parsed: Option<(String, String)> = serde_json::from_str::<serde_json::Value>(r)
         .ok()
-        .and_then(|v| Some((v.get("trashed")?.as_str()?.to_string(), v.get("original")?.as_str()?.to_string())));
+        .and_then(|v| {
+            Some((
+                v.get("trashed")?.as_str()?.to_string(),
+                v.get("original")?.as_str()?.to_string(),
+            ))
+        });
     let Some((trashed, original)) = parsed else {
         return Ok(result_msg(r, OpCode::Error, text("bad_ref")));
     };
@@ -1647,7 +1808,11 @@ fn mac_restore(r: &str) -> io::Result<OpResult> {
         return Ok(result_msg(r, OpCode::Error, text("bad_ref")));
     }
     if !lexists(&trashed) {
-        return Ok(result_msg(&original, OpCode::Missing, text("gone_from_trash")));
+        return Ok(result_msg(
+            &original,
+            OpCode::Missing,
+            text("gone_from_trash"),
+        ));
     }
     if lexists(&original) {
         return Ok(result(&original, OpCode::Exists));

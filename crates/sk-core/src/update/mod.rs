@@ -69,21 +69,45 @@ const LOOPBACK: &[&str] = &["127.0.0.1", "localhost", "::1"];
 /// is read.
 #[derive(Clone, Debug, PartialEq)]
 pub enum UpdateError {
-    Offline { reason: String },
+    Offline {
+        reason: String,
+    },
     Timeout,
-    Certificate { reason: String },
+    Certificate {
+        reason: String,
+    },
     Rate,
-    RateUntil { minutes: i64 },
-    Http { code: u16 },
+    RateUntil {
+        minutes: i64,
+    },
+    Http {
+        code: u16,
+    },
     BadList,
-    Failed { reason: String },
-    Sums { reason: String },
-    DownloadNet { reason: String },
-    DownloadHttp { code: u16 },
-    Incomplete { received: u64, expected: u64 },
+    Failed {
+        reason: String,
+    },
+    Sums {
+        reason: String,
+    },
+    DownloadNet {
+        reason: String,
+    },
+    DownloadHttp {
+        code: u16,
+    },
+    Incomplete {
+        received: u64,
+        expected: u64,
+    },
     Mismatch,
-    Write { path: PathBuf, reason: String },
-    DownloadFailed { reason: String },
+    Write {
+        path: PathBuf,
+        reason: String,
+    },
+    DownloadFailed {
+        reason: String,
+    },
     /// The download was cancelled; its partial file is gone.
     Cancelled,
 }
@@ -114,22 +138,34 @@ impl UpdateError {
     /// The message in the current language.
     pub fn message(&self) -> String {
         match self {
-            UpdateError::Offline { reason } => tr!("连不上 GitHub：{reason}", reason = reason.as_str()),
+            UpdateError::Offline { reason } => {
+                tr!("连不上 GitHub：{reason}", reason = reason.as_str())
+            }
             UpdateError::Timeout => t("连接 GitHub 超时").to_owned(),
             UpdateError::Certificate { reason } => {
                 tr!("无法验证 GitHub 的证书：{reason}", reason = reason.as_str())
             }
             UpdateError::Rate => t("GitHub 暂时限制了查询次数，请过一会儿再试").to_owned(),
             UpdateError::RateUntil { minutes } => {
-                tr!("GitHub 暂时限制了查询次数，约 {minutes} 分钟后恢复", minutes = *minutes)
+                tr!(
+                    "GitHub 暂时限制了查询次数，约 {minutes} 分钟后恢复",
+                    minutes = *minutes
+                )
             }
             UpdateError::Http { code } => tr!("GitHub 返回了错误：HTTP {code}", code = *code),
             UpdateError::BadList => t("GitHub 返回的发布列表无法识别").to_owned(),
-            UpdateError::Failed { reason } => tr!("检查更新失败：{reason}", reason = reason.as_str()),
-            UpdateError::Sums { reason } => {
-                tr!("取不到这个版本发布的校验值（{reason}），没有下载", reason = reason.as_str())
+            UpdateError::Failed { reason } => {
+                tr!("检查更新失败：{reason}", reason = reason.as_str())
             }
-            UpdateError::DownloadNet { reason } => tr!("下载中断：{reason}", reason = reason.as_str()),
+            UpdateError::Sums { reason } => {
+                tr!(
+                    "取不到这个版本发布的校验值（{reason}），没有下载",
+                    reason = reason.as_str()
+                )
+            }
+            UpdateError::DownloadNet { reason } => {
+                tr!("下载中断：{reason}", reason = reason.as_str())
+            }
             UpdateError::DownloadHttp { code } => tr!("下载失败：HTTP {code}", code = *code),
             UpdateError::Incomplete { received, expected } => tr!(
                 "下载不完整：收到 {received} 字节，应为 {expected} 字节",
@@ -138,9 +174,15 @@ impl UpdateError {
             ),
             UpdateError::Mismatch => t("下载的文件与发布的 SHA-256 校验值不符，已删除").to_owned(),
             UpdateError::Write { path, reason } => {
-                tr!("写不了 {path}：{reason}", path = path, reason = reason.as_str())
+                tr!(
+                    "写不了 {path}：{reason}",
+                    path = path,
+                    reason = reason.as_str()
+                )
             }
-            UpdateError::DownloadFailed { reason } => tr!("下载失败：{reason}", reason = reason.as_str()),
+            UpdateError::DownloadFailed { reason } => {
+                tr!("下载失败：{reason}", reason = reason.as_str())
+            }
             UpdateError::Cancelled => "cancelled".to_owned(),
         }
     }
@@ -174,7 +216,12 @@ pub struct Version {
 
 impl Version {
     pub fn new(major: u64, minor: u64, patch: u64) -> Version {
-        Version { major, minor, patch, pre: Vec::new() }
+        Version {
+            major,
+            minor,
+            patch,
+            pre: Vec::new(),
+        }
     }
 
     pub fn parse(text: &str) -> Option<Version> {
@@ -184,7 +231,9 @@ impl Version {
             major: n(1)?,
             minor: n(2)?,
             patch: n(3)?,
-            pre: m.get(4).map_or_else(Vec::new, |p| p.as_str().split('.').map(str::to_owned).collect()),
+            pre: m.get(4).map_or_else(Vec::new, |p| {
+                p.as_str().split('.').map(str::to_owned).collect()
+            }),
         })
     }
 }
@@ -280,7 +329,9 @@ pub fn series_reached(name: &str, current: Option<&str>) -> bool {
     let Ok(parts) = parts else {
         return true; // not a series: drop it
     };
-    let Some(cur) = parse_opt(current) else { return false };
+    let Some(cur) = parse_opt(current) else {
+        return false;
+    };
     let mine = [cur.major, cur.minor];
     mine[..parts.len().min(2)] >= parts[..]
 }
@@ -337,17 +388,24 @@ fn split_url(url: &str) -> Option<(String, &str, String)> {
     } else {
         hostport.split(':').next().unwrap_or("")
     };
-    Some((scheme.to_ascii_lowercase(), netloc, host.to_ascii_lowercase()))
+    Some((
+        scheme.to_ascii_lowercase(),
+        netloc,
+        host.to_ascii_lowercase(),
+    ))
 }
 
 /// Pages and files the app may open or fetch: on github.com — or, with a local test feed
 /// ([`feed_url`]), next to it.
 pub fn allowed_url(url: &str, feed: &str) -> bool {
-    let Some((scheme, netloc, host)) = split_url(url) else { return false };
+    let Some((scheme, netloc, host)) = split_url(url) else {
+        return false;
+    };
     if scheme == "https" && host == "github.com" {
         return true;
     }
-    feed != RELEASES_URL && split_url(feed).is_some_and(|(fs, fn_, _)| fs == scheme && fn_ == netloc)
+    feed != RELEASES_URL
+        && split_url(feed).is_some_and(|(fs, fn_, _)| fs == scheme && fn_ == netloc)
 }
 
 /// At most `limit` UTF-8 bytes, cut at a line end when there is one in the second half.
@@ -388,29 +446,51 @@ pub fn parse_releases(data: &Value, feed: &str) -> Result<Vec<Release>, String> 
     };
     let mut out: Vec<(Version, Release)> = Vec::new();
     for item in items {
-        let Some(obj) = item.as_object() else { continue };
-        if obj.get("draft").is_some_and(|d| d.as_bool().unwrap_or(!d.is_null())) {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        if obj
+            .get("draft")
+            .is_some_and(|d| d.as_bool().unwrap_or(!d.is_null()))
+        {
             continue;
         }
-        let Some(tag) = obj.get("tag_name").and_then(Value::as_str) else { continue };
-        let Some(v) = Version::parse(tag) else { continue };
+        let Some(tag) = obj.get("tag_name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(v) = Version::parse(tag) else {
+            continue;
+        };
         let mut assets = Vec::new();
-        for a in obj.get("assets").and_then(Value::as_array).into_iter().flatten() {
-            let (Some(name), Some(url)) =
-                (a.get("name").and_then(Value::as_str), a.get("browser_download_url").and_then(Value::as_str))
-            else {
+        for a in obj
+            .get("assets")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let (Some(name), Some(url)) = (
+                a.get("name").and_then(Value::as_str),
+                a.get("browser_download_url").and_then(Value::as_str),
+            ) else {
                 continue;
             };
             if allowed_url(url, feed) {
                 let size = a.get("size").and_then(Value::as_u64).unwrap_or(0);
-                assets.push(Asset { name: name.to_owned(), size, url: url.to_owned() });
+                assets.push(Asset {
+                    name: name.to_owned(),
+                    size,
+                    url: url.to_owned(),
+                });
             }
         }
         let url = obj
             .get("html_url")
             .and_then(Value::as_str)
             .filter(|p| allowed_url(p, feed))
-            .map_or_else(|| format!("{RELEASES_PAGE}/tag/{}", quote(tag)), str::to_owned);
+            .map_or_else(
+                || format!("{RELEASES_PAGE}/tag/{}", quote(tag)),
+                str::to_owned,
+            );
         let published_at = obj
             .get("published_at")
             .and_then(Value::as_str)
@@ -419,11 +499,21 @@ pub fn parse_releases(data: &Value, feed: &str) -> Result<Vec<Release>, String> 
         let release = Release {
             version: v.to_string(),
             tag: tag.to_owned(),
-            name: obj.get("name").and_then(Value::as_str).unwrap_or("").to_owned(),
-            prerelease: obj.get("prerelease").and_then(Value::as_bool).unwrap_or(false),
+            name: obj
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            prerelease: obj
+                .get("prerelease")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             published_at,
             url,
-            notes: obj.get("body").and_then(Value::as_str).map_or_else(String::new, |b| cap_notes(b, NOTES_MAX)),
+            notes: obj
+                .get("body")
+                .and_then(Value::as_str)
+                .map_or_else(String::new, |b| cap_notes(b, NOTES_MAX)),
             assets,
         };
         out.push((v, release));
@@ -449,17 +539,27 @@ pub fn choose(releases: &[Release], channel: UpdateChannel) -> Option<&Release> 
 
 /// What the cache keeps: the newest [`HISTORY_KEEP`] releases that have a version, newest first.
 pub fn trim(releases: &[Release]) -> Vec<Release> {
-    let mut known: Vec<(Version, &Release)> =
-        releases.iter().filter_map(|r| r.parsed().map(|v| (v, r))).collect();
+    let mut known: Vec<(Version, &Release)> = releases
+        .iter()
+        .filter_map(|r| r.parsed().map(|v| (v, r)))
+        .collect();
     known.sort_by(|a, b| b.0.cmp(&a.0));
-    known.into_iter().take(HISTORY_KEEP).map(|(_, r)| r.clone()).collect()
+    known
+        .into_iter()
+        .take(HISTORY_KEEP)
+        .map(|(_, r)| r.clone())
+        .collect()
 }
 
 pub fn to_info(release: &Release, asset: Option<&Asset>, sha256: Option<&str>) -> UpdateInfo {
     UpdateInfo {
         version: release.version.clone(),
         tag: release.tag.clone(),
-        name: if release.name.is_empty() { release.tag.clone() } else { release.name.clone() },
+        name: if release.name.is_empty() {
+            release.tag.clone()
+        } else {
+            release.name.clone()
+        },
         published_at: release.published_at,
         prerelease: release.prerelease,
         url: release.url.clone(),
@@ -511,13 +611,20 @@ pub fn asset_templates(kind: InstallKind, system: &str, machine: &str) -> Vec<St
     match kind {
         InstallKind::Nsis => vec!["SpaceKnife_{v}_x64-setup.exe".into()], // Windows on ARM runs it emulated
         InstallKind::Portable if system == "win32" && a == "arm64" => {
-            vec!["SpaceKnife-{v}-win-arm64-portable.zip".into(), "SpaceKnife-{v}-win-x64-portable.zip".into()]
+            vec![
+                "SpaceKnife-{v}-win-arm64-portable.zip".into(),
+                "SpaceKnife-{v}-win-x64-portable.zip".into(),
+            ]
         }
-        InstallKind::Portable if system == "win32" => vec!["SpaceKnife-{v}-win-x64-portable.zip".into()],
+        InstallKind::Portable if system == "win32" => {
+            vec!["SpaceKnife-{v}-win-x64-portable.zip".into()]
+        }
         InstallKind::Portable if system.starts_with("linux") && known => {
             vec![format!("SpaceKnife-{{v}}-linux-{a}-portable.tar.gz")]
         }
-        InstallKind::Portable if system == "darwin" && known => vec![format!("SpaceKnife-{{v}}-mac-{a}-portable.zip")],
+        InstallKind::Portable if system == "darwin" && known => {
+            vec![format!("SpaceKnife-{{v}}-mac-{a}-portable.zip")]
+        }
         InstallKind::Appimage if x64 => vec!["SpaceKnife_{v}_amd64.AppImage".into()],
         InstallKind::Deb if x64 => vec!["SpaceKnife_{v}_amd64.deb".into()],
         InstallKind::Rpm if x64 => vec!["SpaceKnife-{v}-1.x86_64.rpm".into()],
@@ -546,13 +653,24 @@ pub fn pick_asset<'a>(
     system: Option<&str>,
     machine: Option<&str>,
 ) -> Option<&'a Asset> {
-    let templates =
-        asset_templates(kind, system.unwrap_or(self::system()), machine.unwrap_or(std::env::consts::ARCH));
+    let templates = asset_templates(
+        kind,
+        system.unwrap_or(self::system()),
+        machine.unwrap_or(std::env::consts::ARCH),
+    );
     templates.iter().find_map(|template| {
         let exact = template.replace("{v}", &release.version);
         let pattern = template_regex(template, V_SLOT);
-        let found: Vec<&Asset> = release.assets.iter().filter(|a| pattern.is_match(&a.name)).collect();
-        found.iter().find(|a| a.name == exact).or(found.first()).copied()
+        let found: Vec<&Asset> = release
+            .assets
+            .iter()
+            .filter(|a| pattern.is_match(&a.name))
+            .collect();
+        found
+            .iter()
+            .find(|a| a.name == exact)
+            .or(found.first())
+            .copied()
     })
 }
 
@@ -571,7 +689,9 @@ pub fn parse_checksums(text: &str) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     for line in text.lines() {
         let line = line.trim();
-        let Some((hex, rest)) = line.split_once(char::is_whitespace) else { continue };
+        let Some((hex, rest)) = line.split_once(char::is_whitespace) else {
+            continue;
+        };
         if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
             continue;
         }
@@ -587,7 +707,10 @@ pub fn parse_checksums(text: &str) -> Vec<(String, String)> {
 
 /// The checksum of `name` in `sha256sum` output.
 pub fn checksum_of(text: &str, name: &str) -> Option<String> {
-    parse_checksums(text).into_iter().find(|(n, _)| n == name).map(|(_, h)| h)
+    parse_checksums(text)
+        .into_iter()
+        .find(|(n, _)| n == name)
+        .map(|(_, h)| h)
 }
 
 /// The release's checksum files, the likeliest to list `asset` first: SHA256SUMS-mac-arm64.txt
@@ -597,7 +720,10 @@ pub fn checksum_files<'a>(release: &'a Release, asset: &Asset) -> Vec<&'a Asset>
     let rank = |a: &Asset| -> u8 {
         let lower = a.name.to_lowercase();
         let middle = lower.get(10..lower.len().saturating_sub(4)).unwrap_or("");
-        let words: Vec<&str> = middle.split(['-', '_', '.']).filter(|w| !w.is_empty()).collect();
+        let words: Vec<&str> = middle
+            .split(['-', '_', '.'])
+            .filter(|w| !w.is_empty())
+            .collect();
         if words.is_empty() {
             1
         } else if words.iter().all(|w| name.contains(w)) {
@@ -606,7 +732,11 @@ pub fn checksum_files<'a>(release: &'a Release, asset: &Asset) -> Vec<&'a Asset>
             2
         }
     };
-    let mut out: Vec<&Asset> = release.assets.iter().filter(|a| is_checksum_file(&a.name)).collect();
+    let mut out: Vec<&Asset> = release
+        .assets
+        .iter()
+        .filter(|a| is_checksum_file(&a.name))
+        .collect();
     out.sort_by_key(|a| rank(a));
     out
 }
@@ -629,14 +759,19 @@ pub fn feed_url_from(value: &str) -> String {
         {
             return value.to_owned();
         }
-        tracing::warn!("SPACEKNIFE_UPDATE_FEED ignored: only a loopback address is allowed ({value})");
+        tracing::warn!(
+            "SPACEKNIFE_UPDATE_FEED ignored: only a loopback address is allowed ({value})"
+        );
     }
     RELEASES_URL.to_owned()
 }
 
 /// The running app's version as the launcher tells it (`SPACEKNIFE_APP_VERSION`).
 pub fn app_version() -> Option<String> {
-    std::env::var("SPACEKNIFE_APP_VERSION").ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty())
+    std::env::var("SPACEKNIFE_APP_VERSION")
+        .ok()
+        .map(|v| v.trim().to_owned())
+        .filter(|v| !v.is_empty())
 }
 
 /// How this copy was installed, as the launcher tells it: unset is a run from source.
@@ -710,7 +845,9 @@ pub fn update_file_version(name: &str) -> Option<Version> {
 pub fn clean_updates(folder: &Path, current: Option<&str>) -> Vec<String> {
     let now = parse_opt(current);
     let mut removed = Vec::new();
-    let Ok(rd) = std::fs::read_dir(folder) else { return removed };
+    let Ok(rd) = std::fs::read_dir(folder) else {
+        return removed;
+    };
     let mut entries: Vec<_> = rd.filter_map(Result::ok).collect();
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
@@ -724,7 +861,11 @@ pub fn clean_updates(folder: &Path, current: Option<&str>) -> Vec<String> {
         }
         let path = entry.path();
         let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-        let result = if is_dir { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+        let result = if is_dir {
+            std::fs::remove_dir_all(&path)
+        } else {
+            std::fs::remove_file(&path)
+        };
         match result {
             Ok(()) => removed.push(name),
             Err(e) => tracing::warn!("could not remove {}: {e}", path.display()),
@@ -806,7 +947,10 @@ pub fn load_state(file: &Path, feed: &str) -> UpdateState {
         Ok(b) => b,
         Err(e) => {
             if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!("update state {} is unreadable, starting afresh: {e}", file.display());
+                tracing::warn!(
+                    "update state {} is unreadable, starting afresh: {e}",
+                    file.display()
+                );
             }
             return UpdateState::for_feed(feed);
         }
@@ -814,12 +958,19 @@ pub fn load_state(file: &Path, feed: &str) -> UpdateState {
     let state: UpdateState = match serde_json::from_slice(&bytes) {
         Ok(s) => s,
         Err(e) => {
-            tracing::warn!("update state {} is unreadable, starting afresh: {e}", file.display());
+            tracing::warn!(
+                "update state {} is unreadable, starting afresh: {e}",
+                file.display()
+            );
             return UpdateState::for_feed(feed);
         }
     };
     if state.feed != feed {
-        return UpdateState { dismissed: state.dismissed, muted: state.muted, ..UpdateState::for_feed(feed) };
+        return UpdateState {
+            dismissed: state.dismissed,
+            muted: state.muted,
+            ..UpdateState::for_feed(feed)
+        };
     }
     state
 }
@@ -853,7 +1004,9 @@ fn agent(url: &str, timeout: Duration) -> ureq::Agent {
         .timeout_connect(Some(timeout))
         .timeout_recv_response(Some(timeout))
         .tls_config(
-            ureq::tls::TlsConfig::builder().root_certs(ureq::tls::RootCerts::PlatformVerifier).build(),
+            ureq::tls::TlsConfig::builder()
+                .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                .build(),
         );
     if loopback {
         cfg = cfg.proxy(None);
@@ -874,26 +1027,45 @@ fn network_error(e: &ureq::Error, make: impl Fn(String) -> UpdateError, list: bo
     let timed_out = matches!(e, ureq::Error::Timeout(_))
         || matches!(e, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut);
     if timed_out {
-        return if list { UpdateError::Timeout } else { make(t("连接 GitHub 超时").to_owned()) };
+        return if list {
+            UpdateError::Timeout
+        } else {
+            make(t("连接 GitHub 超时").to_owned())
+        };
     }
     match e {
-        ureq::Error::Rustls(r) => UpdateError::Certificate { reason: r.to_string() },
-        ureq::Error::Tls(r) => UpdateError::Certificate { reason: (*r).to_owned() },
+        ureq::Error::Rustls(r) => UpdateError::Certificate {
+            reason: r.to_string(),
+        },
+        ureq::Error::Tls(r) => UpdateError::Certificate {
+            reason: (*r).to_owned(),
+        },
         other => make(reason_of(other)),
     }
 }
 
 fn io_error(e: &std::io::Error, make: impl Fn(String) -> UpdateError, list: bool) -> UpdateError {
     if e.kind() == std::io::ErrorKind::TimedOut {
-        return if list { UpdateError::Timeout } else { make(t("连接 GitHub 超时").to_owned()) };
+        return if list {
+            UpdateError::Timeout
+        } else {
+            make(t("连接 GitHub 超时").to_owned())
+        };
     }
     make(e.to_string())
 }
 
 type Response = ureq::http::Response<ureq::Body>;
 
-fn get(url: &str, user_agent: &str, timeout: Duration, headers: &[(&str, &str)]) -> Result<Response, ureq::Error> {
-    let mut req = agent(url, timeout).get(url).header("User-Agent", user_agent);
+fn get(
+    url: &str,
+    user_agent: &str,
+    timeout: Duration,
+    headers: &[(&str, &str)],
+) -> Result<Response, ureq::Error> {
+    let mut req = agent(url, timeout)
+        .get(url)
+        .header("User-Agent", user_agent);
     for (k, v) in headers {
         req = req.header(*k, *v);
     }
@@ -906,7 +1078,10 @@ fn header<'a>(resp: &'a Response, name: &str) -> Option<&'a str> {
 
 fn read_limited(resp: &mut Response, limit: u64) -> std::io::Result<Vec<u8>> {
     let mut out = Vec::new();
-    resp.body_mut().as_reader().take(limit).read_to_end(&mut out)?;
+    resp.body_mut()
+        .as_reader()
+        .take(limit)
+        .read_to_end(&mut out)?;
     Ok(out)
 }
 
@@ -922,7 +1097,9 @@ fn rate_limit(resp: &mut Response) -> Option<UpdateError> {
     let limited = code == 429
         || remaining_zero
         || retry
-        || String::from_utf8_lossy(&body).to_lowercase().contains("rate limit");
+        || String::from_utf8_lossy(&body)
+            .to_lowercase()
+            .contains("rate limit");
     if !limited {
         return None;
     }
@@ -930,7 +1107,9 @@ fn rate_limit(resp: &mut Response) -> Option<UpdateError> {
         None => Some(UpdateError::Rate),
         Some(reset) => {
             let now = Utc::now().timestamp_millis() as f64 / 1000.0;
-            Some(UpdateError::RateUntil { minutes: (((reset - now) / 60.0).ceil() as i64).max(1) })
+            Some(UpdateError::RateUntil {
+                minutes: (((reset - now) / 60.0).ceil() as i64).max(1),
+            })
         }
     }
 }
@@ -955,10 +1134,14 @@ pub fn fetch_releases(
         headers.push(("If-None-Match", e));
     }
     let offline = |reason| UpdateError::Offline { reason };
-    let mut resp = get(feed, user_agent, timeout, &headers).map_err(|e| network_error(&e, offline, true))?;
+    let mut resp =
+        get(feed, user_agent, timeout, &headers).map_err(|e| network_error(&e, offline, true))?;
     let code = resp.status().as_u16();
     if code == 304 {
-        return Ok(Fetched { releases: None, etag: etag.map(str::to_owned) });
+        return Ok(Fetched {
+            releases: None,
+            etag: etag.map(str::to_owned),
+        });
     }
     if code >= 400 {
         return Err(rate_limit(&mut resp).unwrap_or(UpdateError::Http { code }));
@@ -973,7 +1156,10 @@ pub fn fetch_releases(
     }
     let data: Value = serde_json::from_slice(&body).map_err(|_| UpdateError::BadList)?;
     let releases = parse_releases(&data, feed).map_err(|_| UpdateError::BadList)?;
-    Ok(Fetched { releases: Some(releases), etag: new_etag })
+    Ok(Fetched {
+        releases: Some(releases),
+        etag: new_etag,
+    })
 }
 
 /// The published SHA-256 of `asset` (blocking); `None` when the release publishes none for it.
@@ -987,11 +1173,13 @@ pub fn fetch_checksums(
 ) -> Result<Option<String>, UpdateError> {
     let sums_err = |reason| UpdateError::Sums { reason };
     for sums in checksum_files(release, asset) {
-        let mut resp =
-            get(&sums.url, user_agent, timeout, &[]).map_err(|e| network_error(&e, sums_err, false))?;
+        let mut resp = get(&sums.url, user_agent, timeout, &[])
+            .map_err(|e| network_error(&e, sums_err, false))?;
         let code = resp.status().as_u16();
         if code >= 400 {
-            return Err(UpdateError::Sums { reason: format!("HTTP {code}") });
+            return Err(UpdateError::Sums {
+                reason: format!("HTTP {code}"),
+            });
         }
         let body = read_limited(&mut resp, SUMS_MAX).map_err(|e| io_error(&e, sums_err, false))?;
         if let Some(found) = checksum_of(&String::from_utf8_lossy(&body), &asset.name) {
@@ -1014,7 +1202,10 @@ fn file_sha256(path: &Path, cancel: &AtomicBool) -> Result<String, std::io::Erro
     let mut buf = vec![0u8; 1 << 20];
     loop {
         if cancel.load(Ordering::Relaxed) {
-            return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "cancelled"));
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "cancelled",
+            ));
         }
         let n = f.read(&mut buf)?;
         if n == 0 {
@@ -1053,7 +1244,10 @@ pub fn download(
     timeout: Duration,
 ) -> Result<Option<bool>, UpdateError> {
     let expected = sha256.map(str::to_lowercase);
-    let write_err = |p: &Path, e: &std::io::Error| UpdateError::Write { path: p.to_owned(), reason: e.to_string() };
+    let write_err = |p: &Path, e: &std::io::Error| UpdateError::Write {
+        path: p.to_owned(),
+        reason: e.to_string(),
+    };
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| write_err(dest, &e))?;
     }
@@ -1067,7 +1261,9 @@ pub fn download(
                 return Ok(Some(true));
             }
             Ok(_) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => return Err(UpdateError::Cancelled),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                return Err(UpdateError::Cancelled);
+            }
             Err(e) => return Err(write_err(dest, &e)),
         }
     }
@@ -1077,7 +1273,8 @@ pub fn download(
     let part = part_path(dest);
     let result = (|| {
         let net = |reason| UpdateError::DownloadNet { reason };
-        let mut resp = get(url, user_agent, timeout, &[]).map_err(|e| network_error(&e, net, false))?;
+        let mut resp =
+            get(url, user_agent, timeout, &[]).map_err(|e| network_error(&e, net, false))?;
         let code = resp.status().as_u16();
         if code >= 400 {
             return Err(UpdateError::DownloadHttp { code });
@@ -1088,7 +1285,10 @@ pub fn download(
             .unwrap_or(size);
         let (received, digest) = stream(&mut resp, &part, total, progress, cancel)?;
         if total > 0 && received != total {
-            return Err(UpdateError::Incomplete { received, expected: total });
+            return Err(UpdateError::Incomplete {
+                received,
+                expected: total,
+            });
         }
         if let Some(exp) = &expected
             && digest != *exp
@@ -1119,7 +1319,10 @@ fn stream(
     progress: &mut dyn FnMut(Phase, u64, u64),
     cancel: &AtomicBool,
 ) -> Result<(u64, String), UpdateError> {
-    let write_err = |e: &std::io::Error| UpdateError::Write { path: part.to_owned(), reason: e.to_string() };
+    let write_err = |e: &std::io::Error| UpdateError::Write {
+        path: part.to_owned(),
+        reason: e.to_string(),
+    };
     let mut fh = File::create(part).map_err(|e| write_err(&e))?;
     let mut digest = Sha256::new();
     let mut received = 0u64;
@@ -1134,7 +1337,13 @@ fn stream(
         let n = match reader.read(&mut buf) {
             Ok(n) => n,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(io_error(&e, |reason| UpdateError::DownloadNet { reason }, false)),
+            Err(e) => {
+                return Err(io_error(
+                    &e,
+                    |reason| UpdateError::DownloadNet { reason },
+                    false,
+                ));
+            }
         };
         if n == 0 {
             break;

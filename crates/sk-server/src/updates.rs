@@ -27,12 +27,12 @@ use parking_lot::{Mutex, RwLock};
 use sk_core::settings::SettingsStore;
 use sk_core::tr;
 use sk_core::update::{self as update, Asset, Fetched, Release, UpdateError, UpdateState};
+use sk_protocol::CAP_UPDATES;
 use sk_protocol::methods::UpdateChanged;
 use sk_protocol::update::{
-    DownloadStateName, InstallKind, UpdateChangedEvent, UpdateChannel, UpdateDownload, UpdateLevel, UpdateReleases,
-    UpdateStatus,
+    DownloadStateName, InstallKind, UpdateChangedEvent, UpdateChannel, UpdateDownload, UpdateLevel,
+    UpdateReleases, UpdateStatus,
 };
-use sk_protocol::CAP_UPDATES;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -43,9 +43,11 @@ use crate::rpc::{RpcError, RpcResult};
 pub const FIRST_DELAY: Duration = Duration::from_secs(60);
 
 /// The release list: (feed, etag, user agent) → list (blocking).
-pub type Fetch = Arc<dyn Fn(&str, Option<&str>, &str) -> Result<Fetched, UpdateError> + Send + Sync>;
+pub type Fetch =
+    Arc<dyn Fn(&str, Option<&str>, &str) -> Result<Fetched, UpdateError> + Send + Sync>;
 /// The published SHA-256 of a release's file: (release, asset, user agent) (blocking).
-pub type Checksum = Arc<dyn Fn(&Release, &Asset, &str) -> Result<Option<String>, UpdateError> + Send + Sync>;
+pub type Checksum =
+    Arc<dyn Fn(&Release, &Asset, &str) -> Result<Option<String>, UpdateError> + Send + Sync>;
 /// The time (tests move it).
 pub type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
@@ -82,7 +84,9 @@ pub struct UpdateService {
 
 impl UpdateService {
     pub fn new(config: &Config, settings: &Arc<SettingsStore>) -> UpdateService {
-        UpdateService { core: Arc::new(UpdateCore::new(config, settings)) }
+        UpdateService {
+            core: Arc::new(UpdateCore::new(config, settings)),
+        }
     }
 }
 
@@ -147,8 +151,12 @@ impl UpdateCore {
                 force: false,
                 applied: None,
             }),
-            fetch: RwLock::new(Arc::new(|feed, etag, ua| update::fetch_releases(feed, etag, ua, update::TIMEOUT))),
-            checksum: RwLock::new(Arc::new(|r, a, ua| update::fetch_checksums(r, a, ua, update::TIMEOUT))),
+            fetch: RwLock::new(Arc::new(|feed, etag, ua| {
+                update::fetch_releases(feed, etag, ua, update::TIMEOUT)
+            })),
+            checksum: RwLock::new(Arc::new(|r, a, ua| {
+                update::fetch_checksums(r, a, ua, update::TIMEOUT)
+            })),
             clock: RwLock::new(Arc::new(Utc::now)),
             first_delay: Mutex::new(FIRST_DELAY),
             server: OnceLock::new(),
@@ -223,7 +231,10 @@ impl UpdateCore {
 
     /// The scheduler task runs.
     pub fn scheduling(&self) -> bool {
-        self.scheduler.lock().as_ref().is_some_and(|t| !t.is_finished())
+        self.scheduler
+            .lock()
+            .as_ref()
+            .is_some_and(|t| !t.is_finished())
     }
 
     // ------------------------------------------------------------- state
@@ -249,7 +260,12 @@ impl UpdateCore {
     }
 
     fn settings_key(&self) -> SettingsKey {
-        (self.enabled(), self.channel(), sk_core::i18n::language().as_str(), self.auto_download())
+        (
+            self.enabled(),
+            self.channel(),
+            sk_core::i18n::language().as_str(),
+            self.auto_download(),
+        )
     }
 
     fn now(&self) -> DateTime<Utc> {
@@ -275,7 +291,11 @@ impl UpdateCore {
     }
 
     fn user_agent(&self) -> String {
-        format!("SpaceKnife/{}", self.current().unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned()))
+        format!(
+            "SpaceKnife/{}",
+            self.current()
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned())
+        )
     }
 
     /// The newest release of the channel when it is newer than this app, and its file for this
@@ -291,13 +311,20 @@ impl UpdateCore {
 
     pub fn status(&self) -> UpdateStatus {
         let current = self.current();
-        let due = if self.inner.lock().auto { self.due_in() } else { None }; // tests check only when asked
+        let due = if self.inner.lock().auto {
+            self.due_in()
+        } else {
+            None
+        }; // tests check only when asked
         let enabled = self.enabled();
         let channel = self.channel();
         let g = self.inner.lock();
         let latest = self.newer(&g, current.as_deref()).map(|(release, asset)| {
             let sha = asset.as_ref().and_then(|a| {
-                g.sums.iter().find(|(k, _)| k.0 == release.version && k.1 == a.name).and_then(|(_, s)| s.clone())
+                g.sums
+                    .iter()
+                    .find(|(k, _)| k.0 == release.version && k.1 == a.name)
+                    .and_then(|(_, s)| s.clone())
             });
             update::to_info(&release, asset.as_ref(), sha.as_deref())
         });
@@ -306,7 +333,9 @@ impl UpdateCore {
             download.error = Some(e.message());
         }
         let latest_version = latest.as_ref().map(|l| l.version.clone());
-        let series = latest_version.as_deref().and_then(|v| update::series(current.as_deref(), Some(v)));
+        let series = latest_version
+            .as_deref()
+            .and_then(|v| update::series(current.as_deref(), Some(v)));
         UpdateStatus {
             current: current.clone().unwrap_or_default(),
             install_kind: g.kind,
@@ -315,22 +344,33 @@ impl UpdateCore {
             checking: g.checking,
             checked_at: g.state.checked_at,
             error: g.error.as_ref().map(UpdateError::message),
-            level: latest_version
-                .as_deref()
-                .map_or(UpdateLevel::None, |v| update::level(current.as_deref(), Some(v))),
-            dismissed: latest_version.as_ref().is_some_and(|v| g.state.dismissed.contains(v)),
+            level: latest_version.as_deref().map_or(UpdateLevel::None, |v| {
+                update::level(current.as_deref(), Some(v))
+            }),
+            dismissed: latest_version
+                .as_ref()
+                .is_some_and(|v| g.state.dismissed.contains(v)),
             muted: series.as_ref().is_some_and(|s| g.state.muted.contains(s)),
             series,
             latest,
             download,
-            next_check_at: due.and_then(|d| chrono::TimeDelta::from_std(Duration::from_secs_f64(d)).ok()).map(|d| self.now() + d),
+            next_check_at: due
+                .and_then(|d| chrono::TimeDelta::from_std(Duration::from_secs_f64(d)).ok())
+                .map(|d| self.now() + d),
         }
     }
 
     /// The cached releases, newest first, for the timeline (no asset: nothing to download there).
     pub fn releases(&self) -> UpdateReleases {
         let g = self.inner.lock();
-        UpdateReleases { releases: g.state.releases.iter().map(|r| update::to_info(r, None, None)).collect() }
+        UpdateReleases {
+            releases: g
+                .state
+                .releases
+                .iter()
+                .map(|r| update::to_info(r, None, None))
+                .collect(),
+        }
     }
 
     /// `update.changed` to every session that announced `updates.v1`.
@@ -339,7 +379,12 @@ impl UpdateCore {
         if !server.sessions().iter().any(|s| s.has_cap(CAP_UPDATES)) {
             return;
         }
-        server.broadcast::<UpdateChanged>(&UpdateChangedEvent { status: self.status() }, Some(CAP_UPDATES));
+        server.broadcast::<UpdateChanged>(
+            &UpdateChangedEvent {
+                status: self.status(),
+            },
+            Some(CAP_UPDATES),
+        );
     }
 
     async fn save(self: &Arc<Self>) {
@@ -384,7 +429,9 @@ impl UpdateCore {
     /// The ETag to send: only for a cache trimmed as this version trims it, else the whole list
     /// comes again (an unchanged list would answer 304 and keep a shorter timeline).
     fn cached_etag(st: &UpdateState) -> Option<String> {
-        (!st.releases.is_empty() && st.kept == update::HISTORY_KEEP).then(|| st.etag.clone()).flatten()
+        (!st.releases.is_empty() && st.kept == update::HISTORY_KEEP)
+            .then(|| st.etag.clone())
+            .flatten()
     }
 
     async fn run_check(self: Arc<Self>, target: u64) {
@@ -393,7 +440,11 @@ impl UpdateCore {
         let (feed, ua) = (self.feed.clone(), self.user_agent());
         let got = tokio::task::spawn_blocking(move || fetch(&feed, etag.as_deref(), &ua))
             .await
-            .unwrap_or_else(|e| Err(UpdateError::Failed { reason: e.to_string() }));
+            .unwrap_or_else(|e| {
+                Err(UpdateError::Failed {
+                    reason: e.to_string(),
+                })
+            });
         let now = self.now();
         let current = self.current();
         {
@@ -418,11 +469,23 @@ impl UpdateCore {
             g.checking = false;
             let found = self.newer(&g, current.as_deref());
             if let Some((r, _)) = &found {
-                tracing::info!("update available: {} -> {}", current.as_deref().unwrap_or("?"), r.version);
+                tracing::info!(
+                    "update available: {} -> {}",
+                    current.as_deref().unwrap_or("?"),
+                    r.version
+                );
             }
             let d = &g.download;
-            let idle = !is(d, &[DownloadStateName::Downloading, DownloadStateName::Verifying]);
-            if idle && d.version.is_some() && found.as_ref().is_none_or(|(r, _)| Some(&r.version) != d.version.as_ref()) {
+            let idle = !is(
+                d,
+                &[DownloadStateName::Downloading, DownloadStateName::Verifying],
+            );
+            if idle
+                && d.version.is_some()
+                && found
+                    .as_ref()
+                    .is_none_or(|(r, _)| Some(&r.version) != d.version.as_ref())
+            {
                 g.download = UpdateDownload::default(); // another release now
                 g.download_error = None;
             }
@@ -442,7 +505,9 @@ impl UpdateCore {
         let current = self.current();
         let version = {
             let g = self.inner.lock();
-            let Some((release, Some(_))) = self.newer(&g, current.as_deref()) else { return };
+            let Some((release, Some(_))) = self.newer(&g, current.as_deref()) else {
+                return;
+            };
             if let Some(s) = update::series(current.as_deref(), Some(&release.version))
                 && g.state.muted.contains(&s)
             {
@@ -512,7 +577,10 @@ impl UpdateCore {
             }
         };
         if changed {
-            tracing::info!("update prompts of {series}.x {}", if muted { "off" } else { "on again" });
+            tracing::info!(
+                "update prompts of {series}.x {}",
+                if muted { "off" } else { "on again" }
+            );
             self.save().await;
             self.broadcast();
             if !muted {
@@ -540,22 +608,36 @@ impl UpdateCore {
             }
         };
         let Some(asset) = asset else {
-            return Err(RpcError::invalid_request(tr!("这个版本没有适合这种安装方式的文件，请到发布页下载")));
+            return Err(RpcError::invalid_request(tr!(
+                "这个版本没有适合这种安装方式的文件，请到发布页下载"
+            )));
         };
-        let done_path = {
+        // decide under the lock, answer after releasing it (status() takes the same lock)
+        let (running, done_path) = {
             let g = self.inner.lock();
             let d = &g.download;
             if d.version.as_deref() == Some(version) {
-                if is(d, &[DownloadStateName::Downloading, DownloadStateName::Verifying]) {
-                    return Ok(self.status());
-                }
-                (d.state == DownloadStateName::Done).then(|| d.path.clone()).flatten()
+                let running = is(
+                    d,
+                    &[DownloadStateName::Downloading, DownloadStateName::Verifying],
+                );
+                (
+                    running,
+                    (d.state == DownloadStateName::Done)
+                        .then(|| d.path.clone())
+                        .flatten(),
+                )
             } else {
-                None
+                (false, None)
             }
         };
+        if running {
+            return Ok(self.status());
+        }
         if let Some(p) = done_path
-            && tokio::task::spawn_blocking(move || Path::new(&p).is_file()).await.unwrap_or(false)
+            && tokio::task::spawn_blocking(move || Path::new(&p).is_file())
+                .await
+                .unwrap_or(false)
         {
             return Ok(self.status());
         }
@@ -575,7 +657,10 @@ impl UpdateCore {
         };
         let previous = self.download_task.lock().take();
         let me = self.clone();
-        let task = tokio::spawn(async move { me.run_download(run, release, asset, cancel, previous).await });
+        let task =
+            tokio::spawn(
+                async move { me.run_download(run, release, asset, cancel, previous).await },
+            );
         *self.download_task.lock() = Some(task);
         self.broadcast();
         Ok(self.status())
@@ -612,7 +697,13 @@ impl UpdateCore {
         let dest = self.inner.lock().updates_dir.join(&asset.name);
         let ua = self.user_agent();
         let key = (version.clone(), asset.name.clone());
-        let known = self.inner.lock().sums.iter().find(|(k, _)| *k == key).map(|(_, s)| s.clone());
+        let known = self
+            .inner
+            .lock()
+            .sums
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, s)| s.clone());
         let result: Result<Option<bool>, UpdateError> = async {
             let sha = match known {
                 Some(s) => s,
@@ -621,7 +712,11 @@ impl UpdateCore {
                     let (r, a, u) = (release.clone(), asset.clone(), ua.clone());
                     let s = tokio::task::spawn_blocking(move || f(&r, &a, &u))
                         .await
-                        .unwrap_or_else(|e| Err(UpdateError::DownloadFailed { reason: e.to_string() }))?;
+                        .unwrap_or_else(|e| {
+                            Err(UpdateError::DownloadFailed {
+                                reason: e.to_string(),
+                            })
+                        })?;
                     self.inner.lock().sums.push((key.clone(), s.clone()));
                     s
                 }
@@ -629,11 +724,25 @@ impl UpdateCore {
             let me = self.clone();
             let (url, d, a_size) = (asset.url.clone(), dest.clone(), asset.size);
             tokio::task::spawn_blocking(move || {
-                let mut progress = |phase, received, total| me.progress(run, phase, received, total);
-                update::download(&url, &d, a_size, sha.as_deref(), &ua, &mut progress, &cancel, update::TIMEOUT)
+                let mut progress =
+                    |phase, received, total| me.progress(run, phase, received, total);
+                update::download(
+                    &url,
+                    &d,
+                    a_size,
+                    sha.as_deref(),
+                    &ua,
+                    &mut progress,
+                    &cancel,
+                    update::TIMEOUT,
+                )
             })
             .await
-            .unwrap_or_else(|e| Err(UpdateError::DownloadFailed { reason: e.to_string() }))
+            .unwrap_or_else(|e| {
+                Err(UpdateError::DownloadFailed {
+                    reason: e.to_string(),
+                })
+            })
         }
         .await;
         let mut error = None;
@@ -646,14 +755,25 @@ impl UpdateCore {
             Err(e) => {
                 tracing::warn!("update download failed: {e}");
                 error = Some(e);
-                UpdateDownload { state: DownloadStateName::Failed, version: Some(version.clone()), ..UpdateDownload::default() }
+                UpdateDownload {
+                    state: DownloadStateName::Failed,
+                    version: Some(version.clone()),
+                    ..UpdateDownload::default()
+                }
             }
             Ok(verified) => {
                 let size = {
                     let g = self.inner.lock();
-                    if g.download.total > 0 { g.download.total } else { asset.size }
+                    if g.download.total > 0 {
+                        g.download.total
+                    } else {
+                        asset.size
+                    }
                 };
-                tracing::info!("update {version} downloaded to {} (verified: {verified:?})", dest.display());
+                tracing::info!(
+                    "update {version} downloaded to {} (verified: {verified:?})",
+                    dest.display()
+                );
                 UpdateDownload {
                     state: DownloadStateName::Done,
                     version: Some(version.clone()),
@@ -684,7 +804,10 @@ impl UpdateCore {
     pub fn cancel(&self) -> UpdateStatus {
         let changed = {
             let mut g = self.inner.lock();
-            if is(&g.download, &[DownloadStateName::Downloading, DownloadStateName::Verifying]) {
+            if is(
+                &g.download,
+                &[DownloadStateName::Downloading, DownloadStateName::Verifying],
+            ) {
                 g.cancel.store(true, Ordering::SeqCst);
                 g.run += 1; // the stopped one no longer reports
                 g.download.state = DownloadStateName::Cancelled;
@@ -772,7 +895,8 @@ impl UpdateCore {
             }
             match delay {
                 Some(d) => {
-                    let _ = tokio::time::timeout(Duration::from_secs_f64(d), self.wake.notified()).await;
+                    let _ = tokio::time::timeout(Duration::from_secs_f64(d), self.wake.notified())
+                        .await;
                 }
                 None => self.wake.notified().await,
             }
@@ -837,4 +961,3 @@ impl UpdateCore {
         self.inner.lock().updates_dir.clone()
     }
 }
-

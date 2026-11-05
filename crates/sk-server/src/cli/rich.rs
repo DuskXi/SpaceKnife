@@ -30,20 +30,41 @@ pub struct Style {
 }
 
 impl Style {
-    pub const NONE: Style = Style { bold: false, italic: false, dim: false, fg: None, bg: None };
-    pub const BOLD: Style = Style { bold: true, ..Style::NONE };
-    pub const ITALIC: Style = Style { italic: true, ..Style::NONE };
-    pub const DIM: Style = Style { dim: true, ..Style::NONE };
+    pub const NONE: Style = Style {
+        bold: false,
+        italic: false,
+        dim: false,
+        fg: None,
+        bg: None,
+    };
+    pub const BOLD: Style = Style {
+        bold: true,
+        ..Style::NONE
+    };
+    pub const ITALIC: Style = Style {
+        italic: true,
+        ..Style::NONE
+    };
+    pub const DIM: Style = Style {
+        dim: true,
+        ..Style::NONE
+    };
     pub const GREEN: Style = Style::ansi(2);
     pub const YELLOW: Style = Style::ansi(3);
     pub const RED: Style = Style::ansi(1);
     pub const CYAN: Style = Style::ansi(6);
 
     pub const fn rgb(hex: u32) -> Style {
-        Style { fg: Some(Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)), ..Style::NONE }
+        Style {
+            fg: Some(Color::Rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)),
+            ..Style::NONE
+        }
     }
     pub const fn ansi(n: u8) -> Style {
-        Style { fg: Some(Color::Ansi(n)), ..Style::NONE }
+        Style {
+            fg: Some(Color::Ansi(n)),
+            ..Style::NONE
+        }
     }
     pub const fn bold(self) -> Style {
         Style { bold: true, ..self }
@@ -369,7 +390,13 @@ fn rstrip_end(line: &mut Vec<Cell>, size: usize) {
 }
 
 /// `Text.wrap` (then `Lines.justify` and the final truncation).
-pub fn wrap(text: &Text, width: usize, justify: Justify, overflow: Overflow, no_wrap: bool) -> Vec<Vec<Cell>> {
+pub fn wrap(
+    text: &Text,
+    width: usize,
+    justify: Justify,
+    overflow: Overflow,
+    no_wrap: bool,
+) -> Vec<Vec<Cell>> {
     let mut out = Vec::new();
     for line in text.lines() {
         let mut new_lines: Vec<Vec<Cell>> = if no_wrap {
@@ -379,7 +406,10 @@ pub fn wrap(text: &Text, width: usize, justify: Justify, overflow: Overflow, no_
             let mut bounds = vec![0];
             bounds.extend(offsets);
             bounds.push(line.len());
-            let mut pieces: Vec<Vec<Cell>> = bounds.windows(2).map(|w| line[w[0]..w[1]].to_vec()).collect();
+            let mut pieces: Vec<Vec<Cell>> = bounds
+                .windows(2)
+                .map(|w| line[w[0]..w[1]].to_vec())
+                .collect();
             for p in &mut pieces {
                 rstrip_end(p, width);
             }
@@ -398,7 +428,8 @@ pub fn wrap(text: &Text, width: usize, justify: Justify, overflow: Overflow, no_
                     truncate(l, width, overflow, false);
                     let len = cells_of(l);
                     if len < width {
-                        let mut padded: Vec<Cell> = std::iter::repeat_n((' ', Style::NONE), width - len).collect();
+                        let mut padded: Vec<Cell> =
+                            std::iter::repeat_n((' ', Style::NONE), width - len).collect();
                         padded.append(l);
                         *l = padded;
                     }
@@ -430,13 +461,22 @@ struct Measure {
 impl Measure {
     fn normalize(self) -> Measure {
         let min = self.min.min(self.max);
-        Measure { min, max: self.max.max(min) }
+        Measure {
+            min,
+            max: self.max.max(min),
+        }
     }
     fn with_maximum(self, w: usize) -> Measure {
-        Measure { min: self.min.min(w), max: self.max.min(w) }
+        Measure {
+            min: self.min.min(w),
+            max: self.max.min(w),
+        }
     }
     fn with_minimum(self, w: usize) -> Measure {
-        Measure { min: self.min.max(w), max: self.max.max(w) }
+        Measure {
+            min: self.min.max(w),
+            max: self.max.max(w),
+        }
     }
     fn clamp(self, min: Option<usize>, max: Option<usize>) -> Measure {
         let mut m = self;
@@ -456,7 +496,10 @@ fn measure_padded(text: &Text, max_width: usize, extra: usize) -> Measure {
         return Measure { min: 0, max: 0 };
     }
     let inner = if max_width < extra + 1 {
-        Measure { min: max_width, max: max_width }
+        Measure {
+            min: max_width,
+            max: max_width,
+        }
     } else {
         let plain = text.as_plain();
         let lines: Vec<&str> = plain.lines().collect();
@@ -467,15 +510,32 @@ fn measure_padded(text: &Text, max_width: usize, extra: usize) -> Measure {
             m = Measure { min: 0, max: 0 };
         }
         let m = m.normalize();
-        Measure { min: m.min + extra, max: m.max + extra }.with_maximum(max_width)
+        Measure {
+            min: m.min + extra,
+            max: m.max + extra,
+        }
+        .with_maximum(max_width)
     };
     let m = inner.normalize().with_maximum(max_width);
-    if m.max < 1 { Measure { min: 0, max: 0 } } else { m.normalize() }
+    if m.max < 1 {
+        Measure { min: 0, max: 0 }
+    } else {
+        m.normalize()
+    }
 }
 
 /// `_ratio.ratio_reduce` (Python's `round` rounds half to even).
-fn ratio_reduce(total: usize, ratios: &[usize], maximums: &[usize], values: &[usize]) -> Vec<usize> {
-    let ratios: Vec<usize> = ratios.iter().zip(maximums).map(|(&r, &m)| if m > 0 { r } else { 0 }).collect();
+fn ratio_reduce(
+    total: usize,
+    ratios: &[usize],
+    maximums: &[usize],
+    values: &[usize],
+) -> Vec<usize> {
+    let ratios: Vec<usize> = ratios
+        .iter()
+        .zip(maximums)
+        .map(|(&r, &m)| if m > 0 { r } else { 0 })
+        .collect();
     let mut total_ratio: usize = ratios.iter().sum();
     if total_ratio == 0 {
         return values.to_vec();
@@ -484,7 +544,8 @@ fn ratio_reduce(total: usize, ratios: &[usize], maximums: &[usize], values: &[us
     let mut out = Vec::with_capacity(values.len());
     for ((&ratio, &maximum), &value) in ratios.iter().zip(maximums).zip(values) {
         if ratio > 0 && total_ratio > 0 {
-            let share = (ratio as f64 * remaining as f64 / total_ratio as f64).round_ties_even() as i64;
+            let share =
+                (ratio as f64 * remaining as f64 / total_ratio as f64).round_ties_even() as i64;
             let distributed = (maximum as i64).min(share);
             out.push((value as i64 - distributed).max(0) as usize);
             remaining -= distributed;
@@ -559,7 +620,13 @@ pub struct Table {
 
 impl Table {
     pub fn new(title: Option<String>, pad_edge: bool) -> Table {
-        Table { title, columns: Vec::new(), rows: Vec::new(), pad_edge, show_header: true }
+        Table {
+            title,
+            columns: Vec::new(),
+            rows: Vec::new(),
+            pad_edge,
+            show_header: true,
+        }
     }
     pub fn column(&mut self, c: Column) -> &mut Self {
         self.columns.push(c);
@@ -586,7 +653,9 @@ impl Table {
 
     fn cells(&self, i: usize) -> impl Iterator<Item = &Text> {
         let header = self.show_header.then_some(&self.columns[i].header);
-        header.into_iter().chain(self.rows.iter().map(move |r| &r[i]))
+        header
+            .into_iter()
+            .chain(self.rows.iter().map(move |r| &r[i]))
     }
 
     fn measure_column(&self, i: usize, max_width: usize) -> Measure {
@@ -603,15 +672,23 @@ impl Table {
             maxs.push(m.max);
         }
         let col = &self.columns[i];
-        Measure { min: mins.iter().copied().max().unwrap_or(1), max: maxs.iter().copied().max().unwrap_or(max_width) }
-            .with_maximum(max_width)
-            .clamp(col.min_width.map(|w| w + pad), col.max_width.map(|w| w + pad))
+        Measure {
+            min: mins.iter().copied().max().unwrap_or(1),
+            max: maxs.iter().copied().max().unwrap_or(max_width),
+        }
+        .with_maximum(max_width)
+        .clamp(
+            col.min_width.map(|w| w + pad),
+            col.max_width.map(|w| w + pad),
+        )
     }
 
     /// `Table._calculate_column_widths` (expand=False, no box: no extra width).
     fn widths(&self, max_width: usize) -> Vec<usize> {
         let n = self.columns.len();
-        let mut widths: Vec<usize> = (0..n).map(|i| self.measure_column(i, max_width).max.max(1)).collect();
+        let mut widths: Vec<usize> = (0..n)
+            .map(|i| self.measure_column(i, max_width).max.max(1))
+            .collect();
         let table_width: usize = widths.iter().sum();
         if table_width > max_width {
             let wrapable: Vec<bool> = self.columns.iter().map(|c| !c.no_wrap).collect();
@@ -623,7 +700,9 @@ impl Table {
                 table_width = widths.iter().sum();
             }
             let _ = table_width;
-            widths = (0..n).map(|i| self.measure_column(i, widths[i]).max).collect();
+            widths = (0..n)
+                .map(|i| self.measure_column(i, widths[i]).max)
+                .collect();
         }
         widths
     }
@@ -641,8 +720,16 @@ impl Table {
             let t = Text::styled(title, Style::ITALIC);
             out.extend(wrap(&t, table_width, Justify::Left, Overflow::Fold, false));
         }
-        let header_row = self.show_header.then(|| self.columns.iter().map(|c| c.header.clone()).collect::<Vec<_>>());
-        let rows = header_row.iter().map(|r| (true, r)).chain(self.rows.iter().map(|r| (false, r)));
+        let header_row = self.show_header.then(|| {
+            self.columns
+                .iter()
+                .map(|c| c.header.clone())
+                .collect::<Vec<_>>()
+        });
+        let rows = header_row
+            .iter()
+            .map(|r| (true, r))
+            .chain(self.rows.iter().map(|r| (false, r)));
         for (is_header, row) in rows {
             let mut cells: Vec<Vec<Vec<Cell>>> = Vec::new();
             for (i, text) in row.iter().enumerate() {
@@ -650,11 +737,18 @@ impl Table {
                 let (l, r) = self.pads(i);
                 let base = if is_header { Style::BOLD } else { col.style };
                 let inner = widths[i].saturating_sub(l + r);
-                let lines = wrap(&text.clone().under(base), inner, col.justify, col.overflow, col.no_wrap);
+                let lines = wrap(
+                    &text.clone().under(base),
+                    inner,
+                    col.justify,
+                    col.overflow,
+                    col.no_wrap,
+                );
                 let lines: Vec<Vec<Cell>> = lines
                     .into_iter()
                     .map(|line| {
-                        let mut full: Vec<Cell> = std::iter::repeat_n((' ', Style::NONE), l).collect();
+                        let mut full: Vec<Cell> =
+                            std::iter::repeat_n((' ', Style::NONE), l).collect();
                         full.extend(shape(line, inner));
                         full.extend(std::iter::repeat_n((' ', Style::NONE), r));
                         shape(full, widths[i])
@@ -693,7 +787,13 @@ fn collapse_widths(mut widths: Vec<usize>, wrapable: &[bool], max_width: usize) 
     let mut excess = total as isize - max_width as isize;
     if wrapable.iter().any(|&w| w) {
         while total > 0 && excess > 0 {
-            let max_column = widths.iter().zip(wrapable).filter(|(_, w)| **w).map(|(&x, _)| x).max().unwrap_or(0);
+            let max_column = widths
+                .iter()
+                .zip(wrapable)
+                .filter(|(_, w)| **w)
+                .map(|(&x, _)| x)
+                .max()
+                .unwrap_or(0);
             let second = widths
                 .iter()
                 .zip(wrapable)
@@ -701,7 +801,11 @@ fn collapse_widths(mut widths: Vec<usize>, wrapable: &[bool], max_width: usize) 
                 .max()
                 .unwrap_or(0);
             let difference = max_column - second;
-            let ratios: Vec<usize> = widths.iter().zip(wrapable).map(|(&x, &w)| usize::from(x == max_column && w)).collect();
+            let ratios: Vec<usize> = widths
+                .iter()
+                .zip(wrapable)
+                .map(|(&x, &w)| usize::from(x == max_column && w))
+                .collect();
             if !ratios.iter().any(|&r| r > 0) || difference == 0 {
                 break;
             }
@@ -717,13 +821,25 @@ fn collapse_widths(mut widths: Vec<usize>, wrapable: &[bool], max_width: usize) 
 // ------------------------------------------------------------------------------------- panel
 
 /// `rich.panel.Panel(text, title=…, title_align="left")`, expanded to `width`.
-pub fn panel(content: &Text, title: &str, border: Style, width: usize, legacy_windows: bool) -> Vec<Vec<Cell>> {
+pub fn panel(
+    content: &Text,
+    title: &str,
+    border: Style,
+    width: usize,
+    legacy_windows: bool,
+) -> Vec<Vec<Cell>> {
     // ROUNDED, or SQUARE where rich substitutes boxes for a legacy Windows console
-    let (tl, tr, bl, br) = if legacy_windows { ('┌', '┐', '└', '┘') } else { ('╭', '╮', '╰', '╯') };
+    let (tl, tr, bl, br) = if legacy_windows {
+        ('┌', '┐', '└', '┘')
+    } else {
+        ('╭', '╮', '╰', '╯')
+    };
     let (h, v) = ('─', '│');
     let mut out = Vec::new();
     let title_text = Text::plain(&format!(" {} ", title.replace('\n', " ")));
-    let child_width = (width.saturating_sub(2)).max(title_text.cell_len() + 2).min(width.saturating_sub(2));
+    let child_width = (width.saturating_sub(2))
+        .max(title_text.cell_len() + 2)
+        .min(width.saturating_sub(2));
     let width = child_width + 2;
     let b = |c: char| (c, border);
     if width <= 4 {
@@ -795,17 +911,34 @@ impl Console {
         let force = env("FORCE_COLOR").is_some();
         let terminal = tty || force;
         let legacy_windows = cfg!(windows) && !tty;
-        let dumb = terminal && env("TERM").is_some_and(|t| t.eq_ignore_ascii_case("dumb") || t.eq_ignore_ascii_case("unknown"));
-        let digits = |k: &str| env(k).filter(|v| v.bytes().all(|b| b.is_ascii_digit())).and_then(|v| v.parse::<usize>().ok());
+        let dumb = terminal
+            && env("TERM").is_some_and(|t| {
+                t.eq_ignore_ascii_case("dumb") || t.eq_ignore_ascii_case("unknown")
+            });
+        let digits = |k: &str| {
+            env(k)
+                .filter(|v| v.bytes().all(|b| b.is_ascii_digit()))
+                .and_then(|v| v.parse::<usize>().ok())
+        };
         let legacy = usize::from(legacy_windows);
         let width = match digits("COLUMNS") {
             Some(c) => {
                 let w = c.saturating_sub(legacy);
                 // rich subtracts it once more when LINES is set too
-                if digits("LINES").is_some() { w.saturating_sub(legacy) } else { w }
+                if digits("LINES").is_some() {
+                    w.saturating_sub(legacy)
+                } else {
+                    w
+                }
             }
             None => {
-                let w = if dumb { None } else if tty { terminal_width(stderr) } else { None };
+                let w = if dumb {
+                    None
+                } else if tty {
+                    terminal_width(stderr)
+                } else {
+                    None
+                };
                 w.unwrap_or(80).saturating_sub(legacy)
             }
         };
@@ -813,12 +946,30 @@ impl Console {
         if color {
             enable_vt(stderr);
         }
-        Console { width: width.max(1), color, terminal, legacy_windows, dumb, buf: String::new(), stderr, capture: false }
+        Console {
+            width: width.max(1),
+            color,
+            terminal,
+            legacy_windows,
+            dumb,
+            buf: String::new(),
+            stderr,
+            capture: false,
+        }
     }
 
     /// A console writing into a buffer (tests).
     pub fn capture(width: usize) -> Console {
-        Console { width, color: false, terminal: false, legacy_windows: false, dumb: false, buf: String::new(), stderr: false, capture: true }
+        Console {
+            width,
+            color: false,
+            terminal: false,
+            legacy_windows: false,
+            dumb: false,
+            buf: String::new(),
+            stderr: false,
+            capture: true,
+        }
     }
 
     pub fn interactive(&self) -> bool {
@@ -878,7 +1029,11 @@ impl Console {
             self.buf.extend(line.iter().map(|c| c.0));
         }
         // Python's text-mode streams write \r\n on Windows
-        self.buf.push_str(if cfg!(windows) && !self.capture { "\r\n" } else { "\n" });
+        self.buf.push_str(if cfg!(windows) && !self.capture {
+            "\r\n"
+        } else {
+            "\n"
+        });
     }
 
     /// What was printed so far (and forget it).
@@ -909,11 +1064,16 @@ impl Console {
 #[cfg(windows)]
 fn terminal_width(stderr: bool) -> Option<usize> {
     use windows_sys::Win32::System::Console::{
-        CONSOLE_SCREEN_BUFFER_INFO, GetConsoleScreenBufferInfo, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
+        CONSOLE_SCREEN_BUFFER_INFO, GetConsoleScreenBufferInfo, GetStdHandle, STD_ERROR_HANDLE,
+        STD_OUTPUT_HANDLE,
     };
     // SAFETY: plain Win32 calls with a zeroed out-parameter.
     unsafe {
-        let h = GetStdHandle(if stderr { STD_ERROR_HANDLE } else { STD_OUTPUT_HANDLE });
+        let h = GetStdHandle(if stderr {
+            STD_ERROR_HANDLE
+        } else {
+            STD_OUTPUT_HANDLE
+        });
         let mut info: CONSOLE_SCREEN_BUFFER_INFO = std::mem::zeroed();
         if GetConsoleScreenBufferInfo(h, &mut info) == 0 {
             return None;
@@ -928,7 +1088,11 @@ fn terminal_width(stderr: bool) -> Option<usize> {
     // SAFETY: TIOCGWINSZ fills a winsize.
     unsafe {
         let mut ws: libc::winsize = std::mem::zeroed();
-        let fd = if stderr { libc::STDERR_FILENO } else { libc::STDOUT_FILENO };
+        let fd = if stderr {
+            libc::STDERR_FILENO
+        } else {
+            libc::STDOUT_FILENO
+        };
         if libc::ioctl(fd, libc::TIOCGWINSZ, &mut ws) != 0 || ws.ws_col == 0 {
             return None;
         }
@@ -940,12 +1104,16 @@ fn terminal_width(stderr: bool) -> Option<usize> {
 #[cfg(windows)]
 fn enable_vt(stderr: bool) {
     use windows_sys::Win32::System::Console::{
-        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE, STD_OUTPUT_HANDLE,
-        SetConsoleMode,
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING, GetConsoleMode, GetStdHandle, STD_ERROR_HANDLE,
+        STD_OUTPUT_HANDLE, SetConsoleMode,
     };
     // SAFETY: plain Win32 calls on the process's own standard handle.
     unsafe {
-        let h = GetStdHandle(if stderr { STD_ERROR_HANDLE } else { STD_OUTPUT_HANDLE });
+        let h = GetStdHandle(if stderr {
+            STD_ERROR_HANDLE
+        } else {
+            STD_OUTPUT_HANDLE
+        });
         let mut mode = 0;
         if GetConsoleMode(h, &mut mode) != 0 {
             SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
@@ -961,7 +1129,10 @@ mod tests {
     use super::*;
 
     fn plain(lines: Vec<Vec<Cell>>) -> Vec<String> {
-        lines.into_iter().map(|l| l.into_iter().map(|c| c.0).collect()).collect()
+        lines
+            .into_iter()
+            .map(|l| l.into_iter().map(|c| c.0).collect())
+            .collect()
     }
 
     #[test]
@@ -973,19 +1144,36 @@ mod tests {
         );
         // a wide character never splits; it moves to the next line
         let t = Text::plain("ab中文");
-        assert_eq!(plain(wrap(&t, 3, Justify::Default, Overflow::Fold, false)), ["ab", "中", "文"]);
+        assert_eq!(
+            plain(wrap(&t, 3, Justify::Default, Overflow::Fold, false)),
+            ["ab", "中", "文"]
+        );
     }
 
     #[test]
     fn ellipsis_and_right_justify() {
         let t = Text::plain("Size on disk");
-        assert_eq!(plain(wrap(&t, 10, Justify::Right, Overflow::Ellipsis, true)), ["Size on d…"]);
+        assert_eq!(
+            plain(wrap(&t, 10, Justify::Right, Overflow::Ellipsis, true)),
+            ["Size on d…"]
+        );
         let t = Text::plain("12 KB");
-        assert_eq!(plain(wrap(&t, 8, Justify::Right, Overflow::Ellipsis, true)), ["   12 KB"]);
+        assert_eq!(
+            plain(wrap(&t, 8, Justify::Right, Overflow::Ellipsis, true)),
+            ["   12 KB"]
+        );
     }
 
     #[test]
     fn ratio_reduce_rounds_half_to_even() {
-        assert_eq!(ratio_reduce(8, &[1, 1, 1, 1, 1], &[45, 14, 8, 14, 6], &[45, 14, 8, 14, 6]), [43, 12, 7, 12, 5]);
+        assert_eq!(
+            ratio_reduce(
+                8,
+                &[1, 1, 1, 1, 1],
+                &[45, 14, 8, 14, 6],
+                &[45, 14, 8, 14, 6]
+            ),
+            [43, 12, 7, 12, 5]
+        );
     }
 }

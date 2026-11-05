@@ -6,8 +6,8 @@ use sk_core::i18n::{self, Arg, Language, t};
 
 use super::super::rich::Console;
 use super::super::run::{
-    Command, ParserKind, command_tail, filter_reason, group, main, parse_command_line, split_line, split_tokens,
-    tail_matches, text, usage, windows_command_tail,
+    Command, ParserKind, command_tail, filter_reason, group, main, parse_command_line, split_line,
+    split_tokens, tail_matches, text, usage, windows_command_tail,
 };
 use super::{lock_language, tree};
 
@@ -28,7 +28,16 @@ fn cli_run_internal_parser_keeps_backslashes_before_quotes() {
     let (words, errors, to_os) = split_line(raw);
     assert_eq!(
         words,
-        ["scan", "C:\\", "filter", "*.txt;>1mb", "export", "Simple file list", "C:\\out dir\\list.txt", "autoclose"]
+        [
+            "scan",
+            "C:\\",
+            "filter",
+            "*.txt;>1mb",
+            "export",
+            "Simple file list",
+            "C:\\out dir\\list.txt",
+            "autoclose"
+        ]
     );
     assert!(errors.is_empty() && !to_os);
 }
@@ -36,8 +45,20 @@ fn cli_run_internal_parser_keeps_backslashes_before_quotes() {
 #[test]
 fn cli_run_delimiter_meta_commands() {
     let _g = lock_language(Language::ZhCn);
-    let (words, errors, _) = split_line(r#"@delim={} scan {C:\a "quoted" b} @delim=| filter |*.txt| export x y"#);
-    assert_eq!(words, ["scan", r#"C:\a "quoted" b"#, "filter", "*.txt", "export", "x", "y"]);
+    let (words, errors, _) =
+        split_line(r#"@delim={} scan {C:\a "quoted" b} @delim=| filter |*.txt| export x y"#);
+    assert_eq!(
+        words,
+        [
+            "scan",
+            r#"C:\a "quoted" b"#,
+            "filter",
+            "*.txt",
+            "export",
+            "x",
+            "y"
+        ]
+    );
     assert!(errors.is_empty());
     let (words, _, _) = split_line(r#"scan "a" "@delim={}" {b}"#); // a delimited meta command is a word
     assert_eq!(words, ["scan", "a", "@delim={}", "{b}"]);
@@ -54,17 +75,24 @@ fn cli_run_parser_os_reparses_from_scratch() {
     let tokens = ["@delim={}", "scan", "{a", "b}", "@parser=OS", "@parser=OS"];
     let parsed = parse_command_line(&tokens, Some("@delim={} scan {a b} @parser=OS @parser=OS"));
     assert_eq!(parsed.parser, ParserKind::Os); // the system's words: "{a" and "b}" are two of them
-    assert_eq!(parsed.errors[0], f(text::META_AFTER_OS, &[("word", "@delim={}".into())]));
+    assert_eq!(
+        parsed.errors[0],
+        f(text::META_AFTER_OS, &[("word", "@delim={}".into())])
+    );
     assert!(parsed.errors.len() == 2 && parsed.errors[1].contains("b}"));
     let parsed = parse_command_line(&["@parser=OS", "scan", "{a", "autoclose"], None);
     assert!(parsed.parser == ParserKind::Os && parsed.errors.is_empty());
-    assert_eq!(parsed.commands, [cmd("scan", &["{a"]), cmd("autoclose", &[])]);
+    assert_eq!(
+        parsed.commands,
+        [cmd("scan", &["{a"]), cmd("autoclose", &[])]
+    );
 }
 
 #[test]
 fn cli_run_token_parser_joins_delimited_tokens() {
     let _g = lock_language(Language::ZhCn);
-    let (words, errors, _) = split_tokens(&["@delim={}", "scan", "{/a", "b}", "filter", "{x}y", "z"]);
+    let (words, errors, _) =
+        split_tokens(&["@delim={}", "scan", "{/a", "b}", "filter", "{x}y", "z"]);
     assert_eq!(words, ["scan", "/a b", "filter", "x", "y", "z"]);
     assert!(errors.is_empty());
     let (words, _, _) = split_tokens(&["scan", "/path with spaces", "autoclose"]); // already split by the shell
@@ -76,7 +104,17 @@ fn cli_run_token_parser_joins_delimited_tokens() {
 #[test]
 fn cli_run_grouping_and_order_checks() {
     let _g = lock_language(Language::ZhCn);
-    let (commands, errors) = group(&["SCAN", "/a", "Filter", "*.txt", "export", "Summary", "o.txt", "autoclose", "help"]);
+    let (commands, errors) = group(&[
+        "SCAN",
+        "/a",
+        "Filter",
+        "*.txt",
+        "export",
+        "Summary",
+        "o.txt",
+        "autoclose",
+        "help",
+    ]);
     assert_eq!(
         commands,
         [
@@ -98,9 +136,15 @@ fn cli_run_grouping_and_order_checks() {
 fn cli_run_raw_command_line_tail() {
     let raw = r#""C:\Program Files\Python\python.exe" -m spaceknife run scan "C:\" autoclose"#;
     assert_eq!(command_tail(raw, "run"), Some(r#" scan "C:\" autoclose"#));
-    assert_eq!(command_tail(r#""C:\run\spaceknife.exe" RUN help"#, "run"), Some(" help"));
+    assert_eq!(
+        command_tail(r#""C:\run\spaceknife.exe" RUN help"#, "run"),
+        Some(" help")
+    );
     assert_eq!(command_tail("spaceknife scan x", "run"), None);
-    assert!(tail_matches(r#" scan "C:\" autoclose"#, &["scan", "C:\" autoclose"]));
+    assert!(tail_matches(
+        r#" scan "C:\" autoclose"#,
+        &["scan", "C:\" autoclose"]
+    ));
     assert!(!tail_matches(" -k something", &["scan"]));
     assert!(tail_matches("   ", &[] as &[&str]) && !tail_matches(" scan", &[] as &[&str]));
     // the test runner's own command line has no "run …" with these words
@@ -137,14 +181,24 @@ fn fixture() -> (tempfile::TempDir, PathBuf) {
     let root = dir.path().join("tree");
     tree(
         &root,
-        &[("docs/a.txt", 1200), ("docs/b.txt", 300), ("docs/deep/c.txt", 50), ("media/v.bin", 9000), ("readme.md", 10)],
+        &[
+            ("docs/a.txt", 1200),
+            ("docs/b.txt", 300),
+            ("docs/deep/c.txt", 50),
+            ("media/v.bin", 9000),
+            ("readme.md", 10),
+        ],
     );
     std::fs::create_dir(root.join("empty")).unwrap();
     (dir, root)
 }
 
 fn lines(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path).unwrap().lines().map(str::to_owned).collect()
+    std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }
 
 fn s(p: &Path) -> String {
@@ -158,26 +212,54 @@ fn cli_run_scan_filter_export_save_load() {
     let out = dir.path().join("out");
     std::fs::create_dir(&out).unwrap();
     let snap = out.join("tree.sks");
-    let (list, csv, json, html) = (out.join("list.txt"), out.join("t.csv"), out.join("t.json"), out.join("t.html"));
+    let (list, csv, json, html) = (
+        out.join("list.txt"),
+        out.join("t.csv"),
+        out.join("t.json"),
+        out.join("t.html"),
+    );
     let (code, stdout, stderr) = run(&[
-        "scan", &s(&tree), "filter", "*.txt", "export", "Simple file list", &s(&list), "export", "csv", &s(&csv), "export",
-        "json", &s(&json), "export", "html", &s(&html), "save", &s(&snap), "autoclose",
+        "scan",
+        &s(&tree),
+        "filter",
+        "*.txt",
+        "export",
+        "Simple file list",
+        &s(&list),
+        "export",
+        "csv",
+        &s(&csv),
+        "export",
+        "json",
+        &s(&json),
+        "export",
+        "html",
+        &s(&html),
+        "save",
+        &s(&snap),
+        "autoclose",
     ]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, ""); // autoclose: no view summary
-    let mut expected: Vec<String> =
-        vec![s(&tree.join("docs").join("a.txt")), s(&tree.join("docs").join("b.txt")), s(&tree.join("docs").join("deep").join("c.txt"))];
+    let mut expected: Vec<String> = vec![
+        s(&tree.join("docs").join("a.txt")),
+        s(&tree.join("docs").join("b.txt")),
+        s(&tree.join("docs").join("deep").join("c.txt")),
+    ];
     let mut got = lines(&list);
     expected.sort();
     got.sort();
     assert_eq!(got, expected);
     let raw_csv = std::fs::read(&csv).unwrap();
     assert!(raw_csv.starts_with(b"\xef\xbb\xbf")); // BOM: Excel reads UTF-8
-    let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+    let doc: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
     assert_eq!(doc["filter"], "*.txt");
     assert_eq!(doc["roots"][0]["path"], s(&tree));
     let page = std::fs::read_to_string(&html).unwrap();
-    assert!(page.starts_with("<!doctype html>") && page.contains("a.txt") && !page.contains("v.bin"));
+    assert!(
+        page.starts_with("<!doctype html>") && page.contains("a.txt") && !page.contains("v.bin")
+    );
     // the snapshot holds the whole tree, not the filtered view
     let (store, header) = sk_store::snapshot::load(&snap).unwrap();
     assert_eq!(store.len() as u64, header.node_count);
@@ -186,11 +268,25 @@ fn cli_run_scan_filter_export_save_load() {
     assert_eq!(header.stats["files"].as_i64(), Some(5));
 
     let all = out.join("all.txt");
-    let (code, _, stderr) = run(&["load", &s(&snap), "export", "Simple file list", &s(&all), "autoclose"]);
+    let (code, _, stderr) = run(&[
+        "load",
+        &s(&snap),
+        "export",
+        "Simple file list",
+        &s(&all),
+        "autoclose",
+    ]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(lines(&all).len(), 5);
     let again = out.join("again.txt");
-    let (code, _, stderr) = run(&["scan", &s(&tree), "export", "Simple file list", &s(&again), "autoclose"]);
+    let (code, _, stderr) = run(&[
+        "scan",
+        &s(&tree),
+        "export",
+        "Simple file list",
+        &s(&again),
+        "autoclose",
+    ]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(lines(&again), lines(&all)); // a loaded snapshot exports like the scan
 }
@@ -200,20 +296,41 @@ fn cli_run_template_file_and_view_summary() {
     let _g = lock_language(Language::ZhCn);
     let (dir, tree) = fixture();
     let template = dir.path().join("mine.sktpl");
-    std::fs::write(&template, "@sort=name\n@order=asc\n@detail\n{nest{ }}<%file%>|<%filecount%>{&br}").unwrap();
+    std::fs::write(
+        &template,
+        "@sort=name\n@order=asc\n@detail\n{nest{ }}<%file%>|<%filecount%>{&br}",
+    )
+    .unwrap();
     let target = dir.path().join("mine.txt");
     let (code, stdout, stderr) = run(&["scan", &s(&tree), "export", &s(&template), &s(&target)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(
         lines(&target),
         [
-            "tree|5", " docs|3", "  a.txt|0", "  b.txt|0", "  deep|1", "   c.txt|0", " empty|0", " media|1", "  v.bin|0",
+            "tree|5",
+            " docs|3",
+            "  a.txt|0",
+            "  b.txt|0",
+            "  deep|1",
+            "   c.txt|0",
+            " empty|0",
+            " media|1",
+            "  v.bin|0",
             " readme.md|0",
         ]
     );
     // without autoclose the views are summarised on stdout (the headless stand-in for a window)
-    assert!(stdout.contains(&f(text::VIEW_TITLE, &[("index", 1.into()), ("label", format!("scan {}", s(&tree)).into())])));
-    assert!(stdout.contains(&format!("docs{MAIN_SEPARATOR}")) && stdout.contains("readme.md"), "{stdout}");
+    assert!(stdout.contains(&f(
+        text::VIEW_TITLE,
+        &[
+            ("index", 1.into()),
+            ("label", format!("scan {}", s(&tree)).into())
+        ]
+    )));
+    assert!(
+        stdout.contains(&format!("docs{MAIN_SEPARATOR}")) && stdout.contains("readme.md"),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -226,7 +343,18 @@ fn cli_run_counts_of_one_in_english() {
     let empty = dir.path().join("empty");
     std::fs::create_dir(&empty).unwrap();
     let saved = dir.path().join("one.sks");
-    let tokens = ["scan", &s(&empty), "scan", &s(&one), "filter", "*.txt", "save", &s(&saved), "load", &s(&saved)];
+    let tokens = [
+        "scan",
+        &s(&empty),
+        "scan",
+        &s(&one),
+        "filter",
+        "*.txt",
+        "save",
+        &s(&saved),
+        "load",
+        &s(&saved),
+    ];
     let (code, stdout, stderr) = {
         let _g = lock_language(Language::En);
         run(&tokens)
@@ -235,20 +363,44 @@ fn cli_run_counts_of_one_in_english() {
     let scanned: Vec<String> = stderr
         .lines()
         .filter(|l| l.starts_with("Scanned "))
-        .map(|l| l.split_once(": ").unwrap().1.split(',').next().unwrap().to_owned())
+        .map(|l| {
+            l.split_once(": ")
+                .unwrap()
+                .1
+                .split(',')
+                .next()
+                .unwrap()
+                .to_owned()
+        })
         .collect();
     assert_eq!(scanned, ["1 item", "3 items"]); // the folder itself counts
     assert!(stderr.contains("Filter *.txt: 1 file, "), "{stderr}");
-    assert!(stderr.contains(&format!("Opened snapshot {}: 3 items, ", s(&saved))), "{stderr}");
-    let totals: Vec<&str> =
-        stdout.lines().filter(|l| l.ends_with(" on disk")).map(|l| l.rsplit_once(", ").unwrap().0).collect();
-    assert_eq!(totals, ["0 files, 0 folders", "1 file, 0 folders", "1 file, 1 folder"]); // the three views
+    assert!(
+        stderr.contains(&format!("Opened snapshot {}: 3 items, ", s(&saved))),
+        "{stderr}"
+    );
+    let totals: Vec<&str> = stdout
+        .lines()
+        .filter(|l| l.ends_with(" on disk"))
+        .map(|l| l.rsplit_once(", ").unwrap().0)
+        .collect();
+    assert_eq!(
+        totals,
+        [
+            "0 files, 0 folders",
+            "1 file, 0 folders",
+            "1 file, 1 folder"
+        ]
+    ); // the three views
 
     let _g = lock_language(Language::ZhCn);
     let (code, stdout, stderr) = run(&tokens);
     assert_eq!(code, 0, "{stderr}");
     assert!(stderr.contains("过滤 *.txt：1 个文件，"), "{stderr}");
-    assert!(stdout.contains("共 1 个文件、1 个文件夹，占用 "), "{stdout}");
+    assert!(
+        stdout.contains("共 1 个文件、1 个文件夹，占用 "),
+        "{stdout}"
+    );
 }
 
 #[test]
@@ -261,11 +413,21 @@ fn cli_run_several_roots_in_one_scan() {
     assert_eq!(code, 0, "{stderr}");
     let text = std::fs::read_to_string(&target).unwrap();
     assert_eq!(text.matches("Total size:").count(), 2); // one export per root of the view
-    assert!(text.contains("Files     : 3") && text.contains("Files     : 1"), "{text}");
+    assert!(
+        text.contains("Files     : 3") && text.contains("Files     : 1"),
+        "{text}"
+    );
     let odd = dir.path().join("a;b");
     std::fs::create_dir(&odd).unwrap();
     std::fs::write(odd.join("f.txt"), b"1").unwrap();
-    let (code, _, stderr) = run(&["scan", &s(&odd), "export", "Simple file list", &s(&target), "autoclose"]);
+    let (code, _, stderr) = run(&[
+        "scan",
+        &s(&odd),
+        "export",
+        "Simple file list",
+        &s(&target),
+        "autoclose",
+    ]);
     assert_eq!(code, 0, "{stderr}"); // a folder whose name holds ";" is one path
     assert_eq!(lines(&target), [s(&odd.join("f.txt"))]);
 }
@@ -290,16 +452,52 @@ fn cli_run_failing_commands() {
     let target = dir.path().join("x.txt");
     let (code, _, stderr) = run(&["scan", &s(&dir.path().join("missing")), "autoclose"]);
     assert!(code == 2 && stderr.contains("missing"));
-    let (code, _, stderr) = run(&["scan", &s(&tree), "filter", ">1zb", "export", "Summary", &s(&target), "autoclose"]);
-    assert!(code == 2 && stderr.contains(">1zb") && stderr.contains(t(filter_reason("unknown_unit"))), "{stderr}");
+    let (code, _, stderr) = run(&[
+        "scan",
+        &s(&tree),
+        "filter",
+        ">1zb",
+        "export",
+        "Summary",
+        &s(&target),
+        "autoclose",
+    ]);
+    assert!(
+        code == 2 && stderr.contains(">1zb") && stderr.contains(t(filter_reason("unknown_unit"))),
+        "{stderr}"
+    );
     assert!(!target.exists());
-    let (code, _, stderr) = run(&["scan", &s(&tree), "export", "No such template", &s(&target), "autoclose"]);
+    let (code, _, stderr) = run(&[
+        "scan",
+        &s(&tree),
+        "export",
+        "No such template",
+        &s(&target),
+        "autoclose",
+    ]);
     assert!(code == 2 && stderr.contains("No such template"));
     let broken = dir.path().join("broken.sktpl");
     std::fs::write(&broken, "<%nosuch%>").unwrap();
-    let (code, _, stderr) = run(&["scan", &s(&tree), "export", &s(&broken), &s(&target), "autoclose"]);
-    assert!(code == 2 && stderr.contains("nosuch") && !target.exists(), "{stderr}");
-    let (code, _, _) = run(&["scan", &s(&tree), "export", "Summary", &s(&dir.path().join("no").join("dir.txt")), "autoclose"]);
+    let (code, _, stderr) = run(&[
+        "scan",
+        &s(&tree),
+        "export",
+        &s(&broken),
+        &s(&target),
+        "autoclose",
+    ]);
+    assert!(
+        code == 2 && stderr.contains("nosuch") && !target.exists(),
+        "{stderr}"
+    );
+    let (code, _, _) = run(&[
+        "scan",
+        &s(&tree),
+        "export",
+        "Summary",
+        &s(&dir.path().join("no").join("dir.txt")),
+        "autoclose",
+    ]);
     assert_eq!(code, 2);
     let fake = dir.path().join("old.sns");
     std::fs::write(&fake, b"SpaceSniffer binary snapshot\x00\x01").unwrap();
@@ -314,17 +512,35 @@ fn cli_run_filter_warnings_do_not_stop() {
     let _g = lock_language(Language::ZhCn);
     let (dir, tree) = fixture();
     let target = dir.path().join("w.txt");
-    let (code, _, stderr) = run(&["scan", &s(&tree), "filter", ":attr:ads", "export", "Summary", &s(&target), "autoclose"]);
+    let (code, _, stderr) = run(&[
+        "scan",
+        &s(&tree),
+        "filter",
+        ":attr:ads",
+        "export",
+        "Summary",
+        &s(&target),
+        "autoclose",
+    ]);
     assert_eq!(code, 0, "{stderr}"); // "ads" is not collected yet: a warning, the filter matches nothing
     assert!(stderr.contains(t(filter_reason("unsupported"))), "{stderr}");
-    assert!(std::fs::read_to_string(&target).unwrap().contains("Files     : 0"));
+    assert!(
+        std::fs::read_to_string(&target)
+            .unwrap()
+            .contains("Files     : 0")
+    );
 }
 
 #[test]
 fn cli_run_help_and_empty_command_line() {
     let _g = lock_language(Language::En);
     let (code, stdout, _) = run(&["help"]);
-    assert!(code == 0 && stdout.contains("spaceknife run") && stdout.contains("Grouped by folder") && stdout.contains("@parser=OS"));
+    assert!(
+        code == 0
+            && stdout.contains("spaceknife run")
+            && stdout.contains("Grouped by folder")
+            && stdout.contains("@parser=OS")
+    );
     let (code, stdout2, _) = run(&[]);
     assert!(code == 0 && stdout2 == stdout);
 }
@@ -332,7 +548,12 @@ fn cli_run_help_and_empty_command_line() {
 #[test]
 fn cli_run_wiring() {
     // the arguments after `run` reach the parser untouched (clap does not eat --flags or quotes)
-    let cli = <super::super::Cli as clap::Parser>::try_parse_from(["x", "run", "scan", "--weird", "filter", "-x"]).unwrap();
-    let super::super::Command::Run { args } = cli.command else { panic!() };
+    let cli = <super::super::Cli as clap::Parser>::try_parse_from([
+        "x", "run", "scan", "--weird", "filter", "-x",
+    ])
+    .unwrap();
+    let super::super::Command::Run { args } = cli.command else {
+        panic!()
+    };
     assert_eq!(args, ["scan", "--weird", "filter", "-x"]);
 }

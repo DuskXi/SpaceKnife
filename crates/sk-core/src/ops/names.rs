@@ -93,7 +93,10 @@ mod tests {
 
     #[test]
     fn below_and_task() {
-        assert_eq!(names_below("C:\\data\\a\\b", "C:\\data"), Some(vec!["a".into(), "b".into()]));
+        assert_eq!(
+            names_below("C:\\data\\a\\b", "C:\\data"),
+            Some(vec!["a".into(), "b".into()])
+        );
         assert_eq!(names_below("C:\\data2\\a", "C:\\data"), None);
         assert_eq!(names_below("C:\\data", "C:\\data"), None);
         let below = vec!["a".to_string(), "B".to_string()];

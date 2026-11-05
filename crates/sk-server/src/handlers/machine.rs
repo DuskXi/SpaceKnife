@@ -18,8 +18,9 @@ use sk_core::helper::{HelperClient, HelperError, HelperErrorKind, Scalars, Share
 use sk_core::scan::ScanState;
 use sk_core::volume::{VolumeInfo, list_volumes};
 use sk_protocol::machine::{
-    ClassTotal, DiskHealth, DiskInterface, DiskPart, FolderStat, HealthNote, MachineDisks, PhysicalDisk,
-    ReadHealthOutcome, ReadHealthResult, SnapshotPoint, VolumeOverview, VolumeScan, VolumeScanSource,
+    ClassTotal, DiskHealth, DiskInterface, DiskPart, FolderStat, HealthNote, MachineDisks,
+    PhysicalDisk, ReadHealthOutcome, ReadHealthResult, SnapshotPoint, VolumeOverview, VolumeScan,
+    VolumeScanSource,
 };
 use sk_protocol::methods::{MachineDisksMethod, MachineReadHealth};
 use sk_protocol::scan::{ClassStat, ScanMethodUsed, ScanSource, TreeMethod};
@@ -27,7 +28,7 @@ use sk_store::{Kind, SortBy};
 
 use crate::app::Server;
 use crate::compute::Latest;
-use crate::rpc::{RpcResult, Router};
+use crate::rpc::{Router, RpcResult};
 use crate::scans::{ScanHandle, saved_method, saved_state};
 use crate::topics::TopicRegistry;
 use crate::volume_summaries::{Kept, identity};
@@ -54,12 +55,16 @@ pub fn whole_root(h: &ScanHandle) -> Option<String> {
     }
     let r = &roots[0];
     let v = r.volume.as_ref()?;
-    (r.whole_volume || norm(&r.path.to_string_lossy()) == norm(&v.mount_point)).then(|| norm(&v.mount_point))
+    (r.whole_volume || norm(&r.path.to_string_lossy()) == norm(&v.mount_point))
+        .then(|| norm(&v.mount_point))
 }
 
 /// A scan of the disk beats a loaded snapshot; then the newest.
 fn rank(h: &ScanHandle) -> (bool, i64) {
-    let started = h.progress().started_at.map_or(i64::MIN, |t| t.timestamp_micros());
+    let started = h
+        .progress()
+        .started_at
+        .map_or(i64::MIN, |t| t.timestamp_micros());
     (h.source == ScanSource::Scan, started)
 }
 
@@ -79,21 +84,29 @@ pub fn live_full(server: &Server, h: &ScanHandle) -> Result<(VolumeScan, Vec<Cla
     let mut folders = Vec::new();
     if !running && let Some(node) = h.roots.read().first().map(|r| r.node) {
         let summary = crate::handlers::scan::summary_of(h, node, 0)?;
-        if let Some(gap) = summary
-            .gaps
-            .iter()
-            .find(|g| matches!(g.part, sk_protocol::scan::SummaryPart::Contents | sk_protocol::scan::SummaryPart::Classes))
-        {
+        if let Some(gap) = summary.gaps.iter().find(|g| {
+            matches!(
+                g.part,
+                sk_protocol::scan::SummaryPart::Contents | sk_protocol::scan::SummaryPart::Classes
+            )
+        }) {
             return Err(gap.reason.clone());
         }
-        every = summary.classes.into_iter().filter(|c| c.bytes > 0).collect();
+        every = summary
+            .classes
+            .into_iter()
+            .filter(|c| c.bytes > 0)
+            .collect();
         let nodes = h.store.read();
         folders = nodes
             .sorted_children(node, SortBy::Size, true)
             .into_iter()
             .filter(|&i| nodes.kind(i) == Kind::Dir)
             .take(TOP_FOLDERS)
-            .map(|i| FolderStat { name: nodes.name(i).into_owned(), bytes: nodes.tot_alloc(i) })
+            .map(|i| FolderStat {
+                name: nodes.name(i).into_owned(),
+                bytes: nodes.tot_alloc(i),
+            })
             .collect();
     }
     let method = match st.method {
@@ -102,7 +115,11 @@ pub fn live_full(server: &Server, h: &ScanHandle) -> Result<(VolumeScan, Vec<Cla
         ScanMethodUsed::Snapshot => None,
     };
     let scan = VolumeScan {
-        source: if h.source == ScanSource::Snapshot { VolumeScanSource::Snapshot } else { VolumeScanSource::Scan },
+        source: if h.source == ScanSource::Snapshot {
+            VolumeScanSource::Snapshot
+        } else {
+            VolumeScanSource::Scan
+        },
         scan_id: Some(h.id.clone()),
         snapshot: h.st.lock().snapshot_path.clone(),
         running,
@@ -118,7 +135,12 @@ pub fn live_full(server: &Server, h: &ScanHandle) -> Result<(VolumeScan, Vec<Cla
 }
 
 /// What to keep of a complete scan of a whole volume; None for anything else.
-fn keep_entry(server: &Server, h: &ScanHandle, scan: &VolumeScan, every: &[ClassStat]) -> Option<Kept> {
+fn keep_entry(
+    server: &Server,
+    h: &ScanHandle,
+    scan: &VolumeScan,
+    every: &[ClassStat],
+) -> Option<Kept> {
     let volume = h.roots.read().first().and_then(|r| r.volume.clone())?;
     server.summaries.whole_root(h)?;
     if scan.running || h.progress().state != ScanState::Done {
@@ -134,7 +156,13 @@ fn keep_entry(server: &Server, h: &ScanHandle, scan: &VolumeScan, every: &[Class
         bytes_alloc: scan.bytes_alloc,
         method: scan.method,
         snapshot: scan.snapshot.clone(),
-        classes: every.iter().map(|c| ClassStat { parts: Vec::new(), ..c.clone() }).collect(),
+        classes: every
+            .iter()
+            .map(|c| ClassStat {
+                parts: Vec::new(),
+                ..c.clone()
+            })
+            .collect(),
         folders: scan.folders.clone(),
     })
 }
@@ -157,10 +185,15 @@ pub type Saved = (Option<VolumeScan>, Vec<SnapshotPoint>);
 pub fn saved_scans(mount_point: &str, base: Option<&Path>) -> Saved {
     let base = base.map_or_else(sk_core::paths::snapshots_dir, Path::to_path_buf);
     let folder = base.join(sk_store::snapshot::root_key(&[mount_point.to_owned()]));
-    let Ok(rd) = std::fs::read_dir(&folder) else { return (None, Vec::new()) };
+    let Ok(rd) = std::fs::read_dir(&folder) else {
+        return (None, Vec::new());
+    };
     let mut files: Vec<PathBuf> = rd
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x == sk_store::snapshot::SUFFIX))
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|x| x == sk_store::snapshot::SUFFIX)
+        })
         .collect();
     files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     let mut newest = None;
@@ -169,13 +202,18 @@ pub fn saved_scans(mount_point: &str, base: Option<&Path>) -> Saved {
         if history.len() >= HISTORY {
             break;
         }
-        let Ok(header) = sk_store::snapshot::read_header(&file) else { continue };
+        let Ok(header) = sk_store::snapshot::read_header(&file) else {
+            continue;
+        };
         let stats = &header.stats;
         if saved_state(stats) != ScanState::Done {
             continue;
         }
         let files_n = stats.get("files").and_then(|v| v.as_i64()).unwrap_or(0);
-        let alloc = stats.get("bytes_alloc").and_then(|v| v.as_i64()).unwrap_or(0);
+        let alloc = stats
+            .get("bytes_alloc")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
         let at = DateTime::from_timestamp(header.created_at as i64, 0).unwrap_or_default();
         if newest.is_none() {
             newest = Some(VolumeScan {
@@ -192,7 +230,11 @@ pub fn saved_scans(mount_point: &str, base: Option<&Path>) -> Saved {
                 folders: Vec::new(),
             });
         }
-        history.push(SnapshotPoint { at, bytes_alloc: alloc, files: files_n });
+        history.push(SnapshotPoint {
+            at,
+            bytes_alloc: alloc,
+            files: files_n,
+        });
     }
     (newest, history)
 }
@@ -214,7 +256,9 @@ pub fn overview(
 ) -> MachineDisks {
     let mut open: HashMap<String, Arc<ScanHandle>> = HashMap::new();
     for h in server.scans.list() {
-        let Some(root) = server.summaries.whole_root(&h) else { continue };
+        let Some(root) = server.summaries.whole_root(&h) else {
+            continue;
+        };
         let better = open.get(&root).is_none_or(|best| rank(&h) > rank(best));
         if better {
             open.insert(root, h);
@@ -226,17 +270,22 @@ pub fn overview(
     let mut covered_bytes = 0i64;
     for v in volumes {
         let model = v.to_protocol();
-        let (newest, history) = saved.get(&v.mount_point).cloned().unwrap_or((None, Vec::new()));
+        let (newest, history) = saved
+            .get(&v.mount_point)
+            .cloned()
+            .unwrap_or((None, Vec::new()));
         let k = kept.and_then(|f| f(v));
         let mut every: Vec<ClassStat> = Vec::new();
         let mut mix_bytes = 0;
-        let live = open.get(&norm(&v.mount_point)).and_then(|h| match live_full(server, h) {
-            Ok(got) => Some((h, got)),
-            Err(reason) => {
-                tracing::debug!(scan_id = %h.id, "volume make-up left out: {reason}");
-                None
-            }
-        });
+        let live = open
+            .get(&norm(&v.mount_point))
+            .and_then(|h| match live_full(server, h) {
+                Ok(got) => Some((h, got)),
+                Err(reason) => {
+                    tracing::debug!(scan_id = %h.id, "volume make-up left out: {reason}");
+                    None
+                }
+            });
         let scan = if let Some((h, (scan, all))) = live {
             every = all;
             mix_bytes = scan.bytes_alloc;
@@ -255,7 +304,11 @@ pub fn overview(
             Some(scan)
         } else if let Some(k) = k.as_ref().filter(|k| match &newest {
             None => true,
-            Some(n) => n.at.is_none() || n.snapshot == k.snapshot || n.at.is_some_and(|a| a <= k.at + later()),
+            Some(n) => {
+                n.at.is_none()
+                    || n.snapshot == k.snapshot
+                    || n.at.is_some_and(|a| a <= k.at + later())
+            }
         }) {
             every = k.classes.clone();
             mix_bytes = k.bytes_alloc;
@@ -273,12 +326,22 @@ pub fn overview(
             covered_bytes += mix_bytes;
         }
         let mut ids: Vec<String> = Vec::new();
-        for (disk, _) in found.parts.get(&v.mount_point).map(Vec::as_slice).unwrap_or(&[]) {
+        for (disk, _) in found
+            .parts
+            .get(&v.mount_point)
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+        {
             if !ids.contains(disk) {
                 ids.push(disk.clone());
             }
         }
-        out_volumes.push(VolumeOverview { volume: model, disks: ids, scan, history });
+        out_volumes.push(VolumeOverview {
+            volume: model,
+            disks: ids,
+            scan,
+            history,
+        });
     }
     // each disk's volumes, in disk order (those with no known offset last)
     type Placed<'a> = Vec<(i64, &'a str, Option<i64>)>;
@@ -286,7 +349,10 @@ pub fn overview(
     for (mount, parts) in &found.parts {
         let start = found.offsets.get(mount).copied().unwrap_or(1 << 62);
         for (disk, size) in parts {
-            on_disk.entry(disk.as_str()).or_default().push((start, mount.as_str(), *size));
+            on_disk
+                .entry(disk.as_str())
+                .or_default()
+                .push((start, mount.as_str(), *size));
         }
     }
     let disks = found
@@ -296,24 +362,41 @@ pub fn overview(
             let mut list = on_disk.get(d.id.as_str()).cloned().unwrap_or_default();
             list.sort();
             PhysicalDisk {
-                parts: list.into_iter().map(|(_, m, b)| DiskPart { mount_point: m.to_owned(), bytes: b }).collect(),
+                parts: list
+                    .into_iter()
+                    .map(|(_, m, b)| DiskPart {
+                        mount_point: m.to_owned(),
+                        bytes: b,
+                    })
+                    .collect(),
                 ..d.clone()
             }
         })
         .collect();
     let classes = (!covered.is_empty()).then(|| {
-        let mut list: Vec<(String, (i64, i64))> = totals.into_iter().filter(|(_, (b, _))| *b > 0).collect();
+        let mut list: Vec<(String, (i64, i64))> =
+            totals.into_iter().filter(|(_, (b, _))| *b > 0).collect();
         list.sort_by(|a, b| b.1.0.cmp(&a.1.0).then_with(|| a.0.cmp(&b.0)));
         ClassTotal {
             classes: list
                 .into_iter()
-                .map(|(class_id, (bytes, files))| ClassStat { class_id, bytes, files, parts: Vec::new() })
+                .map(|(class_id, (bytes, files))| ClassStat {
+                    class_id,
+                    bytes,
+                    files,
+                    parts: Vec::new(),
+                })
                 .collect(),
             bytes: covered_bytes,
             volumes: covered,
         }
     });
-    MachineDisks { disks, volumes: out_volumes, collected_at: Utc::now(), classes }
+    MachineDisks {
+        disks,
+        volumes: out_volumes,
+        collected_at: Utc::now(),
+        classes,
+    }
 }
 
 // --------------------------------------------------------------------------- records read as root
@@ -366,21 +449,40 @@ fn record_key(d: &PhysicalDisk) -> String {
 /// The disk with what an elevated read found: the record (keeping the live temperature), or the
 /// reason it has none.
 pub fn with_record(d: &PhysicalDisk, read: Option<&Elevated>) -> PhysicalDisk {
-    let Some((record, note, at)) = read else { return d.clone() };
+    let Some((record, note, at)) = read else {
+        return d.clone();
+    };
     let Some(record) = record else {
-        return PhysicalDisk { health_note: *note, ..d.clone() };
+        return PhysicalDisk {
+            health_note: *note,
+            ..d.clone()
+        };
     };
     let live = d.health.as_ref().and_then(|h| h.temperature_c);
-    let merged = DiskHealth { temperature_c: live.or(record.temperature_c), read_at: Some(*at), ..record.clone() };
-    PhysicalDisk { health: Some(merged), health_note: HealthNote::None, ..d.clone() }
+    let merged = DiskHealth {
+        temperature_c: live.or(record.temperature_c),
+        read_at: Some(*at),
+        ..record.clone()
+    };
+    PhysicalDisk {
+        health: Some(merged),
+        health_note: HealthNote::None,
+        ..d.clone()
+    }
 }
 
 pub fn failed_note(d: &PhysicalDisk) -> HealthNote {
-    if d.interface == DiskInterface::Usb { HealthNote::Usb } else { HealthNote::Unsupported }
+    if d.interface == DiskInterface::Usb {
+        HealthNote::Usb
+    } else {
+        HealthNote::Unsupported
+    }
 }
 
 fn pages_of(s: &Scalars) -> BTreeMap<String, String> {
-    s.iter().filter_map(|(k, v)| v.as_str().map(|t| (k.clone(), t.to_owned()))).collect()
+    s.iter()
+        .filter_map(|(k, v)| v.as_str().map(|t| (k.clone(), t.to_owned())))
+        .collect()
 }
 
 /// Ask the elevated helper for each disk's pages; the cache gets the record or the reason. An
@@ -395,7 +497,11 @@ pub fn read_records(
         match client.disk_health(&d.id) {
             Ok(pages) => {
                 let record = sk_core::disks::health::from_pages(&pages_of(&pages));
-                let note = if record.is_some() { HealthNote::None } else { failed_note(d) };
+                let note = if record.is_some() {
+                    HealthNote::None
+                } else {
+                    failed_note(d)
+                };
                 cache.insert(record_key(d), (record, note, at));
             }
             Err(e) if e.kind == HelperErrorKind::Error => {
@@ -425,7 +531,9 @@ fn refresh(server: &Server, found: &Probe) {
     if cache.is_empty() {
         return;
     }
-    let Some(client) = helper.current().filter(|c| c.elevated()) else { return };
+    let Some(client) = helper.current().filter(|c| c.elevated()) else {
+        return;
+    };
     let again: Vec<PhysicalDisk> = found
         .disks
         .iter()
@@ -439,7 +547,11 @@ fn refresh(server: &Server, found: &Probe) {
 fn page(server: &Server, volumes: &[VolumeInfo], mut found: Probe) -> MachineDisks {
     {
         let cache = server.summaries.elevated.lock();
-        found.disks = found.disks.iter().map(|d| with_record(d, cache.get(&record_key(d)))).collect();
+        found.disks = found
+            .disks
+            .iter()
+            .map(|d| with_record(d, cache.get(&record_key(d))))
+            .collect();
     }
     let saved: HashMap<String, Saved> = volumes
         .iter()
@@ -449,7 +561,14 @@ fn page(server: &Server, volumes: &[VolumeInfo], mut found: Probe) -> MachineDis
     let store = server.summaries.store();
     let get = |v: &VolumeInfo| store.get(v);
     let mut fresh = Vec::new();
-    let out = overview(server, volumes, &found, &saved, Some(&get), Some(&mut fresh));
+    let out = overview(
+        server,
+        volumes,
+        &found,
+        &saved,
+        Some(&get),
+        Some(&mut fresh),
+    );
     if !fresh.is_empty() {
         store.put(fresh);
     }
@@ -457,7 +576,11 @@ fn page(server: &Server, volumes: &[VolumeInfo], mut found: Probe) -> MachineDis
     out
 }
 
-async fn machine_disks(server: Arc<Server>, latest: Arc<Latest<String>>, session: String) -> RpcResult<MachineDisks> {
+async fn machine_disks(
+    server: Arc<Server>,
+    latest: Arc<Latest<String>>,
+    session: String,
+) -> RpcResult<MachineDisks> {
     let srv = server.clone();
     let (volumes, found) = crate::compute::blocking(move || {
         let (volumes, found) = probe(&srv);
@@ -465,13 +588,19 @@ async fn machine_disks(server: Arc<Server>, latest: Arc<Latest<String>>, session
         (volumes, found)
     })
     .await?;
-    latest.run(format!("machine.disks:{session}"), move || page(&server, &volumes, found)).await
+    latest
+        .run(format!("machine.disks:{session}"), move || {
+            page(&server, &volumes, found)
+        })
+        .await
 }
 
 pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
     let latest: Arc<Latest<String>> = Arc::new(Latest::new());
     let l = latest.clone();
-    r.add::<MachineDisksMethod, _, _>(move |call, _| machine_disks(call.server.clone(), l.clone(), call.session.id.clone()));
+    r.add::<MachineDisksMethod, _, _>(move |call, _| {
+        machine_disks(call.server.clone(), l.clone(), call.session.id.clone())
+    });
 
     r.add::<MachineReadHealth, _, _>(move |call, p| {
         let server = call.server.clone();
@@ -485,7 +614,10 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
                         .disks
                         .iter()
                         .map(|d| with_record(d, cache.get(&record_key(d)))) // read once is enough
-                        .filter(|d| d.health_note == HealthNote::NeedsAdmin && (wanted.is_empty() || wanted.contains(&d.id)))
+                        .filter(|d| {
+                            d.health_note == HealthNote::NeedsAdmin
+                                && (wanted.is_empty() || wanted.contains(&d.id))
+                        })
                         .collect()
                 };
                 let mut outcome = ReadHealthOutcome::Nothing;
@@ -503,14 +635,21 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
                             message = e.message;
                         }
                         Err(e) => {
-                            tracing::info!("disk records need administrator rights, not available: {}", e.message);
+                            tracing::info!(
+                                "disk records need administrator rights, not available: {}",
+                                e.message
+                            );
                             outcome = ReadHealthOutcome::Unavailable;
                             message = e.message;
                         }
                     }
                 }
                 let machine = page(&server, &volumes, found);
-                ReadHealthResult { outcome, message, machine }
+                ReadHealthResult {
+                    outcome,
+                    message,
+                    machine,
+                }
             })
             .await
         }

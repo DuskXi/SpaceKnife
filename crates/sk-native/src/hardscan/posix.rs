@@ -151,7 +151,10 @@ fn has_cap_fowner() -> bool {
         permitted: u32,
         inheritable: u32,
     }
-    let mut h = Header { version: VERSION_3, pid: 0 };
+    let mut h = Header {
+        version: VERSION_3,
+        pid: 0,
+    };
     let mut d = [Data::default(); 2];
     // SAFETY: header and two data records as capget(2) takes them for version 3.
     let r = unsafe { libc::syscall(libc::SYS_capget, &mut h as *mut Header, d.as_mut_ptr()) };
@@ -287,7 +290,15 @@ fn add_entry(
 ) {
     let stat = stat_owned(dirfd, name);
     let had = subdirs.len();
-    push_entry(stat.map(|(m, _)| m), name.to_bytes(), dir, root, base, arena, subdirs);
+    push_entry(
+        stat.map(|(m, _)| m),
+        name.to_bytes(),
+        dir,
+        root,
+        base,
+        arena,
+        subdirs,
+    );
     #[cfg(target_os = "linux")]
     if let (Some((_, uid)), Some(sub)) = (stat, subdirs.get_mut(had)) {
         sub.2.noatime = noatime_allowed(uid);
@@ -1180,8 +1191,20 @@ mod tests {
         let sub = CString::new(base.join("sub").as_os_str().as_bytes()).unwrap();
         let old = |c: &CString| {
             // 2001-09-09, older than any change time here
-            let ts = [libc::timespec { tv_sec: 1_000_000_000, tv_nsec: 0 }, libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT }];
-            assert_eq!(unsafe { libc::utimensat(libc::AT_FDCWD, c.as_ptr(), ts.as_ptr(), 0) }, 0);
+            let ts = [
+                libc::timespec {
+                    tv_sec: 1_000_000_000,
+                    tv_nsec: 0,
+                },
+                libc::timespec {
+                    tv_sec: 0,
+                    tv_nsec: libc::UTIME_OMIT,
+                },
+            ];
+            assert_eq!(
+                unsafe { libc::utimensat(libc::AT_FDCWD, c.as_ptr(), ts.as_ptr(), 0) },
+                0
+            );
         };
         let atime = |c: &CString| {
             let mut st: libc::stat = unsafe { std::mem::zeroed() };
@@ -1189,12 +1212,18 @@ mod tests {
             st.st_atime
         };
         for keep in [true, false] {
-            let state = RootState::new(&StateOpts { keep_access_time: keep, ..StateOpts::default() });
+            let state = RootState::new(&StateOpts {
+                keep_access_time: keep,
+                ..StateOpts::default()
+            });
             let path = base.as_os_str().as_bytes();
             let mut st: libc::stat = unsafe { std::mem::zeroed() };
             let c = CString::new(path).unwrap();
             assert_eq!(unsafe { libc::stat(c.as_ptr(), &mut st) }, 0);
-            let root = RootOpts { dev: st.st_dev as u64, ..RootOpts::default() };
+            let root = RootOpts {
+                dev: st.st_dev as u64,
+                ..RootOpts::default()
+            };
             let (mut arena, mut subs) = (Arena::default(), Vec::new());
             list_dir(path, false, None, &root, &state, &mut arena, &mut subs).unwrap();
             assert_eq!(subs.len(), 1);
@@ -1202,9 +1231,22 @@ mod tests {
             assert!(hint.noatime, "our own folder");
             old(&sub);
             let (mut arena, mut subs) = (Arena::default(), Vec::new());
-            list_dir(&child, true, via_hint(hint), &root, &state, &mut arena, &mut subs).unwrap();
+            list_dir(
+                &child,
+                true,
+                via_hint(hint),
+                &root,
+                &state,
+                &mut arena,
+                &mut subs,
+            )
+            .unwrap();
             assert_eq!(arena.len(), 1);
-            assert_eq!(atime(&sub) == 1_000_000_000, keep, "keep_access_time {keep}");
+            assert_eq!(
+                atime(&sub) == 1_000_000_000,
+                keep,
+                "keep_access_time {keep}"
+            );
         }
         std::fs::remove_dir_all(&base).unwrap();
     }

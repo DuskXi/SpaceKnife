@@ -112,7 +112,11 @@ impl Sim {
             t: 0.0,
             scans: Vec::new(),
             points: Vec::new(),
-            core: GovernorCore::new(DiskRef::physical("sim0").with_media(o.media), o.max_workers, 0.0),
+            core: GovernorCore::new(
+                DiskRef::physical("sim0").with_media(o.media),
+                o.max_workers,
+                0.0,
+            ),
             rng: Rng(0x2545_F491_4F6C_DD1D),
             batches: Vec::new(),
             keys: HashMap::new(),
@@ -205,8 +209,17 @@ impl Sim {
         let [busy, queue, alone, span] = self.acc;
         let (busy, queue, alone) = (busy / span, queue / span, alone / span);
         let noise = self.rng.uniform(-self.noise, self.noise);
-        let stall = if self.rng.next() < self.spikes { self.rng.uniform(1.5, 2.0) } else { 1.0 };
-        let sample = DiskSample::new(self.t, span, (busy + noise * 0.3).clamp(0.0, 1.0), (queue * (1.0 + noise) * stall).max(0.0));
+        let stall = if self.rng.next() < self.spikes {
+            self.rng.uniform(1.5, 2.0)
+        } else {
+            1.0
+        };
+        let sample = DiskSample::new(
+            self.t,
+            span,
+            (busy + noise * 0.3).clamp(0.0, 1.0),
+            (queue * (1.0 + noise) * stall).max(0.0),
+        );
         let total_true = self.rho(busy, queue);
         self.core.observe(Some(&sample), self.t, Some(self.t));
         self.granted();
@@ -224,7 +237,11 @@ impl Sim {
     // ------------------------------------------------------------------ metrics
 
     fn window(&self, t0: f64, t1: f64) -> Vec<Point> {
-        self.points.iter().filter(|p| t0 < p.t && p.t <= t1 + 1e-9).copied().collect()
+        self.points
+            .iter()
+            .filter(|p| t0 < p.t && p.t <= t1 + 1e-9)
+            .copied()
+            .collect()
     }
 
     fn mean_self(&self, t0: f64, t1: f64) -> f64 {
@@ -353,7 +370,13 @@ fn hdd_concurrency_stays_low() {
 #[test]
 fn yields_when_others_exceed_the_limit() {
     let mut sim = Sim::new(SimOpts {
-        others: Box::new(|t| if (12.0..24.0).contains(&t) { 0.85 } else { 0.05 }),
+        others: Box::new(|t| {
+            if (12.0..24.0).contains(&t) {
+                0.85
+            } else {
+                0.05
+            }
+        }),
         ..Default::default()
     });
     start(&mut sim, Level::Balanced, None, 16);
@@ -396,7 +419,11 @@ fn others_rise_is_not_billed_to_us() {
     start(&mut sim, Level::Balanced, None, 16);
     sim.run(30.0);
     assert!(!sim.points.iter().any(|p| p.yielding));
-    assert!((sim.core.others.unwrap_or(0.0) - 0.25).abs() < 0.05, "{:?}", sim.core.others);
+    assert!(
+        (sim.core.others.unwrap_or(0.0) - 0.25).abs() < 0.05,
+        "{:?}",
+        sim.core.others
+    );
     assert!(sim.mean_self(22.0, 30.0) > 0.5); // still near the limit: capped by 100 % - others
 }
 
@@ -501,7 +528,11 @@ fn status_model_and_history() {
 
 #[test]
 fn open_loop_without_samples() {
-    let mut core = GovernorCore::new(DiskRef::new("net:\\\\nas\\share", DiskKind::Network).with_media(Media::Network), 8, 0.0);
+    let mut core = GovernorCore::new(
+        DiskRef::new("net:\\\\nas\\share", DiskKind::Network).with_media(Media::Network),
+        8,
+        0.0,
+    );
     core.set_level(Level::Quiet, None, 0.0);
     assert!(core.try_acquire(0.0));
     core.observe(None, 1.0, None);
@@ -512,7 +543,11 @@ fn open_loop_without_samples() {
 
 #[test]
 fn status_reports_the_disks_read_rate_and_latency() {
-    let mut core = GovernorCore::new(DiskRef::physical("disk0").with_media(Media::NvmeSsd), 8, 0.0);
+    let mut core = GovernorCore::new(
+        DiskRef::physical("disk0").with_media(Media::NvmeSsd),
+        8,
+        0.0,
+    );
     let sample = DiskSample {
         read_iops: Some(2000.0),
         read_latency: Some(0.00042),
@@ -549,7 +584,8 @@ fn permit_bounds_the_parallelism() {
     let done = Arc::new(AtomicUsize::new(0));
     let threads: Vec<_> = (0..6)
         .map(|_| {
-            let (gov, running, peak, done) = (gov.clone(), running.clone(), peak.clone(), done.clone());
+            let (gov, running, peak, done) =
+                (gov.clone(), running.clone(), peak.clone(), done.clone());
             std::thread::spawn(move || {
                 let permit = gov.permit();
                 let now = running.fetch_add(1, Ordering::SeqCst) + 1;
@@ -564,7 +600,10 @@ fn permit_bounds_the_parallelism() {
     for t in threads {
         t.join().unwrap();
     }
-    assert_eq!((peak.load(Ordering::SeqCst), done.load(Ordering::SeqCst)), (2, 6));
+    assert_eq!(
+        (peak.load(Ordering::SeqCst), done.load(Ordering::SeqCst)),
+        (2, 6)
+    );
     let st = gov.status(false);
     assert!(st.concurrency == 2 && !st.auto);
     assert_eq!(gov.with_core(|c| c.inflight), 0);
@@ -599,7 +638,8 @@ fn cancelled_waiter_does_not_leak_a_slot() {
     let first = gov.permit();
     let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (g2, c2) = (gov.clone(), cancel.clone());
-    let waiter = std::thread::spawn(move || g2.permit_until(&|| c2.load(Ordering::SeqCst)).is_none());
+    let waiter =
+        std::thread::spawn(move || g2.permit_until(&|| c2.load(Ordering::SeqCst)).is_none());
     std::thread::sleep(Duration::from_millis(10));
     cancel.store(true, Ordering::SeqCst);
     assert!(waiter.join().unwrap());
@@ -627,7 +667,10 @@ fn release_from_another_thread_is_idempotent() {
 #[test]
 fn duty_gate_paces_fractional_intensity() {
     // open loop (no samples): quiet on one worker means about 35 % of the time in flight
-    let gov = IoGovernor::new(DiskRef::new("net:x", DiskKind::Network).with_media(Media::Network), 1);
+    let gov = IoGovernor::new(
+        DiskRef::new("net:x", DiskKind::Network).with_media(Media::Network),
+        1,
+    );
     gov.observe(None, None); // the registry ticks unsampled disks with None
     gov.set_level(Level::Quiet, None);
     assert!((gov.with_core(|c| c.u) - 0.35).abs() < 1e-9);
@@ -662,7 +705,11 @@ impl DiskSampler for FakeSampler {
         let now = monotonic();
         let dt = now - self.last;
         self.last = now;
-        let n = self.gov.lock().as_ref().map_or(0, |g| g.with_core(|c| c.inflight));
+        let n = self
+            .gov
+            .lock()
+            .as_ref()
+            .map_or(0, |g| g.with_core(|c| c.inflight));
         let q = 8.0 * (0.05 + 0.1 * n as f64);
         HashMap::from([(disk().id, DiskSample::new(now, dt, q.min(1.0), q))])
     }
@@ -695,7 +742,11 @@ fn fake_registry(opts: RegistryOptions) -> (IoRegistry, GovSlot, Watched) {
             watched: w.clone(),
         }) as Box<dyn DiskSampler>
     });
-    (IoRegistry::with_sampler(opts, factory, Arc::new(monotonic)), gov_slot, watched)
+    (
+        IoRegistry::with_sampler(opts, factory, Arc::new(monotonic)),
+        gov_slot,
+        watched,
+    )
 }
 
 #[test]
@@ -735,7 +786,10 @@ fn registry_samples_controls_and_pushes() {
     gov.unsubscribe(id);
     assert!(pushes.lock().len() >= 10); // ~20 Hz here (push_interval), 2 Hz in production
     let st = gov.status(true);
-    assert!(st.measured && st.limit == 35.0 && !st.history.is_empty(), "{st:?}");
+    assert!(
+        st.measured && st.limit == 35.0 && !st.history.is_empty(),
+        "{st:?}"
+    );
     assert!(0 < st.concurrency && st.concurrency <= 8);
     let here = tempfile::tempdir().unwrap();
     let other = registry.governor_for_path(here.path()); // real mapping of this machine's disk

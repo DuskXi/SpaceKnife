@@ -73,7 +73,8 @@ impl Slots {
 
     /// A listing that took `took` whose slot goes straight to the next folder: counted only.
     pub fn note(&self, took: Duration) {
-        self.busy_ns.fetch_add(took.as_nanos() as u64, Ordering::Relaxed);
+        self.busy_ns
+            .fetch_add(took.as_nanos() as u64, Ordering::Relaxed);
     }
 
     /// A slot taken a moment ago and not used (its folder could not get the other limit's): back,

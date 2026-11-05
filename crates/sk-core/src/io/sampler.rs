@@ -156,7 +156,12 @@ pub fn pdh_disk_number(instance: &str) -> Option<u32> {
     let t = instance.trim_start();
     let digits: String = t.chars().take_while(char::is_ascii_digit).collect();
     let rest = &t[digits.len()..];
-    if digits.is_empty() || rest.chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+    if digits.is_empty()
+        || rest
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_alphanumeric() || c == '_')
+    {
         return None;
     }
     digits.parse().ok()
@@ -176,12 +181,20 @@ pub fn pdh_instance_letters(instance: &str) -> Vec<String> {
 }
 
 /// Combine formatted PDH arrays (counter key → instance → value) into per-disk samples.
-pub fn pdh_samples(values: &HashMap<String, HashMap<String, f64>>, t: f64, dt: f64) -> HashMap<DiskId, DiskSample> {
+pub fn pdh_samples(
+    values: &HashMap<String, HashMap<String, f64>>,
+    t: f64,
+    dt: f64,
+) -> HashMap<DiskId, DiskSample> {
     let mut out = HashMap::new();
     let get = |key: &str, inst: &str| values.get(key).and_then(|m| m.get(inst)).copied();
-    let Some(idle) = values.get("idle") else { return out };
+    let Some(idle) = values.get("idle") else {
+        return out;
+    };
     for (inst, &idle) in idle {
-        let Some(number) = pdh_disk_number(inst) else { continue };
+        let Some(number) = pdh_disk_number(inst) else {
+            continue;
+        };
         out.insert(
             win_disk_id(number),
             DiskSample {
@@ -231,7 +244,9 @@ mod win {
             // SAFETY: out-pointer.
             let status = unsafe { PdhOpenQueryW(null(), 0, &mut query) };
             if status != 0 {
-                return Err(std::io::Error::other(format!("PdhOpenQueryW failed: 0x{status:08X}")));
+                return Err(std::io::Error::other(format!(
+                    "PdhOpenQueryW failed: 0x{status:08X}"
+                )));
             }
             let mut me = Self {
                 refs: RefSet::default(),
@@ -247,7 +262,9 @@ mod win {
                 if status != 0 {
                     if key == "idle" || key == "queue" {
                         me.close();
-                        return Err(std::io::Error::other(format!("PdhAddEnglishCounterW({path}) failed: 0x{status:08X}")));
+                        return Err(std::io::Error::other(format!(
+                            "PdhAddEnglishCounterW({path}) failed: 0x{status:08X}"
+                        )));
                     }
                     continue; // latency / IOPS / bytes only refine the Q_eff estimate
                 }
@@ -257,7 +274,9 @@ mod win {
             let status = unsafe { PdhCollectQueryData(query) };
             if status != 0 {
                 me.close();
-                return Err(std::io::Error::other(format!("PdhCollectQueryData failed: 0x{status:08X}")));
+                return Err(std::io::Error::other(format!(
+                    "PdhCollectQueryData failed: 0x{status:08X}"
+                )));
             }
             me.last = monotonic();
             Ok(me)
@@ -268,20 +287,33 @@ mod win {
             let (mut size, mut count) = (0u32, 0u32);
             // SAFETY: the size query (null buffer), then a buffer of the size asked for.
             unsafe {
-                let status = PdhGetFormattedCounterArrayW(counter as _, FMT, &mut size, &mut count, std::ptr::null_mut());
+                let status = PdhGetFormattedCounterArrayW(
+                    counter as _,
+                    FMT,
+                    &mut size,
+                    &mut count,
+                    std::ptr::null_mut(),
+                );
                 if status != PDH_MORE_DATA || size == 0 {
                     return out;
                 }
                 let mut buf = vec![0u64; (size as usize).div_ceil(8)];
                 let items = buf.as_mut_ptr() as *mut PDH_FMT_COUNTERVALUE_ITEM_W;
-                if PdhGetFormattedCounterArrayW(counter as _, FMT, &mut size, &mut count, items) != 0 {
+                if PdhGetFormattedCounterArrayW(counter as _, FMT, &mut size, &mut count, items)
+                    != 0
+                {
                     return out;
                 }
                 for i in 0..count as usize {
                     let item = &*items.add(i);
                     // PDH_CSTATUS_VALID_DATA / NEW_DATA
-                    if (item.FmtValue.CStatus == 0 || item.FmtValue.CStatus == 1) && !item.szName.is_null() {
-                        out.insert(from_wide_ptr(item.szName), item.FmtValue.Anonymous.doubleValue);
+                    if (item.FmtValue.CStatus == 0 || item.FmtValue.CStatus == 1)
+                        && !item.szName.is_null()
+                    {
+                        out.insert(
+                            from_wide_ptr(item.szName),
+                            item.FmtValue.Anonymous.doubleValue,
+                        );
                     }
                 }
             }
@@ -291,7 +323,11 @@ mod win {
         fn discover(&mut self, number: u32, instance: &str) {
             let letters = pdh_instance_letters(instance);
             let mount = letters.first().cloned().unwrap_or_default();
-            let media = if mount.is_empty() { Media::Unknown } else { media_of(&mount, mount.trim_end_matches('\\'), false) };
+            let media = if mount.is_empty() {
+                Media::Unknown
+            } else {
+                media_of(&mount, mount.trim_end_matches('\\'), false)
+            };
             self.watch(DiskRef {
                 number: Some(number),
                 media,
@@ -316,8 +352,11 @@ mod win {
             let now = monotonic();
             let dt = now - self.last;
             self.last = now;
-            let values: HashMap<String, HashMap<String, f64>> =
-                self.counters.iter().map(|&(k, h)| (k.to_owned(), self.array(h))).collect();
+            let values: HashMap<String, HashMap<String, f64>> = self
+                .counters
+                .iter()
+                .map(|&(k, h)| (k.to_owned(), self.array(h)))
+                .collect();
             if let Some(idle) = values.get("idle") {
                 for inst in idle.keys() {
                     if let Some(n) = pdh_disk_number(inst)
@@ -371,7 +410,9 @@ mod win {
             };
             me.prev = me.read_all();
             if me.prev.is_empty() {
-                return Err(std::io::Error::other("IOCTL_DISK_PERFORMANCE is not available"));
+                return Err(std::io::Error::other(
+                    "IOCTL_DISK_PERFORMANCE is not available",
+                ));
             }
             Ok(me)
         }
@@ -514,7 +555,10 @@ pub fn parse_linux_stat(text: &str) -> Option<LinuxStat> {
     if fields.len() < 11 {
         return None;
     }
-    let v: Vec<u64> = fields[..11].iter().map(|f| f.parse().ok()).collect::<Option<_>>()?;
+    let v: Vec<u64> = fields[..11]
+        .iter()
+        .map(|f| f.parse().ok())
+        .collect::<Option<_>>()?;
     Some(LinuxStat {
         reads: v[0],
         read_ms: v[3],
@@ -567,14 +611,20 @@ impl SysfsSampler {
             let media = crate::media::media_of("", &format!("/dev/{name}"), false);
             #[cfg(not(all(unix, not(target_os = "macos"))))]
             let media = Media::Unknown;
-            me.watch(DiskRef::physical(name.clone()).with_name(name).with_media(media));
+            me.watch(
+                DiskRef::physical(name.clone())
+                    .with_name(name)
+                    .with_media(media),
+            );
         }
         me.sample();
         me
     }
 
     fn read(&self, name: &str) -> Option<LinuxStat> {
-        parse_linux_stat(&std::fs::read_to_string(self.root.join("block").join(name).join("stat")).ok()?)
+        parse_linux_stat(
+            &std::fs::read_to_string(self.root.join("block").join(name).join("stat")).ok()?,
+        )
     }
 }
 
@@ -638,13 +688,18 @@ fn bsd_name(entry: &serde_json::Value, depth: usize) -> Option<String> {
 /// `ioreg -r -c IOBlockStorageDriver -a` → whole-disk BSD name → cumulative statistics.
 pub fn parse_ioreg(raw: &[u8]) -> HashMap<String, DarwinStat> {
     let mut out = HashMap::new();
-    let Some(entries) = crate::disks::darwin::parse_plist(raw) else { return out };
+    let Some(entries) = crate::disks::darwin::parse_plist(raw) else {
+        return out;
+    };
     let list = match entries {
         serde_json::Value::Array(a) => a,
         other => vec![other],
     };
     for entry in &list {
-        let (Some(stats), Some(name)) = (entry.get("Statistics").filter(|s| s.is_object()), bsd_name(entry, 0)) else {
+        let (Some(stats), Some(name)) = (
+            entry.get("Statistics").filter(|s| s.is_object()),
+            bsd_name(entry, 0),
+        ) else {
             continue;
         };
         let n = |k: &str| stats.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
@@ -663,7 +718,11 @@ pub fn parse_ioreg(raw: &[u8]) -> HashMap<String, DarwinStat> {
 }
 
 pub fn darwin_sample(prev: &DarwinStat, cur: &DarwinStat, dt: f64, t: f64) -> Option<DiskSample> {
-    let (d_ns, d_reads, d_read_ns) = (cur.total_ns - prev.total_ns, cur.reads - prev.reads, cur.read_ns - prev.read_ns);
+    let (d_ns, d_reads, d_read_ns) = (
+        cur.total_ns - prev.total_ns,
+        cur.reads - prev.reads,
+        cur.read_ns - prev.read_ns,
+    );
     if dt <= 0.0 || d_ns < 0 || d_reads < 0 || d_read_ns < 0 {
         return None;
     }
@@ -695,7 +754,9 @@ impl IoregSampler {
             prev: HashMap::new(),
         };
         if Self::read().is_empty() {
-            return Err(std::io::Error::other("ioreg returned no block storage statistics"));
+            return Err(std::io::Error::other(
+                "ioreg returned no block storage statistics",
+            ));
         }
         me.sample();
         Ok(me)
@@ -793,17 +854,24 @@ mod tests {
     #[test]
     fn parse_linux_stat_field_counts() {
         let st = parse_linux_stat(STAT_17).unwrap();
-        assert_eq!(st, LinuxStat {
-            reads: 4136354,
-            read_ms: 470692,
-            writes: 2082300,
-            write_ms: 7927831,
-            sectors_read: 69216064,
-            in_flight: 0,
-            io_ticks: 675528,
-            time_in_queue: 8398529,
-        });
-        let eleven = STAT_17.split_whitespace().take(11).collect::<Vec<_>>().join(" ");
+        assert_eq!(
+            st,
+            LinuxStat {
+                reads: 4136354,
+                read_ms: 470692,
+                writes: 2082300,
+                write_ms: 7927831,
+                sectors_read: 69216064,
+                in_flight: 0,
+                io_ticks: 675528,
+                time_in_queue: 8398529,
+            }
+        );
+        let eleven = STAT_17
+            .split_whitespace()
+            .take(11)
+            .collect::<Vec<_>>()
+            .join(" ");
         assert_eq!(parse_linux_stat(&eleven), Some(st)); // kernels before 4.18
         assert_eq!(parse_linux_stat("1 2 3"), None);
         assert_eq!(parse_linux_stat("a b c d e f g h i j k"), None);
@@ -850,9 +918,15 @@ mod tests {
         assert_eq!(pdh_instance_letters("1 D: e:"), ["D:\\", "E:\\"]);
         let mut values: HashMap<String, HashMap<String, f64>> = HashMap::new();
         let mut put = |k: &str, kv: &[(&str, f64)]| {
-            values.insert(k.into(), kv.iter().map(|(i, v)| (i.to_string(), *v)).collect());
+            values.insert(
+                k.into(),
+                kv.iter().map(|(i, v)| (i.to_string(), *v)).collect(),
+            );
         };
-        put("idle", &[("0 D:", 100.0028), ("3 C:", 40.0), ("_Total", 70.0)]);
+        put(
+            "idle",
+            &[("0 D:", 100.0028), ("3 C:", 40.0), ("_Total", 70.0)],
+        );
         put("queue", &[("0 D:", 0.0), ("3 C:", 2.5), ("_Total", 2.5)]);
         put("latency", &[("3 C:", 0.0001)]);
         put("iops", &[("3 C:", 25000.0)]);
@@ -863,7 +937,10 @@ mod tests {
         assert_eq!(keys, ["PhysicalDrive0", "PhysicalDrive3"]);
         let c = out["PhysicalDrive3"];
         assert!(close(c.busy, 0.6) && c.queue == 2.5 && c.dt == 0.25);
-        assert_eq!((c.read_iops, c.read_latency, c.read_bps), (Some(25000.0), Some(0.0001), Some(25000.0 * 16384.0)));
+        assert_eq!(
+            (c.read_iops, c.read_latency, c.read_bps),
+            (Some(25000.0), Some(0.0001), Some(25000.0 * 16384.0))
+        );
         let d = out["PhysicalDrive0"];
         assert_eq!(d.busy, 0.0); // "% Idle Time" above 100 is clamped
         assert_eq!(d.read_iops, None);
@@ -886,17 +963,25 @@ mod tests {
     #[test]
     fn disk_performance_counters() {
         let p0 = parse_disk_performance(&perf_raw([0; 5], [0; 4], 1_000_000)).unwrap();
-        let p1 = parse_disk_performance(&perf_raw([100 * 4096, 0, 2_000_000, 500_000, 2_500_000], [100, 10, 2, 0], 6_000_000)).unwrap();
-        assert_eq!(p1, DiskPerf {
-            bytes_read: 100 * 4096,
-            bytes_written: 0,
-            read_time: 2_000_000,
-            write_time: 500_000,
-            idle_time: 2_500_000,
-            reads: 100,
-            writes: 10,
-            query_time: 6_000_000,
-        });
+        let p1 = parse_disk_performance(&perf_raw(
+            [100 * 4096, 0, 2_000_000, 500_000, 2_500_000],
+            [100, 10, 2, 0],
+            6_000_000,
+        ))
+        .unwrap();
+        assert_eq!(
+            p1,
+            DiskPerf {
+                bytes_read: 100 * 4096,
+                bytes_written: 0,
+                read_time: 2_000_000,
+                write_time: 500_000,
+                idle_time: 2_500_000,
+                reads: 100,
+                writes: 10,
+                query_time: 6_000_000,
+            }
+        );
         let s = perf_sample(&p0, &p1, 1.0).unwrap();
         assert!(close(s.dt, 0.5)); // 5e6 × 100 ns
         assert!(close(s.busy, 0.5));
@@ -922,21 +1007,33 @@ mod tests {
             let mut e = plist::Dictionary::new();
             e.insert("IOObjectClass".into(), "IOBlockStorageDriver".into());
             e.insert("Statistics".into(), plist::Value::Dictionary(stats));
-            e.insert("IORegistryEntryChildren".into(), plist::Value::Array(vec![plist::Value::Dictionary(child)]));
+            e.insert(
+                "IORegistryEntryChildren".into(),
+                plist::Value::Array(vec![plist::Value::Dictionary(child)]),
+            );
             plist::Value::Dictionary(e)
         };
         let mut no_stats = plist::Dictionary::new();
         no_stats.insert("no".into(), "stats".into());
-        let doc = plist::Value::Array(vec![entry("disk0", 1000, 2_000_000_000, 0), plist::Value::Dictionary(no_stats)]);
+        let doc = plist::Value::Array(vec![
+            entry("disk0", 1000, 2_000_000_000, 0),
+            plist::Value::Dictionary(no_stats),
+        ]);
         let mut raw = Vec::new();
         doc.to_writer_xml(&mut raw).unwrap();
         let stats = parse_ioreg(&raw);
-        assert_eq!(stats, HashMap::from([("disk0".to_owned(), DarwinStat {
-            total_ns: 2_000_000_000,
-            reads: 1000,
-            read_ns: 2_000_000_000,
-            read_bytes: 4_096_000
-        })]));
+        assert_eq!(
+            stats,
+            HashMap::from([(
+                "disk0".to_owned(),
+                DarwinStat {
+                    total_ns: 2_000_000_000,
+                    reads: 1000,
+                    read_ns: 2_000_000_000,
+                    read_bytes: 4_096_000
+                }
+            )])
+        );
         let later = DarwinStat {
             total_ns: 2_500_000_000,
             reads: 2000,
@@ -958,14 +1055,32 @@ mod tests {
         std::fs::write(d.join("stat"), STAT_17).unwrap();
         assert_eq!(linux_physical_disks(tmp.path()), ["sda"]);
         let mut sampler = SysfsSampler::new(tmp.path());
-        assert_eq!(sampler.refs().iter().map(|r| r.id.clone()).collect::<Vec<_>>(), ["sda"]);
-        let mut fields: Vec<u64> = STAT_17.split_whitespace().map(|f| f.parse().unwrap()).collect();
+        assert_eq!(
+            sampler
+                .refs()
+                .iter()
+                .map(|r| r.id.clone())
+                .collect::<Vec<_>>(),
+            ["sda"]
+        );
+        let mut fields: Vec<u64> = STAT_17
+            .split_whitespace()
+            .map(|f| f.parse().unwrap())
+            .collect();
         fields[0] += 500; // reads
         fields[3] += 50; // read ms
         fields[9] += 100; // io_ticks
         fields[10] += 300; // time_in_queue
         std::thread::sleep(std::time::Duration::from_millis(200));
-        std::fs::write(d.join("stat"), fields.iter().map(u64::to_string).collect::<Vec<_>>().join(" ")).unwrap();
+        std::fs::write(
+            d.join("stat"),
+            fields
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+        )
+        .unwrap();
         let out = sampler.sample();
         let s = out["sda"];
         assert!(0.0 < s.busy && s.busy <= 1.0 && s.queue > s.busy, "{s:?}");
@@ -985,8 +1100,13 @@ mod tests {
         if disk.starts_with("vol:") {
             return; // e.g. an overlay root in a container
         }
-        let s = out.get(&disk).unwrap_or_else(|| panic!("{disk} not in {:?}", out.keys().collect::<Vec<_>>()));
-        assert!((0.0..=1.0).contains(&s.busy) && s.queue >= 0.0 && 0.2 < s.dt && s.dt < 2.0, "{s:?}");
+        let s = out
+            .get(&disk)
+            .unwrap_or_else(|| panic!("{disk} not in {:?}", out.keys().collect::<Vec<_>>()));
+        assert!(
+            (0.0..=1.0).contains(&s.busy) && s.queue >= 0.0 && 0.2 < s.dt && s.dt < 2.0,
+            "{s:?}"
+        );
     }
 
     #[cfg(windows)]
@@ -996,6 +1116,10 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(200));
         let out = sampler.sample();
         let disk = super::super::disks::disk_ref_for_path(&std::env::current_dir().unwrap()).id;
-        assert!(out.contains_key(&disk), "{disk}: {:?}", out.keys().collect::<Vec<_>>());
+        assert!(
+            out.contains_key(&disk),
+            "{disk}: {:?}",
+            out.keys().collect::<Vec<_>>()
+        );
     }
 }

@@ -51,7 +51,15 @@ pub struct Change {
 
 impl Change {
     pub fn new(kind: ChangeKind, path: impl Into<PathBuf>, is_dir: Option<bool>) -> Change {
-        Change { kind, path: path.into(), old_path: None, is_dir, size: None, alloc: None, mtime: None }
+        Change {
+            kind,
+            path: path.into(),
+            old_path: None,
+            is_dir,
+            size: None,
+            alloc: None,
+            mtime: None,
+        }
     }
 
     pub fn overflow(path: impl Into<PathBuf>) -> Change {
@@ -59,7 +67,10 @@ impl Change {
     }
 
     pub fn renamed(new: impl Into<PathBuf>, old: Option<PathBuf>, is_dir: Option<bool>) -> Change {
-        Change { old_path: old, ..Change::new(ChangeKind::Renamed, new, is_dir) }
+        Change {
+            old_path: old,
+            ..Change::new(ChangeKind::Renamed, new, is_dir)
+        }
     }
 
     /// A file whose numbers changed.
@@ -99,7 +110,14 @@ pub struct WatchStatus {
 
 impl WatchStatus {
     pub fn new(state: WatchState, detail: impl Into<String>) -> WatchStatus {
-        WatchStatus { state, detail: detail.into(), watched_dirs: 0, polled_dirs: 0, overflows: 0, events: 0 }
+        WatchStatus {
+            state,
+            detail: detail.into(),
+            watched_dirs: 0,
+            polled_dirs: 0,
+            overflows: 0,
+            events: 0,
+        }
     }
 }
 
@@ -139,7 +157,12 @@ pub fn create_watcher(root: &Path, poll_interval: f64, poll_rate: u32) -> Box<dy
     }
     #[cfg(target_os = "linux")]
     {
-        Box::new(linux::InotifyWatcher::new(root, poll_interval, poll_rate, None))
+        Box::new(linux::InotifyWatcher::new(
+            root,
+            poll_interval,
+            poll_rate,
+            None,
+        ))
     }
     #[cfg(target_os = "macos")]
     {

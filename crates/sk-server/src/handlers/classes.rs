@@ -6,10 +6,12 @@ use std::sync::Arc;
 use sk_core::classes::{self, ClassTable};
 use sk_core::{pathclass, tr};
 use sk_protocol::classes::{ClassFolder, ClassesEvent, ClassesState};
-use sk_protocol::methods::{ClassesChanged, ClassesFolder, ClassesGet, ClassesReset, ClassesUpdate};
+use sk_protocol::methods::{
+    ClassesChanged, ClassesFolder, ClassesGet, ClassesReset, ClassesUpdate,
+};
 
 use crate::app::Server;
-use crate::rpc::{RpcError, RpcResult, Router};
+use crate::rpc::{Router, RpcError, RpcResult};
 use crate::topics::TopicRegistry;
 
 /// The table as the interface shows it: built-in names in the current language (M7.5).
@@ -19,7 +21,10 @@ pub fn state() -> ClassesState {
         classes: classes::shown(&table),
         defaults: classes::shown(&ClassTable::builtin()),
         custom: table.custom(),
-        folders: pathclass::folders().into_iter().map(|(path, class_id)| ClassFolder { path, class_id }).collect(),
+        folders: pathclass::folders()
+            .into_iter()
+            .map(|(path, class_id)| ClassFolder { path, class_id })
+            .collect(),
     }
 }
 
@@ -68,7 +73,10 @@ pub fn install(r: &mut Router, _t: &mut TopicRegistry) {
             && !cid.is_empty()
             && classes::active().by_id(cid).is_none()
         {
-            return Err(RpcError::invalid_params(tr!("没有 id 为「{cid}」的类别", cid = cid)));
+            return Err(RpcError::invalid_params(tr!(
+                "没有 id 为「{cid}」的类别",
+                cid = cid
+            )));
         }
         pathclass::set_folder(&p.path, p.class_id.as_deref());
         apply_folders(&call.server).await

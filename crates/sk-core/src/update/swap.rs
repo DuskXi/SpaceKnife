@@ -83,21 +83,39 @@ impl Plan {
         .ok_or_else(|| bad("pid is not a process id"))?;
         let keep = match raw.get("keep") {
             None | Some(Value::Null) => vec!["data".to_owned()],
-            Some(Value::Array(a)) => {
-                a.iter().map(|k| k.as_str().map_or_else(|| k.to_string(), str::to_owned)).collect()
-            }
+            Some(Value::Array(a)) => a
+                .iter()
+                .map(|k| k.as_str().map_or_else(|| k.to_string(), str::to_owned))
+                .collect(),
             Some(_) => return Err(bad("keep is not a list")),
         };
-        let plan = Plan { pid, app: p("app")?, new: p("new")?, old: p("old")?, exe: p("exe")?, log: p("log")?, keep };
+        let plan = Plan {
+            pid,
+            app: p("app")?,
+            new: p("new")?,
+            old: p("old")?,
+            exe: p("exe")?,
+            log: p("log")?,
+            keep,
+        };
         plan.check()?;
         Ok(plan)
     }
 
     /// The new version must be complete before anything is moved.
     pub fn check(&self) -> Result<(), PlanError> {
-        for (name, p) in [("app", &self.app), ("new", &self.new), ("old", &self.old), ("exe", &self.exe), ("log", &self.log)] {
+        for (name, p) in [
+            ("app", &self.app),
+            ("new", &self.new),
+            ("old", &self.old),
+            ("exe", &self.exe),
+            ("log", &self.log),
+        ] {
             if !p.is_absolute() {
-                return Err(PlanError(format!("{name} is not an absolute path: {}", p.display())));
+                return Err(PlanError(format!(
+                    "{name} is not an absolute path: {}",
+                    p.display()
+                )));
             }
         }
         if !self.app.is_dir() {
@@ -105,7 +123,11 @@ impl Plan {
         }
         // the executable is in the app folder: directly, or in the app bundle there (macOS)
         let Some(inside) = within(&self.app, &self.exe) else {
-            return Err(PlanError(format!("{} is not in {}", self.exe.display(), self.app.display())));
+            return Err(PlanError(format!(
+                "{} is not in {}",
+                self.exe.display(),
+                self.app.display()
+            )));
         };
         if !self.new.join(&inside).is_file() {
             return Err(PlanError(format!(
@@ -115,7 +137,9 @@ impl Plan {
             )));
         }
         if same(&self.new, &self.app) || same(&self.old, &self.app) {
-            return Err(PlanError("the new and the old folder must not be the app's folder".into()));
+            return Err(PlanError(
+                "the new and the old folder must not be the app's folder".into(),
+            ));
         }
         if self.old.exists() && std::fs::read_dir(&self.old).is_ok_and(|mut d| d.next().is_some()) {
             return Err(PlanError(format!("{} is not empty", self.old.display())));
@@ -128,7 +152,11 @@ fn normcase(p: &Path) -> String {
     let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_owned());
     let s = abs.to_string_lossy().into_owned();
     let s = s.trim_end_matches(['/', '\\']).to_owned();
-    if cfg!(windows) { s.replace('/', "\\").to_lowercase() } else { s }
+    if cfg!(windows) {
+        s.replace('/', "\\").to_lowercase()
+    } else {
+        s
+    }
 }
 
 fn same(a: &Path, b: &Path) -> bool {
@@ -150,7 +178,11 @@ fn within(folder: &Path, file: &Path) -> Option<PathBuf> {
 }
 
 fn name_case(name: &str) -> String {
-    if cfg!(windows) { name.to_lowercase() } else { name.to_owned() }
+    if cfg!(windows) {
+        name.to_lowercase()
+    } else {
+        name.to_owned()
+    }
 }
 
 /// One timestamped line per step in the plan's log file (never fails).
@@ -161,15 +193,24 @@ pub struct Log {
 
 impl Log {
     pub fn new(path: &Path) -> Log {
-        Log { path: path.to_owned() }
+        Log {
+            path: path.to_owned(),
+        }
     }
 
     pub fn say(&self, message: &str) {
-        let line = format!("{} {message}\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S"));
+        let line = format!(
+            "{} {message}\n",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S")
+        );
         if let Some(parent) = self.path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&self.path) {
+        if let Ok(mut f) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&self.path)
+        {
             let _ = f.write_all(line.as_bytes());
         }
     }
@@ -182,7 +223,9 @@ pub fn wait_gone(pid: u32, timeout: Duration) -> bool {
     #[cfg(windows)]
     {
         use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+        };
         // SAFETY: plain Win32 calls on a handle we own and close.
         unsafe {
             let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
@@ -254,7 +297,13 @@ pub fn entries(folder: &Path, keep: &[String]) -> io::Result<Vec<PathBuf>> {
 
 /// Move `src`'s entries (except `keep`) into `dst`, trying again while one is held. On failure
 /// what was moved goes back, and the error is returned.
-pub fn move_out(src: &Path, dst: &Path, keep: &[String], log: &Log, timeout: Duration) -> io::Result<()> {
+pub fn move_out(
+    src: &Path,
+    dst: &Path,
+    keep: &[String],
+    log: &Log,
+    timeout: Duration,
+) -> io::Result<()> {
     move_out_with(src, dst, keep, log, timeout, &fs_rename)
 }
 
@@ -319,20 +368,33 @@ pub fn place_with(src: &Path, dst: &Path, rename: Rename<'_>) -> io::Result<()> 
             #[cfg(windows)]
             return std::os::windows::fs::symlink_file(target, dst);
             #[cfg(not(any(unix, windows)))]
-            return Err(io::Error::other(format!("cannot copy the link {}", target.display())));
+            return Err(io::Error::other(format!(
+                "cannot copy the link {}",
+                target.display()
+            )));
         }
         std::fs::copy(src, dst)?;
         if let Ok(m) = meta.modified() {
-            let _ = std::fs::File::options().write(true).open(dst).and_then(|f| f.set_modified(m));
+            let _ = std::fs::File::options()
+                .write(true)
+                .open(dst)
+                .and_then(|f| f.set_modified(m));
         }
         return Ok(());
     }
     std::fs::create_dir(dst)?;
     let _ = std::fs::set_permissions(dst, meta.permissions());
-    let mut children: Vec<PathBuf> = std::fs::read_dir(src)?.filter_map(Result::ok).map(|e| e.path()).collect();
+    let mut children: Vec<PathBuf> = std::fs::read_dir(src)?
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .collect();
     children.sort();
     for child in children {
-        place_with(&child, &dst.join(child.file_name().unwrap_or_default()), rename)?;
+        place_with(
+            &child,
+            &dst.join(child.file_name().unwrap_or_default()),
+            rename,
+        )?;
     }
     let _ = std::fs::remove_dir(src); // stays when something in it had to be copied
     Ok(())
@@ -340,10 +402,16 @@ pub fn place_with(src: &Path, dst: &Path, rename: Rename<'_>) -> io::Result<()> 
 
 /// Remove `folder`'s entries except `keep` (taking out new files that only partly arrived).
 pub fn clear(folder: &Path, keep: &[String], log: &Log) {
-    let Ok(list) = entries(folder, keep) else { return };
+    let Ok(list) = entries(folder, keep) else {
+        return;
+    };
     for entry in list {
         let is_dir = std::fs::symlink_metadata(&entry).is_ok_and(|m| m.is_dir());
-        let r = if is_dir { std::fs::remove_dir_all(&entry) } else { std::fs::remove_file(&entry) };
+        let r = if is_dir {
+            std::fs::remove_dir_all(&entry)
+        } else {
+            std::fs::remove_file(&entry)
+        };
         if let Err(e) = r {
             log.say(&format!(
                 "could not take out {}: {e}",
@@ -400,7 +468,11 @@ pub fn launch(exe: &Path, args: &[&str]) -> io::Result<()> {
         const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
         let flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
         // out of any job this process is in, so that closing it doesn't end the app
-        if make().creation_flags(flags | CREATE_BREAKAWAY_FROM_JOB).spawn().is_ok() {
+        if make()
+            .creation_flags(flags | CREATE_BREAKAWAY_FROM_JOB)
+            .spawn()
+            .is_ok()
+        {
             return Ok(());
         }
         make().creation_flags(flags).spawn().map(drop) // a job that doesn't allow it
@@ -435,7 +507,15 @@ pub struct Ops<'a> {
 
 /// Steps 2-5; 0 when the new version is in place.
 pub fn run(plan: &Plan, log: &Log) -> i32 {
-    run_with(plan, log, &Ops { wait: &wait_gone, start: &launch, place: &place })
+    run_with(
+        plan,
+        log,
+        &Ops {
+            wait: &wait_gone,
+            start: &launch,
+            place: &place,
+        },
+    )
 }
 
 pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
@@ -450,7 +530,10 @@ pub fn run_with(plan: &Plan, log: &Log, ops: &Ops<'_>) -> i32 {
     }
     let placed = (|| {
         for entry in entries(&plan.new, &plan.keep)? {
-            (ops.place)(&entry, &plan.app.join(entry.file_name().unwrap_or_default()))?;
+            (ops.place)(
+                &entry,
+                &plan.app.join(entry.file_name().unwrap_or_default()),
+            )?;
         }
         Ok::<(), io::Error>(())
     })();
@@ -509,7 +592,10 @@ pub fn main(argv: &[String]) -> i32 {
 /// [`main`] writing its one line to `out` (`release`: let go of the stdio afterwards).
 pub fn main_with(argv: &[String], out: &mut dyn Write, release: bool) -> i32 {
     let [plan_path] = argv else {
-        say(out, &serde_json::json!({"ok": false, "error": "usage: --apply-update <plan.json>"}));
+        say(
+            out,
+            &serde_json::json!({"ok": false, "error": "usage: --apply-update <plan.json>"}),
+        );
         return 2;
     };
     let plan_path = Path::new(plan_path);
@@ -517,7 +603,10 @@ pub fn main_with(argv: &[String], out: &mut dyn Write, release: bool) -> i32 {
         Ok(p) => p,
         Err(e) => {
             Log::new(&plan_path.with_extension("log")).say(&format!("not started: {e}"));
-            say(out, &serde_json::json!({"ok": false, "error": e.to_string()}));
+            say(
+                out,
+                &serde_json::json!({"ok": false, "error": e.to_string()}),
+            );
             return 2;
         }
     };
@@ -533,7 +622,11 @@ mod tests {
     use super::*;
     use std::cell::RefCell;
 
-    const EXE: &str = if cfg!(windows) { "SpaceKnife.exe" } else { "spaceknife" };
+    const EXE: &str = if cfg!(windows) {
+        "SpaceKnife.exe"
+    } else {
+        "spaceknife"
+    };
 
     fn write(p: &Path, text: &str) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -548,11 +641,16 @@ mod tests {
     fn tree(root: &Path) -> Plan {
         let app = root.join("SpaceKnife-0.3.3-portable");
         let updates = app.join("data").join("data").join("updates");
-        let new = updates.join("staging-0.3.4").join("SpaceKnife-0.3.4-portable");
+        let new = updates
+            .join("staging-0.3.4")
+            .join("SpaceKnife-0.3.4-portable");
         for (folder, version) in [(&app, "0.3.3"), (&new, "0.3.4")] {
             write(&folder.join(EXE), version);
             write(&folder.join("resources/app.asar"), version);
-            write(&folder.join("resources/backend/_internal/python312.dll"), version);
+            write(
+                &folder.join("resources/backend/_internal/python312.dll"),
+                version,
+            );
             std::fs::create_dir_all(folder.join("data")).unwrap();
         }
         write(&app.join(".hidden"), "old");
@@ -584,12 +682,17 @@ mod tests {
     }
 
     fn log_lines(plan: &Plan) -> Vec<String> {
-        read(&plan.log).lines().map(|l| l.splitn(3, ' ').nth(2).unwrap_or("").to_owned()).collect()
+        read(&plan.log)
+            .lines()
+            .map(|l| l.splitn(3, ' ').nth(2).unwrap_or("").to_owned())
+            .collect()
     }
 
     fn names(dir: &Path) -> Vec<String> {
-        let mut v: Vec<String> =
-            std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        let mut v: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
         v.sort();
         v
     }
@@ -604,15 +707,34 @@ mod tests {
             (("v", Value::from(2)), "version 1"),
             (("pid", Value::from("x")), "pid"),
             (("new", Value::from("relative/new")), "absolute"),
-            (("exe", Value::from(tmp.path().join(EXE).to_string_lossy().into_owned())), "is not in"),
-            (("new", Value::from(plan.app.to_string_lossy().into_owned())), "must not be"),
+            (
+                (
+                    "exe",
+                    Value::from(tmp.path().join(EXE).to_string_lossy().into_owned()),
+                ),
+                "is not in",
+            ),
+            (
+                ("new", Value::from(plan.app.to_string_lossy().into_owned())),
+                "must not be",
+            ),
         ] {
             let err = Plan::read(&write_plan(&plan, &file, &[change])).unwrap_err();
             assert!(err.0.contains(says), "{err} / {says}");
         }
         std::fs::remove_file(plan.new.join(EXE)).unwrap();
-        assert!(Plan::read(&write_plan(&plan, &file, &[])).unwrap_err().0.contains("incomplete"));
-        assert!(Plan::read(&tmp.path().join("missing.json")).unwrap_err().0.contains("can't read"));
+        assert!(
+            Plan::read(&write_plan(&plan, &file, &[]))
+                .unwrap_err()
+                .0
+                .contains("incomplete")
+        );
+        assert!(
+            Plan::read(&tmp.path().join("missing.json"))
+                .unwrap_err()
+                .0
+                .contains("can't read")
+        );
     }
 
     #[test]
@@ -631,12 +753,29 @@ mod tests {
             started.borrow_mut().push(v);
             Ok(())
         };
-        let code = run_with(&plan, &Log::new(&plan.log), &Ops { wait: &wait, start: &start, place: &place });
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &wait,
+                start: &start,
+                place: &place,
+            },
+        );
         assert_eq!(code, 0);
         assert_eq!(*waited.borrow(), [4242]);
-        assert_eq!(*started.borrow(), [vec![plan.exe.to_string_lossy().into_owned(), "--updated".into()]]);
+        assert_eq!(
+            *started.borrow(),
+            [vec![
+                plan.exe.to_string_lossy().into_owned(),
+                "--updated".into()
+            ]]
+        );
         assert_eq!(read(&plan.app.join(EXE)), "0.3.4");
-        assert_eq!(read(&plan.app.join("resources/backend/_internal/python312.dll")), "0.3.4");
+        assert_eq!(
+            read(&plan.app.join("resources/backend/_internal/python312.dll")),
+            "0.3.4"
+        );
         assert!(plan.app.join("E2E_NEW_BUILD.txt").is_file());
         assert!(!plan.app.join(".hidden").exists());
         assert_eq!(names(&plan.app.join("data")), ["data", "keep.txt"]);
@@ -644,7 +783,10 @@ mod tests {
         want.sort();
         assert_eq!(names(&plan.old), want);
         assert_eq!(read(&plan.old.join(EXE)), "0.3.3");
-        assert_eq!(log_lines(&plan), ["waiting for SpaceKnife (4242) to quit", "updated"]);
+        assert_eq!(
+            log_lines(&plan),
+            ["waiting for SpaceKnife (4242) to quit", "updated"]
+        );
     }
 
     #[test]
@@ -656,11 +798,22 @@ mod tests {
             *started.borrow_mut() += 1;
             Ok(())
         };
-        let code = run_with(&plan, &Log::new(&plan.log), &Ops { wait: &|_, _| false, start: &start, place: &place });
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &|_, _| false,
+                start: &start,
+                place: &place,
+            },
+        );
         assert_eq!(code, 1);
         assert_eq!(*started.borrow(), 0);
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
-        assert_eq!(log_lines(&plan).last().unwrap(), "SpaceKnife did not quit: kept the old version");
+        assert_eq!(
+            log_lines(&plan).last().unwrap(),
+            "SpaceKnife did not quit: kept the old version"
+        );
     }
 
     #[test]
@@ -678,7 +831,15 @@ mod tests {
             started.borrow_mut().push(args.len());
             Ok(())
         };
-        let code = run_with(&plan, &Log::new(&plan.log), &Ops { wait: &|_, _| true, start: &start, place: &failing });
+        let code = run_with(
+            &plan,
+            &Log::new(&plan.log),
+            &Ops {
+                wait: &|_, _| true,
+                start: &start,
+                place: &failing,
+            },
+        );
         assert_eq!(code, 1);
         assert_eq!(*started.borrow(), [0]); // the old version, without --updated
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
@@ -687,7 +848,13 @@ mod tests {
         assert!(!plan.app.join("E2E_NEW_BUILD.txt").exists());
         assert!(plan.app.join("data/keep.txt").is_file());
         let lines = log_lines(&plan);
-        assert_eq!(lines[lines.len() - 2..], ["could not move the new files in: disk full", "kept the old version"]);
+        assert_eq!(
+            lines[lines.len() - 2..],
+            [
+                "could not move the new files in: disk full",
+                "kept the old version"
+            ]
+        );
     }
 
     #[test]
@@ -696,17 +863,31 @@ mod tests {
         let plan = tree(tmp.path());
         let held = RefCell::new(0);
         let rename = |src: &Path, dst: &Path| {
-            if src.file_name().is_some_and(|n| n == "resources") && src.parent() == Some(plan.app.as_path()) {
+            if src.file_name().is_some_and(|n| n == "resources")
+                && src.parent() == Some(plan.app.as_path())
+            {
                 *held.borrow_mut() += 1;
                 return Err(io::Error::new(io::ErrorKind::PermissionDenied, "in use"));
             }
             std::fs::rename(src, dst)
         };
         let log = Log::new(&plan.log);
-        let err = move_out_with(&plan.app, &plan.old, &plan.keep, &log, Duration::from_millis(600), &rename);
+        let err = move_out_with(
+            &plan.app,
+            &plan.old,
+            &plan.keep,
+            &log,
+            Duration::from_millis(600),
+            &rename,
+        );
         assert!(err.is_err());
         assert!(*held.borrow() >= 2); // tried again
-        let mut want = vec![".hidden".to_owned(), EXE.to_owned(), "data".to_owned(), "resources".to_owned()];
+        let mut want = vec![
+            ".hidden".to_owned(),
+            EXE.to_owned(),
+            "data".to_owned(),
+            "resources".to_owned(),
+        ];
         want.sort();
         assert_eq!(names(&plan.app), want);
         assert!(names(&plan.old).is_empty());
@@ -727,7 +908,10 @@ mod tests {
         let target = tmp.path().join("placed");
         place_with(&plan.new.join("resources"), &target, &rename).unwrap();
         assert_eq!(read(&target.join("app.asar")), "0.3.4");
-        assert_eq!(read(&target.join("backend/_internal/python312.dll")), "0.3.4");
+        assert_eq!(
+            read(&target.join("backend/_internal/python312.dll")),
+            "0.3.4"
+        );
         assert!(held.is_file()); // copied: the original stays
         assert!(!plan.new.join("resources/app.asar").exists()); // moved
     }
@@ -736,7 +920,10 @@ mod tests {
     fn the_executable_may_be_inside_an_app_bundle_in_the_folder() {
         let tmp = tempfile::tempdir().unwrap();
         let mut plan = tree(tmp.path());
-        let inner = Path::new("SpaceKnife.app").join("Contents").join("MacOS").join("spaceknife");
+        let inner = Path::new("SpaceKnife.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("spaceknife");
         write(&plan.app.join(&inner), "0.3.3");
         plan.exe = plan.app.join(&inner);
         // the new version must have it at the same place
@@ -751,13 +938,22 @@ mod tests {
     #[test]
     fn waiting_for_a_process() {
         #[cfg(windows)]
-        let (quick, slow) = (("cmd", vec!["/C", "exit 0"]), ("cmd", vec!["/C", "ping -n 30 127.0.0.1 >NUL"]));
+        let (quick, slow) = (
+            ("cmd", vec!["/C", "exit 0"]),
+            ("cmd", vec!["/C", "ping -n 30 127.0.0.1 >NUL"]),
+        );
         #[cfg(not(windows))]
         let (quick, slow) = (("true", Vec::<&str>::new()), ("sleep", vec!["30"]));
-        let mut done = std::process::Command::new(quick.0).args(&quick.1).spawn().unwrap();
+        let mut done = std::process::Command::new(quick.0)
+            .args(&quick.1)
+            .spawn()
+            .unwrap();
         done.wait().unwrap();
         assert!(wait_gone(done.id(), Duration::from_secs(1)));
-        let mut running = std::process::Command::new(slow.0).args(&slow.1).spawn().unwrap();
+        let mut running = std::process::Command::new(slow.0)
+            .args(&slow.1)
+            .spawn()
+            .unwrap();
         assert!(!wait_gone(running.id(), Duration::from_millis(300)));
         running.kill().unwrap();
         running.wait().unwrap();
@@ -769,7 +965,10 @@ mod tests {
             ("PATH", "/usr/bin"),
             ("_PYI_ARCHIVE_FILE", "x"),
             ("_PYI_PARENT_PROCESS_LEVEL", "1"),
-            ("LD_LIBRARY_PATH", "/opt/sk/resources/backend/_internal:/usr/lib/x"),
+            (
+                "LD_LIBRARY_PATH",
+                "/opt/sk/resources/backend/_internal:/usr/lib/x",
+            ),
             ("LD_LIBRARY_PATH_ORIG", "/usr/lib/x"),
             ("DYLD_LIBRARY_PATH", "/opt/sk/resources/backend/_internal"),
         ]
@@ -778,9 +977,13 @@ mod tests {
         .collect();
         let got = launch_env(&env, Some("/opt/sk/resources/backend/_internal"));
         let want: BTreeMap<String, String> =
-            [("PATH", "/usr/bin"), ("LD_LIBRARY_PATH", "/usr/lib/x")].into_iter().map(|(k, v)| (k.into(), v.into())).collect();
+            [("PATH", "/usr/bin"), ("LD_LIBRARY_PATH", "/usr/lib/x")]
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect();
         assert_eq!(got, want);
-        let mine: BTreeMap<String, String> = [("LD_LIBRARY_PATH".to_owned(), "/usr/lib/mine".to_owned())].into();
+        let mine: BTreeMap<String, String> =
+            [("LD_LIBRARY_PATH".to_owned(), "/usr/lib/mine".to_owned())].into();
         assert_eq!(launch_env(&mine, Some("/opt/sk")), mine);
     }
 
@@ -791,11 +994,17 @@ mod tests {
         std::fs::remove_file(plan.new.join(EXE)).unwrap();
         let file = write_plan(&plan, &tmp.path().join("update-0.3.4.json"), &[]);
         let mut out = Vec::new();
-        assert_eq!(main_with(&[file.to_string_lossy().into_owned()], &mut out, false), 2);
+        assert_eq!(
+            main_with(&[file.to_string_lossy().into_owned()], &mut out, false),
+            2
+        );
         let said: Value = serde_json::from_slice(&out).unwrap();
         assert_eq!(said["ok"], false);
         assert!(said["error"].as_str().unwrap().contains("incomplete"));
-        assert!(read(&tmp.path().join("update-0.3.4.log")).contains("not started: the new version is incomplete"));
+        assert!(
+            read(&tmp.path().join("update-0.3.4.log"))
+                .contains("not started: the new version is incomplete")
+        );
         assert_eq!(read(&plan.app.join(EXE)), "0.3.3");
         assert_eq!(main_with(&[], &mut Vec::new(), false), 2);
     }

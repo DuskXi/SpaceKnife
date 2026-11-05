@@ -8,7 +8,8 @@ use serde_json::Value;
 use sk_protocol::{CloseCode, ErrorCode, PROTOCOL_VERSION};
 use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
-type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+type Ws =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
 async fn recv_json(ws: &mut Ws) -> Value {
     loop {
@@ -24,7 +25,10 @@ async fn recv_json(ws: &mut Ws) -> Value {
 /// The close code the server sends next.
 async fn close_code(ws: &mut Ws) -> Option<u16> {
     loop {
-        match tokio::time::timeout(std::time::Duration::from_secs(5), ws.next()).await.expect("closed in time") {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+            .await
+            .expect("closed in time")
+        {
             Some(Ok(Message::Close(c))) => return c.map(|c| c.code.into()),
             Some(Ok(_)) => continue,
             _ => return None,
@@ -39,13 +43,24 @@ fn caps(c: &[&str]) -> Vec<String> {
 #[tokio::test]
 async fn successful_hello_negotiates_capabilities() {
     let srv = server().await;
-    let c = Client::open_with(&srv.url, TOKEN, caps(&["subscriptions", "made-up"]), None).await.unwrap();
+    let c = Client::open_with(&srv.url, TOKEN, caps(&["subscriptions", "made-up"]), None)
+        .await
+        .unwrap();
     assert_eq!(c.hello["protocol"], PROTOCOL_VERSION);
-    assert_eq!(c.hello["capabilities"], serde_json::json!(["subscriptions"]));
+    assert_eq!(
+        c.hello["capabilities"],
+        serde_json::json!(["subscriptions"])
+    );
     assert_eq!(c.hello["schema_hash"], sk_protocol::schema::schema_hash());
     assert!(!c.hello["session_id"].as_str().unwrap().is_empty());
     assert!(!c.hello["server"]["rust"].as_str().unwrap().is_empty());
-    let caps_all: Vec<&str> = srv.server.config.capabilities.iter().map(String::as_str).collect();
+    let caps_all: Vec<&str> = srv
+        .server
+        .config
+        .capabilities
+        .iter()
+        .map(String::as_str)
+        .collect();
     assert_eq!(caps_all, sk_protocol::ALL_CAPABILITIES.to_vec());
     c.close().await;
 }
@@ -54,18 +69,29 @@ async fn successful_hello_negotiates_capabilities() {
 async fn wrong_token_is_rejected_with_4401() {
     let srv = server().await;
     let mut ws = raw(&srv.url, None, true).await.unwrap();
-    ws.send(Message::text(hello_frame(&"x".repeat(32), PROTOCOL_VERSION, 0, &caps(&["subscriptions"]))))
-        .await
-        .unwrap();
+    ws.send(Message::text(hello_frame(
+        &"x".repeat(32),
+        PROTOCOL_VERSION,
+        0,
+        &caps(&["subscriptions"]),
+    )))
+    .await
+    .unwrap();
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["error"]["code"], ErrorCode::Unauthorized.code());
-    assert_eq!(close_code(&mut ws).await, Some(CloseCode::Unauthorized.code()));
+    assert_eq!(
+        close_code(&mut ws).await,
+        Some(CloseCode::Unauthorized.code())
+    );
 }
 
 #[tokio::test]
 async fn client_sees_remote_error_on_bad_token() {
     let srv = server().await;
-    let e = Client::open_with(&srv.url, &"y".repeat(32), all_caps(), None).await.err().unwrap();
+    let e = Client::open_with(&srv.url, &"y".repeat(32), all_caps(), None)
+        .await
+        .err()
+        .unwrap();
     assert_eq!(e.code, i64::from(ErrorCode::Unauthorized.code()));
 }
 
@@ -73,50 +99,85 @@ async fn client_sees_remote_error_on_bad_token() {
 async fn missing_hello_times_out_with_4408() {
     let srv = server().await;
     let mut ws = raw(&srv.url, None, true).await.unwrap();
-    assert_eq!(close_code(&mut ws).await, Some(CloseCode::HandshakeTimeout.code()));
+    assert_eq!(
+        close_code(&mut ws).await,
+        Some(CloseCode::HandshakeTimeout.code())
+    );
 }
 
 #[tokio::test]
 async fn request_before_hello_is_rejected() {
     let srv = server().await;
     let mut ws = raw(&srv.url, None, true).await.unwrap();
-    ws.send(Message::text(r#"{"jsonrpc":"2.0","id":5,"method":"system.info"}"#)).await.unwrap();
+    ws.send(Message::text(
+        r#"{"jsonrpc":"2.0","id":5,"method":"system.info"}"#,
+    ))
+    .await
+    .unwrap();
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["id"], 5);
     assert_eq!(reply["error"]["code"], ErrorCode::NotHandshaken.code());
-    assert_eq!(close_code(&mut ws).await, Some(CloseCode::Unauthorized.code()));
+    assert_eq!(
+        close_code(&mut ws).await,
+        Some(CloseCode::Unauthorized.code())
+    );
 }
 
 #[tokio::test]
 async fn major_version_mismatch_closes_with_4426() {
     let srv = server().await;
     let mut ws = raw(&srv.url, None, true).await.unwrap();
-    ws.send(Message::text(hello_frame(TOKEN, "2.0", 0, &caps(&["subscriptions"])))).await.unwrap();
+    ws.send(Message::text(hello_frame(
+        TOKEN,
+        "2.0",
+        0,
+        &caps(&["subscriptions"]),
+    )))
+    .await
+    .unwrap();
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["error"]["code"], ErrorCode::ProtocolMismatch.code());
-    assert_eq!(close_code(&mut ws).await, Some(CloseCode::VersionMismatch.code()));
+    assert_eq!(
+        close_code(&mut ws).await,
+        Some(CloseCode::VersionMismatch.code())
+    );
 }
 
 #[tokio::test]
 async fn invalid_hello_params_close_with_4400() {
     let srv = server().await;
     let mut ws = raw(&srv.url, None, true).await.unwrap();
-    ws.send(Message::text(r#"{"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"token":"short"}}"#))
-        .await
-        .unwrap();
+    ws.send(Message::text(
+        r#"{"jsonrpc":"2.0","id":1,"method":"session.hello","params":{"token":"short"}}"#,
+    ))
+    .await
+    .unwrap();
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["error"]["code"], ErrorCode::InvalidParams.code());
-    assert_eq!(close_code(&mut ws).await, Some(CloseCode::ProtocolError.code()));
+    assert_eq!(
+        close_code(&mut ws).await,
+        Some(CloseCode::ProtocolError.code())
+    );
 }
 
 #[tokio::test]
 async fn older_minor_version_is_accepted() {
     let srv = server().await;
     let mut ws = raw(&srv.url, None, true).await.unwrap();
-    ws.send(Message::text(hello_frame(TOKEN, "1.0", 0, &caps(&["subscriptions"])))).await.unwrap();
+    ws.send(Message::text(hello_frame(
+        TOKEN,
+        "1.0",
+        0,
+        &caps(&["subscriptions"]),
+    )))
+    .await
+    .unwrap();
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["result"]["protocol"], PROTOCOL_VERSION);
-    assert_eq!(reply["result"]["capabilities"], serde_json::json!(["subscriptions"]));
+    assert_eq!(
+        reply["result"]["capabilities"],
+        serde_json::json!(["subscriptions"])
+    );
 }
 
 fn status_of(e: WsError) -> u16 {
@@ -144,15 +205,25 @@ async fn wrong_path_gets_404() {
 #[tokio::test]
 async fn foreign_origin_gets_403() {
     let srv = server().await;
-    let e = raw(&srv.url, Some("https://evil.example"), true).await.err().unwrap();
+    let e = raw(&srv.url, Some("https://evil.example"), true)
+        .await
+        .err()
+        .unwrap();
     assert_eq!(status_of(e), 403);
 }
 
 #[tokio::test]
 async fn app_origins_are_allowed() {
     let srv = server().await;
-    for origin in ["app://spaceknife", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost"] {
-        let c = Client::open_with(&srv.url, TOKEN, all_caps(), Some(origin)).await.unwrap();
+    for origin in [
+        "app://spaceknife",
+        "tauri://localhost",
+        "http://tauri.localhost",
+        "https://tauri.localhost",
+    ] {
+        let c = Client::open_with(&srv.url, TOKEN, all_caps(), Some(origin))
+            .await
+            .unwrap();
         c.close().await;
     }
 }
@@ -165,6 +236,8 @@ async fn configured_origin_is_allowed() {
         ..Default::default()
     };
     let srv = server_with(opts, |_| {}).await;
-    let c = Client::open_with(&srv.url, TOKEN, all_caps(), Some("http://localhost:3000")).await.unwrap();
+    let c = Client::open_with(&srv.url, TOKEN, all_caps(), Some("http://localhost:3000"))
+        .await
+        .unwrap();
     c.close().await;
 }

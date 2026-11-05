@@ -91,7 +91,10 @@ pub fn main() -> i32 {
     match args.get(1).and_then(|a| a.to_str()) {
         Some(sk_core::helper::HELPER_SUBCOMMAND) => return sk_core::helper::run_main(&args[2..]),
         Some("--apply-update") => {
-            let rest: Vec<String> = args[2..].iter().map(|a| a.to_string_lossy().into_owned()).collect();
+            let rest: Vec<String> = args[2..]
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
             return sk_core::update::swap::main(&rest);
         }
         _ => {}
@@ -100,13 +103,21 @@ pub fn main() -> i32 {
     match args.get(1).and_then(|a| a.to_str()) {
         // the arguments after `run` reach its own parser untouched (SpaceSniffer's rules)
         Some("run") => {
-            let tokens: Vec<String> = args[2..].iter().map(|a| a.to_string_lossy().into_owned()).collect();
+            let tokens: Vec<String> = args[2..]
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
             return run::cli(&tokens);
         }
         // `--headless` / `--listen …` as Electron's app took them
         Some(a) if a == "--headless" || a == "--listen" || a.starts_with("--listen=") => {
             let mut rewritten = vec![args[0].clone(), "headless".into()];
-            rewritten.extend(args[1..].iter().filter(|a| a.to_str() != Some("--headless")).cloned());
+            rewritten.extend(
+                args[1..]
+                    .iter()
+                    .filter(|a| a.to_str() != Some("--headless"))
+                    .cloned(),
+            );
             return dispatch(Cli::parse_from(rewritten));
         }
         _ => {}
@@ -225,7 +236,9 @@ pub mod interrupt {
     #[cfg(windows)]
     mod imp {
         use windows_sys::Win32::Foundation::{FALSE, TRUE};
-        use windows_sys::Win32::System::Console::{CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler};
+        use windows_sys::Win32::System::Console::{
+            CTRL_BREAK_EVENT, CTRL_C_EVENT, SetConsoleCtrlHandler,
+        };
 
         unsafe extern "system" fn handler(kind: u32) -> i32 {
             if kind == CTRL_C_EVENT || kind == CTRL_BREAK_EVENT {

@@ -14,9 +14,13 @@ use serde_json::{Value, json};
 use sk_core::disks::{Probe, new_disk};
 use sk_core::helper::{HelperError, Scalars};
 use sk_core::volume::VolumeInfo;
-use sk_protocol::machine::{DiskHealth, DiskInterface, DiskPart, HealthNote, HealthSource, MachineDisks, ReadHealthResult};
+use sk_protocol::machine::{
+    DiskHealth, DiskInterface, DiskPart, HealthNote, HealthSource, MachineDisks, ReadHealthResult,
+};
 use sk_protocol::scan::{ClassStat, MediaName};
-use sk_server::handlers::machine::{self as mh, HealthClient, HealthHelper, TOP_CLASSES, TOP_FOLDERS};
+use sk_server::handlers::machine::{
+    self as mh, HealthClient, HealthHelper, TOP_CLASSES, TOP_FOLDERS,
+};
 use sk_server::volume_summaries::{Kept, identity};
 
 fn norm(p: &str) -> String {
@@ -39,7 +43,12 @@ fn vol(mount: &str, serial: &str, total: i64) -> VolumeInfo {
 
 /// Scan `root` with an auto snapshot; the finished status.
 async fn scan_saved(c: &Client, root: &Path) -> Value {
-    let st = c.ok("scan.start", json!({"roots": [root.to_string_lossy()], "workers": 0})).await;
+    let st = c
+        .ok(
+            "scan.start",
+            json!({"roots": [root.to_string_lossy()], "workers": 0}),
+        )
+        .await;
     let id = st["scan_id"].as_str().unwrap().to_owned();
     let mut done = wait_done(c, &id).await;
     for _ in 0..100 {
@@ -58,12 +67,31 @@ async fn this_machine_over_the_protocol() {
     let c = Client::open(&srv.url).await;
     let volumes = c.ok("volume.list", json!({})).await;
     let res: MachineDisks = serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
-    let mounts: Vec<String> =
-        volumes["volumes"].as_array().unwrap().iter().map(|v| v["mount_point"].as_str().unwrap().to_owned()).collect();
-    assert_eq!(res.volumes.iter().map(|v| v.volume.mount_point.clone()).collect::<Vec<_>>(), mounts);
+    let mounts: Vec<String> = volumes["volumes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v["mount_point"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        res.volumes
+            .iter()
+            .map(|v| v.volume.mount_point.clone())
+            .collect::<Vec<_>>(),
+        mounts
+    );
     let ids: Vec<&str> = res.disks.iter().map(|d| d.id.as_str()).collect();
-    assert!(res.volumes.iter().all(|v| v.disks.iter().all(|d| ids.contains(&d.as_str()))));
-    assert!(res.disks.iter().flat_map(|d| &d.parts).all(|p| mounts.contains(&p.mount_point)));
+    assert!(
+        res.volumes
+            .iter()
+            .all(|v| v.disks.iter().all(|d| ids.contains(&d.as_str())))
+    );
+    assert!(
+        res.disks
+            .iter()
+            .flat_map(|d| &d.parts)
+            .all(|p| mounts.contains(&p.mount_point))
+    );
 }
 
 #[tokio::test]
@@ -76,31 +104,61 @@ async fn what_a_scan_and_a_snapshot_tell() {
     let scan_id = status["scan_id"].as_str().unwrap().to_owned();
     // let the scanned folder stand in for a whole volume
     let (key, id) = (norm(&root), scan_id.clone());
-    srv.server.summaries.set_whole_root(Some(Arc::new(move |h| (h.id == id).then(|| key.clone()))));
+    srv.server
+        .summaries
+        .set_whole_root(Some(Arc::new(move |h| (h.id == id).then(|| key.clone()))));
     let volume = vol(&root, "", 1_000_000_000);
     let mut disk = new_disk("d0");
     disk.model = "Disk".into();
     disk.size = Some(1_000_000_000);
-    let mut found = Probe { disks: vec![disk], ..Probe::default() };
-    found.parts.insert(root.clone(), vec![("d0".into(), Some(1_000_000_000))]);
+    let mut found = Probe {
+        disks: vec![disk],
+        ..Probe::default()
+    };
+    found
+        .parts
+        .insert(root.clone(), vec![("d0".into(), Some(1_000_000_000))]);
 
     let s = srv.server.clone();
     let (v, f) = (volume.clone(), found.clone());
-    let out = tokio::task::spawn_blocking(move || mh::overview(&s, &[v], &f, &HashMap::new(), None, None)).await.unwrap();
-    assert_eq!(out.disks[0].parts, vec![DiskPart { mount_point: root.clone(), bytes: Some(1_000_000_000) }]);
+    let out = tokio::task::spawn_blocking(move || {
+        mh::overview(&s, &[v], &f, &HashMap::new(), None, None)
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        out.disks[0].parts,
+        vec![DiskPart {
+            mount_point: root.clone(),
+            bytes: Some(1_000_000_000)
+        }]
+    );
     let ov = &out.volumes[0];
     assert_eq!(ov.disks, vec!["d0".to_owned()]);
     let scan = ov.scan.as_ref().unwrap();
     assert_eq!(scan.source.as_str(), "scan");
     assert_eq!(scan.scan_id.as_deref(), Some(scan_id.as_str()));
     assert!(!scan.running);
-    assert_eq!((scan.files, scan.bytes_alloc), (status["files"].as_i64().unwrap(), status["bytes_alloc"].as_i64().unwrap()));
-    assert_eq!(serde_json::to_value(scan.at).unwrap(), status["finished_at"]);
+    assert_eq!(
+        (scan.files, scan.bytes_alloc),
+        (
+            status["files"].as_i64().unwrap(),
+            status["bytes_alloc"].as_i64().unwrap()
+        )
+    );
+    assert_eq!(
+        serde_json::to_value(scan.at).unwrap(),
+        status["finished_at"]
+    );
     assert_eq!(scan.method.map(|m| m.as_str()), Some("hard"));
     assert!(!scan.classes.is_empty() && scan.classes.len() <= TOP_CLASSES);
     assert!(scan.classes.windows(2).all(|w| w[0].bytes >= w[1].bytes));
     assert!(!scan.folders.is_empty() && scan.folders.len() <= TOP_FOLDERS);
-    assert!(scan.folders.iter().all(|f| tree.path().join(&f.name).is_dir()));
+    assert!(
+        scan.folders
+            .iter()
+            .all(|f| tree.path().join(&f.name).is_dir())
+    );
     assert!(scan.folders.windows(2).all(|w| w[0].bytes >= w[1].bytes));
 
     // without the open scan: the newest snapshot (its header only), and the history of the volume
@@ -108,19 +166,37 @@ async fn what_a_scan_and_a_snapshot_tell() {
     let saved = saved.unwrap();
     assert_eq!(saved.source.as_str(), "snapshot");
     assert_eq!(saved.snapshot.as_deref(), status["snapshot"].as_str());
-    assert_eq!((saved.files, saved.bytes_alloc), (status["files"].as_i64().unwrap(), status["bytes_alloc"].as_i64().unwrap()));
+    assert_eq!(
+        (saved.files, saved.bytes_alloc),
+        (
+            status["files"].as_i64().unwrap(),
+            status["bytes_alloc"].as_i64().unwrap()
+        )
+    );
     assert_eq!(saved.method.map(|m| m.as_str()), Some("hard"));
     assert!(saved.classes.is_empty() && saved.folders.is_empty());
     assert_eq!(history.len(), 1);
-    assert_eq!((history[0].files, history[0].bytes_alloc), (saved.files, saved.bytes_alloc));
-    srv.server.summaries.set_whole_root(Some(Arc::new(|_| None)));
+    assert_eq!(
+        (history[0].files, history[0].bytes_alloc),
+        (saved.files, saved.bytes_alloc)
+    );
+    srv.server
+        .summaries
+        .set_whole_root(Some(Arc::new(|_| None)));
     let mut map = HashMap::new();
     map.insert(root.clone(), (Some(saved.clone()), history.clone()));
     let s = srv.server.clone();
-    let out = tokio::task::spawn_blocking(move || mh::overview(&s, &[volume], &found, &map, None, None)).await.unwrap();
+    let out =
+        tokio::task::spawn_blocking(move || mh::overview(&s, &[volume], &found, &map, None, None))
+            .await
+            .unwrap();
     assert_eq!(out.volumes[0].scan.as_ref(), Some(&saved));
     assert_eq!(out.volumes[0].history, history);
-    let never = tree.path().join("never scanned").to_string_lossy().into_owned();
+    let never = tree
+        .path()
+        .join("never scanned")
+        .to_string_lossy()
+        .into_owned();
     assert_eq!(mh::saved_scans(&never, None), (None, Vec::new()));
 
     // a second complete scan: the history grows, newest first (the first file renamed to an older
@@ -132,7 +208,10 @@ async fn what_a_scan_and_a_snapshot_tell() {
     let (_, history) = mh::saved_scans(&root, None);
     assert_eq!(
         history.iter().map(|h| h.bytes_alloc).collect::<Vec<_>>(),
-        vec![second["bytes_alloc"].as_i64().unwrap(), status["bytes_alloc"].as_i64().unwrap()]
+        vec![
+            second["bytes_alloc"].as_i64().unwrap(),
+            status["bytes_alloc"].as_i64().unwrap()
+        ]
     );
     assert!(history[0].at >= history[1].at);
 }
@@ -167,7 +246,10 @@ impl HealthClient for FakeClient {
         if disk == "sda" {
             return Err(HelperError::error("磁盘没有设备统计日志", "not_supported"));
         }
-        let log: String = nvme_log(1_000_000, 8070, 330).iter().map(|b| format!("{b:02x}")).collect();
+        let log: String = nvme_log(1_000_000, 8070, 330)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
         let mut m = Scalars::new();
         m.insert("kind".into(), json!("nvme"));
         m.insert("log".into(), json!(log));
@@ -184,7 +266,12 @@ struct FakeShared {
 
 impl FakeShared {
     fn new(fail: Option<HelperError>) -> Arc<FakeShared> {
-        Arc::new(FakeShared { fail, client: Arc::default(), prompts: Mutex::new(0), running: Mutex::new(false) })
+        Arc::new(FakeShared {
+            fail,
+            client: Arc::default(),
+            prompts: Mutex::new(0),
+            running: Mutex::new(false),
+        })
     }
 }
 
@@ -211,7 +298,10 @@ fn linux_disks() -> Vec<sk_protocol::machine::PhysicalDisk> {
     nvme.size = Some(4_000_000_000_000);
     nvme.media = MediaName::NvmeSsd;
     nvme.interface = DiskInterface::Nvme;
-    nvme.health = Some(DiskHealth { temperature_c: Some(47), ..sk_core::disks::health::empty_health(HealthSource::Nvme) });
+    nvme.health = Some(DiskHealth {
+        temperature_c: Some(47),
+        ..sk_core::disks::health::empty_health(HealthSource::Nvme)
+    });
     nvme.health_note = HealthNote::NeedsAdmin;
     let mut sata = new_disk("sda");
     sata.model = "CT2000MX500SSD1".into();
@@ -233,41 +323,72 @@ fn notes(m: &MachineDisks) -> Vec<&'static str> {
 async fn records_are_read_only_on_request() {
     let srv = server().await;
     let c = Client::open(&srv.url).await;
-    srv.server.summaries.set_probe(Some(Arc::new(|_| Probe { disks: linux_disks(), ..Probe::default() })));
+    srv.server.summaries.set_probe(Some(Arc::new(|_| Probe {
+        disks: linux_disks(),
+        ..Probe::default()
+    })));
     let shared = FakeShared::new(None);
     srv.server.summaries.set_helper(Some(shared.clone()));
 
-    let page: MachineDisks = serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
+    let page: MachineDisks =
+        serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
     assert_eq!(*shared.prompts.lock(), 0); // opening the page never asks
     assert_eq!(notes(&page), ["needs_admin", "needs_admin", "usb"]);
 
-    let read: ReadHealthResult = serde_json::from_value(c.ok("machine.read_health", json!({})).await).unwrap();
-    assert_eq!((read.outcome.as_str(), read.message.as_str(), *shared.prompts.lock()), ("read", "", 1));
+    let read: ReadHealthResult =
+        serde_json::from_value(c.ok("machine.read_health", json!({})).await).unwrap();
+    assert_eq!(
+        (
+            read.outcome.as_str(),
+            read.message.as_str(),
+            *shared.prompts.lock()
+        ),
+        ("read", "", 1)
+    );
     assert_eq!(*shared.client.asked.lock(), ["nvme0n1", "sda"]); // not the card reader
-    let (nvme, sata, reader) = (&read.machine.disks[0], &read.machine.disks[1], &read.machine.disks[2]);
+    let (nvme, sata, reader) = (
+        &read.machine.disks[0],
+        &read.machine.disks[1],
+        &read.machine.disks[2],
+    );
     let h = nvme.health.as_ref().unwrap();
     assert_eq!(nvme.health_note, HealthNote::None);
     assert_eq!(h.written_bytes, Some(1_000_000 * 512_000));
     assert_eq!(h.power_on_hours, Some(8070));
     assert_eq!(h.temperature_c, Some(47)); // the live temperature
     assert!(h.read_at.is_some());
-    assert_eq!((sata.health.is_none(), sata.health_note), (true, HealthNote::Unsupported));
+    assert_eq!(
+        (sata.health.is_none(), sata.health_note),
+        (true, HealthNote::Unsupported)
+    );
     assert_eq!(reader.health_note, HealthNote::Usb);
 
     // later reads keep the record; while the helper runs they ask it again, without a prompt
-    let again: MachineDisks = serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
+    let again: MachineDisks =
+        serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
     let ah = again.disks[0].health.clone().unwrap();
-    assert_eq!(DiskHealth { read_at: h.read_at, ..ah }, *h);
+    assert_eq!(
+        DiskHealth {
+            read_at: h.read_at,
+            ..ah
+        },
+        *h
+    );
     assert_eq!(*shared.client.asked.lock(), ["nvme0n1", "sda", "nvme0n1"]);
     assert_eq!(*shared.prompts.lock(), 1);
     *shared.running.lock() = false;
-    let kept: MachineDisks = serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
-    assert_eq!(kept.disks[0].health.as_ref().unwrap().written_bytes, h.written_bytes);
+    let kept: MachineDisks =
+        serde_json::from_value(c.ok("machine.disks", json!({})).await).unwrap();
+    assert_eq!(
+        kept.disks[0].health.as_ref().unwrap().written_bytes,
+        h.written_bytes
+    );
     assert_eq!(kept.disks[1].health_note, HealthNote::Unsupported);
     assert_eq!(shared.client.asked.lock().len(), 3);
 
     // nothing left to read
-    let nothing: ReadHealthResult = serde_json::from_value(c.ok("machine.read_health", json!({})).await).unwrap();
+    let nothing: ReadHealthResult =
+        serde_json::from_value(c.ok("machine.read_health", json!({})).await).unwrap();
     assert_eq!(nothing.outcome.as_str(), "nothing");
     assert_eq!(*shared.prompts.lock(), 1);
 }
@@ -276,14 +397,25 @@ async fn records_are_read_only_on_request() {
 async fn records_when_rights_are_not_given() {
     for (fail, outcome) in [
         (HelperError::denied(), "denied"),
-        (HelperError::unavailable("没有可以询问管理员密码的身份验证代理", "no_agent"), "unavailable"),
+        (
+            HelperError::unavailable("没有可以询问管理员密码的身份验证代理", "no_agent"),
+            "unavailable",
+        ),
     ] {
         let srv = server().await;
         let c = Client::open(&srv.url).await;
-        srv.server.summaries.set_probe(Some(Arc::new(|_| Probe { disks: linux_disks(), ..Probe::default() })));
-        srv.server.summaries.set_helper(Some(FakeShared::new(Some(fail))));
-        let read: ReadHealthResult =
-            serde_json::from_value(c.ok("machine.read_health", json!({"disks": ["nvme0n1"]})).await).unwrap();
+        srv.server.summaries.set_probe(Some(Arc::new(|_| Probe {
+            disks: linux_disks(),
+            ..Probe::default()
+        })));
+        srv.server
+            .summaries
+            .set_helper(Some(FakeShared::new(Some(fail))));
+        let read: ReadHealthResult = serde_json::from_value(
+            c.ok("machine.read_health", json!({"disks": ["nvme0n1"]}))
+                .await,
+        )
+        .unwrap();
         assert_eq!(read.outcome.as_str(), outcome);
         assert!(!read.message.is_empty());
         assert_eq!(notes(&read.machine), ["needs_admin", "needs_admin", "usb"]); // still offered
@@ -303,47 +435,97 @@ async fn what_a_scan_showed_is_kept() {
     let id = status["scan_id"].as_str().unwrap().to_owned();
     let idc = id.clone();
     // let the scanned folder stand in for its whole volume
-    srv.server.summaries.set_whole_root(Some(Arc::new(move |h| (h.id == idc).then(|| "x".to_owned()))));
-    let volume = srv.server.scans.get(&id).unwrap().roots.read()[0].volume.clone().unwrap();
+    srv.server.summaries.set_whole_root(Some(Arc::new(move |h| {
+        (h.id == idc).then(|| "x".to_owned())
+    })));
+    let volume = srv.server.scans.get(&id).unwrap().roots.read()[0]
+        .volume
+        .clone()
+        .unwrap();
     c.ok("scan.close", json!({"scan_id": id})).await;
 
     srv.server.summaries.reload(); // read back from the file, as after a restart
     let store = srv.server.summaries.store();
     let kept = store.get(&volume).unwrap();
-    assert_eq!((kept.files, kept.bytes_alloc), (status["files"].as_i64().unwrap(), status["bytes_alloc"].as_i64().unwrap()));
+    assert_eq!(
+        (kept.files, kept.bytes_alloc),
+        (
+            status["files"].as_i64().unwrap(),
+            status["bytes_alloc"].as_i64().unwrap()
+        )
+    );
     assert!(!kept.classes.is_empty() && !kept.folders.is_empty());
-    assert_eq!(serde_json::to_value(kept.at).unwrap(), status["finished_at"]);
+    assert_eq!(
+        serde_json::to_value(kept.at).unwrap(),
+        status["finished_at"]
+    );
     assert!(kept.classes.windows(2).all(|w| w[0].bytes >= w[1].bytes));
 
     let s = srv.server.clone();
     let v = volume.clone();
     let out = tokio::task::spawn_blocking(move || {
         let get = |x: &VolumeInfo| store.get(x);
-        mh::overview(&s, &[v], &Probe::default(), &HashMap::new(), Some(&get), None)
+        mh::overview(
+            &s,
+            &[v],
+            &Probe::default(),
+            &HashMap::new(),
+            Some(&get),
+            None,
+        )
     })
     .await
     .unwrap();
     let scan = out.volumes[0].scan.as_ref().unwrap();
     assert_eq!(scan.source.as_str(), "kept");
     assert!(scan.scan_id.is_none());
-    assert_eq!(scan.classes, kept.classes.iter().take(TOP_CLASSES).cloned().collect::<Vec<_>>());
+    assert_eq!(
+        scan.classes,
+        kept.classes
+            .iter()
+            .take(TOP_CLASSES)
+            .cloned()
+            .collect::<Vec<_>>()
+    );
     assert_eq!(scan.folders, kept.folders);
     let total = out.classes.unwrap();
-    assert_eq!((total.volumes, total.bytes), (vec![volume.mount_point.clone()], status["bytes_alloc"].as_i64().unwrap()));
-    assert_eq!(total.classes.iter().map(|c| c.bytes).sum::<i64>(), kept.classes.iter().map(|c| c.bytes).sum::<i64>());
+    assert_eq!(
+        (total.volumes, total.bytes),
+        (
+            vec![volume.mount_point.clone()],
+            status["bytes_alloc"].as_i64().unwrap()
+        )
+    );
+    assert_eq!(
+        total.classes.iter().map(|c| c.bytes).sum::<i64>(),
+        kept.classes.iter().map(|c| c.bytes).sum::<i64>()
+    );
 
     // without a known mix there is no total
     let s = srv.server.clone();
-    let out = tokio::task::spawn_blocking(move || mh::overview(&s, &[volume], &Probe::default(), &HashMap::new(), None, None))
-        .await
-        .unwrap();
+    let out = tokio::task::spawn_blocking(move || {
+        mh::overview(
+            &s,
+            &[volume],
+            &Probe::default(),
+            &HashMap::new(),
+            None,
+            None,
+        )
+    })
+    .await
+    .unwrap();
     assert!(out.classes.is_none());
 }
 
 #[tokio::test]
 async fn class_total_adds_up_volumes() {
     let srv = server().await;
-    let (cv, dv, ev) = (vol("C:\\", "1", 1 << 40), vol("D:\\", "2", 1 << 40), vol("E:\\", "3", 1 << 40));
+    let (cv, dv, ev) = (
+        vol("C:\\", "1", 1 << 40),
+        vol("D:\\", "2", 1 << 40),
+        vol("E:\\", "3", 1 << 40),
+    );
     let now = Utc::now();
     let k = |v: &VolumeInfo, bytes: i64, classes: Vec<ClassStat>| Kept {
         mount: v.mount_point.clone(),
@@ -358,20 +540,42 @@ async fn class_total_adds_up_volumes() {
         classes,
         folders: Vec::new(),
     };
-    let cs = |id: &str, bytes: i64, files: i64| ClassStat { class_id: id.into(), bytes, files, parts: Vec::new() };
+    let cs = |id: &str, bytes: i64, files: i64| ClassStat {
+        class_id: id.into(),
+        bytes,
+        files,
+        parts: Vec::new(),
+    };
     let mut store = HashMap::new();
-    store.insert(identity(&cv), k(&cv, 700, vec![cs("game", 500, 5), cs("code", 200, 50)]));
+    store.insert(
+        identity(&cv),
+        k(&cv, 700, vec![cs("game", 500, 5), cs("code", 200, 50)]),
+    );
     store.insert(identity(&dv), k(&dv, 300, vec![cs("code", 350, 30)]));
     let s = srv.server.clone();
     let out = tokio::task::spawn_blocking(move || {
         let get = |v: &VolumeInfo| store.get(&identity(v)).cloned();
-        mh::overview(&s, &[cv, dv, ev], &Probe::default(), &HashMap::new(), Some(&get), None)
+        mh::overview(
+            &s,
+            &[cv, dv, ev],
+            &Probe::default(),
+            &HashMap::new(),
+            Some(&get),
+            None,
+        )
     })
     .await
     .unwrap();
     let total = out.classes.unwrap();
     assert_eq!(total.volumes, ["C:\\", "D:\\"]); // E: never scanned
     assert_eq!(total.bytes, 1000);
-    let got: Vec<(String, i64, i64)> = total.classes.iter().map(|c| (c.class_id.clone(), c.bytes, c.files)).collect();
-    assert_eq!(got, [("code".to_owned(), 550, 80), ("game".to_owned(), 500, 5)]);
+    let got: Vec<(String, i64, i64)> = total
+        .classes
+        .iter()
+        .map(|c| (c.class_id.clone(), c.bytes, c.files))
+        .collect();
+    assert_eq!(
+        got,
+        [("code".to_owned(), 550, 80), ("game".to_owned(), 500, 5)]
+    );
 }

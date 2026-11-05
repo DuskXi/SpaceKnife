@@ -27,8 +27,8 @@ use windows_sys::Win32::Storage::FileSystem::{
     GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
 };
 use windows_sys::Win32::System::Com::{
-    CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance,
-    CoInitializeEx, CoTaskMemFree, CoUninitialize,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
+    CoTaskMemFree, CoUninitialize,
 };
 use windows_sys::Win32::System::Registry::{
     HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RegGetValueW,
@@ -83,7 +83,11 @@ const IID_IUNKNOWN: GUID = GUID::from_u128(0x00000000_0000_0000_c000_00000000004
 /// The Win32 error inside an `HRESULT_FROM_WIN32` value (else the HRESULT itself).
 pub fn hresult_code(hr: HRESULT) -> u32 {
     let value = hr as u32;
-    if value >> 16 == 0x8007 { value & 0xFFFF } else { value }
+    if value >> 16 == 0x8007 {
+        value & 0xFFFF
+    } else {
+        value
+    }
 }
 
 pub(crate) fn wide(s: &str) -> Vec<u16> {
@@ -92,7 +96,10 @@ pub(crate) fn wide(s: &str) -> Vec<u16> {
 
 fn wide_path(p: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
-    p.as_os_str().encode_wide().chain(std::iter::once(0)).collect()
+    p.as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 fn from_wide(buf: &[u16]) -> String {
@@ -126,7 +133,11 @@ pub fn volume_root(path: &str) -> io::Result<String> {
         return Err(io::Error::last_os_error());
     }
     let root = from_wide(&buf);
-    Ok(if root.ends_with('\\') { root } else { root + "\\" })
+    Ok(if root.ends_with('\\') {
+        root
+    } else {
+        root + "\\"
+    })
 }
 
 /// `{GUID}` of a mounted volume, or "" (network shares, SUBST drives).
@@ -302,7 +313,12 @@ pub fn notify_changed(path: &str, folder: bool) {
             p.as_ptr() as *const c_void,
             null(),
         );
-        SHChangeNotify(SHCNE_UPDATEDIR, SHCNF_PATHW, d.as_ptr() as *const c_void, null());
+        SHChangeNotify(
+            SHCNE_UPDATEDIR,
+            SHCNF_PATHW,
+            d.as_ptr() as *const c_void,
+            null(),
+        );
     }
 }
 
@@ -340,8 +356,12 @@ pub fn final_name(path: &str) -> Option<String> {
             buf.as_mut_ptr() as *mut c_void,
             65536,
         ) != 0
-            || GetFileInformationByHandleEx(h, FILE_NAME_INFO, buf.as_mut_ptr() as *mut c_void, 65536)
-                != 0;
+            || GetFileInformationByHandleEx(
+                h,
+                FILE_NAME_INFO,
+                buf.as_mut_ptr() as *mut c_void,
+                65536,
+            ) != 0;
         CloseHandle(h);
         if !ok {
             return None;
@@ -359,7 +379,10 @@ pub fn long_path(path: &str) -> String {
         return path.to_string();
     }
     if path.encode_utf16().count() < 240
-        && !(path.contains(".\\") || path.contains(" \\") || path.ends_with('.') || path.ends_with(' '))
+        && !(path.contains(".\\")
+            || path.contains(" \\")
+            || path.ends_with('.')
+            || path.ends_with(' '))
     {
         return path.to_string();
     }
@@ -416,7 +439,15 @@ pub fn rm_lockers(files: &[String]) -> io::Result<Vec<(u32, String)>> {
             let ptrs: Vec<*const u16> = names.iter().map(|n| n.as_ptr()).collect();
             // SAFETY: an array of NUL-terminated strings.
             let err = unsafe {
-                RmRegisterResources(session, ptrs.len() as u32, ptrs.as_ptr(), 0, null(), 0, null())
+                RmRegisterResources(
+                    session,
+                    ptrs.len() as u32,
+                    ptrs.as_ptr(),
+                    0,
+                    null(),
+                    0,
+                    null(),
+                )
             };
             if err != 0 {
                 return Err(rm_error("RmRegisterResources", err));
@@ -425,12 +456,19 @@ pub fn rm_lockers(files: &[String]) -> io::Result<Vec<(u32, String)>> {
         let mut needed = 0u32;
         for _ in 0..8 {
             // the list may grow between the calls
-            let mut buf: Vec<RM_PROCESS_INFO> = vec![RM_PROCESS_INFO::default(); needed.max(1) as usize];
+            let mut buf: Vec<RM_PROCESS_INFO> =
+                vec![RM_PROCESS_INFO::default(); needed.max(1) as usize];
             let mut count = needed;
             let mut reasons = 0u32;
             // SAFETY: `count` entries of room.
             let err = unsafe {
-                RmGetList(session, &mut needed, &mut count, buf.as_mut_ptr(), &mut reasons)
+                RmGetList(
+                    session,
+                    &mut needed,
+                    &mut count,
+                    buf.as_mut_ptr(),
+                    &mut reasons,
+                )
             };
             if err == 0 {
                 let mut out = Vec::new();
@@ -580,7 +618,10 @@ unsafe extern "system" fn sink_qi(this: P, riid: *const GUID, ppv: *mut P) -> HR
     unsafe {
         let want = &*riid;
         let same = |g: &GUID| {
-            g.data1 == want.data1 && g.data2 == want.data2 && g.data3 == want.data3 && g.data4 == want.data4
+            g.data1 == want.data1
+                && g.data2 == want.data2
+                && g.data3 == want.data3
+                && g.data4 == want.data4
         };
         if same(&IID_IUNKNOWN) || same(&IID_IFILE_OPERATION_PROGRESS_SINK) {
             *ppv = this;
@@ -608,13 +649,30 @@ unsafe extern "system" fn ok_post_rename(_: P, _: u32, _: P, _: W, _: HRESULT, _
 unsafe extern "system" fn ok_pre_move(_: P, _: u32, _: P, _: P, _: W) -> HRESULT {
     S_OK
 }
-unsafe extern "system" fn ok_post_move(_: P, _: u32, _: P, _: P, _: W, _: HRESULT, _: P) -> HRESULT {
+unsafe extern "system" fn ok_post_move(
+    _: P,
+    _: u32,
+    _: P,
+    _: P,
+    _: W,
+    _: HRESULT,
+    _: P,
+) -> HRESULT {
     S_OK
 }
 unsafe extern "system" fn ok_pre_new(_: P, _: u32, _: P, _: W) -> HRESULT {
     S_OK
 }
-unsafe extern "system" fn ok_post_new(_: P, _: u32, _: P, _: W, _: W, _: u32, _: HRESULT, _: P) -> HRESULT {
+unsafe extern "system" fn ok_post_new(
+    _: P,
+    _: u32,
+    _: P,
+    _: W,
+    _: W,
+    _: u32,
+    _: HRESULT,
+    _: P,
+) -> HRESULT {
     S_OK
 }
 unsafe extern "system" fn ok_progress(_: P, _: u32, _: u32) -> HRESULT {
@@ -646,7 +704,13 @@ unsafe extern "system" fn sink_pre_delete(this: P, flags: u32, item: P) -> HRESU
     run.unwrap_or(E_ABORT) // never let an error turn into "go ahead"
 }
 
-unsafe extern "system" fn sink_post_delete(this: P, _flags: u32, item: P, hr: HRESULT, created: P) -> HRESULT {
+unsafe extern "system" fn sink_post_delete(
+    this: P,
+    _flags: u32,
+    item: P,
+    hr: HRESULT,
+    created: P,
+) -> HRESULT {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| unsafe {
         let sink = &mut *(this as *mut Sink<'_>);
         let path = item_path(item).unwrap_or_default();
@@ -693,7 +757,10 @@ fn recycle_sta(
     cancel: Option<&(dyn Fn() -> bool + Sync)>,
     on_item: &mut (dyn FnMut(usize, &Recycled) + Send),
 ) -> RecycleRun {
-    let shown: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let shown: Vec<String> = paths
+        .iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect();
     let items: Vec<Recycled> = shown
         .iter()
         .map(|p| Recycled {
@@ -722,7 +789,10 @@ fn recycle_sta(
     // SAFETY: COM on this (fresh) thread; every object is released; the sink outlives the
     // operation (it is unadvised before it is dropped).
     unsafe {
-        let init = CoInitializeEx(null(), (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32);
+        let init = CoInitializeEx(
+            null(),
+            (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32,
+        );
         let run = (|| {
             let mut op: Unknown = null_mut();
             let hr = CoCreateInstance(
@@ -745,7 +815,8 @@ fn recycle_sta(
             let set_flags: unsafe extern "system" fn(Unknown, u32) -> HRESULT = method(op, 5);
             let advise: unsafe extern "system" fn(Unknown, P, *mut u32) -> HRESULT = method(op, 3);
             let unadvise: unsafe extern "system" fn(Unknown, u32) -> HRESULT = method(op, 4);
-            let delete_item: unsafe extern "system" fn(Unknown, Unknown, P) -> HRESULT = method(op, 18);
+            let delete_item: unsafe extern "system" fn(Unknown, Unknown, P) -> HRESULT =
+                method(op, 18);
             let perform: unsafe extern "system" fn(Unknown) -> HRESULT = method(op, 21);
             let hr = set_flags(op, RECYCLE_FLAGS);
             if hr < 0 {
@@ -764,7 +835,12 @@ fn recycle_sta(
                 // as given: a name with a lone surrogate is parsed exactly
                 let w = wide_path(path);
                 let mut item: Unknown = null_mut();
-                let hr = SHCreateItemFromParsingName(w.as_ptr(), null_mut(), &IID_ISHELL_ITEM, &mut item);
+                let hr = SHCreateItemFromParsingName(
+                    w.as_ptr(),
+                    null_mut(),
+                    &IID_ISHELL_ITEM,
+                    &mut item,
+                );
                 if hr < 0 || item.is_null() {
                     let s = &mut *sink_ptr;
                     s.items[i].hr = hr;

@@ -22,10 +22,10 @@ pub const PROMPTING: &[&str] = &[
     "Desktop",
     "Documents",
     "Downloads",
-    "Library/Mobile Documents",         // iCloud Drive
-    "Library/CloudStorage",             // File Providers: OneDrive, Google Drive, Dropbox…
+    "Library/Mobile Documents", // iCloud Drive
+    "Library/CloudStorage",     // File Providers: OneDrive, Google Drive, Dropbox…
     "Pictures/Photos Library.photoslibrary",
-    "Library/Containers",               // other apps' data (macOS 14+)
+    "Library/Containers", // other apps' data (macOS 14+)
     "Library/Group Containers",
 ];
 
@@ -138,7 +138,12 @@ mod tests {
         }
         let found: Vec<_> = protected_folders_in(tmp.path())
             .iter()
-            .map(|p| p.strip_prefix(tmp.path()).unwrap().to_string_lossy().replace('\\', "/"))
+            .map(|p| {
+                p.strip_prefix(tmp.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
             .collect();
         assert_eq!(found, ["Desktop", "Downloads", "Library/Mobile Documents"]);
     }

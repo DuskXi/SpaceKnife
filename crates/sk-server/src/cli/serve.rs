@@ -63,8 +63,16 @@ pub fn init_logging(level: &str, format: &str) {
     use sk_core::log::{LogBus, LogConfig, LogFormat, parse_level};
     let level = parse_level(level).unwrap_or(tracing::level_filters::LevelFilter::INFO);
     let format = LogFormat::parse(format).unwrap_or(LogFormat::Plain);
-    let file = Some((sk_core::paths::log_file(), tracing::level_filters::LevelFilter::INFO));
-    if let Err(e) = sk_core::log::init(&LogConfig { level, format, bus: Some(LogBus::global()), file }) {
+    let file = Some((
+        sk_core::paths::log_file(),
+        tracing::level_filters::LevelFilter::INFO,
+    ));
+    if let Err(e) = sk_core::log::init(&LogConfig {
+        level,
+        format,
+        bus: Some(LogBus::global()),
+        file,
+    }) {
         eprintln!("log file unavailable: {e}");
     }
 }
@@ -91,9 +99,15 @@ pub fn python_json(fields: &[(&str, Value)]) -> String {
 
 fn python_value(v: &Value) -> String {
     match v {
-        Value::Array(a) => format!("[{}]", a.iter().map(python_value).collect::<Vec<_>>().join(", ")),
+        Value::Array(a) => format!(
+            "[{}]",
+            a.iter().map(python_value).collect::<Vec<_>>().join(", ")
+        ),
         Value::Object(o) => {
-            let parts: Vec<String> = o.iter().map(|(k, v)| format!("{}: {}", Value::from(k.as_str()), python_value(v))).collect();
+            let parts: Vec<String> = o
+                .iter()
+                .map(|(k, v)| format!("{}: {}", Value::from(k.as_str()), python_value(v)))
+                .collect();
             format!("{{{}}}", parts.join(", "))
         }
         // non-ASCII as \uXXXX (ensure_ascii)
@@ -128,7 +142,12 @@ pub fn write_ready_file(path: &Path, ready: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let tmp = path.with_file_name(format!("{}.tmp", path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default()));
+    let tmp = path.with_file_name(format!(
+        "{}.tmp",
+        path.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default()
+    ));
     {
         let mut opts = std::fs::OpenOptions::new();
         opts.write(true).create(true).truncate(true);
@@ -178,8 +197,14 @@ pub fn serve(args: ServeArgs) -> i32 {
         static_dir: None,
         tls: None,
     };
-    let tuning = Tuning { hello_timeout: Duration::from_secs_f64(args.hello_timeout.max(0.1)), ..Default::default() };
-    let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+    let tuning = Tuning {
+        hello_timeout: Duration::from_secs_f64(args.hello_timeout.max(0.1)),
+        ..Default::default()
+    };
+    let rt = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
         Ok(rt) => rt,
         Err(e) => {
             eprintln!("cannot start the runtime: {e}");
@@ -205,7 +230,10 @@ pub fn serve(args: ServeArgs) -> i32 {
             ("protocol", sk_protocol::PROTOCOL_VERSION.into()),
             ("subprotocol", sk_protocol::SUBPROTOCOL.into()),
             // where update files are downloaded: the launcher starts only files from there
-            ("updates_dir", handle.updates_dir.to_string_lossy().into_owned().into()),
+            (
+                "updates_dir",
+                handle.updates_dir.to_string_lossy().into_owned().into(),
+            ),
         ];
         if let Some(path) = &ready_file {
             let mut with_token = ready.clone();
@@ -352,18 +380,39 @@ fn pipe_poller() -> Option<impl FnMut() -> bool + Send> {
     let peek = move |h: &H| -> Option<bool> {
         let mut avail: u32 = 0;
         // SAFETY: valid out-pointer; no buffer requested.
-        let ok = unsafe { PeekNamedPipe(h.0, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut()) };
+        let ok = unsafe {
+            PeekNamedPipe(
+                h.0,
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut avail,
+                std::ptr::null_mut(),
+            )
+        };
         if ok == 0 {
             // SAFETY: no preconditions.
             let err = unsafe { GetLastError() };
-            return if err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA { Some(true) } else { None };
+            return if err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA {
+                Some(true)
+            } else {
+                None
+            };
         }
         if avail > 0 {
             // data is there, so this read cannot block: discard it
             let mut buf = vec![0u8; avail as usize];
             let mut read = 0u32;
             // SAFETY: buffer of `avail` bytes.
-            unsafe { ReadFile(h.0, buf.as_mut_ptr(), avail, &mut read, std::ptr::null_mut()) };
+            unsafe {
+                ReadFile(
+                    h.0,
+                    buf.as_mut_ptr(),
+                    avail,
+                    &mut read,
+                    std::ptr::null_mut(),
+                )
+            };
         }
         Some(false)
     };
@@ -377,15 +426,25 @@ mod tests {
 
     #[test]
     fn ready_line_is_json_dumps() {
-        let line = python_json(&[("event", "ready".into()), ("port", 5u16.into()), ("dir", "C:\\Ü".into())]);
-        assert_eq!(line, r#"{"event": "ready", "port": 5, "dir": "C:\\\u00dc"}"#);
+        let line = python_json(&[
+            ("event", "ready".into()),
+            ("port", 5u16.into()),
+            ("dir", "C:\\Ü".into()),
+        ]);
+        assert_eq!(
+            line,
+            r#"{"event": "ready", "port": 5, "dir": "C:\\\u00dc"}"#
+        );
         let v: Value = serde_json::from_str(&line).unwrap();
         assert_eq!(v["dir"], "C:\\Ü");
     }
 
     #[test]
     fn token_line() {
-        assert_eq!(read_token_line(&mut &b"0123456789abcdef\r\nrest"[..]).unwrap(), "0123456789abcdef");
+        assert_eq!(
+            read_token_line(&mut &b"0123456789abcdef\r\nrest"[..]).unwrap(),
+            "0123456789abcdef"
+        );
         assert!(read_token_line(&mut &b"short\n"[..]).is_err());
         assert!(read_token_line(&mut &b""[..]).is_err());
     }

@@ -40,14 +40,19 @@ fn is_token(s: &str) -> bool {
 fn is_token_file_name(name: &str) -> bool {
     name.strip_prefix("spaceknife-helper-")
         .and_then(|rest| rest.strip_suffix(".token"))
-        .is_some_and(|hex| hex.len() == 16 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+        .is_some_and(|hex| {
+            hex.len() == 16 && hex.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+        })
 }
 
 /// Create a fresh token file readable only by this user (in `directory`, default the temp
 /// directory); returns its path.
 pub fn write_token_file(token: &str, directory: Option<&Path>) -> io::Result<PathBuf> {
     let dir = directory.map_or_else(std::env::temp_dir, Path::to_path_buf);
-    let path = dir.join(format!("spaceknife-helper-{}.token", hex(&random_bytes(8)?)));
+    let path = dir.join(format!(
+        "spaceknife-helper-{}.token",
+        hex(&random_bytes(8)?)
+    ));
     write_new_private(&path, token.as_bytes())?;
     Ok(path)
 }
@@ -75,7 +80,10 @@ pub fn write_new_private(path: &Path, data: &[u8]) -> io::Result<()> {
 /// Helper side: read the token and delete the file. Refuses anything but a token file.
 pub fn read_token_file(path: &Path) -> io::Result<String> {
     let invalid = |msg: &str| io::Error::new(io::ErrorKind::InvalidInput, msg.to_owned());
-    let name_ok = path.file_name().and_then(|n| n.to_str()).is_some_and(is_token_file_name);
+    let name_ok = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(is_token_file_name);
     if !path.is_absolute() || !name_ok {
         return Err(invalid(t("令牌文件路径无效")));
     }
@@ -153,23 +161,35 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
         }
         #[cfg(windows)]
         {
             let sddl = super::super::win32::owner_only_sddl().unwrap();
-            assert!(sddl.starts_with("D:P(A;;GA;;;S-1-") && sddl.ends_with("(A;;GA;;;BA)"), "{sddl}");
+            assert!(
+                sddl.starts_with("D:P(A;;GA;;;S-1-") && sddl.ends_with("(A;;GA;;;BA)"),
+                "{sddl}"
+            );
         }
         let again = write_new_private(&path, token.as_bytes()).unwrap_err();
         assert_eq!(again.kind(), io::ErrorKind::AlreadyExists);
         assert_eq!(read_token_file(&path).unwrap(), token);
         assert!(!path.exists());
         let err = read_token_file(&dir.path().join("other.txt")).unwrap_err();
-        assert!(err.to_string().contains("路径") || err.to_string().contains("path"), "{err}");
+        assert!(
+            err.to_string().contains("路径") || err.to_string().contains("path"),
+            "{err}"
+        );
         let bad = dir.path().join("spaceknife-helper-0123456789abcdef.token");
         std::fs::write(&bad, "not-a-token").unwrap();
         let err = read_token_file(&bad).unwrap_err();
-        assert!(err.to_string().contains("格式") || err.to_string().contains("format"), "{err}");
+        assert!(
+            err.to_string().contains("格式") || err.to_string().contains("format"),
+            "{err}"
+        );
         assert!(!bad.exists());
         assert!(read_token_file(Path::new("spaceknife-helper-0123456789abcdef.token")).is_err()); // relative
     }

@@ -46,7 +46,9 @@ fn main() {
         match a.as_str() {
             "--sums" => sums = args.next().map(PathBuf::from),
             "--download" => download = true,
-            v if !v.starts_with("--") && version.is_none() => version = Some(v.trim_start_matches('v').to_owned()),
+            v if !v.starts_with("--") && version.is_none() => {
+                version = Some(v.trim_start_matches('v').to_owned())
+            }
             _ => {
                 eprintln!("usage: release_check VERSION [--sums DIR] [--download]");
                 std::process::exit(2);
@@ -74,12 +76,16 @@ fn check(version: &str, sums_dir: Option<PathBuf>, download: bool) -> Vec<String
         Err(e) => return vec![format!("the release list: {e}")],
     };
     let Some(release) = releases.iter().find(|r| r.version == version) else {
-        return vec![format!("{version} is not in the published release list (a draft is not)")];
+        return vec![format!(
+            "{version} is not in the published release list (a draft is not)"
+        )];
     };
     let mut problems = Vec::new();
     let newest = update::choose(&releases, UpdateChannel::Preview).map(|r| r.version.clone());
     if newest.as_deref() != Some(version) {
-        problems.push(format!("the newest release (preview channel) is {newest:?}"));
+        problems.push(format!(
+            "the newest release (preview channel) is {newest:?}"
+        ));
     }
     if !release.preview() {
         let stable = update::choose(&releases, UpdateChannel::Stable).map(|r| r.version.clone());
@@ -106,17 +112,31 @@ fn check(version: &str, sums_dir: Option<PathBuf>, download: bool) -> Vec<String
     let scratch = std::env::temp_dir().join(format!("sk-release-check-{}", std::process::id()));
     println!("{:<9} {:<15} {:<45} checksum", "install", "system", "file");
     for &(kind, system, machine) in INSTALLS {
-        let row = |file: &str, state: &str| println!("{:<9} {:<15} {:<45} {state}", kind.as_str(), format!("{system}/{machine}"), file);
+        let row = |file: &str, state: &str| {
+            println!(
+                "{:<9} {:<15} {:<45} {state}",
+                kind.as_str(),
+                format!("{system}/{machine}"),
+                file
+            )
+        };
         let want = update::asset_template(kind, system, machine).map(|t| t.replace("{v}", version));
         let asset = update::pick_asset(release, kind, Some(system), Some(machine));
         let Some(asset) = asset else {
-            problems.push(format!("{} on {system}/{machine}: no file, want {want:?}", kind.as_str()));
+            problems.push(format!(
+                "{} on {system}/{machine}: no file, want {want:?}",
+                kind.as_str()
+            ));
             row("-", "-");
             continue;
         };
         // a pre-release's packages may spell the version otherwise (rpm: ~); the app takes either
         if want.as_deref() != Some(asset.name.as_str()) && !release.preview() {
-            problems.push(format!("{} on {system}/{machine}: found {}, want {want:?}", kind.as_str(), asset.name));
+            problems.push(format!(
+                "{} on {system}/{machine}: found {}, want {want:?}",
+                kind.as_str(),
+                asset.name
+            ));
         }
         let state = match update::fetch_checksums(release, asset, AGENT, timeout) {
             Err(e) => {
@@ -129,17 +149,31 @@ fn check(version: &str, sums_dir: Option<PathBuf>, download: bool) -> Vec<String
             }
             Ok(Some(published)) => {
                 if !local.is_empty() && local.get(&asset.name) != Some(&published) {
-                    problems.push(format!("{}: published {published}, assembled {:?}", asset.name, local.get(&asset.name)));
+                    problems.push(format!(
+                        "{}: published {published}, assembled {:?}",
+                        asset.name,
+                        local.get(&asset.name)
+                    ));
                     "differs".to_owned()
                 } else if download {
                     let dest = scratch.join(&asset.name);
                     let cancel = AtomicBool::new(false);
-                    let got = update::download(&asset.url, &dest, asset.size, Some(&published), AGENT, &mut |_, _, _| {}, &cancel, Duration::from_secs(600));
+                    let got = update::download(
+                        &asset.url,
+                        &dest,
+                        asset.size,
+                        Some(&published),
+                        AGENT,
+                        &mut |_, _, _| {},
+                        &cancel,
+                        Duration::from_secs(600),
+                    );
                     let _ = std::fs::remove_file(&dest);
                     match got {
                         Ok(Some(true)) => "ok (downloaded)".to_owned(),
                         Ok(other) => {
-                            problems.push(format!("{}: downloaded, verified {other:?}", asset.name));
+                            problems
+                                .push(format!("{}: downloaded, verified {other:?}", asset.name));
                             "differs".to_owned()
                         }
                         Err(e) => {

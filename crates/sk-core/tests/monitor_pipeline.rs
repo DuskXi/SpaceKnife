@@ -17,7 +17,10 @@ use sk_store::testing::{build_disk_tree, check_invariants, facts};
 use sk_store::{Flags, NodeId, Store};
 
 fn scanned(roots: &[&Path]) -> Scanner {
-    let roots: Vec<String> = roots.iter().map(|r| r.to_string_lossy().into_owned()).collect();
+    let roots: Vec<String> = roots
+        .iter()
+        .map(|r| r.to_string_lossy().into_owned())
+        .collect();
     let s = Scanner::new(&roots, ScanOptions::default()).unwrap();
     s.run(None, Duration::from_millis(250));
     s
@@ -28,7 +31,13 @@ fn monitor(s: &Scanner, watch: bool, usn: Option<Arc<dyn UsnSource>>) -> ScanMon
         s.store().clone(),
         s.roots(),
         s.root_options(),
-        MonitorOptions { watch, coalesce: Duration::from_millis(50), poll_interval: 0.2, usn, ..Default::default() },
+        MonitorOptions {
+            watch,
+            coalesce: Duration::from_millis(50),
+            poll_interval: 0.2,
+            usn,
+            ..Default::default()
+        },
     );
     m.start();
     m
@@ -66,7 +75,11 @@ fn until(mon: &mut ScanMonitor, hooks: &mut dyn MonitorHooks, secs: u64, cond: i
         if cond() {
             return;
         }
-        assert!(Instant::now() < end, "the tree did not catch up: {:?}", mon.status());
+        assert!(
+            Instant::now() < end,
+            "the tree did not catch up: {:?}",
+            mon.status()
+        );
     }
 }
 
@@ -111,7 +124,9 @@ fn changes_reach_the_tree() {
     std::fs::rename(root.join("b"), root.join("renamed")).unwrap();
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
     check_invariants(&s.store().read()).unwrap();
     let st = mon.status();
     assert!(st.changes > 0 && st.events > 0, "{st:?}");
@@ -133,7 +148,9 @@ fn a_change_before_a_folder_is_watched_reaches_the_tree() {
     let mut hooks = Recorder::default();
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
     check_invariants(&s.store().read()).unwrap();
 }
 
@@ -178,7 +195,10 @@ fn recorded(s: &Scanner) -> (ScanMonitor, Handed) {
         s.store().clone(),
         s.roots(),
         s.root_options(),
-        MonitorOptions { coalesce: Duration::from_millis(50), ..Default::default() },
+        MonitorOptions {
+            coalesce: Duration::from_millis(50),
+            ..Default::default()
+        },
     );
     let h = handed.clone();
     m.start_with(&mut move |_| Box::new(h.clone()));
@@ -222,14 +242,25 @@ fn folders_the_scan_could_not_list_are_neither_watched_nor_polled() {
     assert_eq!(mon.status().changes, 0);
     // its parent's own changes are applied
     std::fs::write(root.join("b").join("sibling.txt"), b"s").unwrap();
-    mon.handle().push(vec![Change::new(ChangeKind::Created, root.join("b").join("sibling.txt"), Some(false))]);
+    mon.handle().push(vec![Change::new(
+        ChangeKind::Created,
+        root.join("b").join("sibling.txt"),
+        Some(false),
+    )]);
     mon.step(&mut hooks);
-    assert!(s.store().read().find_path(&root.join("b").join("sibling.txt")).is_some());
+    assert!(
+        s.store()
+            .read()
+            .find_path(&root.join("b").join("sibling.txt"))
+            .is_some()
+    );
     // a rescan of it lists it (readable now): no longer marked, and watched from then on
     mon.handle().rescan(&inner);
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
     assert!(handed.has(&inner));
     assert!(handed.len() > dirs);
     let n = node(&s, &inner);
@@ -281,12 +312,17 @@ fn the_status_is_running_while_folders_wait_for_their_watches() {
     let s = scanned(&[&root]);
     let mut mon = monitor(&s, true, None);
     let st = mon.status();
-    assert_eq!((st.state, st.watcher.as_str(), st.watched_dirs), (MonitorState::Running, "inotify", 1));
+    assert_eq!(
+        (st.state, st.watcher.as_str(), st.watched_dirs),
+        (MonitorState::Running, "inotify", 1)
+    );
     std::fs::write(deepest_dir(&root).join("late.bin"), vec![b'l'; 500_000]).unwrap(); // before its watch
     let mut hooks = Recorder::default();
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
     let want = facts.dirs as i64 + 1;
     let end = Instant::now() + Duration::from_secs(10);
     while mon.status().watched_dirs != want {
@@ -324,7 +360,12 @@ fn a_plain_users_scan_with_unreadable_folders_is_fully_watched() {
     }
     let _restore = Restore(locked.clone());
     let s = scanned(&[&root]);
-    assert!(s.store().read().flags(node(&s, &locked)).intersects(Flags::ACCESS_DENIED));
+    assert!(
+        s.store()
+            .read()
+            .flags(node(&s, &locked))
+            .intersects(Flags::ACCESS_DENIED)
+    );
     let mut mon = monitor(&s, true, None);
     let mut hooks = Recorder::default();
     let watched = |mon: &mut ScanMonitor, hooks: &mut Recorder, want: i64| {
@@ -338,22 +379,41 @@ fn a_plain_users_scan_with_unreadable_folders_is_fully_watched() {
     // the root and every listed folder (the fixture's, plus "locked" itself is not handed)
     watched(&mut mon, &mut hooks, facts.dirs as i64 + 1);
     let st = mon.status();
-    assert_eq!((st.state, st.polled_dirs), (MonitorState::Running, 0), "{}", st.detail);
+    assert_eq!(
+        (st.state, st.polled_dirs),
+        (MonitorState::Running, 0),
+        "{}",
+        st.detail
+    );
     // readable later: a chmod moves no mtime and raises no event for it; a rescan lists it
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(locked.join("found.bin"), vec![b'f'; 4096]).unwrap();
     mon.handle().rescan(&locked);
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
-    assert!(!s.store().read().flags(node(&s, &locked)).intersects(Flags::ACCESS_DENIED));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
+    assert!(
+        !s.store()
+            .read()
+            .flags(node(&s, &locked))
+            .intersects(Flags::ACCESS_DENIED)
+    );
     watched(&mut mon, &mut hooks, facts.dirs as i64 + 3); // it and the folder inside
     std::fs::write(locked.join("later.bin"), vec![b'l'; 4096]).unwrap(); // seen through its own watch
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
     let st = mon.status();
-    assert_eq!((st.state, st.polled_dirs), (MonitorState::Running, 0), "{}", st.detail);
+    assert_eq!(
+        (st.state, st.polled_dirs),
+        (MonitorState::Running, 0),
+        "{}",
+        st.detail
+    );
 }
 
 #[test]
@@ -370,11 +430,21 @@ fn storm_rescans_quietly() {
     }
     std::fs::remove_dir_all(root.join("deep")).unwrap();
     // more events than a batch takes one by one: the common folder is rescanned once quiet
-    let storm: Vec<Change> = (0..20_001).map(|i| Change::new(ChangeKind::Created, root.join(format!("storm{}/f.txt", i % 6)), Some(false))).collect();
+    let storm: Vec<Change> = (0..20_001)
+        .map(|i| {
+            Change::new(
+                ChangeKind::Created,
+                root.join(format!("storm{}/f.txt", i % 6)),
+                Some(false),
+            )
+        })
+        .collect();
     mon.handle().push(storm);
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
     assert_eq!(hooks.messages.lock().unwrap().len(), 1);
     check_invariants(&s.store().read()).unwrap();
 }
@@ -401,7 +471,9 @@ fn rescan_a_folder_without_monitoring_and_several_roots() {
     }
     let store = s.store().clone();
     let (a, b) = (one.clone(), two.clone());
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&a, &b]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&a, &b])
+    });
     assert!(mon.status().watcher.is_empty());
 }
 
@@ -435,7 +507,8 @@ fn concurrent_writers_end_consistent() {
                         use std::io::Write;
                         let f = &made[rnd.below(made.len() as u64) as usize];
                         let mut h = std::fs::OpenOptions::new().append(true).open(f).unwrap();
-                        h.write_all(&vec![b'a'; 1 + rnd.below(9000) as usize]).unwrap();
+                        h.write_all(&vec![b'a'; 1 + rnd.below(9000) as usize])
+                            .unwrap();
                     } else if op < 75 {
                         let f = made.remove(rnd.below(made.len() as u64) as usize);
                         std::fs::remove_file(f).unwrap();
@@ -447,7 +520,8 @@ fn concurrent_writers_end_consistent() {
                     } else {
                         let sub = mine.join(format!("d{step}"));
                         std::fs::create_dir(&sub).unwrap();
-                        std::fs::write(sub.join("inner.txt"), vec![b'i'; rnd.below(3000) as usize]).unwrap();
+                        std::fs::write(sub.join("inner.txt"), vec![b'i'; rnd.below(3000) as usize])
+                            .unwrap();
                     }
                     std::thread::sleep(Duration::from_millis(2));
                 }
@@ -479,7 +553,9 @@ fn sizes_follow_the_hard_scan_rule() {
     std::fs::write(root.join("c.txt"), vec![b'r'; 600]).unwrap(); // resident? the hard scan's rule
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 20, move || {
+        same_as_disk(&store, &[&r2])
+    });
 }
 
 #[cfg(windows)]
@@ -495,13 +571,20 @@ fn overflow_replays_the_usn_journal() {
         }
         fn read(&self, volume: &str, start: u64, jid: u64, _max: usize) -> Result<UsnRead, String> {
             self.calls.lock().unwrap().push((volume.into(), start, jid));
-            Ok(UsnRead { parent_frn: vec![self.ino | (7 << 48)], truncated: false })
+            Ok(UsnRead {
+                parent_frn: vec![self.ino | (7 << 48)],
+                truncated: false,
+            })
         }
     }
     let tmp = tempfile::tempdir().unwrap();
     let root = tree(tmp.path());
     let s = scanned(&[&root]);
-    if !s.roots()[0].volume.as_ref().is_some_and(|v| v.is_local_ntfs()) {
+    if !s.roots()[0]
+        .volume
+        .as_ref()
+        .is_some_and(|v| v.is_local_ntfs())
+    {
         eprintln!("skipped: not a local NTFS volume");
         return;
     }
@@ -512,7 +595,10 @@ fn overflow_replays_the_usn_journal() {
     };
     // the hard scan's rows carry the NTFS file reference the journal names folders by
     assert_ne!(ino, 0, "hard-scanned folders carry their file id");
-    let journal = Arc::new(Journal { ino, calls: Mutex::new(Vec::new()) });
+    let journal = Arc::new(Journal {
+        ino,
+        calls: Mutex::new(Vec::new()),
+    });
     let mut mon = monitor(&s, false, Some(journal.clone()));
     mon.start_usn();
     let mut hooks = Recorder::default();
@@ -520,12 +606,17 @@ fn overflow_replays_the_usn_journal() {
     mon.handle().push(vec![Change::overflow(root.clone())]);
     let store = s.store().clone();
     let r2 = root.clone();
-    until(&mut mon, &mut hooks, 10, move || same_as_disk(&store, &[&r2]));
+    until(&mut mon, &mut hooks, 10, move || {
+        same_as_disk(&store, &[&r2])
+    });
     let vol = root.to_string_lossy()[..2].to_uppercase();
     assert_eq!(*journal.calls.lock().unwrap(), vec![(vol, 1000, 42)]); // from the safe checkpoint
     assert_eq!(mon.status().pending, 0);
     // the journal named the one folder: it was listed again, not the root's whole subtree
     let messages = hooks.messages.lock().unwrap().clone();
-    let replay = sk_core::tr!("变化通知溢出：按 USN 日志补齐 {count} 个文件夹", count = 1usize);
+    let replay = sk_core::tr!(
+        "变化通知溢出：按 USN 日志补齐 {count} 个文件夹",
+        count = 1usize
+    );
     assert!(messages.contains(&replay), "{messages:?}");
 }

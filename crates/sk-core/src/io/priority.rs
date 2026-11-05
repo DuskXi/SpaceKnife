@@ -32,11 +32,13 @@ pub const IOPRIO_CLASS_IDLE: i32 = 3;
 mod imp {
     use std::ffi::c_void;
 
-    use windows_sys::Wdk::System::Threading::{NtQueryInformationProcess, NtQueryInformationThread, NtSetInformationThread};
+    use windows_sys::Wdk::System::Threading::{
+        NtQueryInformationProcess, NtQueryInformationThread, NtSetInformationThread,
+    };
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, GetCurrentThread, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SET_INFORMATION,
-        SetPriorityClass,
+        GetCurrentProcess, GetCurrentThread, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_SET_INFORMATION, SetPriorityClass,
     };
 
     use super::*;
@@ -50,11 +52,20 @@ mod imp {
 
     #[link(name = "ntdll")]
     unsafe extern "system" {
-        fn NtSetInformationProcess(process: HANDLE, class: i32, info: *const c_void, len: u32) -> i32;
+        fn NtSetInformationProcess(
+            process: HANDLE,
+            class: i32,
+            info: *const c_void,
+            len: u32,
+        ) -> i32;
     }
 
     fn set_io(handle: HANDLE, thread: bool, on: bool) -> bool {
-        let value: u32 = if on { IO_PRIORITY_VERY_LOW } else { IO_PRIORITY_NORMAL };
+        let value: u32 = if on {
+            IO_PRIORITY_VERY_LOW
+        } else {
+            IO_PRIORITY_NORMAL
+        };
         let p = (&value as *const u32).cast();
         // SAFETY: a valid handle and a 4-byte value.
         unsafe {
@@ -96,19 +107,27 @@ mod imp {
     pub fn set_process(pid: Option<u32>, on: bool, background_mode: bool) -> bool {
         let own = pid.is_none_or(|p| p == std::process::id());
         if own && background_mode {
-            let mode = if on { PROCESS_MODE_BACKGROUND_BEGIN } else { PROCESS_MODE_BACKGROUND_END };
+            let mode = if on {
+                PROCESS_MODE_BACKGROUND_BEGIN
+            } else {
+                PROCESS_MODE_BACKGROUND_END
+            };
             // SAFETY: the pseudo handle of this process.
             if unsafe { SetPriorityClass(GetCurrentProcess(), mode) } != 0 {
                 return true;
             }
             let err = crate::helper::win32::last_error();
-            return err == ERROR_PROCESS_MODE_ALREADY_BACKGROUND || err == ERROR_PROCESS_MODE_NOT_BACKGROUND;
+            return err == ERROR_PROCESS_MODE_ALREADY_BACKGROUND
+                || err == ERROR_PROCESS_MODE_NOT_BACKGROUND;
         }
         if own {
             // SAFETY: the pseudo handle of this process.
             return set_io(unsafe { GetCurrentProcess() }, false, on);
         }
-        with_process(pid.expect("not own"), PROCESS_SET_INFORMATION, |h| Some(set_io(h, false, on))).unwrap_or(false)
+        with_process(pid.expect("not own"), PROCESS_SET_INFORMATION, |h| {
+            Some(set_io(h, false, on))
+        })
+        .unwrap_or(false)
     }
 
     pub fn set_thread(on: bool) -> bool {
@@ -124,7 +143,11 @@ mod imp {
             // SAFETY: the pseudo handle of this process.
             get_io(unsafe { GetCurrentProcess() }, false)
         } else {
-            with_process(pid.expect("not own"), PROCESS_QUERY_LIMITED_INFORMATION, |h| get_io(h, false))
+            with_process(
+                pid.expect("not own"),
+                PROCESS_QUERY_LIMITED_INFORMATION,
+                |h| get_io(h, false),
+            )
         };
         value.map(|v| v < IO_PRIORITY_NORMAL)
     }
@@ -145,7 +168,10 @@ mod imp {
             Some(p) => format!("/proc/{p}/task"),
         };
         let mut out: Vec<libc::c_long> = std::fs::read_dir(base)
-            .map(|rd| rd.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok()).collect())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok()?.file_name().to_str()?.parse().ok())
+                    .collect()
+            })
             .unwrap_or_default();
         if out.is_empty() {
             out.push(pid.map_or(0, |p| p as libc::c_long));
@@ -155,14 +181,21 @@ mod imp {
     }
 
     fn set(tids: &[libc::c_long], on: bool) -> bool {
-        let prio = ((if on { IOPRIO_CLASS_IDLE } else { IOPRIO_CLASS_NONE }) << IOPRIO_CLASS_SHIFT) as libc::c_long;
+        let prio = ((if on {
+            IOPRIO_CLASS_IDLE
+        } else {
+            IOPRIO_CLASS_NONE
+        }) << IOPRIO_CLASS_SHIFT) as libc::c_long;
         let mut ok = false;
         for &tid in tids {
             // SAFETY: a plain syscall with integer arguments.
             if unsafe { libc::syscall(libc::SYS_ioprio_set, IOPRIO_WHO_PROCESS, tid, prio) } == 0 {
                 ok = true;
             } else {
-                tracing::debug!("ioprio_set({tid}) failed: {}", std::io::Error::last_os_error());
+                tracing::debug!(
+                    "ioprio_set({tid}) failed: {}",
+                    std::io::Error::last_os_error()
+                );
             }
         }
         ok
@@ -213,7 +246,13 @@ mod imp {
 
     fn set(scope: c_int, on: bool) -> bool {
         // SAFETY: plain libSystem call.
-        unsafe { setiopolicy_np(IOPOL_TYPE_DISK, scope, if on { IOPOL_THROTTLE } else { IOPOL_DEFAULT }) == 0 }
+        unsafe {
+            setiopolicy_np(
+                IOPOL_TYPE_DISK,
+                scope,
+                if on { IOPOL_THROTTLE } else { IOPOL_DEFAULT },
+            ) == 0
+        }
     }
 
     pub fn set_process(pid: Option<u32>, on: bool, _background_mode: bool) -> bool {
@@ -229,17 +268,33 @@ mod imp {
             return None;
         }
         // SAFETY: plain libSystem call.
-        let v = unsafe { getiopolicy_np(IOPOL_TYPE_DISK, if thread { IOPOL_SCOPE_THREAD } else { IOPOL_SCOPE_PROCESS }) };
+        let v = unsafe {
+            getiopolicy_np(
+                IOPOL_TYPE_DISK,
+                if thread {
+                    IOPOL_SCOPE_THREAD
+                } else {
+                    IOPOL_SCOPE_PROCESS
+                },
+            )
+        };
         (v >= 0).then_some(v == IOPOL_THROTTLE)
     }
 
     pub fn no_cloud_downloads() -> bool {
         // SAFETY: plain libSystem call.
         let ok = unsafe {
-            setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS, IOPOL_MATERIALIZE_DATALESS_FILES_OFF)
+            setiopolicy_np(
+                IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES,
+                IOPOL_SCOPE_PROCESS,
+                IOPOL_MATERIALIZE_DATALESS_FILES_OFF,
+            )
         } == 0;
         if !ok {
-            tracing::debug!("no_cloud_downloads: setiopolicy_np failed ({})", std::io::Error::last_os_error());
+            tracing::debug!(
+                "no_cloud_downloads: setiopolicy_np failed ({})",
+                std::io::Error::last_os_error()
+            );
         }
         ok
     }
@@ -327,9 +382,15 @@ mod tests {
     fn child_process_io_priority() {
         let _g = normal();
         #[cfg(windows)]
-        let mut child = std::process::Command::new("cmd").args(["/c", "ping -n 30 127.0.0.1 >NUL"]).spawn().unwrap();
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping -n 30 127.0.0.1 >NUL"])
+            .spawn()
+            .unwrap();
         #[cfg(unix)]
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
         let pid = child.id();
         std::thread::sleep(std::time::Duration::from_millis(100));
         let check = || {

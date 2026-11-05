@@ -31,8 +31,12 @@ use crate::volume_summaries::VolumeSummaries;
 /// Origins every server accepts besides those of [`ServeOptions::allow_origins`]: the app's own
 /// window (Tauri) and the Electron-era app scheme. A request without `Origin` (a native client)
 /// is accepted too.
-pub const DEFAULT_ORIGINS: [&str; 4] =
-    ["tauri://localhost", "http://tauri.localhost", "https://tauri.localhost", "app://spaceknife"];
+pub const DEFAULT_ORIGINS: [&str; 4] = [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "app://spaceknife",
+];
 
 /// How [`start`] serves (the contract with the GUI and the CLI).
 #[derive(Clone, Debug)]
@@ -166,7 +170,9 @@ pub struct Server {
 
 impl std::fmt::Debug for Server {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Server").field("url", &self.url()).finish_non_exhaustive()
+        f.debug_struct("Server")
+            .field("url", &self.url())
+            .finish_non_exhaustive()
     }
 }
 
@@ -187,7 +193,11 @@ impl Server {
 
     /// Open sessions.
     pub fn sessions(&self) -> Vec<Arc<Session>> {
-        self.sessions.lock().iter().filter_map(Weak::upgrade).collect()
+        self.sessions
+            .lock()
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect()
     }
 
     pub(crate) fn add_session(&self, s: &Arc<Session>) {
@@ -197,13 +207,19 @@ impl Server {
     }
 
     pub(crate) fn remove_session(self: &Arc<Self>, s: &Arc<Session>) {
-        self.sessions.lock().retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(s)));
+        self.sessions
+            .lock()
+            .retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(s)));
         self.views.close_session(&s.id);
         self.compares.close_session(self, &s.id);
     }
 
     /// Send an event to every session (optionally only those with a capability).
-    pub fn broadcast<E: sk_protocol::methods::Event>(&self, payload: &E::Payload, cap: Option<&str>) {
+    pub fn broadcast<E: sk_protocol::methods::Event>(
+        &self,
+        payload: &E::Payload,
+        cap: Option<&str>,
+    ) {
         for s in self.sessions() {
             if cap.is_none_or(|c| s.has_cap(c)) {
                 s.emit::<E>(payload);
@@ -295,7 +311,10 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
         anyhow::bail!("token must be at least 16 characters");
     }
     if !opts.host.is_loopback() {
-        tracing::warn!("binding to non-loopback host {} exposes the backend to the network", opts.host);
+        tracing::warn!(
+            "binding to non-loopback host {} exposes the backend to the network",
+            opts.host
+        );
     }
     if let Some(locale) = opts.system_locale.as_deref().filter(|l| !l.is_empty())
         && std::env::var_os("SPACEKNIFE_SYSTEM_LOCALE").is_none()
@@ -342,7 +361,11 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
                 let l = crate::http::TlsListener::new(listener, acceptor);
                 axum::serve(l, app).with_graceful_shutdown(shutdown).await
             }
-            None => axum::serve(listener, app).with_graceful_shutdown(shutdown).await,
+            None => {
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(shutdown)
+                    .await
+            }
         };
         if let Err(e) = served {
             tracing::error!("serving stopped: {e}");

@@ -54,14 +54,22 @@ pub fn normalize(tag: Option<&str>) -> Option<Language> {
     if t.is_empty() || t == "c" || t == "posix" {
         return None;
     }
-    Some(if t.starts_with("zh") { Language::ZhCn } else { Language::En })
+    Some(if t.starts_with("zh") {
+        Language::ZhCn
+    } else {
+        Language::En
+    })
 }
 
 #[cfg(windows)]
 fn windows_ui_language() -> Option<Language> {
     // SAFETY: no arguments, no failure mode.
     let langid = unsafe { windows_sys::Win32::Globalization::GetUserDefaultUILanguage() };
-    Some(if (langid & 0x3FF) == 0x04 { Language::ZhCn } else { Language::En }) // LANG_CHINESE
+    Some(if (langid & 0x3FF) == 0x04 {
+        Language::ZhCn
+    } else {
+        Language::En
+    }) // LANG_CHINESE
 }
 
 #[cfg(not(windows))]
@@ -158,7 +166,10 @@ static EN_CATALOG: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new
             Ok(map) => {
                 for (k, v) in map {
                     if !v.is_empty() {
-                        out.insert(&*Box::leak(k.into_boxed_str()), &*Box::leak(v.into_boxed_str()));
+                        out.insert(
+                            &*Box::leak(k.into_boxed_str()),
+                            &*Box::leak(v.into_boxed_str()),
+                        );
                     }
                 }
             }
@@ -283,7 +294,9 @@ fn format_arg(arg: &Arg, spec: &str) -> String {
         rest = &rest[1..];
     }
     let zero = rest.starts_with('0');
-    let wend = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+    let wend = rest
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(rest.len());
     let width: usize = rest[..wend].parse().unwrap_or(0);
     rest = &rest[wend..];
     let comma = rest.starts_with(',');
@@ -319,7 +332,9 @@ fn format_arg(arg: &Arg, spec: &str) -> String {
     match arg {
         Arg::Str(_) => format!("{body}{}", " ".repeat(pad)),
         _ if zero => {
-            let (sign, digits) = body.strip_prefix('-').map_or(("", body.as_str()), |d| ("-", d));
+            let (sign, digits) = body
+                .strip_prefix('-')
+                .map_or(("", body.as_str()), |d| ("-", d));
             format!("{sign}{}{digits}", "0".repeat(pad))
         }
         _ => format!("{}{body}", " ".repeat(pad)),
@@ -329,13 +344,19 @@ fn format_arg(arg: &Arg, spec: &str) -> String {
 fn format_float(f: f64, prec: usize, comma: bool) -> String {
     let s = format!("{:.*}", prec, f.abs());
     let s = if comma {
-        let (int, frac) = s.split_once('.').map_or((s.as_str(), None), |(a, b)| (a, Some(b)));
+        let (int, frac) = s
+            .split_once('.')
+            .map_or((s.as_str(), None), |(a, b)| (a, Some(b)));
         let g = group_thousands(int);
         frac.map_or(g.clone(), |fr| format!("{g}.{fr}"))
     } else {
         s
     };
-    if f.is_sign_negative() && f != 0.0 { format!("-{s}") } else { s }
+    if f.is_sign_negative() && f != 0.0 {
+        format!("-{s}")
+    } else {
+        s
+    }
 }
 
 /// `str(float)` as Python writes it (`1.0`, `2.5`).
@@ -393,14 +414,22 @@ pub fn format(template: &str, fields: &[(&str, Arg)]) -> String {
 /// `format(t(text), fields)` (no fields: just the translation).
 pub fn tr_with(text: &str, fields: &[(&str, Arg)]) -> String {
     let out = t(text);
-    if fields.is_empty() { out.to_owned() } else { format(out, fields) }
+    if fields.is_empty() {
+        out.to_owned()
+    } else {
+        format(out, fields)
+    }
 }
 
 /// `tr(text, fields)`, except one of something in English: `one` (an English literal), e.g.
 /// `plural(n, "{count} 个快照", "1 snapshot", &[("count", n.into())])`.
 pub fn plural(count: i64, text: &str, one: &str, fields: &[(&str, Arg)]) -> String {
     if count == 1 && language() == Language::En {
-        return if fields.is_empty() { one.to_owned() } else { format(one, fields) };
+        return if fields.is_empty() {
+            one.to_owned()
+        } else {
+            format(one, fields)
+        };
     }
     tr_with(text, fields)
 }
@@ -442,12 +471,18 @@ mod tests {
     #[test]
     fn formatting() {
         assert_eq!(format("没有这个词{n}", &[("n", 3.into())]), "没有这个词3");
-        assert_eq!(format("{a:.1f} {b:,} {c:#x} {d:02x} {{x}} {e}", &[
-            ("a", 2.25f64.into()),
-            ("b", 1234567.into()),
-            ("c", 255.into()),
-            ("d", 5.into()),
-        ]), "2.2 1,234,567 0xff 05 {x} {e}");
+        assert_eq!(
+            format(
+                "{a:.1f} {b:,} {c:#x} {d:02x} {{x}} {e}",
+                &[
+                    ("a", 2.25f64.into()),
+                    ("b", 1234567.into()),
+                    ("c", 255.into()),
+                    ("d", 5.into()),
+                ]
+            ),
+            "2.2 1,234,567 0xff 05 {x} {e}"
+        );
         assert_eq!(format("{f}", &[("f", 1.0f64.into())]), "1.0");
     }
 
@@ -456,14 +491,23 @@ mod tests {
         let _g = TEST_LOCK.lock();
         assert_eq!(t("未知空间"), "未知空间");
         set_language(Language::En);
-        assert!(!catalog(Language::En).is_empty(), "the English catalog is empty");
+        assert!(
+            !catalog(Language::En).is_empty(),
+            "the English catalog is empty"
+        );
         if let Some(english) = catalog(Language::En).get("未知空间") {
             assert_eq!(t("未知空间"), *english);
         }
         assert_eq!(t("没有这个词{n}"), "没有这个词{n}"); // no translation: the source text
         assert_eq!(tr!("没有这个词{n}", n = 3), "没有这个词3");
-        assert_eq!(plural(1, "{count} 个快照", "1 snapshot", &[("count", 1.into())]), "1 snapshot");
+        assert_eq!(
+            plural(1, "{count} 个快照", "1 snapshot", &[("count", 1.into())]),
+            "1 snapshot"
+        );
         set_language(Language::ZhCn);
-        assert_eq!(plural(1, "{count} 个快照", "1 snapshot", &[("count", 1.into())]), "1 个快照");
+        assert_eq!(
+            plural(1, "{count} 个快照", "1 snapshot", &[("count", 1.into())]),
+            "1 个快照"
+        );
     }
 }

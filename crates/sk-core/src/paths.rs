@@ -36,7 +36,9 @@ pub fn expand_user(path: &str) -> PathBuf {
 }
 
 fn home_override() -> Option<PathBuf> {
-    let value = std::env::var("SPACEKNIFE_HOME").ok().filter(|v| !v.is_empty())?;
+    let value = std::env::var("SPACEKNIFE_HOME")
+        .ok()
+        .filter(|v| !v.is_empty())?;
     let p = expand_user(&value);
     Some(std::path::absolute(&p).unwrap_or(p))
 }
@@ -61,7 +63,9 @@ fn platform_data_dir() -> PathBuf {
     #[cfg(windows)]
     return local_app_data().join(APP_NAME);
     #[cfg(target_os = "macos")]
-    return home_dir().join("Library/Application Support").join(APP_NAME);
+    return home_dir()
+        .join("Library/Application Support")
+        .join(APP_NAME);
     #[cfg(all(unix, not(target_os = "macos")))]
     return xdg("XDG_DATA_HOME", ".local/share").join(APP_NAME);
 }

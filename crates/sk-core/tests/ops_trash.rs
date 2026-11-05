@@ -56,7 +56,11 @@ fn held_open(path: &Path) -> File {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        std::fs::OpenOptions::new().read(true).share_mode(0x1).open(path).unwrap()
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0x1)
+            .open(path)
+            .unwrap()
     }
     #[cfg(not(windows))]
     File::open(path).unwrap()
@@ -89,7 +93,11 @@ fn make(dir: &Path) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(data.join("folder a").join("sub")).unwrap();
     let f = data.join("报告 final.txt");
     std::fs::write(&f, b"hello").unwrap();
-    std::fs::write(data.join("folder a").join("sub").join("x.bin"), b"x".repeat(10)).unwrap();
+    std::fs::write(
+        data.join("folder a").join("sub").join("x.bin"),
+        b"x".repeat(10),
+    )
+    .unwrap();
     (f, data.join("folder a"))
 }
 
@@ -132,29 +140,54 @@ fn trash_and_restore() {
         },
     );
     let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
-    let got: Vec<(OpCode, bool, String)> = res.iter().map(|r| (r.code, r.ok, r.message.clone())).collect();
+    let got: Vec<(OpCode, bool, String)> = res
+        .iter()
+        .map(|r| (r.code, r.ok, r.message.clone()))
+        .collect();
     assert_eq!(got, vec![(OpCode::Ok, true, text("trashed")); 2]);
-    assert_eq!(res.iter().map(|r| r.path.clone()).collect::<Vec<_>>(), [s(&f), s(&d)]);
+    assert_eq!(
+        res.iter().map(|r| r.path.clone()).collect::<Vec<_>>(),
+        [s(&f), s(&d)]
+    );
     assert!(!f.exists() && !d.exists());
     assert_eq!(seen, [(1, 2, OpCode::Ok), (2, 2, OpCode::Ok)]);
     if WIN {
         for (r, (original, size)) in res.iter().zip([(&f, 5), (&d, 10)]) {
             let info = Path::new(&r.trash_ref);
-            assert!(info.file_name().unwrap().to_string_lossy().starts_with("$I"));
-            let bin = info.parent().unwrap().parent().unwrap().file_name().unwrap();
+            assert!(
+                info.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("$I")
+            );
+            let bin = info
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap();
             assert_eq!(bin.to_string_lossy().to_lowercase(), "$recycle.bin");
             let (got_size, when, path) = parse_recycle_info(&std::fs::read(info).unwrap()).unwrap();
             assert!(same(&path, &s(original)) && got_size == size && when > 1.7e9);
         }
     } else {
         let info = PathBuf::from(&res[0].trash_ref);
-        assert_eq!(info.parent().unwrap(), base.join("xdg").join("Trash").join("info"));
+        assert_eq!(
+            info.parent().unwrap(),
+            base.join("xdg").join("Trash").join("info")
+        );
         let body = std::fs::read_to_string(&info).unwrap();
         assert!(body.starts_with("[Trash Info]\n"));
         let quoted = sk_core::ops::paths::quote_path(s(&f).as_bytes());
         assert!(body.contains(&format!("Path={quoted}\n")));
-        assert!(body.lines().any(|l| l.starts_with("DeletionDate=") && l.len() == "DeletionDate=2026-01-01T00:00:00".len()));
-        let landed = base.join("xdg").join("Trash").join("files").join(f.file_name().unwrap());
+        assert!(body.lines().any(|l| l.starts_with("DeletionDate=")
+            && l.len() == "DeletionDate=2026-01-01T00:00:00".len()));
+        let landed = base
+            .join("xdg")
+            .join("Trash")
+            .join("files")
+            .join(f.file_name().unwrap());
         assert_eq!(std::fs::read(landed).unwrap(), b"hello");
     }
     let back = restore(&res.iter().map(|r| r.trash_ref.clone()).collect::<Vec<_>>());
@@ -163,7 +196,10 @@ fn trash_and_restore() {
     trashed.0.clear();
     assert!(same(&back[0].path, &s(&f)) && same(&back[1].path, &s(&d)));
     assert_eq!(std::fs::read(&f).unwrap(), b"hello");
-    assert_eq!(std::fs::read(d.join("sub").join("x.bin")).unwrap(), b"x".repeat(10));
+    assert_eq!(
+        std::fs::read(d.join("sub").join("x.bin")).unwrap(),
+        b"x".repeat(10)
+    );
 }
 
 #[test]
@@ -208,10 +244,16 @@ fn prechecks_skip_items() {
     let handle = held_open(&held);
     let res = trash_all(&paths);
     let _trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
-    assert_eq!(codes(&res), [OpCode::Missing, OpCode::Protected, OpCode::Locked]);
+    assert_eq!(
+        codes(&res),
+        [OpCode::Missing, OpCode::Protected, OpCode::Locked]
+    );
     assert!(res[2].message.contains("使用"));
     let res = delete_permanently(&paths, OpOptions::default());
-    assert_eq!(codes(&res), [OpCode::Missing, OpCode::Protected, OpCode::Locked]);
+    assert_eq!(
+        codes(&res),
+        [OpCode::Missing, OpCode::Protected, OpCode::Locked]
+    );
     drop(handle);
     assert!(own.exists() && held.exists());
 }
@@ -244,11 +286,17 @@ fn cancel_midway() {
         },
     );
     let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
-    assert_eq!(codes(&res), [OpCode::Ok, OpCode::Cancelled, OpCode::Cancelled]);
+    assert_eq!(
+        codes(&res),
+        [OpCode::Ok, OpCode::Cancelled, OpCode::Cancelled]
+    );
     let exists: Vec<bool> = files.iter().map(|p| Path::new(p).exists()).collect();
     assert_eq!(exists, [false, true, true]);
     assert_eq!(seen.load(Ordering::SeqCst), 3); // every item gets its final result
-    assert_eq!(codes(&restore(std::slice::from_ref(&res[0].trash_ref))), [OpCode::Ok]);
+    assert_eq!(
+        codes(&restore(std::slice::from_ref(&res[0].trash_ref))),
+        [OpCode::Ok]
+    );
     trashed.0.clear();
 }
 
@@ -260,9 +308,14 @@ fn trash_status_of_a_folder() {
     let (base, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
     let status = trash_status(&s(dir.path()), true);
-    assert!(status.available && trash_available(&s(dir.path())), "{status:?}");
+    assert!(
+        status.available && trash_available(&s(dir.path())),
+        "{status:?}"
+    );
     if WIN {
-        assert!(status.location.contains("$Recycle.Bin") && status.used >= 0 && status.capacity > 0);
+        assert!(
+            status.location.contains("$Recycle.Bin") && status.used >= 0 && status.capacity > 0
+        );
     } else {
         assert_eq!(status.location, s(&base.join("xdg").join("Trash")));
     }
@@ -275,7 +328,11 @@ fn bad_refs_are_refused() {
     let fake = dir.path().join("info").join("x.trashinfo");
     std::fs::create_dir(fake.parent().unwrap()).unwrap();
     std::fs::write(&fake, "[Trash Info]\nPath=/etc/passwd\n").unwrap();
-    let res = restore(&[s(&fake), s(&dir.path().join("$Iabc.txt")), "not even a path".into()]);
+    let res = restore(&[
+        s(&fake),
+        s(&dir.path().join("$Iabc.txt")),
+        "not even a path".into(),
+    ]);
     assert_eq!(codes(&res), [OpCode::Error; 3]);
     assert!(res.iter().all(|r| r.message == text("bad_ref")));
 }
@@ -331,7 +388,10 @@ mod windows {
             },
         );
         assert_eq!(codes(&res), [OpCode::NoTrash, OpCode::NoTrash]);
-        assert!(res.iter().all(|r| r.message.starts_with("超出回收站容量")), "{res:?}");
+        assert!(
+            res.iter().all(|r| r.message.starts_with("超出回收站容量")),
+            "{res:?}"
+        );
         assert_eq!(std::fs::metadata(&big).unwrap().len(), 2000);
         assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 3);
     }
@@ -377,16 +437,25 @@ mod windows {
         trash::seams::MAX_PATH.store(100_000, Ordering::Relaxed); // only the guard is left
         let res = trash_all(&[s(&top), s(&other)]);
         let mut trashed = Trashed(res.iter().map(|r| r.trash_ref.clone()).collect());
-        assert_eq!((res[1].code, res[1].message.clone()), (OpCode::Ok, text("trashed")));
+        assert_eq!(
+            (res[1].code, res[1].message.clone()),
+            (OpCode::Ok, text("trashed"))
+        );
         match res[0].code {
             OpCode::NoTrash => assert_eq!(res[0].message, text("refused")),
             OpCode::Ok => {
-                assert_eq!(codes(&restore(std::slice::from_ref(&res[0].trash_ref))), [OpCode::Ok]);
+                assert_eq!(
+                    codes(&restore(std::slice::from_ref(&res[0].trash_ref))),
+                    [OpCode::Ok]
+                );
             }
             other => panic!("{other:?}: {res:?}"),
         }
         assert!(Path::new(&format!("{LP}{}", s(&leaf))).exists());
-        assert_eq!(codes(&restore(std::slice::from_ref(&res[1].trash_ref))), [OpCode::Ok]);
+        assert_eq!(
+            codes(&restore(std::slice::from_ref(&res[1].trash_ref))),
+            [OpCode::Ok]
+        );
         trashed.0.clear();
         assert_eq!(std::fs::read(&other).unwrap(), b"o");
         std::fs::remove_dir_all(format!("{LP}{}", s(&top))).unwrap();
@@ -445,12 +514,21 @@ mod freedesktop {
         let res = trash_all(&[s(&a), s(&b)]);
         let names: Vec<String> = res
             .iter()
-            .map(|r| Path::new(&r.trash_ref).file_name().unwrap().to_string_lossy().into_owned())
+            .map(|r| {
+                Path::new(&r.trash_ref)
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
             .collect();
         assert_eq!(names, ["same.txt.trashinfo", "same.2.txt.trashinfo"]);
         let back = restore(&res.iter().map(|r| r.trash_ref.clone()).collect::<Vec<_>>());
         assert_eq!(codes(&back), [OpCode::Ok, OpCode::Ok]);
-        assert_eq!((std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap()), (b"1".to_vec(), b"2".to_vec()));
+        assert_eq!(
+            (std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap()),
+            (b"1".to_vec(), b"2".to_vec())
+        );
     }
 
     static VOL: Mutex<Option<PathBuf>> = Mutex::new(None);
@@ -465,7 +543,8 @@ mod freedesktop {
         std::fs::write(&f, b"t").unwrap();
         if admin {
             std::fs::create_dir(vol.join(".Trash")).unwrap();
-            std::fs::set_permissions(vol.join(".Trash"), std::fs::Permissions::from_mode(0o1777)).unwrap();
+            std::fs::set_permissions(vol.join(".Trash"), std::fs::Permissions::from_mode(0o1777))
+                .unwrap();
         }
         *VOL.lock() = Some(vol.clone());
         *seams::EXISTING_DEV.lock() = Some(|_| Ok(u64::MAX)); // the home trash is elsewhere
@@ -473,12 +552,29 @@ mod freedesktop {
         let r = trash_all(&[s(&f)]).remove(0);
         // SAFETY: always succeeds
         let uid = unsafe { libc::getuid() };
-        let root = if admin { vol.join(".Trash").join(uid.to_string()) } else { vol.join(format!(".Trash-{uid}")) };
+        let root = if admin {
+            vol.join(".Trash").join(uid.to_string())
+        } else {
+            vol.join(format!(".Trash-{uid}"))
+        };
         assert_eq!(r.code, OpCode::Ok, "{r:?}");
-        assert_eq!(PathBuf::from(&r.trash_ref), root.join("info").join("a b.txt.trashinfo"));
-        assert_eq!(std::fs::metadata(&root).unwrap().permissions().mode() & 0o7777, 0o700);
-        assert!(std::fs::read_to_string(&r.trash_ref).unwrap().contains("Path=dir/a%20b.txt\n"));
-        assert_eq!(codes(&restore(std::slice::from_ref(&r.trash_ref))), [OpCode::Ok]);
+        assert_eq!(
+            PathBuf::from(&r.trash_ref),
+            root.join("info").join("a b.txt.trashinfo")
+        );
+        assert_eq!(
+            std::fs::metadata(&root).unwrap().permissions().mode() & 0o7777,
+            0o700
+        );
+        assert!(
+            std::fs::read_to_string(&r.trash_ref)
+                .unwrap()
+                .contains("Path=dir/a%20b.txt\n")
+        );
+        assert_eq!(
+            codes(&restore(std::slice::from_ref(&r.trash_ref))),
+            [OpCode::Ok]
+        );
         assert_eq!(std::fs::read(&f).unwrap(), b"t");
     }
 
@@ -516,7 +612,11 @@ mod freedesktop {
 fn parse_recycle_info_versions() {
     let path = r"C:\Users\u\报告.txt";
     let filetime: i64 = 133_000_000_000_000_000;
-    let units: Vec<u8> = path.encode_utf16().chain([0]).flat_map(u16::to_le_bytes).collect();
+    let units: Vec<u8> = path
+        .encode_utf16()
+        .chain([0])
+        .flat_map(u16::to_le_bytes)
+        .collect();
     let mut v2 = Vec::new();
     for x in [2i64, 1234, filetime] {
         v2.extend(x.to_le_bytes());
@@ -531,7 +631,10 @@ fn parse_recycle_info_versions() {
     padded.resize(520, 0);
     v1.extend(padded);
     let want = (filetime - 116_444_736_000_000_000) as f64 / 1e7;
-    assert_eq!(parse_recycle_info(&v2).unwrap(), (1234, want, path.to_string()));
+    assert_eq!(
+        parse_recycle_info(&v2).unwrap(),
+        (1234, want, path.to_string())
+    );
     let got = parse_recycle_info(&v1).unwrap();
     assert_eq!((got.0, got.2), (99, path.to_string()));
     let mut bad7 = Vec::new();
@@ -552,20 +655,37 @@ fn parse_recycle_info_versions() {
 #[test]
 fn parse_trashinfo_paths() {
     let body = "[Trash Info]\nPath=/home/u/a%20b/%E6%96%87.txt\nDeletionDate=2026-10-18T12:00:00\n";
-    assert_eq!(parse_trashinfo(body).unwrap(), "/home/u/a b/文.txt".as_bytes());
-    assert_eq!(parse_trashinfo("[Other]\nPath=/x\n[Trash Info]\nPath=rel/y\n").unwrap(), b"rel/y");
-    assert!(parse_trashinfo("[Other]\nPath=/x\n").unwrap_err().contains("no Path"));
+    assert_eq!(
+        parse_trashinfo(body).unwrap(),
+        "/home/u/a b/文.txt".as_bytes()
+    );
+    assert_eq!(
+        parse_trashinfo("[Other]\nPath=/x\n[Trash Info]\nPath=rel/y\n").unwrap(),
+        b"rel/y"
+    );
+    assert!(
+        parse_trashinfo("[Other]\nPath=/x\n")
+            .unwrap_err()
+            .contains("no Path")
+    );
 }
 
 #[test]
 fn rename_without_replacing() {
     let dir = tempfile::tempdir().unwrap();
-    let (a, b, c) = (dir.path().join("a"), dir.path().join("b"), dir.path().join("c"));
+    let (a, b, c) = (
+        dir.path().join("a"),
+        dir.path().join("b"),
+        dir.path().join("c"),
+    );
     std::fs::write(&a, b"a").unwrap();
     std::fs::write(&b, b"b").unwrap();
     let e = rename_noreplace(&a, &b).unwrap_err();
     assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
-    assert_eq!((std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap()), (b"a".to_vec(), b"b".to_vec()));
+    assert_eq!(
+        (std::fs::read(&a).unwrap(), std::fs::read(&b).unwrap()),
+        (b"a".to_vec(), b"b".to_vec())
+    );
     rename_noreplace(&a, &c).unwrap();
     assert_eq!(std::fs::read(&c).unwrap(), b"a");
     assert!(!a.exists());
@@ -650,7 +770,10 @@ fn delete_permanently_cancel() {
             ..OpOptions::default()
         },
     );
-    assert_eq!(codes(&res), [OpCode::Ok, OpCode::Cancelled, OpCode::Cancelled]);
+    assert_eq!(
+        codes(&res),
+        [OpCode::Ok, OpCode::Cancelled, OpCode::Cancelled]
+    );
     let exists: Vec<bool> = files.iter().map(|p| Path::new(p).exists()).collect();
     assert_eq!(exists, [false, true, true]);
 }
@@ -676,7 +799,10 @@ fn delete_inside_a_folder_can_be_cancelled() {
         },
     )
     .remove(0);
-    assert_eq!((r.code, r.message), (OpCode::Cancelled, text("cancelled_partly")));
+    assert_eq!(
+        (r.code, r.message),
+        (OpCode::Cancelled, text("cancelled_partly"))
+    );
     assert!(tree.exists());
 }
 
@@ -687,7 +813,11 @@ fn plain_paths_reach_themselves() {
     std::fs::create_dir_all(root.join("Sub")).unwrap();
     std::fs::write(root.join("Sub").join("a.txt"), b"a").unwrap();
     let mut names = HashMap::new();
-    assert!(!trash::reaches_another(&s(&root.join("Sub").join("a.txt")), &s(&root), &mut names));
+    assert!(!trash::reaches_another(
+        &s(&root.join("Sub").join("a.txt")),
+        &s(&root),
+        &mut names
+    ));
     assert!(!trash::reaches_another(&s(&root), &s(&root), &mut names)); // the root itself
     assert!(!trash::win32_trims(&s(&root.join("Sub"))));
     assert_eq!(trash::win32_trims(r"C:\odd.\x"), WIN);

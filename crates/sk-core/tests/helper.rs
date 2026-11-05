@@ -18,16 +18,20 @@ use std::time::{Duration, Instant};
 use sk_core::helper::auth::{new_token, read_token_file, write_token_file};
 use sk_core::helper::launch::start_subprocess;
 use sk_core::helper::messages::{
-    KIND_BINARY, KIND_JSON, MAX_CONTROL_BYTES, PROTOCOL_VERSION, Reply, Request, Call, Scalars, frame_header,
+    Call, KIND_BINARY, KIND_JSON, MAX_CONTROL_BYTES, PROTOCOL_VERSION, Reply, Request, Scalars,
+    frame_header,
 };
 use sk_core::helper::service::{Hooks, OpError, run_main_with};
 use sk_core::helper::transport::{Listener, connect};
 use sk_core::helper::usn::{
-    self, ERROR_ACCESS_DENIED, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER, ERROR_JOURNAL_DELETE_IN_PROGRESS,
-    ERROR_JOURNAL_ENTRY_DELETED, ERROR_JOURNAL_NOT_ACTIVE, ERROR_NOT_SUPPORTED, ERROR_PRIVILEGE_NOT_HELD, Journal,
-    ReadOptions, UsnDevice, UsnError, UsnRows,
+    self, ERROR_ACCESS_DENIED, ERROR_INVALID_FUNCTION, ERROR_INVALID_PARAMETER,
+    ERROR_JOURNAL_DELETE_IN_PROGRESS, ERROR_JOURNAL_ENTRY_DELETED, ERROR_JOURNAL_NOT_ACTIVE,
+    ERROR_NOT_SUPPORTED, ERROR_PRIVILEGE_NOT_HELD, Journal, ReadOptions, UsnDevice, UsnError,
+    UsnRows,
 };
-use sk_core::helper::{HelperClient, HelperError, LaunchOptions, MftOptions, Phase, SharedHelper, is_elevated};
+use sk_core::helper::{
+    HelperClient, HelperError, LaunchOptions, MftOptions, Phase, SharedHelper, is_elevated,
+};
 use sk_native::mft::MftTable;
 
 // --------------------------------------------------------------------------- the helper entry
@@ -38,7 +42,9 @@ const MODE_FLAG: &str = "--sk-helper-mode";
 #[test]
 fn helper_entry() {
     let args: Vec<OsString> = std::env::args_os().collect();
-    let Some(i) = args.iter().position(|a| a == MODE_FLAG) else { return };
+    let Some(i) = args.iter().position(|a| a == MODE_FLAG) else {
+        return;
+    };
     let mode = args[i + 1].to_string_lossy().into_owned();
     let rest = args[i + 2..].to_vec();
     std::process::exit(run_mode(&mode, &rest));
@@ -73,7 +79,9 @@ fn run_mode(mode: &str, args: &[OsString]) -> i32 {
             args,
             Hooks {
                 elevated: Some(true), // claimed only: the process itself is unprivileged
-                open_usn: Some(Box::new(|v| journal_for(v).map(|j| Box::new(j) as Box<dyn UsnDevice>))),
+                open_usn: Some(Box::new(|v| {
+                    journal_for(v).map(|j| Box::new(j) as Box<dyn UsnDevice>)
+                })),
                 check_ntfs: Some(Box::new(fake_check_ntfs)),
                 ..Default::default()
             },
@@ -98,7 +106,10 @@ fn fake_helper(mode: &str, args: &[OsString]) -> i32 {
         // a process the backend did not launch connects instead
         let mut cmd = command("honest");
         cmd.extend_from_slice(args);
-        let status = std::process::Command::new(&cmd[0]).args(&cmd[1..]).status().unwrap();
+        let status = std::process::Command::new(&cmd[0])
+            .args(&cmd[1..])
+            .status()
+            .unwrap();
         return status.code().unwrap_or(1);
     }
     let token = read_token_file(Path::new(&arg(args, "--token-file"))).unwrap();
@@ -107,7 +118,11 @@ fn fake_helper(mode: &str, args: &[OsString]) -> i32 {
     let pid = std::process::id() + u32::from(mode == "wrong_pid");
     let hello = Reply::Hello {
         version: PROTOCOL_VERSION,
-        token: if mode == "wrong_token" { "0".repeat(64) } else { token },
+        token: if mode == "wrong_token" {
+            "0".repeat(64)
+        } else {
+            token
+        },
         pid,
         elevated: false,
     };
@@ -115,7 +130,11 @@ fn fake_helper(mode: &str, args: &[OsString]) -> i32 {
         chan.send_message(&hello, t).unwrap();
     }
     if let Some(garbage) = mode.strip_prefix("garbage_") {
-        let _ = chan.read_frame(Some(Duration::from_secs(30)), Some(Duration::from_secs(30)), 1 << 20);
+        let _ = chan.read_frame(
+            Some(Duration::from_secs(30)),
+            Some(Duration::from_secs(30)),
+            1 << 20,
+        );
         let _ = match garbage {
             "kind" => chan.send(&[&5u32.to_le_bytes(), &[0x00], b"abcd"], t),
             "json" => chan.send(&[&frame_header(KIND_JSON, 8), b"not json"], t),
@@ -125,7 +144,14 @@ fn fake_helper(mode: &str, args: &[OsString]) -> i32 {
             _ => unreachable!(),
         };
     }
-    while chan.read_frame(Some(Duration::from_secs(60)), Some(Duration::from_secs(60)), 1 << 20).is_ok() {}
+    while chan
+        .read_frame(
+            Some(Duration::from_secs(60)),
+            Some(Duration::from_secs(60)),
+            1 << 20,
+        )
+        .is_ok()
+    {}
     0
 }
 
@@ -167,22 +193,37 @@ fn synth(rows: usize, shuffle: bool) -> MftTable {
         macro_rules! permute {
             ($($f:ident),*) => { $( t.$f = perm.iter().map(|&p| t.$f[p]).collect(); )* };
         }
-        permute!(record, parent, name_off, name_len, kind, flags, size, alloc, ads_size, ads_alloc, mtime, ctime, atime, nlink);
+        permute!(
+            record, parent, name_off, name_len, kind, flags, size, alloc, ads_size, ads_alloc,
+            mtime, ctime, atime, nlink
+        );
     }
     t
 }
 
 fn spec(data: &str) -> std::collections::HashMap<String, String> {
-    data.split_whitespace().filter_map(|p| p.split_once('=')).map(|(k, v)| (k.into(), v.into())).collect()
+    data.split_whitespace()
+        .filter_map(|p| p.split_once('='))
+        .map(|(k, v)| (k.into(), v.into()))
+        .collect()
 }
 
 /// The image file holds a spec (`rows=N shuffle=1 sleep=1.3 record=4096 cluster=8192 fail=io`).
-fn fake_scan_image(path: &str, duty: f64, progress: &mut dyn FnMut(u64, u64)) -> io::Result<(MftTable, Scalars)> {
+fn fake_scan_image(
+    path: &str,
+    duty: f64,
+    progress: &mut dyn FnMut(u64, u64),
+) -> io::Result<(MftTable, Scalars)> {
     let data = std::fs::read_to_string(path)?;
     let s = spec(&data);
     match s.get("fail").map(String::as_str) {
         Some("io") => return Err(io::Error::other("simulated read error")),
-        Some("bad") => return Err(io::Error::new(io::ErrorKind::InvalidData, "not an NTFS volume image")),
+        Some("bad") => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not an NTFS volume image",
+            ));
+        }
         _ => {}
     }
     let get = |k: &str, d: u64| s.get(k).map_or(d, |v| v.parse().unwrap());
@@ -194,8 +235,16 @@ fn fake_scan_image(path: &str, duty: f64, progress: &mut dyn FnMut(u64, u64)) ->
     geo.insert("cluster_size".into(), get("cluster", 4096).into());
     geo.insert("duty_seen".into(), ((duty * 1000.0) as u64).into());
     progress(data.len() as u64 / 2, data.len() as u64); // half read while the (slow) parse runs
-    std::thread::sleep(Duration::from_secs_f64(s.get("sleep").map_or(0.0, |v| v.parse().unwrap())));
-    Ok((synth(get("rows", 0) as usize, s.get("shuffle").map(String::as_str) == Some("1")), geo))
+    std::thread::sleep(Duration::from_secs_f64(
+        s.get("sleep").map_or(0.0, |v| v.parse().unwrap()),
+    ));
+    Ok((
+        synth(
+            get("rows", 0) as usize,
+            s.get("shuffle").map(String::as_str) == Some("1"),
+        ),
+        geo,
+    ))
 }
 
 fn gather(names: &[u8], off: &[u32], len: &[u16]) -> Vec<u8> {
@@ -211,8 +260,14 @@ fn assert_tables_equal(got: &MftTable, want: &MftTable) {
     macro_rules! same {
         ($($f:ident),*) => { $( assert_eq!(got.$f, want.$f, stringify!($f)); )* };
     }
-    same!(record, parent, name_len, kind, flags, size, alloc, ads_size, ads_alloc, mtime, ctime, atime, nlink);
-    assert_eq!(gather(&got.names, &got.name_off, &got.name_len), gather(&want.names, &want.name_off, &want.name_len));
+    same!(
+        record, parent, name_len, kind, flags, size, alloc, ads_size, ads_alloc, mtime, ctime,
+        atime, nlink
+    );
+    assert_eq!(
+        gather(&got.names, &got.name_off, &got.name_len),
+        gather(&want.names, &want.name_off, &want.name_len)
+    );
 }
 
 fn image(dir: &Path, spec: &str) -> String {
@@ -252,7 +307,9 @@ fn launch_err(o: LaunchOptions) -> HelperError {
 
 fn kill(pid: u32) {
     #[cfg(windows)]
-    let _ = std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output();
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .output();
     #[cfg(unix)]
     // SAFETY: plain syscall.
     unsafe {
@@ -294,14 +351,22 @@ fn hello_ping_and_close() {
 fn scan_mft_needs_admin_and_real_reader_errors() {
     if unprivileged() {
         let client = launch("real");
-        let err = client.scan_mft("C:", MftOptions::default(), None).unwrap_err();
+        let err = client
+            .scan_mft("C:", MftOptions::default(), None)
+            .unwrap_err();
         assert_eq!(err.code, "needs_admin");
-        assert!(err.message.contains("需要管理员权限") || err.message.contains("admin"), "{}", err.message);
+        assert!(
+            err.message.contains("需要管理员权限") || err.message.contains("admin"),
+            "{}",
+            err.message
+        );
         assert!(!err.is_unavailable());
         // the real image reader on something that is not an NTFS image
         let dir = tempfile::tempdir().unwrap();
         let path = image(dir.path(), "not a volume");
-        let err = client.scan_mft_image(&path, MftOptions::default(), None).unwrap_err();
+        let err = client
+            .scan_mft_image(&path, MftOptions::default(), None)
+            .unwrap_err();
         assert_eq!(err.code, "io_error", "{}", err.message);
         assert_eq!(client.ping().unwrap()["pid"], client.pid()); // still usable
     }
@@ -316,7 +381,10 @@ fn volume_info() {
             let info = helper.volume_info(&system.to_lowercase()).unwrap();
             assert_eq!(info["volume"], system.to_uppercase());
             assert_eq!(info["fs_type"], "NTFS");
-            assert!(info["cluster_size"].as_u64().unwrap() > 0 && info["bytes_per_sector"].as_u64().unwrap() > 0);
+            assert!(
+                info["cluster_size"].as_u64().unwrap() > 0
+                    && info["bytes_per_sector"].as_u64().unwrap() > 0
+            );
             assert!(!info.contains_key("record_size")); // FSCTL data needs administrator rights
         } else {
             assert_eq!(helper.volume_info("C:").unwrap_err().code, "not_supported");
@@ -334,7 +402,10 @@ fn scan_mft_image_roundtrip() {
         let rows = 25_000;
         let mut phases = Vec::new();
         let mut read = Vec::new();
-        let path = image(dir.path(), &format!("rows={rows} shuffle=1 sleep=1.3 record=4096 cluster=8192"));
+        let path = image(
+            dir.path(),
+            &format!("rows={rows} shuffle=1 sleep=1.3 record=4096 cluster=8192"),
+        );
         let mut on_progress = |phase: Phase, _elapsed: f64, fraction: Option<f64>| {
             phases.push(phase);
             read.push(fraction);
@@ -343,13 +414,27 @@ fn scan_mft_image_roundtrip() {
             batch_rows: 6000,
             duty: 0.5,
         };
-        let table = helper.scan_mft_image(&path, opts, Some(&mut on_progress)).unwrap();
+        let table = helper
+            .scan_mft_image(&path, opts, Some(&mut on_progress))
+            .unwrap();
         assert_tables_equal(&table, &synth(rows, true));
         assert_eq!(table.bad_records, 7); // the table's scalars come back with it
         let stats = helper.last_scan();
-        assert_eq!((stats["frames"].as_u64(), stats["rows"].as_u64()), (Some(5), Some(rows as u64)));
-        assert_eq!((stats["record_size"].as_u64(), stats["cluster_size"].as_u64()), (Some(4096), Some(8192)));
-        assert_eq!(stats["mft_size"].as_u64(), Some(std::fs::metadata(&path).unwrap().len()));
+        assert_eq!(
+            (stats["frames"].as_u64(), stats["rows"].as_u64()),
+            (Some(5), Some(rows as u64))
+        );
+        assert_eq!(
+            (
+                stats["record_size"].as_u64(),
+                stats["cluster_size"].as_u64()
+            ),
+            (Some(4096), Some(8192))
+        );
+        assert_eq!(
+            stats["mft_size"].as_u64(),
+            Some(std::fs::metadata(&path).unwrap().len())
+        );
         assert_eq!(stats["duty_seen"].as_u64(), Some(500));
         assert!(phases.contains(&Phase::Scan)); // heartbeats while the (slow) scan ran
         assert!(read.iter().any(|f| f.is_some_and(|f| 0.45 < f && f <= 0.5))); // carrying how much was read
@@ -376,10 +461,14 @@ fn stream_batches_and_abandon() {
             .unwrap();
         assert_eq!(sizes, [3000, 3000, 3000, 1000]);
         // abandon: the rest of the stream is skipped, the helper stays usable
-        helper.stream_mft_image(&path, opts(1000), None, &mut |_| ControlFlow::Break(())).unwrap();
+        helper
+            .stream_mft_image(&path, opts(1000), None, &mut |_| ControlFlow::Break(()))
+            .unwrap();
         assert!(helper.alive());
         assert_eq!(helper.ping().unwrap()["pid"], helper.pid());
-        let empty = helper.scan_mft_image(&image(dir.path(), "rows=0"), MftOptions::default(), None).unwrap();
+        let empty = helper
+            .scan_mft_image(&image(dir.path(), "rows=0"), MftOptions::default(), None)
+            .unwrap();
         assert_eq!((empty.rows(), empty.names.len()), (0, 0));
     }
 }
@@ -390,11 +479,15 @@ fn scan_errors_keep_the_helper() {
         let helper = launch("fake_mft");
         let dir = tempfile::tempdir().unwrap();
         for spec in ["rows=1 fail=io", "rows=1 fail=bad"] {
-            let err = helper.scan_mft_image(&image(dir.path(), spec), MftOptions::default(), None).unwrap_err();
+            let err = helper
+                .scan_mft_image(&image(dir.path(), spec), MftOptions::default(), None)
+                .unwrap_err();
             assert!(err.code == "io_error" && !err.is_unavailable(), "{err:?}");
         }
         let missing = dir.path().join("missing.img");
-        let err = helper.scan_mft_image(&missing.to_string_lossy(), MftOptions::default(), None).unwrap_err();
+        let err = helper
+            .scan_mft_image(&missing.to_string_lossy(), MftOptions::default(), None)
+            .unwrap_err();
         assert_eq!(err.code, "io_error");
         assert_eq!(helper.ping().unwrap()["pid"], helper.pid());
     }
@@ -408,10 +501,15 @@ fn scan_mft_image_throughput() {
         let rows = 3_000_000;
         let path = image(dir.path(), &format!("rows={rows}"));
         let t0 = Instant::now();
-        let table = helper.scan_mft_image(&path, MftOptions::default(), None).unwrap();
+        let table = helper
+            .scan_mft_image(&path, MftOptions::default(), None)
+            .unwrap();
         let elapsed = t0.elapsed().as_secs_f64();
         let stats = helper.last_scan();
-        assert_eq!((stats["frames"].as_u64(), stats["rows"].as_u64()), (Some(3), Some(rows as u64)));
+        assert_eq!(
+            (stats["frames"].as_u64(), stats["rows"].as_u64()),
+            (Some(3), Some(rows as u64))
+        );
         assert_tables_equal(&table, &synth(rows, false));
         let wire = stats["wire_bytes"].as_u64().unwrap();
         let transfer = elapsed - stats["scan_seconds"].as_f64().unwrap();
@@ -513,11 +611,19 @@ fn shared_helper_is_reused() {
 
 #[test]
 fn handshake_rejects_impostors() {
-    for (mode, why) in [("wrong_token", "令牌不符"), ("wrong_pid", "不符"), ("child", "不是启动的进程")] {
+    for (mode, why) in [
+        ("wrong_token", "令牌不符"),
+        ("wrong_pid", "不符"),
+        ("child", "不是启动的进程"),
+    ] {
         let err = launch_err(opts(mode));
         assert_eq!(err.code, "auth", "{mode}: {err:?}");
         assert!(err.is_unavailable());
-        assert!(err.message.contains(why) || sk_core::i18n::language() != sk_core::i18n::SOURCE, "{mode}: {}", err.message);
+        assert!(
+            err.message.contains(why) || sk_core::i18n::language() != sk_core::i18n::SOURCE,
+            "{mode}: {}",
+            err.message
+        );
     }
 }
 
@@ -552,15 +658,26 @@ fn helper_refuses_bad_arguments() {
     let run = |extra: &[&str]| {
         let cmd = command("real");
         let mut c = std::process::Command::new(&cmd[0]);
-        c.args(&cmd[1..]).args(["--server-pid", &std::process::id().to_string()]).args(extra);
-        c.stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        c.args(&cmd[1..])
+            .args(["--server-pid", &std::process::id().to_string()])
+            .args(extra);
+        c.stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
         c.status().unwrap().code()
     };
-    let bad_pipe = run(&["--pipe", r"C:\Windows\win.ini", "--token-file", &token_path.to_string_lossy()]);
+    let bad_pipe = run(&[
+        "--pipe",
+        r"C:\Windows\win.ini",
+        "--token-file",
+        &token_path.to_string_lossy(),
+    ]);
     assert_eq!(bad_pipe, Some(3));
     assert!(!token_path.exists()); // read and deleted before anything else
     let missing = dir.path().join("nope.token");
-    assert_eq!(run(&["--pipe", "x", "--token-file", &missing.to_string_lossy()]), Some(2));
+    assert_eq!(
+        run(&["--pipe", "x", "--token-file", &missing.to_string_lossy()]),
+        Some(2)
+    );
     assert_eq!(run(&["--pipe", "x"]), Some(2)); // a required argument is missing
 }
 
@@ -568,13 +685,25 @@ fn helper_refuses_bad_arguments() {
 
 #[test]
 fn client_survives_malformed_helper() {
-    for mode in ["garbage_kind", "garbage_json", "garbage_id", "garbage_binary", "garbage_huge"] {
+    for mode in [
+        "garbage_kind",
+        "garbage_json",
+        "garbage_id",
+        "garbage_binary",
+        "garbage_huge",
+    ] {
         let client = launch(mode);
         let err = client.ping().unwrap_err();
-        assert!(err.is_unavailable() && err.code == "protocol", "{mode}: {err:?}");
+        assert!(
+            err.is_unavailable() && err.code == "protocol",
+            "{mode}: {err:?}"
+        );
         assert!(!client.alive());
         client.close();
-        assert!(client.wait_exit(Duration::from_secs(10)).is_some(), "{mode}");
+        assert!(
+            client.wait_exit(Duration::from_secs(10)).is_some(),
+            "{mode}"
+        );
     }
 }
 
@@ -587,41 +716,84 @@ fn helper_survives_malformed_requests() {
         let token_path = write_token_file(&token, Some(dir.path())).unwrap();
         let mut argv = command("real");
         argv.extend(
-            ["--pipe", listener.address(), "--token-file", &token_path.to_string_lossy(), "--server-pid", &std::process::id().to_string()]
-                .map(OsString::from),
+            [
+                "--pipe",
+                listener.address(),
+                "--token-file",
+                &token_path.to_string_lossy(),
+                "--server-pid",
+                &std::process::id().to_string(),
+            ]
+            .map(OsString::from),
         );
         let mut process = start_subprocess(&argv).unwrap();
         let deadline = Instant::now() + Duration::from_secs(30);
         let chan = loop {
             match listener.accept(Duration::from_millis(250)) {
                 Ok(c) => break c,
-                Err(e) if e.kind() == io::ErrorKind::TimedOut && Instant::now() < deadline => continue,
+                Err(e) if e.kind() == io::ErrorKind::TimedOut && Instant::now() < deadline => {
+                    continue;
+                }
                 Err(e) => panic!("{e}"),
             }
         };
         listener.close();
         let t = Some(Duration::from_secs(10));
         let (_, hello) = chan.read_frame(t, t, 0).unwrap();
-        assert!(matches!(Reply::parse(&hello).unwrap(), Reply::Hello { token: theirs, .. } if theirs == token));
+        assert!(
+            matches!(Reply::parse(&hello).unwrap(), Reply::Hello { token: theirs, .. } if theirs == token)
+        );
         let send_raw = |kind: u8, body: &[u8]| {
-            chan.send(&[&frame_header(kind, body.len()), body], t).unwrap();
+            chan.send(&[&frame_header(kind, body.len()), body], t)
+                .unwrap();
             let (_, reply) = chan.read_frame(t, t, 1 << 20).unwrap();
             Reply::parse(&reply).unwrap()
         };
         let is_error = |r: &Reply, code: &str, id: Option<u64>| matches!(r, Reply::Error { code: c, id: i, .. } if c == code && *i == id);
-        assert!(is_error(&send_raw(KIND_JSON, b"not json at all"), "invalid_request", None));
-        let r = send_raw(KIND_JSON, br#"{"type":"request","id":7,"call":{"op":"format_disk"}}"#);
+        assert!(is_error(
+            &send_raw(KIND_JSON, b"not json at all"),
+            "invalid_request",
+            None
+        ));
+        let r = send_raw(
+            KIND_JSON,
+            br#"{"type":"request","id":7,"call":{"op":"format_disk"}}"#,
+        );
         assert!(is_error(&r, "invalid_request", Some(7)), "{r:?}");
-        let r = send_raw(KIND_JSON, br#"{"type":"request","id":8,"call":{"op":"scan_mft","volume":"C:\\Windows"}}"#);
-        assert!(matches!(&r, Reply::Error { id: Some(8), message, .. } if message.contains("volume")), "{r:?}");
-        let r = send_raw(KIND_JSON, br#"{"type":"request","id":9,"call":{"op":"scan_mft_image","path":""}}"#);
+        let r = send_raw(
+            KIND_JSON,
+            br#"{"type":"request","id":8,"call":{"op":"scan_mft","volume":"C:\\Windows"}}"#,
+        );
+        assert!(
+            matches!(&r, Reply::Error { id: Some(8), message, .. } if message.contains("volume")),
+            "{r:?}"
+        );
+        let r = send_raw(
+            KIND_JSON,
+            br#"{"type":"request","id":9,"call":{"op":"scan_mft_image","path":""}}"#,
+        );
         assert!(matches!(r, Reply::Error { id: Some(9), .. }));
-        assert!(is_error(&send_raw(KIND_BINARY, &[0; 16]), "invalid_request", None));
-        chan.send_message(&Request::new(10, Call::Ping {}), t).unwrap();
+        assert!(is_error(
+            &send_raw(KIND_BINARY, &[0; 16]),
+            "invalid_request",
+            None
+        ));
+        chan.send_message(&Request::new(10, Call::Ping {}), t)
+            .unwrap();
         let (_, body) = chan.read_frame(t, t, 1 << 20).unwrap();
-        assert!(matches!(Reply::parse(&body).unwrap(), Reply::Response { id: 10, .. }));
+        assert!(matches!(
+            Reply::parse(&body).unwrap(),
+            Reply::Response { id: 10, .. }
+        ));
         // oversized: the stream is lost
-        chan.send(&[&((MAX_CONTROL_BYTES + 100) as u32).to_le_bytes(), &[KIND_JSON]], t).unwrap();
+        chan.send(
+            &[
+                &((MAX_CONTROL_BYTES + 100) as u32).to_le_bytes(),
+                &[KIND_JSON],
+            ],
+            t,
+        )
+        .unwrap();
         let (_, body) = chan.read_frame(t, t, 1 << 20).unwrap();
         assert!(is_error(&Reply::parse(&body).unwrap(), "bad_frame", None));
         assert!(chan.read_frame(t, t, 1 << 20).is_err());
@@ -637,8 +809,8 @@ fn helper_survives_malformed_requests() {
 #[cfg(windows)]
 mod uac {
     use super::*;
-    use sk_core::helper::launch::{Elevator, HelperProcess};
     use sk_core::helper::launch::ShellExecuteParams;
+    use sk_core::helper::launch::{Elevator, HelperProcess};
     use std::sync::Mutex;
 
     fn split_cmdline(cmdline: &str) -> Vec<OsString> {
@@ -661,7 +833,9 @@ mod uac {
         }
     }
 
-    fn elevator(f: impl Fn(&ShellExecuteParams) -> io::Result<Box<dyn HelperProcess>> + Send + Sync + 'static) -> Elevator {
+    fn elevator(
+        f: impl Fn(&ShellExecuteParams) -> io::Result<Box<dyn HelperProcess>> + Send + Sync + 'static,
+    ) -> Elevator {
         Elevator {
             shell_execute: Arc::new(f),
             ..Elevator::default()
@@ -685,8 +859,17 @@ mod uac {
         let calls = calls.lock().unwrap();
         let params = &calls[0];
         assert_eq!(params.verb, "runas");
-        assert_eq!(params.file, std::env::current_exe().unwrap().to_string_lossy());
-        assert!(params.parameters.starts_with(r"helper --pipe \\.\pipe\spaceknife-helper-"), "{}", params.parameters);
+        assert_eq!(
+            params.file,
+            std::env::current_exe().unwrap().to_string_lossy()
+        );
+        assert!(
+            params
+                .parameters
+                .starts_with(r"helper --pipe \\.\pipe\spaceknife-helper-"),
+            "{}",
+            params.parameters
+        );
         let argv = split_cmdline(&params.parameters);
         let i = argv.iter().position(|a| a == "--token-file").unwrap();
         assert!(!Path::new(&argv[i + 1]).exists()); // cleaned up after the refusal
@@ -733,11 +916,16 @@ mod uac {
         // the real ShellExecuteExW with the "open" verb (no prompt): a process handle comes back
         let params = ShellExecuteParams {
             verb: "open".into(),
-            file: std::env::current_exe().unwrap().to_string_lossy().into_owned(),
+            file: std::env::current_exe()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned(),
             parameters: "helper_entry --exact -- --sk-helper-mode exit5".into(),
             directory: None,
             show: 0,
-            mask: sk_core::helper::launch::SEE_MASK_NOCLOSEPROCESS | sk_core::helper::launch::SEE_MASK_FLAG_NO_UI | sk_core::helper::launch::SEE_MASK_NOASYNC,
+            mask: sk_core::helper::launch::SEE_MASK_NOCLOSEPROCESS
+                | sk_core::helper::launch::SEE_MASK_FLAG_NO_UI
+                | sk_core::helper::launch::SEE_MASK_NOASYNC,
         };
         let mut proc = sk_core::helper::win32::shell_execute(&params).unwrap();
         assert!(proc.pid() > 0);
@@ -779,7 +967,9 @@ fn launch_through_a_stand_in_pkexec() {
         client.close();
         write("exit 126");
         assert!(launch_err(elevated_opts()).is_denied());
-        write("echo 'Error executing command as another user: No authentication agent found.' >&2; exit 127");
+        write(
+            "echo 'Error executing command as another user: No authentication agent found.' >&2; exit 127",
+        );
         assert_eq!(launch_err(elevated_opts()).code, "no_agent");
     }
 }
@@ -789,7 +979,14 @@ fn disk_health_needs_linux_and_admin() {
     if unprivileged() {
         let helper = launch("fake_mft");
         let err = helper.disk_health("nvme0n1").unwrap_err();
-        assert_eq!(err.code, if cfg!(target_os = "linux") { "needs_admin" } else { "not_supported" });
+        assert_eq!(
+            err.code,
+            if cfg!(target_os = "linux") {
+                "needs_admin"
+            } else {
+                "not_supported"
+            }
+        );
         assert!(!err.is_unavailable());
         assert_eq!(helper.ping().unwrap()["pid"], helper.pid()); // still usable
         for bad in ["../etc/shadow", "sda1", "loop0"] {
@@ -818,7 +1015,16 @@ fn utf16(s: &str) -> Vec<u16> {
 
 /// One USN_RECORD_V2 / V3 (or a V4 range record, which has no name).
 #[allow(clippy::too_many_arguments)]
-fn record(frn: u64, parent: u64, usn: i64, name: &[u16], version: u16, reason: u32, attrs: u32, pad: usize) -> Vec<u8> {
+fn record(
+    frn: u64,
+    parent: u64,
+    usn: i64,
+    name: &[u16],
+    version: u16,
+    reason: u32,
+    attrs: u32,
+    pad: usize,
+) -> Vec<u8> {
     if version == 4 {
         let mut r = Vec::new();
         r.extend_from_slice(&64u32.to_le_bytes());
@@ -875,7 +1081,11 @@ fn canonical(units: &[u16]) -> Vec<u8> {
             Ok(c) => out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
             Err(e) => {
                 let u = e.unpaired_surrogate() as u32;
-                out.extend_from_slice(&[0xE0 | (u >> 12) as u8, 0x80 | ((u >> 6) & 0x3F) as u8, 0x80 | (u & 0x3F) as u8]);
+                out.extend_from_slice(&[
+                    0xE0 | (u >> 12) as u8,
+                    0x80 | ((u >> 6) & 0x3F) as u8,
+                    0x80 | (u & 0x3F) as u8,
+                ]);
             }
         }
     }
@@ -994,13 +1204,22 @@ impl UsnDevice for FakeJournal {
         }
         if self.recreate_on_read {
             self.journal_id += 1;
-            return Err(UsnError::new("io_error", "读取失败：[WinError 87] 参数错误。"));
+            return Err(UsnError::new(
+                "io_error",
+                "读取失败：[WinError 87] 参数错误。",
+            ));
         }
         if journal_id != self.journal_id {
-            return Err(UsnError::new("io_error", "读取失败：[WinError 87] 参数错误。"));
+            return Err(UsnError::new(
+                "io_error",
+                "读取失败：[WinError 87] 参数错误。",
+            ));
         }
         if start_usn < self.first_usn {
-            return Err(UsnError::new("usn_gone", "读取失败：[WinError 1181] 日志项已删除。"));
+            return Err(UsnError::new(
+                "usn_gone",
+                "读取失败：[WinError 1181] 日志项已删除。",
+            ));
         }
         if self.garbage {
             let mut b = self.next_usn.to_le_bytes().to_vec();
@@ -1024,7 +1243,10 @@ impl UsnDevice for FakeJournal {
             out.push(r.clone());
         }
         if out.is_empty() && nxt != self.next_usn {
-            return Err(UsnError::new("io_error", "读取失败：[WinError 122] 缓冲区太小。"));
+            return Err(UsnError::new(
+                "io_error",
+                "读取失败：[WinError 122] 缓冲区太小。",
+            ));
         }
         for i in 0..self.grow {
             // the volume keeps changing while we read
@@ -1078,25 +1300,57 @@ fn parse_v2_records() {
     let mut recs = Vec::new();
     let mut pos = 4096;
     for (i, name) in names.iter().enumerate() {
-        recs.push(record(100 + i as u64, 5, pos, &utf16(name), 2, 0x8000_0100 + i as u32, 0x10 * i as u32, 0));
+        recs.push(record(
+            100 + i as u64,
+            5,
+            pos,
+            &utf16(name),
+            2,
+            0x8000_0100 + i as u32,
+            0x10 * i as u32,
+            0,
+        ));
         pos += recs.last().unwrap().len() as i64;
     }
     let chunk = usn::parse_read_buffer(&buffer(pos, &recs), None).unwrap();
-    assert_eq!((chunk.rows.len(), chunk.truncated, chunk.skipped, chunk.next_usn), (4, false, 0, pos));
+    assert_eq!(
+        (
+            chunk.rows.len(),
+            chunk.truncated,
+            chunk.skipped,
+            chunk.next_usn
+        ),
+        (4, false, 0, pos)
+    );
     assert_eq!(chunk.rows.frn, [100, 101, 102, 103]);
     assert_eq!(chunk.rows.parent_frn, [5; 4]);
     let mut at = 4096;
-    let want_usn: Vec<i64> = recs.iter().map(|r| {
-        let u = at;
-        at += r.len() as i64;
-        u
-    }).collect();
+    let want_usn: Vec<i64> = recs
+        .iter()
+        .map(|r| {
+            let u = at;
+            at += r.len() as i64;
+            u
+        })
+        .collect();
     assert_eq!(chunk.rows.usn, want_usn);
-    assert_eq!(chunk.rows.reason, (0..4).map(|i| 0x8000_0100 + i).collect::<Vec<u32>>());
+    assert_eq!(
+        chunk.rows.reason,
+        (0..4).map(|i| 0x8000_0100 + i).collect::<Vec<u32>>()
+    );
     assert_eq!(chunk.rows.attrs, [0, 0x10, 0x20, 0x30]);
-    assert_eq!(names_of(&chunk.rows), names.iter().map(|n| n.as_bytes().to_vec()).collect::<Vec<_>>());
+    assert_eq!(
+        names_of(&chunk.rows),
+        names
+            .iter()
+            .map(|n| n.as_bytes().to_vec())
+            .collect::<Vec<_>>()
+    );
     assert_eq!(chunk.rows.name_off[0], 0);
-    assert_eq!(chunk.rows.names.len(), names.iter().map(|n| n.len()).sum::<usize>());
+    assert_eq!(
+        chunk.rows.names.len(),
+        names.iter().map(|n| n.len()).sum::<usize>()
+    );
     assert!(recs.iter().all(|r| r.len() % 8 == 0)); // records are 8-byte aligned
 }
 
@@ -1104,7 +1358,16 @@ fn parse_v2_records() {
 fn parse_v3_takes_the_low_64_bits() {
     let big = 0xFFFF_0000_0000_0010u64; // sequence in the top 16 bits, record number below
     let recs = [
-        record(big, 0x0003_0000_0000_0005, 64, &utf16("v3.bin"), 3, 0x100, 0x20, 0),
+        record(
+            big,
+            0x0003_0000_0000_0005,
+            64,
+            &utf16("v3.bin"),
+            3,
+            0x100,
+            0x20,
+            0,
+        ),
         record(7, 5, 200, &utf16("v2.bin"), 2, 0x100, 0x20, 0),
         record(9, 9, 300, &[], 4, 0, 0, 0), // range record: skipped
         record(8, 5, 400, &utf16("again"), 3, 0x100, 0x20, 0),
@@ -1114,7 +1377,10 @@ fn parse_v3_takes_the_low_64_bits() {
     assert_eq!(chunk.rows.frn, [big, 7, 8]); // FRN_HI never shows up
     assert_eq!(chunk.rows.parent_frn, [0x0003_0000_0000_0005, 5, 5]);
     assert_eq!(chunk.rows.usn, [64, 200, 400]);
-    assert_eq!(names_of(&chunk.rows), [b"v3.bin".to_vec(), b"v2.bin".to_vec(), b"again".to_vec()]);
+    assert_eq!(
+        names_of(&chunk.rows),
+        [b"v3.bin".to_vec(), b"v2.bin".to_vec(), b"again".to_vec()]
+    );
 }
 
 #[test]
@@ -1122,15 +1388,33 @@ fn parse_names_with_surrogates() {
     let names: Vec<Vec<u16>> = vec![
         [vec![0xD83D, 0xDE00], utf16("smile")].concat(), // pair → one character, 4 UTF-8 bytes
         [utf16("lone-high"), vec![0xD800]].concat(),     // ends with a high surrogate ...
-        [vec![0xDC00], utf16("lone-low")].concat(),      // ... the next starts with a low one: no pairing across names
+        [vec![0xDC00], utf16("lone-low")].concat(), // ... the next starts with a low one: no pairing across names
         vec![0xDFFF],
         utf16("中文名字"),
         utf16("ascii"),
         vec![],
     ];
-    let recs: Vec<_> = names.iter().enumerate().map(|(i, n)| record(i as u64, 5, 8 * (i as i64 + 1), n, 2 + (i % 2) as u16, 0x100, 0x20, 0)).collect();
+    let recs: Vec<_> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            record(
+                i as u64,
+                5,
+                8 * (i as i64 + 1),
+                n,
+                2 + (i % 2) as u16,
+                0x100,
+                0x20,
+                0,
+            )
+        })
+        .collect();
     let chunk = usn::parse_read_buffer(&buffer(0, &recs), None).unwrap();
-    assert_eq!(names_of(&chunk.rows), names.iter().map(|n| canonical(n)).collect::<Vec<_>>());
+    assert_eq!(
+        names_of(&chunk.rows),
+        names.iter().map(|n| canonical(n)).collect::<Vec<_>>()
+    );
     assert_eq!(chunk.rows.name_len[0], 4 + 5);
     assert_eq!(chunk.rows.name_len[1], 9 + 3);
     assert_eq!(names_of(&chunk.rows)[0], "😀smile".as_bytes());
@@ -1140,12 +1424,28 @@ fn parse_names_with_surrogates() {
 #[test]
 fn parse_alignment_and_name_offsets() {
     let recs: Vec<_> = (0..20)
-        .map(|i| record(i, 5, 100 + i as i64, &utf16(&format!("n{i}").repeat(i as usize + 1)), 2 + (i % 2) as u16, 0x100, 0x20, 8 * (i as usize % 3)))
+        .map(|i| {
+            record(
+                i,
+                5,
+                100 + i as i64,
+                &utf16(&format!("n{i}").repeat(i as usize + 1)),
+                2 + (i % 2) as u16,
+                0x100,
+                0x20,
+                8 * (i as usize % 3),
+            )
+        })
         .collect();
     let data = buffer(12345, &recs);
     let want = usn::parse_read_buffer(&data, None).unwrap();
     // FileNameOffset is honoured
-    assert_eq!(names_of(&want.rows), (0..20).map(|i| format!("n{i}").repeat(i + 1).into_bytes()).collect::<Vec<_>>());
+    assert_eq!(
+        names_of(&want.rows),
+        (0..20)
+            .map(|i| format!("n{i}").repeat(i + 1).into_bytes())
+            .collect::<Vec<_>>()
+    );
     for lead in [1, 3, 5] {
         // the buffer itself at an odd address
         let mut raw = vec![0u8; lead];
@@ -1162,7 +1462,9 @@ fn parse_alignment_and_name_offsets() {
 
 #[test]
 fn parse_limit_and_continuation() {
-    let recs: Vec<_> = (0..10).map(|i| rec(i, 5, 1000 + 128 * i as i64, &format!("f{i}"))).collect();
+    let recs: Vec<_> = (0..10)
+        .map(|i| rec(i, 5, 1000 + 128 * i as i64, &format!("f{i}")))
+        .collect();
     let data = buffer(5000, &recs);
     let full = usn::parse_read_buffer(&data, None).unwrap();
     let first = usn::parse_read_buffer(&data, Some(4)).unwrap();
@@ -1174,7 +1476,12 @@ fn parse_limit_and_continuation() {
     let exact = usn::parse_read_buffer(&data, Some(10)).unwrap();
     assert!(exact.rows.len() == 10 && !exact.truncated && exact.next_usn == 5000);
     let empty = usn::parse_read_buffer(&buffer(777, &[]), None).unwrap();
-    assert!(empty.rows.is_empty() && !empty.truncated && empty.next_usn == 777 && empty.rows.names.is_empty());
+    assert!(
+        empty.rows.is_empty()
+            && !empty.truncated
+            && empty.next_usn == 777
+            && empty.rows.names.is_empty()
+    );
 }
 
 #[test]
@@ -1192,11 +1499,11 @@ fn parse_rejects_malformed_buffers() {
     short[0..4].copy_from_slice(&40u32.to_le_bytes());
     short[4..6].copy_from_slice(&2u16.to_le_bytes());
     let cases: Vec<Vec<u8>> = vec![
-        vec![0; 7],                                   // shorter than the next USN
+        vec![0; 7], // shorter than the next USN
         buffer(0, &[zero]),
         buffer(0, &[good[..good.len() - 8].to_vec()]), // runs past the end of the buffer
-        buffer(0, &[good.clone(), vec![0; 4]]),       // a partial header at the end
-        buffer(0, &[short]),                          // shorter than a V2 header
+        buffer(0, &[good.clone(), vec![0; 4]]),        // a partial header at the end
+        buffer(0, &[short]),                           // shorter than a V2 header
         buffer(0, &[bad_name]),
         buffer(0, &[odd_name]),
         buffer(0, &[early_name]),
@@ -1209,7 +1516,11 @@ fn parse_rejects_malformed_buffers() {
 
 #[test]
 fn parse_many_records_matches_a_reference() {
-    let alphabet: Vec<Vec<u16>> = "abcxyz.-_ 文件夹ü".chars().map(|c| utf16(&c.to_string())).chain([vec![0xD83D, 0xDE00], vec![0xD800], vec![0xDC01]]).collect();
+    let alphabet: Vec<Vec<u16>> = "abcxyz.-_ 文件夹ü"
+        .chars()
+        .map(|c| utf16(&c.to_string()))
+        .chain([vec![0xD83D, 0xDE00], vec![0xD800], vec![0xDC01]])
+        .collect();
     let mut x = 5u64;
     let mut next = || {
         x ^= x << 13;
@@ -1217,23 +1528,76 @@ fn parse_many_records_matches_a_reference() {
         x ^= x << 17;
         x
     };
-    let names: Vec<Vec<u16>> = (0..20_000).map(|_| (0..1 + next() % 39).flat_map(|_| alphabet[(next() % alphabet.len() as u64) as usize].clone()).collect()).collect();
-    let recs: Vec<_> = names.iter().enumerate().map(|(i, n)| record(i as u64, i as u64 / 7, 64 * i as i64, n, 2 + (i % 2) as u16, 0x100, 0x20, 0)).collect();
+    let names: Vec<Vec<u16>> = (0..20_000)
+        .map(|_| {
+            (0..1 + next() % 39)
+                .flat_map(|_| alphabet[(next() % alphabet.len() as u64) as usize].clone())
+                .collect()
+        })
+        .collect();
+    let recs: Vec<_> = names
+        .iter()
+        .enumerate()
+        .map(|(i, n)| {
+            record(
+                i as u64,
+                i as u64 / 7,
+                64 * i as i64,
+                n,
+                2 + (i % 2) as u16,
+                0x100,
+                0x20,
+                0,
+            )
+        })
+        .collect();
     let data = buffer(1 << 40, &recs);
     let t0 = Instant::now();
     let chunk = usn::parse_read_buffer(&data, None).unwrap();
-    println!("USN parse: {} records, {:.1} MB in {:.0} ms", chunk.rows.len(), data.len() as f64 / 1e6, t0.elapsed().as_secs_f64() * 1e3);
-    assert_eq!(names_of(&chunk.rows), names.iter().map(|n| canonical(n)).collect::<Vec<_>>());
-    assert_eq!(chunk.rows.parent_frn, (0..20_000u64).map(|i| i / 7).collect::<Vec<_>>());
+    println!(
+        "USN parse: {} records, {:.1} MB in {:.0} ms",
+        chunk.rows.len(),
+        data.len() as f64 / 1e6,
+        t0.elapsed().as_secs_f64() * 1e3
+    );
+    assert_eq!(
+        names_of(&chunk.rows),
+        names.iter().map(|n| canonical(n)).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        chunk.rows.parent_frn,
+        (0..20_000u64).map(|i| i / 7).collect::<Vec<_>>()
+    );
 }
 
 #[test]
 fn append_rebases_names() {
-    let a = usn::parse_read_buffer(&buffer(0, &(0..3).map(|i| rec(i, 5, 8 * i as i64, &format!("a{i}"))).collect::<Vec<_>>()), None).unwrap();
-    let b = usn::parse_read_buffer(&buffer(0, &(0..4).map(|i| rec(i, 5, 8 * i as i64, &format!("bb{i}"))).collect::<Vec<_>>()), None).unwrap();
+    let a = usn::parse_read_buffer(
+        &buffer(
+            0,
+            &(0..3)
+                .map(|i| rec(i, 5, 8 * i as i64, &format!("a{i}")))
+                .collect::<Vec<_>>(),
+        ),
+        None,
+    )
+    .unwrap();
+    let b = usn::parse_read_buffer(
+        &buffer(
+            0,
+            &(0..4)
+                .map(|i| rec(i, 5, 8 * i as i64, &format!("bb{i}")))
+                .collect::<Vec<_>>(),
+        ),
+        None,
+    )
+    .unwrap();
     let mut joined = a.rows.clone();
     joined.append(&b.rows).unwrap();
-    let names: Vec<String> = names_of(&joined).into_iter().map(|n| String::from_utf8(n).unwrap()).collect();
+    let names: Vec<String> = names_of(&joined)
+        .into_iter()
+        .map(|n| String::from_utf8(n).unwrap())
+        .collect();
     assert_eq!(names, ["a0", "a1", "a2", "bb0", "bb1", "bb2", "bb3"]);
     assert_eq!(joined.frn, [0, 1, 2, 0, 1, 2, 3]);
 }
@@ -1244,9 +1608,21 @@ fn append_rebases_names() {
 fn read_journal_whole_and_in_pieces() {
     let mut journal = FakeJournal::new(500, true);
     let (jid, first, end) = (journal.journal_id, journal.first_usn, journal.next_usn);
-    let (table, stats) = usn::read_journal(&mut journal, first, jid, ReadOptions::rows(10_000)).unwrap();
-    assert_eq!((table.rows.len(), table.truncated, table.next_usn, table.journal_id), (500, false, end, jid));
-    assert_eq!(names_of(&table.rows), (0..500).map(|i| canonical(&name_of(i))).collect::<Vec<_>>());
+    let (table, stats) =
+        usn::read_journal(&mut journal, first, jid, ReadOptions::rows(10_000)).unwrap();
+    assert_eq!(
+        (
+            table.rows.len(),
+            table.truncated,
+            table.next_usn,
+            table.journal_id
+        ),
+        (500, false, end, jid)
+    );
+    assert_eq!(
+        names_of(&table.rows),
+        (0..500).map(|i| canonical(&name_of(i))).collect::<Vec<_>>()
+    );
     assert_eq!((stats.skipped, stats.reads), (10, 1));
     assert!(stats.bytes_read > 500 * 60);
     // in pieces of 64: every piece continues exactly where the last one stopped
@@ -1263,8 +1639,12 @@ fn read_journal_whole_and_in_pieces() {
     }
     assert_eq!(seen, names_of(&table.rows));
     assert_eq!(pos, end);
-    let sizes: std::collections::BTreeSet<usize> = journal.reads()[1..].iter().map(|r| r.1).collect();
-    assert_eq!(sizes.into_iter().collect::<Vec<_>>(), [usn::buffer_size(64)]);
+    let sizes: std::collections::BTreeSet<usize> =
+        journal.reads()[1..].iter().map(|r| r.1).collect();
+    assert_eq!(
+        sizes.into_iter().collect::<Vec<_>>(),
+        [usn::buffer_size(64)]
+    );
     assert!(usn::buffer_size(64) <= 8 << 10); // small reads stay small
 }
 
@@ -1290,7 +1670,8 @@ fn read_journal_stops_at_the_end_seen_at_start() {
     let end = journal.next_usn;
     journal.grow = 5; // every read appends records: the loop must not chase them forever
     let (jid, first) = (journal.journal_id, journal.first_usn);
-    let (table, _) = usn::read_journal(&mut journal, first, jid, ReadOptions::rows(100_000)).unwrap();
+    let (table, _) =
+        usn::read_journal(&mut journal, first, jid, ReadOptions::rows(100_000)).unwrap();
     assert!(table.rows.len() >= 300 && table.next_usn >= end);
     assert_eq!(journal.reads().len(), 8); // 300 / 40 → 8 reads, then the end seen at the start is reached
 }
@@ -1301,7 +1682,11 @@ fn read_journal_duty_and_progress() {
     let mut journal = FakeJournal::new(100, false);
     journal.per_read = Some(25);
     journal.busy = Some(clock.clone()); // every read keeps the disk busy for 10 ms
-    let (jid, first, total) = (journal.journal_id, journal.first_usn, (journal.next_usn - journal.first_usn) as u64);
+    let (jid, first, total) = (
+        journal.journal_id,
+        journal.first_usn,
+        (journal.next_usn - journal.first_usn) as u64,
+    );
     let mut slept = Vec::new();
     let mut progress = Vec::new();
     let mut on_progress = |done, total| progress.push((done, total));
@@ -1311,10 +1696,21 @@ fn read_journal_duty_and_progress() {
         progress: Some(&mut on_progress),
     };
     let c2 = clock.clone();
-    usn::read_journal_paced(&mut journal, first, jid, opts, &mut || *c2.lock().unwrap(), &mut |d| slept.push(d)).unwrap();
+    usn::read_journal_paced(
+        &mut journal,
+        first,
+        jid,
+        opts,
+        &mut || *c2.lock().unwrap(),
+        &mut |d| slept.push(d),
+    )
+    .unwrap();
     // busy 10 ms at 25 % → idle 30 ms; none after the last read
     assert_eq!(slept.len(), 3);
-    assert!(slept.iter().all(|d| (d.as_secs_f64() - 0.03).abs() < 1e-6), "{slept:?}");
+    assert!(
+        slept.iter().all(|d| (d.as_secs_f64() - 0.03).abs() < 1e-6),
+        "{slept:?}"
+    );
     assert_eq!(progress.iter().map(|p| p.1).collect::<Vec<_>>(), [total; 4]);
     assert!(progress.windows(2).all(|w| w[0].0 <= w[1].0) && progress.last().unwrap().0 == total);
 }
@@ -1325,7 +1721,10 @@ fn read_journal_errors() {
     journal.recreate_on_read = true; // the journal was recreated between query and read
     let (jid, first) = (journal.journal_id, journal.first_usn);
     let err = usn::read_journal(&mut journal, first, jid, ReadOptions::rows(10)).unwrap_err();
-    assert!(err.code == "usn_gone" && (err.message.contains("重建") || !err.message.is_empty()), "{err:?}");
+    assert!(
+        err.code == "usn_gone" && (err.message.contains("重建") || !err.message.is_empty()),
+        "{err:?}"
+    );
     let mut journal = FakeJournal::new(10, false);
     journal.fail_read = Some(UsnError::new("io_error", "设备未就绪"));
     let err = usn::read_journal(&mut journal, first, jid, ReadOptions::rows(10)).unwrap_err();
@@ -1333,13 +1732,19 @@ fn read_journal_errors() {
     let mut journal = FakeJournal::new(10, false);
     journal.garbage = true;
     let err = usn::read_journal(&mut journal, first, jid, ReadOptions::rows(10)).unwrap_err();
-    assert!(err.code == "io_error" && err.message.contains("USN"), "{err:?}");
+    assert!(
+        err.code == "io_error" && err.message.contains("USN"),
+        "{err:?}"
+    );
 }
 
 #[test]
 fn error_code_mapping() {
     assert_eq!(usn::error_code(ERROR_JOURNAL_NOT_ACTIVE), "usn_inactive");
-    assert_eq!(usn::error_code(ERROR_JOURNAL_DELETE_IN_PROGRESS), "usn_inactive");
+    assert_eq!(
+        usn::error_code(ERROR_JOURNAL_DELETE_IN_PROGRESS),
+        "usn_inactive"
+    );
     assert_eq!(usn::error_code(ERROR_JOURNAL_ENTRY_DELETED), "usn_gone");
     assert_eq!(usn::error_code(ERROR_ACCESS_DENIED), "needs_admin");
     assert_eq!(usn::error_code(ERROR_PRIVILEGE_NOT_HELD), "needs_admin");
@@ -1373,16 +1778,44 @@ fn query_and_read_through_the_helper() {
         expect.insert("volume".into(), "C:".into());
         expect.extend(want.query().unwrap().scalars());
         assert_eq!(info, expect);
-        let got = helper.read_usn("C:", i64_of(&info, "first_usn"), u64_of(&info, "journal_id"), 1_000_000, 1.0, None).unwrap();
-        assert_eq!((got.rows.len(), got.truncated, got.journal_id, got.next_usn), (3000, false, want.journal_id, want.next_usn));
+        let got = helper
+            .read_usn(
+                "C:",
+                i64_of(&info, "first_usn"),
+                u64_of(&info, "journal_id"),
+                1_000_000,
+                1.0,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            (got.rows.len(), got.truncated, got.journal_id, got.next_usn),
+            (3000, false, want.journal_id, want.next_usn)
+        );
         let specs: Vec<_> = (0..3000).map(spec_of).collect();
         assert_eq!(got.rows.frn, specs.iter().map(|s| s.0).collect::<Vec<_>>());
-        assert_eq!(got.rows.parent_frn, specs.iter().map(|s| s.1).collect::<Vec<_>>());
-        assert_eq!(names_of(&got.rows), specs.iter().map(|s| canonical(&s.2)).collect::<Vec<_>>());
+        assert_eq!(
+            got.rows.parent_frn,
+            specs.iter().map(|s| s.1).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            names_of(&got.rows),
+            specs.iter().map(|s| canonical(&s.2)).collect::<Vec<_>>()
+        );
         assert!(got.rows.usn.windows(2).all(|w| w[1] > w[0]) && got.rows.usn[0] == want.first_usn);
         let stats = helper.last_usn();
-        assert_eq!((u64_of(&stats, "rows"), u64_of(&stats, "frames"), u64_of(&stats, "skipped")), (3000, 1, 60));
-        assert_eq!((u64_of(&stats, "reads"), stats["volume"].as_str()), (1, Some("C:")));
+        assert_eq!(
+            (
+                u64_of(&stats, "rows"),
+                u64_of(&stats, "frames"),
+                u64_of(&stats, "skipped")
+            ),
+            (3000, 1, 60)
+        );
+        assert_eq!(
+            (u64_of(&stats, "reads"), stats["volume"].as_str()),
+            (1, Some("C:"))
+        );
         assert!(helper.last_scan().is_empty()); // journal reads leave the scan statistics alone
     }
 }
@@ -1406,9 +1839,18 @@ fn read_in_pieces_through_the_helper() {
                 break;
             }
         }
-        assert_eq!((pieces, names.len(), pos), (5, 3000, i64_of(&info, "next_usn")));
-        let up_to_date = helper.read_usn("C:", pos, jid, 1_000_000, 1.0, None).unwrap();
-        assert!(up_to_date.rows.is_empty() && up_to_date.next_usn == pos && up_to_date.rows.names.is_empty());
+        assert_eq!(
+            (pieces, names.len(), pos),
+            (5, 3000, i64_of(&info, "next_usn"))
+        );
+        let up_to_date = helper
+            .read_usn("C:", pos, jid, 1_000_000, 1.0, None)
+            .unwrap();
+        assert!(
+            up_to_date.rows.is_empty()
+                && up_to_date.next_usn == pos
+                && up_to_date.rows.names.is_empty()
+        );
     }
 }
 
@@ -1418,13 +1860,31 @@ fn heartbeats_while_reading() {
         let helper = launch("usn");
         let mut seen = Vec::new();
         let info = helper.query_usn("S:").unwrap();
-        let mut on_progress = |phase: Phase, _: f64, fraction: Option<f64>| seen.push((phase, fraction));
+        let mut on_progress =
+            |phase: Phase, _: f64, fraction: Option<f64>| seen.push((phase, fraction));
         let got = helper
-            .read_usn("S:", i64_of(&info, "first_usn"), u64_of(&info, "journal_id"), 1_000_000, 1.0, Some(&mut on_progress))
+            .read_usn(
+                "S:",
+                i64_of(&info, "first_usn"),
+                u64_of(&info, "journal_id"),
+                1_000_000,
+                1.0,
+                Some(&mut on_progress),
+            )
             .unwrap();
-        assert_eq!((got.rows.len(), u64_of(&helper.last_usn(), "reads")), (1000, 5));
-        let fractions: Vec<f64> = seen.iter().filter(|(p, _)| *p == Phase::Scan).map(|(_, f)| f.unwrap_or(-1.0)).collect();
-        assert!(!fractions.is_empty() && fractions.iter().all(|&f| 0.0 < f && f <= 1.0), "{fractions:?}");
+        assert_eq!(
+            (got.rows.len(), u64_of(&helper.last_usn(), "reads")),
+            (1000, 5)
+        );
+        let fractions: Vec<f64> = seen
+            .iter()
+            .filter(|(p, _)| *p == Phase::Scan)
+            .map(|(_, f)| f.unwrap_or(-1.0))
+            .collect();
+        assert!(
+            !fractions.is_empty() && fractions.iter().all(|&f| 0.0 < f && f <= 1.0),
+            "{fractions:?}"
+        );
         assert!(fractions.iter().any(|&f| f < 1.0)); // a heartbeat in the middle of the read
     }
 }
@@ -1442,21 +1902,44 @@ fn errors_through_the_helper() {
             ("E:", 0, 0, "needs_admin"),
             ("N:", 0, 0, "not_ntfs"),
         ] {
-            let err = helper.read_usn(volume, start, ident, 1_000_000, 1.0, None).unwrap_err();
+            let err = helper
+                .read_usn(volume, start, ident, 1_000_000, 1.0, None)
+                .unwrap_err();
             assert_eq!(err.code, code, "{volume}: {}", err.message);
             assert!(!err.is_unavailable());
         }
         let j = FakeJournal::new(100, false);
         for (volume, code) in [("F:", "io_error"), ("G:", "io_error"), ("H:", "usn_gone")] {
-            let err = helper.read_usn(volume, j.first_usn, j.journal_id, 1_000_000, 1.0, None).unwrap_err();
+            let err = helper
+                .read_usn(volume, j.first_usn, j.journal_id, 1_000_000, 1.0, None)
+                .unwrap_err();
             assert_eq!(err.code, code, "{volume}: {}", err.message);
         }
-        for (volume, code) in [("D:", "usn_inactive"), ("E:", "needs_admin"), ("N:", "not_ntfs")] {
+        for (volume, code) in [
+            ("D:", "usn_inactive"),
+            ("E:", "needs_admin"),
+            ("N:", "not_ntfs"),
+        ] {
             assert_eq!(helper.query_usn(volume).unwrap_err().code, code);
         }
-        assert_eq!(helper.read_usn("C:\\Windows", 0, 0, 1_000_000, 1.0, None).unwrap_err().code, "invalid_request");
-        assert_eq!(helper.read_usn("C:", -1, 0, 1_000_000, 1.0, None).unwrap_err().code, "invalid_request");
-        assert_eq!(helper.read_usn("C:", 0, 0, 0, 1.0, None).unwrap_err().code, "invalid_request");
+        assert_eq!(
+            helper
+                .read_usn("C:\\Windows", 0, 0, 1_000_000, 1.0, None)
+                .unwrap_err()
+                .code,
+            "invalid_request"
+        );
+        assert_eq!(
+            helper
+                .read_usn("C:", -1, 0, 1_000_000, 1.0, None)
+                .unwrap_err()
+                .code,
+            "invalid_request"
+        );
+        assert_eq!(
+            helper.read_usn("C:", 0, 0, 0, 1.0, None).unwrap_err().code,
+            "invalid_request"
+        );
         assert!(helper.alive());
         assert_eq!(helper.ping().unwrap()["pid"], helper.pid()); // still usable
     }
@@ -1468,7 +1951,13 @@ fn unelevated_helper_needs_admin() {
         let client = launch("real"); // the real helper, no seams
         assert!(!client.elevated());
         assert_eq!(client.query_usn("C:").unwrap_err().code, "needs_admin");
-        assert_eq!(client.read_usn("C:", 0, 1, 1_000_000, 1.0, None).unwrap_err().code, "needs_admin");
+        assert_eq!(
+            client
+                .read_usn("C:", 0, 1, 1_000_000, 1.0, None)
+                .unwrap_err()
+                .code,
+            "needs_admin"
+        );
         assert_eq!(client.ping().unwrap()["pid"], client.pid());
     }
 }

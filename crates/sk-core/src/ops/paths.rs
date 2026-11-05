@@ -116,11 +116,7 @@ pub fn path_forms_bytes(raw: &[u8], system: Option<System>) -> PathForms {
             format!("file:///{}", quote_path(&data[start..]))
         };
         let posix = if drive {
-            format!(
-                "/mnt/{}{}",
-                slashed[..1].to_lowercase(),
-                &slashed[2..]
-            )
+            format!("/mnt/{}{}", slashed[..1].to_lowercase(), &slashed[2..])
         } else {
             slashed
         };
@@ -331,7 +327,13 @@ impl Rules {
     /// Every reason key the rules use.
     pub fn reasons(&self) -> HashSet<&'static str> {
         let mut out: HashSet<&'static str> = HashSet::new();
-        for m in [&self.exact, &self.tree, &self.children, &self.root_names, &self.root_trees] {
+        for m in [
+            &self.exact,
+            &self.tree,
+            &self.children,
+            &self.root_names,
+            &self.root_trees,
+        ] {
             out.extend(m.values().copied());
         }
         out.extend(self.names.iter().map(|(_, r)| *r));
@@ -364,7 +366,12 @@ const WIN_PROFILE: &[&[&str]] = &[
     &["AppData", "LocalLow"],
     &["AppData", "Roaming"],
 ];
-const POSIX_PROFILE: &[&[&str]] = &[&[".config"], &[".local"], &[".local", "share"], &[".local", "state"]];
+const POSIX_PROFILE: &[&[&str]] = &[
+    &[".config"],
+    &[".local"],
+    &[".local", "share"],
+    &[".local", "state"],
+];
 const MAC_PROFILE: &[&[&str]] = &[
     &["Library"],
     &["Library", "Application Support"],
@@ -375,15 +382,41 @@ const LINUX_SYSTEM: &[&str] = &[
     "/sbin", "/sys", "/usr", "/efi",
 ];
 const LINUX_SHARED: &[&str] = &[
-    "/var", "/var/lib", "/var/log", "/var/cache", "/var/tmp", "/tmp", "/opt", "/srv", "/mnt",
-    "/media", "/snap", "/lost+found",
+    "/var",
+    "/var/lib",
+    "/var/log",
+    "/var/cache",
+    "/var/tmp",
+    "/tmp",
+    "/opt",
+    "/srv",
+    "/mnt",
+    "/media",
+    "/snap",
+    "/lost+found",
 ];
 const MAC_SYSTEM: &[&str] = &[
-    "/System", "/bin", "/sbin", "/usr", "/dev", "/etc", "/private/etc", "/private/var/db",
-    "/private/var/vm", "/Library/Apple", "/cores",
+    "/System",
+    "/bin",
+    "/sbin",
+    "/usr",
+    "/dev",
+    "/etc",
+    "/private/etc",
+    "/private/var/db",
+    "/private/var/vm",
+    "/Library/Apple",
+    "/cores",
 ];
 const MAC_SHARED: &[&str] = &[
-    "/Library", "/Volumes", "/private", "/private/var", "/private/tmp", "/var", "/tmp", "/opt",
+    "/Library",
+    "/Volumes",
+    "/private",
+    "/private/var",
+    "/private/tmp",
+    "/var",
+    "/tmp",
+    "/opt",
 ];
 
 fn strings(items: &[&str]) -> Vec<String> {
@@ -422,7 +455,11 @@ pub fn platform_rules(
                 get("ProgramW6432"),
             ],
         );
-        r.put(Table::Exact, "data_root", &[get_or("ProgramData", format!("{drive}\\ProgramData"))]);
+        r.put(
+            Table::Exact,
+            "data_root",
+            &[get_or("ProgramData", format!("{drive}\\ProgramData"))],
+        );
         let users = if home.is_empty() {
             format!("{drive}\\Users")
         } else {
@@ -433,7 +470,11 @@ pub fn platform_rules(
         r.put(Table::Exact, "home", &[home.to_string()]);
         let profile: Vec<String> = WIN_PROFILE
             .iter()
-            .map(|parts| parts.iter().fold(home.to_string(), |acc, p| nt_join(&acc, p)))
+            .map(|parts| {
+                parts
+                    .iter()
+                    .fold(home.to_string(), |acc, p| nt_join(&acc, p))
+            })
             .collect();
         r.put(Table::Exact, "profile", &profile);
         let boot: Vec<String> = ["Recovery", "Boot", "EFI", "$WinREAgent"]
@@ -450,14 +491,20 @@ pub fn platform_rules(
             r.root_names.insert(n.into(), "system_file");
         }
         r.root_trees.insert("$recycle.bin".into(), "trash");
-        r.root_trees.insert("system volume information".into(), "system");
+        r.root_trees
+            .insert("system volume information".into(), "system");
     } else {
         if system == System::Linux {
             r.put(Table::Tree, "system", &strings(LINUX_SYSTEM));
             r.put(
                 Table::Tree,
                 "package_db",
-                &strings(&["/var/lib/dpkg", "/var/lib/rpm", "/var/lib/dnf", "/var/lib/pacman"]),
+                &strings(&[
+                    "/var/lib/dpkg",
+                    "/var/lib/rpm",
+                    "/var/lib/dnf",
+                    "/var/lib/pacman",
+                ]),
             );
             for a in ["/run/media", "/run/user", "/run/mount"] {
                 let k = r.key(a);
@@ -479,14 +526,22 @@ pub fn platform_rules(
             r.put(Table::Children, "home", &strings(&["/Users"]));
             let profile: Vec<String> = MAC_PROFILE
                 .iter()
-                .map(|parts| parts.iter().fold(home.to_string(), |acc, p| posix_join(&acc, p)))
+                .map(|parts| {
+                    parts
+                        .iter()
+                        .fold(home.to_string(), |acc, p| posix_join(&acc, p))
+                })
                 .collect();
             r.put(Table::Exact, "profile", &profile);
         }
         r.put(Table::Exact, "home", &[home.to_string()]);
         let profile: Vec<String> = POSIX_PROFILE
             .iter()
-            .map(|parts| parts.iter().fold(home.to_string(), |acc, p| posix_join(&acc, p)))
+            .map(|parts| {
+                parts
+                    .iter()
+                    .fold(home.to_string(), |acc, p| posix_join(&acc, p))
+            })
             .collect();
         r.put(Table::Exact, "profile", &profile);
         let xdg = get("XDG_DATA_HOME");
@@ -603,9 +658,12 @@ fn path_string(p: &Path) -> String {
 /// parents of a path, so the link would otherwise not be recognised as the app's folder.
 fn app_dirs() -> Vec<String> {
     type Resolved = Option<(Vec<PathBuf>, Vec<String>)>;
-    static CACHE: LazyLock<Mutex<Resolved>> =
-        LazyLock::new(|| Mutex::new(None));
-    let raw = vec![crate::paths::data_dir(), crate::paths::config_dir(), crate::paths::cache_dir()];
+    static CACHE: LazyLock<Mutex<Resolved>> = LazyLock::new(|| Mutex::new(None));
+    let raw = vec![
+        crate::paths::data_dir(),
+        crate::paths::config_dir(),
+        crate::paths::cache_dir(),
+    ];
     let mut slot = CACHE.lock();
     if let Some((k, v)) = slot.as_ref()
         && *k == raw
@@ -654,7 +712,12 @@ static RULES: LazyLock<Mutex<CachedRules>> = LazyLock::new(|| Mutex::new(None));
 pub fn current_rules() -> Arc<Rules> {
     let env: Vec<(String, String)> = ENV_KEYS
         .iter()
-        .filter_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()).map(|v| (k.to_string(), v)))
+        .filter_map(|k| {
+            std::env::var(k)
+                .ok()
+                .filter(|v| !v.is_empty())
+                .map(|v| (k.to_string(), v))
+        })
         .collect();
     let key: RulesKey = (
         path_string(&crate::paths::home_dir()),
@@ -669,7 +732,13 @@ pub fn current_rules() -> Arc<Rules> {
         return rules.clone();
     }
     let env_map: HashMap<String, String> = key.1.iter().cloned().collect();
-    let rules = Arc::new(platform_rules(System::this(), &key.0, &env_map, &key.2, &key.3));
+    let rules = Arc::new(platform_rules(
+        System::this(),
+        &key.0,
+        &env_map,
+        &key.2,
+        &key.3,
+    ));
     *slot = Some((key, rules.clone()));
     rules
 }
@@ -829,12 +898,21 @@ mod tests {
         let forms = app_dir_forms(std::slice::from_ref(&link));
         assert_eq!(forms.len(), 2, "{forms:?}");
         // a home elsewhere (its parent's children are homes)
-        let home = if cfg!(windows) { r"Q:\Users\u" } else { "/nonexistent/home/u" }.to_string();
+        let home = if cfg!(windows) {
+            r"Q:\Users\u"
+        } else {
+            "/nonexistent/home/u"
+        }
+        .to_string();
         let rules = platform_rules(System::this(), &home, &HashMap::new(), &forms, &[]);
         let link_s = path_string(&link);
         assert_eq!(match_rules(&link_s, &rules), Some("app"), "{forms:?}");
         let below = path_string(&resolved(&link.join("snapshots").join("c.sks")));
-        assert_eq!(match_rules(&below, &rules), Some("app"), "{below} / {forms:?}");
+        assert_eq!(
+            match_rules(&below, &rules),
+            Some("app"),
+            "{below} / {forms:?}"
+        );
     }
 
     #[test]
@@ -845,7 +923,10 @@ mod tests {
         assert_eq!(nt_dirname("c:\\windows"), "c:\\");
         assert_eq!(nt_dirname("c:\\"), "c:\\");
         assert_eq!(nt_dirname("\\\\nas\\share\\x"), "\\\\nas\\share\\");
-        assert_eq!(posix_normpath("/home/u/./Downloads/../.config"), "/home/u/.config");
+        assert_eq!(
+            posix_normpath("/home/u/./Downloads/../.config"),
+            "/home/u/.config"
+        );
         assert_eq!(posix_normpath("//x"), "//x");
         assert_eq!(posix_normpath("///x"), "/x");
         assert_eq!(posix_dirname("/home"), "/");

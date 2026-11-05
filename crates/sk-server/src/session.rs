@@ -14,13 +14,14 @@ use bytes::Bytes;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
 use serde::Serialize;
+use sk_protocol::envelope::encode_error_code;
 use sk_protocol::methods::{CANCEL, Event, SESSION_HELLO};
 use sk_protocol::session::{ClientInfo, HelloParams, HelloResult, Limits};
 use sk_protocol::streams::CancelParams;
 use sk_protocol::{
-    CloseCode, ErrorCode, Message as RpcMessage, PROTOCOL_VERSION, RequestId, encode_notification, encode_response, parse_message, parse_params, protocol_major,
+    CloseCode, ErrorCode, Message as RpcMessage, PROTOCOL_VERSION, RequestId, encode_notification,
+    encode_response, parse_message, parse_params, protocol_major,
 };
-use sk_protocol::envelope::encode_error_code;
 use tokio::sync::{Notify, oneshot};
 
 use crate::app::Server;
@@ -131,7 +132,9 @@ pub struct Session {
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Session").field("id", &self.id).finish_non_exhaustive()
+        f.debug_struct("Session")
+            .field("id", &self.id)
+            .finish_non_exhaustive()
     }
 }
 
@@ -199,7 +202,11 @@ impl Session {
     }
 
     fn close_code(&self, code: u16, reason: &str) {
-        self.out.q.lock().close.get_or_insert((code, reason.to_owned()));
+        self.out
+            .q
+            .lock()
+            .close
+            .get_or_insert((code, reason.to_owned()));
         self.out.ready.notify_one();
     }
 
@@ -244,7 +251,10 @@ async fn send_now(ws: &mut WebSocket, frame: String) -> bool {
 }
 
 async fn reject(mut ws: WebSocket, code: CloseCode, reason: &str) {
-    let frame = CloseFrame { code: code.code(), reason: reason.into() };
+    let frame = CloseFrame {
+        code: code.code(),
+        reason: reason.into(),
+    };
     if ws.send(Message::Close(Some(frame))).await.is_ok() {
         // wait for the peer's close (bounded)
         let _ = tokio::time::timeout(Duration::from_secs(2), async {
@@ -258,7 +268,12 @@ async fn reject(mut ws: WebSocket, code: CloseCode, reason: &str) {
     }
 }
 
-fn err_frame(id: Option<&RequestId>, code: ErrorCode, message: &str, data: Option<&serde_json::Value>) -> String {
+fn err_frame(
+    id: Option<&RequestId>,
+    code: ErrorCode,
+    message: &str,
+    data: Option<&serde_json::Value>,
+) -> String {
     encode_error_code(id, code.code().into(), message, data)
 }
 
@@ -266,7 +281,12 @@ fn err_frame(id: Option<&RequestId>, code: ErrorCode, message: &str, data: Optio
 async fn handshake(server: &Server, mut ws: WebSocket) -> Option<(WebSocket, Session)> {
     let raw = match tokio::time::timeout(server.config.hello_timeout, ws.recv()).await {
         Err(_) => {
-            reject(ws, CloseCode::HandshakeTimeout, "session.hello not received in time").await;
+            reject(
+                ws,
+                CloseCode::HandshakeTimeout,
+                "session.hello not received in time",
+            )
+            .await;
             return None;
         }
         Ok(None) | Ok(Some(Err(_))) => return None,
@@ -276,7 +296,12 @@ async fn handshake(server: &Server, mut ws: WebSocket) -> Option<(WebSocket, Ses
         Message::Text(t) => t,
         Message::Close(_) => return None,
         _ => {
-            reject(ws, CloseCode::ProtocolError, "first frame must be a session.hello text frame").await;
+            reject(
+                ws,
+                CloseCode::ProtocolError,
+                "first frame must be a session.hello text frame",
+            )
+            .await;
             return None;
         }
     };
@@ -295,7 +320,12 @@ async fn handshake(server: &Server, mut ws: WebSocket) -> Option<(WebSocket, Ses
                 RpcMessage::Request(r) => Some(r.id.clone()),
                 _ => None,
             };
-            let frame = err_frame(id.as_ref(), ErrorCode::NotHandshaken, "session.hello must come first", None);
+            let frame = err_frame(
+                id.as_ref(),
+                ErrorCode::NotHandshaken,
+                "session.hello must come first",
+                None,
+            );
             send_now(&mut ws, frame).await;
             reject(ws, CloseCode::Unauthorized, "not handshaken").await;
             return None;
@@ -304,7 +334,12 @@ async fn handshake(server: &Server, mut ws: WebSocket) -> Option<(WebSocket, Ses
     let hello: HelloParams = match parse_params(req.params.as_deref()) {
         Ok(h) => h,
         Err(e) => {
-            let frame = err_frame(Some(&req.id), ErrorCode::InvalidParams, "invalid session.hello params", Some(&e.data()));
+            let frame = err_frame(
+                Some(&req.id),
+                ErrorCode::InvalidParams,
+                "invalid session.hello params",
+                Some(&e.data()),
+            );
             send_now(&mut ws, frame).await;
             reject(ws, CloseCode::ProtocolError, "invalid session.hello").await;
             return None;
@@ -312,15 +347,41 @@ async fn handshake(server: &Server, mut ws: WebSocket) -> Option<(WebSocket, Ses
     };
     if !constant_time_eq(hello.token.as_bytes(), server.config.token.as_bytes()) {
         tracing::warn!("rejected a connection with a wrong token");
-        send_now(&mut ws, err_frame(Some(&req.id), ErrorCode::Unauthorized, "invalid token", None)).await;
+        send_now(
+            &mut ws,
+            err_frame(
+                Some(&req.id),
+                ErrorCode::Unauthorized,
+                "invalid token",
+                None,
+            ),
+        )
+        .await;
         reject(ws, CloseCode::Unauthorized, "invalid token").await;
         return None;
     }
     if protocol_major(&hello.protocol) != protocol_major(PROTOCOL_VERSION) {
-        let msg = format!("server speaks protocol {PROTOCOL_VERSION}, client sent {}", hello.protocol);
+        let msg = format!(
+            "server speaks protocol {PROTOCOL_VERSION}, client sent {}",
+            hello.protocol
+        );
         let data = serde_json::json!({ "server": PROTOCOL_VERSION });
-        send_now(&mut ws, err_frame(Some(&req.id), ErrorCode::ProtocolMismatch, &msg, Some(&data))).await;
-        reject(ws, CloseCode::VersionMismatch, "protocol major version mismatch").await;
+        send_now(
+            &mut ws,
+            err_frame(
+                Some(&req.id),
+                ErrorCode::ProtocolMismatch,
+                &msg,
+                Some(&data),
+            ),
+        )
+        .await;
+        reject(
+            ws,
+            CloseCode::VersionMismatch,
+            "protocol major version mismatch",
+        )
+        .await;
         return None;
     }
     let mut caps: Vec<String> = hello
@@ -353,7 +414,11 @@ async fn handshake(server: &Server, mut ws: WebSocket) -> Option<(WebSocket, Ses
         hello.client.kind.as_str(),
         hello.client.name,
         hello.client.version,
-        if caps.is_empty() { "-".to_owned() } else { caps.join(",") }
+        if caps.is_empty() {
+            "-".to_owned()
+        } else {
+            caps.join(",")
+        }
     );
     let _ = session.hello.set((hello.client, caps));
     Some((ws, session))
@@ -388,7 +453,12 @@ pub(crate) async fn run(server: Arc<Server>, ws: WebSocket) {
                         }
                     }
                     Next::Close((code, reason)) => {
-                        let _ = sink.send(Message::Close(Some(CloseFrame { code, reason: reason.into() }))).await;
+                        let _ = sink
+                            .send(Message::Close(Some(CloseFrame {
+                                code,
+                                reason: reason.into(),
+                            })))
+                            .await;
                         break;
                     }
                     Next::Done => break,
@@ -421,7 +491,10 @@ pub(crate) async fn run(server: Arc<Server>, ws: WebSocket) {
         match frame {
             Message::Text(text) => on_text(&server, &session, text.as_str()),
             Message::Binary(_) => {
-                session.close(CloseCode::ProtocolError, "clients must not send binary frames in protocol v1");
+                session.close(
+                    CloseCode::ProtocolError,
+                    "clients must not send binary frames in protocol v1",
+                );
             }
             Message::Close(_) => break,
             Message::Ping(_) | Message::Pong(_) => {}
@@ -446,7 +519,12 @@ pub(crate) async fn run(server: Arc<Server>, ws: WebSocket) {
     let _ = tokio::time::timeout(Duration::from_secs(1), writer).await;
     server.remove_session(&session);
     if let Some(c) = session.client() {
-        tracing::info!("session {} closed ({} {})", session.id, c.kind.as_str(), c.name);
+        tracing::info!(
+            "session {} closed ({} {})",
+            session.id,
+            c.kind.as_str(),
+            c.name
+        );
     }
 }
 
@@ -471,16 +549,26 @@ fn on_text(server: &Arc<Server>, session: &Arc<Session>, text: &str) {
                     Err(_) => tracing::debug!("session {} sent an invalid $/cancel", session.id),
                 }
             } else {
-                tracing::debug!("session {} sent unknown notification {}", session.id, n.method);
+                tracing::debug!(
+                    "session {} sent unknown notification {}",
+                    session.id,
+                    n.method
+                );
             }
         }
-        _ => tracing::debug!("session {} ignored an unexpected response frame", session.id),
+        _ => tracing::debug!(
+            "session {} ignored an unexpected response frame",
+            session.id
+        ),
     }
 }
 
 fn start_request(server: &Arc<Server>, session: &Arc<Session>, req: sk_protocol::Request) {
     if req.method == SESSION_HELLO {
-        session.send_error(Some(&req.id), &RpcError::invalid_request("session already established"));
+        session.send_error(
+            Some(&req.id),
+            &RpcError::invalid_request("session already established"),
+        );
         return;
     }
     let Some(handler) = server.router.get(&req.method).cloned() else {
@@ -492,13 +580,18 @@ fn start_request(server: &Arc<Server>, session: &Arc<Session>, req: sk_protocol:
         let mut tasks = session.tasks.lock();
         if tasks.contains_key(&req.id) {
             drop(tasks);
-            let e = RpcError::invalid_request(format!("request id {} is already in flight", req.id));
+            let e =
+                RpcError::invalid_request(format!("request id {} is already in flight", req.id));
             session.send_error(Some(&req.id), &e);
             return;
         }
         tasks.insert(req.id.clone(), tx);
     }
-    let call = Call { server: server.clone(), session: session.clone(), id: req.id.clone() };
+    let call = Call {
+        server: server.clone(),
+        session: session.clone(),
+        id: req.id.clone(),
+    };
     let session = session.clone();
     let method = req.method;
     tokio::spawn(async move {
