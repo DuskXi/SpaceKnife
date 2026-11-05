@@ -11,7 +11,9 @@ pub fn app_bundle(exe: &Path) -> Option<PathBuf> {
     let contents = macos.parent()?;
     let bundle = contents.parent()?;
     let named = |p: &Path, name: &str| p.file_name().is_some_and(|n| n == name);
-    let is_app = bundle.file_name().is_some_and(|n| n.to_string_lossy().ends_with(".app"));
+    let is_app = bundle
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().ends_with(".app"));
     (named(macos, "MacOS") && named(contents, "Contents") && is_app).then(|| bundle.to_path_buf())
 }
 
@@ -27,8 +29,13 @@ pub fn is_translocated(path: &str) -> bool {
 pub fn untranslocate(path: &str, mount_table: &str) -> Option<String> {
     let mut best: Option<(&str, &str)> = None; // (mount point, source)
     for line in mount_table.lines() {
-        let Some((source, point)) = nullfs_translocation(line.trim()) else { continue };
-        let inside = path == point || path.strip_prefix(point).is_some_and(|rest| rest.starts_with('/'));
+        let Some((source, point)) = nullfs_translocation(line.trim()) else {
+            continue;
+        };
+        let inside = path == point
+            || path
+                .strip_prefix(point)
+                .is_some_and(|rest| rest.starts_with('/'));
         if inside && best.is_none_or(|(p, _)| point.len() > p.len()) {
             best = Some((point, source));
         }
@@ -96,7 +103,11 @@ pub fn original_path(path: &Path) -> Option<PathBuf> {
     if !out.status.success() {
         return None;
     }
-    untranslocate(&path.to_string_lossy(), &String::from_utf8_lossy(&out.stdout)).map(PathBuf::from)
+    untranslocate(
+        &path.to_string_lossy(),
+        &String::from_utf8_lossy(&out.stdout),
+    )
+    .map(PathBuf::from)
 }
 
 #[cfg(test)]
@@ -105,7 +116,10 @@ mod tests {
     use std::ffi::OsStr;
 
     fn app_dir(with_data: &str) -> tempfile::TempDir {
-        let dir = tempfile::Builder::new().prefix("sk-portable-").tempdir().unwrap();
+        let dir = tempfile::Builder::new()
+            .prefix("sk-portable-")
+            .tempdir()
+            .unwrap();
         match with_data {
             "folder" => std::fs::create_dir(dir.path().join("data")).unwrap(),
             "file" => std::fs::write(dir.path().join("data"), "").unwrap(),
@@ -122,28 +136,92 @@ mod tests {
     fn uses_a_data_folder_next_to_the_executable() {
         let dir = app_dir("folder");
         let data = dir.path().join("data");
-        assert_eq!(portable_home(&dir.path().join("SpaceKnife.exe"), "windows", true, None, nowhere), Some(data.clone()));
-        assert_eq!(portable_home(&dir.path().join("spaceknife"), "linux", true, None, nowhere), Some(data));
+        assert_eq!(
+            portable_home(
+                &dir.path().join("SpaceKnife.exe"),
+                "windows",
+                true,
+                None,
+                nowhere
+            ),
+            Some(data.clone())
+        );
+        assert_eq!(
+            portable_home(&dir.path().join("spaceknife"), "linux", true, None, nowhere),
+            Some(data)
+        );
     }
 
     #[test]
     fn is_off_without_the_folder_in_development_and_with_an_explicit_home() {
-        assert_eq!(portable_home(&app_dir("none").path().join("SpaceKnife.exe"), "windows", true, None, nowhere), None);
-        assert_eq!(portable_home(&app_dir("file").path().join("SpaceKnife.exe"), "windows", true, None, nowhere), None);
+        assert_eq!(
+            portable_home(
+                &app_dir("none").path().join("SpaceKnife.exe"),
+                "windows",
+                true,
+                None,
+                nowhere
+            ),
+            None
+        );
+        assert_eq!(
+            portable_home(
+                &app_dir("file").path().join("SpaceKnife.exe"),
+                "windows",
+                true,
+                None,
+                nowhere
+            ),
+            None
+        );
         let dir = app_dir("folder");
-        assert_eq!(portable_home(&dir.path().join("spaceknife.exe"), "windows", false, None, nowhere), None);
-        assert_eq!(portable_home(&dir.path().join("SpaceKnife.exe"), "windows", true, Some(OsStr::new("D:\\elsewhere")), nowhere), None);
+        assert_eq!(
+            portable_home(
+                &dir.path().join("spaceknife.exe"),
+                "windows",
+                false,
+                None,
+                nowhere
+            ),
+            None
+        );
+        assert_eq!(
+            portable_home(
+                &dir.path().join("SpaceKnife.exe"),
+                "windows",
+                true,
+                Some(OsStr::new("D:\\elsewhere")),
+                nowhere
+            ),
+            None
+        );
     }
 
     #[test]
     fn on_macos_uses_a_data_folder_next_to_the_app_bundle() {
         let dir = app_dir("folder");
-        let exe = dir.path().join("SpaceKnife.app").join("Contents").join("MacOS").join("SpaceKnife");
-        assert_eq!(portable_home(&exe, "macos", true, None, nowhere), Some(dir.path().join("data")));
+        let exe = dir
+            .path()
+            .join("SpaceKnife.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("SpaceKnife");
+        assert_eq!(
+            portable_home(&exe, "macos", true, None, nowhere),
+            Some(dir.path().join("data"))
+        );
         // an executable that is not in a bundle, and a bundle with no data folder beside it (a dmg install)
-        assert_eq!(portable_home(&dir.path().join("SpaceKnife"), "macos", true, None, nowhere), None);
+        assert_eq!(
+            portable_home(&dir.path().join("SpaceKnife"), "macos", true, None, nowhere),
+            None
+        );
         let none = app_dir("none");
-        let exe = none.path().join("SpaceKnife.app").join("Contents").join("MacOS").join("SpaceKnife");
+        let exe = none
+            .path()
+            .join("SpaceKnife.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("SpaceKnife");
         assert_eq!(portable_home(&exe, "macos", true, None, nowhere), None);
     }
 
@@ -154,7 +232,10 @@ mod tests {
         let bundle = dir.path().join("SpaceKnife.app");
         let original = |p: &Path| (p == Path::new(moved)).then(|| bundle.clone());
         let exe = PathBuf::from(format!("{moved}/Contents/MacOS/SpaceKnife"));
-        assert_eq!(portable_home(&exe, "macos", true, None, original), Some(dir.path().join("data")));
+        assert_eq!(
+            portable_home(&exe, "macos", true, None, original),
+            Some(dir.path().join("data"))
+        );
         // where the original can't be found it runs as an installed app does
         assert_eq!(portable_home(&exe, "macos", true, None, nowhere), None);
     }
@@ -162,10 +243,15 @@ mod tests {
     #[test]
     fn finds_the_bundle_of_the_executable_only_inside_contents_macos() {
         assert_eq!(
-            app_bundle(Path::new("/Users/lenny/Apps/SpaceKnife.app/Contents/MacOS/SpaceKnife")),
+            app_bundle(Path::new(
+                "/Users/lenny/Apps/SpaceKnife.app/Contents/MacOS/SpaceKnife"
+            )),
             Some(PathBuf::from("/Users/lenny/Apps/SpaceKnife.app"))
         );
-        assert_eq!(app_bundle(Path::new("/Users/lenny/Apps/SpaceKnife/MacOS/SpaceKnife")), None);
+        assert_eq!(
+            app_bundle(Path::new("/Users/lenny/Apps/SpaceKnife/MacOS/SpaceKnife")),
+            None
+        );
         assert_eq!(app_bundle(Path::new("/Users/lenny/Apps/spaceknife")), None);
     }
 
@@ -183,12 +269,25 @@ mod tests {
         assert!(is_translocated(moved));
         assert!(!is_translocated("/Applications/SpaceKnife.app"));
         assert_eq!(untranslocate(moved, &table).as_deref(), Some(original));
-        assert_eq!(untranslocate(&format!("{moved}/Contents/MacOS/SpaceKnife"), &table), Some(format!("{original}/Contents/MacOS/SpaceKnife")));
         assert_eq!(
-            untranslocate("/private/var/folders/x1/abc/T/AppTranslocation/99AA/d/Other.app", &table).as_deref(),
+            untranslocate(&format!("{moved}/Contents/MacOS/SpaceKnife"), &table),
+            Some(format!("{original}/Contents/MacOS/SpaceKnife"))
+        );
+        assert_eq!(
+            untranslocate(
+                "/private/var/folders/x1/abc/T/AppTranslocation/99AA/d/Other.app",
+                &table
+            )
+            .as_deref(),
             Some("/Users/lenny/My Apps/Other.app")
         );
-        assert_eq!(untranslocate("/private/var/folders/x1/abc/T/AppTranslocation/77/d/Gone.app", &table), None);
+        assert_eq!(
+            untranslocate(
+                "/private/var/folders/x1/abc/T/AppTranslocation/77/d/Gone.app",
+                &table
+            ),
+            None
+        );
         // a path that only starts like a mount point is not inside it
         assert_eq!(untranslocate(&format!("{moved}x"), &table), None);
     }

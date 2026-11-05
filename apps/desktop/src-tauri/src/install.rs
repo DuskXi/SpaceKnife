@@ -27,14 +27,19 @@ use crate::update::{MAC_APP, portable_version_for, swap_helper};
 /// The uninstaller Tauri's NSIS installer puts next to the executable.
 pub const NSIS_UNINSTALLER: &str = "uninstall.exe";
 /// dpkg's file list of the installed deb (Tauri names the package after productName, in kebab case).
-const DPKG_LISTS: [&str; 2] = ["/var/lib/dpkg/info/space-knife.list", "/var/lib/dpkg/info/spaceknife.list"];
+const DPKG_LISTS: [&str; 2] = [
+    "/var/lib/dpkg/info/space-knife.list",
+    "/var/lib/dpkg/info/spaceknife.list",
+];
 /// How long the backend has to stop before an update replaces its files.
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
 /// How long the new version's program has to say the plan is usable.
 const SWAP_ANSWER: Duration = Duration::from_secs(30);
 
 /// The kinds sk_core::update::InstallKind knows.
-const KINDS: [&str; 8] = ["nsis", "portable", "appimage", "deb", "rpm", "dmg", "dev", "unknown"];
+const KINDS: [&str; 8] = [
+    "nsis", "portable", "appimage", "deb", "rpm", "dmg", "dev", "unknown",
+];
 
 /// The kind of install. `portable`: a portable copy with its data folder (lib.rs
 /// prepare_environment); `bundle`: what Tauri's bundler patched into the executable
@@ -68,16 +73,26 @@ pub fn install_kind(
     match platform {
         "windows" => {
             let uninstaller = exe.parent().map(|d| d.join(NSIS_UNINSTALLER));
-            if uninstaller.is_some_and(|u| exists(&u)) { "nsis" } else { "unknown" }
+            if uninstaller.is_some_and(|u| exists(&u)) {
+                "nsis"
+            } else {
+                "unknown"
+            }
         }
         "macos" => "dmg",
         "linux" => {
             // the packages first: programs started from an AppImage inherit its APPIMAGE and APPDIR
             if exe.starts_with("/usr") {
-                return if DPKG_LISTS.iter().any(|l| exists(Path::new(l))) { "deb" } else { "rpm" };
+                return if DPKG_LISTS.iter().any(|l| exists(Path::new(l))) {
+                    "deb"
+                } else {
+                    "rpm"
+                };
             }
             let appdir = env("APPDIR").filter(|d| !d.is_empty());
-            if env("APPIMAGE").is_some_and(|a| !a.is_empty()) && appdir.is_none_or(|d| exe.starts_with(d)) {
+            if env("APPIMAGE").is_some_and(|a| !a.is_empty())
+                && appdir.is_none_or(|d| exe.starts_with(d))
+            {
                 return "appimage";
             }
             "unknown"
@@ -90,11 +105,16 @@ pub fn install_kind(
 pub fn this_install_kind() -> &'static str {
     static KIND: OnceLock<&'static str> = OnceLock::new();
     KIND.get_or_init(|| {
-        let forced = std::env::var("SPACEKNIFE_INSTALL_KIND").unwrap_or_default().trim().to_lowercase();
+        let forced = std::env::var("SPACEKNIFE_INSTALL_KIND")
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase();
         if let Some(k) = KINDS.iter().find(|k| **k == forced) {
             return k;
         }
-        let Ok(exe) = std::env::current_exe() else { return "unknown" };
+        let Ok(exe) = std::env::current_exe() else {
+            return "unknown";
+        };
         use tauri::utils::config::BundleType;
         let bundle = tauri::utils::platform::bundle_type().and_then(|b| match b {
             BundleType::Nsis => Some("nsis"),
@@ -144,9 +164,15 @@ pub fn install_step(kind: &str, how: &str) -> Option<Step> {
 
 /// Whether `name` is `template` (sk_core::update::asset_template) with a version for `{v}`.
 fn fits_template(name: &str, template: &str) -> bool {
-    let Some((head, tail)) = template.split_once("{v}") else { return false };
-    let Some(v) = name.strip_prefix(head).and_then(|r| r.strip_suffix(tail)) else { return false };
-    v.starts_with(|c: char| c.is_ascii_digit()) && v.chars().all(|c| c.is_ascii_alphanumeric() || ".+~_-".contains(c))
+    let Some((head, tail)) = template.split_once("{v}") else {
+        return false;
+    };
+    let Some(v) = name.strip_prefix(head).and_then(|r| r.strip_suffix(tail)) else {
+        return false;
+    };
+    v.starts_with(|c: char| c.is_ascii_digit())
+        && v.chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".+~_-".contains(c))
 }
 
 /// Whether `name` is a release file of this kind of install on `platform` (`std::env::consts::OS`).
@@ -165,22 +191,37 @@ pub fn is_release_file(name: &str, kind: &str, platform: &str, machine: &str) ->
 
 /// Why `file` can't be used as the downloaded update, or None when it can: a file directly in the
 /// backend's updates folder, links resolved, named like this install's release file.
-pub fn install_refusal(file: &Path, kind: &str, updates: &Path, platform: &str, machine: &str) -> Option<TextKey> {
+pub fn install_refusal(
+    file: &Path,
+    kind: &str,
+    updates: &Path,
+    platform: &str,
+    machine: &str,
+) -> Option<TextKey> {
     if install_step(kind, "seamless").is_none() && install_step(kind, "classic").is_none() {
         return Some(TextKey::UpdateNoInstall);
     }
-    let (Ok(real), Ok(folder)) = (file.canonicalize(), updates.canonicalize()) else { return Some(TextKey::UpdateMissing) };
+    let (Ok(real), Ok(folder)) = (file.canonicalize(), updates.canonicalize()) else {
+        return Some(TextKey::UpdateMissing);
+    };
     if !real.is_file() {
         return Some(TextKey::UpdateMissing);
     }
     let lower = |p: &Path| {
         let s = p.to_string_lossy().into_owned();
-        if platform == "linux" { s } else { s.to_lowercase() }
+        if platform == "linux" {
+            s
+        } else {
+            s.to_lowercase()
+        }
     };
     if real.parent().map(lower) != Some(lower(&folder)) {
         return Some(TextKey::UpdateNotInUpdates);
     }
-    let name = real.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = real
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     (!is_release_file(&name, kind, platform, machine)).then_some(TextKey::UpdateNotAnUpdate)
 }
 
@@ -208,7 +249,10 @@ pub fn swap_plan_json(p: &SwapPlan<'_>) -> String {
         "v": sk_core::update::swap::PLAN_VERSION, "pid": p.pid, "app": s(p.app_dir), "new": s(p.staged),
         "old": s(p.previous), "exe": s(p.exe), "log": s(p.log), "keep": ["data"],
     });
-    format!("{}\n", serde_json::to_string_pretty(&plan).unwrap_or_default())
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&plan).unwrap_or_default()
+    )
 }
 
 // ------------------------------------------------------------------ the steps
@@ -228,12 +272,15 @@ pub fn install_update(app: &AppHandle, file: &Path, how: &str) -> String {
     }
     let step = install_step(kind, how);
     tracing::info!("[update] {how} ({step:?}) with {}", file.display());
-    let failed = |e: &dyn std::fmt::Display| mt(TextKey::UpdateStartFailed, &[("error", &e.to_string())]);
+    let failed =
+        |e: &dyn std::fmt::Display| mt(TextKey::UpdateStartFailed, &[("error", &e.to_string())]);
     match step {
         Some(Step::Silent) => restart_into(app, || launch(file, &nsis_update_args())),
         // the installer with its pages upgrades in place; SpaceKnife is gone before it gets far
         Some(Step::Wizard) => restart_into(app, || launch(file, &[])),
-        Some(Step::Swap) => replace_portable(app, file, updates.as_deref().unwrap_or(Path::new(""))),
+        Some(Step::Swap) => {
+            replace_portable(app, file, updates.as_deref().unwrap_or(Path::new("")))
+        }
         Some(Step::Replace) => replace_appimage(app, file),
         Some(Step::Open) => {
             // a disk image mounts, a package opens in the system's installer: either replaces this
@@ -280,7 +327,10 @@ fn launch(file: &Path, args: &[&str]) -> std::io::Result<()> {
 /// An AppImage: the new file takes the old one's place (a rename: the running app keeps the old
 /// file open), then the new one starts. Needs a folder the user can write to.
 fn replace_appimage(app: &AppHandle, file: &Path) -> String {
-    let Some(target) = std::env::var_os("APPIMAGE").filter(|t| !t.is_empty()).map(PathBuf::from) else {
+    let Some(target) = std::env::var_os("APPIMAGE")
+        .filter(|t| !t.is_empty())
+        .map(PathBuf::from)
+    else {
         return mt(TextKey::UpdateNoInstall, &[]);
     };
     let mut next = target.clone().into_os_string();
@@ -306,12 +356,22 @@ fn replace_appimage(app: &AppHandle, file: &Path) -> String {
 /// program swaps the files once the app has quit and starts it again. The "data" folder stays.
 fn replace_portable(app: &AppHandle, file: &Path, updates: &Path) -> String {
     let platform = std::env::consts::OS;
-    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let (Some(version), Some(data)) = (portable_version_for(&name, platform), crate::portable_dir()) else {
+    let name = file
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let (Some(version), Some(data)) =
+        (portable_version_for(&name, platform), crate::portable_dir())
+    else {
         return mt(TextKey::UpdateNoInstall, &[]);
     };
-    let Ok(exe) = std::env::current_exe() else { return mt(TextKey::UpdateNoInstall, &[]) };
-    let exe_name = exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let Ok(exe) = std::env::current_exe() else {
+        return mt(TextKey::UpdateNoInstall, &[]);
+    };
+    let exe_name = exe
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let unpack_failed = |e: &str| mt(TextKey::UpdateUnpackFailed, &[("error", e)]);
     let staging = updates.join(format!("staging-{version}"));
     let unpacked = (|| {
@@ -327,9 +387,18 @@ fn replace_portable(app: &AppHandle, file: &Path, updates: &Path) -> String {
     }
     // one folder at the top, holding the new version's program (on macOS the app bundle)
     let top: Vec<PathBuf> = std::fs::read_dir(&staging)
-        .map(|rd| rd.filter_map(Result::ok).filter(|e| e.file_type().is_ok_and(|t| t.is_dir())).map(|e| e.path()).collect())
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .map(|e| e.path())
+                .collect()
+        })
         .unwrap_or_default();
-    let program = if platform == "macos" { MAC_APP.to_owned() } else { exe_name.clone() };
+    let program = if platform == "macos" {
+        MAC_APP.to_owned()
+    } else {
+        exe_name.clone()
+    };
     let staged = match top.as_slice() {
         [one] if one.join(&program).exists() => one.clone(),
         _ => {
@@ -344,22 +413,36 @@ fn replace_portable(app: &AppHandle, file: &Path, updates: &Path) -> String {
     }
     // the copy's folder holds its data folder; on macOS the executable is in the bundle there, which a
     // translocated copy runs from somewhere else: the swap starts the one in the folder
-    let Some(app_dir) = data.parent() else { return mt(TextKey::UpdateNoInstall, &[]) };
+    let Some(app_dir) = data.parent() else {
+        return mt(TextKey::UpdateNoInstall, &[]);
+    };
     let exe_in_folder = match (platform, crate::portable::app_bundle(&exe)) {
-        ("macos", Some(bundle)) => {
-            app_dir.join(bundle.file_name().unwrap_or_default()).join("Contents").join("MacOS").join(&exe_name)
-        }
+        ("macos", Some(bundle)) => app_dir
+            .join(bundle.file_name().unwrap_or_default())
+            .join("Contents")
+            .join("MacOS")
+            .join(&exe_name),
         _ => exe.clone(),
     };
     let previous = updates.join(format!("previous-{}", app.package_info().version));
     let _ = std::fs::remove_dir_all(&previous); // left by an attempt that was undone
     let log = updates.join(format!("update-{version}.log"));
     let plan_file = updates.join(format!("update-{version}.json"));
-    let plan = SwapPlan { pid: std::process::id(), app_dir, staged: &staged, previous: &previous, exe: &exe_in_folder, log: &log };
+    let plan = SwapPlan {
+        pid: std::process::id(),
+        app_dir,
+        staged: &staged,
+        previous: &previous,
+        exe: &exe_in_folder,
+        log: &log,
+    };
     if let Err(e) = std::fs::write(&plan_file, swap_plan_json(&plan)) {
         return unpack_failed(&e.to_string());
     }
-    tracing::info!("[update] {version} unpacked: its program swaps the files once the app has quit ({})", plan_file.display());
+    tracing::info!(
+        "[update] {version} unpacked: its program swaps the files once the app has quit ({})",
+        plan_file.display()
+    );
     restart_into(app, || start_swap(&helper, &plan_file, updates))
 }
 
@@ -367,7 +450,12 @@ fn replace_portable(app: &AppHandle, file: &Path, updates: &Path) -> String {
 /// is usable; an error when it says otherwise, exits or doesn't answer in time.
 fn start_swap(helper: &Path, plan: &Path, cwd: &Path) -> std::io::Result<()> {
     let mut cmd = Command::new(helper);
-    cmd.arg("--apply-update").arg(plan).current_dir(cwd).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    cmd.arg("--apply-update")
+        .arg(plan)
+        .current_dir(cwd)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -387,14 +475,20 @@ fn start_swap(helper: &Path, plan: &Path, cwd: &Path) -> std::io::Result<()> {
         }
     }
     let mut child = cmd.spawn()?;
-    let stdout = child.stdout.take().ok_or_else(|| std::io::Error::other("no stdout"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| std::io::Error::other("no stdout"))?;
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut line = String::new();
         let _ = BufReader::new(stdout).read_line(&mut line);
         let _ = tx.send(line);
     });
-    let name = helper.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name = helper
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let line = match rx.recv_timeout(SWAP_ANSWER) {
         Ok(line) => line,
         Err(_) => {
@@ -407,8 +501,17 @@ fn start_swap(helper: &Path, plan: &Path, cwd: &Path) -> std::io::Result<()> {
         return Ok(()); // it goes on by itself; its stdout is let go of
     }
     let _ = child.kill();
-    let why = said.get("error").and_then(serde_json::Value::as_str).map(str::to_owned);
-    Err(std::io::Error::other(why.unwrap_or_else(|| if line.trim().is_empty() { format!("{name} exited") } else { line.trim().to_owned() })))
+    let why = said
+        .get("error")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    Err(std::io::Error::other(why.unwrap_or_else(|| {
+        if line.trim().is_empty() {
+            format!("{name} exited")
+        } else {
+            line.trim().to_owned()
+        }
+    })))
 }
 
 #[cfg(unix)]
@@ -429,14 +532,21 @@ fn libc_setsid() {
 fn unpack(file: &Path, into: &Path) -> std::io::Result<()> {
     let run = |cmd: &str, args: &[&std::ffi::OsStr]| -> std::io::Result<()> {
         let mut c = Command::new(cmd);
-        c.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        c.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
         }
         let status = c.status()?;
-        if status.success() { Ok(()) } else { Err(std::io::Error::other(format!("{cmd} exited with {status}"))) }
+        if status.success() {
+            Ok(())
+        } else {
+            Err(std::io::Error::other(format!("{cmd} exited with {status}")))
+        }
     };
     let (f, d) = (file.as_os_str(), into.as_os_str());
     if cfg!(target_os = "macos") {
@@ -446,12 +556,29 @@ fn unpack(file: &Path, into: &Path) -> std::io::Result<()> {
         return run("tar", &["-xzf".as_ref(), f, "-C".as_ref(), d]);
     }
     // Windows' own bsdtar (System32), not another tar earlier on the PATH
-    let root = std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let root =
+        std::env::var_os("SystemRoot").map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
     let tar = root.join("System32").join("tar.exe");
-    run(&tar.to_string_lossy(), &["-xf".as_ref(), f, "-C".as_ref(), d]).or_else(|_| {
+    run(
+        &tar.to_string_lossy(),
+        &["-xf".as_ref(), f, "-C".as_ref(), d],
+    )
+    .or_else(|_| {
         let q = |p: &Path| p.to_string_lossy().replace('\'', "''");
-        let script = format!("Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force", q(file), q(into));
-        run("powershell.exe", &["-NoProfile".as_ref(), "-NonInteractive".as_ref(), "-Command".as_ref(), script.as_ref()])
+        let script = format!(
+            "Expand-Archive -LiteralPath '{}' -DestinationPath '{}' -Force",
+            q(file),
+            q(into)
+        );
+        run(
+            "powershell.exe",
+            &[
+                "-NoProfile".as_ref(),
+                "-NonInteractive".as_ref(),
+                "-Command".as_ref(),
+                script.as_ref(),
+            ],
+        )
     })
 }
 
@@ -460,7 +587,10 @@ mod tests {
     use super::*;
 
     fn kind(exe: &str, platform: &str, env: &[(&str, &str)], files: &[&str]) -> &'static str {
-        let env: Vec<(String, String)> = env.iter().map(|(k, v)| ((*k).into(), (*v).into())).collect();
+        let env: Vec<(String, String)> = env
+            .iter()
+            .map(|(k, v)| ((*k).into(), (*v).into()))
+            .collect();
         let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
         install_kind(
             Path::new(exe),
@@ -477,24 +607,113 @@ mod tests {
     fn tells_the_kind_of_install() {
         let none = |_: &str| None;
         let no = |_: &Path| false;
-        assert_eq!(install_kind(Path::new("C:\\x\\spaceknife.exe"), "windows", false, false, None, &none, &no), "dev");
-        assert_eq!(install_kind(Path::new("C:\\x\\spaceknife.exe"), "windows", true, true, Some("nsis"), &none, &no), "portable");
+        assert_eq!(
+            install_kind(
+                Path::new("C:\\x\\spaceknife.exe"),
+                "windows",
+                false,
+                false,
+                None,
+                &none,
+                &no
+            ),
+            "dev"
+        );
+        assert_eq!(
+            install_kind(
+                Path::new("C:\\x\\spaceknife.exe"),
+                "windows",
+                true,
+                true,
+                Some("nsis"),
+                &none,
+                &no
+            ),
+            "portable"
+        );
         let nsis = Path::new("C:\\Users\\l\\AppData\\Local\\SpaceKnife").join(NSIS_UNINSTALLER);
         let exe = Path::new("C:\\Users\\l\\AppData\\Local\\SpaceKnife").join("spaceknife.exe");
-        assert_eq!(install_kind(&exe, "windows", true, false, None, &none, &|p| p == nsis), "nsis");
-        assert_eq!(install_kind(&exe, "windows", true, false, None, &none, &no), "unknown");
+        assert_eq!(
+            install_kind(&exe, "windows", true, false, None, &none, &|p| p == nsis),
+            "nsis"
+        );
+        assert_eq!(
+            install_kind(&exe, "windows", true, false, None, &none, &no),
+            "unknown"
+        );
         // what the bundler patched into the program wins over the files around it
-        assert_eq!(install_kind(&exe, "windows", true, false, Some("nsis"), &none, &no), "nsis");
-        assert_eq!(install_kind(&exe, "windows", true, false, Some("msi"), &none, &|p| p == nsis), "unknown");
+        assert_eq!(
+            install_kind(&exe, "windows", true, false, Some("nsis"), &none, &no),
+            "nsis"
+        );
+        assert_eq!(
+            install_kind(&exe, "windows", true, false, Some("msi"), &none, &|p| p
+                == nsis),
+            "unknown"
+        );
         let opt = Path::new("/usr/bin/spaceknife");
-        assert_eq!(install_kind(opt, "linux", true, false, Some("rpm"), &none, &|_| true), "rpm");
-        assert_eq!(install_kind(Path::new("/tmp/.mount_x/usr/bin/spaceknife"), "linux", true, false, Some("appimage"), &|k| (k == "APPIMAGE").then(|| "/h/S.AppImage".into()), &no), "appimage");
-        assert_eq!(kind("/Applications/SpaceKnife.app/Contents/MacOS/spaceknife", "macos", &[], &[]), "dmg");
-        assert_eq!(kind("/usr/bin/spaceknife", "linux", &[], &["/var/lib/dpkg/info/space-knife.list"]), "deb");
-        assert_eq!(kind("/usr/bin/spaceknife", "linux", &[("APPIMAGE", "/x.AppImage")], &[]), "rpm");
-        assert_eq!(kind("/tmp/.mount_x/usr/bin/spaceknife", "linux", &[("APPIMAGE", "/h/S.AppImage"), ("APPDIR", "/tmp/.mount_x")], &[]), "appimage");
+        assert_eq!(
+            install_kind(opt, "linux", true, false, Some("rpm"), &none, &|_| true),
+            "rpm"
+        );
+        assert_eq!(
+            install_kind(
+                Path::new("/tmp/.mount_x/usr/bin/spaceknife"),
+                "linux",
+                true,
+                false,
+                Some("appimage"),
+                &|k| (k == "APPIMAGE").then(|| "/h/S.AppImage".into()),
+                &no
+            ),
+            "appimage"
+        );
+        assert_eq!(
+            kind(
+                "/Applications/SpaceKnife.app/Contents/MacOS/spaceknife",
+                "macos",
+                &[],
+                &[]
+            ),
+            "dmg"
+        );
+        assert_eq!(
+            kind(
+                "/usr/bin/spaceknife",
+                "linux",
+                &[],
+                &["/var/lib/dpkg/info/space-knife.list"]
+            ),
+            "deb"
+        );
+        assert_eq!(
+            kind(
+                "/usr/bin/spaceknife",
+                "linux",
+                &[("APPIMAGE", "/x.AppImage")],
+                &[]
+            ),
+            "rpm"
+        );
+        assert_eq!(
+            kind(
+                "/tmp/.mount_x/usr/bin/spaceknife",
+                "linux",
+                &[("APPIMAGE", "/h/S.AppImage"), ("APPDIR", "/tmp/.mount_x")],
+                &[]
+            ),
+            "appimage"
+        );
         // started from an AppImage, but not the AppImage's own program
-        assert_eq!(kind("/opt/other/spaceknife", "linux", &[("APPIMAGE", "/h/S.AppImage"), ("APPDIR", "/tmp/.mount_x")], &[]), "unknown");
+        assert_eq!(
+            kind(
+                "/opt/other/spaceknife",
+                "linux",
+                &[("APPIMAGE", "/h/S.AppImage"), ("APPDIR", "/tmp/.mount_x")],
+                &[]
+            ),
+            "unknown"
+        );
     }
 
     #[test]
@@ -512,18 +731,78 @@ mod tests {
 
     #[test]
     fn knows_the_release_files_tauris_bundler_makes() {
-        assert!(is_release_file("SpaceKnife_0.4.1_x64-setup.exe", "nsis", "windows", "x86_64"));
-        assert!(is_release_file("SpaceKnife_0.4.1-beta.1_x64-setup.exe", "nsis", "windows", "aarch64"));
-        assert!(!is_release_file("SpaceKnife_0.4.1_x64-setup.exe.sig", "nsis", "windows", "x86_64"));
-        assert!(!is_release_file("SpaceKnife_../x_x64-setup.exe", "nsis", "windows", "x86_64"));
-        assert!(is_release_file("SpaceKnife-0.4.1-win-x64-portable.zip", "portable", "windows", "x86_64"));
-        assert!(!is_release_file("SpaceKnife_0.4.1_x64-setup.exe", "portable", "windows", "x86_64"));
-        assert!(is_release_file("SpaceKnife_0.4.1_amd64.AppImage", "appimage", "linux", "x86_64"));
-        assert!(is_release_file("SpaceKnife_0.4.1_amd64.deb", "deb", "linux", "x86_64"));
-        assert!(is_release_file("SpaceKnife-0.4.1-1.x86_64.rpm", "rpm", "linux", "x86_64"));
-        assert!(is_release_file("SpaceKnife_0.4.1_aarch64.dmg", "dmg", "macos", "aarch64"));
-        assert!(!is_release_file("SpaceKnife_0.4.1_x64.dmg", "dmg", "macos", "aarch64"));
-        assert!(!is_release_file("SpaceKnife_0.4.1_x64-setup.exe", "dev", "windows", "x86_64"));
+        assert!(is_release_file(
+            "SpaceKnife_0.4.1_x64-setup.exe",
+            "nsis",
+            "windows",
+            "x86_64"
+        ));
+        assert!(is_release_file(
+            "SpaceKnife_0.4.1-beta.1_x64-setup.exe",
+            "nsis",
+            "windows",
+            "aarch64"
+        ));
+        assert!(!is_release_file(
+            "SpaceKnife_0.4.1_x64-setup.exe.sig",
+            "nsis",
+            "windows",
+            "x86_64"
+        ));
+        assert!(!is_release_file(
+            "SpaceKnife_../x_x64-setup.exe",
+            "nsis",
+            "windows",
+            "x86_64"
+        ));
+        assert!(is_release_file(
+            "SpaceKnife-0.4.1-win-x64-portable.zip",
+            "portable",
+            "windows",
+            "x86_64"
+        ));
+        assert!(!is_release_file(
+            "SpaceKnife_0.4.1_x64-setup.exe",
+            "portable",
+            "windows",
+            "x86_64"
+        ));
+        assert!(is_release_file(
+            "SpaceKnife_0.4.1_amd64.AppImage",
+            "appimage",
+            "linux",
+            "x86_64"
+        ));
+        assert!(is_release_file(
+            "SpaceKnife_0.4.1_amd64.deb",
+            "deb",
+            "linux",
+            "x86_64"
+        ));
+        assert!(is_release_file(
+            "SpaceKnife-0.4.1-1.x86_64.rpm",
+            "rpm",
+            "linux",
+            "x86_64"
+        ));
+        assert!(is_release_file(
+            "SpaceKnife_0.4.1_aarch64.dmg",
+            "dmg",
+            "macos",
+            "aarch64"
+        ));
+        assert!(!is_release_file(
+            "SpaceKnife_0.4.1_x64.dmg",
+            "dmg",
+            "macos",
+            "aarch64"
+        ));
+        assert!(!is_release_file(
+            "SpaceKnife_0.4.1_x64-setup.exe",
+            "dev",
+            "windows",
+            "x86_64"
+        ));
     }
 
     #[test]
@@ -539,10 +818,22 @@ mod tests {
         std::fs::write(&outside, "x").unwrap();
         let os = "windows";
         assert_eq!(install_refusal(&good, "nsis", &updates, os, "x86_64"), None);
-        assert_eq!(install_refusal(&other, "nsis", &updates, os, "x86_64"), Some(TextKey::UpdateNotAnUpdate));
-        assert_eq!(install_refusal(&outside, "nsis", &updates, os, "x86_64"), Some(TextKey::UpdateNotInUpdates));
-        assert_eq!(install_refusal(&updates.join("gone.exe"), "nsis", &updates, os, "x86_64"), Some(TextKey::UpdateMissing));
-        assert_eq!(install_refusal(&good, "dev", &updates, os, "x86_64"), Some(TextKey::UpdateNoInstall));
+        assert_eq!(
+            install_refusal(&other, "nsis", &updates, os, "x86_64"),
+            Some(TextKey::UpdateNotAnUpdate)
+        );
+        assert_eq!(
+            install_refusal(&outside, "nsis", &updates, os, "x86_64"),
+            Some(TextKey::UpdateNotInUpdates)
+        );
+        assert_eq!(
+            install_refusal(&updates.join("gone.exe"), "nsis", &updates, os, "x86_64"),
+            Some(TextKey::UpdateMissing)
+        );
+        assert_eq!(
+            install_refusal(&good, "dev", &updates, os, "x86_64"),
+            Some(TextKey::UpdateNoInstall)
+        );
     }
 
     #[test]
@@ -550,15 +841,31 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let app = tmp.path().join("SpaceKnife-0.4.0-win-x64-portable");
         let updates = app.join("data").join("data").join("updates");
-        let staged = updates.join("staging-0.4.1").join("SpaceKnife-0.4.1-win-x64-portable");
+        let staged = updates
+            .join("staging-0.4.1")
+            .join("SpaceKnife-0.4.1-win-x64-portable");
         std::fs::create_dir_all(&staged).unwrap();
         std::fs::write(app.join("spaceknife.exe"), "old").unwrap();
         std::fs::write(staged.join("spaceknife.exe"), "new").unwrap();
-        let (exe, previous, log) = (app.join("spaceknife.exe"), updates.join("previous-0.4.0"), updates.join("update-0.4.1.log"));
-        let plan = SwapPlan { pid: 42, app_dir: &app, staged: &staged, previous: &previous, exe: &exe, log: &log };
+        let (exe, previous, log) = (
+            app.join("spaceknife.exe"),
+            updates.join("previous-0.4.0"),
+            updates.join("update-0.4.1.log"),
+        );
+        let plan = SwapPlan {
+            pid: 42,
+            app_dir: &app,
+            staged: &staged,
+            previous: &previous,
+            exe: &exe,
+            log: &log,
+        };
         let file = updates.join("update-0.4.1.json");
         std::fs::write(&file, swap_plan_json(&plan)).unwrap();
         let read = sk_core::update::swap::Plan::read(&file).unwrap();
-        assert_eq!((read.pid, read.app, read.new, read.exe, read.keep), (42, app.clone(), staged, exe, vec!["data".to_owned()]));
+        assert_eq!(
+            (read.pid, read.app, read.new, read.exe, read.keep),
+            (42, app.clone(), staged, exe, vec!["data".to_owned()])
+        );
     }
 }

@@ -6,7 +6,10 @@ use std::path::{Path, PathBuf};
 
 /// The content type of a file, by its extension.
 pub fn mime_of(file: &Path) -> &'static str {
-    let ext = file.extension().and_then(|e| e.to_str()).map(str::to_ascii_lowercase);
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
     match ext.as_deref() {
         Some("html") => "text/html; charset=utf-8",
         Some("js" | "mjs") => "text/javascript; charset=utf-8",
@@ -31,7 +34,8 @@ fn decode_component(s: &str) -> Option<String> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            let ok = bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit) && bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit);
+            let ok = bytes.get(i + 1).is_some_and(u8::is_ascii_hexdigit)
+                && bytes.get(i + 2).is_some_and(u8::is_ascii_hexdigit);
             if !ok {
                 return None;
             }
@@ -40,7 +44,10 @@ fn decode_component(s: &str) -> Option<String> {
             i += 1;
         }
     }
-    percent_encoding::percent_decode_str(s).decode_utf8().ok().map(|c| c.into_owned())
+    percent_encoding::percent_decode_str(s)
+        .decode_utf8()
+        .ok()
+        .map(|c| c.into_owned())
 }
 
 /// The file a URL path names inside `dir` ("/" is index.html), or None when it can't be decoded.
@@ -79,7 +86,10 @@ mod tests {
 
     #[test]
     fn knows_the_types() {
-        assert_eq!(mime_of(Path::new("a/index.HTML")), "text/html; charset=utf-8");
+        assert_eq!(
+            mime_of(Path::new("a/index.HTML")),
+            "text/html; charset=utf-8"
+        );
         assert_eq!(mime_of(Path::new("x.woff2")), "font/woff2");
         assert_eq!(mime_of(Path::new("x")), "application/octet-stream");
     }
@@ -88,7 +98,10 @@ mod tests {
     fn keeps_paths_inside_the_folder() {
         let dir = std::env::temp_dir().join("r");
         assert_eq!(file_in(&dir, "/"), Some(dir.join("index.html")));
-        assert_eq!(file_in(&dir, "/assets/a.js"), Some(dir.join("assets").join("a.js")));
+        assert_eq!(
+            file_in(&dir, "/assets/a.js"),
+            Some(dir.join("assets").join("a.js"))
+        );
         assert_eq!(file_in(&dir, "/../x"), Some(dir.join("x")));
         assert_eq!(file_in(&dir, "/%2e%2e/%2e%2e/x"), Some(dir.join("x")));
         assert!(file_in(&dir, "/a/..%5c..%5cx").unwrap().starts_with(&dir));

@@ -56,7 +56,10 @@ pub struct Backend {
 
 impl Default for Backend {
     fn default() -> Self {
-        Self { state: Mutex::new(BackendState::Starting), running: Mutex::new(None) }
+        Self {
+            state: Mutex::new(BackendState::Starting),
+            running: Mutex::new(None),
+        }
     }
 }
 
@@ -75,7 +78,11 @@ impl Backend {
 
     /// Where the running server downloads update files (the only files install_update starts).
     pub fn updates_dir(&self) -> Option<PathBuf> {
-        self.running.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|r| r.updates_dir.clone())
+        self.running
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|r| r.updates_dir.clone())
     }
 }
 
@@ -91,7 +98,11 @@ pub struct LaunchFacts {
 
 impl LaunchFacts {
     pub fn of(app: &AppHandle) -> Self {
-        let dev_origin = if tauri::is_dev() { app.config().build.dev_url.as_ref().map(origin_of) } else { None };
+        let dev_origin = if tauri::is_dev() {
+            app.config().build.dev_url.as_ref().map(origin_of)
+        } else {
+            None
+        };
         LaunchFacts {
             app_version: app.package_info().version.to_string(),
             install_kind: crate::install::this_install_kind().to_owned(),
@@ -135,12 +146,21 @@ pub fn start(app: &AppHandle) {
             Ok(h) => h,
             Err(err) => {
                 tracing::error!("the backend could not start: {err:#}");
-                backend.set(&app, BackendState::Failed { message: format!("{err:#}") });
+                backend.set(
+                    &app,
+                    BackendState::Failed {
+                        message: format!("{err:#}"),
+                    },
+                );
                 return;
             }
         };
         tracing::info!("backend listening on {}", handle.url);
-        let info = BackendInfo { url: handle.url.clone(), token, pid: handle.pid };
+        let info = BackendInfo {
+            url: handle.url.clone(),
+            token,
+            pid: handle.pid,
+        };
         let stopping = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
         *backend.running.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running {
@@ -156,7 +176,11 @@ pub fn start(app: &AppHandle) {
         if !stopping.load(Ordering::SeqCst) {
             // stopped on its own (app.shutdown): the page shows that the backend is gone
             tracing::warn!("the backend stopped");
-            backend.running.lock().unwrap_or_else(|e| e.into_inner()).take();
+            backend
+                .running
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
             backend.set(&app, BackendState::Exited { code: None });
         }
     });
@@ -165,7 +189,12 @@ pub fn start(app: &AppHandle) {
 /// `SPACEKNIFE_READY_FILE` (end-to-end tests, demos): the connection info, the token included,
 /// written to that file (owner-only on Unix), as `spaceknife-cli serve --ready-file` does.
 fn write_ready_file(info: &BackendInfo) {
-    let Some(path) = std::env::var_os("SPACEKNIFE_READY_FILE").filter(|p| !p.is_empty()).map(PathBuf::from) else { return };
+    let Some(path) = std::env::var_os("SPACEKNIFE_READY_FILE")
+        .filter(|p| !p.is_empty())
+        .map(PathBuf::from)
+    else {
+        return;
+    };
     let text = serde_json::json!({"event": "ready", "url": info.url, "pid": info.pid, "token": info.token}).to_string();
     if let Err(e) = sk_server::cli::serve::write_ready_file(&path, &text) {
         tracing::warn!("cannot write the ready file {}: {e}", path.display());
@@ -176,7 +205,14 @@ fn write_ready_file(info: &BackendInfo) {
 /// when it stopped in time (or was not running).
 pub fn stop(app: &AppHandle, timeout: Duration) -> bool {
     let backend = app.state::<Backend>();
-    let Some(running) = backend.running.lock().unwrap_or_else(|e| e.into_inner()).take() else { return true };
+    let Some(running) = backend
+        .running
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take()
+    else {
+        return true;
+    };
     running.stopping.store(true, Ordering::SeqCst);
     running.server.request_shutdown();
     let stopped = running.done.recv_timeout(timeout).is_ok();
@@ -194,10 +230,27 @@ mod tests {
     fn serializes_as_the_page_expects() {
         let json = |s: &BackendState| serde_json::to_string(s).unwrap();
         assert_eq!(json(&BackendState::Starting), r#"{"state":"starting"}"#);
-        let ready = BackendState::Ready { info: BackendInfo { url: "ws://127.0.0.1:1/v1".into(), token: "t".into(), pid: 7 } };
-        assert_eq!(json(&ready), r#"{"state":"ready","info":{"url":"ws://127.0.0.1:1/v1","token":"t","pid":7}}"#);
-        assert_eq!(json(&BackendState::Failed { message: "x".into() }), r#"{"state":"failed","message":"x"}"#);
-        assert_eq!(json(&BackendState::Exited { code: None }), r#"{"state":"exited","code":null}"#);
+        let ready = BackendState::Ready {
+            info: BackendInfo {
+                url: "ws://127.0.0.1:1/v1".into(),
+                token: "t".into(),
+                pid: 7,
+            },
+        };
+        assert_eq!(
+            json(&ready),
+            r#"{"state":"ready","info":{"url":"ws://127.0.0.1:1/v1","token":"t","pid":7}}"#
+        );
+        assert_eq!(
+            json(&BackendState::Failed {
+                message: "x".into()
+            }),
+            r#"{"state":"failed","message":"x"}"#
+        );
+        assert_eq!(
+            json(&BackendState::Exited { code: None }),
+            r#"{"state":"exited","code":null}"#
+        );
     }
 
     #[test]

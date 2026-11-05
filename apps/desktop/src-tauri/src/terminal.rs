@@ -9,8 +9,23 @@ use std::process::{Command, Stdio};
 pub fn terminal_command(platform: &str, dir: &str) -> (String, Vec<String>, Option<String>) {
     match platform {
         // `start` returns at once and leaves no console behind; "" is start's window title
-        "windows" => ("cmd.exe".into(), vec!["/c".into(), "start".into(), String::new(), "wt.exe".into(), "-d".into(), dir.into()], None),
-        "macos" => ("open".into(), vec!["-a".into(), "Terminal".into(), dir.into()], None),
+        "windows" => (
+            "cmd.exe".into(),
+            vec![
+                "/c".into(),
+                "start".into(),
+                String::new(),
+                "wt.exe".into(),
+                "-d".into(),
+                dir.into(),
+            ],
+            None,
+        ),
+        "macos" => (
+            "open".into(),
+            vec!["-a".into(), "Terminal".into(), dir.into()],
+            None,
+        ),
         _ => ("x-terminal-emulator".into(), vec![], Some(dir.into())),
     }
 }
@@ -23,7 +38,10 @@ pub fn open_terminal(dir: &str) {
     }
     let (program, args, cwd) = terminal_command(std::env::consts::OS, dir);
     let mut cmd = Command::new(&program);
-    cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     if let Some(cwd) = cwd {
         cmd.current_dir(cwd);
     }
@@ -45,10 +63,33 @@ mod tests {
     #[test]
     fn opens_the_systems_terminal() {
         let (p, a, c) = terminal_command("windows", "D:\\x y");
-        assert_eq!((p.as_str(), a, c), ("cmd.exe", vec!["/c".to_string(), "start".into(), "".into(), "wt.exe".into(), "-d".into(), "D:\\x y".into()], None));
+        assert_eq!(
+            (p.as_str(), a, c),
+            (
+                "cmd.exe",
+                vec![
+                    "/c".to_string(),
+                    "start".into(),
+                    "".into(),
+                    "wt.exe".into(),
+                    "-d".into(),
+                    "D:\\x y".into()
+                ],
+                None
+            )
+        );
         let (p, a, _) = terminal_command("macos", "/Users/a");
-        assert_eq!((p.as_str(), a), ("open", vec!["-a".to_string(), "Terminal".into(), "/Users/a".into()]));
+        assert_eq!(
+            (p.as_str(), a),
+            (
+                "open",
+                vec!["-a".to_string(), "Terminal".into(), "/Users/a".into()]
+            )
+        );
         let (p, a, c) = terminal_command("linux", "/home/a");
-        assert_eq!((p.as_str(), a.len(), c.as_deref()), ("x-terminal-emulator", 0, Some("/home/a")));
+        assert_eq!(
+            (p.as_str(), a.len(), c.as_deref()),
+            ("x-terminal-emulator", 0, Some("/home/a"))
+        );
     }
 }

@@ -30,9 +30,17 @@ pub fn portable_dir() -> Option<&'static Path> {
 /// when macOS runs a translocated copy of it): SPACEKNIFE_HOME points there for the whole process
 /// (the backend included). Call first thing in main, before any thread starts.
 pub fn prepare_environment() {
-    let Ok(exe) = std::env::current_exe() else { return };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
     let home = std::env::var_os("SPACEKNIFE_HOME");
-    if let Some(dir) = portable::portable_home(&exe, std::env::consts::OS, !tauri::is_dev(), home.as_deref(), portable::original_path) {
+    if let Some(dir) = portable::portable_home(
+        &exe,
+        std::env::consts::OS,
+        !tauri::is_dev(),
+        home.as_deref(),
+        portable::original_path,
+    ) {
         // SAFETY: called from main before the runtime or any other thread exists
         unsafe { std::env::set_var("SPACEKNIFE_HOME", &dir) };
         let _ = PORTABLE.set(dir);

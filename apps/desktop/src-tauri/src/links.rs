@@ -27,10 +27,19 @@ mod tests {
     fn opens_the_projects_pages_on_github() {
         let page = "https://github.com/DuskXi/SpaceKnife/releases/tag/v0.4.0";
         assert_eq!(project_page(page).as_deref(), Some(page));
-        assert_eq!(project_page("https://GitHub.com/DuskXi/SpaceKnife/releases").as_deref(), Some("https://github.com/DuskXi/SpaceKnife/releases"));
+        assert_eq!(
+            project_page("https://GitHub.com/DuskXi/SpaceKnife/releases").as_deref(),
+            Some("https://github.com/DuskXi/SpaceKnife/releases")
+        );
         // the repository itself, as the documentation links to it
-        assert_eq!(project_page("https://github.com/DuskXi/SpaceKnife").as_deref(), Some("https://github.com/DuskXi/SpaceKnife"));
-        assert_eq!(project_page("https://github.com/DuskXi/SpaceKnife#readme").as_deref(), Some("https://github.com/DuskXi/SpaceKnife#readme"));
+        assert_eq!(
+            project_page("https://github.com/DuskXi/SpaceKnife").as_deref(),
+            Some("https://github.com/DuskXi/SpaceKnife")
+        );
+        assert_eq!(
+            project_page("https://github.com/DuskXi/SpaceKnife#readme").as_deref(),
+            Some("https://github.com/DuskXi/SpaceKnife#readme")
+        );
     }
 
     #[test]
@@ -39,8 +48,14 @@ mod tests {
             project_page("https://spaceknife.kaltsit.dev/zh/docs/filtering/#大小").as_deref(),
             Some("https://spaceknife.kaltsit.dev/zh/docs/filtering/#%E5%A4%A7%E5%B0%8F")
         );
-        assert_eq!(project_page("https://SpaceKnife.Kaltsit.dev").as_deref(), Some("https://spaceknife.kaltsit.dev/"));
-        assert_eq!(project_page("https://spaceknife.kaltsit.dev/docs/../").as_deref(), Some("https://spaceknife.kaltsit.dev/"));
+        assert_eq!(
+            project_page("https://SpaceKnife.Kaltsit.dev").as_deref(),
+            Some("https://spaceknife.kaltsit.dev/")
+        );
+        assert_eq!(
+            project_page("https://spaceknife.kaltsit.dev/docs/../").as_deref(),
+            Some("https://spaceknife.kaltsit.dev/")
+        );
     }
 
     #[test]

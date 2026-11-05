@@ -7,7 +7,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::window::Color;
-use tauri::{AppHandle, Emitter, Manager, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, Theme, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+    WindowEvent,
+};
 
 use crate::commands::Themes;
 use crate::events::MAXIMIZED;
@@ -21,7 +24,10 @@ pub const MAIN: &str = "main";
 pub fn ui_dir(app: &AppHandle) -> PathBuf {
     match std::env::var_os("SPACEKNIFE_HOME").filter(|h| !h.is_empty()) {
         Some(home) => PathBuf::from(home).join("desktop"),
-        None => app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir().join("SpaceKnife")),
+        None => app
+            .path()
+            .app_local_data_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("SpaceKnife")),
     }
 }
 
@@ -94,10 +100,20 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     let dir = ui_dir(app);
     let file = dir.join("theme.json");
     let text = std::fs::read_to_string(&file).ok();
-    let keeper = ThemeKeeper::new(TauriThemeHost { app: app.clone(), file }, text.as_deref());
+    let keeper = ThemeKeeper::new(
+        TauriThemeHost {
+            app: app.clone(),
+            file,
+        },
+        text.as_deref(),
+    );
     let setting = keeper.setting();
     // light where nothing tells yet (「跟随系统」): the system's once the window exists, below
-    let first_bg = if setting == ThemeSetting::Dark { crate::theme::WINDOW_BG_DARK } else { crate::theme::WINDOW_BG_LIGHT };
+    let first_bg = if setting == ThemeSetting::Dark {
+        crate::theme::WINDOW_BG_DARK
+    } else {
+        crate::theme::WINDOW_BG_LIGHT
+    };
 
     let builder = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("SpaceKnife")
@@ -109,13 +125,19 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
     // macOS keeps its traffic lights over the page's title bar (TitleBar.vue leaves them room);
     // elsewhere the window has no frame at all and the page draws the window buttons
     #[cfg(target_os = "macos")]
-    let builder = builder.decorations(true).title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    let builder = builder
+        .decorations(true)
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true);
     #[cfg(not(target_os = "macos"))]
     let builder = builder.decorations(false);
     let window = builder.build()?;
 
     app.manage::<Themes>(std::sync::Mutex::new(keeper));
-    app.state::<Themes>().lock().unwrap_or_else(|e| e.into_inner()).updated();
+    app.state::<Themes>()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .updated();
 
     // SPACEKNIFE_START_MINIMIZED=1 (milestone demos): appear in the taskbar without taking the focus
     if std::env::var("SPACEKNIFE_START_MINIMIZED").as_deref() == Ok("1") {
@@ -133,7 +155,10 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         }
         // the system's theme changed: the window's own background follows
         WindowEvent::ThemeChanged(_) => {
-            w.state::<Themes>().lock().unwrap_or_else(|e| e.into_inner()).updated();
+            w.state::<Themes>()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .updated();
         }
         // a finished scan's flash stops once the window is looked at
         WindowEvent::Focused(true) => {
@@ -162,7 +187,10 @@ mod tests {
         let file = dir.path().join("a").join("theme.json");
         write_whole(&file, "{}\n").unwrap();
         write_whole(&file, "{\"theme\":\"dark\"}\n").unwrap();
-        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{\"theme\":\"dark\"}\n");
+        assert_eq!(
+            std::fs::read_to_string(&file).unwrap(),
+            "{\"theme\":\"dark\"}\n"
+        );
         assert!(!file.with_extension("json.tmp").exists());
     }
 }

@@ -48,7 +48,11 @@ pub fn parse_theme_file(text: Option<&str>) -> ThemeSetting {
     };
     serde_json::from_str::<serde_json::Value>(text)
         .ok()
-        .and_then(|v| v.get("theme").and_then(|t| t.as_str()).and_then(ThemeSetting::parse))
+        .and_then(|v| {
+            v.get("theme")
+                .and_then(|t| t.as_str())
+                .and_then(ThemeSetting::parse)
+        })
         .unwrap_or(ThemeSetting::System)
 }
 
@@ -83,7 +87,11 @@ impl<H: ThemeHost> ThemeKeeper<H> {
     pub fn new(mut host: H, file_text: Option<&str>) -> Self {
         let theme = parse_theme_file(file_text);
         host.set_source(theme);
-        Self { host, current: theme, saved: file_text.map(|_| theme) }
+        Self {
+            host,
+            current: theme,
+            saved: file_text.map(|_| theme),
+        }
     }
 
     /// The setting in force.
@@ -93,13 +101,19 @@ impl<H: ThemeHost> ThemeKeeper<H> {
 
     /// The window's background for the theme on screen: each theme's color.bg.window.
     pub fn background(&self) -> &'static str {
-        if self.host.dark() { WINDOW_BG_DARK } else { WINDOW_BG_LIGHT }
+        if self.host.dark() {
+            WINDOW_BG_DARK
+        } else {
+            WINDOW_BG_LIGHT
+        }
     }
 
     /// set_theme from the page: it applied the setting to itself; here the window and the file.
     /// Anything but the three settings is ignored.
     pub fn set(&mut self, theme: &str) {
-        let Some(theme) = ThemeSetting::parse(theme) else { return };
+        let Some(theme) = ThemeSetting::parse(theme) else {
+            return;
+        };
         self.current = theme;
         self.host.set_source(theme);
         let bg = self.background();
@@ -143,7 +157,13 @@ mod tests {
 
     impl Fake {
         fn new(system_dark: bool) -> Self {
-            Self { source: ThemeSetting::System, system_dark, log: vec![], files: vec![], fail: false }
+            Self {
+                source: ThemeSetting::System,
+                system_dark,
+                log: vec![],
+                files: vec![],
+                fail: false,
+            }
         }
     }
 
@@ -152,7 +172,8 @@ mod tests {
             self.source = theme;
         }
         fn dark(&self) -> bool {
-            self.source == ThemeSetting::Dark || (self.source == ThemeSetting::System && self.system_dark)
+            self.source == ThemeSetting::Dark
+                || (self.source == ThemeSetting::System && self.system_dark)
         }
         fn set_background(&mut self, color: &str) {
             self.log.push(format!("bg {color}"));
@@ -171,18 +192,43 @@ mod tests {
 
     #[test]
     fn reads_and_writes_the_file() {
-        assert_eq!(parse_theme_file(Some("{\"theme\":\"dark\"}\n")), ThemeSetting::Dark);
-        assert_eq!(parse_theme_file(Some(&theme_file_text(ThemeSetting::Light))), ThemeSetting::Light);
-        for text in [None, Some(""), Some("{"), Some("null"), Some("[]"), Some("{\"theme\":\"sepia\"}"), Some("{\"theme\":1}")] {
+        assert_eq!(
+            parse_theme_file(Some("{\"theme\":\"dark\"}\n")),
+            ThemeSetting::Dark
+        );
+        assert_eq!(
+            parse_theme_file(Some(&theme_file_text(ThemeSetting::Light))),
+            ThemeSetting::Light
+        );
+        for text in [
+            None,
+            Some(""),
+            Some("{"),
+            Some("null"),
+            Some("[]"),
+            Some("{\"theme\":\"sepia\"}"),
+            Some("{\"theme\":1}"),
+        ] {
             assert_eq!(parse_theme_file(text), ThemeSetting::System, "{text:?}");
         }
-        assert_eq!(theme_file_text(ThemeSetting::Dark), "{\"theme\":\"dark\"}\n");
+        assert_eq!(
+            theme_file_text(ThemeSetting::Dark),
+            "{\"theme\":\"dark\"}\n"
+        );
     }
 
     #[test]
     fn takes_only_the_three_settings() {
-        assert!(["system", "light", "dark"].iter().all(|v| ThemeSetting::parse(v).is_some()));
-        assert!(["", "Light", "0", "null"].iter().all(|v| ThemeSetting::parse(v).is_none()));
+        assert!(
+            ["system", "light", "dark"]
+                .iter()
+                .all(|v| ThemeSetting::parse(v).is_some())
+        );
+        assert!(
+            ["", "Light", "0", "null"]
+                .iter()
+                .all(|v| ThemeSetting::parse(v).is_none())
+        );
     }
 
     #[test]
@@ -208,8 +254,19 @@ mod tests {
         keeper.set("system");
         let host = keeper.host();
         assert_eq!(host.source, ThemeSetting::System);
-        assert_eq!(host.log, [format!("bg {WINDOW_BG_LIGHT}"), format!("bg {WINDOW_BG_DARK}"), format!("bg {WINDOW_BG_DARK}"), format!("bg {WINDOW_BG_LIGHT}")]);
-        assert_eq!(host.files, ["{\"theme\":\"dark\"}\n", "{\"theme\":\"system\"}\n"]);
+        assert_eq!(
+            host.log,
+            [
+                format!("bg {WINDOW_BG_LIGHT}"),
+                format!("bg {WINDOW_BG_DARK}"),
+                format!("bg {WINDOW_BG_DARK}"),
+                format!("bg {WINDOW_BG_LIGHT}")
+            ]
+        );
+        assert_eq!(
+            host.files,
+            ["{\"theme\":\"dark\"}\n", "{\"theme\":\"system\"}\n"]
+        );
     }
 
     #[test]
@@ -218,7 +275,10 @@ mod tests {
         fake.fail = true;
         let mut keeper = ThemeKeeper::new(fake, None);
         keeper.set("dark");
-        assert_eq!(keeper.host().log.last().unwrap(), "[theme] not saved: disk full");
+        assert_eq!(
+            keeper.host().log.last().unwrap(),
+            "[theme] not saved: disk full"
+        );
         keeper.host.fail = false;
         keeper.set("dark"); // the same choice: the file does not hold it yet
         assert_eq!(keeper.host().files, ["{\"theme\":\"dark\"}\n"]);

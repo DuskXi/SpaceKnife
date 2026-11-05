@@ -51,7 +51,10 @@ pub fn app_info(app: AppHandle) -> AppInfo {
         platform: page_platform(std::env::consts::OS),
         version: app.package_info().version.to_string(),
         just_updated: std::env::args().any(|a| a == "--updated"),
-        versions: Versions { tauri: tauri::VERSION.to_string(), webview: tauri::webview_version().unwrap_or_default() },
+        versions: Versions {
+            tauri: tauri::VERSION.to_string(),
+            webview: tauri::webview_version().unwrap_or_default(),
+        },
     }
 }
 
@@ -69,7 +72,11 @@ pub fn window_minimize(window: WebviewWindow) {
 
 #[tauri::command]
 pub fn window_toggle_maximize(window: WebviewWindow) {
-    let _ = if window.is_maximized().unwrap_or(false) { window.unmaximize() } else { window.maximize() };
+    let _ = if window.is_maximized().unwrap_or(false) {
+        window.unmaximize()
+    } else {
+        window.maximize()
+    };
 }
 
 #[tauri::command]
@@ -126,7 +133,10 @@ pub fn copy_text(app: AppHandle, text: String) {
 #[tauri::command]
 pub fn open_full_disk_access(app: AppHandle) {
     if cfg!(target_os = "macos") {
-        let _ = app.opener().open_url("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles", None::<&str>);
+        let _ = app.opener().open_url(
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles",
+            None::<&str>,
+        );
     }
 }
 
@@ -139,7 +149,9 @@ pub fn open_external(app: AppHandle, url: String) {
                 eprintln!("[shell] could not open {url}: {err}");
             }
         }
-        None => eprintln!("[shell] not opening {url}: not a page of the project (GitHub, the website)"),
+        None => {
+            eprintln!("[shell] not opening {url}: not a page of the project (GitHub, the website)")
+        }
     }
 }
 
@@ -147,9 +159,16 @@ pub fn open_external(app: AppHandle, url: String) {
 /// why not (install.rs).
 #[tauri::command]
 pub async fn install_update(app: AppHandle, path: String, how: String) -> String {
-    let how = if how == "classic" { "classic" } else { "seamless" };
+    let how = if how == "classic" {
+        "classic"
+    } else {
+        "seamless"
+    };
     let file = std::path::PathBuf::from(&path);
-    let done = tauri::async_runtime::spawn_blocking(move || crate::install::install_update(&app, &file, how)).await;
+    let done = tauri::async_runtime::spawn_blocking(move || {
+        crate::install::install_update(&app, &file, how)
+    })
+    .await;
     done.unwrap_or_else(|e| mt(TextKey::UpdateStartFailed, &[("error", &e.to_string())]))
 }
 
@@ -183,7 +202,12 @@ pub struct FileDialogOptions {
 }
 
 fn file_dialog(window: &WebviewWindow, title: &str, filters: &[Filter]) -> FileDialogBuilder<Wry> {
-    let mut builder = window.app_handle().dialog().file().set_title(title).set_parent(window);
+    let mut builder = window
+        .app_handle()
+        .dialog()
+        .file()
+        .set_title(title)
+        .set_parent(window);
     for f in filters {
         let extensions: Vec<&str> = f.extensions.iter().map(String::as_str).collect();
         builder = builder.add_filter(&f.name, &extensions);
@@ -195,34 +219,54 @@ fn file_dialog(window: &WebviewWindow, title: &str, filters: &[Filter]) -> FileD
 async fn answer<T: Send + 'static>(start: impl FnOnce(mpsc::Sender<T>)) -> Option<T> {
     let (tx, rx) = mpsc::channel();
     start(tx);
-    tauri::async_runtime::spawn_blocking(move || rx.recv().ok()).await.ok().flatten()
+    tauri::async_runtime::spawn_blocking(move || rx.recv().ok())
+        .await
+        .ok()
+        .flatten()
 }
 
 fn path_text(path: FilePath) -> Option<String> {
-    path.into_path().ok().map(|p| p.to_string_lossy().into_owned())
+    path.into_path()
+        .ok()
+        .map(|p| p.to_string_lossy().into_owned())
 }
 
 /// Pick a snapshot file (UI-W1-45, W4 「打开快照文件…」); null when cancelled.
 #[tauri::command]
 pub async fn dialog_open_snapshot(window: WebviewWindow) -> Option<String> {
-    let filters = [Filter { name: mt(TextKey::SnapshotFilter, &[]), extensions: vec!["sks".into()] }];
+    let filters = [Filter {
+        name: mt(TextKey::SnapshotFilter, &[]),
+        extensions: vec!["sks".into()],
+    }];
     let dialog = file_dialog(&window, &mt(TextKey::OpenSnapshot, &[]), &filters);
-    answer(|tx| dialog.pick_file(move |p| drop(tx.send(p)))).await.flatten().and_then(path_text)
+    answer(|tx| dialog.pick_file(move |p| drop(tx.send(p))))
+        .await
+        .flatten()
+        .and_then(path_text)
 }
 
 /// Pick one or more folders (UI-W1-26 「浏览…」); [] when cancelled.
 #[tauri::command]
 pub async fn dialog_open_folders(window: WebviewWindow) -> Vec<String> {
     let dialog = file_dialog(&window, &mt(TextKey::PickFolders, &[]), &[]);
-    let picked = answer(|tx| dialog.pick_folders(move |p| drop(tx.send(p)))).await.flatten();
-    picked.unwrap_or_default().into_iter().filter_map(path_text).collect()
+    let picked = answer(|tx| dialog.pick_folders(move |p| drop(tx.send(p))))
+        .await
+        .flatten();
+    picked
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(path_text)
+        .collect()
 }
 
 /// Pick one file to read (settings import, SpaceSniffer configuration); null when cancelled.
 #[tauri::command]
 pub async fn dialog_open_file(window: WebviewWindow, options: FileDialogOptions) -> Option<String> {
     let dialog = file_dialog(&window, &options.title, &options.filters);
-    answer(|tx| dialog.pick_file(move |p| drop(tx.send(p)))).await.flatten().and_then(path_text)
+    answer(|tx| dialog.pick_file(move |p| drop(tx.send(p))))
+        .await
+        .flatten()
+        .and_then(path_text)
 }
 
 /// Choose where to write a file (export, settings export); null when cancelled.
@@ -232,7 +276,10 @@ pub async fn dialog_save_file(window: WebviewWindow, options: FileDialogOptions)
     if let Some(name) = options.default_name.as_deref().filter(|n| !n.is_empty()) {
         dialog = dialog.set_file_name(name);
     }
-    answer(|tx| dialog.save_file(move |p| drop(tx.send(p)))).await.flatten().and_then(path_text)
+    answer(|tx| dialog.save_file(move |p| drop(tx.send(p))))
+        .await
+        .flatten()
+        .and_then(path_text)
 }
 
 #[cfg(test)]
@@ -250,8 +297,16 @@ mod tests {
     #[test]
     fn reads_the_pages_dialog_options() {
         let o: FileDialogOptions = serde_json::from_str(r#"{"title":"Export","filters":[{"name":"CSV","extensions":["csv"]}],"defaultName":"a.csv"}"#).unwrap();
-        assert_eq!((o.title.as_str(), o.filters[0].extensions[0].as_str(), o.default_name.as_deref()), ("Export", "csv", Some("a.csv")));
-        let o: FileDialogOptions = serde_json::from_str(r#"{"title":"Import","filters":[]}"#).unwrap();
+        assert_eq!(
+            (
+                o.title.as_str(),
+                o.filters[0].extensions[0].as_str(),
+                o.default_name.as_deref()
+            ),
+            ("Export", "csv", Some("a.csv"))
+        );
+        let o: FileDialogOptions =
+            serde_json::from_str(r#"{"title":"Import","filters":[]}"#).unwrap();
         assert!(o.default_name.is_none());
     }
 }
