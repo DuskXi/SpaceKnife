@@ -1,0 +1,18 @@
+[package]
+name = "sk-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+sk-protocol = { workspace = true }
+sk-native = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
