@@ -6,7 +6,7 @@ import { onMounted, onScopeDispose, ref, watch } from "vue";
 
 import Icon from "@/components/ui/Icon.vue";
 import { getLang, t } from "@/lib/i18n";
-import { LOG_ROW_H as ROW_H, logLevelText, messageParts, sourceText } from "@/lib/logPanel";
+import { LOG_ROW_H as ROW_H, logLevelNames, logLevelText, logSourceNames, messageParts, sourceText } from "@/lib/logPanel";
 import { call, viewCall } from "@/state/actions";
 import { get, type LogEntry, set, toast } from "@/state/store";
 
@@ -162,8 +162,16 @@ const newest = (): string => {
           @mousedown="active = index"
         >
           <span class="log-time mono">{{ hhmmss(e.time) }}</span>
-          <span class="log-level">{{ logLevelText(e.level) }}</span>
-          <span class="log-source">{{ sourceText(e.source) }}</span>
+          <!-- a cell as wide as the column's longest name in the current language: the names sit
+               stacked out of sight and size it; the row's own name fills it, cut with … when longer -->
+          <span class="log-fit log-level"
+            ><span v-for="(name, i) in logLevelNames()" :key="i" class="log-fit-size" aria-hidden="true">{{ name }}</span
+            ><span class="log-fit-text">{{ logLevelText(e.level) }}</span></span
+          >
+          <span class="log-fit log-source"
+            ><span v-for="(name, i) in logSourceNames()" :key="i" class="log-fit-size" aria-hidden="true">{{ name }}</span
+            ><span class="log-fit-text">{{ sourceText(e.source) }}</span></span
+          >
           <!-- paths in messages in monospace, long ones cut from the left (UI-W8-25) -->
           <span class="log-msg"
             ><template v-for="(part, i) in messageParts(e.message, e.path)" :key="i"

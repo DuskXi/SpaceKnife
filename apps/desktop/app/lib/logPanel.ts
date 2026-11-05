@@ -7,6 +7,10 @@ import type { LogEntry } from "@/state/store";
 /** One row's height in px: the list is virtualised on it. */
 export const LOG_ROW_H = 20;
 
+/** The sources the backend sends (events.py `Source`): their names size the source column. */
+export const LOG_SOURCES = ["scan", "perm", "monitor", "delete", "snapshot", "export", "system"];
+export const LOG_LEVELS: LogEntry["level"][] = ["INFO", "WARNING", "ERROR"];
+
 /** An event's source in the current language (read at render time, M7.5); unknown ones as they are. */
 export function sourceText(source: string): string {
   switch (source) {
@@ -30,6 +34,11 @@ export function sourceText(source: string): string {
 }
 
 export const logLevelText = (level: LogEntry["level"]): string => ({ INFO: t("信息"), WARNING: t("警告"), ERROR: t("错误") })[level];
+
+/** Every name the level and source columns can show in the current language: stacked out of sight
+ * in each cell (`.log-fit`), they make the column as wide as its longest name in every row. */
+export const logLevelNames = (): string[] => LOG_LEVELS.map(logLevelText);
+export const logSourceNames = (): string[] => LOG_SOURCES.map(sourceText);
 
 /** A long path as "…\\a\\b\\c" (its last three parts); short ones as they are (UI-W8-25). */
 export function shortPath(path: string): string {

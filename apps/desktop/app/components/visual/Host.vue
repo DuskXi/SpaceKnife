@@ -21,8 +21,9 @@ import { setViewSettings, viewCall } from "@/state/actions";
 import { setting, useApp } from "@/state/store";
 import { type ColorMode, rgba } from "@/treemap/paint";
 import { acquireGl, type GlContext } from "@/visual/glContext";
-import { hitOfKey, pointerBox, scaled } from "@/visual/hit";
+import { pointerBox, scaled } from "@/visual/hit";
 import { type HostHandle, hosts } from "@/visual/hosts";
+import { HoverLight, hoverTarget } from "@/visual/hover";
 import {
   type Breath,
   breathingRows,
@@ -78,7 +79,8 @@ interface HostState {
   anim: Transition | null;
   /** what cur was painted with (repainted after a lost context) */
   settings: PaintSettings | null;
-  hovered: Hit;
+  /** the row lit as hovered: worked out again for every picture by syncHover (visual/hover.ts) */
+  light: HoverLight;
   /** where the pointer is over the picture (client px), null once it left */
   pointer: { x: number; y: number } | null;
   lastZoomKey: number | null;
@@ -129,7 +131,7 @@ const st: HostState = {
   old: null,
   anim: null,
   settings: null,
-  hovered: HIT_NONE,
+  light: new HoverLight(),
   pointer: null,
   lastZoomKey: null,
   flash: null,
@@ -222,7 +224,7 @@ function drawMain(now: number): boolean {
     st.anim = null;
     st.old.instance.dispose();
     st.old = null;
-    queueMicrotask(rehover); // the block under the pointer, in the new picture
+    queueMicrotask(() => syncHover("picture")); // the block under the pointer, in the new picture
     return drawMain(now);
   }
   const dprNow = cur.frame.info.dpr;
@@ -313,6 +315,7 @@ function acquire(): boolean {
       if (st.settings) st.cur.instance.setFrame(st.cur.frame, st.settings);
     }
     loops.main.run();
+    syncHover("picture"); // a transition cut short never reaches its end
   };
   canvas.addEventListener("webglcontextlost", lost);
   canvas.addEventListener("webglcontextrestored", restored);
@@ -402,7 +405,7 @@ function applyFrame(): void {
     loops.breath.run(); // 「减少动画」 or 「回收站特效」 may have changed: move again or hold still
     return;
   }
-  st.hovered = HIT_NONE;
+  st.light.dropped(); // the instance gets another frame, or a new instance starts: no row lit
   const zoomKey = view.value?.state.zoom_key ?? null;
   const prevZoom = st.lastZoomKey;
   st.lastZoomKey = zoomKey;
@@ -432,7 +435,7 @@ function applyFrame(): void {
   st.trash = mode === "off" ? [] : trashMarks(g, f, f.info.dpr);
   relight(g, f);
   loops.breath.run();
-  rehover();
+  syncHover("picture");
 }
 watch(
   [frame, colorMode, unitEpoch, theme, haloLevels, hoverHighlight, selectionShadow, fontScale, levelContrast, borderContrast, colors, scanning, reduced, trashMode],
@@ -458,17 +461,10 @@ function applyFocus(): void {
 }
 watch([focusCls, focusNode, colors], applyFocus);
 
-// hover driven from outside (W3 result list): highlight that row like a pointer hover
+// hover driven from outside (W3 result list): that row lit like a pointer hover (new pictures
+// light it again where the frame is taken in)
 const hoverKey = computed(() => view.value?.hoverKey ?? null);
-function applyHoverKey(): void {
-  if (!st.cur || st.anim) return;
-  const hit = hoverKey.value == null ? HIT_NONE : hitOfKey(st.cur.frame, hoverKey.value);
-  if (hit === st.hovered) return;
-  st.hovered = hit;
-  st.cur.instance.setHover(hit);
-  loops.main.run();
-}
-watch([hoverKey, frame], applyHoverKey);
+watch(hoverKey, () => syncHover("key"));
 
 // viewport: tell the backend (≥ 10 updates a second while resizing, UI-TM-05); a new device pixel
 // ratio (another monitor) is sent again even when the size stays
@@ -545,9 +541,8 @@ watch(
 onMounted(() => {
   if (acquire()) {
     // what the watchers above did not hand over while there was no context yet
-    applyFrame();
+    applyFrame(); // lights the hovered row too (syncHover), the one lit from outside included
     applyFocus();
-    applyHoverKey();
   }
   document.addEventListener("visibilitychange", onVisibility);
 });
@@ -585,52 +580,47 @@ function hoverInfo(p: At, clientX: number, clientY: number): HoverInfo {
   };
 }
 
-// a new picture under a pointer that has not moved: the block under it again, so its card stays
-// up (with this frame's numbers) instead of vanishing until the next mouse move; none while a
-// transition runs (the end of it calls this again)
-function rehover(): void {
+/** Why the hovered row is worked out again: a new picture (or the end of a transition, a context
+ * back), the pointer moved or left, or the row lit from outside changed. */
+type HoverWhy = "picture" | "move" | "leave" | "key";
+
+// The hovered row and its card, in one place for every cause (visual/hover.ts): worked out from
+// where the pointer is and the row lit from outside, for the picture on screen. So a new picture
+// under a still pointer (a file change, a scan's progress) lights the block under it again and
+// keeps its card up with this frame's numbers; nothing is lit while a transition runs (its end
+// calls this again).
+function syncHover(why: HoverWhy): void {
+  const cur = st.cur;
   const at = st.pointer;
-  const p = at && !st.anim ? toCanvasAt(at.x, at.y) : null;
-  if (!p || !at) {
-    emit("hover", null);
-    return;
-  }
-  if (p.hit !== st.hovered) {
-    st.hovered = p.hit;
-    p.cur.instance.setHover(p.hit);
+  const moving = st.anim !== null;
+  const p = cur && at && !moving ? toCanvasAt(at.x, at.y) : null;
+  const before = st.light.row;
+  const hit = hoverTarget({ frame: cur?.frame ?? null, moving, pointer: p ? p.hit : null, key: hoverKey.value });
+  if (cur && hit !== before) {
+    if (why === "move" && trailOn.value && !reduced.value && before !== HIT_NONE) {
+      const mark = trailMark(cur.component.geometry, cur.frame, before, performance.now());
+      if (mark) st.trail.push(mark);
+    }
+    st.light.set(cur.instance, hit);
     loops.main.run();
   }
-  emit("hover", p.hit === HIT_NONE ? null : hoverInfo(p, at.x, at.y));
+  // the card is the pointer's: up for its row, with a new picture's numbers, and moving along
+  // with a pointer it follows
+  if (!p || !at || p.hit === HIT_NONE) {
+    if (why !== "move" || hit !== before) emit("hover", null);
+  } else if (why !== "move" || hit !== before || p.cur.component.hoverPlacement === "pointer") {
+    emit("hover", hoverInfo(p, at.x, at.y));
+  }
 }
 
 function onMove(ev: MouseEvent): void {
   st.pointer = { x: ev.clientX, y: ev.clientY };
-  if (st.anim) return;
-  const p = toCanvas(ev);
-  if (!p) return;
-  if (p.hit === st.hovered) {
-    // a card that follows the pointer moves with it inside the row
-    if (p.hit !== HIT_NONE && p.cur.component.hoverPlacement === "pointer") emit("hover", hoverInfo(p, ev.clientX, ev.clientY));
-    return;
-  }
-  if (trailOn.value && !reduced.value && st.hovered !== HIT_NONE) {
-    const mark = trailMark(p.cur.component.geometry, p.f, st.hovered, performance.now());
-    if (mark) st.trail.push(mark);
-  }
-  st.hovered = p.hit;
-  p.cur.instance.setHover(p.hit);
-  loops.main.run();
-  emit("hover", p.hit === HIT_NONE ? null : hoverInfo(p, ev.clientX, ev.clientY));
+  syncHover("move");
 }
 
 function onLeave(): void {
   st.pointer = null;
-  if (st.hovered !== HIT_NONE) {
-    st.hovered = HIT_NONE;
-    st.cur?.instance.setHover(HIT_NONE);
-    loops.main.run();
-  }
-  emit("hover", null);
+  syncHover("leave");
 }
 
 // the zoom root's bar or disc: a click shows it in the details panel (no selection), a double

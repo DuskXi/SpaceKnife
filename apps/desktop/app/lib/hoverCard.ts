@@ -5,8 +5,8 @@ import type { FilterVocab } from "@/protocol/generated";
 import { pointerBox } from "@/visual/hit";
 import { type Box, HIT_ROOT, type HoverInfo, type VisualFrame } from "@/visual/types";
 
-/** The same target: the card stays (and only moves when it follows the pointer). */
-export const sameTarget = (a: HoverInfo | null, b: HoverInfo | null) => !!a && !!b && a.viewId === b.viewId && a.frame === b.frame && a.target === b.target;
+/** The same target (by the row's key, so also across new pictures of the view): visual/hover.ts. */
+export { sameTarget } from "@/visual/hover";
 
 /** What a card keeps clear of: the row's box, or a small box around the pointer. */
 export const cardAvoid = (h: HoverInfo): Box => (h.placement === "pointer" ? pointerBox(h.pointer) : h.avoid);

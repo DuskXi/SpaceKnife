@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { setLang } from "./i18n";
-import { logLevelText, messageParts, shortPath, sourceText } from "./logPanel";
+import { LOG_LEVELS, LOG_SOURCES, logLevelNames, logLevelText, logSourceNames, messageParts, shortPath, sourceText } from "./logPanel";
 
 afterEach(() => setLang("zh-CN"));
 
@@ -12,6 +12,15 @@ describe("log panel texts", () => {
     expect(logLevelText("WARNING")).toBe("警告");
     setLang("en");
     expect(sourceText("perm")).not.toBe("权限");
+  });
+
+  it("lists every name a column can show, in the current language", () => {
+    expect(logLevelNames()).toEqual(["信息", "警告", "错误"]);
+    expect(logSourceNames()).toHaveLength(LOG_SOURCES.length);
+    expect(logSourceNames()).toContain("权限");
+    setLang("en");
+    expect(logLevelNames()).toHaveLength(LOG_LEVELS.length);
+    expect(logSourceNames()).not.toContain("权限");
   });
 
   it("cuts long paths from the left", () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { hitOfKey, pointerBox } from "@/visual/hit";
+import { pointerBox } from "@/visual/hit";
+import { hitOfKey } from "@/visual/hover";
 import { encodeFrame, TREEMAP_ROWS } from "@/visual/testing/fixtures";
 import { HIT_NONE, HIT_ROOT, type HoverInfo } from "@/visual/types";
 

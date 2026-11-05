@@ -29,19 +29,35 @@ const shown = useHoverCard(() => props.hover, keepOpen, HOVER_DELAY);
 const card = ref<HTMLDivElement | null>(null);
 const pos = ref({ left: 0, top: 0 });
 
-// the change's details, once per target (not per pointer move)
+// the change's details, once per target (not per pointer move); a new picture of a live
+// comparison asks again and the card keeps what it shows until the answer comes
+const heldKey = ref<number | null>(null);
+const shownKey = computed(() => {
+  const s = shown.value;
+  if (!s) return null;
+  const facts = hoverFacts(s.frame, s.target, null);
+  return facts.kind !== Kind.FREE && facts.kind !== Kind.UNKNOWN ? facts.key : null;
+});
+const seq = computed(() => shown.value?.frame.info.seq ?? 0);
 watch(
-  [() => shown.value?.viewId ?? null, () => shown.value?.frame ?? null, () => shown.value?.target ?? null] as const,
-  ([viewId, frame, targetHit], _old, onCleanup) => {
-    info.value = null;
-    if (!viewId || !frame || targetHit === null) return;
-    const { kind, key } = hoverFacts(frame, targetHit, null);
-    if (kind === Kind.FREE || kind === Kind.UNKNOWN) return;
+  [() => shown.value?.viewId ?? null, shownKey, seq] as const,
+  ([viewId, key], _old, onCleanup) => {
+    if (!viewId || key === null) {
+      info.value = null;
+      heldKey.value = null;
+      return;
+    }
+    if (heldKey.value !== key) {
+      info.value = null;
+      heldKey.value = null;
+    }
     let alive = true;
     onCleanup(() => (alive = false));
     void call("compare.node", { view_id: viewId, key, children: 4 })
       .then((r) => {
-        if (alive) info.value = r;
+        if (!alive) return;
+        info.value = r;
+        heldKey.value = key;
       })
       .catch(() => undefined);
   },

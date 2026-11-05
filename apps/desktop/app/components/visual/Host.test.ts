@@ -182,6 +182,21 @@ describe("Host", () => {
     host.unmount();
   });
 
+  it("keeps the block under a still pointer lit, with its card, through new pictures", async () => {
+    putView(fakeFrame());
+    const host = mount(Host, { props: { viewId: VIEW } });
+    await host.find(".treemap").trigger("mousemove", at(20, 50));
+    expect(instance.setHover).toHaveBeenLastCalledWith(0);
+    for (let i = 0; i < 3; i++) {
+      instance.setHover.mockClear();
+      putView(fakeFrame()); // a file change redraws the view: the hover key stays null
+      await nextTick();
+      expect(instance.setHover).toHaveBeenLastCalledWith(0);
+      expect((host.emitted("hover")!.at(-1) as [HoverInfo])[0]).toMatchObject({ target: 0, pointer: { x: 20, y: 50 } });
+    }
+    host.unmount();
+  });
+
   it("answers where a row is while mounted", async () => {
     putView(fakeFrame());
     const host = mount(Host, { props: { viewId: VIEW } });

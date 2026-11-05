@@ -18,7 +18,7 @@ import { basketAdd, basketAddBlock, call, rescanFolder, viewCall } from "@/state
 import { closeMenu } from "@/state/menu";
 import { toast, useApp } from "@/state/store";
 import { Kind } from "@/visual/frame";
-import { hitOfKey } from "@/visual/hit";
+import { hitOfKey } from "@/visual/hover";
 import { rowTitle } from "@/visual/rowTitle";
 import { HIT_NONE, HIT_ROOT } from "@/visual/types";
 

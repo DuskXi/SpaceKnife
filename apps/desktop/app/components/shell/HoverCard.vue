@@ -39,14 +39,23 @@ const parentAlloc = ref(0);
 const card = ref<HTMLDivElement | null>(null);
 const pos = ref({ left: 0, top: 0 });
 
-// the node's details, once per target (not per pointer move)
+// the node's details, once per node (not per pointer move); a new picture asks again (its numbers
+// may have changed) and the card keeps what it shows until the answer comes
+const detailNode = computed(() => {
+  const s = shown.value;
+  if (!s) return null;
+  const facts = hoverFacts(s.frame, s.target, null);
+  return facts.kind < Kind.SMALL ? facts.node : null;
+});
+const seq = computed(() => shown.value?.frame.info.seq ?? 0);
 watch(
-  [() => shown.value?.frame ?? null, () => shown.value?.target ?? null, scanId] as const,
-  ([frame, target, scan], _old, onCleanup) => {
-    info.value = null;
-    if (!frame || target === null || !scan) return;
-    const { kind, node } = hoverFacts(frame, target, null);
-    if (kind >= Kind.SMALL) return;
+  [detailNode, scanId, seq] as const,
+  ([node, scan], _old, onCleanup) => {
+    if (node === null || !scan) {
+      info.value = null;
+      return;
+    }
+    if (info.value && info.value.node.id !== node) info.value = null;
     let alive = true;
     onCleanup(() => (alive = false));
     void call("tree.node", { scan_id: scan, node })

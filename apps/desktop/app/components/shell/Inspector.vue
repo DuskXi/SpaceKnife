@@ -18,6 +18,13 @@ import { isRunning } from "@/lib/scanProgress";
 import { tagLabel } from "@/lib/tags";
 import { summaryInterval } from "@/lib/throttle";
 import type { TreeSummaryResult } from "@/protocol/generated";
+
+/** A part of a node's summary the backend could not work out (TreeSummaryResult.gaps). */
+interface SummaryGap {
+  part: string;
+  /** why, in the interface language */
+  reason: string;
+}
 import { basketAdd, cancellable, viewCall } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
 import { Kind } from "@/visual/frame";
@@ -40,6 +47,9 @@ const vocab = useApp((s) => s.vocab);
 const settings = useApp((s) => s.settings); // tag display names (W7 标签)
 const page = ref<Page>("details");
 const summary = shallowRef<TreeSummaryResult | null>(null);
+// why the summary of a node could not be read: shown instead of 「正在读取…」 forever
+const failure = shallowRef<{ node: number; message: string } | null>(null);
+const retry = ref(0);
 const frame = computed(() => view.value?.frame ?? null);
 const scanId = computed(() => view.value?.state.scan_id);
 const selRow = computed(() => frame.value?.info.selected_row ?? null);
@@ -57,16 +67,21 @@ const items = computed(() => (summary.value && summary.value.node.id === node.va
 const tick = useThrottled(seq, () => summaryInterval(items.value, running.value));
 
 watch(
-  [scanId, node, page, tick] as const,
+  [scanId, node, page, tick, retry] as const,
   ([scan, n, p], _old, onCleanup) => {
     if (!scan || n == null || n < 0) return;
     let alive = true;
     const job = cancellable("tree.summary", { scan_id: scan, node: n, top: p === "largest" ? 50 : 5 });
     job.promise
       .then((r) => {
-        if (alive && r) summary.value = r;
+        if (!alive || !r) return;
+        summary.value = r;
+        failure.value = null;
       })
-      .catch(() => {});
+      .catch((err: unknown) => {
+        // the next refresh (or 「重试」) asks again
+        if (alive) failure.value = { node: n, message: err instanceof Error ? err.message : String(err) };
+      });
     onCleanup(() => {
       alive = false;
       job.cancel();
@@ -74,6 +89,16 @@ watch(
   },
   { immediate: true },
 );
+
+// a failed refresh of the node shown keeps what was read; a node never read says why
+const failed = computed(() => {
+  const f = failure.value;
+  const s = summary.value;
+  return f && f.node === node.value && (!s || s.node.id !== node.value) ? f : null;
+});
+// parts of the summary the backend could not work out this time (tree.summary `gaps`); the rest
+// shows as usual. Read loosely: a backend without the field sends none.
+const gaps = computed<SummaryGap[]>(() => (summary.value as (TreeSummaryResult & { gaps?: SummaryGap[] }) | null)?.gaps ?? []);
 
 const className = (id: string) => vocab.value?.classes.find((c) => c.id === id)?.name ?? id;
 const hexOf = (id: string) => classHex(vocab.value, id);
@@ -185,6 +210,12 @@ const syntheticView = computed(() => {
       </div>
     </div>
     <div class="inspector-body">
+      <div v-if="synthetic == null && !failed && summary && gaps.length > 0" class="ins-gaps" role="note" :aria-label="t('部分信息没能读出')">
+        <Icon name="warning" :size="14" />
+        <ul>
+          <li v-for="g in gaps" :key="g.part">{{ g.reason }}</li>
+        </ul>
+      </div>
       <template v-if="syntheticView">
         <div class="ins-name">
           <h2>{{ syntheticView.title }}</h2>
@@ -195,6 +226,14 @@ const syntheticView = computed(() => {
         </div>
         <p class="muted">{{ syntheticView.text }}</p>
       </template>
+      <div v-else-if="failed" class="ins-failed" role="alert">
+        <div class="ins-failed-title">
+          <Icon name="warning" :size="14" />
+          {{ t("详情没能读出") }}
+        </div>
+        <div class="ins-failed-reason">{{ failed.message }}</div>
+        <button class="ghost small" @click="retry++">{{ t("重试") }}</button>
+      </div>
       <div v-else-if="!summary" class="muted">{{ t("正在读取…") }}</div>
       <template v-else-if="page === 'details' && details">
         <div class="ins-title">
@@ -286,7 +325,7 @@ const syntheticView = computed(() => {
         </div>
       </section>
     </div>
-    <div v-if="summary && synthetic == null" class="inspector-actions">
+    <div v-if="summary && synthetic == null && !failed" class="inspector-actions">
       <button v-for="a in actions" :key="a.icon" class="action-row" :disabled="a.disabled" @click="a.run">
         <span :class="a.danger ? 'danger' : 'muted'">
           <Icon :name="a.icon" />
