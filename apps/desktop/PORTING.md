@@ -188,13 +188,15 @@ browser tab.
 ## Bundles
 
 - `src-tauri/tauri.conf.json`: the app (productName SpaceKnife, identifier io.github.duskxi.spaceknife,
-  frontendDist `../.output/public`), icons (`icon.icns` made with `pnpm tauri icon` from the 1024 px
-  `apps/electron/build/icon.png`); `tauri.{windows,linux,macos}.conf.json` the targets: NSIS
+  frontendDist `../.output/public`), icons (made with `pnpm tauri icon ../../design/app-icon/spaceknife.svg`, the
+  1024 px master); `tauri.{windows,linux,macos}.conf.json` the targets: NSIS
   (per-user), AppImage / deb / rpm, app / dmg.
 - `src-tauri/tauri.bundle.json` (`pnpm bundle`): `scripts/prepare-bundle.mjs` builds `spaceknife-cli`
   (release) as `src-tauri/target-bundle/spaceknife-cli-<triple>` for `externalBin` (installed next to the app as
   `spaceknife-cli`) and writes `src-tauri/target-bundle/licenses` (LICENSE.txt, THIRD-PARTY-rust.txt from
-  `cargo metadata`, THIRD-PARTY-ui.txt from `pnpm licenses list --prod`) as the `licenses` resource.
+  `cargo metadata`, THIRD-PARTY-ui.txt from `pnpm licenses list --prod`) as the `licenses` resource;
+  the generated interface (`.output/public`) goes along as the `ui` resource, for
+  `spaceknife-cli headless`.
   Kept out of the base config because Tauri's build script requires externalBin / resources to exist
   (plain `cargo build` and `pnpm tauri dev` would fail without them).
 - Release file names: Tauri's (`SpaceKnife_<v>_x64-setup.exe`, `SpaceKnife_<v>_amd64.AppImage`,
@@ -205,9 +207,12 @@ browser tab.
   appimage (`APPIMAGE`); `SPACEKNIFE_INSTALL_KIND` overrides. No MSI bundle (the protocol has no kind
   for it).
 
-## Not ported yet (outside the components)
+## Headless mode and releases
 
-- Headless / `--listen` mode (`main/headless*.ts`): will be served by the Rust server; `src-tauri/src/files.rs`
-  keeps the static-file resolution it needs.
-- The release workflows (`.github/workflows`, `tools/build_package.py`, `tools/release.py`) still
-  build the Electron app: move them to `pnpm bundle` / `pnpm bundle:portable` and Tauri's file names.
+- Headless / `--listen` mode is `spaceknife-cli headless` (crates/sk-server/src/cli/headless.rs): it
+  serves the generated interface from `ui` next to the program (the portable archives carry it;
+  `--ui <folder>` names another).
+- The release workflows (`.github/workflows/portable.yml`, `macos.yml`, `release.yml`) build with
+  `pnpm tauri build --no-bundle` / `pnpm bundle` and `pnpm bundle:portable`; `tools/release.mjs`
+  assembles the release by Tauri's file names. The packaged app is tested with
+  `packaging/smoke-app.mjs`, `smoke-headless.mjs`, `update-e2e.mjs` and `nsis-e2e.mjs`.

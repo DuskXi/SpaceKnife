@@ -44,7 +44,7 @@ export function structuredData(c: Content, release: Release, pageUrl: string, sh
     "@type": "SoftwareSourceCode",
     name: "SpaceKnife",
     codeRepository: REPO_URL,
-    programmingLanguage: ["Python", "Rust", "TypeScript"],
+    programmingLanguage: ["Rust", "TypeScript", "Vue"],
     runtimePlatform: ["Windows", "Linux"],
     license: "https://opensource.org/licenses/MIT",
     author,

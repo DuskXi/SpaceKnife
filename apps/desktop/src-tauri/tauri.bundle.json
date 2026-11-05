@@ -8,7 +8,8 @@
       "target-bundle/spaceknife-cli"
     ],
     "resources": {
-      "target-bundle/licenses/": "licenses/"
+      "target-bundle/licenses/": "licenses/",
+      "../.output/public/": "ui/"
     }
   }
 }

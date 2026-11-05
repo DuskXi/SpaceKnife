@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-/// The app bundle in a macOS portable copy's folder (tools/build_package.py make_portable).
+/// The app bundle in a macOS portable copy's folder (apps/desktop/scripts/portable.mjs).
 pub const MAC_APP: &str = "SpaceKnife.app";
 
 /// The architectures a portable copy may move to: the backend takes the processor's build (an x64

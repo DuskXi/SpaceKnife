@@ -5,7 +5,7 @@
 - 详情栏的洞察卡（[UI-SPEC](UI-SPEC.md) UI-MAIN-41 / 42）：标题、说明、所属应用、清理方式与命令；
 - 快照对比里的变化原因注释（UI-W6-30）：名称后的灰色短注，如 Cyberpunk 2077 后的「游戏更新」。
 
-接口契约见 [manage.md](manage.md) 第 5 节。实现在 `packages/backend/src/spaceknife/insights/`：引擎 `rules.py`，内置规则 `builtin.toml`。
+接口契约见 [manage.md](manage.md) 第 5 节。实现在 `crates/sk-core/src/insights/`：引擎 `mod.rs`，内置规则 `builtin.toml`。
 
 ## 1. 规则从哪里来
 
@@ -126,15 +126,16 @@ i18n.en.title = "Steam game"     # 可选：其他语言的文案
 
 ### 4.5 结果
 
-```python
-@dataclass(frozen=True) class Insight:
-    rule: str; title: str; reason: str; kind: str      # 契约字段（manage.md 第 5 节）
-    note: str        # 短注（未写时等于 title）
-    app: str         # 所属应用
-    cleanup: str     # safe / tool / review / keep
-    command: str     # 清理命令（只展示）
-    path: str        # 匹配到的项：路径本身，或包含它的那个文件夹（本平台的分隔符）
-    inside: bool     # 是否经由上级文件夹匹配
+```rust
+pub struct Insight {
+    pub rule: String, pub title: String, pub reason: String, pub kind: InsightKind, // 契约字段（manage.md 第 5 节）
+    pub note: String,     // 短注（未写时等于 title）
+    pub app: String,      // 所属应用
+    pub cleanup: Cleanup, // safe / tool / review / keep
+    pub command: String,  // 清理命令（只展示）
+    pub path: String,     // 匹配到的项：路径本身，或包含它的那个文件夹（本平台的分隔符）
+    pub inside: bool,     // 是否经由上级文件夹匹配
+}
 ```
 
 ## 5. 多语言
@@ -177,17 +178,19 @@ id = "pycache"
 enabled = false
 ```
 
-## 7. 接口（`spaceknife.insights`）
+## 7. 接口（`crates/sk-core/src/insights/mod.rs`）
 
-```python
-def load_rules(extra_dir: Path | None = None, *, host: str | None = None) -> RuleSet
-    # 内置规则 + extra_dir/*.toml；成为下面模块级函数使用的规则集。服务启动时传 user_rules_dir()
-def match(path: str, kind: str | Kind, *, size: int | None = None, lang: str | None = None) -> Insight | None
-def match_many(paths, kinds="dir", *, sizes=None, lang=None) -> list[Insight | None]   # 兄弟项共享上级的计算
-def match_node(store: NodeStore, node: int, *, lang=None) -> Insight | None             # 用节点的路径、类型和占用
-def compile_rules(sources: Iterable[tuple[str, str]], *, host=None) -> RuleSet           # 从内存中的 TOML 文本构建
-def user_rules_dir() -> Path
-class RuleSet: rules, problems, get(id), match / match_many / match_node（同上）
+```rust
+pub fn load_rules(extra_dir: Option<&Path>, host: Option<&str>) -> Result<Arc<RuleSet>, InsightsError>
+    // 内置规则 + extra_dir/*.toml；成为下面模块级函数使用的规则集。服务启动时传 user_rules_dir()
+pub fn match_path(path: &str, kind: Kind, size: Option<i64>, lang: Option<&str>) -> Option<Insight>
+pub fn match_many(paths: &[S], kinds: Kinds, sizes: Option<&[Option<i64>]>, lang: Option<&str>)
+    -> Result<Vec<Option<Insight>>, InsightsError>                    // 兄弟项共享上级的计算
+pub fn match_node(nodes: &Nodes, node: NodeId, lang: Option<&str>) -> Option<Insight> // 用节点的路径、类型和占用
+pub fn compile_rules(sources: &[(String, String)], host: Option<&str>, problems: Vec<RuleProblem>)
+    -> Result<RuleSet, InsightsError>                                  // 从内存中的 TOML 文本构建
+pub fn user_rules_dir() -> PathBuf
+pub struct RuleSet // rules(), get(id), match_path / match_many / match_node（同上）
 ```
 
 - 未调用 `load_rules` 时，模块级函数第一次使用会加载内置规则。

@@ -1,6 +1,7 @@
 name: Release check
 
-# Reads a published release the way an installed SpaceKnife reads it (tools/release.py check):
+# Reads a published release the way an installed SpaceKnife reads it (the app's own update code,
+# cargo run -p sk-core --example release_check):
 # it must be the newest of its channel, every kind of install must find its file under the exact
 # name, and every file must match the checksum the app would read for it (each file is downloaded
 # and hashed). Runs when a release is published (also a draft the Release workflow left, published
@@ -25,15 +26,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+      - name: Set up Rust
+        run: rustup update stable --no-self-update && rustup default stable
 
-      - name: Install Python 3.12 and the backend
-        run: |
-          uv python install 3.12
-          uv sync --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-check
 
       - name: Every kind of install finds its file and checksum
         env:
           VERSION: ${{ inputs.version || github.event.release.tag_name }}
-        run: COLUMNS=160 uv run python tools/release.py check "${VERSION#v}" --download
+        run: cargo run --locked -q -p sk-core --example release_check -- "${VERSION#v}" --download

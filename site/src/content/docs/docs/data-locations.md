@@ -12,9 +12,9 @@ A scan only reads the disk. What SpaceKnife keeps lives in a few per-user folder
 | Data: snapshots, tags, logs | `%LOCALAPPDATA%\SpaceKnife` | `~/.local/share/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | Configuration: settings, file classes | `%LOCALAPPDATA%\SpaceKnife` | `~/.config/SpaceKnife` | `~/Library/Application Support/SpaceKnife` |
 | Cache | `%LOCALAPPDATA%\SpaceKnife\Cache` | `~/.cache/SpaceKnife` | `~/Library/Caches/SpaceKnife` |
-| Interface profile (the window's storage and caches) | `%APPDATA%\SpaceKnife\electron` | `~/.config/SpaceKnife/electron` | `~/Library/Application Support/SpaceKnife/electron` |
+| Interface files (the window's theme, storage and caches) | `%LOCALAPPDATA%\io.github.duskxi.spaceknife` | `~/.local/share/io.github.duskxi.spaceknife` | `~/Library/Application Support/io.github.duskxi.spaceknife` |
 
-On Linux, the folders follow `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` when you set them.
+On Linux, the folders follow `XDG_DATA_HOME`, `XDG_CONFIG_HOME` and `XDG_CACHE_HOME` when you set them. The interface files are named after the app's identifier, `io.github.duskxi.spaceknife`; the system's web view (WebView2, WebKitGTK, WebKit) may keep caches of its own as well.
 
 You don't have to look them up: **Settings › Advanced** shows them.
 
@@ -72,7 +72,7 @@ Set the environment variable `SPACEKNIFE_HOME` to a folder, and SpaceKnife keeps
 | `SPACEKNIFE_HOME/data` | Snapshots, tags, logs, update state |
 | `SPACEKNIFE_HOME/config` | Settings, file classes |
 | `SPACEKNIFE_HOME/cache` | Cache |
-| `SPACEKNIFE_HOME/electron` | Interface profile |
+| `SPACEKNIFE_HOME/desktop` | Interface files |
 
 Use it for a separate profile (to try settings without touching your own), to keep snapshots on another drive, or for demos and tests. Give an absolute path.
 
@@ -80,7 +80,7 @@ Windows, for one start from PowerShell:
 
 ```powershell
 $env:SPACEKNIFE_HOME = "D:\SpaceKnife-data"
-& "<install folder>\SpaceKnife.exe"
+& "<install folder>\spaceknife.exe"
 ```
 
 Windows, for every program started afterwards (to undo it, delete the variable in the Windows environment variable settings):
@@ -98,14 +98,14 @@ SPACEKNIFE_HOME=/home/lenny/spaceknife-data spaceknife
 macOS:
 
 ```bash
-SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife
+SPACEKNIFE_HOME=/Users/lenny/spaceknife-data /Applications/SpaceKnife.app/Contents/MacOS/spaceknife
 ```
 
-The [command line](../command-line/) reads the same variable, so `spaceknife-backend snapshot list` with `SPACEKNIFE_HOME` set lists the snapshots in that folder.
+The [command line](../command-line/) reads the same variable, so `spaceknife-cli snapshot list` with `SPACEKNIFE_HOME` set lists the snapshots in that folder.
 
 ## Portable mode
 
-The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-linux-<arch>-portable.tar.gz` and `SpaceKnife-<version>-mac-<arch>-portable.zip`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface profile all stay in it, and nothing is written to your user profile.
+The portable archives (`SpaceKnife-<version>-win-<arch>-portable.zip`, `SpaceKnife-<version>-linux-<arch>-portable.tar.gz` and `SpaceKnife-<version>-mac-<arch>-portable.zip`) have an empty `data` folder next to the program, with a short README in it. Each time SpaceKnife starts, it looks for that folder: if there is a `data` folder next to the executable (on macOS next to `SpaceKnife.app`), it is used exactly like `SPACEKNIFE_HOME`. Snapshots, settings, logs, cache and the interface files all stay in it, and nothing is written to your user profile.
 
 - An explicitly set `SPACEKNIFE_HOME` wins over the `data` folder.
 - Delete or rename `data` and the copy uses the normal per-user folders. Put it back and it is portable again.
@@ -120,7 +120,7 @@ Only the app looks for the `data` folder; the command line inside a portable cop
 
 ```powershell
 $env:SPACEKNIFE_HOME = "C:\Users\lenny\Apps\SpaceKnife-portable\data"
-& "C:\Users\lenny\Apps\SpaceKnife-portable\resources\backend\spaceknife-backend.exe" snapshot list
+& "C:\Users\lenny\Apps\SpaceKnife-portable\spaceknife-cli.exe" snapshot list
 ```
 
 ### Moving your data
@@ -129,4 +129,5 @@ To take your settings into a portable copy (or out of one), export them in one c
 
 ## Removing all data
 
-The Windows uninstaller does it for you: tick **Also delete the snapshots, settings and logs** on its second page ([Uninstalling](../install/#uninstalling)). Otherwise, to start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are) (on Windows: `%LOCALAPPDATA%\SpaceKnife` and `%APPDATA%\SpaceKnife`), or the `SPACEKNIFE_HOME` folder or `data` folder you use. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.
+<!-- TODO: confirm what the Tauri NSIS uninstaller's "delete the application data" box removes (by default the folders named after the identifier, not %LOCALAPPDATA%\SpaceKnife). -->
+To start fresh or to remove everything after uninstalling, quit SpaceKnife and delete the folders in the [first table](#where-things-are) (on Windows: `%LOCALAPPDATA%\SpaceKnife` and `%LOCALAPPDATA%\io.github.duskxi.spaceknife`), or the `SPACEKNIFE_HOME` folder or `data` folder you use. **Settings › Advanced › Restore all defaults** resets only the settings and file classes.

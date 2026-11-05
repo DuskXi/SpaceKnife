@@ -41,15 +41,17 @@ const FALLBACK: Release = {
   },
 };
 
+// Tauri's names from 0.4.0 (SpaceKnife_<v>_x64-setup.exe, SpaceKnife_<v>_aarch64.dmg, …), and the
+// Electron builds' before it (SpaceKnife-<v>-Setup-x64.exe, SpaceKnife-<v>-mac-arm64.dmg, …).
 function kindOf(name: string): AssetKind | null {
-  if (/-Setup-x64\.exe$/i.test(name)) return "windows";
+  if (/(?:-Setup-x64|_x64-setup)\.exe$/i.test(name)) return "windows";
   if (/-win-x64-portable\.zip$/i.test(name)) return "portableWin";
   if (/-linux-x64-portable\.tar\.gz$/i.test(name)) return "portableLinux";
   if (/_amd64\.deb$/i.test(name)) return "deb";
   if (/\.x86_64\.rpm$/i.test(name)) return "rpm";
   if (/\.AppImage$/i.test(name)) return "appimage";
-  if (/-mac-arm64\.dmg$/i.test(name)) return "macArm64";
-  if (/-mac-x64\.dmg$/i.test(name)) return "macX64";
+  if (/(?:-mac-arm64|_aarch64)\.dmg$/i.test(name)) return "macArm64";
+  if (/(?:-mac-x64|_x64)\.dmg$/i.test(name)) return "macX64";
   if (/^SHA256SUMS\.txt$/i.test(name)) return "sums"; // the installers' (portable and macOS files: their own digests)
   return null;
 }

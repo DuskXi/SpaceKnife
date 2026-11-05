@@ -6,7 +6,7 @@
 //   are on. The token then leaves the address bar and stays in this tab (sessionStorage), so a
 //   reload still connects. There is no window to control, no file manager or terminal to open,
 //   no update to install: what needs that computer says so (and copies the path).
-// - The development demo (tools/demo/m3_web.py, screenshots) puts the backend's address in the
+// - The screenshot tool (tools/demo/screenshots.mjs, through spaceknife-cli headless) puts the backend's address in the
 //   link as well (#ws=…&token=…) and looks like the app, window buttons that do nothing included;
 //   `&browser=1` shows it the way headless mode does.
 

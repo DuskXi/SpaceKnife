@@ -42,7 +42,7 @@ const GOOD_FIT = [
 
 const NOT_A_FIT = [
   "- macOS: no build yet.",
-  "- Headless servers: SpaceKnife is a desktop application; its command line (spaceknife-backend scan / snapshot / run) ships inside the desktop packages.",
+  "- Headless servers: SpaceKnife is a desktop application; its command line (spaceknife-cli scan / snapshot / run, and spaceknife-cli headless to use the interface in a browser) ships inside the desktop packages.",
   "- Managed or enterprise deployment that requires code-signed installers: the installers are not code-signed yet.",
   "- Production-critical use: the current release is a pre-release, tested on Windows 11 and Ubuntu 22.04.",
 ];

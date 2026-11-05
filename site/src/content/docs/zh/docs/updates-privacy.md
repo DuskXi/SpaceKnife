@@ -70,12 +70,12 @@ SpaceKnife 没有遥测，也不需要账户。它从网上取的东西只有 Gi
 
 | 你的安装方式 | 下载的文件 |
 |---|---|
-| Windows 安装包 | `SpaceKnife-<版本>-Setup-x64.exe` |
+| Windows 安装包 | `SpaceKnife_<版本>_x64-setup.exe` |
 | Windows 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip` |
-| macOS | `SpaceKnife-<版本>-mac-arm64.dmg` 或 `…-mac-x64.dmg`，按你的 Mac |
-| deb | `spaceknife_<版本>_amd64.deb` |
-| rpm | `spaceknife-<版本>.x86_64.rpm` |
-| AppImage | `SpaceKnife-<版本>-x86_64.AppImage` |
+| macOS | `SpaceKnife_<版本>_aarch64.dmg` 或 `…_x64.dmg`，按你的 Mac |
+| deb | `SpaceKnife_<版本>_amd64.deb` |
+| rpm | `SpaceKnife-<版本>-1.x86_64.rpm` |
+| AppImage | `SpaceKnife_<版本>_amd64.AppImage` |
 | Linux 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` |
 
 下载完会校验文件：
@@ -104,7 +104,7 @@ SpaceKnife 没有遥测，也不需要账户。它从网上取的东西只有 Gi
 
 | 你的安装方式 | 无缝更新 | 经典方式 |
 |---|---|---|
-| Windows 安装包 | SpaceKnife 关闭，安装程序在后台静默运行（不显示安装向导）替换旧版本，然后 SpaceKnife 自动重新打开。为所有用户安装的，Windows 会请求一次管理员权限。 | 「运行安装程序」：SpaceKnife 退出并打开安装向导，按步骤装好新版本。安装程序就地升级旧版本。 |
+| Windows 安装包 | SpaceKnife 关闭，安装程序在后台静默运行（不显示安装向导）替换旧版本，然后 SpaceKnife 自动重新打开。 | 「运行安装程序」：SpaceKnife 退出并打开安装向导，按步骤装好新版本。安装程序就地升级旧版本。 |
 | 便携版（Windows zip、Linux tar.gz） | SpaceKnife 关闭，由它自己换上新版本的程序文件（见下文），然后重新打开。`data` 文件夹原样保留。 | 「自己替换」：在文件夹中显示下载的压缩包，SpaceKnife 继续运行。退出 SpaceKnife 后把它解压覆盖旧文件，保留 `data` 文件夹。 |
 | AppImage | SpaceKnife 关闭，新的 AppImage（已经设好可执行权限）替换旧文件，然后重新打开。 | 「自己替换」：在文件夹中显示新的 AppImage，SpaceKnife 继续运行。退出 SpaceKnife 后用它替换旧文件。 |
 | macOS | 没有 | 「打开磁盘映像」：SpaceKnife 退出并打开磁盘映像。把 SpaceKnife 拖进「应用程序」替换旧版本，再[放行一次](../install/#macos)。 |
@@ -129,7 +129,7 @@ SpaceKnife 从不自己安装更新，「无缝更新」和安装程序都一样
 - **顶部**：你的版本、这份 SpaceKnife 的安装方式和提示哪些版本；上一次检查的结果、检查的时间，以及下一次自动检查的时间。「检查更新」立即检查；「全部发布」打开 [Releases 页面](https://github.com/DuskXi/SpaceKnife/releases)。有新版本时，它的更新卡片也显示在这里，并且一直留着。
 - **跳过的系列**：被[跳过](#跳过一个系列)的系列的版本也显示在这里。状态写「有新版本 0.4.2（已跳过 0.4.x 的提示）」，卡片里有一行「已跳过 0.4.x 的版本提示：不弹出、不显示徽章、不自动下载」和「恢复提示」；点「恢复提示」，这个系列又照常提示。卡片里照样能下载和安装它。
 - **更新**：三项更新设置（检查、下载、提示哪些版本）。
-- **组件版本**：SpaceKnife、Electron、Chromium、Node.js、后端的 Python、协议的版本，以及你的系统。「复制版本信息」把它们一次复制下来，方便报告问题。
+- **组件版本**：这份 SpaceKnife 的安装方式，SpaceKnife、Tauri、系统 WebView、Rust、协议的版本，以及你的系统。「复制版本信息」把它们一次复制下来，方便报告问题。
 - **发布时间线**：最近 30 个版本，新的在前，标着「当前」「新」（比你的新）和「预览版」。点一个版本，用界面语言阅读它的发布说明；最新的默认展开。「在 GitHub 上查看」打开它的发布页。时间线来自上一次检查，离线时也在；第一次检查之前是空的。
 
 ## 关闭更新检查
@@ -157,7 +157,7 @@ SpaceKnife 不发送任何关于你、你的电脑或你的文件的信息：没
 - 请求遵循你的代理设置：常见的代理环境变量，Windows 和 macOS 上还有系统的代理设置。
 - 和 GitHub 的连接用 HTTPS 证书验证。
 - GitHub 对不带令牌的请求按地址限制次数。很多电脑共用一个出口地址时，检查可能暂时被拒（「GitHub 暂时限制了查询次数…」）；SpaceKnife 稍后会再试。
-- 命令行（`spaceknife-backend scan`、`run`、`snapshot`）不发出任何网络请求。
+- 命令行（`spaceknife-cli scan`、`run`、`snapshot`）不发出任何网络请求。
 
 ### 留在你电脑上的
 

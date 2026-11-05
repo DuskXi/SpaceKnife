@@ -10,7 +10,8 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 | 决定 | 结论 | 拍板时间 |
 |---|---|---|
-| 原生扩展 | 允许在 Python 3.12 后端里内嵌 Rust 扩展（PyO3 + maturin，abi3-py312，由 uv 管理），每条原生路径都保留纯 Python 回退 | 2026-10-15 |
+| 原生扩展 | 允许在 Python 3.12 后端里内嵌 Rust 扩展（PyO3 + maturin，abi3-py312，由 uv 管理），每条原生路径都保留纯 Python 回退（0.4.0 起被下一条取代） | 2026-10-15 |
+| 改写为 Rust + Tauri（0.4.0） | 后端整体改写为 Rust（`crates/sk-native`、`sk-protocol`、`sk-store`、`sk-core`、`sk-server`；命令行 `spaceknife-cli`），窗口改为 Tauri 2 + Nuxt 4 + Vue 3（`apps/desktop`），服务端在应用进程里运行；协议 v1 不变。Python 后端（`packages/`）与 Electron 应用（`apps/electron/`）只作移植参照，之后删除。Qt、WinUI3 前端不再计划 <!-- TODO: confirm --> | <!-- TODO: confirm 日期 --> |
 | 平台下限 | Windows 10+、RHEL 9+ / Ubuntu 22.04+（glibc 2.34）、macOS 14+；不支持 RHEL 8 / Ubuntu 20.04 | 2026-10-15 |
 | 视觉一致的口径 | 共享设计 token、同一套字体和图标、同样的布局；树图由同一份绘制列表渲染并做截图比对（像素接近）；标准控件高度相似即可，不要求逐像素 | 2026-10-15 |
 | 提权方式 | UI 和后端以普通权限运行；MFT/USN 快扫通过 UAC 单独拉起一个只读、带令牌鉴权的扫描助手进程；整个程序不提权 | 2026-10-15 |
@@ -18,11 +19,27 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 | UI 范围 | 线框 W1–W8、树图元素规范、主界面里出现的**全部功能和状态都保留，必须全部实现**，逐条列在 [UI-SPEC.md](UI-SPEC.md) | 2026-10-18 |
 | 可视化组件 | 图形区做成可替换的组件，为以后的插件预备：树图之外加火焰图和火焰-极坐标图，每个视图随时切换（扫描中也可以）。后端引擎、线上布局、前端组件三层分开，契约见 [visuals.md](visuals.md)。火焰图默认根在下；火焰图和火焰-极坐标图默认「顶层分支」配色，每种可视化记住自己的配色；分支色板 8 色 × 4 档，待设计评审与色盲检查 | 2026-10-19 |
 
-默认取舍（用户未反对，可随时改）：后端承担逻辑和布局，前端只负责显示；节点用列式存储，不为每个文件建 Python 对象；先做 Electron v1，再做 Qt 和 WinUI3；硬链接只计一次；删除默认进回收站；过滤语法合理兼容 SpaceSniffer（见 filter-syntax.md）；键位提供「现代」和「SpaceSniffer 经典」两套预设。需求里写的「QtSlide」按 PySide6 理解。
+默认取舍（用户未反对，可随时改）：后端承担逻辑和布局，前端只负责显示；节点用列式存储，不为每个文件建对象；先做 Electron v1，再做 Qt 和 WinUI3（0.4.0 起窗口是 Tauri，见上表）；硬链接只计一次；删除默认进回收站；过滤语法合理兼容 SpaceSniffer（见 filter-syntax.md）；键位提供「现代」和「SpaceSniffer 经典」两套预设。需求里写的「QtSlide」按 PySide6 理解。
 
 ---
 
 ## 2. 总体架构
+
+现状（0.4.0 起）：
+
+```
+ Tauri 2 窗口（Nuxt 4 + Vue 3 + WebGL2，系统 WebView）        浏览器（无头模式：spaceknife-cli headless）
+        └────────────── WebSocket v1：JSON 控制帧 + 二进制数据帧 ──────────────┘
+ 后端 Rust（sk-server：tokio + axum，在应用进程里；sk-protocol：serde + schemars 描述所有消息）
+   会话与视图状态机 · 可视化引擎注册表 · 过滤引擎 · 快照与对比 · 导出模板        （sk-core）
+   删除篮与文件操作 · 洞察规则库 · 日志
+   列式节点仓库（列存 + 名称堆）                                               （sk-store）
+   扫描编排 + IO 限速器 ──► 硬扫描 / MFT 读取                                   （sk-core、sk-native）
+                         文件监控（分层）
+ └─ 提权只读扫描助手（同一个可执行文件的 helper 子命令，只在需要 MFT / USN 时拉起）
+```
+
+0.3.x 时的架构（Python 后端 + Electron）：
 
 ```
  Electron (React + WebGL2)      Qt (PySide6 / QML)      WinUI3 (win32more)
@@ -40,10 +57,10 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 **原则**：
 - 后端持有树、视图状态并计算布局，三个前端只负责光栅化、动画插值、命中测试和发送操作意图。三端的逻辑和树图画面一致靠这一点保证。
-- 可视化可替换：后端按 id 注册引擎（`layout/registry.py`），每种线上布局有自己的列契约和能力名，前端按布局注册绘制组件；宿主代码不直接依赖任何一种可视化（[visuals.md](visuals.md)）。
-- 节点不建 Python 对象：650 万节点用列式存储约 0.5 GB，建成对象要几个 GB。
+- 可视化可替换：后端按 id 注册引擎（`crates/sk-core/src/layout/registry.rs`；0.3.x 是 `layout/registry.py`），每种线上布局有自己的列契约和能力名，前端按布局注册绘制组件；宿主代码不直接依赖任何一种可视化（[visuals.md](visuals.md)）。
+- 节点不建对象：650 万节点用列式存储约 0.5 GB，建成对象要几个 GB。
 - 多进程一律用显式 spawn，线程起来之后不再 fork；进程间只传紧凑的列式批数据；缓存和快照写入做成原子操作；后端检测到 stdin EOF 就退出，防止留下孤儿进程；提权助手只读并强制鉴权。
-- Python 3.12 下不要用线程池做逐文件 stat（实测因 GIL 争用慢 3.5–35 倍）；并行靠原生线程（释放 GIL）或 spawn 多进程。
+- （Python 后端时期）Python 3.12 下不要用线程池做逐文件 stat（实测因 GIL 争用慢 3.5–35 倍）；并行靠原生线程（释放 GIL）或 spawn 多进程。
 
 ---
 
@@ -88,15 +105,17 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 ---
 
 ## 4. 协议
-- 连接：`ws://127.0.0.1:{随机端口}/v1`，子协议 `spaceknife.v1`；启动时生成随机 token，经 stdin 交给后端；握手 `session.hello` 校验 token、协商版本与能力；Origin 白名单；关闭 permessage-deflate。
-- 控制帧：JSON-RPC 2.0 风格（请求/响应/事件/订阅/取消/进度），全部 pydantic 校验。
-- 数据帧：pydantic 描述的帧头 + 小端列式二进制数据（绘制列表、子项列表、扫描批次），JS 端零拷贝读取。实测 10 万节点走 pydantic JSON 约 240 ms，走二进制约 1 ms。
+- 连接：`ws://127.0.0.1:{随机端口}/v1`，子协议 `spaceknife.v1`；启动时生成随机 token（应用内直接交给进程内的服务端；独立的 `spaceknife-cli serve --token-stdin` 经 stdin 交给它）；握手 `session.hello` 校验 token、协商版本与能力；Origin 白名单；关闭 permessage-deflate。
+- 控制帧：JSON-RPC 2.0 风格（请求/响应/事件/订阅/取消/进度），全部按模型校验（0.3.x 是 pydantic，现在是 `crates/sk-protocol`）。
+- 数据帧：JSON 帧头 + 小端列式二进制数据（绘制列表、子项列表、扫描批次），JS 端零拷贝读取。实测 10 万节点走 pydantic JSON 约 240 ms，走二进制约 1 ms。
 - JSON 里不出现超过 2^53 的整数，节点一律用后端内部 u32 id。
-- pydantic 模型是唯一事实来源：生成 JSON Schema → TypeScript 类型；Python 前端直接复用模型；CI 检查生成物与源码一致。
+- 模型是唯一事实来源（0.3.x 是 pydantic；现在是 `crates/sk-protocol`）：生成 JSON Schema 与 TypeScript 类型（`cargo run -p sk-protocol --bin gen-ts`，`--check` 检查生成物与源码一致）。
 
 ---
 
 ## 5. 前端
+
+现状（0.4.0 起）：唯一的窗口是 `apps/desktop`（Tauri 2 + Nuxt 4 + Vue 3 + Pinia，界面跑在系统 WebView 里；绘制代码从 Electron 版原样移过来，仍是 WebGL2 + Canvas2D）。下表是 0.3.x 时的计划。
 
 | 前端 | 技术 | 树图渲染 |
 |---|---|---|
@@ -106,7 +125,7 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 - 图形区按线上布局注册组件（`visual/registry.ts`）：树图和火焰图用 WebGL2 instanced 矩形，火焰-极坐标图用扇区实例程序（每个扇区 32 段三角形带，片元着色器按极坐标距离场画填充、缝、条纹和阴影）；宿主负责上下文、调度、缩放与切换的交叉淡入、闪烁和呼吸。Qt 和 WinUI3 恢复后照 [visuals.md](visuals.md) 各实现三个组件。
 - Qt 与 WinUI3 共用 `spaceknife-client`：WS 客户端跑在核心线程，状态与视图模型不引入任何 GUI 库，通过 UiPort 适配（Qt Signal / DispatcherQueue）回到 UI 线程。
-- 视觉统一：一份设计 token（DTCG JSON）经 `tools/gen_design.py` 生成 CSS / TS / QML / XAML / Python 产物（M0 实测后改用自研生成器替代 Style Dictionary：不引入额外的 Node 依赖，输出确定、可在 CI 用 `--check` 校验，QML/XAML 的写法也能完全掌控）；三端打包同一套字体（Geist、Geist Mono、Noto Sans SC）和同一套 SVG 图标；golden 截图对比做回归测试。
+- 视觉统一：一份设计 token（DTCG JSON）经自研生成器产出各端的产物（M0 实测后替代 Style Dictionary：输出确定、可在 CI 用 `--check` 校验）。现在是 `node tools/gen_design.mjs [--check]`，只产出 `design/build/tokens.css`、`tokens.ts`、`icons.ts`、`icons/*.svg`（QML / XAML / Python 产物已去掉）；三端打包同一套字体（Geist、Geist Mono、Noto Sans SC）和同一套 SVG 图标；golden 截图对比做回归测试。
 - 视觉基线 A2 的色板、字体、尺寸、树图元素语义见 [UI-SPEC.md](UI-SPEC.md) 的「主界面与共享外框」和「树图元素与交互」两节。
 
 ---
@@ -133,6 +152,27 @@ SpaceKnife 是受 SpaceSniffer 启发、独立开发的现代化跨平台硬盘�
 
 ## 7. 仓库结构
 
+现状（0.4.0 起）：
+
+```
+Cargo.toml                     # Cargo workspace 根
+crates/
+  sk-native/    原生扫描：MFT 读取与解析、并行硬扫描（普通 Rust 库）
+  sk-protocol/  协议消息模型（serde + schemars，唯一事实来源；生成 TS 类型与 JSON Schema）
+  sk-store/     列式节点仓库、名字堆、快照
+  sk-core/      扫描编排、IO 限速、布局、过滤、监控、导出、更新检查、提权助手
+  sk-server/    WebSocket 服务端（sk_server::start）与命令行 spaceknife-cli
+apps/desktop/                      Tauri 2 + Nuxt 4 + Vue 3（src-tauri/ 是外壳）
+design/tokens/                      DTCG 设计 token → node tools/gen_design.mjs
+design/icons/                       共享 SVG 图标
+crates/sk-core/locales/、apps/desktop/app/locales/   英文词表
+docs/                               PLAN.md、UI-SPEC.md、protocol.md、visuals.md 等
+tools/                              代码生成、发布、检查脚本（Node）
+site/                               项目网站与使用文档
+```
+
+`packages/`（Python）与 `apps/electron/` 暂时留作移植参照。0.3.x 时的结构：
+
 ```
 pyproject.toml                 # uv workspace 根
 packages/
@@ -143,7 +183,7 @@ packages/
   ui-qt/      spaceknife-qt         PySide6 / QML
   ui-winui/   spaceknife-winui      win32more / WinUI3
 apps/electron/                      electron-vite + React + WebGL2
-design/tokens/                      DTCG 设计 token → tools/gen_design.py
+design/tokens/                      DTCG 设计 token → tools/gen_design.mjs
 design/icons/                       共享 SVG 图标
 i18n/                               zh-CN、en
 docs/                               PLAN.md、UI-SPEC.md、protocol.md、visuals.md 等
@@ -189,7 +229,7 @@ tools/                              代码生成、基准测试
 - 每条 `UI-` 需求按其验收标准测试，三端各自勾选；交付时附需求追踪表。
 - 扫描正确性：与 `GetDiskFreeSpaceEx` / `statfs` 合计、`FSCTL_QUERY_FILE_LAYOUT` 结果、`du` 交叉校验。
 - 性能基准：MFT 扫描、硬扫描吞吐（冷/热缓存、SSD/HDD）、布局耗时、绘制帧时间、WS 吞吐。
-- 视觉回归：同一份绘制列表在三端渲染后做截图比对；树图、火焰图、火焰-极坐标图都要有截图（`tools/demo/screenshots.py` 待加后两种）。
+- 视觉回归：同一份绘制列表在三端渲染后做截图比对；树图、火焰图、火焰-极坐标图都要有截图（`node tools/demo/screenshots.mjs` 待加后两种）。
 - 过滤语法、导出模板语言、命令行解析各有独立测试集。
 
 ---

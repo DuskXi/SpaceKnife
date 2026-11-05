@@ -1,2 +1,0 @@
-module SpaceKnife.Tokens
-singleton Tokens 1.0 Tokens.qml

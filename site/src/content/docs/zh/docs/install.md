@@ -9,26 +9,26 @@ SpaceKnife 发布在 [Releases 页面](https://github.com/DuskXi/SpaceKnife/rele
 
 | 系统 | 文件 | 说明 |
 |---|---|---|
-| Windows 10 及以上，x64 | `SpaceKnife-<版本>-Setup-x64.exe` | 安装包，可装给当前用户或所有用户 |
+| Windows 10 及以上，x64 | `SpaceKnife_<版本>_x64-setup.exe` | 安装包，装给当前用户 |
 | Windows 10 及以上，x64 | `SpaceKnife-<版本>-win-x64-portable.zip` | 便携版：解压即用，不用安装 |
 | Windows 11 ARM 版 | `SpaceKnife-<版本>-win-arm64-portable.zip` | 便携版，ARM（arm64） |
-| macOS 14 及以上，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg` | 磁盘映像 |
-| macOS 14 及以上，Intel | `SpaceKnife-<版本>-mac-x64.dmg` | 磁盘映像 |
+| macOS 14 及以上，Apple Silicon | `SpaceKnife_<版本>_aarch64.dmg` | 磁盘映像 |
+| macOS 14 及以上，Intel | `SpaceKnife_<版本>_x64.dmg` | 磁盘映像 |
 | macOS 14 及以上 | `SpaceKnife-<版本>-mac-<arm64 或 x64>-portable.zip` | 便携版：解压即用，数据在程序旁边 |
-| Ubuntu 22.04 及以上 / Debian 系 | `spaceknife_<版本>_amd64.deb` | 软件包 |
-| RHEL 9 及以上 / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` | 软件包 |
-| 其他 Linux，x64 | `SpaceKnife-<版本>-x86_64.AppImage` | 单个文件，需要 FUSE 2 |
+| Ubuntu 22.04 及以上 / Debian 系 | `SpaceKnife_<版本>_amd64.deb` | 软件包 |
+| RHEL 9 及以上 / Fedora 系 | `SpaceKnife-<版本>-1.x86_64.rpm` | 软件包 |
+| 其他 Linux，x64 | `SpaceKnife_<版本>_amd64.AppImage` | 单个文件，需要 FUSE 2 |
 | Linux，x64 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | 便携版：解压即用，不需要 FUSE |
 | Linux，ARM（arm64） | `SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | 便携版，ARM |
 
-ARM 上的 Windows 和 Linux 有便携版；安装包和软件包只有 x64（ARM 版 Windows 也能模拟运行 x64 安装包）。没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）。
+ARM 上的 Windows 和 Linux 有便携版；安装包和软件包只有 x64（ARM 版 Windows 也能模拟运行 x64 安装包）。没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）和 WebKitGTK 4.1。<!-- TODO: confirm the glibc floor of the Tauri builds (it follows the CI build machine). -->
 
 ### 校验下载的文件
 
 软件内的更新会自动校验（见[更新与隐私](../updates-privacy/)）。自己下载的文件，可以算出 SHA-256，和发布里校验文件（`SHA256SUMS.txt`，以及旁边的 `SHA256SUMS-portable-…`、`SHA256SUMS-mac-…`）中对应的那一行比较：
 
 ```powershell
-Get-FileHash .\SpaceKnife-<版本>-Setup-x64.exe -Algorithm SHA256
+Get-FileHash .\SpaceKnife_<版本>_x64-setup.exe -Algorithm SHA256
 ```
 
 ```bash
@@ -36,21 +36,21 @@ sha256sum -c --ignore-missing SHA256SUMS.txt
 ```
 
 ```bash
-shasum -a 256 SpaceKnife-<版本>-mac-arm64.dmg
+shasum -a 256 SpaceKnife_<版本>_aarch64.dmg
 ```
 
 ## Windows
 
 ### 安装包
 
-1. 运行 `SpaceKnife-<版本>-Setup-x64.exe`。
+1. 运行 `SpaceKnife_<版本>_x64-setup.exe`。
 2. 安装包还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」：点「更多信息」，再点「仍要运行」。
-3. 选择装给谁：仅当前用户（默认，不需要管理员权限），或所有用户（需要管理员权限）。安装目录可以改。
+3. 只装给你自己的账户，不需要管理员权限；默认装在 `%LOCALAPPDATA%\SpaceKnife`，也可以另选目录。
 
-安装向导跟随系统语言（中文或英文），会创建开始菜单和桌面快捷方式，装完可以直接启动 SpaceKnife。
+安装向导跟随系统语言（中文或英文），会创建开始菜单快捷方式，装完可以直接启动 SpaceKnife。窗口由 Microsoft Edge WebView2 绘制：Windows 11 自带；Windows 10 上缺少时安装包会装上它。
 
-:::note[仅当前用户还是所有用户]
-「仅当前用户」安装在你自己的账户能写入的目录里，而 [MFT 快速扫描](../first-scan/#扫描方式)的提权只读扫描助手就从安装目录启动。希望这个程序放在只有管理员能改动的位置，就选「所有用户」安装（Program Files）。
+:::note[安装目录你自己能写入]
+安装目录是你自己的账户能写入的位置，而 [MFT 快速扫描](../first-scan/#扫描方式)的提权只读扫描助手就从这里启动。
 :::
 
 ### 静默安装
@@ -58,22 +58,22 @@ shasum -a 256 SpaceKnife-<版本>-mac-arm64.dmg
 脚本部署时，安装包支持常用的参数：
 
 ```powershell
-.\SpaceKnife-<版本>-Setup-x64.exe /S /currentuser
+.\SpaceKnife_<版本>_x64-setup.exe /S
 ```
 
-装给整台电脑就把 `/currentuser` 换成 `/allusers`（以管理员身份运行）。静默卸载用注册表里 SpaceKnife 卸载项的 `QuietUninstallString`，也就是安装目录里的 `"Uninstall SpaceKnife.exe" /currentuser /S`。卸载程序会先把自己复制到临时目录再运行，所以命令会立即返回。静默卸载会保留快照、设置和日志；加上 `--delete-app-data` 就连它们一起删除。
+`/D=<目录>`（放在命令行最后）可以另选安装目录。静默卸载用注册表里 SpaceKnife 卸载项的 `QuietUninstallString`，也就是安装目录里的 `"uninstall.exe" /S`。静默卸载会保留快照、设置和日志。
 
 ### 便携版 zip
 
-把 `SpaceKnife-<版本>-win-x64-portable.zip` 解压到自己能写入的位置（用户目录、U 盘；不要放进 Program Files），运行 `SpaceKnife.exe`。解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
+把 `SpaceKnife-<版本>-win-x64-portable.zip` 解压到自己能写入的位置（用户目录、U 盘；不要放进 Program Files），运行 `spaceknife.exe`。它需要 Microsoft Edge WebView2，Windows 11 自带。解压后第一次启动会慢几秒，Windows 要先检查这些新文件。
 
-`SpaceKnife.exe` 旁边有一个 `data` 文件夹。只要它在，SpaceKnife 就把所有东西（快照、设置、日志、缓存）都存在里面，不写进你的用户目录。见[便携模式](../data-locations/#便携模式)。
+`spaceknife.exe` 旁边有一个 `data` 文件夹。只要它在，SpaceKnife 就把所有东西（快照、设置、日志、缓存）都存在里面，不写进你的用户目录。见[便携模式](../data-locations/#便携模式)。
 
 ## macOS
 
 ### 安装
 
-打开 dmg，把 SpaceKnife 拖进「应用程序」。需要 macOS 14 及以上；Apple Silicon 用 `arm64` 的 dmg，Intel 的 Mac 用 `x64` 的 dmg。
+打开 dmg，把 SpaceKnife 拖进「应用程序」。需要 macOS 14 及以上；Apple Silicon 用 `aarch64` 的 dmg，Intel 的 Mac 用 `x64` 的 dmg。
 
 ### 便携版 zip
 
@@ -118,25 +118,25 @@ macOS 版是 ad-hoc 签名，系统把授权绑定在具体的那个构建上。
 ### deb 与 rpm
 
 ```bash
-sudo apt install ./spaceknife_<版本>_amd64.deb
+sudo apt install ./SpaceKnife_<版本>_amd64.deb
 ```
 
 ```bash
-sudo dnf install ./spaceknife-<版本>.x86_64.rpm
+sudo dnf install ./SpaceKnife-<版本>-1.x86_64.rpm
 ```
 
-两者都把程序装在 `/opt/SpaceKnife/`，在 `/usr/bin` 里放一个 `spaceknife` 命令，并把 SpaceKnife 和它的图标加进应用菜单。依赖（桌面应用常见的那些：GTK 3、NSS 等）由包管理器自动安装。
+两者都把应用（`spaceknife`）和命令行（`spaceknife-cli`）装进 `/usr/bin`，并把 SpaceKnife 和它的图标加进应用菜单。依赖（WebKitGTK、GTK 3 等）由包管理器自动安装。
 
 ### AppImage
 
 ```bash
-chmod +x SpaceKnife-<版本>-x86_64.AppImage
-./SpaceKnife-<版本>-x86_64.AppImage
+chmod +x SpaceKnife_<版本>_amd64.AppImage
+./SpaceKnife_<版本>_amd64.AppImage
 ```
 
 AppImage 需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2` 包）。没有的话，加 `--appimage-extract-and-run` 运行。
 
-从 0.3.2 起，AppImage 里写有更新信息，`./SpaceKnife-<版本>-x86_64.AppImage --appimage-updateinformation` 可以打印出来。AppImage 的更新工具会读取它，配合发布里放在旁边的 `.zsync` 文件，只下载变化的部分。
+<!-- From 0.4.0 the release has no .AppImage.zsync (Tauri's AppImage carries no update information): SpaceKnife's own update check replaces the AppImage. -->
 
 ### 便携版 tar.gz
 
@@ -147,10 +147,6 @@ cd SpaceKnife-<版本>-linux-x64-portable
 ```
 
 不需要 FUSE。和 Windows 的 zip 一样，所有数据都存在程序旁边的 `data` 文件夹里（[便携模式](../data-locations/#便携模式)）。
-
-:::caution[较新的 Ubuntu]
-AppImage 和 tar.gz 里 Chromium 的 `chrome-sandbox` 没有 setuid。在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则），它们可能启动不了，需要加 `--no-sandbox` 运行。Ubuntu 22.04 和 RHEL 9 不受影响。
-:::
 
 ## 升级
 
@@ -170,23 +166,24 @@ SpaceKnife 每天最多检查一次新版本，有新版本时在标题栏提示
 
 | 安装方式 | 怎么卸载 |
 |---|---|
-| Windows 安装包 | 在 Windows 设置的应用列表里卸载 SpaceKnife。程序、界面缓存、缓存和下载的更新都会删除。卸载程序的第二页「你的数据」问其余的：勾上「同时删除快照、设置和日志」（默认不勾）就连 `%LOCALAPPDATA%\SpaceKnife` 一起删掉。 |
+| Windows 安装包 | 在 Windows 设置的应用列表里卸载 SpaceKnife。程序会删除；快照、设置和日志保留。<!-- TODO: confirm what the Tauri uninstaller removes besides the program (its "delete the application data" box). --> |
 | 便携版 | 删除整个文件夹，`data` 文件夹也一起删掉。 |
 | macOS | 退出 SpaceKnife，把它从「应用程序」移到废纸篓。 |
 | deb | `sudo apt remove spaceknife` |
 | rpm | `sudo dnf remove spaceknife` |
 | AppImage | 删除这个文件。 |
 
-除非勾上那一项，或者删的是便携版，扫描、快照和设置都会保留，以后重新安装还能接着用。要手动删掉它们，删除[数据位置](../data-locations/)里列出的文件夹。用 `SPACEKNIFE_HOME` 指定的文件夹，卸载程序从不碰。
+除非删的是便携版，扫描、快照和设置都会保留，以后重新安装还能接着用。要手动删掉它们，删除[数据位置](../data-locations/)里列出的文件夹。用 `SPACEKNIFE_HOME` 指定的文件夹，卸载程序从不碰。
 
 ## 命令行
 
-每个安装好的 SpaceKnife 都带着后端的命令行，可以在终端里扫描、管理快照：
+每个安装好的 SpaceKnife 都带着命令行 `spaceknife-cli`，可以在终端里扫描、管理快照，也用来运行[无头模式](../headless/)：
 
 | 安装方式 | 路径 |
 |---|---|
-| Windows | `<安装目录>\resources\backend\spaceknife-backend.exe` |
-| Linux deb / rpm | `/opt/SpaceKnife/resources/backend/spaceknife-backend` |
-| macOS | `/Applications/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend` |
+| Windows | `<安装目录>\spaceknife-cli.exe` |
+| Linux deb / rpm | `/usr/bin/spaceknife-cli` |
+| 便携版 | 程序旁边的 `spaceknife-cli` |
+| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli` |
 
 能做什么，见[命令行](../command-line/)。

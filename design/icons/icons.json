@@ -1,5 +1,5 @@
 {
-  "$description": "SpaceKnife 图标源：16×16 视框，描边 1.5，圆头圆角，颜色用 currentColor。tools/gen_design.py 生成独立 SVG 与 TS 映射。",
+  "$description": "SpaceKnife 图标源：16×16 视框，描边 1.5，圆头圆角，颜色用 currentColor。tools/gen_design.mjs 生成独立 SVG 与 TS 映射。",
   "viewBox": "0 0 16 16",
   "strokeWidth": 1.5,
   "icons": {
