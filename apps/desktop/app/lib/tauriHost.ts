@@ -92,6 +92,18 @@ export async function tauriApi(): Promise<SkApi> {
             }),
           cb,
         ),
+      // enter / over: something is held over the window; leave / drop: not any more
+      onDragState: (cb) => {
+        let last: boolean | null = null;
+        return subscribe<boolean>(
+          (f) =>
+            getCurrentWebview().onDragDropEvent((e) => {
+              const over = e.payload.type === "enter" || e.payload.type === "over";
+              if (over !== last) f((last = over));
+            }),
+          cb,
+        );
+      },
     },
   };
 }

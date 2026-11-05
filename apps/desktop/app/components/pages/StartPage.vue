@@ -1,8 +1,9 @@
 <!-- Start page (W1, UI-W1-01…51): pick volumes or folders, set this scan's options, start; open a
      recent scan or a snapshot file. The form lives in the store per tab (switching tabs keeps it).
      Folders and snapshot files dropped on the window come with their paths through
-     window.sk.files.onDropPaths (Tauri's drag-drop event); in a browser tab the page's own drop only
-     explains that the paths are the server's. -->
+     window.sk.files.onDropPaths (Tauri's drag-drop event), and the 「松开以添加文件夹…」 overlay follows
+     window.sk.files.onDragState there; in a browser tab the page's own drag events show the overlay
+     and the drop only explains that the paths are the server's. -->
 <script setup lang="ts">
 import { computed, onScopeDispose, ref, watch } from "vue";
 
@@ -136,6 +137,10 @@ onScopeDispose(
     if (dropped.length) patch({ path: dropped.join("; "), picked: null });
   }),
 );
+
+// the overlay in the app: Tauri's drag enter / over / leave (its drag-drop handler takes the
+// page's own drag events on Windows)
+onScopeDispose(window.sk.files.onDragState((over) => (dragging.value = over)));
 
 // the page's own drop: a browser tab gets no paths, and what it gets is this computer's, not the server's
 function onDragOver(e: DragEvent): void {

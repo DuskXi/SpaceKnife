@@ -1,0 +1,14 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "pnpm generate && node scripts/prepare-bundle.mjs"
+  },
+  "bundle": {
+    "externalBin": [
+      "target-bundle/spaceknife-cli"
+    ],
+    "resources": {
+      "target-bundle/licenses/": "licenses/"
+    }
+  }
+}

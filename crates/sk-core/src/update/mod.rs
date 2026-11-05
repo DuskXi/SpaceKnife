@@ -495,23 +495,41 @@ pub fn system() -> &'static str {
     }
 }
 
-/// The file name for a kind of install on a platform, `{v}` for the version; `None`: nothing is
-/// published for it (a run from source, an unknown install, an architecture without builds).
-pub fn asset_template(kind: InstallKind, system: &str, machine: &str) -> Option<String> {
+/// The file names for a kind of install on a platform, `{v}` for the version, the one to take first
+/// first; empty: nothing is published for it (a run from source, an unknown install, an
+/// architecture without builds). A portable copy moves to the build of the processor it runs on —
+/// an x64 copy on Windows on ARM becomes the native one, and stays on x64 for a release without an
+/// ARM build (Windows runs it emulated).
+///
+/// The installers are named as Tauri's bundler names them (`{productName}_{version}_{arch}…`; the
+/// rpm `{productName}-{version}-{release}.{arch}.rpm`); the portable archives are the release
+/// build's own (`apps/desktop` `bundle:portable`; on macOS the app bundle zipped with `data`).
+pub fn asset_templates(kind: InstallKind, system: &str, machine: &str) -> Vec<String> {
     let a = arch(machine);
     let x64 = a == "x64";
-    Some(match kind {
-        InstallKind::Nsis => "SpaceKnife-{v}-Setup-x64.exe".into(), // Windows on ARM runs it emulated
-        InstallKind::Portable if system == "win32" => "SpaceKnife-{v}-win-x64-portable.zip".into(),
-        InstallKind::Portable if system.starts_with("linux") && x64 => {
-            "SpaceKnife-{v}-linux-x64-portable.tar.gz".into()
+    let known = x64 || a == "arm64";
+    match kind {
+        InstallKind::Nsis => vec!["SpaceKnife_{v}_x64-setup.exe".into()], // Windows on ARM runs it emulated
+        InstallKind::Portable if system == "win32" && a == "arm64" => {
+            vec!["SpaceKnife-{v}-win-arm64-portable.zip".into(), "SpaceKnife-{v}-win-x64-portable.zip".into()]
         }
-        InstallKind::Appimage if x64 => "SpaceKnife-{v}-x86_64.AppImage".into(),
-        InstallKind::Deb if x64 => "spaceknife_{v}_amd64.deb".into(),
-        InstallKind::Rpm if x64 => "spaceknife-{v}.x86_64.rpm".into(),
-        InstallKind::Dmg if a == "arm64" || a == "x64" => format!("SpaceKnife-{{v}}-mac-{a}.dmg"),
-        _ => return None,
-    })
+        InstallKind::Portable if system == "win32" => vec!["SpaceKnife-{v}-win-x64-portable.zip".into()],
+        InstallKind::Portable if system.starts_with("linux") && known => {
+            vec![format!("SpaceKnife-{{v}}-linux-{a}-portable.tar.gz")]
+        }
+        InstallKind::Portable if system == "darwin" && known => vec![format!("SpaceKnife-{{v}}-mac-{a}-portable.zip")],
+        InstallKind::Appimage if x64 => vec!["SpaceKnife_{v}_amd64.AppImage".into()],
+        InstallKind::Deb if x64 => vec!["SpaceKnife_{v}_amd64.deb".into()],
+        InstallKind::Rpm if x64 => vec!["SpaceKnife-{v}-1.x86_64.rpm".into()],
+        InstallKind::Dmg if a == "arm64" => vec!["SpaceKnife_{v}_aarch64.dmg".into()],
+        InstallKind::Dmg if x64 => vec!["SpaceKnife_{v}_x64.dmg".into()],
+        _ => Vec::new(),
+    }
+}
+
+/// The first of [`asset_templates`], or `None`.
+pub fn asset_template(kind: InstallKind, system: &str, machine: &str) -> Option<String> {
+    asset_templates(kind, system, machine).into_iter().next()
 }
 
 fn template_regex(template: &str, slot: &str) -> Regex {
@@ -528,15 +546,14 @@ pub fn pick_asset<'a>(
     system: Option<&str>,
     machine: Option<&str>,
 ) -> Option<&'a Asset> {
-    let template = asset_template(
-        kind,
-        system.unwrap_or(self::system()),
-        machine.unwrap_or(std::env::consts::ARCH),
-    )?;
-    let exact = template.replace("{v}", &release.version);
-    let pattern = template_regex(&template, V_SLOT);
-    let found: Vec<&Asset> = release.assets.iter().filter(|a| pattern.is_match(&a.name)).collect();
-    found.iter().find(|a| a.name == exact).or(found.first()).copied()
+    let templates =
+        asset_templates(kind, system.unwrap_or(self::system()), machine.unwrap_or(std::env::consts::ARCH));
+    templates.iter().find_map(|template| {
+        let exact = template.replace("{v}", &release.version);
+        let pattern = template_regex(template, V_SLOT);
+        let found: Vec<&Asset> = release.assets.iter().filter(|a| pattern.is_match(&a.name)).collect();
+        found.iter().find(|a| a.name == exact).or(found.first()).copied()
+    })
 }
 
 // ---------------------------------------------------------------- checksums
@@ -646,9 +663,21 @@ pub fn updates_dir() -> PathBuf {
 /// log; the scripts of earlier test builds).
 static UPDATE_NAMES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
+        // Tauri's bundles (asset_template)
+        "SpaceKnife_{v}_x64-setup.exe",
+        "SpaceKnife_{v}_amd64.AppImage",
+        "SpaceKnife_{v}_amd64.deb",
+        "SpaceKnife-{v}-1.x86_64.rpm",
+        "SpaceKnife_{v}_aarch64.dmg",
+        "SpaceKnife_{v}_x64.dmg",
+        // the Electron builds' files, still cleaned up
         "SpaceKnife-{v}-Setup-x64.exe",
         "SpaceKnife-{v}-win-x64-portable.zip",
+        "SpaceKnife-{v}-win-arm64-portable.zip",
         "SpaceKnife-{v}-linux-x64-portable.tar.gz",
+        "SpaceKnife-{v}-linux-arm64-portable.tar.gz",
+        "SpaceKnife-{v}-mac-arm64-portable.zip",
+        "SpaceKnife-{v}-mac-x64-portable.zip",
         "SpaceKnife-{v}-x86_64.AppImage",
         "spaceknife_{v}_amd64.deb",
         "spaceknife-{v}.x86_64.rpm",

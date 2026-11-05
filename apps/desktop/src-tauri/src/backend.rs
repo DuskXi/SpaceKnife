@@ -1,13 +1,17 @@
-//! The backend the page talks to (docs/protocol.md: WebSocket JSON-RPC and binary frames). It will
-//! run in this process: crate sk-server serves the protocol on a loopback port with a token, and
-//! the page connects to it as it connected to the Python child process before
-//! (state/actions.ts boot → window.sk.backend() → RpcClient.connect(url, token)).
+//! The backend the page talks to (docs/protocol.md: WebSocket JSON-RPC and binary frames). It runs
+//! in this process: crate sk-server serves the protocol on a loopback port with a fresh token, and
+//! the page connects to it (state/actions.ts boot → window.sk.backend() → RpcClient.connect(url,
+//! token)).
 //!
-//! This module is the one place that starts it and tells the page: [`start`] runs once from setup
-//! (lib.rs); [`Backend::set`] keeps the state for `backend_state` and emits it as `sk://backend`.
-//! Until sk-server is ready the state stays "starting" (the page shows its connecting state).
+//! This module is the one place that starts and stops it and tells the page: [`start`] runs from
+//! setup (lib.rs) and again when an update could not start ([`crate::install`]); [`stop`] on exit
+//! and before an update replaces the files. [`Backend::set`] keeps the state for `backend_state`
+//! and emits it as `sk://backend`.
 
-use std::sync::Mutex;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, Once, mpsc};
+use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
@@ -20,7 +24,7 @@ pub struct BackendInfo {
     /// ws://127.0.0.1:<port>/v1
     pub url: String,
     pub token: String,
-    /// the process serving it: this one, once the server is in-process
+    /// the process serving it: this one
     pub pid: u32,
 }
 
@@ -34,14 +38,25 @@ pub enum BackendState {
     Exited { code: Option<i32> },
 }
 
+/// The running server: enough to stop it and to know where it downloads updates.
+struct Running {
+    server: Arc<sk_server::app::Server>,
+    updates_dir: PathBuf,
+    /// set before a stop asked for here: its end is not news for the page
+    stopping: Arc<AtomicBool>,
+    /// one message once the server stopped
+    done: mpsc::Receiver<()>,
+}
+
 /// The backend's state, managed by Tauri (app.manage).
 pub struct Backend {
     state: Mutex<BackendState>,
+    running: Mutex<Option<Running>>,
 }
 
 impl Default for Backend {
     fn default() -> Self {
-        Self { state: Mutex::new(BackendState::Starting) }
+        Self { state: Mutex::new(BackendState::Starting), running: Mutex::new(None) }
     }
 }
 
@@ -57,22 +72,118 @@ impl Backend {
             eprintln!("[backend] could not tell the window: {err}");
         }
     }
+
+    /// Where the running server downloads update files (the only files install_update starts).
+    pub fn updates_dir(&self) -> Option<PathBuf> {
+        self.running.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|r| r.updates_dir.clone())
+    }
 }
 
-/// Start the backend (once, from setup).
+/// How this copy runs, for the server (update checks, the About page).
+#[derive(Clone, Debug)]
+pub struct LaunchFacts {
+    pub app_version: String,
+    pub install_kind: String,
+    pub system_locale: Option<String>,
+    /// more WebSocket origins: the dev server in development
+    pub allow_origins: Vec<String>,
+}
+
+impl LaunchFacts {
+    pub fn of(app: &AppHandle) -> Self {
+        let dev_origin = if tauri::is_dev() { app.config().build.dev_url.as_ref().map(origin_of) } else { None };
+        LaunchFacts {
+            app_version: app.package_info().version.to_string(),
+            install_kind: crate::install::this_install_kind().to_owned(),
+            system_locale: sys_locale::get_locale(),
+            allow_origins: dev_origin.into_iter().collect(),
+        }
+    }
+}
+
+/// "http://localhost:3000/" → "http://localhost:3000" (an Origin header has no path).
+pub fn origin_of(url: &url::Url) -> String {
+    url.origin().ascii_serialization()
+}
+
+static LOGGING: Once = Once::new();
+
+/// Start the backend: from setup, and again after an update could not start. The page hears
+/// "starting", then "ready" (or "failed" with the reason).
 pub fn start(app: &AppHandle) {
-    let _backend = app.state::<Backend>();
-    // TODO(sk-server): start the in-process server here, on tauri::async_runtime:
-    //   - bind 127.0.0.1:0 with a fresh random token; allowed origins: the window's own origin
-    //     (tauri://localhost, http://tauri.localhost) and, in development, the dev server
-    //     (http://localhost:3000, tauri.conf.json build.devUrl);
-    //   - its home: SPACEKNIFE_HOME (set by main.rs for a portable copy) or the platform default;
-    //     the locale: sys_locale::get_locale(); the app version: app.package_info().version;
-    //   - once it listens:
-    //       _backend.set(app, BackendState::Ready { info: BackendInfo { url: format!("ws://127.0.0.1:{port}/v1"), token, pid: std::process::id() } });
-    //   - when it fails to start:  _backend.set(app, BackendState::Failed { message });
-    //   - when it stops on its own: _backend.set(app, BackendState::Exited { code: None });
-    //   and stop it on RunEvent::ExitRequested (lib.rs run()).
+    LOGGING.call_once(|| {
+        // stderr (a console in development), the log bus of the 日志 panel, the rotating log file
+        sk_server::cli::serve::init_logging("INFO", "plain");
+        sk_core::io::no_cloud_downloads(); // macOS: never fetch iCloud / File Provider contents
+    });
+    let facts = LaunchFacts::of(app);
+    let backend = app.state::<Backend>();
+    backend.set(app, BackendState::Starting);
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let token = sk_server::util::new_token();
+        let opts = sk_server::ServeOptions {
+            token: token.clone(),
+            allow_origins: facts.allow_origins,
+            app_version: Some(facts.app_version),
+            install_kind: Some(facts.install_kind),
+            system_locale: facts.system_locale,
+            ..Default::default()
+        };
+        let backend = app.state::<Backend>();
+        let handle = match sk_server::start(opts).await {
+            Ok(h) => h,
+            Err(err) => {
+                tracing::error!("the backend could not start: {err:#}");
+                backend.set(&app, BackendState::Failed { message: format!("{err:#}") });
+                return;
+            }
+        };
+        tracing::info!("backend listening on {}", handle.url);
+        let info = BackendInfo { url: handle.url.clone(), token, pid: handle.pid };
+        let stopping = Arc::new(AtomicBool::new(false));
+        let (tx, rx) = mpsc::channel();
+        *backend.running.lock().unwrap_or_else(|e| e.into_inner()) = Some(Running {
+            server: handle.server.clone(),
+            updates_dir: handle.updates_dir.clone(),
+            stopping: stopping.clone(),
+            done: rx,
+        });
+        write_ready_file(&info);
+        backend.set(&app, BackendState::Ready { info });
+        handle.wait().await;
+        let _ = tx.send(());
+        if !stopping.load(Ordering::SeqCst) {
+            // stopped on its own (app.shutdown): the page shows that the backend is gone
+            tracing::warn!("the backend stopped");
+            backend.running.lock().unwrap_or_else(|e| e.into_inner()).take();
+            backend.set(&app, BackendState::Exited { code: None });
+        }
+    });
+}
+
+/// `SPACEKNIFE_READY_FILE` (end-to-end tests, demos): the connection info, the token included,
+/// written to that file (owner-only on Unix), as `spaceknife-cli serve --ready-file` does.
+fn write_ready_file(info: &BackendInfo) {
+    let Some(path) = std::env::var_os("SPACEKNIFE_READY_FILE").filter(|p| !p.is_empty()).map(PathBuf::from) else { return };
+    let text = serde_json::json!({"event": "ready", "url": info.url, "pid": info.pid, "token": info.token}).to_string();
+    if let Err(e) = sk_server::cli::serve::write_ready_file(&path, &text) {
+        tracing::warn!("cannot write the ready file {}: {e}", path.display());
+    }
+}
+
+/// Stop the backend and wait up to `timeout` for it (exit, an update replacing the files). True
+/// when it stopped in time (or was not running).
+pub fn stop(app: &AppHandle, timeout: Duration) -> bool {
+    let backend = app.state::<Backend>();
+    let Some(running) = backend.running.lock().unwrap_or_else(|e| e.into_inner()).take() else { return true };
+    running.stopping.store(true, Ordering::SeqCst);
+    running.server.request_shutdown();
+    let stopped = running.done.recv_timeout(timeout).is_ok();
+    if !stopped {
+        eprintln!("[backend] did not stop within {timeout:?}");
+    }
+    stopped
 }
 
 #[cfg(test)]
@@ -87,5 +198,11 @@ mod tests {
         assert_eq!(json(&ready), r#"{"state":"ready","info":{"url":"ws://127.0.0.1:1/v1","token":"t","pid":7}}"#);
         assert_eq!(json(&BackendState::Failed { message: "x".into() }), r#"{"state":"failed","message":"x"}"#);
         assert_eq!(json(&BackendState::Exited { code: None }), r#"{"state":"exited","code":null}"#);
+    }
+
+    #[test]
+    fn the_dev_servers_origin_has_no_path() {
+        let url = url::Url::parse("http://localhost:3000/").unwrap();
+        assert_eq!(origin_of(&url), "http://localhost:3000");
     }
 }

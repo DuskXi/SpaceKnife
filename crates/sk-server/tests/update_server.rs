@@ -65,7 +65,7 @@ fn rel(version: &str, assets: Vec<Asset>, prerelease: bool, notes: &str) -> Rele
 }
 
 fn installer(version: &str) -> Asset {
-    let name = format!("SpaceKnife-{version}-Setup-x64.exe");
+    let name = format!("SpaceKnife_{version}_x64-setup.exe");
     Asset { url: format!("{PAGE}/download/v{version}/{name}"), name, size: 10 }
 }
 
@@ -200,7 +200,7 @@ async fn check_levels_events_and_dismiss() {
     assert_eq!(st["latest"]["version"], "0.3.1");
     assert_eq!(st["latest"]["notes"], "- 修复");
     assert_eq!(st["latest"]["url"], format!("{PAGE}/tag/v0.3.1"));
-    assert_eq!(st["latest"]["asset"]["name"], "SpaceKnife-0.3.1-Setup-x64.exe");
+    assert_eq!(st["latest"]["asset"]["name"], "SpaceKnife_0.3.1_x64-setup.exe");
     assert!(!st["checked_at"].is_null() && st["error"].is_null() && st["dismissed"] == false);
     {
         let g = gh.lock().unwrap();
@@ -278,7 +278,7 @@ async fn download_over_the_server() {
     let digest = hex(&payload);
     let gh = fake(&srv);
     let feed = Feed::start().await;
-    let exe = "SpaceKnife-0.4.0-Setup-x64.exe";
+    let exe = "SpaceKnife_0.4.0_x64-setup.exe";
     let sums = feed.file("/SHA256SUMS.txt", format!("{digest}  {exe}\n").as_bytes());
     gh.lock().unwrap().releases = vec![rel(
         "0.4.0",
@@ -316,7 +316,7 @@ async fn download_over_the_server() {
 }
 
 fn published(feed: &Feed, version: &str, payload: &[u8], sums: &str) -> Release {
-    let exe = format!("SpaceKnife-{version}-Setup-x64.exe");
+    let exe = format!("SpaceKnife_{version}_x64-setup.exe");
     rel(
         version,
         vec![
@@ -343,7 +343,7 @@ async fn download_mismatch_and_cancel() {
     let ui = Client::open(&srv.url).await;
     // the published checksum does not match: nothing is kept
     gh.lock().unwrap().releases =
-        vec![published(&feed, "0.4.0", &payload, &format!("{}  SpaceKnife-0.4.0-Setup-x64.exe", "0".repeat(64)))];
+        vec![published(&feed, "0.4.0", &payload, &format!("{}  SpaceKnife_0.4.0_x64-setup.exe", "0".repeat(64)))];
     ui.ok("update.check", json!({})).await;
     ui.ok("update.download", json!({"version": "0.4.0"})).await;
     let failed = update_event(&ui, |s| s["download"]["state"] == "failed").await;
@@ -353,7 +353,7 @@ async fn download_mismatch_and_cancel() {
 
     // a download that stalls before its first byte, cancelled meanwhile
     gh.lock().unwrap().releases = vec![published(&feed, "0.4.1", &payload, "")]; // no checksum for it
-    let exe = "/0.4.1/SpaceKnife-0.4.1-Setup-x64.exe";
+    let exe = "/0.4.1/SpaceKnife_0.4.1_x64-setup.exe";
     let go_on = Arc::new(tokio::sync::Notify::new());
     feed.st.lock().unwrap().stall = Some((exe.to_owned(), go_on.clone()));
     let st = ui.ok("update.check", json!({})).await;
@@ -598,7 +598,7 @@ async fn downloads_by_itself_in_the_real_app() {
     let payload = b"new installer ".repeat(1000);
     let gh = fake(&srv);
     let feed = Feed::start().await;
-    let exe = "SpaceKnife-0.4.0-Setup-x64.exe";
+    let exe = "SpaceKnife_0.4.0_x64-setup.exe";
     gh.lock().unwrap().releases = vec![rel(
         "0.4.0",
         vec![Asset { name: exe.into(), size: payload.len() as u64, url: feed.file(&format!("/{exe}"), &payload) }],

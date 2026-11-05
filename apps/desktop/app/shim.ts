@@ -120,6 +120,7 @@ export function browserApi(cfg: BrowserApiConfig, env: BrowserEnv): SkApi {
     files: {
       pathOf: () => "", // a dropped file is this computer's, not the server's
       onDropPaths: () => noop,
+      onDragState: () => noop, // the page's own dragover / dragleave show the overlay
     },
   };
 }

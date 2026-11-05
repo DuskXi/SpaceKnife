@@ -29,6 +29,10 @@ serde_json = { workspace = true }
 sys-locale = "0.3"
 url = "2"
 percent-encoding = "2"
+# the backend, in this process (backend.rs), and the helper / update modes of the binary (main.rs)
+sk-server = { workspace = true }
+sk-core = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

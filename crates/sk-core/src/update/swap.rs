@@ -103,14 +103,14 @@ impl Plan {
         if !self.app.is_dir() {
             return Err(PlanError(format!("no folder {}", self.app.display())));
         }
-        if !self.exe.parent().is_some_and(|p| same(p, &self.app)) {
+        // the executable is in the app folder: directly, or in the app bundle there (macOS)
+        let Some(inside) = within(&self.app, &self.exe) else {
             return Err(PlanError(format!("{} is not in {}", self.exe.display(), self.app.display())));
-        }
-        let exe_name = self.exe.file_name().unwrap_or_default();
-        if !self.new.join(exe_name).is_file() {
+        };
+        if !self.new.join(&inside).is_file() {
             return Err(PlanError(format!(
                 "the new version is incomplete: no {} in {}",
-                exe_name.to_string_lossy(),
+                inside.display(),
                 self.new.display()
             )));
         }
@@ -133,6 +133,20 @@ fn normcase(p: &Path) -> String {
 
 fn same(a: &Path, b: &Path) -> bool {
     normcase(a) == normcase(b)
+}
+
+/// `file`'s path below `folder` (compared as [`same`] does), or None when it is not below it.
+fn within(folder: &Path, file: &Path) -> Option<PathBuf> {
+    let mut rel = Vec::new();
+    let mut at = file;
+    while let Some(parent) = at.parent() {
+        rel.push(at.file_name()?.to_owned());
+        if same(parent, folder) {
+            return Some(rel.iter().rev().collect());
+        }
+        at = parent;
+    }
+    None
 }
 
 fn name_case(name: &str) -> String {
@@ -719,11 +733,27 @@ mod tests {
     }
 
     #[test]
+    fn the_executable_may_be_inside_an_app_bundle_in_the_folder() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut plan = tree(tmp.path());
+        let inner = Path::new("SpaceKnife.app").join("Contents").join("MacOS").join("spaceknife");
+        write(&plan.app.join(&inner), "0.3.3");
+        plan.exe = plan.app.join(&inner);
+        // the new version must have it at the same place
+        assert!(plan.check().unwrap_err().0.contains("incomplete"));
+        write(&plan.new.join(&inner), "0.3.4");
+        assert_eq!(plan.check(), Ok(()));
+        // not in the folder at all
+        plan.exe = tmp.path().join("elsewhere").join("spaceknife");
+        assert!(plan.check().unwrap_err().0.contains("is not in"));
+    }
+
+    #[test]
     fn waiting_for_a_process() {
         #[cfg(windows)]
         let (quick, slow) = (("cmd", vec!["/C", "exit 0"]), ("cmd", vec!["/C", "ping -n 30 127.0.0.1 >NUL"]));
         #[cfg(not(windows))]
-        let (quick, slow) = (("true", vec![]), ("sleep", vec!["30"]));
+        let (quick, slow) = (("true", Vec::<&str>::new()), ("sleep", vec!["30"]));
         let mut done = std::process::Command::new(quick.0).args(&quick.1).spawn().unwrap();
         done.wait().unwrap();
         assert!(wait_gone(done.id(), Duration::from_secs(1)));

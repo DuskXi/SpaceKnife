@@ -144,17 +144,13 @@ pub fn open_external(app: AppHandle, url: String) {
 }
 
 /// One of the update card's two buttons (shared/install.ts installStep): "" when under way, else
-/// why not.
+/// why not (install.rs).
 #[tauri::command]
-pub fn install_update(path: String, how: String) -> String {
-    // TODO(update): port apps/electron/src/main/update.ts (installKind, installRefusal,
-    // nsisUpdateArgs, swapPlanJson) and index.ts installUpdate for the Tauri bundles (NSIS/MSI,
-    // AppImage, deb/rpm, dmg, portable). Until then no install kind has a step. The portable
-    // archive names (x64 / arm64, the macOS zip) and the swap helper's place are in update.rs; a
-    // macOS portable swap unpacks with `ditto -x -k`, takes the folder above the data folder as the
-    // app folder and restarts the executable of the bundle there (not a translocated copy).
-    eprintln!("[update] not installing {path} ({how}): no install step yet");
-    mt(TextKey::UpdateNoInstall, &[])
+pub async fn install_update(app: AppHandle, path: String, how: String) -> String {
+    let how = if how == "classic" { "classic" } else { "seamless" };
+    let file = std::path::PathBuf::from(&path);
+    let done = tauri::async_runtime::spawn_blocking(move || crate::install::install_update(&app, &file, how)).await;
+    done.unwrap_or_else(|e| mt(TextKey::UpdateStartFailed, &[("error", &e.to_string())]))
 }
 
 #[tauri::command]

@@ -17,14 +17,7 @@ import { notOnDisk, revealLabel } from "@/lib/reveal";
 import { isRunning } from "@/lib/scanProgress";
 import { tagLabel } from "@/lib/tags";
 import { summaryInterval } from "@/lib/throttle";
-import type { TreeSummaryResult } from "@/protocol/generated";
-
-/** A part of a node's summary the backend could not work out (TreeSummaryResult.gaps). */
-interface SummaryGap {
-  part: string;
-  /** why, in the interface language */
-  reason: string;
-}
+import type { SummaryGap, TreeSummaryResult } from "@/protocol/generated";
 import { basketAdd, cancellable, viewCall } from "@/state/actions";
 import { set, toast, useApp } from "@/state/store";
 import { Kind } from "@/visual/frame";
@@ -97,8 +90,8 @@ const failed = computed(() => {
   return f && f.node === node.value && (!s || s.node.id !== node.value) ? f : null;
 });
 // parts of the summary the backend could not work out this time (tree.summary `gaps`); the rest
-// shows as usual. Read loosely: a backend without the field sends none.
-const gaps = computed<SummaryGap[]>(() => (summary.value as (TreeSummaryResult & { gaps?: SummaryGap[] }) | null)?.gaps ?? []);
+// shows as usual.
+const gaps = computed<SummaryGap[]>(() => summary.value?.gaps ?? []);
 
 const className = (id: string) => vocab.value?.classes.find((c) => c.id === id)?.name ?? id;
 const hexOf = (id: string) => classHex(vocab.value, id);

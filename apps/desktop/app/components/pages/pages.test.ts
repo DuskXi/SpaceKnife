@@ -14,10 +14,12 @@ import SettingsPage from "./SettingsPage.vue";
 import StartPage from "./StartPage.vue";
 
 let drop: ((paths: string[]) => void) | null = null;
+let dragState: ((over: boolean) => void) | null = null;
 
 beforeEach(() => {
   resetState();
   drop = null;
+  dragState = null;
   window.sk = {
     platform: "win32",
     host: "app",
@@ -25,7 +27,9 @@ beforeEach(() => {
     versions: { tauri: "2", webview: "1" },
     shell: { openPath: vi.fn(), openExternal: vi.fn(), copyText: vi.fn() },
     dialog: { openFolders: vi.fn(async () => []), openSnapshot: vi.fn(async () => null) },
-    files: { pathOf: () => "", onDropPaths: (cb: (p: string[]) => void) => ((drop = cb), () => (drop = null)) },
+    files: { pathOf: () => "", onDropPaths: (cb: (p: string[]) => void) => ((drop = cb), () => (drop = null)),
+      onDragState: (cb: (over: boolean) => void) => ((dragState = cb), () => (dragState = null)),
+    },
   } as unknown as SkApi;
 });
 afterEach(() => vi.restoreAllMocks());
@@ -42,6 +46,19 @@ describe("pages", () => {
     expect((w.find(".path-input").element as HTMLInputElement).value).toBe("D:\\Games; E:\\Work");
     w.unmount();
     expect(drop).toBeNull();
+  });
+
+  it("shows the drop overlay while the app's window has files dragged over it", async () => {
+    const w = mount(StartPage, { props: { tab: activeTab() } });
+    expect(w.find(".drop-hint").exists()).toBe(false);
+    dragState?.(true);
+    await nextTick();
+    expect(w.find(".drop-hint").exists()).toBe(true);
+    dragState?.(false);
+    await nextTick();
+    expect(w.find(".drop-hint").exists()).toBe(false);
+    w.unmount();
+    expect(dragState).toBeNull();
   });
 
   it("shows the machine page while the disks are read", () => {

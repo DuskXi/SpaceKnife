@@ -310,10 +310,20 @@ fn info() {
 // ---------------------------------------------------------------- the file for this install
 
 const ALL_ASSETS: &[&str] = &[
+    "SpaceKnife_0.4.0_x64-setup.exe",
+    "SpaceKnife_0.4.0_x64-setup.exe.sig",
+    "SpaceKnife_0.4.0_amd64.AppImage",
+    "SpaceKnife_0.4.0_amd64.deb",
+    "SpaceKnife-0.4.0-1.x86_64.rpm",
+    "SpaceKnife_0.4.0_aarch64.dmg",
+    "SpaceKnife_0.4.0_x64.dmg",
     "SpaceKnife-0.4.0-Setup-x64.exe",
-    "SpaceKnife-0.4.0-Setup-x64.exe.blockmap",
     "SpaceKnife-0.4.0-win-x64-portable.zip",
+    "SpaceKnife-0.4.0-win-arm64-portable.zip",
     "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
+    "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+    "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+    "SpaceKnife-0.4.0-mac-x64-portable.zip",
     "SpaceKnife-0.4.0-x86_64.AppImage",
     "spaceknife_0.4.0_amd64.deb",
     "spaceknife-0.4.0.x86_64.rpm",
@@ -330,18 +340,21 @@ fn pick_assets() {
     use InstallKind::*;
     let r = release("0.4.0", ALL_ASSETS);
     for (kind, system, machine, name) in [
-        (Nsis, "win32", "AMD64", Some("SpaceKnife-0.4.0-Setup-x64.exe")),
-        (Nsis, "win32", "ARM64", Some("SpaceKnife-0.4.0-Setup-x64.exe")),
+        (Nsis, "win32", "AMD64", Some("SpaceKnife_0.4.0_x64-setup.exe")),
+        (Nsis, "win32", "ARM64", Some("SpaceKnife_0.4.0_x64-setup.exe")),
         (Portable, "win32", "AMD64", Some("SpaceKnife-0.4.0-win-x64-portable.zip")),
         (Portable, "linux", "x86_64", Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz")),
-        (Portable, "linux", "aarch64", None),
-        (Portable, "darwin", "arm64", None),
-        (Appimage, "linux", "x86_64", Some("SpaceKnife-0.4.0-x86_64.AppImage")),
+        (Portable, "win32", "ARM64", Some("SpaceKnife-0.4.0-win-arm64-portable.zip")),
+        (Portable, "linux", "aarch64", Some("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz")),
+        (Portable, "darwin", "arm64", Some("SpaceKnife-0.4.0-mac-arm64-portable.zip")),
+        (Portable, "darwin", "x86_64", Some("SpaceKnife-0.4.0-mac-x64-portable.zip")),
+        (Portable, "linux", "riscv64", None),
+        (Appimage, "linux", "x86_64", Some("SpaceKnife_0.4.0_amd64.AppImage")),
         (Appimage, "linux", "aarch64", None),
-        (Deb, "linux", "x86_64", Some("spaceknife_0.4.0_amd64.deb")),
-        (Rpm, "linux", "x86_64", Some("spaceknife-0.4.0.x86_64.rpm")),
-        (Dmg, "darwin", "arm64", Some("SpaceKnife-0.4.0-mac-arm64.dmg")),
-        (Dmg, "darwin", "x86_64", Some("SpaceKnife-0.4.0-mac-x64.dmg")),
+        (Deb, "linux", "x86_64", Some("SpaceKnife_0.4.0_amd64.deb")),
+        (Rpm, "linux", "x86_64", Some("SpaceKnife-0.4.0-1.x86_64.rpm")),
+        (Dmg, "darwin", "arm64", Some("SpaceKnife_0.4.0_aarch64.dmg")),
+        (Dmg, "darwin", "x86_64", Some("SpaceKnife_0.4.0_x64.dmg")),
         (Dev, "win32", "AMD64", None),
         (Unknown, "linux", "x86_64", None),
     ] {
@@ -351,12 +364,50 @@ fn pick_assets() {
 }
 
 #[test]
+fn a_portable_copy_on_windows_on_arm_keeps_the_x64_build_without_an_arm_one() {
+    // a release before the ARM builds (or one whose ARM build failed): Windows runs x64 emulated
+    let r = release("0.4.0", &["SpaceKnife-0.4.0-win-x64-portable.zip", "SpaceKnife-0.4.0-linux-x64-portable.tar.gz"]);
+    let got = pick_asset(&r, InstallKind::Portable, Some("win32"), Some("ARM64")).map(|a| a.name.as_str());
+    assert_eq!(got, Some("SpaceKnife-0.4.0-win-x64-portable.zip"));
+    // Linux runs no x64 build on ARM
+    assert!(pick_asset(&r, InstallKind::Portable, Some("linux"), Some("aarch64")).is_none());
+    assert_eq!(
+        asset_templates(InstallKind::Portable, "win32", "ARM64"),
+        ["SpaceKnife-{v}-win-arm64-portable.zip", "SpaceKnife-{v}-win-x64-portable.zip"]
+    );
+    assert_eq!(asset_template(InstallKind::Portable, "win32", "ARM64").as_deref(), Some("SpaceKnife-{v}-win-arm64-portable.zip"));
+    assert!(asset_template(InstallKind::Dev, "win32", "AMD64").is_none());
+}
+
+#[test]
+fn the_arm_and_mac_portable_files_are_update_files() {
+    for name in [
+        "SpaceKnife-0.4.0-win-arm64-portable.zip",
+        "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+        "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+        "SpaceKnife-0.4.0-mac-x64-portable.zip",
+    ] {
+        assert_eq!(update_file_version(name).map(|v| v.to_string()).as_deref(), Some("0.4.0"), "{name}");
+    }
+}
+
+#[test]
+fn update_checks_verify_certificates_through_the_system() {
+    // the operating system's verifier (Windows CryptoAPI, macOS Security framework, the platform
+    // store on Linux): a certificate the system has blocked is refused here too
+    for url in [RELEASES_URL, "http://127.0.0.1:9/releases"] {
+        let a = agent(url, TIMEOUT);
+        assert!(matches!(a.config().tls_config().root_certs(), ureq::tls::RootCerts::PlatformVerifier), "{url}");
+    }
+}
+
+#[test]
 fn pick_asset_tolerates_the_packagers_spelling() {
-    let r = release("0.4.0-beta.1", &["spaceknife-0.4.0~beta.1.x86_64.rpm", "spaceknife_0.4.0-beta.1_amd64.deb"]);
+    let r = release("0.4.0-beta.1", &["SpaceKnife-0.4.0~beta.1-1.x86_64.rpm", "SpaceKnife_0.4.0-beta.1_amd64.deb"]);
     let pick = |k| pick_asset(&r, k, Some("linux"), Some("x86_64")).map(|a| a.name.clone());
-    assert_eq!(pick(InstallKind::Rpm).as_deref(), Some("spaceknife-0.4.0~beta.1.x86_64.rpm"));
-    assert_eq!(pick(InstallKind::Deb).as_deref(), Some("spaceknife_0.4.0-beta.1_amd64.deb"));
-    let odd = release("0.4.0", &["SpaceKnife-../../x-Setup-x64.exe"]);
+    assert_eq!(pick(InstallKind::Rpm).as_deref(), Some("SpaceKnife-0.4.0~beta.1-1.x86_64.rpm"));
+    assert_eq!(pick(InstallKind::Deb).as_deref(), Some("SpaceKnife_0.4.0-beta.1_amd64.deb"));
+    let odd = release("0.4.0", &["SpaceKnife_../../x_x64-setup.exe"]);
     assert!(pick_asset(&odd, InstallKind::Nsis, Some("win32"), Some("AMD64")).is_none());
     assert!(pick_asset(&release("0.4.0", &[]), InstallKind::Nsis, Some("win32"), Some("AMD64")).is_none());
 }
@@ -384,6 +435,7 @@ fn checksums() {
         checksum_files(&r, &Asset { name: name.into(), size: 0, url: "u".into() }).iter().map(|a| a.name.clone()).collect()
     };
     assert_eq!(order("SpaceKnife-0.4.0-mac-arm64.dmg")[0], "SHA256SUMS-mac-arm64.txt");
+    assert_eq!(order("SpaceKnife_0.4.0_x64-setup.exe")[0], "SHA256SUMS.txt");
     assert_eq!(order("SpaceKnife-0.4.0-win-x64-portable.zip")[0], "SHA256SUMS-portable-win-x64.txt");
     assert_eq!(order("SpaceKnife-0.4.0-Setup-x64.exe")[0], "SHA256SUMS.txt");
     assert_eq!(order("x").len(), 3);
@@ -401,6 +453,11 @@ fn update_file_versions() {
     assert_eq!(f("spaceknife_0.4.0~beta.1_amd64.deb").as_deref(), Some("0.4.0-beta.1"));
     assert_eq!(f("spaceknife-0.3.2.x86_64.rpm").as_deref(), Some("0.3.2"));
     assert_eq!(f("SpaceKnife-0.3.2-mac-arm64.dmg").as_deref(), Some("0.3.2"));
+    assert_eq!(f("SpaceKnife_0.4.1_x64-setup.exe").as_deref(), Some("0.4.1"));
+    assert_eq!(f("SpaceKnife_0.4.1-beta.2_amd64.AppImage").as_deref(), Some("0.4.1-beta.2"));
+    assert_eq!(f("SpaceKnife_0.4.1_amd64.deb").as_deref(), Some("0.4.1"));
+    assert_eq!(f("SpaceKnife-0.4.1-1.x86_64.rpm").as_deref(), Some("0.4.1"));
+    assert_eq!(f("SpaceKnife_0.4.1_aarch64.dmg").as_deref(), Some("0.4.1"));
     assert_eq!(f("staging-0.3.3").as_deref(), Some("0.3.3"));
     assert_eq!(f("previous-0.3.2").as_deref(), Some("0.3.2"));
     for n in ["update-0.3.3.ps1", "update-0.3.3.sh", "update-0.3.3.log"] {

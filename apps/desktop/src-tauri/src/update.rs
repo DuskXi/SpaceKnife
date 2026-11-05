@@ -1,7 +1,6 @@
 //! What 「无缝更新」 of a portable copy needs to know about the release files (was the portable part
 //! of apps/electron/src/main/update.ts): which archive is one, the version in its name, and the new
-//! version's backend that swaps the files. The install steps themselves are still to be ported
-//! (commands.rs install_update).
+//! version's program that swaps the files. The install steps are in install.rs.
 
 use std::path::Path;
 
@@ -47,13 +46,13 @@ pub fn portable_version(name: &str) -> Option<String> {
     ["windows", "linux", "macos"].iter().find_map(|p| portable_version_for(name, p))
 }
 
-/// The new version's backend executable in its unpacked files: it does the swap (resources/backend,
-/// the bundle's Contents/Resources/backend on macOS). Joined with the platform's separator.
-pub fn swap_helper(staged: &str, platform: &str) -> String {
+/// The new version's own executable in its unpacked files: started with `--apply-update <plan>`
+/// it swaps the files (main.rs). Inside the app bundle on macOS. Joined with the platform's separator.
+pub fn swap_helper(staged: &str, platform: &str, exe_name: &str) -> String {
     let (sep, parts): (&str, &[&str]) = match platform {
-        "macos" => ("/", &[MAC_APP, "Contents", "Resources", "backend", "spaceknife-backend"]),
-        "windows" => ("\\", &["resources", "backend", "spaceknife-backend.exe"]),
-        _ => ("/", &["resources", "backend", "spaceknife-backend"]),
+        "macos" => ("/", &[MAC_APP, "Contents", "MacOS", exe_name]),
+        "windows" => ("\\", &[exe_name]),
+        _ => ("/", &[exe_name]),
     };
     let mut out = staged.trim_end_matches(sep).to_owned();
     for p in parts {
@@ -100,18 +99,18 @@ mod tests {
     }
 
     #[test]
-    fn the_swap_is_done_by_the_new_versions_own_backend() {
+    fn the_swap_is_done_by_the_new_versions_own_program() {
         assert_eq!(
-            swap_helper("C:\\Users\\lenny\\sk\\staging-0.4.0\\SpaceKnife-0.4.0-win-x64-portable", "windows"),
-            "C:\\Users\\lenny\\sk\\staging-0.4.0\\SpaceKnife-0.4.0-win-x64-portable\\resources\\backend\\spaceknife-backend.exe"
+            swap_helper(r"C:\Users\lenny\sk\staging-0.4.0\SpaceKnife-0.4.0-win-x64-portable", "windows", "spaceknife.exe"),
+            r"C:\Users\lenny\sk\staging-0.4.0\SpaceKnife-0.4.0-win-x64-portable\spaceknife.exe"
         );
         assert_eq!(
-            swap_helper("/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable", "macos"),
-            "/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend"
+            swap_helper("/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable", "macos", "spaceknife"),
+            "/Users/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-mac-arm64-portable/SpaceKnife.app/Contents/MacOS/spaceknife"
         );
         assert_eq!(
-            swap_helper("/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable", "linux"),
-            "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/resources/backend/spaceknife-backend"
+            swap_helper("/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/", "linux", "spaceknife"),
+            "/home/lenny/sk/staging-0.4.0/SpaceKnife-0.4.0-linux-x64-portable/spaceknife"
         );
     }
 

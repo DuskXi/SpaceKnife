@@ -19,6 +19,8 @@ pnpm tauri dev      # the app window (Rust side in src-tauri); the backend comes
 pnpm typecheck      # vue-tsc over app/ (nuxt typecheck)
 pnpm test           # vitest
 pnpm generate       # static output in .output/public (what Tauri bundles)
+pnpm bundle         # release bundles (tauri build + tauri.bundle.json: spaceknife-cli, licences)
+pnpm bundle:portable   # after bundle: target/portable/SpaceKnife-<v>-<os>-<arch>-portable.zip / .tar.gz
 cargo test -p spaceknife-desktop   # from the repository root
 ```
 
@@ -128,9 +130,13 @@ browser. Differences from Electron:
 - `versions` is `{ tauri, webview }` (was electron / chrome / node).
 - `files.pathOf(file)` returns `""` in the app (a webview's `File` has no path); use
   `files.onDropPaths(cb)`, which gives the absolute paths of what was dropped on the window.
-- `update.install` answers "no install step" until the updater is ported (src-tauri TODO(update)).
-- `backend()` stays `{ state: "starting" }` until crate sk-server is wired in
-  (`src-tauri/src/backend.rs`, TODO(sk-server)).
+- `files.onDragState(cb)`: true while files are dragged over the window, false when they leave or
+  are dropped (Tauri's drag enter / over / leave / drop); the start page's drop overlay follows it.
+- `update.install` runs `src-tauri/src/install.rs` (Electron's installUpdate: NSIS silent / wizard,
+  the portable swap through `--apply-update`, AppImage replace, dmg / deb / rpm opened).
+- `backend()`: the server runs in this process (`src-tauri/src/backend.rs`, `sk_server::start` on a
+  random loopback port with a fresh token); "failed" carries the reason, "exited" when it stops on
+  its own. `SPACEKNIFE_READY_FILE=<path>` writes `{url, token, pid}` there (tests, demos).
 
 `lib/host.ts` (`inBrowser`, `serverName`) is as before.
 
@@ -175,14 +181,33 @@ drop: `ClassesEditor` reordering (dataTransfer) must use pointer events instead 
 tab reordering does), or the window must be built with `disable_drag_drop_handler()` and the start
 page loses dropped paths. Decided: the handler stays on. StartPage takes dropped paths from `onDropPaths` (a `.sks` file
 opens as a snapshot, anything else goes in the path box, where the path check flags what isn't a
-folder); ClassesEditor reorders with pointer events. `onDropPaths` only reports the drop, so the
-start page's 「松开以添加文件夹…」 overlay shows in a browser tab only (an enter / leave event from
-Tauri's drag-drop would be needed for it in the app).
+folder); ClassesEditor reorders with pointer events. The overlay 「松开以添加文件夹…」 follows
+`files.onDragState` in the app (Tauri's enter / over / leave) and the page's own drag events in a
+browser tab.
+
+## Bundles
+
+- `src-tauri/tauri.conf.json`: the app (productName SpaceKnife, identifier io.github.duskxi.spaceknife,
+  frontendDist `../.output/public`), icons (`icon.icns` made with `pnpm tauri icon` from the 1024 px
+  `apps/electron/build/icon.png`); `tauri.{windows,linux,macos}.conf.json` the targets: NSIS
+  (per-user), AppImage / deb / rpm, app / dmg.
+- `src-tauri/tauri.bundle.json` (`pnpm bundle`): `scripts/prepare-bundle.mjs` builds `spaceknife-cli`
+  (release) as `src-tauri/target-bundle/spaceknife-cli-<triple>` for `externalBin` (installed next to the app as
+  `spaceknife-cli`) and writes `src-tauri/target-bundle/licenses` (LICENSE.txt, THIRD-PARTY-rust.txt from
+  `cargo metadata`, THIRD-PARTY-ui.txt from `pnpm licenses list --prod`) as the `licenses` resource.
+  Kept out of the base config because Tauri's build script requires externalBin / resources to exist
+  (plain `cargo build` and `pnpm tauri dev` would fail without them).
+- Release file names: Tauri's (`SpaceKnife_<v>_x64-setup.exe`, `SpaceKnife_<v>_amd64.AppImage`,
+  `SpaceKnife_<v>_amd64.deb`, `SpaceKnife-<v>-1.x86_64.rpm`, `SpaceKnife_<v>_<aarch64|x64>.dmg`) and
+  the portable archives of `scripts/portable.mjs`; `crates/sk-core/src/update` picks by these names.
+- Install kind (install.rs): dev (not bundled), portable (`data` next to the program), nsis
+  (`uninstall.exe` next to it), dmg (macOS), deb / rpm (under /usr; deb when dpkg lists it),
+  appimage (`APPIMAGE`); `SPACEKNIFE_INSTALL_KIND` overrides. No MSI bundle (the protocol has no kind
+  for it).
 
 ## Not ported yet (outside the components)
 
-- The update installer (`apps/electron/src/main/update.ts`, `installUpdate`) — `src-tauri` TODO(update).
 - Headless / `--listen` mode (`main/headless*.ts`): will be served by the Rust server; `src-tauri/src/files.rs`
   keeps the static-file resolution it needs.
-- The third-party licence file of the bundle (`rollup-plugin-license` in electron.vite.config.ts).
-- macOS bundle icon (`icon.icns`) in `src-tauri/icons`.
+- The release workflows (`.github/workflows`, `tools/build_package.py`, `tools/release.py`) still
+  build the Electron app: move them to `pnpm bundle` / `pnpm bundle:portable` and Tauri's file names.

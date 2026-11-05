@@ -94,6 +94,10 @@ export interface SkApi {
     /** Files and folders dropped on the window, with their absolute paths (the app: Tauri's drag-drop
      *  event; nothing in browser mode). Returns the unsubscribe. */
     onDropPaths(cb: (paths: string[]) => void): () => void;
+    /** Files are being dragged over the window (true: entered or moving over it; false: left it or
+     *  were dropped), for the start page's drop overlay (the app: Tauri's drag-drop events; nothing in
+     *  browser mode, where the page's own dragover / dragleave do it). Returns the unsubscribe. */
+    onDragState(cb: (over: boolean) => void): () => void;
   };
 }
 

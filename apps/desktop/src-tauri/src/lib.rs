@@ -1,10 +1,15 @@
 //! SpaceKnife's desktop app: a Tauri window around the interface (apps/desktop/app, a Nuxt SPA), the
-//! host API it calls as window.sk (commands.rs) and, soon, the backend in this process (backend.rs).
+//! host API it calls as window.sk (commands.rs) and the backend in this process (backend.rs).
+
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 pub mod backend;
 pub mod commands;
 pub mod events;
 pub mod files;
+pub mod install;
 pub mod links;
 pub mod portable;
 pub mod terminal;
@@ -12,6 +17,14 @@ pub mod text;
 pub mod theme;
 pub mod update;
 pub mod window;
+
+/// The portable copy's data folder, when this is one (prepare_environment).
+static PORTABLE: OnceLock<PathBuf> = OnceLock::new();
+
+/// The data folder next to a portable copy's program; None for an installed copy.
+pub fn portable_dir() -> Option<&'static Path> {
+    PORTABLE.get().map(PathBuf::as_path)
+}
 
 /// A portable copy keeps its data next to the executable (on macOS next to the app bundle, also
 /// when macOS runs a translocated copy of it): SPACEKNIFE_HOME points there for the whole process
@@ -21,7 +34,8 @@ pub fn prepare_environment() {
     let home = std::env::var_os("SPACEKNIFE_HOME");
     if let Some(dir) = portable::portable_home(&exe, std::env::consts::OS, !tauri::is_dev(), home.as_deref(), portable::original_path) {
         // SAFETY: called from main before the runtime or any other thread exists
-        unsafe { std::env::set_var("SPACEKNIFE_HOME", dir) };
+        unsafe { std::env::set_var("SPACEKNIFE_HOME", &dir) };
+        let _ = PORTABLE.set(dir);
     }
 }
 
@@ -58,6 +72,12 @@ pub fn run() {
             backend::start(app.handle());
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("SpaceKnife could not start its window");
+        .build(tauri::generate_context!())
+        .expect("SpaceKnife could not start its window")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // sessions closed, scans stopped, the snapshot cache written
+                backend::stop(app, Duration::from_secs(5));
+            }
+        });
 }
