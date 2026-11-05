@@ -18,13 +18,14 @@
 //! no reader of those stores is held on the same thread).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 use sk_protocol::compare::ChangeKind;
 use sk_protocol::ops::{BasketItemStatus, OpCode};
 use sk_store::lookup::PathIndex;
+use sk_store::names::encode_name;
 use sk_store::subtree::subtree_ids;
 use sk_store::{Flags, Kind, NodeId, Nodes, Store};
 
@@ -41,13 +42,19 @@ pub type ItemStatus = BasketItemStatus;
 pub struct BasketItem {
     /// stable: a hash of the normalised path (groups: of their folder)
     pub id: String,
-    /// absolute path (a small-item group: its folder; members non-empty)
+    /// absolute path (a small-item group: its folder; members non-empty), as shown: names that
+    /// are not valid Unicode have U+FFFD in them ([`BasketItem::os_path`] is the real one)
     pub path: String,
+    /// `path` as the file system names it (lone surrogates, non-UTF-8 bytes kept): what is
+    /// found again in the tree and executed
+    pub os_path: PathBuf,
     pub name: String,
     pub kind: ItemKind,
     pub scan_id: String,
-    /// group: member paths captured when added
+    /// group: member paths captured when added (as shown)
     pub members: Vec<String>,
+    /// group: the members as the file system names them, parallel to `members`
+    pub os_members: Vec<PathBuf>,
     /// freeable allocation (§2.3); 0 while missing or protected
     pub alloc: i64,
     pub size: i64,
@@ -122,7 +129,10 @@ pub struct AddResult {
 pub struct Target {
     /// item id
     pub item: String,
+    /// as shown (keys of the operation's maps, its results)
     pub path: String,
+    /// as the file system names it: what the operation is given
+    pub os_path: PathBuf,
     /// bytes it holds as last scanned (max of logical and allocated): trash capacity checks
     pub size: i64,
     /// the scan root it was found under
@@ -224,6 +234,21 @@ pub fn path_key(path: &str) -> String {
 }
 
 const SEP: char = std::path::MAIN_SEPARATOR;
+
+/// A path as shown: the lossy form of the path the file system knows (the one file operations
+/// report back, so results find their items).
+fn shown(os: &Path) -> String {
+    os.to_string_lossy().into_owned()
+}
+
+/// A group's members as the file system names them (items made without them: from the shown).
+fn os_members_of(item: &BasketItem) -> Vec<PathBuf> {
+    if item.os_members.len() == item.members.len() {
+        item.os_members.clone()
+    } else {
+        item.members.iter().map(PathBuf::from).collect()
+    }
+}
 
 fn prefix(key: &str) -> String {
     if key.ends_with(SEP) {
@@ -472,10 +497,11 @@ impl Basket {
             if e.group() {
                 let n = e.item.members.len();
                 let sizes = if e.member_sizes.len() == n { e.member_sizes.clone() } else { vec![0; n] };
-                for (p, s) in e.item.members.iter().zip(sizes) {
+                for ((p, os), s) in e.item.members.iter().zip(os_members_of(&e.item)).zip(sizes) {
                     out.push(Target {
                         item: e.item.id.clone(),
                         path: p.clone(),
+                        os_path: os,
                         size: s,
                         root: e.item.root.clone(),
                     });
@@ -484,6 +510,7 @@ impl Basket {
                 out.push(Target {
                     item: e.item.id.clone(),
                     path: e.item.path.clone(),
+                    os_path: e.item.os_path.clone(),
                     size: e.item.size.max(e.measure.base).max(e.item.alloc),
                     root: e.item.root.clone(),
                 });
@@ -597,14 +624,15 @@ impl Basket {
                     continue;
                 }
                 let e = &mut g.entries[i];
-                let paths: Vec<String> = if e.group() {
-                    e.item.members.clone()
+                // found by the names the file system has (the shown ones may have lost some)
+                let paths: Vec<PathBuf> = if e.group() {
+                    os_members_of(&e.item)
                 } else {
-                    vec![e.item.path.clone()]
+                    vec![e.item.os_path.clone()]
                 };
                 let found_at: Vec<Option<NodeId>> = paths
                     .iter()
-                    .map(|p| index.locate(&nodes, p.as_bytes()).0)
+                    .map(|p| index.locate(&nodes, encode_name(p.as_os_str())).0)
                     .collect();
                 let found: Vec<NodeId> = found_at.iter().flatten().copied().collect();
                 let was = e.item.status;
@@ -701,6 +729,7 @@ impl Basket {
             if res.ok {
                 let mut item = g.entries[pos].item.clone();
                 item.members.clear();
+                item.os_members.clear();
                 left.push(item);
                 g.drop_at(pos);
                 continue;
@@ -734,11 +763,12 @@ impl Basket {
                 let keys: Vec<String> = item.members.iter().map(|m| path_key(m)).collect();
                 known.member_sizes = vec![0; keys.len()];
                 g.insert_group(
-                    &item.path,
+                    (&item.path, &item.os_path),
                     &item.scan_id,
                     &item.volume,
                     &item.root,
                     item.members.clone(),
+                    os_members_of(item),
                     keys,
                     known,
                     None,
@@ -864,17 +894,19 @@ impl Inner {
         None
     }
 
-    fn node_path(nodes: &Nodes, node: i64) -> String {
+    /// (shown, as the file system names it) of a node; a bad node: its number.
+    fn node_path(nodes: &Nodes, node: i64) -> (String, PathBuf) {
         if node > 0 && (node as usize) < nodes.len() {
-            nodes.path_lossy(node as NodeId)
+            let os = nodes.path(node as NodeId);
+            (shown(&os), os)
         } else {
-            node.to_string()
+            (node.to_string(), PathBuf::from(node.to_string()))
         }
     }
 
     fn add_node(&mut self, nodes: &Nodes, scan_id: &str, node: i64, result: &mut AddResult) {
         let bad = self.check_node(nodes, node);
-        let path = Self::node_path(nodes, node);
+        let (path, os_path) = Self::node_path(nodes, node);
         if let Some(bad) = bad {
             result.refused.push(Refused { path, reason: bad.to_string() });
             return;
@@ -892,10 +924,12 @@ impl Inner {
         let item = BasketItem {
             id: item_id(&key, false),
             path: path.clone(),
+            os_path,
             name: if nodes.depth(id) > 1 { nodes.name(id).into_owned() } else { path.clone() },
             kind: kind_name(nodes.kind(id)),
             scan_id: scan_id.to_string(),
             members: Vec::new(),
+            os_members: Vec::new(),
             alloc: 0,
             size: 0,
             files: 0,
@@ -913,7 +947,7 @@ impl Inner {
 
     fn add_group(&mut self, nodes: &Nodes, scan_id: &str, folder: i64, members: &[i64], result: &mut AddResult) {
         let mut bad = self.check_node(nodes, folder);
-        let folder_path = Self::node_path(nodes, folder);
+        let (folder_path, folder_os) = Self::node_path(nodes, folder);
         if bad.is_none() && !nodes.is_dir(folder as NodeId) {
             bad = Some(text("not_folder"));
         }
@@ -927,12 +961,13 @@ impl Inner {
             return;
         }
         let mut paths = Vec::new();
+        let mut os_paths = Vec::new();
         let mut keys = Vec::new();
         let mut ids: Vec<NodeId> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
         for &m in members {
             let mut bad = self.check_node(nodes, m).map(str::to_string);
-            let path = Self::node_path(nodes, m);
+            let (path, os) = Self::node_path(nodes, m);
             if bad.is_none() && nodes.parent(m as NodeId) as i64 != folder {
                 bad = Some(text("not_member").to_string());
             }
@@ -949,6 +984,7 @@ impl Inner {
                 continue;
             }
             paths.push(path);
+            os_paths.push(os);
             keys.push(key);
             ids.push(m as NodeId);
         }
@@ -960,11 +996,12 @@ impl Inner {
         let m = measure(nodes, &ids, true);
         let fp = fingerprint(nodes, &ids);
         self.insert_group(
-            &folder_path,
+            (&folder_path, &folder_os),
             scan_id,
             &volume,
             &root_path(nodes, f),
             paths,
+            os_paths,
             keys,
             m,
             Some(fp),
@@ -972,16 +1009,18 @@ impl Inner {
         );
     }
 
-    /// Add members to the group of `folder_path` (made if needed). `measure` covers the given
-    /// members; `fp` is None when they are not known in a store right now.
+    /// Add members to the group of `folder` (shown, as the file system names it; made if needed).
+    /// `os_paths` parallel to `paths`. `measure` covers the given members; `fp` is None when they
+    /// are not known in a store right now.
     #[allow(clippy::too_many_arguments)]
     fn insert_group(
         &mut self,
-        folder_path: &str,
+        folder: (&str, &Path),
         scan_id: &str,
         volume: &str,
         root: &str,
         paths: Vec<String>,
+        os_paths: Vec<PathBuf>,
         keys: Vec<String>,
         measure: Measure,
         fp: Fingerprint,
@@ -992,6 +1031,7 @@ impl Inner {
         } else {
             vec![0; paths.len()]
         };
+        let (folder_path, folder_os) = folder;
         let folder_key = path_key(folder_path);
         if let Some(into) = self.covering(&folder_key) {
             result
@@ -999,17 +1039,17 @@ impl Inner {
                 .extend(paths.iter().map(|p| Merged { path: p.clone(), into: into.clone() }));
             return;
         }
-        let mut fresh: Vec<(String, String, i64)> = Vec::new();
-        for ((p, k), s) in paths.iter().zip(&keys).zip(&sizes) {
+        let mut fresh: Vec<(String, String, i64, PathBuf)> = Vec::new();
+        for (((p, k), s), os) in paths.iter().zip(&keys).zip(&sizes).zip(os_paths) {
             match self.covering(k) {
                 Some(hit) => result.merged.push(Merged { path: p.clone(), into: hit }),
-                None => fresh.push((p.clone(), k.clone(), *s)),
+                None => fresh.push((p.clone(), k.clone(), *s, os)),
             }
         }
         if fresh.is_empty() {
             return;
         }
-        for (_, k, _) in &fresh {
+        for (_, k, _, _) in &fresh {
             // whatever lies below a new member is now inside the group
             for below in self.below(k) {
                 if let Some(pos) = self.pos(&below)
@@ -1029,10 +1069,12 @@ impl Inner {
                 let item = BasketItem {
                     id: item_id(&folder_key, true),
                     path: folder_path.to_string(),
+                    os_path: folder_os.to_path_buf(),
                     name: String::new(),
                     kind: ChangeKind::Group,
                     scan_id: scan_id.to_string(),
                     members: Vec::new(),
+                    os_members: Vec::new(),
                     alloc: 0,
                     size: 0,
                     files: 0,
@@ -1052,6 +1094,9 @@ impl Inner {
         let id = {
             let e = &mut self.entries[pos];
             let before = e.item.members.len();
+            let mut os_members = os_members_of(&e.item);
+            os_members.extend(fresh.iter().map(|f| f.3.clone()));
+            e.item.os_members = os_members;
             e.item.members.extend(fresh.iter().map(|f| f.0.clone()));
             e.member_keys.extend(fresh_keys.iter().cloned());
             if e.member_sizes.len() != before {
@@ -1111,10 +1156,12 @@ impl Inner {
         }
         if !done.is_empty() {
             let e = &self.entries[pos];
+            let os_members = os_members_of(&e.item);
             let moved: Vec<String> = done.iter().map(|&i| e.item.members[i].clone()).collect();
             let mut gone_item = e.item.clone();
             gone_item.name = group_name(&e.item.path, moved.len());
             gone_item.members = moved;
+            gone_item.os_members = done.iter().map(|&i| os_members[i].clone()).collect();
             left.push(gone_item);
             let n = e.member_keys.len();
             let sizes = if e.member_sizes.len() == n { e.member_sizes.clone() } else { vec![0; n] };
@@ -1123,11 +1170,13 @@ impl Inner {
             let freed: i64 = done.iter().map(|&i| sizes[i]).sum();
             let keep: Vec<usize> = (0..n).filter(|i| !done_set.contains(i)).collect();
             let members: Vec<String> = keep.iter().map(|&i| e.item.members[i].clone()).collect();
+            let kept_os: Vec<PathBuf> = keep.iter().map(|&i| os_members[i].clone()).collect();
             let keys: Vec<String> = keep.iter().map(|&i| e.member_keys[i].clone()).collect();
             let kept_sizes: Vec<i64> = keep.iter().map(|&i| sizes[i]).collect();
             self.index_remove(&gone_keys);
             let e = &mut self.entries[pos];
             e.item.members = members;
+            e.item.os_members = kept_os;
             e.member_keys = keys;
             e.member_sizes = kept_sizes;
             if e.item.members.is_empty() {

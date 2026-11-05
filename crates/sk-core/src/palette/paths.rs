@@ -13,36 +13,10 @@ use sk_store::{Flags, NodeId, Nodes};
 
 use super::fuzzy::score;
 use crate::filter::NameIndex;
-
-/// The area basis per node (what the view sizes blocks by): an array, or worked out per lookup.
-/// `len` is the node count it covers: nodes past it were listed after it was taken (a running
-/// scan) and count as not scanned yet.
-// TODO(layout): `layout::basis` lazy sizes should implement this.
-pub trait Sizes {
-    fn len(&self) -> usize;
-    fn get(&self, id: NodeId) -> i64;
-    fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-}
-
-impl Sizes for [i64] {
-    fn len(&self) -> usize {
-        <[i64]>::len(self)
-    }
-    fn get(&self, id: NodeId) -> i64 {
-        self[id as usize]
-    }
-}
-
-impl Sizes for Vec<i64> {
-    fn len(&self) -> usize {
-        self.as_slice().len()
-    }
-    fn get(&self, id: NodeId) -> i64 {
-        self[id as usize]
-    }
-}
+/// The area basis per node, as the view sizes its blocks ([`crate::layout::StoreSizes`], or an
+/// array: [`crate::layout::ArraySizes`]). `n()` is the node count it covers: nodes past it were
+/// listed after it was taken (a running scan) and count as not scanned yet.
+pub use crate::layout::SizeSource as Sizes;
 
 #[cfg(windows)]
 const SEPARATORS: &[char] = &['\\', '/'];
@@ -184,11 +158,11 @@ fn subsequence(q: &str) -> impl Fn(&[u8]) -> bool + Sync + use<> {
 }
 
 /// The `k` largest of `ids`, largest first (ties by id).
-fn top(ids: &[NodeId], sizes: &dyn Sizes, k: usize) -> Vec<NodeId> {
+fn top(nodes: &Nodes, ids: &[NodeId], sizes: &dyn Sizes, k: usize) -> Vec<NodeId> {
     if k == 0 || ids.is_empty() {
         return Vec::new();
     }
-    let mut keyed: Vec<(i64, NodeId)> = ids.iter().map(|&i| (-sizes.get(i), i)).collect();
+    let mut keyed: Vec<(i64, NodeId)> = ids.iter().map(|&i| (-sizes.size(nodes, i), i)).collect();
     if keyed.len() > k {
         keyed.select_nth_unstable(k - 1);
         keyed.truncate(k);
@@ -232,7 +206,7 @@ fn hit(nodes: &Nodes, sizes: &dyn Sizes, node: NodeId, query: &str, tier: u8, gl
         node,
         parent: if parent > 0 { nodes.path_lossy(parent as NodeId) } else { String::new() },
         is_dir,
-        alloc: sizes.get(node),
+        alloc: sizes.size(nodes, node),
         hits,
         tier,
         complete: if is_dir { with_sep(full) } else { full },
@@ -261,7 +235,7 @@ pub fn search(
     opts: SearchOptions,
 ) -> (Vec<PathHit>, usize) {
     let q = query.trim();
-    let n = nodes.len().min(sizes.len()); // sizes may be a moment older than a growing store
+    let n = nodes.len().min(sizes.n()); // sizes may be a moment older than a growing store
     if q.is_empty() || n <= 1 {
         return (Vec::new(), 0);
     }
@@ -303,7 +277,7 @@ pub fn search(
             })
             .collect();
         total += ids.len();
-        for node in top(&ids, sizes, limit.saturating_sub(picked.len())) {
+        for node in top(nodes, &ids, sizes, limit.saturating_sub(picked.len())) {
             picked.push((node, if wild { 1 } else { tier as u8 }));
         }
     }
@@ -314,9 +288,9 @@ pub fn search(
 /// A folder's children for a path typed up to `partial` (UI-W4-37): prefix, inside, scattered.
 pub fn children(nodes: &Nodes, sizes: &dyn Sizes, folder: NodeId, partial: &str, limit: usize) -> (Vec<PathHit>, usize) {
     // listed after `sizes` was taken (scan running): no size yet
-    let kids: Vec<NodeId> = nodes.children(folder).filter(|&k| (k as usize) < sizes.len()).collect();
+    let kids: Vec<NodeId> = nodes.children(folder).filter(|&k| (k as usize) < sizes.n()).collect();
     if partial.is_empty() {
-        let hits = top(&kids, sizes, limit).into_iter().map(|k| hit(nodes, sizes, k, "", 4, false)).collect();
+        let hits = top(nodes, &kids, sizes, limit).into_iter().map(|k| hit(nodes, sizes, k, "", 4, false)).collect();
         return (hits, kids.len());
     }
     let p = partial.to_lowercase();
@@ -334,7 +308,7 @@ pub fn children(nodes: &Nodes, sizes: &dyn Sizes, folder: NodeId, partial: &str,
         } else {
             continue;
         };
-        ranked.push((tier, -sizes.get(k), k));
+        ranked.push((tier, -sizes.size(nodes, k), k));
     }
     ranked.sort_unstable();
     let total = ranked.len();
@@ -360,7 +334,7 @@ pub struct PathInput {
 fn sized(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) -> Option<NodeId> {
     let (nodes, sizes) = (nodes?, sizes?);
     let node = nodes.find_path(Path::new(path))?;
-    ((node as usize) < sizes.len()).then_some(node)
+    ((node as usize) < sizes.n()).then_some(node)
 }
 
 /// The input as a path: in the scan, elsewhere on disk, or missing; with its Tab completion.
@@ -368,7 +342,7 @@ pub fn resolve(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, text: &str) -> 
     let path = expand(text);
     let complete = completion(nodes, sizes, &path);
     if let (Some(node), Some(n), Some(s)) = (sized(nodes, sizes, &path), nodes, sizes) {
-        return PathInput { state: PathState::InScan, node: Some(node), is_dir: n.is_dir(node), alloc: Some(s.get(node)), complete, path };
+        return PathInput { state: PathState::InScan, node: Some(node), is_dir: n.is_dir(node), alloc: Some(s.size(n, node)), complete, path };
     }
     let meta = std::fs::metadata(&path);
     let (exists, is_dir) = match &meta {
@@ -397,8 +371,8 @@ pub fn completion(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) 
     {
         let best = n
             .children(node)
-            .filter(|&k| (k as usize) < s.len())
-            .map(|k| (!n.is_dir(k), -s.get(k), n.name(k).to_lowercase(), k))
+            .filter(|&k| (k as usize) < s.n())
+            .map(|k| (!n.is_dir(k), -s.size(n, k), n.name(k).to_lowercase(), k))
             .filter(|c| c.2.starts_with(&p))
             .min()?;
         let k = best.3;

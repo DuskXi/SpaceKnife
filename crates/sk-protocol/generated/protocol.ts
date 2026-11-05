@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "544176c7375270be";
+export const SCHEMA_HASH = "6647971528122374";
 
 export interface AgeCond {
   end: number;
@@ -1616,7 +1616,7 @@ export interface UnsubscribeParams {
 }
 
 export interface UpdateAsset {
-  /** File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe */
+  /** File name, e.g. SpaceKnife_0.4.0_x64-setup.exe (`sk_core::update::asset_template`) */
   name: string;
   /** From the release's SHA256SUMS*.txt; None when it publishes none */
   sha256: string | null;

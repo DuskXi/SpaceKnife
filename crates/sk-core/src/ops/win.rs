@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::OnceLock;
 
@@ -689,11 +689,12 @@ static SINK_VTBL: SinkVtbl = SinkVtbl {
 };
 
 fn recycle_sta(
-    paths: &[String],
+    paths: &[PathBuf],
     cancel: Option<&(dyn Fn() -> bool + Sync)>,
     on_item: &mut (dyn FnMut(usize, &Recycled) + Send),
 ) -> RecycleRun {
-    let items: Vec<Recycled> = paths
+    let shown: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+    let items: Vec<Recycled> = shown
         .iter()
         .map(|p| Recycled {
             path: p.clone(),
@@ -703,7 +704,7 @@ fn recycle_sta(
             reached: false,
         })
         .collect();
-    let index = paths
+    let index = shown
         .iter()
         .enumerate()
         .map(|(i, p)| (path_key(p), i))
@@ -760,7 +761,8 @@ fn recycle_sta(
             }
             let mut queued = 0;
             for (i, path) in paths.iter().enumerate() {
-                let w = wide(path);
+                // as given: a name with a lone surrogate is parsed exactly
+                let w = wide_path(path);
                 let mut item: Unknown = null_mut();
                 let hr = SHCreateItemFromParsingName(w.as_ptr(), null_mut(), &IID_ISHELL_ITEM, &mut item);
                 if hr < 0 || item.is_null() {
@@ -814,7 +816,7 @@ fn recycle_sta(
 /// aborts the whole operation (what was not reached yet is untouched; the caller retries it
 /// without the refused).
 pub fn recycle(
-    paths: &[String],
+    paths: &[PathBuf],
     cancel: Option<&(dyn Fn() -> bool + Sync)>,
     on_item: &mut (dyn FnMut(usize, &Recycled) + Send),
 ) -> io::Result<RecycleRun> {

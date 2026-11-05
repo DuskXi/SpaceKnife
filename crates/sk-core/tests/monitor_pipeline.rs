@@ -510,6 +510,8 @@ fn overflow_replays_the_usn_journal() {
         let r = s.store().read();
         r.ino(r.find_path(&target).unwrap())
     };
+    // the hard scan's rows carry the NTFS file reference the journal names folders by
+    assert_ne!(ino, 0, "hard-scanned folders carry their file id");
     let journal = Arc::new(Journal { ino, calls: Mutex::new(Vec::new()) });
     let mut mon = monitor(&s, false, Some(journal.clone()));
     mon.start_usn();
@@ -522,9 +524,8 @@ fn overflow_replays_the_usn_journal() {
     let vol = root.to_string_lossy()[..2].to_uppercase();
     assert_eq!(*journal.calls.lock().unwrap(), vec![(vol, 1000, 42)]); // from the safe checkpoint
     assert_eq!(mon.status().pending, 0);
-    if ino == 0 {
-        // sk-native's Windows lister records no file ids yet: the journal names no known folder,
-        // so the overflow fell back to listing the root's subtree again (same result, slower)
-        eprintln!("note: hard-scanned tree without file ids: USN replay fell back to a rescan");
-    }
+    // the journal named the one folder: it was listed again, not the root's whole subtree
+    let messages = hooks.messages.lock().unwrap().clone();
+    let replay = sk_core::tr!("变化通知溢出：按 USN 日志补齐 {count} 个文件夹", count = 1usize);
+    assert!(messages.contains(&replay), "{messages:?}");
 }

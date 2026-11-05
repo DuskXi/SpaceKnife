@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock};
 
 use parking_lot::Mutex;
 use sk_core::filter::{FilterContext, evaluate, unix_now};
-use sk_core::layout::effective_alloc;
+use sk_core::layout::StoreSizes;
 use sk_core::layout::registry;
 use sk_core::palette::fuzzy::protocol_spans;
 use sk_core::palette::paths::{self as ppaths, SearchOptions, Sizes};
@@ -26,7 +26,7 @@ use sk_protocol::palette::{
 use sk_protocol::scan::{ScanSource, ScanStateName};
 use sk_protocol::update::UpdateStatus;
 use sk_protocol::EmptyResult;
-use sk_store::{NodeId, Nodes};
+use sk_store::Nodes;
 
 use crate::app::Server;
 use crate::compute::Latest;
@@ -44,22 +44,6 @@ const PREVIEWS_KEPT: usize = 64;
 /// quotes, or a single leading backslash (folder mask; a double one is a UNC path).
 pub fn looks_like_filter(text: &str) -> bool {
     text.chars().any(|c| "*?;|<>:\"".contains(c)) || (text.starts_with('\\') && !text.starts_with("\\\\"))
-}
-
-/// The area basis per node, worked out per lookup (the nodes asked for only): effective
-/// allocation, as the views size their blocks. `n` is the node count when it was taken.
-struct NodeSizes<'a> {
-    nodes: &'a Nodes,
-    n: usize,
-}
-
-impl Sizes for NodeSizes<'_> {
-    fn len(&self) -> usize {
-        self.n
-    }
-    fn get(&self, id: NodeId) -> i64 {
-        effective_alloc(self.nodes, id)
-    }
 }
 
 fn target_of(h: Option<&ScanHandle>) -> Option<String> {
@@ -154,7 +138,8 @@ fn build(server: &Server, session: &Session, params: &PaletteQueryParams, update
     let vocab = current_vocab();
     let guard = w.handle.as_ref().map(|h| h.store.read());
     let nodes: Option<&Nodes> = guard.as_deref();
-    let sizes = nodes.map(|n| NodeSizes { nodes: n, n: n.len() });
+    // the area basis per node, worked out per lookup (effective allocation, as the views size blocks)
+    let sizes = nodes.map(StoreSizes::of);
     let sizes_dyn: Option<&dyn Sizes> = sizes.as_ref().map(|s| s as &dyn Sizes);
 
     let mut direct = Vec::new();
@@ -210,7 +195,7 @@ fn build(server: &Server, session: &Session, params: &PaletteQueryParams, update
                         r.node = Some(node);
                         r.is_dir = n.is_dir(node);
                         // found after the sizes were taken (scan running): no size yet
-                        r.alloc = ((node as usize) < sz.len()).then(|| sz.get(node));
+                        r.alloc = ((node as usize) < sz.n()).then(|| sz.size(n, node));
                     }
                     None => r.exists = false,
                 },
@@ -258,7 +243,7 @@ fn build(server: &Server, session: &Session, params: &PaletteQueryParams, update
 fn find_paths(h: &ScanHandle, view: Option<&Arc<Mutex<View>>>, text: &str, limit: usize) -> PalettePaths {
     let selected = view.and_then(|v| v.lock().selected);
     let nodes = h.store.read();
-    let sizes = NodeSizes { nodes: &nodes, n: nodes.len() };
+    let sizes = StoreSizes::of(&nodes);
     let q = text.trim();
     let (mut seed, mut folder) = (None, None);
     let (hits, total) = if q.is_empty() {

@@ -48,59 +48,24 @@ protocol models).
 - Finish with a report: public API summary (it is handed to the server task), deviations from Python, what is
   not done, test results.
 
-## Integration notes (from finished tasks; the server task must resolve these)
+## Known gaps
 
-- **output** (export, palette): palette `Context` takes plain facts (`ViewFacts`, `ShownVisual`) the server fills
-  from the session/view (`TODO(view)`); `palette::paths::Sizes` should be implemented by layout's lazy sizes
-  (`TODO(layout)`); export masks are `Option<&[bool]>` — adapt if filter results use another type.
-  `docs/export-templates.md` still points at Python paths.
-- **frontend**: About page reads `system.info.server.python` — replace that protocol field with the Rust runtime
-  info; expose Tauri drag enter/leave to `window.sk` so the start page's drop overlay shows in the app.
-- **platform**: applying a settings import (store.update, classes::set_active, pathclass folders) is server work;
-  `settings::io` takes pathclass folders and export builtin templates as arguments; the CLI must route
-  `--apply-update <plan>` to `update::swap::main`; `log::LogBus` listeners run on the logging thread — hand
-  entries to a channel; update network calls are blocking (spawn_blocking).
-- **scan**: one `Arc<Scanner>` per scan (run on its own thread; pause/resume/cancel/progress from anywhere);
-  `ScanOptions.gate` = `Arc<io::IoGovernor>`; `ScanOptions.protect` = `privacy::protected_folders()`;
-  monitor via `monitor::pipeline::ScanMonitor` + `MonitorHooks` (`remapped`/`compacted` run with the store writer
-  held — views must not lock the store inside); keep one `pathclass::FolderClasses` per store.
-  Follow-up: sk-native's Windows lister leaves `ino` = 0, so USN replay falls back to re-listing on hard-scanned
-  trees — fill the file id there. Windows default listing threads capped at 8 (faster on NTFS).
-- **analysis**: server owns basket state per volume, undo windows and live comparisons (ops_service.py,
-  compares.py glue); `Basket::refresh` takes store readers itself — call with no reader held on that thread.
-  `ops::names` (`unnameable`, `names_below`, `task_is`, `long_path`) is now the real home of those worker helpers.
-  Follow-ups: basket paths are lossy `String`s (lone-surrogate names can't be deleted via basket) — switch to
-  bytes/OsString; `test_the_layout_engine_draws_the_union` (diff + layout) not ported.
-- **view**: one `view::ViewContext` per scan (store, roots, basis, NameIndex, tags, trash, vocab); the server must
-  swap `ctx.vocab` when the class table or language changes; `ResultsCache` per view is the caller's;
-  `Visualization.title_id` is translated by the server; compare views take `ArrayChanges::new(...)` around
-  `diff::ChangeTree`; `frame::encode_frame_into` writes the binary frame. Palette's `Sizes` stand-in → use
-  `layout::SizeSource`/`StoreSizes`.
-- **system**: the app binary must dispatch `<exe> helper <args…>` to
-  `std::process::exit(sk_core::helper::run_main(&args))` first thing; `HelperClient`, `disks::probe`,
-  `IoGovernor::permit` block (spawn_blocking). Follow-ups: macOS NVMe SMART stub (`disks/mac_smart.rs`); English
-  catalog entries for helper/disks/io messages.
-- **main merge (0.3.4, `origin/dev..origin/main` ported into the crates)**:
-  - Listing threads: the scanner calls `scan_slice` with `threads: 0` (the walker's shared carriers, adaptive
-    width, sk-native `pace.rs`/`slots.rs`) from `scan::native_threads()` (= start width) threads, with the
-    disk's `ListingGate` from `IoGovernor::listing_gate()` (through `IoGate::listing_gate`). The governor
-    counts in folders listed at once: `RegistryOptions.max_workers` / `set_max_workers` = `scan::listing_max()`
-    (64), manual concurrency in folders (done in `sk-server/src/scans.rs` and `cli/scan.rs`).
-    `SPACEKNIFE_SCAN_SHARED=0` = old one-thread-per-call mode (measurements). `ScanProfile.width` = widths seen.
-  - Windows options: `RootOptions.listed_alloc` (set by `scan::winopts::listed_alloc(volume)`; relists must use the
-    scanner's `root_options()`), `SliceOptions.{skip_final, dot_check, keep_where_updated}` via
-    `scan::winopts::apply_env`.
-  - Monitor: set `MonitorOptions.listed_after` to the scan's start time; `Watcher::add_dirs(dirs, mtimes,
-    since_ns)`; keep calling `kick()` after a scan ends or continues.
-  - Memory (Linux glibc): call `sk_core::memory::tune_allocator()` first thing in the GUI binary (`spaceknife-cli` does);
-    `sk_core::memory::trim()` on a blocking thread when a scan ends, and an idle trim in the diag loop when
-    private memory grew by `TRIM_GROWTH` since the last trim.
-  - Snapshots: optionally `SaveOptions.threads = sk_native::cpus::usable().min(4)`.
-  - MFT: `sk_core::scan::mft::mft_unsupported` replaces the CLI's own copy in `sk-server/src/cli/scan.rs`;
-    `ScanOptions.stats` (MFT timings) and `table_to_store_with` are available.
-  - `tree.summary` gaps (`TreeSummaryResult.gaps`, `sk_core::summary`) are wired in the server handlers.
-  - Structure lock: `Store::read`/`write` follow main's lock.py (writer waits only for readers already running);
-    `Store::write_until` / `try_write_for` let a writer give up (it wakes the readers it held back).
+The integration notes of the porting tasks (and of the 0.3.4 main merge) are resolved in
+sk-server / the Tauri shell; what is still open:
+
+- **macOS NVMe SMART**: `sk_core::disks::mac_smart` is a stub (the IOKit SMART user client FFI is not
+  ported), so macOS disks show no NVMe health record.
+- **Untested platforms**: the Linux and macOS code paths (sk-native's POSIX lister, `monitor::linux` /
+  `monitor::mac`, the freedesktop / macOS trash, glibc `memory::tune_allocator` / `trim`, privacy and
+  volume probes) are cfg-gated and written carefully but compiled and tested on Windows only here.
+- **Compare views in the basket**: blocks of a compare view are refused until change-tree rows map to
+  the live tree (`TODO(compares)` in `sk-server/src/ops_service.rs`).
+- **`ops::names`** is still the ops module's own copy of the scan worker's name checks
+  (`TODO(scan)` in `ops/names.rs`, `ops/win.rs`).
+- **Names that are not Unicode in the basket**: items keep their real path (`BasketItem::os_path` /
+  `os_members`) and are found and executed by it, but they are compared by their shown (lossy)
+  path: two siblings whose names differ only in unpaired surrogates / invalid bytes count as one
+  item, and the lock check (Restart Manager, by shown path) does not name who holds such a file.
 
 ## Wave 3: sk-server (server task + cli task)
 

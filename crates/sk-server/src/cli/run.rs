@@ -709,6 +709,7 @@ impl Runner<'_> {
             volumes: view.volumes.clone(),
             stats: view.stats.clone(),
             checkpoints: view.checkpoints.clone(),
+            threads: sk_native::cpus::usable().min(snapshot::SAVE_THREADS),
             ..Default::default()
         };
         let saved = {

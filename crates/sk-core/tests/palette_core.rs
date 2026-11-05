@@ -6,6 +6,7 @@ use sk_core::i18n::{self, Language};
 use sk_core::palette::commands::{Context, ShownVisual, ViewFacts, command, evaluate, match_command, registry, syllables};
 use sk_core::palette::fuzzy::{score, utf16_spans};
 use sk_core::palette::paths::{self as ppaths, SearchOptions};
+use sk_core::layout::{ArraySizes, SizeSource};
 use sk_core::palette::recents::Recents;
 use sk_protocol::palette::{PaletteTab, PathState};
 use sk_store::testing::{Spec, build_with, d, f, find};
@@ -34,8 +35,8 @@ fn spec() -> Spec {
 }
 
 /// The area basis of every node, as the view's layout sizes it.
-fn sizes(n: &Nodes) -> Vec<i64> {
-    (0..n.len() as u32).map(|i| n.effective_size(i).1).collect()
+fn sizes(n: &Nodes) -> ArraySizes {
+    ArraySizes(std::sync::Arc::new((0..n.len() as u32).map(|i| n.effective_size(i).1).collect()))
 }
 
 fn tree() -> Store {
@@ -366,7 +367,7 @@ fn nodes_listed_after_the_sizes_count_as_not_scanned() {
         app.ingest_listing(videos, &b).unwrap();
     }
     let n = store.read();
-    assert!(n.len() > sz.len());
+    assert!(n.len() > sz.n());
     let base = format!("{}{SEP}", tmp.path().join("Videos").display());
     let some = Some(&sz as &dyn ppaths::Sizes);
     assert_eq!(ppaths::children(&n, &sz, videos, "", 10), (vec![], 0));

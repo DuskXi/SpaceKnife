@@ -1169,6 +1169,73 @@ mod windows {
         ok != 0
     }
 
+    /// The 64-bit file id (on NTFS the file reference the change journal names) and the file
+    /// system of `p`.
+    fn file_index(p: &Path) -> (u64, String) {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle, GetVolumeInformationByHandleW,
+        };
+        let f = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(0x0200_0000) // FILE_FLAG_BACKUP_SEMANTICS: folders too
+            .open(os_path(p))
+            .unwrap();
+        // SAFETY: valid handle and out structs/buffers of their sizes.
+        unsafe {
+            let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+            assert!(GetFileInformationByHandle(f.as_raw_handle(), &mut info) != 0);
+            let mut fs_name = [0u16; 64];
+            let ok = GetVolumeInformationByHandleW(
+                f.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                fs_name.as_mut_ptr(),
+                fs_name.len() as u32,
+            );
+            let end = fs_name.iter().position(|&c| c == 0).unwrap_or(0);
+            let name = if ok != 0 { String::from_utf16_lossy(&fs_name[..end]) } else { String::new() };
+            ((u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow), name)
+        }
+    }
+
+    /// Rows carry the file id the listing gave (USN replay finds folders by it on hard-scanned
+    /// trees): on NTFS every row's `ino` is its file reference.
+    #[test]
+    fn rows_carry_the_file_id() {
+        let _s = serial();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("ids");
+        fs::create_dir_all(root.join("sub").join("deeper")).unwrap();
+        create(&root.join("a.txt"), b"a");
+        create(&root.join("sub").join("b.txt"), b"b");
+        let (_, fs_name) = file_index(&root);
+        let res = scan_one(&root, root_opts(&root));
+        let mut checked = 0;
+        let names: Vec<String> = name_strings(&res);
+        assert_eq!(names.len(), res.entries.ino.len());
+        // the names are unique in this tree
+        let mut want: BTreeMap<String, u64> = BTreeMap::new();
+        for rel in ["a.txt", "sub", "sub/b.txt", "sub/deeper"] {
+            let (id, _) = file_index(&rel.split('/').fold(root.clone(), |p, part| p.join(part)));
+            want.insert(rel.rsplit('/').next().unwrap().to_string(), id);
+        }
+        for (name, &ino) in names.iter().zip(&res.entries.ino) {
+            let Some(&id) = want.get(name) else { continue };
+            if fs_name.eq_ignore_ascii_case("NTFS") {
+                assert_eq!(ino, id, "{name}");
+                assert_ne!(ino, 0, "{name}");
+            } else {
+                assert!(ino == 0 || ino == id, "{name}: {ino} / {id} on {fs_name}");
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 4, "{names:?}");
+    }
+
     #[test]
     fn attributes_compressed_and_sparse() {
         let _s = serial();

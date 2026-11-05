@@ -179,7 +179,7 @@ pub fn os_error(path: &str, e: &io::Error) -> OpResult {
     )
 }
 
-fn lexists(p: &str) -> bool {
+fn lexists(p: impl AsRef<Path>) -> bool {
     std::fs::symlink_metadata(p).is_ok()
 }
 
@@ -244,6 +244,7 @@ pub fn win32_trims(path: &str) -> bool {
 /// protected, held open (§2.5 re-check).
 fn precheck(
     paths: &[String],
+    os: &[PathBuf],
     check_locks: bool,
     roots: &HashMap<String, String>,
 ) -> HashMap<usize, OpResult> {
@@ -256,7 +257,7 @@ fn precheck(
             skipped.insert(i, result_msg(p, OpCode::AmbiguousName, text("trailing_name")));
             continue;
         }
-        if !lexists(p) {
+        if !lexists(&os[i]) {
             skipped.insert(i, result(p, OpCode::Missing));
             continue;
         }
@@ -323,17 +324,23 @@ impl Default for OpOptions<'_> {
 
 /// Results in input order, progress as they become final.
 struct Run<'a> {
+    /// as shown (results, keys of the options' maps; lossy where a name is not Unicode)
     paths: Vec<String>,
+    /// as given: what the file system is asked about (a name that is not valid Unicode, a lone
+    /// UTF-16 surrogate on Windows or bytes that are not UTF-8 elsewhere, is kept exactly)
+    os: Vec<PathBuf>,
     results: Vec<Option<OpResult>>,
     progress: Option<ProgressFn<'a>>,
     done: usize,
 }
 
 impl<'a> Run<'a> {
-    fn new(paths: &[String], progress: Option<ProgressFn<'a>>) -> Run<'a> {
+    fn new<P: AsRef<Path>>(given: &[P], progress: Option<ProgressFn<'a>>) -> Run<'a> {
+        let os: Vec<PathBuf> = given.iter().map(|p| p.as_ref().to_path_buf()).collect();
         Run {
-            paths: paths.to_vec(),
-            results: vec![None; paths.len()],
+            paths: os.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+            results: vec![None; os.len()],
+            os,
             progress,
             done: 0,
         }
@@ -406,12 +413,16 @@ pub fn trash_status(path: &str, usage: bool) -> TrashStatus {
 }
 
 /// Move each path to the trash; one result per path, in order. Never deletes anything.
-pub fn move_to_trash(paths: &[String], opts: OpOptions<'_>) -> Vec<OpResult> {
+///
+/// Paths are taken as the file system names them (`PathBuf` / `OsString`: names that are not
+/// valid Unicode are reached exactly); results and the keys of `opts.sizes` / `opts.roots` are
+/// their `to_string_lossy` forms.
+pub fn move_to_trash<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> Vec<OpResult> {
     let empty_roots = HashMap::new();
     let empty_sizes = HashMap::new();
     let cancel = opts.cancel;
     let mut run = Run::new(paths, opts.progress);
-    for (i, r) in precheck(paths, opts.check_locks, opts.roots.unwrap_or(&empty_roots)) {
+    for (i, r) in precheck(&run.paths, &run.os, opts.check_locks, opts.roots.unwrap_or(&empty_roots)) {
         run.set(i, r);
     }
     let todo: Vec<usize> = (0..paths.len()).filter(|&i| run.results[i].is_none()).collect();
@@ -425,10 +436,11 @@ pub fn move_to_trash(paths: &[String], opts: OpOptions<'_>) -> Vec<OpResult> {
                 break;
             }
             let p = run.paths[i].clone();
+            // macOS file systems store names as UTF-8: the shown path is the path
             #[cfg(target_os = "macos")]
             let r = mac_trash(&p);
             #[cfg(all(unix, not(target_os = "macos")))]
-            let r = fd_trash(&p);
+            let r = fd_trash(&p, &run.os[i].clone());
             #[cfg(not(unix))]
             let r = result_msg(&p, OpCode::NoTrash, text("unsupported"));
             run.set(i, r);
@@ -456,22 +468,23 @@ pub fn restore(refs: &[String]) -> Vec<OpResult> {
 
 /// Delete each path for good (folders with everything inside); links are removed, never
 /// followed, and other file systems mounted inside a folder are not entered. `roots` as for
-/// [`move_to_trash`].
-pub fn delete_permanently(paths: &[String], opts: OpOptions<'_>) -> Vec<OpResult> {
+/// [`move_to_trash`] (paths as given, results and keys as shown).
+pub fn delete_permanently<P: AsRef<Path>>(paths: &[P], opts: OpOptions<'_>) -> Vec<OpResult> {
     let empty_roots = HashMap::new();
     let cancel = opts.cancel;
     let mut run = Run::new(paths, opts.progress);
-    for (i, r) in precheck(paths, opts.check_locks, opts.roots.unwrap_or(&empty_roots)) {
+    for (i, r) in precheck(&run.paths, &run.os, opts.check_locks, opts.roots.unwrap_or(&empty_roots)) {
         run.set(i, r);
     }
-    for (i, path) in paths.iter().enumerate() {
+    for i in 0..paths.len() {
         if run.results[i].is_some() {
             continue;
         }
         if cancelled(cancel) {
             break;
         }
-        let r = delete_one(path, cancel);
+        let (shown, os) = (run.paths[i].clone(), run.os[i].clone());
+        let r = delete_one(&shown, &os, cancel);
         run.set(i, r);
     }
     run.finish()
@@ -582,8 +595,7 @@ fn remove_tree(top: &Path, cancel: Option<CancelFn<'_>>) -> (Option<io::Error>, 
     (first, false, deleted)
 }
 
-fn delete_one(path: &str, cancel: Option<CancelFn<'_>>) -> OpResult {
-    let p = Path::new(path);
+fn delete_one(path: &str, p: &Path, cancel: Option<CancelFn<'_>>) -> OpResult {
     let run = || -> io::Result<Option<OpResult>> {
         let meta = std::fs::symlink_metadata(p)?;
         if is_link_like(&meta) {
@@ -764,20 +776,21 @@ fn units(s: &str) -> usize {
 /// (bytes, too long) of an item, walking a folder until it passes `limit`. "Too long": some
 /// path inside would pass MAX_PATH where it is now, or once it is renamed to `$R??????`.
 #[cfg(windows)]
-fn measure(path: &str, limit: u64, bin_folder: &str) -> io::Result<(u64, bool)> {
+fn measure(path: &Path, limit: u64, bin_folder: &str) -> io::Result<(u64, bool)> {
     let max = seams::max_path();
     let meta = std::fs::symlink_metadata(path)?;
+    let shown = path.to_string_lossy();
     if !meta.is_dir() || is_link_like(&meta) {
-        return Ok((meta.len(), units(path) > max));
+        return Ok((meta.len(), units(&shown) > max));
     }
-    let base = units(path);
-    let ext = Path::new(path)
+    let base = units(&shown);
+    let ext = path
         .extension()
         .map(|e| units(&e.to_string_lossy()) + 1)
         .unwrap_or(0);
     let in_bin = units(bin_folder) + 1 + 8 + ext; // \$R + 6 characters + ext
     let mut total = 0u64;
-    let mut stack = vec![PathBuf::from(path)];
+    let mut stack = vec![path.to_path_buf()];
     while let Some(folder) = stack.pop() {
         let Ok(it) = std::fs::read_dir(&folder) else {
             continue; // what cannot be read here cannot be moved either: the engine reports it
@@ -855,6 +868,7 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
     let mut ready: Vec<(usize, std::sync::Arc<Bin>, u64)> = Vec::new();
     for &i in todo {
         let path = run.paths[i].clone();
+        let os = run.os[i].clone();
         let found = (|| -> io::Result<Result<std::sync::Arc<Bin>, &'static str>> {
             let root = win::volume_root(&path)?;
             if let Some(f) = bins.get(&root) {
@@ -882,13 +896,13 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
         }
         let hint = sizes.get(&path).copied();
         let measured = (|| -> io::Result<(u64, bool)> {
-            let meta = std::fs::symlink_metadata(&path)?;
+            let meta = std::fs::symlink_metadata(&os)?;
             let is_dir = meta.is_dir() && !is_link_like(&meta);
             match hint {
                 Some(h) if is_dir && (h as f64) <= bin.capacity as f64 * TRUST_SHARE => {
                     Ok((h.max(0) as u64, false)) // far from the limit; the engine guard covers the rest
                 }
-                _ => measure(&path, limit, &bin.folder),
+                _ => measure(&os, limit, &bin.folder),
             }
         })();
         match measured {
@@ -934,7 +948,7 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
         while !pending.is_empty() && !cancelled(cancel) {
             let where_: HashMap<String, usize> =
                 pending.iter().map(|&i| (win_key(&run.paths[i]), i)).collect();
-            let batch_paths: Vec<String> = pending.iter().map(|&i| run.paths[i].clone()).collect();
+            let batch_paths: Vec<PathBuf> = pending.iter().map(|&i| run.os[i].clone()).collect();
             let outcome = {
                 let run_ref = &mut *run;
                 let pending_ref = &pending;
@@ -975,7 +989,7 @@ fn win_trash(run: &mut Run<'_>, todo: &[usize], sizes: &HashMap<String, i64>, ca
                     continue; // finish() reports it cancelled
                 } else if !entry.reached && !refused.is_empty() {
                     retry.push(i); // the operation stopped at a refused item before this one
-                } else if entry.hr >= 0 && !lexists(&path) {
+                } else if entry.hr >= 0 && !lexists(&run.os[i]) {
                     run.set(i, result_msg(&path, OpCode::Error, text("destroyed")));
                     tracing::error!("recycle: {path} vanished without a recycle-bin entry");
                 } else if entry.hr >= 0 {
@@ -1432,8 +1446,9 @@ pub mod fd {
         out
     }
 
-    pub(crate) fn fd_trash(path: &str) -> OpResult {
-        let found = match find(Path::new(path), true) {
+    /// `path` as shown (results), `os` as given (the file system's bytes).
+    pub(crate) fn fd_trash(path: &str, os: &Path) -> OpResult {
+        let found = match find(os, true) {
             Ok(f) => f,
             Err(e) => return os_error(path, &e),
         };
@@ -1441,7 +1456,7 @@ pub mod fd {
             Ok(t) => t,
             Err(reason) => return result_msg(path, OpCode::NoTrash, reason),
         };
-        let original = super::super::paths::absolute(Path::new(path));
+        let original = super::super::paths::absolute(os);
         let recorded = match &trash.topdir {
             Some(top) => {
                 let real = resolve_lenient(original.parent().unwrap_or(Path::new("/")))
@@ -1497,7 +1512,7 @@ pub mod fd {
                 let _ = std::fs::remove_file(&info);
                 continue;
             }
-            if let Err(e) = rename_noreplace(Path::new(path), &target) {
+            if let Err(e) = rename_noreplace(os, &target) {
                 let _ = std::fs::remove_file(&info);
                 match e.raw_os_error() {
                     Some(libc::EEXIST) => continue,

@@ -67,7 +67,7 @@ impl Default for DownloadStateName {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateAsset {
-    /// File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe
+    /// File name, e.g. SpaceKnife_0.4.0_x64-setup.exe (`sk_core::update::asset_template`)
     pub name: String,
     /// Bytes
     pub size: u64,

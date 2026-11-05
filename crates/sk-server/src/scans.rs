@@ -974,6 +974,8 @@ pub fn save(h: &ScanHandle, path: &Path) -> Result<SnapshotHeader, String> {
             .map(|r| r.volume.as_ref().map_or(serde_json::json!({}), crate::util::volume_to_json))
             .collect(),
         stats: stats_of(h),
+        // the CPUs this process may use (affinity, cgroup quota), not the machine's
+        threads: sk_native::cpus::usable().min(snapshot::SAVE_THREADS),
         ..SaveOptions::default()
     };
     if let Some(dir) = path.parent() {
@@ -1081,6 +1083,9 @@ fn run_scan(server: &Arc<Server>, h: &Arc<ScanHandle>) {
 fn end_run(_server: &Arc<Server>, h: &Arc<ScanHandle>) {
     h.st.lock().running = false;
     h.set_done(true);
+    // glibc: the scan's freed temporaries go back to the system (docs/memory.md §8); this is the
+    // scan's own thread, nothing waits for it
+    sk_core::memory::trim();
 }
 
 /// The idle level reads at the OS's low I/O priority (setting 「空闲时使用系统低 I/O 优先级」).

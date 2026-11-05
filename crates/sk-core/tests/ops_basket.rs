@@ -576,3 +576,81 @@ fn many_items_stay_fast() {
     assert!(started.elapsed().as_secs() < 20);
     let _ = Path::new("");
 }
+
+// --------------------------------------------------------------------------- names that are not Unicode
+
+/// A name no `String` can hold: a lone UTF-16 surrogate on Windows, bytes that are not UTF-8 on
+/// Linux (None where the file system refuses such names).
+fn odd_name(stem: &str) -> Option<std::ffi::OsString> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        let mut w: Vec<u16> = stem.encode_utf16().collect();
+        w.push(0xD800);
+        w.extend(".bin".encode_utf16());
+        Some(std::ffi::OsString::from_wide(&w))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        let mut b = stem.as_bytes().to_vec();
+        b.extend_from_slice(b"\xff.bin");
+        Some(std::ffi::OsString::from_vec(b))
+    }
+    #[cfg(not(any(windows, all(unix, not(target_os = "macos")))))]
+    {
+        let _ = stem;
+        None
+    }
+}
+
+/// Items whose names are not valid Unicode keep their real path: found again by refresh, and
+/// executed by it (the shown path, with U+FFFD, names nothing).
+#[test]
+fn names_that_are_not_unicode_are_executed_by_their_real_path() {
+    let (Some(single), Some(member)) = (odd_name("single"), odd_name("member")) else { return };
+    let tmp = tempfile::tempdir().unwrap();
+    let top = tmp.path().join("scan");
+    let folder = top.join("group");
+    std::fs::create_dir_all(&folder).unwrap();
+    if std::fs::write(top.join(&single), b"single").is_err() {
+        return; // a file system that refuses the name
+    }
+    std::fs::write(folder.join(&member), b"member").unwrap();
+    std::fs::write(folder.join("plain.txt"), b"plain").unwrap();
+    let (scanner, _) =
+        sk_core::scan::scan_path(&top, sk_core::scan::ScanOptions::default()).unwrap();
+    let store = scanner.store().clone();
+    let (n_single, n_folder, n_member) = {
+        let r = store.read();
+        let at = |p: &Path| r.find_path(p).unwrap_or_else(|| panic!("{p:?} not in the tree")) as i64;
+        (at(&top.join(&single)), at(&folder), at(&folder.join(&member)))
+    };
+    let b = basket();
+    let res = add(&b, &store, "s", &[n_single]);
+    assert_eq!(res.added.len(), 1, "{res:?}");
+    let res = add_group(&b, &store, n_folder, &[n_member]);
+    assert_eq!(res.added.len(), 1, "{res:?}");
+    // the shown path lost the name; the real one did not
+    let items = b.items();
+    let one = items.iter().find(|i| i.members.is_empty()).unwrap();
+    assert!(one.path.contains('\u{FFFD}'), "{}", one.path);
+    assert_eq!(one.os_path, top.join(&single));
+    let group = items.iter().find(|i| !i.members.is_empty()).unwrap();
+    assert_eq!(group.os_members, vec![folder.join(&member)]);
+    // found again in the tree (not missing)
+    let missing = b.refresh(&mut |_| Some(store.clone()));
+    assert!(missing.is_empty(), "{missing:?}");
+    assert!(b.items().iter().all(|i| i.status == St::Ready), "{:?}", b.items());
+    // executed by the real paths
+    let targets = b.targets(None);
+    let os: Vec<PathBuf> = targets.iter().map(|t| t.os_path.clone()).collect();
+    let results = sk_core::ops::delete_permanently(&os, sk_core::ops::OpOptions::default());
+    assert!(results.iter().all(|r| r.ok), "{results:?}");
+    assert!(!top.join(&single).exists() && !folder.join(&member).exists());
+    assert!(folder.join("plain.txt").exists());
+    // the results find their items: both leave the basket
+    let left = b.apply_results(&results);
+    assert_eq!(left.len(), 2);
+    assert_eq!(b.len(), 0);
+}

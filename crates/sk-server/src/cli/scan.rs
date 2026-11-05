@@ -103,32 +103,8 @@ pub fn mft_duty(limit: Option<(sk_core::io::Level, Option<f64>)>) -> f64 {
     }
 }
 
-/// Why an MFT fast scan cannot read these roots, or None when it can: one root that is a whole
-/// local NTFS volume on Windows (`scan/mft.py`'s `mft_unsupported`).
-pub fn mft_unsupported(roots: &[RootInfo]) -> Option<String> {
-    if !cfg!(windows) {
-        return Some(t("MFT 快速扫描只在 Windows 上可用").to_owned());
-    }
-    if roots.len() != 1 {
-        return Some(tr!("一次只能读一个卷，这次有 {count} 个扫描位置", count = roots.len()));
-    }
-    let root = &roots[0];
-    let path = root.path.display().to_string();
-    let Some(vol) = &root.volume else {
-        return Some(tr!("认不出 {path} 所在的卷", path = path));
-    };
-    if vol.is_remote {
-        return Some(tr!("{path} 在网络位置上", path = path));
-    }
-    if !vol.fs_type.eq_ignore_ascii_case("NTFS") {
-        let fs = if vol.fs_type.is_empty() { t("未知文件系统").to_owned() } else { vol.fs_type.clone() };
-        return Some(tr!("{mount} 是 {fs} 卷，只有 NTFS 卷有 $MFT", mount = &vol.mount_point, fs = fs));
-    }
-    if !root.whole_volume {
-        return Some(tr!("只能扫整个卷（例如 {mount}），{path} 只是其中的一个文件夹", mount = &vol.mount_point, path = path));
-    }
-    None
-}
+/// Why an MFT fast scan cannot read these roots (the app's own check, shared).
+pub use sk_core::scan::mft::mft_unsupported;
 
 // ------------------------------------------------------------------------------------- scan
 
@@ -771,6 +747,7 @@ fn save(scanner: &Scanner, path: &Path, method: &ScanMethod) -> bool {
             .map(|r| r.volume.as_ref().and_then(|v| serde_json::to_value(v.to_protocol()).ok()).unwrap_or_else(|| serde_json::json!({})))
             .collect(),
         stats,
+        threads: sk_native::cpus::usable().min(snapshot::SAVE_THREADS),
         ..Default::default()
     };
     if let Some(parent) = path.parent() {

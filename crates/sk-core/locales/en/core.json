@@ -194,5 +194,7 @@
  "部分内容未能删除：{detail}": "Some contents couldn't be deleted: {detail}",
  "错误 {code}": "Error {code}",
  "需要 poll()": "poll() is required",
- "；": "; "
+ "；": "; ",
+ "对比失败：树的子项范围相互重叠": "Comparison failed: the trees' child ranges overlap",
+ "快照不能重新扫描": "A snapshot can't be scanned again"
 }

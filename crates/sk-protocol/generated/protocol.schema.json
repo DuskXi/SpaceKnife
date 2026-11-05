@@ -5166,8 +5166,8 @@
         "platform": {
           "type": "string"
         },
-        "python": {
-          "description": "The runtime the backend runs on (the Python backend sent its Python version).",
+        "rust": {
+          "description": "The Rust compiler the backend was built with (`1.91.0`; the Python backend sent its\nPython version as `python`).",
           "type": "string"
         },
         "version": {
@@ -5177,7 +5177,7 @@
       "required": [
         "name",
         "version",
-        "python",
+        "rust",
         "platform"
       ],
       "type": "object"
@@ -5887,6 +5887,33 @@
       ],
       "type": "object"
     },
+    "SummaryGap": {
+      "description": "A part of a node's summary the backend could not work out; the rest is still given.",
+      "properties": {
+        "part": {
+          "description": "contents: largest files, class totals and newest change (left empty); classes: the folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, parent: that field (left empty)",
+          "enum": [
+            "contents",
+            "classes",
+            "top_files",
+            "folder_class",
+            "tags",
+            "volume",
+            "parent"
+          ],
+          "type": "string"
+        },
+        "reason": {
+          "description": "Why, in the interface language",
+          "type": "string"
+        }
+      },
+      "required": [
+        "part",
+        "reason"
+      ],
+      "type": "object"
+    },
     "SystemInfo": {
       "properties": {
         "full_disk_access": {
@@ -6184,6 +6211,14 @@
           "default": null,
           "description": "The folder class the node (or a file's folder) takes, if any"
         },
+        "gaps": {
+          "default": [],
+          "description": "Parts that could not be worked out this time; empty when complete",
+          "items": {
+            "$ref": "#/$defs/SummaryGap"
+          },
+          "type": "array"
+        },
         "latest_mtime": {
           "description": "Newest modification time in the subtree (0 = unknown)",
           "format": "int64",
@@ -6268,7 +6303,7 @@
     "UpdateAsset": {
       "properties": {
         "name": {
-          "description": "File name, e.g. SpaceKnife-0.4.0-Setup-x64.exe",
+          "description": "File name, e.g. SpaceKnife_0.4.0_x64-setup.exe (`sk_core::update::asset_template`)",
           "type": "string"
         },
         "sha256": {

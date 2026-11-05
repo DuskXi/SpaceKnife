@@ -697,6 +697,38 @@ fn progress_and_cancel() {
     assert_eq!(err.to_string(), "对比已取消");
 }
 
+#[test]
+fn the_layout_engine_draws_the_union() {
+    use sk_core::layout::contract::check_draw;
+    use sk_core::layout::{ArraySizes, Basis, DrawList, LayoutParams, RootSpec, SizeSource, StoreSizes, treemap};
+    let names = |n: usize, size: &dyn Fn(usize) -> i64| -> S {
+        S::D((0..n).map(|i| (format!("f{i}"), f(size(i)))).collect(), 0)
+    };
+    let base = build(&d(vec![("a", names(20, &|i| 100 * i as i64)), ("b", d(vec![("g", f(5000))]))]));
+    let target = build(&d(vec![
+        ("a", names(25, &|i| 100 * i as i64 + if i % 3 != 0 { 50 } else { 0 })),
+        ("c", d(vec![("h", f(800))])),
+    ]));
+    let tree = check(&base, &target, false);
+    let nodes = tree.store.read();
+    let root = RootSpec::node(nodes.roots().next().unwrap());
+    let params = LayoutParams { width: 600.0, height: 400.0, min_element: 1.0, ..LayoutParams::default() };
+    let basis = Basis::default();
+    let lay = |sizes: &dyn SizeSource| {
+        let mut out = DrawList::new();
+        treemap(&nodes, &basis, &params, &root, sizes, &mut out);
+        let problems = check_draw(&out, &nodes, &root, true, Some(sizes));
+        assert!(problems.is_empty(), "{problems:#?}");
+        out
+    };
+    let normal = lay(&StoreSizes::of(&nodes));
+    let changed = lay(&ArraySizes(std::sync::Arc::new(tree.area())));
+    assert!(!normal.is_empty() && !changed.is_empty());
+    let drawn: HashSet<i32> = changed.node.iter().copied().collect();
+    assert!(drawn.contains(&(row(&tree, "b/g") as i32)) && drawn.contains(&(row(&tree, "c/h") as i32)));
+    assert!(!drawn.contains(&(row(&tree, "a/f0") as i32))); // unchanged: no area
+}
+
 // --------------------------------------------------------------------------- change units
 
 fn rel(path: &str) -> String {

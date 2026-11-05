@@ -73,7 +73,8 @@ pub struct OpRun {
     pub mode: OpMode,
     session: Weak<Session>,
     pub total: i64,
-    paths: Vec<String>,
+    /// as the file system names them (results and the maps below: as shown)
+    paths: Vec<std::path::PathBuf>,
     sizes: HashMap<String, i64>,
     /// item path -> freeable bytes (what a success frees)
     alloc: HashMap<String, i64>,
@@ -433,7 +434,7 @@ impl OpsService {
             mode: p.mode,
             session: Arc::downgrade(session),
             total: targets.len() as i64,
-            paths: targets.iter().map(|t| t.path.clone()).collect(),
+            paths: targets.iter().map(|t| t.os_path.clone()).collect(),
             sizes: targets.iter().map(|t| (t.path.clone(), t.size)).collect(),
             alloc,
             scans,

@@ -146,8 +146,12 @@ impl MonitorManager {
             } else {
                 None
             },
+            // changes the scan's listings may have missed count from its start (None: not started
+            // yet, the monitor's own start is earlier than any listing)
+            listed_after: scanner.progress().started_at.map(std::time::SystemTime::from),
             ..MonitorOptions::default()
         };
+        // relists list like the scan did (root path, name check, Windows allocation option)
         let monitor = ScanMonitor::new(h.store.clone(), h.roots.read().clone(), scanner.root_options(), opts);
         let handle = monitor.handle();
         let mon = Arc::new(Mon { monitor: Mutex::new(monitor), handle, status: Mutex::new(None) });

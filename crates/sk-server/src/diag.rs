@@ -8,12 +8,15 @@
 //! can; when that does not bring the process under the limit, a warning goes to the log panel and
 //! a breakdown to the log file: scans, views, the compute slots, session outboxes. Reports repeat
 //! only after another 25 % of growth.
+//!
+//! While no scan runs, the C heap is also trimmed once the process grew by [`TRIM_GROWTH`] since
+//! the last trim (glibc only: [`sk_core::memory::trim`], docs/memory.md §8).
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use sk_core::events::{self, EventLevel, Source};
-use sk_core::memory::{process_memory, release};
+use sk_core::memory::{process_memory, release, trim};
 use sk_core::tr;
 
 use crate::app::Server;
@@ -23,6 +26,8 @@ pub const PERIOD: Duration = Duration::from_secs(15);
 /// 1.5 GiB
 pub const SLACK: u64 = 3 << 29;
 const GIB: f64 = (1u64 << 30) as f64;
+/// Idle: the C heap is trimmed once private memory grew by this much since the last trim.
+pub const TRIM_GROWTH: u64 = 32 << 20;
 
 /// Private bytes the open scans need: node stores in plain memory (mapped columns are file-backed,
 /// not private), what an MFT build holds besides, and name indexes.
@@ -79,6 +84,39 @@ pub fn report(server: &Server) -> String {
     lines.join("\n")
 }
 
+/// No scan is running.
+pub fn idle(server: &Server) -> bool {
+    !server.scans.list().iter().any(|h| h.running())
+}
+
+/// Whether an idle process at `private` bytes should trim, given the private bytes after the last
+/// trim (`None`: never trimmed). Otherwise growth counts from the lowest point since the last trim.
+pub fn trim_due(private: u64, trimmed: &mut Option<u64>) -> bool {
+    match *trimmed {
+        Some(t) if private <= t + TRIM_GROWTH => {
+            *trimmed = Some(t.min(private));
+            false
+        }
+        _ => true,
+    }
+}
+
+/// The idle trim: when no scan runs and the process grew by [`TRIM_GROWTH`] since the last trim,
+/// give the heap's free pages back. `trimmed` is the private memory after the last trim.
+pub fn idle_trim(server: &Server, trimmed: &mut Option<u64>) {
+    let Some(private) = process_memory().private else { return };
+    if !idle(server) {
+        if let Some(t) = trimmed {
+            *t = (*t).min(private);
+        }
+        return;
+    }
+    if trim_due(private, trimmed) {
+        trim();
+        *trimmed = Some(process_memory().private.unwrap_or(private));
+    }
+}
+
 /// One look: true when it warned.
 pub fn check(server: &Server, last: &mut u64) -> bool {
     let Some(private) = process_memory().private else { return false };
@@ -112,20 +150,40 @@ pub fn start(server: &Arc<Server>) {
     let weak = Arc::downgrade(server);
     server.spawn_background(async move {
         let mut last = 0u64;
+        let mut trimmed: Option<u64> = None;
         loop {
             tokio::time::sleep(PERIOD).await;
             let Some(server) = weak.upgrade() else { return };
             // diagnostics never take the backend down
             let res = tokio::task::spawn_blocking(move || {
-                let mut l = last;
+                let (mut l, mut t) = (last, trimmed);
+                idle_trim(&server, &mut t);
                 check(&server, &mut l);
-                l
+                (l, t)
             })
             .await;
             match res {
-                Ok(l) => last = l,
+                Ok((l, t)) => (last, trimmed) = (l, t),
                 Err(e) => tracing::error!("memory watchdog failed: {e}"),
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn idle_trim_waits_for_growth_from_the_lowest_point() {
+        let mut trimmed = None;
+        assert!(trim_due(100 << 20, &mut trimmed), "never trimmed: trim");
+        trimmed = Some(100 << 20);
+        assert!(!trim_due((100 << 20) + TRIM_GROWTH, &mut trimmed));
+        // shrank: growth counts from here
+        assert!(!trim_due(80 << 20, &mut trimmed));
+        assert_eq!(trimmed, Some(80 << 20));
+        assert!(!trim_due((80 << 20) + TRIM_GROWTH, &mut trimmed));
+        assert!(trim_due((80 << 20) + TRIM_GROWTH + 1, &mut trimmed));
+    }
 }

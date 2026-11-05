@@ -612,8 +612,14 @@ pub fn stamp(secs: u64) -> String {
     )
 }
 
-/// Unix seconds of a [`stamp`].
+/// Unix seconds of a [`stamp`], also with the `_NNN` [`auto_path`] adds to a second's later
+/// snapshots.
 pub fn parse_stamp(text: &str) -> Option<u64> {
+    let text = match text.split_once('_') {
+        Some((stamp, n)) if !n.is_empty() && n.bytes().all(|c| c.is_ascii_digit()) => stamp,
+        Some(_) => return None,
+        None => text,
+    };
     let b = text.as_bytes();
     if b.len() != 15
         || b[8] != b'-'
@@ -666,10 +672,20 @@ fn iso_week(days: i64) -> (i64, i64) {
     (y, (thursday - jan1) / 7 + 1)
 }
 
-/// `<base>/<root key>/<stamp>.sks`.
+/// `<base>/<root key>/<stamp>.sks`; a snapshot of the same second there already (a manual save
+/// right after the auto-save) makes it `<stamp>_001.sks`, `_002` … — later names sort after
+/// earlier ones ([`parse_stamp`] reads them, [`prune`] and the newest-first listings follow).
 pub fn auto_path(roots: &[String], when: Option<u64>, base: &Path) -> PathBuf {
-    base.join(root_key(roots))
-        .join(format!("{}.{SUFFIX}", stamp(when.unwrap_or_else(now_secs))))
+    let folder = base.join(root_key(roots));
+    let stamp = stamp(when.unwrap_or_else(now_secs));
+    let first = folder.join(format!("{stamp}.{SUFFIX}"));
+    if !first.exists() {
+        return first;
+    }
+    (1..1000)
+        .map(|n| folder.join(format!("{stamp}_{n:03}.{SUFFIX}")))
+        .find(|p| !p.exists())
+        .unwrap_or(first)
 }
 
 /// Applies retention to one root's snapshot folder (the newest `keep_recent`, plus the newest of
@@ -736,6 +752,9 @@ mod tests {
             assert_eq!(parse_stamp(&stamp(secs)), Some(secs));
         }
         assert_eq!(stamp(1_767_225_600), "20260101-000000");
+        assert_eq!(parse_stamp("20260101-000000_001"), Some(1_767_225_600));
+        assert_eq!(parse_stamp("20260101-000000_"), None);
+        assert_eq!(parse_stamp("20260101-000000_x1"), None);
         // 2026-01-01 is a Thursday: ISO week 1 of 2026; 2027-01-01 is a Friday: week 53 of 2026
         assert_eq!(iso_week(days_from_civil(2026, 1, 1)), (2026, 1));
         assert_eq!(iso_week(days_from_civil(2027, 1, 1)), (2026, 53));

@@ -162,6 +162,41 @@ fn auto_path_and_listing() {
     assert_eq!(listed, vec![path, older]);
 }
 
+/// A manual save in the same second as the auto-save gets a name of its own (it overwrote the
+/// auto-save before); the names sort in the order they were made and prune reads them.
+#[test]
+fn saves_in_one_second_do_not_overwrite_each_other() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = scanned();
+    let roots = vec!["/root".to_string()];
+    let when = 1_800_000_000;
+    let mut made = Vec::new();
+    for _ in 0..3 {
+        let path = snapshot::auto_path(&roots, Some(when), dir.path());
+        assert!(!made.contains(&path), "{path:?} again");
+        let mut opts = SaveOptions::roots(roots.clone());
+        opts.created_at = Some(when);
+        snapshot::save(&store.read(), &path, &opts).unwrap();
+        made.push(path);
+    }
+    let names: Vec<String> = made.iter().map(|p| p.file_name().unwrap().to_string_lossy().into_owned()).collect();
+    let stamp = snapshot::stamp(when);
+    assert_eq!(names, [format!("{stamp}.sks"), format!("{stamp}_001.sks"), format!("{stamp}_002.sks")]);
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(sorted, names, "later saves sort after earlier ones");
+    for p in &made {
+        let stem = p.file_stem().unwrap().to_str().unwrap();
+        assert_eq!(snapshot::parse_stamp(stem), Some(when));
+    }
+    // all three are the newest: kept; with one kept, the others of that week go
+    let folder = made[0].parent().unwrap();
+    assert!(snapshot::prune(folder, 3).unwrap().is_empty());
+    let deleted = snapshot::prune(folder, 1).unwrap();
+    assert_eq!(deleted.len(), 1, "{deleted:?}"); // the newest is kept, plus one per ISO week
+    assert!(made[2].exists());
+}
+
 #[test]
 fn snapshots_load_into_mapped_files_beyond_the_budget() {
     let dir = tempfile::tempdir().unwrap();

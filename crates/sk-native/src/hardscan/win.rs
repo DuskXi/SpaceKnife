@@ -1749,6 +1749,17 @@ fn filetime_now() -> i64 {
     }
 }
 
+/// The file id a listing gave, as the 64-bit `ino` of the row: on NTFS the file reference
+/// (record number in the low 48 bits, as the change journal names files; FileIdExtd's 128-bit id
+/// is it zero-extended). 0 where there is none, it does not fit in 64 bits (ReFS), or the
+/// listing's ids are not to be trusted (WinBtrfs: the listed folder's own in FileIdExtd).
+fn listed_ino(raw: &Raw<'_>, btrfs: bool) -> u64 {
+    if raw.id_bits == 0 || btrfs || raw.id >> 64 != 0 {
+        return 0;
+    }
+    raw.id as u64
+}
+
 fn add_entry(
     raw: &Raw<'_>,
     dir: &[u16],
@@ -1814,7 +1825,7 @@ fn add_entry(
         mtime: ft_secs(raw.write),
         ctime: ft_secs(raw.creation),
         atime: ft_secs(raw.access),
-        ino: 0,
+        ino: listed_ino(raw, how.btrfs),
         nlink: 1,
         dev: 0,
         ext_len,

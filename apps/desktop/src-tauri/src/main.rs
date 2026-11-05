@@ -4,6 +4,8 @@
 use std::ffi::OsString;
 
 fn main() {
+    // Before the first allocation that matters: glibc arena limits / trim threshold (no-op elsewhere).
+    sk_core::memory::tune_allocator();
     // The other jobs of this one program, before anything else (no window, no logging, no settings):
     // the elevated scan helper the backend starts (`<exe> helper …`, sk_core::helper), and putting
     // a portable copy's new version in place (`<exe> --apply-update <plan>`, sk_core::update::swap;

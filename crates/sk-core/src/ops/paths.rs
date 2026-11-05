@@ -594,8 +594,13 @@ fn path_string(p: &Path) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// SpaceKnife's own folders (data, config, cache), resolved like Python's `Path.resolve()`
-/// (resolved again only when they move, i.e. with `SPACEKNIFE_HOME`).
+/// SpaceKnife's own folders (data, config, cache), both as named and resolved like Python's
+/// `Path.resolve()` (resolved again only when they move, i.e. with `SPACEKNIFE_HOME`).
+///
+/// Both forms: when a folder is a link (a symlinked `SPACEKNIFE_HOME`, or the per-package
+/// redirection Windows applies to `AppData` for packaged apps) its contents are reached through
+/// the resolved form, but the folder itself is the link — [`protected_key`] resolves only the
+/// parents of a path, so the link would otherwise not be recognised as the app's folder.
 fn app_dirs() -> Vec<String> {
     type Resolved = Option<(Vec<PathBuf>, Vec<String>)>;
     static CACHE: LazyLock<Mutex<Resolved>> =
@@ -607,9 +612,22 @@ fn app_dirs() -> Vec<String> {
     {
         return v.clone();
     }
-    let resolved: Vec<String> = raw.iter().map(|d| path_string(&resolve_lenient(d))).collect();
+    let resolved = app_dir_forms(&raw);
     *slot = Some((raw, resolved.clone()));
     resolved
+}
+
+/// Each folder resolved (links followed) and as named (absolute), without repeats.
+pub fn app_dir_forms(dirs: &[PathBuf]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(dirs.len() * 2);
+    for d in dirs {
+        for form in [path_string(&resolve_lenient(d)), path_string(&absolute(d))] {
+            if !out.contains(&form) {
+                out.push(form);
+            }
+        }
+    }
+    out
 }
 
 /// Where the running program lives.
@@ -785,6 +803,39 @@ pub fn protected_reason(path: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A data folder that is a link (a symlinked SPACEKNIFE_HOME, Windows' AppData redirection
+    /// for packaged apps): the link itself and everything below it are the app's.
+    #[test]
+    fn linked_app_folder_is_protected_as_named_and_resolved() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir_all(real.join("snapshots")).unwrap();
+        let link = tmp.path().join("SpaceKnife");
+        #[cfg(windows)]
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&real)
+            .output()
+            .is_ok_and(|o| o.status.success());
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&real, &link).is_ok();
+        #[cfg(not(any(windows, unix)))]
+        let made = false;
+        if !made {
+            return;
+        }
+        let forms = app_dir_forms(std::slice::from_ref(&link));
+        assert_eq!(forms.len(), 2, "{forms:?}");
+        // a home elsewhere (its parent's children are homes)
+        let home = if cfg!(windows) { r"Q:\Users\u" } else { "/nonexistent/home/u" }.to_string();
+        let rules = platform_rules(System::this(), &home, &HashMap::new(), &forms, &[]);
+        let link_s = path_string(&link);
+        assert_eq!(match_rules(&link_s, &rules), Some("app"), "{forms:?}");
+        let below = path_string(&resolved(&link.join("snapshots").join("c.sks")));
+        assert_eq!(match_rules(&below, &rules), Some("app"), "{below} / {forms:?}");
+    }
 
     #[test]
     fn nt_helpers() {
