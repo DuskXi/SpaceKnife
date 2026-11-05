@@ -80,3 +80,24 @@ protocol models).
   `std::process::exit(sk_core::helper::run_main(&args))` first thing; `HelperClient`, `disks::probe`,
   `IoGovernor::permit` block (spawn_blocking). Follow-ups: macOS NVMe SMART stub (`disks/mac_smart.rs`); English
   catalog entries for helper/disks/io messages.
+
+## Wave 3: sk-server (server task + cli task)
+
+Binaries (no compatibility with old launch scripts needed):
+- `spaceknife` — the Tauri GUI app (`apps/desktop/src-tauri`): starts the server in-process via `sk_server::start`.
+- `spaceknife-cli` — console binary in `crates/sk-server/src/bin/spaceknife-cli.rs`: `scan`, `run`, `snapshot`,
+  `serve` (ports `cli*.py`), `headless`/`--listen` (HTTP + WS for a browser, replaces Electron's headless mode),
+  `helper` (→ `sk_core::helper::run_main`), `--apply-update <plan>` (→ `sk_core::update::swap::main`).
+  The GUI binary must also dispatch `helper` and `--apply-update` (it re-execs itself).
+
+Contract between the two tasks (server task owns it, cli task calls it):
+```rust
+pub struct ServeOptions { pub host: IpAddr, pub port: u16 /*0 = random*/, pub token: String,
+    pub allow_origins: Vec<String>, pub app_version: Option<String>, pub install_kind: Option<String>,
+    pub system_locale: Option<String>, pub static_dir: Option<PathBuf> /* headless: serve the UI */,
+    pub tls: Option<(PathBuf, PathBuf)> }
+pub struct ServerHandle { pub url: String /* ws://host:port/v1 */, pub port: u16, pub pid: u32, /* … */ }
+impl ServerHandle { pub fn shutdown(&self); pub async fn wait(self); }
+pub async fn start(opts: ServeOptions) -> anyhow::Result<ServerHandle>;   // returns once listening
+```
+Origins the server always allows: `tauri://localhost`, `http://tauri.localhost`, `https://tauri.localhost`.
