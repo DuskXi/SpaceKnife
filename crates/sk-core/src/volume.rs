@@ -127,7 +127,7 @@ pub fn is_volume_root(path: &Path, volume: &VolumeInfo) -> bool {
 }
 
 /// An `io::Error`'s text without Rust's " (os error N)" suffix (Python's `strerror`).
-pub(crate) fn os_message(err: &io::Error) -> String {
+pub fn os_message(err: &io::Error) -> String {
     let s = err.to_string();
     match s.rfind(" (os error ") {
         Some(i) => s[..i].trim_end_matches(['.', '。']).to_owned(),

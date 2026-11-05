@@ -218,6 +218,19 @@ impl MonitorHandle {
         self.inbox.queue.lock().unwrap().extend(changes);
         self.inbox.wake();
     }
+
+    /// Waits until something arrives (or [`MonitorHandle::stop`]) or `timeout` passes (None:
+    /// until woken); true when woken. Lets a caller drive [`ScanMonitor::step`] itself, as
+    /// [`ScanMonitor::run`] does, without holding the monitor while it waits (the server keeps
+    /// the monitor behind a lock so that its status can be read meanwhile).
+    pub fn wait(&self, timeout: Option<Duration>) -> bool {
+        self.inbox.wait(timeout)
+    }
+
+    /// [`MonitorHandle::stop`] was called (or the monitor stopped).
+    pub fn stopped(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+    }
 }
 
 impl Inbox {

@@ -4,7 +4,7 @@
 export const PROTOCOL_VERSION = "1.1";
 export const SUBPROTOCOL = "spaceknife.v1";
 export const WS_PATH = "/v1";
-export const SCHEMA_HASH = "ba1e5a70242e20f4";
+export const SCHEMA_HASH = "17d7ec088181575b";
 
 export interface AgeCond {
   end: number;
@@ -1341,8 +1341,11 @@ export interface ScanStatus {
 export interface ServerInfo {
   name: string;
   platform: string;
-  /** The runtime the backend runs on (the Python backend sent its Python version). */
-  python: string;
+  /**
+   * The Rust compiler the backend was built with (`1.91.0`; the Python backend sent its
+   * Python version as `python`).
+   */
+  rust: string;
   version: string;
 }
 

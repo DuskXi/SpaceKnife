@@ -34,7 +34,7 @@ const rows = computed((): [string, string][] => {
     [t("安装方式"), installKindName(kind.value)],
     ["Tauri", v.tauri || "—"],
     ["WebView", v.webview || "—"],
-    ["Python", s?.server.python ?? "—"],
+    ["Rust", s?.server.rust ?? "—"],
     [t("协议"), PROTOCOL_VERSION],
     [t("系统"), s ? `${s.platform.system} ${s.platform.release} (${s.platform.machine})` : "—"],
   ];

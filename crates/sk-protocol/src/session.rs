@@ -58,8 +58,9 @@ impl Validate for HelloParams {
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
-    /// The runtime the backend runs on (the Python backend sent its Python version).
-    pub python: String,
+    /// The Rust compiler the backend was built with (`1.91.0`; the Python backend sent its
+    /// Python version as `python`).
+    pub rust: String,
     pub platform: String,
 }
 
