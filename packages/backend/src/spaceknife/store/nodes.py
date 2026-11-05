@@ -19,11 +19,13 @@ they return.
 
 from __future__ import annotations
 
+import copy
 import os
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from enum import IntEnum, IntFlag
+from typing import Any
 
 import numpy as np
 
@@ -99,6 +101,32 @@ OFF_NARROW_LIMIT = 2**32  # name offsets fit uint32 below this many bytes of nam
 
 # Columns a scanner provides for new entries (the rest are derived by the store).
 ENTRY_COLUMNS = ("kind", "flags", "size", "alloc", "mtime", "ctime", "atime", "ino", "nlink")
+
+# One slice for NodeStore.ingest_slices: refs, bounds, name_blob, name_lens, entries, ext_ids.
+type SlicePart = tuple[
+    np.ndarray,
+    np.ndarray,
+    bytes | memoryview | np.ndarray,
+    np.ndarray,
+    dict[str, np.ndarray],
+    np.ndarray | None,
+]
+
+
+def _native_fold() -> Any:
+    """The native fold of slices (``spaceknife_native.SliceFold``, docs/native.md 2.3), or None:
+    without the extension, in a build without it, or with ``SPACEKNIFE_PY_FOLD=1`` (the rollback
+    switch: the numpy fold of :meth:`NodeStore._ingest_slice_py`)."""
+    if os.environ.get("SPACEKNIFE_PY_FOLD") == "1":
+        return None
+    from .. import native
+
+    mod = native.module()
+    return getattr(mod, "SliceFold", None) if mod is not None else None
+
+
+# what NodeStore.ingest_slices folds with (tests set it to None to compare both)
+NATIVE_FOLD: Any = _native_fold()
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,8 +261,10 @@ class NodeStore:
         """Give back the growth headroom (up to half of every column) once nothing is added any more.
 
         Copies one column at a time, so the extra memory is one column at most. Readers holding an
-        old column keep a valid, equal copy. Returns the bytes freed. From now on the columns grow
-        a little at a time (:data:`SETTLED_SHARE`).
+        old column keep a valid, equal copy; a writer adding rows meanwhile would lose them (into
+        the old column), so it runs as a reader (``STRUCTURE.read()``) and writers under
+        ``STRUCTURE.write()``. Returns the bytes freed. From now on the columns grow a little at a
+        time (:data:`SETTLED_SHARE`).
         """
         self._settled = True
         n = max(16, self._n)
@@ -392,7 +422,97 @@ class NodeStore:
         ext_ids: np.ndarray | None = None,
     ) -> np.ndarray:
         """Append a whole slice of listings at once (a scan worker's ``SliceResult``); returns the
-        first new id of every listing. The result equals :meth:`ingest_listing` per listing.
+        first new id of every listing (-1: skipped, see below). The result equals
+        :meth:`ingest_listing` per listing; how it is computed: :meth:`_ingest_slice_py`, or the
+        native fold (:meth:`ingest_slices`)."""
+        return self.ingest_slices([(refs, bounds, name_blob, name_lens, entries, ext_ids)])[0]
+
+    def ingest_slices(self, parts: Sequence[SlicePart]) -> list[np.ndarray]:
+        """Several slices folded as one, their listings one after another (what
+        ``worker.merge_slices`` followed by one :meth:`ingest_slice` gives, without the merged
+        copy; ``ext_ids`` are ids of this store's :attr:`ext_table` already); the starts of each
+        part's listings.
+
+        With the native extension the entries are written in one pass without the GIL, the
+        listing threads keep running meanwhile (``spaceknife_native.SliceFold``, docs/native.md
+        2.3): checks, skipped listings, columns, names, PENDING, MOUNT, totals and the order in
+        which readers in other threads see them are those of :meth:`_ingest_slice_py`, which
+        folds without it (and with ``SPACEKNIFE_PY_FOLD=1``).
+        """
+        if not parts:
+            return []
+        fold = NATIVE_FOLD
+        if fold is None:
+            return self._ingest_slices_py(parts)
+        prepared = []
+        for refs, bounds, blob, lens, entries, ext in parts:
+            names = blob if isinstance(blob, np.ndarray) else np.frombuffer(blob, dtype=np.uint8)
+            prepared.append(
+                (
+                    np.ascontiguousarray(np.asarray(refs, dtype=np.int64).reshape(-1, 3)).reshape(-1),
+                    np.ascontiguousarray(bounds, dtype=np.int64),
+                    np.ascontiguousarray(names, dtype=np.uint8),
+                    np.ascontiguousarray(lens, dtype=np.uint16),
+                    {key: np.ascontiguousarray(entries[key], dtype=COLUMNS[key]) for key in ENTRY_COLUMNS},
+                    None if ext is None else np.ascontiguousarray(ext, dtype=np.uint16),
+                )
+            )
+        c = self.cols
+        plan = fold(prepared, self._n, c["kind"], c["flags"], c["child_count"], c["depth"])  # checks
+        if plan.rows:
+            need = plan.name_bytes
+            self._grow(plan.rows)
+            chunk, base, pos = self._heap.run(need)
+            self._fit_offsets(base + pos + need)
+            plan.write(self.cols, chunk, pos, base)  # rows past self._n: no reader sees them yet
+            self._heap.commit(pos + need)
+        starts: list[np.ndarray] = plan.publish(self)  # PENDING, version, _n, ranges, totals
+        return starts
+
+    def _ingest_slices_py(self, parts: Sequence[SlicePart]) -> list[np.ndarray]:
+        """:meth:`ingest_slices` with numpy: the parts merged (as worker.merge_slices does) and
+        folded by :meth:`_ingest_slice_py`."""
+        if len(parts) == 1:
+            return [self._ingest_slice_py(*parts[0])]
+        refs: list[np.ndarray] = []
+        bounds: list[np.ndarray] = [np.zeros(1, dtype=np.int64)]
+        blobs: list[bytes] = []
+        lens: list[np.ndarray] = []
+        exts: list[np.ndarray] = []
+        counts: list[int] = []
+        listings = rows = 0
+        for r, b, blob, ln, _entries, ext in parts:
+            rr = np.array(r, dtype=np.int64).reshape(-1, 3)
+            rr[rr[:, 0] != 0, 1] += listings
+            refs.append(rr)
+            bounds.append(np.asarray(b, dtype=np.int64)[1:] + rows)
+            blobs.append(bytes(blob))
+            lens.append(np.asarray(ln))
+            exts.append(np.zeros(len(ln), dtype=np.uint16) if ext is None else np.asarray(ext))
+            counts.append(len(rr))
+            listings += len(rr)
+            rows += len(ln)
+        starts = self._ingest_slice_py(
+            np.concatenate(refs),
+            np.concatenate(bounds),
+            b"".join(blobs),
+            np.concatenate(lens),
+            {key: np.concatenate([np.asarray(p[4][key]) for p in parts]) for key in ENTRY_COLUMNS},
+            None if all(p[5] is None for p in parts) else np.concatenate(exts),
+        )
+        cuts = np.cumsum(counts)[:-1]
+        return list(np.split(starts, cuts))
+
+    def _ingest_slice_py(
+        self,
+        refs: np.ndarray,
+        bounds: np.ndarray,
+        name_blob: bytes | memoryview | np.ndarray,
+        name_lens: np.ndarray,
+        entries: dict[str, np.ndarray],
+        ext_ids: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """:meth:`ingest_slice` with numpy (without the native extension).
 
         Listing ``k`` lists the directory ``refs[k]`` names — ``(0, node, 0)``: a node already in
         the store; ``(1, j, i)``: entry ``i`` of an earlier listing ``j`` of this slice — and its
@@ -420,7 +540,7 @@ class NodeStore:
             kept = ~gone
             out = np.full(listings, -1, dtype=np.int64)
             rest = _keep_listings(kept, refs, bounds, name_blob, name_lens, entries, ext_ids)
-            out[kept] = self.ingest_slice(*rest)
+            out[kept] = self._ingest_slice_py(*rest)
             return out
         counts = np.diff(bounds)
         total = int(bounds[-1])
@@ -755,11 +875,38 @@ class NodeStore:
 
     # ------------------------------------------------------------------ (de)serialisation helpers
 
+    def fixed(self) -> NodeStore:
+        """The store as it is now, for a long read without the lock (a snapshot being written): the
+        same arrays and name chunks, but its own row count, column dict and chunk lists, so rows
+        added, columns replaced (:meth:`compact`) or a store adopted meanwhile leave it as it was.
+        Rows changed in place change it too: compare :attr:`version` afterwards."""
+        out = copy.copy(self)
+        out.cols = dict(self.cols)
+        out._heap = self._heap.fixed()
+        out.ext_table = list(self.ext_table)
+        return out
+
     def export_columns(self) -> dict[str, np.ndarray]:
         """The live columns; ``name_off`` points into :attr:`names_blob` (from_columns(separated=True))."""
         out = {k: arr[: self._n] for k, arr in self.cols.items()}
         out["name_off"] = self._heap.rebase(out["name_off"])
         return out
+
+    def export_dtypes(self) -> dict[str, np.dtype[np.generic]]:
+        """The dtype of every column of :meth:`export_columns` (``name_off`` rebased: int64 once the
+        names span more than one heap chunk), in its order."""
+        out = {k: arr.dtype for k, arr in self.cols.items()}
+        if self._heap.chunks() > 1:
+            out["name_off"] = _OFF_WIDE
+        return out
+
+    def export_pieces(self, key: str, rows: int) -> Iterator[np.ndarray]:
+        """Column ``key`` of :meth:`export_columns`, ``rows`` at a time (snapshot writing: no copy of
+        a whole column; ``name_off`` rebased piece by piece)."""
+        col = self.cols[key]
+        for a in range(0, self._n, max(1, rows)):
+            piece = col[a : min(self._n, a + rows)]
+            yield self._heap.rebase(piece) if key == "name_off" else piece
 
     @classmethod
     def from_columns(
@@ -820,7 +967,7 @@ def _keep_listings(
     keep: np.ndarray,
     refs: np.ndarray,
     bounds: np.ndarray,
-    name_blob: bytes,
+    name_blob: bytes | memoryview | np.ndarray,
     name_lens: np.ndarray,
     entries: dict[str, np.ndarray],
     ext_ids: np.ndarray | None,

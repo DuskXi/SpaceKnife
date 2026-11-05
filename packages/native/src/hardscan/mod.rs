@@ -5,17 +5,22 @@
 //!
 //! | key | default | meaning |
 //! |---|---|---|
-//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False), `skip` and `protect` (folders not entered: as mount points, as not accessible), `path` (the root as given) and `verify_names` (False; Windows: tasks must be stored under their names below `path`, as on Btrfs) |
+//! | `roots` | required | per root: dict/object with `dev`, `cluster_size` (4096), `resident_max` (0), `cross_mounts` (False), `skip` and `protect` (folders not entered: as mount points, as not accessible), `path` (the root as given), `verify_names` (False; Windows: tasks must be stored under their names below `path`, as on Btrfs) and `listed_alloc` (""; Windows: "NTFS", "ReFS" or "Btrfs" takes files' size on disk from their listing entries as that file system counts it, win.rs `listed_alloc`; "" estimates it from the size) |
 //! | `budget_s` | 0.03 | time budget; directories not started by then go to the frontier |
 //! | `max_entries` | 100000 | entry budget, checked like the time budget |
-//! | `threads` | 0 | listing threads (0 = one per logical CPU, at most 16) |
+//! | `threads` | 0 | listing threads: 0 = the process's shared carriers, as many listings at once as the width pace.rs sets (the scanner's calls); N = a pool of N threads of the call's own (1: the calling thread) |
+//! | `gate` | None | a `ListingGate` (slots.rs): a limit on listings in flight shared by every call that names it, and its pause (the backend's disk-load limit, one per disk) |
 //! | `keep_access_time` | True | Windows and Linux: listing a folder does not update its last access time |
 //! | `relative_open` | True | Windows: a found subdirectory is opened by name relative to its parent's handle, checked against the listed file id |
+//! | `skip_final` | False | Windows (local NTFS, ReFS, Btrfs): no last directory query when the buffer before it had room for one more entry of any name (not in listings of reparse points; in each call the first 64 listings of a root that could leave it out, then one in 64, send it anyway, and one that returns entries turns it off for the root) |
+//! | `dot_check` | False | Windows: a relative open is checked by the file id of its listing's "." entry (else by querying the handle) |
+//! | `keep_where_updated` | True | Windows: `keep_access_time` only on volumes whose file system updates access times (the system's NtfsDisableLastAccessUpdate / RefsDisableLastAccessUpdate) |
 //!
 //! Test seams, not part of the interface: `_fold_strict` and `_extd_self_ids` (Windows: behave as
-//! WinBtrfs does, win.rs RootState), `_pinned_cap` (entries listed past the budget: below folders
+//! WinBtrfs does, win.rs RootState), `_verify_final` (Windows: send the last query `skip_final`
+//! leaves out anyway and count what it returns, `_open_stats`), `_pinned_cap` (entries listed past the budget: below folders
 //! opened by file id, and of folders whose name another entry shares; default max(2 × max_entries,
-//! 10,000)). `ROOT_KEYS` lists the root keys this build knows.
+//! 10,000)). `ROOT_KEYS` and `OPT_KEYS` list the root and option keys this build knows.
 //!
 //! Unknown dict keys are rejected. The result is a dict with the fields of worker.SliceResult
 //! (`SliceResult(**scan_slice(tasks, opts))`). Differences from the worker, all deliberate:
@@ -36,8 +41,10 @@
 mod case;
 mod common;
 mod links;
+mod pace;
 #[cfg(unix)]
 mod posix;
+mod slots;
 mod walk;
 #[cfg(windows)]
 mod win;
@@ -49,7 +56,7 @@ use win as sys;
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicUsize;
 use std::time::{Duration, Instant};
 
@@ -59,20 +66,26 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyString, PyTuple};
 
 use common::{Arena, NativePath, RootOpts, StateOpts};
+use slots::{ListingGate, Slots};
 use walk::{Ctx, ErrRef, Node, Origin, Ref};
 
-const OPT_KEYS: [&str; 9] = [
+const OPT_KEYS: [&str; 14] = [
     "roots",
     "budget_s",
     "max_entries",
     "threads",
+    "gate",
     "keep_access_time",
     "relative_open",
+    "skip_final",
+    "dot_check",
+    "keep_where_updated",
+    "_verify_final",
     "_fold_strict",
     "_extd_self_ids",
     "_pinned_cap",
 ];
-const ROOT_KEYS: [&str; 8] = [
+const ROOT_KEYS: [&str; 9] = [
     "dev",
     "cluster_size",
     "resident_max",
@@ -81,6 +94,7 @@ const ROOT_KEYS: [&str; 8] = [
     "protect",
     "path",
     "verify_names",
+    "listed_alloc",
 ];
 
 struct Opts {
@@ -88,8 +102,13 @@ struct Opts {
     budget_s: f64,
     max_entries: usize,
     threads: usize,
+    gate: Option<Arc<Slots>>,
     keep_access_time: bool,
     relative_open: bool,
+    skip_final: bool,
+    dot_check: bool,
+    keep_where_updated: bool,
+    verify_final: bool,
     fold_strict: bool,
     extd_self_ids: bool,
     pinned_cap: Option<usize>,
@@ -155,6 +174,13 @@ fn parse_root(obj: &Bound<'_, PyAny>) -> PyResult<RootOpts> {
     if let Some(v) = field(obj, "verify_names")? {
         r.verify_names = v.is_truthy()?;
     }
+    if let Some(v) = field(obj, "listed_alloc")?
+        && !v.is_none()
+    {
+        let name: String = v.extract()?;
+        r.listed_alloc = common::listed::parse(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("unknown listed_alloc {name:?}")))?;
+    }
     Ok(r)
 }
 
@@ -178,13 +204,21 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         Some(v) if !v.is_none() => v.extract::<i64>()?.clamp(0, 256) as usize,
         _ => 0,
     };
-    let keep_access_time = match field(opts, "keep_access_time")? {
-        Some(v) if !v.is_none() => v.is_truthy()?,
-        _ => true,
+    let gate = match field(opts, "gate")? {
+        Some(v) if !v.is_none() => Some(
+            v.cast::<ListingGate>()
+                .map_err(|_| PyTypeError::new_err("gate must be a ListingGate"))?
+                .get()
+                .slots
+                .clone(),
+        ),
+        _ => None,
     };
-    let relative_open = match field(opts, "relative_open")? {
-        Some(v) if !v.is_none() => v.is_truthy()?,
-        _ => true,
+    let switch = |key: &str, default: bool| -> PyResult<bool> {
+        match field(opts, key)? {
+            Some(v) if !v.is_none() => v.is_truthy(),
+            _ => Ok(default),
+        }
     };
     let seam = |key: &str| -> PyResult<bool> {
         match field(opts, key)? {
@@ -201,8 +235,13 @@ fn parse_opts(opts: &Bound<'_, PyAny>) -> PyResult<Opts> {
         budget_s,
         max_entries,
         threads,
-        keep_access_time,
-        relative_open,
+        gate,
+        keep_access_time: switch("keep_access_time", true)?,
+        relative_open: switch("relative_open", true)?,
+        skip_final: switch("skip_final", false)?,
+        dot_check: switch("dot_check", false)?,
+        keep_where_updated: switch("keep_where_updated", true)?,
+        verify_final: seam("_verify_final")?,
         fold_strict: seam("_fold_strict")?,
         extd_self_ids: seam("_extd_self_ids")?,
         pinned_cap,
@@ -318,12 +357,20 @@ fn scan_slice<'py>(
     let started = Instant::now();
     let opts = parse_opts(opts)?;
     let tasks = parse_tasks(tasks, opts.roots.len())?;
-    let threads = if opts.threads == 0 {
-        walk::default_threads()
-    } else {
-        opts.threads
-    };
-    let pool = walk::pool(threads).map_err(PyRuntimeError::new_err)?;
+    // threads 0: the shared carriers, within the width; else a pool of the call's own
+    let pace = (opts.threads == 0).then(pace::get);
+    let pool = match pace {
+        Some(p) => {
+            for r in &opts.roots {
+                p.note_root(&r.path);
+            }
+            walk::carriers(p.capacity())
+                .or_else(|_| walk::carriers(p.widths.start))
+                .or_else(|_| walk::pool(1)) // no threads to be had: the calling thread's
+        }
+        None => walk::pool(opts.threads),
+    }
+    .map_err(PyRuntimeError::new_err)?;
     let budget_positive = !(opts.budget_s.is_nan() || opts.budget_s <= 0.0);
     let deadline = if !budget_positive {
         Some(started)
@@ -341,6 +388,10 @@ fn scan_slice<'py>(
                     keep_access_time: opts.keep_access_time,
                     relative_open: opts.relative_open,
                     verify_names: r.verify_names,
+                    skip_final: opts.skip_final,
+                    verify_final: opts.verify_final,
+                    dot_check: opts.dot_check,
+                    keep_where_updated: opts.keep_where_updated,
                     fold_strict: opts.fold_strict,
                     extd_self_ids: opts.extd_self_ids,
                 })
@@ -359,6 +410,11 @@ fn scan_slice<'py>(
         arenas: (0..pool.current_num_threads().max(1))
             .map(|_| Mutex::new(Arena::default()))
             .collect(),
+        width: pace.map(pace::Pace::slots),
+        gate: opts.gate,
+        pace,
+        running: AtomicUsize::new(0),
+        most_running: pool.current_num_threads().max(1),
     };
     let input_refs: Vec<Ref> = tasks.iter().map(|t| t.ref_).collect();
     let nodes: Vec<Node> = tasks
@@ -369,6 +425,9 @@ fn scan_slice<'py>(
     let listing = Instant::now();
     let arenas: Vec<Arena> = py.detach(|| {
         walk::walk(&pool, &nodes, &ctx);
+        if let Some(p) = pace {
+            p.after_call();
+        }
         ctx.arenas
             .into_iter()
             .map(|m| m.into_inner().unwrap_or_else(|e| e.into_inner()))
@@ -540,10 +599,42 @@ fn _open_stats(py: Python<'_>, reset: bool) -> PyResult<Bound<'_, PyDict>> {
     Ok(d)
 }
 
+/// The listing width of calls on the shared carriers (pace.rs, docs/native.md 2.2): `cpus` (the
+/// CPUs this process may use), `start` (the start width: as many calling threads as the scanner
+/// should use), `least`, `cold`, `max`, `width` now, `threads` (the carriers' pool now), `mode`
+/// ("adaptive", "fixed", "start"), and `low` / `high`, the narrowest and widest width since the
+/// last reset (`reset`: start over from the width now, after reading them).
+#[pyfunction]
+#[pyo3(signature = (reset = false))]
+fn listing_threads(py: Python<'_>, reset: bool) -> PyResult<Bound<'_, PyDict>> {
+    let p = pace::get();
+    let (low, high) = p.seen(reset);
+    let d = PyDict::new(py);
+    d.set_item("cpus", p.n_cpu)?;
+    d.set_item("start", p.widths.start)?;
+    d.set_item("least", p.widths.least)?;
+    d.set_item("cold", p.widths.cold)?;
+    d.set_item("max", p.widths.most)?;
+    d.set_item("width", p.width())?;
+    d.set_item("threads", p.capacity())?;
+    let mode = match p.mode {
+        pace::Mode::Adaptive => "adaptive",
+        pace::Mode::Fixed => "fixed",
+        pace::Mode::Start => "start",
+    };
+    d.set_item("mode", mode)?;
+    d.set_item("low", low)?;
+    d.set_item("high", high)?;
+    Ok(d)
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scan_slice, m)?)?;
+    m.add_function(wrap_pyfunction!(listing_threads, m)?)?;
+    m.add_class::<ListingGate>()?;
     // what the backend may pass per root (older builds reject keys they do not know)
     m.add("ROOT_KEYS", PyTuple::new(m.py(), ROOT_KEYS)?)?;
+    m.add("OPT_KEYS", PyTuple::new(m.py(), OPT_KEYS)?)?;
     m.add_function(wrap_pyfunction!(_open_stats, m)?)?;
     m.add_class::<links::LinkSet>()?;
     m.add_function(wrap_pyfunction!(bulk_listing, m)?)?;

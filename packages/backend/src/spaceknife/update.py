@@ -339,41 +339,55 @@ def arch(machine: str) -> str:
     return m
 
 
-def asset_template(kind: InstallKind, system: str, machine: str) -> str | None:
-    """The file name for a kind of install on a platform, ``{v}`` for the version; None: nothing is
-    published for it (a run from source, an unknown install, an architecture without builds)."""
+def asset_templates(kind: InstallKind, system: str, machine: str) -> list[str]:
+    """The file names for a kind of install on a platform, ``{v}`` for the version, the one to take
+    first first; none: nothing is published for it (a run from source, an unknown install, an
+    architecture without builds). ``machine`` is the computer's (Python reads the processor's
+    architecture on Windows, also in an emulated x64 process): a portable copy moves to the build
+    of the processor it runs on, so an x64 copy on Windows on ARM becomes the native one — and stays
+    on x64 for a release without an ARM build (Windows runs it emulated)."""
     a = arch(machine)
     x64 = a == "x64"
     match kind:
         case "nsis":
-            return "SpaceKnife-{v}-Setup-x64.exe"  # Windows on ARM runs it emulated
+            return ["SpaceKnife-{v}-Setup-x64.exe"]  # Windows on ARM runs it emulated
+        case "portable" if system == "win32" and a == "arm64":
+            return ["SpaceKnife-{v}-win-arm64-portable.zip", "SpaceKnife-{v}-win-x64-portable.zip"]
         case "portable" if system == "win32":
-            return "SpaceKnife-{v}-win-x64-portable.zip"
-        case "portable" if system.startswith("linux") and x64:
-            return "SpaceKnife-{v}-linux-x64-portable.tar.gz"
+            return ["SpaceKnife-{v}-win-x64-portable.zip"]
+        case "portable" if system.startswith("linux") and a in ("x64", "arm64"):
+            return [f"SpaceKnife-{{v}}-linux-{a}-portable.tar.gz"]
+        case "portable" if system == "darwin" and a in ("x64", "arm64"):
+            return [f"SpaceKnife-{{v}}-mac-{a}-portable.zip"]
         case "appimage" if x64:
-            return "SpaceKnife-{v}-x86_64.AppImage"
+            return ["SpaceKnife-{v}-x86_64.AppImage"]
         case "deb" if x64:
-            return "spaceknife_{v}_amd64.deb"
+            return ["spaceknife_{v}_amd64.deb"]
         case "rpm" if x64:
-            return "spaceknife-{v}.x86_64.rpm"
+            return ["spaceknife-{v}.x86_64.rpm"]
         case "dmg" if a in ("arm64", "x64"):
-            return f"SpaceKnife-{{v}}-mac-{a}.dmg"
-    return None
+            return [f"SpaceKnife-{{v}}-mac-{a}.dmg"]
+    return []
+
+
+def asset_template(kind: InstallKind, system: str, machine: str) -> str | None:
+    """The first of :func:`asset_templates`, or None."""
+    return next(iter(asset_templates(kind, system, machine)), None)
 
 
 def pick_asset(
     release: Release, kind: InstallKind, system: str | None = None, machine: str | None = None
 ) -> Asset | None:
     """The release's file for this kind of install: the exact name for its version, else one whose
-    version part the packager spelled differently. None when there is none."""
-    template = asset_template(kind, system or sys.platform, machine or platform.machine())
-    if template is None:
-        return None
-    exact = template.format(v=release.version)
-    pattern = re.compile(re.escape(template).replace(re.escape("{v}"), _V_SLOT))
-    found = [a for a in release.assets if pattern.fullmatch(a.name)]
-    return next((a for a in found if a.name == exact), found[0] if found else None)
+    version part the packager spelled differently; the first name (:func:`asset_templates`) the
+    release has. None when there is none."""
+    for template in asset_templates(kind, system or sys.platform, machine or platform.machine()):
+        exact = template.format(v=release.version)
+        pattern = re.compile(re.escape(template).replace(re.escape("{v}"), _V_SLOT))
+        found = [a for a in release.assets if pattern.fullmatch(a.name)]
+        if found:
+            return next((a for a in found if a.name == exact), found[0])
+    return None
 
 
 # ---------------------------------------------------------------- checksums
@@ -457,7 +471,11 @@ _UPDATE_NAMES = tuple(
     for name in (
         "SpaceKnife-{v}-Setup-x64.exe",
         "SpaceKnife-{v}-win-x64-portable.zip",
+        "SpaceKnife-{v}-win-arm64-portable.zip",
         "SpaceKnife-{v}-linux-x64-portable.tar.gz",
+        "SpaceKnife-{v}-linux-arm64-portable.tar.gz",
+        "SpaceKnife-{v}-mac-arm64-portable.zip",
+        "SpaceKnife-{v}-mac-x64-portable.zip",
         "SpaceKnife-{v}-x86_64.AppImage",
         "spaceknife_{v}_amd64.deb",
         "spaceknife-{v}.x86_64.rpm",
@@ -568,9 +586,24 @@ def save_state(state: UpdateState, file: Path) -> None:
 
 @functools.cache
 def ssl_context() -> ssl.SSLContext:
-    """The default context, plus the system's CA bundle where this Python's OpenSSL loaded none (a
-    bundled build looking in another distribution's folder; a hashed folder it may still find is
-    not counted, and the extra bundle does no harm)."""
+    """How the update check verifies GitHub's certificate.
+
+    Windows and macOS: by the system itself (truststore: CryptoAPI, the Security framework), so a
+    certificate the system has blocked is refused here too, as the eMudhra intermediates of October
+    2026 whose private keys could be worked out (Windows blocks them through its list of disallowed
+    certificates). OpenSSL with the system's roots loaded does not look at that list. Neither checks
+    revocation lists (measured: both accept revoked.badssl.com).
+
+    Elsewhere, and if truststore cannot be loaded: the default context, plus the system's CA bundle
+    where this Python's OpenSSL loaded none (a bundled build looking in another distribution's
+    folder; a hashed folder it may still find is not counted, and the extra bundle does no harm)."""
+    if sys.platform == "win32" or sys.platform == "darwin":
+        try:
+            import truststore
+        except ImportError as exc:
+            logger.warning("update check: no system certificate verification ({}): using OpenSSL", exc)
+        else:
+            return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx = ssl.create_default_context()
     if sys.platform != "win32" and not ctx.cert_store_stats().get("x509_ca"):
         for ca in CA_FILES:
@@ -795,6 +828,7 @@ __all__ = [
     "allowed_url",
     "app_version",
     "asset_template",
+    "asset_templates",
     "checksum_files",
     "choose",
     "clean_updates",

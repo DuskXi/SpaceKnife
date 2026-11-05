@@ -27,7 +27,7 @@ from spaceknife_protocol.methods import (
 from spaceknife_protocol.scan import ClassStat
 
 from .test_disks import nvme_log
-from .test_scan_server import wait_done
+from .test_scan_server import finished, wait_done
 from .tree_fixture import build_tree
 
 
@@ -54,6 +54,7 @@ async def test_what_a_scan_and_a_snapshot_tell(
     root = str(facts.root)
     started = await client.call(SCAN_START, p.ScanStartParams(roots=[root]))
     status = await wait_done(client, started.scan_id)
+    await finished(server, started.scan_id)
     # let the scanned folder stand in for a whole volume
     key = os.path.normcase(os.path.normpath(root))
     monkeypatch.setattr(machine_handlers, "_whole_root", lambda h: key if h.id == started.scan_id else None)

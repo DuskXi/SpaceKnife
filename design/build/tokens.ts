@@ -30,6 +30,10 @@ export const tokens = {
     "meter": {
       "used": "#5A5F6B"
     },
+    "scroll": {
+      "thumb": "#454A55",
+      "thumbHover": "#6B707C"
+    },
     "shadow": "#000000B3",
     "status": {
       "danger": "#FF6B6B",
@@ -433,6 +437,10 @@ export const themes: Readonly<Record<ThemeName, Theme>> = {
       "meter": {
         "used": "#868A91"
       },
+      "scroll": {
+        "thumb": "#A0A5AF",
+        "thumbHover": "#7E838E"
+      },
       "shadow": "#12161F57",
       "status": {
         "danger": "#A9212C",
@@ -811,6 +819,8 @@ export const cssVar = {
   "color.line.subtle": "var(--sk-color-line-subtle)",
   "color.line.swatch": "var(--sk-color-line-swatch)",
   "color.meter.used": "var(--sk-color-meter-used)",
+  "color.scroll.thumb": "var(--sk-color-scroll-thumb)",
+  "color.scroll.thumbHover": "var(--sk-color-scroll-thumb-hover)",
   "color.shadow": "var(--sk-color-shadow)",
   "color.status.danger": "var(--sk-color-status-danger)",
   "color.status.growth": "var(--sk-color-status-growth)",

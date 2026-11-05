@@ -323,12 +323,16 @@ ALL_ASSETS = (
     "SpaceKnife-0.4.0-Setup-x64.exe",
     "SpaceKnife-0.4.0-Setup-x64.exe.blockmap",
     "SpaceKnife-0.4.0-win-x64-portable.zip",
+    "SpaceKnife-0.4.0-win-arm64-portable.zip",
     "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
+    "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
     "SpaceKnife-0.4.0-x86_64.AppImage",
     "spaceknife_0.4.0_amd64.deb",
     "spaceknife-0.4.0.x86_64.rpm",
     "SpaceKnife-0.4.0-mac-arm64.dmg",
     "SpaceKnife-0.4.0-mac-x64.dmg",
+    "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+    "SpaceKnife-0.4.0-mac-x64-portable.zip",
     "latest.yml",
     "SHA256SUMS.txt",
     "SHA256SUMS-mac-arm64.txt",
@@ -343,8 +347,10 @@ ALL_ASSETS = (
         ("nsis", "win32", "ARM64", "SpaceKnife-0.4.0-Setup-x64.exe"),
         ("portable", "win32", "AMD64", "SpaceKnife-0.4.0-win-x64-portable.zip"),
         ("portable", "linux", "x86_64", "SpaceKnife-0.4.0-linux-x64-portable.tar.gz"),
-        ("portable", "linux", "aarch64", None),
-        ("portable", "darwin", "arm64", None),  # a macOS app is portable already
+        ("portable", "win32", "ARM64", "SpaceKnife-0.4.0-win-arm64-portable.zip"),
+        ("portable", "linux", "aarch64", "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"),
+        ("portable", "darwin", "arm64", "SpaceKnife-0.4.0-mac-arm64-portable.zip"),
+        ("portable", "darwin", "x86_64", "SpaceKnife-0.4.0-mac-x64-portable.zip"),
         ("appimage", "linux", "x86_64", "SpaceKnife-0.4.0-x86_64.AppImage"),
         ("appimage", "linux", "aarch64", None),
         ("deb", "linux", "x86_64", "spaceknife_0.4.0_amd64.deb"),
@@ -358,6 +364,25 @@ ALL_ASSETS = (
 def test_pick_asset(kind: InstallKind, system: str, machine: str, name: str | None) -> None:
     got = update.pick_asset(release("0.4.0", *ALL_ASSETS), kind, system, machine)
     assert (got.name if got else None) == name
+
+
+def test_a_portable_copy_on_windows_on_arm_keeps_the_x64_build_without_an_arm_one() -> None:
+    # a release before the ARM builds (or one whose ARM build failed): Windows runs x64 emulated
+    r = release(
+        "0.4.0", "SpaceKnife-0.4.0-win-x64-portable.zip", "SpaceKnife-0.4.0-linux-x64-portable.tar.gz"
+    )
+    got = update.pick_asset(r, "portable", "win32", "ARM64")
+    assert got is not None and got.name == "SpaceKnife-0.4.0-win-x64-portable.zip"
+    assert update.pick_asset(r, "portable", "linux", "aarch64") is None  # Linux runs no x64 on ARM
+
+
+def test_the_arm_portable_files_are_update_files() -> None:
+    for name in (
+        "SpaceKnife-0.4.0-win-arm64-portable.zip",
+        "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+        "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+    ):
+        assert str(update.update_file_version(name)) == "0.4.0"
 
 
 def test_pick_asset_tolerates_the_packagers_spelling() -> None:
@@ -693,3 +718,24 @@ def test_palette_commands() -> None:
     assert evaluate(show, Context(tab="settings", update_version="0.4.0")) == (True, "0.4.0")
     about = by_id["app.about"]
     assert evaluate(about, Context(tab="scan", app_version="0.3.3")) == (True, "0.3.3")
+
+
+def test_the_update_check_verifies_certificates_through_the_system() -> None:
+    """Windows and macOS: truststore, the system's own verification (with the certificates it has
+    blocked); elsewhere OpenSSL with the system's bundle. Either way verified, by name."""
+    import ssl
+    import sys
+
+    update.ssl_context.cache_clear()
+    try:
+        ctx = update.ssl_context()
+        if sys.platform == "win32" or sys.platform == "darwin":
+            import truststore
+
+            assert isinstance(ctx, truststore.SSLContext)
+        else:
+            assert type(ctx) is ssl.SSLContext
+        assert ctx.verify_mode == ssl.CERT_REQUIRED
+        assert ctx.check_hostname
+    finally:
+        update.ssl_context.cache_clear()

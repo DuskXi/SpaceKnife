@@ -15,17 +15,17 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import os
 import threading
 from collections.abc import Callable, Hashable
 from concurrent.futures import ThreadPoolExecutor
 
 from spaceknife_protocol.errors import ErrorCode
 
+from ..cpus import usable_cpus
 from ..store.lock import STRUCTURE
 from .rpc import RpcError
 
-WORKERS = max(2, min(4, (os.cpu_count() or 4) // 2))
+WORKERS = max(2, min(4, usable_cpus() // 2))
 
 _pool: ThreadPoolExecutor | None = None
 _pool_lock = threading.Lock()

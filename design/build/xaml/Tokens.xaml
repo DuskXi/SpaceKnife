@@ -42,6 +42,10 @@
             <SolidColorBrush x:Key="SkColorLineSwatchBrush" Color="#00000000"/>
             <Color x:Key="SkColorMeterUsed">#FF5A5F6B</Color>
             <SolidColorBrush x:Key="SkColorMeterUsedBrush" Color="#FF5A5F6B"/>
+            <Color x:Key="SkColorScrollThumb">#FF454A55</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbBrush" Color="#FF454A55"/>
+            <Color x:Key="SkColorScrollThumbHover">#FF6B707C</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbHoverBrush" Color="#FF6B707C"/>
             <Color x:Key="SkColorShadow">#B3000000</Color>
             <SolidColorBrush x:Key="SkColorShadowBrush" Color="#B3000000"/>
             <Color x:Key="SkColorStatusDanger">#FFFF6B6B</Color>
@@ -309,6 +313,10 @@
             <SolidColorBrush x:Key="SkColorLineSwatchBrush" Color="#26161920"/>
             <Color x:Key="SkColorMeterUsed">#FF868A91</Color>
             <SolidColorBrush x:Key="SkColorMeterUsedBrush" Color="#FF868A91"/>
+            <Color x:Key="SkColorScrollThumb">#FFA0A5AF</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbBrush" Color="#FFA0A5AF"/>
+            <Color x:Key="SkColorScrollThumbHover">#FF7E838E</Color>
+            <SolidColorBrush x:Key="SkColorScrollThumbHoverBrush" Color="#FF7E838E"/>
             <Color x:Key="SkColorShadow">#5712161F</Color>
             <SolidColorBrush x:Key="SkColorShadowBrush" Color="#5712161F"/>
             <Color x:Key="SkColorStatusDanger">#FFA9212C</Color>

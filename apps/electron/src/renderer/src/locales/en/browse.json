@@ -255,5 +255,7 @@
  "这个文件夹只按扩展名归类": "This folder is classed by extension only",
  "这个文件夹的文件都算作「{name}」": "Everything in this folder counts as {name}",
  "更多": "More",
- "显示": "Show"
+ "显示": "Show",
+ "详情没能读出": "Couldn't read the details",
+ "部分信息没能读出": "Some details couldn't be read"
 }

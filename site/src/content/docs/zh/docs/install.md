@@ -11,14 +11,17 @@ SpaceKnife 发布在 [Releases 页面](https://github.com/DuskXi/SpaceKnife/rele
 |---|---|---|
 | Windows 10 及以上，x64 | `SpaceKnife-<版本>-Setup-x64.exe` | 安装包，可装给当前用户或所有用户 |
 | Windows 10 及以上，x64 | `SpaceKnife-<版本>-win-x64-portable.zip` | 便携版：解压即用，不用安装 |
+| Windows 11 ARM 版 | `SpaceKnife-<版本>-win-arm64-portable.zip` | 便携版，ARM（arm64） |
 | macOS 14 及以上，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg` | 磁盘映像 |
 | macOS 14 及以上，Intel | `SpaceKnife-<版本>-mac-x64.dmg` | 磁盘映像 |
+| macOS 14 及以上 | `SpaceKnife-<版本>-mac-<arm64 或 x64>-portable.zip` | 便携版：解压即用，数据在程序旁边 |
 | Ubuntu 22.04 及以上 / Debian 系 | `spaceknife_<版本>_amd64.deb` | 软件包 |
 | RHEL 9 及以上 / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` | 软件包 |
 | 其他 Linux，x64 | `SpaceKnife-<版本>-x86_64.AppImage` | 单个文件，需要 FUSE 2 |
 | Linux，x64 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz` | 便携版：解压即用，不需要 FUSE |
+| Linux，ARM（arm64） | `SpaceKnife-<版本>-linux-arm64-portable.tar.gz` | 便携版，ARM |
 
-Windows 和 Linux 只有 x64 版本，没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）。
+ARM 上的 Windows 和 Linux 有便携版；安装包和软件包只有 x64（ARM 版 Windows 也能模拟运行 x64 安装包）。没有 32 位 Windows 版。Linux 版需要 glibc 2.34 及以上（RHEL 9 的水平；Ubuntu 22.04 是 2.35）。
 
 ### 校验下载的文件
 
@@ -71,6 +74,10 @@ shasum -a 256 SpaceKnife-<版本>-mac-arm64.dmg
 ### 安装
 
 打开 dmg，把 SpaceKnife 拖进「应用程序」。需要 macOS 14 及以上；Apple Silicon 用 `arm64` 的 dmg，Intel 的 Mac 用 `x64` 的 dmg。
+
+### 便携版 zip
+
+把 `SpaceKnife-<版本>-mac-arm64-portable.zip`（Apple Silicon）或 `…-mac-x64-portable.zip`（Intel）解压到自己能写入的位置，比如用户目录或 U 盘。解出的文件夹里是 `SpaceKnife.app` 和一个 `data` 文件夹，两者放在一起，打开 `SpaceKnife.app` 即可。所有东西都存在 `data` 里，不写进你的「资源库」（见[便携模式](../data-locations/#便携模式)）。第一次打开和 dmg 一样要放行一次（见下文），放行的是这个文件夹里的应用。
 
 ### 第一次打开：放行一次
 

@@ -98,7 +98,7 @@ def subtree_chunks(store: NodeStore, node: int, chunk: int = SUMMARY_CHUNK) -> I
                 todo.append(dirs)
 
 
-def _largest(ids: np.ndarray, alloc: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
+def largest(ids: np.ndarray, alloc: np.ndarray, k: int) -> tuple[np.ndarray, np.ndarray]:
     """The ``k`` largest by ``alloc``, largest first; of equal sizes the smaller id first."""
     if ids.size > k:
         if k <= 0:
@@ -166,7 +166,7 @@ def summarize(
         if not files.size:
             continue
         alloc = c["alloc"][files].astype(np.int64)
-        best, best_alloc = _largest(np.concatenate([best, files]), np.concatenate([best_alloc, alloc]), top)
+        best, best_alloc = largest(np.concatenate([best, files]), np.concatenate([best_alloc, alloc]), top)
         cls = cls_of(files)
         # float sums of whole byte counts stay exact below 2**53 (8 PiB) per piece and class
         class_bytes += np.bincount(cls, weights=alloc, minlength=n_classes).astype(np.int64)

@@ -37,6 +37,7 @@ impl LinkSet {
     /// HARDLINK_DUP in `flags`; the first one is remembered. Returns how many were marked.
     fn mark(
         &mut self,
+        py: Python<'_>,
         dev: PyReadonlyArray1<'_, u64>,
         ino: PyReadonlyArray1<'_, u64>,
         nlink: PyReadonlyArray1<'_, u16>,
@@ -55,14 +56,18 @@ impl LinkSet {
         {
             return Err(PyValueError::new_err("columns differ in length"));
         }
-        let mut marked = 0;
-        for i in 0..n {
-            if nlink[i] > 1 && kind[i] == KIND_FILE && !self.seen.insert((dev[i], ino[i])) {
-                flags[i] |= HARDLINK_DUP;
-                marked += 1;
+        // the slice's own arrays (borrowed above), so the listing threads may go on meanwhile
+        let seen = &mut self.seen;
+        Ok(py.detach(move || {
+            let mut marked = 0;
+            for i in 0..n {
+                if nlink[i] > 1 && kind[i] == KIND_FILE && !seen.insert((dev[i], ino[i])) {
+                    flags[i] |= HARDLINK_DUP;
+                    marked += 1;
+                }
             }
-        }
-        Ok(marked)
+            marked
+        }))
     }
 
     fn __len__(&self) -> usize {

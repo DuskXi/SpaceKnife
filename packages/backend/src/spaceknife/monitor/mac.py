@@ -228,8 +228,8 @@ class FsEventsWatcher:
         self._thread.start()
         self._started.wait(1.0)
 
-    def add_dirs(self, dirs: Iterable[str]) -> None:
-        pass  # recursive stream
+    def add_dirs(self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0) -> None:
+        pass  # recursive stream, from the scan's start
 
     def stop(self) -> None:
         with self._lock:

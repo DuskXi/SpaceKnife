@@ -11,7 +11,8 @@ import { patchView, setting, type Tab, toast, useApp } from "@/state/store";
 import { diffColor, diffTiers, growColors, maxChange, shrinkColors, type Tiers } from "@/lib/diff";
 import { fmtDelta, fmtInt, fmtSize, plural, sizeParts } from "@/lib/format";
 import { byLang, t } from "@/lib/i18n";
-import { cardAvoid, hoverFacts, sameTarget } from "@/shell/HoverCard";
+import { cardAvoid, hoverFacts } from "@/shell/HoverCard";
+import { sameTarget } from "@/visual/hover";
 import { Kind } from "@/visual/frame";
 import { componentFor } from "@/visual/registry";
 import type { HoverInfo } from "@/visual/types";
@@ -479,7 +480,9 @@ const HOVER_DELAY = 250;
 /** UI-W6-20…22: both sizes, the change in percent, and the children that changed most. */
 export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; bounds: { w: number; h: number } }) {
   const [shown, setShown] = useState<HoverInfo | null>(null);
-  const [info, setInfo] = useState<CompareNodeResult | null>(null);
+  // the change's details and the key they are of
+  const [held, setHeld] = useState<{ key: number; r: CompareNodeResult } | null>(null);
+  const info = held?.r ?? null;
   const target = useApp((s) => {
     const t = s.tabs.find((x) => x.compare?.viewId === hover?.viewId);
     return t?.compare?.info?.target ?? null;
@@ -497,23 +500,26 @@ export function CompareHoverCard({ hover, bounds }: { hover: HoverInfo | null; b
     return () => clearTimeout(timer);
   }, [hover, shown, keepOpen]);
 
-  // the change's details, once per target (not per pointer move)
+  // the change's details, once per target (not per pointer move); a new picture of a live
+  // comparison asks again and the card keeps what it shows until the answer comes
   const viewId = shown?.viewId ?? null;
-  const frame = shown?.frame ?? null;
-  const targetHit = shown?.target ?? null;
+  const facts0 = shown ? hoverFacts(shown.frame, shown.target, null) : null;
+  const key = facts0 && facts0.kind !== Kind.FREE && facts0.kind !== Kind.UNKNOWN ? facts0.key : null;
+  const seq = shown?.frame.info.seq ?? 0;
   useEffect(() => {
-    setInfo(null);
-    if (!viewId || !frame || targetHit === null) return;
-    const { kind, key } = hoverFacts(frame, targetHit, null);
-    if (kind === Kind.FREE || kind === Kind.UNKNOWN) return;
+    if (!viewId || key === null) {
+      setHeld(null);
+      return;
+    }
+    setHeld((cur) => (cur && cur.key === key ? cur : null));
     let alive = true;
     void call("compare.node", { view_id: viewId, key, children: 4 })
-      .then((r) => alive && setInfo(r))
+      .then((r) => alive && setHeld({ key, r }))
       .catch(() => undefined);
     return () => {
       alive = false;
     };
-  }, [viewId, frame, targetHit]);
+  }, [viewId, key, seq]);
 
   useLayoutEffect(() => {
     if (!shown || !card.current) return;

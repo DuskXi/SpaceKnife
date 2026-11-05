@@ -92,6 +92,9 @@ def _live_full(server: Server, handle: ScanHandle) -> tuple[m.VolumeScan, list[C
     if not running:
         node = handle.roots[0].node
         summary = summary_of(server, handle, node, 0)
+        gap = next((g for g in summary.gaps if g.part in ("contents", "classes")), None)
+        if gap is not None:  # never show (or keep) partial class totals as the volume's make-up
+            raise RuntimeError(gap.reason)
         every = [c for c in summary.classes if c.bytes > 0]
         store = handle.store
         kids = store.sorted_children(node, "size")

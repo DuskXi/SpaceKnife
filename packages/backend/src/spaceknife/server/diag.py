@@ -1,5 +1,8 @@
 """Memory watchdog: when the backend holds far more than its scans account for, say what holds it.
 
+While no scan runs, the C heap is also trimmed every ``PERIOD`` seconds once the process grew by
+:data:`TRIM_GROWTH` since the last trim (glibc only: ``memory.trim``, docs/memory.md §8).
+
 Every ``PERIOD`` seconds the private memory of the process is compared with what the scans need
 (node stores and name indexes). Beyond ``2 × accounted + 1.5 GiB`` — plus the size of the largest
 scan closed in the last hour, which the C heap keeps for the next scan to reuse (docs/memory.md
@@ -23,7 +26,7 @@ from loguru import logger
 from ..events import emit
 from ..filter.names import existing_index
 from ..i18n import tr
-from ..memory import process_memory, release
+from ..memory import process_memory, release, trim
 from . import compute
 from .scans import CLOSED_KEEP_S
 
@@ -33,6 +36,7 @@ if TYPE_CHECKING:
 PERIOD = 15.0
 SLACK = 3 << 29  # 1.5 GiB
 GiB = float(1 << 30)
+TRIM_GROWTH = 32 << 20  # idle: the C heap is trimmed once private memory grew by this much
 
 
 def accounted(server: Server) -> int:
@@ -84,14 +88,27 @@ def report(server: Server) -> str:
     return "\n".join(lines)
 
 
+def idle(server: Server) -> bool:
+    """No scan is running."""
+    return not any(handle.running for handle in list(server.scans.scans.values()))
+
+
 async def watch(server: Server) -> None:
     last = 0
+    trimmed: int | None = None  # private memory after the last trim
     while True:
         await asyncio.sleep(PERIOD)
         try:
             private = process_memory().private
             if private is None:
                 continue
+            if idle(server) and (trimmed is None or private > trimmed + TRIM_GROWTH):
+                # glibc keeps freed pages in its arenas: give them back while nothing runs
+                await asyncio.to_thread(trim)
+                private = process_memory().private or private
+                trimmed = private
+            elif trimmed is not None:
+                trimmed = min(trimmed, private)  # growth counts from the lowest point since
             limit = 2 * accounted(server) + SLACK + retained(server)
             if private <= limit or private <= last * 1.25:
                 continue
@@ -126,4 +143,4 @@ def install(server: Server) -> None:
     server.on_start.append(start)
 
 
-__all__ = ["accounted", "install", "report", "watch"]
+__all__ = ["accounted", "idle", "install", "report", "watch"]

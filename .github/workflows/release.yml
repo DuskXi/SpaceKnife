@@ -1,0 +1,221 @@
+name: Release
+
+# Publishes a release from CI: no file goes through anyone's computer (docs/packaging.md「发布」).
+# A signed tag vX.Y.Z on GitHub (signed locally: CI never holds the key) builds every file from that
+# tag with the Portable and macOS build workflows, each attesting where its files were built;
+# tools/release.py then checks every checksum and that exactly the release's files are there,
+# merges the installer checksums into SHA256SUMS.txt, and fills the notes in
+# release-notes/X.Y.Z.md (sizes, links to the build runs); the release is created as a draft
+# (published at once only when asked), and a published one is read back the way SpaceKnife reads it.
+# Run by hand (Actions › Release › Run workflow) for a tag already on GitHub; there it can also take
+# the files of earlier Portable (with installers) and macOS build runs of the same tree instead of
+# building again, and dry_run stops before the release is created.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to release (vX.Y.Z), already on GitHub
+        required: true
+        type: string
+      portable_run:
+        description: Take the files of this Portable build run (built with installers) instead of building
+        type: string
+        default: ""
+      macos_run:
+        description: Take the files of this macOS build run instead of building
+        type: string
+        default: ""
+      publish:
+        description: Publish at once (otherwise the release stays a draft)
+        type: boolean
+        default: false
+      dry_run:
+        description: Check and assemble only, create no release
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check the tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
+      reuse: ${{ steps.tag.outputs.reuse }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: The tag, the version, the notes and the runs to reuse
+        id: tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          PORTABLE_RUN: ${{ inputs.portable_run }}
+          MACOS_RUN: ${{ inputs.macos_run }}
+        run: |
+          set -euo pipefail
+          fail() { echo "::error::$*"; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || fail "$TAG is not vX.Y.Z"
+          version=${TAG#v}
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG" main
+          # an annotated tag whose signature GitHub verifies against the maintainer's key
+          [ "$(git cat-file -t "refs/tags/$TAG")" = tag ] || fail "$TAG is not an annotated tag"
+          verified=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$(git rev-parse "refs/tags/$TAG")" --jq .verification.verified)
+          [ "$verified" = true ] || fail "GitHub does not verify the signature of $TAG"
+          # what is released is what main holds
+          git diff --quiet "$TAG" origin/main || fail "$TAG has other files than main"
+          app=$(git show "$TAG:apps/electron/package.json" | jq -r .version)
+          [ "$app" = "$version" ] || fail "the app at $TAG is version $app, not $version"
+          [ -f "release-notes/$version.md" ] || fail "no release-notes/$version.md here ($GITHUB_REF)"
+          gh release view "$TAG" >/dev/null 2>&1 && fail "a release $TAG exists already"
+          reuse=false
+          if [ -n "$PORTABLE_RUN$MACOS_RUN" ]; then
+            [ -n "$PORTABLE_RUN" ] && [ -n "$MACOS_RUN" ] || fail "give both runs to reuse, or none"
+            tree=$(git rev-parse "$TAG^{tree}")
+            for pair in "$PORTABLE_RUN:Portable build" "$MACOS_RUN:macOS build"; do
+              id=${pair%%:*}; want=${pair#*:}
+              IFS=$'\t' read -r name conclusion sha < <(gh run view "$id" --json workflowName,conclusion,headSha \
+                --jq '[.workflowName, .conclusion, .headSha] | @tsv')
+              [ "$name" = "$want" ] || fail "run $id is \"$name\", not \"$want\""
+              [ "$conclusion" = success ] || fail "run $id ended with $conclusion"
+              git fetch --quiet origin "$sha"
+              [ "$(git rev-parse "$sha^{tree}")" = "$tree" ] || fail "run $id built $sha, whose files differ from $TAG"
+            done
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PORTABLE_RUN/artifacts" --jq '.artifacts[].name' \
+              | grep -qx SpaceKnife-installers-win-x64 || fail "run $PORTABLE_RUN did not build the installers"
+            reuse=true
+          fi
+          { echo "tag=$TAG"; echo "version=$version"; echo "reuse=$reuse"; } >> "$GITHUB_OUTPUT"
+          echo "### $TAG: version $version, tree as main, files $([ "$reuse" = true ] && echo "from runs $PORTABLE_RUN and $MACOS_RUN" || echo "built now")" >> "$GITHUB_STEP_SUMMARY"
+
+  portable:
+    name: Portable build
+    needs: check
+    if: needs.check.outputs.reuse != 'true'
+    uses: ./.github/workflows/portable.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      installers: true
+      ref: ${{ needs.check.outputs.tag }}
+      attest: true
+
+  macos:
+    name: macOS build
+    needs: check
+    if: needs.check.outputs.reuse != 'true'
+    uses: ./.github/workflows/macos.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      ref: ${{ needs.check.outputs.tag }}
+      attest: true
+
+  publish:
+    name: Assemble and publish
+    needs: [check, portable, macos]
+    if: >-
+      !cancelled() && needs.check.result == 'success' &&
+      (needs.check.outputs.reuse == 'true' || (needs.portable.result == 'success' && needs.macos.result == 'success'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.check.outputs.tag }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0 # exact version: this action publishes no moving major tag
+
+      - name: Install Python 3.12 and the tools
+        run: |
+          uv python install 3.12
+          uv sync --locked
+
+      - name: The files of this run
+        if: needs.check.outputs.reuse != 'true'
+        uses: actions/download-artifact@v7
+        with:
+          pattern: SpaceKnife-*
+          path: artifacts
+
+      - name: The files of the given runs
+        if: needs.check.outputs.reuse == 'true'
+        run: |
+          gh run download "${{ inputs.portable_run }}" --dir artifacts
+          gh run download "${{ inputs.macos_run }}" --dir artifacts
+
+      - name: Check and assemble
+        run: |
+          set -euo pipefail
+          base="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs"
+          if [ "${{ needs.check.outputs.reuse }}" = true ]; then
+            runs=(--build-run "$base/${{ inputs.portable_run }}" --build-run "$base/${{ inputs.macos_run }}")
+          else
+            runs=(--build-run "$base/$GITHUB_RUN_ID")
+          fi
+          COLUMNS=160 uv run python tools/release.py assemble "$VERSION" artifacts release \
+            --notes "release-notes/$VERSION.md" --notes-out notes.md "${runs[@]}"
+          cp notes.md release-notes-filled.md
+
+      - name: Keep what would be published
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ needs.check.outputs.version }}
+          path: |
+            release/*
+            release-notes-filled.md
+          retention-days: 14
+
+      - name: Create the release
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          flags=(--verify-tag --title "SpaceKnife $VERSION" --notes-file notes.md)
+          # every 0.x version and every version with a pre-release part is a pre-release
+          if [[ "$VERSION" == 0.* || "$VERSION" == *-* ]]; then flags+=(--prerelease); fi
+          if [ "${{ inputs.publish }}" != true ]; then flags+=(--draft); fi
+          gh release create "$TAG" "${flags[@]}" release/*
+          gh release view "$TAG" --json url,isDraft --jq '"release: \(.url) (draft: \(.isDraft))"' | tee -a "$GITHUB_STEP_SUMMARY"
+
+  read-back:
+    name: Read the release as SpaceKnife does
+    needs: [check, publish]
+    if: ${{ inputs.publish && !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Install Python 3.12 and the backend
+        run: |
+          uv python install 3.12
+          uv sync --locked
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-${{ needs.check.outputs.version }}
+          path: assembled
+
+      - name: Every kind of install finds its file and checksum
+        run: COLUMNS=160 uv run python tools/release.py check "${{ needs.check.outputs.version }}" --sums assembled/release --download

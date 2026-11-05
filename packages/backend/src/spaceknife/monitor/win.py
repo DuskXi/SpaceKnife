@@ -23,7 +23,7 @@ import struct
 import sys
 import threading
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Any
@@ -381,8 +381,8 @@ class RdcwWatcher:
             self._thread = threading.Thread(target=self._run, name=f"rdcw {self.root}", daemon=True)
             self._thread.start()
 
-    def add_dirs(self, dirs: Iterable[str]) -> None:
-        """Recursive watch: every folder below the root is covered already."""
+    def add_dirs(self, dirs: Iterable[str], mtimes: Sequence[int] | None = None, since_ns: int = 0) -> None:
+        """Recursive watch: every folder below the root is covered already (from the scan's start)."""
 
     def stop(self) -> None:
         with self._lock:

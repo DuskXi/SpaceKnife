@@ -37,7 +37,8 @@ use std::sync::{Arc, OnceLock};
 
 use windows_sys::Wdk::Foundation::{NtClose, NtQueryObject, OBJECT_ATTRIBUTES, OBJECT_NAME_INFORMATION};
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE,
+    FILE_BASIC_INFORMATION, FILE_BOTH_DIR_INFORMATION, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE,
+    FILE_STANDARD_INFORMATION, FILE_STAT_INFORMATION, FileStandardInformation, FileStatInformation,
     FILE_FS_ATTRIBUTE_INFORMATION, FILE_ID_BOTH_DIR_INFORMATION, FILE_ID_EXTD_DIR_INFORMATION, FILE_ID_INFORMATION,
     FILE_INFORMATION_CLASS, FILE_INTERNAL_INFORMATION, FILE_NAME_INFORMATION, FILE_OPEN_BY_FILE_ID,
     FILE_OPEN_FOR_BACKUP_INTENT, FILE_OPEN_REPARSE_POINT, FILE_SYNCHRONOUS_IO_NONALERT,
@@ -51,23 +52,25 @@ use windows_sys::Wdk::System::SystemServices::{
     FILE_FS_DEVICE_INFORMATION, FILE_REMOTE_DEVICE, RtlUpcaseUnicodeChar,
 };
 use windows_sys::Win32::Foundation::{
-    ERROR_FILENAME_EXCED_RANGE, ERROR_PATH_NOT_FOUND, GetLastError, HANDLE, NTSTATUS,
+    ERROR_FILENAME_EXCED_RANGE, ERROR_PATH_NOT_FOUND, ERROR_SUCCESS, GetLastError, HANDLE, NTSTATUS,
     OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, STATUS_INVALID_DEVICE_REQUEST,
     STATUS_INVALID_INFO_CLASS, STATUS_INVALID_LEVEL, STATUS_INVALID_PARAMETER,
     STATUS_NO_MORE_FILES, STATUS_NO_SUCH_FILE, STATUS_NOT_IMPLEMENTED, STATUS_NOT_SUPPORTED,
     STATUS_OBJECT_NAME_NOT_FOUND, SetLastError, UNICODE_STRING,
 };
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_LIST_DIRECTORY, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     FILE_WRITE_ATTRIBUTES, GetCompressedFileSizeW, GetFullPathNameW, SYNCHRONIZE,
 };
+use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::System::Diagnostics::Debug::{
     FORMAT_MESSAGE_FROM_SYSTEM, FORMAT_MESSAGE_IGNORE_INSERTS, FormatMessageW,
 };
+use windows_sys::Win32::System::Registry::{HKEY_LOCAL_MACHINE, RRF_RT_REG_DWORD, RegGetValueW};
 use windows_sys::Win32::System::IO::IO_STATUS_BLOCK;
 
 use super::case::{self, CaseKey, Class, First, Outcome, Then, fs, mark, msg};
-use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, secs};
+use super::common::{Arena, NativePath, RootOpts, Row, StateOpts, ext_len_with, flag, kind, listed, secs};
 
 const FA_READONLY: u32 = 0x1;
 const FA_HIDDEN: u32 = 0x2;
@@ -143,6 +146,24 @@ pub struct RootState {
     verify_names: AtomicBool,
     /// The scan root's own stored name, read once per call for `check_task` (None: unreadable).
     root_name: OnceLock<Option<Box<[u16]>>>,
+    /// Leave out the last query of a listing whose buffer had room for another entry, on local
+    /// NTFS, ReFS and Btrfs (`skips_final`); with `verify_final` send it anyway and count it.
+    skip_final: bool,
+    verify_final: bool,
+    /// `skip_final` checks itself: the first FINAL_CHECKED listings of the root in this call that
+    /// could leave the query out, then one in FINAL_CHECKED, send it anyway; one that returns
+    /// entries turns it off for the root (`final_ok`).
+    final_ok: AtomicBool,
+    final_seen: AtomicU32,
+    /// Check a relative open by the file id of the "." entry its listing starts with, before
+    /// querying the handle for it (`list_dir`).
+    dot_check: bool,
+    /// Ask for FILE_WRITE_ATTRIBUTES only where the file system updates access times
+    /// (`atime_updated`; learnt with the file system on the root's first open by path).
+    keep_where_updated: bool,
+    /// Files are asked their allocation by NtQueryInformationByName (`ask_alloc`); cleared on the
+    /// root once the system or its file system does not know the call or FileStatInformation.
+    by_name: AtomicBool,
     /// Test seams (private options; docs/native.md 2.2): strict subfolders are opened by their
     /// upcased name (in a case-sensitive NTFS folder that reaches the upper twin, as WinBtrfs's
     /// lookup does), and FileIdExtd listings give every entry the listed folder's own id (as
@@ -168,6 +189,13 @@ impl RootState {
             fs: AtomicU8::new(fs::UNKNOWN),
             verify_names: AtomicBool::new(o.verify_names),
             root_name: OnceLock::new(),
+            skip_final: o.skip_final,
+            verify_final: o.verify_final,
+            final_ok: AtomicBool::new(true),
+            final_seen: AtomicU32::new(0),
+            dot_check: o.dot_check,
+            keep_where_updated: o.keep_where_updated,
+            by_name: AtomicBool::new(true),
             fold_strict: o.fold_strict,
             extd_self_ids: o.extd_self_ids,
         }
@@ -225,6 +253,24 @@ pub struct OpenStats {
     /// (a listing error).
     pub btrfs_size_mismatch: AtomicU64,
     pub by_id_incomplete: AtomicU64,
+    /// Listings whose last query was left out (`skip_final`); with `_verify_final`, those sent
+    /// anyway that found nothing more, and those that still returned entries (expected: 0).
+    pub final_skipped: AtomicU64,
+    pub final_verified: AtomicU64,
+    pub final_wrong: AtomicU64,
+    /// Relative opens checked by their listing's "." entry, and those it could not settle ("."
+    /// missing, or with another id or width): checked by querying the handle then.
+    pub dot_matched: AtomicU64,
+    pub dot_unmatched: AtomicU64,
+    /// Roots (per call) whose file system does not update access times by the system's setting:
+    /// no FILE_WRITE_ATTRIBUTES there (`keep_where_updated`).
+    pub keep_off: AtomicU64,
+    /// Files whose listing entry gave no reliable allocation (`listed_alloc`), asked by name;
+    /// of them, those asked through a handle (no NtQueryInformationByName here), and those that
+    /// could not be asked (the listed value stands).
+    pub alloc_asked: AtomicU64,
+    pub alloc_ask_opened: AtomicU64,
+    pub alloc_ask_failed: AtomicU64,
 }
 
 pub static STATS: OpenStats = OpenStats {
@@ -247,6 +293,15 @@ pub static STATS: OpenStats = OpenStats {
     task_name_unknown: AtomicU64::new(0),
     btrfs_size_mismatch: AtomicU64::new(0),
     by_id_incomplete: AtomicU64::new(0),
+    final_skipped: AtomicU64::new(0),
+    final_verified: AtomicU64::new(0),
+    final_wrong: AtomicU64::new(0),
+    dot_matched: AtomicU64::new(0),
+    dot_unmatched: AtomicU64::new(0),
+    keep_off: AtomicU64::new(0),
+    alloc_asked: AtomicU64::new(0),
+    alloc_ask_opened: AtomicU64::new(0),
+    alloc_ask_failed: AtomicU64::new(0),
 };
 
 fn bump(c: &AtomicU64) {
@@ -282,6 +337,15 @@ pub fn open_stats(reset: bool) -> Vec<(&'static str, u64)> {
         ("task_name_unknown", get(&s.task_name_unknown)),
         ("btrfs_size_mismatch", get(&s.btrfs_size_mismatch)),
         ("by_id_incomplete", get(&s.by_id_incomplete)),
+        ("final_skipped", get(&s.final_skipped)),
+        ("final_verified", get(&s.final_verified)),
+        ("final_wrong", get(&s.final_wrong)),
+        ("dot_matched", get(&s.dot_matched)),
+        ("dot_unmatched", get(&s.dot_unmatched)),
+        ("keep_off", get(&s.keep_off)),
+        ("alloc_asked", get(&s.alloc_asked)),
+        ("alloc_ask_opened", get(&s.alloc_ask_opened)),
+        ("alloc_ask_failed", get(&s.alloc_ask_failed)),
     ]
 }
 
@@ -597,9 +661,17 @@ fn open_error(status: NTSTATUS) -> String {
 /// - Btrfs lists with FileIdBothDirectoryInformation from the first listing on (WinBtrfs's
 ///   FileIdExtd ids are the listed folder's own) and checks tasks by their stored names;
 /// - how much longer the kernel's name is than the NT path (`expansion`), whether or not relative
-///   opens are on: folders below one opened by file id need it. Without it, no relative opens.
+///   opens are on: folders below one opened by file id need it. Without it, no relative opens;
+/// - whether its file system updates access times at all (`atime_updated`): where it does not,
+///   keeping them is left out (`keep_where_updated`).
 fn detect(h: &Handle, nt_len: usize, state: &RootState) {
     let kind = fs_kind(h);
+    if state.keep_where_updated
+        && !atime_updated(kind, atime_settings())
+        && state.keep.swap(false, Ordering::Relaxed)
+    {
+        bump(&STATS.keep_off);
+    }
     if kind == fs::BTRFS {
         let _ = state
             .level
@@ -616,6 +688,55 @@ fn detect(h: &Handle, nt_len: usize, state: &RootState) {
         None => state.relative.store(false, Ordering::Relaxed),
     }
     state.fs.store(kind, Ordering::Release);
+}
+
+/// The system's access-time settings, read once per process (they take effect at the next boot):
+/// `NtfsDisableLastAccessUpdate` and `RefsDisableLastAccessUpdate` under
+/// HKLM\SYSTEM\CurrentControlSet\Control\FileSystem, None where a value is missing or unreadable.
+fn atime_settings() -> (Option<u32>, Option<u32>) {
+    static SETTINGS: OnceLock<(Option<u32>, Option<u32>)> = OnceLock::new();
+    *SETTINGS.get_or_init(|| {
+        let key: Vec<u16> = "SYSTEM\\CurrentControlSet\\Control\\FileSystem\0".encode_utf16().collect();
+        let read = |name: &str| -> Option<u32> {
+            let value: Vec<u16> = name.encode_utf16().chain([0]).collect();
+            let mut data = 0u32;
+            let mut size = size_of::<u32>() as u32;
+            // SAFETY: NUL-terminated strings; `data` is writable for `size` bytes.
+            let status = unsafe {
+                RegGetValueW(
+                    HKEY_LOCAL_MACHINE,
+                    key.as_ptr(),
+                    value.as_ptr(),
+                    RRF_RT_REG_DWORD,
+                    ptr::null_mut(),
+                    (&raw mut data).cast(),
+                    &mut size,
+                )
+            };
+            (status == ERROR_SUCCESS).then_some(data)
+        };
+        (read("NtfsDisableLastAccessUpdate"), read("RefsDisableLastAccessUpdate"))
+    })
+}
+
+/// Whether a file system updates the access times of folders, by the system's settings `(ntfs,
+/// refs)` (`atime_settings`): yes unless a setting plainly says no.
+/// - NTFS: no for the `fsutil behavior set disablelastaccess` values 1 (user managed, disabled)
+///   and 3 (system managed, disabled), stored as they are or with the high bit Windows sets on
+///   values it manages; 0 and 2 (enabled), anything else and no value: yes.
+/// - ReFS: no for `RefsDisableLastAccessUpdate` = 1 (ReFS's default, but only a value that is
+///   there counts).
+/// - Any other file system: yes.
+///
+/// A setting changed since the last boot is not in effect yet: until the next boot a volume set to
+/// "disabled" still updates access times, and a scan then lists its folders without keeping them
+/// (as before 0.3.4); one set to "enabled" is kept as usual.
+fn atime_updated(kind: u8, (ntfs, refs): (Option<u32>, Option<u32>)) -> bool {
+    match kind {
+        fs::NTFS => !matches!(ntfs.map(|v| v & 0x7FFF_FFFF), Some(1 | 3)),
+        fs::REFS => refs != Some(1),
+        _ => true,
+    }
 }
 
 /// The file system of the volume `h` is on (`case::fs`).
@@ -757,6 +878,9 @@ struct Opened {
     by: By,
     /// A plain relative open: a listing that fails through it is done again by full path.
     relist: bool,
+    /// A plain relative open not checked yet: the "." entry of its listing checks it, or the file
+    /// id of the handle when that does not settle it (`list_dir`).
+    unchecked: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -776,6 +900,15 @@ impl Opened {
             keep,
             by,
             relist: false,
+            unchecked: false,
+        }
+    }
+
+    /// A plain relative open whose handle is the listed folder.
+    fn relative(h: Handle, keep: Keep) -> Self {
+        Self {
+            relist: true,
+            ..Self::new(h, keep, By::Relative)
         }
     }
 }
@@ -793,11 +926,12 @@ fn count_open(state: &RootState, o: &Opened) {
 /// Opens subdirectory `path`, found in the listing of the directory `via` holds open. A plain one
 /// relative to it when that can be checked (`open_plain`), else by full path like a task; one
 /// whose name another entry shares, or that lies below a folder opened by file id, only through a
-/// handle proven to be the listed entry (`open_checked`, rules in case.rs).
-fn open_child(path: &[u16], via: &Via, state: &RootState) -> Result<Opened, String> {
+/// handle proven to be the listed entry (`open_checked`, rules in case.rs). `dot`: a plain
+/// relative open is left to be checked by its listing ("." entry, `list_dir`).
+fn open_child(path: &[u16], via: &Via, state: &RootState, dot: bool) -> Result<Opened, String> {
     let class = case::class_of(via.hint.mark, via.pinned);
     if class == Class::Plain {
-        return open_plain(path, via, state);
+        return open_plain(path, via, state, dot);
     }
     let res = open_checked(path, via, class, state);
     if class == Class::Strict {
@@ -812,62 +946,101 @@ fn open_child(path: &[u16], via: &Via, state: &RootState) -> Result<Opened, Stri
 }
 
 /// A plain subfolder: relative to its parent when relative opens are on and its path is one the
-/// open by path would accept, then as `case::after_open` says for `Class::Plain`; otherwise, and
-/// for whatever that leaves, by full path (which also reports any error).
-fn open_plain(path: &[u16], via: &Via, state: &RootState) -> Result<Opened, String> {
-    let mut failed = false;
+/// open by path would accept, then as `case::after_open` says for `Class::Plain` (`settle_plain`);
+/// otherwise, and for whatever that leaves, by full path (which also reports any error). With
+/// `dot` a relative open that works is returned unchecked: its listing checks it (`list_dir`).
+fn open_plain(path: &[u16], via: &Via, state: &RootState, dot: bool) -> Result<Opened, String> {
     if state.relative.load(Ordering::Relaxed) && within_limit(path, via, state) {
-        let (outcome, handle) = open_relative(path, via, state);
-        match (case::after_open(Class::Plain, outcome, via.hint.mark, via.hint.trusted()), handle) {
-            (Then::List, Some((h, keep))) => {
+        let (outcome, handle) = match open_plain_named(path, via, state) {
+            Some((h, keep)) if dot => {
                 return Ok(Opened {
-                    relist: true,
-                    ..Opened::new(h, keep, By::Relative)
+                    unchecked: true,
+                    ..Opened::relative(h, keep)
                 });
             }
-            (Then::ById, _) => {
-                bump(&STATS.mismatch_renamed);
-                return open_by_id(via, state, None);
-            }
-            (then, _) => {
-                if matches!(outcome, Outcome::Other { .. }) && then == Then::ByPath {
-                    // now and then a folder replaced meanwhile; again and again: ids that do not belong
-                    let n = state.mismatched.fetch_add(1, Ordering::Relaxed) + 1;
-                    if n > 64 && n > state.matched.load(Ordering::Relaxed) {
-                        distrust_ids(state, if via.hint.bits == 128 { 0 } else { 1 });
-                    }
+            Some((h, keep)) => check_relative(h, keep, path, via, state),
+            None => (Outcome::Failed, None),
+        };
+        return settle_plain(path, via, state, outcome, handle);
+    }
+    let (h, keep) = open_dir(path, state)?;
+    Ok(Opened::new(h, keep, By::Path))
+}
+
+/// How a plain subfolder is opened once its relative open found `outcome` (`case::after_open`,
+/// `Class::Plain`): listed through that handle, by the listed file id (the name reached another
+/// entry), or by full path.
+fn settle_plain(
+    path: &[u16],
+    via: &Via,
+    state: &RootState,
+    outcome: Outcome,
+    handle: Option<(Handle, Keep)>,
+) -> Result<Opened, String> {
+    match (case::after_open(Class::Plain, outcome, via.hint.mark, via.hint.trusted()), handle) {
+        (Then::List, Some((h, keep))) => return Ok(Opened::relative(h, keep)),
+        (Then::ById, _) => {
+            bump(&STATS.mismatch_renamed);
+            return open_by_id(via, state, None);
+        }
+        (then, _) => {
+            if matches!(outcome, Outcome::Other { .. }) && then == Then::ByPath {
+                // now and then a folder replaced meanwhile; again and again: ids that do not belong
+                let n = state.mismatched.fetch_add(1, Ordering::Relaxed) + 1;
+                if n > 64 && n > state.matched.load(Ordering::Relaxed) {
+                    distrust_ids(state, if via.hint.bits == 128 { 0 } else { 1 });
                 }
-                failed = outcome == Outcome::Failed;
             }
         }
     }
     let (h, keep) = open_dir(path, state)?;
-    if failed {
+    if outcome == Outcome::Failed {
         bump(&STATS.path_after_failed);
     }
     Ok(Opened::new(h, keep, By::Path))
 }
 
 /// The open of a plain subdirectory by its name relative to its parent's handle (the NT form of
-/// openat), and what it found; the handle only when it is the folder the parent's listing named,
-/// i.e. carries the file id that listing gave the name. Counted on the root:
-/// - the open fails (gone, denied): failures outnumbering matches end relative opens here;
-/// - the handle has another file id (`id_mismatch`): with it, whether its stored name is the
-///   listed one. Under the listed name the folder was replaced meanwhile, or the listing's ids do
-///   not belong to its entries (counted by `open_plain`, which may distrust that class's ids);
-///   under another name the name reached another entry (a case twin the upcase did not catch, on a
-///   volume with its own upcase table; an 8.3 short name), which goes by file id instead;
-/// - the file id cannot be read: such opens cannot be checked, so this root stops making them.
+/// openat), and what it found; the handle only when it is the folder the parent's listing named
+/// (`check_relative`).
+#[cfg(test)]
 fn open_relative(path: &[u16], via: &Via, state: &RootState) -> (Outcome, Option<(Handle, Keep)>) {
-    let Ok((h, keep)) = open_named(path, via, false, 0, state) else {
+    match open_plain_named(path, via, state) {
+        Some((h, keep)) => check_relative(h, keep, path, via, state),
+        None => (Outcome::Failed, None),
+    }
+}
+
+/// The relative open of a plain subdirectory by its name. When it fails (gone, denied) it is
+/// counted on the root: failures outnumbering matches end relative opens here.
+fn open_plain_named(path: &[u16], via: &Via, state: &RootState) -> Option<(Handle, Keep)> {
+    let Ok(opened) = open_named(path, via, false, 0, state) else {
         bump(&STATS.relative_failed);
         // now and then a folder deleted meanwhile; again and again: relative opens do not work here
         let n = state.failed.fetch_add(1, Ordering::Relaxed) + 1;
         if n > 64 && n > state.matched.load(Ordering::Relaxed) {
             state.relative.store(false, Ordering::Relaxed);
         }
-        return (Outcome::Failed, None);
+        return None;
     };
+    Some(opened)
+}
+
+/// Whether the handle of a plain relative open is the folder the parent's listing named, i.e.
+/// carries the file id that listing gave the name (queried from the handle). Counted on the root:
+/// - another file id (`id_mismatch`): with it, whether its stored name is the listed one. Under
+///   the listed name the folder was replaced meanwhile, or the listing's ids do not belong to its
+///   entries (counted by `settle_plain`, which may distrust that class's ids); under another name
+///   the name reached another entry (a case twin the upcase did not catch, on a volume with its own
+///   upcase table; an 8.3 short name), which goes by file id instead;
+/// - the file id cannot be read: such opens cannot be checked, so this root stops making them.
+fn check_relative(
+    h: Handle,
+    keep: Keep,
+    path: &[u16],
+    via: &Via,
+    state: &RootState,
+) -> (Outcome, Option<(Handle, Keep)>) {
     match file_id(&h, via.hint.bits) {
         Some(id) if id == via.hint.id => {
             state.matched.fetch_add(1, Ordering::Relaxed);
@@ -1227,7 +1400,11 @@ struct Raw<'a> {
     creation: i64,
     access: i64,
     write: i64,
+    /// ChangeTime (metadata changes too: a SetFileTime moves it, `listed_alloc`).
+    change: i64,
     eof: i64,
+    /// AllocationSize of the listing entry (the same offset in all three classes).
+    alloc: i64,
     /// File id and its width in bits (FileIdExtd 128, FileIdBoth 64, FileBoth none: 0).
     id: u128,
     id_bits: u8,
@@ -1286,7 +1463,9 @@ unsafe fn read_entry<'a>(p: *const u8, avail: usize, level: u8) -> Option<(u32, 
             creation: field!(i64, E, CreationTime),
             access: field!(i64, E, LastAccessTime),
             write: field!(i64, E, LastWriteTime),
+            change: field!(i64, E, ChangeTime),
             eof: field!(i64, E, EndOfFile),
+            alloc: field!(i64, E, AllocationSize),
             id,
             id_bits,
             name,
@@ -1342,19 +1521,192 @@ fn hint_of(raw: &Raw<'_>, btrfs: bool) -> Hint {
 
 /// What the entries of one listing are read with.
 #[derive(Clone, Copy)]
-struct Listing {
+struct Listing<'a> {
     /// The folder was opened by file id or lies below such a folder: no path reaches its files
-    /// (compressed and sparse files keep their rounded size: GetCompressedFileSizeW takes a path).
+    /// (the estimate keeps the rounded size of compressed and sparse files: GetCompressedFileSizeW
+    /// takes a path; the listing rule does not ask their files).
     pinned: bool,
     btrfs: bool,
     up: &'static [u16],
+    /// When the listing was read (FILETIME, 100 ns since 1601; 0 = unknown): `listed_alloc`.
+    now: i64,
+    /// The listed folder's handle: files are asked relative to it (`ask_alloc`).
+    dir: HANDLE,
+    state: &'a RootState,
+}
+
+/// How long after a file's last write or change its parent's entry may still show an old
+/// allocation. NTFS and ReFS allocate the clusters of sparse and compressed files only when the
+/// cache writes them out (≈3 s after the write, measured 2026-10-24), and update the parent's
+/// entry when the file is next opened and closed or its delayed close comes (10–15 s without any
+/// open); the file itself answers right after the write-out. A minute leaves room for a busy
+/// lazy writer.
+const LISTING_LAG_100NS: i64 = 60 * 10_000_000;
+
+#[derive(Debug, PartialEq, Eq)]
+enum ListedAlloc {
+    Use(i64),
+    /// Ask the file (`ask_alloc`), then `on_disk`.
+    Ask,
+}
+
+/// What a file system's AllocationSize means on disk: a value that is not whole clusters is data
+/// kept in the file's record or its directory and takes no cluster (NTFS resident data and ReFS
+/// inline data, listed as the length rounded up to 8 bytes; a WinBtrfs sparse file without data
+/// below a cluster lists its length). WinBtrfs lists inline extents as a whole sector: kept, as
+/// Linux counts them too.
+fn on_disk(alloc: i64, cluster: i64) -> i64 {
+    let a = alloc.max(0);
+    if a % cluster != 0 { 0 } else { a }
+}
+
+/// Size on disk of a file from its listing entry, on the file systems this was measured on
+/// (`RootOpts::listed_alloc`, worker.py `_listed_alloc`). The entry's AllocationSize is the file
+/// system's own count (what FileStandardInformation and its MFT record say, for preallocated,
+/// sparse, compressed and resident files alike), so files are not opened, except where the entry
+/// is known to lag or to hide the count (`Ask`):
+/// - sparse and compressed files written or changed in the last minute (`LISTING_LAG_100NS`;
+///   `written` is the later of LastWriteTime and ChangeTime: a SetFileTime after the write moves
+///   the change time);
+/// - NTFS files that list no clusters although they are neither empty, sparse nor compressed:
+///   WOF-compressed files (their data lives in an alternate stream, and the WOF filter hides the
+///   reparse attribute in listings; the file answers with the compressed size).
+///
+/// Never asked: on Btrfs (WinBtrfs lists its inodes as they are; its compressed size is the
+/// logical size of sparse files) and in pinned folders (no name reaches their files for sure).
+fn listed_alloc(attrs: u32, eof: i64, alloc: i64, written: i64, fs: u8, how: &Listing<'_>) -> ListedAlloc {
+    let packed = attrs & (FA_COMPRESSED | FA_SPARSE) != 0;
+    let recent = how.now != 0 && how.now.saturating_sub(written) < LISTING_LAG_100NS;
+    let hidden = fs == listed::NTFS && !packed && alloc <= 0 && eof > 0;
+    let asks = matches!(fs, listed::NTFS | listed::REFS) && !how.pinned;
+    if asks && ((packed && recent) || hidden) {
+        return ListedAlloc::Ask;
+    }
+    ListedAlloc::Use(alloc.max(0))
+}
+
+/// NtQueryInformationByName: Windows 10 1703 and later. Looked up rather than linked, so the
+/// module still loads on older systems (which then open the file, `ask_alloc`).
+type QueryByName = unsafe extern "system" fn(
+    *const OBJECT_ATTRIBUTES,
+    *mut IO_STATUS_BLOCK,
+    *mut core::ffi::c_void,
+    u32,
+    FILE_INFORMATION_CLASS,
+) -> NTSTATUS;
+
+fn query_by_name() -> Option<QueryByName> {
+    static FN: OnceLock<Option<QueryByName>> = OnceLock::new();
+    *FN.get_or_init(|| {
+        let ntdll: Vec<u16> = "ntdll.dll\0".encode_utf16().collect();
+        // SAFETY: ntdll is mapped in every process; the name is NUL-terminated.
+        let module = unsafe { GetModuleHandleW(ntdll.as_ptr()) };
+        if module.is_null() {
+            return None;
+        }
+        // SAFETY: the symbol, when present, has this signature (ntifs.h).
+        unsafe { GetProcAddress(module, c"NtQueryInformationByName".as_ptr().cast()) }
+            .map(|f| unsafe { std::mem::transmute::<_, QueryByName>(f) })
+    })
+}
+
+/// The size on disk of the file `name` in the listed folder, as the file system counts it now
+/// (FileStandardInformation's AllocationSize; the same as FileStatInformation's), or None when it
+/// cannot be asked (gone, denied): the listing's value stands. Asked relative to the folder's open
+/// handle with the one name the listing gave: by NtQueryInformationByName, which opens no handle,
+/// else (older systems, file systems without FileStatInformation) by a relative open.
+fn ask_alloc(name: &[u16], how: &Listing<'_>) -> Option<i64> {
+    bump(&STATS.alloc_asked);
+    let mut units = name.to_vec();
+    if units.len() * 2 > u16::MAX as usize {
+        return None;
+    }
+    let us = UNICODE_STRING {
+        Length: (units.len() * 2) as u16,
+        MaximumLength: (units.len() * 2) as u16,
+        Buffer: units.as_mut_ptr(),
+    };
+    // the name exactly as listed: in a case-sensitive folder it is that entry, not a case twin
+    let oa = OBJECT_ATTRIBUTES {
+        Length: size_of::<OBJECT_ATTRIBUTES>() as u32,
+        RootDirectory: how.dir,
+        ObjectName: &us,
+        Attributes: 0,
+        SecurityDescriptor: ptr::null(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let mut iosb = IO_STATUS_BLOCK::default();
+    if how.state.by_name.load(Ordering::Relaxed)
+        && let Some(query) = query_by_name()
+    {
+        let mut info = FILE_STAT_INFORMATION::default();
+        // SAFETY: `oa` names a file relative to an open directory handle; `info` is writable.
+        let status = unsafe {
+            query(
+                &oa,
+                &mut iosb,
+                (&raw mut info).cast(),
+                size_of::<FILE_STAT_INFORMATION>() as u32,
+                FileStatInformation,
+            )
+        };
+        if status >= 0 {
+            return Some(info.AllocationSize);
+        }
+        if !unsupported(status) {
+            bump(&STATS.alloc_ask_failed);
+            return None;
+        }
+        how.state.by_name.store(false, Ordering::Relaxed);
+    }
+    bump(&STATS.alloc_ask_opened);
+    let mut h: HANDLE = ptr::null_mut();
+    // SAFETY: all pointers are valid for the call.
+    let status = unsafe {
+        NtOpenFile(
+            &mut h,
+            FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            &oa,
+            &mut iosb,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_FOR_BACKUP_INTENT,
+        )
+    };
+    if status < 0 {
+        bump(&STATS.alloc_ask_failed);
+        return None;
+    }
+    let h = Handle(h);
+    let mut info = FILE_STANDARD_INFORMATION::default();
+    // SAFETY: `info` is writable for its size.
+    let status = unsafe {
+        NtQueryInformationFile(
+            h.0,
+            &mut iosb,
+            (&raw mut info).cast(),
+            size_of::<FILE_STANDARD_INFORMATION>() as u32,
+            FileStandardInformation,
+        )
+    };
+    if status < 0 {
+        bump(&STATS.alloc_ask_failed);
+        return None;
+    }
+    Some(info.AllocationSize)
+}
+
+fn filetime_now() -> i64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(d) => (d.as_secs() as i64 + SECS_1601_TO_1970) * 10_000_000 + i64::from(d.subsec_nanos() / 100),
+        Err(_) => 0,
+    }
 }
 
 fn add_entry(
     raw: &Raw<'_>,
     dir: &[u16],
     root: &RootOpts,
-    how: Listing,
+    how: &Listing<'_>,
     base: usize,
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
@@ -1380,6 +1732,14 @@ fn add_entry(
     } else if attrs & (FA_RECALL_ON_DATA_ACCESS | FA_RECALL_ON_OPEN) != 0 {
         flags |= flag::CLOUD;
         0
+    } else if root.listed_alloc != listed::OFF {
+        let fs = root.listed_alloc;
+        let written = raw.write.max(raw.change);
+        let a = match listed_alloc(attrs, raw.eof, raw.alloc, written, fs, how) {
+            ListedAlloc::Use(a) => a,
+            ListedAlloc::Ask => ask_alloc(raw.name, how).unwrap_or(raw.alloc),
+        };
+        on_disk(a, cluster)
     } else if attrs & (FA_COMPRESSED | FA_SPARSE) != 0 {
         let real = if how.pinned { None } else { compressed_size(dir, raw.name) };
         round_up(real.unwrap_or(size), cluster)
@@ -1437,26 +1797,64 @@ pub fn list_dir(
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
 ) -> Result<(Option<Arc<Parent>>, bool), String> {
-    let opened = match &via {
-        Some(v) => open_child(path, v, state)?,
+    let mut opened = match &via {
+        Some(v) => open_child(path, v, state, state.dot_check)?,
         None => {
             let (h, keep) = open_dir(path, state)?;
             check_task(&h, path, root, state)?;
             Opened::new(h, keep, By::Path)
         }
     };
-    let pinned = opened.by == By::Id || via.as_ref().is_some_and(|v| v.pinned);
+    let mut pinned = opened.by == By::Id || via.as_ref().is_some_and(|v| v.pinned);
     let hint = via.as_ref().map(|v| v.hint);
-    drop(via); // the parent may close as soon as its last subdirectory is open
-    count_open(state, &opened);
+    // the parent may close as soon as its last subdirectory is open (one opened unchecked keeps it
+    // until its check, for what may follow)
+    let held = if opened.unchecked {
+        via
+    } else {
+        drop(via);
+        None
+    };
+    if !opened.unchecked {
+        count_open(state, &opened);
+    }
+    let base = arena.len();
+    let mark = arena.mark();
+    let first_sub = subdirs.len();
+    let mut dot: DotId = None;
+    let mut listed = list_into(&opened.h, path, root, state, pinned, base, arena, subdirs, &mut dot);
+    if let Some(v) = held.as_ref().filter(|_| opened.unchecked) {
+        // the "." entry is the listed folder itself: its file id, in the width of the parent's
+        // listing, checks the open as the handle's own would (docs/native.md 2.2)
+        if dot == Some((v.hint.id, v.hint.bits)) {
+            bump(&STATS.dot_matched);
+            state.matched.fetch_add(1, Ordering::Relaxed);
+            opened.unchecked = false;
+        } else {
+            bump(&STATS.dot_unmatched);
+            let Opened { h, keep, .. } = opened;
+            let (outcome, handle) = check_relative(h, keep, path, v, state);
+            opened = match handle {
+                Some((h, keep)) if outcome == Outcome::Same => Opened::relative(h, keep),
+                handle => {
+                    // not the listed folder: what was listed through it goes
+                    arena.truncate(mark);
+                    subdirs.truncate(first_sub);
+                    let again = settle_plain(path, v, state, outcome, handle)?;
+                    pinned = again.by == By::Id;
+                    listed = list_into(&again.h, path, root, state, pinned, base, arena, subdirs, &mut dot);
+                    again
+                }
+            };
+        }
+        count_open(state, &opened);
+    }
+    drop(held);
     if pinned {
         bump(&STATS.pinned);
     }
     let Opened { mut h, by, relist, .. } = opened;
-    let base = arena.len();
-    let mark = arena.mark();
-    let first_sub = subdirs.len();
-    if let Err(e) = list_into(&h, path, root, state, pinned, base, arena, subdirs) {
+    if let Err(e) = listed {
         if !relist {
             return Err(e); // a folder no path reaches, or one a name may reach only as another
         }
@@ -1474,7 +1872,7 @@ pub fn list_dir(
         count_keep(state, keep);
         bump(&STATS.by_path);
         h = again;
-        list_into(&h, path, root, state, pinned, base, arena, subdirs)?;
+        list_into(&h, path, root, state, pinned, base, arena, subdirs, &mut dot)?;
     }
     if let Some(hint) = hint.filter(|h| h.size > 0) {
         check_size(&arena.names[mark.names..], hint.size, by == By::Id)?;
@@ -1503,6 +1901,49 @@ fn check_size(names: &[u8], size: i64, by_id: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// The longest name an entry can have on the file systems `skip_final` applies to, in UTF-16
+/// units: NTFS and ReFS allow 255 per name, Linux (Btrfs) 255 bytes of UTF-8, which are at most 255
+/// units (WinBtrfs shows each byte that is not UTF-8 as one U+FFFD).
+const MAX_NAME_UNITS: usize = 255;
+
+/// Whether a directory query that filled `filled` bytes of the buffer left room for one more
+/// entry of class `CLASSES[level]` with the longest name there is. Each call returns as many
+/// entries as fit whole in the buffer (NtQueryDirectoryFile's documented rule; WinBtrfs's
+/// dirctrl.c fills it the same way), so then no entry is left and the next call would only return
+/// STATUS_NO_MORE_FILES. Entries start 8-byte aligned.
+fn room_for_another(filled: usize, level: u8) -> bool {
+    let name_off = match level {
+        0 => offset_of!(FILE_ID_EXTD_DIR_INFORMATION, FileName),
+        1 => offset_of!(FILE_ID_BOTH_DIR_INFORMATION, FileName),
+        _ => offset_of!(FILE_BOTH_DIR_INFORMATION, FileName),
+    };
+    let next = filled.next_multiple_of(8);
+    BUF_BYTES.saturating_sub(next) >= name_off + 2 * MAX_NAME_UNITS
+}
+
+/// Whether listings of this root may leave out their last query (`skip_final`): only on local
+/// NTFS, ReFS and Btrfs, where the rule of `room_for_another` was checked on whole volumes
+/// (docs/native.md 2.2), and until a checked listing broke it. Elsewhere (FAT, exFAT, network
+/// redirectors, which may return a short buffer early) every listing goes on until
+/// STATUS_NO_MORE_FILES; so do listings of reparse points (`list_into`).
+fn skips_final(state: &RootState) -> bool {
+    state.skip_final
+        && state.final_ok.load(Ordering::Relaxed)
+        && matches!(state.fs.load(Ordering::Acquire), fs::NTFS | fs::REFS | fs::BTRFS)
+}
+
+/// Listings of a root `skip_final` checks before it trusts the rule, and one in how many after.
+const FINAL_CHECKED: u32 = 64;
+
+/// Whether this listing, which could leave its last query out, sends it to check the rule.
+fn checks_final(state: &RootState) -> bool {
+    let k = state.final_seen.fetch_add(1, Ordering::Relaxed);
+    state.verify_final || k < FINAL_CHECKED || k % FINAL_CHECKED == 0
+}
+
+/// The file id of a listing's "." entry and its width in bits (`Raw::id`), if it had one.
+type DotId = Option<(u128, u8)>;
+
 #[allow(clippy::too_many_arguments)]
 fn list_into(
     h: &Handle,
@@ -1513,6 +1954,7 @@ fn list_into(
     base: usize,
     arena: &mut Arena,
     subdirs: &mut Vec<(u32, NativePath, Hint)>,
+    dot: &mut DotId,
 ) -> Result<(), String> {
     let first_sub = subdirs.len();
     // one information class for the whole listing, even if another thread changes the root's
@@ -1521,12 +1963,21 @@ fn list_into(
         pinned,
         btrfs: state.btrfs(),
         up: upcase(),
+        now: if root.listed_alloc != listed::OFF { filetime_now() } else { 0 },
+        dir: h.0,
+        state,
     };
     // test seam: FileIdExtd ids as WinBtrfs gives them, the listed folder's own
     let own_id = if state.extd_self_ids { file_id(h, 128) } else { None };
+    let mut skip = skips_final(state);
+    let mut checked: Option<bool> = None; // checks_final, asked once per listing
+    *dot = None;
     CASE.with_borrow_mut(Vec::clear);
     let listed = BUF.with_borrow_mut(|buf| {
         let mut first = true;
+        // the last buffer had room for another entry: the query now running would be left out
+        // (verify_final sends it to see)
+        let mut skippable = false;
         loop {
             let mut iosb = IO_STATUS_BLOCK::default();
             // SAFETY: synchronous handle, buffer is 8-byte aligned and BUF_BYTES long.
@@ -1546,7 +1997,17 @@ fn list_into(
                 )
             };
             if status == STATUS_NO_MORE_FILES || (first && status == STATUS_NO_SUCH_FILE) {
+                if skippable {
+                    bump(&STATS.final_verified);
+                }
                 break;
+            }
+            if skippable {
+                bump(&STATS.final_wrong); // listed all the same: the query was sent
+                if !state.verify_final {
+                    state.final_ok.store(false, Ordering::Relaxed); // the rule does not hold here
+                }
+                skippable = false;
             }
             if status < 0 {
                 if first && unsupported(status) && (level as usize) < CLASSES.len() - 1 {
@@ -1579,14 +2040,29 @@ fn list_into(
                     raw.id = id;
                 }
                 let n = raw.name;
-                let dots = n == [b'.' as u16] || n == [b'.' as u16, b'.' as u16];
-                if !dots {
-                    add_entry(&raw, path, root, how, base, arena, subdirs);
+                if n == [b'.' as u16] {
+                    if dot.is_none() && raw.id_bits != 0 {
+                        *dot = Some((raw.id, raw.id_bits));
+                    }
+                    // a reparse point's listing may come from a filter (cloud files, ProjFS)
+                    // that fills its buffers by other rules
+                    if raw.attrs & FA_REPARSE != 0 {
+                        skip = false;
+                    }
+                } else if n != [b'.' as u16, b'.' as u16] {
+                    add_entry(&raw, path, root, &how, base, arena, subdirs);
                 }
                 if next == 0 || off + next as usize >= filled {
                     break;
                 }
                 off += next as usize;
+            }
+            if skip && room_for_another(filled, level) {
+                if !*checked.get_or_insert_with(|| checks_final(state)) {
+                    bump(&STATS.final_skipped);
+                    break;
+                }
+                skippable = true;
             }
         }
         Ok(())
@@ -1726,6 +2202,54 @@ mod tests {
         assert_eq!(round_up(i64::MAX, 4096), i64::MAX);
     }
 
+    #[test]
+    fn listed_alloc_rules() {
+        // values as NTFS, ReFS and WinBtrfs listed small probe files (2026-10-24)
+        const S: i64 = 10_000_000;
+        let state = RootState::new(&StateOpts::default());
+        let how = |now: i64, pinned: bool| Listing {
+            pinned,
+            btrfs: false,
+            up: &[],
+            now,
+            dir: ptr::null_mut(),
+            state: &state,
+        };
+        let old = how(1_000 * S, false);
+        let (ntfs, refs, btrfs) = (listed::NTFS, listed::REFS, listed::BTRFS);
+        let use_ = ListedAlloc::Use;
+        let ask = ListedAlloc::Ask;
+        // the listed value as it is: preallocated, truncated, compressed and settled sparse files
+        assert_eq!(listed_alloc(0x20, 425, 4096, 0, ntfs, &old), use_(4096)); // truncated: not resident again
+        assert_eq!(listed_alloc(0x820, 1 << 20, 131072, 0, ntfs, &old), use_(131072)); // compressed text
+        assert_eq!(listed_alloc(0x220, 16 << 20, 131072, 0, ntfs, &old), use_(131072)); // sparse, settled
+        assert_eq!(listed_alloc(0x20, 700, 704, 0, ntfs, &old), use_(704)); // resident: on_disk makes it 0
+        // NTFS: no clusters listed for a file that is not empty, sparse or compressed (WOF) -> ask
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, ntfs, &old), ask);
+        assert_eq!(listed_alloc(0x20, 0, 0, 0, ntfs, &old), use_(0));
+        assert_eq!(listed_alloc(0x220, 2000, 0, 0, ntfs, &old), use_(0)); // sparse, no data: 0 is right
+        // sparse or compressed, written or changed in the last minute: the parent entry may lag
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 990 * S, ntfs, &old), ask);
+        assert_eq!(listed_alloc(0x820, 1 << 20, 1 << 20, 990 * S, refs, &old), ask);
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 900 * S, ntfs, &old), use_(0));
+        assert_eq!(listed_alloc(0x20, 3000, 4096, 990 * S, ntfs, &old), use_(4096)); // plain: listed at close
+        // ReFS: an empty-looking entry is no WOF file (WOF is NTFS's)
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, refs, &old), use_(0));
+        // WinBtrfs and folders opened by id are never asked; an unknown clock is never "recent"
+        assert_eq!(listed_alloc(0x220, 64 << 20, 4096, 999 * S, btrfs, &old), use_(4096));
+        assert_eq!(listed_alloc(0x20, 1 << 20, 0, 0, ntfs, &how(1_000 * S, true)), use_(0));
+        assert_eq!(listed_alloc(0x220, 16 << 20, 0, 0, ntfs, &how(0, false)), use_(0));
+        // on disk: NTFS resident and ReFS inline data take no cluster, Btrfs inline extents a sector
+        let c = 4096;
+        assert_eq!(on_disk(704, c), 0);
+        assert_eq!(on_disk(104, c), 0);
+        assert_eq!(on_disk(1500, c), 0);
+        assert_eq!(on_disk(8192, c), 8192);
+        assert_eq!(on_disk(4096, c), 4096); // WinBtrfs: a 100-byte file
+        assert_eq!(on_disk(2000, c), 0); // WinBtrfs: a sparse 2000-byte file without data
+        assert_eq!(on_disk(-1, c), 0);
+    }
+
     fn raw(attrs: u32, tag: u32, eof: i64) -> Raw<'static> {
         static NAME: [u16; 5] = [
             b'f' as u16,
@@ -1740,7 +2264,9 @@ mod tests {
             creation: 0,
             access: 0,
             write: 0,
+            change: 0,
             eof,
+            alloc: 0,
             id: 0,
             id_bits: 0,
             name: &NAME,
@@ -1836,7 +2362,7 @@ mod tests {
             assert!(STATS.id_mismatch.load(Ordering::Relaxed) > before);
             assert!(state.relative.load(Ordering::Relaxed)); // one mismatch does not end them
             // under the listed name: a folder replaced meanwhile, as before by its full path
-            assert_eq!(open_child(&t.child("a"), &via(b), &state).unwrap().by, By::Path);
+            assert_eq!(open_child(&t.child("a"), &via(b), &state, false).unwrap().by, By::Path);
         }
     }
 
@@ -1855,14 +2381,14 @@ mod tests {
             };
             // the listing says `X` is y; the open of `X` reaches x, stored as `x`: y goes by its id
             for marks in [mark::TWIN, 0] {
-                let o = open_child(&t.child("X"), &via(y, marks), &state).unwrap();
+                let o = open_child(&t.child("X"), &via(y, marks), &state, false).unwrap();
                 assert_eq!((o.by, file_id(&o.h, bits)), (By::Id, Some(y)), "{marks}");
             }
             // the parent's own id (WinBtrfs's FileIdExtd ids) is refused, a file's id is no folder
             let own = file_id(&parent, bits).unwrap();
             let file = id_of_file(&t.0.join("f"), bits);
             for id in [own, file] {
-                let err = open_child(&t.child("X"), &via(id, mark::TWIN), &state).err();
+                let err = open_child(&t.child("X"), &via(id, mark::TWIN), &state, false).err();
                 assert_eq!(err.as_deref(), Some(msg::CASE));
             }
             // a duplicate name proves nothing: by id even where the stored name is the listed one
@@ -1871,7 +2397,7 @@ mod tests {
                 hint: hint(y, bits, "x", mark::TWIN | mark::DUP),
                 pinned: false,
             };
-            assert_eq!(open_child(&t.child("x"), &dup, &state).unwrap().by, By::Id);
+            assert_eq!(open_child(&t.child("x"), &dup, &state, false).unwrap().by, By::Id);
         }
         // a folder deleted since it was listed
         let gone = id_of_file(&t.0.join("gone"), 128);
@@ -1881,7 +2407,32 @@ mod tests {
             hint: hint(gone, 128, "X", mark::TWIN),
             pinned: false,
         };
-        assert_eq!(open_child(&t.child("X"), &via, &state).err().as_deref(), Some(msg::CASE));
+        assert_eq!(open_child(&t.child("X"), &via, &state, false).err().as_deref(), Some(msg::CASE));
+    }
+
+    #[test]
+    fn a_listing_through_a_name_that_reached_another_entry_is_dropped_for_the_listed_one() {
+        // with dot_check the relative open is listed before it is checked: what x holds goes, and
+        // y is listed by its id; without it the open is checked first, with the same result
+        let t = Temp::new("dotid", &["x\\in-x", "y\\in-y"], &[]);
+        let root = RootOpts::default();
+        for dot_check in [true, false] {
+            let state = RootState::new(&StateOpts { dot_check, ..opts(true) });
+            let parent = Arc::new(open_dir(&t.path(), &state).unwrap().0);
+            let y = file_id(&open_dir(&t.child("y"), &state).unwrap().0, 128).unwrap();
+            for marks in [mark::TWIN, 0] {
+                let via = Via {
+                    parent: parent.clone(),
+                    hint: hint(y, 128, "X", marks),
+                    pinned: false,
+                };
+                let (mut arena, mut subs) = (Arena::default(), Vec::new());
+                let (_, pinned) =
+                    list_dir(&t.child("X"), true, Some(via), &root, &state, &mut arena, &mut subs).unwrap();
+                assert_eq!(names(&arena), ["in-y"], "{dot_check} {marks}");
+                assert!(pinned && subs.len() == 1, "{dot_check} {marks}");
+            }
+        }
     }
 
     #[test]
@@ -1984,7 +2535,7 @@ mod tests {
                 hint: hint(y, bits, &short, 0),
                 pinned: false,
             };
-            let o = open_child(&t.child(&short), &via, &state).unwrap();
+            let o = open_child(&t.child(&short), &via, &state, false).unwrap();
             assert_eq!((o.by, file_id(&o.h, bits)), (By::Id, Some(y)), "{bits}");
         }
     }
@@ -2101,23 +2652,32 @@ mod tests {
     }
 
     fn entry(attrs: u32, tag: u32, eof: i64) -> (u8, u32, i64, i64, usize) {
+        entry_with(&raw(attrs, tag, eof), listed::OFF)
+    }
+
+    fn entry_with(raw: &Raw<'_>, listed_alloc: u8) -> (u8, u32, i64, i64, usize) {
         let root = RootOpts {
             cluster_size: 4096,
             resident_max: 512,
+            listed_alloc,
             ..RootOpts::default()
         };
         let mut arena = Arena::default();
         let mut subs = Vec::new();
+        let state = RootState::new(&StateOpts::default());
         let how = Listing {
             pinned: false,
             btrfs: false,
             up: upcase(),
+            now: 0,
+            dir: ptr::null_mut(),
+            state: &state,
         };
         add_entry(
-            &raw(attrs, tag, eof),
+            raw,
             &w("C:\\nowhere-spaceknife"),
             &root,
-            how,
+            &how,
             0,
             &mut arena,
             &mut subs,
@@ -2158,6 +2718,24 @@ mod tests {
             entry(FA_COMPRESSED, 0, 5000),
             (kind::FILE, flag::COMPRESSED, 5000, 8192, 0)
         );
+        // the listing rule: the entry's AllocationSize, resident and inline data as no cluster
+        let listed = |attrs: u32, eof: i64, alloc: i64, fs: u8| {
+            entry_with(&Raw { alloc, ..raw(attrs, 0, eof) }, fs).3
+        };
+        assert_eq!(listed(0x20, 700, 704, listed::NTFS), 0);
+        assert_eq!(listed(0x20, 600, 4096, listed::NTFS), 4096); // shrunk below the resident size
+        assert_eq!(listed(0x20, 3000, 4096, listed::NTFS), 4096);
+        assert_eq!(listed(0x20, 1000, 1 << 20, listed::NTFS), 1 << 20); // preallocated
+        assert_eq!(listed(FA_SPARSE, 16 << 20, 131072, listed::NTFS), 131072);
+        assert_eq!(listed(FA_COMPRESSED, 5000, 4096, listed::NTFS), 4096);
+        assert_eq!(listed(0x20, 1500, 1500, listed::REFS), 0); // inline
+        assert_eq!(listed(0x20, 100, 4096, listed::BTRFS), 4096);
+        assert_eq!(listed(FA_SPARSE, 64 << 20, 8192, listed::BTRFS), 8192);
+        assert_eq!(listed(FA_SPARSE, 2000, 2000, listed::BTRFS), 0);
+        // the estimate: 700 B is past resident_max (512), a cluster, though NTFS keeps it resident
+        assert_eq!(listed(0x20, 700, 704, listed::OFF), 4096);
+        // cloud placeholders stay 0 under the listing rule too
+        assert_eq!(listed(FA_RECALL_ON_DATA_ACCESS, 10_000, 12288, listed::NTFS), 0);
     }
 
     #[test]
@@ -2188,6 +2766,220 @@ mod tests {
     fn filetime_conversion() {
         assert_eq!(ft_secs(0), 0);
         assert_eq!(ft_secs(SECS_1601_TO_1970 * 10_000_000 + 15_000_000), 1);
+    }
+
+    #[test]
+    fn the_last_query_is_left_out_only_where_another_entry_would_have_fit() {
+        let name_offs = [
+            offset_of!(FILE_ID_EXTD_DIR_INFORMATION, FileName),
+            offset_of!(FILE_ID_BOTH_DIR_INFORMATION, FileName),
+            offset_of!(FILE_BOTH_DIR_INFORMATION, FileName),
+        ];
+        for (level, &off) in name_offs.iter().enumerate() {
+            let level = level as u8;
+            let biggest = off + 2 * MAX_NAME_UNITS; // the longest name's entry
+            let fit = (BUF_BYTES - biggest) / 8 * 8; // the last 8-aligned start it fits at
+            assert!(room_for_another(0, level));
+            assert!(room_for_another(fit, level));
+            assert!(room_for_another(fit - 7, level)); // the next entry starts 8-aligned
+            assert!(!room_for_another(fit + 1, level));
+            assert!(!room_for_another(fit + 8, level));
+            assert!(!room_for_another(BUF_BYTES, level));
+        }
+        // only local NTFS, ReFS and Btrfs
+        let state = RootState::new(&StateOpts {
+            skip_final: true,
+            ..opts(true)
+        });
+        for (kind, skips) in [
+            (fs::NTFS, true),
+            (fs::REFS, true),
+            (fs::BTRFS, true),
+            (fs::OTHER, false),
+            (fs::UNKNOWN, false),
+        ] {
+            state.fs.store(kind, Ordering::Release);
+            assert_eq!(skips_final(&state), skips, "{kind}");
+        }
+        let off = RootState::new(&opts(true));
+        off.fs.store(fs::NTFS, Ordering::Release);
+        assert!(!skips_final(&off));
+        // a checked listing that found more turned it off for the root
+        state.fs.store(fs::NTFS, Ordering::Release);
+        state.final_ok.store(false, Ordering::Relaxed);
+        assert!(!skips_final(&state));
+    }
+
+    /// Lists `path` as a task the way a scan does, with these options.
+    fn list_task(path: &[u16], o: &StateOpts) -> (Arena, Vec<(u32, NativePath, Hint)>, RootState) {
+        let state = RootState::new(o);
+        let (arena, subs) = list_with(path, &state);
+        (arena, subs, state)
+    }
+
+    fn list_with(path: &[u16], state: &RootState) -> (Arena, Vec<(u32, NativePath, Hint)>) {
+        let (mut arena, mut subs) = (Arena::default(), Vec::new());
+        list_dir(path, false, None, &RootOpts::default(), state, &mut arena, &mut subs).unwrap();
+        (arena, subs)
+    }
+
+    fn names(arena: &Arena) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut at = 0;
+        for &n in &arena.name_lens {
+            out.push(String::from_utf8(arena.names[at..at + n as usize].to_vec()).unwrap());
+            at += n as usize;
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn listings_without_their_last_query_are_complete() {
+        // a few entries (one buffer with room left), and long names over several full buffers
+        let few: Vec<String> = (0..5).map(|i| format!("f{i}")).collect();
+        let many: Vec<String> = (0..700).map(|i| format!("{i:04}{}", "x".repeat(200))).collect();
+        for (tag, files) in [("final-few", &few), ("final-many", &many)] {
+            let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+            let t = Temp::new(tag, &["d"], &refs);
+            let mut want = files.clone();
+            want.push("d".into());
+            want.sort();
+            let base = StateOpts {
+                keep_access_time: true,
+                ..opts(true)
+            };
+            // a root's first listings send the query to check the rule, later ones leave it out
+            let state = RootState::new(&StateOpts { skip_final: true, ..base });
+            let (skipped, verified) = (
+                STATS.final_skipped.load(Ordering::Relaxed),
+                STATS.final_verified.load(Ordering::Relaxed),
+            );
+            let (arena, _) = list_with(&t.path(), &state);
+            assert_eq!(names(&arena), want, "{tag}");
+            assert_eq!(STATS.final_skipped.load(Ordering::Relaxed), skipped, "{tag}");
+            assert!(STATS.final_verified.load(Ordering::Relaxed) > verified, "{tag}");
+            state.final_seen.store(FINAL_CHECKED + 1, Ordering::Relaxed);
+            let (arena, _) = list_with(&t.path(), &state);
+            assert_eq!(names(&arena), want, "{tag}");
+            assert!(STATS.final_skipped.load(Ordering::Relaxed) > skipped, "{tag}");
+            assert!(state.final_ok.load(Ordering::Relaxed), "{tag}");
+            let (arena, _, _) = list_task(&t.path(), &base);
+            assert_eq!(names(&arena), want, "{tag}");
+            // the verification mode sends the query and finds nothing more
+            let (verified, wrong) = (
+                STATS.final_verified.load(Ordering::Relaxed),
+                STATS.final_wrong.load(Ordering::Relaxed),
+            );
+            let o = StateOpts {
+                skip_final: true,
+                verify_final: true,
+                ..base
+            };
+            let (arena, _, _) = list_task(&t.path(), &o);
+            assert_eq!(names(&arena), want, "{tag}");
+            assert!(STATS.final_verified.load(Ordering::Relaxed) > verified, "{tag}");
+            assert_eq!(STATS.final_wrong.load(Ordering::Relaxed), wrong, "{tag}");
+        }
+    }
+
+    #[test]
+    fn relative_opens_are_checked_by_the_dot_entry_else_by_the_handle() {
+        let t = Temp::new("dot", &["a\\in-a", "b\\in-b"], &["a\\file-a"]);
+        let o = StateOpts {
+            keep_access_time: true,
+            dot_check: true,
+            ..opts(true)
+        };
+        let state = RootState::new(&o);
+        let parent = Arc::new(open_dir(&t.path(), &state).unwrap().0);
+        let root = RootOpts::default();
+        for bits in [128u8, 64] {
+            // the class whose ids the parent's listing gave: FileIdExtd (128), FileIdBoth (64)
+            state.level.store(if bits == 128 { 0 } else { 1 }, Ordering::Relaxed);
+            let id_of = |name: &str| file_id(&open_dir(&t.child(name), &state).unwrap().0, bits).unwrap();
+            let (a, b) = (id_of("a"), id_of("b"));
+            let list_a = |id: u128| {
+                let via = Via {
+                    parent: parent.clone(),
+                    hint: hint(id, bits, "a", 0),
+                    pinned: false,
+                };
+                let (mut arena, mut subs) = (Arena::default(), Vec::new());
+                let (handle, pinned) =
+                    list_dir(&t.child("a"), true, Some(via), &root, &state, &mut arena, &mut subs).unwrap();
+                assert!(handle.is_some() && !pinned);
+                names(&arena)
+            };
+            let want = vec!["file-a".to_owned(), "in-a".to_owned()];
+            // the listed id: checked by the "." entry, no query of the handle
+            let (matched, ids, relative) = (
+                STATS.dot_matched.load(Ordering::Relaxed),
+                STATS.id_mismatch.load(Ordering::Relaxed),
+                STATS.relative.load(Ordering::Relaxed),
+            );
+            assert_eq!(list_a(a), want);
+            assert!(STATS.dot_matched.load(Ordering::Relaxed) > matched);
+            assert!(STATS.relative.load(Ordering::Relaxed) > relative);
+            // another id (a folder replaced meanwhile): "." does not settle it, the handle's id
+            // does not either, so the folder is listed again by its full path, as without the dot
+            let (unmatched, by_path) = (
+                STATS.dot_unmatched.load(Ordering::Relaxed),
+                STATS.by_path.load(Ordering::Relaxed),
+            );
+            assert_eq!(list_a(b), want);
+            assert!(STATS.dot_unmatched.load(Ordering::Relaxed) > unmatched);
+            assert!(STATS.id_mismatch.load(Ordering::Relaxed) > ids);
+            assert!(STATS.by_path.load(Ordering::Relaxed) > by_path);
+        }
+        // without "." in the width asked for (the class changed since the parent's listing): the
+        // handle's own id decides, and the listing through it stands
+        state.level.store(2, Ordering::Relaxed); // FileBothDirectoryInformation: no ids at all
+        let a = id_of_file(&t.0.join("a"), 128);
+        let via = Via {
+            parent: parent.clone(),
+            hint: hint(a, 128, "a", 0),
+            pinned: false,
+        };
+        let (mut arena, mut subs) = (Arena::default(), Vec::new());
+        let (unmatched, by_path) = (
+            STATS.dot_unmatched.load(Ordering::Relaxed),
+            STATS.by_path.load(Ordering::Relaxed),
+        );
+        list_dir(&t.child("a"), true, Some(via), &root, &state, &mut arena, &mut subs).unwrap();
+        assert_eq!(names(&arena), ["file-a", "in-a"]);
+        assert!(STATS.dot_unmatched.load(Ordering::Relaxed) > unmatched);
+        let _ = by_path; // (other tests may open by path meanwhile: not asserted)
+    }
+
+    #[test]
+    fn access_times_are_kept_only_where_the_file_system_updates_them() {
+        for v in [0u32, 2, 0x8000_0000, 0x8000_0002, 7] {
+            assert!(atime_updated(fs::NTFS, (Some(v), None)), "{v:#x}");
+        }
+        for v in [1u32, 3, 0x8000_0001, 0x8000_0003] {
+            assert!(!atime_updated(fs::NTFS, (Some(v), None)), "{v:#x}");
+        }
+        assert!(atime_updated(fs::NTFS, (None, Some(1))));
+        assert!(!atime_updated(fs::REFS, (None, Some(1))));
+        for refs in [None, Some(0), Some(2)] {
+            assert!(atime_updated(fs::REFS, (Some(1), refs)), "{refs:?}");
+        }
+        for kind in [fs::BTRFS, fs::OTHER, fs::UNKNOWN] {
+            assert!(atime_updated(kind, (Some(1), Some(1))));
+        }
+        // on this machine's temp folder (NTFS): as its setting says
+        let t = Temp::new("atime", &[], &["f"]);
+        let o = StateOpts {
+            keep_access_time: true,
+            keep_where_updated: true,
+            ..opts(true)
+        };
+        let (_, _, state) = list_task(&t.path(), &o);
+        let updated = atime_updated(state.fs.load(Ordering::Acquire), atime_settings());
+        assert_eq!(state.keep.load(Ordering::Relaxed), updated);
+        let (_, _, state) = list_task(&t.path(), &StateOpts { keep_where_updated: false, ..o });
+        assert!(state.keep.load(Ordering::Relaxed));
     }
 
     #[test]

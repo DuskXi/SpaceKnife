@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import threading
 import time
 from collections.abc import Iterator
@@ -280,7 +281,7 @@ def test_mft_is_chosen_for_whole_ntfs_volumes(
     from spaceknife.server import scans as scans_mod
     from spaceknife.settings import SettingsStore
 
-    if not scans_mod.sys.platform.startswith("win"):
+    if not sys.platform.startswith("win"):
         pytest.skip("MFT scans are Windows-only")
     vol = VolumeInfo(
         mount_point="C:\\",

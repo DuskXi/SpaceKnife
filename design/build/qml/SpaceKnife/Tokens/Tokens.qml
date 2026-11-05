@@ -26,6 +26,8 @@ QtObject {
     readonly property color colorLineSubtle: theme === "light" ? "#FFDEE0E4" : "#FF1D2027"
     readonly property color colorLineSwatch: theme === "light" ? "#26161920" : "#00000000"
     readonly property color colorMeterUsed: theme === "light" ? "#FF868A91" : "#FF5A5F6B"
+    readonly property color colorScrollThumb: theme === "light" ? "#FFA0A5AF" : "#FF454A55"
+    readonly property color colorScrollThumbHover: theme === "light" ? "#FF7E838E" : "#FF6B707C"
     readonly property color colorShadow: theme === "light" ? "#5712161F" : "#B3000000"
     readonly property color colorStatusDanger: theme === "light" ? "#FFA9212C" : "#FFFF6B6B"
     readonly property color colorStatusGrowth: theme === "light" ? "#FFA34700" : "#FFE8963A"

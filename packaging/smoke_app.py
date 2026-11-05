@@ -4,6 +4,7 @@
     python packaging/smoke_app.py dist/electron/linux-unpacked/spaceknife
     python packaging/smoke_app.py SpaceKnife-<v>-x86_64.AppImage     # run with --appimage-extract-and-run
     python packaging/smoke_app.py --portable <unpacked portable archive>/SpaceKnife.exe
+    python packaging/smoke_app.py --portable <unpacked macOS archive>/SpaceKnife.app/Contents/MacOS/SpaceKnife
 
 The app starts minimized (SPACEKNIFE_START_MINIMIZED) with an isolated home (temporary folder:
 its own settings, snapshots and Chromium profile; with --portable the data/ folder next to the
@@ -140,8 +141,10 @@ def main() -> int:
     portable = "--portable" in args
     app = Path(next(a for a in args if a != "--portable")).resolve()
     if portable:
-        # the DevTools port file appears in data/electron only if the app found its data folder
-        home = app.parent / "data"
+        # the DevTools port file appears in data/electron only if the app found its data folder,
+        # next to the executable (on macOS next to the app bundle)
+        bundle = app.parents[2] if app.parent.name == "MacOS" and app.parents[2].suffix == ".app" else None
+        home = (bundle.parent if bundle else app.parent) / "data"
         if not home.is_dir():
             raise SystemExit(f"FAIL no portable data folder at {home}")
         smoke(app, home, portable=True)

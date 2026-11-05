@@ -15,6 +15,9 @@ dependencies = [
   "platformdirs>=4.3",
   "zstandard>=0.23",
   "pypinyin>=0.53",
+  # the update check verifies certificates through the system on Windows and macOS
+  # (update.ssl_context); installed everywhere so type checks for every platform find it
+  "truststore>=0.10",
 ]
 
 [project.scripts]

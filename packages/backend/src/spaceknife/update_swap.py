@@ -1,8 +1,9 @@
 """Put a portable copy's new version in place: the backend executable's ``--apply-update`` mode.
 
-「无缝更新」 on a portable copy (the Windows zip, the Linux tar.gz): the app unpacks the new version
-into its updates folder, writes a plan (:class:`Plan`, JSON) and starts *the new version's* backend
-executable with ``--apply-update <plan>``, detached, just before it quits. That process then:
+「无缝更新」 on a portable copy (the Windows zip, the Linux tar.gz, the macOS zip): the app unpacks the
+new version into its updates folder, writes a plan (:class:`Plan`, JSON) and starts *the new
+version's* backend executable with ``--apply-update <plan>``, detached, just before it quits. That
+process then:
 
 1. says ``{"ok": true}`` on stdout once the plan is usable (the app waits for this line: when the
    helper can't start, the app goes on as it was), and lets go of its stdio;
@@ -52,7 +53,7 @@ class Plan:
     app: Path  # the portable copy's folder
     new: Path  # the unpacked new version (the folder with its executable)
     old: Path  # where the replaced files go (the new version's backend clears it)
-    exe: Path  # the app's executable, in ``app``
+    exe: Path  # the app's executable, in ``app`` (on macOS inside SpaceKnife.app in it)
     log: Path
     keep: tuple[str, ...] = ("data",)  # entries of ``app`` that stay where they are
 
@@ -86,10 +87,11 @@ class Plan:
                 raise PlanError(f"{name} is not an absolute path: {p}")
         if not self.app.is_dir():
             raise PlanError(f"no folder {self.app}")
-        if not _same(self.exe.parent, self.app):
+        rel = _inside(self.exe, self.app)
+        if rel is None:
             raise PlanError(f"{self.exe} is not in {self.app}")
-        if not (self.new / self.exe.name).is_file():
-            raise PlanError(f"the new version is incomplete: no {self.exe.name} in {self.new}")
+        if not (self.new / rel).is_file():
+            raise PlanError(f"the new version is incomplete: no {rel.as_posix()} in {self.new}")
         if _same(self.new, self.app) or _same(self.old, self.app):
             raise PlanError("the new and the old folder must not be the app's folder")
         if self.old.exists() and any(self.old.iterdir()):
@@ -98,6 +100,19 @@ class Plan:
 
 def _same(a: Path, b: Path) -> bool:
     return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
+def _inside(path: Path, folder: Path) -> Path | None:
+    """``path`` relative to ``folder`` when it is in it (at any depth), else None."""
+    a, b = os.path.abspath(path), os.path.abspath(folder)
+    try:
+        rel = os.path.relpath(a, b)
+        same = os.path.relpath(os.path.normcase(a), os.path.normcase(b))
+    except ValueError:  # another drive
+        return None
+    if same == os.curdir or same.startswith(os.pardir) or os.path.isabs(same):
+        return None
+    return Path(rel)
 
 
 class Log:

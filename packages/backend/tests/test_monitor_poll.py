@@ -15,7 +15,8 @@ from typing import Any
 import pytest
 
 from spaceknife.monitor.base import Change
-from spaceknife.monitor.poll import DirPoller, PollWatcher, stat_file
+from spaceknife.monitor.poll import DirPoller, PollWatcher, listed_changed, stat_file
+from spaceknife.scan.worker import open_dir
 
 
 class Collector:
@@ -119,6 +120,48 @@ def test_poller_drops_polled_folders_below_a_gone_one(tmp_path: Path) -> None:
     assert len(p) == 0
 
 
+def deep_folder(top: Path, longer_than: int = 5000) -> str:
+    """A folder whose path is longer than PATH_MAX (4,096 bytes on Linux, 1,024 on macOS), made one
+    level at a time relative to the one above: no single call can name it."""
+    name = "d" * 200
+    fd = os.open(top, os.O_RDONLY | os.O_DIRECTORY)
+    path = str(top)
+    try:
+        while len(path) <= longer_than:
+            os.mkdir(name, dir_fd=fd)
+            below = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = below
+            path += "/" + name
+    finally:
+        os.close(fd)
+    return path
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="PATH_MAX of POSIX systems")
+def test_poller_reads_folders_beyond_path_max(tmp_path: Path) -> None:
+    """A folder the scan reached a piece of its path at a time: stat by its path fails
+    (ENAMETOOLONG), inotify cannot watch it, and the poller used to retry that for ever without
+    ever seeing a change. It now reaches the folder the way the scan does."""
+    deep = deep_folder(tmp_path)
+    with pytest.raises(OSError, match="too long"):
+        os.stat(deep)
+    p = DirPoller(str(tmp_path), interval=10, rate=1000)
+    assert p.add(deep)
+    assert p.step(0.0) == []
+    parent, name = deep.rsplit("/", 1)
+    fd = open_dir(parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        st = os.stat(name, dir_fd=fd)
+        os.utime(name, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000_000), dir_fd=fd)
+        assert p.step(p.wake_time()) == [Change("dir", deep, is_dir=True)]
+        os.rmdir(name, dir_fd=fd)
+    finally:
+        os.close(fd)
+    assert p.step(p.wake_time()) == [Change("deleted", deep, is_dir=True)]
+    assert len(p) == 0
+
+
 def test_poller_vanished_before_baseline_is_reported(tmp_path: Path) -> None:
     p = DirPoller(str(tmp_path), interval=1, rate=100)
     p.add(str(tmp_path / "never-there"))
@@ -134,6 +177,52 @@ def test_poller_root_lost(tmp_path: Path) -> None:
     root.rmdir()
     assert p.step(p.wake_time()) == [Change("overflow", str(root), is_dir=True)]
     assert p.root_lost
+
+
+def test_listed_changed() -> None:
+    s = 1_700_000_000
+    ns = s * 1_000_000_000
+    since = ns + 500_000_000  # the scan began half a second into that second
+    assert listed_changed(ns + 600_000_000, s, since)  # modified after the scan began
+    assert listed_changed(ns + 460_000_000, s, since)  # within a tick of it: cannot tell
+    assert not listed_changed(ns + 400_000_000, s, since)  # well before: the listing saw it
+    assert listed_changed(ns + 400_000_000, s - 1, since)  # whole seconds differ
+    assert listed_changed(ns, s, since)  # a whole second: maybe a file system that keeps no more
+    assert not listed_changed(ns, s, since + 3_000_000_000)
+    # the scanners' seconds truncate the double sec + nsec * 1e-9, which can round up
+    assert not listed_changed(ns + 999_999_999, s + 1, since + 10_000_000_000)
+    assert listed_changed(ns + 999_999_999, s, since + 10_000_000_000)
+
+
+def test_poller_baseline_checks_what_the_scan_recorded(tmp_path: Path) -> None:
+    """A folder handed in with the mtime the scan recorded is checked when its baseline is taken:
+    a change made after the scan listed it, before polling began, is reported (``dir``)."""
+    same, moved, recent, plain = (tmp_path / n for n in ("same", "moved", "recent", "plain"))
+    for d in (same, moved, recent, plain):
+        d.mkdir()
+    secs = {d: int(os.stat(d).st_mtime) for d in (same, moved, recent)}
+    later = time.time_ns() + 3600 * 1_000_000_000  # the scan started after every one of these times
+    p = DirPoller(str(tmp_path), interval=60, rate=1000)
+    assert p.add(str(same), secs[same], later)
+    assert p.add(str(moved), secs[moved] - 5, later)  # whole seconds differ
+    assert p.add(str(recent), secs[recent], os.stat(recent).st_mtime_ns)  # changed after the scan began
+    assert p.add(str(plain))  # nothing recorded: the baseline as before
+    assert p.step(0.0) == [Change("dir", str(moved), is_dir=True), Change("dir", str(recent), is_dir=True)]
+    assert p.step(0.0) == []
+
+
+def test_poller_root_checks_what_the_scan_recorded_once(tmp_path: Path) -> None:
+    """The root is polled from the start, before the scan read it: the record the scan hands in
+    later is checked against it once."""
+    p = DirPoller(str(tmp_path), interval=60, rate=1000)
+    assert p.add(str(tmp_path))
+    assert p.step(0.0) == []  # the baseline
+    secs = int(os.stat(tmp_path).st_mtime)
+    later = time.time_ns() + 3600 * 1_000_000_000
+    assert not p.add(str(tmp_path), secs - 5, later)
+    assert p.step(0.0) == [Change("dir", str(tmp_path), is_dir=True)]
+    assert not p.add(str(tmp_path), secs - 5, later)  # once only
+    assert p.step(0.0) == []
 
 
 def test_poller_rename_tree_rekeys_below(tmp_path: Path) -> None:

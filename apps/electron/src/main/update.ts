@@ -34,10 +34,19 @@ const RELEASE_FILES: Partial<Record<InstallKind, RegExp>> = {
   rpm: new RegExp(String.raw`^spaceknife-${VERSION}\.x86_64\.rpm$`),
   appimage: new RegExp(String.raw`^SpaceKnife-${VERSION}-x86_64\.AppImage$`),
 };
+// a portable copy may move to the other architecture: the backend takes the processor's build (an x64
+// copy on Windows on ARM becomes the native one; update.py asset_templates)
+const ARCH = String.raw`(?:x64|arm64)`;
 const PORTABLE: Partial<Record<NodeJS.Platform, RegExp>> = {
-  win32: new RegExp(String.raw`^SpaceKnife-${VERSION}-win-x64-portable\.zip$`),
-  linux: new RegExp(String.raw`^SpaceKnife-${VERSION}-linux-x64-portable\.tar\.gz$`),
+  win32: new RegExp(String.raw`^SpaceKnife-${VERSION}-win-${ARCH}-portable\.zip$`),
+  linux: new RegExp(String.raw`^SpaceKnife-${VERSION}-linux-${ARCH}-portable\.tar\.gz$`),
+  darwin: new RegExp(String.raw`^SpaceKnife-${VERSION}-mac-${ARCH}-portable\.zip$`),
 };
+
+/** The version in a portable archive's name (Windows, Linux or macOS; x64 or arm64), or null. */
+export function portableVersion(name: string): string | null {
+  return new RegExp(String.raw`^SpaceKnife-(${VERSION})-(?:(?:win|mac)-${ARCH}-portable\.zip|linux-${ARCH}-portable\.tar\.gz)$`).exec(name)?.[1] ?? null;
+}
 
 /** The Windows installer's arguments for a silent update in place, electron-builder's own flags:
  *  --updated keeps the data and skips the pages, --force-run starts the new version afterwards. The
@@ -145,7 +154,11 @@ export function swapPlanJson(p: SwapPlan): string {
 
 /** The new version's backend executable in its unpacked files: it does the swap (resources/backend,
  *  electron-builder.yml extraResources). */
-export function swapHelper(staged: string, platform: "win32" | "linux"): string {
+export function swapHelper(staged: string, platform: "win32" | "linux" | "darwin"): string {
+  if (platform === "darwin") return posix.join(staged, MAC_APP, "Contents", "Resources", "backend", "spaceknife-backend");
   const path = platform === "win32" ? win32 : posix;
   return path.join(staged, "resources", "backend", platform === "win32" ? "spaceknife-backend.exe" : "spaceknife-backend");
 }
+
+/** The app bundle in a macOS portable copy's folder (tools/build_package.py make_portable). */
+export const MAC_APP = "SpaceKnife.app";

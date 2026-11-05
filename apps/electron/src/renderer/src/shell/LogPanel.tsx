@@ -10,6 +10,10 @@ import { byLang, getLang, t } from "@/lib/i18n";
 import { Icon, Kbd } from "@/ui/Icon";
 
 const ROW_H = 20;
+/** The sources the backend sends (events.py `Source`): their names size the source column. */
+const SOURCES = ["scan", "perm", "monitor", "delete", "snapshot", "export", "system"];
+const LEVELS: LogEntry["level"][] = ["INFO", "WARNING", "ERROR"];
+
 /** An event's source in the current language (read at render time, M7.5); unknown ones as they are. */
 function sourceText(source: string): string {
   switch (source) {
@@ -209,8 +213,8 @@ function LogRow({ id, entry: e, top, active, onPick }: { id: string; entry: LogE
   return (
     <div id={id} role="option" aria-selected={active} className={`log-row${active ? " on" : ""} ${e.level.toLowerCase()}`} style={{ top }} onMouseDown={onPick} title={e.message}>
       <span className="log-time mono">{hhmmss}</span>
-      <span className="log-level">{levelText(e.level)}</span>
-      <span className="log-source">{sourceText(e.source)}</span>
+      <FitCell className="log-level" text={levelText(e.level)} names={LEVELS.map(levelText)} />
+      <FitCell className="log-source" text={sourceText(e.source)} names={SOURCES.map(sourceText)} />
       <span className="log-msg">{renderMessage(e.message, e.path)}</span>
       {e.path && (
         <span className="log-actions">
@@ -225,6 +229,24 @@ function LogRow({ id, entry: e, top, active, onPick }: { id: string; entry: LogE
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * A cell as wide as the longest of `names` in the current language, so a column lines up in every
+ * row whatever the language: the names sit stacked out of sight and size the cell. `text` fills it,
+ * cut with "…" when longer (a source the panel has no name for).
+ */
+function FitCell({ className, text, names }: { className: string; text: string; names: string[] }) {
+  return (
+    <span className={`log-fit ${className}`}>
+      {names.map((name, i) => (
+        <span key={i} className="log-fit-size" aria-hidden="true">
+          {name}
+        </span>
+      ))}
+      <span className="log-fit-text">{text}</span>
+    </span>
   );
 }
 

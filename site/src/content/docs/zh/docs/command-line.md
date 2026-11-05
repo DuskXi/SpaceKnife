@@ -75,12 +75,13 @@ spaceknife-backend scan /home/lenny --top 20 --depth 3
 | `--save 文件` | — | 另外把快照保存到这个文件 |
 | `--no-snapshot` | — | 不自动保存快照 |
 | `--profile` | — | 另外输出「耗时分解」（见下文） |
+| `--mft` | 关 | Windows：读取卷的 $MFT（和应用里一样的 MFT 快速扫描），不再逐个文件夹列目录。只能扫一个完整的本地 NTFS 卷，例如 `C:\`；会请求一次管理员权限 |
 
 要点：
 
 - 一条命令里写多个路径，就是一次有多个根的扫描，和在启动页同时选几个位置一样。
 - 扫描完成后保存到应用的快照文件夹。命令行在那里为每个位置保留最近 10 个快照，更早的每周留一个。
-- 命令行总是逐目录硬扫描；MFT 快速扫描只在应用里可用。
+- 不加 `--mft` 时命令行总是逐目录硬扫描。加了 `--mft`，MFT 快速扫描读不了的路径（只是一个文件夹而不是整个卷；ReFS、FAT、exFAT、Btrfs 卷；网络盘；一次写了多个路径；不是 Windows）照样逐目录硬扫描，开始前先输出「不支持 MFT 快速扫描：……」并写明原因；拒绝了管理员授权时也一样改用硬扫描并说明原因。这时「扫描结果」里写「方式 硬扫描（……）」；读了 $MFT 的写「方式 MFT 快速扫描」，`--profile` 改为列出它的几个阶段（启动只读助手、读取并解析 $MFT、建树），而不是列目录线程。
 - `--disk-limit idle` 也会使用系统的低 I/O 优先级，和应用里的「空闲」档一样。限速的原理见[扫描速度与磁盘负载](../performance/)。
 - 退出码：`0` 扫描已执行；`2` 无法开始扫描（例如路径不存在）；`130` 按了 <kbd>Ctrl</kbd>+<kbd>C</kbd>。
 
@@ -96,6 +97,12 @@ spaceknife-backend scan "D:\" --disk-limit quiet
 
 ```bash
 spaceknife-backend scan /home/lenny --disk-limit idle
+```
+
+读 $MFT 扫整个系统盘，比逐个文件夹快得多（Windows，需要管理员权限）：
+
+```bash
+spaceknife-backend scan "C:\" --mft
 ```
 
 只测速度，不留下快照：

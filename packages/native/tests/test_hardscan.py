@@ -12,7 +12,9 @@ import contextlib
 import ctypes
 import dataclasses
 import errno
+import json
 import os
+import pickle
 import stat
 import struct
 import subprocess
@@ -168,9 +170,107 @@ def test_thread_count_does_not_change_output(tree: Path, threads: int) -> None:
     compare([((0, 1, 0), str(tree), 0)], (root_opts(tree),), threads=threads)
 
 
+# a fresh process: the walker reads its width settings from the environment once
+_WIDTH_CHILD = """
+import json, pickle, sys
+import spaceknife_native as n
+opts = json.loads(sys.argv[2])
+res = n.scan_slice([((0, 1, 0), sys.argv[1], 0)], opts)
+sys.stdout.buffer.write(pickle.dumps((n.listing_threads(), res)))
+"""
+
+
+def _width_child(tree: Path, env: dict[str, str]) -> tuple[dict[str, Any], dict[str, Any]]:
+    opts = nopts(SliceOptions(roots=(root_opts(tree),), **EVERYTHING), threads=0)
+    clean = {
+        k: v for k, v in os.environ.items() if not k.startswith(("SPACEKNIFE_SCAN_", "SPACEKNIFE_WALK_"))
+    }
+    out = subprocess.run(
+        [sys.executable, "-c", _WIDTH_CHILD, str(tree), json.dumps(opts)],
+        env={**clean, **env},
+        capture_output=True,
+        check=True,
+        timeout=120,
+    )
+    info, res = pickle.loads(out.stdout)  # our own child's output
+    return info, res
+
+
+@pytest.mark.parametrize(
+    ("env", "mode", "width"),
+    [
+        ({"SPACEKNIFE_SCAN_THREADS": "1"}, "fixed", 1),
+        ({"SPACEKNIFE_SCAN_THREADS": "3"}, "fixed", 3),
+        ({"SPACEKNIFE_SCAN_THREADS": "500"}, "fixed", 64),
+        ({"SPACEKNIFE_WALK_ADAPT": "0"}, "start", None),
+        ({"SPACEKNIFE_WALK_MAX": "8"}, "adaptive", None),
+        ({}, "adaptive", None),
+    ],
+)
+def test_the_width_does_not_change_the_output(
+    tree: Path, env: dict[str, str], mode: str, width: int | None
+) -> None:
+    """The shared listing threads (threads 0) at every width setting list exactly what the worker
+    lists, column by column."""
+    info, res = _width_child(tree, env)
+    assert info["mode"] == mode
+    if width is not None:
+        assert info["start"] == info["width"] == info["max"] == info["threads"] == width
+    else:
+        assert info["least"] <= info["start"] <= info["cold"] <= info["max"]
+        most = max(8, info["start"]) if "SPACEKNIFE_WALK_MAX" in env else 64
+        # POSIX: also at most half the descriptors left below RLIMIT_NOFILE
+        assert info["max"] == most or (not IS_WINDOWS and info["start"] <= info["max"] < most)
+    w = worker.scan_slice([((0, 1, 0), str(tree), 0)], SliceOptions(roots=(root_opts(tree),), **EVERYTHING))
+    assert_same(w, res)
+
+
+@pytest.mark.parametrize("limit", [1, 2, 5])
+def test_a_gate_holds_the_listings_in_flight(tree: Path, limit: int) -> None:
+    """A ListingGate: never more listings at once than its limit, on the shared listing threads or
+    a pool of the call's own; the output is the worker's."""
+    for threads in (0, 7):
+        gate = native.ListingGate(limit)
+        compare([((0, 1, 0), str(tree), 0)], (root_opts(tree),), threads=threads, gate=gate)
+        busy, peak, _waited = gate.window()
+        assert 1 <= peak <= limit and busy > 0 and gate.inflight == 0
+    assert peak == limit or limit > 2  # a varied tree keeps two listings busy at least
+    with pytest.raises(TypeError, match="ListingGate"):
+        native.scan_slice([((0, 1, 0), str(tree), 0)], {"roots": [{}], "gate": object()})
+
+
+def test_a_paused_gate_starts_no_listing_that_can_wait(tree: Path) -> None:
+    """Paused: the tasks come back as they were, nothing listed; once resumed, the worker's output."""
+    gate = native.ListingGate(4)
+    gate.set(paused=True)
+    assert gate.paused and gate.limit == 4
+    tasks: list[Task] = [((0, 1, 0), str(tree), 0), ((0, 2, 0), str(tree / "empty"), 0)]
+    opts = {**nopts(SliceOptions(roots=(root_opts(tree),), **EVERYTHING)), "gate": gate}
+    res = native.scan_slice(tasks, opts)
+    assert res["paths"] == [] and not res["errors"]
+    assert [t[1] for t in res["frontier"]] == [str(tree), str(tree / "empty")]
+    assert gate.window()[1] == 0
+    gate.set(paused=False, limit=0)
+    assert gate.limit == 1  # at least one
+    compare(tasks[:1], (root_opts(tree),), gate=gate)
+
+
+def test_listing_threads_and_cpus() -> None:
+    info = native.listing_threads()
+    assert 1 <= info["cpus"] == native.cpu_count() <= (os.cpu_count() or 1)
+    assert info["mode"] in ("adaptive", "fixed", "start")
+    assert info["low"] <= info["width"] <= info["high"] or info["mode"] != "adaptive"
+    assert info["threads"] >= min(info["width"], info["start"])
+    after = native.listing_threads(reset=True)
+    assert native.listing_threads()["low"] == native.listing_threads()["high"] == after["width"]
+
+
 def test_root_options_apply(tree: Path) -> None:
     scan_one(tree, cluster_size=8192, resident_max=512)
     scan_one(tree, cluster_size=0, resident_max=0)
+    if IS_WINDOWS:  # the listing rule as each file system has it (whatever this volume is)
+        for fs in ("NTFS", "ReFS", "Btrfs"):
+            scan_one(tree, cluster_size=4096, listed_alloc=fs)
 
 
 def test_several_tasks_roots_and_failures(tmp_path: Path, tree: Path) -> None:
@@ -319,6 +419,110 @@ def _names(res: SliceResult) -> list[str]:
         out.append(res.name_blob[off : off + n].decode("utf-8", worker.NAME_ERRORS))
         off += n
     return out
+
+
+def _std_alloc(path: Path) -> int:
+    """FileStandardInfo's AllocationSize, as the file system counts the file."""
+    got = worker._ask_alloc(str(path))
+    assert got is not None
+    return got
+
+
+@pytest.mark.skipif(not IS_WINDOWS, reason="Windows allocation sizes")
+def test_windows_listed_alloc_is_what_the_file_system_counts(tmp_path: Path) -> None:
+    """With ``listed_alloc`` both walkers take a file's size on disk from its listing entry (asking
+    the file where the entry lags: sparse and compressed files just written; WOF files), and give
+    what the file system counts: data kept in the file's record takes no cluster, a sparse file
+    only its written clusters, a compressed file its compressed clusters."""
+    from spaceknife.scan.volume import volume_for
+
+    vol = volume_for(str(tmp_path))
+    fs = {"ntfs": "NTFS", "refs": "ReFS", "btrfs": "Btrfs"}.get(vol.fs_type.lower())
+    if fs is None:
+        pytest.skip(f"listing rule not measured on {vol.fs_type}")
+    root = tmp_path / "listed"
+    root.mkdir()
+    for n in (0, 100, 700, 800, 3000, 5000):
+        (root / f"w_{n:05d}").write_bytes(b"x" * n)
+    with open(root / "setlen_100k", "wb") as f:
+        f.truncate(100_000)
+    sparse = root / "sparse.bin"
+    sparse.write_bytes(b"")
+    have_sparse = _fsctl(sparse, 0x900C4)  # FSCTL_SET_SPARSE
+    with open(sparse, "r+b") as f:  # holes by seeking past the end (truncate would write zeros)
+        for off in (0, 8 << 20, (16 << 20) - 4096):
+            f.seek(off)
+            f.write(b"\xa5" * 4096)
+        f.flush()
+        os.fsync(f.fileno())  # written out: the file's allocation is final, its listing entry lags
+    text = (b"SpaceKnife listed allocation test, compressible text. " * 20000)[: 1 << 20]
+    compressed = root / "compressed.bin"
+    compressed.write_bytes(b"")
+    have_comp = _fsctl(compressed, 0x9C040, (1).to_bytes(2, "little"))  # FSCTL_SET_COMPRESSION
+    with open(compressed, "r+b") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    wof = root / "wof.bin"
+    wof.write_bytes(text)
+    have_wof = fs == "NTFS" and (
+        subprocess.run(["compact.exe", "/c", "/exe:xpress4k", str(wof)], capture_output=True).returncode == 0
+    )
+    settle(root)
+    res = scan_one(root, cluster_size=vol.cluster_size, resident_max=512, listed_alloc=fs)
+    alloc = dict(zip(_names(res), res.cols["alloc"].tolist(), strict=True))
+    cluster = vol.cluster_size
+    for name, got in alloc.items():
+        counted = _std_alloc(root / name)
+        want = 0 if counted % cluster else counted
+        assert got == want, (name, got, counted)
+    if fs == "NTFS":
+        assert alloc["w_00700"] == 0 and alloc["w_00800"] == cluster  # resident, then one cluster
+    if have_sparse:
+        assert 0 < alloc["sparse.bin"] < 1 << 20
+    if have_comp and fs == "NTFS":
+        assert 0 < alloc["compressed.bin"] < 1 << 20
+    if have_wof:
+        assert 0 < alloc["wof.bin"] < 1 << 20
+    # the estimate (no listing rule) stays as it was: 700 B past resident_max, a whole cluster
+    old = scan_one(root, cluster_size=cluster, resident_max=512)
+    old_alloc = dict(zip(_names(old), old.cols["alloc"].tolist(), strict=True))
+    assert old_alloc["w_00700"] == -(-700 // cluster) * cluster
+
+
+def test_listed_alloc_is_for_local_ntfs_refs_and_btrfs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from spaceknife.scan import scanner as scanner_mod
+    from spaceknife.scan.volume import VolumeInfo
+
+    def vol(fs: str, remote: bool = False) -> VolumeInfo:
+        return VolumeInfo("X:\\", "X:", fs, "", 0, 0, 4096, remote, False)
+
+    monkeypatch.setattr(scanner_mod, "sys", SimpleNamespace(**{**vars(sys), "platform": "win32"}))
+    monkeypatch.delenv("SPACEKNIFE_WIN_LISTED_ALLOC", raising=False)
+    assert [scanner_mod.listed_alloc(vol(f)) for f in ("NTFS", "ReFS", "btrfs", "exFAT", "FAT32")] == [
+        "NTFS",
+        "ReFS",
+        "Btrfs",
+        "",
+        "",
+    ]
+    assert scanner_mod.listed_alloc(vol("NTFS", remote=True)) == ""
+    assert scanner_mod.listed_alloc(None) == ""
+    monkeypatch.setenv("SPACEKNIFE_WIN_LISTED_ALLOC", "0")
+    assert scanner_mod.listed_alloc(vol("NTFS")) == ""
+    monkeypatch.setattr(scanner_mod, "sys", SimpleNamespace(**{**vars(sys), "platform": "linux"}))
+    monkeypatch.delenv("SPACEKNIFE_WIN_LISTED_ALLOC")
+    assert scanner_mod.listed_alloc(vol("NTFS")) == ""
+
+
+def test_unknown_listed_alloc_is_refused(tree: Path) -> None:
+    tasks: list[Task] = [((0, 1, 0), str(tree), 0)]
+    opts = SliceOptions(roots=(root_opts(tree, listed_alloc="FAT32"),), **EVERYTHING)
+    with pytest.raises(ValueError, match="listed_alloc"):
+        native.scan_slice(tasks, nopts(opts))
+    if IS_WINDOWS:
+        with pytest.raises(ValueError, match="listed_alloc"):
+            worker.scan_slice(tasks, opts)
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="Windows long paths")
@@ -577,14 +781,17 @@ def test_windows_case_twins_are_listed_by_their_file_ids(tmp_path: Path) -> None
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
-def test_windows_case_twins_never_wait_in_the_frontier(tmp_path: Path) -> None:
+@pytest.mark.parametrize("threads", [1, 0])
+def test_windows_case_twins_never_wait_in_the_frontier(tmp_path: Path, threads: int) -> None:
     """Past the budget a folder opened by id, and everything below it, is listed in the same call:
     as a task its path would open the twin. At budget 0 (a relist of one folder) the twins wait
     like any folder. Past the cap on what is listed after the budget, folders below one opened by
-    id are errors, never tasks."""
+    id are errors, never tasks. On one thread (threads 1) the order is known, and so is which twin
+    the cap leaves out; on the shared listing threads (threads 0) the twins are listed side by side,
+    and what holds in any order is checked."""
     cs = build_twins(tmp_path / "twins")
     tasks: list[Task] = [((0, 1, 0), str(cs), 0)]
-    opts = {"roots": [{}], "max_entries": 1, "threads": 1, "_fold_strict": True}
+    opts = {"roots": [{}], "max_entries": 1, "threads": threads, "_fold_strict": True}
     res = native.scan_slice(tasks, opts)
     check_slice(res, tasks)
     assert [p for _ref, p, _root in res["frontier"]] == [str(cs / "plain")]
@@ -604,11 +811,24 @@ def test_windows_case_twins_never_wait_in_the_frontier(tmp_path: Path) -> None:
     native._open_stats(True)
     res = native.scan_slice(tasks, {**opts, "_pinned_cap": 2})
     check_slice(res, tasks)
-    assert native._open_stats(True)["pinned_cap_hit"] >= 3
+    hits = native._open_stats(True)["pinned_cap_hit"]
     capped = {p for _ref, p, msg in res["errors"] if msg == worker.CAP_ERROR}
-    assert capped == {str(cs / "a" / n) for n in ("sub", "x", "X")}
     waiting = {p for _ref, p, _root in res["frontier"]}
-    assert {str(cs / "b"), str(cs / "plain")} <= waiting <= {str(cs / n) for n in ("A", "b", "plain")}
+    if threads == 1:
+        assert hits >= 3
+        assert capped == {str(cs / "a" / n) for n in ("sub", "x", "X")}
+        assert {str(cs / "b"), str(cs / "plain")} <= waiting <= {str(cs / n) for n in ("A", "b", "plain")}
+    else:
+        # the cap is the only error, and only below a folder opened by id (`a`, `b`); nothing below
+        # them waits as a task; the twins themselves may wait (as tasks they are checked by name)
+        below = (str(cs / "a") + "\\", str(cs / "b") + "\\")
+        assert {msg for _ref, _path, msg in res["errors"]} <= {worker.CAP_ERROR}
+        assert all(p.startswith(below) for p in capped) and hits >= len(capped)
+        assert not any(p.startswith(below) for p in waiting)
+        assert str(cs / "plain") in waiting <= {str(cs / n) for n in ("A", "a", "b", "plain")}
+        listed = set(res["paths"])
+        for name in ("A", "a", "b"):  # each twin listed or waiting, never lost
+            assert (str(cs / name) in listed) != (str(cs / name) in waiting), name
 
 
 @pytest.mark.skipif(not IS_WINDOWS, reason="case-sensitive NTFS folders")
@@ -1245,6 +1465,93 @@ def test_sliced_native_scan_builds_the_same_tree(tree: Path, monkeypatch: pytest
     nat_store = scan_store(tree)
     assert len(nat_store) == len(py_store)
     assert tree_snapshot(nat_store) == tree_snapshot(py_store)
+
+
+def _wide_tree(root: Path, fan: int = 5, depth: int = 4) -> Path:
+    level = [root]
+    root.mkdir(parents=True)
+    for _ in range(depth):
+        nxt = []
+        for d in level:
+            for i in range(fan):
+                sub = d / f"d{i}"
+                sub.mkdir()
+                (sub / "f.txt").write_bytes(b"x" * i)
+                nxt.append(sub)
+        level = nxt
+    settle(root)
+    return root
+
+
+def test_the_governors_gate_follows_its_concurrency_and_pause() -> None:
+    """IoGovernor.listing_gate: the gate's limit is the governor's concurrency, its pause the
+    governor's; the status counts listings in flight."""
+    from spaceknife.io import IoGovernor
+    from spaceknife.io.disks import DiskId, DiskRef
+
+    gov = IoGovernor(DiskRef(DiskId("fake-gate"), media="sata_ssd"), max_workers=64)
+    gov.set_level("max")
+    gate = gov.listing_gate()
+    assert gate is gov.listing_gate() and gate.limit == gov.concurrency == 64
+    gov.set_manual_concurrency(3)
+    assert gate.limit == 3
+    gov.pause("scan-a")
+    assert gate.paused
+    gov.pause("scan-b")
+    gov.resume("scan-a")
+    assert gate.paused  # still paused by the other owner
+    gov.resume("scan-b")
+    assert not gate.paused
+    gov.set_manual_concurrency(None)
+    assert gate.limit == 64
+    status = gov.status()
+    assert status.inflight == 0
+    assert status.concurrency == min(64, native.listing_threads()["width"])  # auto: within the width
+    gov.set_manual_concurrency(40)
+    assert gov.status().concurrency == 40  # manual: as set
+
+
+def test_the_scanner_holds_the_walkers_listings_to_the_disk_load_limit(tmp_path: Path) -> None:
+    """A scan on the shared listing threads with a governor: never more listings in flight than the
+    governor's concurrency, none started while paused, and the tree is the worker's."""
+    from spaceknife.io import IoGovernor
+    from spaceknife.io.disks import DiskId, DiskRef
+
+    root = _wide_tree(tmp_path / "wide")  # 780 folders
+    py_store = scan_store(root)
+    gov = IoGovernor(DiskRef(DiskId("fake-scan"), media="sata_ssd"), max_workers=64)
+    gov.set_level("max")
+    gov.set_manual_concurrency(2)
+    gate = gov.listing_gate()
+    pool = ThreadPoolExecutor(max_workers=4)
+    paused_listings: list[int] = []
+    try:
+        scanner = Scanner(
+            [str(root)], executor=pool, concurrency=4, slicer=native_slicer(), batch_tasks=8, budget_s=0.001
+        )
+        scanner.governor = gov
+
+        async def run() -> ScanState:
+            task = asyncio.create_task(scanner.run())
+            await asyncio.sleep(0.005)
+            if not task.done():
+                scanner.pause()
+                assert gate.paused
+                await asyncio.sleep(0.05)  # what was listing when it paused has finished by now
+                gate.window()
+                await asyncio.sleep(0.1)
+                paused_listings.append(gate.window()[1])
+                scanner.resume()
+                assert not gate.paused
+            return (await task).state
+
+        assert asyncio.run(run()) == ScanState.DONE
+    finally:
+        pool.shutdown()
+    _busy, peak, _waited = gate.window()
+    assert peak <= 2 and gate.inflight == 0
+    assert paused_listings in ([], [0])
+    assert tree_snapshot(scanner.store) == tree_snapshot(py_store)
 
 
 def test_result_arrays_are_writeable(tree: Path) -> None:
