@@ -1,0 +1,13 @@
+@name=First level folders
+# SpaceSniffer 2.0.5.18 的内置模板（语法见 docs/export-templates.md）
+@file=First level.txt
+@blocks=folders
+@sort=size
+@order=desc
+@detail
+{script}
+{   if {<%nestinglevel%>} == {1}
+  ? {   if {<%isfolder%>} == {true}
+      ? {{&br}<%pathfile%> [<%disksize%>]{&br}}
+    }
+}

@@ -1,0 +1,1701 @@
+# SpaceKnife 内置洞察规则（格式见 docs/insights.md）。
+#
+# 优先级分档：10 系统文件 · 5 应用 / 虚拟机 / 游戏 / 聊天数据的整个目录（里面的内容都归它）
+# · 1 开发依赖容器（node_modules、虚拟环境、.git）· 0 默认 · -5 宽泛的容器与通用文件类型
+# · -10 通用的构建目录名（build、dist、target）。
+# 同一优先级时离得最近（最深）的匹配优先，再按模式的具体程度。
+# 文案：title / note / reason 为简体中文，i18n.en 为英文；说明它是什么、能否清理、怎样清理。
+
+version = 1
+
+# ============================================================================================
+# 虚拟机与容器（vm）
+# ============================================================================================
+
+[[rule]]
+id = "docker-desktop"
+kind = "vm"
+title = "Docker Desktop 虚拟磁盘"
+app = "Docker Desktop"
+note = "Docker 数据"
+cleanup = "tool"
+command = "docker system prune"
+reason = "Docker Desktop 的镜像、容器、卷和构建缓存都存放在这里的 vhdx 虚拟磁盘中。删除镜像或容器后 vhdx 不会自动缩小，先在 Docker Desktop 中清理，再压缩虚拟磁盘；直接删除 vhdx 会丢失全部镜像和容器。"
+platforms = "windows"
+paths = ["AppData/Local/Docker", "?:/ProgramData/DockerDesktop"]
+priority = 5
+i18n.en.title = "Docker Desktop virtual disk"
+i18n.en.note = "Docker data"
+i18n.en.reason = "Docker Desktop keeps images, containers, volumes and build cache inside the .vhdx virtual disks here. The disk does not shrink when you delete images or containers: clean up in Docker Desktop first, then compact the virtual disk. Deleting the .vhdx loses every image and container."
+
+[[rule]]
+id = "docker-desktop-mac"
+kind = "vm"
+title = "Docker Desktop 虚拟磁盘"
+app = "Docker Desktop"
+note = "Docker 数据"
+cleanup = "tool"
+command = "docker system prune"
+reason = "Docker Desktop 的镜像、容器和卷都在 Docker.raw 虚拟磁盘里。它是稀疏文件，访达显示的大小可能远大于实际占用；用 docker system prune 清理，或在「设置 › 资源」中调小磁盘上限。"
+platforms = "macos"
+paths = ["Library/Containers/com.docker.docker"]
+priority = 5
+i18n.en.title = "Docker Desktop virtual disk"
+i18n.en.note = "Docker data"
+i18n.en.reason = "Docker Desktop keeps images, containers and volumes in the Docker.raw virtual disk. It is a sparse file, so Finder may show far more than it really occupies; clean up with docker system prune, or lower the disk limit in Settings › Resources."
+
+[[rule]]
+id = "container-engine"
+kind = "vm"
+title = "容器引擎数据"
+app = "Docker / Podman"
+note = "容器数据"
+cleanup = "tool"
+command = "docker system prune"
+reason = "Docker、containerd 或 Podman 的镜像层、容器和卷。不要直接删除这里的文件，否则容器引擎会损坏；用 docker system prune（Podman：podman system prune）清理不再使用的镜像和容器。"
+platforms = "linux"
+paths = ["/var/lib/{docker,containerd,containers}", ".local/share/{docker,containers}"]
+priority = 5
+i18n.en.title = "Container engine data"
+i18n.en.note = "Container data"
+i18n.en.reason = "Image layers, containers and volumes of Docker, containerd or Podman. Deleting files here directly corrupts the engine; use docker system prune (Podman: podman system prune) to remove unused images and containers."
+
+[[rule]]
+id = "wsl-distro-disk"
+kind = "vm"
+title = "WSL 发行版虚拟磁盘"
+app = "WSL"
+note = "WSL 磁盘"
+cleanup = "tool"
+command = "wsl --shutdown"
+reason = "一个 WSL 发行版的整个 Linux 文件系统。在发行版里删除文件后 vhdx 不会自动缩小，可以先 wsl --shutdown 再压缩，或开启稀疏模式；直接删除会丢失该发行版的全部数据，不用的发行版用 wsl --unregister 移除。"
+platforms = "windows"
+node = "file"
+names = ["ext4.vhdx"]
+i18n.en.title = "WSL distribution virtual disk"
+i18n.en.note = "WSL disk"
+i18n.en.reason = "The whole Linux file system of one WSL distribution. The .vhdx does not shrink when you delete files inside it: run wsl --shutdown and compact it, or enable sparse mode. Deleting it loses everything in that distribution; remove a distribution you no longer use with wsl --unregister."
+
+[[rule]]
+id = "hyperv-vms"
+kind = "vm"
+title = "Hyper-V 虚拟机"
+app = "Hyper-V"
+note = "虚拟机"
+cleanup = "tool"
+reason = "Hyper-V 虚拟机的虚拟磁盘与配置。在 Hyper-V 管理器中删除虚拟机不会删除磁盘文件，确认不再使用后再删除；.avhdx 是检查点，要在管理器里删除或合并，不要直接删。"
+platforms = "windows"
+paths = ["Users/Public/Documents/Hyper-V", "?:/ProgramData/Microsoft/Windows/{Hyper-V,Virtual Hard Disks}"]
+priority = 5
+i18n.en.title = "Hyper-V virtual machines"
+i18n.en.note = "Virtual machine"
+i18n.en.reason = "Virtual disks and configuration of Hyper-V virtual machines. Deleting a VM in Hyper-V Manager leaves its disks behind; delete them once you are sure they are unused. .avhdx files are checkpoints: delete or merge them in the manager, not by hand."
+
+[[rule]]
+id = "virtualbox-vms"
+kind = "vm"
+title = "VirtualBox 虚拟机"
+app = "VirtualBox"
+note = "虚拟机"
+cleanup = "tool"
+reason = "VirtualBox 虚拟机的虚拟磁盘（.vdi 等）、快照和日志。在 VirtualBox 中选择「删除 › 删除所有文件」可以连同磁盘一起移除；快照请在快照管理里删除。"
+paths = ["VirtualBox VMs"]
+priority = 5
+i18n.en.title = "VirtualBox virtual machines"
+i18n.en.note = "Virtual machine"
+i18n.en.reason = "Virtual disks (.vdi and others), snapshots and logs of VirtualBox machines. Remove a machine together with its disks with Remove › Delete all files in VirtualBox; delete snapshots in the snapshot manager."
+
+[[rule]]
+id = "vmware-vms"
+kind = "vm"
+title = "VMware 虚拟机"
+app = "VMware"
+note = "虚拟机"
+cleanup = "tool"
+reason = "VMware Workstation / Fusion 虚拟机的虚拟磁盘（.vmdk）、快照和内存文件。在 VMware 中用「从磁盘中删除」整台移除；快照请在快照管理器里删除，不要直接删文件。"
+paths = ["Documents/Virtual Machines", "Virtual Machines.localized", "/home/*/vmware"]
+priority = 5
+i18n.en.title = "VMware virtual machines"
+i18n.en.note = "Virtual machine"
+i18n.en.reason = "Virtual disks (.vmdk), snapshots and memory files of VMware Workstation / Fusion machines. Remove a whole machine with Delete from Disk in VMware; delete snapshots in the snapshot manager, not by deleting files."
+
+[[rule]]
+id = "parallels-vms"
+kind = "vm"
+title = "Parallels 虚拟机"
+app = "Parallels Desktop"
+note = "虚拟机"
+cleanup = "tool"
+reason = "Parallels Desktop 的虚拟机包，里面是虚拟磁盘与快照。在 Parallels 控制中心删除虚拟机，或用「回收磁盘空间」缩小虚拟磁盘。"
+platforms = "macos"
+paths = ["/Users/*/Parallels"]
+names = ["*.pvm"]
+priority = 5
+i18n.en.title = "Parallels virtual machines"
+i18n.en.note = "Virtual machine"
+i18n.en.reason = "Parallels Desktop virtual machine bundles holding virtual disks and snapshots. Delete a machine in Parallels Control Center, or shrink its disk with Reclaim disk space."
+
+[[rule]]
+id = "utm-vms"
+kind = "vm"
+title = "UTM 虚拟机"
+app = "UTM"
+note = "虚拟机"
+cleanup = "tool"
+reason = "UTM 虚拟机包，里面是虚拟磁盘（qcow2）。在 UTM 中删除虚拟机即可释放空间。"
+platforms = "macos"
+paths = ["Library/Containers/com.utmapp.UTM"]
+names = ["*.utm"]
+priority = 5
+i18n.en.title = "UTM virtual machines"
+i18n.en.note = "Virtual machine"
+i18n.en.reason = "UTM virtual machine bundles holding qcow2 virtual disks. Delete the machine in UTM to free the space."
+
+[[rule]]
+id = "virtual-disk-file"
+kind = "vm"
+title = "虚拟磁盘文件"
+note = "虚拟磁盘"
+cleanup = "review"
+reason = "虚拟机或容器使用的虚拟磁盘镜像。先确认是哪个虚拟机在用：直接删除会丢失其中的全部数据，正在使用的磁盘也无法删除。"
+node = "file"
+names = ["*.{vhdx,vhd,avhdx,vmdk,vdi,qcow2}"]
+priority = -5
+i18n.en.title = "Virtual disk file"
+i18n.en.note = "Virtual disk"
+i18n.en.reason = "A virtual disk image used by a virtual machine or container. Find out which machine uses it first: deleting it loses everything inside, and a disk in use cannot be deleted."
+
+[[rule]]
+id = "android-avd"
+kind = "vm"
+title = "Android 模拟器"
+app = "Android Studio"
+note = "模拟器"
+cleanup = "tool"
+reason = "Android 模拟器（AVD）的系统镜像副本与用户数据，每台通常有几 GB。在 Android Studio 的 Device Manager 中删除不用的设备，或用「Wipe Data」清空数据。"
+paths = [".android/avd"]
+priority = 5
+i18n.en.title = "Android emulators"
+i18n.en.note = "Emulator"
+i18n.en.reason = "System image copies and user data of Android emulators (AVDs), often several GB each. Delete devices you no longer use in Android Studio's Device Manager, or Wipe Data to empty one."
+
+[[rule]]
+id = "ios-simulators"
+kind = "vm"
+title = "iOS 模拟器"
+app = "Xcode"
+note = "模拟器"
+cleanup = "tool"
+command = "xcrun simctl delete unavailable"
+reason = "Xcode 各个模拟器设备的数据。用 xcrun simctl delete unavailable 删除已失效的设备，在 Xcode 的「设备与模拟器」里删除不用的模拟器。"
+platforms = "macos"
+paths = ["Library/Developer/CoreSimulator/Devices"]
+priority = 5
+i18n.en.title = "iOS simulators"
+i18n.en.note = "Simulator"
+i18n.en.reason = "Data of Xcode's simulator devices. xcrun simctl delete unavailable removes devices of runtimes that are gone; delete simulators you no longer use in Xcode's Devices and Simulators window."
+
+# ============================================================================================
+# 开发：依赖与构建输出（build）
+# ============================================================================================
+
+[[rule]]
+id = "node-modules"
+kind = "build"
+title = "node_modules 依赖目录"
+app = "Node.js"
+note = "依赖安装"
+cleanup = "safe"
+reason = "项目通过 npm / pnpm / yarn 安装的依赖包。删除是安全的，在项目里重新运行 npm install（或 pnpm / yarn install）即可恢复；不再开发的项目可以直接删掉。"
+node = "dir"
+names = ["node_modules"]
+exclude = [
+  "?:/{Program Files,Program Files (x86),ProgramData,Windows}/**", "AppData/Local/Programs/**",
+  "AppData/Roaming/{npm,nvm}/**", "{.nvm,.npm-global,.volta,.fnm}/**", "pnpm/global/**",
+  "{.npm,npm-cache}/**",
+  "/{usr,opt,snap,Applications,System,Library}/**",
+]
+priority = 1
+i18n.en.title = "node_modules dependencies"
+i18n.en.note = "Dependency install"
+i18n.en.reason = "Packages a project installed with npm / pnpm / yarn. Deleting is safe: run npm install (or pnpm / yarn install) in the project to restore them; for projects you no longer work on, simply delete it."
+
+[[rule]]
+id = "python-venv"
+kind = "build"
+title = "Python 虚拟环境"
+app = "Python"
+note = "虚拟环境"
+cleanup = "safe"
+reason = "项目的 Python 虚拟环境：安装的依赖包和一份解释器。可以删除，之后按项目的依赖文件重建（uv sync、pip install -r requirements.txt 等）；删除前确认没有手工装进去、又无处可查的包。"
+node = "dir"
+names = [".venv", "venv", ".tox", ".nox"]
+exclude = [
+  "?:/{Program Files,Program Files (x86),ProgramData,Windows}/**", "AppData/Local/Programs/**",
+  "/{usr,opt,snap,Applications,System,Library}/**",
+  "{Lib,lib}/venv", "{lib,lib64}/python*/venv",  # the standard library's own venv package
+]
+priority = 1
+i18n.en.title = "Python virtual environment"
+i18n.en.note = "Virtual environment"
+i18n.en.reason = "A project's Python virtual environment: installed packages and a copy of the interpreter. It can be deleted and rebuilt from the project's dependency files (uv sync, pip install -r requirements.txt …); make sure nothing was installed into it by hand without a record."
+
+[[rule]]
+id = "conda-env"
+kind = "build"
+title = "conda 环境"
+app = "conda"
+note = "conda 环境"
+cleanup = "tool"
+command = "conda env remove -n <环境名>"
+reason = "一个 conda 环境：解释器与安装的包。不用的环境用 conda env remove 删除，比直接删目录更干净（conda 会同时更新环境列表）。"
+node = "dir"
+paths = ["{anaconda3,miniconda3,miniforge3,mambaforge,.conda}/envs/*"]
+priority = 1
+i18n.en.title = "conda environment"
+i18n.en.note = "conda environment"
+i18n.en.reason = "A conda environment: an interpreter and its packages. Remove environments you no longer use with conda env remove rather than deleting the folder, so conda's environment list stays correct."
+
+[[rule]]
+id = "conda-pkgs"
+kind = "cache"
+title = "conda 包缓存"
+app = "conda"
+note = "包缓存"
+cleanup = "tool"
+command = "conda clean --all"
+reason = "conda 下载并解压的包缓存。各环境通过硬链接共享这些文件，所以这里的大小可能和环境重复计算；用 conda clean --all 清理不再被引用的包。"
+paths = ["{anaconda3,miniconda3,miniforge3,mambaforge,.conda}/pkgs"]
+i18n.en.title = "conda package cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Packages conda downloaded and extracted. Environments share these files through hard links, so this size may overlap with the environments; conda clean --all removes the packages nothing uses any more."
+
+[[rule]]
+id = "pycache"
+kind = "build"
+title = "Python 字节码缓存"
+note = "字节码缓存"
+cleanup = "safe"
+reason = "Python 自动生成的 .pyc 字节码缓存。删除是安全的，下次运行时会重新生成。"
+node = "dir"
+names = ["__pycache__"]
+priority = -5
+i18n.en.title = "Python bytecode cache"
+i18n.en.note = "Bytecode cache"
+i18n.en.reason = "Compiled .pyc files Python writes automatically. Deleting is safe; they are regenerated on the next run."
+
+[[rule]]
+id = "dev-tool-caches"
+kind = "build"
+title = "开发工具缓存"
+note = "工具缓存"
+cleanup = "safe"
+reason = "代码检查、测试或打包工具（mypy、pytest、ruff、Hypothesis、Parcel、Turborepo、ESLint）的本地缓存。删除是安全的，工具下次运行时会重建，只是第一次会慢一些。"
+names = [".mypy_cache", ".pytest_cache", ".ruff_cache", ".hypothesis", ".parcel-cache", ".turbo", ".eslintcache"]
+i18n.en.title = "Developer tool cache"
+i18n.en.note = "Tool cache"
+i18n.en.reason = "Local caches of linters, test runners and bundlers (mypy, pytest, ruff, Hypothesis, Parcel, Turborepo, ESLint). Deleting is safe; the tool rebuilds it on its next run, which is slower once."
+
+[[rule]]
+id = "js-framework-build"
+kind = "build"
+title = "前端框架构建输出"
+note = "构建输出"
+cleanup = "safe"
+reason = "Next.js、Nuxt、SvelteKit、Vite、Docusaurus、Angular 等前端框架生成的构建产物与缓存。删除是安全的，下次 dev / build 时会重新生成。"
+node = "dir"
+names = [".next", ".nuxt", ".svelte-kit", ".vite", ".docusaurus", ".angular"]
+i18n.en.title = "Front-end framework build output"
+i18n.en.note = "Build output"
+i18n.en.reason = "Build output and caches of front-end frameworks (Next.js, Nuxt, SvelteKit, Vite, Docusaurus, Angular). Deleting is safe; the next dev or build run regenerates it."
+
+[[rule]]
+id = "visual-studio-cache"
+kind = "build"
+title = "Visual Studio 解决方案缓存"
+app = "Visual Studio"
+note = "IDE 缓存"
+cleanup = "safe"
+reason = "Visual Studio 为解决方案保存的 IntelliSense 数据库、预编译头（ipch）和浏览信息，可能有几 GB。关闭 Visual Studio 后删除是安全的，下次打开时会重建（窗口布局和断点等会丢失）。"
+node = "dir"
+names = [".vs", "ipch"]
+i18n.en.title = "Visual Studio solution cache"
+i18n.en.note = "IDE cache"
+i18n.en.reason = "IntelliSense databases, precompiled headers (ipch) and browse data Visual Studio keeps per solution, sometimes several GB. Deleting it with Visual Studio closed is safe; it is rebuilt on the next open (window layout and breakpoints are lost)."
+
+[[rule]]
+id = "cargo-target"
+kind = "build"
+title = "构建输出（target）"
+note = "构建输出"
+cleanup = "review"
+command = "cargo clean"
+reason = "通常是 Rust（cargo）或 Maven 的构建输出：编译产物和增量缓存，常有几 GB。确认是构建目录后可以删除（cargo clean / mvn clean），下次构建时会重新生成；这个名字比较通用，删除前请确认。"
+node = "dir"
+names = ["target"]
+exclude = ["?:/{Program Files,Program Files (x86),ProgramData,Windows}/**", "AppData/Local/Programs/**", "/{usr,opt,snap,Applications,System,Library,etc,proc,sys}/**"]
+priority = -10
+i18n.en.title = "Build output (target)"
+i18n.en.note = "Build output"
+i18n.en.reason = "Usually the build output of Rust (cargo) or Maven: compiled artifacts and incremental caches, often several GB. Once you are sure it is a build folder it can be deleted (cargo clean / mvn clean) and is rebuilt on the next build; the name is generic, so check first."
+
+[[rule]]
+id = "build-output"
+kind = "build"
+title = "构建输出"
+note = "构建输出"
+cleanup = "review"
+reason = "名称表明这里可能是构建工具（CMake、Gradle、webpack、setuptools 等）生成的产物，通常可以删除后重新构建。这个名字比较通用，删除前请确认它确实是构建目录，而不是源文件或安装好的程序。"
+node = "dir"
+names = ["build", "dist", "cmake-build-*"]
+exclude = ["?:/{Program Files,Program Files (x86),ProgramData,Windows}/**", "AppData/Local/Programs/**", "/{usr,opt,snap,Applications,System,Library,etc,proc,sys,boot}/**"]
+priority = -10
+i18n.en.title = "Build output"
+i18n.en.note = "Build output"
+i18n.en.reason = "The name suggests output of a build tool (CMake, Gradle, webpack, setuptools …), which can usually be deleted and rebuilt. The name is generic: make sure it really is a build folder and not sources or an installed program."
+
+[[rule]]
+id = "git-repo"
+kind = "build"
+title = "Git 仓库数据"
+app = "Git"
+note = "Git 历史"
+cleanup = "keep"
+command = "git gc"
+reason = "Git 仓库的元数据与全部历史。删除后这个目录就不再是 Git 仓库，没有推送的提交和分支会丢失；想减小体积用 git gc。"
+node = "dir"
+names = [".git"]
+priority = 1
+i18n.en.title = "Git repository data"
+i18n.en.note = "Git history"
+i18n.en.reason = "The metadata and full history of a Git repository. Deleting it turns the folder into a plain folder and loses commits and branches that were not pushed; use git gc to make it smaller."
+
+[[rule]]
+id = "git-objects"
+kind = "build"
+title = "Git 对象库"
+app = "Git"
+note = "Git 历史"
+cleanup = "keep"
+command = "git gc"
+reason = "Git 仓库的全部历史（提交与文件的各个版本）和 LFS 大文件。不要直接删除，否则仓库会损坏；用 git gc 压缩历史，用 git lfs prune 清理不再需要的 LFS 文件。"
+paths = [".git/objects", ".git/lfs"]
+priority = 1
+i18n.en.title = "Git object store"
+i18n.en.note = "Git history"
+i18n.en.reason = "The full history of a Git repository (every commit and file version) and its LFS files. Deleting it corrupts the repository; compact the history with git gc and remove LFS files no longer needed with git lfs prune."
+
+[[rule]]
+id = "xcode-derived-data"
+kind = "build"
+title = "Xcode DerivedData"
+app = "Xcode"
+note = "构建缓存"
+cleanup = "safe"
+reason = "Xcode 的构建产物与索引。退出 Xcode 后删除是安全的，下次构建时会重新生成。"
+platforms = "macos"
+paths = ["Library/Developer/Xcode/DerivedData"]
+i18n.en.title = "Xcode DerivedData"
+i18n.en.note = "Build cache"
+i18n.en.reason = "Xcode's build products and indexes. Deleting it with Xcode closed is safe; the next build regenerates it."
+
+[[rule]]
+id = "xcode-archives"
+kind = "build"
+title = "Xcode 归档"
+app = "Xcode"
+note = "应用归档"
+cleanup = "review"
+reason = "用 Xcode「Archive」打包的应用归档，包含调试符号（dSYM）。已发布版本的归档用于解析崩溃日志，确认不再需要后在 Xcode Organizer 中删除。"
+platforms = "macos"
+paths = ["Library/Developer/Xcode/Archives"]
+i18n.en.title = "Xcode archives"
+i18n.en.note = "App archives"
+i18n.en.reason = "App archives made with Xcode's Archive, including debug symbols (dSYM). Archives of released versions are needed to symbolicate crash logs; delete them in Xcode's Organizer once they are no longer needed."
+
+[[rule]]
+id = "xcode-device-support"
+kind = "cache"
+title = "Xcode 设备支持文件"
+app = "Xcode"
+note = "调试符号缓存"
+cleanup = "safe"
+reason = "连接真机调试时从设备复制的系统符号，每个系统版本几 GB，以及模拟器的缓存。旧版本可以删除，再次连接该版本的设备时会重新复制。"
+platforms = "macos"
+paths = ["Library/Developer/Xcode/{iOS,watchOS,tvOS,visionOS} DeviceSupport", "Library/Developer/CoreSimulator/Caches"]
+i18n.en.title = "Xcode device support files"
+i18n.en.note = "Debug symbol cache"
+i18n.en.reason = "System symbols copied from devices for on-device debugging, several GB per OS version, plus simulator caches. Old versions can be deleted; they are copied again when a device with that version is connected."
+
+[[rule]]
+id = "unity-project-cache"
+kind = "build"
+title = "Unity 项目缓存"
+app = "Unity"
+note = "导入缓存"
+cleanup = "safe"
+reason = "Unity 项目 Library 目录里的导入缓存、着色器缓存和编译产物。关闭 Unity 后删除是安全的，再次打开项目时会重新导入（大项目可能要很久）。"
+node = "dir"
+paths = ["Library/{PackageCache,ShaderCache,Bee,ScriptAssemblies,Artifacts,il2cpp_cache}"]
+i18n.en.title = "Unity project cache"
+i18n.en.note = "Import cache"
+i18n.en.reason = "Import cache, shader cache and compiled assemblies in a Unity project's Library folder. Deleting them with Unity closed is safe; the project is re-imported on the next open, which can take long for big projects."
+
+[[rule]]
+id = "unreal-ddc"
+kind = "cache"
+title = "Unreal 派生数据缓存"
+app = "Unreal Engine"
+note = "派生数据缓存"
+cleanup = "safe"
+reason = "Unreal Engine 的派生数据缓存（DDC）：着色器与资源的编译结果。关闭编辑器后删除是安全的，再次打开项目时会重新编译，可能要很久。"
+node = "dir"
+names = ["DerivedDataCache"]
+i18n.en.title = "Unreal derived data cache"
+i18n.en.note = "Derived data cache"
+i18n.en.reason = "Unreal Engine's derived data cache (DDC): compiled shaders and assets. Deleting it with the editor closed is safe; it is rebuilt when the project is opened again, which can take long."
+
+# ============================================================================================
+# 包管理器与工具链缓存（cache / app）
+# ============================================================================================
+
+[[rule]]
+id = "pip-cache"
+kind = "cache"
+title = "pip 缓存"
+app = "pip"
+note = "包缓存"
+cleanup = "safe"
+command = "pip cache purge"
+reason = "pip 下载过的安装包和构建好的 wheel。删除是安全的，以后安装时会重新下载。"
+paths = ["AppData/Local/pip/cache", ".cache/pip", "Library/Caches/pip"]
+i18n.en.title = "pip cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Packages pip downloaded and wheels it built. Deleting is safe; they are downloaded again when needed."
+
+[[rule]]
+id = "uv-cache"
+kind = "cache"
+title = "uv 缓存"
+app = "uv"
+note = "包缓存"
+cleanup = "tool"
+command = "uv cache prune"
+reason = "uv 的包缓存。虚拟环境可能通过硬链接或写时复制共享这些文件，所以这里的大小可能和环境重复计算；用 uv cache prune 清理不再使用的条目，或 uv cache clean 全部清空。"
+paths = ["AppData/Local/uv/cache", ".cache/uv"]
+i18n.en.title = "uv cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "uv's package cache. Virtual environments may share these files through hard links or copy-on-write, so this size can overlap with them; uv cache prune removes unused entries, uv cache clean empties it."
+
+[[rule]]
+id = "uv-python"
+kind = "app"
+title = "uv 管理的 Python"
+app = "uv"
+note = "Python 解释器"
+cleanup = "tool"
+command = "uv python list --only-installed"
+reason = "uv 安装的各个 Python 解释器版本。用 uv python list 查看，用 uv python uninstall 卸载不用的版本。"
+paths = ["AppData/Roaming/uv/python", ".local/share/uv/python"]
+priority = 5
+i18n.en.title = "Python versions managed by uv"
+i18n.en.note = "Python interpreters"
+i18n.en.reason = "Python interpreter versions installed by uv. List them with uv python list and remove unused ones with uv python uninstall."
+
+[[rule]]
+id = "npm-cache"
+kind = "cache"
+title = "npm 缓存"
+app = "npm"
+note = "包缓存"
+cleanup = "safe"
+command = "npm cache clean --force"
+reason = "npm 下载过的包缓存与日志。删除是安全的，以后安装时会重新下载。"
+paths = ["AppData/Local/npm-cache", ".npm"]
+i18n.en.title = "npm cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Packages npm downloaded, plus its logs. Deleting is safe; they are downloaded again when needed."
+
+[[rule]]
+id = "pnpm-store"
+kind = "cache"
+title = "pnpm 全局仓库"
+app = "pnpm"
+note = "包仓库"
+cleanup = "tool"
+command = "pnpm store prune"
+reason = "pnpm 的全局包仓库，各项目的 node_modules 通过硬链接引用这里的文件，所以和 node_modules 的大小有重复。用 pnpm store prune 删除没有项目引用的包。"
+paths = ["AppData/Local/pnpm/store", ".local/share/pnpm/store", "Library/pnpm/store", ".pnpm-store", "AppData/Local/pnpm-cache"]
+i18n.en.title = "pnpm store"
+i18n.en.note = "Package store"
+i18n.en.reason = "pnpm's global package store. Projects' node_modules hard-link files from here, so its size overlaps with theirs. pnpm store prune removes packages no project references."
+
+[[rule]]
+id = "yarn-cache"
+kind = "cache"
+title = "Yarn 缓存"
+app = "Yarn"
+note = "包缓存"
+cleanup = "safe"
+command = "yarn cache clean"
+reason = "Yarn 下载过的包缓存。删除是安全的，以后安装时会重新下载。"
+paths = ["AppData/Local/Yarn/Cache", ".cache/yarn", "Library/Caches/Yarn", ".yarn/berry/cache"]
+i18n.en.title = "Yarn cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Packages Yarn downloaded. Deleting is safe; they are downloaded again when needed."
+
+[[rule]]
+id = "bun-deno-cache"
+kind = "cache"
+title = "Bun / Deno 缓存"
+note = "包缓存"
+cleanup = "safe"
+reason = "Bun 或 Deno 下载的依赖和编译缓存。删除是安全的，以后运行时会重新下载。"
+paths = [".bun/install/cache", "AppData/Local/deno", ".cache/deno", "Library/Caches/deno"]
+i18n.en.title = "Bun / Deno cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Dependencies and compile caches downloaded by Bun or Deno. Deleting is safe; they are downloaded again when needed."
+
+[[rule]]
+id = "cargo-registry"
+kind = "cache"
+title = "Cargo 依赖缓存"
+app = "Rust"
+note = "包缓存"
+cleanup = "safe"
+reason = "Cargo 下载的 crate 源码与 git 依赖。删除是安全的，下次构建时会重新下载。"
+paths = [".cargo/registry", ".cargo/git"]
+i18n.en.title = "Cargo dependency cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Crate sources and git dependencies downloaded by Cargo. Deleting is safe; the next build downloads them again."
+
+[[rule]]
+id = "rustup-toolchains"
+kind = "app"
+title = "Rust 工具链"
+app = "rustup"
+note = "工具链"
+cleanup = "tool"
+command = "rustup toolchain list"
+reason = "rustup 安装的 Rust 工具链，每个 1 GB 左右。用 rustup toolchain list 查看，用 rustup toolchain uninstall 卸载不用的版本。"
+paths = [".rustup/toolchains"]
+priority = 5
+i18n.en.title = "Rust toolchains"
+i18n.en.note = "Toolchain"
+i18n.en.reason = "Rust toolchains installed by rustup, around 1 GB each. List them with rustup toolchain list and remove unused ones with rustup toolchain uninstall."
+
+[[rule]]
+id = "go-cache"
+kind = "cache"
+title = "Go 模块与构建缓存"
+app = "Go"
+note = "构建缓存"
+cleanup = "tool"
+command = "go clean -cache -modcache"
+reason = "Go 下载的模块（go/pkg/mod）与构建缓存（go-build）。用 go clean -modcache 和 go clean -cache 清理；模块缓存里的文件是只读的，直接删除可能失败。"
+paths = ["go/pkg/mod", "AppData/Local/go-build", ".cache/go-build", "Library/Caches/go-build"]
+i18n.en.title = "Go module and build cache"
+i18n.en.note = "Build cache"
+i18n.en.reason = "Modules Go downloaded (go/pkg/mod) and its build cache (go-build). Clean them with go clean -modcache and go clean -cache; module cache files are read-only, so deleting them directly may fail."
+
+[[rule]]
+id = "maven-repo"
+kind = "cache"
+title = "Maven 本地仓库"
+app = "Maven"
+note = "包缓存"
+cleanup = "safe"
+reason = "Maven 下载的依赖（jar 与 pom）。删除是安全的，下次构建时会重新下载。"
+paths = [".m2/repository"]
+i18n.en.title = "Maven local repository"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Dependencies (jars and poms) Maven downloaded. Deleting is safe; the next build downloads them again."
+
+[[rule]]
+id = "gradle-cache"
+kind = "cache"
+title = "Gradle 缓存"
+app = "Gradle"
+note = "构建缓存"
+cleanup = "safe"
+command = "gradle --stop"
+reason = "Gradle 的依赖与构建缓存、下载的 Gradle 发行版和守护进程日志。先停止 Gradle 守护进程（gradle --stop）再删除是安全的，下次构建时会重新下载。"
+paths = [".gradle/caches", ".gradle/wrapper/dists", ".gradle/daemon"]
+i18n.en.title = "Gradle cache"
+i18n.en.note = "Build cache"
+i18n.en.reason = "Gradle's dependency and build caches, downloaded Gradle distributions and daemon logs. Stop the daemons first (gradle --stop); then deleting is safe and the next build downloads what it needs."
+
+[[rule]]
+id = "nuget-cache"
+kind = "cache"
+title = "NuGet 包缓存"
+app = "NuGet"
+note = "包缓存"
+cleanup = "safe"
+command = "dotnet nuget locals all --clear"
+reason = "NuGet 下载的 .NET 包。删除是安全的，下次还原时会重新下载。"
+paths = [".nuget/packages", "AppData/Local/NuGet/{v3-cache,Cache}", ".local/share/NuGet"]
+i18n.en.title = "NuGet package cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = ".NET packages NuGet downloaded. Deleting is safe; the next restore downloads them again."
+
+[[rule]]
+id = "homebrew-cache"
+kind = "cache"
+title = "Homebrew 下载缓存"
+app = "Homebrew"
+note = "下载缓存"
+cleanup = "safe"
+command = "brew cleanup --prune=all"
+reason = "Homebrew 下载的安装包与旧版本。用 brew cleanup 清理。"
+platforms = "posix"
+paths = ["Library/Caches/Homebrew", ".cache/Homebrew"]
+i18n.en.title = "Homebrew download cache"
+i18n.en.note = "Download cache"
+i18n.en.reason = "Downloads and old versions kept by Homebrew. Clean them with brew cleanup."
+
+[[rule]]
+id = "cocoapods-cache"
+kind = "cache"
+title = "CocoaPods 缓存"
+app = "CocoaPods"
+note = "包缓存"
+cleanup = "safe"
+command = "pod cache clean --all"
+reason = "CocoaPods 下载的 Pod 缓存。删除是安全的，下次 pod install 时会重新下载。"
+platforms = "macos"
+paths = ["Library/Caches/CocoaPods"]
+i18n.en.title = "CocoaPods cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "Pods CocoaPods downloaded. Deleting is safe; the next pod install downloads them again."
+
+[[rule]]
+id = "compiler-cache"
+kind = "cache"
+title = "编译器缓存"
+note = "编译缓存"
+cleanup = "safe"
+reason = "ccache / sccache 保存的编译结果。删除是安全的，只是之后的第一次编译会变慢。"
+paths = [".ccache", ".cache/{ccache,sccache}", "AppData/Local/{ccache,Mozilla/sccache}", "Library/Caches/Mozilla.sccache"]
+i18n.en.title = "Compiler cache"
+i18n.en.note = "Compile cache"
+i18n.en.reason = "Compilation results saved by ccache / sccache. Deleting is safe; only the next build is slower."
+
+# ============================================================================================
+# IDE 与编辑器（cache / app）
+# ============================================================================================
+
+[[rule]]
+id = "jetbrains-cache"
+kind = "cache"
+title = "JetBrains IDE 缓存"
+app = "JetBrains"
+note = "IDE 缓存"
+cleanup = "safe"
+reason = "JetBrains IDE（IntelliJ IDEA、PyCharm 等）的索引、日志和本地历史，按 IDE 版本分目录。旧版本的目录可以直接删除；当前版本用 IDE 的「文件 › 清除缓存」重建。"
+paths = ["AppData/Local/JetBrains", ".cache/JetBrains", "Library/Caches/JetBrains"]
+i18n.en.title = "JetBrains IDE caches"
+i18n.en.note = "IDE cache"
+i18n.en.reason = "Indexes, logs and local history of JetBrains IDEs (IntelliJ IDEA, PyCharm …), one folder per IDE version. Folders of old versions can be deleted; for the current one use File › Invalidate Caches in the IDE."
+
+[[rule]]
+id = "vscode-cache"
+kind = "cache"
+title = "VS Code 缓存"
+app = "Visual Studio Code"
+note = "编辑器缓存"
+cleanup = "safe"
+reason = "Visual Studio Code 的缓存：编译缓存、扩展安装包、GPU 缓存和日志。退出 VS Code 后删除是安全的，会自动重建。"
+paths = ["{AppData/Roaming,.config,Library/Application Support}/{Code,Code - Insiders,Cursor}/{Cache,CachedData,CachedExtensionVSIXs,Code Cache,GPUCache,logs}"]
+i18n.en.title = "VS Code cache"
+i18n.en.note = "Editor cache"
+i18n.en.reason = "Visual Studio Code's caches: compiled code, extension packages, GPU cache and logs. Deleting them with VS Code closed is safe; they are rebuilt automatically."
+
+[[rule]]
+id = "vscode-extensions"
+kind = "app"
+title = "VS Code 扩展"
+app = "Visual Studio Code"
+note = "编辑器扩展"
+cleanup = "tool"
+reason = "已安装的 VS Code 扩展；.vscode-server 是远程开发时在这台机器（或 WSL、容器）上安装的服务端与扩展。在 VS Code 中卸载不用的扩展。"
+node = "dir"
+paths = ["{.vscode,.vscode-insiders,.cursor}/extensions", ".vscode-server"]
+priority = 5
+i18n.en.title = "VS Code extensions"
+i18n.en.note = "Editor extensions"
+i18n.en.reason = "Installed VS Code extensions; .vscode-server holds the server and extensions installed on this machine (or WSL, a container) for remote development. Uninstall extensions you no longer use from VS Code."
+
+# ============================================================================================
+# 浏览器（cache / app）
+# ============================================================================================
+
+[[rule]]
+id = "chrome-cache"
+kind = "cache"
+title = "Chrome 缓存"
+app = "Google Chrome"
+note = "浏览器缓存"
+cleanup = "safe"
+reason = "Chrome 的网页与代码缓存。删除是安全的（最好先关闭浏览器），用到时会重新下载；在 Chrome 的「删除浏览数据 › 缓存的图片和文件」中清理更稳妥。"
+paths = [
+  "Google/Chrome/User Data/*/{Cache,Code Cache,GPUCache,Service Worker/CacheStorage}",
+  ".cache/{google-chrome,chromium}", "Library/Caches/Google/Chrome", "Library/Caches/Chromium",
+]
+i18n.en.title = "Chrome cache"
+i18n.en.note = "Browser cache"
+i18n.en.reason = "Chrome's web and code caches. Deleting is safe (preferably with the browser closed); content is downloaded again when needed. Chrome's Delete browsing data › Cached images and files is the gentler way."
+
+[[rule]]
+id = "edge-cache"
+kind = "cache"
+title = "Edge 缓存"
+app = "Microsoft Edge"
+note = "浏览器缓存"
+cleanup = "safe"
+reason = "Edge 的网页与代码缓存。删除是安全的（最好先关闭浏览器），用到时会重新下载；在 Edge 的「清除浏览数据 › 缓存的图像和文件」中清理更稳妥。"
+paths = [
+  "Microsoft/Edge/User Data/*/{Cache,Code Cache,GPUCache,Service Worker/CacheStorage}",
+  ".cache/microsoft-edge", "Library/Caches/Microsoft Edge",
+]
+i18n.en.title = "Edge cache"
+i18n.en.note = "Browser cache"
+i18n.en.reason = "Edge's web and code caches. Deleting is safe (preferably with the browser closed); content is downloaded again when needed. Edge's Clear browsing data › Cached images and files is the gentler way."
+
+[[rule]]
+id = "firefox-cache"
+kind = "cache"
+title = "Firefox 缓存"
+app = "Firefox"
+note = "浏览器缓存"
+cleanup = "safe"
+reason = "Firefox 的网页缓存。删除是安全的（最好先关闭浏览器）；在「设置 › 隐私与安全 › Cookie 和网站数据 › 清除数据」中清理更稳妥。"
+paths = ["Mozilla/Firefox/Profiles/*/cache2", ".cache/mozilla/firefox", "Library/Caches/Firefox"]
+i18n.en.title = "Firefox cache"
+i18n.en.note = "Browser cache"
+i18n.en.reason = "Firefox's web cache. Deleting is safe (preferably with the browser closed); Settings › Privacy & Security › Cookies and Site Data › Clear Data is the gentler way."
+
+[[rule]]
+id = "safari-cache"
+kind = "cache"
+title = "Safari 缓存"
+app = "Safari"
+note = "浏览器缓存"
+cleanup = "safe"
+reason = "Safari 的网页缓存。退出 Safari 后删除是安全的，用到时会重新下载。"
+platforms = "macos"
+paths = ["Library/Caches/com.apple.Safari"]
+i18n.en.title = "Safari cache"
+i18n.en.note = "Browser cache"
+i18n.en.reason = "Safari's web cache. Deleting it with Safari closed is safe; content is downloaded again when needed."
+
+[[rule]]
+id = "browser-profile"
+kind = "app"
+title = "浏览器用户数据"
+note = "浏览器数据"
+cleanup = "review"
+reason = "浏览器的个人资料：书签、历史记录、Cookie、保存的密码和扩展，以及各种缓存。不要整个删除；用浏览器的「删除浏览数据」清理历史和缓存。"
+node = "dir"
+paths = [
+  "{Google/Chrome,Microsoft/Edge,BraveSoftware/Brave-Browser}/User Data", "Mozilla/Firefox/Profiles",
+  ".config/{google-chrome,chromium,microsoft-edge,BraveSoftware}", ".mozilla/firefox",
+  "Library/Application Support/{Google/Chrome,Microsoft Edge,BraveSoftware,Firefox/Profiles}",
+]
+i18n.en.title = "Browser profile data"
+i18n.en.note = "Browser data"
+i18n.en.reason = "A browser's profiles: bookmarks, history, cookies, saved passwords, extensions and caches. Do not delete it as a whole; clear history and caches with the browser's Delete browsing data."
+
+# ============================================================================================
+# 聊天（chat）
+# ============================================================================================
+
+[[rule]]
+id = "wechat-files"
+kind = "chat"
+title = "微信聊天数据"
+app = "微信"
+note = "微信数据"
+cleanup = "tool"
+reason = "微信的聊天记录，以及收发的图片、视频和文件。直接删除会丢失聊天记录；在微信「设置 › 存储空间」（或「文件管理」）中按聊天清理更安全。"
+node = "dir"
+paths = ["WeChat Files", "xwechat_files", "Library/Containers/com.tencent.xinWeChat"]
+priority = 5
+i18n.en.title = "WeChat chat data"
+i18n.en.app = "WeChat"
+i18n.en.note = "WeChat data"
+i18n.en.reason = "WeChat's chat history and the images, videos and files sent and received. Deleting it loses chat history; clean up per chat in WeChat's Settings › Storage (or File Management) instead."
+
+[[rule]]
+id = "wechat-cache"
+kind = "cache"
+title = "微信缓存"
+app = "微信"
+note = "微信缓存"
+cleanup = "safe"
+reason = "微信的图片缩略图等缓存。可以在微信「设置 › 存储空间」中清理；退出微信后直接删除通常也是安全的。"
+node = "dir"
+paths = ["WeChat Files/*/FileStorage/Cache"]
+priority = 5
+i18n.en.title = "WeChat cache"
+i18n.en.app = "WeChat"
+i18n.en.note = "WeChat cache"
+i18n.en.reason = "WeChat's thumbnail and similar caches. Clean it in WeChat's Settings › Storage; deleting it with WeChat closed is usually safe too."
+
+[[rule]]
+id = "qq-files"
+kind = "chat"
+title = "QQ 聊天数据"
+app = "QQ"
+note = "QQ 数据"
+cleanup = "tool"
+reason = "QQ / TIM 的聊天记录，以及收发的图片、视频和文件。直接删除会丢失聊天记录；在 QQ「设置 › 存储管理」中清理缓存和文件。"
+node = "dir"
+paths = ["Tencent Files", "Library/Containers/com.tencent.qq", "/home/*/.config/QQ"]
+priority = 5
+i18n.en.title = "QQ chat data"
+i18n.en.note = "QQ data"
+i18n.en.reason = "Chat history of QQ / TIM and the images, videos and files sent and received. Deleting it loses chat history; clean caches and files in QQ's Settings › Storage Management instead."
+
+[[rule]]
+id = "telegram-data"
+kind = "chat"
+title = "Telegram 本地数据"
+app = "Telegram"
+note = "Telegram 缓存"
+cleanup = "tool"
+reason = "Telegram 缓存的图片、视频和文件（聊天记录保存在云端）。在 Telegram「设置 › 高级 › 管理本地存储」中清理；删除整个 tdata 会退出登录。"
+node = "dir"
+paths = ["{Telegram Desktop,TelegramDesktop}/tdata", "Library/Group Containers/*.ru.keepcoder.Telegram"]
+priority = 5
+i18n.en.title = "Telegram local data"
+i18n.en.note = "Telegram cache"
+i18n.en.reason = "Images, videos and files Telegram cached (chat history lives in the cloud). Clean it in Telegram's Settings › Advanced › Manage local storage; deleting the whole tdata folder logs you out."
+
+[[rule]]
+id = "telegram-downloads"
+kind = "chat"
+title = "Telegram 下载的文件"
+app = "Telegram"
+note = "Telegram 下载"
+cleanup = "review"
+reason = "从 Telegram 保存下来的文件。这些是你下载的文件，确认不再需要后再删除。"
+node = "dir"
+paths = ["Downloads/Telegram Desktop"]
+i18n.en.title = "Telegram downloads"
+i18n.en.note = "Telegram downloads"
+i18n.en.reason = "Files saved from Telegram. These are your downloads; delete them once you are sure you no longer need them."
+
+[[rule]]
+id = "discord-cache"
+kind = "cache"
+title = "Discord 缓存"
+app = "Discord"
+note = "应用缓存"
+cleanup = "safe"
+reason = "Discord 的图片与网页缓存。退出 Discord 后删除是安全的。"
+paths = ["{AppData/Roaming,.config,Library/Application Support}/discord/{Cache,Code Cache,GPUCache}"]
+i18n.en.title = "Discord cache"
+i18n.en.note = "App cache"
+i18n.en.reason = "Discord's image and web caches. Deleting them with Discord closed is safe."
+
+# ============================================================================================
+# 游戏（game）
+# ============================================================================================
+
+[[rule]]
+id = "steam-library"
+kind = "game"
+title = "Steam 游戏库"
+app = "Steam"
+note = "Steam 库"
+cleanup = "tool"
+reason = "Steam 游戏库文件夹：已安装的游戏、下载中的更新、着色器缓存和创意工坊内容。在 Steam「设置 › 存储空间」中管理，不要直接删除。"
+node = "dir"
+names = ["steamapps"]
+i18n.en.title = "Steam library"
+i18n.en.note = "Steam library"
+i18n.en.reason = "A Steam library folder: installed games, pending updates, shader caches and Workshop content. Manage it in Steam's Settings › Storage rather than deleting files."
+
+[[rule]]
+id = "steam-game"
+kind = "game"
+title = "Steam 游戏"
+app = "Steam 游戏"
+note = "游戏更新"
+cleanup = "tool"
+reason = "通过 Steam 安装的游戏。在 Steam 中卸载，或在「设置 › 存储空间」里把它移到其他磁盘；直接删除文件夹后 Steam 仍会把它当作已安装。"
+node = "dir"
+paths = ["steamapps/common/*"]
+priority = 5
+i18n.en.title = "Steam game"
+i18n.en.app = "Steam game"
+i18n.en.note = "Game update"
+i18n.en.reason = "A game installed through Steam. Uninstall it in Steam, or move it to another drive in Settings › Storage; after deleting the folder by hand Steam still lists it as installed."
+
+[[rule]]
+id = "steam-shadercache"
+kind = "cache"
+title = "Steam 着色器缓存"
+app = "Steam"
+note = "着色器缓存"
+cleanup = "safe"
+reason = "Steam 为各个游戏预编译的着色器。删除是安全的，游戏下次运行时会重新生成（刚开始可能卡顿）。"
+node = "dir"
+paths = ["steamapps/shadercache"]
+i18n.en.title = "Steam shader cache"
+i18n.en.note = "Shader cache"
+i18n.en.reason = "Shaders Steam precompiled for each game. Deleting is safe; they are rebuilt the next time the game runs (it may stutter at first)."
+
+[[rule]]
+id = "steam-downloading"
+kind = "cache"
+title = "Steam 未完成的下载"
+app = "Steam"
+note = "下载中"
+cleanup = "review"
+reason = "Steam 正在下载或没有完成的游戏与更新。暂停的下载会从这里继续；没有正在进行的下载时可以删除。"
+node = "dir"
+paths = ["steamapps/{downloading,temp}"]
+i18n.en.title = "Unfinished Steam downloads"
+i18n.en.note = "Downloading"
+i18n.en.reason = "Games and updates Steam is downloading or did not finish. Paused downloads resume from here; it can be deleted when no download is in progress."
+
+[[rule]]
+id = "steam-workshop"
+kind = "game"
+title = "Steam 创意工坊内容"
+app = "Steam"
+note = "创意工坊"
+cleanup = "tool"
+reason = "订阅的创意工坊模组与地图。在 Steam 创意工坊中取消订阅即可删除；直接删除会被 Steam 重新下载。"
+node = "dir"
+paths = ["steamapps/workshop"]
+priority = 5
+i18n.en.title = "Steam Workshop content"
+i18n.en.note = "Workshop"
+i18n.en.reason = "Subscribed Workshop mods and maps. Unsubscribe in the Steam Workshop to remove them; Steam downloads deleted items again."
+
+[[rule]]
+id = "steam-compatdata"
+kind = "game"
+title = "Proton 兼容层数据"
+app = "Steam"
+note = "Proton 前缀"
+cleanup = "review"
+reason = "Proton 为每个 Windows 游戏建立的 Wine 前缀，里面可能有游戏存档。卸载游戏后残留的前缀可以删除，删除前确认存档已同步到云端。"
+platforms = "linux"
+node = "dir"
+paths = ["steamapps/compatdata"]
+priority = 5
+i18n.en.title = "Proton compatibility data"
+i18n.en.note = "Proton prefix"
+i18n.en.reason = "The Wine prefixes Proton creates for each Windows game, which may contain save games. Prefixes left behind by uninstalled games can be deleted once the saves are synced to the cloud."
+
+[[rule]]
+id = "epic-game"
+kind = "game"
+title = "Epic Games 游戏"
+app = "Epic 游戏"
+note = "游戏更新"
+cleanup = "tool"
+reason = "通过 Epic Games 启动器安装的游戏。在启动器的「库」中卸载；直接删除文件夹后启动器仍会把它当作已安装。"
+platforms = ["windows", "macos"]
+node = "dir"
+paths = ["Epic Games/*"]
+exclude = ["Epic Games/{Launcher,DirectXRedist,EpicOnlineServices}"]
+priority = 5
+i18n.en.title = "Epic Games game"
+i18n.en.app = "Epic game"
+i18n.en.note = "Game update"
+i18n.en.reason = "A game installed through the Epic Games Launcher. Uninstall it from the Library in the launcher; after deleting the folder by hand the launcher still lists it as installed."
+
+[[rule]]
+id = "unreal-engine"
+kind = "app"
+title = "Unreal Engine"
+app = "Epic Games 启动器"
+note = "引擎版本"
+cleanup = "tool"
+reason = "通过 Epic Games 启动器安装的某个版本的 Unreal Engine，每个版本几十 GB。不用的版本在启动器的「虚幻引擎 › 库」中卸载。"
+platforms = ["windows", "macos"]
+node = "dir"
+paths = ["Epic Games/UE_*"]
+priority = 5
+i18n.en.title = "Unreal Engine"
+i18n.en.app = "Epic Games Launcher"
+i18n.en.note = "Engine version"
+i18n.en.reason = "One version of Unreal Engine installed through the Epic Games Launcher, tens of GB each. Uninstall versions you no longer use under Unreal Engine › Library in the launcher."
+
+[[rule]]
+id = "epic-vaultcache"
+kind = "cache"
+title = "Epic 资源下载缓存"
+app = "Epic Games 启动器"
+note = "下载缓存"
+cleanup = "safe"
+reason = "Epic Games 启动器为虚幻商城资源保留的下载缓存。删除是安全的，再次添加资源到项目时会重新下载。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/ProgramData/Epic/EpicGamesLauncher/VaultCache"]
+i18n.en.title = "Epic asset download cache"
+i18n.en.app = "Epic Games Launcher"
+i18n.en.note = "Download cache"
+i18n.en.reason = "The download cache the Epic Games Launcher keeps for Unreal marketplace assets. Deleting is safe; assets are downloaded again when you add them to a project."
+
+[[rule]]
+id = "xbox-game"
+kind = "game"
+title = "Xbox 游戏"
+app = "Xbox 游戏"
+note = "游戏更新"
+cleanup = "tool"
+reason = "通过 Xbox 应用或 Microsoft Store 安装的游戏，目录受系统保护。在 Xbox 应用或「设置 › 应用」中卸载或移动。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/XboxGames", "?:/XboxGames/*"]
+priority = 5
+i18n.en.title = "Xbox game"
+i18n.en.app = "Xbox game"
+i18n.en.note = "Game update"
+i18n.en.reason = "A game installed through the Xbox app or Microsoft Store; the folder is protected by the system. Uninstall or move it in the Xbox app or Settings › Apps."
+
+[[rule]]
+id = "gog-game"
+kind = "game"
+title = "GOG 游戏"
+app = "GOG 游戏"
+note = "游戏更新"
+cleanup = "tool"
+reason = "通过 GOG Galaxy 安装的游戏。在 GOG Galaxy 中卸载。"
+node = "dir"
+paths = ["GOG Galaxy/Games/*", "GOG Games/*"]
+priority = 5
+i18n.en.title = "GOG game"
+i18n.en.app = "GOG game"
+i18n.en.note = "Game update"
+i18n.en.reason = "A game installed through GOG Galaxy. Uninstall it in GOG Galaxy."
+
+[[rule]]
+id = "launcher-game"
+kind = "game"
+title = "游戏平台安装的游戏"
+app = "游戏"
+note = "游戏更新"
+cleanup = "tool"
+reason = "通过 Ubisoft Connect、EA app 或 Riot 客户端安装的游戏。在对应的启动器中卸载；直接删除文件夹后启动器仍会把它当作已安装。"
+platforms = "windows"
+node = "dir"
+paths = ["Ubisoft Game Launcher/games/*", "EA Games/*", "Riot Games/*"]
+priority = 5
+i18n.en.title = "Game from a launcher"
+i18n.en.app = "Game"
+i18n.en.note = "Game update"
+i18n.en.reason = "A game installed through Ubisoft Connect, the EA app or the Riot Client. Uninstall it in that launcher; after deleting the folder by hand the launcher still lists it as installed."
+
+# ============================================================================================
+# 本地 AI 模型（app / cache）
+# ============================================================================================
+
+[[rule]]
+id = "ollama-models"
+kind = "app"
+title = "Ollama 模型"
+app = "Ollama"
+note = "大模型"
+cleanup = "tool"
+command = "ollama list"
+reason = "Ollama 下载的大语言模型，每个几 GB 到几十 GB。用 ollama list 查看，用 ollama rm <模型名> 删除不用的模型；直接删除文件会让 Ollama 的模型列表出错。"
+node = "dir"
+paths = [".ollama/models"]
+priority = 5
+i18n.en.title = "Ollama models"
+i18n.en.note = "LLM models"
+i18n.en.reason = "Large language models downloaded by Ollama, from a few GB to tens of GB each. List them with ollama list and remove unused ones with ollama rm <model>; deleting files directly confuses Ollama's model list."
+
+[[rule]]
+id = "lmstudio-models"
+kind = "app"
+title = "LM Studio 模型"
+app = "LM Studio"
+note = "大模型"
+cleanup = "tool"
+reason = "LM Studio 下载的本地模型。在 LM Studio 的「我的模型」中删除不用的模型。"
+node = "dir"
+paths = [".lmstudio/models", ".cache/lm-studio/models"]
+priority = 5
+i18n.en.title = "LM Studio models"
+i18n.en.note = "LLM models"
+i18n.en.reason = "Local models downloaded by LM Studio. Delete models you no longer use under My Models in LM Studio."
+
+[[rule]]
+id = "huggingface-cache"
+kind = "cache"
+title = "Hugging Face 模型缓存"
+app = "Hugging Face"
+note = "模型缓存"
+cleanup = "tool"
+command = "huggingface-cli delete-cache"
+reason = "Hugging Face 库（transformers、diffusers、datasets 等）下载的模型与数据集。删除后用到时会重新下载（可能很大）；用 huggingface-cli scan-cache 查看，用 huggingface-cli delete-cache 挑选删除。"
+node = "dir"
+paths = [".cache/huggingface"]
+i18n.en.title = "Hugging Face model cache"
+i18n.en.note = "Model cache"
+i18n.en.reason = "Models and datasets downloaded by Hugging Face libraries (transformers, diffusers, datasets …). They are downloaded again when needed (possibly large); inspect with huggingface-cli scan-cache and pick what to delete with huggingface-cli delete-cache."
+
+[[rule]]
+id = "torch-cache"
+kind = "cache"
+title = "PyTorch 模型缓存"
+app = "PyTorch"
+note = "模型缓存"
+cleanup = "safe"
+reason = "PyTorch Hub 与 torchvision 等下载的预训练权重。删除是安全的，用到时会重新下载。"
+node = "dir"
+paths = [".cache/torch"]
+i18n.en.title = "PyTorch model cache"
+i18n.en.note = "Model cache"
+i18n.en.reason = "Pretrained weights downloaded by PyTorch Hub, torchvision and similar. Deleting is safe; they are downloaded again when needed."
+
+# ============================================================================================
+# 其他应用（app / cache）
+# ============================================================================================
+
+[[rule]]
+id = "android-sdk"
+kind = "app"
+title = "Android SDK"
+app = "Android Studio"
+note = "SDK"
+cleanup = "tool"
+reason = "Android SDK：各版本平台、构建工具和模拟器系统镜像（system-images 通常最大）。用 Android Studio 的 SDK Manager 卸载不用的版本。"
+node = "dir"
+paths = ["AppData/Local/Android/Sdk", "Library/Android/sdk", "/home/*/Android/Sdk"]
+priority = 5
+i18n.en.title = "Android SDK"
+i18n.en.reason = "The Android SDK: platforms, build tools and emulator system images (system-images is usually the largest). Uninstall versions you no longer need with Android Studio's SDK Manager."
+
+[[rule]]
+id = "unity-editors"
+kind = "app"
+title = "Unity 编辑器"
+app = "Unity Hub"
+note = "编辑器版本"
+cleanup = "tool"
+reason = "通过 Unity Hub 安装的某个版本的 Unity 编辑器，每个版本几 GB 到十几 GB。不用的版本在 Unity Hub 的「安装」页面中卸载。"
+node = "dir"
+paths = ["Unity/Hub/Editor/*"]
+priority = 5
+i18n.en.title = "Unity editor"
+i18n.en.note = "Editor version"
+i18n.en.reason = "One version of the Unity editor installed through Unity Hub, several GB each. Uninstall versions you no longer use on the Installs page of Unity Hub."
+
+[[rule]]
+id = "unity-cache"
+kind = "cache"
+title = "Unity 全局缓存"
+app = "Unity"
+note = "下载缓存"
+cleanup = "safe"
+reason = "Unity 的全局包缓存和从资源商店下载的资源包。删除是安全的，需要时会重新下载。"
+node = "dir"
+paths = ["AppData/Local/Unity/cache", "Library/Unity/cache", "{Unity,unity3d}/Asset Store-5.x"]
+i18n.en.title = "Unity global cache"
+i18n.en.note = "Download cache"
+i18n.en.reason = "Unity's global package cache and asset packages downloaded from the Asset Store. Deleting is safe; they are downloaded again when needed."
+
+[[rule]]
+id = "adobe-media-cache"
+kind = "cache"
+title = "Adobe 媒体缓存"
+app = "Adobe"
+note = "媒体缓存"
+cleanup = "safe"
+reason = "Premiere Pro、After Effects 等为导入的素材生成的音频预览和索引。关闭 Adobe 应用后删除是安全的，也可以在首选项「媒体缓存」中清理。"
+node = "dir"
+paths = ["Adobe/Common/{Media Cache Files,Media Cache}"]
+i18n.en.title = "Adobe media cache"
+i18n.en.note = "Media cache"
+i18n.en.reason = "Audio previews and indexes Premiere Pro, After Effects and other Adobe apps create for imported media. Deleting it with the apps closed is safe; it can also be cleaned under Preferences › Media Cache."
+
+[[rule]]
+id = "ios-backups"
+kind = "app"
+title = "iPhone / iPad 备份"
+app = "访达 / iTunes"
+note = "设备备份"
+cleanup = "review"
+reason = "用访达、iTunes 或「Apple 设备」应用做的 iPhone / iPad 本地备份，每份可能有几十 GB。确认不再需要后，在其中的「管理备份」里删除，这样能看出是哪台设备的哪次备份。"
+node = "dir"
+paths = ["Library/Application Support/MobileSync/Backup", "AppData/Roaming/Apple Computer/MobileSync/Backup", "Apple/MobileSync/Backup"]
+priority = 5
+i18n.en.title = "iPhone / iPad backups"
+i18n.en.app = "Finder / iTunes"
+i18n.en.note = "Device backup"
+i18n.en.reason = "Local iPhone / iPad backups made with Finder, iTunes or the Apple Devices app, possibly tens of GB each. Once they are no longer needed, delete them under Manage Backups there, which shows which device and date each backup belongs to."
+
+[[rule]]
+id = "ios-firmware"
+kind = "cache"
+title = "iOS 固件安装包"
+app = "访达 / iTunes"
+note = "固件下载"
+cleanup = "safe"
+reason = "恢复或更新设备时下载的 iOS / iPadOS 固件（.ipsw）。更新完成后可以删除。"
+paths = ["{Library/iTunes,AppData/Roaming/Apple Computer/iTunes}/{iPhone,iPad} Software Updates"]
+i18n.en.title = "iOS firmware files"
+i18n.en.app = "Finder / iTunes"
+i18n.en.note = "Firmware download"
+i18n.en.reason = "iOS / iPadOS firmware (.ipsw) downloaded to restore or update a device. It can be deleted once the update is done."
+
+[[rule]]
+id = "photos-library"
+kind = "app"
+title = "照片图库"
+app = "照片"
+note = "照片图库"
+cleanup = "keep"
+reason = "「照片」应用的图库，包含全部照片、视频和编辑记录。不要在访达里删改其中的内容；在「照片」里删除照片，或开启「优化 Mac 存储空间」。"
+platforms = "macos"
+node = "dir"
+names = ["*.photoslibrary"]
+priority = 5
+i18n.en.title = "Photos library"
+i18n.en.app = "Photos"
+i18n.en.note = "Photos library"
+i18n.en.reason = "The Photos app library with every photo, video and edit. Do not change its contents in Finder; delete photos in Photos, or turn on Optimize Mac Storage."
+
+[[rule]]
+id = "outlook-ost"
+kind = "app"
+title = "Outlook 离线邮箱"
+app = "Outlook"
+note = "离线邮箱"
+cleanup = "review"
+reason = "Outlook 为 Exchange / Microsoft 365 邮箱保存的离线副本（.ost）。退出 Outlook 后删除，下次启动会重新同步；在账户设置里缩短「脱机保留邮件」的时长可以让它变小。.pst 是本地存档，不要删除。"
+platforms = "windows"
+node = "file"
+paths = ["AppData/Local/Microsoft/Outlook/*.ost"]
+i18n.en.title = "Outlook offline mailbox"
+i18n.en.note = "Offline mailbox"
+i18n.en.reason = "Outlook's offline copy (.ost) of an Exchange / Microsoft 365 mailbox. If deleted with Outlook closed it is synced again on the next start; a shorter Mail to keep offline setting makes it smaller. .pst files are local archives: do not delete them."
+
+[[rule]]
+id = "snap-packages"
+kind = "app"
+title = "Snap 软件包"
+app = "snap"
+note = "软件包"
+cleanup = "tool"
+command = "sudo snap set system refresh.retain=2"
+reason = "Snap 应用的软件包文件，默认保留旧版本以便回退。用 sudo snap set system refresh.retain=2 减少保留的版本数，用 snap remove --revision 删除指定的旧版本。"
+platforms = "linux"
+node = "dir"
+paths = ["/var/lib/snapd/snaps"]
+priority = 5
+i18n.en.title = "Snap packages"
+i18n.en.note = "Packages"
+i18n.en.reason = "Package files of Snap applications; old revisions are kept for rollback. Keep fewer with sudo snap set system refresh.retain=2 and remove a specific old revision with snap remove --revision."
+
+[[rule]]
+id = "flatpak"
+kind = "app"
+title = "Flatpak 应用与运行时"
+app = "Flatpak"
+note = "应用与运行时"
+cleanup = "tool"
+command = "flatpak uninstall --unused"
+reason = "Flatpak 应用与共享运行时。用 flatpak uninstall --unused 删除不再被任何应用使用的运行时。"
+platforms = "linux"
+node = "dir"
+paths = ["/var/lib/flatpak", ".local/share/flatpak"]
+priority = 5
+i18n.en.title = "Flatpak apps and runtimes"
+i18n.en.note = "Apps and runtimes"
+i18n.en.reason = "Flatpak applications and shared runtimes. flatpak uninstall --unused removes runtimes no application uses any more."
+
+# ============================================================================================
+# 系统：Windows（system / cache）
+# ============================================================================================
+
+[[rule]]
+id = "windows-update-download"
+kind = "system"
+title = "Windows 更新下载缓存"
+app = "Windows 更新"
+note = "系统更新"
+cleanup = "tool"
+reason = "Windows 更新下载的安装包，更新装好后通常不再需要。用「磁盘清理 › 清理系统文件 › Windows 更新清理」或存储感知清理；手动删除前要先停止 Windows Update 服务。"
+platforms = "windows"
+paths = ["?:/Windows/SoftwareDistribution/Download"]
+priority = 10
+i18n.en.title = "Windows Update download cache"
+i18n.en.app = "Windows Update"
+i18n.en.note = "System update"
+i18n.en.reason = "Packages downloaded by Windows Update, usually not needed once the update is installed. Clean them with Disk Cleanup › Clean up system files › Windows Update Cleanup or Storage Sense; stop the Windows Update service before deleting by hand."
+
+[[rule]]
+id = "software-distribution"
+kind = "system"
+title = "Windows 更新数据"
+app = "Windows 更新"
+note = "系统更新"
+cleanup = "keep"
+reason = "Windows 更新的下载缓存与更新历史数据库。不要整个删除；其中的下载缓存可以用「磁盘清理」清理。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Windows/SoftwareDistribution"]
+priority = 10
+i18n.en.title = "Windows Update data"
+i18n.en.app = "Windows Update"
+i18n.en.note = "System update"
+i18n.en.reason = "Windows Update's download cache and update history database. Do not delete it as a whole; the download cache inside can be cleaned with Disk Cleanup."
+
+[[rule]]
+id = "delivery-optimization"
+kind = "system"
+title = "传递优化缓存"
+app = "Windows 更新"
+note = "更新分享缓存"
+cleanup = "tool"
+reason = "Windows 传递优化缓存：用来与局域网或互联网上的其他电脑分享更新。用「磁盘清理 › 传递优化文件」清理是安全的。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Windows/ServiceProfiles/NetworkService/AppData/Local/Microsoft/Windows/DeliveryOptimization"]
+priority = 10
+i18n.en.title = "Delivery Optimization cache"
+i18n.en.app = "Windows Update"
+i18n.en.note = "Update sharing cache"
+i18n.en.reason = "The Windows Delivery Optimization cache, used to share updates with other PCs on the network or the internet. Cleaning it with Disk Cleanup › Delivery Optimization Files is safe."
+
+[[rule]]
+id = "windows-old"
+kind = "system"
+title = "旧版 Windows 备份"
+note = "系统升级"
+cleanup = "tool"
+reason = "升级或重装 Windows 时保留的上一版本系统，用于回退，通常在一段时间后自动删除。确认不再回退后，在「设置 › 系统 › 存储 › 临时文件 › 以前的 Windows 安装」中删除；它受系统权限保护，很难手动删除。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Windows.old"]
+priority = 10
+i18n.en.title = "Previous Windows installation"
+i18n.en.note = "System upgrade"
+i18n.en.reason = "The previous Windows installation kept after an upgrade or reinstall so you can go back; Windows removes it automatically after a while. Once you will not go back, delete it under Settings › System › Storage › Temporary files › Previous Windows installation(s); its permissions make manual deletion hard."
+
+[[rule]]
+id = "hiberfil"
+kind = "system"
+title = "休眠文件"
+note = "休眠文件"
+cleanup = "keep"
+command = "powercfg /hibernate off"
+reason = "Windows 休眠和快速启动用来保存内存内容的文件，通常约为内存容量的 40%。不能直接删除；如果不需要休眠和快速启动，用管理员命令 powercfg /hibernate off 关闭后它会自动删除。"
+platforms = "windows"
+node = "file"
+paths = ["?:/hiberfil.sys"]
+priority = 10
+i18n.en.title = "Hibernation file"
+i18n.en.note = "Hibernation file"
+i18n.en.reason = "The file Windows hibernation and Fast Startup save memory into, usually about 40% of the installed RAM. It cannot be deleted directly; if you need neither, running powercfg /hibernate off as administrator turns them off and removes it."
+
+[[rule]]
+id = "pagefile"
+kind = "system"
+title = "虚拟内存分页文件"
+note = "虚拟内存"
+cleanup = "keep"
+reason = "Windows 的虚拟内存分页文件（swapfile.sys 用于应用的挂起与恢复）。不能直接删除；可以在「系统属性 › 高级 › 性能 › 虚拟内存」中调整大小或换到其他磁盘，关闭它可能让程序因内存不足而崩溃。"
+platforms = "windows"
+node = "file"
+paths = ["?:/{pagefile,swapfile}.sys"]
+priority = 10
+i18n.en.title = "Virtual memory paging file"
+i18n.en.note = "Virtual memory"
+i18n.en.reason = "Windows' virtual memory paging file (swapfile.sys serves suspending and resuming apps). It cannot be deleted directly; resize it or move it to another drive under System Properties › Advanced › Performance › Virtual memory. Turning it off can crash programs that run out of memory."
+
+[[rule]]
+id = "winsxs"
+kind = "system"
+title = "Windows 组件存储"
+note = "系统组件"
+cleanup = "keep"
+command = "DISM /Online /Cleanup-Image /StartComponentCleanup"
+reason = "Windows 组件存储（WinSxS），保存系统组件及其旧版本。其中大量文件是指向系统目录的硬链接，实际占用比看上去小。不能手动删除；用 DISM /Online /Cleanup-Image /StartComponentCleanup 清理被替换的旧版本。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Windows/WinSxS"]
+priority = 10
+i18n.en.title = "Windows component store"
+i18n.en.note = "System components"
+i18n.en.reason = "The Windows component store (WinSxS) with system components and their older versions. Many files are hard links into the system folders, so it occupies less than it seems. Never delete by hand; DISM /Online /Cleanup-Image /StartComponentCleanup removes superseded versions."
+
+[[rule]]
+id = "windows-installer-cache"
+kind = "system"
+title = "Windows Installer 缓存"
+note = "安装程序缓存"
+cleanup = "keep"
+reason = "已安装程序的 .msi / .msp 安装包副本，修复、更新和卸载这些程序时需要。不要手动删除，否则这些程序可能无法卸载或更新。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Windows/Installer"]
+priority = 10
+i18n.en.title = "Windows Installer cache"
+i18n.en.note = "Installer cache"
+i18n.en.reason = "Copies of the .msi / .msp packages of installed programs, needed to repair, update and uninstall them. Do not delete them by hand, or those programs may become impossible to uninstall or update."
+
+[[rule]]
+id = "package-cache"
+kind = "system"
+title = "安装程序包缓存"
+note = "安装程序缓存"
+cleanup = "keep"
+reason = "Visual Studio、.NET、VC++ 运行库等安装程序保留的安装包，修复、更新和卸载时需要。不建议手动删除。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/ProgramData/Package Cache"]
+priority = 10
+i18n.en.title = "Installer package cache"
+i18n.en.note = "Installer cache"
+i18n.en.reason = "Packages kept by installers such as Visual Studio, .NET and the VC++ runtimes, needed to repair, update and uninstall them. Deleting them by hand is not recommended."
+
+[[rule]]
+id = "windowsapps"
+kind = "system"
+title = "Microsoft Store 应用"
+note = "商店应用"
+cleanup = "keep"
+reason = "Microsoft Store 应用和部分游戏的安装目录，受系统保护，不能直接删除。在「设置 › 应用 › 已安装的应用」中卸载或移动。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Program Files/WindowsApps", "?:/WindowsApps"]
+priority = 10
+i18n.en.title = "Microsoft Store apps"
+i18n.en.note = "Store apps"
+i18n.en.reason = "Where Microsoft Store apps and some games are installed; protected by the system and not deletable directly. Uninstall or move them in Settings › Apps › Installed apps."
+
+[[rule]]
+id = "system-volume-information"
+kind = "system"
+title = "系统还原点与卷影副本"
+note = "还原点"
+cleanup = "tool"
+reason = "系统还原点、卷影副本等系统数据，受保护无法直接访问。在「系统属性 › 系统保护 › 配置」中调整最大使用量或删除还原点。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/System Volume Information"]
+priority = 10
+i18n.en.title = "Restore points and shadow copies"
+i18n.en.note = "Restore points"
+i18n.en.reason = "System restore points, shadow copies and other protected system data. Adjust the maximum usage or delete restore points under System Properties › System Protection › Configure."
+
+[[rule]]
+id = "recycle-bin"
+kind = "system"
+title = "回收站"
+note = "回收站"
+cleanup = "tool"
+reason = "已删除、但还在回收站里的文件。清空回收站即可释放这些空间。"
+node = "dir"
+paths = ["?:/$Recycle.Bin", ".local/share/Trash", "/Users/*/.Trash", ".Trash-*"]
+priority = 5
+i18n.en.title = "Recycle Bin"
+i18n.en.note = "Recycle Bin"
+i18n.en.reason = "Deleted files still in the Recycle Bin / Trash. Empty it to free the space."
+
+[[rule]]
+id = "windows-temp"
+kind = "cache"
+title = "临时文件"
+note = "临时文件"
+cleanup = "safe"
+reason = "系统和程序的临时文件，一般可以删除；正在使用的文件会删除失败，跳过即可。用「设置 › 系统 › 存储 › 临时文件」或存储感知清理更方便。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/Windows/Temp", "AppData/Local/Temp"]
+i18n.en.title = "Temporary files"
+i18n.en.note = "Temporary files"
+i18n.en.reason = "Temporary files of the system and programs; they can generally be deleted, and files in use simply fail to delete. Settings › System › Storage › Temporary files or Storage Sense is the convenient way."
+
+[[rule]]
+id = "explorer-thumbcache"
+kind = "cache"
+title = "缩略图缓存"
+note = "缩略图缓存"
+cleanup = "safe"
+reason = "资源管理器的缩略图和图标缓存（thumbcache_*.db）。可以用「磁盘清理 › 缩略图」安全清理，之后浏览文件夹时会重新生成。"
+platforms = "windows"
+node = "dir"
+paths = ["AppData/Local/Microsoft/Windows/Explorer"]
+i18n.en.title = "Thumbnail cache"
+i18n.en.note = "Thumbnail cache"
+i18n.en.reason = "File Explorer's thumbnail and icon caches (thumbcache_*.db). Disk Cleanup › Thumbnails removes them safely; they are rebuilt as you browse folders."
+
+[[rule]]
+id = "driver-installers"
+kind = "cache"
+title = "显卡驱动安装包"
+note = "驱动安装包"
+cleanup = "safe"
+reason = "显卡驱动安装程序解压或下载的安装包。驱动装好后不再需要，可以删除。"
+platforms = "windows"
+node = "dir"
+paths = ["?:/{AMD,NVIDIA}", "?:/ProgramData/NVIDIA Corporation/Downloader"]
+i18n.en.title = "Graphics driver installers"
+i18n.en.note = "Driver installers"
+i18n.en.reason = "Packages graphics driver installers extracted or downloaded. They are not needed once the driver is installed and can be deleted."
+
+[[rule]]
+id = "crash-dumps"
+kind = "system"
+title = "崩溃转储"
+note = "崩溃转储"
+cleanup = "safe"
+reason = "程序或系统崩溃时保存的内存转储与诊断报告，用于排查问题。不需要排查时可以删除。"
+paths = [
+  "AppData/Local/CrashDumps", "?:/Windows/{Minidump,MEMORY.DMP,LiveKernelReports}",
+  "/var/crash", "/var/lib/systemd/coredump", "Library/Logs/DiagnosticReports",
+]
+i18n.en.title = "Crash dumps"
+i18n.en.note = "Crash dumps"
+i18n.en.reason = "Memory dumps and diagnostic reports saved when a program or the system crashed, used for troubleshooting. They can be deleted if you are not investigating a crash."
+
+# ============================================================================================
+# 系统：Linux / macOS（system / cache）
+# ============================================================================================
+
+[[rule]]
+id = "linux-swapfile"
+kind = "system"
+title = "交换文件"
+note = "虚拟内存"
+cleanup = "keep"
+reason = "Linux 的交换文件（虚拟内存）。不要直接删除；需要先用 swapoff 停用，并从 /etc/fstab 中去掉对应的行。"
+platforms = "linux"
+node = "file"
+paths = ["/swapfile", "/swap.img", "/swap/swapfile"]
+priority = 10
+i18n.en.title = "Swap file"
+i18n.en.note = "Virtual memory"
+i18n.en.reason = "The Linux swap file (virtual memory). Do not delete it directly: turn it off with swapoff and remove its line from /etc/fstab first."
+
+[[rule]]
+id = "macos-swap"
+kind = "system"
+title = "交换与休眠文件"
+note = "虚拟内存"
+cleanup = "keep"
+reason = "macOS 的交换文件和休眠镜像（sleepimage），由系统管理，大小随内存压力变化，不能手动删除；重启后通常会变小。"
+platforms = "macos"
+paths = ["/private/var/vm", "/System/Volumes/VM"]
+priority = 10
+i18n.en.title = "Swap and sleep image"
+i18n.en.note = "Virtual memory"
+i18n.en.reason = "macOS swap files and the sleep image, managed by the system and sized by memory pressure; do not delete them by hand. A restart usually makes them smaller."
+
+[[rule]]
+id = "macos-var-folders"
+kind = "system"
+title = "系统临时与缓存目录"
+note = "系统缓存"
+cleanup = "keep"
+reason = "macOS 为每个用户维护的临时文件与缓存，由系统定期清理。不要手动删除，重启通常会释放一部分空间。"
+platforms = "macos"
+node = "dir"
+paths = ["/private/var/folders"]
+priority = 10
+i18n.en.title = "System temporary and cache folders"
+i18n.en.note = "System cache"
+i18n.en.reason = "Per-user temporary files and caches macOS maintains and cleans periodically. Do not delete them by hand; a restart usually frees some of the space."
+
+[[rule]]
+id = "apt-cache"
+kind = "cache"
+title = "APT 软件包缓存"
+app = "APT"
+note = "软件包缓存"
+cleanup = "safe"
+command = "sudo apt clean"
+reason = "apt 下载的 .deb 安装包，软件装好后不再需要。用 sudo apt clean 清理。"
+platforms = "linux"
+node = "dir"
+paths = ["/var/cache/apt/archives"]
+i18n.en.title = "APT package cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = ".deb packages apt downloaded, not needed once the software is installed. Clean them with sudo apt clean."
+
+[[rule]]
+id = "dnf-cache"
+kind = "cache"
+title = "DNF / YUM 软件包缓存"
+app = "DNF"
+note = "软件包缓存"
+cleanup = "safe"
+command = "sudo dnf clean all"
+reason = "dnf、yum 或 PackageKit 下载的 RPM 包与仓库元数据缓存。用 sudo dnf clean all 清理。"
+platforms = "linux"
+node = "dir"
+paths = ["/var/cache/{dnf,yum,PackageKit}"]
+i18n.en.title = "DNF / YUM package cache"
+i18n.en.note = "Package cache"
+i18n.en.reason = "RPM packages and repository metadata cached by dnf, yum or PackageKit. Clean them with sudo dnf clean all."
+
+[[rule]]
+id = "journal-logs"
+kind = "system"
+title = "systemd 日志"
+note = "系统日志"
+cleanup = "tool"
+command = "sudo journalctl --vacuum-size=200M"
+reason = "systemd-journald 保存的系统日志。不要直接删除正在写入的日志；用 sudo journalctl --vacuum-size=200M 压缩到指定大小。"
+platforms = "linux"
+node = "dir"
+paths = ["/var/log/journal"]
+i18n.en.title = "systemd journal"
+i18n.en.note = "System logs"
+i18n.en.reason = "System logs kept by systemd-journald. Do not delete the active journal files; shrink it to a given size with sudo journalctl --vacuum-size=200M."
+
+[[rule]]
+id = "posix-temp"
+kind = "cache"
+title = "临时目录"
+note = "临时文件"
+cleanup = "review"
+reason = "系统临时目录，/tmp 通常在重启时清空。不要删除正在运行的程序使用的文件。"
+platforms = "posix"
+node = "dir"
+paths = ["/tmp", "/var/tmp", "/private/tmp", "/private/var/tmp"]
+i18n.en.title = "Temporary folder"
+i18n.en.note = "Temporary files"
+i18n.en.reason = "A system temporary folder; /tmp is usually emptied at restart. Do not delete files that running programs are using."
+
+[[rule]]
+id = "xdg-cache"
+kind = "cache"
+title = "用户缓存目录"
+note = "应用缓存"
+cleanup = "review"
+reason = "Linux 程序存放缓存的标准位置（XDG）。其中大多数内容可以删除，程序会重新生成；先看看是哪个程序的子目录占用最多。"
+platforms = "linux"
+node = "dir"
+paths = ["/home/*/.cache", "/root/.cache"]
+priority = -5
+i18n.en.title = "User cache folder"
+i18n.en.note = "App caches"
+i18n.en.reason = "The standard (XDG) place where Linux programs keep caches. Most of it can be deleted and is regenerated; look at which program's subfolder is largest first."
+
+[[rule]]
+id = "macos-caches"
+kind = "cache"
+title = "应用缓存"
+note = "应用缓存"
+cleanup = "review"
+reason = "macOS 应用存放缓存的位置。多数子目录可以在退出对应应用后删除，会自动重建；先看看是哪个应用的子目录占用最多。"
+platforms = "macos"
+node = "dir"
+paths = ["Library/Caches"]
+priority = -5
+i18n.en.title = "App caches"
+i18n.en.note = "App caches"
+i18n.en.reason = "Where macOS apps keep their caches. Most subfolders can be deleted once the app is closed and are rebuilt automatically; look at which app's subfolder is largest first."

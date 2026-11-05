@@ -30,12 +30,15 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 clap = { version = "4", features = ["derive"] }
 toml = "0.9"
+regex = "1"
 libc = "0.2"
 tempfile = "3"
 zstd = { version = "0.13", default-features = false }
 schemars = { version = "1.2", features = ["chrono04"] }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
 sha2 = "0.10"
+roxmltree = "0.20"
+ureq = { version = "3", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [profile.release]
 lto = "thin"

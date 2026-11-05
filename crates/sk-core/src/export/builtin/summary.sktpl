@@ -1,0 +1,11 @@
+@name=Summary
+# SpaceSniffer 2.0.5.18 的内置模板（语法见 docs/export-templates.md）
+# 只有结尾段：在导出根上求值一次。
+@file=Summary.txt
+@blocks=files
+@sort=size
+@order=desc
+@footer
+Total size: <%disksize%>
+Folders   : <%foldercount%>
+Files     : <%filecount%>{&br}
