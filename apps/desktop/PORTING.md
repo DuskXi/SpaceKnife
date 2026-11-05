@@ -52,39 +52,39 @@ need no component; the four already moved are marked done.
 | --- | --- | --- |
 | `App.tsx` | `AppShell.vue` (**done**, skeleton; fill the placeholders) | `onKey`, `keyboardMenu` → `state/shortcuts.ts` (**done**) |
 | `main.tsx` | `app.vue` + `plugins/*` (**done**) | |
-| `shell/TitleBar.tsx` | `shell/TitleBar.vue` (**done**, minus RemoteChip / UpdateBadge) | |
+| `shell/TitleBar.tsx` | `shell/TitleBar.vue` (**done**, with RemoteChip / UpdateBadge) | |
 | `ui/Icon.tsx` | `ui/Icon.vue` + `ui/Kbd.vue` (**done**) | `IconName` → `lib/icons.ts` (**done**) |
-| `ui/ErrorBoundary.tsx` | `ui/ErrorBoundary.vue` (`onErrorCaptured`) | |
-| `ui/charts.tsx` | `ui/charts/*.vue` (one per chart) | `Tone`, `Segment` types → `lib/charts.ts` |
-| `shell/Toolbar.tsx` | `shell/Toolbar.vue` (uses `composables/useCollapseLevel`) | |
-| `shell/StatusBar.tsx` | `shell/StatusBar.vue` | `monitorText` → `lib/statusBar.ts` |
-| `shell/LogPanel.tsx` | `shell/LogPanel.vue` | |
-| `shell/Palette.tsx` | `shell/Palette.vue` | |
-| `shell/ContextMenu.tsx` | `shell/ContextMenu.vue` | `closeMenu` → `state/menu.ts` |
-| `shell/OpToast.tsx` | `shell/OpToast.vue` | |
-| `shell/ExportDialog.tsx` | `shell/ExportDialog.vue` | |
-| `shell/FullDiskAccessDialog.tsx` | `shell/FullDiskAccessDialog.vue` | |
-| `shell/UpdateCard.tsx` | `shell/UpdateCard.vue` (`UpdatePrompt` = `shell/UpdatePrompt.vue`) | `UpdatePlacement` type → `state/updates.ts` |
-| `shell/UpdateBadge.tsx` | `shell/UpdateBadge.vue` (then add it to TitleBar.vue) | |
-| `shell/BrowserLayer.tsx` | `shell/BrowserLayer.vue` + `shell/RemoteChip.vue` (then add the chip to TitleBar.vue) | `isLoopback` → `lib/host.ts` |
-| `shell/FilterBox.tsx` | `shell/FilterBox.vue` | `filterInputId`, `focusFilter` → `lib/filterInput.ts` (**done**); `attrLabel`, `errorText`, `diagnosticText` → `lib/filterText.ts`; `renderColoured` returns React nodes: make it return segments `{ text, cls }[]` and render them in the template |
-| `shell/Inspector.tsx` | `shell/Inspector.vue` | `revealLabel`, `notOnDisk` → `lib/reveal.ts` (**done**); `reveal` (async, store only) → `state/reveal.ts` |
-| `shell/Results.tsx` | `shell/Results.vue` | |
-| `shell/ScanProgress.tsx` | `shell/ScanBand.vue`, `shell/ScanDetails.vue` (one per exported component) | `isRunning`, `fmtRemaining`, `scanPercent`, `fmtRate`, `levels`, `levelName`, `levelText`, `phaseText` → `lib/scanProgress.ts` (**done**); `curveSummary`, `activeTip` → `lib/scanProgress.ts`; hook `useScanIo` → `composables/useScanIo.ts` |
-| `shell/HoverCard.tsx` | `shell/HoverCard.vue` | `sameTarget`, `cardAvoid`, `hoverFacts` → `lib/hoverCard.ts` |
-| `shell/Compare.tsx` | `shell/Compare*.vue` (one per exported component) | `DIRECTIONS`, `directionLabel`, `fmtSpan` → `lib/compare.ts` |
-| `shell/BasketDrawer.tsx` | `shell/BasketDrawer.vue` | |
-| `shell/ColumnResizer.tsx` | `shell/ColumnResizer.vue` | |
-| `visual/Host.tsx` | `visual/Host.vue` (uses `composables/useMedia`, `visual/scheduler.ts` FrameLoop) | `pointerBox`, `hitOfKey` → `visual/hit.ts` |
-| `pages/StartPage.tsx` | `pages/StartPage.vue` | `MEDIA_ZH`, `LOAD_ZH`, `volumeName`, `mftCapable`, `fmtShareOf`, `keysOf` → `lib/volumes.ts`. Dropping folders: see "Drag and drop" |
-| `pages/MachineCard.tsx` | `pages/MachineCard.vue` | |
-| `pages/MachinePage.tsx` | `pages/MachinePage.vue` | |
-| `pages/ScanPage.tsx` | `pages/ScanPage.vue` | |
-| `pages/SettingsPage.tsx` | `pages/SettingsPage.vue` | `PAGES` → `lib/settingsPages.ts` |
-| `pages/AboutPage.tsx` | `pages/AboutPage.vue` (`window.sk.versions` is now `{ tauri, webview }`) | |
-| `pages/AdvancedTools.tsx` | `pages/AdvancedTools.vue` | |
-| `pages/ClassesEditor.tsx` | `pages/ClassesEditor.vue` (see "Drag and drop") | |
-| `pages/HelpPage.tsx` | `pages/HelpPage.vue` | `openLink`, `helpTitle` → `help/links.ts`; port `help/HelpPage.test.ts` (dropped in phase 1, it mounted the React page) as `pages/HelpPage.test.ts` with @vue/test-utils |
+| `ui/ErrorBoundary.tsx` | `ui/ErrorBoundary.vue` (**done**, `onErrorCaptured`; wraps `AppShell` in `app.vue`) | |
+| `ui/charts.tsx` | `ui/charts/{Ring,Meter,StackBar,Sparkline}.vue` (**done**) | `Tone`, `Segment` types, ring / sparkline geometry → `lib/charts.ts` (**done**) |
+| `shell/Toolbar.tsx` | `shell/Toolbar.vue` (**done**; parts `Toolbar{Button,Crumbs,Detail,More,Visuals}.vue`) | `SPACE_SWITCHES`, `colorLabel`, `binName`, breadcrumb label / full path → `lib/toolbar.ts` (**done**) |
+| `shell/StatusBar.tsx` | `shell/StatusBar.vue` (**done**) | `monitorText`, `LEVEL_CAP` → `lib/statusBar.ts` (**done**) |
+| `shell/LogPanel.tsx` | `shell/LogPanel.vue` (**done**; `LogList.vue`, `LogStats.vue`) | source / level texts, message parts → `lib/logPanel.ts` (**done**) |
+| `shell/Palette.tsx` | `shell/Palette.vue` (**done**; `PaletteDialog.vue`, `PaletteRow.vue`) | rows, first runnable row, hit parts → `lib/palette.ts` (**done**) |
+| `shell/ContextMenu.tsx` | `shell/ContextMenu.vue` (**done**) | `closeMenu` → `state/menu.ts` (**done**) |
+| `shell/OpToast.tsx` | `shell/OpToast.vue` (**done**) | |
+| `shell/ExportDialog.tsx` | `shell/ExportDialog.vue` (**done**) | |
+| `shell/FullDiskAccessDialog.tsx` | `shell/FullDiskAccessDialog.vue` (**done**) | |
+| `shell/UpdateCard.tsx` | `shell/UpdateCard.vue` (**done**; `UpdatePrompt` = `shell/UpdatePrompt.vue`) | `UpdatePlacement` type → `state/updates.ts` (**done**); `choiceTitle`, `choiceHint` → `lib/updateCard.ts` |
+| `shell/UpdateBadge.tsx` | `shell/UpdateBadge.vue` (**done**, in TitleBar.vue) | |
+| `shell/BrowserLayer.tsx` | `shell/BrowserLayer.vue` + `shell/RemoteChip.vue` (**done**, chip in TitleBar.vue) | `isLoopback` → `lib/host.ts` (**done**) |
+| `shell/FilterBox.tsx` | `shell/FilterBox.vue` (**done**) | `filterInputId`, `focusFilter` → `lib/filterInput.ts` (**done**); `attrLabel`, `errorText`, `diagnosticText` → `lib/filterText.ts` (**done**); `renderColoured` → `colourSegments` (`{ start, text, cls }[]`, rendered in the template) |
+| `shell/Inspector.tsx` | `shell/Inspector.vue` (**done**; + `InspectorClassStats.vue`, `InspectorTopRow.vue`) | `revealLabel`, `notOnDisk` → `lib/reveal.ts` (**done**); `reveal` (async, store only) → `state/reveal.ts` (**done**) |
+| `shell/Results.tsx` | `shell/Results.vue` (**done**, `Results.test.ts`) | paging, row text, condition capsules → `lib/results.ts` (**done**) |
+| `shell/ScanProgress.tsx` | `shell/ScanBand.vue`, `shell/ScanDetails.vue` (one per exported component) (**done**) | `isRunning`, `fmtRemaining`, `scanPercent`, `fmtRate`, `levels`, `levelName`, `levelText`, `phaseText` → `lib/scanProgress.ts` (**done**); `curveSummary`, `activeTip` → `lib/scanProgress.ts` (**done**); hook `useScanIo` → `composables/useScanIo.ts` (**done**) |
+| `shell/HoverCard.tsx` | `shell/HoverCard.vue` (**done**; delay logic in `composables/useHoverCard.ts`, shared with `CompareHoverCard.vue`) | `sameTarget`, `cardAvoid`, `hoverFacts`, card placement, `splitPlaceholders` → `lib/hoverCard.ts` (**done**) |
+| `shell/Compare.tsx` | `shell/Compare*.vue` (one per exported component): `ComparePicker.vue` (`tab`, `compact?`), `CompareDirection.vue` (was `DirectionSegment`; `viewId`), `CompareExit.vue` (was `ExitCompare`; `tab`, `compact?`), `CompareSidebar.vue`, `CompareHoverCard.vue` (**done**; `CompareEndMenu.vue` is the picker's end) | `DIRECTIONS`, `directionLabel`, `fmtSpan` → `lib/compare.ts` (**done**) |
+| `shell/BasketDrawer.tsx` | `shell/BasketDrawer.vue` (**done**) | sort, main volume, status text → `lib/basketDrawer.ts` (**done**) |
+| `shell/ColumnResizer.tsx` | `shell/ColumnResizer.vue` (**done**) | |
+| `visual/Host.tsx` | `visual/Host.vue` (**done**, `Host.test.ts`; `onHover` / `onContextMenu` are the emits `hover` / `menu`) (uses `composables/useMedia`, `visual/scheduler.ts` FrameLoop) | `pointerBox`, `hitOfKey` → `visual/hit.ts` (**done**) |
+| `pages/StartPage.tsx` | `pages/StartPage.vue` + `pages/StartRecents.vue` (**done**) | `MEDIA_ZH`, `LOAD_ZH`, `volumeName`, `mftCapable`, `fmtShareOf`, `keysOf` (+ `methodText`, `methodBadge`, `sameRoot`, `fmtWhen`, `recentRecords`) → `lib/volumes.ts` (**done**). Dropped folders / `.sks` come through `files.onDropPaths` (see "Drag and drop") |
+| `pages/MachineCard.tsx` | `pages/MachineCard.vue` (**done**) | |
+| `pages/MachinePage.tsx` | `pages/MachinePage.vue` + `pages/MachineDisk.vue`, `pages/MachineVolume.vue` (**done**) | `seconds`, `FULL`, `className`, `scanSummary` → `lib/machinePage.ts` (**done**) |
+| `pages/ScanPage.tsx` | `pages/ScanPage.vue` (**done**; + `ScanPane.vue`, `ScanPaneHead.vue`, `ScanFilterFloater.vue`) | `openMenu`, `jumpUp`, crumb labels, `columnWidth` → `lib/scanPage.ts` (**done**) |
+| `pages/SettingsPage.tsx` | `pages/SettingsPage.vue` + `SettingsGroup`, `SettingRow`, `SettingControl`, `SettingsKeys`, `SettingsFiles`, `SettingsFooter`, `SetRow`; toolbar box `SettingsSearch` = `pages/SettingsSearch.vue` (**done**) | `PAGES` (+ `GROUPS`, `pageName`, `groupBy`, `dependsOk`, `searchSettings`) → `lib/settingsPages.ts` (**done**) |
+| `pages/AboutPage.tsx` | one per exported component: `pages/AboutHeader.vue`, `pages/AboutComponents.vue` (Tauri / WebView rows), `pages/AboutTimeline.vue`, `pages/AboutEntry.vue` (**done**) | |
+| `pages/AdvancedTools.tsx` | `pages/AdvancedTools.vue`, `pages/ClearTags.vue`, `pages/ImportPreview.vue`, `pages/ConfirmButton.vue` (**done**) | hook `useMaintenance` → `composables/useMaintenance.ts` (**done**) |
+| `pages/ClassesEditor.tsx` | `pages/ClassesEditor.vue` (**done**, reordering with pointer events) | row logic → `lib/classesEditor.ts` (**done**) |
+| `pages/HelpPage.tsx` | `pages/HelpPage.vue` + `pages/HelpContents.vue`; toolbar box `HelpSearch` = `pages/HelpSearch.vue` (**done**) | `openLink`, `helpTitle` (+ `markWords`) → `help/links.ts` (**done**); `pages/HelpPage.test.ts` ported (**done**) |
 
 When a component is done, replace its placeholder / TODO(port) comment in `AppShell.vue`,
 `TitleBar.vue` or its parent.
@@ -117,7 +117,7 @@ Nothing in the state is proxied deeply: frames (typed arrays, class instances) a
 | `useCollapseLevel(ref, content)` (shell/toolbarFit.ts) | `useCollapseLevel(elRef, contentRefOrGetter): Ref<number>` (pure parts in `lib/toolbarFit.ts`) |
 | `useReducedMotion(setting)` (visual/scheduler.ts) | `useReducedMotion(settingRefOrGetter): ComputedRef<boolean>` (`composables/useMedia.ts`) |
 | `useDevicePixelRatio()` (visual/scheduler.ts) | `useDevicePixelRatio(): Ref<number>` (`composables/useMedia.ts`) |
-| `useScanIo(scanId)` (shell/ScanProgress.tsx) | to port: `composables/useScanIo.ts` |
+| `useScanIo(scanId)` (shell/ScanProgress.tsx) | `useScanIo(scanIdRefOrGetter): ComputedRef<IoStatus \| null>` (`composables/useScanIo.ts`) |
 
 ## Host API: `window.sk`
 
@@ -173,7 +173,11 @@ Tauri's drag-drop handler is on (window default), so drops of files from the sys
 `window.sk.files.onDropPaths`. On Windows that handler also swallows the page's own HTML5 drag and
 drop: `ClassesEditor` reordering (dataTransfer) must use pointer events instead (as the title bar's
 tab reordering does), or the window must be built with `disable_drag_drop_handler()` and the start
-page loses dropped paths. Decide when porting StartPage / ClassesEditor.
+page loses dropped paths. Decided: the handler stays on. StartPage takes dropped paths from `onDropPaths` (a `.sks` file
+opens as a snapshot, anything else goes in the path box, where the path check flags what isn't a
+folder); ClassesEditor reorders with pointer events. `onDropPaths` only reports the drop, so the
+start page's 「松开以添加文件夹…」 overlay shows in a browser tab only (an enter / leave event from
+Tauri's drag-drop would be needed for it in the app).
 
 ## Not ported yet (outside the components)
 

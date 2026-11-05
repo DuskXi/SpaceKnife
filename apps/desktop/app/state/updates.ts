@@ -19,6 +19,10 @@ export type InstallKind = UpdateStatus["install_kind"];
  * as a dialog by itself (major), or nowhere. */
 export type UpdateSurface = "none" | "anchored" | "corner" | "dialog";
 
+/** Where an update card is drawn (components/shell/UpdateCard.vue); "inline": in the 「关于与更新」
+ * page, where it stays (no closing, no 「以后再说」). */
+export type UpdatePlacement = "anchored" | "corner" | "dialog" | "inline";
+
 /** A newer release is known (the 「关于与更新」 page shows it). */
 export function hasUpdate(st: UpdateStatus | null | undefined): st is UpdateStatus & { latest: UpdateInfo } {
   return !!st && st.level !== "none" && !!st.latest;

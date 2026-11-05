@@ -13,6 +13,9 @@ import { openHelp } from "@/state/help";
 import { type Tab, useApp } from "@/state/store";
 import { dropIndex } from "@/state/tabOrder";
 
+import RemoteChip from "./RemoteChip.vue";
+import UpdateBadge from "./UpdateBadge.vue";
+
 const sk = window.sk;
 const tabs = useApp((s) => s.tabs);
 const active = useApp((s) => s.active);
@@ -133,7 +136,8 @@ function endDrag(): void {
       </button>
     </div>
     <div class="drag" data-tauri-drag-region />
-    <!-- TODO(port): <RemoteChip v-if="!native" /> (shell/BrowserLayer.tsx) and <UpdateBadge /> (shell/UpdateBadge.tsx) -->
+    <RemoteChip v-if="!native" />
+    <UpdateBadge />
     <button class="title-btn" :aria-label="t('本机磁盘')" :title="t('本机磁盘：每块盘的容量、链路、读写量与健康')" @click="openMachineTab()">
       <Icon name="diskGauge" />
     </button>

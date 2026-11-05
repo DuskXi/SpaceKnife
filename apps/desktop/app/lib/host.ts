@@ -6,3 +6,6 @@ export const inBrowser = (): boolean => window.sk.host === "browser";
 
 /** The computer the files are on, in a browser tab; "" in the app. */
 export const serverName = (): string => window.sk.remote?.hostname ?? "";
+
+/** localhost, 127.x.x.x, [::1]: the page and the server are on one computer. */
+export const isLoopback = (hostname: string): boolean => /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/i.test(hostname);
