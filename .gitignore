@@ -38,3 +38,8 @@ Thumbs.db
 *.pdb
 *.so
 *.tsbuildinfo
+
+# Nuxt / Tauri (apps/desktop)
+.nuxt/
+.output/
+apps/desktop/src-tauri/gen/

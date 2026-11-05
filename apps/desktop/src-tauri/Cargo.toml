@@ -1,0 +1,34 @@
+[package]
+name = "spaceknife-desktop"
+description = "SpaceKnife's desktop app: the Tauri shell around the interface (apps/desktop) and the in-process backend"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+name = "spaceknife_desktop"
+path = "src/lib.rs"
+
+[[bin]]
+name = "spaceknife"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sys-locale = "0.3"
+url = "2"
+percent-encoding = "2"
+
+[dev-dependencies]
+tempfile = { workspace = true }
