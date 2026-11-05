@@ -26,3 +26,4 @@ pub mod palette;
 pub mod insights;
 pub mod pathclass;
 pub mod events;
+pub mod summary;

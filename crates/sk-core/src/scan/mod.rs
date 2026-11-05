@@ -1,7 +1,8 @@
 //! Scanning (port of `spaceknife.scan.scanner`, `worker`, `mft`).
 //!
-//! * [`Scanner`]: the hard scan. Listing threads run [`sk_native::hardscan::scan_slice`] on
-//!   batches of folders (one listing thread per call, `concurrency` calls in flight); the thread
+//! * [`Scanner`]: the hard scan. Calling threads run [`sk_native::hardscan::scan_slice`] on
+//!   batches of folders (`concurrency` calls in flight, listed on the walker's shared carriers
+//!   with its adaptive width and the disk's [`sk_native::hardscan::ListingGate`]); the thread
 //!   that calls [`Scanner::run`] folds every result into the [`Store`] with
 //!   [`sk_store::Appender::ingest_slice`] and hands the frontier back to the queue. Readers (views)
 //!   run meanwhile (sk-store threading contract); the appender is taken per fold only, so a
@@ -15,6 +16,7 @@
 pub mod gate;
 pub mod mft;
 mod scanner;
+pub mod winopts;
 
 use std::path::{Path, PathBuf};
 
@@ -35,24 +37,56 @@ pub const NATIVE_BATCH: usize = 256;
 /// How long one slice lists before it returns what it has.
 pub const NATIVE_BUDGET: std::time::Duration = std::time::Duration::from_millis(50);
 
-/// Listing threads: one per CPU, at most 16; on Windows at most 8 (NTFS's directory locks: a warm
-/// scan of `C:\Windows` on a 32-thread machine lists 280k items/s with 8 threads, 150k with 16,
-/// 105k with 32). On macOS twice the CPUs (APFS listings wait in the kernel).
-/// `SPACEKNIFE_SCAN_THREADS` (1–64) overrides it for measurements.
+/// Whether the scanner lists on the walker's shared carriers (`threads` 0: the walker decides
+/// how many folders are listed at once, docs/native.md 2.2 「列目录线程」). `SPACEKNIFE_SCAN_SHARED=0`
+/// goes back to one listing thread per call (`threads` 1, [`native_threads`] calls), for
+/// measurements.
+pub fn shared_listing() -> bool {
+    !matches!(
+        std::env::var("SPACEKNIFE_SCAN_SHARED").map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Ok("0" | "false" | "no" | "off")
+    )
+}
+
+/// Threads that call the walker, one slice each. On the shared carriers the walker decides how
+/// many folders are listed at once (its width: from the start width up to the cold width while the
+/// disk is read, narrower where fewer list faster); the scanner calls it from as many threads as
+/// its start width: the CPUs this process may use ([`sk_native::cpus::usable`]), 2–16 (macOS twice
+/// that, 4–16: APFS listings wait in the kernel; Windows at most 8). `SPACEKNIFE_SCAN_THREADS` (1–64) fixes both,
+/// for measurements. Without the carriers ([`shared_listing`] off): one per CPU, 2–16 (macOS
+/// 4–16, Windows at most 8: NTFS's directory locks).
 pub fn native_threads() -> usize {
     if let Ok(v) = std::env::var("SPACEKNIFE_SCAN_THREADS")
         && let Ok(n) = v.trim().parse::<usize>()
         && n > 0
     {
-        return n.min(64);
+        return n.min(64); // the walker's width is fixed to it too (read once per process)
     }
-    let cpus = std::thread::available_parallelism().map_or(4, |n| n.get());
+    if shared_listing() {
+        let start = sk_native::hardscan::default_threads().max(1);
+        // Windows: at most 8 callers (the walker still lists up to its width, two folders a call
+        // at width 16): C:\Windows warm on 32 CPUs, 1.37–1.43 s with 8 callers, 1.89–2.04 s with
+        // 16 (NTFS's directory locks), 1.48–2.05 s with the old one-thread-per-call mode
+        return if cfg!(windows) { start.min(8) } else { start };
+    }
+    let cpus = sk_native::cpus::usable();
     if cfg!(target_os = "macos") {
         (2 * cpus).clamp(4, 16)
     } else if cfg!(windows) {
         cpus.clamp(2, 8)
     } else {
         cpus.clamp(2, 16)
+    }
+}
+
+/// The most folders the walker lists at once (its widest width): what the disk-load governor's
+/// concurrency, counted in listings, may reach (`RegistryOptions::max_workers`,
+/// `IoGovernor::set_max_workers`).
+pub fn listing_max() -> usize {
+    if shared_listing() {
+        sk_native::hardscan::listing_threads(false).max.max(1)
+    } else {
+        native_threads()
     }
 }
 

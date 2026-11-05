@@ -28,8 +28,10 @@
 mod case;
 mod common;
 mod links;
+mod pace;
 #[cfg(unix)]
 mod posix;
+mod slots;
 mod walk;
 #[cfg(windows)]
 mod win;
@@ -44,7 +46,7 @@ use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use common::{Arena, NativePath, RootOpts, StateOpts};
@@ -52,6 +54,7 @@ use walk::{Ctx, Node};
 
 pub use common::{flag, kind};
 pub use links::LinkSet;
+pub use slots::ListingGate;
 pub use walk::lower_ext;
 
 /// Listing errors of folders their name does not reach (Windows), as `worker.py` words them.
@@ -114,6 +117,56 @@ pub struct RootOptions {
     /// Windows: names fold onto case-sensitive storage here (WinBtrfs): every task is checked by
     /// its stored names below `path` (the walker also finds out about Btrfs by itself).
     pub verify_names: bool,
+    /// Windows: files take their size on disk from their listing entries' AllocationSize as this
+    /// local file system counts it (data kept in the file record or directory counts 0; only
+    /// sparse / compressed files written in the last minute and WOF-compressed NTFS files are
+    /// asked by name). [`ListedAlloc::Off`]: estimated from the size (`cluster_size`,
+    /// `resident_max`, `GetCompressedFileSizeW` by path for sparse and compressed files).
+    pub listed_alloc: ListedAlloc,
+}
+
+/// Where a root's file allocations come from on Windows ([`RootOptions::listed_alloc`]): the
+/// listing's AllocationSize on the local file systems this was measured on, or the estimate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum ListedAlloc {
+    /// Estimated from the size.
+    #[default]
+    Off,
+    Ntfs,
+    Refs,
+    Btrfs,
+}
+
+impl ListedAlloc {
+    /// From a file system name (`"NTFS"`, `"ReFS"`, `"Btrfs"`, any case); `""` and any other
+    /// name are [`ListedAlloc::Off`].
+    pub fn from_fs_name(name: &str) -> Self {
+        match name.to_ascii_lowercase().as_str() {
+            "ntfs" => Self::Ntfs,
+            "refs" => Self::Refs,
+            "btrfs" => Self::Btrfs,
+            _ => Self::Off,
+        }
+    }
+
+    /// The option's text as the Python backend spelled it (`""` when off).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "",
+            Self::Ntfs => "NTFS",
+            Self::Refs => "ReFS",
+            Self::Btrfs => "Btrfs",
+        }
+    }
+
+    fn code(self) -> u8 {
+        match self {
+            Self::Off => common::listed::OFF,
+            Self::Ntfs => common::listed::NTFS,
+            Self::Refs => common::listed::REFS,
+            Self::Btrfs => common::listed::BTRFS,
+        }
+    }
 }
 
 impl Default for RootOptions {
@@ -127,6 +180,7 @@ impl Default for RootOptions {
             protect: Vec::new(),
             path: None,
             verify_names: false,
+            listed_alloc: ListedAlloc::Off,
         }
     }
 }
@@ -143,6 +197,10 @@ pub struct TestSeams {
     /// Entries listed past the budget below folders opened by file id and of folders whose name
     /// another entry shares (default: max(2 × max_entries, 10,000)).
     pub pinned_cap: Option<usize>,
+    /// Windows: the last query `skip_final` would leave out is sent anyway and counted
+    /// (`open_stats`: `final_verified`, `final_wrong`), and one that returns entries does not
+    /// turn skipping off.
+    pub verify_final: bool,
 }
 
 /// Options of one [`scan_slice`] call (worker.SliceOptions plus the native knobs).
@@ -154,14 +212,32 @@ pub struct SliceOptions {
     pub budget: Duration,
     /// Entry budget, checked like the time budget.
     pub max_entries: usize,
-    /// Listing threads; 0 = one per logical CPU, at most 16. A one-thread pool belongs to the
-    /// calling thread, so several one-thread slices on several threads run side by side.
+    /// Listing threads. 0 = the process's shared carriers: every such call lists on them, as many
+    /// folders at once as the adaptive width allows ([`listing_threads`]; the scanner's calls).
+    /// N = a pool of N threads of the call's own; a one-thread pool belongs to the calling
+    /// thread, so several one-thread slices on several threads run side by side.
     pub threads: usize,
+    /// A limit on listings in flight shared by every call that names it, and its pause (the
+    /// backend's disk-load limit, one per disk). A paused gate starts no folder that can wait:
+    /// it goes back in the frontier.
+    pub gate: Option<ListingGate>,
     /// Windows and Linux: listing a folder does not update its last access time.
     pub keep_access_time: bool,
     /// Windows: a found subdirectory is opened by name relative to its parent's handle, checked
     /// against the listed file id.
     pub relative_open: bool,
+    /// Windows (local NTFS, ReFS, Btrfs): no last directory query when the buffer before it had
+    /// room for one more entry of any name. Not in listings of reparse points; per call and root
+    /// the first 64 listings that could leave it out, then one in 64, send it anyway, and one that
+    /// returns entries turns it off for the root. Default off (`SPACEKNIFE_WIN_SKIP_FINAL=1`).
+    pub skip_final: bool,
+    /// Windows: a relative open is checked by the file id of its listing's "." entry (else by
+    /// querying the handle). Default off (`SPACEKNIFE_WIN_DOT_CHECK=1`).
+    pub dot_check: bool,
+    /// Windows: `keep_access_time` only on volumes whose file system updates access times (the
+    /// system's NtfsDisableLastAccessUpdate / RefsDisableLastAccessUpdate). Default on
+    /// (`SPACEKNIFE_WIN_KEEP_WHERE_UPDATED=0` turns it off).
+    pub keep_where_updated: bool,
     /// Set it to end calls early (pause, cancel): nothing more is listed and the rest is returned
     /// in the frontier; [`SliceResult::cancelled`] tells.
     pub cancel: Option<Arc<AtomicBool>>,
@@ -176,8 +252,12 @@ impl Default for SliceOptions {
             budget: Duration::from_millis(30),
             max_entries: 100_000,
             threads: 0,
+            gate: None,
             keep_access_time: true,
             relative_open: true,
+            skip_final: false,
+            dot_check: false,
+            keep_where_updated: true,
             cancel: None,
             seams: TestSeams::default(),
         }
@@ -454,6 +534,7 @@ fn root_opts(r: &RootOptions) -> RootOpts {
         skip: bytes(&r.skip),
         protect: bytes(&r.protect),
         path: r.path.as_deref().map(path_to_native).unwrap_or_default(),
+        listed_alloc: r.listed_alloc.code(),
     }
 }
 
@@ -472,12 +553,21 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
             });
         }
     }
-    let threads = if opts.threads == 0 {
-        walk::default_threads()
-    } else {
-        opts.threads
-    };
-    let pool = walk::pool(threads).map_err(Error::ThreadPool)?;
+    // threads 0: the shared carriers, within the width; else a pool of the call's own
+    let pace = (opts.threads == 0).then(pace::get);
+    let roots: Vec<RootOpts> = opts.roots.iter().map(root_opts).collect();
+    let pool = match pace {
+        Some(p) => {
+            for r in &roots {
+                p.note_root(&r.path);
+            }
+            walk::carriers(p.capacity())
+                .or_else(|_| walk::carriers(p.widths.start))
+                .or_else(|_| walk::pool(1)) // no threads to be had: the calling thread's
+        }
+        None => walk::pool(opts.threads),
+    }
+    .map_err(Error::ThreadPool)?;
     let budget_positive = !opts.budget.is_zero();
     let deadline = if budget_positive {
         started.checked_add(opts.budget)
@@ -493,12 +583,16 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
                     keep_access_time: opts.keep_access_time,
                     relative_open: opts.relative_open,
                     verify_names: r.verify_names,
+                    skip_final: opts.skip_final,
+                    verify_final: opts.seams.verify_final,
+                    dot_check: opts.dot_check,
+                    keep_where_updated: opts.keep_where_updated,
                     fold_strict: opts.seams.fold_strict,
                     extd_self_ids: opts.seams.extd_self_ids,
                 })
             })
             .collect(),
-        roots: opts.roots.iter().map(root_opts).collect(),
+        roots,
         deadline,
         budget_positive,
         max_entries: opts.max_entries,
@@ -512,6 +606,11 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
         arenas: (0..pool.current_num_threads().max(1))
             .map(|_| Mutex::new(Arena::default()))
             .collect(),
+        width: pace.map(pace::Pace::slots),
+        gate: opts.gate.as_ref().map(|g| g.slots.clone()),
+        pace,
+        running: AtomicUsize::new(0),
+        most_running: pool.current_num_threads().max(1),
         cancel: opts.cancel.clone(),
     };
     let nodes: Vec<Node> = tasks
@@ -520,6 +619,9 @@ pub fn scan_slice(tasks: Vec<Task>, opts: &SliceOptions) -> Result<SliceResult, 
         .collect();
 
     walk::walk(&pool, &nodes, &ctx);
+    if let Some(p) = pace {
+        p.after_call();
+    }
     let elapsed = started.elapsed();
     let cancelled = ctx.cancelled();
     let arenas: Vec<Arena> = ctx
@@ -558,8 +660,52 @@ pub fn open_stats(reset: bool) -> Vec<(&'static str, u64)> {
     sys::open_stats(reset)
 }
 
-/// The listing threads [`SliceOptions::threads`] = 0 stands for.
+/// The start width of the shared carriers ([`SliceOptions::threads`] = 0): as many calling
+/// threads as a scanner should use.
 pub fn default_threads() -> usize {
-    static N: OnceLock<usize> = OnceLock::new();
-    *N.get_or_init(walk::default_threads)
+    pace::get().widths.start
+}
+
+/// How listings on the shared carriers are paced (pace.rs, docs/native.md 2.2 「列目录线程」).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ListingThreads {
+    /// The CPUs this process may use.
+    pub cpus: usize,
+    /// The start width: as many calling threads as the scanner should use.
+    pub start: usize,
+    pub least: usize,
+    pub cold: usize,
+    pub max: usize,
+    /// The width now.
+    pub width: usize,
+    /// The carriers' pool now.
+    pub threads: usize,
+    /// "adaptive", "fixed" (`SPACEKNIFE_SCAN_THREADS`) or "start" (`SPACEKNIFE_WALK_ADAPT=0`).
+    pub mode: &'static str,
+    /// The narrowest and widest width since the last reset.
+    pub low: usize,
+    pub high: usize,
+}
+
+/// The listing width of calls on the shared carriers; `reset` starts `low` / `high` over from
+/// the width now, after reading them.
+pub fn listing_threads(reset: bool) -> ListingThreads {
+    let p = pace::get();
+    let (low, high) = p.seen(reset);
+    ListingThreads {
+        cpus: p.n_cpu,
+        start: p.widths.start,
+        least: p.widths.least,
+        cold: p.widths.cold,
+        max: p.widths.most,
+        width: p.width(),
+        threads: p.capacity(),
+        mode: match p.mode {
+            pace::Mode::Adaptive => "adaptive",
+            pace::Mode::Fixed => "fixed",
+            pace::Mode::Start => "start",
+        },
+        low,
+        high,
+    }
 }

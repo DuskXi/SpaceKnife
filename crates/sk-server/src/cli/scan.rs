@@ -210,17 +210,17 @@ fn run_scan(args: &ScanArgs, limit: Limit, out: &mut Console) -> Result<(Arc<Sca
         Some(n) => n,
         None => 0,
     };
-    let threads = if concurrency == 0 { sk_core::scan::native_threads() } else { concurrency };
     let mut opts = ScanOptions { concurrency, cross_mounts: args.cross_mounts && !args.no_cross_mounts, ..Default::default() };
     // the disk-load limit: paced like the app's scans
     let mut registry = None;
     let mut low_io = false;
     if let Some((level, custom)) = limit {
-        let reg = sk_core::io::IoRegistry::new(sk_core::io::RegistryOptions { max_workers: threads, ..Default::default() });
+        let most = sk_core::scan::listing_max(); // the governor counts folders listed at once
+        let reg = sk_core::io::IoRegistry::new(sk_core::io::RegistryOptions { max_workers: most, ..Default::default() });
         reg.start();
         let first = sk_core::scan::normalise_root(&args.paths[0]);
         let gov = reg.governor_for_path(&first);
-        gov.set_max_workers(threads);
+        gov.set_max_workers(most);
         gov.set_level(level, custom);
         low_io = gov.low_io_priority() && sk_core::io::set_low_io_priority(None, true, false);
         opts.gate = Some(Arc::new(gov) as Arc<dyn IoGate>);

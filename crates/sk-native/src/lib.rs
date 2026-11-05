@@ -8,6 +8,7 @@
 //!
 //! See `README.md` for the API overview. Everything here is plain Rust: no Python, no GIL.
 
+pub mod cpus;
 #[cfg(feature = "hardscan")]
 pub mod hardscan;
 #[cfg(feature = "mft")]

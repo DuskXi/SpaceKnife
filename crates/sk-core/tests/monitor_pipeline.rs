@@ -6,11 +6,15 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use sk_core::monitor::pipeline::{MonitorHooks, MonitorOptions, ScanMonitor, UsnRead, UsnSource};
-use sk_core::monitor::{Change, ChangeKind};
+#[cfg(windows)]
+use sk_core::monitor::pipeline::UsnRead;
+use sk_core::monitor::pipeline::{MonitorHooks, MonitorOptions, ScanMonitor, UsnSource};
+use sk_core::monitor::{Change, ChangeKind, Sink, WatchState, WatchStatus, Watcher};
 use sk_core::scan::{ScanOptions, Scanner};
+#[cfg(target_os = "linux")]
+use sk_protocol::scan::MonitorState;
 use sk_store::testing::{build_disk_tree, check_invariants, facts};
-use sk_store::{NodeId, Store};
+use sk_store::{Flags, NodeId, Store};
 
 fn scanned(roots: &[&Path]) -> Scanner {
     let roots: Vec<String> = roots.iter().map(|r| r.to_string_lossy().into_owned()).collect();
@@ -114,6 +118,242 @@ fn changes_reach_the_tree() {
     assert!(sk_store::mutate::gone_count(&s.store().read()) > 0);
     assert!(!hooks.flashes.lock().unwrap().is_empty());
     mon.stop();
+}
+
+/// A file written into a folder after the scan listed it, before its watch was placed, raised no
+/// event: the check made when the watch is placed lists that folder again (Windows: the recursive
+/// watch already runs and sees the write).
+#[test]
+fn a_change_before_a_folder_is_watched_reaches_the_tree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tree(tmp.path());
+    let s = scanned(&[&root]);
+    let mut mon = monitor(&s, true, None); // the root is watched; no folder handed over yet
+    std::fs::write(deepest_dir(&root).join("late.bin"), vec![b'l'; 500_000]).unwrap();
+    let mut hooks = Recorder::default();
+    let store = s.store().clone();
+    let r2 = root.clone();
+    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    check_invariants(&s.store().read()).unwrap();
+}
+
+/// A per-folder watcher that records what it is handed (named "poll": the pipeline feeds it).
+#[derive(Clone, Default)]
+struct Handed(Arc<Mutex<Vec<HandedDir>>>);
+
+/// A folder handed to the watcher, with the mtime the scan recorded.
+type HandedDir = (PathBuf, Option<u32>);
+
+impl Handed {
+    fn has(&self, p: &Path) -> bool {
+        self.0.lock().unwrap().iter().any(|(q, _)| q == p)
+    }
+    fn len(&self) -> usize {
+        self.0.lock().unwrap().len()
+    }
+}
+
+impl Watcher for Handed {
+    fn name(&self) -> &'static str {
+        "poll"
+    }
+    fn start(&self, _sink: Sink) -> std::io::Result<()> {
+        Ok(())
+    }
+    fn add_dirs(&self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, _since_ns: i64) {
+        let mut g = self.0.lock().unwrap();
+        for (i, d) in dirs.into_iter().enumerate() {
+            g.push((d, mtimes.as_ref().map(|m| m[i])));
+        }
+    }
+    fn stop(&self) {}
+    fn status(&self) -> WatchStatus {
+        WatchStatus::new(WatchState::Degraded, "")
+    }
+}
+
+fn recorded(s: &Scanner) -> (ScanMonitor, Handed) {
+    let handed = Handed::default();
+    let mut m = ScanMonitor::new(
+        s.store().clone(),
+        s.roots(),
+        s.root_options(),
+        MonitorOptions { coalesce: Duration::from_millis(50), ..Default::default() },
+    );
+    let h = handed.clone();
+    m.start_with(&mut move |_| Box::new(h.clone()));
+    (m, handed)
+}
+
+fn node(s: &Scanner, p: &Path) -> NodeId {
+    s.store().read().find_path(p).unwrap()
+}
+
+/// A folder the scan could not list has nothing in the tree to keep up to date: it is not handed
+/// to the watcher, and a change inside it does not open it; a rescan that lists it clears the
+/// flag and hands it over.
+#[test]
+fn folders_the_scan_could_not_list_are_neither_watched_nor_polled() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tree(tmp.path());
+    let s = scanned(&[&root]);
+    let inner = root.join("b").join("inner");
+    let locked = node(&s, &inner);
+    s.store().write().mark(locked, Flags::ACCESS_DENIED); // as a listing that failed marks it
+    let (mut mon, handed) = recorded(&s);
+    let mut hooks = Recorder::default();
+    mon.step(&mut hooks);
+    assert!(mon.fed() && handed.has(&root.join("b")) && handed.has(&root));
+    assert!(!handed.has(&inner));
+    let dirs = handed.len();
+    if cfg!(windows) {
+        assert!(handed.0.lock().unwrap().iter().all(|(_, m)| m.is_none())); // no mtimes on Windows
+    } else {
+        assert!(handed.0.lock().unwrap().iter().all(|(_, m)| m.is_some()));
+    }
+    // a change inside it, as a recursive watcher reports one, does not open it
+    std::fs::write(inner.join("new.txt"), b"n").unwrap();
+    mon.handle().push(vec![
+        Change::new(ChangeKind::Created, inner.join("new.txt"), Some(false)),
+        Change::new(ChangeKind::Dir, inner.clone(), Some(true)),
+    ]);
+    mon.step(&mut hooks);
+    assert!(s.store().read().find_path(&inner.join("new.txt")).is_none());
+    assert_eq!(mon.status().changes, 0);
+    // its parent's own changes are applied
+    std::fs::write(root.join("b").join("sibling.txt"), b"s").unwrap();
+    mon.handle().push(vec![Change::new(ChangeKind::Created, root.join("b").join("sibling.txt"), Some(false))]);
+    mon.step(&mut hooks);
+    assert!(s.store().read().find_path(&root.join("b").join("sibling.txt")).is_some());
+    // a rescan of it lists it (readable now): no longer marked, and watched from then on
+    mon.handle().rescan(&inner);
+    let store = s.store().clone();
+    let r2 = root.clone();
+    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    assert!(handed.has(&inner));
+    assert!(handed.len() > dirs);
+    let n = node(&s, &inner);
+    assert!(!s.store().read().flags(n).intersects(Flags::ACCESS_DENIED));
+}
+
+/// A folder is in the tree before the scan lists it (PENDING), and may then turn out unreadable:
+/// it reaches the watcher only once listed.
+#[test]
+fn a_folder_is_handed_over_once_the_scan_has_listed_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tree(tmp.path());
+    let s = scanned(&[&root]);
+    let (inner, sub) = (root.join("b").join("inner"), root.join("a").join("sub"));
+    let ids = [node(&s, &inner), node(&s, &sub)];
+    {
+        let mut w = s.store().write();
+        for &i in &ids {
+            w.mark(i, Flags::PENDING); // not listed yet, as in the middle of the scan
+        }
+    }
+    let (mut mon, handed) = recorded(&s);
+    let mut hooks = Recorder::default();
+    mon.step(&mut hooks);
+    assert!(handed.has(&root.join("b")));
+    assert!(!handed.has(&inner) && !handed.has(&sub));
+    assert!(mon.fed()); // a stopped scan's queue may wait
+    {
+        let mut w = s.store().write();
+        w.clear(ids[0], Flags::PENDING);
+        w.mark(ids[0], Flags::ACCESS_DENIED); // the scan could not list it after all
+        w.clear(ids[1], Flags::PENDING); // listed
+    }
+    assert!(!mon.fed());
+    mon.step(&mut hooks);
+    assert!(handed.has(&sub) && !handed.has(&inner));
+    assert!(mon.fed());
+}
+
+/// Running as soon as the root is watched, as on every platform: right after the scan, with its
+/// folders still waiting for their watches. A write in that moment is not lost.
+#[cfg(target_os = "linux")]
+#[test]
+fn the_status_is_running_while_folders_wait_for_their_watches() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let facts = build_disk_tree(&root).unwrap();
+    let s = scanned(&[&root]);
+    let mut mon = monitor(&s, true, None);
+    let st = mon.status();
+    assert_eq!((st.state, st.watcher.as_str(), st.watched_dirs), (MonitorState::Running, "inotify", 1));
+    std::fs::write(deepest_dir(&root).join("late.bin"), vec![b'l'; 500_000]).unwrap(); // before its watch
+    let mut hooks = Recorder::default();
+    let store = s.store().clone();
+    let r2 = root.clone();
+    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    let want = facts.dirs as i64 + 1;
+    let end = Instant::now() + Duration::from_secs(10);
+    while mon.status().watched_dirs != want {
+        assert!(Instant::now() < end, "{:?}", mon.status());
+        std::thread::sleep(Duration::from_millis(50));
+        mon.step(&mut hooks);
+    }
+    assert_eq!(mon.status().state, MonitorState::Running);
+}
+
+/// A plain user's scan meets folders it cannot read: inotify cannot watch them either (EACCES),
+/// and they used to be polled (「部分轮询」). Nothing below them is in the tree, so the monitor is
+/// running with no folder polled; made readable and rescanned, the folder is watched like the rest.
+#[cfg(target_os = "linux")]
+#[test]
+fn a_plain_users_scan_with_unreadable_folders_is_fully_watched() {
+    use std::os::unix::fs::PermissionsExt;
+    // SAFETY: plain syscall
+    if unsafe { libc::geteuid() } == 0 {
+        eprintln!("skipped: the superuser reads every folder");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let facts = build_disk_tree(&root).unwrap();
+    let locked = root.join("locked");
+    std::fs::create_dir_all(locked.join("inside")).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    struct Restore(PathBuf);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let _ = std::fs::set_permissions(&self.0, std::fs::Permissions::from_mode(0o755));
+        }
+    }
+    let _restore = Restore(locked.clone());
+    let s = scanned(&[&root]);
+    assert!(s.store().read().flags(node(&s, &locked)).intersects(Flags::ACCESS_DENIED));
+    let mut mon = monitor(&s, true, None);
+    let mut hooks = Recorder::default();
+    let watched = |mon: &mut ScanMonitor, hooks: &mut Recorder, want: i64| {
+        let end = Instant::now() + Duration::from_secs(10);
+        while mon.status().watched_dirs != want {
+            assert!(Instant::now() < end, "{:?}", mon.status());
+            std::thread::sleep(Duration::from_millis(50));
+            mon.step(hooks);
+        }
+    };
+    // the root and every listed folder (the fixture's, plus "locked" itself is not handed)
+    watched(&mut mon, &mut hooks, facts.dirs as i64 + 1);
+    let st = mon.status();
+    assert_eq!((st.state, st.polled_dirs), (MonitorState::Running, 0), "{}", st.detail);
+    // readable later: a chmod moves no mtime and raises no event for it; a rescan lists it
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    std::fs::write(locked.join("found.bin"), vec![b'f'; 4096]).unwrap();
+    mon.handle().rescan(&locked);
+    let store = s.store().clone();
+    let r2 = root.clone();
+    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    assert!(!s.store().read().flags(node(&s, &locked)).intersects(Flags::ACCESS_DENIED));
+    watched(&mut mon, &mut hooks, facts.dirs as i64 + 3); // it and the folder inside
+    std::fs::write(locked.join("later.bin"), vec![b'l'; 4096]).unwrap(); // seen through its own watch
+    let store = s.store().clone();
+    let r2 = root.clone();
+    until(&mut mon, &mut hooks, 20, move || same_as_disk(&store, &[&r2]));
+    let st = mon.status();
+    assert_eq!((st.state, st.polled_dirs), (MonitorState::Running, 0), "{}", st.detail);
 }
 
 #[test]

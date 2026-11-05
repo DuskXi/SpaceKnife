@@ -191,7 +191,7 @@ fn posix_links_hardlinks_and_denied() {
     let locked = root.join("locked");
     std::fs::create_dir(&locked).unwrap();
     std::fs::write(locked.join("secret"), b"x").unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
     let s = scanner(&root, ScanOptions::default());
     let p = run(&s);
     std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -465,4 +465,111 @@ fn hard_scans_run_under_the_io_governor() {
     let p = h.join().unwrap();
     assert_eq!(p.state, ScanState::Done);
     check_totals(&s, &facts);
+}
+
+/// Readings a moment apart (the times below are compared with measured ones).
+const TICK: f64 = 0.01;
+
+/// Runs `s` held paused for `secs` (nothing listed), then stops it with every folder still to
+/// read; the wall time it took.
+fn stopped_after(s: &Arc<Scanner>, secs: f64) -> f64 {
+    let t0 = Instant::now();
+    s.pause();
+    let s2 = s.clone();
+    let h = std::thread::spawn(move || run(&s2));
+    std::thread::sleep(Duration::from_secs_f64(secs));
+    s.cancel();
+    let p = h.join().unwrap();
+    assert_eq!(p.state, ScanState::Cancelled);
+    assert!(s.has_queue());
+    t0.elapsed().as_secs_f64()
+}
+
+#[test]
+fn a_continued_scan_takes_the_time_of_both_parts() {
+    // stopped, then continued: both parts count, the wait between them does not (it used to be
+    // the second part alone, and below zero while that part ran)
+    struct SlowOnce(std::sync::atomic::AtomicBool);
+    impl IoGate for SlowOnce {
+        fn permit(&self, _timeout: Duration) -> Option<Permit> {
+            if self.0.swap(false, Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Some(Permit::free())
+        }
+        fn concurrency(&self) -> usize {
+            4
+        }
+    }
+    let (_t, root, facts) = tree();
+    let gate = Arc::new(SlowOnce(std::sync::atomic::AtomicBool::new(false)));
+    let s = Arc::new(scanner(&root, ScanOptions { gate: Some(gate.clone()), ..Default::default() }));
+    let wall = stopped_after(&s, 0.3);
+    let first = s.progress();
+    assert!(0.25 < first.elapsed_s && first.elapsed_s <= wall + TICK, "{}", first.elapsed_s);
+    std::thread::sleep(Duration::from_millis(600)); // stopped: does not count
+    s.uncancel();
+    gate.0.store(true, Ordering::SeqCst); // the continued part lists for a while
+    let t1 = Instant::now();
+    let s2 = s.clone();
+    let h = std::thread::spawn(move || run(&s2));
+    std::thread::sleep(Duration::from_millis(150));
+    let meanwhile = s.progress();
+    let so_far = t1.elapsed().as_secs_f64();
+    assert_eq!(meanwhile.state, ScanState::Scanning);
+    assert!(
+        first.elapsed_s + 0.1 < meanwhile.elapsed_s
+            && meanwhile.elapsed_s <= first.elapsed_s + so_far + TICK,
+        "{} {}",
+        first.elapsed_s,
+        meanwhile.elapsed_s
+    );
+    assert!(meanwhile.finished_at.is_none() && meanwhile.started_at == first.started_at);
+    let done = h.join().unwrap();
+    let second = t1.elapsed().as_secs_f64();
+    assert_eq!(done.state, ScanState::Done);
+    assert_eq!(done.items as usize, facts.files + facts.dirs + 1);
+    assert!(
+        first.elapsed_s + 0.45 < done.elapsed_s && done.elapsed_s <= first.elapsed_s + second + TICK,
+        "{} {}",
+        first.elapsed_s,
+        done.elapsed_s
+    );
+    assert!(done.started_at == first.started_at && done.finished_at.is_some());
+    assert!((done.rate - done.items as f64 / done.elapsed_s).abs() < 1e-6 * done.rate.max(1.0));
+}
+
+#[test]
+fn switching_to_the_mft_read_times_only_that_read() {
+    let (_t, root, _) = tree();
+    let s = Arc::new(scanner(&root, ScanOptions::default()));
+    stopped_after(&s, 0.3);
+    let started_at = s.progress().started_at;
+    s.uncancel();
+    let t0 = Instant::now();
+    s.begin_external();
+    std::thread::sleep(Duration::from_millis(100));
+    let reading = s.progress();
+    assert!(0.05 < reading.elapsed_s && reading.elapsed_s <= t0.elapsed().as_secs_f64() + TICK);
+    assert!(reading.finished_at.is_none() && reading.started_at == started_at);
+    s.finish_external(ScanState::Done);
+    let e = s.progress().elapsed_s;
+    assert!(0.05 < e && e <= t0.elapsed().as_secs_f64() + TICK);
+}
+
+#[test]
+fn a_failed_mft_read_goes_on_with_the_hard_parts_time() {
+    let (_t, root, _) = tree();
+    let s = Arc::new(scanner(&root, ScanOptions::default()));
+    stopped_after(&s, 0.3);
+    let hard = s.progress().elapsed_s;
+    s.uncancel();
+    s.begin_external();
+    std::thread::sleep(Duration::from_millis(300));
+    s.reset_external();
+    assert!((s.progress().elapsed_s - hard).abs() < 1e-9); // the attempt does not count
+    let t1 = Instant::now();
+    let done = run(&s);
+    assert_eq!(done.state, ScanState::Done);
+    assert!(hard < done.elapsed_s && done.elapsed_s <= hard + t1.elapsed().as_secs_f64() + TICK);
 }

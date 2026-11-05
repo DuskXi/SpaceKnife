@@ -4059,6 +4059,8 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
+ "sk-core",
+ "sk-server",
  "sys-locale",
  "tauri",
  "tauri-build",
@@ -4066,6 +4068,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tempfile",
+ "tracing",
  "url",
 ]
 

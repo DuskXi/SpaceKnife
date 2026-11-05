@@ -16,6 +16,13 @@
 //! still runs, folders with children waiting in its queue are deferred; while an MFT scan reads,
 //! everything waits for its tree.
 //!
+//! Per-folder watchers (inotify, polling) get the scan's folders in ticks ([`ScanMonitor::feed`]),
+//! once the scan has listed them and only those it could list, with the mtime the scan recorded
+//! for each (not on Windows): a folder that changed between its listing and its watch is reported
+//! then (`dir`), so the time before a folder's watch is placed is covered too. Changes inside a
+//! folder the scan could not list (`ACCESS_DENIED`) do not open it; a rescan that lists it clears
+//! the flag and hands it to the watchers.
+//!
 //! [`ScanMonitor`] is synchronous: the server runs [`ScanMonitor::run`] on a thread of its own
 //! (or calls [`ScanMonitor::process`] itself).
 
@@ -23,7 +30,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use sk_native::hardscan::{self, Ref, RootOptions, SliceOptions, SliceResult, Task};
 use sk_protocol::scan::{MonitorState, MonitorStatus};
@@ -165,6 +172,11 @@ pub struct MonitorOptions {
     pub gate: Option<Arc<dyn IoGate>>,
     /// The change journal (Windows, elevated helper running).
     pub usn: Option<Arc<dyn UsnSource>>,
+    /// When the scan started (its first listing; None: when the monitor is made). Per-folder
+    /// watchers check each folder they are handed against the mtime the scan recorded, and take
+    /// a change at or after this time as one the listing may have missed
+    /// ([`super::poll::listed_changed`]).
+    pub listed_after: Option<SystemTime>,
 }
 
 impl Default for MonitorOptions {
@@ -177,6 +189,7 @@ impl Default for MonitorOptions {
             hard_rule: true,
             gate: None,
             usn: None,
+            listed_after: None,
         }
     }
 }
@@ -269,7 +282,12 @@ pub struct ScanMonitor {
     pub overflows: i64,
     pub last_apply_ms: f64,
     last_event: Option<Instant>,
+    /// rows below this were handed to the watchers (or wait in `waiting`)
     fed: usize,
+    /// folders of those rows the scan has yet to list (PENDING): handed over once listed
+    waiting: Vec<NodeId>,
+    /// the scan listed nothing before this (wall clock, ns since the Unix epoch)
+    listed_after: i64,
     free_at: Option<Instant>,
     free_due: bool,
     failed: String,
@@ -313,15 +331,37 @@ pub fn common_roots(paths: &HashSet<PathBuf>) -> HashSet<PathBuf> {
     out
 }
 
-/// The numbers a hard scan records for a file of `size` (Windows estimates the allocation: a
-/// cloud placeholder occupies nothing, files up to `resident_max` live in the MFT record, the rest
-/// round up to whole clusters).
-pub fn hard_alloc(size: i64, cloud: bool, opts: &RootOptions) -> i64 {
-    if cloud || size <= opts.resident_max {
-        return 0;
+/// The file system whose listing gives a root's file allocations (`"NTFS"`, `"ReFS"`, `"Btrfs"`;
+/// `""`: the allocation is estimated from the size): Windows hard scans take the listing's
+/// AllocationSize on local NTFS, ReFS and WinBtrfs (8088352).
+/// Set per volume by [`crate::scan::winopts::listed_alloc`]; relists reuse the scan's roots.
+fn listed_alloc(opts: &RootOptions) -> &'static str {
+    opts.listed_alloc.as_str()
+}
+
+/// The allocation a hard scan would record for a file whose event says `size` / `alloc`; None
+/// where the scan would ask the file itself (its folder is listed again then).
+///
+/// A cloud placeholder occupies nothing. Under the listing rule ([`listed_alloc`]) the event's
+/// own AllocatedLength is the listing's (the Windows watcher already gave data kept in the file's
+/// record no cluster and left compressed and sparse files to a relist), except on NTFS for a file
+/// that is not empty yet lists no cluster (WOF-compressed: the scan asks it). Otherwise the
+/// allocation is estimated from the size: files up to `resident_max` live in the MFT record, the
+/// rest round up to whole clusters.
+pub fn hard_alloc(size: i64, alloc: i64, cloud: bool, opts: &RootOptions) -> Option<i64> {
+    if cloud {
+        return Some(0);
+    }
+    match listed_alloc(opts) {
+        "" => {}
+        "NTFS" if alloc == 0 && size > 0 => return None,
+        _ => return Some(alloc),
+    }
+    if size <= opts.resident_max {
+        return Some(0);
     }
     let cluster = if opts.cluster_size > 0 { opts.cluster_size } else { 4096 };
-    (size + cluster - 1) / cluster * cluster
+    Some((size + cluster - 1) / cluster * cluster)
 }
 
 /// Names of a one-folder listing no path stands for alone: held more than once, or with a
@@ -340,6 +380,11 @@ fn unnamed(res: &SliceResult) -> HashSet<Vec<u8>> {
 
 impl ScanMonitor {
     pub fn new(store: Store, roots: Vec<RootInfo>, root_opts: Arc<Vec<RootOptions>>, opts: MonitorOptions) -> ScanMonitor {
+        let now = SystemTime::now();
+        let began = opts.listed_after.map_or(now, |t| t.min(now));
+        let listed_after = began
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos().min(i64::MAX as u128) as i64);
         ScanMonitor {
             store,
             roots,
@@ -362,6 +407,8 @@ impl ScanMonitor {
             last_apply_ms: 0.0,
             last_event: None,
             fed: 0,
+            waiting: Vec::new(),
+            listed_after,
             free_at: None,
             free_due: false,
             failed: String::new(),
@@ -387,16 +434,25 @@ impl ScanMonitor {
     /// Start a watcher per root (polling when the platform's cannot watch). Network volumes and
     /// WSL's 9P drives are polled on POSIX: the kernel never hears of other machines' changes.
     pub fn start(&mut self) {
+        let (interval, rate) = (self.opts.poll_interval, self.opts.poll_rate);
+        self.start_with(&mut |root: &RootInfo| -> Box<dyn Watcher> {
+            let remote = root.volume.as_ref().is_some_and(|v| v.is_remote || !v.note.is_empty());
+            if !cfg!(windows) && remote {
+                Box::new(PollWatcher::new(&root.path, interval, rate))
+            } else {
+                create_watcher(&root.path, interval, rate)
+            }
+        });
+    }
+
+    /// [`ScanMonitor::start`] with the watcher of each root made by `make` (tests; a setting that
+    /// forces polling). A watcher that fails to start is replaced by polling, as there.
+    pub fn start_with(&mut self, make: &mut dyn FnMut(&RootInfo) -> Box<dyn Watcher>) {
         if !self.opts.watch {
             return;
         }
         for root in self.roots.clone() {
-            let remote = root.volume.as_ref().is_some_and(|v| v.is_remote || !v.note.is_empty());
-            let first: Box<dyn Watcher> = if !cfg!(windows) && remote {
-                Box::new(PollWatcher::new(&root.path, self.opts.poll_interval, self.opts.poll_rate))
-            } else {
-                create_watcher(&root.path, self.opts.poll_interval, self.opts.poll_rate)
-            };
+            let first = make(&root);
             if let Some(w) = self.start_watcher(&root.path, first) {
                 self.watchers.push((root.path.clone(), w));
             }
@@ -442,15 +498,28 @@ impl ScanMonitor {
         self.kick();
     }
 
-    /// Every folder of the tree was handed to the watchers.
+    /// Every folder of the tree was handed to the watchers (all but those the scan has yet to
+    /// list: a stopped scan's queue).
     pub fn fed(&self) -> bool {
-        self.fed >= self.store.len()
+        self.fed >= self.store.len() && !self.waiting_listed()
+    }
+
+    /// Some folder held back while it waited to be listed has been listed (or found unreadable)
+    /// since.
+    fn waiting_listed(&self) -> bool {
+        if self.waiting.is_empty() {
+            return false;
+        }
+        let r = self.store.read();
+        let n = r.len();
+        self.waiting.iter().any(|&i| (i as usize) < n && !r.flags(i).intersects(Flags::PENDING))
     }
 
     /// The whole tree was replaced (an MFT scan finished): every id is new.
     pub fn rebuilt(&mut self) {
         self.index.forget();
         self.fed = 0;
+        self.waiting.clear();
         self.ino = None;
     }
 
@@ -574,33 +643,84 @@ impl ScanMonitor {
         }
     }
 
-    /// Hand folders that entered the tree to per-folder watchers (inotify, polling).
+    /// Hand folders that entered the tree to per-folder watchers (inotify, polling), with the
+    /// mtime the scan recorded for each (whole seconds): a folder that changed between its
+    /// listing and its watch is then reported (`dir`).
+    ///
+    /// No mtimes on Windows: the recursive watch covers the whole tree from the scan's start,
+    /// polling there is a rare fallback, and a listing may give a folder's times from its
+    /// parent's index entry, which can lag the folder's own.
+    ///
+    /// Folders the scan could not list (`ACCESS_DENIED`: a plain user's scan of / meets dozens,
+    /// such as /root) are left out: the tree holds nothing of theirs to keep up to date, inotify
+    /// cannot watch them either (EACCES), and polling them only listed them again, in vain, when
+    /// their mtime moved (and made every such scan 「部分轮询」). Their own renaming or removal still
+    /// shows through their parent's watch; one that becomes readable later is handed over by the
+    /// rescan that lists it. So a folder is handed over once the scan has listed it: until then
+    /// (`PENDING`) it is not known to be readable, and it waits in `waiting` (4 B a folder).
     pub fn feed(&mut self) {
         let n = self.store.len();
-        if self.fed >= n {
+        if self.fed >= n && !self.waiting_listed() {
             return;
         }
         let wanted: Vec<usize> = (0..self.watchers.len())
             .filter(|&i| matches!(self.watchers[i].1.name(), "inotify" | "poll"))
             .collect();
         let start = std::mem::replace(&mut self.fed, n);
+        let waiting = std::mem::take(&mut self.waiting);
         if wanted.is_empty() {
             return;
         }
-        let paths: Vec<PathBuf> = {
+        let (paths, mtimes): (Vec<PathBuf>, Option<Vec<u32>>) = {
             let r = self.store.read();
             let n = n.min(r.len());
-            let mut ids: Vec<NodeId> = (start.max(1) as NodeId..n as NodeId)
-                .filter(|&i| r.kind(i) == Kind::Dir && !r.flags(i).intersects(Flags::GONE | Flags::MOUNT))
-                .collect();
+            let fresh = (start.max(1) as NodeId..n as NodeId).filter(|&i| r.kind(i) == Kind::Dir);
+            let skip = Flags::GONE | Flags::MOUNT | Flags::ACCESS_DENIED;
+            let mut ids: Vec<NodeId> = Vec::new();
+            for i in waiting.into_iter().filter(|&i| (i as usize) < n).chain(fresh) {
+                let f = r.flags(i);
+                if f.intersects(skip) {
+                    continue; // mount points are never entered by the scan; unlistable ones hold nothing
+                }
+                if f.intersects(Flags::PENDING) {
+                    self.waiting.push(i); // not listed yet: handed over once it is
+                } else {
+                    ids.push(i);
+                }
+            }
             ids.sort_by_key(|&i| r.depth(i)); // shallow first
-            ids.into_iter().map(|i| r.path(i)).collect()
+            let mtimes = (!cfg!(windows)).then(|| ids.iter().map(|&i| r.mtime(i)).collect());
+            (ids.into_iter().map(|i| r.path(i)).collect(), mtimes)
         };
+        if paths.is_empty() {
+            return;
+        }
         for i in wanted {
             let (root, w) = &self.watchers[i];
-            let mine: Vec<PathBuf> = paths.iter().filter(|p| p.starts_with(root)).cloned().collect();
-            if !mine.is_empty() {
-                w.add_dirs(mine);
+            let inside: Vec<bool> = paths.iter().map(|p| p.starts_with(root)).collect();
+            if inside.iter().all(|&b| b) {
+                w.add_dirs(paths.clone(), mtimes.clone(), self.listed_after);
+            } else if inside.iter().any(|&b| b) {
+                let mine: Vec<PathBuf> = paths.iter().zip(&inside).filter(|x| *x.1).map(|x| x.0.clone()).collect();
+                let times = mtimes.as_ref().map(|m| m.iter().zip(&inside).filter(|x| *x.1).map(|x| *x.0).collect());
+                w.add_dirs(mine, times, self.listed_after);
+            }
+        }
+    }
+
+    /// Folders a rescan could list at last (readable now): to the per-folder watchers, which
+    /// [`ScanMonitor::feed`] left them out of while the scan could not list them.
+    fn hand_over(&self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        for (root, w) in &self.watchers {
+            if !matches!(w.name(), "inotify" | "poll") {
+                continue;
+            }
+            let inside: Vec<PathBuf> = paths.iter().filter(|p| p.starts_with(root)).cloned().collect();
+            if !inside.is_empty() {
+                w.add_dirs(inside, None, 0);
             }
         }
     }
@@ -683,6 +803,7 @@ impl ScanMonitor {
             let applied = self.relist(&targets, hooks, running);
             flashes.extend(applied.flashes);
             changes += applied.changes;
+            self.hand_over(&applied.readable); // before their new subfolders (the next feed)
             self.scan_new(&applied.pending, running);
             // a subtree rescan goes on below every folder that stayed
             targets = HashMap::new();
@@ -725,6 +846,12 @@ impl ScanMonitor {
             if r.flags(folder).intersects(Flags::PENDING) {
                 continue; // the scan has not listed it yet: it will read it as it is now
             }
+            if r.flags(folder).intersects(Flags::ACCESS_DENIED) {
+                // the scan could not list it (or was not to: macOS's protected places, which ask
+                // for consent when opened); a change inside, which a recursive watcher (FSEvents,
+                // ReadDirectoryChangesW) reports, does not open it: a rescan of it tries again
+                continue;
+            }
             if !mutate::can_relist(&r, folder) {
                 self.deferred.insert(r.path(folder));
                 continue;
@@ -758,11 +885,19 @@ impl ScanMonitor {
                         folders.insert(parent_dir(&ch.path));
                         *ch = Change::new(ChangeKind::Modified, ch.path.clone(), Some(false));
                     } else if self.opts.hard_rule
-                        && let Some(size) = ch.size
+                        && let (Some(size), Some(alloc)) = (ch.size, ch.alloc)
                     {
+                        // keep to the hard scan's rule
                         let cloud = r.flags(*node).intersects(Flags::CLOUD);
                         let ro = self.root_index(&ch.path).and_then(|i| self.root_opts.get(i)).cloned().unwrap_or_default();
-                        ch.alloc = Some(hard_alloc(size, cloud, &ro));
+                        match hard_alloc(size, alloc, cloud, &ro) {
+                            Some(a) => ch.alloc = Some(a),
+                            None => {
+                                // the scan would ask this file: its folder's listing asks it
+                                folders.insert(parent_dir(&ch.path));
+                                *ch = Change::new(ChangeKind::Modified, ch.path.clone(), Some(false));
+                            }
+                        }
                     }
                 } else if ch.size.is_none() {
                     // the watcher did not say: ask the file system
@@ -856,6 +991,11 @@ impl ScanMonitor {
                 .collect();
             let batch = entry_batch(&w, res.entries, &res.ext_table);
             let Ok(rel) = mutate::relist(&mut w, node, &batch) else { continue };
+            if w.flags(node).intersects(Flags::ACCESS_DENIED) {
+                // a rescan of a folder the scan could not list, readable now: watched from now on
+                w.clear(node, Flags::ACCESS_DENIED);
+                out.readable.push(path.clone());
+            }
             // new subfolders no path can open: not scanned by their path
             let unreadable: HashSet<NodeId> = unreadable.into_iter().map(|j| rel.start + j as NodeId).collect();
             for &row in &rel.pending {
@@ -918,8 +1058,10 @@ impl ScanMonitor {
             let batch = std::mem::replace(&mut queue, rest);
             self.permit(running);
             let Ok(res) = hardscan::scan_slice(batch, &opts) else { return };
-            let mut app = self.store.appender();
-            match fold_slice(&mut app, res, None) {
+            // under the writer, like every other change of the monitor: never while a reader
+            // (render, summary, a compaction's copy) runs on the store (7ded44c)
+            let mut w = self.store.write();
+            match fold_slice(&mut w, res, None) {
                 Ok(f) => queue.extend(f.frontier),
                 Err(e) => {
                     tracing::warn!("monitor: folding new folders failed: {e}");
@@ -1101,6 +1243,12 @@ impl ScanMonitor {
         self.index.forget();
         self.ino = None;
         self.fed = w.len();
+        // a stopped scan's folders still to list: their new ids
+        let waiting = std::mem::take(&mut self.waiting);
+        self.waiting = waiting
+            .into_iter()
+            .filter_map(|i| remap.get(i as usize).copied().filter(|&m| m >= 0).map(|m| m as NodeId))
+            .collect();
         tracing::info!("compacted after changes, {} rows", w.len());
     }
 }
@@ -1117,4 +1265,6 @@ struct Applied {
     pending: Vec<NodeId>,
     kept_folders: Vec<NodeId>,
     changes: i64,
+    /// listed at last: the scan could not (rescans)
+    readable: Vec<PathBuf>,
 }

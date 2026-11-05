@@ -28,6 +28,7 @@ use sk_protocol::scan::{
     self as p, NodeInfo, NodeKindName, ScanMethod, ScanMethodUsed, ScanSource, ScanStartParams, ScanStatus,
 };
 use sk_store::snapshot::{self, SaveOptions, SnapshotHeader};
+use sk_core::summary::Walk;
 use sk_store::subtree::Summary;
 use sk_store::{Flags, Kind, NodeId, Nodes, Store};
 
@@ -326,7 +327,9 @@ impl ScanHandle {
     /// `subtree::summarize` below `node` with the scan's classes, at most once per store version
     /// (the details panel, the Disks page and the end of a scan ask for the same summary).
     /// Calls for one scan run one at a time; `cache` false while the scan still writes.
-    pub fn summary(&self, node: NodeId, top: usize, cache: bool) -> Arc<Summary> {
+    /// A walk that needed the fallback by extension, or failed, is not cached
+    /// ([`sk_core::summary::summarize_node`]).
+    pub fn summary(&self, node: NodeId, top: usize, cache: bool) -> Walk {
         let mut g = self.summaries.lock();
         let nodes = self.store.read();
         let map = self.ctx.basis.class_map();
@@ -338,39 +341,18 @@ impl ScanHandle {
             let hit = g.remove(i);
             let s = hit.2.clone();
             g.push(hit);
-            return s;
+            return Walk::Full(s);
         }
         let want = top.max(SUMMARY_TOP);
-        let classes = self.ctx.basis.classes(&nodes);
-        let n = classes.len().max(1);
-        let other = classes.other() as usize;
-        let fix = |c: u8| if (c as usize) < n { c as usize } else { other.min(n - 1) };
-        let mut base = |id: NodeId| fix(classes.ext_cls_of(&nodes, id));
-        let s = sk_store::subtree::summarize(
-            &nodes,
-            node,
-            |id| fix(classes.cls_of(&nodes, id)),
-            n,
-            want,
-            Some(&mut base),
-            1 << 16,
-        )
-        .unwrap_or_else(|_| Summary {
-            top_files: Vec::new(),
-            class_bytes: vec![0; n],
-            class_files: vec![0; n],
-            latest_mtime: 0,
-            class_parts: None,
-        });
-        let s = Arc::new(s);
+        let walk = sk_core::summary::summarize_node(&self.ctx.basis, &nodes, node, want);
         g.retain(|(k, _, _)| k.1 == key.1 && k.2 == key.2 && k.3 == key.3 && k.4 == key.4);
-        if cache {
+        if cache && let Walk::Full(s) = &walk {
             g.push((key, want, s.clone()));
             while g.len() > SUMMARY_KEEP {
                 g.remove(0);
             }
         }
-        s
+        walk
     }
 }
 
@@ -458,7 +440,8 @@ pub struct ScanManager {
 
 impl ScanManager {
     pub fn new(_config: &Config, settings: &Arc<SettingsStore>) -> ScanManager {
-        let opts = RegistryOptions { max_workers: native_threads(), ..RegistryOptions::default() };
+        // the governor counts in folders listed at once (the walker's gate), up to its widest width
+        let opts = RegistryOptions { max_workers: sk_core::scan::listing_max(), ..RegistryOptions::default() };
         let (io_ready, _) = tokio::sync::watch::channel(false);
         ScanManager {
             scans: Mutex::new(HashMap::new()),
@@ -568,10 +551,12 @@ impl ScanManager {
                 .or_else(|| Level::from_str(&st.get_str("scan.load_manual")))
                 .unwrap_or(Level::Balanced);
             let custom = params.load_custom.map(f64::from).or_else(|| Some(st.get_int("scan.custom_limit") as f64));
-            gov.set_max_workers(concurrency);
+            // in folders listed at once (the walker's gate, docs/native.md 4.2), up to its widest width
+            let most = sk_core::scan::listing_max();
+            gov.set_max_workers(most);
             gov.set_level(level, custom);
             gov.set_yield_when_busy(st.get_bool("scan.yield_when_busy"));
-            gov.set_manual_concurrency(manual.then_some(concurrency));
+            gov.set_manual_concurrency(workers.filter(|_| manual).map(|w| (w as usize).clamp(1, most)));
             Some(gov)
         } else {
             None

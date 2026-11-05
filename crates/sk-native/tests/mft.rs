@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use mft_image as im;
 use sk_native::mft::{
-    self, MftTable, ScanOptions, image_info, parse_mft, parse_mft_stream, read_mft_image,
-    scan_mft_image,
+    self, MftTable, ScanOptions, ScanStats, image_info, parse_mft, parse_mft_stream,
+    parse_mft_stream_concurrent, read_mft_image, scan_mft_image,
 };
 
 const RS: usize = 1024;
@@ -621,4 +621,250 @@ fn scan_mft_image_can_be_cancelled() {
     .unwrap_err();
     assert_eq!(e.kind(), ErrorKind::Interrupted);
     assert_eq!(calls, 2);
+}
+
+// --------------------------------------------------------------------------- concurrent streaming
+
+/// A sample image, a synthetic one and six fuzzed copies of the sample.
+fn stream_images() -> Vec<(String, Vec<u8>)> {
+    let mut rng = Rng(5);
+    let base = im::build_mft(&im::sample_records(), RS, CS, 0);
+    let mut out = vec![
+        ("sample".to_string(), base.clone()),
+        ("synthetic".to_string(), im::synthetic_mft(20_000, 13, RS)),
+    ];
+    let n = (base.len() / RS) as u64;
+    for k in 0..6 {
+        let mut img = base.clone();
+        for _ in 0..1 + rng.below(9) {
+            img[rng.below(n) as usize * RS + rng.below(RS as u64) as usize] = rng.below(256) as u8;
+        }
+        out.push((format!("fuzzed{k}"), img));
+    }
+    out
+}
+
+#[test]
+fn concurrent_streaming_is_the_sequential_stream() {
+    // windows parsed in parallel, in shuffled order, then put back in record order: the same
+    // table as feeding them one by one, row order and name blob included, whatever the window
+    for (name, data) in stream_images() {
+        let reference = parse_mft_stream(&data, RS, CS, 64).unwrap();
+        for window in [1, 3, 64, 1000, 100_000] {
+            assert!(
+                parse_mft_stream(&data, RS, CS, window).unwrap() == reference,
+                "{name} window {window}"
+            );
+            for seed in 0..3 {
+                let got = parse_mft_stream_concurrent(&data, RS, CS, window, seed).unwrap();
+                assert!(got == reference, "{name} window {window} seed {seed}");
+            }
+        }
+    }
+}
+
+#[test]
+fn scan_mft_image_rows_are_the_streams() {
+    // reads in flight, windows parsed out of order: the rows of the in-memory stream, in order
+    let tmp = tempfile::tempdir().unwrap();
+    let mut cases: Vec<Case> = CASES.to_vec();
+    cases.push((
+        &[(64, 201), (1000, 43), (600, 300)],
+        Some(1),
+        None,
+        4096,
+        512,
+        0,
+    ));
+    for case in &cases {
+        let (_runs, _split, valid, rs, cs, window) = *case;
+        let (img, _) = build(tmp.path(), case);
+        let raw = read_mft_image(&img).unwrap();
+        let total = valid.map_or(raw.len(), |v| v * rs);
+        let mut stats = ScanStats::default();
+        let (table, _) = scan_mft_image(
+            &img,
+            ScanOptions {
+                window,
+                stats: Some(&mut stats),
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap();
+        let per = if window == 0 {
+            mft::DEFAULT_WINDOW
+        } else {
+            window
+        };
+        let stream = parse_mft_stream(&raw[..total], rs, cs, (per / rs).max(1)).unwrap();
+        assert!(table == stream, "{case:?}");
+        assert!(
+            stats.windows >= 1 && stats.reads + 1 >= stats.windows,
+            "{stats:?}"
+        );
+        assert!(1 <= stats.depth && stats.depth <= stats.tuning.depth_max);
+        assert!(stats.max_in_flight >= 1);
+        for v in [
+            stats.read_s,
+            stats.busy_s,
+            stats.paused_s,
+            stats.parse_cpu_s,
+            stats.finish_s,
+            stats.total_s,
+        ] {
+            assert!(v >= 0.0, "{stats:?}");
+        }
+        let mut paced = ScanStats::default();
+        let (slow, _) = scan_mft_image(
+            &img,
+            ScanOptions {
+                duty: 0.3,
+                window,
+                stats: Some(&mut paced),
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert!(slow == table, "{case:?}");
+        assert!(paced.paused_s >= 0.0);
+    }
+}
+
+#[test]
+fn scan_mft_image_fixed_depth() {
+    let tmp = tempfile::tempdir().unwrap();
+    let img = tmp.path().join("vol.img");
+    im::build_volume(
+        &img,
+        &volume_records(),
+        &[(40, 6), (12, 3), (90, 9)],
+        RS,
+        CS,
+        Some(1),
+        None,
+    );
+    let (reference, _) = scan_mft_image(
+        &img,
+        ScanOptions {
+            window: 1024,
+            ..ScanOptions::default()
+        },
+    )
+    .unwrap();
+    for depth in [1, 3] {
+        let mut stats = ScanStats::default();
+        let (table, _) = scan_mft_image(
+            &img,
+            ScanOptions {
+                window: 1024,
+                depth,
+                stats: Some(&mut stats),
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!((stats.depth, stats.tuning.depth_max), (depth, depth));
+        assert!(stats.max_in_flight <= depth + 1); // a window across two runs has two reads
+        assert!(table == reference);
+    }
+}
+
+#[test]
+fn scan_mft_image_read_errors() {
+    // a read that fails mid-scan (the image ends inside the $MFT) is an error, and the scan
+    // leaves nothing behind (every read in flight is waited for)
+    let tmp = tempfile::tempdir().unwrap();
+    let img = tmp.path().join("vol.img");
+    im::build_volume(
+        &img,
+        &volume_records(),
+        &[(10, 4), (200, 30)],
+        RS,
+        CS,
+        None,
+        None,
+    );
+    let data = std::fs::read(&img).unwrap();
+    std::fs::write(&img, &data[..210 * CS]).unwrap(); // the second run's clusters stop short
+    for (duty, window) in [(1.0, 1024), (0.5, 0)] {
+        let e = scan_mft_image(
+            &img,
+            ScanOptions {
+                duty,
+                window,
+                ..ScanOptions::default()
+            },
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("read"), "{e}");
+    }
+}
+
+#[test]
+fn paced_scans_rest_between_bursts() {
+    // under an I/O limit the reads pause in proportion to their busy time (7835ece: each burst
+    // keeps the disk busy at least 50 ms, so short images are one burst and may never pause)
+    let tmp = tempfile::tempdir().unwrap();
+    let (img, _) = build(tmp.path(), &CASES[4]);
+    let mut stats = ScanStats::default();
+    scan_mft_image(
+        &img,
+        ScanOptions {
+            duty: 0.25,
+            window: 4096,
+            stats: Some(&mut stats),
+            ..ScanOptions::default()
+        },
+    )
+    .unwrap();
+    // pauses are busy × (1 − duty) / duty = 3 × busy, bursts included
+    assert!(stats.paused_s <= 3.0 * stats.busy_s + 1e-6, "{stats:?}");
+}
+
+/// Scan speed on a large synthetic volume image (from the file cache: the pipeline and the
+/// parse, not the disk). `cargo test --release -p sk-native --test mft -- --ignored --nocapture
+/// scan_speed`; `SK_MFT_IMAGE` keeps the image at that path (built when missing),
+/// `SK_MFT_RECORDS` sets its records (default 500,000).
+#[test]
+#[ignore = "benchmark"]
+fn scan_speed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let img = std::env::var_os("SK_MFT_IMAGE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| tmp.path().join("big.img"));
+    if !img.exists() {
+        let n: usize = std::env::var("SK_MFT_RECORDS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(500_000);
+        let recs = im::synthetic_records(n, 11);
+        let clusters = ((n + 64) * RS).div_ceil(CS) as u64 + 1;
+        // three fragments, the middle one elsewhere on the volume
+        let third = clusters / 3;
+        let runs = [
+            (100, third),
+            (100 + 2 * clusters, third),
+            (100 + third, clusters - 2 * third),
+        ];
+        im::build_volume(&img, &recs, &runs, RS, CS, None, None);
+    }
+    let raw = read_mft_image(&img).unwrap();
+    for _ in 0..3 {
+        let t0 = std::time::Instant::now();
+        let whole = parse_mft(&raw, RS, CS).unwrap();
+        let parse_s = t0.elapsed().as_secs_f64();
+        let t0 = std::time::Instant::now();
+        let (table, _) = scan_mft_image(&img, ScanOptions::default()).unwrap();
+        let scan_s = t0.elapsed().as_secs_f64();
+        let t0 = std::time::Instant::now();
+        let stream = parse_mft_stream(&raw, RS, CS, (8 << 20) / RS).unwrap();
+        let stream_s = t0.elapsed().as_secs_f64();
+        assert_eq!(table.rows(), whole.rows());
+        assert_eq!(stream.rows(), whole.rows());
+        eprintln!(
+            "{} MB, {} rows: parse_mft {parse_s:.3} s, parse_mft_stream {stream_s:.3} s, scan_mft_image {scan_s:.3} s",
+            raw.len() >> 20,
+            table.rows()
+        );
+    }
 }

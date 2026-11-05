@@ -44,3 +44,8 @@ tempfile = { workspace = true }
 [dev-dependencies.sk-store]
 workspace = true
 features = ["test-support"]
+
+# tests/scan_mft_threads.rs counts the process's threads
+[target."cfg(windows)".dev-dependencies.windows-sys]
+version = "0.61.2"
+features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"]

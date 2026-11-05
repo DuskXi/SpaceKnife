@@ -223,3 +223,195 @@ fn relists_and_readers_interleave_safely() {
         testing::facts(&scan_spec(&spec, "/r", 3).read())
     );
 }
+
+// ---- structure lock fairness (test_structure_lock.py) ----
+//
+// A cleanup plan built over a large scan read the tree for minutes; a file change on the monitored
+// disk then waited for it, and since a waiting writer used to stop every new reader, every picture,
+// summary and view waited too.
+
+mod structure_lock {
+    use std::sync::Arc;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use sk_store::Store;
+
+    /// A reader on its own thread: started, held until released.
+    struct Reader {
+        started: mpsc::Receiver<()>,
+        release: mpsc::Sender<()>,
+        thread: thread::JoinHandle<()>,
+    }
+
+    impl Reader {
+        fn spawn(
+            store: &Arc<Store>,
+            log: &Arc<std::sync::Mutex<Vec<String>>>,
+            name: &str,
+        ) -> Reader {
+            let (started_tx, started) = mpsc::channel();
+            let (release, release_rx) = mpsc::channel::<()>();
+            let (store, log, name) = (store.clone(), log.clone(), name.to_string());
+            let thread = thread::spawn(move || {
+                let _r = store.read();
+                log.lock().unwrap().push(format!("start {name}"));
+                let _ = started_tx.send(());
+                let _ = release_rx.recv_timeout(Duration::from_secs(20));
+                log.lock().unwrap().push(format!("end {name}"));
+            });
+            Reader {
+                started,
+                release,
+                thread,
+            }
+        }
+        fn started_within(&self, d: Duration) -> bool {
+            self.started.recv_timeout(d).is_ok()
+        }
+        fn finish(self) {
+            let _ = self.release.send(());
+            self.thread.join().unwrap();
+        }
+    }
+
+    /// A writer on its own thread (optionally with a deadline); reports whether it wrote.
+    fn spawn_writer(
+        store: &Arc<Store>,
+        log: &Arc<std::sync::Mutex<Vec<String>>>,
+        deadline: Option<Instant>,
+    ) -> thread::JoinHandle<bool> {
+        let (store, log) = (store.clone(), log.clone());
+        thread::spawn(move || {
+            let w = match deadline {
+                None => Some(store.write()),
+                Some(d) => store.write_until(d),
+            };
+            match w {
+                Some(mut w) => {
+                    w.touch();
+                    log.lock().unwrap().push("write".into());
+                    true
+                }
+                None => false,
+            }
+        })
+    }
+
+    fn setup() -> (Arc<Store>, Arc<std::sync::Mutex<Vec<String>>>) {
+        (
+            Arc::new(sk_store::testing::random_store(7, 50)),
+            Arc::new(std::sync::Mutex::new(Vec::new())),
+        )
+    }
+
+    const SHORT: Duration = Duration::from_millis(60);
+    const LONG: Duration = Duration::from_secs(5);
+
+    #[test]
+    fn a_long_reader_holds_up_the_change_not_the_other_readers() {
+        let (store, log) = setup();
+        let old = Reader::spawn(&store, &log, "old");
+        assert!(old.started_within(LONG));
+        let w = spawn_writer(&store, &log, None);
+        thread::sleep(SHORT);
+        assert!(!w.is_finished()); // the change waits for the reader that was there first
+        let new = Reader::spawn(&store, &log, "new");
+        assert!(
+            new.started_within(Duration::from_secs(2)),
+            "a new reader waited for a change that itself waited for an older reader"
+        );
+        new.finish();
+        thread::sleep(SHORT);
+        assert!(!w.is_finished());
+        old.finish();
+        assert!(w.join().unwrap());
+        assert_eq!(log.lock().unwrap().last().unwrap(), "write");
+    }
+
+    #[test]
+    fn once_the_older_readers_are_done_new_readers_wait_for_the_change() {
+        let (store, log) = setup();
+        let old = Reader::spawn(&store, &log, "old");
+        assert!(old.started_within(LONG));
+        let w = spawn_writer(&store, &log, None);
+        thread::sleep(SHORT);
+        let mid = Reader::spawn(&store, &log, "mid"); // admitted: the change cannot start before "old"
+        assert!(mid.started_within(Duration::from_secs(2)));
+        old.finish();
+        let late = Reader::spawn(&store, &log, "late"); // nothing older than the change runs: it waits
+        assert!(!late.started_within(Duration::from_millis(300)));
+        mid.finish();
+        assert!(w.join().unwrap()); // no stream of readers keeps the change out
+        assert!(late.started_within(LONG));
+        late.finish();
+        let log = log.lock().unwrap();
+        let at = |s: &str| log.iter().position(|e| e == s).unwrap();
+        assert!(at("write") < at("start late"));
+    }
+
+    #[test]
+    fn readers_held_back_go_on_when_the_waiting_change_is_given_up() {
+        let (store, log) = setup();
+        let old = Reader::spawn(&store, &log, "old");
+        assert!(old.started_within(LONG));
+        let w = spawn_writer(
+            &store,
+            &log,
+            Some(Instant::now() + Duration::from_millis(700)),
+        );
+        thread::sleep(SHORT);
+        let mid = Reader::spawn(&store, &log, "mid");
+        assert!(mid.started_within(Duration::from_secs(2)));
+        old.finish();
+        let late = Reader::spawn(&store, &log, "late");
+        assert!(!late.started_within(Duration::from_millis(300)));
+        assert!(!w.join().unwrap(), "the writer gave up"); // "mid" still reads
+        assert!(
+            late.started_within(Duration::from_secs(2)),
+            "a reader stayed blocked by a change that was given up"
+        );
+        mid.finish();
+        late.finish();
+        assert!(!log.lock().unwrap().iter().any(|e| e == "write"));
+    }
+
+    #[test]
+    fn no_reader_ever_runs_during_a_change() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        let store = sk_store::testing::random_store(8, 50);
+        let stop = AtomicBool::new(false);
+        let readers = AtomicUsize::new(0);
+        let writing = AtomicBool::new(false);
+        let bad = AtomicBool::new(false);
+        thread::scope(|s| {
+            for _ in 0..6 {
+                s.spawn(|| {
+                    while !stop.load(Ordering::Relaxed) {
+                        let _r = store.read();
+                        readers.fetch_add(1, Ordering::SeqCst);
+                        if writing.load(Ordering::SeqCst) {
+                            bad.store(true, Ordering::SeqCst);
+                        }
+                        thread::sleep(Duration::from_micros(500));
+                        readers.fetch_sub(1, Ordering::SeqCst);
+                    }
+                });
+            }
+            for _ in 0..200 {
+                let mut w = store.write();
+                writing.store(true, Ordering::SeqCst);
+                if readers.load(Ordering::SeqCst) != 0 {
+                    bad.store(true, Ordering::SeqCst);
+                }
+                w.touch();
+                writing.store(false, Ordering::SeqCst);
+                drop(w);
+                thread::yield_now();
+            }
+            stop.store(true, Ordering::Relaxed);
+        });
+        assert!(!bad.load(Ordering::SeqCst));
+    }
+}

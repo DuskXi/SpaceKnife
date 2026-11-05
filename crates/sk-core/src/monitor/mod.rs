@@ -115,7 +115,15 @@ pub trait Watcher: Send + Sync {
     fn start(&self, sink: Sink) -> std::io::Result<()>;
     /// Folders that are now part of the scanned tree, shallow first (per-folder watchers and
     /// polling need them; recursive watchers ignore the call). Safe from any thread.
-    fn add_dirs(&self, dirs: Vec<PathBuf>);
+    ///
+    /// `mtimes`: each folder's mtime as the scan recorded it (whole seconds, the tree's `mtime`
+    /// column; same length as `dirs`); `since_ns`: a wall-clock time (ns since the Unix epoch)
+    /// no later than any of those listings (the scan's start). A per-folder watcher places a
+    /// folder's watch a moment after the scan found it, maybe after the scan listed it too, and a
+    /// change in between raises no event: once the folder is watched (or its polling baseline
+    /// taken) it is checked against the record ([`poll::listed_changed`]) and reported as
+    /// [`ChangeKind::Dir`] when it may have changed. Without `mtimes` nothing is checked.
+    fn add_dirs(&self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, since_ns: i64);
     /// Stop within a second; `sink` is not called afterwards. Idempotent.
     fn stop(&self);
     fn status(&self) -> WatchStatus;

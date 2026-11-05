@@ -60,7 +60,7 @@ impl RootInfo {
 /// How a [`Scanner`] works.
 #[derive(Clone)]
 pub struct ScanOptions {
-    /// Listing calls in flight (one listing thread each); 0 = [`native_threads`].
+    /// Listing calls in flight; 0 = [`native_threads`].
     pub concurrency: usize,
     /// Descend into other filesystems mounted below a root (POSIX).
     pub cross_mounts: bool,
@@ -175,6 +175,9 @@ pub struct ScanProfile {
     pub slices: u64,
     /// entries this run added to the tree
     pub items: u64,
+    /// The walker's shared listing threads: the narrowest and widest width it listed at during
+    /// the run (process-wide: scans at the same time share it); (0, 0) without them.
+    pub width: (usize, usize),
 }
 
 impl ScanProfile {
@@ -200,6 +203,15 @@ impl ScanProfile {
             self.limited() * 100.0,
             self.slices,
         );
+        if self.width.1 > 0 {
+            let (low, high) = self.width;
+            let w = if low == high { low.to_string() } else { format!("{low}–{high}") };
+            s = s.replacen(
+                &format!("of {};", self.threads),
+                &format!("of {} (listing width {w});", self.threads),
+                1,
+            );
+        }
         if cfg!(target_os = "macos") {
             s.push_str(&format!("; getattrlistbulk {bulk}"));
         }
@@ -214,8 +226,15 @@ struct Shared {
     denied: Vec<String>,
     denied_reasons: Vec<String>,
     current: String,
+    /// This run's start; None before the first.
     started: Option<Instant>,
+    /// This run's end; None while it runs.
     finished: Option<Instant>,
+    /// Earlier runs of this scan (stopped, then continued): `elapsed_s` adds them, not the waits.
+    before: Duration,
+    /// The hard runs' time while an MFT read stands in for them.
+    held: Duration,
+    /// The scan's first start, kept by later runs.
     started_at: Option<DateTime>,
     finished_at: Option<DateTime>,
     message: String,
@@ -229,6 +248,32 @@ struct Shared {
     folded: u64,
     slices: u64,
     inflight: usize,
+    /// ScanProfile::width
+    width: (usize, usize),
+}
+
+impl Shared {
+    /// This run so far, the time it was paused included (`elapsed_s`; the profile leaves it out).
+    fn run_time_at(st: &Shared, now: Instant) -> Duration {
+        st.started
+            .map_or(Duration::ZERO, |s| st.finished.unwrap_or(now).saturating_duration_since(s))
+    }
+
+    fn run_time(st: &Shared) -> Duration {
+        Shared::run_time_at(st, Instant::now())
+    }
+
+    /// A run starts at `now`: the scan keeps its first start (`started_at`), an earlier run (a
+    /// stopped scan going on) counts in `before`.
+    fn next_run(st: &mut Shared, now: Instant) {
+        st.before += Shared::run_time_at(st, now);
+        st.started = Some(now);
+        st.finished = None;
+        st.finished_at = None;
+        if st.started_at.is_none() {
+            st.started_at = Some(chrono::Utc::now());
+        }
+    }
 }
 
 enum Msg {
@@ -339,6 +384,7 @@ impl Scanner {
                     protect: opts.protect.iter().filter(|p| path_inside(p, &path)).cloned().collect(),
                     path: Some(path.clone()),
                     verify_names: verify_names(vol.as_ref()),
+                    listed_alloc: super::winopts::listed_alloc(vol.as_ref()),
                 });
                 queue.push_back(Task {
                     target: Ref::Node(node as u64),
@@ -366,6 +412,8 @@ impl Scanner {
                 current: String::new(),
                 started: None,
                 finished: None,
+                before: Duration::ZERO,
+                held: Duration::ZERO,
                 started_at: None,
                 finished_at: None,
                 message: String::new(),
@@ -379,6 +427,7 @@ impl Scanner {
                 folded: 0,
                 slices: 0,
                 inflight: 0,
+                width: (0, 0),
             }),
             links: Mutex::new(LinkSet::new()),
             wake: Mutex::new(None),
@@ -501,11 +550,17 @@ impl Scanner {
 
     // the tree comes from elsewhere (an MFT scan adopted into the store): timing and state only
 
+    /// The read starts; its tree replaces whatever a hard part listed, and so does its time (the
+    /// next "about N s" estimate comes from it). The hard part's time is held for
+    /// [`Scanner::reset_external`].
     pub fn begin_external(&self) {
         let mut st = self.st();
         st.state = ScanState::Scanning;
-        st.started = Some(Instant::now());
-        st.started_at = Some(chrono::Utc::now());
+        st.held = st.before + Shared::run_time(&st);
+        st.before = Duration::ZERO;
+        st.started = None;
+        st.paused_total = Duration::ZERO;
+        Shared::next_run(&mut st, Instant::now());
     }
 
     pub fn finish_external(&self, state: ScanState) {
@@ -517,12 +572,15 @@ impl Scanner {
         st.current.clear();
     }
 
-    /// The external read failed: [`Scanner::run`] scans as usual.
+    /// The external read failed: [`Scanner::run`] scans as usual, going on with the hard part's
+    /// time (not the attempt's: the tree keeps nothing of it).
     pub fn reset_external(&self) {
         let mut st = self.st();
         st.state = ScanState::Queued;
+        st.before = std::mem::take(&mut st.held);
         st.started = None;
-        st.started_at = None;
+        st.finished = None;
+        st.finished_at = None;
     }
 
     // ------------------------------------------------------------------ running
@@ -538,10 +596,8 @@ impl Scanner {
             let mut st = self.st();
             st.state = ScanState::Scanning;
             let now = Instant::now();
-            st.started = Some(now);
-            st.finished = None;
-            st.started_at = Some(chrono::Utc::now());
-            st.finished_at = None;
+            Shared::next_run(&mut st, now);
+            st.samples.clear(); // the rates come from this run's listing, not across a stop
             st.busy = Duration::ZERO;
             st.ingest = Duration::ZERO;
             st.limited = Duration::ZERO;
@@ -554,14 +610,25 @@ impl Scanner {
         }
         let (tx, rx) = mpsc::channel::<Msg>();
         *self.wake.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx.clone());
+        // the walker's shared carriers (threads 0): it decides how many folders are listed at
+        // once; the disk's gate holds them to the governor's concurrency (counted in listings) and
+        // stops new ones while paused. Else a pool owned by each calling thread.
+        let shared = super::shared_listing();
+        let listing_gate = if shared { self.opts.gate.as_ref().and_then(|g| g.listing_gate()) } else { None };
+        if shared {
+            hardscan::listing_threads(true);
+        }
         let base = |budget: Duration| {
-            Arc::new(SliceOptions {
+            let mut o = SliceOptions {
                 roots: self.root_opts.as_ref().clone(),
                 budget,
-                threads: 1, // a pool owned by the listing thread: N calls list side by side
+                threads: if shared { 0 } else { 1 },
+                gate: listing_gate.clone(),
                 cancel: Some(self.cancel.clone()),
                 ..SliceOptions::default()
-            })
+            };
+            super::winopts::apply_env(&mut o); // skip_final, dot_check, keep_where_updated
+            Arc::new(o)
         };
         let full = base(self.opts.budget);
         let short = base(self.opts.budget.min(Duration::from_millis(10)));
@@ -615,6 +682,10 @@ impl Scanner {
             st.finished = Some(Instant::now());
             st.finished_at = Some(chrono::Utc::now());
             st.inflight = 0;
+            if shared {
+                let w = hardscan::listing_threads(false);
+                st.width = (w.low, w.high);
+            }
         }
         let result = self.progress();
         if let Some(cb) = on_progress.as_mut() {
@@ -821,6 +892,7 @@ impl Scanner {
             limited_s: st.limited.as_secs_f64(),
             slices: st.slices,
             items: st.folded,
+            width: st.width,
         }
     }
 
@@ -838,9 +910,8 @@ impl Scanner {
         let roots = self.roots();
         let mut st = self.st();
         let now = Instant::now();
-        let elapsed = st
-            .started
-            .map_or(0.0, |s| st.finished.unwrap_or(now).saturating_duration_since(s).as_secs_f64());
+        // every run of the scan, without the waits between
+        let elapsed = (st.before + Shared::run_time_at(&st, now)).as_secs_f64();
         let (rate, byte_rate) = Self::rates(&mut st, items, alloc, elapsed, now);
         let running = st.state == ScanState::Scanning;
         let used: i64 = if !roots.is_empty() && roots.iter().all(|r| r.whole_volume && r.volume.is_some()) {

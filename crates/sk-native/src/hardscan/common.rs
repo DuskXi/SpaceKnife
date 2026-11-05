@@ -55,6 +55,21 @@ pub struct RootOpts {
     /// below it, case.rs `below_root`). Empty: not given, nothing checked.
     #[cfg_attr(not(windows), allow(dead_code))]
     pub path: NativePath,
+    /// Windows: files take their size on disk from their listing entries' AllocationSize, as this
+    /// file system counts it (`listed`; win.rs `listed_alloc`). `listed::OFF`: estimated from the
+    /// size (`cluster_size`, `resident_max`, the compressed size of sparse and compressed files).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub listed_alloc: u8,
+}
+
+/// The local file system whose listings give files their size on disk (the ones it was measured
+/// on), or OFF (`RootOpts::listed_alloc`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub mod listed {
+    pub const OFF: u8 = 0;
+    pub const NTFS: u8 = 1;
+    pub const REFS: u8 = 2;
+    pub const BTRFS: u8 = 3;
 }
 
 impl Default for RootOpts {
@@ -67,6 +82,7 @@ impl Default for RootOpts {
             skip: Vec::new(),
             protect: Vec::new(),
             path: NativePath::default(),
+            listed_alloc: listed::OFF,
         }
     }
 }
@@ -78,6 +94,16 @@ pub struct StateOpts {
     pub keep_access_time: bool,
     pub relative_open: bool,
     pub verify_names: bool,
+    /// Windows: leave out a listing's last query when the buffer before it had room for another
+    /// entry (`skip_final`; with `verify_final`, sent anyway and its result counted).
+    pub skip_final: bool,
+    pub verify_final: bool,
+    /// Windows: a relative open is checked by the file id of the "." entry its listing starts with
+    /// (`dot_check`), else by querying the handle.
+    pub dot_check: bool,
+    /// Windows: no FILE_WRITE_ATTRIBUTES where the volume's file system does not update access
+    /// times by the system's setting (`keep_where_updated`).
+    pub keep_where_updated: bool,
     /// Test seams, the private `_fold_strict` and `_extd_self_ids` options (win.rs RootState).
     pub fold_strict: bool,
     pub extd_self_ids: bool,

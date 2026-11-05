@@ -921,6 +921,11 @@ pub fn build_volume(
 /// A large random tree below the root: `n` records from 32 on (folders, files with one or two
 /// names, named streams, some non-resident), for the parallel and streaming paths.
 pub fn synthetic_mft(n: usize, seed: u64, record_size: usize) -> Vec<u8> {
+    build_mft(&synthetic_records(n, seed), record_size, 4096, 0)
+}
+
+/// The records of [`synthetic_mft`] (metafiles included).
+pub fn synthetic_records(n: usize, seed: u64) -> Vec<Rec> {
     let mut rng = seed.max(1);
     let mut next = || {
         rng ^= rng << 13;
@@ -964,5 +969,5 @@ pub fn synthetic_mft(n: usize, seed: u64, record_size: usize) -> Vec<u8> {
             ..rec(number, names)
         });
     }
-    build_mft(&recs, record_size, 4096, 0)
+    recs
 }

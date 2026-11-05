@@ -27,6 +27,74 @@ pub fn physical_memory() -> Option<u64> {
     imp::physical_memory()
 }
 
+/// glibc's `mallopt` parameters (malloc.h).
+pub const M_MMAP_THRESHOLD: i32 = -3;
+pub const M_ARENA_MAX: i32 = -8;
+/// Blocks from 4 MiB on are mapped on their own, and unmapped when freed.
+pub const MMAP_THRESHOLD: i32 = 4 << 20;
+pub const ARENA_MAX: i32 = 4;
+/// Set to `1`: keep glibc's own allocator settings.
+pub const GLIBC_DEFAULTS_ENV: &str = "SPACEKNIFE_GLIBC_DEFAULTS";
+
+/// Whether the C library is glibc (where `mallopt`'s parameters and `malloc_trim` exist).
+pub const GLIBC: bool = cfg!(all(target_os = "linux", target_env = "gnu"));
+
+/// Linux with glibc, at the start of the process before its threads: a fixed mmap threshold of
+/// 4 MiB and at most 4 malloc arenas (docs/memory.md §8). By default glibc raises the threshold to
+/// the size of every mapped block that is freed (up to 32 MiB), so a scan's temporary buffers of
+/// 128 KiB–32 MiB end up in the arenas of 30-odd threads, between long-lived blocks, where freed
+/// space stays with the process; a fixed threshold turns that off (man mallopt).
+/// `SPACEKNIFE_GLIBC_DEFAULTS=1` keeps glibc's own settings. Elsewhere (musl, macOS, Windows)
+/// nothing happens. Returns whether both were set.
+pub fn tune_allocator() -> bool {
+    if keeps_glibc_defaults(std::env::var_os(GLIBC_DEFAULTS_ENV).as_deref()) {
+        return false;
+    }
+    glibc::tune()
+}
+
+/// Whether `SPACEKNIFE_GLIBC_DEFAULTS` (its value) asks for glibc's own settings.
+pub fn keeps_glibc_defaults(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| v == "1")
+}
+
+/// glibc: hand the free pages of the malloc arenas back to the system (`malloc_trim(0)`), after a
+/// scan ends and while the process is idle (docs/memory.md §8). Elsewhere nothing happens.
+pub fn trim() {
+    glibc::trim();
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+mod glibc {
+    use super::{ARENA_MAX, M_ARENA_MAX, M_MMAP_THRESHOLD, MMAP_THRESHOLD};
+
+    pub fn tune() -> bool {
+        // SAFETY: mallopt only changes the allocator's parameters; called at startup.
+        let (arenas, threshold) = unsafe {
+            (
+                libc::mallopt(M_ARENA_MAX, ARENA_MAX),
+                libc::mallopt(M_MMAP_THRESHOLD, MMAP_THRESHOLD),
+            )
+        };
+        arenas != 0 && threshold != 0
+    }
+
+    pub fn trim() {
+        // SAFETY: malloc_trim only gives free heap pages back.
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+mod glibc {
+    pub fn tune() -> bool {
+        false
+    }
+    pub fn trim() {}
+}
+
 #[cfg(windows)]
 mod imp {
     use super::ProcessMemory;
@@ -205,6 +273,19 @@ mod tests {
             assert!(mem.resident.is_some_and(|r| r > 0));
         }
         assert!(physical_memory().is_some_and(|p| p > 1 << 20));
+    }
+
+    #[test]
+    fn glibc_gets_its_settings_and_other_libcs_are_left_alone() {
+        // the env var is read each call; tests share the process, so only check the outcome by libc
+        if std::env::var_os(GLIBC_DEFAULTS_ENV).is_none() {
+            assert_eq!(tune_allocator(), GLIBC);
+        }
+        trim(); // never fails, a no-op off glibc
+        assert!(keeps_glibc_defaults(Some("1".as_ref())));
+        assert!(!keeps_glibc_defaults(Some("0".as_ref())));
+        assert!(!keeps_glibc_defaults(None));
+        assert_eq!(GLIBC, cfg!(all(target_os = "linux", target_env = "gnu")));
     }
 
     #[test]

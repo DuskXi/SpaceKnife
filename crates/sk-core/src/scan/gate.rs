@@ -43,6 +43,12 @@ pub trait IoGate: Send + Sync {
     /// The scan paused: nothing of its own in flight (a clean baseline for the governor).
     fn pause(&self) {}
     fn resume(&self) {}
+    /// The disk's gate for the native walker's listings (docs/native.md 2.2 「列目录线程」): the
+    /// walker lists the folders of one batch on several threads at once, and the gate holds its
+    /// listings in flight to the concurrency and starts none while paused. None: batches only.
+    fn listing_gate(&self) -> Option<sk_native::hardscan::ListingGate> {
+        None
+    }
 }
 
 /// The owner name the scanner pauses the governor under.
@@ -71,5 +77,9 @@ impl IoGate for Arc<crate::io::IoGovernor> {
 
     fn resume(&self) {
         crate::io::IoGovernor::resume(self, GATE_OWNER);
+    }
+
+    fn listing_gate(&self) -> Option<sk_native::hardscan::ListingGate> {
+        Some(crate::io::IoGovernor::listing_gate(self))
     }
 }

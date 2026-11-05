@@ -90,71 +90,146 @@ pub fn check_paths(paths: &[String]) -> PathCheckResult {
 
 /// `tree.summary`: parent, largest files, class totals (with what folder classes took over),
 /// newest change, tag, volume, and why the node takes a folder class.
-pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> TreeSummaryResult {
-    let s = h.summary(node, top, !h.running());
+///
+/// Only the node itself (its row, path and whether it is on disk) must be readable; every other
+/// part that fails is left empty and named in `gaps` (`sk_core::summary`). `Err` (the message of
+/// the error to answer with) when the node itself cannot be described.
+pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> Result<TreeSummaryResult, String> {
+    use sk_core::summary::{Failure, Gaps, Walk, class_index, ext_classes};
+    use sk_protocol::scan::SummaryPart;
+
+    let walk = h.summary(node, top, !h.running());
     let nodes = h.store.read();
-    let classes = h.ctx.basis.classes(&nodes);
+    let me = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        (nodes.path(node), node_info(&nodes, node), on_disk(&nodes, node))
+    }));
+    let (base, info, here) = match me {
+        Ok(v) => v,
+        Err(p) => {
+            let path = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| nodes.path_lossy(node))).ok();
+            return Err(sk_core::summary::summary_failed(&h.id, path.as_deref(), &Failure::panic(&*p)));
+        }
+    };
+    let mut gaps = Gaps::new(&h.id, &base.to_string_lossy());
+    walk.note(&mut gaps);
     let class_ids = h.ctx.basis.class_ids();
     let id_of = |i: usize| class_ids.get(i).cloned().unwrap_or_default();
-    let base = nodes.path(node);
-    let mut tags = h.ctx.tags.lock();
-    let mut tops = Vec::new();
-    for &f in s.top_files.iter().take(top) {
-        let parent_path = nodes.path(nodes.parent(f).max(0) as NodeId);
-        let rel = match parent_path.strip_prefix(&base) {
-            Ok(r) if r.as_os_str().is_empty() => String::new(),
-            Ok(r) => format!("{}{}", r.display(), std::path::MAIN_SEPARATOR),
-            Err(_) => String::new(),
-        };
-        let ci = classes.cls_of(&nodes, f) as usize;
-        tops.push(TopFile {
-            node: node_info(&nodes, f),
-            rel_parent: rel,
-            tag: tags.of(&nodes, f),
-            class_id: id_of(if ci < class_ids.len() { ci } else { classes.other() as usize }),
-        });
-    }
-    let n = s.class_bytes.len();
-    let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by_key(|&i| std::cmp::Reverse(s.class_bytes[i]));
-    let parts = |i: usize| -> Vec<sk_protocol::scan::ClassPart> {
-        let Some(p) = &s.class_parts else { return Vec::new() };
-        let row = &p[i * n..(i + 1) * n];
-        let mut idx: Vec<usize> = (0..n).filter(|&j| row[j] > 0).collect();
-        idx.sort_by_key(|&j| std::cmp::Reverse(row[j]));
-        idx.into_iter().map(|j| sk_protocol::scan::ClassPart { class_id: id_of(j), bytes: row[j] }).collect()
+    let mut by_ext = matches!(walk, Walk::ByExtension(..));
+    let classes = if by_ext {
+        ext_classes(&h.ctx.basis, &nodes)
+    } else {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| h.ctx.basis.classes(&nodes))) {
+            Ok(c) => c,
+            Err(p) => {
+                gaps.add(SummaryPart::Classes, &Failure::panic(&*p));
+                by_ext = true;
+                ext_classes(&h.ctx.basis, &nodes)
+            }
+        }
     };
-    let class_stats = order
-        .into_iter()
-        .filter(|&i| s.class_files[i] > 0)
-        .map(|i| sk_protocol::scan::ClassStat {
-            class_id: id_of(i),
-            bytes: s.class_bytes[i],
-            files: s.class_files[i],
-            parts: parts(i),
-        })
-        .collect();
-    let folder_class = h
-        .ctx
-        .basis
-        .class_map()
-        .table()
-        .and_then(|t| h.folder_classes.explain(&nodes, node, t))
-        .map(|why| why.to_protocol(&nodes));
-    let parent = nodes.parent(node);
-    let volume = h.root_of(&nodes, node).and_then(|r| r.volume.map(|v| v.to_protocol()));
-    TreeSummaryResult {
-        node: node_info(&nodes, node),
+    let mut tags = h.ctx.tags.lock();
+    let mut tag_of = |gaps: &mut Gaps, n: NodeId| gaps.guard(SummaryPart::Tags, || tags.of(&nodes, n), None);
+    let (mut tops, mut class_stats, mut latest) = (Vec::new(), Vec::new(), 0i64);
+    if let Some(s) = walk.summary() {
+        latest = i64::from(s.latest_mtime);
+        let ids: Vec<NodeId> = s.top_files.iter().take(top).copied().collect();
+        let cls: Vec<usize> = gaps.guard(
+            SummaryPart::Classes,
+            || ids.iter().map(|&f| class_index(&classes, &nodes, f, by_ext)).collect(),
+            Vec::new(),
+        );
+        let cls = if cls.len() == ids.len() {
+            cls
+        } else {
+            let ext = ext_classes(&h.ctx.basis, &nodes);
+            ids.iter().map(|&f| class_index(&ext, &nodes, f, true)).collect()
+        };
+        let listed = gaps.guard(
+            SummaryPart::TopFiles,
+            || {
+                ids.iter()
+                    .zip(&cls)
+                    .map(|(&f, &ci)| {
+                        let parent_path = nodes.path(nodes.parent(f).max(0) as NodeId);
+                        let rel = match parent_path.strip_prefix(&base) {
+                            Ok(r) if r.as_os_str().is_empty() => String::new(),
+                            Ok(r) => format!("{}{}", r.display(), std::path::MAIN_SEPARATOR),
+                            Err(_) => String::new(),
+                        };
+                        (f, rel, ci)
+                    })
+                    .collect::<Vec<_>>()
+            },
+            Vec::new(),
+        );
+        for (f, rel, ci) in listed {
+            let file = gaps.guard(SummaryPart::TopFiles, || Some(node_info(&nodes, f)), None);
+            let Some(file) = file else { continue };
+            tops.push(TopFile { node: file, rel_parent: rel, tag: tag_of(&mut gaps, f), class_id: id_of(ci) });
+        }
+        class_stats = gaps.guard(
+            SummaryPart::Contents,
+            || {
+                let n = s.class_bytes.len();
+                let mut order: Vec<usize> = (0..n).collect();
+                order.sort_by_key(|&i| std::cmp::Reverse(s.class_bytes[i]));
+                let parts = |i: usize| -> Vec<sk_protocol::scan::ClassPart> {
+                    let Some(p) = &s.class_parts else { return Vec::new() };
+                    let row = &p[i * n..(i + 1) * n];
+                    let mut idx: Vec<usize> = (0..n).filter(|&j| row[j] > 0).collect();
+                    idx.sort_by_key(|&j| std::cmp::Reverse(row[j]));
+                    idx.into_iter().map(|j| sk_protocol::scan::ClassPart { class_id: id_of(j), bytes: row[j] }).collect()
+                };
+                order
+                    .into_iter()
+                    .filter(|&i| s.class_files[i] > 0)
+                    .map(|i| sk_protocol::scan::ClassStat {
+                        class_id: id_of(i),
+                        bytes: s.class_bytes[i],
+                        files: s.class_files[i],
+                        parts: parts(i),
+                    })
+                    .collect()
+            },
+            Vec::new(),
+        );
+    }
+    let folder_class = gaps.guard(
+        SummaryPart::FolderClass,
+        || {
+            h.ctx
+                .basis
+                .class_map()
+                .table()
+                .and_then(|t| h.folder_classes.explain(&nodes, node, t))
+                .map(|why| why.to_protocol(&nodes))
+        },
+        None,
+    );
+    let parent = gaps.guard(
+        SummaryPart::Parent,
+        || {
+            let up = nodes.parent(node);
+            (up > 0).then(|| node_info(&nodes, up as NodeId))
+        },
+        None,
+    );
+    let volume =
+        gaps.guard(SummaryPart::Volume, || h.root_of(&nodes, node).and_then(|r| r.volume.map(|v| v.to_protocol())), None);
+    let tag = tag_of(&mut gaps, node);
+    Ok(TreeSummaryResult {
+        node: info,
         path: base.display().to_string(),
-        parent: (parent > 0).then(|| node_info(&nodes, parent as NodeId)),
-        latest_mtime: i64::from(s.latest_mtime),
+        parent,
+        latest_mtime: latest,
         top_files: tops,
         classes: class_stats,
-        tag: tags.of(&nodes, node),
+        tag,
         volume,
-        on_disk: on_disk(&nodes, node),
+        on_disk: here,
         folder_class,
-    }
+        gaps: gaps.into_items(),
+    })
 }
 
 fn status_of(server: &Arc<Server>, h: Arc<ScanHandle>) -> impl std::future::Future<Output = RpcResult<sk_protocol::scan::ScanStatus>> {
@@ -347,7 +422,10 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
             let h = call.server.scans.get(&p.scan_id)?;
             h.check_node(p.node)?;
             let key = format!("tree.summary:{}", call.session.id);
-            latest.run(key, move || summary_of(&h, p.node, p.top as usize)).await
+            latest
+                .run(key, move || summary_of(&h, p.node, p.top as usize))
+                .await?
+                .map_err(|reason| RpcError::new(sk_protocol::ErrorCode::InternalError, reason))
         }
     });
 

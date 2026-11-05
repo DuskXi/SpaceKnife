@@ -774,8 +774,8 @@ mod imp {
             })
         }
 
-        fn add_dirs(&self, _dirs: Vec<PathBuf>) {
-            // recursive watch: every folder below the root is covered already
+        fn add_dirs(&self, _dirs: Vec<PathBuf>, _mtimes: Option<Vec<u32>>, _since_ns: i64) {
+            // recursive watch: every folder below the root is covered already (from the scan's start)
         }
 
         fn stop(&self) {

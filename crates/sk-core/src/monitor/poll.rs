@@ -7,7 +7,14 @@
 //! [`DirPoller`] is the clock-driven core (no thread, no locks): its owner calls
 //! [`DirPoller::step`] whenever [`DirPoller::wake_time`] has come. A round stats at most
 //! `poll_rate` folders per second, in small batches spaced out in time. The baseline of a newly
-//! added folder is taken right away (in chunks, not rate limited).
+//! added folder is taken right away (in chunks, not rate limited): the scan has just listed that
+//! folder, so the stat is served from the inode cache. Still, the folder may have changed between
+//! the scan's listing and that baseline: when the scan's record of its mtime comes along
+//! (`add_dirs`), the baseline is checked against it ([`listed_changed`]) and a difference is
+//! reported as `dir`, instead of being taken as the starting point.
+//!
+//! Folders whose path reaches PATH_MAX (POSIX) cannot be stat'ed by their path (ENAMETOOLONG):
+//! they are opened a piece of the path at a time, as the scan lists them, and `fstat`ed.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -41,6 +48,159 @@ pub fn stat_file(path: &Path) -> Option<(i64, i64, i64)> {
     }
 }
 
+/// Seconds as the scanners record them: the double `sec + nsec * 1e-9` truncated, clamped to u32.
+fn whole_secs(sec: i64, nsec: i64) -> u32 {
+    let t = sec as f64 + nsec as f64 * 1e-9;
+    if t.is_nan() || t <= 0.0 {
+        0
+    } else if t >= u32::MAX as f64 {
+        u32::MAX
+    } else {
+        t as u32
+    }
+}
+
+// A file time is stamped from a clock that may lag the wall clock by a tick (and kept to 10 ms on
+// exFAT); file systems that keep whole seconds (ext3, HFS+) or even two (FAT) truncate more.
+const FINE_SLACK_NS: i64 = 50_000_000;
+const COARSE_SLACK_NS: i64 = 2_100_000_000;
+
+/// Whether a folder whose mtime is now `mtime_ns` may have changed after the scan listed it.
+///
+/// `listed`: its mtime as the scan recorded it, in whole seconds (the tree's `mtime` column);
+/// `since_ns`: a wall-clock time no later than that listing (the scan's start). A folder's mtime
+/// moves whenever an entry is added, removed or renamed in it. Whole seconds that differ tell.
+/// Within the same second "before the listing" and "after it" look alike, so a folder modified at
+/// or after `since_ns` is taken as changed (one more listing of it): less the slack its file
+/// system's time stamps need, a whole second's worth when the mtime is a whole second.
+pub fn listed_changed(mtime_ns: i64, listed: u32, since_ns: i64) -> bool {
+    let (sec, nsec) = (mtime_ns.div_euclid(1_000_000_000), mtime_ns.rem_euclid(1_000_000_000));
+    if whole_secs(sec, nsec) != listed {
+        return true;
+    }
+    mtime_ns >= since_ns.saturating_sub(if nsec != 0 { FINE_SLACK_NS } else { COARSE_SLACK_NS })
+}
+
+/// Folders handed to a watcher (`add_dirs`), batch by batch as they came: each batch is the
+/// caller's list itself with the mtimes the scan recorded for it (4 B each), nothing per folder
+/// on top. A batch leaves only once all of it was placed, so while the backlog is not empty some
+/// folder handed in is neither watched nor polled yet.
+#[derive(Default)]
+pub struct Backlog {
+    batches: VecDeque<(Vec<PathBuf>, Option<Vec<u32>>, i64)>,
+    /// folders of the first batch already placed
+    at: usize,
+}
+
+impl Backlog {
+    pub fn new() -> Backlog {
+        Backlog::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.batches.is_empty()
+    }
+
+    /// Queue a batch; `mtimes` of another length than `dirs` are dropped (nothing is checked).
+    pub fn add(&mut self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, since_ns: i64) {
+        let mtimes = match mtimes {
+            Some(m) if m.len() != dirs.len() => {
+                tracing::warn!("add_dirs: {} folders, {} mtimes", dirs.len(), m.len());
+                None
+            }
+            m => m,
+        };
+        if !dirs.is_empty() {
+            self.batches.push_back((dirs, mtimes, since_ns));
+        }
+    }
+
+    /// Up to `n` of the next folders, all of one batch: (path, recorded mtime, since).
+    pub fn peek(&self, n: usize) -> Vec<(PathBuf, Option<u32>, i64)> {
+        let Some((paths, mtimes, since)) = self.batches.front() else { return Vec::new() };
+        let end = paths.len().min(self.at + n);
+        (self.at..end).map(|i| (paths[i].clone(), mtimes.as_ref().map(|m| m[i]), *since)).collect()
+    }
+
+    /// The `n` folders [`Backlog::peek`] gave were placed.
+    pub fn advance(&mut self, n: usize) {
+        self.at += n;
+        if self.batches.front().is_some_and(|b| self.at >= b.0.len()) {
+            self.batches.pop_front();
+            self.at = 0;
+        }
+    }
+}
+
+/// `(is_dir, mtime ns)` of a folder whose path is PATH_MAX or longer, which stat refuses
+/// (ENAMETOOLONG): opened a piece of whole names at a time, each piece relative to the folder the
+/// one before reached, as the scan lists such folders (sk-native's `open_long`); the last name is
+/// not followed (as `symlink_metadata`). Linux opens with `O_PATH` (search permission is enough).
+#[cfg(unix)]
+pub(crate) fn stat_past_path_max(path: &Path) -> std::io::Result<(bool, i64)> {
+    use std::os::unix::ffi::OsStrExt;
+    const PIECE: usize = 1000; // bytes per open: well under PATH_MAX everywhere (macOS: 1,024)
+    struct Fd(libc::c_int);
+    impl Drop for Fd {
+        fn drop(&mut self) {
+            // SAFETY: our own descriptor.
+            unsafe { libc::close(self.0) };
+        }
+    }
+    #[cfg(target_os = "linux")]
+    let (middle, last_flags) =
+        (libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC, libc::O_PATH | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    #[cfg(not(target_os = "linux"))]
+    let (middle, last_flags) =
+        (libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC, libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_CLOEXEC);
+    let mut rest = path.as_os_str().as_bytes();
+    let mut dir: Option<Fd> = None;
+    let mut one = false; // a piece too long once its symlinks are followed (macOS): name by name
+    loop {
+        let (piece, tail) = if one {
+            match rest.get(1..).and_then(|r| r.iter().position(|&b| b == b'/')) {
+                Some(j) => (&rest[..j + 1], &rest[j + 2..]),
+                None => (rest, &rest[rest.len()..]),
+            }
+        } else if rest.len() <= PIECE {
+            (rest, &rest[rest.len()..])
+        } else {
+            match rest[1..=PIECE].iter().rposition(|&b| b == b'/') {
+                Some(j) => (&rest[..j + 1], &rest[j + 2..]),
+                None => return Err(std::io::Error::from_raw_os_error(libc::ENAMETOOLONG)),
+            }
+        };
+        let tail = &tail[tail.iter().take_while(|&&b| b == b'/').count()..];
+        let last = tail.is_empty();
+        let c = std::ffi::CString::new(piece).map_err(|_| std::io::Error::from_raw_os_error(libc::EINVAL))?;
+        let at = dir.as_ref().map_or(libc::AT_FDCWD, |d| d.0);
+        // SAFETY: NUL-terminated name; `at` is open (or AT_FDCWD) until `dir` is replaced below.
+        let fd = unsafe { libc::openat(at, c.as_ptr(), if last { last_flags } else { middle }) };
+        if fd < 0 {
+            let e = std::io::Error::last_os_error();
+            if e.raw_os_error() == Some(libc::ENAMETOOLONG) && !one && piece[1..].contains(&b'/') {
+                one = true;
+                continue;
+            }
+            return Err(e);
+        }
+        let fd = Fd(fd);
+        if last {
+            // SAFETY: an open descriptor and a zeroed stat buffer of the right type.
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            if unsafe { libc::fstat(fd.0, &mut st) } != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let is_dir = st.st_mode & libc::S_IFMT == libc::S_IFDIR;
+            #[allow(clippy::unnecessary_cast)]
+            let ns = (st.st_mtime as i64).saturating_mul(1_000_000_000).saturating_add(st.st_mtime_nsec as i64);
+            return Ok((is_dir, ns.max(0)));
+        }
+        dir = Some(fd);
+        rest = tail;
+    }
+}
+
 /// mtime table of folders and the rate-limited rounds that compare it (single-threaded).
 pub struct DirPoller {
     /// stat'ed through symlinks (a scan root may be a link); others are not
@@ -52,7 +212,10 @@ pub struct DirPoller {
     pub stats: u64,
     pub root_lost: bool,
     mtimes: HashMap<PathBuf, i64>,
-    fresh: VecDeque<PathBuf>,
+    /// baselines to take: (path, mtime the scan recorded, since): see [`listed_changed`]
+    fresh: VecDeque<(PathBuf, Option<u32>, i64)>,
+    /// the scan's record of the root was checked
+    root_listed: bool,
     round: Vec<PathBuf>,
     pos: usize,
     next_round: Instant,
@@ -73,6 +236,7 @@ impl DirPoller {
             root_lost: false,
             mtimes: HashMap::new(),
             fresh: VecDeque::new(),
+            root_listed: false,
             round: Vec::new(),
             pos: 0,
             next_round: now + interval,
@@ -94,11 +258,29 @@ impl DirPoller {
 
     /// Start polling `path` (false: already polled). The baseline is taken at the next step.
     pub fn add(&mut self, path: PathBuf) -> bool {
+        self.add_listed(path, None, 0)
+    }
+
+    /// [`DirPoller::add`] with the scan's record of the folder: `listed` (its mtime as the scan
+    /// recorded it, whole seconds) and `since_ns`; the baseline is checked against it first
+    /// ([`listed_changed`]): a change since the listing is reported.
+    ///
+    /// A folder already polled is left as it is: it was handed in again because its row moved
+    /// (its parent was listed again), and its own baseline stands. Only the root, polled from the
+    /// start (before the scan read it), takes the scan's record once, when it comes.
+    pub fn add_listed(&mut self, path: PathBuf, listed: Option<u32>, since_ns: i64) -> bool {
         if self.mtimes.contains_key(&path) {
+            if listed.is_some() && path == self.root && !self.root_listed {
+                self.root_listed = true;
+                self.fresh.push_back((path, listed, since_ns));
+            }
             return false;
         }
+        if listed.is_some() && path == self.root {
+            self.root_listed = true;
+        }
         self.mtimes.insert(path.clone(), PENDING);
-        self.fresh.push_back(path);
+        self.fresh.push_back((path, listed, since_ns));
         true
     }
 
@@ -177,22 +359,40 @@ impl DirPoller {
     }
 
     fn baselines(&mut self) -> Vec<Change> {
+        let mut out = Vec::new();
         let mut gone = Vec::new();
         let mut done = 0;
         while done < BASELINE_CHUNK {
-            let Some(path) = self.fresh.pop_front() else { break };
-            if self.mtimes.get(&path) != Some(&PENDING) {
-                continue;
+            let Some((path, listed, since)) = self.fresh.pop_front() else { break };
+            let Some(&old) = self.mtimes.get(&path) else {
+                continue; // dropped meanwhile
+            };
+            if old != PENDING && listed.is_none() {
+                continue; // no baseline to take
             }
             done += 1;
-            match self.probe(&path) {
-                None => gone.push(path), // already gone again: it was in the tree, so report it
-                Some(m) => {
-                    self.mtimes.insert(path, m);
+            let m = match self.probe(&path) {
+                None => {
+                    gone.push(path); // already gone again: it was in the tree, so report it
+                    continue;
                 }
+                Some(m) => m,
+            };
+            if m == UNKNOWN && old != PENDING {
+                continue; // the root's check, cannot tell now: its baseline stands
+            }
+            self.mtimes.insert(path.clone(), m);
+            if let Some(listed) = listed
+                && m != UNKNOWN
+                && listed_changed(m, listed, since)
+            {
+                out.push(Change::new(ChangeKind::Dir, path, Some(true)));
             }
         }
-        if gone.is_empty() { Vec::new() } else { self.drop_gone(gone) }
+        if !gone.is_empty() {
+            out.extend(self.drop_gone(gone));
+        }
+        out
     }
 
     /// The folder's mtime (ns); None: gone or no longer a folder; `UNKNOWN`: cannot tell.
@@ -201,6 +401,14 @@ impl DirPoller {
         let m = if path == self.root { std::fs::metadata(path) } else { std::fs::symlink_metadata(path) };
         match m {
             Err(e) if matches!(e.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory) => None,
+            #[cfg(unix)]
+            Err(e) if e.raw_os_error() == Some(libc::ENAMETOOLONG) => match stat_past_path_max(path) {
+                Ok((true, ns)) => Some(ns),
+                Ok((false, _)) => None, // no longer a folder
+                // ELOOP: a symbolic link now (its last name is opened without following it)
+                Err(e) if matches!(e.raw_os_error(), Some(libc::ENOENT | libc::ENOTDIR | libc::ELOOP)) => None,
+                Err(_) => Some(UNKNOWN),
+            },
             Err(_) => Some(UNKNOWN),
             Ok(m) if !m.is_dir() => None,
             Ok(m) => Some(
@@ -328,7 +536,7 @@ struct PollInner {
     root: PathBuf,
     poller: Mutex<DirPoller>,
     polled: AtomicI64,
-    incoming: Mutex<VecDeque<PathBuf>>,
+    incoming: Mutex<Backlog>,
     wake: Wake,
     emitter: Emitter,
     state: Mutex<(WatchState, String)>,
@@ -344,11 +552,13 @@ impl PollWatcher {
     pub fn new(root: &Path, poll_interval: f64, poll_rate: u32) -> PollWatcher {
         let root = std::path::absolute(root).unwrap_or_else(|_| root.to_path_buf());
         let interval = Duration::from_secs_f64(poll_interval.max(0.01));
+        let mut incoming = Backlog::new();
+        incoming.add(vec![root.clone()], None, 0);
         PollWatcher {
             inner: Arc::new(PollInner {
                 poller: Mutex::new(DirPoller::new(&root, interval, poll_rate)),
                 polled: AtomicI64::new(0),
-                incoming: Mutex::new(VecDeque::from([root.clone()])),
+                incoming: Mutex::new(incoming),
                 root,
                 wake: Wake::new(),
                 emitter: Emitter::new(),
@@ -365,10 +575,12 @@ impl PollWatcher {
                     let mut poller = inner.poller.lock().unwrap();
                     {
                         let mut inc = inner.incoming.lock().unwrap();
-                        for _ in 0..inc.len().min(4096) {
-                            let p = inc.pop_front().unwrap();
-                            poller.add(p);
+                        let fed = inc.peek(4096);
+                        let n = fed.len();
+                        for (path, listed, since) in fed {
+                            poller.add_listed(path, listed, since);
                         }
+                        inc.advance(n);
                     }
                     let ch = poller.step(Instant::now());
                     inner.polled.store(poller.len() as i64, Ordering::Relaxed);
@@ -417,8 +629,8 @@ impl Watcher for PollWatcher {
         self.worker.spawn("sk-poll", move || PollWatcher::run(inner))
     }
 
-    fn add_dirs(&self, dirs: Vec<PathBuf>) {
-        self.inner.incoming.lock().unwrap().extend(dirs);
+    fn add_dirs(&self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, since_ns: i64) {
+        self.inner.incoming.lock().unwrap().add(dirs, mtimes, since_ns);
         self.inner.wake.set();
     }
 
@@ -599,7 +811,7 @@ mod tests {
         let got = Arc::new(Mutex::new(Vec::new()));
         let g = got.clone();
         w.start(Arc::new(move |b| g.lock().unwrap().extend(b))).unwrap();
-        w.add_dirs(vec![root.join("a"), root.join("b")]);
+        w.add_dirs(vec![root.join("a"), root.join("b")], None, 0);
         std::thread::sleep(Duration::from_millis(150));
         std::fs::write(root.join("a/f"), b"x").unwrap();
         set_mtime(&root.join("a"), 5);
@@ -642,6 +854,172 @@ mod tests {
         assert_eq!(*got.lock().unwrap(), vec![Change::overflow(root.clone())]);
         w.stop();
         assert_eq!(w.status().state, WatchState::Failed);
+    }
+
+    fn mtime_ns(path: &Path) -> i64 {
+        let t = std::fs::metadata(path).unwrap().modified().unwrap();
+        t.duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
+    }
+
+    fn now_ns() -> i64 {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
+    }
+
+    #[test]
+    fn listed_changed_rule() {
+        let s: u32 = 1_700_000_000;
+        let ns = s as i64 * 1_000_000_000;
+        let since = ns + 500_000_000; // the scan began half a second into that second
+        assert!(listed_changed(ns + 600_000_000, s, since)); // modified after the scan began
+        assert!(listed_changed(ns + 460_000_000, s, since)); // within a tick of it: cannot tell
+        assert!(!listed_changed(ns + 400_000_000, s, since)); // well before: the listing saw it
+        assert!(listed_changed(ns + 400_000_000, s - 1, since)); // whole seconds differ
+        assert!(listed_changed(ns, s, since)); // a whole second: maybe a file system that keeps no more
+        assert!(!listed_changed(ns, s, since + 3_000_000_000));
+        // the scanners' seconds truncate the double sec + nsec * 1e-9, which can round up
+        assert!(!listed_changed(ns + 999_999_999, s + 1, since + 10_000_000_000));
+        assert!(listed_changed(ns + 999_999_999, s, since + 10_000_000_000));
+    }
+
+    #[test]
+    fn backlog_keeps_batches_until_placed() {
+        let mut b = Backlog::new();
+        assert!(b.is_empty() && b.peek(10).is_empty());
+        b.add(vec![PathBuf::from("a"), PathBuf::from("b"), PathBuf::from("c")], Some(vec![1, 2, 3]), 7);
+        b.add(vec![PathBuf::from("d")], None, 0);
+        b.add(Vec::new(), None, 0); // nothing: no batch
+        b.add(vec![PathBuf::from("e")], Some(vec![1, 2]), 0); // lengths differ: no mtimes
+        assert_eq!(b.peek(2), vec![(PathBuf::from("a"), Some(1), 7), (PathBuf::from("b"), Some(2), 7)]);
+        b.advance(2);
+        assert_eq!(b.peek(5), vec![(PathBuf::from("c"), Some(3), 7)]); // one batch at a time
+        b.advance(1);
+        assert_eq!(b.peek(5), vec![(PathBuf::from("d"), None, 0)]);
+        b.advance(1);
+        assert_eq!(b.peek(5), vec![(PathBuf::from("e"), None, 0)]);
+        b.advance(1);
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn poller_baseline_checks_what_the_scan_recorded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let [same, moved, recent, plain] = ["same", "moved", "recent", "plain"].map(|n| tmp.path().join(n));
+        for d in [&same, &moved, &recent, &plain] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let secs = |d: &Path| (mtime_ns(d) / 1_000_000_000) as u32;
+        let later = now_ns() + 3600 * 1_000_000_000; // the scan started after every one of these times
+        let mut p = DirPoller::new(tmp.path(), Duration::from_secs(60), 1000);
+        assert!(p.add_listed(same.clone(), Some(secs(&same)), later));
+        assert!(p.add_listed(moved.clone(), Some(secs(&moved) - 5), later)); // whole seconds differ
+        assert!(p.add_listed(recent.clone(), Some(secs(&recent)), mtime_ns(&recent))); // after the scan began
+        assert!(p.add(plain.clone())); // nothing recorded: the baseline as before
+        assert_eq!(p.step(Instant::now()), vec![
+            Change::new(ChangeKind::Dir, moved.clone(), Some(true)),
+            Change::new(ChangeKind::Dir, recent.clone(), Some(true)),
+        ]);
+        assert!(p.step(Instant::now()).is_empty());
+    }
+
+    #[test]
+    fn poller_root_checks_what_the_scan_recorded_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let mut p = DirPoller::new(&root, Duration::from_secs(60), 1000);
+        assert!(p.add(root.clone()));
+        assert!(p.step(Instant::now()).is_empty()); // the baseline
+        let secs = (mtime_ns(&root) / 1_000_000_000) as u32;
+        let later = now_ns() + 3600 * 1_000_000_000;
+        assert!(!p.add_listed(root.clone(), Some(secs - 5), later));
+        assert_eq!(p.step(Instant::now()), vec![Change::new(ChangeKind::Dir, root.clone(), Some(true))]);
+        assert!(!p.add_listed(root.clone(), Some(secs - 5), later)); // once only
+        assert!(p.step(Instant::now()).is_empty());
+    }
+
+    #[test]
+    fn poll_watcher_checks_handed_folders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        let (a, b) = (root.join("a"), root.join("b"));
+        std::fs::create_dir(&a).unwrap();
+        std::fs::create_dir(&b).unwrap();
+        let listed = |d: &Path| (mtime_ns(d) / 1_000_000_000) as u32;
+        let (la, lb) = (listed(&a), listed(&b) - 5); // b changed since its listing
+        let w = PollWatcher::new(&root, 60.0, 100_000);
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let g = got.clone();
+        w.start(Arc::new(move |x| g.lock().unwrap().extend(x))).unwrap();
+        w.add_dirs(vec![a.clone(), b.clone()], Some(vec![la, lb]), now_ns() + 3600 * 1_000_000_000);
+        let end = Instant::now() + Duration::from_secs(5);
+        while !got.lock().unwrap().iter().any(|c| c.kind == ChangeKind::Dir && c.path == b) {
+            assert!(Instant::now() < end);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(!got.lock().unwrap().iter().any(|c| c.path == a));
+        w.stop();
+    }
+
+    /// A folder whose path is longer than PATH_MAX (4,096 bytes on Linux, 1,024 on macOS), made
+    /// one level at a time relative to the one above: no single call can name it.
+    #[cfg(unix)]
+    fn deep_folder(top: &Path, longer_than: usize) -> (PathBuf, std::fs::File) {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::io::{AsRawFd, FromRawFd};
+        let name = std::ffi::CString::new("d".repeat(200)).unwrap();
+        let mut dir = std::fs::File::open(top).unwrap();
+        let mut path = top.as_os_str().as_bytes().to_vec();
+        loop {
+            // SAFETY: plain syscalls on descriptors we own.
+            let below = unsafe {
+                assert_eq!(libc::mkdirat(dir.as_raw_fd(), name.as_ptr(), 0o755), 0);
+                libc::openat(dir.as_raw_fd(), name.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_CLOEXEC)
+            };
+            assert!(below >= 0);
+            path.extend_from_slice(b"/");
+            path.extend_from_slice(name.as_bytes());
+            if path.len() > longer_than {
+                // `dir` stays open: the parent of the deep folder
+                return (PathBuf::from(std::ffi::OsStr::from_bytes(&path)), {
+                    // SAFETY: closing the deepest folder, keeping its parent
+                    unsafe { libc::close(below) };
+                    dir
+                });
+            }
+            // SAFETY: a descriptor we just opened
+            dir = unsafe { std::fs::File::from_raw_fd(below) };
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn poller_reads_folders_beyond_path_max() {
+        use std::os::unix::io::AsRawFd;
+        let tmp = tempfile::tempdir().unwrap();
+        let (deep, parent) = deep_folder(tmp.path(), 5000);
+        let err = std::fs::metadata(&deep).unwrap_err();
+        assert_eq!(err.raw_os_error(), Some(libc::ENAMETOOLONG));
+        let mut p = DirPoller::new(tmp.path(), Duration::from_secs(10), 1000);
+        assert!(p.add(deep.clone()));
+        assert!(p.step(Instant::now()).is_empty());
+        let name = std::ffi::CString::new("d".repeat(200)).unwrap();
+        // SAFETY: plain syscalls relative to the open parent; a zeroed stat buffer.
+        unsafe {
+            let mut st: libc::stat = std::mem::zeroed();
+            assert_eq!(libc::fstatat(parent.as_raw_fd(), name.as_ptr(), &mut st, 0), 0);
+            let times = [
+                libc::timespec { tv_sec: 0, tv_nsec: libc::UTIME_OMIT },
+                libc::timespec { tv_sec: st.st_mtime + 5, tv_nsec: 0 },
+            ];
+            assert_eq!(libc::utimensat(parent.as_raw_fd(), name.as_ptr(), times.as_ptr(), 0), 0);
+        }
+        let at = p.wake_time().unwrap() + Duration::from_millis(1);
+        assert_eq!(p.step(at), vec![Change::new(ChangeKind::Dir, deep.clone(), Some(true))]);
+        // SAFETY: as above
+        unsafe { assert_eq!(libc::unlinkat(parent.as_raw_fd(), name.as_ptr(), libc::AT_REMOVEDIR), 0) };
+        let at = p.wake_time().unwrap() + Duration::from_millis(1);
+        assert_eq!(p.step(at), vec![Change::new(ChangeKind::Deleted, deep.clone(), Some(true))]);
+        assert!(p.is_empty());
+        drop(parent); // tempdir's remove_dir_all walks with openat: deep paths are fine
     }
 
     #[test]

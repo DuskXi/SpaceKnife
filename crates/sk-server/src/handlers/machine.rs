@@ -70,13 +70,22 @@ fn still_running(h: &ScanHandle) -> bool {
 }
 
 /// What an open scan shows, and every class with bytes (largest first; [] while it runs).
-pub fn live_full(server: &Server, h: &ScanHandle) -> (VolumeScan, Vec<ClassStat>) {
+/// `Err` (the reason) when its summary lacks the class totals or the folder classes: partial
+/// totals are never shown (or kept) as the volume's make-up.
+pub fn live_full(server: &Server, h: &ScanHandle) -> Result<(VolumeScan, Vec<ClassStat>), String> {
     let st = h.status(server);
     let running = still_running(h);
     let mut every = Vec::new();
     let mut folders = Vec::new();
     if !running && let Some(node) = h.roots.read().first().map(|r| r.node) {
-        let summary = crate::handlers::scan::summary_of(h, node, 0);
+        let summary = crate::handlers::scan::summary_of(h, node, 0)?;
+        if let Some(gap) = summary
+            .gaps
+            .iter()
+            .find(|g| matches!(g.part, sk_protocol::scan::SummaryPart::Contents | sk_protocol::scan::SummaryPart::Classes))
+        {
+            return Err(gap.reason.clone());
+        }
         every = summary.classes.into_iter().filter(|c| c.bytes > 0).collect();
         let nodes = h.store.read();
         folders = nodes
@@ -105,7 +114,7 @@ pub fn live_full(server: &Server, h: &ScanHandle) -> (VolumeScan, Vec<ClassStat>
         classes: every.iter().take(TOP_CLASSES).cloned().collect(),
         folders,
     };
-    (scan, every)
+    Ok((scan, every))
 }
 
 /// What to keep of a complete scan of a whole volume; None for anything else.
@@ -136,7 +145,7 @@ pub fn kept_of(server: &Server, h: &ScanHandle) -> Option<Kept> {
     if still_running(h) {
         return None;
     }
-    let (scan, every) = live_full(server, h);
+    let (scan, every) = live_full(server, h).ok()?;
     keep_entry(server, h, &scan, &every)
 }
 
@@ -221,8 +230,14 @@ pub fn overview(
         let k = kept.and_then(|f| f(v));
         let mut every: Vec<ClassStat> = Vec::new();
         let mut mix_bytes = 0;
-        let scan = if let Some(h) = open.get(&norm(&v.mount_point)) {
-            let (scan, all) = live_full(server, h);
+        let live = open.get(&norm(&v.mount_point)).and_then(|h| match live_full(server, h) {
+            Ok(got) => Some((h, got)),
+            Err(reason) => {
+                tracing::debug!(scan_id = %h.id, "volume make-up left out: {reason}");
+                None
+            }
+        });
+        let scan = if let Some((h, (scan, all))) = live {
             every = all;
             mix_bytes = scan.bytes_alloc;
             if let Some(fresh) = fresh.as_deref_mut()

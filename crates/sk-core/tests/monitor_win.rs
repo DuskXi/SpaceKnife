@@ -304,6 +304,6 @@ fn buffer_sizes_and_factory() {
     w.stop();
     let made = create_watcher(tmp.path(), 30.0, 2000);
     assert_eq!(made.name(), "rdcw");
-    made.add_dirs(vec![tmp.path().to_path_buf()]);
+    made.add_dirs(vec![tmp.path().to_path_buf()], Some(vec![0]), 0);
     made.stop(); // never started: fine
 }

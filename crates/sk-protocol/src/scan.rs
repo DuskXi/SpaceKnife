@@ -581,6 +581,28 @@ pub struct FolderClassInfo {
     pub fallback: bool,
 }
 
+str_enum! {
+    /// The part of a node's summary a [`SummaryGap`] is about.
+    pub enum SummaryPart {
+        Contents = "contents",
+        Classes = "classes",
+        TopFiles = "top_files",
+        FolderClass = "folder_class",
+        Tags = "tags",
+        Volume = "volume",
+        Parent = "parent",
+    }
+}
+
+/// A part of a node's summary the backend could not work out; the rest is still given.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SummaryGap {
+    /// contents: largest files, class totals and newest change (left empty); classes: the folder classes (classes counted by extension alone); top_files, folder_class, tags, volume, parent: that field (left empty)
+    pub part: SummaryPart,
+    /// Why, in the interface language
+    pub reason: String,
+}
+
 /// Everything the details panel shows for one node (UI-MAIN-35…43, G11).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TreeSummaryResult {
@@ -604,6 +626,9 @@ pub struct TreeSummaryResult {
     /// The folder class the node (or a file's folder) takes, if any
     #[serde(default)]
     pub folder_class: Option<FolderClassInfo>,
+    /// Parts that could not be worked out this time; empty when complete
+    #[serde(default)]
+    pub gaps: Vec<SummaryGap>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

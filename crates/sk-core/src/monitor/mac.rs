@@ -343,7 +343,7 @@ mod imp {
             Ok(())
         }
 
-        fn add_dirs(&self, _dirs: Vec<PathBuf>) {}
+        fn add_dirs(&self, _dirs: Vec<PathBuf>, _mtimes: Option<Vec<u32>>, _since_ns: i64) {} // recursive stream, from the scan's start
 
         fn stop(&self) {
             if self.sh.emitter.stopping.swap(true, Ordering::SeqCst) {

@@ -16,11 +16,13 @@
 //! child ranges, names) before the store is used.
 //!
 //! Files are written to a temporary name and renamed, so a crash never leaves a half-written
-//! snapshot behind. Format 3 is not compatible with the Python backend's formats 1 and 2.
+//! snapshot behind; frames are compressed a few at a time (at most [`SAVE_THREADS`] threads) and
+//! streamed into the file, the header (JSON, padded with spaces) goes last into room reserved
+//! for it. Format 3 is not compatible with the Python backend's formats 1 and 2.
 
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -41,6 +43,8 @@ pub const SUFFIX: &str = "sks";
 pub const KEEP_RECENT: usize = 10;
 /// Raw bytes per frame.
 pub const FRAME_BYTES: usize = 4 << 20;
+/// Most zstd threads a save uses (each holds a frame and its compressed copy while it works).
+pub const SAVE_THREADS: usize = 4;
 const MAX_HEADER: u32 = 64 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -112,6 +116,9 @@ pub struct SaveOptions {
     /// unix seconds (None: now)
     pub created_at: Option<u64>,
     pub app_version: String,
+    /// compressor threads (0: [`default_threads`]; the server may pass the process's usable
+    /// CPUs, `sk_native::cpus::usable()`, capped at [`SAVE_THREADS`])
+    pub threads: usize,
 }
 
 impl Default for SaveOptions {
@@ -125,6 +132,7 @@ impl Default for SaveOptions {
             level: 1,
             created_at: None,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
+            threads: 0,
         }
     }
 }
@@ -150,9 +158,41 @@ enum Source {
     Names(usize, std::ops::Range<usize>), // run index, byte range in it
 }
 
-/// Writes `nodes` to `path` (atomically: a temporary file, then a rename). Safe while a scan
-/// appends (the atomic columns are read value by value), but a snapshot is meant for a
-/// complete tree.
+impl Source {
+    fn raw_len(&self) -> u64 {
+        match self {
+            Source::Col(c, r) => (r.len() * c.item()) as u64,
+            Source::Names(_, r) => r.len() as u64,
+        }
+    }
+}
+
+/// More digits than any offset or length the header will hold: the header is written last, into
+/// room reserved (with these in its numbers) before the data, padded with spaces.
+const PLACEHOLDER: u64 = 1_000_000_000_000_000;
+
+/// Compressor threads of a save by default: at most [`SAVE_THREADS`], fewer on a machine with
+/// fewer CPUs (the server may pass `sk_native::cpus::usable()` instead, see
+/// [`SaveOptions::threads`]).
+pub fn default_threads() -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .clamp(1, SAVE_THREADS)
+}
+
+/// Writes `nodes` to `path` (atomically: a temporary file, then a rename; nothing is left behind
+/// when it fails). Safe while a scan appends (the atomic columns are read value by value), but a
+/// snapshot is meant for a complete tree.
+///
+/// The rows, columns and name chunks are those of `nodes`, fixed when its guard was taken; hold
+/// that guard (a [`crate::Reader`]) for the whole save, so no change reaches the rows meanwhile.
+/// (Python saved without the lock first and again under it when the tree changed; in Rust the
+/// reader is required, and since a waiting writer no longer holds up other readers, a long save
+/// only delays the changes.)
+///
+/// Frames are compressed by at most [`SaveOptions::threads`] threads a few at a time and go
+/// straight into the file in order (nothing beyond those frames is held in memory); the header is
+/// written last into room reserved after the magic. The format is unchanged.
 pub fn save(
     nodes: &Nodes,
     path: &Path,
@@ -197,76 +237,61 @@ pub fn save(
         .flat_map(|b| b.3.iter())
         .chain(name_frames.iter())
         .collect();
-    let packed: Option<Vec<Vec<u8>>> = match opts.codec {
-        Codec::Raw => None,
-        Codec::Zstd => Some(
-            sources
-                .par_iter()
-                .map(|s| compress(&raw_of(s), opts.level))
-                .collect::<io::Result<Vec<_>>>()?,
-        ),
-    };
-    let stored_len = |i: usize, s: &Source| -> u64 {
-        match &packed {
-            Some(p) => p[i].len() as u64,
-            None => match s {
-                Source::Col(c, r) => (r.len() * c.item()) as u64,
-                Source::Names(_, r) => r.len() as u64,
-            },
+
+    // the header, given each frame's (offset, stored length) in `sources` order
+    let created_at = opts.created_at.unwrap_or_else(now_secs);
+    let ext_table: Vec<String> = nodes.ext_table().iter().map(|e| e.to_string()).collect();
+    let header_of = |stored: &dyn Fn(usize) -> (u64, u64)| -> SnapshotHeader {
+        let mut i = 0usize;
+        let mut frames_of = |list: &[Source]| -> Vec<Frame> {
+            list.iter()
+                .map(|s| {
+                    let (offset, len) = stored(i);
+                    i += 1;
+                    [offset, len, s.raw_len()]
+                })
+                .collect()
+        };
+        let mut columns = BTreeMap::new();
+        for (name, dtype, raw, list) in &blocks {
+            let frames = frames_of(list);
+            columns.insert(
+                name.clone(),
+                BlockInfo {
+                    dtype: dtype.to_string(),
+                    raw_length: *raw,
+                    codec: opts.codec,
+                    frames,
+                },
+            );
+        }
+        let names = BlockInfo {
+            dtype: "u1".into(),
+            raw_length: name_bytes,
+            codec: opts.codec,
+            frames: frames_of(&name_frames),
+        };
+        SnapshotHeader {
+            format: FORMAT_VERSION,
+            app_version: opts.app_version.clone(),
+            created_at,
+            roots: opts.roots.clone(),
+            node_count: n as u64,
+            volumes: opts.volumes.clone(),
+            stats: opts.stats.clone(),
+            ext_table: ext_table.clone(),
+            columns,
+            names,
+            checkpoints: opts.checkpoints.clone(),
         }
     };
-    let raw_len = |s: &Source| -> u64 {
-        match s {
-            Source::Col(c, r) => (r.len() * c.item()) as u64,
-            Source::Names(_, r) => r.len() as u64,
-        }
+    let to_json = |h: &SnapshotHeader| {
+        serde_json::to_vec(h).map_err(|e| SnapshotError::Header(e.to_string()))
     };
-    let mut offset = 0u64;
-    let mut i = 0usize;
-    let mut frames_of = |list: &[Source]| -> Vec<Frame> {
-        list.iter()
-            .map(|s| {
-                let len = stored_len(i, s);
-                let f = [offset, len, raw_len(s)];
-                offset += len;
-                i += 1;
-                f
-            })
-            .collect()
-    };
-    let mut columns = BTreeMap::new();
-    for (name, dtype, raw, list) in &blocks {
-        let frames = frames_of(list);
-        columns.insert(
-            name.clone(),
-            BlockInfo {
-                dtype: dtype.to_string(),
-                raw_length: *raw,
-                codec: opts.codec,
-                frames,
-            },
-        );
+    let reserve = to_json(&header_of(&|_| (PLACEHOLDER, PLACEHOLDER)))?.len();
+    if reserve > MAX_HEADER as usize {
+        return Err(SnapshotError::Header("header too large".into()));
     }
-    let names = BlockInfo {
-        dtype: "u1".into(),
-        raw_length: name_bytes,
-        codec: opts.codec,
-        frames: frames_of(&name_frames),
-    };
-    let header = SnapshotHeader {
-        format: FORMAT_VERSION,
-        app_version: opts.app_version.clone(),
-        created_at: opts.created_at.unwrap_or_else(now_secs),
-        roots: opts.roots.clone(),
-        node_count: n as u64,
-        volumes: opts.volumes.clone(),
-        stats: opts.stats.clone(),
-        ext_table: nodes.ext_table().iter().map(|e| e.to_string()).collect(),
-        columns,
-        names,
-        checkpoints: opts.checkpoints.clone(),
-    };
-    let head = serde_json::to_vec(&header).map_err(|e| SnapshotError::Header(e.to_string()))?;
 
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
@@ -274,34 +299,96 @@ pub fn save(
     let mut tmp_name = path.as_os_str().to_owned();
     tmp_name.push(".tmp");
     let tmp = PathBuf::from(tmp_name);
-    let result = (|| -> io::Result<()> {
+    let result = (|| -> Result<SnapshotHeader, SnapshotError> {
         let file = File::create(&tmp)?;
         let mut out = io::BufWriter::with_capacity(1 << 20, file);
         out.write_all(MAGIC)?;
-        out.write_all(&(head.len() as u32).to_le_bytes())?;
-        out.write_all(&head)?;
-        match &packed {
-            Some(p) => {
-                for frame in p {
-                    out.write_all(frame)?;
+        out.write_all(&(reserve as u32).to_le_bytes())?;
+        out.write_all(&vec![b' '; reserve])?;
+        let mut stored: Vec<u64> = Vec::with_capacity(sources.len());
+        match opts.codec {
+            Codec::Raw => {
+                for s in &sources {
+                    let raw = raw_of(s);
+                    out.write_all(&raw)?;
+                    stored.push(raw.len() as u64);
                 }
             }
-            None => {
-                for s in &sources {
-                    out.write_all(&raw_of(s))?;
+            Codec::Zstd => {
+                let threads = if opts.threads == 0 {
+                    default_threads()
+                } else {
+                    opts.threads
+                };
+                let level = opts.level;
+                let compress_all = |batch: &[&Source]| -> io::Result<Vec<Vec<u8>>> {
+                    batch
+                        .par_iter()
+                        .map(|s| compress(&raw_of(s), level))
+                        .collect()
+                };
+                let out = &mut out;
+                let stored = &mut stored;
+                let mut write_all = |packed: Vec<Vec<u8>>| -> io::Result<()> {
+                    for frame in packed {
+                        out.write_all(&frame)?;
+                        stored.push(frame.len() as u64);
+                    }
+                    Ok(())
+                };
+                // a batch compresses while the one before it is written
+                let mut stream = || -> io::Result<()> {
+                    let mut batches = sources.chunks(threads * 2);
+                    let mut ready = match batches.next() {
+                        Some(b) => compress_all(b)?,
+                        None => return Ok(()),
+                    };
+                    for b in batches {
+                        let (written, next) = rayon::join(
+                            || write_all(std::mem::take(&mut ready)),
+                            || compress_all(b),
+                        );
+                        written?;
+                        ready = next?;
+                    }
+                    write_all(ready)
+                };
+                match rayon::ThreadPoolBuilder::new()
+                    .num_threads(threads)
+                    .thread_name(|i| format!("snapshot-zstd-{i}"))
+                    .build()
+                {
+                    Ok(pool) => pool.install(stream)?,
+                    Err(_) => stream()?,
                 }
             }
         }
-        let file = out.into_inner().map_err(|e| e.into_error())?;
+        let mut offsets = Vec::with_capacity(stored.len());
+        let mut at = 0u64;
+        for len in &stored {
+            offsets.push(at);
+            at += len;
+        }
+        let header = header_of(&|i| (offsets[i], stored[i]));
+        let head = to_json(&header)?;
+        if head.len() > reserve {
+            // cannot happen: every number is below the placeholder
+            return Err(SnapshotError::Header(
+                "snapshot header outgrew its room".into(),
+            ));
+        }
+        let mut file = out.into_inner().map_err(|e| e.into_error())?;
+        file.seek(SeekFrom::Start((MAGIC.len() + 4) as u64))?;
+        file.write_all(&head)?;
         file.sync_all()?;
-        Ok(())
+        drop(file);
+        std::fs::rename(&tmp, path)?;
+        Ok(header)
     })();
-    if let Err(e) = result {
+    if result.is_err() {
         let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
     }
-    std::fs::rename(&tmp, path)?;
-    Ok(header)
+    result
 }
 
 fn compress(raw: &[u8], level: i32) -> io::Result<Vec<u8>> {

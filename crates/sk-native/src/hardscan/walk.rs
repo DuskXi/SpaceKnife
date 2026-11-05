@@ -23,13 +23,14 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rayon::{Scope, ThreadPool, ThreadPoolBuilder};
 
 use super::case::{mark, msg};
 use super::common::{Arena, NativePath, RootOpts};
-use super::{Entries, Error, ListingError, Ref, SliceResult, Task, native_to_path, sys};
+use super::slots::{self, Slots};
+use super::{Entries, Error, ListingError, Ref, SliceResult, Task, native_to_path, pace, sys};
 use crate::util::FxHashMap;
 
 pub struct Node {
@@ -164,9 +165,33 @@ pub struct Ctx {
     pub listed: AtomicUsize,
     pub entries: AtomicUsize,
     pub arenas: Vec<Mutex<Arena>>,
+    /// The width of the shared carriers (pace.rs), for a call listing on them.
+    pub width: Option<&'static Slots>,
+    /// The disk's gate (slots.rs `ListingGate`), when the call names one.
+    pub gate: Option<Arc<Slots>>,
+    /// The adaptive width, told about every listing of a call on the carriers.
+    pub pace: Option<&'static pace::Pace>,
+    /// Folders of this call holding their slots, and how many may at once: the threads of its
+    /// pool (an admitted folder never waits in a queue holding slots another call could use);
+    /// on the carriers also its share of the width (`Ctx::share`).
+    pub running: AtomicUsize,
+    pub most_running: usize,
     /// Set by the caller to end the call early: nothing more is listed, what is left waits in
     /// the frontier (folders a path cannot stand for become CAP errors).
     pub cancel: Option<Arc<AtomicBool>>,
+}
+
+/// Calls listing on the shared carriers now (`walk`).
+static CALLS: AtomicUsize = AtomicUsize::new(0);
+
+/// What becomes of a node offered a slot (`Ctx::admit`).
+enum Admit {
+    /// Put off or failed without a listing (its state is set).
+    Resolved,
+    /// It holds a slot of each limit: list it.
+    Taken,
+    /// A limit is full (or the gate paused): it waits.
+    Refused,
 }
 
 impl Ctx {
@@ -182,19 +207,235 @@ impl Ctx {
             && (self.entries.load(Ordering::Relaxed) >= self.max_entries
                 || self.deadline.is_some_and(|d| Instant::now() >= d))
     }
+
+    /// Past the budget, or the disk's gate paused: only what cannot wait is listed (`past_budget`).
+    fn stopped(&self) -> bool {
+        self.should_stop() || self.gate.as_ref().is_some_and(|g| g.paused())
+    }
+
+    /// What `past_budget` says for `node` now (`stopped`: `Ctx::stopped`), its state set when it
+    /// is not to be listed. True: list it.
+    fn settle(&self, node: &Node, stopped: bool) -> bool {
+        if self.cancelled() {
+            let _ = node.take_via();
+            let _ = node.state.set(State::Deferred);
+            return false;
+        }
+        if !stopped {
+            return true;
+        }
+        let cap_left = self.extra.load(Ordering::Relaxed) < self.extra_cap;
+        match past_budget(node.care, self.budget_positive, cap_left) {
+            Past::List => true,
+            Past::Defer => {
+                let _ = node.take_via();
+                let _ = node.state.set(State::Deferred);
+                false
+            }
+            Past::Fail(why) => {
+                let _ = node.take_via();
+                if why == msg::CAP {
+                    sys::cap_hit();
+                }
+                let _ = node.state.set(State::Failed(why.to_owned()));
+                false
+            }
+        }
+    }
+
+    /// A slot of each limit for `node`, unless it is settled without a listing. A folder that must
+    /// be listed in this call goes through a paused gate (never past its limit).
+    fn admit(&self, node: &Node, stopped: bool) -> Admit {
+        if !self.settle(node, stopped) {
+            return Admit::Resolved;
+        }
+        if self.running.load(Ordering::Relaxed) >= self.share() {
+            return Admit::Refused;
+        }
+        if let Some(w) = self.width
+            && !w.try_take(true)
+        {
+            return Admit::Refused;
+        }
+        if let Some(g) = &self.gate
+            && !g.try_take(stopped)
+        {
+            if let Some(w) = self.width {
+                w.untake();
+            }
+            return Admit::Refused;
+        }
+        self.running.fetch_add(1, Ordering::Relaxed);
+        Admit::Taken
+    }
+
+    /// How many of its folders a call may list at once. On the carriers: its share of the width
+    /// among the calls on them, rounded up (all of it for a call alone, as at a scan's start; one
+    /// each for as many calls as the width, as the scanner's calls are on a warm cache; two each
+    /// at the cold width). A call that lists several folders at once lists siblings at the same
+    /// time, which costs the file system more: on ReFS, warm, about 15 % more kernel time than
+    /// one folder at a time per call, for the same wall time.
+    fn share(&self) -> usize {
+        match self.width {
+            Some(w) => w
+                .limit()
+                .div_ceil(CALLS.load(Ordering::Relaxed).max(1))
+                .clamp(1, self.most_running),
+            None => self.most_running,
+        }
+    }
+
+    /// The slots of a listing that took `took` go back.
+    fn give(&self, took: Duration) {
+        self.running.fetch_sub(1, Ordering::Relaxed);
+        if let Some(g) = &self.gate {
+            g.give(took);
+        }
+        if let Some(w) = self.width {
+            w.give(took);
+        }
+    }
+
+    /// A listing that took `took` hands its slots to the next folder of the call: counted, not
+    /// given back (no waiting call is woken for a slot that is taken again at once).
+    fn hand_over(&self, took: Duration) {
+        if let Some(g) = &self.gate {
+            g.note(took);
+        }
+    }
+
+    /// The slots held may go to the next folder: no limit was lowered below the listings in
+    /// flight, and the gate is not paused (but for a folder that must be listed: `stopped`).
+    fn may_keep(&self, stopped: bool) -> bool {
+        self.width.is_none_or(|w| w.inflight() <= w.limit())
+            && self
+                .gate
+                .as_ref()
+                .is_none_or(|g| g.inflight() <= g.limit() && (stopped || !g.paused()))
+    }
+
+    /// How long a call that can start none of its folders waits before it looks again (a slot
+    /// given back wakes it sooner): until its deadline, when it could stop then.
+    fn wait_time(&self) -> Duration {
+        match self.deadline {
+            Some(d) if self.listed.load(Ordering::Relaxed) > 0 => d
+                .saturating_duration_since(Instant::now())
+                .clamp(Duration::from_millis(1), WAIT_MAX),
+            _ => WAIT_MAX,
+        }
+    }
 }
 
-/// Pools kept alive between calls (by size, most recently used last); the IO limiter may vary
-/// the thread count, and an evicted pool's threads exit once its last call returns.
+const WAIT_MAX: Duration = Duration::from_millis(10);
+
+/// A call's folders waiting for a slot, the next one on top (children are pushed in reverse, so a
+/// carrier goes on with the first subfolder of the folder it listed: depth-first).
+pub struct Parked<'n> {
+    stack: Mutex<Vec<&'n Node>>,
+    any: AtomicBool,
+}
+
+impl<'n> Parked<'n> {
+    fn new(nodes: &'n [Node]) -> Self {
+        Self {
+            stack: Mutex::new(nodes.iter().rev().collect()),
+            any: AtomicBool::new(!nodes.is_empty()),
+        }
+    }
+
+    fn push(&self, children: &'n [Child]) {
+        if children.is_empty() {
+            return;
+        }
+        let mut st = self.stack.lock().unwrap_or_else(|e| e.into_inner());
+        st.extend(children.iter().rev().map(|c| &c.node));
+        self.any.store(true, Ordering::Release);
+    }
+
+    /// Takes off the top every node that is settled or gets its slots, until one is refused;
+    /// those to list go to `out`, the next one first.
+    fn admit(&self, ctx: &Ctx, out: &mut Vec<&'n Node>) {
+        if !self.any.load(Ordering::Acquire) {
+            return;
+        }
+        let mut st = self.stack.lock().unwrap_or_else(|e| e.into_inner());
+        let stopped = ctx.stopped();
+        while let Some(&node) = st.last() {
+            match ctx.admit(node, stopped) {
+                Admit::Resolved => {}
+                Admit::Taken => out.push(node),
+                Admit::Refused => break,
+            }
+            st.pop();
+        }
+        self.any.store(!st.is_empty(), Ordering::Release);
+    }
+
+    /// After a listing whose slots are still held: the first folder to list takes them over (when
+    /// `Ctx::may_keep`), then `admit` goes on. True: they were taken over (`out[0]` holds them).
+    fn admit_after(&self, ctx: &Ctx, out: &mut Vec<&'n Node>) -> bool {
+        if !self.any.load(Ordering::Acquire) {
+            return false;
+        }
+        let mut st = self.stack.lock().unwrap_or_else(|e| e.into_inner());
+        let stopped = ctx.stopped();
+        let mut kept = false;
+        while let Some(&node) = st.last() {
+            let admitted = if kept {
+                ctx.admit(node, stopped)
+            } else if !ctx.settle(node, stopped) {
+                Admit::Resolved
+            } else if ctx.may_keep(stopped) {
+                kept = true;
+                Admit::Taken
+            } else {
+                Admit::Refused
+            };
+            match admitted {
+                Admit::Resolved => {}
+                Admit::Taken => out.push(node),
+                Admit::Refused => break,
+            }
+            st.pop();
+        }
+        self.any.store(!st.is_empty(), Ordering::Release);
+        kept
+    }
+
+    fn is_empty(&self) -> bool {
+        !self.any.load(Ordering::Acquire)
+    }
+
+    /// The calling thread: at least one node to list, or none left; waits for a slot meanwhile.
+    fn admit_waiting(&self, ctx: &Ctx, out: &mut Vec<&'n Node>) {
+        loop {
+            self.admit(ctx, out);
+            if !out.is_empty() || self.is_empty() {
+                return;
+            }
+            slots::wait(
+                || {
+                    self.admit(ctx, out);
+                    !out.is_empty() || self.is_empty()
+                },
+                ctx.wait_time(),
+            );
+        }
+    }
+}
+
+/// Private pools kept alive between calls (by size, most recently used last); an evicted pool's
+/// threads exit once its last call returns.
 const KEEP_POOLS: usize = 4;
 
-/// The thread pool of a given size, reused across calls. A forked child inherits the pool
-/// objects but not their threads, so pools from another pid are leaked and rebuilt.
+/// A private pool of `threads` threads (`threads` >= 1), reused across calls. A forked child
+/// inherits the pool objects but not their threads, so pools from another pid are leaked and
+/// rebuilt.
 ///
-/// A one-thread pool belongs to the calling thread: the scanner runs several one-thread slices at
-/// once, one per Python thread, and a shared one-thread pool would list them one after another.
+/// A one-thread pool belongs to the calling thread: several one-thread calls at once each list on
+/// their own thread.
 pub fn pool(threads: usize) -> Result<Arc<ThreadPool>, String> {
-    if threads == 1 {
+    if threads <= 1 {
         return own_pool();
     }
     type Pools = (u32, Vec<(usize, Arc<ThreadPool>)>); // (owning pid, pools)
@@ -210,7 +451,7 @@ pub fn pool(threads: usize) -> Result<Arc<ThreadPool>, String> {
         pools.push(hit.clone());
         return Ok(hit.1);
     }
-    let p = Arc::new(build(threads)?);
+    let p = Arc::new(build(threads, "spaceknife-scan")?);
     pools.push((threads, p.clone()));
     if pools.len() > KEEP_POOLS {
         pools.remove(0);
@@ -233,57 +474,82 @@ fn own_pool() -> Result<Arc<ThreadPool>, String> {
             Some((_, p)) => std::mem::forget(p), // a forked child: the pool's thread is gone
             None => {}
         }
-        let p = Arc::new(build(1)?);
+        let p = Arc::new(build(1, "spaceknife-scan")?);
         *own = Some((std::process::id(), p.clone()));
         Ok(p)
     })
 }
 
-fn build(threads: usize) -> Result<ThreadPool, String> {
+/// The process's shared carriers (`threads` 0), `capacity` threads (pace.rs): every call on them
+/// lists its folders on any of them, within the width. A new capacity is a new pool; calls already
+/// on the old one finish there, and its threads exit after the last. Rebuilt in a forked child.
+pub fn carriers(capacity: usize) -> Result<Arc<ThreadPool>, String> {
+    type Current = (u32, Option<(usize, Arc<ThreadPool>)>); // (owning pid, pool)
+    static CARRIERS: Mutex<Current> = Mutex::new((0, None));
+    let mut guard = CARRIERS.lock().unwrap_or_else(|e| e.into_inner());
+    let (pid, current) = &mut *guard;
+    if *pid != std::process::id() {
+        std::mem::forget(current.take());
+        *pid = std::process::id();
+    }
+    if let Some((n, p)) = current.as_ref()
+        && *n == capacity
+    {
+        return Ok(p.clone());
+    }
+    let p = Arc::new(build(capacity, "spaceknife-carrier")?);
+    *current = Some((capacity, p.clone()));
+    Ok(p)
+}
+
+fn build(threads: usize, name: &'static str) -> Result<ThreadPool, String> {
     ThreadPoolBuilder::new()
         .num_threads(threads)
-        .thread_name(|i| format!("spaceknife-scan-{i}"))
+        .thread_name(move |i| format!("{name}-{i}"))
         .build()
         .map_err(|e| e.to_string())
 }
 
-/// One per logical CPU, at most 16: directory opens contend on file-system locks, and on a
-/// warm cache more threads stop paying off (measured on NTFS) while still costing CPU.
-pub fn default_threads() -> usize {
-    std::thread::available_parallelism()
-        .map_or(4, |n| n.get())
-        .clamp(1, 16)
+/// Lists `node`, which holds a slot of each limit (`Ctx::admit`); then the call's next parked
+/// folder takes its slots over and this thread goes on with it (no job, no thread woken, no slot
+/// given back and taken again), and parked folders that get free slots become jobs for idle
+/// threads. With nothing to take them over, the slots go back.
+fn process<'s, 'n: 's>(scope: &Scope<'s>, node: &'n Node, ctx: &'s Ctx, parked: &'s Parked<'n>) {
+    let mut node = node;
+    let mut ready = Vec::new();
+    loop {
+        let took = list_one(node, ctx, parked);
+        ready.clear();
+        if parked.admit_after(ctx, &mut ready) {
+            ctx.hand_over(took);
+        } else {
+            ctx.give(took);
+        }
+        let Some((&next, rest)) = ready.split_first() else {
+            return;
+        };
+        for &other in rest.iter().rev() {
+            scope.spawn(move |s| process(s, other, ctx, parked));
+        }
+        node = next;
+    }
 }
 
-fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
+/// Lists one admitted node (or settles it, when the budget was spent or the gate paused since it
+/// was admitted) and parks its subfolders; its slots are still held. Returns how long the listing
+/// took.
+fn list_one<'n>(node: &'n Node, ctx: &Ctx, parked: &Parked<'n>) -> Duration {
+    let stopped = ctx.stopped();
+    if !ctx.settle(node, stopped) {
+        return Duration::ZERO;
+    }
     let via = node.take_via(); // the parent's handle goes once its last subdirectory has started
-    if ctx.cancelled() {
-        let _ = node.state.set(State::Deferred);
-        return;
-    }
-    let stopped = ctx.should_stop();
-    if stopped {
-        let cap_left = ctx.extra.load(Ordering::Relaxed) < ctx.extra_cap;
-        match past_budget(node.care, ctx.budget_positive, cap_left) {
-            Past::List => {}
-            Past::Defer => {
-                let _ = node.state.set(State::Deferred);
-                return;
-            }
-            Past::Fail(why) => {
-                if why == msg::CAP {
-                    sys::cap_hit();
-                }
-                let _ = node.state.set(State::Failed(why.to_owned()));
-                return;
-            }
-        }
-    }
     let slot = rayon::current_thread_index().unwrap_or(0) % ctx.arenas.len();
     let mut arena = ctx.arenas[slot].lock().unwrap_or_else(|e| e.into_inner());
     let mark = arena.mark();
     let mut subdirs: Vec<(u32, NativePath, sys::Hint)> = Vec::new();
     let root = node.root as usize;
+    let started = Instant::now();
     let res = sys::list_dir(
         &node.path,
         node.discovered,
@@ -293,11 +559,15 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
         &mut arena,
         &mut subdirs,
     );
+    let took = started.elapsed();
     match res {
         Ok((parent, pinned)) => {
             let count = arena.len() - mark.entries;
             let name_end = arena.names.len();
             drop(arena);
+            if let Some(p) = ctx.pace {
+                p.listed(took, count);
+            }
             ctx.entries.fetch_add(count, Ordering::Relaxed);
             ctx.listed.fetch_add(1, Ordering::Relaxed);
             if stopped {
@@ -314,7 +584,13 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
                     } else {
                         Care::Plain
                     };
+                    #[cfg(windows)]
                     let via = parent.as_ref().and_then(|p| sys::via(p, hint, pinned));
+                    #[cfg(unix)]
+                    let via = {
+                        let _ = (&parent, pinned);
+                        sys::via_hint(hint)
+                    };
                     Child {
                         j,
                         node: Node::with_via(path, node.root, true, care, via),
@@ -329,13 +605,10 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
                 name_end,
                 children,
             };
-            if node.state.set(State::Listed(listed)).is_err() {
-                return;
-            }
-            if let Some(State::Listed(l)) = node.state.get() {
-                for c in l.children.iter().rev() {
-                    scope.spawn(move |s| process(s, &c.node, ctx));
-                }
+            if node.state.set(State::Listed(listed)).is_ok()
+                && let Some(State::Listed(l)) = node.state.get()
+            {
+                parked.push(&l.children);
             }
         }
         Err(msg) => {
@@ -344,17 +617,43 @@ fn process<'s>(scope: &Scope<'s>, node: &'s Node, ctx: &'s Ctx) {
             let _ = node.state.set(State::Failed(msg));
         }
     }
+    took
 }
 
-/// Walks `nodes` (the slice's tasks, in order) on `pool`.
+/// Walks `nodes` (the slice's tasks, in order) on `pool`. The calling thread admits the first
+/// folders (waiting for a slot when its limits are full), the carriers the rest as they go; when
+/// the carriers run out of admitted folders while some still wait, it admits them again.
 pub fn walk(pool: &ThreadPool, nodes: &[Node], ctx: &Ctx) {
-    pool.install(|| {
-        rayon::scope(|s| {
-            for node in nodes.iter().rev() {
-                s.spawn(move |s| process(s, node, ctx));
+    struct OnCarriers(bool);
+    impl Drop for OnCarriers {
+        fn drop(&mut self) {
+            if self.0 {
+                CALLS.fetch_sub(1, Ordering::Relaxed);
             }
-        })
-    });
+        }
+    }
+    let _call = OnCarriers(ctx.width.is_some());
+    if ctx.width.is_some() {
+        CALLS.fetch_add(1, Ordering::Relaxed);
+    }
+    let parked = Parked::new(nodes);
+    let parked = &parked;
+    let mut ready = Vec::new();
+    loop {
+        ready.clear();
+        parked.admit_waiting(ctx, &mut ready);
+        if ready.is_empty() {
+            return;
+        }
+        let batch = &ready;
+        pool.install(|| {
+            rayon::scope(|s| {
+                for &node in batch.iter().rev() {
+                    s.spawn(move |s| process(s, node, ctx, parked));
+                }
+            })
+        });
+    }
 }
 
 /// The lowercased extension ids of a slice, in first-appearance order (worker._Acc.ext_id): a raw
@@ -513,6 +812,18 @@ pub fn flatten(nodes: &[Node], tasks: Vec<Task>, arenas: &[Arena]) -> Result<Sli
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn carriers_follow_their_capacity() {
+        let a = carriers(5).unwrap();
+        let b = std::thread::spawn(|| carriers(5).unwrap()).join().unwrap();
+        assert!(Arc::ptr_eq(&a, &b));
+        assert_eq!(a.current_num_threads(), 5);
+        let c = carriers(6).unwrap();
+        assert_eq!(c.current_num_threads(), 6);
+        assert!(Arc::ptr_eq(&c, &carriers(6).unwrap()));
+        assert!(!Arc::ptr_eq(&a, &carriers(5).unwrap())); // the old pool is not kept
+    }
 
     #[test]
     fn one_thread_pools_belong_to_their_caller() {

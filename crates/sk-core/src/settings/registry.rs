@@ -290,7 +290,7 @@ pub(crate) fn registry() -> Vec<Spec> {
             .applies(NextScan)
             .note(SCAN_GROUP_NOTE)
             .syn(&["concurrency", "threads", "workers", "parallel"]),
-        Spec::new("scan.workers", C::Scan, "磁盘负载上限与并发", "手动并发数", "手动时同时扫描的工作进程数", Number, i(4))
+        Spec::new("scan.workers", C::Scan, "磁盘负载上限与并发", "手动并发数", "手动时最多同时列出几个文件夹", Number, i(4))
             .range(1.0, 64.0, 1.0)
             .applies(NextScan)
             .depends("scan.concurrency=manual")

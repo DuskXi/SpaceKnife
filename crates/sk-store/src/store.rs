@@ -7,8 +7,11 @@ use std::ops::{Deref, DerefMut, Range};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, Instant};
 
-use parking_lot::{Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use parking_lot::{Mutex, MutexGuard, RwLock};
+
+use crate::lock::{ReadGuard, StructureLock, WriteGuard};
 
 use crate::heap::{self, Chunk, HeapWriter, chunk_of};
 use crate::mapped::{Buf, Policy, RamUser};
@@ -150,7 +153,7 @@ struct AppendState {
 }
 
 pub(crate) struct Inner {
-    structure: RwLock<()>,
+    structure: StructureLock,
     append: Mutex<AppendState>,
     published: Mutex<Published>,
     ext: RwLock<ExtTable>,
@@ -235,7 +238,7 @@ impl Store {
         };
         let ram = st.cols.ram() + st.heap.reserved_in_ram();
         let inner = Arc::new(Inner {
-            structure: RwLock::new(()),
+            structure: StructureLock::default(),
             append: Mutex::new(st),
             published: Mutex::new(published),
             ext: RwLock::new(ext),
@@ -260,7 +263,7 @@ impl Store {
     }
 
     /// Shared access for a computation (render, summary, search, snapshot save). Blocks while a
-    /// [`Writer`] holds or waits for the store. The view is the store as it was when the guard
+    /// [`Writer`] holds the store, and while one waits that no longer waits for an older reader. The view is the store as it was when the guard
     /// was taken, plus whatever a running scan publishes into the atomic columns meanwhile.
     pub fn read(&self) -> Reader<'_> {
         let guard = self.inner.structure.read();
@@ -287,12 +290,28 @@ impl Store {
         }
     }
 
-    /// Exclusive access (file-change monitor, adopting a compacted store): waits for running
-    /// readers and the appender; readers that arrive meanwhile wait (writer priority).
+    /// Exclusive access (file-change monitor, adopting a compacted store): waits for the readers
+    /// running when it asked, then for the appender. Readers that arrive while those older readers
+    /// still run start anyway; once they are done, new readers wait for this writer (neither side
+    /// starves; see the crate docs).
     pub fn write(&self) -> Writer<'_> {
         let guard = self.inner.structure.write();
         let app = self.appender();
         Writer { app, _guard: guard }
+    }
+
+    /// [`Store::write`] that gives up at `deadline` (returns `None`): a writer that stops waiting lets
+    /// the readers it held back go on. The deadline covers the structure lock only; the appender
+    /// (a running scan's) is waited for after it.
+    pub fn write_until(&self, deadline: Instant) -> Option<Writer<'_>> {
+        let guard = self.inner.structure.write_until(Some(deadline))?;
+        let app = self.appender();
+        Some(Writer { app, _guard: guard })
+    }
+
+    /// [`Store::write_until`] `now + wait`.
+    pub fn try_write_for(&self, wait: Duration) -> Option<Writer<'_>> {
+        self.write_until(Instant::now() + wait)
     }
 
     /// Published node count.
@@ -791,7 +810,7 @@ impl NamesRun<'_> {
 /// Shared access: a [`Nodes`] view plus the structure read lock (see [`Store::read`]).
 pub struct Reader<'a> {
     nodes: Nodes,
-    _guard: RwLockReadGuard<'a, ()>,
+    _guard: ReadGuard<'a>,
 }
 
 impl Deref for Reader<'_> {
@@ -820,7 +839,7 @@ impl Deref for Appender<'_> {
 /// published rows ([`crate::mutate`]).
 pub struct Writer<'a> {
     app: Appender<'a>,
-    _guard: RwLockWriteGuard<'a, ()>,
+    _guard: WriteGuard<'a>,
 }
 
 impl<'a> Deref for Writer<'a> {

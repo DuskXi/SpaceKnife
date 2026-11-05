@@ -10,6 +10,15 @@
 //! appear later are watched as soon as their event is read and listed once, reporting `created`
 //! for whatever is already inside (`mkdir` + write races).
 //!
+//! The scan's folders arrive a moment after the scan found them (the pipeline hands them over in
+//! ticks, then they wait in a [`super::poll::Backlog`], placed up to 2048 per round), often after
+//! the scan listed them too, and what changed inside a folder in between raises no event. So once
+//! a folder's watch is on, one `stat` compares its mtime with the one the scan recorded
+//! ([`super::poll::listed_changed`]): a folder that may have changed is reported as `dir` and
+//! listed again. Folders the scan could not list never come (the pipeline leaves them out);
+//! folders whose path reaches PATH_MAX cannot be watched by path (ENAMETOOLONG) and are polled,
+//! the poller opening them piece by piece.
+//!
 //! Decoding ([`decode_events`]) and interpretation ([`interpret`]) make no system calls (they
 //! compile and are tested on every platform); the watcher itself is Linux only.
 
@@ -425,7 +434,7 @@ mod imp {
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
-    use super::super::poll::{DirPoller, Emitter, Worker, stat_file};
+    use super::super::poll::{Backlog, DirPoller, Emitter, Worker, listed_changed, stat_file};
     use super::super::{Change, ChangeKind, Sink, WatchState, WatchStatus, Watcher, t};
     use super::*;
 
@@ -439,13 +448,21 @@ mod imp {
     static BUDGET: AtomicUsize = AtomicUsize::new(0);
 
     fn take_budget(limit: usize) -> bool {
-        BUDGET
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |u| (u < limit).then_some(u + 1))
-            .is_ok()
+        let mut u = BUDGET.load(Ordering::SeqCst);
+        while u < limit {
+            match BUDGET.compare_exchange_weak(u, u + 1, Ordering::SeqCst, Ordering::SeqCst) {
+                Ok(_) => return true,
+                Err(now) => u = now,
+            }
+        }
+        false
     }
 
     fn give_budget(n: usize) {
-        let _ = BUDGET.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |u| Some(u.saturating_sub(n)));
+        let mut u = BUDGET.load(Ordering::SeqCst);
+        while let Err(now) = BUDGET.compare_exchange_weak(u, u.saturating_sub(n), Ordering::SeqCst, Ordering::SeqCst) {
+            u = now;
+        }
     }
 
     fn why(err: &std::io::Error) -> String {
@@ -532,6 +549,8 @@ mod imp {
         kernel_full: bool,
         held: usize,
         parent_hint: Option<(Vec<u8>, i32)>,
+        /// the scan's record of the root was checked
+        root_listed: bool,
     }
 
     struct Shared {
@@ -540,7 +559,8 @@ mod imp {
         max_watches: Option<usize>,
         limit: usize,
         st: Mutex<State>,
-        incoming: Mutex<VecDeque<PathBuf>>,
+        /// from add_dirs, waiting for their watch (or polling)
+        incoming: Mutex<Backlog>,
         wake_w: AtomicI64,
         emitter: Emitter,
         state: Mutex<(WatchState, String)>,
@@ -575,9 +595,10 @@ mod imp {
                         kernel_full: false,
                         held: 0,
                         parent_hint: None,
+                        root_listed: false,
                     }),
                     root,
-                    incoming: Mutex::new(VecDeque::new()),
+                    incoming: Mutex::new(Backlog::new()),
                     wake_w: AtomicI64::new(-1),
                     emitter: Emitter::new(),
                     state: Mutex::new((WatchState::Starting, String::new())),
@@ -591,7 +612,7 @@ mod imp {
             let fd = sh.wake_w.load(Ordering::SeqCst);
             if fd >= 0 {
                 // SAFETY: a pipe we own; a full pipe means the thread is awake anyway.
-                unsafe { libc::write(fd as i32, b"\0".as_ptr().cast(), 1) };
+                unsafe { libc::write(fd as i32, [0u8].as_ptr().cast(), 1) };
             }
         }
     }
@@ -643,10 +664,12 @@ mod imp {
         }
 
         /// Watch a folder whose parent is watched; poll it when that is not possible (None).
-        fn watch(&mut self, sh: &Shared, path: &Path, parent: i32, name: &[u8]) -> Option<i32> {
+        /// `listed` / `since_ns`: the scan's record of it, which a polling baseline is checked
+        /// against (the caller checks a watched folder itself).
+        fn watch(&mut self, sh: &Shared, path: &Path, parent: i32, name: &[u8], listed: Option<u32>, since_ns: i64) -> Option<i32> {
             if self.ino.is_none() || !self.reserve(sh) {
                 self.short = self.short || self.ino.is_some();
-                self.poller.add(path.to_path_buf());
+                self.poller.add_listed(path.to_path_buf(), listed, since_ns);
                 return None;
             }
             match self.ino.as_ref().unwrap().add_watch(&bytes_of(path), WATCH_MASK) {
@@ -658,15 +681,16 @@ mod imp {
                             self.kernel_full = true;
                             self.short = true;
                         }
+                        // ENAMETOOLONG (PATH_MAX and beyond): the poller opens it piece by piece
                         _ => tracing::debug!("inotify_add_watch({}) failed: {e}", path.display()),
                     }
-                    self.poller.add(path.to_path_buf());
+                    self.poller.add_listed(path.to_path_buf(), listed, since_ns);
                     None
                 }
                 Ok(wd) if self.tree.contains(wd) => {
                     // the same folder under another path (bind mount): one path per watch
                     self.release(1);
-                    self.poller.add(path.to_path_buf());
+                    self.poller.add_listed(path.to_path_buf(), listed, since_ns);
                     None
                 }
                 Ok(wd) => {
@@ -686,10 +710,25 @@ mod imp {
             }
         }
 
-        /// A folder from add_dirs: watch it (parent watched, budget left) or poll it.
-        fn place(&mut self, sh: &Shared, path: PathBuf) {
+        /// A folder from add_dirs: watch it (parent watched, budget left) or poll it. With the
+        /// scan's record of it (`listed`), a change since its listing is added to `out`.
+        fn place(&mut self, sh: &Shared, path: PathBuf, listed: Option<u32>, since_ns: i64, out: &mut Vec<Change>) {
             let pb = bytes_of(&path);
-            if path == sh.root || !pb.starts_with(&sh.prefix) {
+            if path == sh.root {
+                if let Some(listed) = listed
+                    && !self.root_listed
+                {
+                    // watched (or polled) since start(): checked once, when the scan's record comes
+                    self.root_listed = true;
+                    if self.tree.contains(self.tree.root_wd) {
+                        Self::check(&sh.root, &path, listed, since_ns, out);
+                    } else {
+                        self.poller.add_listed(path, Some(listed), since_ns);
+                    }
+                }
+                return;
+            }
+            if !pb.starts_with(&sh.prefix) {
                 return;
             }
             let (parent_path, name) = Self::split(&pb);
@@ -708,11 +747,33 @@ mod imp {
                 }
             };
             let Some(parent) = parent else {
-                self.poller.add(path); // the parent is polled (or unwatchable): so is this one
+                // the parent is polled (or unwatchable): so is this one
+                self.poller.add_listed(path, listed, since_ns);
                 return;
             };
-            if self.tree.lookup(parent, &name).is_none() && !self.poller.contains(&path) {
-                self.watch(sh, &path, parent, &name);
+            if self.tree.lookup(parent, &name).is_some() || self.poller.contains(&path) {
+                return; // handed in again (its row moved when its parent was listed again): as it is
+            }
+            if self.watch(sh, &path, parent, &name, listed, since_ns).is_some()
+                && let Some(listed) = listed
+            {
+                Self::check(&sh.root, &path, listed, since_ns, out);
+            }
+        }
+
+        /// The folder is watched now: did it change after the scan listed it, unseen? (One stat.)
+        fn check(root: &Path, path: &Path, listed: u32, since_ns: i64, out: &mut Vec<Change>) {
+            let m = if path == root { std::fs::metadata(path) } else { std::fs::symlink_metadata(path) };
+            let Ok(m) = m else {
+                return; // gone again: its parent's events (or the parent's own check) tell
+            };
+            let ns = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos().min(i64::MAX as u128) as i64);
+            if listed_changed(ns, listed, since_ns) {
+                out.push(Change::new(ChangeKind::Dir, path.to_path_buf(), Some(true)));
             }
         }
 
@@ -729,7 +790,7 @@ mod imp {
                     continue;
                 }
                 done += 1;
-                if self.watch(sh, &path, parent, &name).is_none() {
+                if self.watch(sh, &path, parent, &name, None, 0).is_none() {
                     continue;
                 }
                 let Ok(rd) = std::fs::read_dir(&path) else { continue };
@@ -830,13 +891,14 @@ mod imp {
             let timeout_ms;
             {
                 let mut st = sh.st.lock().unwrap();
-                let incoming: Vec<PathBuf> = {
-                    let mut inc = sh.incoming.lock().unwrap();
-                    let n = inc.len().min(ADD_CHUNK);
-                    inc.drain(..n).collect()
-                };
-                for p in incoming {
-                    st.place(&sh, p);
+                // a batch leaves the backlog once all of it is placed
+                let fed = sh.incoming.lock().unwrap().peek(ADD_CHUNK);
+                let n = fed.len();
+                for (path, listed, since) in fed {
+                    st.place(&sh, path, listed, since, &mut emit);
+                }
+                if n > 0 {
+                    sh.incoming.lock().unwrap().advance(n);
                 }
                 if st.ino.is_some() && !st.recheck.is_empty() {
                     let (lost, ch) = st.recheck_some(&sh);
@@ -942,8 +1004,8 @@ mod imp {
             })
         }
 
-        fn add_dirs(&self, dirs: Vec<PathBuf>) {
-            self.sh.incoming.lock().unwrap().extend(dirs);
+        fn add_dirs(&self, dirs: Vec<PathBuf>, mtimes: Option<Vec<u32>>, since_ns: i64) {
+            self.sh.incoming.lock().unwrap().add(dirs, mtimes, since_ns);
             InotifyWatcher::wake(&self.sh);
         }
 
@@ -1116,6 +1178,180 @@ mod tests {
             let r = interpret(&[RawEvent::new(1, mask, 0, b""), RawEvent::new(2, IN_CREATE, 0, b"late")], &mut t);
             assert!(r.root_lost);
             assert_eq!(r.changes, vec![Change::overflow(p("/r"))]);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    mod live {
+        use std::path::Path;
+        use std::sync::{Arc, Mutex};
+        use std::time::{Duration, Instant};
+
+        use super::super::super::{Change, ChangeKind, WatchState, Watcher};
+        use super::super::InotifyWatcher;
+
+        fn listed(d: &Path) -> u32 {
+            use std::os::unix::fs::MetadataExt;
+            std::fs::metadata(d).unwrap().mtime() as u32
+        }
+
+        fn now_ns() -> i64 {
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as i64
+        }
+
+        fn wait_until(secs: u64, cond: impl Fn() -> bool) {
+            let end = Instant::now() + Duration::from_secs(secs);
+            while !cond() {
+                assert!(Instant::now() < end, "timed out");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        fn start(w: &InotifyWatcher) -> Arc<Mutex<Vec<Change>>> {
+            let got = Arc::new(Mutex::new(Vec::new()));
+            let g = got.clone();
+            w.start(Arc::new(move |b| g.lock().unwrap().extend(b))).unwrap();
+            got
+        }
+
+        fn dirs_reported(got: &Mutex<Vec<Change>>) -> std::collections::HashSet<std::path::PathBuf> {
+            got.lock().unwrap().iter().filter(|c| c.kind == ChangeKind::Dir).map(|c| c.path.clone()).collect()
+        }
+
+        /// Running as soon as the root is watched, also while folders handed in still wait for
+        /// their watch; a write into one of them before its watch raises no event, and its check
+        /// reports it.
+        #[test]
+        fn running_while_handed_folders_wait_for_their_watch() {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path().to_path_buf();
+            let dirs: Vec<_> = (0..3).map(|i| root.join(format!("d{i}"))).collect();
+            for d in &dirs {
+                std::fs::create_dir(d).unwrap();
+            }
+            let times: Vec<u32> = dirs.iter().map(|d| listed(d)).collect();
+            std::thread::sleep(Duration::from_millis(200)); // past the folders' times (slack)
+            let since = now_ns();
+            let w = InotifyWatcher::new(&root, 0.2, 2000, None);
+            let got = start(&w);
+            let st = w.status();
+            assert_eq!((st.state, st.watched_dirs), (WatchState::Running, 1)); // the root is watched
+            std::fs::write(dirs[1].join("late.bin"), b"l").unwrap(); // no watch on it yet ...
+            w.add_dirs(dirs.clone(), Some(times), since);
+            wait_until(5, || dirs_reported(&got).contains(&dirs[1])); // ... its check finds it
+            wait_until(5, || w.status().watched_dirs == 4);
+            assert_eq!(w.status().state, WatchState::Running);
+            assert_eq!(dirs_reported(&got), [dirs[1].clone()].into());
+            w.stop();
+        }
+
+        /// A folder the scan listed before its watch was placed: what changed in between raised
+        /// no event. One stat once the watch is on finds it, and the folder is listed again.
+        #[test]
+        fn folder_changed_before_its_watch_is_listed_again() {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path().to_path_buf();
+            let (quiet, changed, older) = (root.join("quiet"), root.join("changed"), root.join("older"));
+            let deep = changed.join("deep");
+            std::fs::create_dir_all(&deep).unwrap();
+            std::fs::create_dir(&quiet).unwrap();
+            std::fs::create_dir(&older).unwrap();
+            let order = [quiet.clone(), changed.clone(), older.clone(), deep.clone()];
+            let mut times: Vec<u32> = order.iter().map(|d| listed(d)).collect();
+            times[2] -= 5; // the folder's time moved since: whole seconds tell
+            std::thread::sleep(Duration::from_millis(200));
+            let since = now_ns(); // the scan started after the folders were made ...
+            std::fs::write(changed.join("late.bin"), vec![b'l'; 512]).unwrap(); // ... this after its listing
+            let w = InotifyWatcher::new(&root, 0.2, 2000, None);
+            let got = start(&w);
+            w.add_dirs(order.to_vec(), Some(times), since);
+            wait_until(5, || dirs_reported(&got).len() >= 2);
+            wait_until(5, || w.status().watched_dirs == 5);
+            assert_eq!(w.status().state, WatchState::Running);
+            assert_eq!(dirs_reported(&got), [changed, older].into()); // unchanged ones are not listed again
+            w.stop();
+        }
+
+        /// Beyond the watch budget the poller's first stat is the check: a change between the
+        /// scan's listing and that baseline is reported, not taken as the starting point.
+        #[test]
+        fn polled_folder_changed_before_its_baseline_is_listed_again() {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path().to_path_buf();
+            let (a, b) = (root.join("a"), root.join("b"));
+            std::fs::create_dir(&a).unwrap();
+            std::fs::create_dir(&b).unwrap();
+            let times = vec![listed(&a), listed(&b)];
+            std::thread::sleep(Duration::from_millis(200));
+            let since = now_ns();
+            std::fs::write(b.join("late.bin"), b"l").unwrap();
+            let w = InotifyWatcher::new(&root, 60.0, 2000, Some(2)); // the root and a: b is polled
+            let got = start(&w);
+            w.add_dirs(vec![a.clone(), b.clone()], Some(times), since);
+            wait_until(5, || dirs_reported(&got).contains(&b));
+            let st = w.status();
+            assert_eq!((st.watched_dirs, st.polled_dirs, st.state), (2, 1, WatchState::Degraded));
+            assert!(!dirs_reported(&got).contains(&a));
+            w.stop();
+        }
+
+        /// A folder whose path reaches PATH_MAX cannot get a watch by path (ENAMETOOLONG): it is
+        /// polled, and the poller sees its changes.
+        #[test]
+        fn folder_beyond_path_max_is_polled() {
+            use std::os::unix::ffi::OsStrExt;
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path().to_path_buf();
+            let name = "d".repeat(200);
+            let mut chain = Vec::new();
+            let mut cur = root.clone();
+            while cur.as_os_str().as_bytes().len() <= 4200 {
+                cur = cur.join(&name);
+                chain.push(cur.clone());
+            }
+            let deepest = chain.last().unwrap().clone();
+            // create them one level at a time relative to an open parent
+            {
+                use std::os::unix::io::{AsRawFd, FromRawFd};
+                let cname = std::ffi::CString::new(name.clone()).unwrap();
+                let mut dir = std::fs::File::open(&root).unwrap();
+                for _ in &chain {
+                    // SAFETY: plain syscalls on descriptors we own.
+                    let below = unsafe {
+                        libc::mkdirat(dir.as_raw_fd(), cname.as_ptr(), 0o755);
+                        libc::openat(dir.as_raw_fd(), cname.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY)
+                    };
+                    assert!(below >= 0);
+                    // SAFETY: a descriptor we just opened
+                    dir = unsafe { std::fs::File::from_raw_fd(below) };
+                }
+            }
+            let w = InotifyWatcher::new(&root, 0.1, 100_000, None);
+            let got = start(&w);
+            w.add_dirs(chain.clone(), None, 0);
+            wait_until(10, || w.status().polled_dirs >= 1);
+            // a new entry in the deepest folder: its mtime moves, the poller reports it
+            {
+                use std::os::unix::io::{AsRawFd, FromRawFd};
+                let cname = std::ffi::CString::new(name.clone()).unwrap();
+                let mut dir = std::fs::File::open(&root).unwrap();
+                for _ in &chain {
+                    // SAFETY: as above
+                    let below = unsafe { libc::openat(dir.as_raw_fd(), cname.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY) };
+                    assert!(below >= 0);
+                    // SAFETY: as above
+                    dir = unsafe { std::fs::File::from_raw_fd(below) };
+                }
+                std::thread::sleep(Duration::from_millis(1100)); // a later mtime, even in whole seconds
+                let f = std::ffi::CString::new("new.txt").unwrap();
+                // SAFETY: as above
+                let fd = unsafe { libc::openat(dir.as_raw_fd(), f.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o644) };
+                assert!(fd >= 0);
+                // SAFETY: as above
+                unsafe { libc::close(fd) };
+            }
+            wait_until(10, || got.lock().unwrap().iter().any(|c| c.kind == ChangeKind::Dir && c.path == deepest));
+            w.stop();
         }
     }
 

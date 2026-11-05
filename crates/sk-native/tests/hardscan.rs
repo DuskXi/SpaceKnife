@@ -16,8 +16,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 use sk_native::hardscan::{
-    self, LinkSet, Ref, RootOptions, SliceOptions, SliceResult, Task, flag, kind, lower_ext,
-    messages, scan_slice,
+    self, LinkSet, ListingGate, Ref, RootOptions, SliceOptions, SliceResult, Task, flag, kind,
+    lower_ext, messages, scan_slice,
 };
 
 fn serial() -> MutexGuard<'static, ()> {
@@ -467,6 +467,20 @@ fn root_options_apply() {
             ..root_opts(&t.root)
         },
     );
+    // the listing rule as each file system has it (whatever this volume is; ignored on POSIX)
+    for listed_alloc in [
+        hardscan::ListedAlloc::Ntfs,
+        hardscan::ListedAlloc::Refs,
+        hardscan::ListedAlloc::Btrfs,
+    ] {
+        scan_one(
+            &t.root,
+            RootOptions {
+                listed_alloc,
+                ..root_opts(&t.root)
+            },
+        );
+    }
 }
 
 #[test]
@@ -797,6 +811,63 @@ fn sliced_scans_build_the_same_tree() {
         assert_eq!(snap.len(), whole.len(), "{opts:?}");
         assert!(snap == whole, "{opts:?}");
     }
+}
+
+#[test]
+fn gates_and_the_shared_carriers_do_not_change_output() {
+    // untruncated slices are the same whatever the width and the gate (docs/native.md 2.2
+    // 「列目录线程」); the gate's limit holds
+    let _s = serial();
+    let t = tree();
+    let mut opts = SliceOptions::unbounded(vec![root_opts(&t.root)]);
+    opts.threads = 1;
+    let first = scan(vec![task(1, &t.root, 0)], &opts);
+    for (threads, limit) in [(0, None), (0, Some(1)), (0, Some(2)), (0, Some(5)), (7, Some(2)), (8, Some(64))] {
+        opts.threads = threads;
+        let gate = limit.map(ListingGate::new);
+        opts.gate = gate.clone();
+        let res = scan(vec![task(1, &t.root, 0)], &opts);
+        let what = format!("threads {threads}, gate {limit:?}");
+        assert_eq!(res.refs, first.refs, "{what}");
+        assert_eq!(res.paths, first.paths, "{what}");
+        assert_eq!(res.bounds, first.bounds, "{what}");
+        let (mut a, mut b) = (res.entries.clone(), first.entries.clone());
+        a.atime.clear();
+        b.atime.clear();
+        assert_eq!(a, b, "{what}");
+        if let (Some(g), Some(n)) = (gate, limit) {
+            let (busy, peak, _) = g.window();
+            assert!((1..=n).contains(&peak), "{what}: peak {peak}");
+            assert!(busy > 0.0, "{what}");
+            assert_eq!(g.inflight(), 0, "{what}");
+        }
+    }
+    let info = hardscan::listing_threads(false);
+    assert!(info.cpus >= 1 && info.least <= info.start && info.start <= info.max);
+    assert!(info.threads >= 1 && info.width >= 1 && info.low <= info.high);
+    assert_eq!(hardscan::default_threads(), info.start);
+}
+
+#[test]
+fn a_paused_gate_hands_back_what_can_wait() {
+    let _s = serial();
+    let t = tree();
+    let gate = ListingGate::new(4);
+    gate.set(None, Some(true));
+    let opts = SliceOptions {
+        gate: Some(gate.clone()),
+        ..SliceOptions::unbounded(vec![root_opts(&t.root)])
+    };
+    let tasks = vec![task(1, &t.root, 0), task(2, &t.root.join("nest"), 0)];
+    let res = scan(tasks.clone(), &opts);
+    assert_eq!(res.listings(), 0);
+    assert_eq!(res.frontier, tasks);
+    assert_eq!(gate.inflight(), 0);
+    // resumed while a call waits: it goes on
+    gate.set(Some(2), Some(false));
+    assert!(!gate.paused() && gate.limit() == 2);
+    let res = scan(tasks, &opts);
+    assert!(res.frontier.is_empty() && res.listings() > 50);
 }
 
 #[test]
@@ -1278,6 +1349,212 @@ mod windows {
         hardscan::open_stats(true).into_iter().collect()
     }
 
+    /// The file system name and cluster size of the volume `p` is on.
+    fn volume_of(p: &Path) -> (String, i64) {
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetDiskFreeSpaceW, GetVolumeInformationW, GetVolumePathNameW,
+        };
+        let mut vol = vec![0u16; 1024];
+        // SAFETY: NUL-terminated path, buffers for their lengths.
+        assert!(
+            unsafe { GetVolumePathNameW(wide(p).as_ptr(), vol.as_mut_ptr(), vol.len() as u32) }
+                != 0
+        );
+        let mut fs_name = vec![0u16; 64];
+        // SAFETY: as above; optional outputs null.
+        let ok = unsafe {
+            GetVolumeInformationW(
+                vol.as_ptr(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                fs_name.as_mut_ptr(),
+                fs_name.len() as u32,
+            )
+        };
+        assert!(ok != 0);
+        let (mut spc, mut bps, mut free, mut total) = (0u32, 0u32, 0u32, 0u32);
+        // SAFETY: as above.
+        assert!(
+            unsafe { GetDiskFreeSpaceW(vol.as_ptr(), &mut spc, &mut bps, &mut free, &mut total) }
+                != 0
+        );
+        let n = fs_name.iter().position(|&u| u == 0).unwrap_or(fs_name.len());
+        (
+            String::from_utf16_lossy(&fs_name[..n]),
+            i64::from(spc) * i64::from(bps),
+        )
+    }
+
+    /// FileStandardInfo's AllocationSize: what the file system counts for the file.
+    fn std_alloc(p: &Path) -> i64 {
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_STANDARD_INFO, FileStandardInfo, GetFileInformationByHandleEx,
+        };
+        let f = fs::File::open(os_path(p)).unwrap();
+        let mut info: FILE_STANDARD_INFO = unsafe { std::mem::zeroed() };
+        // SAFETY: valid handle, `info` writable for its size.
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                f.as_raw_handle(),
+                FileStandardInfo,
+                (&raw mut info).cast(),
+                size_of::<FILE_STANDARD_INFO>() as u32,
+            )
+        };
+        assert!(ok != 0);
+        info.AllocationSize
+    }
+
+    #[test]
+    fn listed_alloc_is_what_the_file_system_counts() {
+        // with listed_alloc a file's size on disk is its listing entry's (asking the file where
+        // the entry lags: sparse and compressed files just written; WOF files): data kept in the
+        // file record takes no cluster, a sparse file only its written clusters, a compressed
+        // file its compressed clusters (test_hardscan.py)
+        let _s = serial();
+        let tmp = tempfile::tempdir().unwrap();
+        let (fs_name, cluster) = volume_of(tmp.path());
+        let listed = hardscan::ListedAlloc::from_fs_name(&fs_name);
+        if listed == hardscan::ListedAlloc::Off {
+            eprintln!("skipped: listing rule not measured on {fs_name}");
+            return;
+        }
+        let root = tmp.path().join("listed");
+        fs::create_dir(&root).unwrap();
+        for n in [0usize, 100, 700, 800, 3000, 5000] {
+            create(&root.join(format!("w_{n:05}")), &vec![b'x'; n]);
+        }
+        fs::File::create(root.join("setlen_100k"))
+            .unwrap()
+            .set_len(100_000)
+            .unwrap();
+        let text: Vec<u8> = b"SpaceKnife listed allocation test, compressible text. "
+            .iter()
+            .copied()
+            .cycle()
+            .take(1 << 20)
+            .collect();
+        let sparse = root.join("sparse.bin");
+        create(&sparse, b"");
+        let have_sparse = fsctl(&sparse, 0x900C4, &[]); // FSCTL_SET_SPARSE
+        let compressed = root.join("compressed.bin");
+        create(&compressed, b"");
+        let have_comp = fsctl(&compressed, 0x9C040, &1u16.to_le_bytes()); // FSCTL_SET_COMPRESSION
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            let mut f = fs::OpenOptions::new().write(true).open(&sparse).unwrap();
+            for off in [0u64, 8 << 20, (16 << 20) - 4096] {
+                f.seek(SeekFrom::Start(off)).unwrap();
+                f.write_all(&[0xa5; 4096]).unwrap();
+            }
+            f.sync_all().unwrap(); // written out: the file is final, its listing entry lags
+            let mut f = fs::OpenOptions::new()
+                .write(true)
+                .open(&compressed)
+                .unwrap();
+            f.write_all(&text).unwrap();
+            f.sync_all().unwrap();
+        }
+        let wof = root.join("wof.bin");
+        create(&wof, &text);
+        let have_wof = listed == hardscan::ListedAlloc::Ntfs
+            && Command::new("compact.exe")
+                .args(["/c", "/exe:xpress4k"])
+                .arg(&wof)
+                .output()
+                .is_ok_and(|o| o.status.success());
+        let res = scan_one(
+            &root,
+            RootOptions {
+                cluster_size: cluster,
+                resident_max: 512,
+                listed_alloc: listed,
+                ..root_opts(&root)
+            },
+        );
+        let names = name_strings(&res);
+        let alloc: BTreeMap<&str, i64> = names
+            .iter()
+            .map(String::as_str)
+            .zip(res.entries.alloc.iter().copied())
+            .collect();
+        for (&name, &got) in &alloc {
+            let counted = std_alloc(&root.join(name));
+            let want = if counted % cluster != 0 { 0 } else { counted };
+            assert_eq!(got, want, "{name}: counted {counted}");
+        }
+        if listed == hardscan::ListedAlloc::Ntfs {
+            // resident (where 700 B stop being resident depends on the record size: 1 KiB
+            // records keep ~600 B, 4 KiB records more; the per-file check above covers it)
+            assert_eq!(alloc["w_00100"], 0);
+            assert_eq!(alloc["w_05000"], (5000 + cluster - 1) / cluster * cluster);
+        }
+        if have_sparse {
+            assert!(alloc["sparse.bin"] > 0 && alloc["sparse.bin"] < 1 << 20);
+        }
+        if have_comp && listed == hardscan::ListedAlloc::Ntfs {
+            assert!(alloc["compressed.bin"] > 0 && alloc["compressed.bin"] < 1 << 20);
+        }
+        if have_wof {
+            assert!(alloc["wof.bin"] > 0 && alloc["wof.bin"] < 1 << 20);
+        }
+        // the estimate stays as it was: 700 B past resident_max is a whole cluster
+        let old = scan_one(
+            &root,
+            RootOptions {
+                cluster_size: cluster,
+                resident_max: 512,
+                ..root_opts(&root)
+            },
+        );
+        let i = name_strings(&old).iter().position(|n| n == "w_00700").unwrap();
+        assert_eq!(old.entries.alloc[i], cluster);
+    }
+
+    #[test]
+    fn io_saving_options_list_the_same_tree() {
+        // skip_final (and its verification mode), dot_check and keep_where_updated change how
+        // folders are listed, never what is listed
+        let _s = serial();
+        let t = tree();
+        let base = SliceOptions::unbounded(vec![root_opts(&t.root)]);
+        stats();
+        for (skip_final, verify_final, dot_check, keep_where_updated) in [
+            (true, false, false, true),
+            (true, true, false, true),
+            (false, false, true, true),
+            (true, false, true, false),
+        ] {
+            let opts = SliceOptions {
+                skip_final,
+                dot_check,
+                keep_where_updated,
+                seams: hardscan::TestSeams {
+                    verify_final,
+                    ..base.seams
+                },
+                ..base.clone()
+            };
+            compare(vec![task(1, &t.root, 0)], &opts);
+            let s = stats();
+            assert_eq!(s["final_wrong"], 0, "{s:?}");
+            if verify_final {
+                assert!(s["final_verified"] > 0 && s["final_skipped"] == 0, "{s:?}");
+            }
+            let (fs_name, _) = volume_of(&t.root);
+            if skip_final && ["NTFS", "ReFS"].contains(&fs_name.as_str()) {
+                // the first 64 listings of a root (each call) send the query to check the rule
+                assert!(s["final_verified"] > 0, "{s:?}");
+            }
+            if dot_check {
+                assert!(s["dot_matched"] > 10 && s["dot_unmatched"] == 0, "{s:?}");
+            }
+        }
+    }
+
     #[test]
     fn relative_opens_list_the_same_tree() {
         // subdirectories opened by name relative to their parent's handle (checked against the
@@ -1410,6 +1687,7 @@ mod windows {
                 fold_strict: true,
                 extd_self_ids: true,
                 pinned_cap: None,
+                ..opts.seams
             },
             ..opts
         }
@@ -1718,6 +1996,15 @@ mod windows {
             "strict_by_id",
             "pinned",
             "pinned_cap_hit",
+            "final_skipped",
+            "final_verified",
+            "final_wrong",
+            "dot_matched",
+            "dot_unmatched",
+            "keep_off",
+            "alloc_asked",
+            "alloc_ask_opened",
+            "alloc_ask_failed",
         ] {
             assert!(names.contains(&k), "{k}");
         }
@@ -1843,7 +2130,7 @@ mod posix {
             create(&d.join("f.txt"), b"f");
         }
         fs::create_dir(blind.join("sub")).unwrap();
-        fs::set_permissions(&denied, fs::Permissions::from_mode(0)).unwrap();
+        fs::set_permissions(&denied, fs::Permissions::from_mode(0o0)).unwrap();
         fs::set_permissions(&blind, fs::Permissions::from_mode(0o400)).unwrap();
         let res = scan(
             vec![task(1, &root, 0)],

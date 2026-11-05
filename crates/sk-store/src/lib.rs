@@ -47,8 +47,11 @@
 //!   a new buffer (or, mapped, the same file mapped longer); a reader keeps the generation it
 //!   started with (`Arc`), so its slices stay valid. The appender swaps columns one at a time,
 //!   so the extra memory of a growth is one column (when no reader holds the old ones).
-//! * **Changes are exclusive and short.** [`Writer`] waits for running readers and the appender;
-//!   while a writer waits, new readers wait too (task-fair lock: neither side starves). Relists
+//! * **Changes are exclusive and short.** [`Writer`] waits for the readers running when it asked
+//!   and the appender. While those older readers run, new readers still start (the writer could
+//!   not start before them anyway), so one long reader holds up the change, not every other
+//!   reader; once they are done, new readers wait for the writer (neither side starves). A writer
+//!   that gives up ([`Store::write_until`] / [`Store::try_write_for`]) lets them go on. Relists
 //!   take milliseconds; take the writer on a blocking thread (`spawn_blocking`), not in async
 //!   code that other tasks share a thread with.
 //! * **Long reads.** A reader guard blocks writers for as long as it lives. Computations over a
@@ -82,6 +85,7 @@
 //! * `testing` (feature `test-support`): fixture trees for the tests of this and other crates.
 
 pub mod heap;
+mod lock;
 pub mod lookup;
 pub mod mapped;
 pub mod mutate;

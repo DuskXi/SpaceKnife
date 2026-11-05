@@ -80,6 +80,27 @@ protocol models).
   `std::process::exit(sk_core::helper::run_main(&args))` first thing; `HelperClient`, `disks::probe`,
   `IoGovernor::permit` block (spawn_blocking). Follow-ups: macOS NVMe SMART stub (`disks/mac_smart.rs`); English
   catalog entries for helper/disks/io messages.
+- **main merge (0.3.4, `origin/dev..origin/main` ported into the crates)**:
+  - Listing threads: the scanner calls `scan_slice` with `threads: 0` (the walker's shared carriers, adaptive
+    width, sk-native `pace.rs`/`slots.rs`) from `scan::native_threads()` (= start width) threads, with the
+    disk's `ListingGate` from `IoGovernor::listing_gate()` (through `IoGate::listing_gate`). The governor
+    counts in folders listed at once: `RegistryOptions.max_workers` / `set_max_workers` = `scan::listing_max()`
+    (64), manual concurrency in folders (done in `sk-server/src/scans.rs` and `cli/scan.rs`).
+    `SPACEKNIFE_SCAN_SHARED=0` = old one-thread-per-call mode (measurements). `ScanProfile.width` = widths seen.
+  - Windows options: `RootOptions.listed_alloc` (set by `scan::winopts::listed_alloc(volume)`; relists must use the
+    scanner's `root_options()`), `SliceOptions.{skip_final, dot_check, keep_where_updated}` via
+    `scan::winopts::apply_env`.
+  - Monitor: set `MonitorOptions.listed_after` to the scan's start time; `Watcher::add_dirs(dirs, mtimes,
+    since_ns)`; keep calling `kick()` after a scan ends or continues.
+  - Memory (Linux glibc): call `sk_core::memory::tune_allocator()` first thing in the GUI binary (`spaceknife-cli` does);
+    `sk_core::memory::trim()` on a blocking thread when a scan ends, and an idle trim in the diag loop when
+    private memory grew by `TRIM_GROWTH` since the last trim.
+  - Snapshots: optionally `SaveOptions.threads = sk_native::cpus::usable().min(4)`.
+  - MFT: `sk_core::scan::mft::mft_unsupported` replaces the CLI's own copy in `sk-server/src/cli/scan.rs`;
+    `ScanOptions.stats` (MFT timings) and `table_to_store_with` are available.
+  - `tree.summary` gaps (`TreeSummaryResult.gaps`, `sk_core::summary`) are wired in the server handlers.
+  - Structure lock: `Store::read`/`write` follow main's lock.py (writer waits only for readers already running);
+    `Store::write_until` / `try_write_for` let a writer give up (it wakes the readers it held back).
 
 ## Wave 3: sk-server (server task + cli task)
 

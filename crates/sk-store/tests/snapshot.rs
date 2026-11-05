@@ -188,3 +188,77 @@ fn snapshots_load_into_mapped_files_beyond_the_budget() {
     drop(loaded);
     assert_eq!(std::fs::read_dir(cols.path()).unwrap().count(), 0); // the files went with it
 }
+
+/// A store whose names span many heap chunks (test_snapshot.py `_many_chunks`).
+fn many_chunks() -> Store {
+    let store = Store::with_options(StoreOptions {
+        first_chunk: 4096,
+        max_chunk: 4096,
+        ..StoreOptions::default()
+    });
+    let mut a = store.appender();
+    let mut folder = a.add_root_dir("/r").unwrap();
+    for k in 0..6 {
+        let names: Vec<String> = (0..500)
+            .map(|i| format!("name-{k}-{i:04}-{}", "é".repeat(i % 7)))
+            .collect();
+        let mut b = EntryBatch::new();
+        for (i, name) in names.iter().enumerate() {
+            if i == 0 {
+                b.push(Entry::dir(name.as_bytes()));
+            } else {
+                b.push(Entry::file(name.as_bytes(), (k * 1000 + i) as i64, 4096));
+            }
+        }
+        folder = a.ingest_listing(folder, &b).unwrap();
+    }
+    drop(a);
+    assert!(store.read().name_chunks() > 1);
+    store
+}
+
+#[test]
+fn streamed_frames_load_back_with_any_thread_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = many_chunks();
+    let mut headers = Vec::new();
+    for threads in [1, 2, 4, 0] {
+        let path = dir.path().join(format!("t{threads}.sks"));
+        let opts = SaveOptions {
+            threads,
+            ..SaveOptions::roots(["/r"])
+        };
+        let header = snapshot::save(&store.read(), &path, &opts).unwrap();
+        assert!(header.names.frames.len() > 1);
+        assert_eq!(header, snapshot::read_header(&path).unwrap());
+        let (loaded, _) = snapshot::load(&path).unwrap();
+        testing::assert_same_store(&store.read(), &loaded.read());
+        // the header sits in room reserved for the largest numbers, padded with spaces
+        let raw = std::fs::read(&path).unwrap();
+        let hlen = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+        let head = &raw[12..12 + hlen];
+        assert!(head.ends_with(b" "));
+        assert_eq!(head.trim_ascii_end(), serde_json::to_vec(&header).unwrap());
+        headers.push(header);
+    }
+    // the frames are the same whatever the thread count
+    for h in &headers[1..] {
+        assert_eq!(h.columns, headers[0].columns);
+        assert_eq!(h.names, headers[0].names);
+    }
+}
+
+#[test]
+fn a_failed_save_leaves_nothing_behind() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = scanned();
+    let path = dir.path().join("x.sks");
+    std::fs::create_dir(&path).unwrap(); // the rename onto it fails
+    std::fs::write(path.join("keep"), b"the previous content").unwrap();
+    assert!(snapshot::save(&store.read(), &path, &SaveOptions::default()).is_err());
+    assert!(!dir.path().join("x.sks.tmp").exists());
+    assert_eq!(
+        std::fs::read(path.join("keep")).unwrap(),
+        b"the previous content"
+    );
+}

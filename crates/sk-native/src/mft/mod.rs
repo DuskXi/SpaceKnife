@@ -2,32 +2,53 @@
 //!
 //! [`parse_mft`] is pure computation and works everywhere (tests drive it with synthetic images);
 //! [`volume_info`] / [`read_mft`] / [`scan_mft`] open `\\.\X:` and need administrator rights
-//! (Windows only; elsewhere they fail with [`io::ErrorKind::Unsupported`]). [`scan_mft`] streams:
-//! it reads the `$MFT` window by window and parses each while the next is read, so memory stays at
-//! the output table plus a few windows ([`read_mft`] holds the whole `$MFT`: about 9 GB on a large
-//! system volume). [`image_info`] / [`read_mft_image`] / [`scan_mft_image`] run the same code on an
-//! image file holding a volume.
+//! (Windows only; elsewhere they fail with [`io::ErrorKind::Unsupported`]). [`scan_mft`] streams
+//! (`scan.rs`): the `$MFT` is cut into 8 MiB windows, several are read at once (one overlapped,
+//! unbuffered volume handle and an I/O completion port on Windows, straight into aligned window
+//! buffers), each is parsed on a rayon pool as soon as it is in, and the parts are joined in
+//! record order — so the rows and their order are those of parsing one window after the other,
+//! and memory stays at the output table plus the windows in flight ([`read_mft`] holds the whole
+//! `$MFT`: about 9 GB on a large system volume). How many windows are read at once is found while
+//! the scan runs (`scan::Depth`: from 2, doubling while that gains more than a tenth, at most
+//! 128 MiB in flight). [`image_info`] / [`read_mft_image`] / [`scan_mft_image`] run the same code
+//! on an image file holding a volume (on Windows through the overlapped engine too, so tests
+//! cover it without administrator rights; reader threads elsewhere).
+//!
+//! The parse runs on a rayon pool of its own, as wide as the CPUs this process may use
+//! ([`crate::cpus::usable`]); it goes, threads and all, when the call returns.
+//!
+//! Benchmarks only (not an interface): `SPACEKNIFE_MFT_WINDOW` (bytes per window),
+//! `SPACEKNIFE_MFT_DEPTH` (a fixed depth), `SPACEKNIFE_MFT_SPARE` (more window buffers) and
+//! `SPACEKNIFE_MFT_PIECE` (bytes per read at most) apply when [`ScanOptions`] leaves them at 0.
 //!
 //! Every error is an [`io::Error`]: `InvalidInput` for bad arguments, `InvalidData` for what is
 //! not NTFS (or a corrupt `$MFT` layout), `Interrupted` when [`ScanOptions::cancel`] was set.
 
+mod io;
 mod parse;
 mod record;
 mod runs;
+mod scan;
 
 use std::fs::File;
-use std::io;
+use std::io as stdio;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 pub use parse::Table as MftTable;
 use runs::{Geometry, Layout, ReadAt};
+pub use scan::{Stats as ScanStats, Tuning as ScanTuning};
 
 #[cfg(windows)]
-const READERS: usize = 4; // parallel 16 MiB requests while reading the $MFT
-/// Bytes of `$MFT` per streaming window (two in flight) when [`ScanOptions::window`] is 0.
-pub const DEFAULT_WINDOW: usize = 32 << 20;
+const READERS: usize = 4; // parallel 16 MiB requests of read_mft
+/// Bytes of `$MFT` per streaming window when [`ScanOptions::window`] is 0 (one read each).
+pub const DEFAULT_WINDOW: usize = 8 << 20;
+const DEPTH_MIN: usize = 2; // windows read at once: where the search starts (scan::Depth)
+const IN_FLIGHT_MAX: usize = 128 << 20; // and the bytes in flight it may reach
+const DEPTH_MAX: usize = 64; // windows, whatever their size (reader threads on an image)
+const SPARE: usize = 4; // more window buffers: read, waiting to be parsed
 
 /// Geometry of an NTFS volume and its `$MFT` (`mft_volume_info`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -64,17 +85,24 @@ impl VolumeInfo {
 
 /// Options of [`scan_mft`] / [`scan_mft_image`].
 pub struct ScanOptions<'a> {
-    /// Disk-load limit in (0, 1]: the reader pauses after each window so that it is busy only
-    /// this share of the time. 1 = no pause.
+    /// Disk-load limit in (0, 1]: the disk is busy with the scan this share of the time. Reads
+    /// go in bursts that keep the disk busy at least 50 ms each, then pause for
+    /// `busy × (1 − duty) / duty`. 1 = no pause.
     pub duty: f64,
-    /// Bytes per read window (rounded down to whole records, at least one); 0 = [`DEFAULT_WINDOW`].
-    /// Small windows exercise the boundaries in tests.
+    /// Bytes per read window (rounded down to whole records, at least one); 0 =
+    /// `SPACEKNIFE_MFT_WINDOW` or [`DEFAULT_WINDOW`]. Small windows exercise the boundaries in
+    /// tests.
     pub window: usize,
+    /// Windows read at once, fixed; 0 = found while the scan runs (or `SPACEKNIFE_MFT_DEPTH`).
+    pub depth: usize,
     /// `progress(done, total)` in bytes of `$MFT`: once with `done = 0`, then after each parsed
     /// window. Runs on the calling thread.
     pub progress: Option<&'a mut dyn FnMut(u64, u64)>,
-    /// Set it to stop the scan: the call returns an `Interrupted` error after the current window.
+    /// Set it to stop the scan: the call returns an `Interrupted` error after the current window
+    /// (reads still in flight are waited for).
     pub cancel: Option<Arc<AtomicBool>>,
+    /// Filled with what the scan did: timings, counts, the depth it settled at (benchmarks).
+    pub stats: Option<&'a mut ScanStats>,
 }
 
 impl Default for ScanOptions<'_> {
@@ -82,17 +110,23 @@ impl Default for ScanOptions<'_> {
         Self {
             duty: 1.0,
             window: 0,
+            depth: 0,
             progress: None,
             cancel: None,
+            stats: None,
         }
     }
 }
 
-fn invalid(msg: String) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidInput, msg)
+fn invalid(msg: String) -> stdio::Error {
+    stdio::Error::new(stdio::ErrorKind::InvalidInput, msg)
 }
 
-fn check_sizes(record_size: usize, cluster_size: usize) -> io::Result<()> {
+pub(crate) fn interrupted() -> stdio::Error {
+    stdio::Error::new(stdio::ErrorKind::Interrupted, "$MFT scan cancelled")
+}
+
+fn check_sizes(record_size: usize, cluster_size: usize) -> stdio::Result<()> {
     if !(512..=65536).contains(&record_size) || !record_size.is_multiple_of(512) {
         return Err(invalid(format!("invalid record_size {record_size}")));
     }
@@ -102,7 +136,7 @@ fn check_sizes(record_size: usize, cluster_size: usize) -> io::Result<()> {
     Ok(())
 }
 
-fn check_duty(duty: f64) -> io::Result<()> {
+fn check_duty(duty: f64) -> stdio::Result<()> {
     if duty > 0.0 && duty <= 1.0 {
         Ok(())
     } else {
@@ -110,15 +144,65 @@ fn check_duty(duty: f64) -> io::Result<()> {
     }
 }
 
-fn parse_error(e: String) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, e)
+fn parse_error(e: String) -> stdio::Error {
+    stdio::Error::new(stdio::ErrorKind::InvalidData, e)
+}
+
+/// The parse's rayon pool: as many threads as the CPUs this process may use. It goes with its
+/// threads when dropped (nothing stays in the process after a scan, docs/memory.md §6).
+fn pool() -> stdio::Result<rayon::ThreadPool> {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(crate::cpus::usable())
+        .thread_name(|i| format!("sk-mft-{i}"))
+        .build()
+        .map_err(|e| stdio::Error::other(format!("cannot start the $MFT parse threads: {e}")))
+}
+
+/// Window size and reads in flight of a scan: the options, else the `SPACEKNIFE_MFT_*`
+/// variables (benchmarks only), else the defaults.
+fn tuning(window: usize, depth: usize) -> ScanTuning {
+    let env = |key: &str| {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|&v| v > 0)
+    };
+    let window = if window > 0 {
+        window
+    } else {
+        env("SPACEKNIFE_MFT_WINDOW").unwrap_or(DEFAULT_WINDOW)
+    };
+    let fixed = if depth > 0 {
+        Some(depth)
+    } else {
+        env("SPACEKNIFE_MFT_DEPTH")
+    };
+    let (depth_min, depth_max) = match fixed {
+        Some(d) => (d, d),
+        None => (
+            DEPTH_MIN,
+            (IN_FLIGHT_MAX / window.max(1)).clamp(DEPTH_MIN, DEPTH_MAX),
+        ),
+    };
+    ScanTuning {
+        window,
+        depth_min,
+        depth_max,
+        spare: std::env::var("SPACEKNIFE_MFT_SPARE")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .unwrap_or(SPARE),
+        piece: env("SPACEKNIFE_MFT_PIECE").unwrap_or(window.max(1)),
+    }
 }
 
 /// Parse a raw `$MFT` (whole records; a partial record at the end is ignored) into the
 /// [`MftTable`] columns, one row per file name, in record order. Parallel (rayon).
-pub fn parse_mft(data: &[u8], record_size: usize, cluster_size: usize) -> io::Result<MftTable> {
+pub fn parse_mft(data: &[u8], record_size: usize, cluster_size: usize) -> stdio::Result<MftTable> {
     check_sizes(record_size, cluster_size)?;
-    parse::parse(data, record_size).map_err(parse_error)
+    pool()?
+        .install(|| parse::parse(data, record_size))
+        .map_err(parse_error)
 }
 
 /// The streaming parser of [`scan_mft`] over an in-memory `$MFT`, `window_records` records at a
@@ -128,123 +212,191 @@ pub fn parse_mft_stream(
     record_size: usize,
     cluster_size: usize,
     window_records: usize,
-) -> io::Result<MftTable> {
+) -> stdio::Result<MftTable> {
     check_sizes(record_size, cluster_size)?;
-    let step = window_records.max(1) * record_size;
-    let whole = data.len() / record_size * record_size;
-    let mut stream = parse::Stream::new(record_size);
-    for window in data[..whole].chunks(step) {
-        stream.feed(window);
-    }
-    stream
-        .finish(|record| {
-            let at = usize::try_from(record).ok()?.checked_mul(record_size)?;
-            data.get(at..at.checked_add(record_size)?)
-                .map(<[u8]>::to_vec)
+    stream_in_memory(data, record_size, window_records, None)
+}
+
+/// Test hook: [`parse_mft_stream`] with the windows parsed in parallel, in an order shuffled by
+/// `seed`, and pushed back in record order, as [`scan_mft`] does. The table is the sequential
+/// stream's, row order and name blob included.
+#[doc(hidden)]
+pub fn parse_mft_stream_concurrent(
+    data: &[u8],
+    record_size: usize,
+    cluster_size: usize,
+    window_records: usize,
+    seed: u64,
+) -> stdio::Result<MftTable> {
+    check_sizes(record_size, cluster_size)?;
+    stream_in_memory(data, record_size, window_records, Some(seed))
+}
+
+fn stream_in_memory(
+    data: &[u8],
+    rs: usize,
+    window_records: usize,
+    shuffled: Option<u64>,
+) -> stdio::Result<MftTable> {
+    let step = window_records.max(1) * rs;
+    let whole = data.len() / rs * rs;
+    pool()?
+        .install(|| {
+            let mut stream = parse::Stream::new(rs);
+            if let Some(seed) = shuffled {
+                use rayon::prelude::*;
+                let windows: Vec<&[u8]> = data[..whole].chunks(step).collect();
+                let mut order: Vec<usize> = (0..windows.len()).collect();
+                shuffle(&mut order, seed);
+                let parts: std::sync::Mutex<Vec<Option<parse::Part>>> =
+                    std::sync::Mutex::new((0..windows.len()).map(|_| None).collect());
+                order.par_iter().for_each(|&i| {
+                    let first = (i * step / rs) as u64;
+                    let part = parse::parse_window(windows[i], first, rs, MftTable::default());
+                    parts.lock().unwrap()[i] = Some(part);
+                });
+                for part in parts.into_inner().unwrap() {
+                    stream.push(part.expect("every window parsed"));
+                }
+            } else {
+                // in parallel, a few windows at a time, pushed in record order
+                use rayon::prelude::*;
+                let windows: Vec<&[u8]> = data[..whole].chunks(step).collect();
+                let batch = rayon::current_num_threads().max(1) * 2;
+                for (b, group) in windows.chunks(batch).enumerate() {
+                    let parts: Vec<parse::Part> = group
+                        .par_iter()
+                        .enumerate()
+                        .map(|(k, w)| {
+                            let first = ((b * batch + k) * step / rs) as u64;
+                            parse::parse_window(w, first, rs, MftTable::default())
+                        })
+                        .collect();
+                    for part in parts {
+                        stream.push(part);
+                    }
+                }
+            }
+            stream.finish(|record| {
+                let at = usize::try_from(record).ok()?.checked_mul(rs)?;
+                data.get(at..at.checked_add(rs)?).map(<[u8]>::to_vec)
+            })
         })
         .map_err(parse_error)
 }
 
+/// A deterministic Fisher-Yates shuffle (xorshift), for the tests' window orders.
+fn shuffle(v: &mut [usize], seed: u64) {
+    let mut x = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1;
+    for i in (1..v.len()).rev() {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        v.swap(i, (x % (i as u64 + 1)) as usize);
+    }
+}
+
 /// The whole `$MFT` read into a new buffer (bytes past the valid data length are zero).
-fn read_all<R: ReadAt>(devs: &[R], geo: &Geometry, lay: &Layout) -> io::Result<Vec<u8>> {
+fn read_all<R: ReadAt>(devs: &[R], geo: &Geometry, lay: &Layout) -> stdio::Result<Vec<u8>> {
     let len = usize::try_from(lay.data_size)
-        .map_err(|_| io::Error::new(io::ErrorKind::OutOfMemory, "$MFT too large"))?;
+        .map_err(|_| stdio::Error::new(stdio::ErrorKind::OutOfMemory, "$MFT too large"))?;
     // zeroed allocations of this size come straight from the OS: no fill pass
     let mut out = vec![0u8; len];
     runs::read_into(devs, geo, lay, &mut out)?;
     Ok(out)
 }
 
-fn interrupted() -> io::Error {
-    io::Error::new(io::ErrorKind::Interrupted, "$MFT scan cancelled")
+/// One record read again after the scan (`Stream::finish`); None past the valid data.
+fn fetcher<'a, R: ReadAt>(
+    dev: &'a R,
+    geo: &'a Geometry,
+    lay: &'a Layout,
+) -> impl Fn(u64) -> Option<Vec<u8>> + Send + 'a {
+    let rs = geo.record;
+    let total = ((lay.valid_size as usize).div_ceil(rs) * rs).min(lay.data_size as usize) as u64;
+    move |record: u64| {
+        let at = record.checked_mul(rs as u64)?;
+        if at + rs as u64 > total {
+            return None;
+        }
+        let mut raw = vec![0u8; rs];
+        runs::read_range(std::slice::from_ref(dev), geo, lay, at, &mut raw)
+            .ok()
+            .map(|()| raw)
+    }
 }
 
-/// Read the valid part of the `$MFT` window by window on one thread while the previous window
-/// is parsed (rayon). Window buffers go back to the reader once parsed (two in flight, never
-/// zero-filled again).
-fn stream_scan<R: ReadAt + Send>(
-    devs: &[R],
+/// The streaming scan on `engine` (see the module docs); `sync` is a plain handle of the same
+/// device for the records read again at the end.
+fn stream_scan<E: io::Engine, R: ReadAt>(
+    engine: E,
+    sync: &R,
     geo: &Geometry,
     lay: &Layout,
     opts: ScanOptions<'_>,
-) -> io::Result<MftTable> {
-    check_duty(opts.duty)?;
+    t0: Instant,
+) -> stdio::Result<MftTable> {
     let ScanOptions {
         duty,
         window,
+        depth,
         mut progress,
         cancel,
+        stats,
     } = opts;
-    let window = if window == 0 { DEFAULT_WINDOW } else { window };
-    let cancelled = || cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed));
-    let rs = geo.record;
-    let window = (window / rs).max(1) * rs;
-    let total = (lay.valid_size as usize).div_ceil(rs) * rs; // past it every record is unused
-    let total = total.min(lay.data_size as usize);
-    let (tx, rx) = std::sync::mpsc::sync_channel::<io::Result<Vec<u8>>>(1);
-    let (free_tx, free_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    let mut report = |done: u64| {
+    let tune = tuning(window, depth);
+    let mut st = ScanStats {
+        layout_s: t0.elapsed().as_secs_f64(),
+        ..Default::default()
+    };
+    let pool = pool()?;
+    let report = |done: u64, total: u64| {
         if let Some(p) = progress.as_mut() {
-            p(done, total as u64);
+            p(done, total);
         }
     };
-    std::thread::scope(|s| {
-        s.spawn(move || {
-            let mut start = 0usize;
-            while start < total {
-                if cancelled() {
-                    let _ = tx.send(Err(interrupted()));
-                    break;
-                }
-                let len = window.min(total - start);
-                let mut buf = free_rx.try_recv().unwrap_or_default();
-                // read_range writes every byte: only a first (or larger) buffer is zeroed
-                buf.resize(len, 0);
-                let t = std::time::Instant::now();
-                let res = runs::read_range(devs, geo, lay, start as u64, &mut buf);
-                let failed = res.is_err();
-                if tx.send(res.map(|()| buf)).is_err() || failed {
-                    break;
-                }
-                if duty < 1.0 {
-                    std::thread::sleep(t.elapsed().mul_f64((1.0 - duty) / duty));
-                }
-                start += len;
-            }
-            drop(tx);
-        });
-        // owned here: an early return drops it, so a reader blocked on `send` wakes up and ends
-        // before the scope joins it
-        let rx = rx;
-        let mut stream = parse::Stream::new(rs);
-        let mut done = 0u64;
-        report(0);
-        for window in &rx {
-            let window = window?;
-            stream.feed(&window);
-            done += window.len() as u64;
-            let _ = free_tx.send(window);
-            report(done);
-            if cancelled() {
-                return Err(interrupted());
-            }
-        }
-        let fetch = |record: u64| {
-            let at = record.checked_mul(rs as u64)?;
-            if at + rs as u64 > total as u64 {
-                return None;
-            }
-            let mut raw = vec![0u8; rs];
-            runs::read_range(devs, geo, lay, at, &mut raw)
-                .ok()
-                .map(|()| raw)
-        };
-        stream.finish(fetch).map_err(parse_error)
-    })
+    let cancelled = || cancel.as_ref().is_some_and(|c| c.load(Ordering::Relaxed));
+    let res = scan::scan(
+        engine,
+        &pool,
+        geo,
+        lay,
+        duty,
+        &tune,
+        fetcher(sync, geo, lay),
+        report,
+        cancelled,
+        &mut st,
+    );
+    let res = res.map(|rows| {
+        let t = Instant::now();
+        let table = pool.install(|| join(rows));
+        st.join_s = t.elapsed().as_secs_f64();
+        table
+    });
+    st.total_s = t0.elapsed().as_secs_f64();
+    if let Some(out) = stats {
+        *out = st;
+    }
+    res
+}
+
+/// The table of a streaming scan with its name pieces copied into one blob, in parallel.
+fn join(rows: scan::Rows) -> MftTable {
+    let parse::Joined {
+        mut table,
+        names,
+        names_len,
+    } = rows;
+    // zeroed allocations of this size come straight from the OS: no fill pass
+    let mut blob = vec![0u8; names_len];
+    parse::Joined::copy_names(names, &mut blob);
+    table.names = blob;
+    table
 }
 
 /// Normalise "C", "C:", "C:\" to the volume device path `\\.\C:`.
-pub fn device_path(volume: &str) -> io::Result<String> {
+pub fn device_path(volume: &str) -> stdio::Result<String> {
     let v = volume.trim_end_matches(['\\', '/']).as_bytes();
     let ok = (v.len() == 1 || (v.len() == 2 && v[1] == b':')) && v[0].is_ascii_alphabetic();
     if !ok {
@@ -254,96 +406,145 @@ pub fn device_path(volume: &str) -> io::Result<String> {
 }
 
 #[cfg(windows)]
-fn open_volume(path: &str) -> io::Result<File> {
+fn open_volume(path: &str, overlapped: bool) -> stdio::Result<File> {
     use std::os::windows::fs::OpenOptionsExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_NO_BUFFERING, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_FLAG_NO_BUFFERING, FILE_FLAG_OVERLAPPED, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
     };
     // read-only and unbuffered: gigabytes of $MFT must not evict the file cache
+    let flags = FILE_FLAG_NO_BUFFERING | if overlapped { FILE_FLAG_OVERLAPPED } else { 0 };
     std::fs::OpenOptions::new()
         .read(true)
         .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
-        .custom_flags(FILE_FLAG_NO_BUFFERING)
+        .custom_flags(flags)
         .open(path)
 }
 
-/// The volume's readers (several handles: parallel requests) and its geometry.
-#[cfg(windows)]
-fn open_readers(volume: &str) -> io::Result<(Vec<File>, Geometry, Layout)> {
-    let path = device_path(volume)?;
-    let first = open_volume(&path)?;
-    let (geo, lay) = runs::open_layout(&first)?;
-    let mut devs = vec![first];
-    for _ in 1..READERS {
-        devs.push(open_volume(&path)?);
-    }
-    Ok((devs, geo, lay))
-}
-
 #[cfg(not(windows))]
-fn open_readers(volume: &str) -> io::Result<(Vec<File>, Geometry, Layout)> {
-    device_path(volume)?;
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "MFT access is only available on Windows",
-    ))
+fn unsupported(volume: &str) -> stdio::Error {
+    match device_path(volume) {
+        Err(e) => e,
+        Ok(_) => stdio::Error::new(
+            stdio::ErrorKind::Unsupported,
+            "MFT access is only available on Windows",
+        ),
+    }
 }
 
 /// Geometry of an NTFS volume and its `$MFT` (needs administrator rights; Windows only).
-pub fn volume_info(volume: &str) -> io::Result<VolumeInfo> {
+pub fn volume_info(volume: &str) -> stdio::Result<VolumeInfo> {
     #[cfg(windows)]
     {
-        let (geo, lay) = runs::open_layout(&open_volume(&device_path(volume)?)?)?;
+        let (geo, lay) = runs::open_layout(&open_volume(&device_path(volume)?, false)?)?;
         Ok(VolumeInfo::new(&geo, &lay))
     }
     #[cfg(not(windows))]
     {
-        open_readers(volume).map(|_| unreachable!())
+        Err(unsupported(volume))
     }
 }
 
 /// The whole `$MFT` `$DATA` of an NTFS volume (needs administrator rights; Windows only).
-pub fn read_mft(volume: &str) -> io::Result<Vec<u8>> {
-    let (devs, geo, lay) = open_readers(volume)?;
-    read_all(&devs, &geo, &lay)
+pub fn read_mft(volume: &str) -> stdio::Result<Vec<u8>> {
+    #[cfg(windows)]
+    {
+        let path = device_path(volume)?;
+        let first = open_volume(&path, false)?;
+        let (geo, lay) = runs::open_layout(&first)?;
+        let mut devs = vec![first];
+        for _ in 1..READERS {
+            devs.push(open_volume(&path, false)?);
+        }
+        read_all(&devs, &geo, &lay)
+    }
+    #[cfg(not(windows))]
+    {
+        Err(unsupported(volume))
+    }
 }
 
 /// Read and parse the whole `$MFT` of a volume, streaming (needs administrator rights; Windows
 /// only).
-pub fn scan_mft(volume: &str, opts: ScanOptions<'_>) -> io::Result<(MftTable, VolumeInfo)> {
+pub fn scan_mft(volume: &str, opts: ScanOptions<'_>) -> stdio::Result<(MftTable, VolumeInfo)> {
     check_duty(opts.duty)?;
-    let (devs, geo, lay) = open_readers(volume)?;
-    let table = stream_scan(&devs, &geo, &lay, opts)?;
-    Ok((table, VolumeInfo::new(&geo, &lay)))
-}
-
-fn open_image(path: &Path) -> io::Result<(Vec<File>, Geometry, Layout)> {
-    let first = File::open(path)?;
-    let (geo, lay) = runs::open_layout(&first)?;
-    let second = File::open(path)?;
-    Ok((vec![first, second], geo, lay))
+    #[cfg(windows)]
+    {
+        let t0 = Instant::now();
+        let path = device_path(volume)?;
+        let sync = open_volume(&path, false)?;
+        let (geo, lay) = runs::open_layout(&sync)?;
+        let engine = io::Overlapped::new(open_volume(&path, true)?)?;
+        let table = stream_scan(engine, &sync, &geo, &lay, opts, t0)?;
+        Ok((table, VolumeInfo::new(&geo, &lay)))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = opts;
+        Err(unsupported(volume))
+    }
 }
 
 /// [`volume_info`] of an image file holding a volume (boot sector at offset 0).
-pub fn image_info(path: impl AsRef<Path>) -> io::Result<VolumeInfo> {
+pub fn image_info(path: impl AsRef<Path>) -> stdio::Result<VolumeInfo> {
     let (geo, lay) = runs::open_layout(&File::open(path)?)?;
     Ok(VolumeInfo::new(&geo, &lay))
 }
 
 /// [`read_mft`] of an image file holding a volume.
-pub fn read_mft_image(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let (devs, geo, lay) = open_image(path.as_ref())?;
+pub fn read_mft_image(path: impl AsRef<Path>) -> stdio::Result<Vec<u8>> {
+    let path = path.as_ref();
+    let first = File::open(path)?;
+    let (geo, lay) = runs::open_layout(&first)?;
+    let devs = [first, File::open(path)?];
     read_all(&devs, &geo, &lay)
+}
+
+/// The engine of an image file: overlapped reads on Windows (so tests cover that engine without
+/// administrator rights), reader threads elsewhere.
+fn image_engine(path: &Path, depth: usize) -> stdio::Result<Box<dyn io::Engine>> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OVERLAPPED;
+        let _ = depth;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_OVERLAPPED)
+            .open(path)?;
+        Ok(Box::new(io::Overlapped::new(file)?))
+    }
+    #[cfg(not(windows))]
+    {
+        let file = Arc::new(File::open(path)?);
+        Ok(Box::new(io::Threads::new(file, depth)?))
+    }
+}
+
+impl io::Engine for Box<dyn io::Engine> {
+    fn submit(&mut self, read: io::Read) -> stdio::Result<()> {
+        (**self).submit(read)
+    }
+    fn wait(&mut self) -> Option<(usize, stdio::Result<()>)> {
+        (**self).wait()
+    }
+    fn in_flight(&self) -> usize {
+        (**self).in_flight()
+    }
 }
 
 /// [`scan_mft`] of an image file holding a volume.
 pub fn scan_mft_image(
     path: impl AsRef<Path>,
     opts: ScanOptions<'_>,
-) -> io::Result<(MftTable, VolumeInfo)> {
+) -> stdio::Result<(MftTable, VolumeInfo)> {
     check_duty(opts.duty)?;
-    let (devs, geo, lay) = open_image(path.as_ref())?;
-    let table = stream_scan(&devs, &geo, &lay, opts)?;
+    let t0 = Instant::now();
+    let path = path.as_ref();
+    let sync = File::open(path)?;
+    let (geo, lay) = runs::open_layout(&sync)?;
+    let engine = image_engine(path, tuning(opts.window, opts.depth).depth_max)?;
+    let table = stream_scan(engine, &sync, &geo, &lay, opts, t0)?;
     Ok((table, VolumeInfo::new(&geo, &lay)))
 }
 
@@ -362,5 +563,25 @@ mod tests {
         assert_eq!(super::device_path("e").unwrap(), r"\\.\E:");
         assert!(super::device_path("C:\\x").is_err());
         assert!(super::device_path("\\\\server\\share").is_err());
+    }
+
+    #[test]
+    fn shuffles_are_permutations() {
+        for seed in 0..20 {
+            let mut v: Vec<usize> = (0..37).collect();
+            super::shuffle(&mut v, seed);
+            let mut s = v.clone();
+            s.sort_unstable();
+            assert_eq!(s, (0..37).collect::<Vec<_>>());
+        }
+    }
+
+    #[test]
+    fn tuning_follows_the_options() {
+        let t = super::tuning(1 << 20, 0);
+        assert_eq!((t.window, t.depth_min), (1 << 20, super::DEPTH_MIN));
+        assert_eq!(t.depth_max, super::DEPTH_MAX.min(128)); // 128 MiB / 1 MiB, capped
+        let t = super::tuning(super::DEFAULT_WINDOW, 3);
+        assert_eq!((t.depth_min, t.depth_max), (3, 3));
     }
 }

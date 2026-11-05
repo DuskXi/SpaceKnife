@@ -531,10 +531,29 @@ impl GovernorCore {
 
     /// Feed the load of the window that just ended (None: no data) and run one control step.
     pub fn observe(&mut self, sample: Option<&DiskSample>, now: f64, wall: Option<f64>) {
+        self.observe_listings(sample, now, wall, None);
+    }
+
+    /// [`observe`](Self::observe) with the native walker's gate over the same window
+    /// (`listings`: seconds spent listing, the most listings in flight at once, whether a listing
+    /// had to wait for the gate): the concurrency is then counted in listings in flight rather
+    /// than in batches.
+    pub fn observe_listings(
+        &mut self,
+        sample: Option<&DiskSample>,
+        now: f64,
+        wall: Option<f64>,
+        listings: Option<(f64, usize, bool)>,
+    ) {
         self.integrate(now);
         let span = now - self.win_t0;
-        let n_bar = if span > 0.0 { (self.area - self.win_area0) / span } else { 0.0 };
-        let (peak, blocked) = (self.win_peak, self.win_blocked);
+        let mut n_bar = if span > 0.0 { (self.area - self.win_area0) / span } else { 0.0 };
+        let (mut peak, mut blocked) = (self.win_peak, self.win_blocked);
+        if let Some((busy_s, lpeak, refused)) = listings {
+            n_bar = if span > 0.0 { busy_s / span } else { 0.0 };
+            peak = lpeak;
+            blocked = blocked || refused;
+        }
         self.win_t0 = now;
         self.win_area0 = self.area;
         self.win_peak = self.inflight;
@@ -867,6 +886,8 @@ impl Drop for Permit {
 /// ```
 pub struct IoGovernor {
     state: Mutex<State>,
+    /// The native walker's gate for this disk, once [`IoGovernor::listing_gate`] made it.
+    gate: std::sync::OnceLock<sk_native::hardscan::ListingGate>,
     cond: Condvar,
     clock: Clock,
     listeners: Mutex<Vec<(u64, Listener)>>,
@@ -887,6 +908,7 @@ impl IoGovernor {
                 granted: HashSet::new(),
             }),
             cond: Condvar::new(),
+            gate: std::sync::OnceLock::new(),
             clock,
             listeners: Mutex::new(Vec::new()),
             next_listener: AtomicU64::new(1),
@@ -996,7 +1018,29 @@ impl IoGovernor {
         }
     }
 
+    /// The disk's gate for the native walker's listings, made on first use: it holds the listings
+    /// in flight to [`concurrency`](Self::concurrency) and lets no new one start while paused (but
+    /// those a call must list where it found them, docs/native.md 2.2). From then on the governor
+    /// counts in listings: the mean and the peak in flight of a window are the gate's.
+    pub fn listing_gate(&self) -> sk_native::hardscan::ListingGate {
+        self.gate
+            .get_or_init(|| {
+                let st = self.state.lock();
+                let g = sk_native::hardscan::ListingGate::new(st.core.concurrency());
+                g.set(None, Some(st.core.paused()));
+                g
+            })
+            .clone()
+    }
+
+    fn sync_gate(&self, core: &GovernorCore) {
+        if let Some(g) = self.gate.get() {
+            g.set(Some(core.concurrency()), Some(core.paused()));
+        }
+    }
+
     fn pump(&self, st: &mut State) {
+        self.sync_gate(&st.core);
         let now = (self.clock)();
         let granted = st.core.grant(now);
         if !granted.is_empty() {
@@ -1054,13 +1098,23 @@ impl IoGovernor {
 
     /// Called by the registry with every new sample of this disk (None: no data).
     pub fn observe(&self, sample: Option<&DiskSample>, wall: Option<f64>) {
-        self.update(|c, now| c.observe(sample, now, wall));
+        let listings = self.gate.get().map(|g| g.window());
+        self.update(|c, now| c.observe_listings(sample, now, wall, listings));
     }
 
     // ------------------------------------------------------------------ status
 
     pub fn status(&self, history: bool) -> IoStatus {
-        self.state.lock().core.status(history)
+        let mut status = self.state.lock().core.status(history);
+        if let Some(g) = self.gate.get() {
+            // in listings: those in flight now, and (automatic) no more than the walker's width
+            if status.auto {
+                status.concurrency =
+                    status.concurrency.min(sk_native::hardscan::listing_threads(false).width as _);
+            }
+            status.inflight = g.inflight() as _;
+        }
+        status
     }
 
     /// Status pushes (2 Hz, from the registry); returns the id for [`unsubscribe`](Self::unsubscribe).
