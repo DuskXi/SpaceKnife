@@ -64,6 +64,9 @@ struct RunState {
     left: Vec<BasketItem>,
     /// trash references (undo)
     refs: Vec<String>,
+    /// trash reference → the path as it was asked for: a restore reports the path recorded in the
+    /// bin, which may be spelled otherwise (Windows: long names for 8.3 short ones)
+    trashed_as: HashMap<String, String>,
     last_emit: Option<Instant>,
 }
 
@@ -547,6 +550,7 @@ impl OpsService {
                 freed: 0,
                 left: Vec::new(),
                 refs: Vec::new(),
+                trashed_as: HashMap::new(),
                 last_emit: None,
             }),
             cancel: AtomicBool::new(false),
@@ -649,6 +653,11 @@ impl OpsService {
                     .filter(|r| r.ok && !r.trash_ref.is_empty())
                     .map(|r| r.trash_ref.clone())
                     .collect();
+                st.trashed_as = results
+                    .iter()
+                    .filter(|r| r.ok && !r.trash_ref.is_empty())
+                    .map(|r| (r.trash_ref.clone(), r.path.clone()))
+                    .collect();
                 st.left = left;
                 st.phase = if run.cancel.load(Ordering::SeqCst) {
                     OpPhase::Cancelled
@@ -748,16 +757,21 @@ impl OpsService {
                 _ => return Ok(()),
             }
         };
+        let asked = refs.clone();
         let results = tokio::task::spawn_blocking(move || sk_core::ops::restore(&refs))
             .await
             .map_err(rpc_internal)?;
+        let trashed_as = std::mem::take(&mut run.st.lock().trashed_as);
         for r in results.iter().filter(|r| !r.ok) {
             tracing::warn!("restoring {}: {} ({})", r.path, r.message, r.code.as_str());
         }
+        // each restored item under both spellings: as restored and as it was trashed
         let restored: HashSet<String> = results
             .iter()
-            .filter(|r| r.ok)
-            .map(|r| r.path.clone())
+            .zip(&asked)
+            .filter(|(r, _)| r.ok)
+            .flat_map(|(r, at)| [Some(r.path.clone()), trashed_as.get(at).cloned()])
+            .flatten()
             .collect();
         let back: Vec<BasketItem> = run
             .st

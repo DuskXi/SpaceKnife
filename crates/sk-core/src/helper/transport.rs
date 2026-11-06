@@ -442,20 +442,55 @@ mod imp {
             }
         }
 
+        /// Write some of `buf`. A blocked write wakes every [`WRITE_SLICE`] to see whether the
+        /// peer is gone: on macOS a peer that shut its end down leaves the writer blocked on a
+        /// full buffer (no EPIPE, as Linux gives) until the timeout.
         pub fn write(&self, buf: &[u8], timeout: Option<Duration>) -> io::Result<usize> {
             use std::io::Write as _;
+            const WRITE_SLICE: Duration = Duration::from_millis(200);
             self.check()?;
-            self.timeouts(timeout, true)?;
+            let deadline = timeout.map(|t| std::time::Instant::now() + t);
             let chunk = buf.len().min(8 << 20);
             loop {
+                let slice = match deadline {
+                    Some(d) => d.saturating_duration_since(std::time::Instant::now()),
+                    None => WRITE_SLICE,
+                };
+                if slice.is_zero() {
+                    return Err(io::Error::new(io::ErrorKind::TimedOut, t("套接字读写超时")));
+                }
+                self.timeouts(Some(slice.min(WRITE_SLICE)), true)?;
                 match (&self.sock).write(&buf[..chunk]) {
                     Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        return Err(io::Error::new(io::ErrorKind::TimedOut, t("套接字读写超时")));
+                        if self.peer_gone() {
+                            return Err(io::Error::new(io::ErrorKind::BrokenPipe, t("管道已断开")));
+                        }
                     }
                     other => return other,
                 }
             }
+        }
+
+        /// Whether the peer closed its end: a peek at what it sent finds the end of the stream.
+        fn peer_gone(&self) -> bool {
+            use std::os::fd::AsRawFd as _;
+            let mut byte = 0u8;
+            // SAFETY: one byte into a local; MSG_PEEK leaves the data for the reader.
+            let n = unsafe {
+                libc::recv(
+                    self.sock.as_raw_fd(),
+                    (&raw mut byte).cast(),
+                    1,
+                    libc::MSG_PEEK | libc::MSG_DONTWAIT,
+                )
+            };
+            n == 0
+                || (n < 0
+                    && matches!(
+                        io::Error::last_os_error().raw_os_error(),
+                        Some(libc::ECONNRESET | libc::ENOTCONN | libc::EPIPE)
+                    ))
         }
 
         pub fn close(&self) {

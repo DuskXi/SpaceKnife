@@ -50,6 +50,9 @@ fn mapped_mode_keeps_columns_out_of_private_memory() {
         assert_eq!(a.tot_alloc(1), tot);
         testing::check_invariants(&a).unwrap();
     }
+    // Windows: delete-on-close files, listed until the store lets go; elsewhere they are unlinked
+    // as soon as they are made (tempfile), and the folder stays empty throughout
+    #[cfg(windows)]
     assert!(std::fs::read_dir(dir.path()).unwrap().count() > 20);
     drop(store);
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0); // self-deleting
