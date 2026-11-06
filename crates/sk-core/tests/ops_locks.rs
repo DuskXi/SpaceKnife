@@ -63,7 +63,8 @@ fn nothing_asked_nothing_found() {
 #[test]
 fn proc_scan_matches_files_and_folders() {
     let dir = tempfile::tempdir().unwrap();
-    let tmp = dir.path();
+    // resolved, as /proc reports targets (macOS: /var is a link to /private/var)
+    let tmp = &dir.path().canonicalize().unwrap();
     let proc = tmp.join("proc");
     let target_dir = tmp.join("data");
     std::fs::create_dir_all(target_dir.join("sub")).unwrap();
