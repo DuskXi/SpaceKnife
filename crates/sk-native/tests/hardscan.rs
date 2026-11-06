@@ -15,9 +15,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+#[cfg(windows)]
+use sk_native::hardscan::messages;
 use sk_native::hardscan::{
     self, LinkSet, ListingGate, Ref, RootOptions, SliceOptions, SliceResult, Task, flag, kind,
-    lower_ext, messages, scan_slice,
+    lower_ext, scan_slice,
 };
 
 fn serial() -> MutexGuard<'static, ()> {
@@ -77,6 +79,7 @@ fn name_strings(res: &SliceResult) -> Vec<String> {
         .collect()
 }
 
+#[cfg(windows)]
 fn listed(res: &SliceResult) -> BTreeMap<PathBuf, Vec<String>> {
     let names = name_strings(res);
     (0..res.listings())

@@ -172,7 +172,10 @@ jobs:
 
       - name: Smoke test in portable mode
         run: |
-          app=$(ls -d target/portable-test/*/spaceknife{,.exe} 2>/dev/null | head -1)
+          # a glob, not `ls` of both names: the missing one would fail the step (pipefail)
+          shopt -s nullglob
+          app=(target/portable-test/*/spaceknife.exe target/portable-test/*/spaceknife)
+          app=${app[0]:?the program is missing from the archive}
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a node packaging/smoke-app.mjs --portable "$app"
           else
@@ -183,7 +186,9 @@ jobs:
       # Linux without a display
       - name: Headless mode smoke test
         run: |
-          cli=$(ls -d target/portable-test/*/spaceknife-cli{,.exe} 2>/dev/null | head -1)
+          shopt -s nullglob
+          cli=(target/portable-test/*/spaceknife-cli.exe target/portable-test/*/spaceknife-cli)
+          cli=${cli[0]:?spaceknife-cli is missing from the archive}
           node packaging/smoke-headless.mjs "$cli"
 
       # a release list on 127.0.0.1 offers the next version (this build again); the backend finds,

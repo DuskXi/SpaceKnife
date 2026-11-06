@@ -41,7 +41,10 @@ pub mod flag {
 pub struct RootOpts {
     #[cfg_attr(windows, allow(dead_code))]
     pub dev: u64,
+    /// Read by the Windows lister only (allocation estimated from the size).
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub cluster_size: i64,
+    #[cfg_attr(not(windows), allow(dead_code))]
     pub resident_max: i64,
     #[cfg_attr(windows, allow(dead_code))]
     pub cross_mounts: bool,

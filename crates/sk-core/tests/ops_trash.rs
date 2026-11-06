@@ -482,6 +482,44 @@ mod windows {
         assert_eq!(r.code, OpCode::Locked, "{r:?}");
         assert!(held.exists());
     }
+
+    /// The 8.3 short name of an existing path (cmd's `%~sI`), None when the volume has none.
+    fn short_name(p: &Path) -> Option<String> {
+        use std::os::windows::process::CommandExt;
+        // raw: cmd parses its own command line, and Rust's quoting would escape the quotes
+        let out = std::process::Command::new("cmd")
+            .raw_arg(format!(
+                "/d /c for %I in (\"{}\") do @echo %~sI",
+                p.display()
+            ))
+            .output()
+            .ok()?;
+        let short = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        (short.contains('~') && Path::new(&short).exists()).then_some(short)
+    }
+
+    /// Asked through a short name (CI's temp folder is `C:\Users\RUNNER~1\…`), reported by the
+    /// shell under the long one: still matched to the request.
+    #[test]
+    fn trash_through_a_short_name() {
+        let (_, _g) = setup();
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("a folder with a long name");
+        std::fs::create_dir(&folder).unwrap();
+        let file = folder.join("some long file name.txt");
+        std::fs::write(&file, b"x").unwrap();
+        let Some(short) = short_name(&file) else {
+            return; // no 8.3 names on this volume
+        };
+        let r = move_to_trash(&[short.as_str()], OpOptions::default()).remove(0);
+        let _trashed = Trashed(vec![r.trash_ref.clone()]);
+        assert_eq!(
+            (r.code, r.path.as_str()),
+            (OpCode::Ok, short.as_str()),
+            "{r:?}"
+        );
+        assert!(!file.exists());
+    }
 }
 
 // --------------------------------------------------------------------------- freedesktop details

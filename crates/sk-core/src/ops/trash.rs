@@ -1021,7 +1021,10 @@ fn win_trash(
         while !pending.is_empty() && !cancelled(cancel) {
             let where_: HashMap<String, usize> = pending
                 .iter()
-                .map(|&i| (win_key(&run.paths[i]), i))
+                .flat_map(|&i| {
+                    let long = win::long_names(&run.paths[i]).map(|l| (win_key(&l), i));
+                    std::iter::once((win_key(&run.paths[i]), i)).chain(long)
+                })
                 .collect();
             let batch_paths: Vec<PathBuf> = pending.iter().map(|&i| run.os[i].clone()).collect();
             let outcome = {
@@ -1764,8 +1767,7 @@ fn mac_trash(path: &str) -> OpResult {
         let url = NSURL::fileURLWithPath(&NSString::from_str(path));
         let manager = NSFileManager::defaultManager();
         let mut out: Option<objc2::rc::Retained<NSURL>> = None;
-        // SAFETY: valid objects; the out pointer lives through the call.
-        let done = unsafe { manager.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out)) };
+        let done = manager.trashItemAtURL_resultingItemURL_error(&url, Some(&mut out));
         match done {
             Err(err) => {
                 let detail = err.localizedDescription().to_string();

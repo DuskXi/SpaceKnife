@@ -3,6 +3,10 @@
 //! for syscall, without the Python objects in between. On macOS `getattrlistbulk` gives the
 //! attributes of whole batches of entries instead (`bulk`, checked against fstatat).
 
+// libc gives the stat fields and S_IF* constants different types per platform (mode_t is u16 on
+// macOS, u32 on Linux): the casts are needed on some targets and redundant on others.
+#![allow(clippy::unnecessary_cast)]
+
 #[cfg(target_os = "linux")]
 use std::cell::RefCell; // the getdents64 buffer
 use std::ffi::{CStr, CString};
@@ -563,10 +567,10 @@ mod bulk {
         }
 
         fn turn_off(&self, why: String) {
-            if self.state.swap(OFF, Ordering::Relaxed) != OFF {
-                if let Ok(mut r) = self.reason.lock() {
-                    *r = why;
-                }
+            if self.state.swap(OFF, Ordering::Relaxed) != OFF
+                && let Ok(mut r) = self.reason.lock()
+            {
+                *r = why;
             }
         }
 
@@ -825,18 +829,18 @@ mod bulk {
                     }
                     off += len;
                 }
-                if FILES.get() == UNTESTED {
-                    if let Err(why) = check(dirfd, &batch, false, &FILES) {
-                        FILES.turn_off(why);
-                        if !emitted {
-                            return Ok(false);
-                        }
+                if FILES.get() == UNTESTED
+                    && let Err(why) = check(dirfd, &batch, false, &FILES)
+                {
+                    FILES.turn_off(why);
+                    if !emitted {
+                        return Ok(false);
                     }
                 }
-                if DIRS.get() == UNTESTED {
-                    if let Err(why) = check(dirfd, &batch, true, &DIRS) {
-                        DIRS.turn_off(why);
-                    }
+                if DIRS.get() == UNTESTED
+                    && let Err(why) = check(dirfd, &batch, true, &DIRS)
+                {
+                    DIRS.turn_off(why);
                 }
                 let (files, dirs) = (FILES.get() != OFF, dirs_used());
                 if !files || !dirs {

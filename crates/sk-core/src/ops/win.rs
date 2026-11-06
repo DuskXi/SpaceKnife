@@ -24,7 +24,7 @@ use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
 use windows_sys::Win32::Security::{GetTokenInformation, TOKEN_QUERY, TOKEN_USER, TokenUser};
 use windows_sys::Win32::Storage::FileSystem::{
     CreateFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetFileInformationByHandleEx,
-    GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
+    GetLongPathNameW, GetVolumeNameForVolumeMountPointW, GetVolumePathNameW,
 };
 use windows_sys::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoCreateInstance, CoInitializeEx,
@@ -568,6 +568,36 @@ pub struct RecycleRun {
     pub unmatched: Vec<(String, Option<String>)>,
 }
 
+/// `path` with its 8.3 short names (`RUNNER~1`) expanded to the long ones, as the shell reports
+/// items; None when it has none, or it does not exist.
+pub fn long_names(path: &str) -> Option<String> {
+    if !path.contains('~') {
+        return None;
+    }
+    let w = wide(&long_path(path));
+    let mut buf = vec![0u16; 512];
+    loop {
+        // SAFETY: w is NUL-terminated; buf holds buf.len() units.
+        let n =
+            unsafe { GetLongPathNameW(w.as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
+        if n == 0 {
+            return None;
+        }
+        if n < buf.len() {
+            let got = String::from_utf16_lossy(&buf[..n]);
+            let got = match got.strip_prefix("\\\\?\\") {
+                Some(rest) if !path.starts_with("\\\\?\\") => match rest.strip_prefix("UNC\\") {
+                    Some(unc) => format!("\\\\{unc}"),
+                    None => rest.to_string(),
+                },
+                _ => got,
+            };
+            return (got != path).then_some(got);
+        }
+        buf.resize(n, 0);
+    }
+}
+
 pub(crate) fn path_key(path: &str) -> String {
     if path.is_empty() {
         return String::new();
@@ -771,10 +801,15 @@ fn recycle_sta(
             reached: false,
         })
         .collect();
+    // the shell reports items by their long names: a request through a short name (`RUNNER~1`)
+    // is found under both
     let index = shown
         .iter()
         .enumerate()
-        .map(|(i, p)| (path_key(p), i))
+        .flat_map(|(i, p)| {
+            let long = long_names(p).map(|l| (path_key(&l), i));
+            std::iter::once((path_key(p), i)).chain(long)
+        })
         .collect();
     let mut sink = Box::new(Sink {
         vtbl: &SINK_VTBL,

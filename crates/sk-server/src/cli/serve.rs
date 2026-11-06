@@ -270,9 +270,9 @@ pub fn serve(args: ServeArgs) -> i32 {
 pub async fn stop_signal(watch_stdin: bool) {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<&'static str>();
     if watch_stdin {
-        let tx = tx.clone();
+        let eof_tx = tx.clone();
         watch_stdin_eof(move || {
-            let _ = tx.send("stdin closed by the parent process");
+            let _ = eof_tx.send("stdin closed by the parent process");
         });
         arm_parent_death_signal();
         #[cfg(all(unix, not(target_os = "linux")))]
