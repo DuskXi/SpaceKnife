@@ -23,7 +23,7 @@ on:
         type: boolean
         default: false
   push:
-    branches: [dev]
+    branches: [dev, dev-rust]
     paths:
       - .github/workflows/macos.yml
       - packaging/**
