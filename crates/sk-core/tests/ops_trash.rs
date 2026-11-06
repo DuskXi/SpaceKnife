@@ -179,8 +179,9 @@ fn trash_and_restore() {
                 .unwrap();
             assert_eq!(bin.to_string_lossy().to_lowercase(), "$recycle.bin");
             let (got_size, when, path) = parse_recycle_info(&std::fs::read(info).unwrap()).unwrap();
+            let short = if size == 5 { s(&f) } else { s(&d) };
             assert!(
-                same(&path, original) && got_size == size && when > 1.7e9,
+                (same(&path, original) || same(&path, &short)) && got_size == size && when > 1.7e9,
                 "{path} {got_size} {when}"
             );
         }
@@ -207,7 +208,12 @@ fn trash_and_restore() {
     let got: Vec<(OpCode, String)> = back.iter().map(|b| (b.code, b.message.clone())).collect();
     assert_eq!(got, vec![(OpCode::Ok, text("restored")); 2]);
     trashed.0.clear();
-    assert!(same(&back[0].path, &s(&f)) && same(&back[1].path, &s(&d)));
+    // back where they were, under either spelling (the $I file may hold the long one)
+    let home = |got: &str, p: &Path, long: &str| same(got, &s(p)) || same(got, long);
+    assert!(
+        home(&back[0].path, &f, &recorded[0]) && home(&back[1].path, &d, &recorded[1]),
+        "{back:?}"
+    );
     assert_eq!(std::fs::read(&f).unwrap(), b"hello");
     assert_eq!(
         std::fs::read(d.join("sub").join("x.bin")).unwrap(),

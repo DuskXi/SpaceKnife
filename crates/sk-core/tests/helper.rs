@@ -356,7 +356,7 @@ fn scan_mft_needs_admin_and_real_reader_errors() {
             .unwrap_err();
         assert_eq!(err.code, "needs_admin");
         assert!(
-            err.message.contains("需要管理员权限") || err.message.contains("admin"),
+            err.message.contains("需要管理员权限") || err.message.to_lowercase().contains("admin"),
             "{}",
             err.message
         );

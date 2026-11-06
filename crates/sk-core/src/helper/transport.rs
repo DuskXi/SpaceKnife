@@ -396,10 +396,17 @@ mod imp {
 
         fn timeouts(&self, timeout: Option<Duration>, write: bool) -> io::Result<()> {
             let t = timeout.map(|d| d.max(Duration::from_millis(1)));
-            if write {
+            let set = if write {
                 self.sock.set_write_timeout(t)
             } else {
                 self.sock.set_read_timeout(t)
+            };
+            match set {
+                // macOS (BSD) refuses setsockopt with EINVAL once the peer has closed the
+                // connection: the read or write that follows reports that (EOF, EPIPE) and never
+                // blocks, so go on to it rather than fail with "invalid argument"
+                Err(e) if e.raw_os_error() == Some(libc::EINVAL) => Ok(()),
+                other => other,
             }
         }
 
