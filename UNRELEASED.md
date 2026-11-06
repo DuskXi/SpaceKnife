@@ -2,6 +2,7 @@
 
 **English** · [简体中文](#简体中文)
 
+
 What is already done for the next version, **0.4.0**, and not in a release yet. When that version is published, this list becomes its release notes and the file starts over.
 
 ### What's new
@@ -33,3 +34,28 @@ What is already done for the next version, **0.4.0**, and not in a release yet. 
 - **Windows 安装程序只装到当前用户**；deb / rpm 把 `spaceknife` 和 `spaceknife-cli` 装到 `/usr/bin`，不再放在 `/opt/SpaceKnife`。
 - **设置和数据还在原来的位置**：设置、文件类别、归类的文件夹、标签、命令面板的最近记录和日志都从原来的文件夹读取。窗口自己的文件（主题、WebView 的数据）不再放在 Electron 的配置文件夹里。
 - **快照换了新格式（第 3 版）**：0.3.x 存的快照 0.4.0 打不开，也不会出现在列表里；旧文件仍留在磁盘上。
+=======
+What is already done for the next version, **0.3.5**, and not in a release yet. When that version is published, this list becomes its release notes and the file starts over.
+
+### What's new
+
+(nothing yet)
+
+### Fixes
+
+- **Singular English counts on the command line**: a scan with one unreadable folder says "1 folder couldn't be accessed", `snapshot list` says "1 snapshot in …" and `snapshot show` "· 1 item ·". Thanks to @swastiktawate ([#9](https://github.com/DuskXi/SpaceKnife/pull/9)).
+
+---
+
+## 简体中文
+
+下一版 **0.3.5** 已经做完、但还没发布的更改。这一版发布时，这里的内容会成为它的发布说明，然后这个文件清空，重新开始记录。
+
+### 新功能
+
+（暂无）
+
+### 修复
+
+- **命令行的英文单数**：有一个文件夹读不了的扫描写「1 folder couldn't be accessed」，`snapshot list` 写「1 snapshot in …」，`snapshot show` 写「· 1 item ·」。感谢 @swastiktawate（[#9](https://github.com/DuskXi/SpaceKnife/pull/9)）。
+
