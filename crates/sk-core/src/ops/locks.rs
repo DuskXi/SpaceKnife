@@ -52,6 +52,7 @@ pub fn find_lockers(paths: &[String]) -> HashMap<String, Vec<String>> {
     })
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn unique(names: impl IntoIterator<Item = String>) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for n in names {

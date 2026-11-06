@@ -1494,9 +1494,11 @@ pub mod fd {
         let uid = uid();
         let top = mount_top(path, dev);
         let admin = top.join(".Trash");
+        #[allow(clippy::unnecessary_cast)] // mode_t: u32 on Linux, u16 on macOS
+        let sticky = libc::S_ISVTX as u32;
         if let Ok(m) = std::fs::symlink_metadata(&admin)
             && m.is_dir()
-            && m.permissions().mode() & libc::S_ISVTX as u32 != 0
+            && m.permissions().mode() & sticky != 0
         {
             // not a link, sticky: usable
             let mine = admin.join(uid.to_string());

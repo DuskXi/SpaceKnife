@@ -266,8 +266,9 @@ pub mod interrupt {
         pub fn install() {
             // SAFETY: installs an async-signal-safe handler (atomics, write, _exit).
             unsafe {
-                libc::signal(libc::SIGINT, handler as libc::sighandler_t);
-                libc::signal(libc::SIGTERM, handler as libc::sighandler_t);
+                let handler = handler as extern "C" fn(libc::c_int) as libc::sighandler_t;
+                libc::signal(libc::SIGINT, handler);
+                libc::signal(libc::SIGTERM, handler);
             }
         }
     }

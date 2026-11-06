@@ -1,7 +1,9 @@
 //! ops::locks (port of tests/test_ops_locks.py): who holds a file open — a real handle held by
 //! this test, plus the parsers.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(not(target_os = "macos"))]
+use std::collections::HashSet;
 use std::fs::File;
 use std::path::Path;
 

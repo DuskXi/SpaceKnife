@@ -101,6 +101,15 @@ fn make(dir: &Path) -> (PathBuf, PathBuf) {
     (f, data.join("folder a"))
 }
 
+/// `p` as the shell records it in a `$I` file: 8.3 short names (CI's `RUNNER~1`) expanded.
+fn shell_name(p: &Path) -> String {
+    #[cfg(windows)]
+    if let Some(long) = sk_core::ops::win::long_names(&s(p)) {
+        return long;
+    }
+    s(p)
+}
+
 fn same(a: &str, b: &str) -> bool {
     let key = |p: &str| {
         if WIN {
@@ -130,6 +139,7 @@ fn trash_and_restore() {
     let (base, _g) = setup();
     let dir = tempfile::tempdir().unwrap();
     let (f, d) = make(dir.path());
+    let recorded = [shell_name(&f), shell_name(&d)]; // before they leave
     let mut seen: Vec<(usize, usize, OpCode)> = Vec::new();
     let mut progress = |done: usize, total: usize, r: &OpResult| seen.push((done, total, r.code));
     let res = move_to_trash(
@@ -152,7 +162,7 @@ fn trash_and_restore() {
     assert!(!f.exists() && !d.exists());
     assert_eq!(seen, [(1, 2, OpCode::Ok), (2, 2, OpCode::Ok)]);
     if WIN {
-        for (r, (original, size)) in res.iter().zip([(&f, 5), (&d, 10)]) {
+        for (r, (original, size)) in res.iter().zip([(&recorded[0], 5), (&recorded[1], 10)]) {
             let info = Path::new(&r.trash_ref);
             assert!(
                 info.file_name()
@@ -169,7 +179,10 @@ fn trash_and_restore() {
                 .unwrap();
             assert_eq!(bin.to_string_lossy().to_lowercase(), "$recycle.bin");
             let (got_size, when, path) = parse_recycle_info(&std::fs::read(info).unwrap()).unwrap();
-            assert!(same(&path, &s(original)) && got_size == size && when > 1.7e9);
+            assert!(
+                same(&path, original) && got_size == size && when > 1.7e9,
+                "{path} {got_size} {when}"
+            );
         }
     } else {
         let info = PathBuf::from(&res[0].trash_ref);

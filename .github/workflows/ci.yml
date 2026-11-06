@@ -61,8 +61,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+.
-        os: [windows-latest, ubuntu-22.04, macos-14]
+        # Platform floors from docs/PLAN.md: Windows 10+, Ubuntu 22.04+ / RHEL 9+ (glibc 2.34), macOS 14+
+        # (GitHub no longer runs macos-14; macos-15 as in macos.yml, the floor is the deployment target).
+        os: [windows-latest, ubuntu-22.04, macos-15]
     defaults:
       run:
         shell: bash

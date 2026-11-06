@@ -340,6 +340,7 @@ mod tests {
 
     /// The priority tests start from normal I/O priority (some environments start every process
     /// at low, which children inherit) and run one at a time (they change the whole process).
+    #[cfg(not(target_os = "macos"))]
     fn normal() -> parking_lot::MutexGuard<'static, ()> {
         static LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::new(());
         let guard = LOCK.lock();

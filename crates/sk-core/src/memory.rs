@@ -248,7 +248,7 @@ mod imp {
         let mut count = (size_of::<VmInfo>() / 4) as u32;
         // SAFETY: the struct is the documented prefix of task_vm_info_data_t, count in natural_t units.
         let rc = unsafe { task_info(mach_task_self_, 22, (&raw mut info).cast(), &mut count) };
-        (rc == 0).then(|| ProcessMemory {
+        (rc == 0).then_some(ProcessMemory {
             private: Some(info.phys_footprint),
             resident: Some(info.resident_size),
         })
