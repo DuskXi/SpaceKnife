@@ -73,10 +73,14 @@ async function smoke(home) {
     console.log(`install kind: ${kind}`);
     if (wantKind && kind !== wantKind) throw new Error(`the app takes itself for a ${kind} install, not ${wantKind}`);
     session.close();
-    stop(proc.pid);
+    // an AppImage started by its runtime: the program is the runtime's child (info.pid, the
+    // backend runs in it), and SIGTERM to the runtime would not reach it; the runtime exits with it
+    const program = app.endsWith(".AppImage") ? info.pid : proc.pid;
+    stop(program);
     await until("the app to exit", () => exited, 15_000).catch(() => {
       console.log("the app did not close on request: ending it");
-      stop(proc.pid, true);
+      stop(program, true);
+      if (program !== proc.pid) stop(proc.pid, true);
       return until("the app to exit", () => exited, 15_000);
     });
     console.log(`app exited: ${JSON.stringify(exited)}`);

@@ -10,7 +10,7 @@
 // run outside GitHub Actions. Exit status 1 on failure.
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,8 +21,10 @@ if (process.env.GITHUB_ACTIONS !== "true") fail("this installs and uninstalls Sp
 const args = process.argv.slice(2);
 const at = args.indexOf("--previous");
 const previous = at >= 0 ? resolve(args[at + 1]) : null;
-const setup = resolve(args.find((a, i) => i !== at && i !== at + 1) ?? "");
-if (!existsSync(setup)) fail("usage: node packaging/nsis-e2e.mjs <setup.exe> [--previous <older setup.exe>]");
+// the one argument that is not --previous or its value (at is -1 without --previous)
+const given = args.find((a, i) => at < 0 || (i !== at && i !== at + 1));
+const setup = given ? resolve(given) : "";
+if (!setup || !existsSync(setup) || !statSync(setup).isFile()) fail("usage: node packaging/nsis-e2e.mjs <setup.exe> [--previous <older setup.exe>]");
 
 // Tauri's per-user NSIS installer: $LOCALAPPDATA\<productName>
 const dir = join(process.env.LOCALAPPDATA, "SpaceKnife");
