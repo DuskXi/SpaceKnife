@@ -19,7 +19,7 @@ description: 首次启动的警告、权限、未知空间、扫描慢或卡住�
   「设置 › 高级 › 文件与诊断 › 日志文件夹 › 打开」无论它在哪里都能打开（便携版和 `SPACEKNIFE_HOME` 会改变位置，见[数据位置与便携模式](../data-locations/)）。
 - **更详细的日志**：把「设置 › 高级 › 日志 › 日志文件级别」改成「调试」，重现问题，再改回「信息」。
 - 「复制诊断信息」（「设置 › 高级 › 文件与诊断」）：复制界面和后端的版本、平台、后端的能力清单，以及设置文件和日志文件夹的路径。
-- **命令行**：`spaceknife-backend version` 输出各部分的版本；其中的 `native none` 表示原生扩展没有加载（见[命令行](../command-line/#version)）。
+- **命令行**：`spaceknife-cli version` 输出版本（见[命令行](../command-line/#version)）。
 
 ## 首次启动
 
@@ -47,15 +47,13 @@ xattr -dr com.apple.quarantine /Applications/SpaceKnife.app
 
 ### Linux：AppImage 打不开
 
-- AppImage 需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）。没有时用 `./SpaceKnife-<版本>-x86_64.AppImage --appimage-extract-and-run` 运行，或者改用不需要 FUSE 的 deb、rpm 或便携版 tar.gz。
-- 在限制非特权用户命名空间的发行版上（Ubuntu 23.10 起的 AppArmor 规则），AppImage 和便携版 tar.gz 可能启动不了，因为其中 Chromium 的沙箱程序没有 setuid。加 `--no-sandbox` 启动。Ubuntu 22.04 和 RHEL 9 不受影响。
+- AppImage 需要 FUSE 2（Ubuntu 22.04 上是 `libfuse2`）。没有时用 `./SpaceKnife_<版本>_amd64.AppImage --appimage-extract-and-run` 运行，或者改用不需要 FUSE 的 deb、rpm 或便携版 tar.gz。
 
 ### 「后端没有启动」
 
-窗口出现了，但被一段提示盖住，状态栏显示「后端不可用」。标题下面写着原因：「后端 30 秒内没有就绪」「后端启动失败（退出码 N）」或「后端已退出（退出码 N）」。
+窗口出现了，但被一段提示盖住，状态栏显示「后端不可用」。标题下面写着原因，比如「后端已退出（退出码 N）」。
 
-- 重新打开 SpaceKnife。再次出现时，在终端里单独运行后端：`spaceknife-backend version`（位置见[命令行](../command-line/#程序在哪里)）。那里的报错就是需要报告的内容。
-- 在 Linux 和 macOS 上，从终端启动 SpaceKnife 可以看到后端自己的输出，每行以 `[backend]` 开头。
+- 重新打开 SpaceKnife。再次出现时，在终端里运行命令行：`spaceknife-cli version`（位置见[命令行](../command-line/#程序在哪里)）。那里的报错，连同标题下面的原因，就是需要报告的内容。
 
 ## 权限
 
@@ -67,7 +65,7 @@ MFT 快速扫描需要管理员权限。SpaceKnife 本身从不提权：它启�
 - **过一会儿又来问**：助手空闲 10 分钟后退出，之后的快速扫描会启动一个新的助手。
 - **永远不想看到提示**：关掉「设置 › 扫描与性能 › 扫描方式 › 需要时请求管理员权限」，或把「默认扫描方式」设为「硬扫描」。
 - **没看到提示，扫描停在「正在等待管理员授权…」**：去任务栏找 UAC 提示。「停止」可以取消这次扫描。
-- 「仅当前用户」安装时，助手从你的账户可写的文件夹启动。介意的话请选「所有用户」安装（装到 Program Files）。
+- 安装包只装给当前用户，所以助手从你的账户可写的文件夹启动。
 
 ### 完全磁盘访问权限
 

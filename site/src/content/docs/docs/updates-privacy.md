@@ -70,12 +70,12 @@ The file goes into the `updates` folder in the [data folder](../data-locations/)
 
 | Your copy | File it downloads |
 |---|---|
-| Windows installer | `SpaceKnife-<version>-Setup-x64.exe` |
+| Windows installer | `SpaceKnife_<version>_x64-setup.exe` |
 | Windows portable | `SpaceKnife-<version>-win-x64-portable.zip` |
-| macOS | `SpaceKnife-<version>-mac-arm64.dmg` or `…-mac-x64.dmg`, for your Mac |
-| deb | `spaceknife_<version>_amd64.deb` |
-| rpm | `spaceknife-<version>.x86_64.rpm` |
-| AppImage | `SpaceKnife-<version>-x86_64.AppImage` |
+| macOS | `SpaceKnife_<version>_aarch64.dmg` or `…_x64.dmg`, for your Mac |
+| deb | `SpaceKnife_<version>_amd64.deb` |
+| rpm | `SpaceKnife-<version>-1.x86_64.rpm` |
+| AppImage | `SpaceKnife_<version>_amd64.AppImage` |
 | Linux portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` |
 
 Then SpaceKnife checks the file:
@@ -104,7 +104,7 @@ A line under each button says what it does. Where your kind of install has no se
 
 | Your copy | Seamless update | The classic way |
 |---|---|---|
-| Windows installer | SpaceKnife closes, the installer runs silently in the background without showing its pages and replaces the old version, and SpaceKnife opens again. For an installation for all users, Windows asks once for administrator permission. | **Run the installer**: SpaceKnife quits and opens the installer's wizard; go through its steps to install the new version. It upgrades the old version in place. |
+| Windows installer | SpaceKnife closes, the installer runs silently in the background without showing its pages and replaces the old version, and SpaceKnife opens again. | **Run the installer**: SpaceKnife quits and opens the installer's wizard; go through its steps to install the new version. It upgrades the old version in place. |
 | Portable (Windows zip, Linux tar.gz) | SpaceKnife closes, puts the new program files in place itself (see below) and opens again. The `data` folder stays as it is. | **Replace it yourself**: shows the downloaded archive in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then unpack the archive over the old files, keeping the `data` folder. |
 | AppImage | SpaceKnife closes, the new AppImage (already made executable) takes the place of the old file, and it opens again. | **Replace it yourself**: shows the new AppImage in its folder, and SpaceKnife keeps running. Quit SpaceKnife, then replace the old file with it. |
 | macOS | None | **Open the disk image**: SpaceKnife quits and opens the disk image. Drag SpaceKnife into Applications to replace the old one, then [allow it once more](../install/#first-launch-allow-it-once). |
@@ -129,7 +129,7 @@ Once you click, it only starts a file that is directly in its `updates` folder a
 - **At the top**: your version, how this copy was installed and which versions are offered; what the last check found, when it ran and when the next automatic check is due. **Check for updates** checks now; **All releases** opens the [Releases page](https://github.com/DuskXi/SpaceKnife/releases). When a newer version is known, its update card is shown here too, and stays.
 - **Skipped series**: a release of a [skipped](#skipping-a-series) series is shown here too. The status reads "Version 0.4.2 is available (prompts for 0.4.x are off)", and the card has a line "Prompts for 0.4.x are off: no card, no badge, no automatic download." with **Turn prompts back on**, which makes the series speak up again. You can still download and install the release from this card.
 - **Updates**: the three update settings (check, download, versions to offer).
-- **Components**: the versions of SpaceKnife, Electron, Chromium, Node.js, the backend's Python and the protocol, and your system. **Copy version info** copies them, for a bug report.
+- **Components**: how this copy was installed, the versions of SpaceKnife, Tauri, the system's WebView, Rust and the protocol, and your system. **Copy version info** copies them, for a bug report.
 - **Release timeline**: the last 30 releases, newest first, marked **Current**, **New** (newer than yours) and **Preview**. Click one to read its notes in the interface language; the newest is open. **View on GitHub** opens its release page. The timeline comes from the last check, so it is there offline too; before the first check it is empty.
 
 ## Turning the check off
@@ -157,7 +157,7 @@ All of them go to GitHub, and only for updates:
 - The requests go through your proxy settings: the usual proxy environment variables, and on Windows and macOS the system's proxy settings.
 - The connection to GitHub is verified with HTTPS certificates.
 - GitHub limits requests without a token per address. When many computers share one address, a check can be refused for a while ("GitHub is limiting requests for now…"); SpaceKnife tries again later.
-- The command line (`spaceknife-backend scan`, `run`, `snapshot`) makes no network requests.
+- The command line (`spaceknife-cli scan`, `run`, `snapshot`) makes no network requests.
 
 ### On your computer
 

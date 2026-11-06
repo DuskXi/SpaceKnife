@@ -9,26 +9,26 @@ SpaceKnife is published on the [Releases page](https://github.com/DuskXi/SpaceKn
 
 | System | File | What it is |
 |---|---|---|
-| Windows 10 or later, x64 | `SpaceKnife-<version>-Setup-x64.exe` | Installer, for the current user or all users |
+| Windows 10 or later, x64 | `SpaceKnife_<version>_x64-setup.exe` | Installer, for the current user |
 | Windows 10 or later, x64 | `SpaceKnife-<version>-win-x64-portable.zip` | Portable: unzip and run, no installation |
 | Windows 11 on ARM | `SpaceKnife-<version>-win-arm64-portable.zip` | Portable, ARM (arm64) |
-| macOS 14 or later, Apple Silicon | `SpaceKnife-<version>-mac-arm64.dmg` | Disk image |
-| macOS 14 or later, Intel | `SpaceKnife-<version>-mac-x64.dmg` | Disk image |
+| macOS 14 or later, Apple Silicon | `SpaceKnife_<version>_aarch64.dmg` | Disk image |
+| macOS 14 or later, Intel | `SpaceKnife_<version>_x64.dmg` | Disk image |
 | macOS 14 or later | `SpaceKnife-<version>-mac-<arm64 or x64>-portable.zip` | Portable: unzip and run, data next to the app |
-| Ubuntu 22.04 or later, Debian family | `spaceknife_<version>_amd64.deb` | Package |
-| RHEL 9 or later, Fedora family | `spaceknife-<version>.x86_64.rpm` | Package |
-| Other Linux, x64 | `SpaceKnife-<version>-x86_64.AppImage` | Single file, needs FUSE 2 |
+| Ubuntu 22.04 or later, Debian family | `SpaceKnife_<version>_amd64.deb` | Package |
+| RHEL 9 or later, Fedora family | `SpaceKnife-<version>-1.x86_64.rpm` | Package |
+| Other Linux, x64 | `SpaceKnife_<version>_amd64.AppImage` | Single file, needs FUSE 2 |
 | Linux, x64 | `SpaceKnife-<version>-linux-x64-portable.tar.gz` | Portable: extract and run, no FUSE |
 | Linux, ARM (arm64) | `SpaceKnife-<version>-linux-arm64-portable.tar.gz` | Portable, ARM |
 
-On ARM, Windows and Linux have the portable archives; the installers and packages are x64 only (Windows on ARM can also run the x64 installer, emulated). There is no 32-bit Windows build. The Linux builds need glibc 2.34 or later (the level of RHEL 9; Ubuntu 22.04 has 2.35).
+On ARM, Windows and Linux have the portable archives; the installers and packages are x64 only (Windows on ARM can also run the x64 installer, emulated). There is no 32-bit Windows build. The Linux builds need glibc 2.34 or later (the level of RHEL 9; Ubuntu 22.04 has 2.35) and WebKitGTK 4.1. <!-- TODO: confirm the glibc floor of the Tauri builds (it follows the CI build machine). -->
 
 ### Check the download
 
 The in-app update checks the checksum for you (see [Updates and privacy](../updates-privacy/)). To check a file you downloaded yourself, compare its SHA-256 with the line for that file in the release's checksum files (`SHA256SUMS.txt` and the `SHA256SUMS-portable-…` / `SHA256SUMS-mac-…` files next to it):
 
 ```powershell
-Get-FileHash .\SpaceKnife-<version>-Setup-x64.exe -Algorithm SHA256
+Get-FileHash .\SpaceKnife_<version>_x64-setup.exe -Algorithm SHA256
 ```
 
 ```bash
@@ -36,21 +36,21 @@ sha256sum -c --ignore-missing SHA256SUMS.txt
 ```
 
 ```bash
-shasum -a 256 SpaceKnife-<version>-mac-arm64.dmg
+shasum -a 256 SpaceKnife_<version>_aarch64.dmg
 ```
 
 ## Windows
 
 ### Installer
 
-1. Run `SpaceKnife-<version>-Setup-x64.exe`.
+1. Run `SpaceKnife_<version>_x64-setup.exe`.
 2. The installer isn't code-signed yet, so on the first run SmartScreen warns about an unknown publisher. Click **More info**, then **Run anyway**.
-3. Choose who it is for: only you (the default, no administrator rights needed) or all users (asks for administrator rights). You can change the install folder.
+3. It installs for your account only, without administrator rights, into `%LOCALAPPDATA%\SpaceKnife` unless you pick another folder.
 
-The installer speaks English or Chinese, following the system language. It creates Start menu and desktop shortcuts and can start SpaceKnife when it is done.
+The installer speaks English or Chinese, following the system language. It creates a Start menu shortcut and can start SpaceKnife when it is done. The window is drawn by Microsoft Edge WebView2, which Windows 11 includes; on Windows 10 the installer sets it up when it is missing.
 
-:::note[Current user or all users]
-A current-user install lives in a folder your own account can write to. The [MFT quick scan](../first-scan/#scan-methods) starts its elevated, read-only scan helper from the install folder. If you want that program to sit where only administrators can change it, choose the all-users install (Program Files).
+:::note[A folder your account can write to]
+The install folder is one your own account can write to. The [MFT quick scan](../first-scan/#scan-methods) starts its elevated, read-only scan helper from there.
 :::
 
 ### Silent install
@@ -58,22 +58,22 @@ A current-user install lives in a folder your own account can write to. The [MFT
 For scripted deployment, the installer takes the usual switches:
 
 ```powershell
-.\SpaceKnife-<version>-Setup-x64.exe /S /currentuser
+.\SpaceKnife_<version>_x64-setup.exe /S
 ```
 
-Use `/allusers` instead of `/currentuser` for a machine-wide install (run it as administrator). To uninstall silently, run the `QuietUninstallString` from SpaceKnife's uninstall entry in the registry, which is `"Uninstall SpaceKnife.exe" /currentuser /S` in the install folder. The uninstaller copies itself to a temporary folder and runs from there, so the command returns at once. A silent uninstall keeps the snapshots, settings and logs; add `--delete-app-data` to remove them too.
+`/D=<folder>` (last on the line) picks another install folder. To uninstall silently, run the `QuietUninstallString` from SpaceKnife's uninstall entry in the registry, which is `"uninstall.exe" /S` in the install folder. A silent uninstall keeps the snapshots, settings and logs.
 
 ### Portable zip
 
-Unzip `SpaceKnife-<version>-win-x64-portable.zip` somewhere you can write (your user folder, a USB drive; not Program Files) and run `SpaceKnife.exe`. The first launch takes a few seconds longer while Windows checks the new files.
+Unzip `SpaceKnife-<version>-win-x64-portable.zip` somewhere you can write (your user folder, a USB drive; not Program Files) and run `spaceknife.exe`. It needs Microsoft Edge WebView2, which Windows 11 includes. The first launch takes a few seconds longer while Windows checks the new files.
 
-Next to `SpaceKnife.exe` there is a `data` folder. While it is there, SpaceKnife keeps everything in it (snapshots, settings, logs, cache) and writes nothing to your user profile. See [Portable mode](../data-locations/#portable-mode).
+Next to `spaceknife.exe` there is a `data` folder. While it is there, SpaceKnife keeps everything in it (snapshots, settings, logs, cache) and writes nothing to your user profile. See [Portable mode](../data-locations/#portable-mode).
 
 ## macOS
 
 ### Install
 
-Open the dmg and drag SpaceKnife into **Applications**. You need macOS 14 or later; take the `arm64` dmg for Apple Silicon and the `x64` dmg for Intel Macs.
+Open the dmg and drag SpaceKnife into **Applications**. You need macOS 14 or later; take the `aarch64` dmg for Apple Silicon and the `x64` dmg for Intel Macs.
 
 ### Portable zip
 
@@ -118,25 +118,25 @@ Scanning runs in a background process of SpaceKnife; macOS still shows its promp
 ### deb and rpm
 
 ```bash
-sudo apt install ./spaceknife_<version>_amd64.deb
+sudo apt install ./SpaceKnife_<version>_amd64.deb
 ```
 
 ```bash
-sudo dnf install ./spaceknife-<version>.x86_64.rpm
+sudo dnf install ./SpaceKnife-<version>-1.x86_64.rpm
 ```
 
-Both put the program in `/opt/SpaceKnife/`, the `spaceknife` command in `/usr/bin`, and add SpaceKnife to the app menu with its icon. The package manager installs the dependencies (the usual ones of a desktop app: GTK 3, NSS and so on).
+Both put the app (`spaceknife`) and the command line (`spaceknife-cli`) in `/usr/bin`, and add SpaceKnife to the app menu with its icon. The package manager installs the dependencies (WebKitGTK, GTK 3 and so on).
 
 ### AppImage
 
 ```bash
-chmod +x SpaceKnife-<version>-x86_64.AppImage
-./SpaceKnife-<version>-x86_64.AppImage
+chmod +x SpaceKnife_<version>_amd64.AppImage
+./SpaceKnife_<version>_amd64.AppImage
 ```
 
 The AppImage needs FUSE 2 (on Ubuntu 22.04, the package `libfuse2`). Without it, start it with `--appimage-extract-and-run`.
 
-From 0.3.2 on, the AppImage carries update information: `./SpaceKnife-<version>-x86_64.AppImage --appimage-updateinformation` prints it. AppImage update tools use it, and the `.zsync` file published next to the AppImage, to download only what changed.
+<!-- From 0.4.0 the release has no .AppImage.zsync (Tauri's AppImage carries no update information): SpaceKnife's own update check replaces the AppImage. -->
 
 ### Portable tar.gz
 
@@ -147,10 +147,6 @@ cd SpaceKnife-<version>-linux-x64-portable
 ```
 
 No FUSE needed. Like the Windows zip, it keeps all its data in the `data` folder next to the program ([portable mode](../data-locations/#portable-mode)).
-
-:::caution[Newer Ubuntu releases]
-In the AppImage and the tar.gz, Chromium's `chrome-sandbox` is not setuid. On distributions that restrict unprivileged user namespaces (the AppArmor rule Ubuntu has from 23.10 on), they may not start; run them with `--no-sandbox`. Ubuntu 22.04 and RHEL 9 are not affected.
-:::
 
 ## Upgrading
 
@@ -170,23 +166,24 @@ Whichever way you upgrade, your scans, snapshots and settings stay: they live ou
 
 | Install | How to remove it |
 |---|---|
-| Windows installer | Uninstall SpaceKnife from the app list in Windows Settings. It removes the program, the window's caches, the cache and the downloaded updates. Its second page, **Your data**, asks about the rest: tick **Also delete the snapshots, settings and logs** (unticked by default) to remove `%LOCALAPPDATA%\SpaceKnife` too. |
+| Windows installer | Uninstall SpaceKnife from the app list in Windows Settings. It removes the program; your snapshots, settings and logs stay. <!-- TODO: confirm what the Tauri uninstaller removes besides the program (its "delete the application data" box). --> |
 | Portable | Delete the folder. Its `data` folder goes with it. |
 | macOS | Quit SpaceKnife and move it from Applications to the Trash. |
 | deb | `sudo apt remove spaceknife` |
 | rpm | `sudo dnf remove spaceknife` |
 | AppImage | Delete the file. |
 
-Unless you tick that box, or remove a portable copy, your scans, snapshots and settings stay, so a later install picks them up again. To remove them by hand, delete the folders listed in [Data locations](../data-locations/). A folder set with `SPACEKNIFE_HOME` is never touched by the uninstaller.
+Unless you remove a portable copy, your scans, snapshots and settings stay, so a later install picks them up again. To remove them by hand, delete the folders listed in [Data locations](../data-locations/). A folder set with `SPACEKNIFE_HOME` is never touched by the uninstaller.
 
 ## The command line
 
-Every installed copy also has the backend's command line, for scans and snapshots in a terminal:
+Every installed copy also has the command line `spaceknife-cli`, for scans and snapshots in a terminal, and for [headless mode](../headless/):
 
 | Install | Path |
 |---|---|
-| Windows | `<install folder>\resources\backend\spaceknife-backend.exe` |
-| Linux deb or rpm | `/opt/SpaceKnife/resources/backend/spaceknife-backend` |
-| macOS | `/Applications/SpaceKnife.app/Contents/Resources/backend/spaceknife-backend` |
+| Windows | `<install folder>\spaceknife-cli.exe` |
+| Linux deb or rpm | `/usr/bin/spaceknife-cli` |
+| Portable | `spaceknife-cli` next to the program |
+| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli` |
 
 What it can do: [Command line](../command-line/).

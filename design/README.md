@@ -1,6 +1,6 @@
 # 设计 token 与图标
 
-三个前端的视觉一致，靠的是同一份源文件生成各端产物。
+界面的视觉靠同一份源文件生成的产物保持一致。
 
 | 源文件（手工编辑） | 内容 |
 |---|---|
@@ -16,31 +16,28 @@
 
 - 路径必须在基础令牌里存在：令牌只能换令牌，组只能进组；
 - 只能覆盖 color 和 shadow，`$type` 不能变，几何、字体、动效两个主题共用；
-- 每个颜色令牌都写一遍（与暗色同值的也写），新加颜色令牌时同时给出浅色值，`tools/tests/test_gen_design.py` 检查；与暗色同值的颜色列在那里的 `SAME_AS_DARK`；
+- 每个颜色令牌都写一遍（与暗色同值的也写），新加颜色令牌时同时给出浅色值，`tools/tests/` 里 gen_design 的测试检查；与暗色同值的颜色列在那里的 `SAME_AS_DARK`；
 - 别名在合并之后解析，所以 `visual.center.*`、`treemap.flat.*`、`color.bg.selected` 这类别名会跟着各自的主题走；覆盖文件里的别名也指向浅色的值。
 
-两个主题都要满足的对比度（外框文字、强调色和状态色、块上标签含大小行、标签形状、闪烁和选中环等，以及「层级对比」滑块拉满时各层不被夹成白或黑）也在 `tools/tests/test_gen_design.py` 里逐对检查；改色值后先跑它。
+两个主题都要满足的对比度（外框文字、强调色和状态色、块上标签含大小行、标签形状、闪烁和选中环等，以及「层级对比」滑块拉满时各层不被夹成白或黑）也在 `tools/tests/` 里 gen_design 的测试里逐对检查；改色值后先跑 `node --test "tools/tests/*.test.mjs"`。
 
 格式是 DTCG 的子集：`$value`、`$type`（可写在父组上继承）、`$description`、`{路径}` 别名。支持的类型：color（`#RRGGBB` / `#RRGGBBAA`）、dimension（px）、duration（ms）、number、fontWeight、fontFamily、cubicBezier、shadow。
 
 ## 生成
 
 ```bash
-uv run python tools/gen_design.py
+node tools/gen_design.mjs
 ```
 
 | 生成物 | 使用方 |
 |---|---|
-| `build/tokens.css` | Electron：CSS 变量 `--sk-color-bg-window` 等。`:root` 是浅色；`prefers-color-scheme: dark`（`data-theme="light"` 时除外）或 `data-theme="dark"` 时换成暗色，只写两个主题不同的变量；每块都带 `color-scheme` |
-| `build/tokens.ts` | Electron：类型化常量 `tokens`（暗色）、`themes.dark` / `themes.light`（WebGL 调色板，渲染进程经 `lib/theme.ts` 的 `palette()` 取当前主题）和 `cssVar` 映射 |
-| `build/qml/SpaceKnife/Tokens/` | Qt：QML 单例 `Tokens.colorBgWindow` 等，`Tokens.theme`（`"dark"` / `"light"`）决定两个主题不同的颜色；默认按系统的配色（Qt 6.5+ 的 `Qt.styleHints.colorScheme`，说不出时浅色），前端按「主题」设置改它 |
-| `build/xaml/Tokens.xaml` | WinUI3：ResourceDictionary，键名 `SkColorBgWindow`、`SkColorBgWindowBrush` 等；两个主题不同的放在 `ThemeDictionaries` 里：暗色的键是 `Default`（WinUI 找不到 `Dark` 和高对比度主题时都退回它），浅色的键是 `Light` |
-| `../packages/client/src/spaceknife_client/tokens.py` | Python 前端：`TOKENS["color.bg.window"]`（暗色）、`THEMES["light"][…]`、`token(path, theme)`；调用方传屏幕上的主题（不传是暗色） |
-| `build/icons/*.svg`、`build/icons.ts` | 三端图标 |
+| `build/tokens.css` | 界面（`apps/desktop`）：CSS 变量 `--sk-color-bg-window` 等。`:root` 是浅色；`prefers-color-scheme: dark`（`data-theme="light"` 时除外）或 `data-theme="dark"` 时换成暗色，只写两个主题不同的变量；每块都带 `color-scheme` |
+| `build/tokens.ts` | 界面：类型化常量 `tokens`（暗色）、`themes.dark` / `themes.light`（WebGL 调色板，经 `app/lib/theme.ts` 的 `palette()` 取当前主题）和 `cssVar` 映射 |
+| `build/icons/*.svg`、`build/icons.ts` | 图标 |
 
 生成物不要手改；CI 用 `--check` 检查它们是否与源文件一致。
 
 ## 待办
 
-- 浅色色板需要先经用户评审才算定稿：`themes/light.tokens.json` 现在是暂定稿，评审之前不合进发布。`uv run python tools/preview_design.py <out.html>` 并排画出两个主题，配合实机截图；要问清当初否决 B「纸本」的理由（TODO.md）。
-- 字体文件：M3 之前把 Geist、Geist Mono、Noto Sans SC 的字体文件（均为 OFL 许可）放进 `design/fonts/`，三端打包同一份。
+- 浅色色板需要先经用户评审才算定稿：`themes/light.tokens.json` 现在是暂定稿，评审之前不合进发布。原来用 `tools/preview_design.py` 并排画出两个主题（目前还没有 Node 版本），配合实机截图；要问清当初否决 B「纸本」的理由（TODO.md）。
+- 字体文件：M3 之前把 Geist、Geist Mono、Noto Sans SC 的字体文件（均为 OFL 许可）放进 `design/fonts/`，三端打包同一份。（现状：`apps/desktop` 用 `@fontsource-variable/geist`、`geist-mono`、`noto-sans-sc` 包自带的字体文件。）

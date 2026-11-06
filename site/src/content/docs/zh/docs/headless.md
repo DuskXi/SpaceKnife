@@ -3,22 +3,22 @@ title: 无头模式
 description: 不开窗口运行 SpaceKnife，在浏览器里使用，本机或别的设备都行；在网络上开放的风险，以及怎样保证安全。
 ---
 
-无头模式下 SpaceKnife 不开窗口：后端照常扫描，应用把界面通过 HTTP 提供出来，你在浏览器里使用 SpaceKnife。适合没有显示器的服务器或 NAS，或者从笔记本、平板访问家里的台式机。在浏览器里看到和做的一切，都发生在运行无头模式的那台电脑上。
+无头模式下 SpaceKnife 不开窗口：命令行程序 `spaceknife-cli` 像应用一样扫描，并把应用的界面通过 HTTP 提供出来，你在浏览器里使用 SpaceKnife。适合没有显示器的服务器或 NAS，或者从笔记本、平板访问家里的台式机。在浏览器里看到和做的一切，都发生在运行无头模式的那台电脑上。
 
 ## 启动
 
-给应用的可执行文件加上下面任意一个选项：
+运行 `spaceknife-cli headless`；要让别的设备访问，再加上监听的地址：
 
 ```bash
-SpaceKnife --headless                  # 只有本机能访问（127.0.0.1，端口 8375）
-SpaceKnife --listen 192.168.1.20       # 这台电脑的某个地址，端口 8375
-SpaceKnife --listen 0.0.0.0:9000       # 所有网络接口，端口 9000
+spaceknife-cli headless                          # 只有本机能访问（127.0.0.1，端口 8375）
+spaceknife-cli headless --listen 192.168.1.20    # 这台电脑的某个地址，端口 8375
+spaceknife-cli headless --listen 0.0.0.0:9000    # 所有网络接口，端口 9000
 ```
 
 它会打印要在浏览器里打开的地址，末尾带一个令牌，然后一直运行，直到你按 <kbd>Ctrl</kbd>+<kbd>C</kbd>：
 
 ```text
-SpaceKnife 无头模式 · 0.3.3
+SpaceKnife 无头模式 · 0.4.0
 在浏览器里打开：
   http://192.168.1.20:8375/#token=n3Vq…
 按 Ctrl+C 停止。
@@ -26,30 +26,32 @@ SpaceKnife 无头模式 · 0.3.3
 
 运行期间，终端里会显示浏览器的连接和断开，以及后端的警告和错误。完整日志照常写进日志文件（[数据位置](../data-locations/)）。
 
+`spaceknife-cli` 装在应用旁边（[在哪里](../command-line/#程序在哪里)）：
+
 | 安装方式 | 命令 |
 |---|---|
-| Windows 安装包，当前用户 | `%LOCALAPPDATA%\Programs\SpaceKnife\SpaceKnife --headless`（默认文件夹） |
-| Windows 安装包，所有用户 | `"C:\Program Files\SpaceKnife\SpaceKnife" --headless`（默认文件夹） |
-| Windows 便携版 | 在它的文件夹里 `SpaceKnife --headless` |
-| deb / rpm | `spaceknife --headless` |
-| Linux 便携版 | 在它的文件夹里 `./spaceknife --headless` |
-| AppImage | `./SpaceKnife-<版本>-x86_64.AppImage --headless` |
-| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/SpaceKnife --headless` |
+| Windows 安装包 | `%LOCALAPPDATA%\SpaceKnife\spaceknife-cli headless`（默认文件夹） |
+| Windows 便携版 | 在它的文件夹里 `.\spaceknife-cli headless` |
+| deb / rpm | `spaceknife-cli headless` |
+| Linux 便携版 | 在它的文件夹里 `./spaceknife-cli headless` |
+| macOS | `/Applications/SpaceKnife.app/Contents/MacOS/spaceknife-cli headless` |
 
-:::note[Windows：不要写 .exe]
-`SpaceKnife.exe` 是窗口程序，终端不会等它，它就没法提问，也没法用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 停止。它旁边有一个 `SpaceKnife.com`，这个小小的控制台程序负责启动它并等待它结束。命令提示符和 PowerShell 会先找 `.com` 再找 `.exe`，所以写 `SpaceKnife`，不加扩展名。
-:::
+它是控制台程序：终端会等它结束，<kbd>Ctrl</kbd>+<kbd>C</kbd> 就能停止。它提供的页面是 `spaceknife-cli` 旁边 `ui` 文件夹里构建好的界面；用 `--ui` 可以指定别的文件夹。
+
+<!-- TODO: confirm — the portable archives and the Windows installer put `ui` next to spaceknife-cli (apps/desktop/scripts/portable.mjs, src-tauri/tauri.bundle.json resources); the deb / rpm put it in /usr/lib/SpaceKnife/ui and the macOS app in Contents/Resources/ui, which spaceknife-cli doesn't look in yet (headless.rs default_ui_dir): there `--ui` is needed until it does. The AppImage has no way to run spaceknife-cli. -->
 
 ## 选项
 
 | 选项 | 作用 |
 |---|---|
-| `--headless` | 无头模式，只监听本机：`127.0.0.1:8375` |
-| `--listen <地址>` | 监听这个地址，同时启动无头模式 |
+| `--listen <地址>` | 监听这个地址。不写时只监听本机：`127.0.0.1:8375` |
 | `--yes` | 在网络上开放前不再询问。没有终端可以回答时必须加 |
 | `--tls-cert <文件>` | 用这个证书（PEM）提供 HTTPS，与 `--tls-key` 一起用 |
 | `--tls-key <文件>` | 证书的私钥（PEM） |
+| `--ui <文件夹>` | 要提供的构建好的界面（默认：程序旁边的 `ui` 文件夹） |
 | `--help` | 列出这些选项 |
+
+以前版本的应用接受的 `spaceknife-cli --headless` 和 `spaceknife-cli --listen <地址>` 仍然可用，等同于 `spaceknife-cli headless …`。
 
 地址可以这样写：
 
@@ -65,7 +67,7 @@ SpaceKnife 无头模式 · 0.3.3
 
 端口写 `0` 由系统挑一个空闲端口，打印出的地址里会带上它。
 
-退出码：回答了「否」、地址用不了、后端退出时是 `1`；选项写错，或者没有终端可以回答时是 `2`。用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或被系统停止时，Linux 和 macOS 上是 `0`；Windows 上 <kbd>Ctrl</kbd>+<kbd>C</kbd> 会立刻结束它，后端随之自行退出。
+退出码：回答了「否」、地址用不了、后端没有启动时是 `1`；选项写错、没有终端可以回答、证书读不了，或者 `ui` 文件夹里没有构建好的界面时是 `2`。用 <kbd>Ctrl</kbd>+<kbd>C</kbd> 或被系统停止时是 `0`。
 
 ## 在网络上开放
 
@@ -85,7 +87,7 @@ SpaceKnife 无头模式 · 0.3.3
 
 - **链接里的令牌**：每次启动都生成一个新的随机令牌，放在 `#` 后面，浏览器不会把这部分发给服务器。页面随后把它从地址栏里拿掉，保存在这个浏览器标签页里：刷新照样能连，分享或收藏的地址里也没有令牌。每个连接到后端的会话都要用它，所以重新启动之后旧链接就失效了，请打开新的地址。
 - **只认本站的页面**：浏览器发起的 WebSocket 必须来自这个服务器提供的页面。同一个浏览器里打开的其他网站，就算拿到令牌也连不上。
-- **后端不对外**：后端照旧只监听 `127.0.0.1`，由无头模式把浏览器的连接转发给它。页面本身的文件是公开的，里面没有任何关于你的文件的信息。
+- **只有一个地址**：页面和后端的 WebSocket 一起在你指定的地址上提供，没有别的端口在监听。页面本身的文件是公开的，里面没有任何关于你的文件的信息。
 
 :::caution[明文 HTTP]
 不提供证书时，传输的是明文 HTTP。同一网络上、或者传输途中的任何人，都能看到令牌和所有路径、文件名。在你管不了的网络上，请用 HTTPS 或 SSH 隧道。
@@ -94,7 +96,7 @@ SpaceKnife 无头模式 · 0.3.3
 **HTTPS**：用 PEM 文件提供证书和私钥，比如用 [mkcert](https://github.com/FiloSottile/mkcert) 为这台电脑的名字或地址签发：
 
 ```bash
-spaceknife --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.lan-key.pem
+spaceknife-cli headless --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.lan-key.pem
 ```
 
 这时打印出的地址以 `https://` 开头。浏览器对不信任的证书（自签名）会给出警告：请在用来访问的设备上安装你自己的证书颁发机构，不要直接点过警告。
@@ -102,7 +104,7 @@ spaceknife --listen 0.0.0.0 --tls-cert nas.lan.pem --tls-key nas.lan-key.pem
 **SSH 隧道**完全不需要开放端口。在服务器上只监听本机：
 
 ```bash
-spaceknife --headless
+spaceknife-cli headless
 ```
 
 在你的电脑上把一个本地端口转发过去，然后在这台电脑上打开打印出的地址（`http://localhost:8375/#token=…`）：
@@ -130,9 +132,9 @@ ssh -L 8375:localhost:8375 lenny@nas.lan
 
 ## 没有显示器的 Linux 服务器
 
-无头模式不需要 X11 或 Wayland：`--headless` 同时也是 Chromium 不连接显示器运行的开关，只写 `--listen` 时会自动加上。程序仍然需要它编译时链接的库（GTK 3、NSS、GBM、ALSA 和几个 X11 库，但不需要 X 服务器）：deb 和 rpm 包会自动装上；在精简系统上用 AppImage 或便携版时请自己安装（Ubuntu 上比如 `libgtk-3-0 libnss3 libgbm1 libasound2`）。
+`spaceknife-cli` 是控制台程序：不需要 X11 或 Wayland，也不需要窗口用的库（GTK、WebKitGTK）。在服务器上用便携版 tar.gz 就够了：解压后运行 `./spaceknife-cli headless`。
 
-Chromium 不加 `--no-sandbox` 就不能以 root 运行。请用你想查看其文件的那个用户运行 SpaceKnife；必须用 root 时再加 `--no-sandbox`。
+请用你想查看其文件的那个用户运行它。以 root 运行也可以，但浏览器里的一切操作都带着 root 的权限。
 
 作为 systemd 服务运行（`~/.config/systemd/user/spaceknife-headless.service`，然后 `systemctl --user enable --now spaceknife-headless`）：
 
@@ -141,7 +143,7 @@ Chromium 不加 `--no-sandbox` 就不能以 root 运行。请用你想查看其�
 Description=SpaceKnife headless mode
 
 [Service]
-ExecStart=/usr/bin/spaceknife --listen 192.168.1.20:8375 --yes
+ExecStart=/usr/bin/spaceknife-cli headless --listen 192.168.1.20:8375 --yes
 Restart=on-failure
 
 [Install]
@@ -152,4 +154,4 @@ WantedBy=default.target
 
 ## macOS 上
 
-运行应用包里的可执行文件（见上面的表格）。无头模式不在程序坞里显示图标。SpaceKnife 能读取哪些东西和应用里一样：要看到全部，请在那台 Mac 上给 SpaceKnife 授予「完全磁盘访问权限」（[安装与升级](../install/#完全磁盘访问权限)）。
+运行应用包里的 `spaceknife-cli`（见上面的表格）。无头模式不在程序坞里显示图标。访问受保护的位置时，macOS 以启动它的程序（通常是「终端」）的名义询问：要看到全部，请给那个程序授予「完全磁盘访问权限」（[安装与升级](../install/#完全磁盘访问权限)）。
