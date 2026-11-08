@@ -80,20 +80,21 @@ Installers are on the [Releases](https://github.com/DuskXi/SpaceKnife/releases) 
 
 | System | File |
 |---|---|
-| Windows 10+ x64 | `SpaceKnife_<version>_x64-setup.exe` (installs for the current user; not code-signed yet, so SmartScreen warns about an unknown publisher on first run: "More info › Run anyway") |
-| Ubuntu 22.04+ / Debian family | `SpaceKnife_<version>_amd64.deb` |
-| RHEL 9+ / Fedora family | `SpaceKnife-<version>-1.x86_64.rpm` |
-| Other Linux x64 | `SpaceKnife_<version>_amd64.AppImage` (needs FUSE 2, or run it with `--appimage-extract-and-run`) |
-| Windows 10+ x64, portable | `SpaceKnife-<version>-win-x64-portable.zip` (no installation: unzip anywhere and run `SpaceKnife.exe`; snapshots and settings stay in the `data` folder next to it; the first launch takes a few seconds longer while Windows checks the new files) |
-| Linux x64, portable | `SpaceKnife-<version>-linux-x64-portable.tar.gz` (extract anywhere and run `./spaceknife`, no FUSE needed; data stays in the `data` folder next to it) |
-| Windows 11 on ARM / ARM Linux, portable | `SpaceKnife-<version>-win-arm64-portable.zip` / `SpaceKnife-<version>-linux-arm64-portable.tar.gz` (the same portable copies, built for arm64; the installers are x64 only) |
-| macOS 14+, Apple Silicon | `SpaceKnife_<version>_aarch64.dmg` (preview: not notarized yet, see below) |
-| macOS 14+, Intel | `SpaceKnife_<version>_x64.dmg` (preview: not notarized yet, see below) |
+| Windows 10+ x64 | `SpaceKnife-<version>-Setup-x64.exe` (for the current user or all users; installs the WebView2 Runtime if it is missing; not code-signed yet, so SmartScreen warns about an unknown publisher on first run: "More info › Run anyway") |
+| Ubuntu 22.04+ / Debian family | `spaceknife_<version>_amd64.deb` |
+| RHEL 9+ / Fedora family | `spaceknife-<version>.x86_64.rpm` |
+| Other Linux x64 | `SpaceKnife-<version>-x86_64.AppImage` (needs FUSE 2, or run it with `--appimage-extract-and-run`) |
+| Windows 10+ x64, portable | `SpaceKnife-<version>-win-x64-portable.zip` (no installation: unzip anywhere and run `SpaceKnife.exe`; snapshots and settings stay in the `data` folder next to it; needs the WebView2 Runtime, which Windows 11 has; the first launch takes a few seconds longer while Windows checks the new files) |
+| Linux x64 / arm64, portable, small | `SpaceKnife-<version>-linux-<x64 or arm64>-tauri.tar.gz` (extract anywhere and run `./spaceknife`, no FUSE needed; data stays in the `data` folder next to it; uses the system's WebKitGTK 4.1, so not for RHEL 9) |
+| Linux x64 / arm64, portable, any distribution | `SpaceKnife-<version>-linux-<x64 or arm64>-portable.tar.gz` (the same, with its own engine (Electron), so it runs on RHEL 9 too; the name of 0.3.4's Linux portable) |
+| Windows 11 on ARM, portable | `SpaceKnife-<version>-win-arm64-portable.zip` (the Windows portable, built for arm64; the installers are x64 only) |
+| macOS 14+, Apple Silicon | `SpaceKnife-<version>-mac-arm64.dmg` (preview: not notarized yet, see below) |
+| macOS 14+, Intel | `SpaceKnife-<version>-mac-x64.dmg` (preview: not notarized yet, see below) |
 | macOS 14+, portable | `SpaceKnife-<version>-mac-<arm64 or x64>-portable.zip` (unzip anywhere and open `SpaceKnife.app`; data stays in the `data` folder next to it; allow it once as below) |
 
-Every release includes `SHA256SUMS.txt`. Each package also carries the command-line program `spaceknife-cli` next to the app.
+Every release includes `SHA256SUMS.txt` and the `SHA256SUMS-portable-…`, `SHA256SUMS-tauri-linux-…` and `SHA256SUMS-mac-…` lists. Each package also carries the command-line program `spaceknife-cli` next to the app. The window is the same everywhere: most downloads draw it with the system's web view (WebView2, WebKit, WebKitGTK) and are small; the rpm, the AppImage and the portable `…-linux-<arch>-portable.tar.gz` bring their own (Electron), because RHEL 9 has no WebKitGTK 4.1.
 
-> **Updating from 0.3.x:** from 0.3.5 on the release files have new names (see the table), which the update check of 0.3.x does not recognise (it finds the portable archives, whose names stay, but their Seamless update stops without changing anything). If you use 0.3.x, download 0.3.5 from the Releases page once by hand. Your settings are kept; snapshots saved by 0.3.x use an older format that 0.3.5 does not open (they stay on disk, and new scans save new ones).
+> **Updating from 0.3.4:** the release files keep 0.3.4's names, so 0.3.4's update check finds 0.3.5 and installs it like any update: **Seamless update** for the Windows installer (it installs 0.3.5 where 0.3.4 was, with the same shortcuts and one entry in the app list), the portable copies and the AppImage; the disk image or the package for the dmg, deb and rpm. Settings, file classes, tags and snapshots stay, and the snapshots 0.3.x saved still open. What changes for each kind of install: [Upgrading from 0.3.4](https://spaceknife.kaltsit.dev/docs/install/#upgrading-from-034).
 
 From 0.3.1 on, SpaceKnife checks this repository's releases at most once a day (it sends nothing about you or your files). A small update shows a badge at the top right; a bigger one also shows a summary. The new version is downloaded in the background and checked against the release's checksums. From 0.3.3 on, the update card offers two ways to install it: **Seamless update** (Windows installer, portable copies, AppImage) puts it in place and opens SpaceKnife again, the classic way opens the installer, the disk image or the package (or shows the file, to replace it yourself); **Skip 0.4.x** silences a whole series. SpaceKnife never installs an update by itself: nothing starts until you click. Turn the check off in Settings › About & updates.
 
@@ -125,7 +126,7 @@ The design documents are in Chinese:
 - Visualizations (engines, wire layouts, renderer components): [docs/visuals.md](docs/visuals.md)
 - Filter syntax (SKF 1): [docs/filter-syntax.md](docs/filter-syntax.md)
 - Design tokens and icons: [design/README.md](design/README.md)
-- Packaging and releases (Windows NSIS, Linux AppImage / deb / rpm): [docs/packaging.md](docs/packaging.md)
+- Packaging and releases (installers, portable copies, the Tauri and Electron shells, updates): [docs/packaging.md](docs/packaging.md)
 
 ## Development
 
@@ -151,7 +152,13 @@ Run the app window (the backend runs inside the app process):
 cd apps/desktop && pnpm install && pnpm tauri dev
 ```
 
-Build the installers (`pnpm bundle`: NSIS on Windows, AppImage / deb / rpm on Linux, app / dmg on macOS) and the portable archives (`pnpm bundle:portable`, after `pnpm bundle`), in `apps/desktop`:
+The same interface also runs in the Electron shell (`apps/electron-shell`: the rpm, the AppImage and the Linux portable that brings its own engine use it, as RHEL 9 has no WebKitGTK 4.1). It starts `spaceknife-cli serve` as its backend and loads the built interface:
+
+```bash
+cargo build -p sk-server --bin spaceknife-cli && pnpm -C apps/desktop generate && pnpm -C apps/electron-shell install && pnpm -C apps/electron-shell dev
+```
+
+Build the Tauri bundles (`pnpm bundle`: NSIS on Windows, AppImage / deb / rpm on Linux, app / dmg on macOS) and the portable archives (`pnpm bundle:portable`, after `pnpm bundle`), in `apps/desktop`; the Electron shell's packages are `pnpm -C apps/electron-shell package` (which of them a release publishes: [docs/packaging.md](docs/packaging.md)):
 
 ```bash
 pnpm bundle && pnpm bundle:portable
@@ -215,9 +222,15 @@ node tools/gen_design.mjs --check && node --test "tools/tests/*.test.mjs"
 cd apps/desktop && pnpm typecheck && pnpm test
 ```
 
+```bash
+cd apps/electron-shell && pnpm typecheck && pnpm test
+```
+
+`cargo test --workspace` also replays the parity gate (`tests/parity`): the Rust backend's answers over the protocol, compared with what 0.3.4's Python backend answered to the same scenarios. More in [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-[MIT](LICENSE). The installers carry the third-party licenses in a `licenses` folder next to the app's resources (see [docs/packaging.md](docs/packaging.md)).
+[MIT](LICENSE). The installers carry the third-party licenses in a `licenses` folder with the app (`resources/licenses` in the Electron builds; see [docs/packaging.md](docs/packaging.md)).
 
 ## Repository layout
 
@@ -230,6 +243,8 @@ cd apps/desktop && pnpm typecheck && pnpm test
 | `crates/sk-server` | WebSocket server and the command line `spaceknife-cli` (scan, run, snapshot, serve, headless) |
 | `design/tokens`, `design/icons` | Design tokens and icon sources; `design/build` is generated |
 | `apps/desktop` | The desktop app: Tauri 2 (`src-tauri`) with a Nuxt 4 / Vue 3 interface (`app`); bundles and portable archives |
-| `packaging` | Smoke tests of the built packages |
+| `apps/electron-shell` | The Electron shell for where Tauri can't run (main process and preload; the interface is `apps/desktop`'s) |
+| `packaging` | Tests of the built packages (smoke, headless, updates, also from 0.3.4) and the Windows console launcher `SpaceKnife.com` |
+| `tests/parity` | The parity gate: the same protocol scenarios against 0.3.4's backend and the Rust one |
 | `site` | The website (Astro, GitHub Pages) |
 | `tools` | Code generation and developer tools (design tokens: `gen_design.mjs`; releases: `release.mjs`; screenshots: `demo/screenshots.mjs`) |

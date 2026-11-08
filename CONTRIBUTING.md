@@ -14,7 +14,12 @@ Thanks for your interest! SpaceKnife is a small, MIT-licensed project and every 
 
 ## Development setup
 
-You need a stable [Rust](https://rustup.rs/) toolchain (edition 2024), Node.js 24 and pnpm 10. On Linux, Tauri also needs `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf`.
+You need:
+
+- a stable [Rust](https://rustup.rs/) toolchain (edition 2024; CI uses the newest stable, so update with `rustup update` when clippy there finds something yours doesn't), with rustfmt and clippy;
+- Node.js 24 and pnpm 10;
+- on Linux, the libraries the Tauri app builds against: `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf`; on Windows, the MSVC build tools and the WebView2 Runtime (Windows 11 has it); on macOS, the Xcode command line tools;
+- only for the live parity run (below): Python 3.12 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 cargo build
@@ -30,21 +35,68 @@ pnpm tauri dev
 
 The last command (in `apps/desktop`) starts the Tauri app; the backend (`crates/sk-server`) runs inside the app process. More commands (CLI scans with `spaceknife-cli`, demos, installers) are in the [README](README.md#development) and [docs/packaging.md](docs/packaging.md).
 
+### Two shells, one interface
+
+The interface in `apps/desktop/app` (Nuxt 4 + Vue 3) runs in two shells. It talks to its host only through `window.sk` (`app/shared/api.ts`), so it never needs to know which one it is in:
+
+| Shell | Folder | Where it ships | The backend |
+|---|---|---|---|
+| Tauri 2 (the default) | `apps/desktop/src-tauri` | Windows installer and portables, macOS, the deb, the small Linux portable | inside the app (`sk_server::start`) |
+| Electron (a fallback where Tauri can't run) | `apps/electron-shell` (main process and preload only) | the RHEL 9 rpm (no WebKitGTK 4.1 there), the AppImage, the Linux portable under 0.3.4's file name | the child process `spaceknife-cli serve --token-stdin` |
+
+A change to the interface has to work in both. To try the Electron shell from a checkout:
+
+```bash
+cargo build -p sk-server --bin spaceknife-cli
+pnpm -C apps/desktop generate
+pnpm -C apps/electron-shell install
+pnpm -C apps/electron-shell dev
+```
+
+It loads the built interface from `apps/desktop/.output/public` and starts `target/debug/spaceknife-cli` (or `target/release`; `SPACEKNIFE_CLI` names another one). Set `SPACEKNIFE_HOME` to an empty folder to keep your experiments away from your real snapshots and settings.
+
+### The parity gate
+
+The Rust backend speaks the same protocol as 0.3.4's Python backend, and `tests/parity` keeps it that way: the same scenarios run against both over the WebSocket protocol and their normalized answers are compared ([tests/parity/README.md](tests/parity/README.md)). Two ways to run it:
+
+- **Replay** (part of `cargo test --workspace`): `cargo test -p sk-server --test parity_replay` compares `spaceknife-cli serve` with the answers recorded from 0.3.4 in `tests/parity/golden/<platform>/`. No Python needed.
+- **Live**, against a worktree of `v0.3.4`: `uv run tests/parity/parity.py run --ref <0.3.4 worktree> --cand target/debug/spaceknife-cli`. Re-record the goldens with `record` on Windows and Linux after you change a scenario.
+
+A difference is either a bug in the Rust backend (fix it, with a test that fails first) or a deliberate change, which goes into `tests/parity/known_diffs.json` with the reason.
+
 ## Before you open a pull request
 
-Run the same checks as CI:
+Run the same checks as CI. Rust (the workspace, then the Windows console launcher `SpaceKnife.com`, a workspace of its own):
 
 ```bash
 cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace
 ```
 
 ```bash
+cargo clippy --manifest-path packaging/console-launcher/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path packaging/console-launcher/Cargo.toml
+```
+
+Generated files, the tools and the translations:
+
+```bash
+cargo run -p sk-protocol --bin gen-ts -- --check && node tools/gen_design.mjs --check && node tools/gen_pinyin.mjs --check
+```
+
+```bash
+node --test "tools/tests/*.test.mjs" && node tools/i18n_check.mjs
+```
+
+The interface and the Electron shell:
+
+```bash
 cd apps/desktop && pnpm typecheck && pnpm test
 ```
 
 ```bash
-node tools/gen_design.mjs --check && node tools/i18n_check.mjs && node --test "tools/tests/*.test.mjs"
+cd apps/electron-shell && pnpm typecheck && pnpm test
 ```
+
+If you changed the documentation or the website, also run `pnpm -C site build`. A bug fix comes with a test that fails without it.
 
 Guidelines:
 
@@ -73,11 +125,27 @@ By contributing you agree that your contribution is licensed under the [MIT Lice
 
 ### 开发环境
 
-需要 stable 版 [Rust](https://rustup.rs/) 工具链（edition 2024）、Node.js 24 和 pnpm 10；Linux 上 Tauri 还需要上方英文部分列出的几个系统库。安装与启动命令同上方英文部分（`cargo build`、在 `apps/desktop` 里 `pnpm install`、`pnpm tauri dev`；后端在应用进程内运行），更多命令见 [README](README.zh-CN.md#开发环境) 和 [docs/packaging.md](docs/packaging.md)。
+需要 stable 版 [Rust](https://rustup.rs/) 工具链（edition 2024，带 rustfmt 和 clippy；CI 用最新的 stable，CI 上的 clippy 报了本机没报的问题时先 `rustup update`）、Node.js 24 和 pnpm 10；Linux 上 Tauri 应用还需要上方英文部分列出的几个系统库，Windows 上需要 MSVC 生成工具和 WebView2 Runtime（Windows 11 自带），macOS 上需要 Xcode 命令行工具；只有在线运行对等关卡（见下）时才需要 Python 3.12 和 [uv](https://docs.astral.sh/uv/)。安装与启动命令同上方英文部分（`cargo build`、在 `apps/desktop` 里 `pnpm install`、`pnpm tauri dev`；后端在应用进程内运行），更多命令见 [README](README.zh-CN.md#开发环境) 和 [docs/packaging.md](docs/packaging.md)。
+
+**两个外壳，同一套界面**：`apps/desktop/app` 里的界面（Nuxt 4 + Vue 3）跑在两个外壳里，只经 `window.sk`（`app/shared/api.ts`）和宿主打交道，不需要知道自己在哪个外壳里。
+
+| 外壳 | 位置 | 用在哪些发布文件 | 后端 |
+|---|---|---|---|
+| Tauri 2（默认） | `apps/desktop/src-tauri` | Windows 安装包和便携版、macOS、deb、小巧的 Linux 便携版 | 在应用进程里（`sk_server::start`） |
+| Electron（只在 Tauri 跑不了的地方兜底） | `apps/electron-shell`（只有主进程和 preload） | RHEL 9 的 rpm（那里没有 WebKitGTK 4.1）、AppImage、沿用 0.3.4 文件名的 Linux 便携版 | 子进程 `spaceknife-cli serve --token-stdin` |
+
+改界面要两个外壳都能用。从源码试 Electron 外壳：`cargo build -p sk-server --bin spaceknife-cli`，`pnpm -C apps/desktop generate`，然后 `pnpm -C apps/electron-shell install`、`pnpm -C apps/electron-shell dev`。它从 `apps/desktop/.output/public` 加载构建好的界面，启动 `target/debug/spaceknife-cli`（或 `target/release` 里的；`SPACEKNIFE_CLI` 可以另指一个）。把 `SPACEKNIFE_HOME` 设成一个空文件夹，试验就不会碰到你真实的快照和设置。
+
+**对等关卡**：Rust 后端和 0.3.4 的 Python 后端说同一个协议，`tests/parity` 守着这一点：同样的场景经 WebSocket 协议分别跑在两个后端上，规范化后的回答逐项比较（[tests/parity/README.md](tests/parity/README.md)）。两种跑法：
+
+- **回放**（包含在 `cargo test --workspace` 里）：`cargo test -p sk-server --test parity_replay` 拿 `spaceknife-cli serve` 和 `tests/parity/golden/<平台>/` 里从 0.3.4 录下的回答比较，不需要 Python。
+- **在线**，对着 `v0.3.4` 的 worktree：`uv run tests/parity/parity.py run --ref <0.3.4 的 worktree> --cand target/debug/spaceknife-cli`。改了场景之后，在 Windows 和 Linux 上用 `record` 重新录金样。
+
+出现差异时，要么是 Rust 后端的缺陷（修掉，并带一个修之前会失败的测试），要么是有意的改变，写进 `tests/parity/known_diffs.json` 并注明原因。
 
 ### 提交 PR 之前
 
-运行与 CI 相同的检查（命令见上方英文部分）。约定：
+运行与 CI 相同的检查（命令见上方英文部分）：Rust 工作区的 fmt、clippy、test，`packaging/console-launcher`（Windows 的 `SpaceKnife.com`，自成一个工作区）的 clippy 和 test，生成文件的检查（`gen-ts --check`、`gen_design.mjs --check`、`gen_pinyin.mjs --check`），`tools/tests` 和 `i18n_check.mjs`，`apps/desktop` 与 `apps/electron-shell` 各自的 `pnpm typecheck && pnpm test`；改了文档或官网时再跑 `pnpm -C site build`。修缺陷要带一个没有这个修复就会失败的测试。约定：
 
 - **与周围代码保持一致**：命名、注释密度、写法。Rust 代码用 `cargo fmt` 格式化、clippy 无警告；协议消息是 `crates/sk-protocol` 里的 serde 类型（TypeScript 一侧用 `cargo run -p sk-protocol --bin gen-ts` 生成）；日志用 `tracing`。界面是 Vue 3 加 TypeScript。
 - **PR 保持专注**：一个 PR 做一件事，简短说明做了什么、为什么；行为变化要带测试。

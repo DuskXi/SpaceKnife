@@ -80,20 +80,21 @@ SpaceKnife 用嵌套树图实时展示每个文件夹、每个文件占了多少
 
 | 系统 | 文件 |
 |---|---|
-| Windows 10+ x64 | `SpaceKnife_<版本>_x64-setup.exe`（安装到当前用户；还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」，点「更多信息 › 仍要运行」） |
-| Ubuntu 22.04+ / Debian 系 | `SpaceKnife_<版本>_amd64.deb` |
-| RHEL 9+ / Fedora 系 | `SpaceKnife-<版本>-1.x86_64.rpm` |
-| 其他 Linux x64 | `SpaceKnife_<版本>_amd64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
-| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
-| Linux x64 便携版 | `SpaceKnife-<版本>-linux-x64-portable.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里） |
-| ARM 版 Windows 11 / ARM Linux 便携版 | `SpaceKnife-<版本>-win-arm64-portable.zip` / `SpaceKnife-<版本>-linux-arm64-portable.tar.gz`（同样的便携版，为 arm64 构建；安装包只有 x64） |
-| macOS 14+，Apple Silicon | `SpaceKnife_<版本>_aarch64.dmg`（预览版：还没经过苹果公证，见下文） |
-| macOS 14+，Intel | `SpaceKnife_<版本>_x64.dmg`（预览版：还没经过苹果公证，见下文） |
+| Windows 10+ x64 | `SpaceKnife-<版本>-Setup-x64.exe`（可装给当前用户或所有用户；缺少 WebView2 Runtime 时会装上它；还没有代码签名，第一次运行时 SmartScreen 会提示「未知发布者」，点「更多信息 › 仍要运行」） |
+| Ubuntu 22.04+ / Debian 系 | `spaceknife_<版本>_amd64.deb` |
+| RHEL 9+ / Fedora 系 | `spaceknife-<版本>.x86_64.rpm` |
+| 其他 Linux x64 | `SpaceKnife-<版本>-x86_64.AppImage`（需要 FUSE 2，或加 `--appimage-extract-and-run` 运行） |
+| Windows 10+ x64 便携版 | `SpaceKnife-<版本>-win-x64-portable.zip`（免安装：解压到任意位置，运行 `SpaceKnife.exe`；快照和设置都存在旁边的 `data` 文件夹里；需要 WebView2 Runtime，Windows 11 自带；解压后第一次启动会慢几秒，Windows 要先检查这些新文件） |
+| Linux x64 / arm64 便携版，小巧的一种 | `SpaceKnife-<版本>-linux-<x64 或 arm64>-tauri.tar.gz`（解压后运行 `./spaceknife`，不需要 FUSE；数据存在旁边的 `data` 文件夹里；用系统的 WebKitGTK 4.1，所以不适用于 RHEL 9） |
+| Linux x64 / arm64 便携版，任意发行版 | `SpaceKnife-<版本>-linux-<x64 或 arm64>-portable.tar.gz`（同样用法，自带引擎（Electron），RHEL 9 上也能用；和 0.3.4 的 Linux 便携版同名） |
+| ARM 版 Windows 11 便携版 | `SpaceKnife-<版本>-win-arm64-portable.zip`（为 arm64 构建的 Windows 便携版；安装包只有 x64） |
+| macOS 14+，Apple Silicon | `SpaceKnife-<版本>-mac-arm64.dmg`（预览版：还没经过苹果公证，见下文） |
+| macOS 14+，Intel | `SpaceKnife-<版本>-mac-x64.dmg`（预览版：还没经过苹果公证，见下文） |
 | macOS 14+ 便携版 | `SpaceKnife-<版本>-mac-<arm64 或 x64>-portable.zip`（解压到任意位置，打开 `SpaceKnife.app`；数据存在旁边的 `data` 文件夹里；第一次打开同样要按下文放行一次） |
 
-每个版本都附带 `SHA256SUMS.txt`。每个安装包都在应用旁边带上命令行程序 `spaceknife-cli`。
+每个版本都附带 `SHA256SUMS.txt` 以及 `SHA256SUMS-portable-…`、`SHA256SUMS-tauri-linux-…`、`SHA256SUMS-mac-…` 校验清单。每个安装包都在应用旁边带上命令行程序 `spaceknife-cli`。各个版本的窗口都一样：多数下载用系统的网页视图（WebView2、WebKit、WebKitGTK）绘制，体积很小；rpm、AppImage 和便携版 `…-linux-<架构>-portable.tar.gz` 自带引擎（Electron），因为 RHEL 9 没有 WebKitGTK 4.1。
 
-> **从 0.3.x 升级：** 从 0.3.5 起发布文件换了名字（见上表），0.3.x 的更新检查认不出来（便携版的名字没变，它找得到，但「无缝更新」会中途停下、什么也不改）。还在用 0.3.x 的话，请到 Releases 页面手动下载一次 0.3.5。设置会保留；0.3.x 保存的快照是旧格式，0.3.5 打不开（文件仍留在磁盘上，新的扫描会保存新快照）。
+> **从 0.3.4 升级：** 发布文件沿用 0.3.4 的名字，0.3.4 的更新检查能找到 0.3.5，像平常的更新一样装上：Windows 安装版（把 0.3.5 装在 0.3.4 原来的位置，快捷方式不变，应用列表里只有一项）、便携版和 AppImage 用「无缝更新」；dmg、deb 和 rpm 打开磁盘映像或安装包。设置、文件类别、标签和快照都保留，0.3.x 存的快照照样能打开。每种安装方式有什么变化：[从 0.3.4 升级](https://spaceknife.kaltsit.dev/zh/docs/install/#从-034-升级)。
 
 从 0.3.1 起，SpaceKnife 每天最多检查一次本仓库的发布（不发送任何关于你或你的文件的信息）。小版本只在右上角显示徽章；版本跨度更大时还会显示更新概要。新版本在后台下载，并按发布里的校验和核对。从 0.3.3 起，更新卡片提供两种安装方式：「无缝更新」（Windows 安装版、便携版和 AppImage）换上新版本并重新打开 SpaceKnife，经典方式打开安装程序、磁盘映像或安装包（或者显示下载的文件，由你自己替换）；「跳过 0.4.x」让整个系列不再提示。SpaceKnife 从不自己安装更新：只有你点了才会开始。可以在「设置 › 关于与更新」里关掉检查。
 
@@ -123,7 +124,7 @@ macOS 版还没有经过苹果公证，第一次打开会被系统拦下，需�
 - 可视化（引擎、线上布局、前端组件）：[docs/visuals.md](docs/visuals.md)
 - 过滤语法（SKF 1）：[docs/filter-syntax.md](docs/filter-syntax.md)
 - 设计 token 与图标：[design/README.md](design/README.md)
-- 打包与发布（Windows NSIS、Linux AppImage / deb / rpm）：[docs/packaging.md](docs/packaging.md)
+- 打包与发布（安装包、便携版、Tauri 与 Electron 两个外壳、更新）：[docs/packaging.md](docs/packaging.md)
 
 ## 开发环境
 
@@ -149,7 +150,13 @@ cargo test --workspace
 cd apps/desktop && pnpm install && pnpm tauri dev
 ```
 
-在 `apps/desktop` 里打安装包（`pnpm bundle`：Windows 上是 NSIS，Linux 上是 AppImage / deb / rpm，macOS 上是 app / dmg）和便携版（`pnpm bundle:portable`，在 `pnpm bundle` 之后）：
+同一套界面也跑在 Electron 外壳里（`apps/electron-shell`：RHEL 9 没有 WebKitGTK 4.1，rpm、AppImage 和自带引擎的 Linux 便携版用它）。它以 `spaceknife-cli serve` 为后端，加载构建好的界面：
+
+```bash
+cargo build -p sk-server --bin spaceknife-cli && pnpm -C apps/desktop generate && pnpm -C apps/electron-shell install && pnpm -C apps/electron-shell dev
+```
+
+在 `apps/desktop` 里打 Tauri 的安装包（`pnpm bundle`：Windows 上是 NSIS，Linux 上是 AppImage / deb / rpm，macOS 上是 app / dmg）和便携版（`pnpm bundle:portable`，在 `pnpm bundle` 之后）；Electron 外壳的安装包是 `pnpm -C apps/electron-shell package`（发布时各用哪一个，见 [docs/packaging.md](docs/packaging.md)）：
 
 ```bash
 pnpm bundle && pnpm bundle:portable
@@ -213,9 +220,15 @@ node tools/gen_design.mjs --check && node --test "tools/tests/*.test.mjs"
 cd apps/desktop && pnpm typecheck && pnpm test
 ```
 
+```bash
+cd apps/electron-shell && pnpm typecheck && pnpm test
+```
+
+`cargo test --workspace` 还会回放对等关卡（`tests/parity`）：Rust 后端经协议给出的回答，和 0.3.4 的 Python 后端对同样场景的回答比较。更多见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 ## 许可证
 
-[MIT](LICENSE)。安装包里附带的第三方许可证在应用资源旁的 `licenses` 文件夹里（[docs/packaging.md](docs/packaging.md)）。
+[MIT](LICENSE)。安装包里附带的第三方许可证在随应用一起装好的 `licenses` 文件夹里（Electron 版在 `resources/licenses`；见 [docs/packaging.md](docs/packaging.md)）。
 
 ## 仓库结构
 
@@ -228,6 +241,8 @@ cd apps/desktop && pnpm typecheck && pnpm test
 | `crates/sk-server` | WebSocket 服务与命令行 `spaceknife-cli`（scan、run、snapshot、serve、headless） |
 | `design/tokens`、`design/icons` | 设计 token 与图标源文件；`design/build` 是生成物 |
 | `apps/desktop` | 桌面应用：Tauri 2（`src-tauri`）加 Nuxt 4 / Vue 3 界面（`app`）；安装包与便携版 |
-| `packaging` | 安装包的冒烟测试 |
+| `apps/electron-shell` | Tauri 跑不了的地方用的 Electron 外壳（主进程和 preload；界面就是 `apps/desktop` 的） |
+| `packaging` | 安装包的测试（冒烟、无头模式、更新，包括从 0.3.4 更新）和 Windows 的控制台启动器 `SpaceKnife.com` |
+| `tests/parity` | 对等关卡：同一批协议场景分别跑在 0.3.4 的后端和 Rust 后端上 |
 | `site` | 官网（Astro，GitHub Pages） |
 | `tools` | 代码生成与开发工具（设计 token：`gen_design.mjs`；发布：`release.mjs`；截图：`demo/screenshots.mjs`） |
