@@ -57,16 +57,20 @@ impl Buf {
     /// `bytes` zeroed bytes of plain memory.
     pub(crate) fn heap(bytes: usize) -> Buf {
         let layout = Layout::from_size_align(bytes.max(ALIGN), ALIGN).expect("buffer too large");
+        Buf::try_heap(bytes).unwrap_or_else(|| std::alloc::handle_alloc_error(layout))
+    }
+
+    /// [`Buf::heap`], or None when there is not that much memory (what a file says it holds is
+    /// asked for this way: a refusal is an error, not an abort).
+    pub(crate) fn try_heap(bytes: usize) -> Option<Buf> {
+        let layout = Layout::from_size_align(bytes.max(ALIGN), ALIGN).ok()?;
         // SAFETY: the layout has a non-zero size.
-        let ptr = unsafe { alloc_zeroed(layout) };
-        let Some(ptr) = NonNull::new(ptr) else {
-            std::alloc::handle_alloc_error(layout)
-        };
-        Buf {
+        let ptr = NonNull::new(unsafe { alloc_zeroed(layout) })?;
+        Some(Buf {
             ptr,
             bytes,
             backing: Backing::Heap(layout),
-        }
+        })
     }
 
     /// Takes over a vector (a name image built aside). The vector is never touched again.
@@ -83,11 +87,14 @@ impl Buf {
     }
 
     /// `bytes` zeroed bytes in a new self-deleting file under `dir`. `growable`: keeps the file
-    /// so [`Buf::grow_mapped`] can extend it in place.
+    /// so [`Buf::grow_mapped`] can extend it in place. The file's blocks are reserved first
+    /// ([`reserve`]): no room on the disk is an error here (the store then keeps the buffer in
+    /// plain memory), never a SIGBUS later.
     pub(crate) fn mapped(bytes: usize, dir: &Path, growable: bool) -> io::Result<Buf> {
         let size = bytes.max(MIN_MAPPED);
         std::fs::create_dir_all(dir)?;
         let file = tempfile::tempfile_in(dir)?;
+        reserve(&file, 0, size as u64)?;
         file.set_len(size as u64)?;
         let map = memmap2::MmapOptions::new().len(size).map_raw(&file)?;
         let ptr = NonNull::new(map.as_mut_ptr()).expect("mapping pointer");
@@ -112,6 +119,7 @@ impl Buf {
         let size = bytes.max(MIN_MAPPED);
         let current = file.metadata().ok()?.len();
         if (size as u64) > current {
+            reserve(file, current, size as u64).ok()?;
             file.set_len(size as u64).ok()?;
         }
         let map = memmap2::MmapOptions::new()
@@ -155,6 +163,93 @@ impl Buf {
             Backing::Mapped { file: Some(f), .. } => Some(Arc::as_ptr(f) as usize),
             _ => None,
         }
+    }
+}
+
+/// Gives `file` real blocks for its bytes `from..to` before they are mapped. A mapping of a
+/// sparse file (what `set_len` makes on ext4, XFS, Btrfs, APFS, tmpfs) has no room behind its
+/// pages: the first write to one once the disk is full is SIGBUS, which kills the process (the
+/// app, not just a backend). Reserved blocks make "no room" an error up front instead.
+///
+/// Linux `fallocate`, macOS `F_PREALLOCATE`, other systems `posix_fallocate`. A file system that
+/// cannot reserve at all (no `fallocate`: some network and FUSE file systems, older ZFS) is
+/// mapped as before. Windows needs nothing: `set_len` gives an NTFS file its clusters (a file is
+/// not sparse unless asked to be), and fails when there is no room.
+pub(crate) fn reserve(file: &File, from: u64, to: u64) -> io::Result<()> {
+    if to <= from {
+        return Ok(());
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        use std::os::fd::AsRawFd;
+        let (Ok(at), Ok(len)) = (
+            libc::off_t::try_from(from),
+            libc::off_t::try_from(to - from),
+        ) else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
+        // SAFETY: a valid descriptor; fallocate has no other preconditions.
+        if unsafe { libc::fallocate(file.as_raw_fd(), 0, at, len) } == 0 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::EOPNOTSUPP | libc::ENOSYS) => Ok(()), // cannot reserve: as before
+            _ => Err(err),
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        let Ok(len) = libc::off_t::try_from(to - from) else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
+        // past the blocks the file has: contiguous if it can be, else wherever
+        let mut store = libc::fstore_t {
+            fst_flags: libc::F_ALLOCATECONTIG | libc::F_ALLOCATEALL,
+            fst_posmode: libc::F_PEOFPOSMODE,
+            fst_offset: 0,
+            fst_length: len,
+            fst_bytesalloc: 0,
+        };
+        // SAFETY: a valid descriptor and a valid fstore_t for F_PREALLOCATE.
+        if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_PREALLOCATE, &raw mut store) } != -1 {
+            return Ok(());
+        }
+        store.fst_flags = libc::F_ALLOCATEALL;
+        // SAFETY: as above.
+        if unsafe { libc::fcntl(file.as_raw_fd(), libc::F_PREALLOCATE, &raw mut store) } != -1 {
+            return Ok(());
+        }
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::ENOTSUP | libc::EOPNOTSUPP | libc::EINVAL) => Ok(()), // cannot: as before
+            _ => Err(err),
+        }
+    }
+    #[cfg(all(
+        unix,
+        not(any(target_os = "linux", target_os = "android", target_os = "macos"))
+    ))]
+    {
+        use std::os::fd::AsRawFd;
+        let (Ok(at), Ok(len)) = (
+            libc::off_t::try_from(from),
+            libc::off_t::try_from(to - from),
+        ) else {
+            return Err(io::Error::from(io::ErrorKind::InvalidInput));
+        };
+        // SAFETY: a valid descriptor; posix_fallocate returns the error itself.
+        match unsafe { libc::posix_fallocate(file.as_raw_fd(), at, len) } {
+            0 => Ok(()),
+            libc::EOPNOTSUPP | libc::EINVAL => Ok(()), // cannot reserve: as before
+            e => Err(io::Error::from_raw_os_error(e)),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        Ok(())
     }
 }
 
@@ -390,6 +485,42 @@ mod tests {
         );
         drop((a, b));
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0); // self-deleting
+    }
+
+    /// A mapped buffer's file has its blocks before it is mapped (and after it grows): a write
+    /// through the mapping can never be the first to find the disk full (review issue 21).
+    #[cfg(unix)]
+    #[test]
+    fn mapped_files_have_their_blocks() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let blocks_of = |b: &Buf| -> u64 {
+            let Backing::Mapped { file: Some(f), .. } = &b.backing else {
+                panic!("a growable mapping")
+            };
+            f.metadata().unwrap().blocks() * 512
+        };
+        let a = Buf::mapped(1 << 20, dir.path(), true).unwrap();
+        assert!(blocks_of(&a) >= 1 << 20, "{} bytes reserved", blocks_of(&a));
+        let b = a.grow_mapped(3 << 20).unwrap();
+        assert!(blocks_of(&b) >= 3 << 20, "{} bytes reserved", blocks_of(&b));
+    }
+
+    /// With `SK_TEST_SMALL_FS` naming a folder on a small file system (a tmpfs of a few MiB: `mount
+    /// -t tmpfs -o size=4m tmpfs <dir>`), a mapped buffer larger than its room is refused up front:
+    /// it used to be a sparse file whose first page past the room killed the process with SIGBUS
+    /// (review issue 21). A buffer that fits is still mapped; growing past the room is refused.
+    #[test]
+    fn no_room_for_a_mapped_file_is_an_error_not_a_crash() {
+        let Some(dir) = std::env::var_os("SK_TEST_SMALL_FS") else {
+            return;
+        };
+        let dir = Path::new(&dir);
+        assert!(Buf::mapped(64 << 20, dir, false).is_err());
+        let a = Buf::mapped(1 << 20, dir, true).unwrap();
+        assert!(a.grow_mapped(64 << 20).is_none());
+        drop(a);
+        assert_eq!(std::fs::read_dir(dir).unwrap().count(), 0);
     }
 
     #[test]

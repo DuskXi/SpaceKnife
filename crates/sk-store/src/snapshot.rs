@@ -18,7 +18,21 @@
 //! Files are written to a temporary name and renamed, so a crash never leaves a half-written
 //! snapshot behind; frames are compressed a few at a time (at most [`SAVE_THREADS`] threads) and
 //! streamed into the file, the header (JSON, padded with spaces) goes last into room reserved
-//! for it. Format 3 is not compatible with the Python backend's formats 1 and 2.
+//! for it.
+//!
+//! The Python backend's formats 1 and 2 (`SKSNAP\0\x01`, every snapshot SpaceKnife 0.3.x saved)
+//! are read too, as they are ([`v2`]); [`read_header`] and [`load`] take either, and a save
+//! always writes format 3. Retention ([`prune`]) only counts and deletes files this build can
+//! read, so a damaged file or one of a newer format is never removed by it.
+//!
+//! Nothing a file says is trusted before it is checked: the frames must lie in the file and
+//! cannot hold more than zstd can pack into their bytes ([`MAX_RATIO`]) before anything is
+//! allocated for them, the allocation itself may fail (an error, not an abort), and the parents
+//! must form a tree ([`crate::StoreBuilder::finish`]).
+
+mod py_alnum;
+mod rootkey;
+pub mod v2;
 
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -30,7 +44,6 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::names::{normcase, normpath};
 use crate::store::{Nodes, Store, StoreBuilder, StoreOptions};
 use crate::types::*;
 
@@ -46,6 +59,9 @@ pub const FRAME_BYTES: usize = 4 << 20;
 /// Most zstd threads a save uses (each holds a frame and its compressed copy while it works).
 pub const SAVE_THREADS: usize = 4;
 const MAX_HEADER: u32 = 64 << 20;
+/// Most raw bytes one stored byte of a zstd frame can stand for: a block holds at most 128 KiB
+/// and takes at least 4 bytes (an RLE block). A frame that says it holds more is not one.
+pub const MAX_RATIO: u64 = (128 << 10) / 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -99,6 +115,8 @@ pub enum SnapshotError {
     Truncated,
     #[error("snapshot is damaged: {0}")]
     Corrupt(String),
+    #[error("not enough memory to open this snapshot")]
+    TooLarge,
     #[error(transparent)]
     Io(#[from] io::Error),
 }
@@ -399,7 +417,7 @@ fn compress(raw: &[u8], level: i32) -> io::Result<Vec<u8>> {
     enc.finish()
 }
 
-/// The header of a snapshot file.
+/// The header of a snapshot file (format 3, or the 0.3.x formats 1 and 2: [`v2`]).
 pub fn read_header(path: &Path) -> Result<SnapshotHeader, SnapshotError> {
     let mut file = File::open(path)?;
     Ok(read_header_from(&mut file)?.0)
@@ -407,25 +425,80 @@ pub fn read_header(path: &Path) -> Result<SnapshotHeader, SnapshotError> {
 
 fn read_header_from(file: &mut File) -> Result<(SnapshotHeader, u64), SnapshotError> {
     let mut prefix = [0u8; 12];
-    if file.read_exact(&mut prefix).is_err() || prefix[..6] != MAGIC[..6] || prefix[6] != 0 {
+    let mut got = 0;
+    while got < prefix.len() {
+        match file.read(&mut prefix[got..]) {
+            Ok(0) => break,
+            Ok(k) => got += k,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    if got < 8 || prefix[..6] != MAGIC[..6] || prefix[6] != 0 {
         return Err(SnapshotError::BadMagic);
     }
-    if prefix[7] as u32 != FORMAT_VERSION {
-        return Err(SnapshotError::Format(prefix[7] as u32));
+    let byte = prefix[7];
+    if byte != MAGIC[7] && byte != v2::MAGIC[7] {
+        return Err(SnapshotError::Format(byte as u32));
+    }
+    if got < prefix.len() {
+        return Err(SnapshotError::Truncated);
     }
     let len = u32::from_le_bytes(prefix[8..12].try_into().unwrap());
     if len > MAX_HEADER {
         return Err(SnapshotError::Header("header too large".into()));
     }
+    if file.metadata()?.len() < 12 + len as u64 {
+        return Err(SnapshotError::Truncated); // before room for a header that is not there
+    }
     let mut head = vec![0u8; len as usize];
     file.read_exact(&mut head)
         .map_err(|_| SnapshotError::Truncated)?;
-    let header: SnapshotHeader =
-        serde_json::from_slice(&head).map_err(|e| SnapshotError::Header(e.to_string()))?;
-    if header.format != FORMAT_VERSION {
-        return Err(SnapshotError::Format(header.format));
-    }
+    let header = if byte == v2::MAGIC[7] {
+        v2::parse_header(&head)?
+    } else {
+        let header: SnapshotHeader =
+            serde_json::from_slice(&head).map_err(|e| SnapshotError::Header(e.to_string()))?;
+        if header.format != FORMAT_VERSION {
+            return Err(SnapshotError::Format(header.format));
+        }
+        header
+    };
     Ok((header, 12 + len as u64))
+}
+
+/// Checks a block's frames against the file before anything is allocated for them: each lies
+/// in the file (`data` is where the frames start, `size` the file's length), they add up to the
+/// block, and none says it holds more than its bytes can.
+fn check_block(info: &BlockInfo, data: u64, size: u64) -> Result<(), SnapshotError> {
+    let mut total = 0u64;
+    for f in &info.frames {
+        if data
+            .checked_add(f[0])
+            .and_then(|v| v.checked_add(f[1]))
+            .is_none_or(|end| end > size)
+        {
+            return Err(SnapshotError::Truncated);
+        }
+        let most = match info.codec {
+            Codec::Raw => f[1],
+            Codec::Zstd => f[1].saturating_mul(MAX_RATIO),
+        };
+        if f[2] > most {
+            return Err(SnapshotError::Corrupt(
+                "a frame says it holds more than its bytes can".into(),
+            ));
+        }
+        total = total
+            .checked_add(f[2])
+            .ok_or_else(|| SnapshotError::Corrupt("a block's frames do not add up".into()))?;
+    }
+    if total != info.raw_length {
+        return Err(SnapshotError::Corrupt(
+            "a block's frames do not add up".into(),
+        ));
+    }
+    Ok(())
 }
 
 type Job<'a> = (&'a mut [u8], Frame, Codec);
@@ -465,6 +538,20 @@ fn split_frames<'a>(
     Ok(())
 }
 
+/// One read at `offset`: the bytes it got (0 at the end of the file).
+pub(crate) fn read_at_most(file: &File, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_at(buf, offset)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileExt;
+        file.seek_read(buf, offset)
+    }
+}
+
 fn read_at(file: &File, buf: &mut [u8], offset: u64) -> io::Result<()> {
     #[cfg(unix)]
     {
@@ -499,6 +586,10 @@ pub fn load_with(
 ) -> Result<(Store, SnapshotHeader), SnapshotError> {
     let mut file = File::open(path)?;
     let (header, data) = read_header_from(&mut file)?;
+    if header.format < FORMAT_VERSION {
+        let store = v2::load(&file, &header, data, opts)?;
+        return Ok((store, header));
+    }
     let size = file.metadata()?.len();
     let n = usize::try_from(header.node_count)
         .map_err(|_| SnapshotError::Header("too many nodes".into()))?;
@@ -523,9 +614,16 @@ pub fn load_with(
             )));
         }
     }
+    // what the header promises must fit the file before anything is allocated for it
+    for (name, info) in &header.columns {
+        if Col::from_name(name).is_some_and(|c| c != Col::NameOff) {
+            check_block(info, data, size)?;
+        }
+    }
+    check_block(&header.names, data, size)?;
     let image_len =
         usize::try_from(header.names.raw_length).map_err(|_| SnapshotError::Truncated)?;
-    let mut builder = StoreBuilder::new(n, image_len, opts);
+    let mut builder = StoreBuilder::try_new(n, image_len, opts).ok_or(SnapshotError::TooLarge)?;
     builder.set_ext_table(header.ext_table.clone());
     {
         let (cols, image) = builder.raw_parts();
@@ -566,38 +664,12 @@ pub fn load_with(
 
 // --------------------------------------------------------------------------- automatic files
 
-/// Stable folder name for a set of scan roots: `<label>-<12 hex digits>`.
+/// Stable folder name for a set of scan roots: `<label>-<12 hex digits>`, exactly the key
+/// SpaceKnife 0.3.x gave them (the first 12 hex digits of a SHA-1 of the normalised roots, see
+/// [`rootkey`]): the auto-save folders, tag files, palette jumps and volume histories it wrote
+/// are found under it.
 pub fn root_key(roots: &[String]) -> String {
-    let mut norm: Vec<Vec<u8>> = roots
-        .iter()
-        .map(|r| normcase(&normpath(r.as_bytes())).into_owned())
-        .collect();
-    norm.sort();
-    let joined = norm.join(&b'\n');
-    // FNV-1a, 64 bits
-    let mut h: u64 = 0xcbf29ce484222325;
-    for &b in &joined {
-        h ^= b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    let first = roots.first().map(String::as_str).unwrap_or("");
-    let trimmed = first.trim_end_matches(['\\', '/']);
-    let base = trimmed
-        .rsplit(['\\', '/'])
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(first);
-    let label: String = base
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '_' })
-        .collect();
-    let label: String = label.trim_matches('_').chars().take(24).collect();
-    let label = if label.is_empty() {
-        "root".to_string()
-    } else {
-        label
-    };
-    format!("{label}-{:012x}", h >> 16)
+    rootkey::root_key(roots)
 }
 
 /// `YYYYmmdd-HHMMSS` of unix seconds (UTC).
@@ -689,12 +761,14 @@ pub fn auto_path(roots: &[String], when: Option<u64>, base: &Path) -> PathBuf {
 }
 
 /// Applies retention to one root's snapshot folder (the newest `keep_recent`, plus the newest of
-/// each older ISO week); returns the deleted files.
+/// each older ISO week); returns the deleted files. Only snapshots this build can read count
+/// and go: a damaged file, or one of a format it does not know, is left alone.
 pub fn prune(folder: &Path, keep_recent: usize) -> io::Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = std::fs::read_dir(folder)?
         .flatten()
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|e| e == SUFFIX))
+        .filter(|p| read_header(p).is_ok())
         .collect();
     files.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
     let mut weeks = std::collections::HashSet::new();

@@ -1,9 +1,10 @@
 # Backend port: Python → Rust (shared brief)
 
 Branch `dev/rust`. The Python backend (`packages/backend/src/spaceknife`, tests in `packages/backend/tests`) is the
-reference; it is deleted at the end. Target: no Python, no Electron. Old snapshot files / old clients need not be
-supported. **Performance and memory are goals**: use the zero-copy column APIs, rayon where it pays, avoid per-node
-allocation, avoid Python-isms (dicts of objects per node).
+reference; it is deleted at the end. Target: no Python, no Electron. Old clients need not be supported; what
+0.3.x left on disk (snapshots, the keys of tags and palette jumps, the data files) must read back. **Performance
+and memory are goals**: use the zero-copy column APIs, rayon where it pays, avoid per-node allocation, avoid
+Python-isms (dicts of objects per node).
 
 ## Crates (read their README / crate docs before using them)
 
@@ -11,7 +12,7 @@ allocation, avoid Python-isms (dicts of objects per node).
 |---|---|---|
 | `sk-native` | parallel dir walker (`hardscan::scan_slice`), NTFS MFT parser (`mft`) | done (`crates/sk-native/README.md`) |
 | `sk-protocol` | wire types (same JSON as pydantic), JSON-RPC envelope, binary frames (`FrameBuilder`), filter-syntax parser (`CompiledVocab`), TS generation | done (`crates/sk-protocol/README.md`) |
-| `sk-store` | columnar node store, threading contract, mutate (monitor), subtree, PathIndex, snapshots (format 3), `testing` fixtures (feature `test-support`) | done (`crates/sk-store/src/lib.rs` docs) |
+| `sk-store` | columnar node store, threading contract, mutate (monitor), subtree, PathIndex, snapshots (format 3; reads 0.3.x's formats 1 and 2), `testing` fixtures (feature `test-support`) | done (`crates/sk-store/src/lib.rs` docs) |
 | `sk-core` | all other backend logic, one module per Python package | being ported (this brief) |
 | `sk-server` | WebSocket JSON-RPC server, sessions, handlers, topics, CLI (`scan` / `run` / `snapshot` / `serve`) | later |
 

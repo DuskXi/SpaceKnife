@@ -46,6 +46,22 @@ impl ColSet {
         ColSet { bufs, wide }
     }
 
+    /// [`ColSet::alloc`] with an allocator that may refuse (None when one buffer was refused).
+    fn try_alloc(
+        cap: usize,
+        wide: bool,
+        alloc: &mut dyn FnMut(usize) -> Option<Buf>,
+    ) -> Option<ColSet> {
+        let mut bufs = Vec::with_capacity(NCOL);
+        for c in Col::ALL {
+            bufs.push(Arc::new(alloc(cap.checked_mul(item_of(c, wide))?)?));
+        }
+        Some(ColSet {
+            bufs: bufs.try_into().ok()?,
+            wide,
+        })
+    }
+
     #[inline]
     pub(crate) fn item(&self, c: Col) -> usize {
         item_of(c, self.wide)
@@ -1763,6 +1779,32 @@ impl StoreBuilder {
         Self::with_buf(n, image, mapped, opts)
     }
 
+    /// [`StoreBuilder::new`] for sizes read from a file: None instead of an abort when the memory
+    /// (or a mapped file, then plain memory) for them cannot be had.
+    pub fn try_new(n: usize, image_len: usize, opts: StoreOptions) -> Option<StoreBuilder> {
+        let cap = n.max(16);
+        let total = cap.checked_mul(ROW_BYTES)?.checked_add(image_len)?;
+        let mapped = opts.policy.should_map_new(total as u64);
+        let image = Self::try_buffer(mapped, &opts, image_len, false)?;
+        let wide = image.bytes() as u64 >= opts.off_narrow_limit;
+        let cols = ColSet::try_alloc(cap, wide, &mut |b| Self::try_buffer(mapped, &opts, b, true))?;
+        Some(StoreBuilder {
+            n,
+            cols,
+            image,
+            mapped,
+            ext: Vec::new(),
+            opts,
+        })
+    }
+
+    fn try_buffer(mapped: bool, opts: &StoreOptions, bytes: usize, growable: bool) -> Option<Buf> {
+        if mapped && let Ok(b) = Buf::mapped(bytes, &opts.policy.columns_dir(), growable) {
+            return Some(b);
+        }
+        Buf::try_heap(bytes)
+    }
+
     /// Columns for `n` nodes over an existing image (used as it is in plain memory).
     pub fn with_image(n: usize, image: Vec<u8>, opts: StoreOptions) -> StoreBuilder {
         let mapped = opts
@@ -1915,6 +1957,10 @@ impl StoreBuilder {
             }
             off += len[i] as u64 + 1;
         }
+        if !parents_form_a_tree(parent) {
+            // walking up from such a node (paths, ancestors, totals) would never end
+            return Err(StoreError::Inconsistent("the parents form a cycle"));
+        }
         let cap = c.cap();
         let StoreBuilder {
             n,
@@ -1938,6 +1984,41 @@ impl StoreBuilder {
         };
         Ok(Store::from_state(st, ExtTable::new(ext)))
     }
+}
+
+/// No chain of parents (each in `-1..n`) comes back to where it started. At once when every
+/// parent comes before its child (a scanned or compacted store); otherwise (folders a relist
+/// moved past their children) each node is looked at once, with a byte per node.
+fn parents_form_a_tree(parent: &[i32]) -> bool {
+    if parent
+        .iter()
+        .enumerate()
+        .all(|(i, &p)| (p as i64) < i as i64)
+    {
+        return true;
+    }
+    // 0: not seen yet, 1: on the walk going on, 2: known to reach the top
+    let mut state = vec![0u8; parent.len()];
+    let mut walk: Vec<usize> = Vec::new();
+    for start in 0..parent.len() {
+        let mut v = start as i64;
+        while v >= 0 {
+            let u = v as usize;
+            match state[u] {
+                2 => break,
+                1 => return false, // back on this walk: a cycle
+                _ => {
+                    state[u] = 1;
+                    walk.push(u);
+                    v = parent[u] as i64;
+                }
+            }
+        }
+        for u in walk.drain(..) {
+            state[u] = 2;
+        }
+    }
+    true
 }
 
 /// A `\0name` image in id order from names concatenated in any order (`off`, `len` index

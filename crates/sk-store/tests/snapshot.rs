@@ -120,11 +120,19 @@ fn corrupt_files_are_rejected() {
 fn retention_keeps_recent_and_one_per_week() {
     let dir = tempfile::tempdir().unwrap();
     let start = snapshot::parse_stamp("20260101-000000").unwrap();
+    // real snapshots: retention only counts (and deletes) files it can read
+    let one = dir.path().join("one.snapshot");
+    snapshot::save(&scanned().read(), &one, &SaveOptions::default()).unwrap();
     for day in 0..60 {
         let name = format!("{}.sks", snapshot::stamp(start + day * 86400));
-        std::fs::write(dir.path().join(name), b"").unwrap();
+        std::fs::copy(&one, dir.path().join(name)).unwrap();
     }
-    std::fs::write(dir.path().join("00-not-a-stamp.sks"), b"").unwrap();
+    std::fs::remove_file(&one).unwrap();
+    std::fs::copy(
+        dir.path().join(format!("{}.sks", snapshot::stamp(start))),
+        dir.path().join("00-not-a-stamp.sks"),
+    )
+    .unwrap();
     let deleted = snapshot::prune(dir.path(), 10).unwrap();
     let mut kept: Vec<String> = std::fs::read_dir(dir.path())
         .unwrap()
@@ -234,6 +242,46 @@ fn snapshots_load_into_mapped_files_beyond_the_budget() {
     assert_eq!(std::fs::read_dir(cols.path()).unwrap().count(), 0); // the files went with it
 }
 
+/// With `SK_TEST_SMALL_FS` naming a folder on a small file system (a tmpfs of 4 MiB), a snapshot
+/// larger than that, opened with every column to be mapped there, fills what room there is and
+/// keeps the rest in memory: it opens whole, and nothing is left behind (review issue 21).
+#[test]
+fn snapshots_open_whole_when_the_mapped_files_run_out_of_room() {
+    let Some(small) = std::env::var_os("SK_TEST_SMALL_FS") else {
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::new();
+    {
+        // 100 000 files: about 10 MB of columns and names
+        let mut a = store.appender();
+        let root = a.add_root_dir("/big").unwrap();
+        let names: Vec<String> = (0..100_000).map(|i| format!("file-{i:06}.bin")).collect();
+        let mut b = EntryBatch::new();
+        for (i, name) in names.iter().enumerate() {
+            b.push(Entry::file(name.as_bytes(), i as i64, 4096));
+        }
+        a.ingest_listing(root, &b).unwrap();
+    }
+    let path = dir.path().join("big.sks");
+    snapshot::save(&store.read(), &path, &SaveOptions::default()).unwrap();
+    let policy = Arc::new(Policy::new());
+    policy.set_force_bytes(Some(0));
+    policy.set_columns_dir(std::path::PathBuf::from(&small));
+    let (loaded, _) = snapshot::load_with(
+        &path,
+        StoreOptions {
+            policy,
+            ..StoreOptions::default()
+        },
+    )
+    .unwrap();
+    testing::assert_same_store(&store.read(), &loaded.read());
+    assert!(loaded.ram_bytes() > 0, "what did not fit is in memory");
+    drop(loaded);
+    assert_eq!(std::fs::read_dir(&small).unwrap().count(), 0);
+}
+
 /// A store whose names span many heap chunks (test_snapshot.py `_many_chunks`).
 fn many_chunks() -> Store {
     let store = Store::with_options(StoreOptions {
@@ -306,4 +354,197 @@ fn a_failed_save_leaves_nothing_behind() {
         std::fs::read(path.join("keep")).unwrap(),
         b"the previous content"
     );
+}
+
+/// The bytes of a file split into magic, header length, header (JSON), and the data after it.
+fn split_file(raw: &[u8]) -> (serde_json::Value, Vec<u8>) {
+    let hlen = u32::from_le_bytes(raw[8..12].try_into().unwrap()) as usize;
+    let head: serde_json::Value =
+        serde_json::from_slice(raw[12..12 + hlen].trim_ascii_end()).unwrap();
+    (head, raw[12 + hlen..].to_vec())
+}
+
+fn join_file(magic: &[u8; 8], head: &serde_json::Value, data: &[u8]) -> Vec<u8> {
+    let head = serde_json::to_vec(head).unwrap();
+    let mut out = magic.to_vec();
+    out.extend_from_slice(&(head.len() as u32).to_le_bytes());
+    out.extend_from_slice(&head);
+    out.extend_from_slice(data);
+    out
+}
+
+/// A snapshot whose parents form a cycle (5 → 6 → 5, or a node its own parent) is refused when
+/// it is opened: walking up from such a node never ends (review issue 19).
+#[test]
+fn parents_that_form_a_cycle_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = scanned();
+    let good = dir.path().join("good.sks");
+    let opts = SaveOptions {
+        codec: Codec::Raw, // the parent column as it is in the file
+        ..SaveOptions::default()
+    };
+    snapshot::save(&store.read(), &good, &opts).unwrap();
+    let raw = std::fs::read(&good).unwrap();
+    let (head, data) = split_file(&raw);
+    let parent_at = head["columns"]["parent"]["frames"][0][0].as_u64().unwrap() as usize;
+    assert!(store.len() > 7);
+    for (node, to) in [(5usize, 6i32), (3, 3)] {
+        let mut d = data.clone();
+        d[parent_at + node * 4..parent_at + node * 4 + 4].copy_from_slice(&to.to_le_bytes());
+        if node == 5 {
+            // and 6 → 5: a cycle of two
+            d[parent_at + 24..parent_at + 28].copy_from_slice(&5i32.to_le_bytes());
+        }
+        let bad = dir.path().join(format!("cycle-{node}.sks"));
+        std::fs::write(&bad, join_file(snapshot::MAGIC, &head, &d)).unwrap();
+        match snapshot::load(&bad) {
+            Err(SnapshotError::Corrupt(why)) => assert!(why.contains("cycle"), "{why}"),
+            Err(e) => panic!("{node}: {e}"),
+            Ok(_) => panic!("{node}: a cycle loaded"),
+        }
+    }
+}
+
+/// A folder a relist moved past its children (their parent now comes after them) still saves
+/// and loads: only cycles are refused, not that order.
+#[test]
+fn a_folder_moved_past_its_children_loads() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = scanned();
+    {
+        let mut w = store.write();
+        let a = testing::find(&w, "a");
+        let mut b = EntryBatch::new();
+        b.push(Entry::dir(b"sub")); // kept, with its movie: the folder gets a new, later row
+        b.push(Entry::file(b"one.bin", 1000, 4096));
+        mutate::relist(&mut w, a, &b).unwrap();
+    }
+    let r = store.read();
+    let sub = testing::find(&r, "a/sub");
+    let movie = testing::find(&r, "a/sub/movie.mp4");
+    assert!(movie < sub, "the child comes before its folder now");
+    drop(r);
+    let path = dir.path().join("moved.sks");
+    snapshot::save(&store.read(), &path, &SaveOptions::default()).unwrap();
+    let (back, _) = snapshot::load(&path).unwrap();
+    testing::assert_same_store(&store.read(), &back.read());
+}
+
+/// A header that declares far more than its file can hold is refused before anything is
+/// allocated for it: a few hundred bytes saying 2^46 bytes of names and i32::MAX nodes used to
+/// make the process abort (review issue 20). Both formats.
+#[test]
+fn a_header_that_promises_too_much_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let good = dir.path().join("good.sks");
+    snapshot::save(&scanned().read(), &good, &SaveOptions::default()).unwrap();
+    let (mut head, data) = split_file(&std::fs::read(&good).unwrap());
+    let n = i32::MAX as u64;
+    head["node_count"] = n.into();
+    for (name, info) in head["columns"].as_object_mut().unwrap() {
+        let c = Col::from_name(name).unwrap();
+        let raw = n * c.item() as u64;
+        info["raw_length"] = raw.into();
+        info["frames"] = serde_json::json!([[0, 40, raw]]);
+    }
+    head["names"]["raw_length"] = (1u64 << 46).into();
+    head["names"]["frames"] = serde_json::json!([[0, 40, 1u64 << 46]]);
+    let bad = dir.path().join("huge.sks");
+    std::fs::write(&bad, join_file(snapshot::MAGIC, &head, &data)).unwrap();
+    assert!(
+        snapshot::read_header(&bad).is_ok(),
+        "the header itself is fine"
+    );
+    assert!(matches!(
+        snapshot::load(&bad),
+        Err(SnapshotError::Corrupt(_))
+    ));
+
+    // format 2: the same promise in 0.3.x's layout
+    let mut columns = serde_json::Map::new();
+    for c in Col::ALL {
+        columns.insert(
+            c.name().into(),
+            serde_json::json!({"offset": 0, "length": 40, "raw_length": n * c.item() as u64,
+                               "dtype": format!("<{}", c.dtype())}),
+        );
+    }
+    let v2 = serde_json::json!({
+        "format": 2, "app_version": "0.3.4", "created_at": "2026-10-26T09:00:00Z",
+        "roots": ["/x"], "node_count": n, "ext_table": [""], "columns": columns,
+        "names": {"offset": 0, "length": 40, "raw_length": 1u64 << 46},
+    });
+    std::fs::write(&bad, join_file(snapshot::v2::MAGIC, &v2, &data)).unwrap();
+    assert_eq!(snapshot::read_header(&bad).unwrap().format, 2);
+    assert!(matches!(
+        snapshot::load(&bad),
+        Err(SnapshotError::Corrupt(_))
+    ));
+}
+
+/// Format 1 (0.3's names back to back, in any order `name_off` says) loads into the same store as
+/// the format 2 file it was made from.
+#[test]
+fn format_1_names_are_laid_out_anew() {
+    use std::io::Read;
+    let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../sk-core/tests/data/v034/posix/snapshots/plain.sks");
+    let (want, _) = snapshot::load(&src).unwrap();
+    let (mut head, mut data) = split_file(&std::fs::read(&src).unwrap());
+    let block = |b: &serde_json::Value, data: &[u8]| -> Vec<u8> {
+        let (o, l) = (
+            b["offset"].as_u64().unwrap() as usize,
+            b["length"].as_u64().unwrap() as usize,
+        );
+        let mut out = Vec::new();
+        zstd::stream::read::Decoder::new(&data[o..o + l])
+            .unwrap()
+            .read_to_end(&mut out)
+            .unwrap();
+        out
+    };
+    let image = block(&head["names"], &data);
+    let lens: Vec<usize> = block(&head["columns"]["name_len"], &data)
+        .chunks(2)
+        .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
+        .collect();
+    // the names back to back, last node first
+    let mut names = Vec::new();
+    let mut offs = vec![0u64; lens.len()];
+    let mut at = 1;
+    let starts: Vec<usize> = lens
+        .iter()
+        .map(|l| {
+            let s = at;
+            at += l + 1;
+            s
+        })
+        .collect();
+    for i in (0..lens.len()).rev() {
+        offs[i] = names.len() as u64;
+        names.extend_from_slice(&image[starts[i]..starts[i] + lens[i]]);
+    }
+    let mut add = |raw: &[u8]| -> serde_json::Value {
+        let z = zstd::stream::encode_all(raw, 3).unwrap();
+        let v =
+            serde_json::json!({"offset": data.len(), "length": z.len(), "raw_length": raw.len()});
+        data.extend_from_slice(&z);
+        v
+    };
+    let off_raw: Vec<u8> = offs
+        .iter()
+        .flat_map(|o| (*o as u32).to_le_bytes())
+        .collect();
+    let mut off_block = add(&off_raw);
+    off_block["dtype"] = "<u4".into();
+    head["columns"]["name_off"] = off_block;
+    head["names"] = add(&names);
+    head["format"] = 1.into();
+    let dir = tempfile::tempdir().unwrap();
+    let f1 = dir.path().join("format1.sks");
+    std::fs::write(&f1, join_file(snapshot::v2::MAGIC, &head, &data)).unwrap();
+    let (got, h) = snapshot::load(&f1).unwrap();
+    assert_eq!(h.format, 1);
+    testing::assert_same_store(&want.read(), &got.read());
 }
