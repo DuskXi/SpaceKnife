@@ -185,6 +185,19 @@ test("the notes get sizes, version and runs", () => {
   assert.ok(notes.includes("| 4 MB |")); // 3.57 MiB rounds to 4, written MB as in every release
 });
 
+test("the coming version's notes name only files of its release", (t) => {
+  // release-notes/<version>.md of the version being built: every {{size:…}} must be a file the
+  // release has (expected()), or `assemble --notes` fails at release time
+  const root = fileURLToPath(new URL("../..", import.meta.url));
+  const version = JSON.parse(readFileSync(join(root, "apps", "desktop", "src-tauri", "tauri.conf.json"), "utf8")).version;
+  const file = join(root, "release-notes", `${version}.md`);
+  if (!existsSync(file)) return t.skip(`no ${file}`);
+  const tmpd = tmp();
+  const done = release.assemble(version, artifacts(join(tmpd, "a"), version), join(tmpd, "out"));
+  const notes = release.fillNotes(readFileSync(file, "utf8"), version, done.files, ["https://github.com/DuskXi/SpaceKnife/actions/runs/1"]);
+  assert.ok(!notes.includes("{{"), "a placeholder is left");
+});
+
 test("bad placeholders are refused", () => {
   const t = tmp();
   const done = release.assemble(V, artifacts(join(t, "a")), join(t, "out"));
