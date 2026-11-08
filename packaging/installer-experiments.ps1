@@ -505,7 +505,8 @@ if (Want 'S4') {
   [void](Run-Wait $OLD '/S /currentuser')
   $seed = Seed-Data
   $env:SPACEKNIFE_START_MINIMIZED = '1'
-  $old = Start-Process -FilePath (Join-Path $USERDIR 'SpaceKnife.exe') -PassThru
+  # not $old: PowerShell's names ignore case, $old is $OLD (the 0.3.4 installer S6 runs next)
+  [void](Start-Process -FilePath (Join-Path $USERDIR 'SpaceKnife.exe') -PassThru)
   Start-Sleep -Seconds 15
   Note ("running before: " + ((Get-AppProcs $USERDIR | ForEach-Object { Split-Path $_.path -Leaf }) -join ', '))
   # a second, unrelated holder of one of 0.3.4's files (the installer may close it)
