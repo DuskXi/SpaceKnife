@@ -6,6 +6,7 @@
     },
     "windows": {
       "webviewInstallMode": { "type": "embedBootstrapper", "silent": true },
+      "minimumWebview2Version": "89.0.774.44",
       "nsis": {
         "template": "windows/installer.nsi",
         "installerHooks": "windows/spaceknife.nsh"

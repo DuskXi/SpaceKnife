@@ -124,3 +124,22 @@ fn the_window_groups_with_the_installers_shortcuts() {
     assert_eq!(id, "io.github.duskxi.spaceknife");
     assert_eq!(spaceknife_desktop::window::APP_USER_MODEL_ID, id);
 }
+
+#[test]
+fn the_installer_brings_webview2_up_to_what_the_window_needs() {
+    // The window needs WebView2 89.0.774.44 or later (startup_check::MIN_WEBVIEW2: wry sets its
+    // background colour through ICoreWebView2Controller2). The swap helper's --startup-check keeps
+    // a portable copy from moving to it on an older runtime; the installer, which takes over 0.3.4
+    // (Electron, no WebView2 needed) in place, asks WebView2's updater for at least that version
+    // (the forked template's MINIMUMWEBVIEW2VERSION)
+    let windows = config("tauri.bundle.windows.json");
+    let want = spaceknife_desktop::startup_check::MIN_WEBVIEW2
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(".");
+    assert_eq!(
+        windows["bundle"]["windows"]["minimumWebview2Version"].as_str(),
+        Some(want.as_str())
+    );
+}
