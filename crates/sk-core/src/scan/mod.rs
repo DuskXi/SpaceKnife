@@ -145,9 +145,7 @@ pub fn entry_batch(app: &Appender<'_>, mut entries: Entries, ext_table: &[Vec<u8
         })
         .collect();
     if !remap.iter().enumerate().all(|(i, &v)| v as usize == i) {
-        for e in entries.ext.iter_mut() {
-            *e = remap.get(*e as usize).copied().unwrap_or(0);
-        }
+        entries.map_ext(&remap);
     }
     EntryBatch {
         names: entries.names,
@@ -183,9 +181,10 @@ pub struct Folded {
 
 /// Folds one slice (or several merged with [`SliceResult::append`]) into the store: hard links
 /// marked through `links` (None: every link counts), extensions mapped onto the store's table,
-/// the columns moved (not copied) into one [`EntryBatch`], one `ingest_slice`. Folders that could
-/// not be listed are marked `ACCESS_DENIED` (no longer `PENDING`); the frontier comes back as
-/// tasks naming nodes. References to folders that left the tree meanwhile are dropped.
+/// the columns moved (not copied) into one [`EntryBatch`], one `ingest_slice` (sk-native's fold
+/// writes the rows, the store publishes them). Folders that could not be listed are marked
+/// `ACCESS_DENIED` (no longer `PENDING`); the frontier comes back as tasks naming nodes.
+/// References to folders that left the tree meanwhile are dropped.
 pub fn fold_slice(
     app: &mut Appender<'_>,
     res: SliceResult,

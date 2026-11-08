@@ -1,40 +1,7 @@
 //! Types and pure rules shared by the platform listers (mirrors spaceknife/scan/worker.py).
 
-/// Entry kinds (the store's `Kind`; each platform produces a subset).
-pub mod kind {
-    pub const FILE: u8 = 0;
-    pub const DIR: u8 = 1;
-    /// Symlink, junction, mount-point reparse point: shown, never descended.
-    pub const LINK: u8 = 2;
-    /// Device, fifo, socket.
-    pub const OTHER: u8 = 3;
-}
-
-/// The node store's `Flag` bits (each platform sets a subset; [`HARDLINK_DUP`] is set by
-/// [`LinkSet`](super::LinkSet)).
-pub mod flag {
-    /// A directory that could not be listed.
-    pub const ACCESS_DENIED: u32 = 1 << 0;
-    /// Another file system mounted here (or a skipped folder): not entered.
-    pub const MOUNT: u32 = 1 << 1;
-    /// An additional link of an already counted file.
-    pub const HARDLINK_DUP: u32 = 1 << 2;
-    pub const COMPRESSED: u32 = 1 << 3;
-    pub const SPARSE: u32 = 1 << 4;
-    pub const HIDDEN: u32 = 1 << 5;
-    pub const SYSTEM: u32 = 1 << 6;
-    pub const READONLY: u32 = 1 << 7;
-    pub const REPARSE: u32 = 1 << 8;
-    pub const CLOUD: u32 = 1 << 9;
-    pub const ERROR: u32 = 1 << 10;
-    pub const ARCHIVE: u32 = 1 << 12;
-    pub const ENCRYPTED: u32 = 1 << 13;
-    pub const TEMPORARY: u32 = 1 << 14;
-    pub const NOT_INDEXED: u32 = 1 << 15;
-    pub const OFFLINE: u32 = 1 << 16;
-    /// Has alternate data streams (MFT scans).
-    pub const ADS: u32 = 1 << 18;
-}
+// the store's kinds and flag bits (crate::columns): what the listers produce
+pub use crate::columns::{flag, kind};
 
 /// Per-root options (worker.RootOptions).
 #[derive(Clone, Debug)]

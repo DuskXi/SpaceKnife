@@ -24,6 +24,7 @@
 //! Every error is an [`io::Error`]: `InvalidInput` for bad arguments, `InvalidData` for what is
 //! not NTFS (or a corrupt `$MFT` layout), `Interrupted` when [`ScanOptions::cancel`] was set.
 
+pub mod build;
 mod io;
 mod parse;
 mod record;
@@ -37,6 +38,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
+pub use build::{BuildError, BuildReport, PseudoNames, TreeOptions, TreeSink, build_tree};
 pub use parse::Table as MftTable;
 use runs::{Geometry, Layout, ReadAt};
 pub use scan::{Stats as ScanStats, Tuning as ScanTuning};

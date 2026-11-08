@@ -10,6 +10,8 @@ use std::sync::atomic::{AtomicI32, AtomicI64, AtomicU32, AtomicU64, AtomicUsize,
 use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, MutexGuard, RwLock};
+use sk_native::columns::{NameOffsets, NodeColumns};
+use sk_native::fold::{self, FoldError, Folder, RowsOut, SliceFold, Totals};
 
 use crate::lock::{ReadGuard, StructureLock, WriteGuard};
 
@@ -892,6 +894,39 @@ impl<'a> DerefMut for Writer<'a> {
 
 // --------------------------------------------------------------------------- appending
 
+/// The appender's rows as sk-native's fold reads them.
+struct FoldView<'a> {
+    nodes: &'a Nodes,
+    n: usize,
+}
+
+impl fold::Tree for FoldView<'_> {
+    fn rows(&self) -> usize {
+        self.n
+    }
+    fn flags(&self, node: u32) -> u32 {
+        self.nodes.flags_raw(node)
+    }
+    fn is_dir(&self, node: u32) -> bool {
+        self.nodes.is_dir(node)
+    }
+    fn child_count(&self, node: u32) -> i32 {
+        self.nodes.child_count(node)
+    }
+    fn depth(&self, node: u32) -> u16 {
+        self.nodes.depth(node)
+    }
+}
+
+fn fold_error(e: FoldError) -> StoreError {
+    match e {
+        FoldError::BadBatch => StoreError::BadBatch,
+        FoldError::BadSlice(why) => StoreError::BadSlice(why),
+        FoldError::NotADirectory(n) => StoreError::NotADirectory(n),
+        FoldError::AlreadyListed(n) => StoreError::AlreadyListed(n),
+    }
+}
+
 impl Appender<'_> {
     fn bump(&self) {
         self.inner.version.fetch_add(1, Ordering::AcqRel);
@@ -948,35 +983,6 @@ impl Appender<'_> {
         assert!(i < self.st.cap && std::mem::size_of::<T>() == self.st.cols.item(c));
         // SAFETY: in capacity, right size; exclusivity per the caller's contract.
         unsafe { self.st.cols.p::<T>(c).add(i).write(v) }
-    }
-
-    /// Copies `src` into rows `start..`.
-    ///
-    /// # Safety
-    /// As [`Appender::put`] for every row.
-    unsafe fn put_all<T: Copy>(&self, c: Col, start: usize, src: &[T]) {
-        assert!(
-            start + src.len() <= self.st.cap && std::mem::size_of::<T>() == self.st.cols.item(c)
-        );
-        // SAFETY: in capacity; exclusivity per the caller's contract.
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                src.as_ptr(),
-                self.st.cols.p::<T>(c).add(start),
-                src.len(),
-            )
-        }
-    }
-
-    /// Fills rows `start..start + len` with zero bytes.
-    ///
-    /// # Safety
-    /// As [`Appender::put`] for every row.
-    unsafe fn zero(&self, c: Col, start: usize, len: usize) {
-        assert!(start + len <= self.st.cap);
-        let item = self.st.cols.item(c);
-        // SAFETY: in capacity; exclusivity per the caller's contract.
-        unsafe { std::ptr::write_bytes(self.st.cols.p::<u8>(c).add(start * item), 0, len * item) }
     }
 
     /// # Safety
@@ -1129,15 +1135,9 @@ impl Appender<'_> {
         self.publish();
     }
 
-    /// Writes `batch`'s names into the heap and their offsets into rows `start..`.
-    ///
-    /// # Safety
-    /// Rows `start..start + batch.len()` are unpublished.
-    unsafe fn write_names(&mut self, start: usize, names: &[u8], lens: &[u16]) {
-        if lens.is_empty() {
-            return;
-        }
-        let need = names.len() + lens.len();
+    /// Room in the heap for `need` more bytes (a new chunk when the last one is full), and
+    /// `name_off` wide enough for them; returns the global offset where they start.
+    fn name_room(&mut self, need: usize) -> u64 {
         let mapped = self.st.mapped;
         let dir = self.inner.policy.columns_dir();
         let mut fell_back = false;
@@ -1156,10 +1156,22 @@ impl Appender<'_> {
         if added {
             self.st.chunks = Arc::from(self.st.heap.chunks.clone());
         }
+        let at = self.st.heap.end();
+        self.fit_offsets(at + need as u64);
+        at
+    }
+
+    /// Writes `names` (lengths `lens`) into the heap and their offsets into rows `start..`.
+    ///
+    /// # Safety
+    /// Rows `start..start + lens.len()` are unpublished.
+    unsafe fn write_names(&mut self, start: usize, names: &[u8], lens: &[u16]) {
+        if lens.is_empty() {
+            return;
+        }
+        self.name_room(names.len() + lens.len());
         // SAFETY: past every published name.
         let first = unsafe { self.st.heap.write(names, lens) };
-        let end = self.st.heap.end();
-        self.fit_offsets(end);
         let mut off = first;
         for (k, &l) in lens.iter().enumerate() {
             // SAFETY: unpublished row (caller's contract).
@@ -1168,59 +1180,97 @@ impl Appender<'_> {
         }
     }
 
-    /// Writes the rows of `batch` at `start..`: entry columns, names, zero totals and ranges.
-    /// Each segment `(rows, parent, depth)` gives the parent and depth of the next rows.
-    /// Folders get `PENDING` unless they are mount points or `listed(row)` says the same
-    /// ingest lists them.
+    /// Lends rows `start..start + rows` of every column and `need` bytes of names (at `at`, which
+    /// [`Appender::name_room`] gave) to `write`, then takes the bytes into the heap. With no rows
+    /// nothing is lent and the heap is left alone.
+    ///
+    /// # Safety
+    /// The rows are unpublished and within capacity, and `name_room(need)` was the last change
+    /// to the heap and the columns.
+    unsafe fn lend_rows<R>(
+        &mut self,
+        start: usize,
+        rows: usize,
+        at: u64,
+        need: usize,
+        write: impl FnOnce(RowsOut<'_>) -> R,
+    ) -> R {
+        if rows == 0 {
+            return write(RowsOut::default());
+        }
+        assert!(start + rows <= self.st.cap);
+        let st: &mut AppendState = &mut self.st;
+        let cols = &st.cols;
+        /// Rows `start..start + rows` of column `c` as `T`s.
+        ///
+        /// # Safety
+        /// As `lend_rows`; `T` is the column's element type.
+        #[allow(clippy::mut_from_ref)]
+        unsafe fn part<T>(cols: &ColSet, c: Col, start: usize, rows: usize) -> &mut [T] {
+            debug_assert_eq!(std::mem::size_of::<T>(), cols.item(c));
+            // SAFETY: in capacity; the rows are unpublished, so no reader or other slice sees
+            // them; every column is its own buffer.
+            unsafe { std::slice::from_raw_parts_mut(cols.p::<T>(c).add(start), rows) }
+        }
+        // SAFETY: the caller's contract, for every column; NameOff has the width `wide` says.
+        let out = unsafe {
+            RowsOut {
+                cols: NodeColumns {
+                    parent: part(cols, Col::Parent, start, rows),
+                    depth: part(cols, Col::Depth, start, rows),
+                    kind: part(cols, Col::Kind, start, rows),
+                    flags: part(cols, Col::Flags, start, rows),
+                    name_len: part(cols, Col::NameLen, start, rows),
+                    ext: part(cols, Col::Ext, start, rows),
+                    size: part(cols, Col::Size, start, rows),
+                    alloc: part(cols, Col::Alloc, start, rows),
+                    mtime: part(cols, Col::Mtime, start, rows),
+                    ctime: part(cols, Col::Ctime, start, rows),
+                    atime: part(cols, Col::Atime, start, rows),
+                    ino: part(cols, Col::Ino, start, rows),
+                    nlink: part(cols, Col::Nlink, start, rows),
+                    child_start: part(cols, Col::ChildStart, start, rows),
+                    child_count: part(cols, Col::ChildCount, start, rows),
+                    tot_size: part(cols, Col::TotSize, start, rows),
+                    tot_alloc: part(cols, Col::TotAlloc, start, rows),
+                    tot_files: part(cols, Col::TotFiles, start, rows),
+                    tot_dirs: part(cols, Col::TotDirs, start, rows),
+                },
+                offsets: if cols.wide {
+                    NameOffsets::Wide(part(cols, Col::NameOff, start, rows))
+                } else {
+                    NameOffsets::Narrow(part(cols, Col::NameOff, start, rows))
+                },
+                names: st.heap.tail(need),
+                names_at: at,
+            }
+        };
+        let r = write(out);
+        st.heap.commit(need);
+        r
+    }
+
+    /// Writes `batch` as the new rows `st.n..` (entry columns, names, zero totals and ranges),
+    /// children of `parent` at `depth` (sk-native's [`fold::write_rows`]); folders `PENDING`
+    /// (unless mount points) when `pending`. Returns the entries' totals.
     ///
     /// # Safety
     /// The rows are unpublished and within capacity.
-    unsafe fn write_rows(
+    unsafe fn write_new_rows(
         &mut self,
-        start: usize,
         batch: &EntryBatch,
-        segments: &[(usize, i32, u16)],
-        listed: &dyn Fn(usize) -> bool,
-    ) {
-        let count = batch.len();
-        // SAFETY: unpublished rows (caller's contract) for every write below.
+        parent: i32,
+        depth: u16,
+        pending: bool,
+    ) -> Totals {
+        let (start, rows) = (self.st.n, batch.len());
+        let need = batch.names.len() + rows;
+        let at = if rows > 0 { self.name_room(need) } else { 0 };
+        // SAFETY: the caller's contract; name_room came last.
         unsafe {
-            let mut row = start;
-            for &(rows, parent, depth) in segments {
-                for i in row..row + rows {
-                    self.put::<i32>(Col::Parent, i, parent);
-                    self.put::<u16>(Col::Depth, i, depth);
-                }
-                row += rows;
-            }
-            self.put_all(Col::Kind, start, &batch.kind);
-            self.put_all(Col::Size, start, &batch.size);
-            self.put_all(Col::Alloc, start, &batch.alloc);
-            self.put_all(Col::Mtime, start, &batch.mtime);
-            self.put_all(Col::Ctime, start, &batch.ctime);
-            self.put_all(Col::Atime, start, &batch.atime);
-            self.put_all(Col::Ino, start, &batch.ino);
-            self.put_all(Col::Nlink, start, &batch.nlink);
-            self.put_all(Col::Ext, start, &batch.ext);
-            self.put_all(Col::NameLen, start, &batch.name_lens);
-            for k in 0..count {
-                let mut f = batch.flags[k];
-                if batch.kind[k] == Kind::Dir as u8 && f & Flags::MOUNT.0 == 0 && !listed(k) {
-                    f |= Flags::PENDING.0;
-                }
-                self.put::<u32>(Col::Flags, start + k, f);
-            }
-            for c in [
-                Col::ChildStart,
-                Col::ChildCount,
-                Col::TotSize,
-                Col::TotAlloc,
-                Col::TotFiles,
-                Col::TotDirs,
-            ] {
-                self.zero(c, start, count);
-            }
-            self.write_names(start, &batch.names, &batch.name_lens);
+            self.lend_rows(start, rows, at, need, |out| {
+                fold::write_rows(out, &batch.columns(), parent, depth, pending)
+            })
         }
     }
 
@@ -1342,20 +1392,6 @@ impl Appender<'_> {
         self.bump();
     }
 
-    fn sums(batch: &EntryBatch, rows: Range<usize>) -> [i64; 4] {
-        let mut acc = [0i64; 4];
-        for k in rows {
-            // a directory's own allocation (POSIX directory blocks) counts toward its parent
-            if batch.flags[k] & Flags::HARDLINK_DUP.0 == 0 {
-                acc[0] += batch.size[k];
-                acc[1] += batch.alloc[k];
-            }
-            acc[2] += (batch.kind[k] == Kind::File as u8) as i64;
-            acc[3] += (batch.kind[k] == Kind::Dir as u8) as i64;
-        }
-        acc
-    }
-
     /// Appends one directory's entries as its children; returns the first new id.
     ///
     /// Folders among them start `PENDING` (unless `MOUNT`). Publish order for readers in other
@@ -1389,30 +1425,15 @@ impl Appender<'_> {
         self.grow(count)?;
         let depth = self.view.depth(dir) + 1;
         // SAFETY: rows start.. are unpublished and within capacity (grown above).
-        unsafe { self.write_rows(start, batch, &[(count, dir as i32, depth)], &|_| false) };
+        let totals = unsafe { self.write_new_rows(batch, dir as i32, depth, true) };
         self.st.n = start + count;
         self.publish();
         self.a32(Col::ChildStart, d)
             .store(start as i32, Ordering::Release);
         self.a32(Col::ChildCount, d)
             .store(count as i32, Ordering::Release);
-        self.propagate(dir as i32, Self::sums(batch, 0..count));
+        self.propagate(dir as i32, totals);
         Ok(start as NodeId)
-    }
-
-    /// Per listing of a slice: does it list a folder that left the tree (`GONE`), or lie inside
-    /// one? (References out of range are left to the other checks.)
-    fn gone_listings(&self, refs: &[SliceRef]) -> Vec<bool> {
-        let mut gone = vec![false; refs.len()];
-        for (k, r) in refs.iter().enumerate() {
-            gone[k] = match *r {
-                SliceRef::Node(d) => {
-                    (d as usize) < self.st.n && self.view.flags(d).intersects(Flags::GONE)
-                }
-                SliceRef::Entry { listing, .. } => (listing as usize) < k && gone[listing as usize],
-            };
-        }
-        gone
     }
 
     /// Appends a whole slice of listings at once (a scan worker's result); returns the first new
@@ -1423,6 +1444,9 @@ impl Appender<'_> {
     /// Listing `k` lists the directory `refs[k]` names, and its entries are rows
     /// `bounds[k]..bounds[k + 1]` of `batch`. Entries flagged `MOUNT` are never `PENDING`. A bad
     /// slice changes nothing.
+    ///
+    /// The checks and the rows are sk-native's fold ([`fold::SliceFold`]): the store lends it the
+    /// new rows and publishes them, in its order.
     pub fn ingest_slice(
         &mut self,
         refs: &[SliceRef],
@@ -1430,173 +1454,50 @@ impl Appender<'_> {
         batch: &EntryBatch,
     ) -> Result<Vec<Option<NodeId>>, StoreError> {
         batch.check()?;
-        let listings = refs.len();
-        if bounds.len() != listings + 1
-            || bounds[0] != 0
-            || bounds.windows(2).any(|w| w[0] > w[1])
-            || bounds[listings] as usize != batch.len()
-        {
-            return Err(StoreError::BadSlice("bounds do not match the entries"));
-        }
-        if listings == 0 {
-            return Ok(Vec::new());
-        }
-        let gone = self.gone_listings(refs);
-        if gone.iter().any(|&g| g) {
-            let mut renumber = vec![0u32; listings];
-            let mut kept_refs = Vec::new();
-            let mut ranges = Vec::new();
-            let mut kept_bounds = vec![0u32];
-            for k in 0..listings {
-                if gone[k] {
-                    continue;
-                }
-                renumber[k] = kept_refs.len() as u32;
-                kept_refs.push(match refs[k] {
-                    SliceRef::Entry { listing, entry } => SliceRef::Entry {
-                        listing: renumber[listing as usize],
-                        entry,
-                    },
-                    r => r,
-                });
-                let (a, b) = (bounds[k] as usize, bounds[k + 1] as usize);
-                ranges.push(a..b);
-                kept_bounds.push(kept_bounds.last().unwrap() + (b - a) as u32);
-            }
-            let sub = batch.select(&ranges);
-            let got = self.ingest_slice(&kept_refs, &kept_bounds, &sub)?;
-            let mut out = vec![None; listings];
-            let mut it = got.into_iter();
-            for k in 0..listings {
-                if !gone[k] {
-                    out[k] = it.next().unwrap();
-                }
-            }
-            return Ok(out);
-        }
-
-        let n0 = self.st.n;
-        let total = batch.len();
-        let count = |k: usize| (bounds[k + 1] - bounds[k]) as usize;
-        let mut dirs = Vec::with_capacity(listings);
-        let mut dir_depth = Vec::with_capacity(listings);
-        let mut up = vec![usize::MAX; listings]; // listing whose entry a listing lists
-        for (k, r) in refs.iter().enumerate() {
-            match *r {
-                SliceRef::Node(d) => {
-                    if d as usize >= n0 {
-                        return Err(StoreError::BadSlice(
-                            "a listing names a node that is not in the store",
-                        ));
-                    }
-                    if !self.view.is_dir(d) {
-                        return Err(StoreError::NotADirectory(d));
-                    }
-                    if self.view.child_count(d) != 0 {
-                        return Err(StoreError::AlreadyListed(d));
-                    }
-                    dirs.push(d as usize);
-                    dir_depth.push(self.view.depth(d));
-                }
-                SliceRef::Entry { listing, entry } => {
-                    let (j, i) = (listing as usize, entry as usize);
-                    if j >= k {
-                        return Err(StoreError::BadSlice(
-                            "a listing can only name an entry of an earlier listing",
-                        ));
-                    }
-                    if i >= count(j) {
-                        return Err(StoreError::BadSlice(
-                            "a listing names an entry its listing does not have",
-                        ));
-                    }
-                    let row = bounds[j] as usize + i;
-                    let id = n0 + row;
-                    if batch.kind[row] != Kind::Dir as u8 {
-                        return Err(StoreError::NotADirectory(id as NodeId));
-                    }
-                    dirs.push(id);
-                    dir_depth.push(dir_depth[j] + 1);
-                    up[k] = j;
-                }
-            }
-        }
-        {
-            let mut seen = dirs.clone();
-            seen.sort_unstable();
-            if let Some(w) = seen.windows(2).find(|w| w[0] == w[1]) {
-                return Err(StoreError::AlreadyListed(w[0] as NodeId));
-            }
-        }
-        // totals inside the slice: each listing's own entries, folded deepest first (a listing
-        // only names earlier ones, so reverse order is deepest first)
-        let mut acc: Vec<[i64; 4]> = (0..listings)
-            .map(|k| Self::sums(batch, bounds[k] as usize..bounds[k + 1] as usize))
+        let folders: Vec<Folder> = refs
+            .iter()
+            .map(|r| match *r {
+                SliceRef::Node(d) => Folder::Node(d),
+                SliceRef::Entry { listing, entry } => Folder::Entry { listing, entry },
+            })
             .collect();
-        for k in (0..listings).rev() {
-            if up[k] != usize::MAX {
-                let a = acc[k];
-                for (t, v) in acc[up[k]].iter_mut().zip(a) {
-                    *t += v;
-                }
-            }
+        let entries = batch.columns();
+        let view = FoldView {
+            nodes: &self.view,
+            n: self.st.n,
+        };
+        let mut plan = SliceFold::plan(&view, &folders, bounds, &entries).map_err(fold_error)?;
+        if plan.kept() == 0 {
+            return Ok(plan.starts()); // no listing, or every one skipped: nothing changes
         }
-
-        self.grow(total)?;
-        // rows listed by this very slice are not PENDING
-        let mut listed_here = vec![false; total];
-        for (k, r) in refs.iter().enumerate() {
-            if matches!(r, SliceRef::Entry { .. }) {
-                listed_here[dirs[k] - n0] = true;
-            }
-        }
-        let segments: Vec<(usize, i32, u16)> = (0..listings)
-            .map(|k| (count(k), dirs[k] as i32, dir_depth[k] + 1))
-            .collect();
-        // SAFETY: rows n0.. are unpublished and within capacity.
-        unsafe {
-            self.write_rows(n0, batch, &segments, &|row| listed_here[row]);
-            for k in 0..listings {
-                if up[k] != usize::MAX {
-                    let d = dirs[k];
-                    self.put::<i64>(Col::TotSize, d, acc[k][0]);
-                    self.put::<i64>(Col::TotAlloc, d, acc[k][1]);
-                    self.put::<i32>(Col::TotFiles, d, acc[k][2] as i32);
-                    self.put::<i32>(Col::TotDirs, d, acc[k][3] as i32);
-                    self.put::<i32>(Col::ChildStart, d, (n0 + bounds[k] as usize) as i32);
-                    self.put::<i32>(Col::ChildCount, d, count(k) as i32);
-                }
-            }
-        }
-        for k in 0..listings {
-            if up[k] == usize::MAX {
-                self.au32(Col::Flags, dirs[k])
-                    .fetch_and(!Flags::PENDING.0, Ordering::Relaxed);
-            }
+        let (n0, rows, need) = (self.st.n, plan.rows(), plan.name_bytes());
+        self.grow(rows)?;
+        let at = if rows > 0 { self.name_room(need) } else { 0 };
+        // SAFETY: rows n0.. are unpublished and within capacity (grown above); name_room came
+        // last.
+        unsafe { self.lend_rows(n0, rows, at, need, |out| plan.write(out, &entries)) };
+        for l in plan.listed_nodes() {
+            self.au32(Col::Flags, l.node as usize)
+                .fetch_and(!Flags::PENDING.0, Ordering::Relaxed);
         }
         self.bump();
         // publish for readers in other threads: rows, the store's count, range starts, counts last
-        self.st.n = n0 + total;
+        self.st.n = n0 + rows;
         self.publish();
-        for k in 0..listings {
-            if up[k] == usize::MAX {
-                self.a32(Col::ChildStart, dirs[k])
-                    .store((n0 + bounds[k] as usize) as i32, Ordering::Release);
-                self.a32(Col::ChildCount, dirs[k])
-                    .store(count(k) as i32, Ordering::Release);
-            }
+        for l in plan.listed_nodes() {
+            self.a32(Col::ChildStart, l.node as usize)
+                .store(l.start as i32, Ordering::Release);
+            self.a32(Col::ChildCount, l.node as usize)
+                .store(l.count as i32, Ordering::Release);
         }
         // listed nodes of the store pass their subtree totals up their chain, themselves included
-        for k in 0..listings {
-            if up[k] == usize::MAX && acc[k] != [0; 4] {
-                self.propagate(dirs[k] as i32, acc[k]);
+        for l in plan.listed_nodes() {
+            if l.totals != [0; 4] {
+                self.propagate(l.node as i32, l.totals);
             }
         }
-        Ok((0..listings)
-            .map(|k| Some((n0 + bounds[k] as usize) as NodeId))
-            .collect())
+        Ok(plan.starts())
     }
-
     /// Breadth-first order of the nodes reachable from node 0 through child ranges.
     pub(crate) fn bfs_order(nodes: &Nodes) -> Vec<NodeId> {
         let mut order = vec![0 as NodeId];
@@ -1668,7 +1569,7 @@ impl Appender<'_> {
         self.grow(count)?;
         let depth = self.view.depth(folder) + 1;
         // SAFETY: rows n0.. are unpublished and within capacity.
-        unsafe { self.write_rows(n0, batch, &[(count, folder as i32, depth)], &|_| true) };
+        unsafe { self.write_new_rows(batch, folder as i32, depth, false) };
         self.st.n = n0 + count;
         self.publish();
         Ok(n0)
@@ -1760,29 +1661,9 @@ impl Writer<'_> {
 
 // --------------------------------------------------------------------------- building whole
 
-/// Every column of a store being built, as plain mutable slices (`name_off` is derived).
-pub struct ColumnSlices<'a> {
-    pub parent: &'a mut [i32],
-    pub depth: &'a mut [u16],
-    pub kind: &'a mut [u8],
-    pub flags: &'a mut [u32],
-    pub name_len: &'a mut [u16],
-    pub ext: &'a mut [u16],
-    pub size: &'a mut [i64],
-    pub alloc: &'a mut [i64],
-    pub mtime: &'a mut [u32],
-    pub ctime: &'a mut [u32],
-    pub atime: &'a mut [u32],
-    pub ino: &'a mut [u64],
-    pub nlink: &'a mut [u16],
-    pub child_start: &'a mut [i32],
-    pub child_count: &'a mut [i32],
-    pub tot_size: &'a mut [i64],
-    pub tot_alloc: &'a mut [i64],
-    pub tot_files: &'a mut [i32],
-    pub tot_dirs: &'a mut [i32],
-}
-
+/// Every column of a store being built, as plain mutable slices (`name_off` is derived): the
+/// performance layer's [`NodeColumns`], which sk-native's `$MFT` build fills.
+pub type ColumnSlices<'a> = NodeColumns<'a>;
 /// A store from whole columns (snapshots, compaction, the MFT reader): allocate, fill the
 /// columns and the name image in place, [`StoreBuilder::finish`]. The image is `\0name` per node
 /// in id order (see [`separate_names`] for names given in another order); `name_off` follows
@@ -1938,6 +1819,13 @@ impl StoreBuilder {
     pub fn image(&mut self) -> &mut [u8] {
         // SAFETY: the unshared image buffer.
         unsafe { std::slice::from_raw_parts_mut(self.image.ptr(), self.image.bytes()) }
+    }
+
+    /// The columns and the name image to fill, at once (sk-native's `$MFT` build fills both).
+    pub fn parts(&mut self) -> (ColumnSlices<'_>, &mut [u8]) {
+        // SAFETY: the unshared image buffer, distinct from every column's.
+        let image = unsafe { std::slice::from_raw_parts_mut(self.image.ptr(), self.image.bytes()) };
+        (self.columns(), image)
     }
 
     /// Derives `name_off`, checks the structure (parents, ranges, names fit the image) and

@@ -354,6 +354,14 @@ impl Entries {
         out
     }
 
+    /// Moves every extension id through `map` (an id past its end becomes 0, no extension): a
+    /// slice's ids onto a store's table.
+    pub fn map_ext(&mut self, map: &[u16]) {
+        for e in &mut self.ext {
+            *e = map.get(*e as usize).copied().unwrap_or(0);
+        }
+    }
+
     fn append(&mut self, other: &Entries, ext_map: &[u16]) {
         self.names.extend_from_slice(&other.names);
         self.name_lens.extend_from_slice(&other.name_lens);

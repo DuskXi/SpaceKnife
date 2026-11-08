@@ -10,6 +10,8 @@ description = "SpaceKnife's columnar node store: the scanned tree as struct-of-a
 test-support = []
 
 [dependencies]
+# the performance layer: the fold of listings into new rows (sk_native::fold)
+sk-native = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 parking_lot = { workspace = true }

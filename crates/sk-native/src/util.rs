@@ -66,3 +66,22 @@ impl Hasher for FxHasher {
 pub type FxBuild = BuildHasherDefault<FxHasher>;
 pub type FxHashMap<K, V> = std::collections::HashMap<K, V, FxBuild>;
 pub type FxHashSet<K> = std::collections::HashSet<K, FxBuild>;
+
+/// `ext.lower()` as Python computes it on a name decoded with surrogatepass (Windows) or
+/// surrogateescape (POSIX): bytes that are not UTF-8 (lone surrogates, foreign encodings) stay.
+pub fn lower_ext(raw: &[u8]) -> Vec<u8> {
+    if raw.is_ascii() {
+        return raw.to_ascii_lowercase();
+    }
+    match std::str::from_utf8(raw) {
+        Ok(s) => s.to_lowercase().into_bytes(),
+        Err(_) => {
+            let mut out = Vec::with_capacity(raw.len());
+            for chunk in raw.utf8_chunks() {
+                out.extend_from_slice(chunk.valid().to_lowercase().as_bytes());
+                out.extend_from_slice(chunk.invalid());
+            }
+            out
+        }
+    }
+}
