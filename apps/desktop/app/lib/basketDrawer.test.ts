@@ -3,9 +3,17 @@ import { describe, expect, it } from "vitest";
 import type { BasketItem, BasketVolume } from "@/protocol/generated";
 import { crumbLabel } from "@/lib/scanPage";
 
-import { changedSince, confirmation, confirmedOf, itemCount, mainVolume, opUndoable, parentOf, sortedItems, statusText, stillConfirmed } from "./basketDrawer";
+import { changedBasket, changedSince, confirmation, confirmedOf, itemCount, mainVolume, opUndoable, parentOf, sortedItems, statusText, stillConfirmed } from "./basketDrawer";
 
 const item = (name: string, path: string, alloc: number) => ({ id: name, name, path, alloc }) as BasketItem;
+
+describe("the basket a BASKET_CHANGED answer carries", () => {
+  it("is its data's state, or none", () => {
+    const state = { items: [item("a", "C:\\a", 1)], volumes: [], freeable: 1 };
+    expect(changedBasket({ state })).toBe(state);
+    for (const data of [undefined, null, "x", {}, { state: null }, { state: { items: "no" } }]) expect(changedBasket(data)).toBeNull();
+  });
+});
 
 describe("basket drawer helpers", () => {
   it("sorts by size, name or place without touching the list", () => {
@@ -28,6 +36,10 @@ describe("basket drawer helpers", () => {
     expect(statusText("ready")).toBe("");
     expect(parentOf("C:\\Users\\me\\a.txt")).toBe("C:\\Users\\me");
     expect(parentOf("/home/me/dir/")).toBe("/home/me");
+    // a name written escaped (not valid Unicode): its backslash is no separator
+    expect(parentOf("C:\\x\\a\\udc80b", "a\\udc80b")).toBe("C:\\x");
+    expect(parentOf("C:\\x\\a.txt", "a.txt")).toBe("C:\\x");
+    expect(parentOf("C:\\x\\a.txt", "other")).toBe("C:\\x");
   });
 });
 

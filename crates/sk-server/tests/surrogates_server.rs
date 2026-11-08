@@ -64,10 +64,8 @@ fn shown(name: &OsStr) -> String {
 }
 
 /// Names that are not valid Unicode reach the protocol escaped as 0.3.4 sent them (`\udc80` on
-/// Windows, `\xff` on POSIX: [`printable`]) in NodeInfo (name, extension) and tree.node paths,
-/// never as U+FFFD; `path.forms` keeps U+FFFD in its text forms (the interface hands those to the
-/// system and refuses such paths: an escaped one could name another item) and the stored bytes in
-/// its URI.
+/// Windows, `\xff` on POSIX: [`printable`]) in NodeInfo (name, extension), tree.node paths and
+/// path.forms' text forms, never as U+FFFD; path.forms' URI keeps the stored bytes.
 #[tokio::test]
 async fn scan_of_undecodable_names_over_the_protocol() {
     let srv = server().await;
@@ -142,14 +140,14 @@ async fn scan_of_undecodable_names_over_the_protocol() {
         .await;
     assert_eq!(node["path"], shown(odd_dir.as_os_str()).as_str());
     assert_eq!(node["node"]["name"], shown(&name).as_str());
-    // what the interface hands the system to open or reveal: the text forms mark the name as not
-    // Unicode (U+FFFD, refused there), the URI keeps the bytes
+    // path.forms: the text forms escaped too (the interface tells from the URI, which keeps the
+    // bytes, that they name nothing on disk, and refuses to hand them to the system)
     let forms = c
         .ok("path.forms", json!({"scan_id": id, "node": folder}))
         .await;
     let raw = forms["raw"].as_str().unwrap();
-    assert!(raw.contains('\u{FFFD}'), "{forms}");
-    assert!(!raw.contains(&shown(&name)), "{forms}");
+    assert!(!raw.contains('\u{FFFD}'), "{forms}");
+    assert_eq!(raw, shown(odd_dir.as_os_str()), "{forms}");
     let escaped = if cfg!(windows) {
         "x%ED%B2%80y"
     } else {
@@ -188,6 +186,287 @@ async fn scan_of_undecodable_names_over_the_protocol() {
     assert!(
         events.iter().any(|m| m.starts_with("硬扫描完成")),
         "{events:?}"
+    );
+    srv.shutdown();
+}
+
+/// The names of a binary frame (its `names` blob, cut by `name_len`), its `key` column.
+fn frame_names(buf: &[u8]) -> (Vec<String>, Vec<u32>) {
+    let f = sk_protocol::binary::decode_frame(buf).unwrap();
+    let lens: Vec<u32> = f.column("name_len").unwrap().to_vec().unwrap();
+    let blob = f.blob("names").unwrap();
+    let mut at = 0;
+    let names = lens
+        .iter()
+        .map(|&l| {
+            let s = std::str::from_utf8(&blob[at..at + l as usize])
+                .expect("names are UTF-8")
+                .to_owned();
+            at += l as usize;
+            s
+        })
+        .collect();
+    (names, f.column("key").unwrap().to_vec().unwrap())
+}
+
+/// How 0.3.4's binary frames carried such a name: `name.encode("utf-8", "replace")`.
+fn frame_label(prefix: &str) -> String {
+    format!("{prefix}?y")
+}
+
+/// Every reply that names an item whose name is not valid Unicode writes it as 0.3.4 did:
+/// escaped in JSON (`\udc80`, `\xff`: tree.summary, path.forms' text forms, view.results, the
+/// breadcrumb, the palette's folders, basket items, a deletion's results), `?` in a binary
+/// frame's names, never U+FFFD; and tree.find takes the escaped path back.
+#[tokio::test]
+async fn undecodable_names_wherever_the_protocol_shows_them() {
+    const SEP: char = std::path::MAIN_SEPARATOR;
+    let srv = server().await;
+    srv.server
+        .ops
+        .set_delete_delay(std::time::Duration::from_millis(100));
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    let Some((name, odd_dir)) = odd_folder(&root) else {
+        return;
+    };
+    // big enough to take room on any file system (NTFS keeps small files in the MFT: no allocation)
+    std::fs::write(root.join("plain.txt"), vec![b'x'; 16 * 1024]).unwrap();
+    std::fs::write(odd_dir.join("big.bin"), vec![b'z'; 64 * 1024]).unwrap();
+    let st = c
+        .ok(
+            "scan.start",
+            json!({"roots": [root], "workers": 0, "auto_snapshot": false}),
+        )
+        .await;
+    let id = st["scan_id"].as_str().unwrap().to_owned();
+    let status = wait_done(&c, &id).await;
+    let top = status["roots"][0]["node"].clone();
+    let (dir, odd) = (shown(odd_dir.as_os_str()), shown(&name));
+    let no_fffd = |v: &Value| assert!(!v.to_string().contains('\u{FFFD}'), "{v}");
+
+    // tree.find takes the path as tree.node writes it
+    let found = c.ok("tree.find", json!({"scan_id": id, "path": dir})).await;
+    assert_eq!(found["node"]["name"], odd.as_str(), "{found}");
+    let folder = found["node"]["id"].clone();
+    let inner = c
+        .ok(
+            "tree.find",
+            json!({"scan_id": id, "path": format!("{dir}{SEP}inner.bin")}),
+        )
+        .await;
+    assert_eq!(inner["node"]["name"], "inner.bin", "{inner}");
+    let lost = c
+        .ok(
+            "tree.find",
+            json!({"scan_id": id, "path": format!("{dir}{SEP}missing.bin")}),
+        )
+        .await;
+    assert!(lost["node"].is_null());
+
+    // path.forms: the text forms escaped, the URI the bytes
+    let forms = c
+        .ok("path.forms", json!({"scan_id": id, "node": folder}))
+        .await;
+    assert_eq!(forms["raw"], dir.as_str(), "{forms}");
+    assert!(forms["quoted"].as_str().unwrap().contains(&odd), "{forms}");
+    assert!(forms["posix"].as_str().unwrap().ends_with(&odd), "{forms}");
+    let bytes = if cfg!(windows) {
+        "x%ED%B2%80y"
+    } else {
+        "x%FFy"
+    };
+    assert!(forms["uri"].as_str().unwrap().ends_with(bytes), "{forms}");
+    no_fffd(&forms);
+
+    // tree.summary: its path, and the folder of the largest files below the root
+    let sum = c
+        .ok(
+            "tree.summary",
+            json!({"scan_id": id, "node": folder, "top": 5}),
+        )
+        .await;
+    assert_eq!(sum["path"], dir.as_str());
+    let sum = c
+        .ok(
+            "tree.summary",
+            json!({"scan_id": id, "node": top, "top": 5}),
+        )
+        .await;
+    let file = sum["top_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["node"]["name"] == "big.bin")
+        .expect("big.bin among the largest")
+        .clone();
+    assert_eq!(file["rel_parent"], format!("{odd}{SEP}").as_str());
+    no_fffd(&sum);
+
+    // a view: the frame's label as 0.3.4's, the result rows and the breadcrumb escaped
+    c.drain_binary().await;
+    let up = c
+        .ok(
+            "view.open",
+            json!({"scan_id": id, "viewport": {"width": 1200, "height": 900, "dpr": 1.0}, "settings": {"detail": 8, "min_element": 3}}),
+        )
+        .await;
+    let view_id = up["state"]["view_id"].as_str().unwrap().to_owned();
+    let seq = up["frame"]["seq"].clone();
+    let buf = loop {
+        let buf = c.binary(10.0).await;
+        let h = frame_header(&buf);
+        if h["stream"] == format!("view:{view_id}").as_str() && h["seq"] == seq {
+            break buf;
+        }
+    };
+    let (names, keys) = frame_names(&buf);
+    assert!(!names.iter().any(|n| n.contains('\u{FFFD}')), "{names:?}");
+    let row = names
+        .iter()
+        .position(|n| *n == frame_label("x"))
+        .unwrap_or_else(|| panic!("{names:?} in {}", frame_header(&buf)));
+    c.ok("view.filter", json!({"view_id": view_id, "text": "*.bin"}))
+        .await;
+    let res = c
+        .ok("view.results", json!({"view_id": view_id, "limit": 50}))
+        .await;
+    let hit = res["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["name"] == "big.bin")
+        .unwrap_or_else(|| panic!("{res}"))
+        .clone();
+    assert_eq!(hit["path"], odd.as_str(), "{res}");
+    no_fffd(&res);
+    let zoomed = c
+        .ok("view.zoom", json!({"view_id": view_id, "key": keys[row]}))
+        .await;
+    let crumbs = zoomed["frame"]["breadcrumb"].as_array().unwrap();
+    assert_eq!(crumbs.last().unwrap()["label"], odd.as_str(), "{zoomed}");
+
+    // the palette: a hit's folder, and the folder it lists
+    let found = c
+        .ok("palette.paths", json!({"scan_id": id, "text": "inner"}))
+        .await;
+    assert_eq!(found["items"][0]["parent"], dir.as_str(), "{found}");
+    let listed = c
+        .ok(
+            "palette.paths",
+            json!({"scan_id": id, "text": format!("{dir}{SEP}")}),
+        )
+        .await;
+    assert_eq!(listed["folder"], dir.as_str(), "{listed}");
+    assert!(
+        listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["name"] == "inner.bin"),
+        "{listed}"
+    );
+    no_fffd(&found);
+    no_fffd(&listed);
+
+    // the basket: the item as 0.3.4 named it; deleted, the result names it so too
+    c.ok("basket.clear", json!({})).await;
+    let added = c
+        .ok("basket.add", json!({"scan_id": id, "nodes": [folder]}))
+        .await;
+    let item = added["state"]["items"][0].clone();
+    assert_eq!(
+        (item["path"].as_str(), item["name"].as_str()),
+        (Some(dir.as_str()), Some(odd.as_str())),
+        "{added}"
+    );
+    no_fffd(&added);
+    let task = c
+        .ok(
+            "basket.execute",
+            json!({"mode": "delete", "confirm": [{"id": item["id"], "rev": item["rev"]}]}),
+        )
+        .await;
+    let task_id = task["task_id"].as_str().unwrap().to_owned();
+    let done = c
+        .event_where("ops.progress", 30.0, |e| {
+            e["task_id"] == task_id.as_str() && e["phase"] == "done"
+        })
+        .await;
+    assert_eq!(done["results"][0]["path"], dir.as_str(), "{done}");
+    assert_eq!(done["results"][0]["ok"], true, "{done}");
+    assert!(!odd_dir.exists());
+    srv.shutdown();
+}
+
+/// A comparison names a changed item whose name is not valid Unicode escaped too: its change
+/// items (path, label) and the folder of a block's hover card.
+#[tokio::test]
+async fn a_comparison_writes_undecodable_names_escaped() {
+    let srv = server().await;
+    let c = Client::open(&srv.url).await;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("plain.txt"), vec![b'x'; 16 * 1024]).unwrap();
+    async fn scan_saved(c: &Client, root: &Path) -> Value {
+        let st = c
+            .ok(
+                "scan.start",
+                json!({"roots": [root], "workers": 0, "auto_snapshot": true}),
+            )
+            .await;
+        let id = st["scan_id"].as_str().unwrap().to_owned();
+        wait_final(c, &id, true).await
+    }
+    let first = scan_saved(&c, &root).await;
+    let snap = first["snapshot"]
+        .as_str()
+        .expect("auto snapshot")
+        .to_owned();
+    // then a folder that is not valid Unicode grows in
+    let Some((name, odd_dir)) = odd_folder(&root) else {
+        return;
+    };
+    std::fs::write(odd_dir.join("big.bin"), vec![b'z'; 256 * 1024]).unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await; // snapshot names: 1 s
+    let now = scan_saved(&c, &root).await;
+    let scan_id = now["scan_id"].as_str().unwrap().to_owned();
+    let task = c
+        .ok(
+            "compare.open",
+            json!({"scan_id": scan_id, "base": snap, "target": "now"}),
+        )
+        .await;
+    let cmp = task["compare_id"].as_str().unwrap().to_owned();
+    let ev = c
+        .event_where("compare.progress", 60.0, |e| {
+            e["compare_id"] == cmp.as_str()
+                && ["ready", "failed", "cancelled"].contains(&e["phase"].as_str().unwrap())
+        })
+        .await;
+    assert_eq!(ev["phase"], "ready", "{ev}");
+    let up = c
+        .ok(
+            "view.open",
+            json!({"scan_id": cmp, "viewport": {"width": 900, "height": 600}}),
+        )
+        .await;
+    let view_id = up["state"]["view_id"].as_str().unwrap().to_owned();
+    let summary = c.ok("compare.summary", json!({"view_id": view_id})).await;
+    assert!(!summary.to_string().contains('\u{FFFD}'), "{summary}");
+    let grown: Vec<&Value> = summary["grow_items"].as_array().unwrap().iter().collect();
+    let dir = shown(odd_dir.as_os_str());
+    assert!(
+        grown
+            .iter()
+            .any(|i| i["path"] == dir.as_str() && i["label"] == shown(&name).as_str())
+            || grown.iter().any(|i| i["path"]
+                .as_str()
+                .is_some_and(|p| p.starts_with(&dir) && p != dir)),
+        "{summary}"
     );
     srv.shutdown();
 }

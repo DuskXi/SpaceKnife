@@ -177,6 +177,65 @@ fn find_prefers_exact_case_and_refuses_ambiguity() {
     }
 }
 
+/// tree.find and the palette take a path as the protocol writes it: a name that is not Unicode
+/// escaped (`\udc80` on Windows, where that backslash is no separator then; `\xff` on POSIX).
+/// A name that really is that text is found first.
+#[test]
+fn find_shown_takes_names_that_are_not_unicode_escaped() {
+    let entry = |name: &[u8], kind: Kind| {
+        let mut b = EntryBatch::new();
+        b.push(Entry {
+            size: 1,
+            alloc: 4096,
+            ..Entry::new(name, kind)
+        });
+        b
+    };
+    let (root_path, sep, odd, esc): (&str, &str, &[u8], &str) = if cfg!(windows) {
+        ("C:\\r", "\\", b"x\xed\xb2\x80y", "x\\udc80y") // a lone surrogate, as WTF-8
+    } else {
+        ("/r", "/", b"x\xffy", "x\\xffy")
+    };
+    let s = Store::new();
+    let mut a = s.appender();
+    let root = a.add_root_dir(root_path).unwrap();
+    // the odd folder, a plain one, and (POSIX) one whose name is the escape's text itself
+    let mut top = entry(odd, Kind::Dir);
+    testing::append_batch(&mut top, &entry(b"x", Kind::Dir));
+    if cfg!(unix) {
+        testing::append_batch(&mut top, &entry(esc.as_bytes(), Kind::Dir));
+    }
+    let first = a.ingest_listing(root, &top).unwrap();
+    let (odd_dir, x_dir) = (first, first + 1);
+    let inner = a
+        .ingest_listing(odd_dir, &named_batch(&["in"], &[Kind::File], &[1], &[]))
+        .unwrap();
+    // Windows: inside x, a folder named like the escape's rest (`x` `\` `udc80y`)
+    let literal = if cfg!(windows) {
+        a.ingest_listing(x_dir, &entry(b"udc80y", Kind::Dir))
+            .unwrap()
+    } else {
+        first + 2
+    };
+    drop(a);
+    let r = s.read();
+    let find = |p: String| r.find_shown(std::path::Path::new(&p));
+    assert_eq!(find(format!("{root_path}{sep}{esc}{sep}in")), Some(inner));
+    assert_eq!(find(format!("{root_path}{sep}{esc}{sep}missing")), None);
+    assert_eq!(find(format!("{root_path}{sep}x")), Some(x_dir));
+    // the name that really is that text wins; the odd one is found below it
+    assert_eq!(find(format!("{root_path}{sep}{esc}")), Some(literal));
+    // Nodes::find (what the system reports) takes paths only as they are
+    assert_eq!(
+        r.find(format!("{root_path}{sep}{esc}{sep}in").as_bytes()),
+        None
+    );
+    if cfg!(windows) {
+        // another case: only where one name alone has it
+        assert_eq!(find("C:\\R\\X\\UDC80Y\\IN".to_owned()), Some(inner));
+    }
+}
+
 #[test]
 fn builder_roundtrip() {
     let s = testing::random_store(7, 50);

@@ -86,11 +86,13 @@ pub fn path_forms(path: &str, system: Option<System>) -> PathForms {
 
 /// [`path_forms`] of a path as the store keeps names (WTF-8 on Windows, raw bytes on POSIX): the
 /// URI percent-encodes those bytes (a lone surrogate as its WTF-8 bytes, an undecodable POSIX
-/// byte as itself); the text forms show such bytes as U+FFFD.
+/// byte as itself); the text forms write such a name escaped as 0.3.4 did
+/// ([`sk_store::names::printable`]: `\udc80`, `\xff`), text that names nothing on disk (or
+/// another item): only the URI's bytes are the path then.
 pub fn path_forms_bytes(raw: &[u8], system: Option<System>) -> PathForms {
-    let text = String::from_utf8_lossy(raw).into_owned();
-    if system.unwrap_or_else(System::this) == System::Windows {
-        let plain = strip_verbatim(&text);
+    let windows = system.unwrap_or_else(System::this) == System::Windows;
+    let text = sk_store::names::printable_for(raw, windows).into_owned();
+    if windows {
         // the same on the bytes (the prefixes are ASCII)
         let mut data: Vec<u8> =
             if raw.starts_with(b"\\\\?\\UNC\\") || raw.starts_with(b"\\\\?\\unc\\") {
@@ -105,7 +107,8 @@ pub fn path_forms_bytes(raw: &[u8], system: Option<System>) -> PathForms {
                 *b = b'/';
             }
         }
-        let slashed = plain.replace('\\', "/");
+        // from the bytes too: an escape's own backslash is no separator
+        let slashed = sk_store::names::printable_for(&data, true).into_owned();
         let drive = slashed.as_bytes().get(1) == Some(&b':');
         let uri = if drive {
             format!("file:///{}{}", &slashed[..2], quote_path(&data[2..]))

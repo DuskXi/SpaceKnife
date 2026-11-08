@@ -1,0 +1,9 @@
+# The Rust toolchain of every build: local ones, the scripts (they run cargo inside the repository,
+# where rustup reads this file) and every CI workflow (each installs it with
+# `rustup toolchain install`, which takes the toolchain and components from here). Pinned so that
+# a newer stable's lints cannot fail CI before they fail here. Move it to the stable GitHub's
+# runners have, then run `cargo clippy --workspace --all-targets -- -D warnings` and the tests.
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

@@ -119,17 +119,21 @@ pub fn result_rows(view: &View) -> Vec<ResultEntry> {
         let parent_of = |x: NodeId| nodes.parent(x).max(0) as NodeId;
         let (kind_, name, parent) = if rk == kind::SMALL || rk == kind::MORE {
             let name = if count == 1 {
-                nodes.name(first).into_owned()
+                nodes.name_printable(first).into_owned()
             } else {
                 String::new()
             };
             (ResultKind::Group, name, nd)
         } else if rk == kind::FILE && !nodes.is_dir(nd) {
-            (ResultKind::File, nodes.name(nd).into_owned(), parent_of(nd))
+            (
+                ResultKind::File,
+                nodes.name_printable(nd).into_owned(),
+                parent_of(nd),
+            )
         } else {
             (
                 ResultKind::Folder,
-                nodes.name(nd).into_owned(),
+                nodes.name_printable(nd).into_owned(),
                 parent_of(nd),
             )
         };
@@ -225,21 +229,20 @@ fn relative_path_in(nodes: &Nodes, home: NodeId, node: NodeId) -> String {
     let mut parts: Vec<String> = Vec::new();
     let mut cur = node as i64;
     while cur > 0 && (cur as usize) < nodes.len() && nodes.parent(cur as NodeId) > 0 {
-        parts.push(nodes.name(cur as NodeId).into_owned());
+        parts.push(nodes.name_printable(cur as NodeId).into_owned());
         cur = nodes.parent(cur as NodeId) as i64;
     }
     if home == 0 && cur > 0 {
-        let root = nodes.name(cur as NodeId).into_owned(); // roots are named by their full path
-        let trimmed = root.trim_end_matches(['\\', '/']);
-        let base = trimmed
-            .rsplit(|c| c == '/' || (cfg!(windows) && c == '\\'))
-            .next()
-            .unwrap_or("");
-        parts.push(if base.is_empty() {
-            root.clone()
-        } else {
-            base.to_owned()
-        });
+        // roots are named by their full path: its last name, cut from the stored bytes (an
+        // escaped name holds a backslash itself)
+        let root = nodes.name_bytes(cur as NodeId);
+        let sep = |b: &u8| *b == b'/' || (cfg!(windows) && *b == b'\\');
+        let end = root.len() - root.iter().rev().take_while(|b| sep(b)).count();
+        let trimmed = &root[..end];
+        let base = trimmed.rsplit(sep).next().unwrap_or(&[]);
+        parts.push(
+            sk_store::names::printable(if base.is_empty() { root } else { base }).into_owned(),
+        );
     }
     parts.reverse();
     parts.join(std::path::MAIN_SEPARATOR_STR)

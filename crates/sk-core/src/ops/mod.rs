@@ -18,7 +18,9 @@ pub mod trash;
 #[cfg(windows)]
 pub mod win;
 
-pub use basket::{AddResult, Basket, BasketError, BasketItem, Merged, Refused, Target};
+pub use basket::{
+    AddResult, Basket, BasketError, BasketItem, Merged, Refused, Target, printable_path,
+};
 pub use paths::{Rules, System, match_rules, path_forms, platform_rules, protected_reason};
 pub use sk_protocol::ops::PathForms;
 pub use text::PATH_KEYS;

@@ -479,8 +479,10 @@ pub(super) fn load(
         .expect("name_len is required");
     let lens_raw = inflate_vec(file, &blocks[len_at].1)?;
     let lens: Vec<u16> = lens_raw
-        .chunks_exact(2)
-        .map(|b| u16::from_le_bytes([b[0], b[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&b| u16::from_le_bytes(b))
         .collect();
     let image_len: u64 = lens.iter().map(|&l| l as u64 + 1).sum();
     // every name's bytes are in the names block (back to back, or each after its separator)

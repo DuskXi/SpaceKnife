@@ -1,6 +1,6 @@
 // The pure parts of the delete basket drawer (shell/BasketDrawer in the Electron renderer).
 
-import type { BasketConfirm, BasketItem, BasketVolume, OpProgressEvent } from "@/protocol/generated";
+import type { BasketConfirm, BasketItem, BasketState, BasketVolume, OpProgressEvent } from "@/protocol/generated";
 import { fmtInt, plural } from "@/lib/format";
 import { t } from "@/lib/i18n";
 
@@ -54,6 +54,15 @@ export function changedSince(confirmed: Confirmed, now: readonly BasketItem[]): 
   });
 }
 
+/** The basket a BASKET_CHANGED answer of basket.execute carries (`data.state`: the backend's
+ *  basket right then), or null when it carries none. The answer can arrive before the
+ *  basket.changed event of the change that caused it, so the confirmation is asked again from
+ *  this one, not from the copy the window had. */
+export function changedBasket(data: unknown): BasketState | null {
+  const state = data && typeof data === "object" ? (data as { state?: unknown }).state : undefined;
+  return state && typeof state === "object" && Array.isArray((state as BasketState).items) ? (state as BasketState) : null;
+}
+
 /** What basket.execute is given for a confirmation: the confirmed items still in the basket, as
  *  they were confirmed (one that left it is simply not run). */
 export function confirmation(confirmed: Confirmed, now: readonly BasketItem[]): BasketConfirm[] {
@@ -66,5 +75,12 @@ export function confirmation(confirmed: Confirmed, now: readonly BasketItem[]): 
 export const opUndoable = (op: Pick<OpProgressEvent, "can_undo" | "phase">): boolean =>
   op.can_undo && (op.phase === "done" || op.phase === "waiting" || op.phase === "cancelled");
 
-/** The folder an item lies in (its path without the last name). */
-export const parentOf = (path: string): string => path.replace(/[\\/][^\\/]*[\\/]?$/, "");
+/** The folder an item lies in (its path without the last name). With the item's `name`, that is
+ *  what is cut when the path ends in it: a name that is not valid Unicode is written escaped
+ *  (`\udc80`), and on Windows that backslash is no separator. */
+export function parentOf(path: string, name?: string): string {
+  if (name && path.length > name.length && path.endsWith(name) && /[\\/]/.test(path[path.length - name.length - 1]!)) {
+    return path.slice(0, path.length - name.length - 1);
+  }
+  return path.replace(/[\\/][^\\/]*[\\/]?$/, "");
+}

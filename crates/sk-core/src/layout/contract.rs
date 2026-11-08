@@ -247,7 +247,7 @@ pub fn check_draw(
         "name is not the node's (labelled real rows) or empty (the rest)",
         rows.clone().filter(|&i| {
             let want = if draw.label[i] != 0 && in_store(i) {
-                nodes.name(node[i] as NodeId).into_owned()
+                sk_store::names::frame_label(nodes.name_bytes(node[i] as NodeId)).into_owned()
             } else {
                 String::new()
             };

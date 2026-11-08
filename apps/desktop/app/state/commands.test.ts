@@ -85,15 +85,19 @@ describe("the selection handed to the system", () => {
   const mocked = vi.mocked(call);
   const shell = { showItemInFolder: vi.fn(), openTerminal: vi.fn(), copyText: vi.fn() };
 
-  // tree.node writes a name that is not valid Unicode escaped, as 0.3.4 did; path.forms' text shows
-  // it as U+FFFD: what the system is handed must be the latter, which handable refuses
-  const answer = (shown: string, raw: string) =>
+  // tree.node and path.forms write a name that is not valid Unicode escaped, as 0.3.4 did; only
+  // path.forms' URI keeps its bytes. The system is handed path.forms' text where that names the
+  // item; the terminal opens in the folder, as path.forms writes the folder (node 3)
+  const forms = (raw: string, uri: string) => ({ raw, quoted: `"${raw}"`, posix: raw, uri, on_disk: true });
+  const answer = (shown: string, item: ReturnType<typeof forms>) =>
     mocked.mockImplementation(
-      async (method) =>
+      async (method, params) =>
         (method === "tree.node"
-          ? { node: { id: 7, kind: "file" }, path: shown, on_disk: true }
+          ? { node: { id: 7, parent: 3, kind: "file" }, path: shown, on_disk: true }
           : method === "path.forms"
-            ? { raw, quoted: `"${raw}"`, posix: raw, uri: "file:///x", on_disk: true }
+            ? (params as { node: number }).node === 3
+              ? forms("C:\\x", "file:///C:/x")
+              : item
             : null) as never,
     );
 
@@ -111,8 +115,8 @@ describe("the selection handed to the system", () => {
     vi.unstubAllGlobals();
   });
 
-  it("is path.forms' text, not tree.node's escaped path", async () => {
-    answer("C:\\x\\a.txt", "C:\\x\\a.txt");
+  it("is path.forms' text, the terminal its folder's", async () => {
+    answer("C:\\x\\a.txt", forms("C:\\x\\a.txt", "file:///C:/x/a.txt"));
     await runCommand("item.reveal");
     expect(shell.showItemInFolder).toHaveBeenCalledWith("C:\\x\\a.txt");
     await runCommand("item.terminal");
@@ -120,11 +124,11 @@ describe("the selection handed to the system", () => {
   });
 
   it("refuses a name that is not valid Unicode, and copies the escaped path", async () => {
-    answer("C:\\x\\a\\udc80b", "C:\\x\\a\uFFFDb");
+    answer("C:\\x\\a\\udc80b", forms("C:\\x\\a\\udc80b", "file:///C:/x/a%ED%B2%80b"));
     await runCommand("item.reveal");
     expect(shell.showItemInFolder).not.toHaveBeenCalled();
     expect(get().toast).toContain("不能在这里打开");
-    await runCommand("item.terminal"); // its folder is fine
+    await runCommand("item.terminal"); // its folder is fine, though its own text cut there would not be
     expect(shell.openTerminal).toHaveBeenCalledWith("C:\\x");
     await runCommand("item.copy_path");
     expect(shell.copyText).toHaveBeenCalledWith("C:\\x\\a\\udc80b");

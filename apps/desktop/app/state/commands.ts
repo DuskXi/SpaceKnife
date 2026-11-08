@@ -2,7 +2,7 @@
 // status and availability (palette.query); this file only maps an id to what it does here.
 
 import { focusFilter } from "@/lib/filterInput";
-import { folderOf, handable, notOpenable, revealLabel } from "@/lib/reveal";
+import { handOff, notOpenable, revealLabel } from "@/lib/reveal";
 import { t } from "@/lib/i18n";
 import { Kind } from "@/visual/frame";
 import { registeredLayouts } from "@/visual/registry";
@@ -78,17 +78,21 @@ async function selectionPath(): Promise<{ path: string; dir: boolean } | null> {
   return { path: r.path, dir: r.node.kind === "dir" };
 }
 
-/** The selection's path as the system is handed it: `path.forms`' text, which shows a name that is
- *  not valid Unicode as U+FFFD (`handable` refuses it). tree.node's path writes such a name escaped,
- *  as 0.3.4 did (`\xff`, `\udc80`): as a path that names nothing, or another item. */
-async function selectionHandOff(): Promise<{ path: string; dir: boolean } | null> {
+/** The selection as the system is handed it (`path.forms`' text), and the folder a terminal opens
+ *  in (the selection when it is one, else its parent's forms: its own name may be one written
+ *  escaped). Null where that text would name nothing or another item (`handOff`): a name that is
+ *  not valid Unicode, which path.forms and tree.node write escaped as 0.3.4 did (`\xff`,
+ *  `\udc80`), or one Win32 rewrites. */
+async function selectionHandOff(): Promise<{ path: string | null; folder: () => Promise<string | null> } | null> {
   const sel = selectedNode();
   if (!sel) return null;
   const [forms, r] = await Promise.all([
     call("path.forms", { scan_id: sel.scanId, node: sel.node }),
     call("tree.node", { scan_id: sel.scanId, node: sel.node }),
   ]);
-  return { path: forms.raw, dir: r.node.kind === "dir" };
+  const dir = r.node.kind === "dir";
+  const folder = async () => handOff(dir ? forms : await call("path.forms", { scan_id: sel.scanId, node: r.node.parent }));
+  return { path: handOff(forms), folder };
 }
 
 /** Where the user is, as the backend's commands see it (palette.query, palette.check). */
@@ -234,8 +238,8 @@ export async function runCommand(id: string): Promise<void> {
     }
     case "item.reveal": {
       const p = await selectionHandOff();
-      if (p && !handable(p.path)) toast(notOpenable());
-      else if (p) {
+      if (p && p.path == null) toast(notOpenable());
+      else if (p?.path != null) {
         window.sk.shell.showItemInFolder(p.path);
         toast(revealLabel());
       }
@@ -243,9 +247,10 @@ export async function runCommand(id: string): Promise<void> {
     }
     case "item.terminal": {
       const p = await selectionHandOff();
-      const here = p && folderOf(p.path, p.dir);
-      if (here && !handable(here)) toast(notOpenable());
-      else if (here) window.sk.shell.openTerminal(here);
+      if (!p) return;
+      const here = await p.folder();
+      if (here == null) toast(notOpenable());
+      else window.sk.shell.openTerminal(here);
       return;
     }
     case "tab.new":

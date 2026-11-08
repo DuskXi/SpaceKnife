@@ -722,6 +722,84 @@ impl Nodes {
         self.find(names::encode_name(path.as_os_str()))
     }
 
+    /// A path as the protocol shows it (tree.node, the palette, a path typed or pasted back): the
+    /// path itself ([`Nodes::find`]), else read with the names that are not Unicode in their
+    /// escaped form ([`names::printable`]: `\udc80` on Windows, `\xff` on POSIX), each name
+    /// matched as it is shown. A name that really is that text wins (it is found first). Only
+    /// for paths from the front ends: what the system reports is found with [`Nodes::find`].
+    pub fn find_shown(&self, path: &std::path::Path) -> Option<NodeId> {
+        let raw = names::encode_name(path.as_os_str());
+        self.find(raw).or_else(|| self.find_printable(raw))
+    }
+
+    fn find_printable(&self, path: &[u8]) -> Option<NodeId> {
+        std::str::from_utf8(path).ok()?; // escaped text is text
+        let target = names::normpath(path);
+        for root in self.roots() {
+            let shown = names::normpath(names::printable(self.name_bytes(root)).as_bytes());
+            if target.len() < shown.len() || normcase(&target[..shown.len()]) != normcase(&shown) {
+                continue;
+            }
+            let mut rest = &target[shown.len()..];
+            if !rest.is_empty() && !shown.last().is_some_and(|&b| names::is_sep(b)) {
+                if !names::is_sep(rest[0]) {
+                    continue; // C:\data2 is not inside C:\data
+                }
+                rest = &rest[1..];
+            }
+            let found = self.walk_printable(root, rest, false).or_else(|| {
+                // another case, where the system ignores it: only a name alone in that case
+                cfg!(windows)
+                    .then(|| self.walk_printable(root, rest, true))
+                    .flatten()
+            });
+            if found.is_some() {
+                return found;
+            }
+        }
+        None
+    }
+
+    /// The node `rest` (names below `node`, separated) leads to, each name matched with a
+    /// child's printable form. On Windows an escape's `\` is no separator, so a name can match
+    /// across one: the longer match is tried first, then the shorter.
+    fn walk_printable(&self, node: NodeId, rest: &[u8], folded: bool) -> Option<NodeId> {
+        if rest.is_empty() {
+            return Some(node);
+        }
+        let mut found: Vec<(usize, NodeId)> = Vec::new();
+        for ch in self.children(node) {
+            let own = names::printable(self.name_bytes(ch));
+            let p = own.as_bytes();
+            if p.is_empty()
+                || rest.len() < p.len()
+                || (rest.len() > p.len() && !names::is_sep(rest[p.len()]))
+            {
+                continue;
+            }
+            let head = &rest[..p.len()];
+            if (folded && normcase(head) == normcase(p)) || (!folded && head == p) {
+                found.push((p.len(), ch));
+            }
+        }
+        found.sort_by_key(|f| std::cmp::Reverse(f.0));
+        for (i, &(len, ch)) in found.iter().enumerate() {
+            // folded: names that differ only in case are two items, never a guess between them
+            let twins = found
+                .iter()
+                .enumerate()
+                .any(|(j, &(l, _))| j != i && l == len);
+            if folded && twins {
+                continue;
+            }
+            let next = rest.get(len + 1..).unwrap_or(&[]);
+            if let Some(n) = self.walk_printable(ch, next, folded) {
+                return Some(n);
+            }
+        }
+        None
+    }
+
     /// Zero-copy view of the names of nodes `a` up to `b` (or fewer: one heap chunk). Safe while
     /// a scan appends. Use [`NamesRun::seps`] for each name's NUL position.
     pub fn names_run(&self, a: NodeId, b: NodeId) -> NamesRun<'_> {

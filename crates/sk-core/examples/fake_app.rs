@@ -1,6 +1,7 @@
-//! A stand-in for the app's program in the swap's tests (src/update/swap.rs): asked
-//! `--startup-check`, it answers as the file `fake-app-mode.txt` next to it says (`ok` when there
-//! is none). Anything else: it says so and ends with 3.
+//! A stand-in for the app's program in the swap's tests (src/update/swap.rs).
+//!
+//! Asked `--startup-check`, it answers as the file `fake-app-mode.txt` next to it says (`ok` when
+//! there is none):
 //!
 //! - `ok`: `{"ok": true, "webview": "fake 1.0"}`, exit 0
 //! - `no-webview`: `{"ok": false, "error": "…WebView2…"}`, exit 1 (the Tauri app without WebView2)
@@ -9,23 +10,78 @@
 //! - `hang`: no answer for a minute
 //! - `noisy`: the `ok` answer, then 1 MiB more on stdout and on stderr
 //! - `bind-now`: the `ok` answer with the LD_BIND_NOW it was given (`unset` when none)
+//!
+//! Started as the swap starts the new version (`--updated`), it runs as the file
+//! `fake-app-run.txt` next to it says (`ready` when there is none), and notes its process id in
+//! `fake-app-pid.txt` there first:
+//!
+//! - `ready`: writes its connection info to `SPACEKNIFE_READY_FILE` as the app does once its
+//!   backend listens (a `.tmp` file renamed into place), exits 0 shortly after
+//! - `crash`: exit 1 at once, nothing written
+//! - `hang`: runs for a minute without a word
+//! - `quit`: exit 0 at once, nothing written (it chose to)
+//!
+//! Anything else: it says so and ends with 3.
 
 use std::io::Write;
+use std::path::Path;
+use std::time::Duration;
+
+fn beside(name: &str) -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok().map(|p| p.with_file_name(name))
+}
+
+fn mode(file: &str, default: &str) -> String {
+    beside(file)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .map(|m| m.trim().to_owned())
+        .unwrap_or_else(|| default.to_owned())
+}
 
 fn main() {
-    let mode = std::env::current_exe()
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p.with_file_name("fake-app-mode.txt")).ok())
-        .map(|m| m.trim().to_owned())
-        .unwrap_or_else(|| "ok".to_owned());
-    if std::env::args().nth(1).as_deref() != Some("--startup-check") {
-        eprintln!(
-            "fake_app: not a startup check: {:?}",
-            std::env::args().collect::<Vec<_>>()
-        );
-        std::process::exit(3);
+    match std::env::args().nth(1).as_deref() {
+        Some("--startup-check") => startup_check(&mode("fake-app-mode.txt", "ok")),
+        Some("--updated") => run(&mode("fake-app-run.txt", "ready")),
+        _ => {
+            eprintln!(
+                "fake_app: not a startup check: {:?}",
+                std::env::args().collect::<Vec<_>>()
+            );
+            std::process::exit(3);
+        }
     }
-    match mode.as_str() {
+}
+
+fn run(mode: &str) {
+    if let Some(p) = beside("fake-app-pid.txt") {
+        let _ = std::fs::write(p, std::process::id().to_string());
+    }
+    match mode {
+        "ready" => {
+            if let Some(file) = std::env::var_os("SPACEKNIFE_READY_FILE") {
+                let file = Path::new(&file);
+                let tmp = file.with_extension("json.tmp");
+                let info = format!(
+                    r#"{{"event": "ready", "url": "ws://127.0.0.1:1/", "pid": {}, "token": "fake"}}"#,
+                    std::process::id()
+                );
+                std::fs::write(&tmp, info).unwrap();
+                std::fs::rename(&tmp, file).unwrap();
+            }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        "crash" => std::process::exit(1),
+        "hang" => std::thread::sleep(Duration::from_secs(60)),
+        "quit" => {}
+        other => {
+            eprintln!("fake_app: no run mode {other}");
+            std::process::exit(4);
+        }
+    }
+}
+
+fn startup_check(mode: &str) {
+    match mode {
         "ok" => println!(r#"{{"ok": true, "webview": "fake 1.0"}}"#),
         "no-webview" => {
             println!(
@@ -40,7 +96,7 @@ fn main() {
             );
             std::process::exit(127);
         }
-        "hang" => std::thread::sleep(std::time::Duration::from_secs(60)),
+        "hang" => std::thread::sleep(Duration::from_secs(60)),
         "noisy" => {
             let junk = vec![b'x'; 1 << 20];
             let _ = std::io::stderr().write_all(&junk);

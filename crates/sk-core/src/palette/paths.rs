@@ -111,7 +111,7 @@ fn with_sep(path: String) -> String {
 
 /// The display path of a node.
 pub fn node_path(nodes: &Nodes, node: NodeId) -> String {
-    nodes.path_lossy(node)
+    nodes.path_printable(node)
 }
 
 /// What a selection seeds the path search with: its name. A scan root is stored under its full
@@ -220,10 +220,10 @@ fn hit(
     tier: u8,
     glob: bool,
 ) -> PathHit {
-    let name = nodes.name(node).into_owned();
+    let name = nodes.name_printable(node).into_owned();
     let is_dir = nodes.is_dir(node);
     let parent = nodes.parent(node);
-    let full = nodes.path_lossy(node);
+    let full = nodes.path_printable(node);
     let hits = if tier == 4 || glob {
         Vec::new()
     } else {
@@ -232,7 +232,7 @@ fn hit(
     PathHit {
         node,
         parent: if parent > 0 {
-            nodes.path_lossy(parent as NodeId)
+            nodes.path_printable(parent as NodeId)
         } else {
             String::new()
         },
@@ -383,7 +383,7 @@ pub struct PathInput {
 /// scanned yet.
 fn sized(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) -> Option<NodeId> {
     let (nodes, sizes) = (nodes?, sizes?);
-    let node = nodes.find_path(Path::new(path))?;
+    let node = nodes.find_shown(Path::new(path))?;
     ((node as usize) < sizes.n()).then_some(node)
 }
 
@@ -433,13 +433,20 @@ pub fn completion(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) 
         let best = n
             .children(node)
             .filter(|&k| (k as usize) < s.n())
-            .map(|k| (!n.is_dir(k), -s.size(n, k), n.name(k).to_lowercase(), k))
+            .map(|k| {
+                (
+                    !n.is_dir(k),
+                    -s.size(n, k),
+                    n.name_printable(k).to_lowercase(),
+                    k,
+                )
+            })
             .filter(|c| c.2.starts_with(&p))
             .min()?;
         let k = best.3;
         return Some(format!(
             "{folder}{}{}",
-            n.name(k),
+            n.name_printable(k),
             if n.is_dir(k) {
                 MAIN_SEP.to_string()
             } else {
@@ -449,7 +456,7 @@ pub fn completion(nodes: Option<&Nodes>, sizes: Option<&dyn Sizes>, path: &str) 
     }
     let mut found: Vec<(bool, String, String, bool)> = Vec::new();
     for e in std::fs::read_dir(folder).ok()?.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
+        let name = sk_store::names::printable(e.file_name().as_encoded_bytes()).into_owned();
         let lower = name.to_lowercase();
         if !lower.starts_with(&p) {
             continue;

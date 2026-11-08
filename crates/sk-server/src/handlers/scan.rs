@@ -122,9 +122,10 @@ pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> Result<TreeSummar
     let (base, info, here) = match me {
         Ok(v) => v,
         Err(p) => {
-            let path =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| nodes.path_lossy(node)))
-                    .ok();
+            let path = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                nodes.path_printable(node)
+            }))
+            .ok();
             return Err(sk_core::summary::summary_failed(
                 &h.id,
                 path.as_deref(),
@@ -132,7 +133,10 @@ pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> Result<TreeSummar
             ));
         }
     };
-    let mut gaps = Gaps::new(&h.id, &base.to_string_lossy());
+    // the path as the protocol shows it (a name that is not Unicode escaped, as 0.3.4 did)
+    let shown =
+        |p: &Path| sk_store::names::printable(p.as_os_str().as_encoded_bytes()).into_owned();
+    let mut gaps = Gaps::new(&h.id, &shown(&base));
     walk.note(&mut gaps);
     let class_ids = h.ctx.basis.class_ids();
     let id_of = |i: usize| class_ids.get(i).cloned().unwrap_or_default();
@@ -183,7 +187,7 @@ pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> Result<TreeSummar
                         let parent_path = nodes.path(nodes.parent(f).max(0) as NodeId);
                         let rel = match parent_path.strip_prefix(&base) {
                             Ok(r) if r.as_os_str().is_empty() => String::new(),
-                            Ok(r) => format!("{}{}", r.display(), std::path::MAIN_SEPARATOR),
+                            Ok(r) => format!("{}{}", shown(r), std::path::MAIN_SEPARATOR),
                             Err(_) => String::new(),
                         };
                         (f, rel, ci)
@@ -267,7 +271,7 @@ pub fn summary_of(h: &ScanHandle, node: NodeId, top: usize) -> Result<TreeSummar
     let tag = tag_of(&mut gaps, node);
     Ok(TreeSummaryResult {
         node: info,
-        path: base.display().to_string(),
+        path: shown(&base),
         parent,
         latest_mtime: latest,
         top_files: tops,
@@ -508,7 +512,7 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
         let h = call.server.scans.get(&p.scan_id)?;
         crate::compute::blocking(move || {
             let nodes = h.store.read();
-            let node = nodes.find_path(Path::new(&p.path));
+            let node = nodes.find_shown(Path::new(&p.path));
             TreeFindResult {
                 node: node.map(|n| node_info(&nodes, n)),
             }

@@ -18,30 +18,30 @@ fn os_release() -> String {
     RELEASE.get_or_init(read_os_release).clone()
 }
 
-/// Windows "10" / "11", the kernel version elsewhere.
+/// Windows: "10", "11", "2022Server" … as 0.3.4 said ([`windows_release`] of the version
+/// RtlGetVersion reports: the system's own, not the one a manifest or compatibility mode makes
+/// GetVersionEx tell, and not `cmd /C ver`'s text, which depends on the console's language and is
+/// empty when a Git for Windows / MSYS2 terminal started the app). Elsewhere the kernel's release.
 fn read_os_release() -> String {
     #[cfg(windows)]
     {
-        // RtlGetVersion is the honest one; the version from the registry is good enough here
-        if let Ok(out) = std::process::Command::new("cmd")
-            .args(["/C", "ver"])
-            .output()
-        {
-            let text = String::from_utf8_lossy(&out.stdout);
-            if let Some(v) = text.split("Version ").nth(1) {
-                let v = v.trim().trim_end_matches(']');
-                let mut parts = v.split('.');
-                if let Some(major) = parts.next() {
-                    let build = parts.nth(1).unwrap_or("");
-                    return if major == "10" && build.parse::<u32>().is_ok_and(|b| b >= 22000) {
-                        "11".to_owned()
-                    } else {
-                        major.to_owned()
-                    };
-                }
-            }
+        use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
+        use windows_sys::Win32::System::SystemInformation::{OSVERSIONINFOEXW, OSVERSIONINFOW};
+        const VER_NT_WORKSTATION: u8 = 1;
+        let mut info = OSVERSIONINFOEXW {
+            dwOSVersionInfoSize: std::mem::size_of::<OSVERSIONINFOEXW>() as u32,
+            ..Default::default()
+        };
+        // SAFETY: an OSVERSIONINFOEXW whose size field says so, which RtlGetVersion fills in.
+        let status = unsafe { RtlGetVersion((&raw mut info).cast::<OSVERSIONINFOW>()) };
+        if status != 0 {
+            return String::new();
         }
-        String::new()
+        windows_release(
+            (info.dwMajorVersion, info.dwMinorVersion, info.dwBuildNumber),
+            info.wProductType == VER_NT_WORKSTATION,
+        )
+        .to_owned()
     }
     #[cfg(not(windows))]
     {
@@ -52,6 +52,43 @@ fn read_os_release() -> String {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
             .unwrap_or_default()
     }
+}
+
+/// Python 3.12's `platform.release()` (0.3.4's) for Windows `(major, minor, build)`: the first
+/// release of its table (workstations or servers) at or below the version; "" below them all.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_release(version: (u32, u32, u32), workstation: bool) -> &'static str {
+    // platform._WIN32_CLIENT_RELEASES and _WIN32_SERVER_RELEASES, newest first
+    const CLIENT: &[((u32, u32, u32), &str)] = &[
+        ((10, 1, 0), "post11"),
+        ((10, 0, 22000), "11"),
+        ((6, 4, 0), "10"),
+        ((6, 3, 0), "8.1"),
+        ((6, 2, 0), "8"),
+        ((6, 1, 0), "7"),
+        ((6, 0, 0), "Vista"),
+        ((5, 2, 3790), "XP64"),
+        ((5, 2, 0), "XPMedia"),
+        ((5, 1, 0), "XP"),
+        ((5, 0, 0), "2000"),
+    ];
+    const SERVER: &[((u32, u32, u32), &str)] = &[
+        ((10, 1, 0), "post2022Server"),
+        ((10, 0, 20348), "2022Server"),
+        ((10, 0, 17763), "2019Server"),
+        ((6, 4, 0), "2016Server"),
+        ((6, 3, 0), "2012ServerR2"),
+        ((6, 2, 0), "2012Server"),
+        ((6, 1, 0), "2008ServerR2"),
+        ((6, 0, 0), "2008Server"),
+        ((5, 2, 0), "2003Server"),
+        ((5, 0, 0), "2000Server"),
+    ];
+    let table = if workstation { CLIENT } else { SERVER };
+    table
+        .iter()
+        .find(|(v, _)| *v <= version)
+        .map_or("", |(_, r)| *r)
 }
 
 fn os_system() -> &'static str {
@@ -159,4 +196,74 @@ pub fn install(r: &mut Router, t: &mut TopicRegistry) {
         }
         Ok(EmptyResult {})
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the registry says this Windows is (`CurrentMajorVersionNumber`, `CurrentBuildNumber`,
+    /// `InstallationType`), read with reg.exe: an oracle that is not the code under test.
+    #[cfg(windows)]
+    fn registry() -> (u32, u32, bool) {
+        let value = |name: &str| {
+            let out = std::process::Command::new("reg")
+                .args([
+                    "query",
+                    r"HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion",
+                    "/v",
+                    name,
+                ])
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stdout).into_owned();
+            let line = text
+                .lines()
+                .find(|l| l.trim_start().starts_with(name))
+                .unwrap_or("");
+            line.split_whitespace().last().unwrap_or("").to_owned()
+        };
+        let major = value("CurrentMajorVersionNumber");
+        let major = u32::from_str_radix(major.trim_start_matches("0x"), 16).unwrap();
+        let build = value("CurrentBuildNumber").parse().unwrap();
+        (major, build, value("InstallationType") != "Server")
+    }
+
+    /// `platform.release()` of 0.3.4 (Python 3.12) on this computer, whatever started it (a
+    /// terminal of Git for Windows or MSYS2, a console in another language).
+    #[cfg(windows)]
+    #[test]
+    fn the_release_is_the_systems_own() {
+        let (major, build, client) = registry();
+        let want = match (client, major, build) {
+            (true, 10, b) if b >= 22000 => "11",
+            (true, 10, _) => "10",
+            (false, 10, b) if b >= 20348 => "2022Server",
+            (false, 10, b) if b >= 17763 => "2019Server",
+            (false, 10, _) => "2016Server",
+            _ => panic!("not a Windows 10 or later: {major}.{build}"),
+        };
+        assert_eq!(read_os_release(), want);
+    }
+
+    /// The releases Python 3.12 names (platform._WIN32_CLIENT_RELEASES / _SERVER_RELEASES).
+    #[test]
+    fn windows_releases_as_python_names_them() {
+        let client = |v| windows_release(v, true);
+        let server = |v| windows_release(v, false);
+        assert_eq!(client((10, 0, 26300)), "11");
+        assert_eq!(client((10, 0, 22000)), "11");
+        assert_eq!(client((10, 0, 21999)), "10");
+        assert_eq!(client((10, 0, 19045)), "10");
+        assert_eq!(client((6, 3, 9600)), "8.1");
+        assert_eq!(client((6, 1, 7601)), "7");
+        assert_eq!(client((5, 2, 3790)), "XP64");
+        assert_eq!(client((10, 1, 0)), "post11");
+        assert_eq!(client((4, 0, 1381)), "");
+        assert_eq!(server((10, 0, 26100)), "2022Server"); // Server 2025: Python 3.12 has no name
+        assert_eq!(server((10, 0, 20348)), "2022Server");
+        assert_eq!(server((10, 0, 17763)), "2019Server");
+        assert_eq!(server((10, 0, 14393)), "2016Server");
+        assert_eq!(server((6, 3, 9600)), "2012ServerR2");
+    }
 }

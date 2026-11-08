@@ -289,11 +289,12 @@ impl DrawList {
     }
 }
 
-/// Append a name as UTF-8 (invalid sequences as U+FFFD).
+/// Append a name as UTF-8, as 0.3.4's frames carried it: what is not Unicode as `?`
+/// ([`sk_store::names::frame_label`]).
 #[inline]
 pub fn push_name(out: &mut Vec<u8>, raw: &[u8]) {
     match std::str::from_utf8(raw) {
         Ok(_) => out.extend_from_slice(raw),
-        Err(_) => out.extend_from_slice(String::from_utf8_lossy(raw).as_bytes()),
+        Err(_) => out.extend_from_slice(sk_store::names::frame_label(raw).as_bytes()),
     }
 }

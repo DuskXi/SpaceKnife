@@ -130,6 +130,10 @@ Step errors (timeouts, a closed connection, a missing saved field) are recorded 
   form `/mnt/c/…`), then `\` → `/` on Windows; snapshot time stamps → `<stamp>`;
 - floats equal within a relative 1e-9 (`<f4` columns 1e-6).
 
+A scenario's `normalize` adds to these: `handshake` compares `system.info`'s `platform.release` as a
+string only (`shape_keys`), since it names the machine that recorded the golden (Windows 11, WSL's
+kernel), not the one a replay runs on (a CI runner is a Windows Server).
+
 Binary frames are decoded to `{stream, layout, seq, final, count, columns: {name: {dtype, values}},
 names}` (the `names` blob cut by `name_len`).
 

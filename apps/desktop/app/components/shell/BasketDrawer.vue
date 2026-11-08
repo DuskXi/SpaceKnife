@@ -146,7 +146,7 @@ async function trashNow(): Promise<void> {
             <span class="bk-name" :title="it.path"
               >{{ it.kind === "group" ? t("{n} 个小项", { n: fmtInt(it.members) }) : it.name }}<span v-if="it.tag" :class="['tag-mini', it.tag]"
             /></span>
-            <span class="bk-path mono">{{ parentOf(it.path) }}</span>
+            <span class="bk-path mono">{{ parentOf(it.path, it.kind === "group" ? undefined : it.name) }}</span>
           </span>
           <span class="bk-size">
             <span class="mono">{{ fmtSize(it.alloc) }}</span>

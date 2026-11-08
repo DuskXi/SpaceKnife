@@ -2,6 +2,7 @@
 
 import type { BackendInfo, BackendState } from "@/shared/api";
 import type { BasketConfirm, FrameInfo, MethodName, Methods, OpProgressEvent, ScanStartParams, ScanStatus, SettingsState, UpdateStatus, ViewSettingsParams, ViewState, ViewUpdate } from "@/protocol/generated";
+import { changedBasket } from "@/lib/basketDrawer";
 import { fmtInt, plural, setUnitBase } from "@/lib/format";
 import { Rpc, RpcError } from "@/protocol/rpc";
 // the built-in visualizations register before the first hello announces their layouts
@@ -341,7 +342,8 @@ const BASKET_CHANGED = -32014;
 /** Run the items the user saw and confirmed (`confirm`, each as it was shown; the basket is
  *  shared by every session): into the recycle bin, or deleted for good after the undo window
  *  (W5-41…47). "changed": one of them changed since and nothing ran (the backend checks it too;
- *  the caller asks again); "failed": told in a toast. */
+ *  the caller asks again, with the basket the answer carried, now in the store); "failed": told
+ *  in a toast. */
 export async function basketExecute(mode: "trash" | "delete", confirm: BasketConfirm[]): Promise<"started" | "changed" | "failed"> {
   try {
     const params = negotiated(BASKET_CONFIRM) ? { mode, confirm } : { mode, ids: confirm.map((c) => c.id) };
@@ -354,7 +356,13 @@ export async function basketExecute(mode: "trash" | "delete", confirm: BasketCon
     );
     return "started";
   } catch (err) {
-    if (err instanceof RpcError && err.code === BASKET_CHANGED) return "changed";
+    if (err instanceof RpcError && err.code === BASKET_CHANGED) {
+      // the basket as the backend has it now, which the caller asks again with: the answer can
+      // come before the basket.changed event that says the same
+      const now = changedBasket(err.data);
+      if (now) set({ basket: now });
+      return "changed";
+    }
     toast(err instanceof RpcError ? err.message : String(err));
     return "failed";
   }

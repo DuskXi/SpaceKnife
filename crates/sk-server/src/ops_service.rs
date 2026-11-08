@@ -115,6 +115,9 @@ pub struct OpRun {
     scans: HashMap<String, String>,
     /// path -> its scan root (case twins, kept with the item so it holds once the scan is closed)
     roots: HashMap<String, String>,
+    /// path as shown -> as the protocol writes it (a name that is not Unicode escaped, as 0.3.4
+    /// sent it): the results and the progress name items so
+    printable: HashMap<String, String>,
     st: Mutex<RunState>,
     cancel: AtomicBool,
     called_off: AtomicBool,
@@ -128,15 +131,27 @@ impl OpRun {
             st.phase,
             OpPhase::Done | OpPhase::Cancelled | OpPhase::Undone
         );
+        let shown = |p: &str| {
+            self.printable
+                .get(p)
+                .cloned()
+                .unwrap_or_else(|| p.to_owned())
+        };
         OpProgressEvent {
             task_id: self.id.clone(),
             mode: self.mode,
             done: st.done,
             total: self.total,
-            current: st.current.clone(),
+            current: shown(&st.current),
             phase: st.phase,
             results: if is_final {
-                st.results.iter().map(OpResult::to_protocol).collect()
+                st.results
+                    .iter()
+                    .map(|r| sk_protocol::ops::OpItemResult {
+                        path: shown(&r.path),
+                        ..r.to_protocol()
+                    })
+                    .collect()
             } else {
                 Vec::new()
             },
@@ -669,6 +684,10 @@ impl OpsService {
                 .iter()
                 .filter(|t| !t.root.is_empty())
                 .map(|t| (t.path.clone(), t.root.clone()))
+                .collect(),
+            printable: targets
+                .iter()
+                .map(|t| (t.path.clone(), sk_core::ops::printable_path(&t.os_path)))
                 .collect(),
             targets,
             st: Mutex::new(RunState {
