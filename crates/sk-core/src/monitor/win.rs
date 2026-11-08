@@ -840,52 +840,62 @@ mod imp {
             if io_event.is_null() {
                 return Err(std::io::Error::last_os_error());
             }
+            // the thread's from here: closed with the closure when the thread never starts (the
+            // closure is dropped then), by the Reader once it runs
+            let io_event = Handle(io_event);
+            #[cfg(test)]
+            let io_u = io_event.0 as usize;
             *self.shared.emitter.sink.locked() = Some(sink);
             let sh = self.shared.clone();
             let explicit = self.buffer_size;
             let ext_ok = self.use_extended.load(Ordering::SeqCst);
-            let io_u = io_event as usize;
-            self.worker
-                .spawn(&format!("rdcw {}", self.shared.root.display()), move || {
-                    let mut r = Reader {
-                        decoder: NotifyDecoder::new(&sh.root),
-                        sh,
-                        handle: std::ptr::null_mut(),
-                        io_event: io_u as HANDLE,
-                        // SAFETY: an all-zero OVERLAPPED is valid.
-                        ov: Box::new(unsafe { std::mem::zeroed() }),
-                        buf: Vec::new(),
-                        size: 0,
-                        extended: ext_ok,
-                        pending: false,
-                        completed: 0,
-                        attempts: Vec::new(),
-                        final_path: String::new(),
-                        check_every: CHECK_LOCAL,
-                    };
-                    let body = std::panic::AssertUnwindSafe(|| {
-                        if r.open(explicit, ext_ok) && r.arm() {
-                            r.run();
-                        }
-                    });
-                    if std::panic::catch_unwind(body).is_err() {
-                        let sh = r.sh.clone();
-                        tracing::error!(
-                            "{}",
-                            crate::tr!(
-                                "文件监视线程异常：{path}",
-                                path = sh.root.display().to_string()
-                            )
-                        );
-                        sh.fail(
-                            crate::tr!("监视意外中断：{reason}", reason = "panic"),
-                            &mut r.decoder,
-                        );
+            let body = move || {
+                let mut r = Reader {
+                    decoder: NotifyDecoder::new(&sh.root),
+                    sh,
+                    handle: std::ptr::null_mut(),
+                    io_event: std::mem::ManuallyDrop::new(io_event).0,
+                    // SAFETY: an all-zero OVERLAPPED is valid.
+                    ov: Box::new(unsafe { std::mem::zeroed() }),
+                    buf: Vec::new(),
+                    size: 0,
+                    extended: ext_ok,
+                    pending: false,
+                    completed: 0,
+                    attempts: Vec::new(),
+                    final_path: String::new(),
+                    check_every: CHECK_LOCAL,
+                };
+                let body = std::panic::AssertUnwindSafe(|| {
+                    if r.open(explicit, ext_ok) && r.arm() {
+                        r.run();
                     }
+                });
+                if std::panic::catch_unwind(body).is_err() {
                     let sh = r.sh.clone();
-                    drop(r);
-                    sh.done.store(true, Ordering::SeqCst);
-                })
+                    tracing::error!(
+                        "{}",
+                        crate::tr!(
+                            "文件监视线程异常：{path}",
+                            path = sh.root.display().to_string()
+                        )
+                    );
+                    sh.fail(
+                        crate::tr!("监视意外中断：{reason}", reason = "panic"),
+                        &mut r.decoder,
+                    );
+                }
+                let sh = r.sh.clone();
+                drop(r);
+                sh.done.store(true, Ordering::SeqCst);
+            };
+            #[cfg(test)]
+            if hooks::spawn_fails(&self.shared.root, io_u) {
+                drop(body); // what std::thread::Builder::spawn does with it when it fails
+                return Err(std::io::Error::other("the watcher thread did not start"));
+            }
+            self.worker
+                .spawn(&format!("rdcw {}", self.shared.root.display()), body)
         }
 
         fn add_dirs(&self, _dirs: Vec<PathBuf>, _mtimes: Option<Vec<u32>>, _since_ns: i64) {
@@ -955,6 +965,27 @@ mod imp {
             if let Some(f) = hook {
                 f(event, done);
             }
+        }
+
+        type SpawnHook = Box<dyn FnOnce(usize) -> bool + Send>;
+        static ON_SPAWN: Mutex<Vec<(PathBuf, SpawnHook)>> = Mutex::new(Vec::new());
+
+        /// `f(read event)` runs once, inside start() of the watcher of `root`, where its thread is
+        /// started; true: the thread does not start (as when the system has no thread to give).
+        pub fn on_spawn(root: &Path, f: impl FnOnce(usize) -> bool + Send + 'static) {
+            ON_SPAWN
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((root.to_path_buf(), Box::new(f)));
+        }
+
+        pub(super) fn spawn_fails(root: &Path, event: usize) -> bool {
+            let hook = {
+                let mut hooks = ON_SPAWN.lock().unwrap_or_else(|e| e.into_inner());
+                let at = hooks.iter().position(|(r, _)| r == root);
+                at.map(|i| hooks.remove(i).1)
+            };
+            hook.is_some_and(|f| f(event))
         }
     }
 }
@@ -1210,5 +1241,50 @@ mod tests {
             "stop() signalled another object's event"
         );
         assert!(w.finished());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_thread_that_does_not_start_leaves_no_event_open() {
+        // start() makes the read's event, then the thread that owns it: when the thread can't be
+        // started, the event must be closed again, not left open for the life of the process
+        use crate::monitor::Watcher;
+        use windows_sys::Win32::Foundation::{
+            CloseHandle, CompareObjectHandles, DUPLICATE_SAME_ACCESS, DuplicateHandle, HANDLE,
+        };
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir(&root).unwrap();
+        let w = RdcwWatcher::new(&root, None);
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(None::<(usize, usize)>));
+        let mine = seen.clone();
+        imp::hooks::on_spawn(&root, move |event| {
+            // a second handle to the event, to tell afterwards whether `event` still names it
+            let mut dup: HANDLE = std::ptr::null_mut();
+            // SAFETY: plain calls on handles of this process; `dup` is closed below.
+            let duplicated = unsafe {
+                DuplicateHandle(
+                    GetCurrentProcess(),
+                    event as HANDLE,
+                    GetCurrentProcess(),
+                    &mut dup,
+                    0,
+                    0,
+                    DUPLICATE_SAME_ACCESS,
+                )
+            } != 0;
+            assert!(duplicated);
+            *mine.lock().unwrap() = Some((event, dup as usize));
+            true
+        });
+        assert!(w.start(std::sync::Arc::new(|_| {})).is_err());
+        let (event, dup) = seen.lock().unwrap().take().expect("the hook did not run");
+        // SAFETY: plain calls; a closed handle value only makes the comparison fail.
+        let still_open = unsafe { CompareObjectHandles(event as HANDLE, dup as HANDLE) } != 0;
+        unsafe { CloseHandle(dup as HANDLE) };
+        assert!(!still_open, "the read's event stayed open");
+        w.stop(); // and the watcher stops as usual
     }
 }
