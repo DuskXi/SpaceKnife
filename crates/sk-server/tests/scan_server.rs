@@ -440,10 +440,14 @@ async fn expected_items_ignore_partial_snapshots() {
         .ok("scan.start", json!({"roots": [facts.root], "workers": 0}))
         .await;
     let st = wait_final(&c, started["scan_id"].as_str().unwrap(), true).await;
-    assert_eq!(
-        sk_server::scans::last_item_count(&roots),
-        st["items"].as_i64()
-    );
+    assert_eq!(st["files"], facts.files, "{st}");
+    // the items of the tree: the root and everything in it. Not the status' `items` (the store's
+    // rows, as in 0.3.4): live monitoring may list folders again right after the scan (here every
+    // one: the tree was made just before the scan started, within the time stamps' slack, so a
+    // change after the listing can't be ruled out, monitor::poll::listed_changed), and a listing
+    // again adds rows for the same items; the snapshot holds the tree.
+    let complete = Some(facts.files + facts.dirs + 1);
+    assert_eq!(sk_server::scans::last_item_count(&roots), complete, "{st}");
     // a stopped scan saved by hand in the same folder is skipped
     let partial = c
         .ok(
@@ -458,10 +462,7 @@ async fn expected_items_ignore_partial_snapshots() {
         // snapshot names have a one-second stamp: not the same file as the complete one
         tokio::time::sleep(Duration::from_millis(1100)).await;
         c.ok("snapshot.save", json!({"scan_id": pid})).await;
-        assert_eq!(
-            sk_server::scans::last_item_count(&roots),
-            st["items"].as_i64()
-        );
+        assert_eq!(sk_server::scans::last_item_count(&roots), complete);
         // and a loaded stopped snapshot keeps its state
         let list = c.ok("snapshot.list", json!({})).await;
         let newest = list["snapshots"][0]["path"].clone();
