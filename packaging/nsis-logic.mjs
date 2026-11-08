@@ -7,7 +7,9 @@
 // an update in place file by file (a stale interface file gone, a file of the user's kept), an
 // incomplete staging that stops with nothing changed, a held file that is reported, a parent that
 // takes no folder (staged elsewhere and copied), a leftover staging folder, a folder that is not
-// a staging folder never removed. Windows only; it writes in a temporary folder only.
+// a staging folder never removed — and that the app the installer starts gets its environment
+// (cmd.exe stands in for it: on your own desktop run this from packaging/hidden-desktop.ps1, so
+// its console window stays out of sight). Windows only; it writes in a temporary folder only.
 //
 //   node packaging/nsis-logic.mjs [--makensis PATH] [--utils PATH] [--helpers PATH]
 //
@@ -177,6 +179,15 @@ try {
   {
     const { got } = run("dropguard");
     expect("SkDropStage leaves a folder it did not make", got, { kept: "1" });
+  }
+  {
+    // the app the installer starts after an update gets the installer's environment (0.3.4's
+    // update test passes its ready file and release list so), unless the installer runs elevated
+    // through UAC: then it starts as the desktop user, with that user's own environment
+    const mark = `sk-logic-${process.pid}-${Date.now()}`;
+    const { got } = run("start", "", { SK_LOGIC_MARK: mark });
+    const elevated = got.get("elevation") === "2";
+    expect(`SkStartApp (elevation type ${got.get("elevation")})`, got, elevated ? { started: /./ } : { started: mark });
   }
 } catch (e) {
   failures++;

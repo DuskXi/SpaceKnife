@@ -288,8 +288,7 @@ FunctionEnd
 !insertmacro MUI_PAGE_FINISH
 
 Function SkFinishRun
-  nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" ""
-  Pop $0
+  !insertmacro SK_START_APP "$INSTDIR\${MAINBINARYNAME}.exe" ""
 FunctionEnd
 
 Function SkFinishDesktopShortcut
@@ -454,8 +453,7 @@ Function .onInit
       ${If} ${Silent}
       ${AndIf} $SkRun = 1
         ReadRegStr $R0 HKLM "${SK_INSTKEY}" "InstallLocation"
-        nsis_tauri_utils::RunAsUser "$R0\${MAINBINARYNAME}.exe" "$SkRunArgs"
-        Pop $R1
+        !insertmacro SK_START_APP "$R0\${MAINBINARYNAME}.exe" "$SkRunArgs"
       ${EndIf}
     ${Else}
       ${If} $0 = -1
@@ -822,8 +820,7 @@ Function .onInstSuccess
   ${AndIf} $SkRun = 1
     ${If} $PassiveMode = 1
     ${OrIf} ${Silent}
-      nsis_tauri_utils::RunAsUser "$INSTDIR\${MAINBINARYNAME}.exe" "$SkRunArgs"
-      Pop $0
+      !insertmacro SK_START_APP "$INSTDIR\${MAINBINARYNAME}.exe" "$SkRunArgs"
     ${EndIf}
   ${EndIf}
 FunctionEnd

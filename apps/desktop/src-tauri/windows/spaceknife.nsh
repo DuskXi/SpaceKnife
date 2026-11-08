@@ -877,6 +877,63 @@ Function SkWebView2Version
   ${EndIf}
 FunctionEnd
 
+; $0 = this process's TokenElevationType: 1 no split token (UAC off, the built-in Administrator,
+; or a standard user), 2 elevated through UAC, 3 the limited half of a split token; 0 unknown
+Function SkElevationType
+  Push $1
+  Push $2
+  Push $3
+  StrCpy $0 0
+  System::Call 'kernel32::GetCurrentProcess() p .r1'
+  System::Call 'advapi32::OpenProcessToken(p r1, i 0x8, *p .r2) i .r3'
+  ${If} $3 <> 0
+    System::Call 'advapi32::GetTokenInformation(p r2, i 18, *i .r0, i 4, *i .r3) i .r1'
+    ${If} $1 = 0
+      StrCpy $0 0
+    ${EndIf}
+    System::Call 'kernel32::CloseHandle(p r2)'
+  ${EndIf}
+  Pop $3
+  Pop $2
+  Pop $1
+FunctionEnd
+
+; Start SpaceKnife ($R0 the program, $R1 its arguments) as the desktop user. Elevated through UAC
+; (2), the desktop user's own token is explorer's (nsis_tauri_utils::RunAsUser), so the app never
+; runs elevated; otherwise there is no other token to take, and the app starts as this process
+; is, with its environment (RunAsUser would take explorer's token anyway when UAC is off, and the
+; profile's environment with it, or start nothing without a shell window). Registers are kept:
+; use SK_START_APP.
+Function SkStartApp
+  Push $0
+  Call SkElevationType
+  ${If} $0 = 2
+    nsis_tauri_utils::RunAsUser "$R0" "$R1"
+    Pop $0
+    ${SkLog} "started $R0 $R1 as the desktop user: $0"
+  ${Else}
+    ClearErrors
+    ExecShell "open" '"$R0"' "$R1"
+    ${If} ${Errors}
+      ${SkLog} "could not start $R0 $R1"
+    ${Else}
+      ${SkLog} "started $R0 $R1"
+    ${EndIf}
+    ClearErrors
+  ${EndIf}
+  Pop $0
+FunctionEnd
+
+!macro SK_START_APP PROGRAM ARGS
+  Push $R0
+  Push $R1
+  StrCpy $R0 "${PROGRAM}"
+  StrCpy $R1 "${ARGS}"
+  Call SkStartApp
+  Pop $R1
+  Pop $R0
+!macroend
+
 ; After a failed silent update: start the version that is still installed, so 「无缝更新」 never
 ; leaves the user without SpaceKnife.
 Function SkRestartPrevious
@@ -897,8 +954,7 @@ Function SkRestartPrevious
   ${If} $SkOldDir != ""
   ${AndIf} ${FileExists} "$SkOldDir\SpaceKnife.exe"
     ${SkLog} "starting the installed version again: $SkOldDir\SpaceKnife.exe"
-    nsis_tauri_utils::RunAsUser "$SkOldDir\SpaceKnife.exe" ""
-    Pop $0
+    !insertmacro SK_START_APP "$SkOldDir\SpaceKnife.exe" ""
   ${EndIf}
 FunctionEnd
 

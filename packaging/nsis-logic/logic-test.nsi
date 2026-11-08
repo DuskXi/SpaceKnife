@@ -2,8 +2,9 @@
 ; without installing anything: packaging/nsis-logic.mjs compiles this with the NSIS that Tauri's
 ; bundler uses and runs it once per case. Each run reads its case from the environment and writes
 ; key=value lines to SK_LOGIC_OUT; the staging cases work in the folder SK_LOGIC_SANDBOX only (a
-; temporary folder the runner makes and removes). No registry writes, no shortcuts, no processes:
-; SkRunElevated, SkCloseIn, SkRemove* and SkMigrateShortcut are compiled in but never called.
+; temporary folder the runner makes and removes). No registry writes, no shortcuts; the one
+; process started is cmd.exe standing in for the app (the "start" case). SkRunElevated, SkCloseIn,
+; SkRemove* and SkMigrateShortcut are compiled in but never called.
 ;
 ;   makensis -DSK_HELPERS=<spaceknife.nsh> -DSK_UTILS=<Tauri's utils.nsh> -DSK_PLUGINS=<dir> -DSK_OUT=<exe> logic-test.nsi
 
@@ -16,6 +17,7 @@ Name "SpaceKnife installer logic test"
 !include x64.nsh
 !include FileFunc.nsh
 !include WordFunc.nsh
+!include TextFunc.nsh
 !include "Win\COM.nsh"
 !include "Win\Propkey.nsh"
 !include "Win\RestartManager.nsh"
@@ -191,6 +193,34 @@ Function Staging
   ${EndIf}
 FunctionEnd
 
+; SkStartApp: the app it starts gets this process's environment (the update's tests pass their
+; ready file and release list so) unless the installer runs elevated through UAC; a console
+; program stands in for the app and writes what it got
+Function StartApp
+  ReadEnvStr $R8 SK_LOGIC_SANDBOX
+  Call SkElevationType
+  !insertmacro OUT "elevation=$0"
+  StrCpy $R0 "$SYSDIR\cmd.exe"
+  StrCpy $R1 '/d /c echo %SK_LOGIC_MARK%>"$R8\started.txt"'
+  Call SkStartApp
+  StrCpy $1 0
+  start_wait:
+  ${IfNot} ${FileExists} "$R8\started.txt"
+  ${AndIf} $1 < 100
+    Sleep 100
+    IntOp $1 $1 + 1
+    Goto start_wait
+  ${EndIf}
+  Sleep 300
+  !insertmacro GET "$R8\started.txt"
+  ${TrimNewLines} "$R0" $R0
+  StrCpy $2 $R0 1 -1
+  ${If} $2 == " "
+    StrCpy $R0 $R0 -1
+  ${EndIf}
+  !insertmacro OUT "started=$R0"
+FunctionEnd
+
 ; SkDropStage removes only a folder SkMakeStage made
 Function DropGuard
   ReadEnvStr $R8 SK_LOGIC_SANDBOX
@@ -258,6 +288,8 @@ Function .onInit
     !insertmacro T_DIR "D:\Apps\SpaceKnife"
   ${ElseIf} $R9 == "dropguard"
     Call DropGuard
+  ${ElseIf} $R9 == "start"
+    Call StartApp
   ${Else}
     Call Staging
   ${EndIf}
