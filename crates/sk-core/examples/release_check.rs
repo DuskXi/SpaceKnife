@@ -22,10 +22,10 @@ use sk_protocol::update::{InstallKind, UpdateChannel};
 const AGENT: &str = "SpaceKnife-release-check";
 
 /// (install kind, shell, platform as the app names it, machine) for every kind of install a
-/// release serves: the Windows installer, the rpm and the AppImage are the Electron shell's, the
-/// rest Tauri's (update::asset_templates)
+/// release serves: the rpm and the AppImage are the Electron shell's, the rest (the Windows
+/// installer too) Tauri's (update::asset_templates)
 const INSTALLS: &[(InstallKind, Shell, &str, &str)] = &[
-    (InstallKind::Nsis, Shell::Electron, "win32", "x86_64"),
+    (InstallKind::Nsis, Shell::Tauri, "win32", "x86_64"),
     (InstallKind::Portable, Shell::Tauri, "win32", "x86_64"),
     (InstallKind::Portable, Shell::Tauri, "win32", "aarch64"),
     (InstallKind::Portable, Shell::Tauri, "linux", "x86_64"),

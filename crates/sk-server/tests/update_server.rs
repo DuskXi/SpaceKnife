@@ -52,9 +52,9 @@ fn fake(srv: &ServerHandle) -> FakeGh {
                 etag: Some(format!("\"{}\"", g.calls)),
             })
         }));
-    // the Windows installer comes from the Electron shell (0.3.4's name, the update contract)
+    // the Windows installer is the Tauri app's (0.3.4's name, the update contract)
     srv.server.updates.set_install_kind(InstallKind::Nsis);
-    srv.server.updates.set_shell(Shell::Electron);
+    srv.server.updates.set_shell(Shell::Tauri);
     gh
 }
 
@@ -449,8 +449,9 @@ async fn a_release_without_a_checksum_for_the_file_is_not_downloaded() {
 
 #[tokio::test]
 async fn each_shell_takes_the_file_built_for_it() {
-    // the rpm and the AppImage are the Electron shell's, the deb and the portable copies Tauri's;
-    // an install never moves to a file of the other shell (SPACEKNIFE_SHELL)
+    // the rpm and the AppImage are the Electron shell's, the Windows installer, the deb and the
+    // portable copies Tauri's; an install never moves to a file of the other shell
+    // (SPACEKNIFE_SHELL)
     let _s = SERIAL.lock().await;
     let (srv, _dir) = setup().await;
     let gh = fake(&srv);
@@ -494,10 +495,10 @@ async fn each_shell_takes_the_file_built_for_it() {
         (InstallKind::Deb, Shell::Electron, None),
         (
             InstallKind::Nsis,
-            Shell::Electron,
+            Shell::Tauri,
             Some("SpaceKnife-0.4.0-Setup-x64.exe"),
         ),
-        (InstallKind::Nsis, Shell::Tauri, None),
+        (InstallKind::Nsis, Shell::Electron, None),
     ] {
         updates.set_install_kind(kind);
         updates.set_shell(shell);

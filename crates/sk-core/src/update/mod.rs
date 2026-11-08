@@ -693,7 +693,7 @@ fn native_machine() -> Option<String> {
 }
 
 /// The program that hosts the interface. Some kinds of install are built from one shell only (the
-/// Windows installer, the rpm and the AppImage from the Electron shell; the portable copies, the
+/// rpm and the AppImage from the Electron shell; the Windows installer, the portable copies, the
 /// deb and the macOS disk images from Tauri), and an install updates to a file of its own shell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Shell {
@@ -750,8 +750,10 @@ pub fn asset_templates(
     let x64 = a == "x64";
     let known = x64 || a == "arm64";
     match (kind, shell) {
-        // Windows on ARM runs it emulated
-        (InstallKind::Nsis, Shell::Electron) => vec!["SpaceKnife-{v}-Setup-x64.exe".into()],
+        // Tauri's (the forked NSIS template, apps/desktop/src-tauri/windows, which takes over
+        // 0.3.4's electron-builder installation), under 0.3.4's name; Windows on ARM runs it
+        // emulated
+        (InstallKind::Nsis, Shell::Tauri) => vec!["SpaceKnife-{v}-Setup-x64.exe".into()],
         (InstallKind::Portable, Shell::Tauri) if system == "win32" && a == "arm64" => {
             vec![
                 "SpaceKnife-{v}-win-arm64-portable.zip".into(),

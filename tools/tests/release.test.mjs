@@ -27,7 +27,7 @@ function put(folder, name, data) {
 function artifacts(root, version = V, { pkgVersion = version } = {}) {
   const groups = {
     // [files listed in the checksum file, the checksum file, files in no list]
-    "SpaceKnife-electron-win-x64": [[`SpaceKnife-${version}-Setup-x64.exe`], "SHA256SUMS-installers-electron-win-x64.txt", []],
+    "SpaceKnife-installers-win-x64": [[`SpaceKnife-${version}-Setup-x64.exe`], "SHA256SUMS-installers-win-x64.txt", []],
     "SpaceKnife-electron-linux-x64": [
       [`SpaceKnife-${version}-x86_64.AppImage`, `spaceknife-${pkgVersion}.x86_64.rpm`],
       "SHA256SUMS-installers-electron-linux-x64.txt",
@@ -56,7 +56,7 @@ test("a complete set becomes the release", () => {
   const names = new Set(readdirSync(join(t, "out")));
   const want = new Set([...release.expected().map((e) => e.template.replace("{v}", V)), ...release.publishedSums()]);
   assert.deepEqual([...names].sort(), [...want].sort());
-  assert.ok(!names.has("SHA256SUMS-installers-electron-win-x64.txt"));
+  assert.ok(!names.has("SHA256SUMS-installers-win-x64.txt"));
   const merged = release.parseSums(readFileSync(join(t, "out", "SHA256SUMS.txt"), "utf8"));
   // the four installers, as in 0.3.4's SHA256SUMS.txt (not the .zsync)
   assert.deepEqual([...merged.keys()].sort(), [`SpaceKnife-${V}-Setup-x64.exe`, `SpaceKnife-${V}-x86_64.AppImage`, `spaceknife-${V}.x86_64.rpm`, `spaceknife_${V}_amd64.deb`]);
@@ -205,6 +205,39 @@ test("bad placeholders are refused", () => {
     () => release.fillNotes(`${V} {{size:nope.exe}} {{colour}} {{build_runs}}`, V, done.files, []),
     (e) => e.message.includes("nope.exe") && e.message.includes("{{colour}}") && e.message.includes("--build-run"),
   );
+});
+
+test("the Windows installer: Tauri's file under 0.3.4's name, in an installer list", () => {
+  assert.equal(release.setupName("SpaceKnife_0.3.5_x64-setup.exe"), "SpaceKnife-0.3.5-Setup-x64.exe");
+  assert.equal(release.setupName("SpaceKnife_0.5.0-beta.1_x64-setup.exe"), "SpaceKnife-0.5.0-beta.1-Setup-x64.exe");
+  for (const other of ["SpaceKnife_0.3.5_x86-setup.exe", "SpaceKnife_0.3.5_arm64-setup.exe", "SpaceKnife_../x_x64-setup.exe", "SpaceKnife-0.3.5-Setup-x64.exe"]) {
+    assert.equal(release.setupName(other), null, other);
+  }
+  const t = tmp();
+  const bundle = join(t, "bundle", "nsis");
+  const digest = put(bundle, `SpaceKnife_${V}_x64-setup.exe`, "MZ the installer");
+  const out = join(t, "installers");
+  const done = release.windowsInstaller(V, bundle, out);
+  assert.equal(done.file, join(out, `SpaceKnife-${V}-Setup-x64.exe`));
+  assert.equal(readFileSync(done.sums, "utf8"), `${digest}  SpaceKnife-${V}-Setup-x64.exe\n`);
+  assert.match(done.sums, /SHA256SUMS-installers-win-x64\.txt$/);
+  // what assemble takes: the file and its list, merged into SHA256SUMS.txt
+  const a = artifacts(join(t, "a"));
+  for (const n of readdirSync(join(a, "SpaceKnife-installers-win-x64"))) unlinkSync(join(a, "SpaceKnife-installers-win-x64", n));
+  for (const n of readdirSync(out)) writeFileSync(join(a, "SpaceKnife-installers-win-x64", n), readFileSync(join(out, n)));
+  release.assemble(V, a, join(t, "release"));
+  assert.equal(release.parseSums(readFileSync(join(t, "release", "SHA256SUMS.txt"), "utf8")).get(`SpaceKnife-${V}-Setup-x64.exe`), digest);
+  // another version, two installers, none: refused
+  assert.throws(() => release.windowsInstaller("0.3.6", bundle, join(t, "x")), /is not version 0\.3\.6/);
+  put(bundle, "SpaceKnife_0.3.4_x64-setup.exe", "old");
+  assert.throws(() => release.windowsInstaller(V, bundle, join(t, "y")), /2 Tauri installers/);
+  assert.throws(() => release.windowsInstaller(V, join(t, "none"), join(t, "z")), /no bundle folder/);
+  // the command line
+  unlinkSync(join(bundle, "SpaceKnife_0.3.4_x64-setup.exe"));
+  const r = spawnSync(process.execPath, [SCRIPT, "windows-installer", V, bundle, join(t, "cli")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.ok(existsSync(join(t, "cli", `SpaceKnife-${V}-Setup-x64.exe`)));
+  assert.equal(spawnSync(process.execPath, [SCRIPT, "windows-installer", V], { encoding: "utf8" }).status, 2);
 });
 
 test("the command line", () => {

@@ -740,9 +740,11 @@ mod tests {
 
     #[test]
     fn knows_the_release_files_of_the_tauri_app() {
-        // 0.3.4's names (sk_core::update::asset_templates): the portable copies, the deb and the
-        // disk images are the Tauri app's
+        // 0.3.4's names (sk_core::update::asset_templates): the Windows installer, the portable
+        // copies, the deb and the disk images are the Tauri app's
         for (name, kind, platform, machine) in [
+            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "x64"),
+            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "arm64"),
             (
                 "SpaceKnife-0.4.1-win-x64-portable.zip",
                 "portable",
@@ -769,8 +771,7 @@ mod tests {
             assert!(is_release_file(name, kind, platform, machine), "{name}");
         }
         for (name, kind, platform, machine) in [
-            // the Windows installer, the rpm and the AppImage come from the Electron shell
-            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "x64"),
+            // the rpm and the AppImage come from the Electron shell
             ("spaceknife-0.4.1.x86_64.rpm", "rpm", "linux", "x64"),
             (
                 "SpaceKnife-0.4.1-x86_64.AppImage",
@@ -779,6 +780,13 @@ mod tests {
                 "x64",
             ),
             // the names Tauri's bundler gives its files are not release files
+            ("SpaceKnife_0.4.1_x64-setup.exe", "nsis", "windows", "x64"),
+            (
+                "SpaceKnife-0.4.1-Setup-x64.exe",
+                "portable",
+                "windows",
+                "x64",
+            ),
             ("SpaceKnife_0.4.1_amd64.deb", "deb", "linux", "x64"),
             ("SpaceKnife_0.4.1_aarch64.dmg", "dmg", "macos", "arm64"),
             // another processor's disk image, another kind's file, odd versions
@@ -829,6 +837,14 @@ mod tests {
         assert_eq!(
             install_refusal(&good, "dev", &updates, os, "x64"),
             Some(TextKey::UpdateNoInstall)
+        );
+        // the Windows installer's own update: the release's setup file (Tauri's installer)
+        let setup = updates.join("SpaceKnife-0.4.1-Setup-x64.exe");
+        std::fs::write(&setup, "x").unwrap();
+        assert_eq!(install_refusal(&setup, "nsis", &updates, os, "x64"), None);
+        assert_eq!(
+            install_refusal(&good, "nsis", &updates, os, "x64"),
+            Some(TextKey::UpdateNotAnUpdate)
         );
     }
 
