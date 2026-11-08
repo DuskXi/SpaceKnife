@@ -18,7 +18,10 @@ const require = createRequire(import.meta.url);
 const pkg = require.resolve("@tauri-apps/cli/package.json");
 const tauri = join(dirname(pkg), JSON.parse(readFileSync(pkg, "utf8")).bin.tauri);
 
-const args = ["build", "--config", "src-tauri/tauri.bundle.json", ...process.argv.slice(2)];
+// macOS: the swap helper 0.3.x portable copies run goes into the app bundle as a resource
+// (Contents/Resources/backend/spaceknife-backend; prepare-bundle.mjs makes and signs it)
+const macos = process.platform === "darwin" ? ["--config", "src-tauri/tauri.bundle.macos.json"] : [];
+const args = ["build", "--config", "src-tauri/tauri.bundle.json", ...macos, ...process.argv.slice(2)];
 console.log(`[bundle] tauri ${args.join(" ")} (build paths remapped)`);
 const r = spawnSync(process.execPath, [tauri, ...args], { cwd: desktop, stdio: "inherit", env: remappedEnv(process.env) });
 if (r.error) throw r.error;

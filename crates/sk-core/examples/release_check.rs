@@ -16,25 +16,27 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
-use sk_core::update;
+use sk_core::update::{self, Shell};
 use sk_protocol::update::{InstallKind, UpdateChannel};
 
 const AGENT: &str = "SpaceKnife-release-check";
 
-/// (install kind, platform as the app names it, machine) for every kind of install a release serves
-const INSTALLS: &[(InstallKind, &str, &str)] = &[
-    (InstallKind::Nsis, "win32", "x86_64"),
-    (InstallKind::Portable, "win32", "x86_64"),
-    (InstallKind::Portable, "win32", "aarch64"),
-    (InstallKind::Portable, "linux", "x86_64"),
-    (InstallKind::Portable, "linux", "aarch64"),
-    (InstallKind::Portable, "darwin", "aarch64"),
-    (InstallKind::Portable, "darwin", "x86_64"),
-    (InstallKind::Appimage, "linux", "x86_64"),
-    (InstallKind::Deb, "linux", "x86_64"),
-    (InstallKind::Rpm, "linux", "x86_64"),
-    (InstallKind::Dmg, "darwin", "aarch64"),
-    (InstallKind::Dmg, "darwin", "x86_64"),
+/// (install kind, shell, platform as the app names it, machine) for every kind of install a
+/// release serves: the Windows installer, the rpm and the AppImage are the Electron shell's, the
+/// rest Tauri's (update::asset_templates)
+const INSTALLS: &[(InstallKind, Shell, &str, &str)] = &[
+    (InstallKind::Nsis, Shell::Electron, "win32", "x86_64"),
+    (InstallKind::Portable, Shell::Tauri, "win32", "x86_64"),
+    (InstallKind::Portable, Shell::Tauri, "win32", "aarch64"),
+    (InstallKind::Portable, Shell::Tauri, "linux", "x86_64"),
+    (InstallKind::Portable, Shell::Tauri, "linux", "aarch64"),
+    (InstallKind::Portable, Shell::Tauri, "darwin", "aarch64"),
+    (InstallKind::Portable, Shell::Tauri, "darwin", "x86_64"),
+    (InstallKind::Appimage, Shell::Electron, "linux", "x86_64"),
+    (InstallKind::Deb, Shell::Tauri, "linux", "x86_64"),
+    (InstallKind::Rpm, Shell::Electron, "linux", "x86_64"),
+    (InstallKind::Dmg, Shell::Tauri, "darwin", "aarch64"),
+    (InstallKind::Dmg, Shell::Tauri, "darwin", "x86_64"),
 ];
 
 fn main() {
@@ -111,7 +113,7 @@ fn check(version: &str, sums_dir: Option<PathBuf>, download: bool) -> Vec<String
     }
     let scratch = std::env::temp_dir().join(format!("sk-release-check-{}", std::process::id()));
     println!("{:<9} {:<15} {:<45} checksum", "install", "system", "file");
-    for &(kind, system, machine) in INSTALLS {
+    for &(kind, shell, system, machine) in INSTALLS {
         let row = |file: &str, state: &str| {
             println!(
                 "{:<9} {:<15} {:<45} {state}",
@@ -120,8 +122,9 @@ fn check(version: &str, sums_dir: Option<PathBuf>, download: bool) -> Vec<String
                 file
             )
         };
-        let want = update::asset_template(kind, system, machine).map(|t| t.replace("{v}", version));
-        let asset = update::pick_asset(release, kind, Some(system), Some(machine));
+        let want =
+            update::asset_template(kind, shell, system, machine).map(|t| t.replace("{v}", version));
+        let asset = update::pick_asset(release, kind, shell, Some(system), Some(machine));
         let Some(asset) = asset else {
             problems.push(format!(
                 "{} on {system}/{machine}: no file, want {want:?}",

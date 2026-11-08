@@ -110,6 +110,9 @@ pub enum UpdateError {
     },
     /// The download was cancelled; its partial file is gone.
     Cancelled,
+    /// The release lists no SHA-256 for the file: it is not downloaded (an unverified installer
+    /// would run silently).
+    NoChecksum,
 }
 
 impl UpdateError {
@@ -132,6 +135,7 @@ impl UpdateError {
             UpdateError::Write { .. } => "write",
             UpdateError::DownloadFailed { .. } => "download_failed",
             UpdateError::Cancelled => "cancelled",
+            UpdateError::NoChecksum => "no_checksum",
         }
     }
 
@@ -184,6 +188,9 @@ impl UpdateError {
                 tr!("下载失败：{reason}", reason = reason.as_str())
             }
             UpdateError::Cancelled => "cancelled".to_owned(),
+            UpdateError::NoChecksum => {
+                t("这个版本的发布没有列出这个文件的 SHA-256 校验值，没有下载").to_owned()
+            }
         }
     }
 }
@@ -595,48 +602,193 @@ pub fn system() -> &'static str {
     }
 }
 
-/// The file names for a kind of install on a platform, `{v}` for the version, the one to take first
-/// first; empty: nothing is published for it (a run from source, an unknown install, an
-/// architecture without builds). A portable copy moves to the build of the processor it runs on —
-/// an x64 copy on Windows on ARM becomes the native one, and stays on x64 for a release without an
-/// ARM build (Windows runs it emulated).
+/// The processor's architecture as the release files name it (`x64`, `arm64`, …), read at run
+/// time: an x64 build that Windows on ARM runs emulated (or Rosetta on an Apple silicon Mac) is on
+/// an `arm64` processor, and a portable copy of it moves to the native build. The build's own
+/// architecture where the system can't say.
+pub fn machine() -> String {
+    static MACHINE: LazyLock<String> =
+        LazyLock::new(|| native_machine().unwrap_or_else(|| arch(std::env::consts::ARCH)));
+    MACHINE.clone()
+}
+
+/// A Windows `IMAGE_FILE_MACHINE_*` value as the release files name it.
+pub fn windows_machine_arch(image: u16) -> Option<&'static str> {
+    match image {
+        0x8664 => Some("x64"),
+        0xAA64 => Some("arm64"),
+        0x014C => Some("x86"),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn native_machine() -> Option<String> {
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+    // IsWow64Process2 (Windows 10 1709): the system's own processor, also from an emulated
+    // process. Looked up at run time: a static import would keep older Windows 10 from starting
+    // the program at all.
+    type IsWow64Process2 = unsafe extern "system" fn(HANDLE, *mut u16, *mut u16) -> i32;
+    let kernel32: Vec<u16> = "kernel32.dll\0".encode_utf16().collect();
+    // SAFETY: plain Win32 calls; kernel32 is always loaded, the function pointer has the
+    // documented signature, and both out-pointers are valid for the call.
+    unsafe {
+        let module = GetModuleHandleW(kernel32.as_ptr());
+        if module.is_null() {
+            return None;
+        }
+        let f = GetProcAddress(module, c"IsWow64Process2".as_ptr().cast())?;
+        let f: IsWow64Process2 = std::mem::transmute(f);
+        let (mut process, mut native) = (0u16, 0u16);
+        if f(GetCurrentProcess(), &mut process, &mut native) == 0 {
+            return None;
+        }
+        windows_machine_arch(native).map(str::to_owned)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn native_machine() -> Option<String> {
+    // hw.optional.arm64 is 1 on Apple silicon, also for a process Rosetta translates; Intel Macs
+    // don't have it
+    let mut value: i32 = 0;
+    let mut size = std::mem::size_of::<i32>();
+    // SAFETY: a valid NUL-terminated name and an out-buffer of the size given.
+    let rc = unsafe {
+        libc::sysctlbyname(
+            c"hw.optional.arm64".as_ptr(),
+            (&mut value as *mut i32).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    Some(
+        if rc == 0 && value == 1 {
+            "arm64"
+        } else {
+            "x64"
+        }
+        .to_owned(),
+    )
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn native_machine() -> Option<String> {
+    // SAFETY: uname fills the struct it is given.
+    let mut name: libc::utsname = unsafe { std::mem::zeroed() };
+    if unsafe { libc::uname(&mut name) } != 0 {
+        return None;
+    }
+    // SAFETY: uname writes NUL-terminated strings.
+    let machine = unsafe { std::ffi::CStr::from_ptr(name.machine.as_ptr()) };
+    Some(arch(&machine.to_string_lossy()))
+}
+
+#[cfg(not(any(unix, windows)))]
+fn native_machine() -> Option<String> {
+    None
+}
+
+/// The program that hosts the interface. Some kinds of install are built from one shell only (the
+/// Windows installer, the rpm and the AppImage from the Electron shell; the portable copies, the
+/// deb and the macOS disk images from Tauri), and an install updates to a file of its own shell.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Shell {
+    /// The Tauri app: the backend runs in its process
+    Tauri,
+    /// The Electron app: it runs `spaceknife-cli serve` and says so with `SPACEKNIFE_SHELL=electron`
+    Electron,
+    /// A value nobody publishes files for
+    Unknown,
+}
+
+impl Shell {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Shell::Tauri => "tauri",
+            Shell::Electron => "electron",
+            Shell::Unknown => "unknown",
+        }
+    }
+}
+
+/// The shell, as the launcher tells it (`SPACEKNIFE_SHELL`): unset is the Tauri app, whose
+/// backend runs in its own process.
+pub fn shell() -> Shell {
+    shell_from(&std::env::var("SPACEKNIFE_SHELL").unwrap_or_default())
+}
+
+/// [`shell`] for a value of `SPACEKNIFE_SHELL`.
+pub fn shell_from(value: &str) -> Shell {
+    match value.trim().to_lowercase().as_str() {
+        "" | "tauri" => Shell::Tauri,
+        "electron" => Shell::Electron,
+        _ => Shell::Unknown,
+    }
+}
+
+/// The file names for a kind of install of a shell on a platform, `{v}` for the version, the one
+/// to take first first; empty: nothing is published for it (a run from source, an unknown install,
+/// a kind the shell is not built as, an architecture without builds). A portable copy moves to the
+/// build of the processor it runs on — an x64 copy on Windows on ARM becomes the native one, and
+/// stays on x64 for a release without an ARM build (Windows runs it emulated).
 ///
-/// The installers are named as Tauri's bundler names them (`{productName}_{version}_{arch}…`; the
-/// rpm `{productName}-{version}-{release}.{arch}.rpm`); the portable archives are the release
-/// build's own (`apps/desktop` `bundle:portable`; on macOS the app bundle zipped with `data`).
-pub fn asset_templates(kind: InstallKind, system: &str, machine: &str) -> Vec<String> {
+/// The names are 0.3.4's, and stay so for good: an installed 0.3.x picks the newest release by
+/// its version first and only then looks for its file under exactly these names (v0.3.4
+/// `update.py` asset_templates; tools/release.mjs `expected` publishes them, Release check runs
+/// 0.3.4's own code against them).
+pub fn asset_templates(
+    kind: InstallKind,
+    shell: Shell,
+    system: &str,
+    machine: &str,
+) -> Vec<String> {
     let a = arch(machine);
     let x64 = a == "x64";
     let known = x64 || a == "arm64";
-    match kind {
-        InstallKind::Nsis => vec!["SpaceKnife_{v}_x64-setup.exe".into()], // Windows on ARM runs it emulated
-        InstallKind::Portable if system == "win32" && a == "arm64" => {
+    match (kind, shell) {
+        // Windows on ARM runs it emulated
+        (InstallKind::Nsis, Shell::Electron) => vec!["SpaceKnife-{v}-Setup-x64.exe".into()],
+        (InstallKind::Portable, Shell::Tauri) if system == "win32" && a == "arm64" => {
             vec![
                 "SpaceKnife-{v}-win-arm64-portable.zip".into(),
                 "SpaceKnife-{v}-win-x64-portable.zip".into(),
             ]
         }
-        InstallKind::Portable if system == "win32" => {
+        (InstallKind::Portable, Shell::Tauri) if system == "win32" => {
             vec!["SpaceKnife-{v}-win-x64-portable.zip".into()]
         }
-        InstallKind::Portable if system.starts_with("linux") && known => {
+        (InstallKind::Portable, Shell::Tauri) if system.starts_with("linux") && known => {
             vec![format!("SpaceKnife-{{v}}-linux-{a}-portable.tar.gz")]
         }
-        InstallKind::Portable if system == "darwin" && known => {
+        (InstallKind::Portable, Shell::Tauri) if system == "darwin" && known => {
             vec![format!("SpaceKnife-{{v}}-mac-{a}-portable.zip")]
         }
-        InstallKind::Appimage if x64 => vec!["SpaceKnife_{v}_amd64.AppImage".into()],
-        InstallKind::Deb if x64 => vec!["SpaceKnife_{v}_amd64.deb".into()],
-        InstallKind::Rpm if x64 => vec!["SpaceKnife-{v}-1.x86_64.rpm".into()],
-        InstallKind::Dmg if a == "arm64" => vec!["SpaceKnife_{v}_aarch64.dmg".into()],
-        InstallKind::Dmg if x64 => vec!["SpaceKnife_{v}_x64.dmg".into()],
+        (InstallKind::Appimage, Shell::Electron) if x64 => {
+            vec!["SpaceKnife-{v}-x86_64.AppImage".into()]
+        }
+        (InstallKind::Deb, Shell::Tauri) if x64 => vec!["spaceknife_{v}_amd64.deb".into()],
+        (InstallKind::Rpm, Shell::Electron) if x64 => vec!["spaceknife-{v}.x86_64.rpm".into()],
+        (InstallKind::Dmg, Shell::Tauri) if known => {
+            vec![format!("SpaceKnife-{{v}}-mac-{a}.dmg")]
+        }
         _ => Vec::new(),
     }
 }
 
 /// The first of [`asset_templates`], or `None`.
-pub fn asset_template(kind: InstallKind, system: &str, machine: &str) -> Option<String> {
-    asset_templates(kind, system, machine).into_iter().next()
+pub fn asset_template(
+    kind: InstallKind,
+    shell: Shell,
+    system: &str,
+    machine: &str,
+) -> Option<String> {
+    asset_templates(kind, shell, system, machine)
+        .into_iter()
+        .next()
 }
 
 fn template_regex(template: &str, slot: &str) -> Regex {
@@ -644,20 +796,25 @@ fn template_regex(template: &str, slot: &str) -> Regex {
     Regex::new(&format!("^(?:{pattern})$")).expect("a valid pattern")
 }
 
-/// The release's file for this kind of install: the exact name for its version, else one whose
-/// version part the packager spelled differently. `None` when there is none. `system` / `machine`
-/// default to this platform.
+/// The release's file for this kind of install of `shell`: the exact name for its version, else
+/// one whose version part the packager spelled differently. `None` when there is none. `system`
+/// defaults to this platform, `machine` to the processor this runs on ([`machine`]).
 pub fn pick_asset<'a>(
     release: &'a Release,
     kind: InstallKind,
+    shell: Shell,
     system: Option<&str>,
     machine: Option<&str>,
 ) -> Option<&'a Asset> {
-    let templates = asset_templates(
-        kind,
-        system.unwrap_or(self::system()),
-        machine.unwrap_or(std::env::consts::ARCH),
-    );
+    let native;
+    let machine = match machine {
+        Some(m) => m,
+        None => {
+            native = self::machine();
+            &native
+        }
+    };
+    let templates = asset_templates(kind, shell, system.unwrap_or(self::system()), machine);
     templates.iter().find_map(|template| {
         let exact = template.replace("{v}", &release.version);
         let pattern = template_regex(template, V_SLOT);
@@ -798,14 +955,14 @@ pub fn updates_dir() -> PathBuf {
 /// log; the scripts of earlier test builds).
 static UPDATE_NAMES: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
-        // Tauri's bundles (asset_template)
+        // the names Tauri's bundler gives its files, which test builds downloaded: cleaned up
         "SpaceKnife_{v}_x64-setup.exe",
         "SpaceKnife_{v}_amd64.AppImage",
         "SpaceKnife_{v}_amd64.deb",
         "SpaceKnife-{v}-1.x86_64.rpm",
         "SpaceKnife_{v}_aarch64.dmg",
         "SpaceKnife_{v}_x64.dmg",
-        // the Electron builds' files, still cleaned up
+        // the release files (asset_templates)
         "SpaceKnife-{v}-Setup-x64.exe",
         "SpaceKnife-{v}-win-x64-portable.zip",
         "SpaceKnife-{v}-win-arm64-portable.zip",
@@ -843,15 +1000,73 @@ pub fn update_file_version(name: &str) -> Option<Version> {
 /// the running version or an older one. The file of a newer release stays, and so does any name
 /// this module did not write. Returns the names removed.
 pub fn clean_updates(folder: &Path, current: Option<&str>) -> Vec<String> {
+    clean_updates_with(folder, current, &remove_entry).removed
+}
+
+/// What a cleaning of the updates folder did: the names it removed, and the ones it could not
+/// remove (yet): right after an update the old version's files may still be held by its last
+/// processes as they close, or by a virus scanner looking at the moved files. [`clean_again`]
+/// tries those later.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Cleaned {
+    pub removed: Vec<String>,
+    pub left: Vec<String>,
+}
+
+/// Remove a file, a link or a whole folder.
+pub fn remove_entry(path: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(path)?.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
+/// [`clean_updates`] with its removing done by `remove` (tests).
+pub fn clean_updates_with(
+    folder: &Path,
+    current: Option<&str>,
+    remove: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Cleaned {
+    clean_names(folder, current, None, remove)
+}
+
+/// Try again to remove what an earlier cleaning left, each name only while it is still stale;
+/// nothing else in the folder is touched (a download that started meanwhile stays), and no
+/// partial download.
+pub fn clean_again(folder: &Path, current: Option<&str>, names: &[String]) -> Cleaned {
+    clean_again_with(folder, current, names, &remove_entry)
+}
+
+/// [`clean_again`] with its removing done by `remove` (tests).
+pub fn clean_again_with(
+    folder: &Path,
+    current: Option<&str>,
+    names: &[String],
+    remove: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Cleaned {
+    clean_names(folder, current, Some(names), remove)
+}
+
+fn clean_names(
+    folder: &Path,
+    current: Option<&str>,
+    only: Option<&[String]>,
+    remove: &dyn Fn(&Path) -> std::io::Result<()>,
+) -> Cleaned {
     let now = parse_opt(current);
-    let mut removed = Vec::new();
+    let mut out = Cleaned::default();
     let Ok(rd) = std::fs::read_dir(folder) else {
-        return removed;
+        return out;
     };
     let mut entries: Vec<_> = rd.filter_map(Result::ok).collect();
     entries.sort_by_key(|e| e.file_name());
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
+        // a partial download is not tried again: by then a new download may write the same name
+        if only.is_some_and(|names| !names.contains(&name) || name.ends_with(".part")) {
+            continue;
+        }
         let mut stale = name.ends_with(".part");
         if !stale && let Some(now) = &now {
             stale = update_file_version(&name).is_some_and(|v| v <= *now);
@@ -860,18 +1075,15 @@ pub fn clean_updates(folder: &Path, current: Option<&str>) -> Vec<String> {
             continue;
         }
         let path = entry.path();
-        let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
-        let result = if is_dir {
-            std::fs::remove_dir_all(&path)
-        } else {
-            std::fs::remove_file(&path)
-        };
-        match result {
-            Ok(()) => removed.push(name),
-            Err(e) => tracing::warn!("could not remove {}: {e}", path.display()),
+        match remove(&path) {
+            Ok(()) => out.removed.push(name),
+            Err(e) => {
+                tracing::warn!("could not remove {} (yet): {e}", path.display());
+                out.left.push(name);
+            }
         }
     }
-    removed
+    out
 }
 
 // ---------------------------------------------------------------- persistent state
@@ -997,12 +1209,21 @@ pub fn save_state(state: &UpdateState, file: &Path) -> std::io::Result<()> {
 
 // ---------------------------------------------------------------- network
 
-fn agent(url: &str, timeout: Duration) -> ureq::Agent {
+/// How long a small body (the release list, a checksum file) may take in all: a server that
+/// trickles it byte by byte does not hold the check for ever.
+const SMALL_BODY: u32 = 4;
+
+/// `timeout` bounds connecting, waiting for the response and each read (a connection that stalls
+/// mid-body fails after it, as each read did in the Python backend); `body`: a limit on the whole
+/// body as well.
+fn agent(url: &str, timeout: Duration, body: Option<Duration>) -> ureq::Agent {
     let loopback = split_url(url).is_some_and(|(_, _, h)| LOOPBACK.contains(&h.as_str()));
     let mut cfg = ureq::Agent::config_builder()
         .http_status_as_error(false)
         .timeout_connect(Some(timeout))
         .timeout_recv_response(Some(timeout))
+        .timeout_per_read(Some(timeout))
+        .timeout_recv_body(body)
         .tls_config(
             ureq::tls::TlsConfig::builder()
                 .root_certs(ureq::tls::RootCerts::PlatformVerifier)
@@ -1044,8 +1265,20 @@ fn network_error(e: &ureq::Error, make: impl Fn(String) -> UpdateError, list: bo
     }
 }
 
+/// A read that timed out: the system's own error, or ureq's timeout wrapped into an I/O error by
+/// the body reader.
+fn timed_out(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::TimedOut
+        || e.get_ref()
+            .and_then(|inner| inner.downcast_ref::<ureq::Error>())
+            .is_some_and(|u| {
+                matches!(u, ureq::Error::Timeout(_))
+                    || matches!(u, ureq::Error::Io(io) if io.kind() == std::io::ErrorKind::TimedOut)
+            })
+}
+
 fn io_error(e: &std::io::Error, make: impl Fn(String) -> UpdateError, list: bool) -> UpdateError {
-    if e.kind() == std::io::ErrorKind::TimedOut {
+    if timed_out(e) {
         return if list {
             UpdateError::Timeout
         } else {
@@ -1061,9 +1294,10 @@ fn get(
     url: &str,
     user_agent: &str,
     timeout: Duration,
+    body: Option<Duration>,
     headers: &[(&str, &str)],
 ) -> Result<Response, ureq::Error> {
-    let mut req = agent(url, timeout)
+    let mut req = agent(url, timeout, body)
         .get(url)
         .header("User-Agent", user_agent);
     for (k, v) in headers {
@@ -1134,8 +1368,14 @@ pub fn fetch_releases(
         headers.push(("If-None-Match", e));
     }
     let offline = |reason| UpdateError::Offline { reason };
-    let mut resp =
-        get(feed, user_agent, timeout, &headers).map_err(|e| network_error(&e, offline, true))?;
+    let mut resp = get(
+        feed,
+        user_agent,
+        timeout,
+        Some(timeout * SMALL_BODY),
+        &headers,
+    )
+    .map_err(|e| network_error(&e, offline, true))?;
     let code = resp.status().as_u16();
     if code == 304 {
         return Ok(Fetched {
@@ -1173,8 +1413,14 @@ pub fn fetch_checksums(
 ) -> Result<Option<String>, UpdateError> {
     let sums_err = |reason| UpdateError::Sums { reason };
     for sums in checksum_files(release, asset) {
-        let mut resp = get(&sums.url, user_agent, timeout, &[])
-            .map_err(|e| network_error(&e, sums_err, false))?;
+        let mut resp = get(
+            &sums.url,
+            user_agent,
+            timeout,
+            Some(timeout * SMALL_BODY),
+            &[],
+        )
+        .map_err(|e| network_error(&e, sums_err, false))?;
         let code = resp.status().as_u16();
         if code >= 400 {
             return Err(UpdateError::Sums {
@@ -1228,10 +1474,13 @@ fn part_path(dest: &Path) -> PathBuf {
 
 /// Download `url` to `dest` (blocking): streamed to `<dest>.part`, hashed on the way, checked
 /// against `sha256` and only then renamed. A `dest` that already has the right hash is kept as it
-/// is. Returns whether the checksum matched (`None`: none was published).
+/// is. Returns `Some(true)`: the file matched its checksum. Without a published checksum
+/// (`sha256` is `None`) nothing is fetched: [`UpdateError::NoChecksum`].
 ///
-/// [`UpdateError::Cancelled`] once `cancel` is set, another [`UpdateError`] otherwise; either way
-/// the partial file is gone, and a file whose hash does not match is never kept.
+/// `timeout` bounds connecting, the response and each read: a connection that stalls fails
+/// after it, and `cancel` takes effect within it. [`UpdateError::Cancelled`] once `cancel` is
+/// set, another [`UpdateError`] otherwise; either way the partial file is gone, and a file whose
+/// hash does not match is never kept.
 #[allow(clippy::too_many_arguments)]
 pub fn download(
     url: &str,
@@ -1243,7 +1492,9 @@ pub fn download(
     cancel: &AtomicBool,
     timeout: Duration,
 ) -> Result<Option<bool>, UpdateError> {
-    let expected = sha256.map(str::to_lowercase);
+    let Some(exp) = sha256.map(str::to_lowercase) else {
+        return Err(UpdateError::NoChecksum);
+    };
     let write_err = |p: &Path, e: &std::io::Error| UpdateError::Write {
         path: p.to_owned(),
         reason: e.to_string(),
@@ -1251,12 +1502,10 @@ pub fn download(
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| write_err(dest, &e))?;
     }
-    if let Some(exp) = &expected
-        && dest.is_file()
-    {
+    if dest.is_file() {
         progress(Phase::Verifying, 0, size);
         match file_sha256(dest, cancel) {
-            Ok(h) if h == *exp => {
+            Ok(h) if h == exp => {
                 progress(Phase::Verifying, size, size);
                 return Ok(Some(true));
             }
@@ -1273,8 +1522,9 @@ pub fn download(
     let part = part_path(dest);
     let result = (|| {
         let net = |reason| UpdateError::DownloadNet { reason };
+        // no limit on the whole body: a large file on a slow line takes its time
         let mut resp =
-            get(url, user_agent, timeout, &[]).map_err(|e| network_error(&e, net, false))?;
+            get(url, user_agent, timeout, None, &[]).map_err(|e| network_error(&e, net, false))?;
         let code = resp.status().as_u16();
         if code >= 400 {
             return Err(UpdateError::DownloadHttp { code });
@@ -1290,16 +1540,19 @@ pub fn download(
                 expected: total,
             });
         }
-        if let Some(exp) = &expected
-            && digest != *exp
-        {
+        if digest != exp {
             return Err(UpdateError::Mismatch);
         }
         std::fs::rename(&part, dest).map_err(|e| write_err(dest, &e))
     })();
     if let Err(e) = result {
         let _ = std::fs::remove_file(&part);
-        return Err(e);
+        // cancelled while the connection was being made: that, not the error it ended with
+        return Err(if cancel.load(Ordering::Relaxed) {
+            UpdateError::Cancelled
+        } else {
+            e
+        });
     }
     #[cfg(unix)]
     {
@@ -1308,7 +1561,7 @@ pub fn download(
             let _ = std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755));
         }
     }
-    Ok(expected.map(|_| true))
+    Ok(Some(true))
 }
 
 /// Copy the response into `part`: (bytes received, their SHA-256).
@@ -1337,6 +1590,8 @@ fn stream(
         let n = match reader.read(&mut buf) {
             Ok(n) => n,
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            // cancelled while a read waited (a stalled connection): the read timeout ended it
+            Err(_) if cancel.load(Ordering::Relaxed) => return Err(UpdateError::Cancelled),
             Err(e) => {
                 return Err(io_error(
                     &e,

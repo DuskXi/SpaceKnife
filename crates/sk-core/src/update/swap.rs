@@ -443,10 +443,36 @@ pub fn launch_env(env: &BTreeMap<String, String>, base: Option<&str>) -> BTreeMa
     out
 }
 
+/// The environment for the app the swap starts (the new version, or the old one when the swap was
+/// undone): [`launch_env`] without a `SPACEKNIFE_HOME` that names the copy's own data folder. The
+/// app that wrote the plan set that for its own processes — it is how a portable copy keeps its
+/// data next to it (0.3.4's Electron main, the Tauri app's `prepare_environment`); passed on, the
+/// started app would take it for a home the user chose, not see that it is a portable copy, and
+/// find no update file for itself. A home anywhere else is the user's and stays.
+pub fn app_env(env: &BTreeMap<String, String>, plan: &Plan) -> BTreeMap<String, String> {
+    let data = plan.app.join("data");
+    launch_env(env, None)
+        .into_iter()
+        .filter(|(k, v)| {
+            let home = if cfg!(windows) {
+                k.eq_ignore_ascii_case("SPACEKNIFE_HOME")
+            } else {
+                k == "SPACEKNIFE_HOME"
+            };
+            !(home && same(Path::new(v), &data))
+        })
+        .collect()
+}
+
 /// Start the app on its own: it outlives this process, without its stdio.
 pub fn launch(exe: &Path, args: &[&str]) -> io::Result<()> {
-    use std::process::{Command, Stdio};
     let env: BTreeMap<String, String> = std::env::vars().collect();
+    launch_with(exe, args, &launch_env(&env, None))
+}
+
+/// [`launch`] with exactly the environment `env`.
+pub fn launch_with(exe: &Path, args: &[&str], env: &BTreeMap<String, String>) -> io::Result<()> {
+    use std::process::{Command, Stdio};
     let make = || {
         let mut cmd = Command::new(exe);
         cmd.args(args)
@@ -454,7 +480,7 @@ pub fn launch(exe: &Path, args: &[&str]) -> io::Result<()> {
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .env_clear()
-            .envs(launch_env(&env, None));
+            .envs(env);
         if let Some(dir) = exe.parent() {
             cmd.current_dir(dir);
         }
@@ -507,12 +533,14 @@ pub struct Ops<'a> {
 
 /// Steps 2-5; 0 when the new version is in place.
 pub fn run(plan: &Plan, log: &Log) -> i32 {
+    let env = app_env(&std::env::vars().collect(), plan);
+    let start = |exe: &Path, args: &[&str]| launch_with(exe, args, &env);
     run_with(
         plan,
         log,
         &Ops {
             wait: &wait_gone,
-            start: &launch,
+            start: &start,
             place: &place,
         },
     )
@@ -985,6 +1013,47 @@ mod tests {
         let mine: BTreeMap<String, String> =
             [("LD_LIBRARY_PATH".to_owned(), "/usr/lib/mine".to_owned())].into();
         assert_eq!(launch_env(&mine, Some("/opt/sk")), mine);
+    }
+
+    #[test]
+    fn the_new_version_finds_its_data_folder_by_itself() {
+        // the app that wrote the plan pointed SPACEKNIFE_HOME at the copy's data folder for its
+        // own processes (0.3.4's Electron main, the Tauri app's prepare_environment); started
+        // with it, the new version takes that for a home the user chose, is no portable copy
+        // and gets no update file
+        let tmp = tempfile::tempdir().unwrap();
+        let plan = tree(tmp.path());
+        let data = plan.app.join("data").to_string_lossy().into_owned();
+        let shown = if cfg!(windows) {
+            format!("{}\\", data.to_uppercase())
+        } else {
+            format!("{data}/")
+        };
+        for home in [data.clone(), shown] {
+            let env: BTreeMap<String, String> = [
+                ("PATH".to_owned(), "/usr/bin".to_owned()),
+                ("SPACEKNIFE_HOME".to_owned(), home.clone()),
+                (
+                    "SPACEKNIFE_UPDATE_FEED".to_owned(),
+                    "http://127.0.0.1:9/r".to_owned(),
+                ),
+            ]
+            .into();
+            let got = app_env(&env, &plan);
+            assert!(!got.contains_key("SPACEKNIFE_HOME"), "{home}");
+            assert_eq!(got["PATH"], "/usr/bin");
+            assert_eq!(got["SPACEKNIFE_UPDATE_FEED"], "http://127.0.0.1:9/r");
+        }
+        // a home somewhere else is the user's: it stays
+        let elsewhere = tmp.path().join("mine").to_string_lossy().into_owned();
+        let env: BTreeMap<String, String> =
+            [("SPACEKNIFE_HOME".to_owned(), elsewhere.clone())].into();
+        assert_eq!(app_env(&env, &plan)["SPACEKNIFE_HOME"], elsewhere);
+        if cfg!(windows) {
+            // Windows names the variable in any case
+            let env: BTreeMap<String, String> = [("SpaceKnife_Home".to_owned(), data)].into();
+            assert!(app_env(&env, &plan).is_empty());
+        }
     }
 
     #[test]

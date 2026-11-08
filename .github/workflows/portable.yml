@@ -1,26 +1,28 @@
 name: Portable build
 
-# The portable archives (docs/packaging.md): the program, spaceknife-cli, the interface for headless
-# mode and a data/ folder that keeps the app's data next to it, a zip on Windows and a tar.gz on
-# Linux, for x64 and arm64, each built on a runner of its architecture (apps/desktop `pnpm bundle
-# --no-bundle`, build paths remapped, then `pnpm bundle:portable`). Each archive is checked (no
-# build-machine home folder in any file, glibc ≤ 2.34 on Linux: tools/package_checks.mjs), unpacked
-# again and smoke-tested in portable mode and in headless mode, and its 「无缝更新」 is tested end to
-# end (packaging/update-e2e.mjs); the archives and their checksums go to the run's artifacts, and the
-# Release workflow publishes them (release.yml). Started by hand (Actions › Portable build › Run
-# workflow), and on dev whenever the packaging changes, so it is checked before it reaches main.
-# With "installers" (by hand, for a release) the same run also builds Tauri's Windows installer
-# (NSIS) and the Linux AppImage / deb / rpm from the same commit (`pnpm bundle`), with their own
-# checksums (x64 only: the ARM jobs make the portable archives alone); their contents get the same
-# checks, the Windows installer is installed, run and uninstalled (packaging/nsis-e2e.mjs) and the
-# AppImage is run.
+# The Tauri app's files (docs/packaging.md): the portable archives — the program, spaceknife-cli,
+# the interface for headless mode, the swap helper 0.3.x copies run (resources/backend) and a data/
+# folder that keeps the app's data next to it, a zip on Windows and a tar.gz on Linux, for x64 and
+# arm64, each built on a runner of its architecture (apps/desktop `pnpm bundle --no-bundle`, build
+# paths remapped, then `pnpm bundle:portable`) — and, with "installers", the deb (`pnpm bundle
+# --bundles deb`, repacked under 0.3.4's package name spaceknife by tools/deb.mjs). The Windows
+# installer, the AppImage and the rpm are the Electron shell's (electron.yml). Each archive is
+# checked (no build-machine home folder in any file, glibc ≤ 2.34 on Linux:
+# tools/package_checks.mjs), unpacked again and smoke-tested in portable mode and in headless mode,
+# and its 「无缝更新」 is tested end to end twice: from this build to the next version
+# (packaging/update-e2e.mjs) and from the real 0.3.4 portable copy of the same target, which clicks
+# its update card (packaging/update-from-034.mjs; on Windows on ARM also 0.3.4's x64 copy, which must
+# move to the arm64 build). The deb is upgraded from 0.3.4's real deb the same way. The files and
+# their checksums go to the run's artifacts, and the Release workflow publishes them (release.yml).
+# Started by hand (Actions › Portable build › Run workflow), and on dev whenever the packaging
+# changes, so it is checked before it reaches main.
 # The Release workflow (release.yml) calls it for a release: installers on, the tag's commit, and
 # a build provenance attestation for every file (actions/attest-build-provenance).
 on:
   workflow_dispatch:
     inputs:
       installers:
-        description: Also build the installers (for a release)
+        description: Also build the deb (for a release)
         type: boolean
         default: false
   workflow_call:
@@ -43,6 +45,7 @@ on:
       - packaging/**
       - apps/desktop/scripts/**
       - tools/package_checks.mjs
+      - tools/deb.mjs
       - apps/desktop/src-tauri/tauri*.json
       - apps/desktop/src-tauri/src/install.rs
       - apps/desktop/src-tauri/src/portable.rs
@@ -64,22 +67,26 @@ jobs:
   portable:
     name: Portable · ${{ matrix.target }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 75
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: win-x64
             runner: windows-latest
-            installer: true # the installers are published for x64 only
+            ext: zip
+            installer: false
           - target: win-arm64
             runner: windows-11-arm
+            ext: zip
             installer: false
           - target: linux-x64
             runner: ubuntu-22.04 # glibc 2.35 build host; the programs may need at most 2.34 (checked)
-            installer: true
+            ext: tar.gz
+            installer: true # the deb (x64 only)
           - target: linux-arm64
             runner: ubuntu-22.04-arm # glibc 2.35 here too
+            ext: tar.gz
             installer: false
     permissions:
       contents: read
@@ -88,6 +95,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }} # gh release download v0.3.4
     steps:
       - uses: actions/checkout@v7
         with:
@@ -124,29 +133,28 @@ jobs:
         with:
           shared-key: bundle-${{ matrix.target }}
 
-      # Tauri's build libraries, xvfb for the window without a display, what the AppImage bundler
-      # (linuxdeploy) runs, and rpm2cpio / cpio to unpack the rpm for its checks
+      # Tauri's build libraries, xvfb for the window without a display, what the deb's checks use
       - name: Install Tauri's libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xvfb file rpm2cpio cpio
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf xvfb file
 
       - name: Install the interface's dependencies
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile
 
-      # the programs only, no installer (beforeBuildCommand: the interface, spaceknife-cli, the licences);
+      # the programs only (beforeBuildCommand: the interface, spaceknife-cli, the licences);
       # `pnpm bundle` (scripts/bundle.mjs) builds them with the build machine's folders remapped
       - name: Build the programs
         if: ${{ !(inputs.installers && matrix.installer) }}
         working-directory: apps/desktop
         run: pnpm bundle --no-bundle
 
-      - name: Build the programs and the installers
+      - name: Build the programs and the deb
         if: ${{ inputs.installers && matrix.installer }}
         working-directory: apps/desktop
-        run: pnpm bundle
+        run: pnpm bundle --bundles deb
 
       - name: Build the portable archive
         working-directory: apps/desktop
@@ -173,11 +181,27 @@ jobs:
           node tools/package_checks.mjs paths "$archive"
           if [ "$RUNNER_OS" = Linux ]; then node tools/package_checks.mjs glibc "$archive"; fi
 
+      # what 0.3.x copies need of it: SpaceKnife.exe / spaceknife at the top, the swap helper
+      # (a copy of spaceknife-cli) at resources/backend, answering --apply-update
+      - name: The layout 0.3.x copies update to
+        run: |
+          shopt -s nullglob
+          dir=(target/portable-test/*/)
+          if [ "$RUNNER_OS" = Windows ]; then program=SpaceKnife.exe; helper=resources/backend/spaceknife-backend.exe
+          else program=spaceknife; helper=resources/backend/spaceknife-backend; fi
+          ls "${dir[0]}" | grep -qx "$program" || { echo "::error::no $program (exactly that name) in the archive"; exit 1; }
+          [ -x "${dir[0]}$helper" ] || { echo "::error::no executable $helper in the archive"; exit 1; }
+          set +e
+          said=$("${dir[0]}$helper" --apply-update); code=$?
+          set -e
+          echo "$helper --apply-update: $said (exit $code)"
+          [ "$code" = 2 ] && echo "$said" | grep -q '"ok":false' || { echo "::error::the swap helper does not take --apply-update"; exit 1; }
+
       - name: Smoke test in portable mode
         run: |
           # a glob, not `ls` of both names: the missing one would fail the step (pipefail)
           shopt -s nullglob
-          app=(target/portable-test/*/spaceknife.exe target/portable-test/*/spaceknife)
+          app=(target/portable-test/*/SpaceKnife.exe target/portable-test/*/spaceknife)
           app=${app[0]:?the program is missing from the archive}
           if [ "$RUNNER_OS" = Linux ]; then
             xvfb-run -a node packaging/smoke-app.mjs --portable "$app"
@@ -202,7 +226,8 @@ jobs:
 
       # a release list on 127.0.0.1 offers the next version (this build again); the backend finds,
       # downloads and verifies it, the new version's --apply-update swaps the files, the app comes back
-      - name: Update end to end (portable)
+      # a portable copy still
+      - name: Update end to end (this build to the next)
         timeout-minutes: 15
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -211,53 +236,77 @@ jobs:
             node packaging/update-e2e.mjs "$archive"
           fi
 
+      # the real 0.3.4 portable copy of this target (checked against the v0.3.4 release's own
+      # checksums and its build provenance), its own 「无缝更新」, to this build
+      - name: Update from 0.3.4 (portable)
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          old="SpaceKnife-0.3.4-${{ matrix.target }}-portable.${{ matrix.ext }}"
+          mkdir -p "$RUNNER_TEMP/v034"
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern "$old" --pattern "SHA256SUMS-portable-${{ matrix.target }}.txt"
+          (cd "$RUNNER_TEMP/v034" && sha256sum -c "SHA256SUMS-portable-${{ matrix.target }}.txt")
+          gh attestation verify "$RUNNER_TEMP/v034/$old" --repo DuskXi/SpaceKnife
+          machine=$([[ "${{ matrix.target }}" == *arm64 ]] && echo arm64 || echo x64)
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine "$machine"
+          else
+            node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine "$machine"
+          fi
+
+      # Windows on ARM: 0.3.4's x64 copy (run emulated) takes the arm64 build, as its update.py
+      # asset_templates says, and runs native afterwards
+      - name: Update from 0.3.4's x64 copy on ARM
+        if: matrix.target == 'win-arm64'
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          old=SpaceKnife-0.3.4-win-x64-portable.zip
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern "$old" --pattern SHA256SUMS-portable-win-x64.txt
+          (cd "$RUNNER_TEMP/v034" && sha256sum -c SHA256SUMS-portable-win-x64.txt)
+          node packaging/update-from-034.mjs portable "$RUNNER_TEMP/v034/$old" "$archive" --expect-machine arm64
+
       - name: Checksum
         working-directory: target/portable
         run: sha256sum "$(basename "$archive")" | tee "SHA256SUMS-portable-${{ matrix.target }}.txt"
 
-      - name: Collect the installers
+      # Tauri names the package space-knife; the release's is 0.3.4's spaceknife (tools/deb.mjs)
+      - name: The deb under 0.3.4's name
         if: inputs.installers && matrix.installer
         run: |
           set -euo pipefail
           shopt -s nullglob
+          version=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          tauri=(target/release/bundle/deb/*.deb)
+          [ "${#tauri[@]}" = 1 ] || { echo "::error::Tauri made ${#tauri[@]} debs"; exit 1; }
           mkdir -p target/installers
-          b=target/release/bundle
-          cp $b/nsis/*-setup.exe $b/appimage/*.AppImage $b/deb/*.deb $b/rpm/*.rpm target/installers/
+          node tools/deb.mjs "${tauri[0]}" "target/installers/spaceknife_${version/-/\~}_amd64.deb"
           cd target/installers
-          ls -l
-          sha256sum * | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
+          dpkg-deb -I spaceknife_*.deb
+          sha256sum spaceknife_*.deb | tee "SHA256SUMS-installers-${{ matrix.target }}.txt"
 
-      # The same checks over what the installers install: the NSIS installer unpacked with 7-Zip, the
-      # deb with dpkg-deb (its files and its control files), the rpm through rpm2cpio, the AppImage
-      # through its own --appimage-extract; on Linux every ELF file in them (the AppImage's bundled
-      # libraries too) needs at most glibc 2.34
-      - name: Check the installers
+      # The same checks over what the deb installs (its files and its control files); every ELF
+      # file in it needs at most glibc 2.34
+      - name: Check the deb
         if: inputs.installers && matrix.installer
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          root=$PWD
-          u=target/installers-unpacked # relative: 7-Zip is a Windows program, it gets no POSIX path
-          rm -rf "$u" && mkdir -p "$u"
-          if [ "$RUNNER_OS" = Windows ]; then
-            for f in target/installers/*-setup.exe; do 7z x -y -bd -o"$u/nsis" "$f" > /dev/null; done
-            node tools/package_checks.mjs paths "$u"
-          else
-            for f in target/installers/*.deb; do dpkg-deb -R "$f" "$u/deb"; done
-            for f in target/installers/*.rpm; do mkdir -p "$u/rpm" && (cd "$u/rpm" && rpm2cpio "$root/$f" | cpio -idm --quiet); done
-            for f in target/installers/*.AppImage; do (cd "$u" && "$root/$f" --appimage-extract > /dev/null && mv squashfs-root appimage); done
-            node tools/package_checks.mjs paths "$u"
-            node tools/package_checks.mjs glibc "$u"
-          fi
+          rm -rf target/installers-unpacked && mkdir -p target/installers-unpacked
+          dpkg-deb -R target/installers/spaceknife_*.deb target/installers-unpacked/deb
+          node tools/package_checks.mjs paths target/installers-unpacked
+          node tools/package_checks.mjs glibc target/installers-unpacked
 
-      - name: Install, run and uninstall (Windows installer)
-        if: inputs.installers && matrix.installer && runner.os == 'Windows'
+      # 0.3.4's real deb installed, then this one over it, as the system's installer does with the
+      # file 0.3.4 downloaded (the in-app part is the portable leg's, and tools/compat034.mjs)
+      - name: Upgrade from 0.3.4's deb
+        if: inputs.installers && matrix.installer
         timeout-minutes: 20
-        run: node packaging/nsis-e2e.mjs target/installers/*-setup.exe
-
-      - name: Run the AppImage
-        if: inputs.installers && matrix.installer && runner.os == 'Linux'
-        run: xvfb-run -a node packaging/smoke-app.mjs --kind appimage target/installers/*.AppImage
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v034"
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern spaceknife_0.3.4_amd64.deb --pattern SHA256SUMS.txt --clobber
+          (cd "$RUNNER_TEMP/v034" && grep ' spaceknife_0.3.4_amd64.deb$' SHA256SUMS.txt | sha256sum -c -)
+          xvfb-run -a node packaging/update-from-034.mjs deb "$RUNNER_TEMP/v034/spaceknife_0.3.4_amd64.deb" target/installers/spaceknife_*.deb
 
       - name: Attest the portable archive
         if: inputs.attest
@@ -267,25 +316,18 @@ jobs:
             target/portable/*-portable.zip
             target/portable/*-portable.tar.gz
 
-      - name: Attest the installers
+      - name: Attest the deb
         if: inputs.attest && inputs.installers && matrix.installer
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: |
-            target/installers/*-setup.exe
-            target/installers/*.AppImage
-            target/installers/*.deb
-            target/installers/*.rpm
+          subject-path: target/installers/*.deb
 
       - uses: actions/upload-artifact@v7
         if: inputs.installers && matrix.installer
         with:
           name: SpaceKnife-installers-${{ matrix.target }}
           path: |
-            target/installers/*-setup.exe
-            target/installers/*.AppImage
             target/installers/*.deb
-            target/installers/*.rpm
             target/installers/SHA256SUMS-installers-*.txt
           if-no-files-found: error
           retention-days: 14

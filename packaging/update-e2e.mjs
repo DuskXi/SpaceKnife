@@ -27,7 +27,8 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
-import { cliIn, fail, hello, pack, pidAlive, programIn, sha256, sleep, stop, unpack, until } from "./lib.mjs";
+import { cliIn, fail, hello, helperIn, pack, pidAlive, programIn, sha256, sleep, stop, unpack, until } from "./lib.mjs";
+import { spawnSync } from "node:child_process";
 
 const NAME = /^SpaceKnife-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)-((?:win|linux|mac)-(?:x64|arm64))-portable\.(zip|tar\.gz)$/;
 const archive = resolve(process.argv[2] ?? "");
@@ -69,6 +70,11 @@ try {
   unpack(archive, join(work, "install"));
   const folder = join(work, "install", `SpaceKnife-${version}-${target}-portable`);
   if (!existsSync(join(folder, "data"))) throw new Error(`${folder} has no data folder`);
+  // what 0.3.x copies run from a new version to swap the files: spaceknife-cli, which takes
+  // --apply-update first (without a plan it says so and touches nothing)
+  const answer = spawnSync(helperIn(folder), ["--apply-update"], { encoding: "utf8", timeout: 30_000 });
+  if (answer.status !== 2 || JSON.parse(answer.stdout.trim()).ok !== false) throw new Error(`${helperIn(folder)} --apply-update: ${answer.status} ${answer.stdout}`);
+  console.log(`the swap helper answers: ${answer.stdout.trim()}`);
   const nextName = `SpaceKnife-${next}-${target}-portable`;
   mkdirSync(join(work, "next"));
   unpack(archive, join(work, "next"));
@@ -144,7 +150,10 @@ try {
   const log = join(updates, `update-${next}.log`);
   writeFileSync(plan, `${JSON.stringify({ v: 1, pid: app.pid, app: folder, new: staged, old: previous, exe: programIn(folder), log, keep: ["data"] }, null, 2)}\n`);
   rmSync(ready, { force: true });
-  const helper = spawn(programIn(staged), ["--apply-update", plan], { cwd: updates, env, detached: true, stdio: ["ignore", "pipe", "ignore"] });
+  // started by the app (install.rs start_swap), it has the app's environment: SPACEKNIFE_HOME set
+  // to the copy's data folder (lib.rs prepare_environment), which the swap must not pass on
+  const appEnv = { ...env, SPACEKNIFE_HOME: join(folder, "data") };
+  const helper = spawn(programIn(staged), ["--apply-update", plan], { cwd: updates, env: appEnv, detached: true, stdio: ["ignore", "pipe", "ignore"] });
   const said = await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("--apply-update did not answer")), 30_000);
     createInterface({ input: helper.stdout }).once("line", (line) => (clearTimeout(t), resolve(line)));
@@ -166,6 +175,9 @@ try {
   if (!existsSync(cliIn(folder))) throw new Error("spaceknife-cli is missing after the swap");
   console.log(`new files in place, data kept; the app runs again (backend pid ${again.pid})`);
   const s2 = await hello(again.url, again.token);
+  // a portable copy still: the next update finds its file (sk_core::update::swap::app_env)
+  const kind = (await s2.call("update.status")).install_kind;
+  if (kind !== "portable") throw new Error(`after the swap the app takes itself for ${kind}, not a portable copy`);
   // clean_updates: everything of the running version or an older one (the copy says it is still
   // the old version: it is the same build; the staged newer files stay)
   await until("the old files to be cleared from the updates folder", () => !existsSync(previous), 60_000).catch(() => {

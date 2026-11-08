@@ -175,7 +175,8 @@ fn fits_template(name: &str, template: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || ".+~_-".contains(c))
 }
 
-/// Whether `name` is a release file of this kind of install on `platform` (`std::env::consts::OS`).
+/// Whether `name` is a release file of this kind of install of the Tauri app on `platform`
+/// (`std::env::consts::OS`); `machine` is the processor (sk_core::update::machine).
 pub fn is_release_file(name: &str, kind: &str, platform: &str, machine: &str) -> bool {
     if kind == "portable" {
         return portable_version_for(name, platform).is_some();
@@ -186,7 +187,8 @@ pub fn is_release_file(name: &str, kind: &str, platform: &str, machine: &str) ->
         "macos" => "darwin",
         other => other,
     };
-    sk_core::update::asset_template(kind, system, machine).is_some_and(|t| fits_template(name, &t))
+    sk_core::update::asset_template(kind, sk_core::update::Shell::Tauri, system, machine)
+        .is_some_and(|t| fits_template(name, &t))
 }
 
 /// Why `file` can't be used as the downloaded update, or None when it can: a file directly in the
@@ -263,7 +265,14 @@ pub fn install_update(app: &AppHandle, file: &Path, how: &str) -> String {
     let kind = this_install_kind();
     let updates = app.state::<Backend>().updates_dir();
     let refusal = match &updates {
-        Some(u) => install_refusal(file, kind, u, std::env::consts::OS, std::env::consts::ARCH),
+        // the processor the backend picked the file for: an emulated copy takes the native build
+        Some(u) => install_refusal(
+            file,
+            kind,
+            u,
+            std::env::consts::OS,
+            &sk_core::update::machine(),
+        ),
         None => Some(TextKey::UpdateMissing),
     };
     if let Some(key) = refusal {
@@ -730,79 +739,62 @@ mod tests {
     }
 
     #[test]
-    fn knows_the_release_files_tauris_bundler_makes() {
-        assert!(is_release_file(
-            "SpaceKnife_0.4.1_x64-setup.exe",
-            "nsis",
-            "windows",
-            "x86_64"
-        ));
-        assert!(is_release_file(
-            "SpaceKnife_0.4.1-beta.1_x64-setup.exe",
-            "nsis",
-            "windows",
-            "aarch64"
-        ));
-        assert!(!is_release_file(
-            "SpaceKnife_0.4.1_x64-setup.exe.sig",
-            "nsis",
-            "windows",
-            "x86_64"
-        ));
-        assert!(!is_release_file(
-            "SpaceKnife_../x_x64-setup.exe",
-            "nsis",
-            "windows",
-            "x86_64"
-        ));
-        assert!(is_release_file(
-            "SpaceKnife-0.4.1-win-x64-portable.zip",
-            "portable",
-            "windows",
-            "x86_64"
-        ));
-        assert!(!is_release_file(
-            "SpaceKnife_0.4.1_x64-setup.exe",
-            "portable",
-            "windows",
-            "x86_64"
-        ));
-        assert!(is_release_file(
-            "SpaceKnife_0.4.1_amd64.AppImage",
-            "appimage",
-            "linux",
-            "x86_64"
-        ));
-        assert!(is_release_file(
-            "SpaceKnife_0.4.1_amd64.deb",
-            "deb",
-            "linux",
-            "x86_64"
-        ));
-        assert!(is_release_file(
-            "SpaceKnife-0.4.1-1.x86_64.rpm",
-            "rpm",
-            "linux",
-            "x86_64"
-        ));
-        assert!(is_release_file(
-            "SpaceKnife_0.4.1_aarch64.dmg",
-            "dmg",
-            "macos",
-            "aarch64"
-        ));
-        assert!(!is_release_file(
-            "SpaceKnife_0.4.1_x64.dmg",
-            "dmg",
-            "macos",
-            "aarch64"
-        ));
-        assert!(!is_release_file(
-            "SpaceKnife_0.4.1_x64-setup.exe",
-            "dev",
-            "windows",
-            "x86_64"
-        ));
+    fn knows_the_release_files_of_the_tauri_app() {
+        // 0.3.4's names (sk_core::update::asset_templates): the portable copies, the deb and the
+        // disk images are the Tauri app's
+        for (name, kind, platform, machine) in [
+            (
+                "SpaceKnife-0.4.1-win-x64-portable.zip",
+                "portable",
+                "windows",
+                "x64",
+            ),
+            (
+                "SpaceKnife-0.4.1-win-arm64-portable.zip",
+                "portable",
+                "windows",
+                "arm64",
+            ),
+            (
+                "SpaceKnife-0.4.1-linux-x64-portable.tar.gz",
+                "portable",
+                "linux",
+                "x64",
+            ),
+            ("spaceknife_0.4.1_amd64.deb", "deb", "linux", "x64"),
+            ("spaceknife_0.4.1~beta.1_amd64.deb", "deb", "linux", "x64"),
+            ("SpaceKnife-0.4.1-mac-arm64.dmg", "dmg", "macos", "arm64"),
+            ("SpaceKnife-0.4.1-mac-x64.dmg", "dmg", "macos", "x64"),
+        ] {
+            assert!(is_release_file(name, kind, platform, machine), "{name}");
+        }
+        for (name, kind, platform, machine) in [
+            // the Windows installer, the rpm and the AppImage come from the Electron shell
+            ("SpaceKnife-0.4.1-Setup-x64.exe", "nsis", "windows", "x64"),
+            ("spaceknife-0.4.1.x86_64.rpm", "rpm", "linux", "x64"),
+            (
+                "SpaceKnife-0.4.1-x86_64.AppImage",
+                "appimage",
+                "linux",
+                "x64",
+            ),
+            // the names Tauri's bundler gives its files are not release files
+            ("SpaceKnife_0.4.1_amd64.deb", "deb", "linux", "x64"),
+            ("SpaceKnife_0.4.1_aarch64.dmg", "dmg", "macos", "arm64"),
+            // another processor's disk image, another kind's file, odd versions
+            ("SpaceKnife-0.4.1-mac-x64.dmg", "dmg", "macos", "arm64"),
+            ("spaceknife_0.4.1_amd64.deb", "portable", "linux", "x64"),
+            ("spaceknife_../x_amd64.deb", "deb", "linux", "x64"),
+            ("spaceknife_0.4.1_amd64.deb.sig", "deb", "linux", "x64"),
+            (
+                "SpaceKnife-0.4.1-win-x64-portable.zip",
+                "dev",
+                "windows",
+                "x64",
+            ),
+        ] {
+            assert!(!is_release_file(name, kind, platform, machine), "{name}");
+        }
     }
 
     #[test]
@@ -810,28 +802,32 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let updates = tmp.path().join("updates");
         std::fs::create_dir(&updates).unwrap();
-        let good = updates.join("SpaceKnife_0.4.1_x64-setup.exe");
+        let name = "SpaceKnife-0.4.1-win-x64-portable.zip";
+        let good = updates.join(name);
         std::fs::write(&good, "x").unwrap();
-        let other = updates.join("evil.exe");
+        let other = updates.join("evil.zip");
         std::fs::write(&other, "x").unwrap();
-        let outside = tmp.path().join("SpaceKnife_0.4.1_x64-setup.exe");
+        let outside = tmp.path().join(name);
         std::fs::write(&outside, "x").unwrap();
         let os = "windows";
-        assert_eq!(install_refusal(&good, "nsis", &updates, os, "x86_64"), None);
         assert_eq!(
-            install_refusal(&other, "nsis", &updates, os, "x86_64"),
+            install_refusal(&good, "portable", &updates, os, "x64"),
+            None
+        );
+        assert_eq!(
+            install_refusal(&other, "portable", &updates, os, "x64"),
             Some(TextKey::UpdateNotAnUpdate)
         );
         assert_eq!(
-            install_refusal(&outside, "nsis", &updates, os, "x86_64"),
+            install_refusal(&outside, "portable", &updates, os, "x64"),
             Some(TextKey::UpdateNotInUpdates)
         );
         assert_eq!(
-            install_refusal(&updates.join("gone.exe"), "nsis", &updates, os, "x86_64"),
+            install_refusal(&updates.join("gone.zip"), "portable", &updates, os, "x64"),
             Some(TextKey::UpdateMissing)
         );
         assert_eq!(
-            install_refusal(&good, "dev", &updates, os, "x86_64"),
+            install_refusal(&good, "dev", &updates, os, "x64"),
             Some(TextKey::UpdateNoInstall)
         );
     }

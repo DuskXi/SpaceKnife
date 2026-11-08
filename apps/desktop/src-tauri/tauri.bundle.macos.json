@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "target-bundle/licenses/": "licenses/",
+      "../.output/public/": "ui/",
+      "target-bundle/backend/spaceknife-backend": "backend/spaceknife-backend"
+    }
+  }
+}

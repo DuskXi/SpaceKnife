@@ -462,79 +462,260 @@ const ALL_ASSETS: &[&str] = &[
 #[test]
 fn pick_assets() {
     use InstallKind::*;
+    use Shell::*;
     let r = release("0.4.0", ALL_ASSETS);
-    for (kind, system, machine, name) in [
+    // 0.3.4's names (its update.py asset_templates), which every later version keeps: an installed
+    // 0.3.x looks for exactly these. Each kind of install is built by one shell; the other shell
+    // has no file for it.
+    for (kind, shell, system, machine, name) in [
         (
             Nsis,
+            Electron,
             "win32",
             "AMD64",
-            Some("SpaceKnife_0.4.0_x64-setup.exe"),
+            Some("SpaceKnife-0.4.0-Setup-x64.exe"),
         ),
         (
             Nsis,
+            Electron,
             "win32",
             "ARM64",
-            Some("SpaceKnife_0.4.0_x64-setup.exe"),
+            Some("SpaceKnife-0.4.0-Setup-x64.exe"),
         ),
+        (Nsis, Tauri, "win32", "AMD64", None),
         (
             Portable,
+            Tauri,
             "win32",
             "AMD64",
             Some("SpaceKnife-0.4.0-win-x64-portable.zip"),
         ),
         (
             Portable,
+            Tauri,
             "linux",
             "x86_64",
             Some("SpaceKnife-0.4.0-linux-x64-portable.tar.gz"),
         ),
         (
             Portable,
+            Tauri,
             "win32",
             "ARM64",
             Some("SpaceKnife-0.4.0-win-arm64-portable.zip"),
         ),
         (
             Portable,
+            Tauri,
             "linux",
             "aarch64",
             Some("SpaceKnife-0.4.0-linux-arm64-portable.tar.gz"),
         ),
         (
             Portable,
+            Tauri,
             "darwin",
             "arm64",
             Some("SpaceKnife-0.4.0-mac-arm64-portable.zip"),
         ),
         (
             Portable,
+            Tauri,
             "darwin",
             "x86_64",
             Some("SpaceKnife-0.4.0-mac-x64-portable.zip"),
         ),
-        (Portable, "linux", "riscv64", None),
+        (Portable, Electron, "win32", "AMD64", None),
+        (Portable, Tauri, "linux", "riscv64", None),
         (
             Appimage,
+            Electron,
             "linux",
             "x86_64",
-            Some("SpaceKnife_0.4.0_amd64.AppImage"),
+            Some("SpaceKnife-0.4.0-x86_64.AppImage"),
         ),
-        (Appimage, "linux", "aarch64", None),
-        (Deb, "linux", "x86_64", Some("SpaceKnife_0.4.0_amd64.deb")),
+        (Appimage, Electron, "linux", "aarch64", None),
+        (Appimage, Tauri, "linux", "x86_64", None),
+        (
+            Deb,
+            Tauri,
+            "linux",
+            "x86_64",
+            Some("spaceknife_0.4.0_amd64.deb"),
+        ),
+        (Deb, Electron, "linux", "x86_64", None),
         (
             Rpm,
+            Electron,
             "linux",
             "x86_64",
-            Some("SpaceKnife-0.4.0-1.x86_64.rpm"),
+            Some("spaceknife-0.4.0.x86_64.rpm"),
         ),
-        (Dmg, "darwin", "arm64", Some("SpaceKnife_0.4.0_aarch64.dmg")),
-        (Dmg, "darwin", "x86_64", Some("SpaceKnife_0.4.0_x64.dmg")),
-        (Dev, "win32", "AMD64", None),
-        (Unknown, "linux", "x86_64", None),
+        (Rpm, Tauri, "linux", "x86_64", None),
+        (
+            Dmg,
+            Tauri,
+            "darwin",
+            "arm64",
+            Some("SpaceKnife-0.4.0-mac-arm64.dmg"),
+        ),
+        (
+            Dmg,
+            Tauri,
+            "darwin",
+            "x86_64",
+            Some("SpaceKnife-0.4.0-mac-x64.dmg"),
+        ),
+        (Dmg, Electron, "darwin", "arm64", None),
+        (Dev, Tauri, "win32", "AMD64", None),
+        (InstallKind::Unknown, Electron, "linux", "x86_64", None),
+        (Deb, Shell::Unknown, "linux", "x86_64", None),
+        (Nsis, Shell::Unknown, "win32", "AMD64", None),
     ] {
-        let got = pick_asset(&r, kind, Some(system), Some(machine)).map(|a| a.name.as_str());
-        assert_eq!(got, name, "{kind:?} {system} {machine}");
+        let got = pick_asset(&r, kind, shell, Some(system), Some(machine)).map(|a| a.name.as_str());
+        assert_eq!(got, name, "{kind:?} {shell:?} {system} {machine}");
     }
+}
+
+#[test]
+fn the_names_are_the_ones_0_3_4_looks_for() {
+    use InstallKind::*;
+    use Shell::*;
+    // v0.3.4 packages/backend/src/spaceknife/update.py asset_templates, word for word
+    let table: &[(InstallKind, Shell, &str, &str, &[&str])] = &[
+        (
+            Nsis,
+            Electron,
+            "win32",
+            "AMD64",
+            &["SpaceKnife-{v}-Setup-x64.exe"],
+        ),
+        (
+            Portable,
+            Tauri,
+            "win32",
+            "ARM64",
+            &[
+                "SpaceKnife-{v}-win-arm64-portable.zip",
+                "SpaceKnife-{v}-win-x64-portable.zip",
+            ],
+        ),
+        (
+            Portable,
+            Tauri,
+            "win32",
+            "AMD64",
+            &["SpaceKnife-{v}-win-x64-portable.zip"],
+        ),
+        (
+            Portable,
+            Tauri,
+            "linux",
+            "x86_64",
+            &["SpaceKnife-{v}-linux-x64-portable.tar.gz"],
+        ),
+        (
+            Portable,
+            Tauri,
+            "linux",
+            "aarch64",
+            &["SpaceKnife-{v}-linux-arm64-portable.tar.gz"],
+        ),
+        (
+            Portable,
+            Tauri,
+            "darwin",
+            "arm64",
+            &["SpaceKnife-{v}-mac-arm64-portable.zip"],
+        ),
+        (
+            Portable,
+            Tauri,
+            "darwin",
+            "x86_64",
+            &["SpaceKnife-{v}-mac-x64-portable.zip"],
+        ),
+        (
+            Appimage,
+            Electron,
+            "linux",
+            "x86_64",
+            &["SpaceKnife-{v}-x86_64.AppImage"],
+        ),
+        (Deb, Tauri, "linux", "x86_64", &["spaceknife_{v}_amd64.deb"]),
+        (
+            Rpm,
+            Electron,
+            "linux",
+            "x86_64",
+            &["spaceknife-{v}.x86_64.rpm"],
+        ),
+        (
+            Dmg,
+            Tauri,
+            "darwin",
+            "arm64",
+            &["SpaceKnife-{v}-mac-arm64.dmg"],
+        ),
+        (
+            Dmg,
+            Tauri,
+            "darwin",
+            "x86_64",
+            &["SpaceKnife-{v}-mac-x64.dmg"],
+        ),
+    ];
+    for &(kind, shell, system, machine, want) in table {
+        assert_eq!(
+            asset_templates(kind, shell, system, machine),
+            want,
+            "{kind:?} {system} {machine}"
+        );
+    }
+}
+
+#[test]
+fn the_shell_comes_from_the_launcher() {
+    assert_eq!(shell_from(""), Shell::Tauri); // the Tauri app runs the backend in its own process
+    assert_eq!(shell_from(" tauri "), Shell::Tauri);
+    assert_eq!(shell_from("Electron"), Shell::Electron);
+    assert_eq!(shell_from("qt"), Shell::Unknown);
+    assert_eq!(Shell::Electron.as_str(), "electron");
+}
+
+#[test]
+fn the_processor_is_read_at_run_time() {
+    // an x64 build that Windows on ARM (or Rosetta) runs emulated is on an arm64 processor
+    assert_eq!(windows_machine_arch(0xAA64), Some("arm64"));
+    assert_eq!(windows_machine_arch(0x8664), Some("x64"));
+    assert_eq!(windows_machine_arch(0x014C), Some("x86"));
+    assert_eq!(windows_machine_arch(0), None);
+    let m = machine();
+    assert!(["x64", "arm64"].contains(&m.as_str()), "{m}");
+    // without a machine, the file is the one of the processor this runs on
+    let r = release(
+        "0.4.0",
+        &[
+            "SpaceKnife-0.4.0-win-x64-portable.zip",
+            "SpaceKnife-0.4.0-win-arm64-portable.zip",
+            "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
+            "SpaceKnife-0.4.0-linux-arm64-portable.tar.gz",
+            "SpaceKnife-0.4.0-mac-x64-portable.zip",
+            "SpaceKnife-0.4.0-mac-arm64-portable.zip",
+        ],
+    );
+    let got =
+        pick_asset(&r, InstallKind::Portable, Shell::Tauri, None, None).map(|a| a.name.clone());
+    let os = match system() {
+        "win32" => "win",
+        "darwin" => "mac",
+        _ => "linux",
+    };
+    assert!(
+        got.as_deref()
+            .is_some_and(|n| n.contains(&format!("-{os}-{m}-"))),
+        "{got:?} on {m}"
+    );
 }
 
 #[test]
@@ -547,23 +728,27 @@ fn a_portable_copy_on_windows_on_arm_keeps_the_x64_build_without_an_arm_one() {
             "SpaceKnife-0.4.0-linux-x64-portable.tar.gz",
         ],
     );
-    let got = pick_asset(&r, InstallKind::Portable, Some("win32"), Some("ARM64"))
-        .map(|a| a.name.as_str());
-    assert_eq!(got, Some("SpaceKnife-0.4.0-win-x64-portable.zip"));
-    // Linux runs no x64 build on ARM
-    assert!(pick_asset(&r, InstallKind::Portable, Some("linux"), Some("aarch64")).is_none());
+    let pick = |system: &str, machine: &str| {
+        pick_asset(
+            &r,
+            InstallKind::Portable,
+            Shell::Tauri,
+            Some(system),
+            Some(machine),
+        )
+        .map(|a| a.name.clone())
+    };
     assert_eq!(
-        asset_templates(InstallKind::Portable, "win32", "ARM64"),
-        [
-            "SpaceKnife-{v}-win-arm64-portable.zip",
-            "SpaceKnife-{v}-win-x64-portable.zip"
-        ]
+        pick("win32", "ARM64").as_deref(),
+        Some("SpaceKnife-0.4.0-win-x64-portable.zip")
     );
+    // Linux runs no x64 build on ARM
+    assert!(pick("linux", "aarch64").is_none());
     assert_eq!(
-        asset_template(InstallKind::Portable, "win32", "ARM64").as_deref(),
+        asset_template(InstallKind::Portable, Shell::Tauri, "win32", "ARM64").as_deref(),
         Some("SpaceKnife-{v}-win-arm64-portable.zip")
     );
-    assert!(asset_template(InstallKind::Dev, "win32", "AMD64").is_none());
+    assert!(asset_template(InstallKind::Dev, Shell::Tauri, "win32", "AMD64").is_none());
 }
 
 #[test]
@@ -587,7 +772,8 @@ fn update_checks_verify_certificates_through_the_system() {
     // the operating system's verifier (Windows CryptoAPI, macOS Security framework, the platform
     // store on Linux): a certificate the system has blocked is refused here too
     for url in [RELEASES_URL, "http://127.0.0.1:9/releases"] {
-        let a = agent(url, TIMEOUT);
+        let a = agent(url, TIMEOUT, None);
+        assert_eq!(a.config().timeout_per_read(), Some(TIMEOUT)); // review issue 11
         assert!(
             matches!(
                 a.config().tls_config().root_certs(),
@@ -603,30 +789,34 @@ fn pick_asset_tolerates_the_packagers_spelling() {
     let r = release(
         "0.4.0-beta.1",
         &[
-            "SpaceKnife-0.4.0~beta.1-1.x86_64.rpm",
-            "SpaceKnife_0.4.0-beta.1_amd64.deb",
+            "spaceknife-0.4.0~beta.1.x86_64.rpm",
+            "spaceknife_0.4.0~beta.1_amd64.deb",
         ],
     );
-    let pick = |k| pick_asset(&r, k, Some("linux"), Some("x86_64")).map(|a| a.name.clone());
+    let pick = |k, s| pick_asset(&r, k, s, Some("linux"), Some("x86_64")).map(|a| a.name.clone());
     assert_eq!(
-        pick(InstallKind::Rpm).as_deref(),
-        Some("SpaceKnife-0.4.0~beta.1-1.x86_64.rpm")
+        pick(InstallKind::Rpm, Shell::Electron).as_deref(),
+        Some("spaceknife-0.4.0~beta.1.x86_64.rpm")
     );
     assert_eq!(
-        pick(InstallKind::Deb).as_deref(),
-        Some("SpaceKnife_0.4.0-beta.1_amd64.deb")
+        pick(InstallKind::Deb, Shell::Tauri).as_deref(),
+        Some("spaceknife_0.4.0~beta.1_amd64.deb")
     );
-    let odd = release("0.4.0", &["SpaceKnife_../../x_x64-setup.exe"]);
-    assert!(pick_asset(&odd, InstallKind::Nsis, Some("win32"), Some("AMD64")).is_none());
-    assert!(
+    let nsis = |r: &Release| {
         pick_asset(
-            &release("0.4.0", &[]),
+            r,
             InstallKind::Nsis,
+            Shell::Electron,
             Some("win32"),
-            Some("AMD64")
+            Some("AMD64"),
         )
         .is_none()
-    );
+    };
+    assert!(nsis(&release(
+        "0.4.0",
+        &["SpaceKnife-../../x-Setup-x64.exe"]
+    )));
+    assert!(nsis(&release("0.4.0", &[])));
 }
 
 // ---------------------------------------------------------------- checksums
@@ -785,6 +975,83 @@ fn clean_updates_folder() {
         ["SpaceKnife-0.3.4-Setup-x64.exe.part"]
     );
     assert!(clean_updates(&tmp.path().join("missing"), Some("0.3.2")).is_empty());
+}
+
+#[test]
+fn what_is_still_held_after_an_update_is_removed_later() {
+    // a 0.3.4 portable copy updated to 0.3.5: the swap left the Electron app's files in
+    // previous-0.3.4, and the new version's first cleaning ran while 0.3.4's last processes still
+    // held some of them (seen on Windows: ffmpeg.dll), leaving hundreds of MB behind until the next
+    // start; what is left is tried again, and nothing else
+    let tmp = tempfile::tempdir().unwrap();
+    let folder = tmp.path().join("updates");
+    std::fs::create_dir_all(folder.join("previous-0.3.4").join("locales")).unwrap();
+    std::fs::write(folder.join("previous-0.3.4").join("ffmpeg.dll"), "x").unwrap();
+    std::fs::create_dir_all(
+        folder
+            .join("staging-0.3.5")
+            .join("SpaceKnife-0.3.5-win-x64-portable"),
+    )
+    .unwrap();
+    std::fs::write(folder.join("SpaceKnife-0.3.5-win-x64-portable.zip"), "x").unwrap();
+    std::fs::write(folder.join("update-0.3.5.log"), "updated").unwrap();
+    let held = std::cell::Cell::new(true);
+    let remove = |p: &Path| {
+        if held.get() && p.file_name().is_some_and(|n| n == "previous-0.3.4") {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "in use",
+            ));
+        }
+        remove_entry(p)
+    };
+    let first = clean_updates_with(&folder, Some("0.3.5"), &remove);
+    assert_eq!(
+        first.removed,
+        [
+            "SpaceKnife-0.3.5-win-x64-portable.zip",
+            "staging-0.3.5",
+            "update-0.3.5.log"
+        ]
+    );
+    assert_eq!(first.left, ["previous-0.3.4"]);
+    // meanwhile a newer release's download started, and something else was put there
+    std::fs::write(
+        folder.join("SpaceKnife-0.3.6-win-x64-portable.zip.part"),
+        "x",
+    )
+    .unwrap();
+    std::fs::write(folder.join("update-0.3.4.json"), "x").unwrap();
+    let again = clean_again_with(&folder, Some("0.3.5"), &first.left, &remove);
+    assert_eq!(
+        again,
+        Cleaned {
+            removed: vec![],
+            left: vec!["previous-0.3.4".into()]
+        }
+    );
+    held.set(false);
+    let again = clean_again_with(&folder, Some("0.3.5"), &first.left, &remove);
+    assert_eq!(again.removed, ["previous-0.3.4"]);
+    assert!(again.left.is_empty());
+    let mut left: Vec<String> = std::fs::read_dir(&folder)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        [
+            "SpaceKnife-0.3.6-win-x64-portable.zip.part",
+            "update-0.3.4.json"
+        ]
+    );
+    // a partial download is never tried again
+    let names = ["SpaceKnife-0.3.6-win-x64-portable.zip.part".to_owned()];
+    assert_eq!(
+        clean_again(&folder, Some("0.3.5"), &names),
+        Cleaned::default()
+    );
 }
 
 // ---------------------------------------------------------------- state
@@ -1028,10 +1295,154 @@ fn download_verified() {
     assert_eq!(r.unwrap(), Some(true));
     assert_eq!(feed.hits("/file.exe"), 1);
     assert_eq!(seen[0].0, Phase::Verifying);
-    // no checksum published: downloaded again, not verified
-    let (r, _) = fetch_file(&url, &dest, None, n, None);
-    assert_eq!(r.unwrap(), None);
-    assert_eq!(feed.hits("/file.exe"), 2);
+}
+
+#[test]
+fn nothing_is_downloaded_without_a_published_checksum() {
+    // review issue 10: a file the release lists no SHA-256 for could be anything; it is never
+    // fetched (an installer would run it silently)
+    let _g = crate::i18n::TEST_LOCK.lock();
+    let feed = LocalFeed::start();
+    let data = payload();
+    let url = feed.file("/file.exe", data.clone(), true);
+    let tmp = tempfile::tempdir().unwrap();
+    let dest = tmp.path().join("SpaceKnife-0.4.0-Setup-x64.exe");
+    let (r, seen) = fetch_file(&url, &dest, None, data.len() as u64, None);
+    let err = r.unwrap_err();
+    assert_eq!(err, UpdateError::NoChecksum);
+    assert_eq!(err.key(), "no_checksum");
+    assert!(err.message().contains("SHA-256"), "{}", err.message());
+    assert_eq!(feed.hits("/file.exe"), 0);
+    assert!(seen.is_empty());
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+    // a file left there earlier is not taken either
+    std::fs::write(&dest, &data).unwrap();
+    let (r, _) = fetch_file(&url, &dest, None, data.len() as u64, None);
+    assert_eq!(r.unwrap_err(), UpdateError::NoChecksum);
+}
+
+/// A server that answers one GET with its headers and `sent` bytes of a body it says is longer,
+/// then holds the connection open for `hold` without sending anything more.
+fn stalling_server(length: usize, sent: usize, hold: Duration) -> String {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for conn in listener.incoming() {
+            let Ok(mut conn) = conn else { continue };
+            std::thread::spawn(move || {
+                let mut reader = BufReader::new(conn.try_clone().unwrap());
+                loop {
+                    let mut line = String::new();
+                    if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+                        break;
+                    }
+                }
+                let head = format!("HTTP/1.1 200 OK\r\nContent-Length: {length}\r\n\r\n");
+                let _ = conn.write_all(head.as_bytes());
+                let _ = conn.write_all(&vec![b'['; sent]);
+                let _ = conn.flush();
+                std::thread::sleep(hold);
+            });
+        }
+    });
+    format!("http://127.0.0.1:{port}/file")
+}
+
+#[test]
+fn a_download_that_stalls_fails_within_the_timeout() {
+    // review issue 11: the body had no read timeout, a stalled connection hung the download (and
+    // every later one) until the app restarted
+    let _g = crate::i18n::TEST_LOCK.lock();
+    let url = stalling_server(1 << 20, 1000, Duration::from_secs(20));
+    let tmp = tempfile::tempdir().unwrap();
+    let dest = tmp.path().join("SpaceKnife-0.4.0-Setup-x64.exe");
+    let cancel = AtomicBool::new(false);
+    let started = Instant::now();
+    let r = download(
+        &url,
+        &dest,
+        1 << 20,
+        Some(&"0".repeat(64)),
+        UA,
+        &mut |_, _, _| {},
+        &cancel,
+        Duration::from_millis(500),
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
+    match r {
+        Err(UpdateError::DownloadNet { reason }) => assert_eq!(reason, "连接 GitHub 超时"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0); // no .part left
+}
+
+#[test]
+fn a_stalled_download_can_be_cancelled() {
+    let url = stalling_server(1 << 20, 1000, Duration::from_secs(20));
+    let tmp = tempfile::tempdir().unwrap();
+    let dest = tmp.path().join("SpaceKnife-0.4.0-Setup-x64.exe");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let c = cancel.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(300));
+        c.store(true, Ordering::SeqCst);
+    });
+    let started = Instant::now();
+    let r = download(
+        &url,
+        &dest,
+        1 << 20,
+        Some(&"0".repeat(64)),
+        UA,
+        &mut |_, _, _| {},
+        &cancel,
+        Duration::from_secs(2),
+    );
+    assert_eq!(r.unwrap_err(), UpdateError::Cancelled);
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn a_release_list_that_stalls_times_out() {
+    let _g = crate::i18n::TEST_LOCK.lock();
+    let url = stalling_server(100_000, 10, Duration::from_secs(20));
+    let started = Instant::now();
+    let err = fetch_releases(&url, None, UA, Duration::from_millis(500)).unwrap_err();
+    assert_eq!(err, UpdateError::Timeout);
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
+    // the checksum file the same way: no download starts
+    let mut r = release("0.4.0", &[]);
+    r.assets = vec![Asset {
+        name: "SHA256SUMS.txt".into(),
+        size: 0,
+        url: stalling_server(100_000, 10, Duration::from_secs(20)),
+    }];
+    let asset = Asset {
+        name: "SpaceKnife-0.4.0-Setup-x64.exe".into(),
+        size: 0,
+        url: "u".into(),
+    };
+    let started = Instant::now();
+    let err = fetch_checksums(&r, &asset, UA, Duration::from_millis(500)).unwrap_err();
+    assert_eq!(err.key(), "sums", "{err:?}");
+    assert!(
+        started.elapsed() < Duration::from_secs(8),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
@@ -1061,7 +1472,7 @@ fn download_cancel_and_failures() {
     let (r, _) = fetch_file(&feed.url("/missing.exe"), &dest, Some(&digest), n, None);
     assert_eq!(r.unwrap_err(), UpdateError::DownloadHttp { code: 404 });
     let short = feed.file("/short.exe", data[..1000].to_vec(), false); // no length: ends when the server closes
-    let (r, _) = fetch_file(&short, &dest, None, n, None);
+    let (r, _) = fetch_file(&short, &dest, Some(&digest), n, None);
     assert_eq!(
         r.unwrap_err(),
         UpdateError::Incomplete {

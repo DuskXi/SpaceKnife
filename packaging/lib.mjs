@@ -126,10 +126,17 @@ export function pack(dir, name, archive) {
   else execFileSync("tar", ["-czf", archive, "-C", dir, name], { stdio: "inherit" });
 }
 
-/** The program in an unpacked portable folder (on macOS inside the app bundle). */
+/** The program in an unpacked portable folder (on macOS inside the app bundle), under the name
+ * 0.3.x copies start after an update (apps/desktop/scripts/portable.mjs). */
 export function programIn(folder) {
-  if (MAC) return join(folder, "SpaceKnife.app", "Contents", "MacOS", "spaceknife");
-  return join(folder, WIN ? "spaceknife.exe" : "spaceknife");
+  if (MAC) return join(folder, "SpaceKnife.app", "Contents", "MacOS", "SpaceKnife");
+  return join(folder, WIN ? "SpaceKnife.exe" : "spaceknife");
+}
+
+/** The swap helper 0.3.x copies run from the new version (a copy of spaceknife-cli). */
+export function helperIn(folder) {
+  if (MAC) return join(folder, "SpaceKnife.app", "Contents", "Resources", "backend", "spaceknife-backend");
+  return join(folder, "resources", "backend", WIN ? "spaceknife-backend.exe" : "spaceknife-backend");
 }
 
 export function cliIn(folder) {

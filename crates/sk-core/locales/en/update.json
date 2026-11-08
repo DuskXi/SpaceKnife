@@ -20,6 +20,7 @@
  "正在检查…": "Checking…",
  "没有可用的更新": "No update available",
  "这个版本没有适合这种安装方式的文件，请到发布页下载": "This release has no file for this kind of install; download it from the release page",
+ "这个版本的发布没有列出这个文件的 SHA-256 校验值，没有下载": "This release lists no SHA-256 checksum for the file, so nothing was downloaded",
  "连不上 GitHub：{reason}": "Can't reach GitHub: {reason}",
  "连接 GitHub 超时": "The connection to GitHub timed out",
  "关于与更新": "About & updates"

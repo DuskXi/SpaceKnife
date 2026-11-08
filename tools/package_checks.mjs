@@ -180,6 +180,8 @@ function tarMembers(data, label) {
         uname: cstr(data, p + 265, 32),
         gname: cstr(data, p + 297, 32),
         file: type === "0" || type === "7",
+        mode: tarNumber(data, p + 100, 8),
+        dir: type === "5",
       });
       long = {};
       pax = {};
@@ -247,6 +249,44 @@ export function* contents(label, data, depth = 0) {
   if (startsWith(data, ZIP) || startsWith(data, ZIP_EMPTY)) {
     for (const m of zipMembers(data, label)) yield* contents(`${label} › ${m.name}`, m.data(), depth + 1);
   }
+}
+
+/** The entries of a portable archive (a zip, or a tar.gz): [{name, mode}] — `mode` the Unix
+ * permissions where the archive keeps them (tar; a zip made on Unix), else null. */
+export function archiveEntries(data, label = "archive") {
+  if (startsWith(data, GZIP)) {
+    const tar = zlib.gunzipSync(data);
+    if (!startsWith(tar, USTAR, 257)) throw new CheckError(`${label}: a gzip file that holds no tar archive`);
+    return tarMembers(tar, label).map((m) => ({ name: m.dir && !m.name.endsWith("/") ? `${m.name}/` : m.name, mode: m.mode }));
+  }
+  if (!startsWith(data, ZIP) && !startsWith(data, ZIP_EMPTY)) throw new CheckError(`${label}: neither a zip nor a tar.gz file`);
+  // the names from the central directory (with the folders, which zipMembers skips)
+  let eocd = -1;
+  for (let i = data.length - 22; i >= Math.max(0, data.length - 22 - 0xffff); i--) {
+    if (data.readUInt32LE(i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new CheckError(`${label}: a zip without its central directory`);
+  const files = new Set(zipMembers(data, label).map((m) => m.name));
+  let count = data.readUInt16LE(eocd + 10);
+  let p = data.readUInt32LE(eocd + 16);
+  if (count === 0xffff || p === 0xffffffff) {
+    const rec = Number(data.readBigUInt64LE(eocd - 20 + 8));
+    count = Number(data.readBigUInt64LE(rec + 32));
+    p = Number(data.readBigUInt64LE(rec + 48));
+  }
+  const out = [];
+  for (let k = 0; k < count; k++) {
+    const madeBy = data.readUInt16LE(p + 4) >> 8; // 3: Unix
+    const nlen = data.readUInt16LE(p + 28);
+    const name = data.subarray(p + 46, p + 46 + nlen).toString("utf8");
+    const external = data.readUInt32LE(p + 38);
+    if (files.has(name) || name.endsWith("/")) out.push({ name, mode: madeBy === 3 ? (external >>> 16) & 0o7777 : null });
+    p += 46 + nlen + data.readUInt16LE(p + 30) + data.readUInt16LE(p + 32);
+  }
+  return out;
 }
 
 /** Every file under `target` (a folder or a file), links not followed: [label, path]. */

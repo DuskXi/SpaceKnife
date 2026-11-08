@@ -1,0 +1,265 @@
+name: Electron shell build
+
+# The Electron shell's installers (docs/packaging.md; the shell is apps/electron-shell): the Windows
+# installer (electron-builder's NSIS, the same appId, uninstall entry, folder and shortcuts as 0.3.4,
+# so that 0.3.4's silent update and both per-user and all-users installs carry on), and for Linux
+# the AppImage and the rpm (RHEL 9 has no WebKitGTK 4.1 for the Tauri app). All under 0.3.4's file
+# names, the update check's contract (crates/sk-core update asset_templates, Shell::Electron):
+#
+#   SpaceKnife-<v>-Setup-x64.exe, SpaceKnife-<v>-x86_64.AppImage (+ .zsync), spaceknife-<v>.x86_64.rpm
+#
+# What the shell's own build has to leave, by contract with this workflow: `pnpm run package` in
+# apps/electron-shell (after the interface and spaceknife-cli are built, below) puts those files in
+# dist/electron/; the app it packs starts its spaceknife-cli serve with SPACEKNIFE_SHELL=electron
+# (the backend then picks the Electron shell's files) and, when SPACEKNIFE_READY_FILE is set (the
+# tests), with --ready-file "$SPACEKNIFE_READY_FILE"; the rpm carries
+# packaging/linux/rpm-posttrans.sh as its %posttrans (electron-builder rpm.fpm: --rpm-posttrans),
+# which puts back the /usr/bin/spaceknife link 0.3.4's %postun takes away on an upgrade.
+# This workflow then writes the AppImage's update information and .zsync (tools/appimage.mjs),
+# checks the files (no build-machine home folder; glibc ≤ 2.34 for every ELF file on Linux),
+# installs, runs and uninstalls the Windows installer (packaging/nsis-e2e.mjs), and tests the update
+# from the real 0.3.4 files end to end (packaging/update-from-034.mjs): the Windows installer
+# per user and for all users, the AppImage, and the rpm in rockylinux:9. The files and their
+# checksums (SHA256SUMS-installers-electron-<target>.txt, merged into SHA256SUMS.txt by
+# tools/release.mjs) go to the run's artifacts. Started by hand, and by the Release workflow
+# (release.yml) for a release: the tag's commit and a build provenance attestation for every file.
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit or tag to build (default the caller's)
+        type: string
+        default: ""
+      attest:
+        description: Attest where each file was built
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: electron-${{ github.ref }}-${{ inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: Electron shell · ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: win-x64
+            runner: windows-latest
+          - target: linux-x64
+            runner: ubuntu-22.04 # glibc 2.35 build host; every ELF file may need at most 2.34 (checked)
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Set up Rust
+        run: rustup update stable --no-self-update && rustup default stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: electron-${{ matrix.target }}
+
+      # electron-builder's rpm target needs rpmbuild; zsyncmake makes the .zsync; xvfb and libfuse2
+      # run the AppImage without a display
+      - name: Install the packaging tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm zsync xvfb libfuse2 file
+
+      # the interface (one Nuxt build for both shells) and spaceknife-cli, build paths remapped
+      - name: Build the interface and spaceknife-cli
+        run: |
+          set -euo pipefail
+          (cd apps/desktop && pnpm install --frozen-lockfile && pnpm generate)
+          node --input-type=module -e "import { remappedEnv } from './tools/package_checks.mjs'; import { execFileSync } from 'node:child_process'; execFileSync('cargo', ['build', '--release', '--locked', '-p', 'sk-server', '--bin', 'spaceknife-cli'], { stdio: 'inherit', env: remappedEnv(process.env) });"
+
+      - name: Build the installers
+        working-directory: apps/electron-shell
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run package
+
+      - name: Collect the files
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          version=$(jq -r .version apps/electron-shell/package.json)
+          tauri=$(jq -r .version apps/desktop/src-tauri/tauri.conf.json)
+          [ "$version" = "$tauri" ] || { echo "::error::the Electron shell is $version, the Tauri app $tauri"; exit 1; }
+          mkdir -p target/electron
+          if [ "$RUNNER_OS" = Windows ]; then
+            want=("SpaceKnife-$version-Setup-x64.exe")
+          else
+            want=("SpaceKnife-$version-x86_64.AppImage" "spaceknife-${version/-/\~}.x86_64.rpm")
+          fi
+          for f in "${want[@]}"; do
+            [ -f "dist/electron/$f" ] || { echo "::error::the shell's build left no dist/electron/$f: $(ls dist/electron)"; exit 1; }
+            cp "dist/electron/$f" target/electron/
+          done
+          echo "version=$version" >> "$GITHUB_ENV"
+          ls -l target/electron
+
+      # AppImageUpdate reads the update information from the runtime; the .zsync is made from the
+      # finished file (both before the checksum)
+      - name: The AppImage's update information and .zsync
+        if: runner.os == 'Linux'
+        run: |
+          node tools/appimage.mjs finish "target/electron/SpaceKnife-$version-x86_64.AppImage"
+          node tools/appimage.mjs show "target/electron/SpaceKnife-$version-x86_64.AppImage"
+
+      - name: Checksums
+        working-directory: target/electron
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          sha256sum *.exe *.AppImage *.rpm | tee "SHA256SUMS-installers-electron-${{ matrix.target }}.txt"
+
+      # what the installers install: the NSIS installer unpacked with 7-Zip, the rpm through
+      # rpm2cpio, the AppImage through its own --appimage-extract
+      - name: Check the files
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          root=$PWD
+          u=target/electron-unpacked
+          rm -rf "$u" && mkdir -p "$u"
+          if [ "$RUNNER_OS" = Windows ]; then
+            for f in target/electron/*-Setup-x64.exe; do 7z x -y -bd -o"$u/nsis" "$f" > /dev/null; done
+            node tools/package_checks.mjs paths "$u"
+          else
+            sudo apt-get install -y rpm2cpio cpio
+            for f in target/electron/*.rpm; do mkdir -p "$u/rpm" && (cd "$u/rpm" && rpm2cpio "$root/$f" | cpio -idm --quiet); done
+            for f in target/electron/*.AppImage; do (cd "$u" && "$root/$f" --appimage-extract > /dev/null && mv squashfs-root appimage); done
+            node tools/package_checks.mjs paths "$u"
+            node tools/package_checks.mjs glibc "$u"
+            rpm -qp --qf '%{NAME} %{VERSION}\n' target/electron/*.rpm | grep -qx "spaceknife ${version/-/\~}" || { echo "::error::the rpm is not package spaceknife"; exit 1; }
+          fi
+
+      - name: Install, run and uninstall (Windows installer)
+        if: runner.os == 'Windows'
+        timeout-minutes: 20
+        run: node packaging/nsis-e2e.mjs target/electron/*-Setup-x64.exe
+
+      # 0.3.4's real installer (checked against the v0.3.4 release's own checksums and its build
+      # provenance), its own 「无缝更新」 to this one: per user, then for all users
+      - name: Update from 0.3.4 (Windows installer)
+        if: runner.os == 'Windows'
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v034"
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern SpaceKnife-0.3.4-Setup-x64.exe --pattern SHA256SUMS.txt
+          (cd "$RUNNER_TEMP/v034" && grep ' SpaceKnife-0.3.4-Setup-x64.exe$' SHA256SUMS.txt | sha256sum -c -)
+          gh attestation verify "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" --repo DuskXi/SpaceKnife
+          node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" target/electron/*-Setup-x64.exe
+          node packaging/update-from-034.mjs nsis "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-Setup-x64.exe" target/electron/*-Setup-x64.exe --allusers
+
+      - name: Run the AppImage
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node packaging/smoke-app.mjs --kind appimage target/electron/*.AppImage
+
+      - name: Update from 0.3.4 (AppImage)
+        if: runner.os == 'Linux'
+        timeout-minutes: 25
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/v034"
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir "$RUNNER_TEMP/v034" --pattern SpaceKnife-0.3.4-x86_64.AppImage --pattern SHA256SUMS.txt
+          (cd "$RUNNER_TEMP/v034" && grep ' SpaceKnife-0.3.4-x86_64.AppImage$' SHA256SUMS.txt | sha256sum -c -)
+          gh attestation verify "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-x86_64.AppImage" --repo DuskXi/SpaceKnife
+          xvfb-run -a node packaging/update-from-034.mjs appimage "$RUNNER_TEMP/v034/SpaceKnife-0.3.4-x86_64.AppImage" target/electron/*.AppImage
+
+      - name: Attest the files
+        if: inputs.attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            target/electron/*.exe
+            target/electron/*.AppImage
+            target/electron/*.AppImage.zsync
+            target/electron/*.rpm
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: SpaceKnife-electron-${{ matrix.target }}
+          path: |
+            target/electron/*.exe
+            target/electron/*.AppImage
+            target/electron/*.AppImage.zsync
+            target/electron/*.rpm
+            target/electron/SHA256SUMS-installers-electron-*.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  # RHEL 9: 0.3.4's rpm installed with dnf, this one over it, as the system's installer does with the
+  # file 0.3.4 downloaded; the app started under xvfb; then removed
+  rpm:
+    name: rpm on Rocky Linux 9
+    needs: build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    container: rockylinux:9
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: What the test needs
+        run: |
+          dnf install -y 'dnf-command(config-manager)' epel-release
+          dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo
+          dnf install -y gh xorg-x11-server-Xvfb xorg-x11-xauth which procps-ng
+
+      # the system's Node is too old for the test (it needs the global WebSocket of Node 22+)
+      - name: Set up Node 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: SpaceKnife-electron-linux-x64
+          path: candidate
+
+      - name: Update from 0.3.4 (rpm)
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v034
+          gh release download v0.3.4 --repo DuskXi/SpaceKnife --dir /tmp/v034 --pattern spaceknife-0.3.4.x86_64.rpm --pattern SHA256SUMS.txt
+          (cd /tmp/v034 && grep ' spaceknife-0.3.4.x86_64.rpm$' SHA256SUMS.txt | sha256sum -c -)
+          xvfb-run -a node packaging/update-from-034.mjs rpm /tmp/v034/spaceknife-0.3.4.x86_64.rpm candidate/spaceknife-*.x86_64.rpm
