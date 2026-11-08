@@ -14,7 +14,7 @@ Thanks for your interest! SpaceKnife is a small, MIT-licensed project and every 
 
 ## Development setup
 
-You need a stable [Rust](https://rustup.rs/) toolchain (edition 2024), Node.js 24 and pnpm 10. On Linux, Tauri also needs `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf`.
+You need [rustup](https://rustup.rs/) (it installs the Rust version `rust-toolchain.toml` pins, with clippy and rustfmt, the first time cargo runs in the repository; CI uses the same one), Node.js 24 and pnpm 10. On Linux, Tauri also needs `libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev libssl-dev patchelf`.
 
 ```bash
 cargo build
@@ -73,7 +73,7 @@ By contributing you agree that your contribution is licensed under the [MIT Lice
 
 ### 开发环境
 
-需要 stable 版 [Rust](https://rustup.rs/) 工具链（edition 2024）、Node.js 24 和 pnpm 10；Linux 上 Tauri 还需要上方英文部分列出的几个系统库。安装与启动命令同上方英文部分（`cargo build`、在 `apps/desktop` 里 `pnpm install`、`pnpm tauri dev`；后端在应用进程内运行），更多命令见 [README](README.zh-CN.md#开发环境) 和 [docs/packaging.md](docs/packaging.md)。
+需要 [rustup](https://rustup.rs/)（第一次在仓库里运行 cargo 时，它会装上 `rust-toolchain.toml` 固定的 Rust 版本和 clippy、rustfmt；CI 用的是同一个）、Node.js 24 和 pnpm 10；Linux 上 Tauri 还需要上方英文部分列出的几个系统库。安装与启动命令同上方英文部分（`cargo build`、在 `apps/desktop` 里 `pnpm install`、`pnpm tauri dev`；后端在应用进程内运行），更多命令见 [README](README.zh-CN.md#开发环境) 和 [docs/packaging.md](docs/packaging.md)。
 
 ### 提交 PR 之前
 

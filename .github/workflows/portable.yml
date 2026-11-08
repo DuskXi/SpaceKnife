@@ -42,6 +42,7 @@ on:
     branches: [dev]
     paths:
       - .github/workflows/portable.yml
+      - rust-toolchain.toml
       - .cargo/**
       - packaging/**
       - apps/desktop/scripts/**
@@ -118,20 +119,25 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
 
-      # the Windows on ARM runner comes without Rust: rustup for its architecture first
+      # the Windows on ARM runner comes without Rust: rustup for its architecture first; then the
+      # toolchain rust-toolchain.toml pins
       - name: Set up Rust
         run: |
-          if command -v rustup >/dev/null; then
-            rustup update stable --no-self-update && rustup default stable
-          elif [ "$RUNNER_OS" = Windows ]; then
-            target=$([ "$RUNNER_ARCH" = ARM64 ] && echo aarch64 || echo x86_64)-pc-windows-msvc
-            curl -sSfL -o "$RUNNER_TEMP/rustup-init.exe" "https://static.rust-lang.org/rustup/dist/$target/rustup-init.exe"
-            "$RUNNER_TEMP/rustup-init.exe" -y --profile minimal --default-toolchain stable --no-modify-path
-            cygpath -w "$USERPROFILE/.cargo/bin" >> "$GITHUB_PATH"
-          else
-            curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable --no-modify-path
-            echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          if ! command -v rustup >/dev/null; then
+            if [ "$RUNNER_OS" = Windows ]; then
+              target=$([ "$RUNNER_ARCH" = ARM64 ] && echo aarch64 || echo x86_64)-pc-windows-msvc
+              curl -sSfL -o "$RUNNER_TEMP/rustup-init.exe" "https://static.rust-lang.org/rustup/dist/$target/rustup-init.exe"
+              "$RUNNER_TEMP/rustup-init.exe" -y --profile minimal --default-toolchain none --no-modify-path
+              bin="$(cygpath -u "$USERPROFILE")/.cargo/bin"
+              cygpath -w "$bin" >> "$GITHUB_PATH"
+            else
+              curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none --no-modify-path
+              bin="$HOME/.cargo/bin"
+              echo "$bin" >> "$GITHUB_PATH"
+            fi
+            export PATH="$bin:$PATH"
           fi
+          rustup toolchain install --no-self-update
 
       - uses: Swatinem/rust-cache@v2
         with:

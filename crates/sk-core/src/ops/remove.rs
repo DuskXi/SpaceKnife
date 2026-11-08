@@ -853,8 +853,10 @@ mod imp {
             return true;
         }
         let units: Vec<u16> = bytes[off..off + len]
-            .chunks_exact(2)
-            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&c| u16::from_le_bytes(c))
             .collect();
         let name = String::from_utf16_lossy(&units).to_ascii_lowercase();
         name.starts_with("\\??\\volume{") || name.starts_with("\\\\?\\volume{")
@@ -998,8 +1000,10 @@ mod imp {
                     .get(at + class.name_at..at + class.name_at + len)
                     .ok_or_else(malformed)?;
                 let units: Vec<u16> = name
-                    .chunks_exact(2)
-                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .map(|&c| u16::from_le_bytes(c))
                     .collect();
                 let id = match class.id_at {
                     Some(i) => {

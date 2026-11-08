@@ -250,7 +250,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Set up Rust
-        run: rustup update stable --no-self-update && rustup default stable
+        run: rustup toolchain install --no-self-update # the one rust-toolchain.toml pins
 
       - uses: Swatinem/rust-cache@v2
         with:

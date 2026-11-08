@@ -74,10 +74,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Set up Rust (stable, rustfmt, clippy)
-        run: |
-          rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update
-          rustup default stable
+      # the toolchain rust-toolchain.toml pins, with its components (rustfmt, clippy): the lints
+      # are those of that version here and on every developer's machine, not of whatever stable
+      # the runner has today
+      - name: Set up Rust (rust-toolchain.toml)
+        run: rustup toolchain install --no-self-update
 
       - uses: Swatinem/rust-cache@v2
         with:

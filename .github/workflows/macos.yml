@@ -31,6 +31,7 @@ on:
     branches: [dev]
     paths:
       - .github/workflows/macos.yml
+      - rust-toolchain.toml
       - packaging/**
       - apps/desktop/scripts/**
       - tools/package_checks.mjs
@@ -89,7 +90,7 @@ jobs:
           cache-dependency-path: apps/desktop/pnpm-lock.yaml
 
       - name: Update Rust
-        run: rustup update stable --no-self-update && rustup default stable
+        run: rustup toolchain install --no-self-update # the one rust-toolchain.toml pins
 
       - uses: Swatinem/rust-cache@v2
         with:
