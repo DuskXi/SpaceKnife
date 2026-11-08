@@ -46,12 +46,12 @@
 // failure; SK_KEEP=1 keeps the work folder.
 
 import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
-import { MAC, WIN, appProcessOf, fail, hello, helperIn, isElectron, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, uiIn, unpack, until, watchSwap } from "./lib.mjs";
+import { MAC, WIN, alternativesGroup, appProcessOf, fail, hello, helperIn, isElectron, pidAlive, processesUnder, programIn, sha256, sleep, stop, stopUnder, treeDiff, uiIn, unpack, until, watchSwap } from "./lib.mjs";
 
 const OLD = "0.3.4";
 const args = process.argv.slice(2);
@@ -633,6 +633,11 @@ async function packaged(kind) {
   } else {
     if (real !== "/opt/SpaceKnife/spaceknife") throw new Error(`${bin} leads to ${real}`);
     if (!alt?.includes("/opt/SpaceKnife/spaceknife")) throw new Error(`the alternatives group spaceknife: ${alt}`);
+    // the group's own link, not a plain one in its place
+    if (readlinkSync(bin) !== "/etc/alternatives/spaceknife") throw new Error(`${bin} is a link to ${readlinkSync(bin)}, not the alternative`);
+    const cli = "/usr/bin/spaceknife-cli";
+    if (!lstatSafe(cli) || readlinkSync(cli) !== "/opt/SpaceKnife/spaceknife-cli") throw new Error(`${cli}: ${lstatSafe(cli) ? readlinkSync(cli) : "missing"}`);
+    console.log(`the alternatives group:\n${alt.trim()}`);
   }
   const desktops = readdirSync("/usr/share/applications").filter((n) => /spaceknife/i.test(n));
   if (desktops.length !== 1 || desktops[0] !== "spaceknife.desktop") throw new Error(`desktop entries: ${desktops.join(", ")}`);
@@ -675,18 +680,11 @@ async function packaged(kind) {
   console.log(`\n${kind} ${OLD} -> ${NEW_VERSION}: ok`);
 }
 
-/** The alternatives group spaceknife as the system shows it (Debian: update-alternatives --query,
- * RHEL: alternatives --display), or null when there is none. */
+/** The alternatives group spaceknife as the system shows it, or null when there is none (Debian:
+ * update-alternatives --query; RHEL: alternatives --display, its update-alternatives has no
+ * --query: lib.mjs alternativesGroup). */
 function alternatives() {
-  for (const [cmd, argv] of [
-    ["update-alternatives", ["--query", "spaceknife"]],
-    ["alternatives", ["--display", "spaceknife"]],
-  ]) {
-    const r = spawnSync(cmd, argv, { encoding: "utf8" });
-    if (r.error) continue; // not this system's tool
-    return r.status === 0 && r.stdout.trim() ? r.stdout : null;
-  }
-  return null;
+  return alternativesGroup("spaceknife");
 }
 
 function lstatSafe(p) {

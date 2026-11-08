@@ -54,6 +54,22 @@ export function pidAlive(pid) {
   }
 }
 
+/** The alternatives group `name` as the system shows it, or null when there is none. Debian's
+ * update-alternatives answers --query. On RHEL update-alternatives is a link to `alternatives`
+ * (chkconfig), which has no --query (it prints its usage and exits 2) and answers --display: a
+ * tool that does not answer is passed over, not taken for "no group". `run`: spawnSync. */
+export function alternativesGroup(name, run = spawnSync) {
+  for (const [cmd, argv] of [
+    ["update-alternatives", ["--query", name]],
+    ["alternatives", ["--display", name]],
+  ]) {
+    const r = run(cmd, argv, { encoding: "utf8" });
+    if (r.error) continue; // not this system's tool
+    if (r.status === 0 && r.stdout.trim()) return r.stdout;
+  }
+  return null;
+}
+
 /** End a process and its children (`force`: at once; else as closing its window / Ctrl+C would). */
 export function stop(pid, force = false) {
   if (WIN) spawnSync("taskkill", [...(force ? ["/F"] : []), "/T", "/PID", String(pid)], { stdio: "ignore" });
