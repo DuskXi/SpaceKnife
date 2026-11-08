@@ -1,0 +1,107 @@
+[
+ {
+  "roots_hex": [
+   "2f686f6d652f6c656e6e792f6261642dff2d6e616d65"
+  ],
+  "key": "bad___name-5a44c2d504d7"
+ },
+ {
+  "roots_hex": [
+   "2f686f6d652f6c656e6e792fe974e9"
+  ],
+  "key": "t-0927ce04a2c8"
+ },
+ {
+  "roots_hex": [
+   "2f80"
+  ],
+  "key": "root-18e9840aa2de"
+ },
+ {
+  "roots_hex": [
+   "2fff2f"
+  ],
+  "key": "root-a27febf10242"
+ },
+ {
+  "roots_hex": [
+   "2f686f6d652f6c656e6e792f636166c3a92dff"
+  ],
+  "key": "caf\u00e9-149716817a52"
+ },
+ {
+  "roots_hex": [
+   "2f782feda08079"
+  ],
+  "key": "y-125329305ffa"
+ },
+ {
+  "roots_hex": [
+   "2f782ff09f98"
+  ],
+  "key": "root-4aa0f4328e85"
+ },
+ {
+  "roots_hex": [
+   "2f782ff09f9861"
+  ],
+  "key": "a-26408ef3fd2b"
+ },
+ {
+  "roots_hex": [
+   "2f782fc0af7a"
+  ],
+  "key": "z-488a87cf9d7e"
+ },
+ {
+  "roots_hex": [
+   "2f782ff4908080"
+  ],
+  "key": "root-4201abc68e28"
+ },
+ {
+  "roots_hex": [
+   "2f782fe08080"
+  ],
+  "key": "root-1f993623bfb7"
+ },
+ {
+  "roots_hex": [
+   "2f612fff2f2e2e2f62fe"
+  ],
+  "key": "b-11cd79a902b9"
+ },
+ {
+  "roots_hex": [
+   "2f6dfc6e6368656e",
+   "2f61"
+  ],
+  "key": "m_nchen-807a900920fc"
+ },
+ {
+  "roots_hex": [
+   "2f61",
+   "2fff",
+   "2fc3bf"
+  ],
+  "key": "a-8f3a79ae04ab"
+ },
+ {
+  "roots_hex": [
+   "2f2fff73686172652f78"
+  ],
+  "key": "x-9dca84f3f84a"
+ },
+ {
+  "roots_hex": [
+   "2f686f6d652f6c656e6e792ffffee4b88be8bdbd"
+  ],
+  "key": "\u4e0b\u8f7d-ea1cc87b8203"
+ },
+ {
+  "roots_hex": [
+   "2f79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff79ff"
+  ],
+  "key": "y_y_y_y_y_y_y_y_y_y_y_y_-380a1185664f"
+ }
+]

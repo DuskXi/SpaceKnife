@@ -19,6 +19,12 @@
 //! (`ntpath.splitroot` on Windows) and `isalnum` (Python 3.12's table, [`super::py_alnum`]).
 //! The path rules are a parameter ([`Rules`]), so both are tested everywhere. These are only for
 //! the key; path comparisons elsewhere use [`crate::names`].
+//!
+//! The roots are the system's own strings: what Python hashed was the text it made of a path
+//! ([`py_bytes`]), which for a path no UTF-8 text can hold (a lone surrogate on Windows, bytes that
+//! are not UTF-8 on POSIX) is not what a lossy `String` of it holds.
+
+use std::ffi::OsStr;
 
 use sha1::{Digest, Sha1};
 
@@ -242,24 +248,81 @@ impl Rules {
         }
     }
 
-    /// The key of `roots` (see the module docs).
+    /// The key of roots that are text (see the module docs).
+    #[cfg(test)]
     pub(crate) fn root_key(self, roots: &[String]) -> String {
+        let py: Vec<Vec<u8>> = roots.iter().map(|r| r.as_bytes().to_vec()).collect();
+        self.root_key_py(&py)
+    }
+
+    /// The key of roots given as the text Python had of them, encoded with surrogatepass
+    /// ([`py_bytes`]).
+    pub(crate) fn root_key_py(self, roots: &[Vec<u8>]) -> String {
         let mut norm: Vec<Vec<u8>> = roots
             .iter()
-            .map(|r| self.normcase(&self.normpath(r.as_bytes())))
+            .map(|r| self.normcase(&self.normpath(r)))
             .collect();
-        // Python sorted the strings by code point: the order of their UTF-8 (WTF-8) bytes
+        // Python sorted the strings by code point: the order of their (generalised) UTF-8 bytes
         norm.sort();
         let digest = Sha1::digest(norm.join(&b'\n'));
         let hex: String = digest[..6].iter().map(|b| format!("{b:02x}")).collect();
-        let first = roots.first().map(String::as_str).unwrap_or("");
-        format!("{}-{hex}", self.label(first))
+        let first = roots.first().map_or_else(String::new, |r| py_chars(r));
+        format!("{}-{hex}", self.label(&first))
     }
 }
 
-/// The key of `roots` with this system's path rules.
-pub(crate) fn root_key(roots: &[String]) -> String {
-    Rules::NATIVE.root_key(roots)
+/// The key of `roots` (the system's own strings) with this system's path rules.
+pub(crate) fn root_key<S: AsRef<OsStr>>(roots: &[S]) -> String {
+    let py: Vec<Vec<u8>> = roots.iter().map(|r| py_bytes(r.as_ref())).collect();
+    Rules::NATIVE.root_key_py(&py)
+}
+
+/// The text 0.3.x had of a path from the system, as `str.encode("utf-8", "surrogatepass")`:
+/// on Windows its UTF-16 units (a valid pair one character, a lone surrogate a code point of its
+/// own: WTF-8); on POSIX `os.fsdecode`, so each byte that is not UTF-8 is U+DC80..U+DCFF
+/// ([`surrogateescape`]). Text that is valid Unicode is its UTF-8 on both.
+pub(crate) fn py_bytes(root: &OsStr) -> Vec<u8> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let wide: Vec<u16> = root.encode_wide().collect();
+        wide_to_wtf8(&wide)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        surrogateescape(root.as_bytes())
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        root.to_string_lossy().into_owned().into_bytes()
+    }
+}
+
+/// `raw.decode("utf-8", "surrogateescape").encode("utf-8", "surrogatepass")`: the valid UTF-8
+/// stays, every other byte `b` becomes U+DC00 + `b` in its 3-byte form. Python's decoder and
+/// [`<[u8]>::utf8_chunks`] agree on what is valid (strict UTF-8: no surrogates, no overlong
+/// forms, nothing past U+10FFFF), and each byte outside it is escaped on its own, so where an
+/// invalid run is cut does not matter.
+#[cfg_attr(not(unix), allow(dead_code))]
+pub(crate) fn surrogateescape(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw.len() + raw.len() / 2);
+    for chunk in raw.utf8_chunks() {
+        out.extend_from_slice(chunk.valid().as_bytes());
+        for &b in chunk.invalid() {
+            push_utf8(&mut out, 0xDC00 + u32::from(b));
+        }
+    }
+    out
+}
+
+/// The characters of generalised UTF-8 (what [`py_bytes`] gives), one per code point, a
+/// surrogate as U+FFFD: like a surrogate to Python's `isalnum` (not alphanumeric) and to the
+/// path rules (not a separator), so the label is the one Python made.
+fn py_chars(py: &[u8]) -> String {
+    char::decode_utf16(crate::names::wtf8_to_wide(py))
+        .map(|c| c.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect()
 }
 
 #[cfg(windows)]
@@ -332,7 +395,6 @@ fn wide_to_wtf8(wide: &[u16]) -> Vec<u8> {
 }
 
 /// One code point as (generalised) UTF-8: surrogates are encoded like any other code point.
-#[cfg_attr(not(windows), allow(dead_code))]
 fn push_utf8(out: &mut Vec<u8>, cp: u32) {
     if cp < 0x80 {
         out.push(cp as u8);
@@ -510,6 +572,115 @@ mod tests {
     fn windows_keys_of_0_3_4() {
         for (roots, want) in fixture_keys("windows") {
             assert_eq!(WIN.root_key(&roots), want, "{roots:?}");
+        }
+    }
+
+    /// `root_keys_os.json`: roots as the system names them (hex: the bytes on POSIX, UTF-16LE
+    /// units on Windows) and the key 0.3.4 gave them.
+    fn fixture_os_keys(platform: &str) -> Vec<(Vec<Vec<u8>>, String)> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sk-core/tests/data/v034")
+            .join(platform)
+            .join("root_keys_os.json");
+        let cases: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let hex = |s: &str| -> Vec<u8> {
+            (0..s.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+                .collect()
+        };
+        cases
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| {
+                let roots = c["roots_hex"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|r| hex(r.as_str().unwrap()))
+                    .collect();
+                (roots, c["key"].as_str().unwrap().to_owned())
+            })
+            .collect()
+    }
+
+    #[cfg(windows)]
+    fn units(le: &[u8]) -> Vec<u16> {
+        le.chunks(2)
+            .map(|p| u16::from_le_bytes([p[0], p[1]]))
+            .collect()
+    }
+
+    #[test]
+    fn surrogateescape_like_python() {
+        // valid UTF-8 stays; every other byte b is U+DC00 + b (ED B2/B3 xx)
+        assert_eq!(surrogateescape("/下载/é".as_bytes()), "/下载/é".as_bytes());
+        assert_eq!(surrogateescape(b"a\xffb"), b"a\xed\xb3\xbfb");
+        assert_eq!(surrogateescape(b"\x80"), b"\xed\xb2\x80");
+        // a cut sequence, a UTF-8 surrogate, an overlong form: every byte on its own
+        assert_eq!(
+            surrogateescape(b"\xf0\x9f\x98a"),
+            b"\xed\xb3\xb0\xed\xb2\x9f\xed\xb2\x98a"
+        );
+        assert_eq!(
+            surrogateescape(b"\xed\xa0\x80"),
+            b"\xed\xb3\xad\xed\xb2\xa0\xed\xb2\x80"
+        );
+        assert_eq!(surrogateescape(b"\xc0\xaf"), b"\xed\xb3\x80\xed\xb2\xaf");
+    }
+
+    /// POSIX roots with bytes that are not UTF-8 (`os.fsdecode` text in 0.3.4), on every system.
+    #[test]
+    fn posix_os_keys_of_0_3_4() {
+        for (roots, want) in fixture_os_keys("posix") {
+            let py: Vec<Vec<u8>> = roots.iter().map(|r| surrogateescape(r)).collect();
+            assert_eq!(POSIX.root_key_py(&py), want, "{roots:x?}");
+        }
+    }
+
+    /// Windows roots with lone surrogates (Windows' rules: its own lower case needs Windows).
+    #[cfg(windows)]
+    #[test]
+    fn windows_os_keys_of_0_3_4() {
+        for (roots, want) in fixture_os_keys("windows") {
+            let py: Vec<Vec<u8>> = roots.iter().map(|r| wide_to_wtf8(&units(r))).collect();
+            assert_eq!(WIN.root_key_py(&py), want, "{roots:x?}");
+        }
+    }
+
+    /// The system's own strings through [`root_key`]: Windows with lone surrogates, POSIX with
+    /// bytes that are not UTF-8 (on Linux and macOS), keyed as 0.3.4 keyed them.
+    #[cfg(any(windows, unix))]
+    #[test]
+    fn os_strings_are_keyed_as_0_3_4_keyed_them() {
+        #[cfg(windows)]
+        let (platform, os): (_, fn(&[u8]) -> std::ffi::OsString) = ("windows", |r| {
+            use std::os::windows::ffi::OsStringExt;
+            std::ffi::OsString::from_wide(&units(r))
+        });
+        #[cfg(unix)]
+        let (platform, os): (_, fn(&[u8]) -> std::ffi::OsString) = ("posix", |r| {
+            use std::os::unix::ffi::OsStringExt;
+            std::ffi::OsString::from_vec(r.to_vec())
+        });
+        let cases = fixture_os_keys(platform);
+        assert!(cases.len() > 10);
+        for (roots, want) in cases {
+            let strings: Vec<std::ffi::OsString> = roots.iter().map(|r| os(r)).collect();
+            assert!(strings.iter().any(|s| s.to_str().is_none()), "{strings:?}");
+            assert_eq!(root_key(&strings), want, "{strings:?}");
+            // a lossy string of the root is another root: not its key
+            let lossy: Vec<String> = strings
+                .iter()
+                .map(|s| s.to_string_lossy().into_owned())
+                .collect();
+            assert_ne!(root_key(&lossy), want, "{strings:?}");
+        }
+        // text roots: the same key as before
+        for (roots, want) in fixture_keys(platform) {
+            assert_eq!(root_key(&roots), want, "{roots:?}");
         }
     }
 }

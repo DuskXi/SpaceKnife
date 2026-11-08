@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::{Mutex, RwLock};
 use sk_core::events::{self, EventLevel, Source};
-use sk_core::helper::{HelperClient, LaunchOptions, MftOptions, Phase, SharedHelper};
+use sk_core::helper::{HelperClient, HelperError, LaunchOptions, MftOptions, Phase, SharedHelper};
 use sk_core::io::{IoGovernor, IoRegistry, Level, RegistryOptions};
 use sk_core::scan::mft::{MftBuild, table_to_store};
 use sk_core::scan::{
@@ -111,8 +111,12 @@ impl std::fmt::Debug for ScanHandle {
     }
 }
 
-/// The tags file of a scan's roots (setting 「记住标签」).
-pub fn tags_file(settings: &SettingsStore, roots: &[String]) -> Option<PathBuf> {
+/// The tags file of a scan's roots (setting 「记住标签」): the system's own strings, so that a root
+/// no text can hold finds the file 0.3.x named for it ([`snapshot::root_key`]).
+pub fn tags_file<S: AsRef<std::ffi::OsStr>>(
+    settings: &SettingsStore,
+    roots: &[S],
+) -> Option<PathBuf> {
     settings.get_bool("tags.remember").then(|| {
         paths::data_dir()
             .join("tags")
@@ -144,10 +148,7 @@ impl ScanHandle {
         governor: Option<Arc<IoGovernor>>,
         method: ScanMethodUsed,
     ) -> ScanHandle {
-        let paths_: Vec<String> = roots
-            .iter()
-            .map(|r| r.path.to_string_lossy().into_owned())
-            .collect();
+        let paths_: Vec<&Path> = roots.iter().map(|r| r.path.as_path()).collect();
         let tags = TagStore::new(tags_file(settings, &paths_));
         let folder_classes = Arc::new(sk_core::pathclass::FolderClasses::new());
         let basis = sk_core::layout::Basis::default().with_folder_classes(folder_classes.clone());
@@ -191,12 +192,19 @@ impl ScanHandle {
         self.st.lock().running
     }
 
+    /// The roots for display (a name no text can hold shows U+FFFD).
     pub fn root_paths(&self) -> Vec<String> {
         self.roots
             .read()
             .iter()
             .map(|r| r.path.to_string_lossy().into_owned())
             .collect()
+    }
+
+    /// The roots as the system names them: what their keys ([`snapshot::root_key`]: the
+    /// auto-save folder, the tag file, the palette's jumps) are made of.
+    pub fn root_os_paths(&self) -> Vec<PathBuf> {
+        self.roots.read().iter().map(|r| r.path.clone()).collect()
     }
 
     pub fn progress(&self) -> ScanProgress {
@@ -689,10 +697,7 @@ impl ScanManager {
             // the expected total (progress by items, room reserved up front) and the media probes
             // (they may block: warm their cache before status() needs them)
             let sc = scanner.clone();
-            let paths_: Vec<String> = roots
-                .iter()
-                .map(|r| r.path.to_string_lossy().into_owned())
-                .collect();
+            let paths_: Vec<PathBuf> = roots.iter().map(|r| r.path.clone()).collect();
             let vols: Vec<VolumeInfo> = roots.iter().filter_map(|r| r.volume.clone()).collect();
             crate::compute::blocking(move || {
                 sc.set_expected_items(last_item_count(&paths_));
@@ -798,10 +803,24 @@ impl ScanManager {
                 "只有整个本地 NTFS 卷能用 MFT 快速扫描"
             )));
         }
+        let helper = self.helper.clone();
+        self.upgrade_with(server, &h, move || helper.get(true))?;
+        Ok(h)
+    }
+
+    /// [`Self::use_mft`] past its volume check, with the helper from `get` (the real one asks
+    /// for administrator rights). Test seam: a `get` that fails or panics.
+    #[doc(hidden)]
+    pub fn upgrade_with(
+        &self,
+        server: &Arc<Server>,
+        h: &Arc<ScanHandle>,
+        get: impl FnOnce() -> Result<Arc<HelperClient>, HelperError> + Send + 'static,
+    ) -> RpcResult<()> {
         {
             let mut st = h.st.lock();
             if !st.running || st.method == ScanMethodUsed::Mft || st.upgrading {
-                return Ok(h.clone());
+                return Ok(());
             }
             st.upgrading = true;
             st.phase = "helper".into();
@@ -809,47 +828,34 @@ impl ScanManager {
         }
         h.publish(server);
         let (srv, hh) = (server.clone(), h.clone());
-        let helper = self.helper.clone();
-        std::thread::spawn(move || {
-            match helper.get(true) {
-                Err(e) => {
-                    hh.st.lock().fallback = tr!("{reason}，继续硬扫描", reason = e.message.clone());
-                    events::emit(
-                        Source::Scan,
-                        &tr!(
-                            "未能启用 MFT 快速扫描：{reason}；继续硬扫描",
-                            reason = e.message
-                        ),
-                        EventLevel::Warning,
-                        Some(&hh.id),
-                        None,
-                    );
-                }
-                Ok(client) => {
-                    let mut st = hh.st.lock();
-                    let scanner = hh.scanner.as_ref();
-                    if st.running
-                        && st.method == ScanMethodUsed::Hard
-                        && scanner.is_some_and(|s| !s.cancelled())
-                    {
-                        st.upgrade = Some(client);
-                        drop(st);
-                        if let Some(s) = scanner {
-                            s.cancel(); // the hard scan stops; run_hard switches over
-                        }
+        let spawned = std::thread::Builder::new()
+            .name(format!("upgrade-{}", h.id))
+            .spawn(move || {
+                // a panic (a bug) while the helper starts is this scan's error, told like a helper
+                // that would not start; the hard scan goes on, and the switch always ends here
+                let run =
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| upgrade(&hh, get)));
+                if let Err(payload) = run {
+                    let why = sk_core::scan::panic_message(payload.as_ref());
+                    tracing::error!("scan {}: starting the helper panicked: {why}", hh.id);
+                    // unless the hard scan was already told to hand over
+                    if hh.st.lock().upgrade.is_none() {
+                        no_upgrade(
+                            &hh,
+                            &tr!("启动扫描助手时意外中断：{reason}", reason = why),
+                            EventLevel::Error,
+                        );
                     }
                 }
-            }
-            {
-                let mut st = hh.st.lock();
-                st.upgrading = false;
-                if st.phase == "helper" {
-                    st.phase.clear();
-                }
-            }
-            hh.publish(&srv);
-        });
-        Ok(h)
+                upgrade_ended(&hh);
+                hh.publish(&srv);
+            });
+        if let Err(e) = spawned {
+            upgrade_ended(h);
+            h.publish(server);
+            return Err(RpcError::internal(e.to_string()));
+        }
+        Ok(())
     }
 
     pub fn cancel(&self, id: &str) -> RpcResult<Arc<ScanHandle>> {
@@ -961,7 +967,7 @@ impl ScanManager {
         }
         let path = target
             .map(PathBuf::from)
-            .unwrap_or_else(|| auto_path(&h.root_paths()));
+            .unwrap_or_else(|| auto_path(&h.root_os_paths()));
         let (hh, pp) = (h.clone(), path.clone());
         let header = crate::compute::blocking(move || save(&hh, &pp))
             .await?
@@ -1027,7 +1033,9 @@ impl ScanManager {
             let nodes = store.read();
             let mut roots = Vec::new();
             for (idx, node) in nodes.roots().enumerate() {
+                // shown (and found in the header) lossily; the root itself exactly
                 let path = nodes.name(node).into_owned();
+                let exact = PathBuf::from(sk_store::names::name_to_os(nodes.name_bytes(node)));
                 let volume = header
                     .volumes
                     .get(idx)
@@ -1035,7 +1043,7 @@ impl ScanManager {
                     .map(crate::util::volume_from_json);
                 roots.push(RootInfo {
                     whole_volume: root_meta.get(&path).copied().unwrap_or(false),
-                    path: PathBuf::from(path),
+                    path: exact,
                     node,
                     volume,
                 });
@@ -1117,6 +1125,52 @@ impl ScanManager {
     }
 }
 
+/// scan.use_mft's thread: start the helper (`get`) and hand it to the running hard scan, which
+/// then stops and switches over (`run_hard`).
+fn upgrade(h: &ScanHandle, get: impl FnOnce() -> Result<Arc<HelperClient>, HelperError>) {
+    match get() {
+        Err(e) => no_upgrade(h, &e.message, EventLevel::Warning),
+        Ok(client) => {
+            let mut st = h.st.lock();
+            let scanner = h.scanner.as_ref();
+            if st.running
+                && st.method == ScanMethodUsed::Hard
+                && scanner.is_some_and(|s| !s.cancelled())
+            {
+                st.upgrade = Some(client);
+                drop(st);
+                if let Some(s) = scanner {
+                    s.cancel(); // the hard scan stops; run_hard switches over
+                }
+            }
+        }
+    }
+}
+
+/// scan.use_mft is through with the helper (it may be asked for again).
+fn upgrade_ended(h: &ScanHandle) {
+    let mut st = h.st.lock();
+    st.upgrading = false;
+    if st.phase == "helper" {
+        st.phase.clear();
+    }
+}
+
+/// The switch to the MFT fast scan did not happen: why, and the hard scan goes on.
+fn no_upgrade(h: &ScanHandle, reason: &str, level: EventLevel) {
+    h.st.lock().fallback = tr!("{reason}，继续硬扫描", reason = reason.to_owned());
+    events::emit(
+        Source::Scan,
+        &tr!(
+            "未能启用 MFT 快速扫描：{reason}；继续硬扫描",
+            reason = reason.to_owned()
+        ),
+        level,
+        Some(&h.id),
+        None,
+    );
+}
+
 /// One whole local NTFS volume on Windows: the $MFT holds exactly this tree.
 fn mft_eligible(roots: &[RootInfo]) -> bool {
     if !cfg!(windows) || roots.len() != 1 {
@@ -1129,8 +1183,8 @@ fn mft_eligible(roots: &[RootInfo]) -> bool {
             .is_some_and(|v| !v.is_remote && v.fs_type.eq_ignore_ascii_case("NTFS"))
 }
 
-/// The auto-snapshot file of `roots` now.
-pub fn auto_path(roots: &[String]) -> PathBuf {
+/// The auto-snapshot file of `roots` (the system's own strings) now.
+pub fn auto_path<S: AsRef<std::ffi::OsStr>>(roots: &[S]) -> PathBuf {
     snapshot::auto_path(roots, None, &paths::snapshots_dir())
 }
 
@@ -1216,7 +1270,7 @@ pub fn saved_method(stats: &serde_json::Map<String, serde_json::Value>) -> Optio
 }
 
 /// Items of the newest complete snapshot of these roots: the expected total of a new scan.
-pub fn last_item_count(roots: &[String]) -> Option<i64> {
+pub fn last_item_count<S: AsRef<std::ffi::OsStr>>(roots: &[S]) -> Option<i64> {
     let folder = paths::snapshots_dir().join(snapshot::root_key(roots));
     let mut found: Vec<PathBuf> = std::fs::read_dir(&folder)
         .ok()?
@@ -1692,7 +1746,7 @@ fn finish(server: &Arc<Server>, h: &Arc<ScanHandle>, reported: Option<usize>) {
 
 /// Save a finished scan to the auto-snapshot folder; a failure only costs a log warning.
 fn auto_save(server: &Server, h: &ScanHandle) {
-    let path = auto_path(&h.root_paths());
+    let path = auto_path(&h.root_os_paths());
     if let Err(reason) = save(h, &path) {
         tracing::warn!("could not save snapshot for {}: {reason}", h.id);
         events::emit(

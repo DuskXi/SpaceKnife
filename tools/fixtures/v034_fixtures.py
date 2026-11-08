@@ -17,7 +17,9 @@ scanned where they are (a temporary folder), then every snapshot is loaded and s
 afterwards against those neutral roots, so their keys (`root_key`) are 0.3.4's for them.
 
 `<out>/<platform>/expected/*.json` hold what 0.3.4 reads back from each snapshot (every column,
-the names as hex), and `root_keys.json` the key 0.3.4 gives to a list of tricky roots.
+the names as hex), `root_keys.json` the key 0.3.4 gives to a list of tricky roots, and
+`root_keys_os.json` the key it gives to roots no UTF-8 text can hold (lone surrogates, bytes that are
+not UTF-8). `--root-keys-only` writes just those two (no scans, no `--work`).
 """
 
 from __future__ import annotations
@@ -600,6 +602,73 @@ def root_key_cases() -> list[dict[str, Any]]:
     return [{"roots": r, "key": snapshot.root_key(r)} for r in lists]
 
 
+def os_root_key_cases() -> list[dict[str, Any]]:
+    """Roots no UTF-8 text can hold, as the system names them, and the key 0.3.4 gave them.
+
+    0.3.4 hashed the text Python made of the path: on Windows the UTF-16 units (a valid pair one
+    character, a lone surrogate one code point of its own), on POSIX `os.fsdecode` (each byte that
+    is not UTF-8 as U+DC80..U+DCFF). `roots_hex` is the path as the system gives it: UTF-16LE
+    units on Windows, the bytes on POSIX."""
+    from spaceknife.store import snapshot
+
+    if WINDOWS:
+        lists: list[list[bytes]] = [
+            [u.encode("utf-16-le", "surrogatepass") for u in r]
+            for r in [
+                ["C:\\Users\\lenny\\lone-\udc80"],
+                ["C:\\Users\\lenny\\\ud800high"],
+                ["C:\\Users\\lenny\\end-\ud83d"],
+                ["C:\\\udfff"],
+                ["C:\\\udc80\\"],
+                ["C:\\data\\x\udfff\\..\\y\udc80"],
+                ["D:\\ÄBC\udcffÖ\\İx"],
+                ["C:\\pair-\U0001f642-\udc80"],
+                ["C:\\b\udc80", "C:\\a"],
+                ["C:\\a", "c:\\B\ud800"],
+                ["\\\\server\\share\\\udc80dir"],
+                ["\\\\server\\\udc80share"],
+                ["C:\\" + "x\udc80" * 20],
+                ["C:/mixed/Sep\udc80/"],
+            ]
+        ]
+        decode = lambda raw: raw.decode("utf-16-le", "surrogatepass")  # noqa: E731
+    else:
+        lists = [
+            [b"/home/lenny/bad-\xff-name"],
+            [b"/home/lenny/\xe9t\xe9"],
+            [b"/\x80"],
+            [b"/\xff/"],
+            [b"/home/lenny/caf\xc3\xa9-\xff"],
+            [b"/x/\xed\xa0\x80y"],
+            [b"/x/\xf0\x9f\x98"],
+            [b"/x/\xf0\x9f\x98a"],
+            [b"/x/\xc0\xafz"],
+            [b"/x/\xf4\x90\x80\x80"],
+            [b"/x/\xe0\x80\x80"],
+            [b"/a/\xff/../b\xfe"],
+            [b"/m\xfcnchen", b"/a"],
+            [b"/a", b"/\xff", b"/\xc3\xbf"],
+            [b"//\xffshare/x"],
+            [b"/home/lenny/\xff\xfe" + "下载".encode()],
+            [b"/" + b"y\xff" * 20],
+        ]
+        decode = os.fsdecode
+    return [
+        {"roots_hex": [raw.hex() for raw in r], "key": snapshot.root_key([decode(raw) for raw in r])}
+        for r in lists
+    ]
+
+
+def write_root_keys(target: Path) -> None:
+    target.mkdir(parents=True, exist_ok=True)
+    (target / "root_keys.json").write_text(
+        json.dumps(root_key_cases(), ensure_ascii=True, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
+    (target / "root_keys_os.json").write_text(
+        json.dumps(os_root_key_cases(), ensure_ascii=True, indent=1) + "\n", encoding="utf-8", newline="\n"
+    )
+
+
 # --------------------------------------------------------------------------- main
 
 
@@ -629,9 +698,7 @@ async def amain(out: Path, work: Path, v033: Path | None) -> None:
     (target / "facts.json").write_text(
         json.dumps(facts, ensure_ascii=True, indent=1, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
     )
-    (target / "root_keys.json").write_text(
-        json.dumps(root_key_cases(), ensure_ascii=True, indent=1) + "\n", encoding="utf-8", newline="\n"
-    )
+    write_root_keys(target)
     # nothing of the machine it ran on: no temporary folder, no user name, also not inside the
     # snapshots' compressed names or in the dumps' hex
     from spaceknife.store import snapshot
@@ -656,9 +723,17 @@ async def amain(out: Path, work: Path, v033: Path | None) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("out", type=Path)
-    ap.add_argument("--work", type=Path, required=True)
+    ap.add_argument("--work", type=Path)
     ap.add_argument("--v033", type=Path)
+    ap.add_argument(
+        "--root-keys-only", action="store_true", help="only (re)write root_keys.json and root_keys_os.json"
+    )
     args = ap.parse_args()
+    if args.root_keys_only:
+        write_root_keys(args.out.resolve() / PLATFORM)
+        return
+    if args.work is None:
+        raise SystemExit("--work is required")
     args.work.mkdir(parents=True, exist_ok=True)
     if any(args.work.iterdir()):
         raise SystemExit("--work must be an empty folder")

@@ -597,18 +597,33 @@ fn say(out: &mut dyn Write, message: &Value) {
 /// The app reads one line and quits: later writes must not fail on its closed pipe.
 fn let_go_of_stdio() {
     #[cfg(unix)]
-    {
-        // SAFETY: plain fd juggling on the process's own standard descriptors.
-        unsafe {
-            let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
-            if null >= 0 {
-                for fd in 0..3 {
-                    libc::dup2(null, fd);
-                }
+    point_at_null(&[0, 1, 2]);
+    // Windows: nothing writes to the standard handles after this point (the log is a file).
+}
+
+/// Point `fds` at /dev/null. The descriptor opened for that is closed again (it would stay open
+/// here, and in the app this process starts), unless it is one of `fds` itself (a standard
+/// descriptor that was closed, which `open` reuses).
+#[cfg(unix)]
+#[doc(hidden)]
+pub fn point_at_null(fds: &[std::os::fd::RawFd]) {
+    use std::os::fd::{FromRawFd, IntoRawFd, OwnedFd};
+    // SAFETY: plain fd juggling on descriptors the caller hands over; `null` is ours.
+    unsafe {
+        let raw = libc::open(c"/dev/null".as_ptr(), libc::O_RDWR);
+        if raw < 0 {
+            return;
+        }
+        let null = OwnedFd::from_raw_fd(raw);
+        for &fd in fds {
+            if fd != raw {
+                libc::dup2(raw, fd);
             }
         }
+        if fds.contains(&raw) {
+            let _ = null.into_raw_fd(); // one of them now: it stays
+        }
     }
-    // Windows: nothing writes to the standard handles after this point (the log is a file).
 }
 
 /// `--apply-update <plan.json>`: the arguments after the flag; returns the exit code.
