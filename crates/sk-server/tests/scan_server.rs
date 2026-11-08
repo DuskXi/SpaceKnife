@@ -692,3 +692,61 @@ async fn applied_changes_and_the_monitor_switch_push_the_scan_status() {
     c.ok("scan.close", json!({"scan_id": id})).await;
     srv.shutdown();
 }
+
+/// A disk sampler that knows one disk and takes `delay` to start (PDH, sysfs on a busy machine).
+struct SlowSampler(sk_core::io::sampler::RefSet);
+
+impl sk_core::io::DiskSampler for SlowSampler {
+    fn name(&self) -> &'static str {
+        "slow"
+    }
+    fn sample(
+        &mut self,
+    ) -> std::collections::HashMap<sk_core::io::DiskId, sk_core::io::DiskSample> {
+        std::collections::HashMap::new()
+    }
+    fn refs(&self) -> Vec<sk_core::io::DiskRef> {
+        self.0.refs()
+    }
+    fn disk_ref(&self, disk: &str) -> Option<sk_core::io::DiskRef> {
+        self.0.get(disk)
+    }
+    fn watch(&mut self, r: sk_core::io::DiskRef) {
+        self.0.watch(r)
+    }
+}
+
+#[tokio::test]
+async fn an_io_subscription_made_at_once_gets_the_disks_of_the_started_registry() {
+    // disk sampling starts with the backend (on a blocking thread); an `io` subscription made
+    // before it is through still gets the load of every disk it knows then, as in 0.3.4 (which had
+    // started it before the first session), not nothing for good
+    let srv = server_tuned(
+        sk_server::ServeOptions {
+            token: TOKEN.to_owned(),
+            ..sk_server::ServeOptions::default()
+        },
+        |t| {
+            t.io_sampling = true;
+            t.io_sampler = Some(std::sync::Arc::new(|| {
+                std::thread::sleep(Duration::from_millis(800));
+                let mut refs = sk_core::io::sampler::RefSet::default();
+                refs.watch(sk_core::io::DiskRef::physical("test-disk-0"));
+                Box::new(SlowSampler(refs)) as Box<dyn sk_core::io::DiskSampler>
+            }));
+        },
+    )
+    .await;
+    let c = Client::open(&srv.url).await;
+    // (not `running()`: it waits for the start)
+    assert!(
+        srv.server.scans.io.governors().is_empty(),
+        "subscribed before the sampler started"
+    );
+    c.subscribe("io", json!({})).await;
+    let ev = c
+        .event_where("io.load", 10.0, |p| p["status"]["disk"] == "test-disk-0")
+        .await;
+    assert!(ev["sub"].is_string(), "{ev}");
+    srv.shutdown();
+}

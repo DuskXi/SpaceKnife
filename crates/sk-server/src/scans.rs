@@ -503,11 +503,19 @@ impl ScanManager {
             ..RegistryOptions::default()
         };
         let (io_ready, _) = tokio::sync::watch::channel(false);
+        let io = match config.io_sampler.clone() {
+            Some(make) => IoRegistry::with_sampler(
+                opts,
+                Box::new(move || make()),
+                Arc::new(sk_core::io::sampler::monotonic),
+            ),
+            None => IoRegistry::new(opts),
+        };
         ScanManager {
             scans: Mutex::new(HashMap::new()),
             order: Mutex::new(Vec::new()),
             settings: settings.clone(),
-            io: Arc::new(IoRegistry::new(opts)),
+            io: Arc::new(io),
             helper: Arc::new(SharedHelper::new(LaunchOptions::default())),
             io_ready,
             io_starting: AtomicBool::new(false),
@@ -526,6 +534,15 @@ impl ScanManager {
             io.start();
             ready.send_replace(true);
         });
+    }
+
+    /// Resolves once disk sampling started at the backend's start (its disks are known then), at
+    /// most [`IO_START_WAIT`] later; at once when it is not starting.
+    pub async fn io_started(&self) {
+        if self.io_starting.load(Ordering::SeqCst) && !*self.io_ready.borrow() {
+            let mut rx = self.io_ready.subscribe();
+            let _ = tokio::time::timeout(IO_START_WAIT, rx.wait_for(|r| *r)).await;
+        }
     }
 
     pub fn list(&self) -> Vec<Arc<ScanHandle>> {
@@ -617,9 +634,8 @@ impl ScanManager {
                 && sk_core::privacy::full_disk_access(None) == Some(false)
         });
         // a scan right after the backend started waits a moment for disk sampling
-        if gated && self.io_starting.load(Ordering::SeqCst) && !*self.io_ready.borrow() {
-            let mut rx = self.io_ready.subscribe();
-            let _ = tokio::time::timeout(IO_START_WAIT, rx.wait_for(|r| *r)).await;
+        if gated {
+            self.io_started().await;
         }
         let governor = if gated && self.io.running() && !params.roots.is_empty() {
             let io = self.io.clone();

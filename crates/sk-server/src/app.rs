@@ -100,6 +100,10 @@ pub struct Tuning {
     /// scan, to see the server go on).
     #[doc(hidden)]
     pub scan_fault: Option<sk_core::scan::ScanFault>,
+    /// Test seam: the disk-load sampler (None: the platform's,
+    /// [`sk_core::io::default_sampler`]); a slow one shows what waits for its start.
+    #[doc(hidden)]
+    pub io_sampler: Option<IoSamplerFactory>,
     /// what a server reachable from elsewhere allows each client (headless mode, an address other
     /// than loopback: [`crate::http::serve_guarded`])
     pub limits: crate::http::Limits,
@@ -121,11 +125,15 @@ impl Default for Tuning {
             settings_file: None,
             log_bus: None,
             scan_fault: None,
+            io_sampler: None,
             limits: crate::http::Limits::default(),
             on_socket: None,
         }
     }
 }
+
+/// Makes the disk-load sampler ([`Tuning::io_sampler`]).
+pub type IoSamplerFactory = Arc<dyn Fn() -> Box<dyn sk_core::io::DiskSampler> + Send + Sync>;
 
 impl Tuning {
     /// What tests use: a short hello timeout, no update checks, no disk sampling.
@@ -156,6 +164,8 @@ pub struct Config {
     pub secure: bool,
     /// [`Tuning::scan_fault`]
     pub scan_fault: Option<sk_core::scan::ScanFault>,
+    /// [`Tuning::io_sampler`]
+    pub io_sampler: Option<IoSamplerFactory>,
     pub on_socket: Option<crate::http::SocketHook>,
 }
 
@@ -365,6 +375,7 @@ pub async fn start_with(opts: ServeOptions, tuning: Tuning) -> anyhow::Result<Se
         static_dir: opts.static_dir.clone(),
         secure: tls.is_some(),
         scan_fault: tuning.scan_fault,
+        io_sampler: tuning.io_sampler,
         on_socket: tuning.on_socket,
     };
     let server = build(config, tuning.routes, tuning.settings_file, tuning.log_bus);
