@@ -904,6 +904,71 @@ Function SkWebView2Version
   ${EndIf}
 FunctionEnd
 
+; Ask WebView2's own updater (EdgeUpdate, per machine or per user) to update the runtime, and
+; wait for it (the stock template's way). Registers are kept.
+Function SkWebView2Update
+  Push $R1
+  Push $1
+  ${If} ${RunningX64}
+    ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
+  ${Else}
+    ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\EdgeUpdate" "path"
+  ${EndIf}
+  ${If} $R1 == ""
+    ReadRegStr $R1 HKCU "SOFTWARE\Microsoft\EdgeUpdate" "path"
+  ${EndIf}
+  ${If} $R1 == ""
+    ${SkLog} "no EdgeUpdate to update WebView2 with"
+  ${Else}
+    DetailPrint "$(installingWebview2)"
+    ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
+    ${SkLog} "EdgeUpdate: exit code $1"
+  ${EndIf}
+  ClearErrors
+  Pop $1
+  Pop $R1
+FunctionEnd
+
+; How SkWebView2Minimum reads the runtime's version ($4) and updates it: the functions above
+; (the logic test puts its own in)
+!ifndef SK_WEBVIEW2_READ
+  !define SK_WEBVIEW2_READ SkWebView2Version
+!endif
+!ifndef SK_WEBVIEW2_UPDATE
+  !define SK_WEBVIEW2_UPDATE SkWebView2Update
+!endif
+
+; An installed WebView2 Runtime older than ${MINIMUMWEBVIEW2VERSION} (bundle > windows >
+; minimumWebview2Version; the app's own MIN_WEBVIEW2: an older one opens no window) is updated
+; first. $R0 = "" when the runtime is new enough (as it is, or after the update), else the version
+; it still has: the installer then stops before anything is changed, and a silent update starts
+; the installed version again, as when WebView2 is missing. An interactive run may try again.
+Function SkWebView2Minimum
+  StrCpy $R0 ""
+  !if "${MINIMUMWEBVIEW2VERSION}" != ""
+    Push $R1
+    Call ${SK_WEBVIEW2_READ}
+    ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R1
+    ${If} $R1 = 1
+      sk_wv2_again:
+      ${SkLog} "WebView2 $4 is older than ${MINIMUMWEBVIEW2VERSION}: updating it"
+      Call ${SK_WEBVIEW2_UPDATE}
+      Call ${SK_WEBVIEW2_READ}
+      ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R1
+      ${If} $R1 = 1
+        ${IfNot} ${Silent}
+          MessageBox MB_ICONEXCLAMATION|MB_RETRYCANCEL "$(webview2InstallError)" IDRETRY sk_wv2_again
+        ${EndIf}
+        StrCpy $R0 $4
+        ${If} $R0 == ""
+          StrCpy $R0 "(none)"
+        ${EndIf}
+      ${EndIf}
+    ${EndIf}
+    Pop $R1
+  !endif
+FunctionEnd
+
 ; $0 = this process's TokenElevationType: 1 no split token (UAC off, the built-in Administrator,
 ; or a standard user), 2 elevated through UAC, 3 the limited half of a split token; 0 unknown
 Function SkElevationType

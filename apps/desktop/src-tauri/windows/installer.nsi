@@ -575,31 +575,15 @@ Section WebView2
         Abort "$(webview2AbortError)"
       ${EndIf}
   ${Else}
-    !if "${MINIMUMWEBVIEW2VERSION}" != ""
-      ${VersionCompare} "${MINIMUMWEBVIEW2VERSION}" "$4" $R0
-      ${If} $R0 = 1
-        update_webview:
-          DetailPrint "$(installingWebview2)"
-          ${If} ${RunningX64}
-            ReadRegStr $R1 HKLM "SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate" "path"
-          ${Else}
-            ReadRegStr $R1 HKLM "SOFTWARE\Microsoft\EdgeUpdate" "path"
-          ${EndIf}
-          ${If} $R1 == ""
-            ReadRegStr $R1 HKCU "SOFTWARE\Microsoft\EdgeUpdate" "path"
-          ${EndIf}
-          ${If} $R1 != ""
-            ExecWait `"$R1" /install appguid=${WEBVIEW2APPGUID}&needsadmin=true` $1
-            ${If} $1 = 0
-              DetailPrint "$(webview2InstallSuccess)"
-            ${Else}
-              MessageBox MB_ICONEXCLAMATION|MB_ABORTRETRYIGNORE "$(webview2InstallError)" /SD IDIGNORE IDIGNORE ignore IDRETRY update_webview
-              Quit
-              ignore:
-            ${EndIf}
-          ${EndIf}
-      ${EndIf}
-    !endif
+    ; installed but older than the app needs: updated through EdgeUpdate first; when it stays
+    ; older, nothing of the installed copy is touched and a silent update starts it again
+    ; (.onInstFailed), as when WebView2 is missing
+    Call SkWebView2Minimum
+    ${If} $R0 != ""
+      ${SkLog} "WebView2 $R0 is older than ${MINIMUMWEBVIEW2VERSION} and could not be updated: nothing changed"
+      DetailPrint "$(webview2InstallError)"
+      Abort "$(webview2AbortError)"
+    ${EndIf}
   ${EndIf}
   webview2_done:
 SectionEnd
